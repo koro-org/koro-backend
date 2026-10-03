@@ -20,7 +20,8 @@ func TestRun_Dispatch(t *testing.T) {
 		{"no command", nil, 2, "usage: koro"},
 		{"unknown command", []string{"serve"}, 2, `unknown command "serve"`},
 		{"help", []string{"help"}, 0, ""},
-		{"worker not yet", []string{"worker"}, 1, "not implemented yet (BE-006)"},
+		{"worker without config", []string{"worker"}, 1, `required environment variable "APP_ENV" is not set`},
+		{"worker with arguments", []string{"worker", "now"}, 2, "worker takes no arguments"},
 		{"migrate without command", []string{"migrate"}, 2, "missing command"},
 		{"migrate unknown command", []string{"migrate", "sideways"}, 2, `unknown migrate command "sideways"`},
 		{"migrate down without N", []string{"migrate", "down"}, 2, "migrate down takes 1 argument"},
@@ -115,6 +116,7 @@ func TestAPI_StartupNeedsDatabase(t *testing.T) {
 		"CRYPTO_KEKS":            "dev1:ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGU=",
 		"CRYPTO_BLIND_INDEX_KEY": "aWR4aWR4aWR4aWR4aWR4aWR4aWR4aWR4aWR4aWR4aWQ=",
 		"CRYPTO_TOKEN_KEYS":      "dev1:dG9rdG9rdG9rdG9rdG9rdG9rdG9rdG9rdG9rdG9rdG8=",
+		"REDIS_URL":              "redis://127.0.0.1:1/0", // BE-006: checked after the database
 	}
 	var stderr bytes.Buffer
 	if got := run([]string{"api"}, base, io.Discard, &stderr); got != 1 || !strings.Contains(stderr.String(), `"DATABASE_URL" is not set`) {

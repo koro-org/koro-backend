@@ -43,6 +43,7 @@ func TestAPI_StartServeAndShutdown(t *testing.T) {
 		"CRYPTO_KEKS":            "dev1:ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGU=",
 		"CRYPTO_BLIND_INDEX_KEY": "aWR4aWR4aWR4aWR4aWR4aWR4aWR4aWR4aWR4aWR4aWQ=",
 		"CRYPTO_TOKEN_KEYS":      "dev1:dG9rdG9rdG9rdG9rdG9rdG9rdG9rdG9rdG9rdG9rdG8=",
+		"REDIS_URL":              redisURL(testutil.NewRedis(t)), // BE-006
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()

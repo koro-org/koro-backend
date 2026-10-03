@@ -16,7 +16,9 @@ package main
 //	func (w *<module>Wiring) build(c *container) error       // New(Deps) with stores, lower-layer services,
 //	                                                         // hooks; registers privacy providers/sweepers,
 //	                                                         // fills the hooks it provides
-//	func (w *<module>Wiring) tasks(c *container)             // appends outbox subscriptions and jobs (BE-006)
+//	func (w *<module>Wiring) tasks(c *container)             // c.infra.subs.Subscribe(topic, "<module>.<verb>_<object>", h, opts...),
+//	                                                         // c.infra.jobs.Schedule(queue.Job{...}) (01 §7; Unique mandatory),
+//	                                                         // c.infra.jobs.Handle(queue.Task{...}), c.infra.inbox.Register(...)
 //	func (w *<module>Wiring) routes(c *container, api huma.API) // <module>.Register(api, w.svc); w.svc may be
 //	                                                         // nil (koro openapi): Register must not touch it
 //
@@ -31,11 +33,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 	"uuid"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/redis/go-redis/v9"
 
 	"koro/db/migrations"
 	"koro/internal/authz"
@@ -43,8 +48,13 @@ import (
 	"koro/internal/platform/config"
 	"koro/internal/platform/db"
 	"koro/internal/platform/httpx"
+	"koro/internal/platform/idempotency"
+	"koro/internal/platform/inbox"
 	"koro/internal/platform/migratekit"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/privacy"
+	"koro/internal/platform/queue"
+	"koro/internal/platform/ratelimit"
 )
 
 // infra is the shared infrastructure handed to every module.
@@ -56,7 +66,48 @@ type infra struct {
 	// db is the app_rw pool (BE-002); nil under `koro openapi` and in the
 	// wiring tests (modules then keep their in-memory stores).
 	db *db.DB
-	// BE-006: outbox, queue, limiter.
+
+	// BE-006. Production: newInfra over db and Redis. Wiring tests: the
+	// in-memory variants (wire_test.go). `koro openapi`: nil except the
+	// registries (no module is built there).
+	redis       redis.UniversalClient // nil without Redis (tests, openapi)
+	queue       queue.Enqueuer        // services: AfterCommit tasks without a topic (mechanism A)
+	outbox      *outbox.Outbox        // services: outbox.Writer (Add = O, AfterCommit = A); worker: relay
+	idempotency *idempotency.Keeper   // services: idempotency.Do in the business transaction (06 H-5)
+	inbox       *inbox.Inbox          // webhook handlers: Receive; provider modules: Register
+	limiter     ratelimit.Limiter     // API rate limit middleware
+	platform    config.Platform       // queue/outbox/idempotency/inbox settings (zero in tests)
+
+	// subs and jobs collect what modules declare in tasks(c): outbox
+	// subscriptions, scheduled jobs and task handlers. Both api and worker
+	// build them (AfterCommit fans out by subscription in the api); only
+	// `koro worker` mounts them.
+	subs *outbox.Registry
+	jobs *queue.Registry
+}
+
+// newInfra completes base with the BE-006 infrastructure of a long-running
+// process: asynq client, outbox, idempotency keeper, webhook inbox and rate
+// limiter over base.db and rdb.
+func newInfra(base infra, rdb redis.UniversalClient, p config.Platform) infra {
+	in := base
+	in.redis, in.platform = rdb, p
+	in.subs, in.jobs = outbox.NewRegistry(), queue.NewRegistry()
+	in.queue = queue.NewClient(rdb, in.log.With("component", "queue"))
+	in.outbox = outbox.New(outbox.Deps{
+		Store: outbox.NewGormStore(in.db.ORM), Tx: in.db.Tx, Subs: in.subs, Queue: in.queue,
+		Clock: in.clock, Log: in.log.With("component", "outbox"),
+	})
+	in.idempotency = idempotency.New(idempotency.Deps{
+		Tx: in.db.Tx, Store: idempotency.NewGormStore(in.db.ORM), Clock: in.clock,
+		Log: in.log.With("component", "idempotency"), TTL: p.Idempotency.TTL,
+	})
+	in.inbox = inbox.New(inbox.Deps{
+		Store: inbox.NewGormStore(in.db.ORM), Tx: in.db.Tx, Queue: in.queue, Clock: in.clock,
+		Log: in.log.With("component", "inbox"),
+	})
+	in.limiter = ratelimit.NewRedis(rdb)
+	return in
 }
 
 // hooks are late bindings between modules that may not import each other
@@ -101,6 +152,14 @@ type hooks struct {
 	// (BE-014). nil → the actor has no memberships (personal and public
 	// actions only; every org surface is 404).
 	memberships func(ctx context.Context, userID uuid.UUID) ([]authz.Membership, error)
+
+	// retention returns the period of a kvkk.retention_policies code for the
+	// platform cleanup jobs (01 §7: "süreler koddan değil
+	// retention_policies'ten"): outbox_published, webhook_payload,
+	// webhook_row. Provider: kvkk (BE-049). Consumer: platformTasks (BE-006).
+	// nil or not found → the config default (OUTBOX_RETENTION,
+	// WEBHOOK_PAYLOAD_RETENTION, WEBHOOK_ROW_RETENTION).
+	retention func(ctx context.Context, code string) (period time.Duration, found bool, err error)
 }
 
 // hookClub is the result of hooks.clubInfo.
@@ -178,9 +237,20 @@ type container struct {
 }
 
 func newContainer(in infra) *container {
+	if in.subs == nil {
+		in.subs = outbox.NewRegistry()
+	}
+	if in.jobs == nil {
+		in.jobs = queue.NewRegistry()
+	}
 	c := &container{infra: in}
 	if in.db != nil {
 		c.readyChecks = append(c.readyChecks, dbReadyChecks(in.db)...)
+	}
+	if in.redis != nil {
+		c.readyChecks = append(c.readyChecks, httpx.Check{Name: "redis", Run: func(ctx context.Context) error {
+			return queue.Ping(ctx, in.redis)
+		}})
 	}
 	return c
 }
@@ -259,8 +329,10 @@ func (c *container) modules() []moduleEntry {
 	}
 }
 
-// build constructs every module bottom-up, then collects their outbox
-// subscriptions and scheduled jobs.
+// build constructs every module bottom-up, then collects the platform's
+// and the modules' outbox subscriptions, scheduled jobs and task handlers.
+// A bad registration (unknown topic, job without Unique, duplicate task
+// type) stops the process at start.
 func (c *container) build() error {
 	mods := c.modules()
 	preset := c.actors // nil in production; the persona resolver in matrix tests
@@ -272,10 +344,84 @@ func (c *container) build() error {
 			return fmt.Errorf("wire %s: replaced the preset ActorResolver (set c.actors only when it is nil)", m.name)
 		}
 	}
+	c.platformTasks()
 	for _, m := range mods {
 		m.w.tasks(c)
 	}
+	if err := errors.Join(c.infra.subs.Err(), c.infra.jobs.Err()); err != nil {
+		return fmt.Errorf("wire tasks: %w", err)
+	}
+	if _, err := c.workerMux(c.infra.log); err != nil {
+		return fmt.Errorf("wire tasks: %w", err)
+	}
 	return nil
+}
+
+// platformTasks registers the platform's own jobs and tasks (01 §7):
+// outbox.cleanup, idempotency.cleanup, webhook_inbox.purge_payloads and the
+// webhook_inbox.process task.
+func (c *container) platformTasks() {
+	in, p := c.infra, c.infra.platform
+	if in.outbox != nil {
+		in.jobs.Schedule(in.outbox.CleanupJob(c.retention("outbox_published", p.Outbox.Retention, outbox.DefaultRetention)))
+	}
+	if in.idempotency != nil {
+		in.jobs.Schedule(in.idempotency.CleanupJob())
+	}
+	if in.inbox != nil {
+		in.jobs.Handle(in.inbox.Task())
+		in.jobs.Schedule(in.inbox.PurgeJob(
+			c.retention("webhook_payload", p.Inbox.PayloadRetention, inbox.DefaultPayloadRetention),
+			c.retention("webhook_row", p.Inbox.RowRetention, inbox.DefaultRowRetention)))
+	}
+}
+
+// retention resolves a retention period at run time: hooks.retention
+// (kvkk.retention_policies) first, then the configured value, then def.
+func (c *container) retention(code string, configured, def time.Duration) func(context.Context) (time.Duration, error) {
+	return func(ctx context.Context) (time.Duration, error) {
+		if h := c.hooks.retention; h != nil {
+			d, found, err := h(ctx, code)
+			if err != nil {
+				return 0, fmt.Errorf("retention %s: %w", code, err)
+			}
+			if found && d > 0 {
+				return d, nil
+			}
+		}
+		if configured > 0 {
+			return configured, nil
+		}
+		return def, nil
+	}
+}
+
+// workerMux routes every subscription, task and job by task type; a type
+// registered twice across the three lists is an error.
+func (c *container) workerMux(log *slog.Logger) (*queue.Mux, error) {
+	mux := queue.NewMux(log)
+	var errs []error
+	for _, s := range c.infra.subs.All() {
+		errs = append(errs, mux.Handle(s.Name, s.HandleTask))
+	}
+	for _, t := range c.infra.jobs.Tasks() {
+		errs = append(errs, mux.Handle(t.Name, t.Handle))
+	}
+	for _, j := range c.infra.jobs.Jobs() {
+		errs = append(errs, mux.Handle(j.Name, queue.JobHandler(j)))
+	}
+	return mux, errors.Join(errs...)
+}
+
+// apiMiddleware installs the BE-006 operation middlewares on the root API,
+// after authentication and before any route is registered: the
+// x-koro-rate-limit class (unless disabled in dev) and Idempotency-Key
+// parsing (06 H-5: the key is stored by the service, not here).
+func (c *container) apiMiddleware(api huma.API, rateLimit bool) {
+	if rateLimit && c.infra.limiter != nil {
+		api.UseMiddleware(ratelimit.Middleware(api, c.infra.limiter, c.infra.log))
+	}
+	api.UseMiddleware(idempotency.Middleware(api))
 }
 
 // registerRoutes registers every module's operations on the /api/v1 group.

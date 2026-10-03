@@ -291,6 +291,70 @@ func syncWriteViolations(files []goFile, allow map[string]bool) []string {
 	return v
 }
 
+// gormCalls are the GORM methods whose string arguments are SQL with "?"
+// or "@name" parameters.
+var gormCalls = map[string]bool{
+	"Raw": true, "Exec": true, "Where": true, "Or": true, "Not": true, "Having": true, "Joins": true,
+	"Select": true, "Order": true, "Group": true, "Distinct": true, "Expr": true,
+}
+
+// parenParam matches a parameter written directly after "(".
+var parenParam = regexp.MustCompile(`\([?@]`)
+
+// gormParamViolations is 06 H-30 (T-113): GORM expands a parameter written
+// directly after "(" element by element (meant for "IN (?)"); stdlib
+// uuid.UUID is a [16]byte array, so "VALUES (?" or "(@id" binds sixteen
+// bytes and fails at run time (json.RawMessage and []byte too). Raw SQL
+// writes "( ?" / "( @id", lists "IN ?" (internal/platform/db).
+func gormParamViolations(files []goFile) []string {
+	var v []string
+	for _, f := range files {
+		if f.test {
+			continue
+		}
+		ast.Inspect(f.ast, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || !gormCalls[sel.Sel.Name] {
+				return true
+			}
+			for _, arg := range call.Args {
+				if sql := literal(arg); parenParam.MatchString(sql) {
+					v = append(v, fmt.Sprintf("%s: %s: parameter directly after \"(\" (GORM expands it element-wise): write \"( ?\" or \"IN ?\" (06 H-30)",
+						f.rel, sel.Sel.Name))
+					break
+				}
+			}
+			return true
+		})
+	}
+	return v
+}
+
+// literal returns the value of a string literal or a concatenation of
+// string literals ("" otherwise).
+func literal(e ast.Expr) string {
+	switch x := e.(type) {
+	case *ast.BasicLit:
+		if x.Kind == token.STRING {
+			s, err := strconv.Unquote(x.Value)
+			if err == nil {
+				return s
+			}
+		}
+	case *ast.BinaryExpr:
+		if x.Op == token.ADD {
+			return literal(x.X) + literal(x.Y)
+		}
+	case *ast.ParenExpr:
+		return literal(x.X)
+	}
+	return ""
+}
+
 // check runs one rule on the real tree (no violation allowed) and on the
 // violations tree (exactly the expected ones).
 func check(t *testing.T, rule func([]goFile) []string, want ...string) {
@@ -370,4 +434,13 @@ func TestSyncWritesAreAllowed(t *testing.T) {
 	if len(v) != 4 {
 		t.Fatalf("parseSyncWrites problems = %q, want 4", v)
 	}
+}
+
+func TestArch_GormParenParams(t *testing.T) {
+	t.Parallel()
+	check(t, gormParamViolations,
+		`internal/events/raw_sql.go: Exec: parameter directly after "(" (GORM expands it element-wise): write "( ?" or "IN ?" (06 H-30)`,
+		`internal/events/raw_sql.go: Raw: parameter directly after "(" (GORM expands it element-wise): write "( ?" or "IN ?" (06 H-30)`,
+		`internal/events/raw_sql.go: Where: parameter directly after "(" (GORM expands it element-wise): write "( ?" or "IN ?" (06 H-30)`,
+	)
 }

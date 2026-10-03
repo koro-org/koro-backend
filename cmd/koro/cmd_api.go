@@ -8,18 +8,23 @@ import (
 	"log/slog"
 	"net"
 
+	"github.com/gin-gonic/gin"
+
 	"koro/internal/platform/clock"
 	"koro/internal/platform/config"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/obs"
+	"koro/internal/platform/queue"
+	"koro/internal/platform/ratelimit"
 )
 
 // apiVersion is the OpenAPI info.version of the v1 contract. It is not the
 // binary version: the generated spec must not change on every commit.
 const apiVersion = "1.0.0"
 
-// runAPI runs `koro api`: config → logger → telemetry → DB → (BE-006:
-// Redis) → wiring → HTTP server → graceful shutdown (05 §10.9).
+// runAPI runs `koro api`: config → logger → telemetry → DB → Redis →
+// wiring → HTTP server (rate limit + Idempotency-Key middlewares) →
+// graceful shutdown (05 §10.9).
 // Deferred closers run in reverse order after HTTP has drained.
 func runAPI(ctx context.Context, stop context.CancelFunc, environ map[string]string, stdout io.Writer) error {
 	cfg, err := config.LoadAPI(environ)
@@ -43,10 +48,20 @@ func runAPI(ctx context.Context, stop context.CancelFunc, environ map[string]str
 		return err
 	}
 	defer database.Close() // after HTTP has drained (deferred closers run last)
+	rdb, err := queue.OpenRedis(ctx, cfg.Platform.Queue.RedisURL.Reveal(), cfg.Platform.Queue.RedisPoolSize)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rdb.Close() }()
 
-	c := newContainer(infra{log: log, clock: clk, version: version, cfg: cfg.Modules, db: database})
+	c := newContainer(newInfra(infra{log: log, clock: clk, version: version, cfg: cfg.Modules, db: database}, rdb, cfg.Platform))
 	if err := c.build(); err != nil {
 		return err
+	}
+	var global []gin.HandlerFunc
+	if cfg.RateLimit.Enabled {
+		//nolint:contextcheck // the middleware uses each request's context, not ctx
+		global = append(global, ratelimit.GlobalIP(c.infra.limiter, log, cfg.HTTP.ProblemTypeBase))
 	}
 
 	ready := httpx.NewReady(c.readyChecks...)
@@ -61,10 +76,12 @@ func runAPI(ctx context.Context, stop context.CancelFunc, environ map[string]str
 		ExposeOpenAPI:   cfg.HTTP.ExposeOpenAPI,
 		Actors:          c.actors,
 		Ready:           ready,
+		Middleware:      global,
 	})
 	if err != nil {
 		return err
 	}
+	c.apiMiddleware(app.API, cfg.RateLimit.Enabled) //nolint:contextcheck // the middlewares use each request's context, not ctx
 	c.registerRoutes(app.V1)
 
 	// Requests keep the signal context's values but not its cancellation;

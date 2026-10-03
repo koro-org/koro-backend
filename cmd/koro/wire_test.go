@@ -38,14 +38,11 @@ var designLayers = [][]string{
 type memStoreUser interface{ useMemStore() }
 
 // newTestContainer returns a container with a fake clock, a discarding
-// logger and every module switched to its in-memory stores, not yet built.
+// logger, the in-memory BE-006 infrastructure and every module switched to
+// its in-memory stores, not yet built.
 func newTestContainer(t *testing.T) *container {
 	t.Helper()
-	c := newContainer(infra{
-		log:     obs.Discard(),
-		clock:   clock.NewFake(time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC)),
-		version: "test",
-	})
+	c := newContainer(testInfra(clock.NewFake(time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC))))
 	for _, m := range c.modules() {
 		u, ok := m.w.(memStoreUser)
 		if !ok {

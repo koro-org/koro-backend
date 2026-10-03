@@ -8,7 +8,11 @@ aynı imaj staging'den prod'a terfi eder. İmajda secret yoktur; secret'lar Dokp
 |---|---|---|
 | `koro-migrate` | `migrate up` | Tek seferlik iş; `koro-api`/`koro-worker` yeni sürüme geçmeden **önce** çalışır. Owner rolü `app_owner`: `MIGRATE_DATABASE_URL`, **doğrudan PostgreSQL'e** (PgBouncer değil; advisory lock). Docker HEALTHCHECK'i kapatın (iş HTTP sunmaz). `dirty` kalırsa: hatayı düzelt → `migrate force <sürüm>` → `migrate up`. |
 | `koro-api` | `api` | Port 8080 (`HTTP_ADDR`), Traefik arkasında. HEALTHCHECK imajda tanımlı (`koro healthcheck` → `/healthz`). Hazırlık: `/readyz` (Traefik sağlık kontrolü buraya bakar). |
-| `koro-worker` | `worker` | asynq + scheduler + outbox aktarıcısı (BE-006). HTTP sunmadığı için imajdaki HEALTHCHECK'i kapatın ya da BE-006'nın tanımlayacağı kontrolle değiştirin. |
+| `koro-worker` | `worker` | asynq sunucusu + scheduler (Europe/Istanbul) + outbox aktarıcısı (BE-006). API portu yok; canlılık/hazırlık `WORKER_HEALTH_ADDR` (varsayılan `127.0.0.1:8081`) üzerinde. Dokploy'da imajdaki HEALTHCHECK komutunu `["/koro", "healthcheck", "-url", "http://127.0.0.1:8081/healthz"]` ile değiştirin (`/healthz`: aktarıcı döngüsü yakın zamanda (≈50 sn) attı ve kapanış başlamadı; `/readyz`: DB + şema sürümü + Redis). Birden çok replikada güvenli (`SKIP LOCKED`, işler `Unique`); `WORKER_SCHEDULER_ENABLED=false` ile scheduler yalnız bir replikada çalıştırılabilir. |
+
+Redis (asynq, rate limit): **AOF açık ve `maxmemory-policy noeviction`** zorunlu (R-002 §5.3). `REDIS_URL` api ve worker'da
+zorunludur; Redis yokken API açılmaz, açıkken düşerse katı (Strict) rate limit sınıfları 503, diğerleri geçirir.
+`asynqmon` yalnız Zero Trust arkasında, iç ağda (kimlik doğrulaması yok).
 
 Dokploy/Swarm ayarları:
 - `stop_grace_period` **≥ 40s**: kapanış sırası sinyal → `/readyz` 503 → `SHUTDOWN_DELAY` (5 sn) → `SHUTDOWN_TIMEOUT` (25 sn) + pay (05 §10.9). Docker'ın varsayılan 10 sn'si uçuştaki istekleri keser.

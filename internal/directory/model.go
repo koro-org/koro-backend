@@ -303,3 +303,53 @@ func (s Skill) Name(locale string) string {
 	}
 	return s.NameTR
 }
+
+// ClaimState is club_claims.status (02 §8.6).
+type ClaimState string
+
+// Claim states: a claim is pending until its claimant withdraws it or a
+// its approver decides it; the three others are final.
+const (
+	ClaimPending   ClaimState = "pending"
+	ClaimApproved  ClaimState = "approved"
+	ClaimRejected  ClaimState = "rejected"
+	ClaimWithdrawn ClaimState = "withdrawn"
+)
+
+// Valid reports whether s is a value of club_claims_status_chk.
+func (s ClaimState) Valid() bool {
+	return s == ClaimPending || s == ClaimApproved || s == ClaimRejected || s == ClaimWithdrawn
+}
+
+// Decided reports whether s carries a review (club_claims_review_chk).
+func (s ClaimState) Decided() bool { return s == ClaimApproved || s == ClaimRejected }
+
+// ClubClaim is one club_claims row (02 §8.6): a student's request to run a
+// club as its club_admin. It is personal data (the claimant, the role,
+// the evidence); DecisionNote is shown to the reviewers only.
+type ClubClaim struct {
+	ID             uuid.UUID  `gorm:"type:uuid;column:id;primaryKey"`
+	ClubOrgID      uuid.UUID  `gorm:"type:uuid;column:club_org_id"`
+	ClaimantUserID uuid.UUID  `gorm:"type:uuid;column:claimant_user_id"`
+	Status         ClaimState `gorm:"column:status"`
+	RoleInClub     string     `gorm:"column:role_in_club"`
+	EvidenceText   *string    `gorm:"column:evidence_text"`
+	EvidenceFileID *uuid.UUID `gorm:"type:uuid;column:evidence_file_id"`
+	ReviewedBy     *uuid.UUID `gorm:"type:uuid;column:reviewed_by"`
+	ReviewedAt     *time.Time `gorm:"column:reviewed_at"`
+	DecisionNote   *string    `gorm:"column:decision_note"`
+	CreatedAt      time.Time  `gorm:"column:created_at"`
+	UpdatedAt      time.Time  `gorm:"column:updated_at"`
+}
+
+// TableName implements gorm's Tabler.
+func (ClubClaim) TableName() string { return "club_claims" }
+
+// ClaimFilter narrows Store.ListClaims.
+type ClaimFilter struct {
+	Status ClaimState
+	// RepUniversityOrgs, when not nil, keeps only the claims of the
+	// non-sensitive clubs of these universities (by the university's org
+	// ID): a university_rep's review queue (E-21).
+	RepUniversityOrgs []uuid.UUID
+}

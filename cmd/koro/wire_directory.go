@@ -7,13 +7,15 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"koro/internal/authz"
 	"koro/internal/directory"
 	"koro/internal/notify"
 	"koro/internal/platform/db"
 )
 
 // directoryWiring wires the directory module (L6; 01 §4.8). First owner:
-// BE-020. Only tickets of the directory module edit this file (BE-001 R4).
+// BE-020; club claims: BE-022. Only tickets of the directory module edit
+// this file (BE-001 R4).
 //
 // Seams (nil in production):
 //
@@ -23,13 +25,18 @@ import (
 //	tx        nil → the app_rw pool's TxManager; tests preset db.NopTx
 //
 // Consumed: c.orgs.svc (orgs.OrgAdmin.Create in directory's transaction,
-// 01 §6.3 T-78; public org profiles), c.audit.svc, c.identity.svc
-// (re-authentication of adminSetClubSensitivity), c.notify.svc and
-// c.notify.platformAdmins (the sensitivity request notice, read at call
-// time). The member count of a club comes from orgs once it offers
+// 01 §6.3 T-78; orgs.OrgAdmin.GrantRole of a claim approval, 01 §6.3;
+// ActiveMemberIDs/HasRole: the university_rep who approves a claim, E-21;
+// public org profiles), c.audit.svc, c.identity.svc (re-authentication of
+// adminSetClubSensitivity; claimant names), the identity module's student
+// verification (the claimant's university at approval), c.files.svc (claim
+// evidence: Get, Attach, PresignGet; Delete as RemoveFile), c.notify.svc
+// and c.notify.platformAdmins (the sensitivity request notice and the
+// claim decision notice, read at call time). The member count of a club comes from orgs once it offers
 // ActiveMemberIDs (BE-019, 01 §4.7); until then member_count is null.
 //
-// Provided, all set in build: svc (directory.Catalog for later layers),
+// Provided, all set in build: svc (directory.Catalog for later layers), the
+// directory KVKK provider (club claims and their evidence),
 // hooks.domainResolver (identity .edu.tr resolution, BE-018),
 // hooks.clubInfo (orgs joinClub, BE-019) and c.orgs.universityOrgs
 // (searchOrgs?university_id, T-180).
@@ -88,13 +95,21 @@ func (w *directoryWiring) build(c *container) error {
 		},
 	}
 	if svc := c.identity.svc; svc != nil {
-		d.Reauth = svc
+		d.Reauth, d.Users = svc, svc
+	}
+	if st := c.identity.mod.Students; st != nil {
+		d.Students = st
+	}
+	if fs := c.files.svc; fs != nil {
+		d.Files = fs
+		d.RemoveFile = func(ctx context.Context, a authz.Actor, id uuid.UUID) error { return fs.Delete(ctx, a, id) }
 	}
 	mod, err := directory.New(d)
 	if err != nil {
 		return err
 	}
 	w.mod, w.svc, w.built = mod, mod.Service, store
+	c.privacy = append(c.privacy, mod.Privacy)
 	svc := mod.Service
 	c.hooks.domainResolver = svc.UniversityByEmailDomain
 	c.hooks.clubInfo = func(ctx context.Context, clubOrgID uuid.UUID) (hookClub, bool, error) {
@@ -111,15 +126,19 @@ func (w *directoryWiring) build(c *container) error {
 	return nil
 }
 
-// tasks: the directory.notify_sensitivity_request task (requestClubSensitivity).
+// tasks: club_claim.decided → directory.notify_claim_decided (01 §6.2) and
+// the directory.notify_sensitivity_request task (requestClubSensitivity).
+// file.rejected → directory.remove_rejected_evidence is written but not
+// subscribed yet (T-222, like identity's).
 func (w *directoryWiring) tasks(c *container) {
+	w.mod.Subscribe(c.infra.subs)
 	for _, t := range w.mod.Tasks() {
 		c.infra.jobs.Handle(t)
 	}
 }
 
-// routes: the 16 directory operations of BE-020 (04 §2.3); w.svc is nil
-// under `koro openapi`, which Register tolerates.
+// routes: the 22 directory operations (04 §2.3; BE-020's 16, BE-022's 6);
+// w.svc is nil under `koro openapi`, which Register tolerates.
 func (w *directoryWiring) routes(c *container, api huma.API) { directory.Register(api, w.svc) }
 
 // notifySender adapts notify (L3) to directory.Sender, read at call time;

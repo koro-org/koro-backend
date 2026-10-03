@@ -51,6 +51,7 @@ type MemStore struct {
 	depts   map[uuid.UUID]Department
 	clubs   map[uuid.UUID]Club
 	skills  map[uuid.UUID]Skill
+	claims  map[uuid.UUID]ClubClaim
 	now     func() time.Time
 	orgs    OrgLookup
 	coll    *collate.Collator
@@ -64,7 +65,7 @@ func NewMemStore(now func() time.Time, orgs OrgLookup) *MemStore {
 	return &MemStore{
 		unis: map[uuid.UUID]University{}, domains: map[string]EmailDomain{}, facs: map[uuid.UUID]Faculty{},
 		depts: map[uuid.UUID]Department{}, clubs: map[uuid.UUID]Club{}, skills: map[uuid.UUID]Skill{},
-		now: now, orgs: orgs, coll: collate.New(language.Turkish),
+		claims: map[uuid.UUID]ClubClaim{}, now: now, orgs: orgs, coll: collate.New(language.Turkish),
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/directory"
+	"koro/internal/files"
 	"koro/internal/identity"
 	"koro/internal/notify"
 	"koro/internal/orgs"
@@ -115,8 +116,10 @@ func txOf(ctx context.Context) int {
 // Create.
 type spyOrgs struct {
 	orgs.Service
-	mu      sync.Mutex
-	creates []int
+	mu        sync.Mutex
+	creates   []int
+	grants    []int // transaction of each GrantRole (BE-022)
+	failGrant error
 }
 
 func (s *spyOrgs) Create(ctx context.Context, in orgs.CreateOrg) (uuid.UUID, error) {
@@ -129,9 +132,10 @@ func (s *spyOrgs) Create(ctx context.Context, in orgs.CreateOrg) (uuid.UUID, err
 // spyStore records the transaction of each InsertClub and can fail it.
 type spyStore struct {
 	directory.Store
-	mu          sync.Mutex
-	clubInserts []int
-	failClub    error
+	mu           sync.Mutex
+	clubInserts  []int
+	failClub     error
+	claimUpdates []int // transaction of each UpdateClaim (BE-022)
 }
 
 func (s *spyStore) InsertClub(ctx context.Context, c directory.Club) (directory.Club, error) {
@@ -191,6 +195,10 @@ type env struct {
 	members *counter
 	sender  *sender
 	admins  []uuid.UUID
+	ver     *verifications
+	users   *userDir
+	files   *fakeFiles
+	removed *removedFiles
 	mod     directory.Module
 	svc     directory.Service
 }
@@ -202,10 +210,13 @@ func newEnv(t *testing.T) *env {
 		clk: clk, tx: &spyTx{}, orgsMem: orgs.NewMemStore(clk.Now), out: outbox.NewMem(clk), queue: queue.NewMem(),
 		audit: &auditLog{}, members: &counter{counts: map[uuid.UUID]int{}}, sender: &sender{},
 		admins: []uuid.UUID{uuid.NewV7(), uuid.NewV7()},
+		ver:    &verifications{m: map[uuid.UUID]identity.EduVerification{}}, users: &userDir{m: map[uuid.UUID]identity.UserSummary{}},
+		files: &fakeFiles{m: map[uuid.UUID]files.FileMeta{}}, removed: &removedFiles{},
 	}
 	idem := idempotency.New(idempotency.Deps{Tx: e.tx, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()})
 	om, err := orgs.New(orgs.Deps{
 		Store: e.orgsMem, Tx: e.tx, Outbox: e.out, Audit: e.audit, Idempotency: idem, Clock: clk, Log: obs.Discard(),
+		Students: e.ver, Users: e.users,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -223,6 +234,7 @@ func newEnv(t *testing.T) *env {
 		Store: e.store, Tx: e.tx, Outbox: e.out, Queue: e.queue, Audit: e.audit, Orgs: e.orgs, Idempotency: idem,
 		Clock: clk, Log: obs.Discard(), Reauth: reauth{}, MemberCount: e.members.count, Sender: e.sender,
 		PlatformAdmins: func(context.Context) ([]uuid.UUID, error) { return e.admins, nil },
+		Students:       e.ver, Users: e.users, Files: e.files, RemoveFile: e.removed.remove,
 	})
 	if err != nil {
 		t.Fatal(err)

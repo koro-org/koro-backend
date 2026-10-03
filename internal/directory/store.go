@@ -6,8 +6,8 @@ import (
 )
 
 // Store is the persistence boundary of directory (05 §2.2) over
-// universities, university_email_domains, faculties, departments, clubs
-// and skills (02 §8.1–8.5, §8.7). The GORM store (store_gorm.go) and the
+// universities, university_email_domains, faculties, departments, clubs,
+// club_claims and skills (02 §8.1–8.7). The GORM store (store_gorm.go) and the
 // in-memory store (store_mem.go) pass the same contract test
 // (store_contract_test.go).
 //
@@ -21,6 +21,10 @@ import (
 // ListClubs reads the name, slug and status of the club's org: the GORM
 // store joins organizations read-only (01 §1.4 row added by BE-020: club
 // search by name needs the org's search_vector and koro_norm(name) index).
+//
+// Club claims are personal records of their claimant, addressed by ID or
+// by the claimant; the club's org (club_org_id) is their parent. The
+// service reads a claim, then decides with authz (owner or platform staff).
 type Store interface {
 	// InsertUniversity writes a university and returns it as stored;
 	// ErrYokCodeTaken when the YÖK code is taken.
@@ -96,6 +100,30 @@ type Store interface {
 	SensitiveAmong(ctx context.Context, orgIDs []uuid.UUID) ([]uuid.UUID, error)
 	// ClubOrgsOf returns the org IDs of a university's clubs.
 	ClubOrgsOf(ctx context.Context, universityID uuid.UUID) ([]uuid.UUID, error)
+
+	// InsertClaim writes a claim and returns it as stored: ErrClaimPending
+	// when the claimant has a pending claim for the club
+	// (club_claims_pending_uq), 422 for a CHECK.
+	InsertClaim(ctx context.Context, c ClubClaim) (ClubClaim, error)
+	// GetClaim returns a claim or ErrNotFound.
+	GetClaim(ctx context.Context, id uuid.UUID) (ClubClaim, error)
+	// LockClaim returns the claim locked for the transaction.
+	LockClaim(ctx context.Context, id uuid.UUID) (ClubClaim, error)
+	// UpdateClaim writes status, evidence_file_id, reviewed_by, reviewed_at
+	// and decision_note. A reviewer who is the claimant is 403
+	// (club_claims_reviewer_chk, 03 Y6); a half review is 422
+	// (club_claims_review_chk).
+	UpdateClaim(ctx context.Context, c ClubClaim) (ClubClaim, error)
+	// ClaimsOf returns up to limit claims of a claimant, newest first,
+	// after the claim after (nil: from the start).
+	ClaimsOf(ctx context.Context, userID uuid.UUID, after *uuid.UUID, limit int) ([]ClubClaim, error)
+	// ListClaims returns up to limit claims of f after the claim after:
+	// pending ones oldest first (the review queue), the others newest first.
+	ListClaims(ctx context.Context, f ClaimFilter, after *uuid.UUID, limit int) ([]ClubClaim, error)
+	// ClaimOfFile returns the claim whose evidence is fileID or ErrNotFound.
+	ClaimOfFile(ctx context.Context, fileID uuid.UUID) (ClubClaim, error)
+	// DeleteClaim hard deletes a claim (KVKK erasure, 02 §8.6).
+	DeleteClaim(ctx context.Context, id uuid.UUID) error
 
 	// InsertSkill writes a skill; ErrSkillSlugTaken when the slug is taken.
 	InsertSkill(ctx context.Context, s Skill) (Skill, error)

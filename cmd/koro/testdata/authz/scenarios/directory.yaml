@@ -66,3 +66,58 @@ scenarios:
       - { persona: platform_admin, operation: adminPutUniversityEmailDomain, expect: 200 }
       - { persona: platform_admin, operation: adminPutUniversityEmailDomain, path_params: { university_id: uni_b_university },
           expect: 409, code: directory.domain_taken }
+  # BE-022: club claims (02 §8.6, 03 §5.3 k8; E-21 approver: uni_a's university_rep).
+  club_claim_lifecycle:
+    note: >-
+      a withdrawn claim is final (409 directory.claim_state); a new claim is read by the reviewers, refused to
+      support and to platform_admin (uni_a has a rep), approved once by the university_rep, then it can neither
+      be decided again nor withdrawn
+    steps:
+      - { persona: student, operation: withdrawMyClubClaim, expect: 200 }
+      - { persona: student, operation: withdrawMyClubClaim, expect: 409, code: directory.claim_state }
+      - { persona: university_rep, operation: adminDecideClubClaim, expect: 409, code: directory.claim_state }
+      - { persona: student, operation: createClubClaim, path_params: { club_id: club_unclaimed }, expect: 201,
+          save: { new_claim: claim_id } }
+      - { persona: student, operation: createClubClaim, path_params: { club_id: club_unclaimed }, expect: 409,
+          code: directory.claim_pending }
+      - { persona: student, operation: listMyClubClaims, expect: 200 }
+      - { persona: support, operation: adminGetClubClaim, path_params: { claim_id: new_claim }, expect: 200 }
+      - { persona: university_rep, operation: adminGetClubClaim, path_params: { claim_id: new_claim }, expect: 200 }
+      - { persona: support, operation: adminDecideClubClaim, path_params: { claim_id: new_claim }, expect: 403,
+          code: forbidden }
+      - { persona: platform_admin, operation: adminDecideClubClaim, path_params: { claim_id: new_claim }, expect: 403,
+          code: forbidden }
+      - { persona: university_rep, operation: adminDecideClubClaim, path_params: { claim_id: new_claim }, expect: 200 }
+      - { persona: university_rep, operation: adminDecideClubClaim, path_params: { claim_id: new_claim },
+          body: bodies/directory/decide_claim_reject.json, expect: 409, code: directory.claim_state }
+      - { persona: student, operation: withdrawMyClubClaim, path_params: { claim_id: new_claim }, expect: 409,
+          code: directory.claim_state }
+  club_claim_rules:
+    note: >-
+      k8 and 03 §2.3 — evidence is required (422), a minor gets 403 directory.minor_restricted, an account
+      without a student verification 403 students.verification_required, another university's student 422
+      directory.university_mismatch, the club's own admin 409; the decision needs an MFA session (the rep's
+      and the platform_admin's)
+    steps:
+      - { persona: club_member, operation: createClubClaim, body: bodies/directory/create_claim_no_evidence.json,
+          expect: 422, code: validation_failed }
+      - { persona: student_minor, operation: createClubClaim, expect: 403, code: directory.minor_restricted }
+      - { persona: user_unverified, operation: createClubClaim, expect: 403, code: students.verification_required }
+      - { persona: platform_admin, operation: createClubClaim, expect: 403, code: students.verification_required }
+      - { persona: other_club_admin, operation: createClubClaim, expect: 422, code: directory.university_mismatch }
+      - { persona: club_admin, operation: createClubClaim, expect: 409, code: directory.invalid_state }
+      - { persona: university_rep, mfa: false, operation: adminDecideClubClaim, expect: 403, code: authz.mfa_required }
+      - { persona: platform_admin, mfa: false, operation: adminDecideClubClaim, path_params: { claim_id: claim_b },
+          expect: 403, code: authz.mfa_required }
+      - { persona: university_rep, mfa: false, operation: adminListClubClaims, expect: 403, code: authz.mfa_required }
+      - { persona: club_member, operation: createClubClaim, expect: 201 }
+  club_claim_rejected_then_again:
+    note: a rejected claim frees the claimant to apply again for the same club (one pending claim per club)
+    steps:
+      - { persona: university_rep, operation: adminDecideClubClaim, body: bodies/directory/decide_claim_reject.json,
+          expect: 200 }
+      - { persona: student, operation: createClubClaim, path_params: { club_id: club_unclaimed }, expect: 201 }
+      - { persona: student, operation: createClubClaim, path_params: { club_id: club_unclaimed }, expect: 409,
+          code: directory.claim_pending }
+      - { persona: platform_admin, operation: adminListClubClaims, expect: 200 }
+      - { persona: university_rep, operation: adminListClubClaims, expect: 200 }

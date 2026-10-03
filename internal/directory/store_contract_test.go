@@ -459,4 +459,123 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (directory.Store, w
 			t.Fatalf("SkillBySlug = %+v, %v", g, err)
 		}
 	})
+
+	t.Run("club claims: pending unique, review checks, lists, rep scope, erase", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		u := uni(t, s, w, "Talep Üniversitesi", "Bursa")
+		other := uni(t, s, w, "Başka Üniversite", "Bursa")
+		c1, c2 := club(t, s, w, u, "Talep Kulübü"), club(t, s, w, other, "Öteki Kulüp")
+		sens := club(t, s, w, u, "Hassas Talep Kulübü")
+		reason, by, now := directory.SensitiveReason("religion"), w.user(t), t0
+		sens.IsSensitive, sens.SensitiveReason, sens.SensitivitySetBy, sens.SensitivitySetAt = true, &reason, &by, &now
+		if _, err := s.UpdateClub(ctx, sens); err != nil {
+			t.Fatal(err)
+		}
+		alice, bob, reviewer := w.user(t), w.user(t), w.user(t)
+		text := "Genel kurul tutanağı"
+		ins := func(club, user uuid.UUID) (directory.ClubClaim, error) {
+			return s.InsertClaim(ctx, directory.ClubClaim{ID: uuid.NewV7(), ClubOrgID: club, ClaimantUserID: user,
+				Status: directory.ClaimPending, RoleInClub: "Başkan", EvidenceText: &text})
+		}
+		a1, err := ins(c1.OrgID, alice)
+		if err != nil || a1.CreatedAt.IsZero() || a1.Status != directory.ClaimPending || *a1.EvidenceText != text {
+			t.Fatalf("InsertClaim = %+v, %v", a1, err)
+		}
+		if _, err := ins(c1.OrgID, alice); !errors.Is(err, directory.ErrClaimPending) {
+			t.Fatalf("second pending claim: %v", err)
+		}
+		if _, err := ins(uuid.NewV7(), alice); !errors.Is(err, directory.ErrNotFound) {
+			t.Fatalf("claim of an unknown club: %v", err) // the club is the parent row (06 H-38)
+		}
+		if _, err := s.InsertClaim(ctx, directory.ClubClaim{ID: uuid.NewV7(), ClubOrgID: c2.OrgID, ClaimantUserID: alice,
+			Status: directory.ClaimPending, RoleInClub: "B"}); !isStatus(err, 422) {
+			t.Fatalf("role_in_club of 1 character: %v", err)
+		}
+		b1, err := ins(c1.OrgID, bob)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b2, err := ins(c2.OrgID, bob)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bs, err := ins(sens.OrgID, bob)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A half review and the claimant as reviewer are refused.
+		half := a1
+		half.Status = directory.ClaimApproved
+		half.ReviewedBy = &reviewer
+		if _, err := s.UpdateClaim(ctx, half); !isStatus(err, 422) {
+			t.Fatalf("approved without reviewed_at: %v", err)
+		}
+		self := half
+		self.ReviewedBy, self.ReviewedAt = &alice, &now
+		if _, err := s.UpdateClaim(ctx, self); !isStatus(err, 403) {
+			t.Fatalf("claimant as reviewer: %v", err)
+		}
+		note := "Yeterli"
+		ok := half
+		ok.ReviewedAt, ok.DecisionNote = &now, &note
+		got, err := s.UpdateClaim(ctx, ok)
+		if err != nil || got.Status != directory.ClaimApproved || *got.ReviewedBy != reviewer || *got.DecisionNote != note {
+			t.Fatalf("UpdateClaim = %+v, %v", got, err)
+		}
+		if l, err := s.LockClaim(ctx, a1.ID); err != nil || l.Status != directory.ClaimApproved {
+			t.Fatalf("LockClaim = %+v, %v", l, err)
+		}
+		// A decided claim frees the pair for a new pending claim.
+		a2, err := ins(c1.OrgID, alice)
+		if err != nil {
+			t.Fatalf("new claim after a decision: %v", err)
+		}
+		ids := func(cs []directory.ClubClaim) []uuid.UUID {
+			out := make([]uuid.UUID, len(cs))
+			for i, c := range cs {
+				out[i] = c.ID
+			}
+			return out
+		}
+		// ClaimsOf: newest first, keyset.
+		mine, err := s.ClaimsOf(ctx, alice, nil, 10)
+		if err != nil || !slices.Equal(ids(mine), []uuid.UUID{a2.ID, a1.ID}) {
+			t.Fatalf("ClaimsOf = %v, %v", ids(mine), err)
+		}
+		if mine, _ = s.ClaimsOf(ctx, alice, &a2.ID, 10); !slices.Equal(ids(mine), []uuid.UUID{a1.ID}) {
+			t.Fatalf("ClaimsOf after = %v", ids(mine))
+		}
+		// ListClaims: the pending queue oldest first, keyset; decided newest first.
+		q, err := s.ListClaims(ctx, directory.ClaimFilter{Status: directory.ClaimPending}, nil, 10)
+		if err != nil || !slices.Equal(ids(q), []uuid.UUID{b1.ID, b2.ID, bs.ID, a2.ID}) {
+			t.Fatalf("pending queue = %v, %v", ids(q), err)
+		}
+		if q, _ = s.ListClaims(ctx, directory.ClaimFilter{Status: directory.ClaimPending}, &b2.ID, 2); !slices.Equal(ids(q), []uuid.UUID{bs.ID, a2.ID}) {
+			t.Fatalf("pending queue after = %v", ids(q))
+		}
+		if q, _ = s.ListClaims(ctx, directory.ClaimFilter{Status: directory.ClaimApproved}, nil, 10); !slices.Equal(ids(q), []uuid.UUID{a1.ID}) {
+			t.Fatalf("approved = %v", ids(q))
+		}
+		// A rep's scope: their universities' non-sensitive clubs only.
+		rep := directory.ClaimFilter{Status: directory.ClaimPending, RepUniversityOrgs: []uuid.UUID{u.OrgID}}
+		if q, _ = s.ListClaims(ctx, rep, nil, 10); !slices.Equal(ids(q), []uuid.UUID{b1.ID, a2.ID}) {
+			t.Fatalf("rep queue = %v", ids(q))
+		}
+		rep.RepUniversityOrgs = []uuid.UUID{}
+		if q, _ = s.ListClaims(ctx, rep, nil, 10); len(q) != 0 {
+			t.Fatalf("empty rep scope = %v", ids(q))
+		}
+		// Erase: hard delete.
+		if err := s.DeleteClaim(ctx, a1.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.GetClaim(ctx, a1.ID); !errors.Is(err, directory.ErrNotFound) {
+			t.Fatalf("deleted claim: %v", err)
+		}
+		if _, err := s.ClaimOfFile(ctx, uuid.NewV7()); !errors.Is(err, directory.ErrNotFound) {
+			t.Fatalf("ClaimOfFile of an unknown file: %v", err)
+		}
+	})
 }

@@ -84,6 +84,17 @@ var constraints = db.Constraints{
 	"clubs_sensitive_reason_chk":                  problem.ErrValidation,
 	"universities_org_kind_chk":                   problem.ErrValidation,
 	"clubs_org_kind_chk":                          problem.ErrValidation,
+	"club_claims_pending_uq":                      ErrClaimPending,
+	"club_claims_reviewer_chk":                    problem.ErrForbidden, // 03 Y6: nobody decides their own claim
+	"club_claims_review_chk":                      problem.ErrValidation,
+	"club_claims_status_chk":                      problem.ErrValidation,
+	"club_claims_role_in_club_chk":                problem.ErrValidation,
+	"club_claims_evidence_text_chk":               problem.ErrValidation,
+	"club_claims_decision_note_chk":               problem.ErrValidation,
+	"club_claims_club_org_id_fkey":                problem.ErrNotFound,
+	"club_claims_claimant_user_id_fkey":           problem.ErrNotFound,
+	"club_claims_evidence_file_id_fkey":           problem.ErrNotFound,
+	"club_claims_reviewed_by_fkey":                problem.ErrNotFound,
 }
 
 func wrap(op string, err error) error {

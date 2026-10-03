@@ -1,8 +1,8 @@
 // Package directory is the reference data and club catalog module (01 §4.8;
 // BE-020): universities, faculties, departments and the students' e-mail
 // domains (YÖK public data, loaded by `koro seed reference`), the skill
-// taxonomy, and the club catalog (category, join policy, sensitive flag).
-// Club claims come with BE-022.
+// taxonomy, the club catalog (category, join policy, sensitive flag) and
+// club claims (BE-022).
 //
 // Rules the package enforces:
 //
@@ -22,6 +22,20 @@
 //     students apply (03 §0, Y2). The flag is never logged.
 //   - Member counts are shown only from 10 members on (k ≥ 10) and never
 //     for a sensitive club.
+//   - Club claims (02 §8.6, 03 §5.3 k8): an adult student whose active
+//     verification is of the club's university asks to run a club, with
+//     evidence (text and/or a club_claim_evidence file attached in the same
+//     transaction). A claimant has one pending claim per club
+//     (club_claims_pending_uq); a club may get several club_admins (E-21),
+//     so a claimed club takes claims too. The approver decides (E-21): the
+//     university_rep of the club's university when it has one (other than
+//     the claimant) and the club is not sensitive, a platform admin
+//     otherwise; nobody decides their own claim (03 Y6,
+//     club_claims_reviewer_chk). Approval is one transaction:
+//     orgs.OrgAdmin.GrantRole(club_admin) (01 §6.3), the claim,
+//     clubs.claim_status = claimed and club_claim.decided (O), whose worker
+//     tells the claimant. The decision note is never shown to the claimant;
+//     the review queue and every claim read are audited.
 //   - Turkish search (02 §0.3, 05 §9.5): full text with the koro_tr
 //     configuration (turkish stemmer), plus koro_norm (tr-TR lower case +
 //     unaccent; İ/ı/I/i fold to i) substring and trigram matches; names
@@ -42,6 +56,7 @@ import (
 	"koro/internal/platform/db"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/outbox"
+	"koro/internal/platform/privacy"
 	"koro/internal/platform/queue"
 )
 
@@ -115,6 +130,24 @@ type Service interface {
 	// AdminUpdateSkill is adminUpdateSkill (directory.skill.manage).
 	AdminUpdateSkill(ctx context.Context, a authz.Actor, id uuid.UUID, p SkillPatch) (Skill, error)
 
+	// CreateClubClaim is createClubClaim (directory.club_claim.create, k8).
+	CreateClubClaim(ctx context.Context, a authz.Actor, clubID uuid.UUID, in ClaimInput) (ClaimView, error)
+	// ListMyClubClaims is listMyClubClaims (directory.club_claim.read_own).
+	ListMyClubClaims(ctx context.Context, a authz.Actor, after *uuid.UUID, limit int) (ClaimPage, error)
+	// WithdrawMyClubClaim is withdrawMyClubClaim (directory.club_claim.withdraw):
+	// pending → withdrawn.
+	WithdrawMyClubClaim(ctx context.Context, a authz.Actor, id uuid.UUID) (ClaimView, error)
+	// AdminListClubClaims is adminListClubClaims (directory.club_claim.list):
+	// the review queue of one status (default pending), audited.
+	AdminListClubClaims(ctx context.Context, a authz.Actor, q AdminClaimQuery) (ClaimPage, error)
+	// AdminGetClubClaim is adminGetClubClaim (directory.club_claim.list):
+	// the claim with a short-lived evidence download, audited.
+	AdminGetClubClaim(ctx context.Context, a authz.Actor, id uuid.UUID) (ClaimView, error)
+	// AdminDecideClubClaim is adminDecideClubClaim
+	// (directory.club_claim.decide): approval grants club_admin, marks the
+	// club claimed and emits club_claim.decided in one transaction.
+	AdminDecideClubClaim(ctx context.Context, a authz.Actor, id uuid.UUID, in ClaimDecision) (ClaimView, error)
+
 	// ImportReference upserts the public reference data (`koro seed
 	// reference`; 02 §23: a command, not a migration). It is idempotent:
 	// a second run with the same data changes nothing.
@@ -142,9 +175,22 @@ type Deps struct {
 	// → member_count is null.
 	MemberCount MemberCounter
 	// Sender and PlatformAdmins serve the sensitivity request notice in the
-	// worker. nil → the task fails (and is retried) instead of dropping it.
+	// worker (Sender also the claim decision notice). nil → the task fails
+	// (and is retried) instead of dropping it.
 	Sender         Sender
 	PlatformAdmins PlatformAdmins
+
+	// Files serves the claim evidence (files, L2). nil → a claim with an
+	// evidence file and the admin's download fail closed with 503.
+	Files Files
+	// RemoveFile deletes an evidence file (erasure, file.rejected). nil →
+	// the file stays (logged).
+	RemoveFile FileRemover
+	// Students is identity's student verification: a claim approval checks
+	// the claimant's university again. nil → approval fails closed (503).
+	Students Students
+	// Users names the claimants in the admin review (optional).
+	Users Users
 }
 
 func (d Deps) validate() error {
@@ -167,6 +213,9 @@ func (d Deps) validate() error {
 // Module is what directory hands to the composition root.
 type Module struct {
 	Service Service
+	// Privacy is the KVKK provider of directory (club claims and their
+	// evidence; 01 §3.3).
+	Privacy privacy.Provider
 	svc     *service
 }
 
@@ -177,7 +226,7 @@ func New(d Deps) (Module, error) {
 		return Module{}, err
 	}
 	s := &service{d: d}
-	return Module{Service: s, svc: s}, nil
+	return Module{Service: s, Privacy: privacyProvider{s: s}, svc: s}, nil
 }
 
 type service struct{ d Deps }

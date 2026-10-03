@@ -1,6 +1,10 @@
 package directory
 
-import "koro/internal/orgs"
+import (
+	"time"
+
+	"koro/internal/orgs"
+)
 
 // UniversityCardDTO is a university in listUniversities (04 §2.3).
 type UniversityCardDTO struct {
@@ -212,4 +216,119 @@ func toClubDTO(v ClubView) ClubDTO {
 		MembershipPrivate: c.IsSensitive, MemberCount: v.MemberCount, SocialLinks: map[string]string(c.SocialLinks.Clone()),
 		FoundedYear: c.FoundedYear,
 	}
+}
+
+// ClubClaimDTO is a club claim as its claimant sees it (04 §2.3
+// ClubClaimDTO; the decision note is for the reviewers only).
+type ClubClaimDTO struct {
+	ClaimID         string     `json:"claim_id"`
+	ClubID          string     `json:"club_id" doc:"The club's org_id"`
+	ClubName        string     `json:"club_name"`
+	Status          string     `json:"status" enum:"pending,approved,rejected,withdrawn"`
+	RoleInClub      string     `json:"role_in_club"`
+	HasEvidenceFile bool       `json:"has_evidence_file"`
+	CreatedAt       time.Time  `json:"created_at"`
+	DecidedAt       *time.Time `json:"decided_at,omitempty"`
+}
+
+// ClubClaimList is a page of ClubClaimDTO.
+type ClubClaimList struct {
+	Items      []ClubClaimDTO `json:"items"`
+	NextCursor string         `json:"next_cursor,omitempty"`
+}
+
+// ClaimClubDTO is the club of an admin claim view.
+type ClaimClubDTO struct {
+	ClubID            string `json:"club_id"`
+	Name              string `json:"name"`
+	UniversityID      string `json:"university_id"`
+	ClaimStatus       string `json:"claim_status" enum:"unclaimed,claimed"`
+	MembershipPrivate bool   `json:"membership_private" doc:"true for a sensitive club: the claim is special category data"`
+}
+
+// ClaimantDTO is the claimant of an admin claim view (null names when the
+// account is gone).
+type ClaimantDTO struct {
+	UserID    string `json:"user_id"`
+	FirstName string `json:"first_name,omitempty"`
+	LastName  string `json:"last_name,omitempty"`
+}
+
+// EvidenceDownloadDTO is the short-lived download of a claim's evidence
+// file (04 §1.14).
+type EvidenceDownloadDTO struct {
+	URL       string    `json:"url"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// AdminClubClaimDTO is a claim in the review of platform staff and
+// university representatives (04 §2.3 AdminClubClaimDTO).
+type AdminClubClaimDTO struct {
+	ClaimID        string               `json:"claim_id"`
+	Status         string               `json:"status" enum:"pending,approved,rejected,withdrawn"`
+	Club           ClaimClubDTO         `json:"club"`
+	Claimant       ClaimantDTO          `json:"claimant"`
+	RoleInClub     string               `json:"role_in_club"`
+	EvidenceText   string               `json:"evidence_text,omitempty"`
+	EvidenceFileID string               `json:"evidence_file_id,omitempty"`
+	EvidenceState  string               `json:"evidence_state" enum:"none,available,not_clean" doc:"available: evidence holds a 5-minute download (adminGetClubClaim only); not_clean: the virus scan has not cleared the file"`
+	Evidence       *EvidenceDownloadDTO `json:"evidence,omitempty"`
+	Approver       string               `json:"approver,omitempty" enum:"university_rep,platform_admin" doc:"Who decides the claim (detail and decision only): the university's representative when it has one and the club is not sensitive, a platform admin otherwise"`
+	CreatedAt      time.Time            `json:"created_at"`
+	ReviewedBy     string               `json:"reviewed_by,omitempty"`
+	ReviewedAt     *time.Time           `json:"reviewed_at,omitempty"`
+	DecisionNote   string               `json:"decision_note,omitempty"`
+}
+
+// AdminClubClaimList is a page of AdminClubClaimDTO.
+type AdminClubClaimList struct {
+	Items      []AdminClubClaimDTO `json:"items"`
+	NextCursor string              `json:"next_cursor,omitempty"`
+}
+
+func toClubClaimDTO(v ClaimView) ClubClaimDTO {
+	c := v.Claim
+	return ClubClaimDTO{
+		ClaimID: c.ID.String(), ClubID: c.ClubOrgID.String(), ClubName: v.ClubName, Status: string(c.Status),
+		RoleInClub: c.RoleInClub, HasEvidenceFile: c.EvidenceFileID != nil, CreatedAt: c.CreatedAt.UTC(),
+		DecidedAt: utcPtr(c.ReviewedAt),
+	}
+}
+
+func toAdminClaimDTO(v ClaimView) AdminClubClaimDTO {
+	c := v.Claim
+	d := AdminClubClaimDTO{
+		ClaimID: c.ID.String(), Status: string(c.Status),
+		Club: ClaimClubDTO{
+			ClubID: c.ClubOrgID.String(), Name: v.ClubName, UniversityID: v.Club.UniversityID.String(),
+			ClaimStatus: string(v.Club.ClaimStatus), MembershipPrivate: v.Club.IsSensitive,
+		},
+		Claimant:   ClaimantDTO{UserID: c.ClaimantUserID.String()},
+		RoleInClub: c.RoleInClub, EvidenceText: str(c.EvidenceText), EvidenceState: v.EvidenceState, Approver: v.Approver,
+		CreatedAt: c.CreatedAt.UTC(), ReviewedAt: utcPtr(c.ReviewedAt), DecisionNote: str(c.DecisionNote),
+	}
+	if d.EvidenceState == "" {
+		d.EvidenceState = EvidenceNone
+	}
+	if v.Claimant != nil {
+		d.Claimant.FirstName, d.Claimant.LastName = v.Claimant.FirstName, v.Claimant.LastName
+	}
+	if c.EvidenceFileID != nil {
+		d.EvidenceFileID = c.EvidenceFileID.String()
+	}
+	if c.ReviewedBy != nil {
+		d.ReviewedBy = c.ReviewedBy.String()
+	}
+	if v.Evidence != nil {
+		d.Evidence = &EvidenceDownloadDTO{URL: v.Evidence.URL, ExpiresAt: v.Evidence.ExpiresAt.UTC()}
+	}
+	return d
+}
+
+func utcPtr(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	u := t.UTC()
+	return &u
 }

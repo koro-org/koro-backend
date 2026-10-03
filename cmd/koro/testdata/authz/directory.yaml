@@ -1,11 +1,21 @@
-# Authz matrix of the directory module (03 §5.3, 04 §2.3; BE-020). 16 operations × 18 personas.
+# Authz matrix of the directory module (03 §5.3, 04 §2.3; BE-020, club claims BE-022). 22 operations × 18
+# personas.
 # The catalog (universities, departments, skills, clubs) is public (P); an inactive university is
 # visible to platform_admin only (others 404). /clubs/{club_id}/... is a resource surface (03 §7.6):
 # a club is visible to everyone, so a signed-in user without the club_admin role of that club gets
 # 403, an unknown club 404. Admin surface (03 §7.2-3): everyone without the role → 403 before
 # anything is read. adminSetClubSensitivity is R: the body carries the matrix password (identity
 # fixtures). Business rules (428/412, 422 k7, 409) live in scenarios/directory.yaml and the
-# service tests.
+# service tests. Club claims (BE-022): createClubClaim is for adult verified students (stu, clm, cla,
+# stf; k8) — an unverified account or staff get 403 students.verification_required, a minor 403
+# directory.minor_restricted; /me/club-claims is the caller's own (another user's claim 404). The claim's
+# approver decides (E-21, orchestrator 2026-10-04): the university_rep of the club's university when it has
+# one and the club is not sensitive, platform_admin otherwise. uni_a has a rep (persona university_rep), uni_b
+# none. The queue and detail are support's and platform_admin's (every claim) and the approving rep's (their
+# claims; another claim 404). Without a decide/list path: 403 before the claim is read. Fixtures:
+# claim_pending (student, club_unclaimed: the rep decides), claim_sensitive (student, club_sensitive:
+# platform_admin decides), claim_b (other_club_admin, club_b of uni_b: platform_admin decides; the grant is a
+# no-op, other_club_admin already runs club_b).
 version: 1
 groups:
   # signed-in users without the club_admin role of club_a.
@@ -16,6 +26,18 @@ groups:
                          event_staff, university_rep, company_member, company_admin, other_company_member]
   # platform roles other than platform_admin.
   other_staff_dir: [moderator, support, dpo, finance_admin, talent_auditor]
+  # signed-in users who are no adult verified students (createClubClaim 403).
+  no_claimants: [user_unverified, student_minor, university_rep, company_member, company_admin, other_company_member,
+                 moderator, support, dpo, platform_admin, finance_admin, talent_auditor]
+  # signed-in users without a platform role and without the university_rep role.
+  no_staff_no_rep: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                    event_staff, company_member, company_admin, other_company_member]
+  # platform roles that cannot read the claim queue.
+  no_claim_queue: [moderator, dpo, finance_admin, talent_auditor]
+  # signed-in users other than the student persona (another user's claim).
+  not_claimant: [user_unverified, student_minor, club_member, club_admin, other_club_admin, event_staff,
+                 university_rep, company_member, company_admin, other_company_member,
+                 moderator, support, dpo, platform_admin, finance_admin, talent_auditor]
 
 operations:
   listUniversities:
@@ -270,10 +292,192 @@ operations:
       "@other_staff_dir": 403
       platform_admin: 200
 
-pending_actions:
-  # BE-022: club claims (03 §5.3).
-  - directory.club_claim.create
-  - directory.club_claim.read_own
-  - directory.club_claim.withdraw
-  - directory.club_claim.list
-  - directory.club_claim.decide
+  createClubClaim:
+    method: POST
+    path: /api/v1/clubs/{club_id}/claims
+    action: directory.club_claim.create
+    path_params: { club_id: club_a }
+    body: bodies/directory/create_claim.json
+    note: >-
+      k8 — club_a is claimed but a club may have several admins (E-21): its club_admin already runs it (409
+      directory.invalid_state); other_club_admin is a uni_b student (422 directory.university_mismatch)
+    expect:
+      anonymous: 401
+      student: 201
+      club_member: 201
+      club_admin: 409
+      other_club_admin: 422
+      event_staff: 201
+      "@no_claimants": 403
+    variants:
+      - name: unclaimed_club
+        path_params: { club_id: club_unclaimed }
+        note: student already has the pending claim claim_pending for club_unclaimed (409 directory.claim_pending)
+        expect:
+          anonymous: 401
+          student: 409
+          club_member: 201
+          club_admin: 201
+          other_club_admin: 422
+          event_staff: 201
+          "@no_claimants": 403
+      - name: sensitive_club
+        path_params: { club_id: club_sensitive }
+        note: >-
+          a sensitive club is claimed like any other (its first admin comes from a claim); student already has
+          claim_sensitive (409); uni_b student 422
+        expect:
+          anonymous: 401
+          student: 409
+          club_member: 201
+          club_admin: 201
+          other_club_admin: 422
+          event_staff: 201
+          "@no_claimants": 403
+      - name: unknown_club
+        path_params: { club_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect:
+          anonymous: 401
+          "@signed_in": 404
+
+  listMyClubClaims:
+    method: GET
+    path: /api/v1/me/club-claims
+    action: directory.club_claim.read_own
+    note: O — every account lists its own claims (an empty list without one)
+    expect:
+      anonymous: 401
+      "@signed_in": 200
+
+  withdrawMyClubClaim:
+    method: POST
+    path: /api/v1/me/club-claims/{claim_id}/withdraw
+    action: directory.club_claim.withdraw
+    path_params: { claim_id: claim_pending }
+    note: O — only the claimant (student) sees the claim; everyone else gets 404
+    expect:
+      anonymous: 401
+      student: 200
+      "@not_claimant": 404
+    variants:
+      - name: unknown_claim
+        path_params: { claim_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect:
+          anonymous: 401
+          "@signed_in": 404
+
+  adminListClubClaims:
+    method: GET
+    path: /api/v1/admin/club-claims
+    action: directory.club_claim.list
+    note: university_rep gets the claims they approve (uni_a's non-sensitive clubs)
+    expect:
+      anonymous: 401
+      "@no_staff_no_rep": 403
+      "@no_claim_queue": 403
+      university_rep: 200
+      support: 200
+      platform_admin: 200
+    variants:
+      - name: decided
+        query: { status: approved }
+        expect:
+          anonymous: 401
+          "@no_staff_no_rep": 403
+          "@no_claim_queue": 403
+          university_rep: 200
+          support: 200
+          platform_admin: 200
+
+  adminGetClubClaim:
+    method: GET
+    path: /api/v1/admin/club-claims/{claim_id}
+    action: directory.club_claim.list
+    path_params: { claim_id: claim_pending }
+    note: claim_pending is the rep's to decide, so the rep reads it too
+    expect:
+      anonymous: 401
+      "@no_staff_no_rep": 403   # the claimant included: the admin view is the reviewers'
+      "@no_claim_queue": 403
+      university_rep: 200
+      support: 200
+      platform_admin: 200
+    variants:
+      - name: sensitive_club
+        path_params: { claim_id: claim_sensitive }
+        note: a sensitive club's claim stays with platform staff (03 Y2); the rep does not see it
+        expect:
+          anonymous: 401
+          "@no_staff_no_rep": 403
+          "@no_claim_queue": 403
+          university_rep: 404
+          support: 200
+          platform_admin: 200
+      - name: university_without_rep
+        path_params: { claim_id: claim_b }
+        expect:
+          anonymous: 401
+          "@no_staff_no_rep": 403
+          "@no_claim_queue": 403
+          university_rep: 404
+          support: 200
+          platform_admin: 200
+      - name: unknown_claim
+        path_params: { claim_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect:
+          anonymous: 401
+          "@no_staff_no_rep": 403   # no ID probing without a list path
+          "@no_claim_queue": 403
+          university_rep: 404
+          support: 404
+          platform_admin: 404
+
+  adminDecideClubClaim:
+    method: POST
+    path: /api/v1/admin/club-claims/{claim_id}/decision
+    action: directory.club_claim.decide
+    path_params: { claim_id: claim_pending }
+    body: bodies/directory/decide_claim_approve.json
+    note: >-
+      E-21 — uni_a has a university_rep: the rep decides claim_pending, platform_admin may not (403)
+    expect:
+      anonymous: 401
+      "@no_staff_no_rep": 403
+      "@other_staff_dir": 403
+      university_rep: 200
+      platform_admin: 403
+    variants:
+      - name: reject
+        body: bodies/directory/decide_claim_reject.json
+        expect:
+          anonymous: 401
+          "@no_staff_no_rep": 403
+          "@other_staff_dir": 403
+          university_rep: 200
+          platform_admin: 403
+      - name: sensitive_club
+        path_params: { claim_id: claim_sensitive }
+        note: a sensitive club's claim is platform_admin's (the rep does not see it)
+        expect:
+          anonymous: 401
+          "@no_staff_no_rep": 403
+          "@other_staff_dir": 403
+          university_rep: 404
+          platform_admin: 200
+      - name: university_without_rep
+        path_params: { claim_id: claim_b }
+        note: uni_b has no rep, so platform_admin decides
+        expect:
+          anonymous: 401
+          "@no_staff_no_rep": 403
+          "@other_staff_dir": 403
+          university_rep: 404
+          platform_admin: 200
+      - name: unknown_claim
+        path_params: { claim_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect:
+          anonymous: 401
+          "@no_staff_no_rep": 403   # 403 before the claim is read
+          "@other_staff_dir": 403
+          university_rep: 404
+          platform_admin: 404

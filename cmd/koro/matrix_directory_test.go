@@ -16,7 +16,8 @@ import (
 // authztest.UniversityID(org): "uni_a_university"), a clubs row for every
 // club org (club_sensitive is a sensitive religious club; club_a and club_b
 // are claimed), and the fixtures of fixtures/directory.yaml (an inactive
-// university, a faculty, a department, a skill). Every row is dated
+// university, a faculty, a department, a skill; BE-022: claim_pending,
+// student's pending claim for club_unclaimed). Every row is dated
 // matrixOrgTime, so an untouched club's ETag is "1hmhuo3hji000" (the
 // If-Match the matrix files send).
 func (w *directoryWiring) matrixFixtures(fx *matrixFixtures) error {
@@ -58,7 +59,7 @@ func (w *directoryWiring) matrixFixtures(fx *matrixFixtures) error {
 		}
 	}
 	// Parents first: universities, faculties, departments, then skills.
-	order := map[string]int{"university": 0, "faculty": 1, "department": 2, "skill": 3}
+	order := map[string]int{"university": 0, "faculty": 1, "department": 2, "skill": 3, "claim": 4}
 	fixtures := fx.Of("directory")
 	slices.SortStableFunc(fixtures, func(a, b fixture) int { return order[a.Kind] - order[b.Kind] })
 	for _, f := range fixtures {
@@ -96,6 +97,20 @@ func (w *directoryWiring) matrixFixtures(fx *matrixFixtures) error {
 			_, err = st.InsertSkill(ctx, directory.Skill{
 				ID: id, Slug: "matris-" + strings.ReplaceAll(f.Name, "_", "-"), NameTR: "Matris yetkinliği", Category: directory.SkillCategory("technical"),
 				IsActive: true,
+			})
+		case "claim":
+			claimant, rerr := fx.Ref(f, "claimant")
+			if rerr != nil {
+				return rerr
+			}
+			club, rerr := fx.Ref(f, "club")
+			if rerr != nil {
+				return rerr
+			}
+			text := "Genel kurul tutanağı kulüp danışmanındadır."
+			_, err = st.InsertClaim(ctx, directory.ClubClaim{
+				ID: id, ClubOrgID: club, ClaimantUserID: claimant, Status: directory.ClaimPending, RoleInClub: "Başkan",
+				EvidenceText: &text, CreatedAt: t, UpdatedAt: t,
 			})
 		default:
 			return fmt.Errorf("fixture %s: unknown kind %q", f.Name, f.Kind)

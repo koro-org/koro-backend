@@ -15,8 +15,9 @@ import (
 	"koro/internal/platform/page"
 )
 
-// Register adds the directory operations of BE-020 (04 §2.3) to api. svc
-// may be nil (`koro openapi`): handlers only touch it when called.
+// Register adds the directory operations (04 §2.3: BE-020's catalog, BE-022's
+// club claims) to api. svc may be nil (`koro openapi`): handlers only touch
+// it when called.
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
 
@@ -115,6 +116,8 @@ func Register(api huma.API, svc Service) {
 		OperationID: "adminUpdateSkill", Method: http.MethodPatch, Path: "/admin/skills/{skill_id}",
 		Summary: "Update or deactivate a skill",
 	}, op.Meta{Action: string(authz.DirectorySkillManage), Surface: op.SurfaceAdmin}, h.adminUpdateSkill)
+
+	registerClaims(api, h)
 }
 
 // reg registers one directory operation with its Koro metadata.

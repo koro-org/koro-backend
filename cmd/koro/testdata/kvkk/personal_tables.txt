@@ -55,7 +55,7 @@ university_email_domains    staff     directory     -
 faculties                   none      directory     -
 departments                 none      directory     -
 clubs                       staff     directory     -
-club_claims                 personal  directory     todo:BE-022
+club_claims                 personal  directory     provider:directory
 skills                      none      directory     -
 # students
 student_profiles            personal  students      todo:BE-023

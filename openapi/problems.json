@@ -180,6 +180,18 @@
     "type": "urn:koro:problem:csrf_rejected"
   },
   {
+    "code": "directory.claim_pending",
+    "status": 409,
+    "title": "You already have a pending claim for this club",
+    "type": "urn:koro:problem:directory.claim_pending"
+  },
+  {
+    "code": "directory.claim_state",
+    "status": 409,
+    "title": "Claim status does not allow this change",
+    "type": "urn:koro:problem:directory.claim_state"
+  },
+  {
     "code": "directory.department_exists",
     "status": 409,
     "title": "Department already exists",
@@ -204,6 +216,12 @@
     "type": "urn:koro:problem:directory.invalid_state"
   },
   {
+    "code": "directory.minor_restricted",
+    "status": 403,
+    "title": "Club claims are open to adult students only",
+    "type": "urn:koro:problem:directory.minor_restricted"
+  },
+  {
     "code": "directory.sensitivity_required",
     "status": 422,
     "title": "Category requires the sensitive flag",
@@ -214,6 +232,12 @@
     "status": 409,
     "title": "Skill slug is already in use",
     "type": "urn:koro:problem:directory.skill_slug_taken"
+  },
+  {
+    "code": "directory.university_mismatch",
+    "status": 422,
+    "title": "Your verified university is not the club's university",
+    "type": "urn:koro:problem:directory.university_mismatch"
   },
   {
     "code": "directory.unknown_skill",

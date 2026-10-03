@@ -27,6 +27,22 @@ var (
 	// ErrEmptyPatch: a PATCH without a field to change.
 	ErrEmptyPatch = problem.New(problem.Invalid, "directory.empty_patch", "Nothing to update")
 
+	// ErrUniversityMismatch: the claimant's active student verification is
+	// not of the club's university (03 k8; 04 §1.10).
+	ErrUniversityMismatch = problem.New(problem.Invalid, "directory.university_mismatch",
+		"Your verified university is not the club's university")
+	// ErrMinorRestricted: a student under 18 asks to claim a club (03 k8, Y4;
+	// 04 §1.10). A club_admin must be an adult (T-55).
+	ErrMinorRestricted = problem.New(problem.Forbidden, "directory.minor_restricted",
+		"Club claims are open to adult students only")
+	// ErrClaimPending: the claimant already has a pending claim for the club
+	// (club_claims_pending_uq).
+	ErrClaimPending = problem.New(problem.Conflict, "directory.claim_pending",
+		"You already have a pending claim for this club")
+	// ErrClaimState: the claim is no longer pending (withdrawn, approved or
+	// rejected), so it cannot be withdrawn or decided.
+	ErrClaimState = problem.New(problem.Conflict, "directory.claim_state", "Claim status does not allow this change")
+
 	// ErrNotFound: the record does not exist or is not visible.
 	ErrNotFound = problem.ErrNotFound
 	// ErrPreconditionRequired / ErrPreconditionFailed: If-Match missing or

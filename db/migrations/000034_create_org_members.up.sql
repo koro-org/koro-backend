@@ -4,6 +4,13 @@
 -- hard delete right away. Business rules the schema enforces: one open
 -- membership per user and org, exactly one active company_owner per org, the
 -- role fits the org kind.
+-- 06 H-37 fix (BE-011, in place before the pilot): the state CHECKs were
+-- `(status = 'active') = (joined_at IS NOT NULL AND ended_at IS NULL)` and
+-- `(status = 'ended') = (ended_at IS NOT NULL AND end_reason IS NOT NULL)`;
+-- the second let a pending membership carry ended_at without end_reason (or
+-- the reverse). Now ended_at and end_reason are each tied to 'ended', an
+-- active membership has joined_at, and a pending one has not joined yet
+-- (the same rows as before, written per state).
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 CREATE TABLE org_members (
@@ -29,8 +36,9 @@ CREATE TABLE org_members (
        OR (org_kind = 'company'    AND role IN ('company_owner','company_admin','recruiter'))
        OR (org_kind = 'platform'   AND role IN ('staff'))
        OR (org_kind = 'ngo'        AND role IN ('ngo_admin','ngo_member')) ),
-  CONSTRAINT org_members_active_chk  CHECK ((status = 'active') = (joined_at IS NOT NULL AND ended_at IS NULL)),
-  CONSTRAINT org_members_ended_chk   CHECK ((status = 'ended')  = (ended_at IS NOT NULL AND end_reason IS NOT NULL)),
+  CONSTRAINT org_members_active_chk  CHECK ((status <> 'active' OR (joined_at IS NOT NULL AND ended_at IS NULL))
+                                         AND (status <> 'pending' OR joined_at IS NULL)),
+  CONSTRAINT org_members_ended_chk   CHECK ((status = 'ended') = (ended_at IS NOT NULL) AND (status = 'ended') = (end_reason IS NOT NULL)),
   CONSTRAINT org_members_pending_chk CHECK (status <> 'pending' OR requested_at IS NOT NULL)
 );
 CREATE UNIQUE INDEX org_members_open_uq      ON org_members (org_id, user_id) WHERE status IN ('pending','active');

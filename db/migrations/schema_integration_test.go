@@ -435,8 +435,8 @@ func TestRoleBoundaries_AuditEvents(t *testing.T) {
 }
 
 // TestRoleBoundaries_TalentSchemaNoAccess: app_rw has no privilege in the
-// talent schema even while it is empty; only SET LOCAL ROLE app_talent
-// enters it. app_rw cannot create objects anywhere.
+// talent schema; only SET LOCAL ROLE app_talent enters it. app_rw cannot
+// create objects anywhere.
 func TestRoleBoundaries_TalentSchemaNoAccess(t *testing.T) {
 	t.Parallel()
 	d := testutil.NewDB(t)
@@ -477,9 +477,10 @@ func TestRoleBoundaries_TalentSchemaNoAccess(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `SELECT has_schema_privilege('talent', 'USAGE')`).Scan(&usage); err != nil || !usage {
 			t.Errorf("app_talent has no USAGE on talent: %v", err)
 		}
-		// The schema is empty: a lookup inside it now fails with "does not
-		// exist" (42P01) instead of "permission denied".
-		if got := execState(t, tx, `SELECT * FROM talent.point_events`); got != "42P01" {
+		// A lookup inside the schema now fails with "does not exist"
+		// (42P01) instead of "permission denied" (reading the talent
+		// tables: TestRoleBoundaries_AppTalentCanReadTalent).
+		if got := execState(t, tx, `SELECT * FROM talent.no_such_table`); got != "42P01" {
 			t.Errorf("app_talent lookup: SQLSTATE %q, want 42P01", got)
 		}
 	})

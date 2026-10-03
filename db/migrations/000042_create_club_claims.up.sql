@@ -1,5 +1,10 @@
 -- 000042_create_club_claims.up.sql (02 §8.6). A student's claim to run an
 -- unclaimed club; decided by a platform admin who is never the claimant.
+-- 06 H-37 fix (BE-011, in place before the pilot): the review CHECK was
+-- `(status IN ('approved','rejected')) = (reviewed_by IS NOT NULL AND
+-- reviewed_at IS NOT NULL)`, which let a pending or withdrawn claim carry
+-- half a review (only the reviewer or only the time); each column is now
+-- tied to the decided state on its own.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 CREATE TABLE club_claims (
@@ -15,7 +20,8 @@ CREATE TABLE club_claims (
   decision_note     text CONSTRAINT club_claims_decision_note_chk CHECK (char_length(decision_note) <= 1000),
   created_at        timestamptz NOT NULL DEFAULT now(),
   updated_at        timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT club_claims_review_chk CHECK ((status IN ('approved','rejected')) = (reviewed_by IS NOT NULL AND reviewed_at IS NOT NULL)),
+  CONSTRAINT club_claims_review_chk CHECK ((status IN ('approved','rejected')) = (reviewed_by IS NOT NULL)
+                                         AND (status IN ('approved','rejected')) = (reviewed_at IS NOT NULL)),
   CONSTRAINT club_claims_reviewer_chk CHECK (reviewed_by IS NULL OR reviewed_by <> claimant_user_id)   -- nobody decides their own claim (03 Y6)
 );
 CREATE UNIQUE INDEX club_claims_pending_uq ON club_claims (club_org_id, claimant_user_id) WHERE status = 'pending';

@@ -120,7 +120,10 @@ func TestSchema_EntitlementUsagesAppendOnly(t *testing.T) {
 		{"owner update", `UPDATE entitlement_usages SET quantity = 5 WHERE id = $1`, []any{use}, db.CodeRestrictViolation, ""},
 		{"owner update to the same value", `UPDATE entitlement_usages SET quantity = quantity WHERE id = $1`, []any{undo}, db.CodeRestrictViolation, ""},
 		{"owner delete", `DELETE FROM entitlement_usages WHERE id = $1`, []any{undo}, db.CodeRestrictViolation, ""},
-		{"owner truncate", `TRUNCATE entitlement_usages`, nil, db.CodeRestrictViolation, ""},
+		// posts, outreach_dispatches and contact_requests refer to the usages (000066–000077),
+		// and the post children refer to posts, so a plain TRUNCATE stops at the FK (0A000).
+		{"owner truncate", `TRUNCATE entitlement_usages, posts, post_media, post_reactions, post_saves, post_hides,
+			outreach_dispatches, contact_requests`, nil, db.CodeRestrictViolation, ""},
 		{"owner truncate cascade", `TRUNCATE entitlement_usages CASCADE`, nil, db.CodeRestrictViolation, ""},
 	})
 	if n := w.count(`SELECT count(*) FROM entitlement_usages WHERE entitlement_id = $1`, ent); n != 2 {

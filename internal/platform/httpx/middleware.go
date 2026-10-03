@@ -96,21 +96,53 @@ func securityHeaders() gin.HandlerFunc {
 	}
 }
 
-type clientIPKey struct{}
+type (
+	clientIPKey  struct{}
+	userAgentKey struct{}
+)
+
+// MaxUserAgent bounds the stored User-Agent (audit_events.user_agent is at
+// most 400 characters, 02 §2.1); longer values are cut at a rune boundary.
+const MaxUserAgent = 400
 
 // clientIP stores gin's ClientIP (X-Forwarded-For honoured only from
-// TRUSTED_PROXIES) in the context; raw X-Forwarded-For is never read
-// elsewhere (05 §10.1).
+// TRUSTED_PROXIES) and the User-Agent in the context; raw X-Forwarded-For
+// is never read elsewhere (05 §10.1). The audit log reads both (01 §4.1:
+// "IP, user-agent, request ID ctx'ten"; BE-007).
 func clientIP() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), clientIPKey{}, c.ClientIP()))
+		ctx := WithClientIP(c.Request.Context(), c.ClientIP())
+		if ua := c.Request.UserAgent(); ua != "" {
+			ctx = WithUserAgent(ctx, ua)
+		}
+		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	}
+}
+
+// WithClientIP returns ctx carrying the client IP (the middleware; tests).
+func WithClientIP(ctx context.Context, ip string) context.Context {
+	return context.WithValue(ctx, clientIPKey{}, ip)
 }
 
 // ClientIPFrom returns the client IP stored by the middleware or "".
 func ClientIPFrom(ctx context.Context) string {
 	v, _ := ctx.Value(clientIPKey{}).(string)
+	return v
+}
+
+// WithUserAgent returns ctx carrying the request's User-Agent, cut to
+// MaxUserAgent characters (the middleware; tests).
+func WithUserAgent(ctx context.Context, ua string) context.Context {
+	if r := []rune(ua); len(r) > MaxUserAgent {
+		ua = string(r[:MaxUserAgent])
+	}
+	return context.WithValue(ctx, userAgentKey{}, ua)
+}
+
+// UserAgentFrom returns the User-Agent stored by the middleware or "".
+func UserAgentFrom(ctx context.Context) string {
+	v, _ := ctx.Value(userAgentKey{}).(string)
 	return v
 }
 

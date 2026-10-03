@@ -14,6 +14,11 @@
 // production pool settings (QueryExecModeExec). Tests call t.Parallel(); the
 // containers are the only shared state.
 //
-// Everything except this file needs the integration build tag; synthetic
-// data generators live in the untagged subpackage fake.
+// Container start-up, the first connections and per-test database
+// creation are retried with exponential backoff (Retry, Transient; 06 H-36):
+// under parallel Docker load a fresh container may drop its first
+// connection ("unexpected EOF") or the reaper may time out.
+//
+// Everything except this file and retry.go needs the integration build tag;
+// synthetic data generators live in the untagged subpackage fake.
 package testutil

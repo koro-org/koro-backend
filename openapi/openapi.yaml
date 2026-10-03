@@ -7,6 +7,65 @@ components:
             $ref: "#/components/schemas/Problem"
       description: RFC 9457 problem details
   schemas:
+    AuditActorDTO:
+      additionalProperties: false
+      properties:
+        display:
+          description: Display name, when known
+          type: string
+        user_id:
+          description: Absent for system jobs and anonymous requests
+          format: uuid
+          type: string
+      type: object
+    AuditEventDTO:
+      additionalProperties: false
+      properties:
+        action:
+          description: Audit action (authz action name)
+          type: string
+        actor:
+          $ref: "#/components/schemas/AuditActorDTO"
+        ip:
+          type: string
+        metadata:
+          description: Event details (IDs, kinds, flags); never secrets
+        occurred_at:
+          format: date-time
+          type: string
+        outcome:
+          enum:
+            - success
+            - denied
+            - failure
+          type: string
+        reason:
+          type: string
+        resource_id:
+          format: uuid
+          type: string
+        resource_type:
+          type: string
+        user_agent:
+          type: string
+      required:
+        - action
+        - outcome
+        - actor
+        - occurred_at
+      type: object
+    AuditEventList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/AuditEventDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
     CompleteUploadInputBody:
       additionalProperties: false
       properties:
@@ -169,6 +228,75 @@ components:
         - status
         - code
       type: object
+    SecurityEventDTO:
+      additionalProperties: false
+      properties:
+        action:
+          description: Audit action (authz action name)
+          type: string
+        ip_prefix:
+          description: Network of the client (/24 or /48); absent for accesses by staff
+          type: string
+        occurred_at:
+          format: date-time
+          type: string
+        outcome:
+          enum:
+            - success
+            - denied
+            - failure
+          type: string
+        user_agent_family:
+          description: Browser or app family, e.g. Chrome, Koro app
+          type: string
+      required:
+        - action
+        - outcome
+        - occurred_at
+      type: object
+    SecurityEventList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/SecurityEventDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
+    VerifyDTO:
+      additionalProperties: false
+      properties:
+        checked_rows:
+          format: int64
+          type: integer
+        first_bad_chain_seq:
+          description: First chain position that fails verification
+          format: int64
+          type: integer
+        ok:
+          type: boolean
+      required:
+        - ok
+        - checked_rows
+      type: object
+    VerifyRequest:
+      additionalProperties: false
+      properties:
+        from_day:
+          description: First day (Europe/Istanbul)
+          format: date
+          type: string
+        to_day:
+          description: Last day (Europe/Istanbul), at most 31 days after from_day
+          format: date
+          type: string
+      required:
+        - from_day
+        - to_day
+      type: object
   securitySchemes:
     bearerAuth:
       bearerFormat: opaque
@@ -184,6 +312,165 @@ info:
   version: 1.0.0
 openapi: 3.1.0
 paths:
+  /api/v1/admin/audit-events:
+    get:
+      description: The search itself is recorded in the audit log.
+      operationId: adminListAuditEvents
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: RFC 3339 time or YYYY-MM-DD (start of that day, Europe/Istanbul)
+          explode: false
+          in: query
+          name: occurred_from
+          required: true
+          schema:
+            description: RFC 3339 time or YYYY-MM-DD (start of that day, Europe/Istanbul)
+            maxLength: 40
+            type: string
+        - description: RFC 3339 time or YYYY-MM-DD (end of that day, Europe/Istanbul); inclusive
+          explode: false
+          in: query
+          name: occurred_to
+          required: true
+          schema:
+            description: RFC 3339 time or YYYY-MM-DD (end of that day, Europe/Istanbul); inclusive
+            maxLength: 40
+            type: string
+        - explode: false
+          in: query
+          name: actor_user_id
+          schema:
+            format: uuid
+            type: string
+        - explode: false
+          in: query
+          name: org_id
+          schema:
+            format: uuid
+            type: string
+        - explode: false
+          in: query
+          name: resource_type
+          schema:
+            maxLength: 64
+            pattern: ^[a-z_]+$
+            type: string
+        - explode: false
+          in: query
+          name: resource_id
+          schema:
+            format: uuid
+            type: string
+        - description: Exact action name
+          explode: false
+          in: query
+          name: action
+          schema:
+            description: Exact action name
+            maxLength: 100
+            pattern: ^[a-z_]+(\.[a-z_]+)+$
+            type: string
+        - explode: false
+          in: query
+          name: outcome
+          schema:
+            enum:
+              - success
+              - denied
+              - failure
+            type: string
+        - description: Only break-glass accesses (true) or none of them (false)
+          explode: false
+          in: query
+          name: break_glass
+          schema:
+            description: Only break-glass accesses (true) or none of them (false)
+            enum:
+              - "true"
+              - "false"
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEventList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Search all audit events
+      tags:
+        - audit
+      x-koro-action: audit.event.list
+      x-koro-rate-limit: search
+      x-koro-surface: admin
+  /api/v1/admin/audit/verify:
+    post:
+      operationId: adminVerifyAuditChain
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerifyDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Verify the audit hash chain and its signed daily roots
+      tags:
+        - audit
+      x-koro-action: audit.chain.verify
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
   /api/v1/files/uploads:
     post:
       description: Checks the purpose's MIME/size allow-list and returns a presigned PUT URL (valid 10 minutes) for the object storage. Send exactly upload_headers with the PUT; the API never receives the file itself (04 §1.14).
@@ -307,3 +594,134 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+  /api/v1/me/security-events:
+    get:
+      description: Sign-in, password, session, MFA and consent events of the caller, and break-glass accesses to the caller's data.
+      operationId: listMySecurityEvents
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecurityEventList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the security events of my account
+      tags:
+        - audit
+      x-koro-action: audit.event.list_own
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
+  /api/v1/orgs/{org_id}/audit-events:
+    get:
+      description: ip and user_agent are returned to dpo and platform_admin only.
+      operationId: listOrgAuditEvents
+      parameters:
+        - in: path
+          name: org_id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: RFC 3339 time or YYYY-MM-DD (start of that day, Europe/Istanbul)
+          explode: false
+          in: query
+          name: occurred_from
+          required: true
+          schema:
+            description: RFC 3339 time or YYYY-MM-DD (start of that day, Europe/Istanbul)
+            maxLength: 40
+            type: string
+        - description: RFC 3339 time or YYYY-MM-DD (end of that day, Europe/Istanbul); inclusive
+          explode: false
+          in: query
+          name: occurred_to
+          required: true
+          schema:
+            description: RFC 3339 time or YYYY-MM-DD (end of that day, Europe/Istanbul); inclusive
+            maxLength: 40
+            type: string
+        - description: Exact action name
+          explode: false
+          in: query
+          name: action
+          schema:
+            description: Exact action name
+            maxLength: 100
+            pattern: ^[a-z_]+(\.[a-z_]+)+$
+            type: string
+        - explode: false
+          in: query
+          name: actor_user_id
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEventList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the audit events of an organisation
+      tags:
+        - audit
+      x-koro-action: audit.event.list_org
+      x-koro-rate-limit: read_default
+      x-koro-surface: org

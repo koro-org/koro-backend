@@ -1,0 +1,117 @@
+# Authz matrix of the audit module (03 §5.21, 04 §2.21; BE-007). 4 operations × 18 personas.
+# Org surface (03 §3.6): members of the org without the role → 403, non-members → 404, every
+# platform role sees the surface (403 unless dpo/platform_admin). Admin surface (03 §7.2-3):
+# everyone without the role → 403. dpo, platform_admin, university_rep and company_admin
+# sessions are MFA verified (03 §7.3); the policy test covers the MFA-less session.
+version: 1
+groups:
+  no_platform_role: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                     event_staff, university_rep, company_member, company_admin, other_company_member]
+  outsiders_company_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                        event_staff, university_rep, other_company_member]
+  outsiders_uni_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                    event_staff, company_member, company_admin, other_company_member]
+
+operations:
+  listMySecurityEvents:
+    method: GET
+    path: /api/v1/me/security-events
+    action: audit.event.list_own
+    expect: { anonymous: 401, "@signed_in": 200 }
+
+  listOrgAuditEvents:
+    method: GET
+    path: /api/v1/orgs/{org_id}/audit-events
+    action: audit.event.list_org
+    path_params: { org_id: club_a }
+    query: { occurred_from: "2026-09-01", occurred_to: "2026-10-03" }
+    expect:
+      anonymous: 401
+      "@outsiders_a": 404        # not a member of club_a
+      club_member: 403           # member, role too weak
+      club_admin: 200            # S
+      moderator: 403
+      support: 403
+      dpo: 200
+      platform_admin: 200
+      finance_admin: 403
+      talent_auditor: 403
+    variants:
+      - name: company_org
+        path_params: { org_id: company_a }
+        expect:
+          anonymous: 401
+          "@outsiders_company_a": 404
+          company_member: 403    # recruiter: no cmm cell
+          company_admin: 200     # S (MFA session)
+          moderator: 403
+          support: 403
+          dpo: 200
+          platform_admin: 200
+          finance_admin: 403
+          talent_auditor: 403
+      - name: university_org
+        path_params: { org_id: uni_a }
+        expect:
+          anonymous: 401
+          "@outsiders_uni_a": 404
+          university_rep: 200    # S (MFA session)
+          moderator: 403
+          support: 403
+          dpo: 200
+          platform_admin: 200
+          finance_admin: 403
+          talent_auditor: 403
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 404   # nobody is a member of a missing org
+          moderator: 403
+          support: 403
+          dpo: 200                   # empty list: an org log the staff may read
+          platform_admin: 200
+          finance_admin: 403
+          talent_auditor: 403
+
+  adminListAuditEvents:
+    method: GET
+    path: /api/v1/admin/audit-events
+    action: audit.event.list
+    query: { occurred_from: "2026-09-01", occurred_to: "2026-10-03" }
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403   # admin surface: 403 before reading (03 §7.2-3)
+      moderator: 403
+      support: 403
+      dpo: 200
+      platform_admin: 200
+      finance_admin: 403
+      talent_auditor: 403
+    variants:
+      - name: break_glass_review
+        query: { break_glass: "true", org_id: "{{fixture:club_a}}" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          moderator: 403
+          support: 403
+          dpo: 200               # 03 §6.3: weekly break-glass review
+          platform_admin: 200
+          finance_admin: 403
+          talent_auditor: 403
+
+  adminVerifyAuditChain:
+    method: POST
+    path: /api/v1/admin/audit/verify
+    action: audit.chain.verify
+    body: bodies/audit/verify.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      moderator: 403
+      support: 403
+      dpo: 200
+      platform_admin: 200
+      finance_admin: 403
+      talent_auditor: 403

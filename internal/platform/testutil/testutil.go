@@ -43,8 +43,16 @@ const (
 	initdbArgs    = "--encoding=UTF8 --locale-provider=icu --icu-locale=tr-TR --locale=C.UTF-8"
 	superUser     = "postgres"
 	superPassword = "test-only-superuser"
-	setupTimeout  = 3 * time.Minute
+	setupTimeout  = 5 * time.Minute
 	redisDBs      = 15 // logical DBs 1..15 (0 is never handed out)
+
+	// readyTimeout bounds one container start (both "ready" log lines of
+	// PostgreSQL and the mapped port); the default minute is too short when
+	// several test binaries start containers at once (06 H-36).
+	readyTimeout = 2 * time.Minute
+	// ryukTimeout is the reaper connection timeout (default 1 m), set
+	// through the testcontainers environment unless the caller chose one.
+	ryukTimeout = "3m"
 )
 
 // environment is the per-binary shared state built by Run.
@@ -67,6 +75,11 @@ var env *environment
 // Run starts PostgreSQL, prepares the template database, runs the tests and
 // terminates the containers. Use it as os.Exit(testutil.Run(m)).
 func Run(m *testing.M) int {
+	for _, k := range []string{"TESTCONTAINERS_RYUK_CONNECTION_TIMEOUT", "TESTCONTAINERS_RYUK_RECONNECTION_TIMEOUT"} {
+		if _, set := os.LookupEnv(k); !set {
+			_ = os.Setenv(k, ryukTimeout)
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), setupTimeout)
 	e, err := setup(ctx)
 	cancel()
@@ -97,22 +110,39 @@ func setup(ctx context.Context) (*environment, error) {
 		return nil, err
 	}
 
-	e.pg, err = tcpostgres.Run(ctx, PostgresImage,
-		tcpostgres.WithDatabase(TemplateDB),
-		tcpostgres.WithUsername(superUser),
-		tcpostgres.WithPassword(superPassword),
-		testcontainers.WithEnv(map[string]string{"POSTGRES_INITDB_ARGS": initdbArgs}),
-		tcpostgres.WithOrderedInitScripts(
-			filepath.Join(root, "deploy", "db", "bootstrap.sql"),
-			filepath.Join(root, "deploy", "db", "dev-passwords.sql"),
-		),
-		testcontainers.WithCmd("postgres",
-			"-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off",
-			"-c", "max_connections=300"),
-		tcpostgres.BasicWaitStrategies(),
-	)
+	// Container start, first connection and migration are retried with
+	// exponential backoff (06 H-36): a start that times out is terminated
+	// and started again; a dropped first connection is simply re-dialled.
+	err = Retry(ctx, setupBackoff, "start postgres", nil, func(ctx context.Context) error {
+		pg, err := tcpostgres.Run(ctx, PostgresImage,
+			tcpostgres.WithDatabase(TemplateDB),
+			tcpostgres.WithUsername(superUser),
+			tcpostgres.WithPassword(superPassword),
+			testcontainers.WithEnv(map[string]string{"POSTGRES_INITDB_ARGS": initdbArgs}),
+			tcpostgres.WithOrderedInitScripts(
+				filepath.Join(root, "deploy", "db", "bootstrap.sql"),
+				filepath.Join(root, "deploy", "db", "dev-passwords.sql"),
+			),
+			testcontainers.WithCmd("postgres",
+				"-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off",
+				"-c", "max_connections=300"),
+			// tcpostgres.BasicWaitStrategies with a longer start-up timeout.
+			testcontainers.WithAdditionalWaitStrategy(
+				wait.ForLog("database system is ready to accept connections").WithOccurrence(2).WithStartupTimeout(readyTimeout),
+				wait.ForListeningPort("5432/tcp").WithStartupTimeout(readyTimeout),
+			),
+		)
+		if err != nil {
+			if pg != nil {
+				_ = pg.Terminate(context.WithoutCancel(ctx))
+			}
+			return err
+		}
+		e.pg = pg
+		return nil
+	})
 	if err != nil {
-		return e, fmt.Errorf("start postgres: %w", err)
+		return e, err
 	}
 	e.host, err = e.pg.Host(ctx)
 	if err != nil {
@@ -128,9 +158,19 @@ func setup(ctx context.Context) (*environment, error) {
 	if err != nil {
 		return e, fmt.Errorf("admin pool: %w", err)
 	}
+	if err := Retry(ctx, setupBackoff, "admin connection", Transient, e.admin.Ping); err != nil {
+		return e, err
+	}
 
-	// Apply every migration once, as the (non-superuser) owner role.
-	mig, err := migratekit.New(migrations.FS, e.url("app_owner", RolePassword, TemplateDB), obs.Discard())
+	// Apply every migration once, as the (non-superuser) owner role. A
+	// migration that fails half way leaves a dirty version, so only the
+	// connection (before Up) is retried.
+	var mig *migratekit.Migrator
+	err = Retry(ctx, setupBackoff, "connect migrator", Transient, func(context.Context) error {
+		var err error
+		mig, err = migratekit.New(migrations.FS, e.url("app_owner", RolePassword, TemplateDB), obs.Discard())
+		return err
+	})
 	if err != nil {
 		return e, err
 	}
@@ -210,8 +250,12 @@ func createDB(t testing.TB, template string) string {
 	e := mustEnv(t)
 	name := randomName("t_")
 	ident := pgx.Identifier{name}.Sanitize()
-	if _, err := e.admin.Exec(t.Context(), `CREATE DATABASE `+ident+` OWNER app_owner TEMPLATE `+template); err != nil {
-		t.Fatalf("testutil: create database: %v", err)
+	err := Retry(t.Context(), setupBackoff, "create database", Transient, func(ctx context.Context) error {
+		_, err := e.admin.Exec(ctx, `CREATE DATABASE `+ident+` OWNER app_owner TEMPLATE `+template)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("%v", err)
 	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -230,16 +274,21 @@ func NewDB(t testing.TB) *db.DB {
 	t.Helper()
 	e := mustEnv(t)
 	name := createDB(t, TemplateDB)
-	d, err := db.Open(t.Context(), db.Config{
-		URL:              e.url("app_rw", RolePassword, name),
-		AppName:          "koro-test",
-		MaxConns:         4,
-		MinConns:         0,
-		StatementTimeout: 15 * time.Second,
-		IdleInTxTimeout:  30 * time.Second,
-	}, obs.Discard())
+	var d *db.DB
+	err := Retry(t.Context(), setupBackoff, "open database", Transient, func(ctx context.Context) error {
+		var err error
+		d, err = db.Open(ctx, db.Config{
+			URL:              e.url("app_rw", RolePassword, name),
+			AppName:          "koro-test",
+			MaxConns:         4,
+			MinConns:         0,
+			StatementTimeout: 15 * time.Second,
+			IdleInTxTimeout:  30 * time.Second,
+		}, obs.Discard())
+		return err
+	})
 	if err != nil {
-		t.Fatalf("testutil: open database: %v", err)
+		t.Fatalf("%v", err)
 	}
 	if err := installQueryCounter(d.ORM); err != nil {
 		d.Close()
@@ -275,9 +324,14 @@ func AppURL(t testing.TB, d *db.DB) string {
 // when the test ends.
 func OwnerConn(t testing.TB, d *db.DB) *pgx.Conn {
 	t.Helper()
-	c, err := pgx.Connect(t.Context(), OwnerURL(t, d))
+	var c *pgx.Conn
+	err := Retry(t.Context(), setupBackoff, "owner connection", Transient, func(ctx context.Context) error {
+		var err error
+		c, err = pgx.Connect(ctx, OwnerURL(t, d))
+		return err
+	})
 	if err != nil {
-		t.Fatalf("testutil: owner connection: %v", err)
+		t.Fatalf("%v", err)
 	}
 	t.Cleanup(func() { _ = c.Close(context.Background()) })
 	return c
@@ -322,18 +376,29 @@ func NewRedis(t testing.TB) *redis.Client {
 func (e *environment) startRedis() {
 	ctx, cancel := context.WithTimeout(context.Background(), setupTimeout)
 	defer cancel()
-	ctr, err := testcontainers.Run(ctx, RedisImage,
-		testcontainers.WithExposedPorts("6379/tcp"),
-		// asynq requirements (R-002 §5.3).
-		testcontainers.WithCmd("redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("Ready to accept connections"),
-			wait.ForListeningPort("6379/tcp"),
-		),
-	)
+	var ctr *testcontainers.DockerContainer
+	err := Retry(ctx, setupBackoff, "start redis", nil, func(ctx context.Context) error {
+		c, err := testcontainers.Run(ctx, RedisImage,
+			testcontainers.WithExposedPorts("6379/tcp"),
+			// asynq requirements (R-002 §5.3).
+			testcontainers.WithCmd("redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"),
+			testcontainers.WithWaitStrategy(
+				wait.ForLog("Ready to accept connections").WithStartupTimeout(readyTimeout),
+				wait.ForListeningPort("6379/tcp").WithStartupTimeout(readyTimeout),
+			),
+		)
+		if err != nil {
+			if c != nil {
+				_ = c.Terminate(context.WithoutCancel(ctx))
+			}
+			return err
+		}
+		ctr = c
+		return nil
+	})
 	e.redisCtr = ctr
 	if err != nil {
-		e.redisErr = fmt.Errorf("start redis: %w", err)
+		e.redisErr = err
 		return
 	}
 	host, err := ctr.Host(ctx)

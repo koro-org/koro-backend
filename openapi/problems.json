@@ -1,5 +1,47 @@
 [
   {
+    "code": "audit.archive_conflict",
+    "status": 409,
+    "title": "Audit root archive holds a different root",
+    "type": "urn:koro:problem:audit.archive_conflict"
+  },
+  {
+    "code": "audit.archive_not_configured",
+    "status": 503,
+    "title": "Audit root archive is not configured",
+    "type": "urn:koro:problem:audit.archive_not_configured"
+  },
+  {
+    "code": "audit.invalid_event",
+    "status": 500,
+    "title": "Audit event is invalid",
+    "type": "urn:koro:problem:audit.invalid_event"
+  },
+  {
+    "code": "audit.invalid_range",
+    "status": 422,
+    "title": "Invalid time range",
+    "type": "urn:koro:problem:audit.invalid_range"
+  },
+  {
+    "code": "audit.root_exists",
+    "status": 409,
+    "title": "Audit daily root already exists",
+    "type": "urn:koro:problem:audit.root_exists"
+  },
+  {
+    "code": "audit.secret_metadata",
+    "status": 500,
+    "title": "Audit metadata must not contain secrets",
+    "type": "urn:koro:problem:audit.secret_metadata"
+  },
+  {
+    "code": "audit.signer_not_configured",
+    "status": 503,
+    "title": "Audit root signing is not configured",
+    "type": "urn:koro:problem:audit.signer_not_configured"
+  },
+  {
     "code": "authz.break_glass_reason_required",
     "status": 403,
     "title": "Access reason required",
@@ -214,6 +256,12 @@
     "status": 503,
     "title": "Notification delivery store is not wired",
     "type": "urn:koro:problem:notify.store_not_wired"
+  },
+  {
+    "code": "page.invalid_cursor",
+    "status": 422,
+    "title": "Invalid cursor",
+    "type": "urn:koro:problem:page.invalid_cursor"
   },
   {
     "code": "payload_too_large",

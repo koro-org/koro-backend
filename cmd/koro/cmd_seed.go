@@ -17,18 +17,20 @@ import (
 )
 
 // runSeed runs `koro seed <command>`. bootstrap-admin (BE-014) opens the
-// first two platform admins and may run in every environment; synthetic
-// data (BE-020 reference data, BE-033 demo data) is dev/staging only
-// (05 §13.7).
+// first two platform admins and reference (BE-020) loads the public
+// reference data; both may run in every environment. Synthetic demo data
+// (BE-033) is dev/staging only (05 §13.7).
 func runSeed(ctx context.Context, args []string, environ map[string]string, stdout io.Writer) error {
 	if len(args) == 0 {
-		return fmt.Errorf("%w: missing seed command (bootstrap-admin)", errUsage)
+		return fmt.Errorf("%w: missing seed command (bootstrap-admin, reference)", errUsage)
 	}
 	switch args[0] {
 	case "bootstrap-admin":
 		return runBootstrapAdmin(ctx, args[1:], environ, stdout)
+	case "reference":
+		return runSeedReference(ctx, args[1:], environ, stdout)
 	default:
-		return fmt.Errorf("seed %q: %w (BE-020/BE-033)", args[0], errNotImplemented)
+		return fmt.Errorf("seed %q: %w (BE-033)", args[0], errNotImplemented)
 	}
 }
 

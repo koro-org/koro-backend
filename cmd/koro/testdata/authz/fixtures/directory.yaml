@@ -1,0 +1,11 @@
+# Fixtures of the directory module (cmd/koro/matrix_directory_test.go; BE-020). IDs are authztest.ID(name).
+# Besides these, the seeder writes a universities row for every university org of authztest
+# (ID authztest.UniversityID(org): uni_a_university, uni_b_university) and a clubs row for every club
+# org (club_a and club_b claimed, club_sensitive a sensitive religious club, club_unclaimed), all
+# dated 2026-10-01T00:00:00Z: an untouched club's ETag is "1hmhuo3hji000".
+version: 1
+fixtures:
+  uni_inactive: { kind: university, active: false }
+  faculty_a: { kind: faculty, university: uni_a_university }
+  department_a: { kind: department, university: uni_a_university, faculty: faculty_a }
+  skill_a: { kind: skill }

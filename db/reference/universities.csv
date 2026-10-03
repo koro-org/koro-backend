@@ -1,0 +1,12 @@
+# Koro referans verisi — üniversiteler (directory, BE-020; 02 §8.1).
+# Kaynak: üniversitelerin kamuya açık adları, şehirleri ve resmî web siteleri
+# (YÖK Atlas / üniversite siteleri). Kamu verisidir; kişisel veri içermez.
+# Lisans: olgusal kamu bilgisi; Koro projesi içinde serbestçe kullanılabilir.
+# DURUM: ÖRNEK VERİ. Pilot üniversiteler (PS-09) henüz belli değil; bu dosya 3
+# büyük devlet üniversitesiyle başlar. yok_code sütunundaki ORNEK-* değerleri
+# yer tutucudur: resmî YÖK kodları gelince yalnız bu dosya değişir; içe
+# aktarma aynı adlı üniversiteyi bulur ve kodunu günceller (yeni satır açmaz).
+yok_code,name,short_name,city,type,website_url
+ORNEK-ODTU,Orta Doğu Teknik Üniversitesi,ODTÜ,Ankara,state,https://www.metu.edu.tr
+ORNEK-ITU,İstanbul Teknik Üniversitesi,İTÜ,İstanbul,state,https://www.itu.edu.tr
+ORNEK-BOUN,Boğaziçi Üniversitesi,BOUN,İstanbul,state,https://www.boun.edu.tr

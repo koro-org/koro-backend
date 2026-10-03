@@ -49,6 +49,90 @@ components:
         - requested_at
         - expires_at
       type: object
+    AdminCreateClubInputBody:
+      additionalProperties: false
+      properties:
+        category:
+          enum:
+            - academic
+            - technology
+            - career
+            - entrepreneurship
+            - arts
+            - culture
+            - sports
+            - social_responsibility
+            - hobby
+            - religious
+            - political
+            - identity
+            - other
+          type: string
+        is_sensitive:
+          type: boolean
+        join_policy:
+          enum:
+            - open
+            - approval
+          type: string
+        name:
+          maxLength: 200
+          minLength: 2
+          type: string
+        sensitive_reason:
+          enum:
+            - religion
+            - political_opinion
+            - philosophical_belief
+            - lgbtiq
+            - ethnic_origin
+            - health
+            - union
+            - other
+          type: string
+        slug:
+          description: Derived from the name when omitted
+          maxLength: 80
+          type: string
+        university_id:
+          format: uuid
+          type: string
+      required:
+        - university_id
+        - name
+        - category
+        - join_policy
+      type: object
+    AdminCreateDepartmentInputBody:
+      additionalProperties: false
+      properties:
+        degree_level:
+          enum:
+            - associate
+            - bachelor
+            - master
+            - doctorate
+          type: string
+        duration_years:
+          format: int32
+          maximum: 7
+          minimum: 1
+          type: integer
+        faculty_id:
+          description: A faculty of this university
+          format: uuid
+          type: string
+        name:
+          maxLength: 200
+          minLength: 2
+          type: string
+        yok_program_code:
+          maxLength: 40
+          type: string
+      required:
+        - name
+        - degree_level
+      type: object
     AdminCreateInputBody:
       additionalProperties: false
       properties:
@@ -89,6 +173,67 @@ components:
       required:
         - type
         - channel
+      type: object
+    AdminCreateSkillInputBody:
+      additionalProperties: false
+      properties:
+        category:
+          enum:
+            - technical
+            - tool
+            - soft
+            - domain
+            - language_tool
+            - other
+          type: string
+        name_en:
+          maxLength: 200
+          type: string
+        name_tr:
+          maxLength: 200
+          minLength: 1
+          type: string
+        slug:
+          maxLength: 80
+          pattern: ^[a-z0-9]+(-[a-z0-9]+)*$
+          type: string
+      required:
+        - slug
+        - name_tr
+        - category
+      type: object
+    AdminCreateUniversityInputBody:
+      additionalProperties: false
+      properties:
+        city:
+          maxLength: 60
+          minLength: 2
+          type: string
+        name:
+          maxLength: 200
+          minLength: 2
+          type: string
+        short_name:
+          maxLength: 60
+          type: string
+        type:
+          enum:
+            - state
+            - foundation
+            - other
+          type: string
+        website_url:
+          maxLength: 2048
+          type: string
+        yok_code:
+          maxLength: 40
+          minLength: 1
+          type: string
+      required:
+        - yok_code
+        - name
+        - city
+        - type
       type: object
     AdminGrantInputBody:
       additionalProperties: false
@@ -200,6 +345,21 @@ components:
       required:
         - items
       type: object
+    AdminPutDomainInputBody:
+      additionalProperties: false
+      properties:
+        domain_kind:
+          enum:
+            - student
+            - staff
+            - mixed
+          type: string
+        is_active:
+          type: boolean
+      required:
+        - domain_kind
+        - is_active
+      type: object
     AdminRevokeInputBody:
       additionalProperties: false
       properties:
@@ -210,6 +370,57 @@ components:
           type: string
       required:
         - reason
+      type: object
+    AdminSensitivityInputBody:
+      additionalProperties: false
+      properties:
+        is_sensitive:
+          type: boolean
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof (03 §6.2)
+        sensitive_reason:
+          enum:
+            - religion
+            - political_opinion
+            - philosophical_belief
+            - lgbtiq
+            - ethnic_origin
+            - health
+            - union
+            - other
+          type: string
+      required:
+        - is_sensitive
+      type: object
+    AdminSkillDTO:
+      additionalProperties: false
+      properties:
+        category:
+          enum:
+            - technical
+            - tool
+            - soft
+            - domain
+            - language_tool
+            - other
+          type: string
+        is_active:
+          type: boolean
+        name_en:
+          type: string
+        name_tr:
+          type: string
+        skill_id:
+          type: string
+        slug:
+          type: string
+      required:
+        - skill_id
+        - slug
+        - name_tr
+        - category
+        - is_active
       type: object
     AdminStudentDTO:
       additionalProperties: false
@@ -250,6 +461,57 @@ components:
           enum:
             - identity_check
             - in_progress
+          type: string
+      type: object
+    AdminUpdateSkillInputBody:
+      additionalProperties: false
+      properties:
+        category:
+          enum:
+            - technical
+            - tool
+            - soft
+            - domain
+            - language_tool
+            - other
+          type: string
+        is_active:
+          type: boolean
+        name_en:
+          description: Empty string clears it
+          maxLength: 200
+          type: string
+        name_tr:
+          maxLength: 200
+          minLength: 1
+          type: string
+      type: object
+    AdminUpdateUniversityInputBody:
+      additionalProperties: false
+      properties:
+        city:
+          maxLength: 60
+          minLength: 2
+          type: string
+        is_active:
+          type: boolean
+        name:
+          maxLength: 200
+          minLength: 2
+          type: string
+        short_name:
+          description: Empty string clears it
+          maxLength: 60
+          type: string
+        type:
+          enum:
+            - state
+            - foundation
+            - other
+          type: string
+        website_url:
+          description: Empty string clears it
+          maxLength: 2048
           type: string
       type: object
     AdminUserDTO:
@@ -476,6 +738,131 @@ components:
           description: "MFA accounts: reauth.totp_code"
       required:
         - new_password
+      type: object
+    ClubCardDTO:
+      additionalProperties: false
+      properties:
+        category:
+          type: string
+        claim_status:
+          enum:
+            - unclaimed
+            - claimed
+          type: string
+        club_id:
+          description: The club's org_id
+          type: string
+        join_policy:
+          enum:
+            - open
+            - approval
+          type: string
+        member_count:
+          description: null below 10 members or for a sensitive club (k-anonymity)
+          format: int64
+          type:
+            - integer
+            - "null"
+        membership_private:
+          description: "true for a sensitive club: its membership is never shown"
+          type: boolean
+        name:
+          type: string
+        slug:
+          type: string
+        university_id:
+          type: string
+      required:
+        - club_id
+        - name
+        - slug
+        - university_id
+        - category
+        - join_policy
+        - claim_status
+        - membership_private
+        - member_count
+      type: object
+    ClubCardList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/ClubCardDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
+    ClubDTO:
+      additionalProperties: false
+      properties:
+        category:
+          type: string
+        claim_status:
+          enum:
+            - unclaimed
+            - claimed
+          type: string
+        club_id:
+          description: The club's org_id
+          type: string
+        founded_year:
+          format: int32
+          type: integer
+        join_policy:
+          enum:
+            - open
+            - approval
+          type: string
+        member_count:
+          description: null below 10 members or for a sensitive club (k-anonymity)
+          format: int64
+          type:
+            - integer
+            - "null"
+        membership_private:
+          description: "true for a sensitive club: its membership is never shown"
+          type: boolean
+        org:
+          $ref: "#/components/schemas/OrgPublicDTO"
+        social_links:
+          additionalProperties:
+            type: string
+          description: Network name → https URL
+          type: object
+        university:
+          $ref: "#/components/schemas/ClubUniversityDTO"
+      required:
+        - club_id
+        - org
+        - university
+        - category
+        - join_policy
+        - claim_status
+        - membership_private
+        - member_count
+        - social_links
+      type: object
+    ClubUniversityDTO:
+      additionalProperties: false
+      properties:
+        city:
+          type: string
+        name:
+          type: string
+        org_id:
+          type: string
+        short_name:
+          type: string
+        university_id:
+          type: string
+      required:
+        - university_id
+        - org_id
+        - name
+        - city
       type: object
     CodeInputBody:
       additionalProperties: false
@@ -881,6 +1268,44 @@ components:
       required:
         - items
       type: object
+    DepartmentDTO:
+      additionalProperties: false
+      properties:
+        degree_level:
+          enum:
+            - associate
+            - bachelor
+            - master
+            - doctorate
+          type: string
+        department_id:
+          type: string
+        duration_years:
+          format: int32
+          type: integer
+        faculty_id:
+          type: string
+        name:
+          type: string
+        yok_program_code:
+          type: string
+      required:
+        - department_id
+        - name
+        - degree_level
+      type: object
+    DepartmentList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/DepartmentDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
     DsrAdminDTO:
       additionalProperties: false
       properties:
@@ -1114,6 +1539,27 @@ components:
       required:
         - new_email
       type: object
+    EmailDomainDTO:
+      additionalProperties: false
+      properties:
+        domain:
+          type: string
+        domain_kind:
+          enum:
+            - student
+            - staff
+            - mixed
+          type: string
+        is_active:
+          type: boolean
+        university_id:
+          type: string
+      required:
+        - domain
+        - university_id
+        - domain_kind
+        - is_active
+      type: object
     EmailInputBody:
       additionalProperties: false
       properties:
@@ -1194,6 +1640,17 @@ components:
       required:
         - items
         - available
+      type: object
+    FacultyDTO:
+      additionalProperties: false
+      properties:
+        faculty_id:
+          type: string
+        name:
+          type: string
+      required:
+        - faculty_id
+        - name
       type: object
     FieldError:
       additionalProperties: false
@@ -2144,6 +2601,27 @@ components:
       required:
         - rejection_reason
       type: object
+    RequestSensitivityInputBody:
+      additionalProperties: false
+      properties:
+        note:
+          description: Shown to the platform admins in the audit log
+          maxLength: 500
+          type: string
+        sensitive_reason:
+          enum:
+            - religion
+            - political_opinion
+            - philosophical_belief
+            - lgbtiq
+            - ethnic_origin
+            - health
+            - union
+            - other
+          type: string
+      required:
+        - sensitive_reason
+      type: object
     ResetConfirmInputBody:
       additionalProperties: false
       properties:
@@ -2322,6 +2800,42 @@ components:
         - url
         - expires_at
       type: object
+    SkillDTO:
+      additionalProperties: false
+      properties:
+        category:
+          enum:
+            - technical
+            - tool
+            - soft
+            - domain
+            - language_tool
+            - other
+          type: string
+        name:
+          type: string
+        skill_id:
+          type: string
+        slug:
+          type: string
+      required:
+        - skill_id
+        - slug
+        - name
+        - category
+      type: object
+    SkillList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/SkillDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
     SourceOrgDTO:
       additionalProperties: false
       properties:
@@ -2421,6 +2935,119 @@ components:
           description: Re-authentication proof (03 §6.2)
       required:
         - new_owner_user_id
+      type: object
+    UniversityCardDTO:
+      additionalProperties: false
+      properties:
+        city:
+          type: string
+        name:
+          type: string
+        org_id:
+          type: string
+        short_name:
+          type: string
+        type:
+          enum:
+            - state
+            - foundation
+            - other
+          type: string
+        university_id:
+          type: string
+      required:
+        - university_id
+        - org_id
+        - name
+        - city
+        - type
+      type: object
+    UniversityDTO:
+      additionalProperties: false
+      properties:
+        city:
+          type: string
+        faculties:
+          items:
+            $ref: "#/components/schemas/FacultyDTO"
+          type: array
+        is_active:
+          type: boolean
+        name:
+          type: string
+        org_id:
+          type: string
+        short_name:
+          type: string
+        type:
+          enum:
+            - state
+            - foundation
+            - other
+          type: string
+        university_id:
+          type: string
+        website_url:
+          type: string
+        yok_code:
+          type: string
+      required:
+        - university_id
+        - org_id
+        - yok_code
+        - name
+        - city
+        - type
+        - is_active
+        - faculties
+      type: object
+    UniversityList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/UniversityCardDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
+    UpdateClubInputBody:
+      additionalProperties: false
+      properties:
+        category:
+          enum:
+            - academic
+            - technology
+            - career
+            - entrepreneurship
+            - arts
+            - culture
+            - sports
+            - social_responsibility
+            - hobby
+            - religious
+            - political
+            - identity
+            - other
+          type: string
+        founded_year:
+          description: 0 clears it
+          format: int32
+          maximum: 2100
+          minimum: 0
+          type: integer
+        join_policy:
+          enum:
+            - open
+            - approval
+          type: string
+        social_links:
+          additionalProperties:
+            type: string
+          description: Replaces every link; network name → https URL (at most 10); {} clears them
+          type: object
       type: object
     UpdateMeInputBody:
       additionalProperties: false
@@ -2768,6 +3395,89 @@ paths:
       x-koro-action: audit.chain.verify
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/clubs:
+    post:
+      description: Opens the club's org and its catalog row together.
+      operationId: adminCreateClub
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCreateClubInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClubDTO"
+          description: Created
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Add a club to the catalog
+      tags:
+        - directory
+      x-koro-action: directory.club.create
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/clubs/{club_id}/sensitivity:
+    post:
+      description: With re-authentication. A change of the flag emits club.sensitivity_changed in the same transaction (the club's audience keys are removed). Religious, political and identity clubs stay sensitive.
+      operationId: adminSetClubSensitivity
+      parameters:
+        - description: The club's org ID
+          in: path
+          name: club_id
+          required: true
+          schema:
+            description: The club's org ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminSensitivityInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClubDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Set or clear the sensitive club flag
+      tags:
+        - directory
+      x-koro-action: directory.club.set_sensitivity
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
       x-koro-surface: admin
   /api/v1/admin/consent-purposes:
     get:
@@ -4023,6 +4733,238 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+  /api/v1/admin/skills:
+    post:
+      operationId: adminCreateSkill
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCreateSkillInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSkillDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Add a skill
+      tags:
+        - directory
+      x-koro-action: directory.skill.manage
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/skills/{skill_id}:
+    patch:
+      operationId: adminUpdateSkill
+      parameters:
+        - description: Skill ID
+          in: path
+          name: skill_id
+          required: true
+          schema:
+            description: Skill ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUpdateSkillInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSkillDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Update or deactivate a skill
+      tags:
+        - directory
+      x-koro-action: directory.skill.manage
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/universities:
+    post:
+      description: Bulk import is the `koro seed reference` command.
+      operationId: adminCreateUniversity
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCreateUniversityInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UniversityDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Add a university
+      tags:
+        - directory
+      x-koro-action: directory.university.manage
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/universities/{university_id}:
+    patch:
+      description: The org profile (name, logo) is changed with updateOrg.
+      operationId: adminUpdateUniversity
+      parameters:
+        - description: University ID
+          in: path
+          name: university_id
+          required: true
+          schema:
+            description: University ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUpdateUniversityInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UniversityDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Update a university
+      tags:
+        - directory
+      x-koro-action: directory.university.manage
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/universities/{university_id}/departments:
+    post:
+      operationId: adminCreateDepartment
+      parameters:
+        - description: University ID
+          in: path
+          name: university_id
+          required: true
+          schema:
+            description: University ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCreateDepartmentInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DepartmentDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Add a department
+      tags:
+        - directory
+      x-koro-action: directory.university.manage
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/universities/{university_id}/email-domains/{domain}:
+    put:
+      description: A .edu.tr domain; a domain of another university is 409 directory.domain_taken.
+      operationId: adminPutUniversityEmailDomain
+      parameters:
+        - description: University ID
+          in: path
+          name: university_id
+          required: true
+          schema:
+            description: University ID
+            type: string
+        - description: A .edu.tr domain, e.g. itu.edu.tr
+          in: path
+          name: domain
+          required: true
+          schema:
+            description: A .edu.tr domain, e.g. itu.edu.tr
+            maxLength: 253
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminPutDomainInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailDomainDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Add or change a university's e-mail domain
+      tags:
+        - directory
+      x-koro-action: directory.university.manage
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
   /api/v1/admin/users:
     get:
       description: q is an exact e-mail address or a fragment of the name (2-100 characters). Every search is audited (query kind and the users found, not the query).
@@ -4708,6 +5650,220 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: auth_login
       x-koro-surface: public
+  /api/v1/clubs:
+    get:
+      description: q matches the club name with Turkish rules (İSTANBUL, Istanbul and istanbul are the same word). member_count is null below 10 members and for sensitive clubs.
+      operationId: listClubs
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: Free text, 2-100 characters
+          explode: false
+          in: query
+          name: q
+          schema:
+            description: Free text, 2-100 characters
+            maxLength: 100
+            type: string
+        - explode: false
+          in: query
+          name: university_id
+          schema:
+            format: uuid
+            type: string
+        - explode: false
+          in: query
+          name: category
+          schema:
+            enum:
+              - academic
+              - technology
+              - career
+              - entrepreneurship
+              - arts
+              - culture
+              - sports
+              - social_responsibility
+              - hobby
+              - religious
+              - political
+              - identity
+              - other
+            type: string
+        - explode: false
+          in: query
+          name: claimed
+          schema:
+            enum:
+              - "true"
+              - "false"
+            type: string
+        - description: name (A-Z, Turkish order); default newest first
+          explode: false
+          in: query
+          name: sort
+          schema:
+            description: name (A-Z, Turkish order); default newest first
+            enum:
+              - name
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClubCardList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: List clubs
+      tags:
+        - directory
+      x-koro-action: directory.club.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: public
+  /api/v1/clubs/{club_id}:
+    get:
+      description: club_id is the club's org_id. The ETag is the If-Match value of updateClub.
+      operationId: getClub
+      parameters:
+        - description: The club's org ID
+          in: path
+          name: club_id
+          required: true
+          schema:
+            description: The club's org ID
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClubDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: Get a club
+      tags:
+        - directory
+      x-koro-action: directory.club.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: public
+    patch:
+      description: "If-Match with the ETag of getClub is required: missing → 428, stale → 412. A religious, political or identity category needs the sensitive flag first (422 directory.sensitivity_required)."
+      operationId: updateClub
+      parameters:
+        - description: The club's org ID
+          in: path
+          name: club_id
+          required: true
+          schema:
+            description: The club's org ID
+            type: string
+        - description: "ETag of getClub (required: missing → 428, stale → 412)"
+          in: header
+          name: If-Match
+          schema:
+            description: "ETag of getClub (required: missing → 428, stale → 412)"
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateClubInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClubDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Update a club's catalog data
+      tags:
+        - directory
+      x-koro-action: directory.club.update
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+  /api/v1/clubs/{club_id}/sensitivity-requests:
+    post:
+      description: Audited; the platform admins get an in-app notice. Only a platform admin sets the flag.
+      operationId: requestClubSensitivity
+      parameters:
+        - description: The club's org ID
+          in: path
+          name: club_id
+          required: true
+          schema:
+            description: The club's org ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestSensitivityInputBody"
+        required: true
+      responses:
+        "202":
+          description: Accepted
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Ask for the sensitive club flag
+      tags:
+        - directory
+      x-koro-action: directory.club.request_sensitivity
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
   /api/v1/companies:
     post:
       description: The company starts pending_review until a platform admin verifies it. The caller becomes its company_owner; all of the caller's sessions are closed (role_change) so that the MFA policy of the role applies at the next sign-in. Tax number and MERSİS are given later with the legal party (parties).
@@ -6500,6 +7656,258 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: org
+  /api/v1/skills:
+    get:
+      description: name follows Accept-Language (tr or en).
+      operationId: listSkills
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: Free text, 2-100 characters
+          explode: false
+          in: query
+          name: q
+          schema:
+            description: Free text, 2-100 characters
+            maxLength: 100
+            type: string
+        - explode: false
+          in: query
+          name: category
+          schema:
+            enum:
+              - technical
+              - tool
+              - soft
+              - domain
+              - language_tool
+              - other
+            type: string
+        - description: tr or en; tr otherwise
+          in: header
+          name: Accept-Language
+          schema:
+            description: tr or en; tr otherwise
+            maxLength: 1000
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillList"
+          description: OK
+          headers:
+            Content-Language:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: List the skill taxonomy
+      tags:
+        - directory
+      x-koro-action: directory.skill.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: public
+  /api/v1/universities:
+    get:
+      description: Active universities. q matches name, short name and city (Turkish full text) or part of the name.
+      operationId: listUniversities
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: Free text, 2-100 characters
+          explode: false
+          in: query
+          name: q
+          schema:
+            description: Free text, 2-100 characters
+            maxLength: 100
+            type: string
+        - explode: false
+          in: query
+          name: city
+          schema:
+            maxLength: 60
+            type: string
+        - explode: false
+          in: query
+          name: type
+          schema:
+            enum:
+              - state
+              - foundation
+              - other
+            type: string
+        - description: name (A-Z, Turkish order); default newest first
+          explode: false
+          in: query
+          name: sort
+          schema:
+            description: name (A-Z, Turkish order); default newest first
+            enum:
+              - name
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UniversityList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: List universities
+      tags:
+        - directory
+      x-koro-action: directory.university.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: public
+  /api/v1/universities/{university_id}:
+    get:
+      operationId: getUniversity
+      parameters:
+        - description: University ID
+          in: path
+          name: university_id
+          required: true
+          schema:
+            description: University ID
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UniversityDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: Get a university with its faculties
+      tags:
+        - directory
+      x-koro-action: directory.university.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: public
+  /api/v1/universities/{university_id}/departments:
+    get:
+      operationId: listDepartments
+      parameters:
+        - description: University ID
+          in: path
+          name: university_id
+          required: true
+          schema:
+            description: University ID
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: Free text, 2-100 characters
+          explode: false
+          in: query
+          name: q
+          schema:
+            description: Free text, 2-100 characters
+            maxLength: 100
+            type: string
+        - explode: false
+          in: query
+          name: faculty_id
+          schema:
+            format: uuid
+            type: string
+        - explode: false
+          in: query
+          name: degree_level
+          schema:
+            enum:
+              - associate
+              - bachelor
+              - master
+              - doctorate
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DepartmentList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: List the departments of a university
+      tags:
+        - directory
+      x-koro-action: directory.department.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: public
   /api/v1/webhooks/email/{provider}:
     post:
       description: "Bounce, complaint and delivery notifications of the e-mail provider (ses: SNS-signed SES notifications; resend: svix-signed events). The identity is the signature: cookies and bearer tokens are ignored. A delivery that does not verify is 401; a verified one is stored in the webhook inbox under the provider's event ID (a redelivery is a no-op, also 204) and processed asynchronously."

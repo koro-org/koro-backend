@@ -1,0 +1,31 @@
+# Koro referans verisi — yetkinlik taksonomisi (directory, BE-020; 02 §8.7).
+# Kaynak: Koro ekibinin derlediği genel yetkinlik adları (teknoloji, araç,
+# kişisel beceri ve alan bilgisi). Kişisel veri içermez.
+# Lisans: Koro projesine aittir; serbestçe genişletilebilir. Yeni satır =
+# yeni yetkinlik; slug değişmez (öğrenci profilleri skill_id ile bağlanır).
+slug,name_tr,name_en,category
+python,Python,Python,technical
+java,Java,Java,technical
+javascript,JavaScript,JavaScript,technical
+typescript,TypeScript,TypeScript,technical
+go,Go,Go,technical
+c-sharp,C#,C#,technical
+sql,SQL,SQL,technical
+react,React,React,technical
+flutter,Flutter,Flutter,technical
+machine-learning,Makine öğrenmesi,Machine learning,technical
+data-analysis,Veri analizi,Data analysis,technical
+docker,Docker,Docker,tool
+git,Git,Git,tool
+figma,Figma,Figma,tool
+excel,Microsoft Excel,Microsoft Excel,tool
+autocad,AutoCAD,AutoCAD,tool
+matlab,MATLAB,MATLAB,tool
+teamwork,Takım çalışması,Teamwork,soft
+leadership,Liderlik,Leadership,soft
+public-speaking,Topluluk önünde konuşma,Public speaking,soft
+problem-solving,Problem çözme,Problem solving,soft
+project-management,Proje yönetimi,Project management,domain
+digital-marketing,Dijital pazarlama,Digital marketing,domain
+accounting,Muhasebe,Accounting,domain
+event-management,Etkinlik yönetimi,Event management,domain

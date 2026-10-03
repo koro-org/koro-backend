@@ -180,6 +180,54 @@
     "type": "urn:koro:problem:csrf_rejected"
   },
   {
+    "code": "directory.department_exists",
+    "status": 409,
+    "title": "Department already exists",
+    "type": "urn:koro:problem:directory.department_exists"
+  },
+  {
+    "code": "directory.domain_taken",
+    "status": 409,
+    "title": "E-mail domain belongs to another university",
+    "type": "urn:koro:problem:directory.domain_taken"
+  },
+  {
+    "code": "directory.empty_patch",
+    "status": 422,
+    "title": "Nothing to update",
+    "type": "urn:koro:problem:directory.empty_patch"
+  },
+  {
+    "code": "directory.invalid_state",
+    "status": 409,
+    "title": "Club state does not allow this change",
+    "type": "urn:koro:problem:directory.invalid_state"
+  },
+  {
+    "code": "directory.sensitivity_required",
+    "status": 422,
+    "title": "Category requires the sensitive flag",
+    "type": "urn:koro:problem:directory.sensitivity_required"
+  },
+  {
+    "code": "directory.skill_slug_taken",
+    "status": 409,
+    "title": "Skill slug is already in use",
+    "type": "urn:koro:problem:directory.skill_slug_taken"
+  },
+  {
+    "code": "directory.unknown_skill",
+    "status": 422,
+    "title": "Unknown or inactive skill",
+    "type": "urn:koro:problem:directory.unknown_skill"
+  },
+  {
+    "code": "directory.yok_code_taken",
+    "status": 409,
+    "title": "YÖK code is already in use",
+    "type": "urn:koro:problem:directory.yok_code_taken"
+  },
+  {
     "code": "entitlements.invalid_grant",
     "status": 422,
     "title": "Entitlement grant is invalid",

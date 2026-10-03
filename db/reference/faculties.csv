@@ -1,0 +1,20 @@
+# Koro referans verisi — fakülteler (directory, BE-020; 02 §8.3).
+# Kaynak: üniversitelerin kamuya açık akademik birim listeleri (YÖK Atlas /
+# üniversite siteleri). Kamu verisidir; kişisel veri içermez.
+# Lisans: olgusal kamu bilgisi. DURUM: ÖRNEK VERİ (seçili fakülteler); resmî
+# liste gelince yalnız bu dosya değişir. yok_code isteğe bağlıdır.
+university_yok_code,name,yok_code
+ORNEK-ODTU,Mühendislik Fakültesi,
+ORNEK-ODTU,Fen-Edebiyat Fakültesi,
+ORNEK-ODTU,İktisadi ve İdari Bilimler Fakültesi,
+ORNEK-ODTU,Mimarlık Fakültesi,
+ORNEK-ITU,Bilgisayar ve Bilişim Fakültesi,
+ORNEK-ITU,İnşaat Fakültesi,
+ORNEK-ITU,Mimarlık Fakültesi,
+ORNEK-ITU,Makina Fakültesi,
+ORNEK-ITU,Elektrik-Elektronik Fakültesi,
+ORNEK-ITU,İşletme Fakültesi,
+ORNEK-BOUN,Mühendislik Fakültesi,
+ORNEK-BOUN,Fen-Edebiyat Fakültesi,
+ORNEK-BOUN,İktisadi ve İdari Bilimler Fakültesi,
+ORNEK-BOUN,Eğitim Fakültesi,

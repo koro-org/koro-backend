@@ -1,0 +1,11 @@
+# Koro referans verisi — öğrenci e-posta alan adları (directory, BE-020; 02 §8.2).
+# Kaynak: üniversitelerin kamuya açık web/e-posta alan adları. Kişisel veri yok
+# (yalnız alan adı). Eşleme: adresin alan adı buradaki alan adına eşitse ya da
+# "." + alan adı ile bitiyorsa (en uzun eşleşme kazanır).
+# Lisans: olgusal kamu bilgisi. DURUM: ÖRNEK VERİ; pilot öncesi her alan adı
+# ilgili üniversiteyle doğrulanmalıdır (PS-09).
+domain,university_yok_code,domain_kind
+metu.edu.tr,ORNEK-ODTU,mixed
+itu.edu.tr,ORNEK-ITU,mixed
+boun.edu.tr,ORNEK-BOUN,mixed
+bogazici.edu.tr,ORNEK-BOUN,mixed

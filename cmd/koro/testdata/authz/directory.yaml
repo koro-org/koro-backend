@@ -1,0 +1,279 @@
+# Authz matrix of the directory module (03 §5.3, 04 §2.3; BE-020). 16 operations × 18 personas.
+# The catalog (universities, departments, skills, clubs) is public (P); an inactive university is
+# visible to platform_admin only (others 404). /clubs/{club_id}/... is a resource surface (03 §7.6):
+# a club is visible to everyone, so a signed-in user without the club_admin role of that club gets
+# 403, an unknown club 404. Admin surface (03 §7.2-3): everyone without the role → 403 before
+# anything is read. adminSetClubSensitivity is R: the body carries the matrix password (identity
+# fixtures). Business rules (428/412, 422 k7, 409) live in scenarios/directory.yaml and the
+# service tests.
+version: 1
+groups:
+  # signed-in users without the club_admin role of club_a.
+  not_club_a_admin: [user_unverified, student, student_minor, club_member, other_club_admin, event_staff,
+                     university_rep, company_member, company_admin, other_company_member]
+  # signed-in users without a platform role.
+  no_platform_role_dir: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                         event_staff, university_rep, company_member, company_admin, other_company_member]
+  # platform roles other than platform_admin.
+  other_staff_dir: [moderator, support, dpo, finance_admin, talent_auditor]
+
+operations:
+  listUniversities:
+    method: GET
+    path: /api/v1/universities
+    action: directory.university.list
+    public: true
+    expect: { "@all": 200 }
+    variants:
+      - name: search_by_name
+        query: { q: matris, sort: name, type: state }
+        expect: { "@all": 200 }
+
+  getUniversity:
+    method: GET
+    path: /api/v1/universities/{university_id}
+    action: directory.university.read
+    public: true
+    path_params: { university_id: uni_a_university }
+    expect: { "@all": 200 }
+    variants:
+      - name: inactive_university
+        path_params: { university_id: uni_inactive }
+        note: a deactivated university is hidden from everyone but platform_admin
+        expect:
+          anonymous: 404
+          "@no_platform_role_dir": 404
+          "@other_staff_dir": 404
+          platform_admin: 200
+      - name: unknown_university
+        path_params: { university_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect: { "@all": 404 }
+
+  listDepartments:
+    method: GET
+    path: /api/v1/universities/{university_id}/departments
+    action: directory.department.list
+    public: true
+    path_params: { university_id: uni_a_university }
+    expect: { "@all": 200 }
+    variants:
+      - name: filtered
+        query: { q: matris, faculty_id: "{{fixture:faculty_a}}", degree_level: bachelor }
+        expect: { "@all": 200 }
+      - name: inactive_university
+        path_params: { university_id: uni_inactive }
+        expect:
+          anonymous: 404
+          "@no_platform_role_dir": 404
+          "@other_staff_dir": 404
+          platform_admin: 200
+
+  listSkills:
+    method: GET
+    path: /api/v1/skills
+    action: directory.skill.list
+    public: true
+    expect: { "@all": 200 }
+    variants:
+      - name: english_names
+        headers: { Accept-Language: "en-US" }
+        query: { category: technical }
+        expect: { "@all": 200 }
+
+  listClubs:
+    method: GET
+    path: /api/v1/clubs
+    action: directory.club.list
+    public: true
+    expect: { "@all": 200 }
+    variants:
+      - name: filtered
+        query: { q: matris, university_id: "{{fixture:uni_a_university}}", category: technology, claimed: "true", sort: name }
+        expect: { "@all": 200 }
+
+  getClub:
+    method: GET
+    path: /api/v1/clubs/{club_id}
+    action: directory.club.read
+    public: true
+    path_params: { club_id: club_a }
+    expect: { "@all": 200 }
+    variants:
+      - name: sensitive_club
+        path_params: { club_id: club_sensitive }
+        note: the club exists publicly; its membership is private (member_count null)
+        expect: { "@all": 200 }
+      - name: unknown_club
+        path_params: { club_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect: { "@all": 404 }
+
+  updateClub:
+    method: PATCH
+    path: /api/v1/clubs/{club_id}
+    action: directory.club.update
+    path_params: { club_id: club_a }
+    headers: { If-Match: '"1hmhuo3hji000"' }
+    body: bodies/directory/update_club.json
+    expect:
+      anonymous: 401
+      "@not_club_a_admin": 403   # the club is visible to everyone (resource surface)
+      club_admin: 200            # S
+      "@other_staff_dir": 403
+      platform_admin: 200
+    variants:
+      - name: other_club
+        path_params: { club_id: club_b }
+        note: IDOR — club_a's admin is not club_b's
+        expect:
+          anonymous: 401
+          user_unverified: 403
+          student: 403
+          student_minor: 403
+          club_member: 403
+          club_admin: 403
+          other_club_admin: 200
+          event_staff: 403
+          university_rep: 403
+          company_member: 403
+          company_admin: 403
+          other_company_member: 403
+          "@other_staff_dir": 403
+          platform_admin: 200
+      - name: unknown_club
+        path_params: { club_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect:
+          anonymous: 401
+          "@no_platform_role_dir": 404
+          "@other_staff_dir": 404
+          platform_admin: 404
+
+  requestClubSensitivity:
+    method: POST
+    path: /api/v1/clubs/{club_id}/sensitivity-requests
+    action: directory.club.request_sensitivity
+    path_params: { club_id: club_a }
+    body: bodies/directory/request_sensitivity.json
+    note: only the club's club_admin asks; the platform admin sets the flag directly
+    expect:
+      anonymous: 401
+      "@not_club_a_admin": 403
+      club_admin: 202
+      "@other_staff_dir": 403
+      platform_admin: 403
+
+  adminCreateClub:
+    method: POST
+    path: /api/v1/admin/clubs
+    action: directory.club.create
+    body: bodies/directory/create_club.json
+    expect:
+      anonymous: 401
+      "@no_platform_role_dir": 403
+      "@other_staff_dir": 403
+      platform_admin: 201
+
+  adminSetClubSensitivity:
+    method: POST
+    path: /api/v1/admin/clubs/{club_id}/sensitivity
+    action: directory.club.set_sensitivity
+    path_params: { club_id: club_a }
+    body: bodies/directory/set_sensitivity.json
+    expect:
+      anonymous: 401
+      "@no_platform_role_dir": 403
+      "@other_staff_dir": 403
+      platform_admin: 200
+    variants:
+      - name: unknown_club
+        path_params: { club_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect:
+          anonymous: 401
+          "@no_platform_role_dir": 403   # no ID probing without a platform role
+          "@other_staff_dir": 403
+          platform_admin: 404
+
+  adminCreateUniversity:
+    method: POST
+    path: /api/v1/admin/universities
+    action: directory.university.manage
+    body: bodies/directory/create_university.json
+    expect:
+      anonymous: 401
+      "@no_platform_role_dir": 403
+      "@other_staff_dir": 403
+      platform_admin: 201
+
+  adminUpdateUniversity:
+    method: PATCH
+    path: /api/v1/admin/universities/{university_id}
+    action: directory.university.manage
+    path_params: { university_id: uni_a_university }
+    body: bodies/directory/update_university.json
+    expect:
+      anonymous: 401
+      "@no_platform_role_dir": 403
+      "@other_staff_dir": 403
+      platform_admin: 200
+    variants:
+      - name: unknown_university
+        path_params: { university_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect:
+          anonymous: 401
+          "@no_platform_role_dir": 403
+          "@other_staff_dir": 403
+          platform_admin: 404
+
+  adminPutUniversityEmailDomain:
+    method: PUT
+    path: /api/v1/admin/universities/{university_id}/email-domains/{domain}
+    action: directory.university.manage
+    path_params: { university_id: uni_a_university, domain: "literal:ogr.matris.edu.tr" }
+    body: bodies/directory/put_domain.json
+    expect:
+      anonymous: 401
+      "@no_platform_role_dir": 403
+      "@other_staff_dir": 403
+      platform_admin: 200
+
+  adminCreateDepartment:
+    method: POST
+    path: /api/v1/admin/universities/{university_id}/departments
+    action: directory.university.manage
+    path_params: { university_id: uni_a_university }
+    body: bodies/directory/create_department.json
+    expect:
+      anonymous: 401
+      "@no_platform_role_dir": 403
+      "@other_staff_dir": 403
+      platform_admin: 201
+
+  adminCreateSkill:
+    method: POST
+    path: /api/v1/admin/skills
+    action: directory.skill.manage
+    body: bodies/directory/create_skill.json
+    expect:
+      anonymous: 401
+      "@no_platform_role_dir": 403
+      "@other_staff_dir": 403
+      platform_admin: 201
+
+  adminUpdateSkill:
+    method: PATCH
+    path: /api/v1/admin/skills/{skill_id}
+    action: directory.skill.manage
+    path_params: { skill_id: skill_a }
+    body: bodies/directory/update_skill.json
+    expect:
+      anonymous: 401
+      "@no_platform_role_dir": 403
+      "@other_staff_dir": 403
+      platform_admin: 200
+
+pending_actions:
+  # BE-022: club claims (03 §5.3).
+  - directory.club_claim.create
+  - directory.club_claim.read_own
+  - directory.club_claim.withdraw
+  - directory.club_claim.list
+  - directory.club_claim.decide

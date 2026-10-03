@@ -1,0 +1,68 @@
+# Multi-step scenarios of the directory module (03 §7.7; BE-020).
+version: 1
+scenarios:
+  update_club_needs_if_match:
+    note: updateClub without If-Match is 428, with a stale ETag 412 (04 §1.13)
+    steps:
+      - { persona: club_admin, operation: updateClub, headers: { If-Match: "" }, expect: 428, code: precondition_required }
+      - { persona: club_admin, operation: updateClub, headers: { If-Match: '"0"' }, expect: 412, code: precondition_failed }
+      - { persona: club_admin, operation: updateClub, expect: 200 }
+      - { persona: club_admin, operation: updateClub, expect: 412, code: precondition_failed }
+  social_links_https_only:
+    note: clubs.social_links accepts https URLs only (02 §8.5)
+    steps:
+      - { persona: club_admin, operation: updateClub, body: bodies/directory/update_club_http.json, expect: 422,
+          code: validation_failed }
+      - { persona: club_admin, operation: updateClub, expect: 200 }
+  sensitive_category_requires_flag:
+    note: >-
+      03 k7 — a club admin cannot move a club to a religious/political/identity category (422
+      directory.sensitivity_required); a platform admin cannot create such a club unflagged or clear
+      the flag of club_sensitive (a religious club stays sensitive); changing its reason is fine.
+    steps:
+      - { persona: club_admin, operation: updateClub, body: bodies/directory/update_club_religious.json, expect: 422,
+          code: directory.sensitivity_required }
+      - { persona: platform_admin, operation: adminCreateClub, body: bodies/directory/create_club_religious_unflagged.json,
+          expect: 422, code: directory.sensitivity_required }
+      - { persona: platform_admin, operation: adminSetClubSensitivity, path_params: { club_id: club_sensitive },
+          body: bodies/directory/clear_sensitivity.json, expect: 422, code: directory.sensitivity_required }
+      - { persona: platform_admin, operation: adminSetClubSensitivity, path_params: { club_id: club_sensitive },
+          expect: 200 }
+  set_sensitivity_needs_reauth_and_mfa:
+    note: adminSetClubSensitivity is an R operation (03 §6.2) on a k-mfa role path (03 §6.4)
+    steps:
+      - { persona: platform_admin, operation: adminSetClubSensitivity, body: bodies/directory/set_sensitivity_no_reauth.json,
+          expect: 403, code: identity.reauth_required }
+      - { persona: platform_admin, operation: adminSetClubSensitivity, body: bodies/directory/set_sensitivity_wrong_reauth.json,
+          expect: 403, code: identity.reauth_failed }
+      - { persona: platform_admin, mfa: false, operation: adminSetClubSensitivity, expect: 403, code: authz.mfa_required }
+      - { persona: platform_admin, operation: adminSetClubSensitivity, expect: 200 }
+      - { persona: club_admin, operation: requestClubSensitivity, expect: 409, code: directory.invalid_state }
+  request_sensitivity_sensitive_club:
+    note: >-
+      a club that is already sensitive takes no request (409); club_a's admin is no admin of club_sensitive
+      (403) but may ask for club_a (202)
+    steps:
+      - { persona: club_admin_sensitive, operation: requestClubSensitivity, path_params: { club_id: club_sensitive },
+          expect: 409, code: directory.invalid_state }
+      - { persona: club_admin, operation: requestClubSensitivity, path_params: { club_id: club_sensitive },
+          expect: 403, code: forbidden }
+      - { persona: club_admin, operation: requestClubSensitivity, expect: 202 }
+  deactivated_university_hidden:
+    note: a university deactivated by a platform admin disappears from the public catalog
+    steps:
+      - { persona: anonymous, operation: getUniversity, expect: 200 }
+      - { persona: platform_admin, operation: adminUpdateUniversity, body: bodies/directory/deactivate_university.json,
+          expect: 200 }
+      - { persona: anonymous, operation: getUniversity, expect: 404 }
+      - { persona: platform_admin, operation: getUniversity, expect: 200 }
+  unique_reference_rows:
+    note: a YÖK code, a skill slug and a domain of another university are 409
+    steps:
+      - { persona: platform_admin, operation: adminCreateUniversity, expect: 201 }
+      - { persona: platform_admin, operation: adminCreateUniversity, expect: 409, code: directory.yok_code_taken }
+      - { persona: platform_admin, operation: adminCreateSkill, expect: 201 }
+      - { persona: platform_admin, operation: adminCreateSkill, expect: 409, code: directory.skill_slug_taken }
+      - { persona: platform_admin, operation: adminPutUniversityEmailDomain, expect: 200 }
+      - { persona: platform_admin, operation: adminPutUniversityEmailDomain, path_params: { university_id: uni_b_university },
+          expect: 409, code: directory.domain_taken }

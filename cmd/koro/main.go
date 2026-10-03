@@ -4,7 +4,8 @@
 //	koro worker              background worker: asynq server, scheduler, outbox relay
 //	koro migrate up|down N|version|force V|freeze V   database migrations (owner role)
 //	koro seed bootstrap-admin -admin "…" -admin "…"   the first two platform admins (BE-014)
-//	koro seed ...            synthetic data, dev/staging only (BE-020, BE-033)
+//	koro seed reference [-dir DIR]                    public reference data: universities, domains, skills (BE-020)
+//	koro seed ...            synthetic data, dev/staging only (BE-033)
 //	koro openapi -o FILE     write the OpenAPI 3.1 spec and problems.json (no DB/Redis)
 //	koro healthcheck         Docker HEALTHCHECK: GET /healthz on the local API
 //
@@ -40,7 +41,8 @@ commands:
   api            run the HTTP API server
   worker         run the background worker (asynq server, scheduler, outbox relay)
   migrate        run database migrations (up | down N | version | force V | freeze V)
-  seed           bootstrap-admin: the first two platform admins; synthetic data later (BE-020/BE-033)
+  seed           bootstrap-admin: the first two platform admins; reference: public reference data;
+                 synthetic data later (BE-033)
   openapi        write openapi/openapi.yaml and openapi/problems.json (-o FILE)
   healthcheck    probe the local API's /healthz (Docker HEALTHCHECK)
 `

@@ -167,7 +167,7 @@ func utc(t *time.Time) *time.Time {
 }
 
 // MemberUserDTO is the member's public identity in a member list (04 §2.2;
-// no e-mail: 04 §V.4). avatar_url comes with the student profile (BE-023).
+// no e-mail: 04 §V.4). avatar_url is the student profile's (BE-023).
 type MemberUserDTO struct {
 	UserID    string `json:"user_id"`
 	FirstName string `json:"first_name"`
@@ -246,7 +246,7 @@ func toMemberDTO(v MemberView) MemberDTO {
 	m := v.Membership
 	return MemberDTO{
 		MembershipID: m.ID.String(), Role: string(m.Role), Status: string(m.Status),
-		User:        MemberUserDTO{UserID: m.UserID.String(), FirstName: v.FirstName, LastName: v.LastName},
+		User:        MemberUserDTO{UserID: m.UserID.String(), FirstName: v.FirstName, LastName: v.LastName, AvatarURL: v.AvatarURL},
 		RequestedAt: utc(m.RequestedAt), JoinedAt: utc(m.JoinedAt),
 	}
 }

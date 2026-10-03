@@ -1,0 +1,9 @@
+# Fixtures of the students module (cmd/koro/matrix_students_test.go; BE-023). IDs are authztest.ID(name).
+# experience_student is the persona student's experience (with its profile at uni_a): the IDOR
+# target of updateMyExperience / deleteMyExperience. notice_discovery is the published consent text
+# of discovery_profile in the consent store; bodies/students/update_privacy_discoverable.json holds
+# the SHA-256 of its body (matrixDiscoveryText).
+version: 1
+fixtures:
+  experience_student: { kind: experience, owner: student }
+  notice_discovery: { kind: consent_text, purpose: discovery_profile }

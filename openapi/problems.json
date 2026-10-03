@@ -924,6 +924,24 @@
     "type": "urn:koro:problem:request_timeout"
   },
   {
+    "code": "students.empty_patch",
+    "status": 422,
+    "title": "Nothing to update",
+    "type": "urn:koro:problem:students.empty_patch"
+  },
+  {
+    "code": "students.minor_restricted",
+    "status": 422,
+    "title": "Not available to users under 18",
+    "type": "urn:koro:problem:students.minor_restricted"
+  },
+  {
+    "code": "students.unknown_department",
+    "status": 422,
+    "title": "Unknown department for the student's university",
+    "type": "urn:koro:problem:students.unknown_department"
+  },
+  {
     "code": "students.verification_required",
     "status": 403,
     "title": "Student verification required",

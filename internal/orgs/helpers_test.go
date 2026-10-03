@@ -135,6 +135,7 @@ type env struct {
 	clubs    *clubs
 	mailer   *mailer
 	open     []orgs.OpenCommerceCheck
+	avatars  *avatars
 	svc      orgs.Service
 	mod      orgs.Module
 }
@@ -146,6 +147,7 @@ func newEnv(t *testing.T) *env {
 		clk: clk, store: orgs.NewMemStore(clk.Now), tx: &spyTx{}, out: outbox.NewMem(clk), audit: &auditLog{},
 		reauth: &reauth{}, revoker: &revoker{}, users: newUsers(), students: &students{ok: map[uuid.UUID]bool{}},
 		clubs: &clubs{facts: map[uuid.UUID]orgs.ClubFacts{}}, mailer: &mailer{},
+		avatars: &avatars{urls: map[uuid.UUID]string{}},
 	}
 	mod, err := orgs.New(orgs.Deps{
 		Store: e.store, Tx: e.tx, Outbox: e.out, Audit: e.audit, Clock: clk, Log: obs.Discard(),
@@ -153,7 +155,7 @@ func newEnv(t *testing.T) *env {
 		Reauth:         e.reauth,
 		RevokeSessions: e.revoker.revoke,
 		OpenCommerce:   func() []orgs.OpenCommerceCheck { return e.open },
-		Users:          e.users, Students: e.students, Clubs: e.clubs.info, Mailer: e.mailer,
+		Users:          e.users, Students: e.students, Clubs: e.clubs.info, Mailer: e.mailer, Avatars: e.avatars.of,
 		Deriver: testDeriver(t), LinkBaseURL: "https://app.koro.test",
 	})
 	if err != nil {
@@ -161,6 +163,28 @@ func newEnv(t *testing.T) *env {
 	}
 	e.mod, e.svc = mod, mod.Service
 	return e
+}
+
+// avatars is students' AvatarURLs (late bound in cmd/koro).
+type avatars struct {
+	mu   sync.Mutex
+	urls map[uuid.UUID]string
+	fail error
+}
+
+func (a *avatars) of(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.fail != nil {
+		return nil, a.fail
+	}
+	out := map[uuid.UUID]string{}
+	for _, id := range ids {
+		if u, ok := a.urls[id]; ok {
+			out[id] = u
+		}
+	}
+	return out, nil
 }
 
 func testDeriver(t *testing.T) *crypto.Deriver {

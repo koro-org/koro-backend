@@ -107,3 +107,9 @@ type ClubInfo func(ctx context.Context, clubOrgID uuid.UUID) (club ClubFacts, fo
 // safety net of student.graduated (01 §7; T-210). nil → the sweep checks
 // the student verification only.
 type GraduatedUsers func(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]bool, error)
+
+// AvatarURLs returns short-lived avatar URLs of the users among userIDs
+// that have one (students, L7, binds it late; BE-023). The member list
+// shows them (04 §2.2 MemberDTO.user.avatar_url). nil, or an error (logged:
+// an avatar never fails a read) → no avatar.
+type AvatarURLs func(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]string, error)

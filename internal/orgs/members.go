@@ -3,6 +3,7 @@ package orgs
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +30,7 @@ type MemberView struct {
 	Membership Membership
 	FirstName  string
 	LastName   string
+	AvatarURL  string // students' signed avatar URL ("" without one)
 }
 
 // MemberQuery narrows listOrgMembers (04 §2.2: status, role, sort joined_at).
@@ -204,24 +206,48 @@ func memberAudit(a authz.Actor, act authz.Action, m Membership, sensitive bool, 
 	}.By(a)
 }
 
-// names returns the first and last names of users (empty without identity).
-func (s *service) names(ctx context.Context, ms []Membership) (map[uuid.UUID]identity.UserSummary, error) {
-	if s.d.Users == nil || len(ms) == 0 {
-		return map[uuid.UUID]identity.UserSummary{}, nil
+// memberFacts are what other modules know about the members of a page:
+// names (identity) and avatars (students).
+type memberFacts struct {
+	users   map[uuid.UUID]identity.UserSummary
+	avatars map[uuid.UUID]string
+}
+
+// names returns the names and avatars of the members (empty without
+// identity or students). An avatar failure is logged, never returned.
+func (s *service) names(ctx context.Context, ms []Membership) (memberFacts, error) {
+	f := memberFacts{users: map[uuid.UUID]identity.UserSummary{}, avatars: map[uuid.UUID]string{}}
+	if len(ms) == 0 {
+		return f, nil
 	}
 	ids := make([]uuid.UUID, 0, len(ms))
 	for _, m := range ms {
 		ids = append(ids, m.UserID)
 	}
-	return s.d.Users.GetMany(ctx, ids)
+	if s.d.Users != nil {
+		users, err := s.d.Users.GetMany(ctx, ids)
+		if err != nil {
+			return f, err
+		}
+		f.users = users
+	}
+	if s.d.Avatars != nil {
+		avatars, err := s.d.Avatars(ctx, ids)
+		if err != nil {
+			s.d.Log.LogAttrs(ctx, slog.LevelWarn, "member avatars not loaded", slog.String("err", err.Error()))
+		} else {
+			f.avatars = avatars
+		}
+	}
+	return f, nil
 }
 
-func viewOf(m Membership, users map[uuid.UUID]identity.UserSummary) MemberView {
-	u := users[m.UserID]
+func viewOf(m Membership, f memberFacts) MemberView {
+	u := f.users[m.UserID]
 	if u.Status == identity.StatusErased {
 		return MemberView{Membership: m}
 	}
-	return MemberView{Membership: m, FirstName: u.FirstName, LastName: u.LastName}
+	return MemberView{Membership: m, FirstName: u.FirstName, LastName: u.LastName, AvatarURL: f.avatars[m.UserID]}
 }
 
 // staffRead reports whether a reads an org's members through a platform

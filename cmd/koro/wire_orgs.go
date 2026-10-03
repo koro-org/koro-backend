@@ -32,6 +32,9 @@ import (
 //	       orgs.admin_sweep. students (L7) sets it in wire_students.go
 //	       (BE-023). Read at call time; nil → the sweep checks the student
 //	       verification only (student.graduated still ends the role).
+//	avatarURLs  member avatars of the member list. students (L7) sets it
+//	       in wire_students.go (BE-023). Read at call time; nil → no
+//	       avatar_url.
 //	students  tests only (the authz matrix): the student verification
 //	       used instead of identity's (its stub verifies nobody until
 //	       BE-018). nil in production.
@@ -56,6 +59,7 @@ type orgsWiring struct {
 
 	universityOrgs func(ctx context.Context, universityID uuid.UUID) ([]uuid.UUID, error)
 	graduatedUsers func(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]bool, error)
+	avatarURLs     func(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]string, error)
 
 	students orgs.Students
 
@@ -111,6 +115,12 @@ func (w *orgsWiring) build(c *container) error {
 				return map[uuid.UUID]bool{}, nil
 			}
 			return w.graduatedUsers(ctx, userIDs)
+		},
+		Avatars: func(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]string, error) {
+			if w.avatarURLs == nil {
+				return map[uuid.UUID]string{}, nil
+			}
+			return w.avatarURLs(ctx, userIDs)
 		},
 		Clubs: func(ctx context.Context, clubOrgID uuid.UUID) (orgs.ClubFacts, bool, error) {
 			info := c.hooks.clubInfo // directory (BE-020) fills it in its build, after orgs

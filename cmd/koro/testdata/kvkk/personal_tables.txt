@@ -58,11 +58,11 @@ clubs                       staff     directory     -
 club_claims                 personal  directory     provider:directory
 skills                      none      directory     -
 # students
-student_profiles            personal  students      todo:BE-023
-student_privacy_settings    personal  students      todo:BE-023
-student_skills              personal  students      todo:BE-023
-student_experiences         personal  students      todo:BE-023
-student_languages           personal  students      todo:BE-023
+student_profiles            personal  students      provider:students
+student_privacy_settings    personal  students      provider:students
+student_skills              personal  students      provider:students
+student_experiences         personal  students      provider:students
+student_languages           personal  students      provider:students
 student_cvs                 personal  students      todo:BE-025
 profile_access_grants       personal  students      todo:BE-046
 # entitlements (code merged without a provider: see the BE-021 ticket note)

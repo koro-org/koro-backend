@@ -222,6 +222,9 @@ type Deps struct {
 	// Graduated reports graduated students for the admin sweep (students,
 	// late bound). nil → only the verification is checked.
 	Graduated GraduatedUsers
+	// Avatars returns the member avatars of the member list (students,
+	// late bound; BE-023). nil → no avatar_url.
+	Avatars AvatarURLs
 	// Deriver derives invitation tokens (CRYPTO_TOKEN_KEYS). nil →
 	// createOrgInvitation answers 503 and acceptOrgInvitation finds nothing.
 	Deriver *crypto.Deriver

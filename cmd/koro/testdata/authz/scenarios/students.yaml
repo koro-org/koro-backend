@@ -1,0 +1,43 @@
+# Multi-step scenarios of the students module (03 §7.7; BE-023).
+version: 1
+scenarios:
+  minor:
+    note: >-
+      "Reşit olmayan" (03 §2.3, k9, Y4): a minor edits the profile and the club/ranking settings, but can
+      never turn level 2 (discoverable) or contact sharing on, with or without the consent text; the
+      settings stay private. An adult student turns level 2 on with the same request.
+    steps:
+      - { persona: student_minor, operation: updateMyStudentProfile, expect: 200 }
+      - { persona: student_minor, operation: updateMyPrivacy, body: bodies/students/update_privacy_discoverable.json,
+          expect: 422, code: students.minor_restricted }
+      - { persona: student_minor, operation: updateMyPrivacy, body: bodies/students/update_privacy_discoverable_no_consent.json,
+          expect: 422, code: students.minor_restricted }
+      - { persona: student_minor, operation: getMyPrivacy, expect: 200 }
+      - { persona: student_minor, operation: updateMyPrivacy, expect: 200 }
+      - { persona: student, operation: updateMyPrivacy, body: bodies/students/update_privacy_discoverable.json, expect: 200 }
+      - { persona: student, operation: updateMyPrivacy, body: bodies/students/update_privacy_contact_off.json, expect: 200 }
+  verification_required:
+    note: k-uv (03 §2.3) — an account without a student verification gets 403 students.verification_required
+    steps:
+      - { persona: user_unverified, operation: getMyStudentProfile, expect: 403, code: students.verification_required }
+      - { persona: company_admin, operation: updateMyPrivacy, expect: 403, code: students.verification_required }
+      - { persona: student, operation: getMyStudentProfile, expect: 200 }
+  experience_idor:
+    note: an experience is its owner's only — another student 404, a company account 403 before the lookup
+    steps:
+      - { persona: student_b, operation: createMyExperience, expect: 201, save: { b_experience: experience_id } }
+      - { persona: student, operation: updateMyExperience, path_params: { experience_id: b_experience }, expect: 404, code: not_found }
+      - { persona: student, operation: deleteMyExperience, path_params: { experience_id: b_experience }, expect: 404, code: not_found }
+      - { persona: other_company_member, operation: deleteMyExperience, path_params: { experience_id: b_experience },
+          expect: 403, code: students.verification_required }
+      - { persona: student_b, operation: updateMyExperience, path_params: { experience_id: b_experience }, expect: 200 }
+      - { persona: student_b, operation: deleteMyExperience, path_params: { experience_id: b_experience }, expect: 204 }
+  department_of_own_university:
+    note: >-
+      the university comes from the verification; a department of another university is 422
+      students.unknown_department (other_club_admin studies at uni_b, department_a is uni_a's)
+    steps:
+      - { persona: other_club_admin, operation: updateMyStudentProfile, body: bodies/students/update_profile_department.json,
+          expect: 422, code: students.unknown_department }
+      - { persona: club_admin, operation: updateMyStudentProfile, body: bodies/students/update_profile_department.json, expect: 200 }
+      - { persona: club_admin, operation: getMyStudentProfile, expect: 200 }

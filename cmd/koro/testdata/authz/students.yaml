@@ -1,0 +1,117 @@
+# Authz matrix of the students module (03 §5.4, 04 §2.4; BE-023). 9 operations × 18 personas.
+# Every operation is an O cell on the caller's own profile for verified students (stu, min, clm,
+# cla, stf); an account without an active student verification (usr k-uv, uni, the companies,
+# platform staff) is 403 students.verification_required, anonymous 401 (03 §5.0, §2.3). The
+# experience operations address an entry by ID: another student's entry is 404 (IDOR), a
+# non-student is refused before the lookup (403). k9 (a minor turning level 2 or contact sharing
+# on, 422 students.minor_restricted) is pinned below and in scenarios/students.yaml.
+version: 1
+groups:
+  # accounts without an active student verification (03 §1.1 usr; companies and staff too).
+  non_students: [user_unverified, university_rep, company_member, company_admin, other_company_member,
+                 moderator, support, dpo, platform_admin, finance_admin, talent_auditor]
+  # verified students other than the owner of experience_student.
+  other_students: [student_minor, club_member, club_admin, other_club_admin, event_staff]
+  # verified adult students (k9 does not apply).
+  adult_students: [student, club_member, club_admin, other_club_admin, event_staff]
+
+operations:
+  getMyStudentProfile:
+    method: GET
+    path: /api/v1/me/student-profile
+    action: students.profile.read_own
+    expect: { anonymous: 401, "@verified_students": 200, "@non_students": 403 }
+
+  updateMyStudentProfile:
+    method: PATCH
+    path: /api/v1/me/student-profile
+    action: students.profile.update_own
+    body: bodies/students/update_profile.json
+    expect: { anonymous: 401, "@verified_students": 200, "@non_students": 403 }
+    variants:
+      - name: university_id_sent
+        body: bodies/students/update_profile_university.json
+        note: "university_id is not a member of the body (it comes from the verification): the schema refuses it (422) before any role check"
+        expect: { anonymous: 401, "@signed_in": 422 }
+
+  putMySkills:
+    method: PUT
+    path: /api/v1/me/student-profile/skills
+    action: students.profile_section.manage
+    body: bodies/students/put_skills.json
+    expect: { anonymous: 401, "@verified_students": 200, "@non_students": 403 }
+
+  createMyExperience:
+    method: POST
+    path: /api/v1/me/student-profile/experiences
+    action: students.profile_section.manage
+    body: bodies/students/create_experience.json
+    expect: { anonymous: 401, "@verified_students": 201, "@non_students": 403 }
+
+  updateMyExperience:
+    method: PATCH
+    path: /api/v1/me/student-profile/experiences/{experience_id}
+    action: students.profile_section.manage
+    path_params: { experience_id: experience_student }
+    body: bodies/students/update_experience.json
+    note: student's entry; another student's ID is 404 (IDOR), a non-student is 403 before the lookup
+    expect: { anonymous: 401, student: 200, "@other_students": 404, "@non_students": 403 }
+    variants:
+      - name: missing
+        path_params: { experience_id: "literal:00000000-0000-7000-8000-0000000000e1" }
+        expect: { anonymous: 401, "@verified_students": 404, "@non_students": 403 }
+
+  deleteMyExperience:
+    method: DELETE
+    path: /api/v1/me/student-profile/experiences/{experience_id}
+    action: students.profile_section.manage
+    path_params: { experience_id: experience_student }
+    note: student's entry; another student's ID is 404 (IDOR), a non-student is 403 before the lookup
+    expect: { anonymous: 401, student: 204, "@other_students": 404, "@non_students": 403 }
+
+  putMyLanguages:
+    method: PUT
+    path: /api/v1/me/student-profile/languages
+    action: students.profile_section.manage
+    body: bodies/students/put_languages.json
+    expect: { anonymous: 401, "@verified_students": 200, "@non_students": 403 }
+
+  getMyPrivacy:
+    method: GET
+    path: /api/v1/me/privacy
+    action: students.privacy.read_own
+    expect: { anonymous: 401, "@verified_students": 200, "@non_students": 403 }
+
+  updateMyPrivacy:
+    method: PATCH
+    path: /api/v1/me/privacy
+    action: students.privacy.update_own
+    body: bodies/students/update_privacy_clubs.json
+    note: club sharing and the ranking choice need no consent; minors may change them
+    expect: { anonymous: 401, "@verified_students": 200, "@non_students": 403 }
+    variants:
+      - name: discoverable_with_consent
+        body: bodies/students/update_privacy_discoverable.json
+        note: level 2 on with the discovery_profile consent text; a minor gets 422 students.minor_restricted (03 k9)
+        expect: { anonymous: 401, "@adult_students": 200, student_minor: 422, "@non_students": 403 }
+      - name: discoverable_without_consent
+        body: bodies/students/update_privacy_discoverable_no_consent.json
+        note: turning level 2 on needs the consent text (422 consent.proof_required); a minor 422 students.minor_restricted
+        expect: { anonymous: 401, "@adult_students": 422, student_minor: 422, "@non_students": 403 }
+      - name: turn_off
+        body: bodies/students/update_privacy_contact_off.json
+        note: turning the mirrored flags off is always allowed, minors included (already off by default)
+        expect: { anonymous: 401, "@verified_students": 200, "@non_students": 403 }
+
+pending_actions:
+  # BE-025: CVs, the member card and the admin view (03 §5.4).
+  - students.cv.manage
+  - students.cv.read_own
+  - students.profile.read_member_card
+  - students.profile.read_admin
+  # BE-046: level 3 access grants and the company views (03 §5.4).
+  - students.access_grant.list_own
+  - students.access_grant.revoke
+  - students.access_grant.list_company
+  - students.profile.read_company
+  - students.cv.read_company

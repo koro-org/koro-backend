@@ -1415,6 +1415,16 @@ components:
         - state
         - since
       type: object
+    ConsentStruct:
+      additionalProperties: false
+      properties:
+        contact_info_share:
+          $ref: "#/components/schemas/StudentConsentProof"
+          description: Required to turn show_contact_on_grant on
+        discovery_profile:
+          $ref: "#/components/schemas/StudentConsentProof"
+          description: Required to turn discoverable on
+      type: object
     CreateBreachInputBody:
       additionalProperties: false
       properties:
@@ -1509,6 +1519,40 @@ components:
         - name
         - sector_code
         - size_band
+      type: object
+    CreateExperienceInputBody:
+      additionalProperties: false
+      properties:
+        description:
+          maxLength: 2000
+          type: string
+        end_month:
+          description: "YYYY-MM; absent: ongoing"
+          pattern: ^([0-9]{4}-(0[1-9]|1[0-2]))?$
+          type: string
+        kind:
+          enum:
+            - internship
+            - job
+            - volunteer
+            - project
+            - club_role
+          type: string
+        organization_name:
+          maxLength: 160
+          type: string
+        start_month:
+          description: YYYY-MM
+          pattern: ^[0-9]{4}-(0[1-9]|1[0-2])$
+          type: string
+        title:
+          maxLength: 120
+          minLength: 1
+          type: string
+      required:
+        - kind
+        - title
+        - start_month
       type: object
     CreateMineInputBody:
       additionalProperties: false
@@ -2335,6 +2379,20 @@ components:
       required:
         - email
         - role
+      type: object
+    Item:
+      additionalProperties: false
+      properties:
+        level:
+          format: int32
+          maximum: 5
+          minimum: 1
+          type: integer
+        skill_id:
+          format: uuid
+          type: string
+      required:
+        - skill_id
       type: object
     JoinInputBody:
       additionalProperties: false
@@ -3229,6 +3287,17 @@ components:
       required:
         - push_token_id
       type: object
+    PutLanguagesInputBody:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/StudentLanguageDTO"
+          maxItems: 20
+          type: array
+      required:
+        - items
+      type: object
     PutPreferencesInputBody:
       additionalProperties: false
       properties:
@@ -3237,6 +3306,17 @@ components:
             $ref: "#/components/schemas/PreferenceDTO"
           maxItems: 21
           minItems: 1
+          type: array
+      required:
+        - items
+      type: object
+    PutSkillsInputBody:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/Item"
+          maxItems: 30
           type: array
       required:
         - items
@@ -3742,6 +3822,21 @@ components:
       required:
         - edu_email
       type: object
+    StudentConsentProof:
+      additionalProperties: false
+      properties:
+        notice_version_id:
+          description: The current consent text of the purpose
+          format: uuid
+          type: string
+        text_sha256:
+          description: body_sha256 of that text
+          pattern: ^[0-9a-f]{64}$
+          type: string
+      required:
+        - notice_version_id
+        - text_sha256
+      type: object
     StudentDTO:
       additionalProperties: false
       properties:
@@ -3756,6 +3851,214 @@ components:
           type: string
       required:
         - status
+      type: object
+    StudentDepartmentDTO:
+      additionalProperties: false
+      properties:
+        department_id:
+          format: uuid
+          type: string
+        name:
+          type: string
+      required:
+        - department_id
+        - name
+      type: object
+    StudentExperienceDTO:
+      additionalProperties: false
+      properties:
+        description:
+          type: string
+        end_month:
+          description: "YYYY-MM; absent: ongoing"
+          pattern: ^[0-9]{4}-(0[1-9]|1[0-2])$
+          type: string
+        experience_id:
+          format: uuid
+          type: string
+        kind:
+          enum:
+            - internship
+            - job
+            - volunteer
+            - project
+            - club_role
+          type: string
+        organization_name:
+          type: string
+        start_month:
+          description: YYYY-MM
+          pattern: ^[0-9]{4}-(0[1-9]|1[0-2])$
+          type: string
+        title:
+          type: string
+      required:
+        - experience_id
+        - kind
+        - title
+        - start_month
+      type: object
+    StudentLanguageDTO:
+      additionalProperties: false
+      properties:
+        language_code:
+          description: ISO 639
+          pattern: ^[a-z]{2,3}$
+          type: string
+        level:
+          enum:
+            - A1
+            - A2
+            - B1
+            - B2
+            - C1
+            - C2
+            - native
+          type: string
+      required:
+        - language_code
+        - level
+      type: object
+    StudentLanguageList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/StudentLanguageDTO"
+          type: array
+      required:
+        - items
+      type: object
+    StudentPrivacyDTO:
+      additionalProperties: false
+      properties:
+        activity_ranking_choice:
+          enum:
+            - default
+            - enabled
+            - disabled
+          type: string
+        discoverable:
+          description: "Level 2: companies may find the anonymous profile (default off)"
+          type: boolean
+        show_clubs_on_grant:
+          description: "Level 3: non-sensitive club memberships (default off)"
+          type: boolean
+        show_contact_on_grant:
+          description: "Level 3: the e-mail goes to a company whose contact request was accepted (default off)"
+          type: boolean
+      required:
+        - discoverable
+        - show_contact_on_grant
+        - show_clubs_on_grant
+        - activity_ranking_choice
+      type: object
+    StudentProfileSelfDTO:
+      additionalProperties: false
+      properties:
+        about:
+          type: string
+        avatar_url:
+          description: Signed URL, valid for 5 minutes
+          type: string
+        city:
+          type: string
+        class_year:
+          format: int64
+          maximum: 8
+          minimum: 1
+          type: integer
+        completed_sections:
+          items:
+            type: string
+          type: array
+        degree_level:
+          enum:
+            - associate
+            - bachelor
+            - master
+            - doctorate
+          type: string
+        department:
+          $ref: "#/components/schemas/StudentDepartmentDTO"
+        expected_graduation:
+          description: YYYY-MM
+          pattern: ^[0-9]{4}-(0[1-9]|1[0-2])$
+          type: string
+        experiences:
+          items:
+            $ref: "#/components/schemas/StudentExperienceDTO"
+          type: array
+        headline:
+          type: string
+        languages:
+          items:
+            $ref: "#/components/schemas/StudentLanguageDTO"
+          type: array
+        privacy:
+          $ref: "#/components/schemas/StudentPrivacyDTO"
+        skills:
+          items:
+            $ref: "#/components/schemas/StudentSkillDTO"
+          type: array
+        status:
+          enum:
+            - active
+            - graduated
+            - inactive
+          type: string
+        university:
+          $ref: "#/components/schemas/StudentUniversityDTO"
+          description: From the active student verification; not editable
+        user_id:
+          format: uuid
+          type: string
+      required:
+        - user_id
+        - university
+        - degree_level
+        - status
+        - completed_sections
+        - skills
+        - experiences
+        - languages
+        - privacy
+      type: object
+    StudentSkillDTO:
+      additionalProperties: false
+      properties:
+        level:
+          format: int64
+          maximum: 5
+          minimum: 1
+          type: integer
+        skill_id:
+          format: uuid
+          type: string
+      required:
+        - skill_id
+      type: object
+    StudentSkillList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/StudentSkillDTO"
+          type: array
+      required:
+        - items
+      type: object
+    StudentUniversityDTO:
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+        university_id:
+          format: uuid
+          type: string
+      required:
+        - university_id
+        - name
       type: object
     SubBody:
       additionalProperties: false
@@ -4136,6 +4439,38 @@ components:
           description: Replaces every link; network name → https URL (at most 10); {} clears them
           type: object
       type: object
+    UpdateExperienceInputBody:
+      additionalProperties: false
+      properties:
+        description:
+          description: Empty string clears it
+          maxLength: 2000
+          type: string
+        end_month:
+          description: "YYYY-MM; empty string: ongoing"
+          pattern: ^([0-9]{4}-(0[1-9]|1[0-2]))?$
+          type: string
+        kind:
+          enum:
+            - internship
+            - job
+            - volunteer
+            - project
+            - club_role
+          type: string
+        organization_name:
+          description: Empty string clears it
+          maxLength: 160
+          type: string
+        start_month:
+          description: YYYY-MM
+          pattern: ^[0-9]{4}-(0[1-9]|1[0-2])$
+          type: string
+        title:
+          maxLength: 120
+          minLength: 1
+          type: string
+      type: object
     UpdateMeInputBody:
       additionalProperties: false
       properties:
@@ -4217,6 +4552,60 @@ components:
         reauth:
           $ref: "#/components/schemas/DsrReauthDTO"
           description: Re-authentication proof (03 §6.2)
+      type: object
+    UpdatePrivacyInputBody:
+      additionalProperties: false
+      properties:
+        activity_ranking_choice:
+          enum:
+            - default
+            - enabled
+            - disabled
+          type: string
+        consent:
+          $ref: "#/components/schemas/ConsentStruct"
+          description: The consent text shown for every consent turned on
+        discoverable:
+          type: boolean
+        show_clubs_on_grant:
+          type: boolean
+        show_contact_on_grant:
+          type: boolean
+      type: object
+    UpdateProfileInputBody:
+      additionalProperties: false
+      properties:
+        about:
+          maxLength: 2000
+          type: string
+        avatar_file_id:
+          description: An avatar upload of yours (createUpload); empty string removes the avatar
+          type: string
+        city:
+          maxLength: 60
+          type: string
+        class_year:
+          format: int32
+          maximum: 8
+          minimum: 1
+          type: integer
+        degree_level:
+          enum:
+            - associate
+            - bachelor
+            - master
+            - doctorate
+          type: string
+        department_id:
+          description: A department of your university; empty string clears it
+          type: string
+        expected_graduation:
+          description: YYYY-MM; empty string clears it
+          pattern: ^([0-9]{4}-(0[1-9]|1[0-2]))?$
+          type: string
+        headline:
+          maxLength: 160
+          type: string
       type: object
     UpdatePurposeInputBody:
       additionalProperties: false
@@ -9082,6 +9471,73 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: self
+  /api/v1/me/privacy:
+    get:
+      description: Everything is off until the student turns it on; the activity ranking choice starts at default.
+      operationId: getMyPrivacy
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StudentPrivacyDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get my privacy settings
+      tags:
+        - students
+      x-koro-action: students.privacy.read_own
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
+    patch:
+      description: "discoverable (level 2) and show_contact_on_grant (level 3 e-mail) mirror explicit consents: turning one on needs the consent text shown (consent.discovery_profile / consent.contact_info_share: notice_version_id and text_sha256), turning it off withdraws the consent; the setting and the consent record change in one transaction. Users under 18 cannot turn either on (422 students.minor_restricted). Every change is audited."
+      operationId: updateMyPrivacy
+      parameters:
+        - description: Client kind; recorded as the consent channel (default web)
+          in: header
+          name: X-Koro-Client
+          schema:
+            description: Client kind; recorded as the consent channel (default web)
+            enum:
+              - web
+              - mobile
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePrivacyInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StudentPrivacyDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Update my privacy settings
+      tags:
+        - students
+      x-koro-action: students.privacy.update_own
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
   /api/v1/me/push-tokens:
     post:
       description: Bound to the current session. Registering a known token again moves it to this account and session.
@@ -9274,6 +9730,239 @@ paths:
       tags:
         - identity
       x-koro-action: identity.session.revoke_own
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/me/student-profile:
+    get:
+      description: "The full profile with its sections and privacy settings (only its owner sees it). A verified student who never edited it gets the profile it starts with. Without an active student verification: 403 students.verification_required."
+      operationId: getMyStudentProfile
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StudentProfileSelfDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get my student profile
+      tags:
+        - students
+      x-koro-action: students.profile.read_own
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
+    patch:
+      description: Partial update; an empty string clears an optional text. The university comes from the student verification and cannot be changed (an unknown member such as university_id is 422). The department must be an active department of that university (422 students.unknown_department).
+      operationId: updateMyStudentProfile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StudentProfileSelfDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Update my student profile
+      tags:
+        - students
+      x-koro-action: students.profile.update_own
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/me/student-profile/experiences:
+    post:
+      description: "At most 50. A club_role entry may name a sensitive club: it never reaches a company's anonymous view and reaches level 3 only when show_clubs_on_grant is on."
+      operationId: createMyExperience
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateExperienceInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StudentExperienceDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Add an experience
+      tags:
+        - students
+      x-koro-action: students.profile_section.manage
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/me/student-profile/experiences/{experience_id}:
+    delete:
+      description: Hard delete. Another user's entry is 404.
+      operationId: deleteMyExperience
+      parameters:
+        - description: Experience ID (another user's or a malformed ID is 404)
+          in: path
+          name: experience_id
+          required: true
+          schema:
+            description: Experience ID (another user's or a malformed ID is 404)
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Delete an experience
+      tags:
+        - students
+      x-koro-action: students.profile_section.manage
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+    patch:
+      description: Partial update; an empty string clears an optional member. Another user's entry is 404.
+      operationId: updateMyExperience
+      parameters:
+        - description: Experience ID (another user's or a malformed ID is 404)
+          in: path
+          name: experience_id
+          required: true
+          schema:
+            description: Experience ID (another user's or a malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateExperienceInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StudentExperienceDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Update an experience
+      tags:
+        - students
+      x-koro-action: students.profile_section.manage
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/me/student-profile/languages:
+    put:
+      description: The list replaces the current languages (at most 20; ISO 639 codes, CEFR levels or native).
+      operationId: putMyLanguages
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PutLanguagesInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StudentLanguageList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Replace my languages
+      tags:
+        - students
+      x-koro-action: students.profile_section.manage
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/me/student-profile/skills:
+    put:
+      description: The list replaces the current skills (at most 30, active catalog skills only).
+      operationId: putMySkills
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PutSkillsInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StudentSkillList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Replace my skills
+      tags:
+        - students
+      x-koro-action: students.profile_section.manage
       x-koro-rate-limit: write_default
       x-koro-surface: self
   /api/v1/notices/current:

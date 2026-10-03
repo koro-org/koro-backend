@@ -808,6 +808,38 @@ func TestListMembers_MemberRole_403(t *testing.T) {
 	}
 }
 
+// TestListMembers_AvatarFromStudents: the member list carries the
+// students module's avatar URL (04 §2.2 MemberDTO.user.avatar_url; BE-023);
+// an avatar failure never fails the read.
+func TestListMembers_AvatarFromStudents(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	club := e.club(t, "Avatar Kulübü", orgs.JoinOpen, false)
+	admin := e.clubAdmin(t, club)
+	_, member := e.join(t, club, e.student(false))
+	e.avatars.mu.Lock()
+	e.avatars.urls[member.UserID] = "https://files.test/avatar"
+	e.avatars.mu.Unlock()
+	p, err := e.svc.ListMembers(t.Context(), admin, club, orgs.MemberQuery{}, orgs.Access{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[uuid.UUID]string{}
+	for _, v := range p.Items {
+		got[v.Membership.UserID] = v.AvatarURL
+	}
+	if got[member.UserID] != "https://files.test/avatar" || got[admin.UserID] != "" {
+		t.Fatalf("avatars = %v", got)
+	}
+	e.avatars.mu.Lock()
+	e.avatars.fail = errors.New("students down")
+	e.avatars.mu.Unlock()
+	if p, err := e.svc.ListMembers(t.Context(), admin, club, orgs.MemberQuery{}, orgs.Access{}); err != nil || len(p.Items) != 2 ||
+		p.Items[0].AvatarURL != "" || p.Items[0].FirstName == "" {
+		t.Fatalf("list with failing avatars = %+v, %v", p, err)
+	}
+}
+
 func TestSensitiveClubMemberList_Audited(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)

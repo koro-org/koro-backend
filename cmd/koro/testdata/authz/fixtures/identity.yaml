@@ -1,0 +1,13 @@
+# Fixtures of the identity module (cmd/koro/matrix_identity_test.go). IDs are
+# authztest.ID(name). Besides these, the seeder creates an active account for
+# every persona and helper user (<name>@matrix.koro.test, password
+# matrixReauthPassword) and one mobile session per account with the persona's
+# session ID. E-mail tokens carry a literal token (the bodies hold it):
+# fixture name without underscores, upper case, padded with A to 52 characters.
+version: 1
+fixtures:
+  user_pending: { kind: user, email: pending@matrix.koro.test, status: pending_email }
+  session_student_2: { kind: session, user: student }
+  token_verify_pending: { kind: email_token, user: user_pending, purpose: account_email }
+  token_reset_student_b: { kind: email_token, user: student_b, purpose: password_reset }
+  token_change_student_b: { kind: email_token, user: student_b, purpose: email_change, target_email: student_b.new@matrix.koro.test }

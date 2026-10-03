@@ -1,0 +1,183 @@
+# Authz matrix of the identity module (03 §5.1, 04 §2.1; BE-014). 14 operations × 18 personas.
+# Public (P) operations are the same for every persona, a signed-in caller included (the
+# operation ignores the session; 06 H-25). O cells: /me/... and /auth/sessions/current act on
+# the caller's own account and sessions only; another user's session is 404. password.change
+# and email_change.request are O · R: the bodies carry the matrix password as proof
+# (current_password / reauth.password); the missing and wrong proofs are scenarios.
+version: 1
+operations:
+  registerAccount:
+    method: POST
+    path: /api/v1/auth/register
+    action: identity.account.register
+    public: true
+    body: bodies/identity/register.json
+    note: registration is anonymous by design (P); 202 whether or not the address exists (no enumeration)
+    expect: { "@all": 202 }
+    variants:
+      - name: with_consent
+        body: bodies/identity/register_with_consent.json
+        note: an optional commercial consent recorded in the registration transaction
+        expect: { "@all": 202 }
+      - name: taken_address
+        body: bodies/identity/register_taken.json
+        note: a registered address answers exactly like a new one (ASVS 6.3.8)
+        expect: { "@all": 202 }
+
+  createSession:
+    method: POST
+    path: /api/v1/auth/sessions
+    action: identity.session.create
+    public: true
+    body: bodies/identity/login.json
+    note: login is anonymous by design (P); student_b's credentials
+    expect: { "@all": 200 }
+    variants:
+      - name: wrong_password
+        body: bodies/identity/login_wrong.json
+        note: identity.invalid_credentials (same answer as an unknown address)
+        expect: { "@all": 401 }
+      - name: unknown_address
+        body: bodies/identity/login_unknown.json
+        note: identity.invalid_credentials (no enumeration)
+        expect: { "@all": 401 }
+      - name: pending_email
+        body: bodies/identity/login_pending.json
+        note: right password, unverified address → identity.email_not_verified (03 §2.2-3)
+        expect: { "@all": 403 }
+
+  deleteCurrentSession:
+    method: DELETE
+    path: /api/v1/auth/sessions/current
+    action: identity.session.delete_current
+    expect: { anonymous: 401, "@signed_in": 204 }
+
+  listMySessions:
+    method: GET
+    path: /api/v1/me/sessions
+    action: identity.session.list_own
+    expect: { anonymous: 401, "@signed_in": 200 }
+
+  revokeMySession:
+    method: DELETE
+    path: /api/v1/me/sessions/{session_id}
+    action: identity.session.revoke_own
+    path_params: { session_id: session_student_2 }
+    note: the second session of student; anyone else's view of it is 404 (O cell)
+    expect:
+      anonymous: 401
+      student: 204
+      user_unverified: 404
+      student_minor: 404
+      club_member: 404
+      club_admin: 404
+      other_club_admin: 404
+      event_staff: 404
+      university_rep: 404
+      company_member: 404
+      company_admin: 404
+      other_company_member: 404
+      moderator: 404
+      support: 404
+      dpo: 404
+      platform_admin: 404
+      finance_admin: 404
+      talent_auditor: 404
+    variants:
+      - name: missing
+        path_params: { session_id: "literal:00000000-0000-7000-8000-0000000000e1" }
+        expect: { anonymous: 401, "@signed_in": 404 }
+
+  confirmEmail:
+    method: POST
+    path: /api/v1/auth/email-verifications/confirm
+    action: identity.email.verify
+    public: true
+    body: bodies/identity/verify.json
+    note: the token in the e-mail is the credential (P); single use
+    expect: { "@all": 204 }
+
+  resendEmailVerification:
+    method: POST
+    path: /api/v1/auth/email-verifications/resend
+    action: identity.email.resend_verification
+    public: true
+    body: bodies/identity/resend.json
+    note: anonymous by design (P); always 202 (no enumeration)
+    expect: { "@all": 202 }
+
+  requestPasswordReset:
+    method: POST
+    path: /api/v1/auth/password-resets
+    action: identity.password.reset_request
+    public: true
+    body: bodies/identity/reset_request.json
+    note: anonymous by design (P); always 202 (no enumeration)
+    expect: { "@all": 202 }
+
+  confirmPasswordReset:
+    method: POST
+    path: /api/v1/auth/password-resets/confirm
+    action: identity.password.reset
+    public: true
+    body: bodies/identity/reset_confirm.json
+    note: the reset token is the credential (P); every session of student_b closes
+    expect: { "@all": 204 }
+
+  changeMyPassword:
+    method: POST
+    path: /api/v1/me/password
+    action: identity.password.change
+    body: bodies/identity/change_password.json
+    expect: { anonymous: 401, "@signed_in": 204 }
+
+  requestEmailChange:
+    method: POST
+    path: /api/v1/me/email-change
+    action: identity.email_change.request
+    body: bodies/identity/email_change.json
+    expect: { anonymous: 401, "@signed_in": 202 }
+
+  confirmEmailChange:
+    method: POST
+    path: /api/v1/auth/email-change/confirm
+    action: identity.email_change.confirm
+    public: true
+    body: bodies/identity/email_change_confirm.json
+    note: the token sent to the new address is the credential (P)
+    expect: { "@all": 204 }
+
+  getMe:
+    method: GET
+    path: /api/v1/me
+    action: identity.account.read_own
+    expect: { anonymous: 401, "@signed_in": 200 }
+
+  updateMe:
+    method: PATCH
+    path: /api/v1/me
+    action: identity.account.update_own
+    body: bodies/identity/update_me.json
+    expect: { anonymous: 401, "@signed_in": 200 }
+
+# Bound by later identity tickets (H-29).
+pending_actions:
+  - identity.mfa.enroll                          # BE-016
+  - identity.mfa.confirm                         # BE-016
+  - identity.mfa.verify                          # BE-016
+  - identity.mfa.disable                         # BE-016
+  - identity.mfa_recovery.regenerate             # BE-016
+  - identity.edu_verification.start              # BE-018
+  - identity.edu_verification.confirm            # BE-018
+  - identity.edu_verification.submit_document    # BE-018
+  - identity.edu_verification.read_own           # BE-018
+  - identity.edu_verification.list               # BE-018
+  - identity.edu_verification.review             # BE-018
+  - identity.user.search                         # BE-016
+  - identity.user.read                           # BE-016
+  - identity.user.suspend                        # BE-016
+  - identity.user.revoke_sessions                # BE-016
+  - identity.user.reset_mfa                      # BE-016
+  - identity.platform_role.list                  # BE-016
+  - identity.platform_role.grant                 # BE-016
+  - identity.platform_role.revoke                # BE-016

@@ -2,6 +2,10 @@
 -- erasure turns the row into a tombstone (status = 'erased', personal columns
 -- NULL) that stays the FK target of financial and audit records (02 §0.5),
 -- so app_rw has no DELETE.
+-- BE-014 (in place before the pilot, BE-001 R2): failed_login_count and
+-- locked_until carry the account lockout of 05 §14.1 (failed logins and
+-- failed re-authentications per account, exponential back-off; the IP rate
+-- limit does not replace it). 02 §5.1 is updated by the orchestrator (T-170).
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 CREATE TABLE users (
@@ -22,6 +26,8 @@ CREATE TABLE users (
   suspended_at       timestamptz,
   suspension_reason  text CONSTRAINT users_suspension_reason_chk CHECK (char_length(suspension_reason) <= 500),
   erased_at          timestamptz,
+  failed_login_count smallint NOT NULL DEFAULT 0 CONSTRAINT users_failed_login_count_chk CHECK (failed_login_count BETWEEN 0 AND 10000),
+  locked_until       timestamptz,                             -- account lockout (05 §14.1)
   created_at         timestamptz NOT NULL DEFAULT now(),
   updated_at         timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT users_erased_chk CHECK (status <> 'erased' OR (email IS NULL AND email_normalized IS NULL AND password_hash IS NULL

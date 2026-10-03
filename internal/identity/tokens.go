@@ -1,0 +1,194 @@
+package identity
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strconv"
+	"uuid"
+
+	"koro/internal/notify"
+	"koro/internal/platform/domainevent"
+	"koro/internal/platform/queue"
+	"koro/internal/platform/token"
+)
+
+// Task names (01 §8: <module>.<verb>_<object>).
+const (
+	// SendEmailTokenTaskName consumes identity.email_token_issued: it
+	// re-derives the token and sends the verification, reset or change
+	// e-mail.
+	SendEmailTokenTaskName = "identity.send_email_token"
+	// SendSecurityNoticeTaskName sends a security notice (registration
+	// attempt on an existing account, password changed, e-mail change
+	// requested or done). Mechanism A without a topic: the payload holds
+	// the user ID and the notice kind only.
+	SendSecurityNoticeTaskName = "identity.send_security_notice"
+)
+
+// Notice kinds of identity.security_notice.
+const (
+	NoticeSignupAttempt        = "signup_attempt"
+	NoticePasswordChanged      = "password_changed"
+	NoticeEmailChangeRequested = "email_change_requested"
+	NoticeEmailChanged         = "email_changed"
+)
+
+// Templates (internal/notify/templates/identity/, BE-001 R8).
+var tokenTemplates = map[TokenPurpose]struct{ template, path string }{
+	PurposeAccountEmail:  {"identity.verify_email", "/auth/verify-email"},
+	PurposePasswordReset: {"identity.password_reset", "/auth/reset-password"},
+	PurposeEmailChange:   {"identity.email_change", "/auth/confirm-email-change"},
+}
+
+const securityNoticeTemplate = "identity.security_notice"
+
+// issueToken opens a new e-mail token of purpose for u in the transaction
+// carried by ctx: the open tokens of the same purpose close, the row keeps
+// only the SHA-256 of the derived token, and identity.email_token_issued
+// (O) carries the token ID, never the token (01 §6.2).
+func (s *service) issueToken(ctx context.Context, u User, purpose TokenPurpose, target string) (EmailToken, error) {
+	now := s.now()
+	t := EmailToken{
+		ID: uuid.NewV7(), UserID: u.ID, Purpose: purpose, TargetEmail: target,
+		KeyID: s.d.Deriver.ActiveKeyID(), ExpiresAt: now.Add(tokenTTL(purpose)), CreatedAt: now,
+	}
+	raw, err := s.deriveToken(t.KeyID, t.ID)
+	if err != nil {
+		return EmailToken{}, err
+	}
+	t.TokenHash = token.Hash(raw)
+	if err := s.d.Store.CloseOpenTokens(ctx, u.ID, purpose, now); err != nil {
+		return EmailToken{}, err
+	}
+	if err := s.d.Store.InsertEmailToken(ctx, t); err != nil {
+		return EmailToken{}, err
+	}
+	env, err := domainevent.New(domainevent.IdentityEmailTokenIssued{TokenID: t.ID, UserID: u.ID, Purpose: string(purpose)}, emailTokenAggType, t.ID)
+	if err != nil {
+		return EmailToken{}, err
+	}
+	if err := s.d.Outbox.Add(ctx, env); err != nil {
+		return EmailToken{}, err
+	}
+	return t, nil
+}
+
+// securityNotice is the payload of identity.send_security_notice: IDs and
+// a kind only (05 §8.4-1).
+type securityNotice struct {
+	UserID uuid.UUID `json:"user_id"`
+	Kind   string    `json:"kind"`
+	Ref    uuid.UUID `json:"ref"` // deduplication key of the e-mail
+}
+
+// notifyUser enqueues a security notice after the transaction commits
+// (mechanism A: best effort, at most once; a lost notice is not repaired).
+func (s *service) notifyUser(ctx context.Context, userID uuid.UUID, kind string) {
+	n := securityNotice{UserID: userID, Kind: kind, Ref: uuid.NewV7()}
+	s.d.Queue.AfterCommit(ctx, SendSecurityNoticeTaskName, n, SendSecurityNoticeTaskName+":"+n.Ref.String())
+}
+
+// handleEmailTokenIssued is the identity.send_email_token handler. It is
+// idempotent: notify deduplicates on the token ID, and a used, expired or
+// deleted token is skipped.
+func (s *service) handleEmailTokenIssued(ctx context.Context, e domainevent.Envelope) error {
+	p, err := domainevent.Decode[domainevent.IdentityEmailTokenIssued](e)
+	if err != nil {
+		return queue.Permanent(err)
+	}
+	t, err := s.d.Store.EmailToken(ctx, p.TokenID)
+	switch {
+	case isNotFound(err):
+		return nil // cleaned up meanwhile
+	case err != nil:
+		return err
+	}
+	if t.ConsumedAt != nil || !s.now().Before(t.ExpiresAt) {
+		return nil // replaced, used or expired: nothing to send
+	}
+	tpl, ok := tokenTemplates[t.Purpose]
+	if !ok {
+		return queue.Permanent(fmt.Errorf("identity: no e-mail for token purpose %q", t.Purpose))
+	}
+	u, err := s.d.Store.User(ctx, t.UserID)
+	switch {
+	case isNotFound(err):
+		return nil
+	case err != nil:
+		return err
+	}
+	if u.Status == StatusErased || u.Status == StatusSuspended {
+		return nil
+	}
+	raw, err := s.deriveToken(t.KeyID, t.ID)
+	if err != nil {
+		return queue.Permanent(err) // the key was removed from CRYPTO_TOKEN_KEYS
+	}
+	if !token.Verify(raw, t.TokenHash) {
+		return queue.Permanent(errors.New("identity: derived token does not match the stored hash (token keys changed)"))
+	}
+	to := u.Email
+	if t.Purpose == PurposeEmailChange {
+		to = t.TargetEmail
+	}
+	minutes := int(tokenTTL(t.Purpose).Minutes())
+	msg := notify.Message{
+		UserID: &u.ID, ToEmail: to, Channel: notify.ChannelEmail, Category: notify.CategoryTransactional,
+		Template: tpl.template, Locale: u.Locale,
+		Data: map[string]any{
+			"name":          u.FirstName,
+			"link":          s.d.LinkBaseURL + tpl.path + "#token=" + raw,
+			"token":         raw,
+			"valid_minutes": strconv.Itoa(minutes),
+		},
+		DedupeKey: "identity.email_token:" + t.ID.String(),
+	}
+	if _, err := s.d.Mailer.Send(ctx, msg); err != nil {
+		if notify.IsPermanent(err) {
+			return queue.Permanent(err)
+		}
+		return err
+	}
+	s.d.Log.LogAttrs(ctx, slog.LevelInfo, "e-mail token sent", slog.String("token_id", t.ID.String()),
+		slog.String("purpose", string(t.Purpose)))
+	return nil
+}
+
+// handleSecurityNotice is the identity.send_security_notice handler.
+func (s *service) handleSecurityNotice(ctx context.Context, payload []byte) error {
+	var n securityNotice
+	if err := json.Unmarshal(payload, &n); err != nil || n.UserID == uuid.Nil() || n.Ref == uuid.Nil() {
+		return queue.Permanent(fmt.Errorf("identity: security notice payload: %w", errors.Join(err, errors.New("missing ids"))))
+	}
+	switch n.Kind {
+	case NoticeSignupAttempt, NoticePasswordChanged, NoticeEmailChangeRequested, NoticeEmailChanged:
+	default:
+		return queue.Permanent(fmt.Errorf("identity: unknown security notice %q", n.Kind))
+	}
+	u, err := s.d.Store.User(ctx, n.UserID)
+	switch {
+	case isNotFound(err):
+		return nil
+	case err != nil:
+		return err
+	}
+	if u.Status == StatusErased || u.Email == "" {
+		return nil
+	}
+	msg := notify.Message{
+		UserID: &u.ID, ToEmail: u.Email, Channel: notify.ChannelEmail, Category: notify.CategoryTransactional,
+		Template: securityNoticeTemplate, Locale: u.Locale,
+		Data:      map[string]any{"name": u.FirstName, "kind": n.Kind, "link": s.d.LinkBaseURL + "/auth/reset-password"},
+		DedupeKey: "identity.security:" + n.Ref.String(),
+	}
+	if _, err := s.d.Mailer.Send(ctx, msg); err != nil {
+		if notify.IsPermanent(err) {
+			return queue.Permanent(err)
+		}
+		return err
+	}
+	return nil
+}

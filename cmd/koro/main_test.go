@@ -27,7 +27,12 @@ func TestRun_Dispatch(t *testing.T) {
 		{"migrate down without N", []string{"migrate", "down"}, 2, "migrate down takes 1 argument"},
 		{"migrate down zero", []string{"migrate", "down", "0"}, 2, "positive step count"},
 		{"migrate without config", []string{"migrate", "up"}, 1, `required environment variable "MIGRATE_DATABASE_URL" is not set`},
-		{"seed not yet", []string{"seed"}, 1, "not implemented yet"},
+		{"seed without command", []string{"seed"}, 2, "missing seed command"},
+		{"seed demo not yet", []string{"seed", "demo"}, 1, "not implemented yet"},
+		{"bootstrap-admin needs two admins", []string{"seed", "bootstrap-admin", "-admin", "Ada Yılmaz <ada@koro.test>"}, 2, "exactly two"},
+		{"bootstrap-admin bad admin", []string{"seed", "bootstrap-admin", "-admin", "ada@koro.test"}, 2, "First Last"},
+		{"bootstrap-admin without config", []string{"seed", "bootstrap-admin", "-admin", "Ada Yılmaz <ada@koro.test>",
+			"-admin", "Can Demir <can@koro.test>"}, 1, `required environment variable "APP_ENV" is not set`},
 		{"api without config", []string{"api"}, 1, `required environment variable "APP_ENV" is not set`},
 		{"healthcheck bad flag", []string{"healthcheck", "-nope"}, 2, "usage"},
 	}

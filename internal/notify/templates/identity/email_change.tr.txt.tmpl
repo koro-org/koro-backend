@@ -1,0 +1,8 @@
+Merhaba {{.Data.name}},
+
+Koro hesabınızın e-posta adresini bu adresle değiştirmek için onaylayın:
+{{index .Data "link"}}
+
+Bağlantı {{index .Data "valid_minutes"}} dakika geçerlidir. Uygulamada kod istenirse şunu girin: {{index .Data "token"}}
+
+Bu isteği siz yapmadıysanız bu iletiyi yok sayın.

@@ -1,0 +1,5 @@
+<p style="margin:0 0 12px 0;">Merhaba {{.Data.name}},</p>
+<p style="margin:0 0 12px 0;">Koro hesabınızın e-posta adresini bu adresle değiştirmek için onaylayın.</p>
+<p style="margin:0 0 12px 0;"><a href="{{index .Data "link"}}" style="color:#1d4ed8;">Yeni adresimi onayla</a></p>
+<p style="margin:0 0 12px 0;">Bağlantı {{index .Data "valid_minutes"}} dakika geçerlidir. Uygulamada kod istenirse şunu girin: <code>{{index .Data "token"}}</code></p>
+<p style="margin:0;">Bu isteği siz yapmadıysanız bu iletiyi yok sayın.</p>

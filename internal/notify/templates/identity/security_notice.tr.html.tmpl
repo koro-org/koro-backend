@@ -1,0 +1,3 @@
+<p style="margin:0 0 12px 0;">Merhaba {{.Data.name}},</p>
+<p style="margin:0 0 12px 0;">{{with index .Data "kind"}}{{if eq . "signup_attempt"}}Bu e-posta adresiyle yeni bir Koro hesabı açılmak istendi. Adresinizin zaten bir hesabı olduğu için yeni hesap açılmadı.{{else if eq . "password_changed"}}Koro hesabınızın parolası değiştirildi; diğer cihazlardaki oturumlarınız kapatıldı.{{else if eq . "email_change_requested"}}Koro hesabınızın e-posta adresinin değiştirilmesi istendi. Değişiklik, yeni adrese gönderilen bağlantıyla onaylanınca geçerli olur.{{else}}Koro hesabınızın e-posta adresi değiştirildi.{{end}}{{end}}</p>
+<p style="margin:0;">Bu işlemi siz yapmadıysanız <a href="{{index .Data "link"}}" style="color:#1d4ed8;">parolanızı hemen sıfırlayın</a>.</p>

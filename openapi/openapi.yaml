@@ -7,6 +7,9 @@ components:
             $ref: "#/components/schemas/Problem"
       description: RFC 9457 problem details
   schemas:
+    AcceptedOutputBody:
+      additionalProperties: false
+      type: object
     AdminGrantInputBody:
       additionalProperties: false
       properties:
@@ -147,6 +150,23 @@ components:
       required:
         - feature
       type: object
+    ChangePasswordInputBody:
+      additionalProperties: false
+      properties:
+        current_password:
+          description: Re-authentication proof (03 §6.2)
+          maxLength: 1024
+          type: string
+        new_password:
+          maxLength: 1024
+          minLength: 1
+          type: string
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: "MFA accounts: reauth.totp_code"
+      required:
+        - new_password
+      type: object
     CompleteUploadInputBody:
       additionalProperties: false
       properties:
@@ -182,6 +202,25 @@ components:
         - purpose_code
         - action
         - occurred_at
+      type: object
+    ConsentGrantBody:
+      additionalProperties: false
+      properties:
+        notice_version_id:
+          description: The consent text shown
+          format: uuid
+          type: string
+        purpose_code:
+          pattern: ^[a-z][a-z0-9_]{2,40}$
+          type: string
+        text_sha256:
+          description: body_sha256 of that text
+          pattern: ^[0-9a-f]{64}$
+          type: string
+      required:
+        - purpose_code
+        - notice_version_id
+        - text_sha256
       type: object
     ConsentProofDTO:
       additionalProperties: false
@@ -405,6 +444,27 @@ components:
       required:
         - items
       type: object
+    EmailChangeInputBody:
+      additionalProperties: false
+      properties:
+        new_email:
+          maxLength: 320
+          type: string
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof (03 §6.2)
+      required:
+        - new_email
+      type: object
+    EmailInputBody:
+      additionalProperties: false
+      properties:
+        email:
+          maxLength: 320
+          type: string
+      required:
+        - email
+      type: object
     EntitlementDTO:
       additionalProperties: false
       properties:
@@ -535,6 +595,109 @@ components:
         - upload_headers
         - expires_at
       type: object
+    LoginInputBody:
+      additionalProperties: false
+      properties:
+        device_label:
+          description: Shown in the session list
+          maxLength: 100
+          type: string
+        email:
+          maxLength: 320
+          type: string
+        password:
+          maxLength: 1024
+          minLength: 1
+          type: string
+      required:
+        - email
+        - password
+      type: object
+    MeDTO:
+      additionalProperties: false
+      properties:
+        birth_date:
+          format: date
+          type: string
+        capabilities:
+          description: Menu hints only; every request is authorized on its own
+          items:
+            type: string
+          type: array
+        email:
+          type: string
+        email_verified_at:
+          format: date-time
+          type: string
+        first_name:
+          type: string
+        is_minor:
+          type: boolean
+        last_name:
+          type: string
+        locale:
+          enum:
+            - tr-TR
+            - en-US
+          type: string
+        memberships:
+          items:
+            $ref: "#/components/schemas/MembershipDTO"
+          type: array
+        mfa_enabled:
+          type: boolean
+        platform_roles:
+          items:
+            type: string
+          type: array
+        signup_persona:
+          enum:
+            - student
+            - company
+            - university
+            - club
+            - platform
+          type: string
+        student:
+          $ref: "#/components/schemas/StudentDTO"
+        user_id:
+          format: uuid
+          type: string
+      required:
+        - user_id
+        - email
+        - first_name
+        - last_name
+        - locale
+        - signup_persona
+        - mfa_enabled
+        - is_minor
+        - student
+        - memberships
+        - platform_roles
+        - capabilities
+      type: object
+    MembershipDTO:
+      additionalProperties: false
+      properties:
+        org_id:
+          format: uuid
+          type: string
+        org_kind:
+          enum:
+            - club
+            - university
+            - company
+            - platform
+            - ngo
+          type: string
+        role:
+          type: string
+      required:
+        - org_id
+        - org_kind
+        - role
+      type: object
     MyConsentsDTO:
       additionalProperties: false
       properties:
@@ -552,6 +715,47 @@ components:
           type: string
       required:
         - current
+        - items
+      type: object
+    MySessionDTO:
+      additionalProperties: false
+      properties:
+        client_kind:
+          enum:
+            - web
+            - mobile
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        current:
+          description: The session of this request
+          type: boolean
+        device_label:
+          type: string
+        last_seen_at:
+          format: date-time
+          type: string
+        session_id:
+          format: uuid
+          type: string
+      required:
+        - session_id
+        - client_kind
+        - created_at
+        - last_seen_at
+        - current
+      type: object
+    MySessionList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/MySessionDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
         - items
       type: object
     NoticeDTO:
@@ -874,6 +1078,60 @@ components:
         - purpose_code
         - action
       type: object
+    RegisterInputBody:
+      additionalProperties: false
+      properties:
+        birth_date:
+          description: YYYY-MM-DD; required for students (age gate)
+          format: date
+          type: string
+        consents:
+          description: Optional consents, one per purpose (unticked by default)
+          items:
+            $ref: "#/components/schemas/ConsentGrantBody"
+          maxItems: 10
+          type: array
+        email:
+          maxLength: 320
+          type: string
+        first_name:
+          maxLength: 200
+          minLength: 1
+          type: string
+        last_name:
+          maxLength: 200
+          minLength: 1
+          type: string
+        locale:
+          enum:
+            - tr-TR
+            - en-US
+          type: string
+        password:
+          description: 15-128 characters; common passwords are refused
+          maxLength: 1024
+          minLength: 1
+          type: string
+        privacy_notice_version_id:
+          description: The privacy notice shown on the page
+          format: uuid
+          type: string
+        signup_persona:
+          enum:
+            - student
+            - company
+            - university
+            - club
+          type: string
+      required:
+        - email
+        - password
+        - first_name
+        - last_name
+        - signup_persona
+        - locale
+        - privacy_notice_version_id
+      type: object
     RegisterPushInputBody:
       additionalProperties: false
       properties:
@@ -893,6 +1151,21 @@ components:
       required:
         - platform
         - token
+      type: object
+    ResetConfirmInputBody:
+      additionalProperties: false
+      properties:
+        new_password:
+          maxLength: 1024
+          minLength: 1
+          type: string
+        token:
+          maxLength: 128
+          minLength: 1
+          type: string
+      required:
+        - token
+        - new_password
       type: object
     RevokedEntitlementDTO:
       additionalProperties: false
@@ -992,6 +1265,30 @@ components:
       required:
         - items
       type: object
+    SessionDTO:
+      additionalProperties: false
+      properties:
+        challenge_id:
+          format: uuid
+          type: string
+        expires_at:
+          description: Absolute expiry of the session (or of the MFA challenge)
+          format: date-time
+          type: string
+        idle_expires_at:
+          description: Expiry if the session stays idle; slides with use
+          format: date-time
+          type: string
+        mfa_required:
+          description: "true: complete the login with completeMfaLogin"
+          type: boolean
+        token:
+          description: Opaque bearer token (mobile clients only; shown once)
+          type: string
+        user_id:
+          format: uuid
+          type: string
+      type: object
     SourceOrgDTO:
       additionalProperties: false
       properties:
@@ -1000,6 +1297,21 @@ components:
           type: string
       required:
         - org_id
+      type: object
+    StudentDTO:
+      additionalProperties: false
+      properties:
+        status:
+          enum:
+            - none
+            - verified
+            - lapsed
+          type: string
+        university_id:
+          format: uuid
+          type: string
+      required:
+        - status
       type: object
     SuppressionDTO:
       additionalProperties: false
@@ -1039,6 +1351,34 @@ components:
           type: string
       required:
         - items
+      type: object
+    TokenInputBody:
+      additionalProperties: false
+      properties:
+        token:
+          description: The token from the e-mail link
+          maxLength: 128
+          minLength: 1
+          type: string
+      required:
+        - token
+      type: object
+    UpdateMeInputBody:
+      additionalProperties: false
+      properties:
+        first_name:
+          maxLength: 200
+          minLength: 1
+          type: string
+        last_name:
+          maxLength: 200
+          minLength: 1
+          type: string
+        locale:
+          enum:
+            - tr-TR
+            - en-US
+          type: string
       type: object
     UpdatePurposeInputBody:
       additionalProperties: false
@@ -1880,6 +2220,253 @@ paths:
       x-koro-break-glass: true
       x-koro-rate-limit: read_default
       x-koro-surface: admin
+  /api/v1/auth/email-change/confirm:
+    post:
+      operationId: confirmEmailChange
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TokenInputBody"
+        required: true
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: Confirm a new e-mail address
+      tags:
+        - identity
+      x-koro-action: identity.email_change.confirm
+      x-koro-idempotency: optional
+      x-koro-rate-limit: token_confirm
+      x-koro-surface: public
+  /api/v1/auth/email-verifications/confirm:
+    post:
+      description: Single use; an unknown, used or expired token is 422 identity.invalid_token.
+      operationId: confirmEmail
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TokenInputBody"
+        required: true
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: Verify an e-mail address
+      tags:
+        - identity
+      x-koro-action: identity.email.verify
+      x-koro-idempotency: optional
+      x-koro-rate-limit: token_confirm
+      x-koro-surface: public
+  /api/v1/auth/email-verifications/resend:
+    post:
+      description: Always 202 (no account enumeration).
+      operationId: resendEmailVerification
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailInputBody"
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcceptedOutputBody"
+          description: Accepted
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: Send the verification e-mail again
+      tags:
+        - identity
+      x-koro-action: identity.email.resend_verification
+      x-koro-idempotency: optional
+      x-koro-rate-limit: auth_email
+      x-koro-surface: public
+  /api/v1/auth/password-resets:
+    post:
+      description: Always 202 (no account enumeration). The link is valid for 30 minutes.
+      operationId: requestPasswordReset
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailInputBody"
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcceptedOutputBody"
+          description: Accepted
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: Request a password reset e-mail
+      tags:
+        - identity
+      x-koro-action: identity.password.reset_request
+      x-koro-idempotency: optional
+      x-koro-rate-limit: auth_password_reset
+      x-koro-surface: public
+  /api/v1/auth/password-resets/confirm:
+    post:
+      description: Every session of the account is closed.
+      operationId: confirmPasswordReset
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetConfirmInputBody"
+        required: true
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: Set a new password with a reset token
+      tags:
+        - identity
+      x-koro-action: identity.password.reset
+      x-koro-idempotency: optional
+      x-koro-rate-limit: auth_password_reset
+      x-koro-surface: public
+  /api/v1/auth/register:
+    post:
+      description: Always 202 for a valid request, whether the address is new or already registered (no account enumeration); a verification e-mail follows. birth_date is required for students (age gate). The privacy notice shown on the page is recorded as shown, never as consent; consents are optional, one per purpose.
+      operationId: registerAccount
+      parameters:
+        - description: Client kind (consent channel); default web
+          in: header
+          name: X-Koro-Client
+          schema:
+            description: Client kind (consent channel); default web
+            enum:
+              - web
+              - mobile
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterInputBody"
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcceptedOutputBody"
+          description: Accepted
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: Register an account
+      tags:
+        - identity
+      x-koro-action: identity.account.register
+      x-koro-idempotency: optional
+      x-koro-rate-limit: auth_register
+      x-koro-surface: public
+  /api/v1/auth/sessions:
+    post:
+      description: "Web clients (X-Koro-Client: web, the default) get the __Host-koro_session cookie and no token; mobile clients get the bearer token once in the body. Wrong credentials, unknown or locked accounts all answer 401 identity.invalid_credentials; an unverified account 403 identity.email_not_verified. An MFA account gets mfa_required with a challenge instead of a session."
+      operationId: createSession
+      parameters:
+        - description: "web (default): cookie; mobile: bearer token in the body"
+          in: header
+          name: X-Koro-Client
+          schema:
+            description: "web (default): cookie; mobile: bearer token in the body"
+            enum:
+              - web
+              - mobile
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionDTO"
+          description: OK
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: Sign in
+      tags:
+        - identity
+      x-koro-action: identity.session.create
+      x-koro-idempotency: optional
+      x-koro-rate-limit: auth_login
+      x-koro-surface: public
+  /api/v1/auth/sessions/current:
+    delete:
+      description: Revokes the session of this request and clears the cookie.
+      operationId: deleteCurrentSession
+      responses:
+        "204":
+          description: No Content
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Sign out
+      tags:
+        - identity
+      x-koro-action: identity.session.delete_current
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
   /api/v1/files/uploads:
     post:
       description: Checks the purpose's MIME/size allow-list and returns a presigned PUT URL (valid 10 minutes) for the object storage. Send exactly upload_headers with the PUT; the API never receives the file itself (04 §1.14).
@@ -2003,6 +2590,62 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+  /api/v1/me:
+    get:
+      description: capabilities are menu hints, not authorization decisions.
+      operationId: getMe
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: My account
+      tags:
+        - identity
+      x-koro-action: identity.account.read_own
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
+    patch:
+      operationId: updateMe
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMeInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Update my name or language
+      tags:
+        - identity
+      x-koro-action: identity.account.update_own
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
   /api/v1/me/consents:
     get:
       operationId: listMyConsents
@@ -2104,6 +2747,40 @@ paths:
       x-koro-action: consent.record.create
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/me/email-change:
+    post:
+      description: A confirmation link goes to the new address, a notice to the current one.
+      operationId: requestEmailChange
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailChangeInputBody"
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcceptedOutputBody"
+          description: Accepted
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Change my e-mail address
+      tags:
+        - identity
+      x-koro-action: identity.email_change.request
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
       x-koro-surface: self
   /api/v1/me/notification-preferences:
     get:
@@ -2286,6 +2963,36 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+  /api/v1/me/password:
+    post:
+      description: "current_password is the re-authentication proof (MFA accounts add reauth.totp_code): missing → 403 identity.reauth_required, wrong → 403 identity.reauth_failed. The other sessions are closed."
+      operationId: changeMyPassword
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordInputBody"
+        required: true
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Change my password
+      tags:
+        - identity
+      x-koro-action: identity.password.change
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: self
   /api/v1/me/push-tokens:
     post:
       description: Bound to the current session. Registering a known token again moves it to this account and session.
@@ -2403,6 +3110,82 @@ paths:
         - audit
       x-koro-action: audit.event.list_own
       x-koro-rate-limit: read_default
+      x-koro-surface: self
+  /api/v1/me/sessions:
+    get:
+      description: Live sessions only, newest first. IP addresses and user agents are not returned.
+      operationId: listMySessions
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MySessionList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List my sessions
+      tags:
+        - identity
+      x-koro-action: identity.session.list_own
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
+  /api/v1/me/sessions/{session_id}:
+    delete:
+      description: Another user's session is 404.
+      operationId: revokeMySession
+      parameters:
+        - description: Session ID (an unknown or malformed ID is 404)
+          in: path
+          name: session_id
+          required: true
+          schema:
+            description: Session ID (an unknown or malformed ID is 404)
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Revoke one of my sessions
+      tags:
+        - identity
+      x-koro-action: identity.session.revoke_own
+      x-koro-rate-limit: write_default
       x-koro-surface: self
   /api/v1/notices/current:
     get:

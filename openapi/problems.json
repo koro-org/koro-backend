@@ -324,6 +324,108 @@
     "type": "urn:koro:problem:idempotency.key_reused"
   },
   {
+    "code": "identity.birth_date_required",
+    "status": 422,
+    "title": "Birth date is required",
+    "type": "urn:koro:problem:identity.birth_date_required"
+  },
+  {
+    "code": "identity.bootstrap_refused",
+    "status": 409,
+    "title": "Bootstrap refused",
+    "type": "urn:koro:problem:identity.bootstrap_refused"
+  },
+  {
+    "code": "identity.duplicate_consent",
+    "status": 422,
+    "title": "Consent purpose listed twice",
+    "type": "urn:koro:problem:identity.duplicate_consent"
+  },
+  {
+    "code": "identity.email_not_verified",
+    "status": 403,
+    "title": "E-mail address not verified",
+    "type": "urn:koro:problem:identity.email_not_verified"
+  },
+  {
+    "code": "identity.email_taken",
+    "status": 409,
+    "title": "E-mail address is already in use",
+    "type": "urn:koro:problem:identity.email_taken"
+  },
+  {
+    "code": "identity.empty_patch",
+    "status": 422,
+    "title": "Nothing to update",
+    "type": "urn:koro:problem:identity.empty_patch"
+  },
+  {
+    "code": "identity.invalid_birth_date",
+    "status": 422,
+    "title": "Invalid birth date",
+    "type": "urn:koro:problem:identity.invalid_birth_date"
+  },
+  {
+    "code": "identity.invalid_credentials",
+    "status": 401,
+    "title": "Invalid e-mail or password",
+    "type": "urn:koro:problem:identity.invalid_credentials"
+  },
+  {
+    "code": "identity.invalid_email",
+    "status": 422,
+    "title": "Invalid e-mail address",
+    "type": "urn:koro:problem:identity.invalid_email"
+  },
+  {
+    "code": "identity.invalid_name",
+    "status": 422,
+    "title": "Invalid name",
+    "type": "urn:koro:problem:identity.invalid_name"
+  },
+  {
+    "code": "identity.invalid_token",
+    "status": 422,
+    "title": "Invalid or expired token",
+    "type": "urn:koro:problem:identity.invalid_token"
+  },
+  {
+    "code": "identity.mfa_unavailable",
+    "status": 503,
+    "title": "Multi-factor authentication is not available",
+    "type": "urn:koro:problem:identity.mfa_unavailable"
+  },
+  {
+    "code": "identity.password_unchanged",
+    "status": 422,
+    "title": "New password equals the current one",
+    "type": "urn:koro:problem:identity.password_unchanged"
+  },
+  {
+    "code": "identity.privacy_notice_invalid",
+    "status": 422,
+    "title": "Privacy notice is not the current one",
+    "type": "urn:koro:problem:identity.privacy_notice_invalid"
+  },
+  {
+    "code": "identity.reauth_failed",
+    "status": 403,
+    "title": "Re-authentication failed",
+    "type": "urn:koro:problem:identity.reauth_failed"
+  },
+  {
+    "code": "identity.reauth_required",
+    "status": 403,
+    "title": "Re-authentication required",
+    "type": "urn:koro:problem:identity.reauth_required"
+  },
+  {
+    "code": "identity.weak_password",
+    "status": 422,
+    "title": "Password does not meet the policy",
+    "type": "urn:koro:problem:identity.weak_password"
+  },
+  {
     "code": "internal_error",
     "status": 500,
     "title": "Internal server error",

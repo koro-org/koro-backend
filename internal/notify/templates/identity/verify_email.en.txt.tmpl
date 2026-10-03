@@ -1,0 +1,8 @@
+Hello {{.Data.name}},
+
+Verify your e-mail address to activate your Koro account:
+{{index .Data "link"}}
+
+The link is valid for {{index .Data "valid_minutes"}} minutes. If the app asks for a code, enter: {{index .Data "token"}}
+
+If you did not sign up, you can ignore this message.

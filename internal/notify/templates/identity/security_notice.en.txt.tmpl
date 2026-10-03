@@ -1,0 +1,5 @@
+Hello {{.Data.name}},
+
+{{with index .Data "kind"}}{{if eq . "signup_attempt"}}Someone tried to open a new Koro account with this e-mail address. No account was created because the address already has one.{{else if eq . "password_changed"}}The password of your Koro account was changed; your sessions on other devices were closed.{{else if eq . "email_change_requested"}}A change of the e-mail address of your Koro account was requested. It takes effect once confirmed through the link sent to the new address.{{else}}The e-mail address of your Koro account was changed.{{end}}{{end}}
+
+If this was not you, reset your password now: {{index .Data "link"}}

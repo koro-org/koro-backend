@@ -1,0 +1,8 @@
+Hello {{.Data.name}},
+
+Confirm this address as the new e-mail address of your Koro account:
+{{index .Data "link"}}
+
+The link is valid for {{index .Data "valid_minutes"}} minutes. If the app asks for a code, enter: {{index .Data "token"}}
+
+If you did not ask for this, ignore this message.

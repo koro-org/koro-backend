@@ -1,0 +1,43 @@
+# Multi-step scenarios of the identity module (03 §7.7; BE-014).
+version: 1
+scenarios:
+  reauth_change_password:
+    note: "03 §7.7 Yeniden doğrulama: changeMyPassword without / with a wrong / with the right proof"
+    steps:
+      - { persona: student, operation: changeMyPassword, body: bodies/identity/change_password_no_current.json, expect: 403, code: identity.reauth_required }
+      - { persona: student, operation: changeMyPassword, body: bodies/identity/change_password_wrong.json, expect: 403, code: identity.reauth_failed }
+      - { persona: student, operation: changeMyPassword, expect: 204 }
+  reauth_rate_limited:
+    note: failed re-authentications lock the account (05 §14.1) and count in the reauth class (5 / 15 min)
+    steps:
+      - { persona: student, operation: changeMyPassword, body: bodies/identity/change_password_wrong.json, expect: 403, code: identity.reauth_failed }
+      - { persona: student, operation: changeMyPassword, body: bodies/identity/change_password_wrong.json, expect: 403, code: identity.reauth_failed }
+      - { persona: student, operation: changeMyPassword, body: bodies/identity/change_password_wrong.json, expect: 403, code: identity.reauth_failed }
+      - { persona: student, operation: changeMyPassword, body: bodies/identity/change_password_wrong.json, expect: 403, code: identity.reauth_failed }
+      - { persona: student, operation: changeMyPassword, body: bodies/identity/change_password_wrong.json, expect: 403, code: identity.reauth_failed }
+      - { persona: student, operation: changeMyPassword, body: bodies/identity/change_password_wrong.json, expect: 429, code: rate_limited }
+      - { persona: student, operation: changeMyPassword, expect: 429, code: rate_limited }
+      - { persona: student_b, operation: changeMyPassword, expect: 204 }
+  email_token_single_use:
+    note: a verification token works once; the account can then sign in
+    steps:
+      - { persona: anonymous, operation: createSession, body: bodies/identity/login_pending.json, expect: 403, code: identity.email_not_verified }
+      - { persona: anonymous, operation: confirmEmail, expect: 204 }
+      - { persona: anonymous, operation: confirmEmail, expect: 422, code: identity.invalid_token }
+      - { persona: anonymous, operation: createSession, body: bodies/identity/login_pending.json, expect: 200 }
+  reset_token_single_use:
+    note: a reset token works once; the old password stops working
+    steps:
+      - { persona: anonymous, operation: confirmPasswordReset, expect: 204 }
+      - { persona: anonymous, operation: confirmPasswordReset, expect: 422, code: identity.invalid_token }
+      - { persona: anonymous, operation: createSession, expect: 401, code: identity.invalid_credentials }
+  own_sessions_only:
+    note: another user's session is 404 for everyone but its owner (O cell)
+    steps:
+      - { persona: student_b, operation: revokeMySession, expect: 404, code: not_found }
+      - { persona: student, operation: revokeMySession, expect: 204 }
+  student_needs_birth_date:
+    note: the age gate of 02 §5.1; a non-student persona registers without one
+    steps:
+      - { persona: anonymous, operation: registerAccount, body: bodies/identity/register_student_no_birth_date.json, expect: 422, code: identity.birth_date_required }
+      - { persona: anonymous, operation: registerAccount, expect: 202 }

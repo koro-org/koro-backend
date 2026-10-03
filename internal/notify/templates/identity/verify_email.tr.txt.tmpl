@@ -1,0 +1,8 @@
+Merhaba {{.Data.name}},
+
+Koro hesabınızı etkinleştirmek için e-posta adresinizi doğrulayın:
+{{index .Data "link"}}
+
+Bağlantı {{index .Data "valid_minutes"}} dakika geçerlidir. Uygulamada kod istenirse şunu girin: {{index .Data "token"}}
+
+Bu kaydı siz yapmadıysanız bu iletiyi yok sayabilirsiniz.

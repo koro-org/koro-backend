@@ -55,6 +55,7 @@ func runAPI(ctx context.Context, stop context.CancelFunc, environ map[string]str
 	defer func() { _ = rdb.Close() }()
 
 	c := newContainer(newInfra(infra{log: log, clock: clk, version: version, cfg: cfg.Modules, db: database}, rdb, cfg.Platform))
+	c.identity.passwd = &cfg.Passwd // only the API hashes passwords (BE-014)
 	if err := c.build(); err != nil {
 		return err
 	}

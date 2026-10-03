@@ -106,6 +106,10 @@ func TestWire_ConsentReauthIsLateBound(t *testing.T) {
 	if err := c.build(); err != nil {
 		t.Fatal(err)
 	}
+	if c.consent.reauth == nil {
+		t.Fatal("identity did not bind consent's re-authentication verifier (BE-014)")
+	}
+	c.consent.reauth = nil // unbound: fail closed
 	dpo, _ := authztest.Get("dpo")
 	proof := consent.ReauthProof{Password: matrixReauthPassword}
 	if _, err := c.consent.svc.UpdatePurpose(t.Context(), dpo.Actor, consent.PurposeCommercialPush,

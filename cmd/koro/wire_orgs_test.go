@@ -2,17 +2,24 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 	"uuid"
 
+	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/identity"
+	"koro/internal/notify"
 	"koro/internal/orgs"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
+	"koro/internal/platform/domainevent"
+	"koro/internal/platform/httpx"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/privacy"
 )
 
@@ -22,6 +29,7 @@ import (
 func (w *orgsWiring) useMemStore() {
 	w.store = orgs.NewMemStore(clock.Real().Now)
 	w.tx = db.NopTx{}
+	w.deriver = testDeriver()
 }
 
 // TestWire_OrgsProvidesDirectoryPrivacyAndOrgKind pins what orgs binds in
@@ -96,5 +104,128 @@ func TestWire_OrgsReadsOpenCommerceAtCallTime(t *testing.T) {
 	v, err := c.orgs.svc.CloseOrg(ctx, admin.Actor, id, "Pilot sona erdi", proof)
 	if err != nil || v.Org.Status != orgs.StatusClosed {
 		t.Fatalf("closeOrg without open commerce = %+v, %v", v.Org, err)
+	}
+}
+
+// TestActor_MembershipsFromHook: orgs fills hooks.memberships (BE-004 R4),
+// so the real ActorResolver carries the user's active org memberships at
+// every request (no cache): the founder of a company is its company_owner
+// at the next request, and a membership that ends is gone at the next one.
+func TestActor_MembershipsFromHook(t *testing.T) {
+	t.Parallel()
+	e := newActorEnv(t)
+	if e.c.hooks.memberships == nil {
+		t.Fatal("hooks.memberships is not filled by orgs")
+	}
+	ctx := t.Context()
+	u := e.user(t, nil)
+	raw := e.session(t, u, identity.ClientMobile)
+	a, err := e.resolve(ctx, httpx.TransportBearer, raw)
+	if err != nil || len(a.Memberships) != 0 {
+		t.Fatalf("before: %+v, %v", a.Memberships, err)
+	}
+	founder := authz.Actor{Kind: authz.KindUser, UserID: u.ID, SessionID: a.SessionID, StudentStatus: authz.StudentNone}
+	v, err := e.c.orgs.svc.CreateCompany(ctx, founder, orgs.CompanyInput{Name: "Kanca Şirketi", SectorCode: "software", SizeBand: "1-10"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// createCompany closes the founder's sessions (role_change): sign in again.
+	raw = e.session(t, u, identity.ClientMobile)
+	a, err = e.resolve(ctx, httpx.TransportBearer, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []authz.Membership{{OrgID: v.Org.ID, OrgKind: authz.OrgCompany, Role: authz.MemberCompanyOwner}}
+	if !slices.Equal(a.Memberships, want) {
+		t.Fatalf("memberships = %+v, want %+v", a.Memberships, want)
+	}
+	if !a.HasOrgRole(v.Org.ID, authz.MemberCompanyOwner) {
+		t.Fatal("the owner's org surface would be 404")
+	}
+	// The company's own management surface is reachable now (not 404).
+	if _, err := e.c.orgs.svc.ListMembers(ctx, a, v.Org.ID, orgs.MemberQuery{}, orgs.Access{}); err != nil &&
+		!errors.Is(err, authz.ErrMFARequired) {
+		t.Fatalf("owner's member list: %v", err)
+	}
+	// A club membership that ends disappears at the next request.
+	club, err := e.c.orgs.svc.Create(ctx, orgs.CreateOrg{Kind: orgs.KindClub, Name: "Kanca Kulübü"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := e.clk.Now().UTC()
+	if _, err := e.c.orgs.store.InsertMember(ctx, orgs.Membership{ID: uuid.NewV7(), OrgID: club, UserID: u.ID,
+		Role: authz.MemberMember, Status: orgs.MemberActive, Source: orgs.SourceInvitation, JoinedAt: &now}); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ = e.resolve(ctx, httpx.TransportBearer, raw); len(a.Memberships) != 2 {
+		t.Fatalf("memberships with the club = %+v", a.Memberships)
+	}
+	if n, err := e.c.orgs.svc.EndRoles(ctx, u.ID, []authz.MemberRole{authz.MemberMember}, orgs.EndClaimRevoked); err != nil || n != 1 {
+		t.Fatalf("EndRoles = %d, %v", n, err)
+	}
+	if a, _ = e.resolve(ctx, httpx.TransportBearer, raw); !slices.Equal(a.Memberships, want) {
+		t.Fatalf("memberships after the end = %+v", a.Memberships)
+	}
+}
+
+// TestWire_OrgsTasksAndInvitationEmail pins what orgs registers (01 §6.2,
+// §7) and runs the invitation e-mail through the wired notify service and
+// the embedded template.
+func TestWire_OrgsTasksAndInvitationEmail(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	var jobs []string
+	for _, j := range c.infra.jobs.Jobs() {
+		if strings.HasPrefix(j.Name, "orgs.") {
+			jobs = append(jobs, j.Name+" "+j.Cron+" "+j.Queue)
+		}
+	}
+	if want := []string{"orgs.admin_sweep 0 1 * * * default", "orgs.invitations_expire 15 * * * * low"}; !slices.Equal(jobs, want) {
+		t.Fatalf("orgs jobs %q, want %q", jobs, want)
+	}
+	for topic, name := range map[string]string{
+		domainevent.TopicOrgInvitationCreated:      orgs.SendInvitationEmailTaskName,
+		domainevent.TopicUserEduVerificationLapsed: orgs.EndLapsedAdminRolesTaskName,
+		domainevent.TopicStudentGraduated:          orgs.EndGraduatedAdminRolesTaskName,
+		domainevent.TopicClubSensitivityChanged:    orgs.PurgeSensitiveMembershipsTaskName,
+	} {
+		if !slices.ContainsFunc(c.infra.subs.For(topic), func(s outbox.Subscription) bool { return s.Name == name }) {
+			t.Errorf("%s is not subscribed to %s", name, topic)
+		}
+	}
+
+	ctx := t.Context()
+	admin, _ := authztest.Get("platform_admin")
+	co, err := c.orgs.svc.Create(ctx, orgs.CreateOrg{Kind: orgs.KindCompany, Name: "E-posta Şirketi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv, err := c.orgs.svc.CreateInvitation(ctx, admin.Actor, co, "yeni.kisi@example.com", authz.MemberRecruiter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := domainevent.New(domainevent.OrgInvitationCreated{InvitationID: inv.ID, OrgID: co}, "org_invitation", inv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.ID, env.OccurredAt = uuid.NewV7(), c.infra.clock.Now()
+	payload, err := json.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub := c.infra.subs.For(domainevent.TopicOrgInvitationCreated)[0]
+	for range 2 { // at-least-once: notify deduplicates
+		if err := sub.HandleTask(workerContext(t), payload); err != nil {
+			t.Fatalf("%s: %v", sub.Name, err)
+		}
+	}
+	sent := c.notify.transport.(*notify.MemTransport).Sent()
+	if len(sent) != 1 || sent[0].To != "yeni.kisi@example.com" ||
+		!strings.Contains(sent[0].Text, "https://app.koro.test/invitations/accept#token=") ||
+		!strings.Contains(sent[0].Text, "E-posta Şirketi") {
+		t.Fatalf("sent %d e-mails", len(sent))
 	}
 }

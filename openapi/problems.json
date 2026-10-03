@@ -756,6 +756,18 @@
     "type": "urn:koro:problem:notify.suppression_not_found"
   },
   {
+    "code": "orgs.already_member",
+    "status": 409,
+    "title": "Already a member or a request is pending",
+    "type": "urn:koro:problem:orgs.already_member"
+  },
+  {
+    "code": "orgs.club_admin_requires_adult_student",
+    "status": 422,
+    "title": "Club admin must be a verified adult student",
+    "type": "urn:koro:problem:orgs.club_admin_requires_adult_student"
+  },
+  {
     "code": "orgs.company_field",
     "status": 422,
     "title": "Company fields apply to companies only",
@@ -772,6 +784,30 @@
     "status": 409,
     "title": "Organization status does not allow this change",
     "type": "urn:koro:problem:orgs.invalid_state"
+  },
+  {
+    "code": "orgs.invitation_exists",
+    "status": 409,
+    "title": "An open invitation to this address exists",
+    "type": "urn:koro:problem:orgs.invitation_exists"
+  },
+  {
+    "code": "orgs.invitation_expired",
+    "status": 409,
+    "title": "Invitation has expired",
+    "type": "urn:koro:problem:orgs.invitation_expired"
+  },
+  {
+    "code": "orgs.last_admin",
+    "status": 409,
+    "title": "The organization's last admin cannot leave",
+    "type": "urn:koro:problem:orgs.last_admin"
+  },
+  {
+    "code": "orgs.member_state",
+    "status": 409,
+    "title": "Membership status does not allow this change",
+    "type": "urn:koro:problem:orgs.member_state"
   },
   {
     "code": "orgs.no_owner",
@@ -796,6 +832,18 @@
     "status": 403,
     "title": "Organization is suspended",
     "type": "urn:koro:problem:orgs.org_suspended"
+  },
+  {
+    "code": "orgs.role_not_allowed",
+    "status": 422,
+    "title": "Role is not allowed for this organization",
+    "type": "urn:koro:problem:orgs.role_not_allowed"
+  },
+  {
+    "code": "orgs.role_unchanged",
+    "status": 422,
+    "title": "Member already has this role",
+    "type": "urn:koro:problem:orgs.role_unchanged"
   },
   {
     "code": "orgs.slug_taken",
@@ -844,6 +892,12 @@
     "status": 408,
     "title": "Request timeout",
     "type": "urn:koro:problem:request_timeout"
+  },
+  {
+    "code": "students.verification_required",
+    "status": 403,
+    "title": "Student verification required",
+    "type": "urn:koro:problem:students.verification_required"
   },
   {
     "code": "unauthenticated",

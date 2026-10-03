@@ -1,4 +1,4 @@
-# Authz matrix of the orgs module (03 §5.2, 04 §2.2; BE-017). 11 operations × 18 personas.
+# Authz matrix of the orgs module (03 §5.2, 04 §2.2; BE-017 + BE-019). 24 operations × 18 personas.
 # Public profile (03 §3.6): active/suspended orgs for everyone; pending_review/closed only for
 # members and platform_admin, support, moderator (others 404). Org management surface
 # (updateOrg, closeOrg, transferOrgOwnership; 03 §7.6): members without the role → 403,
@@ -7,6 +7,11 @@
 # the owner of company_a (company_owner_a is, a helper): k-own cells are 403 for it. R
 # operations carry the matrix password (identity fixtures). Business rules (412/428, 409,
 # 422, suspended org) live in scenarios/orgs.yaml and the service tests.
+# BE-019: member lists are the org's management surface; members do not see each other (T-20);
+# support and platform_admin read them by break-glass (B: 403 without X-Koro-Access-Reason); a
+# sensitive club's list and memberships are hidden from every platform role (Y2: 404). /me and
+# acceptOrgInvitation are the caller's own (another's ID or an invitation to another address → 404).
+# joinClub is a resource surface (the club is public): a non-student is 403.
 version: 1
 groups:
   # signed-in users without a membership in company_a.
@@ -28,6 +33,18 @@ groups:
              company_member, company_admin, other_company_member]
   # platform roles that see pending_review and closed orgs (03 §3.6).
   profile_staff: [moderator, support, platform_admin]
+  # platform roles without a break-glass cell in the member list (03 §5.2).
+  no_bg_staff: [moderator, dpo, finance_admin, talent_auditor]
+  # signed-in users other than student (acceptOrgInvitation of student's invitation).
+  not_student: [user_unverified, student_minor, club_member, club_admin, other_club_admin, event_staff,
+                university_rep, company_member, company_admin, other_company_member,
+                moderator, support, dpo, platform_admin, finance_admin, talent_auditor]
+  # signed-in users other than club_member (leaveMyMembership of club_member's membership).
+  not_club_member: [user_unverified, student, student_minor, club_admin, other_club_admin, event_staff,
+                    university_rep, company_member, company_admin, other_company_member,
+                    moderator, support, dpo, platform_admin, finance_admin, talent_auditor]
+  # signed-in accounts without a student verification (joinClub: 403 students.verification_required).
+  non_students: [user_unverified, university_rep, company_member, company_admin, other_company_member]
 
 operations:
   getOrg:
@@ -257,17 +274,325 @@ operations:
       "@other_staff": 403
       platform_admin: 200
 
-pending_actions:
-  # BE-019: members, memberships and invitations (03 §5.2).
-  - orgs.member.list
-  - orgs.member.read
-  - orgs.member.join
-  - orgs.member.decide
-  - orgs.member.remove
-  - orgs.member.change_role
-  - orgs.membership.list_own
-  - orgs.membership.leave
-  - orgs.invitation.create
-  - orgs.invitation.list
-  - orgs.invitation.revoke
-  - orgs.invitation.accept
+  # ---------------------------------------------------------------- BE-019: memberships
+
+  listOrgMembers:
+    method: GET
+    path: /api/v1/orgs/{org_id}/members
+    action: orgs.member.list
+    path_params: { org_id: club_a }
+    expect:
+      anonymous: 401
+      "@outsiders_club_a": 404
+      club_member: 403          # T-20: members do not see each other
+      club_admin: 200
+      "@no_bg_staff": 403
+      support: 403              # B without X-Koro-Access-Reason
+      platform_admin: 403
+    variants:
+      - name: break_glass
+        headers: { X-Koro-Access-Reason: "Destek talebi 4711: üyelik kaydı inceleniyor" }
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403
+          club_admin: 200
+          "@no_bg_staff": 403
+          support: 200
+          platform_admin: 200
+      - name: sensitive_club
+        path_params: { org_id: club_sensitive }
+        headers: { X-Koro-Access-Reason: "Destek talebi 4711: üyelik kaydı inceleniyor" }
+        note: k4/Y2 — only club_sensitive's club_admin (a helper) lists; staff see nothing, even by break-glass
+        expect:
+          anonymous: 401
+          club_member: 403
+          user_unverified: 404
+          student: 404
+          student_minor: 404
+          club_admin: 404
+          other_club_admin: 404
+          event_staff: 404
+          university_rep: 404
+          company_member: 404
+          company_admin: 404
+          other_company_member: 404
+          "@platform_staff": 404
+      - name: company_org
+        path_params: { org_id: company_a }
+        expect:
+          anonymous: 401
+          "@outsiders_company_a": 404
+          company_member: 200
+          company_admin: 200
+          "@no_bg_staff": 403
+          support: 403
+          platform_admin: 403
+      - name: university_org
+        path_params: { org_id: uni_a }
+        expect:
+          anonymous: 401
+          "@outsiders_uni_a": 404
+          university_rep: 200
+          "@no_bg_staff": 403
+          support: 403
+          platform_admin: 403
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect:
+          anonymous: 401
+          "@signed_in": 404
+
+  getOrgMember:
+    method: GET
+    path: /api/v1/orgs/{org_id}/members/{membership_id}
+    action: orgs.member.read
+    path_params: { org_id: club_a, membership_id: m_club_member_club_a }
+    expect:
+      anonymous: 401
+      "@outsiders_club_a": 404
+      club_member: 403          # own row, but no read cell for clm
+      club_admin: 200
+      "@no_bg_staff": 403
+      support: 403
+      platform_admin: 403
+    variants:
+      - name: break_glass
+        headers: { X-Koro-Access-Reason: "Destek talebi 4711: üyelik kaydı inceleniyor" }
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403
+          club_admin: 200
+          "@no_bg_staff": 403
+          support: 200
+          platform_admin: 200
+      - name: sensitive_membership
+        path_params: { org_id: club_sensitive, membership_id: m_club_member_sensitive }
+        headers: { X-Koro-Access-Reason: "Destek talebi 4711: üyelik kaydı inceleniyor" }
+        note: Y2 — the member sees that the row exists (403), everyone else 404
+        expect:
+          anonymous: 401
+          club_member: 403
+          user_unverified: 404
+          student: 404
+          student_minor: 404
+          club_admin: 404
+          other_club_admin: 404
+          event_staff: 404
+          university_rep: 404
+          company_member: 404
+          company_admin: 404
+          other_company_member: 404
+          "@platform_staff": 404
+      - name: other_org_membership
+        path_params: { org_id: club_a, membership_id: m_company_member_company_a }
+        note: 06 H-38 — another org's membership under club_a's path does not exist
+        expect:
+          anonymous: 401
+          "@signed_in": 404
+
+  approveJoinRequest:
+    method: POST
+    path: /api/v1/orgs/{org_id}/members/{membership_id}/approve
+    action: orgs.member.decide
+    path_params: { org_id: club_a, membership_id: join_pending_a }
+    expect:
+      anonymous: 401
+      "@outsiders_club_a": 404
+      club_member: 403
+      club_admin: 200
+      "@other_staff": 403
+      platform_admin: 403       # decide is the club_admin's only
+
+  rejectJoinRequest:
+    method: POST
+    path: /api/v1/orgs/{org_id}/members/{membership_id}/reject
+    action: orgs.member.decide
+    path_params: { org_id: club_a, membership_id: join_pending_a }
+    expect:
+      anonymous: 401
+      "@outsiders_club_a": 404
+      club_member: 403
+      club_admin: 200
+      "@other_staff": 403
+      platform_admin: 403
+
+  removeOrgMember:
+    method: POST
+    path: /api/v1/orgs/{org_id}/members/{membership_id}/remove
+    action: orgs.member.remove
+    path_params: { org_id: club_a, membership_id: m_club_member_club_a }
+    body: bodies/orgs/remove.json
+    expect:
+      anonymous: 401
+      "@outsiders_club_a": 404
+      club_member: 403
+      club_admin: 204
+      "@other_staff": 403
+      platform_admin: 204
+    variants:
+      - name: company_org
+        path_params: { org_id: company_a, membership_id: m_company_member_company_a }
+        expect:
+          anonymous: 401
+          "@outsiders_company_a": 404
+          company_member: 403
+          company_admin: 204
+          "@other_staff": 403
+          platform_admin: 204
+      - name: university_org
+        path_params: { org_id: uni_a, membership_id: m_university_rep_uni_a }
+        note: university_rep removes (here its own row; university roles are not guarded by k6)
+        expect:
+          anonymous: 401
+          "@outsiders_uni_a": 404
+          university_rep: 204
+          "@other_staff": 403
+          platform_admin: 204
+
+  changeOrgMemberRole:
+    method: POST
+    path: /api/v1/orgs/{org_id}/members/{membership_id}/role
+    action: orgs.member.change_role
+    path_params: { org_id: club_a, membership_id: m_club_member_club_a }
+    body: bodies/orgs/role_club_admin.json
+    note: club_member is a verified adult student (k5 holds)
+    expect:
+      anonymous: 401
+      "@outsiders_club_a": 404
+      club_member: 403
+      club_admin: 200
+      "@other_staff": 403
+      platform_admin: 200
+    variants:
+      - name: company_org
+        path_params: { org_id: company_a, membership_id: m_company_member_company_a }
+        body: bodies/orgs/role_company_admin.json
+        expect:
+          anonymous: 401
+          "@outsiders_company_a": 404
+          company_member: 403
+          company_admin: 200
+          "@other_staff": 403
+          platform_admin: 200
+
+  listMyMemberships:
+    method: GET
+    path: /api/v1/me/memberships
+    action: orgs.membership.list_own
+    expect:
+      anonymous: 401
+      "@signed_in": 200
+
+  leaveMyMembership:
+    method: POST
+    path: /api/v1/me/memberships/{membership_id}/leave
+    action: orgs.membership.leave
+    path_params: { membership_id: m_club_member_club_a }
+    expect:
+      anonymous: 401
+      club_member: 204
+      "@not_club_member": 404   # another user's membership
+
+  createOrgInvitation:
+    method: POST
+    path: /api/v1/orgs/{org_id}/invitations
+    action: orgs.invitation.create
+    path_params: { org_id: club_a }
+    body: bodies/orgs/invite_member.json
+    expect:
+      anonymous: 401
+      "@outsiders_club_a": 404
+      club_member: 403
+      club_admin: 201
+      "@other_staff": 403
+      platform_admin: 201
+    variants:
+      - name: company_org
+        path_params: { org_id: company_a }
+        body: bodies/orgs/invite_recruiter.json
+        expect:
+          anonymous: 401
+          "@outsiders_company_a": 404
+          company_member: 403
+          company_admin: 201
+          "@other_staff": 403
+          platform_admin: 201
+      - name: university_org
+        path_params: { org_id: uni_a }
+        body: bodies/orgs/invite_career_staff.json
+        note: k5 — university roles are invited by platform_admin only
+        expect:
+          anonymous: 401
+          "@outsiders_uni_a": 404
+          university_rep: 403
+          "@other_staff": 403
+          platform_admin: 201
+
+  listOrgInvitations:
+    method: GET
+    path: /api/v1/orgs/{org_id}/invitations
+    action: orgs.invitation.list
+    path_params: { org_id: club_a }
+    expect:
+      anonymous: 401
+      "@outsiders_club_a": 404
+      club_member: 403
+      club_admin: 200
+      "@other_staff": 403
+      platform_admin: 200
+
+  revokeOrgInvitation:
+    method: DELETE
+    path: /api/v1/orgs/{org_id}/invitations/{invitation_id}
+    action: orgs.invitation.revoke
+    path_params: { org_id: club_a, invitation_id: inv_club_a }
+    expect:
+      anonymous: 401
+      "@outsiders_club_a": 404
+      club_member: 403
+      club_admin: 204
+      "@other_staff": 403
+      platform_admin: 204
+    variants:
+      - name: other_org_invitation
+        path_params: { org_id: company_a, invitation_id: inv_club_a }
+        note: 06 H-38 — club_a's invitation under company_a's path does not exist
+        expect:
+          anonymous: 401
+          "@signed_in": 404
+
+  acceptOrgInvitation:
+    method: POST
+    path: /api/v1/invitations/accept
+    action: orgs.invitation.accept
+    body: bodies/orgs/accept_for_student.json
+    note: the invitation is addressed to student's account; any other account gets 404
+    expect:
+      anonymous: 401
+      student: 200
+      "@not_student": 404
+
+  joinClub:
+    method: POST
+    path: /api/v1/clubs/{club_id}/join-requests
+    action: orgs.member.join
+    path_params: { club_id: club_unclaimed }
+    body: bodies/orgs/join.json
+    expect:
+      anonymous: 401
+      "@verified_students": 201
+      "@non_students": 403
+      "@platform_staff": 403
+    variants:
+      - name: unknown_club
+        path_params: { club_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect:
+          anonymous: 401
+          "@signed_in": 404
+      - name: not_a_club
+        path_params: { club_id: company_a }
+        expect:
+          anonymous: 401
+          "@signed_in": 404

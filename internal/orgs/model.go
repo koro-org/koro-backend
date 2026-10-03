@@ -134,12 +134,28 @@ const (
 // EndReason is org_members.end_reason.
 type EndReason string
 
-// End reasons used by this module (the others belong to the membership
-// lifecycle, BE-019).
+// End reasons (org_members_end_reason_chk).
 const (
-	EndOrgClosed   EndReason = "org_closed"
-	EndRoleChanged EndReason = "role_changed"
+	EndLeft               EndReason = "left"                // the member left (or withdrew a join request)
+	EndRemoved            EndReason = "removed"             // an admin removed the member
+	EndRejected           EndReason = "rejected"            // a join request was rejected
+	EndGraduated          EndReason = "graduated"           // student.graduated: club_admin ends (01 §6.2)
+	EndVerificationLapsed EndReason = "verification_lapsed" // the student verification lapsed: club_admin ends
+	EndClaimRevoked       EndReason = "claim_revoked"       // directory revoked a club claim (BE-022)
+	EndAccountErased      EndReason = "account_erased"      // KVKK erasure (privacy provider)
+	EndOrgClosed          EndReason = "org_closed"
+	EndRoleChanged        EndReason = "role_changed"
 )
+
+// Valid reports whether r is a reason of the CHECK constraint.
+func (r EndReason) Valid() bool {
+	switch r {
+	case EndLeft, EndRemoved, EndRejected, EndGraduated, EndVerificationLapsed, EndClaimRevoked,
+		EndAccountErased, EndOrgClosed, EndRoleChanged:
+		return true
+	}
+	return false
+}
 
 // Membership is one org_members row (02 §7.3). It is personal data (in a
 // sensitive club, special-category data): never logged, exported only to
@@ -218,3 +234,77 @@ type OrgView struct {
 
 // reauthProof is the re-authentication proof of an R operation (03 §6.2).
 type reauthProof = identity.ReauthProof
+
+// invitableRole reports whether r may be the role of an invitation of an
+// org of kind k (org_invitations_role_kind_chk: company_owner, the platform
+// and the ngo roles are never invited).
+func invitableRole(k Kind, r authz.MemberRole) bool {
+	switch k {
+	case KindClub:
+		return r == authz.MemberMember || r == authz.MemberClubAdmin
+	case KindUniversity:
+		return r == authz.MemberUniversityRep || r == authz.MemberCareerStaff
+	case KindCompany:
+		return r == authz.MemberCompanyAdmin || r == authz.MemberRecruiter
+	}
+	return false
+}
+
+// mfaRole reports the member roles whose grant or loss closes the user's
+// sessions (03 §2.2-6: company admin roles and university_rep are MFA roles,
+// §6.4; the new session policy applies at once).
+func mfaRole(r authz.MemberRole) bool {
+	return r == authz.MemberCompanyOwner || r == authz.MemberCompanyAdmin || r == authz.MemberUniversityRep
+}
+
+// guardedRole reports the roles an org must keep at least one of
+// (03 k6: the last club_admin and the company_owner cannot leave, be
+// removed or be demoted through the HTTP operations).
+func guardedRole(k Kind, r authz.MemberRole) bool {
+	return k == KindClub && r == authz.MemberClubAdmin || k == KindCompany && r == authz.MemberCompanyOwner
+}
+
+// Join policies of clubs.join_policy (directory).
+const (
+	JoinOpen     = "open"     // a join request is active at once
+	JoinApproval = "approval" // a club_admin approves it
+)
+
+// ClubFacts are the join-relevant facts of a club (directory's clubs row;
+// hooks.clubInfo, T-77).
+type ClubFacts struct {
+	UniversityID uuid.UUID
+	JoinPolicy   string // JoinOpen | JoinApproval
+	Sensitive    bool   // clubs.is_sensitive: special-category data (02 §7.3)
+}
+
+// Invitation is one org_invitations row (02 §7.4). Email is personal data:
+// never logged or audited. Only the SHA-256 of the derived token is stored
+// (TokenHash); the token itself is re-derived from (KeyID, ID) by the worker
+// that sends the e-mail and is never stored or put into an event.
+type Invitation struct {
+	ID              uuid.UUID        `gorm:"type:uuid;column:id;primaryKey"`
+	OrgID           uuid.UUID        `gorm:"type:uuid;column:org_id"`
+	OrgKind         Kind             `gorm:"column:org_kind"`
+	Email           string           `gorm:"column:email"`
+	EmailNormalized string           `gorm:"column:email_normalized"`
+	Role            authz.MemberRole `gorm:"column:role"`
+	KeyID           string           `gorm:"column:key_id"`
+	TokenHash       []byte           `gorm:"column:token_hash"`
+	InvitedBy       uuid.UUID        `gorm:"type:uuid;column:invited_by"`
+	ExpiresAt       time.Time        `gorm:"column:expires_at"`
+	AcceptedAt      *time.Time       `gorm:"column:accepted_at"`
+	AcceptedUserID  *uuid.UUID       `gorm:"type:uuid;column:accepted_user_id"`
+	RevokedAt       *time.Time       `gorm:"column:revoked_at"`
+	CreatedAt       time.Time        `gorm:"column:created_at"`
+}
+
+// TableName implements gorm's Tabler.
+func (Invitation) TableName() string { return "org_invitations" }
+
+// Open reports whether the invitation was neither accepted nor revoked (an
+// expired one is still open until orgs.invitations_expire closes it).
+func (i Invitation) Open() bool { return i.AcceptedAt == nil && i.RevokedAt == nil }
+
+// Expired reports whether the invitation can no longer be accepted at now.
+func (i Invitation) Expired(now time.Time) bool { return !now.Before(i.ExpiresAt) }

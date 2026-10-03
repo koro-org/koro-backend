@@ -33,6 +33,38 @@ var (
 	// company.
 	ErrCompanyFieldOnly = problem.New(problem.Invalid, "orgs.company_field", "Company fields apply to companies only")
 
+	// ErrLastAdmin: the last club_admin of a club or the company_owner would
+	// leave, be removed or be demoted (03 k6; 04 §1.10). An org never stays
+	// without an admin through the HTTP operations.
+	ErrLastAdmin = problem.New(problem.Conflict, "orgs.last_admin", "The organization's last admin cannot leave")
+	// ErrClubAdminNeedsAdultStudent: club_admin goes only to a verified
+	// student who is 18 or older (03 k5, T-55).
+	ErrClubAdminNeedsAdultStudent = problem.New(problem.Invalid, "orgs.club_admin_requires_adult_student",
+		"Club admin must be a verified adult student")
+	// ErrRoleNotAllowed: the role does not exist for the org's kind, or is
+	// company_owner (only orgs.ownership.transfer moves it; 03 k5).
+	ErrRoleNotAllowed = problem.New(problem.Invalid, "orgs.role_not_allowed", "Role is not allowed for this organization")
+	// ErrRoleUnchanged: changeOrgMemberRole to the member's current role.
+	ErrRoleUnchanged = problem.New(problem.Invalid, "orgs.role_unchanged", "Member already has this role")
+	// ErrMemberState: the membership's status does not allow the change
+	// (approving an active membership, removing a pending request).
+	ErrMemberState = problem.New(problem.Conflict, "orgs.member_state", "Membership status does not allow this change")
+	// ErrAlreadyMember: the user already has a pending or active membership
+	// of the org (org_members_open_uq).
+	ErrAlreadyMember = problem.New(problem.Conflict, "orgs.already_member", "Already a member or a request is pending")
+	// ErrInvitationExists: an open, unexpired invitation to the same address
+	// exists (org_invitations_open_uq).
+	ErrInvitationExists = problem.New(problem.Conflict, "orgs.invitation_exists", "An open invitation to this address exists")
+	// ErrInvitationExpired: the invitation's 7 days are over (shown only to
+	// the invited account itself: the e-mail matched).
+	ErrInvitationExpired = problem.New(problem.Conflict, "orgs.invitation_expired", "Invitation has expired")
+	// ErrVerificationRequired: an action for verified students (joinClub)
+	// by an account without an active student verification (03 §2.3, k-uv).
+	// The code is the cross-module one of 04 §1.10; other modules that need
+	// it reuse this value (problem codes are registered once; T-207).
+	ErrVerificationRequired = problem.New(problem.Forbidden, "students.verification_required",
+		"Student verification required")
+
 	// ErrNotFound: the org does not exist or is not visible to the caller.
 	ErrNotFound = problem.ErrNotFound
 	// ErrPreconditionRequired / ErrPreconditionFailed: If-Match missing or

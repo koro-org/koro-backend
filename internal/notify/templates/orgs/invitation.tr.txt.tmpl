@@ -1,0 +1,9 @@
+Merhaba,
+
+{{index .Data "org_name"}} sizi Koro'da {{template "role_tr" .}} olarak davet etti. Daveti kabul etmek için:
+{{index .Data "link"}}
+
+Daveti bu e-posta adresiyle açılmış Koro hesabınızla kabul edebilirsiniz. Davet {{index .Data "valid_days"}} gün geçerlidir ve bir kez kullanılabilir. Uygulamada kod istenirse şunu girin: {{index .Data "token"}}
+
+Bu daveti beklemiyorsanız bu iletiyi yok sayabilirsiniz.
+{{define "role_tr"}}{{$r := printf "%v" (index .Data "role")}}{{if eq $r "member"}}üye{{else if eq $r "club_admin"}}kulüp yöneticisi{{else if eq $r "university_rep"}}üniversite temsilcisi{{else if eq $r "career_staff"}}kariyer merkezi görevlisi{{else if eq $r "company_admin"}}şirket yöneticisi{{else}}işe alım sorumlusu{{end}}{{end}}

@@ -37,8 +37,37 @@ const TypeOrgCatalog = "org_catalog"
 // suspended-org rule (403 orgs.org_suspended, 03 §2.3) is the service's:
 // its code is not an authz code.
 //
-// The remaining orgs actions (members, memberships, invitations) belong to
-// BE-019: until then they are visible and granted to no role path (403).
+// BE-019 adds the membership lifecycle (03 §5.2):
+//
+//	orgs.member.list         S·k4: club_admin; university_rep (k-cs); recruiter (company_member);
+//	                           company_admin/owner of the org; B: support, platform_admin
+//	orgs.member.read         same cells as the list (resource org_member)
+//	orgs.member.join         stu, min (clm, cla, stf are verified students: the student paths)
+//	orgs.member.decide       S: club_admin
+//	orgs.member.remove       S: club_admin, university_rep (k-cs), company_admin/owner; platform_admin
+//	orgs.member.change_role  S·k5: club_admin, company_admin/owner; platform_admin (k5 in the service)
+//	orgs.membership.list_own O (resource user: the caller's own account)
+//	orgs.membership.leave    O (resource org_member owned by the caller; k6 in the service)
+//	orgs.invitation.create   S·k5: club_admin, company_admin/owner; platform_admin
+//	orgs.invitation.list     S: club_admin, company_admin/owner; platform_admin
+//	orgs.invitation.revoke   S: club_admin, company_admin/owner; platform_admin
+//	orgs.invitation.accept   O: the service sets OwnerUserID to the caller once the invited
+//	                           address matched the caller's account (otherwise 404 before authz)
+//
+// Visibility: the member list and the invitation collection are the org's
+// management surface (org resource). A sensitive club's list (Attrs
+// sensitive=true, k4/Y2) is visible to the club's active members only:
+// platform staff get 404 (§7.2: Y2 is the exception to "staff see
+// management surfaces"), a plain member 403. A single membership
+// (org_member) is the management surface too; the core's Y2 hides a
+// sensitive one from everyone but its member and the club's club_admin.
+// /me/memberships/{id} and an invitation being accepted are the caller's
+// own (O): anyone else's is 404. joinClub addresses a club (resource
+// club): the catalog is public (§7.6), so an account without a student
+// verification gets 403 (the service turns it into
+// students.verification_required, k-uv). university_rep is invited and
+// assigned by platform_admin only (k5): club and company admins never hold
+// a role in a university org.
 func orgsPolicy() Policy {
 	return Policy{
 		Types: map[string][]string{TypeOrgCatalog: nil},
@@ -54,8 +83,30 @@ func orgsPolicy() Policy {
 				return r.Type == TypeOrg && OrgSurfaceVisible(a, r.OrgID)
 			case OrgsOrgListAdmin, OrgsOrgVerify, OrgsOrgSuspend:
 				return r.Type == TypeAdminSurface && AdminSurfaceVisible(a)
+			case OrgsMemberList:
+				if r.Type != TypeOrg {
+					return false
+				}
+				if r.Flag(AttrSensitive) {
+					return r.OrgID != nil && a.MemberOf(*r.OrgID) // Y2: no staff
+				}
+				return OrgSurfaceVisible(a, r.OrgID)
+			case OrgsInvitationList:
+				return r.Type == TypeOrg && OrgSurfaceVisible(a, r.OrgID)
+			case OrgsMemberRead, OrgsMemberDecide, OrgsMemberRemove, OrgsMemberChangeRole:
+				return r.Type == TypeOrgMember && OrgSurfaceVisible(a, r.OrgID)
+			case OrgsInvitationCreate, OrgsInvitationRevoke:
+				return r.Type == TypeOrgInvitation && OrgSurfaceVisible(a, r.OrgID)
+			case OrgsMembershipListOwn:
+				return r.Type == TypeUser && a.Owns(r)
+			case OrgsMembershipLeave:
+				return r.Type == TypeOrgMember && a.Owns(r)
+			case OrgsInvitationAccept:
+				return r.Type == TypeOrgInvitation && a.Owns(r)
+			case OrgsMemberJoin:
+				return r.Type == TypeClub
 			}
-			return true // BE-019's actions: no grant below → 403
+			return false
 		},
 		Grants: func(a Actor, act Action, r Resource) []Grant {
 			pad := Grant{Role: RolePlatformAdmin}
@@ -90,10 +141,56 @@ func orgsPolicy() Policy {
 				return []Grant{{Role: RoleModerator}, {Role: RoleSupport}, pad}
 			case OrgsOrgVerify, OrgsOrgSuspend:
 				return []Grant{pad}
+			case OrgsMemberList, OrgsMemberRead:
+				return orgsMemberReadGrants(a, r)
+			case OrgsMemberDecide:
+				return orgsRoleGrants(a, r, false, MemberClubAdmin)
+			case OrgsMemberRemove:
+				return orgsRoleGrants(a, r, true, MemberClubAdmin, MemberUniversityRep, MemberCompanyAdmin, MemberCompanyOwner)
+			case OrgsMemberChangeRole, OrgsInvitationCreate, OrgsInvitationList, OrgsInvitationRevoke:
+				return orgsRoleGrants(a, r, true, MemberClubAdmin, MemberCompanyAdmin, MemberCompanyOwner)
+			case OrgsMembershipListOwn, OrgsMembershipLeave, OrgsInvitationAccept:
+				return []Grant{{Role: RoleSelf}}
+			case OrgsMemberJoin:
+				return []Grant{{Role: RoleStudent}, {Role: RoleStudentMinor}}
 			}
 			return nil
 		},
 	}
+}
+
+// orgsMemberRole maps an org role to its matrix role path (03 §1.2).
+var orgsMemberRole = map[MemberRole]Role{
+	MemberMember: RoleClubMember, MemberClubAdmin: RoleClubAdmin, MemberUniversityRep: RoleUniversityRep,
+	MemberCareerStaff: RoleCareerStaff, MemberRecruiter: RoleCompanyMember, MemberCompanyAdmin: RoleCompanyAdmin,
+	MemberCompanyOwner: RoleCompanyAdmin,
+}
+
+// orgsRoleGrants returns the S grants of the actor's roles among roles in the
+// resource's org (cell S: that org only), plus platform_admin when pad.
+func orgsRoleGrants(a Actor, r Resource, pad bool, roles ...MemberRole) []Grant {
+	var gs []Grant
+	if pad {
+		gs = append(gs, Grant{Role: RolePlatformAdmin})
+	}
+	if r.OrgID == nil {
+		return gs
+	}
+	for _, m := range roles {
+		if a.HasOrgRole(*r.OrgID, m) {
+			gs = append(gs, Grant{Role: orgsMemberRole[m]})
+		}
+	}
+	return gs
+}
+
+// orgsMemberReadGrants is orgs.member.list / orgs.member.read (03 §5.2 with k4,
+// k-cs): the org's club_admin, university_rep, recruiter, company_admin and
+// owner; support and platform_admin by break-glass, which the core voids in
+// a sensitive club (Y2 → 404).
+func orgsMemberReadGrants(a Actor, r Resource) []Grant {
+	gs := orgsRoleGrants(a, r, false, MemberClubAdmin, MemberUniversityRep, MemberRecruiter, MemberCompanyAdmin, MemberCompanyOwner)
+	return append(gs, Grant{Role: RoleSupport, BreakGlass: true}, Grant{Role: RolePlatformAdmin, BreakGlass: true})
 }
 
 // orgProfileVisible is 03 §3.6 "Org (public profile)".

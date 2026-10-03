@@ -7,6 +7,31 @@ components:
             $ref: "#/components/schemas/Problem"
       description: RFC 9457 problem details
   schemas:
+    AcceptInputBody:
+      additionalProperties: false
+      properties:
+        token:
+          description: Token from the invitation e-mail
+          maxLength: 128
+          minLength: 1
+          type: string
+      required:
+        - token
+      type: object
+    AcceptedInvitationDTO:
+      additionalProperties: false
+      properties:
+        membership_id:
+          type: string
+        org_id:
+          type: string
+        role:
+          type: string
+      required:
+        - membership_id
+        - org_id
+        - role
+      type: object
     AcceptedOutputBody:
       additionalProperties: false
       type: object
@@ -1884,6 +1909,78 @@ components:
         - role
         - reason
       type: object
+    InvitationDTO:
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+        expires_at:
+          format: date-time
+          type: string
+        invitation_id:
+          type: string
+        role:
+          type: string
+      required:
+        - invitation_id
+        - email
+        - role
+        - expires_at
+      type: object
+    InvitationList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/InvitationDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
+    InviteInputBody:
+      additionalProperties: false
+      properties:
+        email:
+          description: Address of the invited person; only the account with this address can accept
+          maxLength: 254
+          type: string
+        role:
+          enum:
+            - member
+            - club_admin
+            - university_rep
+            - career_staff
+            - company_admin
+            - recruiter
+          type: string
+      required:
+        - email
+        - role
+      type: object
+    JoinInputBody:
+      additionalProperties: false
+      properties:
+        message:
+          description: Optional note (not stored)
+          maxLength: 300
+          type: string
+      type: object
+    JoinRequestDTO:
+      additionalProperties: false
+      properties:
+        membership_id:
+          type: string
+        status:
+          enum:
+            - pending
+            - active
+          type: string
+      required:
+        - membership_id
+        - status
+      type: object
     LoginInputBody:
       additionalProperties: false
       properties:
@@ -1966,6 +2063,72 @@ components:
         - platform_roles
         - capabilities
       type: object
+    MemberDTO:
+      additionalProperties: false
+      properties:
+        joined_at:
+          format: date-time
+          type: string
+        membership_id:
+          type: string
+        requested_at:
+          format: date-time
+          type: string
+        role:
+          enum:
+            - member
+            - club_admin
+            - university_rep
+            - career_staff
+            - company_owner
+            - company_admin
+            - recruiter
+            - staff
+            - ngo_admin
+            - ngo_member
+          type: string
+        status:
+          enum:
+            - pending
+            - active
+            - ended
+          type: string
+        user:
+          $ref: "#/components/schemas/MemberUserDTO"
+      required:
+        - membership_id
+        - user
+        - role
+        - status
+      type: object
+    MemberList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/MemberDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
+    MemberUserDTO:
+      additionalProperties: false
+      properties:
+        avatar_url:
+          type: string
+        first_name:
+          type: string
+        last_name:
+          type: string
+        user_id:
+          type: string
+      required:
+        - user_id
+        - first_name
+        - last_name
+      type: object
     MembershipDTO:
       additionalProperties: false
       properties:
@@ -1986,6 +2149,28 @@ components:
         - org_id
         - org_kind
         - role
+      type: object
+    MembershipOrgDTO:
+      additionalProperties: false
+      properties:
+        kind:
+          enum:
+            - platform
+            - university
+            - club
+            - company
+            - ngo
+          type: string
+        logo_url:
+          type: string
+        name:
+          type: string
+        org_id:
+          type: string
+      required:
+        - org_id
+        - kind
+        - name
       type: object
     MfaLoginInputBody:
       additionalProperties: false
@@ -2059,6 +2244,42 @@ components:
           type: string
       required:
         - status
+      type: object
+    MyMembershipDTO:
+      additionalProperties: false
+      properties:
+        joined_at:
+          format: date-time
+          type: string
+        membership_id:
+          type: string
+        org:
+          $ref: "#/components/schemas/MembershipOrgDTO"
+        role:
+          type: string
+        status:
+          enum:
+            - pending
+            - active
+            - ended
+          type: string
+      required:
+        - membership_id
+        - org
+        - role
+        - status
+      type: object
+    MyMembershipList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/MyMembershipDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
       type: object
     MySessionDTO:
       additionalProperties: false
@@ -2786,6 +3007,14 @@ components:
       required:
         - rejection_reason
       type: object
+    RemoveInputBody:
+      additionalProperties: false
+      properties:
+        reason:
+          description: Internal note (audited)
+          maxLength: 500
+          type: string
+      type: object
     RequestSensitivityInputBody:
       additionalProperties: false
       properties:
@@ -2909,6 +3138,21 @@ components:
         - valid_to
         - status
         - source_type
+      type: object
+    RoleInputBody:
+      additionalProperties: false
+      properties:
+        role:
+          enum:
+            - member
+            - club_admin
+            - university_rep
+            - career_staff
+            - company_admin
+            - recruiter
+          type: string
+      required:
+        - role
       type: object
     SecurityEventDTO:
       additionalProperties: false
@@ -6209,6 +6453,46 @@ paths:
       x-koro-action: directory.club.update
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+  /api/v1/clubs/{club_id}/join-requests:
+    post:
+      description: Verified students only (403 students.verification_required). An open club makes the membership active at once, an approval club leaves it pending for the club_admin.
+      operationId: joinClub
+      parameters:
+        - description: The club's org ID
+          in: path
+          name: club_id
+          required: true
+          schema:
+            description: The club's org ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JoinInputBody"
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JoinRequestDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Ask to join a club
+      tags:
+        - orgs
+      x-koro-action: orgs.member.join
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
   /api/v1/clubs/{club_id}/sensitivity-requests:
     post:
       description: Audited; the platform admins get an in-app notice. Only a platform admin sets the flag.
@@ -6405,6 +6689,39 @@ paths:
       x-koro-action: files.upload.complete
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/invitations/accept:
+    post:
+      description: The token comes from the invitation e-mail. The invitation must be addressed to the signed-in account's e-mail (otherwise 404); an expired one is 409 orgs.invitation_expired.
+      operationId: acceptOrgInvitation
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AcceptInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcceptedInvitationDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Accept an invitation
+      tags:
+        - orgs
+      x-koro-action: orgs.invitation.accept
+      x-koro-idempotency: optional
+      x-koro-rate-limit: token_confirm
       x-koro-surface: self
   /api/v1/me:
     get:
@@ -6908,6 +7225,94 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: reauth
       x-koro-reauth: true
+      x-koro-surface: self
+  /api/v1/me/memberships:
+    get:
+      description: "Sensitive club memberships included (only for their owner). Default: pending and active."
+      operationId: listMyMemberships
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: "Default: pending and active"
+          explode: false
+          in: query
+          name: status
+          schema:
+            description: "Default: pending and active"
+            enum:
+              - pending
+              - active
+              - ended
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyMembershipList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List my memberships
+      tags:
+        - orgs
+      x-koro-action: orgs.membership.list_own
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
+  /api/v1/me/memberships/{membership_id}/leave:
+    post:
+      description: The last club_admin and the company_owner cannot leave (409 orgs.last_admin).
+      operationId: leaveMyMembership
+      parameters:
+        - description: Membership ID
+          in: path
+          name: membership_id
+          required: true
+          schema:
+            description: Membership ID
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Leave a membership (or withdraw a join request)
+      tags:
+        - orgs
+      x-koro-action: orgs.membership.leave
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
       x-koro-surface: self
   /api/v1/me/mfa/recovery-codes:
     post:
@@ -8083,6 +8488,451 @@ paths:
         - entitlements
       x-koro-action: entitlements.entitlement.read
       x-koro-rate-limit: read_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/invitations:
+    get:
+      operationId: listOrgInvitations
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitationList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List an organization's open invitations
+      tags:
+        - orgs
+      x-koro-action: orgs.invitation.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+    post:
+      description: The invitation is valid for 7 days and can be accepted once, by the account with the invited address only. company_owner is never invited; university roles are invited by platform_admin.
+      operationId: createOrgInvitation
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InviteInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitationDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Invite someone to an organization by e-mail
+      tags:
+        - orgs
+      x-koro-action: orgs.invitation.create
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/invitations/{invitation_id}:
+    delete:
+      operationId: revokeOrgInvitation
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+        - description: Invitation ID
+          in: path
+          name: invitation_id
+          required: true
+          schema:
+            description: Invitation ID
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Revoke an open invitation
+      tags:
+        - orgs
+      x-koro-action: orgs.invitation.revoke
+      x-koro-rate-limit: write_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/members:
+    get:
+      description: The org's admins (club_admin, university_rep, company roles) see the list; members do not see each other. support and platform_admin need X-Koro-Access-Reason (break-glass, audited). A sensitive club's list is its club_admin's only, every read is audited, and platform staff get 404.
+      operationId: listOrgMembers
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+        - description: "Break-glass justification (support, platform_admin: 10–500 characters)"
+          in: header
+          name: X-Koro-Access-Reason
+          schema:
+            description: "Break-glass justification (support, platform_admin: 10–500 characters)"
+            maxLength: 500
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: "Default: both"
+          explode: false
+          in: query
+          name: status
+          schema:
+            description: "Default: both"
+            enum:
+              - pending
+              - active
+            type: string
+        - explode: false
+          in: query
+          name: role
+          schema:
+            enum:
+              - member
+              - club_admin
+              - university_rep
+              - career_staff
+              - company_owner
+              - company_admin
+              - recruiter
+            type: string
+        - description: joined_at (oldest first); default newest first
+          explode: false
+          in: query
+          name: sort
+          schema:
+            description: joined_at (oldest first); default newest first
+            enum:
+              - joined_at
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List an organization's members
+      tags:
+        - orgs
+      x-koro-action: orgs.member.list
+      x-koro-break-glass: true
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/members/{membership_id}:
+    get:
+      description: Same rules as listOrgMembers. Ended memberships are not found.
+      operationId: getOrgMember
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+        - description: Membership ID
+          in: path
+          name: membership_id
+          required: true
+          schema:
+            description: Membership ID
+            type: string
+        - description: "Break-glass justification (support, platform_admin: 10–500 characters)"
+          in: header
+          name: X-Koro-Access-Reason
+          schema:
+            description: "Break-glass justification (support, platform_admin: 10–500 characters)"
+            maxLength: 500
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get one membership of an organization
+      tags:
+        - orgs
+      x-koro-action: orgs.member.read
+      x-koro-break-glass: true
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/members/{membership_id}/approve:
+    post:
+      description: club_admin only. pending → active; another status is 409 orgs.member_state.
+      operationId: approveJoinRequest
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+        - description: Membership ID
+          in: path
+          name: membership_id
+          required: true
+          schema:
+            description: Membership ID
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Approve a join request
+      tags:
+        - orgs
+      x-koro-action: orgs.member.decide
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/members/{membership_id}/reject:
+    post:
+      description: club_admin only. No reason is shown to the student; in a sensitive club the request is deleted.
+      operationId: rejectJoinRequest
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+        - description: Membership ID
+          in: path
+          name: membership_id
+          required: true
+          schema:
+            description: Membership ID
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Reject a join request
+      tags:
+        - orgs
+      x-koro-action: orgs.member.decide
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/members/{membership_id}/remove:
+    post:
+      description: The last club_admin and the company_owner cannot be removed (409 orgs.last_admin).
+      operationId: removeOrgMember
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+        - description: Membership ID
+          in: path
+          name: membership_id
+          required: true
+          schema:
+            description: Membership ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RemoveInputBody"
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Remove a member
+      tags:
+        - orgs
+      x-koro-action: orgs.member.remove
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/members/{membership_id}/role:
+    post:
+      description: "The old membership ends (role_changed) and a new one starts: the answer carries the new membership_id. club_admin goes to verified adult students only (422 orgs.club_admin_requires_adult_student); company_owner moves by ownership transfer only; the last club_admin cannot be demoted (409 orgs.last_admin)."
+      operationId: changeOrgMemberRole
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+        - description: Membership ID
+          in: path
+          name: membership_id
+          required: true
+          schema:
+            description: Membership ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RoleInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Change a member's role
+      tags:
+        - orgs
+      x-koro-action: orgs.member.change_role
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
       x-koro-surface: org
   /api/v1/orgs/{org_id}/ownership-transfer:
     post:

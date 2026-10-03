@@ -12,6 +12,9 @@ import (
 	"unicode/utf8"
 	"uuid"
 
+	"golang.org/x/text/collate"
+	"golang.org/x/text/language"
+
 	"koro/internal/platform/db"
 	"koro/internal/platform/problem"
 	"koro/internal/platform/textx"
@@ -37,6 +40,7 @@ type MemStore struct {
 	orgs      map[uuid.UUID]Org
 	companies map[uuid.UUID]Company
 	members   []Membership // insertion order
+	invites   []Invitation // insertion order
 	// now stamps created_at/updated_at like the column defaults and the
 	// touch trigger; updated_at always moves forward (two writes at the
 	// same fake instant still change the ETag, as two transactions do).
@@ -192,19 +196,24 @@ func (s *MemStore) ListOrgs(_ context.Context, f ListFilter, after *ListAfter, l
 		}
 	}
 	byName := f.Sort == SortName
+	tr := collate.New(language.Turkish) // the store's public.tr collation (ICU tr-TR); not shared: not concurrency safe
+	byTR := func(a, b Org) int {
+		if c := tr.CompareString(a.Name, b.Name); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.ID.String(), b.ID.String())
+	}
 	slices.SortFunc(out, func(a, b Org) int {
 		if byName {
-			if c := cmp.Compare(a.Name, b.Name); c != 0 {
-				return c
-			}
-			return cmp.Compare(a.ID.String(), b.ID.String())
+			return byTR(a, b)
 		}
 		return cmp.Compare(b.ID.String(), a.ID.String())
 	})
 	if after != nil {
+		pos := Org{Name: after.Name, ID: after.ID}
 		out = slices.DeleteFunc(out, func(o Org) bool {
 			if byName {
-				return o.Name < after.Name || o.Name == after.Name && o.ID.String() <= after.ID.String()
+				return byTR(o, pos) <= 0
 			}
 			return o.ID.String() >= after.ID.String()
 		})

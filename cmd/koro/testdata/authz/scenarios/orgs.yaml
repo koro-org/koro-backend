@@ -60,3 +60,56 @@ scenarios:
       - { persona: platform_admin, operation: adminGrantEntitlement, path_params: { org_id: uni_a }, expect: 422,
           code: entitlements.org_not_company }
       - { persona: finance_admin, operation: adminGrantEntitlement, expect: 201 }
+  role_drop:
+    note: >-
+      "Rol düşmesi" (03 §7.7, 02 §7.3): club_admin's student verification lapses →
+      user.edu_verification_lapsed ends its club_admin membership (orgs.end_lapsed_admin_roles); the row is
+      gone from club_a's member surface. The createEvent step (404) joins with the events ticket; the
+      persona's static actor still carries the membership here, the real resolver reads hooks.memberships
+      (TestActor_MembershipsFromHook).
+    steps:
+      - { persona: platform_admin, operation: getOrgMember, path_params: { org_id: club_a, membership_id: m_club_admin_club_a },
+          headers: { X-Koro-Access-Reason: "Destek talebi 4711: üyelik kaydı inceleniyor" }, expect: 200 }
+      - { hook: orgs.edu_lapsed, args: { persona: club_admin } }
+      - { persona: platform_admin, operation: getOrgMember, path_params: { org_id: club_a, membership_id: m_club_admin_club_a },
+          headers: { X-Koro-Access-Reason: "Destek talebi 4711: üyelik kaydı inceleniyor" }, expect: 404 }
+  last_admin:
+    note: 03 k6 — club_a's only club_admin cannot leave, be demoted or removed (409 orgs.last_admin)
+    steps:
+      - { persona: club_admin, operation: leaveMyMembership, path_params: { membership_id: m_club_admin_club_a }, expect: 409,
+          code: orgs.last_admin }
+      - { persona: club_admin, operation: changeOrgMemberRole, path_params: { membership_id: m_club_admin_club_a },
+          body: bodies/orgs/role_member.json, expect: 409, code: orgs.last_admin }
+      - { persona: platform_admin, operation: removeOrgMember, path_params: { membership_id: m_club_admin_club_a }, expect: 409,
+          code: orgs.last_admin }
+      - { persona: club_admin, operation: changeOrgMemberRole, expect: 200 }
+      - { persona: club_admin, operation: leaveMyMembership, path_params: { membership_id: m_club_admin_club_a }, expect: 204 }
+  join_and_approve:
+    note: >-
+      joinClub on an approval club leaves the request pending; club_admin approves it once (04 §2.2);
+      a second request is 409; an account without a student verification gets students.verification_required
+    steps:
+      - { persona: student, operation: joinClub, path_params: { club_id: club_a }, expect: 201, save: { join_req: membership_id } }
+      - { persona: student, operation: joinClub, path_params: { club_id: club_a }, expect: 409, code: orgs.already_member }
+      - { persona: club_admin, operation: approveJoinRequest, path_params: { membership_id: join_req }, expect: 200 }
+      - { persona: club_admin, operation: approveJoinRequest, path_params: { membership_id: join_req }, expect: 409,
+          code: orgs.member_state }
+      - { persona: user_unverified, operation: joinClub, expect: 403, code: students.verification_required }
+  invitation_rules:
+    note: >-
+      acceptOrgInvitation — another account with the token gets 404 (e-mail mismatch), the addressee 200
+      once (single use), an expired invitation 409, a minor's club_admin invitation 422 (03 k5, T-55)
+    steps:
+      - { persona: other_club_admin, operation: acceptOrgInvitation, expect: 404 }
+      - { persona: student, operation: acceptOrgInvitation, expect: 200 }
+      - { persona: student, operation: acceptOrgInvitation, expect: 404 }
+      - { persona: student, operation: acceptOrgInvitation, body: bodies/orgs/accept_expired.json, expect: 409,
+          code: orgs.invitation_expired }
+      - { persona: student_minor, operation: acceptOrgInvitation, body: bodies/orgs/accept_minor_admin.json, expect: 422,
+          code: orgs.club_admin_requires_adult_student }
+  break_glass_members:
+    note: support lists club_a's members only with X-Koro-Access-Reason (03 §6.3)
+    steps:
+      - { persona: support, operation: listOrgMembers, expect: 403, code: authz.break_glass_reason_required }
+      - { persona: support, operation: listOrgMembers, headers: { X-Koro-Access-Reason: "Destek talebi 4711: üyelik kaydı inceleniyor" },
+          expect: 200 }

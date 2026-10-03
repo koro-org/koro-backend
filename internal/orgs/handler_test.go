@@ -143,3 +143,49 @@ func TestHTTP_UpdateOrg_ETagRoundTrip(t *testing.T) {
 		t.Fatalf("PATCH by another company = %d", rec.Code)
 	}
 }
+
+// TestSearchOrgs_SortName_TurkishCollation (T-203): ?sort=name orders by
+// name in Turkish collation (C < Ç, I < İ, O < Ö; not byte order) and the
+// cursor continues in the same order.
+func TestSearchOrgs_SortName_TurkishCollation(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	names := []string{"Zeytin Kulübü", "Öykü Kulübü", "İpek Kulübü", "Çınar Kulübü", "Oya Kulübü", "Işık Kulübü", "Cem Kulübü"}
+	for _, n := range names {
+		if _, err := e.svc.Create(t.Context(), orgs.CreateOrg{Kind: orgs.KindClub, Name: n}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	app := newHTTP(t, e)
+	var got []string
+	cursor := ""
+	for range 4 {
+		path := "/api/v1/orgs?kind=club&sort=name&limit=2"
+		if cursor != "" {
+			path += "&cursor=" + cursor
+		}
+		rec := call(t, app, "anonymous", http.MethodGet, path, "", nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("searchOrgs = %d %s", rec.Code, rec.Body.String())
+		}
+		var body orgs.OrgCardList
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		for _, it := range body.Items {
+			got = append(got, strings.TrimSuffix(it.Name, " Kulübü"))
+		}
+		if cursor = body.NextCursor; cursor == "" {
+			break
+		}
+	}
+	want := []string{"Cem", "Çınar", "Işık", "İpek", "Oya", "Öykü", "Zeytin"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("sort=name = %v, want %v", got, want)
+	}
+	// Without sort the newest comes first.
+	rec := call(t, app, "anonymous", http.MethodGet, "/api/v1/orgs?kind=club&limit=1", "", nil)
+	if !strings.Contains(rec.Body.String(), "Cem Kulübü") {
+		t.Fatalf("default order: %s", rec.Body.String())
+	}
+}

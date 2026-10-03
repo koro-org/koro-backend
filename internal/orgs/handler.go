@@ -14,8 +14,9 @@ import (
 	"koro/internal/platform/page"
 )
 
-// Register adds the orgs operations of BE-017 (04 §2.2) to api. svc may be
-// nil (`koro openapi`): handlers only touch it when called.
+// Register adds the orgs operations (04 §2.2; BE-017's 11 and BE-019's 13,
+// joinClub of 04 §2.3 included) to api. svc may be nil (`koro openapi`):
+// handlers only touch it when called.
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
 
@@ -89,6 +90,8 @@ func Register(api huma.API, svc Service) {
 		Summary: "Reactivate a suspended organization", Description: "suspended → active, with re-authentication.",
 	}, op.Meta{Action: string(authz.OrgsOrgSuspend), Surface: op.SurfaceAdmin, Reauth: true, RateLimit: op.RateReauth,
 		Idempotency: op.IdempotencyOptional}, h.adminReactivate)
+
+	registerMembers(api, h)
 }
 
 // reg registers one orgs operation with its Koro metadata.

@@ -9,6 +9,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/files"
 	"koro/internal/identity"
+	"koro/internal/notify"
 )
 
 // AuditLogger is what orgs needs from audit (L1): every write is logged in
@@ -64,3 +65,45 @@ type OpenCommerceCheck func(ctx context.Context, orgID uuid.UUID) (open bool, er
 // The university ↔ club relation lives in directory (L6), above orgs, so
 // directory binds it late (BE-020). nil → the filter matches nothing.
 type UniversityOrgs func(ctx context.Context, universityID uuid.UUID) ([]uuid.UUID, error)
+
+// Users is what orgs needs from identity's user directory (L4; 01 §4.6):
+// member names for the member list, the account's address for an
+// invitation's e-mail match, the age of a club_admin candidate and the
+// locale of the invitation e-mail. It is identity.Service.
+type Users interface {
+	// Get returns a user or identity.ErrNotFound.
+	Get(ctx context.Context, id uuid.UUID) (identity.UserSummary, error)
+	// GetMany returns the users of ids that exist.
+	GetMany(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]identity.UserSummary, error)
+	// Contact returns the address of a live user or identity.ErrNotFound.
+	Contact(ctx context.Context, id uuid.UUID) (identity.UserContact, error)
+	// FindByEmail returns the account of an address.
+	FindByEmail(ctx context.Context, email string) (uuid.UUID, bool, error)
+}
+
+// Students answers whether a user is a verified student (identity
+// StudentVerification; BE-018 fills it in, until then nobody is). club_admin
+// needs one (03 k5, 02 §7.3), and the admin sweep ends the role without it.
+type Students interface {
+	Active(ctx context.Context, userID uuid.UUID) (identity.EduVerification, bool, error)
+	ActiveMany(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]identity.EduVerification, error)
+}
+
+// Mailer sends the invitation e-mail from the worker (notify, L3).
+type Mailer interface {
+	Send(ctx context.Context, m notify.Message) (uuid.UUID, error)
+}
+
+// ClubInfo returns the join-relevant facts of a club org (T-77): its
+// university, join policy and sensitivity live in directory (L6), above
+// orgs, so directory binds it late (hooks.clubInfo, BE-020). found=false
+// when directory has no club for the org. With no provider joinClub is 404
+// and every club counts as sensitive (fail closed: its member list is the
+// club_admin's only, and an ended membership is deleted at once).
+type ClubInfo func(ctx context.Context, clubOrgID uuid.UUID) (club ClubFacts, found bool, err error)
+
+// GraduatedUsers reports which of userIDs have a graduated student profile
+// (students, L7, binds it late; BE-023). The admin sweep uses it as the
+// safety net of student.graduated (01 §7; T-210). nil → the sweep checks
+// the student verification only.
+type GraduatedUsers func(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]bool, error)

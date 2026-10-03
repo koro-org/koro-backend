@@ -1,0 +1,9 @@
+Hello,
+
+{{index .Data "org_name"}} invited you to Koro as {{template "role_en" .}}. To accept the invitation:
+{{index .Data "link"}}
+
+Accept it with the Koro account that uses this e-mail address. The invitation is valid for {{index .Data "valid_days"}} days and can be used once. If the app asks for a code, enter: {{index .Data "token"}}
+
+If you did not expect this invitation, ignore this message.
+{{define "role_en"}}{{$r := printf "%v" (index .Data "role")}}{{if eq $r "member"}}a member{{else if eq $r "club_admin"}}a club admin{{else if eq $r "university_rep"}}a university representative{{else if eq $r "career_staff"}}a career centre staff member{{else if eq $r "company_admin"}}a company admin{{else}}a recruiter{{end}}{{end}}

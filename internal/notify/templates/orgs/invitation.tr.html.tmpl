@@ -1,0 +1,6 @@
+<p style="margin:0 0 12px 0;">Merhaba,</p>
+<p style="margin:0 0 12px 0;">{{index .Data "org_name"}} sizi Koro'da {{template "role_tr_html" .}} olarak davet etti.</p>
+<p style="margin:0 0 12px 0;"><a href="{{index .Data "link"}}" style="color:#1d4ed8;">Daveti kabul et</a></p>
+<p style="margin:0 0 12px 0;">Daveti bu e-posta adresiyle açılmış Koro hesabınızla kabul edebilirsiniz. Davet {{index .Data "valid_days"}} gün geçerlidir ve bir kez kullanılabilir. Uygulamada kod istenirse şunu girin: <code>{{index .Data "token"}}</code></p>
+<p style="margin:0;">Bu daveti beklemiyorsanız bu iletiyi yok sayabilirsiniz.</p>
+{{define "role_tr_html"}}{{$r := printf "%v" (index .Data "role")}}{{if eq $r "member"}}üye{{else if eq $r "club_admin"}}kulüp yöneticisi{{else if eq $r "university_rep"}}üniversite temsilcisi{{else if eq $r "career_staff"}}kariyer merkezi görevlisi{{else if eq $r "company_admin"}}şirket yöneticisi{{else}}işe alım sorumlusu{{end}}{{end}}

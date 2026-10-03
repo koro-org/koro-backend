@@ -1,10 +1,32 @@
-# Fixtures of the orgs module (cmd/koro/matrix_orgs_test.go; BE-017). IDs are authztest.ID(name).
+# Fixtures of the orgs module (cmd/koro/matrix_orgs_test.go; BE-017, BE-019). IDs are authztest.ID(name).
 # Besides these, the seeder writes every org of authztest.Orgs() (03 §7.3: active and verified;
 # companies with a profile) and one active org_members row per membership of every persona and
 # helper user (company_owner_a is company_a's company_owner). Every org has the slug of its name
 # with hyphens (company_a → company-a) and updated_at 2026-10-01T00:00:00Z: its ETag is
 # "1hmhuo3hji000" until it changes. No persona is a member of the orgs below.
+#
+# BE-019: persona_membership names the row of a persona's membership (its ID is the fixture's);
+# membership adds a row for a helper user; invitation adds an open invitation whose token is
+# matrixToken(name) (the accept bodies hold it), expires: past makes it expired. The club facts
+# (join policy approval, club_sensitive sensitive) come from directory's fixtures through
+# hooks.clubInfo; the seeder serves the student verification of the personas (identity's stub
+# verifies nobody until BE-018).
 version: 1
 fixtures:
   company_pending: { kind: org, type: company, status: pending_review }
   company_suspended: { kind: org, type: company, status: suspended }
+
+  m_club_member_club_a: { kind: persona_membership, persona: club_member, org: club_a }
+  m_club_member_sensitive: { kind: persona_membership, persona: club_member, org: club_sensitive }
+  m_club_admin_club_a: { kind: persona_membership, persona: club_admin, org: club_a }
+  m_company_member_company_a: { kind: persona_membership, persona: company_member, org: company_a }
+  m_university_rep_uni_a: { kind: persona_membership, persona: university_rep, org: uni_a }
+
+  join_pending_a: { kind: membership, user: student_b, org: club_a, role: member, status: pending }
+
+  inv_club_a: { kind: invitation, org: club_a, email: newcomer@matrix.koro.test, role: member, invited_by: club_admin }
+  inv_for_student: { kind: invitation, org: club_a, email: student@matrix.koro.test, role: member, invited_by: club_admin }
+  inv_minor_admin: { kind: invitation, org: club_a, email: student_minor@matrix.koro.test, role: club_admin,
+                     invited_by: club_admin }
+  inv_expired: { kind: invitation, org: club_b, email: student@matrix.koro.test, role: member,
+                 invited_by: other_club_admin, expires: past }

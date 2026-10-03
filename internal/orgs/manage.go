@@ -275,6 +275,16 @@ func (s *service) CloseOrg(ctx context.Context, a authz.Actor, id uuid.UUID, rea
 		if err != nil {
 			return uuid.Nil(), err
 		}
+		// A sensitive club's ended memberships are deleted at once (02 §7.3).
+		sens, err := s.sensitive(ctx, o.ID, o.Kind)
+		if err != nil {
+			return uuid.Nil(), err
+		}
+		for i := 0; sens && i < len(gone); i++ {
+			if err := s.d.Store.DeleteMember(ctx, o.ID, gone[i].ID); err != nil {
+				return uuid.Nil(), err
+			}
+		}
 		meta := map[string]any{"reauth": kind, "ended_memberships": len(gone)}
 		if err := s.d.Audit.Log(ctx, auditEvent(a, authz.OrgsOrgClose, o.ID, reason, meta)); err != nil {
 			return uuid.Nil(), err

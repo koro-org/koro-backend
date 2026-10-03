@@ -46,9 +46,9 @@ notification_preferences    personal  notify        provider:notify
 # orgs
 organizations               staff     orgs          -
 companies                   none      orgs          -
-# orgs (BE-017 provider exports memberships; their erasure lands with the membership lifecycle, BE-019)
+# orgs (memberships and invitations: exported and erased by the orgs provider, BE-019)
 org_members                 special   orgs          provider:orgs
-org_invitations             personal  orgs          todo:BE-019
+org_invitations             personal  orgs          provider:orgs
 # directory
 universities                none      directory     -
 university_email_domains    staff     directory     -

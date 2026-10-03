@@ -14,8 +14,8 @@ import (
 	"koro/internal/platform/textx"
 )
 
-// NewGormStore returns the PostgreSQL store over organizations, companies
-// and org_members (02 §7.1–7.3).
+// NewGormStore returns the PostgreSQL store over organizations, companies,
+// org_members and org_invitations (02 §7.1–7.4).
 func NewGormStore(orm *gorm.DB) Store { return gormStore{orm: orm} }
 
 type gormStore struct{ orm *gorm.DB }
@@ -36,6 +36,9 @@ var constraints = db.Constraints{
 	"org_members_open_uq":              problem.ErrConflict,
 	"org_members_one_owner_uq":         problem.ErrConflict,
 	"organizations_single_platform_uq": problem.ErrConflict,
+	"org_invitations_open_uq":          ErrInvitationExists,
+	"org_invitations_token_hash_uq":    problem.ErrConflict,
+	"org_members_org_id_org_kind_fkey": problem.ErrNotFound,
 }
 
 func wrap(op string, err error) error {
@@ -173,10 +176,13 @@ func (s gormStore) ListOrgs(ctx context.Context, f ListFilter, after *ListAfter,
 			OR public.koro_norm(name) LIKE '%' || public.koro_norm( ?) || '%')`, f.Q, textx.EscapeLike(f.Q))
 	}
 	if f.Sort == SortName {
+		// Turkish collation (organizations.name is COLLATE public.tr, ICU
+		// tr-TR): Ç after C, I before İ, Ö after O; spelled out so the
+		// keyset comparison uses the same order (T-203).
 		if after != nil {
-			q = q.Where("(name, id) > ( ?, ?)", after.Name, after.ID)
+			q = q.Where("(name COLLATE public.tr, id) > ( ? COLLATE public.tr, ?)", after.Name, after.ID)
 		}
-		q = q.Order("name, id")
+		q = q.Order("name COLLATE public.tr, id")
 	} else {
 		if after != nil {
 			q = q.Where("id < ?", after.ID)

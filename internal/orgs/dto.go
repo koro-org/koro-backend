@@ -165,3 +165,92 @@ func utc(t *time.Time) *time.Time {
 	u := t.UTC()
 	return &u
 }
+
+// MemberUserDTO is the member's public identity in a member list (04 §2.2;
+// no e-mail: 04 §V.4). avatar_url comes with the student profile (BE-023).
+type MemberUserDTO struct {
+	UserID    string `json:"user_id"`
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+	AvatarURL string `json:"avatar_url,omitempty"`
+}
+
+// MemberDTO is a membership as the org's admins see it (04 §2.2).
+type MemberDTO struct {
+	MembershipID string        `json:"membership_id"`
+	User         MemberUserDTO `json:"user"`
+	Role         string        `json:"role" enum:"member,club_admin,university_rep,career_staff,company_owner,company_admin,recruiter,staff,ngo_admin,ngo_member"`
+	Status       string        `json:"status" enum:"pending,active,ended"`
+	RequestedAt  *time.Time    `json:"requested_at,omitempty"`
+	JoinedAt     *time.Time    `json:"joined_at,omitempty"`
+}
+
+// MemberList is a page of MemberDTO.
+type MemberList struct {
+	Items      []MemberDTO `json:"items"`
+	NextCursor string      `json:"next_cursor,omitempty"`
+}
+
+// MembershipOrgDTO is the org of one of my memberships.
+type MembershipOrgDTO struct {
+	OrgID   string `json:"org_id"`
+	Kind    string `json:"kind" enum:"platform,university,club,company,ngo"`
+	Name    string `json:"name"`
+	LogoURL string `json:"logo_url,omitempty"`
+}
+
+// MyMembershipDTO is one of the caller's memberships (04 §2.2
+// listMyMemberships; sensitive clubs included, only for the caller).
+type MyMembershipDTO struct {
+	MembershipID string           `json:"membership_id"`
+	Org          MembershipOrgDTO `json:"org"`
+	Role         string           `json:"role"`
+	Status       string           `json:"status" enum:"pending,active,ended"`
+	JoinedAt     *time.Time       `json:"joined_at,omitempty"`
+}
+
+// MyMembershipList is a page of MyMembershipDTO.
+type MyMembershipList struct {
+	Items      []MyMembershipDTO `json:"items"`
+	NextCursor string            `json:"next_cursor,omitempty"`
+}
+
+// InvitationDTO is an invitation as the org's admins see it (04 §2.2).
+type InvitationDTO struct {
+	InvitationID string    `json:"invitation_id"`
+	Email        string    `json:"email"`
+	Role         string    `json:"role"`
+	ExpiresAt    time.Time `json:"expires_at"`
+}
+
+// InvitationList is a page of InvitationDTO.
+type InvitationList struct {
+	Items      []InvitationDTO `json:"items"`
+	NextCursor string          `json:"next_cursor,omitempty"`
+}
+
+// AcceptedInvitationDTO is the answer of acceptOrgInvitation.
+type AcceptedInvitationDTO struct {
+	MembershipID string `json:"membership_id"`
+	OrgID        string `json:"org_id"`
+	Role         string `json:"role"`
+}
+
+// JoinRequestDTO is the answer of joinClub.
+type JoinRequestDTO struct {
+	MembershipID string `json:"membership_id"`
+	Status       string `json:"status" enum:"pending,active"`
+}
+
+func toMemberDTO(v MemberView) MemberDTO {
+	m := v.Membership
+	return MemberDTO{
+		MembershipID: m.ID.String(), Role: string(m.Role), Status: string(m.Status),
+		User:        MemberUserDTO{UserID: m.UserID.String(), FirstName: v.FirstName, LastName: v.LastName},
+		RequestedAt: utc(m.RequestedAt), JoinedAt: utc(m.JoinedAt),
+	}
+}
+
+func toInvitationDTO(i Invitation) InvitationDTO {
+	return InvitationDTO{InvitationID: i.ID.String(), Email: i.Email, Role: string(i.Role), ExpiresAt: i.ExpiresAt.UTC()}
+}

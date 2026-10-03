@@ -179,8 +179,11 @@ func (s *service) SearchOrgs(ctx context.Context, a authz.Actor, q SearchQuery) 
 	return s.list(ctx, f, q.Limit, q.After)
 }
 
+// sortOf maps the sort query value (04 §2.2 searchOrgs: "name") to the
+// store order; anything else is newest first. T-203: "name" used to fall
+// through to newest first.
 func sortOf(s string) string {
-	if s == SortName {
+	if s == "name" || s == SortName {
 		return SortName
 	}
 	return SortNewest

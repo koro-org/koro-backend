@@ -1,9 +1,11 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/mail"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -16,8 +18,9 @@ const (
 	SMTPTLSImplicit = "tls"      // implicit TLS (usually port 465)
 )
 
-// Notify configures the notify module (internal/notify): the SMTP relay and
-// the sender identity of e-mails. Owner: BE-005. Only tickets of the notify
+// Notify configures the notify module (internal/notify): the SMTP relay, the
+// sender identity of e-mails and the provider webhook secrets. Owner: BE-005,
+// BE-015. Only tickets of the notify
 // module edit this file and the "# --- notify ---" block of .env.example
 // (BE-001 R7).
 //
@@ -33,6 +36,47 @@ type Notify struct {
 	SMTPFrom     string        `env:"SMTP_FROM" envDefault:"noreply@koro.test"`
 	SMTPFromName string        `env:"SMTP_FROM_NAME" envDefault:"Koro"`
 	SMTPTimeout  time.Duration `env:"SMTP_TIMEOUT" envDefault:"15s"` // dial + one send
+
+	// EmailWebhookResendSecret is the svix signing secret of the Resend
+	// webhook ("whsec_<base64>"); empty → /webhooks/email/resend answers 401
+	// (BE-015).
+	EmailWebhookResendSecret Secret `env:"EMAIL_WEBHOOK_RESEND_SECRET"`
+	// EmailWebhookSESTopicARNs lists the SNS topics (comma separated) allowed
+	// to post SES notifications; empty → /webhooks/email/ses answers 401.
+	EmailWebhookSESTopicARNs string `env:"EMAIL_WEBHOOK_SES_TOPIC_ARNS"`
+}
+
+// svixSecretPrefix starts every svix signing secret.
+const svixSecretPrefix = "whsec_"
+
+var reSNSTopicARN = regexp.MustCompile(`^arn:aws[a-z-]*:sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]{1,256}$`)
+
+// ResendWebhookSecret returns the decoded svix secret (nil when unset).
+func (n Notify) ResendWebhookSecret() ([]byte, error) {
+	raw := strings.TrimSpace(n.EmailWebhookResendSecret.Reveal())
+	if raw == "" {
+		return nil, nil
+	}
+	b64, ok := strings.CutPrefix(raw, svixSecretPrefix)
+	if !ok {
+		return nil, errors.New("EMAIL_WEBHOOK_RESEND_SECRET must start with whsec_")
+	}
+	key, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil || len(key) < 16 {
+		return nil, errors.New("EMAIL_WEBHOOK_RESEND_SECRET must be whsec_ followed by at least 16 base64-encoded bytes")
+	}
+	return key, nil
+}
+
+// SESTopicARNs returns the allowed SNS topic ARNs.
+func (n Notify) SESTopicARNs() []string {
+	var out []string
+	for a := range strings.SplitSeq(n.EmailWebhookSESTopicARNs, ",") {
+		if a = strings.TrimSpace(a); a != "" {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // placeholderTLDs are reserved names that can never be a real sender domain.
@@ -75,6 +119,16 @@ func (n *Notify) validate(c Common) error {
 	n.SMTPFromName = strings.TrimSpace(n.SMTPFromName)
 	if len([]rune(n.SMTPFromName)) > 100 || strings.IndexFunc(n.SMTPFromName, unicode.IsControl) >= 0 {
 		errs = append(errs, errors.New("SMTP_FROM_NAME must be at most 100 characters without control characters"))
+	}
+
+	if _, err := n.ResendWebhookSecret(); err != nil {
+		errs = append(errs, err)
+	}
+	for _, a := range n.SESTopicARNs() {
+		if !reSNSTopicARN.MatchString(a) {
+			errs = append(errs, errors.New("EMAIL_WEBHOOK_SES_TOPIC_ARNS must list SNS topic ARNs (arn:aws:sns:<region>:<account>:<topic>)"))
+			break
+		}
 	}
 
 	if c.ProdLike() {

@@ -390,10 +390,28 @@
     "type": "urn:koro:problem:notify.not_in_worker"
   },
   {
-    "code": "notify.store_not_wired",
-    "status": 503,
-    "title": "Notification delivery store is not wired",
-    "type": "urn:koro:problem:notify.store_not_wired"
+    "code": "notify.notification_not_found",
+    "status": 404,
+    "title": "Notification not found",
+    "type": "urn:koro:problem:notify.notification_not_found"
+  },
+  {
+    "code": "notify.push_token_not_found",
+    "status": 404,
+    "title": "Push token not found",
+    "type": "urn:koro:problem:notify.push_token_not_found"
+  },
+  {
+    "code": "notify.security_preference_locked",
+    "status": 422,
+    "title": "Security notifications cannot be switched off",
+    "type": "urn:koro:problem:notify.security_preference_locked"
+  },
+  {
+    "code": "notify.suppression_not_found",
+    "status": 404,
+    "title": "E-mail suppression not found",
+    "type": "urn:koro:problem:notify.suppression_not_found"
   },
   {
     "code": "page.invalid_cursor",

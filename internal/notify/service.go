@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"unicode/utf8"
 	"uuid"
@@ -34,7 +35,7 @@ func (s *service) Send(ctx context.Context, m Message) (uuid.UUID, error) {
 
 	// Render before claiming the dedupe key: a message that cannot be rendered
 	// must not leave a delivery row behind.
-	rendered, version, err := s.render(m)
+	c, err := s.prepare(m)
 	if err != nil {
 		return uuid.Nil(), err
 	}
@@ -43,7 +44,7 @@ func (s *service) Send(ctx context.Context, m Message) (uuid.UUID, error) {
 	d, state, err := s.d.Store.Claim(ctx, Delivery{
 		ID: uuid.NewV7(), UserID: m.UserID, RecipientIndex: s.recipientIndex(m),
 		Channel: m.Channel, Category: m.Category, Template: m.Template,
-		TemplateVersion: version, DedupeKey: m.DedupeKey,
+		TemplateVersion: c.meta.Version, DedupeKey: m.DedupeKey,
 	}, now, s.d.Lease)
 	if err != nil {
 		return uuid.Nil(), fmt.Errorf("notify: claim delivery: %w", err)
@@ -57,7 +58,7 @@ func (s *service) Send(ctx context.Context, m Message) (uuid.UUID, error) {
 		return d.ID, ErrDeliveryInFlight
 	}
 
-	result, sendErr := s.deliver(ctx, m, rendered, d)
+	result, sendErr := s.deliver(ctx, m, c, d)
 
 	// The outcome is recorded even if the context was cancelled meanwhile.
 	if _, err := s.d.Store.Finish(context.WithoutCancel(ctx), d.ID, result, s.d.Clock.Now()); err != nil {
@@ -81,62 +82,139 @@ func (s *service) Send(ctx context.Context, m Message) (uuid.UUID, error) {
 	return d.ID, sendErr
 }
 
-// render renders the e-mail body. Push and in-app templates are rendered by
-// their adapters (BE-055, BE-015); they record version 1.
-func (s *service) render(m Message) (Rendered, int, error) {
+// content is a message prepared for delivery: the template's meta and
+// either the rendered e-mail or the fixed in_app/push text.
+type content struct {
+	meta   TemplateMeta
+	email  Rendered
+	notice Notice
+}
+
+// prepare checks the message against its template (known, serves the
+// channel, same category) and renders it.
+func (s *service) prepare(m Message) (content, error) {
+	meta, ok := s.d.Templates.Meta(m.Template)
+	if !ok {
+		return content{}, ErrInvalidMessage.WithFields(problem.FieldError{Location: "message.template", Message: "unknown template"})
+	}
+	var fe []problem.FieldError
+	if !meta.Supports(m.Channel) {
+		fe = append(fe, problem.FieldError{Location: "message.channel", Message: "the template does not serve this channel"})
+	}
+	if meta.Category != m.Category {
+		fe = append(fe, problem.FieldError{Location: "message.category", Message: "does not match the category declared by the template"})
+	}
+	if len(fe) > 0 {
+		return content{}, ErrInvalidMessage.WithFields(fe...)
+	}
+	c := content{meta: meta}
 	if m.Channel != ChannelEmail {
-		return Rendered{}, 1, nil
+		c.notice, _ = s.d.Templates.Notice(m.Template, m.Locale) // served: Supports checked above
+		return c, nil
 	}
 	r, err := s.d.Templates.Render(m.Template, m.Locale, RenderInput{Data: m.Data, UnsubscribeURL: m.UnsubscribeURL})
 	if err != nil {
-		return Rendered{}, 0, err
+		return content{}, err
 	}
-	var fe []problem.FieldError
-	if r.Category != m.Category {
-		fe = append(fe, problem.FieldError{Location: "message.category", Message: "does not match the category declared by the template"})
+	if fe := checkInlineRefs(m, r.HTML); len(fe) > 0 {
+		return content{}, ErrInvalidMessage.WithFields(fe...)
 	}
-	fe = append(fe, checkInlineRefs(m, r.HTML)...)
-	if len(fe) > 0 {
-		return Rendered{}, 0, ErrInvalidMessage.WithFields(fe...)
-	}
-	return r, r.Version, nil
+	c.email = r
+	return c, nil
 }
 
 // deliver performs one attempt for a claimed delivery and returns the result
 // to record plus the error for the caller.
-func (s *service) deliver(ctx context.Context, m Message, r Rendered, d Delivery) (Result, error) {
-	if m.Category == CategoryCommercial {
-		purpose := PurposeCommercialEmail
-		if m.Channel == ChannelPush {
-			purpose = PurposeCommercialPush
-		}
-		ok, err := s.d.Consent.HasActive(ctx, *m.UserID, purpose)
-		if err != nil {
-			return failure("", err)
-		}
-		if !ok {
-			return Result{Status: StatusSkippedNoConsent}, nil
-		}
+func (s *service) deliver(ctx context.Context, m Message, c content, d Delivery) (Result, error) {
+	skip, err := s.gate(ctx, m, c.meta, d)
+	if err != nil {
+		return failure("", err)
+	}
+	if skip != "" {
+		return Result{Status: skip}, nil
 	}
 
 	var provider, providerID string
-	var err error
 	switch m.Channel {
 	case ChannelEmail:
 		provider = s.d.Transport.Name()
-		providerID, err = s.d.Transport.Send(ctx, composeEmail(s.d.FromAddress, s.d.FromName, d.ID, s.d.Clock.Now(), m, r))
+		providerID, err = s.d.Transport.Send(ctx, composeEmail(s.d.FromAddress, s.d.FromName, d.ID, s.d.Clock.Now(), m, c.email))
 	case ChannelPush:
 		provider = s.d.Push.Name()
-		providerID, err = s.d.Push.SendPush(ctx, m)
+		providerID, err = s.d.Push.SendPush(ctx, PushMessage{
+			DeliveryID: d.ID, UserID: *m.UserID, Kind: m.Template, Title: c.notice.Title, Body: c.notice.Body,
+			LinkPath: m.LinkPath, Data: opaqueData(m.Data),
+		})
 	case ChannelInApp:
-		provider = s.d.InApp.Name()
-		providerID, err = s.d.InApp.SendInApp(ctx, m)
+		provider, providerID = inAppProvider, d.ID.String()
+		_, err = s.d.Store.InsertInApp(ctx, InAppNotification{
+			ID: d.ID, UserID: *m.UserID, Kind: m.Template, Title: c.notice.Title, Body: c.notice.Body,
+			LinkPath: m.LinkPath, SourceOrgID: m.SourceOrgID, Data: opaqueData(m.Data), CreatedAt: s.d.Clock.Now(),
+		})
 	}
 	if err != nil {
 		return failure(provider, err)
 	}
 	sentAt := s.d.Clock.Now()
 	return Result{Status: StatusSent, Provider: provider, ProviderMessageID: providerID, SentAt: &sentAt}, nil
+}
+
+// inAppProvider is the provider of in-app deliveries (the inbox table itself).
+const inAppProvider = "in_app"
+
+// gate decides whether a claimed message may go out. It returns the status
+// of a deliberate skip ("" = send):
+//
+//   - e-mail to a suppressed address → suppressed (hard bounce, complaint);
+//   - commercial without a consent in force → skipped_no_consent (6563;
+//     consent.Checker.FilterActive);
+//   - transactional message to a user who switched its preference category
+//     off on this channel → skipped_preference (security never).
+//
+// Consent and preferences are disjoint: commercial messages ignore the
+// preferences, transactional ones never ask for consent.
+func (s *service) gate(ctx context.Context, m Message, meta TemplateMeta, d Delivery) (Status, error) {
+	if m.Channel == ChannelEmail {
+		suppressed, err := s.d.Store.IsSuppressed(ctx, d.RecipientIndex)
+		if err != nil {
+			return "", err
+		}
+		if suppressed {
+			return StatusSuppressed, nil
+		}
+	}
+	switch {
+	case m.Category == CategoryCommercial:
+		purpose := PurposeCommercialEmail
+		if m.Channel == ChannelPush {
+			purpose = PurposeCommercialPush
+		}
+		ok, err := s.consented(ctx, *m.UserID, purpose)
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			return StatusSkippedNoConsent, nil
+		}
+	case m.UserID != nil:
+		ok, err := s.Allowed(ctx, *m.UserID, meta.Preference, m.Channel)
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			return StatusSkippedPreference, nil
+		}
+	}
+	return "", nil
+}
+
+// consented asks the consent port for one user.
+func (s *service) consented(ctx context.Context, userID uuid.UUID, purpose string) (bool, error) {
+	active, err := s.d.Consent.FilterActive(ctx, []uuid.UUID{userID}, purpose)
+	if err != nil {
+		return false, err
+	}
+	return slices.Contains(active, userID), nil
 }
 
 // failure turns a provider or consent error into the record to store and the
@@ -154,10 +232,15 @@ func failure(provider string, err error) (Result, error) {
 }
 
 func (s *service) recipientIndex(m Message) []byte {
-	if s.d.Recipients == nil || m.Channel != ChannelEmail {
+	if m.Channel != ChannelEmail {
 		return nil
 	}
-	return s.d.Recipients.Index(strings.ToLower(strings.TrimSpace(m.ToEmail)))
+	return s.indexOf(m.ToEmail)
+}
+
+// indexOf is the blind index of an address (02 §6.1, §6.2).
+func (s *service) indexOf(email string) []byte {
+	return s.d.Recipients.Index(strings.ToLower(strings.TrimSpace(email)))
 }
 
 // log writes one structured line. It carries IDs, names and the masked

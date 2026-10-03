@@ -11,7 +11,9 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/audit"
 	"koro/internal/notify"
+	"koro/internal/platform/db"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/problem"
 )
@@ -252,12 +254,15 @@ func TestSender_Commercial_PushUsesPushPurpose(t *testing.T) {
 	t.Parallel()
 	consent := &fakeConsent{active: true}
 	push := &recordingPush{}
-	f := newFixture(t, func(d *notify.Deps) { d.Consent, d.Push = consent, push })
+	f := newFixture(t, func(d *notify.Deps) {
+		d.Consent, d.Push = consent, push
+		d.Templates = loadTemplates(t, withPromo(baseTemplates(t)))
+	})
 
 	uid := newID()
 	id := mustSend(t, f, notify.Message{
 		UserID: &uid, Channel: notify.ChannelPush, Category: notify.CategoryCommercial,
-		Template: "feed.promo", DedupeKey: "p1",
+		Template: "notify.test_promo", DedupeKey: "p1",
 	})
 	if got := consent.asked(); len(got) != 1 || got[0] != notify.PurposeCommercialPush {
 		t.Fatalf("consent asked for %v, want [%s]", got, notify.PurposeCommercialPush)
@@ -400,31 +405,39 @@ func TestSender_RenderFailureLeavesNoDelivery(t *testing.T) {
 
 type recordingPush struct {
 	mu   sync.Mutex
-	sent []notify.Message
+	sent []notify.PushMessage
 }
 
 func (p *recordingPush) Name() string { return "recording" }
 
-func (p *recordingPush) SendPush(_ context.Context, m notify.Message) (string, error) {
+func (p *recordingPush) SendPush(_ context.Context, m notify.PushMessage) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.sent = append(p.sent, m)
 	return fmt.Sprintf("push-%d", len(p.sent)), nil
 }
 
-func TestSender_PushAndInApp_NoopByDefault(t *testing.T) {
+func TestSender_PushNoopByDefault_InAppWritesTheInbox(t *testing.T) {
 	t.Parallel()
-	f := newFixture(t)
+	f := newFixture(t, func(d *notify.Deps) { d.Templates = loadTemplates(t, withPromo(baseTemplates(t))) })
 	uid := newID()
+	ids := map[notify.Channel]uuid.UUID{}
 	for _, ch := range []notify.Channel{notify.ChannelPush, notify.ChannelInApp} {
-		id := mustSend(t, f, notify.Message{
+		ids[ch] = mustSend(t, f, notify.Message{
 			UserID: &uid, Channel: ch, Category: notify.CategoryTransactional,
-			Template: "events.ticket_ready", DedupeKey: "k:" + string(ch),
+			Template: "notify.test_notice", DedupeKey: "k:" + string(ch),
 		})
-		d := mustGet(t, f.store, id)
-		if d.Status != notify.StatusSent || d.Provider != "noop" || d.UserID == nil || *d.UserID != uid {
-			t.Fatalf("%s delivery = %+v, want sent through the noop adapter for the user", ch, d)
-		}
+	}
+	if d := mustGet(t, f.store, ids[notify.ChannelPush]); d.Status != notify.StatusSent || d.Provider != "noop" || *d.UserID != uid {
+		t.Fatalf("push delivery = %+v, want sent through the noop adapter", d)
+	}
+	d := mustGet(t, f.store, ids[notify.ChannelInApp])
+	if d.Status != notify.StatusSent || d.Provider != "in_app" || d.ProviderMessageID != d.ID.String() || d.TemplateVersion != 2 {
+		t.Fatalf("in_app delivery = %+v, want sent into the inbox", d)
+	}
+	rows, _ := f.store.ListInApp(t.Context(), uid, false, nil, 10)
+	if len(rows) != 1 || rows[0].ID != d.ID || rows[0].Title != "Yeni bir bildiriminiz var" || rows[0].Kind != "notify.test_notice" {
+		t.Fatalf("inbox = %+v, want the fixed Turkish text under the delivery ID", rows)
 	}
 	if len(f.tr.Sent()) != 0 {
 		t.Fatal("push or in_app went out as e-mail")
@@ -537,18 +550,9 @@ func TestSender_OutcomeNotRecorded_StillReportsTheSend(t *testing.T) {
 	}
 }
 
-func TestSender_StoreNotWired_FailsLoudly(t *testing.T) {
-	t.Parallel()
-	f := newFixture(t, func(d *notify.Deps) { d.Store = notify.MissingStore{} })
+type noAudit struct{}
 
-	_, err := f.svc.Send(workerCtx(t), testMessage("k1"))
-	if !errors.Is(err, notify.ErrStoreNotWired) || notify.IsPermanent(err) {
-		t.Fatalf("Send() error = %v, want a transient ErrStoreNotWired", err)
-	}
-	if len(f.tr.Sent()) != 0 {
-		t.Fatal("a message was sent without a delivery store")
-	}
-}
+func (noAudit) Log(context.Context, audit.Event) error { return nil }
 
 func TestNew_PanicsOnMissingDependencies(t *testing.T) {
 	t.Parallel()
@@ -558,8 +562,8 @@ func TestNew_PanicsOnMissingDependencies(t *testing.T) {
 	}
 	f := newFixture(t)
 	full := notify.Deps{
-		Store: f.store, Transport: f.tr, Templates: tpl, Clock: f.clk,
-		Log: obs.Discard(), FromAddress: "noreply@koro.test",
+		Store: f.store, Tx: db.NopTx{}, Transport: f.tr, Templates: tpl, Clock: f.clk,
+		Log: obs.Discard(), FromAddress: "noreply@koro.test", Recipients: testIndexer{}, Audit: noAudit{},
 	}
 	tests := map[string]func(d *notify.Deps){
 		"Store":       func(d *notify.Deps) { d.Store = nil },
@@ -568,6 +572,10 @@ func TestNew_PanicsOnMissingDependencies(t *testing.T) {
 		"Clock":       func(d *notify.Deps) { d.Clock = nil },
 		"Log":         func(d *notify.Deps) { d.Log = nil },
 		"FromAddress": func(d *notify.Deps) { d.FromAddress = "not-an-address" },
+		"Tx":          func(d *notify.Deps) { d.Tx = nil },
+		"Recipients":  func(d *notify.Deps) { d.Recipients = nil },
+		"Audit":       func(d *notify.Deps) { d.Audit = nil },
+		"Cursor":      func(d *notify.Deps) { d.AuditFeed, d.Cursor = audit.NewMemStore(), nil },
 	}
 	for name, breakIt := range tests {
 		t.Run(name, func(t *testing.T) {

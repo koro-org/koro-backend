@@ -32,16 +32,33 @@ func baseTemplates(t *testing.T) fstest.MapFS {
 	return m
 }
 
-// withPromo adds a commercial sample template.
+// withPromo adds a commercial sample template (email, push) and a
+// transactional one (event_updates on every channel).
 func withPromo(m fstest.MapFS) fstest.MapFS {
 	files := map[string]string{
-		"notify/test_promo.meta.yaml":       "version: 3\ncategory: commercial\n",
-		"notify/test_promo.tr.subject.tmpl": "Kampanya: {{.Data.name}}",
-		"notify/test_promo.en.subject.tmpl": "Offer: {{.Data.name}}",
-		"notify/test_promo.tr.txt.tmpl":     "Merhaba {{.Data.name}}, yeni teklifler var.",
-		"notify/test_promo.en.txt.tmpl":     "Hello {{.Data.name}}, there are new offers.",
-		"notify/test_promo.tr.html.tmpl":    "<p>Merhaba {{.Data.name}}, yeni teklifler var.</p>",
-		"notify/test_promo.en.html.tmpl":    "<p>Hello {{.Data.name}}, there are new offers.</p>",
+		"notify/test_promo.meta.yaml":     "version: 3\ncategory: commercial\nchannels: [email, push]\n",
+		"notify/test_promo.tr.title.tmpl": "Yeni teklifler",
+		"notify/test_promo.en.title.tmpl": "New offers",
+		"notify/test_promo.tr.body.tmpl":  "Size uygun yeni teklifler var.",
+		"notify/test_promo.en.body.tmpl":  "There are new offers for you.",
+		// A transactional notice whose category the user may switch off.
+		"notify/test_notice.meta.yaml":       "version: 2\ncategory: transactional\npreference: event_updates\nchannels: [email, push, in_app]\n",
+		"notify/test_notice.tr.subject.tmpl": "Etkinlik güncellendi",
+		"notify/test_notice.en.subject.tmpl": "Event updated",
+		"notify/test_notice.tr.txt.tmpl":     "Merhaba {{.Data.name}}, etkinlik güncellendi.",
+		"notify/test_notice.en.txt.tmpl":     "Hello {{.Data.name}}, the event was updated.",
+		"notify/test_notice.tr.html.tmpl":    "<p>Merhaba {{.Data.name}}, etkinlik güncellendi.</p>",
+		"notify/test_notice.en.html.tmpl":    "<p>Hello {{.Data.name}}, the event was updated.</p>",
+		"notify/test_notice.tr.title.tmpl":   "Yeni bir bildiriminiz var",
+		"notify/test_notice.en.title.tmpl":   "You have a new notification",
+		"notify/test_notice.tr.body.tmpl":    "Kayıtlı olduğunuz bir etkinlik güncellendi.",
+		"notify/test_notice.en.body.tmpl":    "An event you registered for was updated.",
+		"notify/test_promo.tr.subject.tmpl":  "Kampanya: {{.Data.name}}",
+		"notify/test_promo.en.subject.tmpl":  "Offer: {{.Data.name}}",
+		"notify/test_promo.tr.txt.tmpl":      "Merhaba {{.Data.name}}, yeni teklifler var.",
+		"notify/test_promo.en.txt.tmpl":      "Hello {{.Data.name}}, there are new offers.",
+		"notify/test_promo.tr.html.tmpl":     "<p>Merhaba {{.Data.name}}, yeni teklifler var.</p>",
+		"notify/test_promo.en.html.tmpl":     "<p>Hello {{.Data.name}}, there are new offers.</p>",
 	}
 	for p, s := range files {
 		m[p] = &fstest.MapFile{Data: []byte(s)}
@@ -74,8 +91,22 @@ func TestTemplates_AllParse(t *testing.T) {
 		if !ok || version < 1 || (category != notify.CategoryTransactional && category != notify.CategoryCommercial) {
 			t.Errorf("Info(%q) = (%d, %q, %v), want a positive version and a valid category", id, version, category, ok)
 		}
-		// Every template renders in both locales; nil Data only fails on missing keys,
-		// so give it the sample keys.
+		meta, _ := tpl.Meta(id)
+		if meta.Category == notify.CategoryTransactional && meta.Preference == "" {
+			t.Errorf("%s declares no preference category", id)
+		}
+		if meta.Supports(notify.ChannelInApp) || meta.Supports(notify.ChannelPush) {
+			for _, loc := range []string{"tr", "en"} {
+				if n, ok := tpl.Notice(id, loc); !ok || n.Title == "" || n.Body == "" {
+					t.Errorf("Notice(%q, %s) = (%+v, %v), want a fixed title and body", id, loc, n, ok)
+				}
+			}
+		}
+		if !meta.Supports(notify.ChannelEmail) {
+			continue
+		}
+		// Every e-mail template renders in both locales; nil Data only fails on
+		// missing keys, so give it the sample keys.
 		for _, loc := range []string{"tr", "en"} {
 			r, err := tpl.Render(id, loc, notify.RenderInput{Data: map[string]any{"name": "Test"}, UnsubscribeURL: "https://koro.test/u"})
 			if err != nil {

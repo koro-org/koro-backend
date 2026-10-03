@@ -1,0 +1,8 @@
+# Fixtures of the notify module (cmd/koro/matrix_notify_test.go). IDs are authztest.ID(name).
+# suppression_matrix is stored under the index sha256("matrix-suppression") (its API ID is
+# literal in notify.yaml).
+version: 1
+fixtures:
+  notification_student: { kind: in_app, owner: student }
+  push_token_student: { kind: push_token, owner: student }
+  suppression_matrix: { kind: suppression }

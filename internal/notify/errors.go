@@ -43,9 +43,21 @@ var (
 	// ErrNotFound: the delivery does not exist (store contract).
 	ErrNotFound = problem.New(problem.NotFound, "notify.not_found", "Notification delivery not found")
 
-	// ErrStoreNotWired: the delivery store is not wired yet (the GORM store
-	// arrives with BE-015). Never a silent in-memory fallback (05 §12.2).
-	ErrStoreNotWired = problem.New(problem.Unavailable, "notify.store_not_wired", "Notification delivery store is not wired")
+	// ErrNotificationNotFound: the in-app notification does not exist or
+	// belongs to another user (IDOR: 404, 03 §7.2).
+	ErrNotificationNotFound = problem.New(problem.NotFound, "notify.notification_not_found", "Notification not found")
+
+	// ErrPushTokenNotFound: the push token does not exist or belongs to
+	// another user.
+	ErrPushTokenNotFound = problem.New(problem.NotFound, "notify.push_token_not_found", "Push token not found")
+
+	// ErrSuppressionNotFound: no suppression with this ID.
+	ErrSuppressionNotFound = problem.New(problem.NotFound, "notify.suppression_not_found", "E-mail suppression not found")
+
+	// ErrSecurityLocked: security notifications cannot be switched off
+	// (02 §6.5 CHECK, 04 §2.19: 422).
+	ErrSecurityLocked = problem.New(problem.Invalid, "notify.security_preference_locked",
+		"Security notifications cannot be switched off")
 )
 
 // permanentErrors are the errors a retry cannot fix.

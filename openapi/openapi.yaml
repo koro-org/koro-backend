@@ -367,6 +367,44 @@ components:
         - content_type
         - size_bytes
       type: object
+    DeliveryDTO:
+      additionalProperties: false
+      properties:
+        channel:
+          enum:
+            - email
+            - push
+            - in_app
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        delivery_id:
+          format: uuid
+          type: string
+        status:
+          type: string
+        template:
+          type: string
+      required:
+        - delivery_id
+        - channel
+        - template
+        - status
+        - created_at
+      type: object
+    DeliveryList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/DeliveryDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
     EntitlementDTO:
       additionalProperties: false
       properties:
@@ -597,6 +635,89 @@ components:
           $ref: "#/components/schemas/ReauthDTO"
           description: Re-authentication proof (03 §6.2)
       type: object
+    NotificationDTO:
+      additionalProperties: false
+      properties:
+        body:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        data:
+          additionalProperties:
+            type: string
+          description: Opaque IDs only
+          type: object
+        kind:
+          description: The notification kind (template ID)
+          type: string
+        link_path:
+          description: In-app relative path
+          type: string
+        notification_id:
+          format: uuid
+          type: string
+        read_at:
+          format: date-time
+          type: string
+        source_org:
+          $ref: "#/components/schemas/SourceOrgDTO"
+        title:
+          type: string
+      required:
+        - notification_id
+        - kind
+        - title
+        - created_at
+      type: object
+    NotificationList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/NotificationDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
+    PreferenceDTO:
+      additionalProperties: false
+      properties:
+        category:
+          enum:
+            - security
+            - registration_updates
+            - event_updates
+            - contact_requests
+            - feed_follows
+            - orders_payments
+            - moderation
+          type: string
+        channel:
+          enum:
+            - email
+            - push
+            - in_app
+          type: string
+        enabled:
+          type: boolean
+      required:
+        - category
+        - channel
+        - enabled
+      type: object
+    PreferenceList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/PreferenceDTO"
+          type: array
+      required:
+        - items
+      type: object
     Problem:
       additionalProperties: false
       properties:
@@ -693,6 +814,27 @@ components:
       required:
         - items
       type: object
+    PushTokenCreatedDTO:
+      additionalProperties: false
+      properties:
+        push_token_id:
+          format: uuid
+          type: string
+      required:
+        - push_token_id
+      type: object
+    PutPreferencesInputBody:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/PreferenceDTO"
+          maxItems: 21
+          minItems: 1
+          type: array
+      required:
+        - items
+      type: object
     ReauthDTO:
       additionalProperties: false
       properties:
@@ -731,6 +873,26 @@ components:
       required:
         - purpose_code
         - action
+      type: object
+    RegisterPushInputBody:
+      additionalProperties: false
+      properties:
+        app_version:
+          maxLength: 40
+          type: string
+        platform:
+          enum:
+            - ios
+            - android
+            - web
+          type: string
+        token:
+          maxLength: 4096
+          minLength: 1
+          type: string
+      required:
+        - platform
+        - token
       type: object
     RevokedEntitlementDTO:
       additionalProperties: false
@@ -824,6 +986,54 @@ components:
         items:
           items:
             $ref: "#/components/schemas/SecurityEventDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
+    SourceOrgDTO:
+      additionalProperties: false
+      properties:
+        org_id:
+          format: uuid
+          type: string
+      required:
+        - org_id
+      type: object
+    SuppressionDTO:
+      additionalProperties: false
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        reason:
+          enum:
+            - hard_bounce
+            - complaint
+            - manual
+            - invalid
+          type: string
+        source:
+          enum:
+            - provider_webhook
+            - admin
+            - user_request
+          type: string
+        suppression_id:
+          type: string
+      required:
+        - suppression_id
+        - reason
+        - source
+        - created_at
+      type: object
+    SuppressionList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/SuppressionDTO"
           type: array
         next_cursor:
           type: string
@@ -1167,6 +1377,121 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+  /api/v1/admin/email-suppressions:
+    get:
+      description: "Addresses are kept as blind indexes only: email finds one address by exact match. Break-glass: X-Koro-Access-Reason is mandatory and every read is audited."
+      operationId: adminListEmailSuppressions
+      parameters:
+        - description: Break-glass justification (10–500 characters, mandatory)
+          in: header
+          name: X-Koro-Access-Reason
+          schema:
+            description: Break-glass justification (10–500 characters, mandatory)
+            maxLength: 500
+            type: string
+        - description: Support ticket reference (optional)
+          in: header
+          name: X-Koro-Ticket-Ref
+          schema:
+            description: Support ticket reference (optional)
+            maxLength: 100
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: Exact address (matched by its blind index; never stored)
+          explode: false
+          in: query
+          name: email
+          schema:
+            description: Exact address (matched by its blind index; never stored)
+            maxLength: 254
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuppressionList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List e-mail suppressions
+      tags:
+        - notify
+      x-koro-action: notify.suppression.manage
+      x-koro-break-glass: true
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+  /api/v1/admin/email-suppressions/{suppression_id}:
+    delete:
+      description: "The address may receive e-mail again. Break-glass: X-Koro-Access-Reason is mandatory; audited."
+      operationId: adminDeleteEmailSuppression
+      parameters:
+        - description: Break-glass justification (10–500 characters, mandatory)
+          in: header
+          name: X-Koro-Access-Reason
+          schema:
+            description: Break-glass justification (10–500 characters, mandatory)
+            maxLength: 500
+            type: string
+        - description: Support ticket reference (optional)
+          in: header
+          name: X-Koro-Ticket-Ref
+          schema:
+            description: Support ticket reference (optional)
+            maxLength: 100
+            type: string
+        - description: Suppression ID (an unknown or malformed ID is 404)
+          in: path
+          name: suppression_id
+          required: true
+          schema:
+            description: Suppression ID (an unknown or malformed ID is 404)
+            maxLength: 64
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Remove an e-mail suppression
+      tags:
+        - notify
+      x-koro-action: notify.suppression.manage
+      x-koro-break-glass: true
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
   /api/v1/admin/entitlements/{entitlement_id}/revoke:
     post:
       description: "Units already used stay used. Revoking an expired right is 409; a revoked one is returned unchanged. A right bought with an order is revoked without a refund: warning order_refund_not_started tells the admin to start the refund separately."
@@ -1487,6 +1812,74 @@ paths:
       x-koro-break-glass: true
       x-koro-rate-limit: read_default
       x-koro-surface: admin
+  /api/v1/admin/users/{user_id}/notification-deliveries:
+    get:
+      description: "IDs, channel, template, status and time only: never the content, the data or the address. Break-glass: X-Koro-Access-Reason is mandatory; the read is audited and the user is notified."
+      operationId: adminListUserDeliveries
+      parameters:
+        - description: Break-glass justification (10–500 characters, mandatory)
+          in: header
+          name: X-Koro-Access-Reason
+          schema:
+            description: Break-glass justification (10–500 characters, mandatory)
+            maxLength: 500
+            type: string
+        - description: Support ticket reference (optional)
+          in: header
+          name: X-Koro-Ticket-Ref
+          schema:
+            description: Support ticket reference (optional)
+            maxLength: 100
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: User ID (a malformed ID is 404)
+          in: path
+          name: user_id
+          required: true
+          schema:
+            description: User ID (a malformed ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List a user's notification deliveries
+      tags:
+        - notify
+      x-koro-action: notify.delivery.list
+      x-koro-break-glass: true
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
   /api/v1/files/uploads:
     post:
       description: Checks the purpose's MIME/size allow-list and returns a presigned PUT URL (valid 10 minutes) for the object storage. Send exactly upload_headers with the PUT; the API never receives the file itself (04 §1.14).
@@ -1710,6 +2103,259 @@ paths:
         - consent
       x-koro-action: consent.record.create
       x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/me/notification-preferences:
+    get:
+      description: Every category × channel pair, defaults included. Commercial messages are governed by consents, not here.
+      operationId: getMyNotificationPreferences
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PreferenceList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get my notification preferences
+      tags:
+        - notify
+      x-koro-action: notify.preference.read_own
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
+    put:
+      description: Only the listed pairs change. Security notifications cannot be switched off (422 notify.security_preference_locked).
+      operationId: putMyNotificationPreferences
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PutPreferencesInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PreferenceList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Change my notification preferences
+      tags:
+        - notify
+      x-koro-action: notify.preference.update_own
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/me/notifications:
+    get:
+      description: Newest first. Texts are fixed per notification kind and carry no personal data; data holds opaque IDs only.
+      operationId: listMyNotifications
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: Only unread notifications
+          explode: false
+          in: query
+          name: unread_only
+          schema:
+            description: Only unread notifications
+            type: boolean
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List my in-app notifications
+      tags:
+        - notify
+      x-koro-action: notify.in_app.list_own
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
+  /api/v1/me/notifications/read-all:
+    post:
+      operationId: markAllMyNotificationsRead
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Mark all my notifications read
+      tags:
+        - notify
+      x-koro-action: notify.in_app.mark_read
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/me/notifications/{notification_id}/read:
+    post:
+      operationId: markMyNotificationRead
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Notification ID (an unknown or malformed ID is 404)
+          in: path
+          name: notification_id
+          required: true
+          schema:
+            description: Notification ID (an unknown or malformed ID is 404)
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Mark one of my notifications read
+      tags:
+        - notify
+      x-koro-action: notify.in_app.mark_read
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/me/push-tokens:
+    post:
+      description: Bound to the current session. Registering a known token again moves it to this account and session.
+      operationId: registerMyPushToken
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterPushInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushTokenCreatedDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Register a push token
+      tags:
+        - notify
+      x-koro-action: notify.push_token.manage
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/me/push-tokens/{push_token_id}:
+    delete:
+      operationId: deleteMyPushToken
+      parameters:
+        - description: Push token ID (an unknown or malformed ID is 404)
+          in: path
+          name: push_token_id
+          required: true
+          schema:
+            description: Push token ID (an unknown or malformed ID is 404)
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Delete a push token
+      tags:
+        - notify
+      x-koro-action: notify.push_token.manage
       x-koro-rate-limit: write_default
       x-koro-surface: self
   /api/v1/me/security-events:
@@ -2118,3 +2764,62 @@ paths:
       x-koro-action: entitlements.entitlement.read
       x-koro-rate-limit: read_default
       x-koro-surface: org
+  /api/v1/webhooks/email/{provider}:
+    post:
+      description: "Bounce, complaint and delivery notifications of the e-mail provider (ses: SNS-signed SES notifications; resend: svix-signed events). The identity is the signature: cookies and bearer tokens are ignored. A delivery that does not verify is 401; a verified one is stored in the webhook inbox under the provider's event ID (a redelivery is a no-op, also 204) and processed asynchronously."
+      operationId: receiveEmailWebhook
+      parameters:
+        - description: E-mail provider (00 T-62)
+          in: path
+          name: provider
+          required: true
+          schema:
+            description: E-mail provider (00 T-62)
+            enum:
+              - ses
+              - resend
+            type: string
+        - in: header
+          name: svix-id
+          schema:
+            maxLength: 200
+            type: string
+        - in: header
+          name: svix-timestamp
+          schema:
+            maxLength: 20
+            type: string
+        - in: header
+          name: svix-signature
+          schema:
+            maxLength: 2000
+            type: string
+        - in: header
+          name: x-amz-sns-message-type
+          schema:
+            maxLength: 50
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              contentMediaType: application/octet-stream
+              format: binary
+              type: string
+        required: true
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: Receive an e-mail provider webhook
+      tags:
+        - notify
+      x-koro-action: notify.provider_webhook.receive
+      x-koro-idempotency: optional
+      x-koro-rate-limit: webhook
+      x-koro-surface: webhook

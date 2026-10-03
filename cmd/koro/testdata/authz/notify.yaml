@@ -1,0 +1,141 @@
+# Authz matrix of the notify module (03 §5.19, 04 §2.19 + §2.0 receiveEmailWebhook; BE-015).
+# 11 operations × 18 personas. The /me operations are O cells (every signed-in user, own rows only:
+# another user's notification or token is 404); suppressions and delivery logs are support B and
+# platform_admin B (403 without X-Koro-Access-Reason; admin surface: everyone else 403). The webhook
+# is public: its identity is the svix signature (bodies/notify/resend_bounce.json is signed with the
+# test secret of wire_notify_test.go at the matrix clock 2026-10-03T09:00:00Z).
+version: 1
+groups:
+  not_owner: [user_unverified, student_minor, club_member, club_admin, other_club_admin, event_staff,
+              university_rep, company_member, company_admin, other_company_member,
+              moderator, support, dpo, platform_admin, finance_admin, talent_auditor]
+  no_platform_role: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                     event_staff, university_rep, company_member, company_admin, other_company_member]
+
+operations:
+  receiveEmailWebhook:
+    method: POST
+    path: /api/v1/webhooks/email/{provider}
+    action: notify.provider_webhook.receive
+    public: true
+    path_params: { provider: "literal:resend" }
+    body: bodies/notify/resend_bounce.json
+    headers:
+      svix-id: msg_matrix_1
+      svix-timestamp: "1791018000"
+      svix-signature: "v1,nOoqi8rM9vQACwO51f79cNcSCwW9k5Ouefjn5/ry8Ik="
+    note: provider webhook; the signature is the identity, a session is ignored (04 §2.0, 05 §14.4)
+    expect: { "@all": 204 }
+    variants:
+      - name: bad_signature
+        headers:
+          svix-id: msg_matrix_1
+          svix-timestamp: "1791018000"
+          svix-signature: "v1,AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        note: a delivery that does not verify is 401 for everyone and never stored
+        expect: { "@all": 401 }
+      - name: ses_unconfigured
+        path_params: { provider: "literal:ses" }
+        note: no SNS topic is allowed in the test configuration, so ses rejects every delivery
+        expect: { "@all": 401 }
+
+  listMyNotifications:
+    method: GET
+    path: /api/v1/me/notifications
+    action: notify.in_app.list_own
+    expect: { anonymous: 401, "@signed_in": 200 }
+
+  markMyNotificationRead:
+    method: POST
+    path: /api/v1/me/notifications/{notification_id}/read
+    action: notify.in_app.mark_read
+    path_params: { notification_id: notification_student }
+    note: only the owner finds the notification (IDOR, 03 §7.2)
+    expect: { anonymous: 401, student: 204, "@not_owner": 404 }
+    variants:
+      - name: missing
+        path_params: { notification_id: "literal:00000000-0000-7000-8000-0000000000e1" }
+        expect: { anonymous: 401, "@signed_in": 404 }
+
+  markAllMyNotificationsRead:
+    method: POST
+    path: /api/v1/me/notifications/read-all
+    action: notify.in_app.mark_read
+    expect: { anonymous: 401, "@signed_in": 204 }
+
+  getMyNotificationPreferences:
+    method: GET
+    path: /api/v1/me/notification-preferences
+    action: notify.preference.read_own
+    expect: { anonymous: 401, "@signed_in": 200 }
+
+  putMyNotificationPreferences:
+    method: PUT
+    path: /api/v1/me/notification-preferences
+    action: notify.preference.update_own
+    body: bodies/notify/put_preferences.json
+    expect: { anonymous: 401, "@signed_in": 200 }
+    variants:
+      - name: security_off
+        body: bodies/notify/security_off.json
+        note: security notifications cannot be switched off (422 notify.security_preference_locked)
+        expect: { anonymous: 401, "@signed_in": 422 }
+
+  registerMyPushToken:
+    method: POST
+    path: /api/v1/me/push-tokens
+    action: notify.push_token.manage
+    body: bodies/notify/register_push_token.json
+    expect: { anonymous: 401, "@signed_in": 201 }
+
+  deleteMyPushToken:
+    method: DELETE
+    path: /api/v1/me/push-tokens/{push_token_id}
+    action: notify.push_token.manage
+    path_params: { push_token_id: push_token_student }
+    expect: { anonymous: 401, student: 204, "@not_owner": 404 }
+
+  adminListEmailSuppressions:
+    method: GET
+    path: /api/v1/admin/email-suppressions
+    action: notify.suppression.manage
+    note: without X-Koro-Access-Reason even support and platform_admin are refused (B cells)
+    expect: { anonymous: 401, "@no_platform_role": 403, moderator: 403, support: 403, dpo: 403,
+              platform_admin: 403, finance_admin: 403, talent_auditor: 403 }
+    variants:
+      - name: break_glass
+        headers: { X-Koro-Access-Reason: "Ticket 4711: user reports missing e-mails" }
+        expect: { anonymous: 401, "@no_platform_role": 403, moderator: 403, support: 200, dpo: 403,
+                  platform_admin: 200, finance_admin: 403, talent_auditor: 403 }
+
+  adminDeleteEmailSuppression:
+    method: DELETE
+    path: /api/v1/admin/email-suppressions/{suppression_id}
+    action: notify.suppression.manage
+    path_params: { suppression_id: "literal:45a9518ba0906c480b0e6c0fd84ea579a0a5029c570e4de3e4715e6cabe64c88" }
+    expect: { anonymous: 401, "@no_platform_role": 403, moderator: 403, support: 403, dpo: 403,
+              platform_admin: 403, finance_admin: 403, talent_auditor: 403 }
+    variants:
+      - name: break_glass
+        headers: { X-Koro-Access-Reason: "Ticket 4712: user fixed the mailbox" }
+        expect: { anonymous: 401, "@no_platform_role": 403, moderator: 403, support: 204, dpo: 403,
+                  platform_admin: 204, finance_admin: 403, talent_auditor: 403 }
+      - name: missing
+        path_params: { suppression_id: "literal:00" }
+        headers: { X-Koro-Access-Reason: "Ticket 4712: user fixed the mailbox" }
+        expect: { anonymous: 401, "@no_platform_role": 403, moderator: 403, support: 404, dpo: 403,
+                  platform_admin: 404, finance_admin: 403, talent_auditor: 403 }
+
+  adminListUserDeliveries:
+    method: GET
+    path: /api/v1/admin/users/{user_id}/notification-deliveries
+    action: notify.delivery.list
+    path_params: { user_id: student }
+    note: without X-Koro-Access-Reason support and platform_admin are refused (B cells)
+    expect: { anonymous: 401, "@no_platform_role": 403, moderator: 403, support: 403, dpo: 403,
+              platform_admin: 403, finance_admin: 403, talent_auditor: 403 }
+    variants:
+      - name: break_glass
+        headers: { X-Koro-Access-Reason: "Ticket 4711: user reports missing e-mails" }
+        expect: { anonymous: 401, "@no_platform_role": 403, moderator: 403, support: 200, dpo: 403,
+                  platform_admin: 200, finance_admin: 403, talent_auditor: 403 }

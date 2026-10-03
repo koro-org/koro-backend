@@ -3,14 +3,17 @@ package notify_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"log/slog"
 	"sync"
 	"testing"
 	"time"
 	"uuid"
 
+	"koro/internal/audit"
 	"koro/internal/notify"
 	"koro/internal/platform/clock"
+	"koro/internal/platform/db"
 	"koro/internal/platform/obs"
 )
 
@@ -42,11 +45,17 @@ type fakeConsent struct {
 	purposes []string
 }
 
-func (c *fakeConsent) HasActive(_ context.Context, _ uuid.UUID, purpose string) (bool, error) {
+func (c *fakeConsent) FilterActive(_ context.Context, ids []uuid.UUID, purpose string) ([]uuid.UUID, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.purposes = append(c.purposes, purpose)
-	return c.active, c.err
+	if c.err != nil {
+		return nil, c.err
+	}
+	if !c.active {
+		return nil, nil
+	}
+	return ids, nil
 }
 
 func (c *fakeConsent) asked() []string {
@@ -56,11 +65,22 @@ func (c *fakeConsent) asked() []string {
 }
 
 type fixture struct {
+	mod   notify.Module
 	svc   notify.Service
 	store notify.Store
 	tr    *notify.MemTransport
 	clk   *clock.Fake
 	logs  *syncBuffer
+	audit audit.Store
+}
+
+// testIndexer is a deterministic 32-byte blind index (SHA-256 of a test
+// prefix and the address).
+type testIndexer struct{}
+
+func (testIndexer) Index(email string) []byte {
+	sum := sha256.Sum256([]byte("test-index:" + email))
+	return sum[:]
 }
 
 // newFixture wires the real service with the in-memory store, the in-memory
@@ -77,20 +97,25 @@ func newFixture(t *testing.T, mod ...func(*notify.Deps)) fixture {
 		tr:    notify.NewMemTransport(),
 		clk:   clock.NewFake(t0),
 		logs:  &syncBuffer{},
+		audit: audit.NewMemStore(),
 	}
 	d := notify.Deps{
 		Store:       f.store,
+		Tx:          db.NopTx{},
 		Transport:   f.tr,
 		Templates:   tpl,
 		Clock:       f.clk,
 		Log:         obs.NewLogger(f.logs, obs.LoggerOptions{Level: slog.LevelDebug, Format: obs.FormatJSON}),
 		FromAddress: "noreply@koro.test",
 		FromName:    "Koro",
+		Recipients:  testIndexer{},
+		Audit:       audit.New(audit.Deps{Store: f.audit, Tx: db.NopTx{}, Clock: f.clk, Log: obs.Discard()}).Service,
 	}
 	for _, m := range mod {
 		m(&d)
 	}
-	f.svc = notify.New(d).Service
+	f.mod = notify.New(d)
+	f.svc = f.mod.Service
 	return f
 }
 

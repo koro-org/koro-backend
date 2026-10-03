@@ -50,10 +50,10 @@ const (
 // Status is the delivery status (notification_deliveries.status, 02 §6.1).
 type Status string
 
-// Delivery statuses. BE-005 writes queued, sent, failed and skipped_no_consent;
-// delivered, bounced, complained and suppressed arrive with the provider
-// webhook and the suppression list (BE-015), skipped_preference with the
-// preferences (BE-015).
+// Delivery statuses. Send writes queued, sent, failed, suppressed (the
+// address is on the suppression list), skipped_no_consent (commercial without
+// consent) and skipped_preference (the user switched the category off); the
+// provider webhook moves sent e-mails to delivered, bounced or complained.
 const (
 	StatusQueued            Status = "queued"
 	StatusSent              Status = "sent"
@@ -86,8 +86,13 @@ type Message struct {
 	// Locale is the preferred language ("tr", "en", "tr-TR"). Empty or
 	// unsupported falls back to the default locale (tr).
 	Locale string
-	// Data feeds the template as {{.Data.<key>}}; a key the template reads but
-	// Data lacks is an error, never an empty string in a mail.
+	// Data feeds the e-mail template as {{.Data.<key>}}; a key the template
+	// reads but Data lacks is an error, never an empty string in a mail.
+	//
+	// On the in_app and push channels Data is not rendered: it travels with
+	// the notification (in_app_notifications.data, the push payload) and may
+	// hold only opaque IDs (UUID values under snake_case keys), never personal
+	// data. The visible text of those channels is fixed per template.
 	Data map[string]any
 	// Inline are CID images (QR PNG). Each one must be referenced from the
 	// HTML as src="cid:<CID>".
@@ -101,6 +106,13 @@ type Message struct {
 	// UnsubscribeURL is the HTTPS endpoint of the RFC 8058 one-click
 	// unsubscribe. Required for commercial e-mail, ignored otherwise.
 	UnsubscribeURL string
+
+	// LinkPath is the in-app deep link of an in_app or push message, a
+	// relative path such as "/me/security-events" (in_app_notifications
+	// link_path CHECK). Ignored on the email channel.
+	LinkPath string
+	// SourceOrgID names the org an in_app message comes from (optional).
+	SourceOrgID *uuid.UUID
 }
 
 // InlineAttachment is an image embedded in the HTML part (multipart/related).
@@ -136,6 +148,7 @@ type Delivery struct {
 	Attempts          int
 	LastError         string // scrubbed provider error, at most 2000 characters
 	SentAt            *time.Time
+	DeliveredAt       *time.Time // set by the provider webhook (delivered)
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 }

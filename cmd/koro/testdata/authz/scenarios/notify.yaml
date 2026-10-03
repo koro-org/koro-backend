@@ -1,0 +1,45 @@
+# Multi-step scenarios of the notify module (03 §7.7; BE-015).
+version: 1
+scenarios:
+  notify_break_glass_reason:
+    note: support and platform_admin read delivery logs only with X-Koro-Access-Reason (03 §6.3)
+    steps:
+      - { persona: support, operation: adminListUserDeliveries, expect: 403, code: authz.break_glass_reason_required }
+      - { persona: support, operation: adminListUserDeliveries, headers: { X-Koro-Access-Reason: "short" }, expect: 403, code: authz.break_glass_reason_required }
+      - { persona: platform_admin, operation: adminListUserDeliveries, headers: { X-Koro-Access-Reason: "Ticket 4711: missing e-mails" }, expect: 200 }
+  notify_support_needs_mfa:
+    note: support is an MFA role (k-mfa, 03 §6.4)
+    steps:
+      - { persona: support, mfa: false, operation: adminListEmailSuppressions, headers: { X-Koro-Access-Reason: "Ticket 4711: missing e-mails" }, expect: 403, code: authz.mfa_required }
+      - { persona: support, operation: adminListEmailSuppressions, headers: { X-Koro-Access-Reason: "Ticket 4711: missing e-mails" }, expect: 200 }
+  notify_security_stays_on:
+    note: switching security off is refused; other categories change (02 §6.5)
+    steps:
+      - { persona: student, operation: putMyNotificationPreferences, body: bodies/notify/security_off.json, expect: 422, code: notify.security_preference_locked }
+      - { persona: student, operation: putMyNotificationPreferences, expect: 200 }
+      - { persona: student, operation: getMyNotificationPreferences, expect: 200 }
+  notify_own_inbox_only:
+    note: a notification is marked read only by its owner; mark-all touches only the caller's inbox
+    steps:
+      - { persona: student_b, operation: markMyNotificationRead, expect: 404, code: notify.notification_not_found }
+      - { persona: student_b, operation: markAllMyNotificationsRead, expect: 204 }
+      - { persona: student, operation: markMyNotificationRead, expect: 204 }
+      - { persona: student, operation: markMyNotificationRead, expect: 204 }
+  notify_push_token_lifecycle:
+    note: a registered token can be deleted once by its owner
+    steps:
+      - { persona: student, operation: registerMyPushToken, expect: 201, save: { new_token: push_token_id } }
+      - { persona: student_b, operation: deleteMyPushToken, path_params: { push_token_id: new_token }, expect: 404, code: notify.push_token_not_found }
+      - { persona: student, operation: deleteMyPushToken, path_params: { push_token_id: new_token }, expect: 204 }
+      - { persona: student, operation: deleteMyPushToken, path_params: { push_token_id: new_token }, expect: 404, code: notify.push_token_not_found }
+  notify_suppression_delete_once:
+    note: a removed suppression is gone (break-glass write)
+    steps:
+      - { persona: platform_admin, operation: adminDeleteEmailSuppression, headers: { X-Koro-Access-Reason: "Ticket 4712: mailbox fixed" }, expect: 204 }
+      - { persona: platform_admin, operation: adminDeleteEmailSuppression, headers: { X-Koro-Access-Reason: "Ticket 4712: mailbox fixed" }, expect: 404, code: notify.suppression_not_found }
+  notify_webhook_redelivery:
+    note: a redelivered webhook is accepted again (204) and stored once; a forged one is 401
+    steps:
+      - { persona: anonymous, operation: receiveEmailWebhook, expect: 204 }
+      - { persona: anonymous, operation: receiveEmailWebhook, expect: 204 }
+      - { persona: student, operation: receiveEmailWebhook, headers: { svix-signature: "v1,AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" }, expect: 401, code: unauthenticated }

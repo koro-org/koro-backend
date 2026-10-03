@@ -24,13 +24,28 @@ import (
 	"koro/internal/platform/problem"
 )
 
-// Template files (BE-005 ticket, R8). The directory layout is
+// Template files (BE-005 ticket, R8; BE-015). The directory layout is
 //
-//	templates/<module>/<name>.meta.yaml                    version + category
-//	templates/<module>/<name>.<locale>.subject.tmpl        subject (one line, plain text)
-//	templates/<module>/<name>.<locale>.txt.tmpl            plain-text body
-//	templates/<module>/<name>.<locale>.html.tmpl           HTML body (html/template, auto-escaped)
+//	templates/<module>/<name>.meta.yaml                    version, category, preference, channels
+//	templates/<module>/<name>.<locale>.subject.tmpl        e-mail subject (one line, plain text)
+//	templates/<module>/<name>.<locale>.txt.tmpl            e-mail plain-text body
+//	templates/<module>/<name>.<locale>.html.tmpl           e-mail HTML body (html/template, auto-escaped)
+//	templates/<module>/<name>.<locale>.title.tmpl          in_app/push title (one line, ≤ 140 runes)
+//	templates/<module>/<name>.<locale>.body.tmpl           in_app/push body (≤ 500 runes)
 //	templates/layout/base.<locale>.{txt,html}.tmpl         shared wrapper and category footer
+//
+// The meta file:
+//
+//	version: 1                    # → notification_deliveries.template_version
+//	category: transactional       # transactional | commercial
+//	preference: event_updates     # transactional only: the preference category (02 §6.5)
+//	channels: [email, in_app]     # default [email]; email needs subject/txt/html,
+//	                              # in_app and push need title/body
+//
+// in_app and push texts are fixed: they are rendered once at load time with
+// {{.AppName}} and {{.Locale}} only. Data never reaches them, so no personal
+// data can appear in an in-app notification or a push payload ("Yeni bir
+// mesajınız var" + an opaque ID in the deep link or the data).
 //
 // A module adds only new files under its own directory (BE-001 R8); the
 // directive below picks them up without touching this package. The template
@@ -61,6 +76,13 @@ var (
 	reIdentPart   = regexp.MustCompile(`^[a-z_]+$`)
 	reTemplateID  = regexp.MustCompile(`^[a-z_]+(\.[a-z_]+)*$`) // 02 §6.1 CHECK
 	templateParts = []string{"subject", "txt", "html"}
+	noticeParts   = []string{"title", "body"}
+)
+
+// Limits of the fixed in_app/push texts (in_app_notifications CHECKs).
+const (
+	maxNoticeTitle = 140
+	maxNoticeBody  = 500
 )
 
 // Templates is the set of parsed, versioned message templates. It is
@@ -70,10 +92,30 @@ type Templates struct {
 }
 
 type templateSet struct {
-	version  int
-	category Category
-	locales  map[string]*localized
+	version    int
+	category   Category
+	preference PrefCategory // "" for commercial templates
+	channels   []Channel
+	locales    map[string]*localized
+	notices    map[string]Notice // locale → fixed in_app/push text
 }
+
+// Notice is the fixed visible text of an in_app or push message.
+type Notice struct {
+	Title string
+	Body  string
+}
+
+// TemplateMeta is what a template's meta file declares.
+type TemplateMeta struct {
+	Version    int
+	Category   Category
+	Preference PrefCategory // "" for commercial templates
+	Channels   []Channel
+}
+
+// Supports reports whether the template serves channel ch.
+func (m TemplateMeta) Supports(ch Channel) bool { return slices.Contains(m.Channels, ch) }
 
 type localized struct {
 	subject *texttemplate.Template
@@ -173,6 +215,28 @@ func (t *Templates) Info(id string) (version int, category Category, ok bool) {
 	return set.version, set.category, true
 }
 
+// Meta returns everything the template's meta file declares.
+func (t *Templates) Meta(id string) (TemplateMeta, bool) {
+	set, ok := t.sets[id]
+	if !ok {
+		return TemplateMeta{}, false
+	}
+	return TemplateMeta{Version: set.version, Category: set.category, Preference: set.preference,
+		Channels: slices.Clone(set.channels)}, true
+}
+
+// Notice returns the fixed in_app/push text of template id in the requested
+// locale (falling back to DefaultLocale); ok=false when the template does
+// not serve in_app or push.
+func (t *Templates) Notice(id, locale string) (Notice, bool) {
+	set, ok := t.sets[id]
+	if !ok || set.notices == nil {
+		return Notice{}, false
+	}
+	n, ok := set.notices[resolveLocale(locale)]
+	return n, ok
+}
+
 // Render renders template id in the requested locale (falling back to
 // DefaultLocale). A template that reads a Data key the caller did not supply
 // fails instead of printing an empty value.
@@ -180,6 +244,9 @@ func (t *Templates) Render(id, locale string, in RenderInput) (Rendered, error) 
 	set, ok := t.sets[id]
 	if !ok {
 		return Rendered{}, ErrInvalidMessage.WithFields(problem.FieldError{Location: "message.template", Message: "unknown template"})
+	}
+	if !slices.Contains(set.channels, ChannelEmail) {
+		return Rendered{}, ErrInvalidMessage.WithFields(problem.FieldError{Location: "message.channel", Message: "the template does not serve this channel"})
 	}
 	// html/template trusts these types and would emit them unescaped; a caller
 	// that wraps user input in them (05 §14.6 forbids it) is refused here.
@@ -341,7 +408,7 @@ func (s *scannedFiles) add(p, src string) {
 	}
 	// <name>.<locale>.<part>.tmpl
 	if len(fields) != 4 || fields[3] != "tmpl" || !reIdentPart.MatchString(fields[0]) {
-		s.errs = append(s.errs, fmt.Errorf("%s: unexpected file (want <name>.<locale>.<subject|txt|html>.tmpl or <name>.meta.yaml)", p))
+		s.errs = append(s.errs, fmt.Errorf("%s: unexpected file (want <name>.<locale>.<subject|txt|html|title|body>.tmpl or <name>.meta.yaml)", p))
 		return
 	}
 	name, locale, part := fields[0], fields[1], fields[2]
@@ -357,8 +424,8 @@ func (s *scannedFiles) add(p, src string) {
 		s.layout[layoutKey{locale, part}] = src
 		return
 	}
-	if !slices.Contains(templateParts, part) {
-		s.errs = append(s.errs, fmt.Errorf("%s: unknown part %q (want subject, txt or html)", p, part))
+	if !slices.Contains(templateParts, part) && !slices.Contains(noticeParts, part) {
+		s.errs = append(s.errs, fmt.Errorf("%s: unknown part %q (want subject, txt, html, title or body)", p, part))
 		return
 	}
 	s.set(dir + "." + name).parts[layoutKey{locale, part}] = src
@@ -376,8 +443,10 @@ func (s *scannedFiles) set(id string) *rawSet {
 // --- building --------------------------------------------------------------
 
 type metaFile struct {
-	Version  int    `yaml:"version"`
-	Category string `yaml:"category"`
+	Version    int      `yaml:"version"`
+	Category   string   `yaml:"category"`
+	Preference string   `yaml:"preference"`
+	Channels   []string `yaml:"channels"`
 }
 
 func (r *rawSet) build(id string, layouts map[string]map[string]string) (*templateSet, error) {
@@ -386,7 +455,7 @@ func (r *rawSet) build(id string, layouts map[string]map[string]string) (*templa
 		errs = append(errs, fmt.Errorf("%s: "+format, append([]any{id}, a...)...))
 	}
 
-	set := &templateSet{locales: map[string]*localized{}}
+	set := &templateSet{locales: map[string]*localized{}, channels: []Channel{ChannelEmail}}
 	if r.meta == nil {
 		fail("%s.meta.yaml is missing", strings.SplitN(id, ".", 2)[1])
 	} else {
@@ -404,6 +473,60 @@ func (r *rawSet) build(id string, layouts map[string]map[string]string) (*templa
 		if !set.category.valid() {
 			fail("meta category must be transactional or commercial")
 		}
+		set.preference = PrefCategory(m.Preference)
+		switch {
+		case set.category == CategoryCommercial && m.Preference != "":
+			fail("meta preference is for transactional templates only (commercial messages are governed by consent)")
+		case set.category == CategoryTransactional && !set.preference.valid():
+			fail("meta preference must be one of %v (02 §6.5)", PrefCategories())
+		}
+		if m.Channels != nil {
+			set.channels = nil
+			for _, c := range m.Channels {
+				ch := Channel(c)
+				switch {
+				case !ch.valid():
+					fail("meta channel %q must be email, push or in_app", c)
+				case slices.Contains(set.channels, ch):
+					fail("meta channel %q is listed twice", c)
+				default:
+					set.channels = append(set.channels, ch)
+				}
+			}
+			if len(set.channels) == 0 {
+				fail("meta channels must not be empty")
+			}
+		}
+		if set.category == CategoryCommercial && slices.Contains(set.channels, ChannelInApp) {
+			fail("commercial templates cannot serve in_app")
+		}
+	}
+	email := slices.Contains(set.channels, ChannelEmail)
+	notice := slices.Contains(set.channels, ChannelInApp) || slices.Contains(set.channels, ChannelPush)
+	for k := range r.parts {
+		switch {
+		case slices.Contains(templateParts, k.part) && !email:
+			fail("%s.%s.tmpl is an e-mail part but the template does not list the email channel", k.locale, k.part)
+		case slices.Contains(noticeParts, k.part) && !notice:
+			fail("%s.%s.tmpl is an in_app/push part but the template lists neither in_app nor push", k.locale, k.part)
+		}
+	}
+	if notice {
+		set.notices = map[string]Notice{}
+		for _, loc := range supportedLocales {
+			n, err := buildNotice(id, loc, r.parts)
+			if err != nil {
+				fail("%v", err)
+				continue
+			}
+			set.notices[loc] = n
+		}
+	}
+	if !email {
+		if err := errors.Join(errs...); err != nil {
+			return nil, err
+		}
+		return set, nil
 	}
 
 	for _, loc := range supportedLocales {
@@ -479,6 +602,43 @@ func parseHTML(name, layout, body string) (*htmltemplate.Template, error) {
 		return nil, err
 	}
 	return t, nil
+}
+
+// noticeData is what in_app/push texts are executed with: no Data, so no
+// personal data can reach them.
+type noticeData struct {
+	Locale  string
+	AppName string
+}
+
+// buildNotice renders the fixed title and body of one locale.
+func buildNotice(id, loc string, parts map[layoutKey]string) (Notice, error) {
+	var out [2]string
+	for i, part := range noticeParts {
+		src, ok := parts[layoutKey{loc, part}]
+		if !ok {
+			return Notice{}, fmt.Errorf("%s.%s.tmpl is missing", loc, part)
+		}
+		t, err := texttemplate.New(id + "." + loc + "." + part).Option("missingkey=error").Parse(src)
+		if err != nil {
+			return Notice{}, fmt.Errorf("%s %s: %w", loc, part, err)
+		}
+		var b bytes.Buffer
+		if err := t.Execute(&b, noticeData{Locale: loc, AppName: appName}); err != nil {
+			return Notice{}, fmt.Errorf("%s %s: in_app/push texts are fixed; only {{.AppName}} and {{.Locale}} are available: %w", loc, part, err)
+		}
+		out[i] = strings.TrimSpace(b.String())
+	}
+	title := strings.Join(strings.Fields(out[0]), " ")
+	switch {
+	case title == "":
+		return Notice{}, fmt.Errorf("%s title is empty", loc)
+	case utf8.RuneCountInString(title) > maxNoticeTitle:
+		return Notice{}, fmt.Errorf("%s title is longer than %d characters", loc, maxNoticeTitle)
+	case utf8.RuneCountInString(out[1]) > maxNoticeBody:
+		return Notice{}, fmt.Errorf("%s body is longer than %d characters", loc, maxNoticeBody)
+	}
+	return Notice{Title: title, Body: out[1]}, nil
 }
 
 // formatDateTime renders t in Europe/Istanbul as "02.01.2006 15:04".

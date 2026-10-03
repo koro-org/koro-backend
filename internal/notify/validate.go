@@ -24,13 +24,19 @@ const (
 	maxAttachmentBytes = 10 << 20 // all attachments together
 	maxFilename        = 100
 	maxURL             = 2000
+	maxLinkPath        = 500
+	maxNoticeData      = 10
 )
 
 var (
 	inlineTypes     = map[string]bool{"image/png": true, "image/jpeg": true, "image/gif": true}
 	attachmentTypes = map[string]bool{"text/calendar": true, "application/pdf": true}
 
-	reCID      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
+	reCID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
+	// reLinkPath is the in_app_notifications.link_path CHECK; a leading "//"
+	// (protocol-relative URL, open redirect) is refused separately.
+	reLinkPath = regexp.MustCompile(`^/[A-Za-z0-9/_\-?=&.]*$`)
+	reDataKey  = regexp.MustCompile(`^[a-z][a-z0-9_]{0,39}$`)
 	reFilename = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._ -]*$`)
 	reMethod   = regexp.MustCompile(`^[A-Z]{1,16}$`)
 )
@@ -74,6 +80,13 @@ func validateMessage(m Message) []problem.FieldError {
 		if len(m.Inline) > 0 || len(m.Attachments) > 0 {
 			bad("attachments", "are only supported on the email channel")
 		}
+		if m.LinkPath != "" && (len(m.LinkPath) > maxLinkPath || !reLinkPath.MatchString(m.LinkPath) || strings.HasPrefix(m.LinkPath, "//")) {
+			bad("link_path", "must be an in-app relative path (/..., letters, digits and / _ - ? = & .)")
+		}
+		if m.SourceOrgID != nil && *m.SourceOrgID == uuid.Nil() {
+			bad("source_org_id", "must not be the nil UUID")
+		}
+		fe = append(fe, validateOpaqueData(m.Data)...)
 	}
 
 	if m.Category == CategoryCommercial {
@@ -187,4 +200,56 @@ func validUnsubscribeURL(s string) bool {
 	}
 	u, err := url.Parse(s)
 	return err == nil && u.Scheme == "https" && u.Host != ""
+}
+
+// validateOpaqueData keeps personal data out of in-app notifications and
+// push payloads: on those channels Data may carry only UUIDs under
+// snake_case keys (an opaque ID the client resolves after sign-in).
+func validateOpaqueData(data map[string]any) []problem.FieldError {
+	var fe []problem.FieldError
+	if len(data) > maxNoticeData {
+		fe = append(fe, problem.FieldError{Location: "message.data", Message: fmt.Sprintf("at most %d entries on in_app and push", maxNoticeData)})
+	}
+	for k, v := range data {
+		if !reDataKey.MatchString(k) {
+			fe = append(fe, problem.FieldError{Location: "message.data", Message: "keys must be snake_case (at most 40 characters)"})
+			continue
+		}
+		if _, ok := opaqueID(v); !ok {
+			fe = append(fe, problem.FieldError{Location: "message.data." + k,
+				Message: "in_app and push data may hold only opaque IDs (UUIDs), never personal data"})
+		}
+	}
+	return fe
+}
+
+// opaqueID returns the canonical text of a UUID value.
+func opaqueID(v any) (string, bool) {
+	switch x := v.(type) {
+	case uuid.UUID:
+		return x.String(), x != uuid.Nil()
+	case *uuid.UUID:
+		if x == nil || *x == uuid.Nil() {
+			return "", false
+		}
+		return x.String(), true
+	case string:
+		id, err := uuid.Parse(x)
+		if err != nil || id == uuid.Nil() {
+			return "", false
+		}
+		return id.String(), true
+	}
+	return "", false
+}
+
+// opaqueData converts validated in_app/push data to its stored form.
+func opaqueData(data map[string]any) map[string]string {
+	out := make(map[string]string, len(data))
+	for k, v := range data {
+		if id, ok := opaqueID(v); ok {
+			out[k] = id
+		}
+	}
+	return out
 }

@@ -1,0 +1,1 @@
+{"type":"email.bounced","created_at":"2026-10-03T09:00:00.000Z","data":{"email_id":"re_matrix_1","to":["matrix.bounce@koro.test"],"bounce":{"type":"Permanent","message":"mailbox does not exist"}}}

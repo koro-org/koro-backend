@@ -72,6 +72,108 @@
     "type": "urn:koro:problem:conflict"
   },
   {
+    "code": "consent.channel_not_allowed",
+    "status": 422,
+    "title": "Consent cannot be granted through this channel",
+    "type": "urn:koro:problem:consent.channel_not_allowed"
+  },
+  {
+    "code": "consent.empty_patch",
+    "status": 422,
+    "title": "Nothing to update",
+    "type": "urn:koro:problem:consent.empty_patch"
+  },
+  {
+    "code": "consent.invalid_notice",
+    "status": 422,
+    "title": "Notice is invalid",
+    "type": "urn:koro:problem:consent.invalid_notice"
+  },
+  {
+    "code": "consent.minor_restricted",
+    "status": 422,
+    "title": "Not available to users under 18",
+    "type": "urn:koro:problem:consent.minor_restricted"
+  },
+  {
+    "code": "consent.no_notice",
+    "status": 404,
+    "title": "No published notice",
+    "type": "urn:koro:problem:consent.no_notice"
+  },
+  {
+    "code": "consent.not_consent_based",
+    "status": 422,
+    "title": "Purpose does not rest on explicit consent",
+    "type": "urn:koro:problem:consent.not_consent_based"
+  },
+  {
+    "code": "consent.notice_mismatch",
+    "status": 422,
+    "title": "Notice is not the consent text of this purpose",
+    "type": "urn:koro:problem:consent.notice_mismatch"
+  },
+  {
+    "code": "consent.notice_not_current",
+    "status": 409,
+    "title": "Consent text is not the current version",
+    "type": "urn:koro:problem:consent.notice_not_current"
+  },
+  {
+    "code": "consent.notice_state",
+    "status": 409,
+    "title": "Notice is not in a state that allows this",
+    "type": "urn:koro:problem:consent.notice_state"
+  },
+  {
+    "code": "consent.notice_version_taken",
+    "status": 409,
+    "title": "Notice version already exists",
+    "type": "urn:koro:problem:consent.notice_version_taken"
+  },
+  {
+    "code": "consent.proof_required",
+    "status": 422,
+    "title": "The shown consent text is required",
+    "type": "urn:koro:problem:consent.proof_required"
+  },
+  {
+    "code": "consent.purpose_inactive",
+    "status": 422,
+    "title": "Consent purpose is not active",
+    "type": "urn:koro:problem:consent.purpose_inactive"
+  },
+  {
+    "code": "consent.reauth_unavailable",
+    "status": 503,
+    "title": "Re-authentication is not available",
+    "type": "urn:koro:problem:consent.reauth_unavailable"
+  },
+  {
+    "code": "consent.scope_not_allowed",
+    "status": 422,
+    "title": "Purpose takes no scope",
+    "type": "urn:koro:problem:consent.scope_not_allowed"
+  },
+  {
+    "code": "consent.scope_required",
+    "status": 422,
+    "title": "Purpose needs a scope",
+    "type": "urn:koro:problem:consent.scope_required"
+  },
+  {
+    "code": "consent.text_mismatch",
+    "status": 422,
+    "title": "Text digest does not match the notice",
+    "type": "urn:koro:problem:consent.text_mismatch"
+  },
+  {
+    "code": "consent.unknown_purpose",
+    "status": 422,
+    "title": "Unknown consent purpose",
+    "type": "urn:koro:problem:consent.unknown_purpose"
+  },
+  {
     "code": "csrf_rejected",
     "status": 403,
     "title": "Cross-origin request rejected",

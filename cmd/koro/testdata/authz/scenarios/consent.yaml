@@ -1,0 +1,54 @@
+# Multi-step scenarios of the consent module (03 §7.7; BE-012).
+version: 1
+scenarios:
+  notice_lifecycle:
+    note: a draft is invisible until published; a published notice cannot be published again
+    steps:
+      - { persona: dpo, operation: adminCreateNotice, expect: 201, save: { new_notice: notice_version_id } }
+      - { persona: anonymous, operation: getNoticeVersion, path_params: { notice_version_id: new_notice }, expect: 404, code: not_found }
+      - { persona: dpo, operation: adminPublishNotice, path_params: { notice_version_id: new_notice }, expect: 200 }
+      - { persona: anonymous, operation: getNoticeVersion, path_params: { notice_version_id: new_notice }, expect: 200 }
+      - { persona: dpo, operation: adminPublishNotice, path_params: { notice_version_id: new_notice }, expect: 409, code: consent.notice_state }
+      - { persona: dpo, operation: adminRetireNotice, path_params: { notice_version_id: new_notice }, expect: 200 }
+      - { persona: anonymous, operation: getNoticeVersion, path_params: { notice_version_id: new_notice }, expect: 200 }
+  publish_retires_previous:
+    note: publishing a new version retires the current one of the same key; the old one stays readable
+    steps:
+      - { persona: dpo, operation: adminPublishNotice, path_params: { notice_version_id: notice_privacy_draft }, expect: 200 }
+      - { persona: dpo, operation: adminRetireNotice, path_params: { notice_version_id: notice_privacy_current }, expect: 409, code: consent.notice_state }
+      - { persona: student, operation: getNoticeVersion, path_params: { notice_version_id: notice_privacy_current }, expect: 200 }
+  reauth_required:
+    note: R operations need the re-authentication proof in the body (03 §6.2)
+    steps:
+      - { persona: dpo, operation: adminCreateNotice, body: bodies/consent/create_without_reauth.json, expect: 403, code: forbidden }
+      - { persona: dpo, operation: adminCreateNotice, expect: 201 }
+  dpo_needs_mfa:
+    note: dpo is an MFA role (k-mfa, 03 §6.4)
+    steps:
+      - { persona: dpo, mfa: false, operation: adminListConsentPurposes, expect: 403, code: authz.mfa_required }
+      - { persona: dpo, operation: adminListConsentPurposes, expect: 200 }
+  break_glass_reason:
+    note: support reads consent proof only with X-Koro-Access-Reason (03 §6.3)
+    steps:
+      - { persona: support, operation: adminListUserConsents, expect: 403, code: authz.break_glass_reason_required }
+      - { persona: support, operation: adminListUserConsents, headers: { X-Koro-Access-Reason: "short" }, expect: 403, code: authz.break_glass_reason_required }
+      - { persona: support, operation: adminListUserConsents, headers: { X-Koro-Access-Reason: "Ticket 4711: user cannot unsubscribe" }, expect: 200 }
+  minor_cannot_grant_commercial:
+    note: a minor cannot grant commercial consent but may always withdraw (03 k12)
+    steps:
+      - { persona: student_minor, operation: recordMyConsent, expect: 422, code: consent.minor_restricted }
+      - { persona: student_minor, operation: recordMyConsent, body: bodies/consent/withdraw_commercial_email.json, expect: 201 }
+  retired_text_cannot_be_granted:
+    note: a grant needs the current consent text; a retired one is 409 but stays readable
+    steps:
+      - { persona: student, operation: recordMyConsent, expect: 201 }
+      - { persona: dpo, operation: adminRetireNotice, path_params: { notice_version_id: notice_cc_email }, expect: 200 }
+      - { persona: student_b, operation: recordMyConsent, expect: 409, code: consent.notice_not_current }
+      - { persona: student_b, operation: getNoticeVersion, path_params: { notice_version_id: notice_cc_email }, expect: 200 }
+      - { persona: student, operation: recordMyConsent, body: bodies/consent/withdraw_commercial_email.json, expect: 201 }
+  own_ledger_only:
+    note: /me/consents is the caller's own ledger; another user's proof is an admin read
+    steps:
+      - { persona: student, operation: recordMyConsent, expect: 201 }
+      - { persona: student, operation: listMyConsents, expect: 200 }
+      - { persona: student, operation: adminListUserConsents, path_params: { user_id: student_b }, expect: 403, code: forbidden }

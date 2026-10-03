@@ -1,0 +1,155 @@
+# Authz matrix of the consent module (03 §5.5, 04 §2.5; BE-012). 10 operations × 18 personas.
+# notice.read is public (P); record.create/list_own are O cells on /me (every signed-in
+# user; 03 k12: a minor's grant of a restricted purpose is 422); list_admin is dpo ✓ and
+# support B; notice.manage and purpose.manage are dpo · R. Admin surface (03 §7.2-3):
+# everyone without the role → 403. dpo and support sessions are MFA verified (03 §7.3);
+# the MFA-less session, R and B are pinned in scenarios/consent.yaml and the policy test.
+# R bodies carry the test re-authentication proof (wire_consent_test.go).
+version: 1
+groups:
+  no_platform_role: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                     event_staff, university_rep, company_member, company_admin, other_company_member]
+  # signed-in users who may grant every purpose (all but the minor, 03 k12).
+  signed_in_adults: [user_unverified, student, club_member, club_admin, other_club_admin, event_staff,
+                     university_rep, company_member, company_admin, other_company_member,
+                     moderator, support, dpo, platform_admin, finance_admin, talent_auditor]
+  # signed-in users other than dpo (notice drafts are dpo-only).
+  not_dpo: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin, event_staff,
+            university_rep, company_member, company_admin, other_company_member,
+            moderator, support, platform_admin, finance_admin, talent_auditor]
+
+operations:
+  listCurrentNotices:
+    method: GET
+    path: /api/v1/notices/current
+    action: consent.notice.read
+    public: true
+    query: { audience: student }
+    expect: { "@all": 200 }
+
+  getNoticeVersion:
+    method: GET
+    path: /api/v1/notices/{notice_version_id}
+    action: consent.notice.read
+    public: true
+    path_params: { notice_version_id: notice_cc_email }
+    expect: { "@all": 200 }
+    variants:
+      - name: retired
+        path_params: { notice_version_id: notice_privacy_retired }
+        note: retired versions stay readable as proof (04 §2.5)
+        expect: { "@all": 200 }
+      - name: draft
+        path_params: { notice_version_id: notice_privacy_draft }
+        note: a draft is visible to dpo only; everyone else 404
+        expect: { anonymous: 404, "@not_dpo": 404, dpo: 200 }
+      - name: missing
+        path_params: { notice_version_id: "literal:00000000-0000-7000-8000-0000000000c1" }
+        expect: { "@all": 404 }
+
+  recordMyConsent:
+    method: POST
+    path: /api/v1/me/consents
+    action: consent.record.create
+    body: bodies/consent/grant_commercial_email.json
+    note: commercial_email grant; a minor gets 422 consent.minor_restricted (03 k12)
+    expect: { anonymous: 401, "@signed_in_adults": 201, student_minor: 422 }
+    variants:
+      - name: withdraw
+        body: bodies/consent/withdraw_commercial_email.json
+        note: withdrawing is always allowed, minors included (03 k12)
+        expect: { anonymous: 401, "@signed_in": 201 }
+
+  listMyConsents:
+    method: GET
+    path: /api/v1/me/consents
+    action: consent.record.list_own
+    expect: { anonymous: 401, "@signed_in": 200 }
+
+  adminListUserConsents:
+    method: GET
+    path: /api/v1/admin/users/{user_id}/consents
+    action: consent.record.list_admin
+    path_params: { user_id: student }
+    note: without X-Koro-Access-Reason support is refused (authz.break_glass_reason_required)
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403   # admin surface: 403 before reading (03 §7.2-3)
+      moderator: 403
+      support: 403               # B cell without the reason header
+      dpo: 200
+      platform_admin: 403
+      finance_admin: 403
+      talent_auditor: 403
+    variants:
+      - name: break_glass
+        headers: { X-Koro-Access-Reason: "Ticket 4711: user cannot unsubscribe from e-mails" }
+        note: support reads the proof with a reason (break-glass, audited)
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          moderator: 403
+          support: 200
+          dpo: 200
+          platform_admin: 403
+          finance_admin: 403
+          talent_auditor: 403
+
+  adminCreateNotice:
+    method: POST
+    path: /api/v1/admin/notices
+    action: consent.notice.manage
+    body: bodies/consent/create_privacy_notice.json
+    expect: { anonymous: 401, "@no_platform_role": 403, moderator: 403, support: 403, dpo: 201,
+              platform_admin: 403, finance_admin: 403, talent_auditor: 403 }
+    variants:
+      - name: consent_text
+        body: bodies/consent/create_consent_text.json
+        expect: { anonymous: 401, "@no_platform_role": 403, moderator: 403, support: 403, dpo: 201,
+                  platform_admin: 403, finance_admin: 403, talent_auditor: 403 }
+
+  adminPublishNotice:
+    method: POST
+    path: /api/v1/admin/notices/{notice_version_id}/publish
+    action: consent.notice.manage
+    path_params: { notice_version_id: notice_privacy_draft }
+    body: bodies/consent/reauth.json
+    expect: { anonymous: 401, "@no_platform_role": 403, moderator: 403, support: 403, dpo: 200,
+              platform_admin: 403, finance_admin: 403, talent_auditor: 403 }
+    variants:
+      - name: missing
+        path_params: { notice_version_id: "literal:00000000-0000-7000-8000-0000000000c2" }
+        note: the admin surface answers 403 before reading; dpo learns the notice does not exist
+        expect: { anonymous: 401, "@no_platform_role": 403, moderator: 403, support: 403, dpo: 404,
+                  platform_admin: 403, finance_admin: 403, talent_auditor: 403 }
+
+  adminRetireNotice:
+    method: POST
+    path: /api/v1/admin/notices/{notice_version_id}/retire
+    action: consent.notice.manage
+    path_params: { notice_version_id: notice_cc_email }
+    body: bodies/consent/reauth.json
+    expect: { anonymous: 401, "@no_platform_role": 403, moderator: 403, support: 403, dpo: 200,
+              platform_admin: 403, finance_admin: 403, talent_auditor: 403 }
+
+  adminListConsentPurposes:
+    method: GET
+    path: /api/v1/admin/consent-purposes
+    action: consent.purpose.manage
+    expect: { anonymous: 401, "@no_platform_role": 403, moderator: 403, support: 403, dpo: 200,
+              platform_admin: 403, finance_admin: 403, talent_auditor: 403 }
+
+  adminUpdateConsentPurpose:
+    method: PATCH
+    path: /api/v1/admin/consent-purposes/{purpose_code}
+    action: consent.purpose.manage
+    path_params: { purpose_code: "literal:commercial_push" }
+    body: bodies/consent/update_purpose.json
+    expect: { anonymous: 401, "@no_platform_role": 403, moderator: 403, support: 403, dpo: 200,
+              platform_admin: 403, finance_admin: 403, talent_auditor: 403 }
+    variants:
+      - name: unknown_purpose
+        path_params: { purpose_code: "literal:unknown_purpose" }
+        note: the admin surface answers 403 first; dpo learns the code does not exist
+        expect: { anonymous: 401, "@no_platform_role": 403, moderator: 403, support: 403, dpo: 404,
+                  platform_admin: 403, finance_admin: 403, talent_auditor: 403 }

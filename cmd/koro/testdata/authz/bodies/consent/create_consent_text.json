@@ -1,0 +1,1 @@
+{"kind": "consent_text", "purpose_code": "commercial_push", "audience": "student", "locale": "tr-TR", "version": "2026.10.03", "title": "Ticari bildirim izni", "body_md": "Kampanya bildirimlerini almayı kabul ediyorum.\n", "reauth": {"password": "matrix-reauth-password"}}

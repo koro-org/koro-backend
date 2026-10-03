@@ -1,0 +1,190 @@
+// Package consent is the consent module (01 §4.3; BE-012): versioned notice
+// texts, the append-only consent ledger, the current-state queries other
+// modules gate on, and the İYS delivery of commercial consents.
+//
+// Rules the package enforces (KVKK, 6563, Kurul 2026/347, 2025/1072):
+//
+//   - A privacy notice (aydınlatma) is shown, never consented to; a consent
+//     text (açık rıza) is a separate notice of exactly one purpose. A grant
+//     must name the current consent text of its purpose and the SHA-256 of
+//     the text the user saw; terms of use are never consent proof.
+//   - Only explicit_consent purposes are recorded: consent cannot be bundled
+//     with the service contract. One record = one purpose; there is no
+//     "accept all".
+//   - Grants happen on a page that shows the text (web, mobile; admin and
+//     import for proof migration). Email links only withdraw (one-click
+//     unsubscribe), so a marketing consent can never ride on a
+//     verification/OTP message. Callers (identity registration, events
+//     forms) record each purpose separately, unchecked by default.
+//   - The ledger only grows: a withdrawal is a new row, the newest row of
+//     (user, purpose, scope) is the current state. A published notice never
+//     changes (notice_versions_guard); a new version is a new row and
+//     publishing it retires the previous version of the same key.
+//   - Commercial purposes (requires_iys) get an iys_submissions row and a
+//     consent.recorded outbox event in the recording transaction (ADR-0009,
+//     mechanism O); the consent.submit_iys task delivers it and
+//     consent.iys_reconcile (05:30) retries what is still open.
+package consent
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"time"
+	"uuid"
+
+	"koro/internal/authz"
+	"koro/internal/platform/clock"
+	"koro/internal/platform/db"
+	"koro/internal/platform/idempotency"
+	"koro/internal/platform/outbox"
+	"koro/internal/platform/privacy"
+	"koro/internal/platform/queue"
+)
+
+// Recorder appends consents in the caller's transaction (01 §6.3:
+// identity registration, students privacy settings and events form
+// consent fields → consent.Recorder.Record). Consumers declare it in their
+// ports.go with "// sync-write: consent.Recorder.Record".
+type Recorder interface {
+	// Record validates and appends one consent row; for a requires_iys
+	// purpose it also writes the İYS submission and the consent.recorded
+	// outbox event, all in the transaction carried by ctx (a rollback of
+	// the caller removes everything). It returns the consent ID.
+	Record(ctx context.Context, in RecordInput) (uuid.UUID, error)
+}
+
+// Checker answers whether a user's consent is in force (01 §4.3). The
+// newest row of (user, purpose, scope) decides; an inactive purpose is never
+// in force.
+type Checker interface {
+	// HasActive reports whether userID's current consent for purpose (and
+	// scopeID, for per-registration purposes; nil otherwise) is a grant.
+	HasActive(ctx context.Context, userID uuid.UUID, purpose Purpose, scopeID *uuid.UUID) (bool, error)
+	// FilterActive returns those of userIDs with an unscoped grant in force
+	// for purpose, without duplicates, in ascending ID order (outreach
+	// dispatch, notify's commercial message port; BE-015).
+	FilterActive(ctx context.Context, userIDs []uuid.UUID, purpose Purpose) ([]uuid.UUID, error)
+}
+
+// Notices returns the texts to show (01 §4.3).
+type Notices interface {
+	// Current returns the published version for key, falling back to
+	// audience "all" and then to locale tr-TR; ErrNoNotice when none.
+	Current(ctx context.Context, key NoticeKey) (Notice, error)
+}
+
+// Service is the consent service: the cross-module contracts plus the HTTP
+// use cases (04 §2.5). Every method that takes an actor calls authz.Can
+// first (05 §5.3); R operations then verify the reauth proof (03 §6.2).
+type Service interface {
+	Recorder
+	Checker
+	Notices
+
+	// ListCurrentNotices is listCurrentNotices (consent.notice.read).
+	ListCurrentNotices(ctx context.Context, a authz.Actor, q NoticeFilter) ([]Notice, error)
+	// GetNotice is getNoticeVersion: published and retired versions for
+	// everyone, drafts for dpo only.
+	GetNotice(ctx context.Context, a authz.Actor, id uuid.UUID) (Notice, error)
+	// RecordMine is recordMyConsent (consent.record.create).
+	RecordMine(ctx context.Context, a authz.Actor, in MyConsent) (Consent, error)
+	// ListMine is listMyConsents (consent.record.list_own).
+	ListMine(ctx context.Context, a authz.Actor, q PageQuery) (MyConsents, error)
+	// AdminListUser is adminListUserConsents (consent.record.list_admin;
+	// support only with a break-glass reason). The read is audited.
+	AdminListUser(ctx context.Context, a authz.Actor, userID uuid.UUID, access Access, q PageQuery) (Page, error)
+	// CreateNotice is adminCreateNotice: a new draft (consent.notice.manage, R).
+	CreateNotice(ctx context.Context, a authz.Actor, in NoticeDraft, proof ReauthProof) (Notice, error)
+	// PublishNotice publishes a draft and retires the current version of
+	// its key in one transaction (consent.notice.manage, R).
+	PublishNotice(ctx context.Context, a authz.Actor, id uuid.UUID, proof ReauthProof) (Notice, error)
+	// RetireNotice retires a published version (consent.notice.manage, R).
+	RetireNotice(ctx context.Context, a authz.Actor, id uuid.UUID, proof ReauthProof) (Notice, error)
+	// ListPurposes is adminListConsentPurposes (consent.purpose.manage).
+	ListPurposes(ctx context.Context, a authz.Actor) ([]PurposeDef, error)
+	// UpdatePurpose is adminUpdateConsentPurpose (consent.purpose.manage, R).
+	UpdatePurpose(ctx context.Context, a authz.Actor, code Purpose, p PurposePatch, proof ReauthProof) (PurposeDef, error)
+}
+
+// Deps are the dependencies of the consent module. Everything but IYS and
+// Reauth is required (New returns an error otherwise, 05 §3).
+type Deps struct {
+	Store       Store
+	Tx          db.TxManager
+	Outbox      outbox.Writer // consent.recorded (mechanism O)
+	Audit       AuditLogger
+	Idempotency *idempotency.Keeper // optional Idempotency-Key of the POST operations
+	Clock       clock.Clock
+	Log         *slog.Logger
+
+	// Reauth verifies the proof of R operations (identity, late bound).
+	// nil → every R operation fails closed with ErrReauthUnavailable.
+	Reauth Reauthenticator
+	// IYS delivers commercial consents. nil → NoopIYS (submissions are
+	// skipped) unless IYSRequired.
+	IYS IYSClient
+	// IYSRequired is CONSENT_IYS_REQUIRED: refuse to start without a real
+	// İYS client (live operation, H-14).
+	IYSRequired bool
+}
+
+func (d *Deps) validate() error {
+	var errs []error
+	for _, c := range []struct {
+		name string
+		ok   bool
+	}{
+		{"Store", d.Store != nil}, {"Tx", d.Tx != nil}, {"Outbox", d.Outbox != nil}, {"Audit", d.Audit != nil},
+		{"Idempotency", d.Idempotency != nil}, {"Clock", d.Clock != nil}, {"Log", d.Log != nil},
+	} {
+		if !c.ok {
+			errs = append(errs, fmt.Errorf("consent.Deps.%s is missing", c.name))
+		}
+	}
+	if d.IYS == nil {
+		d.IYS = NoopIYS{}
+	}
+	if d.IYSRequired && !d.IYS.Real() {
+		errs = append(errs, fmt.Errorf("consent: CONSENT_IYS_REQUIRED=true needs a real İYS client, got %q (BE-055)", d.IYS.Name()))
+	}
+	return errors.Join(errs...)
+}
+
+// Module is what consent hands to the composition root.
+type Module struct {
+	Service Service
+	// Privacy is the KVKK provider: consents are exported and kept as proof.
+	Privacy privacy.Provider
+
+	svc *service
+}
+
+// New builds the consent module. It returns an error for invalid
+// dependencies (a missing one is a wiring bug, CONSENT_IYS_REQUIRED without
+// a real client a configuration error; both stop the process at start).
+func New(d Deps) (Module, error) {
+	if err := d.validate(); err != nil {
+		return Module{}, err
+	}
+	s := &service{d: d}
+	return Module{Service: s, Privacy: privacyProvider{s: s}, svc: s}, nil
+}
+
+// Subscribe registers the outbox subscription of consent (01 §6.2):
+// consent.recorded → consent.submit_iys on the critical queue (01 §8).
+func (m Module) Subscribe(r *outbox.Registry) {
+	r.Subscribe(TopicRecorded, SubmitIYSTaskName, m.svc.handleRecorded, outbox.Queue(queue.Critical))
+}
+
+// Jobs returns the scheduled jobs of consent (01 §7): consent.iys_reconcile.
+func (m Module) Jobs() []queue.Job { return []queue.Job{m.svc.reconcileJob()} }
+
+type service struct{ d Deps }
+
+var _ Service = (*service)(nil)
+
+// now is the service clock in the database's precision (microseconds), so
+// the in-memory store keeps exactly what PostgreSQL stores.
+func (s *service) now() time.Time { return s.d.Clock.Now().UTC().Truncate(time.Microsecond) }

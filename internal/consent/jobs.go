@@ -73,7 +73,8 @@ func (s *service) deliver(ctx context.Context, sub Submission) error {
 	)
 	if !skipped {
 		receipt, sendErr = s.d.IYS.Submit(ctx, IYSRecord{
-			SubmissionID: sub.ID, ConsentID: c.ID, UserID: c.UserID, Channel: sub.Channel, Action: c.Action, OccurredAt: c.OccurredAt,
+			SubmissionID: sub.ID, ConsentID: c.ID, UserID: c.UserID, Channel: sub.Channel, Action: c.Action, Source: c.Channel,
+			OccurredAt: c.OccurredAt,
 		})
 	}
 	var final Submission
@@ -114,12 +115,17 @@ func (s *service) deliver(ctx context.Context, sub Submission) error {
 	}
 	switch {
 	case sendErr != nil && final.Status == SubmissionFailed:
+		permanent := errors.Is(sendErr, ErrIYSPermanent)
 		level := slog.LevelWarn
-		if final.Attempts >= alarmAttempts {
-			level, attrs = slog.LevelError, append(attrs, slog.Bool("alarm", true))
+		if final.Attempts >= alarmAttempts || permanent {
+			level, attrs = slog.LevelError, append(attrs, slog.Bool("alarm", true), slog.Bool("permanent", permanent))
 		}
 		s.d.Log.LogAttrs(ctx, level, "iys submission failed", attrs...)
-		return fmt.Errorf("consent: İYS submission %s: %w", sub.ID, sendErr)
+		err := fmt.Errorf("consent: İYS submission %s: %s", sub.ID, cut(obs.Scrub(sendErr.Error()), maxLastError))
+		if permanent {
+			return queue.Permanent(err) // a task retry cannot help; the DPO is alarmed
+		}
+		return err
 	default:
 		s.d.Log.LogAttrs(ctx, slog.LevelInfo, "iys submission done", attrs...)
 	}

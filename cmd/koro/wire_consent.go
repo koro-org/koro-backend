@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"uuid"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/consent"
+	"koro/internal/identity"
 	"koro/internal/platform/config"
 	"koro/internal/platform/db"
 )
@@ -19,8 +21,9 @@ import (
 //
 //	store   nil → consent.NewGormStore over the app_rw pool
 //	tx      nil → the app_rw pool's TxManager; tests preset db.NopTx
-//	iys     nil → consent.NoopIYS (submissions "skipped"); BE-055 sets the
-//	        real İYS adapter here
+//	iys     nil → consent.IYSHTTP when the İYS settings are present
+//	        (CONSENT_IYS_*, BE-055), else consent.NoopIYS (submissions
+//	        "skipped"; CONSENT_IYS_REQUIRED refuses that)
 //	cfg     tests only; nil → the consent section of the loaded configuration
 //	reauth  the re-authentication verifier of the R operations (03 §6.2:
 //	        identity.Reauth.Verify). identity is L4 and builds after
@@ -28,6 +31,10 @@ import (
 //	        in wire_identity.go build, only when it is nil (tests preset a
 //	        fake). The type uses stdlib types only (R4 hook rule). nil →
 //	        every R operation fails closed (503 consent.reauth_unavailable).
+//
+// The İYS recipient address (T-159) is resolved at delivery time from
+// identity (L4, built after consent): iysRecipients reads c.identity.svc
+// when called, so no identity code is touched here.
 //
 // Consumers adapt svc to their own ports: consent.Recorder (identity
 // registration, students privacy settings, events form consent fields:
@@ -56,10 +63,45 @@ func (l lateReauth) Verify(ctx context.Context, userID uuid.UUID, p consent.Reau
 	return l.w.reauth(ctx, userID, p.Password, p.TOTPCode)
 }
 
+// iysRecipients resolves İYS recipients through identity's Users.Contact
+// at call time (worker only). identity holds e-mail addresses only, so the
+// sms and call channels have no recipient.
+type iysRecipients struct{ c *container }
+
+func (r iysRecipients) IYSRecipient(ctx context.Context, userID uuid.UUID, ch consent.IYSChannel) (string, error) {
+	if ch != consent.IYSEmail {
+		return "", fmt.Errorf("%w: identity holds no phone numbers (channel %s)", consent.ErrIYSRecipientGone, ch)
+	}
+	users := r.c.identity.svc
+	if users == nil {
+		return "", errors.New("consent: identity is not wired (İYS recipient)")
+	}
+	contact, err := users.Contact(ctx, userID)
+	switch {
+	case errors.Is(err, identity.ErrNotFound):
+		return "", consent.ErrIYSRecipientGone // erased before the delivery (T-159)
+	case err != nil:
+		return "", err
+	}
+	return contact.Email, nil
+}
+
 func (w *consentWiring) build(c *container) error {
 	cfg := c.infra.cfg.Consent
 	if w.cfg != nil {
 		cfg = *w.cfg
+	}
+	iys := w.iys
+	if iys == nil && cfg.IYSEnabled() {
+		client, err := consent.NewIYSHTTP(consent.IYSHTTPConfig{
+			BaseURL: cfg.IYSBaseURL, Username: cfg.IYSUsername, Password: cfg.IYSPassword.Reveal(),
+			IYSCode: cfg.IYSCode, BrandCode: cfg.IYSBrandCode, RecipientType: cfg.IYSRecipientType,
+			Recipients: iysRecipients{c: c}, Timeout: cfg.IYSTimeout, Clock: c.infra.clock,
+		})
+		if err != nil {
+			return err
+		}
+		iys = client
 	}
 	store, tx := w.store, w.tx
 	if store == nil {
@@ -74,7 +116,7 @@ func (w *consentWiring) build(c *container) error {
 	mod, err := consent.New(consent.Deps{
 		Store: store, Tx: tx, Outbox: c.infra.outbox, Audit: c.audit.svc, Idempotency: c.infra.idempotency,
 		Clock: c.infra.clock, Log: c.infra.log.With("module", "consent"),
-		Reauth: lateReauth{w: w}, IYS: w.iys, IYSRequired: cfg.IYSRequired,
+		Reauth: lateReauth{w: w}, IYS: iys, IYSRequired: cfg.IYSRequired,
 	})
 	if err != nil {
 		return err

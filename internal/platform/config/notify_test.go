@@ -121,3 +121,41 @@ func notifyDevEnv(kv ...string) map[string]string {
 	}
 	return m
 }
+
+// Push providers (BE-055): each is complete or absent; PUSH_REQUIRED needs
+// one; the APNs sandbox is not for prod.
+func TestNotify_PushValidation(t *testing.T) {
+	t.Parallel()
+	fcm := []string{"PUSH_FCM_PROJECT_ID", "koro-prod-123", "PUSH_FCM_CREDENTIALS", `{"type":"service_account"}`}
+	apns := []string{"PUSH_APNS_KEY", "-----BEGIN PRIVATE KEY-----", "PUSH_APNS_KEY_ID", "ABC123DEFG",
+		"PUSH_APNS_TEAM_ID", "TEAM123456", "PUSH_APNS_TOPIC", "app.koro.mobile"}
+	tests := []struct {
+		name    string
+		environ map[string]string
+		wantErr string
+	}{
+		{"none", notifyDevEnv(), ""},
+		{"fcm", notifyDevEnv(fcm...), ""},
+		{"apns", notifyDevEnv(apns...), ""},
+		{"required with fcm", notifyDevEnv(append([]string{"PUSH_REQUIRED", "true"}, fcm...)...), ""},
+		{"required without provider", notifyDevEnv("PUSH_REQUIRED", "true"), "PUSH_REQUIRED=true needs"},
+		{"fcm half", notifyDevEnv("PUSH_FCM_PROJECT_ID", "koro-prod-123"), "must be set together"},
+		{"apns half", notifyDevEnv("PUSH_APNS_KEY_ID", "ABC123DEFG"), "must be set together"},
+		{"timeout", notifyDevEnv("PUSH_TIMEOUT", "0s"), "PUSH_TIMEOUT"},
+		{"sandbox in prod", map[string]string{"APP_ENV": "prod", "PUSH_APNS_SANDBOX": "true"}, "PUSH_APNS_SANDBOX=true is not allowed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := config.Load[notifyOnly](tt.environ)
+			switch {
+			case tt.wantErr == "" && err != nil:
+				t.Fatalf("Load() error = %v", err)
+			case tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)):
+				t.Fatalf("Load() error = %v, want %q", err, tt.wantErr)
+			case err != nil && strings.Contains(err.Error(), "BEGIN PRIVATE KEY"):
+				t.Fatalf("error leaks the key: %v", err)
+			}
+		})
+	}
+}

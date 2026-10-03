@@ -19,8 +19,8 @@ const (
 )
 
 // Notify configures the notify module (internal/notify): the SMTP relay, the
-// sender identity of e-mails and the provider webhook secrets. Owner: BE-005,
-// BE-015. Only tickets of the notify
+// sender identity of e-mails, the provider webhook secrets and the push
+// providers. Owner: BE-005, BE-015, BE-055 (push). Only tickets of the notify
 // module edit this file and the "# --- notify ---" block of .env.example
 // (BE-001 R7).
 //
@@ -44,6 +44,33 @@ type Notify struct {
 	// EmailWebhookSESTopicARNs lists the SNS topics (comma separated) allowed
 	// to post SES notifications; empty → /webhooks/email/ses answers 401.
 	EmailWebhookSESTopicARNs string `env:"EMAIL_WEBHOOK_SES_TOPIC_ARNS"`
+
+	// Push (BE-055). A provider is on when its settings are complete; with
+	// neither, pushes are recorded with the no-op adapter. PushRequired
+	// refuses to start without at least one provider.
+	PushRequired bool `env:"PUSH_REQUIRED" envDefault:"false"`
+	// PushFCMProjectID and PushFCMCredentials (service account JSON,
+	// PUSH_FCM_CREDENTIALS_FILE) enable FCM HTTP v1 (Android, web).
+	PushFCMProjectID   string `env:"PUSH_FCM_PROJECT_ID"`
+	PushFCMCredentials Secret `env:"PUSH_FCM_CREDENTIALS"`
+	// PushAPNsKey (.p8, PUSH_APNS_KEY_FILE), key ID, team ID and topic
+	// (bundle ID) enable APNs (iOS). PushAPNsSandbox selects the development
+	// endpoint (not allowed in prod).
+	PushAPNsKey     Secret `env:"PUSH_APNS_KEY"`
+	PushAPNsKeyID   string `env:"PUSH_APNS_KEY_ID"`
+	PushAPNsTeamID  string `env:"PUSH_APNS_TEAM_ID"`
+	PushAPNsTopic   string `env:"PUSH_APNS_TOPIC"`
+	PushAPNsSandbox bool   `env:"PUSH_APNS_SANDBOX" envDefault:"false"`
+	// PushTimeout bounds one provider request.
+	PushTimeout time.Duration `env:"PUSH_TIMEOUT" envDefault:"10s"`
+}
+
+// FCMEnabled reports whether FCM settings are present.
+func (n Notify) FCMEnabled() bool { return n.PushFCMProjectID != "" || !n.PushFCMCredentials.IsZero() }
+
+// APNsEnabled reports whether APNs settings are present.
+func (n Notify) APNsEnabled() bool {
+	return !n.PushAPNsKey.IsZero() || n.PushAPNsKeyID != "" || n.PushAPNsTeamID != "" || n.PushAPNsTopic != ""
 }
 
 // svixSecretPrefix starts every svix signing secret.
@@ -131,6 +158,8 @@ func (n *Notify) validate(c Common) error {
 		}
 	}
 
+	errs = append(errs, n.validatePush(c)...)
+
 	if c.ProdLike() {
 		if isLoopbackHost(n.SMTPHost) {
 			errs = append(errs, fmt.Errorf("SMTP_HOST must be a real relay in %s (got a loopback address)", c.Env))
@@ -140,6 +169,30 @@ func (n *Notify) validate(c Common) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// validatePush checks that each push provider is complete or absent; the
+// credentials themselves are parsed when the adapter is built (a broken key
+// stops the process there, without repeating it).
+func (n *Notify) validatePush(c Common) []error {
+	var errs []error
+	n.PushFCMProjectID = strings.TrimSpace(n.PushFCMProjectID)
+	if n.FCMEnabled() && (n.PushFCMProjectID == "" || n.PushFCMCredentials.IsZero()) {
+		errs = append(errs, errors.New("PUSH_FCM_PROJECT_ID and PUSH_FCM_CREDENTIALS must be set together"))
+	}
+	if n.APNsEnabled() && (n.PushAPNsKey.IsZero() || n.PushAPNsKeyID == "" || n.PushAPNsTeamID == "" || n.PushAPNsTopic == "") {
+		errs = append(errs, errors.New("PUSH_APNS_KEY, PUSH_APNS_KEY_ID, PUSH_APNS_TEAM_ID and PUSH_APNS_TOPIC must be set together"))
+	}
+	if n.PushRequired && !n.FCMEnabled() && !n.APNsEnabled() {
+		errs = append(errs, errors.New("PUSH_REQUIRED=true needs FCM (PUSH_FCM_*) or APNs (PUSH_APNS_*) settings"))
+	}
+	if c.Env == EnvProd && n.PushAPNsSandbox {
+		errs = append(errs, errors.New("PUSH_APNS_SANDBOX=true is not allowed in prod"))
+	}
+	if n.PushTimeout <= 0 || n.PushTimeout > time.Minute {
+		errs = append(errs, errors.New("PUSH_TIMEOUT must be positive and at most 1m"))
+	}
+	return errs
 }
 
 func hasPlaceholderDomain(addr string) bool {

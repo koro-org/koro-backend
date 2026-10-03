@@ -144,6 +144,9 @@ type PushTokenStore interface {
 	// ActivePushTokens returns the unrevoked tokens of userID (the push
 	// adapter of BE-055).
 	ActivePushTokens(ctx context.Context, userID uuid.UUID) ([]PushToken, error)
+	// RevokePushToken sets revoked_at on token id when the provider reports
+	// it invalid (BE-055); false when it is unknown or already revoked.
+	RevokePushToken(ctx context.Context, id uuid.UUID, at time.Time) (bool, error)
 	// PushTokensOf returns every token of userID (KVKK export).
 	PushTokensOf(ctx context.Context, userID uuid.UUID) ([]PushToken, error)
 	// DeletePushTokensOf deletes every token of userID (KVKK erasure).

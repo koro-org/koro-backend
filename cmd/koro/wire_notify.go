@@ -39,6 +39,8 @@ import (
 //	auditFeed  nil → audit's GORM store (Chained, HeadAt: read only), or the
 //	           in-memory audit store of the tests
 //	cursor     nil → Redis (the audit alert job position), in-memory without Redis
+//	push       nil → notify.PushTransport over FCM/APNs from config (PUSH_*,
+//	           BE-055), or the no-op adapter when neither is configured
 //	cfg        tests only; nil → the notify section of the loaded configuration
 //
 // Late binding (R4; filled by a higher layer, read at call time):
@@ -57,6 +59,7 @@ type notifyWiring struct {
 	snsCerts  notify.SNSCertFetcher
 	auditFeed notify.AuditFeed
 	cursor    notify.CursorStore
+	push      notify.PushSender
 	cfg       *config.Notify
 
 	platformAdmins func(ctx context.Context) ([]uuid.UUID, error)
@@ -220,6 +223,13 @@ func (w *notifyWiring) build(c *container) error {
 		}
 	}
 
+	push := w.push
+	if push == nil {
+		if push, err = newPushSender(cfg, store, c); err != nil {
+			return err
+		}
+	}
+
 	d := notify.Deps{
 		Store:       store,
 		Tx:          tx,
@@ -232,11 +242,11 @@ func (w *notifyWiring) build(c *container) error {
 		Recipients:  indexer,
 		Audit:       c.audit.svc,
 		Consent:     consentChecker,
-		// Push stays nil → NoopPush until BE-055.
-		Webhooks:  notify.WebhookConfig{ResendSecret: resendSecret, SESTopicARNs: cfg.SESTopicARNs(), SNSCerts: certs},
-		AuditFeed: feed,
-		Cursor:    cursor,
-		Admins:    lateAdmins{w: w},
+		Push:        push, // nil → NoopPush
+		Webhooks:    notify.WebhookConfig{ResendSecret: resendSecret, SESTopicARNs: cfg.SESTopicARNs(), SNSCerts: certs},
+		AuditFeed:   feed,
+		Cursor:      cursor,
+		Admins:      lateAdmins{w: w},
 	}
 	if c.infra.inbox != nil {
 		d.Inbox = c.infra.inbox
@@ -250,6 +260,41 @@ func (w *notifyWiring) build(c *container) error {
 	}
 	c.privacy = append(c.privacy, w.mod.Privacy)
 	return nil
+}
+
+// newPushSender builds the FCM/APNs transport from the push settings
+// (BE-055); nil (no-op adapter) when no provider is configured, an error
+// when PUSH_REQUIRED and none is (also caught by config validation) or a
+// credential does not parse (the process does not start).
+func newPushSender(cfg config.Notify, tokens notify.PushTokens, c *container) (notify.PushSender, error) {
+	var (
+		fcm  *notify.FCM
+		apns *notify.APNs
+		err  error
+	)
+	if cfg.FCMEnabled() {
+		fcm, err = notify.NewFCM(notify.FCMConfig{ProjectID: cfg.PushFCMProjectID,
+			CredentialsJSON: []byte(cfg.PushFCMCredentials.Reveal()), Timeout: cfg.PushTimeout, Clock: c.infra.clock})
+		if err != nil {
+			return nil, err
+		}
+	}
+	if cfg.APNsEnabled() {
+		apns, err = notify.NewAPNs(notify.APNsConfig{KeyPEM: []byte(cfg.PushAPNsKey.Reveal()), KeyID: cfg.PushAPNsKeyID,
+			TeamID: cfg.PushAPNsTeamID, Topic: cfg.PushAPNsTopic, Sandbox: cfg.PushAPNsSandbox, Timeout: cfg.PushTimeout,
+			Clock: c.infra.clock})
+		if err != nil {
+			return nil, err
+		}
+	}
+	if fcm == nil && apns == nil {
+		if cfg.PushRequired {
+			return nil, errors.New("notify: PUSH_REQUIRED=true but neither FCM nor APNs is configured")
+		}
+		return nil, nil
+	}
+	return notify.NewPushTransport(notify.PushTransportConfig{Tokens: tokens, FCM: fcm, APNs: apns, Clock: c.infra.clock,
+		Log: c.infra.log.With("module", "notify", "component", "push")})
 }
 
 // tasks schedules notify.send_audit_alerts (every minute, default; 06 H-40,

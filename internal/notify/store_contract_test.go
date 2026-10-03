@@ -467,6 +467,26 @@ func runStoreContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 			t.Fatalf("the first user still has %d tokens", len(mine))
 		}
 		second, _ := w.s.UpsertPushToken(t.Context(), tok(uid, "device-b"))
+		// Revocation (BE-055: the provider reported the token invalid).
+		if ok, err := w.s.RevokePushToken(t.Context(), second.ID, t0.Add(2*time.Hour)); err != nil || !ok {
+			t.Fatalf("RevokePushToken() = (%v, %v)", ok, err)
+		}
+		if ok, _ := w.s.RevokePushToken(t.Context(), second.ID, t0.Add(3*time.Hour)); ok {
+			t.Fatal("a revoked token was revoked again")
+		}
+		if ok, _ := w.s.RevokePushToken(t.Context(), newID(), t0); ok {
+			t.Fatal("an unknown token was revoked")
+		}
+		if active, _ := w.s.ActivePushTokens(t.Context(), uid); len(active) != 0 {
+			t.Fatalf("revoked token still active: %+v", active)
+		}
+		if all, _ := w.s.PushTokensOf(t.Context(), uid); len(all) != 1 || all[0].RevokedAt == nil || !all[0].RevokedAt.Equal(t0.Add(2*time.Hour)) {
+			t.Fatalf("revoked token = %+v", all)
+		}
+		// Registering again clears revoked_at.
+		if again, err := w.s.UpsertPushToken(t.Context(), tok(uid, "device-b")); err != nil || again.ID != second.ID || again.RevokedAt != nil {
+			t.Fatalf("re-register after revoke = (%+v, %v)", again, err)
+		}
 		if err := w.s.DeletePushToken(t.Context(), uid, got.ID); !errors.Is(err, notify.ErrPushTokenNotFound) {
 			t.Fatalf("deleting another user's token = %v, want not found", err)
 		}

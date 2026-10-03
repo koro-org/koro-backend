@@ -3,8 +3,9 @@
 //   - Envelope.Seal/Open: envelope encryption of `*_enc bytea` columns. Each
 //     value gets a fresh 256-bit data key (DEK) and AES-256-GCM; the DEK is
 //     wrapped by a KeyWrapper (KEK). The output carries the KEK id, so keys
-//     can rotate and a later re-wrap job (BE-055, OpenBao Transit) can move
-//     values without decrypting the data.
+//     can rotate and the crypto.rewrap job (subpackage rewrap) can move
+//     values to the active key (Envelope.Rewrap: opened and sealed again in
+//     memory, since the data AAD binds the header).
 //   - Indexer.BlindIndex: deterministic HMAC-SHA256 of a normalized value for
 //     equality search on encrypted columns (`*_bidx bytea`).
 //   - Deriver.DerivedToken: HMAC-SHA256 tokens bound to a key id (QR codes;
@@ -14,8 +15,17 @@
 // ciphertext sealed for one purpose does not open under another, and blind
 // indexes / derived tokens of different purposes use independent keys
 // (HKDF-SHA256). Only the standard library is used; no algorithm is home
-// made. The pilot KEK is local (LocalKEK, keys from a Docker secret file,
-// T-82); a missing key stops the process at start (05 §12.2).
+// made.
+//
+// Key-encryption keys (KVKK 2018/10: keys apart from the data): the KEK
+// lives in OpenBao Transit (subpackage openbao, BE-055) and never leaves it;
+// LocalKEK (keys from a Docker secret file, T-82) is the fallback of
+// environments without OpenBao and the reader of values sealed before the
+// switch. Chain combines them: new values are wrapped by the active wrapper
+// only (no fallback: if the key service is down, Seal fails and nothing is
+// stored), older wrappers only unwrap. Envelope.Rewrap moves a value to the
+// active key (the crypto.rewrap job, subpackage rewrap). A missing key
+// stops the process at start (05 §12.2).
 package crypto
 
 import (
@@ -41,6 +51,10 @@ var (
 	ErrMalformed  = errors.New("crypto: malformed ciphertext")
 	ErrUnknownKey = errors.New("crypto: unknown key id")
 	ErrDecrypt    = errors.New("crypto: decryption failed")
+	// ErrUnavailable marks a key service that cannot serve the request
+	// (unreachable, sealed, overloaded, permission denied). Callers fail
+	// closed: nothing is sealed, nothing is stored in clear text.
+	ErrUnavailable = errors.New("crypto: key service unavailable")
 )
 
 // KeySize is the size of AES-256 keys (KEKs and DEKs); MinMACKeySize the
@@ -146,10 +160,22 @@ func newGCM(key []byte) (cipher.AEAD, error) {
 // KeyWrapper wraps data encryption keys under a key-encryption key. Wrap
 // uses the active KEK and returns its id; Unwrap selects the KEK by id. aad
 // binds the wrapped key to its use (purpose) and must match on Unwrap.
-// Implementations: LocalKEK (pilot, T-82); OpenBao Transit (BE-055).
+// Implementations: LocalKEK (T-82), openbao.Transit (BE-055), Chain.
 type KeyWrapper interface {
 	Wrap(ctx context.Context, dek, aad []byte) (keyID string, wrapped []byte, err error)
 	Unwrap(ctx context.Context, keyID string, wrapped, aad []byte) ([]byte, error)
+}
+
+// KeyOwner is a KeyWrapper that can tell whether it holds a key id (Chain
+// routes Unwrap with it).
+type KeyOwner interface {
+	Owns(keyID string) bool
+}
+
+// ActiveKeyer is a KeyWrapper that knows the id Wrap uses now (the re-wrap
+// job selects the values sealed under any other id).
+type ActiveKeyer interface {
+	ActiveKeyID(ctx context.Context) (string, error)
 }
 
 // LocalKEK wraps DEKs with AES-256-GCM under KEKs held in memory
@@ -185,6 +211,15 @@ func (l *LocalKEK) Wrap(_ context.Context, dek, aad []byte) (string, []byte, err
 	return l.active, g.Seal(nonce, nonce, dek, aad), nil
 }
 
+// Owns implements KeyOwner.
+func (l *LocalKEK) Owns(keyID string) bool {
+	_, ok := l.keys[keyID]
+	return ok
+}
+
+// ActiveKeyID implements ActiveKeyer.
+func (l *LocalKEK) ActiveKeyID(context.Context) (string, error) { return l.active, nil }
+
 // Unwrap implements KeyWrapper.
 func (l *LocalKEK) Unwrap(_ context.Context, keyID string, wrapped, aad []byte) ([]byte, error) {
 	k, ok := l.keys[keyID]
@@ -203,6 +238,76 @@ func (l *LocalKEK) Unwrap(_ context.Context, keyID string, wrapped, aad []byte) 
 		return nil, ErrDecrypt
 	}
 	return dek, nil
+}
+
+// Chain is the KeyWrapper of a key migration: Wrap always uses the active
+// wrapper (never a fallback: a failing key service fails the seal), Unwrap
+// asks the wrappers in order and uses the first that owns the key id.
+// Typical: NewChain(openBaoTransit, localKEK) while values sealed under the
+// local KEK are re-wrapped (crypto.rewrap).
+type Chain struct {
+	active KeyWrapper
+	keyer  ActiveKeyer
+	all    []KeyWrapper
+	owners []KeyOwner // owners[i] is all[i]
+}
+
+var (
+	_ KeyWrapper  = (*Chain)(nil)
+	_ KeyOwner    = (*Chain)(nil)
+	_ ActiveKeyer = (*Chain)(nil)
+)
+
+// NewChain returns a Chain; every wrapper must implement KeyOwner, the
+// active one also ActiveKeyer.
+func NewChain(active KeyWrapper, older ...KeyWrapper) (*Chain, error) {
+	if active == nil {
+		return nil, fmt.Errorf("%w: no active key wrapper", ErrConfig)
+	}
+	keyer, ok := active.(ActiveKeyer)
+	if !ok {
+		return nil, fmt.Errorf("%w: the active key wrapper cannot name its key", ErrConfig)
+	}
+	all := append([]KeyWrapper{active}, older...)
+	owners := make([]KeyOwner, len(all))
+	for i, w := range all {
+		o, ok := w.(KeyOwner)
+		if !ok {
+			return nil, fmt.Errorf("%w: every chained key wrapper must name the keys it owns", ErrConfig)
+		}
+		owners[i] = o
+	}
+	return &Chain{active: active, keyer: keyer, all: all, owners: owners}, nil
+}
+
+// Wrap implements KeyWrapper with the active wrapper.
+func (c *Chain) Wrap(ctx context.Context, dek, aad []byte) (string, []byte, error) {
+	return c.active.Wrap(ctx, dek, aad)
+}
+
+// Unwrap implements KeyWrapper with the wrapper that owns keyID.
+func (c *Chain) Unwrap(ctx context.Context, keyID string, wrapped, aad []byte) ([]byte, error) {
+	for i, o := range c.owners {
+		if o.Owns(keyID) {
+			return c.all[i].Unwrap(ctx, keyID, wrapped, aad)
+		}
+	}
+	return nil, ErrUnknownKey
+}
+
+// Owns implements KeyOwner.
+func (c *Chain) Owns(keyID string) bool {
+	for _, o := range c.owners {
+		if o.Owns(keyID) {
+			return true
+		}
+	}
+	return false
+}
+
+// ActiveKeyID implements ActiveKeyer.
+func (c *Chain) ActiveKeyID(ctx context.Context) (string, error) {
+	return c.keyer.ActiveKeyID(ctx)
 }
 
 // ---------------------------------------------------------------------------
@@ -239,6 +344,7 @@ func (e *Envelope) Seal(ctx context.Context, purpose string, plaintext []byte) (
 		return nil, ErrPurpose
 	}
 	dek := make([]byte, KeySize)
+	defer clear(dek)
 	if _, err := rand.Read(dek); err != nil {
 		return nil, fmt.Errorf("crypto: dek: %w", err)
 	}
@@ -283,6 +389,7 @@ func (e *Envelope) Open(ctx context.Context, purpose string, sealed []byte) ([]b
 	if err != nil {
 		return nil, fmt.Errorf("crypto: unwrap: %w", err)
 	}
+	defer clear(dek)
 	g, err := newGCM(dek)
 	if err != nil {
 		return nil, ErrDecrypt
@@ -293,6 +400,51 @@ func (e *Envelope) Open(ctx context.Context, purpose string, sealed []byte) ([]b
 		return nil, ErrDecrypt
 	}
 	return pt, nil
+}
+
+// ActiveKeyID returns the key id new values are sealed under; the wrapper
+// must implement ActiveKeyer.
+func (e *Envelope) ActiveKeyID(ctx context.Context) (string, error) {
+	ak, ok := e.w.(ActiveKeyer)
+	if !ok {
+		return "", fmt.Errorf("%w: the key wrapper cannot name its active key", ErrConfig)
+	}
+	kid, err := ak.ActiveKeyID(ctx)
+	if err != nil {
+		return "", fmt.Errorf("crypto: active key: %w", err)
+	}
+	return kid, nil
+}
+
+// Rewrap re-seals a value under the active key (key migration and
+// rotation). A value already under the active key is returned unchanged
+// with changed=false, so repeating Rewrap is harmless. Otherwise the value
+// is opened and sealed again with a fresh data key: the data AAD binds the
+// header, so the data itself is re-encrypted; the plaintext exists only in
+// memory and is cleared. Errors are those of Open and Seal; nothing is
+// returned on error.
+func (e *Envelope) Rewrap(ctx context.Context, purpose string, sealed []byte) (out []byte, changed bool, err error) {
+	kid, err := KeyID(sealed)
+	if err != nil {
+		return nil, false, err
+	}
+	active, err := e.ActiveKeyID(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	if kid == active {
+		return sealed, false, nil
+	}
+	pt, err := e.Open(ctx, purpose, sealed)
+	if err != nil {
+		return nil, false, err
+	}
+	defer clear(pt)
+	out, err = e.Seal(ctx, purpose, pt)
+	if err != nil {
+		return nil, false, err
+	}
+	return out, true, nil
 }
 
 // KeyID returns the id of the KEK that wrapped sealed (for rotation jobs).

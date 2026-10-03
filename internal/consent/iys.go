@@ -10,8 +10,9 @@ import (
 )
 
 // IYSClient delivers consent changes of commercial purposes to İYS (İleti
-// Yönetim Sistemi; 6563, H-14). The real HTTP adapter is BE-055; it resolves
-// the recipient address of UserID itself (consent holds no contact data).
+// Yönetim Sistemi; 6563, H-14). The real HTTP adapter is IYSHTTP (BE-055);
+// it resolves the recipient address of UserID itself through IYSRecipients
+// (consent holds no contact data, T-159).
 //
 // Submit must be safe to repeat for the same consent: a retry after a lost
 // answer sends the same state again (İYS keeps the latest state per
@@ -23,8 +24,27 @@ type IYSClient interface {
 	// refuses to start without one.
 	Real() bool
 	// Submit sends one consent change. An error leaves the submission
-	// failed; it is retried with back-off and by consent.iys_reconcile.
+	// failed; it is retried with back-off and by consent.iys_reconcile,
+	// except an error wrapping ErrIYSPermanent, which raises the alarm at
+	// once and is not retried by the task (reconcile still tries daily).
 	Submit(ctx context.Context, r IYSRecord) (IYSReceipt, error)
+}
+
+// ErrIYSPermanent marks an İYS submission a retry cannot fix: İYS refused
+// the record (validation) or the recipient address is gone (T-159). The
+// DPO handles it (alarm).
+var ErrIYSPermanent = errors.New("consent: İYS submission refused permanently")
+
+// ErrIYSRecipientGone is returned by IYSRecipients when the user has no
+// address for the channel any more (account erased before the delivery).
+var ErrIYSRecipientGone = errors.New("consent: İYS recipient address is not available")
+
+// IYSRecipients resolves the İYS recipient (e-mail address or phone number)
+// of a user for a channel. identity provides it (late binding in
+// cmd/koro/wire_consent.go); the address is used for the request only and
+// never stored or logged.
+type IYSRecipients interface {
+	IYSRecipient(ctx context.Context, userID uuid.UUID, ch IYSChannel) (string, error)
 }
 
 // IYSRecord is one consent change for İYS. It carries IDs and codes only.
@@ -33,7 +53,8 @@ type IYSRecord struct {
 	ConsentID    uuid.UUID
 	UserID       uuid.UUID
 	Channel      IYSChannel
-	Action       Action // granted → ONAY, withdrawn → RET
+	Action       Action  // granted → ONAY, withdrawn → RET
+	Source       Channel // where the consent act happened → İYS "source"
 	OccurredAt   time.Time
 }
 

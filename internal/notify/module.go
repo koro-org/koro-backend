@@ -6,8 +6,12 @@
 // svix), user preferences, the in-app inbox, push token registration and the
 // alerts derived from the audit log (06 H-40, H-43).
 //
-// What lives elsewhere: real push (FCM/APNs, BE-055); the retention job
-// notify.purge (BE-057); the ticket e-mail itself (BE-031).
+// Push (BE-055): PushTransport sends over FCM HTTP v1 (Android, web) and
+// APNs (iOS, token-based) and revokes the device tokens the providers
+// report invalid; without provider settings NoopPush records the delivery.
+//
+// What lives elsewhere: the retention job notify.purge (BE-057); the ticket
+// e-mail itself (BE-031).
 //
 // Rules the package enforces:
 //
@@ -152,7 +156,7 @@ type Deps struct {
 	// Consent checks commercial messages. nil → commercial messages are
 	// rejected with ErrCommercialDisabled.
 	Consent ConsentChecker
-	// Push delivers the push channel. nil → NoopPush.
+	// Push delivers the push channel (PushTransport). nil → NoopPush.
 	Push PushSender
 
 	// Inbox stores provider webhooks. nil → receiveEmailWebhook answers 503.

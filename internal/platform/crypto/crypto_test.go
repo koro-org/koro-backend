@@ -273,6 +273,17 @@ func TestCrypto_MissingKEK_FailsFast(t *testing.T) {
 	if _, err := config.Load[cryptoOnly](base()); err != nil {
 		t.Fatalf("valid crypto config rejected: %v", err)
 	}
+	// With OpenBao the local KEK is optional (after crypto.rewrap it is
+	// removed); prod may opt out of OpenBao only explicitly.
+	cfg, err := config.Load[cryptoOnly](base("CRYPTO_KEKS", "<unset>", "CRYPTO_OPENBAO_ADDR", "http://127.0.0.1:8200",
+		"CRYPTO_OPENBAO_TOKEN", "dev-only-root-token"))
+	if err != nil || !cfg.Crypto.OpenBaoEnabled() || cfg.Crypto.OpenBaoKey != "koro-kek" || cfg.Crypto.OpenBaoMount != "transit" {
+		t.Fatalf("OpenBao without local KEK = %+v, %v", cfg.Crypto, err)
+	}
+	if _, err := config.Load[cryptoOnly](base("APP_ENV", "prod", "CRYPTO_OPENBAO_REQUIRED", "false")); err == nil ||
+		strings.Contains(err.Error(), "CRYPTO_OPENBAO_ADDR is required") {
+		t.Fatalf("prod with explicit opt-out = %v; want only the placeholder error", err)
+	}
 	dir := t.TempDir()
 	file := filepath.Join(dir, "crypto_keks")
 	if err := os.WriteFile(file, []byte(keks+"\n"), 0o600); err != nil {
@@ -287,8 +298,8 @@ func TestCrypto_MissingKEK_FailsFast(t *testing.T) {
 		environ map[string]string
 		want    string
 	}{
-		{"unset", base("CRYPTO_KEKS", "<unset>"), `"CRYPTO_KEKS" is not set`},
-		{"empty", base("CRYPTO_KEKS", ""), `"CRYPTO_KEKS" should not be empty`},
+		{"unset", base("CRYPTO_KEKS", "<unset>"), "CRYPTO_KEKS is required unless CRYPTO_OPENBAO_ADDR is set"},
+		{"empty", base("CRYPTO_KEKS", ""), "CRYPTO_KEKS is required unless CRYPTO_OPENBAO_ADDR is set"},
 		{"secret file missing", base("CRYPTO_KEKS", "<unset>", "CRYPTO_KEKS_FILE", filepath.Join(dir, "absent")), "CRYPTO_KEKS_FILE"},
 		{"short key", base("CRYPTO_KEKS", "k1:c2hvcnQ="), "CRYPTO_KEKS"},
 		{"no id", base("CRYPTO_KEKS", secretB64), "CRYPTO_KEKS"},
@@ -296,6 +307,17 @@ func TestCrypto_MissingKEK_FailsFast(t *testing.T) {
 		{"placeholder in prod", base("APP_ENV", "prod"), "looks like a placeholder"},
 		{"blind index key short", base("CRYPTO_BLIND_INDEX_KEY", "c2hvcnQ="), "CRYPTO_BLIND_INDEX_KEY"},
 		{"token keys missing", base("CRYPTO_TOKEN_KEYS", "<unset>"), "CRYPTO_TOKEN_KEYS"},
+		{"reserved OpenBao key id", base("CRYPTO_KEKS", "bao.k1:"+secretB64), "reserved prefix"},
+		{"prod requires OpenBao", base("APP_ENV", "prod"), "CRYPTO_OPENBAO_ADDR is required in prod"},
+		{"OpenBao required in dev", base("CRYPTO_OPENBAO_REQUIRED", "true"), "CRYPTO_OPENBAO_ADDR is required in dev"},
+		{"bad required flag", base("CRYPTO_OPENBAO_REQUIRED", "maybe"), "CRYPTO_OPENBAO_REQUIRED must be true or false"},
+		{"OpenBao without token", base("CRYPTO_OPENBAO_ADDR", "http://127.0.0.1:8200"), "openbao token is empty"},
+		{"OpenBao over http in staging", base("APP_ENV", "staging", "CRYPTO_OPENBAO_ADDR", "http://bao:8200",
+			"CRYPTO_OPENBAO_TOKEN", "s.Q8yJ2mZ5bW1tK4xR7nV0cL3h"), "CRYPTO_OPENBAO_ADDR must use https"},
+		{"OpenBao placeholder token in prod", base("APP_ENV", "prod", "CRYPTO_OPENBAO_ADDR", "https://bao:8200",
+			"CRYPTO_OPENBAO_TOKEN", "devdevdevdev"), "CRYPTO_OPENBAO_TOKEN looks like a placeholder"},
+		{"OpenBao key name", base("CRYPTO_OPENBAO_ADDR", "http://127.0.0.1:8200", "CRYPTO_OPENBAO_TOKEN", "dev-root",
+			"CRYPTO_OPENBAO_KEY", "koro kek"), "invalid characters"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -304,7 +326,8 @@ func TestCrypto_MissingKEK_FailsFast(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("Load error = %v, want it to mention %q", err, tt.want)
 			}
-			if strings.Contains(err.Error(), secretB64[:20]) || strings.Contains(err.Error(), "ZGV2ZGV2") {
+			if strings.Contains(err.Error(), secretB64[:20]) || strings.Contains(err.Error(), "ZGV2ZGV2") ||
+				strings.Contains(err.Error(), "Q8yJ2mZ5bW1tK4xR7nV0cL3h") || strings.Contains(err.Error(), "devdevdevdev") {
 				t.Fatalf("error leaks key material: %v", err)
 			}
 		})
@@ -343,4 +366,62 @@ func FuzzCrypto_Open(f *testing.F) {
 			t.Fatalf("opened a ciphertext without a valid header: %x", b)
 		}
 	})
+}
+
+// Chain (BE-055): new values only under the active wrapper, old ones open
+// through the wrapper that owns their key id; Rewrap moves a value to the
+// active key once and is a no-op afterwards.
+func TestCrypto_Chain_RoutesByKeyID(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	oldKEK, _ := crypto.NewLocalKEK([]crypto.Key{{ID: "pilot1", Secret: key(1)}})
+	newKEK, _ := crypto.NewLocalKEK([]crypto.Key{{ID: "k2", Secret: key(2)}})
+	oldEnv, _ := crypto.NewEnvelope(oldKEK)
+	old, _ := oldEnv.Seal(ctx, "p", []byte("v"))
+
+	chain, err := crypto.NewChain(newKEK, oldKEK)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, _ := crypto.NewEnvelope(chain)
+	fresh, _ := env.Seal(ctx, "p", []byte("v"))
+	if kid, _ := crypto.KeyID(fresh); kid != "k2" {
+		t.Fatalf("new value under %s, want the active k2", kid)
+	}
+	if pt, err := env.Open(ctx, "p", old); err != nil || string(pt) != "v" {
+		t.Fatalf("old value = %q, %v", pt, err)
+	}
+	if !chain.Owns("pilot1") || !chain.Owns("k2") || chain.Owns("k3") {
+		t.Fatal("Owns does not reflect the chained keys")
+	}
+	moved, changed, err := env.Rewrap(ctx, "p", old)
+	if err != nil || !changed {
+		t.Fatalf("Rewrap = %v, %v", changed, err)
+	}
+	if kid, _ := crypto.KeyID(moved); kid != "k2" {
+		t.Fatalf("rewrapped under %s", kid)
+	}
+	if same, changed, err := env.Rewrap(ctx, "p", moved); err != nil || changed || !bytes.Equal(same, moved) {
+		t.Fatalf("second Rewrap = %v, %v", changed, err)
+	}
+	if _, _, err := env.Rewrap(ctx, "q", old); !errors.Is(err, crypto.ErrDecrypt) {
+		t.Fatalf("Rewrap with the wrong purpose = %v", err)
+	}
+	other, _ := crypto.NewLocalKEK([]crypto.Key{{ID: "zz", Secret: key(3)}})
+	otherEnv, _ := crypto.NewEnvelope(other)
+	foreign, _ := otherEnv.Seal(ctx, "p", []byte("v"))
+	if _, err := env.Open(ctx, "p", foreign); !errors.Is(err, crypto.ErrUnknownKey) {
+		t.Fatalf("unknown key id = %v", err)
+	}
+
+	if _, err := crypto.NewChain(nil); !errors.Is(err, crypto.ErrConfig) {
+		t.Fatalf("NewChain(nil) = %v", err)
+	}
+	if _, err := crypto.NewChain(failingWrapper{}); !errors.Is(err, crypto.ErrConfig) {
+		t.Fatalf("NewChain(non-owner) = %v", err)
+	}
+	plain, _ := crypto.NewEnvelope(failingWrapper{})
+	if _, _, err := plain.Rewrap(ctx, "p", old); !errors.Is(err, crypto.ErrConfig) {
+		t.Fatalf("Rewrap without an active key = %v", err)
+	}
 }

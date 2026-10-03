@@ -211,6 +211,11 @@ type container struct {
 	readyChecks   []httpx.Check
 	shutdownHooks []func()
 
+	// keys is platform/crypto (BE-055, wire_crypto.go): the shared Envelope
+	// modules seal with (c.keys.envelope()), the openbao readiness check and
+	// the crypto.* jobs. Built before the modules.
+	keys cryptoKeys
+
 	// Feature modules, in layer order (01 §5.1).
 	audit        auditWiring        // L1
 	files        filesWiring        // L2
@@ -336,6 +341,9 @@ func (c *container) modules() []moduleEntry {
 func (c *container) build() error {
 	mods := c.modules()
 	preset := c.actors // nil in production; the persona resolver in matrix tests
+	if err := c.keys.build(c); err != nil {
+		return fmt.Errorf("wire crypto: %w", err)
+	}
 	for _, m := range mods {
 		if err := m.w.build(c); err != nil {
 			return fmt.Errorf("wire %s: %w", m.name, err)
@@ -358,8 +366,8 @@ func (c *container) build() error {
 }
 
 // platformTasks registers the platform's own jobs and tasks (01 §7):
-// outbox.cleanup, idempotency.cleanup, webhook_inbox.purge_payloads and the
-// webhook_inbox.process task.
+// outbox.cleanup, idempotency.cleanup, webhook_inbox.purge_payloads, the
+// webhook_inbox.process task and the crypto jobs.
 func (c *container) platformTasks() {
 	in, p := c.infra, c.infra.platform
 	if in.outbox != nil {
@@ -374,6 +382,7 @@ func (c *container) platformTasks() {
 			c.retention("webhook_payload", p.Inbox.PayloadRetention, inbox.DefaultPayloadRetention),
 			c.retention("webhook_row", p.Inbox.RowRetention, inbox.DefaultRowRetention)))
 	}
+	c.keys.tasks(c) // crypto.rewrap, crypto.renew_token (BE-055)
 }
 
 // retention resolves a retention period at run time: hooks.retention

@@ -549,6 +549,17 @@ func (s gormStore) ActivePushTokens(ctx context.Context, userID uuid.UUID) ([]Pu
 	return s.tokens(ctx, `user_id = ? AND revoked_at IS NULL`, userID)
 }
 
+// RevokePushToken implements Store.
+//
+// cross-org: a device token reported invalid by the provider (02 §6.3).
+func (s gormStore) RevokePushToken(ctx context.Context, id uuid.UUID, at time.Time) (bool, error) {
+	res := db.Conn(ctx, s.orm).Exec(`UPDATE push_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, at, id)
+	if res.Error != nil {
+		return false, fmt.Errorf("notify: revoke push token: %w", res.Error)
+	}
+	return res.RowsAffected == 1, nil
+}
+
 // PushTokensOf implements Store.
 //
 // cross-org: the user's own devices (02 §6.3).

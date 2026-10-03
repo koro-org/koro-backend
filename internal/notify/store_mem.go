@@ -379,6 +379,18 @@ func (s *memStore) ActivePushTokens(_ context.Context, userID uuid.UUID) ([]Push
 	return s.tokensOf(userID, true), nil
 }
 
+func (s *memStore) RevokePushToken(_ context.Context, id uuid.UUID, at time.Time) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.tokens[id]
+	if !ok || t.RevokedAt != nil {
+		return false, nil
+	}
+	t.RevokedAt = &at
+	s.tokens[id] = t
+	return true, nil
+}
+
 func (s *memStore) PushTokensOf(_ context.Context, userID uuid.UUID) ([]PushToken, error) {
 	return s.tokensOf(userID, false), nil
 }

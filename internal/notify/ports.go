@@ -37,8 +37,9 @@ type PushMessage struct {
 	Data       map[string]string // opaque IDs
 }
 
-// PushSender delivers push notifications. The real adapter (FCM/APNs over
-// Store.ActivePushTokens) arrives with BE-055; until then NoopPush is used.
+// PushSender delivers push notifications: PushTransport (FCM/APNs over
+// Store.ActivePushTokens, BE-055), or NoopPush when no provider is
+// configured.
 type PushSender interface {
 	// Name is stored as the delivery's provider.
 	Name() string

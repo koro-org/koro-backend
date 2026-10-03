@@ -618,6 +618,12 @@
     "type": "urn:koro:problem:kvkk.duplicate_request"
   },
   {
+    "code": "kvkk.duplicate_subprocessor",
+    "status": 409,
+    "title": "A sub-processor with this name exists",
+    "type": "urn:koro:problem:kvkk.duplicate_subprocessor"
+  },
+  {
     "code": "kvkk.export_expired",
     "status": 410,
     "title": "The export file has expired",

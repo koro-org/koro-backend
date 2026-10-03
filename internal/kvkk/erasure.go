@@ -92,6 +92,16 @@ func (s *service) erase(ctx context.Context, d DSR) error {
 			slog.String("dsr_id", d.ID.String()), slog.Bool("alarm", true))
 		return errors.New("kvkk: identity privacy provider is not registered")
 	}
+	// 06 H-49: no session may write while the run goes (the approval
+	// signed the subject out already; this covers a login since).
+	if s.d.RevokeSessions != nil {
+		if _, err := s.d.RevokeSessions(ctx, uid); err != nil {
+			s.d.Log.LogAttrs(ctx, slog.LevelWarn, "sessions not revoked before the erasure run; retrying",
+				slog.String("dsr_id", d.ID.String()))
+			return fmt.Errorf("kvkk: revoke sessions: %w", err)
+		}
+	}
+	started := s.now()
 	results := map[string]privacy.EraseResult{}
 	run := func(p privacy.Provider) error {
 		r, err := p.Erase(ctx, uid)
@@ -127,12 +137,49 @@ func (s *service) erase(ctx context.Context, d DSR) error {
 			return err
 		}
 	}
-	return s.finishErasure(ctx, d.ID, ps, results)
+	return s.finishErasure(ctx, d.ID, ps, results, started)
+}
+
+// revokeSessions signs the subject of an approved erasure out (after the
+// approval committed). A failure is logged: the erasure run revokes again
+// before it starts and identity deletes every session at its step.
+func (s *service) revokeSessions(ctx context.Context, dsrID, userID uuid.UUID) {
+	if s.d.RevokeSessions == nil {
+		return
+	}
+	n, err := s.d.RevokeSessions(ctx, userID)
+	if err != nil {
+		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "sessions not revoked at the erasure approval; the run revokes them",
+			slog.String("dsr_id", dsrID.String()))
+		return
+	}
+	s.d.Log.LogAttrs(ctx, slog.LevelInfo, "sessions revoked at the erasure approval", slog.String("dsr_id", dsrID.String()),
+		slog.Int("sessions", n))
+}
+
+// erasureLogs are the destruction record rows of an erasure run (02 §16.3:
+// policy dsr_erasure, one row per module; run_id = the request ID, so the
+// record proves which request was carried out without naming the person).
+func (s *service) erasureLogs(id uuid.UUID, ps []privacy.Provider, results map[string]privacy.EraseResult, started time.Time) []DestructionLog {
+	now := s.now()
+	out := make([]DestructionLog, 0, len(ps))
+	for _, p := range ps {
+		r := results[p.Name()]
+		method := "hard_delete"
+		if r.Anonymized > 0 && r.Deleted == 0 {
+			method = "anonymize"
+		}
+		out = append(out, DestructionLog{ID: uuid.NewV7(), PolicyCode: ErasurePolicyCode, RunID: id, Module: p.Name(),
+			Target: p.Name(), Method: method, RecordCount: r.Deleted + r.Anonymized, PeriodCutoff: now,
+			StartedAt: started, FinishedAt: now, Details: map[string]any{"deleted": r.Deleted, "anonymized": r.Anonymized,
+				"retained": r.Retained, "retained_reason": r.RetainedReason}})
+	}
+	return out
 }
 
 // finishErasure appends the report, audits the run and writes
 // dsr.completed in one transaction.
-func (s *service) finishErasure(ctx context.Context, id uuid.UUID, ps []privacy.Provider, results map[string]privacy.EraseResult) error {
+func (s *service) finishErasure(ctx context.Context, id uuid.UUID, ps []privacy.Provider, results map[string]privacy.EraseResult, started time.Time) error {
 	var deleted, anonymized, retained int
 	var modules []string
 	for _, p := range ps {
@@ -158,6 +205,11 @@ func (s *service) finishErasure(ctx context.Context, id uuid.UUID, ps []privacy.
 		cur.ResponseSummary = strings.TrimSpace(cutRunes(strings.TrimSpace(cur.ResponseSummary), room) + "\n\n" + rep)
 		if err := s.d.Store.Update(ctx, cur); err != nil {
 			return err
+		}
+		for _, l := range s.erasureLogs(id, ps, results, started) {
+			if err := s.d.Records.InsertDestructionLog(ctx, l); err != nil {
+				return err
+			}
 		}
 		if err := s.d.Audit.Log(ctx, event(sys, authz.KvkkDsrComplete, cur, map[string]any{
 			"step": "erasure_done", "modules": strings.Join(modules, ","), "deleted": deleted,

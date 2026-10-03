@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"strconv"
@@ -118,6 +119,11 @@ func TestMigrateCommand(t *testing.T) {
 	t.Parallel()
 	environ := map[string]string{"APP_ENV": "dev", "MIGRATE_DATABASE_URL": testutil.NewEmptyDB(t)}
 	latest := strconv.Itoa(int(testutil.LatestMigration(t)))
+	ups, err := fs.Glob(migrations.FS, "*.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied := strconv.Itoa(len(ups))
 	migrate := func(args ...string) (int, string) {
 		t.Helper()
 		var stdout, stderr bytes.Buffer
@@ -138,8 +144,8 @@ func TestMigrateCommand(t *testing.T) {
 		{[]string{"version"}, 0, "0"},
 		{[]string{"up"}, 0, ""},
 		{[]string{"version"}, 0, latest},
-		{[]string{"up"}, 0, ""}, // nothing to do
-		{[]string{"down", latest}, 0, ""},
+		{[]string{"up"}, 0, ""},            // nothing to do
+		{[]string{"down", applied}, 0, ""}, // steps = files: numbers may leave gaps before the pilot (R2)
 		{[]string{"version"}, 0, "0"},
 		{[]string{"up"}, 0, ""},
 		{[]string{"force", "3"}, 0, ""},

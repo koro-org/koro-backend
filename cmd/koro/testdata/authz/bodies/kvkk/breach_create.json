@@ -1,0 +1,1 @@
+{"title": "Toplu e-postada açık alıcı listesi", "detected_at": "2026-10-01T06:00:00Z", "data_categories": ["contact"], "affected_estimate": 120, "description": "Bir duyuru e-postası alıcıları gizlemeden gönderildi.", "owner_user_id": "{{fixture:dpo}}"}

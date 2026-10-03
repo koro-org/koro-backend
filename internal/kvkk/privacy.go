@@ -90,7 +90,7 @@ func (p privacyProvider) Erase(ctx context.Context, userID uuid.UUID) (privacy.E
 				return err
 			}
 			if fileID != nil {
-				if err := s.d.RemoveFile(ctx, sys, *fileID); err != nil {
+				if err := s.d.Files.Delete(ctx, sys, *fileID); err != nil {
 					return err
 				}
 				res.Deleted++

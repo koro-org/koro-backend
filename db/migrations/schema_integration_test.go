@@ -116,8 +116,9 @@ func TestMigrations_UpDownUp(t *testing.T) {
 		}
 	}
 
-	if err := m.Down(ctx, int(latest)); err != nil {
-		t.Fatalf("down %d: %v", latest, err)
+	versions := migrationVersions(t) // numbers may leave gaps before the pilot (BE-001 R2)
+	if err := m.Down(ctx, len(versions)); err != nil {
+		t.Fatalf("down %d: %v", len(versions), err)
 	}
 	if v := version(); v != 0 {
 		t.Fatalf("version after full down = %d", v)
@@ -135,10 +136,10 @@ func TestMigrations_UpDownUp(t *testing.T) {
 	if err := m.Up(ctx); err != nil { // nothing to do is not an error
 		t.Fatalf("third up: %v", err)
 	}
-	if err := m.Down(ctx, 1); err != nil || version() != latest-1 {
+	if err := m.Down(ctx, 1); err != nil || version() != versions[len(versions)-2] {
 		t.Fatalf("down 1: %v", err)
 	}
-	if err := m.Down(ctx, int(latest)); err == nil {
+	if err := m.Down(ctx, len(versions)); err == nil {
 		t.Fatal("down more steps than applied must fail")
 	}
 }

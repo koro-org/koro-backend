@@ -2,8 +2,8 @@ package authz
 
 // kvkkPolicy is the policy of the kvkk module (03 §5.22). Only tickets of
 // the kvkk module edit this file (BE-001 R5). Written by BE-021 (data
-// subject requests); retention, destruction log, breach and subprocessor
-// actions stay denied until BE-049.
+// subject requests) and BE-049 (retention, destruction log, breaches,
+// sub-processors).
 //
 //	kvkk.dsr.create, list_own,    O for every signed-in user (k31: erasure
 //	read_own, cancel_own          needs R, checked by the service)
@@ -15,6 +15,16 @@ package authz
 //	kvkk.dsr.approve              dpo ✓·4, platform_admin ✓·4·k32 (second
 //	                              stage only); four eyes: first_approver ≠
 //	                              actor (core table, 03 §6.1)
+//
+//	kvkk.retention_policy.list    dpo ✓, platform_admin ✓
+//	kvkk.retention_policy.update  dpo ✓ (R in the service)
+//	kvkk.destruction_log.list     dpo ✓, platform_admin ✓
+//	kvkk.breach.list, manage      dpo ✓, platform_admin ✓
+//	kvkk.subprocessor.list        dpo ✓, platform_admin ✓
+//	kvkk.subprocessor.manage      dpo ✓
+//
+// The kvkk-2 records have no owner and no org: the resource is always the
+// admin surface (visible to every user, 403 without the role).
 //
 // MFA follows from the role paths (dpo, platform_admin: k-mfa).
 //
@@ -45,6 +55,9 @@ func kvkkPolicy() Policy {
 			case KvkkDsrList, KvkkDsrRead, KvkkDsrCreateAdmin, KvkkDsrUpdate, KvkkDsrApprove,
 				KvkkDsrComplete, KvkkDsrReject:
 				return kvkkAdminVisible(a, r)
+			case KvkkRetentionPolicyList, KvkkRetentionPolicyUpdate, KvkkDestructionLogList, KvkkBreachList,
+				KvkkBreachManage, KvkkSubprocessorList, KvkkSubprocessorManage:
+				return r.Type == TypeAdminSurface && AdminSurfaceVisible(a)
 			}
 			return false
 		},
@@ -56,8 +69,11 @@ func kvkkPolicy() Policy {
 				return []Grant{{Role: RoleSelf}, {Role: RoleDPO}}
 			case KvkkDsrList, KvkkDsrRead:
 				return []Grant{{Role: RoleDPO}, {Role: RolePlatformAdmin}}
-			case KvkkDsrCreateAdmin, KvkkDsrUpdate, KvkkDsrComplete, KvkkDsrReject:
+			case KvkkDsrCreateAdmin, KvkkDsrUpdate, KvkkDsrComplete, KvkkDsrReject,
+				KvkkRetentionPolicyUpdate, KvkkSubprocessorManage:
 				return []Grant{{Role: RoleDPO}}
+			case KvkkRetentionPolicyList, KvkkDestructionLogList, KvkkBreachList, KvkkBreachManage, KvkkSubprocessorList:
+				return []Grant{{Role: RoleDPO}, {Role: RolePlatformAdmin}}
 			case KvkkDsrApprove:
 				gs := []Grant{{Role: RoleDPO}}
 				// k32: platform_admin gives the second approval only. The

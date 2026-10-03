@@ -122,8 +122,45 @@ func TestKvkkPolicy_EdgeCases(t *testing.T) {
 	dpo := persona(t, "dpo")
 	dpo.MFAVerified = false
 	wantErr(t, authz.Can(ctx, dpo, authz.KvkkDsrList, dsrSurface), authz.ErrMFARequired, false)
-	// Retention, breach and subprocessor actions stay denied until BE-049.
+	// The kvkk-2 records live on the admin surface only.
 	for _, act := range []authz.Action{authz.KvkkRetentionPolicyList, authz.KvkkBreachManage, authz.KvkkSubprocessorList} {
-		wantErr(t, authz.Can(ctx, persona(t, "dpo"), act, adminSurface), authz.ErrNotFound, false)
+		wantErr(t, authz.Can(ctx, persona(t, "dpo"), act, dsrOf("student", "access", "received", "")), authz.ErrNotFound, false)
 	}
+	// MFA: a dpo session that is not MFA verified does nothing with them.
+	wantErr(t, authz.Can(ctx, dpo, authz.KvkkBreachManage, dsrSurface), authz.ErrMFARequired, false)
+}
+
+// TestKvkkPolicy_RecordsMatrix pins 03 §5.22 for the retention, destruction
+// log, breach and sub-processor actions (BE-049): dpo everywhere,
+// platform_admin everywhere but the policy update (R) and the sub-processor
+// inventory edits; nobody else.
+func TestKvkkPolicy_RecordsMatrix(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	dpoAndAdmin := map[string]error{"dpo": nil, "platform_admin": nil}
+	dpoOnly := map[string]error{"dpo": nil}
+	for act, want := range map[authz.Action]map[string]error{
+		authz.KvkkRetentionPolicyList:   dpoAndAdmin,
+		authz.KvkkRetentionPolicyUpdate: dpoOnly,
+		authz.KvkkDestructionLogList:    dpoAndAdmin,
+		authz.KvkkBreachList:            dpoAndAdmin,
+		authz.KvkkBreachManage:          dpoAndAdmin,
+		authz.KvkkSubprocessorList:      dpoAndAdmin,
+		authz.KvkkSubprocessorManage:    dpoOnly,
+	} {
+		for _, p := range authztest.Personas() {
+			exp, ok := want[p.Name]
+			if !ok {
+				exp = authz.ErrForbidden
+			}
+			t.Run(string(act)+"/"+p.Name, func(t *testing.T) {
+				t.Parallel()
+				wantErr(t, authz.Can(ctx, p.Actor, act, dsrSurface), exp, false)
+			})
+		}
+	}
+	// System actor: only kvkk.retention.sweep, never the HTTP actions.
+	sys := authz.SystemActor("kvkk.retention_sweep")
+	wantErr(t, authz.Can(ctx, sys, authz.KvkkRetentionSweep, authz.Resource{}), nil, false)
+	wantErr(t, authz.Can(ctx, sys, authz.KvkkBreachManage, dsrSurface), authz.ErrForbidden, false)
 }

@@ -10,3 +10,7 @@ fixtures:
   dsr_student_awaiting: { kind: dsr, owner: student, type: profiling_access, status: awaiting_second_approval, verified: true, first_approver: dpo_2 }
   dsr_student_rectify: { kind: dsr, owner: student, type: rectification, status: in_progress, verified: true }
   dsr_student_unverified: { kind: dsr, owner: student, type: objection, status: received, verified: false }
+  # kvkk-2 records (BE-049): created/updated at 2026-10-01T08:00:00Z (ETag "DDNFR4TI7YAAA").
+  breach_open: { kind: breach, owner: dpo, status: open }
+  breach_closed: { kind: breach, owner: dpo, status: closed }
+  subprocessor_mail: { kind: subprocessor, name: "Matris E-posta A.Ş." }

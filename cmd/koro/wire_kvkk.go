@@ -8,7 +8,6 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"koro/internal/authz"
 	"koro/internal/identity"
 	"koro/internal/kvkk"
 	"koro/internal/platform/config"
@@ -23,6 +22,7 @@ import (
 // Seams (nil in production unless noted):
 //
 //	store   nil → kvkk.NewGormStore over the app_rw pool
+//	records nil → kvkk.NewGormRecords over the app_rw pool (BE-049)
 //	tx      nil → the app_rw pool's TxManager; tests preset db.NopTx
 //	cfg     tests only; nil → the kvkk section of the loaded configuration
 //	reauth  the re-authentication verifier of the R steps; nil →
@@ -35,12 +35,17 @@ import (
 // every provider registered by any module is erased and exported. kvkk adds
 // its own provider to c.privacy.
 //
-// c.sweepers (RetentionSweeper) is read by BE-049 (kvkk.retention_sweep).
+// BE-049: c.sweepers (RetentionSweeper) is read at call time by
+// kvkk.retention_sweep; identity's Sessions.RevokeAll (reason erasure)
+// signs an approved erasure's subject out after the commit (06 H-49);
+// identity's PlatformAdmins receive the breach alerts; kvkk fills
+// hooks.retention (the platform cleanup periods from retention_policies).
 type kvkkWiring struct {
-	store  kvkk.Store
-	tx     db.TxManager
-	cfg    *config.Kvkk
-	reauth func(ctx context.Context, userID uuid.UUID, password, totpCode string) (kind string, err error)
+	store   kvkk.Store
+	records kvkk.RecordStore
+	tx      db.TxManager
+	cfg     *config.Kvkk
+	reauth  func(ctx context.Context, userID uuid.UUID, password, totpCode string) (kind string, err error)
 
 	mod   kvkk.Module
 	svc   kvkk.Service // set by build
@@ -59,6 +64,13 @@ func (w *kvkkWiring) build(c *container) error {
 		}
 		store = kvkk.NewGormStore(c.infra.db.ORM)
 	}
+	records := w.records
+	if records == nil {
+		if c.infra.db == nil {
+			return errors.New("kvkk: no record store (database not opened)")
+		}
+		records = kvkk.NewGormRecords(c.infra.db.ORM)
+	}
 	if tx == nil {
 		tx = c.infra.db.Tx
 	}
@@ -70,27 +82,37 @@ func (w *kvkkWiring) build(c *container) error {
 	}
 	fs := c.files.svc
 	w.files = fs
-	mod, err := kvkk.New(kvkk.Deps{
-		Store: store, Tx: tx, Outbox: c.infra.outbox, Audit: c.audit.svc, Idempotency: c.infra.idempotency,
+	d := kvkk.Deps{
+		Store: store, Records: records, Tx: tx, Outbox: c.infra.outbox, Audit: c.audit.svc, Idempotency: c.infra.idempotency,
 		Clock: c.infra.clock, Log: c.infra.log.With("module", "kvkk"),
 		Reauth: kvkkReauth{w: w}, Users: kvkkUsers{svc: c.identity.svc}, Files: fs,
-		RemoveFile: func(ctx context.Context, a authz.Actor, id uuid.UUID) error { return fs.Delete(ctx, a, id) },
-		Mailer:     c.notify.svc,
-		Providers:  func() []privacy.Provider { return c.privacy },
-		Talent:     kvkkTalent{c: c},
-		DPOEmail:   cfg.DPOEmail, ExportRetention: cfg.ExportRetention,
-	})
+		Mailer:    c.notify.svc,
+		Providers: func() []privacy.Provider { return c.privacy },
+		Sweepers:  func() []privacy.RetentionSweeper { return c.sweepers },
+		Talent:    kvkkTalent{c: c},
+		DPOEmail:  cfg.DPOEmail, ExportRetention: cfg.ExportRetention,
+	}
+	if svc := c.identity.svc; svc != nil {
+		d.RevokeSessions = func(ctx context.Context, userID uuid.UUID) (int, error) {
+			return svc.RevokeAll(ctx, userID, identity.RevokeErasure)
+		}
+		d.Admins = c.identity.mod.PlatformAdmins
+	}
+	mod, err := kvkk.New(d)
 	if err != nil {
 		return err
 	}
-	w.mod, w.svc = mod, mod.Service
+	w.mod, w.svc, w.records = mod, mod.Service, records
 	c.privacy = append(c.privacy, mod.Privacy)
+	c.hooks.retention = mod.RetentionPeriod
 	return nil
 }
 
 // tasks: dsr.submitted → kvkk.notify_dpo, dsr.erasure_approved →
-// kvkk.erase_account, dsr.completed → kvkk.finish_request (critical);
-// kvkk.dsr_deadlines (09:00, default) and kvkk.purge_exports (hourly, low).
+// kvkk.erase_account, dsr.completed → kvkk.finish_request, breach.recorded →
+// kvkk.alert_breach (critical); kvkk.dsr_deadlines (09:00, default),
+// kvkk.purge_exports (hourly, low), kvkk.retention_sweep (02:30, low) and
+// kvkk.breach_timer (hourly, critical).
 func (w *kvkkWiring) tasks(c *container) {
 	w.mod.Subscribe(c.infra.subs)
 	for _, j := range w.mod.Jobs() {
@@ -98,7 +120,7 @@ func (w *kvkkWiring) tasks(c *container) {
 	}
 }
 
-// routes: the 13 data subject request operations (04 §2.22); w.svc is nil
+// routes: the 22 kvkk operations (04 §2.22); w.svc is nil
 // under `koro openapi`, which Register tolerates.
 func (w *kvkkWiring) routes(c *container, api huma.API) { kvkk.Register(api, w.svc, c.infra.clock) }
 

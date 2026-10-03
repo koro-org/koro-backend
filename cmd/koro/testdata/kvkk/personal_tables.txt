@@ -108,7 +108,9 @@ talent.neutralizations      personal  talent        todo:BE-047
 data_subject_requests       personal  kvkk          provider:kvkk
 retention_policies          staff     kvkk          -
 destruction_logs            none      kvkk          -
-breach_incidents            personal  kvkk          todo:BE-049
+# breach_incidents: owner_user_id is the staff member handling the breach; the title and the
+# description never name a person (02 §16.4 rule, API doc) — BE-049.
+breach_incidents            staff     kvkk          -
 subprocessors               none      kvkk          -
 # parties (BE-034 schema; financial records kept 10 years: providers export, erasure keeps the legal duty)
 legal_parties               personal  parties       todo:BE-036

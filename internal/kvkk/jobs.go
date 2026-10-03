@@ -205,7 +205,7 @@ func (s *service) purgeExports(ctx context.Context) (int, error) {
 	if err := authz.Can(ctx, sys, authz.KvkkRetentionSweep, authz.Resource{}); err != nil {
 		return 0, err
 	}
-	cutoff := s.now().Add(-s.d.ExportRetention)
+	cutoff := s.now().Add(-s.exportRetention(ctx))
 	n, after := 0, uuid.Nil()
 	for {
 		rows, err := s.d.Store.ExportsCompletedBefore(ctx, cutoff, after, batchSize)
@@ -247,7 +247,7 @@ func (s *service) purgeOne(ctx context.Context, sys authz.Actor, id uuid.UUID, c
 		if err := s.d.Store.Update(ctx, d); err != nil {
 			return err
 		}
-		if err := s.d.RemoveFile(ctx, sys, fileID); err != nil {
+		if err := s.d.Files.Delete(ctx, sys, fileID); err != nil {
 			return err
 		}
 		purged = true

@@ -1,5 +1,6 @@
-# Authz matrix of the kvkk module, data subject requests (03 §5.22, 04 §2.22; BE-021).
-# 13 operations × 18 personas. /me operations are O cells for every signed-in user:
+# Authz matrix of the kvkk module (03 §5.22, 04 §2.22): data subject requests (BE-021) and
+# the kvkk-2 records (BE-049): retention policies, destruction log, breaches, sub-processors.
+# 22 operations × 18 personas. /me operations are O cells for every signed-in user:
 # the requests of fixtures/kvkk.yaml belong to student, so everyone else gets 404 on
 # them (IDOR). The /admin surface answers 403 before reading (03 §7.2-3); dpo ✓,
 # platform_admin only on list/read of requests awaiting the second approval and on
@@ -137,12 +138,77 @@ operations:
     path_params: { dsr_id: dsr_student_export }
     expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 200, platform_admin: 403 }
 
-# Retention, destruction log, breach and subprocessor operations: kvkk-2 (BE-049).
-pending_actions:
-  - kvkk.retention_policy.list
-  - kvkk.retention_policy.update
-  - kvkk.destruction_log.list
-  - kvkk.breach.list
-  - kvkk.breach.manage
-  - kvkk.subprocessor.list
-  - kvkk.subprocessor.manage
+  # ---- kvkk-2 (BE-049): admin surface; dpo ✓, platform_admin ✓ except the policy update (R)
+  # and the sub-processor edits. R, If-Match and the state rules: scenarios/kvkk.yaml.
+  adminListRetentionPolicies:
+    method: GET
+    path: /api/v1/admin/retention-policies
+    action: kvkk.retention_policy.list
+    expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 200, platform_admin: 200 }
+
+  adminUpdateRetentionPolicy:
+    method: PATCH
+    path: /api/v1/admin/retention-policies/{code}
+    action: kvkk.retention_policy.update
+    path_params: { code: "literal:notification_delivery" }
+    headers: { If-Match: "\"DDNFR4TI7YAAA\"" }
+    body: bodies/kvkk/policy_update.json
+    expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 200, platform_admin: 403 }
+    variants:
+      - name: unknown_policy
+        path_params: { code: "literal:no_such_policy" }
+        expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 404, platform_admin: 403 }
+
+  adminListDestructionLogs:
+    method: GET
+    path: /api/v1/admin/destruction-logs
+    action: kvkk.destruction_log.list
+    expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 200, platform_admin: 200 }
+
+  adminListBreaches:
+    method: GET
+    path: /api/v1/admin/breaches
+    action: kvkk.breach.list
+    expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 200, platform_admin: 200 }
+
+  adminCreateBreach:
+    method: POST
+    path: /api/v1/admin/breaches
+    action: kvkk.breach.manage
+    body: bodies/kvkk/breach_create.json
+    expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 201, platform_admin: 201 }
+
+  adminUpdateBreach:
+    method: PATCH
+    path: /api/v1/admin/breaches/{breach_id}
+    action: kvkk.breach.manage
+    path_params: { breach_id: breach_open }
+    headers: { If-Match: "\"DDNFR4TI7YAAA\"" }
+    body: bodies/kvkk/breach_contain.json
+    expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 200, platform_admin: 200 }
+    variants:
+      - name: missing
+        path_params: { breach_id: "literal:00000000-0000-7000-8000-0000000000b1" }
+        expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 404, platform_admin: 404 }
+
+  adminListSubprocessors:
+    method: GET
+    path: /api/v1/admin/subprocessors
+    action: kvkk.subprocessor.list
+    expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 200, platform_admin: 200 }
+
+  adminCreateSubprocessor:
+    method: POST
+    path: /api/v1/admin/subprocessors
+    action: kvkk.subprocessor.manage
+    body: bodies/kvkk/subprocessor_create.json
+    expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 201, platform_admin: 403 }
+
+  adminUpdateSubprocessor:
+    method: PATCH
+    path: /api/v1/admin/subprocessors/{subprocessor_id}
+    action: kvkk.subprocessor.manage
+    path_params: { subprocessor_id: subprocessor_mail }
+    headers: { If-Match: "\"DDNFR4TI7YAAA\"" }
+    body: bodies/kvkk/subprocessor_retire.json
+    expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 200, platform_admin: 403 }

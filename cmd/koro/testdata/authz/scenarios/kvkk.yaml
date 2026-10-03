@@ -52,3 +52,28 @@ scenarios:
       - { persona: student_b, operation: downloadMyDataExport, expect: 404, code: not_found }
       - { persona: student, operation: downloadMyDataExport, path_params: { dsr_id: dsr_student_open }, expect: 404, code: kvkk.export_not_ready }
       - { persona: dpo, operation: adminDownloadDataExport, expect: 200 }
+  retention_policy_update_rules:
+    note: the policy update is R and optimistic; an approval names its reference; the export lives at most 7 days (T-35, T-83)
+    steps:
+      - { persona: dpo, operation: adminUpdateRetentionPolicy, body: bodies/kvkk/policy_update_no_reauth.json, expect: 403, code: forbidden }
+      - { persona: dpo, operation: adminUpdateRetentionPolicy, headers: { If-Match: "" }, expect: 428, code: precondition_required }
+      - { persona: dpo, operation: adminUpdateRetentionPolicy, body: bodies/kvkk/policy_approve_no_ref.json, expect: 422, code: kvkk.invalid_request }
+      - { persona: dpo, operation: adminUpdateRetentionPolicy, body: bodies/kvkk/policy_approve.json, expect: 200 }
+      - { persona: dpo, operation: adminUpdateRetentionPolicy, expect: 412, code: precondition_failed }
+      - { persona: dpo, operation: adminUpdateRetentionPolicy, path_params: { code: "literal:dsr_export_file" }, body: bodies/kvkk/policy_export_too_long.json, expect: 422, code: kvkk.invalid_request }
+  breach_lifecycle:
+    note: a breach is created with the 72-hour deadline; the status only moves forward; notified needs the Board time
+    steps:
+      - { persona: dpo, operation: adminCreateBreach, expect: 201 }
+      - { persona: dpo, operation: adminUpdateBreach, body: bodies/kvkk/breach_notified_without_time.json, expect: 422, code: kvkk.invalid_request }
+      - { persona: platform_admin, operation: adminUpdateBreach, expect: 200 }
+      - { persona: dpo, operation: adminUpdateBreach, headers: { If-Match: "\"DDNFR4TI7YAAA\"" }, body: bodies/kvkk/breach_reopen.json, expect: 412, code: precondition_failed }
+      - { persona: dpo, operation: adminUpdateBreach, path_params: { breach_id: breach_closed }, body: bodies/kvkk/breach_reopen.json, expect: 409, code: kvkk.invalid_state }
+  subprocessor_rules:
+    note: a processor abroad is never domestic; names are unique; edits need If-Match
+    steps:
+      - { persona: dpo, operation: adminCreateSubprocessor, body: bodies/kvkk/subprocessor_domestic_abroad.json, expect: 422, code: kvkk.invalid_request }
+      - { persona: dpo, operation: adminCreateSubprocessor, expect: 201 }
+      - { persona: dpo, operation: adminCreateSubprocessor, expect: 409, code: kvkk.duplicate_subprocessor }
+      - { persona: dpo, operation: adminUpdateSubprocessor, headers: { If-Match: "" }, expect: 428, code: precondition_required }
+      - { persona: dpo, operation: adminUpdateSubprocessor, expect: 200 }

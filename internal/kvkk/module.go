@@ -1,7 +1,11 @@
-// Package kvkk is the KVKK module, part 1 (01 §4.22; BE-021): data subject
+// Package kvkk is the KVKK module (01 §4.22). Part 1 (BE-021): data subject
 // requests (KVKK md. 11) with their 30-day legal deadline, the data export
 // built from every registered privacy.Provider, and the account erasure
-// orchestration.
+// orchestration. Part 2 (BE-049): retention policies and the nightly
+// retention sweep with its destruction record, the breach register with the
+// 72-hour authority deadline, the sub-processor inventory (and, in
+// migration 000121, the purge functions of the append-only tables and the
+// analytics views).
 //
 // Rules the package enforces:
 //
@@ -27,6 +31,15 @@
 //     touched) and deletes every session; then every other provider runs
 //     once more to sweep what the user wrote while the run was going.
 //     Consent rows are never deleted: consent withdraws what was granted.
+//   - Retention (kvkk.retention_sweep, 02:30): every registered sweeper runs
+//     for each of its enabled policies; a policy the lawyer has not approved
+//     (legal_approved = false, the seed state, T-35) runs as a dry run only,
+//     inside a transaction that is always rolled back; every policy run
+//     writes one destruction_logs row (02 §16.3), errors included.
+//   - Breaches: authority_deadline_at = detected_at + 72 hours; the DPO and
+//     the platform admins are alerted at once (breach.recorded) and by the
+//     hourly kvkk.breach_timer at 48/24/6 hours left and when overdue, and
+//     about the 24-hour notice to the data controller (Proje Sahibi).
 //   - Nothing personal is logged or put in an error: logs carry request
 //     IDs, types, statuses and counts only; details, names and addresses
 //     stay in the database.
@@ -82,12 +95,35 @@ type Service interface {
 	Reject(ctx context.Context, a authz.Actor, id uuid.UUID, reason string) (DSR, error)
 	// AdminDownload is adminDownloadDataExport (kvkk.dsr.export_download).
 	AdminDownload(ctx context.Context, a authz.Actor, id uuid.UUID) (Download, error)
+
+	// ListRetentionPolicies is adminListRetentionPolicies
+	// (kvkk.retention_policy.list).
+	ListRetentionPolicies(ctx context.Context, a authz.Actor) ([]PolicyView, error)
+	// UpdateRetentionPolicy is adminUpdateRetentionPolicy
+	// (kvkk.retention_policy.update; R, If-Match).
+	UpdateRetentionPolicy(ctx context.Context, a authz.Actor, code, ifMatch string, p PolicyPatch, proof ReauthProof) (PolicyView, error)
+	// ListDestructionLogs is adminListDestructionLogs (kvkk.destruction_log.list).
+	ListDestructionLogs(ctx context.Context, a authz.Actor, f DestructionFilter, after *After, limit int) (DestructionPage, error)
+	// ListBreaches is adminListBreaches (kvkk.breach.list).
+	ListBreaches(ctx context.Context, a authz.Actor, status *BreachStatus) ([]Breach, error)
+	// CreateBreach is adminCreateBreach (kvkk.breach.manage).
+	CreateBreach(ctx context.Context, a authz.Actor, in BreachInput) (Breach, error)
+	// UpdateBreach is adminUpdateBreach (kvkk.breach.manage; If-Match).
+	UpdateBreach(ctx context.Context, a authz.Actor, id uuid.UUID, ifMatch string, p BreachPatch) (Breach, error)
+	// ListSubprocessors is adminListSubprocessors (kvkk.subprocessor.list).
+	ListSubprocessors(ctx context.Context, a authz.Actor, active *bool) ([]Subprocessor, error)
+	// CreateSubprocessor is adminCreateSubprocessor (kvkk.subprocessor.manage).
+	CreateSubprocessor(ctx context.Context, a authz.Actor, in SubprocessorInput) (Subprocessor, error)
+	// UpdateSubprocessor is adminUpdateSubprocessor (kvkk.subprocessor.manage;
+	// If-Match).
+	UpdateSubprocessor(ctx context.Context, a authz.Actor, id uuid.UUID, ifMatch string, p SubprocessorPatch) (Subprocessor, error)
 }
 
 // Deps are the dependencies of the kvkk module. Everything but Talent and
 // DPOEmail is required (New returns an error otherwise, 05 §3).
 type Deps struct {
 	Store       Store
+	Records     RecordStore // retention policies, destruction log, breaches, sub-processors
 	Tx          db.TxManager
 	Outbox      outbox.Writer // dsr.* events (mechanism O)
 	Audit       AuditLogger
@@ -99,10 +135,8 @@ type Deps struct {
 	Reauth Reauthenticator
 	// Users reads identity (existence of a user, the worker's address).
 	Users Users
-	// Files stores, attaches and serves the export file; RemoveFile
-	// deletes it (see FileRemover).
-	Files      Files
-	RemoveFile FileRemover
+	// Files stores, attaches, serves and deletes the export file.
+	Files Files
 	// Mailer sends the DPO and data subject e-mails (worker).
 	Mailer Mailer
 	// Providers returns the registered privacy providers at call time
@@ -111,6 +145,15 @@ type Deps struct {
 	// Talent is the auditor report of profiling_access (hooks.talentAuditor).
 	// nil → the export states that no profiling report exists.
 	Talent TalentAuditor
+	// Sweepers returns the registered retention sweepers at call time
+	// (container.sweepers, 01 §3.3); nil → none.
+	Sweepers func() []privacy.RetentionSweeper
+	// RevokeSessions signs the subject of an approved erasure out at once
+	// (06 H-49). nil → only identity's erasure step deletes the sessions.
+	RevokeSessions SessionRevoker
+	// Admins lists the platform admins alerted about breaches. nil → the
+	// DPO mailbox only.
+	Admins PlatformAdmins
 
 	// DPOEmail is KVKK_DPO_EMAIL; empty → DPO mails are logged and skipped.
 	DPOEmail string
@@ -124,14 +167,17 @@ func (d *Deps) validate() error {
 		name string
 		ok   bool
 	}{
-		{"Store", d.Store != nil}, {"Tx", d.Tx != nil}, {"Outbox", d.Outbox != nil}, {"Audit", d.Audit != nil},
+		{"Store", d.Store != nil}, {"Records", d.Records != nil}, {"Tx", d.Tx != nil}, {"Outbox", d.Outbox != nil}, {"Audit", d.Audit != nil},
 		{"Idempotency", d.Idempotency != nil}, {"Clock", d.Clock != nil}, {"Log", d.Log != nil},
-		{"Users", d.Users != nil}, {"Files", d.Files != nil}, {"RemoveFile", d.RemoveFile != nil},
+		{"Users", d.Users != nil}, {"Files", d.Files != nil},
 		{"Mailer", d.Mailer != nil}, {"Providers", d.Providers != nil},
 	} {
 		if !c.ok {
 			errs = append(errs, fmt.Errorf("kvkk.Deps.%s is missing", c.name))
 		}
+	}
+	if d.Sweepers == nil {
+		d.Sweepers = func() []privacy.RetentionSweeper { return nil }
 	}
 	if d.ExportRetention == 0 {
 		d.ExportRetention = MaxExportRetention
@@ -178,12 +224,30 @@ func (m Module) Subscribe(r *outbox.Registry) {
 		outbox.Queue(queue.Critical), outbox.Timeout(eraseTimeout))
 	r.Subscribe(TopicCompleted, FinishRequestTaskName, m.svc.handleCompleted,
 		outbox.Queue(queue.Critical), outbox.Timeout(exportTimeout))
+	r.Subscribe(TopicBreachRecorded, AlertBreachTaskName, m.svc.handleBreachRecorded, outbox.Queue(queue.Critical))
 }
 
-// Jobs returns the scheduled jobs of kvkk (01 §7): kvkk.dsr_deadlines and
-// kvkk.purge_exports.
+// Jobs returns the scheduled jobs of kvkk (01 §7): kvkk.dsr_deadlines,
+// kvkk.purge_exports, kvkk.retention_sweep and kvkk.breach_timer.
 func (m Module) Jobs() []queue.Job {
-	return []queue.Job{m.svc.deadlinesJob(), m.svc.purgeExportsJob()}
+	return []queue.Job{m.svc.deadlinesJob(), m.svc.purgeExportsJob(), m.svc.retentionSweepJob(), m.svc.breachTimerJob()}
+}
+
+// RetentionPeriod is hooks.retention (01 §7: the platform cleanup jobs read
+// their periods from retention_policies): the period of an enabled policy at
+// now; found=false for an unknown or disabled policy (the job then keeps
+// its configured default).
+func (m Module) RetentionPeriod(ctx context.Context, code string) (time.Duration, bool, error) {
+	p, err := m.svc.d.Records.Policy(ctx, code)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		return 0, false, nil
+	case err != nil:
+		return 0, false, err
+	case !p.Enabled:
+		return 0, false, nil
+	}
+	return p.Period.Duration(m.svc.d.Clock.Now()), true, nil
 }
 
 type service struct{ d Deps }

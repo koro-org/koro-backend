@@ -3,6 +3,7 @@
 package kvkk_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"strconv"
@@ -11,9 +12,12 @@ import (
 	"time"
 	"uuid"
 
+	"gorm.io/gorm"
+
 	"koro/internal/identity"
 	"koro/internal/kvkk"
 	"koro/internal/platform/db"
+	"koro/internal/platform/privacy"
 	"koro/internal/platform/testutil"
 )
 
@@ -103,5 +107,71 @@ func TestErasure_TombstoneKeepsForeignKeys_PG(t *testing.T) {
 	r3.ID, r3.UserID = uuid.NewV7(), &ghost
 	if err := store.Insert(ctx, r3); !errors.Is(err, kvkk.ErrUnknownUser) {
 		t.Fatalf("Insert(unknown user) = %v", err)
+	}
+}
+
+func TestRecords_Contract_Gorm(t *testing.T) {
+	t.Parallel()
+	recordsContract(t, func(t *testing.T) recordsWorld {
+		d := testutil.NewDB(t)
+		return recordsWorld{s: kvkk.NewGormRecords(d.ORM), tx: d.Tx, user: func(t *testing.T) uuid.UUID { return insertUser(t, d) }}
+	})
+}
+
+// writingSweeper writes in its Sweep (a faulty sweeper on a dry run) and
+// calls the consents purge function of 000121 without the approval.
+type writingSweeper struct{ orm *gorm.DB }
+
+func (writingSweeper) PolicyCodes() []string {
+	return []string{"notification_delivery", "consent_proof"}
+}
+
+func (w writingSweeper) Sweep(ctx context.Context, p privacy.RetentionPolicy, now time.Time) (privacy.SweepResult, error) {
+	conn := db.Conn(ctx, w.orm)
+	if p.Code == "consent_proof" {
+		var n int64
+		err := conn.Raw(`SELECT consents_purge( ?, 1000, false)`, now.Add(-p.Retention)).Scan(&n).Error
+		return privacy.SweepResult{PolicyCode: p.Code, Count: int(n)}, err
+	}
+	if err := conn.Exec(`UPDATE retention_policies SET description_tr = 'yazıldı' WHERE code = ?`, p.Code).Error; err != nil {
+		return privacy.SweepResult{}, err
+	}
+	return privacy.SweepResult{PolicyCode: p.Code, Table: "notification_deliveries", Count: 7}, nil
+}
+
+// TestRetentionSweep_DryRunRolledBack_PG: on PostgreSQL a dry run is rolled
+// back whatever the sweeper writes, a real purge of an append-only table is
+// refused by the database until the legal approval (55000, recorded), and
+// every policy run lands in destruction_logs.
+func TestRetentionSweep_DryRunRolledBack_PG(t *testing.T) {
+	t.Parallel()
+	d := testutil.NewDB(t)
+	e := newEnv(t, func(dp *kvkk.Deps) { dp.Records, dp.Tx = kvkk.NewGormRecords(d.ORM), d.Tx })
+	e.sweepers = []privacy.RetentionSweeper{writingSweeper{orm: d.ORM}}
+	if err := e.job(t, kvkk.RetentionSweepJobName).Handle(workerCtx(t)); err != nil {
+		t.Fatal(err)
+	}
+	var desc string
+	if err := d.Pool.QueryRow(t.Context(), `SELECT description_tr FROM retention_policies WHERE code = 'notification_delivery'`).Scan(&desc); err != nil {
+		t.Fatal(err)
+	}
+	if desc == "yazıldı" {
+		t.Fatal("a dry run's write survived: the transaction was not rolled back")
+	}
+	rows, err := kvkk.NewGormRecords(d.ORM).DestructionLogs(t.Context(), kvkk.DestructionFilter{}, nil, 10)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("destruction rows = %d, %v", len(rows), err)
+	}
+	for _, r := range rows {
+		switch r.PolicyCode {
+		case "notification_delivery":
+			if r.RecordCount != 0 || r.Details["dry_run"] != true || r.Details["eligible"] != float64(7) {
+				t.Errorf("dry-run row = %+v", r)
+			}
+		case "consent_proof":
+			if r.Details["error"] != "sqlstate_55000" {
+				t.Errorf("unapproved purge row = %+v; want the 55000 refusal", r)
+			}
+		}
 	}
 }

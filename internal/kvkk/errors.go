@@ -36,6 +36,9 @@ var (
 	// period (T-83: 7 days).
 	ErrExportExpired = problem.New(problem.Gone, "kvkk.export_expired", "The export file has expired")
 
+	// ErrDuplicateSubprocessor: another sub-processor has this name.
+	ErrDuplicateSubprocessor = problem.New(problem.Conflict, "kvkk.duplicate_subprocessor", "A sub-processor with this name exists")
+
 	// ErrReauthUnavailable: an R step while no re-authentication verifier
 	// is bound. Fail closed.
 	ErrReauthUnavailable = problem.New(problem.Unavailable, "kvkk.reauth_unavailable", "Re-authentication is not available")

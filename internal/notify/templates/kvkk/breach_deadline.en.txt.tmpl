@@ -1,0 +1,5 @@
+Breach record {{index .Data "breach_id"}} has no {{if eq (index .Data "step") "authority"}}notification to the Personal Data Protection Board (72 hours){{else}}notice to the data controller (24 hours){{end}} recorded yet.
+
+Due: {{index .Data "deadline"}}{{if index .Data "overdue"}} — overdue.{{else}} — {{index .Data "hours_left"}} hours or less left.{{end}}
+
+If the notification was made, record its time on the breach; the details are in the Koro admin panel.

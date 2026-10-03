@@ -819,6 +819,90 @@ components:
       required:
         - feature
       type: object
+    BreachDTO:
+      additionalProperties: false
+      properties:
+        affected_estimate:
+          format: int64
+          type: integer
+        authority_deadline_at:
+          description: detected_at + 72 hours (Board notification)
+          format: date-time
+          type: string
+        authority_hours_left:
+          description: "Whole hours to the Board deadline while it is open (negative: overdue)"
+          format: int64
+          type: integer
+        authority_notified_at:
+          format: date-time
+          type: string
+        breach_id:
+          format: uuid
+          type: string
+        closed_at:
+          format: date-time
+          type: string
+        controller_deadline_at:
+          description: detected_at + 24 hours (notice to the data controller)
+          format: date-time
+          type: string
+        controller_notified_at:
+          format: date-time
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        data_categories:
+          items:
+            type: string
+          type: array
+        description:
+          type: string
+        detected_at:
+          format: date-time
+          type: string
+        etag:
+          description: If-Match of adminUpdateBreach
+          type: string
+        owner_user_id:
+          format: uuid
+          type: string
+        status:
+          enum:
+            - open
+            - contained
+            - notified
+            - closed
+          type: string
+        title:
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - breach_id
+        - title
+        - detected_at
+        - authority_deadline_at
+        - controller_deadline_at
+        - data_categories
+        - description
+        - status
+        - owner_user_id
+        - created_at
+        - updated_at
+        - etag
+      type: object
+    BreachListOutputBody:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/BreachDTO"
+          type: array
+      required:
+        - items
+      type: object
     ChangePasswordInputBody:
       additionalProperties: false
       properties:
@@ -1164,6 +1248,44 @@ components:
         - state
         - since
       type: object
+    CreateBreachInputBody:
+      additionalProperties: false
+      properties:
+        affected_estimate:
+          format: int64
+          minimum: 0
+          type: integer
+        data_categories:
+          description: "snake_case tokens: identity, contact, health, ..."
+          items:
+            type: string
+          maxItems: 30
+          type: array
+        description:
+          description: No person's name
+          maxLength: 10000
+          minLength: 1
+          type: string
+        detected_at:
+          description: When the breach was detected (the 72 hours start here)
+          format: date-time
+          type: string
+        owner_user_id:
+          description: The staff member handling the breach
+          format: uuid
+          type: string
+        title:
+          description: No person's name
+          maxLength: 200
+          minLength: 1
+          type: string
+      required:
+        - title
+        - detected_at
+        - data_categories
+        - description
+        - owner_user_id
+      type: object
     CreateCompanyInputBody:
       additionalProperties: false
       properties:
@@ -1421,6 +1543,63 @@ components:
           type: string
       required:
         - items
+      type: object
+    DestructionLogDTO:
+      additionalProperties: false
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        destruction_log_id:
+          format: uuid
+          type: string
+        details:
+          additionalProperties: {}
+          description: Counts and errors only (dry_run, eligible, error, ...)
+          type: object
+        finished_at:
+          format: date-time
+          type: string
+        method:
+          enum:
+            - hard_delete
+            - anonymize
+            - null_columns
+            - file_delete
+          type: string
+        module:
+          type: string
+        period_cutoff:
+          format: date-time
+          type: string
+        policy_code:
+          type: string
+        record_count:
+          description: Records destroyed (0 on a dry run)
+          format: int64
+          type: integer
+        run_id:
+          description: The nightly run; for dsr_erasure the request ID
+          format: uuid
+          type: string
+        started_at:
+          format: date-time
+          type: string
+        target:
+          type: string
+      required:
+        - destruction_log_id
+        - policy_code
+        - run_id
+        - module
+        - target
+        - method
+        - record_count
+        - period_cutoff
+        - started_at
+        - finished_at
+        - details
+        - created_at
       type: object
     DsrAdminDTO:
       additionalProperties: false
@@ -1980,6 +2159,18 @@ components:
       required:
         - membership_id
         - status
+      type: object
+    LogListOutputBody:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/DestructionLogDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
       type: object
     LoginInputBody:
       additionalProperties: false
@@ -2689,6 +2880,16 @@ components:
       required:
         - items
       type: object
+    PolicyListOutputBody:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/RetentionPolicyDTO"
+          type: array
+      required:
+        - items
+      type: object
     PreferenceDTO:
       additionalProperties: false
       properties:
@@ -3065,6 +3266,65 @@ components:
       required:
         - reason
       type: object
+    RetentionPolicyDTO:
+      additionalProperties: false
+      properties:
+        anchor:
+          type: string
+        approved_ref:
+          type: string
+        code:
+          type: string
+        description_tr:
+          type: string
+        enabled:
+          type: boolean
+        etag:
+          description: If-Match of adminUpdateRetentionPolicy
+          type: string
+        legal_approved:
+          description: "false: the sweeper only counts (dry run)"
+          type: boolean
+        legal_basis:
+          type: string
+        method:
+          enum:
+            - hard_delete
+            - anonymize
+            - null_columns
+            - file_delete
+          type: string
+        owner_module:
+          type: string
+        period:
+          description: ISO 8601 duration (P3Y, P12M, P30D, PT24H, P0D)
+          type: string
+        sweeper_registered:
+          description: A module sweeper runs this policy nightly
+          type: boolean
+        target:
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+        updated_by:
+          format: uuid
+          type: string
+      required:
+        - code
+        - owner_module
+        - target
+        - period
+        - anchor
+        - method
+        - legal_basis
+        - legal_approved
+        - enabled
+        - description_tr
+        - sweeper_registered
+        - updated_at
+        - etag
+      type: object
     RevokeRoleInputBody:
       additionalProperties: false
       properties:
@@ -3299,6 +3559,69 @@ components:
       required:
         - status
       type: object
+    SubBody:
+      additionalProperties: false
+      properties:
+        authority_notified_at:
+          description: Standard contract notified to the Board
+          format: date
+          type: string
+        contract_signed_at:
+          format: date
+          type: string
+        country_code:
+          pattern: ^[A-Z]{2}$
+          type: string
+        data_categories:
+          description: snake_case tokens
+          items:
+            type: string
+          maxItems: 30
+          minItems: 1
+          type: array
+        name:
+          maxLength: 200
+          minLength: 1
+          type: string
+        notes:
+          maxLength: 2000
+          type: string
+        region:
+          description: Hosting region (e.g. eu-central-1)
+          maxLength: 100
+          minLength: 1
+          type: string
+        service:
+          description: What it does for Koro
+          maxLength: 200
+          minLength: 1
+          type: string
+        transfer_mechanism:
+          enum:
+            - domestic
+            - standard_contract
+            - adequacy
+            - explicit_consent
+            - undecided
+          type: string
+      required:
+        - name
+        - service
+        - data_categories
+        - region
+        - country_code
+        - transfer_mechanism
+      type: object
+    SubListOutputBody:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/SubprocessorDTO"
+          type: array
+      required:
+        - items
+      type: object
     SubmitEduDocumentInputBody:
       additionalProperties: false
       properties:
@@ -3313,6 +3636,64 @@ components:
       required:
         - university_id
         - document_file_id
+      type: object
+    SubprocessorDTO:
+      additionalProperties: false
+      properties:
+        active:
+          type: boolean
+        authority_notified_at:
+          format: date
+          type: string
+        contract_signed_at:
+          format: date
+          type: string
+        country_code:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        data_categories:
+          items:
+            type: string
+          type: array
+        etag:
+          description: If-Match of adminUpdateSubprocessor
+          type: string
+        name:
+          type: string
+        notes:
+          type: string
+        region:
+          type: string
+        service:
+          type: string
+        subprocessor_id:
+          format: uuid
+          type: string
+        transfer_mechanism:
+          enum:
+            - domestic
+            - standard_contract
+            - adequacy
+            - explicit_consent
+            - undecided
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - subprocessor_id
+        - name
+        - service
+        - data_categories
+        - region
+        - country_code
+        - transfer_mechanism
+        - active
+        - created_at
+        - updated_at
+        - etag
       type: object
     SuppressionDTO:
       additionalProperties: false
@@ -3478,6 +3859,49 @@ components:
       required:
         - id
       type: object
+    UpdateBreachInputBody:
+      additionalProperties: false
+      properties:
+        affected_estimate:
+          format: int64
+          minimum: 0
+          type: integer
+        authority_notified_at:
+          description: When the Board was notified (written once)
+          format: date-time
+          type: string
+        controller_notified_at:
+          description: When the data controller was told (written once)
+          format: date-time
+          type: string
+        data_categories:
+          items:
+            type: string
+          maxItems: 30
+          type: array
+        description:
+          maxLength: 10000
+          minLength: 1
+          type: string
+        detected_at:
+          description: Only earlier than recorded
+          format: date-time
+          type: string
+        owner_user_id:
+          format: uuid
+          type: string
+        status:
+          enum:
+            - open
+            - contained
+            - notified
+            - closed
+          type: string
+        title:
+          maxLength: 200
+          minLength: 1
+          type: string
+      type: object
     UpdateClubInputBody:
       additionalProperties: false
       properties:
@@ -3569,6 +3993,33 @@ components:
           maxLength: 2048
           type: string
       type: object
+    UpdatePolicyInputBody:
+      additionalProperties: false
+      properties:
+        approved_ref:
+          description: Reference of the approval (document, meeting); required to approve
+          maxLength: 200
+          type: string
+        enabled:
+          type: boolean
+        legal_approved:
+          description: The lawyer / the accountant approved the period and method
+          type: boolean
+        method:
+          enum:
+            - hard_delete
+            - anonymize
+            - null_columns
+            - file_delete
+          type: string
+        period:
+          description: "ISO 8601 duration: P3Y, P12M, P30D, PT24H, P0D"
+          maxLength: 30
+          type: string
+        reauth:
+          $ref: "#/components/schemas/DsrReauthDTO"
+          description: Re-authentication proof (03 §6.2)
+      type: object
     UpdatePurposeInputBody:
       additionalProperties: false
       properties:
@@ -3581,6 +4032,51 @@ components:
         reauth:
           $ref: "#/components/schemas/ReauthDTO"
           description: Re-authentication proof (03 §6.2)
+      type: object
+    UpdateSubInputBody:
+      additionalProperties: false
+      properties:
+        active:
+          description: false retires the sub-processor (never deleted)
+          type: boolean
+        authority_notified_at:
+          format: date
+          type: string
+        contract_signed_at:
+          format: date
+          type: string
+        country_code:
+          pattern: ^[A-Z]{2}$
+          type: string
+        data_categories:
+          items:
+            type: string
+          maxItems: 30
+          minItems: 1
+          type: array
+        name:
+          maxLength: 200
+          minLength: 1
+          type: string
+        notes:
+          maxLength: 2000
+          type: string
+        region:
+          maxLength: 100
+          minLength: 1
+          type: string
+        service:
+          maxLength: 200
+          minLength: 1
+          type: string
+        transfer_mechanism:
+          enum:
+            - domestic
+            - standard_contract
+            - adequacy
+            - explicit_consent
+            - undecided
+          type: string
       type: object
     UsageDTO:
       additionalProperties: false
@@ -3859,6 +4355,150 @@ paths:
         - audit
       x-koro-action: audit.chain.verify
       x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/breaches:
+    get:
+      description: With the 72-hour deadline of the Board notification and the 24-hour notice to the data controller.
+      operationId: adminListBreaches
+      parameters:
+        - explode: false
+          in: query
+          name: status
+          schema:
+            enum:
+              - open
+              - contained
+              - notified
+              - closed
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BreachListOutputBody"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the personal data breaches
+      tags:
+        - kvkk
+      x-koro-action: kvkk.breach.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+    post:
+      description: authority_deadline_at = detected_at + 72 hours. The DPO and the platform admins are alerted at once and again at 48/24/6 hours left. Do not put a person's name in the title or the description.
+      operationId: adminCreateBreach
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBreachInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BreachDTO"
+          description: Created
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Record a personal data breach
+      tags:
+        - kvkk
+      x-koro-action: kvkk.breach.manage
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/breaches/{breach_id}:
+    patch:
+      description: If-Match. The status only moves forward (open → contained → notified → closed); notified needs authority_notified_at; notification times are written once; detected_at may only move earlier.
+      operationId: adminUpdateBreach
+      parameters:
+        - description: Breach ID (an unknown or malformed ID is 404)
+          in: path
+          name: breach_id
+          required: true
+          schema:
+            description: Breach ID (an unknown or malformed ID is 404)
+            type: string
+        - description: etag of the list item (428 without, 412 when stale)
+          in: header
+          name: If-Match
+          schema:
+            description: etag of the list item (428 without, 412 when stale)
+            maxLength: 100
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateBreachInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BreachDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: "Update a breach: containment, notifications, closing"
+      tags:
+        - kvkk
+      x-koro-action: kvkk.breach.manage
       x-koro-rate-limit: write_default
       x-koro-surface: admin
   /api/v1/admin/clubs:
@@ -4446,6 +5086,80 @@ paths:
       x-koro-action: kvkk.dsr.reject
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/destruction-logs:
+    get:
+      description: One row per retention policy and nightly run, and per module of an account erasure; newest first.
+      operationId: adminListDestructionLogs
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: Only this policy
+          explode: false
+          in: query
+          name: policy_code
+          schema:
+            description: Only this policy
+            pattern: ^[a-z_]{3,60}$
+            type: string
+        - description: Rows written at or after this instant
+          explode: false
+          in: query
+          name: from
+          schema:
+            description: Rows written at or after this instant
+            format: date-time
+            type: string
+        - description: Rows written before this instant
+          explode: false
+          in: query
+          name: to
+          schema:
+            description: Rows written before this instant
+            format: date-time
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogListOutputBody"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the destruction record
+      tags:
+        - kvkk
+      x-koro-action: kvkk.destruction_log.list
+      x-koro-rate-limit: read_default
       x-koro-surface: admin
   /api/v1/admin/edu-verifications:
     get:
@@ -5333,6 +6047,92 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+  /api/v1/admin/retention-policies:
+    get:
+      description: Every policy with its period (ISO 8601), anchor, method, legal approval and whether a sweeper is registered for it. A policy that is not legally approved runs as a dry run only (count, no deletion). Each item carries the etag that adminUpdateRetentionPolicy expects in If-Match.
+      operationId: adminListRetentionPolicies
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PolicyListOutputBody"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the retention policies
+      tags:
+        - kvkk
+      x-koro-action: kvkk.retention_policy.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+  /api/v1/admin/retention-policies/{code}:
+    patch:
+      description: Re-authentication required; If-Match (428 without, 412 when stale). Changing the period or the method withdraws the legal approval unless the same request approves the new values with approved_ref. The data export files live at most 7 days.
+      operationId: adminUpdateRetentionPolicy
+      parameters:
+        - description: Policy code (an unknown code is 404)
+          in: path
+          name: code
+          required: true
+          schema:
+            description: Policy code (an unknown code is 404)
+            pattern: ^[a-z_]{3,60}$
+            type: string
+        - description: etag of the list item (428 without, 412 when stale)
+          in: header
+          name: If-Match
+          schema:
+            description: etag of the list item (428 without, 412 when stale)
+            maxLength: 100
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePolicyInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetentionPolicyDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Change a retention period, method, state or legal approval
+      tags:
+        - kvkk
+      x-koro-action: kvkk.retention_policy.update
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
   /api/v1/admin/skills:
     post:
       operationId: adminCreateSkill
@@ -5402,6 +6202,149 @@ paths:
       tags:
         - directory
       x-koro-action: directory.skill.manage
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/subprocessors:
+    get:
+      operationId: adminListSubprocessors
+      parameters:
+        - description: Only active (true) or retired (false) sub-processors
+          explode: false
+          in: query
+          name: active
+          schema:
+            description: Only active (true) or retired (false) sub-processors
+            enum:
+              - "true"
+              - "false"
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubListOutputBody"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the sub-processor inventory
+      tags:
+        - kvkk
+      x-koro-action: kvkk.subprocessor.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+    post:
+      description: A processor abroad is never domestic (KVKK md. 9). 409 kvkk.duplicate_subprocessor on a taken name.
+      operationId: adminCreateSubprocessor
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubprocessorDTO"
+          description: Created
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Add a sub-processor
+      tags:
+        - kvkk
+      x-koro-action: kvkk.subprocessor.manage
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/subprocessors/{subprocessor_id}:
+    patch:
+      description: If-Match (the etag of the list item). Retire with active = false.
+      operationId: adminUpdateSubprocessor
+      parameters:
+        - description: Sub-processor ID (an unknown or malformed ID is 404)
+          in: path
+          name: subprocessor_id
+          required: true
+          schema:
+            description: Sub-processor ID (an unknown or malformed ID is 404)
+            type: string
+        - description: etag of the list item (428 without, 412 when stale)
+          in: header
+          name: If-Match
+          schema:
+            description: etag of the list item (428 without, 412 when stale)
+            maxLength: 100
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSubInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubprocessorDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Update a sub-processor
+      tags:
+        - kvkk
+      x-koro-action: kvkk.subprocessor.manage
       x-koro-rate-limit: write_default
       x-koro-surface: admin
   /api/v1/admin/universities:

@@ -412,11 +412,12 @@ func TestSyncWritesAreAllowed(t *testing.T) {
 	if len(v) > 0 {
 		t.Fatalf("sync_writes.txt:\n%s", strings.Join(v, "\n"))
 	}
-	// 01 §6.3 + 05 §2.4 in full (written once, BE-004): 16 + 4 pending lines.
-	if len(allow) != 20 {
-		t.Fatalf("sync_writes.txt has %d lines, want 20", len(allow))
+	// 01 §6.3 + 05 §2.4 in full (written once, BE-004): 16 + 4 pending lines,
+	// + kvkk → files.Files.Delete (06 H-49, BE-049).
+	if len(allow) != 21 {
+		t.Fatalf("sync_writes.txt has %d lines, want 21", len(allow))
 	}
-	for _, must := range []string{
+	for _, must := range []string{"kvkk files.Files.Delete",
 		"* audit.Logger.Log", "* files.Files.Attach", "payments orders.Orders.ApplyPayment", "payments ledger.Poster.Post",
 		"directory orgs.OrgAdmin.GrantRole", "directory orgs.OrgAdmin.Create", "orders catalog.Offerings.Release",
 	} {

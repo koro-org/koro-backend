@@ -1,0 +1,1 @@
+{{if index .Data "overdue"}}SÜRESİ GEÇTİ{{else}}{{index .Data "hours_left"}} saat kaldı{{end}}: veri ihlali {{if eq (index .Data "step") "authority"}}Kurul bildirimi{{else}}veri sorumlusu bildirimi{{end}} ({{index .Data "breach_id"}})

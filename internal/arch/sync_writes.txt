@@ -45,3 +45,9 @@ directory -> orgs.OrgAdmin.Create
 orders    -> entitlements.Entitlements.ActivateBySource
 orders    -> entitlements.Entitlements.Release
 orders    -> catalog.Offerings.Release
+
+# 06 H-49 (T-193; BE-049 writes this line, rationale for 01 §6.3 in the BE-049
+# ticket's doc patch): kvkk deletes a data export file in the transaction that
+# clears the request's export_file_id (7-day purge, account erasure), so the
+# file never outlives its reference nor the reference its file.
+kvkk      -> files.Files.Delete

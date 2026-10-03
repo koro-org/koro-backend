@@ -224,6 +224,10 @@ func (f *fakeTalent) Report(_ context.Context, _, userID uuid.UUID, _ string) (j
 type env struct {
 	clk       *clock.Fake
 	store     *kvkk.MemStore
+	records   *kvkk.MemRecords
+	sweepers  []privacy.RetentionSweeper
+	revoked   *callLog // RevokeSessions calls ("revoke:<user>")
+	admins    []uuid.UUID
 	out       *outbox.Mem
 	subs      *outbox.Registry
 	audit     *auditRec
@@ -241,7 +245,8 @@ type env struct {
 func newEnv(t *testing.T, opts ...func(*kvkk.Deps)) *env {
 	t.Helper()
 	clk := clock.NewFake(time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC))
-	e := &env{clk: clk, store: kvkk.NewMemStore(clk.Now), out: outbox.NewMem(clk), subs: outbox.NewRegistry(),
+	e := &env{clk: clk, store: kvkk.NewMemStore(clk.Now), records: kvkk.NewMemRecords(clk.Now), revoked: &callLog{},
+		admins: []uuid.UUID{authztest.ID("platform_admin")}, out: outbox.NewMem(clk), subs: outbox.NewRegistry(),
 		users: &fakeUsers{live: map[uuid.UUID]kvkk.Contact{}, erased: map[uuid.UUID]bool{}},
 		mail:  &fakeMailer{keys: map[string]bool{}}, log: &callLog{}, filesMem: storage.NewMem(clk)}
 	auditSvc := audit.New(audit.Deps{Store: audit.NewMemStore(), Tx: db.NopTx{}, Clock: clk, Log: obs.Discard()}).Service
@@ -272,11 +277,17 @@ func newEnv(t *testing.T, opts ...func(*kvkk.Deps)) *env {
 		&fakeProvider{name: kvkk.IdentityProvider, log: e.log, items: []map[string]any{{"type": "account"}},
 			onErase: func(id uuid.UUID) { e.users.erase(id) }},
 	}
+	seedPolicies(e.records, clk.Now())
 	d := kvkk.Deps{
-		Store: e.store, Tx: db.NopTx{}, Outbox: e.out, Audit: e.audit, Idempotency: keeper(), Clock: clk, Log: obs.Discard(),
-		Reauth: fakeReauth{}, Users: e.users, Files: e.zips,
-		RemoveFile: func(ctx context.Context, a authz.Actor, id uuid.UUID) error { return e.files.Delete(ctx, a, id) },
-		Mailer:     e.mail, Providers: func() []privacy.Provider { return e.providers }, DPOEmail: dpoMailbox,
+		Store: e.store, Records: e.records, Tx: db.NopTx{}, Outbox: e.out, Audit: e.audit, Idempotency: keeper(), Clock: clk,
+		Log: obs.Discard(), Reauth: fakeReauth{}, Users: e.users, Files: e.zips,
+		Mailer: e.mail, Providers: func() []privacy.Provider { return e.providers }, DPOEmail: dpoMailbox,
+		Sweepers: func() []privacy.RetentionSweeper { return e.sweepers },
+		RevokeSessions: func(_ context.Context, userID uuid.UUID) (int, error) {
+			e.revoked.add("revoke:" + userID.String())
+			return 1, nil
+		},
+		Admins: func(context.Context) ([]uuid.UUID, error) { return e.admins, nil },
 	}
 	for _, o := range opts {
 		o(&d)
@@ -404,4 +415,28 @@ func (c *capFiles) of(id uuid.UUID) []byte {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.content[id]
+}
+
+// seedPolicies seeds the retention policies the tests use, as 000090 /
+// 000121 do: none legally approved.
+func seedPolicies(r *kvkk.MemRecords, at time.Time) {
+	for _, p := range []kvkk.Policy{
+		{Code: kvkk.ExportPolicyCode, OwnerModule: "kvkk", Target: "files:dsr_export", Period: kvkk.Period{Days: 7},
+			Anchor: "created_at", Method: privacy.MethodFileDelete, LegalBasis: "Teslim süresi", Enabled: true},
+		{Code: kvkk.ErasurePolicyCode, OwnerModule: "kvkk", Target: "users", Anchor: "created_at",
+			Method: privacy.MethodHardDelete, LegalBasis: "Hesap silme", Enabled: true},
+		{Code: "notification_delivery", OwnerModule: "notify", Target: "notification_deliveries", Period: kvkk.Period{Years: 1},
+			Anchor: "created_at", Method: privacy.MethodHardDelete, LegalBasis: "R-003 §5.4", Enabled: true},
+		{Code: "post_removed", OwnerModule: "feed", Target: "posts", Period: kvkk.Period{Years: 1},
+			Anchor: "closed_at", Method: privacy.MethodHardDelete, LegalBasis: "Moderasyon itirazı", Enabled: true},
+		{Code: "outreach_dispatch", OwnerModule: "outreach", Target: "outreach_dispatches", Period: kvkk.Period{Years: 2},
+			Anchor: "created_at", Method: privacy.MethodHardDelete, LegalBasis: "Hak kullanımı ispatı", Enabled: true},
+		{Code: "destruction_log", OwnerModule: "kvkk", Target: "destruction_logs", Period: kvkk.Period{Years: 3},
+			Anchor: "created_at", Method: privacy.MethodHardDelete, LegalBasis: "Teknik rapor §6.2", Enabled: true},
+		{Code: "dormant_account", OwnerModule: "identity", Target: "users", Period: kvkk.Period{Years: 100},
+			Anchor: "last_seen_at", Method: privacy.MethodAnonymize, LegalBasis: "Hukukçu kararına kadar kapalı", Enabled: false},
+	} {
+		p.DescriptionTR, p.CreatedAt, p.UpdatedAt = "Test", at, at
+		r.PutPolicy(p)
+	}
 }

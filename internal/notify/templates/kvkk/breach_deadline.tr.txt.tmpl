@@ -1,0 +1,5 @@
+{{index .Data "breach_id"}} numaralı veri ihlali kaydında {{if eq (index .Data "step") "authority"}}Kişisel Verileri Koruma Kurulu bildirimi (72 saat){{else}}veri sorumlusuna (Proje Sahibi) bildirim (24 saat){{end}} henüz kaydedilmedi.
+
+Son tarih: {{index .Data "deadline"}}{{if index .Data "overdue"}} — süre geçti.{{else}} — {{index .Data "hours_left"}} saat veya daha az kaldı.{{end}}
+
+Bildirim yapıldıysa zamanını ihlal kaydına girin; ayrıntılar Koro yönetim panelindedir.

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -21,7 +22,14 @@ var matrixDSRReceivedAt = time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
 func (w *kvkkWiring) matrixFixtures(fx *matrixFixtures) error {
 	ctx := context.Background()
 	for _, f := range fx.Of("kvkk") {
-		if f.Kind != "dsr" {
+		switch f.Kind {
+		case "breach", "subprocessor":
+			if err := w.matrixRecord(fx, f); err != nil {
+				return fmt.Errorf("fixture %s: %w", f.Name, err)
+			}
+			continue
+		case "dsr":
+		default:
 			return fmt.Errorf("fixture %s: unknown kind %q", f.Name, f.Kind)
 		}
 		id, err := fx.ID(f.Name)
@@ -79,4 +87,40 @@ func (w *kvkkWiring) matrixExportFile(ctx context.Context, d kvkk.DSR) error {
 	}
 	d.ExportFileID = &fileID
 	return w.store.Update(ctx, d)
+}
+
+// matrixRecord seeds a breach or a sub-processor of fixtures/kvkk.yaml with
+// the fixed timestamps of matrixRecordsAt (ETag "DDNFR4TI7YAAA").
+func (w *kvkkWiring) matrixRecord(fx *matrixFixtures, f fixture) error {
+	mem, ok := w.records.(*kvkk.MemRecords)
+	if !ok {
+		return errors.New("kvkk records are not in memory")
+	}
+	id, err := fx.ID(f.Name)
+	if err != nil {
+		return err
+	}
+	switch f.Kind {
+	case "breach":
+		owner, err := fx.Ref(f, "owner")
+		if err != nil {
+			return err
+		}
+		status, _ := f.Fields["status"].(string)
+		detected := matrixRecordsAt.Add(-time.Hour)
+		b := kvkk.Breach{ID: id, Title: "Matris ihlali", DetectedAt: detected, AuthorityDeadlineAt: detected.Add(kvkk.AuthorityPeriod),
+			DataCategories: []string{"contact"}, Description: "Yanlış alıcıya gönderilen toplu e-posta.",
+			Status: kvkk.BreachStatus(status), OwnerUserID: owner, CreatedAt: matrixRecordsAt, UpdatedAt: matrixRecordsAt}
+		if b.Status == kvkk.BreachClosed {
+			at := matrixRecordsAt
+			b.ClosedAt = &at
+		}
+		mem.PutBreach(b)
+	case "subprocessor":
+		name, _ := f.Fields["name"].(string)
+		mem.PutSubprocessor(kvkk.Subprocessor{ID: id, Name: name, Service: "E-posta gönderimi", DataCategories: []string{"contact"},
+			Region: "eu-central-1", CountryCode: "DE", TransferMechanism: "standard_contract", Active: true,
+			CreatedAt: matrixRecordsAt, UpdatedAt: matrixRecordsAt})
+	}
+	return nil
 }

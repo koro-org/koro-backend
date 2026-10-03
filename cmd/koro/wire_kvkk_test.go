@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 	"uuid"
 
 	"github.com/hibiken/asynq"
@@ -46,9 +47,33 @@ const testDPOEmail = "kvkk@koro.test"
 // (BE-001 R4).
 func (w *kvkkWiring) useMemStore() {
 	w.store = kvkk.NewMemStore(clock.Real().Now)
+	records := kvkk.NewMemRecords(clock.Real().Now)
+	memPolicies(records)
+	w.records = records
 	w.tx = db.NopTx{}
 	w.cfg = &config.Kvkk{DPOEmail: testDPOEmail, ExportRetention: config.MaxExportRetention}
 	w.reauth = testReauth
+}
+
+// matrixRecordsAt is the created/updated time of every seeded kvkk-2 record
+// of the in-memory store: its ETag is "DDNFR4TI7YAAA" (testdata/authz/kvkk.yaml).
+var matrixRecordsAt = time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
+
+// memPolicies seeds the retention policies the wiring and matrix tests use,
+// as 000090/000121 do (none legally approved).
+func memPolicies(r *kvkk.MemRecords) {
+	for _, p := range []kvkk.Policy{
+		{Code: kvkk.ErasurePolicyCode, OwnerModule: "kvkk", Target: "users", Anchor: "created_at", Method: privacy.MethodHardDelete},
+		{Code: kvkk.ExportPolicyCode, OwnerModule: "kvkk", Target: "files:dsr_export", Period: kvkk.Period{Days: 7},
+			Anchor: "created_at", Method: privacy.MethodFileDelete},
+		{Code: "notification_delivery", OwnerModule: "notify", Target: "notification_deliveries", Period: kvkk.Period{Years: 1},
+			Anchor: "created_at", Method: privacy.MethodHardDelete},
+		{Code: "outbox_published", OwnerModule: "platform", Target: "outbox", Period: kvkk.Period{Days: 7},
+			Anchor: "published_at", Method: privacy.MethodHardDelete},
+	} {
+		p.LegalBasis, p.DescriptionTR, p.Enabled, p.CreatedAt, p.UpdatedAt = "Öneri", "Test", true, matrixRecordsAt, matrixRecordsAt
+		r.PutPolicy(p)
+	}
 }
 
 // TestWire_KvkkTasksAndPrivacy pins what kvkk registers (01 §6.2, §7): the
@@ -66,12 +91,13 @@ func TestWire_KvkkTasksAndPrivacy(t *testing.T) {
 			jobs = append(jobs, j.Name+" "+j.Cron+" "+j.Queue)
 		}
 	}
-	if want := []string{"kvkk.dsr_deadlines 0 9 * * * default", "kvkk.purge_exports 27 * * * * low"}; !slices.Equal(jobs, want) {
+	if want := []string{"kvkk.dsr_deadlines 0 9 * * * default", "kvkk.purge_exports 27 * * * * low",
+		"kvkk.retention_sweep 30 2 * * * low", "kvkk.breach_timer 0 * * * * critical"}; !slices.Equal(jobs, want) {
 		t.Fatalf("kvkk jobs %q, want %q", jobs, want)
 	}
 	for topic, name := range map[string]string{
 		domainevent.TopicDSRSubmitted: kvkk.NotifyDPOTaskName, domainevent.TopicDSRErasureApproved: kvkk.EraseAccountTaskName,
-		domainevent.TopicDSRCompleted: kvkk.FinishRequestTaskName,
+		domainevent.TopicDSRCompleted: kvkk.FinishRequestTaskName, domainevent.TopicBreachRecorded: kvkk.AlertBreachTaskName,
 	} {
 		subs := c.infra.subs.For(topic)
 		if !slices.ContainsFunc(subs, func(s outbox.Subscription) bool { return s.Name == name && s.Queue == queue.Critical }) {
@@ -83,13 +109,24 @@ func TestWire_KvkkTasksAndPrivacy(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, name := range []string{kvkk.NotifyDPOTaskName, kvkk.EraseAccountTaskName, kvkk.FinishRequestTaskName,
-		kvkk.DeadlinesJobName, kvkk.PurgeExportsJobName} {
+		kvkk.DeadlinesJobName, kvkk.PurgeExportsJobName, kvkk.RetentionSweepJobName, kvkk.BreachTimerJobName, kvkk.AlertBreachTaskName} {
 		if !slices.Contains(mux.Types(), name) {
 			t.Errorf("worker does not route %s", name)
 		}
 	}
 	if !slices.ContainsFunc(c.privacy, func(p privacy.Provider) bool { return p.Name() == "kvkk" }) {
 		t.Fatal("kvkk privacy provider not registered")
+	}
+	// hooks.retention (01 §7): the platform cleanup reads the period of the
+	// policy; an unknown code keeps the configured default.
+	if c.hooks.retention == nil {
+		t.Fatal("kvkk did not fill hooks.retention")
+	}
+	if d, found, err := c.hooks.retention(t.Context(), "outbox_published"); err != nil || !found || d != 7*24*time.Hour {
+		t.Fatalf("hooks.retention(outbox_published) = %s, %v, %v", d, found, err)
+	}
+	if _, found, err := c.hooks.retention(t.Context(), "no_such_policy"); err != nil || found {
+		t.Fatalf("hooks.retention(unknown) found = %v, %v", found, err)
 	}
 }
 

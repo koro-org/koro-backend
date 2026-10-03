@@ -162,7 +162,7 @@ func (s *service) buildExport(ctx context.Context, d DSR) error {
 	switch {
 	case d.UserID == nil, d.ExportFileID != nil, d.Status != StatusCompleted, !d.Type.exports():
 		return nil
-	case d.CompletedAt != nil && s.now().Sub(*d.CompletedAt) >= s.d.ExportRetention:
+	case d.CompletedAt != nil && s.now().Sub(*d.CompletedAt) >= s.exportRetention(ctx):
 		return nil // a redelivered event must not rebuild a purged export
 	}
 	content, err := s.exportZip(ctx, d)
@@ -189,7 +189,7 @@ func (s *service) buildExport(ctx context.Context, d DSR) error {
 			return err
 		}
 		if cur.ExportFileID != nil { // a concurrent run won
-			return s.d.RemoveFile(ctx, sys, fileID)
+			return s.d.Files.Delete(ctx, sys, fileID)
 		}
 		if err := s.d.Files.Attach(ctx, sys, fileID, files.Owner{Module: "kvkk", EntityID: d.ID, Purpose: files.PurposeDSRExport}); err != nil {
 			return err
@@ -204,7 +204,7 @@ func (s *service) buildExport(ctx context.Context, d DSR) error {
 	})
 	if err != nil {
 		// Do not leave the personal file to the 24-hour orphan cleanup.
-		if rerr := s.d.RemoveFile(context.WithoutCancel(ctx), sys, fileID); rerr != nil {
+		if rerr := s.d.Files.Delete(context.WithoutCancel(ctx), sys, fileID); rerr != nil {
 			s.d.Log.LogAttrs(ctx, slog.LevelWarn, "unattached export file not removed", slog.String("dsr_id", d.ID.String()),
 				slog.String("file_id", fileID.String()))
 		}
@@ -223,7 +223,7 @@ func (s *service) buildExport(ctx context.Context, d DSR) error {
 func (s *service) download(ctx context.Context, a authz.Actor, d DSR) (Download, error) {
 	now := s.now()
 	if d.ExportFileID == nil {
-		if d.Status == StatusCompleted && d.Type.exports() && d.CompletedAt != nil && now.Sub(*d.CompletedAt) >= s.d.ExportRetention {
+		if d.Status == StatusCompleted && d.Type.exports() && d.CompletedAt != nil && now.Sub(*d.CompletedAt) >= s.exportRetention(ctx) {
 			return Download{}, ErrExportExpired
 		}
 		return Download{}, ErrExportNotReady
@@ -234,7 +234,7 @@ func (s *service) download(ctx context.Context, a authz.Actor, d DSR) (Download,
 		return Download{}, ErrExportExpired
 	case err != nil:
 		return Download{}, err
-	case now.Sub(meta.CreatedAt) >= s.d.ExportRetention:
+	case now.Sub(meta.CreatedAt) >= s.exportRetention(ctx):
 		return Download{}, ErrExportExpired // the hourly purge has not run yet
 	}
 	dl, err := s.d.Files.PresignGet(ctx, *d.ExportFileID, DownloadTTL)

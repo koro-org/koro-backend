@@ -360,12 +360,21 @@ func TestMigrations_EachStepRestoresThePreviousSchema(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close(context.Background()) })
 
 	forward := map[uint]string{}
-	for n := uint(1); n <= latest; n++ {
+	// Numbers are pre-allocated per ticket and may leave gaps before the
+	// pilot (BE-001 R2): walk the versions that exist.
+	versions := migrationVersions(t)
+	below := func(i int) uint {
+		if i == 0 {
+			return 0
+		}
+		return versions[i-1]
+	}
+	for i, n := range versions {
 		m, err := migratekit.New(migrationsUpTo(t, n), ownerURL, obs.Discard())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if n == 1 {
+		if i == 0 {
 			forward[0] = fingerprint(t, conn) // schema_migrations exists once a migrator is open
 		}
 		if err := m.Up(ctx); err != nil {
@@ -380,7 +389,7 @@ func TestMigrations_EachStepRestoresThePreviousSchema(t *testing.T) {
 			t.Fatal(err)
 		}
 		forward[n] = fingerprint(t, conn)
-		if seeds, _ := fs.Glob(migrations.FS, fmt.Sprintf("%06d_seed_*.up.sql", n)); len(seeds) == 0 && forward[n] == forward[n-1] {
+		if seeds, _ := fs.Glob(migrations.FS, fmt.Sprintf("%06d_seed_*.up.sql", n)); len(seeds) == 0 && forward[n] == forward[below(i)] {
 			t.Errorf("migration %06d changed nothing in the schema fingerprint", n)
 		}
 	}
@@ -406,8 +415,12 @@ func TestMigrations_EachStepRestoresThePreviousSchema(t *testing.T) {
 		}
 	}
 	if latest >= 90 {
-		if defs, policies := rowCount(seedRows[81]), rowCount(seedRows[90]); defs != 10 || policies != 44 {
-			t.Fatalf("seed rows after the last up: signal defs %d, retention policies %d; want 10 and 44", defs, policies)
+		wantPolicies := 44 // 000090 (02 §24.2)
+		if latest >= 121 {
+			wantPolicies = 45 // + privileged_action_history (000121, BE-049)
+		}
+		if defs, policies := rowCount(seedRows[81]), rowCount(seedRows[90]); defs != 10 || policies != wantPolicies {
+			t.Fatalf("seed rows after the last up: signal defs %d, retention policies %d; want 10 and %d", defs, policies, wantPolicies)
 		}
 	}
 	if latest >= 110 {
@@ -421,15 +434,16 @@ func TestMigrations_EachStepRestoresThePreviousSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = m.Close() })
-	for n := latest; n >= 1; n-- {
+	for i := len(versions) - 1; i >= 0; i-- {
+		n, prev := versions[i], below(i)
 		if err := m.Down(ctx, 1); err != nil {
 			t.Fatalf("down of %06d: %v", n, err)
 		}
-		if v, dirty, err := m.Version(); err != nil || dirty || v != n-1 {
+		if v, dirty, err := m.Version(); err != nil || dirty || v != prev {
 			t.Fatalf("version after down of %06d = %d, dirty %v, %v", n, v, dirty, err)
 		}
-		if got := fingerprint(t, conn); got != forward[n-1] {
-			t.Errorf("down of %06d does not restore the schema of %06d:\n%s", n, n-1, diff(forward[n-1], got))
+		if got := fingerprint(t, conn); got != forward[prev] {
+			t.Errorf("down of %06d does not restore the schema of %06d:\n%s", n, prev, diff(forward[prev], got))
 		}
 		if q, ok := seedRows[n]; ok && rowCount(q) != 0 {
 			t.Errorf("down of %06d left the seed rows behind (%s)", n, q)

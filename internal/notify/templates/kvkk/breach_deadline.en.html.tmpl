@@ -1,0 +1,3 @@
+<p style="margin:0 0 12px 0;">Breach record <strong>{{index .Data "breach_id"}}</strong> has no {{if eq (index .Data "step") "authority"}}notification to the Personal Data Protection Board (72 hours){{else}}notice to the data controller (24 hours){{end}} recorded yet.</p>
+<p style="margin:0 0 12px 0;">Due: <strong>{{index .Data "deadline"}}</strong>{{if index .Data "overdue"}} — overdue.{{else}} — {{index .Data "hours_left"}} hours or less left.{{end}}</p>
+<p style="margin:0;">If the notification was made, record its time on the breach; the details are in the Koro admin panel.</p>

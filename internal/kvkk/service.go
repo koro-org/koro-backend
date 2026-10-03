@@ -14,6 +14,7 @@ import (
 
 	"koro/internal/audit"
 	"koro/internal/authz"
+	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
@@ -637,6 +638,9 @@ func (s *service) Complete(ctx context.Context, a authz.Actor, id uuid.UUID, sum
 			switch {
 			case outcome == OutcomeErased:
 				err = s.emit(ctx, domainevent.DSRErasureApproved{DSRID: d.ID, UserID: subject}, d.ID)
+				// 06 H-49: sign the subject out as soon as the erasure is
+				// approved, after the commit (not a same-transaction write).
+				db.AfterCommit(ctx, func(ctx context.Context) { s.revokeSessions(ctx, d.ID, subject) })
 			case d.Type == TypeProfilingObjection && d.UserID != nil:
 				err = s.emit(ctx, domainevent.DSRProfilingObjection{DSRID: d.ID, UserID: subject}, d.ID)
 			}

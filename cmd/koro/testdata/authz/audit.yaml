@@ -3,6 +3,8 @@
 # platform role sees the surface (403 unless dpo/platform_admin). Admin surface (03 §7.2-3):
 # everyone without the role → 403. dpo, platform_admin, university_rep and company_admin
 # sessions are MFA verified (03 §7.3); the policy test covers the MFA-less session.
+# compare: status (BE-061): the three event lists grow with every audited read of the shared
+# application (support/break-glass member reads, ...), so only their status is compared.
 version: 1
 groups:
   no_platform_role: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
@@ -17,12 +19,14 @@ operations:
     method: GET
     path: /api/v1/me/security-events
     action: audit.event.list_own
+    compare: status            # audited reads append to this list (BE-061)
     expect: { anonymous: 401, "@signed_in": 200 }
 
   listOrgAuditEvents:
     method: GET
     path: /api/v1/orgs/{org_id}/audit-events
     action: audit.event.list_org
+    compare: status            # audited reads append to this list (BE-061)
     path_params: { org_id: club_a }
     query: { occurred_from: "2026-09-01", occurred_to: "2026-10-03" }
     expect:
@@ -78,6 +82,7 @@ operations:
     method: GET
     path: /api/v1/admin/audit-events
     action: audit.event.list
+    compare: status            # audited reads append to this list (BE-061)
     query: { occurred_from: "2026-09-01", occurred_to: "2026-10-03" }
     expect:
       anonymous: 401

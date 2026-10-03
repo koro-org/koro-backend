@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/gin-gonic/gin"
 	"go.yaml.in/yaml/v3"
 
@@ -350,6 +351,98 @@ func TestAuthzMatrix_SharedAppExposesLeak(t *testing.T) {
 		return strings.HasPrefix(l, "testOnlyListThings/") && strings.Contains(l, "state leaked on the shared application")
 	}) {
 		t.Fatalf("the leaky denial was not reported; leaks: %v", leaks)
+	}
+}
+
+// TestAuthzMatrix_StatusOnlyDeclaration pins BE-061: an operation declaring
+// compare: status is compared by status only on the shared application, for
+// every variant and persona, whatever the interleaving of the reads; its
+// status is still compared; the declaration is limited to reads and is
+// required on every operation listing audit events.
+func TestAuthzMatrix_StatusOnlyDeclaration(t *testing.T) {
+	t.Parallel()
+	f := caseResult{http.StatusOK, `{"count":1}`}
+	grown := caseResult{http.StatusOK, `{"count":2}`}
+	gone := caseResult{http.StatusNotFound, `{"count":1}`}
+	plain, declared := matrixCase{name: "x/student"}, matrixCase{name: "x/student", statusOnly: true}
+	for _, c := range []struct {
+		name     string
+		c        matrixCase
+		r        caseResult
+		unstable bool
+		same     bool
+	}{
+		{"stable body differs", plain, grown, false, false},
+		{"measured unstable body differs", plain, grown, true, true},
+		{"declared body differs", declared, grown, false, true},
+		{"declared status differs", declared, gone, false, false},
+		{"plain status differs", plain, gone, true, false},
+		{"identical", plain, f, false, true},
+	} {
+		if got := sameRead(c.c, f, c.r, c.unstable); got != c.same {
+			t.Errorf("%s: sameRead = %v, want %v", c.name, got, c.same)
+		}
+	}
+
+	// The real matrix declares every audit list, and only them so far.
+	m, probs := loadMatrix(os.DirFS("testdata/authz"), realMatrixOptions().modules)
+	if len(probs) > 0 {
+		t.Fatal(probs)
+	}
+	var got []string
+	for id, o := range m.ops {
+		if o.Compare == compareStatus {
+			got = append(got, id)
+		}
+	}
+	slices.Sort(got)
+	if want := []string{"adminListAuditEvents", "listMySecurityEvents", "listOrgAuditEvents"}; !slices.Equal(got, want) {
+		t.Errorf("operations with compare: status = %v, want %v", got, want)
+	}
+	env := &matrixEnv{opts: realMatrixOptions(), m: m}
+	for _, c := range env.cases() {
+		id, _, _ := strings.Cut(c.name, "/")
+		if c.statusOnly != slices.Contains(got, id) {
+			t.Errorf("%s: statusOnly = %v", c.name, c.statusOnly)
+		}
+	}
+
+	// Static checks on the self-test matrix.
+	fsys := selfTestFS(t)
+	declare := func(action string) fs.FS {
+		return edit(t, fsys, "testonly.yaml", "    action: "+action+"\n", "    action: "+action+"\n    compare: status\n")
+	}
+	wantProblem(t, selfTestProblems(t, edit(t, fsys, "testonly.yaml", "    action: testonly.thing.list\n",
+		"    action: testonly.thing.list\n    compare: body\n"), nil), `operation "testOnlyListThings": matrix compare may only be "status"`)
+	wantProblem(t, selfTestProblems(t, declare("testonly.thing.create"), nil),
+		`operation "testOnlyCreateThing": compare: status applies to reads (GET/HEAD) only`)
+	asAuditList := func(a *matrixApp) {
+		r := a.app.API.OpenAPI().Paths[httpx.APIPrefix+"/testonly/things"].Get.Responses["200"]
+		r.Content["application/json"].Schema = &huma.Schema{Ref: "#/components/schemas/AuditEventList"}
+	}
+	wantProblem(t, selfTestProblems(t, fsys, asAuditList),
+		`operation "testOnlyListThings" lists audit events (AuditEventList): declare compare: status`)
+	if probs := selfTestProblems(t, declare("testonly.thing.list"), asAuditList); len(probs) > 0 {
+		t.Errorf("declared audit list: %v", probs)
+	}
+
+	// On the shared application: the leaky denial of newSelfTestEnv(true)
+	// grows testOnlyListThings (TestAuthzMatrix_SharedAppExposesLeak). Once
+	// the list is declared status-only, no persona reports it, whatever the
+	// seed; the other reads are still compared by body.
+	for seed := int64(1); seed <= 3; seed++ {
+		env := newSelfTestEnv(true)
+		m, probs := loadMatrix(declare("testonly.thing.list"), env.opts.modules)
+		if len(probs) > 0 {
+			t.Fatal(probs)
+		}
+		env.m = m
+		groups, _ := partitionCases(env.cases(), false)
+		for i, g := range groups {
+			for _, l := range env.runShared(t, g, seed+int64(i)).leaks {
+				t.Errorf("seed %d: %s", seed, l)
+			}
+		}
 	}
 }
 

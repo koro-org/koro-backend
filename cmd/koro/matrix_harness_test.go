@@ -22,6 +22,9 @@ package main
 //     then all reads again in another shuffled order. The second read must
 //     return exactly what the first returned (status and body), so a denial
 //     that changed state, or a read with a side effect, fails the matrix.
+//     An operation declaring "compare: status" (the audit event lists, whose
+//     body grows with every audited read by design; BE-061) is compared by
+//     status only, for every variant and persona.
 //
 // -matrix.fresh restores a fresh application for every case (the BE-004
 // behaviour); -matrix.seed reproduces the shuffle of a run (it is logged).
@@ -135,6 +138,12 @@ type matrixOp struct {
 	Expect        map[string]int   `yaml:"expect"`
 	Note          string           `yaml:"note"`
 	Variants      []*matrixVariant `yaml:"variants"`
+	// Compare "status": on the shared application only the status of the
+	// operation is compared between runs, never its body, for every variant
+	// and persona (BE-061). For reads whose body changes with the side
+	// effects of other reads by design; required on the audit event lists
+	// (auditListSchemas).
+	Compare string `yaml:"compare"`
 
 	file string // module file the operation is declared in
 }
@@ -416,6 +425,37 @@ func coreFixtureNames() map[string]bool {
 type specOp struct {
 	ID, Method, Path, Tag, Action, Idempotency string
 	Public                                     bool
+	AuditList                                  string // the audit list schema of a 2xx response, if any
+}
+
+// compareStatus is the value of matrixOp.Compare for status-only reads.
+const compareStatus = "status"
+
+// auditListSchemas are the response schemas listing audit events. Audited
+// reads (support/break-glass member reads, document reads, ...) append to
+// the trail by design (03 §6.3), so these lists grow as the other reads of
+// the shared application run: every operation returning one must declare
+// compare: status (BE-061). A new audit list schema is added here.
+var auditListSchemas = []string{"AuditEventList", "SecurityEventList"}
+
+// auditListSchema returns the audit list schema a 2xx JSON response of o
+// refers to, or "".
+func auditListSchema(o *huma.Operation) string {
+	for code, r := range o.Responses {
+		if r == nil || !strings.HasPrefix(code, "2") {
+			continue
+		}
+		for _, mt := range r.Content {
+			if mt == nil || mt.Schema == nil {
+				continue
+			}
+			name := strings.TrimPrefix(mt.Schema.Ref, "#/components/schemas/")
+			if slices.Contains(auditListSchemas, name) {
+				return name
+			}
+		}
+	}
+	return ""
 }
 
 // specOps walks the OpenAPI document (paths carry the /api/v1 prefix).
@@ -435,6 +475,7 @@ func specOps(api huma.API) []specOp {
 			}
 			s.Action, _ = o.Extensions[op.ExtAction].(string)
 			s.Idempotency, _ = o.Extensions[op.ExtIdempotency].(string)
+			s.AuditList = auditListSchema(o)
 			out = append(out, s)
 		}
 	}
@@ -556,6 +597,16 @@ func checkMatrix(in checkInput) (probs, notes []string) {
 		}
 		if e.Idempotency != "" && e.Idempotency != "required" {
 			bad("operation %q: matrix idempotency may only be \"required\"", s.ID)
+		}
+		// compare: status (BE-061): reads only; required on audit lists.
+		switch {
+		case e.Compare != "" && e.Compare != compareStatus:
+			bad("operation %q: matrix compare may only be %q", s.ID, compareStatus)
+		case e.Compare == compareStatus && s.Method != http.MethodGet && s.Method != http.MethodHead:
+			bad("operation %q: compare: status applies to reads (GET/HEAD) only", s.ID)
+		case s.AuditList != "" && e.Compare != compareStatus:
+			bad("operation %q lists audit events (%s): declare compare: status, audited reads append to the trail "+
+				"it returns on the shared application (BE-061)", s.ID, s.AuditList)
 		}
 		checkOpCells(in, s, e, bad)
 	}
@@ -1079,6 +1130,9 @@ type matrixCase struct {
 	persona   string
 	mfa       *bool
 	want      int
+	// statusOnly: the operation declares compare: status; its body is never
+	// compared on the shared application (BE-061).
+	statusOnly bool
 }
 
 // cases expands every operation, variant and non-API route per persona.
@@ -1087,7 +1141,8 @@ func (env *matrixEnv) cases() []matrixCase {
 	var out []matrixCase
 	for _, id := range slices.Sorted(maps.Keys(m.ops)) {
 		o := m.ops[id]
-		base := matrixCase{method: strings.ToUpper(o.Method), path: o.Path, req: o.matrixRequest, idem: o.Idempotency == "required"}
+		base := matrixCase{method: strings.ToUpper(o.Method), path: o.Path, req: o.matrixRequest, idem: o.Idempotency == "required",
+			statusOnly: o.Compare == compareStatus}
 		runs := []struct {
 			name   string
 			req    matrixRequest
@@ -1453,19 +1508,30 @@ type sharedRun struct {
 	leaks    []string              // reads whose last run differs from the first
 }
 
+// sameRead reports whether r, a later run of the read c, matches its first
+// run f: always the status; the body unless c is declared status-only
+// (compare: status) or its body was measured unstable in the recheck phase.
+func sameRead(c matrixCase, f, r caseResult, unstable bool) bool {
+	return f.status == r.status && (f.body == r.body || c.statusOnly || unstable)
+}
+
 // runShared runs one group on a single application in four phases, each a
 // set of parallel subtests (t.Run returns when they are done):
 //
 //  1. read: every read, shuffled; the responses are recorded;
-//  2. recheck: every read again in the same order, so every other read
-//     runs between a read's two runs. A read whose body changes here
-//     depends on time or on the side effects of reads (the audit trail of
-//     audited reads): its body is not compared later, its status is. A
-//     changed status is a leak already;
+//  2. recheck: every read again in the same order. A read whose body
+//     changes here depends on time (signed URL expiry, ...) or on other
+//     reads: its body is not
+//     compared later, its status is. A changed status is a leak already.
+//     This measurement depends on the interleaving of the parallel reads,
+//     so it is no ground for reads whose body depends on other reads: those
+//     declare compare: status (statusOnly) and their body is never compared
+//     (BE-061: an audit list read before and after every audited read of
+//     the recheck phase looked stable, then grew in reread);
 //  3. deny: every denial, shuffled;
 //  4. reread: every read in another order. Its status, and its body unless
-//     unstable, must equal the first run: no denial and no read left state
-//     behind that another case can see.
+//     status-only or unstable, must equal the first run: no denial and no
+//     read left state behind that another case can see.
 func (env *matrixEnv) runShared(t *testing.T, g *sharedGroup, seed int64) sharedRun {
 	t.Helper()
 	a := env.newMatrixApp(t, g.config)
@@ -1508,19 +1574,28 @@ func (env *matrixEnv) runShared(t *testing.T, g *sharedGroup, seed int64) shared
 		switch {
 		case f.status != r.status:
 			leak(c, "recheck", f, r)
-		case f.body != r.body:
+		case f.body != r.body && !c.statusOnly:
 			run.unstable[c.name] = true
 		}
 	})
 	phase("deny", shuffled(g.denials), record)
 	phase("reread", shuffled(g.reads), func(c matrixCase, r caseResult) {
-		if f := run.first[c.name]; f.status != r.status || (f.body != r.body && !run.unstable[c.name]) {
+		if f := run.first[c.name]; !sameRead(c, f, r, run.unstable[c.name]) {
 			leak(c, "reread", f, r)
 		}
 	})
 	slices.Sort(run.leaks)
-	t.Logf("%d of %d reads compared by status only (time or read side effects): %v",
-		len(run.unstable), len(g.reads), slices.Sorted(maps.Keys(run.unstable)))
+	declared, declaredOps := 0, map[string]bool{}
+	for _, c := range g.reads {
+		if c.statusOnly {
+			declared++
+			id, _, _ := strings.Cut(c.name, "/")
+			declaredOps[id] = true
+		}
+	}
+	t.Logf("%d of %d reads compared by status only: %d declared (compare: status) of %v; %d measured unstable (time): %v",
+		declared+len(run.unstable), len(g.reads), declared, slices.Sorted(maps.Keys(declaredOps)),
+		len(run.unstable), slices.Sorted(maps.Keys(run.unstable)))
 	return run
 }
 

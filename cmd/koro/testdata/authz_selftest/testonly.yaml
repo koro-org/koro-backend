@@ -1,0 +1,124 @@
+# Matrix of the synthetic "testonly" module (cmd/koro/matrix_testonly_test.go):
+# the self-test of the harness (BE-004). It doubles as the reference example
+# for module files: testdata/authz/<module>.yaml has the same shape.
+version: 1
+config:
+  testonly_flag: false           # a module-owned config key with its default
+groups:                          # file-local groups
+  outsiders_company_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                        event_staff, university_rep, other_company_member]
+  no_platform_role: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                     event_staff, university_rep, company_member, company_admin, other_company_member]
+pending_actions:
+  - testonly.thing.archive       # bound by a later ticket (illustration)
+
+operations:
+  testOnlyListThings:
+    method: GET
+    path: /api/v1/testonly/things
+    action: testonly.thing.list
+    public: true
+    expect: { "@all": 200 }
+
+  testOnlyGetThing:
+    method: GET
+    path: /api/v1/testonly/orgs/{org_id}/things/{thing_id}
+    action: testonly.thing.read
+    path_params: { org_id: club_a, thing_id: thing_a }
+    expect:
+      anonymous: 401
+      "@outsiders_a": 404        # club_a org surface: not a member
+      club_member: 403           # member, role too weak
+      club_admin: 200
+      "@platform_staff": 403     # staff see org surfaces (03 §7.2)
+    variants:
+      - name: missing_thing
+        path_params: { thing_id: "literal:00000000-0000-7000-8000-000000000001" }
+        expect: { anonymous: 401, "@signed_in": 404 }
+      - name: company_thing
+        path_params: { org_id: company_a, thing_id: thing_company }
+        expect:
+          anonymous: 401
+          "@outsiders_company_a": 404
+          company_member: 403
+          company_admin: 200     # MFA role, MFA session (scenario mfa_missing covers the other case)
+          "@platform_staff": 403
+
+  testOnlyCreateThing:
+    method: POST
+    path: /api/v1/testonly/orgs/{org_id}/things
+    action: testonly.thing.create
+    idempotency: required
+    path_params: { org_id: club_a }
+    body: bodies/testonly/create_thing.json
+    expect:
+      anonymous: 401
+      "@outsiders_a": 404
+      club_member: 403
+      club_admin: 201
+      "@platform_staff": 403
+
+  testOnlyAdminCreateThing:
+    method: POST
+    path: /api/v1/testonly/admin/things
+    action: testonly.admin_thing.create
+    body: bodies/testonly/create_thing.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403   # admin surface: 403 before reading (03 §7.2-3)
+      moderator: 403
+      support: 403
+      dpo: 403
+      platform_admin: 403
+      finance_admin: 201
+      talent_auditor: 403
+
+  testOnlyApproveThing:
+    method: POST
+    path: /api/v1/testonly/admin/things/{thing_id}/approve
+    action: testonly.admin_thing.approve
+    path_params: { thing_id: thing_pending }
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      moderator: 403
+      support: 403
+      dpo: 403
+      platform_admin: 403
+      finance_admin: 200         # thing_pending was created by finance_admin_2 (four eyes holds)
+      talent_auditor: 403
+
+  testOnlyGetFlagged:
+    method: GET
+    path: /api/v1/testonly/admin/flagged
+    action: testonly.flagged.read
+    expect: { anonymous: 401, "@signed_in": 404 }   # flag off: 404 for everyone (like 03 Y1)
+    variants:
+      - name: flag_on
+        config: { testonly_flag: true }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          moderator: 403
+          support: 403
+          dpo: 403
+          platform_admin: 403
+          finance_admin: 403
+          talent_auditor: 200
+
+  testOnlyDefaultDeny:
+    method: GET
+    path: /api/v1/testonly/default-deny
+    action: testonly.thing.deny
+    expect: { anonymous: 401, "@signed_in": 403 }   # real authz.Can on a system-only action
+
+non_api_routes:
+  - method: GET
+    path: /api/v1/testonly/live
+    websocket: true              # 101 = upgrade accepted
+    expect:
+      anonymous: 401
+      "@outsiders_a": 403
+      club_member: 403
+      club_admin: 101
+      "@platform_staff": 403

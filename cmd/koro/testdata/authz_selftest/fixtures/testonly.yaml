@@ -1,0 +1,6 @@
+# Fixtures of the synthetic module: names only, IDs are authztest.ID(name).
+version: 1
+fixtures:
+  thing_a: { kind: thing, org: club_a, created_by: club_admin }
+  thing_company: { kind: thing, org: company_a, created_by: company_admin }
+  thing_pending: { kind: thing, org: platform_org, created_by: finance_admin_2 }

@@ -1,0 +1,47 @@
+# internal/arch/sync_writes.txt: the machine-readable form of docs/design/01 §6.3
+# (closed list of synchronous, same-transaction cross-module writes; 05 §2.4-3,
+# 06 H-2). Format: <caller> -> <provider>.<Interface>.<Method>; * = every module.
+# TestSyncWritesAreAllowed reads it as the allow-list for "// sync-write:" ports.
+#
+# Written once by BE-004; module tickets never edit this file (BE-001 R9). A new
+# line needs 01 §6.3 first (orchestrator). On a conflict with 05 §2.4, 01 wins.
+
+# Every module: audit log and file attachment in the caller's transaction.
+*         -> audit.Logger.Log
+*         -> files.Files.Attach
+
+# Consent records (01 §6.3 "Ek senkron yazmalar"). 05 §2.4 allowed "*" here;
+# 01 names three callers, and 01 wins (06 H-2, H-11).
+identity  -> consent.Recorder.Record
+students  -> consent.Recorder.Record
+events    -> consent.Recorder.Record
+
+# Targeted post publication (feed) and dispatch quota (outreach).
+feed      -> entitlements.Entitlements.Consume
+feed      -> outreach.Targeting.ScheduleDispatch
+outreach  -> entitlements.Entitlements.Consume
+
+# Contact request and its acceptance (messaging).
+messaging -> entitlements.Entitlements.Consume
+messaging -> students.AccessGrants.Grant
+
+# Club claim approval grants club_admin (directory).
+directory -> orgs.OrgAdmin.GrantRole
+
+# Order placement (orders).
+orders    -> catalog.Offerings.Reserve
+orders    -> entitlements.Entitlements.Grant
+
+# Transfer match = payment capture (payments) and payout paid (ledger).
+payments  -> orders.Orders.ApplyPayment
+payments  -> ledger.Poster.Post
+ledger    -> orders.Orders.MarkLinesPaidOut
+
+# --- Pending rationale in 01 §6.3 (06 H-2): the named ticket writes it into 01,
+# --- or deletes the line.
+# T-78: directory opens the club/university org in its own transaction; BE-020.
+directory -> orgs.OrgAdmin.Create
+# 05 §2.4 "derived" lines (01 §4.18, §7 orders.expire_unpaid); BE-040.
+orders    -> entitlements.Entitlements.ActivateBySource
+orders    -> entitlements.Entitlements.Release
+orders    -> catalog.Offerings.Release

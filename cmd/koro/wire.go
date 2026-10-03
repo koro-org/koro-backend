@@ -37,6 +37,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"koro/internal/authz"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/config"
 	"koro/internal/platform/httpx"
@@ -88,7 +89,12 @@ type hooks struct {
 	// nil → the DSR report has no talent section and nothing is neutralised.
 	talentAuditor *hookTalentAuditor
 
-	// BE-004: memberships (orgs → authz.Actor).
+	// memberships returns the active org memberships of a user for Actor
+	// resolution (03 §2.1; orgs.OrgDirectory.MembershipsOf), sensitive clubs
+	// included. Provider: orgs (BE-019). Consumer: cmd/koro/actor.go
+	// (BE-014). nil → the actor has no memberships (personal and public
+	// actions only; every org surface is 404).
+	memberships func(ctx context.Context, userID uuid.UUID) ([]authz.Membership, error)
 }
 
 // hookClub is the result of hooks.clubInfo.
@@ -121,8 +127,14 @@ type container struct {
 	infra infra
 	hooks hooks
 
-	// actors resolves credentials into actors for the HTTP auth middleware.
-	// BE-014 sets it (cmd/koro/actor.go); nil → protected operations 401.
+	// actors resolves credentials into actors for the HTTP auth middleware
+	// and any non-huma route (WebSocket). BE-014 sets it in build
+	// (cmd/koro/actor.go); nil → protected operations 401.
+	//
+	// Tests preset it before build (authz matrix: authztest.Resolver, persona
+	// token → Actor; BE-004). build keeps a preset resolver: a module that
+	// replaces it fails the build, so no wiring can bypass the test resolver.
+	// A module therefore sets actors only when it is nil.
 	actors httpx.ActorResolver
 
 	// privacy and sweepers are the KVKK registries read by kvkk (01 §3.3).
@@ -208,9 +220,13 @@ func (c *container) modules() []moduleEntry {
 // subscriptions and scheduled jobs.
 func (c *container) build() error {
 	mods := c.modules()
+	preset := c.actors // nil in production; the persona resolver in matrix tests
 	for _, m := range mods {
 		if err := m.w.build(c); err != nil {
 			return fmt.Errorf("wire %s: %w", m.name, err)
+		}
+		if preset != nil && c.actors != preset {
+			return fmt.Errorf("wire %s: replaced the preset ActorResolver (set c.actors only when it is nil)", m.name)
 		}
 	}
 	for _, m := range mods {

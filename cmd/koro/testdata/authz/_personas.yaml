@@ -1,0 +1,28 @@
+# Authz matrix personas (docs/design/03 §1.1, §7.3, §7.5). Written by BE-004,
+# then frozen (BE-001 R3): module tickets never edit this file.
+#
+# personas: the 16 HTTP roles + 2 IDOR personas, in report order. They must
+# equal authztest.PersonaNames (TestAuthzMatrix_PersonaCoverage_Exactly18).
+# groups: shorthands for expect (@group); after expansion every persona
+# appears exactly once. A module file may add file-local groups.
+# config: default platform configuration of every case; a module declares
+# its own keys under config: in its <module>.yaml.
+# strict_action_coverage: false while module tickets are in flight: an
+# unbound HTTP action of a module WITHOUT a matrix file is only logged. The
+# orchestrator sets it to true once every module has its file (03 §7.4-5).
+version: 1
+personas: [anonymous, user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+           event_staff, university_rep, company_member, company_admin, other_company_member,
+           moderator, support, dpo, platform_admin, finance_admin, talent_auditor]
+groups:
+  platform_staff: [moderator, support, dpo, platform_admin, finance_admin, talent_auditor]
+  outsiders_a: [user_unverified, student, student_minor, other_club_admin, event_staff,
+                university_rep, company_member, company_admin, other_company_member]
+  verified_students: [student, student_minor, club_member, club_admin, other_club_admin, event_staff]
+  companies: [company_member, company_admin, other_company_member]
+  signed_in: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+              event_staff, university_rep, company_member, company_admin, other_company_member,
+              moderator, support, dpo, platform_admin, finance_admin, talent_auditor]
+config:
+  talent_auditor_api_enabled: false
+strict_action_coverage: false

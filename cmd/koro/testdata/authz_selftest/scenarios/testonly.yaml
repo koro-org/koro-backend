@@ -1,0 +1,28 @@
+# Multi-step scenarios of the synthetic module (03 §7.7): one application per
+# scenario, steps in order; each needs a positive and a negative step.
+version: 1
+scenarios:
+  four_eyes_thing:
+    note: the creator of a thing cannot approve it (03 §6.1)
+    steps:
+      - { persona: finance_admin, operation: testOnlyAdminCreateThing, expect: 201, save: { thing_new: id } }
+      - { persona: finance_admin, operation: testOnlyApproveThing, path_params: { thing_id: thing_new },
+          expect: 403, code: authz.four_eyes_violation }
+      - { persona: finance_admin_2, operation: testOnlyApproveThing, path_params: { thing_id: thing_new }, expect: 200 }
+  mfa_missing:
+    note: an MFA role without an MFA session (03 §6.4)
+    steps:
+      - { persona: company_admin, mfa: false, operation: testOnlyGetThing,
+          path_params: { org_id: company_a, thing_id: thing_company }, expect: 403, code: authz.mfa_required }
+      - { persona: company_admin, operation: testOnlyGetThing,
+          path_params: { org_id: company_a, thing_id: thing_company }, expect: 200 }
+  hook_removes_thing:
+    steps:
+      - { persona: club_admin, operation: testOnlyGetThing, expect: 200 }
+      - { hook: testonly.delete_thing, args: { thing: thing_a } }
+      - { persona: club_admin, operation: testOnlyGetThing, expect: 404, code: not_found }
+  flag_on:
+    config: { testonly_flag: true }
+    steps:
+      - { persona: talent_auditor, operation: testOnlyGetFlagged, expect: 200 }
+      - { persona: platform_admin, operation: testOnlyGetFlagged, expect: 403, code: forbidden }

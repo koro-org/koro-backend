@@ -1,0 +1,6 @@
+# Platform routes outside OpenAPI (03 §7.4-9; 04 §2.0). Written by BE-004.
+# WebSocket routes belong to their module file (BE-054: events.yaml).
+version: 1
+non_api_routes:
+  - { method: GET, path: /healthz, expect: { "@all": 200 } }
+  - { method: GET, path: /readyz, expect: { "@all": 200 } }

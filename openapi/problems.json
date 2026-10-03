@@ -1,5 +1,23 @@
 [
   {
+    "code": "authz.break_glass_reason_required",
+    "status": 403,
+    "title": "Access reason required",
+    "type": "urn:koro:problem:authz.break_glass_reason_required"
+  },
+  {
+    "code": "authz.four_eyes_violation",
+    "status": 403,
+    "title": "Four-eyes rule violated",
+    "type": "urn:koro:problem:authz.four_eyes_violation"
+  },
+  {
+    "code": "authz.mfa_required",
+    "status": 403,
+    "title": "Multi-factor authentication required",
+    "type": "urn:koro:problem:authz.mfa_required"
+  },
+  {
     "code": "bad_request",
     "status": 400,
     "title": "Bad request",

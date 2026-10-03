@@ -1,4 +1,7 @@
 # Security-sensitive paths need the security owner's approval (docs/design/03 §7).
 # Replace the placeholder team once the GitHub organisation exists (06 H-9).
-/cmd/koro/testdata/authz/**  @koro/security
-/internal/authz/**           @koro/security
+/cmd/koro/testdata/authz/**       @koro/security
+/cmd/koro/authz_matrix_test.go    @koro/security
+/cmd/koro/matrix_harness_test.go  @koro/security
+/internal/authz/**                @koro/security
+/internal/arch/**                 @koro/security

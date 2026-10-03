@@ -384,7 +384,7 @@ func TestMigrations_EachStepRestoresThePreviousSchema(t *testing.T) {
 		}
 	}
 	// The seeds change data only: the fingerprint cannot see them.
-	seedRows := map[uint]string{11: `SELECT count(*) FROM consent_purposes`, 31: `SELECT count(*) FROM organizations`}
+	seedRows := map[uint]string{11: `SELECT count(*) FROM consent_purposes`, 31: `SELECT count(*) FROM organizations`, 60: `SELECT count(*) FROM form_lint_rules`}
 	rowCount := func(sql string) int {
 		t.Helper()
 		var n int
@@ -396,6 +396,11 @@ func TestMigrations_EachStepRestoresThePreviousSchema(t *testing.T) {
 	if latest >= 31 {
 		if rowCount(seedRows[11]) != 7 || rowCount(seedRows[31]) != 1 {
 			t.Fatalf("seed rows after the last up: purposes %d, orgs %d; want 7 and 1", rowCount(seedRows[11]), rowCount(seedRows[31]))
+		}
+	}
+	if latest >= 60 {
+		if n := rowCount(seedRows[60]); n != 19 {
+			t.Fatalf("seed rows after the last up: lint rules %d; want 19", n)
 		}
 	}
 

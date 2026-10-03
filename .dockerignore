@@ -1,0 +1,9 @@
+# Keep the build context small and free of secrets.
+.git
+.github
+.worktrees/
+bin/
+*.env
+.env
+coverage.out
+.DS_Store

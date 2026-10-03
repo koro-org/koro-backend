@@ -1,0 +1,111 @@
+# golangci-lint v2 configuration (docs/design/05 §15.1; R-002 §3j).
+# The binary must be built with Go 1.27 (make tools); verify with `make lint-config`.
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+  build-tags: [integration] # integration tests are linted too
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - gosec # security (G104 is left to errcheck)
+    - bodyclose
+    - noctx # context-less http/net calls
+    - sqlclosecheck
+    - rowserrcheck
+    - errorlint # errors.Is/As, %w
+    - contextcheck
+    - sloglint
+    - copyloopvar
+    - intrange
+    - nilerr
+    - nolintlint
+    - perfsprint
+    - usestdlibvars
+    - exptostd
+    # --- Koro additions (05 §15.1) ---
+    - forbidigo # forbidden calls (below)
+    - depguard # forbidden packages
+    - paralleltest # every test calls t.Parallel
+    - tparallel
+    - testpackage # black-box test packages (_test)
+  settings:
+    gosec:
+      excludes: [G104]
+    sloglint:
+      no-mixed-args: true
+      context: scope
+      no-global: default
+    errcheck:
+      check-type-assertions: true
+    govet:
+      enable-all: true
+      disable: [fieldalignment, shadow]
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    testpackage:
+      skip-regexp: (export|internal)_test\.go
+    depguard:
+      rules:
+        prod:
+          list-mode: lax
+          files: ["$all", "!$test"]
+          deny:
+            - pkg: github.com/google/uuid
+              desc: use the stdlib uuid package (Go 1.27)
+            - pkg: github.com/pkg/errors
+              desc: use the stdlib errors package
+        tests:
+          list-mode: lax
+          files: ["$test"]
+          deny:
+            - pkg: github.com/stretchr/testify
+              desc: stdlib testing only
+    forbidigo:
+      forbid:
+        - pattern: ^time\.Now$
+          msg: use the injected clock.Clock
+        - pattern: ^os\.(Getenv|LookupEnv|Environ)$
+          msg: read configuration only in internal/platform/config
+        - pattern: ^fmt\.(Print|Println|Printf)$
+          msg: use slog
+        - pattern: ^log\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)$
+          msg: use slog (std log is banned)
+        - pattern: ^http\.(DefaultClient|Get|Post|Head|PostForm)$
+          msg: use an http.Client with explicit timeouts
+        - pattern: \.AutoMigrate$
+          msg: schema changes only via db/migrations
+        - pattern: ^gorm\.(Model|DeletedAt)$
+          msg: no gorm.Model; soft delete only for non-personal data (docs/design/05 §6.4)
+        - pattern: ^[a-z]+\.NewMemStore$
+          msg: in-memory stores are for tests only
+        - pattern: ^context\.(Background|TODO)$
+          msg: propagate the request ctx (context.WithoutCancel if detaching)
+  exclusions:
+    presets: [comments, std-error-handling, common-false-positives]
+    rules:
+      - path: _test\.go
+        linters: [gosec, errcheck, noctx, bodyclose, usestdlibvars, forbidigo]
+      # Process lifecycle: root context.Background, pre-logger stderr writes.
+      - path: ^cmd/koro/
+        linters: [forbidigo]
+      # package main cannot be imported, so its tests are white-box.
+      - path: ^cmd/koro/.*_test\.go$
+        linters: [testpackage]
+      # Late-bound hooks and KVKK registries are declared by BE-001 (R4) and
+      # filled by later module tickets in their own wire_<module>.go files;
+      # wire.go itself is frozen, so they are exempt until then.
+      - path: ^cmd/koro/wire\.go$
+        linters: [unused]
+        text: "^(type (hooks|hookClub|hookCollectionAccount|hookTalentAuditor)|field (hooks|privacy|sweepers|domainResolver|clubInfo|anonResolver|collectionAccount|openCommerce|talentAuditor)) is unused"
+      - path: ^internal/platform/(clock|config|testutil|obs)/
+        linters: [forbidigo]
+
+formatters:
+  enable: [gofmt, goimports]
+  settings:
+    goimports:
+      local-prefixes: [koro]

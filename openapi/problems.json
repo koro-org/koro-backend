@@ -1,0 +1,110 @@
+[
+  {
+    "code": "bad_request",
+    "status": 400,
+    "title": "Bad request",
+    "type": "urn:koro:problem:bad_request"
+  },
+  {
+    "code": "conflict",
+    "status": 409,
+    "title": "Conflict",
+    "type": "urn:koro:problem:conflict"
+  },
+  {
+    "code": "csrf_rejected",
+    "status": 403,
+    "title": "Cross-origin request rejected",
+    "type": "urn:koro:problem:csrf_rejected"
+  },
+  {
+    "code": "forbidden",
+    "status": 403,
+    "title": "Forbidden",
+    "type": "urn:koro:problem:forbidden"
+  },
+  {
+    "code": "gone",
+    "status": 410,
+    "title": "Gone",
+    "type": "urn:koro:problem:gone"
+  },
+  {
+    "code": "internal_error",
+    "status": 500,
+    "title": "Internal server error",
+    "type": "urn:koro:problem:internal_error"
+  },
+  {
+    "code": "method_not_allowed",
+    "status": 405,
+    "title": "Method not allowed",
+    "type": "urn:koro:problem:method_not_allowed"
+  },
+  {
+    "code": "not_acceptable",
+    "status": 406,
+    "title": "Not acceptable",
+    "type": "urn:koro:problem:not_acceptable"
+  },
+  {
+    "code": "not_found",
+    "status": 404,
+    "title": "Not found",
+    "type": "urn:koro:problem:not_found"
+  },
+  {
+    "code": "payload_too_large",
+    "status": 413,
+    "title": "Payload too large",
+    "type": "urn:koro:problem:payload_too_large"
+  },
+  {
+    "code": "precondition_failed",
+    "status": 412,
+    "title": "Precondition failed",
+    "type": "urn:koro:problem:precondition_failed"
+  },
+  {
+    "code": "precondition_required",
+    "status": 428,
+    "title": "Precondition required",
+    "type": "urn:koro:problem:precondition_required"
+  },
+  {
+    "code": "rate_limited",
+    "status": 429,
+    "title": "Rate limit exceeded",
+    "type": "urn:koro:problem:rate_limited"
+  },
+  {
+    "code": "request_timeout",
+    "status": 408,
+    "title": "Request timeout",
+    "type": "urn:koro:problem:request_timeout"
+  },
+  {
+    "code": "unauthenticated",
+    "status": 401,
+    "title": "Authentication required",
+    "type": "urn:koro:problem:unauthenticated"
+  },
+  {
+    "code": "unavailable",
+    "status": 503,
+    "title": "Service unavailable",
+    "type": "urn:koro:problem:unavailable"
+  },
+  {
+    "code": "unsupported_media_type",
+    "status": 415,
+    "title": "Unsupported media type",
+    "type": "urn:koro:problem:unsupported_media_type"
+  },
+  {
+    "code": "validation_failed",
+    "status": 422,
+    "title": "Validation failed",
+    "type": "urn:koro:problem:validation_failed"
+  }
+]

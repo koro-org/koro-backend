@@ -132,6 +132,11 @@ func validAPIEnv(kv ...string) map[string]string {
 		"APP_ENV":         "dev",
 		"PUBLIC_BASE_URL": "http://localhost:3000",
 		"TRUSTED_ORIGINS": "http://localhost:3000",
+		// BE-003 secrets (.env.example development placeholders).
+		"PASSWORD_PEPPER":        "devpepperdevpepperdevpepperdevpepper",
+		"CRYPTO_KEKS":            "dev1:ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGU=",
+		"CRYPTO_BLIND_INDEX_KEY": "aWR4aWR4aWR4aWR4aWR4aWR4aWR4aWR4aWR4aWR4aWQ=",
+		"CRYPTO_TOKEN_KEYS":      "dev1:dG9rdG9rdG9rdG9rdG9rdG9rdG9rdG9rdG9rdG9rdG8=",
 	}
 	for i := 0; i+1 < len(kv); i += 2 {
 		m[kv[i]] = kv[i+1]

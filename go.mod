@@ -6,15 +6,19 @@ require (
 	github.com/caarlos0/env/v11 v11.4.1
 	github.com/danielgtaylor/huma/v2 v2.39.1
 	github.com/gin-gonic/gin v1.12.0
+	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/wneessen/go-mail v0.8.1
 	go.yaml.in/yaml/v3 v3.0.5
+	golang.org/x/crypto v0.57.0
+	golang.org/x/text v0.42.0
 )
 
 require (
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
+	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/bytedance/gopkg v0.1.4 // indirect
 	github.com/bytedance/sonic v1.15.2 // indirect
 	github.com/bytedance/sonic/loader v0.5.1 // indirect
@@ -43,6 +47,7 @@ require (
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/gorilla/css v1.0.1 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/compress v1.19.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
@@ -83,10 +88,8 @@ require (
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	golang.org/x/arch v0.29.0 // indirect
-	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
-	golang.org/x/text v0.42.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

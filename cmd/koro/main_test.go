@@ -96,6 +96,11 @@ func TestAPI_StartServeAndShutdown(t *testing.T) {
 		"TRUSTED_ORIGINS":  "http://localhost:3000",
 		"SHUTDOWN_DELAY":   "1ms",
 		"SHUTDOWN_TIMEOUT": "5s",
+		// BE-003 secrets (.env.example development placeholders).
+		"PASSWORD_PEPPER":        "devpepperdevpepperdevpepperdevpepper",
+		"CRYPTO_KEKS":            "dev1:ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGU=",
+		"CRYPTO_BLIND_INDEX_KEY": "aWR4aWR4aWR4aWR4aWR4aWR4aWR4aWR4aWR4aWR4aWQ=",
+		"CRYPTO_TOKEN_KEYS":      "dev1:dG9rdG9rdG9rdG9rdG9rdG9rdG9rdG9rdG9rdG9rdG8=",
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()

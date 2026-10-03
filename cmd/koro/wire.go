@@ -37,10 +37,13 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"koro/db/migrations"
 	"koro/internal/authz"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/config"
+	"koro/internal/platform/db"
 	"koro/internal/platform/httpx"
+	"koro/internal/platform/migratekit"
 	"koro/internal/platform/privacy"
 )
 
@@ -50,7 +53,10 @@ type infra struct {
 	clock   clock.Clock
 	version string         // binary version (git sha)
 	cfg     config.Modules // zero value under `koro openapi`
-	// BE-002: db; BE-006: outbox, queue, limiter.
+	// db is the app_rw pool (BE-002); nil under `koro openapi` and in the
+	// wiring tests (modules then keep their in-memory stores).
+	db *db.DB
+	// BE-006: outbox, queue, limiter.
 }
 
 // hooks are late bindings between modules that may not import each other
@@ -171,7 +177,44 @@ type container struct {
 	kvkk         kvkkWiring         // L13
 }
 
-func newContainer(in infra) *container { return &container{infra: in} }
+func newContainer(in infra) *container {
+	c := &container{infra: in}
+	if in.db != nil {
+		c.readyChecks = append(c.readyChecks, dbReadyChecks(in.db)...)
+	}
+	return c
+}
+
+// openDB opens the application pool (app_rw, DATABASE_URL) of a
+// long-running process (BE-002). app is the application_name.
+func openDB(ctx context.Context, cfg config.DB, app string, clk clock.Clock, log *slog.Logger) (*db.DB, error) {
+	return db.Open(ctx, db.Config{
+		URL:              cfg.URL.Reveal(),
+		AppName:          app,
+		MaxConns:         cfg.MaxConns,
+		MinConns:         cfg.MinConns,
+		StatementTimeout: cfg.StatementTimeout,
+		IdleInTxTimeout:  cfg.IdleInTxTimeout,
+		Clock:            clk,
+	}, log)
+}
+
+// dbReadyChecks are the /readyz checks of the database (BE-002): the pool
+// answers, and the schema is clean and at least at the newest migration
+// embedded in this binary (a newer schema is fine: the migrate job runs
+// before a rolling deploy, 05 §7.3).
+func dbReadyChecks(d *db.DB) []httpx.Check {
+	want, wantErr := migratekit.Latest(migrations.FS)
+	return []httpx.Check{
+		{Name: "db", Run: d.Ping},
+		{Name: "migrations", Run: func(ctx context.Context) error {
+			if wantErr != nil {
+				return wantErr
+			}
+			return migratekit.CheckVersion(ctx, d.Pool, want)
+		}},
+	}
+}
 
 // moduleWiring is implemented by every <module>Wiring.
 type moduleWiring interface {

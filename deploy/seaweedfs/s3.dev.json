@@ -1,0 +1,11 @@
+{
+  "identities": [
+    {
+      "name": "koro-dev",
+      "credentials": [
+        { "accessKey": "koro-dev-access-key", "secretKey": "dev-only-change-me" }
+      ],
+      "actions": ["Admin", "Read", "List", "Tagging", "Write"]
+    }
+  ]
+}

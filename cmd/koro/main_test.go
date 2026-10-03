@@ -1,10 +1,7 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
-	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -24,7 +21,11 @@ func TestRun_Dispatch(t *testing.T) {
 		{"unknown command", []string{"serve"}, 2, `unknown command "serve"`},
 		{"help", []string{"help"}, 0, ""},
 		{"worker not yet", []string{"worker"}, 1, "not implemented yet (BE-006)"},
-		{"migrate not yet", []string{"migrate", "up"}, 1, "not implemented yet (BE-002)"},
+		{"migrate without command", []string{"migrate"}, 2, "missing command"},
+		{"migrate unknown command", []string{"migrate", "sideways"}, 2, `unknown migrate command "sideways"`},
+		{"migrate down without N", []string{"migrate", "down"}, 2, "migrate down takes 1 argument"},
+		{"migrate down zero", []string{"migrate", "down", "0"}, 2, "positive step count"},
+		{"migrate without config", []string{"migrate", "up"}, 1, `required environment variable "MIGRATE_DATABASE_URL" is not set`},
 		{"seed not yet", []string{"seed"}, 1, "not implemented yet"},
 		{"api without config", []string{"api"}, 1, `required environment variable "APP_ENV" is not set`},
 		{"healthcheck bad flag", []string{"healthcheck", "-nope"}, 2, "usage"},
@@ -85,64 +86,49 @@ func TestHealthURL(t *testing.T) {
 	}
 }
 
-// TestAPI_StartServeAndShutdown runs `koro api` in-process: it starts,
-// answers /healthz and /readyz, then drains on cancellation and returns nil.
-func TestAPI_StartServeAndShutdown(t *testing.T) {
+func TestMigrate_FreezeNeedsNoDatabase(t *testing.T) {
 	t.Parallel()
-	environ := map[string]string{
-		"APP_ENV":          "dev",
-		"HTTP_ADDR":        "127.0.0.1:0",
-		"PUBLIC_BASE_URL":  "http://localhost:3000",
-		"TRUSTED_ORIGINS":  "http://localhost:3000",
-		"SHUTDOWN_DELAY":   "1ms",
-		"SHUTDOWN_TIMEOUT": "5s",
+	var stdout, stderr bytes.Buffer
+	if got := run([]string{"migrate", "freeze", "9"}, map[string]string{}, &stdout, &stderr); got != 0 {
+		t.Fatalf("exit code = %d (stderr: %s)", got, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "floor 000009") || !strings.Contains(stdout.String(), "000009_create_files.up.sql") {
+		t.Fatalf("manifest = %s", stdout.String())
+	}
+	if got := run([]string{"migrate", "freeze", "x"}, map[string]string{}, &stdout, &stderr); got != 2 {
+		t.Fatalf("freeze x exit code = %d", got)
+	}
+}
+
+// TestAPI_StartupNeedsDatabase: `koro api` fails fast without a reachable
+// database (05 §12.2); the full start/serve/shutdown cycle runs against a
+// real database in api_integration_test.go.
+func TestAPI_StartupNeedsDatabase(t *testing.T) {
+	t.Parallel()
+	base := map[string]string{
+		"APP_ENV":         "dev",
+		"HTTP_ADDR":       "127.0.0.1:0",
+		"PUBLIC_BASE_URL": "http://localhost:3000",
+		"TRUSTED_ORIGINS": "http://localhost:3000",
 		// BE-003 secrets (.env.example development placeholders).
 		"PASSWORD_PEPPER":        "devpepperdevpepperdevpepperdevpepper",
 		"CRYPTO_KEKS":            "dev1:ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGU=",
 		"CRYPTO_BLIND_INDEX_KEY": "aWR4aWR4aWR4aWR4aWR4aWR4aWR4aWR4aWR4aWR4aWQ=",
 		"CRYPTO_TOKEN_KEYS":      "dev1:dG9rdG9rdG9rdG9rdG9rdG9rdG9rdG9rdG9rdG9rdG8=",
 	}
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	pr, pw := io.Pipe()
-	done := make(chan error, 1)
-	go func() {
-		done <- runAPI(ctx, cancel, environ, pw)
-		_ = pw.Close()
-	}()
-
-	// Wait for the "api listening" log line and read the bound address.
-	var addr string
-	sc := bufio.NewScanner(pr)
-	for sc.Scan() {
-		var rec map[string]any
-		if json.Unmarshal(sc.Bytes(), &rec) == nil && rec["msg"] == "api listening" {
-			addr, _ = rec["addr"].(string)
-			break
-		}
+	var stderr bytes.Buffer
+	if got := run([]string{"api"}, base, io.Discard, &stderr); got != 1 || !strings.Contains(stderr.String(), `"DATABASE_URL" is not set`) {
+		t.Fatalf("without DATABASE_URL: exit %d, stderr %q", got, stderr.String())
 	}
-	if addr == "" {
-		t.Fatalf("api did not start: %v", <-done)
+	unreachable := map[string]string{"DATABASE_URL": "postgres://app_rw:s3cr3t-pw@127.0.0.1:1/koro?sslmode=disable"}
+	for k, v := range base {
+		unreachable[k] = v
 	}
-	go func() { _, _ = io.Copy(io.Discard, pr) }()
-
-	// No keep-alive: a spare pooled connection that never sends a request
-	// would make Shutdown wait (net/http treats it as busy for 5 s).
-	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
-	for path, want := range map[string]int{"/healthz": http.StatusOK, "/readyz": http.StatusOK, "/api/v1/nothing": http.StatusNotFound} {
-		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+addr+path, nil)
-		resp, err := client.Do(req)
-		if err != nil {
-			t.Fatalf("GET %s: %v", path, err)
-		}
-		_ = resp.Body.Close()
-		if resp.StatusCode != want {
-			t.Fatalf("GET %s = %d, want %d", path, resp.StatusCode, want)
-		}
+	stderr.Reset()
+	if got := run([]string{"api"}, unreachable, io.Discard, &stderr); got != 1 || !strings.Contains(stderr.String(), "db: ping") {
+		t.Fatalf("unreachable database: exit %d, stderr %q", got, stderr.String())
 	}
-
-	cancel() // SIGTERM
-	if err := <-done; err != nil {
-		t.Fatalf("runAPI() error = %v", err)
+	if strings.Contains(stderr.String(), "s3cr3t-pw") {
+		t.Fatalf("stderr leaks the database password: %q", stderr.String())
 	}
 }

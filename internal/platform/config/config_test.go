@@ -61,7 +61,7 @@ func TestConfig_MissingSecret_FailsFast(t *testing.T) {
 		if err == nil {
 			t.Fatal("LoadAPI() succeeded with an empty environment")
 		}
-		for _, v := range []string{"APP_ENV", "PUBLIC_BASE_URL", "TRUSTED_ORIGINS"} {
+		for _, v := range []string{"APP_ENV", "PUBLIC_BASE_URL", "TRUSTED_ORIGINS", "DATABASE_URL"} {
 			if !strings.Contains(err.Error(), v) {
 				t.Errorf("error %q does not mention %s", err, v)
 			}
@@ -137,6 +137,7 @@ func validAPIEnv(kv ...string) map[string]string {
 		"CRYPTO_KEKS":            "dev1:ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGV2ZGU=",
 		"CRYPTO_BLIND_INDEX_KEY": "aWR4aWR4aWR4aWR4aWR4aWR4aWR4aWR4aWR4aWR4aWQ=",
 		"CRYPTO_TOKEN_KEYS":      "dev1:dG9rdG9rdG9rdG9rdG9rdG9rdG9rdG9rdG9rdG9rdG8=",
+		"DATABASE_URL":           "postgres://app_rw:test-only@localhost:5432/koro?sslmode=disable",
 	}
 	for i := 0; i+1 < len(kv); i += 2 {
 		m[kv[i]] = kv[i+1]

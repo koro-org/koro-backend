@@ -18,8 +18,8 @@ import (
 // binary version: the generated spec must not change on every commit.
 const apiVersion = "1.0.0"
 
-// runAPI runs `koro api`: config → logger → telemetry → (BE-002: DB,
-// BE-006: Redis) → wiring → HTTP server → graceful shutdown (05 §10.9).
+// runAPI runs `koro api`: config → logger → telemetry → DB → (BE-006:
+// Redis) → wiring → HTTP server → graceful shutdown (05 §10.9).
 // Deferred closers run in reverse order after HTTP has drained.
 func runAPI(ctx context.Context, stop context.CancelFunc, environ map[string]string, stdout io.Writer) error {
 	cfg, err := config.LoadAPI(environ)
@@ -37,7 +37,14 @@ func runAPI(ctx context.Context, stop context.CancelFunc, environ map[string]str
 		return err
 	}
 
-	c := newContainer(infra{log: log, clock: clock.Real(), version: version, cfg: cfg.Modules})
+	clk := clock.Real()
+	database, err := openDB(ctx, cfg.Platform.DB, "koro-api", clk, log)
+	if err != nil {
+		return err
+	}
+	defer database.Close() // after HTTP has drained (deferred closers run last)
+
+	c := newContainer(infra{log: log, clock: clk, version: version, cfg: cfg.Modules, db: database})
 	if err := c.build(); err != nil {
 		return err
 	}

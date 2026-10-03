@@ -2,7 +2,7 @@
 //
 //	koro api                 HTTP API server
 //	koro worker              background worker (BE-006)
-//	koro migrate up|down N|version|force V   database migrations (BE-002)
+//	koro migrate up|down N|version|force V|freeze V   database migrations (owner role)
 //	koro seed ...            synthetic data, dev/staging only (BE-020, BE-033)
 //	koro openapi -o FILE     write the OpenAPI 3.1 spec and problems.json (no DB/Redis)
 //	koro healthcheck         Docker HEALTHCHECK: GET /healthz on the local API
@@ -38,7 +38,7 @@ const usage = `usage: koro <command> [arguments]
 commands:
   api            run the HTTP API server
   worker         run the background worker (not implemented yet: BE-006)
-  migrate        run database migrations (not implemented yet: BE-002)
+  migrate        run database migrations (up | down N | version | force V | freeze V)
   seed           load synthetic data, dev/staging only (not implemented yet: BE-020/BE-033)
   openapi        write openapi/openapi.yaml and openapi/problems.json (-o FILE)
   healthcheck    probe the local API's /healthz (Docker HEALTHCHECK)
@@ -67,7 +67,7 @@ func run(args []string, environ map[string]string, stdout, stderr io.Writer) int
 	case "worker":
 		err = runWorker(ctx, rest)
 	case "migrate":
-		err = runMigrate(ctx, rest)
+		err = runMigrate(ctx, rest, environ, stdout)
 	case "seed":
 		err = runSeed(ctx, rest)
 	case "openapi":

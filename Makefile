@@ -98,6 +98,7 @@ migrate-new: ## sıradaki migration çiftini aç: make migrate-new name=create_e
 
 deps-up: ## yerel postgres + redis + mailpit + seaweedfs (compose: BE-002)
 	docker compose -f deploy/compose.dev.yaml up -d --wait
+	docker compose -f deploy/compose.dev.yaml wait seaweedfs-buckets >/dev/null
 
 deps-down: ## yerel bağımlılıkları durdur
 	docker compose -f deploy/compose.dev.yaml down

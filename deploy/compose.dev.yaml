@@ -1,0 +1,99 @@
+# Local development dependencies (05 §15.4; BE-002). `make deps-up` /
+# `make deps-down`; `make dev` also migrates and runs api + worker.
+# Ports are bound to 127.0.0.1 only. Every password here is a dev-only
+# placeholder (.env.example uses the same values); nothing in this file is
+# used in staging/prod.
+name: koro-dev
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: koro
+      # Bootstrap superuser of the container only. app_owner (migrations) and
+      # app_rw (api/worker) are ordinary roles from deploy/db/bootstrap.sql.
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: dev-only-change-me
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale-provider=icu --icu-locale=tr-TR --locale=C.UTF-8" # 02 §0.3
+    ports: ["127.0.0.1:5432:5432"]
+    volumes:
+      # PG18 image: PGDATA=/var/lib/postgresql/18/docker; mounting
+      # /var/lib/postgresql/data is WRONG (R-002 §3h).
+      - pgdata:/var/lib/postgresql
+      - ./db/bootstrap.sql:/docker-entrypoint-initdb.d/01-bootstrap.sql:ro
+      - ./db/dev-passwords.sql:/docker-entrypoint-initdb.d/02-dev-passwords.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d koro"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:8-alpine
+    # asynq requires AOF persistence and no eviction (R-002 §5.3).
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    ports: ["127.0.0.1:6379:6379"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  mailpit:
+    image: axllent/mailpit:v1.28
+    ports: ["127.0.0.1:1025:1025", "127.0.0.1:8025:8025"] # SMTP, web UI
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # S3-compatible object storage (DECISIONS-LOG 2026-10-03: SeaweedFS
+  # locally). Buckets are private: s3.dev.json defines the only identity,
+  # anonymous requests are rejected. S3 API: http://127.0.0.1:8333.
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.48
+    command:
+      - server
+      - -dir=/data
+      - -ip=seaweedfs
+      - -ip.bind=0.0.0.0
+      - -master.volumeSizeLimitMB=256
+      - -volume.max=0
+      - -s3
+      - -s3.port=8333
+      - -s3.config=/etc/seaweedfs/s3.json
+      - -s3.autoCreateBucket=false
+    ports: ["127.0.0.1:8333:8333"]
+    volumes:
+      - seaweeddata:/data
+      - ./seaweedfs/s3.dev.json:/etc/seaweedfs/s3.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8333/healthz"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  # One-shot: creates the dev buckets (idempotent). Bucket names match the
+  # storage section of .env.example (BE-008).
+  seaweedfs-buckets:
+    image: chrislusf/seaweedfs:4.48
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        for b in koro-files-dev koro-quarantine-dev; do
+          echo "s3.bucket.create -name $$b" | weed shell -master=seaweedfs:9333 >/tmp/out 2>&1 || true
+          echo "s3.bucket.list" | weed shell -master=seaweedfs:9333 | grep -q "$$b" || { cat /tmp/out; exit 1; }
+        done
+    restart: "no"
+
+volumes:
+  pgdata: {}
+  redisdata: {}
+  seaweeddata: {}

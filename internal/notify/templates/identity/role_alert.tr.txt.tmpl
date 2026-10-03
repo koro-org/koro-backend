@@ -1,0 +1,5 @@
+Merhaba {{.Data.name}},
+
+{{with index .Data "kind"}}{{if eq . "role_requested"}}Bir platform yöneticisi bir kullanıcı için {{index $.Data "role"}} rolü istedi. Rol, ikinci bir yönetici onaylayınca geçerli olur.{{else if eq . "role_granted"}}Bir kullanıcıya {{index $.Data "role"}} rolü verildi.{{else if eq . "role_rejected"}}Bir {{index $.Data "role"}} rolü isteği reddedildi ya da geri çekildi.{{else if eq . "role_revoke_requested"}}Bir platform yöneticisi bir {{index $.Data "role"}} rolünün geri alınmasını istedi. Geri alma, ikinci bir yönetici onaylayınca geçerli olur.{{else if eq . "role_revoked"}}Bir {{index $.Data "role"}} rolü geri alındı.{{else}}Bir platform rolü ataması değişti.{{end}}{{end}}
+
+Platform rolü atamalarını inceleyin: {{index .Data "link"}}

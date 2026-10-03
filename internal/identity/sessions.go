@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"time"
 	"uuid"
 
@@ -120,9 +121,17 @@ func (s *service) CreateSession(ctx context.Context, a authz.Actor, in Login) (L
 		}
 	}
 	if u.MFAEnabled {
-		return s.beginMFA(ctx, u, in.Client, label)
+		return s.beginMFA(ctx, u, in.Client, label, newHash)
 	}
+	return s.openSession(ctx, u, in.Client, label, newHash, nil)
+}
 
+// openSession opens a session of u after the last factor (password, or
+// the second factor of an MFA account: mfa holds its audit metadata) and
+// resets the lockout counter. newHash replaces the password hash when the
+// parameters changed (05 §14.1 needsRehash).
+func (s *service) openSession(ctx context.Context, u User, client ClientKind, label, newHash string, mfa map[string]any) (LoginResult, error) {
+	now := s.now()
 	roles, err := s.d.Store.PlatformRoles(ctx, u.ID)
 	if err != nil {
 		return LoginResult{}, err
@@ -131,15 +140,20 @@ func (s *service) CreateSession(ctx context.Context, a authz.Actor, in Login) (L
 	if err != nil {
 		return LoginResult{}, err
 	}
-	pol := policyFor(in.Client, privileged(roles, ms))
+	pol := policyFor(client, privileged(roles, ms))
 	raw, hash, err := token.New()
 	if err != nil {
 		return LoginResult{}, err
 	}
 	sess := Session{
-		ID: uuid.NewV7(), UserID: u.ID, TokenHash: hash, ClientKind: in.Client, CreatedAt: now, LastSeenAt: now,
+		ID: uuid.NewV7(), UserID: u.ID, TokenHash: hash, ClientKind: client, CreatedAt: now, LastSeenAt: now,
 		IdleExpiresAt: now.Add(pol.Idle), AbsoluteExpiresAt: now.Add(pol.Absolute),
 		IP: canonicalIP(httpx.ClientIPFrom(ctx)), UserAgent: cut(httpx.UserAgentFrom(ctx), maxUserAgent), DeviceLabel: label,
+	}
+	meta := map[string]any{"client_kind": string(sess.ClientKind)}
+	if mfa != nil {
+		sess.MFAVerifiedAt = &now
+		maps.Copy(meta, mfa)
 	}
 	prevLogin := time.Time{}
 	err = s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
@@ -160,32 +174,15 @@ func (s *service) CreateSession(ctx context.Context, a authz.Actor, in Login) (L
 		if err := s.d.Store.InsertSession(ctx, sess); err != nil {
 			return err
 		}
-		return s.d.Audit.Log(ctx, byUser(event(authz.IdentitySessionCreate, audit.Success, resourceSession, sess.ID,
-			map[string]any{"client_kind": string(sess.ClientKind)}), u.ID))
+		return s.d.Audit.Log(ctx, byUser(event(authz.IdentitySessionCreate, audit.Success, resourceSession, sess.ID, meta), u.ID))
 	})
 	if err != nil {
 		return LoginResult{}, err
 	}
 	s.markActiveDay(ctx, u.ID, prevLogin, now)
 	s.d.Log.LogAttrs(ctx, slog.LevelInfo, "session created", slog.String("user_id", u.ID.String()),
-		slog.String("client_kind", string(sess.ClientKind)))
+		slog.String("client_kind", string(sess.ClientKind)), slog.Bool("mfa", mfa != nil))
 	return LoginResult{Session: sess, Token: raw}, nil
-}
-
-// beginMFA answers the first step of an MFA login: no session yet
-// (03 §6.4-1).
-func (s *service) beginMFA(ctx context.Context, u User, client ClientKind, label string) (LoginResult, error) {
-	if s.d.MFA == nil {
-		return LoginResult{}, ErrMFAUnavailable
-	}
-	if err := s.resetFailures(ctx, u); err != nil {
-		return LoginResult{}, err
-	}
-	ch, err := s.d.MFA.Begin(ctx, u.ID, client, label)
-	if err != nil {
-		return LoginResult{}, err
-	}
-	return LoginResult{MFARequired: true, Challenge: ch}, nil
 }
 
 // deviceLabel normalizes the optional device label (≤ 100 characters).

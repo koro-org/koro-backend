@@ -33,13 +33,14 @@ var p1aGrants = map[string]string{
 	"consents":         "SI",
 	"iys_submissions":  "SIUD",
 	// identity
-	"users":                     "SIU",
-	"sessions":                  "SIUD",
-	"email_tokens":              "SIUD",
-	"edu_verifications":         "SIUD",
-	"mfa_totp":                  "SIUD",
-	"mfa_recovery_codes":        "SIUD",
-	"platform_role_assignments": "SIUD",
+	"users":                      "SIU",
+	"sessions":                   "SIUD",
+	"email_tokens":               "SIUD",
+	"edu_verifications":          "SIUD",
+	"mfa_totp":                   "SIUD",
+	"mfa_recovery_codes":         "SIUD",
+	"platform_role_assignments":  "SIUD",
+	"privileged_account_actions": "SIU", // 06 H-47 (BE-016): proof of the four-eyes decision
 	// notify
 	"notification_deliveries":  "SIUD",
 	"email_suppressions":       "SIUD",

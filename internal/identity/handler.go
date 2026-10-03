@@ -18,8 +18,8 @@ import (
 	"koro/internal/platform/problem"
 )
 
-// Register adds the identity operations of BE-014 (04 §2.1) to api. svc may
-// be nil (`koro openapi`): handlers only touch it when called.
+// Register adds the identity operations (04 §2.1; BE-014 and BE-016) to
+// api. svc may be nil (`koro openapi`): handlers only touch it when called.
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
 
@@ -38,7 +38,7 @@ func Register(api huma.API, svc Service) {
 		Description: "Web clients (X-Koro-Client: web, the default) get the __Host-koro_session cookie and no token; " +
 			"mobile clients get the bearer token once in the body. Wrong credentials, unknown or locked accounts all " +
 			"answer 401 identity.invalid_credentials; an unverified account 403 identity.email_not_verified. An MFA " +
-			"account gets mfa_required with a challenge instead of a session.",
+			"account gets mfa_required with a challenge (5 minutes) instead of a session: completeMfaLogin opens it.",
 	}, op.Meta{Action: string(authz.IdentitySessionCreate), Surface: op.SurfacePublic, RateLimit: op.RateAuthLogin,
 		Idempotency: op.IdempotencyOptional}, h.login)
 
@@ -110,6 +110,8 @@ func Register(api huma.API, svc Service) {
 		OperationID: "updateMe", Method: http.MethodPatch, Path: "/me",
 		Summary: "Update my name or language",
 	}, op.Meta{Action: string(authz.IdentityAccountUpdateOwn), Surface: op.SurfaceSelf}, h.updateMe)
+
+	registerMFAAndAdmin(api, h)
 }
 
 // reg registers one identity operation with its Koro metadata.
@@ -227,21 +229,11 @@ func (h handler) login(ctx context.Context, in *loginInput) (*loginOutput, error
 	if err != nil {
 		return nil, err
 	}
-	out := &loginOutput{}
 	if res.MFARequired {
 		exp := res.Challenge.ExpiresAt
-		out.Body = SessionDTO{MFARequired: true, ChallengeID: res.Challenge.ID.String(), ExpiresAt: &exp}
-		return out, nil
+		return &loginOutput{Body: SessionDTO{MFARequired: true, ChallengeID: res.Challenge.ID.String(), ExpiresAt: &exp}}, nil
 	}
-	s := res.Session
-	abs, idle := s.AbsoluteExpiresAt, s.IdleExpiresAt
-	out.Body = SessionDTO{UserID: s.UserID.String(), ExpiresAt: &abs, IdleExpiresAt: &idle}
-	if s.ClientKind == ClientMobile {
-		out.Body.Token = res.Token
-	} else {
-		out.SetCookie = sessionCookie(res.Token, abs, int(abs.Sub(s.CreatedAt).Seconds()))
-	}
-	return out, nil
+	return sessionOutput(res), nil
 }
 
 // ---- deleteCurrentSession

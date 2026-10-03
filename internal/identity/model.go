@@ -231,3 +231,121 @@ type RoleAssignment struct {
 // `koro seed bootstrap-admin` (the only privileged rows without a second
 // approver, 02 §5.7).
 const bootstrapReason = "bootstrap"
+
+// privilegedRole reports whether r is one of the four-eyes roles of 06 H-17:
+// granting and revoking it needs a second platform_admin.
+func privilegedRole(r authz.PlatformRole) bool {
+	return r == authz.PlatformAdmin || r == authz.PlatformFinanceAdmin || r == authz.PlatformTalentAuditor
+}
+
+// validPlatformRole reports whether r is a platform role of 02 §5.7.
+func validPlatformRole(r authz.PlatformRole) bool {
+	switch r {
+	case authz.PlatformAdmin, authz.PlatformModerator, authz.PlatformSupport, authz.PlatformDPO,
+		authz.PlatformFinanceAdmin, authz.PlatformTalentAuditor:
+		return true
+	}
+	return false
+}
+
+func (a RoleAssignment) clone() RoleAssignment {
+	c := a
+	c.RequestedBy, c.ApprovedBy, c.RejectedBy = cloneID(a.RequestedBy), cloneID(a.ApprovedBy), cloneID(a.RejectedBy)
+	c.RevokeRequestedBy, c.RevokedBy = cloneID(a.RevokeRequestedBy), cloneID(a.RevokedBy)
+	c.ApprovedAt, c.GrantedAt, c.RejectedAt = cloneTime(a.ApprovedAt), cloneTime(a.GrantedAt), cloneTime(a.RejectedAt)
+	c.RevokeRequestedAt, c.RevokedAt = cloneTime(a.RevokeRequestedAt), cloneTime(a.RevokedAt)
+	return c
+}
+
+func cloneID(p *uuid.UUID) *uuid.UUID {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
+}
+
+// RoleQuery is one page of adminListPlatformRoles, newest first.
+type RoleQuery struct {
+	Role         authz.PlatformRole // "" = every role
+	IncludeEnded bool               // revoked and rejected rows too
+	After        *uuid.UUID         // the last assignment ID of the previous page
+	Limit        int
+}
+
+// TOTP is one mfa_totp row (02 §5.5). The secret exists only sealed
+// (crypto.Envelope, purpose identity.mfa_secret); the plaintext lives in
+// memory for one verification and in the enrollTotp response, nowhere else.
+type TOTP struct {
+	UserID       uuid.UUID
+	SecretEnc    []byte
+	ConfirmedAt  *time.Time // nil: enrollment not confirmed yet (MFA still off)
+	LastUsedStep *int64     // replay guard: the last accepted 30-second step
+	CreatedAt    time.Time
+}
+
+func (t TOTP) clone() TOTP {
+	c := t
+	c.SecretEnc = bytes.Clone(t.SecretEnc)
+	c.ConfirmedAt = cloneTime(t.ConfirmedAt)
+	if t.LastUsedStep != nil {
+		v := *t.LastUsedStep
+		c.LastUsedStep = &v
+	}
+	return c
+}
+
+// UserSearch is one page of adminSearchUsers, newest first. Exactly one of
+// Email (normalized, exact) and Name (a fragment of "first last") may be
+// set; neither lists every account (Status still applies).
+type UserSearch struct {
+	Email  string
+	Name   string
+	Status Status // "" = every status
+	After  *uuid.UUID
+	Limit  int
+}
+
+// AccountActionKind is privileged_account_actions.action: an admin action
+// against an account that needs four eyes when the account holds a
+// privileged role (06 H-47).
+type AccountActionKind string
+
+// Account actions under four eyes.
+const (
+	AccountSuspend        AccountActionKind = "suspend"
+	AccountRevokeSessions AccountActionKind = "revoke_sessions"
+	AccountResetMFA       AccountActionKind = "reset_mfa"
+)
+
+// AccountActionStatus is privileged_account_actions.status.
+type AccountActionStatus string
+
+// Request statuses.
+const (
+	AccountActionPending  AccountActionStatus = "pending"
+	AccountActionApproved AccountActionStatus = "approved"
+	AccountActionExpired  AccountActionStatus = "expired"
+)
+
+// AccountActionRequest is one privileged_account_actions row: the first
+// eye's request (pending) and, once a second platform_admin repeats the
+// call, its approval.
+type AccountActionRequest struct {
+	ID           uuid.UUID
+	TargetUserID uuid.UUID
+	Action       AccountActionKind
+	Reason       string
+	Status       AccountActionStatus
+	RequestedBy  uuid.UUID
+	RequestedAt  time.Time
+	ExpiresAt    time.Time
+	ApprovedBy   *uuid.UUID
+	ApprovedAt   *time.Time
+}
+
+func (r AccountActionRequest) clone() AccountActionRequest {
+	c := r
+	c.ApprovedBy, c.ApprovedAt = cloneID(r.ApprovedBy), cloneTime(r.ApprovedAt)
+	return c
+}

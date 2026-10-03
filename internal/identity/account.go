@@ -93,18 +93,20 @@ func (s *service) checkPassword(ctx context.Context, u User, pw string, action a
 	return s.reauthFailed(ctx, u, action)
 }
 
-// checkTOTP verifies the TOTP code of an MFA account (BE-016 verifier).
+// checkTOTP verifies the TOTP code of an MFA account (03 §6.2: recovery
+// codes are not accepted for re-authentication). A code is accepted once
+// (replay guard); a wrong one counts like a wrong password.
 func (s *service) checkTOTP(ctx context.Context, u User, code string, action authz.Action) error {
 	if code == "" {
 		return ErrReauthRequired
 	}
-	if s.d.TOTP == nil {
-		return ErrMFAUnavailable
+	if err := s.mfaReady(); err != nil {
+		return err
 	}
 	if u.locked(s.now()) {
 		return problem.ErrRateLimited
 	}
-	ok, err := s.d.TOTP.VerifyTOTP(ctx, u.ID, code)
+	ok, err := s.verifyTOTP(ctx, u.ID, code)
 	if err != nil {
 		return err
 	}

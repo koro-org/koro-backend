@@ -41,3 +41,80 @@ scenarios:
     steps:
       - { persona: anonymous, operation: registerAccount, body: bodies/identity/register_student_no_birth_date.json, expect: 422, code: identity.birth_date_required }
       - { persona: anonymous, operation: registerAccount, expect: 202 }
+  # BE-016
+  mfa_login:
+    note: "03 §6.4-1: an MFA account's password step opens no session; the challenge (5 min) is used once"
+    config: { identity_mfa: enabled }
+    steps:
+      - { persona: anonymous, operation: createSession, expect: 200 }
+      - { persona: anonymous, operation: completeMfaLogin, body: bodies/identity/mfa_login_wrong.json, expect: 401, code: identity.mfa_login_failed }
+      - { persona: anonymous, operation: completeMfaLogin, body: bodies/identity/mfa_login.json, expect: 200 }
+      - { persona: anonymous, operation: completeMfaLogin, body: bodies/identity/mfa_login.json, expect: 401, code: identity.mfa_login_failed }
+  totp_replay:
+    note: "R-002: the same TOTP code is accepted once in its window (step-up and re-authentication alike)"
+    config: { identity_mfa: enabled }
+    steps:
+      - { persona: student, operation: verifyMfa, expect: 204 }
+      - { persona: student, operation: verifyMfa, expect: 422, code: identity.invalid_mfa_code }
+      - { persona: student, operation: regenerateRecoveryCodes, expect: 403, code: identity.reauth_failed }
+  mfa_missing:
+    note: "03 §7.7 MFA eksik: a platform_admin session without MFA gets 403 authz.mfa_required on the role path;
+      verifyMfa (an O cell, no MFA needed) steps the session up, then the same call works"
+    config: { identity_mfa: enabled }
+    steps:
+      - { persona: platform_admin, mfa: false, operation: adminListPlatformRoles, expect: 403, code: authz.mfa_required }
+      - { persona: platform_admin, mfa: false, operation: verifyMfa, expect: 204 }
+      - { persona: platform_admin, operation: adminListPlatformRoles, expect: 200 }
+  self_grant:
+    note: "03 §7.7 Kendi kendine: a platform_admin cannot grant a role to themselves (Y6), only to others"
+    steps:
+      - { persona: platform_admin, operation: adminGrantPlatformRole, body: bodies/identity/grant_role_self.json, expect: 403, code: forbidden }
+      - { persona: platform_admin, operation: adminGrantPlatformRole, expect: 201 }
+  four_eyes_grant:
+    note: "06 H-17: a privileged role request is approved by a second platform_admin only; the requester gets 403"
+    steps:
+      - { persona: platform_admin, operation: adminGrantPlatformRole, body: bodies/identity/grant_role_finance.json, expect: 201, save: { role_request_b: assignment_id } }
+      - { persona: platform_admin, operation: adminApprovePlatformRole, path_params: { assignment_id: role_request_b }, expect: 403, code: authz.four_eyes_violation }
+      - { persona: platform_admin_2, operation: adminApprovePlatformRole, path_params: { assignment_id: role_request_b }, expect: 200 }
+      - { persona: platform_admin_2, operation: adminApprovePlatformRole, path_params: { assignment_id: role_request_b }, expect: 409, code: identity.invalid_state }
+  four_eyes_revoke:
+    note: "06 H-17: revoking a privileged role is requested by one platform_admin and confirmed by another"
+    steps:
+      - { persona: platform_admin, operation: adminRevokePlatformRole, path_params: { assignment_id: role_talent_granted }, expect: 200 }
+      - { persona: platform_admin, operation: adminRevokePlatformRole, path_params: { assignment_id: role_talent_granted }, expect: 403, code: authz.four_eyes_violation }
+      - { persona: platform_admin_2, operation: adminRevokePlatformRole, path_params: { assignment_id: role_talent_granted }, expect: 200 }
+  disable_totp_required_role:
+    note: "03 §5.1 k1: an MFA role keeps TOTP on (409); a student may turn it off with a TOTP proof"
+    config: { identity_mfa: enabled }
+    steps:
+      - { persona: company_admin, operation: disableTotp, expect: 409, code: identity.mfa_required_by_role }
+      - { persona: student, operation: disableTotp, expect: 204 }
+  mfa_enroll_reauth:
+    note: "06 H-46: a stolen session cannot start TOTP enrollment without the password"
+    steps:
+      - { persona: student, operation: enrollTotp, body: bodies/identity/mfa_reauth_totp.json, expect: 403, code: identity.reauth_required }
+      - { persona: student, operation: enrollTotp, expect: 200 }
+  mfa_confirm_reauth:
+    note: "06 H-46: the TOTP confirmation (activation) needs the password too"
+    config: { identity_mfa: enrolled }
+    steps:
+      - { persona: student, operation: confirmTotp, body: bodies/identity/mfa_confirm_no_reauth.json, expect: 403, code: identity.reauth_required }
+      - { persona: student, operation: confirmTotp, expect: 200 }
+  four_eyes_suspend_privileged:
+    note: "06 H-47: suspending a finance_admin opens a request (202); the requester cannot approve it, a second platform_admin does"
+    steps:
+      - { persona: platform_admin, operation: adminSuspendUser, path_params: { user_id: finance_admin }, expect: 202 }
+      - { persona: platform_admin, operation: adminSuspendUser, path_params: { user_id: finance_admin }, expect: 403, code: authz.four_eyes_violation }
+      - { persona: platform_admin_2, operation: adminSuspendUser, path_params: { user_id: finance_admin }, expect: 200 }
+  four_eyes_revoke_sessions_privileged:
+    note: "06 H-47: support may open the request against a platform_admin; only another platform_admin approves it"
+    steps:
+      - { persona: support, operation: adminRevokeUserSessions, path_params: { user_id: platform_admin_2 }, expect: 202 }
+      - { persona: support, operation: adminRevokeUserSessions, path_params: { user_id: platform_admin_2 }, expect: 403, code: forbidden }
+      - { persona: platform_admin, operation: adminRevokeUserSessions, path_params: { user_id: platform_admin_2 }, expect: 204 }
+  four_eyes_reset_mfa_privileged:
+    note: "06 H-47: resetting a talent_auditor's MFA takes two platform admins"
+    steps:
+      - { persona: platform_admin, operation: adminResetUserMfa, path_params: { user_id: talent_auditor }, expect: 202 }
+      - { persona: platform_admin, operation: adminResetUserMfa, path_params: { user_id: talent_auditor }, expect: 403, code: authz.four_eyes_violation }
+      - { persona: platform_admin_2, operation: adminResetUserMfa, path_params: { user_id: talent_auditor }, expect: 204 }

@@ -1,4 +1,5 @@
--- 000024_create_platform_role_assignments.up.sql (02 §5.7; 06 H-17, H-20).
+-- 000024_create_platform_role_assignments.up.sql (02 §5.7; 06 H-17, H-20;
+-- privileged_account_actions: 06 H-47, BE-016).
 -- Platform role assignments with FOUR EYES: granting or revoking
 -- platform_admin, finance_admin or talent_auditor needs a second
 -- platform_admin. A grant is a row that starts 'pending' (requested_by) and
@@ -61,4 +62,39 @@ CREATE TABLE platform_role_assignments (
 CREATE UNIQUE INDEX platform_role_assignments_open_uq ON platform_role_assignments (user_id, role)
   WHERE status IN ('pending','active','revoke_pending');
 GRANT SELECT, INSERT, UPDATE, DELETE ON platform_role_assignments TO app_rw;
+
+-- BE-016 (06 H-47; in place before the pilot, BE-001 R2 / H-20): FOUR EYES on
+-- account actions against a holder of a privileged role (platform_admin,
+-- finance_admin, talent_auditor in effect). Suspending such an account,
+-- closing its sessions or resetting its MFA is first a 'pending' request
+-- (requested_by); a different platform_admin's same call approves and runs it
+-- ('approved', approved_by). A request lapses after expires_at ('expired').
+-- The approver is never the requester nor the target (CHECKs below, the
+-- second layer next to the authz four-eyes rule). Rows stay as the proof of
+-- the decision (no DELETE for app_rw).
+CREATE TABLE privileged_account_actions (
+  id              uuid PRIMARY KEY DEFAULT uuidv7(),
+  target_user_id  uuid NOT NULL CONSTRAINT privileged_account_actions_target_user_id_fkey REFERENCES users (id),
+  action          text NOT NULL CONSTRAINT privileged_account_actions_action_chk CHECK (action IN ('suspend','revoke_sessions','reset_mfa')),
+  reason          text NOT NULL CONSTRAINT privileged_account_actions_reason_chk CHECK (char_length(reason) BETWEEN 5 AND 500),
+  status          text NOT NULL DEFAULT 'pending'
+                    CONSTRAINT privileged_account_actions_status_chk CHECK (status IN ('pending','approved','expired')),
+  requested_by    uuid NOT NULL CONSTRAINT privileged_account_actions_requested_by_fkey REFERENCES users (id),
+  requested_at    timestamptz NOT NULL DEFAULT now(),
+  expires_at      timestamptz NOT NULL,
+  approved_by     uuid CONSTRAINT privileged_account_actions_approved_by_fkey REFERENCES users (id),
+  approved_at     timestamptz,
+  -- nobody requests or approves an action against their own account (03 Y6)
+  CONSTRAINT privileged_account_actions_self_chk CHECK (requested_by <> target_user_id AND approved_by <> target_user_id),
+  -- FOUR EYES (H-47): the approver is not the requester
+  CONSTRAINT privileged_account_actions_four_eyes_chk CHECK (approved_by <> requested_by),
+  -- one complete condition per status (06 H-37)
+  CONSTRAINT privileged_account_actions_approved_chk CHECK (status <> 'approved' OR (approved_by IS NOT NULL AND approved_at IS NOT NULL)),
+  CONSTRAINT privileged_account_actions_unapproved_chk CHECK (status = 'approved' OR (approved_by IS NULL AND approved_at IS NULL)),
+  CONSTRAINT privileged_account_actions_expiry_chk CHECK (expires_at > requested_at)
+);
+-- one open request per target and action
+CREATE UNIQUE INDEX privileged_account_actions_open_uq ON privileged_account_actions (target_user_id, action)
+  WHERE status = 'pending';
+GRANT SELECT, INSERT, UPDATE ON privileged_account_actions TO app_rw;
 COMMIT;

@@ -11,6 +11,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/platform/db"
+	"koro/internal/platform/textx"
 )
 
 // NewGormStore returns the PostgreSQL store over users, sessions,
@@ -21,8 +22,14 @@ type gormStore struct{ orm *gorm.DB }
 
 // constraints maps identity constraints to module errors.
 var constraints = db.Constraints{
-	"users_email_uq":                    ErrEmailTaken,
-	"platform_role_assignments_open_uq": ErrBootstrap,
+	"users_email_uq":                                 ErrEmailTaken,
+	"platform_role_assignments_open_uq":              ErrRoleAssignmentOpen,
+	"platform_role_assignments_four_eyes_chk":        ErrFourEyes,
+	"platform_role_assignments_revoke_four_eyes_chk": ErrFourEyes,
+	"platform_role_assignments_self_chk":             ErrForbidden,
+	"privileged_account_actions_open_uq":             ErrAccountActionOpen,
+	"privileged_account_actions_four_eyes_chk":       ErrFourEyes,
+	"privileged_account_actions_self_chk":            ErrForbidden,
 }
 
 // InsertUser implements Store.
@@ -109,7 +116,8 @@ func (s gormStore) UpdateUser(ctx context.Context, u User) error {
 	res := db.Conn(ctx, s.orm).Model(&userRow{}).Where("id = ?", u.ID).Updates(map[string]any{
 		"status": r.Status, "email": r.Email, "email_normalized": r.EmailNormalized, "email_verified_at": r.EmailVerifiedAt,
 		"password_hash": r.PasswordHash, "first_name": r.FirstName, "last_name": r.LastName, "locale": r.Locale,
-		"last_login_at": r.LastLoginAt, "failed_login_count": r.FailedLoginCount, "locked_until": r.LockedUntil,
+		"mfa_enabled": r.MFAEnabled, "last_login_at": r.LastLoginAt, "suspended_at": r.SuspendedAt,
+		"suspension_reason": r.SuspensionReason, "failed_login_count": r.FailedLoginCount, "locked_until": r.LockedUntil,
 	})
 	if res.Error != nil {
 		return fmt.Errorf("identity: update user: %w", constraints.Translate(res.Error))
@@ -420,17 +428,15 @@ func (s gormStore) RoleAssignmentsOf(ctx context.Context, userID uuid.UUID) ([]R
 	if err := db.Conn(ctx, s.orm).Where("user_id = ?", userID).Order("id").Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("identity: role assignments: %w", err)
 	}
+	return assignments(rows), nil
+}
+
+func assignments(rows []roleRow) []RoleAssignment {
 	out := make([]RoleAssignment, len(rows))
 	for i, r := range rows {
-		out[i] = RoleAssignment{
-			ID: r.ID, UserID: r.UserID, Role: authz.PlatformRole(r.Role), Reason: r.Reason, Status: RoleStatus(r.Status),
-			RequestedBy: r.RequestedBy, RequestedAt: r.RequestedAt.UTC(), ApprovedBy: r.ApprovedBy, ApprovedAt: utcPtr(r.ApprovedAt),
-			GrantedAt: utcPtr(r.GrantedAt), RejectedBy: r.RejectedBy, RejectedAt: utcPtr(r.RejectedAt), RevokeReason: str(r.RevokeReason),
-			RevokeRequestedBy: r.RevokeRequestedBy, RevokeRequestedAt: utcPtr(r.RevokeRequestedAt), RevokedBy: r.RevokedBy,
-			RevokedAt: utcPtr(r.RevokedAt),
-		}
+		out[i] = r.assignment()
 	}
-	return out, nil
+	return out
 }
 
 // UsersWithRole implements Store (06 H-33).
@@ -450,14 +456,321 @@ func (s gormStore) UsersWithRole(ctx context.Context, role authz.PlatformRole) (
 //
 // cross-org: platform roles belong to no org.
 func (s gormStore) InsertRoleAssignment(ctx context.Context, a RoleAssignment) error {
-	r := roleRow{
-		ID: a.ID, UserID: a.UserID, Role: string(a.Role), Reason: a.Reason, Status: string(a.Status),
-		RequestedBy: a.RequestedBy, RequestedAt: a.RequestedAt, ApprovedBy: a.ApprovedBy, ApprovedAt: a.ApprovedAt,
-		GrantedAt: a.GrantedAt, RejectedBy: a.RejectedBy, RejectedAt: a.RejectedAt, RevokeReason: nullable(a.RevokeReason),
-		RevokeRequestedBy: a.RevokeRequestedBy, RevokeRequestedAt: a.RevokeRequestedAt, RevokedBy: a.RevokedBy, RevokedAt: a.RevokedAt,
-	}
+	r := roleRowOf(a)
 	if err := db.Conn(ctx, s.orm).Create(&r).Error; err != nil {
 		return fmt.Errorf("identity: insert role assignment: %w", constraints.Translate(err))
 	}
 	return nil
+}
+
+// RoleAssignment implements Store.
+//
+// cross-org: platform roles belong to no org.
+func (s gormStore) RoleAssignment(ctx context.Context, id uuid.UUID) (RoleAssignment, error) {
+	return s.roleAssignment(ctx, id, false)
+}
+
+// LockRoleAssignment implements Store.
+//
+// cross-org: platform roles belong to no org.
+func (s gormStore) LockRoleAssignment(ctx context.Context, id uuid.UUID) (RoleAssignment, error) {
+	return s.roleAssignment(ctx, id, true)
+}
+
+// cross-org: platform roles belong to no org.
+func (s gormStore) roleAssignment(ctx context.Context, id uuid.UUID, lock bool) (RoleAssignment, error) {
+	q := db.Conn(ctx, s.orm)
+	if lock {
+		q = q.Clauses(clause.Locking{Strength: clause.LockingStrengthUpdate})
+	}
+	var r roleRow
+	if err := q.Where("id = ?", id).Take(&r).Error; err != nil {
+		if db.IsNotFound(err) {
+			return RoleAssignment{}, ErrNotFound
+		}
+		return RoleAssignment{}, fmt.Errorf("identity: role assignment: %w", err)
+	}
+	return r.assignment(), nil
+}
+
+// UpdateRoleAssignment implements Store.
+//
+// cross-org: platform roles belong to no org.
+func (s gormStore) UpdateRoleAssignment(ctx context.Context, a RoleAssignment) error {
+	r := roleRowOf(a)
+	res := db.Conn(ctx, s.orm).Model(&roleRow{}).Where("id = ?", a.ID).Updates(map[string]any{
+		"status": r.Status, "approved_by": r.ApprovedBy, "approved_at": r.ApprovedAt, "granted_at": r.GrantedAt,
+		"rejected_by": r.RejectedBy, "rejected_at": r.RejectedAt, "revoke_reason": r.RevokeReason,
+		"revoke_requested_by": r.RevokeRequestedBy, "revoke_requested_at": r.RevokeRequestedAt,
+		"revoked_by": r.RevokedBy, "revoked_at": r.RevokedAt,
+	})
+	if res.Error != nil {
+		return fmt.Errorf("identity: update role assignment: %w", constraints.Translate(res.Error))
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// RoleAssignments implements Store.
+//
+// cross-org: platform roles belong to no org.
+func (s gormStore) RoleAssignments(ctx context.Context, q RoleQuery) ([]RoleAssignment, error) {
+	tx := db.Conn(ctx, s.orm).Model(&roleRow{})
+	if q.Role != "" {
+		tx = tx.Where("role = ?", string(q.Role))
+	}
+	if !q.IncludeEnded {
+		tx = tx.Where("status IN ('pending','active','revoke_pending')")
+	}
+	if q.After != nil {
+		tx = tx.Where("id < ?", *q.After)
+	}
+	var rows []roleRow
+	if err := tx.Order("id DESC").Limit(q.Limit).Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("identity: list role assignments: %w", err)
+	}
+	return assignments(rows), nil
+}
+
+// CountRoleAssignments implements Store (06 H-33).
+//
+// cross-org: platform roles belong to no org.
+func (s gormStore) CountRoleAssignments(ctx context.Context, role authz.PlatformRole) (int, int, int, error) {
+	var c struct {
+		InEffect      int `gorm:"column:in_effect"`
+		Pending       int `gorm:"column:pending"`
+		RevokePending int `gorm:"column:revoke_pending"`
+	}
+	err := db.Conn(ctx, s.orm).Raw(`SELECT
+		count(*) FILTER (WHERE `+inEffect+`) AS in_effect,
+		count(*) FILTER (WHERE status = 'pending') AS pending,
+		count(*) FILTER (WHERE status = 'revoke_pending') AS revoke_pending
+		FROM platform_role_assignments WHERE role = ?`, string(role)).Scan(&c).Error
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("identity: count role assignments: %w", err)
+	}
+	return c.InEffect, c.Pending, c.RevokePending, nil
+}
+
+// SearchUsers implements Store (users_email_uq; users_name_trgm_idx).
+//
+// cross-org: accounts belong to no org.
+func (s gormStore) SearchUsers(ctx context.Context, q UserSearch) ([]User, error) {
+	tx := db.Conn(ctx, s.orm).Model(&userRow{})
+	switch {
+	case q.Email != "":
+		tx = tx.Where("email_normalized = ?", q.Email)
+	case q.Name != "":
+		tx = tx.Where(`status <> 'erased' AND public.koro_norm(first_name || ' ' || last_name) LIKE '%' || public.koro_norm( ?) || '%' ESCAPE '\'`,
+			textx.EscapeLike(q.Name))
+	}
+	if q.Status != "" {
+		tx = tx.Where("status = ?", string(q.Status))
+	}
+	if q.After != nil {
+		tx = tx.Where("id < ?", *q.After)
+	}
+	var rows []userRow
+	if err := tx.Order("id DESC").Limit(q.Limit).Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("identity: search users: %w", err)
+	}
+	out := make([]User, len(rows))
+	for i, r := range rows {
+		out[i] = r.user()
+	}
+	return out, nil
+}
+
+// MarkSessionMFA implements Store.
+//
+// cross-org: sessions belong to a user, not an org.
+func (s gormStore) MarkSessionMFA(ctx context.Context, userID, id uuid.UUID, at time.Time) (bool, error) {
+	res := db.Conn(ctx, s.orm).Exec(`UPDATE sessions SET mfa_verified_at = ?
+		WHERE id = ? AND user_id = ? AND revoked_at IS NULL`, at, id, userID)
+	if res.Error != nil {
+		return false, fmt.Errorf("identity: mark session mfa: %w", db.Translate(res.Error))
+	}
+	return res.RowsAffected == 1, nil
+}
+
+// TOTP implements Store.
+//
+// cross-org: MFA secrets belong to a user, not an org.
+func (s gormStore) TOTP(ctx context.Context, userID uuid.UUID) (TOTP, bool, error) {
+	var rows []totpRow
+	if err := db.Conn(ctx, s.orm).Where("user_id = ?", userID).Limit(1).Find(&rows).Error; err != nil {
+		return TOTP{}, false, fmt.Errorf("identity: totp: %w", err)
+	}
+	if len(rows) == 0 {
+		return TOTP{}, false, nil
+	}
+	return rows[0].totp(), true, nil
+}
+
+// PutTOTP implements Store: a confirmed row is never overwritten.
+//
+// cross-org: MFA secrets belong to a user, not an org.
+func (s gormStore) PutTOTP(ctx context.Context, t TOTP) error {
+	res := db.Conn(ctx, s.orm).Exec(`INSERT INTO mfa_totp (user_id, secret_enc, confirmed_at, last_used_step, created_at)
+		VALUES ( ?, ?, NULL, NULL, ?)
+		ON CONFLICT (user_id) DO UPDATE SET secret_enc = EXCLUDED.secret_enc, last_used_step = NULL, created_at = EXCLUDED.created_at
+		WHERE mfa_totp.confirmed_at IS NULL`, t.UserID, t.SecretEnc, t.CreatedAt)
+	if res.Error != nil {
+		return fmt.Errorf("identity: put totp: %w", db.Translate(res.Error))
+	}
+	if res.RowsAffected == 0 {
+		return ErrMFAAlreadyEnabled
+	}
+	return nil
+}
+
+// ConfirmTOTP implements Store.
+//
+// cross-org: MFA secrets belong to a user, not an org.
+func (s gormStore) ConfirmTOTP(ctx context.Context, userID uuid.UUID, step int64, at time.Time) (bool, error) {
+	res := db.Conn(ctx, s.orm).Exec(`UPDATE mfa_totp SET confirmed_at = ?, last_used_step = ?
+		WHERE user_id = ? AND confirmed_at IS NULL`, at, step, userID)
+	if res.Error != nil {
+		return false, fmt.Errorf("identity: confirm totp: %w", db.Translate(res.Error))
+	}
+	return res.RowsAffected == 1, nil
+}
+
+// UseTOTPStep implements Store: one conditional UPDATE, so two requests
+// with the same code cannot both pass (05 §14.1 replay guard).
+//
+// cross-org: MFA secrets belong to a user, not an org.
+func (s gormStore) UseTOTPStep(ctx context.Context, userID uuid.UUID, step int64) (bool, error) {
+	res := db.Conn(ctx, s.orm).Exec(`UPDATE mfa_totp SET last_used_step = ?
+		WHERE user_id = ? AND confirmed_at IS NOT NULL AND (last_used_step IS NULL OR last_used_step < ?)`, step, userID, step)
+	if res.Error != nil {
+		return false, fmt.Errorf("identity: use totp step: %w", db.Translate(res.Error))
+	}
+	return res.RowsAffected == 1, nil
+}
+
+// DeleteTOTP implements Store.
+//
+// cross-org: MFA secrets belong to a user, not an org.
+func (s gormStore) DeleteTOTP(ctx context.Context, userID uuid.UUID) (int, error) {
+	res := db.Conn(ctx, s.orm).Exec(`DELETE FROM mfa_totp WHERE user_id = ?`, userID)
+	if res.Error != nil {
+		return 0, fmt.Errorf("identity: delete totp: %w", res.Error)
+	}
+	return int(res.RowsAffected), nil
+}
+
+// ReplaceRecoveryCodes implements Store.
+//
+// cross-org: recovery codes belong to a user, not an org.
+func (s gormStore) ReplaceRecoveryCodes(ctx context.Context, userID uuid.UUID, hashes [][]byte, at time.Time) error {
+	conn := db.Conn(ctx, s.orm)
+	if err := conn.Exec(`DELETE FROM mfa_recovery_codes WHERE user_id = ?`, userID).Error; err != nil {
+		return fmt.Errorf("identity: replace recovery codes: %w", err)
+	}
+	if len(hashes) == 0 {
+		return nil
+	}
+	rows := make([]recoveryRow, len(hashes))
+	for i, h := range hashes {
+		rows[i] = recoveryRow{ID: uuid.NewV7(), UserID: userID, CodeHash: h, CreatedAt: at}
+	}
+	if err := conn.Create(&rows).Error; err != nil {
+		return fmt.Errorf("identity: insert recovery codes: %w", db.Translate(err))
+	}
+	return nil
+}
+
+// UseRecoveryCode implements Store (mfa_recovery_codes_code_hash_uq).
+//
+// cross-org: recovery codes belong to a user, not an org.
+func (s gormStore) UseRecoveryCode(ctx context.Context, userID uuid.UUID, hash []byte, at time.Time) (bool, error) {
+	res := db.Conn(ctx, s.orm).Exec(`UPDATE mfa_recovery_codes SET used_at = ?
+		WHERE user_id = ? AND code_hash = ? AND used_at IS NULL`, at, userID, hash)
+	if res.Error != nil {
+		return false, fmt.Errorf("identity: use recovery code: %w", db.Translate(res.Error))
+	}
+	return res.RowsAffected == 1, nil
+}
+
+// RecoveryCodesLeft implements Store (mfa_recovery_codes_user_idx).
+//
+// cross-org: recovery codes belong to a user, not an org.
+func (s gormStore) RecoveryCodesLeft(ctx context.Context, userID uuid.UUID) (int, error) {
+	var n int64
+	if err := db.Conn(ctx, s.orm).Model(&recoveryRow{}).Where("user_id = ? AND used_at IS NULL", userID).Count(&n).Error; err != nil {
+		return 0, fmt.Errorf("identity: recovery codes left: %w", err)
+	}
+	return int(n), nil
+}
+
+// DeleteRecoveryCodes implements Store.
+//
+// cross-org: recovery codes belong to a user, not an org.
+func (s gormStore) DeleteRecoveryCodes(ctx context.Context, userID uuid.UUID) (int, error) {
+	res := db.Conn(ctx, s.orm).Exec(`DELETE FROM mfa_recovery_codes WHERE user_id = ?`, userID)
+	if res.Error != nil {
+		return 0, fmt.Errorf("identity: delete recovery codes: %w", res.Error)
+	}
+	return int(res.RowsAffected), nil
+}
+
+// InsertAccountAction implements Store.
+//
+// cross-org: accounts belong to no org.
+func (s gormStore) InsertAccountAction(ctx context.Context, r AccountActionRequest) error {
+	row := accountActionRowOf(r)
+	if err := db.Conn(ctx, s.orm).Create(&row).Error; err != nil {
+		return fmt.Errorf("identity: insert account action: %w", constraints.Translate(err))
+	}
+	return nil
+}
+
+// LockOpenAccountAction implements Store (privileged_account_actions_open_uq).
+//
+// cross-org: accounts belong to no org.
+func (s gormStore) LockOpenAccountAction(ctx context.Context, target uuid.UUID, action AccountActionKind) (AccountActionRequest, bool, error) {
+	var rows []accountActionRow
+	err := db.Conn(ctx, s.orm).Clauses(clause.Locking{Strength: clause.LockingStrengthUpdate}).
+		Where("target_user_id = ? AND action = ? AND status = 'pending'", target, string(action)).Limit(1).Find(&rows).Error
+	if err != nil {
+		return AccountActionRequest{}, false, fmt.Errorf("identity: open account action: %w", err)
+	}
+	if len(rows) == 0 {
+		return AccountActionRequest{}, false, nil
+	}
+	return rows[0].request(), true, nil
+}
+
+// UpdateAccountAction implements Store.
+//
+// cross-org: accounts belong to no org.
+func (s gormStore) UpdateAccountAction(ctx context.Context, r AccountActionRequest) error {
+	res := db.Conn(ctx, s.orm).Model(&accountActionRow{}).Where("id = ?", r.ID).Updates(map[string]any{
+		"status": string(r.Status), "approved_by": r.ApprovedBy, "approved_at": r.ApprovedAt,
+	})
+	if res.Error != nil {
+		return fmt.Errorf("identity: update account action: %w", constraints.Translate(res.Error))
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// AccountActionsOf implements Store.
+//
+// cross-org: accounts belong to no org.
+func (s gormStore) AccountActionsOf(ctx context.Context, userID uuid.UUID) ([]AccountActionRequest, error) {
+	var rows []accountActionRow
+	if err := db.Conn(ctx, s.orm).Where("target_user_id = ?", userID).Order("id").Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("identity: account actions of: %w", err)
+	}
+	out := make([]AccountActionRequest, len(rows))
+	for i, r := range rows {
+		out[i] = r.request()
+	}
+	return out, nil
 }

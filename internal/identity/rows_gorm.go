@@ -4,6 +4,7 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/authz"
 	"koro/internal/platform/civil"
 )
 
@@ -152,3 +153,78 @@ type roleRow struct {
 
 // TableName implements gorm's Tabler.
 func (roleRow) TableName() string { return "platform_role_assignments" }
+
+func (r roleRow) assignment() RoleAssignment {
+	return RoleAssignment{
+		ID: r.ID, UserID: r.UserID, Role: authz.PlatformRole(r.Role), Reason: r.Reason, Status: RoleStatus(r.Status),
+		RequestedBy: r.RequestedBy, RequestedAt: r.RequestedAt.UTC(), ApprovedBy: r.ApprovedBy, ApprovedAt: utcPtr(r.ApprovedAt),
+		GrantedAt: utcPtr(r.GrantedAt), RejectedBy: r.RejectedBy, RejectedAt: utcPtr(r.RejectedAt), RevokeReason: str(r.RevokeReason),
+		RevokeRequestedBy: r.RevokeRequestedBy, RevokeRequestedAt: utcPtr(r.RevokeRequestedAt), RevokedBy: r.RevokedBy,
+		RevokedAt: utcPtr(r.RevokedAt),
+	}
+}
+
+func roleRowOf(a RoleAssignment) roleRow {
+	return roleRow{
+		ID: a.ID, UserID: a.UserID, Role: string(a.Role), Reason: a.Reason, Status: string(a.Status),
+		RequestedBy: a.RequestedBy, RequestedAt: a.RequestedAt, ApprovedBy: a.ApprovedBy, ApprovedAt: a.ApprovedAt,
+		GrantedAt: a.GrantedAt, RejectedBy: a.RejectedBy, RejectedAt: a.RejectedAt, RevokeReason: nullable(a.RevokeReason),
+		RevokeRequestedBy: a.RevokeRequestedBy, RevokeRequestedAt: a.RevokeRequestedAt, RevokedBy: a.RevokedBy, RevokedAt: a.RevokedAt,
+	}
+}
+
+// totpRow is one mfa_totp row.
+type totpRow struct {
+	UserID       uuid.UUID  `gorm:"column:user_id;primaryKey"`
+	SecretEnc    []byte     `gorm:"column:secret_enc"`
+	ConfirmedAt  *time.Time `gorm:"column:confirmed_at"`
+	LastUsedStep *int64     `gorm:"column:last_used_step"`
+	CreatedAt    time.Time  `gorm:"column:created_at"`
+}
+
+// TableName implements gorm's Tabler.
+func (totpRow) TableName() string { return "mfa_totp" }
+
+func (r totpRow) totp() TOTP {
+	return TOTP{UserID: r.UserID, SecretEnc: r.SecretEnc, ConfirmedAt: utcPtr(r.ConfirmedAt), LastUsedStep: r.LastUsedStep, CreatedAt: r.CreatedAt.UTC()}
+}
+
+// recoveryRow is one mfa_recovery_codes row.
+type recoveryRow struct {
+	ID        uuid.UUID  `gorm:"column:id;primaryKey"`
+	UserID    uuid.UUID  `gorm:"column:user_id"`
+	CodeHash  []byte     `gorm:"column:code_hash"`
+	UsedAt    *time.Time `gorm:"column:used_at"`
+	CreatedAt time.Time  `gorm:"column:created_at"`
+}
+
+// TableName implements gorm's Tabler.
+func (recoveryRow) TableName() string { return "mfa_recovery_codes" }
+
+// accountActionRow is one privileged_account_actions row (06 H-47).
+type accountActionRow struct {
+	ID           uuid.UUID  `gorm:"column:id;primaryKey"`
+	TargetUserID uuid.UUID  `gorm:"column:target_user_id"`
+	Action       string     `gorm:"column:action"`
+	Reason       string     `gorm:"column:reason"`
+	Status       string     `gorm:"column:status"`
+	RequestedBy  uuid.UUID  `gorm:"column:requested_by"`
+	RequestedAt  time.Time  `gorm:"column:requested_at"`
+	ExpiresAt    time.Time  `gorm:"column:expires_at"`
+	ApprovedBy   *uuid.UUID `gorm:"column:approved_by"`
+	ApprovedAt   *time.Time `gorm:"column:approved_at"`
+}
+
+// TableName implements gorm's Tabler.
+func (accountActionRow) TableName() string { return "privileged_account_actions" }
+
+func accountActionRowOf(r AccountActionRequest) accountActionRow {
+	return accountActionRow{ID: r.ID, TargetUserID: r.TargetUserID, Action: string(r.Action), Reason: r.Reason, Status: string(r.Status),
+		RequestedBy: r.RequestedBy, RequestedAt: r.RequestedAt, ExpiresAt: r.ExpiresAt, ApprovedBy: r.ApprovedBy, ApprovedAt: r.ApprovedAt}
+}
+
+func (r accountActionRow) request() AccountActionRequest {
+	return AccountActionRequest{ID: r.ID, TargetUserID: r.TargetUserID, Action: AccountActionKind(r.Action), Reason: r.Reason,
+		Status: AccountActionStatus(r.Status), RequestedBy: r.RequestedBy, RequestedAt: r.RequestedAt.UTC(), ExpiresAt: r.ExpiresAt.UTC(),
+		ApprovedBy: r.ApprovedBy, ApprovedAt: utcPtr(r.ApprovedAt)}
+}

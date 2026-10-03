@@ -218,7 +218,21 @@ type env struct {
 	svc       identity.Service
 	subs      *outbox.Registry
 	delivered int
+	chal      *identity.MemChallenges
 }
+
+// testEnvelope seals TOTP secrets (fixed local KEK).
+var testEnvelope = sync.OnceValue(func() *crypto.Envelope {
+	kek, err := crypto.NewLocalKEK([]crypto.Key{{ID: "k1", Secret: []byte("identity-unit-kek-32-bytes-long!")}})
+	if err != nil {
+		panic(err)
+	}
+	env, err := crypto.NewEnvelope(kek)
+	if err != nil {
+		panic(err)
+	}
+	return env
+})
 
 func newEnv(t *testing.T, opts ...func(*identity.Deps)) *env {
 	t.Helper()
@@ -231,12 +245,13 @@ func newEnv(t *testing.T, opts ...func(*identity.Deps)) *env {
 		clk: clk, store: &spyStore{MemStore: identity.NewMemStore()}, tx: &spyTx{}, out: outbox.NewMem(clk), q: queue.NewMem(),
 		lim: ratelimit.NewMem(clk), consent: &fakeRecorder{}, notices: newNotices(), mail: &mailer{},
 		hasher: &countingHasher{h: sharedHasher()}, members: map[uuid.UUID][]authz.Membership{}, subs: outbox.NewRegistry(),
+		chal: identity.NewMemChallenges(clk),
 	}
 	e.audit = &auditRec{svc: audit.New(audit.Deps{Store: audit.NewMemStore(), Tx: db.NopTx{}, Clock: clk, Log: obs.Discard()}).Service}
 	d := identity.Deps{
 		Store: e.store, Tx: e.tx, Outbox: e.out, Queue: e.q, Audit: e.audit, Clock: clk, Log: obs.Discard(),
 		Limiter: e.lim, Deriver: der, Consent: e.consent, Notices: e.notices, Mailer: e.mail,
-		LinkBaseURL: "https://app.koro.test", Hasher: e.hasher,
+		LinkBaseURL: "https://app.koro.test", Hasher: e.hasher, Secrets: testEnvelope(), Challenges: e.chal,
 		Memberships: func(_ context.Context, id uuid.UUID) ([]authz.Membership, error) { return e.members[id], nil },
 	}
 	for _, o := range opts {

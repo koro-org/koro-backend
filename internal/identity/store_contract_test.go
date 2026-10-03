@@ -260,7 +260,7 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 		// A second open row of (user, role) is refused (…_open_uq).
 		dup := identity.RoleAssignment{ID: uuid.NewV7(), UserID: target.ID, Role: authz.PlatformAdmin, Reason: "second request",
 			Status: identity.RolePending, RequestedBy: &b.ID, RequestedAt: now}
-		if err := s.InsertRoleAssignment(ctx, dup); !errors.Is(err, identity.ErrBootstrap) {
+		if err := s.InsertRoleAssignment(ctx, dup); !errors.Is(err, identity.ErrRoleAssignmentOpen) {
 			t.Fatalf("second open row = %v", err)
 		}
 		// A privileged role in effect without a second approver is refused,
@@ -280,6 +280,268 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 		}
 		if all, _ := s.RoleAssignmentsOf(ctx, target.ID); len(all) != len(rows) {
 			t.Fatalf("RoleAssignmentsOf = %d", len(all))
+		}
+	})
+	t.Run("four-eyes role flow (06 H-17)", func(t *testing.T) {
+		t.Parallel()
+		s, ctx := newWorld(t).s, t.Context()
+		var us [4]identity.User
+		for i := range us {
+			us[i] = contractUser(uuid.NewV7().String() + "@contract.test")
+			if err := s.InsertUser(ctx, us[i]); err != nil {
+				t.Fatal(err)
+			}
+		}
+		a, b, c, target := us[0].ID, us[1].ID, us[2].ID, us[3].ID
+		now := contractBase
+		ra := identity.RoleAssignment{ID: uuid.NewV7(), UserID: target, Role: authz.PlatformFinanceAdmin, Reason: "needs finance",
+			Status: identity.RolePending, RequestedBy: &a, RequestedAt: now}
+		if err := s.InsertRoleAssignment(ctx, ra); err != nil {
+			t.Fatal(err)
+		}
+		// approved_by = requested_by: …_four_eyes_chk → the authz problem code.
+		bad := ra
+		bad.Status, bad.ApprovedBy, bad.ApprovedAt, bad.GrantedAt = identity.RoleActive, &a, &now, &now
+		if err := s.UpdateRoleAssignment(ctx, bad); !errors.Is(err, authz.ErrFourEyes) {
+			t.Fatalf("self approval = %v, want ErrFourEyes", err)
+		}
+		// active without any approver: …_privileged_chk.
+		bad.ApprovedBy, bad.ApprovedAt = nil, nil
+		if err := s.UpdateRoleAssignment(ctx, bad); err == nil {
+			t.Fatal("privileged role in effect without approver accepted")
+		}
+		ok := ra
+		ok.Status, ok.ApprovedBy, ok.ApprovedAt, ok.GrantedAt = identity.RoleActive, &b, &now, &now
+		if err := s.UpdateRoleAssignment(ctx, ok); err != nil {
+			t.Fatalf("approval by b: %v", err)
+		}
+		got, err := s.RoleAssignment(ctx, ra.ID)
+		if err != nil || got.Status != identity.RoleActive || *got.ApprovedBy != b || got.GrantedAt == nil {
+			t.Fatalf("RoleAssignment = %+v, %v", got, err)
+		}
+		if eff, pend, rp, err := s.CountRoleAssignments(ctx, authz.PlatformFinanceAdmin); err != nil || eff != 1 || pend != 0 || rp != 0 {
+			t.Fatalf("Count = %d %d %d %v", eff, pend, rp, err)
+		}
+		// Revocation: request by b, confirmation by the same b refused (…_revoke_four_eyes_chk).
+		got.Status, got.RevokeReason, got.RevokeRequestedBy, got.RevokeRequestedAt = identity.RoleRevokePending, "left the team", &b, &now
+		if err := s.UpdateRoleAssignment(ctx, got); err != nil {
+			t.Fatalf("revoke request: %v", err)
+		}
+		if roles, _ := s.PlatformRoles(ctx, target); len(roles) != 1 {
+			t.Fatalf("revoke_pending not in effect: %v", roles)
+		}
+		if _, _, rp, _ := s.CountRoleAssignments(ctx, authz.PlatformFinanceAdmin); rp != 1 {
+			t.Fatalf("revoke_pending count %d", rp)
+		}
+		self := got
+		self.Status, self.RevokedBy, self.RevokedAt = identity.RoleRevoked, &b, &now
+		if err := s.UpdateRoleAssignment(ctx, self); !errors.Is(err, authz.ErrFourEyes) {
+			t.Fatalf("self-confirmed revocation = %v, want ErrFourEyes", err)
+		}
+		got.Status, got.RevokedBy, got.RevokedAt = identity.RoleRevoked, &c, &now
+		if err := s.UpdateRoleAssignment(ctx, got); err != nil {
+			t.Fatalf("confirmation by c: %v", err)
+		}
+		if roles, _ := s.PlatformRoles(ctx, target); len(roles) != 0 {
+			t.Fatalf("revoked role in effect: %v", roles)
+		}
+		// Lists: open ones by default, everything with IncludeEnded; newest first; paging.
+		ra2 := identity.RoleAssignment{ID: uuid.NewV7(), UserID: target, Role: authz.PlatformSupport, Reason: "support desk",
+			Status: identity.RoleActive, RequestedBy: &a, RequestedAt: now, GrantedAt: &now}
+		if err := s.InsertRoleAssignment(ctx, ra2); err != nil {
+			t.Fatal(err)
+		}
+		open, _ := s.RoleAssignments(ctx, identity.RoleQuery{Limit: 10})
+		all, _ := s.RoleAssignments(ctx, identity.RoleQuery{IncludeEnded: true, Limit: 10})
+		fin, _ := s.RoleAssignments(ctx, identity.RoleQuery{Role: authz.PlatformFinanceAdmin, IncludeEnded: true, Limit: 10})
+		page2, _ := s.RoleAssignments(ctx, identity.RoleQuery{IncludeEnded: true, After: &ra2.ID, Limit: 10})
+		if len(open) != 1 || len(all) != 2 || all[0].ID != ra2.ID || len(fin) != 1 || len(page2) != 1 || page2[0].ID != ra.ID {
+			t.Fatalf("lists: open %d all %d fin %d page2 %d", len(open), len(all), len(fin), len(page2))
+		}
+		// A self-assignment: …_self_chk → 403.
+		self2 := identity.RoleAssignment{ID: uuid.NewV7(), UserID: a, Role: authz.PlatformSupport, Reason: "self service",
+			Status: identity.RoleActive, RequestedBy: &a, RequestedAt: now, GrantedAt: &now}
+		if err := s.InsertRoleAssignment(ctx, self2); !errors.Is(err, identity.ErrForbidden) {
+			t.Fatalf("self assignment = %v, want ErrForbidden", err)
+		}
+		if _, err := s.RoleAssignment(ctx, uuid.NewV7()); !errors.Is(err, identity.ErrNotFound) {
+			t.Fatalf("unknown assignment = %v", err)
+		}
+	})
+	t.Run("mfa secrets and recovery codes", func(t *testing.T) {
+		t.Parallel()
+		s, ctx := newWorld(t).s, t.Context()
+		u := contractUser(uuid.NewV7().String() + "@contract.test")
+		if err := s.InsertUser(ctx, u); err != nil {
+			t.Fatal(err)
+		}
+		if _, found, err := s.TOTP(ctx, u.ID); found || err != nil {
+			t.Fatalf("TOTP before enrollment: %v %v", found, err)
+		}
+		if used, _ := s.UseTOTPStep(ctx, u.ID, 10); used {
+			t.Fatal("a step was used without a TOTP")
+		}
+		if err := s.PutTOTP(ctx, identity.TOTP{UserID: u.ID, SecretEnc: []byte("sealed-1"), CreatedAt: contractBase}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.PutTOTP(ctx, identity.TOTP{UserID: u.ID, SecretEnc: []byte("sealed-2"), CreatedAt: contractBase}); err != nil {
+			t.Fatalf("re-enrollment: %v", err)
+		}
+		if used, _ := s.UseTOTPStep(ctx, u.ID, 10); used {
+			t.Fatal("an unconfirmed TOTP accepted a step")
+		}
+		if ok, err := s.ConfirmTOTP(ctx, u.ID, 100, contractBase); !ok || err != nil {
+			t.Fatalf("ConfirmTOTP = %v %v", ok, err)
+		}
+		if ok, _ := s.ConfirmTOTP(ctx, u.ID, 101, contractBase); ok {
+			t.Fatal("confirmed twice")
+		}
+		got, found, _ := s.TOTP(ctx, u.ID)
+		if !found || string(got.SecretEnc) != "sealed-2" || got.ConfirmedAt == nil || got.LastUsedStep == nil || *got.LastUsedStep != 100 {
+			t.Fatalf("TOTP = %+v", got)
+		}
+		if err := s.PutTOTP(ctx, identity.TOTP{UserID: u.ID, SecretEnc: []byte("sealed-3"), CreatedAt: contractBase}); !errors.Is(err, identity.ErrMFAAlreadyEnabled) {
+			t.Fatalf("enrollment over a confirmed TOTP = %v", err)
+		}
+		// Replay guard: a step ≤ the last used one is refused, a later one once.
+		for _, c := range []struct {
+			step int64
+			want bool
+		}{{100, false}, {99, false}, {101, true}, {101, false}, {103, true}, {102, false}} {
+			if used, err := s.UseTOTPStep(ctx, u.ID, c.step); used != c.want || err != nil {
+				t.Fatalf("UseTOTPStep(%d) = %v %v, want %v", c.step, used, err, c.want)
+			}
+		}
+		hashes := [][]byte{token.Hash("code-1"), token.Hash("code-2")}
+		if err := s.ReplaceRecoveryCodes(ctx, u.ID, hashes, contractBase); err != nil {
+			t.Fatal(err)
+		}
+		if used, _ := s.UseRecoveryCode(ctx, u.ID, hashes[0], contractBase); !used {
+			t.Fatal("recovery code not accepted")
+		}
+		if used, _ := s.UseRecoveryCode(ctx, u.ID, hashes[0], contractBase); used {
+			t.Fatal("recovery code accepted twice")
+		}
+		if left, _ := s.RecoveryCodesLeft(ctx, u.ID); left != 1 {
+			t.Fatalf("left %d", left)
+		}
+		if err := s.ReplaceRecoveryCodes(ctx, u.ID, [][]byte{token.Hash("code-3")}, contractBase); err != nil {
+			t.Fatal(err)
+		}
+		if used, _ := s.UseRecoveryCode(ctx, u.ID, hashes[1], contractBase); used {
+			t.Fatal("a replaced code still works")
+		}
+		if n, _ := s.DeleteRecoveryCodes(ctx, u.ID); n != 1 {
+			t.Fatalf("DeleteRecoveryCodes = %d", n)
+		}
+		if n, _ := s.DeleteTOTP(ctx, u.ID); n != 1 {
+			t.Fatalf("DeleteTOTP = %d", n)
+		}
+	})
+	t.Run("four-eyes account actions (06 H-47)", func(t *testing.T) {
+		t.Parallel()
+		s, ctx := newWorld(t).s, t.Context()
+		var us [3]identity.User
+		for i := range us {
+			us[i] = contractUser(uuid.NewV7().String() + "@contract.test")
+			if err := s.InsertUser(ctx, us[i]); err != nil {
+				t.Fatal(err)
+			}
+		}
+		a, b, target := us[0].ID, us[1].ID, us[2].ID
+		r := identity.AccountActionRequest{ID: uuid.NewV7(), TargetUserID: target, Action: identity.AccountSuspend, Reason: "suspicious",
+			Status: identity.AccountActionPending, RequestedBy: a, RequestedAt: contractBase, ExpiresAt: contractBase.Add(24 * time.Hour)}
+		if err := s.InsertAccountAction(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+		dup := r
+		dup.ID, dup.RequestedBy = uuid.NewV7(), b
+		if err := s.InsertAccountAction(ctx, dup); !errors.Is(err, identity.ErrAccountActionOpen) {
+			t.Fatalf("second pending request = %v", err)
+		}
+		other := dup
+		other.ID, other.Action = uuid.NewV7(), identity.AccountResetMFA
+		if err := s.InsertAccountAction(ctx, other); err != nil {
+			t.Fatalf("another action: %v", err)
+		}
+		self := r
+		self.ID, self.Action, self.RequestedBy = uuid.NewV7(), identity.AccountRevokeSessions, target
+		if err := s.InsertAccountAction(ctx, self); !errors.Is(err, identity.ErrForbidden) {
+			t.Fatalf("self request = %v", err)
+		}
+		got, found, err := s.LockOpenAccountAction(ctx, target, identity.AccountSuspend)
+		if err != nil || !found || got.ID != r.ID || got.RequestedBy != a {
+			t.Fatalf("LockOpenAccountAction = %+v %v %v", got, found, err)
+		}
+		at := contractBase.Add(time.Hour)
+		got.Status, got.ApprovedBy, got.ApprovedAt = identity.AccountActionApproved, &a, &at
+		if err := s.UpdateAccountAction(ctx, got); !errors.Is(err, authz.ErrFourEyes) {
+			t.Fatalf("self approval = %v", err)
+		}
+		got.ApprovedBy = &b
+		if err := s.UpdateAccountAction(ctx, got); err != nil {
+			t.Fatalf("approval: %v", err)
+		}
+		if _, found, _ := s.LockOpenAccountAction(ctx, target, identity.AccountSuspend); found {
+			t.Fatal("an approved request is still open")
+		}
+		if err := s.InsertAccountAction(ctx, dup); err != nil {
+			t.Fatalf("new request after the approval: %v", err)
+		}
+		all, _ := s.AccountActionsOf(ctx, target)
+		if len(all) != 3 || all[0].Status != identity.AccountActionApproved || *all[0].ApprovedBy != b || all[0].ApprovedAt == nil {
+			t.Fatalf("AccountActionsOf = %+v", all)
+		}
+	})
+	t.Run("admin search, mfa flag, suspension, session mfa", func(t *testing.T) {
+		t.Parallel()
+		s, ctx := newWorld(t).s, t.Context()
+		tag := uuid.NewV7().String()[:8]
+		u := contractUser(tag + "-x@contract.test")
+		u.FirstName, u.LastName = "Zeynep"+tag, "Öztürk"
+		if err := s.InsertUser(ctx, u); err != nil {
+			t.Fatal(err)
+		}
+		v := contractUser(tag + "-y@contract.test")
+		v.FirstName = "Zeynep" + tag
+		if err := s.InsertUser(ctx, v); err != nil {
+			t.Fatal(err)
+		}
+		byMail, _ := s.SearchUsers(ctx, identity.UserSearch{Email: u.EmailNormalized, Limit: 10})
+		byName, _ := s.SearchUsers(ctx, identity.UserSearch{Name: "zeynep" + tag, Limit: 10})
+		one, _ := s.SearchUsers(ctx, identity.UserSearch{Name: "zeynep" + tag, Limit: 1})
+		next, _ := s.SearchUsers(ctx, identity.UserSearch{Name: "zeynep" + tag, After: &v.ID, Limit: 10})
+		if len(byMail) != 1 || byMail[0].ID != u.ID || len(byName) != 2 || byName[0].ID != v.ID || len(one) != 1 || len(next) != 1 || next[0].ID != u.ID {
+			t.Fatalf("search: mail %d name %d one %d next %d", len(byMail), len(byName), len(one), len(next))
+		}
+		if got, _ := s.SearchUsers(ctx, identity.UserSearch{Name: "zeynep" + tag + "%", Limit: 10}); len(got) != 0 {
+			t.Fatal("LIKE wildcards are not escaped")
+		}
+		cur, _ := s.User(ctx, u.ID)
+		at := contractBase.Add(time.Minute)
+		cur.MFAEnabled, cur.Status, cur.SuspendedAt, cur.SuspensionReason = true, identity.StatusSuspended, &at, "spam"
+		if err := s.UpdateUser(ctx, cur); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := s.User(ctx, u.ID)
+		if !got.MFAEnabled || got.Status != identity.StatusSuspended || got.SuspendedAt == nil || got.SuspensionReason != "spam" {
+			t.Fatalf("UpdateUser lost columns: %+v", got)
+		}
+		if sus, _ := s.SearchUsers(ctx, identity.UserSearch{Name: "zeynep" + tag, Status: identity.StatusSuspended, Limit: 10}); len(sus) != 1 {
+			t.Fatalf("status filter: %d", len(sus))
+		}
+		sess := contractSession(v.ID, contractBase)
+		if err := s.InsertSession(ctx, sess); err != nil {
+			t.Fatal(err)
+		}
+		if ok, _ := s.MarkSessionMFA(ctx, u.ID, sess.ID, at); ok {
+			t.Fatal("marked another user's session")
+		}
+		if ok, _ := s.MarkSessionMFA(ctx, v.ID, sess.ID, at); !ok {
+			t.Fatal("MarkSessionMFA missed")
+		}
+		if x, _ := s.Session(ctx, sess.ID); x.MFAVerifiedAt == nil || !x.MFAVerifiedAt.Equal(at) {
+			t.Fatalf("mfa_verified_at %v", x.MFAVerifiedAt)
 		}
 	})
 }

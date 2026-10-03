@@ -10,6 +10,45 @@ components:
     AcceptedOutputBody:
       additionalProperties: false
       type: object
+    AccountActionDTO:
+      additionalProperties: false
+      properties:
+        action:
+          enum:
+            - suspend
+            - revoke_sessions
+            - reset_mfa
+          type: string
+        expires_at:
+          format: date-time
+          type: string
+        request_id:
+          format: uuid
+          type: string
+        requested_at:
+          format: date-time
+          type: string
+        requested_by:
+          format: uuid
+          type: string
+        status:
+          enum:
+            - pending
+            - approved
+            - expired
+          type: string
+        user_id:
+          format: uuid
+          type: string
+      required:
+        - request_id
+        - user_id
+        - action
+        - status
+        - requested_by
+        - requested_at
+        - expires_at
+      type: object
     AdminCreateInputBody:
       additionalProperties: false
       properties:
@@ -172,6 +211,26 @@ components:
       required:
         - reason
       type: object
+    AdminStudentDTO:
+      additionalProperties: false
+      properties:
+        expires_at:
+          format: date-time
+          type: string
+        status:
+          enum:
+            - none
+            - verified
+          type: string
+        university_id:
+          format: uuid
+          type: string
+        verified_at:
+          format: date-time
+          type: string
+      required:
+        - status
+      type: object
     AdminUpdateInputBody:
       additionalProperties: false
       properties:
@@ -193,6 +252,116 @@ components:
             - in_progress
           type: string
       type: object
+    AdminUserDTO:
+      additionalProperties: false
+      properties:
+        birth_date:
+          description: dpo only
+          format: date
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        email:
+          type: string
+        first_name:
+          type: string
+        last_login_at:
+          format: date-time
+          type: string
+        last_name:
+          type: string
+        locale:
+          enum:
+            - tr-TR
+            - en-US
+          type: string
+        memberships:
+          description: Non-club memberships only
+          items:
+            $ref: "#/components/schemas/MembershipDTO"
+          type: array
+        mfa_enabled:
+          type: boolean
+        pending_action:
+          $ref: "#/components/schemas/AccountActionDTO"
+          description: Set when this call opened (or kept) a four-eyes request instead of acting (06 H-47)
+        platform_roles:
+          items:
+            type: string
+          type: array
+        status:
+          enum:
+            - pending_email
+            - active
+            - suspended
+            - erased
+          type: string
+        student:
+          $ref: "#/components/schemas/AdminStudentDTO"
+        suspended_at:
+          format: date-time
+          type: string
+        suspension_reason:
+          type: string
+        user_id:
+          format: uuid
+          type: string
+      required:
+        - user_id
+        - status
+        - locale
+        - mfa_enabled
+        - created_at
+        - student
+        - platform_roles
+        - memberships
+      type: object
+    AdminUserList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/AdminUserSummaryDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
+    AdminUserSummaryDTO:
+      additionalProperties: false
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        email:
+          type: string
+        first_name:
+          type: string
+        last_login_at:
+          format: date-time
+          type: string
+        last_name:
+          type: string
+        mfa_enabled:
+          type: boolean
+        status:
+          enum:
+            - pending_email
+            - active
+            - suspended
+            - erased
+          type: string
+        user_id:
+          format: uuid
+          type: string
+      required:
+        - user_id
+        - status
+        - mfa_enabled
+        - created_at
+      type: object
     ApproveInputBody:
       additionalProperties: false
       properties:
@@ -203,6 +372,13 @@ components:
           type: string
       required:
         - stage
+      type: object
+    AssignmentInputBody:
+      additionalProperties: false
+      properties:
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof of the admin (03 §6.2)
       type: object
     AuditActorDTO:
       additionalProperties: false
@@ -301,6 +477,17 @@ components:
       required:
         - new_password
       type: object
+    CodeInputBody:
+      additionalProperties: false
+      properties:
+        code:
+          description: The current 6-digit TOTP code
+          maxLength: 16
+          minLength: 1
+          type: string
+      required:
+        - code
+      type: object
     CompanyDTO:
       additionalProperties: false
       properties:
@@ -349,6 +536,20 @@ components:
           type: string
       required:
         - sha256
+      type: object
+    ConfirmInputBody:
+      additionalProperties: false
+      properties:
+        code:
+          description: The current 6-digit TOTP code
+          maxLength: 16
+          minLength: 1
+          type: string
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: "Re-authentication proof (06 H-46): reauth.password"
+      required:
+        - code
       type: object
     ConsentDTO:
       additionalProperties: false
@@ -1052,6 +1253,34 @@ components:
         - upload_headers
         - expires_at
       type: object
+    GrantRoleInputBody:
+      additionalProperties: false
+      properties:
+        reason:
+          description: 5-500 characters; audited
+          maxLength: 1000
+          minLength: 1
+          type: string
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof of the admin (03 §6.2)
+        role:
+          enum:
+            - platform_admin
+            - moderator
+            - finance_admin
+            - talent_auditor
+            - support
+            - dpo
+          type: string
+        user_id:
+          format: uuid
+          type: string
+      required:
+        - user_id
+        - role
+        - reason
+      type: object
     LoginInputBody:
       additionalProperties: false
       properties:
@@ -1154,6 +1383,21 @@ components:
         - org_id
         - org_kind
         - role
+      type: object
+    MfaLoginInputBody:
+      additionalProperties: false
+      properties:
+        challenge_id:
+          format: uuid
+          type: string
+        recovery_code:
+          maxLength: 32
+          type: string
+        totp_code:
+          maxLength: 16
+          type: string
+      required:
+        - challenge_id
       type: object
     MyConsentsDTO:
       additionalProperties: false
@@ -1497,6 +1741,91 @@ components:
         - verified
         - follower_count
       type: object
+    PlatformRoleAssignmentDTO:
+      additionalProperties: false
+      properties:
+        approved_at:
+          format: date-time
+          type: string
+        approved_by:
+          description: The second platform_admin (privileged roles)
+          format: uuid
+          type: string
+        assignment_id:
+          format: uuid
+          type: string
+        granted_at:
+          description: The role is in effect since
+          format: date-time
+          type: string
+        reason:
+          type: string
+        rejected_at:
+          format: date-time
+          type: string
+        rejected_by:
+          format: uuid
+          type: string
+        requested_at:
+          format: date-time
+          type: string
+        requested_by:
+          description: Absent on bootstrap rows
+          format: uuid
+          type: string
+        revoke_reason:
+          type: string
+        revoke_requested_at:
+          format: date-time
+          type: string
+        revoke_requested_by:
+          format: uuid
+          type: string
+        revoked_at:
+          format: date-time
+          type: string
+        revoked_by:
+          format: uuid
+          type: string
+        role:
+          enum:
+            - platform_admin
+            - moderator
+            - finance_admin
+            - talent_auditor
+            - support
+            - dpo
+          type: string
+        status:
+          enum:
+            - pending
+            - active
+            - revoke_pending
+            - revoked
+            - rejected
+          type: string
+        user:
+          $ref: "#/components/schemas/UserRefDTO"
+      required:
+        - assignment_id
+        - user
+        - role
+        - status
+        - reason
+        - requested_at
+      type: object
+    PlatformRoleList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/PlatformRoleAssignmentDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
     PreferenceDTO:
       additionalProperties: false
       properties:
@@ -1650,6 +1979,17 @@ components:
       required:
         - items
       type: object
+    ReasonInputBody:
+      additionalProperties: false
+      properties:
+        reason:
+          description: 5-500 characters; audited
+          maxLength: 1000
+          minLength: 1
+          type: string
+      required:
+        - reason
+      type: object
     ReasonReauthInputBody:
       additionalProperties: false
       properties:
@@ -1674,6 +2014,13 @@ components:
           description: Current TOTP code (account with MFA; recovery codes are not accepted)
           pattern: ^[0-9]{6}$
           type: string
+      type: object
+    ReauthOnlyInputBody:
+      additionalProperties: false
+      properties:
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: "Re-authentication proof (03 §6.2): totp_code on an MFA account"
       type: object
     RecordMineInputBody:
       additionalProperties: false
@@ -1701,6 +2048,17 @@ components:
       required:
         - purpose_code
         - action
+      type: object
+    RecoveryCodesDTO:
+      additionalProperties: false
+      properties:
+        recovery_codes:
+          description: Ten single-use recovery codes; store them now, they are not shown again
+          items:
+            type: string
+          type: array
+      required:
+        - recovery_codes
       type: object
     RegisterInputBody:
       additionalProperties: false
@@ -1800,6 +2158,34 @@ components:
       required:
         - token
         - new_password
+      type: object
+    ResetMFAInputBody:
+      additionalProperties: false
+      properties:
+        reason:
+          description: 5-500 characters; audited
+          maxLength: 1000
+          minLength: 1
+          type: string
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof of the admin (03 §6.2)
+      required:
+        - reason
+      type: object
+    RevokeRoleInputBody:
+      additionalProperties: false
+      properties:
+        reason:
+          description: 5-500 characters; audited
+          maxLength: 1000
+          minLength: 1
+          type: string
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof of the admin (03 §6.2)
+      required:
+        - reason
       type: object
     RevokedEntitlementDTO:
       additionalProperties: false
@@ -1999,6 +2385,19 @@ components:
       required:
         - items
       type: object
+    TOTPEnrollmentDTO:
+      additionalProperties: false
+      properties:
+        otpauth_uri:
+          description: otpauth:// URI for authenticator apps (QR code); shown once
+          type: string
+        secret_base32:
+          description: The TOTP secret for manual entry; shown once
+          type: string
+      required:
+        - otpauth_uri
+        - secret_base32
+      type: object
     TokenInputBody:
       additionalProperties: false
       properties:
@@ -2143,6 +2542,19 @@ components:
           type: string
       required:
         - items
+      type: object
+    UserRefDTO:
+      additionalProperties: false
+      properties:
+        first_name:
+          type: string
+        last_name:
+          type: string
+        user_id:
+          format: uuid
+          type: string
+      required:
+        - user_id
       type: object
     VerifyDTO:
       additionalProperties: false
@@ -3429,6 +3841,286 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+  /api/v1/admin/platform-roles:
+    get:
+      description: Open assignments (pending, active, revoke_pending) unless include_revoked.
+      operationId: adminListPlatformRoles
+      parameters:
+        - explode: false
+          in: query
+          name: role
+          schema:
+            enum:
+              - platform_admin
+              - moderator
+              - finance_admin
+              - talent_auditor
+              - support
+              - dpo
+            type: string
+        - description: Also revoked and rejected assignments
+          explode: false
+          in: query
+          name: include_revoked
+          schema:
+            description: Also revoked and rejected assignments
+            type: boolean
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformRoleList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List platform role assignments
+      tags:
+        - identity
+      x-koro-action: identity.platform_role.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+    post:
+      description: "platform_admin, finance_admin and talent_auditor start as a pending request that a second platform_admin approves (four eyes); moderator, support and dpo take effect at once and close the user's sessions. Own account: 403. At most two talent auditors (409)."
+      operationId: adminGrantPlatformRole
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GrantRoleInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformRoleAssignmentDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Grant a platform role
+      tags:
+        - identity
+      x-koro-action: identity.platform_role.grant
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/platform-roles/{assignment_id}/approve:
+    post:
+      description: "The second eye (06 H-17): a platform_admin other than the requester and the user. The requester gets 403 authz.four_eyes_violation. The role takes effect and the user's sessions close."
+      operationId: adminApprovePlatformRole
+      parameters:
+        - description: Assignment ID (an unknown or malformed ID is 404)
+          in: path
+          name: assignment_id
+          required: true
+          schema:
+            description: Assignment ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignmentInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformRoleAssignmentDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Approve a pending platform role request
+      tags:
+        - identity
+      x-koro-action: identity.platform_role.grant
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/platform-roles/{assignment_id}/revoke:
+    post:
+      description: "moderator, support, dpo: revoked at once. platform_admin, finance_admin, talent_auditor: the first call requests the revocation (revoke_pending; the role stays in effect), a second platform_admin's call confirms it (the requester gets 403 authz.four_eyes_violation). A pending request is rejected. The last active platform_admin cannot be revoked (409)."
+      operationId: adminRevokePlatformRole
+      parameters:
+        - description: Assignment ID (an unknown or malformed ID is 404)
+          in: path
+          name: assignment_id
+          required: true
+          schema:
+            description: Assignment ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevokeRoleInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformRoleAssignmentDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Revoke a platform role
+      tags:
+        - identity
+      x-koro-action: identity.platform_role.revoke
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/users:
+    get:
+      description: q is an exact e-mail address or a fragment of the name (2-100 characters). Every search is audited (query kind and the users found, not the query).
+      operationId: adminSearchUsers
+      parameters:
+        - description: An exact e-mail address or a fragment of the name (2-100 characters)
+          explode: false
+          in: query
+          name: q
+          schema:
+            description: An exact e-mail address or a fragment of the name (2-100 characters)
+            maxLength: 254
+            type: string
+        - explode: false
+          in: query
+          name: status
+          schema:
+            enum:
+              - pending_email
+              - active
+              - suspended
+              - erased
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Search users
+      tags:
+        - identity
+      x-koro-action: identity.user.search
+      x-koro-rate-limit: search
+      x-koro-surface: admin
+  /api/v1/admin/users/{user_id}:
+    get:
+      description: Status, roles, student verification and non-club memberships; no profile content and never a club membership (a sensitive one must not show).
+      operationId: adminGetUser
+      parameters:
+        - description: User ID (an unknown or malformed ID is 404)
+          in: path
+          name: user_id
+          required: true
+          schema:
+            description: User ID (an unknown or malformed ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Account summary for platform staff
+      tags:
+        - identity
+      x-koro-action: identity.user.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
   /api/v1/admin/users/{user_id}/consents:
     get:
       description: IP, channel and text digest of every consent act. support needs X-Koro-Access-Reason (break-glass); every read is audited.
@@ -3503,6 +4195,48 @@ paths:
       x-koro-break-glass: true
       x-koro-rate-limit: read_default
       x-koro-surface: admin
+  /api/v1/admin/users/{user_id}/mfa/reset:
+    post:
+      description: Deletes the TOTP secret and recovery codes, closes every session and notifies the user (204). Not for the own account (403). Against a holder of platform_admin, finance_admin or talent_auditor the first call only opens a four-eyes request (202 with pending_action; valid 24 hours); the same call by a second platform_admin approves and performs it (the requester gets 403 authz.four_eyes_violation).
+      operationId: adminResetUserMfa
+      parameters:
+        - description: User ID (an unknown or malformed ID is 404)
+          in: path
+          name: user_id
+          required: true
+          schema:
+            description: User ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetMFAInputBody"
+        required: true
+      responses:
+        "204":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountActionDTO"
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Reset a user's TOTP
+      tags:
+        - identity
+      x-koro-action: identity.user.reset_mfa
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
   /api/v1/admin/users/{user_id}/notification-deliveries:
     get:
       description: "IDs, channel, template, status and time only: never the content, the data or the address. Break-glass: X-Koro-Access-Reason is mandatory; the read is audited and the user is notified."
@@ -3570,6 +4304,128 @@ paths:
       x-koro-action: notify.delivery.list
       x-koro-break-glass: true
       x-koro-rate-limit: read_default
+      x-koro-surface: admin
+  /api/v1/admin/users/{user_id}/sessions/revoke:
+    post:
+      description: 204 when done. Against a holder of platform_admin, finance_admin or talent_auditor the first call only opens a four-eyes request (202 with pending_action; valid 24 hours); the same call by a second platform_admin approves and performs it (the requester gets 403 authz.four_eyes_violation). Only a platform_admin can be the second eye.
+      operationId: adminRevokeUserSessions
+      parameters:
+        - description: User ID (an unknown or malformed ID is 404)
+          in: path
+          name: user_id
+          required: true
+          schema:
+            description: User ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReasonInputBody"
+        required: true
+      responses:
+        "204":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountActionDTO"
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Close every session of a user
+      tags:
+        - identity
+      x-koro-action: identity.user.revoke_sessions
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/users/{user_id}/suspend:
+    post:
+      description: Every session closes (revoke_reason suspended). Against a holder of platform_admin, finance_admin or talent_auditor the first call only opens a four-eyes request (202 with pending_action; valid 24 hours); the same call by a second platform_admin approves and performs it (the requester gets 403 authz.four_eyes_violation). The last active holder of a privileged role cannot be suspended (409 identity.last_privileged_holder).
+      operationId: adminSuspendUser
+      parameters:
+        - description: User ID (an unknown or malformed ID is 404)
+          in: path
+          name: user_id
+          required: true
+          schema:
+            description: User ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReasonInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Suspend an account
+      tags:
+        - identity
+      x-koro-action: identity.user.suspend
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/users/{user_id}/unsuspend:
+    post:
+      operationId: adminUnsuspendUser
+      parameters:
+        - description: User ID (an unknown or malformed ID is 404)
+          in: path
+          name: user_id
+          required: true
+          schema:
+            description: User ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReasonInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Lift a suspension
+      tags:
+        - identity
+      x-koro-action: identity.user.suspend
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
       x-koro-surface: admin
   /api/v1/auth/email-change/confirm:
     post:
@@ -3750,7 +4606,7 @@ paths:
       x-koro-surface: public
   /api/v1/auth/sessions:
     post:
-      description: "Web clients (X-Koro-Client: web, the default) get the __Host-koro_session cookie and no token; mobile clients get the bearer token once in the body. Wrong credentials, unknown or locked accounts all answer 401 identity.invalid_credentials; an unverified account 403 identity.email_not_verified. An MFA account gets mfa_required with a challenge instead of a session."
+      description: "Web clients (X-Koro-Client: web, the default) get the __Host-koro_session cookie and no token; mobile clients get the bearer token once in the body. Wrong credentials, unknown or locked accounts all answer 401 identity.invalid_credentials; an unverified account 403 identity.email_not_verified. An MFA account gets mfa_required with a challenge (5 minutes) instead of a session: completeMfaLogin opens it."
       operationId: createSession
       parameters:
         - description: "web (default): cookie; mobile: bearer token in the body"
@@ -3818,6 +4674,40 @@ paths:
       x-koro-action: identity.session.delete_current
       x-koro-rate-limit: write_default
       x-koro-surface: self
+  /api/v1/auth/sessions/mfa:
+    post:
+      description: "Second step of an MFA account's login: the challenge of createSession (valid 5 minutes, single use) with a TOTP code or a recovery code (exactly one). The session opens MFA-verified; web clients get the cookie, mobile clients the token (the client kind of the password step). Any failure is 401 identity.mfa_login_failed. A recovery code sign-in sends a security notice."
+      operationId: completeMfaLogin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MfaLoginInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionDTO"
+          description: OK
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: Complete an MFA sign-in
+      tags:
+        - identity
+      x-koro-action: identity.session.create
+      x-koro-idempotency: optional
+      x-koro-rate-limit: auth_login
+      x-koro-surface: public
   /api/v1/companies:
     post:
       description: The company starts pending_review until a platform admin verifies it. The caller becomes its company_owner; all of the caller's sessions are closed (role_change) so that the MFA policy of the role applies at the next sign-in. Tax number and MERSİS are given later with the legal party (parties).
@@ -4388,6 +5278,167 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: reauth
       x-koro-reauth: true
+      x-koro-surface: self
+  /api/v1/me/mfa/recovery-codes:
+    post:
+      description: reauth.totp_code is the proof; the old codes stop working.
+      operationId: regenerateRecoveryCodes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReauthOnlyInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecoveryCodesDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Replace my recovery codes
+      tags:
+        - identity
+      x-koro-action: identity.mfa_recovery.regenerate
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: self
+  /api/v1/me/mfa/totp:
+    post:
+      description: reauth.password is the proof (06 H-46). Returns a new TOTP secret (only in this response; stored encrypted). An earlier unconfirmed enrollment is replaced. 409 identity.mfa_already_enabled when TOTP is on.
+      operationId: enrollTotp
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReauthOnlyInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TOTPEnrollmentDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Start TOTP enrollment
+      tags:
+        - identity
+      x-koro-action: identity.mfa.enroll
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: self
+  /api/v1/me/mfa/totp/confirm:
+    post:
+      description: reauth.password is the proof (06 H-46). The first code from the authenticator turns MFA on and returns ten single-use recovery codes (shown once). The current session becomes MFA-verified. A wrong code is 422 identity.invalid_mfa_code.
+      operationId: confirmTotp
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecoveryCodesDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Confirm TOTP enrollment
+      tags:
+        - identity
+      x-koro-action: identity.mfa.confirm
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: self
+  /api/v1/me/mfa/totp/disable:
+    post:
+      description: reauth.totp_code is the proof. Users holding a role that requires MFA (platform roles, university_rep, company_admin/owner) get 409 identity.mfa_required_by_role.
+      operationId: disableTotp
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReauthOnlyInputBody"
+        required: true
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Turn TOTP off
+      tags:
+        - identity
+      x-koro-action: identity.mfa.disable
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: self
+  /api/v1/me/mfa/verify:
+    post:
+      description: Step-up after a role that requires MFA arrived (403 authz.mfa_required). A code is accepted once; recovery codes are not accepted here.
+      operationId: verifyMfa
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CodeInputBody"
+        required: true
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Make the current session MFA-verified
+      tags:
+        - identity
+      x-koro-action: identity.mfa.verify
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
       x-koro-surface: self
   /api/v1/me/notification-preferences:
     get:

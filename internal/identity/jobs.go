@@ -35,7 +35,10 @@ func (m Module) Subscribe(r *outbox.Registry) {
 
 // Tasks returns the task handlers identity enqueues itself (mechanism A).
 func (m Module) Tasks() []queue.Task {
-	return []queue.Task{{Name: SendSecurityNoticeTaskName, Handle: m.svc.handleSecurityNotice}}
+	return []queue.Task{
+		{Name: SendSecurityNoticeTaskName, Handle: m.svc.handleSecurityNotice},
+		{Name: SendRoleAlertTaskName, Handle: m.svc.handleRoleAlert},
+	}
 }
 
 // Jobs returns the cleanup jobs of 01 §7. sessions and tokens give the

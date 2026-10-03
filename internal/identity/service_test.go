@@ -275,7 +275,8 @@ func TestSession_SuspendedUser_401(t *testing.T) {
 	// Suspension (BE-016 writes it with suspended_at; the store field is
 	// enough here) closes the door at the next request (03 §2.2-3).
 	cur, _ := e.store.User(t.Context(), u.ID)
-	cur.Status = identity.StatusSuspended
+	now := e.clk.Now()
+	cur.Status, cur.SuspendedAt = identity.StatusSuspended, &now
 	if err := e.store.UpdateUser(t.Context(), cur); err != nil {
 		t.Fatal(err)
 	}

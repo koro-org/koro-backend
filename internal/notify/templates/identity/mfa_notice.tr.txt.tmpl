@@ -1,0 +1,5 @@
+Merhaba {{.Data.name}},
+
+{{with index .Data "kind"}}{{if eq . "mfa_enabled"}}Koro hesabınızda iki adımlı doğrulama (TOTP) açıldı.{{else if eq . "mfa_disabled"}}Koro hesabınızda iki adımlı doğrulama (TOTP) kapatıldı.{{else if eq . "recovery_code_used"}}Koro hesabınıza bir kurtarma koduyla giriş yapıldı. Her kod bir kez kullanılır; güvenlik ayarlarınızdan yeni kodlar oluşturabilirsiniz.{{else if eq . "recovery_codes_regenerated"}}Koro hesabınız için yeni kurtarma kodları oluşturuldu; eski kodlar artık geçersiz.{{else if eq . "mfa_reset"}}Bir Koro yöneticisi hesabınızın iki adımlı doğrulamasını sıfırladı ve tüm oturumlarınızı kapattı. Giriş yaptıktan sonra iki adımlı doğrulamayı yeniden kurun.{{else}}Koro hesabınızın iki adımlı doğrulama ayarları değişti.{{end}}{{end}}
+
+Bu işlemi siz yapmadıysanız parolanızı hemen sıfırlayın: {{index .Data "link"}}

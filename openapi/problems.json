@@ -330,6 +330,12 @@
     "type": "urn:koro:problem:idempotency.key_reused"
   },
   {
+    "code": "identity.account_action_open",
+    "status": 409,
+    "title": "A request for this action is already pending",
+    "type": "urn:koro:problem:identity.account_action_open"
+  },
+  {
     "code": "identity.birth_date_required",
     "status": 422,
     "title": "Birth date is required",
@@ -384,16 +390,76 @@
     "type": "urn:koro:problem:identity.invalid_email"
   },
   {
+    "code": "identity.invalid_mfa_code",
+    "status": 422,
+    "title": "Invalid or already used code",
+    "type": "urn:koro:problem:identity.invalid_mfa_code"
+  },
+  {
     "code": "identity.invalid_name",
     "status": 422,
     "title": "Invalid name",
     "type": "urn:koro:problem:identity.invalid_name"
   },
   {
+    "code": "identity.invalid_reason",
+    "status": 422,
+    "title": "Invalid reason",
+    "type": "urn:koro:problem:identity.invalid_reason"
+  },
+  {
+    "code": "identity.invalid_state",
+    "status": 409,
+    "title": "The role assignment is not in a state that allows this",
+    "type": "urn:koro:problem:identity.invalid_state"
+  },
+  {
     "code": "identity.invalid_token",
     "status": 422,
     "title": "Invalid or expired token",
     "type": "urn:koro:problem:identity.invalid_token"
+  },
+  {
+    "code": "identity.last_platform_admin",
+    "status": 409,
+    "title": "The last platform admin cannot be revoked",
+    "type": "urn:koro:problem:identity.last_platform_admin"
+  },
+  {
+    "code": "identity.last_privileged_holder",
+    "status": 409,
+    "title": "The last active holder of a privileged role cannot be suspended",
+    "type": "urn:koro:problem:identity.last_privileged_holder"
+  },
+  {
+    "code": "identity.mfa_already_enabled",
+    "status": 409,
+    "title": "Multi-factor authentication is already enabled",
+    "type": "urn:koro:problem:identity.mfa_already_enabled"
+  },
+  {
+    "code": "identity.mfa_login_failed",
+    "status": 401,
+    "title": "Multi-factor sign-in failed",
+    "type": "urn:koro:problem:identity.mfa_login_failed"
+  },
+  {
+    "code": "identity.mfa_not_enabled",
+    "status": 409,
+    "title": "Multi-factor authentication is not enabled",
+    "type": "urn:koro:problem:identity.mfa_not_enabled"
+  },
+  {
+    "code": "identity.mfa_not_enrolled",
+    "status": 409,
+    "title": "No TOTP enrollment to confirm",
+    "type": "urn:koro:problem:identity.mfa_not_enrolled"
+  },
+  {
+    "code": "identity.mfa_required_by_role",
+    "status": 409,
+    "title": "Multi-factor authentication is required by your role",
+    "type": "urn:koro:problem:identity.mfa_required_by_role"
   },
   {
     "code": "identity.mfa_unavailable",
@@ -406,6 +472,12 @@
     "status": 422,
     "title": "New password equals the current one",
     "type": "urn:koro:problem:identity.password_unchanged"
+  },
+  {
+    "code": "identity.platform_role_open",
+    "status": 409,
+    "title": "The user already has this role or a pending request for it",
+    "type": "urn:koro:problem:identity.platform_role_open"
   },
   {
     "code": "identity.privacy_notice_invalid",
@@ -424,6 +496,18 @@
     "status": 403,
     "title": "Re-authentication required",
     "type": "urn:koro:problem:identity.reauth_required"
+  },
+  {
+    "code": "identity.talent_auditor_limit",
+    "status": 409,
+    "title": "At most two talent auditors are allowed",
+    "type": "urn:koro:problem:identity.talent_auditor_limit"
+  },
+  {
+    "code": "identity.user_invalid_state",
+    "status": 409,
+    "title": "The account is not in a state that allows this",
+    "type": "urn:koro:problem:identity.user_invalid_state"
   },
   {
     "code": "identity.weak_password",

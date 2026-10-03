@@ -84,13 +84,15 @@ func TestWire_CryptoKeys(t *testing.T) {
 	}
 	bao.SetDown(false)
 
+	// identity declares mfa_totp.secret_enc in its build (BE-016, T-185): a
+	// second declaration of the same column is refused.
 	col := rewrap.Column{Name: "identity.mfa_totp.secret_enc", Table: "mfa_totp", Key: "user_id", Column: "secret_enc",
 		PurposePrefix: "identity.mfa_secret/", PurposeColumn: "user_id"}
-	if err := c.keys.addRewrap(col); err != nil {
-		t.Fatal(err)
-	}
 	if err := c.keys.addRewrap(col); err == nil {
 		t.Fatal("a column was declared twice")
+	}
+	if err := c.keys.addRewrap(rewrap.Column{Name: "test.other_enc", Table: "other", Key: "id", Column: "other_enc", PurposePrefix: "p"}); err != nil {
+		t.Fatal(err)
 	}
 	if err := c.keys.addRewrap(rewrap.Column{Name: "x", Table: "t;", Key: "id", Column: "c", PurposePrefix: "p"}); err == nil {
 		t.Fatal("an invalid identifier was accepted")

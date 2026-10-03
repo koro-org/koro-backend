@@ -34,6 +34,13 @@ const (
 	NoticePasswordChanged      = "password_changed"
 	NoticeEmailChangeRequested = "email_change_requested"
 	NoticeEmailChanged         = "email_changed"
+
+	// MFA notices (03 §6.4-4; identity.mfa_notice template, BE-016).
+	NoticeMFAEnabled               = "mfa_enabled"
+	NoticeMFADisabled              = "mfa_disabled"
+	NoticeRecoveryCodeUsed         = "recovery_code_used"
+	NoticeRecoveryCodesRegenerated = "recovery_codes_regenerated"
+	NoticeMFAReset                 = "mfa_reset" // by a platform admin (k2)
 )
 
 // Templates (internal/notify/templates/identity/, BE-001 R8).
@@ -43,7 +50,18 @@ var tokenTemplates = map[TokenPurpose]struct{ template, path string }{
 	PurposeEmailChange:   {"identity.email_change", "/auth/confirm-email-change"},
 }
 
-const securityNoticeTemplate = "identity.security_notice"
+const (
+	securityNoticeTemplate = "identity.security_notice"
+	mfaNoticeTemplate      = "identity.mfa_notice"
+)
+
+// noticeTemplates maps every security notice kind to its template.
+var noticeTemplates = map[string]string{
+	NoticeSignupAttempt: securityNoticeTemplate, NoticePasswordChanged: securityNoticeTemplate,
+	NoticeEmailChangeRequested: securityNoticeTemplate, NoticeEmailChanged: securityNoticeTemplate,
+	NoticeMFAEnabled: mfaNoticeTemplate, NoticeMFADisabled: mfaNoticeTemplate, NoticeRecoveryCodeUsed: mfaNoticeTemplate,
+	NoticeRecoveryCodesRegenerated: mfaNoticeTemplate, NoticeMFAReset: mfaNoticeTemplate,
+}
 
 // issueToken opens a new e-mail token of purpose for u in the transaction
 // carried by ctx: the open tokens of the same purpose close, the row keeps
@@ -163,9 +181,8 @@ func (s *service) handleSecurityNotice(ctx context.Context, payload []byte) erro
 	if err := json.Unmarshal(payload, &n); err != nil || n.UserID == uuid.Nil() || n.Ref == uuid.Nil() {
 		return queue.Permanent(fmt.Errorf("identity: security notice payload: %w", errors.Join(err, errors.New("missing ids"))))
 	}
-	switch n.Kind {
-	case NoticeSignupAttempt, NoticePasswordChanged, NoticeEmailChangeRequested, NoticeEmailChanged:
-	default:
+	tpl, ok := noticeTemplates[n.Kind]
+	if !ok {
 		return queue.Permanent(fmt.Errorf("identity: unknown security notice %q", n.Kind))
 	}
 	u, err := s.d.Store.User(ctx, n.UserID)
@@ -180,7 +197,7 @@ func (s *service) handleSecurityNotice(ctx context.Context, payload []byte) erro
 	}
 	msg := notify.Message{
 		UserID: &u.ID, ToEmail: u.Email, Channel: notify.ChannelEmail, Category: notify.CategoryTransactional,
-		Template: securityNoticeTemplate, Locale: u.Locale,
+		Template: tpl, Locale: u.Locale,
 		Data:      map[string]any{"name": u.FirstName, "kind": n.Kind, "link": s.d.LinkBaseURL + "/auth/reset-password"},
 		DedupeKey: "identity.security:" + n.Ref.String(),
 	}

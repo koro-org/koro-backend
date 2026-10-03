@@ -12,6 +12,7 @@ import (
 	"uuid"
 
 	"koro/internal/authz"
+	"koro/internal/platform/textx"
 )
 
 // MemStore is the in-memory Store of service, wiring and matrix tests
@@ -25,6 +26,15 @@ type MemStore struct {
 	sessions map[uuid.UUID]Session
 	tokens   map[uuid.UUID]EmailToken
 	roles    map[uuid.UUID]RoleAssignment
+	totp     map[uuid.UUID]TOTP
+	recovery map[uuid.UUID]memRecovery
+	actions  map[uuid.UUID]AccountActionRequest
+}
+
+type memRecovery struct {
+	userID uuid.UUID
+	hash   []byte
+	usedAt *time.Time
 }
 
 // NewMemStore returns an empty in-memory store.
@@ -32,6 +42,7 @@ func NewMemStore() *MemStore {
 	return &MemStore{
 		users: map[uuid.UUID]User{}, sessions: map[uuid.UUID]Session{},
 		tokens: map[uuid.UUID]EmailToken{}, roles: map[uuid.UUID]RoleAssignment{},
+		totp: map[uuid.UUID]TOTP{}, recovery: map[uuid.UUID]memRecovery{}, actions: map[uuid.UUID]AccountActionRequest{},
 	}
 }
 
@@ -61,6 +72,10 @@ func checkUser(u User) error {
 		return fmt.Errorf("%w: users_student_birth_date_chk", errMemCheck)
 	case u.FailedLogins < 0 || u.FailedLogins > maxFailedLogins:
 		return fmt.Errorf("%w: users_failed_login_count_chk", errMemCheck)
+	case u.Status == StatusSuspended && u.SuspendedAt == nil:
+		return fmt.Errorf("%w: users_suspended_chk", errMemCheck)
+	case len([]rune(u.SuspensionReason)) > 500:
+		return fmt.Errorf("%w: users_suspension_reason_chk", errMemCheck)
 	}
 	return nil
 }
@@ -138,6 +153,7 @@ func (m *MemStore) UpdateUser(_ context.Context, u User) error {
 	cur.Status, cur.Email, cur.EmailNormalized, cur.EmailVerifiedAt = u.Status, u.Email, u.EmailNormalized, cloneTime(u.EmailVerifiedAt)
 	cur.PasswordHash, cur.FirstName, cur.LastName, cur.Locale = u.PasswordHash, u.FirstName, u.LastName, u.Locale
 	cur.LastLoginAt, cur.FailedLogins, cur.LockedUntil = cloneTime(u.LastLoginAt), u.FailedLogins, cloneTime(u.LockedUntil)
+	cur.MFAEnabled, cur.SuspendedAt, cur.SuspensionReason = u.MFAEnabled, cloneTime(u.SuspendedAt), u.SuspensionReason
 	if err := checkUser(cur); err != nil {
 		return err
 	}
@@ -467,11 +483,6 @@ func (m *MemStore) UsersWithRole(_ context.Context, role authz.PlatformRole) ([]
 	return out, nil
 }
 
-// privilegedRole is the four-eyes set of 06 H-17.
-func privilegedRole(r authz.PlatformRole) bool {
-	return r == authz.PlatformAdmin || r == authz.PlatformFinanceAdmin || r == authz.PlatformTalentAuditor
-}
-
 // checkAssignment mirrors the platform_role_assignments CHECKs (02 §5.7).
 func checkAssignment(a RoleAssignment) error {
 	eq := func(x *uuid.UUID, y uuid.UUID) bool { return x != nil && *x == y }
@@ -498,8 +509,28 @@ func checkAssignment(a RoleAssignment) error {
 	case (a.RevokedBy == nil) != (a.RevokedAt == nil) || (a.Status == RoleRevoked) != (a.RevokedAt != nil) ||
 		(a.Status == RoleRevokePending || a.Status == RoleRevoked) != (a.RevokeReason != ""):
 		return bad("revoked")
+	case (a.RevokeRequestedBy == nil) != (a.RevokeRequestedAt == nil) ||
+		(a.Status == RoleRevokePending && a.RevokeRequestedBy == nil) ||
+		(a.RevokeRequestedBy != nil && a.Status != RoleRevokePending && a.Status != RoleRevoked):
+		return bad("revoke_request")
+	case privilegedRole(a.Role) && a.Status == RoleRevoked && (a.RevokeRequestedBy == nil || same(a.RevokedBy, a.RevokeRequestedBy)):
+		return bad("revoke_four_eyes")
 	}
 	return nil
+}
+
+// memAssignmentErr maps a CHECK failure to the error the GORM store's
+// constraint table gives (store contract).
+func memAssignmentErr(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case strings.Contains(err.Error(), "_four_eyes_chk"):
+		return ErrFourEyes.Wrap(err)
+	case strings.Contains(err.Error(), "_self_chk"):
+		return ErrForbidden.Wrap(err)
+	}
+	return err
 }
 
 // InsertRoleAssignment implements Store.
@@ -509,17 +540,370 @@ func (m *MemStore) InsertRoleAssignment(_ context.Context, a RoleAssignment) err
 	if _, ok := m.users[a.UserID]; !ok {
 		return fmt.Errorf("identity memstore: assignment of unknown user: %w", ErrNotFound)
 	}
-	if err := checkAssignment(a); err != nil {
+	if err := memAssignmentErr(checkAssignment(a)); err != nil {
 		return err
 	}
-	isOpen := func(s RoleStatus) bool { return s == RolePending || s.InEffect() }
-	if isOpen(a.Status) {
-		for _, o := range m.roles {
-			if o.UserID == a.UserID && o.Role == a.Role && isOpen(o.Status) {
-				return ErrBootstrap.Wrap(errors.New("platform_role_assignments_open_uq"))
-			}
+	if _, dup := m.roles[a.ID]; dup {
+		return fmt.Errorf("identity memstore: duplicate assignment %s", a.ID)
+	}
+	if err := m.openConflict(a); err != nil {
+		return err
+	}
+	m.roles[a.ID] = a.clone()
+	return nil
+}
+
+func openStatus(s RoleStatus) bool { return s == RolePending || s.InEffect() }
+
+// openConflict mirrors platform_role_assignments_open_uq.
+func (m *MemStore) openConflict(a RoleAssignment) error {
+	if !openStatus(a.Status) {
+		return nil
+	}
+	for _, o := range m.roles {
+		if o.ID != a.ID && o.UserID == a.UserID && o.Role == a.Role && openStatus(o.Status) {
+			return ErrRoleAssignmentOpen.Wrap(errors.New("platform_role_assignments_open_uq"))
 		}
 	}
-	m.roles[a.ID] = a
 	return nil
+}
+
+// RoleAssignment implements Store.
+func (m *MemStore) RoleAssignment(_ context.Context, id uuid.UUID) (RoleAssignment, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, ok := m.roles[id]
+	if !ok {
+		return RoleAssignment{}, ErrNotFound
+	}
+	return a.clone(), nil
+}
+
+// LockRoleAssignment implements Store.
+func (m *MemStore) LockRoleAssignment(ctx context.Context, id uuid.UUID) (RoleAssignment, error) {
+	return m.RoleAssignment(ctx, id)
+}
+
+// UpdateRoleAssignment implements Store.
+func (m *MemStore) UpdateRoleAssignment(_ context.Context, a RoleAssignment) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cur, ok := m.roles[a.ID]
+	if !ok {
+		return ErrNotFound
+	}
+	cur.Status, cur.ApprovedBy, cur.ApprovedAt, cur.GrantedAt = a.Status, cloneID(a.ApprovedBy), cloneTime(a.ApprovedAt), cloneTime(a.GrantedAt)
+	cur.RejectedBy, cur.RejectedAt, cur.RevokeReason = cloneID(a.RejectedBy), cloneTime(a.RejectedAt), a.RevokeReason
+	cur.RevokeRequestedBy, cur.RevokeRequestedAt = cloneID(a.RevokeRequestedBy), cloneTime(a.RevokeRequestedAt)
+	cur.RevokedBy, cur.RevokedAt = cloneID(a.RevokedBy), cloneTime(a.RevokedAt)
+	if err := memAssignmentErr(checkAssignment(cur)); err != nil {
+		return err
+	}
+	if err := m.openConflict(cur); err != nil {
+		return err
+	}
+	m.roles[a.ID] = cur
+	return nil
+}
+
+// RoleAssignments implements Store.
+func (m *MemStore) RoleAssignments(_ context.Context, q RoleQuery) ([]RoleAssignment, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []RoleAssignment
+	for _, a := range m.roles {
+		if (q.Role == "" || a.Role == q.Role) && (q.IncludeEnded || openStatus(a.Status)) &&
+			(q.After == nil || a.ID.Compare(*q.After) < 0) {
+			out = append(out, a.clone())
+		}
+	}
+	slices.SortFunc(out, func(a, b RoleAssignment) int { return b.ID.Compare(a.ID) })
+	if len(out) > q.Limit {
+		out = out[:q.Limit]
+	}
+	return out, nil
+}
+
+// CountRoleAssignments implements Store.
+func (m *MemStore) CountRoleAssignments(_ context.Context, role authz.PlatformRole) (int, int, int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var eff, pend, rp int
+	for _, a := range m.roles {
+		if a.Role != role {
+			continue
+		}
+		if a.Status.InEffect() {
+			eff++
+		}
+		switch a.Status {
+		case RolePending:
+			pend++
+		case RoleRevokePending:
+			rp++
+		default:
+		}
+	}
+	return eff, pend, rp, nil
+}
+
+// SearchUsers implements Store. The name match folds case the Turkish way
+// (koro_norm without unaccent: tests use plain names).
+func (m *MemStore) SearchUsers(_ context.Context, q UserSearch) ([]User, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []User
+	name := textx.LowerTR(q.Name)
+	for _, u := range m.users {
+		switch {
+		case q.Email != "" && u.EmailNormalized != q.Email,
+			q.Email == "" && q.Name != "" && (u.Status == StatusErased || !strings.Contains(textx.LowerTR(u.FirstName+" "+u.LastName), name)),
+			q.Status != "" && u.Status != q.Status,
+			q.After != nil && u.ID.Compare(*q.After) >= 0:
+			continue
+		}
+		out = append(out, u.clone())
+	}
+	slices.SortFunc(out, func(a, b User) int { return b.ID.Compare(a.ID) })
+	if len(out) > q.Limit {
+		out = out[:q.Limit]
+	}
+	return out, nil
+}
+
+// MarkSessionMFA implements Store.
+func (m *MemStore) MarkSessionMFA(_ context.Context, userID, id uuid.UUID, at time.Time) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[id]
+	if !ok || s.UserID != userID || s.RevokedAt != nil {
+		return false, nil
+	}
+	s.MFAVerifiedAt = &at
+	m.sessions[id] = s
+	return true, nil
+}
+
+// TOTP implements Store.
+func (m *MemStore) TOTP(_ context.Context, userID uuid.UUID) (TOTP, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.totp[userID]
+	if !ok {
+		return TOTP{}, false, nil
+	}
+	return t.clone(), true, nil
+}
+
+// PutTOTP implements Store.
+func (m *MemStore) PutTOTP(_ context.Context, t TOTP) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.users[t.UserID]; !ok {
+		return fmt.Errorf("identity memstore: totp of unknown user: %w", ErrNotFound)
+	}
+	if cur, ok := m.totp[t.UserID]; ok && cur.ConfirmedAt != nil {
+		return ErrMFAAlreadyEnabled
+	}
+	n := t.clone()
+	n.ConfirmedAt, n.LastUsedStep = nil, nil
+	m.totp[t.UserID] = n
+	return nil
+}
+
+// ConfirmTOTP implements Store.
+func (m *MemStore) ConfirmTOTP(_ context.Context, userID uuid.UUID, step int64, at time.Time) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.totp[userID]
+	if !ok || t.ConfirmedAt != nil {
+		return false, nil
+	}
+	t.ConfirmedAt, t.LastUsedStep = &at, &step
+	m.totp[userID] = t
+	return true, nil
+}
+
+// UseTOTPStep implements Store.
+func (m *MemStore) UseTOTPStep(_ context.Context, userID uuid.UUID, step int64) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.totp[userID]
+	if !ok || t.ConfirmedAt == nil || (t.LastUsedStep != nil && *t.LastUsedStep >= step) {
+		return false, nil
+	}
+	t.LastUsedStep = &step
+	m.totp[userID] = t
+	return true, nil
+}
+
+// DeleteTOTP implements Store.
+func (m *MemStore) DeleteTOTP(_ context.Context, userID uuid.UUID) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.totp[userID]; !ok {
+		return 0, nil
+	}
+	delete(m.totp, userID)
+	return 1, nil
+}
+
+// ReplaceRecoveryCodes implements Store.
+func (m *MemStore) ReplaceRecoveryCodes(_ context.Context, userID uuid.UUID, hashes [][]byte, _ time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, r := range m.recovery {
+		if r.userID == userID {
+			delete(m.recovery, id)
+		}
+	}
+	for _, h := range hashes {
+		if len(h) != 32 {
+			return fmt.Errorf("%w: mfa_recovery_codes_code_hash_chk", errMemCheck)
+		}
+		for _, r := range m.recovery {
+			if bytes.Equal(r.hash, h) {
+				return errors.New("identity memstore: mfa_recovery_codes_code_hash_uq")
+			}
+		}
+		m.recovery[uuid.NewV7()] = memRecovery{userID: userID, hash: bytes.Clone(h)}
+	}
+	return nil
+}
+
+// UseRecoveryCode implements Store.
+func (m *MemStore) UseRecoveryCode(_ context.Context, userID uuid.UUID, hash []byte, at time.Time) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, r := range m.recovery {
+		if r.userID == userID && r.usedAt == nil && bytes.Equal(r.hash, hash) {
+			r.usedAt = &at
+			m.recovery[id] = r
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// RecoveryCodesLeft implements Store.
+func (m *MemStore) RecoveryCodesLeft(_ context.Context, userID uuid.UUID) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, r := range m.recovery {
+		if r.userID == userID && r.usedAt == nil {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// DeleteRecoveryCodes implements Store.
+func (m *MemStore) DeleteRecoveryCodes(_ context.Context, userID uuid.UUID) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for id, r := range m.recovery {
+		if r.userID == userID {
+			delete(m.recovery, id)
+			n++
+		}
+	}
+	return n, nil
+}
+
+// checkAccountAction mirrors the privileged_account_actions CHECKs.
+func checkAccountAction(r AccountActionRequest) error {
+	bad := func(name string) error { return fmt.Errorf("%w: privileged_account_actions_%s_chk", errMemCheck, name) }
+	switch {
+	case r.Action != AccountSuspend && r.Action != AccountRevokeSessions && r.Action != AccountResetMFA:
+		return bad("action")
+	case len([]rune(r.Reason)) < 5 || len([]rune(r.Reason)) > 500:
+		return bad("reason")
+	case r.RequestedBy == r.TargetUserID || (r.ApprovedBy != nil && *r.ApprovedBy == r.TargetUserID):
+		return ErrForbidden.Wrap(bad("self"))
+	case r.ApprovedBy != nil && *r.ApprovedBy == r.RequestedBy:
+		return ErrFourEyes.Wrap(bad("four_eyes"))
+	case r.Status == AccountActionApproved && (r.ApprovedBy == nil || r.ApprovedAt == nil):
+		return bad("approved")
+	case r.Status != AccountActionApproved && (r.ApprovedBy != nil || r.ApprovedAt != nil):
+		return bad("unapproved")
+	case !r.ExpiresAt.After(r.RequestedAt):
+		return bad("expiry")
+	}
+	return nil
+}
+
+func (m *MemStore) actionOpen(r AccountActionRequest) error {
+	if r.Status != AccountActionPending {
+		return nil
+	}
+	for _, o := range m.actions {
+		if o.ID != r.ID && o.TargetUserID == r.TargetUserID && o.Action == r.Action && o.Status == AccountActionPending {
+			return ErrAccountActionOpen.Wrap(errors.New("privileged_account_actions_open_uq"))
+		}
+	}
+	return nil
+}
+
+// InsertAccountAction implements Store.
+func (m *MemStore) InsertAccountAction(_ context.Context, r AccountActionRequest) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.users[r.TargetUserID]; !ok {
+		return fmt.Errorf("identity memstore: action against unknown user: %w", ErrNotFound)
+	}
+	if _, dup := m.actions[r.ID]; dup {
+		return fmt.Errorf("identity memstore: duplicate account action %s", r.ID)
+	}
+	if err := checkAccountAction(r); err != nil {
+		return err
+	}
+	if err := m.actionOpen(r); err != nil {
+		return err
+	}
+	m.actions[r.ID] = r.clone()
+	return nil
+}
+
+// LockOpenAccountAction implements Store.
+func (m *MemStore) LockOpenAccountAction(_ context.Context, target uuid.UUID, action AccountActionKind) (AccountActionRequest, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, r := range m.actions {
+		if r.TargetUserID == target && r.Action == action && r.Status == AccountActionPending {
+			return r.clone(), true, nil
+		}
+	}
+	return AccountActionRequest{}, false, nil
+}
+
+// UpdateAccountAction implements Store.
+func (m *MemStore) UpdateAccountAction(_ context.Context, r AccountActionRequest) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cur, ok := m.actions[r.ID]
+	if !ok {
+		return ErrNotFound
+	}
+	cur.Status, cur.ApprovedBy, cur.ApprovedAt = r.Status, cloneID(r.ApprovedBy), cloneTime(r.ApprovedAt)
+	if err := checkAccountAction(cur); err != nil {
+		return err
+	}
+	m.actions[r.ID] = cur
+	return nil
+}
+
+// AccountActionsOf implements Store.
+func (m *MemStore) AccountActionsOf(_ context.Context, userID uuid.UUID) ([]AccountActionRequest, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []AccountActionRequest
+	for _, r := range m.actions {
+		if r.TargetUserID == userID {
+			out = append(out, r.clone())
+		}
+	}
+	slices.SortFunc(out, func(a, b AccountActionRequest) int { return a.ID.Compare(b.ID) })
+	return out, nil
 }

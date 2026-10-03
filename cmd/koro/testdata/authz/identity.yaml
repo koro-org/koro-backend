@@ -1,10 +1,22 @@
-# Authz matrix of the identity module (03 §5.1, 04 §2.1; BE-014). 14 operations × 18 personas.
+# Authz matrix of the identity module (03 §5.1, 04 §2.1; BE-014, BE-016). 30 operations × 18 personas.
 # Public (P) operations are the same for every persona, a signed-in caller included (the
 # operation ignores the session; 06 H-25). O cells: /me/... and /auth/sessions/current act on
 # the caller's own account and sessions only; another user's session is 404. password.change
 # and email_change.request are O · R: the bodies carry the matrix password as proof
 # (current_password / reauth.password); the missing and wrong proofs are scenarios.
+# BE-016: identity_mfa (none | enrolled | enabled) gives every matrix account an unconfirmed or a
+# confirmed TOTP with one secret; its code at the container clock is in the bodies (mfa_*.json).
+# Staff cells need an MFA-verified session (k-mfa); the personas' sessions are (03 §7.3).
 version: 1
+config:
+  identity_mfa: none
+groups:
+  mfa_roles: [university_rep, company_admin, other_company_member, moderator, support, dpo, platform_admin,
+              finance_admin, talent_auditor]
+  no_mfa_role: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin, event_staff,
+                company_member]
+  not_staff: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin, event_staff,
+              university_rep, company_member, company_admin, other_company_member]
 operations:
   registerAccount:
     method: POST
@@ -33,6 +45,10 @@ operations:
     note: login is anonymous by design (P); student_b's credentials
     expect: { "@all": 200 }
     variants:
+      - name: mfa_account
+        config: { identity_mfa: enabled }
+        note: an MFA account gets a challenge (200 mfa_required), no session (03 §6.4-1)
+        expect: { "@all": 200 }
       - name: wrong_password
         body: bodies/identity/login_wrong.json
         note: identity.invalid_credentials (same answer as an unknown address)
@@ -160,24 +176,187 @@ operations:
     body: bodies/identity/update_me.json
     expect: { anonymous: 401, "@signed_in": 200 }
 
+  completeMfaLogin:
+    method: POST
+    path: /api/v1/auth/sessions/mfa
+    action: identity.session.create
+    public: true
+    config: { identity_mfa: enabled }
+    body: bodies/identity/mfa_login.json
+    note: the challenge of student_b's password step is the credential (P); single use and a wrong code are the
+      mfa_login scenario
+    expect: { "@all": 200 }
+    variants:
+      - name: unknown_challenge
+        body: bodies/identity/mfa_login_unknown.json
+        note: identity.mfa_login_failed, the same answer as a wrong code or an expired challenge
+        expect: { "@all": 401 }
+
+  enrollTotp:
+    method: POST
+    path: /api/v1/me/mfa/totp
+    action: identity.mfa.enroll
+    body: bodies/identity/role_reauth.json
+    note: O · R (06 H-46) - reauth.password; missing proof is the mfa_enroll_reauth scenario
+    expect: { anonymous: 401, "@signed_in": 200 }
+    variants:
+      - name: already_enabled
+        config: { identity_mfa: enabled }
+        note: TOTP is on; the secret is never shown again (identity.mfa_already_enabled)
+        expect: { anonymous: 401, "@signed_in": 409 }
+
+  confirmTotp:
+    method: POST
+    path: /api/v1/me/mfa/totp/confirm
+    action: identity.mfa.confirm
+    config: { identity_mfa: enrolled }
+    body: bodies/identity/mfa_confirm.json
+    note: O · R (06 H-46) - the code and reauth.password
+    expect: { anonymous: 401, "@signed_in": 200 }
+
+  verifyMfa:
+    method: POST
+    path: /api/v1/me/mfa/verify
+    action: identity.mfa.verify
+    config: { identity_mfa: enabled }
+    body: bodies/identity/mfa_code.json
+    expect: { anonymous: 401, "@signed_in": 204 }
+
+  disableTotp:
+    method: POST
+    path: /api/v1/me/mfa/totp/disable
+    action: identity.mfa.disable
+    config: { identity_mfa: enabled }
+    body: bodies/identity/mfa_reauth_totp.json
+    note: 03 §5.1 k1 - a user holding an MFA role cannot turn TOTP off (409 identity.mfa_required_by_role)
+    expect: { anonymous: 401, "@no_mfa_role": 204, "@mfa_roles": 409 }
+
+  regenerateRecoveryCodes:
+    method: POST
+    path: /api/v1/me/mfa/recovery-codes
+    action: identity.mfa_recovery.regenerate
+    config: { identity_mfa: enabled }
+    body: bodies/identity/mfa_reauth_totp.json
+    expect: { anonymous: 401, "@signed_in": 200 }
+
+  adminSearchUsers:
+    method: GET
+    path: /api/v1/admin/users
+    action: identity.user.search
+    query: { q: student_b@matrix.koro.test }
+    expect: { anonymous: 401, "@not_staff": 403, moderator: 403, support: 200, dpo: 200, platform_admin: 200,
+              finance_admin: 403, talent_auditor: 403 }
+
+  adminGetUser:
+    method: GET
+    path: /api/v1/admin/users/{user_id}
+    action: identity.user.read
+    path_params: { user_id: student_b }
+    expect: { anonymous: 401, "@not_staff": 403, moderator: 403, support: 200, dpo: 200, platform_admin: 200,
+              finance_admin: 403, talent_auditor: 403 }
+    variants:
+      - name: missing
+        path_params: { user_id: "literal:00000000-0000-7000-8000-0000000000e3" }
+        note: the admin surface decides before it reads (03 §3.2); only staff with the action learn it is missing
+        expect: { anonymous: 401, "@not_staff": 403, moderator: 403, support: 404, dpo: 404, platform_admin: 404,
+                  finance_admin: 403, talent_auditor: 403 }
+
+  adminSuspendUser:
+    method: POST
+    path: /api/v1/admin/users/{user_id}/suspend
+    action: identity.user.suspend
+    path_params: { user_id: student_b }
+    body: bodies/identity/admin_reason.json
+    expect: { anonymous: 401, "@not_staff": 403, moderator: 403, support: 403, dpo: 403, platform_admin: 200,
+              finance_admin: 403, talent_auditor: 403 }
+
+  adminUnsuspendUser:
+    method: POST
+    path: /api/v1/admin/users/{user_id}/unsuspend
+    action: identity.user.suspend
+    path_params: { user_id: user_suspended }
+    body: bodies/identity/admin_reason.json
+    expect: { anonymous: 401, "@not_staff": 403, moderator: 403, support: 403, dpo: 403, platform_admin: 200,
+              finance_admin: 403, talent_auditor: 403 }
+
+  adminRevokeUserSessions:
+    method: POST
+    path: /api/v1/admin/users/{user_id}/sessions/revoke
+    action: identity.user.revoke_sessions
+    path_params: { user_id: student_b }
+    body: bodies/identity/admin_reason.json
+    expect: { anonymous: 401, "@not_staff": 403, moderator: 403, support: 204, dpo: 403, platform_admin: 204,
+              finance_admin: 403, talent_auditor: 403 }
+
+  adminResetUserMfa:
+    method: POST
+    path: /api/v1/admin/users/{user_id}/mfa/reset
+    action: identity.user.reset_mfa
+    path_params: { user_id: student_b }
+    body: bodies/identity/admin_reset_mfa.json
+    expect: { anonymous: 401, "@not_staff": 403, moderator: 403, support: 403, dpo: 403, platform_admin: 204,
+              finance_admin: 403, talent_auditor: 403 }
+    variants:
+      - name: own_account
+        path_params: { user_id: platform_admin }
+        note: k2 / Y6 - nobody resets their own MFA
+        expect: { anonymous: 401, "@signed_in": 403 }
+
+  adminListPlatformRoles:
+    method: GET
+    path: /api/v1/admin/platform-roles
+    action: identity.platform_role.list
+    expect: { anonymous: 401, "@not_staff": 403, moderator: 403, support: 403, dpo: 200, platform_admin: 200,
+              finance_admin: 403, talent_auditor: 403 }
+
+  adminGrantPlatformRole:
+    method: POST
+    path: /api/v1/admin/platform-roles
+    action: identity.platform_role.grant
+    body: bodies/identity/grant_role.json
+    note: moderator takes effect at once (one admin, 02 §5.7); privileged roles are the four_eyes_grant scenario
+    expect: { anonymous: 401, "@not_staff": 403, moderator: 403, support: 403, dpo: 403, platform_admin: 201,
+              finance_admin: 403, talent_auditor: 403 }
+    variants:
+      - name: privileged_request
+        body: bodies/identity/grant_role_finance.json
+        note: finance_admin opens a pending request (06 H-17)
+        expect: { anonymous: 401, "@not_staff": 403, moderator: 403, support: 403, dpo: 403, platform_admin: 201,
+                  finance_admin: 403, talent_auditor: 403 }
+      - name: self
+        body: bodies/identity/grant_role_self.json
+        note: Y6 - nobody grants a role to themselves
+        expect: { anonymous: 401, "@signed_in": 403 }
+
+  adminApprovePlatformRole:
+    method: POST
+    path: /api/v1/admin/platform-roles/{assignment_id}/approve
+    action: identity.platform_role.grant
+    path_params: { assignment_id: role_pending_finance_b }
+    body: bodies/identity/role_reauth.json
+    note: the second eye (06 H-17, T-79); the request is platform_admin_2's
+    expect: { anonymous: 401, "@not_staff": 403, moderator: 403, support: 403, dpo: 403, platform_admin: 200,
+              finance_admin: 403, talent_auditor: 403 }
+    variants:
+      - name: missing
+        path_params: { assignment_id: "literal:00000000-0000-7000-8000-0000000000e4" }
+        expect: { anonymous: 401, "@not_staff": 403, moderator: 403, support: 403, dpo: 403, platform_admin: 404,
+                  finance_admin: 403, talent_auditor: 403 }
+
+  adminRevokePlatformRole:
+    method: POST
+    path: /api/v1/admin/platform-roles/{assignment_id}/revoke
+    action: identity.platform_role.revoke
+    path_params: { assignment_id: role_moderator_b }
+    body: bodies/identity/revoke_role.json
+    expect: { anonymous: 401, "@not_staff": 403, moderator: 403, support: 403, dpo: 403, platform_admin: 200,
+              finance_admin: 403, talent_auditor: 403 }
+
 # Bound by later identity tickets (H-29).
 pending_actions:
-  - identity.mfa.enroll                          # BE-016
-  - identity.mfa.confirm                         # BE-016
-  - identity.mfa.verify                          # BE-016
-  - identity.mfa.disable                         # BE-016
-  - identity.mfa_recovery.regenerate             # BE-016
   - identity.edu_verification.start              # BE-018
   - identity.edu_verification.confirm            # BE-018
   - identity.edu_verification.submit_document    # BE-018
   - identity.edu_verification.read_own           # BE-018
   - identity.edu_verification.list               # BE-018
   - identity.edu_verification.review             # BE-018
-  - identity.user.search                         # BE-016
-  - identity.user.read                           # BE-016
-  - identity.user.suspend                        # BE-016
-  - identity.user.revoke_sessions                # BE-016
-  - identity.user.reset_mfa                      # BE-016
-  - identity.platform_role.list                  # BE-016
-  - identity.platform_role.grant                 # BE-016
-  - identity.platform_role.revoke                # BE-016

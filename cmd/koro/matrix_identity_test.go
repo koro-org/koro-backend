@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"uuid"
 
+	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/identity"
 	"koro/internal/platform/civil"
+	"koro/internal/platform/config"
 	"koro/internal/platform/token"
 )
 
@@ -59,6 +62,18 @@ func (w *identityWiring) matrixFixtures(fx *matrixFixtures) error {
 		if err := insertMatrixSession(ctx, w.store, p.Actor.SessionID, u.ID, now); err != nil {
 			return fmt.Errorf("session %s: %w", p.Name, err)
 		}
+		// The persona's platform roles in effect, as bootstrap rows (02 §5.7),
+		// so the store agrees with the actor (last admin, talent limit).
+		for _, r := range p.Actor.PlatformRoles {
+			ra := identity.RoleAssignment{ID: uuid.NewV7(), UserID: u.ID, Role: r, Reason: "bootstrap", Status: identity.RoleActive,
+				RequestedAt: now, GrantedAt: &now}
+			if err := w.store.InsertRoleAssignment(ctx, ra); err != nil {
+				return fmt.Errorf("role %s of %s: %w", r, p.Name, err)
+			}
+		}
+		if err := w.matrixTOTP(ctx, u); err != nil {
+			return fmt.Errorf("totp %s: %w", p.Name, err)
+		}
 	}
 	fixtures := fx.Of("identity")
 	slices.SortStableFunc(fixtures, func(a, b fixture) int { // accounts before what refers to them
@@ -77,6 +92,9 @@ func (w *identityWiring) matrixFixtures(fx *matrixFixtures) error {
 				ID: id, Status: identity.Status(status), Email: email, EmailNormalized: email, PasswordHash: testPasswordHash(),
 				FirstName: "Ayla", LastName: f.Name, Persona: identity.PersonaCompany, Locale: identity.LocaleTR,
 				CreatedAt: now, UpdatedAt: now,
+			}
+			if u.Status == identity.StatusSuspended {
+				u.EmailVerifiedAt, u.SuspendedAt, u.SuspensionReason = &now, &now, "matrix fixture"
 			}
 			if err := w.store.InsertUser(ctx, u); err != nil {
 				return fmt.Errorf("fixture %s: %w", f.Name, err)
@@ -103,6 +121,18 @@ func (w *identityWiring) matrixFixtures(fx *matrixFixtures) error {
 			if err := w.store.InsertEmailToken(ctx, t); err != nil {
 				return fmt.Errorf("fixture %s: %w", f.Name, err)
 			}
+		case "mfa_challenge":
+			owner, err := fx.Ref(f, "user")
+			if err != nil {
+				return err
+			}
+			if err := identity.SeedChallenge(ctx, w.challenges, id, owner, identity.ClientMobile, matrixClock.Add(identity.ChallengeTTL), matrixClock); err != nil {
+				return fmt.Errorf("fixture %s: %w", f.Name, err)
+			}
+		case "role_assignment":
+			if err := w.matrixRole(ctx, fx, f, id, now); err != nil {
+				return fmt.Errorf("fixture %s: %w", f.Name, err)
+			}
 		default:
 			return fmt.Errorf("fixture %s: unknown kind %q", f.Name, f.Kind)
 		}
@@ -126,4 +156,96 @@ func boolInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// matrixTOTPSecret is the TOTP secret of every matrix account when the
+// identity_mfa config enrolls them; its code at the container clock
+// (2026-10-03T09:00:00Z) is matrixTOTPCode (the bodies hold it).
+const (
+	matrixTOTPSecret = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
+	matrixTOTPCode   = "498845"
+)
+
+// matrixMFAModes is the identity_mfa config of each matrix application
+// (keyed by its wiring; set by matrixConfig before build):
+//
+//	none      no account has TOTP (default; R proofs are passwords)
+//	enrolled  every account has an unconfirmed enrollment (confirmTotp)
+//	enabled   every account has TOTP on (verifyMfa, disableTotp, …; R
+//	          proofs are TOTP codes; MFA logins answer a challenge)
+var matrixMFAModes sync.Map
+
+// matrixConfig implements matrixConfigurer: identity_mfa.
+func (w *identityWiring) matrixConfig(_ *config.Modules, key string, v any) (bool, error) {
+	if key != "identity_mfa" {
+		return false, nil
+	}
+	mode, _ := v.(string)
+	switch mode {
+	case "none", "enrolled", "enabled":
+	default:
+		return true, fmt.Errorf("identity_mfa %v: want none, enrolled or enabled", v)
+	}
+	matrixMFAModes.Store(w, mode)
+	return true, nil
+}
+
+// matrixTOTP gives u the TOTP state of the identity_mfa config.
+func (w *identityWiring) matrixTOTP(ctx context.Context, u identity.User) error {
+	mode, _ := matrixMFAModes.Load(w)
+	if mode == nil || mode == "none" {
+		return nil
+	}
+	sealed, err := w.secrets.Seal(ctx, identity.TOTPSecretPurpose(u.ID), []byte(matrixTOTPSecret))
+	if err != nil {
+		return err
+	}
+	if err := w.store.PutTOTP(ctx, identity.TOTP{UserID: u.ID, SecretEnc: sealed, CreatedAt: u.CreatedAt}); err != nil {
+		return err
+	}
+	if mode != "enabled" {
+		return nil
+	}
+	// Confirmed two steps before the container clock: the code of "now" is fresh.
+	step := matrixClock.Unix()/30 - 2
+	if _, err := w.store.ConfirmTOTP(ctx, u.ID, step, u.CreatedAt); err != nil {
+		return err
+	}
+	cur, err := w.store.User(ctx, u.ID)
+	if err != nil {
+		return err
+	}
+	cur.MFAEnabled = true
+	return w.store.UpdateUser(ctx, cur)
+}
+
+// matrixClock is the fake clock of newTestContainer.
+var matrixClock = time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC)
+
+// matrixRole seeds a role_assignment fixture: user, role, status (pending
+// | active), requested_by and, for an active privileged role, approved_by.
+func (w *identityWiring) matrixRole(ctx context.Context, fx *matrixFixtures, f fixture, id uuid.UUID, now time.Time) error {
+	user, err := fx.Ref(f, "user")
+	if err != nil {
+		return err
+	}
+	req, err := fx.Ref(f, "requested_by")
+	if err != nil {
+		return err
+	}
+	role, _ := f.Fields["role"].(string)
+	status, _ := f.Fields["status"].(string)
+	ra := identity.RoleAssignment{ID: id, UserID: user, Role: authz.PlatformRole(role), Reason: "matrix fixture",
+		Status: identity.RoleStatus(status), RequestedBy: &req, RequestedAt: now}
+	if ra.Status == identity.RoleActive {
+		ra.GrantedAt = &now
+		if _, ok := f.Fields["approved_by"]; ok {
+			by, err := fx.Ref(f, "approved_by")
+			if err != nil {
+				return err
+			}
+			ra.ApprovedBy, ra.ApprovedAt = &by, &now
+		}
+	}
+	return w.store.InsertRoleAssignment(ctx, ra)
 }

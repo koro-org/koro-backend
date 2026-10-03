@@ -33,9 +33,10 @@ users                       personal  identity      provider:identity
 sessions                    personal  identity      provider:identity
 email_tokens                personal  identity      provider:identity
 platform_role_assignments   personal  identity      provider:identity
+privileged_account_actions  personal  identity      provider:identity
 edu_verifications           personal  identity      todo:BE-018
-mfa_totp                    personal  identity      todo:BE-016
-mfa_recovery_codes          personal  identity      todo:BE-016
+mfa_totp                    personal  identity      provider:identity
+mfa_recovery_codes          personal  identity      provider:identity
 # notify
 notification_deliveries     personal  notify        provider:notify
 email_suppressions          personal  notify        provider:notify

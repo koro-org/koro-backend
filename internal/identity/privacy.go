@@ -19,8 +19,8 @@ var _ privacy.Provider = privacyProvider{}
 func (privacyProvider) Name() string { return "identity" }
 
 // Export implements privacy.Provider: the account, its sessions (device,
-// IP, user agent) and its platform role history. Hashes and tokens are
-// never exported.
+// IP, user agent), its TOTP enrollment (dates only) and its platform role
+// history. Hashes, secrets and tokens are never exported.
 func (p privacyProvider) Export(ctx context.Context, userID uuid.UUID) (privacy.ExportSection, error) {
 	s := p.s
 	out := privacy.ExportSection{Module: "identity"}
@@ -52,6 +52,27 @@ func (p privacyProvider) Export(ctx context.Context, userID uuid.UUID) (privacy.
 			"revoked_at": x.RevokedAt, "revoke_reason": string(x.RevokeReason),
 		})
 	}
+	if t, found, err := s.d.Store.TOTP(ctx, userID); err != nil {
+		return out, err
+	} else if found { // the secret is never exported
+		left, err := s.d.Store.RecoveryCodesLeft(ctx, userID)
+		if err != nil {
+			return out, err
+		}
+		out.Items = append(out.Items, map[string]any{
+			"type": "mfa_totp", "enrolled_at": t.CreatedAt, "confirmed_at": t.ConfirmedAt, "recovery_codes_left": left,
+		})
+	}
+	actions, err := s.d.Store.AccountActionsOf(ctx, userID)
+	if err != nil {
+		return out, err
+	}
+	for _, r := range actions { // four-eyes admin actions against the account (06 H-47)
+		out.Items = append(out.Items, map[string]any{
+			"type": "admin_account_action", "action": string(r.Action), "status": string(r.Status), "reason": r.Reason,
+			"requested_at": r.RequestedAt, "approved_at": r.ApprovedAt,
+		})
+	}
 	roles, err := s.d.Store.RoleAssignmentsOf(ctx, userID)
 	if err != nil {
 		return out, err
@@ -78,6 +99,14 @@ func (p privacyProvider) Erase(ctx context.Context, userID uuid.UUID) (privacy.E
 		if err != nil {
 			return err
 		}
+		nm, err := s.d.Store.DeleteTOTP(ctx, userID) // 02 §5.5–5.6: hard delete with the account
+		if err != nil {
+			return err
+		}
+		nr, err := s.d.Store.DeleteRecoveryCodes(ctx, userID)
+		if err != nil {
+			return err
+		}
 		erased, err := s.d.Store.EraseUser(ctx, userID, s.now())
 		if err != nil && !isNotFound(err) {
 			return err
@@ -86,13 +115,17 @@ func (p privacyProvider) Erase(ctx context.Context, userID uuid.UUID) (privacy.E
 		if err != nil {
 			return err
 		}
-		res.Deleted = ns + nt
+		res.Deleted = ns + nt + nm + nr
 		if erased {
 			res.Anonymized = 1
 		}
-		if len(roles) > 0 {
-			res.Retained = len(roles)
-			res.RetainedReason = "platform_role_assignments: access review proof (role_history, 3 years)"
+		actions, err := s.d.Store.AccountActionsOf(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if n := len(roles) + len(actions); n > 0 {
+			res.Retained = n
+			res.RetainedReason = "platform_role_assignments, privileged_account_actions: access review and four-eyes proof (role_history, 3 years)"
 		}
 		return nil
 	})

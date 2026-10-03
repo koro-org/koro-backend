@@ -15,12 +15,16 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/pquerna/otp"
+	"github.com/pquerna/otp/totp"
+
 	"koro/internal/authz"
 	"koro/internal/identity"
 	"koro/internal/notify"
 	"koro/internal/platform/civil"
 	"koro/internal/platform/config"
 	"koro/internal/platform/crypto"
+	"koro/internal/platform/crypto/rewrap"
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/httpx"
@@ -74,7 +78,22 @@ func (w *identityWiring) useMemStore() {
 	w.deriver = testDeriver()
 	w.hasher = testHasher()
 	w.cfg = &config.Identity{LinkBaseURL: "https://app.koro.test"}
+	w.secrets = testEnvelope()
+	w.memChallenges = true
 }
+
+// testEnvelope seals TOTP secrets in tests (fixed local KEK).
+var testEnvelope = sync.OnceValue(func() *crypto.Envelope {
+	kek, err := crypto.NewLocalKEK([]crypto.Key{{ID: "test1", Secret: []byte("identity-test-kek-32-bytes-long!")}})
+	if err != nil {
+		panic(err)
+	}
+	env, err := crypto.NewEnvelope(kek)
+	if err != nil {
+		panic(err)
+	}
+	return env
+})
 
 // TestWire_IdentityTasksAndPrivacy pins what identity registers (01 §6.2,
 // §7): the e-mail token subscription, the security notice task, the two
@@ -103,7 +122,7 @@ func TestWire_IdentityTasksAndPrivacy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{identity.SendEmailTokenTaskName, identity.SendSecurityNoticeTaskName,
+	for _, name := range []string{identity.SendEmailTokenTaskName, identity.SendSecurityNoticeTaskName, identity.SendRoleAlertTaskName,
 		identity.SessionsCleanupJobName, identity.EmailTokensCleanupJobName} {
 		if !slices.Contains(mux.Types(), name) {
 			t.Errorf("worker does not route %s", name)
@@ -340,5 +359,158 @@ func TestWire_IdentityEmailGoesThroughNotify(t *testing.T) {
 			}
 			return sent[0].To
 		}())
+	}
+}
+
+// TestWire_AdminMFAOverHTTP runs BE-016 end to end through the real
+// ActorResolver: an admin without MFA is refused on the role path
+// (authz.mfa_required), enrolls and confirms TOTP (the session steps up),
+// then signs in again in two steps (03 §6.4).
+func TestWire_AdminMFAOverHTTP(t *testing.T) {
+	t.Parallel()
+	e := newActorEnv(t)
+	u := e.user(t, nil)
+	now := e.clk.Now().UTC().Truncate(time.Microsecond)
+	if err := e.store.InsertRoleAssignment(t.Context(), identity.RoleAssignment{ID: uuid.NewV7(), UserID: u.ID, Role: authz.PlatformAdmin,
+		Reason: "bootstrap", Status: identity.RoleActive, RequestedAt: now, GrantedAt: &now}); err != nil {
+		t.Fatal(err)
+	}
+	app, err := httpx.New(httpx.Deps{Log: obs.Discard(), Actors: e.c.actors})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.c.registerRoutes(app.V1)
+	do := func(method, path, tok, body string) (int, map[string]any) {
+		req := httptest.NewRequestWithContext(t.Context(), method, path, strings.NewReader(body))
+		req.Header.Set("X-Koro-Client", "mobile")
+		if tok != "" {
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		rec := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rec, req)
+		var out map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec.Code, out
+	}
+	login := `{"email":"` + u.Email + `","password":"` + matrixReauthPassword + `"}`
+	code, body := do(http.MethodPost, "/api/v1/auth/sessions", "", login)
+	if code != http.StatusOK || body["token"] == nil {
+		t.Fatalf("login = %d %v", code, body)
+	}
+	tok := body["token"].(string)
+	if code, body = do(http.MethodGet, "/api/v1/admin/platform-roles", tok, ""); code != http.StatusForbidden || body["code"] != "authz.mfa_required" {
+		t.Fatalf("admin call without MFA = %d %v", code, body)
+	}
+	pw := `"reauth":{"password":"` + matrixReauthPassword + `"}`
+	if code, body = do(http.MethodPost, "/api/v1/me/mfa/totp", tok, "{}"); code != http.StatusForbidden || body["code"] != "identity.reauth_required" {
+		t.Fatalf("enroll without the password (06 H-46) = %d %v", code, body)
+	}
+	code, body = do(http.MethodPost, "/api/v1/me/mfa/totp", tok, "{"+pw+"}")
+	if code != http.StatusOK || body["secret_base32"] == nil {
+		t.Fatalf("enroll = %d %v", code, body)
+	}
+	secret := body["secret_base32"].(string)
+	gen := func() string {
+		c, err := totp.GenerateCodeCustom(secret, e.clk.Now(), totp.ValidateOpts{Period: 30, Digits: otp.DigitsSix, Algorithm: otp.AlgorithmSHA1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	code, body = do(http.MethodPost, "/api/v1/me/mfa/totp/confirm", tok, `{"code":"`+gen()+`",`+pw+`}`)
+	if codes, _ := body["recovery_codes"].([]any); code != http.StatusOK || len(codes) != 10 {
+		t.Fatalf("confirm = %d %v", code, body)
+	}
+	if code, body = do(http.MethodGet, "/api/v1/admin/platform-roles", tok, ""); code != http.StatusOK {
+		t.Fatalf("admin call after the step-up = %d %v", code, body)
+	}
+	// A new sign-in takes two steps; the password step opens nothing.
+	code, body = do(http.MethodPost, "/api/v1/auth/sessions", "", login)
+	if code != http.StatusOK || body["mfa_required"] != true || body["token"] != nil || body["challenge_id"] == nil {
+		t.Fatalf("password step = %d %v", code, body)
+	}
+	challenge := body["challenge_id"].(string)
+	e.c.infra.clock.(interface{ Advance(time.Duration) }).Advance(30 * time.Second)
+	code, body = do(http.MethodPost, "/api/v1/auth/sessions/mfa", "", `{"challenge_id":"`+challenge+`","totp_code":"`+gen()+`"}`)
+	if code != http.StatusOK || body["token"] == nil {
+		t.Fatalf("second step = %d %v", code, body)
+	}
+	if code, _ = do(http.MethodGet, "/api/v1/admin/platform-roles", body["token"].(string), ""); code != http.StatusOK {
+		t.Fatalf("admin call with the MFA session = %d", code)
+	}
+	// TOTP cannot be turned off while the role is held (k1).
+	if code, body = do(http.MethodPost, "/api/v1/me/mfa/totp/disable", tok, `{"reauth":{"totp_code":"000000"}}`); code != http.StatusConflict ||
+		body["code"] != "identity.mfa_required_by_role" {
+		t.Fatalf("disable = %d %v", code, body)
+	}
+}
+
+// TestIdentityTemplates_MFAAndRoleAlertsRender: every BE-016 notice kind
+// renders its own sentence in both locales (no fallback text).
+func TestIdentityTemplates_MFAAndRoleAlertsRender(t *testing.T) {
+	t.Parallel()
+	tpl, err := notify.EmbeddedTemplates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string][]string{
+		"identity.mfa_notice": {identity.NoticeMFAEnabled, identity.NoticeMFADisabled, identity.NoticeRecoveryCodeUsed,
+			identity.NoticeRecoveryCodesRegenerated, identity.NoticeMFAReset},
+		"identity.role_alert": {identity.AlertRoleRequested, identity.AlertRoleGranted, identity.AlertRoleRejected,
+			identity.AlertRoleRevokeRequested, identity.AlertRoleRevoked},
+	}
+	for id, kinds := range cases {
+		for _, loc := range []string{"tr", "en"} {
+			fallback, err := tpl.Render(id, loc, notify.RenderInput{Data: map[string]any{"name": "Ada", "kind": "?", "role": "moderator", "link": "https://x.test"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			seen := map[string]bool{}
+			for _, k := range kinds {
+				r, err := tpl.Render(id, loc, notify.RenderInput{Data: map[string]any{"name": "Ada", "kind": k, "role": "finance_admin", "link": "https://x.test"}})
+				if err != nil {
+					t.Fatalf("%s %s %s: %v", id, loc, k, err)
+				}
+				if r.Text == fallback.Text || seen[r.Text] || !strings.Contains(r.Text, "Ada") {
+					t.Fatalf("%s %s %s: no own text: %q", id, loc, k, r.Text)
+				}
+				seen[r.Text] = true
+			}
+		}
+	}
+}
+
+// TestWire_IdentityUsesSharedEnvelope (T-185): with only the local KEK
+// configured, identity seals TOTP secrets with the shared envelope of
+// platform/crypto and declares mfa_totp.secret_enc for crypto.rewrap.
+func TestWire_IdentityUsesSharedEnvelope(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	c.identity.secrets = nil
+	c.infra.platform.Crypto = config.Crypto{KEKs: config.NewSecret(testKEKs)}
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	env, err := c.keys.envelope()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.identity.secrets != identity.SecretBox(env) {
+		t.Fatal("identity does not use the shared envelope")
+	}
+	if !slices.ContainsFunc(c.keys.columns, func(col rewrap.Column) bool {
+		return col.Table == "mfa_totp" && col.Column == "secret_enc" && col.Key == "user_id" &&
+			col.PurposePrefix == "identity.mfa_secret/" && col.PurposeColumn == "user_id"
+	}) {
+		t.Fatalf("mfa_totp.secret_enc not declared for rewrap: %+v", c.keys.columns)
+	}
+	// Without any key the identity build fails (no TOTP secret sealed with nothing).
+	none := newTestContainer(t)
+	none.identity.secrets = nil
+	if err := none.build(); err == nil {
+		t.Fatal("identity built without a key-encryption key")
 	}
 }

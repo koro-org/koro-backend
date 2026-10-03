@@ -4,15 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 	"uuid"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/redis/go-redis/v9"
 
 	"koro/internal/authz"
 	"koro/internal/consent"
 	"koro/internal/identity"
 	"koro/internal/platform/config"
 	"koro/internal/platform/crypto"
+	"koro/internal/platform/crypto/rewrap"
 	"koro/internal/platform/db"
 	"koro/internal/platform/passwd"
 	"koro/internal/platform/problem"
@@ -31,6 +34,12 @@ import (
 //	         there every password operation answers 503
 //	passwd   the passwd configuration section of `koro api`
 //	cfg      tests only; nil → the identity section of the configuration
+//	secrets  nil → the shared envelope c.keys.envelope() (TOTP secrets;
+//	         BE-055/T-185: OpenBao Transit or the local KEK); the column
+//	         mfa_totp.secret_enc is declared for crypto.rewrap
+//	challenges nil → Redis (c.infra.redis; 5-minute MFA login challenges,
+//	         06 H-16); without Redis (openapi) MFA answers 503. memChallenges
+//	         (tests) → identity.MemChallenges on the container clock
 //
 // What identity provides to others, all set in build:
 //
@@ -52,6 +61,10 @@ type identityWiring struct {
 	hasher  identity.PasswordHasher
 	passwd  *config.Passwd
 	cfg     *config.Identity
+
+	secrets       identity.SecretBox
+	challenges    identity.ChallengeStore
+	memChallenges bool
 
 	mod identity.Module
 	svc identity.Service // set by build
@@ -90,6 +103,28 @@ func (w *identityWiring) build(c *container) error {
 		}
 		hasher = h
 	}
+	// TOTP secrets: the shared envelope of platform/crypto (BE-055, T-185;
+	// OpenBao Transit or the local KEK), never a LocalKEK of identity's own.
+	secrets := w.secrets
+	if secrets == nil {
+		env, err := c.keys.envelope()
+		if err != nil {
+			return fmt.Errorf("identity: TOTP secrets: %w", err)
+		}
+		secrets = env
+	}
+	if err := c.keys.addRewrap(rewrap.Column{Name: "identity.mfa_totp.secret_enc", Table: "mfa_totp", Key: "user_id",
+		Column: "secret_enc", PurposePrefix: identity.TOTPSecretPurposePrefix, PurposeColumn: "user_id"}); err != nil {
+		return fmt.Errorf("identity: %w", err)
+	}
+	challenges := w.challenges
+	switch {
+	case challenges != nil:
+	case w.memChallenges:
+		challenges = identity.NewMemChallenges(c.infra.clock)
+	case c.infra.redis != nil:
+		challenges = redisChallenges{rdb: c.infra.redis}
+	}
 	d := identity.Deps{
 		Store: store, Tx: tx, Outbox: c.infra.outbox, Queue: c.infra.queue, Audit: c.audit.svc,
 		Clock: c.infra.clock, Log: c.infra.log.With("module", "identity"), Limiter: c.infra.limiter,
@@ -101,14 +136,13 @@ func (w *identityWiring) build(c *container) error {
 			}
 			return nil, nil
 		},
-		Hasher: hasher,
-		// MFA and TOTP: BE-016 (MFA accounts answer 503 until then; none exist).
+		Hasher: hasher, Secrets: secrets, Challenges: challenges,
 	}
 	mod, err := identity.New(d)
 	if err != nil {
 		return err
 	}
-	w.mod, w.svc = mod, mod.Service
+	w.mod, w.svc, w.secrets, w.challenges = mod, mod.Service, secrets, challenges
 	c.privacy = append(c.privacy, mod.Privacy)
 	if c.actors == nil {
 		c.actors = actorResolver{auth: mod.Service, students: mod.Students, clock: c.infra.clock}
@@ -126,8 +160,9 @@ func (w *identityWiring) build(c *container) error {
 }
 
 // tasks: identity.email_token_issued → identity.send_email_token; the
-// identity.send_security_notice task; identity.sessions_cleanup (03:30)
-// and identity.email_tokens_cleanup (03:35) on the low queue (01 §7).
+// identity.send_security_notice and identity.send_role_alert tasks;
+// identity.sessions_cleanup (03:30) and identity.email_tokens_cleanup
+// (03:35) on the low queue (01 §7).
 func (w *identityWiring) tasks(c *container) {
 	w.mod.Subscribe(c.infra.subs)
 	for _, t := range w.mod.Tasks() {
@@ -140,8 +175,9 @@ func (w *identityWiring) tasks(c *container) {
 	}
 }
 
-// routes: the 14 identity operations of BE-014 (04 §2.1); w.svc is nil
-// under `koro openapi`, which Register tolerates.
+// routes: the identity operations of BE-014 and BE-016 (04 §2.1, plus
+// adminApprovePlatformRole of 06 H-17); w.svc is nil under `koro openapi`,
+// which Register tolerates.
 func (w *identityWiring) routes(c *container, api huma.API) { identity.Register(api, w.svc) }
 
 // noticeLookup adapts consent.Service.GetNotice to identity.NoticeLookup:
@@ -165,4 +201,30 @@ func (n noticeLookup) NoticeByID(ctx context.Context, id uuid.UUID) (identity.No
 		info.Purpose = *v.PurposeCode
 	}
 	return info, nil
+}
+
+// redisChallenges is identity.ChallengeStore over the queue's Redis
+// (06 H-16: MFA login challenges live 5 minutes in Redis). Keys are
+// already digests (identity never hands over a usable challenge ID); Take
+// is GETDEL, so a challenge is used at most once even under concurrency.
+type redisChallenges struct{ rdb redis.UniversalClient }
+
+const redisChallengePrefix = "koro:"
+
+func (r redisChallenges) Put(ctx context.Context, key string, value []byte, ttl time.Duration) error {
+	if ttl <= 0 {
+		return fmt.Errorf("identity challenge: ttl %s", ttl)
+	}
+	return r.rdb.Set(ctx, redisChallengePrefix+key, value, ttl).Err()
+}
+
+func (r redisChallenges) Take(ctx context.Context, key string) ([]byte, bool, error) {
+	b, err := r.rdb.GetDel(ctx, redisChallengePrefix+key).Bytes()
+	switch {
+	case errors.Is(err, redis.Nil):
+		return nil, false, nil
+	case err != nil:
+		return nil, false, err
+	}
+	return b, true, nil
 }

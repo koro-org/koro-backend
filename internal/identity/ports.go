@@ -67,16 +67,22 @@ type MFAChallenge struct {
 	ExpiresAt time.Time
 }
 
-// MFAChallenger opens the 5-minute, single-use login challenge of an MFA
-// account (Redis; BE-016 implements it and completeMfaLogin).
-type MFAChallenger interface {
-	Begin(ctx context.Context, userID uuid.UUID, client ClientKind, deviceLabel string) (MFAChallenge, error)
+// SecretBox seals and opens secrets at rest (crypto.Envelope).
+type SecretBox interface {
+	Seal(ctx context.Context, purpose string, plaintext []byte) ([]byte, error)
+	Open(ctx context.Context, purpose string, sealed []byte) ([]byte, error)
 }
 
-// TOTPVerifier checks a TOTP code of an MFA account during
-// re-authentication (BE-016; replay guard included).
-type TOTPVerifier interface {
-	VerifyTOTP(ctx context.Context, userID uuid.UUID, code string) (bool, error)
+// ChallengeStore keeps short-lived login challenges (Redis in production,
+// 06 H-16; cmd/koro adapts go-redis, identity never imports it). Keys are
+// digests of the challenge IDs, so the store never holds a usable ID.
+type ChallengeStore interface {
+	// Put stores value under key for ttl (> 0).
+	Put(ctx context.Context, key string, value []byte, ttl time.Duration) error
+	// Take returns the value of key and removes it atomically (GETDEL):
+	// a challenge is used at most once. found=false when there is none or
+	// it expired.
+	Take(ctx context.Context, key string) (value []byte, found bool, err error)
 }
 
 // MembershipsFunc returns the active org memberships of a user (orgs,

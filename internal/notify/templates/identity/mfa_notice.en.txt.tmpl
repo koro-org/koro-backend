@@ -1,0 +1,5 @@
+Hello {{.Data.name}},
+
+{{with index .Data "kind"}}{{if eq . "mfa_enabled"}}Two-step verification (TOTP) was turned on for your Koro account.{{else if eq . "mfa_disabled"}}Two-step verification (TOTP) was turned off for your Koro account.{{else if eq . "recovery_code_used"}}A recovery code was used to sign in to your Koro account. Each code works once; you can create new codes in your security settings.{{else if eq . "recovery_codes_regenerated"}}New recovery codes were created for your Koro account; the old ones no longer work.{{else if eq . "mfa_reset"}}A Koro administrator reset the two-step verification of your account and closed all your sessions. Set up two-step verification again after signing in.{{else}}The two-step verification settings of your Koro account changed.{{end}}{{end}}
+
+If this was not you, reset your password now: {{index .Data "link"}}

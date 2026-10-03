@@ -187,6 +187,52 @@ type Service interface {
 	Me(ctx context.Context, a authz.Actor) (Me, error)
 	// UpdateMe is updateMe (names, locale).
 	UpdateMe(ctx context.Context, a authz.Actor, p MePatch) (Me, error)
+
+	// CompleteMFALogin is completeMfaLogin: the second step of an MFA
+	// login opens the session (03 §6.4-1).
+	CompleteMFALogin(ctx context.Context, a authz.Actor, in MFALogin) (LoginResult, error)
+	// EnrollTOTP is enrollTotp (R, 06 H-46: the password): a new secret,
+	// returned only here.
+	EnrollTOTP(ctx context.Context, a authz.Actor, proof ReauthProof) (TOTPEnrollment, error)
+	// ConfirmTOTP is confirmTotp (R, 06 H-46): MFA on, ten recovery codes,
+	// the current session becomes MFA verified.
+	ConfirmTOTP(ctx context.Context, a authz.Actor, code string, proof ReauthProof) (RecoveryCodes, error)
+	// VerifyMFA is verifyMfa: step-up of the current session.
+	VerifyMFA(ctx context.Context, a authz.Actor, code string) error
+	// DisableTOTP is disableTotp (R; 409 for MFA roles, k1).
+	DisableTOTP(ctx context.Context, a authz.Actor, proof ReauthProof) error
+	// RegenerateRecoveryCodes is regenerateRecoveryCodes (R).
+	RegenerateRecoveryCodes(ctx context.Context, a authz.Actor, proof ReauthProof) (RecoveryCodes, error)
+
+	// SearchUsers is adminSearchUsers (audited).
+	SearchUsers(ctx context.Context, a authz.Actor, q AdminUserQuery) (AdminUserPage, error)
+	// AdminUser is adminGetUser (no sensitive club membership).
+	AdminUser(ctx context.Context, a authz.Actor, id uuid.UUID) (AdminUser, error)
+	// SuspendUser is adminSuspendUser: every session closes (suspended);
+	// four eyes against a privileged role holder (06 H-47).
+	SuspendUser(ctx context.Context, a authz.Actor, id uuid.UUID, reason string) (AdminActionResult, error)
+	// UnsuspendUser is adminUnsuspendUser.
+	UnsuspendUser(ctx context.Context, a authz.Actor, id uuid.UUID, reason string) (AdminUser, error)
+	// RevokeUserSessions is adminRevokeUserSessions (reason admin); a
+	// non-nil request: the four-eyes request is pending (06 H-47).
+	RevokeUserSessions(ctx context.Context, a authz.Actor, id uuid.UUID, reason string) (*AccountActionRequest, error)
+	// ResetUserMFA is adminResetUserMfa (R, k2): TOTP and recovery codes
+	// deleted, every session closed, a security notice to the user; a
+	// non-nil request: the four-eyes request is pending (06 H-47).
+	ResetUserMFA(ctx context.Context, a authz.Actor, id uuid.UUID, reason string, proof ReauthProof) (*AccountActionRequest, error)
+
+	// PlatformRoleAssignments is adminListPlatformRoles.
+	PlatformRoleAssignments(ctx context.Context, a authz.Actor, q RoleQuery) (RolePage, error)
+	// GrantPlatformRole is adminGrantPlatformRole (R, k3): a privileged
+	// role opens a pending request (06 H-17), the others take effect.
+	GrantPlatformRole(ctx context.Context, a authz.Actor, in RoleGrant) (RoleAssignment, error)
+	// ApprovePlatformRole is adminApprovePlatformRole (R): the second
+	// platform_admin activates a pending request.
+	ApprovePlatformRole(ctx context.Context, a authz.Actor, id uuid.UUID, proof ReauthProof) (RoleAssignment, error)
+	// RevokePlatformRole is adminRevokePlatformRole (R, k3): rejects a
+	// pending request, revokes a role (privileged: request, then a second
+	// admin's confirmation).
+	RevokePlatformRole(ctx context.Context, a authz.Actor, id uuid.UUID, reason string, proof ReauthProof) (RoleAssignment, error)
 }
 
 // PasswordHasher is platform/passwd.Hasher (an interface so tests can count
@@ -198,7 +244,8 @@ type PasswordHasher interface {
 }
 
 // Deps are the dependencies of the identity module. Everything but Hasher,
-// Memberships, MFA and TOTP is required (New returns an error otherwise).
+// Memberships, Secrets and Challenges is required (New returns an error
+// otherwise).
 type Deps struct {
 	Store   Store
 	Tx      db.TxManager
@@ -223,11 +270,13 @@ type Deps struct {
 	// Memberships returns org memberships (hooks.memberships, late bound).
 	// nil → none (03 §2.1: personal and public actions only).
 	Memberships MembershipsFunc
-	// MFA opens the login challenge of an MFA account; TOTP verifies a code
-	// on re-authentication (BE-016). nil → MFA accounts get 503
-	// identity.mfa_unavailable (fail closed).
-	MFA  MFAChallenger
-	TOTP TOTPVerifier
+	// Secrets seals and opens TOTP secrets (crypto.Envelope over
+	// CRYPTO_KEKS; 05 §14.1). Challenges keeps the 5-minute login
+	// challenges of MFA accounts (Redis; 06 H-16). Either nil (the worker)
+	// → every MFA operation, the login and the re-authentication of an MFA
+	// account answer 503 identity.mfa_unavailable (fail closed).
+	Secrets    SecretBox
+	Challenges ChallengeStore
 }
 
 func (d *Deps) validate() error {
@@ -272,11 +321,14 @@ func New(d Deps) (Module, error) {
 	if err := d.validate(); err != nil {
 		return Module{}, err
 	}
-	s := &service{d: d}
-	return Module{Service: s, Students: noStudentVerification{}, Privacy: privacyProvider{s: s}, svc: s}, nil
+	s := &service{d: d, students: noStudentVerification{}}
+	return Module{Service: s, Students: s.students, Privacy: privacyProvider{s: s}, svc: s}, nil
 }
 
-type service struct{ d Deps }
+type service struct {
+	d        Deps
+	students StudentVerification // the stub until BE-018
+}
 
 var _ Service = (*service)(nil)
 

@@ -11,3 +11,9 @@ fixtures:
   token_verify_pending: { kind: email_token, user: user_pending, purpose: account_email }
   token_reset_student_b: { kind: email_token, user: student_b, purpose: password_reset }
   token_change_student_b: { kind: email_token, user: student_b, purpose: email_change, target_email: student_b.new@matrix.koro.test }
+  # BE-016: a suspended account and platform role assignments (02 §5.7, 06 H-17).
+  user_suspended: { kind: user, email: suspended@matrix.koro.test, status: suspended }
+  role_pending_finance_b: { kind: role_assignment, user: student_b, role: finance_admin, status: pending, requested_by: platform_admin_2 }
+  role_moderator_b: { kind: role_assignment, user: student_b, role: moderator, status: active, requested_by: platform_admin_2 }
+  role_talent_granted: { kind: role_assignment, user: student_granted, role: talent_auditor, status: active, requested_by: platform_admin_2, approved_by: dpo_2 }
+  mfa_challenge_b: { kind: mfa_challenge, user: student_b }

@@ -36,6 +36,13 @@ package authz
 //	                                       the second eye of 06 H-17: requested_by)
 //	identity.platform_role.revoke          pad · R; k3 (the second eye of a privileged
 //	                                       revocation: requested_by = revoke requester)
+//	identity.edu_verification.start       O (BE-018; 202 without enumeration)
+//	identity.edu_verification.confirm     P (the token names the account)
+//	identity.edu_verification.submit_document O
+//	identity.edu_verification.read_own    O
+//	identity.edu_verification.list        sup, pad (the document queue: admin_surface)
+//	identity.edu_verification.review      sup, pad (download and decision; Y6 in the
+//	                                       core: never the reviewer's own document)
 //
 // MFA of the staff columns (k-mfa) follows from the role paths. The O cells
 // of the MFA actions are RoleSelf: an admin without TOTP must be able to
@@ -47,12 +54,10 @@ package authz
 // session's user), admin_surface (search and list: nothing is read before
 // the decision) and platform_role_assignment (OwnerUserID = the target user,
 // Attrs role and requested_by: the user whose request the actor would
-// complete, "" on a first step). Y6 (own role, own MFA reset) and the four
-// eyes of 06 H-17 are enforced by the core (absolute.go) from these fields.
-//
-// The remaining identity actions (student verification) belong to BE-018:
-// until it writes them, they are visible and granted to no role path, so
-// every caller gets 403 (default deny).
+// complete, "" on a first step) and edu_verification (OwnerUserID = the
+// applicant, Attrs status; the nil UUID before the row is read). Y6 (own
+// role, own MFA reset, own student document) and the four eyes of 06 H-17
+// are enforced by the core (absolute.go) from these fields.
 func identityPolicy() Policy {
 	return Policy{
 		Visible: func(a Actor, act Action, r Resource) bool {
@@ -71,19 +76,30 @@ func identityPolicy() Policy {
 				return r.Type == TypeUser && r.OwnerUserID != nil && AdminSurfaceVisible(a)
 			case IdentityPlatformRoleGrant, IdentityPlatformRoleRevoke:
 				return r.Type == TypePlatformRoleAssignment && r.OwnerUserID != nil && AdminSurfaceVisible(a)
+			case IdentityEduVerificationConfirm:
+				return r.Type == TypeUser
+			case IdentityEduVerificationStart, IdentityEduVerificationSubmitDocument, IdentityEduVerificationReadOwn:
+				return r.Type == TypeUser && a.Owns(r)
+			case IdentityEduVerificationList:
+				return r.Type == TypeAdminSurface && AdminSurfaceVisible(a)
+			case IdentityEduVerificationReview:
+				return r.Type == TypeEduVerification && r.OwnerUserID != nil && AdminSurfaceVisible(a)
 			}
-			return true // not written yet: no grant below → 403
+			return true // no grant below → 403
 		},
 		Grants: func(_ Actor, act Action, r Resource) []Grant {
 			sup, dpo, pad := Grant{Role: RoleSupport}, Grant{Role: RoleDPO}, Grant{Role: RolePlatformAdmin}
 			switch act {
 			case IdentityAccountRegister, IdentitySessionCreate, IdentityEmailVerify, IdentityEmailResendVerification,
-				IdentityPasswordResetRequest, IdentityPasswordReset, IdentityEmailChangeConfirm:
+				IdentityPasswordResetRequest, IdentityPasswordReset, IdentityEmailChangeConfirm, IdentityEduVerificationConfirm:
 				return []Grant{{Role: RolePublic}}
 			case IdentitySessionDeleteCurrent, IdentitySessionListOwn, IdentitySessionRevokeOwn,
 				IdentityAccountReadOwn, IdentityAccountUpdateOwn, IdentityPasswordChange, IdentityEmailChangeRequest,
-				IdentityMfaEnroll, IdentityMfaConfirm, IdentityMfaVerify, IdentityMfaDisable, IdentityMfaRecoveryRegenerate:
+				IdentityMfaEnroll, IdentityMfaConfirm, IdentityMfaVerify, IdentityMfaDisable, IdentityMfaRecoveryRegenerate,
+				IdentityEduVerificationStart, IdentityEduVerificationSubmitDocument, IdentityEduVerificationReadOwn:
 				return []Grant{{Role: RoleSelf}}
+			case IdentityEduVerificationList, IdentityEduVerificationReview:
+				return []Grant{sup, pad}
 			case IdentityUserSearch, IdentityUserRead:
 				return []Grant{sup, dpo, pad}
 			case IdentityUserSuspend, IdentityUserRevokeSessions, IdentityUserResetMfa:

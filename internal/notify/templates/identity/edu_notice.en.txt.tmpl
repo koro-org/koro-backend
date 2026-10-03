@@ -1,0 +1,5 @@
+Hello {{.Data.name}},
+
+{{with index .Data "kind"}}{{if eq . "renewal_reminder"}}Your Koro student verification ends in {{index $.Data "days_left"}} days. Without a renewal the student features close and companies no longer discover you.{{else if eq . "document_approved"}}Your student document was approved; your student verification lasts one year.{{else if eq . "document_rejected"}}Your student document was not approved. You can see the reason in the app and upload a new document.{{else if eq . "lapsed"}}Your Koro student verification has ended. The student features are closed and companies no longer discover you; you can verify again at any time.{{else}}Your Koro student verification changed.{{end}}{{end}}
+
+Your student verification: {{index .Data "link"}}

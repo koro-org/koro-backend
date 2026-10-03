@@ -6,6 +6,8 @@
 -- IS NOT NULL AND email_domain IS NOT NULL)`, which let a document
 -- verification carry part of an e-mail address; every column is now tied to
 -- the method on its own.
+-- BE-018 (in place, T-220): document_method_chk lets a decided document row
+-- drop its file (retention), see below.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 CREATE TABLE edu_verifications (
@@ -28,7 +30,13 @@ CREATE TABLE edu_verifications (
   CONSTRAINT edu_verifications_email_method_chk CHECK ((method = 'edu_email') = (edu_email IS NOT NULL)
                                                         AND (method = 'edu_email') = (edu_email_normalized IS NOT NULL)
                                                         AND (method = 'edu_email') = (email_domain IS NOT NULL)),
-  CONSTRAINT edu_verifications_document_method_chk CHECK ((method = 'document') = (document_file_id IS NOT NULL)),
+  -- BE-018 (in place before the pilot): a decided document verification
+  -- may lose its file (edu_document retention: decision + 30 days, 02 §24.2;
+  -- a virus finding, 01 §6.2 file.rejected); a pending one always has it,
+  -- an e-mail verification never.
+  CONSTRAINT edu_verifications_document_method_chk CHECK (CASE WHEN method = 'document'
+                                                               THEN status <> 'pending' OR document_file_id IS NOT NULL
+                                                               ELSE document_file_id IS NULL END),
   CONSTRAINT edu_verifications_verified_chk CHECK (status <> 'verified' OR (verified_at IS NOT NULL AND expires_at IS NOT NULL AND university_id IS NOT NULL)),
   CONSTRAINT edu_verifications_expiry_chk CHECK (expires_at IS NULL OR expires_at > verified_at),
   CONSTRAINT edu_verifications_document_review_chk CHECK (method <> 'document' OR status NOT IN ('verified','rejected') OR reviewed_by IS NOT NULL),

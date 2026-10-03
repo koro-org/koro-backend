@@ -40,7 +40,7 @@ type AdminUserList struct {
 
 // AdminStudentDTO is the student verification of an account (04 §V.5).
 type AdminStudentDTO struct {
-	Status       string     `json:"status" enum:"none,verified"`
+	Status       string     `json:"status" enum:"none,verified,lapsed"`
 	UniversityID string     `json:"university_id,omitempty" format:"uuid"`
 	VerifiedAt   *time.Time `json:"verified_at,omitempty"`
 	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
@@ -158,6 +158,9 @@ func toAdminUserDTO(v AdminUser) AdminUserDTO {
 	}
 	if v.ShowBirthDate && u.BirthDate != nil {
 		d.BirthDate = u.BirthDate.String()
+	}
+	if v.StudentStatus == authz.StudentLapsed {
+		d.Student.Status = string(authz.StudentLapsed)
 	}
 	if s := v.Student; s != nil {
 		va, ex := s.VerifiedAt, s.ExpiresAt

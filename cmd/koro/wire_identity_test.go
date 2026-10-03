@@ -96,8 +96,8 @@ var testEnvelope = sync.OnceValue(func() *crypto.Envelope {
 })
 
 // TestWire_IdentityTasksAndPrivacy pins what identity registers (01 §6.2,
-// §7): the e-mail token subscription, the security notice task, the two
-// cleanup jobs and the KVKK provider.
+// §7): the e-mail token subscription, the notice tasks, the cleanup and
+// student verification jobs and the KVKK provider.
 func TestWire_IdentityTasksAndPrivacy(t *testing.T) {
 	t.Parallel()
 	c := newTestContainer(t)
@@ -110,7 +110,8 @@ func TestWire_IdentityTasksAndPrivacy(t *testing.T) {
 			jobs = append(jobs, j.Name+" "+j.Cron+" "+j.Queue)
 		}
 	}
-	want := []string{"identity.sessions_cleanup 30 3 * * * low", "identity.email_tokens_cleanup 35 3 * * * low"}
+	want := []string{"identity.sessions_cleanup 30 3 * * * low", "identity.email_tokens_cleanup 35 3 * * * low",
+		"identity.edu_expire 30 0 * * * default", "identity.edu_renewal_reminders 0 10 * * * default"}
 	if !slices.Equal(jobs, want) {
 		t.Fatalf("identity jobs %q, want %q", jobs, want)
 	}
@@ -123,7 +124,8 @@ func TestWire_IdentityTasksAndPrivacy(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, name := range []string{identity.SendEmailTokenTaskName, identity.SendSecurityNoticeTaskName, identity.SendRoleAlertTaskName,
-		identity.SessionsCleanupJobName, identity.EmailTokensCleanupJobName} {
+		identity.SessionsCleanupJobName, identity.EmailTokensCleanupJobName, identity.SendEduNoticeTaskName,
+		identity.EduExpireJobName, identity.EduRenewalRemindersJobName} {
 		if !slices.Contains(mux.Types(), name) {
 			t.Errorf("worker does not route %s", name)
 		}

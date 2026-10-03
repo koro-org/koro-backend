@@ -53,6 +53,8 @@ type AdminUser struct {
 	// shown at all (03 Y2, 04 §V.5 "hassas kulüp üyeliği yok").
 	Memberships []authz.Membership
 	Student     *EduVerification // nil: no active student verification
+	// StudentStatus is none, verified or lapsed (03 §2.1).
+	StudentStatus authz.StudentStatus
 	// ShowBirthDate: only the dpo column of 04 §V.5 sees the birth date.
 	ShowBirthDate bool
 }
@@ -156,13 +158,11 @@ func (s *service) adminView(ctx context.Context, a authz.Actor, u User) (AdminUs
 	}
 	ms = slices.DeleteFunc(slices.Clone(ms), func(m authz.Membership) bool { return m.OrgKind == authz.OrgClub })
 	out := AdminUser{User: u, PlatformRoles: roles, Memberships: ms, ShowBirthDate: a.HasPlatformRole(authz.PlatformDPO)}
-	v, ok, err := s.students.Active(ctx, u.ID)
+	st, err := s.students.StudentStatus(ctx, u.ID)
 	if err != nil {
 		return AdminUser{}, err
 	}
-	if ok {
-		out.Student = &v
-	}
+	out.Student, out.StudentStatus = st.Active, st.Status
 	return out, nil
 }
 

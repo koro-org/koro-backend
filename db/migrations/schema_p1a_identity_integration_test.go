@@ -183,6 +183,14 @@ func TestSchema_EduVerificationConstraints(t *testing.T) {
 	expectOK(t, w.d.Pool, []p1aCase{
 		{"address of a superseded verification can be used again", emailRow + `($1, 'edu_email', 'ada@ogr.x.edu.tr', 'ada@ogr.x.edu.tr', 'ogr.x.edu.tr', 'pending', NULL, NULL, NULL)`, []any{u2}, "", ""},
 	})
+	// BE-018: a decided document row may drop its file (edu_document
+	// retention, virus finding); a pending one may not.
+	expectFail(t, w.d.Pool, []p1aCase{
+		{"pending document without its file", `UPDATE edu_verifications SET document_file_id = NULL WHERE user_id = $1 AND status = 'pending'`, []any{u1}, db.CodeCheckViolation, "edu_verifications_document_method_chk"},
+	})
+	expectOK(t, w.d.Pool, []p1aCase{
+		{"decided document without its file", `UPDATE edu_verifications SET document_file_id = NULL WHERE user_id = $1 AND status = 'verified'`, []any{u3}, "", ""},
+	})
 }
 
 // TestSchema_PlatformRoleFourEyesCheck (06 H-17, 02 §5.7): granting or

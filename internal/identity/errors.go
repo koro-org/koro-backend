@@ -92,6 +92,29 @@ var (
 	ErrAccountActionOpen = problem.New(problem.Conflict, "identity.account_action_open", "A request for this action is already pending")
 	// ErrInvalidReason: a reason outside 5–500 characters of plain text.
 	ErrInvalidReason = problem.New(problem.Invalid, "identity.invalid_reason", "Invalid reason")
+	// ErrEduDomainUnknown: the address is not a .edu.tr address of a
+	// university the directory knows (hooks.domainResolver; nil until
+	// directory is wired). The student document path is the alternative
+	// (04 §2.1 startEduVerification).
+	ErrEduDomainUnknown = problem.New(problem.Invalid, "identity.edu_domain_unknown",
+		"E-mail domain is not a known university; submit a student document instead")
+	// ErrEduEmailTaken: the .edu.tr address verifies another account
+	// (edu_verifications_email_uq). Only the holder of the address learns
+	// it, at confirmation: the start answers 202 either way.
+	ErrEduEmailTaken = problem.New(problem.Conflict, "identity.edu_email_taken", "This university address already verifies another account")
+	// ErrEduPending: a student document of the caller is already in the
+	// review queue (edu_verifications_one_pending_uq).
+	ErrEduPending = problem.New(problem.Conflict, "identity.edu_verification_pending", "A student document is already waiting for review")
+	// ErrEduInvalidState: a decision on a verification that is not pending.
+	ErrEduInvalidState = problem.New(problem.Conflict, "identity.edu_invalid_state", "The verification is not waiting for review")
+	// ErrInvalidEduDocument: document_file_id is not an edu_document upload
+	// of the caller that can be used (unknown, another user's, another
+	// purpose, not completed, rejected or attached elsewhere): one answer.
+	ErrInvalidEduDocument = problem.New(problem.Invalid, "identity.invalid_edu_document", "Invalid student document")
+	// ErrUniversityUnknown: university_id is not a university
+	// (edu_verifications_university_id_fkey).
+	ErrUniversityUnknown = problem.New(problem.Invalid, "identity.university_unknown", "Unknown university")
+
 	// ErrBootstrap: `koro seed bootstrap-admin` refuses (wrong admin count,
 	// another admin already exists, unusable account).
 	ErrBootstrap = problem.New(problem.Conflict, "identity.bootstrap_refused", "Bootstrap refused")

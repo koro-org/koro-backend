@@ -1,0 +1,8 @@
+Merhaba {{.Data.name}},
+
+Koro hesabınızda öğrenciliğinizi bu üniversite adresiyle doğrulamak için onaylayın:
+{{index .Data "link"}}
+
+Bağlantı {{index .Data "valid_minutes"}} dakika geçerlidir ve bir kez kullanılabilir. Uygulamada kod istenirse şunu girin: {{index .Data "token"}}
+
+Doğrulama bir yıl geçerlidir. Bu isteği siz yapmadıysanız bu iletiyi yok sayın.

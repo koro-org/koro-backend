@@ -1,0 +1,5 @@
+<p style="margin:0 0 12px 0;">Hello {{.Data.name}},</p>
+<p style="margin:0 0 12px 0;">Confirm this university address to verify your student status on your Koro account.</p>
+<p style="margin:0 0 12px 0;"><a href="{{index .Data "link"}}" style="color:#1d4ed8;">Verify my student status</a></p>
+<p style="margin:0 0 12px 0;">The link is valid for {{index .Data "valid_minutes"}} minutes and works once. If the app asks for a code, enter: <code>{{index .Data "token"}}</code></p>
+<p style="margin:0;">The verification lasts one year. If you did not ask for this, ignore this message.</p>

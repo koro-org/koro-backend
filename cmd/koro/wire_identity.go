@@ -40,6 +40,12 @@ import (
 //	challenges nil → Redis (c.infra.redis; 5-minute MFA login challenges,
 //	         06 H-16); without Redis (openapi) MFA answers 503. memChallenges
 //	         (tests) → identity.MemChallenges on the container clock
+//	domains  nil → hooks.domainResolver, read at call time (directory,
+//	         BE-020); both nil → every domain is unknown: 422
+//	         identity.edu_domain_unknown, the document path stays open
+//	         (BE-018 safe default: nobody becomes a student by e-mail)
+//	universityNames late-bound university names (directory has no hook
+//	         for them yet, T-223; nil → answers carry the university ID only)
 //
 // What identity provides to others, all set in build:
 //
@@ -52,8 +58,10 @@ import (
 //	c.privacy       the identity KVKK provider (kvkk calls it last)
 //
 // Consumed: c.consent.svc (registration consents, privacy notice lookup),
-// c.notify.svc (worker e-mails), c.audit.svc, hooks.memberships (read at
-// call time, so orgs may fill it later) and hooks.retention.
+// c.notify.svc (worker e-mails), c.audit.svc, c.files.svc (student
+// documents: Get, Attach, PresignGet; Delete through identity.FileRemover),
+// hooks.memberships and hooks.domainResolver (read at call time, so orgs
+// and directory may fill them later) and hooks.retention.
 type identityWiring struct {
 	store   identity.Store
 	tx      db.TxManager
@@ -65,6 +73,13 @@ type identityWiring struct {
 	secrets       identity.SecretBox
 	challenges    identity.ChallengeStore
 	memChallenges bool
+
+	domains         identity.DomainResolver
+	universityNames identity.UniversityNames
+
+	// late is the container, kept for the late-bound reads above and for
+	// the matrix fixtures (student documents live in the files store).
+	late *container
 
 	mod identity.Module
 	svc identity.Service // set by build
@@ -137,12 +152,31 @@ func (w *identityWiring) build(c *container) error {
 			return nil, nil
 		},
 		Hasher: hasher, Secrets: secrets, Challenges: challenges,
+		Domains: func(ctx context.Context, domain string) (uuid.UUID, bool, error) {
+			if w.domains != nil {
+				return w.domains(ctx, domain)
+			}
+			if h := c.hooks.domainResolver; h != nil {
+				return h(ctx, domain)
+			}
+			return uuid.Nil(), false, nil // directory not wired: unknown (422, document path)
+		},
+		UniversityNames: func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error) {
+			if w.universityNames != nil {
+				return w.universityNames(ctx, ids)
+			}
+			return nil, nil
+		},
+	}
+	if fs := c.files.svc; fs != nil {
+		d.Files = fs
+		d.RemoveFile = func(ctx context.Context, a authz.Actor, id uuid.UUID) error { return fs.Delete(ctx, a, id) }
 	}
 	mod, err := identity.New(d)
 	if err != nil {
 		return err
 	}
-	w.mod, w.svc, w.secrets, w.challenges = mod, mod.Service, secrets, challenges
+	w.mod, w.svc, w.secrets, w.challenges, w.late = mod, mod.Service, secrets, challenges, c
 	c.privacy = append(c.privacy, mod.Privacy)
 	if c.actors == nil {
 		c.actors = actorResolver{auth: mod.Service, students: mod.Students, clock: c.infra.clock}
@@ -160,9 +194,11 @@ func (w *identityWiring) build(c *container) error {
 }
 
 // tasks: identity.email_token_issued → identity.send_email_token; the
-// identity.send_security_notice and identity.send_role_alert tasks;
-// identity.sessions_cleanup (03:30) and identity.email_tokens_cleanup
-// (03:35) on the low queue (01 §7).
+// identity.send_security_notice, identity.send_role_alert and
+// identity.send_edu_notice tasks; identity.sessions_cleanup (03:30) and
+// identity.email_tokens_cleanup (03:35) on the low queue,
+// identity.edu_expire (00:30) and identity.edu_renewal_reminders (10:00)
+// (01 §7).
 func (w *identityWiring) tasks(c *container) {
 	w.mod.Subscribe(c.infra.subs)
 	for _, t := range w.mod.Tasks() {
@@ -175,9 +211,9 @@ func (w *identityWiring) tasks(c *container) {
 	}
 }
 
-// routes: the identity operations of BE-014 and BE-016 (04 §2.1, plus
-// adminApprovePlatformRole of 06 H-17); w.svc is nil under `koro openapi`,
-// which Register tolerates.
+// routes: the identity operations of BE-014, BE-016 and BE-018 (04 §2.1,
+// plus adminApprovePlatformRole of 06 H-17); w.svc is nil under `koro
+// openapi`, which Register tolerates.
 func (w *identityWiring) routes(c *container, api huma.API) { identity.Register(api, w.svc) }
 
 // noticeLookup adapts consent.Service.GetNotice to identity.NoticeLookup:

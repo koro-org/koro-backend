@@ -48,6 +48,7 @@ var tokenTemplates = map[TokenPurpose]struct{ template, path string }{
 	PurposeAccountEmail:  {"identity.verify_email", "/auth/verify-email"},
 	PurposePasswordReset: {"identity.password_reset", "/auth/reset-password"},
 	PurposeEmailChange:   {"identity.email_change", "/auth/confirm-email-change"},
+	PurposeEduEmail:      {"identity.edu_verify", "/auth/verify-edu"},
 }
 
 const (
@@ -149,8 +150,8 @@ func (s *service) handleEmailTokenIssued(ctx context.Context, e domainevent.Enve
 		return queue.Permanent(errors.New("identity: derived token does not match the stored hash (token keys changed)"))
 	}
 	to := u.Email
-	if t.Purpose == PurposeEmailChange {
-		to = t.TargetEmail
+	if t.Purpose == PurposeEmailChange || t.Purpose == PurposeEduEmail {
+		to = t.TargetEmail // the address being proven
 	}
 	minutes := int(tokenTTL(t.Purpose).Minutes())
 	msg := notify.Message{

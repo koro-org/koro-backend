@@ -4,13 +4,19 @@ import (
 	"context"
 	"uuid"
 
+	"koro/internal/authz"
 	"koro/internal/platform/privacy"
 )
+
+// privacyEraseJob is the system actor of the document deletions of an
+// erasure.
+const privacyEraseJob = "identity.privacy_erase"
 
 // privacyProvider is the KVKK provider of identity (01 §3.3). kvkk calls
 // Erase last (01 §6.3 "en son identity anonimleştirme"): the account
 // becomes a tombstone that stays the FK target of financial and audit rows
-// (02 §0.6); sessions and e-mail tokens are deleted.
+// (02 §0.6); sessions, e-mail tokens, TOTP, recovery codes and student
+// verifications (with their documents) are deleted.
 type privacyProvider struct{ s *service }
 
 var _ privacy.Provider = privacyProvider{}
@@ -82,6 +88,23 @@ func (p privacyProvider) Export(ctx context.Context, userID uuid.UUID) (privacy.
 			"type": "platform_role", "role": string(r.Role), "status": string(r.Status), "granted_at": r.GrantedAt, "revoked_at": r.RevokedAt,
 		})
 	}
+	edu, err := s.d.Store.EduVerificationsOf(ctx, userID)
+	if err != nil {
+		return out, err
+	}
+	for _, v := range edu { // the subject's own address in full; the document is listed by ID (files serves it)
+		item := map[string]any{
+			"type": "student_verification", "method": string(v.Method), "status": string(v.Status), "edu_email": v.EduEmail,
+			"verified_at": v.VerifiedAt, "expires_at": v.ExpiresAt, "review_note": v.ReviewNote, "created_at": v.CreatedAt,
+		}
+		if v.UniversityID != nil {
+			item["university_id"] = v.UniversityID.String()
+		}
+		if v.DocumentFileID != nil {
+			item["document_file_id"] = v.DocumentFileID.String()
+		}
+		out.Items = append(out.Items, item)
+	}
 	return out, nil
 }
 
@@ -107,6 +130,20 @@ func (p privacyProvider) Erase(ctx context.Context, userID uuid.UUID) (privacy.E
 		if err != nil {
 			return err
 		}
+		// Student verifications go with their documents (02 §5.4: hard
+		// delete); the files are deleted after the rows released them.
+		edu, err := s.d.Store.DeleteUserEduVerifications(ctx, userID)
+		if err != nil {
+			return err
+		}
+		for _, v := range edu {
+			if v.DocumentFileID != nil {
+				if err := s.removeFile(ctx, authz.SystemActor(privacyEraseJob), *v.DocumentFileID); err != nil {
+					return err
+				}
+			}
+		}
+		nr += len(edu)
 		erased, err := s.d.Store.EraseUser(ctx, userID, s.now())
 		if err != nil && !isNotFound(err) {
 			return err

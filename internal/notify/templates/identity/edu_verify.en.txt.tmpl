@@ -1,0 +1,8 @@
+Hello {{.Data.name}},
+
+Confirm this university address to verify your student status on your Koro account:
+{{index .Data "link"}}
+
+The link is valid for {{index .Data "valid_minutes"}} minutes and works once. If the app asks for a code, enter: {{index .Data "token"}}
+
+The verification lasts one year. If you did not ask for this, ignore this message.

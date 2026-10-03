@@ -8,6 +8,7 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/consent"
+	"koro/internal/files"
 	"koro/internal/notify"
 	"koro/internal/platform/ratelimit"
 )
@@ -90,3 +91,35 @@ type ChallengeStore interface {
 // the session policy (03 §6.4: MFA roles get 30 min / 12 h sessions) and
 // hands them to the Actor; it never imports orgs (01 §5.3).
 type MembershipsFunc func(ctx context.Context, userID uuid.UUID) ([]authz.Membership, error)
+
+// Files is what identity needs from files (L2) for student documents
+// (01 §4.6): the upload's metadata, attaching it to its verification and
+// the short-lived download of the review.
+type Files interface {
+	// Get returns the file's metadata or files.ErrNotFound.
+	Get(ctx context.Context, fileID uuid.UUID) (files.FileMeta, error)
+	// Attach binds the document to its verification in the caller's
+	// transaction (orphan cleanup leaves it alone).
+	// sync-write: files.Files.Attach
+	Attach(ctx context.Context, a authz.Actor, fileID uuid.UUID, owner files.Owner) error
+	// PresignGet returns a download URL valid for ttl (≤ 5 minutes) of a
+	// clean file; files.ErrNotClean otherwise.
+	PresignGet(ctx context.Context, fileID uuid.UUID, ttl time.Duration) (files.Download, error)
+}
+
+// FileRemover deletes a student document (files.Files.Delete) once identity
+// has cleared its reference: erasure, and a document the virus scan
+// rejected (01 §6.2 file.rejected). It is a function, not a port method:
+// the pair identity → files.Files.Delete is not in the 01 §6.3 allow-list
+// yet (T-221; kvkk has the same gap, BE-021/H-49). nil → the file
+// stays and a warning is logged.
+type FileRemover func(ctx context.Context, a authz.Actor, fileID uuid.UUID) error
+
+// DomainResolver maps the domain of a .edu.tr address to a university
+// (hooks.domainResolver: directory.Catalog.UniversityByEmailDomain, 01 §5.3;
+// identity never imports directory). found=false: not a known university.
+type DomainResolver func(ctx context.Context, domain string) (universityID uuid.UUID, found bool, err error)
+
+// UniversityNames returns the display names of universities (directory).
+// Optional: nil, or a missing ID, leaves the name out of the answers.
+type UniversityNames func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error)

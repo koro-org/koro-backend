@@ -29,6 +29,7 @@ type MemStore struct {
 	totp     map[uuid.UUID]TOTP
 	recovery map[uuid.UUID]memRecovery
 	actions  map[uuid.UUID]AccountActionRequest
+	edu      map[uuid.UUID]EduRecord
 }
 
 type memRecovery struct {
@@ -43,6 +44,7 @@ func NewMemStore() *MemStore {
 		users: map[uuid.UUID]User{}, sessions: map[uuid.UUID]Session{},
 		tokens: map[uuid.UUID]EmailToken{}, roles: map[uuid.UUID]RoleAssignment{},
 		totp: map[uuid.UUID]TOTP{}, recovery: map[uuid.UUID]memRecovery{}, actions: map[uuid.UUID]AccountActionRequest{},
+		edu: map[uuid.UUID]EduRecord{},
 	}
 }
 

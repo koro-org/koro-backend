@@ -154,3 +154,85 @@ func TestIdentityPolicy_EdgeCases(t *testing.T) {
 	wantErr(t, authz.Can(ctx, pad, authz.IdentityUserSuspend, authz.Resource{Type: authz.TypeUser,
 		Attrs: map[string]string{authz.AttrRequestedBy: ""}}), authz.ErrNotFound, false)
 }
+
+func eduVerification(applicant string) authz.Resource {
+	id := authztest.ID(applicant)
+	return authz.Resource{Type: authz.TypeEduVerification, ID: uuid.NewV7(), OwnerUserID: &id,
+		Attrs: map[string]string{authz.AttrStatus: "pending"}}
+}
+
+// TestIdentityPolicy_EduVerificationMatrix pins the BE-018 rows of 03 §5.1
+// (student verification) for the 18 personas.
+func TestIdentityPolicy_EduVerificationMatrix(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	forbidden := authz.ErrForbidden
+	self := func(p authztest.Persona) authz.Resource { return ownAccount(p) }
+	public := func(authztest.Persona) authz.Resource { return authz.Resource{Type: authz.TypeUser} }
+	staff := map[string]error{"support": nil, "platform_admin": nil}
+	for _, tc := range []struct {
+		name          string
+		act           authz.Action
+		res           func(p authztest.Persona) authz.Resource
+		want          map[string]error
+		missing, anon error
+	}{
+		{"start", authz.IdentityEduVerificationStart, self, nil, nil, forbidden},
+		{"confirm", authz.IdentityEduVerificationConfirm, public, nil, nil, nil},
+		{"submit_document", authz.IdentityEduVerificationSubmitDocument, self, nil, nil, forbidden},
+		{"read_own", authz.IdentityEduVerificationReadOwn, self, nil, nil, forbidden},
+		{"list", authz.IdentityEduVerificationList, func(authztest.Persona) authz.Resource { return adminSurface }, staff, forbidden, forbidden},
+		{"review", authz.IdentityEduVerificationReview, func(authztest.Persona) authz.Resource { return eduVerification("student_b") },
+			staff, forbidden, forbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			for _, p := range authztest.Personas() {
+				want, ok := tc.want[p.Name]
+				if !ok {
+					want = tc.missing
+				}
+				if p.Name == "anonymous" {
+					want = tc.anon
+				}
+				t.Run(p.Name, func(t *testing.T) {
+					wantErr(t, authz.Can(ctx, p.Actor, tc.act, tc.res(p)), want, false)
+				})
+			}
+		})
+	}
+}
+
+func TestIdentityPolicy_EduVerificationEdgeCases(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	pad, sup := persona(t, "platform_admin"), persona(t, "support")
+	// O: another user's account is invisible (staff included).
+	for _, act := range []authz.Action{authz.IdentityEduVerificationStart, authz.IdentityEduVerificationSubmitDocument,
+		authz.IdentityEduVerificationReadOwn} {
+		wantErr(t, authz.Can(ctx, pad, act, targetUser("student")), authz.ErrNotFound, false)
+	}
+	// Y6: nobody reviews their own student document.
+	wantErr(t, authz.Can(ctx, pad, authz.IdentityEduVerificationReview, eduVerification("platform_admin")), authz.ErrForbidden, false)
+	wantErr(t, authz.Can(ctx, sup, authz.IdentityEduVerificationReview, eduVerification("support")), authz.ErrForbidden, false)
+	wantErr(t, authz.Can(ctx, sup, authz.IdentityEduVerificationReview, eduVerification("platform_admin")), nil, false)
+	// The gate before the row is read: the applicant is nobody (the nil UUID).
+	nobody := uuid.Nil()
+	gate := authz.Resource{Type: authz.TypeEduVerification, OwnerUserID: &nobody, Attrs: map[string]string{authz.AttrStatus: ""}}
+	wantErr(t, authz.Can(ctx, pad, authz.IdentityEduVerificationReview, gate), nil, false)
+	wantErr(t, authz.Can(ctx, persona(t, "dpo"), authz.IdentityEduVerificationReview, gate), authz.ErrForbidden, false)
+	// k-mfa: the staff cells need an MFA-verified session.
+	noMFA := sup
+	noMFA.MFAVerified = false
+	wantErr(t, authz.Can(ctx, noMFA, authz.IdentityEduVerificationList, adminSurface), authz.ErrMFARequired, false)
+	// H-27: the applicant is mandatory (Y6 fails closed), so is Attrs status.
+	wantErr(t, authz.Can(ctx, pad, authz.IdentityEduVerificationReview,
+		authz.Resource{Type: authz.TypeEduVerification, Attrs: map[string]string{authz.AttrStatus: "pending"}}), authz.ErrNotFound, false)
+	owner := authztest.ID("student_b")
+	wantErr(t, authz.Can(ctx, pad, authz.IdentityEduVerificationReview,
+		authz.Resource{Type: authz.TypeEduVerification, OwnerUserID: &owner}), authz.ErrForbidden, true)
+	// System actor: only the nightly expiry.
+	sys := authz.SystemActor("identity.edu_expire")
+	wantErr(t, authz.Can(ctx, sys, authz.IdentityEduVerificationExpire, authz.Resource{Type: authz.TypeEduVerification}), nil, false)
+	wantErr(t, authz.Can(ctx, sys, authz.IdentityEduVerificationReview, eduVerification("student_b")), authz.ErrForbidden, false)
+}

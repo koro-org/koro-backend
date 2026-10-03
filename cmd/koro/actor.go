@@ -21,8 +21,10 @@ import (
 //     transport (web → cookie, mobile → bearer), active user, sliding idle
 //     window; platform roles in effect only (06 H-33) and the org
 //     memberships of hooks.memberships (orgs, BE-019; none until then);
-//  2. the student verification (identity.StudentVerification; BE-018
-//     replaces the stub) gives StudentStatus and UniversityID;
+//  2. the student verification (identity.Students; BE-018) gives
+//     StudentStatus (verified while a verification is in its year, lapsed
+//     once it ran out or was revoked, none otherwise) and, when verified,
+//     UniversityID;
 //  3. IsMinor is computed from the birth date at this request's instant
 //     (02 §5.1: never stored).
 //
@@ -31,7 +33,7 @@ import (
 // public ones, 06 H-25); any other error is a server failure.
 type actorResolver struct {
 	auth     identity.Authenticator
-	students identity.StudentVerification
+	students identity.Students
 	clock    clock.Clock
 }
 
@@ -59,13 +61,14 @@ func (r actorResolver) actor(ctx context.Context, cred httpx.Credential) (authz.
 		StudentStatus: authz.StudentNone, MFAVerified: p.MFAVerified,
 		IsMinor: p.BirthDate != nil && p.BirthDate.IsMinor(r.clock.Now()),
 	}
-	v, ok, err := r.students.Active(ctx, p.UserID)
+	st, err := r.students.StudentStatus(ctx, p.UserID)
 	if err != nil {
 		return authz.Actor{}, fmt.Errorf("actor: student verification: %w", err)
 	}
-	if ok {
-		uni := v.UniversityID
-		a.StudentStatus, a.UniversityID = authz.StudentVerified, &uni
+	a.StudentStatus = st.Status
+	if st.Status == authz.StudentVerified && st.Active != nil {
+		uni := st.Active.UniversityID
+		a.UniversityID = &uni
 	}
 	return a, nil
 }

@@ -34,7 +34,7 @@ sessions                    personal  identity      provider:identity
 email_tokens                personal  identity      provider:identity
 platform_role_assignments   personal  identity      provider:identity
 privileged_account_actions  personal  identity      provider:identity
-edu_verifications           personal  identity      todo:BE-018
+edu_verifications           personal  identity      provider:identity
 mfa_totp                    personal  identity      provider:identity
 mfa_recovery_codes          personal  identity      provider:identity
 # notify

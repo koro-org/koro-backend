@@ -24,6 +24,10 @@
 //   - Passwords, tokens and addresses are never logged.
 //   - A platform role is in effect only while its assignment is active or
 //     revoke_pending (06 H-33): a pending request grants nothing.
+//   - A student is a user whose active education is verified (BE-018):
+//     by a single-use link to a .edu.tr address of a known university, or
+//     by a student document a platform admin approved (never their own).
+//     A verification lasts a year; identity.edu_expire lapses it.
 package identity
 
 import (
@@ -141,11 +145,26 @@ type EduVerification struct {
 }
 
 // StudentVerification answers whether a user is a verified student
-// (01 §4.6). This ticket ships the stub (nobody is verified); BE-018 fills
-// it in.
+// (01 §4.6): status verified and expires_at in the future (03 §2.1).
 type StudentVerification interface {
 	Active(ctx context.Context, userID uuid.UUID) (EduVerification, bool, error)
 	ActiveMany(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]EduVerification, error)
+}
+
+// StudentState is the student part of an Actor (03 §2.1): Status none,
+// verified or lapsed; Active is set only when verified.
+type StudentState struct {
+	Status authz.StudentStatus
+	Active *EduVerification
+}
+
+// Students is StudentVerification plus the Actor's three-valued state
+// (cmd/koro/actor.go reads it on every request, without a cache).
+type Students interface {
+	StudentVerification
+	// StudentStatus returns verified (an active verification), lapsed
+	// (verified once, now expired or revoked) or none.
+	StudentStatus(ctx context.Context, userID uuid.UUID) (StudentState, error)
 }
 
 // Service is the identity service: the cross-module contracts plus the
@@ -233,6 +252,28 @@ type Service interface {
 	// pending request, revokes a role (privileged: request, then a second
 	// admin's confirmation).
 	RevokePlatformRole(ctx context.Context, a authz.Actor, id uuid.UUID, reason string, proof ReauthProof) (RoleAssignment, error)
+
+	// StartEduVerification is startEduVerification: a single-use link to
+	// the .edu.tr address (24 h). nil (202) whether or not the address is
+	// free (only its holder learns that, at confirmation); an unknown
+	// domain is 422 identity.edu_domain_unknown.
+	StartEduVerification(ctx context.Context, a authz.Actor, eduEmail string) error
+	// ConfirmEduVerification is confirmEduVerification: the token's user
+	// becomes a verified student for a year; a renewal supersedes the
+	// previous verification.
+	ConfirmEduVerification(ctx context.Context, a authz.Actor, token string) error
+	// SubmitEduDocument is submitEduDocument: a student document goes to
+	// the platform staff queue.
+	SubmitEduDocument(ctx context.Context, a authz.Actor, in EduDocumentSubmission) (EduView, error)
+	// MyEduVerification is getMyEduVerification.
+	MyEduVerification(ctx context.Context, a authz.Actor) (MyEdu, error)
+	// EduQueue is adminListEduVerifications (student documents).
+	EduQueue(ctx context.Context, a authz.Actor, q EduQuery) (EduPage, error)
+	// EduDocument is adminGetEduDocument: a ≤ 5-minute download URL,
+	// audited on every call.
+	EduDocument(ctx context.Context, a authz.Actor, id uuid.UUID) (EduDocumentLink, error)
+	// DecideEduVerification is adminDecideEduVerification.
+	DecideEduVerification(ctx context.Context, a authz.Actor, id uuid.UUID, in EduDecision) (EduView, error)
 }
 
 // PasswordHasher is platform/passwd.Hasher (an interface so tests can count
@@ -277,6 +318,18 @@ type Deps struct {
 	// account answer 503 identity.mfa_unavailable (fail closed).
 	Secrets    SecretBox
 	Challenges ChallengeStore
+
+	// Student verification (BE-018). Domains resolves .edu.tr domains
+	// (hooks.domainResolver); nil → every domain is unknown (422
+	// identity.edu_domain_unknown: the document path stays open). Files
+	// holds student documents; nil → the document operations answer 503.
+	// RemoveFile deletes documents on erasure and after a virus finding
+	// (nil → the file stays, logged). UniversityNames fills university
+	// names (nil → IDs only).
+	Domains         DomainResolver
+	Files           Files
+	RemoveFile      FileRemover
+	UniversityNames UniversityNames
 }
 
 func (d *Deps) validate() error {
@@ -300,8 +353,9 @@ func (d *Deps) validate() error {
 // Module is what identity hands to the composition root.
 type Module struct {
 	Service Service
-	// Students is the StudentVerification stub (BE-018 replaces it).
-	Students StudentVerification
+	// Students answers student verification questions (Actor resolution,
+	// other modules' StudentVerification).
+	Students Students
 	// Privacy is the KVKK provider: the account becomes a tombstone and
 	// its sessions and tokens are deleted (kvkk calls it last).
 	Privacy privacy.Provider
@@ -321,13 +375,14 @@ func New(d Deps) (Module, error) {
 	if err := d.validate(); err != nil {
 		return Module{}, err
 	}
-	s := &service{d: d, students: noStudentVerification{}}
+	s := &service{d: d}
+	s.students = eduStudents{s: s}
 	return Module{Service: s, Students: s.students, Privacy: privacyProvider{s: s}, svc: s}, nil
 }
 
 type service struct {
 	d        Deps
-	students StudentVerification // the stub until BE-018
+	students Students
 }
 
 var _ Service = (*service)(nil)
@@ -335,15 +390,3 @@ var _ Service = (*service)(nil)
 // now is the service clock in the database's precision (microseconds), so
 // the in-memory store keeps exactly what PostgreSQL stores.
 func (s *service) now() time.Time { return s.d.Clock.Now().UTC().Truncate(time.Microsecond) }
-
-// noStudentVerification is the StudentVerification stub of this ticket:
-// nobody is a verified student until BE-018 (Actor.StudentStatus none).
-type noStudentVerification struct{}
-
-func (noStudentVerification) Active(context.Context, uuid.UUID) (EduVerification, bool, error) {
-	return EduVerification{}, false, nil
-}
-
-func (noStudentVerification) ActiveMany(context.Context, []uuid.UUID) (map[uuid.UUID]EduVerification, error) {
-	return map[uuid.UUID]EduVerification{}, nil
-}

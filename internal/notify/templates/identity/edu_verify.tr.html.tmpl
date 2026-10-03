@@ -1,0 +1,5 @@
+<p style="margin:0 0 12px 0;">Merhaba {{.Data.name}},</p>
+<p style="margin:0 0 12px 0;">Koro hesabınızda öğrenciliğinizi bu üniversite adresiyle doğrulamak için onaylayın.</p>
+<p style="margin:0 0 12px 0;"><a href="{{index .Data "link"}}" style="color:#1d4ed8;">Öğrenciliğimi doğrula</a></p>
+<p style="margin:0 0 12px 0;">Bağlantı {{index .Data "valid_minutes"}} dakika geçerlidir ve bir kez kullanılabilir. Uygulamada kod istenirse şunu girin: <code>{{index .Data "token"}}</code></p>
+<p style="margin:0;">Doğrulama bir yıl geçerlidir. Bu isteği siz yapmadıysanız bu iletiyi yok sayın.</p>

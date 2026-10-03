@@ -17,3 +17,12 @@ fixtures:
   role_moderator_b: { kind: role_assignment, user: student_b, role: moderator, status: active, requested_by: platform_admin_2 }
   role_talent_granted: { kind: role_assignment, user: student_granted, role: talent_auditor, status: active, requested_by: platform_admin_2, approved_by: dpo_2 }
   mfa_challenge_b: { kind: mfa_challenge, user: student_b }
+  # BE-018: an e-mail token of student_b's renewal, student documents (edu_document files in the
+  # files store, uploaded by their user; attached_to: the verification that holds them) and two
+  # pending verifications in the review queue.
+  token_edu_student_b: { kind: email_token, user: student_b, purpose: edu_email, target_email: student_b.yeni@ogr.matrix.edu.tr }
+  edu_file_student: { kind: edu_document_file, user: student }
+  edu_file_b: { kind: edu_document_file, user: student_b, attached_to: edu_pending_b }
+  edu_file_pad: { kind: edu_document_file, user: platform_admin, attached_to: edu_pending_pad }
+  edu_pending_b: { kind: edu_verification, user: student_b, file: edu_file_b }
+  edu_pending_pad: { kind: edu_verification, user: platform_admin, file: edu_file_pad }

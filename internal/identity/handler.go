@@ -18,7 +18,7 @@ import (
 	"koro/internal/platform/problem"
 )
 
-// Register adds the identity operations (04 §2.1; BE-014 and BE-016) to
+// Register adds the identity operations (04 §2.1; BE-014, BE-016, BE-018) to
 // api. svc may be nil (`koro openapi`): handlers only touch it when called.
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
@@ -112,6 +112,7 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.IdentityAccountUpdateOwn), Surface: op.SurfaceSelf}, h.updateMe)
 
 	registerMFAAndAdmin(api, h)
+	registerEdu(api, h)
 }
 
 // reg registers one identity operation with its Koro metadata.

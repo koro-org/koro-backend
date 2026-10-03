@@ -1,0 +1,5 @@
+Merhaba {{.Data.name}},
+
+{{with index .Data "kind"}}{{if eq . "renewal_reminder"}}Koro öğrenci doğrulamanızın süresi {{index $.Data "days_left"}} gün içinde doluyor. Yenilemezseniz öğrenci olarak sunulan özellikler kapanır ve şirket keşfinde görünmezsiniz.{{else if eq . "document_approved"}}Öğrenci belgeniz onaylandı; öğrencilik doğrulamanız bir yıl geçerlidir.{{else if eq . "document_rejected"}}Öğrenci belgeniz onaylanmadı. Gerekçeyi uygulamada görebilir, yeni bir belge yükleyebilirsiniz.{{else if eq . "lapsed"}}Koro öğrenci doğrulamanızın süresi doldu. Öğrenci olarak sunulan özellikler kapandı ve şirket keşfinde görünmüyorsunuz; dilediğiniz zaman yeniden doğrulayabilirsiniz.{{else}}Koro öğrenci doğrulamanızda bir değişiklik oldu.{{end}}{{end}}
+
+Öğrenci doğrulamanız: {{index .Data "link"}}

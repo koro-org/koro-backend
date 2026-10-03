@@ -235,6 +235,77 @@ components:
         - city
         - type
       type: object
+    AdminEduUserDTO:
+      additionalProperties: false
+      properties:
+        first_name:
+          type: string
+        id:
+          format: uuid
+          type: string
+        last_name:
+          type: string
+      required:
+        - id
+      type: object
+    AdminEduVerificationDTO:
+      additionalProperties: false
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        expires_at:
+          format: date-time
+          type: string
+        method:
+          enum:
+            - edu_email
+            - document
+          type: string
+        review_note:
+          type: string
+        reviewed_by:
+          format: uuid
+          type: string
+        status:
+          enum:
+            - pending
+            - verified
+            - rejected
+            - expired
+            - revoked
+            - superseded
+          type: string
+        university:
+          $ref: "#/components/schemas/UniversityRefDTO"
+          description: Claimed while pending, confirmed once verified
+        user:
+          $ref: "#/components/schemas/AdminEduUserDTO"
+        verification_id:
+          format: uuid
+          type: string
+        verified_at:
+          format: date-time
+          type: string
+      required:
+        - verification_id
+        - user
+        - method
+        - status
+        - created_at
+      type: object
+    AdminEduVerificationList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/AdminEduVerificationDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
     AdminGrantInputBody:
       additionalProperties: false
       properties:
@@ -432,6 +503,7 @@ components:
           enum:
             - none
             - verified
+            - lapsed
           type: string
         university_id:
           format: uuid
@@ -1230,6 +1302,25 @@ components:
         - content_type
         - size_bytes
       type: object
+    DecideEduInputBody:
+      additionalProperties: false
+      properties:
+        decision:
+          enum:
+            - verified
+            - rejected
+          type: string
+        review_note:
+          description: At most 500 characters; shown to the student on a rejection
+          maxLength: 2000
+          type: string
+        university_id:
+          description: Required to approve
+          format: uuid
+          type: string
+      required:
+        - decision
+      type: object
     DeliveryDTO:
       additionalProperties: false
       properties:
@@ -1526,6 +1617,61 @@ components:
           type: string
       required:
         - items
+      type: object
+    EduDocumentDTO:
+      additionalProperties: false
+      properties:
+        expires_at:
+          format: date-time
+          type: string
+        url:
+          type: string
+      required:
+        - url
+        - expires_at
+      type: object
+    EduVerificationDTO:
+      additionalProperties: false
+      properties:
+        edu_email:
+          description: "Masked: a***@ogr.x.edu.tr"
+          type: string
+        expires_at:
+          format: date-time
+          type: string
+        method:
+          enum:
+            - edu_email
+            - document
+          type: string
+        review_note:
+          description: The reviewer's note on a rejected document
+          type: string
+        status:
+          enum:
+            - pending
+            - verified
+            - rejected
+            - expired
+            - revoked
+            - superseded
+          type: string
+        submitted_at:
+          format: date-time
+          type: string
+        university:
+          $ref: "#/components/schemas/UniversityRefDTO"
+        verification_id:
+          format: uuid
+          type: string
+        verified_at:
+          format: date-time
+          type: string
+      required:
+        - verification_id
+        - method
+        - status
+        - submitted_at
       type: object
     EmailChangeInputBody:
       additionalProperties: false
@@ -1874,6 +2020,45 @@ components:
       required:
         - current
         - items
+      type: object
+    MyEduVerificationDTO:
+      additionalProperties: false
+      properties:
+        edu_email:
+          description: "Masked: a***@ogr.x.edu.tr"
+          type: string
+        expires_at:
+          format: date-time
+          type: string
+        method:
+          enum:
+            - edu_email
+            - document
+          type: string
+        pending_document:
+          $ref: "#/components/schemas/EduVerificationDTO"
+          description: A document in review next to a current verification (renewal)
+        review_note:
+          description: The reviewer's note when status is rejected
+          type: string
+        status:
+          enum:
+            - none
+            - pending
+            - verified
+            - lapsed
+            - rejected
+          type: string
+        university:
+          $ref: "#/components/schemas/UniversityRefDTO"
+        verification_id:
+          format: uuid
+          type: string
+        verified_at:
+          format: date-time
+          type: string
+      required:
+        - status
       type: object
     MySessionDTO:
       additionalProperties: false
@@ -2845,6 +3030,16 @@ components:
       required:
         - org_id
       type: object
+    StartEduInputBody:
+      additionalProperties: false
+      properties:
+        edu_email:
+          description: A .edu.tr address of the caller's university
+          maxLength: 320
+          type: string
+      required:
+        - edu_email
+      type: object
     StudentDTO:
       additionalProperties: false
       properties:
@@ -2859,6 +3054,21 @@ components:
           type: string
       required:
         - status
+      type: object
+    SubmitEduDocumentInputBody:
+      additionalProperties: false
+      properties:
+        document_file_id:
+          description: A completed edu_document upload of the caller
+          format: uuid
+          type: string
+        university_id:
+          description: The university the student attends
+          format: uuid
+          type: string
+      required:
+        - university_id
+        - document_file_id
       type: object
     SuppressionDTO:
       additionalProperties: false
@@ -3012,6 +3222,17 @@ components:
           type: string
       required:
         - items
+      type: object
+    UniversityRefDTO:
+      additionalProperties: false
+      properties:
+        id:
+          format: uuid
+          type: string
+        name:
+          type: string
+      required:
+        - id
       type: object
     UpdateClubInputBody:
       additionalProperties: false
@@ -3981,6 +4202,141 @@ paths:
       x-koro-action: kvkk.dsr.reject
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/edu-verifications:
+    get:
+      description: Student documents of one status (default pending, oldest first; other statuses newest first). Applicants by name only; open a document with adminGetEduDocument.
+      operationId: adminListEduVerifications
+      parameters:
+        - description: Default pending
+          explode: false
+          in: query
+          name: status
+          schema:
+            description: Default pending
+            enum:
+              - pending
+              - verified
+              - rejected
+              - expired
+              - revoked
+              - superseded
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminEduVerificationList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Student document review queue
+      tags:
+        - identity
+      x-koro-action: identity.edu_verification.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+  /api/v1/admin/edu-verifications/{verification_id}/decision:
+    post:
+      description: "verified needs university_id and a clean document; the student is verified for one year (a current verification is superseded). rejected keeps review_note for the student. Own document: 403; a decided verification: 409 identity.edu_invalid_state."
+      operationId: adminDecideEduVerification
+      parameters:
+        - description: Verification ID (an unknown or malformed ID is 404)
+          in: path
+          name: verification_id
+          required: true
+          schema:
+            description: Verification ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DecideEduInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminEduVerificationDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Approve or reject a student document
+      tags:
+        - identity
+      x-koro-action: identity.edu_verification.review
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/edu-verifications/{verification_id}/document:
+    get:
+      description: A signed URL valid for 5 minutes; every call is audited. 409 files.not_clean while the virus scan is pending or found something. Not for the reviewer's own document (403).
+      operationId: adminGetEduDocument
+      parameters:
+        - description: Verification ID (an unknown or malformed ID is 404)
+          in: path
+          name: verification_id
+          required: true
+          schema:
+            description: Verification ID (an unknown or malformed ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EduDocumentDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Download a student document
+      tags:
+        - identity
+      x-koro-action: identity.edu_verification.review
+      x-koro-rate-limit: read_default
       x-koro-surface: admin
   /api/v1/admin/email-suppressions:
     get:
@@ -5369,6 +5725,32 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+  /api/v1/auth/edu-verifications/confirm:
+    post:
+      description: Single use; an unknown, used or expired token is 422 identity.invalid_token. The account becomes a verified student for one year; a renewal supersedes the previous verification. An address that verifies another account is 409 identity.edu_email_taken.
+      operationId: confirmEduVerification
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TokenInputBody"
+        required: true
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: Confirm a .edu.tr address
+      tags:
+        - identity
+      x-koro-action: identity.edu_verification.confirm
+      x-koro-idempotency: optional
+      x-koro-rate-limit: token_confirm
+      x-koro-surface: public
   /api/v1/auth/email-change/confirm:
     post:
       operationId: confirmEmailChange
@@ -6400,6 +6782,98 @@ paths:
         - kvkk
       x-koro-action: kvkk.dsr.export_download
       x-koro-rate-limit: read_default
+      x-koro-surface: self
+  /api/v1/me/edu-verification:
+    get:
+      description: The .edu.tr address is masked (a***@ogr.x.edu.tr).
+      operationId: getMyEduVerification
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyEduVerificationDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: My student verification
+      tags:
+        - identity
+      x-koro-action: identity.edu_verification.read_own
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
+  /api/v1/me/edu-verifications:
+    post:
+      description: "A single-use link (valid 24 hours) goes to the address. 202 whether or not the address is free: an address that verifies another account gets nothing (no enumeration). An address whose domain is not a known university is 422 identity.edu_domain_unknown: submit a student document instead."
+      operationId: startEduVerification
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartEduInputBody"
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcceptedOutputBody"
+          description: Accepted
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Verify (or renew) my student status with a .edu.tr address
+      tags:
+        - identity
+      x-koro-action: identity.edu_verification.start
+      x-koro-idempotency: optional
+      x-koro-rate-limit: auth_email
+      x-koro-surface: self
+  /api/v1/me/edu-verifications/document:
+    post:
+      description: For students without a .edu.tr address (open education). document_file_id is a completed edu_document upload of the caller (createUpload). The document waits for platform staff; one at a time (409 identity.edu_verification_pending).
+      operationId: submitEduDocument
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitEduDocumentInputBody"
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EduVerificationDTO"
+          description: Accepted
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Submit a student document for review
+      tags:
+        - identity
+      x-koro-action: identity.edu_verification.submit_document
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
       x-koro-surface: self
   /api/v1/me/email-change:
     post:

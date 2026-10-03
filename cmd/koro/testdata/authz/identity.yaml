@@ -1,4 +1,4 @@
-# Authz matrix of the identity module (03 §5.1, 04 §2.1; BE-014, BE-016). 30 operations × 18 personas.
+# Authz matrix of the identity module (03 §5.1, 04 §2.1; BE-014, BE-016, BE-018). 37 operations × 18 personas.
 # Public (P) operations are the same for every persona, a signed-in caller included (the
 # operation ignores the session; 06 H-25). O cells: /me/... and /auth/sessions/current act on
 # the caller's own account and sessions only; another user's session is 404. password.change
@@ -7,6 +7,9 @@
 # BE-016: identity_mfa (none | enrolled | enabled) gives every matrix account an unconfirmed or a
 # confirmed TOTP with one secret; its code at the container clock is in the bodies (mfa_*.json).
 # Staff cells need an MFA-verified session (k-mfa); the personas' sessions are (03 §7.3).
+# BE-018: every verified student persona has a verified .edu.tr row (<name>@matrix.edu.tr, its
+# university); the matrix domain resolver knows matrix.edu.tr and its subdomains (uni_a).
+# Student documents are edu_document files in the files store (matrix_identity_test.go).
 version: 1
 config:
   identity_mfa: none
@@ -17,6 +20,10 @@ groups:
                 company_member]
   not_staff: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin, event_staff,
               university_rep, company_member, company_admin, other_company_member]
+  not_student: [user_unverified, student_minor, club_member, club_admin, other_club_admin, event_staff,
+                university_rep, company_member, company_admin, other_company_member, moderator, support, dpo,
+                platform_admin, finance_admin, talent_auditor]
+  edu_bystanders: [moderator, dpo, finance_admin, talent_auditor]
 operations:
   registerAccount:
     method: POST
@@ -352,11 +359,88 @@ operations:
     expect: { anonymous: 401, "@not_staff": 403, moderator: 403, support: 403, dpo: 403, platform_admin: 200,
               finance_admin: 403, talent_auditor: 403 }
 
-# Bound by later identity tickets (H-29).
-pending_actions:
-  - identity.edu_verification.start              # BE-018
-  - identity.edu_verification.confirm            # BE-018
-  - identity.edu_verification.submit_document    # BE-018
-  - identity.edu_verification.read_own           # BE-018
-  - identity.edu_verification.list               # BE-018
-  - identity.edu_verification.review             # BE-018
+  # ---- BE-018: student verification
+  startEduVerification:
+    method: POST
+    path: /api/v1/me/edu-verifications
+    action: identity.edu_verification.start
+    body: bodies/identity/edu_start.json
+    note: O - a link to the .edu.tr address (renewal for verified students); 202 also for an address that verifies another account
+    expect: { anonymous: 401, "@signed_in": 202 }
+    variants:
+      - name: unknown_domain
+        body: bodies/identity/edu_start_unknown.json
+        note: a domain hooks.domainResolver does not know - identity.edu_domain_unknown, the document path instead
+        expect: { anonymous: 401, "@signed_in": 422 }
+      - name: not_edu_tr
+        body: bodies/identity/edu_start_not_edu.json
+        expect: { anonymous: 401, "@signed_in": 422 }
+
+  confirmEduVerification:
+    method: POST
+    path: /api/v1/auth/edu-verifications/confirm
+    action: identity.edu_verification.confirm
+    public: true
+    body: bodies/identity/edu_confirm.json
+    note: P - the token names the account (student_b renews; the old row is superseded); single use is a scenario
+    expect: { "@all": 204 }
+    variants:
+      - name: invalid_token
+        body: bodies/identity/edu_confirm_invalid.json
+        expect: { "@all": 422 }
+
+  submitEduDocument:
+    method: POST
+    path: /api/v1/me/edu-verifications/document
+    action: identity.edu_verification.submit_document
+    body: bodies/identity/edu_document.json
+    note: O - the document is the student persona's edu_document upload; anyone else's own account gets 422 identity.invalid_edu_document (not their file)
+    expect: { anonymous: 401, student: 202, "@not_student": 422 }
+
+  getMyEduVerification:
+    method: GET
+    path: /api/v1/me/edu-verification
+    action: identity.edu_verification.read_own
+    expect: { anonymous: 401, "@signed_in": 200 }
+
+  adminListEduVerifications:
+    method: GET
+    path: /api/v1/admin/edu-verifications
+    action: identity.edu_verification.list
+    expect: { anonymous: 401, "@not_staff": 403, "@edu_bystanders": 403, support: 200, platform_admin: 200 }
+
+  adminGetEduDocument:
+    method: GET
+    path: /api/v1/admin/edu-verifications/{verification_id}/document
+    action: identity.edu_verification.review
+    path_params: { verification_id: edu_pending_b }
+    note: every download is audited; the URL lives 5 minutes
+    expect: { anonymous: 401, "@not_staff": 403, "@edu_bystanders": 403, support: 200, platform_admin: 200 }
+    variants:
+      - name: own_document
+        path_params: { verification_id: edu_pending_pad }
+        note: Y6 - nobody reviews their own student document
+        expect: { anonymous: 401, "@not_staff": 403, "@edu_bystanders": 403, support: 200, platform_admin: 403 }
+      - name: missing
+        path_params: { verification_id: "literal:00000000-0000-7000-8000-0000000000e5" }
+        note: the gate decides before the row is read; only reviewers learn it is missing
+        expect: { anonymous: 401, "@not_staff": 403, "@edu_bystanders": 403, support: 404, platform_admin: 404 }
+
+  adminDecideEduVerification:
+    method: POST
+    path: /api/v1/admin/edu-verifications/{verification_id}/decision
+    action: identity.edu_verification.review
+    path_params: { verification_id: edu_pending_b }
+    body: bodies/identity/edu_decide_verified.json
+    expect: { anonymous: 401, "@not_staff": 403, "@edu_bystanders": 403, support: 200, platform_admin: 200 }
+    variants:
+      - name: rejected
+        body: bodies/identity/edu_decide_rejected.json
+        expect: { anonymous: 401, "@not_staff": 403, "@edu_bystanders": 403, support: 200, platform_admin: 200 }
+      - name: own_document
+        path_params: { verification_id: edu_pending_pad }
+        note: Y6 (03 §5.1) - edu_verifications_reviewer_chk is the second layer
+        expect: { anonymous: 401, "@not_staff": 403, "@edu_bystanders": 403, support: 200, platform_admin: 403 }
+      - name: missing
+        path_params: { verification_id: "literal:00000000-0000-7000-8000-0000000000e6" }
+        expect: { anonymous: 401, "@not_staff": 403, "@edu_bystanders": 403, support: 404, platform_admin: 404 }

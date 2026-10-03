@@ -3,6 +3,7 @@ package main
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
+	"koro/internal/files"
 	"koro/internal/identity"
 	"koro/internal/platform/civil"
 	"koro/internal/platform/config"
@@ -74,10 +76,28 @@ func (w *identityWiring) matrixFixtures(fx *matrixFixtures) error {
 		if err := w.matrixTOTP(ctx, u); err != nil {
 			return fmt.Errorf("totp %s: %w", p.Name, err)
 		}
+		// BE-018: a verified student persona has its verification in the store
+		// too (getMyEduVerification, renewals), at the persona's university.
+		if p.Actor.IsVerifiedStudent() {
+			uni, exp, addr := *p.Actor.UniversityID, now.AddDate(1, 0, 0), p.Name+"@matrix.edu.tr"
+			v := identity.EduRecord{ID: uuid.NewV7(), UserID: u.ID, Method: identity.EduMethodEmail, EduEmail: addr,
+				EduEmailNormalized: addr, EmailDomain: "matrix.edu.tr", UniversityID: &uni, Status: identity.EduVerified,
+				VerifiedAt: &now, ExpiresAt: &exp, CreatedAt: now, UpdatedAt: now}
+			if err := w.store.InsertEduVerification(ctx, v); err != nil {
+				return fmt.Errorf("student verification %s: %w", p.Name, err)
+			}
+		}
+	}
+	// The matrix directory: matrix.edu.tr and its subdomains are uni_a.
+	w.domains = func(_ context.Context, domain string) (uuid.UUID, bool, error) {
+		if domain == "matrix.edu.tr" || strings.HasSuffix(domain, ".matrix.edu.tr") {
+			return authztest.UniversityID("uni_a"), true, nil
+		}
+		return uuid.Nil(), false, nil
 	}
 	fixtures := fx.Of("identity")
-	slices.SortStableFunc(fixtures, func(a, b fixture) int { // accounts before what refers to them
-		return cmp.Compare(boolInt(a.Kind != "user"), boolInt(b.Kind != "user"))
+	slices.SortStableFunc(fixtures, func(a, b fixture) int { // accounts and files before what refers to them
+		return cmp.Compare(fixtureRank(a.Kind), fixtureRank(b.Kind))
 	})
 	for _, f := range fixtures {
 		id, err := fx.ID(f.Name)
@@ -133,6 +153,25 @@ func (w *identityWiring) matrixFixtures(fx *matrixFixtures) error {
 			if err := w.matrixRole(ctx, fx, f, id, now); err != nil {
 				return fmt.Errorf("fixture %s: %w", f.Name, err)
 			}
+		case "edu_document_file":
+			if err := w.matrixEduFile(ctx, fx, f, id, now); err != nil {
+				return fmt.Errorf("fixture %s: %w", f.Name, err)
+			}
+		case "edu_verification":
+			owner, err := fx.Ref(f, "user")
+			if err != nil {
+				return err
+			}
+			file, err := fx.Ref(f, "file")
+			if err != nil {
+				return err
+			}
+			uni := authztest.UniversityID("uni_a")
+			v := identity.EduRecord{ID: id, UserID: owner, Method: identity.EduMethodDocument, UniversityID: &uni,
+				DocumentFileID: &file, Status: identity.EduPending, CreatedAt: now, UpdatedAt: now}
+			if err := w.store.InsertEduVerification(ctx, v); err != nil {
+				return fmt.Errorf("fixture %s: %w", f.Name, err)
+			}
 		default:
 			return fmt.Errorf("fixture %s: unknown kind %q", f.Name, f.Kind)
 		}
@@ -151,11 +190,50 @@ func insertMatrixSession(ctx context.Context, s identity.Store, id, userID uuid.
 	})
 }
 
-func boolInt(b bool) int {
-	if b {
+// fixtureRank orders the identity fixtures: accounts, then student
+// document files, then what refers to them.
+func fixtureRank(kind string) int {
+	switch kind {
+	case "user":
+		return 0
+	case "edu_document_file":
 		return 1
 	}
-	return 0
+	return 2
+}
+
+// matrixEduFile seeds an edu_document file (BE-018) into the files store and
+// object storage of the container: uploaded by user, verified, skipped by
+// the no-op scanner (served while FILES_SCAN_REQUIRED=false), attached to
+// the verification attached_to when given.
+func (w *identityWiring) matrixEduFile(ctx context.Context, fx *matrixFixtures, f fixture, id uuid.UUID, now time.Time) error {
+	by, err := fx.Ref(f, "user")
+	if err != nil {
+		return err
+	}
+	if w.late == nil {
+		return errors.New("identity wiring was not built")
+	}
+	mem, err := w.late.files.memObjects()
+	if err != nil {
+		return err
+	}
+	size := int64(len(matrixFilePDF))
+	row := files.File{
+		ID: id, Purpose: files.PurposeEduDocument, OwnerUserID: &by, UploadedBy: &by, Bucket: testBuckets.Files,
+		StorageKey: "matrix/" + f.Name, DeclaredMIME: files.MIMEPDF, SizeBytes: &size, SHA256: make([]byte, 32),
+		Status: files.StatusActive, ScanStatus: files.ScanSkipped, CreatedAt: now, UpdatedAt: now,
+	}
+	if _, ok := f.Fields["attached_to"]; ok {
+		owner, err := fx.Ref(f, "attached_to")
+		if err != nil {
+			return err
+		}
+		module := "identity"
+		row.AttachedModule, row.AttachedEntityID, row.AttachedAt = &module, &owner, &now
+	}
+	mem.Upload(row.Bucket, row.StorageKey, matrixFilePDF, files.MIMEPDF)
+	return w.late.files.store.Insert(ctx, row)
 }
 
 // matrixTOTPSecret is the TOTP secret of every matrix account when the

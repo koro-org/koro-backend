@@ -402,6 +402,30 @@
     "type": "urn:koro:problem:identity.duplicate_consent"
   },
   {
+    "code": "identity.edu_domain_unknown",
+    "status": 422,
+    "title": "E-mail domain is not a known university; submit a student document instead",
+    "type": "urn:koro:problem:identity.edu_domain_unknown"
+  },
+  {
+    "code": "identity.edu_email_taken",
+    "status": 409,
+    "title": "This university address already verifies another account",
+    "type": "urn:koro:problem:identity.edu_email_taken"
+  },
+  {
+    "code": "identity.edu_invalid_state",
+    "status": 409,
+    "title": "The verification is not waiting for review",
+    "type": "urn:koro:problem:identity.edu_invalid_state"
+  },
+  {
+    "code": "identity.edu_verification_pending",
+    "status": 409,
+    "title": "A student document is already waiting for review",
+    "type": "urn:koro:problem:identity.edu_verification_pending"
+  },
+  {
     "code": "identity.email_not_verified",
     "status": 403,
     "title": "E-mail address not verified",
@@ -430,6 +454,12 @@
     "status": 401,
     "title": "Invalid e-mail or password",
     "type": "urn:koro:problem:identity.invalid_credentials"
+  },
+  {
+    "code": "identity.invalid_edu_document",
+    "status": 422,
+    "title": "Invalid student document",
+    "type": "urn:koro:problem:identity.invalid_edu_document"
   },
   {
     "code": "identity.invalid_email",
@@ -550,6 +580,12 @@
     "status": 409,
     "title": "At most two talent auditors are allowed",
     "type": "urn:koro:problem:identity.talent_auditor_limit"
+  },
+  {
+    "code": "identity.university_unknown",
+    "status": 422,
+    "title": "Unknown university",
+    "type": "urn:koro:problem:identity.university_unknown"
   },
   {
     "code": "identity.user_invalid_state",

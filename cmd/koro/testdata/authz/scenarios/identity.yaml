@@ -118,3 +118,31 @@ scenarios:
       - { persona: platform_admin, operation: adminResetUserMfa, path_params: { user_id: talent_auditor }, expect: 202 }
       - { persona: platform_admin, operation: adminResetUserMfa, path_params: { user_id: talent_auditor }, expect: 403, code: authz.four_eyes_violation }
       - { persona: platform_admin_2, operation: adminResetUserMfa, path_params: { user_id: talent_auditor }, expect: 204 }
+  # BE-018
+  edu_document_review:
+    note: "BE-018: a student document waits in the queue; the applicant cannot open it, support opens it (audited)
+      and approves it; a decided document is not decided again"
+    steps:
+      - { persona: student, operation: submitEduDocument, expect: 202, save: { new_edu: verification_id } }
+      - { persona: student, operation: adminGetEduDocument, path_params: { verification_id: new_edu }, expect: 403, code: forbidden }
+      - { persona: support, operation: adminListEduVerifications, expect: 200 }
+      - { persona: support, operation: adminGetEduDocument, path_params: { verification_id: new_edu }, expect: 200 }
+      - { persona: support, operation: adminDecideEduVerification, path_params: { verification_id: new_edu }, expect: 200 }
+      - { persona: platform_admin, operation: adminDecideEduVerification, path_params: { verification_id: new_edu }, expect: 409, code: identity.edu_invalid_state }
+      - { persona: student, operation: getMyEduVerification, expect: 200 }
+  edu_confirm_single_use:
+    note: "BE-018: a .edu.tr link works once"
+    steps:
+      - { persona: anonymous, operation: confirmEduVerification, expect: 204 }
+      - { persona: anonymous, operation: confirmEduVerification, expect: 422, code: identity.invalid_token }
+  edu_self_review:
+    note: "Y6 (03 §5.1): the platform admin's own student document is decided by someone else"
+    steps:
+      - { persona: platform_admin, operation: adminDecideEduVerification, path_params: { verification_id: edu_pending_pad }, expect: 403, code: forbidden }
+      - { persona: platform_admin, operation: adminGetEduDocument, path_params: { verification_id: edu_pending_pad }, expect: 403, code: forbidden }
+      - { persona: support, operation: adminDecideEduVerification, path_params: { verification_id: edu_pending_pad }, expect: 200 }
+  edu_unknown_domain:
+    note: "BE-018: an unknown .edu.tr domain is 422 (document path); a known one starts the verification"
+    steps:
+      - { persona: user_unverified, operation: startEduVerification, body: bodies/identity/edu_start_unknown.json, expect: 422, code: identity.edu_domain_unknown }
+      - { persona: user_unverified, operation: startEduVerification, expect: 202 }

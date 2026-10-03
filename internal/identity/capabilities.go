@@ -24,7 +24,7 @@ func Capabilities(a authz.Actor) []authz.Action {
 	// Every signed-in user: own account, consents, notifications, requests.
 	add(authz.IdentityAccountUpdateOwn, authz.IdentityPasswordChange, authz.IdentityEmailChangeRequest,
 		authz.IdentitySessionListOwn, authz.ConsentRecordListOwn, authz.NotifyPreferenceReadOwn,
-		authz.OrgsMembershipListOwn, authz.KvkkDsrCreate)
+		authz.OrgsMembershipListOwn, authz.KvkkDsrCreate, authz.IdentityEduVerificationReadOwn)
 	if a.IsVerifiedStudent() {
 		add(authz.StudentsProfileReadOwn, authz.EventsRegistrationListOwn, authz.OrgsMemberJoin)
 		if !a.IsMinor {

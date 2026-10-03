@@ -1,0 +1,178 @@
+# Authz matrix of the entitlements module (03 §5.11, 04 §2.11; BE-013). 5 operations × 18 personas.
+# Org surface (03 §3.6): members of the org without the role → 403, non-members → 404, every
+# platform role sees the surface (403 unless platform_admin/finance_admin). Admin surface
+# (03 §7.2-3): everyone without the role → 403, nothing is read first. company_admin,
+# platform_admin and finance_admin sessions are MFA verified (03 §7.3); the policy test covers
+# the MFA-less session. Fixtures: fixtures/entitlements.yaml (matrix_entitlements_test.go).
+version: 1
+groups:
+  # signed-in users without a membership in company_a (its org surface is 404).
+  outsiders_company_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                        event_staff, university_rep, other_company_member]
+  # signed-in users without a membership in company_b.
+  outsiders_company_b: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                        event_staff, university_rep, company_member, company_admin]
+  # signed-in users without a platform role.
+  no_platform_role: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                     event_staff, university_rep, company_member, company_admin, other_company_member]
+  # platform roles without an entitlements cell.
+  other_staff: [moderator, support, dpo, talent_auditor]
+
+operations:
+  listOrgEntitlements:
+    method: GET
+    path: /api/v1/orgs/{org_id}/entitlements
+    action: entitlements.entitlement.list
+    path_params: { org_id: company_a }
+    expect:
+      anonymous: 401
+      "@outsiders_company_a": 404   # not a member of company_a
+      company_member: 200           # S (recruiter)
+      company_admin: 200            # S (MFA session)
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: company_b
+        path_params: { org_id: company_b }
+        expect:
+          anonymous: 401
+          "@outsiders_company_b": 404
+          other_company_member: 200   # company_admin of company_b
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+      - name: club_org
+        path_params: { org_id: club_a }
+        note: club_a members see the surface but hold no entitlements cell
+        expect:
+          anonymous: 401
+          "@outsiders_a": 404
+          club_member: 403
+          club_admin: 403
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 404   # nobody is a member of a missing org
+          "@other_staff": 403
+          platform_admin: 200        # empty list
+          finance_admin: 200
+
+  getOrgEntitlement:
+    method: GET
+    path: /api/v1/orgs/{org_id}/entitlements/{entitlement_id}
+    action: entitlements.entitlement.read
+    path_params: { org_id: company_a, entitlement_id: ent_company_a_post }
+    expect:
+      anonymous: 401
+      "@outsiders_company_a": 404
+      company_member: 200
+      company_admin: 200
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: other_orgs_entitlement
+        path_params: { org_id: company_a, entitlement_id: ent_company_b_post }
+        note: IDOR — company_b's entitlement under company_a's path is not found, for staff too (06 H-38)
+        expect:
+          anonymous: 401
+          "@outsiders_company_a": 404
+          company_member: 404
+          company_admin: 404
+          "@other_staff": 403        # authorised before reading: no role, no lookup
+          platform_admin: 404
+          finance_admin: 404
+      - name: own_entitlement_other_path
+        path_params: { org_id: company_b, entitlement_id: ent_company_b_post }
+        expect:
+          anonymous: 401
+          "@outsiders_company_b": 404
+          other_company_member: 200
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+
+  listOrgEntitlementUsages:
+    method: GET
+    path: /api/v1/orgs/{org_id}/entitlement-usages
+    action: entitlements.usage.list
+    path_params: { org_id: company_a }
+    expect:
+      anonymous: 401
+      "@outsiders_company_a": 404
+      company_member: 200
+      company_admin: 200
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: feature_filter
+        query: { feature: targeted_post }
+        expect:
+          anonymous: 401
+          "@outsiders_company_a": 404
+          company_member: 200
+          company_admin: 200
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+
+  adminGrantEntitlement:
+    method: POST
+    path: /api/v1/admin/orgs/{org_id}/entitlements
+    action: entitlements.entitlement.grant
+    idempotency: required
+    path_params: { org_id: company_a }
+    body: bodies/entitlements/grant_contact_request.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403   # admin surface: 403 before reading (03 §7.2-3)
+      "@other_staff": 403
+      platform_admin: 201
+      finance_admin: 201
+    variants:
+      - name: promo_access
+        path_params: { org_id: company_b }
+        body: bodies/entitlements/grant_discovery_promo.json
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 201
+          finance_admin: 201
+
+  adminRevokeEntitlement:
+    method: POST
+    path: /api/v1/admin/entitlements/{entitlement_id}/revoke
+    action: entitlements.entitlement.revoke
+    path_params: { entitlement_id: ent_company_a_contact }
+    body: bodies/entitlements/revoke.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: order_line_source
+        path_params: { entitlement_id: ent_company_a_order }
+        note: a right bought with an order is revoked with warning order_refund_not_started (04 §2.11)
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+      - name: missing_entitlement
+        path_params: { entitlement_id: "literal:00000000-0000-7000-8000-000000000001" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403   # no ID probing without a platform role
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404

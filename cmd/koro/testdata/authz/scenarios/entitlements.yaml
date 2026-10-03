@@ -1,0 +1,34 @@
+# Multi-step scenarios of the entitlements module (03 §7.7; BE-013).
+version: 1
+scenarios:
+  no_entitlement:
+    note: >-
+      "Hak yok" (03 §7.7): company_b's rights are reset → consuming a quota is 403
+      entitlements.not_entitled; a grant by finance_admin makes it usable again. The
+      searchDiscovery step joins with BE-051 (discovery_access).
+    steps:
+      - { hook: entitlements.reset, args: { org: company_b } }
+      - { persona: other_company_member, operation: listOrgEntitlements, path_params: { org_id: company_b }, expect: 200 }
+      - { hook: entitlements.expect_not_entitled, args: { org: company_b, feature: contact_request } }
+      - { hook: entitlements.expect_not_entitled, args: { org: company_b, feature: discovery_access } }
+      - { persona: other_company_member, operation: adminGrantEntitlement, path_params: { org_id: company_b },
+          expect: 403, code: forbidden }
+      - { persona: finance_admin, operation: adminGrantEntitlement, path_params: { org_id: company_b }, expect: 201,
+          save: { regranted: entitlement_id } }
+      - { hook: entitlements.consume, args: { org: company_b, feature: contact_request } }
+      - { persona: other_company_member, operation: getOrgEntitlement,
+          path_params: { org_id: company_b, entitlement_id: regranted }, expect: 200 }
+  revoke_then_not_entitled:
+    note: an admin revocation takes the right away at once; revoking again is a no-op, a missing right 404
+    steps:
+      - { hook: entitlements.consume, args: { org: company_a, feature: targeted_dispatch } }
+      - { persona: platform_admin, operation: adminRevokeEntitlement, path_params: { entitlement_id: ent_company_a_dispatch }, expect: 200 }
+      - { hook: entitlements.expect_not_entitled, args: { org: company_a, feature: targeted_dispatch } }
+      - { persona: finance_admin, operation: adminRevokeEntitlement, path_params: { entitlement_id: ent_company_a_dispatch }, expect: 200 }
+      - { persona: company_admin, operation: adminRevokeEntitlement, path_params: { entitlement_id: ent_company_a_dispatch },
+          expect: 403, code: forbidden }
+  grant_needs_mfa:
+    note: platform_admin and finance_admin grants are k-mfa role paths (03 §6.4)
+    steps:
+      - { persona: finance_admin, mfa: false, operation: adminGrantEntitlement, expect: 403, code: authz.mfa_required }
+      - { persona: finance_admin, operation: adminGrantEntitlement, expect: 201 }

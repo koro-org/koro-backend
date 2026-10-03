@@ -7,6 +7,66 @@ components:
             $ref: "#/components/schemas/Problem"
       description: RFC 9457 problem details
   schemas:
+    AdminGrantInputBody:
+      additionalProperties: false
+      properties:
+        feature:
+          enum:
+            - targeted_post
+            - targeted_dispatch
+            - contact_request
+            - discovery_access
+          type: string
+        kind:
+          description: access for discovery_access, quota otherwise
+          enum:
+            - quota
+            - access
+          type: string
+        quantity_total:
+          description: Units (quota only)
+          format: int64
+          maximum: 100000
+          minimum: 1
+          type: integer
+        reason:
+          description: Why the right is granted (audited; no personal data)
+          maxLength: 300
+          minLength: 3
+          type: string
+        source_type:
+          description: "admin_grant: a package sold offline; promo: a promotion"
+          enum:
+            - admin_grant
+            - promo
+          type: string
+        valid_from:
+          description: Start of the validity window
+          format: date-time
+          type: string
+        valid_to:
+          description: End of the validity window (exclusive; in the future, at most three years after valid_from)
+          format: date-time
+          type: string
+      required:
+        - feature
+        - kind
+        - valid_from
+        - valid_to
+        - source_type
+        - reason
+      type: object
+    AdminRevokeInputBody:
+      additionalProperties: false
+      properties:
+        reason:
+          description: Why the right is taken back (stored and audited; no personal data)
+          maxLength: 300
+          minLength: 3
+          type: string
+      required:
+        - reason
+      type: object
     AuditActorDTO:
       additionalProperties: false
       properties:
@@ -66,6 +126,27 @@ components:
       required:
         - items
       type: object
+    AvailabilityDTO:
+      additionalProperties: false
+      properties:
+        access_until:
+          description: End of the running access right (discovery_access; absent when none)
+          format: date-time
+          type: string
+        feature:
+          enum:
+            - targeted_post
+            - targeted_dispatch
+            - contact_request
+            - discovery_access
+          type: string
+        remaining:
+          description: Units usable now (quota features)
+          format: int64
+          type: integer
+      required:
+        - feature
+      type: object
     CompleteUploadInputBody:
       additionalProperties: false
       properties:
@@ -124,6 +205,78 @@ components:
         - filename
         - content_type
         - size_bytes
+      type: object
+    EntitlementDTO:
+      additionalProperties: false
+      properties:
+        entitlement_id:
+          format: uuid
+          type: string
+        feature:
+          enum:
+            - targeted_post
+            - targeted_dispatch
+            - contact_request
+            - discovery_access
+          type: string
+        kind:
+          enum:
+            - quota
+            - access
+          type: string
+        quantity_total:
+          description: Units bought (quota only)
+          format: int64
+          type: integer
+        quantity_used:
+          format: int64
+          type: integer
+        source_type:
+          enum:
+            - order_line
+            - admin_grant
+            - promo
+          type: string
+        status:
+          enum:
+            - pending
+            - active
+            - exhausted
+            - expired
+            - revoked
+          type: string
+        valid_from:
+          format: date-time
+          type: string
+        valid_to:
+          format: date-time
+          type: string
+      required:
+        - entitlement_id
+        - feature
+        - kind
+        - quantity_used
+        - valid_from
+        - valid_to
+        - status
+        - source_type
+      type: object
+    EntitlementList:
+      additionalProperties: false
+      properties:
+        available:
+          items:
+            $ref: "#/components/schemas/AvailabilityDTO"
+          type: array
+        items:
+          items:
+            $ref: "#/components/schemas/EntitlementDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+        - available
       type: object
     FieldError:
       additionalProperties: false
@@ -228,6 +381,66 @@ components:
         - status
         - code
       type: object
+    RevokedEntitlementDTO:
+      additionalProperties: false
+      properties:
+        entitlement_id:
+          format: uuid
+          type: string
+        feature:
+          enum:
+            - targeted_post
+            - targeted_dispatch
+            - contact_request
+            - discovery_access
+          type: string
+        kind:
+          enum:
+            - quota
+            - access
+          type: string
+        quantity_total:
+          description: Units bought (quota only)
+          format: int64
+          type: integer
+        quantity_used:
+          format: int64
+          type: integer
+        source_type:
+          enum:
+            - order_line
+            - admin_grant
+            - promo
+          type: string
+        status:
+          enum:
+            - pending
+            - active
+            - exhausted
+            - expired
+            - revoked
+          type: string
+        valid_from:
+          format: date-time
+          type: string
+        valid_to:
+          format: date-time
+          type: string
+        warning:
+          description: "Set when the right was bought with an order: no refund was started"
+          enum:
+            - order_refund_not_started
+          type: string
+      required:
+        - entitlement_id
+        - feature
+        - kind
+        - quantity_used
+        - valid_from
+        - valid_to
+        - status
+        - source_type
+      type: object
     SecurityEventDTO:
       additionalProperties: false
       properties:
@@ -260,6 +473,59 @@ components:
         items:
           items:
             $ref: "#/components/schemas/SecurityEventDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
+    UsageDTO:
+      additionalProperties: false
+      properties:
+        actor_user_id:
+          description: Who consumed; platform_admin and finance_admin only
+          format: uuid
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        feature:
+          enum:
+            - targeted_post
+            - targeted_dispatch
+            - contact_request
+            - discovery_access
+          type: string
+        quantity:
+          description: "Positive: consumption; negative: reversal (release)"
+          format: int64
+          type: integer
+        ref_id:
+          format: uuid
+          type: string
+        ref_type:
+          enum:
+            - post
+            - dispatch
+            - contact_request
+          type: string
+        usage_id:
+          format: uuid
+          type: string
+      required:
+        - usage_id
+        - feature
+        - quantity
+        - ref_type
+        - ref_id
+        - created_at
+      type: object
+    UsageList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/UsageDTO"
           type: array
         next_cursor:
           type: string
@@ -469,6 +735,107 @@ paths:
         - audit
       x-koro-action: audit.chain.verify
       x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/entitlements/{entitlement_id}/revoke:
+    post:
+      description: "Units already used stay used. Revoking an expired right is 409; a revoked one is returned unchanged. A right bought with an order is revoked without a refund: warning order_refund_not_started tells the admin to start the refund separately."
+      operationId: adminRevokeEntitlement
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Entitlement ID (an unknown or malformed ID is 404)
+          in: path
+          name: entitlement_id
+          required: true
+          schema:
+            description: Entitlement ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminRevokeInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevokedEntitlementDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Revoke an entitlement
+      tags:
+        - entitlements
+      x-koro-action: entitlements.entitlement.revoke
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/orgs/{org_id}/entitlements:
+    post:
+      description: "Grants a right by hand (pilot packages are sold offline; promotions). The grant is active at once and usable inside [valid_from, valid_to). Idempotency-Key is required: a retry replays the first grant."
+      operationId: adminGrantEntitlement
+      parameters:
+        - description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Organisation ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organisation ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminGrantInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntitlementDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Grant an entitlement to an organisation
+      tags:
+        - entitlements
+      x-koro-action: entitlements.entitlement.grant
+      x-koro-idempotency: required
       x-koro-rate-limit: write_default
       x-koro-surface: admin
   /api/v1/files/uploads:
@@ -723,5 +1090,182 @@ paths:
       tags:
         - audit
       x-koro-action: audit.event.list_org
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/entitlement-usages:
+    get:
+      description: Consumptions (positive quantity) and their reversals (negative quantity), newest first. actor_user_id is returned to platform_admin and finance_admin only.
+      operationId: listOrgEntitlementUsages
+      parameters:
+        - description: Organisation ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organisation ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - explode: false
+          in: query
+          name: feature
+          schema:
+            enum:
+              - targeted_post
+              - targeted_dispatch
+              - contact_request
+              - discovery_access
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the entitlement usage history of an organisation
+      tags:
+        - entitlements
+      x-koro-action: entitlements.usage.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/entitlements:
+    get:
+      description: "Rights of the org (quota or access), newest first, with a summary of what is usable now (available: units left per quota feature, access end for discovery_access)."
+      operationId: listOrgEntitlements
+      parameters:
+        - description: Organisation ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organisation ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - explode: false
+          in: query
+          name: feature
+          schema:
+            enum:
+              - targeted_post
+              - targeted_dispatch
+              - contact_request
+              - discovery_access
+            type: string
+        - explode: false
+          in: query
+          name: status
+          schema:
+            enum:
+              - pending
+              - active
+              - exhausted
+              - expired
+              - revoked
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntitlementList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the entitlements of an organisation
+      tags:
+        - entitlements
+      x-koro-action: entitlements.entitlement.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/entitlements/{entitlement_id}:
+    get:
+      operationId: getOrgEntitlement
+      parameters:
+        - description: Organisation ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organisation ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Entitlement ID (an unknown, malformed or other org's ID is 404)
+          in: path
+          name: entitlement_id
+          required: true
+          schema:
+            description: Entitlement ID (an unknown, malformed or other org's ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntitlementDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get an entitlement of an organisation
+      tags:
+        - entitlements
+      x-koro-action: entitlements.entitlement.read
       x-koro-rate-limit: read_default
       x-koro-surface: org

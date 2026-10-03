@@ -1,0 +1,17 @@
+# Fixtures of the entitlements module (cmd/koro/matrix_entitlements_test.go; 03 §7.3:
+# company_a and company_b hold an active right of every feature). IDs are authztest.ID(name).
+# Every right is valid from one day before to 30 days after the matrix clock; admin grants
+# are granted by platform_admin. usage_company_a_post is one unit of ent_company_a_post
+# consumed by company_member.
+version: 1
+fixtures:
+  ent_company_a_post: { kind: entitlement, org: company_a, feature: targeted_post, quantity: 5 }
+  ent_company_a_dispatch: { kind: entitlement, org: company_a, feature: targeted_dispatch, quantity: 5 }
+  ent_company_a_contact: { kind: entitlement, org: company_a, feature: contact_request, quantity: 20 }
+  ent_company_a_discovery: { kind: entitlement, org: company_a, feature: discovery_access }
+  ent_company_a_order: { kind: entitlement, org: company_a, feature: contact_request, quantity: 10, source: order_line }
+  ent_company_b_post: { kind: entitlement, org: company_b, feature: targeted_post, quantity: 5 }
+  ent_company_b_dispatch: { kind: entitlement, org: company_b, feature: targeted_dispatch, quantity: 5 }
+  ent_company_b_contact: { kind: entitlement, org: company_b, feature: contact_request, quantity: 20 }
+  ent_company_b_discovery: { kind: entitlement, org: company_b, feature: discovery_access }
+  usage_company_a_post: { kind: usage, entitlement: ent_company_a_post, actor: company_member }

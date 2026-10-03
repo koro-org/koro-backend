@@ -78,6 +78,36 @@
     "type": "urn:koro:problem:csrf_rejected"
   },
   {
+    "code": "entitlements.invalid_grant",
+    "status": 422,
+    "title": "Entitlement grant is invalid",
+    "type": "urn:koro:problem:entitlements.invalid_grant"
+  },
+  {
+    "code": "entitlements.invalid_state",
+    "status": 409,
+    "title": "Entitlement status does not allow this change",
+    "type": "urn:koro:problem:entitlements.invalid_state"
+  },
+  {
+    "code": "entitlements.not_entitled",
+    "status": 403,
+    "title": "No entitlement for this feature",
+    "type": "urn:koro:problem:entitlements.not_entitled"
+  },
+  {
+    "code": "entitlements.ref_conflict",
+    "status": 409,
+    "title": "Reference was consumed elsewhere",
+    "type": "urn:koro:problem:entitlements.ref_conflict"
+  },
+  {
+    "code": "entitlements.usage_released",
+    "status": 409,
+    "title": "Consumption of this reference was released",
+    "type": "urn:koro:problem:entitlements.usage_released"
+  },
+  {
     "code": "files.already_attached",
     "status": 409,
     "title": "File is attached to another record",

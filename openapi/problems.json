@@ -276,6 +276,12 @@
     "type": "urn:koro:problem:files.referenced"
   },
   {
+    "code": "files.rejected",
+    "status": 409,
+    "title": "File could not be processed; upload it again",
+    "type": "urn:koro:problem:files.rejected"
+  },
+  {
     "code": "files.size_mismatch",
     "status": 422,
     "title": "Uploaded size does not match the declared size",

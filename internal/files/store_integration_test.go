@@ -14,6 +14,7 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/audit"
 	"koro/internal/files"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
@@ -43,6 +44,7 @@ type realEnv struct {
 	d     *db.DB
 	s3    *storage.S3
 	store files.Store
+	audit audit.Store
 	mod   files.Module
 	b     files.Buckets
 }
@@ -52,12 +54,13 @@ func newRealEnv(t *testing.T) *realEnv {
 	d := testutil.NewDB(t)
 	s3 := storagetest.Client(t)
 	clk := clock.NewFake(time.Now().UTC().Truncate(time.Second))
-	e := &realEnv{clk: clk, d: d, s3: s3, store: files.NewGormStore(d.ORM),
+	e := &realEnv{clk: clk, d: d, s3: s3, store: files.NewGormStore(d.ORM), audit: audit.NewGormStore(d.ORM),
 		b: files.Buckets{Files: storagetest.Bucket(t, s3), Quarantine: storagetest.Bucket(t, s3)}}
 	mod, err := files.New(files.Deps{
 		Store: e.store, Objects: s3, Tx: d.Tx, Outbox: outbox.NewMem(clk), Queue: queue.NewMem(),
 		Idempotency: idempotency.New(idempotency.Deps{Tx: d.Tx, Store: idempotency.NewGormStore(d.ORM), Clock: clk, Log: obs.Discard()}),
 		Clock:       clk, Log: obs.Discard(), Buckets: e.b,
+		Audit: audit.New(audit.Deps{Store: e.audit, Tx: d.Tx, Clock: clk, Log: obs.Discard()}).Service,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -126,8 +129,9 @@ func TestFiles_SeaweedFS_UploadVerifyScanDownload(t *testing.T) {
 		t.Fatalf("rejected upload: status %s, object kept %v", badRow.Status, e.exists(t, e.b.Quarantine, badRow.StorageKey))
 	}
 
-	up := e.browserUpload(t, pdf)
-	m, err := svc.CompleteUpload(t.Context(), actor(t, "student"), up.FileID, digest(pdf))
+	cv := cvPDF(t) // with author, XMP and an EXIF/GPS photo (BE-059)
+	up := e.browserUpload(t, cv)
+	m, err := svc.CompleteUpload(t.Context(), actor(t, "student"), up.FileID, digest(cv))
 	if err != nil || m.Status != files.StatusActive || m.ScanStatus != files.ScanPending {
 		t.Fatalf("CompleteUpload = %+v, %v", m, err)
 	}
@@ -155,9 +159,27 @@ func TestFiles_SeaweedFS_UploadVerifyScanDownload(t *testing.T) {
 	}
 	body, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !bytes.Equal(body, pdf) ||
+	if resp.StatusCode != http.StatusOK || !bytes.Equal(digest(body), f.SHA256) ||
 		!strings.HasPrefix(resp.Header.Get("Content-Disposition"), "attachment") || resp.Header.Get("Content-Type") != files.MIMEPDF {
 		t.Fatalf("download: status %d, disposition %q, type %q", resp.StatusCode, resp.Header.Get("Content-Disposition"), resp.Header.Get("Content-Type"))
+	}
+	noSecrets(t, "downloaded CV", body)
+
+	// The writes are in audit_events (same transaction, PostgreSQL CHECKs).
+	recs, err := e.audit.List(t.Context(), audit.Filter{ResourceType: "file", ResourceID: &up.FileID}, nil, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var actions []string
+	for _, r := range recs {
+		actions = append(actions, r.Action+"/"+string(r.Outcome))
+	}
+	if len(recs) != 2 || recs[0].Action != "files.upload.complete" || recs[1].Action != "files.upload.create" {
+		t.Fatalf("audit of the upload = %v", actions)
+	}
+	badRecs, err := e.audit.List(t.Context(), audit.Filter{ResourceType: "file", ResourceID: &bad.FileID}, nil, 10)
+	if err != nil || len(badRecs) != 2 || badRecs[0].Outcome != audit.Failure {
+		t.Fatalf("audit of the tampered upload = %+v, %v", badRecs, err)
 	}
 }
 
@@ -180,7 +202,7 @@ func TestOrphanCleanup_DeletesObjectAndRow(t *testing.T) {
 	if _, err := svc.CompleteUpload(ctx, actor(t, "student"), kept.FileID, digest(pdf)); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.Attach(ctx, kept.FileID, files.Owner{Module: "students", EntityID: uuid.NewV7(), Purpose: files.PurposeCV}); err != nil {
+	if err := svc.Attach(ctx, actor(t, "student"), kept.FileID, files.Owner{Module: "students", EntityID: uuid.NewV7(), Purpose: files.PurposeCV}); err != nil {
 		t.Fatal(err)
 	}
 	rows := map[uuid.UUID]files.File{}

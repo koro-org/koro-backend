@@ -5,10 +5,12 @@ import (
 	"crypto/sha256"
 	"errors"
 	"io"
+	"slices"
 	"testing"
 	"time"
 	"uuid"
 
+	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/files"
@@ -25,19 +27,22 @@ import (
 
 var buckets = files.Buckets{Files: "files-test", Quarantine: "quarantine-test"}
 
-// pdf is a minimal object with PDF magic bytes.
-var pdf = []byte("%PDF-1.7\n1 0 obj << >> endobj\n%%EOF\n")
+// pdf is a valid one-page PDF without metadata.
+var pdf = minimalPDF()
 
-// png is a minimal object with PNG magic bytes.
+// png is a minimal object with PNG magic bytes (not a decodable image).
 var png = append([]byte("\x89PNG\r\n\x1a\n"), []byte("not really an image")...)
 
-// env is a files module over in-memory stores (05 §13.2).
+// env is a files module over in-memory stores (05 §13.2). The audit log is
+// the real audit service over its in-memory store, so every event is
+// validated like in production.
 type env struct {
 	clk   *clock.Fake
 	store files.Store
 	mem   *storage.Mem
 	out   *outbox.Mem
 	q     *queue.Mem
+	audit *audit.MemStore
 	mod   files.Module
 	svc   files.Service
 }
@@ -45,11 +50,13 @@ type env struct {
 func newEnv(t *testing.T, opts ...func(*files.Deps)) *env {
 	t.Helper()
 	clk := clock.NewFake(time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC))
-	e := &env{clk: clk, store: files.NewMemStore(clk.Now), mem: storage.NewMem(clk), out: outbox.NewMem(clk), q: queue.NewMem()}
+	e := &env{clk: clk, store: files.NewMemStore(clk.Now), mem: storage.NewMem(clk), out: outbox.NewMem(clk), q: queue.NewMem(),
+		audit: audit.NewMemStore()}
 	d := files.Deps{
 		Store: e.store, Objects: e.mem, Tx: db.NopTx{}, Outbox: e.out, Queue: e.q,
 		Idempotency: idempotency.New(idempotency.Deps{Tx: db.NopTx{}, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()}),
 		Clock:       clk, Log: obs.Discard(), Buckets: buckets,
+		Audit: audit.New(audit.Deps{Store: e.audit, Tx: db.NopTx{}, Clock: clk, Log: obs.Discard()}).Service,
 	}
 	for _, o := range opts {
 		o(&d)
@@ -89,6 +96,31 @@ func (e *env) upload(t *testing.T, persona string, req files.UploadRequest, cont
 		e.mem.Upload(f.Bucket, f.StorageKey, content, req.ContentType)
 	}
 	return up
+}
+
+// events returns the audit records written so far, oldest first.
+func (e *env) events(t *testing.T) []audit.Record {
+	t.Helper()
+	recs, err := e.audit.List(t.Context(), audit.Filter{}, nil, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Reverse(recs) // List returns the newest first
+	return recs
+}
+
+// scanned uploads content with req as the student persona, completes it and
+// runs the scan; it returns the row and the object in the main bucket.
+func (e *env) scanned(t *testing.T, req files.UploadRequest, content []byte) (files.File, []byte) {
+	t.Helper()
+	req.SizeBytes = int64(len(content))
+	id := e.active(t, req, content)
+	if err := e.scan(t, id); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	f := e.row(t, id)
+	data, _, _, _ := e.mem.Object(buckets.Files, f.StorageKey)
+	return f, data
 }
 
 // active uploads and completes a file of the student persona.

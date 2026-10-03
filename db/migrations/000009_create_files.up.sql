@@ -21,7 +21,7 @@ CREATE TABLE files (
   detected_mime       text,                          -- magic bytes
   size_bytes          bigint CONSTRAINT files_size_bytes_chk CHECK (size_bytes BETWEEN 1 AND 104857600),
   sha256              bytea CONSTRAINT files_sha256_chk CHECK (octet_length(sha256) = 32),
-  status              text NOT NULL DEFAULT 'uploading' CONSTRAINT files_status_chk CHECK (status IN ('uploading','active')),
+  status              text NOT NULL DEFAULT 'uploading' CONSTRAINT files_status_chk CHECK (status IN ('uploading','active','rejected')), -- rejected: BE-059 metadata removal failed
   scan_status         text NOT NULL DEFAULT 'pending' CONSTRAINT files_scan_status_chk CHECK (scan_status IN ('pending','clean','infected','skipped')),
   scanned_at          timestamptz,
   uploaded_by         uuid,

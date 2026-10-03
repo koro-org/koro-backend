@@ -242,9 +242,14 @@ func TestScan_NoopSkipsAndMovesOutOfQuarantine(t *testing.T) {
 	if _, _, _, ok := e.mem.Object(buckets.Quarantine, before.StorageKey); ok {
 		t.Fatal("quarantine copy not deleted")
 	}
+	// The main bucket holds the rewritten PDF (BE-059) and the row
+	// describes exactly those bytes.
 	data, ctype, disp, ok := e.mem.Object(buckets.Files, f.StorageKey)
-	if !ok || !bytes.Equal(data, pdf) || ctype != files.MIMEPDF || !strings.HasPrefix(disp, "attachment") {
+	if !ok || files.DetectMIME(data) != files.MIMEPDF || ctype != files.MIMEPDF || !strings.HasPrefix(disp, "attachment") {
 		t.Fatalf("main object: ok=%v type=%q disposition=%q", ok, ctype, disp)
+	}
+	if !bytes.Equal(f.SHA256, digest(data)) || *f.SizeBytes != int64(len(data)) {
+		t.Fatalf("row checksum/size do not describe the stored object")
 	}
 	// Idempotent: a second delivery changes nothing.
 	if err := e.scan(t, id); err != nil {
@@ -284,7 +289,7 @@ func TestScan_VerdictsAndErrors(t *testing.T) {
 		}
 		_, err := e.svc.PresignGet(t.Context(), id, 0)
 		wantErr(t, err, files.ErrNotClean)
-		err = e.svc.Attach(t.Context(), id, files.Owner{Module: "students", EntityID: uuid.NewV7(), Purpose: files.PurposeCV})
+		err = e.svc.Attach(t.Context(), actor(t, "student"), id, files.Owner{Module: "students", EntityID: uuid.NewV7(), Purpose: files.PurposeCV})
 		wantErr(t, err, files.ErrNotClean)
 	})
 	t.Run("scanner error keeps the file pending", func(t *testing.T) {
@@ -392,7 +397,7 @@ func TestDeleteMyFile_Attached_409(t *testing.T) {
 	e := newEnv(t)
 	a := actor(t, "student")
 	id := e.active(t, cvRequest(len(pdf)), pdf)
-	if err := e.svc.Attach(t.Context(), id, files.Owner{Module: "students", EntityID: uuid.NewV7(), Purpose: files.PurposeCV}); err != nil {
+	if err := e.svc.Attach(t.Context(), actor(t, "student"), id, files.Owner{Module: "students", EntityID: uuid.NewV7(), Purpose: files.PurposeCV}); err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
 	err := e.svc.DeleteOwn(t.Context(), a, id)
@@ -421,28 +426,28 @@ func TestAttach_Rules(t *testing.T) {
 	e := newEnv(t)
 	owner := files.Owner{Module: "students", EntityID: uuid.NewV7(), Purpose: files.PurposeCV}
 	up := e.upload(t, "student", cvRequest(len(pdf)), pdf)
-	wantErr(t, e.svc.Attach(t.Context(), up.FileID, owner), files.ErrNotActive)
+	wantErr(t, e.svc.Attach(t.Context(), actor(t, "student"), up.FileID, owner), files.ErrNotActive)
 
 	id := e.active(t, cvRequest(len(pdf)), pdf)
 	wrong := owner
 	wrong.Purpose = files.PurposeAvatar
-	wantErr(t, e.svc.Attach(t.Context(), id, wrong), files.ErrPurposeMismatch)
-	if err := e.svc.Attach(t.Context(), id, owner); err != nil {
+	wantErr(t, e.svc.Attach(t.Context(), actor(t, "student"), id, wrong), files.ErrPurposeMismatch)
+	if err := e.svc.Attach(t.Context(), actor(t, "student"), id, owner); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.svc.Attach(t.Context(), id, owner); err != nil {
+	if err := e.svc.Attach(t.Context(), actor(t, "student"), id, owner); err != nil {
 		t.Fatalf("re-attaching to the same owner: %v", err)
 	}
 	another := owner
 	another.EntityID = uuid.NewV7()
-	wantErr(t, e.svc.Attach(t.Context(), id, another), files.ErrAlreadyAttached)
+	wantErr(t, e.svc.Attach(t.Context(), actor(t, "student"), id, another), files.ErrAlreadyAttached)
 	if m, _ := e.svc.Get(t.Context(), id); m.AttachedModule != "students" || m.AttachedEntityID != owner.EntityID {
 		t.Fatalf("meta = %+v", m)
 	}
-	if err := e.svc.Attach(t.Context(), id, files.Owner{Module: "Bad Module", EntityID: owner.EntityID, Purpose: files.PurposeCV}); err == nil {
+	if err := e.svc.Attach(t.Context(), actor(t, "student"), id, files.Owner{Module: "Bad Module", EntityID: owner.EntityID, Purpose: files.PurposeCV}); err == nil {
 		t.Fatal("invalid owner accepted")
 	}
-	wantErr(t, e.svc.Attach(t.Context(), uuid.NewV7(), owner), files.ErrNotFound)
+	wantErr(t, e.svc.Attach(t.Context(), actor(t, "student"), uuid.NewV7(), owner), files.ErrNotFound)
 }
 
 func TestDelete_RemovesObjectsAndRetriesFailures(t *testing.T) {
@@ -453,7 +458,7 @@ func TestDelete_RemovesObjectsAndRetriesFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.mem.FailNext(errors.New("storage down"))
-	if err := e.svc.Delete(t.Context(), id); err != nil {
+	if err := e.svc.Delete(t.Context(), actor(t, "student"), id); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 	if _, err := e.store.Get(t.Context(), id); !errors.Is(err, files.ErrNotFound) {
@@ -463,7 +468,7 @@ func TestDelete_RemovesObjectsAndRetriesFailures(t *testing.T) {
 	if len(tasks) != 1 || tasks[0].Type != files.DeleteObjectTaskName {
 		t.Fatalf("retry tasks = %+v", tasks)
 	}
-	if err := e.svc.Delete(t.Context(), id); err != nil {
+	if err := e.svc.Delete(t.Context(), actor(t, "student"), id); err != nil {
 		t.Fatalf("Delete of a missing file: %v", err)
 	}
 	// The retry task removes the object.
@@ -483,7 +488,7 @@ func TestDelete_RemovesObjectsAndRetriesFailures(t *testing.T) {
 	// A file another table still references is not deleted.
 	ref := e.active(t, cvRequest(len(pdf)), pdf)
 	files.Reference(e.store, ref)
-	wantErr(t, e.svc.Delete(t.Context(), ref), files.ErrReferenced)
+	wantErr(t, e.svc.Delete(t.Context(), actor(t, "student"), ref), files.ErrReferenced)
 	if e.mem.Len() != 1 {
 		t.Fatal("the referenced file's object was deleted")
 	}
@@ -519,7 +524,7 @@ func TestOrphanCleanup_DeletesOldUnattachedFiles(t *testing.T) {
 	orphan := e.active(t, cvRequest(len(pdf)), pdf)
 	pending := e.upload(t, "student", cvRequest(len(pdf)), pdf).FileID
 	kept := e.active(t, cvRequest(len(pdf)), pdf)
-	if err := e.svc.Attach(t.Context(), kept, files.Owner{Module: "students", EntityID: uuid.NewV7(), Purpose: files.PurposeCV}); err != nil {
+	if err := e.svc.Attach(t.Context(), actor(t, "student"), kept, files.Owner{Module: "students", EntityID: uuid.NewV7(), Purpose: files.PurposeCV}); err != nil {
 		t.Fatal(err)
 	}
 	e.clk.Advance(files.DefaultOrphanRetention + time.Minute)
@@ -546,7 +551,7 @@ func TestPrivacy_ExportAndEraseUnattachedFiles(t *testing.T) {
 	user := authztest.ID("student")
 	loose := e.active(t, cvRequest(len(pdf)), pdf)
 	kept := e.active(t, cvRequest(len(pdf)), pdf)
-	if err := e.svc.Attach(t.Context(), kept, files.Owner{Module: "students", EntityID: uuid.NewV7(), Purpose: files.PurposeCV}); err != nil {
+	if err := e.svc.Attach(t.Context(), actor(t, "student"), kept, files.Owner{Module: "students", EntityID: uuid.NewV7(), Purpose: files.PurposeCV}); err != nil {
 		t.Fatal(err)
 	}
 	p := e.mod.Privacy

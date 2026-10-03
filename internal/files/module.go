@@ -10,17 +10,26 @@
 //	completeUpload size ≤ limit and = declared → SHA-256 = client's → magic bytes
 //	               ∈ purpose allow-list and = declared type → row "active",
 //	               scan "pending" → file.uploaded (A); a failed check deletes the object
-//	worker         file.uploaded → Scanner (NoopScanner → "skipped" until
-//	               ClamAV, BE-048) → clean/skipped: copy to the MAIN bucket with
-//	               Content-Type + Content-Disposition: attachment, delete the
-//	               quarantine copy; infected: delete the object, never served
+//	worker         file.uploaded → read the quarantined object (SHA-256 must
+//	               still match) → Scanner (NoopScanner → "skipped" until
+//	               ClamAV, BE-048) → clean/skipped: remove the metadata
+//	               (sanitize.go: images decoded and encoded again, PDFs
+//	               rewritten) and PUT only the rewritten bytes into the MAIN
+//	               bucket with Content-Type + Content-Disposition: attachment,
+//	               delete the quarantine copy; a rewrite that fails rejects
+//	               the file (status "rejected", object deleted, never served);
+//	               infected: delete the object, never served
 //	download       the OWNING module checks authz, then files.PresignGet:
 //	               ≤ 5 minutes, attachment, only clean (or skipped while
 //	               FILES_SCAN_REQUIRED=false) objects of the main bucket
 //
+// Every write of a file row is audited in its transaction (audit.Logger):
+// files.upload.create, files.upload.complete (also failed verifications),
+// files.file.attach, files.file.delete_own, files.file.delete and
+// files.orphan.purge.
+//
 // What files does not do: decide who may read or attach a file (the owning
-// module does, 01 §4.2, 03 §3.6), clean image metadata (EXIF; see the BE-008
-// ticket notes) or scan for real (BE-048).
+// module does, 01 §4.2, 03 §3.6) or scan for real (BE-048).
 package files
 
 import (
@@ -57,10 +66,11 @@ type Files interface {
 	PutGenerated(ctx context.Context, in GeneratedFile) (uuid.UUID, error)
 	// Attach binds the file to its owning record in the caller's
 	// transaction (01 §6.3 "* → files.Files.Attach"): it stops being an
-	// orphan. The caller has already checked that its actor may use the
-	// file (uploader or org, via Get). Attaching to the same owner again is
-	// a no-op; another owner is ErrAlreadyAttached.
-	Attach(ctx context.Context, fileID uuid.UUID, owner Owner) error
+	// orphan. The caller has already checked that its actor a (a user or a
+	// system job; written to the audit log) may use the file (uploader or
+	// org, via Get). Attaching to the same owner again is a no-op; another
+	// owner is ErrAlreadyAttached; a rejected file is ErrRejected.
+	Attach(ctx context.Context, a authz.Actor, fileID uuid.UUID, owner Owner) error
 	// Get returns the file's metadata or ErrNotFound.
 	Get(ctx context.Context, fileID uuid.UUID) (FileMeta, error)
 	// PresignGet returns a download URL valid for ttl (0 → 5 minutes, at
@@ -69,12 +79,13 @@ type Files interface {
 	// is false, is served (else ErrNotClean). The caller (owning module) has
 	// checked authz and writes the access audit.
 	PresignGet(ctx context.Context, fileID uuid.UUID, ttl time.Duration) (Download, error)
-	// Delete removes the row and its objects (hard delete, 02 §3.1). The
+	// Delete removes the row and its objects (hard delete, 02 §3.1) on
+	// behalf of a (a user or a system job; written to the audit log). The
 	// owning module clears its reference first: a referenced row fails with
 	// ErrReferenced. Inside a transaction the objects are removed after the
 	// commit; an object that cannot be removed then is retried by the
 	// files.delete_object task. A missing file is not an error.
-	Delete(ctx context.Context, fileID uuid.UUID) error
+	Delete(ctx context.Context, a authz.Actor, fileID uuid.UUID) error
 }
 
 // Service is the files service: the contract plus the HTTP-only operations.
@@ -102,6 +113,7 @@ type Deps struct {
 	Clock       clock.Clock
 	Log         *slog.Logger
 	Buckets     Buckets
+	Audit       AuditLogger // every row write, in its transaction
 
 	// Scanner scans uploads. nil → NoopScanner (scan_status "skipped").
 	Scanner Scanner
@@ -123,7 +135,7 @@ func (d *Deps) validate() error {
 	}{
 		{"Store", d.Store != nil}, {"Objects", d.Objects != nil}, {"Tx", d.Tx != nil},
 		{"Outbox", d.Outbox != nil}, {"Queue", d.Queue != nil}, {"Idempotency", d.Idempotency != nil},
-		{"Clock", d.Clock != nil}, {"Log", d.Log != nil},
+		{"Clock", d.Clock != nil}, {"Log", d.Log != nil}, {"Audit", d.Audit != nil},
 		{"Buckets", d.Buckets.Files != "" && d.Buckets.Quarantine != "" && d.Buckets.Files != d.Buckets.Quarantine},
 	} {
 		if !c.ok {
@@ -164,7 +176,7 @@ func New(d Deps) (Module, error) {
 	if err := d.validate(); err != nil {
 		return Module{}, err
 	}
-	s := &service{d: d}
+	s := &service{d: d, clean: newSanitizer()}
 	return Module{Service: s, Privacy: privacyProvider{s: s}, svc: s}, nil
 }
 

@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 	"uuid"
 
+	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
@@ -28,7 +29,43 @@ import (
 // maxNameRunes is files_original_name_chk (02 §3.1).
 const maxNameRunes = 255
 
-type service struct{ d Deps }
+type service struct {
+	d     Deps
+	clean *sanitizer // metadata removal (sanitize.go)
+}
+
+// Audit actions of the file writes that have no HTTP operation of their own
+// (the owning module calls Attach and Delete). They are not in 03 yet: T-161
+// asks to list them in 03 §3.7 next to files.orphan.purge.
+const (
+	auditAttach = "files.file.attach"
+	auditDelete = "files.file.delete"
+)
+
+// fileEvent is the audit event of a write on f by a (01 §4.1). Metadata
+// holds IDs, kinds and sizes only: never the file name or content.
+func fileEvent(action string, outcome audit.Outcome, a authz.Actor, f File, meta map[string]any) audit.Event {
+	id := f.ID
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	meta["purpose"] = string(f.Purpose)
+	return audit.Event{
+		Action: action, Outcome: outcome, OrgID: f.OrgID, ResourceType: authz.TypeFile, ResourceID: &id, Metadata: meta,
+	}.By(a)
+}
+
+// checkActor accepts the actor of a module call (Attach, Delete): a user
+// or a system job, never an anonymous or zero actor (the audit needs one).
+func checkActor(a authz.Actor) error {
+	switch {
+	case a.Kind == authz.KindUser && a.UserID != uuid.Nil():
+	case a.Kind == authz.KindSystem && a.SystemJob != "":
+	default:
+		return fmt.Errorf("files: the actor must be a user or a system job, got %s", a.Kind)
+	}
+	return nil
+}
 
 var _ Service = (*service)(nil)
 
@@ -128,6 +165,11 @@ func (s *service) CreateUpload(ctx context.Context, a authz.Actor, in UploadRequ
 		if err := s.d.Store.Insert(ctx, f); err != nil {
 			return Upload{}, err
 		}
+		ev := fileEvent(string(authz.FilesUploadCreate), audit.Success, a, f,
+			map[string]any{"mime": in.ContentType, "size_bytes": in.SizeBytes})
+		if err := s.d.Audit.Log(ctx, ev); err != nil {
+			return Upload{}, err
+		}
 		// Presigning is a local computation (no request to the storage).
 		p, err := s.d.Objects.PresignPut(ctx, storage.PresignPutInput{
 			Bucket: f.Bucket, Key: f.StorageKey, ContentType: in.ContentType, ContentLength: in.SizeBytes,
@@ -163,7 +205,7 @@ func (s *service) CompleteUpload(ctx context.Context, a authz.Actor, fileID uuid
 	}
 
 	// Verify the object outside any transaction (05 §6.2: no I/O in a tx).
-	detected, size, err := s.verify(ctx, f, sum)
+	detected, size, err := s.verify(ctx, a, f, sum)
 	if err != nil {
 		return FileMeta{}, err
 	}
@@ -180,6 +222,11 @@ func (s *service) CompleteUpload(ctx context.Context, a authz.Actor, fileID uuid
 		}
 		cur.Status, cur.SHA256, cur.DetectedMIME, cur.SizeBytes = StatusActive, sum, &detected, &size
 		if err := s.d.Store.Update(ctx, cur); err != nil {
+			return err
+		}
+		aev := fileEvent(string(authz.FilesUploadComplete), audit.Success, a, cur,
+			map[string]any{"mime": detected, "size_bytes": size})
+		if err := s.d.Audit.Log(ctx, aev); err != nil {
 			return err
 		}
 		ev, err := domainevent.New(domainevent.FileUploaded{FileID: cur.ID}, "file", cur.ID)
@@ -200,9 +247,15 @@ func (s *service) CompleteUpload(ctx context.Context, a authz.Actor, fileID uuid
 	return out.meta(), nil
 }
 
-// completed answers a completion of an already active file: the same
-// checksum is a retry (idempotent), another one a conflict.
+// completed answers a completion of a file that is no longer uploading:
+// the same checksum is a retry (idempotent), another one a conflict, a
+// rejected file ErrRejected. Once the worker rewrote the object (metadata
+// removal) the row holds the checksum of the rewritten bytes, so a late
+// retry gets the conflict.
 func completed(f File, sum []byte) (FileMeta, error) {
+	if f.Status == StatusRejected {
+		return FileMeta{}, ErrRejected
+	}
 	if f.Status == StatusActive && subtle.ConstantTimeCompare(f.SHA256, sum) == 1 {
 		return f.meta(), nil
 	}
@@ -212,9 +265,10 @@ func completed(f File, sum []byte) (FileMeta, error) {
 // verify checks the uploaded object of f: size (≤ purpose limit and equal to
 // the declared one), SHA-256 (equal to the client's) and magic bytes (an
 // allowed type of the purpose, equal to the declared type). A failed check
-// deletes the object (05 §14.7: "başarısızsa sil"); the row stays
-// "uploading" and orphan cleanup removes it.
-func (s *service) verify(ctx context.Context, f File, sum []byte) (detected string, size int64, err error) {
+// deletes the object (05 §14.7: "başarısızsa sil") and is audited as a
+// failed files.upload.complete; the row stays "uploading" and orphan
+// cleanup removes it.
+func (s *service) verify(ctx context.Context, a authz.Actor, f File, sum []byte) (detected string, size int64, err error) {
 	declared := int64(0)
 	if f.SizeBytes != nil {
 		declared = *f.SizeBytes
@@ -226,9 +280,9 @@ func (s *service) verify(ctx context.Context, f File, sum []byte) (detected stri
 	case err != nil:
 		return "", 0, ErrStorageUnavailable.Wrap(err)
 	case info.Size > f.Purpose.MaxBytes():
-		return "", 0, s.reject(ctx, f, invalid(ErrTooLarge, "object", "uploaded object exceeds the purpose limit"))
+		return "", 0, s.reject(ctx, a, f, invalid(ErrTooLarge, "object", "uploaded object exceeds the purpose limit"))
 	case info.Size != declared:
-		return "", 0, s.reject(ctx, f, ErrSizeMismatch)
+		return "", 0, s.reject(ctx, a, f, ErrSizeMismatch)
 	}
 
 	rc, _, err := s.d.Objects.Open(ctx, f.Bucket, f.StorageKey)
@@ -246,24 +300,30 @@ func (s *service) verify(ctx context.Context, f File, sum []byte) (detected stri
 	case err != nil:
 		return "", 0, ErrStorageUnavailable.Wrap(err)
 	case n != declared:
-		return "", 0, s.reject(ctx, f, ErrSizeMismatch)
+		return "", 0, s.reject(ctx, a, f, ErrSizeMismatch)
 	case subtle.ConstantTimeCompare(h.Sum(nil), sum) != 1:
-		return "", 0, s.reject(ctx, f, invalid(ErrChecksumMismatch, "body.sha256", "does not match the uploaded object"))
+		return "", 0, s.reject(ctx, a, f, invalid(ErrChecksumMismatch, "body.sha256", "does not match the uploaded object"))
 	}
 	detected = DetectMIME(head.buf)
 	if detected == "" || !f.Purpose.AllowsMIME(detected) || detected != f.DeclaredMIME {
-		return "", 0, s.reject(ctx, f, ErrContentMismatch)
+		return "", 0, s.reject(ctx, a, f, ErrContentMismatch)
 	}
 	return detected, n, nil
 }
 
-// reject deletes the quarantined object of a failed verification and
-// returns err. A failed delete is logged: the quarantine lifecycle rule
-// (1 day) and orphan cleanup remove the object later.
-func (s *service) reject(ctx context.Context, f File, err error) error {
+// reject deletes the quarantined object of a failed verification, audits
+// the failed completion and returns err. A failed delete is logged: the
+// quarantine lifecycle rule (1 day) and orphan cleanup remove the object
+// later. A failed audit write is logged too: the 422 stands either way.
+func (s *service) reject(ctx context.Context, a authz.Actor, f File, err error) error {
 	if derr := s.d.Objects.Delete(ctx, f.Bucket, f.StorageKey); derr != nil {
 		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "rejected upload not deleted",
 			slog.String("file_id", f.ID.String()), slog.String("err", derr.Error()))
+	}
+	ev := fileEvent(string(authz.FilesUploadComplete), audit.Failure, a, f, map[string]any{"error_code": problemCode(err)})
+	if aerr := s.d.Audit.Log(ctx, ev); aerr != nil {
+		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "failed upload completion not audited",
+			slog.String("file_id", f.ID.String()), slog.String("err", aerr.Error()))
 	}
 	s.d.Log.LogAttrs(ctx, slog.LevelInfo, "file upload rejected",
 		slog.String("file_id", f.ID.String()), slog.String("purpose", string(f.Purpose)), slog.String("reason", problemCode(err)))
@@ -299,7 +359,7 @@ func (s *service) DeleteOwn(ctx context.Context, a authz.Actor, fileID uuid.UUID
 	if err := authz.Can(ctx, a, authz.FilesFileDeleteOwn, resource(f)); err != nil {
 		return err
 	}
-	return s.remove(ctx, fileID, func(f File) error {
+	return s.remove(ctx, a, string(authz.FilesFileDeleteOwn), fileID, func(f File) error {
 		if f.Attached() {
 			return ErrAttached
 		}
@@ -308,13 +368,17 @@ func (s *service) DeleteOwn(ctx context.Context, a authz.Actor, fileID uuid.UUID
 }
 
 // Delete implements Files.
-func (s *service) Delete(ctx context.Context, fileID uuid.UUID) error {
-	return s.remove(ctx, fileID, nil)
+func (s *service) Delete(ctx context.Context, a authz.Actor, fileID uuid.UUID) error {
+	if err := checkActor(a); err != nil {
+		return err
+	}
+	return s.remove(ctx, a, auditDelete, fileID, nil)
 }
 
-// remove deletes the row in a transaction (joining the caller's) and the
-// objects after the commit. guard may veto the deletion of the locked row.
-func (s *service) remove(ctx context.Context, fileID uuid.UUID, guard func(File) error) error {
+// remove deletes the row in a transaction (joining the caller's), audits
+// the deletion as action by a in it and removes the objects after the
+// commit. guard may veto the deletion of the locked row.
+func (s *service) remove(ctx context.Context, a authz.Actor, action string, fileID uuid.UUID, guard func(File) error) error {
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		f, err := s.d.Store.Lock(ctx, fileID)
 		switch {
@@ -329,6 +393,10 @@ func (s *service) remove(ctx context.Context, fileID uuid.UUID, guard func(File)
 			}
 		}
 		if err := s.d.Store.Delete(ctx, fileID); err != nil {
+			return err
+		}
+		ev := fileEvent(action, audit.Success, a, f, map[string]any{"status": string(f.Status), "attached": f.Attached()})
+		if err := s.d.Audit.Log(ctx, ev); err != nil {
 			return err
 		}
 		db.AfterCommit(ctx, func(ctx context.Context) { s.removeObjects(ctx, f) })
@@ -361,9 +429,12 @@ func (s *service) Get(ctx context.Context, fileID uuid.UUID) (FileMeta, error) {
 }
 
 // Attach implements Files.
-func (s *service) Attach(ctx context.Context, fileID uuid.UUID, owner Owner) error {
+func (s *service) Attach(ctx context.Context, a authz.Actor, fileID uuid.UUID, owner Owner) error {
 	if !moduleRe.MatchString(owner.Module) || owner.EntityID == uuid.Nil() || !owner.Purpose.Valid() {
 		return fmt.Errorf("files: attach: invalid owner %q/%s/%q", owner.Module, owner.EntityID, owner.Purpose)
+	}
+	if err := checkActor(a); err != nil {
+		return err
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		f, err := s.d.Store.Lock(ctx, fileID)
@@ -373,6 +444,8 @@ func (s *service) Attach(ctx context.Context, fileID uuid.UUID, owner Owner) err
 		switch {
 		case f.Purpose != owner.Purpose:
 			return ErrPurposeMismatch
+		case f.Status == StatusRejected:
+			return ErrRejected
 		case f.Status != StatusActive:
 			return ErrNotActive
 		case f.ScanStatus == ScanInfected:
@@ -384,7 +457,11 @@ func (s *service) Attach(ctx context.Context, fileID uuid.UUID, owner Owner) err
 		}
 		now := s.d.Clock.Now()
 		f.AttachedModule, f.AttachedEntityID, f.AttachedAt = &owner.Module, &owner.EntityID, &now
-		return s.d.Store.Update(ctx, f)
+		if err := s.d.Store.Update(ctx, f); err != nil {
+			return err
+		}
+		return s.d.Audit.Log(ctx, fileEvent(auditAttach, audit.Success, a, f,
+			map[string]any{"owner_module": owner.Module, "owner_entity_id": owner.EntityID.String()}))
 	})
 }
 
@@ -420,6 +497,9 @@ func (s *service) PresignGet(ctx context.Context, fileID uuid.UUID, ttl time.Dur
 // servable reports whether f may be downloaded (05 §14.7: an unscanned or
 // unapproved object is never served).
 func (s *service) servable(f File) error {
+	if f.Status == StatusRejected {
+		return ErrRejected
+	}
 	if f.Status != StatusActive {
 		return ErrNotActive
 	}

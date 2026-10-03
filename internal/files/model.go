@@ -16,6 +16,11 @@ const (
 	StatusUploading Status = "uploading"
 	// StatusActive: size, SHA-256 and magic bytes are verified.
 	StatusActive Status = "active"
+	// StatusRejected: the worker could not remove the metadata (corrupt,
+	// oversized or unsupported content, or the object changed after the
+	// completion). The object is deleted and never served; an unattached
+	// row is removed by orphan cleanup (BE-059).
+	StatusRejected Status = "rejected"
 )
 
 // ScanStatus is files.scan_status (02 §3.1).

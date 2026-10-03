@@ -5,6 +5,7 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/authz"
 	"koro/internal/platform/privacy"
 )
 
@@ -37,8 +38,12 @@ func (p privacyProvider) Export(ctx context.Context, userID uuid.UUID) (privacy.
 	return out, nil
 }
 
+// privacyEraseJob is the system actor of the deletions of an erasure.
+const privacyEraseJob = "files.privacy_erase"
+
 // Erase implements privacy.Provider: the unattached files are hard deleted
-// with their objects. It is idempotent.
+// with their objects (audited as files.file.delete by privacyEraseJob). It
+// is idempotent.
 func (p privacyProvider) Erase(ctx context.Context, userID uuid.UUID) (privacy.EraseResult, error) {
 	rows, err := p.s.d.Store.UnattachedOf(ctx, userID)
 	if err != nil {
@@ -46,7 +51,7 @@ func (p privacyProvider) Erase(ctx context.Context, userID uuid.UUID) (privacy.E
 	}
 	res := privacy.EraseResult{Module: "files"}
 	for _, f := range rows {
-		if err := p.s.remove(ctx, f.ID, nil); err != nil {
+		if err := p.s.remove(ctx, authz.SystemActor(privacyEraseJob), auditDelete, f.ID, nil); err != nil {
 			return res, err
 		}
 		res.Deleted++

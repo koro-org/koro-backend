@@ -47,9 +47,9 @@ func (s *memStore) check(f File) error {
 	switch {
 	case !f.Purpose.Valid(), f.Bucket == "", f.StorageKey == "", f.DeclaredMIME == "":
 		return errCheck
-	case f.Status != StatusUploading && f.Status != StatusActive:
-		return errCheck
-	case f.Status == StatusActive && (len(f.SHA256) != 32 || f.SizeBytes == nil):
+	case f.Status != StatusUploading && f.Status != StatusActive && f.Status != StatusRejected:
+		return errCheck // files_status_chk
+	case f.Status != StatusUploading && (len(f.SHA256) != 32 || f.SizeBytes == nil):
 		return errCheck // files_active_chk
 	case (f.AttachedModule == nil) != (f.AttachedEntityID == nil):
 		return errCheck // files_attached_chk

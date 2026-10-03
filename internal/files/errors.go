@@ -29,6 +29,9 @@ var (
 	// ErrNotClean: the file is not cleared for use (04 §1.14: scan pending,
 	// infected, or skipped while FILES_SCAN_REQUIRED=true).
 	ErrNotClean = problem.New(problem.Conflict, "files.not_clean", "File is not cleared by the virus scan")
+	// ErrRejected: the file was rejected after the upload (its metadata
+	// could not be removed, BE-059); it is never served or attached.
+	ErrRejected = problem.New(problem.Conflict, "files.rejected", "File could not be processed; upload it again")
 	// ErrAttached: deleteMyFile on an attached file (the owning module deletes it).
 	ErrAttached = problem.New(problem.Conflict, "files.attached", "File is in use; delete it where it is used")
 	// ErrAlreadyAttached: Attach to another owner than the current one.

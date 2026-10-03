@@ -23,6 +23,8 @@ import (
 //	buckets  nil → S3_BUCKET_FILES / S3_BUCKET_QUARANTINE
 //	scanner  nil → files.NoopScanner (scan_status "skipped"); BE-048 sets ClamAV here
 //	cfg      tests only; nil → the files section of the loaded configuration
+//
+// Every file row write is audited through c.audit.svc (L1, BE-059).
 type filesWiring struct {
 	store   files.Store
 	tx      db.TxManager
@@ -70,7 +72,7 @@ func (w *filesWiring) build(c *container) error {
 	mod, err := files.New(files.Deps{
 		Store: store, Objects: objects, Tx: tx, Outbox: c.infra.outbox, Queue: c.infra.queue,
 		Idempotency: c.infra.idempotency, Clock: c.infra.clock, Log: c.infra.log.With("module", "files"),
-		Buckets: buckets, Scanner: w.scanner, ScanRequired: cfg.ScanRequired, UploadURLTTL: cfg.UploadURLTTL,
+		Buckets: buckets, Audit: c.audit.svc, Scanner: w.scanner, ScanRequired: cfg.ScanRequired, UploadURLTTL: cfg.UploadURLTTL,
 		OrphanRetention: c.retention("files_orphan", 0, files.DefaultOrphanRetention),
 	})
 	if err != nil {

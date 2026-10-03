@@ -1,7 +1,10 @@
 package files
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +14,7 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/queue"
@@ -54,11 +58,13 @@ func (s *service) handleUploaded(ctx context.Context, e domainevent.Envelope) er
 	return s.scan(ctx, p.FileID)
 }
 
-// scan runs the scanner on a pending file and moves a clean (or skipped)
-// object from the quarantine bucket to the main bucket. It is idempotent:
-// a file that is gone, not active or no longer pending is left alone. An
-// error leaves the file pending; the task is retried and
-// files.rescan_pending re-enqueues it later.
+// scan runs the scanner on a pending file, removes the metadata of a clean
+// (or skipped) upload and stores only the rewritten bytes in the main
+// bucket (05 §14.7; BE-059). It is idempotent: a file that is gone, not
+// active or no longer pending is left alone. A transient error (storage,
+// scanner) leaves the file pending; the task is retried and
+// files.rescan_pending re-enqueues it later. Content that cannot be
+// rewritten rejects the file: it never reaches the main bucket.
 func (s *service) scan(ctx context.Context, id uuid.UUID) error {
 	f, err := s.d.Store.Get(ctx, id)
 	switch {
@@ -70,9 +76,27 @@ func (s *service) scan(ctx context.Context, id uuid.UUID) error {
 		return nil
 	}
 	m := f.meta()
+
+	// A quarantined upload is read once: the scanner and the rewrite see the
+	// same bytes, and they must still be the bytes completeUpload verified
+	// (the presigned PUT URL stays valid for a while after the completion).
+	quarantined := f.Bucket != s.d.Buckets.Files
+	var content []byte
+	if quarantined {
+		content, err = s.readVerified(ctx, f)
+		if reason, ok := isUnprocessable(err); ok {
+			return s.rejectScanned(ctx, f, ScanPending, reason)
+		}
+		if err != nil {
+			return fmt.Errorf("files: read %s from quarantine: %w", f.ID, err)
+		}
+	}
 	v, err := s.d.Scanner.Scan(ctx, ScanObject{
 		FileID: f.ID, Purpose: f.Purpose, MIME: m.MIME, Size: m.SizeBytes,
 		Open: func(ctx context.Context) (io.ReadCloser, error) {
+			if content != nil {
+				return io.NopCloser(bytes.NewReader(content)), nil
+			}
 			rc, _, err := s.d.Objects.Open(ctx, f.Bucket, f.StorageKey)
 			return rc, err
 		},
@@ -81,17 +105,27 @@ func (s *service) scan(ctx context.Context, id uuid.UUID) error {
 		return fmt.Errorf("files: scan %s with %s: %w", f.ID, s.d.Scanner.Name(), err)
 	}
 
-	quarantined := f.Bucket != s.d.Buckets.Files
+	var clean *sanitized
 	switch v.Status {
 	case ScanClean, ScanSkipped:
 		if quarantined {
-			err := s.d.Objects.Copy(ctx, storage.CopyInput{
-				SrcBucket: f.Bucket, SrcKey: f.StorageKey, DstBucket: s.d.Buckets.Files, DstKey: f.StorageKey,
-				ContentType: m.MIME, ContentDisposition: Disposition(m.OriginalName, m.MIME),
+			out, err := s.clean.Sanitize(ctx, m.MIME, content, maxGrowth*f.Purpose.MaxBytes())
+			if reason, ok := isUnprocessable(err); ok {
+				return s.rejectScanned(ctx, f, v.Status, reason)
+			}
+			if err != nil {
+				return fmt.Errorf("files: remove metadata of %s: %w", f.ID, err)
+			}
+			// Only the rewritten bytes reach the main bucket, never a copy of
+			// the upload.
+			err = s.d.Objects.PutObject(ctx, storage.PutInput{
+				Bucket: s.d.Buckets.Files, Key: f.StorageKey, Body: bytes.NewReader(out.data), Size: int64(len(out.data)),
+				ContentType: out.mime, ContentDisposition: Disposition(m.OriginalName, out.mime),
 			})
 			if err != nil {
 				return fmt.Errorf("files: move %s out of quarantine: %w", f.ID, err)
 			}
+			clean = &out
 		}
 	case ScanInfected:
 		// Never keep malware: drop the object first; the row records the
@@ -120,6 +154,10 @@ func (s *service) scan(ctx context.Context, id uuid.UUID) error {
 		if v.Status != ScanInfected {
 			cur.Bucket = s.d.Buckets.Files
 		}
+		if clean != nil { // the row describes the stored (rewritten) bytes
+			sum, size := sha256.Sum256(clean.data), int64(len(clean.data))
+			cur.SHA256, cur.SizeBytes, cur.DetectedMIME = sum[:], &size, &clean.mime
+		}
 		applied = true
 		return s.d.Store.Update(ctx, cur)
 	})
@@ -139,12 +177,87 @@ func (s *service) scan(ctx context.Context, id uuid.UUID) error {
 	level, attrs := slog.LevelInfo, []slog.Attr{
 		slog.String("file_id", f.ID.String()), slog.String("purpose", string(f.Purpose)),
 		slog.String("scanner", s.d.Scanner.Name()), slog.String("scan_status", string(v.Status)),
+		slog.Bool("metadata_removed", clean != nil),
+	}
+	if clean != nil && clean.mime != m.MIME {
+		attrs = append(attrs, slog.String("converted_to", clean.mime))
 	}
 	if v.Status == ScanInfected {
 		level = slog.LevelWarn
 		attrs = append(attrs, slog.String("signature", v.Signature), slog.Bool("alarm", true))
 	}
 	s.d.Log.LogAttrs(ctx, level, "file scanned", attrs...)
+	return nil
+}
+
+// readVerified reads the quarantined object of f and checks it against the
+// size and SHA-256 completeUpload verified. A missing or changed object is
+// unprocessable (the file is rejected); a storage failure is transient.
+func (s *service) readVerified(ctx context.Context, f File) ([]byte, error) {
+	if f.SizeBytes == nil {
+		return nil, refuse("no_size", nil)
+	}
+	size := *f.SizeBytes
+	rc, _, err := s.d.Objects.Open(ctx, f.Bucket, f.StorageKey)
+	switch {
+	case errors.Is(err, storage.ErrNotFound):
+		return nil, refuse("object_missing", nil)
+	case err != nil:
+		return nil, err
+	}
+	defer rc.Close()
+	data, err := io.ReadAll(io.LimitReader(rc, size+1))
+	if err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256(data)
+	if int64(len(data)) != size || subtle.ConstantTimeCompare(sum[:], f.SHA256) != 1 {
+		return nil, refuse("content_changed", nil)
+	}
+	return data, nil
+}
+
+// rejectScanned marks a pending file rejected (its metadata could not be
+// removed), deletes the quarantined object and audits the failed upload
+// completion as the scan task. The row keeps the scan verdict (pending when
+// the file was rejected before the scan). The task succeeds: a retry would
+// fail the same way.
+func (s *service) rejectScanned(ctx context.Context, f File, scan ScanStatus, reason string) error {
+	applied := false
+	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
+		cur, err := s.d.Store.Lock(ctx, f.ID)
+		switch {
+		case errors.Is(err, ErrNotFound):
+			return nil
+		case err != nil:
+			return err
+		case cur.Status != StatusActive || cur.ScanStatus != ScanPending:
+			return nil
+		}
+		cur.Status, cur.ScanStatus = StatusRejected, scan
+		if scan != ScanPending {
+			now := s.d.Clock.Now()
+			cur.ScannedAt = &now
+		}
+		if err := s.d.Store.Update(ctx, cur); err != nil {
+			return err
+		}
+		applied = true
+		return s.d.Audit.Log(ctx, fileEvent(string(authz.FilesUploadComplete), audit.Failure,
+			authz.SystemActor(ScanTaskName), cur, map[string]any{"error_code": ErrRejected.Code(), "reason": reason}))
+	})
+	if err != nil {
+		return err
+	}
+	if !applied {
+		return nil
+	}
+	if err := s.d.Objects.Delete(ctx, f.Bucket, f.StorageKey); err != nil {
+		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "rejected file not deleted (lifecycle rule removes it)",
+			slog.String("file_id", f.ID.String()), slog.String("err", err.Error()))
+	}
+	s.d.Log.LogAttrs(ctx, slog.LevelWarn, "file rejected: metadata could not be removed",
+		slog.String("file_id", f.ID.String()), slog.String("purpose", string(f.Purpose)), slog.String("reason", reason))
 	return nil
 }
 
@@ -175,7 +288,7 @@ func (s *service) cleanupOrphans(ctx context.Context) error {
 		}
 		for _, f := range batch {
 			after = f.ID
-			switch err := s.remove(ctx, f.ID, nil); {
+			switch err := s.remove(ctx, authz.SystemActor(OrphanCleanupJobName), string(authz.FilesOrphanPurge), f.ID, nil); {
 			case err == nil:
 				deleted++
 			case errors.Is(err, ErrReferenced):

@@ -110,3 +110,33 @@ retention_policies          staff     kvkk          -
 destruction_logs            none      kvkk          -
 breach_incidents            personal  kvkk          todo:BE-049
 subprocessors               none      kvkk          -
+# parties (BE-034 schema; financial records kept 10 years: providers export, erasure keeps the legal duty)
+legal_parties               personal  parties       todo:BE-036
+legal_party_documents       personal  parties       todo:BE-036
+payees                      personal  parties       todo:BE-037
+payee_bank_accounts         personal  parties       todo:BE-037
+# catalog
+services                    none      catalog       -
+offerings                   staff     catalog       -
+commerce_policies           staff     catalog       -
+# orders
+orders                      personal  orders        todo:BE-040
+order_lines                 staff     orders        -
+# payments
+collection_accounts         staff     payments      -
+incoming_bank_transfers     personal  payments      todo:BE-041
+payments                    staff     payments      -
+payment_splits              none      payments      -
+refunds                     staff     payments      -
+# ledger
+ledger_accounts             none      ledger        -
+ledger_transactions         staff     ledger        -
+ledger_entries              none      ledger        -
+payouts                     personal  ledger        todo:BE-044
+payout_items                none      ledger        -
+# billing
+invoices                    personal  billing       todo:BE-042
+invoice_lines               none      billing       -
+provider_contact_map        none      billing       -
+provider_product_map        none      billing       -
+integration_credentials     none      billing       -

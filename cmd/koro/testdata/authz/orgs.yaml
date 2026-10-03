@@ -1,0 +1,273 @@
+# Authz matrix of the orgs module (03 §5.2, 04 §2.2; BE-017). 11 operations × 18 personas.
+# Public profile (03 §3.6): active/suspended orgs for everyone; pending_review/closed only for
+# members and platform_admin, support, moderator (others 404). Org management surface
+# (updateOrg, closeOrg, transferOrgOwnership; 03 §7.6): members without the role → 403,
+# non-members → 404, every platform role sees it (403 unless platform_admin). Admin surface
+# (03 §7.2-3): everyone without the role → 403 before anything is read. company_admin is not
+# the owner of company_a (company_owner_a is, a helper): k-own cells are 403 for it. R
+# operations carry the matrix password (identity fixtures). Business rules (412/428, 409,
+# 422, suspended org) live in scenarios/orgs.yaml and the service tests.
+version: 1
+groups:
+  # signed-in users without a membership in company_a.
+  outsiders_company_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                        event_staff, university_rep, other_company_member]
+  # signed-in users without a membership in club_a.
+  outsiders_club_a: [user_unverified, student, student_minor, other_club_admin, event_staff, university_rep,
+                     company_member, company_admin, other_company_member]
+  # signed-in users without a membership in uni_a.
+  outsiders_uni_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                    event_staff, company_member, company_admin, other_company_member]
+  # signed-in users without a platform role.
+  no_platform_role: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                     event_staff, university_rep, company_member, company_admin, other_company_member]
+  # platform roles without a cell in the org management operations.
+  other_staff: [moderator, support, dpo, finance_admin, talent_auditor]
+  # orgs.company.create cells: usr, stu, clm, cla, stf, uni, cmm, cma (03 §5.2).
+  creators: [user_unverified, student, club_member, club_admin, other_club_admin, event_staff, university_rep,
+             company_member, company_admin, other_company_member]
+  # platform roles that see pending_review and closed orgs (03 §3.6).
+  profile_staff: [moderator, support, platform_admin]
+
+operations:
+  getOrg:
+    method: GET
+    path: /api/v1/orgs/{org_id}
+    action: orgs.org.read
+    public: true
+    path_params: { org_id: company_a }
+    expect: { "@all": 200 }
+    variants:
+      - name: suspended_org
+        path_params: { org_id: company_suspended }
+        note: a suspended org stays readable (03 §2.3)
+        expect: { "@all": 200 }
+      - name: pending_review_org
+        path_params: { org_id: company_pending }
+        note: no persona is a member; only moderator, support and platform_admin see it
+        expect:
+          anonymous: 404
+          "@no_platform_role": 404
+          "@profile_staff": 200
+          dpo: 404
+          finance_admin: 404
+          talent_auditor: 404
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect: { "@all": 404 }
+
+  getOrgBySlug:
+    method: GET
+    path: /api/v1/orgs/by-slug/{slug}
+    action: orgs.org.read
+    public: true
+    path_params: { slug: "literal:club-a" }
+    expect: { "@all": 200 }
+    variants:
+      - name: pending_review_org
+        path_params: { slug: "literal:company-pending" }
+        expect:
+          anonymous: 404
+          "@no_platform_role": 404
+          "@profile_staff": 200
+          dpo: 404
+          finance_admin: 404
+          talent_auditor: 404
+      - name: unknown_slug
+        path_params: { slug: "literal:no-such-org" }
+        expect: { "@all": 404 }
+
+  searchOrgs:
+    method: GET
+    path: /api/v1/orgs
+    action: orgs.org.search
+    public: true
+    expect: { "@all": 200 }
+    variants:
+      - name: text_and_kind
+        query: { q: matris, kind: company, sort: name }
+        expect: { "@all": 200 }
+
+  createCompany:
+    method: POST
+    path: /api/v1/companies
+    action: orgs.company.create
+    body: bodies/orgs/create_company.json
+    note: k-cmp — a minor and the platform staff accounts do not register companies
+    expect:
+      anonymous: 401
+      "@creators": 201
+      student_minor: 403
+      "@platform_staff": 403
+
+  updateOrg:
+    method: PATCH
+    path: /api/v1/orgs/{org_id}
+    action: orgs.org.update
+    path_params: { org_id: company_a }
+    headers: { If-Match: '"1hmhuo3hji000"' }
+    body: bodies/orgs/update_org.json
+    expect:
+      anonymous: 401
+      "@outsiders_company_a": 404
+      company_member: 403       # member, no role
+      company_admin: 200        # S
+      "@other_staff": 403
+      platform_admin: 200
+    variants:
+      - name: club_org
+        path_params: { org_id: club_a }
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403
+          club_admin: 200
+          "@other_staff": 403
+          platform_admin: 200
+      - name: university_org
+        path_params: { org_id: uni_a }
+        expect:
+          anonymous: 401
+          "@outsiders_uni_a": 404
+          university_rep: 200     # not career_staff (k-cs)
+          "@other_staff": 403
+          platform_admin: 200
+      - name: other_company
+        path_params: { org_id: company_b }
+        note: IDOR — company_a's admins do not see company_b's management surface
+        expect:
+          anonymous: 401
+          user_unverified: 404
+          student: 404
+          student_minor: 404
+          club_member: 404
+          club_admin: 404
+          other_club_admin: 404
+          event_staff: 404
+          university_rep: 404
+          company_member: 404
+          company_admin: 404
+          other_company_member: 200
+          "@other_staff": 403
+          platform_admin: 200
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 404
+          "@other_staff": 404       # staff see management surfaces, but there is no org
+          platform_admin: 404
+
+  closeOrg:
+    method: POST
+    path: /api/v1/orgs/{org_id}/close
+    action: orgs.org.close
+    path_params: { org_id: company_a }
+    body: bodies/orgs/close.json
+    expect:
+      anonymous: 401
+      "@outsiders_company_a": 404
+      company_member: 403
+      company_admin: 403         # k-own: company_owner only
+      "@other_staff": 403
+      platform_admin: 200
+
+  transferOrgOwnership:
+    method: POST
+    path: /api/v1/orgs/{org_id}/ownership-transfer
+    action: orgs.ownership.transfer
+    path_params: { org_id: company_a }
+    body: bodies/orgs/transfer.json
+    note: platform_admin moves company_a from company_owner_a to company_admin
+    expect:
+      anonymous: 401
+      "@outsiders_company_a": 404
+      company_member: 403
+      company_admin: 403         # k-own
+      "@other_staff": 403
+      platform_admin: 200
+
+  adminListOrgs:
+    method: GET
+    path: /api/v1/admin/orgs
+    action: orgs.org.list_admin
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      moderator: 200
+      support: 200
+      platform_admin: 200
+      dpo: 403
+      finance_admin: 403
+      talent_auditor: 403
+    variants:
+      - name: status_filter
+        query: { status: pending_review, kind: company }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          moderator: 200
+          support: 200
+          platform_admin: 200
+          dpo: 403
+          finance_admin: 403
+          talent_auditor: 403
+
+  adminVerifyOrg:
+    method: POST
+    path: /api/v1/admin/orgs/{org_id}/verify
+    action: orgs.org.verify
+    path_params: { org_id: company_pending }
+    body: bodies/orgs/verify.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+    variants:
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403   # no ID probing without a platform role
+          "@other_staff": 403
+          platform_admin: 404
+
+  adminSuspendOrg:
+    method: POST
+    path: /api/v1/admin/orgs/{org_id}/suspend
+    action: orgs.org.suspend
+    path_params: { org_id: company_a }
+    body: bodies/orgs/suspend.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+
+  adminReactivateOrg:
+    method: POST
+    path: /api/v1/admin/orgs/{org_id}/reactivate
+    action: orgs.org.suspend
+    path_params: { org_id: company_suspended }
+    body: bodies/orgs/reactivate.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+
+pending_actions:
+  # BE-019: members, memberships and invitations (03 §5.2).
+  - orgs.member.list
+  - orgs.member.read
+  - orgs.member.join
+  - orgs.member.decide
+  - orgs.member.remove
+  - orgs.member.change_role
+  - orgs.membership.list_own
+  - orgs.membership.leave
+  - orgs.invitation.create
+  - orgs.invitation.list
+  - orgs.invitation.revoke
+  - orgs.invitation.accept

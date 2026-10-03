@@ -43,7 +43,8 @@ func Register(api huma.API, svc Service) {
 		Summary: "Grant an entitlement to an organisation", DefaultStatus: http.StatusCreated,
 		Description: "Grants a right by hand (pilot packages are sold offline; promotions). The grant is " +
 			"active at once and usable inside [valid_from, valid_to). Idempotency-Key is required: a retry " +
-			"replays the first grant.",
+			"replays the first grant. Rights go to companies only: another kind of org is 422 " +
+			"entitlements.org_not_company.",
 	}, op.Meta{
 		Action: string(authz.EntitlementsEntitlementGrant), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyRequired,
 	}), h.adminGrant)

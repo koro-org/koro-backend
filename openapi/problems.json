@@ -198,6 +198,12 @@
     "type": "urn:koro:problem:entitlements.not_entitled"
   },
   {
+    "code": "entitlements.org_not_company",
+    "status": 422,
+    "title": "Entitlements are granted to companies only",
+    "type": "urn:koro:problem:entitlements.org_not_company"
+  },
+  {
     "code": "entitlements.ref_conflict",
     "status": 409,
     "title": "Reference was consumed elsewhere",
@@ -514,6 +520,60 @@
     "status": 404,
     "title": "E-mail suppression not found",
     "type": "urn:koro:problem:notify.suppression_not_found"
+  },
+  {
+    "code": "orgs.company_field",
+    "status": 422,
+    "title": "Company fields apply to companies only",
+    "type": "urn:koro:problem:orgs.company_field"
+  },
+  {
+    "code": "orgs.empty_patch",
+    "status": 422,
+    "title": "Nothing to update",
+    "type": "urn:koro:problem:orgs.empty_patch"
+  },
+  {
+    "code": "orgs.invalid_state",
+    "status": 409,
+    "title": "Organization status does not allow this change",
+    "type": "urn:koro:problem:orgs.invalid_state"
+  },
+  {
+    "code": "orgs.no_owner",
+    "status": 409,
+    "title": "Company has no active owner",
+    "type": "urn:koro:problem:orgs.no_owner"
+  },
+  {
+    "code": "orgs.open_commerce",
+    "status": 409,
+    "title": "Organization has open orders or payouts",
+    "type": "urn:koro:problem:orgs.open_commerce"
+  },
+  {
+    "code": "orgs.org_not_verified",
+    "status": 403,
+    "title": "Organization is not verified yet",
+    "type": "urn:koro:problem:orgs.org_not_verified"
+  },
+  {
+    "code": "orgs.org_suspended",
+    "status": 403,
+    "title": "Organization is suspended",
+    "type": "urn:koro:problem:orgs.org_suspended"
+  },
+  {
+    "code": "orgs.slug_taken",
+    "status": 409,
+    "title": "Slug is already in use",
+    "type": "urn:koro:problem:orgs.slug_taken"
+  },
+  {
+    "code": "orgs.transfer_target_invalid",
+    "status": 422,
+    "title": "New owner must be an active company admin",
+    "type": "urn:koro:problem:orgs.transfer_target_invalid"
   },
   {
     "code": "page.invalid_cursor",

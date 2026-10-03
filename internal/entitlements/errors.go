@@ -12,6 +12,9 @@ var (
 	// ErrInvalidGrant: a grant breaks the shape rules (kind ↔ feature,
 	// quantity, validity window, source).
 	ErrInvalidGrant = problem.New(problem.Invalid, "entitlements.invalid_grant", "Entitlement grant is invalid")
+	// ErrOrgNotCompany: an admin grant for an org that is not a company
+	// (06 H-40, T-148: entitlements are company features).
+	ErrOrgNotCompany = problem.New(problem.Invalid, "entitlements.org_not_company", "Entitlements are granted to companies only")
 	// ErrInvalidState: the entitlement's status does not allow the change
 	// (e.g. revoking an expired right).
 	ErrInvalidState = problem.New(problem.Conflict, "entitlements.invalid_state", "Entitlement status does not allow this change")

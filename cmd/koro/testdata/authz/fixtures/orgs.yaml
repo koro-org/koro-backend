@@ -1,0 +1,10 @@
+# Fixtures of the orgs module (cmd/koro/matrix_orgs_test.go; BE-017). IDs are authztest.ID(name).
+# Besides these, the seeder writes every org of authztest.Orgs() (03 §7.3: active and verified;
+# companies with a profile) and one active org_members row per membership of every persona and
+# helper user (company_owner_a is company_a's company_owner). Every org has the slug of its name
+# with hyphens (company_a → company-a) and updated_at 2026-10-01T00:00:00Z: its ETag is
+# "1hmhuo3hji000" until it changes. No persona is a member of the orgs below.
+version: 1
+fixtures:
+  company_pending: { kind: org, type: company, status: pending_review }
+  company_suspended: { kind: org, type: company, status: suspended }

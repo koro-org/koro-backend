@@ -168,6 +168,9 @@ func (s *service) AdminGrant(ctx context.Context, a authz.Actor, orgID uuid.UUID
 	if !in.ValidTo.After(now) {
 		return Entitlement{}, grantErr("body.valid_to", "must be in the future")
 	}
+	if err := s.checkCompany(ctx, orgID); err != nil {
+		return Entitlement{}, err
+	}
 	admin := a.UserID
 	g := GrantInput{
 		OrgID: orgID, Feature: in.Feature, Quantity: in.Quantity, ValidFrom: in.ValidFrom, ValidTo: in.ValidTo,
@@ -220,6 +223,24 @@ func (s *service) AdminGrant(ctx context.Context, a authz.Actor, orgID uuid.UUID
 			slog.String("granted_by", admin.String()), slog.String("feature", string(out.Feature)))
 	}
 	return out, nil
+}
+
+// checkCompany is the org kind rule of an admin grant (06 H-40, T-148):
+// rights are company features, a club or a university gets none.
+func (s *service) checkCompany(ctx context.Context, orgID uuid.UUID) error {
+	if s.d.OrgKind == nil {
+		return nil
+	}
+	kind, found, err := s.d.OrgKind(ctx, orgID)
+	switch {
+	case err != nil:
+		return err
+	case !found:
+		return ErrNotFound
+	case kind != "company":
+		return ErrOrgNotCompany
+	}
+	return nil
 }
 
 // AdminRevoke implements Service. Revoking an expired right is 409;

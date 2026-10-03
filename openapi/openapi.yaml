@@ -59,6 +59,67 @@ components:
         - source_type
         - reason
       type: object
+    AdminOrgDTO:
+      additionalProperties: false
+      properties:
+        city:
+          type: string
+        closed_at:
+          format: date-time
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        created_by:
+          description: User who registered the org
+          type: string
+        kind:
+          enum:
+            - platform
+            - university
+            - club
+            - company
+            - ngo
+          type: string
+        name:
+          type: string
+        org_id:
+          type: string
+        slug:
+          type: string
+        status:
+          enum:
+            - pending_review
+            - active
+            - suspended
+            - closed
+          type: string
+        verified:
+          type: boolean
+        verified_at:
+          format: date-time
+          type: string
+      required:
+        - org_id
+        - kind
+        - name
+        - slug
+        - status
+        - verified
+        - created_at
+      type: object
+    AdminOrgList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/AdminOrgDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
     AdminRevokeInputBody:
       additionalProperties: false
       properties:
@@ -166,6 +227,31 @@ components:
           description: "MFA accounts: reauth.totp_code"
       required:
         - new_password
+      type: object
+    CompanyDTO:
+      additionalProperties: false
+      properties:
+        domain_verified_at:
+          format: date-time
+          type: string
+        email_domain:
+          type: string
+        hq_city:
+          type: string
+        sector_code:
+          type: string
+        size_band:
+          type: string
+      type: object
+    CompanyPublicDTO:
+      additionalProperties: false
+      properties:
+        hq_city:
+          type: string
+        sector_code:
+          type: string
+        size_band:
+          type: string
       type: object
     CompleteUploadInputBody:
       additionalProperties: false
@@ -305,6 +391,44 @@ components:
         - purpose_code
         - state
         - since
+      type: object
+    CreateCompanyInputBody:
+      additionalProperties: false
+      properties:
+        email_domain:
+          description: The company's e-mail domain (not verified yet)
+          maxLength: 253
+          type: string
+        hq_city:
+          maxLength: 60
+          type: string
+        name:
+          maxLength: 200
+          minLength: 2
+          type: string
+        sector_code:
+          pattern: ^[a-z_]{2,40}$
+          type: string
+        size_band:
+          enum:
+            - 1-10
+            - 11-50
+            - 51-200
+            - 201-1000
+            - 1000+
+          type: string
+        slug:
+          description: Derived from the name when omitted
+          maxLength: 80
+          type: string
+        website_url:
+          description: https:// only
+          maxLength: 2048
+          type: string
+      required:
+        - name
+        - sector_code
+        - size_band
       type: object
     CreateNoticeInputBody:
       additionalProperties: false
@@ -886,6 +1010,160 @@ components:
       required:
         - items
       type: object
+    OrgCardDTO:
+      additionalProperties: false
+      properties:
+        city:
+          type: string
+        kind:
+          enum:
+            - platform
+            - university
+            - club
+            - company
+            - ngo
+          type: string
+        logo_url:
+          type: string
+        name:
+          type: string
+        org_id:
+          type: string
+        slug:
+          type: string
+        verified:
+          type: boolean
+      required:
+        - org_id
+        - kind
+        - name
+        - slug
+        - verified
+      type: object
+    OrgCardList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/OrgCardDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
+    OrgDTO:
+      additionalProperties: false
+      properties:
+        city:
+          type: string
+        closed_at:
+          format: date-time
+          type: string
+        company:
+          $ref: "#/components/schemas/CompanyDTO"
+        created_at:
+          format: date-time
+          type: string
+        description:
+          type: string
+        kind:
+          enum:
+            - platform
+            - university
+            - club
+            - company
+            - ngo
+          type: string
+        logo_file_id:
+          type: string
+        logo_url:
+          type: string
+        name:
+          type: string
+        org_id:
+          type: string
+        slug:
+          type: string
+        status:
+          enum:
+            - pending_review
+            - active
+            - suspended
+            - closed
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+        verified:
+          type: boolean
+        verified_at:
+          format: date-time
+          type: string
+        website_url:
+          type: string
+      required:
+        - org_id
+        - kind
+        - name
+        - slug
+        - status
+        - verified
+        - created_at
+        - updated_at
+      type: object
+    OrgPublicDTO:
+      additionalProperties: false
+      properties:
+        city:
+          type: string
+        company:
+          $ref: "#/components/schemas/CompanyPublicDTO"
+        description:
+          type: string
+        follower_count:
+          description: null below 10 followers (k-anonymity)
+          format: int64
+          type:
+            - integer
+            - "null"
+        kind:
+          enum:
+            - platform
+            - university
+            - club
+            - company
+            - ngo
+          type: string
+        logo_url:
+          description: Short-lived download URL (at most 5 minutes)
+          type: string
+        name:
+          type: string
+        org_id:
+          type: string
+        slug:
+          type: string
+        status:
+          enum:
+            - pending_review
+            - active
+            - suspended
+            - closed
+          type: string
+        verified:
+          type: boolean
+        website_url:
+          type: string
+      required:
+        - org_id
+        - kind
+        - name
+        - slug
+        - status
+        - verified
+        - follower_count
+      type: object
     PreferenceDTO:
       additionalProperties: false
       properties:
@@ -1038,6 +1316,19 @@ components:
           type: array
       required:
         - items
+      type: object
+    ReasonReauthInputBody:
+      additionalProperties: false
+      properties:
+        reason:
+          maxLength: 500
+          minLength: 3
+          type: string
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof (03 §6.2)
+      required:
+        - reason
       type: object
     ReauthDTO:
       additionalProperties: false
@@ -1363,6 +1654,19 @@ components:
       required:
         - token
       type: object
+    TransferInputBody:
+      additionalProperties: false
+      properties:
+        new_owner_user_id:
+          description: An active company_admin of the company
+          format: uuid
+          type: string
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof (03 §6.2)
+      required:
+        - new_owner_user_id
+      type: object
     UpdateMeInputBody:
       additionalProperties: false
       properties:
@@ -1378,6 +1682,44 @@ components:
           enum:
             - tr-TR
             - en-US
+          type: string
+      type: object
+    UpdateOrgInputBody:
+      additionalProperties: false
+      properties:
+        city:
+          maxLength: 60
+          type: string
+        description:
+          description: Empty string clears it
+          maxLength: 5000
+          type: string
+        email_domain:
+          description: Companies only; a change resets its verification
+          maxLength: 253
+          type: string
+        hq_city:
+          description: Companies only
+          maxLength: 60
+          type: string
+        logo_file_id:
+          description: An org_logo upload (createUpload); empty string removes the logo
+          type: string
+        name:
+          maxLength: 200
+          minLength: 2
+          type: string
+        sector_code:
+          description: Companies only
+          maxLength: 40
+          type: string
+        size_band:
+          description: "Companies only: 1-10, 11-50, 51-200, 201-1000, 1000+"
+          maxLength: 10
+          type: string
+        website_url:
+          description: https:// only; empty string clears it
+          maxLength: 2048
           type: string
       type: object
     UpdatePurposeInputBody:
@@ -1461,6 +1803,14 @@ components:
       required:
         - ok
         - checked_rows
+      type: object
+    VerifyInputBody:
+      additionalProperties: false
+      properties:
+        note:
+          description: Internal note (audited)
+          maxLength: 500
+          type: string
       type: object
     VerifyRequest:
       additionalProperties: false
@@ -2027,9 +2377,81 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+  /api/v1/admin/orgs:
+    get:
+      operationId: adminListOrgs
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - explode: false
+          in: query
+          name: kind
+          schema:
+            enum:
+              - platform
+              - university
+              - club
+              - company
+              - ngo
+            type: string
+        - explode: false
+          in: query
+          name: status
+          schema:
+            enum:
+              - pending_review
+              - active
+              - suspended
+              - closed
+            type: string
+        - explode: false
+          in: query
+          name: q
+          schema:
+            maxLength: 100
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminOrgList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List organizations (platform staff)
+      tags:
+        - orgs
+      x-koro-action: orgs.org.list_admin
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
   /api/v1/admin/orgs/{org_id}/entitlements:
     post:
-      description: "Grants a right by hand (pilot packages are sold offline; promotions). The grant is active at once and usable inside [valid_from, valid_to). Idempotency-Key is required: a retry replays the first grant."
+      description: "Grants a right by hand (pilot packages are sold offline; promotions). The grant is active at once and usable inside [valid_from, valid_to). Idempotency-Key is required: a retry replays the first grant. Rights go to companies only: another kind of org is 422 entitlements.org_not_company."
       operationId: adminGrantEntitlement
       parameters:
         - description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
@@ -2076,6 +2498,142 @@ paths:
         - entitlements
       x-koro-action: entitlements.entitlement.grant
       x-koro-idempotency: required
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/orgs/{org_id}/reactivate:
+    post:
+      description: suspended → active, with re-authentication.
+      operationId: adminReactivateOrg
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReasonReauthInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Reactivate a suspended organization
+      tags:
+        - orgs
+      x-koro-action: orgs.org.suspend
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/orgs/{org_id}/suspend:
+    post:
+      description: active → suspended, with re-authentication.
+      operationId: adminSuspendOrg
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReasonReauthInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Suspend an organization
+      tags:
+        - orgs
+      x-koro-action: orgs.org.suspend
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/orgs/{org_id}/verify:
+    post:
+      description: pending_review → active; another status is 409 orgs.invalid_state.
+      operationId: adminVerifyOrg
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyInputBody"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Verify an organization
+      tags:
+        - orgs
+      x-koro-action: orgs.org.verify
+      x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
   /api/v1/admin/users/{user_id}/consents:
@@ -2465,6 +3023,43 @@ paths:
       tags:
         - identity
       x-koro-action: identity.session.delete_current
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/companies:
+    post:
+      description: The company starts pending_review until a platform admin verifies it. The caller becomes its company_owner; all of the caller's sessions are closed (role_change) so that the MFA policy of the role applies at the next sign-in. Tax number and MERSİS are given later with the legal party (parties).
+      operationId: createCompany
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCompanyInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgDTO"
+          description: Created
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Register a company
+      tags:
+        - orgs
+      x-koro-action: orgs.company.create
+      x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
   /api/v1/files/uploads:
@@ -3285,6 +3880,209 @@ paths:
       x-koro-action: consent.notice.read
       x-koro-rate-limit: read_default
       x-koro-surface: public
+  /api/v1/orgs:
+    get:
+      description: Active and suspended orgs only. q matches name and description (full text) or part of the name.
+      operationId: searchOrgs
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: Free text, 2-100 characters
+          explode: false
+          in: query
+          name: q
+          schema:
+            description: Free text, 2-100 characters
+            maxLength: 100
+            type: string
+        - explode: false
+          in: query
+          name: kind
+          schema:
+            enum:
+              - platform
+              - university
+              - club
+              - company
+            type: string
+        - description: The university's own org and its clubs
+          explode: false
+          in: query
+          name: university_id
+          schema:
+            description: The university's own org and its clubs
+            format: uuid
+            type: string
+        - explode: false
+          in: query
+          name: city
+          schema:
+            maxLength: 60
+            type: string
+        - description: name (A-Z); default newest first
+          explode: false
+          in: query
+          name: sort
+          schema:
+            description: name (A-Z); default newest first
+            enum:
+              - name
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgCardList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: Search organizations
+      tags:
+        - orgs
+      x-koro-action: orgs.org.search
+      x-koro-rate-limit: search
+      x-koro-surface: public
+  /api/v1/orgs/by-slug/{slug}:
+    get:
+      operationId: getOrgBySlug
+      parameters:
+        - description: Organization slug
+          in: path
+          name: slug
+          required: true
+          schema:
+            description: Organization slug
+            maxLength: 80
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgPublicDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: Get an organization's public profile by slug
+      tags:
+        - orgs
+      x-koro-action: orgs.org.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: public
+  /api/v1/orgs/{org_id}:
+    get:
+      description: Active and suspended orgs are public; a pending_review or closed org is visible to its members and platform staff only (others get 404). The ETag is the If-Match value of updateOrg.
+      operationId: getOrg
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgPublicDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: Get an organization's public profile
+      tags:
+        - orgs
+      x-koro-action: orgs.org.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: public
+    patch:
+      description: "If-Match with the ETag of getOrg is required: missing → 428, stale → 412. Company fields apply to companies only. A suspended org cannot be changed by its members (403 orgs.org_suspended)."
+      operationId: updateOrg
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+        - description: "ETag of getOrg (required: missing → 428, stale → 412)"
+          in: header
+          name: If-Match
+          schema:
+            description: "ETag of getOrg (required: missing → 428, stale → 412)"
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateOrgInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Update an organization's profile
+      tags:
+        - orgs
+      x-koro-action: orgs.org.update
+      x-koro-rate-limit: write_default
+      x-koro-surface: org
   /api/v1/orgs/{org_id}/audit-events:
     get:
       description: ip and user_agent are returned to dpo and platform_admin only.
@@ -3369,6 +4167,52 @@ paths:
         - audit
       x-koro-action: audit.event.list_org
       x-koro-rate-limit: read_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/close:
+    post:
+      description: Company owner or platform admin, with re-authentication. Open orders or payouts → 409 orgs.open_commerce. Every membership ends (org_closed).
+      operationId: closeOrg
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReasonReauthInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Close an organization
+      tags:
+        - orgs
+      x-koro-action: orgs.org.close
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
       x-koro-surface: org
   /api/v1/orgs/{org_id}/entitlement-usages:
     get:
@@ -3546,6 +4390,52 @@ paths:
         - entitlements
       x-koro-action: entitlements.entitlement.read
       x-koro-rate-limit: read_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/ownership-transfer:
+    post:
+      description: The new owner must be an active company_admin of the company (422 orgs.transfer_target_invalid). The former owner stays as company_admin; both users' sessions are closed.
+      operationId: transferOrgOwnership
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransferInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Transfer company ownership
+      tags:
+        - orgs
+      x-koro-action: orgs.ownership.transfer
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
       x-koro-surface: org
   /api/v1/webhooks/email/{provider}:
     post:

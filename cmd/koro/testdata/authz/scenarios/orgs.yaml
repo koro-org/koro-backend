@@ -1,0 +1,62 @@
+# Multi-step scenarios of the orgs module (03 §7.7; BE-017).
+version: 1
+scenarios:
+  suspended_org:
+    note: >-
+      "Askıdaki org" (03 §7.7, §2.3): company_a suspended → its admins' and owner's writes are 403
+      orgs.org_suspended, reads stay 200; after reactivation the fixture ETag is stale (the
+      suspension changed the org: 412) and the createPost step joins with the feed ticket.
+    steps:
+      - { persona: platform_admin, operation: adminSuspendOrg, expect: 200 }
+      - { persona: company_admin, operation: updateOrg, expect: 403, code: orgs.org_suspended }
+      - { persona: company_owner_a, operation: closeOrg, expect: 403, code: orgs.org_suspended }
+      - { persona: anonymous, operation: getOrg, expect: 200 }
+      - { persona: platform_admin, operation: adminSuspendOrg, expect: 409, code: orgs.invalid_state }
+      - { persona: platform_admin, operation: adminReactivateOrg, path_params: { org_id: company_a }, expect: 200 }
+      - { persona: company_admin, operation: updateOrg, expect: 412, code: precondition_failed }
+  update_needs_if_match:
+    note: updateOrg without If-Match is 428, with a stale ETag 412 (04 §1.13)
+    steps:
+      - { persona: company_admin, operation: updateOrg, headers: { If-Match: "" }, expect: 428, code: precondition_required }
+      - { persona: company_admin, operation: updateOrg, headers: { If-Match: '"0"' }, expect: 412, code: precondition_failed }
+      - { persona: company_admin, operation: updateOrg, expect: 200 }
+      - { persona: company_admin, operation: updateOrg, expect: 412, code: precondition_failed }
+  ownership_transfer:
+    note: k-own and the transfer target rule (04 §2.2 transferOrgOwnership)
+    steps:
+      - { persona: company_admin, operation: transferOrgOwnership, expect: 403, code: forbidden }
+      - { persona: company_owner_a, operation: transferOrgOwnership, body: bodies/orgs/transfer_to_recruiter.json,
+          expect: 422, code: orgs.transfer_target_invalid }
+      - { persona: company_owner_a, operation: transferOrgOwnership, expect: 200 }
+  close_needs_reauth:
+    note: closeOrg is an R operation (03 §6.2); a closed org is hidden from non-members afterwards
+    steps:
+      - { persona: platform_admin, operation: closeOrg, body: bodies/orgs/close_no_reauth.json, expect: 403,
+          code: identity.reauth_required }
+      - { persona: platform_admin, operation: closeOrg, body: bodies/orgs/close_wrong_reauth.json, expect: 403,
+          code: identity.reauth_failed }
+      - { persona: company_owner_a, operation: closeOrg, expect: 200 }
+      - { persona: anonymous, operation: getOrg, expect: 404 }
+      - { persona: support, operation: getOrg, expect: 200 }
+  verify_pending_company:
+    note: adminVerifyOrg pending_review → active (public afterwards); verifying again is 409
+    steps:
+      - { persona: anonymous, operation: getOrg, path_params: { org_id: company_pending }, expect: 404 }
+      - { persona: platform_admin, operation: adminVerifyOrg, expect: 200 }
+      - { persona: anonymous, operation: getOrg, path_params: { org_id: company_pending }, expect: 200 }
+      - { persona: platform_admin, operation: adminVerifyOrg, expect: 409, code: orgs.invalid_state }
+  admin_needs_mfa:
+    note: platform_admin's org operations are k-mfa role paths (03 §6.4)
+    steps:
+      - { persona: platform_admin, mfa: false, operation: adminSuspendOrg, expect: 403, code: authz.mfa_required }
+      - { persona: platform_admin, operation: adminSuspendOrg, expect: 200 }
+  grant_company_only:
+    note: >-
+      06 H-40 (T-148): an admin grant goes to a company only — a club or a university is 422
+      entitlements.org_not_company, a company 201.
+    steps:
+      - { persona: finance_admin, operation: adminGrantEntitlement, path_params: { org_id: club_a }, expect: 422,
+          code: entitlements.org_not_company }
+      - { persona: platform_admin, operation: adminGrantEntitlement, path_params: { org_id: uni_a }, expect: 422,
+          code: entitlements.org_not_company }
+      - { persona: finance_admin, operation: adminGrantEntitlement, expect: 201 }

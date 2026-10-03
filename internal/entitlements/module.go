@@ -85,7 +85,8 @@ type Service interface {
 	AdminRevoke(ctx context.Context, a authz.Actor, id uuid.UUID, reason string) (Entitlement, error)
 }
 
-// Deps are the dependencies of the entitlements module; all are required.
+// Deps are the dependencies of the entitlements module; all but OrgKind
+// are required.
 type Deps struct {
 	Store       Store
 	Tx          db.TxManager
@@ -93,6 +94,13 @@ type Deps struct {
 	Idempotency *idempotency.Keeper // Idempotency-Key of adminGrantEntitlement (06 H-5)
 	Clock       clock.Clock
 	Log         *slog.Logger
+
+	// OrgKind checks the target org of adminGrantEntitlement (06 H-40):
+	// a missing org is 404, an org that is not a company 422
+	// entitlements.org_not_company. Optional: nil keeps the pre-T-148
+	// behaviour (only the foreign key: a missing org is 404); cmd/koro
+	// always binds it.
+	OrgKind OrgKindFunc
 }
 
 func (d Deps) validate() error {

@@ -1,0 +1,1 @@
+{"new_owner_user_id": "{{fixture:company_admin}}", "reauth": {"password": "matrix-reauth-password"}}

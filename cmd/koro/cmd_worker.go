@@ -42,10 +42,7 @@ func runWorker(ctx context.Context, stop context.CancelFunc, environ map[string]
 	log := obs.NewLogger(stdout, obs.LoggerOptions{
 		Level: cfg.LogLevel, Format: cfg.LogFormat, Service: "koro-worker", Env: cfg.Env, Version: version,
 	})
-	shutdownTelemetry, err := obs.SetupTelemetry(ctx, obs.TelemetryOptions{
-		OTLPEndpoint: cfg.Obs.OTLPEndpoint, MetricsAddr: cfg.Obs.MetricsAddr,
-		Service: "koro-worker", Version: version, Env: cfg.Env,
-	})
+	tel, err := setupTelemetry(ctx, cfg.Obs, "koro-worker", cfg.Env, log)
 	if err != nil {
 		return err
 	}
@@ -56,6 +53,9 @@ func runWorker(ctx context.Context, stop context.CancelFunc, environ map[string]
 		return err
 	}
 	defer database.Close()
+	if err := instrumentDB(tel, database); err != nil {
+		return err
+	}
 	q := cfg.Platform.Queue
 	rdb, err := queue.OpenRedis(ctx, q.RedisURL.Reveal(), q.RedisPoolSize)
 	if err != nil {
@@ -64,6 +64,10 @@ func runWorker(ctx context.Context, stop context.CancelFunc, environ map[string]
 	defer func() { _ = rdb.Close() }()
 	if err := queue.CheckPersistence(ctx, rdb); err != nil {
 		log.LogAttrs(ctx, slog.LevelError, "redis is not configured for asynq", slog.Bool("alarm", true), slog.String("err", err.Error()))
+	}
+
+	if err := workerGauges(tel, database, rdb, clk); err != nil {
+		return err
 	}
 
 	c := newContainer(newInfra(infra{log: log, clock: clk, version: version, cfg: cfg.Modules, db: database}, rdb, cfg.Platform))
@@ -79,6 +83,7 @@ func runWorker(ctx context.Context, stop context.CancelFunc, environ map[string]
 		clock: clk,
 		srv: queue.NewServer(ctx, rdb, mux, queue.ServerConfig{
 			Concurrency: q.WorkerConcurrency, ShutdownTimeout: q.ShutdownTimeout, Log: log,
+			Metrics: tel.Metrics, Tracer: taskTracer(tel),
 		}),
 		relay: c.infra.outbox.NewRelay(outbox.RelayConfig{
 			Batch: cfg.Platform.Outbox.RelayBatch, Idle: cfg.Platform.Outbox.RelayIdle, BackoffMax: cfg.Platform.Outbox.RelayBackoffMax,
@@ -97,7 +102,7 @@ func runWorker(ctx context.Context, stop context.CancelFunc, environ map[string]
 	}
 	err = w.run(ctx, stop, q.HealthAddr, mux.Types())
 	// The worker has drained: flush telemetry, then Redis and the DB close.
-	err = errors.Join(err, shutdownTelemetry(context.WithoutCancel(ctx)))
+	err = errors.Join(err, shutdownTelemetry(ctx, tel))
 	log.LogAttrs(ctx, slog.LevelInfo, "worker stopped", slog.Bool("clean", err == nil))
 	return err
 }

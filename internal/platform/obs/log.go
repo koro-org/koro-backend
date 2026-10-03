@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Log output formats (LOG_FORMAT).
@@ -48,8 +50,8 @@ func NewLogger(w io.Writer, o LoggerOptions) *slog.Logger {
 // Discard returns a logger that drops everything (tests, openapi generation).
 func Discard() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
-// ctxHandler adds request_id, actor_id and task_id from the context.
-// trace_id/span_id are added once OpenTelemetry is enabled (05 §11.3).
+// ctxHandler adds request_id, actor_id and task_id from the context, and
+// trace_id/span_id when the context carries a valid span context (05 §11.1).
 type ctxHandler struct{ slog.Handler }
 
 func (h ctxHandler) Handle(ctx context.Context, r slog.Record) error {
@@ -61,6 +63,9 @@ func (h ctxHandler) Handle(ctx context.Context, r slog.Record) error {
 	}
 	if v := TaskID(ctx); v != "" {
 		r.AddAttrs(slog.String("task_id", v))
+	}
+	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
+		r.AddAttrs(slog.String("trace_id", sc.TraceID().String()), slog.String("span_id", sc.SpanID().String()))
 	}
 	if err := h.Handler.Handle(ctx, r); err != nil {
 		return fmt.Errorf("obs: write log record: %w", err)

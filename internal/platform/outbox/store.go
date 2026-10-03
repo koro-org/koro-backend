@@ -119,3 +119,33 @@ func (s gormStore) DeletePublished(ctx context.Context, before time.Time, limit 
 	}
 	return int(res.RowsAffected), nil
 }
+
+// Backlog is the unpublished part of the outbox (BE-058 gauges).
+type Backlog struct {
+	Pending       int64         // koro_outbox_pending
+	Dead          int64         // koro_outbox_dead: pending rows that reached AlarmAttempts
+	OldestPending time.Duration // koro_outbox_oldest_pending_seconds (0 when empty)
+}
+
+// ReadBacklog counts the unpublished rows (partial index outbox_pending_idx).
+//
+// cross-org: infrastructure table without org_id (02 §1.1).
+func ReadBacklog(ctx context.Context, orm *gorm.DB, now time.Time) (Backlog, error) {
+	var r struct {
+		Pending int64
+		Dead    int64
+		Oldest  *time.Time
+	}
+	err := db.Conn(ctx, orm).Raw(`SELECT count(*) AS pending,
+		count(*) FILTER (WHERE attempts >= ?) AS dead,
+		min(occurred_at) AS oldest
+		FROM outbox WHERE published_at IS NULL`, AlarmAttempts).Scan(&r).Error
+	if err != nil {
+		return Backlog{}, fmt.Errorf("outbox: backlog: %w", err)
+	}
+	b := Backlog{Pending: r.Pending, Dead: r.Dead}
+	if r.Oldest != nil && now.After(*r.Oldest) {
+		b.OldestPending = now.Sub(*r.Oldest)
+	}
+	return b, nil
+}

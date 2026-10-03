@@ -112,14 +112,22 @@ func TestObs_Logger_RedactsByTypeKeyAndScrub(t *testing.T) {
 
 func TestObs_SetupTelemetry_EmptyIsNoop(t *testing.T) {
 	t.Parallel()
-	shutdown, err := obs.SetupTelemetry(t.Context(), obs.TelemetryOptions{Service: "koro-test"})
+	tel, err := obs.SetupTelemetry(t.Context(), obs.TelemetryOptions{Service: "koro-test"})
 	if err != nil {
 		t.Fatalf("SetupTelemetry() error = %v", err)
 	}
-	if err := shutdown(t.Context()); err != nil {
-		t.Fatalf("shutdown() error = %v", err)
+	if tel.Metrics != nil || tel.Tracing() || tel.MetricsAddr() != "" {
+		t.Fatalf("empty options must install nothing: metrics=%v tracing=%v addr=%q", tel.Metrics, tel.Tracing(), tel.MetricsAddr())
 	}
-	if _, err := obs.SetupTelemetry(t.Context(), obs.TelemetryOptions{OTLPEndpoint: "http://otel:4318"}); !errors.Is(err, obs.ErrTelemetryNotImplemented) {
-		t.Fatalf("configured exporter must fail fast, got %v", err)
+	_, span := tel.TracerProvider().Tracer("t").Start(t.Context(), "x")
+	if span.IsRecording() || span.SpanContext().IsValid() {
+		t.Fatal("tracer provider must be a no-op when tracing is off")
+	}
+	span.End()
+	// The nil registry is safe to call: callers never branch.
+	tel.Metrics.ObserveHTTP("GET", "/x", 200, 0)
+	tel.Metrics.AuthzDenied("m", "a", "r")
+	if err := tel.Shutdown(t.Context()); err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
 	}
 }

@@ -34,10 +34,7 @@ func runAPI(ctx context.Context, stop context.CancelFunc, environ map[string]str
 	log := obs.NewLogger(stdout, obs.LoggerOptions{
 		Level: cfg.LogLevel, Format: cfg.LogFormat, Service: "koro-api", Env: cfg.Env, Version: version,
 	})
-	shutdownTelemetry, err := obs.SetupTelemetry(ctx, obs.TelemetryOptions{
-		OTLPEndpoint: cfg.Obs.OTLPEndpoint, MetricsAddr: cfg.Obs.MetricsAddr,
-		Service: "koro-api", Version: version, Env: cfg.Env,
-	})
+	tel, err := setupTelemetry(ctx, cfg.Obs, "koro-api", cfg.Env, log)
 	if err != nil {
 		return err
 	}
@@ -48,6 +45,9 @@ func runAPI(ctx context.Context, stop context.CancelFunc, environ map[string]str
 		return err
 	}
 	defer database.Close() // after HTTP has drained (deferred closers run last)
+	if err := instrumentDB(tel, database); err != nil {
+		return err
+	}
 	rdb, err := queue.OpenRedis(ctx, cfg.Platform.Queue.RedisURL.Reveal(), cfg.Platform.Queue.RedisPoolSize)
 	if err != nil {
 		return err
@@ -78,6 +78,9 @@ func runAPI(ctx context.Context, stop context.CancelFunc, environ map[string]str
 		Actors:          c.actors,
 		Ready:           ready,
 		Middleware:      global,
+		Metrics:         tel.Metrics,
+		TracerProvider:  tracerProvider(tel),
+		Service:         "koro-api",
 	})
 	if err != nil {
 		return err
@@ -109,7 +112,7 @@ func runAPI(ctx context.Context, stop context.CancelFunc, environ map[string]str
 		Log:             log,
 	})
 	// HTTP has drained: flush telemetry now, then the deferred closers run.
-	err = errors.Join(err, shutdownTelemetry(context.WithoutCancel(ctx)))
+	err = errors.Join(err, shutdownTelemetry(ctx, tel))
 	log.LogAttrs(ctx, slog.LevelInfo, "api stopped", slog.Bool("clean", err == nil))
 	return err
 }

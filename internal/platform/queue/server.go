@@ -13,6 +13,9 @@ import (
 
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"koro/internal/platform/clock"
 	"koro/internal/platform/obs"
@@ -102,12 +105,17 @@ type ServerConfig struct {
 	// BE-055/BE-058 plugs in here; critical-queue dead letters carry
 	// alarm=true in the log.
 	OnDeadLetter func(ctx context.Context, d DeadLetter)
+	// Metrics records koro_queue_tasks_processed_total and
+	// koro_queue_task_duration_seconds (BE-058); nil = off.
+	Metrics *obs.Metrics
+	// Tracer starts one consumer span per task (BE-058); nil = off.
+	Tracer trace.Tracer
 }
 
 // Server is the asynq worker server.
 type Server struct {
 	srv *asynq.Server
-	mux *Mux
+	h   asynq.Handler // mux, wrapped by the telemetry when it is on
 }
 
 // NewServer returns a worker server on rdb (shared pool) serving mux. ctx
@@ -132,7 +140,63 @@ func NewServer(ctx context.Context, rdb redis.UniversalClient, mux *Mux, cfg Ser
 		IsFailure:    func(err error) bool { return !errors.Is(err, context.Canceled) },
 		ErrorHandler: asynq.ErrorHandlerFunc(errorHandler(log, cfg.OnDeadLetter)),
 	})
-	return &Server{srv: srv, mux: mux}
+	var h asynq.Handler = mux
+	if cfg.Metrics != nil || cfg.Tracer != nil {
+		h = mux.instrumented(cfg.Metrics, cfg.Tracer)
+	}
+	return &Server{srv: srv, h: h}
+}
+
+// Task results of koro_queue_tasks_processed_total.
+const (
+	resultOK     = "ok"
+	resultRetry  = "retry"
+	resultFailed = "failed"
+)
+
+// instrumented wraps ProcessTask with a span and the task metrics. Labels
+// are the queue name and the registered task type (an unregistered type is
+// "unknown"); span attributes carry no payload and no error text.
+func (m *Mux) instrumented(met *obs.Metrics, tr trace.Tracer) asynq.Handler {
+	return asynq.HandlerFunc(func(ctx context.Context, t *asynq.Task) error {
+		queue, _ := asynq.GetQueueName(ctx)
+		typ := t.Type()
+		if _, ok := m.handlers[typ]; !ok {
+			typ = "unknown"
+		}
+		var span trace.Span
+		if tr != nil {
+			ctx, span = tr.Start(ctx, "asynq "+typ, trace.WithSpanKind(trace.SpanKindConsumer),
+				trace.WithAttributes(
+					attribute.String("messaging.system", "asynq"),
+					attribute.String("messaging.destination.name", queue),
+					attribute.String("koro.task.type", typ),
+				))
+			defer span.End()
+		}
+		start := time.Now() //nolint:forbidigo // latency measurement (monotonic), not a business timestamp
+		err := m.ProcessTask(ctx, t)
+		result := taskResult(ctx, err)
+		met.ObserveTask(queue, typ, result, time.Since(start))
+		if span != nil && result != resultOK {
+			span.SetStatus(codes.Error, "task "+result)
+		}
+		return err
+	})
+}
+
+// taskResult classifies an attempt: a cancelled task (shutdown) goes back
+// to the queue, so it counts as a retry like any attempt with retries left.
+func taskResult(ctx context.Context, err error) string {
+	if err == nil {
+		return resultOK
+	}
+	retried, _ := asynq.GetRetryCount(ctx)
+	maxRetry, _ := asynq.GetMaxRetry(ctx)
+	if errors.Is(err, context.Canceled) || (retried < maxRetry && !errors.Is(err, asynq.SkipRetry)) {
+		return resultRetry
+	}
+	return resultFailed
 }
 
 // RetryDelay is asynq's default polynomial back-off capped at MaxRetryDelay
@@ -171,7 +235,7 @@ func errorHandler(log *slog.Logger, onDead func(context.Context, DeadLetter)) fu
 // Start starts processing (non-blocking). Never use asynq's Run: it
 // installs its own signal handler (R-002 §5.3).
 func (s *Server) Start() error {
-	if err := s.srv.Start(s.mux); err != nil {
+	if err := s.srv.Start(s.h); err != nil {
 		return fmt.Errorf("queue: start server: %w", err)
 	}
 	return nil

@@ -20,7 +20,9 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humagin"
 	"github.com/gin-gonic/gin"
+	"go.opentelemetry.io/otel/trace"
 
+	"koro/internal/platform/obs"
 	"koro/internal/platform/problem"
 )
 
@@ -62,6 +64,15 @@ type Deps struct {
 	// Middleware is appended after the core chain (e.g. the global IP rate
 	// limit of BE-006).
 	Middleware []gin.HandlerFunc
+	// Metrics records koro_http_* and koro_authz_denied_total (BE-058). nil
+	// means metrics are off: no middleware is added. The registry is served
+	// by obs on its own internal listener, never on this router.
+	Metrics *obs.Metrics
+	// TracerProvider enables otelgin server spans (BE-058); nil means
+	// tracing is off and no middleware is added.
+	TracerProvider trace.TracerProvider
+	// Service is the server name of the spans; default "koro-api".
+	Service string
 }
 
 // App is the assembled HTTP application.
@@ -111,9 +122,18 @@ func New(d Deps) (*App, error) {
 	}
 	// Middleware must be attached before any route (gin combines handlers at
 	// registration time).
+	if d.TracerProvider != nil {
+		service := d.Service
+		if service == "" {
+			service = "koro-api"
+		}
+		r.Use(tracing(service, d.TracerProvider)) // first: every later step runs inside the span
+	}
+	r.Use(injectLogger(d.Log), requestID())
+	if d.Metrics != nil {
+		r.Use(httpMetrics(d.Metrics))
+	}
 	r.Use(
-		injectLogger(d.Log),
-		requestID(),
 		accessLog(d.Log),
 		recoverProblem(d.Log, base),
 		securityHeaders(),

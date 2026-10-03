@@ -38,6 +38,7 @@ func installProblemFactory(base string) error {
 		}
 		huma.NewErrorWithContext = func(hctx huma.Context, status int, msg string, errs ...error) huma.StatusError {
 			ctx := hctx.Context()
+			observeDenial(ctx, errs)
 			p, cause := toProblem(base, status, msg, errs)
 			if cause != nil {
 				loggerFrom(ctx).LogAttrs(ctx, slog.LevelError, "request failed",

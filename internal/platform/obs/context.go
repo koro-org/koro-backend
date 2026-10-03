@@ -1,5 +1,6 @@
 // Package obs provides structured logging (log/slog), request/actor context
-// fields, PII masking (05 §11.1–11.2) and the telemetry hooks (05 §11.3–11.4).
+// fields, PII masking (05 §11.1–11.2), OpenTelemetry tracing and the
+// Prometheus registry (05 §11.3–11.4).
 package obs
 
 import "context"

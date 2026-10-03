@@ -12,7 +12,19 @@ package main
 //
 // and checks the 10 rules of 03 §7.4 against the OpenAPI spec, the gin
 // routes and the authz action catalog, then runs every (operation, variant,
-// persona) request against a fresh in-memory application.
+// persona) request (BE-060, see "driver" below):
+//
+//   - a case that may change state (a non-GET expected to succeed, 2xx or
+//     an annotated 409/422) and every scenario runs on a fresh in-memory
+//     application (05 §13.5);
+//   - every other case (GET/HEAD, and non-GET denials 401/403/404) runs on
+//     one shared application per config: first all reads, then all denials,
+//     then all reads again in another shuffled order. The second read must
+//     return exactly what the first returned (status and body), so a denial
+//     that changed state, or a read with a side effect, fails the matrix.
+//
+// -matrix.fresh restores a fresh application for every case (the BE-004
+// behaviour); -matrix.seed reproduces the shuffle of a run (it is logged).
 //
 // A module plugs in through optional methods on its <module>Wiring, written
 // in cmd/koro/matrix_<module>_test.go (pattern of useMemStore):
@@ -27,12 +39,15 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"io/fs"
 	"maps"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -941,8 +956,9 @@ func realMatrixOptions() matrixOptions {
 }
 
 // newMatrixApp builds a fresh application: in-memory stores, the persona
-// resolver, cfg applied before build, fixtures seeded after build (05 §13.5:
-// every subtest starts from fresh state).
+// resolver, cfg applied before build, fixtures seeded after build. A case
+// that may change state gets its own (05 §13.5); the others share one per
+// config and prove they left no state behind (runShared, BE-060).
 func (env *matrixEnv) newMatrixApp(t *testing.T, cfg map[string]any) *matrixApp {
 	t.Helper()
 	c := newTestContainer(t)
@@ -1188,6 +1204,12 @@ func (a *matrixApp) do(t *testing.T, m *matrix, c matrixCase) (int, string) {
 	if body != nil {
 		hdr.Set("Content-Type", "application/json")
 	}
+	if hdr.Get(httpx.RequestIDHeader) == "" {
+		// Deterministic per case, so problem bodies (instance) of two runs
+		// of the same case compare equal on the shared application.
+		sum := sha256.Sum256([]byte(c.name))
+		hdr.Set(httpx.RequestIDHeader, "matrix-"+hex.EncodeToString(sum[:8]))
+	}
 	if c.idem {
 		hdr.Set("Idempotency-Key", uuid.NewV7().String())
 	}
@@ -1322,11 +1344,30 @@ func (env *matrixEnv) run(t *testing.T, fsys fs.FS) {
 	if len(probs) > 0 {
 		return
 	}
-	for _, c := range env.cases() {
+	all := env.cases()
+	groups, fresh := partitionCases(all, *matrixFresh)
+	seed := *matrixSeed
+	if seed == 0 {
+		seed = rand.Int64N(1<<62) + 1
+	}
+	t.Logf("%d cases + %d scenarios: %d on %d shared applications, %d on fresh applications (-matrix.seed=%d)",
+		len(all), len(m.scenarios), len(all)-len(fresh), len(groups), len(fresh), seed)
+
+	for _, c := range fresh {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			if got, body := env.runCase(t, c); got != c.want {
 				t.Errorf("%s %s as %s: got %d, want %d (body: %s)", c.method, c.path, c.persona, got, c.want, body)
+			}
+		})
+	}
+	for i, g := range groups {
+		t.Run(fmt.Sprintf("shared%d", i+1), func(t *testing.T) {
+			t.Parallel()
+			t.Logf("config %s: %d reads, %d denials", g.key, len(g.reads), len(g.denials))
+			res := env.runShared(t, g, seed+int64(i))
+			for _, l := range res.leaks {
+				t.Error(l)
 			}
 		})
 	}
@@ -1336,6 +1377,189 @@ func (env *matrixEnv) run(t *testing.T, fsys fs.FS) {
 			env.runScenario(t, s)
 		})
 	}
+}
+
+var (
+	matrixFresh = flag.Bool("matrix.fresh", false,
+		"authz matrix: run every case on a fresh application (no shared application; BE-004 behaviour)")
+	matrixSeed = flag.Int64("matrix.seed", 0, "authz matrix: shuffle seed of the shared applications (0: random, logged)")
+)
+
+// sharedSafe reports whether a case may run on the shared application of
+// its config: a read (GET/HEAD, WebSocket upgrade included) or a request
+// expected to be denied (401 by the auth middleware, 403/404 by the
+// visibility and authz checks that precede any write). A request expected
+// to succeed, or to fail later in the service (409/422), may change state.
+func (c matrixCase) sharedSafe() bool {
+	if c.read() {
+		return true
+	}
+	return c.want == http.StatusUnauthorized || c.want == http.StatusForbidden || c.want == http.StatusNotFound
+}
+
+func (c matrixCase) read() bool { return c.method == http.MethodGet || c.method == http.MethodHead }
+
+// sharedGroup is the cases of one config that run on one shared application.
+type sharedGroup struct {
+	key            string // canonical config
+	config         map[string]any
+	reads, denials []matrixCase
+}
+
+// partitionCases splits the cases into shared groups (one per distinct
+// config, in a stable order) and the cases needing a fresh application.
+// Every case lands in exactly one place (TestAuthzMatrix_CasePartition).
+func partitionCases(cases []matrixCase, allFresh bool) (groups []*sharedGroup, fresh []matrixCase) {
+	byKey := map[string]*sharedGroup{}
+	for _, c := range cases {
+		if allFresh || !c.sharedSafe() {
+			fresh = append(fresh, c)
+			continue
+		}
+		k := configKey(c.config)
+		g := byKey[k]
+		if g == nil {
+			g = &sharedGroup{key: k, config: c.config}
+			byKey[k] = g
+			groups = append(groups, g)
+		}
+		if c.read() {
+			g.reads = append(g.reads, c)
+		} else {
+			g.denials = append(g.denials, c)
+		}
+	}
+	slices.SortFunc(groups, func(a, b *sharedGroup) int { return strings.Compare(a.key, b.key) })
+	return groups, fresh
+}
+
+func configKey(cfg map[string]any) string {
+	var b strings.Builder
+	for _, k := range slices.Sorted(maps.Keys(cfg)) {
+		fmt.Fprintf(&b, "%s=%v;", k, cfg[k])
+	}
+	return b.String()
+}
+
+// caseResult is a response as compared between two runs of a read.
+type caseResult struct {
+	status int
+	body   string // canonical (see canonicalBody)
+}
+
+type sharedRun struct {
+	first    map[string]caseResult // first run of every read and denial, by case name
+	unstable map[string]bool       // reads whose body differs when run again before any denial
+	leaks    []string              // reads whose last run differs from the first
+}
+
+// runShared runs one group on a single application in four phases, each a
+// set of parallel subtests (t.Run returns when they are done):
+//
+//  1. read: every read, shuffled; the responses are recorded;
+//  2. recheck: every read again in the same order, so every other read
+//     runs between a read's two runs. A read whose body changes here
+//     depends on time or on the side effects of reads (the audit trail of
+//     audited reads): its body is not compared later, its status is. A
+//     changed status is a leak already;
+//  3. deny: every denial, shuffled;
+//  4. reread: every read in another order. Its status, and its body unless
+//     unstable, must equal the first run: no denial and no read left state
+//     behind that another case can see.
+func (env *matrixEnv) runShared(t *testing.T, g *sharedGroup, seed int64) sharedRun {
+	t.Helper()
+	a := env.newMatrixApp(t, g.config)
+	rng := rand.New(rand.NewPCG(uint64(seed), uint64(seed)>>1|1))
+	shuffled := func(cs []matrixCase) []matrixCase {
+		out := slices.Clone(cs)
+		rng.Shuffle(len(out), func(i, j int) { out[i], out[j] = out[j], out[i] })
+		return out
+	}
+	var mu sync.Mutex
+	run := sharedRun{first: map[string]caseResult{}, unstable: map[string]bool{}}
+	leak := func(c matrixCase, phase string, f, r caseResult) {
+		run.leaks = append(run.leaks, fmt.Sprintf(
+			"%s: state leaked on the shared application (%s): %s %s as %s first returned %d %s, then %d %s",
+			c.name, phase, c.method, c.path, c.persona, f.status, f.body, r.status, r.body))
+	}
+
+	phase := func(name string, cs []matrixCase, after func(c matrixCase, r caseResult)) {
+		t.Run(name, func(t *testing.T) {
+			for _, c := range cs {
+				t.Run(c.name, func(t *testing.T) {
+					t.Parallel()
+					got, body := a.do(t, env.m, c)
+					if got != c.want {
+						t.Errorf("%s %s as %s: got %d, want %d (body: %s)", c.method, c.path, c.persona, got, c.want, body)
+					}
+					r := caseResult{got, canonicalBody(body)}
+					mu.Lock()
+					defer mu.Unlock()
+					after(c, r)
+				})
+			}
+		})
+	}
+	record := func(c matrixCase, r caseResult) { run.first[c.name] = r }
+	reads := shuffled(g.reads)
+	phase("read", reads, record)
+	phase("recheck", reads, func(c matrixCase, r caseResult) {
+		f := run.first[c.name]
+		switch {
+		case f.status != r.status:
+			leak(c, "recheck", f, r)
+		case f.body != r.body:
+			run.unstable[c.name] = true
+		}
+	})
+	phase("deny", shuffled(g.denials), record)
+	phase("reread", shuffled(g.reads), func(c matrixCase, r caseResult) {
+		if f := run.first[c.name]; f.status != r.status || (f.body != r.body && !run.unstable[c.name]) {
+			leak(c, "reread", f, r)
+		}
+	})
+	slices.Sort(run.leaks)
+	t.Logf("%d of %d reads compared by status only (time or read side effects): %v",
+		len(run.unstable), len(g.reads), slices.Sorted(maps.Keys(run.unstable)))
+	return run
+}
+
+// canonicalBody makes a JSON body comparable across runs: object keys are
+// sorted by encoding/json and array elements are sorted, since in-memory
+// stores may list rows in map order. Other bodies compare verbatim.
+func canonicalBody(body string) string {
+	var v any
+	if json.Unmarshal([]byte(body), &v) != nil {
+		return body
+	}
+	var canon func(v any) any
+	canon = func(v any) any {
+		switch x := v.(type) {
+		case map[string]any:
+			for k, e := range x {
+				x[k] = canon(e)
+			}
+		case []any:
+			keys := make([]string, len(x))
+			for i, e := range x {
+				x[i] = canon(e)
+				b, _ := json.Marshal(x[i])
+				keys[i] = string(b)
+			}
+			slices.Sort(keys)
+			out := make([]any, len(keys))
+			for i, k := range keys {
+				out[i] = json.RawMessage(k)
+			}
+			return out
+		}
+		return v
+	}
+	b, err := json.Marshal(canon(v))
+	if err != nil {
+		return body
+	}
+	return string(b)
 }
 
 // tokenHash is the credential hash the auth middleware passes to resolvers.

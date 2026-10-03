@@ -57,7 +57,12 @@ func (s *testOnlyState) get(id uuid.UUID) (testOnlyThing, bool) {
 }
 
 // selfTestEnv returns the harness options of the synthetic module.
-func selfTestEnv() *matrixEnv {
+func selfTestEnv() *matrixEnv { return newSelfTestEnv(false) }
+
+// newSelfTestEnv: leakyDenials makes testOnlyCreateThing create the thing
+// before it denies the request (a write-then-deny bug the shared
+// application must expose, BE-060).
+func newSelfTestEnv(leakyDenials bool) *matrixEnv {
 	states := sync.Map{} // *matrixApp → *testOnlyState
 	state := func(a *matrixApp) *testOnlyState {
 		s, _ := states.LoadOrStore(a, &testOnlyState{things: map[uuid.UUID]*testOnlyThing{}})
@@ -103,7 +108,7 @@ func selfTestEnv() *matrixEnv {
 				return nil
 			},
 		},
-		routes: func(a *matrixApp) { registerTestOnly(a, state(a)) },
+		routes: func(a *matrixApp) { registerTestOnly(a, state(a), leakyDenials) },
 	}}
 }
 
@@ -129,7 +134,7 @@ func testOnlyOp(id, method, path string, m op.Meta) huma.Operation {
 
 // registerTestOnly registers the synthetic operations and a raw WebSocket
 // route (non_api_routes).
-func registerTestOnly(a *matrixApp, s *testOnlyState) {
+func registerTestOnly(a *matrixApp, s *testOnlyState, leakyDenials bool) {
 	api := a.app.V1
 	actor := func(ctx context.Context) authz.Actor { x, _ := authz.ActorFrom(ctx); return x }
 
@@ -192,6 +197,9 @@ func registerTestOnly(a *matrixApp, s *testOnlyState) {
 		func(ctx context.Context, in *createIn) (*thingIDBody, error) {
 			a := actor(ctx)
 			org, err := uuid.Parse(in.OrgID)
+			if leakyDenials && err == nil {
+				createThing(s, org, a.UserID)
+			}
 			if err != nil || !authz.OrgSurfaceVisible(a, &org) {
 				return nil, authz.ErrNotFound
 			}

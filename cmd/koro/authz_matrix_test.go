@@ -2,6 +2,7 @@ package main
 
 import (
 	"io/fs"
+	"maps"
 	"net/http"
 	"os"
 	"slices"
@@ -237,6 +238,118 @@ func TestAuthzMatrix_ActionCoverageAndRoutes(t *testing.T) {
 			t.Parallel()
 			wantProblem(t, selfTestProblems(t, c.fsys(), c.extra), c.want)
 		})
+	}
+}
+
+// TestAuthzMatrix_CasePartition pins the BE-060 split of the real matrix:
+// every case runs exactly once, either on the shared application of its
+// config or on a fresh one, and every case that may change state (a
+// non-GET expected to succeed or to fail in the service) is fresh.
+func TestAuthzMatrix_CasePartition(t *testing.T) {
+	t.Parallel()
+	env := &matrixEnv{opts: realMatrixOptions()}
+	m, probs := loadMatrix(os.DirFS("testdata/authz"), env.opts.modules)
+	if len(probs) > 0 {
+		t.Fatal(probs)
+	}
+	env.m = m
+	all := env.cases()
+	for _, allFresh := range []bool{false, true} {
+		groups, fresh := partitionCases(all, allFresh)
+		seen := map[string]int{}
+		for _, c := range fresh {
+			seen[c.name]++
+		}
+		shared := 0
+		for _, g := range groups {
+			for _, c := range append(slices.Clone(g.reads), g.denials...) {
+				seen[c.name]++
+				shared++
+				if !c.sharedSafe() || configKey(c.config) != g.key {
+					t.Errorf("%s: on shared application %q but sharedSafe=%v config %q", c.name, g.key, c.sharedSafe(), configKey(c.config))
+				}
+				if c.read() != slices.ContainsFunc(g.reads, func(r matrixCase) bool { return r.name == c.name }) {
+					t.Errorf("%s: read/denial phase mismatch", c.name)
+				}
+			}
+		}
+		for _, c := range all {
+			if seen[c.name] != 1 {
+				t.Errorf("case %s runs %d times (allFresh=%v)", c.name, seen[c.name], allFresh)
+			}
+			if !c.read() && c.want/100 == 2 && !slices.ContainsFunc(fresh, func(f matrixCase) bool { return f.name == c.name }) {
+				t.Errorf("%s: a successful write must run on a fresh application", c.name)
+			}
+		}
+		if len(seen) != len(all) || shared+len(fresh) != len(all) {
+			t.Errorf("partition of %d cases: %d shared + %d fresh, %d distinct", len(all), shared, len(fresh), len(seen))
+		}
+		if allFresh && (len(groups) != 0 || len(fresh) != len(all)) {
+			t.Errorf("-matrix.fresh must run every case fresh: %d groups, %d fresh", len(groups), len(fresh))
+		}
+		if !allFresh {
+			t.Logf("%d cases: %d shared on %d applications, %d fresh; %d scenarios", len(all), shared, len(groups), len(fresh), len(m.scenarios))
+		}
+	}
+}
+
+// selfTestSharedRun loads the self-test matrix into env and runs every
+// shared group with seed, returning the first responses and the leaks.
+func selfTestSharedRun(t *testing.T, env *matrixEnv, seed int64) (map[string]caseResult, []string, []matrixCase) {
+	t.Helper()
+	m, probs := loadMatrix(selfTestFS(t), env.opts.modules)
+	if len(probs) > 0 {
+		t.Fatal(probs)
+	}
+	env.m = m
+	groups, _ := partitionCases(env.cases(), false)
+	if len(groups) == 0 {
+		t.Fatal("no shared group in the self-test matrix")
+	}
+	first, leaks := map[string]caseResult{}, []string(nil)
+	var cases []matrixCase
+	for i, g := range groups {
+		res := env.runShared(t, g, seed+int64(i))
+		maps.Copy(first, res.first)
+		leaks = append(leaks, res.leaks...)
+		cases = append(append(cases, g.reads...), g.denials...)
+	}
+	return first, leaks, cases
+}
+
+// TestAuthzMatrix_SharedAppIsolation proves the shared application leaks no
+// state between cases (BE-060): two runs in different shuffled orders give
+// the same responses, and every response equals the one of a fresh
+// application per case (the BE-004 behaviour).
+func TestAuthzMatrix_SharedAppIsolation(t *testing.T) {
+	t.Parallel()
+	env := selfTestEnv()
+	r1, leaks1, cases := selfTestSharedRun(t, env, 1)
+	r2, leaks2, _ := selfTestSharedRun(t, selfTestEnv(), 2)
+	if len(leaks1)+len(leaks2) > 0 {
+		t.Fatalf("leaks: %v %v", leaks1, leaks2)
+	}
+	if len(r1) != len(cases) || !maps.Equal(r1, r2) {
+		t.Fatalf("shuffled runs differ:\n%v\n%v", r1, r2)
+	}
+	for _, c := range cases {
+		got, body := env.runCase(t, c)
+		if fresh := (caseResult{got, canonicalBody(body)}); fresh != r1[c.name] {
+			t.Errorf("%s: shared application %v, fresh application %v", c.name, r1[c.name], fresh)
+		}
+	}
+}
+
+// TestAuthzMatrix_SharedAppExposesLeak proves the reread phase catches a
+// write-then-deny bug: testOnlyCreateThing denies with the expected code but
+// has already stored a thing, which testOnlyListThings then counts.
+func TestAuthzMatrix_SharedAppExposesLeak(t *testing.T) {
+	t.Parallel()
+	_, leaks, _ := selfTestSharedRun(t, newSelfTestEnv(true), 1)
+	if !slices.ContainsFunc(leaks, func(l string) bool {
+		return strings.HasPrefix(l, "testOnlyListThings/") && strings.Contains(l, "state leaked on the shared application")
+	}) {
+		t.Fatalf("the leaky denial was not reported; leaks: %v", leaks)
 	}
 }
 

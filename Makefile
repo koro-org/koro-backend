@@ -14,9 +14,12 @@ TOOLS_DIR             := $(CURDIR)/bin
 GOLANGCI_LINT         := $(TOOLS_DIR)/golangci-lint-$(GOLANGCI_LINT_VERSION)
 GOVULNCHECK           := $(TOOLS_DIR)/govulncheck-$(GOVULNCHECK_VERSION)
 LOAD_ENV              := set -a; [ -f .env ] && . ./.env; set +a;
+# Paket başına test zaman aşımı (Go varsayılanı 10m). cmd/koro yetki matrisi
+# -race altında yük varken 10m'yi aşabiliyordu (BE-060, T-110).
+TEST_TIMEOUT          ?= 20m
 
 .PHONY: help tools fmt fmt-check lint test test-integration build sec tidy-check openapi openapi-check \
-        migrate-up migrate-down migrate-new deps-up deps-down dev check
+        migrate-up migrate-down migrate-new deps-up deps-down dev check test-matrix
 
 help: ## hedefleri listele
 	@awk 'BEGIN{FS=":.*## "} /^[a-zA-Z_-]+:.*## /{printf "  %-18s %s\n",$$1,$$2}' $(MAKEFILE_LIST)
@@ -49,10 +52,15 @@ lint: $(GOLANGCI_LINT) ## golangci-lint (config verify + gosec dahil)
 	$(GOLANGCI_LINT) run ./...
 
 test: ## birim + service + yetki matrisi testleri (DB/Redis gerekmez, -race)
-	$(GO) test -race -shuffle=on ./...
+	$(GO) test -race -shuffle=on -timeout $(TEST_TIMEOUT) ./...
 
 test-integration: ## testcontainers ile store/queue/migration testleri (Docker gerekir)
-	$(GO) test -race -tags=integration -count=1 -p 2 ./...
+	$(GO) test -race -tags=integration -count=1 -p 2 -timeout $(TEST_TIMEOUT) ./...
+
+# MATRIX_ARGS: -matrix.fresh (her vaka taze uygulamada, BE-004 davranışı),
+# -matrix.seed=N (paylaşılan uygulamadaki karıştırmayı tekrarla; seed logda).
+test-matrix: ## yalnız yetki matrisi + self-test'leri (-race); ör. make test-matrix MATRIX_ARGS=-matrix.fresh
+	$(GO) test -race -count=1 -timeout $(TEST_TIMEOUT) -run '^TestAuthzMatrix' ./cmd/koro $(if $(MATRIX_ARGS),-args $(MATRIX_ARGS))
 
 build: ## tek binary: bin/koro
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="-s -w -X main.version=$$(git rev-parse --short HEAD 2>/dev/null || echo dev)" -o $(BIN) ./cmd/koro

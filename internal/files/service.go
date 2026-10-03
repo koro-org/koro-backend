@@ -12,6 +12,7 @@ import (
 	"mime"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 	"uuid"
@@ -32,6 +33,12 @@ const maxNameRunes = 255
 type service struct {
 	d     Deps
 	clean *sanitizer // metadata removal (sanitize.go)
+
+	// rescanMu serialises files.rescan_skipped runs of this process;
+	// rescanAfter is where the next run continues (process-local: a restart
+	// starts over, which only repeats the scan of still-skipped files).
+	rescanMu    sync.Mutex
+	rescanAfter uuid.UUID
 }
 
 // Audit actions of the file writes that have no HTTP operation of their own

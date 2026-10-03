@@ -108,6 +108,18 @@ func (s gormStore) PendingScans(ctx context.Context, before time.Time, after uui
 	return out, nil
 }
 
+// cross-org: see Insert (a platform job over every org).
+func (s gormStore) SkippedScans(ctx context.Context, after uuid.UUID, limit int) ([]File, error) {
+	var out []File
+	err := db.Conn(ctx, s.orm).
+		Where("scan_status = 'skipped' AND status = 'active' AND id > ?", after).
+		Order("id").Limit(limit).Find(&out).Error
+	if err != nil {
+		return nil, fmt.Errorf("files: skipped scans: %w", err)
+	}
+	return out, nil
+}
+
 // cross-org: the data subject's own files across every org (KVKK).
 func (s gormStore) UnattachedOf(ctx context.Context, userID uuid.UUID) ([]File, error) {
 	var out []File

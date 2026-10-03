@@ -155,6 +155,20 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (files.Store, db.Tx
 		if err != nil || len(mine) != 5 {
 			t.Fatalf("UnattachedOf = %d rows, %v; want 5", len(mine), err)
 		}
+		// Skipped scans (files.rescan_skipped) page by id too.
+		skipped2 := activate(row(files.PurposeCV, base))
+		skipped2.ScanStatus = files.ScanSkipped
+		if err := s.Insert(ctx, skipped2); err != nil {
+			t.Fatal(err)
+		}
+		sk, err := s.SkippedScans(ctx, uuid.Nil(), 1)
+		if err != nil || len(sk) != 1 || sk[0].ID != attached.ID {
+			t.Fatalf("SkippedScans page 1 = %+v, %v", sk, err)
+		}
+		sk, err = s.SkippedScans(ctx, sk[0].ID, 10)
+		if err != nil || len(sk) != 1 || sk[0].ID != skipped2.ID {
+			t.Fatalf("SkippedScans page 2 = %+v, %v", sk, err)
+		}
 	})
 
 	t.Run("lock in a transaction", func(t *testing.T) {

@@ -11,8 +11,8 @@ import (
 // size, checksum and magic bytes were verified and before the object leaves
 // the quarantine bucket.
 //
-// The contract is written so that the ClamAV adapter of BE-048 plugs in
-// without changes to the flow:
+// The ClamAV adapter (package clamav, BE-048; FILES_SCANNER=clamav)
+// implements it; the flow does not depend on the implementation:
 //
 //   - Scan reads the content only through obj.Open, lazily: a scanner that
 //     does not look at the content (NoopScanner) never downloads it.
@@ -50,10 +50,11 @@ type ScanVerdict struct {
 	Signature string     // infected only
 }
 
-// NoopScanner is the scanner until ClamAV (BE-048): it never reads the
-// object and marks every file skipped (02 §3.1 scan_status='skipped').
-// With FILES_SCAN_REQUIRED=false a skipped file is downloadable; with true
-// it is not, so the wiring refuses that combination.
+// NoopScanner (FILES_SCANNER=noop, development) never reads the object and
+// marks every file skipped (02 §3.1 scan_status='skipped'). With
+// FILES_SCAN_REQUIRED=false a skipped file is downloadable; with true it is
+// not, so the module refuses that combination. Files skipped this way are
+// rescanned by files.rescan_skipped once a real scanner is wired.
 type NoopScanner struct{}
 
 // Name implements Scanner.

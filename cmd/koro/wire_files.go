@@ -1,13 +1,18 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/files"
+	"koro/internal/notify"
 	"koro/internal/platform/config"
 	"koro/internal/platform/db"
+	"koro/internal/platform/httpx"
+	"koro/internal/platform/queue"
 	"koro/internal/platform/storage"
 )
 
@@ -21,10 +26,16 @@ import (
 //	tx       nil → the app_rw pool's TxManager; tests preset db.NopTx
 //	objects  nil → the S3 client from config (S3_*); tests preset storage.Mem
 //	buckets  nil → S3_BUCKET_FILES / S3_BUCKET_QUARANTINE
-//	scanner  nil → files.NoopScanner (scan_status "skipped"); BE-048 sets ClamAV here
+//	scanner  nil → FILES_SCANNER: "clamav" builds the ClamAV adapter
+//	         (files.ClamAV, clamd over TCP; BE-048), "noop"
+//	         files.NoopScanner (scan_status "skipped")
 //	cfg      tests only; nil → the files section of the loaded configuration
 //
 // Every file row write is audited through c.audit.svc (L1, BE-059).
+//
+// Late binding (read at call time): the uploader of a rejected file is
+// notified through c.notify.svc (L3, built after files) by filesNotifier;
+// FILES_CLAMAV_READY_CHECK=true adds clamd to /readyz.
 type filesWiring struct {
 	store   files.Store
 	tx      db.TxManager
@@ -69,11 +80,27 @@ func (w *filesWiring) build(c *container) error {
 	if tx == nil {
 		tx = c.infra.db.Tx
 	}
+	scanner := w.scanner
+	if scanner == nil && cfg.Scanner == config.ScannerClamAV {
+		sc, err := files.NewClamAV(files.ClamAVConfig{
+			Addr: cfg.ClamAVAddr, Timeout: cfg.ClamAVTimeout, MaxConns: cfg.ClamAVMaxConns,
+			MaxBytes: cfg.ClamAVMaxBytes, Clock: c.infra.clock,
+		})
+		if err != nil {
+			return err
+		}
+		if cfg.ClamAVReadyCheck {
+			c.readyChecks = append(c.readyChecks, httpx.Check{Name: "clamav", Run: sc.Ping})
+		}
+		c.shutdownHooks = append(c.shutdownHooks, sc.Close)
+		scanner = sc
+	}
 	mod, err := files.New(files.Deps{
 		Store: store, Objects: objects, Tx: tx, Outbox: c.infra.outbox, Queue: c.infra.queue,
 		Idempotency: c.infra.idempotency, Clock: c.infra.clock, Log: c.infra.log.With("module", "files"),
-		Buckets: buckets, Audit: c.audit.svc, Scanner: w.scanner, ScanRequired: cfg.ScanRequired, UploadURLTTL: cfg.UploadURLTTL,
+		Buckets: buckets, Audit: c.audit.svc, Scanner: scanner, ScanRequired: cfg.ScanRequired, UploadURLTTL: cfg.UploadURLTTL,
 		OrphanRetention: c.retention("files_orphan", 0, files.DefaultOrphanRetention),
+		Notifier:        filesNotifier{c: c}, RescanBatch: cfg.RescanBatch,
 	})
 	if err != nil {
 		return err
@@ -83,8 +110,10 @@ func (w *filesWiring) build(c *container) error {
 	return nil
 }
 
-// tasks: file.uploaded → files.scan_file; files.orphan_cleanup (04:40) and
-// files.rescan_pending (every 10 min); the files.delete_object retry task.
+// tasks: file.uploaded → files.scan_file, file.rejected →
+// files.notify_rejected; files.orphan_cleanup (04:40), files.rescan_pending
+// (every 10 min) and files.rescan_skipped (every 10 min, minute 5); the
+// files.delete_object retry task.
 func (w *filesWiring) tasks(c *container) {
 	w.mod.Subscribe(c.infra.subs)
 	for _, j := range w.mod.Jobs() {
@@ -97,3 +126,39 @@ func (w *filesWiring) tasks(c *container) {
 
 // routes: createUpload, completeUpload, deleteMyFile (04 §2.20).
 func (w *filesWiring) routes(c *container, api huma.API) { files.Register(api, w.svc) }
+
+// filesNotifier adapts notify (L3) to files.OwnerNotifier: a fixed,
+// transactional in-app notice to the uploader (preference "security",
+// which cannot be switched off). The text names no file; the data carries
+// the file ID only. The dedupe key makes a repeated file.rejected delivery
+// a no-op. notify is built after files, so the sender is read at call
+// time; a missing sender fails the task (retried), it never drops the
+// notice silently.
+type filesNotifier struct{ c *container }
+
+// Notification templates of files (internal/notify/templates/files).
+const (
+	templateFileInfected      = "files.file_infected"
+	templateFileUnprocessable = "files.file_unprocessable"
+)
+
+func (n filesNotifier) NotifyFileRejected(ctx context.Context, r files.RejectionNotice) error {
+	svc := n.c.notify.svc
+	if svc == nil {
+		return errors.New("files: notify is not wired")
+	}
+	tmpl := templateFileUnprocessable
+	if r.Reason == files.RejectInfected {
+		tmpl = templateFileInfected
+	}
+	user := r.UserID
+	_, err := svc.Send(ctx, notify.Message{
+		UserID: &user, Channel: notify.ChannelInApp, Category: notify.CategoryTransactional,
+		Template: tmpl, Data: map[string]any{"file_id": r.FileID},
+		DedupeKey: "files.rejected:" + r.FileID.String(),
+	})
+	if notify.IsPermanent(err) { // an invalid message never improves: do not retry
+		return queue.Permanent(err)
+	}
+	return err
+}

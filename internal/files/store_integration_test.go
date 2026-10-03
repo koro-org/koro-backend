@@ -16,6 +16,7 @@ import (
 
 	"koro/internal/audit"
 	"koro/internal/files"
+	"koro/internal/files/clamavtest"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
@@ -28,7 +29,11 @@ import (
 	"koro/internal/platform/testutil"
 )
 
-func TestMain(m *testing.M) { os.Exit(storagetest.Main(m, testutil.Run)) }
+// SeaweedFS and clamd start in the background while testutil.Run prepares
+// PostgreSQL; each is one container for the whole package.
+func TestMain(m *testing.M) {
+	os.Exit(storagetest.Main(m, func(m *testing.M) int { return clamavtest.Main(m, testutil.Run) }))
+}
 
 func TestStore_Contract_Gorm(t *testing.T) {
 	t.Parallel()
@@ -45,23 +50,28 @@ type realEnv struct {
 	s3    *storage.S3
 	store files.Store
 	audit audit.Store
+	out   *outbox.Mem
 	mod   files.Module
 	b     files.Buckets
 }
 
-func newRealEnv(t *testing.T) *realEnv {
+func newRealEnv(t *testing.T, opts ...func(*files.Deps)) *realEnv {
 	t.Helper()
 	d := testutil.NewDB(t)
 	s3 := storagetest.Client(t)
 	clk := clock.NewFake(time.Now().UTC().Truncate(time.Second))
 	e := &realEnv{clk: clk, d: d, s3: s3, store: files.NewGormStore(d.ORM), audit: audit.NewGormStore(d.ORM),
-		b: files.Buckets{Files: storagetest.Bucket(t, s3), Quarantine: storagetest.Bucket(t, s3)}}
-	mod, err := files.New(files.Deps{
-		Store: e.store, Objects: s3, Tx: d.Tx, Outbox: outbox.NewMem(clk), Queue: queue.NewMem(),
+		out: outbox.NewMem(clk), b: files.Buckets{Files: storagetest.Bucket(t, s3), Quarantine: storagetest.Bucket(t, s3)}}
+	deps := files.Deps{
+		Store: e.store, Objects: s3, Tx: d.Tx, Outbox: e.out, Queue: queue.NewMem(),
 		Idempotency: idempotency.New(idempotency.Deps{Tx: d.Tx, Store: idempotency.NewGormStore(d.ORM), Clock: clk, Log: obs.Discard()}),
 		Clock:       clk, Log: obs.Discard(), Buckets: e.b,
 		Audit: audit.New(audit.Deps{Store: e.audit, Tx: d.Tx, Clock: clk, Log: obs.Discard()}).Service,
-	})
+	}
+	for _, o := range opts {
+		o(&deps)
+	}
+	mod, err := files.New(deps)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -34,6 +34,10 @@ type Store interface {
 	// and that were last updated before the cutoff, with an ID greater than
 	// after, in ID order (files.rescan_pending).
 	PendingScans(ctx context.Context, before time.Time, after uuid.UUID, limit int) ([]File, error)
+	// SkippedScans returns up to limit active rows whose scan was skipped
+	// (no real scanner at the time) with an ID greater than after, in ID
+	// order (files.rescan_skipped).
+	SkippedScans(ctx context.Context, after uuid.UUID, limit int) ([]File, error)
 	// UnattachedOf returns the unattached rows whose data subject is userID
 	// (KVKK export and erasure), in ID order.
 	UnattachedOf(ctx context.Context, userID uuid.UUID) ([]File, error)

@@ -43,7 +43,8 @@ func TestStorage_Validation(t *testing.T) {
 	t.Parallel()
 	prod := func(kv ...string) map[string]string {
 		m := storageEnv("APP_ENV", "prod", "S3_ENDPOINT", "https://s3.tr-1.provider.example", "S3_ACCESS_KEY", "AKPROD",
-			"S3_SECRET_KEY", "prod-secret-value", "S3_BUCKET_FILES", "koro-files", "S3_BUCKET_QUARANTINE", "koro-quarantine")
+			"S3_SECRET_KEY", "prod-secret-value", "S3_BUCKET_FILES", "koro-files", "S3_BUCKET_QUARANTINE", "koro-quarantine",
+			"FILES_SCANNER", "clamav", "FILES_SCAN_REQUIRED", "true", "FILES_CLAMAV_ADDR", "clamav:3310")
 		for i := 0; i+1 < len(kv); i += 2 {
 			m[kv[i]] = kv[i+1]
 		}

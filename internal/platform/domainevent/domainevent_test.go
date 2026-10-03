@@ -164,8 +164,8 @@ func snake(field string) string {
 func TestDomainevent_NamesFollowTheTopic(t *testing.T) {
 	t.Parallel()
 	cat := domainevent.Catalog()
-	if len(cat) != 61 {
-		t.Fatalf("catalog has %d topics, want the 61 of 01 §6.2", len(cat))
+	if len(cat) != 62 {
+		t.Fatalf("catalog has %d topics, want the 62 of 01 §6.2", len(cat))
 	}
 	for _, s := range cat {
 		typ := reflect.TypeOf(s.Payload)

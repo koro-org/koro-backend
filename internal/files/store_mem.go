@@ -146,6 +146,12 @@ func (s *memStore) PendingScans(_ context.Context, before time.Time, after uuid.
 	}, after, limit), nil
 }
 
+func (s *memStore) SkippedScans(_ context.Context, after uuid.UUID, limit int) ([]File, error) {
+	return s.list(func(f File) bool {
+		return f.Status == StatusActive && f.ScanStatus == ScanSkipped
+	}, after, limit), nil
+}
+
 func (s *memStore) UnattachedOf(_ context.Context, userID uuid.UUID) ([]File, error) {
 	return s.list(func(f File) bool {
 		return f.AttachedAt == nil && f.OwnerUserID != nil && *f.OwnerUserID == userID

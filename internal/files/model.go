@@ -31,7 +31,19 @@ const (
 	ScanPending  ScanStatus = "pending"  // not scanned yet (object in quarantine)
 	ScanClean    ScanStatus = "clean"    // scanned, no finding (or server-generated content)
 	ScanInfected ScanStatus = "infected" // scanned, malware found: never served
-	ScanSkipped  ScanStatus = "skipped"  // no real scanner (NoopScanner, until BE-048)
+	ScanSkipped  ScanStatus = "skipped"  // no real scanner (NoopScanner); rescanned once one is wired
+)
+
+// RejectReason says why a file was taken out of use after its upload
+// (domainevent.FileRejected Reason).
+type RejectReason string
+
+// Reject reasons.
+const (
+	// RejectInfected: the scanner found malware (BE-048).
+	RejectInfected RejectReason = "infected"
+	// RejectUnprocessable: the metadata could not be removed (BE-059).
+	RejectUnprocessable RejectReason = "unprocessable"
 )
 
 // File is one row of the files table (02 §3.1).

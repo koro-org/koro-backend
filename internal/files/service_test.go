@@ -283,14 +283,15 @@ func TestScan_VerdictsAndErrors(t *testing.T) {
 		if err := e.scan(t, id); err != nil {
 			t.Fatal(err)
 		}
-		f := e.row(t, id)
-		if f.ScanStatus != files.ScanInfected || f.Bucket != buckets.Quarantine || e.mem.Len() != 0 {
-			t.Fatalf("infected: %+v with %d objects", f, e.mem.Len())
+		// BE-048: the object and the (unattached) row are gone; the
+		// verdict is in the audit log (TestInfected_DeletedAndOwnerNotified).
+		if _, err := e.store.Get(t.Context(), id); !errors.Is(err, files.ErrNotFound) || e.mem.Len() != 0 {
+			t.Fatalf("infected: row lookup %v with %d objects", err, e.mem.Len())
 		}
 		_, err := e.svc.PresignGet(t.Context(), id, 0)
-		wantErr(t, err, files.ErrNotClean)
+		wantErr(t, err, files.ErrNotFound)
 		err = e.svc.Attach(t.Context(), actor(t, "student"), id, files.Owner{Module: "students", EntityID: uuid.NewV7(), Purpose: files.PurposeCV})
-		wantErr(t, err, files.ErrNotClean)
+		wantErr(t, err, files.ErrNotFound)
 	})
 	t.Run("scanner error keeps the file pending", func(t *testing.T) {
 		t.Parallel()

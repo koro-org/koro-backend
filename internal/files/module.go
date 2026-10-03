@@ -11,14 +11,22 @@
 //	               ∈ purpose allow-list and = declared type → row "active",
 //	               scan "pending" → file.uploaded (A); a failed check deletes the object
 //	worker         file.uploaded → read the quarantined object (SHA-256 must
-//	               still match) → Scanner (NoopScanner → "skipped" until
-//	               ClamAV, BE-048) → clean/skipped: remove the metadata
-//	               (sanitize.go: images decoded and encoded again, PDFs
-//	               rewritten) and PUT only the rewritten bytes into the MAIN
-//	               bucket with Content-Type + Content-Disposition: attachment,
-//	               delete the quarantine copy; a rewrite that fails rejects
-//	               the file (status "rejected", object deleted, never served);
-//	               infected: delete the object, never served
+//	               still match) → Scanner (FILES_SCANNER: ClamAV over clamd
+//	               INSTREAM, package clamav; or NoopScanner → "skipped") →
+//	               clean/skipped: remove the metadata (sanitize.go: images
+//	               decoded and encoded again, PDFs rewritten) and PUT only the
+//	               rewritten bytes into the MAIN bucket with Content-Type +
+//	               Content-Disposition: attachment, delete the quarantine
+//	               copy; a rewrite that fails rejects the file (status
+//	               "rejected", object deleted, never served); infected:
+//	               delete the objects, mark the row "infected", audit, then
+//	               delete the unattached row (BE-048). Both failures write
+//	               file.rejected (O): the uploader gets an in-app notice and
+//	               the owning module drops its reference. A scanner error is
+//	               no verdict: the file stays pending (fail closed) and is
+//	               scanned again (task retry, files.rescan_pending)
+//	rescan         files.rescan_skipped scans the files the no-op scanner
+//	               skipped, in batches, once a real scanner is wired
 //	download       the OWNING module checks authz, then files.PresignGet:
 //	               ≤ 5 minutes, attachment, only clean (or skipped while
 //	               FILES_SCAN_REQUIRED=false) objects of the main bucket
@@ -29,7 +37,7 @@
 // files.orphan.purge.
 //
 // What files does not do: decide who may read or attach a file (the owning
-// module does, 01 §4.2, 03 §3.6) or scan for real (BE-048).
+// module does, 01 §4.2, 03 §3.6).
 package files
 
 import (
@@ -116,10 +124,18 @@ type Deps struct {
 	Audit       AuditLogger // every row write, in its transaction
 
 	// Scanner scans uploads. nil → NoopScanner (scan_status "skipped").
+	// A scanner with a size limit (MaxBytes() int64, the ClamAV adapter)
+	// must accept MaxScanBytes.
 	Scanner Scanner
 	// ScanRequired is FILES_SCAN_REQUIRED: downloads need a clean scan.
 	// It needs a real scanner.
 	ScanRequired bool
+	// Notifier tells uploaders about rejected files (file.rejected). nil →
+	// the rejection is only logged.
+	Notifier OwnerNotifier
+	// RescanBatch is FILES_RESCAN_BATCH (files.rescan_skipped); 0 →
+	// DefaultRescanBatch.
+	RescanBatch int
 	// UploadURLTTL is FILES_UPLOAD_URL_TTL; 0 → storage.MaxPutTTL.
 	UploadURLTTL time.Duration
 	// OrphanRetention returns the files_orphan retention period
@@ -146,7 +162,17 @@ func (d *Deps) validate() error {
 		d.Scanner = NoopScanner{}
 	}
 	if d.ScanRequired && !d.Scanner.Real() {
-		errs = append(errs, fmt.Errorf("files: FILES_SCAN_REQUIRED=true needs a real scanner, got %q (ClamAV: BE-048)", d.Scanner.Name()))
+		errs = append(errs, fmt.Errorf("files: FILES_SCAN_REQUIRED=true needs a real scanner, got %q (FILES_SCANNER=clamav)", d.Scanner.Name()))
+	}
+	if l, ok := d.Scanner.(interface{ MaxBytes() int64 }); ok && l.MaxBytes() < MaxScanBytes() {
+		errs = append(errs, fmt.Errorf("files: scanner %q accepts %d bytes, uploads need %d (FILES_CLAMAV_MAX_BYTES, clamd StreamMaxLength)",
+			d.Scanner.Name(), l.MaxBytes(), MaxScanBytes()))
+	}
+	if d.RescanBatch <= 0 {
+		d.RescanBatch = DefaultRescanBatch
+	}
+	if d.RescanBatch > batchSize {
+		errs = append(errs, fmt.Errorf("files: rescan batch %d exceeds %d", d.RescanBatch, batchSize))
 	}
 	if d.UploadURLTTL <= 0 {
 		d.UploadURLTTL = storage.MaxPutTTL
@@ -181,14 +207,28 @@ func New(d Deps) (Module, error) {
 }
 
 // Subscribe registers the outbox subscriptions of files (01 §6.2):
-// file.uploaded → files.scan_file.
+// file.uploaded → files.scan_file, file.rejected → files.notify_rejected.
 func (m Module) Subscribe(r *outbox.Registry) {
 	r.Subscribe(TopicScan, ScanTaskName, m.svc.handleUploaded, outbox.Queue(queue.Default))
+	r.Subscribe(TopicRejected, NotifyRejectedTaskName, m.svc.handleRejected, outbox.Queue(queue.Default))
 }
 
 // Jobs returns the scheduled jobs of files (01 §7).
 func (m Module) Jobs() []queue.Job {
-	return []queue.Job{m.svc.orphanCleanupJob(), m.svc.rescanPendingJob()}
+	return []queue.Job{m.svc.orphanCleanupJob(), m.svc.rescanPendingJob(), m.svc.rescanSkippedJob()}
+}
+
+// MaxScanBytes is the largest object a scanner must accept: a skipped file
+// is rescanned after its metadata removal, which may grow it up to twice
+// the largest browser upload (sanitize.go maxGrowth).
+func MaxScanBytes() int64 {
+	var m int64
+	for p, r := range purposeRule {
+		if p.Uploadable() {
+			m = max(m, r.maxBytes)
+		}
+	}
+	return maxGrowth * m
 }
 
 // Tasks returns the task handlers of files (files.delete_object).

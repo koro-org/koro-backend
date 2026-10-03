@@ -93,7 +93,38 @@ services:
         done
     restart: "no"
 
+  # Virus scanner of the upload pipeline (BE-048; FILES_SCANNER=clamav,
+  # FILES_CLAMAV_ADDR=127.0.0.1:3310). The ClamAV version is pinned; the
+  # image ships a signature database that the named volume keeps, and
+  # freshclam runs inside the container to update it (FRESHCLAM_CHECKS per
+  # day). clamd needs ~1–1.5 GB of memory and up to a minute to load the
+  # database; a reload is not run beside the old engine (lower peak memory,
+  # scans wait a few seconds instead). StreamMaxLength must equal
+  # FILES_CLAMAV_MAX_BYTES. It is in the "clamav" profile, so `make deps-up`
+  # does not start it; start and stop it on demand:
+  #   docker compose -f deploy/compose.dev.yaml up -d --wait clamav
+  #   docker compose -f deploy/compose.dev.yaml --profile clamav down
+  clamav:
+    image: clamav/clamav:1.5.4-debian
+    profiles: ["clamav"]
+    environment:
+      CLAMAV_NO_MILTERD: "true"
+      FRESHCLAM_CHECKS: "12"
+      CLAMD_CONF_StreamMaxLength: 25M
+      CLAMD_CONF_ConcurrentDatabaseReload: "no"
+    ports: ["127.0.0.1:3310:3310"]
+    volumes:
+      - clamavdb:/var/lib/clamav
+    mem_limit: 3g
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 180s
+
 volumes:
   pgdata: {}
   redisdata: {}
   seaweeddata: {}
+  clamavdb: {}

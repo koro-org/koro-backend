@@ -1,0 +1,183 @@
+// Package files is the file core (01 §4.2; BE-008): file metadata, presigned
+// upload and download URLs, the per-purpose MIME/size allow-list, the virus
+// scan hook and orphan cleanup.
+//
+// Upload pipeline (05 §14.7, rapor §8.2):
+//
+//	createUpload   authz (03 k30) + allow-list → row "uploading" + presigned
+//	               PUT into the QUARANTINE bucket (server key, signed type and length)
+//	browser        PUT → quarantine bucket (the API never carries file bytes)
+//	completeUpload size ≤ limit and = declared → SHA-256 = client's → magic bytes
+//	               ∈ purpose allow-list and = declared type → row "active",
+//	               scan "pending" → file.uploaded (A); a failed check deletes the object
+//	worker         file.uploaded → Scanner (NoopScanner → "skipped" until
+//	               ClamAV, BE-048) → clean/skipped: copy to the MAIN bucket with
+//	               Content-Type + Content-Disposition: attachment, delete the
+//	               quarantine copy; infected: delete the object, never served
+//	download       the OWNING module checks authz, then files.PresignGet:
+//	               ≤ 5 minutes, attachment, only clean (or skipped while
+//	               FILES_SCAN_REQUIRED=false) objects of the main bucket
+//
+// What files does not do: decide who may read or attach a file (the owning
+// module does, 01 §4.2, 03 §3.6), clean image metadata (EXIF; see the BE-008
+// ticket notes) or scan for real (BE-048).
+package files
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"time"
+	"uuid"
+
+	"koro/internal/authz"
+	"koro/internal/platform/clock"
+	"koro/internal/platform/db"
+	"koro/internal/platform/idempotency"
+	"koro/internal/platform/outbox"
+	"koro/internal/platform/privacy"
+	"koro/internal/platform/queue"
+	"koro/internal/platform/storage"
+)
+
+// Files is the cross-module contract (01 §4.2). Consumers declare a port
+// with the methods they use; cmd/koro binds this service to it.
+type Files interface {
+	// CreateUpload starts a browser upload (createUpload): the allow-list
+	// and authz (03 k30) are checked, an "uploading" row is written and a
+	// presigned PUT into the quarantine bucket is returned.
+	CreateUpload(ctx context.Context, a authz.Actor, in UploadRequest) (Upload, error)
+	// CompleteUpload verifies the uploaded object (size, SHA-256, magic
+	// bytes; 422 on a mismatch), activates the row and queues the scan.
+	// Repeating it with the same checksum returns the current state.
+	CompleteUpload(ctx context.Context, a authz.Actor, fileID uuid.UUID, sha256 []byte) (FileMeta, error)
+	// PutGenerated stores a server-generated file (export, PDF) directly in
+	// the main bucket as active and clean. Call it outside a transaction.
+	PutGenerated(ctx context.Context, in GeneratedFile) (uuid.UUID, error)
+	// Attach binds the file to its owning record in the caller's
+	// transaction (01 §6.3 "* → files.Files.Attach"): it stops being an
+	// orphan. The caller has already checked that its actor may use the
+	// file (uploader or org, via Get). Attaching to the same owner again is
+	// a no-op; another owner is ErrAlreadyAttached.
+	Attach(ctx context.Context, fileID uuid.UUID, owner Owner) error
+	// Get returns the file's metadata or ErrNotFound.
+	Get(ctx context.Context, fileID uuid.UUID) (FileMeta, error)
+	// PresignGet returns a download URL valid for ttl (0 → 5 minutes, at
+	// most storage.MaxGetTTL) with Content-Disposition: attachment. Only an
+	// active file whose scan is clean, or skipped while FILES_SCAN_REQUIRED
+	// is false, is served (else ErrNotClean). The caller (owning module) has
+	// checked authz and writes the access audit.
+	PresignGet(ctx context.Context, fileID uuid.UUID, ttl time.Duration) (Download, error)
+	// Delete removes the row and its objects (hard delete, 02 §3.1). The
+	// owning module clears its reference first: a referenced row fails with
+	// ErrReferenced. Inside a transaction the objects are removed after the
+	// commit; an object that cannot be removed then is retried by the
+	// files.delete_object task. A missing file is not an error.
+	Delete(ctx context.Context, fileID uuid.UUID) error
+}
+
+// Service is the files service: the contract plus the HTTP-only operations.
+type Service interface {
+	Files
+	// DeleteOwn is deleteMyFile: the uploader deletes an unattached file.
+	DeleteOwn(ctx context.Context, a authz.Actor, fileID uuid.UUID) error
+}
+
+// Buckets names the two private buckets (05 §14.7).
+type Buckets struct {
+	Files      string // verified and scanned objects
+	Quarantine string // browser uploads until they are scanned
+}
+
+// Deps are the dependencies of the files module. Everything but Scanner is
+// required (New panics otherwise, 05 §3).
+type Deps struct {
+	Store       Store
+	Objects     storage.Objects
+	Tx          db.TxManager
+	Outbox      outbox.Writer       // file.uploaded (mechanism A)
+	Queue       queue.Enqueuer      // files.delete_object retries
+	Idempotency *idempotency.Keeper // optional Idempotency-Key of createUpload
+	Clock       clock.Clock
+	Log         *slog.Logger
+	Buckets     Buckets
+
+	// Scanner scans uploads. nil → NoopScanner (scan_status "skipped").
+	Scanner Scanner
+	// ScanRequired is FILES_SCAN_REQUIRED: downloads need a clean scan.
+	// It needs a real scanner.
+	ScanRequired bool
+	// UploadURLTTL is FILES_UPLOAD_URL_TTL; 0 → storage.MaxPutTTL.
+	UploadURLTTL time.Duration
+	// OrphanRetention returns the files_orphan retention period
+	// (kvkk.retention_policies, 02 §24.2). nil → DefaultOrphanRetention.
+	OrphanRetention func(ctx context.Context) (time.Duration, error)
+}
+
+func (d *Deps) validate() error {
+	var errs []error
+	for _, c := range []struct {
+		name string
+		ok   bool
+	}{
+		{"Store", d.Store != nil}, {"Objects", d.Objects != nil}, {"Tx", d.Tx != nil},
+		{"Outbox", d.Outbox != nil}, {"Queue", d.Queue != nil}, {"Idempotency", d.Idempotency != nil},
+		{"Clock", d.Clock != nil}, {"Log", d.Log != nil},
+		{"Buckets", d.Buckets.Files != "" && d.Buckets.Quarantine != "" && d.Buckets.Files != d.Buckets.Quarantine},
+	} {
+		if !c.ok {
+			errs = append(errs, fmt.Errorf("files.Deps.%s is missing or invalid", c.name))
+		}
+	}
+	if d.Scanner == nil {
+		d.Scanner = NoopScanner{}
+	}
+	if d.ScanRequired && !d.Scanner.Real() {
+		errs = append(errs, fmt.Errorf("files: FILES_SCAN_REQUIRED=true needs a real scanner, got %q (ClamAV: BE-048)", d.Scanner.Name()))
+	}
+	if d.UploadURLTTL <= 0 {
+		d.UploadURLTTL = storage.MaxPutTTL
+	}
+	if d.UploadURLTTL > storage.MaxPutTTL {
+		errs = append(errs, fmt.Errorf("files: upload URL lifetime %s exceeds %s", d.UploadURLTTL, storage.MaxPutTTL))
+	}
+	if d.OrphanRetention == nil {
+		d.OrphanRetention = func(context.Context) (time.Duration, error) { return DefaultOrphanRetention, nil }
+	}
+	return errors.Join(errs...)
+}
+
+// Module is what files hands to the composition root.
+type Module struct {
+	Service Service
+	// Privacy is the KVKK provider (the user's unattached files).
+	Privacy privacy.Provider
+
+	svc *service
+}
+
+// New builds the files module. It returns an error for invalid
+// dependencies (a missing one is a wiring bug, a scanner/flag mismatch a
+// configuration error; both stop the process at start).
+func New(d Deps) (Module, error) {
+	if err := d.validate(); err != nil {
+		return Module{}, err
+	}
+	s := &service{d: d}
+	return Module{Service: s, Privacy: privacyProvider{s: s}, svc: s}, nil
+}
+
+// Subscribe registers the outbox subscriptions of files (01 §6.2):
+// file.uploaded → files.scan_file.
+func (m Module) Subscribe(r *outbox.Registry) {
+	r.Subscribe(TopicScan, ScanTaskName, m.svc.handleUploaded, outbox.Queue(queue.Default))
+}
+
+// Jobs returns the scheduled jobs of files (01 §7).
+func (m Module) Jobs() []queue.Job {
+	return []queue.Job{m.svc.orphanCleanupJob(), m.svc.rescanPendingJob()}
+}
+
+// Tasks returns the task handlers of files (files.delete_object).
+func (m Module) Tasks() []queue.Task { return []queue.Task{m.svc.deleteObjectTask()} }

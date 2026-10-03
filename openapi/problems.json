@@ -36,6 +36,90 @@
     "type": "urn:koro:problem:csrf_rejected"
   },
   {
+    "code": "files.already_attached",
+    "status": 409,
+    "title": "File is attached to another record",
+    "type": "urn:koro:problem:files.already_attached"
+  },
+  {
+    "code": "files.attached",
+    "status": 409,
+    "title": "File is in use; delete it where it is used",
+    "type": "urn:koro:problem:files.attached"
+  },
+  {
+    "code": "files.checksum_mismatch",
+    "status": 422,
+    "title": "SHA-256 checksum does not match",
+    "type": "urn:koro:problem:files.checksum_mismatch"
+  },
+  {
+    "code": "files.content_mismatch",
+    "status": 422,
+    "title": "File content does not match an allowed type",
+    "type": "urn:koro:problem:files.content_mismatch"
+  },
+  {
+    "code": "files.invalid_upload",
+    "status": 422,
+    "title": "Upload request is invalid",
+    "type": "urn:koro:problem:files.invalid_upload"
+  },
+  {
+    "code": "files.not_active",
+    "status": 409,
+    "title": "File upload is not completed",
+    "type": "urn:koro:problem:files.not_active"
+  },
+  {
+    "code": "files.not_clean",
+    "status": 409,
+    "title": "File is not cleared by the virus scan",
+    "type": "urn:koro:problem:files.not_clean"
+  },
+  {
+    "code": "files.not_uploading",
+    "status": 409,
+    "title": "File upload is already completed",
+    "type": "urn:koro:problem:files.not_uploading"
+  },
+  {
+    "code": "files.object_missing",
+    "status": 422,
+    "title": "Uploaded object not found",
+    "type": "urn:koro:problem:files.object_missing"
+  },
+  {
+    "code": "files.purpose_mismatch",
+    "status": 422,
+    "title": "File purpose does not fit this use",
+    "type": "urn:koro:problem:files.purpose_mismatch"
+  },
+  {
+    "code": "files.referenced",
+    "status": 409,
+    "title": "File is still referenced",
+    "type": "urn:koro:problem:files.referenced"
+  },
+  {
+    "code": "files.size_mismatch",
+    "status": 422,
+    "title": "Uploaded size does not match the declared size",
+    "type": "urn:koro:problem:files.size_mismatch"
+  },
+  {
+    "code": "files.storage_unavailable",
+    "status": 503,
+    "title": "File storage is unavailable",
+    "type": "urn:koro:problem:files.storage_unavailable"
+  },
+  {
+    "code": "files.too_large",
+    "status": 422,
+    "title": "File is too large for its purpose",
+    "type": "urn:koro:problem:files.too_large"
+  },
+  {
     "code": "forbidden",
     "status": 403,
     "title": "Forbidden",

@@ -1,0 +1,133 @@
+# Authz matrix of the files module (03 §5.20, 04 §2.20; BE-008).
+# createUpload follows k30 (purpose → roles); completeUpload and
+# deleteMyFile are O cells: only the uploader sees the file (03 §3.6),
+# everyone else 404. Fixtures: fixtures/files.yaml (matrix_files_test.go).
+version: 1
+groups:
+  # signed-in users without a role in company_a (its org surface is 404).
+  outsiders_company_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                        event_staff, university_rep, other_company_member]
+  # signed-in users without a role in uni_a.
+  outsiders_uni_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                    event_staff, company_member, company_admin, other_company_member]
+  # signed-in users other than the uploader of the fixtures (student).
+  not_uploader: [user_unverified, student_minor, club_member, club_admin, other_club_admin, event_staff,
+                 university_rep, company_member, company_admin, other_company_member,
+                 moderator, support, dpo, platform_admin, finance_admin, talent_auditor]
+  # signed-in users without finance_admin.
+  not_finance: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin, event_staff,
+                university_rep, company_member, company_admin, other_company_member,
+                moderator, support, dpo, platform_admin, talent_auditor]
+
+operations:
+  createUpload:
+    method: POST
+    path: /api/v1/files/uploads
+    action: files.upload.create
+    body: bodies/files/create_cv.json
+    note: cv → verified students only (k30)
+    expect:
+      anonymous: 401
+      "@verified_students": 201
+      user_unverified: 403        # k-uv
+      university_rep: 403
+      "@companies": 403
+      "@platform_staff": 403
+    variants:
+      - name: edu_document
+        body: bodies/files/create_edu_document.json
+        note: edu_document → every signed-in user (k30)
+        expect: { anonymous: 401, "@signed_in": 201 }
+      - name: org_logo_club
+        body: bodies/files/create_org_logo_club_a.json
+        note: org_logo → S write role of the org (orgs.org.update) and platform_admin
+        expect:
+          anonymous: 401
+          "@outsiders_a": 404      # club_a org surface: not a member
+          club_member: 403
+          club_admin: 201
+          moderator: 403
+          support: 403
+          dpo: 403
+          platform_admin: 201
+          finance_admin: 403
+          talent_auditor: 403
+      - name: post_media_company
+        body: bodies/files/create_post_media_company_a.json
+        note: post_media → S poster roles (feed.post.create); platform_admin only for the platform org (k-po)
+        expect:
+          anonymous: 401
+          "@outsiders_company_a": 404
+          company_member: 201
+          company_admin: 201
+          "@platform_staff": 403
+      - name: party_document_club
+        body: bodies/files/create_party_document_club_a.json
+        note: party_document → cla/uni/cma (S), fin, pad (k30)
+        expect:
+          anonymous: 401
+          "@outsiders_a": 404
+          club_member: 403
+          club_admin: 201
+          moderator: 403
+          support: 403
+          dpo: 403
+          platform_admin: 201
+          finance_admin: 201
+          talent_auditor: 403
+      - name: transfer_receipt
+        body: bodies/files/create_transfer_receipt.json
+        note: receipts → finance_admin only (k30)
+        expect: { anonymous: 401, "@not_finance": 403, finance_admin: 201 }
+      - name: club_claim_evidence
+        body: bodies/files/create_club_claim_evidence.json
+        note: club_claim_evidence → directory.club_claim.create holders (adult verified students; Y4)
+        expect:
+          anonymous: 401
+          user_unverified: 403
+          student: 201
+          student_minor: 403
+          club_member: 201
+          club_admin: 201
+          other_club_admin: 201
+          event_staff: 201
+          university_rep: 403
+          "@companies": 403
+          "@platform_staff": 403
+      - name: invoice_pdf_university
+        body: bodies/files/create_invoice_pdf_uni_a.json
+        note: invoice_pdf → fin and billing.invoice.upload holders (S)
+        expect:
+          anonymous: 401
+          "@outsiders_uni_a": 404
+          university_rep: 201
+          moderator: 403
+          support: 403
+          dpo: 403
+          platform_admin: 403
+          finance_admin: 201
+          talent_auditor: 403
+
+  completeUpload:
+    method: POST
+    path: /api/v1/files/{file_id}/complete
+    action: files.upload.complete
+    path_params: { file_id: file_uploading }
+    body: bodies/files/complete.json
+    expect: { anonymous: 401, student: 200, "@not_uploader": 404 }
+    variants:
+      - name: missing_file
+        path_params: { file_id: "literal:00000000-0000-7000-8000-000000000001" }
+        expect: { anonymous: 401, "@signed_in": 404 }
+
+  deleteMyFile:
+    method: DELETE
+    path: /api/v1/files/{file_id}
+    action: files.file.delete_own
+    path_params: { file_id: file_unattached }
+    expect: { anonymous: 401, student: 204, "@not_uploader": 404 }
+    variants:
+      - name: attached
+        path_params: { file_id: file_attached }
+        note: an attached file is deleted where it is used → 409 files.attached (04 §2.20)
+        expect: { anonymous: 401, student: 409, "@not_uploader": 404 }

@@ -1,0 +1,32 @@
+# Multi-step scenarios of the files module (03 §7.7; BE-008).
+version: 1
+scenarios:
+  upload_complete_delete:
+    note: the full upload flow; only the uploader completes and deletes (03 §3.6)
+    steps:
+      - { persona: student, operation: createUpload, expect: 201, save: { new_file: file_id } }
+      - { hook: files.upload_object, args: { file: new_file } }
+      - { persona: student_b, operation: completeUpload, path_params: { file_id: new_file }, expect: 404, code: not_found }
+      - { persona: student, operation: completeUpload, path_params: { file_id: new_file }, expect: 200 }
+      - { persona: student, operation: completeUpload, path_params: { file_id: new_file }, expect: 200 }
+      - { persona: student_b, operation: deleteMyFile, path_params: { file_id: new_file }, expect: 404, code: not_found }
+      - { persona: student, operation: deleteMyFile, path_params: { file_id: new_file }, expect: 204 }
+      - { persona: student, operation: deleteMyFile, path_params: { file_id: new_file }, expect: 404, code: not_found }
+  complete_before_upload:
+    note: completing before the PUT is 422 files.object_missing; the upload then completes
+    steps:
+      - { persona: student, operation: createUpload, expect: 201, save: { early_file: file_id } }
+      - { persona: student, operation: completeUpload, path_params: { file_id: early_file }, expect: 422, code: files.object_missing }
+      - { hook: files.upload_object, args: { file: early_file } }
+      - { persona: student, operation: completeUpload, path_params: { file_id: early_file }, expect: 200 }
+  company_admin_needs_mfa:
+    note: org_logo for a company is a company_admin (k-mfa) grant (03 §6.4)
+    steps:
+      - { persona: company_admin, mfa: false, operation: createUpload, body: bodies/files/create_org_logo_company_a.json,
+          expect: 403, code: authz.mfa_required }
+      - { persona: company_admin, operation: createUpload, body: bodies/files/create_org_logo_company_a.json, expect: 201 }
+  minor_cannot_upload_claim_evidence:
+    note: club claim evidence needs an adult student (03 k8, Y4)
+    steps:
+      - { persona: student_minor, operation: createUpload, body: bodies/files/create_club_claim_evidence.json, expect: 403, code: forbidden }
+      - { persona: student, operation: createUpload, body: bodies/files/create_club_claim_evidence.json, expect: 201 }

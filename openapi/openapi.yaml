@@ -7,6 +7,65 @@ components:
             $ref: "#/components/schemas/Problem"
       description: RFC 9457 problem details
   schemas:
+    CompleteUploadInputBody:
+      additionalProperties: false
+      properties:
+        sha256:
+          description: Lower-case hex SHA-256 of the uploaded bytes
+          pattern: ^[0-9a-f]{64}$
+          type: string
+      required:
+        - sha256
+      type: object
+    CreateUploadInputBody:
+      additionalProperties: false
+      properties:
+        content_type:
+          description: Declared MIME type; verified by magic bytes on completion
+          enum:
+            - application/pdf
+            - image/jpeg
+            - image/png
+            - image/webp
+          type: string
+        filename:
+          description: Original file name (display only; never part of the storage key)
+          maxLength: 1024
+          minLength: 1
+          type: string
+        org_id:
+          description: Owning organisation (required for org_logo, event_cover, post_media)
+          format: uuid
+          type: string
+        purpose:
+          description: What the file is for; decides the MIME/size allow-list and who may upload (03 k30)
+          enum:
+            - avatar
+            - cv
+            - edu_document
+            - org_logo
+            - event_cover
+            - post_media
+            - club_claim_evidence
+            - party_document
+            - bank_account_evidence
+            - transfer_receipt
+            - payout_receipt
+            - refund_receipt
+            - invoice_pdf
+          type: string
+        size_bytes:
+          description: "Exact size in bytes (the purpose may allow less: avatar 5 MB)"
+          format: int64
+          maximum: 10485760
+          minimum: 1
+          type: integer
+      required:
+        - purpose
+        - filename
+        - content_type
+        - size_bytes
+      type: object
     FieldError:
       additionalProperties: false
       properties:
@@ -18,6 +77,52 @@ components:
           type: string
       required:
         - message
+      type: object
+    FileState:
+      additionalProperties: false
+      properties:
+        file_id:
+          format: uuid
+          type: string
+        scan_status:
+          enum:
+            - pending
+            - clean
+            - infected
+            - skipped
+          type: string
+        status:
+          enum:
+            - uploading
+            - active
+          type: string
+      required:
+        - file_id
+        - status
+        - scan_status
+      type: object
+    FileUpload:
+      additionalProperties: false
+      properties:
+        expires_at:
+          format: date-time
+          type: string
+        file_id:
+          format: uuid
+          type: string
+        upload_headers:
+          additionalProperties:
+            type: string
+          description: Headers the PUT must carry exactly (Content-Type)
+          type: object
+        upload_url:
+          description: Presigned PUT URL of the object storage
+          type: string
+      required:
+        - file_id
+        - upload_url
+        - upload_headers
+        - expires_at
       type: object
     Problem:
       additionalProperties: false
@@ -78,3 +183,127 @@ info:
   title: Koro API
   version: 1.0.0
 openapi: 3.1.0
+paths:
+  /api/v1/files/uploads:
+    post:
+      description: Checks the purpose's MIME/size allow-list and returns a presigned PUT URL (valid 10 minutes) for the object storage. Send exactly upload_headers with the PUT; the API never receives the file itself (04 §1.14).
+      operationId: createUpload
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUploadInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileUpload"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Start a file upload
+      tags:
+        - files
+      x-koro-action: files.upload.create
+      x-koro-idempotency: optional
+      x-koro-rate-limit: upload
+      x-koro-surface: self
+  /api/v1/files/{file_id}:
+    delete:
+      description: Deletes a file the caller uploaded and no record uses yet; an attached file is deleted where it is used (409).
+      operationId: deleteMyFile
+      parameters:
+        - description: File ID (an unknown or malformed ID is 404)
+          in: path
+          name: file_id
+          required: true
+          schema:
+            description: File ID (an unknown or malformed ID is 404)
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Delete my unattached file
+      tags:
+        - files
+      x-koro-action: files.file.delete_own
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/files/{file_id}/complete:
+    post:
+      description: Verifies the uploaded object (size, SHA-256, magic bytes; 422 on a mismatch) and queues the virus scan. Repeating it with the same sha256 returns the current state.
+      operationId: completeUpload
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: File ID (an unknown or malformed ID is 404)
+          in: path
+          name: file_id
+          required: true
+          schema:
+            description: File ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteUploadInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileState"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Complete a file upload
+      tags:
+        - files
+      x-koro-action: files.upload.complete
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: self

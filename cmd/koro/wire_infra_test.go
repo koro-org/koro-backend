@@ -47,6 +47,10 @@ func TestWire_PlatformTasksRegistered(t *testing.T) {
 	}
 	var jobs []string
 	for _, j := range c.infra.jobs.Jobs() {
+		mod, _, _ := strings.Cut(j.Name, ".")
+		if slices.ContainsFunc(c.modules(), func(m moduleEntry) bool { return m.name == mod }) {
+			continue // module jobs are pinned by wire_<module>_test.go
+		}
 		jobs = append(jobs, j.Name+" "+j.Cron+" "+j.Queue)
 	}
 	// 01 §7 rows owned by the platform.

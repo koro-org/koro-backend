@@ -1,0 +1,9 @@
+# Fixtures of the files module (cmd/koro/matrix_files_test.go). IDs are
+# authztest.ID(name); every file is uploaded by the student persona.
+# file_uploading carries the 43-byte PDF of matrixFilePDF in the quarantine
+# bucket (bodies/files/complete.json holds its SHA-256).
+version: 1
+fixtures:
+  file_uploading: { kind: file, uploaded_by: student, purpose: cv, status: uploading }
+  file_unattached: { kind: file, uploaded_by: student, purpose: cv, status: active }
+  file_attached: { kind: file, uploaded_by: student, purpose: cv, status: active, attached: true }

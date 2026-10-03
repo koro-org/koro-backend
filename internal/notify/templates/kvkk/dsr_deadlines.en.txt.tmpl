@@ -1,0 +1,5 @@
+Requests with 7 days or less left of their 30-day legal period, or past it:
+
+{{range (index .Data "items")}}- {{index . "dsr_id"}} · {{index . "type"}} · {{index . "status"}} · due {{index . "due_date"}} ({{index . "days_left"}} days)
+{{end}}
+Unanswered requests must not exceed the period of KVKK art. 13.

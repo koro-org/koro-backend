@@ -1,0 +1,54 @@
+# Multi-step scenarios of the kvkk module (03 §7.7; BE-021).
+version: 1
+scenarios:
+  dsr_erasure_needs_reauth:
+    note: an erasure request needs the re-authentication proof in the request (03 k31, §6.2)
+    steps:
+      - { persona: student, operation: createMyDataRequest, body: bodies/kvkk/create_erasure_no_reauth.json, expect: 403, code: forbidden }
+      - { persona: student, operation: createMyDataRequest, body: bodies/kvkk/create_erasure_wrong_reauth.json, expect: 403, code: forbidden }
+      - { persona: student, operation: createMyDataRequest, body: bodies/kvkk/create_erasure.json, expect: 201, save: { erasure: dsr_id } }
+      - { persona: student, operation: getMyDataRequest, path_params: { dsr_id: erasure }, expect: 200 }
+      - { persona: student, operation: createMyDataRequest, body: bodies/kvkk/create_erasure.json, expect: 409, code: kvkk.duplicate_request }
+  dsr_profiling_four_eyes:
+    note: the same DPO cannot give both approvals of a profiling report (03 §6.1)
+    steps:
+      - { persona: dpo, operation: adminCompleteDataRequest, path_params: { dsr_id: dsr_student_profiling }, expect: 409, code: kvkk.second_approval_required }
+      - { persona: dpo, operation: adminApproveDataRequest, path_params: { dsr_id: dsr_student_profiling }, expect: 200 }
+      - { persona: dpo, operation: adminApproveDataRequest, path_params: { dsr_id: dsr_student_profiling }, body: bodies/kvkk/approve_second.json, expect: 403, code: authz.four_eyes_violation }
+      - { persona: platform_admin, operation: adminGetDataRequest, path_params: { dsr_id: dsr_student_profiling }, expect: 200 }
+      - { persona: dpo_2, operation: adminApproveDataRequest, path_params: { dsr_id: dsr_student_profiling }, body: bodies/kvkk/approve_second.json, expect: 200 }
+      - { persona: platform_admin, operation: adminGetDataRequest, path_params: { dsr_id: dsr_student_profiling }, expect: 404 }
+      - { persona: dpo, operation: adminCompleteDataRequest, path_params: { dsr_id: dsr_student_profiling }, expect: 202 }
+  dsr_platform_admin_second_only:
+    note: platform_admin never gives the first approval; the request is invisible to it until then (k32)
+    steps:
+      - { persona: platform_admin, operation: adminApproveDataRequest, path_params: { dsr_id: dsr_student_profiling }, expect: 404, code: not_found }
+      - { persona: dpo, operation: adminApproveDataRequest, path_params: { dsr_id: dsr_student_profiling }, expect: 200 }
+      - { persona: platform_admin, operation: adminApproveDataRequest, path_params: { dsr_id: dsr_student_profiling }, body: bodies/kvkk/approve_second.json, expect: 200 }
+  dsr_complete_needs_reauth_and_identity:
+    note: completing is R (03 §6.2) and needs the identity check of the applicant (KVKK md. 13)
+    steps:
+      - { persona: dpo, operation: adminCompleteDataRequest, body: bodies/kvkk/complete_no_reauth.json, expect: 403, code: forbidden }
+      - { persona: dpo, operation: adminCompleteDataRequest, path_params: { dsr_id: dsr_student_unverified }, expect: 409, code: kvkk.identity_not_verified }
+      - { persona: dpo, operation: adminUpdateDataRequest, path_params: { dsr_id: dsr_student_unverified }, body: bodies/kvkk/update_verified.json, expect: 200 }
+      - { persona: dpo, operation: adminCompleteDataRequest, path_params: { dsr_id: dsr_student_unverified }, expect: 202 }
+      - { persona: dpo, operation: adminRejectDataRequest, path_params: { dsr_id: dsr_student_unverified }, expect: 409, code: kvkk.invalid_state }
+  dsr_update_needs_if_match:
+    note: adminUpdateDataRequest is optimistic (04 §1.13)
+    steps:
+      - { persona: dpo, operation: adminUpdateDataRequest, headers: { If-Match: "" }, expect: 428, code: precondition_required }
+      - { persona: dpo, operation: adminUpdateDataRequest, expect: 200 }
+      - { persona: dpo, operation: adminUpdateDataRequest, expect: 412, code: precondition_failed }
+  dsr_cancel_only_before_work:
+    note: the subject withdraws a request only while it is received or under identity check
+    steps:
+      - { persona: student, operation: cancelMyDataRequest, path_params: { dsr_id: dsr_student_rectify }, expect: 409, code: kvkk.invalid_state }
+      - { persona: student, operation: cancelMyDataRequest, expect: 200 }
+      - { persona: student, operation: cancelMyDataRequest, expect: 409, code: kvkk.invalid_state }
+  dsr_export_download:
+    note: only the subject (and dpo on the admin surface) gets the short-lived link
+    steps:
+      - { persona: student, operation: downloadMyDataExport, expect: 200 }
+      - { persona: student_b, operation: downloadMyDataExport, expect: 404, code: not_found }
+      - { persona: student, operation: downloadMyDataExport, path_params: { dsr_id: dsr_student_open }, expect: 404, code: kvkk.export_not_ready }
+      - { persona: dpo, operation: adminDownloadDataExport, expect: 200 }

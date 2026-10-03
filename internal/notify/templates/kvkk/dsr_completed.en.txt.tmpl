@@ -1,0 +1,6 @@
+Hello{{with .Data.name}} {{.}}{{end}},
+
+Your personal data request {{index .Data "dsr_id"}} was answered.
+{{with (index .Data "outcome")}}{{if eq . "export"}}A copy of your personal data is ready. Download it within 7 days from My account > Data requests in the Koro app.{{else if eq . "erased"}}Your account was deleted: your personal data was deleted or anonymised and every session was closed. Records the law requires us to keep are destroyed at the end of their period.{{else if eq . "rejected"}}Your request was rejected with a reason. You can read the reason under My account > Data requests in the Koro app.{{else}}You can read the answer under My account > Data requests in the Koro app.{{end}}{{end}}
+
+If you find the answer insufficient you may complain to the Personal Data Protection Board (KVKK art. 14).

@@ -1,0 +1,111 @@
+# Table → KVKK provider map (01 §3.3, T-92; BE-021). TestEveryPersonalTableHasProvider
+# reads it together with every CREATE TABLE of db/migrations:
+#
+#   <table>  <class>  <owner module>  <coverage>
+#
+# class     personal | special (KVKK md. 6) | staff (only staff/author user references,
+#           02 §0.6 "yok") | none (02 §0.6 "yok")
+# coverage  provider:<name>    a registered privacy.Provider exports and erases the table
+#           todo:BE-NNN        the module has no code yet; its ticket registers the provider
+#           exempt:<reason>    personal but deliberately outside every provider (≥ 20 characters)
+#           -                  staff/none tables
+#
+# A new table without a line, a personal table without coverage, a provider name that is
+# not registered, or a table with a user column classified none fails the test. A module
+# ticket that adds its provider turns its todo lines into provider lines.
+
+# platform (operational, short retention swept by the platform jobs)
+outbox                      personal  platform      exempt:payload holds IDs only; deleted 7 days after publication (outbox_published)
+webhook_inbox               personal  platform      exempt:provider payloads; nulled after 90 days, rows deleted after 2 years (webhook_payload/row)
+idempotency_keys            personal  platform      exempt:stored responses expire after 24 hours (idempotency)
+# audit (append-only hash chain: rows keep the tombstone UUID, never erased)
+audit_events                personal  audit         exempt:append-only hash chain; actor stays the tombstone UUID, purged after 2 years (audit_events)
+audit_daily_roots           none      audit         -
+# files
+files                       personal  files         provider:files
+# consent
+consent_purposes            none      consent       -
+notice_versions             staff     consent       -
+consents                    personal  consent       provider:consent
+iys_submissions             personal  consent       provider:consent
+# identity
+users                       personal  identity      provider:identity
+sessions                    personal  identity      provider:identity
+email_tokens                personal  identity      provider:identity
+platform_role_assignments   personal  identity      provider:identity
+edu_verifications           personal  identity      todo:BE-018
+mfa_totp                    personal  identity      todo:BE-016
+mfa_recovery_codes          personal  identity      todo:BE-016
+# notify
+notification_deliveries     personal  notify        provider:notify
+email_suppressions          personal  notify        provider:notify
+push_tokens                 personal  notify        provider:notify
+in_app_notifications        personal  notify        provider:notify
+notification_preferences    personal  notify        provider:notify
+# orgs
+organizations               staff     orgs          -
+companies                   none      orgs          -
+# orgs (BE-017 provider exports memberships; their erasure lands with the membership lifecycle, BE-019)
+org_members                 special   orgs          provider:orgs
+org_invitations             personal  orgs          todo:BE-019
+# directory
+universities                none      directory     -
+university_email_domains    staff     directory     -
+faculties                   none      directory     -
+departments                 none      directory     -
+clubs                       staff     directory     -
+club_claims                 personal  directory     todo:BE-022
+skills                      none      directory     -
+# students
+student_profiles            personal  students      todo:BE-023
+student_privacy_settings    personal  students      todo:BE-023
+student_skills              personal  students      todo:BE-023
+student_experiences         personal  students      todo:BE-023
+student_languages           personal  students      todo:BE-023
+student_cvs                 personal  students      todo:BE-025
+profile_access_grants       personal  students      todo:BE-046
+# entitlements (code merged without a provider: see the BE-021 ticket note)
+entitlements                staff     entitlements  -
+entitlement_usages          personal  entitlements  todo:BE-057
+# events
+events                      staff     events        -
+event_staff                 personal  events        todo:BE-024
+event_forms                 staff     events        -
+event_form_versions         staff     events        -
+form_lint_rules             staff     events        -
+event_registrations         special   events        todo:BE-028
+registration_tickets        personal  events        todo:BE-028
+event_checkins              personal  events        todo:BE-031
+event_data_exports          personal  events        todo:BE-050
+# feed
+feed_org_settings           staff     feed          -
+posts                       personal  feed          todo:BE-027
+post_media                  none      feed          -
+post_reactions              personal  feed          todo:BE-029
+post_saves                  personal  feed          todo:BE-029
+post_hides                  personal  feed          todo:BE-029
+org_follows                 personal  feed          todo:BE-029
+org_mutes                   personal  feed          todo:BE-029
+content_reports             personal  feed          todo:BE-032
+moderation_actions          personal  feed          todo:BE-032
+# outreach
+segments                    staff     outreach      -
+outreach_dispatches         staff     outreach      -
+# messaging
+contact_requests            personal  messaging     todo:BE-056
+contact_blocks              personal  messaging     todo:BE-056
+# talent (profiling data)
+talent.config_versions      staff     talent        -
+talent.signal_defs          staff     talent        -
+talent.point_events         personal  talent        todo:BE-047
+talent.daily_counters       personal  talent        todo:BE-047
+talent.cohorts              personal  talent        todo:BE-052
+talent.scores               personal  talent        todo:BE-052
+talent.score_runs           none      talent        -
+talent.neutralizations      personal  talent        todo:BE-047
+# kvkk
+data_subject_requests       personal  kvkk          provider:kvkk
+retention_policies          staff     kvkk          -
+destruction_logs            none      kvkk          -
+breach_incidents            personal  kvkk          todo:BE-049
+subprocessors               none      kvkk          -

@@ -1,0 +1,148 @@
+# Authz matrix of the kvkk module, data subject requests (03 §5.22, 04 §2.22; BE-021).
+# 13 operations × 18 personas. /me operations are O cells for every signed-in user:
+# the requests of fixtures/kvkk.yaml belong to student, so everyone else gets 404 on
+# them (IDOR). The /admin surface answers 403 before reading (03 §7.2-3); dpo ✓,
+# platform_admin only on list/read of requests awaiting the second approval and on
+# the second approval itself (03 k32). dpo and platform_admin sessions are MFA
+# verified (03 §7.3). R (erasure create, complete), four eyes, If-Match and k32 are
+# pinned in scenarios/kvkk.yaml and the policy test.
+version: 1
+groups:
+  no_platform_role: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                     event_staff, university_rep, company_member, company_admin, other_company_member]
+  not_student: [user_unverified, student_minor, club_member, club_admin, other_club_admin, event_staff,
+                university_rep, company_member, company_admin, other_company_member,
+                moderator, support, dpo, platform_admin, finance_admin, talent_auditor]
+  staff_without_dsr: [moderator, support, finance_admin, talent_auditor]
+
+operations:
+  createMyDataRequest:
+    method: POST
+    path: /api/v1/me/data-requests
+    action: kvkk.dsr.create
+    body: bodies/kvkk/create_info.json
+    expect: { anonymous: 401, "@signed_in": 201 }
+    variants:
+      - name: erasure
+        body: bodies/kvkk/create_erasure.json
+        note: an erasure request carries the re-authentication proof (03 k31)
+        expect: { anonymous: 401, "@signed_in": 201 }
+      - name: erasure_without_reauth
+        body: bodies/kvkk/create_erasure_no_reauth.json
+        note: without the proof every erasure request is refused (03 §6.2)
+        expect: { anonymous: 401, "@signed_in": 403 }
+
+  listMyDataRequests:
+    method: GET
+    path: /api/v1/me/data-requests
+    action: kvkk.dsr.list_own
+    expect: { anonymous: 401, "@signed_in": 200 }
+
+  getMyDataRequest:
+    method: GET
+    path: /api/v1/me/data-requests/{dsr_id}
+    action: kvkk.dsr.read_own
+    path_params: { dsr_id: dsr_student_open }
+    note: another user's request is 404, staff included
+    expect: { anonymous: 401, student: 200, "@not_student": 404 }
+
+  cancelMyDataRequest:
+    method: POST
+    path: /api/v1/me/data-requests/{dsr_id}/cancel
+    action: kvkk.dsr.cancel_own
+    path_params: { dsr_id: dsr_student_open }
+    expect: { anonymous: 401, student: 200, "@not_student": 404 }
+
+  downloadMyDataExport:
+    method: GET
+    path: /api/v1/me/data-requests/{dsr_id}/export
+    action: kvkk.dsr.export_download
+    path_params: { dsr_id: dsr_student_export }
+    expect: { anonymous: 401, student: 200, "@not_student": 404 }
+
+  adminListDataRequests:
+    method: GET
+    path: /api/v1/admin/data-requests
+    action: kvkk.dsr.list
+    note: platform_admin sees the awaiting_second_approval requests only (k32)
+    expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 200, platform_admin: 200 }
+
+  adminGetDataRequest:
+    method: GET
+    path: /api/v1/admin/data-requests/{dsr_id}
+    action: kvkk.dsr.read
+    path_params: { dsr_id: dsr_student_open }
+    note: platform_admin does not see a request that is not awaiting the second approval (k32)
+    expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 200, platform_admin: 404 }
+    variants:
+      - name: awaiting_second_approval
+        path_params: { dsr_id: dsr_student_awaiting }
+        expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 200, platform_admin: 200 }
+      - name: missing
+        path_params: { dsr_id: "literal:00000000-0000-7000-8000-0000000000d1" }
+        note: the admin surface answers 403 before reading; staff learn the request does not exist
+        expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 404, platform_admin: 404 }
+
+  adminCreateDataRequest:
+    method: POST
+    path: /api/v1/admin/data-requests
+    action: kvkk.dsr.create_admin
+    body: bodies/kvkk/admin_create.json
+    expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 201, platform_admin: 403 }
+
+  adminUpdateDataRequest:
+    method: PATCH
+    path: /api/v1/admin/data-requests/{dsr_id}
+    action: kvkk.dsr.update
+    path_params: { dsr_id: dsr_student_open }
+    headers: { If-Match: "\"DDNFR4TI7YAAA\"" }
+    body: bodies/kvkk/update_in_progress.json
+    expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 200, platform_admin: 403 }
+
+  adminApproveDataRequest:
+    method: POST
+    path: /api/v1/admin/data-requests/{dsr_id}/approve
+    action: kvkk.dsr.approve
+    path_params: { dsr_id: dsr_student_profiling }
+    body: bodies/kvkk/approve_first.json
+    note: platform_admin never gives the first approval; it does not even see a request before it (k32 → 404)
+    expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 200, platform_admin: 404 }
+    variants:
+      - name: second
+        path_params: { dsr_id: dsr_student_awaiting }
+        body: bodies/kvkk/approve_second.json
+        note: the first approver is dpo_2; dpo and platform_admin may give the second approval
+        expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 200, platform_admin: 200 }
+
+  adminCompleteDataRequest:
+    method: POST
+    path: /api/v1/admin/data-requests/{dsr_id}/complete
+    action: kvkk.dsr.complete
+    path_params: { dsr_id: dsr_student_rectify }
+    body: bodies/kvkk/complete.json
+    expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 202, platform_admin: 403 }
+
+  adminRejectDataRequest:
+    method: POST
+    path: /api/v1/admin/data-requests/{dsr_id}/reject
+    action: kvkk.dsr.reject
+    path_params: { dsr_id: dsr_student_open }
+    body: bodies/kvkk/reject.json
+    expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 200, platform_admin: 403 }
+
+  adminDownloadDataExport:
+    method: GET
+    path: /api/v1/admin/data-requests/{dsr_id}/export
+    action: kvkk.dsr.export_download
+    path_params: { dsr_id: dsr_student_export }
+    expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 200, platform_admin: 403 }
+
+# Retention, destruction log, breach and subprocessor operations: kvkk-2 (BE-049).
+pending_actions:
+  - kvkk.retention_policy.list
+  - kvkk.retention_policy.update
+  - kvkk.destruction_log.list
+  - kvkk.breach.list
+  - kvkk.breach.manage
+  - kvkk.subprocessor.list
+  - kvkk.subprocessor.manage

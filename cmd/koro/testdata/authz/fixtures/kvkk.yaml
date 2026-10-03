@@ -1,0 +1,12 @@
+# Fixtures of the kvkk module (cmd/koro/matrix_kvkk_test.go). IDs are
+# authztest.ID(name). Every request belongs to the student persona and was
+# received at 2026-10-01T08:00:00Z (its ETag is "DDNFR4TI7YAAA", the
+# If-Match of adminUpdateDataRequest). verified: identity checked.
+version: 1
+fixtures:
+  dsr_student_open: { kind: dsr, owner: student, type: access, status: received, verified: true }
+  dsr_student_export: { kind: dsr, owner: student, type: export, status: completed, verified: true, export_file: true }
+  dsr_student_profiling: { kind: dsr, owner: student, type: profiling_access, status: received, verified: true }
+  dsr_student_awaiting: { kind: dsr, owner: student, type: profiling_access, status: awaiting_second_approval, verified: true, first_approver: dpo_2 }
+  dsr_student_rectify: { kind: dsr, owner: student, type: rectification, status: in_progress, verified: true }
+  dsr_student_unverified: { kind: dsr, owner: student, type: objection, status: received, verified: false }

@@ -1,0 +1,5 @@
+30 günlük yasal süresine 7 gün veya daha az kalan ya da süresi geçmiş başvurular:
+
+{{range (index .Data "items")}}- {{index . "dsr_id"}} · {{index . "type"}} · {{index . "status"}} · son tarih {{index . "due_date"}} ({{index . "days_left"}} gün)
+{{end}}
+Yanıtlanmamış başvurular KVKK md. 13 süresini aşmamalıdır.

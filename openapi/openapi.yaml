@@ -10,6 +10,47 @@ components:
     AcceptedOutputBody:
       additionalProperties: false
       type: object
+    AdminCreateInputBody:
+      additionalProperties: false
+      properties:
+        channel:
+          enum:
+            - email
+            - post
+            - kep
+            - in_person
+          type: string
+        details:
+          maxLength: 4000
+          type: string
+        requester_email:
+          description: Applicant without an account (mandatory then)
+          maxLength: 254
+          type: string
+        requester_name:
+          description: Applicant without an account
+          maxLength: 200
+          type: string
+        type:
+          enum:
+            - access
+            - export
+            - rectification
+            - erasure
+            - restriction
+            - objection
+            - profiling_access
+            - profiling_objection
+            - info
+          type: string
+        user_id:
+          description: Account of the applicant, if any
+          format: uuid
+          type: string
+      required:
+        - type
+        - channel
+      type: object
     AdminGrantInputBody:
       additionalProperties: false
       properties:
@@ -130,6 +171,38 @@ components:
           type: string
       required:
         - reason
+      type: object
+    AdminUpdateInputBody:
+      additionalProperties: false
+      properties:
+        assigned_to:
+          description: The DPO handling the request
+          format: uuid
+          type: string
+        identity_verified_at:
+          description: When the applicant's identity was verified
+          format: date-time
+          type: string
+        response_summary:
+          description: Draft of the answer
+          maxLength: 4000
+          type: string
+        status:
+          enum:
+            - identity_check
+            - in_progress
+          type: string
+      type: object
+    ApproveInputBody:
+      additionalProperties: false
+      properties:
+        stage:
+          enum:
+            - first
+            - second
+          type: string
+      required:
+        - stage
       type: object
     AuditActorDTO:
       additionalProperties: false
@@ -252,6 +325,20 @@ components:
           type: string
         size_band:
           type: string
+      type: object
+    CompleteInputBody:
+      additionalProperties: false
+      properties:
+        reauth:
+          $ref: "#/components/schemas/DsrReauthDTO"
+          description: Re-authentication proof (03 §6.2)
+        response_summary:
+          description: The answer to the applicant
+          maxLength: 4000
+          minLength: 1
+          type: string
+      required:
+        - response_summary
       type: object
     CompleteUploadInputBody:
       additionalProperties: false
@@ -430,6 +517,31 @@ components:
         - sector_code
         - size_band
       type: object
+    CreateMineInputBody:
+      additionalProperties: false
+      properties:
+        details:
+          description: Free text of the application (optional)
+          maxLength: 4000
+          type: string
+        reauth:
+          $ref: "#/components/schemas/DsrReauthDTO"
+          description: Re-authentication proof; mandatory for erasure (03 k31)
+        type:
+          enum:
+            - access
+            - export
+            - rectification
+            - erasure
+            - restriction
+            - objection
+            - profiling_access
+            - profiling_objection
+            - info
+          type: string
+      required:
+        - type
+      type: object
     CreateNoticeInputBody:
       additionalProperties: false
       properties:
@@ -562,6 +674,227 @@ components:
         items:
           items:
             $ref: "#/components/schemas/DeliveryDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
+    DsrAdminDTO:
+      additionalProperties: false
+      properties:
+        assigned_to:
+          format: uuid
+          type: string
+        channel:
+          enum:
+            - in_app
+            - email
+            - post
+            - kep
+            - in_person
+          type: string
+        completed_at:
+          format: date-time
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        days_left:
+          description: "Whole days until due_at (≤ 0: overdue)"
+          format: int64
+          type: integer
+        details:
+          type: string
+        dsr_id:
+          format: uuid
+          type: string
+        due_at:
+          format: date-time
+          type: string
+        export_available:
+          type: boolean
+        first_approver:
+          format: uuid
+          type: string
+        identity_verified_at:
+          format: date-time
+          type: string
+        received_at:
+          format: date-time
+          type: string
+        rejection_reason:
+          type: string
+        requester_email:
+          type: string
+        requester_name:
+          type: string
+        response_summary:
+          type: string
+        second_approver:
+          format: uuid
+          type: string
+        status:
+          enum:
+            - received
+            - identity_check
+            - in_progress
+            - awaiting_second_approval
+            - completed
+            - rejected
+            - cancelled
+          type: string
+        type:
+          enum:
+            - access
+            - export
+            - rectification
+            - erasure
+            - restriction
+            - objection
+            - profiling_access
+            - profiling_objection
+            - info
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+        user_id:
+          description: Absent for an applicant without an account
+          format: uuid
+          type: string
+      required:
+        - dsr_id
+        - type
+        - channel
+        - status
+        - received_at
+        - due_at
+        - days_left
+        - export_available
+        - created_at
+        - updated_at
+      type: object
+    DsrAdminList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/DsrAdminDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
+    DsrReauthDTO:
+      additionalProperties: false
+      properties:
+        password:
+          description: Account password (account without MFA)
+          maxLength: 1024
+          type: string
+        totp_code:
+          description: Current TOTP code (account with MFA; recovery codes are not accepted)
+          pattern: ^[0-9]{6}$
+          type: string
+      type: object
+    DsrSelfDTO:
+      additionalProperties: false
+      properties:
+        dsr_id:
+          format: uuid
+          type: string
+        due_at:
+          description: "Legal answer deadline: received_at + 30 days (KVKK md. 13)"
+          format: date-time
+          type: string
+        received_at:
+          format: date-time
+          type: string
+        status:
+          enum:
+            - received
+            - identity_check
+            - in_progress
+            - awaiting_second_approval
+            - completed
+            - rejected
+            - cancelled
+          type: string
+        type:
+          enum:
+            - access
+            - export
+            - rectification
+            - erasure
+            - restriction
+            - objection
+            - profiling_access
+            - profiling_objection
+            - info
+          type: string
+      required:
+        - dsr_id
+        - type
+        - status
+        - received_at
+        - due_at
+      type: object
+    DsrSelfDetailDTO:
+      additionalProperties: false
+      properties:
+        dsr_id:
+          format: uuid
+          type: string
+        due_at:
+          description: "Legal answer deadline: received_at + 30 days (KVKK md. 13)"
+          format: date-time
+          type: string
+        received_at:
+          format: date-time
+          type: string
+        rejection_reason:
+          description: Reason of a rejected request (KVKK md. 13)
+          type: string
+        response_summary:
+          description: The DPO's answer (and, after an erasure, its report)
+          type: string
+        status:
+          enum:
+            - received
+            - identity_check
+            - in_progress
+            - awaiting_second_approval
+            - completed
+            - rejected
+            - cancelled
+          type: string
+        type:
+          enum:
+            - access
+            - export
+            - rectification
+            - erasure
+            - restriction
+            - objection
+            - profiling_access
+            - profiling_objection
+            - info
+          type: string
+      required:
+        - dsr_id
+        - type
+        - status
+        - received_at
+        - due_at
+      type: object
+    DsrSelfList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/DsrSelfDTO"
           type: array
         next_cursor:
           type: string
@@ -1443,6 +1776,16 @@ components:
         - platform
         - token
       type: object
+    RejectInputBody:
+      additionalProperties: false
+      properties:
+        rejection_reason:
+          maxLength: 1000
+          minLength: 1
+          type: string
+      required:
+        - rejection_reason
+      type: object
     ResetConfirmInputBody:
       additionalProperties: false
       properties:
@@ -1579,6 +1922,19 @@ components:
         user_id:
           format: uuid
           type: string
+      type: object
+    SignedURLDTO:
+      additionalProperties: false
+      properties:
+        expires_at:
+          format: date-time
+          type: string
+        url:
+          format: uri
+          type: string
+      required:
+        - url
+        - expires_at
       type: object
     SourceOrgDTO:
       additionalProperties: false
@@ -2066,6 +2422,443 @@ paths:
       x-koro-action: consent.purpose.manage
       x-koro-rate-limit: reauth
       x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/data-requests:
+    get:
+      description: Soonest deadline first. platform_admin sees only requests awaiting the second approval (03 k32).
+      operationId: adminListDataRequests
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - explode: false
+          in: query
+          name: status
+          schema:
+            enum:
+              - received
+              - identity_check
+              - in_progress
+              - awaiting_second_approval
+              - completed
+              - rejected
+              - cancelled
+            type: string
+        - explode: false
+          in: query
+          name: type
+          schema:
+            enum:
+              - access
+              - export
+              - rectification
+              - erasure
+              - restriction
+              - objection
+              - profiling_access
+              - profiling_objection
+              - info
+            type: string
+        - description: Only requests due before this instant
+          explode: false
+          in: query
+          name: due_before
+          schema:
+            description: Only requests due before this instant
+            format: date-time
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DsrAdminList"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the data subject request queue
+      tags:
+        - kvkk
+      x-koro-action: kvkk.dsr.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+    post:
+      description: user_id for an account holder, requester_email (and requester_name) otherwise. The identity check is recorded with adminUpdateDataRequest before the request can be completed.
+      operationId: adminCreateDataRequest
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCreateInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DsrAdminDTO"
+          description: Created
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Record a postal, KEP, e-mail or in-person application
+      tags:
+        - kvkk
+      x-koro-action: kvkk.dsr.create_admin
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/data-requests/{dsr_id}:
+    get:
+      description: The ETag is the If-Match of adminUpdateDataRequest.
+      operationId: adminGetDataRequest
+      parameters:
+        - description: Request ID (an unknown or malformed ID is 404)
+          in: path
+          name: dsr_id
+          required: true
+          schema:
+            description: Request ID (an unknown or malformed ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DsrAdminDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a data subject request
+      tags:
+        - kvkk
+      x-koro-action: kvkk.dsr.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+    patch:
+      operationId: adminUpdateDataRequest
+      parameters:
+        - description: Request ID (an unknown or malformed ID is 404)
+          in: path
+          name: dsr_id
+          required: true
+          schema:
+            description: Request ID (an unknown or malformed ID is 404)
+            type: string
+        - description: ETag of adminGetDataRequest (428 without, 412 when stale)
+          in: header
+          name: If-Match
+          schema:
+            description: ETag of adminGetDataRequest (428 without, 412 when stale)
+            maxLength: 100
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUpdateInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DsrAdminDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Assign, record the identity check, set the working status or draft the answer
+      tags:
+        - kvkk
+      x-koro-action: kvkk.dsr.update
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/data-requests/{dsr_id}/approve:
+    post:
+      description: profiling_access only. The second approver must differ from the first (403 authz.four_eyes_violation); platform_admin may give the second approval only.
+      operationId: adminApproveDataRequest
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Request ID (an unknown or malformed ID is 404)
+          in: path
+          name: dsr_id
+          required: true
+          schema:
+            description: Request ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApproveInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DsrAdminDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Approve the release of a profiling report
+      tags:
+        - kvkk
+      x-koro-action: kvkk.dsr.approve
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/data-requests/{dsr_id}/complete:
+    post:
+      description: "Re-authentication required. Queues what the answer sets in motion: the data export (access, export, profiling_access) or the account erasure; the applicant is notified when it is done."
+      operationId: adminCompleteDataRequest
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Request ID (an unknown or malformed ID is 404)
+          in: path
+          name: dsr_id
+          required: true
+          schema:
+            description: Request ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteInputBody"
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DsrAdminDTO"
+          description: Accepted
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Answer and close a data subject request
+      tags:
+        - kvkk
+      x-koro-action: kvkk.dsr.complete
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/data-requests/{dsr_id}/export:
+    get:
+      description: A presigned URL valid for at most 5 minutes; audited.
+      operationId: adminDownloadDataExport
+      parameters:
+        - description: Request ID (an unknown or malformed ID is 404)
+          in: path
+          name: dsr_id
+          required: true
+          schema:
+            description: Request ID (an unknown or malformed ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignedURLDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a download link of a data export
+      tags:
+        - kvkk
+      x-koro-action: kvkk.dsr.export_download
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+  /api/v1/admin/data-requests/{dsr_id}/reject:
+    post:
+      operationId: adminRejectDataRequest
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Request ID (an unknown or malformed ID is 404)
+          in: path
+          name: dsr_id
+          required: true
+          schema:
+            description: Request ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RejectInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DsrAdminDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Reject a data subject request with a reason
+      tags:
+        - kvkk
+      x-koro-action: kvkk.dsr.reject
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
       x-koro-surface: admin
   /api/v1/admin/email-suppressions:
     get:
@@ -3342,6 +4135,225 @@ paths:
       x-koro-action: consent.record.create
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/me/data-requests:
+    get:
+      operationId: listMyDataRequests
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DsrSelfList"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List my data subject requests
+      tags:
+        - kvkk
+      x-koro-action: kvkk.dsr.list_own
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
+    post:
+      description: KVKK md. 11 application. The answer is due within 30 days (due_at). An erasure (account deletion) request needs the re-authentication proof in reauth (403 identity.reauth_required otherwise). One open request per type (409 kvkk.duplicate_request).
+      operationId: createMyDataRequest
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMineInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DsrSelfDTO"
+          description: Created
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Submit a data subject request
+      tags:
+        - kvkk
+      x-koro-action: kvkk.dsr.create
+      x-koro-idempotency: optional
+      x-koro-rate-limit: export
+      x-koro-reauth: true
+      x-koro-surface: self
+  /api/v1/me/data-requests/{dsr_id}:
+    get:
+      operationId: getMyDataRequest
+      parameters:
+        - description: Request ID (an unknown, malformed or foreign ID is 404)
+          in: path
+          name: dsr_id
+          required: true
+          schema:
+            description: Request ID (an unknown, malformed or foreign ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DsrSelfDetailDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get my data subject request and its answer
+      tags:
+        - kvkk
+      x-koro-action: kvkk.dsr.read_own
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
+  /api/v1/me/data-requests/{dsr_id}/cancel:
+    post:
+      description: Only while the request is received or under identity check (409 kvkk.invalid_state otherwise).
+      operationId: cancelMyDataRequest
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Request ID (an unknown, malformed or foreign ID is 404)
+          in: path
+          name: dsr_id
+          required: true
+          schema:
+            description: Request ID (an unknown, malformed or foreign ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DsrSelfDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Withdraw my data subject request
+      tags:
+        - kvkk
+      x-koro-action: kvkk.dsr.cancel_own
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/me/data-requests/{dsr_id}/export:
+    get:
+      description: A presigned URL valid for at most 5 minutes; every call is audited. The file is deleted 7 days after the request was answered (410 kvkk.export_expired); 404 kvkk.export_not_ready while it is built.
+      operationId: downloadMyDataExport
+      parameters:
+        - description: Request ID (an unknown, malformed or foreign ID is 404)
+          in: path
+          name: dsr_id
+          required: true
+          schema:
+            description: Request ID (an unknown, malformed or foreign ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignedURLDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a download link of my data export
+      tags:
+        - kvkk
+      x-koro-action: kvkk.dsr.export_download
+      x-koro-rate-limit: read_default
       x-koro-surface: self
   /api/v1/me/email-change:
     post:

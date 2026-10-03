@@ -1,0 +1,3 @@
+<p style="margin:0 0 12px 0;">30 günlük yasal süresine 7 gün veya daha az kalan ya da süresi geçmiş başvurular:</p>
+<ul style="margin:0 0 12px 0;">{{range (index .Data "items")}}<li>{{index . "dsr_id"}} · {{index . "type"}} · {{index . "status"}} · son tarih {{index . "due_date"}} ({{index . "days_left"}} gün)</li>{{end}}</ul>
+<p style="margin:0;">Yanıtlanmamış başvurular KVKK md. 13 süresini aşmamalıdır.</p>

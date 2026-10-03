@@ -1,0 +1,6 @@
+Merhaba{{with .Data.name}} {{.}}{{end}},
+
+{{index .Data "dsr_id"}} numaralı kişisel veri başvurunuz yanıtlandı.
+{{with (index .Data "outcome")}}{{if eq . "export"}}Kişisel verilerinizin kopyası hazırlandı. Koro uygulamasında Hesabım > Veri başvurularım bölümünden 7 gün içinde indirebilirsiniz.{{else if eq . "erased"}}Hesabınız silindi: kişisel verileriniz silindi veya anonimleştirildi ve tüm oturumlarınız kapatıldı. Kanuni yükümlülük gereği saklanması gereken kayıtlar süreleri sonunda imha edilir.{{else if eq . "rejected"}}Başvurunuz gerekçeli olarak reddedildi. Gerekçeyi Koro uygulamasında Hesabım > Veri başvurularım bölümünde görebilirsiniz.{{else}}Yanıtı Koro uygulamasında Hesabım > Veri başvurularım bölümünde görebilirsiniz.{{end}}{{end}}
+
+Yanıtı yetersiz bulursanız Kişisel Verileri Koruma Kurulu'na şikâyet hakkınız vardır (KVKK md. 14).

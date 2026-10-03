@@ -438,6 +438,72 @@
     "type": "urn:koro:problem:internal_error"
   },
   {
+    "code": "kvkk.approval_not_applicable",
+    "status": 409,
+    "title": "This request type takes no approval",
+    "type": "urn:koro:problem:kvkk.approval_not_applicable"
+  },
+  {
+    "code": "kvkk.duplicate_request",
+    "status": 409,
+    "title": "An open request of this type exists",
+    "type": "urn:koro:problem:kvkk.duplicate_request"
+  },
+  {
+    "code": "kvkk.export_expired",
+    "status": 410,
+    "title": "The export file has expired",
+    "type": "urn:koro:problem:kvkk.export_expired"
+  },
+  {
+    "code": "kvkk.export_not_ready",
+    "status": 404,
+    "title": "No export file for this request",
+    "type": "urn:koro:problem:kvkk.export_not_ready"
+  },
+  {
+    "code": "kvkk.identity_not_verified",
+    "status": 409,
+    "title": "Applicant identity is not verified",
+    "type": "urn:koro:problem:kvkk.identity_not_verified"
+  },
+  {
+    "code": "kvkk.invalid_request",
+    "status": 422,
+    "title": "Request is invalid",
+    "type": "urn:koro:problem:kvkk.invalid_request"
+  },
+  {
+    "code": "kvkk.invalid_state",
+    "status": 409,
+    "title": "Request is not in a state that allows this",
+    "type": "urn:koro:problem:kvkk.invalid_state"
+  },
+  {
+    "code": "kvkk.own_request",
+    "status": 403,
+    "title": "Staff cannot handle their own request",
+    "type": "urn:koro:problem:kvkk.own_request"
+  },
+  {
+    "code": "kvkk.reauth_unavailable",
+    "status": 503,
+    "title": "Re-authentication is not available",
+    "type": "urn:koro:problem:kvkk.reauth_unavailable"
+  },
+  {
+    "code": "kvkk.second_approval_required",
+    "status": 409,
+    "title": "A second approval is required",
+    "type": "urn:koro:problem:kvkk.second_approval_required"
+  },
+  {
+    "code": "kvkk.unknown_user",
+    "status": 422,
+    "title": "Unknown user",
+    "type": "urn:koro:problem:kvkk.unknown_user"
+  },
+  {
     "code": "method_not_allowed",
     "status": 405,
     "title": "Method not allowed",

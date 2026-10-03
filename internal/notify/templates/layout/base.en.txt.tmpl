@@ -1,0 +1,8 @@
+{{template "content" .}}
+
+--
+{{if eq .Category "commercial" -}}
+This is a commercial electronic message sent by {{.AppName}} based on the consent you gave. If you do not want to receive such messages, you can unsubscribe here: {{.UnsubscribeURL}}
+{{- else -}}
+This e-mail is an informational message about your {{.AppName}} account and the actions you requested; it is not a commercial electronic message.
+{{- end}}

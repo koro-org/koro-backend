@@ -54,6 +54,54 @@
     "type": "urn:koro:problem:not_found"
   },
   {
+    "code": "notify.commercial_disabled",
+    "status": 403,
+    "title": "Commercial notifications are disabled until consent checking is wired",
+    "type": "urn:koro:problem:notify.commercial_disabled"
+  },
+  {
+    "code": "notify.delivery_failed",
+    "status": 503,
+    "title": "Notification delivery failed",
+    "type": "urn:koro:problem:notify.delivery_failed"
+  },
+  {
+    "code": "notify.delivery_in_flight",
+    "status": 409,
+    "title": "Another attempt of this notification is in progress",
+    "type": "urn:koro:problem:notify.delivery_in_flight"
+  },
+  {
+    "code": "notify.delivery_rejected",
+    "status": 422,
+    "title": "Notification was rejected by the provider",
+    "type": "urn:koro:problem:notify.delivery_rejected"
+  },
+  {
+    "code": "notify.invalid_message",
+    "status": 422,
+    "title": "Notification message is invalid",
+    "type": "urn:koro:problem:notify.invalid_message"
+  },
+  {
+    "code": "notify.not_found",
+    "status": 404,
+    "title": "Notification delivery not found",
+    "type": "urn:koro:problem:notify.not_found"
+  },
+  {
+    "code": "notify.not_in_worker",
+    "status": 500,
+    "title": "Notifications can only be sent from a worker context",
+    "type": "urn:koro:problem:notify.not_in_worker"
+  },
+  {
+    "code": "notify.store_not_wired",
+    "status": 503,
+    "title": "Notification delivery store is not wired",
+    "type": "urn:koro:problem:notify.store_not_wired"
+  },
+  {
     "code": "payload_too_large",
     "status": 413,
     "title": "Payload too large",

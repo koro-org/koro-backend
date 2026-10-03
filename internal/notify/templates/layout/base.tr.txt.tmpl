@@ -1,0 +1,8 @@
+{{template "content" .}}
+
+--
+{{if eq .Category "commercial" -}}
+Bu ileti, {{.AppName}} tarafından, verdiğiniz onaya dayanarak gönderilen bir ticari elektronik iletidir. İleti almak istemiyorsanız buradan çıkabilirsiniz: {{.UnsubscribeURL}}
+{{- else -}}
+Bu e-posta, {{.AppName}} hesabınız ve talep ettiğiniz işlemlerle ilgili bir bilgilendirme iletisidir; ticari elektronik ileti değildir.
+{{- end}}

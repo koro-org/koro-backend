@@ -1,0 +1,3 @@
+<p style="margin:0 0 12px 0;">Merhaba {{.Data.name}},</p>
+<p style="margin:0 0 12px 0;">Bu ileti, Koro e-posta altyapısının çalıştığını doğrulamak için gönderildi. Herhangi bir işlem yapmanız gerekmiyor.</p>
+{{with index .Data "qr_cid"}}<p style="margin:0;"><img src="cid:{{.}}" alt="Test görseli" width="160" height="160" style="display:block;"></p>{{end}}

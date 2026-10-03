@@ -1,0 +1,7 @@
+Hello {{.Data.name}},
+
+This message was sent to verify that the Koro e-mail infrastructure works. You do not need to do anything.
+{{- if index .Data "qr_cid"}}
+
+This message also contains an inline image.
+{{- end}}

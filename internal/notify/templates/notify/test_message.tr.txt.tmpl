@@ -1,0 +1,7 @@
+Merhaba {{.Data.name}},
+
+Bu ileti, Koro e-posta altyapısının çalıştığını doğrulamak için gönderildi. Herhangi bir işlem yapmanız gerekmiyor.
+{{- if index .Data "qr_cid"}}
+
+Bu iletide satır içi bir görsel de bulunur.
+{{- end}}

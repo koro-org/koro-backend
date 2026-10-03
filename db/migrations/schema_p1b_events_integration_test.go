@@ -264,3 +264,40 @@ func TestSchema_EventStaffAndFormConstraints(t *testing.T) {
 		t.Errorf("default draft schema = %s", got)
 	}
 }
+
+// TestSchema_EventIDOrgUnique (06 H-55, T-229): events (id, org_id) is
+// unique, so the composite FK of a child row (offerings, order lines;
+// BE-034) pins the event's org. Mutation test: a child table with
+// FOREIGN KEY (event_id, org_id) REFERENCES events (id, org_id) takes the
+// event under its own org and refuses it under another org; once the
+// constraint is dropped, such an FK cannot even be declared.
+func TestSchema_EventIDOrgUnique(t *testing.T) {
+	t.Parallel()
+	w := newP1aWorld(t)
+	org, other, creator := w.org("club"), w.org("club"), w.user()
+	ev := uuid.NewV7()
+	w.exec(insertSQL("events", eventDefaults, nil), org, creator, ev)
+	if got := queryString(t, w.d, `SELECT pg_get_constraintdef(oid) FROM pg_constraint
+		WHERE conname = 'events_id_org_uq' AND conrelid = 'events'::regclass`); got != "UNIQUE (id, org_id)" {
+		t.Fatalf("events_id_org_uq = %q", got)
+	}
+	owner := testutil.OwnerConn(t, w.d)
+	if _, err := owner.Exec(t.Context(), `CREATE TABLE event_child (id int PRIMARY KEY, event_id uuid NOT NULL, org_id uuid NOT NULL,
+		CONSTRAINT event_child_event_org_fkey FOREIGN KEY (event_id, org_id) REFERENCES events (id, org_id))`); err != nil {
+		t.Fatal(err)
+	}
+	if got := execState(t, owner, `INSERT INTO event_child VALUES (1, $1, $2)`, ev, org); got != "" {
+		t.Fatalf("child under the event's org: SQLSTATE %q", got)
+	}
+	if got := execState(t, owner, `INSERT INTO event_child VALUES (2, $1, $2)`, ev, other); got != db.CodeForeignKeyViolation {
+		t.Fatalf("child under another org: SQLSTATE %q, want %s", got, db.CodeForeignKeyViolation)
+	}
+	// Mutation: without the constraint the composite FK has no target.
+	if _, err := owner.Exec(t.Context(), `DROP TABLE event_child; ALTER TABLE events DROP CONSTRAINT events_id_org_uq`); err != nil {
+		t.Fatal(err)
+	}
+	if got := execState(t, owner, `CREATE TABLE event_child2 (event_id uuid, org_id uuid,
+		FOREIGN KEY (event_id, org_id) REFERENCES events (id, org_id))`); got != "42830" { // invalid_foreign_key
+		t.Fatalf("composite FK without events_id_org_uq: SQLSTATE %q, want 42830", got)
+	}
+}

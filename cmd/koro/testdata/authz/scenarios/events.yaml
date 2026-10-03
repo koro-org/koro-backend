@@ -1,0 +1,57 @@
+# Multi-step scenarios of the events module (03 §7.7; BE-024).
+version: 1
+scenarios:
+  update_event_needs_if_match:
+    note: updateEvent without If-Match is 428, with a stale ETag 412 (04 §1.13)
+    steps:
+      - { persona: club_admin, operation: updateEvent, headers: { If-Match: "" }, expect: 428, code: precondition_required }
+      - { persona: club_admin, operation: updateEvent, headers: { If-Match: '"0"' }, expect: 412, code: precondition_failed }
+      - { persona: club_admin, operation: updateEvent, expect: 200 }
+      - { persona: club_admin, operation: updateEvent, expect: 412, code: precondition_failed }
+  publish_needs_published_form:
+    note: >-
+      a new event has an empty form draft only: publishing it is 422 events.form_required (versions are
+      BE-026); event_a_draft has a published version and is published once (a second publication is 409)
+    steps:
+      - { persona: club_admin, operation: createEvent, expect: 201, save: { new_event: event_id } }
+      - { persona: club_admin, operation: publishEvent, path_params: { event_id: new_event }, expect: 422,
+          code: events.form_required }
+      - { persona: club_admin, operation: publishEvent, expect: 200 }
+      - { persona: club_admin, operation: publishEvent, expect: 409, code: events.invalid_state }
+  only_drafts_are_deleted:
+    note: a published event is cancelled, never deleted (409); a draft is deleted once
+    steps:
+      - { persona: club_admin, operation: deleteEventDraft, path_params: { event_id: event_a }, expect: 409,
+          code: events.invalid_state }
+      - { persona: club_admin, operation: deleteEventDraft, expect: 204 }
+      - { persona: club_admin, operation: deleteEventDraft, expect: 404, code: not_found }
+      - { persona: club_admin, operation: getEvent, path_params: { event_id: event_a }, expect: 200 }
+  cancelled_event_is_final:
+    note: a cancelled event takes no second cancellation and no edit (409 events.invalid_state)
+    steps:
+      - { persona: club_admin, operation: cancelEvent, expect: 200 }
+      - { persona: club_admin, operation: cancelEvent, expect: 409, code: events.invalid_state }
+      - { persona: club_admin, operation: updateEvent, expect: 409, code: events.invalid_state }
+      - { persona: anonymous, operation: getEvent, path_params: { event_id: event_a }, expect: 200 }
+  another_orgs_draft_is_invisible:
+    note: >-
+      06 H-38 — a draft of club_a does not exist for club_b's admin (404 on every management call);
+      staff need an existing account (404) and are added once (409)
+    steps:
+      - { persona: club_admin, operation: createEvent, expect: 201, save: { draft_a: event_id } }
+      - { persona: other_club_admin, operation: getEvent, path_params: { event_id: draft_a }, expect: 404, code: not_found }
+      - { persona: other_club_admin, operation: addEventStaff, path_params: { event_id: draft_a }, expect: 404,
+          code: not_found }
+      - { persona: other_club_admin, operation: deleteEventDraft, path_params: { event_id: draft_a }, expect: 404,
+          code: not_found }
+      - { persona: club_admin, operation: addEventStaff, path_params: { event_id: draft_a },
+          body: bodies/events/add_staff_unknown.json, expect: 404, code: not_found }
+      - { persona: club_admin, operation: addEventStaff, path_params: { event_id: draft_a }, expect: 201 }
+      - { persona: club_admin, operation: addEventStaff, path_params: { event_id: draft_a }, expect: 409,
+          code: events.staff_exists }
+  schedule_change_of_published_event:
+    note: a published event's new date is accepted with the current ETag (attendees get event.schedule_changed)
+    steps:
+      - { persona: club_admin, operation: updateEvent, body: bodies/events/update_event_schedule.json, expect: 200 }
+      - { persona: club_member, operation: updateEvent, body: bodies/events/update_event_schedule.json, expect: 403,
+          code: forbidden }

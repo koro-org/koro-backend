@@ -1,0 +1,378 @@
+package events_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+	"uuid"
+
+	"koro/internal/audit"
+	"koro/internal/authz"
+	"koro/internal/authz/authztest"
+	"koro/internal/directory"
+	"koro/internal/events"
+	"koro/internal/identity"
+	"koro/internal/orgs"
+	"koro/internal/platform/clock"
+	"koro/internal/platform/db"
+	"koro/internal/platform/domainevent"
+	"koro/internal/platform/idempotency"
+	"koro/internal/platform/obs"
+	"koro/internal/platform/outbox"
+	"koro/internal/platform/problem"
+)
+
+// t0 is the test clock's start (microsecond precision, like PostgreSQL).
+var t0 = time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC)
+
+// start is a future start time of the test events.
+var start = time.Date(2026, 11, 20, 15, 0, 0, 0, time.UTC)
+
+// auditLog records the audit events; fail makes Log fail.
+type auditLog struct {
+	mu     sync.Mutex
+	events []audit.Event
+	fail   error
+}
+
+func (l *auditLog) Log(_ context.Context, e audit.Event) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.fail != nil {
+		return l.fail
+	}
+	l.events = append(l.events, e)
+	return nil
+}
+
+func (l *auditLog) of(action authz.Action) []audit.Event {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var out []audit.Event
+	for _, e := range l.events {
+		if e.Action == string(action) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func (l *auditLog) setFail(err error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.fail = err
+}
+
+// txKey marks the context of an open spyTx transaction.
+type txKey struct{}
+
+// spyTx is db.NopTx that numbers its transactions in the context, so a
+// test can tell which calls share one.
+type spyTx struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (s *spyTx) WithTx(ctx context.Context, fn func(context.Context) error) error {
+	if ctx.Value(txKey{}) != nil {
+		return fn(ctx)
+	}
+	s.mu.Lock()
+	s.n++
+	n := s.n
+	s.mu.Unlock()
+	return db.NopTx{}.WithTx(ctx, func(inner context.Context) error {
+		return fn(context.WithValue(inner, txKey{}, n))
+	})
+}
+
+func (s *spyTx) WithSerializableTx(ctx context.Context, fn func(context.Context) error) error {
+	return s.WithTx(ctx, fn)
+}
+
+func txOf(ctx context.Context) int {
+	n, _ := ctx.Value(txKey{}).(int)
+	return n
+}
+
+// spyOutbox records the transaction of each Add.
+type spyOutbox struct {
+	*outbox.Mem
+	mu  sync.Mutex
+	txs map[string][]int
+}
+
+func (s *spyOutbox) Add(ctx context.Context, e domainevent.Envelope) error {
+	s.mu.Lock()
+	s.txs[e.Topic] = append(s.txs[e.Topic], txOf(ctx))
+	s.mu.Unlock()
+	return s.Mem.Add(ctx, e)
+}
+
+// spyStore records the transaction of each UpdateEvent.
+type spyStore struct {
+	*events.MemStore
+	mu      sync.Mutex
+	updates []int
+}
+
+func (s *spyStore) UpdateEvent(ctx context.Context, e events.Event) (events.Event, error) {
+	s.mu.Lock()
+	s.updates = append(s.updates, txOf(ctx))
+	s.mu.Unlock()
+	return s.MemStore.UpdateEvent(ctx, e)
+}
+
+// fakeOrgs is the organiser directory of the authztest orgs.
+type fakeOrgs struct {
+	mu   sync.Mutex
+	orgs map[uuid.UUID]orgs.OrgSummary
+}
+
+func newFakeOrgs() *fakeOrgs {
+	f := &fakeOrgs{orgs: map[uuid.UUID]orgs.OrgSummary{}}
+	for _, o := range authztest.Orgs() {
+		id := authztest.ID(o.Name)
+		f.orgs[id] = orgs.OrgSummary{ID: id, Kind: orgs.Kind(o.Kind), Name: "Org " + o.Name,
+			Slug: strings.ReplaceAll(o.Name, "_", "-"), Status: orgs.StatusActive}
+	}
+	return f
+}
+
+func (f *fakeOrgs) Get(_ context.Context, id uuid.UUID) (orgs.OrgSummary, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	o, ok := f.orgs[id]
+	if !ok {
+		return orgs.OrgSummary{}, orgs.ErrNotFound
+	}
+	return o, nil
+}
+
+func (f *fakeOrgs) GetMany(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]orgs.OrgSummary, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[uuid.UUID]orgs.OrgSummary{}
+	for _, id := range ids {
+		if o, ok := f.orgs[id]; ok {
+			out[id] = o
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeOrgs) setStatus(id uuid.UUID, st orgs.Status) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	o := f.orgs[id]
+	o.Status = st
+	f.orgs[id] = o
+}
+
+// fakeCatalog is directory for the authztest orgs: club_sensitive is a
+// sensitive club; every club and university org belongs to its university.
+type fakeCatalog struct{}
+
+func (fakeCatalog) SensitiveOrgIDs(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error) {
+	out := map[uuid.UUID]bool{}
+	for _, id := range ids {
+		if id == authztest.ID("club_sensitive") {
+			out[id] = true
+		}
+	}
+	return out, nil
+}
+
+func (fakeCatalog) GetClub(_ context.Context, id uuid.UUID) (directory.Club, error) {
+	for _, o := range authztest.Orgs() {
+		if o.Kind == authz.OrgClub && authztest.ID(o.Name) == id {
+			return directory.Club{OrgID: id, UniversityID: authztest.UniversityID(o.University),
+				IsSensitive: o.Sensitive}, nil
+		}
+	}
+	return directory.Club{}, directory.ErrNotFound
+}
+
+func (fakeCatalog) GetUniversity(_ context.Context, id uuid.UUID) (directory.University, error) {
+	for _, n := range []string{"uni_a", "uni_b"} {
+		if authztest.UniversityID(n) == id {
+			return directory.University{ID: id, OrgID: authztest.ID(n), Name: "Uni " + n, IsActive: true}, nil
+		}
+	}
+	return directory.University{}, directory.ErrNotFound
+}
+
+func (fakeCatalog) UniversityOrgs(_ context.Context, id uuid.UUID) ([]uuid.UUID, error) {
+	out := []uuid.UUID{}
+	for _, o := range authztest.Orgs() {
+		switch {
+		case o.Kind == authz.OrgUniversity && authztest.UniversityID(o.Name) == id,
+			o.Kind == authz.OrgClub && authztest.UniversityID(o.University) == id:
+			out = append(out, authztest.ID(o.Name))
+		}
+	}
+	return out, nil
+}
+
+// fakeUsers is identity's user directory: an account per persona,
+// "<name>@example.test", last name "Yılmaz".
+type fakeUsers struct{ suspended map[uuid.UUID]bool }
+
+func (u fakeUsers) Get(_ context.Context, id uuid.UUID) (identity.UserSummary, error) {
+	for _, p := range append(authztest.Personas(), authztest.Helpers()...) {
+		if p.Actor.IsUser() && p.User() == id {
+			st := identity.StatusActive
+			if u.suspended[id] {
+				st = identity.StatusSuspended
+			}
+			return identity.UserSummary{ID: id, Status: st, FirstName: "Ayla", LastName: "Yılmaz"}, nil
+		}
+	}
+	return identity.UserSummary{}, identity.ErrNotFound
+}
+
+func (u fakeUsers) GetMany(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]identity.UserSummary, error) {
+	out := map[uuid.UUID]identity.UserSummary{}
+	for _, id := range ids {
+		if s, err := u.Get(ctx, id); err == nil {
+			out[id] = s
+		}
+	}
+	return out, nil
+}
+
+func (u fakeUsers) FindByEmail(_ context.Context, email string) (uuid.UUID, bool, error) {
+	name, ok := strings.CutSuffix(strings.ToLower(strings.TrimSpace(email)), "@example.test")
+	if !ok {
+		return uuid.Nil(), false, nil
+	}
+	p, ok := authztest.Get(name)
+	if !ok || !p.Actor.IsUser() {
+		return uuid.Nil(), false, nil
+	}
+	return p.User(), true, nil
+}
+
+type env struct {
+	clk   *clock.Fake
+	tx    *spyTx
+	mem   *events.MemStore
+	store *spyStore
+	out   *spyOutbox
+	audit *auditLog
+	orgs  *fakeOrgs
+	users fakeUsers
+	svc   events.Service
+	mod   events.Module
+}
+
+func newEnv(t *testing.T) *env {
+	t.Helper()
+	clk := clock.NewFake(t0)
+	e := &env{
+		clk: clk, tx: &spyTx{}, mem: events.NewMemStore(clk.Now), audit: &auditLog{}, orgs: newFakeOrgs(),
+		out: &spyOutbox{Mem: outbox.NewMem(clk), txs: map[string][]int{}}, users: fakeUsers{suspended: map[uuid.UUID]bool{}},
+	}
+	e.store = &spyStore{MemStore: e.mem}
+	idem := idempotency.New(idempotency.Deps{Tx: e.tx, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()})
+	mod, err := events.New(events.Deps{
+		Store: e.store, Tx: e.tx, Outbox: e.out, Audit: e.audit, Orgs: e.orgs, Catalog: fakeCatalog{},
+		Idempotency: idem, Clock: clk, Log: obs.Discard(), Users: e.users,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.mod, e.svc = mod, mod.Service
+	return e
+}
+
+func persona(t *testing.T, name string) authz.Actor {
+	t.Helper()
+	p, ok := authztest.Get(name)
+	if !ok {
+		t.Fatalf("unknown persona %s", name)
+	}
+	return p.Actor
+}
+
+func orgID(name string) uuid.UUID { return authztest.ID(name) }
+
+// input is a valid in-person draft that needs registration.
+func input(title string) events.EventInput {
+	return events.EventInput{
+		Title: title, Category: events.CategoryWorkshop, Format: events.FormatInPerson, City: "İstanbul",
+		LocationName: "Mühendislik Fakültesi", StartsAt: start, EndsAt: start.Add(2 * time.Hour),
+	}
+}
+
+// create makes a draft as actor in org.
+func (e *env) create(t *testing.T, actor, org string, in events.EventInput) events.EventView {
+	t.Helper()
+	v, err := e.svc.CreateEvent(t.Context(), persona(t, actor), orgID(org), in)
+	if err != nil {
+		t.Fatalf("CreateEvent(%s in %s): %v", actor, org, err)
+	}
+	return v
+}
+
+// published creates and publishes an event of club_a (the form version is
+// stood in for, BE-026).
+func (e *env) published(t *testing.T, in events.EventInput) events.EventView {
+	t.Helper()
+	v := e.create(t, "club_admin", "club_a", in)
+	if err := e.mem.SetFormVersion(v.Event.ID, uuid.NewV7()); err != nil {
+		t.Fatal(err)
+	}
+	p, err := e.svc.PublishEvent(t.Context(), persona(t, "club_admin"), v.Event.ID)
+	if err != nil {
+		t.Fatalf("PublishEvent: %v", err)
+	}
+	return p
+}
+
+func wantCode(t *testing.T, err error, status int, code string) {
+	t.Helper()
+	p, ok := errors.AsType[*problem.Error](err)
+	if !ok || p.Status() != status || p.Code() != code {
+		t.Fatalf("error = %v, want %d %s", err, status, code)
+	}
+}
+
+func wantNotFound(t *testing.T, err error) { t.Helper(); wantCode(t, err, 404, "not_found") }
+
+func wantForbidden(t *testing.T, err error) { t.Helper(); wantCode(t, err, 403, "forbidden") }
+
+func authzUniversity(name string) uuid.UUID { return authztest.UniversityID(name) }
+
+func compare(a, b uuid.UUID) int { return strings.Compare(a.String(), b.String()) }
+
+func eventJSON(t *testing.T, v events.EventView) string {
+	t.Helper()
+	b, err := json.Marshal(events.ToEventDTO(v))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func cardJSON(t *testing.T, v events.EventView) string {
+	t.Helper()
+	b, err := json.Marshal(events.ToCardDTO(v))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func containsAny(s string, subs ...string) bool {
+	for _, x := range subs {
+		if strings.Contains(s, x) {
+			return true
+		}
+	}
+	return false
+}

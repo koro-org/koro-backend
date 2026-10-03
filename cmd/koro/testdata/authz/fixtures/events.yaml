@@ -1,0 +1,19 @@
+# Fixtures of the events module (cmd/koro/matrix_events_test.go; BE-024). IDs are authztest.ID(name).
+# Every event starts 2026-11-20T15:00:00Z (after the matrix clock), lasts two hours, needs registration
+# (auto) and has a form draft; form: published gives it a published form version (BE-026 stand-in), so
+# the draft can be published. created_at/updated_at are 2026-10-01T00:00:00Z: an untouched event's
+# ETag is "1hmhuo3hji000". Staff: persona event_staff scans event_a, helper event_manager_a manages it
+# (03 §7.3).
+version: 1
+fixtures:
+  event_a: { kind: event, org: club_a, status: published, visibility: public, form: published, checkin: true }
+  event_a_draft: { kind: event, org: club_a, status: draft, visibility: public, form: published }
+  event_a_draft_bare: { kind: event, org: club_a, status: draft, visibility: public }
+  event_a_members: { kind: event, org: club_a, status: published, visibility: members, form: published }
+  event_uni_a: { kind: event, org: uni_a, status: published, visibility: university, university: uni_a_university,
+                 form: published }
+  event_b: { kind: event, org: club_b, status: published, visibility: public, form: published }
+  event_sensitive: { kind: event, org: club_sensitive, status: published, visibility: members, form: published }
+  staff_scanner_a: { kind: staff, event: event_a, user: event_staff, role: scanner }
+  staff_manager_a: { kind: staff, event: event_a, user: event_manager_a, role: manager }
+  staff_scanner_members: { kind: staff, event: event_a_members, user: event_staff, role: scanner }

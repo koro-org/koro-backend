@@ -48,6 +48,10 @@ CREATE TABLE events (
   search_vector             tsvector GENERATED ALWAYS AS
                               (to_tsvector('public.koro_tr'::regconfig, coalesce(title, '') || ' ' || coalesce(summary, '') || ' ' || coalesce(description_text, ''))) STORED,
   CONSTRAINT events_org_slug_uq UNIQUE (org_id, slug),
+  -- 06 H-55 / T-229: target of the composite (event_id, org_id) FKs of child
+  -- rows (offerings, order lines; BE-034), so a child cannot name another
+  -- org's event.
+  CONSTRAINT events_id_org_uq UNIQUE (id, org_id),
   CONSTRAINT events_period_chk CHECK (ends_at > starts_at),
   CONSTRAINT events_capacity_fill_chk CHECK (capacity IS NULL OR confirmed_count <= capacity),
   CONSTRAINT events_visibility_university_chk CHECK ((visibility = 'university') = (visibility_university_id IS NOT NULL)),

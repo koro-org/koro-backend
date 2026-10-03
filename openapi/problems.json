@@ -288,6 +288,36 @@
     "type": "urn:koro:problem:entitlements.usage_released"
   },
   {
+    "code": "events.empty_patch",
+    "status": 422,
+    "title": "Nothing to update",
+    "type": "urn:koro:problem:events.empty_patch"
+  },
+  {
+    "code": "events.form_required",
+    "status": 422,
+    "title": "A published registration form is required to publish this event",
+    "type": "urn:koro:problem:events.form_required"
+  },
+  {
+    "code": "events.invalid_state",
+    "status": 409,
+    "title": "Event status does not allow this change",
+    "type": "urn:koro:problem:events.invalid_state"
+  },
+  {
+    "code": "events.slug_taken",
+    "status": 409,
+    "title": "Slug is already in use by another event of the organization",
+    "type": "urn:koro:problem:events.slug_taken"
+  },
+  {
+    "code": "events.staff_exists",
+    "status": 409,
+    "title": "User is already a staff member of this event",
+    "type": "urn:koro:problem:events.staff_exists"
+  },
+  {
     "code": "files.already_attached",
     "status": 409,
     "title": "File is attached to another record",

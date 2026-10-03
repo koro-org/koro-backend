@@ -1,0 +1,346 @@
+# Authz matrix of the events module (03 §5.6, 04 §2.6; BE-024). 12 operations × 18 personas.
+# Event visibility (03 §3.6): published public events are everyone's; a members event is its org's
+# members', its staff's and every platform role's; a university event is also the verified students'
+# of that university; a draft is its organiser's club_admin / university_rep's and every platform
+# role's. /events/{event_id}/... is a resource surface (03 §7.6): an invisible event is 404, a visible
+# one without the role 403. /orgs/{org_id}/events is the org management surface: members without the
+# role 403, non-members 404. k-po: platform_admin creates, publishes, deletes and manages staff only
+# for the platform org (no persona is a member of it → 403); it updates and cancels any event. k13:
+# companies create no events (403). Business rules (428/412, 409 status machine, 422 form_required,
+# 404 unknown staff account) live in scenarios/events.yaml and the service tests.
+version: 1
+groups:
+  # signed-in users without a membership in club_a (and no platform role).
+  ev_outsiders_club_a: [user_unverified, student, student_minor, other_club_admin, event_staff, university_rep,
+                        company_member, company_admin, other_company_member]
+  # signed-in users without a membership in company_a.
+  ev_outsiders_company_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                           event_staff, university_rep, other_company_member]
+  # signed-in users without a membership in uni_a.
+  ev_outsiders_uni_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin, event_staff,
+                       company_member, company_admin, other_company_member]
+  # platform roles other than platform_admin.
+  ev_other_staff: [moderator, support, dpo, finance_admin, talent_auditor]
+  # platform roles without listOrgEvents (03 §5.6: mod, sup and pad have it).
+  ev_list_denied_staff: [dpo, finance_admin, talent_auditor]
+  # signed-in users who see public event_a but do not manage it.
+  ev_not_manager_a: [user_unverified, student, student_minor, club_member, other_club_admin, event_staff,
+                     university_rep, company_member, company_admin, other_company_member]
+  # signed-in users who do not see event_a_members (no club_a membership, no staff role on it).
+  ev_members_hidden: [user_unverified, student, student_minor, other_club_admin, university_rep, company_member,
+                      company_admin, other_company_member]
+  # signed-in users who do not see event_a_draft (not club_a's club_admin, no platform role).
+  ev_draft_hidden: [user_unverified, student, student_minor, club_member, other_club_admin, event_staff,
+                    university_rep, company_member, company_admin, other_company_member]
+  # verified students of uni_a (they see event_uni_a).
+  ev_uni_a_students: [student, student_minor, club_member, club_admin, event_staff]
+  # signed-in users who do not see event_uni_a.
+  ev_uni_hidden: [user_unverified, other_club_admin, company_member, company_admin, other_company_member]
+  # signed-in users who do not see event_sensitive (club_member is a member of club_sensitive).
+  ev_sensitive_hidden: [user_unverified, student, student_minor, club_admin, other_club_admin, event_staff,
+                        university_rep, company_member, company_admin, other_company_member]
+
+operations:
+  listEvents:
+    method: GET
+    path: /api/v1/events
+    action: events.event.list
+    public: true
+    expect: { "@all": 200 }
+    variants:
+      - name: filtered
+        query: { q: matris, category: workshop, city: istanbul, sort: "-published_at", starts_from: "2026-11-01",
+                 org_id: "{{fixture:club_a}}" }
+        expect: { "@all": 200 }
+      - name: by_university
+        query: { university_id: "{{fixture:uni_a_university}}" }
+        expect: { "@all": 200 }
+
+  getEvent:
+    method: GET
+    path: /api/v1/events/{event_id}
+    action: events.event.read
+    public: true
+    path_params: { event_id: event_a }
+    expect: { "@all": 200 }
+    variants:
+      - name: members_event
+        path_params: { event_id: event_a_members }
+        note: club_a's members and the event's staff only; every platform role sees it
+        expect:
+          anonymous: 404
+          "@ev_members_hidden": 404
+          club_member: 200
+          club_admin: 200
+          event_staff: 200
+          "@platform_staff": 200
+      - name: draft_event
+        path_params: { event_id: event_a_draft }
+        expect:
+          anonymous: 404
+          "@ev_draft_hidden": 404
+          club_admin: 200
+          "@platform_staff": 200
+      - name: university_event
+        path_params: { event_id: event_uni_a }
+        expect:
+          anonymous: 404
+          "@ev_uni_hidden": 404
+          "@ev_uni_a_students": 200
+          university_rep: 200
+          "@platform_staff": 200
+      - name: sensitive_club_members_event
+        path_params: { event_id: event_sensitive }
+        note: club_member is a member of club_sensitive
+        expect:
+          anonymous: 404
+          "@ev_sensitive_hidden": 404
+          club_member: 200
+          "@platform_staff": 200
+      - name: unknown_event
+        path_params: { event_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect: { "@all": 404 }
+
+  listOrgEvents:
+    method: GET
+    path: /api/v1/orgs/{org_id}/events
+    action: events.event.list_org
+    path_params: { org_id: club_a }
+    expect:
+      anonymous: 401
+      "@ev_outsiders_club_a": 404
+      club_member: 403
+      club_admin: 200
+      moderator: 200
+      support: 200
+      platform_admin: 200
+      "@ev_list_denied_staff": 403
+    variants:
+      - name: drafts_only
+        query: { status: draft }
+        expect:
+          anonymous: 401
+          "@ev_outsiders_club_a": 404
+          club_member: 403
+          club_admin: 200
+          moderator: 200
+          support: 200
+          platform_admin: 200
+          "@ev_list_denied_staff": 403
+      - name: university_org
+        path_params: { org_id: uni_a }
+        expect:
+          anonymous: 401
+          "@ev_outsiders_uni_a": 404
+          university_rep: 200
+          moderator: 200
+          support: 200
+          platform_admin: 200
+          "@ev_list_denied_staff": 403
+
+  createEvent:
+    method: POST
+    path: /api/v1/orgs/{org_id}/events
+    action: events.event.create
+    path_params: { org_id: club_a }
+    body: bodies/events/create_event.json
+    expect:
+      anonymous: 401
+      "@ev_outsiders_club_a": 404
+      club_member: 403
+      club_admin: 201
+      "@platform_staff": 403
+    variants:
+      - name: university_org
+        path_params: { org_id: uni_a }
+        expect:
+          anonymous: 401
+          "@ev_outsiders_uni_a": 404
+          university_rep: 201
+          "@platform_staff": 403
+      - name: company_org
+        path_params: { org_id: company_a }
+        note: k13 / T-17 — companies create no events in v1
+        expect:
+          anonymous: 401
+          "@ev_outsiders_company_a": 404
+          company_member: 403
+          company_admin: 403
+          "@platform_staff": 403
+
+  updateEvent:
+    method: PATCH
+    path: /api/v1/events/{event_id}
+    action: events.event.update
+    path_params: { event_id: event_a }
+    headers: { If-Match: '"1hmhuo3hji000"' }
+    body: bodies/events/update_event.json
+    expect:
+      anonymous: 401
+      "@ev_not_manager_a": 403
+      club_admin: 200
+      "@ev_other_staff": 403
+      platform_admin: 200
+    variants:
+      - name: draft_event
+        path_params: { event_id: event_a_draft }
+        expect:
+          anonymous: 401
+          "@ev_draft_hidden": 404
+          club_admin: 200
+          "@ev_other_staff": 403
+          platform_admin: 200
+      - name: university_event
+        path_params: { event_id: event_uni_a }
+        expect:
+          anonymous: 401
+          "@ev_uni_hidden": 404
+          "@ev_uni_a_students": 403
+          university_rep: 200
+          "@ev_other_staff": 403
+          platform_admin: 200
+
+  publishEvent:
+    method: POST
+    path: /api/v1/events/{event_id}/publish
+    action: events.event.publish
+    path_params: { event_id: event_a_draft }
+    expect:
+      anonymous: 401
+      "@ev_draft_hidden": 404
+      club_admin: 200
+      "@platform_staff": 403
+
+  cancelEvent:
+    method: POST
+    path: /api/v1/events/{event_id}/cancel
+    action: events.event.cancel
+    path_params: { event_id: event_a }
+    body: bodies/events/cancel_event.json
+    expect:
+      anonymous: 401
+      "@ev_not_manager_a": 403
+      club_admin: 200
+      "@ev_other_staff": 403
+      platform_admin: 200
+    variants:
+      - name: members_event
+        path_params: { event_id: event_a_members }
+        expect:
+          anonymous: 401
+          "@ev_members_hidden": 404
+          club_member: 403
+          club_admin: 200
+          event_staff: 403
+          "@ev_other_staff": 403
+          platform_admin: 200
+
+  deleteEventDraft:
+    method: DELETE
+    path: /api/v1/events/{event_id}
+    action: events.event.delete
+    path_params: { event_id: event_a_draft_bare }
+    note: a draft whose form has a published version keeps it (immutable versions; 409), so the draft without one
+    expect:
+      anonymous: 401
+      "@ev_draft_hidden": 404
+      club_admin: 204
+      "@platform_staff": 403
+
+  listEventStaff:
+    method: GET
+    path: /api/v1/events/{event_id}/staff
+    action: events.staff.list
+    path_params: { event_id: event_a }
+    expect:
+      anonymous: 401
+      "@ev_not_manager_a": 403
+      club_admin: 200
+      "@platform_staff": 403
+    variants:
+      - name: draft_event
+        path_params: { event_id: event_a_draft }
+        expect:
+          anonymous: 401
+          "@ev_draft_hidden": 404
+          club_admin: 200
+          "@platform_staff": 403
+
+  addEventStaff:
+    method: POST
+    path: /api/v1/events/{event_id}/staff
+    action: events.staff.manage
+    path_params: { event_id: event_a }
+    body: bodies/events/add_staff.json
+    expect:
+      anonymous: 401
+      "@ev_not_manager_a": 403
+      club_admin: 201
+      "@platform_staff": 403
+    variants:
+      - name: university_event
+        path_params: { event_id: event_uni_a }
+        expect:
+          anonymous: 401
+          "@ev_uni_hidden": 404
+          "@ev_uni_a_students": 403
+          university_rep: 201
+          "@platform_staff": 403
+
+  updateEventStaff:
+    method: PATCH
+    path: /api/v1/events/{event_id}/staff/{user_id}
+    action: events.staff.manage
+    path_params: { event_id: event_a, user_id: event_staff }
+    body: bodies/events/update_staff.json
+    expect:
+      anonymous: 401
+      "@ev_not_manager_a": 403
+      club_admin: 200
+      "@platform_staff": 403
+
+  removeEventStaff:
+    method: DELETE
+    path: /api/v1/events/{event_id}/staff/{user_id}
+    action: events.staff.manage
+    path_params: { event_id: event_a, user_id: event_staff }
+    expect:
+      anonymous: 401
+      "@ev_not_manager_a": 403
+      club_admin: 204
+      "@platform_staff": 403
+    variants:
+      - name: members_event
+        path_params: { event_id: event_a_members }
+        expect:
+          anonymous: 401
+          "@ev_members_hidden": 404
+          club_member: 403
+          club_admin: 204
+          event_staff: 403
+          "@platform_staff": 403
+
+pending_actions:
+  - events.form.read                 # BE-026
+  - events.form.manage               # BE-026
+  - events.form.publish              # BE-026
+  - events.registration.create       # BE-028
+  - events.registration.list_own     # BE-028
+  - events.registration.read_own     # BE-028
+  - events.registration.cancel_own   # BE-028
+  - events.registration.list         # BE-028
+  - events.registration.read         # BE-028
+  - events.registration.decide       # BE-028
+  - events.registration.cancel       # BE-028
+  - events.ticket.read_own           # BE-031
+  - events.ticket.resend             # BE-031
+  - events.ticket.reissue            # BE-031
+  - events.checkin.create            # BE-031
+  - events.checkin.void              # BE-031
+  - events.checkin.list              # BE-031
+  - events.checkin.stats             # BE-031
+  - events.attendance.finalize       # BE-031
+  - events.export.create             # BE-050
+  - events.export.list               # BE-050
+  - events.export.download           # BE-050
+  - events.lint_rule.manage          # BE-026

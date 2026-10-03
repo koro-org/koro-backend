@@ -70,7 +70,7 @@ entitlements                staff     entitlements  -
 entitlement_usages          personal  entitlements  todo:BE-057
 # events
 events                      staff     events        -
-event_staff                 personal  events        todo:BE-024
+event_staff                 personal  events        provider:events
 event_forms                 staff     events        -
 event_form_versions         staff     events        -
 form_lint_rules             staff     events        -

@@ -74,6 +74,23 @@ components:
         - requested_at
         - expires_at
       type: object
+    AddStaffInputBody:
+      additionalProperties: false
+      properties:
+        email:
+          description: Address of an existing account
+          maxLength: 254
+          minLength: 3
+          type: string
+        role:
+          enum:
+            - scanner
+            - manager
+          type: string
+      required:
+        - email
+        - role
+      type: object
     AdminClubClaimDTO:
       additionalProperties: false
       properties:
@@ -985,6 +1002,17 @@ components:
           type: array
       required:
         - items
+      type: object
+    CancelEventInputBody:
+      additionalProperties: false
+      properties:
+        cancel_reason:
+          description: Shown to the attendees
+          maxLength: 500
+          minLength: 3
+          type: string
+      required:
+        - cancel_reason
       type: object
     ChangePasswordInputBody:
       additionalProperties: false
@@ -2220,6 +2248,460 @@ components:
       required:
         - items
         - available
+      type: object
+    EventCardDTO:
+      additionalProperties: false
+      properties:
+        capacity:
+          format: int64
+          type: integer
+        category:
+          type: string
+        city:
+          type: string
+        cover_url:
+          description: Short-lived download URL (at most 5 minutes)
+          type: string
+        display_timezone:
+          enum:
+            - Europe/Istanbul
+          type: string
+        ends_at:
+          format: date-time
+          type: string
+        event_id:
+          type: string
+        format:
+          enum:
+            - in_person
+            - online
+            - hybrid
+          type: string
+        location_name:
+          type: string
+        org:
+          $ref: "#/components/schemas/EventOrgDTO"
+        registration_mode:
+          enum:
+            - auto
+            - manual
+          type: string
+        requires_registration:
+          type: boolean
+        slug:
+          type: string
+        starts_at:
+          format: date-time
+          type: string
+        status:
+          enum:
+            - draft
+            - published
+            - cancelled
+            - completed
+          type: string
+        summary:
+          type: string
+        title:
+          type: string
+        visibility:
+          enum:
+            - public
+            - university
+            - members
+          type: string
+      required:
+        - event_id
+        - org
+        - title
+        - slug
+        - category
+        - format
+        - starts_at
+        - ends_at
+        - display_timezone
+        - visibility
+        - status
+        - requires_registration
+        - registration_mode
+      type: object
+    EventCardList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/EventCardDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
+    EventDTO:
+      additionalProperties: false
+      properties:
+        address:
+          type: string
+        cancel_deadline_at:
+          format: date-time
+          type: string
+        cancel_reason:
+          type: string
+        cancelled_at:
+          format: date-time
+          type: string
+        capacity:
+          format: int64
+          type: integer
+        category:
+          type: string
+        checkin_enabled:
+          type: boolean
+        city:
+          type: string
+        confirmed_count:
+          format: int64
+          type: integer
+        cover_file_id:
+          description: Managers only
+          type: string
+        cover_url:
+          description: Short-lived download URL (at most 5 minutes)
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        description_json:
+          additionalProperties: {}
+          description: Tiptap JSON document
+          type: object
+        display_timezone:
+          enum:
+            - Europe/Istanbul
+          type: string
+        ends_at:
+          format: date-time
+          type: string
+        event_id:
+          type: string
+        format:
+          enum:
+            - in_person
+            - online
+            - hybrid
+          type: string
+        is_sensitive_category:
+          description: Managers only
+          type: boolean
+        location_name:
+          type: string
+        online_url:
+          description: "Managers only (approved attendees: registrations)"
+          type: string
+        org:
+          $ref: "#/components/schemas/EventOrgDTO"
+        published_at:
+          format: date-time
+          type: string
+        registration_closes_at:
+          format: date-time
+          type: string
+        registration_mode:
+          enum:
+            - auto
+            - manual
+          type: string
+        registration_opens_at:
+          format: date-time
+          type: string
+        requires_registration:
+          type: boolean
+        slug:
+          type: string
+        starts_at:
+          format: date-time
+          type: string
+        status:
+          enum:
+            - draft
+            - published
+            - cancelled
+            - completed
+          type: string
+        summary:
+          type: string
+        title:
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+        visibility:
+          enum:
+            - public
+            - university
+            - members
+          type: string
+        visibility_university_id:
+          type: string
+        waitlist_enabled:
+          type: boolean
+      required:
+        - confirmed_count
+        - waitlist_enabled
+        - checkin_enabled
+        - created_at
+        - updated_at
+        - event_id
+        - org
+        - title
+        - slug
+        - category
+        - format
+        - starts_at
+        - ends_at
+        - display_timezone
+        - visibility
+        - status
+        - requires_registration
+        - registration_mode
+      type: object
+    EventOrgDTO:
+      additionalProperties: false
+      properties:
+        kind:
+          enum:
+            - platform
+            - university
+            - club
+          type: string
+        name:
+          type: string
+        org_id:
+          type: string
+        slug:
+          type: string
+      required:
+        - org_id
+        - kind
+        - name
+        - slug
+      type: object
+    EventPatchBody:
+      additionalProperties: false
+      properties:
+        address:
+          maxLength: 500
+          type: string
+        cancel_deadline_at:
+          format: date-time
+          type: string
+        capacity:
+          format: int64
+          maximum: 100000
+          minimum: 1
+          type: integer
+        category:
+          enum:
+            - workshop
+            - talk
+            - competition
+            - career
+            - social
+            - trip
+            - sports
+            - culture
+            - volunteering
+            - other
+          type: string
+        checkin_enabled:
+          type: boolean
+        city:
+          maxLength: 60
+          type: string
+        clear:
+          description: Optional fields to empty
+          items:
+            enum:
+              - summary
+              - description_json
+              - location_name
+              - address
+              - city
+              - online_url
+              - cover_file_id
+              - capacity
+              - registration_opens_at
+              - registration_closes_at
+              - cancel_deadline_at
+            type: string
+          maxItems: 11
+          type: array
+        cover_file_id:
+          type: string
+        description_json:
+          additionalProperties: {}
+          description: Tiptap JSON
+          type: object
+        ends_at:
+          format: date-time
+          type: string
+        format:
+          enum:
+            - in_person
+            - online
+            - hybrid
+          type: string
+        is_sensitive_category:
+          type: boolean
+        location_name:
+          maxLength: 200
+          type: string
+        online_url:
+          maxLength: 2048
+          type: string
+        registration_closes_at:
+          format: date-time
+          type: string
+        registration_mode:
+          enum:
+            - auto
+            - manual
+          type: string
+        registration_opens_at:
+          format: date-time
+          type: string
+        requires_registration:
+          type: boolean
+        slug:
+          maxLength: 100
+          type: string
+        starts_at:
+          format: date-time
+          type: string
+        summary:
+          description: Empty string clears it
+          maxLength: 300
+          type: string
+        title:
+          maxLength: 160
+          minLength: 3
+          type: string
+        visibility:
+          enum:
+            - public
+            - university
+            - members
+          type: string
+        visibility_university_id:
+          type: string
+        waitlist_enabled:
+          type: boolean
+      type: object
+    EventWriteBody:
+      additionalProperties: false
+      properties:
+        address:
+          maxLength: 500
+          type: string
+        cancel_deadline_at:
+          format: date-time
+          type: string
+        capacity:
+          format: int64
+          maximum: 100000
+          minimum: 1
+          type: integer
+        category:
+          enum:
+            - workshop
+            - talk
+            - competition
+            - career
+            - social
+            - trip
+            - sports
+            - culture
+            - volunteering
+            - other
+          type: string
+        checkin_enabled:
+          type: boolean
+        city:
+          maxLength: 60
+          type: string
+        cover_file_id:
+          description: An event_cover upload (createUpload)
+          type: string
+        description_json:
+          additionalProperties: {}
+          description: "Tiptap JSON: paragraphs, headings 2-3, lists, quotes, bold, italic, https links"
+          type: object
+        ends_at:
+          format: date-time
+          type: string
+        format:
+          enum:
+            - in_person
+            - online
+            - hybrid
+          type: string
+        is_sensitive_category:
+          description: "Religious, political etc.: produces no talent signal"
+          type: boolean
+        location_name:
+          maxLength: 200
+          type: string
+        online_url:
+          description: https:// only; required to publish an online or hybrid event
+          maxLength: 2048
+          type: string
+        registration_closes_at:
+          format: date-time
+          type: string
+        registration_mode:
+          description: Default auto
+          enum:
+            - auto
+            - manual
+          type: string
+        registration_opens_at:
+          format: date-time
+          type: string
+        requires_registration:
+          description: Default true
+          type: boolean
+        slug:
+          description: Derived from the title when omitted
+          maxLength: 100
+          type: string
+        starts_at:
+          format: date-time
+          type: string
+        summary:
+          maxLength: 300
+          type: string
+        title:
+          maxLength: 160
+          minLength: 3
+          type: string
+        visibility:
+          description: Default public
+          enum:
+            - public
+            - university
+            - members
+          type: string
+        visibility_university_id:
+          description: Required for university visibility
+          type: string
+        waitlist_enabled:
+          type: boolean
+      required:
+        - title
+        - category
+        - format
+        - starts_at
+        - ends_at
       type: object
     EvidenceDownloadDTO:
       additionalProperties: false
@@ -3812,6 +4294,37 @@ components:
       required:
         - org_id
       type: object
+    StaffDTO:
+      additionalProperties: false
+      properties:
+        first_name:
+          type: string
+        last_name:
+          description: Initial of the last name only ("Y.")
+          type: string
+        role:
+          enum:
+            - scanner
+            - manager
+          type: string
+        user_id:
+          type: string
+      required:
+        - user_id
+        - first_name
+        - last_name
+        - role
+      type: object
+    StaffList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/StaffDTO"
+          type: array
+      required:
+        - items
+      type: object
     StartEduInputBody:
       additionalProperties: false
       properties:
@@ -4619,6 +5132,17 @@ components:
         reauth:
           $ref: "#/components/schemas/ReauthDTO"
           description: Re-authentication proof (03 §6.2)
+      type: object
+    UpdateStaffInputBody:
+      additionalProperties: false
+      properties:
+        role:
+          enum:
+            - scanner
+            - manager
+          type: string
+      required:
+        - role
       type: object
     UpdateSubInputBody:
       additionalProperties: false
@@ -8271,6 +8795,486 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+  /api/v1/events:
+    get:
+      description: "Published events the caller may see (anonymous: public events only). Without a date range, events that have ended are left out. q matches title, summary and description (full text) or part of the title. Repeated org_id / university_id values are ORed; the two filters together intersect. A date-only starts_from / starts_to is the start / end of that day in Europe/Istanbul."
+      operationId: listEvents
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: Free text, 2-100 characters
+          explode: false
+          in: query
+          name: q
+          schema:
+            description: Free text, 2-100 characters
+            maxLength: 100
+            type: string
+        - description: Organiser org IDs (repeat the parameter)
+          explode: true
+          in: query
+          name: org_id
+          schema:
+            description: Organiser org IDs (repeat the parameter)
+            items:
+              type: string
+            maxItems: 20
+            type: array
+        - description: "University IDs: the university's own org and its clubs"
+          explode: true
+          in: query
+          name: university_id
+          schema:
+            description: "University IDs: the university's own org and its clubs"
+            items:
+              type: string
+            maxItems: 20
+            type: array
+        - explode: false
+          in: query
+          name: category
+          schema:
+            enum:
+              - workshop
+              - talk
+              - competition
+              - career
+              - social
+              - trip
+              - sports
+              - culture
+              - volunteering
+              - other
+            type: string
+        - explode: false
+          in: query
+          name: format
+          schema:
+            enum:
+              - in_person
+              - online
+              - hybrid
+            type: string
+        - explode: false
+          in: query
+          name: city
+          schema:
+            maxLength: 60
+            type: string
+        - description: RFC 3339 instant or YYYY-MM-DD (Europe/Istanbul day start); inclusive
+          explode: false
+          in: query
+          name: starts_from
+          schema:
+            description: RFC 3339 instant or YYYY-MM-DD (Europe/Istanbul day start); inclusive
+            maxLength: 40
+            type: string
+        - description: RFC 3339 instant or YYYY-MM-DD (Europe/Istanbul day end); exclusive
+          explode: false
+          in: query
+          name: starts_to
+          schema:
+            description: RFC 3339 instant or YYYY-MM-DD (Europe/Istanbul day end); exclusive
+            maxLength: 40
+            type: string
+        - description: starts_at (default, soonest first) or -published_at
+          explode: false
+          in: query
+          name: sort
+          schema:
+            description: starts_at (default, soonest first) or -published_at
+            enum:
+              - starts_at
+              - -published_at
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventCardList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: List events
+      tags:
+        - events
+      x-koro-action: events.event.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: public
+  /api/v1/events/{event_id}:
+    delete:
+      description: Drafts only (409 events.invalid_state otherwise).
+      operationId: deleteEventDraft
+      parameters:
+        - description: Event ID
+          in: path
+          name: event_id
+          required: true
+          schema:
+            description: Event ID
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Delete a draft event
+      tags:
+        - events
+      x-koro-action: events.event.delete
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+    get:
+      description: An event the caller may not see is 404. online_url is shown to the event's managers only. The ETag is the If-Match value of updateEvent.
+      operationId: getEvent
+      parameters:
+        - description: Event ID
+          in: path
+          name: event_id
+          required: true
+          schema:
+            description: Event ID
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: Get an event
+      tags:
+        - events
+      x-koro-action: events.event.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: public
+    patch:
+      description: "If-Match with the ETag of getEvent is required: missing → 428, stale → 412. Cancelled and completed events cannot change (409 events.invalid_state). A schedule or venue change of a published event notifies its attendees. clear lists the optional fields to empty."
+      operationId: updateEvent
+      parameters:
+        - description: Event ID
+          in: path
+          name: event_id
+          required: true
+          schema:
+            description: Event ID
+            type: string
+        - description: "ETag of getEvent (required: missing → 428, stale → 412)"
+          in: header
+          name: If-Match
+          schema:
+            description: "ETag of getEvent (required: missing → 428, stale → 412)"
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EventPatchBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Update an event
+      tags:
+        - events
+      x-koro-action: events.event.update
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+  /api/v1/events/{event_id}/cancel:
+    post:
+      description: published → cancelled. Registrations and tickets are cancelled and attendees notified (event.cancelled).
+      operationId: cancelEvent
+      parameters:
+        - description: Event ID
+          in: path
+          name: event_id
+          required: true
+          schema:
+            description: Event ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelEventInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Cancel a published event
+      tags:
+        - events
+      x-koro-action: events.event.cancel
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+  /api/v1/events/{event_id}/publish:
+    post:
+      description: draft → published. An event with registration needs a published form version (422 events.form_required); an online or hybrid event needs online_url; a past event cannot be published.
+      operationId: publishEvent
+      parameters:
+        - description: Event ID
+          in: path
+          name: event_id
+          required: true
+          schema:
+            description: Event ID
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Publish a draft event
+      tags:
+        - events
+      x-koro-action: events.event.publish
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+  /api/v1/events/{event_id}/staff:
+    get:
+      description: First name and the initial of the last name only.
+      operationId: listEventStaff
+      parameters:
+        - description: Event ID
+          in: path
+          name: event_id
+          required: true
+          schema:
+            description: Event ID
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List an event's staff
+      tags:
+        - events
+      x-koro-action: events.staff.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: resource
+    post:
+      description: The address must belong to an active account (404 otherwise; invitations come later). Staff are managed while the event is a draft or published.
+      operationId: addEventStaff
+      parameters:
+        - description: Event ID
+          in: path
+          name: event_id
+          required: true
+          schema:
+            description: Event ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddStaffInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Add a staff member
+      tags:
+        - events
+      x-koro-action: events.staff.manage
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+  /api/v1/events/{event_id}/staff/{user_id}:
+    delete:
+      operationId: removeEventStaff
+      parameters:
+        - description: Event ID
+          in: path
+          name: event_id
+          required: true
+          schema:
+            description: Event ID
+            type: string
+        - description: Staff member's user ID
+          in: path
+          name: user_id
+          required: true
+          schema:
+            description: Staff member's user ID
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Remove a staff member
+      tags:
+        - events
+      x-koro-action: events.staff.manage
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+    patch:
+      operationId: updateEventStaff
+      parameters:
+        - description: Event ID
+          in: path
+          name: event_id
+          required: true
+          schema:
+            description: Event ID
+            type: string
+        - description: Staff member's user ID
+          in: path
+          name: user_id
+          required: true
+          schema:
+            description: Staff member's user ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateStaffInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Change a staff member's role
+      tags:
+        - events
+      x-koro-action: events.staff.manage
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
   /api/v1/files/uploads:
     post:
       description: Checks the purpose's MIME/size allow-list and returns a presigned PUT URL (valid 10 minutes) for the object storage. Send exactly upload_headers with the PUT; the API never receives the file itself (04 §1.14).
@@ -10573,6 +11577,127 @@ paths:
         - entitlements
       x-koro-action: entitlements.entitlement.read
       x-koro-rate-limit: read_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/events:
+    get:
+      description: Drafts included; sorted by starts_at.
+      operationId: listOrgEvents
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: Statuses (repeat the parameter)
+          explode: true
+          in: query
+          name: status
+          schema:
+            description: Statuses (repeat the parameter)
+            items:
+              enum:
+                - draft
+                - published
+                - cancelled
+                - completed
+              type: string
+            maxItems: 4
+            type: array
+        - description: starts_at (the only order)
+          explode: false
+          in: query
+          name: sort
+          schema:
+            description: starts_at (the only order)
+            enum:
+              - starts_at
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventCardList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List an organization's events
+      tags:
+        - events
+      x-koro-action: events.event.list_org
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+    post:
+      description: "Clubs, universities and the platform org organise events (companies: 403 in v1). The event starts as a draft with an empty registration form draft. A suspended org cannot create (403 orgs.org_suspended)."
+      operationId: createEvent
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EventWriteBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventDTO"
+          description: Created
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Create an event (draft)
+      tags:
+        - events
+      x-koro-action: events.event.create
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
       x-koro-surface: org
   /api/v1/orgs/{org_id}/invitations:
     get:

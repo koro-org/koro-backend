@@ -37,11 +37,28 @@ func staffOfEventA(p authztest.Persona) string {
 	return "none"
 }
 
+// formRes is the event_form resource the events service builds for the
+// form actions (BE-026): the event's resource as a form sub-surface, with
+// event_status.
+func formRes(org, status, visibility, uni string, staffRole func(authztest.Persona) string) func(authztest.Persona) authz.Resource {
+	ev := eventRes(org, status, visibility, uni, staffRole)
+	return func(p authztest.Persona) authz.Resource {
+		r := ev(p)
+		r.Type = authz.TypeEventForm
+		r.Attrs["event_status"] = status
+		return r
+	}
+}
+
+func adminSurfaceRes(authztest.Persona) authz.Resource {
+	return authz.Resource{Type: authz.TypeAdminSurface}
+}
+
 func orgSurface(name string, kind authz.OrgKind) func(authztest.Persona) authz.Resource {
 	return func(authztest.Persona) authz.Resource { return orgRes(name, kind, "active") }
 }
 
-// TestEventsPolicy_Matrix pins 03 §5.6 (BE-024's 10 actions) for the 18
+// TestEventsPolicy_Matrix pins 03 §5.6 (BE-024's 10 and BE-026's 4 actions) for the 18
 // personas; testdata/authz/events.yaml checks the same through the API.
 func TestEventsPolicy_Matrix(t *testing.T) {
 	t.Parallel()
@@ -127,6 +144,28 @@ func TestEventsPolicy_Matrix(t *testing.T) {
 		{"staff.manage public", authz.EventsStaffManage, eventA, with(all(fb), map[string]error{"club_admin": nil})},
 		{"staff.manage university", authz.EventsStaffManage, uniEvent,
 			platformSees(with(hidden(), with(uniVisible, map[string]error{"university_rep": nil})))},
+		// BE-026: the published form follows the event's visibility; the
+		// draft schema and its publication are the organiser's management
+		// sub-surface (another org's form: 404).
+		{"form.read public", authz.EventsFormRead, formRes("club_a", "published", "public", "", staffOfEventA), all(nil)},
+		{"form.read members", authz.EventsFormRead, formRes("club_a", "published", "members", "", staffOfEventA),
+			with(all(nf), map[string]error{"club_member": nil, "club_admin": nil, "event_staff": nil, "moderator": nil,
+				"support": nil, "dpo": nil, "platform_admin": nil, "finance_admin": nil, "talent_auditor": nil})},
+		{"form.read draft", authz.EventsFormRead, formRes("club_a", "draft", "public", "", nil),
+			with(all(nf), map[string]error{"club_admin": nil, "moderator": nil, "support": nil, "dpo": nil,
+				"platform_admin": nil, "finance_admin": nil, "talent_auditor": nil})},
+		{"form.manage public", authz.EventsFormManage, formRes("club_a", "published", "public", "", staffOfEventA),
+			platformSees(with(hidden(), map[string]error{"club_member": fb, "club_admin": nil}))},
+		{"form.manage draft", authz.EventsFormManage, formRes("club_a", "draft", "public", "", nil),
+			platformSees(with(hidden(), map[string]error{"club_admin": nil}))},
+		{"form.manage university", authz.EventsFormManage, formRes("uni_a", "published", "university", "uni_a", nil),
+			platformSees(with(hidden(), map[string]error{"university_rep": nil}))},
+		{"form.publish public", authz.EventsFormPublish, formRes("club_a", "published", "public", "", staffOfEventA),
+			platformSees(with(hidden(), map[string]error{"club_member": fb, "club_admin": nil}))},
+		{"form.publish members", authz.EventsFormPublish, formRes("club_a", "published", "members", "", staffOfEventA),
+			platformSees(with(hidden(), map[string]error{"club_member": fb, "club_admin": nil}))},
+		{"lint_rule.manage", authz.EventsLintRuleManage, adminSurfaceRes,
+			with(all(fb), map[string]error{"dpo": nil, "platform_admin": nil})},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -149,6 +188,7 @@ func TestEventsPolicy_EdgeCases(t *testing.T) {
 	draft := eventRes("club_a", "draft", "public", "", nil)
 	uniEvent := eventRes("uni_a", "published", "public", "", nil)
 	p := authztest.Personas()[0]
+	org0 := authztest.ID("club_a")
 	// k-po: a platform_admin who belongs to the platform org creates,
 	// publishes and manages its events.
 	pad := persona(t, "platform_admin")
@@ -181,6 +221,24 @@ func TestEventsPolicy_EdgeCases(t *testing.T) {
 		authz.ErrNotFound, false)
 	wantErr(t, authz.Can(ctx, authz.Anonymous(), authz.EventsEventRead, eventRes("club_a", "published", "friends", "", nil)(p)),
 		authz.ErrNotFound, false)
+	// BE-026: k-po for the platform org's forms, career_staff on its
+	// university's forms, MFA of the lint rule managers, and the form
+	// resource needs event_status.
+	platformForm := formRes("platform_org", "draft", "public", "", nil)
+	for _, act := range []authz.Action{authz.EventsFormManage, authz.EventsFormPublish} {
+		wantErr(t, authz.Can(ctx, pad, act, platformForm(p)), nil, false)
+		wantErr(t, authz.Can(ctx, cs, act, formRes("uni_a", "published", "public", "", nil)(p)), nil, false)
+		// A form of another org is invisible to a club admin (404), even
+		// when the event itself is public.
+		wantErr(t, authz.Can(ctx, persona(t, "other_club_admin"), act, formRes("club_a", "published", "public", "", nil)(p)),
+			authz.ErrNotFound, false)
+	}
+	dpo := persona(t, "dpo")
+	dpo.MFAVerified = false
+	wantErr(t, authz.Can(ctx, dpo, authz.EventsLintRuleManage, adminSurfaceRes(p)), authz.ErrMFARequired, false)
+	wantErr(t, authz.Can(ctx, persona(t, "club_admin"), authz.EventsFormManage,
+		authz.Resource{Type: authz.TypeEventForm, OrgID: &org0, Attrs: map[string]string{authz.AttrStatus: "draft"}}),
+		authz.ErrForbidden, true)
 	// Missing Attrs are a programmer error (deny).
 	org := authztest.ID("club_a")
 	wantErr(t, authz.Can(ctx, persona(t, "club_admin"), authz.EventsEventUpdate,

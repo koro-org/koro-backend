@@ -42,6 +42,32 @@
 //     and last-name initial only.
 //   - Turkish search (02 §0.3, 05 §9.5): BE-020's pattern — koro_tr full
 //     text plus koro_norm substring / trigram matches on the title.
+//
+// BE-026 adds the registration form (ADR-0013, R-003 §2.5.1–2.5.2):
+//
+//   - The schema is a strict JSON document of at most 20 typed fields
+//     (form_schema.go). The organiser edits one draft per event
+//     (putEventFormDraft, If-Match) and publishes it as an immutable
+//     version: schema_sha256, version_no + 1 and current_version_id change
+//     in one transaction under the form row lock. A registration keeps its
+//     version, so a later version never breaks it; an earlier key cannot
+//     come back with another type, and no new required field may appear
+//     after the first registration (422 events.form_incompatible).
+//   - KVKK lint (form_lint.go; 02 §11.4–11.5, T-133): blocked fields are
+//     never published (422 events.form_blocked_field, no override);
+//     warn_special and review_identifier fields need a reasoned override
+//     (422 events.lint_override_required). Every draft save returns the
+//     lint preview. The rules are data the DPO manages (/admin/form-lint-
+//     rules); a pattern must compile as RE2 (422).
+//   - Answers (form_answers.go): ValidateAnswers is the single server-side
+//     check (BE-028 calls it): a JSON Schema 2020-12 document derived from
+//     the version plus the rules it cannot express. Typed answers, never
+//     "everything is a string".
+//   - Consent fields name a per-registration consent purpose; publishing
+//     needs its current consent text (consent.Notices), the form returns
+//     it, and a minor never sees a minor-restricted consent field (03 k12).
+//   - Isolation: the form, its draft and its versions take event_id and
+//     org_id from the event row (06 H-38); another org's form draft is 404.
 package events
 
 import (
@@ -68,7 +94,7 @@ type Events interface {
 }
 
 // Service is the events service: the cross-module contract plus the HTTP
-// use cases of BE-024 (04 §2.6). Every method that takes an actor calls
+// use cases of BE-024 and BE-026 (04 §2.6). Every method that takes an actor calls
 // authz.Can first (05 §5.3).
 type Service interface {
 	Events
@@ -103,6 +129,27 @@ type Service interface {
 	UpdateStaff(ctx context.Context, a authz.Actor, eventID, userID uuid.UUID, role StaffRole) (StaffView, error)
 	// RemoveStaff is removeEventStaff (events.staff.manage).
 	RemoveStaff(ctx context.Context, a authz.Actor, eventID, userID uuid.UUID) error
+
+	// GetForm is getEventForm (events.form.read, P): the current published
+	// version as the caller may answer it, with its consent texts.
+	GetForm(ctx context.Context, a authz.Actor, eventID uuid.UUID, locale string) (FormView, error)
+	// GetFormDraft is getEventFormDraft (events.form.manage): the draft
+	// with a lint preview.
+	GetFormDraft(ctx context.Context, a authz.Actor, eventID uuid.UUID) (FormDraftView, error)
+	// PutFormDraft is putEventFormDraft (events.form.manage): ifMatch is
+	// the If-Match header (missing → 428, stale → 412); draft is the JSON
+	// of the new schema.
+	PutFormDraft(ctx context.Context, a authz.Actor, eventID uuid.UUID, ifMatch string, draft []byte) (FormDraftView, error)
+	// PublishForm is publishEventForm (events.form.publish): the draft
+	// becomes the next immutable version and the current one.
+	PublishForm(ctx context.Context, a authz.Actor, eventID uuid.UUID, overrideReason string) (FormVersionView, error)
+
+	// ListLintRules is adminListFormLintRules (events.lint_rule.manage).
+	ListLintRules(ctx context.Context, a authz.Actor) ([]LintRule, error)
+	// CreateLintRule is adminCreateFormLintRule (events.lint_rule.manage).
+	CreateLintRule(ctx context.Context, a authz.Actor, in LintRuleInput) (LintRule, error)
+	// UpdateLintRule is adminUpdateFormLintRule (events.lint_rule.manage).
+	UpdateLintRule(ctx context.Context, a authz.Actor, id uuid.UUID, p LintRulePatch) (LintRule, error)
 }
 
 // Deps are the dependencies of the events module. Store, Tx, Outbox,
@@ -125,6 +172,10 @@ type Deps struct {
 	// Files attaches and serves the event cover. nil → cover_file_id is
 	// refused (503) and no cover_url is returned.
 	Files Files
+	// Notices is consent's current consent texts. nil → a form with a
+	// consent field cannot be published (503) and getEventForm lists no
+	// consent_notices.
+	Notices Notices
 }
 
 func (d Deps) validate() error {

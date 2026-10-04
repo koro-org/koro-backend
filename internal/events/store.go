@@ -7,8 +7,8 @@ import (
 )
 
 // Store is the persistence boundary of events (05 §2.2) over events,
-// event_forms (the draft row only; versions are BE-026) and event_staff
-// (02 §11.1–11.3). The GORM store (store_gorm.go) and the in-memory store
+// event_forms, event_form_versions, form_lint_rules and event_staff (02
+// §11.1–11.5). The GORM store (store_gorm.go) and the in-memory store
 // (store_mem.go) pass the same contract test (store_contract_test.go).
 //
 // Every method works in the transaction carried by ctx, if any; the service
@@ -53,6 +53,45 @@ type Store interface {
 	// HasPublishedForm reports whether the form of event id (of orgID) has
 	// a current published version.
 	HasPublishedForm(ctx context.Context, orgID, id uuid.UUID) (bool, error)
+
+	// GetForm returns the form row of event eventID of orgID or ErrNotFound
+	// (BE-026).
+	GetForm(ctx context.Context, orgID, eventID uuid.UUID) (Form, error)
+	// LockForm is GetForm with the row locked for the transaction: the
+	// draft and the version number change under it.
+	LockForm(ctx context.Context, orgID, eventID uuid.UUID) (Form, error)
+	// UpdateFormDraft replaces the draft schema of form formID of orgID and
+	// returns the row (updated_at moves, so the ETag does). ErrNotFound
+	// when the form is not orgID's.
+	UpdateFormDraft(ctx context.Context, orgID, formID uuid.UUID, schema JSON, by uuid.UUID) (Form, error)
+	// InsertFormVersion writes the next version of form v.FormID of orgID:
+	// version_no is one more than the highest, event_id comes from the
+	// event_forms row (06 H-38; v.EventID and v.VersionNo are ignored). It
+	// returns the stored row; ErrNotFound when the form is not orgID's.
+	InsertFormVersion(ctx context.Context, orgID uuid.UUID, v FormVersion) (FormVersion, error)
+	// SetCurrentVersion points form formID of orgID at one of its own
+	// versions and returns the row; ErrNotFound otherwise.
+	SetCurrentVersion(ctx context.Context, orgID, formID, versionID uuid.UUID) (Form, error)
+	// GetFormVersion returns version id of a form of orgID or ErrNotFound.
+	GetFormVersion(ctx context.Context, orgID, id uuid.UUID) (FormVersion, error)
+	// ListFormVersions returns the versions of form formID of orgID by
+	// version_no.
+	ListFormVersions(ctx context.Context, orgID, formID uuid.UUID) ([]FormVersion, error)
+	// HasRegistrations reports whether event eventID of orgID has any
+	// registration (02 §11.6, any status): R-003 §2.5.2 forbids a new
+	// required field after the first one.
+	HasRegistrations(ctx context.Context, orgID, eventID uuid.UUID) (bool, error)
+
+	// ListLintRules returns every form lint rule (02 §11.5; no org scope),
+	// active or not, by class then creation.
+	ListLintRules(ctx context.Context) ([]LintRule, error)
+	// GetLintRule returns a rule or ErrNotFound.
+	GetLintRule(ctx context.Context, id uuid.UUID) (LintRule, error)
+	// InsertLintRule writes a new rule and returns it as stored.
+	InsertLintRule(ctx context.Context, r LintRule) (LintRule, error)
+	// UpdateLintRule writes class, pattern, description_tr, active and
+	// updated_by of r and returns the row; ErrNotFound when it is gone.
+	UpdateLintRule(ctx context.Context, r LintRule) (LintRule, error)
 
 	// StaffRole returns userID's staff role on event id (of orgID).
 	StaffRole(ctx context.Context, orgID, eventID, userID uuid.UUID) (StaffRole, bool, error)

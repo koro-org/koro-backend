@@ -9,7 +9,8 @@ import (
 
 // privacyRetainedReason explains what Erase leaves in place.
 const privacyRetainedReason = "events rows hold no personal data (02 §11.1): created_by and attendance_finalized_by " +
-	"reference the account, which identity anonymises; registrations, tickets and check-ins are BE-028/BE-031's"
+	"reference the account, which identity anonymises, as do the form columns updated_by, published_by and " +
+	"lint_override_by (02 §11.3-11.5); registrations, tickets and check-ins are BE-028/BE-031's"
 
 // privacyProvider is the KVKK provider of the event core (01 §3.3): what
 // it knows about a person is their staff assignments (02 §11.2: who works

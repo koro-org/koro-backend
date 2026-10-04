@@ -19,11 +19,16 @@ type world struct {
 	org        func(t *testing.T) uuid.UUID
 	user       func(t *testing.T) uuid.UUID
 	university func(t *testing.T) uuid.UUID
+	// register adds a registration to an event (BE-028's table; BE-026
+	// only reads whether one exists).
+	register func(t *testing.T, s events.Store, org, eventID uuid.UUID)
 }
 
 func memWorld() world {
 	id := func(*testing.T) uuid.UUID { return uuid.NewV7() }
-	return world{org: id, user: id, university: id}
+	return world{org: id, user: id, university: id, register: func(_ *testing.T, s events.Store, _, eventID uuid.UUID) {
+		s.(*events.MemStore).MarkRegistered(eventID)
+	}}
 }
 
 var seq atomic.Int64

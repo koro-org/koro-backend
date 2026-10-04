@@ -7,6 +7,7 @@ import (
 
 	"koro/internal/audit"
 	"koro/internal/authz"
+	"koro/internal/consent"
 	"koro/internal/directory"
 	"koro/internal/files"
 	"koro/internal/identity"
@@ -70,4 +71,14 @@ type Files interface {
 	Attach(ctx context.Context, a authz.Actor, fileID uuid.UUID, owner files.Owner) error
 	// PresignGet returns a short-lived download URL of a clean file.
 	PresignGet(ctx context.Context, fileID uuid.UUID, ttl time.Duration) (files.Download, error)
+}
+
+// Notices is what events needs from consent (L2; 01 §4.3 Notices): the
+// current consent text of each consent field of a form, shown with the
+// form (getEventForm consent_notices) and required to publish it. It is
+// consent.Service.
+type Notices interface {
+	// Current returns the published version for key (fallback: audience
+	// "all", locale tr-TR) or consent.ErrNoNotice.
+	Current(ctx context.Context, key consent.NoticeKey) (consent.Notice, error)
 }

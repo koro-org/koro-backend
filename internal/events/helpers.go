@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"errors"
+	"maps"
 	"net/url"
 	"strconv"
 	"strings"
@@ -90,13 +91,31 @@ func (s *service) staffRole(ctx context.Context, a authz.Actor, e Event) (StaffR
 	return r, nil
 }
 
-// authorize builds the event's resource for a and runs authz.Can.
+// authorize builds the event's resource for a (its form sub-surface for
+// the form actions) and runs authz.Can.
 func (s *service) authorize(ctx context.Context, a authz.Actor, act authz.Action, e Event) error {
 	res, err := s.resource(ctx, a, e)
 	if err != nil {
 		return err
 	}
+	if formActions[act] {
+		res = formResource(res)
+	}
 	return authz.Can(ctx, a, act, res)
+}
+
+// formActions address the form of an event (event_form, 03 §3.5).
+var formActions = map[authz.Action]bool{
+	authz.EventsFormRead: true, authz.EventsFormManage: true, authz.EventsFormPublish: true,
+}
+
+// formResource is the event_form view of an event's resource: the same
+// organiser and Attrs plus event_status (03 §3.5).
+func formResource(r authz.Resource) authz.Resource {
+	attrs := maps.Clone(r.Attrs)
+	attrs["event_status"] = attrs[authz.AttrStatus]
+	r.Type, r.Attrs = authz.TypeEventForm, attrs
+	return r
 }
 
 // org returns the organiser's summary; a missing org is 404.

@@ -12,11 +12,16 @@
 -- diet, religion, disability = warn_special) and R-003 §2.6 for the other
 -- special categories of KVKK md. 6 (blocked); the two documents disagree on
 -- religion and on the national ID number (T-133).
+-- BE-026 (in place, pre-pilot, R2): rule 1 also catches "Kimlik numaranız",
+-- "TC No" and "nüfus cüzdanı" (the trailing \b missed every suffixed
+-- "numarası"); rules 11-12 add pregnancy, psychiatric and "engel durumu".
+-- internal/events.DefaultLintRules mirrors this file
+-- (TestStore_GormSeedMatchesDefaultLintRules).
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 INSERT INTO form_lint_rules (id, class, pattern, description_tr, active) VALUES
-  ('01990000-0000-7000-8000-000000000001', 'blocked', '\btckn\b|\bt\.?\s?c\.?\s*(kimlik|vatandaslik)|\bkimlik\s*(no|numara|nu)\b|\bvatandaslik\s*(no|numara)',
-    'T.C. kimlik veya vatandaşlık numarası istenemez (veri minimizasyonu, KVKK md. 4).', true),
+  ('01990000-0000-7000-8000-000000000001', 'blocked', '\btckn\b|\bt\.?\s?c\.?\s*(kimlik|vatandaslik|no\b|numara)|\bkimlik\s*(no\b|nu\b|numara)|\bvatandaslik\s*(no|numara)|\bnufus\s*cuzdan',
+    'T.C. kimlik, vatandaşlık veya nüfus cüzdanı numarası istenemez (veri minimizasyonu, KVKK md. 4).', true),
   ('01990000-0000-7000-8000-000000000002', 'blocked', '\b(kredi|banka|debit)\s*kart|\bkart\s*(no|numara|bilgi)|\bcvv\b|\bcvc\b|\bson\s*kullanma\s*tarih',
     'Ödeme kartı bilgisi istenemez.', true),
   ('01990000-0000-7000-8000-000000000003', 'blocked', '\b(parola|sifre|password)|\bpin\s*kod',
@@ -35,9 +40,9 @@ INSERT INTO form_lint_rules (id, class, pattern, description_tr, active) VALUES
     'Cinsel yönelim veya cinsel hayat (özel nitelikli veri, KVKK md. 6).', true),
   ('01990000-0000-7000-8000-000000000010', 'blocked', '\bsendika|\b(dernek|vakif)\s*uyel',
     'Sendika, dernek veya vakıf üyeliği (özel nitelikli veri, KVKK md. 6).', true),
-  ('01990000-0000-7000-8000-000000000011', 'warn_special', '\bsaglik|\bhastalik|\bhasta\b|\balerji|\balerjen|\bilac|\bkronik|\brahatsizlik|\bameliyat|\btedavi',
+  ('01990000-0000-7000-8000-000000000011', 'warn_special', '\bsaglik|\bhastalik|\bhasta\b|\balerji|\balerjen|\bilac|\bkronik|\brahatsizlik|\bameliyat|\btedavi|\bhamile|\bgebelik|\bpsikiyatr|\bdepresyon|\bpsikolojik\s*(destek|tedavi|sorun|durum|rahatsiz)',
     'Sağlık bilgisi (özel nitelikli veri): gerekçeli istisna, ayrı açık rıza ve kısa saklama gerekir.', true),
-  ('01990000-0000-7000-8000-000000000012', 'warn_special', '\bengelli|\bozel\s*ihtiyac|\berisilebilirlik|\btekerlekli\s*sandalye',
+  ('01990000-0000-7000-8000-000000000012', 'warn_special', '\bengelli|\bengel\s*durum|\bengeliniz\b|\bozel\s*ihtiyac|\berisilebilirlik|\btekerlekli\s*sandalye',
     'Engellilik veya erişilebilirlik ihtiyacı (sağlık verisi): gerekçeli istisna gerekir.', true),
   ('01990000-0000-7000-8000-000000000013', 'warn_special', '\bdiyet|\bvegan|\bvejetaryen|\bhelal|\bglutensiz|\bgluten|\byemek\s*(tercih|ihtiyac|kisit)|\bozel\s*menu',
     'Yemek tercihi veya diyet; dolaylı olarak din ya da sağlık bilgisi açığa çıkarabilir.', true),

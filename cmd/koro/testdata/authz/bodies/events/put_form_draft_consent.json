@@ -1,0 +1,4 @@
+{"draft_schema": {"schema_version": 1, "fields": [
+  {"key": "motivation", "type": "long_text", "label": {"tr": "Neden katılmak istiyorsun?"}, "required": true},
+  {"key": "share_sponsor", "type": "consent", "required": false, "consent_purpose": "event_sponsor_share"}
+]}}

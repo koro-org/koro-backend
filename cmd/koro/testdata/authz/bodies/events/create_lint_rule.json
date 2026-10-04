@@ -1,0 +1,1 @@
+{"class": "review_identifier", "pattern": "\\bogrenci\\s*(no|numara)", "description_tr": "Öğrenci numarası: zorunlu değilse istenmemeli."}

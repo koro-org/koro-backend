@@ -190,6 +190,70 @@ func (Form) TableName() string { return "event_forms" }
 // default of 02 §11.3).
 var emptyFormSchema = JSON(`{"schema_version":1,"fields":[]}`)
 
+// FormVersion is one event_form_versions row (02 §11.4): a published form
+// schema, immutable (app_rw has SELECT/INSERT only and koro_forbid_mutation
+// blocks UPDATE/DELETE). A registration keeps the version it was validated
+// against (event_registrations.form_version_id), so a later version never
+// changes what an earlier registration means. form_id and event_id come
+// from the event_forms row (06 H-38); the lint report is part of the row:
+// blocked is always empty, has_sensitive_fields mirrors warn_special and
+// needs the override columns (the CHECKs of 000057).
+type FormVersion struct {
+	ID                 uuid.UUID  `gorm:"type:uuid;column:id;primaryKey"`
+	FormID             uuid.UUID  `gorm:"type:uuid;column:form_id"`
+	EventID            uuid.UUID  `gorm:"type:uuid;column:event_id"`
+	VersionNo          int        `gorm:"column:version_no"`
+	Schema             JSON       `gorm:"column:schema;type:jsonb"`
+	SchemaSHA256       []byte     `gorm:"column:schema_sha256"`
+	FieldCount         int        `gorm:"column:field_count"`
+	HasSensitiveFields bool       `gorm:"column:has_sensitive_fields"`
+	LintReport         JSON       `gorm:"column:lint_report;type:jsonb"`
+	LintOverrideBy     *uuid.UUID `gorm:"type:uuid;column:lint_override_by"`
+	LintOverrideReason *string    `gorm:"column:lint_override_reason"`
+	PublishedBy        uuid.UUID  `gorm:"type:uuid;column:published_by"`
+	PublishedAt        time.Time  `gorm:"column:published_at"`
+}
+
+// TableName implements gorm's Tabler.
+func (FormVersion) TableName() string { return "event_form_versions" }
+
+// LintClass is form_lint_rules.class (02 §11.5; T-133: 02 wins over R-003).
+type LintClass string
+
+// Lint classes. A blocked field (ID, card or account numbers, passwords and
+// the special categories 02 does not list) cannot be published, with no
+// override; a warn_special field (health, disability, diet, religion) and a
+// review_identifier field (passport, licence, tax or social security
+// numbers) need a reasoned override (lint_override_reason).
+const (
+	LintBlocked          LintClass = "blocked"
+	LintWarnSpecial      LintClass = "warn_special"
+	LintReviewIdentifier LintClass = "review_identifier"
+)
+
+// Valid reports whether c is a class of the CHECK constraint.
+func (c LintClass) Valid() bool {
+	return c == LintBlocked || c == LintWarnSpecial || c == LintReviewIdentifier
+}
+
+// LintRule is one form_lint_rules row (02 §11.5): an RE2 pattern matched on
+// the folded (koro_norm) texts of a form field. Rules are data (the DPO
+// tunes them, events.lint_rule.manage); a rule is deactivated, never
+// deleted. No org scope.
+type LintRule struct {
+	ID            uuid.UUID  `gorm:"type:uuid;column:id;primaryKey"`
+	Class         LintClass  `gorm:"column:class"`
+	Pattern       string     `gorm:"column:pattern"`
+	DescriptionTR string     `gorm:"column:description_tr"`
+	Active        bool       `gorm:"column:active"`
+	UpdatedBy     *uuid.UUID `gorm:"type:uuid;column:updated_by"`
+	CreatedAt     time.Time  `gorm:"column:created_at"`
+	UpdatedAt     time.Time  `gorm:"column:updated_at"`
+}
+
+// TableName implements gorm's Tabler.
+func (LintRule) TableName() string { return "form_lint_rules" }
+
 // EventSummary is the cross-module view of an event (01 §4.10 Events.Get).
 // Sensitive = is_sensitive_category OR the organiser is a sensitive club
 // (02 §11.1): consumers (feed, catalog, talent) treat such an event like

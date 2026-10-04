@@ -28,10 +28,13 @@ var slugRe = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 // org_id from the events row like the GORM store (06 H-38). Every method is
 // atomic under one mutex; it has no transactions (db.NopTx).
 type MemStore struct {
-	mu     sync.Mutex
-	events map[uuid.UUID]Event
-	forms  map[uuid.UUID]Form // by event id
-	staff  []Staff            // insertion order
+	mu       sync.Mutex
+	events   map[uuid.UUID]Event
+	forms    map[uuid.UUID]Form        // by event id
+	versions map[uuid.UUID]FormVersion // by id; never changed once written
+	rules    []LintRule                // insertion order; seeded with DefaultLintRules
+	reg      map[uuid.UUID]bool        // events with a registration (MarkRegistered; BE-028)
+	staff    []Staff                   // insertion order
 	// now stamps created_at/updated_at like the column defaults and the
 	// touch trigger; updated_at always moves forward (two writes at the same
 	// fake instant still change the ETag, as two transactions do).
@@ -41,8 +44,18 @@ type MemStore struct {
 var _ Store = (*MemStore)(nil)
 
 // NewMemStore returns an empty in-memory Store; now stamps the rows.
+// The lint rules start as the seed of migration 000060 (DefaultLintRules).
 func NewMemStore(now func() time.Time) *MemStore {
-	return &MemStore{events: map[uuid.UUID]Event{}, forms: map[uuid.UUID]Form{}, now: now}
+	s := &MemStore{
+		events: map[uuid.UUID]Event{}, forms: map[uuid.UUID]Form{}, versions: map[uuid.UUID]FormVersion{},
+		reg: map[uuid.UUID]bool{}, now: now,
+	}
+	seeded := s.stamp(time.Time{})
+	for _, r := range DefaultLintRules() {
+		r.CreatedAt, r.UpdatedAt = seeded, seeded
+		s.rules = append(s.rules, r)
+	}
+	return s
 }
 
 func (s *MemStore) stamp(prev time.Time) time.Time {
@@ -345,18 +358,53 @@ func (s *MemStore) Form(eventID uuid.UUID) (Form, bool) {
 	return f, ok
 }
 
-// SetFormVersion points an event's form at a published version (BE-026
-// writes the versions; tests and matrix fixtures stand in for it).
+// SetFormVersion publishes the empty form as version versionID of an
+// event's form and points the form at it (tests and matrix fixtures that
+// need "a published form" without going through publishEventForm).
 func (s *MemStore) SetFormVersion(eventID, versionID uuid.UUID) error {
+	return s.PutFormVersion(eventID, versionID, FormSchema{SchemaVersion: FormSchemaVersion, Fields: []FormField{}})
+}
+
+// PutFormVersion publishes schema (no lint findings) as version versionID
+// of an event's form and points the form at it (tests and fixtures).
+func (s *MemStore) PutFormVersion(eventID, versionID uuid.UUID, schema FormSchema) error {
+	s.mu.Lock()
+	f, ok := s.forms[eventID]
+	s.mu.Unlock()
+	if !ok {
+		return ErrNotFound
+	}
+	v, err := s.insertVersion(f.OrgID, FormVersion{
+		ID: versionID, FormID: f.ID, Schema: JSON(schema.Canonical()), SchemaSHA256: schema.SHA256(),
+		FieldCount: len(schema.Fields), LintReport: LintReport{}.JSON(), PublishedBy: uuid.NewV7(), PublishedAt: s.now(),
+	})
+	if err != nil {
+		return err
+	}
+	_, err = s.setCurrent(f.OrgID, f.ID, v.ID)
+	return err
+}
+
+// PutFormDraft replaces the draft schema of an event's form as is, with
+// updated_at at (matrix fixtures: a fixed ETag).
+func (s *MemStore) PutFormDraft(eventID uuid.UUID, schema FormSchema, at time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f, ok := s.forms[eventID]
 	if !ok {
 		return ErrNotFound
 	}
-	f.CurrentVersionID = &versionID
+	f.DraftSchema, f.UpdatedAt = JSON(schema.Canonical()), at
 	s.forms[eventID] = f
 	return nil
+}
+
+// MarkRegistered records that an event has a registration (BE-028 writes
+// them; tests stand in for it).
+func (s *MemStore) MarkRegistered(eventID uuid.UUID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reg[eventID] = true
 }
 
 // HasPublishedForm implements Store.

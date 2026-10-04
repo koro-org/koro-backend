@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"regexp"
 	"strconv"
 	"testing"
 	"uuid"
@@ -25,7 +26,7 @@ func pgWorld(d *db.DB) world {
 			t.Fatal(err)
 		}
 	}
-	return world{
+	w := world{
 		org: func(t *testing.T) uuid.UUID {
 			id, n := uuid.NewV7(), strconv.FormatInt(seq.Add(1), 10)
 			exec(t, `INSERT INTO organizations (id, kind, name, slug) VALUES ($1, 'club', $2, $3)`, id, "Org "+n, "org-"+n)
@@ -45,6 +46,86 @@ func pgWorld(d *db.DB) world {
 				id, org, "T-"+n, "Üniversite "+n)
 			return id
 		},
+	}
+	w.register = func(t *testing.T, _ events.Store, org, eventID uuid.UUID) {
+		exec(t, `INSERT INTO event_registrations (event_id, org_id, user_id, status, source, answers_purge_at)
+			VALUES ($1, $2, $3, 'pending', 'web', now() + interval '90 days')`, eventID, org, w.user(t))
+	}
+	return w
+}
+
+func TestStore_FormContract_Gorm(t *testing.T) {
+	t.Parallel()
+	formStoreContract(t, func(t *testing.T) (events.Store, world) {
+		d := testutil.NewDB(t)
+		return events.NewGormStore(d.ORM), pgWorld(d)
+	})
+}
+
+// TestStore_GormSeedMatchesDefaultLintRules: migration 000060 and
+// DefaultLintRules (the in-memory seed) are the same 19 rules, and every
+// seeded pattern compiles as Go RE2 and does not match the empty text.
+func TestStore_GormSeedMatchesDefaultLintRules(t *testing.T) {
+	t.Parallel()
+	d := testutil.NewDB(t)
+	got, err := events.NewGormStore(d.ORM).ListLintRules(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := events.DefaultLintRules()
+	if len(got) != len(want) {
+		t.Fatalf("seed has %d rules, DefaultLintRules %d", len(got), len(want))
+	}
+	for i := range want {
+		g, w := got[i], want[i]
+		if g.ID != w.ID || g.Class != w.Class || g.Pattern != w.Pattern || g.DescriptionTR != w.DescriptionTR || g.Active != w.Active {
+			t.Fatalf("rule %d:\n db  %+v\n go  %+v", i, g, w)
+		}
+		re, err := regexp.Compile(g.Pattern)
+		if err != nil || re.MatchString("") {
+			t.Fatalf("seed rule %s does not compile or matches the empty text: %v", g.ID, err)
+		}
+	}
+}
+
+// TestStore_GormFormVersionImmutable: app_rw can neither update nor delete
+// a published version (02 §11.4: no grant, and koro_forbid_mutation).
+func TestStore_GormFormVersionImmutable(t *testing.T) {
+	t.Parallel()
+	d := testutil.NewDB(t)
+	w := pgWorld(d)
+	s := events.NewGormStore(d.ORM)
+	ctx := t.Context()
+	org, by := w.org(t), w.user(t)
+	e := row(org, by, "Değişmez", start)
+	if _, ok, err := s.InsertEvent(ctx, e); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if err := s.InsertForm(ctx, org, events.Form{ID: uuid.NewV7(), EventID: e.ID, DraftSchema: events.JSON(`{"schema_version":1,"fields":[]}`)}); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.GetForm(ctx, org, e.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc := events.FormSchema{SchemaVersion: 1, Fields: []events.FormField{}}
+	v, err := s.InsertFormVersion(ctx, org, events.FormVersion{ID: uuid.NewV7(), FormID: f.ID, Schema: events.JSON(sc.Canonical()),
+		SchemaSHA256: sc.SHA256(), LintReport: events.LintReport{}.JSON(), PublishedBy: by, PublishedAt: t0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`UPDATE event_form_versions SET version_no = 9 WHERE id = $1`,
+		`UPDATE event_form_versions SET schema = '{"schema_version":1,"fields":[]}' WHERE id = $1`,
+		`DELETE FROM event_form_versions WHERE id = $1`,
+	} {
+		if _, err := d.Pool.Exec(ctx, stmt, v.ID); err == nil {
+			t.Fatalf("%s succeeded", stmt)
+		}
+	}
+	got, err := s.GetFormVersion(ctx, org, v.ID)
+	if err != nil || got.VersionNo != 1 {
+		t.Fatalf("version = %+v, %v", got, err)
 	}
 }
 

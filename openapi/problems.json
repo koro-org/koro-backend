@@ -294,16 +294,40 @@
     "type": "urn:koro:problem:events.empty_patch"
   },
   {
+    "code": "events.form_blocked_field",
+    "status": 422,
+    "title": "The form asks for data that may not be collected",
+    "type": "urn:koro:problem:events.form_blocked_field"
+  },
+  {
+    "code": "events.form_incompatible",
+    "status": 422,
+    "title": "The draft changes earlier fields in a way existing registrations cannot follow",
+    "type": "urn:koro:problem:events.form_incompatible"
+  },
+  {
     "code": "events.form_required",
     "status": 422,
     "title": "A published registration form is required to publish this event",
     "type": "urn:koro:problem:events.form_required"
   },
   {
+    "code": "events.form_unchanged",
+    "status": 409,
+    "title": "The draft equals the current form version",
+    "type": "urn:koro:problem:events.form_unchanged"
+  },
+  {
     "code": "events.invalid_state",
     "status": 409,
     "title": "Event status does not allow this change",
     "type": "urn:koro:problem:events.invalid_state"
+  },
+  {
+    "code": "events.lint_override_required",
+    "status": 422,
+    "title": "A reason is required to publish a form with sensitive or identifier fields",
+    "type": "urn:koro:problem:events.lint_override_required"
   },
   {
     "code": "events.slug_taken",

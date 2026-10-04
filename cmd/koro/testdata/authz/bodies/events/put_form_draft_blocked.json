@@ -1,0 +1,4 @@
+{"draft_schema": {"schema_version": 1, "fields": [
+  {"key": "motivation", "type": "long_text", "label": {"tr": "Neden katılmak istiyorsun?"}, "required": true},
+  {"key": "kimlik", "type": "short_text", "label": {"tr": "T.C. Kimlik Numaranız"}, "required": true}
+]}}

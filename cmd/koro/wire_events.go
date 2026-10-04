@@ -22,7 +22,9 @@ import (
 // Consumed: c.audit.svc, c.orgs.svc (the organiser's kind, status and
 // name), c.directory.svc (sensitive clubs, a club's university, the orgs
 // of a university), c.identity.svc (staff accounts and names; nil → staff
-// cannot be added), c.files.svc (the cover; nil → no cover).
+// cannot be added), c.files.svc (the cover; nil → no cover),
+// c.consent.svc (BE-026: the current consent texts of a form's consent
+// fields; nil → such a form cannot be published).
 //
 // Provided, set in build: svc (events.Events for feed and catalog) and the
 // events KVKK provider (staff assignments).
@@ -65,6 +67,9 @@ func (w *eventsWiring) build(c *container) error {
 	if svc := c.files.svc; svc != nil {
 		d.Files = svc
 	}
+	if svc := c.consent.svc; svc != nil {
+		d.Notices = svc
+	}
 	mod, err := events.New(d)
 	if err != nil {
 		return err
@@ -78,6 +83,6 @@ func (w *eventsWiring) build(c *container) error {
 // event.schedule_changed are consumed by BE-028/BE-031 and catalog.
 func (w *eventsWiring) tasks(c *container) {}
 
-// routes: the 12 operations of BE-024 (04 §2.6); w.svc is nil under
-// `koro openapi`, which Register tolerates.
+// routes: the 12 operations of BE-024 and the 7 of BE-026 (04 §2.6);
+// w.svc is nil under `koro openapi`, which Register tolerates.
 func (w *eventsWiring) routes(c *container, api huma.API) { events.Register(api, w.svc) }

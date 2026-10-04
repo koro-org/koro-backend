@@ -1875,6 +1875,29 @@ components:
         - address
         - email
       type: object
+    CreateRuleInputBody:
+      additionalProperties: false
+      properties:
+        class:
+          enum:
+            - blocked
+            - warn_special
+            - review_identifier
+          type: string
+        description_tr:
+          maxLength: 500
+          minLength: 3
+          type: string
+        pattern:
+          description: RE2 expression on the lower-case, accent-free text
+          maxLength: 500
+          minLength: 1
+          type: string
+      required:
+        - class
+        - pattern
+        - description_tr
+      type: object
     CreateUploadInputBody:
       additionalProperties: false
       properties:
@@ -2729,6 +2752,76 @@ components:
         - requires_registration
         - registration_mode
       type: object
+    EventFormDTO:
+      additionalProperties: false
+      properties:
+        answers_schema:
+          additionalProperties: {}
+          description: JSON Schema 2020-12 of the answers object
+          type: object
+        consent_notices:
+          items:
+            $ref: "#/components/schemas/NoticeDTO"
+          type: array
+        form_version_id:
+          format: uuid
+          type: string
+        schema:
+          $ref: "#/components/schemas/FormSchema"
+        version_no:
+          format: int64
+          type: integer
+      required:
+        - form_version_id
+        - version_no
+        - schema
+        - answers_schema
+        - consent_notices
+      type: object
+    EventFormDraftDTO:
+      additionalProperties: false
+      properties:
+        current_version_no:
+          description: Absent before the first publication
+          format: int64
+          type: integer
+        draft_schema:
+          $ref: "#/components/schemas/FormSchema"
+        lint_report:
+          $ref: "#/components/schemas/FormLintReportDTO"
+          description: Preview with the active rules
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - draft_schema
+        - lint_report
+        - updated_at
+      type: object
+    EventFormVersionDTO:
+      additionalProperties: false
+      properties:
+        form_version_id:
+          format: uuid
+          type: string
+        has_sensitive_fields:
+          description: "warn_special fields: answers are stored encrypted"
+          type: boolean
+        lint_report:
+          $ref: "#/components/schemas/FormLintReportDTO"
+        published_at:
+          format: date-time
+          type: string
+        version_no:
+          format: int64
+          type: integer
+      required:
+        - form_version_id
+        - version_no
+        - lint_report
+        - has_sensitive_fields
+        - published_at
+      type: object
     EventOrgDTO:
       additionalProperties: false
       properties:
@@ -3047,6 +3140,234 @@ components:
         - upload_url
         - upload_headers
         - expires_at
+      type: object
+    FormField:
+      additionalProperties: false
+      properties:
+        consent_purpose:
+          description: "consent: the consent purpose (event_sponsor_share)"
+          type: string
+        help:
+          additionalProperties:
+            type: string
+          description: HTML fragment per locale, cleaned by the server's allow-list
+          type: object
+        key:
+          description: Answer key; never reused with another type
+          pattern: ^[a-z][a-z0-9_]{1,40}$
+          type: string
+        label:
+          additionalProperties:
+            type: string
+          description: Plain text per locale (tr required; optional for consent fields)
+          type: object
+        options:
+          description: single_select, multi_select
+          items:
+            $ref: "#/components/schemas/FormFieldOption"
+          maxItems: 50
+          type: array
+        purpose:
+          additionalProperties:
+            type: string
+          description: Why the field is asked (KVKK), shown to the user
+          type: object
+        required:
+          type: boolean
+        type:
+          enum:
+            - short_text
+            - long_text
+            - single_select
+            - multi_select
+            - checkbox
+            - number
+            - url
+            - phone
+            - date
+            - consent
+          type: string
+        validation:
+          $ref: "#/components/schemas/FormFieldValidation"
+      required:
+        - key
+        - type
+        - required
+      type: object
+    FormFieldOption:
+      additionalProperties: false
+      properties:
+        deleted:
+          description: Kept for earlier answers; cannot be chosen
+          type: boolean
+        label:
+          additionalProperties:
+            type: string
+          description: Option text per locale (tr required)
+          type: object
+        value:
+          description: Stable answer value
+          pattern: ^[a-z0-9][a-z0-9_-]{0,39}$
+          type: string
+      required:
+        - value
+        - label
+      type: object
+    FormFieldValidation:
+      additionalProperties: false
+      properties:
+        allowed_hosts:
+          description: "url: allowed host names (subdomains included)"
+          items:
+            type: string
+          maxItems: 10
+          type: array
+        integer:
+          description: "number: whole numbers only"
+          type: boolean
+        max:
+          description: "number: upper bound (inclusive)"
+          format: double
+          type: number
+        max_date:
+          description: "date: latest YYYY-MM-DD (inclusive)"
+          type: string
+        max_length:
+          description: short_text (≤ 200), long_text (≤ 2000)
+          format: int64
+          minimum: 1
+          type: integer
+        max_select:
+          description: multi_select
+          format: int64
+          minimum: 1
+          type: integer
+        min:
+          description: "number: lower bound (inclusive)"
+          format: double
+          type: number
+        min_date:
+          description: "date: earliest YYYY-MM-DD (inclusive)"
+          type: string
+        min_length:
+          description: short_text, long_text
+          format: int64
+          minimum: 0
+          type: integer
+        min_select:
+          description: multi_select
+          format: int64
+          minimum: 0
+          type: integer
+        pattern:
+          description: "short_text: RE2 expression the answer must match"
+          maxLength: 200
+          type: string
+      type: object
+    FormLintHitDTO:
+      additionalProperties: false
+      properties:
+        description_tr:
+          type: string
+        field_key:
+          description: Key of the field; empty for the form description
+          type: string
+        rule_id:
+          format: uuid
+          type: string
+      required:
+        - field_key
+        - rule_id
+        - description_tr
+      type: object
+    FormLintReportDTO:
+      additionalProperties: false
+      properties:
+        blocked:
+          description: Cannot be published
+          items:
+            $ref: "#/components/schemas/FormLintHitDTO"
+          type: array
+        review_identifier:
+          description: Needs lint_override_reason
+          items:
+            $ref: "#/components/schemas/FormLintHitDTO"
+          type: array
+        warn_special:
+          description: Needs lint_override_reason; answers are stored encrypted
+          items:
+            $ref: "#/components/schemas/FormLintHitDTO"
+          type: array
+      required:
+        - blocked
+        - warn_special
+        - review_identifier
+      type: object
+    FormLintRuleDTO:
+      additionalProperties: false
+      properties:
+        active:
+          type: boolean
+        class:
+          enum:
+            - blocked
+            - warn_special
+            - review_identifier
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        description_tr:
+          type: string
+        pattern:
+          description: RE2 on the lower-case, accent-free text
+          type: string
+        rule_id:
+          format: uuid
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - rule_id
+        - class
+        - pattern
+        - description_tr
+        - active
+        - created_at
+        - updated_at
+      type: object
+    FormLintRuleList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/FormLintRuleDTO"
+          type: array
+      required:
+        - items
+      type: object
+    FormSchema:
+      additionalProperties: false
+      properties:
+        description:
+          additionalProperties:
+            type: string
+          description: HTML fragment shown above the form, cleaned by the server's allow-list
+          type: object
+        fields:
+          items:
+            $ref: "#/components/schemas/FormField"
+          maxItems: 20
+          type: array
+        schema_version:
+          enum:
+            - 1
+          format: int64
+          type: integer
+      required:
+        - schema_version
+        - fields
       type: object
     GrantRoleInputBody:
       additionalProperties: false
@@ -4166,6 +4487,14 @@ components:
         - status
         - code
       type: object
+    PublishFormInputBody:
+      additionalProperties: false
+      properties:
+        lint_override_reason:
+          description: 10-500 characters; required when the lint finds warn_special or review_identifier fields
+          maxLength: 500
+          type: string
+      type: object
     PurposeDTO:
       additionalProperties: false
       properties:
@@ -4225,6 +4554,14 @@ components:
           type: string
       required:
         - push_token_id
+      type: object
+    PutFormDraftInputBody:
+      additionalProperties: false
+      properties:
+        draft_schema:
+          $ref: "#/components/schemas/FormSchema"
+      required:
+        - draft_schema
       type: object
     PutLanguagesInputBody:
       additionalProperties: false
@@ -5627,6 +5964,27 @@ components:
         reauth:
           $ref: "#/components/schemas/ReauthDTO"
           description: Re-authentication proof (03 §6.2)
+      type: object
+    UpdateRuleInputBody:
+      additionalProperties: false
+      properties:
+        active:
+          description: false retires the rule
+          type: boolean
+        class:
+          enum:
+            - blocked
+            - warn_special
+            - review_identifier
+          type: string
+        description_tr:
+          maxLength: 500
+          minLength: 3
+          type: string
+        pattern:
+          maxLength: 500
+          minLength: 1
+          type: string
       type: object
     UpdateStaffInputBody:
       additionalProperties: false
@@ -7218,6 +7576,104 @@ paths:
         - entitlements
       x-koro-action: entitlements.entitlement.revoke
       x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/form-lint-rules:
+    get:
+      description: Active and retired rules, blocked first.
+      operationId: adminListFormLintRules
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FormLintRuleList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the form lint rules
+      tags:
+        - events
+      x-koro-action: events.lint_rule.manage
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+    post:
+      description: pattern is an RE2 expression matched on the lower-case, accent-free text of a field ("saglik"); a pattern that does not compile or matches the empty text is 422.
+      operationId: adminCreateFormLintRule
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRuleInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FormLintRuleDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Create a form lint rule
+      tags:
+        - events
+      x-koro-action: events.lint_rule.manage
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/form-lint-rules/{rule_id}:
+    patch:
+      description: "Rules are never deleted: active=false retires one."
+      operationId: adminUpdateFormLintRule
+      parameters:
+        - description: Lint rule ID
+          in: path
+          name: rule_id
+          required: true
+          schema:
+            description: Lint rule ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateRuleInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FormLintRuleDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Update a form lint rule
+      tags:
+        - events
+      x-koro-action: events.lint_rule.manage
       x-koro-rate-limit: write_default
       x-koro-surface: admin
   /api/v1/admin/ledger/transactions:
@@ -9954,6 +10410,171 @@ paths:
       tags:
         - events
       x-koro-action: events.event.cancel
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+  /api/v1/events/{event_id}/form:
+    get:
+      description: "The current published version (404 when the event has none or is not visible). answers_schema is the JSON Schema 2020-12 document the server validates the answers with (plus phone, URL host and date range rules). A minor does not get the sponsor-sharing consent field. consent_notices are the current texts of the consent fields (Accept-Language: tr or en)."
+      operationId: getEventForm
+      parameters:
+        - description: Event ID
+          in: path
+          name: event_id
+          required: true
+          schema:
+            description: Event ID
+            type: string
+        - description: tr or en; tr-TR otherwise
+          in: header
+          name: Accept-Language
+          schema:
+            description: tr or en; tr-TR otherwise
+            maxLength: 1000
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventFormDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: Get the registration form of an event
+      tags:
+        - events
+      x-koro-action: events.form.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: public
+  /api/v1/events/{event_id}/form/draft:
+    get:
+      description: The draft schema with a KVKK lint preview over the active rules. The ETag is the If-Match value of putEventFormDraft.
+      operationId: getEventFormDraft
+      parameters:
+        - description: Event ID
+          in: path
+          name: event_id
+          required: true
+          schema:
+            description: Event ID
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventFormDraftDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get the form draft
+      tags:
+        - events
+      x-koro-action: events.form.manage
+      x-koro-rate-limit: read_default
+      x-koro-surface: resource
+    put:
+      description: "If-Match with the ETag of getEventFormDraft is required: missing → 428, stale → 412. At most 20 fields; keys match ^[a-z][a-z0-9_]{1,40}$; help and description are HTML cleaned by the server's allow-list. Every save returns the lint preview. Cancelled and completed events: 409."
+      operationId: putEventFormDraft
+      parameters:
+        - description: Event ID
+          in: path
+          name: event_id
+          required: true
+          schema:
+            description: Event ID
+            type: string
+        - description: "ETag of getEventFormDraft (required: missing → 428, stale → 412)"
+          in: header
+          name: If-Match
+          schema:
+            description: "ETag of getEventFormDraft (required: missing → 428, stale → 412)"
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PutFormDraftInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventFormDraftDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Replace the form draft
+      tags:
+        - events
+      x-koro-action: events.form.manage
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+  /api/v1/events/{event_id}/form/versions:
+    post:
+      description: "The draft becomes the next immutable version and the current form. A blocked field: 422 events.form_blocked_field (no override). A warn_special or review_identifier field needs lint_override_reason (422 events.lint_override_required). A draft equal to the current version: 409 events.form_unchanged. An earlier key with another type, or a new required field after the first registration: 422 events.form_incompatible. Consent fields need a published consent text."
+      operationId: publishEventForm
+      parameters:
+        - description: Event ID
+          in: path
+          name: event_id
+          required: true
+          schema:
+            description: Event ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublishFormInputBody"
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventFormVersionDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Publish the form draft as a new version
+      tags:
+        - events
+      x-koro-action: events.form.publish
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource

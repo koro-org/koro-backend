@@ -23,11 +23,29 @@ var (
 	// (event_staff primary key).
 	ErrStaffExists = problem.New(problem.Conflict, "events.staff_exists", "User is already a staff member of this event")
 
+	// ErrFormBlockedField: the form draft has a field of the lint class
+	// blocked (ID, card or account numbers, passwords, special categories
+	// 02 does not allow); there is no override (02 §11.4, 04 §1.10).
+	ErrFormBlockedField = problem.New(problem.Invalid, "events.form_blocked_field",
+		"The form asks for data that may not be collected")
+	// ErrLintOverrideRequired: the draft has a warn_special or
+	// review_identifier field and no lint_override_reason (04 §1.10).
+	ErrLintOverrideRequired = problem.New(problem.Invalid, "events.lint_override_required",
+		"A reason is required to publish a form with sensitive or identifier fields")
+	// ErrFormUnchanged: the draft equals the current version (R-003 §2.5.2:
+	// the schema hash prevents a duplicate publication).
+	ErrFormUnchanged = problem.New(problem.Conflict, "events.form_unchanged", "The draft equals the current form version")
+	// ErrFormIncompatible: the draft reuses an earlier key with another
+	// type, or adds a required field after the first registration (R-003
+	// §2.5.2).
+	ErrFormIncompatible = problem.New(problem.Invalid, "events.form_incompatible",
+		"The draft changes earlier fields in a way existing registrations cannot follow")
+
 	// ErrNotFound: the event (or staff member) does not exist or is not
 	// visible to the caller (03 §3.6).
 	ErrNotFound = problem.ErrNotFound
 	// ErrPreconditionRequired / ErrPreconditionFailed: If-Match missing or
-	// stale on updateEvent (04 §1.13).
+	// stale on updateEvent and putEventFormDraft (04 §1.13).
 	ErrPreconditionRequired = problem.ErrPreconditionRequired
 	ErrPreconditionFailed   = problem.ErrPreconditionFailed
 )

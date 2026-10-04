@@ -1,4 +1,4 @@
-# Authz matrix of the events module (03 §5.6, 04 §2.6; BE-024). 12 operations × 18 personas.
+# Authz matrix of the events module (03 §5.6, 04 §2.6; BE-024, BE-026). 19 operations × 18 personas.
 # Event visibility (03 §3.6): published public events are everyone's; a members event is its org's
 # members', its staff's and every platform role's; a university event is also the verified students'
 # of that university; a draft is its organiser's club_admin / university_rep's and every platform
@@ -8,6 +8,10 @@
 # for the platform org (no persona is a member of it → 403); it updates and cancels any event. k13:
 # companies create no events (403). Business rules (428/412, 409 status machine, 422 form_required,
 # 404 unknown staff account) live in scenarios/events.yaml and the service tests.
+# BE-026 forms: the published form follows the event's visibility (P); the draft and its publication
+# are the organiser's management sub-surface: the org's other members 403, everyone else 404 (another
+# org's form is 404, 03 §3.6), platform roles 403 (k-po: no persona is in the platform org). Lint rules
+# are the admin surface: dpo and platform_admin; every other signed-in user 403.
 version: 1
 groups:
   # signed-in users without a membership in club_a (and no platform role).
@@ -36,6 +40,11 @@ groups:
   ev_uni_a_students: [student, student_minor, club_member, club_admin, event_staff]
   # signed-in users who do not see event_uni_a.
   ev_uni_hidden: [user_unverified, other_club_admin, company_member, company_admin, other_company_member]
+  # signed-in users without a platform role (the admin surface answers them 403).
+  ev_no_platform_role: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin, event_staff,
+                        university_rep, company_member, company_admin, other_company_member]
+  # platform roles other than dpo and platform_admin (no lint rule grant).
+  ev_lint_denied_staff: [moderator, support, finance_admin, talent_auditor]
   # signed-in users who do not see event_sensitive (club_member is a member of club_sensitive).
   ev_sensitive_hidden: [user_unverified, student, student_minor, club_admin, other_club_admin, event_staff,
                         university_rep, company_member, company_admin, other_company_member]
@@ -320,10 +329,173 @@ operations:
           event_staff: 403
           "@platform_staff": 403
 
+  getEventForm:
+    method: GET
+    path: /api/v1/events/{event_id}/form
+    action: events.form.read
+    public: true
+    path_params: { event_id: event_a }
+    expect: { "@all": 200 }
+    variants:
+      - name: members_event
+        path_params: { event_id: event_a_members }
+        expect:
+          anonymous: 404
+          "@ev_members_hidden": 404
+          club_member: 200
+          club_admin: 200
+          event_staff: 200
+          "@platform_staff": 200
+      - name: draft_event
+        path_params: { event_id: event_a_draft }
+        note: a draft event's form is published before the event (publishEvent needs it); its managers read it
+        expect:
+          anonymous: 404
+          "@ev_draft_hidden": 404
+          club_admin: 200
+          "@platform_staff": 200
+      - name: university_event
+        path_params: { event_id: event_uni_a }
+        expect:
+          anonymous: 404
+          "@ev_uni_hidden": 404
+          "@ev_uni_a_students": 200
+          university_rep: 200
+          "@platform_staff": 200
+      - name: no_published_version
+        path_params: { event_id: event_a_draft_bare }
+        note: 04 §2.6 — an event without a published form version has no form (404 for everyone)
+        expect: { "@all": 404 }
+
+  getEventFormDraft:
+    method: GET
+    path: /api/v1/events/{event_id}/form/draft
+    action: events.form.manage
+    path_params: { event_id: event_a }
+    expect:
+      anonymous: 401
+      "@ev_outsiders_club_a": 404
+      club_member: 403
+      club_admin: 200
+      "@platform_staff": 403
+    variants:
+      - name: draft_event
+        path_params: { event_id: event_a_draft }
+        expect:
+          anonymous: 401
+          "@ev_draft_hidden": 404
+          club_admin: 200
+          "@platform_staff": 403
+      - name: university_event
+        path_params: { event_id: event_uni_a }
+        expect:
+          anonymous: 401
+          "@ev_outsiders_uni_a": 404
+          university_rep: 200
+          "@platform_staff": 403
+
+  putEventFormDraft:
+    method: PUT
+    path: /api/v1/events/{event_id}/form/draft
+    action: events.form.manage
+    path_params: { event_id: event_a }
+    headers: { If-Match: '"1hmhuo3hji000"' }
+    body: bodies/events/put_form_draft.json
+    expect:
+      anonymous: 401
+      "@ev_outsiders_club_a": 404
+      club_member: 403
+      club_admin: 200
+      "@platform_staff": 403
+    variants:
+      - name: draft_event
+        path_params: { event_id: event_a_draft }
+        expect:
+          anonymous: 401
+          "@ev_draft_hidden": 404
+          club_admin: 200
+          "@platform_staff": 403
+      - name: university_event
+        path_params: { event_id: event_uni_a }
+        expect:
+          anonymous: 401
+          "@ev_outsiders_uni_a": 404
+          university_rep: 200
+          "@platform_staff": 403
+
+  publishEventForm:
+    method: POST
+    path: /api/v1/events/{event_id}/form/versions
+    action: events.form.publish
+    path_params: { event_id: event_a }
+    expect:
+      anonymous: 401
+      "@ev_outsiders_club_a": 404
+      club_member: 403
+      club_admin: 201
+      "@platform_staff": 403
+    variants:
+      - name: first_version
+        path_params: { event_id: event_a_draft_bare }
+        expect:
+          anonymous: 401
+          "@ev_draft_hidden": 404
+          club_admin: 201
+          "@platform_staff": 403
+      - name: university_event
+        path_params: { event_id: event_uni_a }
+        expect:
+          anonymous: 401
+          "@ev_outsiders_uni_a": 404
+          university_rep: 201
+          "@platform_staff": 403
+
+  adminListFormLintRules:
+    method: GET
+    path: /api/v1/admin/form-lint-rules
+    action: events.lint_rule.manage
+    expect:
+      anonymous: 401
+      "@ev_no_platform_role": 403
+      dpo: 200
+      platform_admin: 200
+      "@ev_lint_denied_staff": 403
+
+  adminCreateFormLintRule:
+    method: POST
+    path: /api/v1/admin/form-lint-rules
+    action: events.lint_rule.manage
+    body: bodies/events/create_lint_rule.json
+    expect:
+      anonymous: 401
+      "@ev_no_platform_role": 403
+      dpo: 201
+      platform_admin: 201
+      "@ev_lint_denied_staff": 403
+
+  adminUpdateFormLintRule:
+    method: PATCH
+    path: /api/v1/admin/form-lint-rules/{rule_id}
+    action: events.lint_rule.manage
+    path_params: { rule_id: "literal:01990000-0000-7000-8000-000000000016" }
+    body: bodies/events/update_lint_rule.json
+    expect:
+      anonymous: 401
+      "@ev_no_platform_role": 403
+      dpo: 200
+      platform_admin: 200
+      "@ev_lint_denied_staff": 403
+    variants:
+      - name: unknown_rule
+        path_params: { rule_id: "literal:00000000-0000-7000-8000-0000000000bb" }
+        expect:
+          anonymous: 401
+          "@ev_no_platform_role": 403
+          dpo: 404
+          platform_admin: 404
+          "@ev_lint_denied_staff": 403
+
 pending_actions:
-  - events.form.read                 # BE-026
-  - events.form.manage               # BE-026
-  - events.form.publish              # BE-026
   - events.registration.create       # BE-028
   - events.registration.list_own     # BE-028
   - events.registration.read_own     # BE-028
@@ -343,4 +515,3 @@ pending_actions:
   - events.export.create             # BE-050
   - events.export.list               # BE-050
   - events.export.download           # BE-050
-  - events.lint_rule.manage          # BE-026

@@ -15,9 +15,23 @@ import (
 // clock (2026-10-03), so a draft fixture can be published.
 var matrixEventStart = time.Date(2026, 11, 20, 15, 0, 0, 0, time.UTC)
 
+// matrixFormV1 is the published version 1 of a fixture form; matrixFormDraft
+// its draft (one more, optional field): publishEventForm publishes it as
+// version 2 (BE-026).
+var (
+	matrixFormV1 = events.FormSchema{SchemaVersion: events.FormSchemaVersion, Fields: []events.FormField{
+		{Key: "motivation", Type: events.FieldLongText, Label: events.LocalText{"tr": "Neden katılmak istiyorsun?"}, Required: true},
+	}}
+	matrixFormDraft = events.FormSchema{SchemaVersion: events.FormSchemaVersion, Fields: []events.FormField{
+		matrixFormV1.Fields[0],
+		{Key: "school", Type: events.FieldShortText, Label: events.LocalText{"tr": "Okulun"}},
+	}}
+)
+
 // matrixFixtures seeds the events of the matrix (03 §7.3; fixtures/
 // events.yaml): kind event (org, status, visibility, university, form:
-// published gives the form a published version, checkin) and kind staff
+// published gives the form a published version and a newer draft,
+// checkin) and kind staff
 // (event, persona or helper user, role). Every event is dated
 // matrixOrgTime, so an untouched event's ETag is "1hmhuo3hji000" (the
 // If-Match the matrix files send).
@@ -73,10 +87,16 @@ func (w *eventsWiring) matrixFixtures(fx *matrixFixtures) error {
 				DraftSchema: events.JSON(`{"schema_version":1,"fields":[]}`)}); err != nil {
 				return fmt.Errorf("form of %s: %w", f.Name, err)
 			}
+			draft := events.FormSchema{SchemaVersion: events.FormSchemaVersion, Fields: []events.FormField{}}
 			if str("form") == "published" {
-				if err := mem.SetFormVersion(id, uuid.NewV7()); err != nil {
+				if err := mem.PutFormVersion(id, uuid.NewV7(), matrixFormV1); err != nil {
 					return fmt.Errorf("form version of %s: %w", f.Name, err)
 				}
+				draft = matrixFormDraft
+			}
+			// The draft last, at the fixed instant: its ETag is the event's.
+			if err := mem.PutFormDraft(id, draft, t); err != nil {
+				return fmt.Errorf("form draft of %s: %w", f.Name, err)
 			}
 		case "staff":
 			ev, err := fx.Ref(f, "event")

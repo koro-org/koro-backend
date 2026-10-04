@@ -2,6 +2,7 @@ package events_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
+	"koro/internal/consent"
 	"koro/internal/directory"
 	"koro/internal/events"
 	"koro/internal/identity"
@@ -257,17 +259,48 @@ func (u fakeUsers) FindByEmail(_ context.Context, email string) (uuid.UUID, bool
 	return p.User(), true, nil
 }
 
+// fakeNotices is consent's current consent texts: every purpose has one
+// unless it is listed in missing.
+type fakeNotices struct {
+	mu      sync.Mutex
+	missing map[consent.Purpose]bool
+}
+
+func (f *fakeNotices) Current(_ context.Context, key consent.NoticeKey) (consent.Notice, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if key.Kind != consent.KindConsentText || key.Purpose == nil || f.missing[*key.Purpose] {
+		return consent.Notice{}, consent.ErrNoNotice
+	}
+	body := "Katıldığım etkinliğin sponsoruyla bilgilerimin paylaşılmasına izin veriyorum."
+	sum := sha256.Sum256([]byte(body))
+	pub := t0
+	p := *key.Purpose
+	return consent.Notice{
+		ID: authztest.ID("notice_" + string(p)), Kind: consent.KindConsentText, PurposeCode: &p, Audience: consent.AudienceAll,
+		Locale: consent.LocaleTR, Version: "2026.10.02", Title: "Sponsorla paylaşım açık rıza metni", BodyMD: body,
+		BodySHA256: sum[:], PublishedAt: &pub,
+	}, nil
+}
+
+func (f *fakeNotices) setMissing(p consent.Purpose) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.missing[p] = true
+}
+
 type env struct {
-	clk   *clock.Fake
-	tx    *spyTx
-	mem   *events.MemStore
-	store *spyStore
-	out   *spyOutbox
-	audit *auditLog
-	orgs  *fakeOrgs
-	users fakeUsers
-	svc   events.Service
-	mod   events.Module
+	notices *fakeNotices
+	clk     *clock.Fake
+	tx      *spyTx
+	mem     *events.MemStore
+	store   *spyStore
+	out     *spyOutbox
+	audit   *auditLog
+	orgs    *fakeOrgs
+	users   fakeUsers
+	svc     events.Service
+	mod     events.Module
 }
 
 func newEnv(t *testing.T) *env {
@@ -276,12 +309,13 @@ func newEnv(t *testing.T) *env {
 	e := &env{
 		clk: clk, tx: &spyTx{}, mem: events.NewMemStore(clk.Now), audit: &auditLog{}, orgs: newFakeOrgs(),
 		out: &spyOutbox{Mem: outbox.NewMem(clk), txs: map[string][]int{}}, users: fakeUsers{suspended: map[uuid.UUID]bool{}},
+		notices: &fakeNotices{missing: map[consent.Purpose]bool{}},
 	}
 	e.store = &spyStore{MemStore: e.mem}
 	idem := idempotency.New(idempotency.Deps{Tx: e.tx, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()})
 	mod, err := events.New(events.Deps{
 		Store: e.store, Tx: e.tx, Outbox: e.out, Audit: e.audit, Orgs: e.orgs, Catalog: fakeCatalog{},
-		Idempotency: idem, Clock: clk, Log: obs.Discard(), Users: e.users,
+		Idempotency: idem, Clock: clk, Log: obs.Discard(), Users: e.users, Notices: e.notices,
 	})
 	if err != nil {
 		t.Fatal(err)

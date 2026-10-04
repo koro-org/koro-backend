@@ -1,4 +1,4 @@
-# Multi-step scenarios of the events module (03 §7.7; BE-024).
+# Multi-step scenarios of the events module (03 §7.7; BE-024, BE-026).
 version: 1
 scenarios:
   update_event_needs_if_match:
@@ -55,3 +55,59 @@ scenarios:
       - { persona: club_admin, operation: updateEvent, body: bodies/events/update_event_schedule.json, expect: 200 }
       - { persona: club_member, operation: updateEvent, body: bodies/events/update_event_schedule.json, expect: 403,
           code: forbidden }
+  form_draft_needs_if_match:
+    note: putEventFormDraft without If-Match is 428, with a stale ETag 412; a save makes the read ETag stale (04 §1.13)
+    steps:
+      - { persona: club_admin, operation: putEventFormDraft, headers: { If-Match: "" }, expect: 428, code: precondition_required }
+      - { persona: club_admin, operation: putEventFormDraft, headers: { If-Match: '"0"' }, expect: 412, code: precondition_failed }
+      - { persona: club_admin, operation: putEventFormDraft, expect: 200 }
+      - { persona: club_admin, operation: putEventFormDraft, expect: 412, code: precondition_failed }
+      - { persona: club_admin, operation: getEventFormDraft, expect: 200 }
+  form_lint_blocks_and_needs_reasons:
+    note: >-
+      KVKK lint (02 §11.4, T-133) — a national ID field is never published (422, even with a reason); a
+      health field needs lint_override_reason (422 without, 201 with)
+    steps:
+      - { persona: club_admin, operation: putEventFormDraft, body: bodies/events/put_form_draft_blocked.json, expect: 200 }
+      - { persona: club_admin, operation: publishEventForm, expect: 422, code: events.form_blocked_field }
+      - { persona: club_admin, operation: publishEventForm, body: bodies/events/publish_form_reason.json, expect: 422,
+          code: events.form_blocked_field }
+      - { persona: club_admin, operation: putEventFormDraft, path_params: { event_id: event_a_draft },
+          body: bodies/events/put_form_draft_sensitive.json, expect: 200 }
+      - { persona: club_admin, operation: publishEventForm, path_params: { event_id: event_a_draft }, expect: 422,
+          code: events.lint_override_required }
+      - { persona: club_admin, operation: publishEventForm, path_params: { event_id: event_a_draft },
+          body: bodies/events/publish_form_reason.json, expect: 201 }
+      - { persona: club_admin, operation: getEventForm, path_params: { event_id: event_a_draft }, expect: 200 }
+  form_versions_are_not_duplicated:
+    note: the draft becomes version 2 and the current form; publishing the same draft again is 409 events.form_unchanged
+    steps:
+      - { persona: club_admin, operation: publishEventForm, expect: 201 }
+      - { persona: club_admin, operation: publishEventForm, expect: 409, code: events.form_unchanged }
+      - { persona: anonymous, operation: getEventForm, expect: 200 }
+  another_orgs_form_is_invisible:
+    note: >-
+      06 H-38, 03 §3.6 — club_b's admin does not see club_a's form draft (404 on read, write and publish), a member of
+      club_a without the role gets 403; the published form stays public
+    steps:
+      - { persona: other_club_admin, operation: getEventFormDraft, expect: 404, code: not_found }
+      - { persona: other_club_admin, operation: putEventFormDraft, expect: 404, code: not_found }
+      - { persona: other_club_admin, operation: publishEventForm, expect: 404, code: not_found }
+      - { persona: club_member, operation: putEventFormDraft, expect: 403, code: forbidden }
+      - { persona: other_club_admin, operation: getEventForm, expect: 200 }
+  lint_rule_pattern_must_be_re2:
+    note: a pattern that does not compile as RE2 is 422 (02 §11.5); a valid one is created and can be retired
+    steps:
+      - { persona: dpo, operation: adminCreateFormLintRule, body: bodies/events/create_lint_rule_bad.json, expect: 422,
+          code: validation_failed }
+      - { persona: dpo, operation: adminCreateFormLintRule, expect: 201 }
+      - { persona: platform_admin, operation: adminUpdateFormLintRule, expect: 200 }
+      - { persona: club_admin, operation: adminListFormLintRules, expect: 403, code: forbidden }
+  consent_field_needs_a_published_text:
+    note: >-
+      a consent field asks a per-registration consent purpose; without a published consent text of
+      event_sponsor_share (none in the consent fixtures) the form is not published (422, consent wired)
+    steps:
+      - { persona: club_admin, operation: putEventFormDraft, body: bodies/events/put_form_draft_consent.json, expect: 200 }
+      - { persona: club_admin, operation: publishEventForm, expect: 422, code: validation_failed }
+      - { persona: club_admin, operation: getEventForm, expect: 200 }

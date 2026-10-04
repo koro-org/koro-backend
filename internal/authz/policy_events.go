@@ -24,11 +24,27 @@ const TypeEventCatalog = "event_catalog"
 //	events.staff.list        S: club_admin, university_rep, career_staff; platform_admin k-po
 //	events.staff.manage      S: club_admin, university_rep, career_staff; platform_admin k-po
 //
+// and by BE-026 for the form actions:
+//
+//	events.form.read         P (event_form; visible when the event is)
+//	events.form.manage       S: club_admin, university_rep, career_staff; platform_admin k-po
+//	events.form.publish      S: club_admin, university_rep, career_staff; platform_admin k-po
+//	events.lint_rule.manage  dpo, platform_admin (admin surface; k-mfa)
+//
 // Resources (03 §3.5): event (OrgID = the organiser; Attrs status,
 // visibility, visibility_university_id, sensitive, event_staff_role),
-// org (createEvent and listOrgEvents address /orgs/{org_id}/events, the
-// org's management surface: its active members and every platform role
-// see it, everyone else gets 404) and event_catalog.
+// event_form (the same Attrs plus event_status: the form is a sub-surface
+// of its event), org (createEvent and listOrgEvents address
+// /orgs/{org_id}/events, the org's management surface: its active members
+// and every platform role see it, everyone else gets 404), event_catalog
+// and admin_surface (/admin/form-lint-rules).
+//
+// Form visibility (03 §3.6 "Etkinlik formu"): the published version is
+// visible to everyone who sees the event; the draft schema (and so the
+// publication) to the event's management only: a visible event's form
+// draft is 403 for the organiser's other active members and every platform
+// role without the grant, 404 for everyone else (another org's form is
+// 404, BE-026 reading of the S cell, 03 §5.0).
 //
 // Event visibility (03 §3.6): a published, completed or cancelled event is
 // visible to everyone when public; to verified students of
@@ -57,26 +73,35 @@ func eventsPolicy() Policy {
 				return r.Type == TypeEventCatalog
 			case EventsEventCreate, EventsEventListOrg:
 				return r.Type == TypeOrg && OrgSurfaceVisible(a, r.OrgID)
+			case EventsFormRead:
+				return r.Type == TypeEventForm && eventVisibleAt(a, r, r.Attr("event_status"))
+			case EventsFormManage, EventsFormPublish:
+				return r.Type == TypeEventForm && eventVisibleAt(a, r, r.Attr("event_status")) && OrgSurfaceVisible(a, r.OrgID)
+			case EventsLintRuleManage:
+				return r.Type == TypeAdminSurface && AdminSurfaceVisible(a)
 			}
 			return r.Type == TypeEvent && eventVisible(a, r)
 		},
 		Grants: func(a Actor, act Action, r Resource) []Grant {
 			switch act {
-			case EventsEventList, EventsEventRead:
+			case EventsEventList, EventsEventRead, EventsFormRead:
 				return []Grant{{Role: RolePublic}}
+			case EventsLintRuleManage:
+				return []Grant{{Role: RoleDPO}, {Role: RolePlatformAdmin}}
 			case EventsEventListOrg:
 				return append(eventOrgGrants(a, r.OrgID),
 					Grant{Role: RoleModerator}, Grant{Role: RoleSupport}, Grant{Role: RolePlatformAdmin})
 			case EventsEventUpdate, EventsEventCancel:
 				return append(eventOrgGrants(a, r.OrgID), Grant{Role: RolePlatformAdmin})
-			case EventsEventCreate, EventsEventPublish, EventsEventDelete, EventsStaffList, EventsStaffManage:
+			case EventsEventCreate, EventsEventPublish, EventsEventDelete, EventsStaffList, EventsStaffManage,
+				EventsFormManage, EventsFormPublish:
 				gs := eventOrgGrants(a, r.OrgID)
 				if platformOrg(a, r.OrgID) { // k-po
 					gs = append(gs, Grant{Role: RolePlatformAdmin})
 				}
 				return gs
 			}
-			return nil // the actions of BE-026, BE-028, BE-031, BE-050: not written yet
+			return nil // the actions of BE-028, BE-031, BE-050: not written yet
 		},
 	}
 }
@@ -103,13 +128,17 @@ func eventOrgGrants(a Actor, orgID *uuid.UUID) []Grant {
 }
 
 // eventVisible is 03 §3.6 "Etkinlik".
-func eventVisible(a Actor, r Resource) bool {
+func eventVisible(a Actor, r Resource) bool { return eventVisibleAt(a, r, r.Attr(AttrStatus)) }
+
+// eventVisibleAt is eventVisible with the event's status given (an
+// event_form resource carries it as event_status).
+func eventVisibleAt(a Actor, r Resource, status string) bool {
 	if a.HasAnyPlatformRole() {
 		return true
 	}
 	org := r.OrgID
 	member := org != nil && a.MemberOf(*org)
-	switch r.Attr(AttrStatus) {
+	switch status {
 	case "draft":
 		return org != nil && a.HasOrgRole(*org, MemberClubAdmin, MemberUniversityRep, MemberCareerStaff)
 	case "published", "completed", "cancelled":

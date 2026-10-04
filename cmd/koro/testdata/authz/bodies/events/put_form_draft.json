@@ -1,0 +1,7 @@
+{"draft_schema": {"schema_version": 1, "fields": [
+  {"key": "motivation", "type": "long_text", "label": {"tr": "Neden katılmak istiyorsun?"}, "required": true,
+   "validation": {"max_length": 800}, "purpose": {"tr": "Başvuruları değerlendirmek için"}},
+  {"key": "tshirt", "type": "single_select", "label": {"tr": "Tişört bedeni"}, "required": false,
+   "options": [{"value": "s", "label": {"tr": "S"}}, {"value": "m", "label": {"tr": "M"}}, {"value": "l", "label": {"tr": "L"}}]},
+  {"key": "rules", "type": "checkbox", "label": {"tr": "Etkinlik kurallarını okudum"}, "required": true}
+]}}

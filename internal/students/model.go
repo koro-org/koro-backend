@@ -226,6 +226,21 @@ type Language struct {
 // TableName implements gorm's Tabler.
 func (Language) TableName() string { return "student_languages" }
 
+// CV is a student_cvs row (02 §9.6): at most 3 per user (application
+// rule, MaxCVs), at most one current (student_cvs_current_uq). The file
+// is a files row of purpose cv, attached to students with the CV's ID as
+// its entity; the CV and its file are hard deleted together.
+type CV struct {
+	ID        uuid.UUID `gorm:"type:uuid;column:id;primaryKey"`
+	UserID    uuid.UUID `gorm:"type:uuid;column:user_id"`
+	FileID    uuid.UUID `gorm:"type:uuid;column:file_id"`
+	IsCurrent bool      `gorm:"column:is_current"`
+	CreatedAt time.Time `gorm:"column:created_at"`
+}
+
+// TableName implements gorm's Tabler.
+func (CV) TableName() string { return "student_cvs" }
+
 // ProfileView is a profile with its sections and the display facts other
 // modules hold (names of the university and department, the avatar URL).
 // Stored is false for the profile of a verified student who has never
@@ -240,4 +255,5 @@ type ProfileView struct {
 	Experiences    []Experience
 	Languages      []Language
 	Privacy        Privacy
+	CVs            []CVView
 }

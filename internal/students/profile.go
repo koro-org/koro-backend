@@ -144,6 +144,13 @@ func (s *service) view(ctx context.Context, p Profile, stored bool) (ProfileView
 	case !errors.Is(err, ErrNotFound):
 		return ProfileView{}, err
 	}
+	cvs, err := s.d.Store.CVs(ctx, p.UserID)
+	if err != nil {
+		return ProfileView{}, err
+	}
+	if v.CVs, err = s.cvViews(ctx, cvs); err != nil {
+		return ProfileView{}, err
+	}
 	return v, nil
 }
 
@@ -403,12 +410,12 @@ func (s *service) attachAvatar(ctx context.Context, a authz.Actor, fileID uuid.U
 	return s.d.Files.Attach(ctx, a, fileID, files.Owner{Module: studentsModule, EntityID: a.UserID, Purpose: files.PurposeAvatar})
 }
 
-// removeFile deletes an avatar the profile no longer references, in the
-// transaction carried by ctx (see FileRemover); without a remover the file
-// stays (logged without personal data).
+// removeFile deletes an avatar or a CV file students no longer
+// references, in the transaction carried by ctx (see FileRemover); without
+// a remover the file stays (logged without personal data).
 func (s *service) removeFile(ctx context.Context, a authz.Actor, fileID uuid.UUID) error {
 	if s.d.RemoveFile == nil {
-		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "avatar kept: no file remover wired", slog.String("file_id", fileID.String()))
+		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "file kept: no file remover wired", slog.String("file_id", fileID.String()))
 		return nil
 	}
 	return s.d.RemoveFile(ctx, a, fileID)

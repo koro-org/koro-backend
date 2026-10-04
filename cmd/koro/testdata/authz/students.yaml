@@ -1,10 +1,17 @@
-# Authz matrix of the students module (03 §5.4, 04 §2.4; BE-023). 9 operations × 18 personas.
+# Authz matrix of the students module (03 §5.4, 04 §2.4; BE-023, BE-025). 16 operations × 18 personas.
 # Every operation is an O cell on the caller's own profile for verified students (stu, min, clm,
 # cla, stf); an account without an active student verification (usr k-uv, uni, the companies,
 # platform staff) is 403 students.verification_required, anonymous 401 (03 §5.0, §2.3). The
 # experience operations address an entry by ID: another student's entry is 404 (IDOR), a
 # non-student is refused before the lookup (403). k9 (a minor turning level 2 or contact sharing
 # on, 422 students.minor_restricted) is pinned below and in scenarios/students.yaml.
+# BE-025: the CV operations are the same O cell (cv_student is the student's current CV, its file
+# file_attached; createMyCv takes file_unattached, the student's cv upload: another student 422).
+# getMemberCard is cla S·k10 on club_a's surface (members of club_a: club_member 403, club_admin
+# 200; staff 403, 404 in a sensitive club; everyone else 404; a pending or another club's
+# membership 404). adminGetStudentProfile is the admin surface (403 without a platform role):
+# support and platform_admin B (403 without X-Koro-Access-Reason), dpo k11 (the reason is the ID
+# of an open data subject request of the student: dsr_student_open of kvkk's fixtures).
 version: 1
 groups:
   # accounts without an active student verification (03 §1.1 usr; companies and staff too).
@@ -14,6 +21,11 @@ groups:
   other_students: [student_minor, club_member, club_admin, other_club_admin, event_staff]
   # verified adult students (k9 does not apply).
   adult_students: [student, club_member, club_admin, other_club_admin, event_staff]
+  # every signed-in user without a platform role (admin surface: 403 before reading).
+  no_platform_role: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                     event_staff, university_rep, company_member, company_admin, other_company_member]
+  # platform staff without a cell on the admin student view.
+  staff_without_cell: [moderator, finance_admin, talent_auditor]
 
 operations:
   getMyStudentProfile:
@@ -103,12 +115,93 @@ operations:
         note: turning the mirrored flags off is always allowed, minors included (already off by default)
         expect: { anonymous: 401, "@verified_students": 200, "@non_students": 403 }
 
+  listMyCvs:
+    method: GET
+    path: /api/v1/me/cvs
+    action: students.cv.read_own
+    expect: { anonymous: 401, "@verified_students": 200, "@non_students": 403 }
+
+  createMyCv:
+    method: POST
+    path: /api/v1/me/cvs
+    action: students.cv.manage
+    body: bodies/students/create_cv.json
+    note: file_unattached is the student's cv upload; another student may not use it (422 validation_failed, a body rule after the role check)
+    expect: { anonymous: 401, student: 201, "@other_students": 422, "@non_students": 403 }
+
+  setMyCurrentCv:
+    method: POST
+    path: /api/v1/me/cvs/{cv_id}/current
+    action: students.cv.manage
+    path_params: { cv_id: cv_student }
+    note: student's CV; another student's ID is 404 (IDOR), a non-student is 403 before the lookup
+    expect: { anonymous: 401, student: 200, "@other_students": 404, "@non_students": 403 }
+    variants:
+      - name: missing
+        path_params: { cv_id: "literal:00000000-0000-7000-8000-0000000000c1" }
+        expect: { anonymous: 401, "@verified_students": 404, "@non_students": 403 }
+
+  deleteMyCv:
+    method: DELETE
+    path: /api/v1/me/cvs/{cv_id}
+    action: students.cv.manage
+    path_params: { cv_id: cv_student }
+    expect: { anonymous: 401, student: 204, "@other_students": 404, "@non_students": 403 }
+
+  downloadMyCv:
+    method: GET
+    path: /api/v1/me/cvs/{cv_id}/download
+    action: students.cv.read_own
+    path_params: { cv_id: cv_student }
+    expect: { anonymous: 401, student: 200, "@other_students": 404, "@non_students": 403 }
+
+  getMemberCard:
+    method: GET
+    path: /api/v1/orgs/{org_id}/members/{membership_id}/profile
+    action: students.profile.read_member_card
+    path_params: { org_id: club_a, membership_id: m_club_member_club_a }
+    note: club_a's surface; club_member is a plain member (403); staff see the surface (403)
+    expect: { anonymous: 401, "@outsiders_a": 404, club_member: 403, club_admin: 200, "@platform_staff": 403 }
+    variants:
+      - name: sensitive_club
+        path_params: { org_id: club_sensitive, membership_id: m_club_member_sensitive }
+        note: a sensitive club's surface is its members' only (Y2, k4); club_admin is not one of them
+        expect: { anonymous: 401, "@outsiders_a": 404, club_member: 403, club_admin: 404, "@platform_staff": 404 }
+      - name: pending_membership
+        path_params: { org_id: club_a, membership_id: join_pending_a }
+        note: k10, a card exists for an active member only
+        expect: { anonymous: 401, "@outsiders_a": 404, club_member: 403, club_admin: 404, "@platform_staff": 403 }
+      - name: other_club_membership
+        path_params: { org_id: club_b, membership_id: m_club_member_club_a }
+        note: club_b's admin asks for club_a's membership under club_b (IDOR)
+        expect: { anonymous: 401, "@outsiders_a": 404, club_member: 404, club_admin: 404, "@platform_staff": 403 }
+
+  adminGetStudentProfile:
+    method: GET
+    path: /api/v1/admin/users/{user_id}/student-profile
+    action: students.profile.read_admin
+    path_params: { user_id: student }
+    note: support and platform_admin need X-Koro-Access-Reason (B); the dpo an open request of the student (k11)
+    expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_cell": 403, support: 403, dpo: 403,
+              platform_admin: 403 }
+    variants:
+      - name: break_glass
+        headers: { X-Koro-Access-Reason: "Destek talebi 4711: öğrenci profili inceleniyor" }
+        expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_cell": 403, support: 200, dpo: 403,
+                  platform_admin: 200 }
+      - name: dsr_of_the_student
+        headers: { X-Koro-Access-Reason: "{{fixture:dsr_student_open}}" }
+        note: the request ID is also a valid break-glass reason for support and platform_admin
+        expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_cell": 403, support: 200, dpo: 200,
+                  platform_admin: 200 }
+      - name: dsr_of_another_user
+        path_params: { user_id: student_b }
+        headers: { X-Koro-Access-Reason: "{{fixture:dsr_student_open}}" }
+        note: the request's subject is student, not student_b (k11); student_b has no profile, so B answers 404
+        expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_cell": 403, support: 404, dpo: 403,
+                  platform_admin: 404 }
+
 pending_actions:
-  # BE-025: CVs, the member card and the admin view (03 §5.4).
-  - students.cv.manage
-  - students.cv.read_own
-  - students.profile.read_member_card
-  - students.profile.read_admin
   # BE-046: level 3 access grants and the company views (03 §5.4).
   - students.access_grant.list_own
   - students.access_grant.revoke

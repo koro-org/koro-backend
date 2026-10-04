@@ -733,6 +733,151 @@ components:
       required:
         - status
       type: object
+    AdminStudentMembershipDTO:
+      additionalProperties: false
+      properties:
+        org_id:
+          format: uuid
+          type: string
+        org_kind:
+          type: string
+        role:
+          type: string
+      required:
+        - org_id
+        - org_kind
+        - role
+      type: object
+    AdminStudentProfileDTO:
+      additionalProperties: false
+      properties:
+        about:
+          type: string
+        class_year:
+          format: int64
+          type: integer
+        department:
+          $ref: "#/components/schemas/StudentDepartmentDTO"
+        experiences:
+          items:
+            $ref: "#/components/schemas/StudentExperienceDTO"
+          type: array
+        headline:
+          type: string
+        languages:
+          items:
+            $ref: "#/components/schemas/StudentLanguageDTO"
+          type: array
+        skills:
+          items:
+            $ref: "#/components/schemas/StudentSkillDTO"
+          type: array
+      required:
+        - skills
+        - experiences
+        - languages
+      type: object
+    AdminStudentRegistrationDTO:
+      additionalProperties: false
+      properties:
+        event_id:
+          format: uuid
+          type: string
+        event_title:
+          type: string
+        registered_at:
+          format: date-time
+          type: string
+        status:
+          type: string
+      required:
+        - event_id
+        - event_title
+        - status
+        - registered_at
+      type: object
+    AdminStudentVerificationDTO:
+      additionalProperties: false
+      properties:
+        expires_at:
+          format: date-time
+          type: string
+        status:
+          enum:
+            - none
+            - verified
+            - lapsed
+          type: string
+        university:
+          $ref: "#/components/schemas/StudentUniversityDTO"
+        verified_at:
+          format: date-time
+          type: string
+      required:
+        - status
+      type: object
+    AdminStudentViewDTO:
+      additionalProperties: false
+      properties:
+        birth_date:
+          description: YYYY-MM-DD; dpo only (data subject request)
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        email:
+          type: string
+        first_name:
+          type: string
+        last_login_at:
+          format: date-time
+          type: string
+        last_name:
+          type: string
+        locale:
+          type: string
+        memberships:
+          description: Non-sensitive memberships only
+          items:
+            $ref: "#/components/schemas/AdminStudentMembershipDTO"
+          type: array
+        mfa_enabled:
+          type: boolean
+        platform_roles:
+          items:
+            type: string
+          type: array
+        privacy:
+          $ref: "#/components/schemas/StudentPrivacyDTO"
+        profile:
+          $ref: "#/components/schemas/AdminStudentProfileDTO"
+        registrations:
+          description: Event registrations without answers; absent while the events module does not provide them
+          items:
+            $ref: "#/components/schemas/AdminStudentRegistrationDTO"
+          type: array
+        status:
+          type: string
+        student:
+          $ref: "#/components/schemas/AdminStudentVerificationDTO"
+        user_id:
+          format: uuid
+          type: string
+      required:
+        - user_id
+        - email
+        - first_name
+        - last_name
+        - status
+        - created_at
+        - mfa_enabled
+        - locale
+        - student
+        - platform_roles
+        - memberships
+        - profile
+        - privacy
+      type: object
     AdminUpdateInputBody:
       additionalProperties: false
       properties:
@@ -1661,6 +1806,19 @@ components:
         - data_categories
         - description
         - owner_user_id
+      type: object
+    CreateCVInputBody:
+      additionalProperties: false
+      properties:
+        file_id:
+          description: A cv upload of yours (createUpload)
+          format: uuid
+          type: string
+        make_current:
+          description: Make the new CV the current one (the first CV always is)
+          type: boolean
+      required:
+        - file_id
       type: object
     CreateClaimInputBody:
       additionalProperties: false
@@ -3770,6 +3928,65 @@ components:
         - platform_roles
         - capabilities
       type: object
+    MemberCardDTO:
+      additionalProperties: false
+      properties:
+        avatar_url:
+          description: Signed URL, valid for 5 minutes
+          type: string
+        class_year:
+          format: int64
+          type: integer
+        club_event_registrations_count:
+          description: Registrations for this club's events; null while the events module does not provide it
+          format: int64
+          type:
+            - integer
+            - "null"
+        department:
+          $ref: "#/components/schemas/StudentNameRefDTO"
+        first_name:
+          type: string
+        last_name:
+          type: string
+        membership:
+          $ref: "#/components/schemas/MemberCardMembershipDTO"
+        university:
+          $ref: "#/components/schemas/StudentNameRefDTO"
+        user_id:
+          format: uuid
+          type: string
+      required:
+        - user_id
+        - first_name
+        - last_name
+        - membership
+        - club_event_registrations_count
+      type: object
+    MemberCardMembershipDTO:
+      additionalProperties: false
+      properties:
+        joined_at:
+          format: date-time
+          type: string
+        membership_id:
+          format: uuid
+          type: string
+        role:
+          enum:
+            - member
+            - club_admin
+          type: string
+        source:
+          type: string
+        status:
+          type: string
+      required:
+        - membership_id
+        - role
+        - status
+        - source
+      type: object
     MemberDTO:
       additionalProperties: false
       properties:
@@ -5129,6 +5346,50 @@ components:
       required:
         - edu_email
       type: object
+    StudentCVDTO:
+      additionalProperties: false
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        cv_id:
+          format: uuid
+          type: string
+        file_name:
+          description: The uploaded file's name (sanitised; empty when unknown)
+          type: string
+        is_current:
+          description: The CV a company with level 3 access may download
+          type: boolean
+      required:
+        - cv_id
+        - file_name
+        - is_current
+        - created_at
+      type: object
+    StudentCVDownloadDTO:
+      additionalProperties: false
+      properties:
+        expires_at:
+          format: date-time
+          type: string
+        url:
+          description: "Signed URL (Content-Disposition: attachment), valid for 5 minutes"
+          type: string
+      required:
+        - url
+        - expires_at
+      type: object
+    StudentCVList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/StudentCVDTO"
+          type: array
+      required:
+        - items
+      type: object
     StudentConsentProof:
       additionalProperties: false
       properties:
@@ -5236,6 +5497,14 @@ components:
       required:
         - items
       type: object
+    StudentNameRefDTO:
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+      required:
+        - name
+      type: object
     StudentPrivacyDTO:
       additionalProperties: false
       properties:
@@ -5278,6 +5547,10 @@ components:
         completed_sections:
           items:
             type: string
+          type: array
+        cvs:
+          items:
+            $ref: "#/components/schemas/StudentCVDTO"
           type: array
         degree_level:
           enum:
@@ -5329,6 +5602,7 @@ components:
         - skills
         - experiences
         - languages
+        - cvs
         - privacy
       type: object
     StudentSkillDTO:
@@ -9407,6 +9681,48 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+  /api/v1/admin/users/{user_id}/student-profile:
+    get:
+      description: "support and platform_admin: break-glass (X-Koro-Access-Reason, 10–500 characters; audited, the student is told). dpo: X-Koro-Access-Reason is the ID of an open data subject request of this student (the birth date is shown only then). Never CV files, sensitive clubs, form answers or talent values."
+      operationId: adminGetStudentProfile
+      parameters:
+        - description: User ID
+          in: path
+          name: user_id
+          required: true
+          schema:
+            description: User ID
+            type: string
+        - description: "support, platform_admin: break-glass justification (10–500 characters); dpo: the ID of an open data subject request of this student"
+          in: header
+          name: X-Koro-Access-Reason
+          schema:
+            description: "support, platform_admin: break-glass justification (10–500 characters); dpo: the ID of an open data subject request of this student"
+            maxLength: 500
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStudentViewDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a student's profile (staff)
+      tags:
+        - students
+      x-koro-action: students.profile.read_admin
+      x-koro-break-glass: true
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
   /api/v1/admin/users/{user_id}/suspend:
     post:
       description: Every session closes (revoke_reason suspended). Against a holder of platform_admin, finance_admin or talent_auditor the first call only opens a four-eyes request (202 with pending_action; valid 24 hours); the same call by a second platform_admin approves and performs it (the requester gets 403 authz.four_eyes_violation). The last active holder of a privileged role cannot be suspended (409 identity.last_privileged_holder).
@@ -11166,6 +11482,182 @@ paths:
       x-koro-action: consent.record.create
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/me/cvs:
+    get:
+      description: At most 3, oldest first. The current CV is the one a company with level 3 access may download.
+      operationId: listMyCvs
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StudentCVList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List my CVs
+      tags:
+        - students
+      x-koro-action: students.cv.read_own
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
+    post:
+      description: "file_id is a cv upload of yours (createUpload purpose cv: PDF only, 10 MB; the file is virus scanned and its metadata removed before it is served). At most 3 CVs: a fourth is 409 students.cv_limit. The first CV is current; make_current moves the mark to the new one."
+      operationId: createMyCv
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCVInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StudentCVDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Add a CV
+      tags:
+        - students
+      x-koro-action: students.cv.manage
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/me/cvs/{cv_id}:
+    delete:
+      description: Hard delete, the file included. A deleted current CV leaves no current one until you pick another. Another user's CV is 404.
+      operationId: deleteMyCv
+      parameters:
+        - description: CV ID (another user's or a malformed ID is 404)
+          in: path
+          name: cv_id
+          required: true
+          schema:
+            description: CV ID (another user's or a malformed ID is 404)
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Delete a CV
+      tags:
+        - students
+      x-koro-action: students.cv.manage
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/me/cvs/{cv_id}/current:
+    post:
+      description: The CV becomes the only current one. Another user's CV is 404.
+      operationId: setMyCurrentCv
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: CV ID (another user's or a malformed ID is 404)
+          in: path
+          name: cv_id
+          required: true
+          schema:
+            description: CV ID (another user's or a malformed ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StudentCVDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Make a CV current
+      tags:
+        - students
+      x-koro-action: students.cv.manage
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/me/cvs/{cv_id}/download:
+    get:
+      description: A signed URL valid for 5 minutes (attachment). 409 files.not_clean while the virus scan is pending. Every download is audited. Another user's CV is 404.
+      operationId: downloadMyCv
+      parameters:
+        - description: CV ID (another user's or a malformed ID is 404)
+          in: path
+          name: cv_id
+          required: true
+          schema:
+            description: CV ID (another user's or a malformed ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StudentCVDownloadDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Download a CV
+      tags:
+        - students
+      x-koro-action: students.cv.read_own
+      x-koro-rate-limit: read_default
       x-koro-surface: self
   /api/v1/me/data-requests:
     get:
@@ -13804,6 +14296,47 @@ paths:
       x-koro-action: orgs.member.decide
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/members/{membership_id}/profile:
+    get:
+      description: The club_admin's view of an active member of the club (no e-mail, CV, skills or other clubs). A pending or ended membership, another club's member or a non-member caller is 404. A sensitive club's card is audited.
+      operationId: getMemberCard
+      parameters:
+        - description: Club org ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Club org ID
+            type: string
+        - description: Membership ID (org_members.id)
+          in: path
+          name: membership_id
+          required: true
+          schema:
+            description: Membership ID (org_members.id)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberCardDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a club member's card
+      tags:
+        - students
+      x-koro-action: students.profile.read_member_card
+      x-koro-rate-limit: read_default
       x-koro-surface: org
   /api/v1/orgs/{org_id}/members/{membership_id}/reject:
     post:

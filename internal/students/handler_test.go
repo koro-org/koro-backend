@@ -12,6 +12,7 @@ import (
 	"testing"
 	"uuid"
 
+	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/consent"
 	"koro/internal/platform/httpx"
@@ -25,7 +26,8 @@ import (
 // the rate limit and Idempotency-Key middlewares (as cmd/koro does).
 func newHTTP(t *testing.T, e *env) *httpx.App {
 	t.Helper()
-	app, err := httpx.New(httpx.Deps{Log: obs.Discard(), Actors: authztest.NewResolver(append(authztest.Personas(), authztest.Helpers()...)...)})
+	e.resolver = authztest.NewResolver(append(authztest.Personas(), authztest.Helpers()...)...)
+	app, err := httpx.New(httpx.Deps{Log: obs.Discard(), Actors: e.resolver})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,6 +48,22 @@ func call(t *testing.T, app *httpx.App, persona, method, path, body string, hdr 
 	}
 	if p, _ := authztest.Get(persona); p.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+p.Token)
+	}
+	rec := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rec, req)
+	return rec
+}
+
+// callAs sends a request as actor a (registered with the resolver of
+// newHTTP under its own token); hdr is a list of header name, value pairs.
+func (e *env) callAs(t *testing.T, app *httpx.App, a authz.Actor, method, path string, hdr ...string) *httptest.ResponseRecorder {
+	t.Helper()
+	token := "actor-" + a.UserID.String()
+	e.resolver.Add(token, a)
+	req := httptest.NewRequestWithContext(t.Context(), method, path, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	for i := 0; i+1 < len(hdr); i += 2 {
+		req.Header.Set(hdr[i], hdr[i+1])
 	}
 	rec := httptest.NewRecorder()
 	app.Handler().ServeHTTP(rec, req)

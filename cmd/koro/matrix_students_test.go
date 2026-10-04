@@ -18,8 +18,8 @@ const matrixDiscoveryText = "# Keşif profili rızası\n\nProfilimin takma adla 
 
 // matrixFixtures seeds fixtures/students.yaml (03 §7.3): an experience of
 // the persona student (with the profile it belongs to, at the persona's
-// university) and the published discovery_profile consent text in the
-// consent store installed by useMemStore.
+// university), the published discovery_profile consent text in the
+// consent store installed by useMemStore, and the student's current CV.
 func (w *studentsWiring) matrixFixtures(fx *matrixFixtures) error {
 	ctx := context.Background()
 	for _, f := range fx.Of("students") {
@@ -35,6 +35,10 @@ func (w *studentsWiring) matrixFixtures(fx *matrixFixtures) error {
 			}
 		case "consent_text":
 			if err := w.matrixConsentText(ctx, f, id); err != nil {
+				return err
+			}
+		case "cv":
+			if err := w.matrixCV(ctx, fx, f, id); err != nil {
 				return err
 			}
 		default:
@@ -61,6 +65,32 @@ func (w *studentsWiring) matrixExperience(ctx context.Context, name string, id u
 	if _, err := w.store.InsertExperience(ctx, students.Experience{ID: id, UserID: owner, Kind: students.KindProject,
 		Title: "Matris projesi", StartMonth: start}); err != nil {
 		return fmt.Errorf("fixture %s: %w", name, err)
+	}
+	return nil
+}
+
+// matrixCV inserts the owner's profile (when missing) and a current CV
+// holding the files fixture named by "file" (BE-025).
+func (w *studentsWiring) matrixCV(ctx context.Context, fx *matrixFixtures, f fixture, id uuid.UUID) error {
+	ownerName, _ := f.Fields["owner"].(string)
+	p, ok := authztest.Get(ownerName)
+	if !ok || p.Actor.UniversityID == nil {
+		return fmt.Errorf("fixture %s: the owner must be a verified student persona", f.Name)
+	}
+	file, err := fx.Ref(f, "file")
+	if err != nil {
+		return err
+	}
+	owner := p.User()
+	if _, _, err := w.store.InsertProfile(ctx, students.Profile{UserID: owner, UniversityID: *p.Actor.UniversityID,
+		DegreeLevel: students.DegreeBachelor, Status: students.ProfileActive, CompletedSections: []string{"cv"}}); err != nil {
+		return fmt.Errorf("fixture %s: profile: %w", f.Name, err)
+	}
+	if _, err := w.store.InsertCV(ctx, students.CV{ID: id, UserID: owner, FileID: file}); err != nil {
+		return fmt.Errorf("fixture %s: %w", f.Name, err)
+	}
+	if _, err := w.store.SetCurrentCV(ctx, owner, id); err != nil {
+		return fmt.Errorf("fixture %s: current: %w", f.Name, err)
 	}
 	return nil
 }

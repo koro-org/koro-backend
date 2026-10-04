@@ -1,4 +1,4 @@
-# Multi-step scenarios of the students module (03 §7.7; BE-023).
+# Multi-step scenarios of the students module (03 §7.7; BE-023, BE-025).
 version: 1
 scenarios:
   minor:
@@ -41,3 +41,37 @@ scenarios:
           expect: 422, code: students.unknown_department }
       - { persona: club_admin, operation: updateMyStudentProfile, body: bodies/students/update_profile_department.json, expect: 200 }
       - { persona: club_admin, operation: getMyStudentProfile, expect: 200 }
+  cv_lifecycle:
+    note: >-
+      BE-025 (02 §9.6, 04 §2.4): a CV is added from the student's cv upload, served, made current and hard
+      deleted with its file (the same upload is unknown afterwards); another student never reaches it.
+    steps:
+      - { persona: student, operation: createMyCv, expect: 201, save: { new_cv: cv_id } }
+      - { persona: student, operation: listMyCvs, expect: 200 }
+      - { persona: student, operation: downloadMyCv, path_params: { cv_id: new_cv }, expect: 200 }
+      - { persona: student_b, operation: deleteMyCv, path_params: { cv_id: new_cv }, expect: 404, code: not_found }
+      - { persona: student, operation: setMyCurrentCv, path_params: { cv_id: cv_student }, expect: 200 }
+      - { persona: student, operation: deleteMyCv, path_params: { cv_id: new_cv }, expect: 204 }
+      - { persona: student, operation: downloadMyCv, path_params: { cv_id: new_cv }, expect: 404, code: not_found }
+      - { persona: student, operation: createMyCv, expect: 422, code: validation_failed }
+  member_card_sensitive_club:
+    note: >-
+      03 k10, Y2: the sensitive club's own club_admin reads its member's card (audited); club_a's admin and
+      staff never learn the membership exists.
+    steps:
+      - { persona: club_admin_sensitive, operation: getMemberCard,
+          path_params: { org_id: club_sensitive, membership_id: m_club_member_sensitive }, expect: 200 }
+      - { persona: club_admin, operation: getMemberCard,
+          path_params: { org_id: club_sensitive, membership_id: m_club_member_sensitive }, expect: 404, code: not_found }
+      - { persona: platform_admin, operation: getMemberCard,
+          path_params: { org_id: club_sensitive, membership_id: m_club_member_sensitive }, expect: 404, code: not_found }
+  admin_view_justification:
+    note: >-
+      03 §6.3, k11: support needs the break-glass reason (authz.break_glass_reason_required); a dpo's free-text
+      reason is no data subject request (403); the request ID of the student opens it.
+    steps:
+      - { persona: support, operation: adminGetStudentProfile, expect: 403, code: authz.break_glass_reason_required }
+      - { persona: dpo, operation: adminGetStudentProfile, headers: { X-Koro-Access-Reason: "KVKK başvurusu inceleniyor" },
+          expect: 403, code: forbidden }
+      - { persona: dpo, operation: adminGetStudentProfile, headers: { X-Koro-Access-Reason: "{{fixture:dsr_student_open}}" },
+          expect: 200 }

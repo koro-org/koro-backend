@@ -1050,6 +1050,12 @@
     "type": "urn:koro:problem:request_timeout"
   },
   {
+    "code": "students.cv_limit",
+    "status": 409,
+    "title": "At most 3 CVs",
+    "type": "urn:koro:problem:students.cv_limit"
+  },
+  {
     "code": "students.empty_patch",
     "status": 422,
     "title": "Nothing to update",

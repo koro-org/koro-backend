@@ -5,9 +5,11 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 	"uuid"
 
 	"koro/internal/authz/authztest"
+	"koro/internal/kvkk"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
@@ -26,8 +28,8 @@ func (w *studentsWiring) useMemStore() {
 
 // TestWire_StudentsProvidesProviderHooksAndTasks pins what students binds
 // in build and registers in tasks (01 §6.2, §7): its service, its KVKK
-// provider, the two late-bound reads of orgs, five subscriptions and two
-// nightly jobs.
+// provider, the two late-bound reads of orgs, six subscriptions (file.rejected
+// since BE-025, next to files' own) and two nightly jobs.
 func TestWire_StudentsProvidesProviderHooksAndTasks(t *testing.T) {
 	t.Parallel()
 	c := newTestContainer(t)
@@ -58,6 +60,7 @@ func TestWire_StudentsProvidesProviderHooksAndTasks(t *testing.T) {
 		domainevent.TopicUserEduVerified:           students.ApplyEduVerifiedTaskName,
 		domainevent.TopicUserEduVerificationLapsed: students.ApplyEduLapsedTaskName,
 		domainevent.TopicClubSensitivityChanged:    students.DropSensitiveClubKeyTaskName,
+		domainevent.TopicFileRejected:              students.DropRejectedFileTaskName,
 	} {
 		if !slices.ContainsFunc(c.infra.subs.For(topic), func(s outbox.Subscription) bool { return s.Name == name }) {
 			t.Errorf("%s is not subscribed to %s", name, topic)
@@ -134,5 +137,49 @@ func TestWire_StudentsSensitivityChangedThroughTheSubscription(t *testing.T) {
 	p, err := c.students.store.GetProfile(ctx, user)
 	if err != nil || slices.Contains(p.AudienceKeys, students.ClubKey(club)) {
 		t.Fatalf("profile keys after the event = %v, %v", p.AudienceKeys, err)
+	}
+}
+
+// TestWire_StudentsDSRsReadKvkkAtCallTime (03 k11): the dpo's request is
+// read through kvkk (built after students) at call time: an open request
+// names its subject, a closed one and an unknown one are no request, and a
+// caller kvkk does not let read requests (support) gets none either.
+func TestWire_StudentsDSRsReadKvkkAtCallTime(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	subject := authztest.ID("student")
+	at := c.infra.clock.Now().UTC()
+	open, closed := uuid.NewV7(), uuid.NewV7()
+	for id, st := range map[uuid.UUID]kvkk.Status{open: kvkk.StatusInProgress, closed: kvkk.StatusCompleted} {
+		d := kvkk.DSR{ID: id, UserID: &subject, Type: kvkk.TypeAccess, Channel: kvkk.ChannelInApp, Status: st,
+			ReceivedAt: at, DueAt: at.Add(kvkk.LegalPeriod)}
+		if st == kvkk.StatusCompleted {
+			done := at.Add(time.Hour)
+			d.CompletedAt, d.ResponseSummary = &done, "Yanıtlandı"
+		}
+		if err := c.kvkk.store.Insert(ctx, d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dpo, _ := authztest.Get("dpo")
+	sup, _ := authztest.Get("support")
+	dsrs := studentsDSRs{c: c}
+	if got, ok, err := dsrs.OpenSubject(ctx, dpo.Actor, open); err != nil || !ok || got != subject {
+		t.Fatalf("open request = %v, %v, %v", got, ok, err)
+	}
+	for name, id := range map[string]uuid.UUID{"closed": closed, "unknown": uuid.NewV7()} {
+		if _, ok, err := dsrs.OpenSubject(ctx, dpo.Actor, id); err != nil || ok {
+			t.Fatalf("%s request = %v, %v", name, ok, err)
+		}
+	}
+	if _, ok, err := dsrs.OpenSubject(ctx, sup.Actor, open); err != nil || ok {
+		t.Fatalf("support reading a request = %v, %v", ok, err)
+	}
+	if _, ok, err := (studentsDSRs{c: &container{}}).OpenSubject(ctx, dpo.Actor, open); err != nil || ok {
+		t.Fatalf("without kvkk = %v, %v", ok, err)
 	}
 }

@@ -10,7 +10,8 @@ import (
 
 // Store is the persistence boundary of students (05 §2.2) over
 // student_profiles, student_privacy_settings, student_skills,
-// student_experiences and student_languages (02 §9.1–9.5). The GORM store
+// student_experiences, student_languages and student_cvs (02 §9.1–9.6)
+// and the count_segment function (02 §9.1, 01 §1.4). The GORM store
 // (store_gorm.go) and the in-memory store (store_mem.go) pass the same
 // contract test (store_contract_test.go).
 //
@@ -93,4 +94,31 @@ type Store interface {
 	// DeleteSections deletes every skill, experience and language of
 	// userID and returns how many rows went.
 	DeleteSections(ctx context.Context, userID uuid.UUID) (int, error)
+
+	// CVs returns the CVs of userID, oldest first (created_at, id).
+	CVs(ctx context.Context, userID uuid.UUID) ([]CV, error)
+	// GetCV returns userID's CV id, or ErrNotFound (also when id belongs
+	// to another user: IDOR).
+	GetCV(ctx context.Context, userID, id uuid.UUID) (CV, error)
+	// CVByFile returns the CV holding fileID or ErrNotFound (file.rejected).
+	CVByFile(ctx context.Context, fileID uuid.UUID) (CV, error)
+	// InsertCV writes a new CV (not current) and returns it as stored. A
+	// file already used by a CV is a conflict (student_cvs_file_id_uq).
+	InsertCV(ctx context.Context, cv CV) (CV, error)
+	// SetCurrentCV makes userID's CV id the only current one and returns
+	// it, or ErrNotFound when id is not userID's.
+	SetCurrentCV(ctx context.Context, userID, id uuid.UUID) (CV, error)
+	// DeleteCV deletes userID's CV id; false when it is not there (or not
+	// userID's).
+	DeleteCV(ctx context.Context, userID, id uuid.UUID) (bool, error)
+
+	// CountSegment is count_segment(keys, dims) (02 §9.1): the number of
+	// audience eligible profiles matching keys (OR inside a dimension,
+	// AND across dims dimensions); ok=false when the number is below 10
+	// (the function's NULL: the real number never leaves the database).
+	CountSegment(ctx context.Context, keys []string, dims int16) (n int, ok bool, err error)
+	// AudienceAfter returns up to limit user IDs > after, in user_id
+	// order, of the audience eligible profiles count_segment would count
+	// (keyset walk of Audience.Stream).
+	AudienceAfter(ctx context.Context, keys []string, dims int16, after uuid.UUID, limit int) ([]uuid.UUID, error)
 }

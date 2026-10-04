@@ -12,10 +12,12 @@ import (
 
 	"koro/internal/audit"
 	"koro/internal/authz"
+	"koro/internal/authz/authztest"
 	"koro/internal/consent"
 	"koro/internal/directory"
 	"koro/internal/files"
 	"koro/internal/identity"
+	"koro/internal/orgs"
 	"koro/internal/platform/civil"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
@@ -151,14 +153,24 @@ func (c *consents) records() []consent.RecordInput {
 	return slices.Clone(c.rows)
 }
 
-// catalog is directory: two universities, their departments, skills and
-// sensitive clubs.
+// catalog is directory: two universities, their departments, skills,
+// sensitive clubs and the known clubs (GetClub).
 type catalog struct {
 	mu        sync.Mutex
 	unis      map[uuid.UUID]directory.University
 	depts     map[uuid.UUID]directory.Department
 	skills    map[uuid.UUID]bool
 	sensitive map[uuid.UUID]bool
+	clubs     map[uuid.UUID]bool // known clubs (catalog rows)
+}
+
+func (c *catalog) GetClub(_ context.Context, orgID uuid.UUID) (directory.Club, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.clubs[orgID] {
+		return directory.Club{}, directory.ErrNotFound
+	}
+	return directory.Club{OrgID: orgID, OrgKind: "club", IsSensitive: c.sensitive[orgID]}, nil
 }
 
 func (c *catalog) GetUniversity(_ context.Context, id uuid.UUID) (directory.University, error) {
@@ -208,6 +220,91 @@ func (c *catalog) setSensitive(id uuid.UUID, v bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.sensitive[id] = v
+}
+
+// membersFake is orgs' GetMember: memberships by ID; it records the actor
+// of every call (only a club_admin of the org may reach it).
+type membersFake struct {
+	mu    sync.Mutex
+	ms    map[uuid.UUID]orgs.MemberView
+	calls []authz.Actor
+}
+
+func (m *membersFake) GetMember(_ context.Context, a authz.Actor, orgID, id uuid.UUID, _ orgs.Access) (orgs.MemberView, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, a)
+	v, ok := m.ms[id]
+	if !ok || v.Membership.OrgID != orgID || v.Membership.Status == orgs.MemberEnded {
+		return orgs.MemberView{}, orgs.ErrNotFound
+	}
+	return v, nil
+}
+
+// add records a membership of user in org and returns its ID.
+func (m *membersFake) add(org, user uuid.UUID, role authz.MemberRole, status orgs.MemberStatus) uuid.UUID {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	id := uuid.NewV7()
+	joined := t0.AddDate(0, -2, 0)
+	m.ms[id] = orgs.MemberView{
+		Membership: orgs.Membership{ID: id, OrgID: org, OrgKind: orgs.KindClub, UserID: user, Role: role, Status: status,
+			Source: orgs.SourceJoinRequest, JoinedAt: &joined},
+		FirstName: "Ada", LastName: "Yılmaz", AvatarURL: "https://files.test/avatar",
+	}
+	return id
+}
+
+// accountsFake is identity's AdminUser over the users fake.
+type accountsFake struct{ users *usersFake }
+
+func (f accountsFake) AdminUser(_ context.Context, _ authz.Actor, id uuid.UUID) (identity.AdminUser, error) {
+	f.users.mu.Lock()
+	defer f.users.mu.Unlock()
+	s, ok := f.users.sum[id]
+	if !ok {
+		return identity.AdminUser{}, identity.ErrNotFound
+	}
+	birth := ym(2003, 4)
+	out := identity.AdminUser{
+		User: identity.User{ID: id, Status: s.Status, Email: "ada@example.test", FirstName: s.FirstName, LastName: s.LastName,
+			BirthDate: &birth, Locale: "tr", MFAEnabled: false, CreatedAt: t0.AddDate(-1, 0, 0), PasswordHash: "$argon2id$secret"},
+		StudentStatus: authz.StudentNone,
+	}
+	if v, ok := f.users.ver[id]; ok {
+		out.Student, out.StudentStatus = &v, authz.StudentVerified
+	}
+	return out, nil
+}
+
+// dsrsFake is kvkk's data subject requests: open or closed, by subject.
+type dsrsFake struct {
+	mu   sync.Mutex
+	open map[uuid.UUID]uuid.UUID // request → subject (open requests only)
+}
+
+func (d *dsrsFake) OpenSubject(_ context.Context, a authz.Actor, id uuid.UUID) (uuid.UUID, bool, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !a.HasPlatformRole(authz.PlatformDPO) {
+		return uuid.Nil(), false, nil
+	}
+	s, ok := d.open[id]
+	return s, ok, nil
+}
+
+// regsFake is events' registration reader.
+type regsFake struct {
+	count map[uuid.UUID]int // user → registrations in the club
+	list  map[uuid.UUID][]students.RegistrationSummary
+}
+
+func (r *regsFake) CountInOrg(_ context.Context, _, user uuid.UUID) (int, error) {
+	return r.count[user], nil
+}
+
+func (r *regsFake) SummaryOf(_ context.Context, user uuid.UUID) ([]students.RegistrationSummary, error) {
+	return r.list[user], nil
 }
 
 // orgsFake is orgs: the active memberships of users.
@@ -304,6 +401,8 @@ type filesFake struct {
 	attached map[uuid.UUID]files.Owner
 	deleted  []uuid.UUID
 	deleteTx []int
+	notClean map[uuid.UUID]bool // scan pending: PresignGet refuses
+	ttls     []time.Duration    // PresignGet lifetimes asked for
 }
 
 func (f *filesFake) Get(_ context.Context, id uuid.UUID) (files.FileMeta, error) {
@@ -323,13 +422,17 @@ func (f *filesFake) Attach(_ context.Context, _ authz.Actor, id uuid.UUID, owner
 	return nil
 }
 
-func (f *filesFake) PresignGet(_ context.Context, id uuid.UUID, _ time.Duration) (files.Download, error) {
+func (f *filesFake) PresignGet(_ context.Context, id uuid.UUID, ttl time.Duration) (files.Download, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if _, ok := f.meta[id]; !ok {
 		return files.Download{}, files.ErrNotFound
 	}
-	return files.Download{URL: "https://files.test/" + id.String()}, nil
+	if f.notClean[id] {
+		return files.Download{}, files.ErrNotClean
+	}
+	f.ttls = append(f.ttls, ttl)
+	return files.Download{URL: "https://files.test/" + id.String(), ExpiresAt: t0.Add(ttl)}, nil
 }
 
 func (f *filesFake) remove(ctx context.Context, _ authz.Actor, id uuid.UUID) error {
@@ -345,25 +448,36 @@ func (f *filesFake) upload(owner uuid.UUID, purpose files.Purpose) uuid.UUID {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	id := uuid.NewV7()
-	f.meta[id] = files.FileMeta{ID: id, Purpose: purpose, UploadedBy: &owner, OwnerUserID: &owner}
+	f.meta[id] = files.FileMeta{ID: id, Purpose: purpose, UploadedBy: &owner, OwnerUserID: &owner,
+		OriginalName: string(purpose) + ".pdf"}
 	return id
+}
+
+func (f *filesFake) wasDeleted(id uuid.UUID) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Contains(f.deleted, id)
 }
 
 // env is a students module over the in-memory store and the fakes.
 type env struct {
-	clk     *clock.Fake
-	store   *spyStore
-	tx      *spyTx
-	out     *outbox.Mem
-	audit   *auditLog
-	consent *consents
-	catalog *catalog
-	orgs    *orgsFake
-	users   *usersFake
-	files   *filesFake
-	mod     students.Module
-	svc     students.Service
-	subs    *outbox.Registry
+	clk      *clock.Fake
+	store    *spyStore
+	tx       *spyTx
+	out      *outbox.Mem
+	audit    *auditLog
+	consent  *consents
+	catalog  *catalog
+	orgs     *orgsFake
+	users    *usersFake
+	files    *filesFake
+	members  *membersFake
+	dsrs     *dsrsFake
+	resolver *authztest.Resolver // newHTTP
+	regs     *regsFake
+	mod      students.Module
+	svc      students.Service
+	subs     *outbox.Registry
 
 	uniA, uniB           uuid.UUID
 	deptA, deptB, deptA2 uuid.UUID // deptA2 is inactive
@@ -379,8 +493,10 @@ func newEnv(t *testing.T) *env {
 		audit: &auditLog{}, consent: &consents{removed: map[uuid.UUID]bool{}},
 		orgs:  &orgsFake{ms: map[uuid.UUID][]authz.Membership{}},
 		users: &usersFake{sum: map[uuid.UUID]identity.UserSummary{}, ver: map[uuid.UUID]identity.EduVerification{}},
-		files: &filesFake{meta: map[uuid.UUID]files.FileMeta{}, attached: map[uuid.UUID]files.Owner{}},
-		uniA:  uuid.NewV7(), uniB: uuid.NewV7(), deptA: uuid.NewV7(), deptB: uuid.NewV7(), deptA2: uuid.NewV7(),
+		files: &filesFake{meta: map[uuid.UUID]files.FileMeta{}, attached: map[uuid.UUID]files.Owner{},
+			notClean: map[uuid.UUID]bool{}},
+		members: &membersFake{ms: map[uuid.UUID]orgs.MemberView{}}, dsrs: &dsrsFake{open: map[uuid.UUID]uuid.UUID{}},
+		uniA: uuid.NewV7(), uniB: uuid.NewV7(), deptA: uuid.NewV7(), deptB: uuid.NewV7(), deptA2: uuid.NewV7(),
 		skill1: uuid.NewV7(), skill2: uuid.NewV7(), clubPlain: uuid.NewV7(), clubSens: uuid.NewV7(),
 	}
 	e.catalog = &catalog{
@@ -395,12 +511,20 @@ func newEnv(t *testing.T) *env {
 		},
 		skills:    map[uuid.UUID]bool{e.skill1: true, e.skill2: true},
 		sensitive: map[uuid.UUID]bool{e.clubSens: true},
+		clubs:     map[uuid.UUID]bool{e.clubPlain: true, e.clubSens: true},
 	}
 	mod, err := students.New(students.Deps{
 		Store: e.store, Tx: e.tx, Outbox: e.out, Audit: e.audit, Clock: clk, Log: obs.Discard(),
 		Idempotency: idempotency.New(idempotency.Deps{Tx: e.tx, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()}),
 		Consent:     e.consent, Consents: e.consent, Catalog: e.catalog, Orgs: e.orgs, Users: e.users,
 		Verifications: e.users, Files: e.files, RemoveFile: e.files.remove,
+		Members: e.members, Accounts: accountsFake{users: e.users}, DSRs: e.dsrs,
+		Registrations: func() students.Registrations {
+			if e.regs == nil {
+				return nil
+			}
+			return e.regs
+		},
 	})
 	if err != nil {
 		t.Fatal(err)

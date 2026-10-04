@@ -15,7 +15,7 @@ import (
 )
 
 // NewGormStore returns the PostgreSQL store over the students tables
-// (02 §9.1–9.5).
+// (02 §9.1–9.6).
 func NewGormStore(orm *gorm.DB) Store { return gormStore{orm: orm} }
 
 type gormStore struct{ orm *gorm.DB }
@@ -40,6 +40,10 @@ var constraints = db.Constraints{
 	"student_skills_user_id_fkey":           problem.ErrNotFound,
 	"student_experiences_user_id_fkey":      problem.ErrNotFound,
 	"student_languages_user_id_fkey":        problem.ErrNotFound,
+	"student_cvs_user_id_fkey":              problem.ErrNotFound,
+	"student_cvs_file_id_fkey":              problem.ErrNotFound,
+	"student_cvs_file_id_uq":                problem.ErrConflict,
+	"student_cvs_current_uq":                problem.ErrConflict,
 }
 
 func wrap(op string, err error) error {

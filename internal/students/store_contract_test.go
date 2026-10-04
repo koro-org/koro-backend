@@ -18,13 +18,14 @@ type world struct {
 	university func(t *testing.T) uuid.UUID
 	department func(t *testing.T, uni uuid.UUID) uuid.UUID
 	skill      func(t *testing.T) uuid.UUID
-	file       func(t *testing.T) uuid.UUID
+	file       func(t *testing.T) uuid.UUID // an avatar
+	cvFile     func(t *testing.T) uuid.UUID // a cv upload
 }
 
 func memWorld() world {
 	id := func(*testing.T) uuid.UUID { return uuid.NewV7() }
 	return world{user: id, university: id, department: func(*testing.T, uuid.UUID) uuid.UUID { return uuid.NewV7() },
-		skill: id, file: id}
+		skill: id, file: id, cvFile: id}
 }
 
 func TestStore_Contract_Mem(t *testing.T) {
@@ -32,6 +33,11 @@ func TestStore_Contract_Mem(t *testing.T) {
 	storeContract(t, func(*testing.T) (students.Store, world) {
 		return students.NewMemStore(func() time.Time { return t0 }), memWorld()
 	})
+}
+
+func isConflict(err error) bool {
+	var pe *problem.Error
+	return errors.As(err, &pe) && pe.Status() == 409
 }
 
 func isInvalid(err error) bool {
@@ -308,6 +314,127 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (students.Store, wo
 		}
 		if n, _ := s.DeleteSections(ctx, u); n != 0 {
 			t.Fatalf("second DeleteSections = %d", n)
+		}
+	})
+
+	t.Run("cvs: insert, single current, owner scoping, by file, delete", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		u, other := w.user(t), w.user(t)
+		f1, f2, f3 := w.cvFile(t), w.cvFile(t), w.cvFile(t)
+		c1, err := s.InsertCV(ctx, students.CV{ID: uuid.NewV7(), UserID: u, FileID: f1})
+		if err != nil || c1.IsCurrent || c1.CreatedAt.IsZero() {
+			t.Fatalf("InsertCV = %+v, %v", c1, err)
+		}
+		c2, err := s.InsertCV(ctx, students.CV{ID: uuid.NewV7(), UserID: u, FileID: f2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.InsertCV(ctx, students.CV{ID: uuid.NewV7(), UserID: other, FileID: f1}); !isConflict(err) {
+			t.Fatalf("a file used twice: %v, want 409", err)
+		}
+		for _, id := range []uuid.UUID{c1.ID, c2.ID, c2.ID, c1.ID} {
+			got, err := s.SetCurrentCV(ctx, u, id)
+			if err != nil || !got.IsCurrent || got.ID != id {
+				t.Fatalf("SetCurrentCV(%v) = %+v, %v", id, got, err)
+			}
+			cvs, _ := s.CVs(ctx, u)
+			n := 0
+			for _, c := range cvs {
+				if c.IsCurrent {
+					n++
+					if c.ID != id {
+						t.Fatalf("current = %v, want %v", c.ID, id)
+					}
+				}
+			}
+			if n != 1 || len(cvs) != 2 || cvs[0].ID != c1.ID {
+				t.Fatalf("CVs = %+v", cvs)
+			}
+		}
+		if _, err := s.SetCurrentCV(ctx, other, c1.ID); !errors.Is(err, students.ErrNotFound) {
+			t.Fatalf("another user's SetCurrentCV: %v", err)
+		}
+		if _, err := s.GetCV(ctx, other, c1.ID); !errors.Is(err, students.ErrNotFound) {
+			t.Fatalf("another user's GetCV: %v", err)
+		}
+		if got, err := s.CVByFile(ctx, f2); err != nil || got.ID != c2.ID {
+			t.Fatalf("CVByFile = %+v, %v", got, err)
+		}
+		if _, err := s.CVByFile(ctx, f3); !errors.Is(err, students.ErrNotFound) {
+			t.Fatalf("CVByFile(unused) = %v", err)
+		}
+		if ok, err := s.DeleteCV(ctx, other, c1.ID); err != nil || ok {
+			t.Fatalf("another user's DeleteCV = %v, %v", ok, err)
+		}
+		if ok, err := s.DeleteCV(ctx, u, c1.ID); err != nil || !ok {
+			t.Fatalf("DeleteCV = %v, %v", ok, err)
+		}
+		if cvs, _ := s.CVs(ctx, u); len(cvs) != 1 || cvs[0].ID != c2.ID {
+			t.Fatalf("CVs after delete = %+v", cvs)
+		}
+	})
+
+	t.Run("segment: count_segment semantics and the eligible walk", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		uni := w.university(t)
+		var eligible []uuid.UUID
+		put := func(keys []string, ok bool) uuid.UUID {
+			p := newProfile(t, s, w, uni)
+			p.AudienceKeys, p.AudienceEligible = keys, ok
+			if _, err := s.UpdateProfile(ctx, p); err != nil {
+				t.Fatal(err)
+			}
+			return p.UserID
+		}
+		for i := range 12 {
+			year := "year:2"
+			if i >= 8 {
+				year = "year:3"
+			}
+			eligible = append(eligible, put([]string{"all", "uni:a", year}, true))
+		}
+		for range 3 {
+			put([]string{"all", "uni:a", "year:2"}, false) // ineligible: never counted
+		}
+		put([]string{"all", "uni:b", "year:2"}, true)
+		for _, c := range []struct {
+			keys []string
+			dims int16
+			want int // -1: below 10 (no number)
+		}{
+			{[]string{"uni:a"}, 1, 12},
+			{[]string{"uni:a", "uni:b"}, 1, 13},
+			{[]string{"uni:a", "year:2", "year:3"}, 2, 12},
+			{[]string{"uni:a", "uni:b", "year:2"}, 2, -1}, // 8 + 1 = 9
+			{[]string{"uni:a", "year:3"}, 2, -1},          // 4
+			{[]string{"all"}, 1, 13},
+			{[]string{"uni:x"}, 1, -1},
+		} {
+			n, ok, err := s.CountSegment(ctx, c.keys, c.dims)
+			if err != nil || (c.want < 0) == ok || (ok && n != c.want) || (!ok && n != 0) {
+				t.Errorf("CountSegment(%v, %d) = %d, %v, %v; want %d", c.keys, c.dims, n, ok, err, c.want)
+			}
+		}
+		var walked []uuid.UUID
+		after := uuid.Nil()
+		for {
+			page, err := s.AudienceAfter(ctx, []string{"uni:a", "year:2", "year:3"}, 2, after, 5)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(page) == 0 {
+				break
+			}
+			walked = append(walked, page...)
+			after = page[len(page)-1]
+		}
+		slices.SortFunc(eligible, func(a, b uuid.UUID) int { return slices.Compare(a[:], b[:]) })
+		if !slices.Equal(walked, eligible) {
+			t.Fatalf("walk = %v\n want %v", walked, eligible)
 		}
 	})
 }

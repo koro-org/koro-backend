@@ -123,6 +123,7 @@ func TestDTO_SelfProfileHasNoTalentField(t *testing.T) {
 		"experiences[].start_month", "experiences[].end_month", "experiences[].description", "languages",
 		"languages[].language_code", "languages[].level", "privacy", "privacy.discoverable", "privacy.show_contact_on_grant",
 		"privacy.show_clubs_on_grant", "privacy.activity_ranking_choice",
+		"cvs", "cvs[].cv_id", "cvs[].file_name", "cvs[].is_current", "cvs[].created_at", // BE-025 (04 §V.1)
 	})
 	wantFields(t, "StudentPrivacyDTO", jsonFields(reflect.TypeFor[students.StudentPrivacyDTO]()),
 		[]string{"discoverable", "show_contact_on_grant", "show_clubs_on_grant", "activity_ranking_choice"})
@@ -136,6 +137,7 @@ func TestDTO_NoLevelCarriesTalentField(t *testing.T) {
 		reflect.TypeFor[students.AudienceCountDTO](), reflect.TypeFor[students.AnonProfileDTO](),
 		reflect.TypeFor[students.StudentProfileL3DTO](), reflect.TypeFor[students.StudentL3CardDTO](),
 		reflect.TypeFor[students.StudentSkillList](), reflect.TypeFor[students.StudentLanguageList](), reflect.TypeFor[students.StudentExperienceDTO](),
+		reflect.TypeFor[students.StudentCVList](), reflect.TypeFor[students.StudentCVDownloadDTO](), reflect.TypeFor[students.MemberCardDTO](),
 	} {
 		for _, f := range jsonFields(typ) {
 			if forbiddenRe.MatchString(f) {

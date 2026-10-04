@@ -3,7 +3,11 @@
 # target of updateMyExperience / deleteMyExperience. notice_discovery is the published consent text
 # of discovery_profile in the consent store; bodies/students/update_privacy_discoverable.json holds
 # the SHA-256 of its body (matrixDiscoveryText).
+# BE-025: cv_student is the persona student's current CV (with its profile); its file is files'
+# fixture file_attached (purpose cv, uploaded by student, active, served while the scan is not
+# required).
 version: 1
 fixtures:
   experience_student: { kind: experience, owner: student }
   notice_discovery: { kind: consent_text, purpose: discovery_profile }
+  cv_student: { kind: cv, owner: student, file: file_attached }

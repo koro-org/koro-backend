@@ -13,6 +13,9 @@ import (
 //
 //	level  who      type                                     built by
 //	self   student  StudentProfileSelfDTO, StudentPrivacyDTO  toSelfDTO, toPrivacyDTO (BE-023 endpoints)
+//	self   student  StudentCVDTO, StudentCVDownloadDTO        toCVDTO, toDownloadDTO (BE-025, dto_views.go)
+//	club   cla      MemberCardDTO                            toMemberCardDTO (BE-025, 04 §V.4)
+//	staff  sup/pad/dpo AdminStudentViewDTO                   toAdminStudentViewDTO (BE-025, 04 §V.5)
 //	0      company  AudienceCountDTO                         NewAudienceCount (outreach; BE-025 Audience.Count)
 //	1      company  none: delivery counts are AudienceCountDTO values (outreach)
 //	2      company  AnonProfileDTO                           ToAnonProfile (discovery, BE-051)
@@ -116,8 +119,8 @@ type StudentPrivacyDTO struct {
 }
 
 // StudentProfileSelfDTO is the student's own profile (04 §V.1): every
-// field of the profile and its sections, the privacy settings; CVs come
-// with BE-025. Only the owner ever receives it.
+// field of the profile and its sections, the CVs and the privacy
+// settings. Only the owner ever receives it.
 type StudentProfileSelfDTO struct {
 	UserID             string                 `json:"user_id" format:"uuid"`
 	University         StudentUniversityDTO   `json:"university" doc:"From the active student verification; not editable"`
@@ -134,6 +137,7 @@ type StudentProfileSelfDTO struct {
 	Skills             []StudentSkillDTO      `json:"skills"`
 	Experiences        []StudentExperienceDTO `json:"experiences"`
 	Languages          []StudentLanguageDTO   `json:"languages"`
+	CVs                []StudentCVDTO         `json:"cvs"`
 	Privacy            StudentPrivacyDTO      `json:"privacy"`
 }
 
@@ -175,7 +179,7 @@ func toSelfDTO(v ProfileView) StudentProfileSelfDTO {
 		Headline: str(p.Headline), About: str(p.About), City: str(p.City), AvatarURL: v.AvatarURL,
 		CompletedSections: append([]string{}, p.CompletedSections...),
 		Skills:            skillDTOs(v.Skills), Languages: languageDTOs(v.Languages),
-		Experiences: make([]StudentExperienceDTO, len(v.Experiences)), Privacy: toPrivacyDTO(v.Privacy),
+		Experiences: make([]StudentExperienceDTO, len(v.Experiences)), CVs: cvDTOs(v.CVs), Privacy: toPrivacyDTO(v.Privacy),
 	}
 	if p.ExpectedGraduation != nil {
 		d.ExpectedGraduation = monthString(*p.ExpectedGraduation)

@@ -15,9 +15,11 @@ const eraseJob = "students.erase_account"
 
 // privacyProvider is the KVKK provider of students (01 §3.3): the profile
 // (with its derived audience columns), the skills, experiences and
-// languages, the privacy settings and the avatar file are the student's
-// personal data (02 §9.1–9.5: hard delete with the account). The consent
-// rows behind the mirrored flags belong to consent's provider.
+// languages, the privacy settings, the CVs and the avatar and CV files are
+// the student's personal data (02 §9.1–9.6: hard delete with the account,
+// the files included). The consent rows behind the mirrored flags belong
+// to consent's provider; the CV files' bytes are files' (the export lists
+// them).
 type privacyProvider struct{ s *service }
 
 var _ privacy.Provider = privacyProvider{}
@@ -79,6 +81,20 @@ func (p privacyProvider) Export(ctx context.Context, userID uuid.UUID) (privacy.
 	for _, l := range langs {
 		out.Items = append(out.Items, map[string]any{"record": "language", "language_code": l.LanguageCode, "level": string(l.Level)})
 	}
+	cvs, err := st.CVs(ctx, userID)
+	if err != nil {
+		return privacy.ExportSection{}, err
+	}
+	views, err := p.s.cvViews(ctx, cvs)
+	if err != nil {
+		return privacy.ExportSection{}, err
+	}
+	for _, c := range views {
+		out.Items = append(out.Items, map[string]any{
+			"record": "cv", "cv_id": c.CV.ID.String(), "file_id": c.CV.FileID.String(), "file_name": c.FileName,
+			"is_current": c.CV.IsCurrent, "created_at": c.CV.CreatedAt.UTC().Format(time.RFC3339),
+		})
+	}
 	return out, nil
 }
 
@@ -117,9 +133,9 @@ func putStr(item map[string]any, key string, v *string) {
 }
 
 // Erase implements privacy.Provider: in one transaction the sections, the
-// settings and the profile are hard deleted, then the avatar (no longer
-// referenced) is deleted through files. Idempotent: a second run finds
-// nothing.
+// CVs, the settings and the profile are hard deleted, then the avatar and
+// the CV files (no longer referenced) are deleted through files.
+// Idempotent: a second run finds nothing.
 func (p privacyProvider) Erase(ctx context.Context, userID uuid.UUID) (privacy.EraseResult, error) {
 	s := p.s
 	res := privacy.EraseResult{Module: "students"}
@@ -136,6 +152,16 @@ func (p privacyProvider) Erase(ctx context.Context, userID uuid.UUID) (privacy.E
 			return err
 		}
 		res.Deleted = n
+		cvs, err := s.d.Store.CVs(ctx, userID)
+		if err != nil {
+			return err
+		}
+		for _, c := range cvs {
+			if _, err := s.d.Store.DeleteCV(ctx, userID, c.ID); err != nil {
+				return err
+			}
+			res.Deleted++
+		}
 		for _, del := range []func(context.Context, uuid.UUID) (bool, error){s.d.Store.DeletePrivacy, s.d.Store.DeleteProfile} {
 			ok, err := del(ctx, userID)
 			if err != nil {
@@ -147,6 +173,12 @@ func (p privacyProvider) Erase(ctx context.Context, userID uuid.UUID) (privacy.E
 		}
 		if avatar != nil {
 			if err := s.removeFile(ctx, authz.SystemActor(eraseJob), *avatar); err != nil {
+				return err
+			}
+			res.Deleted++
+		}
+		for _, c := range cvs {
+			if err := s.removeFile(ctx, authz.SystemActor(eraseJob), c.FileID); err != nil {
 				return err
 			}
 			res.Deleted++

@@ -17,6 +17,7 @@ import (
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/obs"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/privacy"
 	"koro/internal/platform/storage"
 )
@@ -62,8 +63,13 @@ func TestWire_FilesTasksAndPrivacy(t *testing.T) {
 	if len(subs) != 1 || subs[0].Name != files.ScanTaskName {
 		t.Fatalf("file.uploaded subscriptions %+v", subs)
 	}
-	if subs := c.infra.subs.For(domainevent.TopicFileRejected); len(subs) != 1 || subs[0].Name != files.NotifyRejectedTaskName {
-		t.Fatalf("file.rejected subscriptions %+v", subs)
+	// file.rejected has several subscribers: files notifies the uploader and
+	// every owning module drops its reference (01 §6.2, T-176, T-222; the
+	// first owner is students, BE-025). Pin files' own one.
+	if subs := c.infra.subs.For(domainevent.TopicFileRejected); !slices.ContainsFunc(subs, func(s outbox.Subscription) bool {
+		return s.Name == files.NotifyRejectedTaskName
+	}) {
+		t.Fatalf("file.rejected subscriptions %+v lack %s", subs, files.NotifyRejectedTaskName)
 	}
 	mux, err := c.workerMux(obs.Discard())
 	if err != nil {

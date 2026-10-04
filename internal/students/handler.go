@@ -16,9 +16,10 @@ import (
 	"koro/internal/platform/idempotency"
 )
 
-// Register adds the students operations of BE-023 (04 §2.4) to api. svc
-// may be nil (`koro openapi`): handlers only touch it when called. Every
-// answer carries personal data: the API sets Cache-Control: no-store.
+// Register adds the students operations of BE-023 and BE-025 (04 §2.4) to
+// api. svc may be nil (`koro openapi`): handlers only touch it when
+// called. Every answer carries personal data: the API sets Cache-Control:
+// no-store.
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
 	tags := []string{"students"}
@@ -89,6 +90,8 @@ func Register(api huma.API, svc Service) {
 			"record change in one transaction. Users under 18 cannot turn either on (422 students.minor_restricted). " +
 			"Every change is audited.",
 	}, authz.StudentsPrivacyUpdateOwn, ""), h.updatePrivacy)
+
+	registerViews(api, h)
 }
 
 type handler struct{ svc Service }

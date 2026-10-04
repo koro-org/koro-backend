@@ -1,6 +1,8 @@
 package students
 
 import (
+	"errors"
+
 	"koro/internal/orgs"
 	"koro/internal/platform/problem"
 )
@@ -16,6 +18,17 @@ var (
 		"Unknown department for the student's university")
 	// ErrEmptyPatch: a PATCH without a field to change.
 	ErrEmptyPatch = problem.New(problem.Invalid, "students.empty_patch", "Nothing to update")
+	// ErrCVLimit: a fourth CV (02 §9.6: at most 3; 04 §2.4 createMyCv 409).
+	ErrCVLimit = problem.New(problem.Conflict, "students.cv_limit", "At most 3 CVs")
+
+	// ErrAudienceTooSmall: the audience is below k = 10 (04 §V.2): no number
+	// is returned and nobody is streamed. It is a cross-module sentinel,
+	// not an HTTP problem: outreach answers it with its own 422
+	// outreach.audience_too_small (04 §1.10; 06 H-52: one code, one module).
+	ErrAudienceTooSmall = errors.New("students: audience below the k-anonymity threshold")
+	// ErrInvalidAudience: an audience spec with no key or a malformed key
+	// (422 validation_failed if it ever reaches HTTP).
+	ErrInvalidAudience = problem.ErrValidation.Wrap(errors.New("students: invalid audience spec"))
 
 	// ErrVerificationRequired: an action for verified students by an
 	// account without an active student verification (03 §2.3, k-uv). The

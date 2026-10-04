@@ -2,10 +2,11 @@
 // profile and its sections (skills, experiences, languages), the privacy
 // settings, the audience keys (audience_keys, audience_eligible) that feed
 // and outreach target, and the visibility DTOs of every level a company or
-// the student sees (dto.go). CVs, the audience counts, the member card and
-// the admin view come with BE-025; level 3 access grants and the company
-// endpoints with BE-046, which serve the level 2 and 3 projections built
-// here.
+// the student sees (dto.go), the CVs, the audience counts and streams
+// (Audience over count_segment), the club_admin's member card and the
+// platform staff's admin view (BE-025). Level 3 access grants and the
+// company endpoints come with BE-046, which serve the level 2 and 3
+// projections built here.
 //
 // Rules the package enforces:
 //
@@ -34,11 +35,26 @@
 //     (club.sensitivity_changed), students.audience_refresh is the nightly
 //     safety net. ViewerKeys, read by the feed only, adds the sensitive
 //     clubs at read time and is never stored.
+//   - k-anonymity (04 §V.2, 02 §9.1): Audience.Count answers through
+//     count_segment and never returns a number below 10
+//     (ErrAudienceTooSmall); Audience.Stream refuses such an audience and
+//     walks only eligible adults. The dimension count is derived from the
+//     keys (T-132) and sensitive club keys never target (03 Y2).
+//   - CVs (02 §9.6): at most 3, one current, PDF uploads of the student
+//     only (files: ClamAV, metadata removed), downloads by ≤ 5-minute
+//     signed URL with an access audit record, hard delete with the file.
+//     A CV or an avatar the scan rejects loses its reference and its file
+//     (file.rejected, T-176).
+//   - The member card (04 §V.4) has no e-mail (T-69) and exists for an
+//     active member of the club_admin's own club only; a sensitive club's
+//     card is audited. The admin view (04 §V.5) is break-glass for
+//     support and platform_admin and request-bound for the dpo (03 k11);
+//     every read is audited.
 //   - Talent values never enter this module (01 §0-7): no DTO carries a
 //     talent, band, score, point or rank field (TestDTO_SelfProfileHasNoTalentField,
 //     TestDTO_NoLevelCarriesTalentField).
 //   - Personal data: logs carry IDs only; the KVKK provider exports and
-//     erases every row of the module and the avatar file.
+//     erases every row of the module, the avatar and the CV files.
 package students
 
 import (
@@ -50,6 +66,7 @@ import (
 	"uuid"
 
 	"koro/internal/authz"
+	"koro/internal/files"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
 	"koro/internal/platform/idempotency"
@@ -99,6 +116,7 @@ type Profiles interface {
 // authz.Can first (05 §5.3).
 type Service interface {
 	Profiles
+	Audience
 
 	// GraduatedAmong reports which of userIDs have a graduated profile
 	// (orgs.admin_sweep, T-210).
@@ -126,6 +144,23 @@ type Service interface {
 	GetMyPrivacy(ctx context.Context, a authz.Actor) (Privacy, error)
 	// UpdateMyPrivacy is updateMyPrivacy (students.privacy.update_own).
 	UpdateMyPrivacy(ctx context.Context, a authz.Actor, p PrivacyPatch) (Privacy, error)
+
+	// ListMyCVs is listMyCvs (students.cv.read_own).
+	ListMyCVs(ctx context.Context, a authz.Actor) ([]CVView, error)
+	// CreateMyCV is createMyCv (students.cv.manage): 409 students.cv_limit
+	// for a fourth CV.
+	CreateMyCV(ctx context.Context, a authz.Actor, fileID uuid.UUID, makeCurrent bool) (CVView, error)
+	// SetMyCurrentCV is setMyCurrentCv (students.cv.manage).
+	SetMyCurrentCV(ctx context.Context, a authz.Actor, id uuid.UUID) (CVView, error)
+	// DeleteMyCV is deleteMyCv (students.cv.manage): the file goes too.
+	DeleteMyCV(ctx context.Context, a authz.Actor, id uuid.UUID) error
+	// DownloadMyCV is downloadMyCv (students.cv.read_own): ≤ 5 minutes.
+	DownloadMyCV(ctx context.Context, a authz.Actor, id uuid.UUID) (files.Download, error)
+	// GetMemberCard is getMemberCard (students.profile.read_member_card).
+	GetMemberCard(ctx context.Context, a authz.Actor, orgID, membershipID uuid.UUID) (MemberCard, error)
+	// AdminGetStudentProfile is adminGetStudentProfile
+	// (students.profile.read_admin).
+	AdminGetStudentProfile(ctx context.Context, a authz.Actor, userID uuid.UUID, access AdminAccess) (AdminView, error)
 }
 
 // Deps are the dependencies of the students module. Store, Tx, Outbox,
@@ -152,12 +187,28 @@ type Deps struct {
 	// Consents checks consents in force for the nightly reconciliation of
 	// the mirrored flags. nil → the reconciliation is skipped.
 	Consents ConsentChecker
-	// Files attaches and serves the avatar. nil → avatar_file_id is
-	// refused (503) and no avatar_url is returned.
+	// Files attaches and serves the avatar and the CVs. nil →
+	// avatar_file_id and createMyCv/downloadMyCv are refused (503) and no
+	// avatar_url is returned.
 	Files Files
-	// RemoveFile deletes a replaced or erased avatar in the caller's
-	// transaction. nil → the file is kept (logged).
+	// RemoveFile deletes a replaced or erased avatar, a deleted CV and a
+	// file the scan rejected in the caller's transaction. nil → the file
+	// is kept (logged).
 	RemoveFile FileRemover
+
+	// Members reads the membership behind a member card (orgs). nil →
+	// getMemberCard answers 503 after its authz decision.
+	Members Members
+	// Accounts is identity's account view of the admin student view. nil
+	// → adminGetStudentProfile answers 503 after its authz decision.
+	Accounts AdminUsers
+	// DSRs checks the dpo's data subject request (kvkk). nil → the dpo
+	// path is closed (403; support and platform_admin keep break-glass).
+	DSRs DSRs
+	// Registrations returns the events reader, read at call time (events
+	// builds later). nil, or a nil reader → the member card's count and
+	// the admin view's registrations are absent.
+	Registrations func() Registrations
 }
 
 func (d Deps) validate() error {
@@ -180,7 +231,8 @@ func (d Deps) validate() error {
 // Module is what students hands to the composition root.
 type Module struct {
 	Service Service
-	// Privacy is the KVKK provider (profile, sections, settings, avatar).
+	// Privacy is the KVKK provider (profile, sections, settings, CVs,
+	// avatar and CV files).
 	Privacy privacy.Provider
 
 	svc *service

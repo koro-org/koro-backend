@@ -1,0 +1,72 @@
+# Multi-step scenarios of the outreach module (03 §7.7; BE-030).
+version: 1
+scenarios:
+  sensitive_club_targeting:
+    note: >-
+      03 k16 and Y2 — a sensitive club's own club_admin (helper club_admin_sensitive) addresses its members:
+      the count is allowed but never a number (a sensitive membership is never counted) and the segment is
+      saved; a company and the platform never target it (422 outreach.sensitive_target).
+    steps:
+      - { persona: club_admin_sensitive, operation: countAudience, path_params: { org_id: club_sensitive },
+          body: bodies/outreach/count_club_sensitive.json, expect: 200 }
+      - { persona: club_admin_sensitive, operation: createSegment, path_params: { org_id: club_sensitive },
+          body: bodies/outreach/create_club_sensitive_own.json, expect: 201, save: { seg_sensitive_own: segment_id } }
+      - { persona: club_admin_sensitive, operation: getSegment,
+          path_params: { org_id: club_sensitive, segment_id: seg_sensitive_own }, expect: 200 }
+      - { persona: company_admin, operation: countAudience, path_params: { org_id: company_a },
+          body: bodies/outreach/count_club_sensitive.json, expect: 422, code: outreach.sensitive_target }
+      - { persona: platform_admin, operation: countAudience, path_params: { org_id: club_sensitive },
+          body: bodies/outreach/count_club_sensitive.json, expect: 422, code: outreach.sensitive_target }
+  targeting_scope_k16:
+    note: >-
+      03 k16 — a club_admin targets only its own club, a university_rep only its own university (narrowed by
+      department or year); anything else is 422 outreach.target_out_of_scope.
+    steps:
+      - { persona: club_admin, operation: countAudience, path_params: { org_id: club_a },
+          body: bodies/outreach/count_club_b.json, expect: 422, code: outreach.target_out_of_scope }
+      - { persona: club_admin, operation: countAudience, path_params: { org_id: club_a },
+          body: bodies/outreach/count_company.json, expect: 422, code: outreach.target_out_of_scope }
+      - { persona: club_admin, operation: countAudience, path_params: { org_id: club_a },
+          body: bodies/outreach/count_club_a.json, expect: 200 }
+      - { persona: university_rep, operation: countAudience, path_params: { org_id: uni_a },
+          body: bodies/outreach/count_uni_b.json, expect: 422, code: outreach.target_out_of_scope }
+      - { persona: university_rep, operation: countAudience, path_params: { org_id: uni_a },
+          body: bodies/outreach/count_club_a.json, expect: 422, code: outreach.target_out_of_scope }
+      - { persona: university_rep, operation: countAudience, path_params: { org_id: uni_a },
+          body: bodies/outreach/count_uni_a.json, expect: 200 }
+      - { persona: company_member, operation: countAudience, path_params: { org_id: company_a },
+          body: bodies/outreach/count_uni_b.json, expect: 200 }
+  segment_lifecycle:
+    note: >-
+      04 §1.13 — updateSegment needs If-Match (428 without, 412 stale); an archived segment cannot change (409
+      outreach.invalid_state); archiving twice changes nothing.
+    steps:
+      - { persona: company_member, operation: createSegment, path_params: { org_id: company_a }, expect: 201,
+          save: { seg_new: segment_id } }
+      - { persona: company_admin, operation: getSegment, path_params: { org_id: company_a, segment_id: seg_new },
+          expect: 200 }
+      - { persona: company_member, operation: updateSegment, path_params: { org_id: company_a, segment_id: seg_new },
+          headers: { If-Match: "" }, expect: 428, code: precondition_required }
+      - { persona: company_member, operation: updateSegment,
+          path_params: { org_id: company_a, segment_id: seg_company_a }, headers: { If-Match: '"0"' },
+          expect: 412, code: precondition_failed }
+      - { persona: company_admin, operation: archiveSegment, path_params: { org_id: company_a, segment_id: seg_new },
+          expect: 200 }
+      - { persona: company_admin, operation: archiveSegment, path_params: { org_id: company_a, segment_id: seg_new },
+          expect: 200 }
+      - { persona: company_member, operation: updateSegment,
+          path_params: { org_id: company_a, segment_id: seg_company_a_archived }, expect: 409,
+          code: outreach.invalid_state }
+      - { persona: company_member, operation: listSegments, path_params: { org_id: company_a },
+          query: { archived: "true" }, expect: 200 }
+  audience_count_mfa:
+    note: >-
+      k-mfa (03 §6.4) — company_admin and university_rep count with an MFA session only; company_member
+      (recruiter) needs none.
+    steps:
+      - { persona: company_admin, mfa: false, operation: countAudience, path_params: { org_id: company_a },
+          expect: 403, code: authz.mfa_required }
+      - { persona: university_rep, mfa: false, operation: countAudience, path_params: { org_id: uni_a },
+          body: bodies/outreach/count_uni_a.json, expect: 403, code: authz.mfa_required }
+      - { persona: company_member, mfa: false, operation: countAudience, path_params: { org_id: company_a },
+          expect: 200 }

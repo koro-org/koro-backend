@@ -1,0 +1,1 @@
+{"definition": {"uni": ["{{fixture:uni_a_university}}", "{{fixture:uni_b_university}}"], "dept": ["{{fixture:department_a}}"]}}

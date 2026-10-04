@@ -1020,6 +1020,36 @@
     "type": "urn:koro:problem:orgs.transfer_target_invalid"
   },
   {
+    "code": "outreach.audience_too_small",
+    "status": 422,
+    "title": "The audience is too small to target",
+    "type": "urn:koro:problem:outreach.audience_too_small"
+  },
+  {
+    "code": "outreach.empty_patch",
+    "status": 422,
+    "title": "Nothing to update",
+    "type": "urn:koro:problem:outreach.empty_patch"
+  },
+  {
+    "code": "outreach.invalid_state",
+    "status": 409,
+    "title": "Segment status does not allow this change",
+    "type": "urn:koro:problem:outreach.invalid_state"
+  },
+  {
+    "code": "outreach.sensitive_target",
+    "status": 422,
+    "title": "Sensitive clubs cannot be targeted",
+    "type": "urn:koro:problem:outreach.sensitive_target"
+  },
+  {
+    "code": "outreach.target_out_of_scope",
+    "status": 422,
+    "title": "The audience is outside the organization's targeting scope",
+    "type": "urn:koro:problem:outreach.target_out_of_scope"
+  },
+  {
     "code": "page.invalid_cursor",
     "status": 422,
     "title": "Invalid cursor",

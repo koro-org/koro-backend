@@ -1,0 +1,344 @@
+# Authz matrix of the outreach module (03 §5.8, 04 §2.8; BE-030). 6 operations × 18 personas.
+# Every operation is the org management surface /orgs/{org_id}/... (03 §3.6): the org's members without
+# the role → 403, non-members → 404, every platform role sees it (403 without the grant). S cells: the
+# org's club_admin, university_rep, company_member (recruiter) and company_admin. k-po: platform_admin
+# lists, reads and manages the platform org's segments only (no persona is a member of it → 403); it
+# counts the audience of every org (✓). k16 and Y2 (the targeting scope) are the service's: 422
+# outreach.target_out_of_scope / outreach.sensitive_target (variants with a note). Another org's segment
+# under an org's path is 404 (IDOR). Fixtures: fixtures/outreach.yaml (matrix_outreach_test.go), dated
+# 2026-10-01T00:00:00Z: an untouched segment's ETag is "1hmhuo3hji000". The matrix students have no
+# eligible audience: every count is 200 with count null and below_threshold true.
+version: 1
+groups:
+  # signed-in users without a membership in company_a (and no platform role).
+  out_outsiders_company_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                            event_staff, university_rep, other_company_member]
+  # signed-in users without a membership in company_b.
+  out_outsiders_company_b: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                            event_staff, university_rep, company_member, company_admin]
+  # signed-in users without a membership in club_a.
+  out_outsiders_club_a: [user_unverified, student, student_minor, other_club_admin, event_staff, university_rep,
+                         company_member, company_admin, other_company_member]
+  # signed-in users without a membership in uni_a.
+  out_outsiders_uni_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                        event_staff, company_member, company_admin, other_company_member]
+  # signed-in users without a membership in club_sensitive (club_member is one of its members).
+  out_outsiders_sensitive: [user_unverified, student, student_minor, club_admin, other_club_admin, event_staff,
+                            university_rep, company_member, company_admin, other_company_member]
+  # signed-in users without a platform role (nobody is a member of platform_org or of a missing org).
+  out_no_platform_role: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                         event_staff, university_rep, company_member, company_admin, other_company_member]
+  # platform roles other than platform_admin.
+  out_other_staff: [moderator, support, dpo, finance_admin, talent_auditor]
+
+operations:
+  listSegments:
+    method: GET
+    path: /api/v1/orgs/{org_id}/segments
+    action: outreach.segment.list
+    path_params: { org_id: company_a }
+    expect:
+      anonymous: 401
+      "@out_outsiders_company_a": 404
+      company_member: 200
+      company_admin: 200
+      "@platform_staff": 403   # k-po: platform_admin only for the platform org
+    variants:
+      - name: archived
+        path_params: { org_id: company_a }
+        query: { archived: "true" }
+        expect:
+          anonymous: 401
+          "@out_outsiders_company_a": 404
+          company_member: 200
+          company_admin: 200
+          "@platform_staff": 403
+      - name: club_org
+        path_params: { org_id: club_a }
+        expect:
+          anonymous: 401
+          "@out_outsiders_club_a": 404
+          club_member: 403
+          club_admin: 200
+          "@platform_staff": 403
+      - name: university_org
+        path_params: { org_id: uni_a }
+        expect:
+          anonymous: 401
+          "@out_outsiders_uni_a": 404
+          university_rep: 200
+          "@platform_staff": 403
+      - name: platform_org
+        path_params: { org_id: platform_org }
+        note: k-po — no persona is a member of the platform org
+        expect:
+          anonymous: 401
+          "@out_no_platform_role": 404
+          "@platform_staff": 403
+
+  getSegment:
+    method: GET
+    path: /api/v1/orgs/{org_id}/segments/{segment_id}
+    action: outreach.segment.read
+    path_params: { org_id: company_a, segment_id: seg_company_a }
+    expect:
+      anonymous: 401
+      "@out_outsiders_company_a": 404
+      company_member: 200
+      company_admin: 200
+      "@platform_staff": 403
+    variants:
+      - name: other_orgs_segment
+        path_params: { org_id: company_a, segment_id: seg_company_b }
+        note: IDOR — company_b's segment under company_a's path is not found (06 H-38)
+        expect:
+          anonymous: 401
+          "@out_outsiders_company_a": 404
+          company_member: 404
+          company_admin: 404
+          "@platform_staff": 403   # authorised before reading: no role, no lookup
+      - name: own_segment_company_b
+        path_params: { org_id: company_b, segment_id: seg_company_b }
+        expect:
+          anonymous: 401
+          "@out_outsiders_company_b": 404
+          other_company_member: 200
+          "@platform_staff": 403
+      - name: club_segment
+        path_params: { org_id: club_a, segment_id: seg_club_a }
+        expect:
+          anonymous: 401
+          "@out_outsiders_club_a": 404
+          club_member: 403
+          club_admin: 200
+          "@platform_staff": 403
+      - name: university_segment
+        path_params: { org_id: uni_a, segment_id: seg_uni_a }
+        expect:
+          anonymous: 401
+          "@out_outsiders_uni_a": 404
+          university_rep: 200
+          "@platform_staff": 403
+      - name: archived_segment
+        path_params: { org_id: company_a, segment_id: seg_company_a_archived }
+        expect:
+          anonymous: 401
+          "@out_outsiders_company_a": 404
+          company_member: 200
+          company_admin: 200
+          "@platform_staff": 403
+
+  createSegment:
+    method: POST
+    path: /api/v1/orgs/{org_id}/segments
+    action: outreach.segment.manage
+    path_params: { org_id: company_a }
+    body: bodies/outreach/create_company.json
+    expect:
+      anonymous: 401
+      "@out_outsiders_company_a": 404
+      company_member: 201
+      company_admin: 201
+      "@platform_staff": 403
+    variants:
+      - name: club_own_members
+        path_params: { org_id: club_a }
+        body: bodies/outreach/create_club_a.json
+        expect:
+          anonymous: 401
+          "@out_outsiders_club_a": 404
+          club_member: 403
+          club_admin: 201
+          "@platform_staff": 403
+      - name: university_own
+        path_params: { org_id: uni_a }
+        body: bodies/outreach/create_uni_a.json
+        expect:
+          anonymous: 401
+          "@out_outsiders_uni_a": 404
+          university_rep: 201
+          "@platform_staff": 403
+      - name: company_sensitive_club
+        path_params: { org_id: company_a }
+        body: bodies/outreach/create_company_sensitive.json
+        note: 03 Y2 — a company never targets a sensitive club (422 outreach.sensitive_target)
+        expect:
+          anonymous: 401
+          "@out_outsiders_company_a": 404
+          company_member: 422
+          company_admin: 422
+          "@platform_staff": 403
+      - name: club_other_club
+        path_params: { org_id: club_a }
+        body: bodies/outreach/create_club_out_of_scope.json
+        note: 03 k16 — a club_admin targets club:<own club> only (422 outreach.target_out_of_scope)
+        expect:
+          anonymous: 401
+          "@out_outsiders_club_a": 404
+          club_member: 403
+          club_admin: 422
+          "@platform_staff": 403
+
+  updateSegment:
+    method: PATCH
+    path: /api/v1/orgs/{org_id}/segments/{segment_id}
+    action: outreach.segment.manage
+    path_params: { org_id: company_a, segment_id: seg_company_a }
+    headers: { If-Match: '"1hmhuo3hji000"' }
+    body: bodies/outreach/update_name.json
+    expect:
+      anonymous: 401
+      "@out_outsiders_company_a": 404
+      company_member: 200
+      company_admin: 200
+      "@platform_staff": 403
+    variants:
+      - name: new_definition
+        path_params: { org_id: company_a, segment_id: seg_company_a }
+        body: bodies/outreach/update_definition_company.json
+        expect:
+          anonymous: 401
+          "@out_outsiders_company_a": 404
+          company_member: 200
+          company_admin: 200
+          "@platform_staff": 403
+      - name: other_orgs_segment
+        path_params: { org_id: company_a, segment_id: seg_company_b }
+        note: IDOR — company_b's segment under company_a's path is not found
+        expect:
+          anonymous: 401
+          "@out_outsiders_company_a": 404
+          company_member: 404
+          company_admin: 404
+          "@platform_staff": 403
+      - name: club_segment
+        path_params: { org_id: club_a, segment_id: seg_club_a }
+        expect:
+          anonymous: 401
+          "@out_outsiders_club_a": 404
+          club_member: 403
+          club_admin: 200
+          "@platform_staff": 403
+      - name: university_segment
+        path_params: { org_id: uni_a, segment_id: seg_uni_a }
+        expect:
+          anonymous: 401
+          "@out_outsiders_uni_a": 404
+          university_rep: 200
+          "@platform_staff": 403
+
+  archiveSegment:
+    method: POST
+    path: /api/v1/orgs/{org_id}/segments/{segment_id}/archive
+    action: outreach.segment.manage
+    path_params: { org_id: company_a, segment_id: seg_company_a }
+    expect:
+      anonymous: 401
+      "@out_outsiders_company_a": 404
+      company_member: 200
+      company_admin: 200
+      "@platform_staff": 403
+    variants:
+      - name: already_archived
+        path_params: { org_id: company_a, segment_id: seg_company_a_archived }
+        note: archiving an archived segment changes nothing
+        expect:
+          anonymous: 401
+          "@out_outsiders_company_a": 404
+          company_member: 200
+          company_admin: 200
+          "@platform_staff": 403
+      - name: other_orgs_segment
+        path_params: { org_id: company_a, segment_id: seg_company_b }
+        expect:
+          anonymous: 401
+          "@out_outsiders_company_a": 404
+          company_member: 404
+          company_admin: 404
+          "@platform_staff": 403
+      - name: club_segment
+        path_params: { org_id: club_a, segment_id: seg_club_a }
+        expect:
+          anonymous: 401
+          "@out_outsiders_club_a": 404
+          club_member: 403
+          club_admin: 200
+          "@platform_staff": 403
+
+  countAudience:
+    method: POST
+    path: /api/v1/orgs/{org_id}/audience-counts
+    action: outreach.audience.count
+    path_params: { org_id: company_a }
+    body: bodies/outreach/count_company.json
+    expect:
+      anonymous: 401
+      "@out_outsiders_company_a": 404
+      company_member: 200
+      company_admin: 200
+      "@out_other_staff": 403
+      platform_admin: 200      # ✓ for every org
+    variants:
+      - name: club_own_members
+        path_params: { org_id: club_a }
+        body: bodies/outreach/count_club_a.json
+        expect:
+          anonymous: 401
+          "@out_outsiders_club_a": 404
+          club_member: 403
+          club_admin: 200
+          "@out_other_staff": 403
+          platform_admin: 200
+      - name: university_own
+        path_params: { org_id: uni_a }
+        body: bodies/outreach/count_uni_a.json
+        expect:
+          anonymous: 401
+          "@out_outsiders_uni_a": 404
+          university_rep: 200
+          "@out_other_staff": 403
+          platform_admin: 200
+      - name: sensitive_club_org
+        path_params: { org_id: club_sensitive }
+        body: bodies/outreach/count_club_sensitive.json
+        note: >-
+          03 Y2 — club_member is a plain member (403); platform_admin counts with the platform's scope and a
+          sensitive club is never a target for it (422 outreach.sensitive_target). The club's own admin counts it
+          (scenario sensitive_club_targeting).
+        expect:
+          anonymous: 401
+          "@out_outsiders_sensitive": 404
+          club_member: 403
+          "@out_other_staff": 403
+          platform_admin: 422
+      - name: company_with_sensitive_club
+        path_params: { org_id: company_a }
+        body: bodies/outreach/count_with_sensitive.json
+        note: 03 Y2 — one sensitive club among the targets is enough for 422 outreach.sensitive_target
+        expect:
+          anonymous: 401
+          "@out_outsiders_company_a": 404
+          company_member: 422
+          company_admin: 422
+          "@out_other_staff": 403
+          platform_admin: 422
+      - name: platform_org
+        path_params: { org_id: platform_org }
+        expect:
+          anonymous: 401
+          "@out_no_platform_role": 404
+          "@out_other_staff": 403
+          platform_admin: 200
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000ab" }
+        expect:
+          anonymous: 401
+          "@out_no_platform_role": 404   # nobody is a member of a missing org
+          "@out_other_staff": 403
+          platform_admin: 404            # the org does not exist
+
+pending_actions:
+  - outreach.dispatch.create   # BE-035
+  - outreach.dispatch.list     # BE-035
+  - outreach.dispatch.read     # BE-035
+  - outreach.dispatch.cancel   # BE-035

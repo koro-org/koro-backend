@@ -1,0 +1,12 @@
+# Fixtures of the outreach module (cmd/koro/matrix_outreach_test.go; BE-030). IDs are authztest.ID(name).
+# Every segment is dated 2026-10-01T00:00:00Z (ETag "1hmhuo3hji000"), its estimate is below the threshold
+# (last_count NULL) and its creator is the org's targeting persona. uni, dept and club name fixtures; year
+# holds class years. seg_company_a_archived is archived.
+version: 1
+fixtures:
+  seg_company_a: { kind: segment, org: company_a, created_by: company_member, uni: [uni_a_university], year: [3, 4] }
+  seg_company_a_archived: { kind: segment, org: company_a, created_by: company_admin, uni: [uni_b_university],
+                            archived: true }
+  seg_company_b: { kind: segment, org: company_b, created_by: other_company_member, dept: [department_a] }
+  seg_club_a: { kind: segment, org: club_a, created_by: club_admin, club: [club_a] }
+  seg_uni_a: { kind: segment, org: uni_a, created_by: university_rep, uni: [uni_a_university], year: [4] }

@@ -1155,6 +1155,41 @@ components:
           $ref: "#/components/schemas/ReauthDTO"
           description: Re-authentication proof of the admin (03 §6.2)
       type: object
+    AudienceCountDTO:
+      additionalProperties: false
+      properties:
+        below_threshold:
+          type: boolean
+        count:
+          description: null below 10
+          format: int64
+          type:
+            - integer
+            - "null"
+      required:
+        - count
+        - below_threshold
+      type: object
+    AudienceCountResultDTO:
+      additionalProperties: false
+      properties:
+        below_threshold:
+          type: boolean
+        count:
+          description: null below 10
+          format: int64
+          type:
+            - integer
+            - "null"
+        dimensions:
+          description: Number of dimensions of the definition (1-4)
+          format: int64
+          type: integer
+      required:
+        - dimensions
+        - count
+        - below_threshold
+      type: object
     AuditActorDTO:
       additionalProperties: false
       properties:
@@ -1829,6 +1864,14 @@ components:
           $ref: "#/components/schemas/StudentConsentProof"
           description: Required to turn discoverable on
       type: object
+    CountAudienceInputBody:
+      additionalProperties: false
+      properties:
+        definition:
+          $ref: "#/components/schemas/SegmentDefinitionDTO"
+      required:
+        - definition
+      type: object
     CreateBreachInputBody:
       additionalProperties: false
       properties:
@@ -2133,6 +2176,20 @@ components:
         - class
         - pattern
         - description_tr
+      type: object
+    CreateSegmentInputBody:
+      additionalProperties: false
+      properties:
+        definition:
+          $ref: "#/components/schemas/SegmentDefinitionDTO"
+        name:
+          description: Segment name (2-100 characters)
+          maxLength: 100
+          minLength: 2
+          type: string
+      required:
+        - name
+        - definition
       type: object
     CreateUploadInputBody:
       additionalProperties: false
@@ -5976,6 +6033,85 @@ components:
       required:
         - items
       type: object
+    SegmentDTO:
+      additionalProperties: false
+      properties:
+        archived_at:
+          format: date-time
+          type: string
+        count:
+          $ref: "#/components/schemas/AudienceCountDTO"
+          description: "Level 0 estimate (04 §V.2): rounded down, null below 10 students"
+        created_at:
+          format: date-time
+          type: string
+        definition:
+          $ref: "#/components/schemas/SegmentDefinitionDTO"
+        dimensions:
+          description: Number of dimensions of the definition (1-4)
+          format: int64
+          type: integer
+        last_counted_at:
+          format: date-time
+          type: string
+        name:
+          type: string
+        segment_id:
+          format: uuid
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - segment_id
+        - name
+        - definition
+        - dimensions
+        - count
+        - created_at
+        - updated_at
+      type: object
+    SegmentDefinitionDTO:
+      additionalProperties: false
+      properties:
+        club:
+          description: Club org IDs (never a sensitive club, except a club's own members)
+          items:
+            type: string
+          maxItems: 100
+          type: array
+        dept:
+          description: Department IDs
+          items:
+            type: string
+          maxItems: 100
+          type: array
+        uni:
+          description: University IDs (universities)
+          items:
+            type: string
+          maxItems: 100
+          type: array
+        year:
+          description: Class years (1-8)
+          items:
+            format: int64
+            type: integer
+          maxItems: 8
+          type: array
+      type: object
+    SegmentList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/SegmentDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
     SessionDTO:
       additionalProperties: false
       properties:
@@ -7024,6 +7160,18 @@ components:
         pattern:
           maxLength: 500
           minLength: 1
+          type: string
+      type: object
+    UpdateSegmentInputBody:
+      additionalProperties: false
+      properties:
+        definition:
+          $ref: "#/components/schemas/SegmentDefinitionDTO"
+          description: New definition (counted again)
+        name:
+          description: New name
+          maxLength: 100
+          minLength: 2
           type: string
       type: object
     UpdateStaffInputBody:
@@ -14570,6 +14718,56 @@ paths:
       x-koro-action: orgs.org.update
       x-koro-rate-limit: write_default
       x-koro-surface: org
+  /api/v1/orgs/{org_id}/audience-counts:
+    post:
+      description: "Level 0 (04 §V.2): a number only, never an identity or a sample. Below 10 students count is null and below_threshold true; from 10 on the count is rounded down (to 10 below 100, 50 below 1000, 100 below 10000, then 1000). Only audience eligible students count (verified, adult, active). The scope rules of createSegment apply. Each count spends the org's daily audience count budget (429 rate_limited when spent)."
+      operationId: countAudience
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CountAudienceInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AudienceCountResultDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Estimate an audience
+      tags:
+        - outreach
+      x-koro-action: outreach.audience.count
+      x-koro-idempotency: optional
+      x-koro-rate-limit: audience_count
+      x-koro-surface: org
   /api/v1/orgs/{org_id}/audit-events:
     get:
       description: ip and user_agent are returned to dpo and platform_admin only.
@@ -15938,6 +16136,275 @@ paths:
       tags:
         - feed
       x-koro-action: feed.post.create
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/segments:
+    get:
+      description: "Newest first. archived=true lists the archived segments, otherwise the active ones. The count is the stored estimate (refreshed daily at 06:00): null below 10 students."
+      operationId: listSegments
+      parameters:
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: "true: archived segments only; false (default): active segments"
+          explode: false
+          in: query
+          name: archived
+          schema:
+            description: "true: archived segments only; false (default): active segments"
+            type: boolean
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SegmentList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List an organization's segments
+      tags:
+        - outreach
+      x-koro-action: outreach.segment.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+    post:
+      description: "OR inside a dimension, AND across dimensions; at least one dimension. Scope (03 k16): a club targets only its own members (club = [the club]); a university its own university (uni = [it]), narrowed by dept or year; a company every dimension but never a sensitive club (422 outreach.sensitive_target). Out of scope → 422 outreach.target_out_of_scope. The estimate is null below 10 students and rounded down otherwise; counting spends the org's audience count budget."
+      operationId: createSegment
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSegmentInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SegmentDTO"
+          description: Created
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Create a segment
+      tags:
+        - outreach
+      x-koro-action: outreach.segment.manage
+      x-koro-idempotency: optional
+      x-koro-rate-limit: audience_count
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/segments/{segment_id}:
+    get:
+      description: The ETag is the If-Match value of updateSegment.
+      operationId: getSegment
+      parameters:
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Segment ID (an unknown, malformed or other org's ID is 404)
+          in: path
+          name: segment_id
+          required: true
+          schema:
+            description: Segment ID (an unknown, malformed or other org's ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SegmentDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a segment
+      tags:
+        - outreach
+      x-koro-action: outreach.segment.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+    patch:
+      description: "If-Match with the ETag of getSegment is required: missing → 428, stale → 412. A new definition follows the rules of createSegment and is counted again. An archived segment cannot change (409 outreach.invalid_state)."
+      operationId: updateSegment
+      parameters:
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Segment ID (an unknown, malformed or other org's ID is 404)
+          in: path
+          name: segment_id
+          required: true
+          schema:
+            description: Segment ID (an unknown, malformed or other org's ID is 404)
+            type: string
+        - description: "ETag of getSegment (required: missing → 428, stale → 412)"
+          in: header
+          name: If-Match
+          schema:
+            description: "ETag of getSegment (required: missing → 428, stale → 412)"
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSegmentInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SegmentDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Update a segment
+      tags:
+        - outreach
+      x-koro-action: outreach.segment.manage
+      x-koro-rate-limit: audience_count
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/segments/{segment_id}/archive:
+    post:
+      description: Archiving an archived segment changes nothing.
+      operationId: archiveSegment
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Segment ID (an unknown, malformed or other org's ID is 404)
+          in: path
+          name: segment_id
+          required: true
+          schema:
+            description: Segment ID (an unknown, malformed or other org's ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SegmentDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Archive a segment
+      tags:
+        - outreach
+      x-koro-action: outreach.segment.manage
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: org

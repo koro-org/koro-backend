@@ -342,6 +342,30 @@
     "type": "urn:koro:problem:events.staff_exists"
   },
   {
+    "code": "feed.empty_patch",
+    "status": 422,
+    "title": "Nothing to update",
+    "type": "urn:koro:problem:feed.empty_patch"
+  },
+  {
+    "code": "feed.invalid_state",
+    "status": 409,
+    "title": "Post status does not allow this change",
+    "type": "urn:koro:problem:feed.invalid_state"
+  },
+  {
+    "code": "feed.posting_suspended",
+    "status": 403,
+    "title": "Organization cannot publish posts",
+    "type": "urn:koro:problem:feed.posting_suspended"
+  },
+  {
+    "code": "feed.published_immutable",
+    "status": 409,
+    "title": "Kind, audience and commercial label of a published post cannot change",
+    "type": "urn:koro:problem:feed.published_immutable"
+  },
+  {
     "code": "files.already_attached",
     "status": 409,
     "title": "File is attached to another record",

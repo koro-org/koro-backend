@@ -1,0 +1,55 @@
+# Multi-step scenarios of the feed module (03 §7.7; BE-027).
+version: 1
+scenarios:
+  feed_update_post_needs_if_match:
+    note: updatePost without If-Match is 428, with a stale ETag 412 (04 §1.13)
+    steps:
+      - { persona: club_admin, operation: updatePost, headers: { If-Match: "" }, expect: 428, code: precondition_required }
+      - { persona: club_admin, operation: updatePost, headers: { If-Match: '"0"' }, expect: 412, code: precondition_failed }
+      - { persona: club_admin, operation: updatePost, expect: 200 }
+      - { persona: club_admin, operation: updatePost, expect: 412, code: precondition_failed }
+  feed_published_post_keeps_its_audience:
+    note: a published post's audience cannot change (409 feed.published_immutable); a draft's can
+    steps:
+      - { persona: club_admin, operation: updatePost, body: bodies/feed/update_post_audience.json, expect: 409,
+          code: feed.published_immutable }
+      - { persona: club_admin, operation: updatePost, path_params: { post_id: post_a_draft },
+          body: bodies/feed/update_post_audience.json, expect: 200 }
+  feed_publish_once:
+    note: a draft is published once; a second publication is 409 feed.invalid_state
+    steps:
+      - { persona: club_admin, operation: publishPost, expect: 200 }
+      - { persona: club_admin, operation: publishPost, expect: 409, code: feed.invalid_state }
+      - { persona: anonymous, operation: getPost, path_params: { post_id: post_a_draft }, expect: 200 }
+  feed_new_company_post_waits_for_review:
+    note: company_a is new (T-15) — its published draft is pending_review, invisible to readers
+    steps:
+      - { persona: company_member, operation: publishPost, path_params: { post_id: post_company_draft }, expect: 200 }
+      - { persona: student, operation: getPost, path_params: { post_id: post_company_draft }, expect: 404,
+          code: not_found }
+      - { persona: company_admin, operation: publishPost, path_params: { post_id: post_company_draft }, expect: 409,
+          code: feed.invalid_state }
+  feed_another_orgs_draft_is_invisible:
+    note: 06 H-38 — a draft of club_a does not exist for club_b's admin (404 on every management call)
+    steps:
+      - { persona: club_admin, operation: createPost, expect: 201, save: { draft_a: post_id } }
+      - { persona: other_club_admin, operation: getPost, path_params: { post_id: draft_a }, expect: 404, code: not_found }
+      - { persona: other_club_admin, operation: publishPost, path_params: { post_id: draft_a }, expect: 404,
+          code: not_found }
+      - { persona: other_club_admin, operation: deletePost, path_params: { post_id: draft_a }, expect: 404,
+          code: not_found }
+      - { persona: club_admin, operation: publishPost, path_params: { post_id: draft_a }, expect: 200 }
+      - { persona: anonymous, operation: getPost, path_params: { post_id: draft_a }, expect: 200 }
+  feed_tiptap_body_allow_list:
+    note: a node outside the Tiptap allow-list (an image in the body) is 422 (05 §14.6)
+    steps:
+      - { persona: club_admin, operation: createPost, body: bodies/feed/create_post_bad_body.json, expect: 422,
+          code: validation_failed }
+      - { persona: club_admin, operation: createPost, expect: 201 }
+  feed_removed_post_is_gone:
+    note: a published post is removed once; readers and the author then get 404, moderators still see it
+    steps:
+      - { persona: club_admin, operation: deletePost, path_params: { post_id: post_a }, expect: 204 }
+      - { persona: anonymous, operation: getPost, expect: 404, code: not_found }
+      - { persona: club_admin, operation: deletePost, path_params: { post_id: post_a }, expect: 404, code: not_found }
+      - { persona: moderator, operation: getPost, expect: 200 }

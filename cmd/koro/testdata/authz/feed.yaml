@@ -1,0 +1,310 @@
+# Authz matrix of the feed module (03 §5.7, 04 §2.7; BE-027). 9 operations × 18 personas.
+# Post visibility (03 §3.6): a published public post is everyone's; a commercial post is not a minor's nor an
+# anonymous reader's (k15, T-57); a followers post is its followers' and the author org's members' (persona
+# student follows club_a); drafts and posts in review are the author org's writers', moderators' and platform
+# admins'; a removed post is moderators' and platform admins' only. /posts/{post_id} is a resource surface
+# (03 §7.6): an invisible post is 404, a visible one without the role 403. /orgs/{org_id}/posts is the org
+# management surface: members without a writer role 403, non-members 404, every platform role 403 (k-po:
+# platform_admin writes for the platform org only, no persona belongs to it). Business rules (428/412, 409
+# state machine and immutable audience, 422 Tiptap body) live in scenarios/feed.yaml and the service tests.
+version: 1
+groups:
+  # signed-in users without a membership in club_a (and no platform role).
+  fd_outsiders_club_a: [user_unverified, student, student_minor, other_club_admin, event_staff, university_rep,
+                        company_member, company_admin, other_company_member]
+  # signed-in users without a membership in company_a.
+  fd_outsiders_company_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                           event_staff, university_rep, other_company_member]
+  # signed-in users without a membership in uni_a.
+  fd_outsiders_uni_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin, event_staff,
+                       company_member, company_admin, other_company_member]
+  # moderator and platform_admin see drafts and removed posts.
+  fd_post_staff: [moderator, platform_admin]
+  # platform roles that read only what readers read.
+  fd_other_staff: [support, dpo, finance_admin, talent_auditor]
+  # signed-in users who see post_a but do not write it.
+  fd_not_writer_a: [user_unverified, student, student_minor, club_member, other_club_admin, event_staff,
+                    university_rep, company_member, company_admin, other_company_member,
+                    moderator, support, dpo, platform_admin, finance_admin, talent_auditor]
+  # users who do not see a club_a draft (not its writer, not moderator / platform_admin).
+  fd_draft_hidden_a: [user_unverified, student, student_minor, club_member, other_club_admin, event_staff,
+                      university_rep, company_member, company_admin, other_company_member,
+                      support, dpo, finance_admin, talent_auditor]
+  # users who do not see a club_b draft.
+  fd_draft_hidden_b: [user_unverified, student, student_minor, club_member, club_admin, event_staff, university_rep,
+                      company_member, company_admin, other_company_member, support, dpo, finance_admin,
+                      talent_auditor]
+  # users who do not see a company_a draft.
+  fd_draft_hidden_company: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                            event_staff, university_rep, other_company_member, support, dpo, finance_admin,
+                            talent_auditor]
+  # signed-in users who see post_company (commercial) but do not write it; student_minor does not see it.
+  fd_not_writer_company: [user_unverified, student, club_member, club_admin, other_club_admin, event_staff,
+                          university_rep, other_company_member, moderator, support, dpo, platform_admin,
+                          finance_admin, talent_auditor]
+  # who sees post_a_followers: its followers (student), club_a's members and moderator / platform_admin.
+  fd_followers_a: [student, club_member, club_admin, moderator, platform_admin]
+  fd_not_followers_a: [user_unverified, student_minor, other_club_admin, event_staff, university_rep,
+                       company_member, company_admin, other_company_member, support, dpo, finance_admin,
+                       talent_auditor]
+
+operations:
+  getFeed:
+    method: GET
+    path: /api/v1/feed
+    action: feed.feed.read
+    expect:
+      anonymous: 401
+      "@signed_in": 200
+    variants:
+      - name: following
+        query: { tab: following, kind: text, limit: "5" }
+        expect:
+          anonymous: 401
+          "@signed_in": 200
+
+  listPosts:
+    method: GET
+    path: /api/v1/posts
+    action: feed.post.list_by_org
+    public: true
+    query: { org_id: "{{fixture:club_a}}" }
+    expect: { "@all": 200 }
+    variants:
+      - name: company_page
+        query: { org_id: "{{fixture:company_a}}", limit: "10" }
+        note: anonymous readers and minors get an empty page (every company post is commercial)
+        expect: { "@all": 200 }
+      - name: unknown_org
+        query: { org_id: "00000000-0000-7000-8000-0000000000aa" }
+        expect: { "@all": 404 }
+
+  getPost:
+    method: GET
+    path: /api/v1/posts/{post_id}
+    action: feed.post.read
+    public: true
+    path_params: { post_id: post_a }
+    expect: { "@all": 200 }
+    variants:
+      - name: commercial_post
+        path_params: { post_id: post_company }
+        note: k15 — no commercial post for a minor; T-57 — none for an anonymous reader
+        expect:
+          anonymous: 404
+          student_minor: 404
+          "@fd_not_writer_company": 200
+          company_member: 200
+          company_admin: 200
+      - name: followers_post
+        path_params: { post_id: post_a_followers }
+        expect:
+          anonymous: 404
+          "@fd_followers_a": 200
+          "@fd_not_followers_a": 404
+      - name: draft
+        path_params: { post_id: post_a_draft }
+        expect:
+          anonymous: 404
+          "@fd_draft_hidden_a": 404
+          club_admin: 200
+          "@fd_post_staff": 200
+      - name: removed
+        path_params: { post_id: post_a_removed }
+        note: the author org sees a removed post in its management list only
+        expect:
+          anonymous: 404
+          "@fd_draft_hidden_a": 404
+          club_admin: 404
+          "@fd_post_staff": 200
+      - name: unknown_post
+        path_params: { post_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect: { "@all": 404 }
+
+  listOrgPostsManage:
+    method: GET
+    path: /api/v1/orgs/{org_id}/posts
+    action: feed.post.list_org_manage
+    path_params: { org_id: club_a }
+    expect:
+      anonymous: 401
+      "@fd_outsiders_club_a": 404
+      club_member: 403
+      club_admin: 200
+      "@platform_staff": 403
+    variants:
+      - name: drafts_only
+        query: { status: draft }
+        expect:
+          anonymous: 401
+          "@fd_outsiders_club_a": 404
+          club_member: 403
+          club_admin: 200
+          "@platform_staff": 403
+      - name: company_org
+        path_params: { org_id: company_a }
+        expect:
+          anonymous: 401
+          "@fd_outsiders_company_a": 404
+          company_member: 200
+          company_admin: 200
+          "@platform_staff": 403
+      - name: university_org
+        path_params: { org_id: uni_a }
+        expect:
+          anonymous: 401
+          "@fd_outsiders_uni_a": 404
+          university_rep: 200
+          "@platform_staff": 403
+
+  createPost:
+    method: POST
+    path: /api/v1/orgs/{org_id}/posts
+    action: feed.post.create
+    path_params: { org_id: club_a }
+    body: bodies/feed/create_post.json
+    expect:
+      anonymous: 401
+      "@fd_outsiders_club_a": 404
+      club_member: 403
+      club_admin: 201
+      "@platform_staff": 403
+    variants:
+      - name: company_org
+        path_params: { org_id: company_a }
+        note: a recruiter (company_member) posts too; the post is always commercial
+        expect:
+          anonymous: 401
+          "@fd_outsiders_company_a": 404
+          company_member: 201
+          company_admin: 201
+          "@platform_staff": 403
+      - name: university_org
+        path_params: { org_id: uni_a }
+        expect:
+          anonymous: 401
+          "@fd_outsiders_uni_a": 404
+          university_rep: 201
+          "@platform_staff": 403
+
+  updatePost:
+    method: PATCH
+    path: /api/v1/posts/{post_id}
+    action: feed.post.update
+    path_params: { post_id: post_a }
+    headers: { If-Match: '"1hmhuo3hji000"' }
+    body: bodies/feed/update_post.json
+    expect:
+      anonymous: 401
+      "@fd_not_writer_a": 403
+      club_admin: 200
+    variants:
+      - name: draft
+        path_params: { post_id: post_a_draft }
+        expect:
+          anonymous: 401
+          "@fd_draft_hidden_a": 404
+          club_admin: 200
+          "@fd_post_staff": 403
+      - name: company_draft
+        path_params: { post_id: post_company_draft }
+        expect:
+          anonymous: 401
+          "@fd_draft_hidden_company": 404
+          company_member: 200
+          company_admin: 200
+          "@fd_post_staff": 403
+      - name: university_draft
+        path_params: { post_id: post_uni_draft }
+        expect:
+          anonymous: 401
+          "@fd_outsiders_uni_a": 404
+          "@fd_other_staff": 404
+          university_rep: 200
+          "@fd_post_staff": 403
+
+  publishPost:
+    method: POST
+    path: /api/v1/posts/{post_id}/publish
+    action: feed.post.publish
+    path_params: { post_id: post_a_draft }
+    expect:
+      anonymous: 401
+      "@fd_draft_hidden_a": 404
+      club_admin: 200
+      "@fd_post_staff": 403
+    variants:
+      - name: company_draft
+        path_params: { post_id: post_company_draft }
+        note: company_a is new (no feed settings), so the post goes to pending_review (200)
+        expect:
+          anonymous: 401
+          "@fd_draft_hidden_company": 404
+          company_member: 200
+          company_admin: 200
+          "@fd_post_staff": 403
+
+  deletePost:
+    method: DELETE
+    path: /api/v1/posts/{post_id}
+    action: feed.post.delete
+    path_params: { post_id: post_a_draft }
+    expect:
+      anonymous: 401
+      "@fd_draft_hidden_a": 404
+      club_admin: 204
+      "@fd_post_staff": 403
+    variants:
+      - name: published
+        path_params: { post_id: post_a }
+        note: a published post becomes removed
+        expect:
+          anonymous: 401
+          "@fd_not_writer_a": 403
+          club_admin: 204
+      - name: another_orgs_draft
+        path_params: { post_id: post_b_draft }
+        note: 06 H-38 — club_b's draft does not exist for club_a's admin
+        expect:
+          anonymous: 401
+          "@fd_draft_hidden_b": 404
+          other_club_admin: 204
+          "@fd_post_staff": 403
+
+  getPostStats:
+    method: GET
+    path: /api/v1/posts/{post_id}/stats
+    action: feed.post.stats
+    path_params: { post_id: post_a }
+    expect:
+      anonymous: 401
+      "@fd_not_writer_a": 403
+      club_admin: 200
+    variants:
+      - name: commercial_post
+        path_params: { post_id: post_company }
+        expect:
+          anonymous: 401
+          student_minor: 404
+          "@fd_not_writer_company": 403
+          company_member: 200
+          company_admin: 200
+
+pending_actions:
+  - feed.post.create_targeted        # BE-032
+  - feed.reaction.manage             # BE-029
+  - feed.save.manage                 # BE-029
+  - feed.save.list_own               # BE-029
+  - feed.hide.create                 # BE-029
+  - feed.follow.manage               # BE-029
+  - feed.follow.list_own             # BE-029
+  - feed.mute.manage                 # BE-029
+  - feed.mute.list_own               # BE-029
+  - feed.report.create               # BE-032
+  - feed.report.list                 # BE-032
+  - feed.report.read                 # BE-032
+  - feed.report.resolve              # BE-032
+  - feed.review_queue.list           # BE-032
+  - feed.post.moderate               # BE-032
+  - feed.org.moderate                # BE-032
+  - feed.moderation_action.list      # BE-032

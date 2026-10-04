@@ -1,0 +1,22 @@
+# Fixtures of the feed module (cmd/koro/matrix_feed_test.go; BE-027). IDs are authztest.ID(name).
+# Every post is a text post dated 2026-10-01T00:00:00Z (created, updated and, when published, published):
+# an untouched post's ETag is "1hmhuo3hji000". A company post is commercial (02
+# posts_company_commercial_chk). Persona student follows club_a (org_follows, BE-029's table);
+# club_member and club_admin are club_a's members, which counts as following it. club_a is trusted
+# (its drafts publish at once); company_a has no settings row (new: its first posts go to review).
+version: 1
+fixtures:
+  post_a: { kind: post, org: club_a, author: club_admin, author_kind: club, status: published, audience: public }
+  post_a_followers: { kind: post, org: club_a, author: club_admin, author_kind: club, status: published,
+                      audience: followers }
+  post_a_draft: { kind: post, org: club_a, author: club_admin, author_kind: club, status: draft, audience: public }
+  post_a_removed: { kind: post, org: club_a, author: club_admin, author_kind: club, status: removed, audience: public }
+  post_company: { kind: post, org: company_a, author: company_member, author_kind: company, status: published,
+                  audience: public }
+  post_company_draft: { kind: post, org: company_a, author: company_member, author_kind: company, status: draft,
+                        audience: public }
+  post_uni_draft: { kind: post, org: uni_a, author: university_rep, author_kind: university, status: draft,
+                    audience: public }
+  post_b_draft: { kind: post, org: club_b, author: other_club_admin, author_kind: club, status: draft, audience: public }
+  follow_student_club_a: { kind: follow, user: student, org: club_a }
+  trust_club_a: { kind: trust, org: club_a, level: trusted }

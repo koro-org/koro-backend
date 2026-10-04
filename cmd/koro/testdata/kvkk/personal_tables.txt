@@ -80,7 +80,7 @@ event_checkins              personal  events        todo:BE-031
 event_data_exports          personal  events        todo:BE-050
 # feed
 feed_org_settings           staff     feed          -
-posts                       personal  feed          todo:BE-027
+posts                       personal  feed          provider:feed
 post_media                  none      feed          -
 post_reactions              personal  feed          todo:BE-029
 post_saves                  personal  feed          todo:BE-029

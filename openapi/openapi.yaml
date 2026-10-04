@@ -1214,6 +1214,28 @@ components:
       required:
         - items
       type: object
+    AuthorDTO:
+      additionalProperties: false
+      properties:
+        kind:
+          enum:
+            - platform
+            - university
+            - club
+            - company
+          type: string
+        name:
+          type: string
+        org_id:
+          type: string
+        slug:
+          type: string
+      required:
+        - org_id
+        - kind
+        - name
+        - slug
+      type: object
     AvailabilityDTO:
       additionalProperties: false
       properties:
@@ -3112,6 +3134,33 @@ components:
         waitlist_enabled:
           type: boolean
       type: object
+    EventRefDTO:
+      additionalProperties: false
+      properties:
+        ends_at:
+          format: date-time
+          type: string
+        event_id:
+          type: string
+        starts_at:
+          format: date-time
+          type: string
+        status:
+          enum:
+            - draft
+            - published
+            - cancelled
+            - completed
+          type: string
+        title:
+          type: string
+      required:
+        - event_id
+        - title
+        - starts_at
+        - ends_at
+        - status
+      type: object
     EventWriteBody:
       additionalProperties: false
       properties:
@@ -3928,6 +3977,37 @@ components:
         - platform_roles
         - capabilities
       type: object
+    MediaBody:
+      additionalProperties: false
+      properties:
+        alt_text:
+          maxLength: 300
+          type: string
+        file_id:
+          description: A post_media upload (createUpload) of the organization
+          type: string
+      required:
+        - file_id
+      type: object
+    MediaDTO:
+      additionalProperties: false
+      properties:
+        alt_text:
+          type: string
+        file_id:
+          type: string
+        height:
+          format: int64
+          type: integer
+        url:
+          description: Short-lived download URL (at most 5 minutes); absent until the scan clears it
+          type: string
+        width:
+          format: int64
+          type: integer
+      required:
+        - file_id
+      type: object
     MemberCardDTO:
       additionalProperties: false
       properties:
@@ -4374,6 +4454,91 @@ components:
       required:
         - items
       type: object
+    OpportunityBody:
+      additionalProperties: false
+      properties:
+        apply_via:
+          description: "contact_request: company posts only"
+          enum:
+            - contact_request
+            - external_url
+          type: string
+        city:
+          maxLength: 60
+          type: string
+        deadline:
+          description: YYYY-MM-DD
+          maxLength: 10
+          type: string
+        eligible_years:
+          description: Class years 1-8
+          items:
+            format: int64
+            type: integer
+          maxItems: 8
+          type: array
+        external_url:
+          description: https:// only; required for external_url
+          maxLength: 2048
+          type: string
+        type:
+          enum:
+            - internship
+            - job
+            - part_time
+            - project
+            - volunteer
+            - talent_call
+          type: string
+        work_mode:
+          enum:
+            - onsite
+            - hybrid
+            - remote
+          type: string
+      required:
+        - type
+        - apply_via
+      type: object
+    OpportunityDTO:
+      additionalProperties: false
+      properties:
+        apply_via:
+          enum:
+            - contact_request
+            - external_url
+          type: string
+        city:
+          type: string
+        deadline:
+          description: YYYY-MM-DD
+          type: string
+        eligible_years:
+          items:
+            format: int64
+            type: integer
+          type: array
+        external_url:
+          type: string
+        type:
+          enum:
+            - internship
+            - job
+            - part_time
+            - project
+            - volunteer
+            - talent_call
+          type: string
+        work_mode:
+          enum:
+            - onsite
+            - hybrid
+            - remote
+          type: string
+      required:
+        - type
+        - apply_via
+      type: object
     OrgCardDTO:
       additionalProperties: false
       properties:
@@ -4623,6 +4788,260 @@ components:
       required:
         - items
       type: object
+    PostDTO:
+      additionalProperties: false
+      properties:
+        author:
+          $ref: "#/components/schemas/AuthorDTO"
+        body_json:
+          additionalProperties: {}
+          description: "Tiptap JSON: paragraphs, headings 2-3, lists, quotes, hard breaks; bold, italic, https/mailto links"
+          type: object
+        commercial_label:
+          description: "\"Tanıtım\": commercial content"
+          type: boolean
+        edited_at:
+          format: date-time
+          type: string
+        event:
+          $ref: "#/components/schemas/EventRefDTO"
+        kind:
+          enum:
+            - text
+            - image
+            - event_share
+            - opportunity_call
+          type: string
+        like_count:
+          format: int64
+          type: integer
+        media:
+          items:
+            $ref: "#/components/schemas/MediaDTO"
+          type: array
+        opportunity:
+          $ref: "#/components/schemas/OpportunityDTO"
+        post_id:
+          type: string
+        published_at:
+          format: date-time
+          type: string
+        title:
+          type: string
+        viewer:
+          $ref: "#/components/schemas/ViewerDTO"
+          description: Signed-in readers only
+      required:
+        - post_id
+        - author
+        - kind
+        - media
+        - commercial_label
+        - like_count
+      type: object
+    PostList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/PostDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
+    PostManageDTO:
+      additionalProperties: false
+      properties:
+        audience_keys:
+          items:
+            type: string
+          type: array
+        audience_kind:
+          enum:
+            - public
+            - followers
+            - segment
+          type: string
+        audience_size_estimate:
+          format: int64
+          type: integer
+        author:
+          $ref: "#/components/schemas/AuthorDTO"
+        author_user_id:
+          type: string
+        body_json:
+          additionalProperties: {}
+          description: "Tiptap JSON: paragraphs, headings 2-3, lists, quotes, hard breaks; bold, italic, https/mailto links"
+          type: object
+        commercial_flag:
+          type: boolean
+        commercial_label:
+          description: "\"Tanıtım\": commercial content"
+          type: boolean
+        created_at:
+          format: date-time
+          type: string
+        edited_at:
+          format: date-time
+          type: string
+        event:
+          $ref: "#/components/schemas/EventRefDTO"
+        kind:
+          enum:
+            - text
+            - image
+            - event_share
+            - opportunity_call
+          type: string
+        like_count:
+          format: int64
+          type: integer
+        media:
+          items:
+            $ref: "#/components/schemas/MediaDTO"
+          type: array
+        opportunity:
+          $ref: "#/components/schemas/OpportunityDTO"
+        post_id:
+          type: string
+        published_at:
+          format: date-time
+          type: string
+        removed_at:
+          format: date-time
+          type: string
+        save_count:
+          format: int64
+          type: integer
+        status:
+          enum:
+            - draft
+            - pending_review
+            - published
+            - hidden
+            - removed
+          type: string
+        title:
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+        viewer:
+          $ref: "#/components/schemas/ViewerDTO"
+          description: Signed-in readers only
+      required:
+        - status
+        - audience_kind
+        - commercial_flag
+        - save_count
+        - created_at
+        - updated_at
+        - post_id
+        - author
+        - kind
+        - media
+        - commercial_label
+        - like_count
+      type: object
+    PostManageList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/PostManageDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
+    PostPatchBody:
+      additionalProperties: false
+      properties:
+        audience_kind:
+          enum:
+            - public
+            - followers
+          type: string
+        body_json:
+          additionalProperties: {}
+          description: Tiptap JSON
+          type: object
+        clear:
+          description: Optional fields to empty
+          items:
+            enum:
+              - title
+              - body_json
+            type: string
+          maxItems: 2
+          type: array
+        commercial_flag:
+          type: boolean
+        event_id:
+          type: string
+        kind:
+          enum:
+            - text
+            - image
+            - event_share
+            - opportunity_call
+          type: string
+        media:
+          description: Replaces every image; [] removes them
+          items:
+            $ref: "#/components/schemas/MediaBody"
+          maxItems: 10
+          type: array
+        opportunity:
+          $ref: "#/components/schemas/OpportunityBody"
+        title:
+          description: Empty string clears it
+          maxLength: 140
+          type: string
+      type: object
+    PostWriteBody:
+      additionalProperties: false
+      properties:
+        audience_kind:
+          description: Default public
+          enum:
+            - public
+            - followers
+          type: string
+        body_json:
+          additionalProperties: {}
+          description: "Tiptap JSON: paragraphs, headings 2-3, lists, quotes, hard breaks; bold, italic, https/mailto links"
+          type: object
+        commercial_flag:
+          description: Sponsored content; always true for companies
+          type: boolean
+        event_id:
+          description: "event_share: a published public event"
+          type: string
+        kind:
+          enum:
+            - text
+            - image
+            - event_share
+            - opportunity_call
+          type: string
+        media:
+          description: "image posts: 1-10 images"
+          items:
+            $ref: "#/components/schemas/MediaBody"
+          maxItems: 10
+          type: array
+        opportunity:
+          $ref: "#/components/schemas/OpportunityBody"
+        title:
+          maxLength: 140
+          type: string
+      required:
+        - kind
+      type: object
     PreferenceDTO:
       additionalProperties: false
       properties:
@@ -4711,6 +5130,23 @@ components:
           description: 10-500 characters; required when the lint finds warn_special or review_identifier fields
           maxLength: 500
           type: string
+      type: object
+    PublishResult:
+      additionalProperties: false
+      properties:
+        post_id:
+          type: string
+        published_at:
+          format: date-time
+          type: string
+        status:
+          enum:
+            - published
+            - pending_review
+          type: string
+      required:
+        - post_id
+        - status
       type: object
     PurposeDTO:
       additionalProperties: false
@@ -5345,6 +5781,19 @@ components:
           type: string
       required:
         - edu_email
+      type: object
+    StatsDTO:
+      additionalProperties: false
+      properties:
+        like_count:
+          format: int64
+          type: integer
+        save_count:
+          format: int64
+          type: integer
+      required:
+        - like_count
+        - save_count
       type: object
     StudentCVDTO:
       additionalProperties: false
@@ -6440,6 +6889,20 @@ components:
       required:
         - from_day
         - to_day
+      type: object
+    ViewerDTO:
+      additionalProperties: false
+      properties:
+        following_author:
+          type: boolean
+        liked:
+          type: boolean
+        saved:
+          type: boolean
+      required:
+        - liked
+        - saved
+        - following_author
       type: object
   securitySchemes:
     bearerAuth:
@@ -11088,6 +11551,72 @@ paths:
       x-koro-action: events.staff.manage
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+  /api/v1/feed:
+    get:
+      description: Published posts the reader may see, newest first by (published_at, post_id). discover lists every visible post, following the posts of followed and member organizations. Muted organizations and hidden posts are left out; a minor gets no commercial post.
+      operationId: getFeed
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 20
+            description: Page size
+            format: int64
+            maximum: 50
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: discover (default) or following
+          explode: false
+          in: query
+          name: tab
+          schema:
+            description: discover (default) or following
+            enum:
+              - discover
+              - following
+            type: string
+        - explode: false
+          in: query
+          name: kind
+          schema:
+            enum:
+              - text
+              - image
+              - event_share
+              - opportunity_call
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get the feed
+      tags:
+        - feed
+      x-koro-action: feed.feed.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
   /api/v1/files/uploads:
     post:
       description: Checks the purpose's MIME/size allow-list and returns a presigned PUT URL (valid 10 minutes) for the object storage. Send exactly upload_headers with the PUT; the API never receives the file itself (04 §1.14).
@@ -14517,6 +15046,352 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: org
+  /api/v1/orgs/{org_id}/posts:
+    get:
+      description: "Every post of the organization, newest first: drafts, posts in review, hidden and removed posts (removed: status only)."
+      operationId: listOrgPostsManage
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: Statuses (repeat the parameter)
+          explode: true
+          in: query
+          name: status
+          schema:
+            description: Statuses (repeat the parameter)
+            items:
+              enum:
+                - draft
+                - pending_review
+                - published
+                - hidden
+                - removed
+              type: string
+            maxItems: 5
+            type: array
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostManageList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List an organization's posts for management
+      tags:
+        - feed
+      x-koro-action: feed.post.list_org_manage
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+    post:
+      description: A public or followers post starts as a draft. A company post is always commercial. The body is Tiptap JSON of the allowed nodes and marks (422 otherwise; an unsafe link loses its link mark). Images are post_media uploads (createUpload) of the organization.
+      operationId: createPost
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostWriteBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostManageDTO"
+          description: Created
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Create a post (draft)
+      tags:
+        - feed
+      x-koro-action: feed.post.create
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: org
+  /api/v1/posts:
+    get:
+      description: "The published posts of an organization page the caller may see (anonymous: public, non-commercial posts only)."
+      operationId: listPosts
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: The organization of the page
+          explode: false
+          in: query
+          name: org_id
+          required: true
+          schema:
+            description: The organization of the page
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: List an organization's posts
+      tags:
+        - feed
+      x-koro-action: feed.post.list_by_org
+      x-koro-rate-limit: read_default
+      x-koro-surface: public
+  /api/v1/posts/{post_id}:
+    delete:
+      description: A post never published is deleted; a published one is removed (status removed).
+      operationId: deletePost
+      parameters:
+        - description: Post ID
+          in: path
+          name: post_id
+          required: true
+          schema:
+            description: Post ID
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Delete a post
+      tags:
+        - feed
+      x-koro-action: feed.post.delete
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+    get:
+      description: A post the caller may not see is 404. The author organization's writers get the management view (status, audience). The ETag is the If-Match value of updatePost.
+      operationId: getPost
+      parameters:
+        - description: Post ID
+          in: path
+          name: post_id
+          required: true
+          schema:
+            description: Post ID
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: Get a post
+      tags:
+        - feed
+      x-koro-action: feed.post.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: public
+    patch:
+      description: "If-Match with the ETag of getPost is required: missing → 428, stale → 412. A published post keeps its kind, audience and commercial label (409 feed.published_immutable); an edit stamps edited_at. media replaces every image."
+      operationId: updatePost
+      parameters:
+        - description: Post ID
+          in: path
+          name: post_id
+          required: true
+          schema:
+            description: Post ID
+            type: string
+        - description: "ETag of getPost (required: missing → 428, stale → 412)"
+          in: header
+          name: If-Match
+          schema:
+            description: "ETag of getPost (required: missing → 428, stale → 412)"
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostPatchBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostManageDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Update a post
+      tags:
+        - feed
+      x-koro-action: feed.post.update
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+  /api/v1/posts/{post_id}/publish:
+    post:
+      description: draft → published, or pending_review for a new organization's first posts (moderator approval). Images must be cleared by the virus scan (409 files.not_clean).
+      operationId: publishPost
+      parameters:
+        - description: Post ID
+          in: path
+          name: post_id
+          required: true
+          schema:
+            description: Post ID
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublishResult"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Publish a draft post
+      tags:
+        - feed
+      x-koro-action: feed.post.publish
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+  /api/v1/posts/{post_id}/stats:
+    get:
+      description: "Like and save counts only: who liked or saved is never shown."
+      operationId: getPostStats
+      parameters:
+        - description: Post ID
+          in: path
+          name: post_id
+          required: true
+          schema:
+            description: Post ID
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatsDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a post's statistics
+      tags:
+        - feed
+      x-koro-action: feed.post.stats
+      x-koro-rate-limit: read_default
+      x-koro-surface: resource
   /api/v1/skills:
     get:
       description: name follows Accept-Language (tr or en).

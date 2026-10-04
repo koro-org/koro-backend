@@ -1,0 +1,21 @@
+# Fixtures of the parties module (cmd/koro/matrix_parties_test.go; BE-036). IDs are authztest.ID(name).
+# Parties are created and updated at 2026-10-01T00:00:00Z: the ETag of an untouched party is
+# "1hmhuo3hji000". Verified parties are verified by finance_admin_2. A payee fixture is a payees
+# row relating a party to a seller org (03 k21) until BE-037 writes payees. A file fixture is an
+# unattached, active party_document upload of uploaded_by for org; a document fixture carries its
+# own attached file. No persona is a member of an org not listed in authztest.
+version: 1
+fixtures:
+  party_buyer_a: { kind: party, party_kind: buyer_company, legal_type: company, org: company_a, status: verified, tax_no: "1234567890" }
+  party_buyer_b: { kind: party, party_kind: buyer_company, legal_type: company, org: company_b, status: pending_verification, tax_no: "9876543217" }
+  party_foundation_a: { kind: party, party_kind: payee, legal_type: foundation, status: verified, tax_no: "1111111114" }
+  party_uni_a: { kind: party, party_kind: payee, legal_type: university, org: uni_a, status: pending_verification, tax_no: "2223334447" }
+  party_platform: { kind: party, party_kind: platform, legal_type: company, status: draft }
+  payee_club_a: { kind: payee, org: club_a, party: party_foundation_a, status: active }
+  payee_uni_a: { kind: payee, org: uni_a, party: party_uni_a, status: pending_verification }
+  upload_company_a: { kind: file, org: company_a, uploaded_by: company_admin }
+  upload_club_a: { kind: file, org: club_a, uploaded_by: club_admin }
+  upload_uni_a: { kind: file, org: uni_a, uploaded_by: university_rep }
+  doc_buyer_a: { kind: document, party: party_buyer_a, uploaded_by: company_admin }
+  doc_foundation_a: { kind: document, party: party_foundation_a, uploaded_by: club_admin }
+  doc_foundation_pad: { kind: document, party: party_foundation_a, uploaded_by: platform_admin }

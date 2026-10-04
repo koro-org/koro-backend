@@ -1,0 +1,397 @@
+# Authz matrix of the parties module (03 §5.13, 04 §2.13; BE-036). 11 operations × 18 personas.
+# Org surface (03 §3.6, §7.6): members of the org without the role → 403 before any party is read
+# (no ID probing), non-members → 404, every platform role sees the surface (403 unless
+# platform_admin/finance_admin); the org is looked up first, so an unknown org is 404 for everyone.
+# k21: club_admin and university_rep reach the legal side of their org's payees (fixtures payee_*),
+# never another org's party (404). k22: company_admin creates and changes only its company's
+# buyer parties; a club has no buyer party (staff: 422). Admin surface (03 §7.2-3): 403 before
+# reading for everyone without the role. company_admin, university_rep, platform_admin and
+# finance_admin sessions are MFA verified (03 §7.3); the policy test and scenarios cover the
+# MFA-less session and the four-eyes document verification. Fixtures: fixtures/parties.yaml.
+# Payees and bank accounts (10 actions) come with BE-037.
+version: 1
+groups:
+  # signed-in users without a membership in company_a (its org surface is 404).
+  outsiders_company_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                        event_staff, university_rep, other_company_member]
+  # signed-in users without a membership in club_a.
+  outsiders_club_a: [user_unverified, student, student_minor, other_club_admin, event_staff, university_rep,
+                     company_member, company_admin, other_company_member]
+  # signed-in users without a membership in uni_a.
+  outsiders_uni_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                    event_staff, company_member, company_admin, other_company_member]
+  # signed-in users without a platform role.
+  no_platform_role: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                     event_staff, university_rep, company_member, company_admin, other_company_member]
+  # platform roles without a parties cell.
+  other_staff: [moderator, support, dpo, talent_auditor]
+
+pending_actions:
+  # BE-037 (payees and payee bank accounts).
+  - parties.payee.list
+  - parties.payee.read
+  - parties.payee.manage
+  - parties.payee.verify
+  - parties.bank_account.list
+  - parties.bank_account.submit
+  - parties.bank_account.verify
+  - parties.bank_account.approve
+  - parties.bank_account.reject
+  - parties.bank_account.revoke
+
+operations:
+  listOrgLegalParties:
+    method: GET
+    path: /api/v1/orgs/{org_id}/legal-parties
+    action: parties.legal_party.read
+    path_params: { org_id: company_a }
+    expect:
+      anonymous: 401
+      "@outsiders_company_a": 404
+      company_member: 200     # S (recruiter)
+      company_admin: 200      # S
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: club_org
+        path_params: { org_id: club_a }
+        note: k21 — the club admin lists the foundation paid for the club; a member has no role
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403
+          club_admin: 200
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+      - name: university_org
+        path_params: { org_id: uni_a }
+        expect:
+          anonymous: 401
+          "@outsiders_uni_a": 404
+          university_rep: 200     # S·k21 (not career_staff)
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 404
+          "@other_staff": 404     # the org is looked up first: there is none
+          platform_admin: 404
+          finance_admin: 404
+
+  getOrgLegalParty:
+    method: GET
+    path: /api/v1/orgs/{org_id}/legal-parties/{party_id}
+    action: parties.legal_party.read
+    path_params: { org_id: company_a, party_id: party_buyer_a }
+    expect:
+      anonymous: 401
+      "@outsiders_company_a": 404
+      company_member: 200
+      company_admin: 200
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: club_payee_party
+        path_params: { org_id: club_a, party_id: party_foundation_a }
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403
+          club_admin: 200         # k21
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+      - name: university_payee_party
+        path_params: { org_id: uni_a, party_id: party_uni_a }
+        expect:
+          anonymous: 401
+          "@outsiders_uni_a": 404
+          university_rep: 200
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+      - name: other_orgs_party
+        path_params: { org_id: club_a, party_id: party_buyer_a }
+        note: IDOR — company_a's party under club_a's path is not found, for staff too (06 H-38)
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403        # no role: refused before the lookup
+          club_admin: 404
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404
+      - name: platform_party
+        path_params: { org_id: company_a, party_id: party_platform }
+        note: Koro's own party belongs to no org surface
+        expect:
+          anonymous: 401
+          "@outsiders_company_a": 404
+          company_member: 404
+          company_admin: 404
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404
+
+  createBuyerLegalParty:
+    method: POST
+    path: /api/v1/orgs/{org_id}/legal-parties
+    action: parties.legal_party.create
+    path_params: { org_id: company_a }
+    body: bodies/parties/create_buyer.json
+    expect:
+      anonymous: 401
+      "@outsiders_company_a": 404
+      company_member: 403
+      company_admin: 201       # S·k22
+      "@other_staff": 403
+      platform_admin: 201
+      finance_admin: 201
+    variants:
+      - name: club_org
+        path_params: { org_id: club_a }
+        note: buyer parties belong to companies — staff get 422 parties.org_not_company (k22)
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403
+          club_admin: 403
+          "@other_staff": 403
+          platform_admin: 422
+          finance_admin: 422
+
+  updateLegalParty:
+    method: PATCH
+    path: /api/v1/orgs/{org_id}/legal-parties/{party_id}
+    action: parties.legal_party.update
+    path_params: { org_id: company_a, party_id: party_buyer_a }
+    headers: { If-Match: '"1hmhuo3hji000"' }
+    body: bodies/parties/update_title.json
+    expect:
+      anonymous: 401
+      "@outsiders_company_a": 404
+      company_member: 403
+      company_admin: 200       # S·k22 (the verified party goes back to pending_verification)
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: club_payee_party
+        path_params: { org_id: club_a, party_id: party_foundation_a }
+        note: k22 — a payee party is changed by finance and platform admins only
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403
+          club_admin: 403
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+      - name: other_orgs_party
+        path_params: { org_id: company_a, party_id: party_buyer_b }
+        note: IDOR — company_b's party under company_a's path (06 H-38)
+        expect:
+          anonymous: 401
+          "@outsiders_company_a": 404
+          company_member: 403
+          company_admin: 404
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404
+
+  uploadLegalPartyDocument:
+    method: POST
+    path: /api/v1/orgs/{org_id}/legal-parties/{party_id}/documents
+    action: parties.document.upload
+    path_params: { org_id: company_a, party_id: party_buyer_a }
+    body: bodies/parties/upload_company_a.json
+    expect:
+      anonymous: 401
+      "@outsiders_company_a": 404
+      company_member: 403      # no document cell for recruiters
+      company_admin: 201
+      "@other_staff": 403
+      platform_admin: 201
+      finance_admin: 201
+    variants:
+      - name: club_payee_party
+        path_params: { org_id: club_a, party_id: party_foundation_a }
+        body: bodies/parties/upload_club_a.json
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403
+          club_admin: 201          # S·k21
+          "@other_staff": 403
+          platform_admin: 201
+          finance_admin: 201
+      - name: university_payee_party
+        path_params: { org_id: uni_a, party_id: party_uni_a }
+        body: bodies/parties/upload_uni_a.json
+        expect:
+          anonymous: 401
+          "@outsiders_uni_a": 404
+          university_rep: 201
+          "@other_staff": 403
+          platform_admin: 201
+          finance_admin: 201
+
+  downloadLegalPartyDocument:
+    method: GET
+    path: /api/v1/orgs/{org_id}/legal-parties/{party_id}/documents/{document_id}/download
+    action: parties.document.read
+    path_params: { org_id: company_a, party_id: party_buyer_a, document_id: doc_buyer_a }
+    expect:
+      anonymous: 401
+      "@outsiders_company_a": 404
+      company_member: 403
+      company_admin: 200
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: club_payee_document
+        path_params: { org_id: club_a, party_id: party_foundation_a, document_id: doc_foundation_a }
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403
+          club_admin: 200
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+      - name: other_partys_document
+        path_params: { org_id: company_a, party_id: party_buyer_a, document_id: doc_foundation_a }
+        note: IDOR — a document of another party under this party's path (06 H-38)
+        expect:
+          anonymous: 401
+          "@outsiders_company_a": 404
+          company_member: 403
+          company_admin: 404
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404
+
+  adminListLegalParties:
+    method: GET
+    path: /api/v1/admin/legal-parties
+    action: parties.legal_party.read
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403   # admin surface: 403 before reading (03 §7.2-3)
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: filtered
+        query: { kind: payee, status: verified, q: matris }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+
+  adminCreateLegalParty:
+    method: POST
+    path: /api/v1/admin/legal-parties
+    action: parties.legal_party.create
+    body: bodies/parties/admin_create_foundation.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 201
+      finance_admin: 201
+    variants:
+      - name: natural_person_payee
+        body: bodies/parties/admin_create_individual.json
+        note: 06 H-54 — a payee is a legal entity in the MVP; an individual is 422 parties.natural_person_payee
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 422
+          finance_admin: 422
+
+  adminUpdateLegalParty:
+    method: PATCH
+    path: /api/v1/admin/legal-parties/{party_id}
+    action: parties.legal_party.update
+    path_params: { party_id: party_foundation_a }
+    headers: { If-Match: '"1hmhuo3hji000"' }
+    body: bodies/parties/admin_update.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: platform_party
+        path_params: { party_id: party_platform }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+      - name: missing_party
+        path_params: { party_id: "literal:00000000-0000-7000-8000-000000000001" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403   # no ID probing without a platform role
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404
+
+  adminVerifyLegalParty:
+    method: POST
+    path: /api/v1/admin/legal-parties/{party_id}/verification
+    action: parties.legal_party.verify
+    path_params: { party_id: party_buyer_b }
+    body: bodies/parties/verify.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: already_verified
+        path_params: { party_id: party_buyer_a }
+        note: a verified party is decided — 409 parties.invalid_state
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 409
+          finance_admin: 409
+
+  adminVerifyLegalPartyDocument:
+    method: POST
+    path: /api/v1/admin/legal-party-documents/{document_id}/verify
+    action: parties.document.verify
+    path_params: { document_id: doc_foundation_a }
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: own_upload
+        path_params: { document_id: doc_foundation_pad }
+        note: four eyes — the uploader (platform_admin) may not verify the document (03 §6.1 kind)
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 200

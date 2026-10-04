@@ -91,6 +91,31 @@ components:
         - email
         - role
       type: object
+    AddressDTO:
+      additionalProperties: false
+      properties:
+        city:
+          maxLength: 60
+          type: string
+        country:
+          description: ISO 3166-1 alpha-2; TR when omitted
+          maxLength: 2
+          type: string
+        district:
+          maxLength: 100
+          type: string
+        line1:
+          description: Street address
+          maxLength: 200
+          type: string
+        postal_code:
+          description: 5 digits
+          maxLength: 5
+          type: string
+      required:
+        - line1
+        - city
+      type: object
     AdminClubClaimDTO:
       additionalProperties: false
       properties:
@@ -283,6 +308,75 @@ components:
       required:
         - type
         - channel
+      type: object
+    AdminCreatePartyInputBody:
+      additionalProperties: false
+      properties:
+        address:
+          $ref: "#/components/schemas/AddressDTO"
+        e_invoice_alias:
+          maxLength: 200
+          type: string
+        email:
+          description: Invoice / payout contact address
+          maxLength: 254
+          type: string
+        kind:
+          description: Buyer parties are created by their company (createBuyerLegalParty)
+          enum:
+            - payee
+            - platform
+          type: string
+        legal_type:
+          enum:
+            - company
+            - university
+            - foundation
+            - association
+            - sole_prop
+            - individual
+            - public_body
+            - other
+          type: string
+        mersis_no:
+          description: "MERSİS number: 16 digits"
+          maxLength: 30
+          type: string
+        org_id:
+          description: "payee only: the university organization the party is"
+          format: uuid
+          type: string
+        phone:
+          maxLength: 30
+          type: string
+        tax_no:
+          description: "Tax number (VKN): 10 digits with its check digit"
+          maxLength: 20
+          type: string
+        tax_office:
+          maxLength: 100
+          type: string
+        tckn:
+          description: "individual only: national ID (11 digits); stored encrypted, never returned"
+          maxLength: 20
+          type: string
+        title:
+          description: Invoice title (unvan)
+          maxLength: 300
+          minLength: 2
+          type: string
+        vat_status:
+          description: unknown when omitted
+          enum:
+            - vat_payer
+            - vat_exempt
+            - not_vat_payer
+            - unknown
+          type: string
+      required:
+        - kind
+        - legal_type
+        - title
       type: object
     AdminCreateSkillInputBody:
       additionalProperties: false
@@ -660,6 +754,68 @@ components:
             - in_progress
           type: string
       type: object
+    AdminUpdatePartyInputBody:
+      additionalProperties: false
+      properties:
+        address:
+          $ref: "#/components/schemas/AddressDTO"
+          description: Replaces the whole address
+        e_invoice_alias:
+          description: Empty string clears it
+          maxLength: 200
+          type: string
+        email:
+          description: Empty string clears it
+          maxLength: 254
+          type: string
+        legal_type:
+          enum:
+            - company
+            - university
+            - foundation
+            - association
+            - sole_prop
+            - individual
+            - public_body
+            - other
+          type: string
+        mersis_no:
+          description: Empty string clears it
+          maxLength: 30
+          type: string
+        phone:
+          description: Empty string clears it
+          maxLength: 30
+          type: string
+        status:
+          description: inactive retires the party (not the platform party)
+          enum:
+            - inactive
+          type: string
+        tax_no:
+          description: VKN; empty string clears it
+          maxLength: 20
+          type: string
+        tax_office:
+          description: Empty string clears it
+          maxLength: 100
+          type: string
+        tckn:
+          description: "individual only: replaces the national ID (never returned)"
+          maxLength: 20
+          type: string
+        title:
+          maxLength: 300
+          minLength: 2
+          type: string
+        vat_status:
+          enum:
+            - vat_payer
+            - vat_exempt
+            - not_vat_payer
+            - unknown
+          type: string
+      type: object
     AdminUpdateSkillInputBody:
       additionalProperties: false
       properties:
@@ -820,6 +976,21 @@ components:
         - status
         - mfa_enabled
         - created_at
+      type: object
+    AdminVerifyPartyInputBody:
+      additionalProperties: false
+      properties:
+        decision:
+          enum:
+            - verified
+            - rejected
+          type: string
+        note:
+          description: Internal note (audited; no personal data)
+          maxLength: 500
+          type: string
+      required:
+        - decision
       type: object
     ApproveInputBody:
       additionalProperties: false
@@ -1658,6 +1829,52 @@ components:
         - title
         - body_md
       type: object
+    CreatePartyInputBody:
+      additionalProperties: false
+      properties:
+        address:
+          $ref: "#/components/schemas/AddressDTO"
+        email:
+          description: Invoice contact address
+          maxLength: 254
+          type: string
+        legal_type:
+          enum:
+            - company
+            - sole_prop
+            - association
+            - foundation
+            - public_body
+            - other
+          type: string
+        mersis_no:
+          description: "MERSİS number: 16 digits"
+          maxLength: 30
+          type: string
+        phone:
+          description: +<country><number>, or a Turkish number
+          maxLength: 30
+          type: string
+        tax_no:
+          description: "Tax number (VKN): 10 digits with its check digit"
+          maxLength: 20
+          type: string
+        tax_office:
+          maxLength: 100
+          type: string
+        title:
+          description: Invoice title (unvan)
+          maxLength: 300
+          minLength: 2
+          type: string
+      required:
+        - legal_type
+        - title
+        - tax_office
+        - tax_no
+        - address
+        - email
+      type: object
     CreateUploadInputBody:
       additionalProperties: false
       properties:
@@ -1858,6 +2075,53 @@ components:
         - finished_at
         - details
         - created_at
+      type: object
+    DocumentDTO:
+      additionalProperties: false
+      properties:
+        document_id:
+          format: uuid
+          type: string
+        kind:
+          enum:
+            - tax_certificate
+            - signature_circular
+            - foundation_deed
+            - university_protocol
+            - authorization_letter
+            - other
+          type: string
+        uploaded_at:
+          format: date-time
+          type: string
+        uploaded_by:
+          description: Finance and platform admins only
+          format: uuid
+          type: string
+        verified_at:
+          format: date-time
+          type: string
+        verified_by:
+          description: Finance and platform admins only
+          format: uuid
+          type: string
+      required:
+        - document_id
+        - kind
+        - uploaded_at
+      type: object
+    DownloadDTO:
+      additionalProperties: false
+      properties:
+        expires_at:
+          format: date-time
+          type: string
+        url:
+          description: Valid for at most 5 minutes
+          type: string
+      required:
+        - url
+        - expires_at
       type: object
     DsrAdminDTO:
       additionalProperties: false
@@ -2897,6 +3161,110 @@ components:
       required:
         - membership_id
         - status
+      type: object
+    LegalPartyDTO:
+      additionalProperties: false
+      properties:
+        address:
+          $ref: "#/components/schemas/AddressDTO"
+        created_at:
+          format: date-time
+          type: string
+        documents:
+          items:
+            $ref: "#/components/schemas/DocumentDTO"
+          type: array
+        e_invoice_alias:
+          description: Finance and platform admins only
+          type: string
+        email:
+          type: string
+        kind:
+          enum:
+            - platform
+            - buyer_company
+            - payee
+          type: string
+        legal_type:
+          enum:
+            - company
+            - university
+            - foundation
+            - association
+            - sole_prop
+            - individual
+            - public_body
+            - other
+          type: string
+        mersis_no:
+          description: MERSİS number; masked to its last 4 digits for organization roles
+          type: string
+        org_id:
+          description: The company of a buyer party, the university of a university's own party
+          format: uuid
+          type: string
+        party_id:
+          format: uuid
+          type: string
+        phone:
+          type: string
+        status:
+          enum:
+            - draft
+            - pending_verification
+            - verified
+            - rejected
+            - inactive
+          type: string
+        tax_ids_masked:
+          type: boolean
+        tax_no:
+          description: Tax number (VKN); masked to its last 4 digits for organization roles
+          type: string
+        tax_office:
+          type: string
+        tckn_on_file:
+          description: "Individuals, finance and platform admins only: a national ID is stored (encrypted); its value is never returned"
+          type: boolean
+        title:
+          description: Invoice title (unvan)
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+        vat_status:
+          enum:
+            - vat_payer
+            - vat_exempt
+            - not_vat_payer
+            - unknown
+          type: string
+        verified_at:
+          format: date-time
+          type: string
+      required:
+        - party_id
+        - kind
+        - legal_type
+        - title
+        - tax_ids_masked
+        - vat_status
+        - status
+        - created_at
+        - updated_at
+        - documents
+      type: object
+    LegalPartyList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/LegalPartyDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
       type: object
     LogListOutputBody:
       additionalProperties: false
@@ -5039,6 +5407,44 @@ components:
           maxLength: 2048
           type: string
       type: object
+    UpdatePartyInputBody:
+      additionalProperties: false
+      properties:
+        address:
+          $ref: "#/components/schemas/AddressDTO"
+          description: Replaces the whole address
+        email:
+          maxLength: 254
+          type: string
+        legal_type:
+          enum:
+            - company
+            - sole_prop
+            - association
+            - foundation
+            - public_body
+            - other
+          type: string
+        mersis_no:
+          description: Empty string clears it
+          maxLength: 30
+          type: string
+        phone:
+          description: Empty string clears it
+          maxLength: 30
+          type: string
+        tax_no:
+          description: VKN
+          maxLength: 20
+          type: string
+        tax_office:
+          maxLength: 100
+          type: string
+        title:
+          maxLength: 300
+          minLength: 2
+          type: string
+      type: object
     UpdatePolicyInputBody:
       additionalProperties: false
       properties:
@@ -5188,6 +5594,26 @@ components:
             - explicit_consent
             - undecided
           type: string
+      type: object
+    UploadDocumentInputBody:
+      additionalProperties: false
+      properties:
+        file_id:
+          description: A party_document upload (createUpload, completeUpload)
+          format: uuid
+          type: string
+        kind:
+          enum:
+            - tax_certificate
+            - signature_circular
+            - foundation_deed
+            - university_protocol
+            - authorization_letter
+            - other
+          type: string
+      required:
+        - kind
+        - file_id
       type: object
     UsageDTO:
       additionalProperties: false
@@ -6702,6 +7128,274 @@ paths:
       tags:
         - entitlements
       x-koro-action: entitlements.entitlement.revoke
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/legal-parties:
+    get:
+      description: Newest first. q matches part of the title, or a 10-digit tax number exactly. Tax numbers are not masked here.
+      operationId: adminListLegalParties
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - explode: false
+          in: query
+          name: kind
+          schema:
+            enum:
+              - platform
+              - buyer_company
+              - payee
+            type: string
+        - explode: false
+          in: query
+          name: status
+          schema:
+            enum:
+              - draft
+              - pending_verification
+              - verified
+              - rejected
+              - inactive
+            type: string
+        - description: Part of the title (2-100 characters), or a 10-digit tax number
+          explode: false
+          in: query
+          name: q
+          schema:
+            description: Part of the title (2-100 characters), or a 10-digit tax number
+            maxLength: 100
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegalPartyList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List legal parties (finance and platform admins)
+      tags:
+        - parties
+      x-koro-action: parties.legal_party.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+    post:
+      description: "kind payee: the legal side of a payee (foundation, university, association, institution). In the MVP a payee is a legal entity: an individual or a sole proprietorship is 422 parties.natural_person_payee (06 H-54). kind platform: Koro's own party (one row; 409 parties.platform_exists). The national ID (tckn, individuals only) is stored envelope-encrypted with a blind index and never returned."
+      operationId: adminCreateLegalParty
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCreatePartyInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegalPartyDTO"
+          description: Created
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Create a payee or platform legal party
+      tags:
+        - parties
+      x-koro-action: parties.legal_party.create
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/legal-parties/{party_id}:
+    patch:
+      description: If-Match is required (428/412). A change to a verified (or rejected) party sends it back to pending_verification. status inactive retires a party (kept for the financial records).
+      operationId: adminUpdateLegalParty
+      parameters:
+        - description: Legal party ID (an unknown or malformed ID is 404)
+          in: path
+          name: party_id
+          required: true
+          schema:
+            description: Legal party ID (an unknown or malformed ID is 404)
+            type: string
+        - description: "ETag of the party (required: missing → 428, stale → 412)"
+          in: header
+          name: If-Match
+          schema:
+            description: "ETag of the party (required: missing → 428, stale → 412)"
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUpdatePartyInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegalPartyDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Update a legal party
+      tags:
+        - parties
+      x-koro-action: parties.legal_party.update
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/legal-parties/{party_id}/verification:
+    post:
+      description: verified needs the tax number and an address (422 parties.verification_incomplete); a party that is already decided or inactive is 409 parties.invalid_state.
+      operationId: adminVerifyLegalParty
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Legal party ID (an unknown or malformed ID is 404)
+          in: path
+          name: party_id
+          required: true
+          schema:
+            description: Legal party ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminVerifyPartyInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegalPartyDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Verify or reject a legal party
+      tags:
+        - parties
+      x-koro-action: parties.legal_party.verify
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/legal-party-documents/{document_id}/verify:
+    post:
+      description: Never by the document's uploader (403 authz.four_eyes_violation). A verified document is 409 parties.invalid_state; a file that is not scanned clean is 409 files.not_clean.
+      operationId: adminVerifyLegalPartyDocument
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Document ID (an unknown or malformed ID is 404)
+          in: path
+          name: document_id
+          required: true
+          schema:
+            description: Document ID (an unknown or malformed ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Verify a legal party document
+      tags:
+        - parties
+      x-koro-action: parties.document.verify
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
@@ -11826,6 +12520,303 @@ paths:
         - orgs
       x-koro-action: orgs.invitation.revoke
       x-koro-rate-limit: write_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/legal-parties:
+    get:
+      description: "A company sees its buyer parties (invoice titles); a club or a university sees the legal side of its payees (03 k21: the foundation paid on its behalf). No national ID (TCKN) is ever returned; tax number and MERSİS number are masked for organization roles."
+      operationId: listOrgLegalParties
+      parameters:
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegalPartyList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the legal parties of an organization
+      tags:
+        - parties
+      x-koro-action: parties.legal_party.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+    post:
+      description: Creates a buyer_company party of the company (pending_verification until finance verifies it). Only companies have buyer parties (422 parties.org_not_company); the tax number (VKN) is checked with its check digit and is unique among active buyer parties (409 parties.tax_id_taken).
+      operationId: createBuyerLegalParty
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePartyInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegalPartyDTO"
+          description: Created
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Create the invoice title of a company
+      tags:
+        - parties
+      x-koro-action: parties.legal_party.create
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/legal-parties/{party_id}:
+    get:
+      description: The ETag is the If-Match value of updateLegalParty. A party of another organization is 404.
+      operationId: getOrgLegalParty
+      parameters:
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Legal party ID (an unknown, malformed or other organization's ID is 404)
+          in: path
+          name: party_id
+          required: true
+          schema:
+            description: Legal party ID (an unknown, malformed or other organization's ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegalPartyDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a legal party of an organization
+      tags:
+        - parties
+      x-koro-action: parties.legal_party.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+    patch:
+      description: "If-Match with the ETag of getOrgLegalParty is required: missing → 428, stale → 412. A change to a verified (or rejected) party sends it back to pending_verification; orders keep their own snapshot."
+      operationId: updateLegalParty
+      parameters:
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Legal party ID (an unknown, malformed or other organization's ID is 404)
+          in: path
+          name: party_id
+          required: true
+          schema:
+            description: Legal party ID (an unknown, malformed or other organization's ID is 404)
+            type: string
+        - description: "ETag of getOrgLegalParty (required: missing → 428, stale → 412)"
+          in: header
+          name: If-Match
+          schema:
+            description: "ETag of getOrgLegalParty (required: missing → 428, stale → 412)"
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePartyInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegalPartyDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Update the invoice title of a company
+      tags:
+        - parties
+      x-koro-action: parties.legal_party.update
+      x-koro-rate-limit: write_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/legal-parties/{party_id}/documents:
+    post:
+      description: file_id is a party_document upload (createUpload, then completeUpload) of the caller or of this organization; any other file is 422. Finance verifies the document later.
+      operationId: uploadLegalPartyDocument
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Legal party ID (an unknown, malformed or other organization's ID is 404)
+          in: path
+          name: party_id
+          required: true
+          schema:
+            description: Legal party ID (an unknown, malformed or other organization's ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadDocumentInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Add a document to a legal party
+      tags:
+        - parties
+      x-koro-action: parties.document.upload
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/legal-parties/{party_id}/documents/{document_id}/download:
+    get:
+      description: "Returns a download URL valid for at most 5 minutes (Content-Disposition: attachment). Every download is audited. A file that is not scanned clean is 409 files.not_clean."
+      operationId: downloadLegalPartyDocument
+      parameters:
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Legal party ID (an unknown, malformed or other organization's ID is 404)
+          in: path
+          name: party_id
+          required: true
+          schema:
+            description: Legal party ID (an unknown, malformed or other organization's ID is 404)
+            type: string
+        - description: Document ID (an unknown, malformed or other party's ID is 404)
+          in: path
+          name: document_id
+          required: true
+          schema:
+            description: Document ID (an unknown, malformed or other party's ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DownloadDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Download a legal party document
+      tags:
+        - parties
+      x-koro-action: parties.document.read
+      x-koro-rate-limit: read_default
       x-koro-surface: org
   /api/v1/orgs/{org_id}/members:
     get:

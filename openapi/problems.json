@@ -924,6 +924,48 @@
     "type": "urn:koro:problem:page.invalid_cursor"
   },
   {
+    "code": "parties.empty_patch",
+    "status": 422,
+    "title": "Nothing to update",
+    "type": "urn:koro:problem:parties.empty_patch"
+  },
+  {
+    "code": "parties.invalid_state",
+    "status": 409,
+    "title": "Legal party status does not allow this change",
+    "type": "urn:koro:problem:parties.invalid_state"
+  },
+  {
+    "code": "parties.natural_person_payee",
+    "status": 422,
+    "title": "Payees must be legal entities; natural persons are not supported yet",
+    "type": "urn:koro:problem:parties.natural_person_payee"
+  },
+  {
+    "code": "parties.org_not_company",
+    "status": 422,
+    "title": "Buyer legal parties belong to companies only",
+    "type": "urn:koro:problem:parties.org_not_company"
+  },
+  {
+    "code": "parties.platform_exists",
+    "status": 409,
+    "title": "The platform legal party already exists",
+    "type": "urn:koro:problem:parties.platform_exists"
+  },
+  {
+    "code": "parties.tax_id_taken",
+    "status": 409,
+    "title": "A legal party with this tax ID already exists",
+    "type": "urn:koro:problem:parties.tax_id_taken"
+  },
+  {
+    "code": "parties.verification_incomplete",
+    "status": 422,
+    "title": "Legal party lacks the tax number or address needed for verification",
+    "type": "urn:koro:problem:parties.verification_incomplete"
+  },
+  {
     "code": "payload_too_large",
     "status": 413,
     "title": "Payload too large",

@@ -113,8 +113,8 @@ destruction_logs            none      kvkk          -
 breach_incidents            staff     kvkk          -
 subprocessors               none      kvkk          -
 # parties (BE-034 schema; financial records kept 10 years: providers export, erasure keeps the legal duty)
-legal_parties               personal  parties       todo:BE-036
-legal_party_documents       personal  parties       todo:BE-036
+legal_parties               personal  parties       provider:parties
+legal_party_documents       personal  parties       provider:parties
 payees                      personal  parties       todo:BE-037
 payee_bank_accounts         personal  parties       todo:BE-037
 # catalog

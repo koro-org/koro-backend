@@ -165,3 +165,37 @@ func toManageDTO(v PostView) PostManageDTO {
 	}
 	return d
 }
+
+// FeedOrgDTO is an org of the reader's follow and mute lists (04 §2.7
+// "OrgCardDTO"): public org data only. logo_url and verified are not in
+// orgs.OrgSummary yet (T-251, as AuthorDTO).
+type FeedOrgDTO struct {
+	OrgID string `json:"org_id"`
+	Kind  string `json:"kind" enum:"platform,university,club,company,ngo"`
+	Name  string `json:"name"`
+	Slug  string `json:"slug"`
+}
+
+// FeedOrgList is a page of listMyMutes.
+type FeedOrgList struct {
+	Items      []FeedOrgDTO `json:"items"`
+	NextCursor string       `json:"next_cursor,omitempty"`
+}
+
+// FollowItemDTO is a follow of listMyFollows (04 §2.7).
+type FollowItemDTO struct {
+	Org    FeedOrgDTO `json:"org"`
+	Source string     `json:"source" enum:"manual,auto_membership,auto_university" doc:"auto_membership: came with a membership; goes when it ends"`
+	Notify bool       `json:"notify" doc:"Push digest of the organization's non-commercial posts"`
+}
+
+// FollowList is a page of listMyFollows.
+type FollowList struct {
+	Items      []FollowItemDTO `json:"items"`
+	NextCursor string          `json:"next_cursor,omitempty"`
+}
+
+func toOrgDTO(it OrgItem) FeedOrgDTO {
+	o := it.Org
+	return FeedOrgDTO{OrgID: o.ID.String(), Kind: string(o.Kind), Name: o.Name, Slug: o.Slug}
+}

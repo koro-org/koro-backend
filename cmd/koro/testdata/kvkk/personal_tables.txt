@@ -82,11 +82,11 @@ event_data_exports          personal  events        todo:BE-050
 feed_org_settings           staff     feed          -
 posts                       personal  feed          provider:feed
 post_media                  none      feed          -
-post_reactions              personal  feed          todo:BE-029
-post_saves                  personal  feed          todo:BE-029
-post_hides                  personal  feed          todo:BE-029
-org_follows                 personal  feed          todo:BE-029
-org_mutes                   personal  feed          todo:BE-029
+post_reactions              personal  feed          provider:feed
+post_saves                  personal  feed          provider:feed
+post_hides                  personal  feed          provider:feed
+org_follows                 personal  feed          provider:feed
+org_mutes                   personal  feed          provider:feed
 content_reports             personal  feed          todo:BE-032
 moderation_actions          personal  feed          todo:BE-032
 # outreach

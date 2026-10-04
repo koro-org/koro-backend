@@ -9,7 +9,7 @@ const TypeFeed = "feed"
 
 // feedPolicy is the policy of the feed module (03 §5.7). Only tickets of
 // the feed module edit this file (BE-001 R5). Written by BE-027 for its 9
-// actions:
+// actions and extended by BE-029 for the reader's 8:
 //
 //	feed.feed.read            every signed-in user (✓; k15 is the store's filter)
 //	feed.post.read            P (post; 404 when the post is not visible)
@@ -21,8 +21,26 @@ const TypeFeed = "feed"
 //	feed.post.publish         S: as list_org_manage
 //	feed.post.delete          S: as list_org_manage
 //	feed.post.stats           S: as list_org_manage
+//	feed.reaction.manage      every signed-in user (✓) on a post they see (404 otherwise)
+//	feed.save.manage          as reaction.manage
+//	feed.hide.create          as reaction.manage
+//	feed.follow.manage        every signed-in user (✓) on an org whose profile they see
+//	feed.mute.manage          as follow.manage
+//	feed.save.list_own        O (feed resource with OwnerUserID = the caller)
+//	feed.follow.list_own      O
+//	feed.mute.list_own        O
 //
-// The other 17 feed actions belong to BE-029 and BE-032 (nil grants: 403).
+// The other 9 feed actions belong to BE-032 (nil grants: 403).
+//
+// Reader interactions (BE-029): a like, a save or a hide addresses a post
+// (/posts/{post_id}/..., resource surface): the post's visibility is
+// postVisible, so an invisible post is 404 and a minor cannot like a
+// commercial post. A follow or a mute addresses an org (/me/follows/
+// {org_id}): its public profile must be visible (orgProfileVisible). The
+// lists are the caller's own (feed resource, OwnerUserID). Following a
+// sensitive club is the reader's own choice and reveals nothing to anyone
+// else (02 §12.7: the org sees a count at most); what feed never does is
+// create one automatically from a sensitive membership (the service).
 //
 // Resources (03 §3.5): post (OrgID = the author org; Attrs status,
 // audience_kind, audience_match, commercial, follows_author), org
@@ -60,17 +78,24 @@ func feedPolicy() Policy {
 				return r.Type == TypeOrg && orgProfileVisible(a, r)
 			case FeedPostListOrgManage, FeedPostCreate:
 				return r.Type == TypeOrg && OrgSurfaceVisible(a, r.OrgID)
-			case FeedPostRead, FeedPostUpdate, FeedPostPublish, FeedPostDelete, FeedPostStats:
+			case FeedPostRead, FeedPostUpdate, FeedPostPublish, FeedPostDelete, FeedPostStats,
+				FeedReactionManage, FeedSaveManage, FeedHideCreate:
 				return r.Type == TypePost && postVisible(a, r)
+			case FeedFollowManage, FeedMuteManage:
+				return r.Type == TypeOrg && orgProfileVisible(a, r)
+			case FeedSaveListOwn, FeedFollowListOwn, FeedMuteListOwn:
+				return r.Type == TypeFeed && a.Owns(r)
 			}
 			return false
 		},
 		Grants: func(a Actor, act Action, r Resource) []Grant {
 			switch act {
-			case FeedFeedRead:
+			case FeedFeedRead, FeedReactionManage, FeedSaveManage, FeedHideCreate, FeedFollowManage, FeedMuteManage:
 				// Every user is either a verified student (minor or not) or
 				// not: the three paths cover every signed-in actor.
 				return []Grant{{Role: RoleUserUnverified}, {Role: RoleStudent}, {Role: RoleStudentMinor}}
+			case FeedSaveListOwn, FeedFollowListOwn, FeedMuteListOwn:
+				return []Grant{{Role: RoleSelf}}
 			case FeedPostRead, FeedPostListByOrg:
 				return []Grant{{Role: RolePublic}}
 			case FeedPostListOrgManage, FeedPostCreate, FeedPostUpdate, FeedPostPublish, FeedPostDelete, FeedPostStats:
@@ -80,7 +105,7 @@ func feedPolicy() Policy {
 				}
 				return gs
 			}
-			return nil // the actions of BE-029 and BE-032: not written yet
+			return nil // the actions of BE-032: not written yet
 		},
 	}
 }

@@ -29,6 +29,19 @@ type Orgs interface {
 	Get(ctx context.Context, orgID uuid.UUID) (orgs.OrgSummary, error)
 	// GetMany returns the summaries of the ids that exist.
 	GetMany(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]orgs.OrgSummary, error)
+	// MembershipsOf returns the active memberships of a user (sensitive
+	// clubs included): the membership events re-check it, so an automatic
+	// follow follows the membership whatever order the events arrive in.
+	MembershipsOf(ctx context.Context, userID uuid.UUID) ([]authz.Membership, error)
+}
+
+// Clubs is what feed needs from directory (L6; 01 §4.6 Catalog): which
+// clubs are sensitive. A sensitive club membership never creates an
+// automatic follow (02 §12.7: the follow list must not reveal it).
+type Clubs interface {
+	// SensitiveOrgIDs reports which of orgIDs are sensitive clubs (only
+	// those keys are present, with true).
+	SensitiveOrgIDs(ctx context.Context, orgIDs []uuid.UUID) (map[uuid.UUID]bool, error)
 }
 
 // Viewers is what feed needs from students (L7; 01 §4.9 Profiles): the

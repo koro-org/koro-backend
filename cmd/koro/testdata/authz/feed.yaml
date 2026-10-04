@@ -1,4 +1,4 @@
-# Authz matrix of the feed module (03 §5.7, 04 §2.7; BE-027). 9 operations × 18 personas.
+# Authz matrix of the feed module (03 §5.7, 04 §2.7; BE-027, BE-029). 21 operations × 18 personas.
 # Post visibility (03 §3.6): a published public post is everyone's; a commercial post is not a minor's nor an
 # anonymous reader's (k15, T-57); a followers post is its followers' and the author org's members' (persona
 # student follows club_a); drafts and posts in review are the author org's writers', moderators' and platform
@@ -7,6 +7,10 @@
 # management surface: members without a writer role 403, non-members 404, every platform role 403 (k-po:
 # platform_admin writes for the platform org only, no persona belongs to it). Business rules (428/412, 409
 # state machine and immutable audience, 422 Tiptap body) live in scenarios/feed.yaml and the service tests.
+# BE-029: a like, a save or a hide needs a published post the reader sees (invisible 404; a draft its writers
+# and moderators see 409 feed.invalid_state); unlike/unsave are 204 without a row on a visible post and 404 on
+# an invisible one (no existence leak); follows and mutes address an org whose profile the reader sees; the
+# lists are the caller's own (anonymous 401).
 version: 1
 groups:
   # signed-in users without a membership in club_a (and no platform role).
@@ -290,16 +294,223 @@ operations:
           company_member: 200
           company_admin: 200
 
+  likePost:
+    method: PUT
+    path: /api/v1/posts/{post_id}/like
+    action: feed.reaction.manage
+    path_params: { post_id: post_a }
+    expect:
+      anonymous: 401
+      "@signed_in": 204
+    variants:
+      - name: commercial_post
+        path_params: { post_id: post_company }
+        note: k15 — a minor does not see a commercial post
+        expect:
+          anonymous: 401
+          student_minor: 404
+          "@fd_not_writer_company": 204
+          company_member: 204
+          company_admin: 204
+      - name: followers_post
+        path_params: { post_id: post_a_followers }
+        expect:
+          anonymous: 401
+          "@fd_followers_a": 204
+          "@fd_not_followers_a": 404
+      - name: draft
+        path_params: { post_id: post_a_draft }
+        note: a draft takes no like; who does not see it gets 404, its writer and moderators 409
+        expect:
+          anonymous: 401
+          "@fd_draft_hidden_a": 404
+          club_admin: 409
+          "@fd_post_staff": 409
+      - name: unknown_post
+        path_params: { post_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect:
+          anonymous: 401
+          "@signed_in": 404
+
+  unlikePost:
+    method: DELETE
+    path: /api/v1/posts/{post_id}/like
+    action: feed.reaction.manage
+    path_params: { post_id: post_a }
+    note: idempotent — 204 without a like
+    expect:
+      anonymous: 401
+      "@signed_in": 204
+    variants:
+      - name: removed_post
+        path_params: { post_id: post_a_removed }
+        note: no like on an invisible post is 404 (moderators still see it)
+        expect:
+          anonymous: 401
+          "@fd_draft_hidden_a": 404
+          club_admin: 404
+          "@fd_post_staff": 204
+
+  savePost:
+    method: PUT
+    path: /api/v1/posts/{post_id}/save
+    action: feed.save.manage
+    path_params: { post_id: post_a }
+    expect:
+      anonymous: 401
+      "@signed_in": 204
+    variants:
+      - name: commercial_post
+        path_params: { post_id: post_company }
+        expect:
+          anonymous: 401
+          student_minor: 404
+          "@fd_not_writer_company": 204
+          company_member: 204
+          company_admin: 204
+      - name: draft
+        path_params: { post_id: post_a_draft }
+        note: a draft takes no interaction (409 feed.invalid_state for those who see it)
+        expect:
+          anonymous: 401
+          "@fd_draft_hidden_a": 404
+          club_admin: 409
+          "@fd_post_staff": 409
+
+  unsavePost:
+    method: DELETE
+    path: /api/v1/posts/{post_id}/save
+    action: feed.save.manage
+    path_params: { post_id: post_a }
+    expect:
+      anonymous: 401
+      "@signed_in": 204
+    variants:
+      - name: followers_post
+        path_params: { post_id: post_a_followers }
+        expect:
+          anonymous: 401
+          "@fd_followers_a": 204
+          "@fd_not_followers_a": 404
+
+  hidePost:
+    method: POST
+    path: /api/v1/posts/{post_id}/hide
+    action: feed.hide.create
+    path_params: { post_id: post_a }
+    expect:
+      anonymous: 401
+      "@signed_in": 204
+    variants:
+      - name: followers_post
+        path_params: { post_id: post_a_followers }
+        expect:
+          anonymous: 401
+          "@fd_followers_a": 204
+          "@fd_not_followers_a": 404
+      - name: draft
+        path_params: { post_id: post_a_draft }
+        note: a draft takes no interaction (409 feed.invalid_state for those who see it)
+        expect:
+          anonymous: 401
+          "@fd_draft_hidden_a": 404
+          club_admin: 409
+          "@fd_post_staff": 409
+
+  listMySavedPosts:
+    method: GET
+    path: /api/v1/me/saved-posts
+    action: feed.save.list_own
+    query: { limit: "10" }
+    expect:
+      anonymous: 401
+      "@signed_in": 200
+
+  followOrg:
+    method: PUT
+    path: /api/v1/me/follows/{org_id}
+    action: feed.follow.manage
+    path_params: { org_id: club_a }
+    expect:
+      anonymous: 401
+      "@signed_in": 204
+    variants:
+      - name: sensitive_club
+        path_params: { org_id: club_sensitive }
+        note: following a sensitive club by hand is the reader's own choice (no automatic follow)
+        expect:
+          anonymous: 401
+          "@signed_in": 204
+      - name: company
+        path_params: { org_id: company_a }
+        expect:
+          anonymous: 401
+          "@signed_in": 204
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect:
+          anonymous: 401
+          "@signed_in": 404
+
+  unfollowOrg:
+    method: DELETE
+    path: /api/v1/me/follows/{org_id}
+    action: feed.follow.manage
+    path_params: { org_id: club_a }
+    note: idempotent — 204 without a follow (persona student follows club_a)
+    expect:
+      anonymous: 401
+      "@signed_in": 204
+    variants:
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect:
+          anonymous: 401
+          "@signed_in": 404
+
+  listMyFollows:
+    method: GET
+    path: /api/v1/me/follows
+    action: feed.follow.list_own
+    expect:
+      anonymous: 401
+      "@signed_in": 200
+
+  muteOrg:
+    method: PUT
+    path: /api/v1/me/mutes/{org_id}
+    action: feed.mute.manage
+    path_params: { org_id: company_a }
+    expect:
+      anonymous: 401
+      "@signed_in": 204
+    variants:
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect:
+          anonymous: 401
+          "@signed_in": 404
+
+  unmuteOrg:
+    method: DELETE
+    path: /api/v1/me/mutes/{org_id}
+    action: feed.mute.manage
+    path_params: { org_id: company_a }
+    expect:
+      anonymous: 401
+      "@signed_in": 204
+
+  listMyMutes:
+    method: GET
+    path: /api/v1/me/mutes
+    action: feed.mute.list_own
+    query: { limit: "5" }
+    expect:
+      anonymous: 401
+      "@signed_in": 200
+
 pending_actions:
   - feed.post.create_targeted        # BE-032
-  - feed.reaction.manage             # BE-029
-  - feed.save.manage                 # BE-029
-  - feed.save.list_own               # BE-029
-  - feed.hide.create                 # BE-029
-  - feed.follow.manage               # BE-029
-  - feed.follow.list_own             # BE-029
-  - feed.mute.manage                 # BE-029
-  - feed.mute.list_own               # BE-029
   - feed.report.create               # BE-032
   - feed.report.list                 # BE-032
   - feed.report.read                 # BE-032

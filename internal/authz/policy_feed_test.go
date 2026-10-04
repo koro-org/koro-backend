@@ -25,7 +25,19 @@ func postRes(org, status, audience string, commercial bool) func(authztest.Perso
 	}
 }
 
-// TestFeedPolicy_Matrix pins 03 §5.7 (BE-027's 9 actions) for the 18
+// ownFeed is the reader's own list (feed resource owned by the persona);
+// othersFeed is someone else's.
+func ownFeed(p authztest.Persona) authz.Resource {
+	me := p.Actor.UserID
+	return authz.Resource{Type: authz.TypeFeed, OwnerUserID: &me}
+}
+
+func othersFeed(authztest.Persona) authz.Resource {
+	other := uuid.NewV7()
+	return authz.Resource{Type: authz.TypeFeed, OwnerUserID: &other}
+}
+
+// TestFeedPolicy_Matrix pins 03 §5.7 (BE-027's 9 and BE-029's 8 actions) for the 18
 // personas; testdata/authz/feed.yaml checks the same through the API.
 func TestFeedPolicy_Matrix(t *testing.T) {
 	t.Parallel()
@@ -100,6 +112,24 @@ func TestFeedPolicy_Matrix(t *testing.T) {
 			with(hidden(), map[string]error{"club_member": fb, "club_admin": nil, "moderator": fb, "platform_admin": fb})},
 		{"stats commercial", authz.FeedPostStats, ad,
 			with(all(fb), map[string]error{"student_minor": nf, "company_member": nil, "company_admin": nil})},
+		// BE-029: the reader's interactions follow the post's visibility.
+		{"like public", authz.FeedReactionManage, pub, with(all(nil), map[string]error{"anonymous": fb})},
+		{"save commercial (k15)", authz.FeedSaveManage, ad, with(all(nil), map[string]error{"anonymous": fb, "student_minor": nf})},
+		{"hide followers", authz.FeedHideCreate, followers, with(hidden(), map[string]error{
+			"club_member": nil, "club_admin": nil, "moderator": nil, "platform_admin": nil})},
+		{"like draft (the service refuses: 409)", authz.FeedReactionManage, draft, with(hidden(), map[string]error{
+			"club_admin": nil, "moderator": nil, "platform_admin": nil})},
+		{"like removed", authz.FeedReactionManage, removed, with(hidden(), map[string]error{"moderator": nil, "platform_admin": nil})},
+		{"follow club_a", authz.FeedFollowManage, func(authztest.Persona) authz.Resource { return orgRes("club_a", authz.OrgClub, "active") },
+			with(all(nil), map[string]error{"anonymous": fb})},
+		{"mute pending company", authz.FeedMuteManage,
+			func(authztest.Persona) authz.Resource { return orgRes("company_a", authz.OrgCompany, "pending_review") },
+			with(hidden(), map[string]error{"company_member": nil, "company_admin": nil, "moderator": nil, "support": nil,
+				"platform_admin": nil})},
+		{"list own saves", authz.FeedSaveListOwn, ownFeed, with(all(nil), map[string]error{"anonymous": fb})},
+		{"list own follows", authz.FeedFollowListOwn, ownFeed, with(all(nil), map[string]error{"anonymous": fb})},
+		{"list own mutes", authz.FeedMuteListOwn, ownFeed, with(all(nil), map[string]error{"anonymous": fb})},
+		{"list another user's mutes", authz.FeedMuteListOwn, othersFeed, hidden()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -162,7 +192,7 @@ func TestFeedPolicy_EdgeCases(t *testing.T) {
 	// An unknown status hides the post (safe default).
 	wantErr(t, authz.Can(ctx, authz.Anonymous(), authz.FeedPostRead, postRes("club_a", "archived", "public", false)(p)),
 		authz.ErrNotFound, false)
-	// The other feed actions are BE-029's and BE-032's: denied for now.
+	// The other feed actions are BE-032's: denied for now.
 	wantErr(t, authz.Can(ctx, persona(t, "moderator"), authz.FeedPostModerate, postRes("club_a", "published", "public", false)(p)),
 		authz.ErrNotFound, false)
 	// Missing Attrs are a programmer error (deny).

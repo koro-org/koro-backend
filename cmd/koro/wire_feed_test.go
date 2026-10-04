@@ -2,6 +2,7 @@ package main
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 	"uuid"
@@ -59,5 +60,34 @@ func TestWire_FeedProvidesServiceAndPrivacy(t *testing.T) {
 		return s.Name == feed.NotifyFollowersTaskName
 	}) {
 		t.Fatalf("post.published subscribers = %v", subs)
+	}
+}
+
+// TestWire_FeedFollowsMembershipsAndReconciles pins what BE-029 binds: the
+// membership and club sensitivity consumers, the hourly counter job and
+// directory as the sensitive club source.
+func TestWire_FeedFollowsMembershipsAndReconciles(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	for topic, task := range map[string]string{
+		domainevent.TopicMembershipStarted:      feed.AutoFollowTaskName,
+		domainevent.TopicMembershipEnded:        feed.RemoveAutoFollowTaskName,
+		domainevent.TopicClubSensitivityChanged: feed.DropSensitiveAutoFollowsTaskName,
+	} {
+		if !slices.ContainsFunc(c.infra.subs.For(topic), func(s outbox.Subscription) bool { return s.Name == task }) {
+			t.Errorf("%s has no %s subscriber", topic, task)
+		}
+	}
+	var jobs []string
+	for _, j := range c.infra.jobs.Jobs() {
+		if strings.HasPrefix(j.Name, "feed.") {
+			jobs = append(jobs, j.Name+" "+j.Cron+" "+j.Queue)
+		}
+	}
+	if want := []string{"feed.reconcile_counters 35 * * * * low"}; !slices.Equal(jobs, want) {
+		t.Fatalf("feed jobs = %v, want %v", jobs, want)
 	}
 }

@@ -1,6 +1,7 @@
 package feed_test
 
 import (
+	"cmp"
 	"errors"
 	"slices"
 	"strconv"
@@ -352,6 +353,331 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (feed.Store, world)
 		}
 		if vs, err := s.ViewerState(ctx, reader, nil, nil); err != nil || len(vs.Liked) != 0 {
 			t.Fatalf("empty ViewerState = %+v, %v", vs, err)
+		}
+	})
+	t.Run("likes and saves: idempotent rows, counters move with them", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		org, by, u1, u2 := w.org(t, feed.AuthorClub), w.user(t), w.user(t), w.user(t)
+		p := insert(t, s, publishedAt(post(org, feed.AuthorClub, by), pub0))
+		counts := func() (int, int, time.Time) {
+			t.Helper()
+			got, err := s.GetPost(ctx, p.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return got.LikeCount, got.SaveCount, got.UpdatedAt
+		}
+		_, _, v0 := counts()
+		for i, want := range []bool{true, false} {
+			if ok, err := s.AddLike(ctx, u1, p.ID); err != nil || ok != want {
+				t.Fatalf("AddLike #%d = %v, %v", i, ok, err)
+			}
+		}
+		if ok, _ := s.AddLike(ctx, u2, p.ID); !ok {
+			t.Fatal("second user's like")
+		}
+		if ok, _ := s.AddSave(ctx, u1, p.ID); !ok {
+			t.Fatal("save")
+		}
+		if ok, _ := s.AddSave(ctx, u1, p.ID); ok {
+			t.Fatal("save twice")
+		}
+		if l, sv, v := counts(); l != 2 || sv != 1 || !v.Equal(v0) {
+			t.Fatalf("counts = %d, %d (updated_at %v → %v: counters must not move the version)", l, sv, v0, v)
+		}
+		vs, _ := s.ViewerState(ctx, u1, []uuid.UUID{p.ID}, nil)
+		if !vs.Liked[p.ID] || !vs.Saved[p.ID] {
+			t.Fatalf("ViewerState = %+v", vs)
+		}
+		for i, want := range []bool{true, false} {
+			if ok, err := s.RemoveLike(ctx, u1, p.ID); err != nil || ok != want {
+				t.Fatalf("RemoveLike #%d = %v, %v", i, ok, err)
+			}
+			if ok, err := s.RemoveSave(ctx, u1, p.ID); err != nil || ok != want {
+				t.Fatalf("RemoveSave #%d = %v, %v", i, ok, err)
+			}
+		}
+		if l, sv, _ := counts(); l != 1 || sv != 0 {
+			t.Fatalf("counts after removal = %d, %d", l, sv)
+		}
+		// A row without a count (drift) goes without the counter below 0.
+		q := insert(t, s, publishedAt(post(org, feed.AuthorClub, by), pub0.Add(time.Minute)))
+		w.like(t, u1, q.ID)
+		if ok, err := s.RemoveLike(ctx, u1, q.ID); err != nil || !ok {
+			t.Fatalf("RemoveLike(drift) = %v, %v", ok, err)
+		}
+		if got, _ := s.GetPost(ctx, q.ID); got.LikeCount != 0 {
+			t.Fatalf("like_count = %d", got.LikeCount)
+		}
+		// A missing post is 404, not a row.
+		if _, err := s.AddLike(ctx, u1, uuid.NewV7()); !errors.Is(err, problem.ErrNotFound) {
+			t.Fatalf("AddLike(missing) = %v", err)
+		}
+		if _, err := s.AddSave(ctx, u1, uuid.NewV7()); !errors.Is(err, problem.ErrNotFound) {
+			t.Fatalf("AddSave(missing) = %v", err)
+		}
+		if ok, err := s.AddHide(ctx, u1, p.ID); err != nil || !ok {
+			t.Fatalf("AddHide = %v, %v", ok, err)
+		}
+		if ok, err := s.AddHide(ctx, u1, p.ID); err != nil || ok {
+			t.Fatalf("AddHide twice = %v, %v", ok, err)
+		}
+		if _, err := s.AddHide(ctx, u1, uuid.NewV7()); !errors.Is(err, problem.ErrNotFound) {
+			t.Fatalf("AddHide(missing) = %v", err)
+		}
+	})
+
+	t.Run("saved list: visible posts only, keyset by save time", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		club, company, by, reader := w.org(t, feed.AuthorClub), w.org(t, feed.AuthorCompany), w.user(t), w.user(t)
+		var posts []feed.Post
+		for i := range 4 {
+			posts = append(posts, insert(t, s, publishedAt(post(club, feed.AuthorClub, by), pub0.Add(time.Duration(i)*time.Minute))))
+		}
+		draft := insert(t, s, post(club, feed.AuthorClub, by))
+		ad := insert(t, s, publishedAt(post(company, feed.AuthorCompany, by), pub0))
+		fol := post(club, feed.AuthorClub, by)
+		fol.AudienceKind = feed.AudienceFollowers
+		fol = insert(t, s, publishedAt(fol, pub0))
+		for _, p := range append(posts, draft, ad, fol) {
+			if _, err := s.AddSave(ctx, reader, p.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		r := feed.Reader{UserID: &reader, Keys: []string{"all"}}
+		read := func(rd feed.Reader, limit int) []feed.SavedPost {
+			t.Helper()
+			var out []feed.SavedPost
+			var after *feed.After
+			for range 20 {
+				page, err := s.ListSaved(ctx, rd, after, limit)
+				if err != nil {
+					t.Fatal(err)
+				}
+				out = append(out, page...)
+				if len(page) < limit {
+					return out
+				}
+				last := page[len(page)-1]
+				after = &feed.After{At: last.SavedAt, ID: last.Post.ID}
+			}
+			t.Fatal("saved list did not end")
+			return nil
+		}
+		got := read(r, 2)
+		gotIDs := []uuid.UUID{}
+		for i, sp := range got {
+			gotIDs = append(gotIDs, sp.Post.ID)
+			if i > 0 && cmp.Or(sp.SavedAt.Compare(got[i-1].SavedAt), sp.Post.ID.Compare(got[i-1].Post.ID)) >= 0 {
+				t.Fatalf("not newest first at %d", i)
+			}
+		}
+		// The draft and the followers post (no follow) are skipped; the
+		// commercial post is an adult's.
+		want := []uuid.UUID{posts[0].ID, posts[1].ID, posts[2].ID, posts[3].ID, ad.ID}
+		slices.SortFunc(want, func(a, b uuid.UUID) int { return a.Compare(b) })
+		sorted := slices.SortedFunc(slices.Values(gotIDs), func(a, b uuid.UUID) int { return a.Compare(b) })
+		if !slices.Equal(sorted, want) {
+			t.Fatalf("saved = %v, want %v", sorted, want)
+		}
+		minor := r
+		minor.Minor = true
+		if got := read(minor, 10); len(got) != 4 {
+			t.Fatalf("minor saved = %d", len(got))
+		}
+		w.follow(t, reader, club)
+		if got := read(r, 10); len(got) != 6 {
+			t.Fatalf("follower saved = %d", len(got))
+		}
+		if got, _ := s.ListSaved(ctx, feed.Reader{Keys: []string{"all"}}, nil, 10); len(got) != 0 {
+			t.Fatalf("anonymous saved = %v", got)
+		}
+	})
+
+	t.Run("follows and mutes", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		a, b, c, u, other := w.org(t, feed.AuthorClub), w.org(t, feed.AuthorClub), w.org(t, feed.AuthorCompany), w.user(t), w.user(t)
+		yes := true
+		if created, err := s.FollowManual(ctx, u, a, &yes); err != nil || !created {
+			t.Fatalf("FollowManual(new) = %v, %v", created, err)
+		}
+		if created, err := s.FollowManual(ctx, u, a, nil); err != nil || created {
+			t.Fatalf("FollowManual(again) = %v, %v", created, err)
+		}
+		if ok, err := s.AddAutoFollow(ctx, u, a); err != nil || ok {
+			t.Fatalf("AddAutoFollow over manual = %v, %v", ok, err)
+		}
+		if ok, err := s.RemoveAutoFollow(ctx, u, a); err != nil || ok {
+			t.Fatalf("RemoveAutoFollow(manual) = %v, %v", ok, err)
+		}
+		for _, x := range []struct{ user, org uuid.UUID }{{u, b}, {other, b}, {u, c}} {
+			if ok, err := s.AddAutoFollow(ctx, x.user, x.org); err != nil || !ok {
+				t.Fatalf("AddAutoFollow = %v, %v", ok, err)
+			}
+		}
+		list := func(user uuid.UUID) []feed.Follow {
+			t.Helper()
+			var out []feed.Follow
+			var after *feed.After
+			for range 10 {
+				page, err := s.ListFollows(ctx, user, after, 1)
+				if err != nil {
+					t.Fatal(err)
+				}
+				out = append(out, page...)
+				if len(page) < 1 {
+					return out
+				}
+				after = &feed.After{At: page[0].CreatedAt, ID: page[0].OrgID}
+			}
+			return out
+		}
+		fs := list(u)
+		if len(fs) != 3 {
+			t.Fatalf("follows = %+v", fs)
+		}
+		byOrg := map[uuid.UUID]feed.Follow{}
+		for _, f := range fs {
+			byOrg[f.OrgID] = f
+		}
+		if f := byOrg[a]; f.Source != feed.FollowManual || !f.Notify {
+			t.Fatalf("manual follow = %+v", f)
+		}
+		if f := byOrg[b]; f.Source != feed.FollowAutoMembership || f.Notify {
+			t.Fatalf("auto follow = %+v", f)
+		}
+		// notify: nil keeps it, false clears it; an auto follow confirmed by
+		// hand becomes manual.
+		no := false
+		if _, err := s.FollowManual(ctx, u, a, &no); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.FollowManual(ctx, u, c, nil); err != nil {
+			t.Fatal(err)
+		}
+		fs = list(u)
+		for _, f := range fs {
+			switch f.OrgID {
+			case a:
+				if f.Notify {
+					t.Fatal("notify not cleared")
+				}
+			case c:
+				if f.Source != feed.FollowManual {
+					t.Fatalf("confirmed follow = %+v", f)
+				}
+			}
+		}
+		if ok, err := s.RemoveAutoFollow(ctx, u, b); err != nil || !ok {
+			t.Fatalf("RemoveAutoFollow = %v, %v", ok, err)
+		}
+		if n, err := s.RemoveAutoFollowsOf(ctx, b); err != nil || n != 1 {
+			t.Fatalf("RemoveAutoFollowsOf = %d, %v", n, err)
+		}
+		if f, _ := s.Follows(ctx, other, b); f {
+			t.Fatal("RemoveAutoFollowsOf left a row")
+		}
+		if ok, _ := s.RemoveFollow(ctx, u, c); !ok {
+			t.Fatal("RemoveFollow")
+		}
+		if ok, _ := s.RemoveFollow(ctx, u, c); ok {
+			t.Fatal("RemoveFollow twice")
+		}
+		if fs := list(u); len(fs) != 1 || fs[0].OrgID != a {
+			t.Fatalf("follows after removals = %+v", fs)
+		}
+		// Mutes.
+		for i, want := range []bool{true, false} {
+			if ok, err := s.AddMute(ctx, u, a); err != nil || ok != want {
+				t.Fatalf("AddMute #%d = %v, %v", i, ok, err)
+			}
+		}
+		if _, err := s.AddMute(ctx, u, c); err != nil {
+			t.Fatal(err)
+		}
+		ms, err := s.ListMutes(ctx, u, nil, 10)
+		if err != nil || len(ms) != 2 {
+			t.Fatalf("ListMutes = %+v, %v", ms, err)
+		}
+		next, err := s.ListMutes(ctx, u, &feed.After{At: ms[0].CreatedAt, ID: ms[0].OrgID}, 10)
+		if err != nil || len(next) != 1 || next[0].OrgID != ms[1].OrgID {
+			t.Fatalf("ListMutes after = %+v, %v", next, err)
+		}
+		if ok, _ := s.RemoveMute(ctx, u, a); !ok {
+			t.Fatal("RemoveMute")
+		}
+		if ok, _ := s.RemoveMute(ctx, u, a); ok {
+			t.Fatal("RemoveMute twice")
+		}
+		if ms, _ := s.ListMutes(ctx, other, nil, 10); len(ms) != 0 {
+			t.Fatalf("another user's mutes = %+v", ms)
+		}
+	})
+
+	t.Run("reconcile counters, export and erase", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		org, other, by, u1, u2 := w.org(t, feed.AuthorClub), w.org(t, feed.AuthorClub), w.user(t), w.user(t), w.user(t)
+		p := insert(t, s, publishedAt(post(org, feed.AuthorClub, by), pub0))
+		q := insert(t, s, publishedAt(post(org, feed.AuthorClub, by), pub0.Add(time.Minute)))
+		before, _ := s.GetPost(ctx, p.ID)
+		// p: two seeded likes and one seeded save without counts (drift);
+		// q: counted through the store (no drift).
+		w.like(t, u1, p.ID)
+		w.like(t, u2, p.ID)
+		w.save(t, u1, p.ID)
+		if _, err := s.AddLike(ctx, u1, q.ID); err != nil {
+			t.Fatal(err)
+		}
+		n, err := s.ReconcileCounters(ctx)
+		if err != nil || n != 1 {
+			t.Fatalf("ReconcileCounters = %d, %v", n, err)
+		}
+		got, _ := s.GetPost(ctx, p.ID)
+		if got.LikeCount != 2 || got.SaveCount != 1 || !got.UpdatedAt.Equal(before.UpdatedAt) {
+			t.Fatalf("reconciled = %d, %d (updated_at moved: %v)", got.LikeCount, got.SaveCount, !got.UpdatedAt.Equal(before.UpdatedAt))
+		}
+		if n, err := s.ReconcileCounters(ctx); err != nil || n != 0 {
+			t.Fatalf("second ReconcileCounters = %d, %v", n, err)
+		}
+		// Export / erase of u1: 2 likes, 1 save, 1 hide, 1 follow, 1 mute.
+		if _, err := s.AddHide(ctx, u1, q.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.FollowManual(ctx, u1, org, nil); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.AddMute(ctx, u1, other); err != nil {
+			t.Fatal(err)
+		}
+		in, err := s.InteractionsOf(ctx, u1)
+		if err != nil || len(in.Likes) != 2 || len(in.Saves) != 1 || len(in.Hides) != 1 || len(in.Follows) != 1 || len(in.Mutes) != 1 {
+			t.Fatalf("InteractionsOf = %+v, %v", in, err)
+		}
+		if n, err := s.EraseInteractions(ctx, u1); err != nil || n != 6 {
+			t.Fatalf("EraseInteractions = %d, %v", n, err)
+		}
+		if got, _ := s.GetPost(ctx, p.ID); got.LikeCount != 1 || got.SaveCount != 0 {
+			t.Fatalf("p after erase = %d, %d", got.LikeCount, got.SaveCount)
+		}
+		if got, _ := s.GetPost(ctx, q.ID); got.LikeCount != 0 {
+			t.Fatalf("q after erase = %d", got.LikeCount)
+		}
+		if in, _ := s.InteractionsOf(ctx, u1); len(in.Likes)+len(in.Saves)+len(in.Hides)+len(in.Follows)+len(in.Mutes) != 0 {
+			t.Fatalf("left after erase = %+v", in)
+		}
+		if in, _ := s.InteractionsOf(ctx, u2); len(in.Likes) != 1 {
+			t.Fatalf("u2 lost its like: %+v", in)
+		}
+		if n, err := s.EraseInteractions(ctx, u1); err != nil || n != 0 {
+			t.Fatalf("second EraseInteractions = %d, %v", n, err)
 		}
 	})
 }

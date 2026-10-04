@@ -53,14 +53,16 @@ func (l *auditLog) of(action authz.Action) []audit.Event {
 	return out
 }
 
-// fakeOrgs is the org directory of the authztest orgs (all active).
+// fakeOrgs is the org directory of the authztest orgs (all active) with
+// the active memberships set per user.
 type fakeOrgs struct {
-	mu   sync.Mutex
-	orgs map[uuid.UUID]orgs.OrgSummary
+	mu      sync.Mutex
+	orgs    map[uuid.UUID]orgs.OrgSummary
+	members map[uuid.UUID][]authz.Membership
 }
 
 func newFakeOrgs() *fakeOrgs {
-	f := &fakeOrgs{orgs: map[uuid.UUID]orgs.OrgSummary{}}
+	f := &fakeOrgs{orgs: map[uuid.UUID]orgs.OrgSummary{}, members: map[uuid.UUID][]authz.Membership{}}
 	for _, o := range authztest.Orgs() {
 		id := authztest.ID(o.Name)
 		f.orgs[id] = orgs.OrgSummary{ID: id, Kind: orgs.Kind(o.Kind), Name: "Org " + o.Name,
@@ -89,6 +91,19 @@ func (f *fakeOrgs) GetMany(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]or
 		}
 	}
 	return out, nil
+}
+
+func (f *fakeOrgs) MembershipsOf(_ context.Context, userID uuid.UUID) ([]authz.Membership, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]authz.Membership(nil), f.members[userID]...), nil
+}
+
+// setMembers replaces the active memberships of userID.
+func (f *fakeOrgs) setMembers(userID uuid.UUID, ms ...authz.Membership) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.members[userID] = ms
 }
 
 func (f *fakeOrgs) setStatus(id uuid.UUID, st orgs.Status) {
@@ -187,6 +202,30 @@ func (f *fakeFiles) setScan(id uuid.UUID, scan files.ScanStatus) {
 	f.files[id] = m
 }
 
+// fakeClubs is directory's sensitive club set.
+type fakeClubs struct {
+	mu        sync.Mutex
+	sensitive map[uuid.UUID]bool
+}
+
+func (f *fakeClubs) SensitiveOrgIDs(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[uuid.UUID]bool{}
+	for _, id := range ids {
+		if f.sensitive[id] {
+			out[id] = true
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeClubs) set(id uuid.UUID, sensitive bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sensitive[id] = sensitive
+}
+
 type env struct {
 	clk     *clock.Fake
 	mem     *feed.MemStore
@@ -196,24 +235,36 @@ type env struct {
 	viewers *fakeViewers
 	events  *fakeEvents
 	files   *fakeFiles
+	clubs   *fakeClubs
 	svc     feed.Service
 	mod     feed.Module
 }
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
+	return newEnvWith(t, nil)
+}
+
+// newEnvWith is newEnv with the dependencies adjusted by tweak.
+func newEnvWith(t *testing.T, tweak func(*feed.Deps)) *env {
+	t.Helper()
 	clk := clock.NewFake(t0)
 	e := &env{
 		clk: clk, mem: feed.NewMemStore(clk.Now), out: outbox.NewMem(clk), audit: &auditLog{}, orgs: newFakeOrgs(),
 		viewers: &fakeViewers{keys: map[uuid.UUID][]string{}}, events: &fakeEvents{events: map[uuid.UUID]events.EventSummary{}},
 		files: &fakeFiles{files: map[uuid.UUID]files.FileMeta{}, attached: map[uuid.UUID]uuid.UUID{}},
+		clubs: &fakeClubs{sensitive: map[uuid.UUID]bool{}},
 	}
 	tx := db.NopTx{}
 	idem := idempotency.New(idempotency.Deps{Tx: tx, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()})
-	mod, err := feed.New(feed.Deps{
+	d := feed.Deps{
 		Store: e.mem, Tx: tx, Outbox: e.out, Audit: e.audit, Orgs: e.orgs, Idempotency: idem, Clock: clk,
-		Log: obs.Discard(), Viewers: e.viewers, Events: e.events, Files: e.files,
-	})
+		Log: obs.Discard(), Viewers: e.viewers, Events: e.events, Files: e.files, Clubs: e.clubs,
+	}
+	if tweak != nil {
+		tweak(&d)
+	}
+	mod, err := feed.New(d)
 	if err != nil {
 		t.Fatal(err)
 	}

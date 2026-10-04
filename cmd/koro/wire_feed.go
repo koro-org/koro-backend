@@ -19,12 +19,15 @@ import (
 //	tx        nil → the app_rw pool's TxManager; tests preset db.NopTx
 //
 // Consumed: c.audit.svc, c.orgs.svc (the author org's kind, status and
-// name), c.students.svc (the readers' audience keys; nil → 'all' only),
-// c.events.svc (event_share; nil → no event can be shared), c.files.svc
-// (images; nil → no media) and c.infra.cfg.Feed (FEED_REVIEW_THRESHOLD).
+// name; the active memberships behind the automatic follows),
+// c.directory.svc (sensitive clubs; nil → every club counts as sensitive
+// and gets no automatic follow), c.students.svc (the readers' audience
+// keys; nil → 'all' only), c.events.svc (event_share; nil → no event can
+// be shared), c.files.svc (images; nil → no media) and c.infra.cfg.Feed
+// (FEED_REVIEW_THRESHOLD).
 //
 // Provided, set in build: svc (feed.Posts for messaging) and the feed KVKK
-// provider (posts.author_user_id).
+// provider (posts.author_user_id; likes, saves, hides, follows, mutes).
 type feedWiring struct {
 	store    feed.Store
 	newStore func(c *container) feed.Store
@@ -62,6 +65,9 @@ func (w *feedWiring) build(c *container) error {
 	if svc := c.students.svc; svc != nil {
 		d.Viewers = svc
 	}
+	if svc := c.directory.svc; svc != nil {
+		d.Clubs = svc
+	}
 	if svc := c.events.svc; svc != nil {
 		d.Events = svc
 	}
@@ -78,11 +84,18 @@ func (w *feedWiring) build(c *container) error {
 }
 
 // tasks: post.published → feed.notify_followers (a no-op hook in P1,
-// T-84). post.submitted_for_review's moderator notice and the jobs
-// feed.reconcile_counters / feed.purge_removed come with BE-029, BE-032
-// and BE-057.
-func (w *feedWiring) tasks(c *container) { w.mod.Subscribe(c.infra.subs) }
+// T-84); membership.started/ended → feed.auto_follow /
+// feed.remove_auto_follow; club.sensitivity_changed →
+// feed.drop_sensitive_auto_follows; the job feed.reconcile_counters (01 §7:
+// hourly at :35, low). post.submitted_for_review's moderator notice and
+// feed.purge_removed come with BE-032 and BE-057.
+func (w *feedWiring) tasks(c *container) {
+	w.mod.Subscribe(c.infra.subs)
+	for _, j := range w.mod.Jobs() {
+		c.infra.jobs.Schedule(j)
+	}
+}
 
-// routes: the 9 operations of BE-027 (04 §2.7); w.svc is nil under
-// `koro openapi`, which Register tolerates.
+// routes: the 9 operations of BE-027 and the 12 of BE-029 (04 §2.7);
+// w.svc is nil under `koro openapi`, which Register tolerates.
 func (w *feedWiring) routes(c *container, api huma.API) { feed.Register(api, w.svc) }

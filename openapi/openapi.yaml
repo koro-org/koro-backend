@@ -3422,6 +3422,41 @@ components:
         - faculty_id
         - name
       type: object
+    FeedOrgDTO:
+      additionalProperties: false
+      properties:
+        kind:
+          enum:
+            - platform
+            - university
+            - club
+            - company
+            - ngo
+          type: string
+        name:
+          type: string
+        org_id:
+          type: string
+        slug:
+          type: string
+      required:
+        - org_id
+        - kind
+        - name
+        - slug
+      type: object
+    FeedOrgList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/FeedOrgDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
     FieldError:
       additionalProperties: false
       properties:
@@ -3479,6 +3514,45 @@ components:
         - upload_url
         - upload_headers
         - expires_at
+      type: object
+    FollowInputBody:
+      additionalProperties: false
+      properties:
+        notify:
+          description: "Push digest of the organization's non-commercial posts (absent: unchanged)"
+          type: boolean
+      type: object
+    FollowItemDTO:
+      additionalProperties: false
+      properties:
+        notify:
+          description: Push digest of the organization's non-commercial posts
+          type: boolean
+        org:
+          $ref: "#/components/schemas/FeedOrgDTO"
+        source:
+          description: "auto_membership: came with a membership; goes when it ends"
+          enum:
+            - manual
+            - auto_membership
+            - auto_university
+          type: string
+      required:
+        - org
+        - source
+        - notify
+      type: object
+    FollowList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/FollowItemDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
       type: object
     FormField:
       additionalProperties: false
@@ -13307,6 +13381,116 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: self
+  /api/v1/me/follows:
+    get:
+      description: "Newest first. source: manual, or auto_membership for a follow that came with a membership."
+      operationId: listMyFollows
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FollowList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the organizations I follow
+      tags:
+        - feed
+      x-koro-action: feed.follow.list_own
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
+  /api/v1/me/follows/{org_id}:
+    delete:
+      description: "Idempotent: 204 whether or not the reader followed the organization."
+      operationId: unfollowOrg
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Unfollow an organization
+      tags:
+        - feed
+      x-koro-action: feed.follow.manage
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+    put:
+      description: "Idempotent. notify asks for a push digest of the organization's non-commercial posts (absent: unchanged). An automatic follow (membership) becomes the reader's own. The organization never sees who follows it."
+      operationId: followOrg
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FollowInputBody"
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Follow an organization
+      tags:
+        - feed
+      x-koro-action: feed.follow.manage
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
   /api/v1/me/memberships:
     get:
       description: "Sensitive club memberships included (only for their owner). Default: pending and active."
@@ -13554,6 +13738,111 @@ paths:
         - identity
       x-koro-action: identity.mfa.verify
       x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/me/mutes:
+    get:
+      description: Newest first.
+      operationId: listMyMutes
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedOrgList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the organizations I muted
+      tags:
+        - feed
+      x-koro-action: feed.mute.list_own
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
+  /api/v1/me/mutes/{org_id}:
+    delete:
+      description: "Idempotent: 204 whether or not the reader had muted the organization."
+      operationId: unmuteOrg
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Unmute an organization
+      tags:
+        - feed
+      x-koro-action: feed.mute.manage
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+    put:
+      description: The organization's posts leave the reader's feed (the feed's block); its page stays readable. Idempotent. Contact request blocks are separate (messaging).
+      operationId: muteOrg
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Mute an organization
+      tags:
+        - feed
+      x-koro-action: feed.mute.manage
       x-koro-rate-limit: write_default
       x-koro-surface: self
   /api/v1/me/notification-preferences:
@@ -14061,6 +14350,52 @@ paths:
       x-koro-action: events.registration.cancel_own
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/me/saved-posts:
+    get:
+      description: Newest save first. A saved post the reader may no longer see (removed, hidden by a moderator, out of the audience) is skipped.
+      operationId: listMySavedPosts
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 20
+            description: Page size
+            format: int64
+            maximum: 50
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List my saved posts
+      tags:
+        - feed
+      x-koro-action: feed.save.list_own
+      x-koro-rate-limit: read_default
       x-koro-surface: self
   /api/v1/me/security-events:
     get:
@@ -16572,6 +16907,96 @@ paths:
       x-koro-action: feed.post.update
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+  /api/v1/posts/{post_id}/hide:
+    post:
+      description: The post leaves the reader's feed (it stays on the organization page). Idempotent. The post must be a published post the reader may see (404 otherwise).
+      operationId: hidePost
+      parameters:
+        - description: Post ID
+          in: path
+          name: post_id
+          required: true
+          schema:
+            description: Post ID
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Hide a post from my feed
+      tags:
+        - feed
+      x-koro-action: feed.hide.create
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+  /api/v1/posts/{post_id}/like:
+    delete:
+      description: "Idempotent: 204 whether or not the reader had liked the post."
+      operationId: unlikePost
+      parameters:
+        - description: Post ID
+          in: path
+          name: post_id
+          required: true
+          schema:
+            description: Post ID
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Remove a like
+      tags:
+        - feed
+      x-koro-action: feed.reaction.manage
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+    put:
+      description: "Idempotent: a repeated like counts once. The post must be a published post the reader may see (404 otherwise). The author organization sees the like count only, never who liked."
+      operationId: likePost
+      parameters:
+        - description: Post ID
+          in: path
+          name: post_id
+          required: true
+          schema:
+            description: Post ID
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Like a post
+      tags:
+        - feed
+      x-koro-action: feed.reaction.manage
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
   /api/v1/posts/{post_id}/publish:
     post:
       description: draft → published, or pending_review for a new organization's first posts (moderator approval). Images must be cleared by the virus scan (409 files.not_clean).
@@ -16605,6 +17030,65 @@ paths:
         - feed
       x-koro-action: feed.post.publish
       x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+  /api/v1/posts/{post_id}/save:
+    delete:
+      description: "Idempotent: 204 whether or not the reader had saved the post."
+      operationId: unsavePost
+      parameters:
+        - description: Post ID
+          in: path
+          name: post_id
+          required: true
+          schema:
+            description: Post ID
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Remove a saved post
+      tags:
+        - feed
+      x-koro-action: feed.save.manage
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+    put:
+      description: Idempotent. The post must be a published post the reader may see (404 otherwise). The author organization sees the save count only.
+      operationId: savePost
+      parameters:
+        - description: Post ID
+          in: path
+          name: post_id
+          required: true
+          schema:
+            description: Post ID
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Save a post
+      tags:
+        - feed
+      x-koro-action: feed.save.manage
       x-koro-rate-limit: write_default
       x-koro-surface: resource
   /api/v1/posts/{post_id}/stats:

@@ -5,6 +5,8 @@ package feed_test
 import (
 	"os"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"uuid"
@@ -138,5 +140,159 @@ func TestFeedQuery_NoNPlusOne(t *testing.T) {
 	}
 	if small != large || large > 3 {
 		t.Fatalf("feed statements: %d for 5 posts, %d for 20 (want the same, ≤ 3)", small, large)
+	}
+}
+
+// TestLike_Concurrent_CountsConsistent (PostgreSQL): readers liking the
+// same post at once, each several times, and unliking while the hourly
+// reconciliation runs leave exactly one row per reader and a like_count
+// equal to the rows; every repeated request reports "no change" exactly
+// once per reader, and the post's version (updated_at) never moves.
+func TestLike_Concurrent_CountsConsistent(t *testing.T) {
+	t.Parallel()
+	d := testutil.NewDB(t)
+	w := pgWorld(d)
+	store := feed.NewGormStore(d.ORM)
+	ctx := t.Context()
+	org, by := w.org(t, feed.AuthorClub), w.user(t)
+	p, err := store.InsertPost(ctx, publishedAt(post(org, feed.AuthorClub, by), pub0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const readers, repeats = 24, 3
+	users := make([]uuid.UUID, readers)
+	for i := range users {
+		users[i] = w.user(t)
+	}
+	run := func(op func(u uuid.UUID) (bool, error), only func(i int) bool) (int64, error) {
+		var changed atomic.Int64
+		var wg sync.WaitGroup
+		errs := make(chan error, readers*repeats+4)
+		for i, u := range users {
+			if !only(i) {
+				continue
+			}
+			for range repeats {
+				wg.Go(func() {
+					ok, err := op(u)
+					if err != nil {
+						errs <- err
+					}
+					if ok {
+						changed.Add(1)
+					}
+				})
+			}
+		}
+		for range 2 { // the reconciliation runs meanwhile
+			wg.Go(func() {
+				if _, err := store.ReconcileCounters(ctx); err != nil {
+					errs <- err
+				}
+			})
+		}
+		wg.Wait()
+		close(errs)
+		return changed.Load(), <-errs // nil when no error was sent
+	}
+	check := func(want int) {
+		t.Helper()
+		var rows int64
+		if err := d.ORM.Raw(`SELECT count(*) FROM post_reactions WHERE post_id = ?`, p.ID).Scan(&rows).Error; err != nil {
+			t.Fatal(err)
+		}
+		got, err := store.GetPost(ctx, p.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rows != int64(want) || got.LikeCount != want {
+			t.Fatalf("rows = %d, like_count = %d, want %d", rows, got.LikeCount, want)
+		}
+		if !got.UpdatedAt.Equal(p.UpdatedAt) {
+			t.Fatalf("updated_at moved with the counter: %v → %v", p.UpdatedAt, got.UpdatedAt)
+		}
+	}
+	all := func(int) bool { return true }
+	if n, err := run(func(u uuid.UUID) (bool, error) { return store.AddLike(ctx, u, p.ID) }, all); err != nil || n != readers {
+		t.Fatalf("new likes = %d, want %d (%v)", n, readers, err)
+	}
+	check(readers)
+	// Half unlike (each several times), the other half like again.
+	even := func(i int) bool { return i%2 == 0 }
+	odd := func(i int) bool { return i%2 == 1 }
+	var removed, again int64
+	var errRemove, errAgain error
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		removed, errRemove = run(func(u uuid.UUID) (bool, error) { return store.RemoveLike(ctx, u, p.ID) }, even)
+	})
+	wg.Go(func() {
+		again, errAgain = run(func(u uuid.UUID) (bool, error) { return store.AddLike(ctx, u, p.ID) }, odd)
+	})
+	wg.Wait()
+	if errRemove != nil || errAgain != nil || removed != readers/2 || again != 0 {
+		t.Fatalf("removed = %d, liked again = %d (%v, %v)", removed, again, errRemove, errAgain)
+	}
+	check(readers / 2)
+	if n, err := store.ReconcileCounters(ctx); err != nil || n != 0 {
+		t.Fatalf("ReconcileCounters after the races = %d, %v", n, err)
+	}
+}
+
+// TestLike_Service_Postgres: the service on PostgreSQL — two likes are one
+// row and one count, the ETag of the post stays, unlike without a like is
+// a no-op.
+func TestLike_Service_Postgres(t *testing.T) {
+	t.Parallel()
+	d := testutil.NewDB(t)
+	w := pgWorld(d)
+	store := feed.NewGormStore(d.ORM)
+	ctx := t.Context()
+	org, by, reader := w.org(t, feed.AuthorClub), w.user(t), w.user(t)
+	p, err := store.InsertPost(ctx, publishedAt(post(org, feed.AuthorClub, by), pub0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	orgsDir := newFakeOrgs()
+	o := orgsDir.orgs[orgID("club_a")]
+	o.ID = org
+	orgsDir.orgs[org] = o
+	clk := clock.NewFake(t0)
+	mod, err := feed.New(feed.Deps{
+		Store: store, Tx: d.Tx, Outbox: outbox.NewMem(clk), Audit: &auditLog{}, Orgs: orgsDir,
+		Idempotency: idempotency.New(idempotency.Deps{Tx: d.Tx, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()}),
+		Clock:       clk, Log: obs.Discard(), Viewers: &fakeViewers{keys: map[uuid.UUID][]string{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := authz.Actor{Kind: authz.KindUser, UserID: reader, StudentStatus: authz.StudentNone}
+	before, err := mod.Service.GetPost(ctx, a, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := mod.Service.LikePost(ctx, a, p.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := mod.Service.SavePost(ctx, a, p.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := mod.Service.GetPost(ctx, a, p.ID)
+	if err != nil || got.Post.LikeCount != 1 || got.Post.SaveCount != 1 || !got.Viewer.Liked || !got.Viewer.Saved {
+		t.Fatalf("GetPost = %+v / %+v, %v", got.Post, got.Viewer, err)
+	}
+	if got.ETag != before.ETag {
+		t.Fatalf("ETag moved: %s → %s", before.ETag, got.ETag)
+	}
+	if err := mod.Service.UnlikePost(ctx, authz.Actor{Kind: authz.KindUser, UserID: w.user(t)}, p.ID); err != nil {
+		t.Fatalf("UnlikePost(no like) = %v", err)
+	}
+	if err := mod.Service.HidePost(ctx, a, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if page, err := mod.Service.GetFeed(ctx, a, feed.FeedQuery{}); err != nil || len(page.Items) != 0 {
+		t.Fatalf("feed after hide = %d, %v", len(page.Items), err)
 	}
 }

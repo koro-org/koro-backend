@@ -219,3 +219,56 @@ func (j *JSON) Scan(src any) error {
 	}
 	return nil
 }
+
+// FollowSource is org_follows.source (02 §12.7).
+type FollowSource string
+
+// Follow sources. auto_membership follows come from membership.started and
+// go with membership.ended; a sensitive club never gets one (02 §12.7).
+// auto_university is reserved by the schema (no producer in v1).
+const (
+	FollowManual         FollowSource = "manual"
+	FollowAutoMembership FollowSource = "auto_membership"
+	FollowAutoUniversity FollowSource = "auto_university"
+)
+
+// Follow is one org_follows row (02 §12.7): personal data of the follower;
+// the org never sees who follows it.
+type Follow struct {
+	UserID    uuid.UUID    `gorm:"type:uuid;column:user_id"`
+	OrgID     uuid.UUID    `gorm:"type:uuid;column:org_id"`
+	Source    FollowSource `gorm:"column:source"`
+	Notify    bool         `gorm:"column:notify"`
+	CreatedAt time.Time    `gorm:"column:created_at"`
+}
+
+// Mute is one org_mutes row (02 §12.8): the org's posts leave the user's
+// feed (the feed's "block", 04 §F.5).
+type Mute struct {
+	UserID    uuid.UUID `gorm:"type:uuid;column:user_id"`
+	OrgID     uuid.UUID `gorm:"type:uuid;column:org_id"`
+	CreatedAt time.Time `gorm:"column:created_at"`
+}
+
+// Interaction is a like, a save or a hide of a post by one user
+// (post_reactions, post_saves, post_hides).
+type Interaction struct {
+	PostID    uuid.UUID `gorm:"type:uuid;column:post_id"`
+	CreatedAt time.Time `gorm:"column:created_at"`
+}
+
+// SavedPost is a post of the reader's saved list with the time it was saved
+// (the keyset of listMySavedPosts).
+type SavedPost struct {
+	Post    Post      `gorm:"embedded"`
+	SavedAt time.Time `gorm:"column:saved_at"`
+}
+
+// Interactions is everything feed holds about a reader (KVKK export).
+type Interactions struct {
+	Likes   []Interaction
+	Saves   []Interaction
+	Hides   []Interaction
+	Follows []Follow
+	Mutes   []Mute
+}

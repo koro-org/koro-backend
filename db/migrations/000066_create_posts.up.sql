@@ -12,6 +12,7 @@
 --   * the audience index is posts_audience_idx (02 §23 naming), not _gin.
 --   * posts_id_org_uq (06 H-38): the target of the composite FKs of
 --     outreach_dispatches, so a dispatch belongs to the org of its post.
+--   * posts_touch_updated_at skips counter-only updates (BE-029, below).
 -- Removed posts are hard-deleted 12 months later with their media and
 -- interactions (ON DELETE CASCADE on the child tables).
 BEGIN;
@@ -67,7 +68,11 @@ CREATE INDEX posts_author_idx   ON posts (org_id, published_at DESC, id DESC) WH
 CREATE INDEX posts_review_idx   ON posts (created_at) WHERE status = 'pending_review';
 CREATE INDEX posts_removed_idx  ON posts (removed_at) WHERE status = 'removed';
 CREATE INDEX posts_fts_idx      ON posts USING gin (search_vector) WHERE status = 'published';
+-- A counter-only update (like_count / save_count; BE-029) keeps updated_at:
+-- updated_at is the post's version (its ETag, 04 §1.13), and a like must
+-- not make its author's If-Match stale.
 CREATE TRIGGER posts_touch_updated_at BEFORE UPDATE ON posts
-  FOR EACH ROW EXECUTE FUNCTION public.koro_touch_updated_at();
+  FOR EACH ROW WHEN (OLD.like_count IS NOT DISTINCT FROM NEW.like_count AND OLD.save_count IS NOT DISTINCT FROM NEW.save_count)
+  EXECUTE FUNCTION public.koro_touch_updated_at();
 GRANT SELECT, INSERT, UPDATE, DELETE ON posts TO app_rw;
 COMMIT;

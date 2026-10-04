@@ -27,11 +27,11 @@ type MemStore struct {
 	posts    map[uuid.UUID]Post
 	media    map[uuid.UUID][]Media // by post id
 	settings map[uuid.UUID]OrgSettings
-	follows  map[[2]uuid.UUID]bool // {user, org}
-	mutes    map[[2]uuid.UUID]bool // {user, org}
-	hides    map[[2]uuid.UUID]bool // {user, post}
-	likes    map[[2]uuid.UUID]bool // {user, post}
-	saves    map[[2]uuid.UUID]bool // {user, post}
+	follows  map[[2]uuid.UUID]Follow    // {user, org}
+	mutes    map[[2]uuid.UUID]time.Time // {user, org} → created_at
+	hides    map[[2]uuid.UUID]time.Time // {user, post} → created_at
+	likes    map[[2]uuid.UUID]time.Time // {user, post} → created_at
+	saves    map[[2]uuid.UUID]time.Time // {user, post} → created_at
 	// now stamps created_at/updated_at like the column defaults and the
 	// touch trigger; updated_at always moves forward.
 	now func() time.Time
@@ -43,8 +43,8 @@ var _ Store = (*MemStore)(nil)
 func NewMemStore(now func() time.Time) *MemStore {
 	return &MemStore{
 		posts: map[uuid.UUID]Post{}, media: map[uuid.UUID][]Media{}, settings: map[uuid.UUID]OrgSettings{},
-		follows: map[[2]uuid.UUID]bool{}, mutes: map[[2]uuid.UUID]bool{}, hides: map[[2]uuid.UUID]bool{},
-		likes: map[[2]uuid.UUID]bool{}, saves: map[[2]uuid.UUID]bool{}, now: now,
+		follows: map[[2]uuid.UUID]Follow{}, mutes: map[[2]uuid.UUID]time.Time{}, hides: map[[2]uuid.UUID]time.Time{},
+		likes: map[[2]uuid.UUID]time.Time{}, saves: map[[2]uuid.UUID]time.Time{}, now: now,
 	}
 }
 
@@ -110,8 +110,14 @@ func (s *MemStore) PutSettings(o OrgSettings) {
 }
 
 // PutFollow / PutMute / PutHide / PutLike / PutSave seed the reader rows
-// BE-029 writes (fixtures and tests).
-func (s *MemStore) PutFollow(userID, orgID uuid.UUID) { s.put(s.follows, userID, orgID) }
+// (fixtures and tests) without touching the counters: a seeded like or
+// save is a drift feed.reconcile_counters corrects.
+func (s *MemStore) PutFollow(userID, orgID uuid.UUID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.follows[[2]uuid.UUID{userID, orgID}] = Follow{UserID: userID, OrgID: orgID, Source: FollowManual,
+		CreatedAt: s.stamp(time.Time{})}
+}
 
 // PutMute seeds an org_mutes row.
 func (s *MemStore) PutMute(userID, orgID uuid.UUID) { s.put(s.mutes, userID, orgID) }
@@ -125,10 +131,10 @@ func (s *MemStore) PutLike(userID, postID uuid.UUID) { s.put(s.likes, userID, po
 // PutSave seeds a post_saves row.
 func (s *MemStore) PutSave(userID, postID uuid.UUID) { s.put(s.saves, userID, postID) }
 
-func (s *MemStore) put(m map[[2]uuid.UUID]bool, a, b uuid.UUID) {
+func (s *MemStore) put(m map[[2]uuid.UUID]time.Time, a, b uuid.UUID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	m[[2]uuid.UUID{a, b}] = true
+	m[[2]uuid.UUID{a, b}] = s.stamp(time.Time{})
 }
 
 // InsertPost implements Store.
@@ -201,7 +207,7 @@ func (s *MemStore) DeletePost(_ context.Context, orgID, id uuid.UUID) error {
 	}
 	delete(s.posts, id)
 	delete(s.media, id)
-	for _, m := range []map[[2]uuid.UUID]bool{s.hides, s.likes, s.saves} {
+	for _, m := range []map[[2]uuid.UUID]time.Time{s.hides, s.likes, s.saves} {
 		for k := range m {
 			if k[1] == id {
 				delete(m, k)
@@ -262,7 +268,7 @@ func (s *MemStore) visible(r Reader, p Post) bool {
 	case !audienceMatch(p.AudienceKeys, p.AudienceDimCount, r.Keys), r.Minor && p.CommercialFlag:
 		return false
 	case p.AudienceKind == AudienceFollowers:
-		return slices.Contains(r.MemberOrgs, p.OrgID) || s.follows[[2]uuid.UUID{*r.UserID, p.OrgID}]
+		return slices.Contains(r.MemberOrgs, p.OrgID) || has(s.follows, *r.UserID, p.OrgID)
 	}
 	return true
 }
@@ -280,8 +286,8 @@ func (s *MemStore) ListFeed(_ context.Context, f FeedFilter, after *After, limit
 			continue
 		}
 		if u := f.UserID; u != nil {
-			followed := slices.Contains(f.MemberOrgs, p.OrgID) || s.follows[[2]uuid.UUID{*u, p.OrgID}]
-			if s.mutes[[2]uuid.UUID{*u, p.OrgID}] || s.hides[[2]uuid.UUID{*u, p.ID}] || f.Following && !followed {
+			followed := slices.Contains(f.MemberOrgs, p.OrgID) || has(s.follows, *u, p.OrgID)
+			if has(s.mutes, *u, p.OrgID) || has(s.hides, *u, p.ID) || f.Following && !followed {
 				continue
 			}
 		}
@@ -356,7 +362,7 @@ func (s *MemStore) OrgSettings(_ context.Context, orgID uuid.UUID) (OrgSettings,
 func (s *MemStore) Follows(_ context.Context, userID, orgID uuid.UUID) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.follows[[2]uuid.UUID{userID, orgID}], nil
+	return has(s.follows, userID, orgID), nil
 }
 
 // ViewerState implements Store.
@@ -365,15 +371,15 @@ func (s *MemStore) ViewerState(_ context.Context, userID uuid.UUID, postIDs, org
 	defer s.mu.Unlock()
 	out := ViewerState{Liked: map[uuid.UUID]bool{}, Saved: map[uuid.UUID]bool{}, Following: map[uuid.UUID]bool{}}
 	for _, id := range postIDs {
-		if s.likes[[2]uuid.UUID{userID, id}] {
+		if has(s.likes, userID, id) {
 			out.Liked[id] = true
 		}
-		if s.saves[[2]uuid.UUID{userID, id}] {
+		if has(s.saves, userID, id) {
 			out.Saved[id] = true
 		}
 	}
 	for _, id := range orgIDs {
-		if s.follows[[2]uuid.UUID{userID, id}] {
+		if has(s.follows, userID, id) {
 			out.Following[id] = true
 		}
 	}

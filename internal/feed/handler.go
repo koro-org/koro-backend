@@ -14,8 +14,9 @@ import (
 	"koro/internal/platform/page"
 )
 
-// Register adds the 9 operations of BE-027 (04 §2.7) to api. svc may be
-// nil (`koro openapi`): handlers only touch it when called.
+// Register adds the 9 operations of BE-027 and the 12 of BE-029 (04 §2.7)
+// to api. svc may be nil (`koro openapi`): handlers only touch it when
+// called.
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
 
@@ -82,6 +83,8 @@ func Register(api huma.API, svc Service) {
 		Summary:     "Get a post's statistics",
 		Description: "Like and save counts only: who liked or saved is never shown.",
 	}, op.Meta{Action: string(authz.FeedPostStats), Surface: op.SurfaceResource}, h.postStats)
+
+	registerInteractions(api, h)
 }
 
 // reg registers one feed operation with its Koro metadata.

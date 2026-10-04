@@ -14,7 +14,7 @@ import (
 )
 
 // NewGormStore returns the PostgreSQL store over posts, post_media and
-// feed_org_settings (02 §12.1–12.3) and the reader tables of BE-029.
+// feed_org_settings (02 §12.1–12.3) and the reader tables (02 §12.4–12.8).
 func NewGormStore(orm *gorm.DB) Store { return gormStore{orm: orm} }
 
 type gormStore struct{ orm *gorm.DB }
@@ -36,13 +36,19 @@ var (
 
 const mediaCols = `id, post_id, file_id, position, alt_text, width, height, created_at`
 
-// constraints maps the named constraints of 02 §12.1–12.3 onto module
+// constraints maps the named constraints of 02 §12.1–12.8 onto module
 // errors. Unlisted CHECKs are 422 and FKs/uniques 409 (db.Translate).
 var constraints = db.Constraints{
 	"posts_org_id_author_org_kind_fkey": problem.ErrNotFound,
 	"posts_event_id_fkey":               problem.ErrValidation,
 	"post_media_post_id_fkey":           problem.ErrNotFound,
 	"post_media_file_id_fkey":           problem.ErrValidation,
+	// The post or org of a reader row vanished meanwhile (02 §12.4–12.8).
+	"post_reactions_post_id_fkey": problem.ErrNotFound,
+	"post_saves_post_id_fkey":     problem.ErrNotFound,
+	"post_hides_post_id_fkey":     problem.ErrNotFound,
+	"org_follows_org_id_fkey":     problem.ErrNotFound,
+	"org_mutes_org_id_fkey":       problem.ErrNotFound,
 }
 
 func wrap(op string, err error) error {

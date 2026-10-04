@@ -53,3 +53,39 @@ scenarios:
       - { persona: anonymous, operation: getPost, expect: 404, code: not_found }
       - { persona: club_admin, operation: deletePost, path_params: { post_id: post_a }, expect: 404, code: not_found }
       - { persona: moderator, operation: getPost, expect: 200 }
+  feed_like_and_save_are_idempotent:
+    note: 04 §F.3 — a repeated PUT is one like (the count is pinned by the service and PostgreSQL tests)
+    steps:
+      - { persona: student, operation: likePost, expect: 204 }
+      - { persona: student, operation: likePost, expect: 204 }
+      - { persona: student, operation: savePost, expect: 204 }
+      - { persona: student, operation: savePost, expect: 204 }
+      - { persona: club_admin, operation: getPostStats, expect: 200 }
+      - { persona: student, operation: unlikePost, expect: 204 }
+      - { persona: student, operation: unlikePost, expect: 204 }
+      - { persona: student, operation: listMySavedPosts, expect: 200 }
+      - { persona: student, operation: likePost, path_params: { post_id: post_a_draft }, expect: 404, code: not_found }
+  feed_unlike_after_removal_is_the_likers_only:
+    note: on a removed post only a reader who liked it can still take the like back; others get 404 (no leak)
+    steps:
+      - { persona: student, operation: likePost, expect: 204 }
+      - { persona: club_admin, operation: deletePost, path_params: { post_id: post_a }, expect: 204 }
+      - { persona: club_member, operation: likePost, expect: 404, code: not_found }
+      - { persona: club_member, operation: unlikePost, expect: 404, code: not_found }
+      - { persona: student, operation: unlikePost, expect: 204 }
+      - { persona: student, operation: unlikePost, expect: 404, code: not_found }
+  feed_follow_mute_cycle:
+    note: follow, mute and their reversals are idempotent PUT/DELETE pairs (04 §F.5)
+    steps:
+      - { persona: student_minor, operation: followOrg, expect: 204 }
+      - { persona: student_minor, operation: followOrg, expect: 204 }
+      - { persona: student_minor, operation: listMyFollows, expect: 200 }
+      - { persona: student_minor, operation: unfollowOrg, expect: 204 }
+      - { persona: student_minor, operation: unfollowOrg, expect: 204 }
+      - { persona: student_minor, operation: muteOrg, expect: 204 }
+      - { persona: student_minor, operation: hidePost, expect: 204 }
+      - { persona: student_minor, operation: getFeed, expect: 200 }
+      - { persona: student_minor, operation: unmuteOrg, expect: 204 }
+      - { persona: student_minor, operation: listMyMutes, expect: 200 }
+      - { persona: student_minor, operation: muteOrg, path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000aa" },
+          expect: 404, code: not_found }

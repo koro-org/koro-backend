@@ -3,9 +3,10 @@
 // BE-027 builds the core: posts of four kinds with a validated Tiptap body
 // and images, the draft → (pending_review →) published life cycle with the
 // pre-moderation of new orgs, the feed itself (fan-out on read, keyset
-// pagination) and the org page. Likes, saves, hides, follows and mutes
-// are written by BE-029 (read here), targeted posts, reports and
-// moderation by BE-032.
+// pagination) and the org page. BE-029 adds the reader's interactions:
+// likes, saves and hides of posts, follows and mutes of orgs, the
+// automatic follow of a membership and the hourly counter reconciliation.
+// Targeted posts, reports and moderation are BE-032's.
 //
 // Rules the package enforces:
 //
@@ -50,6 +51,16 @@
 //   - Statistics (04 §2.7): like and save counts only, never who liked or
 //     saved (03 Y7); dispatch counts come with targeted posts (BE-032/BE-035,
 //     k ≥ 10).
+//   - Interactions (02 §12.4–12.8, 04 §F.3, §F.5): a like, a save or a hide
+//     needs a published post the reader may see (404 otherwise); PUT and
+//     DELETE are idempotent and a counter moves only with its row, so a
+//     repeated or concurrent like counts once. Likes, saves, hides,
+//     follows and mutes are the reader's personal data: the author org
+//     sees the counters only, never who (03 Y7). A mute and a hide take
+//     posts out of the feed, not out of the org page. A membership follows
+//     its org automatically (auto_membership) except in a sensitive club,
+//     whose follow would reveal the membership (02 §12.7); the end of the
+//     membership removes the automatic follow only.
 //   - Personal data: posts carry the author's user ID (audit), never shown
 //     to readers; logs carry IDs only.
 package feed
@@ -81,7 +92,7 @@ type Posts interface {
 }
 
 // Service is the feed service: the cross-module contract plus the HTTP use
-// cases of BE-027 (04 §2.7). Every method that takes an actor calls
+// cases of BE-027 and BE-029 (04 §2.7). Every method that takes an actor calls
 // authz.Can first (05 §5.3).
 type Service interface {
 	Posts
@@ -109,6 +120,29 @@ type Service interface {
 	DeletePost(ctx context.Context, a authz.Actor, id uuid.UUID) error
 	// PostStats is getPostStats (feed.post.stats).
 	PostStats(ctx context.Context, a authz.Actor, id uuid.UUID) (Stats, error)
+
+	// LikePost / UnlikePost are likePost / unlikePost (feed.reaction.manage).
+	LikePost(ctx context.Context, a authz.Actor, postID uuid.UUID) error
+	UnlikePost(ctx context.Context, a authz.Actor, postID uuid.UUID) error
+	// SavePost / UnsavePost are savePost / unsavePost (feed.save.manage).
+	SavePost(ctx context.Context, a authz.Actor, postID uuid.UUID) error
+	UnsavePost(ctx context.Context, a authz.Actor, postID uuid.UUID) error
+	// HidePost is hidePost (feed.hide.create).
+	HidePost(ctx context.Context, a authz.Actor, postID uuid.UUID) error
+	// ListSavedPosts is listMySavedPosts (feed.save.list_own): Next is the
+	// position (saved_at, post_id) of the next page.
+	ListSavedPosts(ctx context.Context, a authz.Actor, q PageQuery) (PostPage, error)
+	// FollowOrg / UnfollowOrg are followOrg / unfollowOrg
+	// (feed.follow.manage); notify nil keeps the current setting.
+	FollowOrg(ctx context.Context, a authz.Actor, orgID uuid.UUID, notify *bool) error
+	UnfollowOrg(ctx context.Context, a authz.Actor, orgID uuid.UUID) error
+	// ListFollows is listMyFollows (feed.follow.list_own).
+	ListFollows(ctx context.Context, a authz.Actor, q PageQuery) (OrgPage, error)
+	// MuteOrg / UnmuteOrg are muteOrg / unmuteOrg (feed.mute.manage).
+	MuteOrg(ctx context.Context, a authz.Actor, orgID uuid.UUID) error
+	UnmuteOrg(ctx context.Context, a authz.Actor, orgID uuid.UUID) error
+	// ListMutes is listMyMutes (feed.mute.list_own).
+	ListMutes(ctx context.Context, a authz.Actor, q PageQuery) (OrgPage, error)
 }
 
 // Deps are the dependencies of the feed module. Store, Tx, Outbox, Audit,
@@ -134,6 +168,10 @@ type Deps struct {
 	// Files attaches and serves the images. nil → media are refused (503)
 	// and no media URL is returned.
 	Files Files
+	// Clubs is directory's catalog (sensitive clubs). nil → every club
+	// counts as sensitive: no club membership creates an automatic follow
+	// (fail closed, as orgs does without club facts, T-208).
+	Clubs Clubs
 	// ReviewThreshold is FEED_REVIEW_THRESHOLD: the approved posts after
 	// which a new org publishes without review; 0 → DefaultReviewThreshold.
 	ReviewThreshold int
@@ -161,7 +199,8 @@ func (d Deps) validate() error {
 // Module is what feed hands to the composition root.
 type Module struct {
 	Service Service
-	// Privacy is the KVKK provider (the posts a user authored).
+	// Privacy is the KVKK provider (the posts a user authored, their likes,
+	// saves, hides, follows and mutes).
 	Privacy privacy.Provider
 
 	svc *service

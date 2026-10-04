@@ -1,0 +1,63 @@
+# Authz matrix of the ledger module (03 §5.17, 04 §2.17; BE-039). 1 operation × 18 personas.
+# Admin surface (03 §7.2-3): everyone without the role → 403, nothing is read first.
+# platform_admin and finance_admin sessions are MFA verified (03 §7.3); the policy test and
+# scenarios/ledger.yaml cover the MFA-less session. Fixtures: fixtures/ledger.yaml
+# (matrix_ledger_test.go). The balance and payout endpoints come with BE-044 (pending_actions).
+version: 1
+groups:
+  # signed-in users without a platform role.
+  no_platform_role: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                     event_staff, university_rep, company_member, company_admin, other_company_member]
+  # platform roles without a ledger.journal.list cell.
+  other_staff: [moderator, support, dpo, talent_auditor]
+
+operations:
+  adminListLedgerTransactions:
+    method: GET
+    path: /api/v1/admin/ledger/transactions
+    action: ledger.journal.list
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403   # admin surface: 403 before reading (03 §7.2-3)
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: kind_filter
+        query: { kind: order_allocated, ref_type: order }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+      - name: ref_filter
+        query: { ref_id: "{{fixture:ledger_payment_a}}", occurred_from: "2020-01-01" }
+        note: one business event's transactions in a date window
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+      - name: unknown_ref
+        query: { ref_id: "00000000-0000-7000-8000-0000000000ab" }
+        note: an unknown reference is an empty page, not 404 (a filter, not a resource)
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+
+pending_actions:
+  # BE-044: payee balance, payables and payouts (03 §5.17).
+  - ledger.balance.read
+  - ledger.payable.list
+  - ledger.payout.list
+  - ledger.payout.read
+  - ledger.payout.create
+  - ledger.payout.approve
+  - ledger.payout.mark_paid
+  - ledger.payout.mark_failed
+  - ledger.payout.cancel

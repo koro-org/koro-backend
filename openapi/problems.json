@@ -732,6 +732,36 @@
     "type": "urn:koro:problem:kvkk.unknown_user"
   },
   {
+    "code": "ledger.invalid_transaction",
+    "status": 422,
+    "title": "Ledger transaction is invalid",
+    "type": "urn:koro:problem:ledger.invalid_transaction"
+  },
+  {
+    "code": "ledger.model_not_enabled",
+    "status": 422,
+    "title": "Commerce model has no ledger template yet",
+    "type": "urn:koro:problem:ledger.model_not_enabled"
+  },
+  {
+    "code": "ledger.negative_payee_balance",
+    "status": 409,
+    "title": "Payee balance would become negative",
+    "type": "urn:koro:problem:ledger.negative_payee_balance"
+  },
+  {
+    "code": "ledger.ref_conflict",
+    "status": 409,
+    "title": "Ledger event was already posted with other entries",
+    "type": "urn:koro:problem:ledger.ref_conflict"
+  },
+  {
+    "code": "ledger.unbalanced",
+    "status": 422,
+    "title": "Ledger transaction is not balanced",
+    "type": "urn:koro:problem:ledger.unbalanced"
+  },
+  {
     "code": "method_not_allowed",
     "status": 405,
     "title": "Method not allowed",

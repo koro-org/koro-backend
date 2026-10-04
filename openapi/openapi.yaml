@@ -3162,6 +3162,95 @@ components:
         - membership_id
         - status
       type: object
+    LedgerEntryDTO:
+      additionalProperties: false
+      properties:
+        account_code:
+          description: Chart of accounts code (02 §21.1)
+          type: string
+        amount:
+          description: Kuruş; debit positive, credit negative
+          format: int64
+          type: integer
+        currency:
+          enum:
+            - TRY
+          type: string
+        entry_id:
+          format: uuid
+          type: string
+        order_line_id:
+          format: uuid
+          type: string
+        payee_id:
+          description: Set on per-payee accounts (seller_payable)
+          format: uuid
+          type: string
+      required:
+        - entry_id
+        - account_code
+        - amount
+        - currency
+      type: object
+    LedgerTransactionDTO:
+      additionalProperties: false
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        entries:
+          items:
+            $ref: "#/components/schemas/LedgerEntryDTO"
+          type: array
+        kind:
+          enum:
+            - payment_received
+            - order_allocated
+            - payout_paid
+            - refund_completed
+            - fee
+            - adjustment
+          type: string
+        memo:
+          type: string
+        occurred_at:
+          format: date-time
+          type: string
+        ref_id:
+          format: uuid
+          type: string
+        ref_type:
+          enum:
+            - payment
+            - order
+            - payout
+            - refund
+            - manual
+          type: string
+        transaction_id:
+          format: uuid
+          type: string
+      required:
+        - transaction_id
+        - kind
+        - ref_type
+        - ref_id
+        - occurred_at
+        - created_at
+        - entries
+      type: object
+    LedgerTransactionList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/LedgerTransactionDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
     LegalPartyDTO:
       additionalProperties: false
       properties:
@@ -7130,6 +7219,99 @@ paths:
       x-koro-action: entitlements.entitlement.revoke
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/ledger/transactions:
+    get:
+      description: "The double-entry journal, newest occurred_at first. Amounts are kuruş; debit is positive, credit negative; the entries of a transaction sum to zero. Filters: kind, ref_type, ref_id and an occurred_at window."
+      operationId: adminListLedgerTransactions
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - explode: false
+          in: query
+          name: kind
+          schema:
+            enum:
+              - payment_received
+              - order_allocated
+              - payout_paid
+              - refund_completed
+              - fee
+              - adjustment
+            type: string
+        - explode: false
+          in: query
+          name: ref_type
+          schema:
+            enum:
+              - payment
+              - order
+              - payout
+              - refund
+              - manual
+            type: string
+        - description: The referenced record (payment, order, payout, refund, reversed transaction)
+          explode: false
+          in: query
+          name: ref_id
+          schema:
+            description: The referenced record (payment, order, payout, refund, reversed transaction)
+            format: uuid
+            type: string
+        - description: RFC 3339 time or YYYY-MM-DD (start of that day, Europe/Istanbul)
+          explode: false
+          in: query
+          name: occurred_from
+          schema:
+            description: RFC 3339 time or YYYY-MM-DD (start of that day, Europe/Istanbul)
+            maxLength: 40
+            type: string
+        - description: RFC 3339 time or YYYY-MM-DD (end of that day, Europe/Istanbul); inclusive
+          explode: false
+          in: query
+          name: occurred_to
+          schema:
+            description: RFC 3339 time or YYYY-MM-DD (end of that day, Europe/Istanbul); inclusive
+            maxLength: 40
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LedgerTransactionList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List ledger transactions with their entries
+      tags:
+        - ledger
+      x-koro-action: ledger.journal.list
+      x-koro-rate-limit: read_default
       x-koro-surface: admin
   /api/v1/admin/legal-parties:
     get:

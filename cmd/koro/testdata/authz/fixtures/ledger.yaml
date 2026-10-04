@@ -1,0 +1,9 @@
+# Fixtures of the ledger module (cmd/koro/matrix_ledger_test.go). IDs are authztest.ID(name)
+# and name the business event (ref_id), not the ledger transaction. Posted through
+# ledger.Poster with the model A templates (02 §21.3): a captured payment of 1,200,000 kuruş
+# and the allocation of its order (one line: payee 1,080,000, commission 100,000, VAT 20,000;
+# payee authztest.ID("<name>_payee"), line authztest.ID("<name>_line")).
+version: 1
+fixtures:
+  ledger_payment_a: { kind: transaction, template: payment_received, amount: 1200000 }
+  ledger_order_a: { kind: transaction, template: order_allocated, amount: 1200000 }

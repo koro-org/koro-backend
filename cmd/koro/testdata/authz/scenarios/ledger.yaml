@@ -1,0 +1,20 @@
+# Multi-step scenarios of the ledger module (03 §7.7; BE-039).
+version: 1
+scenarios:
+  journal_needs_mfa:
+    note: platform_admin and finance_admin reads of the journal are k-mfa role paths (03 §6.4)
+    steps:
+      - { persona: finance_admin, mfa: false, operation: adminListLedgerTransactions, expect: 403, code: authz.mfa_required }
+      - { persona: platform_admin, mfa: false, operation: adminListLedgerTransactions, expect: 403, code: authz.mfa_required }
+      - { persona: finance_admin, operation: adminListLedgerTransactions, expect: 200 }
+  journal_filters:
+    note: >-
+      a filter narrows the journal for staff; a malformed bound is 422 validation_failed, while
+      an actor without a platform role still gets 403 first (admin surface, 03 §7.2-3)
+    steps:
+      - { persona: company_admin, operation: adminListLedgerTransactions, query: { occurred_from: "not-a-date" },
+          expect: 403, code: forbidden }
+      - { persona: finance_admin, operation: adminListLedgerTransactions, query: { occurred_from: "not-a-date" },
+          expect: 422, code: validation_failed }
+      - { persona: finance_admin, operation: adminListLedgerTransactions,
+          query: { kind: payment_received, ref_id: "{{fixture:ledger_payment_a}}" }, expect: 200 }

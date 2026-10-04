@@ -19,8 +19,10 @@ import (
 // passes that org to every later call (06 H-38). event_forms and
 // event_staff copy org_id from their events row, never from the caller:
 // InsertForm and InsertStaff fail with ErrNotFound when the event is not
-// the given org's.
+// the given org's. Registrations and tickets (BE-028) are RegistrationStore.
 type Store interface {
+	RegistrationStore
+
 	// InsertEvent writes a new event and returns it as stored (created_at
 	// and updated_at from the database). It reports false and writes
 	// nothing when the slug is taken in the org (ON CONFLICT DO NOTHING:

@@ -31,8 +31,9 @@ var (
 // matrixFixtures seeds the events of the matrix (03 §7.3; fixtures/
 // events.yaml): kind event (org, status, visibility, university, form:
 // published gives the form a published version and a newer draft,
-// checkin) and kind staff
-// (event, persona or helper user, role). Every event is dated
+// checkin, capacity, waitlist, mode), kind registration (event, persona
+// user, status; BE-028) and kind staff (event, persona or helper user,
+// role). Every event is dated
 // matrixOrgTime, so an untouched event's ETag is "1hmhuo3hji000" (the
 // If-Match the matrix files send).
 func (w *eventsWiring) matrixFixtures(fx *matrixFixtures) error {
@@ -61,14 +62,22 @@ func (w *eventsWiring) matrixFixtures(fx *matrixFixtures) error {
 			}
 			str := func(k string) string { s, _ := f.Fields[k].(string); return s }
 			checkin, _ := f.Fields["checkin"].(bool)
+			waitlist, _ := f.Fields["waitlist"].(bool)
+			mode := events.ModeAuto
+			if str("mode") != "" {
+				mode = events.RegistrationMode(str("mode"))
+			}
 			t := matrixOrgTime
 			e := events.Event{
 				ID: id, OrgID: org, CreatedBy: creator, Title: "Matris " + f.Name, Slug: matrixSlug(f.Name),
 				Category: events.CategoryWorkshop, Format: events.FormatInPerson, City: new("İstanbul"),
 				StartsAt: matrixEventStart, EndsAt: matrixEventStart.Add(2 * time.Hour),
 				Visibility: events.Visibility(str("visibility")), Status: events.Status(str("status")),
-				RequiresRegistration: true, RegistrationMode: events.ModeAuto, CheckinEnabled: checkin,
+				RequiresRegistration: true, RegistrationMode: mode, CheckinEnabled: checkin, WaitlistEnabled: waitlist,
 				CreatedAt: t, UpdatedAt: t,
+			}
+			if n, ok := f.Fields["capacity"].(int); ok {
+				e.Capacity = &n
 			}
 			if e.Status != events.StatusDraft {
 				e.PublishedAt = &t
@@ -115,6 +124,36 @@ func (w *eventsWiring) matrixFixtures(fx *matrixFixtures) error {
 			if _, err := mem.InsertStaff(ctx, events.Staff{EventID: ev, UserID: user, OrgID: e.OrgID,
 				Role: events.StaffRole(role), InvitedBy: creator}); err != nil {
 				return fmt.Errorf("staff %s: %w", f.Name, err)
+			}
+		case "registration":
+			ev, err := fx.Ref(f, "event")
+			if err != nil {
+				return err
+			}
+			user, err := fx.Ref(f, "user")
+			if err != nil {
+				return err
+			}
+			e, err := mem.GetEvent(ctx, ev)
+			if err != nil {
+				return fmt.Errorf("registration %s: %w", f.Name, err)
+			}
+			st, _ := f.Fields["status"].(string)
+			t := matrixOrgTime
+			r := events.Registration{ID: id, EventID: ev, OrgID: e.OrgID, UserID: user, Status: events.RegStatus(st),
+				Source: events.SourceWeb, Answers: events.JSON(`{"motivation":"Matris cevabı"}`),
+				AnswersPurgeAt: e.EndsAt.Add(90 * 24 * time.Hour), CreatedAt: t, UpdatedAt: t}
+			if v, ok := mem.Form(ev); ok && v.CurrentVersionID != nil {
+				r.FormVersionID = v.CurrentVersionID
+			}
+			switch r.Status {
+			case events.RegConfirmed:
+				r.ConfirmedAt = &t
+			case events.RegWaitlisted:
+				r.WaitlistedAt = &t
+			}
+			if err := mem.PutRegistration(r); err != nil {
+				return fmt.Errorf("registration %s: %w", f.Name, err)
 			}
 		default:
 			return fmt.Errorf("fixture %s: unknown kind %q", f.Name, f.Kind)

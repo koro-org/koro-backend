@@ -1,4 +1,4 @@
-# Authz matrix of the events module (03 §5.6, 04 §2.6; BE-024, BE-026). 19 operations × 18 personas.
+# Authz matrix of the events module (03 §5.6, 04 §2.6; BE-024, BE-026, BE-028). 27 operations × 18 personas.
 # Event visibility (03 §3.6): published public events are everyone's; a members event is its org's
 # members', its staff's and every platform role's; a university event is also the verified students'
 # of that university; a draft is its organiser's club_admin / university_rep's and every platform
@@ -12,6 +12,11 @@
 # are the organiser's management sub-surface: the org's other members 403, everyone else 404 (another
 # org's form is 404, 03 §3.6), platform roles 403 (k-po: no persona is in the platform org). Lint rules
 # are the admin surface: dpo and platform_admin; every other signed-in user 403.
+# BE-028 registrations: verified students register (stu, min, clm, cla, stf; the others 403 — usr with
+# students.verification_required); a university event only its university's students. /me/registrations
+# are O (anyone else's 404). The organiser's list/read/decide/cancel are the event's sub-surface (03 §7.6):
+# managers 200, others who see the event 403; support and platform_admin read by break-glass only
+# (X-Koro-Access-Reason; without it 403) and never a sensitive club's event (Y2: 404).
 version: 1
 groups:
   # signed-in users without a membership in club_a (and no platform role).
@@ -48,6 +53,16 @@ groups:
   # signed-in users who do not see event_sensitive (club_member is a member of club_sensitive).
   ev_sensitive_hidden: [user_unverified, student, student_minor, club_admin, other_club_admin, event_staff,
                         university_rep, company_member, company_admin, other_company_member]
+  # verified students (they register for an event they see).
+  ev_registrants: [student, student_minor, club_member, club_admin, other_club_admin, event_staff]
+  # signed-in users who see a public event but hold no student verification (no registration grant).
+  ev_not_students: [user_unverified, university_rep, company_member, company_admin, other_company_member]
+  # signed-in users other than the persona student (owner of reg_student and reg_pending).
+  ev_not_owner: [user_unverified, student_minor, club_member, club_admin, other_club_admin, event_staff, university_rep,
+                 company_member, company_admin, other_company_member, moderator, support, dpo, platform_admin,
+                 finance_admin, talent_auditor]
+  # platform roles without break-glass (support and platform_admin have it).
+  ev_no_bg_staff: [moderator, dpo, finance_admin, talent_auditor]
 
 operations:
   listEvents:
@@ -495,15 +510,221 @@ operations:
           platform_admin: 404
           "@ev_lint_denied_staff": 403
 
+  createRegistration:
+    method: POST
+    path: /api/v1/events/{event_id}/registrations
+    action: events.registration.create
+    idempotency: required
+    path_params: { event_id: event_a }
+    body: bodies/events/create_registration.json
+    expect:
+      anonymous: 401
+      "@ev_registrants": 201
+      "@ev_not_students": 403
+      "@platform_staff": 403
+    variants:
+      - name: members_event
+        path_params: { event_id: event_a_members }
+        expect:
+          anonymous: 401
+          "@ev_members_hidden": 404
+          club_member: 201
+          club_admin: 201
+          event_staff: 201
+          "@platform_staff": 403
+      - name: university_event
+        path_params: { event_id: event_uni_a }
+        note: student already holds reg_uni (409); the other students of uni_a register
+        expect:
+          anonymous: 401
+          "@ev_uni_hidden": 404
+          student: 409
+          student_minor: 201
+          club_member: 201
+          club_admin: 201
+          event_staff: 201
+          university_rep: 403
+          "@platform_staff": 403
+
+  listMyRegistrations:
+    method: GET
+    path: /api/v1/me/registrations
+    action: events.registration.list_own
+    expect:
+      anonymous: 401
+      "@signed_in": 200
+    variants:
+      - name: upcoming_confirmed
+        query: { upcoming: "true", status: confirmed }
+        expect:
+          anonymous: 401
+          "@signed_in": 200
+
+  getMyRegistration:
+    method: GET
+    path: /api/v1/me/registrations/{registration_id}
+    action: events.registration.read_own
+    path_params: { registration_id: reg_student }
+    expect:
+      anonymous: 401
+      student: 200
+      "@ev_not_owner": 404
+    variants:
+      - name: unknown_registration
+        path_params: { registration_id: "literal:00000000-0000-7000-8000-0000000000cc" }
+        expect:
+          anonymous: 401
+          "@signed_in": 404
+
+  cancelMyRegistration:
+    method: POST
+    path: /api/v1/me/registrations/{registration_id}/cancel
+    action: events.registration.cancel_own
+    path_params: { registration_id: reg_student }
+    body: bodies/events/cancel_my_registration.json
+    expect:
+      anonymous: 401
+      student: 200
+      "@ev_not_owner": 404
+    variants:
+      - name: pending_application
+        path_params: { registration_id: reg_pending }
+        note: a pending application is withdrawn
+        expect:
+          anonymous: 401
+          student: 200
+          "@ev_not_owner": 404
+
+  listEventRegistrations:
+    method: GET
+    path: /api/v1/events/{event_id}/registrations
+    action: events.registration.list
+    path_params: { event_id: event_reg }
+    expect:
+      anonymous: 401
+      "@ev_not_manager_a": 403
+      club_admin: 200
+      "@platform_staff": 403
+    variants:
+      - name: break_glass
+        headers: { X-Koro-Access-Reason: "Destek talebi 4711: kayıt sorunu inceleniyor" }
+        expect:
+          anonymous: 401
+          "@ev_not_manager_a": 403
+          club_admin: 200
+          support: 200
+          platform_admin: 200
+          "@ev_no_bg_staff": 403
+      - name: members_event
+        path_params: { event_id: event_a_members }
+        expect:
+          anonymous: 401
+          "@ev_members_hidden": 404
+          club_member: 403
+          club_admin: 200
+          event_staff: 403
+          "@platform_staff": 403
+      - name: university_event
+        path_params: { event_id: event_uni_a }
+        expect:
+          anonymous: 401
+          "@ev_uni_hidden": 404
+          "@ev_uni_a_students": 403
+          university_rep: 200
+          "@platform_staff": 403
+      - name: sensitive_club_break_glass
+        path_params: { event_id: event_sensitive }
+        headers: { X-Koro-Access-Reason: "Destek talebi 4711: kayıt sorunu inceleniyor" }
+        note: Y2 — break-glass never reaches a sensitive club's event (only club_sensitive's admin, a helper, lists)
+        expect:
+          anonymous: 401
+          "@ev_sensitive_hidden": 404
+          club_member: 403
+          support: 404
+          platform_admin: 404
+          "@ev_no_bg_staff": 403
+
+  getEventRegistration:
+    method: GET
+    path: /api/v1/events/{event_id}/registrations/{registration_id}
+    action: events.registration.read
+    path_params: { event_id: event_reg, registration_id: reg_student }
+    expect:
+      anonymous: 401
+      "@ev_not_manager_a": 403
+      club_admin: 200
+      "@platform_staff": 403
+    variants:
+      - name: break_glass
+        headers: { X-Koro-Access-Reason: "Destek talebi 4711: kayıt sorunu inceleniyor" }
+        expect:
+          anonymous: 401
+          "@ev_not_manager_a": 403
+          club_admin: 200
+          support: 200
+          platform_admin: 200
+          "@ev_no_bg_staff": 403
+      - name: registration_of_another_event
+        path_params: { event_id: event_reg, registration_id: reg_pending }
+        note: 06 H-38 — a registration is read through its own event only
+        expect:
+          anonymous: 401
+          "@ev_not_manager_a": 403
+          club_admin: 404
+          "@platform_staff": 403
+      - name: university_event
+        path_params: { event_id: event_uni_a, registration_id: reg_uni }
+        expect:
+          anonymous: 401
+          "@ev_uni_hidden": 404
+          "@ev_uni_a_students": 403
+          university_rep: 200
+          "@platform_staff": 403
+      - name: sensitive_club_break_glass
+        path_params: { event_id: event_sensitive, registration_id: reg_sensitive }
+        headers: { X-Koro-Access-Reason: "Destek talebi 4711: kayıt sorunu inceleniyor" }
+        expect:
+          anonymous: 401
+          "@ev_sensitive_hidden": 404
+          club_member: 403
+          support: 404
+          platform_admin: 404
+          "@ev_no_bg_staff": 403
+
+  decideEventRegistration:
+    method: POST
+    path: /api/v1/events/{event_id}/registrations/{registration_id}/decision
+    action: events.registration.decide
+    path_params: { event_id: event_manual, registration_id: reg_pending }
+    body: bodies/events/decide_registration.json
+    expect:
+      anonymous: 401
+      "@ev_not_manager_a": 403
+      club_admin: 200
+      "@platform_staff": 403
+
+  cancelEventRegistration:
+    method: POST
+    path: /api/v1/events/{event_id}/registrations/{registration_id}/cancel
+    action: events.registration.cancel
+    path_params: { event_id: event_reg, registration_id: reg_student }
+    body: bodies/events/cancel_registration.json
+    expect:
+      anonymous: 401
+      "@ev_not_manager_a": 403
+      club_admin: 200
+      "@platform_staff": 403
+    variants:
+      - name: university_event
+        path_params: { event_id: event_uni_a, registration_id: reg_uni }
+        expect:
+          anonymous: 401
+          "@ev_uni_hidden": 404
+          "@ev_uni_a_students": 403
+          university_rep: 200
+          "@platform_staff": 403
+
 pending_actions:
-  - events.registration.create       # BE-028
-  - events.registration.list_own     # BE-028
-  - events.registration.read_own     # BE-028
-  - events.registration.cancel_own   # BE-028
-  - events.registration.list         # BE-028
-  - events.registration.read         # BE-028
-  - events.registration.decide       # BE-028
-  - events.registration.cancel       # BE-028
   - events.ticket.read_own           # BE-031
   - events.ticket.resend             # BE-031
   - events.ticket.reissue            # BE-031

@@ -16,3 +16,13 @@ func LintSchema(s FormSchema, rules []LintRule) LintReport {
 	}
 	return lintSchema(s, compiled)
 }
+
+// Registration DTO mappings (BE-028).
+var (
+	ToSelfDTO = toSelfDTO
+	ToOrgDTO  = toOrgDTO
+)
+
+// RegistrationTemplates are the in-app templates of the registration
+// notices (BE-028).
+var RegistrationTemplates = []string{templateSubmitted, templateReceived, templateWaitlisted, templateRejected, templateCancelled}

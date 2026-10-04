@@ -46,14 +46,22 @@ type EventPage struct {
 
 // EventView is an event as one caller may see it. Manager is true when the
 // caller manages the event (events.event.update): only then does the DTO
-// carry online_url, the cover file ID and the sensitive category flag (03
-// §5.6: online_url for approved attendees and managers; attendees: BE-028).
+// carry the cover file ID and the sensitive category flag. online_url is
+// for the managers and the approved attendees (03 §5.6): MyRegistration is
+// the caller's live registration (getEvent only, BE-028), confirmed or
+// checked in makes an attendee.
 type EventView struct {
-	Event    Event
-	Org      orgs.OrgSummary
-	ETag     string
-	CoverURL string
-	Manager  bool
+	Event          Event
+	Org            orgs.OrgSummary
+	ETag           string
+	CoverURL       string
+	Manager        bool
+	MyRegistration *Registration
+}
+
+// Attendee reports whether the caller holds a seat of the event.
+func (v EventView) Attendee() bool {
+	return v.MyRegistration != nil && v.MyRegistration.Status.Counted()
 }
 
 // StaffView is one staff member as the staff list shows it (04 §2.6, §E.4):
@@ -101,7 +109,11 @@ func (s *service) GetEvent(ctx context.Context, a authz.Actor, id uuid.UUID) (Ev
 		return EventView{}, err
 	}
 	manager := authz.Can(ctx, a, authz.EventsEventUpdate, res) == nil
-	return s.view(ctx, e, o, manager), nil
+	v := s.view(ctx, e, o, manager)
+	if v.MyRegistration, err = s.myRegistration(ctx, a, e); err != nil {
+		return EventView{}, err
+	}
+	return v, nil
 }
 
 // ListEvents implements Service. Only published events the caller may see

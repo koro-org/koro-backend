@@ -187,6 +187,9 @@ func (s *service) UpdateEvent(ctx context.Context, a authz.Actor, id uuid.UUID, 
 				return err
 			}
 		}
+		if err := s.followRegistrations(ctx, e, out, ap.changed); err != nil {
+			return err
+		}
 		return s.d.Audit.Log(ctx, auditEvent(a, authz.EventsEventUpdate, eventAggType, e.ID, e.OrgID, "",
 			map[string]any{"fields": ap.changed}))
 	})
@@ -194,6 +197,31 @@ func (s *service) UpdateEvent(ctx context.Context, a authz.Actor, id uuid.UUID, 
 		return EventView{}, err
 	}
 	return s.view(ctx, out, org, true), nil
+}
+
+// followRegistrations keeps the registrations in step with an edited
+// event (BE-028, in the update's transaction under the event row lock): a
+// new end moves the answer purge dates (02 §11.6), and a raised or removed
+// capacity of a published event gives the new seats to the waiting list.
+func (s *service) followRegistrations(ctx context.Context, before, after Event, changed []string) error {
+	if contains(changed, "ends_at") {
+		answers, sens, err := s.purgeDates(ctx, after.EndsAt)
+		if err != nil {
+			return err
+		}
+		if err := s.d.Store.ShiftPurgeDates(ctx, after.OrgID, after.ID, answers, sens); err != nil {
+			return err
+		}
+	}
+	raised := before.Capacity != nil && (after.Capacity == nil || *after.Capacity > *before.Capacity)
+	if !raised || after.Status != StatusPublished {
+		return nil
+	}
+	sens, err := s.sensitive(ctx, after)
+	if err != nil {
+		return err
+	}
+	return s.promote(ctx, after, sens, s.now())
 }
 
 // scheduleChanges keeps the schedule and venue fields of changed.

@@ -5,6 +5,10 @@
 # published as version 2. created_at/updated_at of events and form drafts are 2026-10-01T00:00:00Z: an
 # untouched event's and form draft's ETag is "1hmhuo3hji000". Staff: persona event_staff scans event_a,
 # helper event_manager_a manages it (03 §7.3). Lint rules: the 19 seeded rules of migration 000060.
+# BE-028: an event may set capacity, waitlist and mode (manual); kind registration (event, user, status)
+# is stored as is (a confirmed one holds its seat, no ticket). event_reg carries the registrations of the
+# organiser's matrix rows (student's confirmed reg_student), event_manual the pending application,
+# event_full a full event without a waiting list.
 version: 1
 fixtures:
   event_a: { kind: event, org: club_a, status: published, visibility: public, form: published, checkin: true }
@@ -18,3 +22,11 @@ fixtures:
   staff_scanner_a: { kind: staff, event: event_a, user: event_staff, role: scanner }
   staff_manager_a: { kind: staff, event: event_a, user: event_manager_a, role: manager }
   staff_scanner_members: { kind: staff, event: event_a_members, user: event_staff, role: scanner }
+  event_reg: { kind: event, org: club_a, status: published, visibility: public, form: published, capacity: 10, waitlist: true }
+  event_manual: { kind: event, org: club_a, status: published, visibility: public, form: published, mode: manual }
+  event_full: { kind: event, org: club_a, status: published, visibility: public, form: published, capacity: 1 }
+  reg_student: { kind: registration, event: event_reg, user: student, status: confirmed }
+  reg_pending: { kind: registration, event: event_manual, user: student, status: pending }
+  reg_full: { kind: registration, event: event_full, user: student, status: confirmed }
+  reg_uni: { kind: registration, event: event_uni_a, user: student, status: confirmed }
+  reg_sensitive: { kind: registration, event: event_sensitive, user: club_member, status: confirmed }

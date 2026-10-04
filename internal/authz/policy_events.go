@@ -31,6 +31,29 @@ const TypeEventCatalog = "event_catalog"
 //	events.form.publish      S: club_admin, university_rep, career_staff; platform_admin k-po
 //	events.lint_rule.manage  dpo, platform_admin (admin surface; k-mfa)
 //
+// and by BE-028 for the registrations:
+//
+//	events.registration.create      verified students (stu, min, clm, cla, stf ✓; usr k-uv: the
+//	                                  service answers 403 students.verification_required); a
+//	                                  university event only for its university's students
+//	events.registration.list_own,   O for every signed-in user (registration with OwnerUserID)
+//	  read_own, cancel_own
+//	events.registration.list, read  S: club_admin, university_rep, career_staff (k14); support and
+//	                                  platform_admin B; platform_admin k-po
+//	events.registration.decide,     S: club_admin, university_rep, career_staff; platform_admin k-po
+//	  cancel
+//
+// The organiser's registration actions (list, read, decide, cancel) take
+// the event resource: the registrations are the event's sub-surface (03
+// §7.6), so a visible event without the role is 403 and an invisible one
+// 404 before any registration is read (no registration ID is probed). B
+// (03 §6.3): support and platform_admin outside the platform org need
+// Attrs access_reason (10–500 characters; 403
+// authz.break_glass_reason_required) and never reach a sensitive event's
+// registrations (Y2 → 404). The registrant's own actions take the
+// registration resource (OwnerUserID = the registrant; the service reads
+// it by owner, a foreign ID is 404 before authz).
+//
 // Resources (03 §3.5): event (OrgID = the organiser; Attrs status,
 // visibility, visibility_university_id, sensitive, event_staff_role),
 // event_form (the same Attrs plus event_status: the form is a sub-surface
@@ -79,6 +102,8 @@ func eventsPolicy() Policy {
 				return r.Type == TypeEventForm && eventVisibleAt(a, r, r.Attr("event_status")) && OrgSurfaceVisible(a, r.OrgID)
 			case EventsLintRuleManage:
 				return r.Type == TypeAdminSurface && AdminSurfaceVisible(a)
+			case EventsRegistrationListOwn, EventsRegistrationReadOwn, EventsRegistrationCancelOwn:
+				return r.Type == TypeRegistration && a.Owns(r)
 			}
 			return r.Type == TypeEvent && eventVisible(a, r)
 		},
@@ -100,8 +125,25 @@ func eventsPolicy() Policy {
 					gs = append(gs, Grant{Role: RolePlatformAdmin})
 				}
 				return gs
+			case EventsRegistrationCreate:
+				return registrantGrants(a, r)
+			case EventsRegistrationListOwn, EventsRegistrationReadOwn, EventsRegistrationCancelOwn:
+				return []Grant{{Role: RoleSelf}}
+			case EventsRegistrationList, EventsRegistrationRead:
+				gs := append(eventOrgGrants(a, r.OrgID),
+					Grant{Role: RoleSupport, BreakGlass: true}, Grant{Role: RolePlatformAdmin, BreakGlass: true})
+				if platformOrg(a, r.OrgID) { // k-po
+					gs = append(gs, Grant{Role: RolePlatformAdmin})
+				}
+				return gs
+			case EventsRegistrationDecide, EventsRegistrationCancel:
+				gs := eventOrgGrants(a, r.OrgID)
+				if platformOrg(a, r.OrgID) { // k-po
+					gs = append(gs, Grant{Role: RolePlatformAdmin})
+				}
+				return gs
 			}
-			return nil // the actions of BE-028, BE-031, BE-050: not written yet
+			return nil // the actions of BE-031, BE-050: not written yet
 		},
 	}
 }
@@ -125,6 +167,23 @@ func eventOrgGrants(a Actor, orgID *uuid.UUID) []Grant {
 		}
 	}
 	return gs
+}
+
+// registrantGrants is events.registration.create (03 §5.6): a verified
+// student, adult or minor (T-22: a minor may register; the service hides
+// the sponsor consent field); for a university event only a student of
+// that university (BE-028 reading of "üniversite görünürlüğünde
+// öğrencinin üniversitesi eşleşmeli": the organiser's members and the
+// staff see the event but register only as its university's students).
+func registrantGrants(a Actor, r Resource) []Grant {
+	if !a.IsVerifiedStudent() {
+		return nil // usr: k-uv (403 students.verification_required by the service)
+	}
+	if r.Attr("visibility") == "university" &&
+		(a.UniversityID == nil || a.UniversityID.String() != r.Attr("visibility_university_id")) {
+		return nil
+	}
+	return []Grant{{Role: RoleStudent}, {Role: RoleStudentMinor}}
 }
 
 // eventVisible is 03 §3.6 "Etkinlik".

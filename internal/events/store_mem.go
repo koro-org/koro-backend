@@ -30,11 +30,13 @@ var slugRe = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 type MemStore struct {
 	mu       sync.Mutex
 	events   map[uuid.UUID]Event
-	forms    map[uuid.UUID]Form        // by event id
-	versions map[uuid.UUID]FormVersion // by id; never changed once written
-	rules    []LintRule                // insertion order; seeded with DefaultLintRules
-	reg      map[uuid.UUID]bool        // events with a registration (MarkRegistered; BE-028)
-	staff    []Staff                   // insertion order
+	forms    map[uuid.UUID]Form         // by event id
+	versions map[uuid.UUID]FormVersion  // by id; never changed once written
+	rules    []LintRule                 // insertion order; seeded with DefaultLintRules
+	reg      map[uuid.UUID]bool         // events marked as having a registration (MarkRegistered; form tests)
+	staff    []Staff                    // insertion order
+	regs     map[uuid.UUID]Registration // by id (BE-028)
+	tickets  []Ticket                   // insertion order (BE-028)
 	// now stamps created_at/updated_at like the column defaults and the
 	// touch trigger; updated_at always moves forward (two writes at the same
 	// fake instant still change the ETag, as two transactions do).
@@ -48,7 +50,7 @@ var _ Store = (*MemStore)(nil)
 func NewMemStore(now func() time.Time) *MemStore {
 	s := &MemStore{
 		events: map[uuid.UUID]Event{}, forms: map[uuid.UUID]Form{}, versions: map[uuid.UUID]FormVersion{},
-		reg: map[uuid.UUID]bool{}, now: now,
+		reg: map[uuid.UUID]bool{}, regs: map[uuid.UUID]Registration{}, now: now,
 	}
 	seeded := s.stamp(time.Time{})
 	for _, r := range DefaultLintRules() {

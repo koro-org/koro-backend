@@ -288,6 +288,18 @@
     "type": "urn:koro:problem:entitlements.usage_released"
   },
   {
+    "code": "events.already_registered",
+    "status": 409,
+    "title": "You are already registered for this event",
+    "type": "urn:koro:problem:events.already_registered"
+  },
+  {
+    "code": "events.capacity_full",
+    "status": 409,
+    "title": "The event is full",
+    "type": "urn:koro:problem:events.capacity_full"
+  },
+  {
     "code": "events.empty_patch",
     "status": 422,
     "title": "Nothing to update",
@@ -318,6 +330,12 @@
     "type": "urn:koro:problem:events.form_unchanged"
   },
   {
+    "code": "events.form_version_stale",
+    "status": 409,
+    "title": "The registration form has changed; reload it",
+    "type": "urn:koro:problem:events.form_version_stale"
+  },
+  {
     "code": "events.invalid_state",
     "status": 409,
     "title": "Event status does not allow this change",
@@ -328,6 +346,12 @@
     "status": 422,
     "title": "A reason is required to publish a form with sensitive or identifier fields",
     "type": "urn:koro:problem:events.lint_override_required"
+  },
+  {
+    "code": "events.registration_closed",
+    "status": 409,
+    "title": "Registration for this event is closed",
+    "type": "urn:koro:problem:events.registration_closed"
   },
   {
     "code": "events.slug_taken",

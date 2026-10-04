@@ -244,3 +244,144 @@ func TestEventsPolicy_EdgeCases(t *testing.T) {
 	wantErr(t, authz.Can(ctx, persona(t, "club_admin"), authz.EventsEventUpdate,
 		authz.Resource{Type: authz.TypeEvent, OrgID: &org, Attrs: map[string]string{authz.AttrStatus: "draft"}}), authz.ErrForbidden, true)
 }
+
+// withReason adds a break-glass reason to a resource builder.
+func withReason(res func(authztest.Persona) authz.Resource, reason string) func(authztest.Persona) authz.Resource {
+	return func(p authztest.Persona) authz.Resource {
+		r := res(p)
+		r.Attrs[authz.AttrAccessReason] = reason
+		return r
+	}
+}
+
+// ownRegistration is the registration resource of persona owner's own
+// registration of event_a (BE-028).
+func ownRegistration(owner string) func(authztest.Persona) authz.Resource {
+	return func(authztest.Persona) authz.Resource {
+		org, u := authztest.ID("club_a"), authztest.ID(owner)
+		return authz.Resource{Type: authz.TypeRegistration, ID: authztest.ID("reg_" + owner), OrgID: &org, OwnerUserID: &u,
+			Attrs: map[string]string{authz.AttrStatus: "confirmed", authz.AttrEventStaffRole: "none"}}
+	}
+}
+
+// TestEventsPolicy_Registrations pins 03 §5.6 for BE-028's 8 actions: only
+// verified students register (a university event: its students); the own
+// actions are O; the organiser's list/read/decide/cancel are S on the
+// event's sub-surface, list/read also by break-glass (support,
+// platform_admin) except on a sensitive event (Y2 → 404).
+func TestEventsPolicy_Registrations(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	fb, nf, bg := authz.ErrForbidden, authz.ErrNotFound, authz.ErrBreakGlassReason
+	all := func(err error) map[string]error {
+		m := map[string]error{}
+		for _, n := range authztest.PersonaNames {
+			m[n] = err
+		}
+		return m
+	}
+	with := func(base map[string]error, over map[string]error) map[string]error {
+		for k, v := range over {
+			base[k] = v
+		}
+		return base
+	}
+	eventA := eventRes("club_a", "published", "public", "", staffOfEventA)
+	members := eventRes("club_a", "published", "members", "", staffOfEventA)
+	uniEvent := eventRes("uni_a", "published", "university", "uni_a", nil)
+	sensitive := func(p authztest.Persona) authz.Resource {
+		r := eventRes("club_sensitive", "published", "public", "", nil)(p)
+		r.Attrs[authz.AttrSensitive] = "true"
+		return r
+	}
+	students := map[string]error{"student": nil, "student_minor": nil, "club_member": nil, "club_admin": nil,
+		"other_club_admin": nil, "event_staff": nil}
+	hiddenMembers := map[string]error{"user_unverified": nf, "student": nf, "student_minor": nf, "other_club_admin": nf,
+		"university_rep": nf, "company_member": nf, "company_admin": nf, "other_company_member": nf}
+	hiddenUni := map[string]error{"user_unverified": nf, "other_club_admin": nf, "company_member": nf, "company_admin": nf,
+		"other_company_member": nf}
+	why := "Destek talebi 4711: kayıt sorunu inceleniyor"
+	for _, tc := range []struct {
+		name string
+		act  authz.Action
+		res  func(authztest.Persona) authz.Resource
+		want map[string]error
+	}{
+		{"create public", authz.EventsRegistrationCreate, eventA, with(all(fb), students)},
+		{"create members", authz.EventsRegistrationCreate, members,
+			with(with(all(fb), hiddenMembers), map[string]error{"club_member": nil, "club_admin": nil, "event_staff": nil})},
+		{"create university", authz.EventsRegistrationCreate, uniEvent,
+			with(with(all(fb), hiddenUni), map[string]error{"student": nil, "student_minor": nil, "club_member": nil,
+				"club_admin": nil, "event_staff": nil})},
+		{"list_own", authz.EventsRegistrationListOwn, ownRegistration("student"),
+			with(all(nf), map[string]error{"anonymous": fb, "student": nil})},
+		{"read_own", authz.EventsRegistrationReadOwn, ownRegistration("club_member"),
+			with(all(nf), map[string]error{"anonymous": fb, "club_member": nil})},
+		{"cancel_own", authz.EventsRegistrationCancelOwn, ownRegistration("company_admin"),
+			with(all(nf), map[string]error{"anonymous": fb, "company_admin": nil})},
+		{"list public", authz.EventsRegistrationList, eventA,
+			with(all(fb), map[string]error{"club_admin": nil, "support": bg, "platform_admin": bg})},
+		{"list public with a reason", authz.EventsRegistrationList, withReason(eventA, why),
+			with(all(fb), map[string]error{"club_admin": nil, "support": nil, "platform_admin": nil})},
+		{"read public with a short reason", authz.EventsRegistrationRead, withReason(eventA, "kısa"),
+			with(all(fb), map[string]error{"club_admin": nil, "support": bg, "platform_admin": bg})},
+		{"read members", authz.EventsRegistrationRead, withReason(members, why),
+			with(with(all(fb), hiddenMembers), map[string]error{"anonymous": fb, "club_admin": nil, "support": nil,
+				"platform_admin": nil})},
+		{"list university", authz.EventsRegistrationList, uniEvent,
+			with(with(all(fb), hiddenUni), map[string]error{"university_rep": nil, "support": bg, "platform_admin": bg})},
+		{"list sensitive by break-glass", authz.EventsRegistrationList, withReason(sensitive, why),
+			with(all(fb), map[string]error{"support": nf, "platform_admin": nf})},
+		{"decide public", authz.EventsRegistrationDecide, eventA, with(all(fb), map[string]error{"club_admin": nil})},
+		{"cancel members", authz.EventsRegistrationCancel, members,
+			with(with(all(fb), hiddenMembers), map[string]error{"club_admin": nil})},
+		{"cancel university", authz.EventsRegistrationCancel, uniEvent,
+			with(with(all(fb), hiddenUni), map[string]error{"university_rep": nil})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			for _, p := range authztest.Personas() {
+				want, ok := tc.want[p.Name]
+				if !ok {
+					t.Fatalf("no expectation for %s", p.Name)
+				}
+				t.Run(p.Name, func(t *testing.T) {
+					wantErr(t, authz.Can(ctx, p.Actor, tc.act, tc.res(p)), want, false)
+				})
+			}
+		})
+	}
+	p := authztest.Personas()[0]
+	// k-po: a platform_admin of the platform org manages its registrations
+	// without a reason.
+	pad := persona(t, "platform_admin")
+	pad.Memberships = append(pad.Memberships, authz.Membership{OrgID: authztest.ID("platform_org"), OrgKind: authz.OrgPlatform,
+		Role: authz.MemberStaff})
+	platformEvent := eventRes("platform_org", "published", "public", "", nil)
+	for _, act := range []authz.Action{authz.EventsRegistrationList, authz.EventsRegistrationRead,
+		authz.EventsRegistrationDecide, authz.EventsRegistrationCancel} {
+		wantErr(t, authz.Can(ctx, pad, act, platformEvent(p)), nil, false)
+	}
+	// career_staff decides its university's applications; a minor club
+	// admin is no club_admin (Y4) but registers as a student.
+	cs := authz.Actor{Kind: authz.KindUser, UserID: uuid.NewV7(),
+		Memberships: []authz.Membership{{OrgID: authztest.ID("uni_a"), OrgKind: authz.OrgUniversity, Role: authz.MemberCareerStaff}}}
+	wantErr(t, authz.Can(ctx, cs, authz.EventsRegistrationDecide, uniEvent(p)), nil, false)
+	minorAdmin := persona(t, "club_admin")
+	minorAdmin.IsMinor = true
+	wantErr(t, authz.Can(ctx, minorAdmin, authz.EventsRegistrationDecide, eventA(p)), authz.ErrForbidden, false)
+	wantErr(t, authz.Can(ctx, minorAdmin, authz.EventsRegistrationCreate, eventA(p)), nil, false)
+	// A student of another university who is a member of the organiser
+	// sees a university event but cannot register for it.
+	stranger := persona(t, "other_club_admin")
+	stranger.Memberships = append(stranger.Memberships, authz.Membership{OrgID: authztest.ID("uni_a"),
+		OrgKind: authz.OrgUniversity, Role: authz.MemberStaff})
+	wantErr(t, authz.Can(ctx, stranger, authz.EventsRegistrationCreate, uniEvent(p)), authz.ErrForbidden, false)
+	// support without MFA is refused before the reason (03 §3.2-5).
+	sup := persona(t, "support")
+	sup.MFAVerified = false
+	wantErr(t, authz.Can(ctx, sup, authz.EventsRegistrationList, withReason(eventA, why)(p)), authz.ErrMFARequired, false)
+	// A draft event's registrations are its managers' only.
+	draft := eventRes("club_a", "draft", "public", "", nil)
+	wantErr(t, authz.Can(ctx, persona(t, "student"), authz.EventsRegistrationCreate, draft(p)), authz.ErrNotFound, false)
+}

@@ -2,12 +2,16 @@ package main
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 	"uuid"
 
 	"koro/internal/events"
+	"koro/internal/platform/crypto/rewrap"
 	"koro/internal/platform/db"
+	"koro/internal/platform/domainevent"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/privacy"
 )
 
@@ -17,6 +21,7 @@ import (
 func (w *eventsWiring) useMemStore() {
 	w.tx = db.NopTx{}
 	w.newStore = func(c *container) events.Store { return events.NewMemStore(c.infra.clock.Now) }
+	w.sealer, w.tickets = testEnvelope(), testDeriver() // the shared test key and token deriver (identity's)
 }
 
 // TestWire_EventsProvidesServiceAndPrivacy pins what events binds in build:
@@ -52,5 +57,49 @@ func TestWire_EventsProvidesServiceAndPrivacy(t *testing.T) {
 	got, err := c.events.svc.Get(ctx, e.ID)
 	if err != nil || got.ID != e.ID || got.OrgID != e.OrgID || got.Sensitive {
 		t.Fatalf("Get = %+v, %v", got, err)
+	}
+}
+
+// TestWire_EventsRegistrationTasks pins what BE-028 adds: the outbox
+// subscriptions (event.cancelled and the registration notices), the jobs
+// of 01 §7 and the rewrap declaration of the sensitive answers.
+func TestWire_EventsRegistrationTasks(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	for topic, name := range map[string]string{
+		domainevent.TopicEventCancelled:         events.CancelRegistrationsTaskName,
+		domainevent.TopicRegistrationSubmitted:  events.NotifySubmittedTaskName,
+		domainevent.TopicRegistrationWaitlisted: events.NotifyWaitlistedTaskName,
+		domainevent.TopicRegistrationRejected:   events.NotifyRejectedTaskName,
+		domainevent.TopicRegistrationCancelled:  events.NotifyCancelledTaskName,
+	} {
+		if !slices.ContainsFunc(c.infra.subs.For(topic), func(s outbox.Subscription) bool { return s.Name == name }) {
+			t.Errorf("%s has no subscription %s", topic, name)
+		}
+	}
+	var jobs []string
+	for _, j := range c.infra.jobs.Jobs() {
+		if strings.HasPrefix(j.Name, "events.") {
+			if err := j.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			jobs = append(jobs, j.Name+" "+j.Cron+" "+j.Queue)
+		}
+	}
+	if want := []string{"events.waitlist_expire */15 * * * * default", "events.reconcile_counts 0 3 * * * low"}; !slices.Equal(jobs, want) {
+		t.Fatalf("events jobs = %q, want %q", jobs, want)
+	}
+	if !slices.ContainsFunc(c.keys.columns, func(col rewrap.Column) bool {
+		return col.Table == "event_registrations" && col.Column == "answers_sensitive_enc" &&
+			col.PurposePrefix == events.SensitiveAnswersPurposePrefix && col.PurposeColumn == "id"
+	}) {
+		t.Fatalf("rewrap columns = %+v", c.keys.columns)
+	}
+	// The registrations reader of students (T-241) answers from the built store.
+	if n, err := c.events.svc.CountInOrg(t.Context(), uuid.NewV7(), uuid.NewV7()); err != nil || n != 0 {
+		t.Fatalf("CountInOrg = %d, %v", n, err)
 	}
 }

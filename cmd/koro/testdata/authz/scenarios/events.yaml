@@ -1,4 +1,4 @@
-# Multi-step scenarios of the events module (03 §7.7; BE-024, BE-026).
+# Multi-step scenarios of the events module (03 §7.7; BE-024, BE-026, BE-028).
 version: 1
 scenarios:
   update_event_needs_if_match:
@@ -111,3 +111,53 @@ scenarios:
       - { persona: club_admin, operation: putEventFormDraft, body: bodies/events/put_form_draft_consent.json, expect: 200 }
       - { persona: club_admin, operation: publishEventForm, expect: 422, code: validation_failed }
       - { persona: club_admin, operation: getEventForm, expect: 200 }
+  break_glass:
+    note: >-
+      03 §7.7 "Break-glass" — support lists an event's registrations only with X-Koro-Access-Reason (403
+      authz.break_glass_reason_required without), the access is audited; a sensitive club's event is 404 even
+      with a reason (Y2)
+    steps:
+      - { persona: support, operation: listEventRegistrations, expect: 403, code: authz.break_glass_reason_required }
+      - { persona: support, operation: listEventRegistrations,
+          headers: { X-Koro-Access-Reason: "Destek talebi 4711: kayıt sorunu inceleniyor" }, expect: 200 }
+      - { persona: support, operation: listEventRegistrations, path_params: { event_id: event_sensitive },
+          headers: { X-Koro-Access-Reason: "Destek talebi 4711: kayıt sorunu inceleniyor" }, expect: 404, code: not_found }
+      - { persona: support, operation: getEventRegistration, expect: 403, code: authz.break_glass_reason_required }
+      - { persona: platform_admin, operation: getEventRegistration,
+          headers: { X-Koro-Access-Reason: "Destek talebi 4711: kayıt sorunu inceleniyor" }, expect: 200 }
+  registration_lifecycle:
+    note: >-
+      a verified student registers once (201, then 409 events.already_registered with a new key), reads and
+      cancels their own registration; nobody else sees it (404); a cancelled one is not cancelled twice (409)
+    steps:
+      - { persona: other_club_admin, operation: createRegistration, path_params: { event_id: event_reg }, expect: 201,
+          save: { new_reg: registration_id } }
+      - { persona: other_club_admin, operation: createRegistration, path_params: { event_id: event_reg }, expect: 409,
+          code: events.already_registered }
+      - { persona: other_club_admin, operation: getMyRegistration, path_params: { registration_id: new_reg }, expect: 200 }
+      - { persona: student, operation: getMyRegistration, path_params: { registration_id: new_reg }, expect: 404,
+          code: not_found }
+      - { persona: club_admin, operation: getEventRegistration, path_params: { event_id: event_reg, registration_id: new_reg },
+          expect: 200 }
+      - { persona: other_club_admin, operation: cancelMyRegistration, path_params: { registration_id: new_reg }, expect: 200 }
+      - { persona: other_club_admin, operation: cancelMyRegistration, path_params: { registration_id: new_reg }, expect: 409,
+          code: events.invalid_state }
+  registration_rules:
+    note: >-
+      k-uv — an account without a student verification gets 403 students.verification_required; invalid answers
+      are 422; a full event without a waiting list is 409 events.capacity_full
+    steps:
+      - { persona: user_unverified, operation: createRegistration, expect: 403, code: students.verification_required }
+      - { persona: student, operation: createRegistration, body: bodies/events/create_registration_invalid.json,
+          expect: 422, code: validation_failed }
+      - { persona: club_member, operation: createRegistration, path_params: { event_id: event_full }, expect: 409,
+          code: events.capacity_full }
+      - { persona: club_member, operation: createRegistration, expect: 201 }
+  manual_decision:
+    note: a pending application is decided once (200, then 409 events.invalid_state); the student sees it confirmed
+    steps:
+      - { persona: club_member, operation: decideEventRegistration, expect: 403, code: forbidden }
+      - { persona: club_admin, operation: decideEventRegistration, expect: 200 }
+      - { persona: club_admin, operation: decideEventRegistration, expect: 409, code: events.invalid_state }
+      - { persona: student, operation: getMyRegistration, path_params: { registration_id: reg_pending }, expect: 200 }
+

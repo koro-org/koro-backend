@@ -183,7 +183,18 @@ func (s *MemStore) HasRegistrations(_ context.Context, orgID, eventID uuid.UUID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e, ok := s.events[eventID]
-	return ok && e.OrgID == orgID && s.reg[eventID], nil
+	if !ok || e.OrgID != orgID {
+		return false, nil
+	}
+	if s.reg[eventID] {
+		return true, nil
+	}
+	for _, r := range s.regs {
+		if r.EventID == eventID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // checkLintRule applies the CHECKs of form_lint_rules (000059).

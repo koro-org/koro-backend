@@ -68,6 +68,38 @@
 //     it, and a minor never sees a minor-restricted consent field (03 k12).
 //   - Isolation: the form, its draft and its versions take event_id and
 //     org_id from the event row (06 H-38); another org's form draft is 404.
+//
+// BE-028 adds the registrations (01 §6.3, 02 §11.6–11.7, 04 §E.2, §E.6):
+//
+//   - Who registers (03 §5.6, T-54, T-22): verified students who see the
+//     event (a university event: its university's students); an account
+//     without a student verification gets 403
+//     students.verification_required; a minor answers the form without the
+//     sponsor consent field (ForReader).
+//   - The chain, in one transaction with the Idempotency-Key (06 H-5): the
+//     conditional seat UPDATE (confirmed_count + 1 while below the
+//     capacity; no interleaving exceeds it, proven by the concurrency test
+//     in memory and PostgreSQL) → the registration → its ticket (only the
+//     SHA-256 of the derived token; the QR and the e-mail are BE-031's) →
+//     consent.Recorder for the consent fields answered yes → audit →
+//     outbox. auto mode: confirmed, else waitlisted (open list, event not
+//     started) or 409 events.capacity_full; manual mode: pending, then the
+//     organiser decides (confirmed / waitlisted / rejected).
+//   - Answers: validated with ValidateAnswers against the current version
+//     (an older version: 409 events.form_version_stale); warn_special
+//     answers are envelope encrypted (answers_sensitive_enc, purpose
+//     event_answers_sensitive:<id>), never in a list, opened only for the
+//     owner and the organiser's managers, every such read audited.
+//   - Cancellation and the waiting list: a confirmed registration released
+//     by its owner (until cancel_deadline_at), the organiser, the system
+//     (event.cancelled) or the erasure gives its seat to the first
+//     waitlisted one (FOR UPDATE SKIP LOCKED, FIFO) in the same
+//     transaction; promotion is idempotent (a seat by the conditional
+//     UPDATE, a waiting row). Jobs: events.waitlist_expire,
+//     events.reconcile_counts. Lock order: the events row, then
+//     registrations.
+//   - The organiser's reads are the event's sub-surface (03 §7.6), support
+//     and platform_admin read by break-glass only, never a sensitive event.
 package events
 
 import (
@@ -93,11 +125,24 @@ type Events interface {
 	Get(ctx context.Context, eventID uuid.UUID) (EventSummary, error)
 }
 
+// Registrations is the registration read contract of other modules
+// (students' member card and admin view, T-241). No answers, no ticket.
+type Registrations interface {
+	// CountInOrg returns how many live or attended registrations userID has
+	// for the events of orgID (club_event_registrations_count, 04 §V.4).
+	CountInOrg(ctx context.Context, orgID, userID uuid.UUID) (int, error)
+	// SummaryOf returns userID's registrations, newest first, without their
+	// answers; registrations of sensitive events are left out (03 Y2: the
+	// admin view is a break-glass read).
+	SummaryOf(ctx context.Context, userID uuid.UUID) ([]RegistrationSummary, error)
+}
+
 // Service is the events service: the cross-module contract plus the HTTP
 // use cases of BE-024 and BE-026 (04 §2.6). Every method that takes an actor calls
 // authz.Can first (05 §5.3).
 type Service interface {
 	Events
+	Registrations
 
 	// ListEvents is listEvents (events.event.list, P): published events the
 	// caller may see.
@@ -150,6 +195,36 @@ type Service interface {
 	CreateLintRule(ctx context.Context, a authz.Actor, in LintRuleInput) (LintRule, error)
 	// UpdateLintRule is adminUpdateFormLintRule (events.lint_rule.manage).
 	UpdateLintRule(ctx context.Context, a authz.Actor, id uuid.UUID, p LintRulePatch) (LintRule, error)
+
+	// CreateRegistration is createRegistration (events.registration.create;
+	// Idempotency-Key required): the registration chain of 01 §6.3 in one
+	// transaction with the key (06 H-5).
+	CreateRegistration(ctx context.Context, a authz.Actor, eventID uuid.UUID, in RegistrationInput) (RegistrationView, error)
+	// ListMyRegistrations is listMyRegistrations (events.registration.list_own).
+	ListMyRegistrations(ctx context.Context, a authz.Actor, q MyRegistrationQuery) (RegistrationPage, error)
+	// GetMyRegistration is getMyRegistration (events.registration.read_own):
+	// the answers too, the sensitive ones opened for the owner (audited).
+	GetMyRegistration(ctx context.Context, a authz.Actor, id uuid.UUID) (RegistrationView, error)
+	// CancelMyRegistration is cancelMyRegistration
+	// (events.registration.cancel_own): a confirmed registration is
+	// cancelled (until cancel_deadline_at) and the waiting list moves up; a
+	// pending or waitlisted one is withdrawn.
+	CancelMyRegistration(ctx context.Context, a authz.Actor, id uuid.UUID, reason string) (RegistrationView, error)
+	// ListEventRegistrations is listEventRegistrations
+	// (events.registration.list; support and platform_admin by
+	// break-glass): never the sensitive answers; always audited.
+	ListEventRegistrations(ctx context.Context, a authz.Actor, eventID uuid.UUID, q EventRegistrationQuery, access Access) (RegistrationPage, error)
+	// GetEventRegistration is getEventRegistration (events.registration.read):
+	// the sensitive answers for the organiser's managers only (audited),
+	// never by break-glass.
+	GetEventRegistration(ctx context.Context, a authz.Actor, eventID, id uuid.UUID, access Access) (RegistrationView, error)
+	// DecideRegistration is decideEventRegistration
+	// (events.registration.decide): a pending registration of a manual
+	// event becomes confirmed, waitlisted or rejected.
+	DecideRegistration(ctx context.Context, a authz.Actor, eventID, id uuid.UUID, d Decision) (RegistrationView, error)
+	// CancelEventRegistration is cancelEventRegistration
+	// (events.registration.cancel): cancelled_by_kind = org.
+	CancelEventRegistration(ctx context.Context, a authz.Actor, eventID, id uuid.UUID, reason string) (RegistrationView, error)
 }
 
 // Deps are the dependencies of the events module. Store, Tx, Outbox,
@@ -176,6 +251,27 @@ type Deps struct {
 	// consent field cannot be published (503) and getEventForm lists no
 	// consent_notices.
 	Notices Notices
+
+	// Consents records the consent fields of a registration (BE-028). nil →
+	// a registration granting a consent field is refused (503).
+	Consents Recorder
+	// Sealer encrypts the warn_special answers (BE-028). nil → a
+	// registration with such an answer is refused (503) and stored ones are
+	// not opened.
+	Sealer Sealer
+	// Tickets derives the ticket tokens of confirmed registrations
+	// (CRYPTO_TOKEN_KEYS). nil → a registration cannot be confirmed (503).
+	Tickets TicketKeys
+	// Sender sends the in-app notices of the registration events (worker).
+	// nil → the notice tasks fail and are retried.
+	Sender Sender
+	// Students adds university, department, class year and avatar to the
+	// organiser's registration views. nil → those fields are absent.
+	Students Students
+	// Retention returns a retention period of kvkk.retention_policies
+	// (event_form_answers, event_form_answers_sensitive) for the purge
+	// dates of a registration; nil or not found → 90 and 30 days.
+	Retention func(ctx context.Context, code string) (time.Duration, bool, error)
 }
 
 func (d Deps) validate() error {
@@ -198,8 +294,9 @@ func (d Deps) validate() error {
 // Module is what events hands to the composition root.
 type Module struct {
 	Service Service
-	// Privacy is the KVKK provider (event staff assignments of a user; the
-	// events rows hold no personal data, 02 §11.1).
+	// Privacy is the KVKK provider (event staff assignments, registrations
+	// with their answers and tickets; the events rows hold no personal
+	// data, 02 §11.1).
 	Privacy privacy.Provider
 
 	svc *service

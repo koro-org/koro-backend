@@ -41,6 +41,23 @@ var (
 	ErrFormIncompatible = problem.New(problem.Invalid, "events.form_incompatible",
 		"The draft changes earlier fields in a way existing registrations cannot follow")
 
+	// ErrCapacityFull: the event has no seat left and no open waiting list
+	// (04 §E.2; the conditional counter UPDATE took no seat).
+	ErrCapacityFull = problem.New(problem.Conflict, "events.capacity_full", "The event is full")
+	// ErrAlreadyRegistered: the user has a live registration of the event
+	// (event_registrations_active_uq; 04 §E.2).
+	ErrAlreadyRegistered = problem.New(problem.Conflict, "events.already_registered",
+		"You are already registered for this event")
+	// ErrFormVersionStale: the answers were given to a form version that is
+	// no longer the current one (04 §E.2): reload the form.
+	ErrFormVersionStale = problem.New(problem.Conflict, "events.form_version_stale",
+		"The registration form has changed; reload it")
+	// ErrRegistrationClosed: registration is not open (window, a past,
+	// cancelled or completed event), or a confirmed registration is
+	// cancelled after cancel_deadline_at (04 §E.6).
+	ErrRegistrationClosed = problem.New(problem.Conflict, "events.registration_closed",
+		"Registration for this event is closed")
+
 	// ErrNotFound: the event (or staff member) does not exist or is not
 	// visible to the caller (03 §3.6).
 	ErrNotFound = problem.ErrNotFound

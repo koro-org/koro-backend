@@ -15,8 +15,9 @@ import (
 	"koro/internal/platform/textx"
 )
 
-// NewGormStore returns the PostgreSQL store over events, event_forms and
-// event_staff (02 §11.1–11.3).
+// NewGormStore returns the PostgreSQL store over events, event_forms,
+// event_form_versions, form_lint_rules, event_staff, event_registrations
+// and registration_tickets (02 §11.1–11.7).
 func NewGormStore(orm *gorm.DB) Store { return gormStore{orm: orm} }
 
 type gormStore struct{ orm *gorm.DB }
@@ -45,6 +46,10 @@ var constraints = db.Constraints{
 	"event_form_versions_form_id_fkey":    ErrInvalidState,
 	"event_form_versions_event_id_fkey":   ErrInvalidState,
 	"event_forms_current_version_id_fkey": ErrInvalidState,
+	// BE-028: one live registration per user and event; the capacity CHECK
+	// is the second layer behind the conditional seat UPDATE.
+	"event_registrations_active_uq": ErrAlreadyRegistered,
+	"events_capacity_fill_chk":      ErrCapacityFull,
 }
 
 func wrap(op string, err error) error {

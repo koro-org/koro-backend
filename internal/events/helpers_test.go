@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -18,8 +19,10 @@ import (
 	"koro/internal/directory"
 	"koro/internal/events"
 	"koro/internal/identity"
+	"koro/internal/notify"
 	"koro/internal/orgs"
 	"koro/internal/platform/clock"
+	"koro/internal/platform/crypto"
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
@@ -167,6 +170,27 @@ func (f *fakeOrgs) GetMany(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]or
 	return out, nil
 }
 
+// ActiveMemberIDs: the personas and helpers with a membership of id.
+func (f *fakeOrgs) ActiveMemberIDs(_ context.Context, id uuid.UUID) ([]uuid.UUID, error) {
+	var out []uuid.UUID
+	for _, p := range append(authztest.Personas(), authztest.Helpers()...) {
+		if p.Actor.MemberOf(id) {
+			out = append(out, p.User())
+		}
+	}
+	return out, nil
+}
+
+// HasRole: the persona's membership roles.
+func (f *fakeOrgs) HasRole(_ context.Context, orgID, userID uuid.UUID, roles ...authz.MemberRole) (bool, error) {
+	for _, p := range append(authztest.Personas(), authztest.Helpers()...) {
+		if p.User() == userID && p.Actor.HasOrgRole(orgID, roles...) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (f *fakeOrgs) setStatus(id uuid.UUID, st orgs.Status) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -206,6 +230,10 @@ func (fakeCatalog) GetUniversity(_ context.Context, id uuid.UUID) (directory.Uni
 		}
 	}
 	return directory.University{}, directory.ErrNotFound
+}
+
+func (fakeCatalog) GetDepartment(context.Context, uuid.UUID) (directory.Department, error) {
+	return directory.Department{}, directory.ErrNotFound
 }
 
 func (fakeCatalog) UniversityOrgs(_ context.Context, id uuid.UUID) ([]uuid.UUID, error) {
@@ -289,8 +317,77 @@ func (f *fakeNotices) setMissing(p consent.Purpose) {
 	f.missing[p] = true
 }
 
+// spyRecorder is consent.Recorder: it records each consent with the
+// transaction it was written in.
+type spyRecorder struct {
+	mu   sync.Mutex
+	recs []consent.RecordInput
+	txs  []int
+	fail error
+}
+
+func (r *spyRecorder) Record(ctx context.Context, in consent.RecordInput) (uuid.UUID, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.fail != nil {
+		return uuid.Nil(), r.fail
+	}
+	r.recs = append(r.recs, in)
+	r.txs = append(r.txs, txOf(ctx))
+	return uuid.NewV7(), nil
+}
+
+func (r *spyRecorder) records() ([]consent.RecordInput, []int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.recs), slices.Clone(r.txs)
+}
+
+// spySender is notify: it records the in-app notices.
+type spySender struct {
+	mu   sync.Mutex
+	msgs []notify.Message
+}
+
+func (s *spySender) Send(_ context.Context, m notify.Message) (uuid.UUID, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.msgs = append(s.msgs, m)
+	return uuid.NewV7(), nil
+}
+
+func (s *spySender) sent() []notify.Message {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.msgs)
+}
+
+// testEnvelope seals the sensitive answers (a fixed local KEK).
+var testEnvelope = sync.OnceValue(func() *crypto.Envelope {
+	kek, err := crypto.NewLocalKEK([]crypto.Key{{ID: "test1", Secret: []byte("events-test-kek-32-bytes-long!!!")}})
+	if err != nil {
+		panic(err)
+	}
+	env, err := crypto.NewEnvelope(kek)
+	if err != nil {
+		panic(err)
+	}
+	return env
+})
+
+// testDeriver derives the ticket tokens.
+var testDeriver = sync.OnceValue(func() *crypto.Deriver {
+	d, err := crypto.NewDeriver([]crypto.Key{{ID: "t1", Secret: []byte("events-test-ticket-key-events-test-ticket-key")}})
+	if err != nil {
+		panic(err)
+	}
+	return d
+})
+
 type env struct {
 	notices *fakeNotices
+	consent *spyRecorder
+	sender  *spySender
 	clk     *clock.Fake
 	tx      *spyTx
 	mem     *events.MemStore
@@ -309,13 +406,14 @@ func newEnv(t *testing.T) *env {
 	e := &env{
 		clk: clk, tx: &spyTx{}, mem: events.NewMemStore(clk.Now), audit: &auditLog{}, orgs: newFakeOrgs(),
 		out: &spyOutbox{Mem: outbox.NewMem(clk), txs: map[string][]int{}}, users: fakeUsers{suspended: map[uuid.UUID]bool{}},
-		notices: &fakeNotices{missing: map[consent.Purpose]bool{}},
+		notices: &fakeNotices{missing: map[consent.Purpose]bool{}}, consent: &spyRecorder{}, sender: &spySender{},
 	}
 	e.store = &spyStore{MemStore: e.mem}
 	idem := idempotency.New(idempotency.Deps{Tx: e.tx, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()})
 	mod, err := events.New(events.Deps{
 		Store: e.store, Tx: e.tx, Outbox: e.out, Audit: e.audit, Orgs: e.orgs, Catalog: fakeCatalog{},
 		Idempotency: idem, Clock: clk, Log: obs.Discard(), Users: e.users, Notices: e.notices,
+		Consents: e.consent, Sealer: testEnvelope(), Tickets: testDeriver(), Sender: e.sender,
 	})
 	if err != nil {
 		t.Fatal(err)

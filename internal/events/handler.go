@@ -15,8 +15,9 @@ import (
 	"koro/internal/platform/page"
 )
 
-// Register adds the 12 event core operations of BE-024 and the 7 form and
-// lint rule operations of BE-026 (04 §2.6) to api. svc may be nil (`koro
+// Register adds the 12 event core operations of BE-024, the 7 form and
+// lint rule operations of BE-026 and the 8 registration operations of
+// BE-028 (04 §2.6) to api. svc may be nil (`koro
 // openapi`): handlers only touch it when called.
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
@@ -100,6 +101,7 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.EventsStaffManage), Surface: op.SurfaceResource}, h.removeStaff)
 
 	registerForms(api, h)
+	registerRegistrations(api, h)
 }
 
 // reg registers one events operation with its Koro metadata.

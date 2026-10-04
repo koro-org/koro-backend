@@ -1352,6 +1352,24 @@ components:
       required:
         - cancel_reason
       type: object
+    CancelEventRegistrationInputBody:
+      additionalProperties: false
+      properties:
+        cancel_reason:
+          description: 3-300 characters
+          maxLength: 300
+          type: string
+      required:
+        - cancel_reason
+      type: object
+    CancelMyRegistrationInputBody:
+      additionalProperties: false
+      properties:
+        reason:
+          description: Optional reason
+          maxLength: 300
+          type: string
+      type: object
     ChangePasswordInputBody:
       additionalProperties: false
       properties:
@@ -1690,6 +1708,26 @@ components:
           type: string
         text_sha256:
           description: body_sha256 of that text
+          pattern: ^[0-9a-f]{64}$
+          type: string
+      required:
+        - purpose_code
+        - notice_version_id
+        - text_sha256
+      type: object
+    ConsentProofBody:
+      additionalProperties: false
+      properties:
+        notice_version_id:
+          description: consent_notices[].notice_version_id of getEventForm
+          format: uuid
+          type: string
+        purpose_code:
+          description: The consent purpose of the field (event_sponsor_share)
+          maxLength: 64
+          type: string
+        text_sha256:
+          description: consent_notices[].body_sha256 of getEventForm
           pattern: ^[0-9a-f]{64}$
           type: string
       required:
@@ -2055,6 +2093,24 @@ components:
         - address
         - email
       type: object
+    CreateRegistrationInputBody:
+      additionalProperties: false
+      properties:
+        answers:
+          additionalProperties: {}
+          description: Answers by field key (see getEventForm answers_schema)
+          type: object
+        consents:
+          description: One proof per consent field answered true
+          items:
+            $ref: "#/components/schemas/ConsentProofBody"
+          maxItems: 10
+          type: array
+        form_version_id:
+          description: "The form version answered (getEventForm); default: the current one"
+          format: uuid
+          type: string
+      type: object
     CreateRuleInputBody:
       additionalProperties: false
       properties:
@@ -2142,6 +2198,22 @@ components:
         university_id:
           description: Required to approve
           format: uuid
+          type: string
+      required:
+        - decision
+      type: object
+    DecideRegistrationInputBody:
+      additionalProperties: false
+      properties:
+        decision:
+          enum:
+            - confirmed
+            - rejected
+            - waitlisted
+          type: string
+        decision_note:
+          description: For the organiser only; never shown to the student
+          maxLength: 500
           type: string
       required:
         - decision
@@ -2862,8 +2934,11 @@ components:
           type: boolean
         location_name:
           type: string
+        my_registration:
+          $ref: "#/components/schemas/MyRegistrationDTO"
+          description: The caller's live registration (signed-in callers)
         online_url:
-          description: "Managers only (approved attendees: registrations)"
+          description: Managers and confirmed attendees only
           type: string
         org:
           $ref: "#/components/schemas/EventOrgDTO"
@@ -4285,6 +4360,24 @@ components:
       required:
         - items
       type: object
+    MyRegistrationDTO:
+      additionalProperties: false
+      properties:
+        registration_id:
+          format: uuid
+          type: string
+        status:
+          enum:
+            - pending
+            - confirmed
+            - waitlisted
+            - checked_in
+            - no_show
+          type: string
+      required:
+        - registration_id
+        - status
+      type: object
     MySessionDTO:
       additionalProperties: false
       properties:
@@ -4325,6 +4418,14 @@ components:
           type: string
       required:
         - items
+      type: object
+    NamedRefDTO:
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+      required:
+        - name
       type: object
     NoticeDTO:
       additionalProperties: false
@@ -5404,6 +5505,222 @@ components:
       required:
         - platform
         - token
+      type: object
+    RegistrantDTO:
+      additionalProperties: false
+      properties:
+        avatar_url:
+          description: Short-lived URL
+          type: string
+        class_year:
+          format: int32
+          type: integer
+        department:
+          $ref: "#/components/schemas/NamedRefDTO"
+        first_name:
+          type: string
+        last_name:
+          type: string
+        university:
+          $ref: "#/components/schemas/NamedRefDTO"
+        user_id:
+          format: uuid
+          type: string
+      required:
+        - user_id
+        - first_name
+        - last_name
+      type: object
+    RegistrationEventDTO:
+      additionalProperties: false
+      properties:
+        display_timezone:
+          enum:
+            - Europe/Istanbul
+          type: string
+        ends_at:
+          format: date-time
+          type: string
+        event_id:
+          format: uuid
+          type: string
+        location_name:
+          type: string
+        starts_at:
+          format: date-time
+          type: string
+        status:
+          enum:
+            - draft
+            - published
+            - cancelled
+            - completed
+          type: string
+        title:
+          type: string
+      required:
+        - event_id
+        - title
+        - status
+        - starts_at
+        - ends_at
+        - display_timezone
+      type: object
+    RegistrationOrgDTO:
+      additionalProperties: false
+      properties:
+        answers:
+          additionalProperties: {}
+          description: Answers without the special-category fields
+          type: object
+        answers_sensitive:
+          additionalProperties: {}
+          description: getEventRegistration for the organiser's managers only (audited)
+          type: object
+        cancelled_at:
+          format: date-time
+          type: string
+        checked_in_at:
+          format: date-time
+          type: string
+        confirmed_at:
+          format: date-time
+          type: string
+        consent_snapshot:
+          additionalProperties:
+            type: boolean
+          type: object
+        created_at:
+          format: date-time
+          type: string
+        decision_note:
+          description: Managers only; never shown to the student
+          type: string
+        form_version_id:
+          format: uuid
+          type: string
+        registration_id:
+          format: uuid
+          type: string
+        source:
+          enum:
+            - web
+            - mobile
+            - admin
+          type: string
+        status:
+          enum:
+            - pending
+            - confirmed
+            - waitlisted
+            - rejected
+            - cancelled
+            - checked_in
+            - no_show
+            - expired
+            - withdrawn
+          type: string
+        user:
+          $ref: "#/components/schemas/RegistrantDTO"
+        waitlisted_at:
+          format: date-time
+          type: string
+      required:
+        - registration_id
+        - status
+        - source
+        - created_at
+        - user
+        - answers
+        - consent_snapshot
+      type: object
+    RegistrationOrgList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/RegistrationOrgDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
+    RegistrationSelfDTO:
+      additionalProperties: false
+      properties:
+        answers:
+          additionalProperties: {}
+          description: getMyRegistration only
+          type: object
+        answers_sensitive:
+          additionalProperties: {}
+          description: Special-category answers (getMyRegistration only)
+          type: object
+        cancelled_at:
+          format: date-time
+          type: string
+        confirmed_at:
+          format: date-time
+          type: string
+        consent_snapshot:
+          additionalProperties:
+            type: boolean
+          description: Consent fields answered (purpose → answer)
+          type: object
+        created_at:
+          format: date-time
+          type: string
+        event:
+          $ref: "#/components/schemas/RegistrationEventDTO"
+        form_version_id:
+          format: uuid
+          type: string
+        registration_id:
+          format: uuid
+          type: string
+        status:
+          enum:
+            - pending
+            - confirmed
+            - waitlisted
+            - rejected
+            - cancelled
+            - checked_in
+            - no_show
+            - expired
+            - withdrawn
+          type: string
+        ticket_available:
+          type: boolean
+        waitlist_position:
+          description: Current place on the waiting list (an estimate); null when not waitlisted
+          format: int64
+          type:
+            - integer
+            - "null"
+        waitlisted_at:
+          format: date-time
+          type: string
+      required:
+        - registration_id
+        - event
+        - status
+        - created_at
+        - waitlist_position
+        - ticket_available
+      type: object
+    RegistrationSelfList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/RegistrationSelfDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
       type: object
     RejectInputBody:
       additionalProperties: false
@@ -11396,6 +11713,315 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+  /api/v1/events/{event_id}/registrations:
+    get:
+      description: The organiser's managers; support and platform_admin by break-glass (X-Koro-Access-Reason, 10–500 characters; never a sensitive event). The special-category answers are never in the list. Every list is audited.
+      operationId: listEventRegistrations
+      parameters:
+        - description: Event ID
+          in: path
+          name: event_id
+          required: true
+          schema:
+            description: Event ID
+            type: string
+        - description: "Break-glass justification (support, platform_admin: 10–500 characters)"
+          in: header
+          name: X-Koro-Access-Reason
+          schema:
+            description: "Break-glass justification (support, platform_admin: 10–500 characters)"
+            maxLength: 500
+            type: string
+        - description: Support ticket reference (optional)
+          in: header
+          name: X-Koro-Ticket-Ref
+          schema:
+            description: Support ticket reference (optional)
+            maxLength: 100
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: Statuses (repeat the parameter)
+          explode: true
+          in: query
+          name: status
+          schema:
+            description: Statuses (repeat the parameter)
+            items:
+              enum:
+                - pending
+                - confirmed
+                - waitlisted
+                - rejected
+                - cancelled
+                - checked_in
+                - no_show
+                - expired
+                - withdrawn
+              type: string
+            maxItems: 9
+            type: array
+        - description: created_at (default, oldest first) or -created_at
+          explode: false
+          in: query
+          name: sort
+          schema:
+            description: created_at (default, oldest first) or -created_at
+            enum:
+              - created_at
+              - -created_at
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegistrationOrgList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List an event's registrations
+      tags:
+        - events
+      x-koro-action: events.registration.list
+      x-koro-break-glass: true
+      x-koro-rate-limit: read_default
+      x-koro-surface: resource
+    post:
+      description: "Verified students only (403 students.verification_required). The answers are validated against the current form version (form_version_id of an older version: 409 events.form_version_stale; field errors: 422 at body.answers.<key>). Every consent field answered true needs its consent text proof in consents. auto mode: confirmed (with a ticket) or, when full, waitlisted (waiting list open) or 409 events.capacity_full; manual mode: pending. One live registration per user (409 events.already_registered). Outside the registration window: 409 events.registration_closed. Idempotency-Key is required: a retry with the same key and body replays the first answer."
+      operationId: createRegistration
+      parameters:
+        - description: Event ID
+          in: path
+          name: event_id
+          required: true
+          schema:
+            description: Event ID
+            type: string
+        - description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Client kind; the registration source and the consent channel (default web)
+          in: header
+          name: X-Koro-Client
+          schema:
+            description: Client kind; the registration source and the consent channel (default web)
+            enum:
+              - web
+              - mobile
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRegistrationInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegistrationSelfDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Register for an event
+      tags:
+        - events
+      x-koro-action: events.registration.create
+      x-koro-idempotency: required
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+  /api/v1/events/{event_id}/registrations/{registration_id}:
+    get:
+      description: answers_sensitive (special-category answers) for the organiser's managers only, never by break-glass. Every read is audited (metadata.sensitive_fields).
+      operationId: getEventRegistration
+      parameters:
+        - description: Event ID
+          in: path
+          name: event_id
+          required: true
+          schema:
+            description: Event ID
+            type: string
+        - description: Registration ID
+          in: path
+          name: registration_id
+          required: true
+          schema:
+            description: Registration ID
+            type: string
+        - description: "Break-glass justification (support, platform_admin: 10–500 characters)"
+          in: header
+          name: X-Koro-Access-Reason
+          schema:
+            description: "Break-glass justification (support, platform_admin: 10–500 characters)"
+            maxLength: 500
+            type: string
+        - description: Support ticket reference (optional)
+          in: header
+          name: X-Koro-Ticket-Ref
+          schema:
+            description: Support ticket reference (optional)
+            maxLength: 100
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegistrationOrgDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get an event registration
+      tags:
+        - events
+      x-koro-action: events.registration.read
+      x-koro-break-glass: true
+      x-koro-rate-limit: read_default
+      x-koro-surface: resource
+  /api/v1/events/{event_id}/registrations/{registration_id}/cancel:
+    post:
+      description: pending, waitlisted or confirmed → cancelled (cancelled_by_kind org); a confirmed seat goes to the waiting list.
+      operationId: cancelEventRegistration
+      parameters:
+        - description: Event ID
+          in: path
+          name: event_id
+          required: true
+          schema:
+            description: Event ID
+            type: string
+        - description: Registration ID
+          in: path
+          name: registration_id
+          required: true
+          schema:
+            description: Registration ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelEventRegistrationInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegistrationOrgDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Cancel a registration on behalf of the organiser
+      tags:
+        - events
+      x-koro-action: events.registration.cancel
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+  /api/v1/events/{event_id}/registrations/{registration_id}/decision:
+    post:
+      description: manual mode, pending registrations only (409 events.invalid_state otherwise). confirmed takes a seat (409 events.capacity_full) and issues the ticket; waitlisted needs the waiting list; the note is never shown to the student.
+      operationId: decideEventRegistration
+      parameters:
+        - description: Event ID
+          in: path
+          name: event_id
+          required: true
+          schema:
+            description: Event ID
+            type: string
+        - description: Registration ID
+          in: path
+          name: registration_id
+          required: true
+          schema:
+            description: Registration ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DecideRegistrationInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegistrationOrgDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Decide a pending application
+      tags:
+        - events
+      x-koro-action: events.registration.decide
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
   /api/v1/events/{event_id}/staff:
     get:
       description: First name and the initial of the last name only.
@@ -13130,6 +13756,162 @@ paths:
       tags:
         - notify
       x-koro-action: notify.push_token.manage
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/me/registrations:
+    get:
+      description: The caller's registrations by the event's start (no answers); upcoming=true keeps events that have not ended.
+      operationId: listMyRegistrations
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: Statuses (repeat the parameter)
+          explode: true
+          in: query
+          name: status
+          schema:
+            description: Statuses (repeat the parameter)
+            items:
+              enum:
+                - pending
+                - confirmed
+                - waitlisted
+                - rejected
+                - cancelled
+                - checked_in
+                - no_show
+                - expired
+                - withdrawn
+              type: string
+            maxItems: 9
+            type: array
+        - description: Only events that have not ended
+          explode: false
+          in: query
+          name: upcoming
+          schema:
+            description: Only events that have not ended
+            type: boolean
+        - description: starts_at (the only order)
+          explode: false
+          in: query
+          name: sort
+          schema:
+            description: starts_at (the only order)
+            enum:
+              - starts_at
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegistrationSelfList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List my registrations
+      tags:
+        - events
+      x-koro-action: events.registration.list_own
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
+  /api/v1/me/registrations/{registration_id}:
+    get:
+      description: With the answers; the special-category answers are opened for the owner (the read is audited).
+      operationId: getMyRegistration
+      parameters:
+        - description: Registration ID
+          in: path
+          name: registration_id
+          required: true
+          schema:
+            description: Registration ID
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegistrationSelfDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get my registration
+      tags:
+        - events
+      x-koro-action: events.registration.read_own
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
+  /api/v1/me/registrations/{registration_id}/cancel:
+    post:
+      description: A confirmed registration is cancelled until cancel_deadline_at and the event's start (409 events.registration_closed after), its ticket is revoked and the first on the waiting list takes the seat; a pending or waitlisted one is withdrawn.
+      operationId: cancelMyRegistration
+      parameters:
+        - description: Registration ID
+          in: path
+          name: registration_id
+          required: true
+          schema:
+            description: Registration ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelMyRegistrationInputBody"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegistrationSelfDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Cancel my registration
+      tags:
+        - events
+      x-koro-action: events.registration.cancel_own
+      x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
   /api/v1/me/security-events:

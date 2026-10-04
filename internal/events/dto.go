@@ -46,28 +46,35 @@ type EventCardList struct {
 	NextCursor string         `json:"next_cursor,omitempty"`
 }
 
-// EventDTO is the event page (getEvent and the writes). online_url,
-// cover_file_id and is_sensitive_category are present for the event's
-// managers only (03 §5.6; approved attendees: BE-028).
+// EventDTO is the event page (getEvent and the writes). online_url is
+// present for the event's managers and its confirmed attendees (03 §5.6),
+// cover_file_id and is_sensitive_category for the managers only.
 type EventDTO struct {
 	EventCardDTO
-	Description            map[string]any `json:"description_json,omitempty" doc:"Tiptap JSON document"`
-	Address                string         `json:"address,omitempty"`
-	OnlineURL              string         `json:"online_url,omitempty" doc:"Managers only (approved attendees: registrations)"`
-	CoverFileID            string         `json:"cover_file_id,omitempty" doc:"Managers only"`
-	VisibilityUniversityID string         `json:"visibility_university_id,omitempty"`
-	PublishedAt            *time.Time     `json:"published_at,omitempty"`
-	CancelledAt            *time.Time     `json:"cancelled_at,omitempty"`
-	CancelReason           string         `json:"cancel_reason,omitempty"`
-	ConfirmedCount         int            `json:"confirmed_count"`
-	WaitlistEnabled        bool           `json:"waitlist_enabled"`
-	RegistrationOpensAt    *time.Time     `json:"registration_opens_at,omitempty"`
-	RegistrationClosesAt   *time.Time     `json:"registration_closes_at,omitempty"`
-	CancelDeadlineAt       *time.Time     `json:"cancel_deadline_at,omitempty"`
-	CheckinEnabled         bool           `json:"checkin_enabled"`
-	IsSensitiveCategory    *bool          `json:"is_sensitive_category,omitempty" doc:"Managers only"`
-	CreatedAt              time.Time      `json:"created_at"`
-	UpdatedAt              time.Time      `json:"updated_at"`
+	Description            map[string]any     `json:"description_json,omitempty" doc:"Tiptap JSON document"`
+	Address                string             `json:"address,omitempty"`
+	OnlineURL              string             `json:"online_url,omitempty" doc:"Managers and confirmed attendees only"`
+	CoverFileID            string             `json:"cover_file_id,omitempty" doc:"Managers only"`
+	VisibilityUniversityID string             `json:"visibility_university_id,omitempty"`
+	PublishedAt            *time.Time         `json:"published_at,omitempty"`
+	CancelledAt            *time.Time         `json:"cancelled_at,omitempty"`
+	CancelReason           string             `json:"cancel_reason,omitempty"`
+	ConfirmedCount         int                `json:"confirmed_count"`
+	WaitlistEnabled        bool               `json:"waitlist_enabled"`
+	RegistrationOpensAt    *time.Time         `json:"registration_opens_at,omitempty"`
+	RegistrationClosesAt   *time.Time         `json:"registration_closes_at,omitempty"`
+	CancelDeadlineAt       *time.Time         `json:"cancel_deadline_at,omitempty"`
+	CheckinEnabled         bool               `json:"checkin_enabled"`
+	IsSensitiveCategory    *bool              `json:"is_sensitive_category,omitempty" doc:"Managers only"`
+	MyRegistration         *MyRegistrationDTO `json:"my_registration,omitempty" doc:"The caller's live registration (signed-in callers)"`
+	CreatedAt              time.Time          `json:"created_at"`
+	UpdatedAt              time.Time          `json:"updated_at"`
+}
+
+// MyRegistrationDTO is the caller's live registration on the event page.
+type MyRegistrationDTO struct {
+	RegistrationID string `json:"registration_id" format:"uuid"`
+	Status         string `json:"status" enum:"pending,confirmed,waitlisted,checked_in,no_show"`
 }
 
 // StaffDTO is one staff member (04 §2.6, §E.4): last_name is the initial.
@@ -119,8 +126,13 @@ func toEventDTO(v EventView) EventDTO {
 			out.Description = doc
 		}
 	}
-	if v.Manager {
+	if v.Manager || v.Attendee() {
 		out.OnlineURL = str(e.OnlineURL)
+	}
+	if r := v.MyRegistration; r != nil {
+		out.MyRegistration = &MyRegistrationDTO{RegistrationID: r.ID.String(), Status: string(r.Status)}
+	}
+	if v.Manager {
 		if e.CoverFileID != nil {
 			out.CoverFileID = e.CoverFileID.String()
 		}

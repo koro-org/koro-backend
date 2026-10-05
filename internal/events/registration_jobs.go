@@ -21,7 +21,7 @@ const (
 	// (event_cancelled), in batches of 1000.
 	CancelRegistrationsTaskName = "events.cancel_registrations"
 	// The in-app notices of the registration events (the ticket e-mail of
-	// registration.confirmed and the .ics files are BE-031's).
+	// registration.confirmed and the .ics files: ticket_email.go).
 	NotifySubmittedTaskName  = "events.notify_registration_submitted"
 	NotifyWaitlistedTaskName = "events.notify_registration_waitlisted"
 	NotifyRejectedTaskName   = "events.notify_registration_rejected"
@@ -66,15 +66,35 @@ func (m Module) Subscribe(r *outbox.Registry) {
 		outbox.Queue(queue.Default))
 	r.Subscribe(domainevent.TopicRegistrationCancelled, NotifyCancelledTaskName, m.svc.handleCancelled,
 		outbox.Queue(queue.Default))
+	// BE-031: the ticket mails (01 §8: critical), the schedule update and
+	// the cancellation .ics, the no-shows of a closed attendance.
+	r.Subscribe(domainevent.TopicRegistrationConfirmed, SendTicketEmailTaskName, m.svc.handleConfirmed,
+		outbox.Queue(queue.Critical))
+	r.Subscribe(domainevent.TopicTicketReissued, SendReissuedTicketTaskName, m.svc.handleReissued,
+		outbox.Queue(queue.Critical))
+	r.Subscribe(domainevent.TopicEventScheduleChanged, SendScheduleUpdateTaskName, m.svc.handleScheduleChanged,
+		outbox.Queue(queue.Default), outbox.Timeout(scheduleTimeout))
+	r.Subscribe(domainevent.TopicRegistrationCancelled, SendCancellationEmailTaskName, m.svc.handleCancelledEmail,
+		outbox.Queue(queue.Default))
+	r.Subscribe(domainevent.TopicAttendanceFinalized, MarkNoShowsTaskName, m.svc.handleAttendanceFinalized,
+		outbox.Queue(queue.Default))
 }
 
-// Jobs returns the scheduled jobs of 01 §7 owned by BE-028.
+// Tasks returns the task handlers events enqueues itself (mechanism A):
+// the ticket resend (BE-031).
+func (m Module) Tasks() []queue.Task {
+	return []queue.Task{{Name: ResendTicketTaskName, Handle: m.svc.handleResend}}
+}
+
+// Jobs returns the scheduled jobs of 01 §7 owned by BE-028 and BE-031.
 func (m Module) Jobs() []queue.Job {
 	return []queue.Job{
 		{Name: WaitlistExpireJobName, Cron: "*/15 * * * *", Queue: queue.Default, Unique: 14 * time.Minute,
 			Handle: m.svc.expireWaitlists},
 		{Name: ReconcileCountsJobName, Cron: "0 3 * * *", Queue: queue.Low, Unique: 23 * time.Hour,
 			Handle: m.svc.reconcileCounts},
+		{Name: AutoFinalizeJobName, Cron: "20 * * * *", Queue: queue.Default, Unique: 50 * time.Minute,
+			Handle: m.svc.autoFinalize},
 	}
 }
 

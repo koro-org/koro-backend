@@ -1,0 +1,12 @@
+Merhaba {{.Data.name}},
+
+Kayıtlı olduğun "{{index .Data "event_title"}}" etkinliğinin tarihi ya da yeri değişti. Güncel bilgiler:
+
+Etkinlik: {{index .Data "event_title"}}
+Düzenleyen: {{index .Data "org_name"}}
+Tarih: {{index .Data "when"}} (Türkiye saati)
+{{if index .Data "location"}}Yer: {{index .Data "location"}}
+{{end}}
+Biletin değişmedi. Güncellenmiş takvim dosyası (etkinlik.ics) ektedir; açarak takvimindeki etkinliği güncelleyebilirsin.
+
+Biletin ve kaydın: {{index .Data "ticket_url"}}

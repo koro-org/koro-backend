@@ -547,7 +547,7 @@ func (s *MemStore) TicketsOfRegistration(_ context.Context, orgID, registrationI
 	return out, nil
 }
 
-// DeleteRegistration implements Store.
+// DeleteRegistration implements Store (tickets and check-ins cascade).
 func (s *MemStore) DeleteRegistration(_ context.Context, orgID, id uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -557,6 +557,7 @@ func (s *MemStore) DeleteRegistration(_ context.Context, orgID, id uuid.UUID) er
 	}
 	delete(s.regs, id)
 	s.tickets = slices.DeleteFunc(s.tickets, func(t Ticket) bool { return t.RegistrationID == id })
+	s.checkins = slices.DeleteFunc(s.checkins, func(c Checkin) bool { return c.RegistrationID == id }) // ON DELETE CASCADE
 	return nil
 }
 

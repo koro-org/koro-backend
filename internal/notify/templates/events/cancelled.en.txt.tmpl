@@ -1,0 +1,12 @@
+Hello {{.Data.name}},
+
+"{{index .Data "event_title"}}": {{if eq (printf "%v" (index .Data "by")) "user"}}You cancelled your registration.{{else if eq (printf "%v" (index .Data "by")) "org"}}The organiser ({{index .Data "org_name"}}) cancelled your registration.{{else}}The event was cancelled.{{end}} Your ticket no longer works.
+
+Event: {{index .Data "event_title"}}
+Organiser: {{index .Data "org_name"}}
+When: {{index .Data "when"}} (Istanbul time)
+{{if index .Data "location"}}Where: {{index .Data "location"}}
+{{end}}
+The attached calendar file (etkinlik.ics) removes the event from your calendar.
+
+Your registrations: {{index .Data "ticket_url"}}

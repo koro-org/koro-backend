@@ -10,16 +10,18 @@ import (
 // privacyRetainedReason explains what Erase leaves in place.
 const privacyRetainedReason = "events rows hold no personal data (02 §11.1): created_by and attendance_finalized_by " +
 	"reference the account, which identity anonymises, as do the form columns updated_by, published_by and " +
-	"lint_override_by (02 §11.3-11.5) and a registration's approved_by; check-ins go with their registration " +
-	"(ON DELETE CASCADE)"
+	"lint_override_by (02 §11.3-11.5), a registration's approved_by and a check-in's staff_user_id and voided_by " +
+	"(the person's scans of other attendees stay with those attendees' records); the person's own check-ins go " +
+	"with their registration (ON DELETE CASCADE)"
 
 // privacyProvider is the KVKK provider of events (01 §3.3): a person's
 // staff assignments (02 §11.2), registrations with their answers (the
 // special-category ones opened for the data subject) and consent snapshot,
-// and tickets (02 §11.6–11.7). Export lists them; Erase deletes them (the
-// tickets and check-ins go with their registration, a held seat is
-// released and given to the waiting list). Exports of registrations
-// (BE-050) join this provider in their ticket.
+// tickets and check-ins (02 §11.6–11.8; BE-031: the check-ins of their
+// registrations and the scans they made as staff). Export lists them;
+// Erase deletes them (the tickets and check-ins go with their
+// registration, a held seat is released and given to the waiting list).
+// Exports of registrations (BE-050) join this provider in their ticket.
 type privacyProvider struct{ s *service }
 
 var _ privacy.Provider = privacyProvider{}
@@ -79,7 +81,29 @@ func (p privacyProvider) Export(ctx context.Context, userID uuid.UUID) (privacy.
 				"revoked_at": t.RevokedAt})
 		}
 		item["tickets"] = ts
+		checkins, err := p.s.d.Store.CheckinsOfRegistration(ctx, r.OrgID, r.ID)
+		if err != nil {
+			return privacy.ExportSection{}, err
+		}
+		cs := make([]map[string]any, 0, len(checkins))
+		for _, c := range checkins {
+			cs = append(cs, map[string]any{"checkin_id": c.ID.String(), "method": string(c.Method), "scanned_at": c.ScannedAt,
+				"voided_at": c.VoidedAt})
+		}
+		item["checkins"] = cs
 		out.Items = append(out.Items, item)
+	}
+	// The scans the person made as event staff (their own activity; the
+	// attendees appear by registration id only).
+	scans, err := p.s.d.Store.CheckinsByStaff(ctx, userID)
+	if err != nil {
+		return privacy.ExportSection{}, err
+	}
+	for _, c := range scans {
+		out.Items = append(out.Items, map[string]any{
+			"type": "event_checkin_scanned", "checkin_id": c.ID.String(), "event_id": c.EventID.String(),
+			"method": string(c.Method), "scanned_at": c.ScannedAt, "voided": c.VoidedAt != nil,
+		})
 	}
 	return out, nil
 }

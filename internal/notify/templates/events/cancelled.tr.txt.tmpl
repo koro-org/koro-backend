@@ -1,0 +1,12 @@
+Merhaba {{.Data.name}},
+
+"{{index .Data "event_title"}}": {{if eq (printf "%v" (index .Data "by")) "user"}}Kaydını iptal ettin.{{else if eq (printf "%v" (index .Data "by")) "org"}}Düzenleyen ({{index .Data "org_name"}}) kaydını iptal etti.{{else}}Etkinlik iptal edildi.{{end}} Biletin artık geçersiz.
+
+Etkinlik: {{index .Data "event_title"}}
+Düzenleyen: {{index .Data "org_name"}}
+Tarih: {{index .Data "when"}} (Türkiye saati)
+{{if index .Data "location"}}Yer: {{index .Data "location"}}
+{{end}}
+Ekteki takvim dosyası (etkinlik.ics) etkinliği takviminden kaldırır.
+
+Kayıtların: {{index .Data "ticket_url"}}

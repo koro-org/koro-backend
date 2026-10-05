@@ -1,4 +1,4 @@
-# Multi-step scenarios of the events module (03 §7.7; BE-024, BE-026, BE-028).
+# Multi-step scenarios of the events module (03 §7.7; BE-024, BE-026, BE-028, BE-031).
 version: 1
 scenarios:
   update_event_needs_if_match:
@@ -161,3 +161,41 @@ scenarios:
       - { persona: club_admin, operation: decideEventRegistration, expect: 409, code: events.invalid_state }
       - { persona: student, operation: getMyRegistration, path_params: { registration_id: reg_pending }, expect: 200 }
 
+  checkin_door:
+    note: >-
+      BE-031 — the staff check a ticket in by its manual code (200 ok), a new scan of it is 200 too
+      (already_checked_in, T-70); voiding needs a manager (the scanner 403), a voided check-in is not voided
+      twice (409); the attendance of an event that has not ended does not close (409)
+    steps:
+      - { persona: event_staff, operation: createCheckin, expect: 200 }
+      - { persona: event_staff, operation: createCheckin, body: bodies/events/create_checkin_retry.json, expect: 200 }
+      - { persona: event_staff, operation: voidCheckin, expect: 403, code: forbidden }
+      - { persona: event_manager_a, operation: voidCheckin, expect: 200 }
+      - { persona: event_manager_a, operation: voidCheckin, expect: 409, code: events.invalid_state }
+      - { persona: event_manager_a, operation: finalizeEventAttendance, path_params: { event_id: event_door }, expect: 409,
+          code: events.invalid_state }
+      - { persona: event_staff, operation: listCheckins, expect: 200 }
+  ticket_lifecycle:
+    note: >-
+      BE-031 — the registrant reads, resends and reissues the ticket, the organiser reissues it too; a pending
+      application has no ticket (409); nobody else reads it (404)
+    steps:
+      - { persona: student, operation: getMyTicket, expect: 200 }
+      - { persona: student, operation: getMyTicket, path_params: { registration_id: reg_pending }, expect: 409,
+          code: events.invalid_state }
+      - { persona: club_member, operation: getMyTicket, expect: 404, code: not_found }
+      - { persona: student, operation: resendMyTicket, expect: 202 }
+      - { persona: student, operation: reissueMyTicket, expect: 200 }
+      - { persona: club_admin, operation: reissueRegistrationTicket, expect: 200 }
+      - { persona: student, operation: getMyTicket, expect: 200 }
+  attendance_close:
+    note: >-
+      BE-031 — an ended event's attendance closes once (200, then 409); a scanner cannot close it; a closed
+      door takes no scan (409)
+    steps:
+      - { persona: event_staff, operation: finalizeEventAttendance, expect: 403, code: forbidden }
+      - { persona: club_admin, operation: finalizeEventAttendance, expect: 200 }
+      - { persona: club_admin, operation: finalizeEventAttendance, expect: 409, code: events.invalid_state }
+      - { persona: club_admin, operation: createCheckin, path_params: { event_id: event_ended }, expect: 409,
+          code: events.invalid_state }
+      - { persona: club_admin, operation: getCheckinStats, path_params: { event_id: event_ended }, expect: 200 }

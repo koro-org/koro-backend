@@ -1,6 +1,12 @@
 package events
 
-import "koro/internal/platform/problem"
+import (
+	"errors"
+
+	"koro/internal/platform/problem"
+)
+
+var errClientScan = errors.New("events: client_scan_id belongs to another check-in")
 
 // Errors of the events module (05 §4.2; 04 §1.10, §2.6). The org status
 // rules of 03 §2.3 reuse the orgs codes (orgs.ErrOrgSuspended,
@@ -57,6 +63,12 @@ var (
 	// cancelled after cancel_deadline_at (04 §E.6).
 	ErrRegistrationClosed = problem.New(problem.Conflict, "events.registration_closed",
 		"Registration for this event is closed")
+
+	// ErrClientScanTaken: the client_scan_id of a check-in belongs to
+	// another check-in (another event's, another staff member's or another
+	// ticket's scan; event_checkins_client_scan_id_uq). 409 conflict, never
+	// that scan's answer (T-137). BE-031.
+	ErrClientScanTaken = problem.ErrConflict.Wrap(errClientScan)
 
 	// ErrNotFound: the event (or staff member) does not exist or is not
 	// visible to the caller (03 §3.6).

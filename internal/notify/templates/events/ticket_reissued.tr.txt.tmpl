@@ -1,0 +1,15 @@
+Merhaba {{.Data.name}},
+
+"{{index .Data "event_title"}}" etkinliği için biletin yenilendi. Önceki QR kod ve kod artık geçersiz; kapıda yalnız bu yeni bileti kullan.
+
+Etkinlik: {{index .Data "event_title"}}
+Düzenleyen: {{index .Data "org_name"}}
+Tarih: {{index .Data "when"}} (Türkiye saati)
+{{if index .Data "location"}}Yer: {{index .Data "location"}}
+{{end}}
+QR kod okunmazsa görevliye şu kodu söyle: {{index .Data "manual_code"}}
+
+Biletini ve kaydını Koro'da görebilir, gerekirse iptal edebilirsin:
+{{index .Data "ticket_url"}}
+
+Bu bilet sana özeldir; QR kodu ve kodu paylaşma: kapıda ilk okutulan bilet geçerli olur. Takvim dosyası (etkinlik.ics) ektedir.

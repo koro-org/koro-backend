@@ -14,6 +14,7 @@ import (
 	"koro/internal/platform/crypto"
 	"koro/internal/platform/crypto/rewrap"
 	"koro/internal/platform/db"
+	"koro/internal/students"
 )
 
 // eventsWiring wires the events module (L8; 01 §4.10). First owner: BE-024.
@@ -44,13 +45,26 @@ import (
 // c.hooks.retention (BE-028: the answer purge periods of
 // kvkk.retention_policies, read at call time).
 //
-// Provided, set in build: svc (events.Events for feed and catalog;
-// events.Registrations, T-241: the students hook once BE-025 is merged),
-// the events KVKK provider (staff assignments, registrations, tickets) and
-// the crypto.rewrap declaration of event_registrations.answers_sensitive_enc.
+// BE-031 consumes c.identity.svc as events.Contacts (the registrant's
+// address of the ticket mails, read in the worker; nil → the mail tasks
+// fail and are retried), c.infra.queue (the resend task, mechanism A),
+// the web origin of the mail links (IDENTITY_LINK_BASE_URL) and SMTP_FROM
+// as the .ics ORGANIZER. The QR renderer is events.NewQRRenderer (yeqown/go-qrcode/v2).
+//
+// Provided, set in build: svc (events.Events for feed and catalog), the
+// students hook c.students.registrations (T-241: events.Registrations
+// adapted to students.Registrations), the events KVKK provider (staff
+// assignments, registrations, tickets, check-ins) and the crypto.rewrap
+// declaration of event_registrations.answers_sensitive_enc.
 // Worker (tasks): event.cancelled → events.cancel_registrations, the
 // registration.* notices, events.waitlist_expire and
-// events.reconcile_counts (01 §6.2, §7).
+// events.reconcile_counts (01 §6.2, §7); BE-031: registration.confirmed →
+// events.send_ticket_email, ticket.reissued →
+// events.send_reissued_ticket_email (critical), event.schedule_changed →
+// events.send_schedule_update, registration.cancelled →
+// events.send_cancellation_email, attendance.finalized →
+// events.mark_no_shows, the task events.resend_ticket_email and the job
+// events.auto_finalize_attendance.
 type eventsWiring struct {
 	store    events.Store
 	newStore func(c *container) events.Store
@@ -59,8 +73,9 @@ type eventsWiring struct {
 	tickets  events.TicketKeys
 
 	mod   events.Module
-	svc   events.Service // set by build
-	built events.Store   // the store build used (wiring and matrix tests seed it)
+	svc   events.Service    // set by build
+	built events.Store      // the store build used (wiring and matrix tests seed it)
+	keys  events.TicketKeys // the ticket key ring build used (matrix fixtures derive the tickets' tokens)
 }
 
 func (w *eventsWiring) build(c *container) error {
@@ -92,9 +107,14 @@ func (w *eventsWiring) build(c *container) error {
 			}
 			return 0, false, nil
 		},
+		QR: events.NewQRRenderer(), Queue: c.infra.queue, ICSOrganizer: c.infra.cfg.Notify.SMTPFrom,
+		LinkBaseURL: c.infra.cfg.Identity.LinkBaseURL, // the web application origin (IDENTITY_LINK_BASE_URL)
+	}
+	if c.identity.cfg != nil {
+		d.LinkBaseURL = c.identity.cfg.LinkBaseURL
 	}
 	if svc := c.identity.svc; svc != nil {
-		d.Users = svc
+		d.Users, d.Contacts = svc, svc
 	}
 	if svc := c.files.svc; svc != nil {
 		d.Files = svc
@@ -130,25 +150,52 @@ func (w *eventsWiring) build(c *container) error {
 	if err != nil {
 		return err
 	}
-	w.mod, w.svc, w.built = mod, mod.Service, store
+	w.mod, w.svc, w.built, w.keys = mod, mod.Service, store, d.Tickets
 	c.privacy = append(c.privacy, mod.Privacy)
+	c.students.registrations = eventsRegistrations{svc: mod.Service} // T-241
 	return nil
 }
 
+// eventsRegistrations adapts events.Registrations to students.Registrations
+// (T-241: the member card's club_event_registrations_count and the admin
+// view's registrations[]; sensitive events are left out by events).
+type eventsRegistrations struct{ svc events.Registrations }
+
+func (r eventsRegistrations) CountInOrg(ctx context.Context, orgID, userID uuid.UUID) (int, error) {
+	return r.svc.CountInOrg(ctx, orgID, userID)
+}
+
+func (r eventsRegistrations) SummaryOf(ctx context.Context, userID uuid.UUID) ([]students.RegistrationSummary, error) {
+	rows, err := r.svc.SummaryOf(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]students.RegistrationSummary, len(rows))
+	for i, x := range rows {
+		out[i] = students.RegistrationSummary{EventID: x.EventID, EventTitle: x.EventTitle, Status: string(x.Status),
+			RegisteredAt: x.RegisteredAt}
+	}
+	return out, nil
+}
+
 // tasks: event.cancelled → events.cancel_registrations, the
-// registration.submitted/waitlisted/rejected/cancelled notices (BE-028;
-// registration.confirmed's ticket e-mail and event.schedule_changed are
-// BE-031's, event.cancelled's offerings catalog's), and the jobs
-// events.waitlist_expire and events.reconcile_counts.
+// registration.submitted/waitlisted/rejected/cancelled notices (BE-028),
+// the ticket, schedule and cancellation mails and the no-shows (BE-031;
+// event.cancelled's offerings are catalog's), the resend task and the
+// jobs events.waitlist_expire, events.reconcile_counts and
+// events.auto_finalize_attendance.
 func (w *eventsWiring) tasks(c *container) {
 	w.mod.Subscribe(c.infra.subs)
+	for _, t := range w.mod.Tasks() {
+		c.infra.jobs.Handle(t)
+	}
 	for _, j := range w.mod.Jobs() {
 		c.infra.jobs.Schedule(j)
 	}
 }
 
-// routes: the 12 operations of BE-024, the 7 of BE-026 and the 8 of
-// BE-028 (04 §2.6); w.svc is nil under `koro openapi`, which Register
+// routes: the 12 operations of BE-024, the 7 of BE-026, the 8 of BE-028
+// and the 9 of BE-031 (04 §2.6); w.svc is nil under `koro openapi`, which Register
 // tolerates.
 func (w *eventsWiring) routes(c *container, api huma.API) { events.Register(api, w.svc) }
 

@@ -1,10 +1,10 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 	"uuid"
 
@@ -31,9 +31,10 @@ var (
 // matrixFixtures seeds the events of the matrix (03 §7.3; fixtures/
 // events.yaml): kind event (org, status, visibility, university, form:
 // published gives the form a published version and a newer draft,
-// checkin, capacity, waitlist, mode), kind registration (event, persona
-// user, status; BE-028) and kind staff (event, persona or helper user,
-// role). Every event is dated
+// checkin, capacity, waitlist, mode, ended: before the matrix clock), kind
+// registration (event, persona user, status; BE-028; ticket: the manual
+// code of its active ticket, BE-031), kind staff (event, persona or helper
+// user, role) and kind checkin (registration, staff; BE-031). Every event is dated
 // matrixOrgTime, so an untouched event's ETag is "1hmhuo3hji000" (the
 // If-Match the matrix files send).
 func (w *eventsWiring) matrixFixtures(fx *matrixFixtures) error {
@@ -47,8 +48,9 @@ func (w *eventsWiring) matrixFixtures(fx *matrixFixtures) error {
 		return err
 	}
 	fixtures := fx.Of("events")
-	// Events first, then their staff.
-	slices.SortStableFunc(fixtures, func(a, b fixture) int { return strings.Compare(a.Kind, b.Kind) })
+	// Events first, then their staff, registrations and check-ins.
+	rank := map[string]int{"event": 0, "staff": 1, "registration": 2, "checkin": 3}
+	slices.SortStableFunc(fixtures, func(a, b fixture) int { return cmp.Compare(rank[a.Kind], rank[b.Kind]) })
 	for _, f := range fixtures {
 		id, err := fx.ID(f.Name)
 		if err != nil {
@@ -68,10 +70,14 @@ func (w *eventsWiring) matrixFixtures(fx *matrixFixtures) error {
 				mode = events.RegistrationMode(str("mode"))
 			}
 			t := matrixOrgTime
+			starts := matrixEventStart
+			if ended, _ := f.Fields["ended"].(bool); ended { // BE-031: ended before the matrix clock
+				starts = matrixOrgTime.Add(10 * time.Hour)
+			}
 			e := events.Event{
 				ID: id, OrgID: org, CreatedBy: creator, Title: "Matris " + f.Name, Slug: matrixSlug(f.Name),
 				Category: events.CategoryWorkshop, Format: events.FormatInPerson, City: new("İstanbul"),
-				StartsAt: matrixEventStart, EndsAt: matrixEventStart.Add(2 * time.Hour),
+				StartsAt: starts, EndsAt: starts.Add(2 * time.Hour),
 				Visibility: events.Visibility(str("visibility")), Status: events.Status(str("status")),
 				RequiresRegistration: true, RegistrationMode: mode, CheckinEnabled: checkin, WaitlistEnabled: waitlist,
 				CreatedAt: t, UpdatedAt: t,
@@ -149,11 +155,47 @@ func (w *eventsWiring) matrixFixtures(fx *matrixFixtures) error {
 			switch r.Status {
 			case events.RegConfirmed:
 				r.ConfirmedAt = &t
+			case events.RegCheckedIn:
+				r.ConfirmedAt, r.CheckedInAt = &t, &t
 			case events.RegWaitlisted:
 				r.WaitlistedAt = &t
 			}
 			if err := mem.PutRegistration(r); err != nil {
 				return fmt.Errorf("registration %s: %w", f.Name, err)
+			}
+			// BE-031: ticket gives the registration its active ticket (version
+			// 1, the field is its manual code; the token is derived from the
+			// key ring of the build, like a real ticket).
+			if code, _ := f.Fields["ticket"].(string); code != "" {
+				key := w.keys.ActiveKeyID()
+				token, err := events.TicketToken(w.keys, key, id, 1)
+				if err != nil {
+					return fmt.Errorf("ticket of %s: %w", f.Name, err)
+				}
+				if err := mem.PutTicket(events.Ticket{ID: uuid.NewV7(), RegistrationID: id, Version: 1, KeyID: key,
+					TokenLookup: events.TicketLookup(token), ManualCode: code, Status: events.TicketActive, IssuedAt: t}); err != nil {
+					return fmt.Errorf("ticket of %s: %w", f.Name, err)
+				}
+			}
+		case "checkin":
+			// BE-031: the valid check-in of a checked-in registration with a
+			// ticket, scanned by the staff persona.
+			reg, err := fx.Ref(f, "registration")
+			if err != nil {
+				return err
+			}
+			staff, err := fx.Ref(f, "staff")
+			if err != nil {
+				return err
+			}
+			tickets := mem.Tickets(reg)
+			if len(tickets) == 0 {
+				return fmt.Errorf("checkin %s: the registration has no ticket", f.Name)
+			}
+			t := matrixOrgTime
+			if err := mem.PutCheckin(events.Checkin{ID: id, RegistrationID: reg, TicketID: tickets[0].ID, StaffUserID: staff,
+				Method: events.MethodQR, ClientScanID: uuid.NewV7(), ScannedAt: t, ReceivedAt: t}); err != nil {
+				return fmt.Errorf("checkin %s: %w", f.Name, err)
 			}
 		default:
 			return fmt.Errorf("fixture %s: unknown kind %q", f.Name, f.Kind)

@@ -100,6 +100,31 @@
 //     registrations.
 //   - The organiser's reads are the event's sub-surface (03 §7.6), support
 //     and platform_admin read by break-glass only, never a sensitive event.
+//
+// BE-031 adds the ticket, the door and the attendance (ADR-0013, 01 §6.3
+// "Check-in", 02 §11.7–11.8, 04 §E.3, §E.5, R-003 §2.5.4–2.5.6):
+//
+//   - The QR payload is "KORO1:<token>", the token derived by HMAC from
+//     the registration and the ticket version under a key of
+//     CRYPTO_TOKEN_KEYS (no PII, no URL); only its SHA-256 is stored, so
+//     the app and every mail show the same re-derived QR. A missing key
+//     stops the process (wiring). A reissue moves to version + 1 and
+//     revokes the old QR.
+//   - The ticket e-mail (worker, outbox): the QR as an inline CID PNG
+//     (QRRenderer), the manual code as text and an .ics (REQUEST; CANCEL
+//     on cancellation; updated on a schedule change), deduplicated per
+//     ticket version; the address is never logged.
+//   - Check-in (event staff and the organiser's managers): one transaction
+//     with the Idempotency-Key; the conditional UPDATE confirmed →
+//     checked_in lets exactly one of concurrent scans of a ticket pass,
+//     the partial unique index of event_checkins is the second layer; a
+//     client_scan_id retry returns the first answer (looked up with the
+//     event and the staff member, T-137). Outcomes are 200 with result
+//     (T-70); another event's ticket is wrong_event without the attendee.
+//   - Attendance: closing it (after the end; the system 24 hours later)
+//     turns the confirmed registrations without check-in into no_show in
+//     batches; a check-in and a no_show keep confirmed_count consistent
+//     (checked_in holds its seat, no_show releases it).
 package events
 
 import (
@@ -116,6 +141,7 @@ import (
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/privacy"
+	"koro/internal/platform/queue"
 )
 
 // Events is the read contract of other modules (01 §4.10).
@@ -138,7 +164,7 @@ type Registrations interface {
 }
 
 // Service is the events service: the cross-module contract plus the HTTP
-// use cases of BE-024 and BE-026 (04 §2.6). Every method that takes an actor calls
+// use cases of BE-024, BE-026, BE-028 and BE-031 (04 §2.6). Every method that takes an actor calls
 // authz.Can first (05 §5.3).
 type Service interface {
 	Events
@@ -225,6 +251,35 @@ type Service interface {
 	// CancelEventRegistration is cancelEventRegistration
 	// (events.registration.cancel): cancelled_by_kind = org.
 	CancelEventRegistration(ctx context.Context, a authz.Actor, eventID, id uuid.UUID, reason string) (RegistrationView, error)
+
+	// GetMyTicket is getMyTicket (events.ticket.read_own): the QR payload
+	// and manual code of a seat holder's active ticket (409 otherwise).
+	GetMyTicket(ctx context.Context, a authz.Actor, id uuid.UUID) (TicketView, error)
+	// ResendMyTicket is resendMyTicket (events.ticket.resend): the same
+	// ticket mailed again from the worker (503 when the queue is down).
+	ResendMyTicket(ctx context.Context, a authz.Actor, id uuid.UUID) error
+	// ReissueMyTicket is reissueMyTicket (events.ticket.reissue, O): version
+	// + 1, the old QR revoked, the new one mailed.
+	ReissueMyTicket(ctx context.Context, a authz.Actor, id uuid.UUID) (TicketView, error)
+	// ReissueRegistrationTicket is reissueRegistrationTicket
+	// (events.ticket.reissue, S): the organiser's managers reissue a
+	// registration's ticket; it returns the new version (never the token).
+	ReissueRegistrationTicket(ctx context.Context, a authz.Actor, eventID, id uuid.UUID) (int, error)
+	// CreateCheckin is createCheckin (events.checkin.create; Idempotency-Key
+	// required): the business outcome is in the result (T-70).
+	CreateCheckin(ctx context.Context, a authz.Actor, eventID uuid.UUID, in CheckinInput) (CheckinResult, error)
+	// VoidCheckin is voidCheckin (events.checkin.void): the registration is
+	// confirmed again.
+	VoidCheckin(ctx context.Context, a authz.Actor, eventID, id uuid.UUID, reason string) (CheckinVoidView, error)
+	// ListCheckins is listCheckins (events.checkin.list): the latest scan
+	// first, attendees as "Ayşe K.".
+	ListCheckins(ctx context.Context, a authz.Actor, eventID uuid.UUID, limit int, after *After) (CheckinPage, error)
+	// GetCheckinStats is getCheckinStats (events.checkin.stats).
+	GetCheckinStats(ctx context.Context, a authz.Actor, eventID uuid.UUID) (CheckinStats, error)
+	// FinalizeEventAttendance is finalizeEventAttendance
+	// (events.attendance.finalize): after the end, once (409 otherwise); it
+	// returns the number of no-shows the worker marks.
+	FinalizeEventAttendance(ctx context.Context, a authz.Actor, eventID uuid.UUID) (int, error)
 }
 
 // Deps are the dependencies of the events module. Store, Tx, Outbox,
@@ -272,6 +327,22 @@ type Deps struct {
 	// (event_form_answers, event_form_answers_sensitive) for the purge
 	// dates of a registration; nil or not found → 90 and 30 days.
 	Retention func(ctx context.Context, code string) (time.Duration, bool, error)
+
+	// QR renders the ticket QR of the e-mails (BE-031; NewQRRenderer). nil → the
+	// ticket mail tasks fail and are retried.
+	QR QRRenderer
+	// Contacts is identity's address lookup of the ticket mails (worker
+	// only). nil → the mail tasks fail and are retried.
+	Contacts Contacts
+	// Queue enqueues the resend task (mechanism A). nil → resendMyTicket
+	// answers 503.
+	Queue queue.Enqueuer
+	// LinkBaseURL is the web origin of the links in the mails (the ticket
+	// page; IDENTITY_LINK_BASE_URL).
+	LinkBaseURL string
+	// ICSOrganizer is the ORGANIZER address of the .ics files (SMTP_FROM);
+	// empty → the files carry no ORGANIZER.
+	ICSOrganizer string
 }
 
 func (d Deps) validate() error {
@@ -308,11 +379,16 @@ func New(d Deps) (Module, error) {
 	if err := d.validate(); err != nil {
 		return Module{}, err
 	}
-	s := &service{d: d}
+	s := &service{d: d, batch: jobBatch}
 	return Module{Service: s, Privacy: privacyProvider{s: s}, svc: s}, nil
 }
 
-type service struct{ d Deps }
+type service struct {
+	d Deps
+	// batch is the rows per transaction of the jobs and consumers (01 §7:
+	// 1000; tests make it smaller).
+	batch int
+}
 
 var _ Service = (*service)(nil)
 

@@ -29,6 +29,7 @@ import (
 	"koro/internal/platform/obs"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/queue"
 )
 
 // t0 is the test clock's start (microsecond precision, like PostgreSQL).
@@ -249,8 +250,19 @@ func (fakeCatalog) UniversityOrgs(_ context.Context, id uuid.UUID) ([]uuid.UUID,
 }
 
 // fakeUsers is identity's user directory: an account per persona,
-// "<name>@example.test", last name "Yılmaz".
-type fakeUsers struct{ suspended map[uuid.UUID]bool }
+// "<name>@example.test", last name "Yılmaz". Contact (BE-031) answers for
+// every account that is not erased.
+type fakeUsers struct{ suspended, erased map[uuid.UUID]bool }
+
+// Contact implements events.Contacts: "u<8 hex>@example.test", first name
+// Ayla, locale tr.
+func (u fakeUsers) Contact(_ context.Context, id uuid.UUID) (identity.UserContact, error) {
+	if u.erased[id] {
+		return identity.UserContact{}, identity.ErrNotFound
+	}
+	return identity.UserContact{ID: id, Email: "u" + id.String()[:8] + "@example.test", FirstName: "Ayla", LastName: "Yılmaz",
+		Locale: "tr"}, nil
+}
 
 func (u fakeUsers) Get(_ context.Context, id uuid.UUID) (identity.UserSummary, error) {
 	for _, p := range append(authztest.Personas(), authztest.Helpers()...) {
@@ -343,17 +355,60 @@ func (r *spyRecorder) records() ([]consent.RecordInput, []int) {
 	return slices.Clone(r.recs), slices.Clone(r.txs)
 }
 
-// spySender is notify: it records the in-app notices.
+// spySender is notify: it records every message; e-mails also go through
+// a real notify service (mail, BE-031) over an in-memory transport, so its
+// validation (CID references, attachment types) and its dedupe keys apply.
 type spySender struct {
 	mu   sync.Mutex
 	msgs []notify.Message
+	mail notify.Sender
 }
 
-func (s *spySender) Send(_ context.Context, m notify.Message) (uuid.UUID, error) {
+func (s *spySender) Send(ctx context.Context, m notify.Message) (uuid.UUID, error) {
+	s.mu.Lock()
+	s.msgs = append(s.msgs, m)
+	s.mu.Unlock()
+	if s.mail != nil && m.Channel == notify.ChannelEmail {
+		return s.mail.Send(ctx, m)
+	}
+	return uuid.NewV7(), nil
+}
+
+// emails returns the e-mail messages of template tmpl ("": all), one per
+// dedupe key (a repeated Send of a key is the same message).
+func (s *spySender) emails(tmpl string) []notify.Message {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.msgs = append(s.msgs, m)
-	return uuid.NewV7(), nil
+	var out []notify.Message
+	seen := map[string]bool{}
+	for _, m := range s.msgs {
+		if m.Channel == notify.ChannelEmail && (tmpl == "" || m.Template == tmpl) && !seen[m.DedupeKey] {
+			seen[m.DedupeKey] = true
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// embeddedTemplates are notify's templates, parsed once.
+var embeddedTemplates = sync.OnceValues(notify.EmbeddedTemplates)
+
+// hashIndex is a blind index stand-in (notify.RecipientIndexer).
+type hashIndex struct{}
+
+func (hashIndex) Index(email string) []byte { h := sha256.Sum256([]byte(email)); return h[:] }
+
+// realMail is a notify service over an in-memory store and transport.
+func realMail(t *testing.T, clk *clock.Fake) (notify.Sender, *notify.MemTransport) {
+	t.Helper()
+	tpl, err := embeddedTemplates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := notify.NewMemTransport()
+	mod := notify.New(notify.Deps{Store: notify.NewMemStore(), Tx: db.NopTx{}, Transport: tr, Templates: tpl, Clock: clk,
+		Log: obs.Discard(), FromAddress: "noreply@koro.test", FromName: "Koro", Recipients: hashIndex{}, Audit: &auditLog{}})
+	return mod.Service, tr
 }
 
 func (s *spySender) sent() []notify.Message {
@@ -388,6 +443,8 @@ type env struct {
 	notices *fakeNotices
 	consent *spyRecorder
 	sender  *spySender
+	mailbox *notify.MemTransport // the e-mails notify handed to the transport
+	queue   *queue.Mem
 	clk     *clock.Fake
 	tx      *spyTx
 	mem     *events.MemStore
@@ -405,15 +462,19 @@ func newEnv(t *testing.T) *env {
 	clk := clock.NewFake(t0)
 	e := &env{
 		clk: clk, tx: &spyTx{}, mem: events.NewMemStore(clk.Now), audit: &auditLog{}, orgs: newFakeOrgs(),
-		out: &spyOutbox{Mem: outbox.NewMem(clk), txs: map[string][]int{}}, users: fakeUsers{suspended: map[uuid.UUID]bool{}},
+		out:     &spyOutbox{Mem: outbox.NewMem(clk), txs: map[string][]int{}},
+		users:   fakeUsers{suspended: map[uuid.UUID]bool{}, erased: map[uuid.UUID]bool{}},
 		notices: &fakeNotices{missing: map[consent.Purpose]bool{}}, consent: &spyRecorder{}, sender: &spySender{},
+		queue: queue.NewMem(),
 	}
+	e.sender.mail, e.mailbox = realMail(t, clk)
 	e.store = &spyStore{MemStore: e.mem}
 	idem := idempotency.New(idempotency.Deps{Tx: e.tx, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()})
 	mod, err := events.New(events.Deps{
 		Store: e.store, Tx: e.tx, Outbox: e.out, Audit: e.audit, Orgs: e.orgs, Catalog: fakeCatalog{},
 		Idempotency: idem, Clock: clk, Log: obs.Discard(), Users: e.users, Notices: e.notices,
 		Consents: e.consent, Sealer: testEnvelope(), Tickets: testDeriver(), Sender: e.sender,
+		QR: events.NewQRRenderer(), Contacts: e.users, Queue: e.queue, LinkBaseURL: "https://koro.test", ICSOrganizer: "noreply@koro.test",
 	})
 	if err != nil {
 		t.Fatal(err)

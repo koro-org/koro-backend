@@ -1,0 +1,15 @@
+Hello {{.Data.name}},
+
+{{if index .Data "promoted"}}A place opened up for you on the waiting list. {{end}}Your registration for "{{index .Data "event_title"}}" is confirmed. At the door, show the QR code of this e-mail or your ticket in the app.
+
+Event: {{index .Data "event_title"}}
+Organiser: {{index .Data "org_name"}}
+When: {{index .Data "when"}} (Istanbul time)
+{{if index .Data "location"}}Where: {{index .Data "location"}}
+{{end}}
+If the QR code cannot be read, tell the staff this code: {{index .Data "manual_code"}}
+
+Your ticket and registration are in Koro, where you can also cancel it:
+{{index .Data "ticket_url"}}
+
+This ticket is yours alone; do not share the QR code or the code: the first scan at the door wins. The calendar file (etkinlik.ics) is attached.

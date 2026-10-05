@@ -9,6 +9,10 @@
 # is stored as is (a confirmed one holds its seat, no ticket). event_reg carries the registrations of the
 # organiser's matrix rows (student's confirmed reg_student), event_manual the pending application,
 # event_full a full event without a waiting list.
+# BE-031: event_door has check-in on (event_staff scans it, event_manager_a manages it); reg_door is
+# student's confirmed registration with an active ticket (manual code MTRXK001), reg_door_in club_member's
+# checked-in one (ticket MTRXK002, check-in checkin_door by event_staff); event_ended (check-in on) ended
+# on 2026-10-01, before the matrix clock, so its attendance can be closed.
 version: 1
 fixtures:
   event_a: { kind: event, org: club_a, status: published, visibility: public, form: published, checkin: true }
@@ -30,3 +34,12 @@ fixtures:
   reg_full: { kind: registration, event: event_full, user: student, status: confirmed }
   reg_uni: { kind: registration, event: event_uni_a, user: student, status: confirmed }
   reg_sensitive: { kind: registration, event: event_sensitive, user: club_member, status: confirmed }
+  event_door: { kind: event, org: club_a, status: published, visibility: public, form: published, checkin: true }
+  event_ended: { kind: event, org: club_a, status: published, visibility: public, form: published, checkin: true,
+                 ended: true }
+  staff_scanner_door: { kind: staff, event: event_door, user: event_staff, role: scanner }
+  staff_manager_door: { kind: staff, event: event_door, user: event_manager_a, role: manager }
+  reg_door: { kind: registration, event: event_door, user: student, status: confirmed, ticket: MTRXK001 }
+  reg_door_in: { kind: registration, event: event_door, user: club_member, status: checked_in, ticket: MTRXK002 }
+  reg_ended: { kind: registration, event: event_ended, user: student, status: confirmed, ticket: MTRXK003 }
+  checkin_door: { kind: checkin, registration: reg_door_in, staff: event_staff }

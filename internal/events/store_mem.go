@@ -37,6 +37,7 @@ type MemStore struct {
 	staff    []Staff                    // insertion order
 	regs     map[uuid.UUID]Registration // by id (BE-028)
 	tickets  []Ticket                   // insertion order (BE-028)
+	checkins []Checkin                  // insertion order (BE-031)
 	// now stamps created_at/updated_at like the column defaults and the
 	// touch trigger; updated_at always moves forward (two writes at the same
 	// fake instant still change the ETag, as two transactions do).

@@ -124,7 +124,7 @@ type TicketKeys interface {
 }
 
 // Sender is what events needs from notify (L3): the in-app notices of the
-// registration events (the ticket e-mail is BE-031's).
+// registration events and the ticket e-mails (BE-031).
 type Sender interface {
 	Send(ctx context.Context, m notify.Message) (uuid.UUID, error)
 }
@@ -137,4 +137,14 @@ type Students interface {
 	AudienceProfile(ctx context.Context, userID uuid.UUID) (students.AudienceProfile, error)
 	// AvatarURLs returns short-lived avatar URLs of the users that have one.
 	AvatarURLs(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]string, error)
+}
+
+// Contacts is what events needs from identity (L4; 01 §4.6 Users.Contact)
+// for the ticket e-mails: the registrant's address, first name and locale,
+// read in the worker only (01 §5.3: notify never resolves a recipient). It
+// is identity.Service.
+type Contacts interface {
+	// Contact returns the address of a live user or identity.ErrNotFound
+	// (unknown or erased: nothing is sent).
+	Contact(ctx context.Context, id uuid.UUID) (identity.UserContact, error)
 }

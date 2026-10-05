@@ -1,0 +1,15 @@
+Hello {{.Data.name}},
+
+Your ticket for "{{index .Data "event_title"}}" was renewed. The previous QR code and code no longer work; use only this new ticket at the door.
+
+Event: {{index .Data "event_title"}}
+Organiser: {{index .Data "org_name"}}
+When: {{index .Data "when"}} (Istanbul time)
+{{if index .Data "location"}}Where: {{index .Data "location"}}
+{{end}}
+If the QR code cannot be read, tell the staff this code: {{index .Data "manual_code"}}
+
+Your ticket and registration are in Koro, where you can also cancel it:
+{{index .Data "ticket_url"}}
+
+This ticket is yours alone; do not share the QR code or the code: the first scan at the door wins. The calendar file (etkinlik.ics) is attached.

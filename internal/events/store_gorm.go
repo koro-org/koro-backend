@@ -50,6 +50,11 @@ var constraints = db.Constraints{
 	// is the second layer behind the conditional seat UPDATE.
 	"event_registrations_active_uq": ErrAlreadyRegistered,
 	"events_capacity_fill_chk":      ErrCapacityFull,
+	// BE-031: a client_scan_id is unique over the table (another scan's id is
+	// 409, never its answer: T-137); one valid check-in per registration is
+	// the second layer behind the conditional status UPDATE.
+	"event_checkins_client_scan_id_uq": ErrClientScanTaken,
+	"event_checkins_one_active_uq":     problem.ErrConflict,
 }
 
 func wrap(op string, err error) error {

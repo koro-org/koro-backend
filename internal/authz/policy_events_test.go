@@ -385,3 +385,117 @@ func TestEventsPolicy_Registrations(t *testing.T) {
 	draft := eventRes("club_a", "draft", "public", "", nil)
 	wantErr(t, authz.Can(ctx, persona(t, "student"), authz.EventsRegistrationCreate, draft(p)), authz.ErrNotFound, false)
 }
+
+// ownTicket is the ticket resource of persona owner's own registration of
+// event_a (BE-031).
+func ownTicket(owner string) func(authztest.Persona) authz.Resource {
+	return func(authztest.Persona) authz.Resource {
+		org, u := authztest.ID("club_a"), authztest.ID(owner)
+		return authz.Resource{Type: authz.TypeTicket, ID: authztest.ID("reg_" + owner), OrgID: &org, OwnerUserID: &u,
+			Attrs: map[string]string{}}
+	}
+}
+
+// TestEventsPolicy_TicketsAndCheckins pins 03 §5.6 for BE-031's 8 actions:
+// the ticket is O (reissue also S for the organiser's managers on the
+// event's sub-surface); the door (create, list, stats) is S for the
+// organiser's managers and E for the event's staff, void and finalize Em
+// (manager only); platform_admin only for the platform org (k-po).
+func TestEventsPolicy_TicketsAndCheckins(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	fb, nf := authz.ErrForbidden, authz.ErrNotFound
+	all := func(err error) map[string]error {
+		m := map[string]error{}
+		for _, n := range authztest.PersonaNames {
+			m[n] = err
+		}
+		return m
+	}
+	with := func(base map[string]error, over map[string]error) map[string]error {
+		for k, v := range over {
+			base[k] = v
+		}
+		return base
+	}
+	eventA := eventRes("club_a", "published", "public", "", staffOfEventA)
+	members := eventRes("club_a", "published", "members", "", staffOfEventA)
+	uniEvent := eventRes("uni_a", "published", "university", "uni_a", nil)
+	hiddenMembers := map[string]error{"user_unverified": nf, "student": nf, "student_minor": nf, "other_club_admin": nf,
+		"university_rep": nf, "company_member": nf, "company_admin": nf, "other_company_member": nf}
+	hiddenUni := map[string]error{"user_unverified": nf, "other_club_admin": nf, "company_member": nf, "company_admin": nf,
+		"other_company_member": nf}
+	for _, tc := range []struct {
+		name string
+		act  authz.Action
+		res  func(authztest.Persona) authz.Resource
+		want map[string]error
+	}{
+		{"read_own", authz.EventsTicketReadOwn, ownTicket("student"), with(all(nf), map[string]error{"anonymous": fb, "student": nil})},
+		{"resend", authz.EventsTicketResend, ownTicket("platform_admin"),
+			with(all(nf), map[string]error{"anonymous": fb, "platform_admin": nil})},
+		{"reissue own", authz.EventsTicketReissue, ownTicket("event_staff"),
+			with(all(nf), map[string]error{"anonymous": fb, "event_staff": nil})},
+		{"reissue by the organiser", authz.EventsTicketReissue, eventA, with(all(fb), map[string]error{"club_admin": nil})},
+		{"reissue university", authz.EventsTicketReissue, uniEvent,
+			with(with(all(fb), hiddenUni), map[string]error{"university_rep": nil})},
+		{"checkin create", authz.EventsCheckinCreate, eventA,
+			with(all(fb), map[string]error{"club_admin": nil, "event_staff": nil})},
+		{"checkin list members", authz.EventsCheckinList, members,
+			with(with(all(fb), hiddenMembers), map[string]error{"club_admin": nil, "event_staff": nil})},
+		{"checkin stats university", authz.EventsCheckinStats, uniEvent,
+			with(with(all(fb), hiddenUni), map[string]error{"university_rep": nil})},
+		{"checkin void: scanner is not enough", authz.EventsCheckinVoid, eventA,
+			with(all(fb), map[string]error{"club_admin": nil})},
+		{"finalize", authz.EventsAttendanceFinalize, eventA, with(all(fb), map[string]error{"club_admin": nil})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			for _, p := range authztest.Personas() {
+				want, ok := tc.want[p.Name]
+				if !ok {
+					t.Fatalf("no expectation for %s", p.Name)
+				}
+				t.Run(p.Name, func(t *testing.T) {
+					wantErr(t, authz.Can(ctx, p.Actor, tc.act, tc.res(p)), want, false)
+				})
+			}
+		})
+	}
+	p := authztest.Personas()[0]
+	// Em: the event's manager voids and finalizes; a scanner does not.
+	mgr := persona(t, "event_manager_a")
+	managed := func(role string) authz.Resource {
+		r := eventRes("club_a", "published", "public", "", nil)(p)
+		r.Attrs[authz.AttrEventStaffRole] = role
+		return r
+	}
+	for _, act := range []authz.Action{authz.EventsCheckinVoid, authz.EventsAttendanceFinalize, authz.EventsCheckinCreate,
+		authz.EventsCheckinList, authz.EventsCheckinStats} {
+		wantErr(t, authz.Can(ctx, mgr, act, managed("manager")), nil, false)
+	}
+	scanner := persona(t, "event_staff")
+	wantErr(t, authz.Can(ctx, scanner, authz.EventsAttendanceFinalize, managed("scanner")), fb, false)
+	// Staff of another event (Attrs none) get nothing; the staff grant is
+	// not the reissue grant.
+	wantErr(t, authz.Can(ctx, scanner, authz.EventsCheckinCreate, managed("none")), fb, false)
+	wantErr(t, authz.Can(ctx, mgr, authz.EventsTicketReissue, managed("manager")), fb, false)
+	// k-po: a platform_admin of the platform org runs the door of its events.
+	pad := persona(t, "platform_admin")
+	pad.Memberships = append(pad.Memberships, authz.Membership{OrgID: authztest.ID("platform_org"), OrgKind: authz.OrgPlatform,
+		Role: authz.MemberStaff})
+	platformEvent := eventRes("platform_org", "published", "public", "", nil)
+	for _, act := range []authz.Action{authz.EventsCheckinCreate, authz.EventsCheckinVoid, authz.EventsCheckinList,
+		authz.EventsCheckinStats, authz.EventsAttendanceFinalize} {
+		wantErr(t, authz.Can(ctx, pad, act, platformEvent(p)), nil, false)
+	}
+	// ... but reissues only its own tickets (03 §5.6: pad O).
+	wantErr(t, authz.Can(ctx, pad, authz.EventsTicketReissue, platformEvent(p)), fb, false)
+	// The system closes attendances (03 §3.7); it scans nothing.
+	sys := authz.SystemActor("events.auto_finalize_attendance")
+	wantErr(t, authz.Can(ctx, sys, authz.EventsAttendanceFinalize, authz.Resource{}), nil, false)
+	wantErr(t, authz.Can(ctx, sys, authz.EventsCheckinCreate, authz.Resource{}), fb, false)
+	// A draft event's door is its managers' only.
+	draft := eventRes("club_a", "draft", "public", "", staffOfEventA)
+	wantErr(t, authz.Can(ctx, scanner, authz.EventsCheckinCreate, draft(p)), nf, false)
+}

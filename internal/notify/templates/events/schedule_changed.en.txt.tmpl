@@ -1,0 +1,12 @@
+Hello {{.Data.name}},
+
+The time or the venue of "{{index .Data "event_title"}}", which you registered for, changed. The current details:
+
+Event: {{index .Data "event_title"}}
+Organiser: {{index .Data "org_name"}}
+When: {{index .Data "when"}} (Istanbul time)
+{{if index .Data "location"}}Where: {{index .Data "location"}}
+{{end}}
+Your ticket stays the same. The updated calendar file (etkinlik.ics) is attached; open it to update your calendar.
+
+Your ticket and registration: {{index .Data "ticket_url"}}

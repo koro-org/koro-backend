@@ -13,6 +13,7 @@ import (
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/privacy"
+	"koro/internal/platform/queue"
 )
 
 // useMemStore installs the in-memory events stores used by service,
@@ -89,7 +90,8 @@ func TestWire_EventsRegistrationTasks(t *testing.T) {
 			jobs = append(jobs, j.Name+" "+j.Cron+" "+j.Queue)
 		}
 	}
-	if want := []string{"events.waitlist_expire */15 * * * * default", "events.reconcile_counts 0 3 * * * low"}; !slices.Equal(jobs, want) {
+	if want := []string{"events.waitlist_expire */15 * * * * default", "events.reconcile_counts 0 3 * * * low",
+		"events.auto_finalize_attendance 20 * * * * default"}; !slices.Equal(jobs, want) {
 		t.Fatalf("events jobs = %q, want %q", jobs, want)
 	}
 	if !slices.ContainsFunc(c.keys.columns, func(col rewrap.Column) bool {
@@ -101,5 +103,46 @@ func TestWire_EventsRegistrationTasks(t *testing.T) {
 	// The registrations reader of students (T-241) answers from the built store.
 	if n, err := c.events.svc.CountInOrg(t.Context(), uuid.NewV7(), uuid.NewV7()); err != nil || n != 0 {
 		t.Fatalf("CountInOrg = %d, %v", n, err)
+	}
+}
+
+// TestWire_EventsCheckinTasks pins what BE-031 adds: the ticket mails
+// (critical), the schedule update, the cancellation .ics and the no-shows
+// as outbox subscriptions, the resend task, and the students hook of
+// T-241 answering from the events store.
+func TestWire_EventsCheckinTasks(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range []struct{ topic, name, queue string }{
+		{domainevent.TopicRegistrationConfirmed, events.SendTicketEmailTaskName, queue.Critical},
+		{domainevent.TopicTicketReissued, events.SendReissuedTicketTaskName, queue.Critical},
+		{domainevent.TopicEventScheduleChanged, events.SendScheduleUpdateTaskName, queue.Default},
+		{domainevent.TopicRegistrationCancelled, events.SendCancellationEmailTaskName, queue.Default},
+		{domainevent.TopicAttendanceFinalized, events.MarkNoShowsTaskName, queue.Default},
+	} {
+		if !slices.ContainsFunc(c.infra.subs.For(x.topic), func(s outbox.Subscription) bool {
+			return s.Name == x.name && s.Queue == x.queue
+		}) {
+			t.Errorf("%s has no subscription %s on %s", x.topic, x.name, x.queue)
+		}
+	}
+	if !slices.ContainsFunc(c.infra.jobs.Tasks(), func(tk queue.Task) bool { return tk.Name == events.ResendTicketTaskName }) {
+		t.Fatal("events.resend_ticket_email has no handler")
+	}
+	if c.events.keys == nil {
+		t.Fatal("no ticket key ring")
+	}
+	// T-241: the students reader is bound and answers from the events store.
+	if c.students.registrations == nil {
+		t.Fatal("c.students.registrations is not bound")
+	}
+	if n, err := c.students.registrations.CountInOrg(t.Context(), uuid.NewV7(), uuid.NewV7()); err != nil || n != 0 {
+		t.Fatalf("CountInOrg = %d, %v", n, err)
+	}
+	if rows, err := c.students.registrations.SummaryOf(t.Context(), uuid.NewV7()); err != nil || len(rows) != 0 {
+		t.Fatalf("SummaryOf = %+v, %v", rows, err)
 	}
 }

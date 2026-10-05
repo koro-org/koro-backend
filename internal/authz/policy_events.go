@@ -43,6 +43,23 @@ const TypeEventCatalog = "event_catalog"
 //	events.registration.decide,     S: club_admin, university_rep, career_staff; platform_admin k-po
 //	  cancel
 //
+// and by BE-031 for the tickets, the door and the attendance:
+//
+//	events.ticket.read_own,         O for every signed-in user (ticket with OwnerUserID)
+//	  resend
+//	events.ticket.reissue           O on the own ticket (/me/...); S on the event's sub-surface for
+//	                                  club_admin, university_rep, career_staff (/events/.../ticket/reissue;
+//	                                  platform_admin and staff only O)
+//	events.checkin.create, list,    S: club_admin, university_rep, career_staff; E: the event's staff
+//	  stats                           (scanner or manager); platform_admin k-po
+//	events.checkin.void,            S: club_admin, university_rep, career_staff; Em: the event's manager
+//	  events.attendance.finalize      only; platform_admin k-po (attendance.finalize is also a system
+//	                                  action, 03 §3.7, allowed by the core)
+//
+// The check-in actions take the event resource (the door is the event's
+// sub-surface, 03 §7.6): a visible event without the role is 403, an
+// invisible one 404, before any ticket is read.
+//
 // The organiser's registration actions (list, read, decide, cancel) take
 // the event resource: the registrations are the event's sub-surface (03
 // §7.6), so a visible event without the role is 403 and an invisible one
@@ -104,6 +121,12 @@ func eventsPolicy() Policy {
 				return r.Type == TypeAdminSurface && AdminSurfaceVisible(a)
 			case EventsRegistrationListOwn, EventsRegistrationReadOwn, EventsRegistrationCancelOwn:
 				return r.Type == TypeRegistration && a.Owns(r)
+			case EventsTicketReadOwn, EventsTicketResend:
+				return r.Type == TypeTicket && a.Owns(r)
+			case EventsTicketReissue:
+				if r.Type == TypeTicket {
+					return a.Owns(r)
+				}
 			}
 			return r.Type == TypeEvent && eventVisible(a, r)
 		},
@@ -142,8 +165,19 @@ func eventsPolicy() Policy {
 					gs = append(gs, Grant{Role: RolePlatformAdmin})
 				}
 				return gs
+			case EventsTicketReadOwn, EventsTicketResend:
+				return []Grant{{Role: RoleSelf}}
+			case EventsTicketReissue:
+				if r.Type == TypeTicket {
+					return []Grant{{Role: RoleSelf}} // O (every column)
+				}
+				return eventOrgGrants(a, r.OrgID) // ·S of cla and uni
+			case EventsCheckinCreate, EventsCheckinList, EventsCheckinStats:
+				return checkinGrants(a, r, false)
+			case EventsCheckinVoid, EventsAttendanceFinalize:
+				return checkinGrants(a, r, true)
 			}
-			return nil // the actions of BE-031, BE-050: not written yet
+			return nil // the actions of BE-050: not written yet
 		},
 	}
 }
@@ -216,4 +250,23 @@ func eventVisibleAt(a Actor, r Resource, status string) bool {
 		return member || staff
 	}
 	return false
+}
+
+// checkinGrants are the door's grants (03 §5.6): the organiser's managers
+// (S), the event's staff (E; managerOnly: Em, the manager role only) and
+// platform_admin for the platform org (k-po).
+func checkinGrants(a Actor, r Resource, managerOnly bool) []Grant {
+	gs := eventOrgGrants(a, r.OrgID)
+	switch r.Attr(AttrEventStaffRole) {
+	case "manager":
+		gs = append(gs, Grant{Role: RoleEventStaff})
+	case "scanner":
+		if !managerOnly {
+			gs = append(gs, Grant{Role: RoleEventStaff})
+		}
+	}
+	if platformOrg(a, r.OrgID) { // k-po
+		gs = append(gs, Grant{Role: RolePlatformAdmin})
+	}
+	return gs
 }

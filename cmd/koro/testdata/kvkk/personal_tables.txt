@@ -76,7 +76,7 @@ event_form_versions         staff     events        -
 form_lint_rules             staff     events        -
 event_registrations         special   events        provider:events
 registration_tickets        personal  events        provider:events
-event_checkins              personal  events        todo:BE-031
+event_checkins              personal  events        provider:events
 event_data_exports          personal  events        todo:BE-050
 # feed
 feed_org_settings           staff     feed          -

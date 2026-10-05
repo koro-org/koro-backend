@@ -1,0 +1,12 @@
+<p style="margin:0 0 12px 0;">Merhaba {{.Data.name}},</p>
+<p style="margin:0 0 12px 0;">Biletin yenilendi. Önceki QR kod ve kod artık geçersiz; kapıda yalnız bu yeni bileti kullan.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 16px 0;font-size:15px;">
+<tr><td style="padding:2px 12px 2px 0;color:#52525b;">Etkinlik</td><td style="padding:2px 0;"><strong>{{index .Data "event_title"}}</strong></td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#52525b;">Düzenleyen</td><td style="padding:2px 0;">{{index .Data "org_name"}}</td></tr>
+<tr><td style="padding:2px 12px 2px 0;color:#52525b;">Tarih</td><td style="padding:2px 0;">{{index .Data "when"}} (Türkiye saati)</td></tr>
+{{if index .Data "location"}}<tr><td style="padding:2px 12px 2px 0;color:#52525b;">Yer</td><td style="padding:2px 0;">{{index .Data "location"}}</td></tr>
+{{end}}</table>
+<p style="margin:0 0 8px 0;text-align:center;"><img src="cid:ticket-qr" width="240" height="240" alt="Bilet QR kodu" style="display:block;margin:0 auto;border:0;"></p>
+<p style="margin:0 0 16px 0;text-align:center;">QR kod okunmazsa görevliye bu kodu söyle:<br><strong style="font-family:Consolas,Menlo,monospace;font-size:20px;letter-spacing:2px;">{{index .Data "manual_code"}}</strong></p>
+<p style="margin:0 0 12px 0;"><a href="{{index .Data "ticket_url"}}" style="color:#1d4ed8;">Biletini Koro'da aç</a> (kaydını oradan iptal de edebilirsin).</p>
+<p style="margin:0;font-size:13px;color:#52525b;">Bu bilet sana özeldir; QR kodu ve kodu paylaşma: kapıda ilk okutulan bilet geçerli olur. Takvim dosyası (etkinlik.ics) ektedir.</p>

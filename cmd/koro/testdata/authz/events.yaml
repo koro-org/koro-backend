@@ -1,4 +1,4 @@
-# Authz matrix of the events module (03 §5.6, 04 §2.6; BE-024, BE-026, BE-028). 27 operations × 18 personas.
+# Authz matrix of the events module (03 §5.6, 04 §2.6; BE-024, BE-026, BE-028, BE-031). 36 operations × 18 personas.
 # Event visibility (03 §3.6): published public events are everyone's; a members event is its org's
 # members', its staff's and every platform role's; a university event is also the verified students'
 # of that university; a draft is its organiser's club_admin / university_rep's and every platform
@@ -17,6 +17,11 @@
 # are O (anyone else's 404). The organiser's list/read/decide/cancel are the event's sub-surface (03 §7.6):
 # managers 200, others who see the event 403; support and platform_admin read by break-glass only
 # (X-Koro-Access-Reason; without it 403) and never a sensitive club's event (Y2: 404).
+# BE-031 tickets: /me/registrations/{id}/ticket* are O (anyone else's 404); the organiser's reissue is the
+# event's sub-surface (club_admin 200; staff and platform roles only O → 403). The door (check-ins, list,
+# stats) is S for the organiser's managers and E for the event's staff (event_staff scans event_door); void
+# and the attendance close are Em (the manager helper event_manager_a; the scanner 403). Business outcomes
+# of a scan are 200 with result (T-70); 409s (closed attendance, second void) live in scenarios/events.yaml.
 version: 1
 groups:
   # signed-in users without a membership in club_a (and no platform role).
@@ -63,6 +68,9 @@ groups:
                  finance_admin, talent_auditor]
   # platform roles without break-glass (support and platform_admin have it).
   ev_no_bg_staff: [moderator, dpo, finance_admin, talent_auditor]
+  # signed-in users who see public event_door but do not run its door (event_staff scans it).
+  ev_not_door: [user_unverified, student, student_minor, club_member, other_club_admin, university_rep, company_member,
+                company_admin, other_company_member]
 
 operations:
   listEvents:
@@ -724,15 +732,170 @@ operations:
           university_rep: 200
           "@platform_staff": 403
 
+  getMyTicket:
+    method: GET
+    path: /api/v1/me/registrations/{registration_id}/ticket
+    action: events.ticket.read_own
+    path_params: { registration_id: reg_door }
+    expect:
+      anonymous: 401
+      student: 200
+      "@ev_not_owner": 404
+    variants:
+      - name: unknown_registration
+        path_params: { registration_id: "literal:00000000-0000-7000-8000-0000000000dd" }
+        expect:
+          anonymous: 401
+          "@signed_in": 404
+
+  resendMyTicket:
+    method: POST
+    path: /api/v1/me/registrations/{registration_id}/ticket/resend
+    action: events.ticket.resend
+    path_params: { registration_id: reg_door }
+    expect:
+      anonymous: 401
+      student: 202
+      "@ev_not_owner": 404
+
+  reissueMyTicket:
+    method: POST
+    path: /api/v1/me/registrations/{registration_id}/ticket/reissue
+    action: events.ticket.reissue
+    path_params: { registration_id: reg_door }
+    expect:
+      anonymous: 401
+      student: 200
+      "@ev_not_owner": 404
+
+  reissueRegistrationTicket:
+    method: POST
+    path: /api/v1/events/{event_id}/registrations/{registration_id}/ticket/reissue
+    action: events.ticket.reissue
+    path_params: { event_id: event_door, registration_id: reg_door }
+    expect:
+      anonymous: 401
+      "@ev_not_manager_a": 403
+      club_admin: 200
+      "@platform_staff": 403
+    variants:
+      - name: registration_of_another_event
+        path_params: { event_id: event_reg, registration_id: reg_door }
+        note: 06 H-38 — a registration is reissued through its own event only
+        expect:
+          anonymous: 401
+          "@ev_not_manager_a": 403
+          club_admin: 404
+          "@platform_staff": 403
+      - name: university_event
+        path_params: { event_id: event_uni_a, registration_id: reg_uni }
+        expect:
+          anonymous: 401
+          "@ev_uni_hidden": 404
+          "@ev_uni_a_students": 403
+          university_rep: 200
+          "@platform_staff": 403
+
+  createCheckin:
+    method: POST
+    path: /api/v1/events/{event_id}/check-ins
+    action: events.checkin.create
+    idempotency: required
+    path_params: { event_id: event_door }
+    body: bodies/events/create_checkin.json
+    expect:
+      anonymous: 401
+      "@ev_not_door": 403
+      club_admin: 200
+      event_staff: 200
+      "@platform_staff": 403
+    variants:
+      - name: unknown_code
+        body: bodies/events/create_checkin_unknown.json
+        note: a code of no ticket is a business outcome (200, result not_found; T-70)
+        expect:
+          anonymous: 401
+          "@ev_not_door": 403
+          club_admin: 200
+          event_staff: 200
+          "@platform_staff": 403
+
+  voidCheckin:
+    method: POST
+    path: /api/v1/events/{event_id}/check-ins/{checkin_id}/void
+    action: events.checkin.void
+    path_params: { event_id: event_door, checkin_id: checkin_door }
+    body: bodies/events/void_checkin.json
+    expect:
+      anonymous: 401
+      "@ev_not_manager_a": 403
+      club_admin: 200
+      "@platform_staff": 403
+    variants:
+      - name: checkin_of_another_event
+        path_params: { event_id: event_a, checkin_id: checkin_door }
+        note: 06 H-38 — a check-in is voided through its own event only
+        expect:
+          anonymous: 401
+          "@ev_not_manager_a": 403
+          club_admin: 404
+          "@platform_staff": 403
+
+  listCheckins:
+    method: GET
+    path: /api/v1/events/{event_id}/check-ins
+    action: events.checkin.list
+    path_params: { event_id: event_door }
+    expect:
+      anonymous: 401
+      "@ev_not_door": 403
+      club_admin: 200
+      event_staff: 200
+      "@platform_staff": 403
+    variants:
+      - name: university_event
+        path_params: { event_id: event_uni_a }
+        expect:
+          anonymous: 401
+          "@ev_uni_hidden": 404
+          "@ev_uni_a_students": 403
+          university_rep: 200
+          "@platform_staff": 403
+
+  getCheckinStats:
+    method: GET
+    path: /api/v1/events/{event_id}/check-ins/stats
+    action: events.checkin.stats
+    path_params: { event_id: event_door }
+    expect:
+      anonymous: 401
+      "@ev_not_door": 403
+      club_admin: 200
+      event_staff: 200
+      "@platform_staff": 403
+    variants:
+      - name: members_event
+        path_params: { event_id: event_a_members }
+        expect:
+          anonymous: 401
+          "@ev_members_hidden": 404
+          club_member: 403
+          club_admin: 200
+          event_staff: 200
+          "@platform_staff": 403
+
+  finalizeEventAttendance:
+    method: POST
+    path: /api/v1/events/{event_id}/attendance/finalize
+    action: events.attendance.finalize
+    path_params: { event_id: event_ended }
+    expect:
+      anonymous: 401
+      "@ev_not_manager_a": 403
+      club_admin: 200
+      "@platform_staff": 403
+
 pending_actions:
-  - events.ticket.read_own           # BE-031
-  - events.ticket.resend             # BE-031
-  - events.ticket.reissue            # BE-031
-  - events.checkin.create            # BE-031
-  - events.checkin.void              # BE-031
-  - events.checkin.list              # BE-031
-  - events.checkin.stats             # BE-031
-  - events.attendance.finalize       # BE-031
   - events.export.create             # BE-050
   - events.export.list               # BE-050
   - events.export.download           # BE-050

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"errors"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -502,12 +503,95 @@ func runStoreContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 	})
 }
 
+// runRetentionContract checks PurgeExpired (BE-057) on every notify table:
+// a dry run counts the rows whose anchor is before the cut-off, a purge
+// deletes at most limit of them, oldest first, and leaves younger rows.
+func runRetentionContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
+	t.Helper()
+	cutoff := t0.AddDate(-1, 0, 0)
+	ages := []time.Time{t0.AddDate(-2, 0, 0), t0.AddDate(-2, 0, 1), t0.AddDate(-2, 0, 2), t0} // three expired, one young
+	seed := map[string]func(t *testing.T, w storeWorld, uid uuid.UUID, i int, at time.Time){
+		notify.PolicyNotificationDelivery: func(t *testing.T, w storeWorld, uid uuid.UUID, i int, at time.Time) {
+			d := notify.Delivery{ID: newID(), UserID: &uid, RecipientIndex: index("r@koro.test"), Channel: notify.ChannelEmail,
+				Category: notify.CategoryTransactional, Template: "notify.test_message", TemplateVersion: 1, DedupeKey: "k" + strconv.Itoa(i)}
+			if _, _, err := w.s.Claim(t.Context(), d, at, time.Minute); err != nil {
+				t.Fatal(err)
+			}
+		},
+		notify.PolicyEmailSuppression: func(t *testing.T, w storeWorld, _ uuid.UUID, i int, at time.Time) {
+			if _, err := w.s.Suppress(t.Context(), notify.Suppression{EmailIndex: index("s" + strconv.Itoa(i) + "@koro.test"),
+				Reason: notify.SuppressHardBounce, Source: notify.SourceProviderWebhook, CreatedAt: at}); err != nil {
+				t.Fatal(err)
+			}
+		},
+		notify.PolicyPushToken: func(t *testing.T, w storeWorld, uid uuid.UUID, i int, at time.Time) {
+			sum := sha256.Sum256([]byte("token-" + strconv.Itoa(i)))
+			if _, err := w.s.UpsertPushToken(t.Context(), notify.PushToken{ID: newID(), UserID: uid, Platform: notify.PushAndroid,
+				Token: "token-" + strconv.Itoa(i), TokenSHA256: sum[:], CreatedAt: at, LastSeenAt: at}); err != nil {
+				t.Fatal(err)
+			}
+		},
+		notify.PolicyInAppNotification: func(t *testing.T, w storeWorld, uid uuid.UUID, _ int, at time.Time) {
+			if _, err := w.s.InsertInApp(t.Context(), notify.InAppNotification{ID: newID(), UserID: uid, Kind: "notify.test_message",
+				Title: "Başlık", CreatedAt: at}); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	for policy, put := range seed {
+		t.Run("retention "+policy, func(t *testing.T) {
+			t.Parallel()
+			w := newWorld(t)
+			uid := w.user(t)
+			for i, at := range ages {
+				put(t, w, uid, i, at)
+			}
+			purge := func(limit int, dry bool) int {
+				t.Helper()
+				n, err := w.s.PurgeExpired(t.Context(), policy, cutoff, limit, dry)
+				if err != nil {
+					t.Fatalf("PurgeExpired(%s, %d, %v): %v", policy, limit, dry, err)
+				}
+				return n
+			}
+			if n := purge(0, true); n != 3 {
+				t.Fatalf("dry run = %d, want 3", n)
+			}
+			if n := purge(0, true); n != 3 {
+				t.Fatalf("a dry run deleted: second count = %d", n)
+			}
+			if n := purge(2, false); n != 2 {
+				t.Fatalf("first batch = %d, want 2", n)
+			}
+			if n := purge(2, false); n != 1 {
+				t.Fatalf("second batch = %d, want 1", n)
+			}
+			if n := purge(2, false); n != 0 {
+				t.Fatalf("third batch = %d, want 0", n)
+			}
+			// The young row is still there: a cut-off after it counts it.
+			if n, err := w.s.PurgeExpired(t.Context(), policy, t0.Add(time.Hour), 0, true); err != nil || n != 1 {
+				t.Fatalf("young rows = %d, %v; want 1", n, err)
+			}
+		})
+	}
+	t.Run("retention of an unknown policy fails", func(t *testing.T) {
+		t.Parallel()
+		w := newWorld(t)
+		if _, err := w.s.PurgeExpired(t.Context(), "no_such_policy", cutoff, 10, true); err == nil {
+			t.Fatal("PurgeExpired(unknown) succeeded")
+		}
+	})
+}
+
 // index is a 32-byte blind index for the contract (the table CHECK).
 func index(email string) []byte { return testIndexer{}.Index(email) }
 
 func TestMemStore(t *testing.T) {
 	t.Parallel()
-	runStoreContract(t, func(*testing.T) storeWorld {
+	world := func(*testing.T) storeWorld {
 		return storeWorld{s: notify.NewMemStore(), user: func(*testing.T) uuid.UUID { return newID() }}
-	})
+	}
+	runStoreContract(t, world)
+	runRetentionContract(t, world)
 }

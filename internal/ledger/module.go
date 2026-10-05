@@ -48,6 +48,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
+	"koro/internal/platform/privacy"
 	"koro/internal/platform/queue"
 )
 
@@ -117,6 +118,9 @@ func (d Deps) validate() error {
 // Module is what ledger hands to the composition root.
 type Module struct {
 	Service Service
+	// Sweeper ends the retention of the financial records (10 years from
+	// the end of the calendar year; 06 H-57, BE-057).
+	Sweeper privacy.RetentionSweeper
 
 	svc *service
 }
@@ -128,7 +132,7 @@ func New(d Deps) (Module, error) {
 		return Module{}, err
 	}
 	s := &service{d: d}
-	return Module{Service: s, svc: s}, nil
+	return Module{Service: s, Sweeper: sweeper{s: s}, svc: s}, nil
 }
 
 // Jobs returns the scheduled jobs of ledger (01 §7): ledger.integrity_check.

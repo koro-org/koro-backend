@@ -88,15 +88,14 @@ type Files interface {
 	// PresignGet returns a download URL valid for ttl (≤ 5 minutes) of a
 	// clean file; files.ErrNotClean otherwise.
 	PresignGet(ctx context.Context, fileID uuid.UUID, ttl time.Duration) (files.Download, error)
+	// Delete removes a claim's evidence in the caller's transaction once
+	// directory has cleared its reference: KVKK erasure, a file the virus
+	// scan rejected and the end of the claim's retention (club_claim,
+	// BE-057). The objects go after the commit. The pair is on the
+	// 01 §6.3 allow-list (BE-057).
+	// sync-write: files.Files.Delete
+	Delete(ctx context.Context, a authz.Actor, fileID uuid.UUID) error
 }
-
-// FileRemover deletes a claim's evidence (files.Files.Delete) once
-// directory has cleared its reference: KVKK erasure and a file the virus
-// scan rejected. It is a function, not a port method: the pair directory →
-// files.Files.Delete is not in the 01 §6.3 allow-list (same gap as
-// identity's T-221 and kvkk's H-49). nil → the file stays and a warning is
-// logged (orphan cleanup does not touch an attached file; retention does).
-type FileRemover func(ctx context.Context, a authz.Actor, fileID uuid.UUID) error
 
 // Students answers whether a user holds an active student verification and
 // of which university (identity, L4). A claim approval re-checks the

@@ -37,9 +37,11 @@ import (
 // (the org moderation and report outcome notice tasks) and
 // c.infra.cfg.Feed (FEED_REVIEW_THRESHOLD, FEED_REPORT_HIDE_THRESHOLD).
 //
-// Provided, set in build: svc (feed.Posts for messaging) and the feed KVKK
+// Provided, set in build: svc (feed.Posts for messaging), the feed KVKK
 // provider (posts.author_user_id; likes, saves, hides, follows, mutes;
-// reports; a moderator's decisions).
+// reports; a moderator's decisions) and the feed retention sweeper (removed
+// posts with their images through c.files.svc Delete, resolved reports,
+// moderation actions; BE-057).
 type feedWiring struct {
 	store    feed.Store
 	newStore func(c *container) feed.Store
@@ -100,6 +102,7 @@ func (w *feedWiring) build(c *container) error {
 	}
 	w.mod, w.svc, w.built, w.late = mod, mod.Service, store, c
 	c.privacy = append(c.privacy, mod.Privacy)
+	c.sweepers = append(c.sweepers, mod.Sweeper)
 	return nil
 }
 

@@ -458,3 +458,31 @@ func (s gormRecords) Subprocessors(ctx context.Context, active *bool) ([]Subproc
 	}
 	return s.subs(ctx, `SELECT `+subCols+` FROM subprocessors ORDER BY name, id`)
 }
+
+// PurgeDestructionLogs implements RecordStore.
+func (s gormRecords) PurgeDestructionLogs(ctx context.Context, cutoff time.Time, limit int, dryRun bool) (int, error) {
+	var n int64
+	if err := db.Conn(ctx, s.orm).Raw(`SELECT destruction_logs_purge( ?, ?, ?)`, cutoff, max(limit, 1), dryRun).Scan(&n).Error; err != nil {
+		return 0, db.Translate(err)
+	}
+	return int(n), nil
+}
+
+// PurgeBreaches implements RecordStore.
+func (s gormRecords) PurgeBreaches(ctx context.Context, cutoff time.Time, limit int, dryRun bool) (int, error) {
+	args := map[string]any{"cutoff": cutoff, "limit": limit}
+	if dryRun {
+		var n int64
+		if err := db.Conn(ctx, s.orm).Raw(`SELECT count(*) FROM breach_incidents WHERE status = 'closed' AND closed_at < @cutoff`, args).
+			Scan(&n).Error; err != nil {
+			return 0, db.Translate(err)
+		}
+		return int(n), nil
+	}
+	res := db.Conn(ctx, s.orm).Exec(`DELETE FROM breach_incidents WHERE id IN (SELECT id FROM breach_incidents
+		WHERE status = 'closed' AND closed_at < @cutoff ORDER BY closed_at, id LIMIT @limit FOR UPDATE SKIP LOCKED)`, args)
+	if res.Error != nil {
+		return 0, db.Translate(res.Error)
+	}
+	return int(res.RowsAffected), nil
+}

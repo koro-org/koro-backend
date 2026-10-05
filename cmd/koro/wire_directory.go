@@ -7,7 +7,6 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"koro/internal/authz"
 	"koro/internal/directory"
 	"koro/internal/notify"
 	"koro/internal/platform/db"
@@ -30,7 +29,7 @@ import (
 // public org profiles), c.audit.svc, c.identity.svc (re-authentication of
 // adminSetClubSensitivity; claimant names), the identity module's student
 // verification (the claimant's university at approval), c.files.svc (claim
-// evidence: Get, Attach, PresignGet; Delete as RemoveFile), c.notify.svc
+// evidence: Get, Attach, PresignGet, Delete — 01 §6.3, BE-057), c.notify.svc
 // and c.notify.platformAdmins (the sensitivity request notice and the
 // claim decision notice, read at call time). The member count of a club comes from orgs once it offers
 // ActiveMemberIDs (BE-019, 01 §4.7); until then member_count is null.
@@ -102,7 +101,6 @@ func (w *directoryWiring) build(c *container) error {
 	}
 	if fs := c.files.svc; fs != nil {
 		d.Files = fs
-		d.RemoveFile = func(ctx context.Context, a authz.Actor, id uuid.UUID) error { return fs.Delete(ctx, a, id) }
 	}
 	mod, err := directory.New(d)
 	if err != nil {
@@ -110,6 +108,7 @@ func (w *directoryWiring) build(c *container) error {
 	}
 	w.mod, w.svc, w.built = mod, mod.Service, store
 	c.privacy = append(c.privacy, mod.Privacy)
+	c.sweepers = append(c.sweepers, mod.Sweeper)
 	svc := mod.Service
 	c.hooks.domainResolver = svc.UniversityByEmailDomain
 	c.hooks.clubInfo = func(ctx context.Context, clubOrgID uuid.UUID) (hookClub, bool, error) {

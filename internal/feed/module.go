@@ -280,6 +280,9 @@ type Module struct {
 	// saves, hides, follows and mutes, their reports and, for a moderator,
 	// their moderation actions).
 	Privacy privacy.Provider
+	// Sweeper ends the retention of removed posts, resolved reports and
+	// moderation actions (02 §24.2; BE-057).
+	Sweeper privacy.RetentionSweeper
 
 	svc *service
 }
@@ -297,7 +300,7 @@ func New(d Deps) (Module, error) {
 		d.ReportHideThreshold = DefaultReportHideThreshold
 	}
 	s := &service{d: d}
-	return Module{Service: s, Privacy: privacyProvider{s: s}, svc: s}, nil
+	return Module{Service: s, Privacy: privacyProvider{s: s}, Sweeper: sweeper{s: s}, svc: s}, nil
 }
 
 type service struct{ d Deps }

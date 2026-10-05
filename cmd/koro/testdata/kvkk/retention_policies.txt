@@ -1,0 +1,78 @@
+# Retention policy → sweeper map (BE-057; 01 §3.3, §7; 02 §24.2). TestEveryRetentionPolicyHasSweeper
+# reads it together with the retention_policies seed of db/migrations (000090, 000121):
+#
+#   <policy code>  <coverage>
+#
+# coverage  sweeper:<module>   a privacy.RetentionSweeper of the policy's owner module claims the code;
+#                              kvkk.retention_sweep runs it (dry run until legally approved)
+#           job:<job name>     a scheduled job applies the period (hooks.retention): operational data or a
+#                              destruction that is never deferred to the legal approval
+#           inline:<reason>    deleted in the transaction that ends the record (≥ 20 characters)
+#           todo:BE-NNN        the code writing the table is not merged yet; the ticket adds the sweeper
+#           none:<reason>      no sweeper by design (≥ 20 characters)
+#
+# Every seeded policy has exactly one line; a sweeper claiming an unknown code, a code claimed twice,
+# a sweeper of another module than the owner, a missing job or a line without a seeded policy fails.
+
+# platform (operational, independent of the legal approval; BE-006 jobs)
+outbox_published              job:outbox.cleanup
+webhook_payload               job:webhook_inbox.purge_payloads
+webhook_row                   job:webhook_inbox.purge_payloads
+idempotency                   job:idempotency.cleanup
+# audit
+audit_events                  sweeper:audit
+audit_roots                   sweeper:audit
+# files: unattached uploads (operational)
+files_orphan                  job:files.orphan_cleanup
+# identity
+edu_document                  sweeper:identity
+session_expired               job:identity.sessions_cleanup
+email_token                   job:identity.email_tokens_cleanup
+edu_verification_history      sweeper:identity
+role_history                  sweeper:identity
+privileged_action_history     sweeper:identity
+dormant_account               none:disabled until the lawyer decides a period (T-36); placeholder 100 years
+# consent
+consent_proof                 sweeper:consent
+# notify (01 §7 notify.purge)
+notification_delivery         sweeper:notify
+email_suppression             sweeper:notify
+push_token                    sweeper:notify
+in_app_notification           sweeper:notify
+# orgs
+membership_ended              sweeper:orgs
+membership_ended_sensitive    inline:deleted in the transaction that ends it; orgs.purge_sensitive_memberships when a club becomes sensitive (T-83, T-208)
+org_invitation                sweeper:orgs
+# directory
+club_claim                    sweeper:directory
+# students: profile_access_grants are written by messaging (P3) and students-3
+access_grant_revoked          todo:BE-046
+# events
+event_form_answers            sweeper:events
+event_form_answers_sensitive  sweeper:events
+event_staff                   sweeper:events
+event_export_log              todo:BE-050
+event_export_file             todo:BE-050
+# feed (01 §7 feed.purge_removed)
+post_removed                  sweeper:feed
+content_report                sweeper:feed
+moderation_action             sweeper:feed
+# outreach: outreach_dispatches are written by BE-035
+outreach_dispatch             todo:BE-035
+# messaging (P3)
+contact_request_closed        todo:BE-056
+# talent (P3)
+talent_ledger                 todo:BE-052
+talent_counters               todo:BE-052
+talent_runs                   todo:BE-052
+talent_neutralization         todo:BE-052
+# entitlements
+entitlement_other             sweeper:entitlements
+# ledger (orders, payments, ledger, billing and parties tables; 06 H-57)
+financial_records             sweeper:ledger
+# kvkk
+dsr_record                    sweeper:kvkk
+dsr_export_file               job:kvkk.purge_exports
+destruction_log               sweeper:kvkk
+breach_record                 sweeper:kvkk
+dsr_erasure                   none:a destruction_logs category of account erasures, written by the erasure run

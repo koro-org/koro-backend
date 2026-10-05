@@ -201,6 +201,9 @@ type Module struct {
 	// Privacy is kvkk's own provider: the subject's requests are exported;
 	// on erasure their export files are deleted and the rows kept (proof).
 	Privacy privacy.Provider
+	// Sweeper ends the retention of closed requests and breaches and of the
+	// destruction record (02 §24.2; BE-057).
+	Sweeper privacy.RetentionSweeper
 
 	svc *service
 }
@@ -211,7 +214,7 @@ func New(d Deps) (Module, error) {
 		return Module{}, err
 	}
 	s := &service{d: d}
-	return Module{Service: s, Privacy: privacyProvider{s: s}, svc: s}, nil
+	return Module{Service: s, Privacy: privacyProvider{s: s}, Sweeper: sweeper{s: s}, svc: s}, nil
 }
 
 // Subscribe registers the outbox subscriptions of kvkk (01 §6.2) on the

@@ -1,5 +1,6 @@
 -- 000121_create_retention_purge_and_analytics_views.up.sql (02 §23 000121;
--- BE-049, kvkk-2; 06 H-34, H-41, H-48; T-120, T-121, T-153, T-192).
+-- BE-049, kvkk-2; 06 H-34, H-41, H-48; T-120, T-121, T-153, T-192;
+-- extended in place by BE-057, kvkk-3: 06 H-57, T-149, T-217, T-224).
 --
 -- 1. Retention purge of the append-only tables. consents,
 --    moderation_actions, destruction_logs, talent.point_events and
@@ -22,6 +23,11 @@
 --        nothing: the roles of the application still hold no DELETE.
 --    Who writes destruction_logs: the caller (kvkk.retention_sweep writes
 --    one row per policy and run, 01 §7).
+--    BE-057 adds the same kind of function for the rows app_rw cannot
+--    delete at the end of their retention: entitlements with their
+--    append-only usages (1j), the signed audit roots (1k) and the financial
+--    records of 000094–000120 (1l, 06 H-57), plus a purge branch in the
+--    payout item guard of 000115.
 -- 2. retention_policies: role_history is anchored on the end of the
 --    assignment, which platform_role_assignments records as revoked_at or
 --    rejected_at (no ended_at; T-121) → new anchor 'revoked_or_rejected';
@@ -334,6 +340,451 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.privileged_account_actions_purge(timestamptz, integer, boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.privileged_account_actions_purge(timestamptz, integer, boolean) TO app_rw;
+
+-- 1j. entitlements + entitlement_usages (entitlement_other: 2 years after
+-- the right ended; BE-057, T-149/T-217). An admin or promo grant ends at
+-- revoked_at, or at valid_to. Its usages are append-only, so the grant and
+-- its usages go together here; a usage that still proves a targeted post,
+-- a dispatch or a contact request (their FKs) keeps the whole grant until
+-- that record is gone. Order rights (source_type order_line) follow the
+-- order, not this policy. A batch is bounded by rows (grant + its usages
+-- ≤ p_limit; the first grant always goes, so a big one never blocks).
+CREATE FUNCTION public.entitlements_purge(p_cutoff timestamptz, p_limit integer, p_dry_run boolean) RETURNS bigint
+  LANGUAGE plpgsql SECURITY DEFINER
+  SET search_path = pg_catalog, public
+  AS $$
+DECLARE
+  v_cutoff timestamptz := public.koro_retention_cutoff('entitlement_other', p_cutoff, p_limit, p_dry_run);
+  v_ids    uuid[];
+  v_n      bigint;
+  v_u      bigint;
+BEGIN
+  v_ids := ARRAY(
+    SELECT c.id FROM (
+      SELECT e.id, sum(1 + (SELECT count(*) FROM public.entitlement_usages u WHERE u.entitlement_id = e.id))
+                     OVER (ORDER BY least(e.revoked_at, e.valid_to), e.id) AS running,
+             row_number() OVER (ORDER BY least(e.revoked_at, e.valid_to), e.id) AS rn
+        FROM public.entitlements e
+       WHERE e.source_type IN ('admin_grant','promo')
+         AND least(e.revoked_at, e.valid_to) < v_cutoff
+         AND NOT EXISTS (SELECT 1 FROM public.entitlement_usages u
+                          WHERE u.entitlement_id = e.id
+                            AND (EXISTS (SELECT 1 FROM public.posts p WHERE p.entitlement_usage_id = u.id)
+                              OR EXISTS (SELECT 1 FROM public.outreach_dispatches d WHERE d.entitlement_usage_id = u.id)
+                              OR EXISTS (SELECT 1 FROM public.contact_requests r WHERE r.entitlement_usage_id = u.id)))) c
+     WHERE p_dry_run OR c.rn = 1 OR c.running <= p_limit
+     ORDER BY c.rn);
+  IF p_dry_run OR cardinality(v_ids) = 0 THEN
+    RETURN cardinality(v_ids);
+  END IF;
+  PERFORM set_config('koro.retention_purge', 'public.entitlement_usages', true);
+  DELETE FROM public.entitlement_usages WHERE entitlement_id = ANY (v_ids);
+  GET DIAGNOSTICS v_u = ROW_COUNT;
+  PERFORM set_config('koro.retention_purge', '', true);
+  DELETE FROM public.entitlements WHERE id = ANY (v_ids);
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  RETURN v_n + v_u;
+END $$;
+REVOKE ALL ON FUNCTION public.entitlements_purge(timestamptz, integer, boolean) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.entitlements_purge(timestamptz, integer, boolean) TO app_rw;
+
+-- 1k. audit_daily_roots (audit_roots: 10 years; BE-057). app_rw holds
+-- SELECT/INSERT only. Verification of the chain starts at a root (the
+-- newest one whose rows audit_purge_until removed), so a root goes only
+-- when it is older than the cut-off and a later root exists whose chained
+-- rows are all gone: that later root is where verification starts.
+CREATE FUNCTION public.audit_daily_roots_purge(p_cutoff timestamptz, p_limit integer, p_dry_run boolean) RETURNS bigint
+  LANGUAGE plpgsql SECURITY DEFINER
+  SET search_path = pg_catalog, public
+  AS $$
+DECLARE
+  v_cutoff timestamptz := public.koro_retention_cutoff('audit_roots', p_cutoff, p_limit, p_dry_run);
+  v_days   date[];
+  v_n      bigint;
+BEGIN
+  v_days := ARRAY(SELECT r.day FROM public.audit_daily_roots r
+                   WHERE r.created_at < v_cutoff
+                     AND EXISTS (SELECT 1 FROM public.audit_daily_roots s
+                                  WHERE s.day > r.day
+                                    AND NOT EXISTS (SELECT 1 FROM public.audit_events e WHERE e.chain_seq <= s.last_chain_seq))
+                   ORDER BY r.day
+                   LIMIT CASE WHEN p_dry_run THEN NULL ELSE p_limit END);
+  IF p_dry_run OR cardinality(v_days) = 0 THEN
+    RETURN cardinality(v_days);
+  END IF;
+  DELETE FROM public.audit_daily_roots WHERE day = ANY (v_days);
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  RETURN v_n;
+END $$;
+REVOKE ALL ON FUNCTION public.audit_daily_roots_purge(timestamptz, integer, boolean) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.audit_daily_roots_purge(timestamptz, integer, boolean) TO app_rw;
+
+-- 1l. Financial records (financial_records: 10 years; 06 H-57, T-224;
+-- BE-057). TTK md. 82 and VUK md. 253 count the 10 years from the end of
+-- the calendar year of the record, so the cut-off is rounded down to the
+-- start of its year (Europe/Istanbul): a record of 2026 goes on 1 January
+-- 2037 at the earliest. app_rw holds no DELETE on these tables and the
+-- ledger is append-only; this SECURITY DEFINER function is the only way.
+--
+-- What goes, and only as a whole:
+--   * an order aggregate: the order, its lines, payments, payment splits,
+--     refunds, the bank transfers matched to it, its invoices (with their
+--     lines and credit notes) and every ledger transaction about it (ref
+--     order / payment / refund, or an entry on one of its lines), together
+--     with the payouts that paid its lines (items, payout invoices, payout
+--     ledger transactions) and the other orders those payouts paid. Every
+--     row of that closure is older than the cut-off (created_at and the
+--     last update), and the closure is balanced: on the per-payee accounts
+--     (seller_payable) each line nets to zero and no entry lacks its line,
+--     so no payee balance changes (the ledger's integrity check stays true).
+--     A young refund, an open payable, a payout of a young order or a
+--     transaction that also touches a young line keeps the whole closure.
+--   * then, unreferenced master and loose rows older than the cut-off:
+--     failed / cancelled payouts without items, unmatched transfers,
+--     invoices of neither an order nor a payout, superseded / rejected /
+--     revoked bank accounts no payout or newer account points at, draft or
+--     closed payees nothing refers to, legal parties (with their documents)
+--     nothing refers to. An approved account and an active or suspended
+--     payee are in use and stay, however old.
+-- Ledger transactions with a manual reference that touch no order line
+-- (fee, adjustment) stay: deleting them would move balances (T-new note in
+-- BE-057). The files of the deleted rows (receipts, invoices, documents)
+-- stay attached to their module; their deletion is BE-057's open point.
+-- Batch: p_limit order aggregates (closed over shared payouts) and at most
+-- p_limit rows of each loose kind per call; the caller loops until 0.
+CREATE FUNCTION public.financial_records_cutoff(p_cutoff timestamptz, p_limit integer, p_dry_run boolean)
+  RETURNS timestamptz
+  LANGUAGE sql STABLE
+  SET search_path = pg_catalog, public
+  AS $$
+  SELECT date_trunc('year', public.koro_retention_cutoff('financial_records', p_cutoff, p_limit, p_dry_run)
+                            AT TIME ZONE 'Europe/Istanbul') AT TIME ZONE 'Europe/Istanbul'
+$$;
+REVOKE ALL ON FUNCTION public.financial_records_cutoff(timestamptz, integer, boolean) FROM PUBLIC;
+
+-- The payout guard lets the purge through, for DELETE only (an item of a
+-- paid payout is otherwise never deleted).
+CREATE OR REPLACE FUNCTION public.payout_items_check() RETURNS trigger
+  LANGUAGE plpgsql AS $$
+DECLARE
+  payout_status text;
+  line          record;
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF current_setting('koro.retention_purge', true) = TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME THEN
+      RETURN OLD;
+    END IF;
+    SELECT p.status INTO payout_status FROM payouts p WHERE p.id = OLD.payout_id;
+    IF payout_status IS NOT NULL AND payout_status NOT IN ('failed','cancelled') THEN
+      RAISE EXCEPTION 'DELETE on %.% is not allowed: payout % is %', TG_TABLE_SCHEMA, TG_TABLE_NAME, OLD.payout_id, payout_status
+        USING ERRCODE = 'restrict_violation';
+    END IF;
+    RETURN OLD;
+  END IF;
+  IF TG_OP = 'UPDATE' THEN
+    RAISE EXCEPTION 'UPDATE on %.% is not allowed: an item is replaced by delete + insert', TG_TABLE_SCHEMA, TG_TABLE_NAME
+      USING ERRCODE = 'restrict_violation';
+  END IF;
+  SELECT p.status INTO payout_status FROM payouts p WHERE p.id = NEW.payout_id;
+  SELECT l.fulfillment_status, l.payout_id, l.seller_net_amount INTO line FROM order_lines l WHERE l.id = NEW.order_line_id;
+  IF payout_status IS DISTINCT FROM 'pending_approval' OR line.fulfillment_status IS DISTINCT FROM 'fulfilled'
+     OR line.payout_id IS NOT NULL OR NEW.amount > line.seller_net_amount THEN
+    RAISE EXCEPTION 'payout %: line % cannot be added (payout %, line %, paid out %, amount % of %)', NEW.payout_id, NEW.order_line_id,
+      payout_status, line.fulfillment_status, line.payout_id IS NOT NULL, NEW.amount, line.seller_net_amount
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'payout_items_line_chk';
+  END IF;
+  RETURN NEW;
+END $$;
+
+-- financial_order_ok: the order's own rows are older than the cut-off and
+-- its ledger side is closed (every transaction about it is old, its lines
+-- net to zero on the per-payee accounts, no per-payee entry without a line,
+-- no credit note of another order on its invoices).
+CREATE FUNCTION public.financial_order_ok(p_order uuid, p_cutoff timestamptz) RETURNS boolean
+  LANGUAGE sql STABLE
+  SET search_path = pg_catalog, public
+  AS $$
+  WITH txn AS (
+    SELECT x.id, x.created_at FROM public.ledger_transactions x
+     WHERE (x.ref_type = 'order' AND x.ref_id = p_order)
+        OR (x.ref_type = 'payment' AND x.ref_id IN (SELECT p.id FROM public.payments p WHERE p.order_id = p_order))
+        OR (x.ref_type = 'refund' AND x.ref_id IN (SELECT r.id FROM public.refunds r WHERE r.order_id = p_order))
+        OR EXISTS (SELECT 1 FROM public.ledger_entries e JOIN public.order_lines l ON l.id = e.order_line_id
+                    WHERE e.transaction_id = x.id AND l.order_id = p_order)
+  )
+  SELECT NOT EXISTS (SELECT 1 FROM public.order_lines l WHERE l.order_id = p_order AND greatest(l.created_at, l.updated_at) >= p_cutoff)
+     AND NOT EXISTS (SELECT 1 FROM public.payments p WHERE p.order_id = p_order AND greatest(p.created_at, p.updated_at) >= p_cutoff)
+     AND NOT EXISTS (SELECT 1 FROM public.payment_splits s WHERE s.order_id = p_order AND greatest(s.created_at, s.updated_at) >= p_cutoff)
+     AND NOT EXISTS (SELECT 1 FROM public.refunds r WHERE r.order_id = p_order AND greatest(r.created_at, r.updated_at) >= p_cutoff)
+     AND NOT EXISTS (SELECT 1 FROM public.incoming_bank_transfers t WHERE t.matched_order_id = p_order
+                                                                     AND greatest(t.created_at, t.updated_at) >= p_cutoff)
+     AND NOT EXISTS (SELECT 1 FROM public.invoices i WHERE i.order_id = p_order AND greatest(i.created_at, i.updated_at) >= p_cutoff)
+     AND NOT EXISTS (SELECT 1 FROM public.invoices i JOIN public.invoices j ON j.refers_to_invoice_id = i.id
+                      WHERE i.order_id = p_order AND j.order_id IS DISTINCT FROM p_order)
+     AND NOT EXISTS (SELECT 1 FROM txn WHERE txn.created_at >= p_cutoff)
+     AND NOT EXISTS (SELECT 1 FROM txn JOIN public.ledger_entries e ON e.transaction_id = txn.id
+                                      JOIN public.ledger_accounts a ON a.code = e.account_code
+                      WHERE a.per_payee AND e.order_line_id IS NULL)
+     AND NOT EXISTS (SELECT 1 FROM public.order_lines l
+                      WHERE l.order_id = p_order
+                        AND (SELECT coalesce(sum(e.amount), 0) FROM public.ledger_entries e
+                               JOIN public.ledger_accounts a ON a.code = e.account_code
+                              WHERE e.order_line_id = l.id AND a.per_payee) <> 0)
+$$;
+REVOKE ALL ON FUNCTION public.financial_order_ok(uuid, timestamptz) FROM PUBLIC;
+
+-- financial_payout_ok: the payout and its items, invoices and ledger
+-- transactions are older than the cut-off and its transactions name the
+-- line of every per-payee entry.
+CREATE FUNCTION public.financial_payout_ok(p_payout uuid, p_cutoff timestamptz) RETURNS boolean
+  LANGUAGE sql STABLE
+  SET search_path = pg_catalog, public
+  AS $$
+  SELECT EXISTS (SELECT 1 FROM public.payouts p WHERE p.id = p_payout AND greatest(p.created_at, p.updated_at) < p_cutoff)
+     AND NOT EXISTS (SELECT 1 FROM public.payout_items i WHERE i.payout_id = p_payout AND i.created_at >= p_cutoff)
+     AND NOT EXISTS (SELECT 1 FROM public.invoices v WHERE v.payout_id = p_payout AND greatest(v.created_at, v.updated_at) >= p_cutoff)
+     AND NOT EXISTS (SELECT 1 FROM public.invoices v JOIN public.invoices j ON j.refers_to_invoice_id = v.id
+                      WHERE v.payout_id = p_payout AND j.payout_id IS DISTINCT FROM p_payout)
+     AND NOT EXISTS (SELECT 1 FROM public.ledger_transactions x
+                      WHERE x.ref_type = 'payout' AND x.ref_id = p_payout
+                        AND (x.created_at >= p_cutoff
+                          OR EXISTS (SELECT 1 FROM public.ledger_entries e JOIN public.ledger_accounts a ON a.code = e.account_code
+                                      WHERE e.transaction_id = x.id AND a.per_payee AND e.order_line_id IS NULL)))
+$$;
+REVOKE ALL ON FUNCTION public.financial_payout_ok(uuid, timestamptz) FROM PUBLIC;
+
+CREATE FUNCTION public.financial_records_purge(p_cutoff timestamptz, p_limit integer, p_dry_run boolean) RETURNS bigint
+  LANGUAGE plpgsql SECURITY DEFINER
+  SET search_path = pg_catalog, public
+  AS $$
+DECLARE
+  v_cutoff  timestamptz := public.financial_records_cutoff(p_cutoff, p_limit, p_dry_run);
+  v_limit   integer := CASE WHEN p_dry_run THEN NULL ELSE p_limit END;
+  v_orders  uuid[];
+  v_bad     uuid[];
+  v_sel     uuid[];
+  v_grow    uuid[];
+  v_lines   uuid[];
+  v_payouts uuid[];
+  v_txns    uuid[];
+  v_inv     uuid[];
+  v_ids     uuid[];
+  v_n       bigint := 0;
+  v_k       bigint;
+BEGIN
+  -- 1. Orders whose own aggregate is closed and old.
+  v_orders := ARRAY(SELECT o.id FROM public.orders o
+                     WHERE greatest(o.created_at, o.updated_at) < v_cutoff
+                       AND public.financial_order_ok(o.id, v_cutoff));
+  -- 2. Fixpoint: an order whose line is in a payout that cannot go (young,
+  -- or paying a line of an order that cannot go), or whose ledger
+  -- transaction or invoice line also touches such an order, cannot go.
+  LOOP
+    v_bad := ARRAY(
+      SELECT DISTINCT l.order_id FROM public.order_lines l
+       WHERE l.order_id = ANY (v_orders)
+         AND (EXISTS (SELECT 1 FROM public.payout_items i
+                       WHERE i.order_line_id = l.id
+                         AND (NOT public.financial_payout_ok(i.payout_id, v_cutoff)
+                           OR EXISTS (SELECT 1 FROM public.payout_items i2 JOIN public.order_lines l2 ON l2.id = i2.order_line_id
+                                       WHERE i2.payout_id = i.payout_id AND l2.order_id <> ALL (v_orders))))
+           OR (l.payout_id IS NOT NULL AND NOT public.financial_payout_ok(l.payout_id, v_cutoff))
+           OR EXISTS (SELECT 1 FROM public.ledger_entries e
+                        JOIN public.ledger_entries e2 ON e2.transaction_id = e.transaction_id
+                        JOIN public.order_lines l2 ON l2.id = e2.order_line_id
+                       WHERE e.order_line_id = l.id AND l2.order_id <> ALL (v_orders))
+           OR EXISTS (SELECT 1 FROM public.invoice_lines il JOIN public.invoices v ON v.id = il.invoice_id
+                       WHERE il.order_line_id = l.id
+                         AND (v.order_id IS NULL OR v.order_id <> ALL (v_orders))
+                         AND (v.payout_id IS NULL
+                           OR EXISTS (SELECT 1 FROM public.payout_items i2 JOIN public.order_lines l2 ON l2.id = i2.order_line_id
+                                       WHERE i2.payout_id = v.payout_id AND l2.order_id <> ALL (v_orders))))));
+    EXIT WHEN cardinality(v_bad) = 0;
+    v_orders := ARRAY(SELECT x FROM unnest(v_orders) x WHERE x <> ALL (v_bad));
+  END LOOP;
+
+  -- 3. The batch: the oldest p_limit orders, closed over the payouts and
+  -- ledger transactions they share (all of them passed the fixpoint).
+  IF p_dry_run THEN
+    v_sel := v_orders;
+  ELSE
+    v_sel := ARRAY(SELECT o.id FROM public.orders o WHERE o.id = ANY (v_orders) ORDER BY o.created_at, o.id LIMIT p_limit);
+    LOOP
+      v_grow := ARRAY(
+        SELECT l2.order_id FROM public.order_lines l
+          JOIN public.payout_items i ON i.order_line_id = l.id
+          JOIN public.payout_items i2 ON i2.payout_id = i.payout_id
+          JOIN public.order_lines l2 ON l2.id = i2.order_line_id
+         WHERE l.order_id = ANY (v_sel) AND l2.order_id <> ALL (v_sel)
+        UNION
+        SELECT l2.order_id FROM public.order_lines l
+          JOIN public.ledger_entries e ON e.order_line_id = l.id
+          JOIN public.ledger_entries e2 ON e2.transaction_id = e.transaction_id
+          JOIN public.order_lines l2 ON l2.id = e2.order_line_id
+         WHERE l.order_id = ANY (v_sel) AND l2.order_id <> ALL (v_sel)
+        UNION
+        SELECT l2.order_id FROM public.order_lines l
+          JOIN public.invoice_lines il ON il.order_line_id = l.id
+          JOIN public.invoice_lines il2 ON il2.invoice_id = il.invoice_id
+          JOIN public.order_lines l2 ON l2.id = il2.order_line_id
+         WHERE l.order_id = ANY (v_sel) AND l2.order_id <> ALL (v_sel)
+        UNION
+        SELECT v.order_id FROM public.order_lines l
+          JOIN public.invoice_lines il ON il.order_line_id = l.id
+          JOIN public.invoices v ON v.id = il.invoice_id
+         WHERE l.order_id = ANY (v_sel) AND v.order_id IS NOT NULL AND v.order_id <> ALL (v_sel)
+        UNION
+        SELECT l2.order_id FROM public.order_lines l
+          JOIN public.invoice_lines il ON il.order_line_id = l.id
+          JOIN public.invoices v ON v.id = il.invoice_id
+          JOIN public.payout_items i2 ON i2.payout_id = v.payout_id
+          JOIN public.order_lines l2 ON l2.id = i2.order_line_id
+         WHERE l.order_id = ANY (v_sel) AND l2.order_id <> ALL (v_sel));
+      EXIT WHEN cardinality(v_grow) = 0;
+      v_sel := v_sel || v_grow;
+    END LOOP;
+  END IF;
+  v_lines := ARRAY(SELECT l.id FROM public.order_lines l WHERE l.order_id = ANY (v_sel));
+  v_payouts := ARRAY(SELECT i.payout_id FROM public.payout_items i WHERE i.order_line_id = ANY (v_lines)
+                     UNION SELECT l.payout_id FROM public.order_lines l WHERE l.id = ANY (v_lines) AND l.payout_id IS NOT NULL);
+  v_txns := ARRAY(SELECT x.id FROM public.ledger_transactions x
+                   WHERE (x.ref_type = 'order' AND x.ref_id = ANY (v_sel))
+                      OR (x.ref_type = 'payment' AND x.ref_id IN (SELECT p.id FROM public.payments p WHERE p.order_id = ANY (v_sel)))
+                      OR (x.ref_type = 'refund' AND x.ref_id IN (SELECT r.id FROM public.refunds r WHERE r.order_id = ANY (v_sel)))
+                      OR (x.ref_type = 'payout' AND x.ref_id = ANY (v_payouts))
+                      OR EXISTS (SELECT 1 FROM public.ledger_entries e WHERE e.transaction_id = x.id AND e.order_line_id = ANY (v_lines)));
+  v_inv := ARRAY(WITH RECURSIVE inv (id) AS (
+                    SELECT v.id FROM public.invoices v
+                     WHERE v.order_id = ANY (v_sel) OR v.payout_id = ANY (v_payouts)
+                        OR EXISTS (SELECT 1 FROM public.invoice_lines il WHERE il.invoice_id = v.id AND il.order_line_id = ANY (v_lines))
+                    UNION
+                    SELECT j.id FROM public.invoices j JOIN inv ON j.refers_to_invoice_id = inv.id)
+                  SELECT inv.id FROM inv);
+
+  IF p_dry_run THEN
+    v_n := cardinality(v_sel) + cardinality(v_lines) + cardinality(v_payouts) + cardinality(v_txns) + cardinality(v_inv)
+         + (SELECT count(*) FROM public.payments p WHERE p.order_id = ANY (v_sel))
+         + (SELECT count(*) FROM public.payment_splits s WHERE s.order_id = ANY (v_sel))
+         + (SELECT count(*) FROM public.refunds r WHERE r.order_id = ANY (v_sel))
+         + (SELECT count(*) FROM public.incoming_bank_transfers t WHERE t.matched_order_id = ANY (v_sel))
+         + (SELECT count(*) FROM public.invoice_lines il WHERE il.invoice_id = ANY (v_inv))
+         + (SELECT count(*) FROM public.ledger_entries e WHERE e.transaction_id = ANY (v_txns))
+         + (SELECT count(*) FROM public.payout_items i WHERE i.payout_id = ANY (v_payouts));
+  ELSIF cardinality(v_sel) > 0 THEN
+    -- 4. Leaves first; the payout cycle (order_lines ↔ payout_items ↔
+    -- payouts) goes in one statement, its foreign keys are checked at the
+    -- statement's end.
+    DELETE FROM public.invoice_lines WHERE invoice_id = ANY (v_inv);
+    GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+    DELETE FROM public.invoices WHERE id = ANY (v_inv);
+    GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+    PERFORM set_config('koro.retention_purge', 'public.ledger_entries', true);
+    DELETE FROM public.ledger_entries WHERE transaction_id = ANY (v_txns);
+    GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+    PERFORM set_config('koro.retention_purge', 'public.ledger_transactions', true);
+    DELETE FROM public.ledger_transactions WHERE id = ANY (v_txns);
+    GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+    PERFORM set_config('koro.retention_purge', '', true);
+    DELETE FROM public.payment_splits WHERE order_id = ANY (v_sel);
+    GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+    DELETE FROM public.refunds WHERE order_id = ANY (v_sel);
+    GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+    PERFORM set_config('koro.retention_purge', 'public.payout_items', true);
+    WITH di AS (DELETE FROM public.payout_items WHERE payout_id = ANY (v_payouts) RETURNING 1),
+         dl AS (DELETE FROM public.order_lines WHERE id = ANY (v_lines) RETURNING 1),
+         dp AS (DELETE FROM public.payouts WHERE id = ANY (v_payouts) RETURNING 1)
+    SELECT (SELECT count(*) FROM di) + (SELECT count(*) FROM dl) + (SELECT count(*) FROM dp) INTO v_k;
+    v_n := v_n + v_k;
+    PERFORM set_config('koro.retention_purge', '', true);
+    DELETE FROM public.payments WHERE order_id = ANY (v_sel);
+    GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+    DELETE FROM public.incoming_bank_transfers WHERE matched_order_id = ANY (v_sel);
+    GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+    DELETE FROM public.orders WHERE id = ANY (v_sel);
+    GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+  END IF;
+
+  -- 5. Loose and master rows nothing refers to any more.
+  v_ids := ARRAY(SELECT p.id FROM public.payouts p
+                  WHERE p.status IN ('failed','cancelled') AND greatest(p.created_at, p.updated_at) < v_cutoff
+                    AND NOT EXISTS (SELECT 1 FROM public.payout_items i WHERE i.payout_id = p.id)
+                    AND NOT EXISTS (SELECT 1 FROM public.order_lines l WHERE l.payout_id = p.id)
+                    AND NOT EXISTS (SELECT 1 FROM public.invoices v WHERE v.payout_id = p.id)
+                    AND NOT EXISTS (SELECT 1 FROM public.ledger_transactions x WHERE x.ref_type = 'payout' AND x.ref_id = p.id)
+                  ORDER BY p.created_at, p.id LIMIT v_limit);
+  v_n := v_n + cardinality(v_ids);
+  IF NOT p_dry_run THEN
+    DELETE FROM public.payouts WHERE id = ANY (v_ids);
+  END IF;
+
+  v_ids := ARRAY(SELECT t.id FROM public.incoming_bank_transfers t
+                  WHERE t.matched_order_id IS NULL AND greatest(t.created_at, t.updated_at) < v_cutoff
+                  ORDER BY t.created_at, t.id LIMIT v_limit);
+  v_n := v_n + cardinality(v_ids);
+  IF NOT p_dry_run THEN
+    DELETE FROM public.incoming_bank_transfers WHERE id = ANY (v_ids);
+  END IF;
+
+  v_ids := ARRAY(SELECT v.id FROM public.invoices v
+                  WHERE v.order_id IS NULL AND v.payout_id IS NULL AND greatest(v.created_at, v.updated_at) < v_cutoff
+                    AND NOT EXISTS (SELECT 1 FROM public.invoices j WHERE j.refers_to_invoice_id = v.id)
+                    AND NOT EXISTS (SELECT 1 FROM public.invoice_lines il WHERE il.invoice_id = v.id AND il.order_line_id IS NOT NULL)
+                  ORDER BY v.created_at, v.id LIMIT v_limit);
+  IF p_dry_run THEN
+    v_n := v_n + cardinality(v_ids) + (SELECT count(*) FROM public.invoice_lines il WHERE il.invoice_id = ANY (v_ids));
+  ELSE
+    DELETE FROM public.invoice_lines WHERE invoice_id = ANY (v_ids);
+    GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+    DELETE FROM public.invoices WHERE id = ANY (v_ids);
+    GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+  END IF;
+
+  v_ids := ARRAY(SELECT b.id FROM public.payee_bank_accounts b
+                  WHERE b.status IN ('superseded','rejected','revoked') AND greatest(b.created_at, b.updated_at) < v_cutoff
+                    AND NOT EXISTS (SELECT 1 FROM public.payouts p WHERE p.bank_account_id = b.id)
+                    AND NOT EXISTS (SELECT 1 FROM public.payee_bank_accounts n WHERE n.superseded_by_id = b.id)
+                  ORDER BY b.created_at, b.id LIMIT v_limit);
+  v_n := v_n + cardinality(v_ids);
+  IF NOT p_dry_run THEN
+    DELETE FROM public.payee_bank_accounts WHERE id = ANY (v_ids);
+  END IF;
+
+  v_ids := ARRAY(SELECT y.id FROM public.payees y
+                  WHERE y.status IN ('draft','closed') AND greatest(y.created_at, y.updated_at) < v_cutoff
+                    AND NOT EXISTS (SELECT 1 FROM public.payee_bank_accounts b WHERE b.payee_id = y.id)
+                    AND NOT EXISTS (SELECT 1 FROM public.offerings f WHERE f.default_payee_id = y.id)
+                    AND NOT EXISTS (SELECT 1 FROM public.order_lines l WHERE l.payee_id = y.id)
+                    AND NOT EXISTS (SELECT 1 FROM public.ledger_entries e WHERE e.payee_id = y.id)
+                    AND NOT EXISTS (SELECT 1 FROM public.payouts p WHERE p.payee_id = y.id)
+                    AND NOT EXISTS (SELECT 1 FROM public.payout_items i WHERE i.payee_id = y.id)
+                  ORDER BY y.created_at, y.id LIMIT v_limit);
+  v_n := v_n + cardinality(v_ids);
+  IF NOT p_dry_run THEN
+    DELETE FROM public.payees WHERE id = ANY (v_ids);
+  END IF;
+
+  v_ids := ARRAY(SELECT lp.id FROM public.legal_parties lp
+                  WHERE lp.kind <> 'platform' AND greatest(lp.created_at, lp.updated_at) < v_cutoff
+                    AND NOT EXISTS (SELECT 1 FROM public.legal_party_documents d
+                                     WHERE d.legal_party_id = lp.id AND greatest(d.created_at, d.verified_at) >= v_cutoff)
+                    AND NOT EXISTS (SELECT 1 FROM public.payees y WHERE y.legal_party_id = lp.id)
+                    AND NOT EXISTS (SELECT 1 FROM public.orders o WHERE o.buyer_party_id = lp.id)
+                    AND NOT EXISTS (SELECT 1 FROM public.invoices v WHERE v.issuer_party_id = lp.id OR v.recipient_party_id = lp.id)
+                    AND NOT EXISTS (SELECT 1 FROM public.collection_accounts c WHERE c.legal_party_id = lp.id)
+                    AND NOT EXISTS (SELECT 1 FROM public.provider_contact_map m WHERE m.legal_party_id = lp.id)
+                  ORDER BY lp.created_at, lp.id LIMIT v_limit);
+  IF p_dry_run THEN
+    v_n := v_n + cardinality(v_ids) + (SELECT count(*) FROM public.legal_party_documents d WHERE d.legal_party_id = ANY (v_ids));
+  ELSE
+    DELETE FROM public.legal_party_documents WHERE legal_party_id = ANY (v_ids);
+    GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+    DELETE FROM public.legal_parties WHERE id = ANY (v_ids);
+    GET DIAGNOSTICS v_k = ROW_COUNT; v_n := v_n + v_k;
+  END IF;
+  RETURN v_n;
+END $$;
+REVOKE ALL ON FUNCTION public.financial_records_purge(timestamptz, integer, boolean) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.financial_records_purge(timestamptz, integer, boolean) TO app_rw;
 
 -- 2. Retention policy alignment (T-121, 06 H-48) and the policy of the
 -- privileged account actions (BE-016; with role_history, unapproved like

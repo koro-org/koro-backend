@@ -139,13 +139,11 @@ type Files interface {
 	Attach(ctx context.Context, a authz.Actor, fileID uuid.UUID, owner files.Owner) error
 	// PresignGet returns a short-lived download URL of a clean file.
 	PresignGet(ctx context.Context, fileID uuid.UUID, ttl time.Duration) (files.Download, error)
+	// Delete removes a replaced or erased avatar, a deleted or erased CV
+	// and a file the scan rejected in the caller's transaction, after
+	// students has released the reference: the files row goes with the
+	// transaction, the stored objects after the commit (files retries
+	// them). The pair is on the 01 §6.3 allow-list (T-239, BE-057).
+	// sync-write: files.Files.Delete
+	Delete(ctx context.Context, a authz.Actor, fileID uuid.UUID) error
 }
-
-// FileRemover deletes a replaced or erased avatar, a deleted or erased CV
-// and a file the scan rejected (files.Files.Delete) in the caller's
-// transaction, after students has released the reference:
-// the files row goes with the transaction, the stored objects after the
-// commit (files retries them). It is the pattern of identity's RemoveFile
-// (student documents); the pair is not on the 01 §6.3 list yet (H-49 adds
-// kvkk → files.Files.Delete; see the ticket notes).
-type FileRemover func(ctx context.Context, a authz.Actor, fileID uuid.UUID) error

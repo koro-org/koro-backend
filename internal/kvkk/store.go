@@ -49,4 +49,10 @@ type Store interface {
 	// file that were completed at or before cutoff, in ID order after afterID
 	// (kvkk.purge_exports).
 	ExportsCompletedBefore(ctx context.Context, cutoff time.Time, afterID uuid.UUID, limit int) ([]DSR, error)
+	// PurgeClosed deletes up to limit requests closed (completed, rejected
+	// or cancelled) before cutoff, oldest first, whose export file is gone,
+	// and returns how many; dryRun counts every such request and deletes
+	// nothing (retention dsr_record, BE-057). The close time is completed_at,
+	// or updated_at of a cancelled request.
+	PurgeClosed(ctx context.Context, cutoff time.Time, limit int, dryRun bool) (int, error)
 }

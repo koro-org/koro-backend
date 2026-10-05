@@ -211,8 +211,9 @@ func newEnv(t *testing.T) *env {
 		audit: &auditLog{}, members: &counter{counts: map[uuid.UUID]int{}}, sender: &sender{},
 		admins: []uuid.UUID{uuid.NewV7(), uuid.NewV7()},
 		ver:    &verifications{m: map[uuid.UUID]identity.EduVerification{}}, users: &userDir{m: map[uuid.UUID]identity.UserSummary{}},
-		files: &fakeFiles{m: map[uuid.UUID]files.FileMeta{}}, removed: &removedFiles{},
+		removed: &removedFiles{},
 	}
+	e.files = &fakeFiles{m: map[uuid.UUID]files.FileMeta{}, removed: e.removed}
 	idem := idempotency.New(idempotency.Deps{Tx: e.tx, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()})
 	om, err := orgs.New(orgs.Deps{
 		Store: e.orgsMem, Tx: e.tx, Outbox: e.out, Audit: e.audit, Idempotency: idem, Clock: clk, Log: obs.Discard(),
@@ -234,7 +235,7 @@ func newEnv(t *testing.T) *env {
 		Store: e.store, Tx: e.tx, Outbox: e.out, Queue: e.queue, Audit: e.audit, Orgs: e.orgs, Idempotency: idem,
 		Clock: clk, Log: obs.Discard(), Reauth: reauth{}, MemberCount: e.members.count, Sender: e.sender,
 		PlatformAdmins: func(context.Context) ([]uuid.UUID, error) { return e.admins, nil },
-		Students:       e.ver, Users: e.users, Files: e.files, RemoveFile: e.removed.remove,
+		Students:       e.ver, Users: e.users, Files: e.files,
 	})
 	if err != nil {
 		t.Fatal(err)

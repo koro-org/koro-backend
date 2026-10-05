@@ -173,6 +173,7 @@ type Store interface {
 	AccountActionsOf(ctx context.Context, userID uuid.UUID) ([]AccountActionRequest, error)
 
 	EduStore
+	RetentionStore
 }
 
 // EduStore is the edu_verifications part of Store (02 §5.4; BE-018). The

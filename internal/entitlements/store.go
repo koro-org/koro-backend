@@ -77,6 +77,20 @@ type Store interface {
 	// ListUsages returns up to limit usage rows of orgID (consumptions and
 	// reversals) matching f, newest first, with an ID below after.
 	ListUsages(ctx context.Context, orgID uuid.UUID, f UsageFilter, after *uuid.UUID, limit int) ([]UsageView, error)
+
+	// UsagesOfActor returns every usage row a user made, oldest first
+	// (KVKK export; BE-057).
+	UsagesOfActor(ctx context.Context, userID uuid.UUID) ([]Usage, error)
+	// PurgeEndedGrants deletes, with their usages, admin and promo grants
+	// whose validity ended (revoked_at, else valid_to) before cutoff and no
+	// usage of which still proves a post, a dispatch or a contact request,
+	// oldest first, at most limit rows (a grant and its usages) per call
+	// but always at least one grant; it returns the rows deleted. dryRun
+	// counts the grants and deletes nothing (entitlement_other; BE-057).
+	// The GORM store goes through 000121's entitlements_purge (the usages
+	// are append-only): it never passes now − the policy's period and
+	// refuses a real purge of an unapproved policy (55000).
+	PurgeEndedGrants(ctx context.Context, cutoff time.Time, limit int, dryRun bool) (int, error)
 }
 
 // ListFilter narrows listOrgEntitlements.

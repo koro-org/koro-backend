@@ -53,6 +53,8 @@ type Store interface {
 	// koro_bank −amount) and the payout_paid transactions whose payout is
 	// missing or not paid.
 	PayoutMismatches(ctx context.Context, limit int) ([]PayoutMismatch, error)
+
+	RetentionStore
 }
 
 // JournalFilter narrows adminListLedgerTransactions (04 §2.17).

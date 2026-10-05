@@ -369,6 +369,9 @@ type Module struct {
 	// with their answers and tickets; the events rows hold no personal
 	// data, 02 §11.1).
 	Privacy privacy.Provider
+	// Sweeper ends the retention of form answers (special category ones
+	// sooner) and staff assignments after the event (02 §24.2; BE-057).
+	Sweeper privacy.RetentionSweeper
 
 	svc *service
 }
@@ -380,7 +383,7 @@ func New(d Deps) (Module, error) {
 		return Module{}, err
 	}
 	s := &service{d: d, batch: jobBatch}
-	return Module{Service: s, Privacy: privacyProvider{s: s}, svc: s}, nil
+	return Module{Service: s, Privacy: privacyProvider{s: s}, Sweeper: sweeper{s: s}, svc: s}, nil
 }
 
 type service struct {

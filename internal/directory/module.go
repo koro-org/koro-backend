@@ -180,12 +180,11 @@ type Deps struct {
 	Sender         Sender
 	PlatformAdmins PlatformAdmins
 
-	// Files serves the claim evidence (files, L2). nil → a claim with an
-	// evidence file and the admin's download fail closed with 503.
+	// Files serves the claim evidence (files, L2) and deletes it (erasure,
+	// file.rejected, retention). nil → a claim with an evidence file and the
+	// admin's download fail closed with 503; evidence to delete stays
+	// (logged).
 	Files Files
-	// RemoveFile deletes an evidence file (erasure, file.rejected). nil →
-	// the file stays (logged).
-	RemoveFile FileRemover
 	// Students is identity's student verification: a claim approval checks
 	// the claimant's university again. nil → approval fails closed (503).
 	Students Students
@@ -216,6 +215,9 @@ type Module struct {
 	// Privacy is the KVKK provider of directory (club claims and their
 	// evidence; 01 §3.3).
 	Privacy privacy.Provider
+	// Sweeper ends the retention of decided club claims and their evidence
+	// (02 §24.2 club_claim; BE-057).
+	Sweeper privacy.RetentionSweeper
 	svc     *service
 }
 
@@ -226,7 +228,7 @@ func New(d Deps) (Module, error) {
 		return Module{}, err
 	}
 	s := &service{d: d}
-	return Module{Service: s, Privacy: privacyProvider{s: s}, svc: s}, nil
+	return Module{Service: s, Privacy: privacyProvider{s: s}, Sweeper: sweeper{s: s}, svc: s}, nil
 }
 
 type service struct{ d Deps }

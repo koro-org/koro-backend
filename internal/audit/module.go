@@ -45,6 +45,7 @@ import (
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/privacy"
 	"koro/internal/platform/queue"
 )
 
@@ -130,13 +131,17 @@ type Module struct {
 	Service Service
 	// Jobs are audit.chain, audit.daily_root and audit.verify_chain (01 §7).
 	Jobs []queue.Job
+	// Sweeper ends the retention of the log and of its daily roots
+	// (02 §24.2 audit_events, audit_roots; BE-057), run by
+	// kvkk.retention_sweep.
+	Sweeper privacy.RetentionSweeper
 }
 
 // New builds the audit module.
 func New(d Deps) Module {
 	d.mustValid()
 	s := &service{d: d}
-	return Module{Service: s, Jobs: s.jobs()}
+	return Module{Service: s, Jobs: s.jobs(), Sweeper: sweeper{s: s}}
 }
 
 type service struct {

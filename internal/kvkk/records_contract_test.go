@@ -114,6 +114,18 @@ func recordsContract(t *testing.T, newWorld func(t *testing.T) recordsWorld) {
 		if len(ofRun) != 3 {
 			t.Fatalf("of run = %d", len(ofRun))
 		}
+		// Retention (BE-057): the cut-off never passes now − 3 years, so
+		// tonight's rows are never counted, and the unapproved policy
+		// refuses a real purge.
+		if n, err := w.s.PurgeDestructionLogs(ctx, base.AddDate(5, 0, 0), 1000, true); err != nil || n != 0 {
+			t.Fatalf("dry run with a future cut-off = %d, %v; want 0", n, err)
+		}
+		if _, err := w.s.PurgeDestructionLogs(ctx, base.AddDate(-5, 0, 0), 1000, false); err == nil {
+			t.Fatal("a real purge of the unapproved destruction_log policy succeeded")
+		}
+		if all, _ := w.s.DestructionLogs(ctx, kvkk.DestructionFilter{}, nil, 10); len(all) != 3 {
+			t.Fatalf("rows after the refused purge = %d", len(all))
+		}
 	})
 
 	t.Run("breaches", func(t *testing.T) {
@@ -159,6 +171,28 @@ func recordsContract(t *testing.T, newWorld func(t *testing.T) recordsWorld) {
 		}
 		if _, err := w.s.Breach(ctx, uuid.NewV7()); !errors.Is(err, problem.ErrNotFound) {
 			t.Fatalf("Breach(missing) = %v", err)
+		}
+		// Retention (BE-057): a closed breach goes once closed_at is before
+		// the cut-off; an open one never.
+		second := b
+		second.ID, second.Title = uuid.NewV7(), "Açık ihlal"
+		if err := w.s.InsertBreach(ctx, second); err != nil {
+			t.Fatal(err)
+		}
+		if n, err := w.s.PurgeBreaches(ctx, base.Add(time.Hour), 10, true); err != nil || n != 0 {
+			t.Fatalf("dry run at closed_at = %d, %v; want 0 (strictly before)", n, err)
+		}
+		if n, err := w.s.PurgeBreaches(ctx, base.AddDate(10, 0, 0), 10, true); err != nil || n != 1 {
+			t.Fatalf("dry run = %d, %v; want 1", n, err)
+		}
+		if n, err := w.s.PurgeBreaches(ctx, base.AddDate(10, 0, 0), 10, false); err != nil || n != 1 {
+			t.Fatalf("purge = %d, %v; want 1", n, err)
+		}
+		if _, err := w.s.Breach(ctx, b.ID); !errors.Is(err, problem.ErrNotFound) {
+			t.Fatalf("purged breach found: %v", err)
+		}
+		if _, err := w.s.Breach(ctx, second.ID); err != nil {
+			t.Fatalf("the open breach was purged: %v", err)
 		}
 	})
 

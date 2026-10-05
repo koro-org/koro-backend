@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -302,4 +303,82 @@ func (f Filter) match(r Record) bool {
 		return false
 	}
 	return true
+}
+
+// covered reports whether a chained row is covered by root r.
+func covered(rec Record, r DailyRoot) bool {
+	return rec.ChainSeq != nil && *rec.ChainSeq <= r.LastChainSeq
+}
+
+// PurgeDays implements Store.
+func (s *MemStore) PurgeDays(_ context.Context, before civil.Date, limit int) ([]civil.Date, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []civil.Date
+	for _, r := range s.roots { // day order
+		if len(out) < limit && r.Day.Before(before) && slices.ContainsFunc(s.rows, func(rec Record) bool { return covered(rec, r) }) {
+			out = append(out, r.Day)
+		}
+	}
+	return out, nil
+}
+
+// CountPurgeable implements Store.
+func (s *MemStore) CountPurgeable(_ context.Context, before civil.Date) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var last *DailyRoot
+	for i := range s.roots {
+		if s.roots[i].Day.Before(before) {
+			last = &s.roots[i]
+		}
+	}
+	n := 0
+	for _, rec := range s.rows {
+		if last != nil && covered(rec, *last) {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// PurgeUntil implements Store (the retention window check of
+// audit_purge_until is the sweeper's cut-off here).
+func (s *MemStore) PurgeUntil(_ context.Context, day civil.Date) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := slices.IndexFunc(s.roots, func(r DailyRoot) bool { return r.Day == day })
+	if i < 0 {
+		return 0, fmt.Errorf("audit: purge until %s: no daily root", day)
+	}
+	before := len(s.rows)
+	s.rows = slices.DeleteFunc(s.rows, func(rec Record) bool { return covered(rec, s.roots[i]) })
+	return before - len(s.rows), nil
+}
+
+// PurgeRoots implements Store (the approval check of the database function
+// is kvkk's dry-run rule here).
+func (s *MemStore) PurgeRoots(_ context.Context, cutoff time.Time, limit int, dryRun bool) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	purgedAfter := func(i int) bool {
+		for _, later := range s.roots[i+1:] {
+			if !slices.ContainsFunc(s.rows, func(rec Record) bool { return covered(rec, later) }) {
+				return true
+			}
+		}
+		return false
+	}
+	var doomed []civil.Date
+	for i, r := range s.roots {
+		if r.CreatedAt.Before(cutoff) && purgedAfter(i) {
+			doomed = append(doomed, r.Day)
+		}
+	}
+	if dryRun {
+		return len(doomed), nil
+	}
+	doomed = doomed[:min(len(doomed), max(limit, 0))]
+	s.roots = slices.DeleteFunc(s.roots, func(r DailyRoot) bool { return slices.Contains(doomed, r.Day) })
+	return len(doomed), nil
 }

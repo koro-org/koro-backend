@@ -18,6 +18,7 @@ type Store interface {
 	PreferenceStore
 	InAppStore
 	PushTokenStore
+	RetentionStore
 }
 
 // DeliveryStore persists notification_deliveries (02 §6.1).

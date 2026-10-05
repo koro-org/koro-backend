@@ -56,10 +56,13 @@ import (
 //	c.notify.platformAdmins the platform_admins in effect (06 H-33) for
 //	                notify's admin alerts (06 H-40), only when nil
 //	c.privacy       the identity KVKK provider (kvkk calls it last)
+//	c.sweepers      the identity retention sweeper (student documents and
+//	                verifications, role history, privileged account
+//	                requests; BE-057)
 //
 // Consumed: c.consent.svc (registration consents, privacy notice lookup),
 // c.notify.svc (worker e-mails), c.audit.svc, c.files.svc (student
-// documents: Get, Attach, PresignGet; Delete through identity.FileRemover),
+// documents: Get, Attach, PresignGet, Delete — 01 §6.3, T-221),
 // hooks.memberships and hooks.domainResolver (read at call time, so orgs
 // and directory may fill them later) and hooks.retention.
 type identityWiring struct {
@@ -170,7 +173,6 @@ func (w *identityWiring) build(c *container) error {
 	}
 	if fs := c.files.svc; fs != nil {
 		d.Files = fs
-		d.RemoveFile = func(ctx context.Context, a authz.Actor, id uuid.UUID) error { return fs.Delete(ctx, a, id) }
 	}
 	mod, err := identity.New(d)
 	if err != nil {
@@ -178,6 +180,7 @@ func (w *identityWiring) build(c *container) error {
 	}
 	w.mod, w.svc, w.secrets, w.challenges, w.late = mod, mod.Service, secrets, challenges, c
 	c.privacy = append(c.privacy, mod.Privacy)
+	c.sweepers = append(c.sweepers, mod.Sweeper)
 	if c.actors == nil {
 		c.actors = actorResolver{auth: mod.Service, students: mod.Students, clock: c.infra.clock}
 	}

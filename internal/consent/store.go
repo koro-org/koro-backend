@@ -81,6 +81,17 @@ type Store interface {
 	// updated before the cutoff, with an ID greater than after, in ID order
 	// (consent.iys_reconcile).
 	DueSubmissions(ctx context.Context, before time.Time, after uuid.UUID, limit int) ([]Submission, error)
+
+	// PurgeProof deletes up to limit consent rows (with their İYS
+	// submissions) of the chains whose proof retention ended: the latest
+	// row of the (user, purpose, scope) chain is a withdrawal before cutoff,
+	// or the user was erased before cutoff (consent_proof, 3 years; BE-057).
+	// Oldest first, so a chain cut by the limit keeps its newest rows and
+	// its current state. dryRun counts every such row and deletes nothing.
+	// The GORM store goes through 000121's consents_purge (consents are
+	// append-only): it never passes now − the policy's period and refuses a
+	// real purge of an unapproved policy (55000).
+	PurgeProof(ctx context.Context, cutoff time.Time, limit int, dryRun bool) (int, error)
 }
 
 // CurrentQuery filters Store.CurrentNotices. Empty slices and nil pointers

@@ -479,3 +479,14 @@ func (s gormStore) DueSubmissions(ctx context.Context, before time.Time, after u
 	}
 	return out, nil
 }
+
+// PurgeProof implements Store.
+//
+// cross-org: retention spans every user.
+func (s gormStore) PurgeProof(ctx context.Context, cutoff time.Time, limit int, dryRun bool) (int, error) {
+	var n int64
+	if err := db.Conn(ctx, s.orm).Raw(`SELECT consents_purge( ?, ?, ?)`, cutoff, max(limit, 1), dryRun).Scan(&n).Error; err != nil {
+		return 0, fmt.Errorf("consent: purge proof: %w", db.Translate(err))
+	}
+	return int(n), nil
+}

@@ -96,7 +96,6 @@ func (w *studentsWiring) build(c *container) error {
 	}
 	if fs := c.files.svc; fs != nil {
 		d.Files = fs
-		d.RemoveFile = func(ctx context.Context, a authz.Actor, id uuid.UUID) error { return fs.Delete(ctx, a, id) }
 	}
 	mod, err := students.New(d)
 	if err != nil {

@@ -2,6 +2,7 @@ package directory
 
 import (
 	"context"
+	"time"
 	"uuid"
 
 	"gorm.io/gorm"
@@ -116,4 +117,34 @@ func claimRows(op string, q *gorm.DB) ([]ClubClaim, error) {
 		return nil, wrap(op, err)
 	}
 	return out, nil
+}
+
+// decidedSQL selects the decided claims of the retention club_claim; the
+// decision time is reviewed_at, or the last update of a withdrawal.
+const decidedSQL = `status IN ('approved','rejected','withdrawn') AND COALESCE(reviewed_at, updated_at) < @cutoff`
+
+// ClaimsDecidedBefore implements Store.
+//
+// cross-org: retention spans every claim.
+func (s gormStore) ClaimsDecidedBefore(ctx context.Context, cutoff time.Time, limit int) ([]ClubClaim, error) {
+	var rows []ClubClaim
+	err := db.Conn(ctx, s.orm).Raw(`SELECT `+claimCols+` FROM club_claims WHERE `+decidedSQL+`
+		ORDER BY COALESCE(reviewed_at, updated_at), id LIMIT @limit FOR UPDATE SKIP LOCKED`,
+		map[string]any{"cutoff": cutoff, "limit": limit}).Scan(&rows).Error
+	if err != nil {
+		return nil, wrap("claims decided before", err)
+	}
+	return rows, nil
+}
+
+// CountClaimsDecidedBefore implements Store.
+//
+// cross-org: retention spans every claim.
+func (s gormStore) CountClaimsDecidedBefore(ctx context.Context, cutoff time.Time) (int, error) {
+	var n int64
+	if err := db.Conn(ctx, s.orm).Raw(`SELECT count(*) FROM club_claims WHERE `+decidedSQL,
+		map[string]any{"cutoff": cutoff}).Scan(&n).Error; err != nil {
+		return 0, wrap("count claims decided before", err)
+	}
+	return int(n), nil
 }

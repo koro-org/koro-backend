@@ -24,6 +24,7 @@ import (
 type Store interface {
 	RegistrationStore
 	CheckinStore
+	RetentionStore
 
 	// InsertEvent writes a new event and returns it as stored (created_at
 	// and updated_at from the database). It reports false and writes

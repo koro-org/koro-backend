@@ -435,7 +435,7 @@ func (f *filesFake) PresignGet(_ context.Context, id uuid.UUID, ttl time.Duratio
 	return files.Download{URL: "https://files.test/" + id.String(), ExpiresAt: t0.Add(ttl)}, nil
 }
 
-func (f *filesFake) remove(ctx context.Context, _ authz.Actor, id uuid.UUID) error {
+func (f *filesFake) Delete(ctx context.Context, _ authz.Actor, id uuid.UUID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.deleted = append(f.deleted, id)
@@ -517,7 +517,7 @@ func newEnv(t *testing.T) *env {
 		Store: e.store, Tx: e.tx, Outbox: e.out, Audit: e.audit, Clock: clk, Log: obs.Discard(),
 		Idempotency: idempotency.New(idempotency.Deps{Tx: e.tx, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()}),
 		Consent:     e.consent, Consents: e.consent, Catalog: e.catalog, Orgs: e.orgs, Users: e.users,
-		Verifications: e.users, Files: e.files, RemoveFile: e.files.remove,
+		Verifications: e.users, Files: e.files,
 		Members: e.members, Accounts: accountsFake{users: e.users}, DSRs: e.dsrs,
 		Registrations: func() students.Registrations {
 			if e.regs == nil {

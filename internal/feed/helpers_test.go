@@ -187,6 +187,16 @@ type fakeFiles struct {
 	mu       sync.Mutex
 	files    map[uuid.UUID]files.FileMeta
 	attached map[uuid.UUID]uuid.UUID // file → post
+	deleted  []uuid.UUID
+}
+
+func (f *fakeFiles) Delete(_ context.Context, _ authz.Actor, id uuid.UUID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.files, id)
+	delete(f.attached, id)
+	f.deleted = append(f.deleted, id)
+	return nil
 }
 
 func (f *fakeFiles) Get(_ context.Context, id uuid.UUID) (files.FileMeta, error) {

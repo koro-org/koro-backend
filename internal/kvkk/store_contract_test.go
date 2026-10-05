@@ -179,6 +179,59 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 			t.Fatal("DueBy lists a completed request")
 		}
 	})
+
+	t.Run("retention purge of closed requests (BE-057)", func(t *testing.T) {
+		t.Parallel()
+		w := newWorld(t)
+		ctx := t.Context()
+		u := w.user(t)
+		closeAs := func(d kvkk.DSR, st kvkk.Status, at *time.Time, file *uuid.UUID) kvkk.DSR {
+			t.Helper()
+			if err := w.s.Insert(ctx, d); err != nil {
+				t.Fatal(err)
+			}
+			got, _ := w.s.Get(ctx, d.ID)
+			got.Status, got.CompletedAt, got.ExportFileID = st, at, file
+			if st == kvkk.StatusRejected {
+				got.RejectionReason = "Kimlik doğrulanamadı"
+			}
+			if err := w.s.Update(ctx, got); err != nil {
+				t.Fatal(err)
+			}
+			return got
+		}
+		t1, t2 := base, base.Add(time.Hour)
+		completed := closeAs(dsr(&u, kvkk.TypeAccess, base), kvkk.StatusCompleted, &t1, nil)
+		rejected := closeAs(dsr(&u, kvkk.TypeErasure, base), kvkk.StatusRejected, &t2, nil)
+		fileID := uuid.NewV7()
+		if w.file != nil {
+			w.file(t, fileID)
+		}
+		withFile := closeAs(dsr(&u, kvkk.TypeExport, base), kvkk.StatusCompleted, &t1, &fileID)
+		open := dsr(&u, kvkk.TypeInfo, base)
+		if err := w.s.Insert(ctx, open); err != nil {
+			t.Fatal(err)
+		}
+		cutoff := base.Add(90 * time.Minute)
+		if n, err := w.s.PurgeClosed(ctx, cutoff, 0, true); err != nil || n != 2 {
+			t.Fatalf("dry run = %d, %v; want the completed and the rejected request", n, err)
+		}
+		if n, err := w.s.PurgeClosed(ctx, cutoff, 1, false); err != nil || n != 1 {
+			t.Fatalf("batch of 1 = %d, %v", n, err)
+		}
+		if _, err := w.s.Get(ctx, completed.ID); !errors.Is(err, problem.ErrNotFound) {
+			t.Fatalf("the oldest closed request survived the first batch: %v", err)
+		}
+		if n, err := w.s.PurgeClosed(ctx, cutoff, 10, false); err != nil || n != 1 {
+			t.Fatalf("second batch = %d, %v", n, err)
+		}
+		for _, id := range []uuid.UUID{withFile.ID, open.ID} {
+			if _, err := w.s.Get(ctx, id); err != nil {
+				t.Fatalf("a request with an export file or still open was purged: %v", err)
+			}
+		}
+		_ = rejected
+	})
 }
 
 func ids(rows []kvkk.DSR) []uuid.UUID {

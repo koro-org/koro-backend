@@ -378,3 +378,61 @@ func (s *memStore) ListUsages(_ context.Context, orgID uuid.UUID, f UsageFilter,
 	slices.SortFunc(out, func(a, b UsageView) int { return b.ID.Compare(a.ID) })
 	return out[:min(limit, len(out))], nil
 }
+
+// UsagesOfActor implements Store.
+func (s *memStore) UsagesOfActor(_ context.Context, userID uuid.UUID) ([]Usage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []Usage
+	for _, u := range s.usages {
+		if u.ActorUserID != nil && *u.ActorUserID == userID {
+			out = append(out, u)
+		}
+	}
+	return out, nil
+}
+
+// PurgeEndedGrants implements Store. The in-memory store knows no posts,
+// dispatches or contact requests: every usage counts as unreferenced.
+func (s *memStore) PurgeEndedGrants(_ context.Context, cutoff time.Time, limit int, dryRun bool) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ended := func(e Entitlement) time.Time {
+		if e.RevokedAt != nil && e.RevokedAt.Before(e.ValidTo) {
+			return *e.RevokedAt
+		}
+		return e.ValidTo
+	}
+	var due []Entitlement
+	for _, e := range s.rows {
+		if (e.SourceType == SourceAdminGrant || e.SourceType == SourcePromo) && ended(e).Before(cutoff) {
+			due = append(due, e)
+		}
+	}
+	if dryRun {
+		return len(due), nil
+	}
+	slices.SortFunc(due, func(a, b Entitlement) int { return cmp.Or(ended(a).Compare(ended(b)), a.ID.Compare(b.ID)) })
+	usagesOf := func(id uuid.UUID) int {
+		n := 0
+		for _, u := range s.usages {
+			if u.EntitlementID == id {
+				n++
+			}
+		}
+		return n
+	}
+	gone, rows := map[uuid.UUID]bool{}, 0
+	for i, e := range due {
+		n := 1 + usagesOf(e.ID)
+		if i > 0 && rows+n > limit {
+			break
+		}
+		gone[e.ID], rows = true, rows+n
+	}
+	s.usages = slices.DeleteFunc(s.usages, func(u Usage) bool { return gone[u.EntitlementID] })
+	for id := range gone {
+		delete(s.rows, id)
+	}
+	return rows, nil
+}

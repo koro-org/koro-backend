@@ -3,6 +3,8 @@
 package feed_test
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"strconv"
 	"sync"
@@ -295,5 +297,55 @@ func TestLike_Service_Postgres(t *testing.T) {
 	}
 	if page, err := mod.Service.GetFeed(ctx, a, feed.FeedQuery{}); err != nil || len(page.Items) != 0 {
 		t.Fatalf("feed after hide = %d, %v", len(page.Items), err)
+	}
+}
+
+// TestRemovedPostsDue_SkipsReferencedPosts_Gorm (T-152 option a; BE-057):
+// a removed post a dispatch still refers to (outreach_dispatches.post_id,
+// NO ACTION, kept 2 years) is not due: it goes in a later run, after the
+// dispatch. The others go.
+func TestRemovedPostsDue_SkipsReferencedPosts_Gorm(t *testing.T) {
+	t.Parallel()
+	d := testutil.NewDB(t)
+	w := pgWorld(d)
+	s := feed.NewGormStore(d.ORM)
+	ctx := t.Context()
+	org, by := w.org(t, feed.AuthorClub), w.user(t)
+	removedAt := pub0.AddDate(-1, -1, 0)
+	var ids []uuid.UUID
+	for range 2 {
+		p, err := s.InsertPost(ctx, post(org, feed.AuthorClub, by))
+		if err != nil {
+			t.Fatal(err)
+		}
+		p = publishedAt(p, removedAt.AddDate(0, -1, 0))
+		p.Status, p.RemovedAt = feed.StatusRemoved, &removedAt
+		if _, err := s.UpdatePost(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, p.ID)
+	}
+	if _, err := d.Pool.Exec(ctx, `INSERT INTO outreach_dispatches (org_id, post_id, audience_keys, audience_dim_count, channels,
+		title_snapshot, deep_link, commercial, created_by) VALUES ($1, $2, ARRAY['all'], 1, ARRAY['in_app'], 'Duyuru', '/posts/x', false, $3)`,
+		org, ids[0], by); err != nil {
+		t.Fatal(err)
+	}
+	cutoff := pub0.AddDate(-1, 0, 0)
+	if n, err := s.CountRemovedPostsDue(ctx, cutoff); err != nil || n != 1 {
+		t.Fatalf("CountRemovedPostsDue = %d, %v; want the unreferenced post", n, err)
+	}
+	err := d.Tx.WithTx(ctx, func(ctx context.Context) error {
+		due, err := s.RemovedPostsDue(ctx, cutoff, 10)
+		if err != nil || len(due) != 1 || due[0].ID != ids[1] {
+			return fmt.Errorf("RemovedPostsDue = %+v: %w", due, err)
+		}
+		_, err = s.PurgePosts(ctx, []uuid.UUID{due[0].ID})
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetPost(ctx, ids[0]); err != nil {
+		t.Fatalf("the referenced post was purged: %v", err)
 	}
 }

@@ -227,6 +227,46 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (orgs.Store, world)
 		}
 	})
 
+	t.Run("members: retention purge of ended memberships (BE-057)", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		club := insert(t, s, newOrg(orgs.KindClub, "Saklama Kulübü"))
+		var ended []uuid.UUID
+		for i, at := range []time.Time{now.AddDate(0, -8, 0), now.AddDate(0, -7, 0), now} {
+			m, err := s.InsertMember(ctx, member(club.ID, w.user(t), authz.MemberMember))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.EndMember(ctx, club.ID, m.ID, at, orgs.EndLeft); err != nil {
+				t.Fatalf("end %d: %v", i, err)
+			}
+			ended = append(ended, m.ID)
+		}
+		active, err := s.InsertMember(ctx, member(club.ID, w.user(t), authz.MemberMember))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cutoff := now.AddDate(0, -6, 0)
+		if n, err := s.PurgeExpired(ctx, orgs.PolicyMembershipEnded, cutoff, 0, true); err != nil || n != 2 {
+			t.Fatalf("dry run = %d, %v; want 2", n, err)
+		}
+		if n, err := s.PurgeExpired(ctx, orgs.PolicyMembershipEnded, cutoff, 1, false); err != nil || n != 1 {
+			t.Fatalf("batch of 1 = %d, %v", n, err)
+		}
+		if _, err := s.GetMember(ctx, club.ID, ended[0]); !errors.Is(err, orgs.ErrNotFound) {
+			t.Fatalf("the oldest ended membership survived the first batch: %v", err)
+		}
+		if n, err := s.PurgeExpired(ctx, orgs.PolicyMembershipEnded, cutoff, 10, false); err != nil || n != 1 {
+			t.Fatalf("second batch = %d, %v", n, err)
+		}
+		for _, id := range []uuid.UUID{ended[2], active.ID} {
+			if _, err := s.GetMember(ctx, club.ID, id); err != nil {
+				t.Fatalf("a young or active membership was purged: %v", err)
+			}
+		}
+	})
+
 	t.Run("members: lifecycle queries (BE-019)", func(t *testing.T) {
 		t.Parallel()
 		s, w := newStore(t)
@@ -460,11 +500,20 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (orgs.Store, world)
 		if _, err := s.InsertInvitation(ctx, open); err != nil {
 			t.Fatal(err)
 		}
-		if n, err := s.DeleteClosedInvitations(ctx, now.Add(-2*time.Hour), 10); err != nil || n != 0 {
-			t.Fatalf("DeleteClosedInvitations before the cutoff = %d, %v", n, err)
+		if n, err := s.PurgeExpired(ctx, orgs.PolicyOrgInvitation, now.Add(-2*time.Hour), 10, false); err != nil || n != 0 {
+			t.Fatalf("PurgeExpired before the cutoff = %d, %v", n, err)
 		}
-		if n, err := s.DeleteClosedInvitations(ctx, now.Add(time.Minute), 10); err != nil || n != 2 {
-			t.Fatalf("DeleteClosedInvitations = %d, %v", n, err)
+		if n, err := s.PurgeExpired(ctx, orgs.PolicyOrgInvitation, now.Add(time.Minute), 10, true); err != nil || n != 2 {
+			t.Fatalf("PurgeExpired dry run = %d, %v", n, err)
+		}
+		if n, err := s.PurgeExpired(ctx, orgs.PolicyOrgInvitation, now.Add(time.Minute), 1, false); err != nil || n != 1 {
+			t.Fatalf("PurgeExpired batch of 1 = %d, %v", n, err)
+		}
+		if n, err := s.PurgeExpired(ctx, orgs.PolicyOrgInvitation, now.Add(time.Minute), 10, false); err != nil || n != 1 {
+			t.Fatalf("PurgeExpired = %d, %v", n, err)
+		}
+		if _, err := s.PurgeExpired(ctx, "no_such_policy", now, 10, true); err == nil {
+			t.Fatal("PurgeExpired(unknown policy) succeeded")
 		}
 		if n, err := s.DeleteInvitationsOfUser(ctx, acceptor, "c@example.com"); err != nil || n != 1 {
 			t.Fatalf("DeleteInvitationsOfUser = %d, %v", n, err)

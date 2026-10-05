@@ -123,6 +123,7 @@ func (w *consentWiring) build(c *container) error {
 	}
 	w.mod, w.svc = mod, mod.Service
 	c.privacy = append(c.privacy, mod.Privacy)
+	c.sweepers = append(c.sweepers, mod.Sweeper)
 	return nil
 }
 

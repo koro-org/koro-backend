@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"sync/atomic"
 	"testing"
+	"time"
 	"uuid"
 
 	"koro/internal/directory"
@@ -576,6 +577,53 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (directory.Store, w
 		}
 		if _, err := s.ClaimOfFile(ctx, uuid.NewV7()); !errors.Is(err, directory.ErrNotFound) {
 			t.Fatalf("ClaimOfFile of an unknown file: %v", err)
+		}
+	})
+
+	t.Run("club claims: retention of decided claims (BE-057)", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		u := uni(t, s, w, "Saklama Üniversitesi", "Bursa")
+		reviewer := w.user(t)
+		decide := func(name string, state directory.ClaimState, at *time.Time) directory.ClubClaim {
+			t.Helper()
+			c := club(t, s, w, u, name)
+			claim, err := s.InsertClaim(ctx, directory.ClubClaim{ID: uuid.NewV7(), ClubOrgID: c.OrgID, ClaimantUserID: w.user(t),
+				Status: directory.ClaimPending, RoleInClub: "Başkan"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if at == nil {
+				return claim
+			}
+			claim.Status, claim.ReviewedBy, claim.ReviewedAt = state, &reviewer, at
+			if claim, err = s.UpdateClaim(ctx, claim); err != nil {
+				t.Fatal(err)
+			}
+			return claim
+		}
+		twoYears, eighteenMonths, lastMonth := t0.AddDate(-2, 0, 0), t0.AddDate(0, -18, 0), t0.AddDate(0, -1, 0)
+		oldest := decide("Eski Onay Kulübü", directory.ClaimApproved, &twoYears)
+		rejected := decide("Eski Ret Kulübü", directory.ClaimRejected, &eighteenMonths)
+		recent := decide("Yeni Onay Kulübü", directory.ClaimApproved, &lastMonth)
+		pending := decide("Bekleyen Kulüp", directory.ClaimPending, nil)
+		cutoff := t0.AddDate(-1, 0, 0)
+		if n, err := s.CountClaimsDecidedBefore(ctx, cutoff); err != nil || n != 2 {
+			t.Fatalf("CountClaimsDecidedBefore = %d, %v; want 2", n, err)
+		}
+		got, err := s.ClaimsDecidedBefore(ctx, cutoff, 1)
+		if err != nil || len(got) != 1 || got[0].ID != oldest.ID {
+			t.Fatalf("batch of 1 = %+v, %v; want the oldest decision", got, err)
+		}
+		got, _ = s.ClaimsDecidedBefore(ctx, cutoff, 10)
+		if len(got) != 2 || got[1].ID != rejected.ID {
+			t.Fatalf("decided before = %+v", got)
+		}
+		for _, c := range []directory.ClubClaim{recent, pending} {
+			if slices.ContainsFunc(got, func(x directory.ClubClaim) bool { return x.ID == c.ID }) {
+				t.Fatalf("claim %s is due too early", c.ID)
+			}
 		}
 	})
 }

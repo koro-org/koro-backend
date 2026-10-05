@@ -32,17 +32,14 @@ const (
 	// AdminSweepJobName ends club_admin roles without a valid student
 	// verification (or of graduates): the safety net of the two events.
 	AdminSweepJobName = "orgs.admin_sweep" // 01:00, default
-	// InvitationsExpireJobName closes expired invitations and deletes the
-	// closed ones after their retention (org_invitation: 30 days).
+	// InvitationsExpireJobName closes expired invitations; the closed ones
+	// are deleted after their retention (org_invitation: 30 days) by the
+	// sweeper (kvkk.retention_sweep, BE-057).
 	InvitationsExpireJobName = "orgs.invitations_expire" // hourly :15, low
 
 	// endRolesJob is the system actor of OrgAdmin.EndRoles called by other
 	// modules (claim revocation).
 	endRolesJob = "orgs.end_roles"
-
-	// DefaultInvitationRetention is the retention of a closed invitation
-	// (retention_policies org_invitation).
-	DefaultInvitationRetention = 30 * 24 * time.Hour
 
 	sweepBatch = 1000 // rows per transaction (01 §7)
 )
@@ -50,10 +47,6 @@ const (
 // clubAdminRoles are the roles that need a valid student verification
 // (02 §7.3).
 var clubAdminRoles = []authz.MemberRole{authz.MemberClubAdmin}
-
-// Retention returns a retention period at run time (hooks.retention, then
-// the default).
-type Retention func(ctx context.Context) (time.Duration, error)
 
 // Subscribe registers the outbox subscriptions of orgs (01 §6.2).
 func (m Module) Subscribe(r *outbox.Registry) {
@@ -67,15 +60,17 @@ func (m Module) Subscribe(r *outbox.Registry) {
 		outbox.Queue(queue.Default))
 }
 
-// Jobs returns the scheduled jobs of 01 §7 (orgs.ended_memberships_purge,
-// the 6-month purge of non-sensitive ended memberships, is BE-057's; a
-// sensitive club's membership is deleted when it ends).
-func (m Module) Jobs(invitations Retention) []queue.Job {
+// Jobs returns the scheduled jobs of 01 §7. The 6-month purge of ended
+// memberships (01 §7 orgs.ended_memberships_purge) and the 30-day purge of
+// closed invitations are the Sweeper's, run by kvkk.retention_sweep under
+// the legal approval of their policies (BE-057); a sensitive club's
+// membership is deleted when it ends.
+func (m Module) Jobs() []queue.Job {
 	return []queue.Job{
 		{Name: AdminSweepJobName, Cron: "0 1 * * *", Queue: queue.Default, Unique: 23 * time.Hour,
 			Handle: m.svc.adminSweep},
 		{Name: InvitationsExpireJobName, Cron: "15 * * * *", Queue: queue.Low, Unique: 55 * time.Minute,
-			Handle: func(ctx context.Context) error { return m.svc.expireInvitations(ctx, invitations) }},
+			Handle: m.svc.expireInvitations},
 	}
 }
 
@@ -329,19 +324,9 @@ func (s *service) adminSweep(ctx context.Context) error {
 }
 
 // expireInvitations is orgs.invitations_expire: open invitations past
-// expires_at are closed (revoked_at = expires_at), then closed ones older
-// than the retention are deleted, in batches (idempotent).
-func (s *service) expireInvitations(ctx context.Context, retention Retention) error {
-	period := DefaultInvitationRetention
-	if retention != nil {
-		d, err := retention(ctx)
-		if err != nil {
-			return err
-		}
-		if d > 0 {
-			period = d
-		}
-	}
+// expires_at are closed (revoked_at = expires_at), in batches (idempotent).
+// Deleting the closed ones after their retention is the Sweeper's.
+func (s *service) expireInvitations(ctx context.Context) error {
 	now := s.now()
 	closed, err := s.batches(ctx, func(ctx context.Context) (int, error) {
 		return s.d.Store.CloseExpiredInvitations(ctx, now, sweepBatch)
@@ -349,13 +334,7 @@ func (s *service) expireInvitations(ctx context.Context, retention Retention) er
 	if err != nil {
 		return fmt.Errorf("%s: close: %w", InvitationsExpireJobName, err)
 	}
-	deleted, err := s.batches(ctx, func(ctx context.Context) (int, error) {
-		return s.d.Store.DeleteClosedInvitations(ctx, now.Add(-period), sweepBatch)
-	})
-	if err != nil {
-		return fmt.Errorf("%s: delete: %w", InvitationsExpireJobName, err)
-	}
-	s.d.Log.LogAttrs(ctx, slog.LevelInfo, "invitations expired", slog.Int("closed", closed), slog.Int("deleted", deleted))
+	s.d.Log.LogAttrs(ctx, slog.LevelInfo, "invitations expired", slog.Int("closed", closed))
 	return ctx.Err()
 }
 

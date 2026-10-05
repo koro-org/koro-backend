@@ -893,6 +893,100 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (feed.Store, world)
 		}
 	})
 
+	t.Run("retention: removed posts, resolved reports, moderation actions (BE-057)", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		org, by, reader, mod := w.org(t, feed.AuthorClub), w.user(t), w.user(t), w.user(t)
+		removed := func(at time.Time, image bool) feed.Post {
+			t.Helper()
+			p := insert(t, s, post(org, feed.AuthorClub, by))
+			if image {
+				p.Kind, p.BodyJSON, p.BodyText = feed.KindImage, nil, nil
+			}
+			p = publishedAt(p, at.AddDate(0, -1, 0))
+			p.Status, p.RemovedAt = feed.StatusRemoved, &at
+			got, err := s.UpdatePost(ctx, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return got
+		}
+		old := removed(pub0.AddDate(0, -13, 0), true)
+		if err := s.ReplaceMedia(ctx, org, old.ID, []feed.Media{{ID: uuid.NewV7(), FileID: w.file(t, org)}}); err != nil {
+			t.Fatal(err)
+		}
+		w.like(t, reader, old.ID)
+		young := removed(pub0.AddDate(0, -1, 0), false)
+		cutoff := pub0.AddDate(0, -12, 0)
+		if n, err := s.CountRemovedPostsDue(ctx, cutoff); err != nil || n != 1 {
+			t.Fatalf("CountRemovedPostsDue = %d, %v; want 1", n, err)
+		}
+		due, err := s.RemovedPostsDue(ctx, cutoff, 10)
+		if err != nil || len(due) != 1 || due[0].ID != old.ID {
+			t.Fatalf("RemovedPostsDue = %+v, %v", due, err)
+		}
+		if n, err := s.PurgePosts(ctx, []uuid.UUID{old.ID}); err != nil || n != 1 {
+			t.Fatalf("PurgePosts = %d, %v", n, err)
+		}
+		if _, err := s.GetPost(ctx, old.ID); !errors.Is(err, feed.ErrNotFound) {
+			t.Fatalf("purged post found: %v", err)
+		}
+		if media, _ := s.MediaOf(ctx, []uuid.UUID{old.ID}); len(media) != 0 {
+			t.Fatalf("media outlived the purged post: %+v", media)
+		}
+		if in, _ := s.InteractionsOf(ctx, reader); len(in.Likes) != 0 {
+			t.Fatalf("likes outlived the purged post: %+v", in.Likes)
+		}
+		if _, err := s.GetPost(ctx, young.ID); err != nil {
+			t.Fatalf("the young removed post was purged: %v", err)
+		}
+
+		// A resolved report goes after 12 months; its action keeps the
+		// decision (report_id → NULL).
+		target := insert(t, s, publishedAt(post(org, feed.AuthorClub, by), pub0))
+		r, _, err := s.InsertReport(ctx, feed.Report{ID: uuid.NewV7(), ReporterUserID: reader, TargetType: feed.TargetPost,
+			TargetID: target.ID, Reason: feed.ReasonSpam})
+		if err != nil {
+			t.Fatal(err)
+		}
+		resolved := pub0.AddDate(0, -13, 0)
+		r.Status, r.ResolvedAt = feed.ReportDismissed, &resolved
+		if _, err := s.UpdateReport(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+		open, _, err := s.InsertReport(ctx, feed.Report{ID: uuid.NewV7(), ReporterUserID: by, TargetType: feed.TargetPost,
+			TargetID: target.ID, Reason: feed.ReasonSpam})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rid := r.ID
+		act, err := s.InsertModerationAction(ctx, feed.ModerationAction{ID: uuid.NewV7(), ReportID: &rid, TargetType: feed.TargetPost,
+			TargetID: target.ID, Action: feed.ModHide, ReasonCode: "spam", ActorUserID: mod})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n, err := s.PurgeResolvedReports(ctx, cutoff, 10, true); err != nil || n != 1 {
+			t.Fatalf("PurgeResolvedReports dry run = %d, %v; want 1", n, err)
+		}
+		if n, err := s.PurgeResolvedReports(ctx, cutoff, 10, false); err != nil || n != 1 {
+			t.Fatalf("PurgeResolvedReports = %d, %v", n, err)
+		}
+		if _, err := s.GetReport(ctx, r.ID); !errors.Is(err, feed.ErrNotFound) {
+			t.Fatalf("purged report found: %v", err)
+		}
+		if _, err := s.GetReport(ctx, open.ID); err != nil {
+			t.Fatalf("the open report was purged: %v", err)
+		}
+		if got, err := s.GetModerationAction(ctx, act.ID); err != nil || got.ReportID != nil {
+			t.Fatalf("action after its report's purge = %+v, %v; want report_id NULL", got, err)
+		}
+		// The actions are 2-year records: nothing of today is due.
+		if n, err := s.PurgeModerationActions(ctx, time.Now().AddDate(-2, -1, 0), 10, true); err != nil || n != 0 {
+			t.Fatalf("PurgeModerationActions dry run = %d, %v", n, err)
+		}
+	})
+
 	t.Run("review queue: pending posts of every org, oldest first", func(t *testing.T) {
 		t.Parallel()
 		s, w := newStore(t)

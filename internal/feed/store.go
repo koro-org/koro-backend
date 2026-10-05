@@ -21,6 +21,8 @@ import (
 // passes that org to every later call (06 H-38). post_media has no org_id:
 // ReplaceMedia writes it only through a posts row of the given org.
 type Store interface {
+	RetentionStore
+
 	// InsertPost writes a new post and returns it as stored (created_at,
 	// updated_at from the database).
 	InsertPost(ctx context.Context, p Post) (Post, error)

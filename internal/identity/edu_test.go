@@ -95,7 +95,7 @@ func (f *fakeFiles) PresignGet(_ context.Context, id uuid.UUID, ttl time.Duratio
 	return files.Download{URL: "https://files.koro.test/" + id.String(), ExpiresAt: f.clk.Now().Add(ttl)}, nil
 }
 
-func (f *fakeFiles) remove(_ context.Context, _ authz.Actor, id uuid.UUID) error {
+func (f *fakeFiles) Delete(_ context.Context, _ authz.Actor, id uuid.UUID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.removed = append(f.removed, id)
@@ -113,7 +113,7 @@ func newEduEnv(t *testing.T, opts ...func(*identity.Deps)) *eduEnv {
 	t.Helper()
 	ff := &fakeFiles{metas: map[uuid.UUID]files.FileMeta{}}
 	e := newEnv(t, append([]func(*identity.Deps){func(d *identity.Deps) {
-		d.Domains, d.Files, d.RemoveFile = fakeDomains, ff, ff.remove
+		d.Domains, d.Files = fakeDomains, ff
 		d.UniversityNames = func(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error) {
 			return map[uuid.UUID]string{eduUni: "Koro Üniversitesi"}, nil
 		}

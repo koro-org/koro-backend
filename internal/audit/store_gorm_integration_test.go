@@ -27,10 +27,12 @@ func TestMain(m *testing.M) { os.Exit(testutil.Run(m)) }
 
 func TestGormStore_Contract(t *testing.T) {
 	t.Parallel()
-	runStoreContract(t, func(t *testing.T) (audit.Store, db.TxManager) {
+	gorm := func(t *testing.T) (audit.Store, db.TxManager) {
 		d := testutil.NewDB(t)
 		return audit.NewGormStore(d.ORM), d.Tx
-	})
+	}
+	runStoreContract(t, gorm)
+	runRetentionContract(t, gorm)
 }
 
 // pgEnv is an audit module over PostgreSQL (app_rw) with a fake clock.

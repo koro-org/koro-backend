@@ -153,6 +153,7 @@ func (w *orgsWiring) build(c *container) error {
 	}
 	w.mod, w.svc = mod, mod.Service
 	c.privacy = append(c.privacy, mod.Privacy)
+	c.sweepers = append(c.sweepers, mod.Sweeper)
 	svc := mod.Service
 	c.hooks.memberships = func(ctx context.Context, userID uuid.UUID) ([]authz.Membership, error) {
 		return svc.MembershipsOf(ctx, userID)
@@ -202,12 +203,12 @@ func (s studentsSeam) ActiveMany(ctx context.Context, userIDs []uuid.UUID) (map[
 // user.edu_verification_lapsed → orgs.end_lapsed_admin_roles;
 // student.graduated → orgs.end_graduated_admin_roles;
 // club.sensitivity_changed → orgs.purge_sensitive_memberships; orgs.admin_sweep
-// (01:00, default) and orgs.invitations_expire (:15, low; retention
-// org_invitation) (01 §6.2, §7). orgs.ended_memberships_purge is BE-057's.
+// (01:00, default) and orgs.invitations_expire (:15, low) (01 §6.2, §7).
+// The retention purges (membership_ended, org_invitation) are the orgs
+// sweeper's, registered in build and run by kvkk.retention_sweep (BE-057).
 func (w *orgsWiring) tasks(c *container) {
 	w.mod.Subscribe(c.infra.subs)
-	invitations := c.retention("org_invitation", 0, orgs.DefaultInvitationRetention)
-	for _, j := range w.mod.Jobs(orgs.Retention(invitations)) {
+	for _, j := range w.mod.Jobs() {
 		c.infra.jobs.Schedule(j)
 	}
 }

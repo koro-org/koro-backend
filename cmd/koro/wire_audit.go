@@ -25,7 +25,8 @@ import (
 //
 // Consumers: every module's service takes svc as its audit.Logger port
 // ("// sync-write: audit.Logger.Log", 01 §6.3). ActorNames (display names)
-// is bound once identity exists (BE-014).
+// is bound once identity exists (BE-014). The retention sweeper of the log
+// and its roots goes to c.sweepers (kvkk.retention_sweep; BE-057).
 type auditWiring struct {
 	store   audit.Store
 	signer  audit.RootSigner
@@ -83,6 +84,7 @@ func (w *auditWiring) build(c *container) error {
 		// notification is wired (BE-058).
 	})
 	w.svc, w.jobs = m.Service, m.Jobs
+	c.sweepers = append(c.sweepers, m.Sweeper)
 	return nil
 }
 

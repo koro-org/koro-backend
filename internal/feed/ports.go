@@ -79,6 +79,11 @@ type Files interface {
 	Attach(ctx context.Context, a authz.Actor, fileID uuid.UUID, owner files.Owner) error
 	// PresignGet returns a short-lived download URL of a clean file.
 	PresignGet(ctx context.Context, fileID uuid.UUID, ttl time.Duration) (files.Download, error)
+	// Delete removes an image in the caller's transaction once feed has
+	// dropped its media row: the end of a removed post's retention
+	// (post_removed; BE-057, T-247). The objects go after the commit.
+	// sync-write: files.Files.Delete
+	Delete(ctx context.Context, a authz.Actor, fileID uuid.UUID) error
 }
 
 // Targeting is what feed needs from outreach (L8; 01 §4.13): the audience

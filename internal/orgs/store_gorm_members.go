@@ -2,6 +2,7 @@ package orgs
 
 import (
 	"context"
+	"fmt"
 	"time"
 	"uuid"
 
@@ -326,17 +327,41 @@ func (s gormStore) CloseExpiredInvitations(ctx context.Context, now time.Time, l
 	return int(res.RowsAffected), nil
 }
 
-// DeleteClosedInvitations implements Store.
-//
-// cross-org: the retention cleanup of org_invitations (02 §24.2
-// org_invitation) spans every org.
-func (s gormStore) DeleteClosedInvitations(ctx context.Context, cutoff time.Time, limit int) (int, error) {
-	res := db.Conn(ctx, s.orm).Exec(`DELETE FROM org_invitations
-		WHERE id IN (SELECT id FROM org_invitations
+// purgeSQL holds, per retention policy, the count of rows whose retention
+// ended and the delete of one batch of them, oldest first (BE-057).
+var purgeSQL = map[string]struct{ count, del string }{
+	PolicyMembershipEnded: {
+		`SELECT count(*) FROM org_members WHERE status = 'ended' AND ended_at < @cutoff`,
+		`DELETE FROM org_members WHERE id IN (SELECT id FROM org_members
+			WHERE status = 'ended' AND ended_at < @cutoff ORDER BY ended_at, id LIMIT @limit FOR UPDATE SKIP LOCKED)`,
+	},
+	PolicyOrgInvitation: {
+		`SELECT count(*) FROM org_invitations WHERE COALESCE(accepted_at, revoked_at, expires_at) < @cutoff`,
+		`DELETE FROM org_invitations WHERE id IN (SELECT id FROM org_invitations
 			WHERE COALESCE(accepted_at, revoked_at, expires_at) < @cutoff
-			ORDER BY id LIMIT @limit FOR UPDATE SKIP LOCKED)`, map[string]any{"cutoff": cutoff, "limit": limit})
+			ORDER BY COALESCE(accepted_at, revoked_at, expires_at), id LIMIT @limit FOR UPDATE SKIP LOCKED)`,
+	},
+}
+
+// PurgeExpired implements Store.
+//
+// cross-org: retention applies to the rows of every org.
+func (s gormStore) PurgeExpired(ctx context.Context, policy string, cutoff time.Time, limit int, dryRun bool) (int, error) {
+	q, ok := purgeSQL[policy]
+	if !ok {
+		return 0, fmt.Errorf("orgs: no retention purge for policy %q", policy)
+	}
+	args := map[string]any{"cutoff": cutoff, "limit": limit}
+	if dryRun {
+		var n int64
+		if err := db.Conn(ctx, s.orm).Raw(q.count, args).Scan(&n).Error; err != nil {
+			return 0, wrap("count "+policy, err)
+		}
+		return int(n), nil
+	}
+	res := db.Conn(ctx, s.orm).Exec(q.del, args)
 	if res.Error != nil {
-		return 0, wrap("delete closed invitations", res.Error)
+		return 0, wrap("purge "+policy, res.Error)
 	}
 	return int(res.RowsAffected), nil
 }

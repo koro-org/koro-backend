@@ -255,6 +255,9 @@ type Module struct {
 	// Privacy is the KVKK provider (memberships, invitations and registered
 	// orgs of a user; the org rows themselves hold no personal data).
 	Privacy privacy.Provider
+	// Sweeper ends the retention of ended memberships and closed
+	// invitations (02 §24.2; BE-057).
+	Sweeper privacy.RetentionSweeper
 
 	svc *service
 }
@@ -266,7 +269,7 @@ func New(d Deps) (Module, error) {
 		return Module{}, err
 	}
 	s := &service{d: d}
-	return Module{Service: s, Privacy: privacyProvider{s: s}, svc: s}, nil
+	return Module{Service: s, Privacy: privacyProvider{s: s}, Sweeper: sweeper{s: s}, svc: s}, nil
 }
 
 type service struct{ d Deps }

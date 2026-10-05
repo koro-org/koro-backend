@@ -1,0 +1,106 @@
+# Table → retention map (BE-057; 02 §24.2, KVKK md. 7 and İmha Yönetmeliği). TestEveryPersonalTableHasRetention
+# reads it together with personal_tables.txt and the retention_policies seed of db/migrations:
+#
+#   <table>  <retention>
+#
+# retention  policy:<code>[,<code>…]  the retention policies whose target names the table
+#            account:<reason>         kept while the account lives; the module's KVKK provider erases it
+#                                     (02 §24.2: "hesap yaşadıkça saklanan kayıtlar için satır yoktur")
+#            parent:<table>           the rows go with their parent row (FK cascade or the parent's purge)
+#            todo:BE-NNN              no policy yet; the ticket decides it (P3 code)
+#
+# Every personal (or special category) table of personal_tables.txt has a line, and every table a seeded
+# policy names has a line listing that policy. A policy code that is not seeded, a policy whose target does
+# not name the table, an account line for a table without a provider, or a parent without retention fails.
+
+# platform
+outbox                      policy:outbox_published
+webhook_inbox               policy:webhook_payload,webhook_row
+idempotency_keys            policy:idempotency
+# audit
+audit_events                policy:audit_events
+audit_daily_roots           policy:audit_roots
+# files: unattached uploads, documents and generated files by purpose; avatars and CVs live with the account
+files                       policy:files_orphan,edu_document,event_export_file,dsr_export_file,financial_records
+# consent
+consents                    policy:consent_proof
+iys_submissions             policy:consent_proof
+# identity
+users                       policy:dsr_erasure,dormant_account
+sessions                    policy:session_expired
+email_tokens                policy:email_token
+platform_role_assignments   policy:role_history
+privileged_account_actions  policy:privileged_action_history
+edu_verifications           policy:edu_verification_history
+mfa_totp                    account:the second factor of the account; identity's provider deletes it on erasure
+mfa_recovery_codes          account:the recovery codes of the account; identity's provider deletes them on erasure
+# notify
+notification_deliveries     policy:notification_delivery
+email_suppressions          policy:email_suppression
+push_tokens                 policy:push_token
+in_app_notifications        policy:in_app_notification
+notification_preferences    account:the user's notification settings; notify's provider deletes them on erasure
+# orgs
+org_members                 policy:membership_ended,membership_ended_sensitive
+org_invitations             policy:org_invitation
+# directory
+club_claims                 policy:club_claim
+# students: the profile lives with the account (students provider); access grants end with their policy
+student_profiles            account:the student profile; students' provider deletes it on erasure
+student_privacy_settings    account:the profile's privacy settings; students' provider deletes them on erasure
+student_skills              account:the profile's skills; students' provider deletes them on erasure
+student_experiences         account:the profile's experiences; students' provider deletes them on erasure
+student_languages           account:the profile's languages; students' provider deletes them on erasure
+student_cvs                 account:the student's CVs (and files); students' provider deletes them on erasure
+profile_access_grants       policy:access_grant_revoked
+# entitlements
+entitlements                policy:entitlement_other
+entitlement_usages          parent:entitlements
+# events: the registration core lives with the account (02 §24.2 registration_core); answers end earlier
+event_staff                 policy:event_staff
+event_registrations         policy:event_form_answers,event_form_answers_sensitive
+registration_tickets        parent:event_registrations
+event_checkins              parent:event_registrations
+event_data_exports          policy:event_export_log
+# feed
+posts                       policy:post_removed
+post_reactions              account:the user's likes; feed's provider deletes them on erasure
+post_saves                  account:the user's saved posts; feed's provider deletes them on erasure
+post_hides                  account:the user's hidden posts; feed's provider deletes them on erasure
+org_follows                 account:the user's follows; feed's provider deletes them on erasure
+org_mutes                   account:the user's mutes; feed's provider deletes them on erasure
+content_reports             policy:content_report
+moderation_actions          policy:moderation_action
+# outreach
+outreach_dispatches         policy:outreach_dispatch
+# messaging (P3)
+contact_requests            policy:contact_request_closed
+contact_blocks              account:the user's blocks of companies; the messaging provider deletes them (BE-056)
+# talent (P3, profiling data)
+talent.point_events         policy:talent_ledger
+talent.daily_counters       policy:talent_counters
+talent.score_runs           policy:talent_runs
+talent.neutralizations      policy:talent_neutralization
+talent.cohorts              todo:BE-052
+talent.scores               todo:BE-052
+# kvkk
+data_subject_requests       policy:dsr_record
+destruction_logs            policy:destruction_log
+breach_incidents            policy:breach_record
+# financial records (10 years from the end of the calendar year; 06 H-57)
+legal_parties               policy:financial_records
+legal_party_documents       policy:financial_records
+payees                      policy:financial_records
+payee_bank_accounts         policy:financial_records
+orders                      policy:financial_records
+order_lines                 policy:financial_records
+incoming_bank_transfers     policy:financial_records
+payments                    policy:financial_records
+payment_splits              policy:financial_records
+refunds                     policy:financial_records
+ledger_transactions         policy:financial_records
+ledger_entries              policy:financial_records
+payouts                     policy:financial_records
+payout_items                policy:financial_records
+invoices                    policy:financial_records
+invoice_lines               policy:financial_records

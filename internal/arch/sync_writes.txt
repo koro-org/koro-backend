@@ -59,3 +59,17 @@ feed      -> entitlements.Entitlements.Release
 # clears the request's export_file_id (7-day purge, account erasure), so the
 # file never outlives its reference nor the reference its file.
 kvkk      -> files.Files.Delete
+
+# BE-057 (06 H-49 pattern; T-193, T-221, T-239, T-247; rationale for 01 §6.3 in
+# the BE-057 ticket's doc patch): the owning module deletes a file in the
+# transaction that clears its reference, so the file never outlives its
+# reference nor the reference its file (the objects go after the commit).
+# identity: student documents (erasure, file.rejected, edu_document retention);
+# directory: club claim evidence (erasure, file.rejected, club_claim retention);
+# students: replaced/deleted avatars and CVs (profile edits, erasure, file.rejected);
+# feed: media of deleted drafts, replaced images and purged removed posts (port
+# with the feed sweepers after BE-032).
+identity  -> files.Files.Delete
+directory -> files.Files.Delete
+students  -> files.Files.Delete
+feed      -> files.Files.Delete

@@ -157,6 +157,9 @@ type Module struct {
 	Service Service
 	// Privacy is the KVKK provider: consents are exported and kept as proof.
 	Privacy privacy.Provider
+	// Sweeper ends the retention of the consent proof (consent_proof,
+	// 02 §24.2; BE-057).
+	Sweeper privacy.RetentionSweeper
 
 	svc *service
 }
@@ -169,7 +172,7 @@ func New(d Deps) (Module, error) {
 		return Module{}, err
 	}
 	s := &service{d: d}
-	return Module{Service: s, Privacy: privacyProvider{s: s}, svc: s}, nil
+	return Module{Service: s, Privacy: privacyProvider{s: s}, Sweeper: sweeper{s: s}, svc: s}, nil
 }
 
 // Subscribe registers the outbox subscription of consent (01 §6.2):

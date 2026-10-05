@@ -153,6 +153,7 @@ func (w *eventsWiring) build(c *container) error {
 	w.mod, w.svc, w.built, w.keys = mod, mod.Service, store, d.Tickets
 	c.privacy = append(c.privacy, mod.Privacy)
 	c.students.registrations = eventsRegistrations{svc: mod.Service} // T-241
+	c.sweepers = append(c.sweepers, mod.Sweeper)
 	return nil
 }
 

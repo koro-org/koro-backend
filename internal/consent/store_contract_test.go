@@ -313,6 +313,49 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 		}
 	})
 
+	t.Run("proof retention (BE-057)", func(t *testing.T) {
+		t.Parallel()
+		w := newWorld(t)
+		ctx := t.Context()
+		text := notice(consent.KindConsentText, &email, consent.AudienceAll, "2020.01.01")
+		if err := w.s.InsertNotice(ctx, text); err != nil {
+			t.Fatal(err)
+		}
+		add := func(u uuid.UUID, a consent.Action, at time.Time) consent.Consent {
+			t.Helper()
+			c := consent.Consent{ID: uuid.NewV7(), UserID: u, PurposeCode: email, Action: a, ScopeType: consent.ScopeNone,
+				Channel: consent.ChannelWeb, OccurredAt: at}
+			if a == consent.Granted {
+				c.NoticeVersionID, c.TextSHA256 = &text.ID, text.BodySHA256
+			}
+			if err := w.s.InsertConsent(ctx, c); err != nil {
+				t.Fatal(err)
+			}
+			return c
+		}
+		long := base.AddDate(-6, 0, 0)
+		gone, kept, live := w.user(t), w.user(t), w.user(t)
+		g := add(gone, consent.Granted, long)
+		add(gone, consent.Withdrawn, long.AddDate(0, 1, 0)) // withdrawn ~6 years ago: the chain goes
+		sub := consent.Submission{ID: uuid.NewV7(), ConsentID: g.ID, Channel: consent.IYSEmail, Status: consent.SubmissionPending,
+			CreatedAt: long, UpdatedAt: long}
+		if err := w.s.InsertSubmission(ctx, sub); err != nil {
+			t.Fatal(err)
+		}
+		add(kept, consent.Withdrawn, base.AddDate(-1, 0, 0)) // withdrawn a year ago: kept
+		add(live, consent.Granted, long)                     // still granted: the proof in force
+		cutoff := base.AddDate(-4, 0, 0)
+		if n, err := w.s.PurgeProof(ctx, cutoff, 1000, true); err != nil || n != 2 {
+			t.Fatalf("dry run = %d, %v; want the 2 rows of the withdrawn chain", n, err)
+		}
+		if rows, _ := w.s.AllOf(ctx, gone); len(rows) != 2 {
+			t.Fatalf("a dry run deleted: %d rows left", len(rows))
+		}
+		if _, err := w.s.SubmissionOf(ctx, g.ID); err != nil {
+			t.Fatalf("a dry run deleted the submission: %v", err)
+		}
+	})
+
 	t.Run("iys submissions", func(t *testing.T) {
 		t.Parallel()
 		w := newWorld(t)

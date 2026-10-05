@@ -256,3 +256,28 @@ func (s gormStore) ExportsCompletedBefore(ctx context.Context, cutoff time.Time,
 	return s.many(ctx, `SELECT `+dsrCols+` FROM data_subject_requests WHERE export_file_id IS NOT NULL
 		AND completed_at <= ? AND id > ? ORDER BY id LIMIT ?`, cutoff, afterID, limit)
 }
+
+// closedSQL is the close time of a request: completed_at (completed,
+// rejected) or the last update of a cancelled one.
+const closedSQL = `status IN ('completed','rejected','cancelled') AND export_file_id IS NULL
+	AND COALESCE(completed_at, updated_at) < @cutoff`
+
+// PurgeClosed implements Store.
+//
+// cross-org: retention spans every request.
+func (s gormStore) PurgeClosed(ctx context.Context, cutoff time.Time, limit int, dryRun bool) (int, error) {
+	args := map[string]any{"cutoff": cutoff, "limit": limit}
+	if dryRun {
+		var n int64
+		if err := db.Conn(ctx, s.orm).Raw(`SELECT count(*) FROM data_subject_requests WHERE `+closedSQL, args).Scan(&n).Error; err != nil {
+			return 0, db.Translate(err)
+		}
+		return int(n), nil
+	}
+	res := db.Conn(ctx, s.orm).Exec(`DELETE FROM data_subject_requests WHERE id IN (SELECT id FROM data_subject_requests
+		WHERE `+closedSQL+` ORDER BY COALESCE(completed_at, updated_at), id LIMIT @limit FOR UPDATE SKIP LOCKED)`, args)
+	if res.Error != nil {
+		return 0, db.Translate(res.Error)
+	}
+	return int(res.RowsAffected), nil
+}

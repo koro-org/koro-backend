@@ -211,19 +211,23 @@ func (d *Deps) mustValid() {
 type Module struct {
 	Service Service
 	// Jobs are the scheduled jobs: notify.send_audit_alerts when an
-	// AuditFeed is wired (notify.purge is BE-057).
+	// AuditFeed is wired. The notify.purge row of 01 §7 is the Sweeper,
+	// run by kvkk.retention_sweep (BE-057).
 	Jobs []queue.Job
 	// Webhook is the platform/inbox processor of provider "email".
 	Webhook inbox.Processor
 	// Privacy is the KVKK provider (01 §3.3).
 	Privacy privacy.Provider
+	// Sweeper ends the retention of deliveries, suppressions, push tokens
+	// and in-app notifications (01 §3.3, 02 §24.2; BE-057).
+	Sweeper privacy.RetentionSweeper
 }
 
 // New builds the notify module.
 func New(d Deps) Module {
 	d.mustValid()
 	s := &service{d: d}
-	m := Module{Service: s, Webhook: s.webhookProcessor(), Privacy: privacyProvider{s: s}}
+	m := Module{Service: s, Webhook: s.webhookProcessor(), Privacy: privacyProvider{s: s}, Sweeper: sweeper{s: s}}
 	if d.AuditFeed != nil {
 		m.Jobs = append(m.Jobs, s.auditAlertJob())
 	}

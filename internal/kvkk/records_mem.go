@@ -1,7 +1,9 @@
 package kvkk
 
 import (
+	"cmp"
 	"context"
+	"errors"
 	"maps"
 	"slices"
 	"strings"
@@ -319,4 +321,59 @@ func (m *MemRecords) PutSubprocessor(s Subprocessor) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.subs[s.ID] = s.clone()
+}
+
+// PurgeDestructionLogs implements RecordStore with the rules of 000121's
+// destruction_logs_purge: the cut-off never passes now − the policy's
+// period, and a real purge needs the policy enabled and legally approved.
+func (m *MemRecords) PurgeDestructionLogs(_ context.Context, cutoff time.Time, limit int, dryRun bool) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.policies["destruction_log"]
+	switch {
+	case !ok:
+		return 0, errors.New("kvkk: retention purge: no retention policy destruction_log")
+	case !dryRun && (!p.Enabled || !p.LegalApproved):
+		return 0, errors.New("kvkk: retention purge: policy destruction_log is not enabled and legally approved (dry run only)")
+	}
+	if c := p.Period.Before(m.now()); c.Before(cutoff) {
+		cutoff = c
+	}
+	var old []DestructionLog
+	for _, l := range m.logs {
+		if l.CreatedAt.Before(cutoff) {
+			old = append(old, l)
+		}
+	}
+	if dryRun {
+		return len(old), nil
+	}
+	slices.SortFunc(old, func(a, b DestructionLog) int { return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), a.ID.Compare(b.ID)) })
+	doomed := map[uuid.UUID]bool{}
+	for _, l := range old[:min(len(old), max(limit, 0))] {
+		doomed[l.ID] = true
+	}
+	m.logs = slices.DeleteFunc(m.logs, func(l DestructionLog) bool { return doomed[l.ID] })
+	return len(doomed), nil
+}
+
+// PurgeBreaches implements RecordStore.
+func (m *MemRecords) PurgeBreaches(_ context.Context, cutoff time.Time, limit int, dryRun bool) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var old []Breach
+	for _, b := range m.breaches {
+		if b.Status == BreachClosed && b.ClosedAt != nil && b.ClosedAt.Before(cutoff) {
+			old = append(old, b)
+		}
+	}
+	if dryRun {
+		return len(old), nil
+	}
+	slices.SortFunc(old, func(a, b Breach) int { return cmp.Or(a.ClosedAt.Compare(*b.ClosedAt), a.ID.Compare(b.ID)) })
+	old = old[:min(len(old), max(limit, 0))]
+	for _, b := range old {
+		delete(m.breaches, b.ID)
+	}
+	return len(old), nil
 }

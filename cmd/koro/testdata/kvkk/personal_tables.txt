@@ -65,9 +65,9 @@ student_experiences         personal  students      provider:students
 student_languages           personal  students      provider:students
 student_cvs                 personal  students      provider:students
 profile_access_grants       personal  students      todo:BE-046
-# entitlements (code merged without a provider: see the BE-021 ticket note)
+# entitlements (usages: exported, kept on erasure as the company's record; BE-057, T-196)
 entitlements                staff     entitlements  -
-entitlement_usages          personal  entitlements  todo:BE-057
+entitlement_usages          personal  entitlements  provider:entitlements
 # events
 events                      staff     events        -
 event_staff                 personal  events        provider:events

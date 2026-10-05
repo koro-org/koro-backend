@@ -13,6 +13,7 @@ import (
 	"koro/internal/platform/clock"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/obs"
+	"koro/internal/platform/privacy"
 	"koro/internal/platform/queue"
 )
 
@@ -197,15 +198,19 @@ func (s *service) purgeExportsJob() queue.Job {
 }
 
 // purgeExports deletes every export file of a request completed more than
-// ExportRetention ago: the reference is cleared and the file deleted in
-// one transaction per request (files removes the objects after the
-// commit), audited as kvkk.retention.sweep (policy dsr_export_file).
+// ExportRetention ago: the reference is cleared, the file deleted, the
+// deletion audited as kvkk.retention.sweep and recorded in destruction_logs
+// (policy dsr_export_file, one row per file) in one transaction per request
+// (files removes the objects after the commit). It does not wait for the
+// legal approval of the policy: the export lives at most 7 days (T-83,
+// 06 H-48), so a destruction is never deferred.
 func (s *service) purgeExports(ctx context.Context) (int, error) {
 	sys := authz.SystemActor(purgeJob)
 	if err := authz.Can(ctx, sys, authz.KvkkRetentionSweep, authz.Resource{}); err != nil {
 		return 0, err
 	}
 	cutoff := s.now().Add(-s.exportRetention(ctx))
+	runID := uuid.NewV7()
 	n, after := 0, uuid.Nil()
 	for {
 		rows, err := s.d.Store.ExportsCompletedBefore(ctx, cutoff, after, batchSize)
@@ -214,7 +219,7 @@ func (s *service) purgeExports(ctx context.Context) (int, error) {
 		}
 		for _, d := range rows {
 			after = d.ID
-			purged, err := s.purgeOne(ctx, sys, d.ID, cutoff)
+			purged, err := s.purgeOne(ctx, sys, d.ID, cutoff, runID)
 			if err != nil {
 				return n, err
 			}
@@ -232,8 +237,9 @@ func (s *service) purgeExports(ctx context.Context) (int, error) {
 	return n, nil
 }
 
-func (s *service) purgeOne(ctx context.Context, sys authz.Actor, id uuid.UUID, cutoff time.Time) (bool, error) {
+func (s *service) purgeOne(ctx context.Context, sys authz.Actor, id uuid.UUID, cutoff time.Time, runID uuid.UUID) (bool, error) {
 	purged := false
+	started := s.now()
 	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		d, err := s.d.Store.Lock(ctx, id)
 		if err != nil {
@@ -251,8 +257,13 @@ func (s *service) purgeOne(ctx context.Context, sys authz.Actor, id uuid.UUID, c
 			return err
 		}
 		purged = true
-		return s.d.Audit.Log(ctx, event(sys, authz.KvkkRetentionSweep, d, map[string]any{
-			"policy_code": "dsr_export_file", "file_id": fileID.String()}))
+		if err := s.d.Audit.Log(ctx, event(sys, authz.KvkkRetentionSweep, d, map[string]any{
+			"policy_code": ExportPolicyCode, "file_id": fileID.String()})); err != nil {
+			return err
+		}
+		return s.d.Records.InsertDestructionLog(ctx, DestructionLog{ID: uuid.NewV7(), PolicyCode: ExportPolicyCode, RunID: runID,
+			Module: "kvkk", Target: "files:dsr_export", Method: privacy.MethodFileDelete, RecordCount: 1, PeriodCutoff: cutoff,
+			StartedAt: started, FinishedAt: s.now(), Details: map[string]any{"job": PurgeExportsJobName}})
 	})
 	return purged, err
 }

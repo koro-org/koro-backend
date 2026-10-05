@@ -187,14 +187,10 @@ type Deps struct {
 	// Consents checks consents in force for the nightly reconciliation of
 	// the mirrored flags. nil → the reconciliation is skipped.
 	Consents ConsentChecker
-	// Files attaches and serves the avatar and the CVs. nil →
-	// avatar_file_id and createMyCv/downloadMyCv are refused (503) and no
-	// avatar_url is returned.
+	// Files attaches, serves and deletes the avatar and the CVs. nil →
+	// avatar_file_id and createMyCv/downloadMyCv are refused (503), no
+	// avatar_url is returned and a file to delete is kept (logged).
 	Files Files
-	// RemoveFile deletes a replaced or erased avatar, a deleted CV and a
-	// file the scan rejected in the caller's transaction. nil → the file
-	// is kept (logged).
-	RemoveFile FileRemover
 
 	// Members reads the membership behind a member card (orgs). nil →
 	// getMemberCard answers 503 after its authz decision.

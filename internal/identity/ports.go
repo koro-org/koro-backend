@@ -105,15 +105,14 @@ type Files interface {
 	// PresignGet returns a download URL valid for ttl (≤ 5 minutes) of a
 	// clean file; files.ErrNotClean otherwise.
 	PresignGet(ctx context.Context, fileID uuid.UUID, ttl time.Duration) (files.Download, error)
+	// Delete removes a student document in the caller's transaction once
+	// identity has cleared its reference: erasure, a document the virus
+	// scan rejected (01 §6.2 file.rejected) and the end of its retention
+	// (edu_document, BE-057). The objects go after the commit. The pair is
+	// on the 01 §6.3 allow-list (T-221, BE-057).
+	// sync-write: files.Files.Delete
+	Delete(ctx context.Context, a authz.Actor, fileID uuid.UUID) error
 }
-
-// FileRemover deletes a student document (files.Files.Delete) once identity
-// has cleared its reference: erasure, and a document the virus scan
-// rejected (01 §6.2 file.rejected). It is a function, not a port method:
-// the pair identity → files.Files.Delete is not in the 01 §6.3 allow-list
-// yet (T-221; kvkk has the same gap, BE-021/H-49). nil → the file
-// stays and a warning is logged.
-type FileRemover func(ctx context.Context, a authz.Actor, fileID uuid.UUID) error
 
 // DomainResolver maps the domain of a .edu.tr address to a university
 // (hooks.domainResolver: directory.Catalog.UniversityByEmailDomain, 01 §5.3;

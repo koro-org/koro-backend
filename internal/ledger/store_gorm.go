@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"uuid"
 
 	"gorm.io/gorm"
@@ -304,4 +305,16 @@ func (s gormStore) PayoutMismatches(ctx context.Context, limit int) ([]PayoutMis
 		out[i] = PayoutMismatch{PayoutID: r.PayoutID, TransactionID: r.TransactionID, Problem: r.Problem}
 	}
 	return out, nil
+}
+
+// PurgeFinancialRecords implements Store through 000121's
+// financial_records_purge.
+//
+// cross-org: retention spans every org (finance data).
+func (s gormStore) PurgeFinancialRecords(ctx context.Context, cutoff time.Time, limit int, dryRun bool) (int, error) {
+	var n int64
+	if err := db.Conn(ctx, s.orm).Raw(`SELECT financial_records_purge( ?, ?, ?)`, cutoff, max(limit, 1), dryRun).Scan(&n).Error; err != nil {
+		return 0, fmt.Errorf("ledger: purge financial records: %w", db.Translate(err))
+	}
+	return int(n), nil
 }

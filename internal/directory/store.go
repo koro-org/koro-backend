@@ -2,6 +2,7 @@ package directory
 
 import (
 	"context"
+	"time"
 	"uuid"
 )
 
@@ -124,6 +125,13 @@ type Store interface {
 	ClaimOfFile(ctx context.Context, fileID uuid.UUID) (ClubClaim, error)
 	// DeleteClaim hard deletes a claim (KVKK erasure, 02 §8.6).
 	DeleteClaim(ctx context.Context, id uuid.UUID) error
+	// ClaimsDecidedBefore returns up to limit claims decided (approved or
+	// rejected at reviewed_at; withdrawn at the last update) before cutoff,
+	// oldest first, locked for the transaction (rows locked elsewhere are
+	// skipped): retention club_claim (BE-057).
+	ClaimsDecidedBefore(ctx context.Context, cutoff time.Time, limit int) ([]ClubClaim, error)
+	// CountClaimsDecidedBefore counts them without a limit (dry run).
+	CountClaimsDecidedBefore(ctx context.Context, cutoff time.Time) (int, error)
 
 	// InsertSkill writes a skill; ErrSkillSlugTaken when the slug is taken.
 	InsertSkill(ctx context.Context, s Skill) (Skill, error)

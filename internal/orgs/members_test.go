@@ -16,6 +16,7 @@ import (
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/outbox"
+	"koro/internal/platform/privacy"
 	"koro/internal/platform/queue"
 )
 
@@ -64,7 +65,7 @@ func (e *env) publish(t *testing.T, p domainevent.Payload) error {
 
 func (e *env) job(t *testing.T, name string) queue.Job {
 	t.Helper()
-	for _, j := range e.mod.Jobs(nil) {
+	for _, j := range e.mod.Jobs() {
 		if j.Name == name {
 			return j
 		}
@@ -527,7 +528,8 @@ func TestInvitation_Expired_Rejected(t *testing.T) {
 	if _, err := e.svc.AcceptInvitation(t.Context(), invitee, raw2); err != nil {
 		t.Fatalf("accept the new invitation: %v", err)
 	}
-	// The hourly job closes expired invitations and deletes them after 30 days.
+	// The hourly job closes expired invitations; the sweeper deletes them
+	// 30 days later, only under an approved policy (BE-057).
 	other, _ := e.svc.CreateInvitation(t.Context(), admin, club, "x@example.com", authz.MemberMember)
 	e.clk.Advance(8 * 24 * time.Hour)
 	if err := e.job(t, orgs.InvitationsExpireJobName).Handle(t.Context()); err != nil {
@@ -540,6 +542,20 @@ func TestInvitation_Expired_Rejected(t *testing.T) {
 	e.clk.Advance(31 * 24 * time.Hour)
 	if err := e.job(t, orgs.InvitationsExpireJobName).Handle(t.Context()); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := e.store.GetInvitation(t.Context(), club, other.ID); err != nil {
+		t.Fatalf("the job deleted a closed invitation (the sweeper's work): %v", err)
+	}
+	p := privacy.RetentionPolicy{Code: orgs.PolicyOrgInvitation, Retention: 30 * 24 * time.Hour}
+	if res, err := e.mod.Sweeper.Sweep(t.Context(), p, e.clk.Now()); err != nil || res.Count < 1 {
+		t.Fatalf("dry run = %+v, %v", res, err)
+	}
+	if _, err := e.store.GetInvitation(t.Context(), club, other.ID); err != nil {
+		t.Fatalf("a dry run deleted the invitation: %v", err)
+	}
+	p.LegalApproved = true
+	if res, err := e.mod.Sweeper.Sweep(t.Context(), p, e.clk.Now()); err != nil || res.Count < 1 || res.Table != "org_invitations" {
+		t.Fatalf("sweep = %+v, %v", res, err)
 	}
 	if _, err := e.store.GetInvitation(t.Context(), club, other.ID); !errors.Is(err, orgs.ErrNotFound) {
 		t.Fatalf("closed invitation not deleted after its retention: %v", err)

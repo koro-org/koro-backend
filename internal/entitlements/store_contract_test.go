@@ -296,6 +296,39 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (entitlements.Store
 		if _, err := s.ListUsages(ctx, uuid.Nil(), entitlements.UsageFilter{}, nil, 10); !errors.Is(err, db.ErrMissingOrgScope) {
 			t.Fatalf("ListUsages without org: %v", err)
 		}
+		// KVKK export (BE-057): the actor's own usages only.
+		mine, err := s.UsagesOfActor(ctx, actor)
+		if err != nil || len(mine) != 1 || mine[0].ID != u.ID {
+			t.Fatalf("UsagesOfActor = %+v, %v", mine, err)
+		}
+		if none, _ := s.UsagesOfActor(ctx, admin); len(none) != 0 {
+			t.Fatalf("UsagesOfActor(admin) = %+v", none)
+		}
+	})
+
+	t.Run("retention of ended grants (BE-057)", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		org, admin := w.org(t), w.user(t)
+		ctx := t.Context()
+		// The database clock is real: dates are relative to the real date.
+		real := time.Now()
+		ended := insert(t, s, quota(org, admin, entitlements.FeatureTargetedPost, 5, real.AddDate(-4, 0, 0), real.AddDate(-3, 0, 0)))
+		young := insert(t, s, quota(org, admin, entitlements.FeatureTargetedPost, 5, real.AddDate(-1, 0, 0), real.AddDate(0, -6, 0)))
+		order := quota(org, admin, entitlements.FeatureContactRequest, 5, real.AddDate(-4, 0, 0), real.AddDate(-3, 0, 0))
+		src := uuid.NewV7()
+		order.SourceType, order.SourceID, order.GrantedBy = entitlements.SourceOrderLine, &src, nil
+		insert(t, s, order)
+		cutoff := real.AddDate(-2, -1, 0)
+		if n, err := s.PurgeEndedGrants(ctx, cutoff, 1000, true); err != nil || n != 1 {
+			t.Fatalf("dry run = %d, %v; want the admin grant that ended 3 years ago", n, err)
+		}
+		if _, err := s.Get(ctx, org, ended.ID); err != nil {
+			t.Fatalf("a dry run deleted the grant: %v", err)
+		}
+		if _, err := s.Get(ctx, org, young.ID); err != nil {
+			t.Fatal(err)
+		}
 	})
 }
 

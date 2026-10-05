@@ -926,3 +926,24 @@ func TestGormStore_InsertTxn_NeedsTransaction(t *testing.T) {
 		t.Fatalf("InsertTxn without a transaction: %v, %v", ok, err)
 	}
 }
+
+// TestPurgeFinancialRecords_Gorm (06 H-57; BE-057): the store reaches
+// 000121's financial_records_purge as app_rw: a dry run counts, a real
+// purge of the unapproved policy is refused by the database (55000), so
+// nothing is destroyed before the accountant's approval.
+func TestPurgeFinancialRecords_Gorm(t *testing.T) {
+	t.Parallel()
+	d := testutil.NewDB(t)
+	s := ledger.NewGormStore(d.ORM)
+	cutoff := ledger.FinancialCutoff(time.Now(), 10*366*24*time.Hour)
+	if n, err := s.PurgeFinancialRecords(t.Context(), cutoff, ledger.FinancialBatch, true); err != nil || n != 0 {
+		t.Fatalf("dry run = %d, %v", n, err)
+	}
+	err := d.Tx.WithTx(t.Context(), func(ctx context.Context) error {
+		_, err := s.PurgeFinancialRecords(ctx, cutoff, ledger.FinancialBatch, false)
+		return err
+	})
+	if db.SQLState(err) != "55000" {
+		t.Fatalf("unapproved purge: %v; want SQLSTATE 55000", err)
+	}
+}

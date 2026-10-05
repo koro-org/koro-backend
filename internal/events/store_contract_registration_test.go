@@ -373,4 +373,84 @@ func registrationContract(t *testing.T, newStore func(t *testing.T) (events.Stor
 			t.Fatalf("a freed manual code = %v, %v", ok, err)
 		}
 	})
+
+	t.Run("retention: answers, special category answers, staff after the event (BE-057)", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		org, by := w.org(t), w.user(t)
+		ended := func(endedAgo time.Duration) events.Event {
+			t.Helper()
+			e := row(org, by, "Geçmiş Etkinlik", t0.Add(-endedAgo-time.Hour))
+			got, ok, err := s.InsertEvent(ctx, e)
+			if err != nil || !ok {
+				t.Fatalf("InsertEvent: %v %v", ok, err)
+			}
+			return got
+		}
+		old, recent := ended(120*24*time.Hour), ended(10*24*time.Hour)
+		reg := func(e events.Event) events.Registration {
+			t.Helper()
+			r := newReg(e, w.user(t), events.RegConfirmed)
+			purge := e.EndsAt.Add(30 * 24 * time.Hour)
+			r.AnswersSensitiveEnc, r.SensitivePurgeAt = []byte("enc"), &purge
+			return insert(t, s, r)
+		}
+		oldReg, recentReg := reg(old), reg(recent)
+		for _, e := range []events.Event{old, recent} {
+			if _, err := s.InsertStaff(ctx, events.Staff{EventID: e.ID, UserID: w.user(t), OrgID: org, Role: events.StaffScanner, InvitedBy: by}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		purge := func(policy string, cutoff time.Time, limit int, dry bool) int {
+			t.Helper()
+			n, err := s.PurgeExpired(ctx, policy, cutoff, limit, dry)
+			if err != nil {
+				t.Fatalf("PurgeExpired(%s): %v", policy, err)
+			}
+			return n
+		}
+		// Special category answers: 30 days after the end.
+		if n := purge(events.PolicyFormAnswersSensitive, t0.AddDate(0, 0, -30), 0, true); n != 1 {
+			t.Fatalf("sensitive dry run = %d, want 1", n)
+		}
+		if n := purge(events.PolicyFormAnswersSensitive, t0.AddDate(0, 0, -30), 10, false); n != 1 {
+			t.Fatalf("sensitive purge = %d, want 1", n)
+		}
+		got, _ := s.GetRegistration(ctx, org, old.ID, oldReg.ID)
+		if got.AnswersSensitiveEnc != nil || string(got.Answers) == "{}" || got.AnswersPurgedAt != nil {
+			t.Fatalf("after the sensitive purge = %+v", got)
+		}
+		// Answers: 90 days after the end; the registration stays.
+		if n := purge(events.PolicyFormAnswers, t0.AddDate(0, 0, -90), 0, true); n != 1 {
+			t.Fatalf("answers dry run = %d, want 1", n)
+		}
+		if n := purge(events.PolicyFormAnswers, t0.AddDate(0, 0, -90), 10, false); n != 1 {
+			t.Fatalf("answers purge = %d, want 1", n)
+		}
+		got, err := s.GetRegistration(ctx, org, old.ID, oldReg.ID)
+		if err != nil || string(got.Answers) != "{}" || got.AnswersPurgedAt == nil || got.Status != events.RegConfirmed {
+			t.Fatalf("after the answer purge = %+v, %v", got, err)
+		}
+		if n := purge(events.PolicyFormAnswers, t0.AddDate(0, 0, -90), 10, false); n != 0 {
+			t.Fatalf("second answer purge = %d, want 0 (idempotent)", n)
+		}
+		young, _ := s.GetRegistration(ctx, org, recent.ID, recentReg.ID)
+		if young.AnswersSensitiveEnc == nil || young.AnswersPurgedAt != nil {
+			t.Fatalf("the recent event's answers were purged: %+v", young)
+		}
+		// Staff: 90 days after the end.
+		if n := purge(events.PolicyStaff, t0.AddDate(0, 0, -90), 1, false); n != 1 {
+			t.Fatalf("staff purge = %d, want 1", n)
+		}
+		if st, _ := s.ListStaff(ctx, org, old.ID); len(st) != 0 {
+			t.Fatalf("staff of the old event left: %+v", st)
+		}
+		if st, _ := s.ListStaff(ctx, org, recent.ID); len(st) != 1 {
+			t.Fatalf("staff of the recent event = %+v", st)
+		}
+		if _, err := s.PurgeExpired(ctx, "no_such_policy", t0, 1, true); err == nil {
+			t.Fatal("unknown policy accepted")
+		}
+	})
 }

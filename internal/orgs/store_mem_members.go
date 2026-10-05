@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"fmt"
 	"slices"
 	"time"
 	"unicode/utf8"
@@ -387,19 +388,45 @@ func (i Invitation) closedAt() time.Time {
 	return i.ExpiresAt
 }
 
-// DeleteClosedInvitations implements Store.
-func (s *MemStore) DeleteClosedInvitations(_ context.Context, cutoff time.Time, limit int) (int, error) {
+// PurgeExpired implements Store.
+func (s *MemStore) PurgeExpired(_ context.Context, policy string, cutoff time.Time, limit int, dryRun bool) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	n := 0
-	s.invites = slices.DeleteFunc(s.invites, func(i Invitation) bool {
-		if n < limit && i.closedAt().Before(cutoff) {
-			n++
-			return true
+	type row struct {
+		at time.Time
+		id uuid.UUID
+	}
+	var rows []row
+	switch policy {
+	case PolicyMembershipEnded:
+		for _, m := range s.members {
+			if m.Status == MemberEnded && m.EndedAt != nil && m.EndedAt.Before(cutoff) {
+				rows = append(rows, row{*m.EndedAt, m.ID})
+			}
 		}
-		return false
-	})
-	return n, nil
+	case PolicyOrgInvitation:
+		for _, i := range s.invites {
+			if i.closedAt().Before(cutoff) {
+				rows = append(rows, row{i.closedAt(), i.ID})
+			}
+		}
+	default:
+		return 0, fmt.Errorf("orgs: no retention purge for policy %q", policy)
+	}
+	if dryRun {
+		return len(rows), nil
+	}
+	slices.SortFunc(rows, func(a, b row) int { return cmp.Or(a.at.Compare(b.at), bytes.Compare(a.id[:], b.id[:])) })
+	doomed := map[uuid.UUID]bool{}
+	for _, r := range rows[:min(len(rows), max(limit, 0))] {
+		doomed[r.id] = true
+	}
+	if policy == PolicyMembershipEnded {
+		s.members = slices.DeleteFunc(s.members, func(m Membership) bool { return doomed[m.ID] })
+	} else {
+		s.invites = slices.DeleteFunc(s.invites, func(i Invitation) bool { return doomed[i.ID] })
+	}
+	return len(doomed), nil
 }
 
 func ofUser(userID uuid.UUID, emailNormalized string) func(Invitation) bool {

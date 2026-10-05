@@ -415,11 +415,13 @@ func TestSyncWritesAreAllowed(t *testing.T) {
 	// 01 §6.3 + 05 §2.4 in full (written once, BE-004): 16 + 4 pending lines,
 	// + kvkk → files.Files.Delete (06 H-49, BE-049), + feed →
 	// entitlements.Entitlements.Release (BE-032: the targeted_post unit of a
-	// deleted or rejected draft; 04 §2.7 deletePost "+ hak iadesi").
-	if len(allow) != 22 {
-		t.Fatalf("sync_writes.txt has %d lines, want 22", len(allow))
+	// deleted or rejected draft; 04 §2.7 deletePost "+ hak iadesi"), +
+	// identity, directory, students and feed → files.Files.Delete (BE-057).
+	if len(allow) != 26 {
+		t.Fatalf("sync_writes.txt has %d lines, want 26", len(allow))
 	}
 	for _, must := range []string{"kvkk files.Files.Delete", "feed entitlements.Entitlements.Release",
+		"identity files.Files.Delete", "directory files.Files.Delete", "students files.Files.Delete", "feed files.Files.Delete",
 		"* audit.Logger.Log", "* files.Files.Attach", "payments orders.Orders.ApplyPayment", "payments ledger.Poster.Post",
 		"directory orgs.OrgAdmin.GrantRole", "directory orgs.OrgAdmin.Create", "orders catalog.Offerings.Release",
 	} {

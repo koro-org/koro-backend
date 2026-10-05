@@ -33,7 +33,8 @@ import (
 // c.notify.svc (e-mails), c.audit.svc, hooks.talentAuditor (read at call
 // time; nil → no profiling report) and c.privacy, read at call time so that
 // every provider registered by any module is erased and exported. kvkk adds
-// its own provider to c.privacy.
+// its own provider to c.privacy and its own sweeper (closed requests and
+// breaches, the destruction record; BE-057) to c.sweepers.
 //
 // BE-049: c.sweepers (RetentionSweeper) is read at call time by
 // kvkk.retention_sweep; identity's Sessions.RevokeAll (reason erasure)
@@ -104,6 +105,7 @@ func (w *kvkkWiring) build(c *container) error {
 	}
 	w.mod, w.svc, w.records = mod, mod.Service, records
 	c.privacy = append(c.privacy, mod.Privacy)
+	c.sweepers = append(c.sweepers, mod.Sweeper)
 	c.hooks.retention = mod.RetentionPeriod
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"slices"
+	"time"
 	"unicode/utf8"
 	"uuid"
 
@@ -173,4 +174,46 @@ func (s *MemStore) DeleteClaim(_ context.Context, id uuid.UUID) error {
 	defer s.mu.Unlock()
 	delete(s.claims, id)
 	return nil
+}
+
+// decidedAt is when a claim was decided (reviewed_at, or the last update
+// of a withdrawal); ok=false for a pending claim.
+func (c ClubClaim) decidedAt() (time.Time, bool) {
+	switch {
+	case c.Status == ClaimPending:
+		return time.Time{}, false
+	case c.ReviewedAt != nil:
+		return *c.ReviewedAt, true
+	}
+	return c.UpdatedAt, true
+}
+
+func (s *MemStore) decidedBefore(cutoff time.Time) []ClubClaim {
+	var out []ClubClaim
+	for _, c := range s.claims {
+		if at, ok := c.decidedAt(); ok && at.Before(cutoff) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// ClaimsDecidedBefore implements Store.
+func (s *MemStore) ClaimsDecidedBefore(_ context.Context, cutoff time.Time, limit int) ([]ClubClaim, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := s.decidedBefore(cutoff)
+	slices.SortFunc(out, func(a, b ClubClaim) int {
+		x, _ := a.decidedAt()
+		y, _ := b.decidedAt()
+		return cmp.Or(x.Compare(y), a.ID.Compare(b.ID))
+	})
+	return out[:min(len(out), max(limit, 0))], nil
+}
+
+// CountClaimsDecidedBefore implements Store.
+func (s *MemStore) CountClaimsDecidedBefore(_ context.Context, cutoff time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.decidedBefore(cutoff)), nil
 }

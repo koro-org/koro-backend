@@ -19,6 +19,7 @@ import (
 	"koro/internal/orgs"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/outbox"
+	"koro/internal/platform/privacy"
 	"koro/internal/platform/problem"
 )
 
@@ -101,11 +102,19 @@ func (*userDir) FindByEmail(context.Context, string) (uuid.UUID, bool, error) {
 	return uuid.Nil(), false, nil
 }
 
-// fakeFiles is files for claim evidence.
+// fakeFiles is files for claim evidence; Delete records into removed.
 type fakeFiles struct {
 	mu       sync.Mutex
 	m        map[uuid.UUID]files.FileMeta
 	attached []files.Owner
+	removed  *removedFiles
+}
+
+func (f *fakeFiles) Delete(ctx context.Context, a authz.Actor, id uuid.UUID) error {
+	f.mu.Lock()
+	delete(f.m, id)
+	f.mu.Unlock()
+	return f.removed.remove(ctx, a, id)
 }
 
 func (f *fakeFiles) put(m files.FileMeta) {
@@ -153,7 +162,7 @@ func (f *fakeFiles) PresignGet(_ context.Context, id uuid.UUID, ttl time.Duratio
 	return files.Download{URL: "https://files.example.test/" + id.String(), ExpiresAt: t0.Add(ttl)}, nil
 }
 
-// removedFiles records Deps.RemoveFile.
+// removedFiles records the deleted files.
 type removedFiles struct {
 	mu  sync.Mutex
 	ids []uuid.UUID
@@ -726,5 +735,55 @@ func TestClaimPrivacy_ExportErase(t *testing.T) {
 	// Idempotent.
 	if res, err := w.mod.Privacy.Erase(t.Context(), s.UserID); err != nil || res.Deleted != 0 {
 		t.Fatalf("second erase = %+v, %v", res, err)
+	}
+}
+
+// TestSweeper_ClubClaim (club_claim, 1 year after the decision; BE-057):
+// unapproved, the sweep counts and deletes nothing; approved, the decided
+// claim goes with its evidence file, a pending claim stays.
+func TestSweeper_ClubClaim(t *testing.T) {
+	t.Parallel()
+	w := newClaimWorld(t)
+	s := w.student(t, w.uni, false)
+	fid := uuid.NewV7()
+	w.files.put(files.FileMeta{ID: fid, Purpose: files.PurposeClubClaimEvidence, UploadedBy: &s.UserID, Status: files.StatusActive,
+		ScanStatus: files.ScanClean})
+	decided, err := w.svc.CreateClubClaim(t.Context(), s, w.club.Club.OrgID, directory.ClaimInput{RoleInClub: "Başkan", EvidenceFileID: &fid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.svc.AdminDecideClubClaim(t.Context(), pad(t), decided.Claim.ID,
+		directory.ClaimDecision{Decision: directory.ClaimRejected, Note: "Kanıt yetersiz"}); err != nil {
+		t.Fatal(err)
+	}
+	pending := w.claim(t, w.student(t, w.uni, false), w.sens.Club.OrgID)
+	if got := w.mod.Sweeper.PolicyCodes(); !slices.Equal(got, []string{directory.PolicyClubClaim}) {
+		t.Fatalf("PolicyCodes() = %v", got)
+	}
+	later := w.clk.Now().AddDate(1, 0, 1)
+	p := privacy.RetentionPolicy{Code: directory.PolicyClubClaim, Retention: later.Sub(later.AddDate(-1, 0, 0))}
+	res, err := w.mod.Sweeper.Sweep(t.Context(), p, later)
+	if err != nil || res.Count != 1 || len(w.removed.ids) != 0 {
+		t.Fatalf("dry run = %+v, %v (removed %v)", res, err, w.removed.ids)
+	}
+	if _, err := w.mem.GetClaim(t.Context(), decided.Claim.ID); err != nil {
+		t.Fatalf("a dry run deleted the claim: %v", err)
+	}
+	p.LegalApproved = true
+	if res, err = w.mod.Sweeper.Sweep(t.Context(), p, later); err != nil || res.Count != 1 || res.Table != "club_claims" {
+		t.Fatalf("sweep = %+v, %v", res, err)
+	}
+	if _, err := w.mem.GetClaim(t.Context(), decided.Claim.ID); !errors.Is(err, problem.ErrNotFound) {
+		t.Fatalf("the decided claim survived: %v", err)
+	}
+	if !slices.Equal(w.removed.ids, []uuid.UUID{fid}) {
+		t.Fatalf("removed files = %v, want the evidence", w.removed.ids)
+	}
+	if _, err := w.mem.GetClaim(t.Context(), pending.ID); err != nil {
+		t.Fatalf("the pending claim was purged: %v", err)
+	}
+	// A year from the decision is not over yet one day earlier.
+	if res, _ := w.mod.Sweeper.Sweep(t.Context(), p, later.AddDate(0, 0, -2)); res.Count != 0 {
+		t.Fatalf("early sweep = %+v", res)
 	}
 }

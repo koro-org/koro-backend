@@ -301,3 +301,25 @@ func (s gormStore) ListUsages(ctx context.Context, orgID uuid.UUID, f UsageFilte
 	}
 	return out, nil
 }
+
+// UsagesOfActor implements Store.
+//
+// cross-org: the KVKK export of one data subject spans every org.
+func (s gormStore) UsagesOfActor(ctx context.Context, userID uuid.UUID) ([]Usage, error) {
+	var rows []Usage
+	if err := db.Conn(ctx, s.orm).Where("actor_user_id = ?", userID).Order("created_at, id").Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("entitlements: usages of actor: %w", db.Translate(err))
+	}
+	return rows, nil
+}
+
+// PurgeEndedGrants implements Store.
+//
+// cross-org: retention spans every org.
+func (s gormStore) PurgeEndedGrants(ctx context.Context, cutoff time.Time, limit int, dryRun bool) (int, error) {
+	var n int64
+	if err := db.Conn(ctx, s.orm).Raw(`SELECT entitlements_purge( ?, ?, ?)`, cutoff, max(limit, 1), dryRun).Scan(&n).Error; err != nil {
+		return 0, fmt.Errorf("entitlements: purge ended grants: %w", db.Translate(err))
+	}
+	return int(n), nil
+}

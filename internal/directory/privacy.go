@@ -27,7 +27,7 @@ const (
 // Export returns every claim of the data subject, the decision note
 // included (it is a record about them; the app shows it to the reviewers only).
 // Erase hard deletes the claims (02 §8.6 "hard delete") and then their
-// evidence files (files.Files.Delete through Deps.RemoveFile). The role an
+// evidence files (files.Files.Delete through Deps.Files). The role an
 // approved claim granted is ended by the orgs provider (account_erased).
 type privacyProvider struct{ s *service }
 
@@ -122,13 +122,13 @@ func (p privacyProvider) Erase(ctx context.Context, userID uuid.UUID) (privacy.E
 	return res, nil
 }
 
-// removeFile deletes an evidence file through Deps.RemoveFile (nil: the
-// file stays, logged without personal data).
+// removeFile deletes an evidence file through Deps.Files (nil: the file
+// stays, logged without personal data).
 func (s *service) removeFile(ctx context.Context, a authz.Actor, fileID uuid.UUID) error {
-	if s.d.RemoveFile == nil {
-		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "claim evidence not removed: no file remover wired",
+	if s.d.Files == nil {
+		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "claim evidence not removed: files not wired",
 			slog.String("file_id", fileID.String()))
 		return nil
 	}
-	return s.d.RemoveFile(ctx, a, fileID)
+	return s.d.Files.Delete(ctx, a, fileID)
 }

@@ -259,6 +259,7 @@ func (w *notifyWiring) build(c *container) error {
 		}
 	}
 	c.privacy = append(c.privacy, w.mod.Privacy)
+	c.sweepers = append(c.sweepers, w.mod.Sweeper)
 	return nil
 }
 

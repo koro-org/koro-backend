@@ -387,3 +387,58 @@ func applyFilter(q *gorm.DB, f Filter) *gorm.DB {
 	}
 	return q
 }
+
+// PurgeDays implements Store.
+//
+// cross-org: retention of the whole log.
+func (s gormStore) PurgeDays(ctx context.Context, before civil.Date, limit int) ([]civil.Date, error) {
+	var rows []struct {
+		Day civil.Date `gorm:"column:day"`
+	}
+	err := db.Conn(ctx, s.orm).Raw(`SELECT r.day FROM audit_daily_roots r WHERE r.day < ?
+		AND EXISTS (SELECT 1 FROM audit_events e WHERE e.chain_seq <= r.last_chain_seq)
+		ORDER BY r.day LIMIT ?`, before, limit).Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("audit: purge days: %w", err)
+	}
+	days := make([]civil.Date, len(rows))
+	for i, r := range rows {
+		days[i] = r.Day
+	}
+	return days, nil
+}
+
+// CountPurgeable implements Store.
+//
+// cross-org: retention of the whole log.
+func (s gormStore) CountPurgeable(ctx context.Context, before civil.Date) (int, error) {
+	var n int64
+	err := db.Conn(ctx, s.orm).Raw(`SELECT count(*) FROM audit_events WHERE chain_seq <=
+		(SELECT max(last_chain_seq) FROM audit_daily_roots WHERE day < ?)`, before).Scan(&n).Error
+	if err != nil {
+		return 0, fmt.Errorf("audit: count purgeable: %w", err)
+	}
+	return int(n), nil
+}
+
+// PurgeUntil implements Store.
+//
+// cross-org: retention of the whole log.
+func (s gormStore) PurgeUntil(ctx context.Context, day civil.Date) (int, error) {
+	var n int64
+	if err := db.Conn(ctx, s.orm).Raw(`SELECT audit_purge_until( ?)`, day).Scan(&n).Error; err != nil {
+		return 0, fmt.Errorf("audit: purge until %s: %w", day, db.Translate(err))
+	}
+	return int(n), nil
+}
+
+// PurgeRoots implements Store.
+//
+// cross-org: daily roots have no org.
+func (s gormStore) PurgeRoots(ctx context.Context, cutoff time.Time, limit int, dryRun bool) (int, error) {
+	var n int64
+	if err := db.Conn(ctx, s.orm).Raw(`SELECT audit_daily_roots_purge( ?, ?, ?)`, cutoff, max(limit, 1), dryRun).Scan(&n).Error; err != nil {
+		return 0, fmt.Errorf("audit: purge roots: %w", db.Translate(err))
+	}
+	return int(n), nil
+}

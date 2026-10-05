@@ -25,6 +25,9 @@ import (
 //
 // Alarm: nil → ERROR log with alarm=true for each integrity finding until
 // GlitchTip/finance paging is wired (BE-058).
+//
+// build adds the financial_records retention sweeper (06 H-57; BE-057) to
+// c.sweepers.
 type ledgerWiring struct {
 	store ledger.Store
 	tx    db.TxManager
@@ -53,6 +56,7 @@ func (w *ledgerWiring) build(c *container) error {
 		return err
 	}
 	w.mod, w.svc = mod, mod.Service
+	c.sweepers = append(c.sweepers, mod.Sweeper)
 	return nil
 }
 

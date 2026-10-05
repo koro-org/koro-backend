@@ -145,9 +145,13 @@ type Store interface {
 	// expires_at ≤ now (revoked_at = expires_at: the schema has no separate
 	// expired column, T-206) and returns how many it closed.
 	CloseExpiredInvitations(ctx context.Context, now time.Time, limit int) (int, error)
-	// DeleteClosedInvitations deletes up to limit invitations accepted,
-	// revoked or expired before cutoff and returns how many it deleted.
-	DeleteClosedInvitations(ctx context.Context, cutoff time.Time, limit int) (int, error)
+	// PurgeExpired deletes up to limit rows of the retention policy whose
+	// anchor is before cutoff, oldest first, and returns how many it
+	// deleted; with dryRun it counts every such row and deletes nothing
+	// (BE-057). PolicyMembershipEnded: ended memberships by ended_at;
+	// PolicyOrgInvitation: invitations accepted, revoked or expired, by
+	// COALESCE(accepted_at, revoked_at, expires_at). Unknown policy: error.
+	PurgeExpired(ctx context.Context, policy string, cutoff time.Time, limit int, dryRun bool) (int, error)
 	// InvitationsOfUser returns the invitations accepted by userID or (when
 	// emailNormalized is not empty) addressed to emailNormalized, oldest
 	// first (KVKK).

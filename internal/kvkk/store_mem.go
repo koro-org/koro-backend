@@ -1,6 +1,7 @@
 package kvkk
 
 import (
+	"cmp"
 	"context"
 	"slices"
 	"sync"
@@ -204,4 +205,31 @@ func (m *MemStore) ExportsCompletedBefore(_ context.Context, cutoff time.Time, a
 	})
 	slices.SortFunc(rows, func(a, b DSR) int { return a.ID.Compare(b.ID) })
 	return limitTo(rows, limit), nil
+}
+
+// PurgeClosed implements Store.
+func (m *MemStore) PurgeClosed(_ context.Context, cutoff time.Time, limit int, dryRun bool) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	closedAt := func(d DSR) time.Time {
+		if d.CompletedAt != nil {
+			return *d.CompletedAt
+		}
+		return d.UpdatedAt
+	}
+	var rows []DSR
+	for _, d := range m.rows {
+		if !d.Status.Open() && d.ExportFileID == nil && closedAt(d).Before(cutoff) {
+			rows = append(rows, d)
+		}
+	}
+	if dryRun {
+		return len(rows), nil
+	}
+	slices.SortFunc(rows, func(a, b DSR) int { return cmp.Or(closedAt(a).Compare(closedAt(b)), a.ID.Compare(b.ID)) })
+	rows = rows[:min(len(rows), max(limit, 0))]
+	for _, d := range rows {
+		delete(m.rows, d.ID)
+	}
+	return len(rows), nil
 }

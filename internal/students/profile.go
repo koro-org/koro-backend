@@ -411,14 +411,14 @@ func (s *service) attachAvatar(ctx context.Context, a authz.Actor, fileID uuid.U
 }
 
 // removeFile deletes an avatar or a CV file students no longer
-// references, in the transaction carried by ctx (see FileRemover); without
-// a remover the file stays (logged without personal data).
+// references, in the transaction carried by ctx (Files.Delete); without
+// files the file stays (logged without personal data).
 func (s *service) removeFile(ctx context.Context, a authz.Actor, fileID uuid.UUID) error {
-	if s.d.RemoveFile == nil {
-		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "file kept: no file remover wired", slog.String("file_id", fileID.String()))
+	if s.d.Files == nil {
+		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "file kept: files not wired", slog.String("file_id", fileID.String()))
 		return nil
 	}
-	return s.d.RemoveFile(ctx, a, fileID)
+	return s.d.Files.Delete(ctx, a, fileID)
 }
 
 // sectionCompleted emits student.profile_section_completed (A) once the

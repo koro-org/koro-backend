@@ -30,7 +30,9 @@ import (
 // (targeted_dispatch) and messaging (contact_request) adapt svc to their
 // Consume port; discovery reads Available (discovery_access); orders
 // (BE-040) Grant/ActivateBySource/RevokeBySource. All of them are higher
-// layers and read c.entitlements.svc in their own build.
+// layers and read c.entitlements.svc in their own build. build adds the KVKK
+// provider (usages, T-196) to c.privacy and the retention sweeper
+// (entitlement_other) to c.sweepers (BE-057).
 type entitlementsWiring struct {
 	store   entitlements.Store
 	tx      db.TxManager
@@ -68,6 +70,8 @@ func (w *entitlementsWiring) build(c *container) error {
 		return err
 	}
 	w.mod, w.svc, w.clk = mod, mod.Service, c.infra.clock
+	c.privacy = append(c.privacy, mod.Privacy)
+	c.sweepers = append(c.sweepers, mod.Sweeper)
 	return nil
 }
 

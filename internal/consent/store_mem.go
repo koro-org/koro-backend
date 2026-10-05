@@ -515,3 +515,53 @@ func (s *memStore) DueSubmissions(_ context.Context, before time.Time, after uui
 	}
 	return out, nil
 }
+
+// PurgeProof implements Store. The in-memory store knows no accounts: only
+// withdrawn chains are purged here (the erased-account rule is the GORM
+// store's, through users).
+func (m *memStore) PurgeProof(_ context.Context, cutoff time.Time, limit int, dryRun bool) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	type key struct {
+		user    uuid.UUID
+		purpose Purpose
+		scope   uuid.UUID
+	}
+	keyOf := func(c Consent) key {
+		k := key{user: c.UserID, purpose: c.PurposeCode}
+		if c.ScopeID != nil {
+			k.scope = *c.ScopeID
+		}
+		return k
+	}
+	newer := func(a, b Consent) bool {
+		return a.OccurredAt.After(b.OccurredAt) || a.OccurredAt.Equal(b.OccurredAt) && a.ID.Compare(b.ID) > 0
+	}
+	latest := map[key]Consent{}
+	for _, c := range m.consents {
+		if cur, ok := latest[keyOf(c)]; !ok || newer(c, cur) {
+			latest[keyOf(c)] = c
+		}
+	}
+	var doomed []Consent
+	for _, c := range m.consents {
+		if l := latest[keyOf(c)]; l.Action == Withdrawn && l.OccurredAt.Before(cutoff) {
+			doomed = append(doomed, c)
+		}
+	}
+	if dryRun {
+		return len(doomed), nil
+	}
+	slices.SortFunc(doomed, func(a, b Consent) int { return cmp.Or(a.OccurredAt.Compare(b.OccurredAt), a.ID.Compare(b.ID)) })
+	gone := map[uuid.UUID]bool{}
+	for _, c := range doomed[:min(len(doomed), max(limit, 0))] {
+		gone[c.ID] = true
+	}
+	m.consents = slices.DeleteFunc(m.consents, func(c Consent) bool { return gone[c.ID] })
+	for id, sub := range m.subs {
+		if gone[sub.ConsentID] {
+			delete(m.subs, id)
+		}
+	}
+	return len(gone), nil
+}

@@ -299,6 +299,11 @@ type RecordStore interface {
 	// DestructionLogsOfRun returns the rows of one run (erasure: the
 	// request ID), oldest first.
 	DestructionLogsOfRun(ctx context.Context, runID uuid.UUID) ([]DestructionLog, error)
+	// PurgeDestructionLogs deletes up to limit destruction rows created
+	// before cutoff, oldest first, through 000121's destruction_logs_purge
+	// (the table is append-only; the database refuses a real purge of an
+	// unapproved policy with 55000); dryRun counts (BE-057).
+	PurgeDestructionLogs(ctx context.Context, cutoff time.Time, limit int, dryRun bool) (int, error)
 
 	// InsertBreach writes a breach (created_at/updated_at = now).
 	InsertBreach(ctx context.Context, b Breach) error
@@ -311,6 +316,9 @@ type RecordStore interface {
 	// Breaches returns the breaches (status filter optional), the most
 	// recently detected first.
 	Breaches(ctx context.Context, status *BreachStatus) ([]Breach, error)
+	// PurgeBreaches deletes up to limit breaches closed before cutoff,
+	// oldest first; dryRun counts (retention breach_record, BE-057).
+	PurgeBreaches(ctx context.Context, cutoff time.Time, limit int, dryRun bool) (int, error)
 
 	// InsertSubprocessor writes a sub-processor (ErrDuplicateSubprocessor
 	// on a taken name).

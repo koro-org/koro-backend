@@ -322,13 +322,12 @@ type Deps struct {
 	// Student verification (BE-018). Domains resolves .edu.tr domains
 	// (hooks.domainResolver); nil → every domain is unknown (422
 	// identity.edu_domain_unknown: the document path stays open). Files
-	// holds student documents; nil → the document operations answer 503.
-	// RemoveFile deletes documents on erasure and after a virus finding
-	// (nil → the file stays, logged). UniversityNames fills university
-	// names (nil → IDs only).
+	// holds student documents and deletes them on erasure, after a virus
+	// finding and at the end of their retention; nil → the document
+	// operations answer 503 and a document to delete stays (logged).
+	// UniversityNames fills university names (nil → IDs only).
 	Domains         DomainResolver
 	Files           Files
-	RemoveFile      FileRemover
 	UniversityNames UniversityNames
 }
 
@@ -359,6 +358,10 @@ type Module struct {
 	// Privacy is the KVKK provider: the account becomes a tombstone and
 	// its sessions and tokens are deleted (kvkk calls it last).
 	Privacy privacy.Provider
+	// Sweeper ends the retention of student documents and verifications,
+	// platform role assignments and privileged account requests (02 §24.2;
+	// BE-057).
+	Sweeper privacy.RetentionSweeper
 
 	svc *service
 }
@@ -377,7 +380,7 @@ func New(d Deps) (Module, error) {
 	}
 	s := &service{d: d}
 	s.students = eduStudents{s: s}
-	return Module{Service: s, Students: s.students, Privacy: privacyProvider{s: s}, svc: s}, nil
+	return Module{Service: s, Students: s.students, Privacy: privacyProvider{s: s}, Sweeper: sweeper{s: s}, svc: s}, nil
 }
 
 type service struct {

@@ -42,10 +42,12 @@ func insertUser(t *testing.T, d *db.DB) uuid.UUID {
 // against PostgreSQL (T-98).
 func TestStore_Contract_Gorm(t *testing.T) {
 	t.Parallel()
-	runStoreContract(t, func(t *testing.T) storeWorld {
+	world := func(t *testing.T) storeWorld {
 		d := testutil.NewDB(t)
 		return storeWorld{s: notify.NewGormStore(d.ORM), user: func(t *testing.T) uuid.UUID { return insertUser(t, d) }}
-	})
+	}
+	runStoreContract(t, world)
+	runRetentionContract(t, world)
 }
 
 // TestSend_DedupeKeyAcrossWorkers_SingleDelivery: many workers (separate

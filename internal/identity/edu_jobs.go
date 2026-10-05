@@ -262,13 +262,13 @@ func (s *service) handleFileRejected(ctx context.Context, e domainevent.Envelope
 	})
 }
 
-// removeFile deletes a student document through Deps.RemoveFile (nil: the
-// file stays, logged without personal data).
+// removeFile deletes a student document through Deps.Files (nil: the file
+// stays, logged without personal data).
 func (s *service) removeFile(ctx context.Context, a authz.Actor, fileID uuid.UUID) error {
-	if s.d.RemoveFile == nil {
-		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "student document not removed: no file remover wired",
+	if s.d.Files == nil {
+		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "student document not removed: files not wired",
 			slog.String("file_id", fileID.String()))
 		return nil
 	}
-	return s.d.RemoveFile(ctx, a, fileID)
+	return s.d.Files.Delete(ctx, a, fileID)
 }

@@ -255,3 +255,11 @@ func firstN[T any](xs []T, n int, by func(a, b T) int) []T {
 	}
 	return xs
 }
+
+// PurgeFinancialRecords implements Store. The in-memory ledger keeps no
+// orders, payments, invoices or parties, the aggregates the purge deletes
+// as a whole: it purges nothing. The rules are 000121's
+// financial_records_purge, tested on PostgreSQL (db/migrations).
+func (m *MemStore) PurgeFinancialRecords(context.Context, time.Time, int, bool) (int, error) {
+	return 0, nil
+}

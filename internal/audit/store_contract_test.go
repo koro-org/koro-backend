@@ -10,6 +10,7 @@ import (
 	"uuid"
 
 	"koro/internal/audit"
+	"koro/internal/platform/civil"
 	"koro/internal/platform/db"
 )
 
@@ -200,7 +201,98 @@ func runStoreContract(t *testing.T, newStore storeFactory) {
 	})
 }
 
+// runRetentionContract checks the retention primitives (BE-057): which
+// days a purge may reach, what it would delete, and the purge itself. The
+// days are three years back from the real date: the GORM store's
+// audit_purge_until refuses a day inside the 2-year window of the
+// database clock.
+func runRetentionContract(t *testing.T, newStore storeFactory) {
+	t.Helper()
+	t.Run("retention: purge by day up to the roots", func(t *testing.T) {
+		t.Parallel()
+		s, tx := newStore(t)
+		ctx := t.Context()
+		for i := range 3 {
+			if err := s.Insert(ctx, audit.Record{ID: uuid.NewV7(), OccurredAt: t0, ActorKind: "system", SystemJob: "test",
+				Action: "a.b.c", Outcome: audit.Success, Metadata: json.RawMessage(`{"i":` + string(rune('0'+i)) + `}`)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		hashes := [][]byte{bytes.Repeat([]byte{1}, 32), bytes.Repeat([]byte{2}, 32), bytes.Repeat([]byte{3}, 32)}
+		if err := tx.WithTx(ctx, func(ctx context.Context) error {
+			head, err := s.BeginChain(ctx)
+			if err != nil {
+				return err
+			}
+			rows, err := s.Unchained(ctx, 3)
+			if err != nil {
+				return err
+			}
+			prev := head.Hash
+			for i, r := range rows {
+				if err := s.SetChain(ctx, r.ID, int64(i+1), prev, hashes[i], t0); err != nil {
+					return err
+				}
+				prev = hashes[i]
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		dayA := civil.Today(time.Now()).AddDays(-3 * 366)
+		dayB := dayA.AddDays(1)
+		for _, r := range []audit.DailyRoot{{Day: dayA, LastChainSeq: 2, RootHash: hashes[1]}, {Day: dayB, LastChainSeq: 3, RootHash: hashes[2]}} {
+			r.Signature, r.KeyID, r.ExternalRef, r.CreatedAt = []byte("sig"), "k1", "audit-roots/"+r.Day.String()+".json", time.Now()
+			if err := s.InsertRoot(ctx, r); err != nil {
+				t.Fatal(err)
+			}
+		}
+		before := dayB.AddDays(1)
+		if days, err := s.PurgeDays(ctx, before, 10); err != nil || len(days) != 2 || days[0] != dayA || days[1] != dayB {
+			t.Fatalf("PurgeDays = %v, %v", days, err)
+		}
+		if days, _ := s.PurgeDays(ctx, dayB, 10); len(days) != 1 {
+			t.Fatalf("PurgeDays(before dayB) = %v, want dayA only", days)
+		}
+		if n, err := s.CountPurgeable(ctx, before); err != nil || n != 3 {
+			t.Fatalf("CountPurgeable = %d, %v; want 3", n, err)
+		}
+		if n, err := s.CountPurgeable(ctx, dayA); err != nil || n != 0 {
+			t.Fatalf("CountPurgeable(before any root) = %d, %v", n, err)
+		}
+		purge := func(day civil.Date) int {
+			t.Helper()
+			var n int
+			if err := tx.WithTx(ctx, func(ctx context.Context) error {
+				var err error
+				n, err = s.PurgeUntil(ctx, day)
+				return err
+			}); err != nil {
+				t.Fatalf("PurgeUntil(%s): %v", day, err)
+			}
+			return n
+		}
+		if n := purge(dayA); n != 2 {
+			t.Fatalf("PurgeUntil(dayA) = %d, want 2", n)
+		}
+		if days, _ := s.PurgeDays(ctx, before, 10); len(days) != 1 || days[0] != dayB {
+			t.Fatalf("PurgeDays after dayA = %v", days)
+		}
+		if n := purge(dayB); n != 1 {
+			t.Fatalf("PurgeUntil(dayB) = %d, want 1", n)
+		}
+		if days, _ := s.PurgeDays(ctx, before, 10); len(days) != 0 {
+			t.Fatalf("PurgeDays after the purge = %v", days)
+		}
+		// The roots are 10-year records: nothing is old enough yet.
+		if n, err := s.PurgeRoots(ctx, time.Now().AddDate(-10, 0, 0), 10, true); err != nil || n != 0 {
+			t.Fatalf("PurgeRoots dry run = %d, %v", n, err)
+		}
+	})
+}
+
 func TestMemStore_Contract(t *testing.T) {
 	t.Parallel()
 	runStoreContract(t, func(*testing.T) (audit.Store, db.TxManager) { return audit.NewMemStore(), db.NopTx{} })
+	runRetentionContract(t, func(*testing.T) (audit.Store, db.TxManager) { return audit.NewMemStore(), db.NopTx{} })
 }

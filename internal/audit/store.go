@@ -57,4 +57,23 @@ type Store interface {
 	ListOrg(ctx context.Context, orgID uuid.UUID, f Filter, after *After, limit int) ([]Record, error)
 	// List lists every event matching f (adminListAuditEvents).
 	List(ctx context.Context, f Filter, after *After, limit int) ([]Record, error)
+
+	// Retention (BE-057; 02 §2.1 "İmha", §24.2 audit_events, audit_roots).
+	//
+	// PurgeDays returns up to limit days before day that have a daily
+	// root and still chained rows covered by it, oldest first.
+	PurgeDays(ctx context.Context, before civil.Date, limit int) ([]civil.Date, error)
+	// CountPurgeable counts the chained rows covered by the newest root
+	// of a day before day (what purging up to it would delete).
+	CountPurgeable(ctx context.Context, before civil.Date) (int, error)
+	// PurgeUntil deletes the chained rows covered by the root of day
+	// through audit_purge_until (000008; the only delete path of the
+	// append-only table) and returns how many.
+	PurgeUntil(ctx context.Context, day civil.Date) (int, error)
+	// PurgeRoots deletes up to limit roots created before cutoff, oldest
+	// first, of which a later root whose rows are all purged exists (the
+	// verification starts there), through 000121's audit_daily_roots_purge
+	// (it never passes now − the policy's period and refuses a real purge
+	// of an unapproved policy); dryRun counts.
+	PurgeRoots(ctx context.Context, cutoff time.Time, limit int, dryRun bool) (int, error)
 }

@@ -429,7 +429,7 @@ func TestCV_Gorm_EndToEnd(t *testing.T) {
 		Store: students.NewGormStore(e.d.ORM), Tx: e.d.Tx, Outbox: outbox.NewMem(e.clk), Audit: e.audit, Clock: e.clk, Log: obs.Discard(),
 		Idempotency: idempotency.New(idempotency.Deps{Tx: e.d.Tx, Store: idempotency.NewGormStore(e.d.ORM), Clock: e.clk, Log: obs.Discard()}),
 		Consent:     e.consent, Consents: e.consent, Catalog: e.catalog, Orgs: e.orgs, Users: e.users, Verifications: e.users,
-		Files: fsvc, RemoveFile: fsvc.Delete,
+		Files: fsvc,
 	})
 	if err != nil {
 		t.Fatal(err)

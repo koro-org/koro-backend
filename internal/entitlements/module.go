@@ -33,6 +33,7 @@ import (
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/privacy"
 	"koro/internal/platform/queue"
 )
 
@@ -122,6 +123,12 @@ func (d Deps) validate() error {
 // Module is what entitlements hands to the composition root.
 type Module struct {
 	Service Service
+	// Privacy is the KVKK provider (the usages a person made for their
+	// company; T-196, BE-057).
+	Privacy privacy.Provider
+	// Sweeper ends the retention of admin and promo grants
+	// (entitlement_other, 02 §24.2; BE-057).
+	Sweeper privacy.RetentionSweeper
 
 	svc *service
 }
@@ -133,7 +140,7 @@ func New(d Deps) (Module, error) {
 		return Module{}, err
 	}
 	s := &service{d: d}
-	return Module{Service: s, svc: s}, nil
+	return Module{Service: s, Privacy: privacyProvider{s: s}, Sweeper: sweeper{s: s}, svc: s}, nil
 }
 
 // Jobs returns the scheduled jobs of entitlements (01 §7): entitlements.expire.

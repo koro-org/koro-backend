@@ -115,8 +115,8 @@ subprocessors               none      kvkk          -
 # parties (BE-034 schema; financial records kept 10 years: providers export, erasure keeps the legal duty)
 legal_parties               personal  parties       provider:parties
 legal_party_documents       personal  parties       provider:parties
-payees                      personal  parties       todo:BE-037
-payee_bank_accounts         personal  parties       todo:BE-037
+payees                      personal  parties       provider:parties
+payee_bank_accounts         personal  parties       provider:parties
 # catalog
 services                    none      catalog       -
 offerings                   staff     catalog       -

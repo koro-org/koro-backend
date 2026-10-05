@@ -1,0 +1,4 @@
+<p style="margin:0 0 12px 0;">Hello {{index .Data "name"}},</p>
+<p style="margin:0 0 12px 0;">A payee's new bank account awaits the four-eyes check: {{if eq (index .Data "stage") "pending_verification"}}the evidence and account holder check (first eye){{else}}the final approval (second eye){{end}}.</p>
+<p style="margin:0 0 12px 0;">IBAN: {{index .Data "iban_masked"}}</p>
+<p style="margin:0;">The person who submitted it or checked it first cannot approve it. Review it in the bank account queue of the Koro admin panel.</p>

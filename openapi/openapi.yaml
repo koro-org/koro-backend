@@ -74,6 +74,34 @@ components:
         - requested_at
         - expires_at
       type: object
+    AccountListOutputBody:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/BankAccountDTO"
+          type: array
+      required:
+        - items
+      type: object
+    AccountSummaryDTO:
+      additionalProperties: false
+      properties:
+        approved_at:
+          format: date-time
+          type: string
+        bank_account_id:
+          format: uuid
+          type: string
+        bank_name:
+          type: string
+        iban_masked:
+          description: TR12 **** **** **** **** 1234 56
+          type: string
+      required:
+        - bank_account_id
+        - iban_masked
+      type: object
     AddStaffInputBody:
       additionalProperties: false
       properties:
@@ -115,6 +143,25 @@ components:
       required:
         - line1
         - city
+      type: object
+    AdminAccountListOutputBody:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/BankAccountAdminDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
+    AdminApproveAccountInputBody:
+      additionalProperties: false
+      properties:
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof (03 §6.2)
       type: object
     AdminClubClaimDTO:
       additionalProperties: false
@@ -183,6 +230,22 @@ components:
           type: string
       required:
         - items
+      type: object
+    AdminCorrectOwnershipInputBody:
+      additionalProperties: false
+      properties:
+        evidence_file_id:
+          description: "A party_document upload of the caller: the real owner's evidence"
+          format: uuid
+          type: string
+        reason:
+          description: Why the party does not own its tax ID (audited)
+          maxLength: 500
+          minLength: 10
+          type: string
+      required:
+        - reason
+        - evidence_file_id
       type: object
     AdminCreateClubInputBody:
       additionalProperties: false
@@ -377,6 +440,40 @@ components:
         - kind
         - legal_type
         - title
+      type: object
+    AdminCreatePayeeInputBody:
+      additionalProperties: false
+      properties:
+        invoicing_capability:
+          description: unknown when omitted
+          enum:
+            - can_issue
+            - cannot_issue
+            - unknown
+          type: string
+        is_default:
+          description: The organization's default payee once active
+          type: boolean
+        legal_party_id:
+          description: A payee legal party (adminCreateLegalParty kind payee)
+          format: uuid
+          type: string
+        org_id:
+          description: The club or university paid on behalf of
+          format: uuid
+          type: string
+        payout_method:
+          description: bank_eft when omitted
+          enum:
+            - bank_eft
+            - none
+          type: string
+        university_protocol_ref:
+          maxLength: 200
+          type: string
+      required:
+        - legal_party_id
+        - org_id
       type: object
     AdminCreateSkillInputBody:
       additionalProperties: false
@@ -650,6 +747,17 @@ components:
         - domain_kind
         - is_active
       type: object
+    AdminRejectAccountInputBody:
+      additionalProperties: false
+      properties:
+        rejection_reason:
+          description: Shown to the organization (no personal data)
+          maxLength: 500
+          minLength: 1
+          type: string
+      required:
+        - rejection_reason
+      type: object
     AdminReportDTO:
       additionalProperties: false
       properties:
@@ -722,6 +830,20 @@ components:
           type: string
       required:
         - items
+      type: object
+    AdminRevokeAccountInputBody:
+      additionalProperties: false
+      properties:
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof (03 §6.2)
+        revoke_reason:
+          description: Shown to the organization (no personal data)
+          maxLength: 500
+          minLength: 1
+          type: string
+      required:
+        - revoke_reason
       type: object
     AdminRevokeInputBody:
       additionalProperties: false
@@ -1034,6 +1156,33 @@ components:
             - unknown
           type: string
       type: object
+    AdminUpdatePayeeInputBody:
+      additionalProperties: false
+      properties:
+        invoicing_capability:
+          enum:
+            - can_issue
+            - cannot_issue
+            - unknown
+          type: string
+        is_default:
+          type: boolean
+        payout_method:
+          enum:
+            - bank_eft
+            - none
+          type: string
+        status:
+          description: adminVerifyPayee activates a suspended payee again
+          enum:
+            - suspended
+            - closed
+          type: string
+        university_protocol_ref:
+          description: Empty string clears it
+          maxLength: 200
+          type: string
+      type: object
     AdminUpdateSkillInputBody:
       additionalProperties: false
       properties:
@@ -1084,6 +1233,26 @@ components:
           description: Empty string clears it
           maxLength: 2048
           type: string
+      type: object
+    AdminUploadDocumentInputBody:
+      additionalProperties: false
+      properties:
+        file_id:
+          description: A party_document upload of the caller (createUpload, completeUpload)
+          format: uuid
+          type: string
+        kind:
+          enum:
+            - tax_certificate
+            - signature_circular
+            - foundation_deed
+            - university_protocol
+            - authorization_letter
+            - other
+          type: string
+      required:
+        - kind
+        - file_id
       type: object
     AdminUserDTO:
       additionalProperties: false
@@ -1194,6 +1363,18 @@ components:
         - status
         - mfa_enabled
         - created_at
+      type: object
+    AdminVerifyAccountInputBody:
+      additionalProperties: false
+      properties:
+        checklist:
+          $ref: "#/components/schemas/VerifyChecklist"
+        note:
+          description: Required when the holder is not the legal party's title (audited; no personal data)
+          maxLength: 500
+          type: string
+      required:
+        - checklist
       type: object
     AdminVerifyPartyInputBody:
       additionalProperties: false
@@ -1372,6 +1553,170 @@ components:
           type: integer
       required:
         - feature
+      type: object
+    BankAccountAdminDTO:
+      additionalProperties: false
+      properties:
+        approved_at:
+          format: date-time
+          type: string
+        approved_by:
+          format: uuid
+          type: string
+        bank_account_id:
+          format: uuid
+          type: string
+        bank_code:
+          description: Characters 5-9 of the IBAN
+          type: string
+        bank_name:
+          type: string
+        evidence_file_id:
+          description: adminDownloadBankAccountEvidence
+          format: uuid
+          type: string
+        holder_matches_title:
+          description: Holder equals the title after Turkish-insensitive folding (advisory)
+          type: boolean
+        holder_name:
+          type: string
+        iban:
+          description: Finance and platform admins only (the read is audited)
+          type: string
+        iban_masked:
+          description: TR12 **** **** **** **** 1234 56
+          type: string
+        org_id:
+          format: uuid
+          type: string
+        party_title:
+          description: The legal party's invoice title the holder is checked against
+          type: string
+        payee_id:
+          format: uuid
+          type: string
+        rejected_at:
+          format: date-time
+          type: string
+        rejected_by:
+          format: uuid
+          type: string
+        rejection_reason:
+          type: string
+        revoke_reason:
+          type: string
+        revoked_at:
+          format: date-time
+          type: string
+        revoked_by:
+          format: uuid
+          type: string
+        status:
+          enum:
+            - pending_verification
+            - pending_approval
+            - approved
+            - rejected
+            - superseded
+            - revoked
+          type: string
+        submitted_at:
+          format: date-time
+          type: string
+        submitted_by:
+          format: uuid
+          type: string
+        submitted_by_admin:
+          description: An admin submission starts pending_approval (the submitter is the first eye)
+          type: boolean
+        superseded_at:
+          format: date-time
+          type: string
+        superseded_by_id:
+          format: uuid
+          type: string
+        verified_at:
+          format: date-time
+          type: string
+        verified_by:
+          format: uuid
+          type: string
+      required:
+        - org_id
+        - evidence_file_id
+        - submitted_by
+        - submitted_by_admin
+        - party_title
+        - holder_matches_title
+        - bank_account_id
+        - payee_id
+        - iban_masked
+        - holder_name
+        - bank_code
+        - status
+        - submitted_at
+      type: object
+    BankAccountDTO:
+      additionalProperties: false
+      properties:
+        approved_at:
+          format: date-time
+          type: string
+        bank_account_id:
+          format: uuid
+          type: string
+        bank_code:
+          description: Characters 5-9 of the IBAN
+          type: string
+        bank_name:
+          type: string
+        holder_name:
+          type: string
+        iban:
+          description: Finance and platform admins only (the read is audited)
+          type: string
+        iban_masked:
+          description: TR12 **** **** **** **** 1234 56
+          type: string
+        payee_id:
+          format: uuid
+          type: string
+        rejected_at:
+          format: date-time
+          type: string
+        rejection_reason:
+          type: string
+        revoke_reason:
+          type: string
+        revoked_at:
+          format: date-time
+          type: string
+        status:
+          enum:
+            - pending_verification
+            - pending_approval
+            - approved
+            - rejected
+            - superseded
+            - revoked
+          type: string
+        submitted_at:
+          format: date-time
+          type: string
+        superseded_at:
+          format: date-time
+          type: string
+        verified_at:
+          format: date-time
+          type: string
+      required:
+        - bank_account_id
+        - payee_id
+        - iban_masked
+        - holder_name
+        - bank_code
+        - status
+        - submitted_at
       type: object
     BreachDTO:
       additionalProperties: false
@@ -5308,6 +5653,115 @@ components:
         - verified
         - follower_count
       type: object
+    PartySummaryDTO:
+      additionalProperties: false
+      properties:
+        legal_type:
+          enum:
+            - company
+            - university
+            - foundation
+            - association
+            - sole_prop
+            - individual
+            - public_body
+            - other
+          type: string
+        party_id:
+          format: uuid
+          type: string
+        status:
+          enum:
+            - draft
+            - pending_verification
+            - verified
+            - rejected
+            - inactive
+          type: string
+        title:
+          description: Invoice title (unvan)
+          type: string
+      required:
+        - party_id
+        - title
+        - legal_type
+        - status
+      type: object
+    PayeeDTO:
+      additionalProperties: false
+      properties:
+        approved_account:
+          $ref: "#/components/schemas/AccountSummaryDTO"
+        created_at:
+          format: date-time
+          type: string
+        invoicing_capability:
+          enum:
+            - can_issue
+            - cannot_issue
+            - unknown
+          type: string
+        is_default:
+          type: boolean
+        legal_party:
+          $ref: "#/components/schemas/PartySummaryDTO"
+        org_id:
+          description: The club or university paid on behalf of
+          format: uuid
+          type: string
+        payee_id:
+          format: uuid
+          type: string
+        payout_method:
+          enum:
+            - bank_eft
+            - iyzico
+            - none
+          type: string
+        status:
+          enum:
+            - draft
+            - pending_verification
+            - active
+            - suspended
+            - closed
+          type: string
+        university_protocol_ref:
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+        valid_from:
+          format: date-time
+          type: string
+        valid_to:
+          format: date-time
+          type: string
+        verified_at:
+          format: date-time
+          type: string
+      required:
+        - payee_id
+        - org_id
+        - legal_party
+        - status
+        - is_default
+        - payout_method
+        - invoicing_capability
+        - valid_from
+        - created_at
+        - updated_at
+      type: object
+    PayeeListOutputBody:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/PayeeDTO"
+          type: array
+      required:
+        - items
+      type: object
     PlatformRoleAssignmentDTO:
       additionalProperties: false
       properties:
@@ -7248,6 +7702,34 @@ components:
       required:
         - items
       type: object
+    SubmitAccountBody:
+      additionalProperties: false
+      properties:
+        bank_name:
+          maxLength: 120
+          type: string
+        evidence_file_id:
+          description: A bank_account_evidence upload (account statement or bank letter)
+          format: uuid
+          type: string
+        holder_name:
+          description: The account holder as the bank names it
+          maxLength: 300
+          minLength: 2
+          type: string
+        iban:
+          description: TR + 24 digits; spaces allowed
+          maxLength: 42
+          minLength: 15
+          type: string
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof (03 §6.2)
+      required:
+        - iban
+        - holder_name
+        - evidence_file_id
+      type: object
     SubmitEduDocumentInputBody:
       additionalProperties: false
       properties:
@@ -8134,6 +8616,19 @@ components:
       required:
         - user_id
       type: object
+    VerifyChecklist:
+      additionalProperties: false
+      properties:
+        evidence_ok:
+          description: The evidence shows this IBAN and holder; false → reject instead
+          type: boolean
+        holder_matches_party:
+          description: The holder is the legal party's title (T-19)
+          type: boolean
+      required:
+        - holder_matches_party
+        - evidence_ok
+      type: object
     VerifyDTO:
       additionalProperties: false
       properties:
@@ -8368,6 +8863,326 @@ paths:
       tags:
         - audit
       x-koro-action: audit.chain.verify
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/bank-accounts:
+    get:
+      description: "Oldest first; without status the accounts waiting for an eye. Full IBANs: the read is audited. holder_matches_title compares the holder with the legal party's title (advisory; the first eye decides)."
+      operationId: adminListBankAccounts
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: Both pending statuses when omitted
+          explode: false
+          in: query
+          name: status
+          schema:
+            description: Both pending statuses when omitted
+            enum:
+              - pending_verification
+              - pending_approval
+              - approved
+              - rejected
+              - superseded
+              - revoked
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAccountListOutputBody"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List payee bank accounts (four-eyes queue)
+      tags:
+        - parties
+      x-koro-action: parties.bank_account.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+  /api/v1/admin/bank-accounts/{bank_account_id}/approve:
+    post:
+      description: Requires re-authentication. Neither the submitter nor the first eye approves (403 authz.four_eyes_violation). The evidence must be scanned clean (409 files.not_clean). The payee's approved account is superseded in the same transaction; the organization's admins and every finance admin get a security notice.
+      operationId: adminApproveBankAccount
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Bank account ID (an unknown or malformed ID is 404)
+          in: path
+          name: bank_account_id
+          required: true
+          schema:
+            description: Bank account ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminApproveAccountInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankAccountAdminDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Approve a bank account (second eye)
+      tags:
+        - parties
+      x-koro-action: parties.bank_account.approve
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/bank-accounts/{bank_account_id}/evidence/download:
+    get:
+      description: "The account statement or bank letter the eyes check: a URL valid for at most 5 minutes, every download audited. A file that is not scanned clean is 409 files.not_clean."
+      operationId: adminDownloadBankAccountEvidence
+      parameters:
+        - description: Bank account ID (an unknown or malformed ID is 404)
+          in: path
+          name: bank_account_id
+          required: true
+          schema:
+            description: Bank account ID (an unknown or malformed ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DownloadDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Download the evidence of a bank account
+      tags:
+        - parties
+      x-koro-action: parties.bank_account.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+  /api/v1/admin/bank-accounts/{bank_account_id}/reject:
+    post:
+      description: Only an account waiting for an eye (409 parties.invalid_state otherwise); the submitter is notified.
+      operationId: adminRejectBankAccount
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Bank account ID (an unknown or malformed ID is 404)
+          in: path
+          name: bank_account_id
+          required: true
+          schema:
+            description: Bank account ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminRejectAccountInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankAccountAdminDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Reject a bank account
+      tags:
+        - parties
+      x-koro-action: parties.bank_account.reject
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/bank-accounts/{bank_account_id}/revoke:
+    post:
+      description: Requires re-authentication. No payout can be approved to a revoked account; payouts created before must be cancelled. Only an approved account (409 parties.invalid_state).
+      operationId: adminRevokeBankAccount
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Bank account ID (an unknown or malformed ID is 404)
+          in: path
+          name: bank_account_id
+          required: true
+          schema:
+            description: Bank account ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminRevokeAccountInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankAccountAdminDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Revoke an approved bank account
+      tags:
+        - parties
+      x-koro-action: parties.bank_account.revoke
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/bank-accounts/{bank_account_id}/verify:
+    post:
+      description: The submitter never verifies (403 authz.four_eyes_violation). The evidence must hold (otherwise reject the account); a holder that is not the legal party's title needs a note (T-19). Only pending_verification (409 parties.invalid_state); an evidence file that is not scanned clean is 409 files.not_clean.
+      operationId: adminVerifyBankAccount
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Bank account ID (an unknown or malformed ID is 404)
+          in: path
+          name: bank_account_id
+          required: true
+          schema:
+            description: Bank account ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminVerifyAccountInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankAccountAdminDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Verify a bank account (first eye)
+      tags:
+        - parties
+      x-koro-action: parties.bank_account.verify
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
@@ -9920,6 +10735,43 @@ paths:
       x-koro-rate-limit: write_default
       x-koro-surface: admin
   /api/v1/admin/legal-parties/{party_id}:
+    get:
+      description: With its documents and the ETag that adminUpdateLegalParty takes as If-Match. Tax numbers are not masked.
+      operationId: adminGetLegalParty
+      parameters:
+        - description: Legal party ID (an unknown or malformed ID is 404)
+          in: path
+          name: party_id
+          required: true
+          schema:
+            description: Legal party ID (an unknown or malformed ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegalPartyDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a legal party (finance and platform admins)
+      tags:
+        - parties
+      x-koro-action: parties.legal_party.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
     patch:
       description: If-Match is required (428/412). A change to a verified (or rejected) party sends it back to pending_verification. status inactive retires a party (kept for the financial records).
       operationId: adminUpdateLegalParty
@@ -9967,6 +10819,110 @@ paths:
       tags:
         - parties
       x-koro-action: parties.legal_party.update
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/legal-parties/{party_id}/documents:
+    post:
+      description: file_id is a party_document upload of the caller. For parties no organization surface reaches (a foundation before its payee, Koro's own party). Another admin verifies it.
+      operationId: adminUploadLegalPartyDocument
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Legal party ID (an unknown or malformed ID is 404)
+          in: path
+          name: party_id
+          required: true
+          schema:
+            description: Legal party ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUploadDocumentInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Add a document to any legal party
+      tags:
+        - parties
+      x-koro-action: parties.document.upload
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/legal-parties/{party_id}/ownership-correction:
+    post:
+      description: "06 H-60: the party holds a tax ID it does not own (the real owner gets 409 parties.tax_id_taken). It is retired (inactive: out of the tax ID uniqueness) with the reason and the evidence, which is kept as a document of the party. Platform admins only; orders keep their buyer snapshot."
+      operationId: adminCorrectLegalPartyOwnership
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Legal party ID (an unknown or malformed ID is 404)
+          in: path
+          name: party_id
+          required: true
+          schema:
+            description: Legal party ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCorrectOwnershipInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegalPartyDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Correct the ownership of a tax ID (platform admins)
+      tags:
+        - parties
+      x-koro-action: parties.legal_party.verify
+      x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
   /api/v1/admin/legal-parties/{party_id}/verification:
@@ -10022,6 +10978,44 @@ paths:
       x-koro-action: parties.legal_party.verify
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/legal-party-documents/{document_id}/download:
+    get:
+      description: A URL valid for at most 5 minutes; every download is audited. A file that is not scanned clean is 409 files.not_clean.
+      operationId: adminDownloadLegalPartyDocument
+      parameters:
+        - description: Document ID (an unknown or malformed ID is 404)
+          in: path
+          name: document_id
+          required: true
+          schema:
+            description: Document ID (an unknown or malformed ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DownloadDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Download a legal party document (finance and platform admins)
+      tags:
+        - parties
+      x-koro-action: parties.document.read
+      x-koro-rate-limit: read_default
       x-koro-surface: admin
   /api/v1/admin/legal-party-documents/{document_id}/verify:
     post:
@@ -10570,6 +11564,206 @@ paths:
       tags:
         - orgs
       x-koro-action: orgs.org.verify
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/payees:
+    post:
+      description: Relates a payee legal party (kind payee) to the club or university it is paid for (draft until adminVerifyPayee). A natural person is 422 parties.natural_person_payee (06 H-54); a second open payee of the same party for the organization 409 parties.payee_exists.
+      operationId: adminCreatePayee
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminCreatePayeeInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayeeDTO"
+          description: Created
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Create a payee
+      tags:
+        - parties
+      x-koro-action: parties.payee.manage
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/payees/{payee_id}:
+    patch:
+      description: If-Match is required (428/412). status suspended stops payouts, closed ends the payee (kept for the financial records). Making an active payee the default moves the organization's default to it.
+      operationId: adminUpdatePayee
+      parameters:
+        - description: Payee ID (an unknown, malformed or other organization's ID is 404)
+          in: path
+          name: payee_id
+          required: true
+          schema:
+            description: Payee ID (an unknown, malformed or other organization's ID is 404)
+            type: string
+        - description: "ETag of the payee (required: missing → 428, stale → 412)"
+          in: header
+          name: If-Match
+          schema:
+            description: "ETag of the payee (required: missing → 428, stale → 412)"
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUpdatePayeeInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayeeDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Update a payee
+      tags:
+        - parties
+      x-koro-action: parties.payee.manage
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/payees/{payee_id}/bank-accounts:
+    post:
+      description: "Requires re-authentication. The submitting admin is the first eye: the account starts pending_approval and a different admin approves it."
+      operationId: adminSubmitBankAccount
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Payee ID (an unknown, malformed or other organization's ID is 404)
+          in: path
+          name: payee_id
+          required: true
+          schema:
+            description: Payee ID (an unknown, malformed or other organization's ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitAccountBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankAccountAdminDTO"
+          description: Created
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Submit a bank account (IBAN) of a payee as an admin
+      tags:
+        - parties
+      x-koro-action: parties.bank_account.submit
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/payees/{payee_id}/verify:
+    post:
+      description: draft, pending_verification or suspended → active. The legal party must be verified (422 parties.verification_incomplete); an active or closed payee is 409 parties.invalid_state.
+      operationId: adminVerifyPayee
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Payee ID (an unknown, malformed or other organization's ID is 404)
+          in: path
+          name: payee_id
+          required: true
+          schema:
+            description: Payee ID (an unknown, malformed or other organization's ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayeeDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Verify (activate) a payee
+      tags:
+        - parties
+      x-koro-action: parties.payee.verify
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
@@ -17884,6 +19078,191 @@ paths:
       tags:
         - orgs
       x-koro-action: orgs.ownership.transfer
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/payees:
+    get:
+      description: The legal parties paid on behalf of a club or university, with their approved bank account (the IBAN masked for everyone here).
+      operationId: listOrgPayees
+      parameters:
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayeeListOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the payees of an organization
+      tags:
+        - parties
+      x-koro-action: parties.payee.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/payees/{payee_id}:
+    get:
+      description: The ETag is the If-Match value of adminUpdatePayee. A payee of another organization is 404.
+      operationId: getOrgPayee
+      parameters:
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Payee ID (an unknown, malformed or other organization's ID is 404)
+          in: path
+          name: payee_id
+          required: true
+          schema:
+            description: Payee ID (an unknown, malformed or other organization's ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayeeDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a payee of an organization
+      tags:
+        - parties
+      x-koro-action: parties.payee.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/payees/{payee_id}/bank-accounts:
+    get:
+      description: Newest first. Organization roles see the IBAN masked; finance and platform admins see it in full and the read is audited.
+      operationId: listPayeeBankAccounts
+      parameters:
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Payee ID (an unknown, malformed or other organization's ID is 404)
+          in: path
+          name: payee_id
+          required: true
+          schema:
+            description: Payee ID (an unknown, malformed or other organization's ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountListOutputBody"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the bank accounts of a payee
+      tags:
+        - parties
+      x-koro-action: parties.bank_account.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+    post:
+      description: "Requires re-authentication (reauth). The account waits for four eyes (pending_verification: a finance or platform admin checks the evidence and the holder, a different one approves); no money goes to it before. An invalid IBAN is 422 parties.iban_invalid, a pending submission of the payee 409 parties.bank_account_pending. Every admin of the organization and every finance admin is notified."
+      operationId: submitPayeeBankAccount
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Payee ID (an unknown, malformed or other organization's ID is 404)
+          in: path
+          name: payee_id
+          required: true
+          schema:
+            description: Payee ID (an unknown, malformed or other organization's ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitAccountBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankAccountDTO"
+          description: Created
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Submit a bank account (IBAN) of a payee
+      tags:
+        - parties
+      x-koro-action: parties.bank_account.submit
       x-koro-idempotency: optional
       x-koro-rate-limit: reauth
       x-koro-reauth: true

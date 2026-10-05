@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"uuid"
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"koro/internal/authz"
+	"koro/internal/identity"
+	"koro/internal/notify"
 	"koro/internal/parties"
 	"koro/internal/platform/crypto"
 	"koro/internal/platform/crypto/rewrap"
@@ -25,22 +30,39 @@ import (
 //	         fails closed (503) and nothing is stored in clear
 //	indexer  nil → crypto.Indexer over CRYPTO_BLIND_INDEX_KEY
 //	         (legal_parties.tckn_bidx); without a key the TCKN path is 503
+//	roles    nil → identity's store (c.identity.store when the tests preset
+//	         it, identity.NewGormStore otherwise): the finance admins in
+//	         effect (06 H-33) for the bank account notices
 //
-// Consumed: c.audit.svc, c.files.svc (party_document files: Get, Attach,
-// PresignGet) and c.orgs.svc (orgs.OrgDirectory: the org of the path).
+// Consumed: c.audit.svc, c.files.svc (party_document and
+// bank_account_evidence files: Get, Attach, PresignGet), c.orgs.svc
+// (orgs.OrgDirectory: the org of the path, the payee org's admins),
+// c.identity.svc (re-authentication of submit/approve/revoke, the notice
+// addresses), c.notify.svc (the notices, worker), c.infra.outbox and
+// c.infra.queue.
 // Provided: svc (parties.Parties for orders and billing: Get, Platform,
-// BuyerPartyOf) and the parties KVKK provider. 06 H-54: natural-person
-// payee parties stay closed (Deps.AllowNaturalPersonPayees is never set).
+// BuyerPartyOf), payees (parties.Payees for catalog, orders and ledger:
+// Get, DefaultFor, ApprovedAccount, IsActive) and the parties KVKK
+// provider. 06 H-54: natural-person payees stay closed
+// (Deps.AllowNaturalPersonPayees is never set).
 type partiesWiring struct {
 	store   parties.Store
 	tx      db.TxManager
 	sealer  parties.Sealer
 	indexer parties.Indexer
+	roles   roleHolders
 
-	mod parties.Module
-	svc parties.Service // set by build
+	mod    parties.Module
+	svc    parties.Service // set by build
+	payees parties.Payees  // set by build
 	// late is the container, kept for the matrix fixtures (files store).
 	late *container
+}
+
+// roleHolders is the part of identity's store the bank account notices
+// read: who holds a platform role in effect.
+type roleHolders interface {
+	UsersWithRole(ctx context.Context, role authz.PlatformRole) ([]uuid.UUID, error)
 }
 
 func (w *partiesWiring) build(c *container) error {
@@ -59,9 +81,26 @@ func (w *partiesWiring) build(c *container) error {
 	if c.orgs.svc == nil {
 		return errors.New("parties: orgs is not built")
 	}
+	roles := w.roles
+	switch {
+	case roles != nil:
+	case c.identity.store != nil:
+		roles = c.identity.store
+	case c.infra.db != nil:
+		roles = identity.NewGormStore(c.infra.db.ORM)
+	}
 	d := parties.Deps{
 		Store: store, Tx: tx, Audit: c.audit.svc, Idempotency: c.infra.idempotency, Orgs: c.orgs.svc,
 		Clock: c.infra.clock, Log: c.infra.log.With("module", "parties"), Sealer: w.sealer, Indexer: w.indexer,
+		Outbox: c.infra.outbox, Queue: c.infra.queue, Sender: partiesSender{c: c},
+	}
+	if roles != nil {
+		d.FinanceAdmins = func(ctx context.Context) ([]uuid.UUID, error) {
+			return roles.UsersWithRole(ctx, authz.PlatformFinanceAdmin)
+		}
+	}
+	if svc := c.identity.svc; svc != nil {
+		d.Reauth, d.Users = svc, svc
 	}
 	if c.files.svc != nil {
 		d.Files = c.files.svc
@@ -92,16 +131,36 @@ func (w *partiesWiring) build(c *container) error {
 	if err != nil {
 		return err
 	}
-	w.mod, w.svc, w.late = mod, mod.Service, c
+	w.mod, w.svc, w.payees, w.late = mod, mod.Service, mod.Payees, c
 	c.privacy = append(c.privacy, mod.Privacy)
 	return nil
 }
 
-// tasks: none (BE-036 has no job or subscription; file.rejected is not
-// consumed: documents are financial records and keep their row, a rejected
-// file answers 409 on download and verification).
-func (w *partiesWiring) tasks(c *container) {}
+// partiesSender adapts notify's service, read at call time (the worker
+// sends the bank account notices).
+type partiesSender struct{ c *container }
 
-// routes: the 11 legal party and document operations of BE-036 (04 §2.13);
+func (s partiesSender) Send(ctx context.Context, m notify.Message) (uuid.UUID, error) {
+	if s.c.notify.svc == nil {
+		return uuid.Nil(), errors.New("parties: notify is not wired")
+	}
+	return s.c.notify.svc.Send(ctx, m)
+}
+
+// tasks: payee_bank_account.submitted → parties.notify_bank_account_submitted,
+// .approved → parties.notify_bank_account_approved, .rejected →
+// parties.notify_bank_account_rejected (01 §6.2) and the
+// parties.notify_bank_account_revoked task (A). file.rejected is not
+// consumed: documents and evidence are financial records and keep their
+// row; a rejected file answers 409 on download and verification.
+func (w *partiesWiring) tasks(c *container) {
+	w.mod.Subscribe(c.infra.subs)
+	for _, t := range w.mod.Tasks() {
+		c.infra.jobs.Handle(t)
+	}
+}
+
+// routes: the 29 parties operations (04 §2.13: BE-036's 11, BE-037's 13,
+// the evidence download, and 06 H-60 / T-234's 4 admin party operations);
 // w.svc is nil under `koro openapi`, which Register tolerates.
 func (w *partiesWiring) routes(c *container, api huma.API) { parties.Register(api, w.svc) }

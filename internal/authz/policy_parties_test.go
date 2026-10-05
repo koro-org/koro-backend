@@ -175,10 +175,145 @@ func TestPartiesPolicy_EdgeCases(t *testing.T) {
 
 	// Org actions are bound to their resource types, admin-only ones to the admin surface.
 	wantErr(t, authz.Can(ctx, persona(t, "platform_admin"), authz.PartiesLegalPartyVerify, buyerA), authz.ErrNotFound, false)
-	wantErr(t, authz.Can(ctx, persona(t, "platform_admin"), authz.PartiesDocumentUpload, adminSurface), authz.ErrNotFound, false)
+	// T-234: documents on the admin surface (staff only).
+	wantErr(t, authz.Can(ctx, persona(t, "platform_admin"), authz.PartiesDocumentUpload, adminSurface), nil, false)
+	wantErr(t, authz.Can(ctx, persona(t, "finance_admin"), authz.PartiesDocumentRead, adminSurface), nil, false)
+	wantErr(t, authz.Can(ctx, persona(t, "club_admin"), authz.PartiesDocumentRead, adminSurface), authz.ErrForbidden, false)
+	// Org-only payee actions have no admin-surface cell.
+	wantErr(t, authz.Can(ctx, persona(t, "platform_admin"), authz.PartiesPayeeList, adminSurface), authz.ErrForbidden, false)
+}
 
-	// BE-037's actions are granted to nobody yet.
-	for _, act := range []authz.Action{authz.PartiesPayeeList, authz.PartiesPayeeManage, authz.PartiesBankAccountList} {
-		wantErr(t, authz.Can(ctx, persona(t, "platform_admin"), act, adminSurface), authz.ErrForbidden, false)
+// payeesOf is the payees collection of an org surface (BE-037).
+func payeesOf(org string) authz.Resource {
+	id := authztest.ID(org)
+	return authz.Resource{Type: authz.TypePayee, OrgID: &id}
+}
+
+// accountOf is a bank account for the eyes (Attrs status, submitted_by,
+// verified_by; 03 §3.5).
+func accountOf(status, submitter, verifier string) authz.Resource {
+	org := authztest.ID("club_a")
+	v := ""
+	if verifier != "" {
+		v = authztest.ID(verifier).String()
 	}
+	return authz.Resource{Type: authz.TypeBankAccount, ID: uuid.NewV7(), OrgID: &org, Attrs: map[string]string{
+		authz.AttrStatus: status, authz.AttrSubmittedBy: authztest.ID(submitter).String(), authz.AttrVerifiedBy: v,
+	}}
+}
+
+// TestPartiesPolicy_PayeesMatrix pins the BE-037 rows of 03 §5.13 for the
+// 18 personas: the payee org surface (cla S, uni S; pad, fin) and the admin
+// surface (pad, fin).
+func TestPartiesPolicy_PayeesMatrix(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	forbidden, notFound := authz.ErrForbidden, authz.ErrNotFound
+	staffCells := map[string]error{
+		"anonymous": forbidden, "moderator": forbidden, "support": forbidden, "dpo": forbidden, "platform_admin": nil,
+		"finance_admin": nil, "talent_auditor": forbidden,
+	}
+	with := func(m map[string]error) map[string]error {
+		out := map[string]error{}
+		for k, v := range staffCells {
+			out[k] = v
+		}
+		for k, v := range m {
+			out[k] = v
+		}
+		return out
+	}
+	orgActs := []authz.Action{authz.PartiesPayeeList, authz.PartiesPayeeRead, authz.PartiesBankAccountList,
+		authz.PartiesBankAccountSubmit}
+	for _, act := range orgActs {
+		for _, c := range []struct {
+			org  string
+			want map[string]error // not listed: 404 (not a member)
+		}{
+			{"club_a", with(map[string]error{"club_member": forbidden, "club_admin": nil})},
+			{"uni_a", with(map[string]error{"university_rep": nil})},
+			{"company_a", with(map[string]error{"company_member": forbidden, "company_admin": forbidden})},
+		} {
+			for _, p := range authztest.Personas() {
+				want, ok := c.want[p.Name]
+				if !ok {
+					want = notFound
+				}
+				err := authz.Can(ctx, p.Actor, act, payeesOf(c.org))
+				if want == nil && err != nil || want != nil && err == nil {
+					t.Errorf("%s %s %s: %v, want %v", act, c.org, p.Name, err, want)
+					continue
+				}
+				if want != nil {
+					wantErr(t, err, want, false)
+				}
+			}
+		}
+	}
+	// verify and approve are decided on the account (four eyes); their /admin
+	// operations are gated with bank_account.list before reading.
+	adminActs := []authz.Action{authz.PartiesPayeeManage, authz.PartiesPayeeVerify, authz.PartiesBankAccountList,
+		authz.PartiesBankAccountSubmit, authz.PartiesBankAccountReject, authz.PartiesBankAccountRevoke,
+		authz.PartiesDocumentUpload, authz.PartiesDocumentRead}
+	for _, act := range adminActs {
+		for _, p := range authztest.Personas() {
+			var want error = forbidden
+			if p.Name == "platform_admin" || p.Name == "finance_admin" {
+				want = nil
+			}
+			wantErr(t, authz.Can(ctx, p.Actor, act, adminSurface), want, false)
+		}
+	}
+}
+
+// TestPartiesPolicy_BankAccountFourEyes pins 03 §6.1 "Payee IBAN": the
+// first eye is never the submitter, the second eye neither the submitter
+// nor the first eye (Y6); only finance and platform admins are eyes; the
+// Attrs keys are mandatory (06 H-27).
+func TestPartiesPolicy_BankAccountFourEyes(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	fe := authz.ErrFourEyes
+	for _, tc := range []struct {
+		who  string
+		act  authz.Action
+		r    authz.Resource
+		want error
+	}{
+		{"finance_admin", authz.PartiesBankAccountVerify, accountOf("pending_verification", "club_admin", ""), nil},
+		{"platform_admin", authz.PartiesBankAccountVerify, accountOf("pending_verification", "platform_admin", ""), fe},
+		{"finance_admin", authz.PartiesBankAccountApprove, accountOf("pending_approval", "club_admin", "finance_admin"), fe},
+		{"platform_admin", authz.PartiesBankAccountApprove, accountOf("pending_approval", "club_admin", "finance_admin"), nil},
+		{"finance_admin", authz.PartiesBankAccountApprove, accountOf("pending_approval", "finance_admin", ""), fe},
+		{"platform_admin", authz.PartiesBankAccountApprove, accountOf("pending_approval", "finance_admin", ""), nil},
+		{"club_admin", authz.PartiesBankAccountApprove, accountOf("pending_approval", "finance_admin", ""), authz.ErrNotFound},
+		{"moderator", authz.PartiesBankAccountVerify, accountOf("pending_verification", "club_admin", ""), authz.ErrForbidden},
+		// reject and revoke are admin-surface actions only.
+		{"finance_admin", authz.PartiesBankAccountRevoke, accountOf("approved", "club_admin", "platform_admin"), authz.ErrNotFound},
+	} {
+		wantErr(t, authz.Can(ctx, persona(t, tc.who), tc.act, tc.r), tc.want, false)
+	}
+	// A missing submitted_by key, or an empty one, is a programmer error (fail closed).
+	noKey := accountOf("pending_approval", "club_admin", "")
+	delete(noKey.Attrs, authz.AttrSubmittedBy)
+	wantErr(t, authz.Can(ctx, persona(t, "platform_admin"), authz.PartiesBankAccountApprove, noKey), authz.ErrForbidden, true)
+	empty := accountOf("pending_approval", "club_admin", "")
+	empty.Attrs[authz.AttrSubmittedBy] = ""
+	wantErr(t, authz.Can(ctx, persona(t, "platform_admin"), authz.PartiesBankAccountApprove, empty), authz.ErrForbidden, true)
+
+	// MFA: the eyes are k-mfa role paths; a club admin's submission is not.
+	fin := persona(t, "finance_admin")
+	fin.MFAVerified = false
+	wantErr(t, authz.Can(ctx, fin, authz.PartiesBankAccountVerify, accountOf("pending_verification", "club_admin", "")),
+		authz.ErrMFARequired, false)
+	wantErr(t, authz.Can(ctx, fin, authz.PartiesBankAccountList, adminSurface), authz.ErrMFARequired, false)
+	cla := persona(t, "club_admin")
+	cla.MFAVerified = false
+	wantErr(t, authz.Can(ctx, cla, authz.PartiesBankAccountSubmit, payeesOf("club_a")), nil, false)
+
+	// 06 H-60: the ownership correction is a platform admin's decision.
+	own := authz.Resource{Type: authz.TypeLegalPartyOwnership, ID: uuid.NewV7()}
+	wantErr(t, authz.Can(ctx, persona(t, "platform_admin"), authz.PartiesLegalPartyVerify, own), nil, false)
+	wantErr(t, authz.Can(ctx, persona(t, "finance_admin"), authz.PartiesLegalPartyVerify, own), authz.ErrForbidden, false)
+	wantErr(t, authz.Can(ctx, persona(t, "club_admin"), authz.PartiesLegalPartyVerify, own), authz.ErrNotFound, false)
 }

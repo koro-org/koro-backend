@@ -1062,15 +1062,27 @@
     "type": "urn:koro:problem:page.invalid_cursor"
   },
   {
+    "code": "parties.bank_account_pending",
+    "status": 409,
+    "title": "The payee already has a bank account awaiting verification or approval",
+    "type": "urn:koro:problem:parties.bank_account_pending"
+  },
+  {
     "code": "parties.empty_patch",
     "status": 422,
     "title": "Nothing to update",
     "type": "urn:koro:problem:parties.empty_patch"
   },
   {
+    "code": "parties.iban_invalid",
+    "status": 422,
+    "title": "The IBAN is not a valid Turkish IBAN",
+    "type": "urn:koro:problem:parties.iban_invalid"
+  },
+  {
     "code": "parties.invalid_state",
     "status": 409,
-    "title": "Legal party status does not allow this change",
+    "title": "The current status does not allow this change",
     "type": "urn:koro:problem:parties.invalid_state"
   },
   {
@@ -1080,10 +1092,22 @@
     "type": "urn:koro:problem:parties.natural_person_payee"
   },
   {
+    "code": "parties.no_approved_account",
+    "status": 409,
+    "title": "The payee has no approved bank account",
+    "type": "urn:koro:problem:parties.no_approved_account"
+  },
+  {
     "code": "parties.org_not_company",
     "status": 422,
     "title": "Buyer legal parties belong to companies only",
     "type": "urn:koro:problem:parties.org_not_company"
+  },
+  {
+    "code": "parties.payee_exists",
+    "status": 409,
+    "title": "The organization already has a payee for this legal party",
+    "type": "urn:koro:problem:parties.payee_exists"
   },
   {
     "code": "parties.platform_exists",

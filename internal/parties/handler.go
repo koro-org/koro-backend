@@ -14,9 +14,10 @@ import (
 	"koro/internal/platform/page"
 )
 
-// Register adds the parties operations of BE-036 (04 §2.13: legal parties
-// and their documents) to api. svc may be nil (`koro openapi`): handlers
-// only touch it when called.
+// Register adds the parties operations (04 §2.13) to api: legal parties
+// and their documents (BE-036), payees and their bank accounts, the admin
+// party reads and the ownership correction (BE-037). svc may be nil (`koro
+// openapi`): handlers only touch it when called.
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
 
@@ -99,6 +100,8 @@ func Register(api huma.API, svc Service) {
 		Description: "Never by the document's uploader (403 authz.four_eyes_violation). A verified document is 409 " +
 			"parties.invalid_state; a file that is not scanned clean is 409 files.not_clean.",
 	}, op.Meta{Action: string(authz.PartiesDocumentVerify), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.adminVerifyDocument)
+
+	registerPayees(api, h)
 }
 
 // reg registers one parties operation with its Koro metadata.

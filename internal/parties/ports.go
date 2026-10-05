@@ -8,6 +8,8 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/files"
+	"koro/internal/identity"
+	"koro/internal/notify"
 	"koro/internal/orgs"
 )
 
@@ -21,11 +23,13 @@ type AuditLogger interface {
 }
 
 // Files is what parties needs from files (L2) for the party documents
-// (purpose party_document, 04 §1.14).
+// (purpose party_document) and the bank account evidence (purpose
+// bank_account_evidence; 04 §1.14).
 type Files interface {
 	// Get returns the file's metadata or files.ErrNotFound.
 	Get(ctx context.Context, fileID uuid.UUID) (files.FileMeta, error)
-	// Attach binds the file to its document row in the caller's transaction.
+	// Attach binds the file to its document or bank account row in the
+	// caller's transaction.
 	//
 	// sync-write: files.Files.Attach
 	Attach(ctx context.Context, a authz.Actor, fileID uuid.UUID, owner files.Owner) error
@@ -35,10 +39,16 @@ type Files interface {
 
 // Orgs is what parties needs from orgs (L5): the org of an org-surface
 // request (existence → 404, kind → buyer parties belong to companies,
-// status → writes of a suspended org are 403). It is orgs.OrgDirectory.
+// payees to clubs and universities, status → writes of a suspended org are
+// 403) and, in the worker, the admins of a payee's org (the security
+// notices of an IBAN change). It is orgs.OrgDirectory.
 type Orgs interface {
 	// Get returns the summary of an org (any status) or orgs.ErrNotFound.
 	Get(ctx context.Context, orgID uuid.UUID) (orgs.OrgSummary, error)
+	// ActiveMemberIDs returns the user IDs of an org's active members.
+	ActiveMemberIDs(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error)
+	// HasRole reports whether userID holds one of roles in orgID (active).
+	HasRole(ctx context.Context, orgID, userID uuid.UUID, roles ...authz.MemberRole) (bool, error)
 }
 
 // Sealer envelope-encrypts the national ID of an individual party
@@ -54,4 +64,23 @@ type Sealer interface {
 // crypto.Indexer.
 type Indexer interface {
 	BlindIndex(purpose string, v []byte) []byte
+}
+
+// Reauthenticator verifies the re-authentication proof of the R
+// operations (03 §6.2: parties.bank_account.submit, approve, revoke) after
+// authz.Can and before any business write. It is identity.Service (L4).
+type Reauthenticator interface {
+	Verify(ctx context.Context, userID uuid.UUID, proof identity.ReauthProof) (kind string, err error)
+}
+
+// Sender is notify's Sender (L3): the security notices of the bank account
+// flow (01 §6.2) are sent by the worker.
+type Sender interface {
+	Send(ctx context.Context, m notify.Message) (uuid.UUID, error)
+}
+
+// Users resolves the e-mail address of a notice's recipient (identity.Users;
+// worker path only).
+type Users interface {
+	Contact(ctx context.Context, id uuid.UUID) (identity.UserContact, error)
 }

@@ -6,16 +6,23 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
+	"uuid"
 
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
+	"koro/internal/identity"
+	"koro/internal/notify"
 	"koro/internal/parties"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/crypto/rewrap"
 	"koro/internal/platform/db"
+	"koro/internal/platform/domainevent"
 	"koro/internal/platform/obs"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/privacy"
+	"koro/internal/platform/queue"
 )
 
 // useMemStore installs the in-memory parties store used by service, wiring
@@ -54,6 +61,106 @@ func TestWire_Parties(t *testing.T) {
 	})
 	if !errors.Is(err, parties.ErrNaturalPersonPayee) {
 		t.Fatalf("individual payee party: %v, want parties.natural_person_payee (06 H-54)", err)
+	}
+	// BE-037: the payee contract for catalog, orders and ledger, the notice
+	// subscriptions of the three payee_bank_account topics and the revocation task.
+	if c.parties.payees == nil {
+		t.Fatal("parties.Payees not provided")
+	}
+	for topic, name := range map[string]string{
+		domainevent.TopicPayeeBankAccountSubmitted: parties.NotifySubmittedTaskName,
+		domainevent.TopicPayeeBankAccountApproved:  parties.NotifyApprovedTaskName,
+		domainevent.TopicPayeeBankAccountRejected:  parties.NotifyRejectedTaskName,
+	} {
+		if !slices.ContainsFunc(c.infra.subs.For(topic), func(s outbox.Subscription) bool { return s.Name == name }) {
+			t.Errorf("%s has no %s subscription", topic, name)
+		}
+	}
+	if !slices.ContainsFunc(c.infra.jobs.Tasks(), func(task queue.Task) bool { return task.Name == parties.NotifyRevokedTaskName }) {
+		t.Error("the revocation notice task is not registered")
+	}
+}
+
+// TestWire_PartiesApprovalNoticeReachesFinanceAdmins runs the
+// payee_bank_account.approved subscription through the wired services: the
+// finance admins in effect come from identity's store (06 H-33; a pending
+// grant is not one), their addresses from identity, and notify mails them.
+func TestWire_PartiesApprovalNoticeReachesFinanceAdmins(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	now := c.infra.clock.Now().UTC().Truncate(time.Microsecond)
+	for _, name := range []string{"finance_admin", "finance_admin_2", "platform_admin", "dpo"} {
+		p, _ := authztest.Get(name)
+		email := matrixEmail(name)
+		if err := c.identity.store.InsertUser(ctx, identity.User{
+			ID: p.User(), Status: identity.StatusActive, Email: email, EmailNormalized: email, EmailVerifiedAt: &now,
+			PasswordHash: testPasswordHash(), FirstName: "Ayla", LastName: name, Persona: identity.PersonaPlatform,
+			Locale: identity.LocaleTR, CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	grant := func(name string, role authz.PlatformRole, st identity.RoleStatus) {
+		ra := identity.RoleAssignment{ID: uuid.NewV7(), UserID: authztest.ID(name), Role: role, Reason: "bootstrap",
+			Status: st, RequestedAt: now}
+		if st == identity.RoleActive {
+			ra.GrantedAt = &now
+		}
+		if err := c.identity.store.InsertRoleAssignment(ctx, ra); err != nil {
+			t.Fatal(err)
+		}
+	}
+	grant("finance_admin", authz.PlatformFinanceAdmin, identity.RoleActive)
+	grant("finance_admin_2", authz.PlatformFinanceAdmin, identity.RoleActive)
+	grant("platform_admin", authz.PlatformAdmin, identity.RoleActive)
+	grant("dpo", authz.PlatformFinanceAdmin, identity.RolePending) // not in effect (06 H-33)
+
+	store := c.parties.store.(*parties.MemStore)
+	party := parties.LegalParty{ID: uuid.NewV7(), Kind: parties.KindPayee, LegalType: parties.LegalFoundation,
+		Title: "Kanca Vakfı", VATStatus: parties.VATUnknown, Status: parties.StatusPendingVerification}
+	if _, err := store.InsertParty(ctx, party); err != nil {
+		t.Fatal(err)
+	}
+	payee, club := uuid.NewV7(), uuid.NewV7()
+	store.LinkPayee(payee, club, party.ID, "active")
+	b, err := store.InsertBankAccount(ctx, parties.BankAccount{ID: uuid.NewV7(), PayeeID: payee, OrgID: club,
+		IBAN: "TR330006100519786457841326", HolderName: "Kanca Vakfı", EvidenceFileID: uuid.NewV7(),
+		Status: parties.AccountPendingApproval, SubmittedBy: authztest.ID("finance_admin_2"), SubmittedByAdmin: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := authztest.ID("platform_admin")
+	b.Status, b.ApprovedBy, b.ApprovedAt = parties.AccountApproved, &by, &now
+	if _, err := store.TransitionBankAccount(ctx, b, parties.AccountPendingApproval); err != nil {
+		t.Fatal(err)
+	}
+	env, err := domainevent.New(domainevent.PayeeBankAccountApproved{BankAccountID: b.ID, PayeeID: payee}, "payee_bank_account", b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subs := c.infra.subs.For(domainevent.TopicPayeeBankAccountApproved)
+	if len(subs) != 1 {
+		t.Fatalf("approved subscriptions = %d", len(subs))
+	}
+	if err := subs[0].Handle(workerContext(t), env); err != nil {
+		t.Fatal(err)
+	}
+	var to []string
+	for _, e := range c.notify.transport.(*notify.MemTransport).Sent() {
+		to = append(to, e.To)
+		if !strings.Contains(e.Text, "TR33 **** **** **** **** 8413 26") || strings.Contains(e.Text, "TR330006100519786457841326") {
+			t.Errorf("notice to %s does not carry the masked IBAN only:\n%s", e.To, e.Text)
+		}
+	}
+	slices.Sort(to)
+	want := []string{matrixEmail("finance_admin"), matrixEmail("finance_admin_2")}
+	slices.Sort(want)
+	if !slices.Equal(to, want) {
+		t.Fatalf("approval notice mailed to %v, want every finance admin in effect %v", to, want)
 	}
 }
 

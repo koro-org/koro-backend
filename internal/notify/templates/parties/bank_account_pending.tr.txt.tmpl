@@ -1,0 +1,7 @@
+Merhaba {{index .Data "name"}},
+
+Bir hakediş sahibinin yeni banka hesabı dört göz kontrolünü bekliyor: {{if eq (index .Data "stage") "pending_verification"}}belge ve hesap sahibi unvanı kontrolü (1. göz){{else}}son onay (2. göz){{end}}.
+
+IBAN: {{index .Data "iban_masked"}}
+
+Başvuruyu yapan ya da ilk kontrolü yapan kişi onay veremez. Koro yönetim panelindeki banka hesabı kuyruğundan inceleyin.

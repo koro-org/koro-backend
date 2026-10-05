@@ -1,10 +1,11 @@
-// Package parties is the legal parties module, first half (01 §4.12;
-// BE-036): the legal persons of money and invoices — Koro's own party
-// (kind platform, one row, seeded as draft until Koro's legal entity exists:
-// T-31), the invoice titles of buying companies (buyer_company) and the
-// legal side of payees (payee: the foundation, university or association
-// paid on behalf of a club) — their evidence documents and their
-// verification. Payees and their bank accounts come with BE-037.
+// Package parties is the legal parties module (01 §4.12): the legal
+// persons of money and invoices — Koro's own party (kind platform, one row,
+// seeded as draft until Koro's legal entity exists: T-31), the invoice
+// titles of buying companies (buyer_company) and the legal side of payees
+// (payee: the foundation, university or association paid on behalf of a
+// club) — their evidence documents and their verification (BE-036); the
+// payees themselves (which legal party is paid for which seller org) and
+// their bank accounts (IBAN) under four eyes (BE-037).
 //
 // Rules the package enforces:
 //
@@ -41,6 +42,23 @@
 //     account erasure retains them (privacy.go).
 //   - Koro's own party is seeded as a draft by `koro seed bootstrap-commerce`
 //     (NewSeeder; idempotent, never over HTTP).
+//   - Payee bank accounts (03 §6.1 "Payee IBAN"): money only ever goes to an
+//     approved account, and an account is approved by four eyes. An org
+//     submission (club_admin, university_rep: R) is verified by a finance or
+//     platform admin A ≠ submitter (evidence + holder = the party's title,
+//     T-19) and approved by B ≠ submitter, ≠ A (R); an admin submission (R)
+//     is approved by another admin. authz checks the eyes (Attrs
+//     submitted_by, verified_by) and the database again (payee_bank_accounts
+//     CHECKs, answered as 403 authz.four_eyes_violation). A change is a new
+//     row: approving it supersedes the approved one in the same transaction;
+//     the IBAN, holder and evidence of a row never change. The IBAN is
+//     checked with platform/iban (422 parties.iban_invalid) and the database
+//     function koro_iban_tr_valid, stored in clear (06 H-54: payees are legal
+//     entities), shown masked to org roles, in full only to finance and
+//     platform admins, audited (03 §6.5), and never logged.
+//   - Security notices (01 §6.2): a submission tells the payee org's admins
+//     (an IBAN change they did not make is an account takeover) and every
+//     finance admin; approval, rejection and revocation are notified too.
 package parties
 
 import (
@@ -52,10 +70,13 @@ import (
 	"uuid"
 
 	"koro/internal/authz"
+	"koro/internal/identity"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/privacy"
+	"koro/internal/platform/queue"
 )
 
 // Parties is the read contract of other modules (01 §4.12). The returned
@@ -107,6 +128,87 @@ type Service interface {
 	// AdminVerifyDocument is adminVerifyLegalPartyDocument
 	// (parties.document.verify): never by the document's uploader.
 	AdminVerifyDocument(ctx context.Context, a authz.Actor, documentID uuid.UUID) (Document, error)
+	// AdminGetParty is adminGetLegalParty (parties.legal_party.read; T-234).
+	AdminGetParty(ctx context.Context, a authz.Actor, partyID uuid.UUID) (PartyView, error)
+	// AdminUploadDocument is adminUploadLegalPartyDocument
+	// (parties.document.upload; T-234): a document of any party, for
+	// example a foundation that has no payee yet.
+	AdminUploadDocument(ctx context.Context, a authz.Actor, partyID uuid.UUID, in DocumentInput) (Document, error)
+	// AdminDownloadDocument is adminDownloadLegalPartyDocument
+	// (parties.document.read; T-234): a 5-minute URL, audited.
+	AdminDownloadDocument(ctx context.Context, a authz.Actor, documentID uuid.UUID) (DocumentLink, error)
+	// AdminCorrectOwnership is adminCorrectLegalPartyOwnership
+	// (parties.legal_party.verify, platform admins only; 06 H-60): a party
+	// that holds another owner's tax ID is retired with the evidence.
+	AdminCorrectOwnership(ctx context.Context, a authz.Actor, partyID uuid.UUID, in OwnershipCorrection) (PartyView, error)
+
+	PayeeService
+}
+
+// PayeeService is the payee and bank account half of Service (04 §2.13,
+// BE-037).
+type PayeeService interface {
+	// ListOrgPayees is listOrgPayees (parties.payee.list).
+	ListOrgPayees(ctx context.Context, a authz.Actor, orgID uuid.UUID) ([]PayeeView, error)
+	// GetOrgPayee is getOrgPayee (parties.payee.read).
+	GetOrgPayee(ctx context.Context, a authz.Actor, orgID, payeeID uuid.UUID) (PayeeView, error)
+	// ListPayeeBankAccounts is listPayeeBankAccounts
+	// (parties.bank_account.list): masked for org roles; a full read by
+	// finance or platform admins is audited.
+	ListPayeeBankAccounts(ctx context.Context, a authz.Actor, orgID, payeeID uuid.UUID) ([]BankAccountView, error)
+	// SubmitPayeeBankAccount is submitPayeeBankAccount
+	// (parties.bank_account.submit, R).
+	SubmitPayeeBankAccount(ctx context.Context, a authz.Actor, orgID, payeeID uuid.UUID, in BankAccountInput, proof identity.ReauthProof) (BankAccountView, error)
+
+	// AdminCreatePayee is adminCreatePayee (parties.payee.manage).
+	AdminCreatePayee(ctx context.Context, a authz.Actor, in PayeeInput) (PayeeView, error)
+	// AdminUpdatePayee is adminUpdatePayee (parties.payee.manage; If-Match).
+	AdminUpdatePayee(ctx context.Context, a authz.Actor, payeeID uuid.UUID, ifMatch string, p PayeePatch) (PayeeView, error)
+	// AdminVerifyPayee is adminVerifyPayee (parties.payee.verify): active.
+	AdminVerifyPayee(ctx context.Context, a authz.Actor, payeeID uuid.UUID) (PayeeView, error)
+
+	// AdminListBankAccounts is adminListBankAccounts
+	// (parties.bank_account.list): the four-eyes queue, full IBANs, audited.
+	AdminListBankAccounts(ctx context.Context, a authz.Actor, q BankAccountQuery) (BankAccountPage, error)
+	// AdminSubmitBankAccount is adminSubmitBankAccount
+	// (parties.bank_account.submit, R): pending_approval, the submitter is
+	// the first eye.
+	AdminSubmitBankAccount(ctx context.Context, a authz.Actor, payeeID uuid.UUID, in BankAccountInput, proof identity.ReauthProof) (BankAccountView, error)
+	// AdminVerifyBankAccount is adminVerifyBankAccount
+	// (parties.bank_account.verify): the first eye of an org submission.
+	AdminVerifyBankAccount(ctx context.Context, a authz.Actor, id uuid.UUID, in VerifyInput) (BankAccountView, error)
+	// AdminApproveBankAccount is adminApproveBankAccount
+	// (parties.bank_account.approve, R): the second eye; the approved
+	// account of the payee is superseded in the same transaction.
+	AdminApproveBankAccount(ctx context.Context, a authz.Actor, id uuid.UUID, proof identity.ReauthProof) (BankAccountView, error)
+	// AdminRejectBankAccount is adminRejectBankAccount
+	// (parties.bank_account.reject).
+	AdminRejectBankAccount(ctx context.Context, a authz.Actor, id uuid.UUID, reason string) (BankAccountView, error)
+	// AdminRevokeBankAccount is adminRevokeBankAccount
+	// (parties.bank_account.revoke, R): an approved account stops being
+	// payable.
+	AdminRevokeBankAccount(ctx context.Context, a authz.Actor, id uuid.UUID, reason string, proof identity.ReauthProof) (BankAccountView, error)
+	// AdminDownloadBankAccountEvidence is
+	// adminDownloadBankAccountEvidence (parties.bank_account.list): the
+	// evidence the eyes check, a 5-minute URL, audited.
+	AdminDownloadBankAccountEvidence(ctx context.Context, a authz.Actor, id uuid.UUID) (DocumentLink, error)
+}
+
+// Payees is the payee contract of other modules (01 §4.12: catalog,
+// orders, ledger). It reads without an actor (trusted in-process calls).
+type Payees interface {
+	// Get returns a payee (any status) or ErrNotFound.
+	Get(ctx context.Context, payeeID uuid.UUID) (Payee, error)
+	// DefaultFor returns the default payee of a seller org that is active
+	// now; found is false when it has none.
+	DefaultFor(ctx context.Context, sellerOrgID uuid.UUID) (Payee, bool, error)
+	// ApprovedAccount returns the approved bank account of a payee, the only
+	// account money may go to (with its IBAN in full: payouts snapshot it),
+	// or 409 ErrNoApprovedAccount.
+	ApprovedAccount(ctx context.Context, payeeID uuid.UUID) (BankAccount, error)
+	// IsActive reports whether the payee may be paid now (status active
+	// within its validity); ErrNotFound for an unknown payee.
+	IsActive(ctx context.Context, payeeID uuid.UUID) (bool, error)
 }
 
 // Deps are the dependencies of the parties module. Store, Tx, Audit,
@@ -129,9 +231,28 @@ type Deps struct {
 	Sealer  Sealer
 	Indexer Indexer
 	// AllowNaturalPersonPayees lifts 06 H-54 (individual and sole
-	// proprietorship payee parties). false in the MVP: cmd/koro never sets
-	// it; a later ticket does, together with the payee IBAN encryption.
+	// proprietorship payee parties and payees). false in the MVP: cmd/koro
+	// never sets it; a later ticket does, together with the payee IBAN
+	// encryption.
 	AllowNaturalPersonPayees bool
+
+	// Outbox writes payee_bank_account.submitted/approved (O) in the
+	// business transaction and .rejected (A) after it (01 §6.2).
+	Outbox outbox.Writer
+	// Queue enqueues the revocation notice after commit (A; 01 §6.2 has no
+	// topic for it).
+	Queue queue.Enqueuer
+	// Reauth verifies the proof of the R operations (submit, approve,
+	// revoke). nil → they fail closed with 503.
+	Reauth Reauthenticator
+	// Sender, Users and FinanceAdmins serve the security notices in the
+	// worker: the payee org's admins come from Orgs, every finance admin in
+	// effect from FinanceAdmins (identity, 06 H-33), their addresses from
+	// Users. nil Sender or FinanceAdmins → the notice task fails and is
+	// retried; nil Users → in-app notices only.
+	Sender        Sender
+	Users         Users
+	FinanceAdmins func(ctx context.Context) ([]uuid.UUID, error)
 }
 
 func (d Deps) validate() error {
@@ -142,6 +263,7 @@ func (d Deps) validate() error {
 	}{
 		{"Store", d.Store != nil}, {"Tx", d.Tx != nil}, {"Audit", d.Audit != nil},
 		{"Idempotency", d.Idempotency != nil}, {"Orgs", d.Orgs != nil}, {"Clock", d.Clock != nil}, {"Log", d.Log != nil},
+		{"Outbox", d.Outbox != nil}, {"Queue", d.Queue != nil},
 	} {
 		if !c.ok {
 			errs = append(errs, fmt.Errorf("parties.Deps.%s is missing", c.name))
@@ -154,8 +276,13 @@ func (d Deps) validate() error {
 // platform party is written by NewSeeder (`koro seed bootstrap-commerce`).
 type Module struct {
 	Service Service
-	// Privacy is the KVKK provider (parties and documents a user created).
+	// Payees is the payee contract of other modules (01 §4.12).
+	Payees Payees
+	// Privacy is the KVKK provider (parties, documents, payees and bank
+	// accounts a user created).
 	Privacy privacy.Provider
+
+	svc *service
 }
 
 // New builds the parties module; a missing dependency is a wiring bug that
@@ -165,7 +292,7 @@ func New(d Deps) (Module, error) {
 		return Module{}, err
 	}
 	s := &service{d: d}
-	return Module{Service: s, Privacy: privacyProvider{s: s}}, nil
+	return Module{Service: s, Payees: payees{s: s}, Privacy: privacyProvider{s: s}, svc: s}, nil
 }
 
 type service struct{ d Deps }

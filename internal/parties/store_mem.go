@@ -30,41 +30,44 @@ var (
 
 // MemStore is the in-memory Store of service, wiring and matrix tests
 // (05 §13.2). It follows the GORM store's contract, including the CHECK,
-// unique and foreign key constraints of 02 §17.1–17.2 a test could
+// unique and foreign key constraints of 02 §17.1–17.4 (000094–000097) a test could
 // otherwise only meet in PostgreSQL. Every method is atomic under one
 // mutex; it has no transactions (db.NopTx).
 type MemStore struct {
-	mu      sync.Mutex
-	parties map[uuid.UUID]LegalParty
-	docs    map[uuid.UUID]Document
-	payees  []memPayee
+	mu       sync.Mutex
+	parties  map[uuid.UUID]LegalParty
+	docs     map[uuid.UUID]Document
+	payees   map[uuid.UUID]Payee
+	accounts map[uuid.UUID]BankAccount
 	// now stamps created_at and updated_at like the defaults and the
-	// legal_parties_touch_updated_at trigger.
+	// *_touch_updated_at triggers.
 	now func() time.Time
-}
-
-// memPayee is the part of a payees row (02 §17.3) the store reads: which
-// seller org a party is paid for.
-type memPayee struct {
-	ID, OrgID, PartyID uuid.UUID
-	Status             string
 }
 
 var _ Store = (*MemStore)(nil)
 
 // NewMemStore returns an empty in-memory Store; now stamps the rows.
 func NewMemStore(now func() time.Time) *MemStore {
-	return &MemStore{parties: map[uuid.UUID]LegalParty{}, docs: map[uuid.UUID]Document{}, now: now}
+	return &MemStore{parties: map[uuid.UUID]LegalParty{}, docs: map[uuid.UUID]Document{}, payees: map[uuid.UUID]Payee{},
+		accounts: map[uuid.UUID]BankAccount{}, now: now}
 }
 
-// LinkPayee records a payees row (id, seller org, legal party, status)
-// for the org scope of the reads (03 k21). It is the test seam of the
-// payees table until BE-037 writes payees through the store; status is a
-// payees.status value ("closed" rows relate nothing).
+// LinkPayee records a payees row (id, seller org, legal party, status) with
+// the column defaults (bank_eft, not default; an active one verified by
+// its own id), without the foreign key checks of InsertPayee. It is a seed
+// shortcut of service and matrix tests; status is a payees.status value
+// ("closed" rows relate nothing).
 func (s *MemStore) LinkPayee(id, orgID, partyID uuid.UUID, status string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.payees = append(s.payees, memPayee{ID: id, OrgID: orgID, PartyID: partyID, Status: status})
+	now := s.now().UTC().Truncate(time.Microsecond)
+	p := Payee{ID: id, LegalPartyID: partyID, PartyKind: KindPayee, OrgID: orgID, Status: PayeeStatus(status),
+		PayoutMethod: PayoutBankEFT, InvoicingCapability: InvoicingUnknown, ValidFrom: now, CreatedBy: id,
+		CreatedAt: now, UpdatedAt: now}
+	if p.Status == PayeeActive {
+		p.VerifiedAt, p.VerifiedBy = &now, &id
+	}
+	s.payees[id] = p
 }
 
 func (s *MemStore) stamp(prev time.Time) time.Time {
@@ -241,7 +244,7 @@ func (s *MemStore) scopeOf(orgID uuid.UUID, p LegalParty) Scope {
 		return ""
 	}
 	for _, py := range s.payees {
-		if py.OrgID == orgID && py.PartyID == p.ID && py.Status != "closed" {
+		if py.OrgID == orgID && py.LegalPartyID == p.ID && py.Status != PayeeClosed {
 			return ScopePayee
 		}
 	}

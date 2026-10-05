@@ -1,21 +1,47 @@
-# Fixtures of the parties module (cmd/koro/matrix_parties_test.go; BE-036). IDs are authztest.ID(name).
-# Parties are created and updated at 2026-10-01T00:00:00Z: the ETag of an untouched party is
-# "1hmhuo3hji000". Verified parties are verified by finance_admin_2. A payee fixture is a payees
-# row relating a party to a seller org (03 k21) until BE-037 writes payees. A file fixture is an
-# unattached, active party_document upload of uploaded_by for org; a document fixture carries its
-# own attached file. No persona is a member of an org not listed in authztest.
+# Fixtures of the parties module (cmd/koro/matrix_parties_test.go; BE-036, BE-037). IDs are
+# authztest.ID(name). Parties and payees are created and updated at 2026-10-01T00:00:00Z: the ETag of
+# an untouched party or payee is "1hmhuo3hji000". Verified parties and active payees are verified by
+# finance_admin_2; payees are created by platform_admin_2. A file fixture is an unattached, active
+# upload of uploaded_by for org (party_document unless purpose says otherwise); a document fixture
+# carries its own attached file. An account fixture is a payee bank account that went through its
+# real states (submitted_by, admin = an admin submission, verified_by, approved_by); its holder is the
+# payee party's title and its evidence "<name>_file" is attached. One pending account per payee at
+# most (payee_bank_accounts_pending_uq). No persona is a member of an org not listed in authztest.
 version: 1
 fixtures:
   party_buyer_a: { kind: party, party_kind: buyer_company, legal_type: company, org: company_a, status: verified, tax_no: "1234567890" }
   party_buyer_b: { kind: party, party_kind: buyer_company, legal_type: company, org: company_b, status: pending_verification, tax_no: "9876543217" }
   party_foundation_a: { kind: party, party_kind: payee, legal_type: foundation, status: verified, tax_no: "1111111114" }
+  party_foundation_b: { kind: party, party_kind: payee, legal_type: foundation, status: verified, tax_no: "3334445553" }
+  party_foundation_c: { kind: party, party_kind: payee, legal_type: association, status: verified, tax_no: "5556667775" }
+  party_foundation_free: { kind: party, party_kind: payee, legal_type: foundation, status: verified, tax_no: "7778889991" }
   party_uni_a: { kind: party, party_kind: payee, legal_type: university, org: uni_a, status: pending_verification, tax_no: "2223334447" }
+  # party_sole_prop: a natural person's payee party written past the API (06 H-54 closes it there).
+  party_sole_prop: { kind: party, party_kind: payee, legal_type: sole_prop, status: verified, tax_no: "1357924685" }
   party_platform: { kind: party, party_kind: platform, legal_type: company, status: draft }
-  payee_club_a: { kind: payee, org: club_a, party: party_foundation_a, status: active }
+  # payee_club_a: active default payee of club_a with an approved account (acct_club_a).
+  payee_club_a: { kind: payee, org: club_a, party: party_foundation_a, status: active, is_default: true }
+  # payee_uni_a: the university's own party, its org submission waits for the first eye (acct_uni_a).
   payee_uni_a: { kind: payee, org: uni_a, party: party_uni_a, status: pending_verification }
+  # payee_club_a2: a second payee of club_a whose org submission waits for the second eye (acct_club_a2).
+  payee_club_a2: { kind: payee, org: club_a, party: party_foundation_b, status: active }
+  # payee_draft: a draft payee of club_a with a platform_admin submission waiting for approval (acct_admin).
+  payee_draft: { kind: payee, org: club_a, party: party_foundation_c, status: draft }
   upload_company_a: { kind: file, org: company_a, uploaded_by: company_admin }
   upload_club_a: { kind: file, org: club_a, uploaded_by: club_admin }
   upload_uni_a: { kind: file, org: uni_a, uploaded_by: university_rep }
+  upload_pad: { kind: file, org: club_a, uploaded_by: platform_admin }
+  upload_fin: { kind: file, org: club_a, uploaded_by: finance_admin }
+  evidence_club_a: { kind: file, org: club_a, uploaded_by: club_admin, purpose: bank_account_evidence }
+  evidence_uni_a: { kind: file, org: uni_a, uploaded_by: university_rep, purpose: bank_account_evidence }
   doc_buyer_a: { kind: document, party: party_buyer_a, uploaded_by: company_admin }
   doc_foundation_a: { kind: document, party: party_foundation_a, uploaded_by: club_admin }
   doc_foundation_pad: { kind: document, party: party_foundation_a, uploaded_by: platform_admin }
+  acct_club_a: { kind: account, payee: payee_club_a, iban: TR330006100519786457841326, status: approved,
+                 submitted_by: club_admin, verified_by: finance_admin_2, approved_by: platform_admin_2 }
+  acct_uni_a: { kind: account, payee: payee_uni_a, iban: TR950001200945200058000003, status: pending_verification,
+                submitted_by: university_rep }
+  acct_club_a2: { kind: account, payee: payee_club_a2, iban: TR809999900000000000000001, status: pending_approval,
+                  submitted_by: club_admin, verified_by: finance_admin_2 }
+  acct_admin: { kind: account, payee: payee_draft, iban: TR039999901234567890123456, status: pending_approval,
+                submitted_by: platform_admin, admin: true }

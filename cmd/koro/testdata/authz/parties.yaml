@@ -1,14 +1,18 @@
-# Authz matrix of the parties module (03 §5.13, 04 §2.13; BE-036). 11 operations × 18 personas.
-# Org surface (03 §3.6, §7.6): members of the org without the role → 403 before any party is read
+# Authz matrix of the parties module (03 §5.13, 04 §2.13; BE-036, BE-037). 29 operations × 18 personas.
+# Org surface (03 §3.6, §7.6): members of the org without the role → 403 before any row is read
 # (no ID probing), non-members → 404, every platform role sees the surface (403 unless
 # platform_admin/finance_admin); the org is looked up first, so an unknown org is 404 for everyone.
 # k21: club_admin and university_rep reach the legal side of their org's payees (fixtures payee_*),
 # never another org's party (404). k22: company_admin creates and changes only its company's
-# buyer parties; a club has no buyer party (staff: 422). Admin surface (03 §7.2-3): 403 before
-# reading for everyone without the role. company_admin, university_rep, platform_admin and
-# finance_admin sessions are MFA verified (03 §7.3); the policy test and scenarios cover the
-# MFA-less session and the four-eyes document verification. Fixtures: fixtures/parties.yaml.
-# Payees and bank accounts (10 actions) come with BE-037.
+# buyer parties; a club has no buyer party (staff: 422). Payees and bank accounts (BE-037): the club
+# admin of the club and the university rep of the university (S), finance and platform admins; a
+# payee or account of another org is 404 (06 H-38). R operations (submit, approve, revoke) carry the
+# matrix password; the four eyes (submitter, first eye), the missing/wrong proof and the holder note
+# (T-19) are scenarios (scenarios/parties.yaml, 03 §7.7 "4 göz – IBAN"). Admin surface (03 §7.2-3):
+# 403 before reading for everyone without the role; the ownership correction (06 H-60) is platform
+# admins' only. company_admin, university_rep, platform_admin and finance_admin sessions are MFA
+# verified (03 §7.3); the policy test and scenarios cover the MFA-less session. Fixtures:
+# fixtures/parties.yaml.
 version: 1
 groups:
   # signed-in users without a membership in company_a (its org surface is 404).
@@ -25,19 +29,6 @@ groups:
                      event_staff, university_rep, company_member, company_admin, other_company_member]
   # platform roles without a parties cell.
   other_staff: [moderator, support, dpo, talent_auditor]
-
-pending_actions:
-  # BE-037 (payees and payee bank accounts).
-  - parties.payee.list
-  - parties.payee.read
-  - parties.payee.manage
-  - parties.payee.verify
-  - parties.bank_account.list
-  - parties.bank_account.submit
-  - parties.bank_account.verify
-  - parties.bank_account.approve
-  - parties.bank_account.reject
-  - parties.bank_account.revoke
 
 operations:
   listOrgLegalParties:
@@ -395,3 +386,502 @@ operations:
           "@other_staff": 403
           platform_admin: 403
           finance_admin: 200
+
+  # ---- BE-037: payees and payee bank accounts (org surface)
+
+  listOrgPayees:
+    method: GET
+    path: /api/v1/orgs/{org_id}/payees
+    action: parties.payee.list
+    path_params: { org_id: club_a }
+    expect:
+      anonymous: 401
+      "@outsiders_club_a": 404
+      club_member: 403
+      club_admin: 200          # S
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: university_org
+        path_params: { org_id: uni_a }
+        expect:
+          anonymous: 401
+          "@outsiders_uni_a": 404
+          university_rep: 200    # S (not career_staff)
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+      - name: company_org
+        path_params: { org_id: company_a }
+        note: a company has no payee cell — its members get 403 (members see the surface)
+        expect:
+          anonymous: 401
+          "@outsiders_company_a": 404
+          company_member: 403
+          company_admin: 403
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 404
+          "@other_staff": 404
+          platform_admin: 404
+          finance_admin: 404
+
+  getOrgPayee:
+    method: GET
+    path: /api/v1/orgs/{org_id}/payees/{payee_id}
+    action: parties.payee.read
+    path_params: { org_id: club_a, payee_id: payee_club_a }
+    expect:
+      anonymous: 401
+      "@outsiders_club_a": 404
+      club_member: 403
+      club_admin: 200
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: university_payee
+        path_params: { org_id: uni_a, payee_id: payee_uni_a }
+        expect:
+          anonymous: 401
+          "@outsiders_uni_a": 404
+          university_rep: 200
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+      - name: other_orgs_payee
+        path_params: { org_id: club_a, payee_id: payee_uni_a }
+        note: IDOR — uni_a's payee under club_a's path is not found, for staff too (06 H-38)
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403        # no role: refused before the lookup
+          club_admin: 404
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404
+
+  listPayeeBankAccounts:
+    method: GET
+    path: /api/v1/orgs/{org_id}/payees/{payee_id}/bank-accounts
+    action: parties.bank_account.list
+    path_params: { org_id: club_a, payee_id: payee_club_a }
+    note: org roles see the IBAN masked; the full read of finance and platform admins is audited
+    expect:
+      anonymous: 401
+      "@outsiders_club_a": 404
+      club_member: 403
+      club_admin: 200
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: university_payee
+        path_params: { org_id: uni_a, payee_id: payee_uni_a }
+        expect:
+          anonymous: 401
+          "@outsiders_uni_a": 404
+          university_rep: 200
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+      - name: other_orgs_payee
+        path_params: { org_id: uni_a, payee_id: payee_club_a }
+        note: IDOR — club_a's payee under uni_a's path (06 H-38)
+        expect:
+          anonymous: 401
+          "@outsiders_uni_a": 404
+          university_rep: 404
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404
+
+  submitPayeeBankAccount:
+    method: POST
+    path: /api/v1/orgs/{org_id}/payees/{payee_id}/bank-accounts
+    action: parties.bank_account.submit
+    path_params: { org_id: club_a, payee_id: payee_club_a }
+    body: bodies/parties/submit_account.json
+    expect:
+      anonymous: 401
+      "@outsiders_club_a": 404
+      club_member: 403
+      club_admin: 201          # S·R → pending_verification
+      "@other_staff": 403
+      platform_admin: 201      # an admin submission → pending_approval
+      finance_admin: 201
+    variants:
+      - name: pending_submission
+        path_params: { org_id: uni_a, payee_id: payee_uni_a }
+        body: bodies/parties/submit_account_uni.json
+        note: one submission waits per payee — 409 parties.bank_account_pending
+        expect:
+          anonymous: 401
+          "@outsiders_uni_a": 404
+          university_rep: 409
+          "@other_staff": 403
+          platform_admin: 409
+          finance_admin: 409
+      - name: no_reauth
+        body: bodies/parties/submit_account_no_reauth.json
+        note: R — without the proof 403 identity.reauth_required (03 §6.2)
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403
+          club_admin: 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 403
+      - name: other_orgs_payee
+        path_params: { org_id: club_a, payee_id: payee_uni_a }
+        note: IDOR — the account's org is its payee's, never the path's (06 H-38)
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403
+          club_admin: 404
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404
+
+  # ---- BE-037: admin surface (payees, the four-eyes queue)
+
+  adminCreatePayee:
+    method: POST
+    path: /api/v1/admin/payees
+    action: parties.payee.manage
+    body: bodies/parties/create_payee.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 201
+      finance_admin: 201
+    variants:
+      - name: company_org
+        body: bodies/parties/create_payee_company.json
+        note: a payee is paid for a club or university — 422 for a company
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 422
+          finance_admin: 422
+      - name: natural_person
+        body: bodies/parties/create_payee_sole_prop.json
+        note: 06 H-54 — a natural person's payee is 422 parties.natural_person_payee
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 422
+          finance_admin: 422
+
+  adminUpdatePayee:
+    method: PATCH
+    path: /api/v1/admin/payees/{payee_id}
+    action: parties.payee.manage
+    path_params: { payee_id: payee_club_a2 }
+    headers: { If-Match: '"1hmhuo3hji000"' }
+    body: bodies/parties/update_payee.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: missing_payee
+        path_params: { payee_id: "literal:00000000-0000-7000-8000-000000000002" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403   # no ID probing without a platform role
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404
+
+  adminVerifyPayee:
+    method: POST
+    path: /api/v1/admin/payees/{payee_id}/verify
+    action: parties.payee.verify
+    path_params: { payee_id: payee_draft }
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: already_active
+        path_params: { payee_id: payee_club_a }
+        note: an active payee is 409 parties.invalid_state
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 409
+          finance_admin: 409
+      - name: unverified_party
+        path_params: { payee_id: payee_uni_a }
+        note: the legal party is not verified — 422 parties.verification_incomplete
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 422
+          finance_admin: 422
+
+  adminListBankAccounts:
+    method: GET
+    path: /api/v1/admin/bank-accounts
+    action: parties.bank_account.list
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: approved
+        query: { status: approved }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+
+  adminSubmitBankAccount:
+    method: POST
+    path: /api/v1/admin/payees/{payee_id}/bank-accounts
+    action: parties.bank_account.submit
+    path_params: { payee_id: payee_club_a }
+    body: bodies/parties/submit_account.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 201     # R; the submitter is the first eye (pending_approval)
+      finance_admin: 201
+    variants:
+      - name: pending_submission
+        path_params: { payee_id: payee_uni_a }
+        body: bodies/parties/submit_account_uni.json
+        note: one submission waits per payee — 409 parties.bank_account_pending
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 409
+          finance_admin: 409
+
+  adminVerifyBankAccount:
+    method: POST
+    path: /api/v1/admin/bank-accounts/{bank_account_id}/verify
+    action: parties.bank_account.verify
+    path_params: { bank_account_id: acct_uni_a }
+    body: bodies/parties/verify_account.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200     # first eye ≠ submitter (university_rep)
+      finance_admin: 200
+    variants:
+      - name: already_verified
+        path_params: { bank_account_id: acct_club_a2 }
+        note: pending_approval is past the first eye — 409 parties.invalid_state
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 409
+          finance_admin: 409
+      - name: own_submission
+        path_params: { bank_account_id: acct_admin }
+        note: four eyes — platform_admin submitted it (403); for anyone else an admin submission has no first eye (409)
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 409
+
+  adminApproveBankAccount:
+    method: POST
+    path: /api/v1/admin/bank-accounts/{bank_account_id}/approve
+    action: parties.bank_account.approve
+    path_params: { bank_account_id: acct_club_a2 }
+    body: bodies/parties/approve_account.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200     # second eye ≠ submitter (club_admin), ≠ first eye (finance_admin_2)
+      finance_admin: 200
+    variants:
+      - name: own_submission
+        path_params: { bank_account_id: acct_admin }
+        note: four eyes — platform_admin submitted it and may not approve it (Y6)
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 200
+      - name: not_verified
+        path_params: { bank_account_id: acct_uni_a }
+        note: an org submission waits for its first eye — 409 parties.invalid_state
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 409
+          finance_admin: 409
+
+  adminRejectBankAccount:
+    method: POST
+    path: /api/v1/admin/bank-accounts/{bank_account_id}/reject
+    action: parties.bank_account.reject
+    path_params: { bank_account_id: acct_uni_a }
+    body: bodies/parties/reject_account.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: approved_account
+        path_params: { bank_account_id: acct_club_a }
+        note: an approved account is revoked, not rejected — 409 parties.invalid_state
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 409
+          finance_admin: 409
+
+  adminRevokeBankAccount:
+    method: POST
+    path: /api/v1/admin/bank-accounts/{bank_account_id}/revoke
+    action: parties.bank_account.revoke
+    path_params: { bank_account_id: acct_club_a }
+    body: bodies/parties/revoke_account.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200     # R
+      finance_admin: 200
+    variants:
+      - name: pending_account
+        path_params: { bank_account_id: acct_uni_a }
+        note: only an approved account is revoked — 409 parties.invalid_state
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 409
+          finance_admin: 409
+
+  adminDownloadBankAccountEvidence:
+    method: GET
+    path: /api/v1/admin/bank-accounts/{bank_account_id}/evidence/download
+    action: parties.bank_account.list
+    path_params: { bank_account_id: acct_club_a }
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: missing_account
+        path_params: { bank_account_id: "literal:00000000-0000-7000-8000-000000000003" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404
+
+  # ---- BE-037: admin legal party operations (T-234, 06 H-60)
+
+  adminGetLegalParty:
+    method: GET
+    path: /api/v1/admin/legal-parties/{party_id}
+    action: parties.legal_party.read
+    path_params: { party_id: party_foundation_a }
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: missing_party
+        path_params: { party_id: "literal:00000000-0000-7000-8000-000000000001" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404
+
+  adminUploadLegalPartyDocument:
+    method: POST
+    path: /api/v1/admin/legal-parties/{party_id}/documents
+    action: parties.document.upload
+    path_params: { party_id: party_foundation_free }
+    body: bodies/parties/admin_upload_pad.json
+    note: the file must be the caller's own upload — platform_admin's file is 422 for finance_admin
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 201
+      finance_admin: 422
+    variants:
+      - name: finance_upload
+        body: bodies/parties/admin_upload_fin.json
+        note: finance_admin's file is 422 for platform_admin
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 422
+          finance_admin: 201
+
+  adminDownloadLegalPartyDocument:
+    method: GET
+    path: /api/v1/admin/legal-party-documents/{document_id}/download
+    action: parties.document.read
+    path_params: { document_id: doc_foundation_a }
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+
+  adminCorrectLegalPartyOwnership:
+    method: POST
+    path: /api/v1/admin/legal-parties/{party_id}/ownership-correction
+    action: parties.legal_party.verify
+    path_params: { party_id: party_buyer_b }
+    body: bodies/parties/ownership_correction.json
+    note: 06 H-60 — a platform admin's decision; finance verifies parties but does not take a tax ID away
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 403

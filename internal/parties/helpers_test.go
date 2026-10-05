@@ -18,6 +18,8 @@ import (
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/files"
+	"koro/internal/identity"
+	"koro/internal/notify"
 	"koro/internal/orgs"
 	"koro/internal/parties"
 	"koro/internal/platform/clock"
@@ -25,7 +27,9 @@ import (
 	"koro/internal/platform/db"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/queue"
 )
 
 // t0 is the test clock's start (microsecond precision, like PostgreSQL).
@@ -104,6 +108,97 @@ func (f *fakeOrgs) Get(_ context.Context, id uuid.UUID) (orgs.OrgSummary, error)
 	return o, nil
 }
 
+// ActiveMemberIDs returns the personas and helpers with a membership of
+// the org (authztest memberships).
+func (f *fakeOrgs) ActiveMemberIDs(_ context.Context, orgID uuid.UUID) ([]uuid.UUID, error) {
+	var out []uuid.UUID
+	for _, p := range append(authztest.Personas(), authztest.Helpers()...) {
+		if p.Actor.MemberOf(orgID) {
+			out = append(out, p.User())
+		}
+	}
+	return out, nil
+}
+
+// HasRole reports a persona's or helper's role in the org.
+func (f *fakeOrgs) HasRole(_ context.Context, orgID, userID uuid.UUID, roles ...authz.MemberRole) (bool, error) {
+	for _, p := range append(authztest.Personas(), authztest.Helpers()...) {
+		if p.User() == userID && p.Actor.HasOrgRole(orgID, roles...) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// reauthPassword is the proof fakeReauth accepts.
+const reauthPassword = "test-reauth-password"
+
+// fakeReauth is identity's re-authentication: reauthPassword passes, no
+// proof is 403 identity.reauth_required, anything else reauth_failed.
+type fakeReauth struct {
+	mu    sync.Mutex
+	calls []uuid.UUID
+}
+
+func (f *fakeReauth) Verify(_ context.Context, userID uuid.UUID, p identity.ReauthProof) (string, error) {
+	f.mu.Lock()
+	f.calls = append(f.calls, userID)
+	f.mu.Unlock()
+	switch {
+	case p.Password == "" && p.TOTPCode == "":
+		return "", identity.ErrReauthRequired
+	case p.Password != reauthPassword:
+		return "", identity.ErrReauthFailed
+	}
+	return "password", nil
+}
+
+func proof() identity.ReauthProof { return identity.ReauthProof{Password: reauthPassword} }
+
+// fakeSender records the notices.
+type fakeSender struct {
+	mu   sync.Mutex
+	sent []notify.Message
+	keys map[string]bool
+}
+
+func (f *fakeSender) Send(_ context.Context, m notify.Message) (uuid.UUID, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.keys == nil {
+		f.keys = map[string]bool{}
+	}
+	if f.keys[m.DedupeKey] {
+		return uuid.NewV7(), nil
+	}
+	f.keys[m.DedupeKey] = true
+	f.sent = append(f.sent, m)
+	return uuid.NewV7(), nil
+}
+
+func (f *fakeSender) all() []notify.Message {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]notify.Message(nil), f.sent...)
+}
+
+// fakeUsers resolves every persona to an address of its name.
+type fakeUsers struct{}
+
+func (fakeUsers) Contact(_ context.Context, id uuid.UUID) (identity.UserContact, error) {
+	for _, p := range append(authztest.Personas(), authztest.Helpers()...) {
+		if p.User() == id && p.Actor.IsUser() {
+			return identity.UserContact{ID: id, Email: p.Name + "@koro.test", FirstName: p.Name, Locale: "tr"}, nil
+		}
+	}
+	return identity.UserContact{}, identity.ErrNotFound
+}
+
+// financeAdmins are the finance admins in effect (finance_admin, finance_admin_2).
+func financeAdmins(context.Context) ([]uuid.UUID, error) {
+	return []uuid.UUID{authztest.ID("finance_admin"), authztest.ID("finance_admin_2")}, nil
+}
+
 // fakeFiles is the files port: metadata by ID, attachments and the TTLs of
 // the presigned downloads.
 type fakeFiles struct {
@@ -119,10 +214,15 @@ func newFakeFiles() *fakeFiles {
 
 // add registers an active, clean party_document of uploader (and org).
 func (f *fakeFiles) add(uploader uuid.UUID, org *uuid.UUID) uuid.UUID {
+	return f.addPurpose(files.PurposePartyDocument, uploader, org)
+}
+
+// addPurpose registers an active, clean file of purpose by uploader (and org).
+func (f *fakeFiles) addPurpose(purpose files.Purpose, uploader uuid.UUID, org *uuid.UUID) uuid.UUID {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	id := uuid.NewV7()
-	f.meta[id] = files.FileMeta{ID: id, Purpose: files.PurposePartyDocument, UploadedBy: &uploader, OrgID: org,
+	f.meta[id] = files.FileMeta{ID: id, Purpose: purpose, UploadedBy: &uploader, OrgID: org,
 		OwnerUserID: &uploader, Status: files.StatusActive, ScanStatus: files.ScanClean, MIME: files.MIMEPDF}
 	return id
 }
@@ -198,14 +298,18 @@ func (b *syncBuffer) String() string {
 
 // env is a parties module over the in-memory store.
 type env struct {
-	clk   *clock.Fake
-	store *parties.MemStore
-	audit *auditLog
-	orgs  *fakeOrgs
-	files *fakeFiles
-	logs  *syncBuffer
-	svc   parties.Service
-	mod   parties.Module
+	clk    *clock.Fake
+	store  *parties.MemStore
+	audit  *auditLog
+	orgs   *fakeOrgs
+	files  *fakeFiles
+	logs   *syncBuffer
+	outbox *outbox.Mem
+	queue  *queue.Mem
+	reauth *fakeReauth
+	sender *fakeSender
+	svc    parties.Service
+	mod    parties.Module
 }
 
 type envOpt func(*parties.Deps)
@@ -234,11 +338,12 @@ func newEnv(t *testing.T, opts ...envOpt) *env {
 	t.Helper()
 	clk := clock.NewFake(t0)
 	e := &env{clk: clk, store: parties.NewMemStore(clk.Now), audit: &auditLog{}, orgs: newFakeOrgs(), files: newFakeFiles(),
-		logs: &syncBuffer{}}
+		logs: &syncBuffer{}, outbox: outbox.NewMem(clk), queue: queue.NewMem(), reauth: &fakeReauth{}, sender: &fakeSender{}}
 	sealer, indexer := testKeys(t)
 	tx := db.NopTx{}
 	d := parties.Deps{
 		Store: e.store, Tx: tx, Audit: e.audit, Orgs: e.orgs, Files: e.files, Clock: clk, Sealer: sealer, Indexer: indexer,
+		Outbox: e.outbox, Queue: e.queue, Reauth: e.reauth, Sender: e.sender, Users: fakeUsers{}, FinanceAdmins: financeAdmins,
 		// A plain JSON handler: no obs masks, so what the module logs is checked as is.
 		Log:         slog.New(slog.NewJSONHandler(e.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		Idempotency: idempotency.New(idempotency.Deps{Tx: tx, Store: idempotency.NewMemStore(), Clock: clk, Log: slog.New(slog.DiscardHandler)}),

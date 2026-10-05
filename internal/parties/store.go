@@ -7,10 +7,9 @@ import (
 )
 
 // Store is the persistence boundary of parties (05 §2.2) over
-// legal_parties and legal_party_documents (02 §17.1–17.2); it reads payees
-// (02 §17.3, same module) only to relate a party to a seller org (03 k21).
-// The GORM store (store_gorm.go) and the in-memory store (store_mem.go)
-// pass the same contract test (store_contract_test.go).
+// legal_parties, legal_party_documents, payees and payee_bank_accounts
+// (02 §17.1–17.4). The GORM store (store_gorm.go) and the in-memory store
+// (store_mem.go) pass the same contract test (store_contract_test.go).
 //
 // Every method works in the transaction carried by ctx, if any.
 //
@@ -76,6 +75,74 @@ type Store interface {
 	// DocumentsUploadedBy returns the documents a user uploaded, oldest
 	// first (KVKK export).
 	DocumentsUploadedBy(ctx context.Context, userID uuid.UUID) ([]Document, error)
+
+	PayeeStore
+	BankAccountStore
+}
+
+// PayeeStore is the payees part of Store (02 §17.3). A payee's org is
+// payees.org_id: the org-surface reads take the org and return only its
+// payees (06 H-38: a bank account's org comes from its payee row, never
+// from the request).
+type PayeeStore interface {
+	// InsertPayee writes a new payee and returns it as stored. 409
+	// ErrPayeeExists when the org has an open payee for the legal party;
+	// 422 when the legal party is not a payee party (composite FK).
+	InsertPayee(ctx context.Context, p Payee) (Payee, error)
+	// GetPayee returns the payee or ErrNotFound; lock locks it for the rest
+	// of the transaction.
+	GetPayee(ctx context.Context, id uuid.UUID, lock bool) (Payee, error)
+	// OrgPayee returns a payee of orgID or ErrNotFound (another org's payee
+	// too); lock locks it.
+	OrgPayee(ctx context.Context, orgID, id uuid.UUID, lock bool) (Payee, error)
+	// OrgPayees returns the payees of orgID (closed ones included), by id.
+	OrgPayees(ctx context.Context, orgID uuid.UUID) ([]Payee, error)
+	// DefaultPayee returns the active default payee of a seller org; found
+	// is false when it has none.
+	DefaultPayee(ctx context.Context, orgID uuid.UUID) (Payee, bool, error)
+	// UpdatePayee writes the mutable columns of p (status, is_default,
+	// payout_method, invoicing_capability, university_protocol_ref,
+	// verified_at/by, valid_to: never the party, the org or the creator)
+	// and returns the stored row; updated_at changes (ETag).
+	UpdatePayee(ctx context.Context, p Payee) (Payee, error)
+	// ClearDefault unsets is_default on the active payees of orgID other
+	// than keep and returns their IDs (the default moves in one
+	// transaction, payees_default_uq).
+	ClearDefault(ctx context.Context, orgID, keep uuid.UUID) ([]uuid.UUID, error)
+	// PayeesCreatedBy returns the payees a user created, oldest first
+	// (KVKK export).
+	PayeesCreatedBy(ctx context.Context, userID uuid.UUID) ([]Payee, error)
+}
+
+// BankAccountStore is the payee_bank_accounts part of Store (02 §17.4).
+// Rows are never deleted and their IBAN, holder, payee, evidence and
+// submitter never change (payee_bank_accounts_frozen): only the state
+// columns are written, by targeted UPDATEs (06 H-56: no full-row save).
+type BankAccountStore interface {
+	// InsertBankAccount writes a new account (status pending_verification or
+	// pending_approval, payee_bank_accounts_initial_status) and returns it
+	// as stored. 409 ErrBankAccountPending when the payee has a pending
+	// account; 422 ErrIBANInvalid when the database refuses the IBAN.
+	InsertBankAccount(ctx context.Context, b BankAccount) (BankAccount, error)
+	// GetBankAccount returns the account or ErrNotFound; lock locks it.
+	GetBankAccount(ctx context.Context, id uuid.UUID, lock bool) (BankAccount, error)
+	// PayeeBankAccounts returns the accounts of a payee, newest first.
+	PayeeBankAccounts(ctx context.Context, payeeID uuid.UUID) ([]BankAccount, error)
+	// ApprovedAccounts returns the approved account of each payee that has
+	// one; lock locks them (the approval that supersedes one).
+	ApprovedAccounts(ctx context.Context, payeeIDs []uuid.UUID, lock bool) (map[uuid.UUID]BankAccount, error)
+	// ListBankAccounts returns up to limit accounts in statuses (all when
+	// empty), oldest first (the four-eyes queue), after the position after.
+	ListBankAccounts(ctx context.Context, statuses []BankAccountStatus, after *uuid.UUID, limit int) ([]BankAccount, error)
+	// TransitionBankAccount writes the state columns of b (status and the
+	// verified_*, approved_*, rejected_*, superseded_*, revoked_* columns)
+	// when the stored status is from, and returns the stored row.
+	// ErrInvalidState when the status is no longer from (a concurrent
+	// decision); the four-eyes CHECKs answer 403 authz.four_eyes_violation.
+	TransitionBankAccount(ctx context.Context, b BankAccount, from BankAccountStatus) (BankAccount, error)
+	// BankAccountsSubmittedBy returns the accounts a user submitted, oldest
+	// first (KVKK export).
+	BankAccountsSubmittedBy(ctx context.Context, userID uuid.UUID) ([]BankAccount, error)
 }
 
 // ListFilter narrows ListParties. Zero fields do not filter.

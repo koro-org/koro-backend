@@ -1,0 +1,4 @@
+<p style="margin:0 0 12px 0;">Merhaba {{index .Data "name"}},</p>
+<p style="margin:0 0 12px 0;">Bir hakediş sahibinin yeni banka hesabı dört göz kontrolünü bekliyor: {{if eq (index .Data "stage") "pending_verification"}}belge ve hesap sahibi unvanı kontrolü (1. göz){{else}}son onay (2. göz){{end}}.</p>
+<p style="margin:0 0 12px 0;">IBAN: {{index .Data "iban_masked"}}</p>
+<p style="margin:0;">Başvuruyu yapan ya da ilk kontrolü yapan kişi onay veremez. Koro yönetim panelindeki banka hesabı kuyruğundan inceleyin.</p>

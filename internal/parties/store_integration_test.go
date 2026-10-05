@@ -4,6 +4,8 @@ package parties_test
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"os"
 	"strconv"
 	"sync/atomic"
@@ -14,10 +16,13 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/files"
+	"koro/internal/orgs"
 	"koro/internal/parties"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/outbox"
+	"koro/internal/platform/queue"
 	"koro/internal/platform/testutil"
 )
 
@@ -93,7 +98,7 @@ func TestService_Gorm_EndToEnd(t *testing.T) {
 	sealer, indexer := testKeys(t)
 	mod, err := parties.New(parties.Deps{
 		Store: store, Tx: d.Tx, Audit: au, Orgs: fakeOrgsFor(o, company), Files: fs, Clock: clk, Log: discard(),
-		Sealer: sealer, Indexer: indexer, AllowNaturalPersonPayees: true,
+		Sealer: sealer, Indexer: indexer, AllowNaturalPersonPayees: true, Outbox: outbox.NewMem(clk), Queue: queue.NewMem(),
 		Idempotency: idempotency.New(idempotency.Deps{Tx: d.Tx, Store: idempotency.NewGormStore(d.ORM), Clock: clk, Log: discard()}),
 	})
 	if err != nil {
@@ -186,4 +191,156 @@ func fakeOrgsFor(o *fakeOrgs, company uuid.UUID) *fakeOrgs {
 	s.ID = company
 	o.m[company] = s
 	return o
+}
+
+func TestPayeeStore_Contract_Gorm(t *testing.T) {
+	t.Parallel()
+	payeeStoreContract(t, func(t *testing.T) (parties.Store, world) {
+		d := testutil.NewDB(t)
+		return parties.NewGormStore(d.ORM), pgWorld(d)
+	})
+}
+
+// failingAudit fails the audit record of one action (the business write of
+// that action must roll back with it).
+type failingAudit struct {
+	audit.Logger
+	act authz.Action
+}
+
+func (f failingAudit) Log(ctx context.Context, e audit.Event) error {
+	if e.Action == string(f.act) {
+		return errors.New("audit store down")
+	}
+	return f.Logger.Log(ctx, e)
+}
+
+// TestBankAccount_Gorm_ApproveRollsBackTogether runs the bank account flow
+// over PostgreSQL: the four eyes (authz and the CHECKs answered 403), the
+// approval that supersedes the approved account — rolled back together when
+// the approval's audit record fails (one transaction) — the frozen IBAN and
+// the outbox rows.
+func TestBankAccount_Gorm_ApproveRollsBackTogether(t *testing.T) {
+	t.Parallel()
+	d := testutil.NewDB(t)
+	w := pgWorld(d)
+	clk := clock.NewFake(time.Now().UTC().Truncate(time.Microsecond))
+	store := parties.NewGormStore(d.ORM)
+	base := audit.New(audit.Deps{Store: audit.NewGormStore(d.ORM), Tx: d.Tx, Clock: clk, Log: discard()}).Service
+	fs := newFakeFiles()
+	o := newFakeOrgs()
+	club := w.org(t)
+	o.m[club] = orgs.OrgSummary{ID: club, Kind: orgs.KindClub, Name: "Kulüp", Status: orgs.StatusActive, Slug: "kulup"}
+	ob := outbox.New(outbox.Deps{Store: outbox.NewGormStore(d.ORM), Tx: d.Tx, Subs: outbox.NewRegistry(), Queue: queue.NewMem(),
+		Clock: clk, Log: discard()})
+	build := func(au parties.AuditLogger) parties.Service {
+		mod, err := parties.New(parties.Deps{
+			Store: store, Tx: d.Tx, Audit: au, Orgs: o, Files: fs, Clock: clk, Log: discard(), Outbox: ob, Queue: queue.NewMem(),
+			Reauth:      &fakeReauth{},
+			Idempotency: idempotency.New(idempotency.Deps{Tx: d.Tx, Store: idempotency.NewGormStore(d.ORM), Clock: clk, Log: discard()}),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return mod.Service
+	}
+	svc := build(base)
+	staff := func(r authz.PlatformRole) authz.Actor {
+		return authz.Actor{Kind: authz.KindUser, UserID: w.user(t), MFAVerified: true, PlatformRoles: []authz.PlatformRole{r}}
+	}
+	fin, fin2, pad := staff(authz.PlatformFinanceAdmin), staff(authz.PlatformFinanceAdmin), staff(authz.PlatformAdmin)
+	cla := authz.Actor{Kind: authz.KindUser, UserID: w.user(t),
+		Memberships: []authz.Membership{{OrgID: club, OrgKind: authz.OrgClub, Role: authz.MemberClubAdmin}}}
+
+	party, err := svc.AdminCreateParty(ctxOf(t, fin), fin, foundationInput(vknC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AdminVerifyParty(ctxOf(t, fin2), fin2, party.Party.ID, parties.Decision{Decision: parties.StatusVerified}); err != nil {
+		t.Fatal(err)
+	}
+	py, err := svc.AdminCreatePayee(ctxOf(t, fin), fin, parties.PayeeInput{LegalPartyID: party.Party.ID, OrgID: club, IsDefault: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AdminVerifyPayee(ctxOf(t, pad), pad, py.Payee.ID); err != nil {
+		t.Fatal(err)
+	}
+	evidence := func(by authz.Actor) uuid.UUID {
+		id := w.file(t)
+		fs.meta[id] = files.FileMeta{ID: id, Purpose: files.PurposeBankAccountEvidence, UploadedBy: &by.UserID, OrgID: &club,
+			Status: files.StatusActive, ScanStatus: files.ScanClean}
+		return id
+	}
+	submit := func(number string) parties.BankAccountView {
+		t.Helper()
+		v, err := svc.SubmitPayeeBankAccount(ctxOf(t, cla), cla, club, py.Payee.ID, parties.BankAccountInput{IBAN: number,
+			HolderName: "Örnek Eğitim Vakfı", EvidenceFileID: evidence(cla)}, proof())
+		if err != nil {
+			t.Fatalf("submit: %v", err)
+		}
+		return v
+	}
+	old := submit(ibanA)
+	if _, err := svc.AdminVerifyBankAccount(ctxOf(t, fin), fin, old.Account.ID, parties.VerifyInput{HolderMatchesParty: true, EvidenceOK: true}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.AdminApproveBankAccount(ctxOf(t, fin), fin, old.Account.ID, proof())
+	wantProblem(t, err, 403, "authz.four_eyes_violation")
+	if _, err := svc.AdminApproveBankAccount(ctxOf(t, pad), pad, old.Account.ID, proof()); err != nil {
+		t.Fatal(err)
+	}
+
+	// The database refuses the eyes on its own (03 §6.1 second layer), answered 403.
+	for _, sql := range []string{
+		`UPDATE payee_bank_accounts SET approved_by = submitted_by WHERE id = $1`,
+		`UPDATE payee_bank_accounts SET approved_by = verified_by WHERE id = $1`,
+	} {
+		err := d.Tx.WithTx(t.Context(), func(ctx context.Context) error {
+			return db.Conn(ctx, d.ORM).Exec(sql, old.Account.ID).Error
+		})
+		if db.ConstraintName(err) == "" {
+			t.Fatalf("%s: %v, want a four-eyes CHECK", sql, err)
+		}
+	}
+	// The IBAN of an account never changes (payee_bank_accounts_frozen).
+	if _, err := d.Pool.Exec(t.Context(), `UPDATE payee_bank_accounts SET iban = $2 WHERE id = $1`, old.Account.ID, ibanB); err == nil ||
+		db.SQLState(err) != db.CodeRestrictViolation {
+		t.Fatalf("IBAN change: %v, want 23001", err)
+	}
+
+	// The change: verified, then the approval fails at its audit record —
+	// the supersede and the approval roll back together.
+	next := submit(ibanB)
+	if _, err := svc.AdminVerifyBankAccount(ctxOf(t, fin2), fin2, next.Account.ID, parties.VerifyInput{HolderMatchesParty: true, EvidenceOK: true}); err != nil {
+		t.Fatal(err)
+	}
+	broken := build(failingAudit{Logger: base, act: authz.PartiesBankAccountApprove})
+	if _, err := broken.AdminApproveBankAccount(ctxOf(t, pad), pad, next.Account.ID, proof()); err == nil {
+		t.Fatal("the approval succeeded without its audit record")
+	}
+	statusOf := func(id uuid.UUID) string {
+		var s string
+		if err := d.Pool.QueryRow(t.Context(), `SELECT status FROM payee_bank_accounts WHERE id = $1`, id).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	if statusOf(old.Account.ID) != "approved" || statusOf(next.Account.ID) != "pending_approval" {
+		t.Fatalf("after the failed approval: old %s, new %s", statusOf(old.Account.ID), statusOf(next.Account.ID))
+	}
+	if _, err := svc.AdminApproveBankAccount(ctxOf(t, pad), pad, next.Account.ID, proof()); err != nil {
+		t.Fatal(err)
+	}
+	if statusOf(old.Account.ID) != "superseded" || statusOf(next.Account.ID) != "approved" {
+		t.Fatalf("after the approval: old %s, new %s", statusOf(old.Account.ID), statusOf(next.Account.ID))
+	}
+	var superseder uuid.UUID
+	if err := d.Pool.QueryRow(t.Context(), `SELECT superseded_by_id FROM payee_bank_accounts WHERE id = $1`, old.Account.ID).Scan(&superseder); err != nil || superseder != next.Account.ID {
+		t.Fatalf("superseded_by_id = %s, %v", superseder, err)
+	}
+	var events int
+	if err := d.Pool.QueryRow(t.Context(), `SELECT count(*) FROM outbox WHERE topic LIKE 'payee_bank_account.%'`).Scan(&events); err != nil || events != 6 {
+		t.Fatalf("outbox rows = %d, %v (2 × submitted at submission and verification, 2 × approved)", events, err)
+	}
 }

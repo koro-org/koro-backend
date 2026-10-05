@@ -9,10 +9,12 @@ import (
 
 	"koro/internal/authz/authztest"
 	"koro/internal/feed"
+	"koro/internal/notify"
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/privacy"
+	"koro/internal/platform/queue"
 )
 
 // useMemStore installs the in-memory feed stores used by service,
@@ -89,5 +91,42 @@ func TestWire_FeedFollowsMembershipsAndReconciles(t *testing.T) {
 	}
 	if want := []string{"feed.reconcile_counters 35 * * * * low"}; !slices.Equal(jobs, want) {
 		t.Fatalf("feed jobs = %v, want %v", jobs, want)
+	}
+}
+
+// TestWire_FeedModerationNotices pins what BE-032 binds: the moderation
+// notice consumers (post.submitted_for_review, content_report.created,
+// post.moderated), the plain notice tasks, and the moderation staff lookup
+// (moderators from identity's store, platform admins from the notify hook
+// identity fills; T-249).
+func TestWire_FeedModerationNotices(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	for topic, task := range map[string]string{
+		domainevent.TopicPostSubmittedForReview: feed.NotifyReviewQueueTaskName,
+		domainevent.TopicContentReportCreated:   feed.NotifyReportCreatedTaskName,
+		domainevent.TopicPostModerated:          feed.NotifyPostModeratedTaskName,
+	} {
+		if !slices.ContainsFunc(c.infra.subs.For(topic), func(s outbox.Subscription) bool { return s.Name == task }) {
+			t.Errorf("%s has no %s subscriber", topic, task)
+		}
+	}
+	for _, task := range []string{feed.NotifyOrgModeratedTaskName, feed.NotifyReportResolvedTaskName} {
+		if !slices.ContainsFunc(c.infra.jobs.Tasks(), func(x queue.Task) bool { return x.Name == task }) {
+			t.Errorf("task %s is not registered", task)
+		}
+	}
+	staff := feedStaff{c: c}
+	if mods, err := staff.Moderators(t.Context()); err != nil || len(mods) != 0 {
+		t.Fatalf("Moderators (empty identity store) = %v, %v", mods, err)
+	}
+	if _, err := staff.PlatformAdmins(t.Context()); err != nil {
+		t.Fatalf("PlatformAdmins: %v", err)
+	}
+	if _, err := (feedSender{c: &container{}}).Send(t.Context(), notify.Message{}); err == nil {
+		t.Fatal("a sender without notify succeeded")
 	}
 }

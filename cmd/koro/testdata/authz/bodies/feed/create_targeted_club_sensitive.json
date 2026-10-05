@@ -1,0 +1,1 @@
+{"kind": "text", "title": "Üyelere duyuru", "body_json": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Hedefli matris duyurusu"}]}]}, "audience": {"definition": {"club": ["{{fixture:club_sensitive}}"]}}}

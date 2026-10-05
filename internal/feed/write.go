@@ -16,8 +16,9 @@ import (
 
 // CreatePost implements Service. Order: the org (404) → authz on its
 // management surface (404/403) → the author kind → the org status (403)
-// → the body (422) → in one transaction: the draft, its media and their
-// attachment, and the audit record.
+// → the feed trust level (403 when suspended, BE-032) → the body (422) →
+// in one transaction: the draft, its media and their attachment, and the
+// audit record.
 func (s *service) CreatePost(ctx context.Context, a authz.Actor, orgID uuid.UUID, in PostInput) (PostView, error) {
 	o, err := s.org(ctx, orgID)
 	if err != nil {
@@ -31,6 +32,9 @@ func (s *service) CreatePost(ctx context.Context, a authz.Actor, orgID uuid.UUID
 		return PostView{}, authz.ErrForbidden
 	}
 	if err := writable(a, o); err != nil {
+		return PostView{}, err
+	}
+	if err := s.notSuspended(ctx, o); err != nil {
 		return PostView{}, err
 	}
 	base := Post{
@@ -162,13 +166,18 @@ func (s *service) UpdatePost(ctx context.Context, a authz.Actor, id uuid.UUID, i
 // emit publishes a feed event after the commit (mechanism A, 01 §6.2). A
 // failure is logged, never returned: the business write stands.
 func (s *service) emit(ctx context.Context, p domainevent.Payload, postID uuid.UUID) {
-	env, err := domainevent.New(p, postAggType, postID)
+	s.emitFor(ctx, p, postAggType, postID)
+}
+
+// emitFor is emit for an aggregate of another type (a content report).
+func (s *service) emitFor(ctx context.Context, p domainevent.Payload, aggType string, id uuid.UUID) {
+	env, err := domainevent.New(p, aggType, id)
 	if err == nil {
 		err = s.d.Outbox.AfterCommit(ctx, env)
 	}
 	if err != nil {
 		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "feed event not emitted",
-			slog.String("topic", p.Topic()), slog.String("post_id", postID.String()), slog.String("err", err.Error()))
+			slog.String("topic", p.Topic()), slog.String("aggregate_id", id.String()), slog.String("err", err.Error()))
 	}
 }
 
@@ -279,14 +288,18 @@ func (s *service) publishable(ctx context.Context, o orgs.OrgSummary, p Post) er
 		}
 	}
 	if p.EventID != nil {
-		return s.checkEvent(ctx, o, *p.EventID)
+		if err := s.checkEvent(ctx, o, *p.EventID); err != nil {
+			return err
+		}
 	}
-	return nil
+	return s.checkTargets(ctx, p)
 }
 
 // DeletePost implements Service: a post that was never published (draft,
-// pending_review) is deleted with its media rows; a published or hidden one
-// becomes removed (04 §2.7; kept 12 months, then purged: BE-057). A
+// pending_review) is deleted with its media rows and its targeted_post
+// unit goes back to the company (04 §2.7 "+ hak iadesi", same
+// transaction); a published or hidden one becomes removed (04 §2.7; kept
+// 12 months, then purged: BE-057) and keeps its unit, which was used. A
 // removed post is 404 for the author org (it sees it in its management
 // list only).
 func (s *service) DeletePost(ctx context.Context, a authz.Actor, id uuid.UUID) error {
@@ -297,6 +310,9 @@ func (s *service) DeletePost(ctx context.Context, a authz.Actor, id uuid.UUID) e
 		}
 		switch p.Status {
 		case StatusDraft, StatusPendingReview:
+			if err := s.releaseUnit(ctx, p); err != nil {
+				return err
+			}
 			if err := s.d.Store.DeletePost(ctx, p.OrgID, p.ID); err != nil {
 				return err
 			}
@@ -312,6 +328,7 @@ func (s *service) DeletePost(ctx context.Context, a authz.Actor, id uuid.UUID) e
 		}
 		return s.d.Audit.Log(ctx, auditEvent(a, authz.FeedPostDelete, p, map[string]any{
 			"previous_status": string(p.Status),
+			"quota_released":  p.EntitlementUsageID != nil && (p.Status == StatusDraft || p.Status == StatusPendingReview),
 		}))
 	})
 }

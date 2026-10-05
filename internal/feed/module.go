@@ -6,7 +6,9 @@
 // pagination) and the org page. BE-029 adds the reader's interactions:
 // likes, saves and hides of posts, follows and mutes of orgs, the
 // automatic follow of a membership and the hourly counter reconciliation.
-// Targeted posts, reports and moderation are BE-032's.
+// BE-032 adds targeted posts (a compiled segment audience, a company's
+// targeted_post quota), user reports and platform moderation (the review
+// queue, decisions on posts and orgs, the trust levels).
 //
 // Rules the package enforces:
 //
@@ -61,6 +63,25 @@
 //     its org automatically (auto_membership) except in a sensitive club,
 //     whose follow would reveal the membership (02 §12.7); the end of the
 //     membership removes the automatic follow only.
+//   - Targeted posts (01 §6.3, 03 k16, 04 §F.1): the audience is compiled
+//     by outreach (scope, k ≥ 10, no sensitive club, no minor) and, for a
+//     company, one targeted_post unit is consumed, in the transaction that
+//     writes the draft; an Idempotency-Key replay neither compiles nor
+//     consumes again. The audience is fixed at creation; deleting (or a
+//     moderator rejecting) a draft gives the unit back. A club addresses
+//     its own members (club:<id>, a sensitive club too) without k ≥ 10 and
+//     without a quota; only its members see such a post.
+//   - Reports (02 §12.9, 04 §F.4): one open report per user and target; a
+//     repeated report returns the open one. The reporter's identity leaves
+//     the module only through the admin report endpoints (03 Y7), never in
+//     an org's audit trail. A published post reported by enough distinct
+//     users is hidden until a moderator decides (R-003 §1.5.3).
+//   - Moderation (02 §12.10, 03 §5.7): moderators and platform admins work
+//     the review queue and the reports; every decision is an append-only
+//     moderation_actions row and an audit record, and the author org is
+//     notified with the reason code (the way to appeal: support, then a
+//     restore). Nobody moderates a post or an org they write for, and only
+//     a platform admin suspends an org or lifts a suspension (k17).
 //   - Personal data: posts carry the author's user ID (audit), never shown
 //     to readers; logs carry IDs only.
 package feed
@@ -79,11 +100,17 @@ import (
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/privacy"
+	"koro/internal/platform/queue"
 )
 
 // DefaultReviewThreshold is the number of approved posts after which a new
 // org publishes without review (T-15: "ilk 3 gönderi").
 const DefaultReviewThreshold = 3
+
+// DefaultReportHideThreshold is the number of distinct users whose open
+// reports hide a published post until a moderator decides (R-003 §1.5.3:
+// "≥3 farklı kullanıcı bildirirse").
+const DefaultReportHideThreshold = 3
 
 // Posts is the read contract of other modules (01 §4.14).
 type Posts interface {
@@ -143,15 +170,42 @@ type Service interface {
 	UnmuteOrg(ctx context.Context, a authz.Actor, orgID uuid.UUID) error
 	// ListMutes is listMyMutes (feed.mute.list_own).
 	ListMutes(ctx context.Context, a authz.Actor, q PageQuery) (OrgPage, error)
+
+	// CreateTargetedPost is createTargetedPost (feed.post.create_targeted,
+	// 03 k16): a segment draft with its compiled audience and, for a
+	// company, one targeted_post unit consumed in the same transaction.
+	CreateTargetedPost(ctx context.Context, a authz.Actor, orgID uuid.UUID, in TargetedInput) (TargetedView, error)
+
+	// CreateReport is createContentReport (feed.report.create): Created is
+	// false when the reporter's open report on the target is returned.
+	CreateReport(ctx context.Context, a authz.Actor, in ReportInput) (ReportResult, error)
+	// ListReports is adminListReports (feed.report.list).
+	ListReports(ctx context.Context, a authz.Actor, q ReportQuery) (ReportPage, error)
+	// GetReport is adminGetReport (feed.report.read): the report with a
+	// summary of its target.
+	GetReport(ctx context.Context, a authz.Actor, id uuid.UUID) (ReportView, error)
+	// ResolveReport is adminResolveReport (feed.report.resolve).
+	ResolveReport(ctx context.Context, a authz.Actor, id uuid.UUID, in ResolveInput) (ReportView, error)
+	// ListReviewQueue is adminListReviewQueue (feed.review_queue.list):
+	// the posts in pending_review, oldest first.
+	ListReviewQueue(ctx context.Context, a authz.Actor, q PageQuery) (PostPage, error)
+	// ModeratePost is adminModeratePost (feed.post.moderate).
+	ModeratePost(ctx context.Context, a authz.Actor, postID uuid.UUID, in ModerationInput) (PostModeration, error)
+	// ModerateOrg is adminModerateOrg (feed.org.moderate).
+	ModerateOrg(ctx context.Context, a authz.Actor, orgID uuid.UUID, in ModerationInput) (OrgModeration, error)
+	// ListModerationActions is adminListModerationActions
+	// (feed.moderation_action.list).
+	ListModerationActions(ctx context.Context, a authz.Actor, q ActionQuery) (ActionPage, error)
 }
 
-// Deps are the dependencies of the feed module. Store, Tx, Outbox, Audit,
-// Orgs, Idempotency, Clock and Log are required (New returns an error
-// otherwise).
+// Deps are the dependencies of the feed module. Store, Tx, Outbox, Queue,
+// Audit, Orgs, Idempotency, Clock and Log are required (New returns an
+// error otherwise).
 type Deps struct {
 	Store       Store
 	Tx          db.TxManager
-	Outbox      outbox.Writer       // post.published, post.submitted_for_review (A)
+	Outbox      outbox.Writer       // post.published, post.submitted_for_review, post.moderated, content_report.created (A)
+	Queue       queue.Enqueuer      // the org moderation and report outcome notices (A, BE-032)
 	Audit       AuditLogger         // every write, same transaction
 	Orgs        Orgs                // the author org's kind, status and name
 	Idempotency *idempotency.Keeper // optional Idempotency-Key of the POST operations (06 H-5)
@@ -172,9 +226,28 @@ type Deps struct {
 	// counts as sensitive: no club membership creates an automatic follow
 	// (fail closed, as orgs does without club facts, T-208).
 	Clubs Clubs
+	// Targeting is outreach's Compile (targeted posts). nil → a targeted
+	// post cannot be created (503).
+	Targeting Targeting
+	// Entitlements is the targeted_post quota. nil → a company's targeted
+	// post cannot be created and a draft holding a unit cannot be deleted
+	// or rejected (503: the unit would be lost).
+	Entitlements Entitlements
+	// Sender delivers the in-app moderation notices. nil → the notice
+	// tasks fail and are retried (a notice is never dropped silently).
+	Sender Sender
+	// Staff lists the moderators (and the platform admins when there is
+	// none) who receive the review queue and report notices. nil → as
+	// Sender.
+	Staff Staff
+
 	// ReviewThreshold is FEED_REVIEW_THRESHOLD: the approved posts after
 	// which a new org publishes without review; 0 → DefaultReviewThreshold.
 	ReviewThreshold int
+	// ReportHideThreshold is FEED_REPORT_HIDE_THRESHOLD: the distinct
+	// users whose open reports hide a published post until a moderator
+	// decides; 0 → DefaultReportHideThreshold.
+	ReportHideThreshold int
 }
 
 func (d Deps) validate() error {
@@ -183,7 +256,8 @@ func (d Deps) validate() error {
 		name string
 		ok   bool
 	}{
-		{"Store", d.Store != nil}, {"Tx", d.Tx != nil}, {"Outbox", d.Outbox != nil}, {"Audit", d.Audit != nil},
+		{"Store", d.Store != nil}, {"Tx", d.Tx != nil}, {"Outbox", d.Outbox != nil}, {"Queue", d.Queue != nil},
+		{"Audit", d.Audit != nil},
 		{"Orgs", d.Orgs != nil}, {"Idempotency", d.Idempotency != nil}, {"Clock", d.Clock != nil}, {"Log", d.Log != nil},
 	} {
 		if !c.ok {
@@ -193,6 +267,9 @@ func (d Deps) validate() error {
 	if d.ReviewThreshold < 0 {
 		errs = append(errs, errors.New("feed.Deps.ReviewThreshold is negative"))
 	}
+	if d.ReportHideThreshold < 0 {
+		errs = append(errs, errors.New("feed.Deps.ReportHideThreshold is negative"))
+	}
 	return errors.Join(errs...)
 }
 
@@ -200,7 +277,8 @@ func (d Deps) validate() error {
 type Module struct {
 	Service Service
 	// Privacy is the KVKK provider (the posts a user authored, their likes,
-	// saves, hides, follows and mutes).
+	// saves, hides, follows and mutes, their reports and, for a moderator,
+	// their moderation actions).
 	Privacy privacy.Provider
 
 	svc *service
@@ -214,6 +292,9 @@ func New(d Deps) (Module, error) {
 	}
 	if d.ReviewThreshold == 0 {
 		d.ReviewThreshold = DefaultReviewThreshold
+	}
+	if d.ReportHideThreshold == 0 {
+		d.ReportHideThreshold = DefaultReportHideThreshold
 	}
 	s := &service{d: d}
 	return Module{Service: s, Privacy: privacyProvider{s: s}, svc: s}, nil

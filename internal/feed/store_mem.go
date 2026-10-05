@@ -32,6 +32,8 @@ type MemStore struct {
 	hides    map[[2]uuid.UUID]time.Time // {user, post} → created_at
 	likes    map[[2]uuid.UUID]time.Time // {user, post} → created_at
 	saves    map[[2]uuid.UUID]time.Time // {user, post} → created_at
+	reports  map[uuid.UUID]Report       // content_reports (BE-032)
+	actions  []ModerationAction         // moderation_actions, append-only (BE-032)
 	// now stamps created_at/updated_at like the column defaults and the
 	// touch trigger; updated_at always moves forward.
 	now func() time.Time
@@ -44,7 +46,8 @@ func NewMemStore(now func() time.Time) *MemStore {
 	return &MemStore{
 		posts: map[uuid.UUID]Post{}, media: map[uuid.UUID][]Media{}, settings: map[uuid.UUID]OrgSettings{},
 		follows: map[[2]uuid.UUID]Follow{}, mutes: map[[2]uuid.UUID]time.Time{}, hides: map[[2]uuid.UUID]time.Time{},
-		likes: map[[2]uuid.UUID]time.Time{}, saves: map[[2]uuid.UUID]time.Time{}, now: now,
+		likes: map[[2]uuid.UUID]time.Time{}, saves: map[[2]uuid.UUID]time.Time{}, reports: map[uuid.UUID]Report{},
+		now: now,
 	}
 }
 

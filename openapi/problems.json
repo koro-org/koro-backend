@@ -378,6 +378,12 @@
     "type": "urn:koro:problem:feed.invalid_state"
   },
   {
+    "code": "feed.moderation_action_required",
+    "status": 409,
+    "title": "An actioned report needs a moderation action",
+    "type": "urn:koro:problem:feed.moderation_action_required"
+  },
+  {
     "code": "feed.posting_suspended",
     "status": 403,
     "title": "Organization cannot publish posts",

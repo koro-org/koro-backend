@@ -88,6 +88,7 @@ type PostManageDTO struct {
 	AuthorUserID         string     `json:"author_user_id,omitempty"`
 	SaveCount            int        `json:"save_count"`
 	RemovedAt            *time.Time `json:"removed_at,omitempty"`
+	ReasonCode           string     `json:"reason_code,omitempty" doc:"Moderation reason of a hidden or removed post (reported_by_users: hidden by user reports until a moderator decides)"`
 	CreatedAt            time.Time  `json:"created_at"`
 	UpdatedAt            time.Time  `json:"updated_at"`
 }
@@ -154,7 +155,7 @@ func toManageDTO(v PostView) PostManageDTO {
 	d := PostManageDTO{
 		PostDTO: toPostDTO(v), Status: string(p.Status), AudienceKind: string(p.AudienceKind),
 		AudienceSizeEstimate: p.AudienceSizeEstimate, CommercialFlag: p.CommercialFlag, SaveCount: p.SaveCount,
-		RemovedAt: p.RemovedAt, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
+		RemovedAt: p.RemovedAt, ReasonCode: v.ReasonCode, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}
 	d.Viewer = nil
 	if len(p.AudienceKeys) > 0 {

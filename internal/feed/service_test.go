@@ -100,10 +100,13 @@ func TestPublish_NewOrgFirst3_PendingReview(t *testing.T) {
 	if p, err := e.svc.PublishPost(ctx, admin, v.Post.ID); err != nil || p.Post.Status != feed.StatusPendingReview {
 		t.Fatalf("PublishPost(restricted) = %+v, %v", p.Post, err)
 	}
-	// Suspended: 403.
-	e.mem.PutSettings(feed.OrgSettings{OrgID: orgID("company_a"), TrustLevel: feed.TrustSuspended, Reason: &reason})
+	// Suspended: 403 — a draft written before cannot be published, and no
+	// new draft is taken (BE-032).
 	v = e.create(t, "company_admin", "company_a", textInput("Askıda"))
+	e.mem.PutSettings(feed.OrgSettings{OrgID: orgID("company_a"), TrustLevel: feed.TrustSuspended, Reason: &reason})
 	_, err := e.svc.PublishPost(ctx, admin, v.Post.ID)
+	wantCode(t, err, 403, "feed.posting_suspended")
+	_, err = e.svc.CreatePost(ctx, admin, orgID("company_a"), textInput("Askıda 2"))
 	wantCode(t, err, 403, "feed.posting_suspended")
 	// The platform org is trusted without a settings row (k-po author).
 	pa := authz.Actor{Kind: authz.KindUser, UserID: uuid.NewV7(), PlatformRoles: []authz.PlatformRole{authz.PlatformAdmin},

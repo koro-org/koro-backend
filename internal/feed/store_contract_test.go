@@ -680,4 +680,264 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (feed.Store, world)
 			t.Fatalf("second EraseInteractions = %d, %v", n, err)
 		}
 	})
+
+	// ---- BE-032: reports, moderation actions, trust, review queue
+
+	t.Run("reports: one open per reporter and target, queue order, erase", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		org, by := w.org(t, feed.AuthorClub), w.user(t)
+		p := insert(t, s, publishedAt(post(org, feed.AuthorClub, by), pub0))
+		u1, u2, mod := w.user(t), w.user(t), w.user(t)
+		details := "Ücret istiyorlar"
+		rep := func(u uuid.UUID, tt feed.TargetType, target uuid.UUID) (feed.Report, bool) {
+			t.Helper()
+			r, created, err := s.InsertReport(ctx, feed.Report{ID: uuid.NewV7(), ReporterUserID: u, TargetType: tt,
+				TargetID: target, Reason: feed.ReasonScamOrMisleading, Details: &details})
+			if err != nil {
+				t.Fatalf("InsertReport: %v", err)
+			}
+			return r, created
+		}
+		r1, created := rep(u1, feed.TargetPost, p.ID)
+		if !created || r1.Status != feed.ReportOpen || r1.CreatedAt.IsZero() || r1.Details == nil || *r1.Details != details {
+			t.Fatalf("first report = %+v, %v", r1, created)
+		}
+		if again, created := rep(u1, feed.TargetPost, p.ID); created || again.ID != r1.ID {
+			t.Fatalf("duplicate = %+v, %v", again, created)
+		}
+		r2, _ := rep(u2, feed.TargetPost, p.ID)
+		ro, created := rep(u1, feed.TargetOrg, org)
+		if !created || ro.ID == r1.ID {
+			t.Fatal("an org report of the same user is another report")
+		}
+		if n, err := s.OpenReporters(ctx, feed.TargetPost, p.ID); err != nil || n != 2 {
+			t.Fatalf("OpenReporters = %d, %v", n, err)
+		}
+		if _, err := s.GetReport(ctx, uuid.NewV7()); !errors.Is(err, feed.ErrNotFound) {
+			t.Fatalf("GetReport(unknown) = %v", err)
+		}
+		if got, err := s.LockReport(ctx, r1.ID); err != nil || got.ReporterUserID != u1 {
+			t.Fatalf("LockReport = %+v, %v", got, err)
+		}
+		next := r1
+		next.Status, next.AssignedTo = feed.ReportInReview, &mod
+		upd, err := s.UpdateReport(ctx, next)
+		if err != nil || upd.Status != feed.ReportInReview || upd.AssignedTo == nil || *upd.AssignedTo != mod {
+			t.Fatalf("UpdateReport(in_review) = %+v, %v", upd, err)
+		}
+		// A resolved report needs resolved_at (content_reports_resolved_chk).
+		bad := upd
+		bad.Status = feed.ReportDismissed
+		if _, err := s.UpdateReport(ctx, bad); !errors.Is(err, problem.ErrValidation) {
+			t.Fatalf("dismissed without resolved_at = %v", err)
+		}
+		at := pub0.Add(time.Hour)
+		note := "Kural dışı değil"
+		bad.ResolvedAt, bad.ResolutionNote = &at, &note
+		if res, err := s.UpdateReport(ctx, bad); err != nil || res.ResolvedAt == nil || *res.ResolutionNote != note {
+			t.Fatalf("UpdateReport(dismissed) = %+v, %v", res, err)
+		}
+		if n, _ := s.OpenReporters(ctx, feed.TargetPost, p.ID); n != 1 {
+			t.Fatalf("OpenReporters after dismissal = %d", n)
+		}
+		r3, created := rep(u1, feed.TargetPost, p.ID)
+		if !created || r3.ID == r1.ID {
+			t.Fatal("after dismissal the same user reports anew")
+		}
+		// The queue: open reports, oldest first; newest first on request; keyset.
+		open := feed.ReportFilter{Statuses: []feed.ReportStatus{feed.ReportOpen, feed.ReportInReview}}
+		got, err := s.ListReports(ctx, open, nil, 10)
+		if err != nil || !slices.Equal(reportIDs(got), []uuid.UUID{r2.ID, ro.ID, r3.ID}) {
+			t.Fatalf("ListReports(open) = %v, %v", reportIDs(got), err)
+		}
+		open.Newest = true
+		if got, _ := s.ListReports(ctx, open, nil, 2); !slices.Equal(reportIDs(got), []uuid.UUID{r3.ID, ro.ID}) {
+			t.Fatalf("ListReports(newest) = %v", reportIDs(got))
+		}
+		if got, _ := s.ListReports(ctx, open, &feed.After{At: ro.CreatedAt, ID: ro.ID}, 10); !slices.Equal(reportIDs(got), []uuid.UUID{r2.ID}) {
+			t.Fatalf("ListReports(newest, after) = %v", reportIDs(got))
+		}
+		if got, _ := s.ListReports(ctx, feed.ReportFilter{TargetType: feed.TargetOrg}, nil, 10); len(got) != 1 || got[0].ID != ro.ID {
+			t.Fatalf("ListReports(org) = %v", reportIDs(got))
+		}
+		if got, _ := s.ListReports(ctx, feed.ReportFilter{Reason: feed.ReasonSpam}, nil, 10); len(got) != 0 {
+			t.Fatalf("ListReports(spam) = %v", reportIDs(got))
+		}
+		if mine, err := s.ReportsOf(ctx, u1); err != nil || len(mine) != 3 {
+			t.Fatalf("ReportsOf = %d, %v", len(mine), err)
+		}
+		if n, err := s.DeleteReportsOf(ctx, u1); err != nil || n != 3 {
+			t.Fatalf("DeleteReportsOf = %d, %v", n, err)
+		}
+		if mine, _ := s.ReportsOf(ctx, u1); len(mine) != 0 {
+			t.Fatal("reports survived the erasure")
+		}
+		if _, err := s.GetReport(ctx, r2.ID); err != nil {
+			t.Fatal("another reporter's report was erased")
+		}
+	})
+
+	t.Run("moderation actions: append, history, latest, by report and actor", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		org, by := w.org(t, feed.AuthorClub), w.user(t)
+		p := insert(t, s, publishedAt(post(org, feed.AuthorClub, by), pub0))
+		q := insert(t, s, publishedAt(post(org, feed.AuthorClub, by), pub0))
+		reporter, mod := w.user(t), w.user(t)
+		r, _, err := s.InsertReport(ctx, feed.Report{ID: uuid.NewV7(), ReporterUserID: reporter, TargetType: feed.TargetPost,
+			TargetID: p.ID, Reason: feed.ReasonSpam})
+		if err != nil {
+			t.Fatal(err)
+		}
+		act := func(target uuid.UUID, a feed.ModAction, report *uuid.UUID) feed.ModerationAction {
+			t.Helper()
+			note := "not"
+			m, err := s.InsertModerationAction(ctx, feed.ModerationAction{ID: uuid.NewV7(), ReportID: report,
+				TargetType: feed.TargetPost, TargetID: target, Action: a, ReasonCode: "spam", ActorUserID: mod, Note: &note})
+			if err != nil {
+				t.Fatalf("InsertModerationAction: %v", err)
+			}
+			return m
+		}
+		a1 := act(p.ID, feed.ModHide, &r.ID)
+		a2 := act(p.ID, feed.ModRestore, nil)
+		aq := act(q.ID, feed.ModRemove, nil)
+		if a1.CreatedAt.IsZero() || a1.ReportID == nil || *a1.ReportID != r.ID {
+			t.Fatalf("a1 = %+v", a1)
+		}
+		if _, err := s.InsertModerationAction(ctx, feed.ModerationAction{ID: uuid.NewV7(), TargetType: feed.TargetPost,
+			TargetID: p.ID, Action: feed.ModHide, ReasonCode: "Spam!", ActorUserID: mod}); !errors.Is(err, problem.ErrValidation) {
+			t.Fatalf("bad reason code = %v", err)
+		}
+		if got, err := s.GetModerationAction(ctx, a1.ID); err != nil || got.Action != feed.ModHide || got.ActorUserID != mod {
+			t.Fatalf("GetModerationAction = %+v, %v", got, err)
+		}
+		if _, err := s.GetModerationAction(ctx, uuid.NewV7()); !errors.Is(err, feed.ErrNotFound) {
+			t.Fatalf("GetModerationAction(unknown) = %v", err)
+		}
+		target := p.ID
+		hist, err := s.ListModerationActions(ctx, feed.ActionFilter{TargetType: feed.TargetPost, TargetID: &target}, nil, 10)
+		if err != nil || !slices.Equal(actionIDs(hist), []uuid.UUID{a2.ID, a1.ID}) {
+			t.Fatalf("history = %v, %v", actionIDs(hist), err)
+		}
+		if all, _ := s.ListModerationActions(ctx, feed.ActionFilter{}, &a2.ID, 10); !slices.Contains(actionIDs(all), a1.ID) ||
+			slices.Contains(actionIDs(all), aq.ID) {
+			t.Fatalf("history after a2 = %v", actionIDs(all))
+		}
+		last, err := s.LatestActions(ctx, feed.TargetPost, []uuid.UUID{p.ID, q.ID, uuid.NewV7()})
+		if err != nil || len(last) != 2 || last[p.ID].ID != a2.ID || last[q.ID].ID != aq.ID {
+			t.Fatalf("LatestActions = %+v, %v", last, err)
+		}
+		if n, err := s.ReportActions(ctx, r.ID); err != nil || n != 1 {
+			t.Fatalf("ReportActions = %d, %v", n, err)
+		}
+		if mine, err := s.ActionsBy(ctx, mod); err != nil || len(mine) != 3 {
+			t.Fatalf("ActionsBy = %d, %v", len(mine), err)
+		}
+		// Erasing the report keeps the decision; its report_id is cleared.
+		if _, err := s.DeleteReportsOf(ctx, reporter); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := s.GetModerationAction(ctx, a1.ID); got.ReportID != nil || got.Action != feed.ModHide {
+			t.Fatalf("a1 after the report's erasure = %+v", got)
+		}
+	})
+
+	t.Run("trust: approvals, auto trust, set trust", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		org, admin := w.org(t, feed.AuthorCompany), w.user(t)
+		for i := range 2 {
+			st, err := s.AddApprovedPost(ctx, org)
+			if err != nil || st.ApprovedPostsCount != i+1 || st.TrustLevel != feed.TrustNew {
+				t.Fatalf("AddApprovedPost %d = %+v, %v", i, st, err)
+			}
+		}
+		if ok, err := s.PromoteTrusted(ctx, org, 3); err != nil || ok {
+			t.Fatalf("PromoteTrusted(2 of 3) = %v, %v", ok, err)
+		}
+		if _, err := s.AddApprovedPost(ctx, org); err != nil {
+			t.Fatal(err)
+		}
+		if ok, err := s.PromoteTrusted(ctx, org, 3); err != nil || !ok {
+			t.Fatalf("PromoteTrusted(3 of 3) = %v, %v", ok, err)
+		}
+		if ok, _ := s.PromoteTrusted(ctx, org, 3); ok {
+			t.Fatal("a trusted org promoted twice")
+		}
+		until, reason := pub0.Add(48*time.Hour), "spam"
+		st, err := s.SetTrust(ctx, feed.OrgSettings{OrgID: org, TrustLevel: feed.TrustRestricted, RestrictedUntil: &until,
+			Reason: &reason, UpdatedBy: &admin})
+		if err != nil || st.TrustLevel != feed.TrustRestricted || st.ApprovedPostsCount != 3 || st.RestrictedUntil == nil ||
+			!st.RestrictedUntil.Equal(until) || st.UpdatedBy == nil || *st.UpdatedBy != admin {
+			t.Fatalf("SetTrust(restricted) = %+v, %v", st, err)
+		}
+		if _, err := s.SetTrust(ctx, feed.OrgSettings{OrgID: org, TrustLevel: feed.TrustSuspended}); !errors.Is(err, problem.ErrValidation) {
+			t.Fatalf("suspended without a reason = %v", err)
+		}
+		// A restricted org is not promoted.
+		if ok, _ := s.PromoteTrusted(ctx, org, 1); ok {
+			t.Fatal("a restricted org was promoted")
+		}
+		fresh := w.org(t, feed.AuthorClub)
+		st, err = s.SetTrust(ctx, feed.OrgSettings{OrgID: fresh, TrustLevel: feed.TrustSuspended, Reason: &reason, UpdatedBy: &admin})
+		if err != nil || st.TrustLevel != feed.TrustSuspended || st.ApprovedPostsCount != 0 {
+			t.Fatalf("SetTrust(new row) = %+v, %v", st, err)
+		}
+		if got, ok, _ := s.OrgSettings(ctx, fresh); !ok || got.TrustLevel != feed.TrustSuspended {
+			t.Fatalf("OrgSettings = %+v, %v", got, ok)
+		}
+	})
+
+	t.Run("review queue: pending posts of every org, oldest first", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		a, b, by := w.org(t, feed.AuthorCompany), w.org(t, feed.AuthorClub), w.user(t)
+		review := func(org uuid.UUID, kind feed.AuthorKind) feed.Post {
+			p := post(org, kind, by)
+			p.Status = feed.StatusPendingReview
+			return insert(t, s, p)
+		}
+		p1 := review(a, feed.AuthorCompany)
+		insert(t, s, post(a, feed.AuthorCompany, by)) // a draft is not in the queue
+		p2 := review(b, feed.AuthorClub)
+		got, err := s.ListReview(ctx, nil, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ids []uuid.UUID
+		for _, p := range got {
+			if p.ID == p1.ID || p.ID == p2.ID {
+				ids = append(ids, p.ID)
+			}
+		}
+		if !slices.Equal(ids, []uuid.UUID{p1.ID, p2.ID}) {
+			t.Fatalf("ListReview = %v", ids)
+		}
+		if next, _ := s.ListReview(ctx, &feed.After{At: p1.CreatedAt, ID: p1.ID}, 10); slices.ContainsFunc(next,
+			func(p feed.Post) bool { return p.ID == p1.ID }) || !slices.ContainsFunc(next, func(p feed.Post) bool { return p.ID == p2.ID }) {
+			t.Fatal("ListReview keyset")
+		}
+	})
+}
+
+func reportIDs(rs []feed.Report) []uuid.UUID {
+	out := []uuid.UUID{}
+	for _, r := range rs {
+		out = append(out, r.ID)
+	}
+	return out
+}
+
+func actionIDs(ms []feed.ModerationAction) []uuid.UUID {
+	out := []uuid.UUID{}
+	for _, m := range ms {
+		out = append(out, m.ID)
+	}
+	return out
 }

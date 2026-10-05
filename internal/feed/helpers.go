@@ -23,6 +23,43 @@ const postAggType = "post"
 // feedResource is the reader's feed (getFeed): no org, no owner.
 var feedResource = authz.Resource{Type: authz.TypeFeed}
 
+// adminSurface is the platform management surface (/admin/**, 03 §3.6):
+// visible to every user, so an actor without a platform role gets 403
+// before anything is read (BE-032's moderation endpoints).
+var adminSurface = authz.Resource{Type: authz.TypeAdminSurface}
+
+// reportAggType is the aggregate type of content_report.created and of
+// the report audit records.
+const reportAggType = "content_report"
+
+// moderatedPost is the authz view of a post a moderator decides on: the
+// post resource with its author user as owner, so the policy refuses a
+// moderator who wrote the post or writes for its org (BE-032, 03 Y6's
+// rule of not deciding on one's own work).
+func moderatedPost(p Post) authz.Resource {
+	r := postResource(p, true, true)
+	author := p.AuthorUserID
+	r.OwnerUserID = &author
+	return r
+}
+
+// moderatedOrg is the authz view of an org a moderator decides on (03 k17:
+// only a platform admin suspends an org or changes a suspended one; nobody
+// moderates an org they belong to).
+func moderatedOrg(o orgs.OrgSummary, act ModAction, trust TrustLevel) authz.Resource {
+	r := orgResource(o)
+	r.Attrs["moderation_action"] = string(act)
+	r.Attrs["trust_level"] = string(trust)
+	return r
+}
+
+// reportResource is the authz view of a report a moderator resolves: the
+// reporter as owner (nobody resolves their own report).
+func reportResource(r Report) authz.Resource {
+	reporter := r.ReporterUserID
+	return authz.Resource{Type: authz.TypeContentReport, ID: r.ID, OwnerUserID: &reporter}
+}
+
 // orgResource is the authz view of an org for its management surface
 // (/orgs/{org_id}/posts) and its public page (listPosts?org_id=): 03 §3.5
 // org, Attrs org_kind and org_status.

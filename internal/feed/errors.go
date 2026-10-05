@@ -6,7 +6,9 @@ import "koro/internal/platform/problem"
 // of 03 §2.3 reuse the orgs codes (orgs.ErrOrgSuspended,
 // orgs.ErrOrgNotVerified, orgs.ErrInvalidState) and a medium that is not
 // cleared by the scan is files.ErrNotClean: a problem code is registered
-// once (06 H-52). Field errors (Tiptap body, shape of a kind) are
+// once (06 H-52). Targeted posts answer with outreach's codes (scope,
+// sensitive club, k ≥ 10) and entitlements.ErrNoEntitlement (403
+// entitlements.not_entitled, T-58). Field errors (Tiptap body, shape of a kind) are
 // problem.ErrValidation with the offending member's location.
 var (
 	// ErrInvalidState: a transition outside the state machine: publishing
@@ -22,6 +24,10 @@ var (
 	ErrPostingSuspended = problem.New(problem.Forbidden, "feed.posting_suspended", "Organization cannot publish posts")
 	// ErrEmptyPatch: updatePost without a field to change.
 	ErrEmptyPatch = problem.New(problem.Invalid, "feed.empty_patch", "Nothing to update")
+	// ErrModerationActionRequired: a report is resolved as actioned without
+	// a moderation action taken on it (04 §2.7 adminResolveReport).
+	ErrModerationActionRequired = problem.New(problem.Conflict, "feed.moderation_action_required",
+		"An actioned report needs a moderation action")
 
 	// ErrNotFound: the post does not exist or is not visible to the caller
 	// (03 §3.6).

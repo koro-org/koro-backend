@@ -10,7 +10,9 @@ import (
 // privacyRetainedReason explains what Erase leaves in place.
 const privacyRetainedReason = "posts are the author org's content (02 §12.2); author_user_id and reviewed_by " +
 	"reference the account, which identity anonymises last (the tombstone keeps no name or address), so a post " +
-	"no longer identifies its author; readers never see the author user. Reports are BE-032's"
+	"no longer identifies its author; readers never see the author user. A moderator's decisions " +
+	"(moderation_actions, append-only) are kept for their retention period (moderation_action, 2 years; 06 H-41) " +
+	"and point at the same tombstone"
 
 // privacyProvider is the KVKK provider of feed (01 §3.3). What it knows
 // about a person:
@@ -25,6 +27,14 @@ const privacyRetainedReason = "posts are the author org's content (02 §12.2); a
 //     of orgs (02 §12.4–12.8, personal). Export lists them; Erase deletes
 //     them (hard delete) and takes the likes and saves off the posts'
 //     counters.
+//   - the reports they filed (02 §12.9, personal; BE-032). Export lists
+//     them with their own details text; Erase deletes them, open ones too
+//     (the user's erasure prevails; the moderation decisions taken stay
+//     and lose their report_id). Reports others filed about the user's
+//     org are the org's matter, not the user's data.
+//   - for a moderator, the decisions they took (02 §12.10, staff data:
+//     actor_user_id). Export lists them; Erase keeps them (append-only,
+//     retained with the reason above).
 type privacyProvider struct{ s *service }
 
 var _ privacy.Provider = privacyProvider{}
@@ -70,6 +80,32 @@ func (p privacyProvider) Export(ctx context.Context, userID uuid.UUID) (privacy.
 	for _, m := range in.Mutes {
 		out.Items = append(out.Items, map[string]any{"type": "org_mute", "org_id": m.OrgID.String(), "created_at": m.CreatedAt})
 	}
+	reports, err := p.s.d.Store.ReportsOf(ctx, userID)
+	if err != nil {
+		return privacy.ExportSection{}, err
+	}
+	for _, r := range reports {
+		item := map[string]any{
+			"type": "content_report", "report_id": r.ID.String(), "target_type": string(r.TargetType),
+			"target_id": r.TargetID.String(), "reason": string(r.Reason), "status": string(r.Status),
+			"created_at": r.CreatedAt, "resolved_at": r.ResolvedAt,
+		}
+		if r.Details != nil {
+			item["details"] = *r.Details
+		}
+		out.Items = append(out.Items, item)
+	}
+	actions, err := p.s.d.Store.ActionsBy(ctx, userID)
+	if err != nil {
+		return privacy.ExportSection{}, err
+	}
+	for _, m := range actions {
+		out.Items = append(out.Items, map[string]any{
+			"type": "moderation_action", "moderation_action_id": m.ID.String(), "target_type": string(m.TargetType),
+			"target_id": m.TargetID.String(), "action": string(m.Action), "reason_code": m.ReasonCode,
+			"created_at": m.CreatedAt,
+		})
+	}
 	return out, nil
 }
 
@@ -82,11 +118,19 @@ func (p privacyProvider) Erase(ctx context.Context, userID uuid.UUID) (privacy.E
 		if err != nil {
 			return err
 		}
+		reports, err := p.s.d.Store.DeleteReportsOf(ctx, userID)
+		if err != nil {
+			return err
+		}
 		rows, err := p.s.d.Store.PostsOfAuthor(ctx, userID)
 		if err != nil {
 			return err
 		}
-		res.Deleted, res.Retained = n, len(rows)
+		actions, err := p.s.d.Store.ActionsBy(ctx, userID)
+		if err != nil {
+			return err
+		}
+		res.Deleted, res.Retained = n+reports, len(rows)+len(actions)
 		return nil
 	})
 	if err != nil {

@@ -4,6 +4,8 @@
 # posts_company_commercial_chk). Persona student follows club_a (org_follows, BE-029's table);
 # club_member and club_admin are club_a's members, which counts as following it. club_a is trusted
 # (its drafts publish at once); company_a has no settings row (new: its first posts go to review).
+# BE-032: report_a is student's open report of post_a_followers; audience_uni_a seeds 12 eligible students of
+# uni_a in students' store, so a targeted post of uni_a's students reaches k ≥ 10.
 version: 1
 fixtures:
   post_a: { kind: post, org: club_a, author: club_admin, author_kind: club, status: published, audience: public }
@@ -20,3 +22,8 @@ fixtures:
   post_b_draft: { kind: post, org: club_b, author: other_club_admin, author_kind: club, status: draft, audience: public }
   follow_student_club_a: { kind: follow, user: student, org: club_a }
   trust_club_a: { kind: trust, org: club_a, level: trusted }
+  post_company_review: { kind: post, org: company_a, author: company_member, author_kind: company, status: pending_review,
+                         audience: public }
+  post_a_hidden: { kind: post, org: club_a, author: club_admin, author_kind: club, status: hidden, audience: public }
+  report_a: { kind: report, reporter: student, target_type: post, target: post_a_followers, reason: spam }
+  audience_uni_a: { kind: audience, unis: [uni_a_university], count: 12 }

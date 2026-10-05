@@ -1,0 +1,1 @@
+{"kind": "text", "title": "Segment", "body_json": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Hedefli matris duyurusu"}]}]}, "audience": {"segment_id": "{{fixture:seg_company_a}}"}}

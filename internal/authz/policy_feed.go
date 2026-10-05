@@ -9,7 +9,7 @@ const TypeFeed = "feed"
 
 // feedPolicy is the policy of the feed module (03 §5.7). Only tickets of
 // the feed module edit this file (BE-001 R5). Written by BE-027 for its 9
-// actions and extended by BE-029 for the reader's 8:
+// actions, extended by BE-029 for the reader's 8:
 //
 //	feed.feed.read            every signed-in user (✓; k15 is the store's filter)
 //	feed.post.read            P (post; 404 when the post is not visible)
@@ -30,7 +30,24 @@ const TypeFeed = "feed"
 //	feed.follow.list_own      O
 //	feed.mute.list_own        O
 //
-// The other 9 feed actions belong to BE-032 (nil grants: 403).
+// and by BE-032 for the targeted post, the reports and moderation:
+//
+//	feed.post.create_targeted   S: as feed.post.create (k16, the targeting scope, is outreach.Compile's: 422)
+//	feed.report.create          every signed-in user (✓) on a post they see / an org whose profile they see
+//	feed.report.list            mod, pad (admin surface: no platform role → 403)
+//	feed.report.read            mod, pad (admin surface)
+//	feed.report.resolve         mod, pad (admin surface; on the report: not the reporter, Y6's spirit)
+//	feed.review_queue.list      mod, pad (admin surface)
+//	feed.post.moderate          mod, pad (admin surface; on the post: not its author nor a writer of its org)
+//	feed.org.moderate           mod (k17: no suspend_org, no change of a suspended org), pad (admin surface;
+//	                            on the org: not a member of it)
+//	feed.moderation_action.list mod, pad (admin surface)
+//
+// The moderation endpoints authorise twice: first the admin surface
+// (03 §3.6: every user sees it, a user without a platform role gets 403
+// before anything is read), then the target they decide on, where the
+// conflict-of-interest rules apply (a moderator does not decide on their
+// own work: their post, their org's post, their org, their report).
 //
 // Reader interactions (BE-029): a like, a save or a hide addresses a post
 // (/posts/{post_id}/..., resource surface): the post's visibility is
@@ -85,6 +102,24 @@ func feedPolicy() Policy {
 				return r.Type == TypeOrg && orgProfileVisible(a, r)
 			case FeedSaveListOwn, FeedFollowListOwn, FeedMuteListOwn:
 				return r.Type == TypeFeed && a.Owns(r)
+			case FeedPostCreateTargeted:
+				return r.Type == TypeOrg && OrgSurfaceVisible(a, r.OrgID)
+			case FeedReportCreate:
+				switch r.Type {
+				case TypePost:
+					return postVisible(a, r)
+				case TypeOrg:
+					return orgProfileVisible(a, r)
+				}
+				return false
+			case FeedReportList, FeedReportRead, FeedReviewQueueList, FeedModerationActionList:
+				return r.Type == TypeAdminSurface && AdminSurfaceVisible(a)
+			case FeedReportResolve, FeedPostModerate, FeedOrgModerate:
+				// The admin surface, then the decided target: an admin
+				// resource is no secret (403, never 404).
+				return AdminSurfaceVisible(a) && (r.Type == TypeAdminSurface ||
+					act == FeedReportResolve && r.Type == TypeContentReport ||
+					act == FeedPostModerate && r.Type == TypePost || act == FeedOrgModerate && r.Type == TypeOrg)
 			}
 			return false
 		},
@@ -104,10 +139,54 @@ func feedPolicy() Policy {
 					gs = append(gs, Grant{Role: RolePlatformAdmin})
 				}
 				return gs
+			case FeedPostCreateTargeted:
+				gs := postWriterGrants(a, r.OrgID)
+				if platformOrg(a, r.OrgID) { // k-po
+					gs = append(gs, Grant{Role: RolePlatformAdmin})
+				}
+				return gs
+			case FeedReportCreate:
+				return []Grant{{Role: RoleUserUnverified}, {Role: RoleStudent}, {Role: RoleStudentMinor}}
+			case FeedReportList, FeedReportRead, FeedReviewQueueList, FeedModerationActionList:
+				return moderators
+			case FeedReportResolve:
+				if r.Type == TypeContentReport && a.Owns(r) {
+					return nil // nobody resolves their own report
+				}
+				return moderators
+			case FeedPostModerate:
+				if r.Type == TypePost && (a.Owns(r) || postWriter(a, r)) {
+					return nil // nobody moderates their own or their org's post
+				}
+				return moderators
+			case FeedOrgModerate:
+				return orgModerationGrants(a, r)
 			}
-			return nil // the actions of BE-032: not written yet
+			return nil
 		},
 	}
+}
+
+// moderators are the grants of the moderation actions (03 §5.7 mod, pad;
+// both MFA roles, k-mfa).
+var moderators = []Grant{{Role: RoleModerator}, {Role: RolePlatformAdmin}}
+
+// orgModerationGrants is feed.org.moderate on the admin surface or on the
+// decided org (Attrs moderation_action, trust_level): nobody moderates an
+// org they belong to; k17 — a moderator neither suspends an org nor
+// changes a suspended one (lifting a suspension is a platform admin's).
+func orgModerationGrants(a Actor, r Resource) []Grant {
+	if r.Type != TypeOrg {
+		return moderators
+	}
+	if r.OrgID != nil && a.MemberOf(*r.OrgID) {
+		return nil
+	}
+	if r.Attr("moderation_action") == "suspend_org" || r.Attr("trust_level") == "suspended" &&
+		r.Attr("moderation_action") != "warn_org" {
+		return []Grant{{Role: RolePlatformAdmin}}
+	}
+	return moderators
 }
 
 // postWriters are the org roles that write an org's posts (03 §5.7 S cells

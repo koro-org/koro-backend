@@ -69,6 +69,12 @@ func TestFeedPolicy_Matrix(t *testing.T) {
 		}
 		return m
 	}
+	// BE-032: the moderation endpoints are the admin surface (403 without a
+	// platform role, 401 anonymous) and its decided targets.
+	modOnly := func() map[string]error {
+		return with(all(fb), map[string]error{"moderator": nil, "platform_admin": nil})
+	}
+	adminRes := func(authztest.Persona) authz.Resource { return authz.Resource{Type: authz.TypeAdminSurface} }
 	pub := postRes("club_a", "published", "public", false)
 	ad := postRes("company_a", "published", "public", true)
 	followers := postRes("club_a", "published", "followers", false)
@@ -130,6 +136,37 @@ func TestFeedPolicy_Matrix(t *testing.T) {
 		{"list own follows", authz.FeedFollowListOwn, ownFeed, with(all(nil), map[string]error{"anonymous": fb})},
 		{"list own mutes", authz.FeedMuteListOwn, ownFeed, with(all(nil), map[string]error{"anonymous": fb})},
 		{"list another user's mutes", authz.FeedMuteListOwn, othersFeed, hidden()},
+		// BE-032: targeted posts, reports and moderation.
+		{"create_targeted club_a", authz.FeedPostCreateTargeted, orgSurface("club_a", authz.OrgClub),
+			staffAre(with(hidden(), map[string]error{"club_member": fb, "club_admin": nil}), fb)},
+		{"create_targeted company_a", authz.FeedPostCreateTargeted, orgSurface("company_a", authz.OrgCompany),
+			staffAre(with(hidden(), map[string]error{"company_member": nil, "company_admin": nil}), fb)},
+		{"create_targeted uni_a", authz.FeedPostCreateTargeted, orgSurface("uni_a", authz.OrgUniversity),
+			staffAre(with(hidden(), map[string]error{"university_rep": nil}), fb)},
+		{"report public post", authz.FeedReportCreate, pub, with(all(nil), map[string]error{"anonymous": fb})},
+		{"report commercial post (k15)", authz.FeedReportCreate, ad,
+			with(all(nil), map[string]error{"anonymous": fb, "student_minor": nf})},
+		{"report draft (the service refuses: 409)", authz.FeedReportCreate, draft,
+			with(hidden(), map[string]error{"club_admin": nil, "moderator": nil, "platform_admin": nil})},
+		{"report org", authz.FeedReportCreate, func(authztest.Persona) authz.Resource { return orgRes("company_a", authz.OrgCompany, "active") },
+			with(all(nil), map[string]error{"anonymous": fb})},
+		{"report list", authz.FeedReportList, adminRes, modOnly()},
+		{"report read", authz.FeedReportRead, adminRes, modOnly()},
+		{"report resolve (surface)", authz.FeedReportResolve, adminRes, modOnly()},
+		{"report resolve (report of someone else)", authz.FeedReportResolve, reportOf(uuid.NewV7()), modOnly()},
+		{"review queue", authz.FeedReviewQueueList, adminRes, modOnly()},
+		{"moderation history", authz.FeedModerationActionList, adminRes, modOnly()},
+		{"moderate post (surface)", authz.FeedPostModerate, adminRes, modOnly()},
+		{"moderate post (club_a)", authz.FeedPostModerate, moderated(pub), modOnly()},
+		{"moderate post in review", authz.FeedPostModerate, moderated(review), modOnly()},
+		{"moderate org (surface)", authz.FeedOrgModerate, adminRes, modOnly()},
+		{"warn company_a", authz.FeedOrgModerate, orgDecision("company_a", authz.OrgCompany, "warn_org", "new"), modOnly()},
+		{"restrict company_a", authz.FeedOrgModerate, orgDecision("company_a", authz.OrgCompany, "restrict_org", "trusted"), modOnly()},
+		{"suspend company_a (k17)", authz.FeedOrgModerate, orgDecision("company_a", authz.OrgCompany, "suspend_org", "new"),
+			with(all(fb), map[string]error{"platform_admin": nil})},
+		{"restrict a suspended org (k17)", authz.FeedOrgModerate,
+			orgDecision("company_a", authz.OrgCompany, "restrict_org", "suspended"), with(all(fb), map[string]error{"platform_admin": nil})},
+		{"warn a suspended org", authz.FeedOrgModerate, orgDecision("company_a", authz.OrgCompany, "warn_org", "suspended"), modOnly()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -192,11 +229,69 @@ func TestFeedPolicy_EdgeCases(t *testing.T) {
 	// An unknown status hides the post (safe default).
 	wantErr(t, authz.Can(ctx, authz.Anonymous(), authz.FeedPostRead, postRes("club_a", "archived", "public", false)(p)),
 		authz.ErrNotFound, false)
-	// The other feed actions are BE-032's: denied for now.
-	wantErr(t, authz.Can(ctx, persona(t, "moderator"), authz.FeedPostModerate, postRes("club_a", "published", "public", false)(p)),
-		authz.ErrNotFound, false)
+	// BE-032: nobody decides on their own work. A moderator who writes for
+	// club_a does not moderate its posts; the author of a post does not
+	// moderate it; a platform admin who belongs to company_a does not
+	// moderate it; the reporter does not resolve their own report.
+	modClub := persona(t, "moderator")
+	modClub.Memberships = append(modClub.Memberships, authz.Membership{OrgID: authztest.ID("club_a"), OrgKind: authz.OrgClub,
+		Role: authz.MemberClubAdmin})
+	pubA := moderated(postRes("club_a", "published", "public", false))(p)
+	wantErr(t, authz.Can(ctx, modClub, authz.FeedPostModerate, pubA), authz.ErrForbidden, false)
+	wantErr(t, authz.Can(ctx, modClub, authz.FeedPostModerate, authz.Resource{Type: authz.TypeAdminSurface}), nil, false)
+	mod := persona(t, "moderator")
+	own := postRes("club_b", "published", "public", false)(p)
+	me := mod.UserID
+	own.OwnerUserID = &me
+	wantErr(t, authz.Can(ctx, mod, authz.FeedPostModerate, own), authz.ErrForbidden, false)
+	wantErr(t, authz.Can(ctx, mod, authz.FeedPostModerate, pubA), nil, false)
+	padCo := persona(t, "platform_admin")
+	padCo.Memberships = append(padCo.Memberships, authz.Membership{OrgID: authztest.ID("company_a"), OrgKind: authz.OrgCompany,
+		Role: authz.MemberCompanyAdmin})
+	coSuspend := orgDecision("company_a", authz.OrgCompany, "suspend_org", "new")(p)
+	wantErr(t, authz.Can(ctx, padCo, authz.FeedOrgModerate, coSuspend), authz.ErrForbidden, false)
+	wantErr(t, authz.Can(ctx, persona(t, "platform_admin"), authz.FeedOrgModerate, coSuspend), nil, false)
+	wantErr(t, authz.Can(ctx, mod, authz.FeedReportResolve, reportOf(mod.UserID)(p)), authz.ErrForbidden, false)
+	wantErr(t, authz.Can(ctx, persona(t, "platform_admin"), authz.FeedReportResolve, reportOf(mod.UserID)(p)), nil, false)
+	// The moderation endpoints are k-mfa (mod, pad).
+	modNoMFA := persona(t, "moderator")
+	modNoMFA.MFAVerified = false
+	wantErr(t, authz.Can(ctx, modNoMFA, authz.FeedReportList, authz.Resource{Type: authz.TypeAdminSurface}), authz.ErrMFARequired, false)
+	// k-po: the platform org's targeted posts are its platform admin's.
+	wantErr(t, authz.Can(ctx, pad, authz.FeedPostCreateTargeted, orgRes("platform_org", authz.OrgPlatform, "active")), nil, false)
+	wantErr(t, authz.Can(ctx, persona(t, "platform_admin"), authz.FeedPostCreateTargeted,
+		orgRes("company_a", authz.OrgCompany, "active")), authz.ErrForbidden, false)
 	// Missing Attrs are a programmer error (deny).
 	org := authztest.ID("club_a")
 	wantErr(t, authz.Can(ctx, persona(t, "club_admin"), authz.FeedPostUpdate,
 		authz.Resource{Type: authz.TypePost, OrgID: &org, Attrs: map[string]string{authz.AttrStatus: "draft"}}), authz.ErrForbidden, true)
+}
+
+// moderated is the post resource a moderation decision builds: the post
+// with its author (a third party here) as owner.
+func moderated(res func(authztest.Persona) authz.Resource) func(authztest.Persona) authz.Resource {
+	return func(p authztest.Persona) authz.Resource {
+		r := res(p)
+		author := uuid.NewV7()
+		r.OwnerUserID = &author
+		return r
+	}
+}
+
+// orgDecision is the org resource of adminModerateOrg (Attrs
+// moderation_action and trust_level).
+func orgDecision(name string, kind authz.OrgKind, action, trust string) func(authztest.Persona) authz.Resource {
+	return func(authztest.Persona) authz.Resource {
+		r := orgRes(name, kind, "active")
+		r.Attrs["moderation_action"] = action
+		r.Attrs["trust_level"] = trust
+		return r
+	}
+}
+
+// reportOf is a content report filed by reporter.
+func reportOf(reporter uuid.UUID) func(authztest.Persona) authz.Resource {
+	return func(authztest.Persona) authz.Resource {
+		return authz.Resource{Type: authz.TypeContentReport, ID: uuid.NewV7(), OwnerUserID: &reporter}
+	}
 }

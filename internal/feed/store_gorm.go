@@ -49,6 +49,10 @@ var constraints = db.Constraints{
 	"post_hides_post_id_fkey":     problem.ErrNotFound,
 	"org_follows_org_id_fkey":     problem.ErrNotFound,
 	"org_mutes_org_id_fkey":       problem.ErrNotFound,
+	// The report of a moderation action vanished meanwhile (BE-032).
+	"moderation_actions_report_id_fkey": problem.ErrNotFound,
+	// A trust change of an org that does not exist (BE-032).
+	"feed_org_settings_org_id_fkey": problem.ErrNotFound,
 }
 
 func wrap(op string, err error) error {

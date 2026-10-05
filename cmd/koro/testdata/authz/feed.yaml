@@ -11,6 +11,11 @@
 # and moderators see 409 feed.invalid_state); unlike/unsave are 204 without a row on a visible post and 404 on
 # an invisible one (no existence leak); follows and mutes address an org whose profile the reader sees; the
 # lists are the caller's own (anonymous 401).
+# BE-032: a targeted post is created on the org management surface like a post (k16 — the targeting scope, k ≥ 10,
+# the sensitive club ban — is outreach.Compile's: 422, scenarios); a company spends a targeted_post unit (company_a
+# holds 4; the "Hak yok" scenario empties company_b). Reports are every signed-in user's on what they see. The
+# moderation endpoints are the admin surface: moderator and platform_admin, every other user 403 (03 §3.6), with
+# MFA (k-mfa) and k17 (a moderator never suspends).
 version: 1
 groups:
   # signed-in users without a membership in club_a (and no platform role).
@@ -51,6 +56,9 @@ groups:
   fd_not_followers_a: [user_unverified, student_minor, other_club_admin, event_staff, university_rep,
                        company_member, company_admin, other_company_member, support, dpo, finance_admin,
                        talent_auditor]
+  # signed-in users without a platform role (the admin surface answers them 403).
+  fd_no_platform_role: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                        event_staff, university_rep, company_member, company_admin, other_company_member]
 
 operations:
   getFeed:
@@ -509,13 +517,224 @@ operations:
       anonymous: 401
       "@signed_in": 200
 
-pending_actions:
-  - feed.post.create_targeted        # BE-032
-  - feed.report.create               # BE-032
-  - feed.report.list                 # BE-032
-  - feed.report.read                 # BE-032
-  - feed.report.resolve              # BE-032
-  - feed.review_queue.list           # BE-032
-  - feed.post.moderate               # BE-032
-  - feed.org.moderate                # BE-032
-  - feed.moderation_action.list      # BE-032
+  # ---- BE-032: targeted posts, reports, moderation
+
+  createTargetedPost:
+    method: POST
+    path: /api/v1/orgs/{org_id}/targeted-posts
+    action: feed.post.create_targeted
+    idempotency: required
+    path_params: { org_id: club_a }
+    body: bodies/feed/create_targeted_club.json
+    note: a club addresses its own members (club:<id>) without k ≥ 10 and without a quota
+    expect:
+      anonymous: 401
+      "@fd_outsiders_club_a": 404
+      club_member: 403
+      club_admin: 201
+      "@platform_staff": 403
+    variants:
+      - name: company_org
+        path_params: { org_id: company_a }
+        body: bodies/feed/create_targeted_uni.json
+        note: k ≥ 10 (fixture audience_uni_a) and one targeted_post unit of company_a
+        expect:
+          anonymous: 401
+          "@fd_outsiders_company_a": 404
+          company_member: 201
+          company_admin: 201
+          "@platform_staff": 403
+      - name: university_org
+        path_params: { org_id: uni_a }
+        body: bodies/feed/create_targeted_uni.json
+        note: uni:<own university> (k ≥ 10, no quota)
+        expect:
+          anonymous: 401
+          "@fd_outsiders_uni_a": 404
+          university_rep: 201
+          "@platform_staff": 403
+
+  createContentReport:
+    method: POST
+    path: /api/v1/reports
+    action: feed.report.create
+    body: bodies/feed/create_report.json
+    expect:
+      anonymous: 401
+      "@signed_in": 201
+    variants:
+      - name: commercial_post
+        body: bodies/feed/create_report_company_post.json
+        note: k15 — a minor does not see a commercial post
+        expect:
+          anonymous: 401
+          student_minor: 404
+          "@fd_not_writer_company": 201
+          company_member: 201
+          company_admin: 201
+      - name: draft
+        body: bodies/feed/create_report_draft.json
+        note: a draft is not reported (409 feed.invalid_state for those who see it, 404 for the others)
+        expect:
+          anonymous: 401
+          "@fd_draft_hidden_a": 404
+          club_admin: 409
+          "@fd_post_staff": 409
+      - name: org
+        body: bodies/feed/create_report_org.json
+        expect:
+          anonymous: 401
+          "@signed_in": 201
+
+  adminListReports:
+    method: GET
+    path: /api/v1/admin/reports
+    action: feed.report.list
+    query: { status: open, sort: "-created_at" }
+    expect:
+      anonymous: 401
+      "@fd_no_platform_role": 403
+      "@fd_other_staff": 403
+      "@fd_post_staff": 200
+
+  adminGetReport:
+    method: GET
+    path: /api/v1/admin/reports/{report_id}
+    action: feed.report.read
+    path_params: { report_id: report_a }
+    expect:
+      anonymous: 401
+      "@fd_no_platform_role": 403
+      "@fd_other_staff": 403
+      "@fd_post_staff": 200
+    variants:
+      - name: unknown_report
+        path_params: { report_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect:
+          anonymous: 401
+          "@fd_no_platform_role": 403
+          "@fd_other_staff": 403
+          "@fd_post_staff": 404
+
+  adminResolveReport:
+    method: POST
+    path: /api/v1/admin/reports/{report_id}/resolve
+    action: feed.report.resolve
+    path_params: { report_id: report_a }
+    body: bodies/feed/resolve_in_review.json
+    expect:
+      anonymous: 401
+      "@fd_no_platform_role": 403
+      "@fd_other_staff": 403
+      "@fd_post_staff": 200
+    variants:
+      - name: actioned_without_action
+        body: bodies/feed/resolve_actioned.json
+        note: actioned needs a moderation action with the report (409 feed.moderation_action_required)
+        expect:
+          anonymous: 401
+          "@fd_no_platform_role": 403
+          "@fd_other_staff": 403
+          "@fd_post_staff": 409
+
+  adminListReviewQueue:
+    method: GET
+    path: /api/v1/admin/review-queue
+    action: feed.review_queue.list
+    expect:
+      anonymous: 401
+      "@fd_no_platform_role": 403
+      "@fd_other_staff": 403
+      "@fd_post_staff": 200
+
+  adminModeratePost:
+    method: POST
+    path: /api/v1/admin/posts/{post_id}/moderation
+    action: feed.post.moderate
+    path_params: { post_id: post_a }
+    body: bodies/feed/moderate_hide.json
+    expect:
+      anonymous: 401
+      "@fd_no_platform_role": 403
+      "@fd_other_staff": 403
+      "@fd_post_staff": 200
+    variants:
+      - name: approve_in_review
+        path_params: { post_id: post_company_review }
+        body: bodies/feed/moderate_approve.json
+        expect:
+          anonymous: 401
+          "@fd_no_platform_role": 403
+          "@fd_other_staff": 403
+          "@fd_post_staff": 200
+      - name: restore_hidden
+        path_params: { post_id: post_a_hidden }
+        body: bodies/feed/moderate_restore.json
+        expect:
+          anonymous: 401
+          "@fd_no_platform_role": 403
+          "@fd_other_staff": 403
+          "@fd_post_staff": 200
+      - name: approve_published
+        body: bodies/feed/moderate_approve.json
+        note: approve applies to a post in review only (409 feed.invalid_state)
+        expect:
+          anonymous: 401
+          "@fd_no_platform_role": 403
+          "@fd_other_staff": 403
+          "@fd_post_staff": 409
+      - name: unknown_post
+        path_params: { post_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect:
+          anonymous: 401
+          "@fd_no_platform_role": 403
+          "@fd_other_staff": 403
+          "@fd_post_staff": 404
+
+  adminModerateOrg:
+    method: POST
+    path: /api/v1/admin/orgs/{org_id}/moderation
+    action: feed.org.moderate
+    path_params: { org_id: company_a }
+    body: bodies/feed/moderate_org_warn.json
+    expect:
+      anonymous: 401
+      "@fd_no_platform_role": 403
+      "@fd_other_staff": 403
+      "@fd_post_staff": 200
+    variants:
+      - name: suspend
+        body: bodies/feed/moderate_org_suspend.json
+        note: k17 — only a platform admin suspends an org
+        expect:
+          anonymous: 401
+          "@fd_no_platform_role": 403
+          "@fd_other_staff": 403
+          moderator: 403
+          platform_admin: 200
+      - name: restrict
+        path_params: { org_id: club_a }
+        body: bodies/feed/moderate_org_restrict.json
+        expect:
+          anonymous: 401
+          "@fd_no_platform_role": 403
+          "@fd_other_staff": 403
+          "@fd_post_staff": 200
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect:
+          anonymous: 401
+          "@fd_no_platform_role": 403
+          "@fd_other_staff": 403
+          "@fd_post_staff": 404
+
+  adminListModerationActions:
+    method: GET
+    path: /api/v1/admin/moderation-actions
+    action: feed.moderation_action.list
+    query: { target_type: post, target_id: "{{fixture:post_a}}" }
+    expect:
+      anonymous: 401
+      "@fd_no_platform_role": 403
+      "@fd_other_staff": 403
+      "@fd_post_staff": 200

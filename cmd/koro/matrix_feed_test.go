@@ -1,19 +1,26 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
+	"koro/internal/authz/authztest"
 	"koro/internal/feed"
+	"koro/internal/students"
 )
 
 // matrixFixtures seeds the feed fixtures of the matrix (03 §7.3;
 // fixtures/feed.yaml): kind post (org, status, audience, author; a company
 // post is commercial, commercial: true makes another one so), kind follow
-// (user follows org) and kind trust (an org's feed trust level). Every post
-// is dated matrixOrgTime, so an untouched post's ETag is "1hmhuo3hji000"
-// (the If-Match the matrix files send).
+// (user follows org), kind trust (an org's feed trust level), kind report
+// (BE-032: reporter, target_type, target, reason) and kind audience
+// (BE-032: count eligible student profiles holding keys — the uni: keys of
+// the named universities — in students' store, so a targeted post reaches
+// k ≥ 10). Every post is dated matrixOrgTime, so an untouched post's ETag
+// is "1hmhuo3hji000" (the If-Match the matrix files send).
 func (w *feedWiring) matrixFixtures(fx *matrixFixtures) error {
 	mem, ok := w.built.(*feed.MemStore)
 	if !ok {
@@ -73,8 +80,62 @@ func (w *feedWiring) matrixFixtures(fx *matrixFixtures) error {
 				return err
 			}
 			mem.PutSettings(feed.OrgSettings{OrgID: org, TrustLevel: feed.TrustLevel(str("level"))})
+		case "report":
+			id, err := fx.ID(f.Name)
+			if err != nil {
+				return err
+			}
+			reporter, err := fx.Ref(f, "reporter")
+			if err != nil {
+				return err
+			}
+			target, err := fx.Ref(f, "target")
+			if err != nil {
+				return err
+			}
+			t := matrixOrgTime
+			if err := mem.PutReport(feed.Report{ID: id, ReporterUserID: reporter, TargetType: feed.TargetType(str("target_type")),
+				TargetID: target, Reason: feed.ReportReason(str("reason")), Status: feed.ReportOpen, CreatedAt: t,
+				UpdatedAt: t}); err != nil {
+				return fmt.Errorf("report %s: %w", f.Name, err)
+			}
+		case "audience":
+			if err := w.matrixAudience(fx, f); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("fixture %s: unknown kind %q", f.Name, f.Kind)
+		}
+	}
+	return nil
+}
+
+// matrixAudience seeds count eligible student profiles of the first named
+// university holding the uni: keys of the named universities (students'
+// in-memory store; deterministic user IDs).
+func (w *feedWiring) matrixAudience(fx *matrixFixtures, f fixture) error {
+	if w.late == nil || w.late.students.store == nil {
+		return fmt.Errorf("fixture %s: students is not built", f.Name)
+	}
+	unis, err := matrixIDs(fx, f, "unis")
+	if err != nil || len(unis) == 0 {
+		return fmt.Errorf("fixture %s: unis must name universities: %w", f.Name, err)
+	}
+	n, _ := f.Fields["count"].(int)
+	keys := make([]string, len(unis))
+	for i, u := range unis {
+		keys[i] = "uni:" + u.String()
+	}
+	ctx := context.Background()
+	st := w.late.students.store
+	for i := range n {
+		user := authztest.ID(f.Name + "_" + strconv.Itoa(i))
+		if _, _, err := st.InsertProfile(ctx, students.Profile{UserID: user, UniversityID: unis[0],
+			DegreeLevel: students.DegreeBachelor, Status: students.ProfileActive}); err != nil {
+			return fmt.Errorf("fixture %s: %w", f.Name, err)
+		}
+		if err := st.SetAudience(ctx, user, keys, true, matrixOrgTime); err != nil {
+			return fmt.Errorf("fixture %s: %w", f.Name, err)
 		}
 	}
 	return nil

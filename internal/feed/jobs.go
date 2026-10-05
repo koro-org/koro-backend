@@ -34,13 +34,17 @@ const (
 // Subscribe registers the outbox subscriptions of feed (01 §6.2):
 // post.published → feed.notify_followers; membership.started/ended → the
 // automatic follow; club.sensitivity_changed → the automatic follows of a
-// club that became sensitive. post.submitted_for_review is consumed by the
-// review queue notice of BE-032 (moderators, in-app); post.liked/unliked
-// and post.saved by talent (P3).
+// club that became sensitive; post.submitted_for_review,
+// content_report.created and post.moderated → the moderation notices
+// (BE-032, notices.go). post.liked/unliked and post.saved are talent's
+// (P3).
 func (m Module) Subscribe(r *outbox.Registry) {
 	r.Subscribe(domainevent.TopicPostPublished, NotifyFollowersTaskName, m.svc.handlePostPublished,
 		outbox.Queue(queue.Low))
 	q := outbox.Queue(queue.Default)
+	r.Subscribe(domainevent.TopicPostSubmittedForReview, NotifyReviewQueueTaskName, m.svc.handleSubmittedForReview, q)
+	r.Subscribe(domainevent.TopicContentReportCreated, NotifyReportCreatedTaskName, m.svc.handleReportCreated, q)
+	r.Subscribe(domainevent.TopicPostModerated, NotifyPostModeratedTaskName, m.svc.handlePostModerated, q)
 	r.Subscribe(domainevent.TopicMembershipStarted, AutoFollowTaskName, m.svc.handleMembershipStarted, q)
 	r.Subscribe(domainevent.TopicMembershipEnded, RemoveAutoFollowTaskName, m.svc.handleMembershipEnded, q)
 	r.Subscribe(domainevent.TopicClubSensitivityChanged, DropSensitiveAutoFollowsTaskName,

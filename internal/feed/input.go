@@ -112,6 +112,11 @@ func (s *service) apply(ctx context.Context, a authz.Actor, o orgs.OrgSummary, c
 		next.Kind = *p.Kind
 	}
 	if p.AudienceKind != nil {
+		if cur.AudienceKind == AudienceSegment && *p.AudienceKind != AudienceSegment {
+			// The audience of a targeted post was compiled (and paid for)
+			// at creation: a new audience is a new targeted post.
+			return applied{}, fieldErr("body.audience_kind", "a targeted post keeps the audience it was created with")
+		}
 		switch *p.AudienceKind {
 		case "", AudiencePublic:
 			next.AudienceKind = AudiencePublic
@@ -161,7 +166,9 @@ func (s *service) apply(ctx context.Context, a authz.Actor, o orgs.OrgSummary, c
 	case p.Kind != nil && next.Kind != KindOpportunityCall:
 		next.Opportunity = nil
 	}
-	next.AudienceKeys, next.AudienceDimCount = []string{KeyAll}, 1
+	if next.AudienceKind != AudienceSegment { // a segment's keys come from outreach.Compile
+		next.AudienceKeys, next.AudienceDimCount = []string{KeyAll}, 1
+	}
 	out := applied{next: next}
 	media := len(current)
 	if p.Media != nil {

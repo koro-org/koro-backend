@@ -650,6 +650,79 @@ components:
         - domain_kind
         - is_active
       type: object
+    AdminReportDTO:
+      additionalProperties: false
+      properties:
+        assigned_to:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        details:
+          type: string
+        reason:
+          enum:
+            - spam
+            - harassment
+            - hate
+            - sexual
+            - scam_or_misleading_job
+            - copyright
+            - privacy
+            - other
+          type: string
+        report_id:
+          type: string
+        reporter_user_id:
+          description: Shown on the admin report endpoints only, never to the reported organization
+          type: string
+        resolution_note:
+          type: string
+        resolved_at:
+          format: date-time
+          type: string
+        status:
+          enum:
+            - open
+            - in_review
+            - actioned
+            - dismissed
+          type: string
+        target:
+          $ref: "#/components/schemas/ReportTargetDTO"
+          description: adminGetReport and adminResolveReport only
+        target_id:
+          type: string
+        target_type:
+          enum:
+            - post
+            - org
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - report_id
+        - reporter_user_id
+        - target_type
+        - target_id
+        - reason
+        - status
+        - created_at
+        - updated_at
+      type: object
+    AdminReportList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/AdminReportDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
     AdminRevokeInputBody:
       additionalProperties: false
       properties:
@@ -2828,6 +2901,21 @@ components:
         - status
         - source_type
       type: object
+    EntitlementLeftDTO:
+      additionalProperties: false
+      properties:
+        feature:
+          enum:
+            - targeted_post
+          type: string
+        remaining:
+          description: Units left after this post
+          format: int64
+          type: integer
+      required:
+        - feature
+        - remaining
+      type: object
     EntitlementList:
       additionalProperties: false
       properties:
@@ -4397,6 +4485,114 @@ components:
       required:
         - challenge_id
       type: object
+    ModerateOrgBody:
+      additionalProperties: false
+      properties:
+        action:
+          enum:
+            - warn_org
+            - restrict_org
+            - suspend_org
+          type: string
+        note:
+          description: Internal note of the moderators
+          maxLength: 1000
+          type: string
+        reason_code:
+          description: Shown to the organization
+          pattern: ^[a-z_]{2,40}$
+          type: string
+        report_id:
+          description: An open report of this organization the decision answers
+          type: string
+        restricted_until:
+          description: "restrict_org only: the end of the restriction (at most a year ahead)"
+          format: date-time
+          type: string
+      required:
+        - action
+        - reason_code
+      type: object
+    ModeratePostBody:
+      additionalProperties: false
+      properties:
+        action:
+          enum:
+            - approve
+            - hide
+            - remove
+            - restore
+          type: string
+        note:
+          description: Internal note of the moderators
+          maxLength: 1000
+          type: string
+        reason_code:
+          description: Shown to the author organization (e.g. misleading_job, spam)
+          pattern: ^[a-z_]{2,40}$
+          type: string
+        report_id:
+          description: An open report of this post the decision answers
+          type: string
+      required:
+        - action
+        - reason_code
+      type: object
+    ModerationActionDTO:
+      additionalProperties: false
+      properties:
+        action:
+          enum:
+            - approve
+            - hide
+            - remove
+            - restore
+            - warn_org
+            - restrict_org
+            - suspend_org
+          type: string
+        actor_user_id:
+          description: The moderator (platform staff)
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        moderation_action_id:
+          type: string
+        note:
+          type: string
+        reason_code:
+          type: string
+        report_id:
+          type: string
+        target_id:
+          type: string
+        target_type:
+          enum:
+            - post
+            - org
+          type: string
+      required:
+        - moderation_action_id
+        - target_type
+        - target_id
+        - action
+        - reason_code
+        - actor_user_id
+        - created_at
+      type: object
+    ModerationActionList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/ModerationActionDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
     MyConsentsDTO:
       additionalProperties: false
       properties:
@@ -4873,6 +5069,28 @@ components:
         - created_at
         - updated_at
       type: object
+    OrgModerationDTO:
+      additionalProperties: false
+      properties:
+        moderation_action:
+          $ref: "#/components/schemas/ModerationActionDTO"
+        org_id:
+          type: string
+        restricted_until:
+          format: date-time
+          type: string
+        trust_level:
+          enum:
+            - new
+            - trusted
+            - restricted
+            - suspended
+          type: string
+      required:
+        - org_id
+        - trust_level
+        - moderation_action
+      type: object
     OrgPublicDTO:
       additionalProperties: false
       properties:
@@ -5141,6 +5359,9 @@ components:
         published_at:
           format: date-time
           type: string
+        reason_code:
+          description: "Moderation reason of a hidden or removed post (reported_by_users: hidden by user reports until a moderator decides)"
+          type: string
         removed_at:
           format: date-time
           type: string
@@ -5188,6 +5409,26 @@ components:
           type: string
       required:
         - items
+      type: object
+    PostModerationDTO:
+      additionalProperties: false
+      properties:
+        moderation_action:
+          $ref: "#/components/schemas/ModerationActionDTO"
+        post_id:
+          type: string
+        status:
+          enum:
+            - draft
+            - pending_review
+            - published
+            - hidden
+            - removed
+          type: string
+      required:
+        - post_id
+        - status
+        - moderation_action
       type: object
     PostPatchBody:
       additionalProperties: false
@@ -5871,6 +6112,126 @@ components:
           maxLength: 500
           type: string
       type: object
+    ReportBody:
+      additionalProperties: false
+      properties:
+        details:
+          maxLength: 1000
+          type: string
+        reason:
+          enum:
+            - spam
+            - harassment
+            - hate
+            - sexual
+            - scam_or_misleading_job
+            - copyright
+            - privacy
+            - other
+          type: string
+        target_id:
+          description: A post or organization ID
+          type: string
+        target_type:
+          enum:
+            - post
+            - org
+          type: string
+      required:
+        - target_type
+        - target_id
+        - reason
+      type: object
+    ReportCreatedDTO:
+      additionalProperties: false
+      properties:
+        report_id:
+          type: string
+      required:
+        - report_id
+      type: object
+    ReportTargetDTO:
+      additionalProperties: false
+      properties:
+        open_reports:
+          description: Distinct users with an open report on the target
+          format: int64
+          type: integer
+        org:
+          $ref: "#/components/schemas/FeedOrgDTO"
+          description: The reported organization, or the post's author organization
+        org_status:
+          enum:
+            - pending_review
+            - active
+            - suspended
+            - closed
+          type: string
+        post:
+          $ref: "#/components/schemas/ReportedPostDTO"
+        trust_level:
+          description: Feed trust level
+          enum:
+            - new
+            - trusted
+            - restricted
+            - suspended
+          type: string
+        type:
+          enum:
+            - post
+            - org
+          type: string
+      required:
+        - type
+        - org
+        - org_status
+        - trust_level
+        - open_reports
+      type: object
+    ReportedPostDTO:
+      additionalProperties: false
+      properties:
+        audience_kind:
+          enum:
+            - public
+            - followers
+            - segment
+          type: string
+        body_text:
+          description: Plain-text preview of the body
+          type: string
+        commercial_flag:
+          type: boolean
+        kind:
+          enum:
+            - text
+            - image
+            - event_share
+            - opportunity_call
+          type: string
+        post_id:
+          type: string
+        published_at:
+          format: date-time
+          type: string
+        status:
+          enum:
+            - draft
+            - pending_review
+            - published
+            - hidden
+            - removed
+          type: string
+        title:
+          type: string
+      required:
+        - post_id
+        - kind
+        - status
+        - audience_kind
+        - commercial_flag
+      type: object
     RequestSensitivityInputBody:
       additionalProperties: false
       properties:
@@ -5920,6 +6281,23 @@ components:
           description: Re-authentication proof of the admin (03 §6.2)
       required:
         - reason
+      type: object
+    ResolveBody:
+      additionalProperties: false
+      properties:
+        assign_to_me:
+          type: boolean
+        resolution_note:
+          maxLength: 1000
+          type: string
+        status:
+          enum:
+            - in_review
+            - actioned
+            - dismissed
+          type: string
+      required:
+        - status
       type: object
     RetentionPolicyDTO:
       additionalProperties: false
@@ -6804,6 +7182,154 @@ components:
       required:
         - otpauth_uri
         - secret_base32
+      type: object
+    TargetedAudienceBody:
+      additionalProperties: false
+      properties:
+        definition:
+          $ref: "#/components/schemas/SegmentDefinitionDTO"
+        segment_id:
+          description: An active segment of the organization
+          type: string
+      type: object
+    TargetedPostBody:
+      additionalProperties: false
+      properties:
+        audience:
+          $ref: "#/components/schemas/TargetedAudienceBody"
+        body_json:
+          additionalProperties: {}
+          description: "Tiptap JSON: paragraphs, headings 2-3, lists, quotes, hard breaks; bold, italic, https/mailto links"
+          type: object
+        commercial_flag:
+          description: Sponsored content; always true for companies
+          type: boolean
+        event_id:
+          description: "event_share: a published public event"
+          type: string
+        kind:
+          enum:
+            - text
+            - image
+            - event_share
+            - opportunity_call
+          type: string
+        media:
+          description: "image posts: 1-10 images"
+          items:
+            $ref: "#/components/schemas/MediaBody"
+          maxItems: 10
+          type: array
+        opportunity:
+          $ref: "#/components/schemas/OpportunityBody"
+        title:
+          maxLength: 140
+          type: string
+      required:
+        - kind
+        - audience
+      type: object
+    TargetedPostDTO:
+      additionalProperties: false
+      properties:
+        audience_estimate:
+          $ref: "#/components/schemas/AudienceCountDTO"
+        audience_keys:
+          items:
+            type: string
+          type: array
+        audience_kind:
+          enum:
+            - public
+            - followers
+            - segment
+          type: string
+        audience_size_estimate:
+          format: int64
+          type: integer
+        author:
+          $ref: "#/components/schemas/AuthorDTO"
+        author_user_id:
+          type: string
+        body_json:
+          additionalProperties: {}
+          description: "Tiptap JSON: paragraphs, headings 2-3, lists, quotes, hard breaks; bold, italic, https/mailto links"
+          type: object
+        commercial_flag:
+          type: boolean
+        commercial_label:
+          description: "\"Tanıtım\": commercial content"
+          type: boolean
+        created_at:
+          format: date-time
+          type: string
+        edited_at:
+          format: date-time
+          type: string
+        entitlement:
+          $ref: "#/components/schemas/EntitlementLeftDTO"
+        event:
+          $ref: "#/components/schemas/EventRefDTO"
+        kind:
+          enum:
+            - text
+            - image
+            - event_share
+            - opportunity_call
+          type: string
+        like_count:
+          format: int64
+          type: integer
+        media:
+          items:
+            $ref: "#/components/schemas/MediaDTO"
+          type: array
+        opportunity:
+          $ref: "#/components/schemas/OpportunityDTO"
+        post_id:
+          type: string
+        published_at:
+          format: date-time
+          type: string
+        reason_code:
+          description: "Moderation reason of a hidden or removed post (reported_by_users: hidden by user reports until a moderator decides)"
+          type: string
+        removed_at:
+          format: date-time
+          type: string
+        save_count:
+          format: int64
+          type: integer
+        status:
+          enum:
+            - draft
+            - pending_review
+            - published
+            - hidden
+            - removed
+          type: string
+        title:
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+        viewer:
+          $ref: "#/components/schemas/ViewerDTO"
+          description: Signed-in readers only
+      required:
+        - audience_estimate
+        - status
+        - audience_kind
+        - commercial_flag
+        - save_count
+        - created_at
+        - updated_at
+        - post_id
+        - author
+        - kind
+        - media
+        - commercial_label
+        - like_count
       type: object
     TokenInputBody:
       additionalProperties: false
@@ -9313,6 +9839,67 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+  /api/v1/admin/moderation-actions:
+    get:
+      description: Newest first; narrowed by target_type and target_id.
+      operationId: adminListModerationActions
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - explode: false
+          in: query
+          name: target_type
+          schema:
+            enum:
+              - post
+              - org
+            type: string
+        - description: A post or organization ID
+          explode: false
+          in: query
+          name: target_id
+          schema:
+            description: A post or organization ID
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModerationActionList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List moderation decisions
+      tags:
+        - feed
+      x-koro-action: feed.moderation_action.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
   /api/v1/admin/notices:
     post:
       description: A consent_text belongs to exactly one explicit-consent purpose; other kinds carry none.
@@ -9579,6 +10166,47 @@ paths:
         - entitlements
       x-koro-action: entitlements.entitlement.grant
       x-koro-idempotency: required
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/orgs/{org_id}/moderation:
+    post:
+      description: warn_org records a warning; restrict_org sends every post of the organization to review until restricted_until (required, at most a year ahead); suspend_org stops its posting (platform admins only; only they change a suspended organization). The organization's managers are notified. Nobody moderates an organization they belong to.
+      operationId: adminModerateOrg
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModerateOrgBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgModerationDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Moderate an organization
+      tags:
+        - feed
+      x-koro-action: feed.org.moderate
+      x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
   /api/v1/admin/orgs/{org_id}/reactivate:
@@ -9899,6 +10527,215 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+  /api/v1/admin/posts/{post_id}/moderation:
+    post:
+      description: "approve: pending_review → published (counts towards the organization's trust); hide: published → hidden; remove: published or hidden → removed, pending_review → removed (rejected; a targeted_post unit goes back); restore: hidden → published, or a post removed by a moderator → published (an appeal). Every decision is kept (append-only) and the author organization is notified with the reason code. Nobody moderates a post of an organization they write for."
+      operationId: adminModeratePost
+      parameters:
+        - description: Post ID
+          in: path
+          name: post_id
+          required: true
+          schema:
+            description: Post ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModeratePostBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostModerationDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Moderate a post
+      tags:
+        - feed
+      x-koro-action: feed.post.moderate
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/reports:
+    get:
+      description: "The moderation queue: oldest first (sort=-created_at: newest first). The reporter's identity is shown here."
+      operationId: adminListReports
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: Statuses (repeat the parameter)
+          explode: true
+          in: query
+          name: status
+          schema:
+            description: Statuses (repeat the parameter)
+            items:
+              enum:
+                - open
+                - in_review
+                - actioned
+                - dismissed
+              type: string
+            maxItems: 4
+            type: array
+        - explode: false
+          in: query
+          name: reason
+          schema:
+            enum:
+              - spam
+              - harassment
+              - hate
+              - sexual
+              - scam_or_misleading_job
+              - copyright
+              - privacy
+              - other
+            type: string
+        - explode: false
+          in: query
+          name: target_type
+          schema:
+            enum:
+              - post
+              - org
+            type: string
+        - description: created_at (default, oldest first) or -created_at
+          explode: false
+          in: query
+          name: sort
+          schema:
+            description: created_at (default, oldest first) or -created_at
+            enum:
+              - created_at
+              - -created_at
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReportList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List content reports
+      tags:
+        - feed
+      x-koro-action: feed.report.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+  /api/v1/admin/reports/{report_id}:
+    get:
+      description: The report with a summary of its target (the post or organization, its trust level, its open reports).
+      operationId: adminGetReport
+      parameters:
+        - description: Report ID
+          in: path
+          name: report_id
+          required: true
+          schema:
+            description: Report ID
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReportDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a content report
+      tags:
+        - feed
+      x-koro-action: feed.report.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+  /api/v1/admin/reports/{report_id}/resolve:
+    post:
+      description: in_review takes the report (assign_to_me assigns it to the caller); actioned needs a moderation action taken with the report (409 feed.moderation_action_required); dismissed closes it. A resolved report takes no other change (409 feed.invalid_state). Nobody resolves their own report. The reporter is told the report was handled.
+      operationId: adminResolveReport
+      parameters:
+        - description: Report ID
+          in: path
+          name: report_id
+          required: true
+          schema:
+            description: Report ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolveBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminReportDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Take, action or dismiss a report
+      tags:
+        - feed
+      x-koro-action: feed.report.resolve
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
   /api/v1/admin/retention-policies:
     get:
       description: Every policy with its period (ISO 8601), anchor, method, legal approval and whether a sweeper is registered for it. A policy that is not legally approved runs as a dry run only (count, no deletion). Each item carries the etag that adminUpdateRetentionPolicy expects in If-Match.
@@ -9984,6 +10821,52 @@ paths:
       x-koro-action: kvkk.retention_policy.update
       x-koro-rate-limit: reauth
       x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/review-queue:
+    get:
+      description: Posts in pending_review (new or restricted organizations), oldest first.
+      operationId: adminListReviewQueue
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostManageList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the posts waiting for review
+      tags:
+        - feed
+      x-koro-action: feed.review_queue.list
+      x-koro-rate-limit: read_default
       x-koro-surface: admin
   /api/v1/admin/skills:
     post:
@@ -16743,6 +17626,51 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: org
+  /api/v1/orgs/{org_id}/targeted-posts:
+    post:
+      description: "A segment draft: the audience is a saved segment of the organization or an inline definition (OR inside a dimension, AND across). A club addresses its own members (club:<id>, a sensitive club too) without the k ≥ 10 rule; a university narrows its own university; a company targets any non-sensitive audience of at least 10 students and spends one targeted_post unit (403 entitlements.not_entitled without one). The audience is fixed here: it never changes, deleting the draft gives the unit back. Each call spends one unit of the organization's daily count budget (429)."
+      operationId: createTargetedPost
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TargetedPostBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TargetedPostDTO"
+          description: Created
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Create a targeted post (draft)
+      tags:
+        - feed
+      x-koro-action: feed.post.create_targeted
+      x-koro-idempotency: required
+      x-koro-rate-limit: write_default
+      x-koro-surface: org
   /api/v1/posts:
     get:
       description: "The published posts of an organization page the caller may see (anonymous: public, non-commercial posts only)."
@@ -17124,6 +18052,39 @@ paths:
         - feed
       x-koro-action: feed.post.stats
       x-koro-rate-limit: read_default
+      x-koro-surface: resource
+  /api/v1/reports:
+    post:
+      description: "The target must be a published post or an organization the caller may see (404 otherwise). A user has one open report per target: reporting it again returns that report (200). The reported organization never learns who reported."
+      operationId: createContentReport
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportCreatedDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Report a post or an organization
+      tags:
+        - feed
+      x-koro-action: feed.report.create
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
       x-koro-surface: resource
   /api/v1/skills:
     get:

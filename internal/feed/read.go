@@ -81,6 +81,11 @@ type PostView struct {
 	ETag   string
 	Viewer *ViewerFlags
 	Manage bool
+	// ReasonCode is the moderation reason of a hidden or removed post in
+	// the management view (04 §2.7 "durum + reason_code"; BE-032): the
+	// moderator's reason_code, reported_by_users for a post hidden by the
+	// report threshold, "" for a post its org removed.
+	ReasonCode string
 }
 
 // Stats are the counters of getPostStats (04 §2.7): no identity of who
@@ -319,6 +324,10 @@ func (s *service) views(ctx context.Context, a authz.Actor, rows []Post, manage 
 	if err != nil {
 		return nil, err
 	}
+	reasons, err := s.reasons(ctx, rows, manage)
+	if err != nil {
+		return nil, err
+	}
 	var state *ViewerState
 	if a.IsUser() && !manage {
 		st, err := s.d.Store.ViewerState(ctx, a.UserID, ids, orgIDs)
@@ -345,7 +354,7 @@ func (s *service) views(ctx context.Context, a authz.Actor, rows []Post, manage 
 		if !ok {
 			continue // an org row never disappears; a missing one is not shown
 		}
-		v := PostView{Post: p, Org: o, ETag: etagOf(p), Manage: manage}
+		v := PostView{Post: p, Org: o, ETag: etagOf(p), Manage: manage, ReasonCode: reasons[p.ID]}
 		if manage && p.Status == StatusRemoved {
 			// The author org sees a removed post's status, not its content
 			// (03 §3.6).
@@ -378,6 +387,40 @@ func (s *service) views(ctx context.Context, a authz.Actor, rows []Post, manage 
 			}
 		}
 		out = append(out, v)
+	}
+	return out, nil
+}
+
+// reasons returns the moderation reason of the hidden and removed posts of
+// a management page (one statement; none for a reader page): the reason
+// code of the decision that set the status, reported_by_users for a post
+// the report threshold hid.
+func (s *service) reasons(ctx context.Context, rows []Post, manage bool) (map[uuid.UUID]string, error) {
+	out := map[uuid.UUID]string{}
+	if !manage {
+		return out, nil
+	}
+	var ids []uuid.UUID
+	for _, p := range rows {
+		if p.Status == StatusHidden || p.Status == StatusRemoved {
+			ids = append(ids, p.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	last, err := s.d.Store.LatestActions(ctx, TargetPost, ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range rows {
+		m, ok := last[p.ID]
+		switch {
+		case p.Status == StatusHidden && ok && m.Action == ModHide, p.Status == StatusRemoved && ok && m.Action == ModRemove:
+			out[p.ID] = m.ReasonCode
+		case p.Status == StatusHidden:
+			out[p.ID] = autoHideReason
+		}
 	}
 	return out, nil
 }

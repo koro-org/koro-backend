@@ -14,8 +14,8 @@ import (
 	"koro/internal/platform/page"
 )
 
-// Register adds the 9 operations of BE-027 and the 12 of BE-029 (04 §2.7)
-// to api. svc may be nil (`koro openapi`): handlers only touch it when
+// Register adds the 9 operations of BE-027, the 12 of BE-029 and the 9
+// of BE-032 (04 §2.7) to api. svc may be nil (`koro openapi`): handlers only touch it when
 // called.
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
@@ -85,6 +85,7 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.FeedPostStats), Surface: op.SurfaceResource}, h.postStats)
 
 	registerInteractions(api, h)
+	registerModeration(api, h)
 }
 
 // reg registers one feed operation with its Koro metadata.
@@ -337,18 +338,8 @@ func (h handler) createPost(ctx context.Context, in *createPostInput) (*manageOu
 	if err != nil {
 		return nil, err
 	}
-	b := in.Body
-	pi := PostInput{
-		Kind: Kind(b.Kind), Title: b.Title, Opportunity: b.Opportunity.opportunity(), CommercialFlag: b.CommercialFlag,
-		AudienceKind: AudienceKind(b.AudienceKind),
-	}
-	if pi.Body, err = bodyBytes(b.Body); err != nil {
-		return nil, err
-	}
-	if pi.EventID, err = optID("body.event_id", b.EventID); err != nil {
-		return nil, err
-	}
-	if pi.Media, err = mediaInputs(b.Media); err != nil {
+	pi, err := in.Body.input()
+	if err != nil {
 		return nil, err
 	}
 	v, err := h.svc.CreatePost(ctx, a, in.id(), pi)
@@ -356,6 +347,25 @@ func (h handler) createPost(ctx context.Context, in *createPostInput) (*manageOu
 		return nil, err
 	}
 	return manageOut(v), nil
+}
+
+// input turns the body into the service input.
+func (b PostWriteBody) input() (PostInput, error) {
+	pi := PostInput{
+		Kind: Kind(b.Kind), Title: b.Title, Opportunity: b.Opportunity.opportunity(), CommercialFlag: b.CommercialFlag,
+		AudienceKind: AudienceKind(b.AudienceKind),
+	}
+	var err error
+	if pi.Body, err = bodyBytes(b.Body); err != nil {
+		return PostInput{}, err
+	}
+	if pi.EventID, err = optID("body.event_id", b.EventID); err != nil {
+		return PostInput{}, err
+	}
+	if pi.Media, err = mediaInputs(b.Media); err != nil {
+		return PostInput{}, err
+	}
+	return pi, nil
 }
 
 func bodyBytes(m map[string]any) ([]byte, error) {

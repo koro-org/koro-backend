@@ -129,6 +129,85 @@ type Store interface {
 	// EraseInteractions hard-deletes them (KVKK erase; the counters of the
 	// liked and saved posts go down) and returns the number of rows.
 	EraseInteractions(ctx context.Context, userID uuid.UUID) (int, error)
+
+	// ---- reports, moderation and trust (BE-032; 02 §12.1, §12.9–12.10)
+	//
+	// Reports and moderation actions have no org scope: moderation is the
+	// platform's (02 §12.9 "Org kapsamı: yok"). The service authorises the
+	// admin surface before it reads them.
+
+	// InsertReport writes r as an open report unless the reporter already
+	// has an open (open or in_review) report on the target
+	// (content_reports_open_uq): then it returns that report and
+	// created=false. Concurrent duplicates end with one row.
+	InsertReport(ctx context.Context, r Report) (Report, bool, error)
+	// GetReport returns the report or ErrNotFound.
+	GetReport(ctx context.Context, id uuid.UUID) (Report, error)
+	// LockReport is GetReport with the row locked for the transaction.
+	LockReport(ctx context.Context, id uuid.UUID) (Report, error)
+	// UpdateReport writes the status, assigned_to, resolution_note and
+	// resolved_at of r and returns the stored row (ErrNotFound when gone).
+	UpdateReport(ctx context.Context, r Report) (Report, error)
+	// ListReports returns up to limit reports of f by (created_at, id),
+	// oldest first unless f.Newest, after the position after.
+	ListReports(ctx context.Context, f ReportFilter, after *After, limit int) ([]Report, error)
+	// OpenReporters counts the users with an open report on the target (one
+	// open report per user and target: the distinct reporters).
+	OpenReporters(ctx context.Context, t TargetType, targetID uuid.UUID) (int, error)
+	// ReportsOf returns every report filed by userID, oldest first (KVKK
+	// export).
+	ReportsOf(ctx context.Context, userID uuid.UUID) ([]Report, error)
+	// DeleteReportsOf hard-deletes them (KVKK erase; the moderation actions
+	// keep their decision, report_id becomes NULL) and returns the count.
+	DeleteReportsOf(ctx context.Context, userID uuid.UUID) (int, error)
+
+	// InsertModerationAction appends m (moderation_actions is append-only)
+	// and returns it as stored.
+	InsertModerationAction(ctx context.Context, m ModerationAction) (ModerationAction, error)
+	// GetModerationAction returns the action or ErrNotFound.
+	GetModerationAction(ctx context.Context, id uuid.UUID) (ModerationAction, error)
+	// ListModerationActions returns up to limit actions of f, newest first
+	// by id, after the id after.
+	ListModerationActions(ctx context.Context, f ActionFilter, after *uuid.UUID, limit int) ([]ModerationAction, error)
+	// LatestActions returns the newest action on each target of type t
+	// among ids (one statement for a page).
+	LatestActions(ctx context.Context, t TargetType, ids []uuid.UUID) (map[uuid.UUID]ModerationAction, error)
+	// ReportActions counts the actions taken with reportID.
+	ReportActions(ctx context.Context, reportID uuid.UUID) (int, error)
+	// ActionsBy returns the actions taken by userID, oldest first (KVKK
+	// export of a moderator).
+	ActionsBy(ctx context.Context, userID uuid.UUID) ([]ModerationAction, error)
+
+	// ListReview returns up to limit posts in pending_review of every org,
+	// oldest first by (created_at, id), after the position after (the
+	// review queue, posts_review_idx).
+	ListReview(ctx context.Context, after *After, limit int) ([]Post, error)
+
+	// AddApprovedPost counts one more approved post of orgID (a new
+	// settings row when there was none) and returns the row.
+	AddApprovedPost(ctx context.Context, orgID uuid.UUID) (OrgSettings, error)
+	// PromoteTrusted makes orgID trusted when it is new and has at least
+	// threshold approved posts (feed.org_settings.auto_trust) and reports
+	// whether it changed.
+	PromoteTrusted(ctx context.Context, orgID uuid.UUID, threshold int) (bool, error)
+	// SetTrust writes the trust level, restricted_until, reason and
+	// updated_by of s (a new row when there was none; the approved post
+	// count stays) and returns the row.
+	SetTrust(ctx context.Context, s OrgSettings) (OrgSettings, error)
+}
+
+// ReportFilter narrows ListReports (adminListReports).
+type ReportFilter struct {
+	Statuses   []ReportStatus // empty: every status
+	Reason     ReportReason   // "": every reason
+	TargetType TargetType     // "": both
+	Newest     bool           // newest first (sort=-created_at)
+}
+
+// ActionFilter narrows ListModerationActions (adminListModerationActions).
+type ActionFilter struct {
+	TargetType TargetType // "": both
+	TargetID   *uuid.UUID // nil: every target
 }
 
 // Reader is who reads published posts (03 §3.6 "Gönderi"): what makes a

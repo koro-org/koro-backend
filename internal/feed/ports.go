@@ -7,9 +7,12 @@ import (
 
 	"koro/internal/audit"
 	"koro/internal/authz"
+	"koro/internal/entitlements"
 	"koro/internal/events"
 	"koro/internal/files"
+	"koro/internal/notify"
 	"koro/internal/orgs"
+	"koro/internal/outreach"
 	"koro/internal/students"
 )
 
@@ -33,6 +36,11 @@ type Orgs interface {
 	// clubs included): the membership events re-check it, so an automatic
 	// follow follows the membership whatever order the events arrive in.
 	MembershipsOf(ctx context.Context, userID uuid.UUID) ([]authz.Membership, error)
+	// ActiveMemberIDs returns the users with an active membership of orgID
+	// (the moderation notices to the author org, BE-032).
+	ActiveMemberIDs(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error)
+	// HasRole reports whether userID holds one of roles in orgID (active).
+	HasRole(ctx context.Context, orgID, userID uuid.UUID, roles ...authz.MemberRole) (bool, error)
 }
 
 // Clubs is what feed needs from directory (L6; 01 §4.6 Catalog): which
@@ -71,4 +79,49 @@ type Files interface {
 	Attach(ctx context.Context, a authz.Actor, fileID uuid.UUID, owner files.Owner) error
 	// PresignGet returns a short-lived download URL of a clean file.
 	PresignGet(ctx context.Context, fileID uuid.UUID, ttl time.Duration) (files.Download, error)
+}
+
+// Targeting is what feed needs from outreach (L8; 01 §4.13): the audience
+// of a targeted post, fixed in the post's transaction (01 §6.3 "Hedefli
+// gönderi yayını"). Compile applies the actor's targeting scope (03 k16),
+// the sensitive club ban (03 Y2), k ≥ 10 and the minor exclusion, and
+// spends one unit of the org's daily count budget (06 H-61; 429/503).
+type Targeting interface {
+	Compile(ctx context.Context, a authz.Actor, spec outreach.SegmentSpec) (outreach.Compiled, error)
+}
+
+// Entitlements is what feed needs from entitlements (L2; 01 §4.4): the
+// targeted_post quota of a company, consumed when the targeted post is
+// created and given back when its draft is deleted or rejected (DECISIONS-
+// LOG 2026-10-03), in the post's transaction.
+type Entitlements interface {
+	// Consume uses one unit of the org's feature for ref (the post) in the
+	// caller's transaction; no usable right is entitlements.ErrNoEntitlement
+	// (403 entitlements.not_entitled).
+	//
+	// sync-write: entitlements.Entitlements.Consume
+	Consume(ctx context.Context, orgID uuid.UUID, f entitlements.Feature, qty int, ref entitlements.Ref) (uuid.UUID, error)
+	// Release gives the unit of ref back in the caller's transaction (a
+	// reversal row); a ref that consumed nothing is a no-op.
+	//
+	// sync-write: entitlements.Entitlements.Release
+	Release(ctx context.Context, ref entitlements.Ref) error
+	// Available returns what the org may still use of the feature.
+	Available(ctx context.Context, orgID uuid.UUID, f entitlements.Feature) (entitlements.Availability, error)
+}
+
+// Sender is what feed needs from notify (L3; 01 §4.5): the in-app notices
+// of moderation (moderators, the author org, the reporter).
+type Sender interface {
+	Send(ctx context.Context, m notify.Message) (uuid.UUID, error)
+}
+
+// Staff lists the platform staff who moderate (03 §5.7 mod, pad): the
+// recipients of the review queue and report notices (T-249). Both lists
+// hold the roles in effect only (06 H-33).
+type Staff interface {
+	// Moderators returns the users holding moderator.
+	Moderators(ctx context.Context) ([]uuid.UUID, error)
+	// PlatformAdmins returns the users holding platform_admin.
+	PlatformAdmins(ctx context.Context) ([]uuid.UUID, error)
 }

@@ -12,16 +12,22 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
+	"koro/internal/directory"
+	"koro/internal/entitlements"
 	"koro/internal/events"
 	"koro/internal/feed"
 	"koro/internal/files"
+	"koro/internal/notify"
 	"koro/internal/orgs"
+	"koro/internal/outreach"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/queue"
+	"koro/internal/platform/ratelimit"
 	"koro/internal/students"
 )
 
@@ -97,6 +103,34 @@ func (f *fakeOrgs) MembershipsOf(_ context.Context, userID uuid.UUID) ([]authz.M
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]authz.Membership(nil), f.members[userID]...), nil
+}
+
+func (f *fakeOrgs) ActiveMemberIDs(_ context.Context, orgID uuid.UUID) ([]uuid.UUID, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []uuid.UUID
+	for u, ms := range f.members {
+		for _, m := range ms {
+			if m.OrgID == orgID {
+				out = append(out, u)
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeOrgs) HasRole(_ context.Context, orgID, userID uuid.UUID, roles ...authz.MemberRole) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, m := range f.members[userID] {
+		for _, r := range roles {
+			if m.OrgID == orgID && m.Role == r {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // setMembers replaces the active memberships of userID.
@@ -202,10 +236,22 @@ func (f *fakeFiles) setScan(id uuid.UUID, scan files.ScanStatus) {
 	f.files[id] = m
 }
 
-// fakeClubs is directory's sensitive club set.
+// fakeClubs is directory's sensitive club set (feed's Clubs) and its
+// universities (outreach's Catalog of the real targeting).
 type fakeClubs struct {
 	mu        sync.Mutex
 	sensitive map[uuid.UUID]bool
+	unis      map[uuid.UUID]directory.University
+}
+
+func (f *fakeClubs) GetUniversity(_ context.Context, id uuid.UUID) (directory.University, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	u, ok := f.unis[id]
+	if !ok {
+		return directory.University{}, directory.ErrNotFound
+	}
+	return u, nil
 }
 
 func (f *fakeClubs) SensitiveOrgIDs(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error) {
@@ -226,18 +272,113 @@ func (f *fakeClubs) set(id uuid.UUID, sensitive bool) {
 	f.sensitive[id] = sensitive
 }
 
+// fakeAudience is students' count_segment over profiles (outreach's
+// Audience of the real targeting): a profile counts when it is eligible and
+// its keys match every dimension of the spec; a sensitive club's key never
+// counts; below 10 there is no number.
+type fakeAudience struct {
+	mu        sync.Mutex
+	profiles  [][]string
+	sensitive map[string]bool
+}
+
+func (f *fakeAudience) add(n int, keys ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for range n {
+		f.profiles = append(f.profiles, keys)
+	}
+}
+
+func (f *fakeAudience) Count(_ context.Context, spec students.AudienceSpec) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	dims, keys := map[string]bool{}, map[string]bool{}
+	for _, k := range spec.Keys {
+		dim, _, _ := strings.Cut(k, ":")
+		dims[dim] = true
+		if !f.sensitive[k] {
+			keys[k] = true
+		}
+	}
+	n := 0
+	for _, p := range f.profiles {
+		matched := map[string]bool{}
+		for _, k := range p {
+			if keys[k] {
+				dim, _, _ := strings.Cut(k, ":")
+				matched[dim] = true
+			}
+		}
+		if len(matched) > 0 && len(matched) == len(dims) {
+			n++
+		}
+	}
+	if n < 10 {
+		return 0, students.ErrAudienceTooSmall
+	}
+	return n, nil
+}
+
+// fakeSender records the notices.
+type fakeSender struct {
+	mu   sync.Mutex
+	sent []notify.Message
+	keys map[string]bool
+}
+
+func (f *fakeSender) Send(_ context.Context, m notify.Message) (uuid.UUID, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.keys == nil {
+		f.keys = map[string]bool{}
+	}
+	if f.keys[m.DedupeKey] {
+		return uuid.NewV7(), nil
+	}
+	f.keys[m.DedupeKey] = true
+	f.sent = append(f.sent, m)
+	return uuid.NewV7(), nil
+}
+
+// to returns the recipients of tmpl.
+func (f *fakeSender) to(tmpl string) []uuid.UUID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []uuid.UUID
+	for _, m := range f.sent {
+		if m.Template == tmpl {
+			out = append(out, *m.UserID)
+		}
+	}
+	return out
+}
+
+// fakeStaff lists the moderators and platform admins in effect.
+type fakeStaff struct {
+	moderators, admins []uuid.UUID
+}
+
+func (f *fakeStaff) Moderators(context.Context) ([]uuid.UUID, error)     { return f.moderators, nil }
+func (f *fakeStaff) PlatformAdmins(context.Context) ([]uuid.UUID, error) { return f.admins, nil }
+
 type env struct {
-	clk     *clock.Fake
-	mem     *feed.MemStore
-	out     *outbox.Mem
-	audit   *auditLog
-	orgs    *fakeOrgs
-	viewers *fakeViewers
-	events  *fakeEvents
-	files   *fakeFiles
-	clubs   *fakeClubs
-	svc     feed.Service
-	mod     feed.Module
+	clk      *clock.Fake
+	mem      *feed.MemStore
+	out      *outbox.Mem
+	queue    *queue.Mem
+	audit    *auditLog
+	orgs     *fakeOrgs
+	viewers  *fakeViewers
+	events   *fakeEvents
+	files    *fakeFiles
+	clubs    *fakeClubs
+	audience *fakeAudience
+	ents     entitlements.Service
+	sender   *fakeSender
+	staff    *fakeStaff
+	svc      feed.Service
+	mod      feed.Module
 }
 
 func newEnv(t *testing.T) *env {
@@ -250,16 +391,35 @@ func newEnvWith(t *testing.T, tweak func(*feed.Deps)) *env {
 	t.Helper()
 	clk := clock.NewFake(t0)
 	e := &env{
-		clk: clk, mem: feed.NewMemStore(clk.Now), out: outbox.NewMem(clk), audit: &auditLog{}, orgs: newFakeOrgs(),
-		viewers: &fakeViewers{keys: map[uuid.UUID][]string{}}, events: &fakeEvents{events: map[uuid.UUID]events.EventSummary{}},
-		files: &fakeFiles{files: map[uuid.UUID]files.FileMeta{}, attached: map[uuid.UUID]uuid.UUID{}},
-		clubs: &fakeClubs{sensitive: map[uuid.UUID]bool{}},
+		clk: clk, mem: feed.NewMemStore(clk.Now), out: outbox.NewMem(clk), queue: queue.NewMem(), audit: &auditLog{},
+		orgs: newFakeOrgs(), viewers: &fakeViewers{keys: map[uuid.UUID][]string{}},
+		events: &fakeEvents{events: map[uuid.UUID]events.EventSummary{}},
+		files:  &fakeFiles{files: map[uuid.UUID]files.FileMeta{}, attached: map[uuid.UUID]uuid.UUID{}},
+		clubs: &fakeClubs{sensitive: map[uuid.UUID]bool{}, unis: map[uuid.UUID]directory.University{
+			uniA: {ID: uniA, OrgID: orgID("uni_a"), Name: "Üniversite A", IsActive: true},
+		}},
+		audience: &fakeAudience{sensitive: map[string]bool{}},
+		sender:   &fakeSender{},
+		staff:    &fakeStaff{moderators: []uuid.UUID{orgID("moderator")}, admins: []uuid.UUID{orgID("platform_admin")}},
 	}
 	tx := db.NopTx{}
 	idem := idempotency.New(idempotency.Deps{Tx: tx, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()})
+	ents, err := entitlements.New(entitlements.Deps{Store: entitlements.NewMemStore(clk.Now), Tx: tx, Audit: e.audit,
+		Idempotency: idem, Clock: clk, Log: obs.Discard()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.ents = ents.Service
+	targeting, err := outreach.New(outreach.Deps{Store: outreach.NewMemStore(clk.Now), Tx: tx, Audit: e.audit,
+		Audience: e.audience, Catalog: e.clubs, Orgs: e.orgs, Limiter: ratelimit.NewMem(clk), Idempotency: idem,
+		Clock: clk, Log: obs.Discard()})
+	if err != nil {
+		t.Fatal(err)
+	}
 	d := feed.Deps{
-		Store: e.mem, Tx: tx, Outbox: e.out, Audit: e.audit, Orgs: e.orgs, Idempotency: idem, Clock: clk,
+		Store: e.mem, Tx: tx, Outbox: e.out, Queue: e.queue, Audit: e.audit, Orgs: e.orgs, Idempotency: idem, Clock: clk,
 		Log: obs.Discard(), Viewers: e.viewers, Events: e.events, Files: e.files, Clubs: e.clubs,
+		Targeting: targeting.Service, Entitlements: e.ents, Sender: e.sender, Staff: e.staff,
 	}
 	if tweak != nil {
 		tweak(&d)
@@ -282,6 +442,9 @@ func persona(t *testing.T, name string) authz.Actor {
 }
 
 func orgID(name string) uuid.UUID { return authztest.ID(name) }
+
+// uniA is the university of uni_a (students' uni: keys).
+var uniA = authztest.UniversityID("uni_a")
 
 // doc is a one-paragraph Tiptap document.
 func doc(text string) []byte {

@@ -87,8 +87,8 @@ post_saves                  personal  feed          provider:feed
 post_hides                  personal  feed          provider:feed
 org_follows                 personal  feed          provider:feed
 org_mutes                   personal  feed          provider:feed
-content_reports             personal  feed          todo:BE-032
-moderation_actions          personal  feed          todo:BE-032
+content_reports             personal  feed          provider:feed
+moderation_actions          personal  feed          provider:feed
 # outreach
 segments                    staff     outreach      -
 outreach_dispatches         staff     outreach      -

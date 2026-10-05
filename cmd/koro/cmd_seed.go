@@ -23,7 +23,7 @@ import (
 // dev/staging only (05 §13.7).
 func runSeed(ctx context.Context, args []string, environ map[string]string, stdout io.Writer) error {
 	if len(args) == 0 {
-		return fmt.Errorf("%w: missing seed command (bootstrap-admin, reference, bootstrap-commerce)", errUsage)
+		return fmt.Errorf("%w: missing seed command (bootstrap-admin, reference, bootstrap-commerce, demo)", errUsage)
 	}
 	switch args[0] {
 	case "bootstrap-admin":
@@ -32,8 +32,10 @@ func runSeed(ctx context.Context, args []string, environ map[string]string, stdo
 		return runSeedReference(ctx, args[1:], environ, stdout)
 	case "bootstrap-commerce":
 		return runSeedBootstrapCommerce(ctx, args[1:], environ, stdout)
+	case "demo":
+		return runSeedDemo(ctx, args[1:], environ, stdout)
 	default:
-		return fmt.Errorf("seed %q: %w (BE-033)", args[0], errNotImplemented)
+		return fmt.Errorf("%w: unknown seed command %q (bootstrap-admin, reference, bootstrap-commerce, demo)", errUsage, args[0])
 	}
 }
 

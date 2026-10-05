@@ -164,7 +164,7 @@ func TestCheckinFlow_Postgres(t *testing.T) {
 	// The ticket.reissued consumer reads the ticket across the org boundary
 	// by id and mails through the registration's own event.
 	mailer := &spySender{}
-	mailer.mail, _ = realMail(t, e.clk)
+	mailer.mail, _, _ = realMail(t, e.clk)
 	mail := e.withMail(t, mailer)
 	reg := outbox.NewRegistry()
 	mail.Subscribe(reg)

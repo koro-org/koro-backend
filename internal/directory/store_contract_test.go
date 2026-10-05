@@ -564,6 +564,25 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (directory.Store, w
 		if q, _ = s.ListClaims(ctx, rep, nil, 10); !slices.Equal(ids(q), []uuid.UUID{b1.ID, a2.ID}) {
 			t.Fatalf("rep queue = %v", ids(q))
 		}
+		// 06 H-58: a rep's pending queue drops claims created at or before
+		// RepPendingSince; CreatedBefore keeps those created at or before it.
+		rep.RepPendingSince = new(b1.CreatedAt.Add(-time.Microsecond))
+		if q, _ = s.ListClaims(ctx, rep, nil, 10); !slices.Equal(ids(q), []uuid.UUID{b1.ID, a2.ID}) {
+			t.Fatalf("rep queue since before b1 = %v", ids(q))
+		}
+		rep.RepPendingSince = new(a2.CreatedAt)
+		if q, _ = s.ListClaims(ctx, rep, nil, 10); len(q) != 0 {
+			t.Fatalf("rep queue since a2 = %v", ids(q))
+		}
+		rep.RepPendingSince = nil
+		old := directory.ClaimFilter{Status: directory.ClaimPending, CreatedBefore: new(a2.CreatedAt)}
+		if q, _ = s.ListClaims(ctx, old, nil, 10); !slices.Equal(ids(q), []uuid.UUID{b1.ID, b2.ID, bs.ID, a2.ID}) {
+			t.Fatalf("created before a2 = %v", ids(q))
+		}
+		old.CreatedBefore = new(b1.CreatedAt.Add(-time.Microsecond))
+		if q, _ = s.ListClaims(ctx, old, nil, 10); len(q) != 0 {
+			t.Fatalf("created before b1 = %v", ids(q))
+		}
 		rep.RepUniversityOrgs = []uuid.UUID{}
 		if q, _ = s.ListClaims(ctx, rep, nil, 10); len(q) != 0 {
 			t.Fatalf("empty rep scope = %v", ids(q))

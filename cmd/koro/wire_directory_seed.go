@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"strings"
 
 	"koro/db/reference"
 	"koro/internal/audit"
@@ -41,6 +43,9 @@ func runSeedReference(ctx context.Context, args []string, environ map[string]str
 	}
 	data, err := directory.ParseReference(src)
 	if err != nil {
+		return err
+	}
+	if err := refusePlaceholders(environ, data); err != nil {
 		return err
 	}
 	cfg, err := config.LoadSeed(environ)
@@ -78,6 +83,29 @@ func runSeedReference(ctx context.Context, args []string, environ map[string]str
 	if err != nil {
 		return err
 	}
+	return printImport(stdout, res)
+}
+
+// errPlaceholderReference is the refusal of 06 H-50.
+var errPlaceholderReference = errors.New("seed reference: the data has placeholder YÖK codes (" +
+	directory.PlaceholderCodePrefix + "*), which production refuses (06 H-50); load the pilot list (PS-09)")
+
+// refusePlaceholders refuses sample reference data in production (06 H-50,
+// T-204): an ORNEK-* code would give a real university a placeholder
+// identity. APP_ENV is read before the rest of the configuration so the
+// refusal does not depend on it; dev and staging load the sample freely.
+func refusePlaceholders(environ map[string]string, data directory.ReferenceData) error {
+	if strings.TrimSpace(environ["APP_ENV"]) != config.EnvProd {
+		return nil
+	}
+	if codes := data.PlaceholderCodes(); len(codes) > 0 {
+		return fmt.Errorf("%w: %d codes, first %s", errPlaceholderReference, len(codes), codes[0])
+	}
+	return nil
+}
+
+// printImport prints what the import did per table.
+func printImport(stdout io.Writer, res directory.ImportResult) error {
 	for _, r := range []struct {
 		name string
 		c    directory.Counts

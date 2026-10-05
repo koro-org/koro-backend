@@ -32,9 +32,6 @@ var version = "dev"
 // errUsage marks command-line mistakes (exit code 2).
 var errUsage = errors.New("usage")
 
-// errNotImplemented marks subcommands whose ticket has not landed yet.
-var errNotImplemented = errors.New("not implemented yet")
-
 const usage = `usage: koro <command> [arguments]
 
 commands:
@@ -42,7 +39,7 @@ commands:
   worker         run the background worker (asynq server, scheduler, outbox relay)
   migrate        run database migrations (up | down N | version | force V | freeze V)
   seed           bootstrap-admin: the first two platform admins; reference: public reference data;
-                 synthetic data later (BE-033)
+                 bootstrap-commerce: Koro's draft legal party; demo: synthetic demo data (dev/staging)
   openapi        write openapi/openapi.yaml and openapi/problems.json (-o FILE)
   healthcheck    probe the local API's /healthz (Docker HEALTHCHECK)
 `

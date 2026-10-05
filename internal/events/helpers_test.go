@@ -399,16 +399,16 @@ type hashIndex struct{}
 func (hashIndex) Index(email string) []byte { h := sha256.Sum256([]byte(email)); return h[:] }
 
 // realMail is a notify service over an in-memory store and transport.
-func realMail(t *testing.T, clk *clock.Fake) (notify.Sender, *notify.MemTransport) {
+func realMail(t *testing.T, clk *clock.Fake) (notify.Sender, *notify.MemTransport, notify.Store) {
 	t.Helper()
 	tpl, err := embeddedTemplates()
 	if err != nil {
 		t.Fatal(err)
 	}
-	tr := notify.NewMemTransport()
-	mod := notify.New(notify.Deps{Store: notify.NewMemStore(), Tx: db.NopTx{}, Transport: tr, Templates: tpl, Clock: clk,
+	tr, st := notify.NewMemTransport(), notify.NewMemStore()
+	mod := notify.New(notify.Deps{Store: st, Tx: db.NopTx{}, Transport: tr, Templates: tpl, Clock: clk,
 		Log: obs.Discard(), FromAddress: "noreply@koro.test", FromName: "Koro", Recipients: hashIndex{}, Audit: &auditLog{}})
-	return mod.Service, tr
+	return mod.Service, tr, st
 }
 
 func (s *spySender) sent() []notify.Message {
@@ -444,6 +444,7 @@ type env struct {
 	consent *spyRecorder
 	sender  *spySender
 	mailbox *notify.MemTransport // the e-mails notify handed to the transport
+	prefs   notify.Store         // notify's store (notification preferences)
 	queue   *queue.Mem
 	clk     *clock.Fake
 	tx      *spyTx
@@ -467,7 +468,7 @@ func newEnv(t *testing.T) *env {
 		notices: &fakeNotices{missing: map[consent.Purpose]bool{}}, consent: &spyRecorder{}, sender: &spySender{},
 		queue: queue.NewMem(),
 	}
-	e.sender.mail, e.mailbox = realMail(t, clk)
+	e.sender.mail, e.mailbox, e.prefs = realMail(t, clk)
 	e.store = &spyStore{MemStore: e.mem}
 	idem := idempotency.New(idempotency.Deps{Tx: e.tx, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()})
 	mod, err := events.New(events.Deps{

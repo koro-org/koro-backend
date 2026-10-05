@@ -89,6 +89,40 @@ func (c *Counts) add(created, updated bool) {
 	}
 }
 
+// PlaceholderCodePrefix marks the placeholder YÖK codes of the sample
+// reference data (T-204: "ORNEK-ODTU" until the pilot list, PS-09, gives
+// the real codes).
+const PlaceholderCodePrefix = "ORNEK-"
+
+// PlaceholderCodes returns the placeholder YÖK codes the data uses (a
+// university, a domain, faculty or department row naming one, a faculty's
+// or department's own code), sorted and without duplicates. `koro seed
+// reference` refuses data with any in production (06 H-50).
+func (d ReferenceData) PlaceholderCodes() []string {
+	var out []string
+	add := func(codes ...string) {
+		for _, c := range codes {
+			if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(c)), PlaceholderCodePrefix) {
+				out = append(out, c)
+			}
+		}
+	}
+	for _, u := range d.Universities {
+		add(u.YokCode)
+	}
+	for _, r := range d.Domains {
+		add(r.UniversityYokCode)
+	}
+	for _, f := range d.Faculties {
+		add(f.UniversityYokCode, f.YokCode)
+	}
+	for _, r := range d.Departments {
+		add(r.UniversityYokCode, r.YokProgramCode)
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
 // ImportResult is the outcome of ImportReference per table.
 type ImportResult struct {
 	Universities, Domains, Faculties, Departments, Skills Counts

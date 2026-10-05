@@ -136,37 +136,53 @@ func ownClaims(a authz.Actor) authz.Resource {
 	return authz.Resource{Type: authz.TypeClubClaim, OwnerUserID: &owner, Attrs: map[string]string{authz.AttrStatus: ""}}
 }
 
-// approvalOf finds the approver of a claim on club: the club's university
-// org, and whether that org has an active university_rep other than the
-// claimant (orgs reads; a sensitive club always goes to platform staff:
-// its claim is special category data, 03 Y2).
-func (s *service) approvalOf(ctx context.Context, club Club, claimant uuid.UUID) (approval, error) {
-	u, err := s.d.Store.GetUniversity(ctx, club.UniversityID)
+// approvalOf finds the approver of a claim on club created at createdAt:
+// the club's university org, and whether that org has an active
+// university_rep other than the claimant (orgs reads; a sensitive club
+// always goes to platform staff: its claim is special category data,
+// 03 Y2). A claim the rep has not decided within ClaimEscalateAfter goes
+// to platform staff (06 H-58).
+func (s *service) approvalOf(ctx context.Context, club Club, claimant uuid.UUID, createdAt time.Time) (approval, error) {
+	ap, reps, err := s.repApproval(ctx, club, claimant)
 	if err != nil {
 		return approval{}, err
+	}
+	if len(reps) > 0 && !escalated(createdAt, s.now()) {
+		ap.Approver = authz.ClaimApproverRep
+	}
+	return ap, nil
+}
+
+// repApproval returns the platform-staff approval of a claim on club and
+// the active university_reps of the club's university other than the
+// claimant who would decide it instead (none for a sensitive club).
+func (s *service) repApproval(ctx context.Context, club Club, claimant uuid.UUID) (approval, []uuid.UUID, error) {
+	u, err := s.d.Store.GetUniversity(ctx, club.UniversityID)
+	if err != nil {
+		return approval{}, nil, err
 	}
 	ap := approval{UniversityOrg: u.OrgID, Approver: authz.ClaimApproverPlatformAdmin}
 	if club.IsSensitive {
-		return ap, nil
+		return ap, nil, nil
 	}
 	ids, err := s.d.Orgs.ActiveMemberIDs(ctx, u.OrgID)
 	if err != nil {
-		return approval{}, err
+		return approval{}, nil, err
 	}
+	var reps []uuid.UUID
 	for _, id := range ids {
 		if id == claimant {
 			continue
 		}
 		ok, err := s.d.Orgs.HasRole(ctx, u.OrgID, id, authz.MemberUniversityRep)
 		if err != nil {
-			return approval{}, err
+			return approval{}, nil, err
 		}
 		if ok {
-			ap.Approver = authz.ClaimApproverRep
-			return ap, nil
+			reps = append(reps, id)
 		}
 	}
-	return ap, nil
+	return ap, reps, nil
 }
 
 // repUniversities returns the university orgs where a is a
@@ -322,6 +338,9 @@ func (s *service) CreateClubClaim(ctx context.Context, a authz.Actor, clubID uui
 				return uuid.Nil(), err
 			}
 		}
+		// The rep who decides it is told after the commit (06 H-58; the
+		// task re-reads the claim, so a withdrawn one notifies nobody).
+		s.d.Queue.AfterCommit(ctx, ClaimCreatedTaskName, claimNotice{ClaimID: claim.ID}, ClaimCreatedTaskName+":"+claim.ID.String())
 		return claim.ID, s.d.Audit.Log(ctx, claimAudit(a, authz.DirectoryClubClaimCreate, claim, c, false,
 			map[string]any{"evidence_file": in.EvidenceFileID != nil, "evidence_text": text != nil}))
 	})
@@ -478,6 +497,9 @@ func (s *service) AdminListClubClaims(ctx context.Context, a authz.Actor, q Admi
 			}
 		}
 		f.RepUniversityOrgs = reps
+		// A pending claim older than ClaimEscalateAfter is platform staff's
+		// (06 H-58); decided claims stay in the rep's history.
+		f.RepPendingSince = new(s.now().Add(-ClaimEscalateAfter))
 	}
 	if f.Status == "" {
 		f.Status = ClaimPending
@@ -538,7 +560,7 @@ func (s *service) AdminGetClubClaim(ctx context.Context, a authz.Actor, id uuid.
 	if err != nil {
 		return ClaimView{}, err
 	}
-	ap, err := s.approvalOf(ctx, club, c.ClaimantUserID)
+	ap, err := s.approvalOf(ctx, club, c.ClaimantUserID, c.CreatedAt)
 	if err != nil {
 		return ClaimView{}, err
 	}
@@ -619,7 +641,7 @@ func (s *service) AdminDecideClubClaim(ctx context.Context, a authz.Actor, id uu
 		if err != nil {
 			return uuid.Nil(), err
 		}
-		if ap, err = s.approvalOf(ctx, club, c.ClaimantUserID); err != nil {
+		if ap, err = s.approvalOf(ctx, club, c.ClaimantUserID, c.CreatedAt); err != nil {
 			return uuid.Nil(), err
 		}
 		if err := authz.Can(ctx, a, authz.DirectoryClubClaimDecide, claimResource(c, ap)); err != nil {

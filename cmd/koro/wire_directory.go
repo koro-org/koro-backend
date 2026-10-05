@@ -125,14 +125,19 @@ func (w *directoryWiring) build(c *container) error {
 	return nil
 }
 
-// tasks: club_claim.decided → directory.notify_claim_decided (01 §6.2) and
-// the directory.notify_sensitivity_request task (requestClubSensitivity).
+// tasks: club_claim.decided → directory.notify_claim_decided (01 §6.2), the
+// directory.notify_sensitivity_request task (requestClubSensitivity), the
+// directory.notify_claim_created task and the daily
+// directory.claim_reminders job (06 H-58).
 // file.rejected → directory.remove_rejected_evidence is written but not
 // subscribed yet (T-222, like identity's).
 func (w *directoryWiring) tasks(c *container) {
 	w.mod.Subscribe(c.infra.subs)
 	for _, t := range w.mod.Tasks() {
 		c.infra.jobs.Handle(t)
+	}
+	for _, j := range w.mod.Jobs() {
+		c.infra.jobs.Schedule(j) // directory.claim_reminders (06 H-58)
 	}
 }
 

@@ -1,4 +1,7 @@
 version: 1
 category: transactional
-preference: registration_updates
+# 06 H-62 (T-266): the ticket is part of the service (transactional), so its
+# e-mail cannot be switched off: the always-on security category, not
+# registration_updates.
+preference: security
 channels: [email]

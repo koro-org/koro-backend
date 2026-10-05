@@ -86,7 +86,8 @@ func (m Module) Tasks() []queue.Task {
 	return []queue.Task{{Name: ResendTicketTaskName, Handle: m.svc.handleResend}}
 }
 
-// Jobs returns the scheduled jobs of 01 §7 owned by BE-028 and BE-031.
+// Jobs returns the scheduled jobs of 01 §7 owned by BE-028 and BE-031 (and
+// events.complete_ended, T-264).
 func (m Module) Jobs() []queue.Job {
 	return []queue.Job{
 		{Name: WaitlistExpireJobName, Cron: "*/15 * * * *", Queue: queue.Default, Unique: 14 * time.Minute,
@@ -95,6 +96,8 @@ func (m Module) Jobs() []queue.Job {
 			Handle: m.svc.reconcileCounts},
 		{Name: AutoFinalizeJobName, Cron: "20 * * * *", Queue: queue.Default, Unique: 50 * time.Minute,
 			Handle: m.svc.autoFinalize},
+		{Name: CompleteEndedJobName, Cron: "40 * * * *", Queue: queue.Default, Unique: 50 * time.Minute,
+			Handle: m.svc.completeEnded}, // T-264 (BE-033)
 	}
 }
 

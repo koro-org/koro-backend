@@ -381,3 +381,29 @@ func TestTicketTemplates_Exist(t *testing.T) {
 		}
 	}
 }
+
+// TestTicketEmail_SentWhenRegistrationUpdatesOff (06 H-62, T-266): the
+// ticket e-mail is transactional (the service itself), so a student who
+// switched registration_updates (and event_updates) e-mails off still gets
+// it (the template's preference is the always-on security category).
+func TestTicketEmail_SentWhenRegistrationUpdatesOff(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	student := adultStudent(t)
+	off := []notify.Preference{
+		{Category: notify.PrefRegistrationUpdates, Channel: notify.ChannelEmail, Enabled: false},
+		{Category: notify.PrefEventUpdates, Channel: notify.ChannelEmail, Enabled: false},
+	}
+	if err := e.prefs.UpsertPreferences(t.Context(), student.UserID, off, e.clk.Now()); err != nil {
+		t.Fatal(err)
+	}
+	ev := e.doorEvent(t)
+	e.ticketOf(t, student, ev.Event.ID)
+	e.deliver(t, domainevent.TopicRegistrationConfirmed, 0)
+	if got := len(e.mailbox.Sent()); got != 1 {
+		t.Fatalf("ticket mails sent = %d, want 1 although registration_updates e-mails are off", got)
+	}
+	if m := e.lastMail(t); !strings.HasPrefix(m.Subject, "Biletin hazır") {
+		t.Fatalf("subject = %q", m.Subject)
+	}
+}

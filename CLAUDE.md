@@ -19,6 +19,20 @@ Bu repo Koro'nun Go backend'idir (tek modül `koro`, tek binary `cmd/koro`). Tic
   `bin/` gitignore'da). Global kurulum yapma.
 - `go.mod`: `go 1.27.1`; `GOTOOLCHAIN=auto` ile 1.27.1 kendiliğinden iner.
 
+## Demo verisi (BE-033; yalnız dev/staging)
+- `make seed-demo` hedefi yok (Makefile dondurulmuş, R9). `make dev` (bağımlılıklar + migration + api + worker) açıkken başka
+  bir terminalde, `.env` yüklüyken (`set -a; . ./.env; set +a`):
+  `go run ./cmd/koro seed reference` → `go run ./cmd/koro seed demo -password '<en az 15 karakter>'`.
+- `seed demo` `APP_ENV=prod`'da (ve dev/staging dışındaki her değerde) veritabanına dokunmadan reddeder; idempotenttir
+  (sabit kimlikler + `ON CONFLICT DO NOTHING`, ikinci koşu 0 satır ekler). Veri tamamen sentetiktir: `@example.test`
+  adresleri, `testutil/fake` adları, telefon/TCKN/IBAN yok; outbox satırı yazmaz (e-posta/bildirim gitmez).
+- İçerik (`db/seed`): 3 üniversite (referans veriden), 24 kulüp (2 hassas, 1 sahipsiz), 300 öğrenci (12'si 18 yaş altı),
+  4 şirket (1'i `pending_review`), 34 etkinlik (geçmiş/dolu/bekleme listeli/başvurulu/üniversiteye özel/kayıtsız/taslak/
+  iptal), ~370 kayıt + bilet + check-in, ~220 gönderi + beğeni, segmentler, `targeted_post` hakları, 2 platform admini,
+  2 finans admini, DPO, moderatör, destek. Bilinen hesaplar komut çıktısında ve `db/seed/seed.go` sabitlerinde
+  (`demo.yonetici1@example.test`, `demo.kulup@example.test`, `demo.ogrenci@example.test`, `demo.sirket@example.test` …).
+- Uçtan uca duman testi: `cmd/koro/smoke_integration_test.go` (`TestSmoke_ClubFirstPilotFlow`, `make test-integration`).
+
 ## Kod kuralları (özet; ayrıntı 05)
 - Kodda her şey İngilizce (identifier, yorum, hata/log mesajı, OpenAPI özeti); commit özeti Türkçe.
 - Hata: `internal/platform/problem` (H-14). Sentinel `problem.New(kind, "<modül>.<kod>", "Title")` modülün `errors.go`'sunda;

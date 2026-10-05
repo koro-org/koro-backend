@@ -152,6 +152,11 @@ func (s *MemStore) ListClaims(_ context.Context, f ClaimFilter, after *uuid.UUID
 		s.mu.Unlock()
 	}
 	return s.claimRows(func(c ClubClaim) bool {
+		switch {
+		case f.RepUniversityOrgs != nil && f.RepPendingSince != nil && f.Status == ClaimPending && !c.CreatedAt.After(*f.RepPendingSince),
+			f.CreatedBefore != nil && c.CreatedAt.After(*f.CreatedBefore):
+			return false
+		}
 		return c.Status == f.Status && (keep == nil || keep[c.ClubOrgID])
 	}, after, f.Status != ClaimPending, limit), nil
 }

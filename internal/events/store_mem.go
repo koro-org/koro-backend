@@ -252,7 +252,7 @@ func (s *MemStore) ListEvents(_ context.Context, f ListFilter, after *After, lim
 	var out []Event
 	for _, e := range s.events {
 		switch {
-		case e.Status != StatusPublished, !s.visibleTo(f.Viewer, e):
+		case e.Status != StatusPublished && e.Status != StatusCompleted, !s.visibleTo(f.Viewer, e):
 			continue
 		case f.OrgIDs != nil && !slices.Contains(f.OrgIDs, e.OrgID),
 			f.Category != "" && e.Category != f.Category,

@@ -91,7 +91,7 @@ func TestWire_EventsRegistrationTasks(t *testing.T) {
 		}
 	}
 	if want := []string{"events.waitlist_expire */15 * * * * default", "events.reconcile_counts 0 3 * * * low",
-		"events.auto_finalize_attendance 20 * * * * default"}; !slices.Equal(jobs, want) {
+		"events.auto_finalize_attendance 20 * * * * default", "events.complete_ended 40 * * * * default"}; !slices.Equal(jobs, want) {
 		t.Fatalf("events jobs = %q, want %q", jobs, want)
 	}
 	if !slices.ContainsFunc(c.keys.columns, func(col rewrap.Column) bool {

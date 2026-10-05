@@ -52,7 +52,10 @@ type sensitivityRequest struct {
 
 // Tasks returns the task handlers of directory for the worker.
 func (m Module) Tasks() []queue.Task {
-	return []queue.Task{{Name: SensitivityRequestTaskName, Handle: m.svc.handleSensitivityRequest}}
+	return []queue.Task{
+		{Name: SensitivityRequestTaskName, Handle: m.svc.handleSensitivityRequest},
+		{Name: ClaimCreatedTaskName, Handle: m.svc.handleClaimCreated}, // 06 H-58
+	}
 }
 
 // Subscribe registers the outbox subscription of directory (01 §6.2):

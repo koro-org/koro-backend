@@ -352,4 +352,11 @@ type ClaimFilter struct {
 	// non-sensitive clubs of these universities (by the university's org
 	// ID): a university_rep's review queue (E-21).
 	RepUniversityOrgs []uuid.UUID
+	// RepPendingSince, with RepUniversityOrgs and status pending, keeps
+	// only the claims created after it: older ones went to platform staff
+	// (06 H-58).
+	RepPendingSince *time.Time
+	// CreatedBefore keeps only the claims created at or before it (the
+	// reminder job, 06 H-58).
+	CreatedBefore *time.Time
 }

@@ -125,6 +125,10 @@ type CheckinStore interface {
 	// enabled, not finalised, published or completed, ended at or before
 	// endedBefore, with at least one valid check-in.
 	DueAttendance(ctx context.Context, endedBefore time.Time, after uuid.UUID, limit int) ([]Event, error)
+	// CompleteEnded turns up to limit published events that ended at or
+	// before endedBy into completed (oldest end first) and returns them;
+	// rows locked elsewhere are skipped (T-264, events.complete_ended).
+	CompleteEnded(ctx context.Context, endedBy time.Time, limit int) ([]Event, error)
 	// SeatHolders returns up to limit confirmed and checked-in registrations
 	// of the event with an id after after, by id (the schedule change
 	// e-mails).

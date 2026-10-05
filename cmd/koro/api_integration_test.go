@@ -18,10 +18,13 @@ import (
 	"koro/db/migrations"
 	"koro/internal/platform/migratekit"
 	"koro/internal/platform/obs"
+	"koro/internal/platform/storage/storagetest"
 	"koro/internal/platform/testutil"
 )
 
-func TestMain(m *testing.M) { os.Exit(testutil.Run(m)) }
+// TestMain starts PostgreSQL (and, for the smoke test, SeaweedFS in the
+// background) for the binary's integration tests.
+func TestMain(m *testing.M) { os.Exit(storagetest.Main(m, testutil.Run)) }
 
 // TestAPI_StartServeAndShutdown runs `koro api` in-process against a
 // migrated database: it starts, answers /healthz and /readyz, reports not

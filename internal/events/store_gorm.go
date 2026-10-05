@@ -200,7 +200,8 @@ func (s gormStore) DeleteDraft(ctx context.Context, orgID, id uuid.UUID) error {
 // cross-org: the public event list spans every organiser; the viewer's
 // visibility (03 §3.6) is applied in the query.
 func (s gormStore) ListEvents(ctx context.Context, f ListFilter, after *After, limit int) ([]Event, error) {
-	q := db.Conn(ctx, s.orm).Model(&Event{}).Select(eventCols).Where("status = ?", string(StatusPublished))
+	// A completed event is a published one that has ended (T-264).
+	q := db.Conn(ctx, s.orm).Model(&Event{}).Select(eventCols).Where("status IN ?", []string{string(StatusPublished), string(StatusCompleted)})
 	if !f.Viewer.All {
 		conds, args := []string{"visibility = 'public'"}, []any{}
 		if v := f.Viewer.UniversityID; v != nil {

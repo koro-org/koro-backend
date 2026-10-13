@@ -1,0 +1,72 @@
+# Multi-step scenarios of the catalog module (03 §7.7; BE-038).
+version: 1
+scenarios:
+  offering_four_eyes:
+    note: >-
+      03 §6.1 "Teklif onayı" (k24): the platform admin who created the platform offering may not approve it
+      (403 authz.four_eyes_violation); another platform admin does and the offering goes on sale; a decided
+      offering is 409; a finance admin is no approver.
+    steps:
+      - { persona: platform_admin, operation: adminDecideOffering, path_params: { offering_id: off_pad_pending }, expect: 403,
+          code: authz.four_eyes_violation }
+      - { persona: finance_admin, operation: adminDecideOffering, path_params: { offering_id: off_pad_pending }, expect: 403,
+          code: forbidden }
+      - { persona: platform_admin_2, operation: adminDecideOffering, path_params: { offering_id: off_pad_pending }, expect: 200 }
+      - { persona: platform_admin_2, operation: adminDecideOffering, path_params: { offering_id: off_pad_pending }, expect: 409,
+          code: catalog.invalid_state }
+      - { persona: company_admin, operation: getOffering, path_params: { offering_id: off_pad_pending }, expect: 200 }
+  offering_create_submit_approve:
+    note: >-
+      The package flow of meeting 2 #4: club_admin creates an offering (draft, invisible to companies),
+      submits it (the payee has an approved IBAN), cannot approve it itself; the platform admin approves it and
+      every company sees it on the marketplace; a second submission is 409.
+    steps:
+      - { persona: club_admin, operation: createOffering, expect: 201, save: { new_offering: offering_id } }
+      - { persona: company_admin, operation: getOffering, path_params: { offering_id: new_offering }, expect: 404, code: not_found }
+      - { persona: club_admin, operation: submitOffering, path_params: { offering_id: new_offering }, expect: 200 }
+      - { persona: club_admin, operation: submitOffering, path_params: { offering_id: new_offering }, expect: 409,
+          code: catalog.invalid_state }
+      - { persona: club_admin, operation: adminDecideOffering, path_params: { offering_id: new_offering }, expect: 403,
+          code: forbidden }
+      - { persona: platform_admin, operation: adminDecideOffering, path_params: { offering_id: new_offering }, expect: 200 }
+      - { persona: company_admin, operation: getOffering, path_params: { offering_id: new_offering }, expect: 200 }
+      - { persona: company_admin, operation: browseOfferings, expect: 200 }
+  offering_university_approval:
+    note: >-
+      T-21: an offering that needs its university waits for both decisions — the platform's approval alone
+      keeps it off the marketplace; the university rep's approval puts it on sale; the rep cannot decide it
+      again.
+    steps:
+      - { persona: platform_admin, operation: adminDecideOffering, path_params: { offering_id: off_a_uni }, expect: 200 }
+      - { persona: company_admin, operation: getOffering, path_params: { offering_id: off_a_uni }, expect: 404, code: not_found }
+      - { persona: university_rep, operation: decideUniversityOfferingApproval, expect: 200 }
+      - { persona: company_admin, operation: getOffering, path_params: { offering_id: off_a_uni }, expect: 200 }
+      - { persona: university_rep, operation: decideUniversityOfferingApproval, expect: 403, code: forbidden }
+  offering_update_needs_if_match:
+    note: updateOffering requires If-Match (04 §1.13) — missing 428, stale 412; a draft only
+    steps:
+      - { persona: club_admin, operation: updateOffering, headers: { If-Match: "" }, expect: 428, code: precondition_required }
+      - { persona: club_admin, operation: updateOffering, headers: { If-Match: '"stale"' }, expect: 412, code: precondition_failed }
+      - { persona: club_admin, operation: updateOffering, expect: 200 }
+  commerce_policy_reauth:
+    note: >-
+      03 §6.2, 06 H-17: a commerce policy change needs the re-authentication proof (missing / wrong /
+      right); the row is closed, never changed (a second close is 409).
+    steps:
+      - { persona: finance_admin, operation: adminCreateCommercePolicy, body: bodies/catalog/create_policy_no_reauth.json,
+          expect: 403, code: identity.reauth_required }
+      - { persona: finance_admin, operation: adminCreateCommercePolicy, body: bodies/catalog/create_policy_wrong_reauth.json,
+          expect: 403, code: identity.reauth_failed }
+      - { persona: finance_admin, operation: adminCreateCommercePolicy, expect: 201, save: { club_policy: policy_id } }
+      - { persona: platform_admin, operation: adminCreateCommercePolicy, expect: 409, code: catalog.policy_overlap }
+      - { persona: platform_admin, operation: adminCloseCommercePolicy, path_params: { policy_id: club_policy }, expect: 200 }
+      - { persona: platform_admin, operation: adminCloseCommercePolicy, path_params: { policy_id: club_policy }, expect: 409,
+          code: catalog.invalid_state }
+  catalog_mfa_required:
+    note: university_rep, platform_admin and finance_admin cells are k-mfa role paths (03 §6.4); club_admin needs none
+    steps:
+      - { persona: university_rep, mfa: false, operation: listUniversityOfferingApprovals, expect: 403, code: authz.mfa_required }
+      - { persona: platform_admin, mfa: false, operation: adminListOfferingReviewQueue, expect: 403, code: authz.mfa_required }
+      - { persona: finance_admin, mfa: false, operation: adminListCommercePolicies, expect: 403, code: authz.mfa_required }
+      - { persona: university_rep, operation: listUniversityOfferingApprovals, expect: 200 }
+      - { persona: club_admin, operation: listOrgOfferings, expect: 200 }

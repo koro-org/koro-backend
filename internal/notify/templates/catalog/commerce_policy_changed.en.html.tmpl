@@ -1,0 +1,4 @@
+<p style="margin:0 0 12px 0;">Hello {{index .Data "name"}},</p>
+<p style="margin:0 0 12px 0;">A commerce policy was {{if eq (index .Data "change") "closed"}}closed{{else}}created{{end}}. New orders are priced by it; past orders keep their own copy.</p>
+<p style="margin:0 0 12px 0;">Scope: {{index .Data "scope"}}<br>Model: {{index .Data "model_code"}}<br>Commission: {{index .Data "commission_rate"}}% ({{index .Data "commission_payer"}})<br>Valid from: {{index .Data "valid_from"}}{{if index .Data "valid_to"}}<br>Valid to: {{index .Data "valid_to"}}{{end}}</p>
+<p style="margin:0;">If you did not expect this change, review it at once; policy rows never change, they can only be closed.</p>

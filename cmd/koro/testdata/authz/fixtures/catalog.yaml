@@ -1,0 +1,28 @@
+# Fixtures of the catalog module (cmd/koro/matrix_catalog_test.go; BE-038). IDs are authztest.ID(name). Every
+# row is written in its final state at 2026-10-01T00:00:00Z (before the matrix clock): the ETag of every
+# offering is "1hmhuo3hji000". Offerings sell 5 units, 1 per buyer, at 1,000,000 kuruş (VAT 20 %).
+# Payees and events are fixtures of parties and events: payee_club_a is club_a's active default payee with an
+# approved account (acct_club_a); payee_club_a2's account waits for its second eye (no approved account).
+version: 1
+fixtures:
+  svc_booth: { kind: service, code: matrix_booth, category: booth, fulfillment: org_bound, reviewed: true }
+  svc_quota: { kind: service, code: matrix_quota, category: targeted_post_quota, fulfillment: platform_native, reviewed: true }
+  svc_unreviewed: { kind: service, code: matrix_unreviewed, category: workshop, fulfillment: org_bound, reviewed: false }
+  # The default commerce policy (model A, 10 % from the seller), valid from 2026-10-01.
+  policy_default: { kind: policy, rate: 1000 }
+  # club_a's offerings (created by club_admin).
+  off_a_draft: { kind: offering, org: club_a, service: svc_booth, status: draft, created_by: club_admin, payee: payee_club_a }
+  off_a2_draft: { kind: offering, org: club_a, service: svc_booth, status: draft, created_by: club_admin, payee: payee_club_a2 }
+  off_a_pending: { kind: offering, org: club_a, service: svc_booth, status: pending_approval, created_by: club_admin,
+                   payee: payee_club_a }
+  off_a_active: { kind: offering, org: club_a, service: svc_booth, status: active, created_by: club_admin, payee: payee_club_a,
+                  event: event_a, approved_by: platform_admin_2 }
+  # Waits for uni_a's decision (T-21); the platform has not decided either.
+  off_a_uni: { kind: offering, org: club_a, service: svc_booth, status: pending_approval, created_by: club_admin,
+               payee: payee_club_a, university: true }
+  # club_b's draft (IDOR) and uni_a's own draft.
+  off_b_draft: { kind: offering, org: club_b, service: svc_booth, status: draft, created_by: other_club_admin }
+  off_uni_draft: { kind: offering, org: uni_a, service: svc_booth, status: draft, created_by: university_rep }
+  # A platform offering created by platform_admin (k24: it may not approve it).
+  off_pad_pending: { kind: offering, org: platform_org, service: svc_quota, status: pending_approval, created_by: platform_admin,
+                     platform: true }

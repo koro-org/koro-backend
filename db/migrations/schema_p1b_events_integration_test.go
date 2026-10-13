@@ -292,8 +292,9 @@ func TestSchema_EventIDOrgUnique(t *testing.T) {
 	if got := execState(t, owner, `INSERT INTO event_child VALUES (2, $1, $2)`, ev, other); got != db.CodeForeignKeyViolation {
 		t.Fatalf("child under another org: SQLSTATE %q, want %s", got, db.CodeForeignKeyViolation)
 	}
-	// Mutation: without the constraint the composite FK has no target.
-	if _, err := owner.Exec(t.Context(), `DROP TABLE event_child; ALTER TABLE events DROP CONSTRAINT events_id_org_uq`); err != nil {
+	// Mutation: without the constraint the composite FK has no target
+	// (CASCADE: offerings_event_id_org_id_fkey of 000099 depends on it, BE-038).
+	if _, err := owner.Exec(t.Context(), `DROP TABLE event_child; ALTER TABLE events DROP CONSTRAINT events_id_org_uq CASCADE`); err != nil {
 		t.Fatal(err)
 	}
 	if got := execState(t, owner, `CREATE TABLE event_child2 (event_id uuid, org_id uuid,

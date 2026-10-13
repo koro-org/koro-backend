@@ -1,0 +1,467 @@
+# Authz matrix of the catalog module (03 §5.14, 04 §2.14; BE-038). 17 operations × 18 personas.
+# Every signed-in user reads the service catalogue and browses the marketplace (T-57: no anonymous access).
+# /offerings/{offering_id}/... is a resource surface (03 §7.6): a published offering is visible to every
+# signed-in user (403 without the grant); a draft or an offering under review is the seller's — its members
+# (403 without the role) and every platform role see it, anyone else gets 404 (no ID probing); an offering
+# waiting for its university is visible to that university's rep too. /orgs/{org_id}/... is the org's
+# management surface (non-members 404). Cells: list_org cla S, uni S, pad, fin; create/update/submit cla S,
+# uni S·k-cs, pad k-po (platform_admin is no platform-org member in the matrix: 403); cancel cla S, uni S, pad;
+# read of an unpublished offering cla, uni S and pad (finance 403); review_queue pad (admin) and uni U;
+# decide pad·k24 (the gate is review_queue on the admin surface: 403 before reading); university_decide uni U
+# only; policy list pad, fin; policy manage pad·R, fin·R (the matrix password); service manage pad·k23, fin.
+# Four eyes, the university flow, MFA, R and If-Match are scenarios (scenarios/catalog.yaml). Fixtures:
+# fixtures/catalog.yaml (offering ETag "1hmhuo3hji000").
+version: 1
+groups:
+  # signed-in users without a membership in club_a.
+  outsiders_club_a: [user_unverified, student, student_minor, other_club_admin, event_staff, university_rep,
+                     company_member, company_admin, other_company_member]
+  # signed-in users without a membership in uni_a.
+  outsiders_uni_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                    event_staff, company_member, company_admin, other_company_member]
+  # signed-in users without a membership in uni_b (every non-platform persona).
+  no_platform_role: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                     event_staff, university_rep, company_member, company_admin, other_company_member]
+  # platform roles without a catalog cell.
+  other_staff: [moderator, support, dpo, talent_auditor]
+  # signed-in users without a write cell on club_a's published offering.
+  not_club_a_writers: [user_unverified, student, student_minor, club_member, other_club_admin, event_staff,
+                       university_rep, company_member, company_admin, other_company_member, moderator, support, dpo,
+                       finance_admin, talent_auditor]
+
+operations:
+  listServices:
+    method: GET
+    path: /api/v1/services
+    action: catalog.service.list
+    expect:
+      anonymous: 401
+      "@signed_in": 200
+
+  adminCreateService:
+    method: POST
+    path: /api/v1/admin/services
+    action: catalog.service.manage
+    body: bodies/catalog/create_service.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 201
+      finance_admin: 201
+    variants:
+      - name: accounting_review
+        body: bodies/catalog/create_service_reviewed.json
+        note: k23 — the accountant's review is finance admins' only
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 201
+
+  adminUpdateService:
+    method: PATCH
+    path: /api/v1/admin/services/{service_id}
+    action: catalog.service.manage
+    path_params: { service_id: svc_booth }
+    body: bodies/catalog/update_service.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: accounting_review
+        body: bodies/catalog/update_service_review.json
+        note: k23
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 200
+      - name: unknown_service
+        path_params: { service_id: "literal:00000000-0000-7000-8000-0000000000ab" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404
+
+  browseOfferings:
+    method: GET
+    path: /api/v1/offerings
+    action: catalog.offering.browse
+    expect:
+      anonymous: 401
+      "@signed_in": 200
+
+  getOffering:
+    method: GET
+    path: /api/v1/offerings/{offering_id}
+    action: catalog.offering.read
+    path_params: { offering_id: off_a_active }
+    expect:
+      anonymous: 401
+      "@signed_in": 200
+    variants:
+      - name: draft
+        path_params: { offering_id: off_a_draft }
+        note: a draft is the seller's (03 §5.14 read) — outsiders 404, members without the role and other staff 403
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403
+          club_admin: 200
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 403
+      - name: under_university_review
+        path_params: { offering_id: off_a_uni }
+        note: T-21 — the rep of the club's university reads the offering it decides
+        expect:
+          anonymous: 401
+          user_unverified: 404
+          student: 404
+          student_minor: 404
+          other_club_admin: 404
+          event_staff: 404
+          university_rep: 200
+          company_member: 404
+          company_admin: 404
+          other_company_member: 404
+          club_member: 403
+          club_admin: 200
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 403
+      - name: other_orgs_draft
+        path_params: { offering_id: off_b_draft }
+        note: IDOR — club_b's draft is invisible outside club_b (club_a's admin too)
+        expect:
+          anonymous: 401
+          user_unverified: 404
+          student: 404
+          student_minor: 404
+          club_member: 404
+          club_admin: 404
+          other_club_admin: 200
+          event_staff: 404
+          university_rep: 404
+          company_member: 404
+          company_admin: 404
+          other_company_member: 404
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 403
+      - name: unknown_offering
+        path_params: { offering_id: "literal:00000000-0000-7000-8000-0000000000ac" }
+        expect:
+          anonymous: 401
+          "@signed_in": 404
+
+  listOrgOfferings:
+    method: GET
+    path: /api/v1/orgs/{org_id}/offerings
+    action: catalog.offering.list_org
+    path_params: { org_id: club_a }
+    expect:
+      anonymous: 401
+      "@outsiders_club_a": 404
+      club_member: 403
+      club_admin: 200
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: university_org
+        path_params: { org_id: uni_a }
+        expect:
+          anonymous: 401
+          "@outsiders_uni_a": 404
+          university_rep: 200
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000ad" }
+        expect:
+          anonymous: 401
+          "@signed_in": 404
+
+  createOffering:
+    method: POST
+    path: /api/v1/orgs/{org_id}/offerings
+    action: catalog.offering.create
+    path_params: { org_id: club_a }
+    body: bodies/catalog/create_offering.json
+    expect:
+      anonymous: 401
+      "@outsiders_club_a": 404
+      club_member: 403
+      club_admin: 201
+      "@other_staff": 403
+      platform_admin: 403     # k-po: not the platform org
+      finance_admin: 403
+    variants:
+      - name: university_org
+        path_params: { org_id: uni_a }
+        expect:
+          anonymous: 401
+          "@outsiders_uni_a": 404
+          university_rep: 201
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 403
+      - name: foreign_event
+        body: bodies/catalog/create_offering_foreign_event.json
+        note: 06 H-38/H-55 — club_b's event under club_a's offering is 422 catalog.parent_mismatch
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403
+          club_admin: 422
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 403
+      - name: platform_org
+        path_params: { org_id: platform_org }
+        note: k-po — no persona is a platform-org member
+        expect:
+          anonymous: 401
+          "@no_platform_role": 404
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 403
+
+  updateOffering:
+    method: PATCH
+    path: /api/v1/offerings/{offering_id}
+    action: catalog.offering.update
+    path_params: { offering_id: off_a_draft }
+    headers: { If-Match: '"1hmhuo3hji000"' }
+    body: bodies/catalog/update_offering.json
+    expect:
+      anonymous: 401
+      "@outsiders_club_a": 404
+      club_member: 403
+      club_admin: 200
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 403
+    variants:
+      - name: published
+        path_params: { offering_id: off_a_active }
+        note: a published offering is visible to everyone (403 without the cell); the seller gets 409 catalog.invalid_state (drafts only)
+        expect:
+          anonymous: 401
+          "@not_club_a_writers": 403
+          club_admin: 409
+          platform_admin: 403
+
+  submitOffering:
+    method: POST
+    path: /api/v1/offerings/{offering_id}/submit
+    action: catalog.offering.submit
+    path_params: { offering_id: off_a_draft }
+    expect:
+      anonymous: 401
+      "@outsiders_club_a": 404
+      club_member: 403
+      club_admin: 200
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 403
+    variants:
+      - name: no_approved_account
+        path_params: { offering_id: off_a2_draft }
+        note: BE-037 — a payee without an approved bank account is 409 parties.no_approved_account
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403
+          club_admin: 409
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 403
+
+  cancelOffering:
+    method: POST
+    path: /api/v1/offerings/{offering_id}/cancel
+    action: catalog.offering.cancel
+    path_params: { offering_id: off_a_active }
+    body: bodies/catalog/cancel.json
+    expect:
+      anonymous: 401
+      "@not_club_a_writers": 403
+      club_admin: 200
+      platform_admin: 200
+    variants:
+      - name: draft
+        path_params: { offering_id: off_a_draft }
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403
+          club_admin: 200
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 403
+
+  adminListOfferingReviewQueue:
+    method: GET
+    path: /api/v1/admin/offerings
+    action: catalog.offering.review_queue
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 403
+
+  adminDecideOffering:
+    method: POST
+    path: /api/v1/admin/offerings/{offering_id}/decision
+    action: catalog.offering.decide
+    path_params: { offering_id: off_a_pending }
+    body: bodies/catalog/approve.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 403
+    variants:
+      - name: reject
+        body: bodies/catalog/reject.json
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 403
+      - name: unknown_offering
+        path_params: { offering_id: "literal:00000000-0000-7000-8000-0000000000ae" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 403
+
+  listUniversityOfferingApprovals:
+    method: GET
+    path: /api/v1/orgs/{org_id}/offering-approvals
+    action: catalog.offering.review_queue
+    path_params: { org_id: uni_a }
+    expect:
+      anonymous: 401
+      "@outsiders_uni_a": 404
+      university_rep: 200
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 403
+    variants:
+      - name: club_org
+        path_params: { org_id: club_a }
+        note: a club has no approval queue — its members 403, the platform admin 404 (not a university)
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403
+          club_admin: 403
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 403
+
+  decideUniversityOfferingApproval:
+    method: POST
+    path: /api/v1/orgs/{org_id}/offering-approvals/{offering_id}/decision
+    action: catalog.offering.university_decide
+    path_params: { org_id: uni_a, offering_id: off_a_uni }
+    body: bodies/catalog/uni_approve.json
+    expect:
+      anonymous: 401
+      "@outsiders_uni_a": 404
+      university_rep: 200
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 403
+    variants:
+      - name: other_university
+        path_params: { org_id: uni_b, offering_id: off_a_uni }
+        note: uni_b's surface is invisible to uni_a's rep (not a member)
+        expect:
+          anonymous: 401
+          "@no_platform_role": 404
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 403
+      - name: not_under_review
+        path_params: { org_id: uni_a, offering_id: off_a_pending }
+        note: an offering that does not need the university is not one of its decisions (404)
+        expect:
+          anonymous: 401
+          "@outsiders_uni_a": 404
+          university_rep: 404
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 403
+
+  adminListCommercePolicies:
+    method: GET
+    path: /api/v1/admin/commerce-policies
+    action: catalog.policy.list
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+
+  adminCreateCommercePolicy:
+    method: POST
+    path: /api/v1/admin/commerce-policies
+    action: catalog.policy.manage
+    body: bodies/catalog/create_policy.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 201
+      finance_admin: 201
+    variants:
+      - name: overlapping_default
+        body: bodies/catalog/create_policy_default.json
+        note: T-43 — the default policy is open from 2026-10-01; another default from now overlaps (409 catalog.policy_overlap)
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 409
+          finance_admin: 409
+
+  adminCloseCommercePolicy:
+    method: POST
+    path: /api/v1/admin/commerce-policies/{policy_id}/close
+    action: catalog.policy.manage
+    path_params: { policy_id: policy_default }
+    body: bodies/catalog/close_policy.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: unknown_policy
+        path_params: { policy_id: "literal:00000000-0000-7000-8000-0000000000af" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404

@@ -1,0 +1,4 @@
+<p style="margin:0 0 12px 0;">Merhaba {{index .Data "name"}},</p>
+<p style="margin:0 0 12px 0;">Bir ticaret politikası {{if eq (index .Data "change") "closed"}}kapatıldı{{else}}oluşturuldu{{end}}. Yeni siparişler bu politikaya göre hesaplanır; geçmiş siparişler kendi kopyalarını korur.</p>
+<p style="margin:0 0 12px 0;">Kapsam: {{index .Data "scope"}}<br>Model: {{index .Data "model_code"}}<br>Komisyon: %{{index .Data "commission_rate"}} ({{index .Data "commission_payer"}})<br>Geçerlilik başlangıcı: {{index .Data "valid_from"}}{{if index .Data "valid_to"}}<br>Geçerlilik sonu: {{index .Data "valid_to"}}{{end}}</p>
+<p style="margin:0;">Bu değişikliği beklemiyorsanız hemen inceleyin; politika satırları değiştirilemez, yalnızca kapatılabilir.</p>

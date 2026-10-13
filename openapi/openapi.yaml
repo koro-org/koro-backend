@@ -1183,6 +1183,85 @@ components:
           maxLength: 200
           type: string
       type: object
+    AdminUpdateServiceInputBody:
+      additionalProperties: false
+      properties:
+        accounting_reviewed:
+          description: "true: reviewed now; false: review withdrawn (finance admins only)"
+          type: boolean
+        accounting_reviewed_ref:
+          description: Finance admins only
+          maxLength: 40
+          type: string
+        active:
+          type: boolean
+        category:
+          enum:
+            - sponsorship
+            - booth
+            - logo_placement
+            - talk_slot
+            - social_media_post
+            - workshop
+            - targeted_post_quota
+            - contact_request_quota
+            - discovery_access
+            - other
+          type: string
+        clear:
+          description: Optional fields to empty
+          items:
+            enum:
+              - description_tr
+              - vat_exemption_code
+              - vat_withholding_code
+              - invoice_description_tr
+              - accounting_reviewed_ref
+            type: string
+          maxItems: 5
+          type: array
+        default_vat_rate_bp:
+          format: int64
+          maximum: 10000
+          minimum: 0
+          type: integer
+        description:
+          maxLength: 2000
+          type: string
+        entitlement_template:
+          additionalProperties: {}
+          type: object
+        invoice_description:
+          maxLength: 300
+          type: string
+        name:
+          maxLength: 160
+          minLength: 2
+          type: string
+        vat_class:
+          enum:
+            - standard
+            - exempt
+            - outside_scope
+            - withheld
+          type: string
+        vat_exemption_code:
+          maxLength: 40
+          type: string
+        vat_withholding_code:
+          maxLength: 40
+          type: string
+        vat_withholding_den:
+          format: int64
+          maximum: 1000
+          minimum: 1
+          type: integer
+        vat_withholding_num:
+          format: int64
+          maximum: 1000
+          minimum: 1
+          type: integer
+      type: object
     AdminUpdateSkillInputBody:
       additionalProperties: false
       properties:
@@ -1802,6 +1881,18 @@ components:
       required:
         - items
       type: object
+    BrowseOfferingsOutputBody:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/OfferingCardDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
     CancelEventInputBody:
       additionalProperties: false
       properties:
@@ -1830,6 +1921,175 @@ components:
           description: Optional reason
           maxLength: 300
           type: string
+      type: object
+    CancelOfferingInputBody:
+      additionalProperties: false
+      properties:
+        cancel_reason:
+          description: Shown to the seller (no personal data)
+          maxLength: 500
+          minLength: 1
+          type: string
+      required:
+        - cancel_reason
+      type: object
+    CatalogServiceBody:
+      additionalProperties: false
+      properties:
+        accounting_reviewed:
+          description: The accountant reviewed the VAT profile (finance admins only)
+          type: boolean
+        accounting_reviewed_ref:
+          description: The accountant's reference (finance admins only)
+          maxLength: 40
+          type: string
+        active:
+          description: true when omitted
+          type: boolean
+        category:
+          enum:
+            - sponsorship
+            - booth
+            - logo_placement
+            - talk_slot
+            - social_media_post
+            - workshop
+            - targeted_post_quota
+            - contact_request_quota
+            - discovery_access
+            - other
+          type: string
+        code:
+          description: "[a-z][a-z0-9_]{2,40}"
+          maxLength: 41
+          minLength: 3
+          type: string
+        default_vat_rate_bp:
+          description: 2000 when omitted
+          format: int64
+          maximum: 10000
+          minimum: 0
+          type: integer
+        description:
+          maxLength: 2000
+          type: string
+        entitlement_template:
+          additionalProperties: {}
+          description: "platform_native only: {feature, kind, quantity_per_unit, valid_days?}"
+          type: object
+        fulfillment_type:
+          enum:
+            - event_bound
+            - org_bound
+            - platform_native
+          type: string
+        invoice_description:
+          maxLength: 300
+          type: string
+        name:
+          maxLength: 160
+          minLength: 2
+          type: string
+        vat_class:
+          description: standard when omitted
+          enum:
+            - standard
+            - exempt
+            - outside_scope
+            - withheld
+          type: string
+        vat_exemption_code:
+          maxLength: 40
+          type: string
+        vat_withholding_code:
+          maxLength: 40
+          type: string
+        vat_withholding_den:
+          format: int64
+          maximum: 1000
+          minimum: 1
+          type: integer
+        vat_withholding_num:
+          format: int64
+          maximum: 1000
+          minimum: 1
+          type: integer
+      required:
+        - code
+        - name
+        - category
+        - fulfillment_type
+      type: object
+    CatalogServiceDTO:
+      additionalProperties: false
+      properties:
+        accounting_reviewed_at:
+          format: date-time
+          type: string
+        accounting_reviewed_ref:
+          type: string
+        active:
+          type: boolean
+        category:
+          type: string
+        code:
+          type: string
+        default_vat_rate_bp:
+          description: "Basis points: 2000 = 20 %"
+          format: int64
+          type: integer
+        description:
+          type: string
+        entitlement_template:
+          additionalProperties: {}
+          type: object
+        fulfillment_type:
+          enum:
+            - event_bound
+            - org_bound
+            - platform_native
+          type: string
+        invoice_description:
+          type: string
+        name:
+          type: string
+        service_id:
+          format: uuid
+          type: string
+        vat_class:
+          enum:
+            - standard
+            - exempt
+            - outside_scope
+            - withheld
+          type: string
+        vat_exemption_code:
+          type: string
+        vat_withholding_code:
+          type: string
+        vat_withholding_den:
+          format: int32
+          type: integer
+        vat_withholding_num:
+          format: int32
+          type: integer
+      required:
+        - service_id
+        - code
+        - name
+        - category
+        - fulfillment_type
+        - default_vat_rate_bp
+      type: object
+    CatalogServiceListOutputBody:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/CatalogServiceDTO"
+          type: array
+      required:
+        - items
       type: object
     ChangePasswordInputBody:
       additionalProperties: false
@@ -1998,6 +2258,17 @@ components:
           type: string
       required:
         - user_id
+      type: object
+    CloseCommercePolicyInputBody:
+      additionalProperties: false
+      properties:
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof (03 §6.2)
+        valid_to:
+          description: Now when omitted; never in the past
+          format: date-time
+          type: string
       type: object
     ClubCardDTO:
       additionalProperties: false
@@ -2182,6 +2453,109 @@ components:
           type: string
       required:
         - code
+      type: object
+    CommercePolicyDTO:
+      additionalProperties: false
+      properties:
+        collection_method:
+          enum:
+            - bank_transfer
+            - iyzico
+            - direct_to_payee
+          type: string
+        commission_basis:
+          enum:
+            - net_excl_vat
+            - gross_incl_vat
+          type: string
+        commission_max_amount:
+          format: int64
+          type: integer
+        commission_min_amount:
+          format: int64
+          type: integer
+        commission_payer:
+          enum:
+            - seller
+            - buyer
+          type: string
+        commission_rate_bp:
+          description: "Basis points: 1000 = 10 %"
+          format: int64
+          type: integer
+        commission_vat_rate_bp:
+          format: int64
+          type: integer
+        created_at:
+          format: date-time
+          type: string
+        created_by:
+          format: uuid
+          type: string
+        dispute_window_days:
+          format: int32
+          type: integer
+        invoice_automation:
+          enum:
+            - manual
+            - provider
+          type: string
+        model_code:
+          enum:
+            - A
+            - A2
+            - B
+            - C
+          type: string
+        notes:
+          type: string
+        payout_hold_days:
+          format: int32
+          type: integer
+        policy_id:
+          format: uuid
+          type: string
+        scope:
+          enum:
+            - default
+            - seller_org
+            - service
+            - offering
+          type: string
+        scope_id:
+          format: uuid
+          type: string
+        valid_from:
+          format: date-time
+          type: string
+        valid_to:
+          format: date-time
+          type: string
+      required:
+        - policy_id
+        - scope
+        - model_code
+        - collection_method
+        - commission_rate_bp
+        - commission_basis
+        - commission_payer
+        - commission_vat_rate_bp
+        - invoice_automation
+        - dispute_window_days
+        - payout_hold_days
+        - valid_from
+        - created_by
+        - created_at
+      type: object
+    CommercePolicyListOutputBody:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/CommercePolicyDTO"
+          type: array
+      required:
+        - items
       type: object
     CompanyDTO:
       additionalProperties: false
@@ -2514,6 +2888,104 @@ components:
           type: string
       required:
         - role_in_club
+      type: object
+    CreateCommercePolicyInputBody:
+      additionalProperties: false
+      properties:
+        collection_method:
+          description: "bank_transfer (model C: direct_to_payee) when omitted; iyzico is phase 2"
+          enum:
+            - bank_transfer
+            - iyzico
+            - direct_to_payee
+          type: string
+        commission_basis:
+          description: net_excl_vat when omitted
+          enum:
+            - net_excl_vat
+            - gross_incl_vat
+          type: string
+        commission_max_amount:
+          format: int64
+          minimum: 0
+          type: integer
+        commission_min_amount:
+          format: int64
+          minimum: 0
+          type: integer
+        commission_payer:
+          description: "seller (model C: buyer) when omitted"
+          enum:
+            - seller
+            - buyer
+          type: string
+        commission_rate_bp:
+          description: Required, no default (T-10)
+          format: int64
+          maximum: 10000
+          minimum: 0
+          type:
+            - integer
+            - "null"
+        commission_vat_rate_bp:
+          description: 2000 when omitted
+          format: int64
+          maximum: 10000
+          minimum: 0
+          type: integer
+        dispute_window_days:
+          description: 7 when omitted
+          format: int64
+          maximum: 60
+          minimum: 0
+          type: integer
+        invoice_automation:
+          description: manual when omitted
+          enum:
+            - manual
+            - provider
+          type: string
+        model_code:
+          enum:
+            - A
+            - A2
+            - B
+            - C
+          type: string
+        notes:
+          maxLength: 1000
+          type: string
+        payout_hold_days:
+          description: 0 when omitted
+          format: int64
+          maximum: 90
+          minimum: 0
+          type: integer
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof (03 §6.2)
+        scope:
+          enum:
+            - default
+            - seller_org
+            - service
+            - offering
+          type: string
+        scope_id:
+          description: The org, service or offering (not for default)
+          format: uuid
+          type: string
+        valid_from:
+          description: Now when omitted; never in the past
+          format: date-time
+          type: string
+        valid_to:
+          format: date-time
+          type: string
+      required:
+        - scope
+        - model_code
+        - commission_rate_bp
       type: object
     CreateCompanyInputBody:
       additionalProperties: false
@@ -5520,6 +5992,378 @@ components:
       required:
         - items
       type: object
+    OfferingApprovalDTO:
+      additionalProperties: false
+      properties:
+        approved_at:
+          format: date-time
+          type: string
+        blocked_sponsor_flags:
+          items:
+            type: string
+          type: array
+        cancel_reason:
+          type: string
+        cancelled_at:
+          format: date-time
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        default_payee_id:
+          format: uuid
+          type: string
+        invoice_trigger:
+          enum:
+            - on_payment
+            - on_fulfillment
+          type: string
+        quantity_sold:
+          format: int64
+          type: integer
+        quantity_total:
+          description: "null: unlimited"
+          format: int64
+          type:
+            - integer
+            - "null"
+        rejection_reason:
+          type: string
+        requires_university_approval:
+          type: boolean
+        submitted_at:
+          format: date-time
+          type: string
+        university_approval_status:
+          enum:
+            - not_required
+            - pending
+            - approved
+            - rejected
+          type: string
+        university_decided_at:
+          format: date-time
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - quantity_total
+        - quantity_sold
+        - invoice_trigger
+        - blocked_sponsor_flags
+        - requires_university_approval
+        - university_approval_status
+        - created_at
+        - updated_at
+      type: object
+    OfferingBody:
+      additionalProperties: false
+      properties:
+        blocked_sponsor_flags:
+          description: "Sponsor categories the seller refuses: alcohol, tobacco, gambling, political"
+          items:
+            type: string
+          maxItems: 4
+          type: array
+        default_payee_id:
+          description: A payee of the organization; its default payee when omitted
+          format: uuid
+          type: string
+        deliverables:
+          description: What the buyer gets (the items of the package)
+          items:
+            $ref: "#/components/schemas/OfferingDeliverableDTO"
+          maxItems: 20
+          type: array
+        description_json:
+          additionalProperties: {}
+          description: "Tiptap JSON: paragraphs, headings 2-3, lists, quotes, bold, italic, https links"
+          type: object
+        event_id:
+          description: An event of the organization (event-bound services need one)
+          format: uuid
+          type: string
+        fulfil_by:
+          format: date-time
+          type: string
+        invoice_trigger:
+          description: on_fulfillment when omitted
+          enum:
+            - on_payment
+            - on_fulfillment
+          type: string
+        per_buyer_limit:
+          format: int64
+          maximum: 100000
+          minimum: 1
+          type: integer
+        quantity_total:
+          description: Stock; unlimited when omitted
+          format: int64
+          maximum: 100000
+          minimum: 1
+          type: integer
+        requires_university_approval:
+          description: A club's offering its university must approve too (T-21)
+          type: boolean
+        sales_end_at:
+          format: date-time
+          type: string
+        sales_start_at:
+          format: date-time
+          type: string
+        service_id:
+          format: uuid
+          type: string
+        title:
+          maxLength: 160
+          minLength: 3
+          type: string
+        unit_price_amount:
+          description: Kuruş, excluding VAT
+          format: int64
+          maximum: 100000000000
+          minimum: 1
+          type: integer
+      required:
+        - service_id
+        - title
+        - deliverables
+        - unit_price_amount
+      type: object
+    OfferingCardDTO:
+      additionalProperties: false
+      properties:
+        currency:
+          type: string
+        event:
+          $ref: "#/components/schemas/OfferingEventDTO"
+        offering_id:
+          format: uuid
+          type: string
+        quantity_remaining:
+          description: "null: unlimited"
+          format: int64
+          type:
+            - integer
+            - "null"
+        sales_end_at:
+          format: date-time
+          type: string
+        sales_start_at:
+          format: date-time
+          type: string
+        seller:
+          $ref: "#/components/schemas/OfferingSellerDTO"
+        service:
+          $ref: "#/components/schemas/OfferingServiceDTO"
+        status:
+          enum:
+            - draft
+            - pending_approval
+            - active
+            - sold_out
+            - closed
+            - cancelled
+          type: string
+        title:
+          type: string
+        unit_price_amount:
+          description: Kuruş, excluding VAT
+          format: int64
+          type: integer
+        vat_rate_bp:
+          format: int64
+          type: integer
+      required:
+        - offering_id
+        - title
+        - service
+        - seller
+        - unit_price_amount
+        - vat_rate_bp
+        - currency
+        - quantity_remaining
+        - status
+      type: object
+    OfferingDTO:
+      additionalProperties: false
+      properties:
+        approval:
+          $ref: "#/components/schemas/OfferingApprovalDTO"
+        buyer_fee_amount:
+          description: Estimated fee of one unit (kuruş, VAT included) when the buyer pays the commission
+          format: int64
+          type: integer
+        currency:
+          type: string
+        deliverables:
+          items:
+            $ref: "#/components/schemas/OfferingDeliverableDTO"
+          type: array
+        description_json:
+          additionalProperties: {}
+          description: Tiptap JSON
+          type: object
+        event:
+          $ref: "#/components/schemas/OfferingEventDTO"
+        fulfil_by:
+          format: date-time
+          type: string
+        offering_id:
+          format: uuid
+          type: string
+        per_buyer_limit:
+          format: int64
+          type: integer
+        quantity_remaining:
+          description: "null: unlimited"
+          format: int64
+          type:
+            - integer
+            - "null"
+        sales_end_at:
+          format: date-time
+          type: string
+        sales_start_at:
+          format: date-time
+          type: string
+        seller:
+          $ref: "#/components/schemas/OfferingSellerDTO"
+        service:
+          $ref: "#/components/schemas/OfferingServiceDTO"
+        status:
+          enum:
+            - draft
+            - pending_approval
+            - active
+            - sold_out
+            - closed
+            - cancelled
+          type: string
+        title:
+          type: string
+        unit_price_amount:
+          description: Kuruş, excluding VAT
+          format: int64
+          type: integer
+        vat_rate_bp:
+          format: int64
+          type: integer
+      required:
+        - deliverables
+        - offering_id
+        - title
+        - service
+        - seller
+        - unit_price_amount
+        - vat_rate_bp
+        - currency
+        - quantity_remaining
+        - status
+      type: object
+    OfferingDecisionBody:
+      additionalProperties: false
+      properties:
+        decision:
+          enum:
+            - approved
+            - rejected
+          type: string
+        rejection_reason:
+          description: Required for a rejection; shown to the seller (no personal data)
+          maxLength: 500
+          type: string
+      required:
+        - decision
+      type: object
+    OfferingDeliverableDTO:
+      additionalProperties: false
+      properties:
+        key:
+          pattern: ^[a-z][a-z0-9_]{1,40}$
+          type: string
+        label:
+          maxLength: 120
+          minLength: 1
+          type: string
+      required:
+        - key
+        - label
+      type: object
+    OfferingEventDTO:
+      additionalProperties: false
+      properties:
+        event_id:
+          format: uuid
+          type: string
+        starts_at:
+          format: date-time
+          type: string
+        title:
+          type: string
+      required:
+        - event_id
+        - title
+        - starts_at
+      type: object
+    OfferingListOutputBody:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/OfferingDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
+    OfferingSellerDTO:
+      additionalProperties: false
+      properties:
+        kind:
+          enum:
+            - club
+            - university
+            - platform
+          type: string
+        name:
+          type: string
+        org_id:
+          format: uuid
+          type: string
+      required:
+        - org_id
+        - name
+        - kind
+      type: object
+    OfferingServiceDTO:
+      additionalProperties: false
+      properties:
+        category:
+          type: string
+        code:
+          type: string
+        fulfillment_type:
+          enum:
+            - event_bound
+            - org_bound
+            - platform_native
+          type: string
+        name:
+          type: string
+        service_id:
+          format: uuid
+          type: string
+      required:
+        - service_id
+        - code
+        - name
+        - category
+        - fulfillment_type
+      type: object
     OpportunityBody:
       additionalProperties: false
       properties:
@@ -8258,6 +9102,21 @@ components:
         - is_active
         - faculties
       type: object
+    UniversityDecisionInputBody:
+      additionalProperties: false
+      properties:
+        decision:
+          enum:
+            - approved
+            - rejected
+          type: string
+        note:
+          description: Shown to the seller (no personal data)
+          maxLength: 500
+          type: string
+      required:
+        - decision
+      type: object
     UniversityList:
       additionalProperties: false
       properties:
@@ -8408,6 +9267,83 @@ components:
             - tr-TR
             - en-US
           type: string
+      type: object
+    UpdateOfferingInputBody:
+      additionalProperties: false
+      properties:
+        blocked_sponsor_flags:
+          items:
+            type: string
+          maxItems: 4
+          type: array
+        clear:
+          description: Optional fields to empty
+          items:
+            enum:
+              - event_id
+              - default_payee_id
+              - description_json
+              - quantity_total
+              - per_buyer_limit
+              - sales_start_at
+              - sales_end_at
+              - fulfil_by
+            type: string
+          maxItems: 8
+          type: array
+        default_payee_id:
+          format: uuid
+          type: string
+        deliverables:
+          items:
+            $ref: "#/components/schemas/OfferingDeliverableDTO"
+          maxItems: 20
+          type: array
+        description_json:
+          additionalProperties: {}
+          description: Tiptap JSON
+          type: object
+        event_id:
+          format: uuid
+          type: string
+        fulfil_by:
+          format: date-time
+          type: string
+        invoice_trigger:
+          enum:
+            - on_payment
+            - on_fulfillment
+          type: string
+        per_buyer_limit:
+          format: int64
+          maximum: 100000
+          minimum: 1
+          type: integer
+        quantity_total:
+          format: int64
+          maximum: 100000
+          minimum: 1
+          type: integer
+        requires_university_approval:
+          type: boolean
+        sales_end_at:
+          format: date-time
+          type: string
+        sales_start_at:
+          format: date-time
+          type: string
+        service_id:
+          format: uuid
+          type: string
+        title:
+          maxLength: 160
+          minLength: 3
+          type: string
+        unit_price_amount:
+          format: int64
+          maximum: 100000000000
+          minimum: 1
+          type: integer
       type: object
     UpdateOrgInputBody:
       additionalProperties: false
@@ -9680,6 +10616,145 @@ paths:
       tags:
         - directory
       x-koro-action: directory.club.set_sensitivity
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/commerce-policies:
+    get:
+      description: Newest valid_from first; at keeps the policies in effect at that time.
+      operationId: adminListCommercePolicies
+      parameters:
+        - explode: false
+          in: query
+          name: scope
+          schema:
+            enum:
+              - default
+              - seller_org
+              - service
+              - offering
+            type: string
+        - description: Only the policies in effect at this instant
+          explode: false
+          in: query
+          name: at
+          schema:
+            description: Only the policies in effect at this instant
+            format: date-time
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommercePolicyListOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List commerce policies
+      tags:
+        - catalog
+      x-koro-action: catalog.policy.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+    post:
+      description: "Requires re-authentication. A policy never changes: a change is \"close + new row\". Periods of one scope never overlap (409 catalog.policy_overlap); none starts in the past. commission_rate_bp has no default. Every platform and finance admin is notified; orders copy the policy in effect onto their lines."
+      operationId: adminCreateCommercePolicy
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCommercePolicyInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommercePolicyDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Create a commerce policy
+      tags:
+        - catalog
+      x-koro-action: catalog.policy.manage
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/commerce-policies/{policy_id}/close:
+    post:
+      description: Requires re-authentication. Sets valid_to (now when omitted, never in the past); the row changes no other way; a closed policy is 409 catalog.invalid_state. Every platform and finance admin is notified.
+      operationId: adminCloseCommercePolicy
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Policy ID (an unknown or malformed ID is 404)
+          in: path
+          name: policy_id
+          required: true
+          schema:
+            description: Policy ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloseCommercePolicyInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommercePolicyDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Close a commerce policy
+      tags:
+        - catalog
+      x-koro-action: catalog.policy.manage
       x-koro-idempotency: optional
       x-koro-rate-limit: reauth
       x-koro-reauth: true
@@ -11405,6 +12480,116 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+  /api/v1/admin/offerings:
+    get:
+      description: Oldest submission first.
+      operationId: adminListOfferingReviewQueue
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: The offerings waiting for the platform decision
+          explode: false
+          in: query
+          name: status
+          schema:
+            default: pending_approval
+            description: The offerings waiting for the platform decision
+            enum:
+              - pending_approval
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferingListOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the offerings waiting for the platform decision
+      tags:
+        - catalog
+      x-koro-action: catalog.offering.review_queue
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+  /api/v1/admin/offerings/{offering_id}/decision:
+    post:
+      description: Its creator never decides it (403 authz.four_eyes_violation). An approval puts it on sale — after the payee, its bank account and a commerce policy are checked again — unless its university still has to approve it (it waits). A rejection sends it back to draft with the reason.
+      operationId: adminDecideOffering
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Offering ID (an unknown, malformed or invisible ID is 404)
+          in: path
+          name: offering_id
+          required: true
+          schema:
+            description: Offering ID (an unknown, malformed or invisible ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OfferingDecisionBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferingDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Approve or reject an offering
+      tags:
+        - catalog
+      x-koro-action: catalog.offering.decide
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
   /api/v1/admin/orgs:
     get:
       operationId: adminListOrgs
@@ -12427,6 +13612,89 @@ paths:
         - feed
       x-koro-action: feed.review_queue.list
       x-koro-rate-limit: read_default
+      x-koro-surface: admin
+  /api/v1/admin/services:
+    post:
+      description: "The invoice wording and VAT profile of what may be sold. Offerings of a service go on sale only once the accountant has reviewed it (accounting_reviewed, finance admins only: 03 k23). A duplicate code is 409 catalog.service_code_taken."
+      operationId: adminCreateService
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CatalogServiceBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogServiceDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Create a service
+      tags:
+        - catalog
+      x-koro-action: catalog.service.manage
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/services/{service_id}:
+    patch:
+      description: Partial update; clear empties optional fields; active false withdraws the service. The accountant's review (accounting_reviewed, accounting_reviewed_ref) is finance admins' only (03 k23); a change to the VAT profile withdraws the review unless the same request reviews it again.
+      operationId: adminUpdateService
+      parameters:
+        - description: Service ID (an unknown or malformed ID is 404)
+          in: path
+          name: service_id
+          required: true
+          schema:
+            description: Service ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUpdateServiceInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogServiceDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Update a service
+      tags:
+        - catalog
+      x-koro-action: catalog.service.manage
+      x-koro-rate-limit: write_default
       x-koro-surface: admin
   /api/v1/admin/skills:
     post:
@@ -17709,6 +18977,303 @@ paths:
       x-koro-action: consent.notice.read
       x-koro-rate-limit: read_default
       x-koro-surface: public
+  /api/v1/offerings:
+    get:
+      description: Active offerings whose sales have not ended. Prices are kuruş excluding VAT; the payee and the commission are never shown.
+      operationId: browseOfferings
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: Words of the title
+          explode: false
+          in: query
+          name: q
+          schema:
+            description: Words of the title
+            maxLength: 100
+            type: string
+        - description: One seller
+          explode: false
+          in: query
+          name: org_id
+          schema:
+            description: One seller
+            type: string
+        - explode: false
+          in: query
+          name: event_id
+          schema:
+            type: string
+        - description: The sellers of a university (its org and clubs)
+          explode: false
+          in: query
+          name: university_id
+          schema:
+            description: The sellers of a university (its org and clubs)
+            type: string
+        - explode: false
+          in: query
+          name: service_category
+          schema:
+            enum:
+              - sponsorship
+              - booth
+              - logo_placement
+              - talk_slot
+              - social_media_post
+              - workshop
+              - targeted_post_quota
+              - contact_request_quota
+              - discovery_access
+              - other
+            type: string
+        - description: "Kuruş, excluding VAT (0: no limit)"
+          explode: false
+          in: query
+          name: price_max_amount
+          schema:
+            description: "Kuruş, excluding VAT (0: no limit)"
+            format: int64
+            minimum: 0
+            type: integer
+        - explode: false
+          in: query
+          name: sort
+          schema:
+            default: -created_at
+            enum:
+              - -created_at
+              - unit_price_amount
+              - sales_end_at
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrowseOfferingsOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Browse the marketplace
+      tags:
+        - catalog
+      x-koro-action: catalog.offering.browse
+      x-koro-rate-limit: search
+      x-koro-surface: resource
+  /api/v1/offerings/{offering_id}:
+    get:
+      description: A published offering for every signed-in user; a draft or an offering under review only for its seller and the platform (404 otherwise). The seller's managers and platform staff also get the approval block and the ETag that updateOffering takes as If-Match. buyer_fee_amount estimates the fee of one unit when the commission is charged to the buyer.
+      operationId: getOffering
+      parameters:
+        - description: Offering ID (an unknown, malformed or invisible ID is 404)
+          in: path
+          name: offering_id
+          required: true
+          schema:
+            description: Offering ID (an unknown, malformed or invisible ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferingDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get an offering
+      tags:
+        - catalog
+      x-koro-action: catalog.offering.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: resource
+    patch:
+      description: "Drafts only (409 catalog.invalid_state). If-Match with the ETag of getOffering is required: missing → 428, stale → 412. clear empties optional fields."
+      operationId: updateOffering
+      parameters:
+        - description: Offering ID (an unknown, malformed or invisible ID is 404)
+          in: path
+          name: offering_id
+          required: true
+          schema:
+            description: Offering ID (an unknown, malformed or invisible ID is 404)
+            type: string
+        - description: "ETag of getOffering (required: missing → 428, stale → 412)"
+          in: header
+          name: If-Match
+          schema:
+            description: "ETag of getOffering (required: missing → 428, stale → 412)"
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateOfferingInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferingDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Update a draft offering
+      tags:
+        - catalog
+      x-koro-action: catalog.offering.update
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+  /api/v1/offerings/{offering_id}/cancel:
+    post:
+      description: Any offering that is not cancelled. Unpaid orders of it are cancelled and paid ones queued for refund (offering.cancelled).
+      operationId: cancelOffering
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Offering ID (an unknown, malformed or invisible ID is 404)
+          in: path
+          name: offering_id
+          required: true
+          schema:
+            description: Offering ID (an unknown, malformed or invisible ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelOfferingInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferingDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Cancel an offering
+      tags:
+        - catalog
+      x-koro-action: catalog.offering.cancel
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+  /api/v1/offerings/{offering_id}/submit:
+    post:
+      description: draft → pending_approval. The service must be reviewed (409 catalog.service_not_sellable), an organization's payee active (409 catalog.payee_not_active) with an approved bank account (409 parties.no_approved_account); what is missing is 422 catalog.offering_incomplete.
+      operationId: submitOffering
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Offering ID (an unknown, malformed or invisible ID is 404)
+          in: path
+          name: offering_id
+          required: true
+          schema:
+            description: Offering ID (an unknown, malformed or invisible ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferingDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Submit an offering for approval
+      tags:
+        - catalog
+      x-koro-action: catalog.offering.submit
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
   /api/v1/orgs:
     get:
       description: Active and suspended orgs only. q matches name and description (full text) or part of the name.
@@ -19319,6 +20884,248 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: org
+  /api/v1/orgs/{org_id}/offering-approvals:
+    get:
+      description: org_id is a university; the offerings of its clubs that require its approval, oldest first.
+      operationId: listUniversityOfferingApprovals
+      parameters:
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: The offerings waiting for the university's decision
+          explode: false
+          in: query
+          name: status
+          schema:
+            default: pending
+            description: The offerings waiting for the university's decision
+            enum:
+              - pending
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferingListOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the offerings waiting for a university's approval
+      tags:
+        - catalog
+      x-koro-action: catalog.offering.review_queue
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/offering-approvals/{offering_id}/decision:
+    post:
+      description: An approval puts the offering on sale when the platform has approved it too; a rejection sends it back to draft.
+      operationId: decideUniversityOfferingApproval
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Offering ID (an unknown, malformed or invisible ID is 404)
+          in: path
+          name: offering_id
+          required: true
+          schema:
+            description: Offering ID (an unknown, malformed or invisible ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UniversityDecisionInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferingDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Approve or reject an offering as its university
+      tags:
+        - catalog
+      x-koro-action: catalog.offering.university_decide
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/offerings:
+    get:
+      description: Drafts included, newest first, with the approval block.
+      operationId: listOrgOfferings
+      parameters:
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - explode: false
+          in: query
+          name: status
+          schema:
+            enum:
+              - draft
+              - pending_approval
+              - active
+              - sold_out
+              - closed
+              - cancelled
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferingListOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the offerings of an organization
+      tags:
+        - catalog
+      x-koro-action: catalog.offering.list_org
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+    post:
+      description: "A draft of a club or a university (for its payee: the default payee when omitted) or of the platform org. The VAT rate is copied from the service; the event and the payee must be the organization's (422 catalog.parent_mismatch). A platform-native service is the platform's only."
+      operationId: createOffering
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OfferingBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfferingDTO"
+          description: Created
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Create an offering (package)
+      tags:
+        - catalog
+      x-koro-action: catalog.offering.create
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: org
   /api/v1/orgs/{org_id}/ownership-transfer:
     post:
       description: The new owner must be an active company_admin of the company (422 orgs.transfer_target_invalid). The former owner stays as company_admin; both users' sessions are closed.
@@ -20442,6 +22249,49 @@ paths:
       x-koro-action: feed.report.create
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
+      x-koro-surface: resource
+  /api/v1/services:
+    get:
+      description: "The services an organization may offer: active and reviewed by the accountant. Finance and platform admins see every service with its VAT profile."
+      operationId: listServices
+      parameters:
+        - explode: false
+          in: query
+          name: category
+          schema:
+            enum:
+              - sponsorship
+              - booth
+              - logo_placement
+              - talk_slot
+              - social_media_post
+              - workshop
+              - targeted_post_quota
+              - contact_request_quota
+              - discovery_access
+              - other
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CatalogServiceListOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the Koro services
+      tags:
+        - catalog
+      x-koro-action: catalog.service.list
+      x-koro-rate-limit: read_default
       x-koro-surface: resource
   /api/v1/skills:
     get:

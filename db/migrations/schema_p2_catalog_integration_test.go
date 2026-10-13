@@ -96,6 +96,51 @@ func TestSchema_OfferingConstraints(t *testing.T) {
 	}
 }
 
+// TestSchema_OfferingEventOrgFK (06 H-55, BE-038): an offering is bound
+// only to an event of its own seller org — offerings_event_id_org_id_fkey
+// (event_id, org_id) → events (id, org_id) — on insert and on a later
+// rebinding; an offering without an event is free (MATCH SIMPLE).
+// Mutation test: with the former single-column FK (event_id → events (id))
+// the same cross-org binding is stored, so the composite FK is what refuses it.
+func TestSchema_OfferingEventOrgFK(t *testing.T) {
+	t.Parallel()
+	w := newP1aWorld(t)
+	seller, service := w.seller(), w.service()
+	creator := w.user()
+	own, foreign := w.event(seller.org, creator, nil), w.event(w.org("club"), creator, nil)
+	defaults := map[string]string{
+		"service_id": "$1", "seller_kind": "'org'", "org_id": "$2", "default_payee_id": "$3", "title": "'Stant alanı'",
+		"unit_price_amount": "50000", "vat_rate_bp": "2000", "created_by": "$4", "event_id": "$5",
+	}
+	ins := insertSQL("offerings", defaults, nil)
+	const fk = "offerings_event_id_org_id_fkey"
+	expectFail(t, w.d.Pool, []p1aCase{
+		{"an event of another org", ins, []any{service, seller.org, seller.payee, creator, foreign}, db.CodeForeignKeyViolation, fk},
+		{"an unknown event", ins, []any{service, seller.org, seller.payee, creator, uuid.NewV7()}, db.CodeForeignKeyViolation, fk},
+	})
+	bound, free := uuid.NewV7(), uuid.NewV7()
+	w.exec(insertSQL("offerings", defaults, map[string]string{"id": "$6"}), service, seller.org, seller.payee, creator, own, bound)
+	w.exec(insertSQL("offerings", defaults, map[string]string{"id": "$6", "event_id": "NULLIF($5::uuid, $5::uuid)"}),
+		service, seller.org, seller.payee, creator, own, free)
+	rebind := `UPDATE offerings SET event_id = $2 WHERE id = $1`
+	expectFail(t, w.d.Pool, []p1aCase{
+		{"rebinding to another org's event", rebind, []any{bound, foreign}, db.CodeForeignKeyViolation, fk},
+		{"binding a free offering to another org's event", rebind, []any{free, foreign}, db.CodeForeignKeyViolation, fk},
+	})
+	expectOK(t, w.d.Pool, []p1aCase{{"binding a free offering to its org's event", rebind, []any{free, own}, "", ""}})
+
+	// Mutation: the former single-column FK lets the cross-org binding in.
+	owner := testutil.OwnerConn(t, w.d)
+	if _, err := owner.Exec(t.Context(), `ALTER TABLE offerings DROP CONSTRAINT offerings_event_id_org_id_fkey,
+		ADD CONSTRAINT offerings_event_id_fkey FOREIGN KEY (event_id) REFERENCES events (id)`); err != nil {
+		t.Fatal(err)
+	}
+	if got := execState(t, w.d.Pool, rebind, bound, foreign); got != "" {
+		t.Fatalf("mutant (event_id → events (id)): cross-org rebinding SQLSTATE %q, want it stored (the mutant must survive "+
+			"only without the composite FK)", got)
+	}
+}
+
 // TestSchema_OfferingReservationUnderConcurrency (02 §18.2): the
 // reservation is one conditional UPDATE; 25 concurrent buyers of a stock of
 // 7 get exactly 7 units and the offering ends sold_out (offerings_stock_chk

@@ -1,0 +1,2 @@
+{"scope": "seller_org", "scope_id": "{{fixture:club_a}}", "model_code": "A", "commission_rate_bp": 800,
+ "notes": "Matris kulüp politikası", "reauth": {"password": "matrix-reauth-password"}}

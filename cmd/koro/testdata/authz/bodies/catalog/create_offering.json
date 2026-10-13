@@ -1,0 +1,3 @@
+{"service_id": "{{fixture:svc_booth}}", "title": "Matris stant paketi", "unit_price_amount": 1000000,
+ "deliverables": [{"key": "booth_3x3", "label": "3x3 stant alanı"}, {"key": "logo_on_banner", "label": "Afişte logo"}],
+ "quantity_total": 5, "per_buyer_limit": 1, "blocked_sponsor_flags": ["alcohol", "tobacco"]}

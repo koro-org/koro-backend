@@ -1,0 +1,11 @@
+Hello {{index .Data "name"}},
+
+A commerce policy was {{if eq (index .Data "change") "closed"}}closed{{else}}created{{end}}. New orders are priced by it; past orders keep their own copy.
+
+Scope: {{index .Data "scope"}}
+Model: {{index .Data "model_code"}}
+Commission: {{index .Data "commission_rate"}}% ({{index .Data "commission_payer"}})
+Valid from: {{index .Data "valid_from"}}{{if index .Data "valid_to"}}
+Valid to: {{index .Data "valid_to"}}{{end}}
+
+If you did not expect this change, review it at once; policy rows never change, they can only be closed.

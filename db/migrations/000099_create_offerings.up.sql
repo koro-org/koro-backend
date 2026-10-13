@@ -11,6 +11,9 @@
 --   * 06 H-38: (default_payee_id, org_id) → payees: the default payee belongs
 --     to the seller org; offerings_id_org_uq is the target of
 --     order_lines (offering_id, seller_org_id).
+--   * 06 H-55 (BE-038): (event_id, org_id) → events (id, org_id)
+--     (events_id_org_uq): an offering is bound only to an event of its own
+--     seller org; MATCH SIMPLE leaves an offering without an event free.
 --   * 03 §6.1 "Teklif onayı" in the database as well: approved_by <> created_by.
 --   * per-state CHECKs (06 H-37): approved_by/at together; pending_approval
 --     has submitted_at; the university decision columns belong to a decision
@@ -23,7 +26,7 @@ CREATE TABLE offerings (
   service_id                   uuid NOT NULL CONSTRAINT offerings_service_id_fkey REFERENCES services (id),
   seller_kind                  text NOT NULL CONSTRAINT offerings_seller_kind_chk CHECK (seller_kind IN ('org','platform')),
   org_id                       uuid NOT NULL CONSTRAINT offerings_org_id_fkey REFERENCES organizations (id),   -- seller org (the platform org for platform offerings)
-  event_id                     uuid CONSTRAINT offerings_event_id_fkey REFERENCES events (id),
+  event_id                     uuid,
   default_payee_id             uuid,
   title                        text COLLATE "tr" NOT NULL CONSTRAINT offerings_title_chk CHECK (char_length(title) BETWEEN 3 AND 160),
   description_json             jsonb,
@@ -59,6 +62,7 @@ CREATE TABLE offerings (
   updated_at                   timestamptz NOT NULL DEFAULT now(),
   search_vector                tsvector GENERATED ALWAYS AS (to_tsvector('public.koro_tr'::regconfig, coalesce(title, ''))) STORED,
   CONSTRAINT offerings_default_payee_id_org_id_fkey FOREIGN KEY (default_payee_id, org_id) REFERENCES payees (id, org_id),
+  CONSTRAINT offerings_event_id_org_id_fkey FOREIGN KEY (event_id, org_id) REFERENCES events (id, org_id),
   CONSTRAINT offerings_id_org_uq UNIQUE (id, org_id),
   CONSTRAINT offerings_stock_chk CHECK (quantity_total IS NULL OR quantity_sold <= quantity_total),
   CONSTRAINT offerings_sold_out_chk CHECK (status <> 'sold_out' OR (quantity_total IS NOT NULL AND quantity_sold = quantity_total)),

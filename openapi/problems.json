@@ -66,6 +66,78 @@
     "type": "urn:koro:problem:bad_request"
   },
   {
+    "code": "catalog.empty_patch",
+    "status": 422,
+    "title": "Nothing to update",
+    "type": "urn:koro:problem:catalog.empty_patch"
+  },
+  {
+    "code": "catalog.invalid_state",
+    "status": 409,
+    "title": "The current status does not allow this change",
+    "type": "urn:koro:problem:catalog.invalid_state"
+  },
+  {
+    "code": "catalog.no_commerce_policy",
+    "status": 409,
+    "title": "No commerce policy applies",
+    "type": "urn:koro:problem:catalog.no_commerce_policy"
+  },
+  {
+    "code": "catalog.not_on_sale",
+    "status": 409,
+    "title": "The offering is not on sale",
+    "type": "urn:koro:problem:catalog.not_on_sale"
+  },
+  {
+    "code": "catalog.offering_incomplete",
+    "status": 422,
+    "title": "The offering lacks what submission needs",
+    "type": "urn:koro:problem:catalog.offering_incomplete"
+  },
+  {
+    "code": "catalog.parent_mismatch",
+    "status": 422,
+    "title": "The payee or event does not belong to the seller organization",
+    "type": "urn:koro:problem:catalog.parent_mismatch"
+  },
+  {
+    "code": "catalog.payee_not_active",
+    "status": 409,
+    "title": "The payee of the offering is not active",
+    "type": "urn:koro:problem:catalog.payee_not_active"
+  },
+  {
+    "code": "catalog.per_buyer_limit",
+    "status": 409,
+    "title": "The per-buyer limit of the offering is reached",
+    "type": "urn:koro:problem:catalog.per_buyer_limit"
+  },
+  {
+    "code": "catalog.policy_overlap",
+    "status": 409,
+    "title": "The validity period overlaps another policy of the same scope",
+    "type": "urn:koro:problem:catalog.policy_overlap"
+  },
+  {
+    "code": "catalog.service_code_taken",
+    "status": 409,
+    "title": "A service with this code already exists",
+    "type": "urn:koro:problem:catalog.service_code_taken"
+  },
+  {
+    "code": "catalog.service_not_sellable",
+    "status": 409,
+    "title": "The service is inactive or not reviewed by the accountant",
+    "type": "urn:koro:problem:catalog.service_not_sellable"
+  },
+  {
+    "code": "catalog.sold_out",
+    "status": 409,
+    "title": "Not enough stock left",
+    "type": "urn:koro:problem:catalog.sold_out"
+  },
+  {
     "code": "conflict",
     "status": 409,
     "title": "Conflict",

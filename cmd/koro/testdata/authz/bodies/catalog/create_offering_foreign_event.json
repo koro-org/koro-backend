@@ -1,0 +1,2 @@
+{"service_id": "{{fixture:svc_booth}}", "event_id": "{{fixture:event_b}}", "title": "Matris stant paketi",
+ "unit_price_amount": 1000000, "deliverables": []}

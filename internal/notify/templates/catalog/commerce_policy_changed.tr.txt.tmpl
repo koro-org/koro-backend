@@ -1,0 +1,11 @@
+Merhaba {{index .Data "name"}},
+
+Bir ticaret politikası {{if eq (index .Data "change") "closed"}}kapatıldı{{else}}oluşturuldu{{end}}. Yeni siparişler bu politikaya göre hesaplanır; geçmiş siparişler kendi kopyalarını korur.
+
+Kapsam: {{index .Data "scope"}}
+Model: {{index .Data "model_code"}}
+Komisyon: %{{index .Data "commission_rate"}} ({{index .Data "commission_payer"}})
+Geçerlilik başlangıcı: {{index .Data "valid_from"}}{{if index .Data "valid_to"}}
+Geçerlilik sonu: {{index .Data "valid_to"}}{{end}}
+
+Bu değişikliği beklemiyorsanız hemen inceleyin; politika satırları değiştirilemez, yalnızca kapatılabilir.

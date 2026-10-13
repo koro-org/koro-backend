@@ -167,6 +167,7 @@ func TestSchema_P2SchemaForeignKeys(t *testing.T) {
 		"collection_accounts_legal_party_id_party_kind_fkey FOREIGN KEY (legal_party_id, party_kind) REFERENCES legal_parties(id, kind)",
 		"ledger_entries_order_line_id_payee_id_fkey FOREIGN KEY (order_line_id, payee_id) REFERENCES order_lines(id, payee_id)",
 		"offerings_default_payee_id_org_id_fkey FOREIGN KEY (default_payee_id, org_id) REFERENCES payees(id, org_id)",
+		"offerings_event_id_org_id_fkey FOREIGN KEY (event_id, org_id) REFERENCES events(id, org_id)",
 		"order_lines_offering_id_seller_org_id_fkey FOREIGN KEY (offering_id, seller_org_id) REFERENCES offerings(id, org_id)",
 		"order_lines_order_id_org_id_fkey FOREIGN KEY (order_id, org_id) REFERENCES orders(id, org_id)",
 		"order_lines_payee_id_seller_org_id_fkey FOREIGN KEY (payee_id, seller_org_id) REFERENCES payees(id, org_id)",

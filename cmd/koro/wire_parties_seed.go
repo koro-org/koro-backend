@@ -5,8 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"uuid"
 
 	"koro/internal/audit"
+	"koro/internal/authz"
+	"koro/internal/catalog"
+	"koro/internal/identity"
 	"koro/internal/parties"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/config"
@@ -21,9 +25,15 @@ import (
 // existing platform party (any status) is left as it is. No personal data,
 // so it runs in every environment. CLI only, audited as the system job
 // parties.bootstrap_commerce.
+//
+// BE-038 adds the default commerce policy (seedDefaultCommercePolicy,
+// wire_catalog_seed.go): -commission-rate-bp sets its rate; without it
+// production writes none (T-10) and the other environments the
+// development default.
 func runSeedBootstrapCommerce(ctx context.Context, args []string, environ map[string]string, stdout io.Writer) error {
 	fset := flag.NewFlagSet("seed bootstrap-commerce", flag.ContinueOnError)
 	fset.SetOutput(io.Discard)
+	rate := fset.Int("commission-rate-bp", -1, "commission of the default commerce policy in basis points (BE-038, T-10)")
 	if err := fset.Parse(args); err != nil {
 		return fmt.Errorf("%w: %w", errUsage, err)
 	}
@@ -42,8 +52,18 @@ func runSeedBootstrapCommerce(ctx context.Context, args []string, environ map[st
 	}
 	defer database.Close()
 	au := audit.New(audit.Deps{Store: audit.NewGormStore(database.ORM), Tx: database.Tx, Clock: clk, Log: log.With("module", "audit")}).Service
-	return seedBootstrapCommerce(ctx, parties.SeederDeps{
+	if err := seedBootstrapCommerce(ctx, parties.SeederDeps{
 		Store: parties.NewGormStore(database.ORM), Tx: database.Tx, Audit: au, Clock: clk, Log: log.With("module", "parties"),
+	}, stdout); err != nil {
+		return err
+	}
+	return seedDefaultCommercePolicy(ctx, catalogSeed{
+		deps: catalog.SeederDeps{Store: catalog.NewGormStore(database.ORM), Tx: database.Tx, Audit: au, Clock: clk,
+			Log: log.With("module", "catalog")},
+		admins: func(ctx context.Context) ([]uuid.UUID, error) {
+			return identity.NewGormStore(database.ORM).UsersWithRole(ctx, authz.PlatformAdmin)
+		},
+		env: cfg.Env, rateBP: *rate,
 	}, stdout)
 }
 

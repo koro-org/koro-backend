@@ -17,8 +17,8 @@ import (
 )
 
 // Register adds the 6 segment and audience count operations of BE-030
-// (04 §2.8) to api. svc may be nil (`koro openapi`): handlers only touch
-// it when called.
+// and the 4 dispatch operations of BE-035 (04 §2.8) to api. svc may be nil
+// (`koro openapi`): handlers only touch it when called.
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
 
@@ -72,6 +72,8 @@ func Register(api huma.API, svc Service) {
 		Action: string(authz.OutreachAudienceCount), Surface: op.SurfaceOrg, RateLimit: op.RateAudienceCount,
 		Idempotency: op.IdempotencyOptional,
 	}, h.count)
+
+	registerDispatch(api, h)
 }
 
 // reg registers one outreach operation with its Koro metadata.

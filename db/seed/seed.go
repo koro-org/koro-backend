@@ -39,7 +39,9 @@ import (
 const DefaultSeed uint64 = 20261005
 
 // Well-known demo accounts (all @example.test; the password is the one
-// given to `koro seed demo -password`, none without it).
+// given to `koro seed demo -password`, none without it). The platform role
+// accounts (admin, finance, DPO, moderator, support) never get it (06 H-66):
+// they are opened by a password reset and TOTP enrolment.
 const (
 	AdminEmail1    = "demo.yonetici1@example.test" // platform_admin (bootstrap)
 	AdminEmail2    = "demo.yonetici2@example.test" // platform_admin (bootstrap)
@@ -83,8 +85,9 @@ type Options struct {
 	Now time.Time
 	// Seed is the random seed; 0 means DefaultSeed.
 	Seed uint64
-	// PasswordHash is the argon2id hash of every demo account's password;
-	// "" leaves the accounts without one (a password reset sets it).
+	// PasswordHash is the argon2id hash of the student, club and company
+	// demo accounts' password; "" leaves them without one (a password reset
+	// sets it). Platform role accounts never get it (06 H-66).
 	PasswordHash string
 	// Tickets derives the ticket tokens (CRYPTO_TOKEN_KEYS).
 	Tickets events.TicketKeys
@@ -101,9 +104,12 @@ type Demo struct {
 	SensitiveClubOrgIDs []uuid.UUID
 }
 
-// Account is a well-known demo account and what it is for.
+// Account is a well-known demo account and what it is for. NoPassword
+// marks a platform role account: it never gets the demo password (06
+// H-66; password reset + TOTP).
 type Account struct {
 	Email, Role string
+	NoPassword  bool
 }
 
 // Plan is the demo data: rows in insertion order, statements to run after

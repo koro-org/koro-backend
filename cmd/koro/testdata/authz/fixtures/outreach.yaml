@@ -1,4 +1,4 @@
-# Fixtures of the outreach module (cmd/koro/matrix_outreach_test.go; BE-030). IDs are authztest.ID(name).
+# Fixtures of the outreach module (cmd/koro/matrix_outreach_test.go; BE-030, BE-035). IDs are authztest.ID(name).
 # Every segment is dated 2026-10-01T00:00:00Z (ETag "1hmhuo3hji000"), its estimate is below the threshold
 # (last_count NULL) and its creator is the org's targeting persona. uni, dept and club name fixtures; year
 # holds class years. seg_company_a_archived is archived.
@@ -10,3 +10,28 @@ fixtures:
   seg_company_b: { kind: segment, org: company_b, created_by: other_company_member, dept: [department_a] }
   seg_club_a: { kind: segment, org: club_a, created_by: club_admin, club: [club_a] }
   seg_uni_a: { kind: segment, org: uni_a, created_by: university_rep, uni: [uni_a_university], year: [4] }
+  # BE-035: targeted posts (feed's store) and their dispatches, dated like the segments. A company post is commercial
+  # and carries an estimate and a usage; a club's own-members post targets club:<club>.
+  tpost_company_a: { kind: targeted_post, org: company_a, author: company_member, author_kind: company, uni: [uni_a_university] }
+  tpost_company_a_done: { kind: targeted_post, org: company_a, author: company_member, author_kind: company,
+                          uni: [uni_a_university] }
+  tpost_company_a_sched: { kind: targeted_post, org: company_a, author: company_admin, author_kind: company,
+                           uni: [uni_a_university] }
+  tpost_company_a_free: { kind: targeted_post, org: company_a, author: company_admin, author_kind: company,
+                          uni: [uni_a_university] }
+  tpost_company_b: { kind: targeted_post, org: company_b, author: other_company_member, author_kind: company,
+                     uni: [uni_a_university] }
+  tpost_company_sensitive: { kind: targeted_post, org: company_a, author: company_admin, author_kind: company,
+                             club: [club_sensitive] }
+  tpost_club_a: { kind: targeted_post, org: club_a, author: club_admin, author_kind: club, club: [club_a] }
+  tpost_club_a_done: { kind: targeted_post, org: club_a, author: club_admin, author_kind: club, club: [club_a] }
+  tpost_sensitive: { kind: targeted_post, org: club_sensitive, author: club_admin_sensitive, author_kind: club,
+                     club: [club_sensitive] }
+  tpost_uni_a: { kind: targeted_post, org: uni_a, author: university_rep, author_kind: university, uni: [uni_a_university] }
+  disp_company_a: { kind: dispatch, org: company_a, post: tpost_company_a_done, created_by: company_member,
+                    status: completed, eligible: 40, consented: 20, sent: 20 }
+  disp_company_a_scheduled: { kind: dispatch, org: company_a, post: tpost_company_a_sched, created_by: company_admin,
+                              status: scheduled }
+  disp_company_b: { kind: dispatch, org: company_b, post: tpost_company_b, created_by: other_company_member,
+                    status: completed }
+  disp_club_a: { kind: dispatch, org: club_a, post: tpost_club_a_done, created_by: club_admin, status: cancelled }

@@ -42,6 +42,15 @@ func pgWorld(d *db.DB) world {
 				VALUES ($1, 'active', $2, $2, 'Ada', 'Yılmaz', 'company')`, id, "u"+strconv.FormatInt(seq.Add(1), 10)+"@example.test")
 			return id
 		},
+		// A company's public post (the dispatch FK; the audience does not matter to the store).
+		post: func(t *testing.T, org, by uuid.UUID) uuid.UUID {
+			id := uuid.NewV7()
+			exec(t, `INSERT INTO posts (id, org_id, author_org_kind, author_user_id, kind, title, body_json, audience_kind,
+				audience_keys, audience_dim_count, commercial_flag)
+				VALUES ($1, $2, 'company', $3, 'text', 'Yaz stajı', '{"type":"doc"}', 'public', ARRAY['all'], 1, true)`,
+				id, org, by)
+			return id
+		},
 	}
 }
 

@@ -2981,6 +2981,134 @@ components:
         - details
         - created_at
       type: object
+    DispatchBody:
+      additionalProperties: false
+      properties:
+        channels:
+          description: "push, email, in_app (a commercial dispatch: push and email only)"
+          items:
+            enum:
+              - push
+              - email
+              - in_app
+            type: string
+          maxItems: 3
+          minItems: 1
+          type: array
+          uniqueItems: true
+        commercial:
+          description: "Default: the post's nature (company or sponsored post: true). false is refused for a commercial post."
+          type: boolean
+      required:
+        - channels
+      type: object
+    DispatchCountsDTO:
+      additionalProperties: false
+      properties:
+        consented_count:
+          description: Published estimate; null below 10 or before the run
+          format: int64
+          type:
+            - integer
+            - "null"
+        eligible_count:
+          description: Published estimate; null below 10 or before the run
+          format: int64
+          type:
+            - integer
+            - "null"
+        sent_count:
+          description: Published estimate; null below 10 or before the run
+          format: int64
+          type:
+            - integer
+            - "null"
+      required:
+        - eligible_count
+        - consented_count
+        - sent_count
+      type: object
+    DispatchDTO:
+      additionalProperties: false
+      properties:
+        channels:
+          items:
+            type: string
+          type: array
+        commercial:
+          description: "true: consenting students only (6563); false: an informational notice"
+          type: boolean
+        completed_at:
+          format: date-time
+          type: string
+        consented_count:
+          description: "Of them, reachable on a channel (commercial: consenting); null below 10"
+          format: int64
+          type:
+            - integer
+            - "null"
+        created_at:
+          format: date-time
+          type: string
+        dispatch_id:
+          format: uuid
+          type: string
+        eligible_count:
+          description: Reached students (published estimate); null below 10 or before the run
+          format: int64
+          type:
+            - integer
+            - "null"
+        failure_reason:
+          description: Why a cancelled or failed dispatch did not send (a problem code)
+          type: string
+        post_id:
+          format: uuid
+          type: string
+        segment_id:
+          description: The saved segment the post's audience came from
+          format: uuid
+          type: string
+        sent_count:
+          description: Of them, notified; null below 10
+          format: int64
+          type:
+            - integer
+            - "null"
+        started_at:
+          format: date-time
+          type: string
+        status:
+          enum:
+            - scheduled
+            - running
+            - completed
+            - cancelled
+            - failed
+          type: string
+      required:
+        - dispatch_id
+        - post_id
+        - status
+        - channels
+        - commercial
+        - eligible_count
+        - consented_count
+        - sent_count
+        - created_at
+      type: object
+    DispatchList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/DispatchDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
     DocumentDTO:
       additionalProperties: false
       properties:
@@ -7334,6 +7462,9 @@ components:
     StatsDTO:
       additionalProperties: false
       properties:
+        dispatch:
+          $ref: "#/components/schemas/DispatchCountsDTO"
+          description: Only for a targeted post with a notification dispatch
         like_count:
           format: int64
           type: integer
@@ -7876,6 +8007,9 @@ components:
         commercial_flag:
           description: Sponsored content; always true for companies
           type: boolean
+        dispatch:
+          $ref: "#/components/schemas/DispatchBody"
+          description: Notify the audience once the post is published (the rules of createDispatch; a company spends one targeted_dispatch unit)
         event_id:
           description: "event_share: a published public event"
           type: string
@@ -7934,6 +8068,10 @@ components:
           type: boolean
         created_at:
           format: date-time
+          type: string
+        dispatch_id:
+          description: The scheduled notification of the audience (getDispatch)
+          format: uuid
           type: string
         edited_at:
           format: date-time
@@ -17955,6 +18093,151 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: org
+  /api/v1/orgs/{org_id}/dispatches:
+    get:
+      description: Newest first.
+      operationId: listDispatches
+      parameters:
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DispatchList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List an organization's dispatches
+      tags:
+        - outreach
+      x-koro-action: outreach.dispatch.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/dispatches/{dispatch_id}:
+    get:
+      description: "eligible_count, consented_count and sent_count are published estimates (rounded down like the audience count) and null below 10 or before the run: an exact delivery count is never shown."
+      operationId: getDispatch
+      parameters:
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Dispatch ID (an unknown, malformed or other org's ID is 404)
+          in: path
+          name: dispatch_id
+          required: true
+          schema:
+            description: Dispatch ID (an unknown, malformed or other org's ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DispatchDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a dispatch
+      tags:
+        - outreach
+      x-koro-action: outreach.dispatch.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/dispatches/{dispatch_id}/cancel:
+    post:
+      description: Only a scheduled dispatch (409 outreach.invalid_state once it runs); a company's targeted_dispatch unit goes back. Cancelling a cancelled dispatch changes nothing.
+      operationId: cancelDispatch
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Dispatch ID (an unknown, malformed or other org's ID is 404)
+          in: path
+          name: dispatch_id
+          required: true
+          schema:
+            description: Dispatch ID (an unknown, malformed or other org's ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DispatchDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Cancel a scheduled dispatch
+      tags:
+        - outreach
+      x-koro-action: outreach.dispatch.cancel
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: org
   /api/v1/orgs/{org_id}/entitlement-usages:
     get:
       description: Consumptions (positive quantity) and their reversals (negative quantity), newest first. actor_user_id is returned to platform_admin and finance_admin only.
@@ -19651,7 +19934,7 @@ paths:
       x-koro-surface: org
   /api/v1/orgs/{org_id}/targeted-posts:
     post:
-      description: "A segment draft: the audience is a saved segment of the organization or an inline definition (OR inside a dimension, AND across). A club addresses its own members (club:<id>, a sensitive club too) without the k ≥ 10 rule; a university narrows its own university; a company targets any non-sensitive audience of at least 10 students and spends one targeted_post unit (403 entitlements.not_entitled without one). The audience is fixed here: it never changes, deleting the draft gives the unit back. Each call spends one unit of the organization's daily count budget (429)."
+      description: "A segment draft: the audience is a saved segment of the organization or an inline definition (OR inside a dimension, AND across). A club addresses its own members (club:<id>, a sensitive club too) without the k ≥ 10 rule; a university narrows its own university; a company targets any non-sensitive audience of at least 10 students and spends one targeted_post unit (403 entitlements.not_entitled without one). The audience is fixed here: it never changes, deleting the draft gives the unit back. Each call spends one unit of the organization's daily count budget (429). With dispatch, the audience is notified once the post is published (createDispatch's rules, in the same transaction)."
       operationId: createTargetedPost
       parameters:
         - description: Organization ID
@@ -19856,6 +20139,57 @@ paths:
       tags:
         - feed
       x-koro-action: feed.post.update
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+  /api/v1/posts/{post_id}/dispatches:
+    post:
+      description: "Schedules the notification of a targeted post's audience (at most one dispatch per post, 409 outreach.dispatch_exists); it runs once the post is published. A company's dispatch, and the dispatch of a sponsored post, is commercial: it reaches only the students whose commercial consent of the channel is in force, goes by push or e-mail (never in-app) and spends one targeted_dispatch unit (403 entitlements.not_entitled without one). A club's or university's informational notice needs neither consent nor a unit. Students under 18 and sensitive clubs are never reached; a club's notice to its own members goes to its member list. Counts are published estimates only (null below 10)."
+      operationId: createDispatch
+      parameters:
+        - description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Post ID (an unknown, malformed or other org's post is 404)
+          in: path
+          name: post_id
+          required: true
+          schema:
+            description: Post ID (an unknown, malformed or other org's post is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DispatchBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DispatchDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Notify a targeted post's audience
+      tags:
+        - outreach
+      x-koro-action: outreach.dispatch.create
+      x-koro-idempotency: required
       x-koro-rate-limit: write_default
       x-koro-surface: resource
   /api/v1/posts/{post_id}/hide:

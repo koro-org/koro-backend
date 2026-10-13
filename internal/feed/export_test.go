@@ -14,6 +14,7 @@ var (
 	ToPostDTO     = toPostDTO
 	ToManageDTO   = toManageDTO
 	ToTargetedDTO = toTargetedDTO
+	ToStatsDTO    = toStatsDTO
 	ToReportDTO   = toReportDTO
 	// NoticeTemplates are the notify templates of the moderation notices.
 	NoticeTemplates = []string{templateReviewSubmitted, templateReportCreated, templatePostApproved, templatePostActioned,

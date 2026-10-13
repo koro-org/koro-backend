@@ -120,4 +120,10 @@ func TestSeedDemo_Idempotent(t *testing.T) {
 		seed.StudentEmail).Scan(&withPassword); err != nil || withPassword != 1 {
 		t.Fatalf("demo student password = %d (%v)", withPassword, err)
 	}
+	// 06 H-66: no platform role account gets the demo password.
+	var staffWithPassword int
+	if err := d.Pool.QueryRow(t.Context(), `SELECT count(*) FROM users u JOIN platform_role_assignments r ON r.user_id = u.id
+		WHERE u.password_hash IS NOT NULL`).Scan(&staffWithPassword); err != nil || staffWithPassword != 0 {
+		t.Fatalf("platform role accounts with a password = %d (%v), want 0", staffWithPassword, err)
+	}
 }

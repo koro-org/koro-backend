@@ -13,14 +13,21 @@ import "uuid"
 //	outreach.audience.count   the same S roles (k16 for club_admin, U for university_rep: the
 //	                            service's scope check); platform_admin for every org (✓)
 //
-// The dispatch actions (outreach.dispatch.*) come with BE-035: no grant
-// until then (403).
+// and by BE-035 for the dispatch actions:
 //
-// Resources (03 §3.5): segment with OrgID = the org of the path; every
-// action addresses the org management surface (/orgs/{org_id}/segments,
-// /orgs/{org_id}/audience-counts): the org's active members and every
-// platform role see it (403 without the grant), everyone else gets 404
-// (03 §3.6). A segment of another org is the service's 404 (it reads the
+//	outreach.dispatch.create  S·k18: the same S roles of the post's org; platform_admin k-po (the
+//	                            platform org's posts). k18 (a company's targeted_dispatch unit and
+//	                            the commercial consent filter) and k16 (the scope) are the service's
+//	outreach.dispatch.list    the same S roles; platform_admin for every org (✓)
+//	outreach.dispatch.read
+//	outreach.dispatch.cancel
+//
+// Resources (03 §3.5): segment and dispatch with OrgID = the org (of the
+// path; of the post row for createDispatch, 06 H-38); every action
+// addresses the org management surface (/orgs/{org_id}/segments,
+// /orgs/{org_id}/audience-counts, /orgs/{org_id}/dispatches): the org's
+// active members and every platform role see it (403 without the grant),
+// everyone else gets 404 (03 §3.6). A segment of another org is the service's 404 (it reads the
 // segment within the path's org). MFA follows from the role paths (k-mfa:
 // university_rep, company_admin, platform_admin; not career_staff or
 // company_member). career_staff takes the university_rep cells (03 §1.1
@@ -30,20 +37,20 @@ import "uuid"
 func outreachPolicy() Policy {
 	return Policy{
 		Visible: func(a Actor, act Action, r Resource) bool {
-			return r.Type == TypeSegment && OrgSurfaceVisible(a, r.OrgID)
+			return (r.Type == TypeSegment || r.Type == TypeDispatch) && OrgSurfaceVisible(a, r.OrgID)
 		},
 		Grants: func(a Actor, act Action, r Resource) []Grant {
 			switch act {
-			case OutreachSegmentList, OutreachSegmentRead, OutreachSegmentManage:
+			case OutreachSegmentList, OutreachSegmentRead, OutreachSegmentManage, OutreachDispatchCreate:
 				gs := targetingGrants(a, r.OrgID)
 				if platformOrg(a, r.OrgID) { // k-po
 					gs = append(gs, Grant{Role: RolePlatformAdmin})
 				}
 				return gs
-			case OutreachAudienceCount:
+			case OutreachAudienceCount, OutreachDispatchList, OutreachDispatchRead, OutreachDispatchCancel:
 				return append(targetingGrants(a, r.OrgID), Grant{Role: RolePlatformAdmin})
 			}
-			return nil // outreach.dispatch.*: BE-035
+			return nil
 		},
 	}
 }

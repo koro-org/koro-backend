@@ -1,0 +1,3 @@
+version: 1
+category: commercial
+channels: [push, email]

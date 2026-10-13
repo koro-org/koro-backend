@@ -416,11 +416,16 @@ func TestSyncWritesAreAllowed(t *testing.T) {
 	// + kvkk → files.Files.Delete (06 H-49, BE-049), + feed →
 	// entitlements.Entitlements.Release (BE-032: the targeted_post unit of a
 	// deleted or rejected draft; 04 §2.7 deletePost "+ hak iadesi"), +
-	// identity, directory, students and feed → files.Files.Delete (BE-057).
-	if len(allow) != 26 {
-		t.Fatalf("sync_writes.txt has %d lines, want 26", len(allow))
+	// identity, directory, students and feed → files.Files.Delete (BE-057),
+	// + outreach → entitlements.Entitlements.Release and feed →
+	// outreach.Targeting.DiscardDispatch (BE-035: the dispatch unit back,
+	// the dispatch of a withdrawn draft).
+	if len(allow) != 28 {
+		t.Fatalf("sync_writes.txt has %d lines, want 28", len(allow))
 	}
 	for _, must := range []string{"kvkk files.Files.Delete", "feed entitlements.Entitlements.Release",
+		"outreach entitlements.Entitlements.Release", "feed outreach.Targeting.DiscardDispatch",
+		"feed outreach.Targeting.ScheduleDispatch", "outreach entitlements.Entitlements.Consume",
 		"identity files.Files.Delete", "directory files.Files.Delete", "students files.Files.Delete", "feed files.Files.Delete",
 		"* audit.Logger.Log", "* files.Files.Attach", "payments orders.Orders.ApplyPayment", "payments ledger.Poster.Post",
 		"directory orgs.OrgAdmin.GrantRole", "directory orgs.OrgAdmin.Create", "orders catalog.Offerings.Release",

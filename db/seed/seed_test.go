@@ -289,3 +289,57 @@ func TestBuild_Deterministic(t *testing.T) {
 		t.Fatalf("two universities: %v", err)
 	}
 }
+
+// TestSeedDemo_PrivilegedAccountsHaveNoPassword (06 H-66, T-287): with
+// -password, the student, club and company accounts get the demo password
+// but no account holding a platform role (platform_admin, finance_admin,
+// dpo, moderator, support, talent_auditor) ever does: they are opened by a
+// password reset and TOTP enrolment, so the shared demo password opens no
+// privileged account without MFA.
+func TestSeedDemo_PrivilegedAccountsHaveNoPassword(t *testing.T) {
+	t.Parallel()
+	p := build(t, reference(), now)
+	pw := map[uuid.UUID]any{}
+	email := map[uuid.UUID]string{}
+	for _, u := range rows(p, "users") {
+		id, ok := u["id"].(uuid.UUID)
+		if !ok {
+			t.Fatalf("users.id %T", u["id"])
+		}
+		pw[id], email[id] = u["password_hash"], u["email"].(string)
+	}
+	privileged := 0
+	for _, r := range rows(p, "platform_role_assignments") {
+		id, ok := r["user_id"].(uuid.UUID)
+		if !ok {
+			t.Fatalf("platform_role_assignments.user_id %T", r["user_id"])
+		}
+		privileged++
+		if h, ok := pw[id]; !ok || h != nil {
+			t.Errorf("%s (%v) has password hash %v, want none", email[id], r["role"], h)
+		}
+	}
+	if privileged < 7 {
+		t.Fatalf("%d platform role assignments, want the 7 demo staff", privileged)
+	}
+	for _, a := range p.Accounts {
+		isStaff := slices.Contains([]string{"platform_admin", "finance_admin", "dpo", "moderator", "support", "talent_auditor"}, a.Role)
+		if a.NoPassword != isStaff {
+			t.Errorf("account %s (%s): NoPassword = %v", a.Email, a.Role, a.NoPassword)
+		}
+	}
+	for _, e := range []string{seed.StudentEmail, seed.ClubAdminEmail, seed.CompanyEmail, seed.RepEmail} {
+		found := false
+		for id, m := range email {
+			if m == e {
+				found = true
+				if h, _ := pw[id].(string); !strings.HasPrefix(h, "$argon2id$") {
+					t.Errorf("%s has no demo password", e)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s is not seeded", e)
+		}
+	}
+}

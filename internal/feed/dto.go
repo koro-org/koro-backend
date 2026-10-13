@@ -106,11 +106,29 @@ type PublishResult struct {
 	PublishedAt *time.Time `json:"published_at,omitempty"`
 }
 
-// StatsDTO is the answer of getPostStats (04 §2.7). dispatch (targeted
-// posts with a notification dispatch, k ≥ 10) comes with BE-032/BE-035.
+// StatsDTO is the answer of getPostStats (04 §2.7). dispatch: a targeted
+// post's notification dispatch (BE-035), its counts as published estimates
+// (null below 10, 06 H-61).
 type StatsDTO struct {
-	LikeCount int `json:"like_count"`
-	SaveCount int `json:"save_count"`
+	LikeCount int                `json:"like_count"`
+	SaveCount int                `json:"save_count"`
+	Dispatch  *DispatchCountsDTO `json:"dispatch,omitempty" doc:"Only for a targeted post with a notification dispatch"`
+}
+
+// DispatchCountsDTO is getPostStats' dispatch (04 §2.7): the counts of
+// outreach's getDispatch.
+type DispatchCountsDTO struct {
+	EligibleCount  *int `json:"eligible_count" doc:"Published estimate; null below 10 or before the run"`
+	ConsentedCount *int `json:"consented_count" doc:"Published estimate; null below 10 or before the run"`
+	SentCount      *int `json:"sent_count" doc:"Published estimate; null below 10 or before the run"`
+}
+
+func toStatsDTO(st Stats) StatsDTO {
+	out := StatsDTO{LikeCount: st.LikeCount, SaveCount: st.SaveCount}
+	if d := st.Dispatch; d != nil {
+		out.Dispatch = &DispatchCountsDTO{EligibleCount: d.Eligible, ConsentedCount: d.Consented, SentCount: d.Sent}
+	}
+	return out
 }
 
 func toPostDTO(v PostView) PostDTO {

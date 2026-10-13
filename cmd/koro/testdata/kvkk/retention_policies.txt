@@ -57,8 +57,8 @@ event_export_file             todo:BE-050
 post_removed                  sweeper:feed
 content_report                sweeper:feed
 moderation_action             sweeper:feed
-# outreach: outreach_dispatches are written by BE-035
-outreach_dispatch             todo:BE-035
+# outreach: the dispatch rows (BE-035): finished dispatches 2 years after created_at
+outreach_dispatch             sweeper:outreach
 # messaging (P3)
 contact_request_closed        todo:BE-056
 # talent (P3)

@@ -236,6 +236,9 @@ func (s *service) transition(ctx context.Context, a authz.Actor, p Post, act Mod
 		if err := s.releaseUnit(ctx, p); err != nil {
 			return Post{}, err
 		}
+		if err := s.discardDispatch(ctx, a, p); err != nil { // BE-035: its dispatch never runs
+			return Post{}, err
+		}
 		next.Status, next.RemovedAt, next.ReviewedBy, next.ReviewedAt = StatusRemoved, &now, &me, &now
 	case act == ModRestore && p.Status == StatusHidden:
 		next.Status = StatusPublished

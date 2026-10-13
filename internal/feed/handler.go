@@ -508,5 +508,5 @@ func (h handler) postStats(ctx context.Context, in *PostPath) (*statsOutput, err
 	if err != nil {
 		return nil, err
 	}
-	return &statsOutput{Body: StatsDTO(st)}, nil
+	return &statsOutput{Body: toStatsDTO(st)}, nil
 }

@@ -3,6 +3,7 @@ package feed
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"uuid"
 
@@ -21,15 +22,21 @@ import (
 // Both happen in the transaction that writes the draft (one Idempotency-
 // Key, one compilation, one unit); the audience never changes afterwards
 // (updatePost refuses it, publication keeps it). Deleting the draft — or a
-// moderator rejecting it in review — gives the unit back.
+// moderator rejecting it in review — gives the unit back. BE-035: the
+// draft may ask outreach to notify its audience once it is published
+// (Dispatch, "yayında bildir"): the dispatch is scheduled in the same
+// transaction with a company's targeted_dispatch unit, and withdrawn with
+// the draft.
 
 // TargetedInput is createTargetedPost's body: PostWrite (its AudienceKind
-// is ignored: the post is a segment post) and the audience, exactly one of
-// a saved segment of the org and an inline definition.
+// is ignored: the post is a segment post), the audience, exactly one of a
+// saved segment of the org and an inline definition, and the optional
+// notification of the audience on publication.
 type TargetedInput struct {
 	Post       PostInput
 	SegmentID  *uuid.UUID
 	Definition *outreach.Definition
+	Dispatch   *outreach.DispatchRequest
 }
 
 // TargetedView is the created draft in its management view with the
@@ -44,6 +51,24 @@ type TargetedView struct {
 	// Remaining is the company's targeted_post units left; nil for the
 	// authors that spend none (club, university, platform).
 	Remaining *int
+	// DispatchID is the post's scheduled notification dispatch, if any.
+	DispatchID *uuid.UUID
+}
+
+// DispatchInfo is the outreach view of a post (01 §5.3 "feed ↔ outreach":
+// the feed hands the content summary over; outreach never imports the
+// feed).
+func (s PostSummary) DispatchInfo() outreach.PostInfo {
+	out := outreach.PostInfo{
+		ID: s.ID, OrgID: s.OrgID, AuthorKind: outreach.AuthorKind(s.AuthorKind), Status: outreach.PostStatus(s.Status),
+		Targeted: s.AudienceKind == AudienceSegment, Keys: slices.Clone(s.AudienceKeys), DimCount: s.DimCount,
+		Title: s.Title, Commercial: s.Commercial,
+	}
+	if s.SegmentID != nil {
+		id := *s.SegmentID
+		out.SegmentID = &id
+	}
+	return out
 }
 
 // audienceSnapshot is posts.audience_snapshot: the definition the keys
@@ -91,6 +116,9 @@ func (s *service) CreateTargetedPost(ctx context.Context, a authz.Actor, orgID u
 	quota := spendsQuota(kind)
 	if s.d.Targeting == nil || quota && s.d.Entitlements == nil {
 		return TargetedView{}, problem.ErrUnavailable
+	}
+	if in.Dispatch != nil && len(in.Dispatch.Channels) == 0 {
+		return TargetedView{}, fieldErr("body.dispatch.channels", "at least one channel is required")
 	}
 	if (in.SegmentID == nil) == (in.Definition == nil) {
 		return TargetedView{}, fieldErr("body.audience", "exactly one of segment_id and definition is required")
@@ -140,12 +168,22 @@ func (s *service) CreateTargetedPost(ctx context.Context, a authz.Actor, orgID u
 		}
 		meta := map[string]any{
 			"kind": string(p.Kind), "audience_kind": string(p.AudienceKind), "dimensions": int(p.AudienceDimCount),
-			"commercial": p.CommercialFlag, "quota_consumed": quota,
+			"commercial": p.CommercialFlag, "quota_consumed": quota, "dispatch": in.Dispatch != nil,
 		}
 		if c.SegmentID != nil {
 			meta["segment_id"] = c.SegmentID.String()
 		}
-		return p.ID, s.d.Audit.Log(ctx, auditEvent(a, authz.FeedPostCreateTargeted, p, meta))
+		if err := s.d.Audit.Log(ctx, auditEvent(a, authz.FeedPostCreateTargeted, p, meta)); err != nil {
+			return uuid.Nil(), err
+		}
+		if in.Dispatch != nil { // "notify on publish": same transaction (01 §6.3)
+			if _, err := s.d.Targeting.ScheduleDispatch(ctx, outreach.DispatchInput{
+				Actor: a, Post: summaryOf(p).DispatchInfo(), Channels: in.Dispatch.Channels, Commercial: in.Dispatch.Commercial,
+			}); err != nil {
+				return uuid.Nil(), err
+			}
+		}
+		return p.ID, nil
 	})
 	if err != nil {
 		return TargetedView{}, err
@@ -166,7 +204,31 @@ func (s *service) CreateTargetedPost(ctx context.Context, a authz.Actor, orgID u
 		left := av.Remaining
 		out.Remaining = &left
 	}
+	if in.Dispatch != nil {
+		dv, ok, err := s.d.Targeting.DispatchOfPost(ctx, o.ID, id)
+		if err != nil {
+			return TargetedView{}, err
+		}
+		if ok {
+			did := dv.ID
+			out.DispatchID = &did
+		}
+	}
 	return out, nil
+}
+
+// discardDispatch withdraws the dispatch of a post that leaves before it
+// was ever published (draft deleted, rejected in review), in the
+// transaction carried by ctx; only a segment post can have one. Without
+// outreach the dispatch (and its unit) would be stranded: fail closed.
+func (s *service) discardDispatch(ctx context.Context, a authz.Actor, p Post) error {
+	if p.AudienceKind != AudienceSegment {
+		return nil
+	}
+	if s.d.Targeting == nil {
+		return problem.ErrUnavailable
+	}
+	return s.d.Targeting.DiscardDispatch(ctx, a, p.OrgID, p.ID)
 }
 
 // withAudience writes the compiled targeting onto a draft: the keys and

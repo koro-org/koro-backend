@@ -1,4 +1,4 @@
-# Authz matrix of the outreach module (03 §5.8, 04 §2.8; BE-030). 6 operations × 18 personas.
+# Authz matrix of the outreach module (03 §5.8, 04 §2.8; BE-030, BE-035). 10 operations × 18 personas.
 # Every operation is the org management surface /orgs/{org_id}/... (03 §3.6): the org's members without
 # the role → 403, non-members → 404, every platform role sees it (403 without the grant). S cells: the
 # org's club_admin, university_rep, company_member (recruiter) and company_admin. k-po: platform_admin
@@ -8,6 +8,11 @@
 # under an org's path is 404 (IDOR). Fixtures: fixtures/outreach.yaml (matrix_outreach_test.go), dated
 # 2026-10-01T00:00:00Z: an untouched segment's ETag is "1hmhuo3hji000". The matrix students have no
 # eligible audience: every count is 200 with count null and below_threshold true.
+# BE-035 dispatches: createDispatch addresses the org of its post (the post row, 06 H-38): the post's org members
+# without the role → 403, everyone else 404; k-po for platform_admin (403 outside the platform org). list, read and
+# cancel are the org surface with platform_admin ✓ (any org). k18 (the company's targeted_dispatch unit, the
+# commercial consent filter) and the scope are the service's (scenarios). Fixtures: targeted posts and dispatches of
+# fixtures/outreach.yaml; company_a holds 5 targeted_dispatch units (fixtures/entitlements.yaml).
 version: 1
 groups:
   # signed-in users without a membership in company_a (and no platform role).
@@ -337,8 +342,140 @@ operations:
           "@out_other_staff": 403
           platform_admin: 404            # the org does not exist
 
-pending_actions:
-  - outreach.dispatch.create   # BE-035
-  - outreach.dispatch.list     # BE-035
-  - outreach.dispatch.read     # BE-035
-  - outreach.dispatch.cancel   # BE-035
+  createDispatch:
+    method: POST
+    path: /api/v1/posts/{post_id}/dispatches
+    action: outreach.dispatch.create
+    idempotency: required
+    path_params: { post_id: tpost_company_a }
+    body: bodies/outreach/dispatch_push.json
+    note: a company's dispatch is commercial and spends one targeted_dispatch unit (k18)
+    expect:
+      anonymous: 401
+      "@out_outsiders_company_a": 404
+      company_member: 201
+      company_admin: 201
+      "@platform_staff": 403   # k-po: platform_admin only for the platform org's posts
+    variants:
+      - name: club_own_members
+        path_params: { post_id: tpost_club_a }
+        body: bodies/outreach/dispatch_in_app.json
+        note: T-16 — a club's notice to its own members is informational (no consent, no unit, no k ≥ 10)
+        expect:
+          anonymous: 401
+          "@out_outsiders_club_a": 404
+          club_member: 403
+          club_admin: 201
+          "@platform_staff": 403
+      - name: university_own
+        path_params: { post_id: tpost_uni_a }
+        body: bodies/outreach/dispatch_push.json
+        expect:
+          anonymous: 401
+          "@out_outsiders_uni_a": 404
+          university_rep: 201
+          "@platform_staff": 403
+      - name: unknown_post
+        path_params: { post_id: "literal:00000000-0000-7000-8000-0000000000ac" }
+        note: the post decides the org; a missing post is 404 for everyone
+        expect:
+          anonymous: 401
+          "@out_no_platform_role": 404
+          "@platform_staff": 404
+
+  listDispatches:
+    method: GET
+    path: /api/v1/orgs/{org_id}/dispatches
+    action: outreach.dispatch.list
+    path_params: { org_id: company_a }
+    expect:
+      anonymous: 401
+      "@out_outsiders_company_a": 404
+      company_member: 200
+      company_admin: 200
+      "@out_other_staff": 403
+      platform_admin: 200      # ✓ for every org
+    variants:
+      - name: club_org
+        path_params: { org_id: club_a }
+        expect:
+          anonymous: 401
+          "@out_outsiders_club_a": 404
+          club_member: 403
+          club_admin: 200
+          "@out_other_staff": 403
+          platform_admin: 200
+      - name: university_org
+        path_params: { org_id: uni_a }
+        expect:
+          anonymous: 401
+          "@out_outsiders_uni_a": 404
+          university_rep: 200
+          "@out_other_staff": 403
+          platform_admin: 200
+
+  getDispatch:
+    method: GET
+    path: /api/v1/orgs/{org_id}/dispatches/{dispatch_id}
+    action: outreach.dispatch.read
+    path_params: { org_id: company_a, dispatch_id: disp_company_a }
+    expect:
+      anonymous: 401
+      "@out_outsiders_company_a": 404
+      company_member: 200
+      company_admin: 200
+      "@out_other_staff": 403
+      platform_admin: 200
+    variants:
+      - name: other_orgs_dispatch
+        path_params: { org_id: company_a, dispatch_id: disp_company_b }
+        note: IDOR — company_b's dispatch under company_a's path is not found (06 H-38)
+        expect:
+          anonymous: 401
+          "@out_outsiders_company_a": 404
+          company_member: 404
+          company_admin: 404
+          "@out_other_staff": 403
+          platform_admin: 404
+      - name: club_dispatch
+        path_params: { org_id: club_a, dispatch_id: disp_club_a }
+        expect:
+          anonymous: 401
+          "@out_outsiders_club_a": 404
+          club_member: 403
+          club_admin: 200
+          "@out_other_staff": 403
+          platform_admin: 200
+
+  cancelDispatch:
+    method: POST
+    path: /api/v1/orgs/{org_id}/dispatches/{dispatch_id}/cancel
+    action: outreach.dispatch.cancel
+    path_params: { org_id: company_a, dispatch_id: disp_company_a_scheduled }
+    expect:
+      anonymous: 401
+      "@out_outsiders_company_a": 404
+      company_member: 200
+      company_admin: 200
+      "@out_other_staff": 403
+      platform_admin: 200
+    variants:
+      - name: other_orgs_dispatch
+        path_params: { org_id: company_a, dispatch_id: disp_company_b }
+        expect:
+          anonymous: 401
+          "@out_outsiders_company_a": 404
+          company_member: 404
+          company_admin: 404
+          "@out_other_staff": 403
+          platform_admin: 404
+      - name: club_dispatch
+        path_params: { org_id: club_a, dispatch_id: disp_club_a }
+        note: cancelling a cancelled dispatch changes nothing
+        expect:
+          anonymous: 401
+          "@out_outsiders_club_a": 404
+          club_member: 403
+          club_admin: 200
+          "@out_other_staff": 403
+          platform_admin: 200

@@ -35,3 +35,23 @@ func TestOutreach_CountDailyLimitDefaultAndBounds(t *testing.T) {
 		}
 	}
 }
+
+func TestOutreach_UnsubscribeURL(t *testing.T) {
+	t.Parallel()
+	env := func(v string) map[string]string {
+		return map[string]string{"APP_ENV": "dev", "OUTREACH_UNSUBSCRIBE_URL": v}
+	}
+	cfg, err := config.Load[outreachOnly](map[string]string{"APP_ENV": "dev"})
+	if err != nil || cfg.Outreach.UnsubscribeURL != "" {
+		t.Fatalf("default = %+v, %v (empty: no commercial e-mail)", cfg.Outreach, err)
+	}
+	if cfg, err := config.Load[outreachOnly](env(" https://koro.example.test/unsubscribe ")); err != nil ||
+		cfg.Outreach.UnsubscribeURL != "https://koro.example.test/unsubscribe" {
+		t.Fatalf("https = %+v, %v", cfg.Outreach, err)
+	}
+	for _, v := range []string{"http://koro.example.test/u", "/unsubscribe", "https://", "https://koro.example.test/u#x"} {
+		if _, err := config.Load[outreachOnly](env(v)); err == nil || !strings.Contains(err.Error(), "OUTREACH_UNSUBSCRIBE_URL") {
+			t.Fatalf("%q accepted: %v", v, err)
+		}
+	}
+}

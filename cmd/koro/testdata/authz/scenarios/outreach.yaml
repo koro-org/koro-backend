@@ -1,4 +1,4 @@
-# Multi-step scenarios of the outreach module (03 §7.7; BE-030).
+# Multi-step scenarios of the outreach module (03 §7.7; BE-030, BE-035).
 version: 1
 scenarios:
   sensitive_club_targeting:
@@ -70,3 +70,58 @@ scenarios:
           body: bodies/outreach/count_uni_a.json, expect: 403, code: authz.mfa_required }
       - { persona: company_member, mfa: false, operation: countAudience, path_params: { org_id: company_a },
           expect: 200 }
+  dispatch_k18_lifecycle:
+    note: >-
+      03 k18, 04 §2.8 (BE-035) — a company's dispatch is commercial and spends one targeted_dispatch unit; one
+      dispatch per post (409 outreach.dispatch_exists); cancel while scheduled (a second cancel changes nothing), a
+      finished dispatch cannot be cancelled (409 outreach.invalid_state); a commercial dispatch never goes in-app and
+      cannot be informational (422); a sensitive club is never a company's target (422); only a targeted post is
+      dispatched (422 outreach.post_not_targeted); without a unit 403 entitlements.not_entitled ("Hak yok").
+    steps:
+      - { persona: company_member, operation: createDispatch, path_params: { post_id: tpost_company_a },
+          body: bodies/outreach/dispatch_push.json, expect: 201, save: { disp_new: dispatch_id } }
+      - { persona: company_admin, operation: createDispatch, path_params: { post_id: tpost_company_a },
+          body: bodies/outreach/dispatch_push.json, expect: 409, code: outreach.dispatch_exists }
+      - { persona: company_admin, operation: getDispatch, path_params: { org_id: company_a, dispatch_id: disp_new },
+          expect: 200 }
+      - { persona: company_admin, operation: cancelDispatch, path_params: { org_id: company_a, dispatch_id: disp_new },
+          expect: 200 }
+      - { persona: company_member, operation: cancelDispatch, path_params: { org_id: company_a, dispatch_id: disp_new },
+          expect: 200 }
+      - { persona: company_admin, operation: cancelDispatch,
+          path_params: { org_id: company_a, dispatch_id: disp_company_a }, expect: 409, code: outreach.invalid_state }
+      - { persona: company_admin, operation: createDispatch, path_params: { post_id: tpost_company_a_free },
+          body: bodies/outreach/dispatch_in_app.json, expect: 422, code: validation_failed }
+      - { persona: company_admin, operation: createDispatch, path_params: { post_id: tpost_company_a_free },
+          body: bodies/outreach/dispatch_not_commercial.json, expect: 422, code: validation_failed }
+      - { persona: company_admin, operation: createDispatch, path_params: { post_id: tpost_company_sensitive },
+          body: bodies/outreach/dispatch_push.json, expect: 422, code: outreach.sensitive_target }
+      - { persona: company_admin, operation: createDispatch, path_params: { post_id: post_company },
+          body: bodies/outreach/dispatch_push.json, expect: 422, code: outreach.post_not_targeted }
+      - { hook: entitlements.reset, args: { org: company_a } }
+      - { persona: company_admin, operation: createDispatch, path_params: { post_id: tpost_company_a_free },
+          body: bodies/outreach/dispatch_push.json, expect: 403, code: entitlements.not_entitled }
+  dispatch_scope_t258:
+    note: >-
+      T-258, 03 k16 (BE-035) — a sensitive club's own club_admin notifies its members (the member list, no count);
+      nobody else reaches a club's or a university's post (404 outside the org); a club_admin addresses only its own
+      members.
+    steps:
+      - { persona: club_admin_sensitive, operation: createDispatch, path_params: { post_id: tpost_sensitive },
+          body: bodies/outreach/dispatch_in_app.json, expect: 201, save: { disp_sensitive: dispatch_id } }
+      - { persona: club_admin_sensitive, operation: getDispatch,
+          path_params: { org_id: club_sensitive, dispatch_id: disp_sensitive }, expect: 200 }
+      - { persona: club_admin, operation: createDispatch, path_params: { post_id: tpost_sensitive },
+          body: bodies/outreach/dispatch_in_app.json, expect: 404 }
+      - { persona: university_rep, operation: createDispatch, path_params: { post_id: tpost_club_a },
+          body: bodies/outreach/dispatch_in_app.json, expect: 404 }
+      - { persona: club_admin, operation: createDispatch, path_params: { post_id: tpost_club_a },
+          body: bodies/outreach/dispatch_in_app.json, expect: 201 }
+  dispatch_mfa:
+    note: >-
+      k-mfa (03 §6.4) — company_admin dispatches with an MFA session only; company_member (recruiter) needs none.
+    steps:
+      - { persona: company_admin, mfa: false, operation: createDispatch, path_params: { post_id: tpost_company_a },
+          body: bodies/outreach/dispatch_push.json, expect: 403, code: authz.mfa_required }
+      - { persona: company_member, mfa: false, operation: createDispatch, path_params: { post_id: tpost_company_a },
+          body: bodies/outreach/dispatch_push.json, expect: 201 }

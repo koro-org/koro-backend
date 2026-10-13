@@ -313,6 +313,9 @@ func (s *service) DeletePost(ctx context.Context, a authz.Actor, id uuid.UUID) e
 			if err := s.releaseUnit(ctx, p); err != nil {
 				return err
 			}
+			if err := s.discardDispatch(ctx, a, p); err != nil { // BE-035: before the post (FK)
+				return err
+			}
 			if err := s.d.Store.DeletePost(ctx, p.OrgID, p.ID); err != nil {
 				return err
 			}

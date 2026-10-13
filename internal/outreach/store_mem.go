@@ -23,8 +23,9 @@ var errCheck = problem.ErrValidation.Wrap(errors.New("outreach: check constraint
 // constraints of segments; every method is atomic under one mutex and it
 // has no transactions (db.NopTx).
 type MemStore struct {
-	mu   sync.Mutex
-	rows map[uuid.UUID]Segment
+	mu         sync.Mutex
+	rows       map[uuid.UUID]Segment
+	dispatches map[uuid.UUID]Dispatch
 	// now stamps created_at and updated_at like the column default and the
 	// segments_touch_updated_at trigger.
 	now func() time.Time
@@ -34,7 +35,7 @@ var _ Store = (*MemStore)(nil)
 
 // NewMemStore returns an empty in-memory store; now stamps the timestamps.
 func NewMemStore(now func() time.Time) *MemStore {
-	return &MemStore{rows: map[uuid.UUID]Segment{}, now: now}
+	return &MemStore{rows: map[uuid.UUID]Segment{}, dispatches: map[uuid.UUID]Dispatch{}, now: now}
 }
 
 // Put stores s as is (test fixtures: fixed timestamps for a known ETag).

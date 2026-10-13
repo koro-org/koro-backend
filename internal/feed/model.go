@@ -184,7 +184,8 @@ type Opportunity struct {
 }
 
 // PostSummary is the cross-module view of a post (01 §4.14 Posts.Get):
-// messaging checks an opportunity call through it.
+// messaging checks an opportunity call through it; outreach reads a
+// targeted post's targeting through it (BE-035, DispatchInfo).
 type PostSummary struct {
 	ID          uuid.UUID
 	OrgID       uuid.UUID
@@ -192,6 +193,13 @@ type PostSummary struct {
 	Status      Status
 	Title       string
 	Opportunity *Opportunity // opportunity_call only
+
+	AuthorKind   AuthorKind
+	AudienceKind AudienceKind
+	AudienceKeys []string
+	DimCount     int16
+	SegmentID    *uuid.UUID // the saved segment of a targeted post (audience_snapshot)
+	Commercial   bool       // commercial_flag
 }
 
 // JSON is a jsonb column; nil is SQL NULL. Scan copies the driver's bytes.

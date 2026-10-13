@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,7 +17,10 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
+	"koro/internal/consent"
 	"koro/internal/directory"
+	"koro/internal/entitlements"
+	"koro/internal/identity"
 	"koro/internal/orgs"
 	"koro/internal/outreach"
 	"koro/internal/platform/clock"
@@ -24,6 +28,7 @@ import (
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/obs"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/problem"
 	"koro/internal/platform/ratelimit"
 	"koro/internal/students"
@@ -49,6 +54,7 @@ var (
 
 // profile is one student as count_segment sees it.
 type profile struct {
+	id       uuid.UUID
 	keys     []string
 	eligible bool // audience_eligible: verified, adult, active
 }
@@ -63,14 +69,19 @@ type fakeAudience struct {
 	sensitive map[string]bool // club keys students never counts
 	calls     int
 	err       error
+	streams   int // Stream calls (BE-035)
 }
 
-func (f *fakeAudience) add(n int, eligible bool, keys ...string) {
+// add adds n profiles holding keys and returns their user IDs.
+func (f *fakeAudience) add(n int, eligible bool, keys ...string) []uuid.UUID {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	for range n {
-		f.profiles = append(f.profiles, profile{keys: keys, eligible: eligible})
+	ids := make([]uuid.UUID, n)
+	for i := range n {
+		ids[i] = uuid.NewV7()
+		f.profiles = append(f.profiles, profile{id: ids[i], keys: keys, eligible: eligible})
 	}
+	return ids
 }
 
 func (f *fakeAudience) reset() {
@@ -86,6 +97,45 @@ func (f *fakeAudience) Count(_ context.Context, spec students.AudienceSpec) (int
 	if f.err != nil {
 		return 0, f.err
 	}
+	ids := f.match(spec)
+	if len(ids) < 10 {
+		return 0, students.ErrAudienceTooSmall
+	}
+	return len(ids), nil
+}
+
+// Stream implements outreach.Recipients like students: k ≥ 10 first (fn
+// never called below), then every eligible matching profile in user_id
+// order. (students also drops minors against identity; the fake leaves
+// that to outreach's own check, which the tests exercise.)
+func (f *fakeAudience) Stream(ctx context.Context, spec students.AudienceSpec, fn func(uuid.UUID) error) error {
+	f.mu.Lock()
+	f.streams++
+	ids := f.match(spec)
+	f.mu.Unlock()
+	if len(ids) < 10 {
+		return students.ErrAudienceTooSmall
+	}
+	slices.SortFunc(ids, uuid.UUID.Compare)
+	for _, id := range ids {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := fn(id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (f *fakeAudience) streamCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.streams
+}
+
+// match returns the eligible profiles spec targets (count_segment).
+func (f *fakeAudience) match(spec students.AudienceSpec) []uuid.UUID {
 	dims, keys := map[string]bool{}, map[string]bool{}
 	for _, k := range spec.Keys {
 		dim, _, _ := strings.Cut(k, ":")
@@ -94,7 +144,7 @@ func (f *fakeAudience) Count(_ context.Context, spec students.AudienceSpec) (int
 			keys[k] = true
 		}
 	}
-	n := 0
+	var out []uuid.UUID
 	for _, p := range f.profiles {
 		if !p.eligible {
 			continue
@@ -107,13 +157,10 @@ func (f *fakeAudience) Count(_ context.Context, spec students.AudienceSpec) (int
 			}
 		}
 		if len(matched) > 0 && len(matched) == len(dims) {
-			n++
+			out = append(out, p.id)
 		}
 	}
-	if n < 10 {
-		return 0, students.ErrAudienceTooSmall
-	}
-	return n, nil
+	return out
 }
 
 func (f *fakeAudience) callCount() int {
@@ -192,6 +239,36 @@ func (l *auditLog) Log(_ context.Context, e audit.Event) error {
 	return nil
 }
 
+// actionsOf returns the recorded events of action.
+func (l *auditLog) actionsOf(action string) []audit.Event {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var out []audit.Event
+	for _, e := range l.events {
+		if e.Action == action {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// all returns every recorded event.
+func (l *auditLog) all() []audit.Event {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Clone(l.events)
+}
+
+// last returns the last recorded event.
+func (l *auditLog) last() audit.Event {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.events) == 0 {
+		return audit.Event{}
+	}
+	return l.events[len(l.events)-1]
+}
+
 func (l *auditLog) actions() []string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -222,6 +299,17 @@ type env struct {
 	limiter  outreach.Limiter
 	mod      outreach.Module
 	svc      outreach.Service
+
+	// The dispatch (BE-035).
+	out       *outbox.Mem
+	subs      *outbox.Registry
+	ents      entitlements.Service
+	users     *fakeUsers
+	consents  *fakeConsents
+	members   *fakeMembers
+	sender    *fakeSender
+	posts     *fakePosts
+	delivered map[uuid.UUID]bool // outbox events handed to the worker
 }
 
 type envOption func(*env, *outreach.Deps)
@@ -254,6 +342,13 @@ func newEnvWith(t *testing.T, clk *clock.Fake, store outreach.Store, tx db.TxMan
 		},
 		orgs:    &fakeOrgs{rows: map[uuid.UUID]orgs.OrgSummary{}},
 		limiter: ratelimit.NewMem(clk),
+		out:     outbox.NewMem(clk), subs: outbox.NewRegistry(),
+		users:     &fakeUsers{users: map[uuid.UUID]identity.UserSummary{}},
+		consents:  &fakeConsents{grants: map[consent.Purpose]map[uuid.UUID]bool{}},
+		members:   &fakeMembers{members: map[uuid.UUID][]uuid.UUID{}},
+		sender:    &fakeSender{byKey: map[string]uuid.UUID{}},
+		posts:     &fakePosts{posts: map[uuid.UUID]outreach.PostInfo{}},
+		delivered: map[uuid.UUID]bool{},
 	}
 	for id, kind := range map[uuid.UUID]orgs.Kind{
 		companyA: orgs.KindCompany, companyB: orgs.KindCompany, clubA: orgs.KindClub, clubB: orgs.KindClub,
@@ -262,10 +357,19 @@ func newEnvWith(t *testing.T, clk *clock.Fake, store outreach.Store, tx db.TxMan
 	} {
 		e.orgs.set(id, kind, orgs.StatusActive)
 	}
+	idem := idempotency.New(idempotency.Deps{Tx: tx, Store: keys, Clock: clk, Log: obs.Discard()})
+	ents, err := entitlements.New(entitlements.Deps{Store: entitlements.NewMemStore(clk.Now), Tx: tx, Audit: e.audit,
+		Idempotency: idem, Clock: clk, Log: obs.Discard()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.ents = ents.Service
 	d := outreach.Deps{
 		Store: store, Tx: tx, Audit: e.audit, Audience: e.audience, Catalog: e.catalog, Orgs: e.orgs,
-		Limiter: e.limiter, Clock: clk, Log: obs.Discard(),
-		Idempotency: idempotency.New(idempotency.Deps{Tx: tx, Store: keys, Clock: clk, Log: obs.Discard()}),
+		Limiter: e.limiter, Clock: clk, Log: obs.Discard(), Idempotency: idem,
+		Outbox: e.out, Entitlements: e.ents, Recipients: e.audience, Members: e.members, Users: e.users,
+		Consents: e.consents, Sender: e.sender, Posts: e.posts, LinkBaseURL: "https://koro.example.test",
+		UnsubscribeURL: testUnsubscribe,
 	}
 	for _, o := range opts {
 		o(e, &d)
@@ -275,6 +379,10 @@ func newEnvWith(t *testing.T, clk *clock.Fake, store outreach.Store, tx db.TxMan
 		t.Fatalf("outreach.New: %v", err)
 	}
 	e.mod, e.svc = mod, mod.Service
+	mod.Subscribe(e.subs)
+	if err := e.subs.Err(); err != nil {
+		t.Fatal(err)
+	}
 	return e
 }
 

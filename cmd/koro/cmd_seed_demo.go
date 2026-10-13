@@ -33,8 +33,10 @@ var errDemoEnv = errors.New("seed demo: synthetic demo data is for APP_ENV=dev o
 // seed reference` (run that first). dev and staging only: APP_ENV is
 // checked before anything else, so prod refuses without touching the
 // database. Idempotent: a second run inserts nothing. -password gives
-// every demo account that password (≥ 15 characters); without it the
-// accounts have none (a password reset sets it). The accounts and what
+// the student, club and company demo accounts that password (≥ 15
+// characters); without it the accounts have none (a password reset sets
+// it). Platform role accounts never get it (06 H-66: password reset +
+// TOTP). The accounts and what
 // was inserted are printed; the password never is.
 func runSeedDemo(ctx context.Context, args []string, environ map[string]string, stdout io.Writer) error {
 	if env := strings.TrimSpace(environ["APP_ENV"]); env != config.EnvDev && env != config.EnvStaging {
@@ -42,7 +44,7 @@ func runSeedDemo(ctx context.Context, args []string, environ map[string]string, 
 	}
 	fset := flag.NewFlagSet("seed demo", flag.ContinueOnError)
 	fset.SetOutput(io.Discard)
-	password := fset.String("password", "", "password of every demo account (at least 15 characters; default: none)")
+	password := fset.String("password", "", "password of the student, club and company demo accounts (at least 15 characters; default: none; never the platform role accounts)")
 	rnd := fset.Uint64("seed", seed.DefaultSeed, "random seed of the demo data")
 	if err := fset.Parse(args); err != nil {
 		return fmt.Errorf("%w: %w", errUsage, err)
@@ -168,7 +170,11 @@ func printDemo(stdout io.Writer, plan *seed.Plan, res seed.Result, withPassword 
 	}
 	_, _ = fmt.Fprintf(stdout, "demo accounts (%s):\n", pw)
 	for _, a := range plan.Accounts {
-		_, _ = fmt.Fprintf(stdout, "  %-34s %s\n", a.Email, a.Role)
+		note := ""
+		if a.NoPassword {
+			note = " (no password: password reset + TOTP)"
+		}
+		_, _ = fmt.Fprintf(stdout, "  %-34s %s%s\n", a.Email, a.Role, note)
 	}
 	_, _ = fmt.Fprintf(stdout, "  ... and %d synthetic students (@example.test)\n", seed.StudentCount)
 }

@@ -91,8 +91,25 @@ type Files interface {
 // gönderi yayını"). Compile applies the actor's targeting scope (03 k16),
 // the sensitive club ban (03 Y2), k ≥ 10 and the minor exclusion, and
 // spends one unit of the org's daily count budget (06 H-61; 429/503).
+// BE-035: the post's notification dispatch ("notify on publish").
 type Targeting interface {
 	Compile(ctx context.Context, a authz.Actor, spec outreach.SegmentSpec) (outreach.Compiled, error)
+	// ScheduleDispatch schedules the notification of the post's audience
+	// in the post's transaction (a company's targeted_dispatch unit, the
+	// outbox event); it runs once the post is published.
+	//
+	// sync-write: outreach.Targeting.ScheduleDispatch
+	ScheduleDispatch(ctx context.Context, in outreach.DispatchInput) (uuid.UUID, error)
+	// DiscardDispatch removes the dispatch of a post that leaves before it
+	// was ever published (draft deleted, rejected in review) in the post's
+	// transaction: its unit goes back and the row goes before the post's
+	// (the composite FK).
+	//
+	// sync-write: outreach.Targeting.DiscardDispatch
+	DiscardDispatch(ctx context.Context, a authz.Actor, orgID, postID uuid.UUID) error
+	// DispatchOfPost returns a post's dispatch, if any (its counts as
+	// published estimates only: getPostStats).
+	DispatchOfPost(ctx context.Context, orgID, postID uuid.UUID) (outreach.DispatchView, bool, error)
 }
 
 // Entitlements is what feed needs from entitlements (L2; 01 §4.4): the

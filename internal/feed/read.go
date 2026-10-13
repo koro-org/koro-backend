@@ -2,6 +2,7 @@ package feed
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/events"
 	"koro/internal/orgs"
+	"koro/internal/outreach"
 	"koro/internal/platform/page"
 )
 
@@ -93,6 +95,10 @@ type PostView struct {
 type Stats struct {
 	LikeCount int
 	SaveCount int
+	// Dispatch holds the counts of a targeted post's notification
+	// dispatch (BE-035; nil: the post has none). Each count is a published
+	// estimate (06 H-61): nil below 10 or before the run.
+	Dispatch *outreach.DispatchCounts
 }
 
 // Get implements Posts.
@@ -101,11 +107,27 @@ func (s *service) Get(ctx context.Context, postID uuid.UUID) (PostSummary, error
 	if err != nil {
 		return PostSummary{}, err
 	}
-	out := PostSummary{ID: p.ID, OrgID: p.OrgID, Kind: p.Kind, Status: p.Status, Opportunity: decodeOpportunity(p.Opportunity)}
+	return summaryOf(p), nil
+}
+
+// summaryOf is the cross-module view of p.
+func summaryOf(p Post) PostSummary {
+	out := PostSummary{
+		ID: p.ID, OrgID: p.OrgID, Kind: p.Kind, Status: p.Status, Opportunity: decodeOpportunity(p.Opportunity),
+		AuthorKind: p.AuthorOrgKind, AudienceKind: p.AudienceKind, AudienceKeys: slices.Clone([]string(p.AudienceKeys)),
+		DimCount: p.AudienceDimCount, Commercial: p.CommercialFlag,
+	}
 	if p.Title != nil {
 		out.Title = *p.Title
 	}
-	return out, nil
+	if p.AudienceKind == AudienceSegment && len(p.AudienceSnapshot) > 0 {
+		var snap audienceSnapshot
+		if json.Unmarshal(p.AudienceSnapshot, &snap) == nil && snap.SegmentID != nil {
+			id := *snap.SegmentID
+			out.SegmentID = &id
+		}
+	}
+	return out
 }
 
 // resource builds the authz view of p for a: the audience match of the
@@ -277,7 +299,18 @@ func (s *service) PostStats(ctx context.Context, a authz.Actor, id uuid.UUID) (S
 	if err := s.authorize(ctx, a, authz.FeedPostStats, p); err != nil {
 		return Stats{}, err
 	}
-	return Stats{LikeCount: p.LikeCount, SaveCount: p.SaveCount}, nil
+	st := Stats{LikeCount: p.LikeCount, SaveCount: p.SaveCount}
+	if p.AudienceKind == AudienceSegment && s.d.Targeting != nil {
+		d, ok, err := s.d.Targeting.DispatchOfPost(ctx, p.OrgID, p.ID)
+		if err != nil {
+			return Stats{}, err
+		}
+		if ok {
+			c := d.Counts
+			st.Dispatch = &c
+		}
+	}
+	return st, nil
 }
 
 // managedView reads the post after a write by one of its writers.

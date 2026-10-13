@@ -15,6 +15,13 @@ func segmentsOf(org string) authz.Resource {
 	return authz.Resource{Type: authz.TypeSegment, ID: id, OrgID: &id}
 }
 
+// dispatchesOf is the Resource of the dispatch operations (03 §3.5
+// dispatch): OrgID = the path's org (the post's org for createDispatch).
+func dispatchesOf(org string) authz.Resource {
+	id := authztest.ID(org)
+	return authz.Resource{Type: authz.TypeDispatch, ID: id, OrgID: &id}
+}
+
 // TestOutreachPolicy_Matrix pins 03 §5.8 for the 18 personas (the HTTP
 // matrix, testdata/authz/outreach.yaml, checks the same through the API).
 func TestOutreachPolicy_Matrix(t *testing.T) {
@@ -37,8 +44,13 @@ func TestOutreachPolicy_Matrix(t *testing.T) {
 		}
 		return m
 	}
-	// list, read, manage: S cells; platform_admin k-po (not a member of these orgs → 403).
-	for _, act := range []authz.Action{authz.OutreachSegmentList, authz.OutreachSegmentRead, authz.OutreachSegmentManage} {
+	// list, read, manage, dispatch.create: S cells; platform_admin k-po (not a member of these orgs → 403).
+	for _, act := range []authz.Action{authz.OutreachSegmentList, authz.OutreachSegmentRead, authz.OutreachSegmentManage,
+		authz.OutreachDispatchCreate} {
+		res := segmentsOf
+		if act == authz.OutreachDispatchCreate {
+			res = dispatchesOf
+		}
 		for _, tc := range []struct {
 			org  string
 			want map[string]error
@@ -55,26 +67,34 @@ func TestOutreachPolicy_Matrix(t *testing.T) {
 				if !ok {
 					want = notFound
 				}
-				wantErr(t, authz.Can(ctx, p.Actor, act, segmentsOf(tc.org)), want, false)
+				wantErr(t, authz.Can(ctx, p.Actor, act, res(tc.org)), want, false)
 			}
 		}
 	}
-	// count: the same S cells plus platform_admin on every org (✓).
-	for _, tc := range []struct {
-		org  string
-		want map[string]error
-	}{
-		{"company_a", with(staff(nil), "company_member", nil, "company_admin", nil)},
-		{"club_a", with(staff(nil), "club_admin", nil, "club_member", forbidden)},
-		{"uni_a", with(staff(nil), "university_rep", nil)},
-		{"platform_org", staff(nil)},
-	} {
-		for _, p := range authztest.Personas() {
-			want, ok := tc.want[p.Name]
-			if !ok {
-				want = notFound
+	// count, dispatch list/read/cancel: the same S cells plus platform_admin on every org (✓).
+	for _, act := range []authz.Action{authz.OutreachAudienceCount, authz.OutreachDispatchList, authz.OutreachDispatchRead,
+		authz.OutreachDispatchCancel} {
+		res := dispatchesOf
+		if act == authz.OutreachAudienceCount {
+			res = segmentsOf
+		}
+		for _, tc := range []struct {
+			org  string
+			want map[string]error
+		}{
+			{"company_a", with(staff(nil), "company_member", nil, "company_admin", nil)},
+			{"club_a", with(staff(nil), "club_admin", nil, "club_member", forbidden)},
+			{"uni_a", with(staff(nil), "university_rep", nil)},
+			{"club_sensitive", with(staff(nil), "club_member", forbidden)},
+			{"platform_org", staff(nil)},
+		} {
+			for _, p := range authztest.Personas() {
+				want, ok := tc.want[p.Name]
+				if !ok {
+					want = notFound
+				}
+				wantErr(t, authz.Can(ctx, p.Actor, act, res(tc.org)), want, false)
 			}
-			wantErr(t, authz.Can(ctx, p.Actor, authz.OutreachAudienceCount, segmentsOf(tc.org)), want, false)
 		}
 	}
 }
@@ -131,9 +151,26 @@ func TestOutreachPolicy_EdgeCases(t *testing.T) {
 	wantErr(t, authz.Can(ctx, persona(t, "platform_admin"), authz.OutreachAudienceCount, bare), nil, false)
 	wantErr(t, authz.Can(ctx, persona(t, "company_admin"), authz.OutreachSegmentList, adminSurface), authz.ErrNotFound, false)
 
-	// The dispatch actions come with BE-035: nobody holds them yet.
-	for _, act := range []authz.Action{authz.OutreachDispatchCreate, authz.OutreachDispatchList, authz.OutreachDispatchRead, authz.OutreachDispatchCancel} {
-		wantErr(t, authz.Can(ctx, persona(t, "company_admin"), act, segmentsOf("company_a")), authz.ErrForbidden, false)
-		wantErr(t, authz.Can(ctx, persona(t, "platform_admin"), act, segmentsOf("company_a")), authz.ErrForbidden, false)
+	// BE-035 dispatches: the sensitive club's own club_admin dispatches to
+	// its members (T-258; k16 is the service's); career_staff without MFA;
+	// k-mfa for company_admin; k-po for create, ✓ for the rest; a minor
+	// never acts as club_admin (Y4).
+	for _, act := range []authz.Action{authz.OutreachDispatchCreate, authz.OutreachDispatchList, authz.OutreachDispatchRead,
+		authz.OutreachDispatchCancel} {
+		wantErr(t, authz.Can(ctx, persona(t, "club_admin_sensitive"), act, dispatchesOf("club_sensitive")), nil, false)
+		wantErr(t, authz.Can(ctx, persona(t, "company_owner_a"), act, dispatchesOf("company_a")), nil, false)
+		wantErr(t, authz.Can(ctx, cs, act, authz.Resource{Type: authz.TypeDispatch, ID: uni, OrgID: &uni}), nil, false)
+		noMFA := persona(t, "company_admin")
+		noMFA.MFAVerified = false
+		wantErr(t, authz.Can(ctx, noMFA, act, dispatchesOf("company_a")), authz.ErrMFARequired, false)
+		wantErr(t, authz.Can(ctx, pad, act, dispatchesOf("platform_org")), nil, false)
+		wantErr(t, authz.Can(ctx, minorAdmin, act, dispatchesOf("club_a")), authz.ErrForbidden, false)
+		// The system actor never reaches the HTTP actions; only outreach.dispatch.run.
+		wantErr(t, authz.Can(ctx, authz.SystemActor("outreach.run_dispatch"), act, dispatchesOf("company_a")), authz.ErrForbidden, false)
 	}
+	wantErr(t, authz.Can(ctx, authz.SystemActor("outreach.run_dispatch"), authz.OutreachDispatchRun, authz.Resource{}), nil, false)
+	// k-po: a platform_admin outside the platform org dispatches nothing, but lists, reads and cancels everywhere.
+	plain := persona(t, "platform_admin")
+	wantErr(t, authz.Can(ctx, plain, authz.OutreachDispatchCreate, dispatchesOf("company_a")), authz.ErrForbidden, false)
+	wantErr(t, authz.Can(ctx, plain, authz.OutreachDispatchCancel, dispatchesOf("company_a")), nil, false)
 }

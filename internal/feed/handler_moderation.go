@@ -28,7 +28,8 @@ func registerModeration(api huma.API, h handler) {
 			"without the k ≥ 10 rule; a university narrows its own university; a company targets any non-sensitive " +
 			"audience of at least 10 students and spends one targeted_post unit (403 entitlements.not_entitled " +
 			"without one). The audience is fixed here: it never changes, deleting the draft gives the unit back. " +
-			"Each call spends one unit of the organization's daily count budget (429).",
+			"Each call spends one unit of the organization's daily count budget (429). With dispatch, the audience " +
+			"is notified once the post is published (createDispatch's rules, in the same transaction).",
 	}, op.Meta{Action: string(authz.FeedPostCreateTargeted), Surface: op.SurfaceOrg, Idempotency: op.IdempotencyRequired},
 		h.createTargetedPost)
 
@@ -117,6 +118,9 @@ type TargetedPostBody struct {
 	Media          []MediaBody          `json:"media,omitempty" maxItems:"10" doc:"image posts: 1-10 images"`
 	CommercialFlag bool                 `json:"commercial_flag,omitempty" doc:"Sponsored content; always true for companies"`
 	Audience       TargetedAudienceBody `json:"audience"`
+	// Dispatch notifies the audience once the post is published (BE-035;
+	// the rules of createDispatch).
+	Dispatch *outreach.DispatchBody `json:"dispatch,omitempty" doc:"Notify the audience once the post is published (the rules of createDispatch; a company spends one targeted_dispatch unit)"`
 }
 
 type createTargetedInput struct {
@@ -143,6 +147,10 @@ func (h handler) createTargetedPost(ctx context.Context, in *createTargetedInput
 		return nil, err
 	}
 	ti := TargetedInput{Post: pi}
+	if b.Dispatch != nil {
+		r := b.Dispatch.Request()
+		ti.Dispatch = &r
+	}
 	if ti.SegmentID, err = optID("body.audience.segment_id", b.Audience.SegmentID); err != nil {
 		return nil, err
 	}

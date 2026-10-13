@@ -1032,6 +1032,12 @@
     "type": "urn:koro:problem:outreach.audience_too_small"
   },
   {
+    "code": "outreach.dispatch_exists",
+    "status": 409,
+    "title": "The post already has a dispatch",
+    "type": "urn:koro:problem:outreach.dispatch_exists"
+  },
+  {
     "code": "outreach.empty_patch",
     "status": 422,
     "title": "Nothing to update",
@@ -1040,8 +1046,14 @@
   {
     "code": "outreach.invalid_state",
     "status": 409,
-    "title": "Segment status does not allow this change",
+    "title": "The current status does not allow this change",
     "type": "urn:koro:problem:outreach.invalid_state"
+  },
+  {
+    "code": "outreach.post_not_targeted",
+    "status": 422,
+    "title": "Only a targeted post can be dispatched",
+    "type": "urn:koro:problem:outreach.post_not_targeted"
   },
   {
     "code": "outreach.sensitive_target",

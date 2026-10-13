@@ -160,8 +160,14 @@ func (b *builder) build() error {
 	return nil
 }
 
-// user adds an active, verified account.
+// user adds an active, verified account with the demo password (if any).
 func (b *builder) user(n int, email, first, last, persona string, birth *time.Time) uuid.UUID {
+	return b.account(n, email, first, last, persona, birth, b.pw)
+}
+
+// account adds an active, verified account with password hash pw (nil:
+// none).
+func (b *builder) account(n int, email, first, last, persona string, birth *time.Time, pw any) uuid.UUID {
 	id := b.id("user", n)
 	created := b.now.AddDate(0, 0, -90)
 	var bd any
@@ -169,7 +175,7 @@ func (b *builder) user(n int, email, first, last, persona string, birth *time.Ti
 		bd = date(*birth)
 	}
 	b.p.add("users", "id", id, "status", "active", "email", email, "email_normalized", textx.NormalizeEmail(email),
-		"email_verified_at", created, "password_hash", b.pw, "first_name", first, "last_name", last, "birth_date", bd,
+		"email_verified_at", created, "password_hash", pw, "first_name", first, "last_name", last, "birth_date", bd,
 		"signup_persona", persona, "locale", "tr-TR", "created_at", created, "updated_at", created)
 	return id
 }
@@ -188,7 +194,10 @@ func (b *builder) role(userID uuid.UUID, role, reason string, requestedBy, appro
 
 // platformStaff opens the platform roles: two bootstrap platform admins
 // (four eyes never deadlocks, 06 H-17), two finance admins approved by the
-// second admin, a DPO, a moderator and a support agent.
+// second admin, a DPO, a moderator and a support agent. A privileged
+// account never gets the demo password (06 H-66, T-287): it is opened by a
+// password reset and TOTP enrolment, so a shared demo password never opens
+// an account without MFA that can read personal data or move money.
 func (b *builder) platformStaff() {
 	staff := []struct{ email, role string }{
 		{AdminEmail1, "platform_admin"}, {AdminEmail2, "platform_admin"}, {FinanceEmail1, "finance_admin"},
@@ -196,8 +205,8 @@ func (b *builder) platformStaff() {
 	}
 	ids := make([]uuid.UUID, len(staff))
 	for i, s := range staff {
-		ids[i] = b.user(i+1, s.email, b.f.FirstName(), b.f.LastName(), "platform", nil)
-		b.p.Accounts = append(b.p.Accounts, Account{Email: s.email, Role: s.role})
+		ids[i] = b.account(i+1, s.email, b.f.FirstName(), b.f.LastName(), "platform", nil, nil)
+		b.p.Accounts = append(b.p.Accounts, Account{Email: s.email, Role: s.role, NoPassword: true})
 	}
 	b.admin1, b.admin2 = ids[0], ids[1]
 	b.role(b.admin1, "platform_admin", "bootstrap", nil, nil)
@@ -250,15 +259,15 @@ func (b *builder) studentsAndReps() {
 		b.students = append(b.students, s)
 		b.byUni[uni] = append(b.byUni[uni], s)
 	}
-	b.p.Accounts = append(b.p.Accounts, Account{StudentEmail, "student"}, Account{ClubAdminEmail, "student, club_admin"},
-		Account{MinorEmail, "student under 18"})
+	b.p.Accounts = append(b.p.Accounts, Account{Email: StudentEmail, Role: "student"},
+		Account{Email: ClubAdminEmail, Role: "student, club_admin"}, Account{Email: MinorEmail, Role: "student under 18"})
 	for k := range unis {
 		email := RepEmail
 		if k > 0 {
 			email = fmt.Sprintf("demo.temsilci%d@%s", k+1, fake.EmailDomain)
 		}
 		b.reps = append(b.reps, b.user(1000+k, email, b.f.FirstName(), b.f.LastName(), "university", nil))
-		b.p.Accounts = append(b.p.Accounts, Account{email, "university_rep (" + unis[k].Name + ")"})
+		b.p.Accounts = append(b.p.Accounts, Account{Email: email, Role: "university_rep (" + unis[k].Name + ")"})
 	}
 }
 
@@ -358,11 +367,11 @@ func (b *builder) companyOrgs() {
 		}
 		c.owner = b.user(2000+k, email, b.f.FirstName(), b.f.LastName(), "company", nil)
 		b.member(c.orgID, "company", c.owner, "company_owner", "admin", nil)
-		b.p.Accounts = append(b.p.Accounts, Account{email, "company_owner (" + spec.Name + ", " + status + ")"})
+		b.p.Accounts = append(b.p.Accounts, Account{Email: email, Role: "company_owner (" + spec.Name + ", " + status + ")"})
 		if k == 0 {
 			hr := b.user(2100, "demo.ik@"+fake.EmailDomain, b.f.FirstName(), b.f.LastName(), "company", nil)
 			b.member(c.orgID, "company", hr, "recruiter", "invitation", &c.owner)
-			b.p.Accounts = append(b.p.Accounts, Account{"demo.ik@" + fake.EmailDomain, "recruiter (" + spec.Name + ")"})
+			b.p.Accounts = append(b.p.Accounts, Account{Email: "demo.ik@" + fake.EmailDomain, Role: "recruiter (" + spec.Name + ")"})
 		}
 		b.companies = append(b.companies, c)
 		if spec.Pending {

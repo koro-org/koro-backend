@@ -52,7 +52,8 @@ import (
 //  4. a company targets the students of a university (k ≥ 10, one unit of
 //     its quota): a too small audience is refused, the post reaches an
 //     adult student of that university and not a minor;
-//  5. KVKK: the student's data export is answered by the DPO and
+//  5. KVKK: the DPO (no demo password, 06 H-66: opened by a password
+//     reset) answers the student's data export, which is
 //     downloaded (a zip from S3), then the account is erased: the sessions
 //     end, the account is a tombstone and signing in fails.
 func TestSmoke_ClubFirstPilotFlow(t *testing.T) {
@@ -126,8 +127,17 @@ func TestSmoke_ClubFirstPilotFlow(t *testing.T) {
 		t.Fatalf("a demo student's /api/v1/feed after the demo seed: %d items", len(feed))
 	}
 
-	// MFA roles first (their TOTP steps then have time to advance): the DPO
-	// and the company owner sign in with the demo password and enrol TOTP.
+	// MFA roles first (their TOTP steps then have time to advance). A
+	// platform role account has no demo password (06 H-66): the DPO opens
+	// the account by a password reset (link from Mailpit) and enrols TOTP;
+	// the company owner signs in with the demo password and enrols TOTP.
+	if _, st := c.try(http.MethodPost, "/api/v1/auth/sessions", "", map[string]any{"email": seed.DPOEmail,
+		"password": demoPassword}); st != http.StatusUnauthorized {
+		t.Fatalf("the DPO signed in with the demo password: %d (06 H-66)", st)
+	}
+	c.do(http.MethodPost, "/api/v1/auth/password-resets", "", map[string]any{"email": seed.DPOEmail}, nil, http.StatusAccepted)
+	c.do(http.MethodPost, "/api/v1/auth/password-resets/confirm", "", map[string]any{"token": mail.token(seed.DPOEmail),
+		"new_password": demoPassword}, nil, http.StatusNoContent)
 	dpo := c.login(seed.DPOEmail, demoPassword)
 	dpoTOTP := c.enrolTOTP(dpo, demoPassword)
 	owner := c.login(seed.CompanyEmail, demoPassword)

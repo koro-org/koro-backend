@@ -24,12 +24,23 @@ var (
 	// role in the org.
 	ErrTargetOutOfScope = problem.New(problem.Invalid, "outreach.target_out_of_scope",
 		"The audience is outside the organization's targeting scope")
-	// ErrInvalidState: a change the segment's state does not allow
-	// (updating or compiling an archived segment).
+	// ErrInvalidState: a change the state of a segment or a dispatch does
+	// not allow (updating or compiling an archived segment; cancelling a
+	// dispatch that is no longer scheduled; dispatching a hidden or removed
+	// post).
 	ErrInvalidState = problem.New(problem.Conflict, "outreach.invalid_state",
-		"Segment status does not allow this change")
+		"The current status does not allow this change")
 	// ErrEmptyPatch: updateSegment without a field to change.
 	ErrEmptyPatch = problem.New(problem.Invalid, "outreach.empty_patch", "Nothing to update")
+	// ErrPostNotTargeted: createDispatch on a post that is not a targeted
+	// (segment) post: only a targeted post has an audience to notify (04
+	// §2.8).
+	ErrPostNotTargeted = problem.New(problem.Invalid, "outreach.post_not_targeted",
+		"Only a targeted post can be dispatched")
+	// ErrDispatchExists: the post already has a dispatch (at most one per
+	// post, outreach_dispatches_post_id_uq).
+	ErrDispatchExists = problem.New(problem.Conflict, "outreach.dispatch_exists",
+		"The post already has a dispatch")
 
 	// ErrNotFound: the segment (or org) does not exist or is not the
 	// caller's org's (IDOR: another org's segment is 404).

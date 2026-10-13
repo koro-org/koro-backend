@@ -73,3 +73,12 @@ identity  -> files.Files.Delete
 directory -> files.Files.Delete
 students  -> files.Files.Delete
 feed      -> files.Files.Delete
+
+# BE-035 (rationale for 01 §6.3 in the BE-035 ticket's doc patch; the twin of 06 H-64): a dispatch's
+# targeted_dispatch unit goes back in the transaction that ends the dispatch without sending
+# (cancelDispatch, a post that left the feed before the run, an audience below 10), so a unit is never lost
+# by a crash between the two nor released for a dispatch that ran. A targeted post that leaves before it
+# was ever published (draft deleted, rejected in review) withdraws its dispatch in its own transaction: the
+# unit goes back and the dispatch row goes before the post row (the composite FK of 06 H-38).
+outreach  -> entitlements.Entitlements.Release
+feed      -> outreach.Targeting.DiscardDispatch

@@ -25,12 +25,16 @@ type TargetedPostDTO struct {
 	PostManageDTO
 	AudienceEstimate students.AudienceCountDTO `json:"audience_estimate"`
 	Entitlement      *EntitlementLeftDTO       `json:"entitlement,omitempty"`
+	DispatchID       string                    `json:"dispatch_id,omitempty" format:"uuid" doc:"The scheduled notification of the audience (getDispatch)"`
 }
 
 func toTargetedDTO(v TargetedView) TargetedPostDTO {
 	d := TargetedPostDTO{
 		PostManageDTO:    toManageDTO(v.PostView),
 		AudienceEstimate: estimateDTO(v.Estimate),
+	}
+	if v.DispatchID != nil {
+		d.DispatchID = v.DispatchID.String()
 	}
 	if v.Remaining != nil {
 		d.Entitlement = &EntitlementLeftDTO{Feature: "targeted_post", Remaining: *v.Remaining}

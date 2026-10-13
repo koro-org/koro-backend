@@ -33,6 +33,17 @@ func (f fixedTargeting) Compile(_ context.Context, _ authz.Actor, spec outreach.
 	return outreach.Compiled{Keys: []string{f.key}, DimCount: 1, Definition: *spec.Definition, Size: 40}, nil
 }
 
+// The dispatch (BE-035) is not used here: no post asks for one.
+func (fixedTargeting) ScheduleDispatch(context.Context, outreach.DispatchInput) (uuid.UUID, error) {
+	return uuid.Nil(), errors.New("no dispatch in this test")
+}
+func (fixedTargeting) DiscardDispatch(context.Context, authz.Actor, uuid.UUID, uuid.UUID) error {
+	return nil
+}
+func (fixedTargeting) DispatchOfPost(context.Context, uuid.UUID, uuid.UUID) (outreach.DispatchView, bool, error) {
+	return outreach.DispatchView{}, false, nil
+}
+
 // failingAudit fails the audit record of one action (the last write of the
 // targeted post's transaction).
 type failingAudit struct {

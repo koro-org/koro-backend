@@ -12,11 +12,13 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
+	"koro/internal/consent"
 	"koro/internal/directory"
 	"koro/internal/entitlements"
 	"koro/internal/events"
 	"koro/internal/feed"
 	"koro/internal/files"
+	"koro/internal/identity"
 	"koro/internal/notify"
 	"koro/internal/orgs"
 	"koro/internal/outreach"
@@ -364,6 +366,39 @@ func (f *fakeSender) to(tmpl string) []uuid.UUID {
 	return out
 }
 
+// dispatchPeers are the outreach dependencies of the dispatch (BE-035)
+// the feed's tests never reach: the recipient walk, the club members, the
+// accounts and the consents. The feed only schedules and withdraws.
+type dispatchPeers struct{}
+
+func (dispatchPeers) Stream(context.Context, students.AudienceSpec, func(uuid.UUID) error) error {
+	return nil
+}
+func (dispatchPeers) ActiveMemberIDs(context.Context, uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+func (dispatchPeers) GetMany(context.Context, []uuid.UUID) (map[uuid.UUID]identity.UserSummary, error) {
+	return map[uuid.UUID]identity.UserSummary{}, nil
+}
+func (dispatchPeers) Contact(context.Context, uuid.UUID) (identity.UserContact, error) {
+	return identity.UserContact{}, identity.ErrNotFound
+}
+func (dispatchPeers) FilterActive(context.Context, []uuid.UUID, consent.Purpose) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
+// latePosts is outreach's view of the feed, bound once the feed is built
+// (cmd/koro does the same).
+type latePosts struct{ svc *feed.Service }
+
+func (p *latePosts) DispatchPost(ctx context.Context, id uuid.UUID) (outreach.PostInfo, error) {
+	s, err := (*p.svc).Get(ctx, id)
+	if err != nil {
+		return outreach.PostInfo{}, err
+	}
+	return s.DispatchInfo(), nil
+}
+
 // fakeStaff lists the moderators and platform admins in effect.
 type fakeStaff struct {
 	moderators, admins []uuid.UUID
@@ -389,6 +424,9 @@ type env struct {
 	staff    *fakeStaff
 	svc      feed.Service
 	mod      feed.Module
+
+	dispatches *outreach.MemStore // outreach's store (BE-035: the dispatch of targeted posts)
+	targeting  outreach.Service
 }
 
 func newEnv(t *testing.T) *env {
@@ -420,12 +458,17 @@ func newEnvWith(t *testing.T, tweak func(*feed.Deps)) *env {
 		t.Fatal(err)
 	}
 	e.ents = ents.Service
-	targeting, err := outreach.New(outreach.Deps{Store: outreach.NewMemStore(clk.Now), Tx: tx, Audit: e.audit,
+	posts := &latePosts{svc: &e.svc}
+	e.dispatches = outreach.NewMemStore(clk.Now)
+	targeting, err := outreach.New(outreach.Deps{Store: e.dispatches, Tx: tx, Audit: e.audit,
 		Audience: e.audience, Catalog: e.clubs, Orgs: e.orgs, Limiter: ratelimit.NewMem(clk), Idempotency: idem,
-		Clock: clk, Log: obs.Discard()})
+		Clock: clk, Log: obs.Discard(), Outbox: e.out, Entitlements: e.ents, Recipients: dispatchPeers{},
+		Members: dispatchPeers{}, Users: dispatchPeers{}, Consents: dispatchPeers{}, Sender: e.sender, Posts: posts,
+		LinkBaseURL: "https://koro.example.test"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	e.targeting = targeting.Service
 	d := feed.Deps{
 		Store: e.mem, Tx: tx, Outbox: e.out, Queue: e.queue, Audit: e.audit, Orgs: e.orgs, Idempotency: idem, Clock: clk,
 		Log: obs.Discard(), Viewers: e.viewers, Events: e.events, Files: e.files, Clubs: e.clubs,

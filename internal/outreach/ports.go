@@ -5,7 +5,11 @@ import (
 	"uuid"
 
 	"koro/internal/audit"
+	"koro/internal/consent"
 	"koro/internal/directory"
+	"koro/internal/entitlements"
+	"koro/internal/identity"
+	"koro/internal/notify"
 	"koro/internal/orgs"
 	"koro/internal/platform/ratelimit"
 	"koro/internal/students"
@@ -52,4 +56,69 @@ type Orgs interface {
 // Targeting). It is the platform's rate limiter (Redis in production).
 type Limiter interface {
 	Allow(ctx context.Context, rule ratelimit.Rule, key string) (ratelimit.Result, error)
+}
+
+// ---- dispatch (BE-035)
+
+// Entitlements is what outreach needs from entitlements (L2; 01 §4.4): the
+// targeted_dispatch quota of a company, consumed when a dispatch is
+// scheduled (01 §6.3 "Hedefli gönderi yayını": in the caller's
+// transaction) and given back when it is cancelled or never runs.
+type Entitlements interface {
+	// Consume uses one unit of the org's feature for ref (the dispatch) in
+	// the caller's transaction; no usable right is
+	// entitlements.ErrNoEntitlement (403 entitlements.not_entitled).
+	//
+	// sync-write: entitlements.Entitlements.Consume
+	Consume(ctx context.Context, orgID uuid.UUID, f entitlements.Feature, qty int, ref entitlements.Ref) (uuid.UUID, error)
+	// Release gives the unit of ref back in the caller's transaction (a
+	// reversal row); a ref that consumed nothing is a no-op.
+	//
+	// sync-write: entitlements.Entitlements.Release
+	Release(ctx context.Context, ref entitlements.Ref) error
+}
+
+// Recipients is the recipient walk of students (L7; 01 §4.9 Audience.Stream):
+// every audience eligible adult student a targeting reaches, in batches,
+// k ≥ 10 first (students.ErrAudienceTooSmall, fn never called). Sensitive
+// club keys never match (03 Y2). It is students.Service.
+type Recipients interface {
+	Stream(ctx context.Context, spec students.AudienceSpec, fn func(userID uuid.UUID) error) error
+}
+
+// Members lists a club's active members (orgs, L5; 01 §4.7 OrgDirectory):
+// the recipients of a club's notice to its own members (T-258). It is
+// orgs.Service.
+type Members interface {
+	ActiveMemberIDs(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error)
+}
+
+// Users is what outreach needs from identity (L4; 01 §4.6 Users) in the
+// worker: whether an account is active and adult (checked again for every
+// batch: a minor never receives a dispatch), the recipient's language and,
+// for e-mail, the address (01 §5.3: notify does not resolve recipients).
+type Users interface {
+	GetMany(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]identity.UserSummary, error)
+	Contact(ctx context.Context, id uuid.UUID) (identity.UserContact, error)
+}
+
+// Consents is the commercial message filter of consent (L2; 01 §4.3
+// Checker, 6563/İYS): of a batch, the users whose consent of a purpose is
+// in force.
+type Consents interface {
+	FilterActive(ctx context.Context, userIDs []uuid.UUID, purpose consent.Purpose) ([]uuid.UUID, error)
+}
+
+// Sender is notify (L3; 01 §4.5): one notification per recipient and
+// channel, idempotent by its dedupe key.
+type Sender interface {
+	Send(ctx context.Context, m notify.Message) (uuid.UUID, error)
+}
+
+// Posts is what a dispatch needs from the feed (L9: above outreach, bound
+// late by cmd/koro; 01 §5.3 "feed ↔ outreach"): a post's org, status,
+// targeting and notification title.
+type Posts interface {
+	// DispatchPost returns the facts of postID or ErrNotFound.
+	DispatchPost(ctx context.Context, postID uuid.UUID) (PostInfo, error)
 }

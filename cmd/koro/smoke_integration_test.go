@@ -58,16 +58,21 @@ import (
 //     end, the account is a tombstone and signing in fails.
 func TestSmoke_ClubFirstPilotFlow(t *testing.T) {
 	t.Parallel()
-	start := time.Now()
-	ctx, cancel := context.WithTimeout(t.Context(), 4*time.Minute)
-	defer cancel()
 
 	// --- infrastructure: PostgreSQL, Redis, S3, Mailpit ---
 	d := testutil.NewDB(t)
 	rdb := testutil.NewRedis(t)
+	s3srv := storagetest.Start(t)
 	s3 := storagetest.Client(t)
 	filesBucket, quarantine := storagetest.Bucket(t, s3), storagetest.Bucket(t, s3)
 	smtpHost, smtpPort, mailAPI := startMailpit(t)
+
+	// The 3-minute budget (BE-033) measures the flow, not the container
+	// start-up: under load (a busy machine or a CI runner) the containers
+	// alone can take minutes (OPS-001). The clock starts once they are ready.
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(t.Context(), 4*time.Minute)
+	defer cancel()
 
 	environ := seedEnviron(t, d)
 	for k, v := range map[string]string{
@@ -75,7 +80,7 @@ func TestSmoke_ClubFirstPilotFlow(t *testing.T) {
 		"SHUTDOWN_DELAY": "1ms", "SHUTDOWN_TIMEOUT": "5s", "RATE_LIMIT_ENABLED": "false", "REDIS_URL": redisURL(rdb),
 		"WORKER_HEALTH_ADDR": "127.0.0.1:0", "WORKER_SHUTDOWN_TIMEOUT": "5s", "WORKER_SCHEDULER_ENABLED": "false",
 		"OUTBOX_RELAY_IDLE": "50ms", "DB_MAX_CONNS": "8",
-		"S3_ENDPOINT": storagetest.Start(t).Endpoint, "S3_ACCESS_KEY": storagetest.AccessKey, "S3_SECRET_KEY": storagetest.SecretKey,
+		"S3_ENDPOINT": s3srv.Endpoint, "S3_ACCESS_KEY": storagetest.AccessKey, "S3_SECRET_KEY": storagetest.SecretKey,
 		"S3_REGION": storagetest.Region, "S3_BUCKET_FILES": filesBucket, "S3_BUCKET_QUARANTINE": quarantine,
 		"SMTP_HOST": smtpHost, "SMTP_PORT": strconv.Itoa(smtpPort), "SMTP_TLS": "none",
 		"IDENTITY_LINK_BASE_URL": "http://localhost:3000",
@@ -325,7 +330,9 @@ func TestSmoke_ClubFirstPilotFlow(t *testing.T) {
 	if st != http.StatusUnauthorized {
 		t.Fatalf("sign-in of the erased account = %d, want 401", st)
 	}
-	if took := time.Since(start); took > 3*time.Minute {
+	took := time.Since(start)
+	t.Logf("smoke flow took %s (containers ready beforehand)", took.Round(time.Second))
+	if took > 3*time.Minute {
 		t.Errorf("smoke test took %s, want ≤ 3 minutes", took.Round(time.Second))
 	}
 }

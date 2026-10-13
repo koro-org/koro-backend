@@ -17,12 +17,14 @@ Bu repo Koro'nun Go backend'idir (tek modül `koro`, tek binary `cmd/koro`). Tic
   · `make tidy-check` · `make sec` · `make check` (PR öncesi tamamı) · `make test-integration` (Docker).
 - Araçlar (golangci-lint, govulncheck) **Go 1.27 ile derlenmiş** olarak repo içi `bin/` klasörüne kurulur (`make tools`;
   `bin/` gitignore'da). Global kurulum yapma.
-- `go.mod`: `go 1.27.2`; `GOTOOLCHAIN=auto` ile 1.27.2 kendiliğinden iner (OPS-002: govulncheck GO-2026-6599…6617). Makefile `GO_TOOLCHAIN` (yalnız araç derlemesi) go1.27.1 kalır.
+- `go.mod`: `go 1.27.2`; `GOTOOLCHAIN=auto` ile 1.27.2 kendiliğinden iner (OPS-002: govulncheck GO-2026-6599…6617). Makefile `GO_TOOLCHAIN` (yalnız araç derlemesi) da go1.27.2 (OPS-001).
 
 ## Demo verisi (BE-033; yalnız dev/staging)
 - `make seed-demo` hedefi yok (Makefile dondurulmuş, R9). `make dev` (bağımlılıklar + migration + api + worker) açıkken başka
   bir terminalde, `.env` yüklüyken (`set -a; . ./.env; set +a`):
   `go run ./cmd/koro seed reference` → `go run ./cmd/koro seed demo -password '<en az 15 karakter>'`.
+- `-password` yalnız öğrenci, kulüp, şirket ve temsilci hesaplarına yazılır; platform rolleri (admin, finans, DPO, moderatör,
+  destek) parola sıfırlama ve TOTP ile açılır (06 H-66).
 - `seed demo` `APP_ENV=prod`'da (ve dev/staging dışındaki her değerde) veritabanına dokunmadan reddeder; idempotenttir
   (sabit kimlikler + `ON CONFLICT DO NOTHING`, ikinci koşu 0 satır ekler). Veri tamamen sentetiktir: `@example.test`
   adresleri, `testutil/fake` adları, telefon/TCKN/IBAN yok; outbox satırı yazmaz (e-posta/bildirim gitmez).

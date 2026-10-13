@@ -4,7 +4,7 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 GO                    ?= go
-GO_TOOLCHAIN          := go1.27.1
+GO_TOOLCHAIN          := go1.27.2
 GOLANGCI_LINT_VERSION := v2.14.0
 GOVULNCHECK_VERSION   := v1.8.0
 BIN                   := bin/koro

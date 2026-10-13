@@ -1,13 +1,23 @@
-# CI draft (docs/design/05 §15.5): fmt → lint → tidy → OpenAPI diff → unit
-# tests → integration tests (own job) → govulncheck/gosec → gitleaks → image
-# build + Trivy + SBOM. Every action is pinned to a commit SHA (tag in the
-# comment); GITHUB_TOKEN is read-only. The Go version comes from go.mod.
+# CI (docs/design/05 §15.5, OPS-001): fmt → lint → tidy → OpenAPI diff
+# (check) → unit + integration tests under -race (test-integration) →
+# govulncheck/gosec + gitleaks (security) → image build + Trivy + SBOM
+# (image). Every action is pinned to a commit SHA (tag in the comment);
+# GITHUB_TOKEN is read-only. The Go version comes from go.mod.
+#
+# Budget: private repo on the free plan (2000 min/month; runners have
+# 2 vCPU, 7.9 GB RAM, 3 GB swap). Go caches are restored in every job and
+# saved only on main pushes (or when nothing was restored), so pull
+# requests start warm. A pull request run whose head is already on main
+# stops after `check` (the push run tests it). Measurements and the
+# budget: OPS-001.
 name: ci
 
 on:
   pull_request:
+    paths-ignore: ["**.md", "docs/**"]
   push:
     branches: [main]
+    paths-ignore: ["**.md", "docs/**"]
 
 permissions:
   contents: read
@@ -19,17 +29,50 @@ concurrency:
 env:
   GOTOOLCHAIN: local
 
+defaults:
+  run:
+    shell: bash # -eo pipefail
+
 jobs:
   check:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      image: ${{ steps.changes.outputs.image }}
+      merged: ${{ steps.merged.outputs.merged }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 2 # HEAD^1 = the base of a pull request's merge commit
+      # The image job runs on main pushes and on pull requests that touch the
+      # image's inputs (Dockerfile, modules, CI); Go code is tested by the
+      # other jobs and the image is rebuilt and scanned on main.
+      - name: Does the change touch the image?
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" != pull_request ] ||
+            git diff --name-only HEAD^1 HEAD | grep -qE '^(deploy/|go\.mod$|go\.sum$|\.dockerignore$|\.github/)'; then
+            echo "image=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "image=false" >>"$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false
+      - name: Restore Go caches
+        id: go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+            ~/.cache/golangci-lint
+          key: go-check-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-check-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-check-${{ runner.os }}-
       - name: Cache tools (golangci-lint, govulncheck built with Go 1.27)
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -40,12 +83,59 @@ jobs:
       - run: make lint
       - run: make tidy-check
       - run: make openapi-check
-      - run: make test
+      - name: Save Go caches
+        if: github.event_name == 'push' || steps.go-cache.outputs.cache-matched-key == ''
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+            ~/.cache/golangci-lint
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
+      # verify-merge.sh pushes the rebased pull request head and, seconds
+      # later, main (fast-forward), so GitHub runs this workflow twice for
+      # the same commit (pull_request + push). When the head is already on
+      # the base branch, the push run tests it (and builds the image); the
+      # pull request run stops after `check`. Asked last, when the push has
+      # long landed; if the API call fails, everything runs.
+      - name: Is the head already on the base branch?
+        id: merged
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          status=$(gh api "repos/$GITHUB_REPOSITORY/compare/$HEAD_SHA...$BASE_REF" --jq .status) || status=unknown
+          echo "$BASE_REF compared to $HEAD_SHA: $status"
+          if [ "$status" = identical ] || [ "$status" = ahead ]; then
+            echo "::notice::$HEAD_SHA is already on $BASE_REF; its push run tests it, this run stops after check"
+            echo "merged=true" >>"$GITHUB_OUTPUT"
+          fi
 
+  # `-tags=integration ./...` runs every unit test too (no file is excluded
+  # by the tag), so this job is also the -race unit test run of CI; `check`
+  # does not run `make test` (the same tests twice would double the
+  # minutes).
+  #
+  # Memory (OPS-001): under -race the cmd/koro test binary grows to 6+ GB
+  # RSS (the authz matrix and its self-tests). Without a limit the runner
+  # ran out of RAM and swap and `make test` was killed (exit 143, main
+  # 9c6345f). GOMEMLIMIT keeps the Go heap at 2 GiB per process; the race
+  # detector's shadow memory comes on top of it.
+  #
+  # Time (OPS-001): on 2 vCPU the cmd/koro package alone takes 15–20 min
+  # under -race (873 s and 1220 s in two runs of the same commit), at the
+  # Makefile's 20m per-package timeout; CI gives it 40m. Speeding the matrix
+  # up is application work (see the OPS-001 notes).
   test-integration:
     needs: check
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    if: needs.check.outputs.merged != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    env:
+      GOFLAGS: -shuffle=on -json
+      GOMEMLIMIT: 2GiB
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -53,12 +143,49 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      # testcontainers uses the runner's Docker daemon (PostgreSQL 18, Redis 8).
-      - run: make test-integration
+          cache: false
+      - name: Restore Go caches
+        id: go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-race-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-race-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-race-${{ runner.os }}-
+      # testcontainers uses the runner's Docker daemon (PostgreSQL 18, Redis 8,
+      # SeaweedFS, Mailpit, ClamAV, OpenBao).
+      # -json carries every test's log (the smoke test's flow time too)
+      # without a -v wall of text; test-report.sh keeps the log short.
+      - name: make test-integration (unit + integration, -race)
+        run: |
+          .github/scripts/resmon.sh 60 &
+          trap 'kill $!' EXIT
+          make test-integration TEST_TIMEOUT=40m | tee "$RUNNER_TEMP/test.json" | .github/scripts/test-report.sh live
+      - name: Failed tests (full output)
+        if: failure()
+        run: .github/scripts/test-report.sh failures "$RUNNER_TEMP/test.json"
+      - name: Slowest packages and tests
+        if: success() || failure()
+        run: .github/scripts/test-report.sh slowest "$RUNNER_TEMP/test.json"
+      - name: Runner resources and OOM records
+        if: always()
+        run: .github/scripts/resmon.sh report
+      - name: Save Go caches
+        if: github.event_name == 'push' || steps.go-cache.outputs.cache-matched-key == ''
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
   security:
     needs: check
-    runs-on: ubuntu-latest
+    if: needs.check.outputs.merged != 'true'
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -68,23 +195,59 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false
+      - name: Restore Go caches
+        id: go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+            ~/.cache/golangci-lint
+          key: go-sec-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-sec-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-sec-${{ runner.os }}-
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: bin
           key: tools-${{ runner.os }}-${{ hashFiles('Makefile', 'go.mod') }}
-      - name: govulncheck (source + binary) and gosec
-        run: make sec
+      # The gitleaks CLI (MIT, no license key) instead of gitleaks-action,
+      # which needs a GITLEAKS_LICENSE secret on organisation repositories.
+      # The release archive is pinned by its SHA-256; the whole history is
+      # scanned (fetch-depth 0), findings are redacted in the log.
       - name: gitleaks
-        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Organisation repositories need a (free) license key.
-          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          tgz="$RUNNER_TEMP/gitleaks.tar.gz"
+          curl -fsSL -o "$tgz" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  $tgz" | sha256sum -c -
+          tar -xzf "$tgz" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" git --config .gitleaks.toml --redact --no-banner --exit-code 1 \
+            --report-format json --report-path "$RUNNER_TEMP/gitleaks.json" . || {
+            jq -r '.[] | "\(.RuleID)\t\(.File):\(.StartLine)\t\(.Fingerprint)"' "$RUNNER_TEMP/gitleaks.json"
+            exit 1
+          }
+      - name: govulncheck (source + binary) and gosec
+        if: success() || failure() # reported even when gitleaks fails
+        run: make sec
+      - name: Save Go caches
+        if: github.event_name == 'push' || steps.go-cache.outputs.cache-matched-key == ''
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+            ~/.cache/golangci-lint
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
   image:
-    needs: [test-integration, security]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    needs: [check, test-integration, security]
+    if: needs.check.outputs.image == 'true' && needs.check.outputs.merged != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -1,0 +1,14 @@
+# gitleaks (CI security job, OPS-001): the default rules, minus test fixtures.
+# Tests and testdata hold synthetic passwords, keys and tokens on purpose
+# (e.g. "dogru-parola-12345", RFC 6455's sample nonce); real secrets live
+# only in the environment (.env, never committed) and are still scanned
+# everywhere else, .env.example included.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Synthetic test fixtures"
+paths = [
+  '''_test\.go$''',
+  '''(^|/)testdata/''',
+]

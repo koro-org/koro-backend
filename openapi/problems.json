@@ -996,6 +996,48 @@
     "type": "urn:koro:problem:notify.suppression_not_found"
   },
   {
+    "code": "orders.amount_exceeds_due",
+    "status": 409,
+    "title": "The amount exceeds what the order still waits for",
+    "type": "urn:koro:problem:orders.amount_exceeds_due"
+  },
+  {
+    "code": "orders.buyer_party_required",
+    "status": 422,
+    "title": "A verified buyer legal party of the company is required",
+    "type": "urn:koro:problem:orders.buyer_party_required"
+  },
+  {
+    "code": "orders.commission_exceeds_share",
+    "status": 409,
+    "title": "The commission exceeds the seller's share of a line",
+    "type": "urn:koro:problem:orders.commission_exceeds_share"
+  },
+  {
+    "code": "orders.dispute_window_closed",
+    "status": 409,
+    "title": "The dispute window of the line has ended",
+    "type": "urn:koro:problem:orders.dispute_window_closed"
+  },
+  {
+    "code": "orders.invalid_state",
+    "status": 409,
+    "title": "The current status does not allow this change",
+    "type": "urn:koro:problem:orders.invalid_state"
+  },
+  {
+    "code": "orders.order_not_paid",
+    "status": 409,
+    "title": "The order is not paid yet",
+    "type": "urn:koro:problem:orders.order_not_paid"
+  },
+  {
+    "code": "orders.refund_exceeds_paid",
+    "status": 422,
+    "title": "The refund exceeds the paid amount",
+    "type": "urn:koro:problem:orders.refund_exceeds_paid"
+  },
+  {
     "code": "orgs.already_member",
     "status": 409,
     "title": "Already a member or a request is pending",
@@ -1216,6 +1258,12 @@
     "status": 413,
     "title": "Payload too large",
     "type": "urn:koro:problem:payload_too_large"
+  },
+  {
+    "code": "payments.no_active_collection_account",
+    "status": 409,
+    "title": "No active collection account is configured",
+    "type": "urn:koro:problem:payments.no_active_collection_account"
   },
   {
     "code": "precondition_failed",

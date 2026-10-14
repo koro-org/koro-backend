@@ -41,9 +41,17 @@ ledger    -> orders.Orders.MarkLinesPaidOut
 # --- or deletes the line.
 # T-78: directory opens the club/university org in its own transaction; BE-020.
 directory -> orgs.OrgAdmin.Create
-# 05 §2.4 "derived" lines (01 §4.18, §7 orders.expire_unpaid); BE-040.
+# 05 §2.4 "derived" lines (01 §4.18, §7 orders.expire_unpaid); BE-040 (06 H-2,
+# rationale for 01 §6.3 in the BE-040 ticket's doc patch): a full payment
+# activates the pending rights of the order in the capture transaction (01 §6.3
+# "Havale eşleştirme": orders.ApplyPayment → ActivateBySource); an unpaid order
+# that expires or is cancelled gives its units back and revokes its pending
+# rights in the transaction that ends it, so stock and rights never outlive the
+# order nor the order its stock. 05 named the revocation "Release"
+# (entitlements' Release reverses a usage); the entitlements method is
+# RevokeBySource.
 orders    -> entitlements.Entitlements.ActivateBySource
-orders    -> entitlements.Entitlements.Release
+orders    -> entitlements.Entitlements.RevokeBySource
 orders    -> catalog.Offerings.Release
 
 # BE-032 (rationale for 01 §6.3 in the BE-032 ticket's doc patch): the reverse of

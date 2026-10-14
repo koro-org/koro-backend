@@ -1,0 +1,380 @@
+package orders
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"slices"
+	"time"
+	"uuid"
+
+	"koro/internal/entitlements"
+	"koro/internal/platform/domainevent"
+)
+
+// Revocation reasons of the rights of a line (entitlements.revoke_reason).
+const (
+	revokeExpired   = "order_expired"
+	revokeCancelled = "order_cancelled"
+	revokeRefunded  = "order_line_refunded"
+)
+
+// ForPayment implements Orders.
+func (s *service) ForPayment(ctx context.Context, orderID uuid.UUID) (PayableOrder, error) {
+	o, err := s.d.Store.GetOrder(ctx, orderID, false)
+	if err != nil {
+		return PayableOrder{}, err
+	}
+	return payableOf(o), nil
+}
+
+// FindByReference implements Orders (04 §C.3): the code is normalised
+// (separators ignored, upper case, Crockford's O/I/L) before the lookup.
+func (s *service) FindByReference(ctx context.Context, ref string) (PayableOrder, bool, error) {
+	code, ok := NormalizeReference(ref)
+	if !ok {
+		return PayableOrder{}, false, nil
+	}
+	o, err := s.d.Store.OrderByNo(ctx, code)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		return PayableOrder{}, false, nil
+	case err != nil:
+		return PayableOrder{}, false, err
+	}
+	return payableOf(o), true, nil
+}
+
+// ApplyPayment implements Orders (01 §4.18, §6.3 "Havale eşleştirme"; T-14)
+// in the caller's transaction: only an order awaiting payment takes money,
+// never more than it still waits for (payments refunds an overpayment).
+// When Koro has collected everything (paid_amount = koro_collect_amount, the
+// orders_paid_full_chk rule) a model A, A2 or B order is paid (settle). A
+// model C order collects only Koro's fee here and is paid by
+// ConfirmDirectPayment (T-18, T-227, 06 H-56).
+func (s *service) ApplyPayment(ctx context.Context, orderID, paymentID uuid.UUID, amount int64) (PaymentEffect, error) {
+	if amount <= 0 {
+		return PaymentEffect{}, fieldErr("amount", "must be positive")
+	}
+	var eff PaymentEffect
+	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
+		o, err := s.d.Store.GetOrder(ctx, orderID, true)
+		if err != nil {
+			return err
+		}
+		if o.Status != StatusAwaitingPayment {
+			return ErrInvalidState
+		}
+		if amount > o.DueAmount() {
+			return ErrAmountExceedsDue
+		}
+		next := o
+		next.PaidAmount += amount
+		paid := next.DueAmount() == 0 && !o.DirectToPayee()
+		if eff, err = s.settle(ctx, o, next, paid); err != nil {
+			return err
+		}
+		s.d.Log.LogAttrs(ctx, slog.LevelInfo, "order payment applied", slog.String("order_id", o.ID.String()),
+			slog.String("payment_id", paymentID.String()), slog.Int64("amount", amount), slog.Bool("paid", paid))
+		return nil
+	})
+	if err != nil {
+		return PaymentEffect{}, err
+	}
+	return eff, nil
+}
+
+// ConfirmDirectPayment implements Orders (model C; 00 T-18, T-227, 06 H-56:
+// as in model A, an order is paid only once the buyer has paid all of it).
+// payments records a finance admin's confirmation that the buyer paid the
+// payees directly (payments provider direct_confirmed, BE-041) and calls
+// this in its transaction: the order must be a model C order awaiting
+// payment whose fee Koro has collected in full (else 409
+// orders.order_not_paid: payments confirms the direct payment once the fee
+// is in; an order without a fee is paid at once). The order is then paid
+// like a model A order (settle). The direct amount never enters
+// paid_amount (T-227).
+func (s *service) ConfirmDirectPayment(ctx context.Context, orderID, paymentID uuid.UUID) (PaymentEffect, error) {
+	var eff PaymentEffect
+	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
+		o, err := s.d.Store.GetOrder(ctx, orderID, true)
+		switch {
+		case err != nil:
+			return err
+		case !o.DirectToPayee() || o.Status != StatusAwaitingPayment:
+			return ErrInvalidState
+		case o.DueAmount() != 0:
+			return ErrOrderNotPaid
+		}
+		if eff, err = s.settle(ctx, o, o, true); err != nil {
+			return err
+		}
+		s.d.Log.LogAttrs(ctx, slog.LevelInfo, "order direct payment confirmed", slog.String("order_id", o.ID.String()),
+			slog.String("payment_id", paymentID.String()), slog.Int64("direct_amount", o.DirectToPayeeAmount))
+		return nil
+	})
+	if err != nil {
+		return PaymentEffect{}, err
+	}
+	return eff, nil
+}
+
+// settle writes next (o with its new paid amount) and, when paid, makes it
+// paid: the rights of its platform-native lines are activated and those
+// lines fulfilled (auto_platform, order_line.fulfilled O), and the effect
+// carries every line for payment_splits and the ledger.
+func (s *service) settle(ctx context.Context, o, next Order, paid bool) (PaymentEffect, error) {
+	var lines []Line
+	if paid {
+		now := s.now()
+		var err error
+		next.Status, next.PaidAt = StatusPaid, &now
+		if lines, err = s.payLines(ctx, o, now); err != nil {
+			return PaymentEffect{}, err
+		}
+		next.Status = progressStatus(next, lines)
+		if next.Status == StatusCompleted {
+			next.CompletedAt = &now
+		}
+	}
+	stored, err := s.d.Store.UpdateOrder(ctx, next, StatusAwaitingPayment)
+	if err != nil {
+		return PaymentEffect{}, err
+	}
+	eff := PaymentEffect{OrderID: stored.ID, OrgID: stored.OrgID, ModelCode: stored.ModelCode, PaidAmount: stored.PaidAmount,
+		DueAmount: stored.DueAmount(), Paid: paid}
+	for _, l := range lines {
+		eff.Lines = append(eff.Lines, paidLineOf(l))
+	}
+	return eff, nil
+}
+
+// payLines runs at the payment of o: the rights of its platform-native
+// lines are activated and those lines fulfilled (02 §19.2 "hak ödeme anında
+// aktifleşir, fulfilled_via='auto_platform'"). It returns every line.
+func (s *service) payLines(ctx context.Context, o Order, now time.Time) ([]Line, error) {
+	byOrder, err := s.d.Store.LinesOf(ctx, []uuid.UUID{o.ID})
+	if err != nil {
+		return nil, err
+	}
+	lines := byOrder[o.ID]
+	for i, l := range lines {
+		if l.FulfillmentStatus != FulfillNotApplicable {
+			continue
+		}
+		if err := s.d.Entitlements.ActivateBySource(ctx, entitlements.SourceOrderLine, l.ID); err != nil {
+			return nil, fmt.Errorf("orders: activate the rights of line %s: %w", l.ID, err)
+		}
+		via := ViaAutoPlatform
+		next := l
+		next.FulfillmentStatus, next.FulfilledAt, next.FulfilledVia = FulfillFulfilled, &now, &via
+		stored, err := s.d.Store.UpdateLine(ctx, next, FulfillNotApplicable)
+		if err != nil {
+			return nil, err
+		}
+		lines[i] = stored
+		if err := s.emitFulfilled(ctx, stored); err != nil {
+			return nil, err
+		}
+	}
+	return lines, nil
+}
+
+// emitFulfilled writes order_line.fulfilled (O) for billing and the seller's
+// notice; a platform line has no payee (the zero ID).
+func (s *service) emitFulfilled(ctx context.Context, l Line) error {
+	p := domainevent.OrderLineFulfilled{OrderLineID: l.ID, OrderID: l.OrderID}
+	if l.PayeeID != nil {
+		p.PayeeID = *l.PayeeID
+	}
+	return s.emitOutbox(ctx, auditLine, l.ID, p)
+}
+
+// progressStatus is the running status of a paid order from its lines:
+// disputed while a line is disputed; completed once every line is done
+// (fulfilled or cancelled) and one was fulfilled; in_fulfilment once a line
+// is marked or fulfilled; paid otherwise. Any other status (unpaid,
+// cancelled, expired, refunds) is kept.
+func progressStatus(o Order, lines []Line) Status {
+	switch o.Status {
+	case StatusPaid, StatusInFulfilment, StatusDisputed, StatusCompleted:
+	default:
+		return o.Status
+	}
+	disputed, allDone, fulfilled, started := false, true, false, false
+	for _, l := range lines {
+		switch l.FulfillmentStatus {
+		case FulfillDisputed:
+			disputed, allDone, started = true, false, true
+		case FulfillFulfilled:
+			fulfilled, started = true, true
+		case FulfillMarked:
+			allDone, started = false, true
+		case FulfillCancelled:
+		default:
+			allDone = false
+		}
+	}
+	switch {
+	case disputed:
+		return StatusDisputed
+	case allDone && fulfilled:
+		return StatusCompleted
+	case started:
+		return StatusInFulfilment
+	}
+	return StatusPaid
+}
+
+// advance writes the running status of a paid order after a change of one
+// of its lines (the order row is locked first).
+func (s *service) advance(ctx context.Context, orderID uuid.UUID, now time.Time) (Order, error) {
+	o, err := s.d.Store.GetOrder(ctx, orderID, true)
+	if err != nil {
+		return Order{}, err
+	}
+	byOrder, err := s.d.Store.LinesOf(ctx, []uuid.UUID{o.ID})
+	if err != nil {
+		return Order{}, err
+	}
+	next := o
+	next.Status = progressStatus(o, byOrder[o.ID])
+	if next.Status == o.Status {
+		return o, nil
+	}
+	if next.Status == StatusCompleted {
+		next.CompletedAt = &now
+	}
+	return s.d.Store.UpdateOrder(ctx, next, o.Status)
+}
+
+// ApplyRefund implements Orders (BE-043, in its transaction): the refunded
+// amount of the order (and of the line) grows, never beyond what was paid
+// nor beyond what Koro holds of the line (its buyer fee on a model C order;
+// 422 orders.refund_exceeds_paid); a paid order becomes partially_refunded
+// or refunded; a fully refunded line, or every line of a fully refunded
+// order, loses its rights.
+func (s *service) ApplyRefund(ctx context.Context, orderID uuid.UUID, lineID *uuid.UUID, amount int64) error {
+	if amount <= 0 {
+		return fieldErr("amount", "must be positive")
+	}
+	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
+		o, err := s.d.Store.GetOrder(ctx, orderID, true)
+		if err != nil {
+			return err
+		}
+		if o.RefundedAmount+amount > o.PaidAmount {
+			return ErrRefundExceedsPaid
+		}
+		var revoke []uuid.UUID
+		if lineID != nil {
+			l, err := s.d.Store.GetLine(ctx, *lineID, true)
+			switch {
+			case err != nil:
+				return err
+			case l.OrderID != o.ID:
+				return ErrNotFound
+			case amount > o.Refundable(l):
+				return ErrRefundExceedsPaid
+			}
+			next := l
+			next.RefundedAmount += amount
+			if _, err := s.d.Store.UpdateLine(ctx, next, l.FulfillmentStatus); err != nil {
+				return err
+			}
+			if next.RefundedAmount == o.KoroHeld(next) {
+				revoke = append(revoke, l.ID)
+			}
+		}
+		next := o
+		next.RefundedAmount += amount
+		if o.Status.PaidState() {
+			next.Status = StatusPartiallyRefunded
+			if next.RefundedAmount == next.PaidAmount {
+				next.Status = StatusRefunded
+				byOrder, err := s.d.Store.LinesOf(ctx, []uuid.UUID{o.ID})
+				if err != nil {
+					return err
+				}
+				for _, l := range byOrder[o.ID] {
+					if !slices.Contains(revoke, l.ID) {
+						revoke = append(revoke, l.ID)
+					}
+				}
+			}
+		}
+		if _, err := s.d.Store.UpdateOrder(ctx, next, o.Status); err != nil {
+			return err
+		}
+		for _, id := range revoke {
+			if err := s.d.Entitlements.RevokeBySource(ctx, entitlements.SourceOrderLine, id, revokeRefunded); err != nil {
+				return fmt.Errorf("orders: revoke the rights of line %s: %w", id, err)
+			}
+		}
+		return nil
+	})
+}
+
+// GetLine implements Orders.
+func (s *service) GetLine(ctx context.Context, lineID uuid.UUID) (Line, error) {
+	return s.d.Store.GetLine(ctx, lineID, false)
+}
+
+// PayableLines implements Orders (01 §4.18; BE-044).
+func (s *service) PayableLines(ctx context.Context, payeeID uuid.UUID, asOf time.Time) ([]PayableLine, error) {
+	lines, err := s.d.Store.PayableLines(ctx, payeeID, asOf.UTC())
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]uuid.UUID, 0, len(lines))
+	for _, l := range lines {
+		ids = append(ids, l.OrderID)
+	}
+	orders, err := s.d.Store.OrdersByID(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PayableLine, 0, len(lines))
+	for _, l := range lines {
+		out = append(out, PayableLine{LineID: l.ID, OrderID: l.OrderID, OrderNo: orders[l.OrderID].OrderNo, PayeeID: *l.PayeeID,
+			SellerOrgID: l.SellerOrgID, SellerNetAmount: l.SellerNetAmount, FulfilledAt: *l.FulfilledAt})
+	}
+	return out, nil
+}
+
+// MarkLinesPaidOut implements Orders (01 §6.3 "Payout ödendi"; BE-044): in
+// the caller's transaction, every line gets the payout once; a line that is
+// not fulfilled, has no payee or is already paid out fails the whole call
+// (409 orders.invalid_state).
+func (s *service) MarkLinesPaidOut(ctx context.Context, lineIDs []uuid.UUID, payoutID uuid.UUID) error {
+	if len(lineIDs) == 0 || payoutID == uuid.Nil() {
+		return errors.New("orders: mark paid out: lines and payout are required")
+	}
+	ids := slices.Clone(lineIDs)
+	slices.SortFunc(ids, compareUUID)
+	if len(slices.Compact(ids)) != len(lineIDs) {
+		return errors.New("orders: mark paid out: a line is listed twice")
+	}
+	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
+		n, err := s.d.Store.MarkLinesPaidOut(ctx, lineIDs, payoutID, s.now())
+		if err != nil {
+			return err
+		}
+		if n != len(lineIDs) {
+			return ErrInvalidState
+		}
+		return nil
+	})
+}
+
+// maxRefundsDue bounds one RefundsDue page.
+const maxRefundsDue = 1000
+
+// RefundsDue implements Orders.
+func (s *service) RefundsDue(ctx context.Context, limit int) ([]RefundDue, error) {
+	if limit < 1 || limit > maxRefundsDue {
+		limit = maxRefundsDue
+	}
+	return s.d.Store.RefundsDue(ctx, limit)
+}

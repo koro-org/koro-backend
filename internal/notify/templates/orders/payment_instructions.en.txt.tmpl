@@ -1,0 +1,12 @@
+Hello {{index .Data "name"}},
+
+Your order was placed. Pay it by bank transfer to Koro's account below and write only the reference code into the transfer description.
+
+Reference code: {{index .Data "reference_code"}}
+Amount: {{index .Data "amount"}} {{index .Data "currency"}}
+IBAN: {{index .Data "iban"}}
+Account holder: {{index .Data "holder_name"}}
+Bank: {{index .Data "bank_name"}}
+Pay by: {{index .Data "expires_at"}} (Türkiye time)
+
+An order that is not paid by then closes by itself and the reserved packages are released.

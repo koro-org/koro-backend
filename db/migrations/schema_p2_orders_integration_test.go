@@ -7,6 +7,7 @@ import (
 	"uuid"
 
 	"koro/internal/platform/db"
+	"koro/internal/platform/testutil"
 )
 
 // TestSchema_OrderConstraints (02 §19.1, 06 H-6): the order amounts add up
@@ -215,4 +216,66 @@ func TestSchema_OrderValuesFrozen(t *testing.T) {
 		dispute_window_ends_at = now() + interval '7 days' WHERE id = $1`, line, w.user())
 	w.fulfil(line)
 	w.exec(`UPDATE order_lines SET refunded_amount = 1000 WHERE id = $1`, line)
+}
+
+// TestSchema_OrderLineEventOrgFK (06 H-55, BE-040): an order line is bound
+// only to an event of its seller org — order_lines_event_id_seller_org_id_fkey
+// (event_id, seller_org_id) → events (id, org_id); a line without an event
+// is free (MATCH SIMPLE). Mutation test: with the former single-column FK
+// (event_id → events (id)) the same cross-org line commits, so the
+// composite FK is what refuses it.
+func TestSchema_OrderLineEventOrgFK(t *testing.T) {
+	t.Parallel()
+	w := newP1aWorld(t)
+	s := w.shop()
+	own, foreign := w.event(s.seller.org, w.user(), nil), w.event(w.org("club"), w.user(), nil)
+	withEvent := func(ev uuid.UUID) []stmt {
+		order := uuid.NewV7()
+		return []stmt{w.orderStmt(s, order, nil), lineStmt(s, uuid.NewV7(), order, map[string]string{"event_id": "'" + ev.String() + "'::uuid"})}
+	}
+	const fk = "order_lines_event_id_seller_org_id_fkey"
+	expectCommit(t, w, "an event of another org", db.CodeForeignKeyViolation, fk, withEvent(foreign)...)
+	expectCommit(t, w, "an unknown event", db.CodeForeignKeyViolation, fk, withEvent(uuid.NewV7())...)
+	w.mustCommit(withEvent(own)...)
+	w.order(s) // a line without an event
+
+	// Mutation: the former single-column FK lets the cross-org line in.
+	owner := testutil.OwnerConn(t, w.d)
+	if _, err := owner.Exec(t.Context(), `ALTER TABLE order_lines DROP CONSTRAINT `+fk+`,
+		ADD CONSTRAINT order_lines_event_id_fkey FOREIGN KEY (event_id) REFERENCES events (id)`); err != nil {
+		t.Fatal(err)
+	}
+	if state, c := w.commit(stmts(t, withEvent(foreign)...)); state != "" {
+		t.Fatalf("mutant (event_id → events (id)): cross-org line SQLSTATE %q %s, want it stored (the mutant must survive "+
+			"only without the composite FK)", state, c)
+	}
+}
+
+// TestSchema_OrderLinePolicyWindows (02 §18.3, BE-040): the dispute window
+// and the payout hold of the policy in effect are frozen on the line, within
+// the policy's ranges (0–60 and 0–90 days).
+func TestSchema_OrderLinePolicyWindows(t *testing.T) {
+	t.Parallel()
+	w := newP1aWorld(t)
+	s := w.shop()
+	chk := db.CodeCheckViolation
+	for _, c := range []struct{ name, constraint, col, val string }{
+		{"a dispute window above 60 days", "order_lines_dispute_window_days_chk", "dispute_window_days", "61"},
+		{"a negative dispute window", "order_lines_dispute_window_days_chk", "dispute_window_days", "-1"},
+		{"a payout hold above 90 days", "order_lines_payout_hold_days_chk", "payout_hold_days", "91"},
+	} {
+		order := uuid.NewV7()
+		expectCommit(t, w, c.name, chk, c.constraint, w.orderStmt(s, order, nil),
+			lineStmt(s, uuid.NewV7(), order, map[string]string{c.col: c.val}))
+	}
+	order := uuid.NewV7()
+	line := uuid.NewV7()
+	w.mustCommit(w.orderStmt(s, order, nil), lineStmt(s, line, order, map[string]string{"dispute_window_days": "14", "payout_hold_days": "3"}))
+	if got := queryString(t, w.d, `SELECT dispute_window_days || '/' || payout_hold_days FROM order_lines WHERE id = $1`, line); got != "14/3" {
+		t.Fatalf("windows = %s, want 14/3", got)
+	}
+	expectFail(t, w.d.Pool, []p1aCase{
+		{"the dispute window", `UPDATE order_lines SET dispute_window_days = 0 WHERE id = $1`, []any{line}, db.CodeRestrictViolation, ""},
+		{"the payout hold", `UPDATE order_lines SET payout_hold_days = 0 WHERE id = $1`, []any{line}, db.CodeRestrictViolation, ""},
+	})
 }

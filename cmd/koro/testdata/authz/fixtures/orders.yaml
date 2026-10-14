@@ -1,0 +1,22 @@
+# Fixtures of the orders module (cmd/koro/matrix_orders_test.go; BE-040). IDs are authztest.ID(name). Orders are
+# placed at 2026-10-01T00:00:00Z and expire on 2026-10-08 (the matrix clock is 2026-10-03T09:00:00Z); a paid order
+# was paid on 2026-10-02; a marked line was marked then, its dispute window ends on 2026-10-09. Every line is one
+# unit of 1,000,000 kuruş + 20 % VAT under policy_default (model A, 10 % from the seller: seller net 1,080,000),
+# sold by club_a to its payee payee_club_a. off_a_sold is an active offering of club_a without a stock or a
+# per-buyer limit that the orders code seeds into catalog's store, so the fixture orders never count against
+# off_a_active's per-buyer limit (createOrder buys off_a_active). The orders code also installs Koro's
+# collection account (hooks.collectionAccount, payments BE-041) unless payments did.
+version: 1
+fixtures:
+  off_a_sold: { kind: offering, org: club_a, service: svc_booth, payee: payee_club_a }
+  ord_a_unpaid: { kind: order, org: company_a, party: party_buyer_a, placed_by: company_admin, status: awaiting_payment }
+  ln_a_unpaid: { kind: line, order: ord_a_unpaid, offering: off_a_sold, fulfillment: pending }
+  ord_a_paid: { kind: order, org: company_a, party: party_buyer_a, placed_by: company_admin, status: paid }
+  ln_a_paid: { kind: line, order: ord_a_paid, offering: off_a_sold, fulfillment: pending }
+  ord_a_marked: { kind: order, org: company_a, party: party_buyer_a, placed_by: company_admin, status: in_fulfilment }
+  ln_a_marked: { kind: line, order: ord_a_marked, offering: off_a_sold, fulfillment: marked, marked_by: club_admin }
+  ord_a_disputed: { kind: order, org: company_a, party: party_buyer_a, placed_by: company_admin, status: disputed }
+  ln_a_disputed: { kind: line, order: ord_a_disputed, offering: off_a_sold, fulfillment: disputed, marked_by: club_admin }
+  # IDOR: company_b's order (sold by club_a too: club_a's admin sees it as the seller).
+  ord_b_unpaid: { kind: order, org: company_b, party: party_buyer_b, placed_by: other_company_member, status: awaiting_payment }
+  ln_b_unpaid: { kind: line, order: ord_b_unpaid, offering: off_a_sold, fulfillment: pending }

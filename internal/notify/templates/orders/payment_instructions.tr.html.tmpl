@@ -1,0 +1,4 @@
+<p style="margin:0 0 12px 0;">Merhaba {{index .Data "name"}},</p>
+<p style="margin:0 0 12px 0;">Siparişiniz alındı. Ödemeyi aşağıdaki Koro hesabına havale veya EFT ile yapın; havale açıklamasına yalnız referans kodunu yazın.</p>
+<p style="margin:0 0 12px 0;">Referans kodu: <strong>{{index .Data "reference_code"}}</strong><br>Tutar: {{index .Data "amount"}} {{index .Data "currency"}}<br>IBAN: {{index .Data "iban"}}<br>Hesap sahibi: {{index .Data "holder_name"}}<br>Banka: {{index .Data "bank_name"}}<br>Son ödeme: {{index .Data "expires_at"}} (Türkiye saati)</p>
+<p style="margin:0;">Bu süre içinde ödenmeyen sipariş kendiliğinden kapanır ve ayrılan paketler serbest kalır.</p>

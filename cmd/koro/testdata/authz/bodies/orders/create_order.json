@@ -1,0 +1,1 @@
+{"buyer_party_id": "{{fixture:party_buyer_a}}", "lines": [{"offering_id": "{{fixture:off_a_active}}", "quantity": 1}]}

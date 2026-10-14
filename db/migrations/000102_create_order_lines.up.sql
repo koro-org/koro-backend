@@ -21,6 +21,15 @@
 --   * frozen values (H-6, ADR-0014): order_lines_frozen keeps the payee, the
 --     policy copy and every amount; order_lines_paid_out_frozen keeps
 --     payout_id / paid_out_at once set (no second payout of a line).
+--   * 06 H-55 (BE-040): (event_id, seller_org_id) → events (id, org_id)
+--     (events_id_org_uq): a line is bound only to an event of its seller org
+--     (the offering's org); MATCH SIMPLE leaves a line without an event free.
+--   * the policy windows are frozen too (02 §18.3 "commerce_policy_id + tüm
+--     parametreler"; BE-040): dispute_window_days starts the buyer's dispute
+--     window when the seller marks the line, payout_hold_days delays its
+--     payout after fulfilment (T-13: 7 / 0 days by default).
+--   * order_lines_offering_idx: the lines of an offering (the per-buyer
+--     limit of catalog.Reserve, the offering.cancelled consumer; BE-040).
 --   * orders_totals_match_lines: deferred constraint trigger on orders and
 --     order_lines; at commit an order has at least one line and its subtotal,
 --     VAT, withholding, buyer fee and payable amounts equal the sums of its
@@ -36,7 +45,7 @@ CREATE TABLE order_lines (
   payee_id                 uuid,                             -- frozen; NULL for a platform seller
   offering_id              uuid NOT NULL,
   service_id               uuid NOT NULL CONSTRAINT order_lines_service_id_fkey REFERENCES services (id),
-  event_id                 uuid CONSTRAINT order_lines_event_id_fkey REFERENCES events (id),
+  event_id                 uuid,                             -- an event of the seller org (composite FK, 06 H-55)
   commerce_policy_id       uuid NOT NULL CONSTRAINT order_lines_commerce_policy_id_fkey REFERENCES commerce_policies (id),
   title_snapshot           text NOT NULL,
   deliverables_snapshot    jsonb NOT NULL DEFAULT '[]',
@@ -55,6 +64,8 @@ CREATE TABLE order_lines (
   commission_amount        bigint NOT NULL CONSTRAINT order_lines_commission_amount_chk CHECK (commission_amount >= 0),
   commission_vat_rate_bp   integer NOT NULL CONSTRAINT order_lines_commission_vat_rate_bp_chk CHECK (commission_vat_rate_bp BETWEEN 0 AND 10000),
   commission_vat_amount    bigint NOT NULL CONSTRAINT order_lines_commission_vat_amount_chk CHECK (commission_vat_amount >= 0),
+  dispute_window_days      smallint NOT NULL DEFAULT 7 CONSTRAINT order_lines_dispute_window_days_chk CHECK (dispute_window_days BETWEEN 0 AND 60),
+  payout_hold_days         smallint NOT NULL DEFAULT 0 CONSTRAINT order_lines_payout_hold_days_chk CHECK (payout_hold_days BETWEEN 0 AND 90),
   buyer_fee_amount         bigint NOT NULL CONSTRAINT order_lines_buyer_fee_amount_chk CHECK (buyer_fee_amount >= 0),
   seller_net_amount        bigint NOT NULL CONSTRAINT order_lines_seller_net_amount_chk CHECK (seller_net_amount >= 0),   -- the payee's earning
   payable_amount           bigint NOT NULL CONSTRAINT order_lines_payable_amount_chk CHECK (payable_amount >= 0),
@@ -74,6 +85,7 @@ CREATE TABLE order_lines (
   CONSTRAINT order_lines_order_id_org_id_fkey FOREIGN KEY (order_id, org_id) REFERENCES orders (id, org_id),
   CONSTRAINT order_lines_offering_id_seller_org_id_fkey FOREIGN KEY (offering_id, seller_org_id) REFERENCES offerings (id, org_id),
   CONSTRAINT order_lines_payee_id_seller_org_id_fkey FOREIGN KEY (payee_id, seller_org_id) REFERENCES payees (id, org_id),
+  CONSTRAINT order_lines_event_id_seller_org_id_fkey FOREIGN KEY (event_id, seller_org_id) REFERENCES events (id, org_id),
   CONSTRAINT order_lines_id_order_uq UNIQUE (id, order_id),
   CONSTRAINT order_lines_id_payee_uq UNIQUE (id, payee_id),
   -- amounts (kuruş; 02 §19.2 rules, computed by platform/money)
@@ -101,6 +113,7 @@ CREATE INDEX order_lines_seller_idx  ON order_lines (seller_org_id, created_at D
 CREATE INDEX order_lines_payable_idx ON order_lines (payee_id, fulfilled_at)
   WHERE fulfillment_status = 'fulfilled' AND payout_id IS NULL;
 CREATE INDEX order_lines_window_idx  ON order_lines (dispute_window_ends_at) WHERE fulfillment_status = 'marked';
+CREATE INDEX order_lines_offering_idx ON order_lines (offering_id);
 CREATE TRIGGER order_lines_touch_updated_at BEFORE UPDATE ON order_lines
   FOR EACH ROW EXECUTE FUNCTION public.koro_touch_updated_at();
 CREATE TRIGGER order_lines_frozen BEFORE UPDATE ON order_lines
@@ -108,7 +121,8 @@ CREATE TRIGGER order_lines_frozen BEFORE UPDATE ON order_lines
     'service_id', 'event_id', 'commerce_policy_id', 'title_snapshot', 'deliverables_snapshot', 'quantity', 'unit_price_amount',
     'net_amount', 'vat_rate_bp', 'vat_amount', 'vat_withholding_num', 'vat_withholding_den', 'vat_withheld_amount',
     'gross_amount', 'commission_rate_bp', 'commission_basis', 'commission_payer', 'commission_amount',
-    'commission_vat_rate_bp', 'commission_vat_amount', 'buyer_fee_amount', 'seller_net_amount', 'payable_amount');
+    'commission_vat_rate_bp', 'commission_vat_amount', 'dispute_window_days', 'payout_hold_days', 'buyer_fee_amount',
+    'seller_net_amount', 'payable_amount');
 CREATE TRIGGER order_lines_paid_out_frozen BEFORE UPDATE ON order_lines
   FOR EACH ROW EXECUTE FUNCTION public.koro_freeze_columns('payout_id', 'payout_id', 'paid_out_at');
 

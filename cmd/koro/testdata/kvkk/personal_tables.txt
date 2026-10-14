@@ -122,7 +122,7 @@ services                    none      catalog       -
 offerings                   staff     catalog       -
 commerce_policies           staff     catalog       -
 # orders
-orders                      personal  orders        todo:BE-040
+orders                      personal  orders        provider:orders
 order_lines                 staff     orders        -
 # payments
 collection_accounts         staff     payments      -

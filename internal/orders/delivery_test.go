@@ -457,6 +457,16 @@ func TestPayableLines_AndPaidOut(t *testing.T) {
 	if got, err := ord.GetLine(t.Context(), l.ID); err != nil || got.ID != l.ID {
 		t.Fatalf("GetLine = %+v, %v", got, err)
 	}
+	// billing (BE-042): the order with its lines, and the lines of the payout.
+	o, lines, err := ord.ForBilling(t.Context(), v.Order.ID)
+	if err != nil || o.ID != v.Order.ID || len(lines) != 1 || lines[0].ID != l.ID {
+		t.Fatalf("ForBilling = %+v, %d lines, %v", o, len(lines), err)
+	}
+	_, _, err = ord.ForBilling(t.Context(), uuid.NewV7())
+	wantErr(t, err, orders.ErrNotFound)
+	if ls, err := ord.PayoutLines(t.Context(), payout); err != nil || len(ls) != 1 || ls[0].ID != l.ID {
+		t.Fatalf("PayoutLines = %+v, %v", ls, err)
+	}
 }
 
 // TestOpenCommerce_BlocksClose (hooks.openCommerce → orgs closeOrg): a

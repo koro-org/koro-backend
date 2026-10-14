@@ -110,6 +110,14 @@ type Orders interface {
 	// cancelled after payment, dispute resolved with a refund, an order
 	// cancelled or expired with money paid); BE-043 opens the refunds.
 	RefundsDue(ctx context.Context, limit int) ([]RefundDue, error)
+	// ForBilling returns an order with all its lines (any status) for
+	// billing's invoice plan (BE-042: the frozen amounts, payees, policy
+	// copy and the buyer's snapshot); ErrNotFound.
+	ForBilling(ctx context.Context, orderID uuid.UUID) (Order, []Line, error)
+	// PayoutLines returns the lines a payout paid out (order_lines.payout_id,
+	// written by MarkLinesPaidOut), in line order: billing's commission
+	// invoice on payout.paid (BE-042). An unknown payout has none.
+	PayoutLines(ctx context.Context, payoutID uuid.UUID) ([]Line, error)
 }
 
 // Service is the orders service: the cross-module contract plus the HTTP

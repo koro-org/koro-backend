@@ -92,6 +92,12 @@ type Offerings interface {
 	// t: offering > service > seller_org > default (02 §18.3); ErrNoPolicy
 	// when none applies.
 	ResolvePolicy(ctx context.Context, offeringID uuid.UUID, at time.Time) (CommercePolicy, error)
+	// InvoiceTerms returns how billing invoices a line of the offering
+	// (BE-042): the offering's invoice trigger, the service's invoice text
+	// and VAT codes (any status: the line may be long sold) and the invoice
+	// automation of the commerce policy frozen on the line (policyID).
+	// ErrNotFound for an unknown offering, service or policy.
+	InvoiceTerms(ctx context.Context, offeringID, policyID uuid.UUID) (InvoiceTerms, error)
 }
 
 // Service is the catalog service: the cross-module contract plus the HTTP

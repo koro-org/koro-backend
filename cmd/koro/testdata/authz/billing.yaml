@@ -1,0 +1,295 @@
+# Authz matrix of the billing module (03 §5.18, 04 §2.18; BE-042). 9 operations × 18 personas.
+# Admin surface (03 §7.2-3): everyone without the role → 403, nothing is read first. Org and invoice
+# surface (03 §3.6): an invoice is visible to the active members of its issuing and receiving orgs and to
+# every platform role (403 without a cell); anyone else gets 404. k29: the issuer's club admin uploads only
+# a seller_uploaded invoice (the payee's own service invoice); finance uploads any. Four eyes (03 §6.1,
+# 06 H-19): inv_own_upload was uploaded by finance_admin. The integration PUT carries the matrix password
+# (R, identity fixtures). Fixtures: fixtures/billing.yaml (matrix_billing_test.go).
+version: 1
+groups:
+  # signed-in users without a platform role.
+  no_platform_role: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                     event_staff, university_rep, company_member, company_admin, other_company_member]
+  # platform roles without a billing cell.
+  other_staff: [moderator, support, dpo, talent_auditor]
+  # signed-in users outside club_a.
+  outsiders_club_a: [user_unverified, student, student_minor, other_club_admin, event_staff, university_rep,
+                     company_member, company_admin, other_company_member]
+  # signed-in users outside company_a.
+  outsiders_company_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin, event_staff,
+                        university_rep, other_company_member]
+  # signed-in users outside uni_a.
+  outsiders_uni_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin, event_staff,
+                    company_member, company_admin, other_company_member]
+  # signed-in users outside club_a and company_a (club_a's service invoice to company_a).
+  outsiders_invoice_a: [user_unverified, student, student_minor, other_club_admin, event_staff, university_rep,
+                        other_company_member]
+
+operations:
+  listOrgInvoices:
+    method: GET
+    path: /api/v1/orgs/{org_id}/invoices
+    action: billing.invoice.list
+    path_params: { org_id: club_a }
+    expect:
+      anonymous: 401
+      "@outsiders_club_a": 404
+      club_member: 403
+      club_admin: 200
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: company_received
+        path_params: { org_id: company_a }
+        query: { direction: received }
+        expect:
+          anonymous: 401
+          "@outsiders_company_a": 404
+          company_member: 200
+          company_admin: 200
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+      - name: university_issued
+        path_params: { org_id: uni_a }
+        query: { direction: issued, status: issued }
+        expect:
+          anonymous: 401
+          "@outsiders_uni_a": 404
+          university_rep: 200
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+
+  getInvoice:
+    method: GET
+    path: /api/v1/invoices/{invoice_id}
+    action: billing.invoice.read
+    path_params: { invoice_id: inv_planned }
+    note: club_a's service invoice to company_a — both sides read it
+    expect:
+      anonymous: 401
+      "@outsiders_invoice_a": 404
+      club_member: 403
+      club_admin: 200
+      company_member: 200
+      company_admin: 200
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: koro_commission
+        path_params: { invoice_id: inv_commission }
+        note: Koro's commission invoice to club_a's payee — club_a reads it, company_a never sees it
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403
+          club_admin: 200
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+      - name: other_org
+        path_params: { invoice_id: inv_uni }
+        note: IDOR — uni_a's invoice to company_b
+        expect:
+          anonymous: 401
+          user_unverified: 404
+          student: 404
+          student_minor: 404
+          club_member: 404
+          club_admin: 404
+          other_club_admin: 404
+          event_staff: 404
+          university_rep: 200
+          company_member: 404
+          company_admin: 404
+          other_company_member: 200
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+
+  downloadInvoicePdf:
+    method: GET
+    path: /api/v1/invoices/{invoice_id}/pdf
+    action: billing.invoice.read
+    path_params: { invoice_id: inv_issued }
+    note: an issued invoice's PDF for both sides
+    expect:
+      anonymous: 401
+      "@outsiders_invoice_a": 404
+      club_member: 403
+      club_admin: 200
+      company_member: 200
+      company_admin: 200
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: waiting_for_verification
+        path_params: { invoice_id: inv_uploaded }
+        note: an unissued upload only for its uploader side and finance — 409 billing.invalid_state for the buyer and pad
+        expect:
+          anonymous: 401
+          "@outsiders_invoice_a": 404
+          club_member: 403
+          club_admin: 200
+          company_member: 409
+          company_admin: 409
+          "@other_staff": 403
+          platform_admin: 409
+          finance_admin: 200
+
+  uploadInvoice:
+    method: POST
+    path: /api/v1/invoices/{invoice_id}/upload
+    action: billing.invoice.upload
+    path_params: { invoice_id: inv_planned }
+    body: bodies/billing/upload.json
+    note: k29 — club_a's admin uploads the payee's service invoice with the club's PDF; finance may too
+    expect:
+      anonymous: 401
+      "@outsiders_invoice_a": 404
+      club_member: 403
+      club_admin: 200
+      company_member: 403
+      company_admin: 403
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 200
+    variants:
+      - name: koro_invoice
+        path_params: { invoice_id: inv_commission }
+        body: bodies/billing/upload_fin.json
+        note: Koro's own invoice is finance's to upload (k29 — the club admin may not)
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403
+          club_admin: 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 200
+      - name: issued
+        path_params: { invoice_id: inv_issued }
+        note: only a planned invoice takes a document — 409 billing.invalid_state
+        expect:
+          anonymous: 401
+          "@outsiders_invoice_a": 404
+          club_member: 403
+          club_admin: 409
+          company_member: 403
+          company_admin: 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 409
+
+  adminListInvoices:
+    method: GET
+    path: /api/v1/admin/invoices
+    action: billing.invoice.list_admin
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403   # admin surface: 403 before reading (03 §7.2-3)
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: verification_queue
+        query: { status: planned, kind: service_sale }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+
+  adminVerifyInvoice:
+    method: POST
+    path: /api/v1/admin/invoices/{invoice_id}/verify
+    action: billing.invoice.verify
+    path_params: { invoice_id: inv_uploaded }
+    body: bodies/billing/verify.json
+    note: second eye — finance_admin verifies club_admin's upload; a platform admin is no eye (fin only)
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 200
+    variants:
+      - name: own_upload
+        path_params: { invoice_id: inv_own_upload }
+        note: four eyes — finance_admin uploaded it and may not verify it
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 403
+      - name: mismatch
+        body: bodies/billing/mismatch.json
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 200
+      - name: nothing_uploaded
+        path_params: { invoice_id: inv_planned }
+        note: no upload waits — 409 billing.invalid_state for the platform roles that pass the gate
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 409
+          finance_admin: 409
+
+  adminCancelInvoice:
+    method: POST
+    path: /api/v1/admin/invoices/{invoice_id}/cancel
+    action: billing.invoice.cancel
+    path_params: { invoice_id: inv_issued }
+    body: bodies/billing/cancel.json
+    note: an issued invoice is cancelled with a credit note planned
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 200
+    variants:
+      - name: planned
+        path_params: { invoice_id: inv_planned }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 200
+
+  adminListIntegrations:
+    method: GET
+    path: /api/v1/admin/integrations
+    action: billing.integration.manage
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+
+  adminPutIntegration:
+    method: PUT
+    path: /api/v1/admin/integrations/{provider}
+    action: billing.integration.manage
+    path_params: { provider: "literal:parasut" }
+    body: bodies/billing/put_integration.json
+    note: R — the tokens are sealed and never returned (the matrix password)
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200

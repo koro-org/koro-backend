@@ -1,0 +1,38 @@
+# Fixtures of the billing module (cmd/koro/matrix_billing_test.go; BE-042). IDs are authztest.ID(name).
+# A pdf is an active invoice_pdf upload (scan skipped) of uploaded_by, for org when given, attached to
+# invoice when given. An invoice is a planned document (02 §22.1) of invoice_kind from issuer (a parties
+# fixture) of issuer_org (none: Koro's own invoice) to recipient of recipient_org; status uploaded adds
+# the upload (uploaded_by, pdf), issued and mismatch the verification (verified_by) too.
+version: 1
+fixtures:
+  # the club's PDF for the uploads of the matrix (club_admin's, for club_a: finance may use it too).
+  pdf_club: { kind: pdf, uploaded_by: club_admin, org: club_a }
+  # finance's own PDF (Koro's invoices).
+  pdf_fin: { kind: pdf, uploaded_by: finance_admin }
+  pdf_uploaded: { kind: pdf, uploaded_by: club_admin, org: club_a, invoice: inv_uploaded }
+  pdf_own: { kind: pdf, uploaded_by: finance_admin, invoice: inv_own_upload }
+  pdf_issued: { kind: pdf, uploaded_by: club_admin, org: club_a, invoice: inv_issued }
+  pdf_uni: { kind: pdf, uploaded_by: university_rep, org: uni_a, invoice: inv_uni }
+  # club_a's payee (party_foundation_a) → company_a (party_buyer_a): the service invoice of ord_a_paid.
+  inv_planned: { kind: invoice, invoice_kind: service_sale, issuer: party_foundation_a, issuer_org: club_a,
+                 recipient: party_buyer_a, recipient_org: company_a, mode: seller_uploaded, order: ord_a_paid }
+  inv_uploaded: { kind: invoice, invoice_kind: service_sale, issuer: party_foundation_a, issuer_org: club_a,
+                  recipient: party_buyer_a, recipient_org: company_a, mode: seller_uploaded, order: ord_a_marked,
+                  status: uploaded, uploaded_by: club_admin, pdf: pdf_uploaded }
+  inv_issued: { kind: invoice, invoice_kind: service_sale, issuer: party_foundation_a, issuer_org: club_a,
+                recipient: party_buyer_a, recipient_org: company_a, mode: seller_uploaded, order: ord_a_disputed,
+                status: issued, uploaded_by: club_admin, pdf: pdf_issued, verified_by: finance_admin_2 }
+  # Koro (party_platform) → club_a's payee: commission invoices of a payout.
+  inv_commission: { kind: invoice, invoice_kind: commission, issuer: party_platform, recipient: party_foundation_a,
+                    recipient_org: club_a, mode: manual_upload, payout: po_matrix_a }
+  # four eyes: finance_admin uploaded it and may not verify it.
+  inv_own_upload: { kind: invoice, invoice_kind: commission, issuer: party_platform, recipient: party_foundation_b,
+                    recipient_org: club_a, mode: manual_upload, payout: po_matrix_b, status: uploaded,
+                    uploaded_by: finance_admin, pdf: pdf_own }
+  # IDOR: uni_a's payee (party_uni_a) → company_b (party_buyer_b), issued.
+  inv_uni: { kind: invoice, invoice_kind: service_sale, issuer: party_uni_a, issuer_org: uni_a, recipient: party_buyer_b,
+             recipient_org: company_b, mode: seller_uploaded, order: ord_b_unpaid, status: issued,
+             uploaded_by: university_rep, pdf: pdf_uni, verified_by: finance_admin }
+  # payout IDs of the commission invoices (no payout row in memory).
+  po_matrix_a: { kind: payout_ref }
+  po_matrix_b: { kind: payout_ref }

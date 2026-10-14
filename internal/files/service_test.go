@@ -572,3 +572,25 @@ func TestPrivacy_ExportAndEraseUnattachedFiles(t *testing.T) {
 	}
 	e.row(t, kept)
 }
+
+// TestRead_ServableOnly: the owner module reads a file's content only under
+// the download rule (BE-042: the invoice PDF e-mail) and within its limit.
+func TestRead_ServableOnly(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	pending := e.active(t, cvRequest(len(pdf)), pdf)
+	_, _, err := e.svc.Read(t.Context(), pending, files.MaxUploadBytes)
+	wantErr(t, err, files.ErrNotClean)
+	if err := e.scan(t, pending); err != nil {
+		t.Fatal(err)
+	}
+	b, meta, err := e.svc.Read(t.Context(), pending, files.MaxUploadBytes)
+	if err != nil || !strings.HasPrefix(string(b), "%PDF-") || int64(len(b)) != meta.SizeBytes || meta.ID != pending ||
+		meta.MIME != files.MIMEPDF {
+		t.Fatalf("Read = %d bytes, %+v, %v", len(b), meta, err)
+	}
+	_, _, err = e.svc.Read(t.Context(), pending, int64(len(b)-1))
+	wantErr(t, err, files.ErrTooLarge)
+	_, _, err = e.svc.Read(t.Context(), uuid.NewV7(), files.MaxUploadBytes)
+	wantErr(t, err, files.ErrNotFound)
+}

@@ -501,6 +501,38 @@ func (s *service) PresignGet(ctx context.Context, fileID uuid.UUID, ttl time.Dur
 	return Download{URL: p.URL, ExpiresAt: p.ExpiresAt}, nil
 }
 
+// Read implements Files.
+func (s *service) Read(ctx context.Context, fileID uuid.UUID, maxBytes int64) ([]byte, FileMeta, error) {
+	f, err := s.d.Store.Get(ctx, fileID)
+	if err != nil {
+		return nil, FileMeta{}, err
+	}
+	if err := s.servable(f); err != nil {
+		return nil, FileMeta{}, err
+	}
+	if f.SizeBytes != nil && *f.SizeBytes > maxBytes {
+		return nil, FileMeta{}, ErrTooLarge
+	}
+	rc, _, err := s.d.Objects.Open(ctx, f.Bucket, f.StorageKey)
+	switch {
+	case errors.Is(err, storage.ErrNotFound):
+		return nil, FileMeta{}, ErrObjectMissing
+	case err != nil:
+		return nil, FileMeta{}, ErrStorageUnavailable.Wrap(err)
+	}
+	defer rc.Close()
+	b, err := io.ReadAll(io.LimitReader(rc, maxBytes+1))
+	switch {
+	case err != nil:
+		return nil, FileMeta{}, ErrStorageUnavailable.Wrap(err)
+	case int64(len(b)) > maxBytes:
+		return nil, FileMeta{}, ErrTooLarge
+	}
+	s.d.Log.LogAttrs(ctx, slog.LevelInfo, "file read by its owner module",
+		slog.String("file_id", f.ID.String()), slog.String("purpose", string(f.Purpose)), slog.Int("bytes", len(b)))
+	return b, f.meta(), nil
+}
+
 // servable reports whether f may be downloaded (05 §14.7: an unscanned or
 // unapproved object is never served).
 func (s *service) servable(f File) error {

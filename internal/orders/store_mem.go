@@ -434,6 +434,13 @@ func (m *MemStore) PayableLines(_ context.Context, payeeID uuid.UUID, asOf time.
 	return out, nil
 }
 
+// LinesOfPayout implements Store.
+func (m *MemStore) LinesOfPayout(_ context.Context, payoutID uuid.UUID) ([]Line, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.linesOrdered(func(l Line) bool { return l.PayoutID != nil && *l.PayoutID == payoutID }), nil
+}
+
 // MarkLinesPaidOut implements Store. It writes only when every line
 // qualifies: the service rolls a partial payout back, which db.NopTx
 // cannot do (the count is the same as the GORM store's).

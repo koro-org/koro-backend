@@ -73,6 +73,8 @@ type Store interface {
 	// MarkLinesPaidOut records the payout of the lines (only fulfilled lines
 	// of a payee without a payout); it returns how many were marked.
 	MarkLinesPaidOut(ctx context.Context, lineIDs []uuid.UUID, payoutID uuid.UUID, at time.Time) (int, error)
+	// LinesOfPayout returns the lines a payout paid out, by (created_at, id).
+	LinesOfPayout(ctx context.Context, payoutID uuid.UUID) ([]Line, error)
 	// RefundsDue returns up to limit money that waits for a refund: paid
 	// lines that were cancelled (what Koro holds of them, Order.Refundable)
 	// and orders cancelled or expired with money paid, not refunded yet;

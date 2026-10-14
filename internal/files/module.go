@@ -87,6 +87,12 @@ type Files interface {
 	// is false, is served (else ErrNotClean). The caller (owning module) has
 	// checked authz and writes the access audit.
 	PresignGet(ctx context.Context, fileID uuid.UUID, ttl time.Duration) (Download, error)
+	// Read returns the content of a file the owning module sends on (the
+	// invoice PDF e-mail, BE-042) under the rule of PresignGet: only an
+	// active file whose scan is clean (or skipped while FILES_SCAN_REQUIRED
+	// is false) is read (else ErrNotClean); more than maxBytes is
+	// ErrTooLarge. The caller has checked authz and writes any audit.
+	Read(ctx context.Context, fileID uuid.UUID, maxBytes int64) ([]byte, FileMeta, error)
 	// Delete removes the row and its objects (hard delete, 02 §3.1) on
 	// behalf of a (a user or a system job; written to the audit log). The
 	// owning module clears its reference first: a referenced row fails with

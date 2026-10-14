@@ -360,6 +360,13 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (orders.Store, worl
 		if got, _ := s.GetLine(ctx, a.ID, false); got.PayoutID == nil || *got.PayoutID != payout || got.PaidOutAt == nil {
 			t.Fatalf("paid out line = %+v", got)
 		}
+		// billing's commission invoice reads the lines of the payout (BE-042).
+		if ls, err := s.LinesOfPayout(ctx, payout); err != nil || len(ls) != 1 || ls[0].ID != a.ID {
+			t.Fatalf("LinesOfPayout = %d, %v", len(ls), err)
+		}
+		if ls, err := s.LinesOfPayout(ctx, uuid.NewV7()); err != nil || len(ls) != 0 {
+			t.Fatalf("LinesOfPayout(unknown) = %d, %v", len(ls), err)
+		}
 		if n, _ := s.MarkLinesPaidOut(ctx, []uuid.UUID{a.ID}, payout, done); n != 0 {
 			t.Fatalf("second payout of a line marked %d", n)
 		}

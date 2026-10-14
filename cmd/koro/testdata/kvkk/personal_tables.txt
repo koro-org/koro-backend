@@ -137,7 +137,7 @@ ledger_entries              none      ledger        -
 payouts                     personal  ledger        provider:ledger
 payout_items                none      ledger        -
 # billing
-invoices                    personal  billing       todo:BE-042
+invoices                    personal  billing       provider:billing
 invoice_lines               none      billing       -
 provider_contact_map        none      billing       -
 provider_product_map        none      billing       -

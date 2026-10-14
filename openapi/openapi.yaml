@@ -1976,6 +1976,17 @@ components:
       required:
         - cancel_reason
       type: object
+    CancelInputBody1:
+      additionalProperties: false
+      properties:
+        reason:
+          description: Why the invoice is cancelled (no personal data)
+          maxLength: 500
+          minLength: 1
+          type: string
+      required:
+        - reason
+      type: object
     CancelMyRegistrationInputBody:
       additionalProperties: false
       properties:
@@ -2004,6 +2015,171 @@ components:
           type: string
       required:
         - reason
+      type: object
+    CancelledInvoiceDTO:
+      additionalProperties: false
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        credit_note:
+          $ref: "#/components/schemas/InvoiceAdminDTO"
+          description: The credit note planned for an issued invoice
+        currency:
+          enum:
+            - TRY
+          type: string
+        document_type:
+          enum:
+            - e_fatura
+            - e_arsiv
+            - paper
+            - unknown
+          type: string
+        ettn:
+          format: uuid
+          type: string
+        has_pdf:
+          type: boolean
+        idempotency_key:
+          description: The planned document's key (kind:source:line:seq)
+          type: string
+        invoice_id:
+          format: uuid
+          type: string
+        invoice_no:
+          type: string
+        issue_date:
+          format: date
+          type: string
+        issued_at:
+          format: date-time
+          type: string
+        issuer_org_id:
+          format: uuid
+          type: string
+        issuer_party_id:
+          format: uuid
+          type: string
+        issuer_snapshot:
+          $ref: "#/components/schemas/InvoicePartyDTO"
+        issuing_mode:
+          enum:
+            - provider
+            - manual_upload
+            - seller_uploaded
+            - koro_on_behalf
+          type: string
+        kind:
+          enum:
+            - service_sale
+            - commission
+            - platform_fee
+            - payee_to_koro
+            - credit_note
+          type: string
+        last_error:
+          description: The mismatch note or the provider's last error
+          type: string
+        lines:
+          description: getInvoice and the admin writes
+          items:
+            $ref: "#/components/schemas/InvoiceLineDTO"
+          type: array
+        mismatch_note:
+          description: Why the upload did not match (status mismatch)
+          type: string
+        net_amount:
+          description: Kuruş
+          format: int64
+          type: integer
+        order_id:
+          format: uuid
+          type: string
+        payable_amount:
+          description: "Kuruş: total − withheld VAT"
+          format: int64
+          type: integer
+        payout_id:
+          format: uuid
+          type: string
+        pdf_file_id:
+          format: uuid
+          type: string
+        recipient_org_id:
+          format: uuid
+          type: string
+        recipient_party_id:
+          format: uuid
+          type: string
+        recipient_snapshot:
+          $ref: "#/components/schemas/InvoicePartyDTO"
+        refers_to_invoice_id:
+          description: A credit note's invoice
+          format: uuid
+          type: string
+        status:
+          enum:
+            - planned
+            - queued
+            - provider_pending
+            - issued
+            - failed
+            - mismatch
+            - cancelled
+          type: string
+        total_amount:
+          description: "Kuruş: net + VAT"
+          format: int64
+          type: integer
+        trigger:
+          enum:
+            - on_payment
+            - on_fulfillment
+            - on_payout
+            - manual
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+        uploaded_by:
+          format: uuid
+          type: string
+        vat_amount:
+          description: Kuruş
+          format: int64
+          type: integer
+        vat_withheld_amount:
+          description: Kuruş (tevkifat)
+          format: int64
+          type: integer
+        verified_at:
+          format: date-time
+          type: string
+        verified_by:
+          format: uuid
+          type: string
+      required:
+        - idempotency_key
+        - invoice_id
+        - kind
+        - status
+        - issuing_mode
+        - document_type
+        - trigger
+        - issuer_party_id
+        - recipient_party_id
+        - issuer_snapshot
+        - recipient_snapshot
+        - currency
+        - net_amount
+        - vat_amount
+        - vat_withheld_amount
+        - total_amount
+        - payable_amount
+        - has_pdf
+        - created_at
+        - updated_at
       type: object
     CatalogServiceBody:
       additionalProperties: false
@@ -5568,6 +5744,66 @@ components:
       required:
         - items
       type: object
+    IntegrationCredentialsDTO:
+      additionalProperties: false
+      properties:
+        access_token:
+          description: Never returned
+          maxLength: 8192
+          type: string
+          writeOnly: true
+        expires_at:
+          description: When the access token expires
+          format: date-time
+          type: string
+        refresh_token:
+          description: Never returned
+          maxLength: 8192
+          type: string
+          writeOnly: true
+      type: object
+    IntegrationDTO:
+      additionalProperties: false
+      properties:
+        expires_at:
+          format: date-time
+          type: string
+        external_account:
+          description: The account at the provider (Paraşüt company ID)
+          type: string
+        has_access_token:
+          type: boolean
+        has_refresh_token:
+          type: boolean
+        provider:
+          enum:
+            - parasut
+            - iyzico
+            - iys
+            - email
+          type: string
+        rotated_at:
+          format: date-time
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - provider
+        - has_access_token
+        - has_refresh_token
+        - updated_at
+      type: object
+    IntegrationList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/IntegrationDTO"
+          type: array
+      required:
+        - items
+      type: object
     InvitationDTO:
       additionalProperties: false
       properties:
@@ -5617,6 +5853,429 @@ components:
       required:
         - email
         - role
+      type: object
+    InvoiceAddressDTO:
+      additionalProperties: false
+      properties:
+        city:
+          type: string
+        country:
+          type: string
+        district:
+          type: string
+        line1:
+          type: string
+        postal_code:
+          type: string
+      type: object
+    InvoiceAdminDTO:
+      additionalProperties: false
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        currency:
+          enum:
+            - TRY
+          type: string
+        document_type:
+          enum:
+            - e_fatura
+            - e_arsiv
+            - paper
+            - unknown
+          type: string
+        ettn:
+          format: uuid
+          type: string
+        has_pdf:
+          type: boolean
+        idempotency_key:
+          description: The planned document's key (kind:source:line:seq)
+          type: string
+        invoice_id:
+          format: uuid
+          type: string
+        invoice_no:
+          type: string
+        issue_date:
+          format: date
+          type: string
+        issued_at:
+          format: date-time
+          type: string
+        issuer_org_id:
+          format: uuid
+          type: string
+        issuer_party_id:
+          format: uuid
+          type: string
+        issuer_snapshot:
+          $ref: "#/components/schemas/InvoicePartyDTO"
+        issuing_mode:
+          enum:
+            - provider
+            - manual_upload
+            - seller_uploaded
+            - koro_on_behalf
+          type: string
+        kind:
+          enum:
+            - service_sale
+            - commission
+            - platform_fee
+            - payee_to_koro
+            - credit_note
+          type: string
+        last_error:
+          description: The mismatch note or the provider's last error
+          type: string
+        lines:
+          description: getInvoice and the admin writes
+          items:
+            $ref: "#/components/schemas/InvoiceLineDTO"
+          type: array
+        mismatch_note:
+          description: Why the upload did not match (status mismatch)
+          type: string
+        net_amount:
+          description: Kuruş
+          format: int64
+          type: integer
+        order_id:
+          format: uuid
+          type: string
+        payable_amount:
+          description: "Kuruş: total − withheld VAT"
+          format: int64
+          type: integer
+        payout_id:
+          format: uuid
+          type: string
+        pdf_file_id:
+          format: uuid
+          type: string
+        recipient_org_id:
+          format: uuid
+          type: string
+        recipient_party_id:
+          format: uuid
+          type: string
+        recipient_snapshot:
+          $ref: "#/components/schemas/InvoicePartyDTO"
+        refers_to_invoice_id:
+          description: A credit note's invoice
+          format: uuid
+          type: string
+        status:
+          enum:
+            - planned
+            - queued
+            - provider_pending
+            - issued
+            - failed
+            - mismatch
+            - cancelled
+          type: string
+        total_amount:
+          description: "Kuruş: net + VAT"
+          format: int64
+          type: integer
+        trigger:
+          enum:
+            - on_payment
+            - on_fulfillment
+            - on_payout
+            - manual
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+        uploaded_by:
+          format: uuid
+          type: string
+        vat_amount:
+          description: Kuruş
+          format: int64
+          type: integer
+        vat_withheld_amount:
+          description: Kuruş (tevkifat)
+          format: int64
+          type: integer
+        verified_at:
+          format: date-time
+          type: string
+        verified_by:
+          format: uuid
+          type: string
+      required:
+        - idempotency_key
+        - invoice_id
+        - kind
+        - status
+        - issuing_mode
+        - document_type
+        - trigger
+        - issuer_party_id
+        - recipient_party_id
+        - issuer_snapshot
+        - recipient_snapshot
+        - currency
+        - net_amount
+        - vat_amount
+        - vat_withheld_amount
+        - total_amount
+        - payable_amount
+        - has_pdf
+        - created_at
+        - updated_at
+      type: object
+    InvoiceAdminList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/InvoiceAdminDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
+    InvoiceDTO:
+      additionalProperties: false
+      properties:
+        created_at:
+          format: date-time
+          type: string
+        currency:
+          enum:
+            - TRY
+          type: string
+        document_type:
+          enum:
+            - e_fatura
+            - e_arsiv
+            - paper
+            - unknown
+          type: string
+        ettn:
+          format: uuid
+          type: string
+        has_pdf:
+          type: boolean
+        invoice_id:
+          format: uuid
+          type: string
+        invoice_no:
+          type: string
+        issue_date:
+          format: date
+          type: string
+        issued_at:
+          format: date-time
+          type: string
+        issuer_org_id:
+          format: uuid
+          type: string
+        issuer_party_id:
+          format: uuid
+          type: string
+        issuer_snapshot:
+          $ref: "#/components/schemas/InvoicePartyDTO"
+        issuing_mode:
+          enum:
+            - provider
+            - manual_upload
+            - seller_uploaded
+            - koro_on_behalf
+          type: string
+        kind:
+          enum:
+            - service_sale
+            - commission
+            - platform_fee
+            - payee_to_koro
+            - credit_note
+          type: string
+        lines:
+          description: getInvoice and the admin writes
+          items:
+            $ref: "#/components/schemas/InvoiceLineDTO"
+          type: array
+        mismatch_note:
+          description: Why the upload did not match (status mismatch)
+          type: string
+        net_amount:
+          description: Kuruş
+          format: int64
+          type: integer
+        order_id:
+          format: uuid
+          type: string
+        payable_amount:
+          description: "Kuruş: total − withheld VAT"
+          format: int64
+          type: integer
+        payout_id:
+          format: uuid
+          type: string
+        recipient_org_id:
+          format: uuid
+          type: string
+        recipient_party_id:
+          format: uuid
+          type: string
+        recipient_snapshot:
+          $ref: "#/components/schemas/InvoicePartyDTO"
+        refers_to_invoice_id:
+          description: A credit note's invoice
+          format: uuid
+          type: string
+        status:
+          enum:
+            - planned
+            - queued
+            - provider_pending
+            - issued
+            - failed
+            - mismatch
+            - cancelled
+          type: string
+        total_amount:
+          description: "Kuruş: net + VAT"
+          format: int64
+          type: integer
+        trigger:
+          enum:
+            - on_payment
+            - on_fulfillment
+            - on_payout
+            - manual
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+        uploaded_by:
+          format: uuid
+          type: string
+        vat_amount:
+          description: Kuruş
+          format: int64
+          type: integer
+        vat_withheld_amount:
+          description: Kuruş (tevkifat)
+          format: int64
+          type: integer
+      required:
+        - invoice_id
+        - kind
+        - status
+        - issuing_mode
+        - document_type
+        - trigger
+        - issuer_party_id
+        - recipient_party_id
+        - issuer_snapshot
+        - recipient_snapshot
+        - currency
+        - net_amount
+        - vat_amount
+        - vat_withheld_amount
+        - total_amount
+        - payable_amount
+        - has_pdf
+        - created_at
+        - updated_at
+      type: object
+    InvoiceLineDTO:
+      additionalProperties: false
+      properties:
+        description:
+          type: string
+        net_amount:
+          format: int64
+          type: integer
+        order_line_id:
+          format: uuid
+          type: string
+        position:
+          format: int64
+          type: integer
+        quantity:
+          format: int64
+          type: integer
+        total_amount:
+          format: int64
+          type: integer
+        unit_price_amount:
+          format: int64
+          type: integer
+        vat_amount:
+          format: int64
+          type: integer
+        vat_exemption_code:
+          type: string
+        vat_rate_bp:
+          format: int64
+          type: integer
+        vat_withheld_amount:
+          format: int64
+          type: integer
+        vat_withholding_code:
+          type: string
+      required:
+        - position
+        - description
+        - quantity
+        - unit_price_amount
+        - net_amount
+        - vat_rate_bp
+        - vat_amount
+        - vat_withheld_amount
+        - total_amount
+      type: object
+    InvoiceList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/InvoiceDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
+    InvoicePDFLinkDTO:
+      additionalProperties: false
+      properties:
+        expires_at:
+          format: date-time
+          type: string
+        url:
+          type: string
+      required:
+        - url
+        - expires_at
+      type: object
+    InvoicePartyDTO:
+      additionalProperties: false
+      properties:
+        address:
+          $ref: "#/components/schemas/InvoiceAddressDTO"
+        email:
+          description: The invoice e-mail address
+          type: string
+        tax_no:
+          description: VKN
+          type: string
+        tax_office:
+          type: string
+        title:
+          type: string
+      required:
+        - title
       type: object
     Item:
       additionalProperties: false
@@ -8655,6 +9314,20 @@ components:
       required:
         - draft_schema
       type: object
+    PutIntegrationInputBody:
+      additionalProperties: false
+      properties:
+        credentials:
+          $ref: "#/components/schemas/IntegrationCredentialsDTO"
+        external_account:
+          maxLength: 100
+          type: string
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof (03 §6.2)
+      required:
+        - credentials
+      type: object
     PutLanguagesInputBody:
       additionalProperties: false
       properties:
@@ -11155,6 +11828,38 @@ components:
         - kind
         - file_id
       type: object
+    UploadInputBody:
+      additionalProperties: false
+      properties:
+        document_type:
+          enum:
+            - e_fatura
+            - e_arsiv
+            - paper
+          type: string
+        ettn:
+          description: The e-document's ETTN
+          format: uuid
+          type: string
+        invoice_no:
+          description: The number on the document
+          maxLength: 30
+          minLength: 1
+          type: string
+        issue_date:
+          description: The issue date on the document (not in the future)
+          format: date
+          type: string
+        pdf_file_id:
+          description: An invoice_pdf upload (application/pdf)
+          format: uuid
+          type: string
+      required:
+        - invoice_no
+        - issue_date
+        - document_type
+        - pdf_file_id
+      type: object
     UsageDTO:
       additionalProperties: false
       properties:
@@ -11257,6 +11962,21 @@ components:
           description: Internal note (audited)
           maxLength: 500
           type: string
+      type: object
+    VerifyInputBody1:
+      additionalProperties: false
+      properties:
+        note:
+          description: What does not match (required for mismatch; no personal data)
+          maxLength: 500
+          type: string
+        result:
+          enum:
+            - issued
+            - mismatch
+          type: string
+      required:
+        - result
       type: object
     VerifyRequest:
       additionalProperties: false
@@ -13942,6 +14662,256 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: reauth
       x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/integrations:
+    get:
+      description: The account and the token state of each integration; secret values are never returned.
+      operationId: adminListIntegrations
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the integration connections
+      tags:
+        - billing
+      x-koro-action: billing.integration.manage
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+  /api/v1/admin/integrations/{provider}:
+    put:
+      description: "Requires re-authentication. The tokens are write-only: they are stored envelope-encrypted and never returned (503 when no encryption key is configured)."
+      operationId: adminPutIntegration
+      parameters:
+        - in: path
+          name: provider
+          required: true
+          schema:
+            enum:
+              - parasut
+              - iyzico
+              - iys
+              - email
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PutIntegrationInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegrationDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Set the credentials of an integration
+      tags:
+        - billing
+      x-koro-action: billing.integration.manage
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/invoices:
+    get:
+      description: "Newest first; status narrows the queue (planned: to upload or verify, mismatch)."
+      operationId: adminListInvoices
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - explode: false
+          in: query
+          name: status
+          schema:
+            enum:
+              - planned
+              - queued
+              - provider_pending
+              - issued
+              - failed
+              - mismatch
+              - cancelled
+            type: string
+        - explode: false
+          in: query
+          name: kind
+          schema:
+            enum:
+              - service_sale
+              - commission
+              - platform_fee
+              - payee_to_koro
+              - credit_note
+            type: string
+        - explode: false
+          in: query
+          name: order_id
+          schema:
+            format: uuid
+            type: string
+        - explode: false
+          in: query
+          name: payout_id
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceAdminList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List every invoice
+      tags:
+        - billing
+      x-koro-action: billing.invoice.list_admin
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+  /api/v1/admin/invoices/{invoice_id}/cancel:
+    post:
+      description: An unissued invoice is cancelled; an issued one is cancelled and a credit note of it is planned (credit_note in the answer). A cancelled invoice or an issued credit note is final (409 billing.invalid_state).
+      operationId: adminCancelInvoice
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - in: path
+          name: invoice_id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelInputBody1"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CancelledInvoiceDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Cancel an invoice
+      tags:
+        - billing
+      x-koro-action: billing.invoice.cancel
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/invoices/{invoice_id}/verify:
+    post:
+      description: "The number, date and amounts of the uploaded document match the planned invoice (issued: the PDF is e-mailed to the recipient) or not (mismatch with a note: the uploader side may upload again). The uploader cannot verify (403 authz.four_eyes_violation). Only an upload waiting for verification (409 billing.invalid_state)."
+      operationId: adminVerifyInvoice
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - in: path
+          name: invoice_id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyInputBody1"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceAdminDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Verify an uploaded invoice (second eye)
+      tags:
+        - billing
+      x-koro-action: billing.invoice.verify
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
       x-koro-surface: admin
   /api/v1/admin/ledger/transactions:
     get:
@@ -19399,6 +20369,121 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: token_confirm
       x-koro-surface: self
+  /api/v1/invoices/{invoice_id}:
+    get:
+      description: The invoice with its lines, for its issuing and receiving organizations and finance.
+      operationId: getInvoice
+      parameters:
+        - in: path
+          name: invoice_id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get an invoice
+      tags:
+        - billing
+      x-koro-action: billing.invoice.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: resource
+  /api/v1/invoices/{invoice_id}/pdf:
+    get:
+      description: A URL valid for 5 minutes. Only an issued invoice (409 billing.invalid_state); an uploaded PDF waiting for verification only for its uploader side and finance. 409 files.not_clean until the virus scan clears the file.
+      operationId: downloadInvoicePdf
+      parameters:
+        - in: path
+          name: invoice_id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoicePDFLinkDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a download URL of an invoice's PDF
+      tags:
+        - billing
+      x-koro-action: billing.invoice.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: resource
+  /api/v1/invoices/{invoice_id}/upload:
+    post:
+      description: The PDF (an invoice_pdf upload of the caller or of the issuing organization), the invoice number, the issue date and the document type of a planned invoice without a document, or of one whose upload was found not to match (409 billing.invalid_state otherwise). The issuing organization's admins upload its own service invoices (03 k29); finance uploads any. Another finance admin verifies it.
+      operationId: uploadInvoice
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - in: path
+          name: invoice_id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Upload the document of a planned invoice
+      tags:
+        - billing
+      x-koro-action: billing.invoice.upload
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
   /api/v1/me:
     get:
       description: capabilities are menu hints, not authorization decisions.
@@ -23258,6 +24343,92 @@ paths:
         - orgs
       x-koro-action: orgs.invitation.revoke
       x-koro-rate-limit: write_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/invoices:
+    get:
+      description: "The invoices the organization issues (direction=issued: a payee's service invoices) and receives (direction=received: a company's invoices, Koro's commission invoices to a payee), newest first; both when direction is omitted. Planned invoices are the documents the commerce model expects (02 §18.3)."
+      operationId: listOrgInvoices
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - in: path
+          name: org_id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - description: "issued: the org issues them; received: the org receives them; both when omitted"
+          explode: false
+          in: query
+          name: direction
+          schema:
+            description: "issued: the org issues them; received: the org receives them; both when omitted"
+            enum:
+              - issued
+              - received
+            type: string
+        - explode: false
+          in: query
+          name: kind
+          schema:
+            enum:
+              - service_sale
+              - commission
+              - platform_fee
+              - payee_to_koro
+              - credit_note
+            type: string
+        - explode: false
+          in: query
+          name: status
+          schema:
+            enum:
+              - planned
+              - queued
+              - provider_pending
+              - issued
+              - failed
+              - mismatch
+              - cancelled
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the invoices of an organization
+      tags:
+        - billing
+      x-koro-action: billing.invoice.list
+      x-koro-rate-limit: read_default
       x-koro-surface: org
   /api/v1/orgs/{org_id}/legal-parties:
     get:

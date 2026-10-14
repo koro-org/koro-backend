@@ -1,0 +1,53 @@
+# Multi-step scenarios of the billing module (03 §7.7; BE-042).
+version: 1
+scenarios:
+  invoice_four_eyes:
+    note: >-
+      03 §6.1 "Fatura doğrulama" (06 H-19): club_admin uploads the payee's invoice and cannot upload a second
+      document while it waits; finance_admin uploads Koro's own invoice and may not verify it (403
+      authz.four_eyes_violation), but verifies the club's; the buyer then downloads the issued PDF and a
+      verified invoice is final.
+    steps:
+      - { persona: club_admin, operation: uploadInvoice, expect: 200 }
+      - { persona: club_admin, operation: uploadInvoice, expect: 409, code: billing.invalid_state }
+      - { persona: company_admin, operation: downloadInvoicePdf, path_params: { invoice_id: inv_planned }, expect: 409,
+          code: billing.invalid_state }
+      - { persona: finance_admin, operation: uploadInvoice, path_params: { invoice_id: inv_commission },
+          body: bodies/billing/upload_fin.json, expect: 200 }
+      - { persona: finance_admin, operation: adminVerifyInvoice, path_params: { invoice_id: inv_commission }, expect: 403,
+          code: authz.four_eyes_violation }
+      - { persona: finance_admin, operation: adminVerifyInvoice, path_params: { invoice_id: inv_planned }, expect: 200 }
+      - { persona: company_admin, operation: downloadInvoicePdf, path_params: { invoice_id: inv_planned }, expect: 200 }
+      - { persona: finance_admin, operation: adminVerifyInvoice, path_params: { invoice_id: inv_planned }, expect: 409,
+          code: billing.invalid_state }
+  mismatch_then_upload_again:
+    note: >-
+      a mismatch sends the document back; the club uploads again (the club admin is never an eye: 403 on the
+      admin surface) and the second eye issues it
+    steps:
+      - { persona: finance_admin, operation: adminVerifyInvoice, body: bodies/billing/mismatch.json, expect: 200 }
+      - { persona: club_admin, operation: uploadInvoice, path_params: { invoice_id: inv_uploaded }, expect: 200 }
+      - { persona: club_admin, operation: adminVerifyInvoice, expect: 403, code: forbidden }
+      - { persona: finance_admin, operation: adminVerifyInvoice, expect: 200 }
+  cancel_issued_plans_credit_note:
+    note: cancelling an issued invoice plans its credit note; a cancelled invoice is final
+    steps:
+      - { persona: finance_admin, operation: adminCancelInvoice, expect: 200 }
+      - { persona: finance_admin, operation: adminCancelInvoice, expect: 409, code: billing.invalid_state }
+      - { persona: club_admin, operation: listOrgInvoices, query: { kind: credit_note }, expect: 200 }
+  integration_reauth:
+    note: 03 §6.2 R — no proof, a wrong proof, then the right one; the tokens never come back
+    steps:
+      - { persona: finance_admin, operation: adminPutIntegration, body: bodies/billing/put_integration_no_reauth.json,
+          expect: 403, code: identity.reauth_required }
+      - { persona: platform_admin, operation: adminPutIntegration, body: bodies/billing/put_integration_wrong_reauth.json,
+          expect: 403, code: identity.reauth_failed }
+      - { persona: platform_admin, operation: adminPutIntegration, expect: 200 }
+      - { persona: finance_admin, operation: adminListIntegrations, expect: 200 }
+  billing_needs_mfa:
+    note: the finance and company admin cells are k-mfa role paths (03 §6.4)
+    steps:
+      - { persona: finance_admin, mfa: false, operation: adminListInvoices, expect: 403, code: authz.mfa_required }
+      - { persona: company_admin, mfa: false, operation: listOrgInvoices, path_params: { org_id: company_a }, expect: 403,
+          code: authz.mfa_required }
+      - { persona: club_admin, mfa: false, operation: listOrgInvoices, expect: 200 }

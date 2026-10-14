@@ -354,6 +354,17 @@ func (s gormStore) PayableLines(ctx context.Context, payeeID uuid.UUID, asOf tim
 	return rows, nil
 }
 
+// LinesOfPayout implements Store.
+//
+// cross-org: the lines of one payout (billing's commission invoice).
+func (s gormStore) LinesOfPayout(ctx context.Context, payoutID uuid.UUID) ([]Line, error) {
+	var rows []Line
+	if err := db.Conn(ctx, s.orm).Where("payout_id = ?", payoutID).Order("created_at, id").Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("orders: lines of payout: %w", err)
+	}
+	return rows, nil
+}
+
 // MarkLinesPaidOut implements Store.
 //
 // cross-org: the lines of one payout (ledger); the payout's payee is

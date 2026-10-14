@@ -759,3 +759,24 @@ func countTemplate(ms []notify.Message, tmpl string, user uuid.UUID) int {
 	}
 	return n
 }
+
+// TestInvoiceTerms_OfferingServiceAndFrozenPolicy: billing reads the
+// offering's invoice trigger, the service's invoice codes and the frozen
+// policy's automation, whatever their status (BE-042).
+func TestInvoiceTerms_OfferingServiceAndFrozenPolicy(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	v := e.offering(t, "club_admin", "club_a", nil)
+	p := e.policy(t, catalog.ScopeDefault, nil, 1000, t0.Add(-time.Hour), nil)
+	got, err := e.mod.Offerings.InvoiceTerms(t.Context(), v.Offering.ID, p.ID)
+	if err != nil || got.OfferingID != v.Offering.ID || got.Trigger != v.Offering.InvoiceTrigger || !got.Trigger.Valid() ||
+		got.Automation != p.InvoiceAutomation {
+		t.Fatalf("InvoiceTerms = %+v, %v", got, err)
+	}
+	if _, err := e.mod.Offerings.InvoiceTerms(t.Context(), uuid.NewV7(), p.ID); !errors.Is(err, catalog.ErrNotFound) {
+		t.Fatalf("unknown offering: %v", err)
+	}
+	if _, err := e.mod.Offerings.InvoiceTerms(t.Context(), v.Offering.ID, uuid.NewV7()); !errors.Is(err, catalog.ErrNotFound) {
+		t.Fatalf("unknown policy: %v", err)
+	}
+}

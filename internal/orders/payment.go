@@ -316,6 +316,25 @@ func (s *service) ApplyRefund(ctx context.Context, orderID uuid.UUID, lineID *uu
 	})
 }
 
+// ForBilling implements Orders (BE-042): the order and every line, read
+// in the caller's transaction.
+func (s *service) ForBilling(ctx context.Context, orderID uuid.UUID) (Order, []Line, error) {
+	o, err := s.d.Store.GetOrder(ctx, orderID, false)
+	if err != nil {
+		return Order{}, nil, err
+	}
+	byOrder, err := s.d.Store.LinesOf(ctx, []uuid.UUID{o.ID})
+	if err != nil {
+		return Order{}, nil, err
+	}
+	return o, byOrder[o.ID], nil
+}
+
+// PayoutLines implements Orders (BE-042).
+func (s *service) PayoutLines(ctx context.Context, payoutID uuid.UUID) ([]Line, error) {
+	return s.d.Store.LinesOfPayout(ctx, payoutID)
+}
+
 // GetLine implements Orders.
 func (s *service) GetLine(ctx context.Context, lineID uuid.UUID) (Line, error) {
 	return s.d.Store.GetLine(ctx, lineID, false)

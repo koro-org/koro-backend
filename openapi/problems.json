@@ -66,6 +66,18 @@
     "type": "urn:koro:problem:bad_request"
   },
   {
+    "code": "billing.invalid_state",
+    "status": 409,
+    "title": "Invoice state does not allow this",
+    "type": "urn:koro:problem:billing.invalid_state"
+  },
+  {
+    "code": "billing.invoice_no_taken",
+    "status": 409,
+    "title": "The issuer already has an invoice with this number",
+    "type": "urn:koro:problem:billing.invoice_no_taken"
+  },
+  {
     "code": "catalog.empty_patch",
     "status": 422,
     "title": "Nothing to update",

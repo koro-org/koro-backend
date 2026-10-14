@@ -1,0 +1,70 @@
+# Multi-step scenarios of the payments module (03 §7.7; BE-041).
+version: 1
+scenarios:
+  collection_account_four_eyes:
+    note: >-
+      03 §6.1: the admin who creates a collection account never decides it (403 authz.four_eyes_violation, a
+      platform admin's own creation included); another admin approves it once (a second decision is 409), and only
+      make-default puts it on the payment instructions.
+    steps:
+      - { persona: finance_admin, operation: adminCreateCollectionAccount, expect: 201, save: { new_account: account_id } }
+      - { persona: finance_admin, operation: adminApproveCollectionAccount, path_params: { account_id: new_account },
+          expect: 403, code: authz.four_eyes_violation }
+      - { persona: platform_admin, operation: adminApproveCollectionAccount, path_params: { account_id: new_account }, expect: 200 }
+      - { persona: finance_admin_2, operation: adminApproveCollectionAccount, path_params: { account_id: new_account },
+          body: bodies/payments/reject.json, expect: 409, code: payments.invalid_state }
+      - { persona: finance_admin, operation: adminMakeDefaultCollectionAccount, path_params: { account_id: new_account }, expect: 200 }
+  collection_account_reauth:
+    note: >-
+      03 §6.2 (R): the decision on a collection account carries the re-authentication proof — without it 403
+      identity.reauth_required, with a wrong one 403 identity.reauth_failed; nothing changes until it is right.
+    steps:
+      - { persona: platform_admin, operation: adminApproveCollectionAccount, body: bodies/payments/approve_no_reauth.json,
+          expect: 403, code: identity.reauth_required }
+      - { persona: platform_admin, operation: adminApproveCollectionAccount, body: bodies/payments/approve_wrong_reauth.json,
+          expect: 403, code: identity.reauth_failed }
+      - { persona: platform_admin, operation: adminApproveCollectionAccount, expect: 200 }
+  payments_mfa_required:
+    note: platform_admin and finance_admin reach payments only on k-mfa role paths (03 §6.4)
+    steps:
+      - { persona: finance_admin, mfa: false, operation: adminListIncomingTransfers, expect: 403, code: authz.mfa_required }
+      - { persona: platform_admin, mfa: false, operation: adminListCollectionAccounts, expect: 403, code: authz.mfa_required }
+      - { persona: finance_admin, mfa: false, operation: adminCreateIncomingTransfer, expect: 403, code: authz.mfa_required }
+      - { persona: finance_admin, operation: adminCreateIncomingTransfer, expect: 201 }
+  transfer_return_four_eyes:
+    note: >-
+      06 H-18, H-56: a transfer goes back to its sender in three steps — a finance admin requests it, another
+      approves it (the requester gets 403 authz.four_eyes_violation), the EFT receipt closes it once.
+    steps:
+      - { persona: finance_admin, operation: adminRequestIncomingTransferReturn, expect: 200 }
+      - { persona: finance_admin, operation: adminMarkIncomingTransferReturned, path_params: { transfer_id: tr_unmatched_b },
+          expect: 409, code: payments.invalid_state }
+      - { persona: finance_admin, operation: adminApproveIncomingTransferReturn, path_params: { transfer_id: tr_unmatched_b },
+          expect: 403, code: authz.four_eyes_violation }
+      - { persona: finance_admin_2, operation: adminApproveIncomingTransferReturn, path_params: { transfer_id: tr_unmatched_b }, expect: 200 }
+      - { persona: finance_admin, operation: adminMarkIncomingTransferReturned, path_params: { transfer_id: tr_unmatched_b }, expect: 200 }
+      - { persona: finance_admin_2, operation: adminMarkIncomingTransferReturned, path_params: { transfer_id: tr_unmatched_b },
+          expect: 409, code: payments.invalid_state }
+  transfer_match_once:
+    config: { orders_seed: true }
+    note: >-
+      01 §6.3: the match captures the payment and pays ord_a_unpaid in one go (its payment instructions are then 409
+      orders.invalid_state); the same transfer is never captured twice (409 payments.transfer_already_matched).
+    steps:
+      - { persona: company_admin, operation: getOrderPaymentInstructions, path_params: { order_id: ord_a_unpaid }, expect: 200 }
+      - { persona: finance_admin, operation: adminMatchIncomingTransfer, expect: 200 }
+      - { persona: finance_admin, operation: adminMatchIncomingTransfer, expect: 409, code: payments.transfer_already_matched }
+      - { persona: company_admin, operation: getOrderPaymentInstructions, path_params: { order_id: ord_a_unpaid }, expect: 409,
+          code: orders.invalid_state }
+  collection_account_hook:
+    config: { orders_seed: true }
+    note: >-
+      hooks.collectionAccount: the payment instructions show Koro's active default account; retiring it leaves none
+      (409 payments.no_active_collection_account) until another account is made the default.
+    steps:
+      - { persona: company_admin, operation: getOrderPaymentInstructions, path_params: { order_id: ord_a_unpaid }, expect: 200 }
+      - { persona: finance_admin, operation: adminRetireCollectionAccount, path_params: { account_id: coll_default }, expect: 200 }
+      - { persona: company_admin, operation: getOrderPaymentInstructions, path_params: { order_id: ord_a_unpaid }, expect: 409,
+          code: payments.no_active_collection_account }
+      - { persona: platform_admin, operation: adminMakeDefaultCollectionAccount, expect: 200 }
+      - { persona: company_member, operation: getOrderPaymentInstructions, path_params: { order_id: ord_a_unpaid }, expect: 200 }

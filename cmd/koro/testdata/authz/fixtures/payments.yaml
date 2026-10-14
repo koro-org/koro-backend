@@ -1,0 +1,27 @@
+# Fixtures of the payments module (cmd/koro/matrix_payments_test.go; BE-041). IDs are authztest.ID(name).
+# Collection accounts belong to party_platform (parties' fixture); an active account was created by created_by
+# and approved by approved_by (four eyes). coll_default is Koro's active default account (the IBAN orders'
+# matrix shows in the payment instructions, hooks.collectionAccount). Transfers arrived at coll_default with
+# value date 2026-10-02 and were recorded by entered_by at 2026-10-01T00:00:00Z; a transfer with order: carries
+# that order's reference code in its description (ord_a_unpaid → KRA3CMA4HG). A file is an unattached, active
+# upload of uploaded_by (purpose transfer_receipt or refund_receipt). ord_c_direct is a model C order of
+# company_a whose fee Koro has collected (it waits for the direct payment confirmation); like orders' fixtures
+# it is seeded only under the matrix config orders_seed: true.
+version: 1
+fixtures:
+  coll_default: { kind: account, status: active, default: true, iban: TR330006100519786457841326, created_by: finance_admin_2, approved_by: platform_admin_2 }
+  coll_active: { kind: account, status: active, iban: TR940001000999990123456789, created_by: finance_admin_2, approved_by: platform_admin_2 }
+  # coll_pending_fin: created by finance_admin (the persona may not decide it); coll_pending_fin2 by the helper.
+  coll_pending_fin: { kind: account, status: pending_approval, iban: TR190001200000000001234567, created_by: finance_admin }
+  coll_pending_fin2: { kind: account, status: pending_approval, iban: TR680006400000000009876543, created_by: finance_admin_2 }
+  tr_unmatched: { kind: transfer, account: coll_default, amount: 1200000, order: ord_a_unpaid, entered_by: finance_admin_2, sender_iban: TR100006200000000006295938 }
+  tr_unmatched_b: { kind: transfer, account: coll_default, amount: 5000, entered_by: finance_admin_2, sender_iban: TR100006200000000006295938 }
+  tr_matched: { kind: transfer, account: coll_default, amount: 1200000, status: matched, matched_order: ord_a_paid, matched_by: finance_admin_2, entered_by: finance_admin_2 }
+  # tr_return_requested: requested by the helper (finance_admin decides); tr_return_own: by finance_admin itself.
+  tr_return_requested: { kind: transfer, account: coll_default, amount: 7000, status: return_requested, requested_by: finance_admin_2, entered_by: finance_admin_2, sender_iban: TR100006200000000006295938 }
+  tr_return_own: { kind: transfer, account: coll_default, amount: 8000, status: return_requested, requested_by: finance_admin, entered_by: finance_admin_2, sender_iban: TR100006200000000006295938 }
+  tr_return_approved: { kind: transfer, account: coll_default, amount: 9000, status: return_approved, requested_by: finance_admin_2, approved_by: finance_admin, entered_by: finance_admin_2, sender_iban: TR100006200000000006295938 }
+  file_transfer_receipt: { kind: file, purpose: transfer_receipt, uploaded_by: finance_admin }
+  file_return_receipt: { kind: file, purpose: refund_receipt, uploaded_by: finance_admin }
+  file_direct_evidence: { kind: file, purpose: transfer_receipt, uploaded_by: finance_admin }
+  ord_c_direct: { kind: order_c, org: company_a, party: party_buyer_a, placed_by: company_admin }

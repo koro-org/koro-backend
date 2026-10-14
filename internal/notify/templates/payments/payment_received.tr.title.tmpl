@@ -1,0 +1,1 @@
+Ödemeniz alındı

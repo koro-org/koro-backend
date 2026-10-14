@@ -1,0 +1,388 @@
+# Authz matrix of the payments module (03 §5.16, 04 §2.16; BE-041). 15 operations × 18 personas: 04 §2.16's 12, the
+# return's request and second eye (06 H-56, T-79, T-228) and the model C direct confirmation (T-18). Everything is the
+# admin surface (03 §7.2-3): an actor without the role gets 403 before anything is read. Cells: collection accounts
+# list pad, fin; create fin·R; approve pad·4·R, fin·4·R; retire / make-default pad·R, fin·R; transfers list / read pad,
+# fin; create, import, match (k27), ignore and the direct confirmation fin; the three return steps fin·R (k28, four
+# eyes on the second). platform_admin and finance_admin sessions are MFA verified (03 §7.3). Four eyes, R, MFA and the
+# capture's effects are scenarios (scenarios/payments.yaml). Fixtures: fixtures/payments.yaml; orders' ord_a_unpaid /
+# ord_a_paid and payments' ord_c_direct exist only under config orders_seed: true (set by the operations that need
+# them). The matrix app has no idempotency middleware: Idempotency-Key replays are service and PostgreSQL tests.
+version: 1
+groups:
+  # signed-in users without a platform role.
+  no_platform_role: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                     event_staff, university_rep, company_member, company_admin, other_company_member]
+  # platform roles without a payments cell.
+  other_staff: [moderator, support, dpo, talent_auditor]
+
+operations:
+  adminListCollectionAccounts:
+    method: GET
+    path: /api/v1/admin/collection-accounts
+    action: payments.collection_account.list
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+
+  adminCreateCollectionAccount:
+    method: POST
+    path: /api/v1/admin/collection-accounts
+    action: payments.collection_account.create
+    body: bodies/payments/create_account.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403     # 03 §5.16: create is fin·R only
+      finance_admin: 201
+    variants:
+      - name: iban_in_use
+        body: bodies/payments/create_account_taken.json
+        note: coll_default is open with this IBAN — 409 payments.iban_in_use
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 409
+      - name: no_reauth
+        body: bodies/payments/create_account_no_reauth.json
+        note: R (03 §6.2) — without the proof 403 identity.reauth_required
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 403
+
+  adminApproveCollectionAccount:
+    method: POST
+    path: /api/v1/admin/collection-accounts/{account_id}/approve
+    action: payments.collection_account.approve
+    path_params: { account_id: coll_pending_fin2 }
+    body: bodies/payments/approve.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200     # second eye ≠ creator (finance_admin_2)
+      finance_admin: 200
+    variants:
+      - name: own_creation
+        path_params: { account_id: coll_pending_fin }
+        note: four eyes — finance_admin created it and may not decide it (03 §6.1)
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 403
+      - name: reject
+        body: bodies/payments/reject.json
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+      - name: decided
+        path_params: { account_id: coll_active }
+        note: an approved account is decided — 409 payments.invalid_state
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 409
+          finance_admin: 409
+      - name: unknown
+        path_params: { account_id: "literal:00000000-0000-7000-8000-0000000000ac" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404
+
+  adminRetireCollectionAccount:
+    method: POST
+    path: /api/v1/admin/collection-accounts/{account_id}/retire
+    action: payments.collection_account.retire
+    path_params: { account_id: coll_active }
+    body: bodies/payments/reauth.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: pending
+        path_params: { account_id: coll_pending_fin }
+        note: only an active account is retired — 409 payments.invalid_state
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 409
+          finance_admin: 409
+
+  adminMakeDefaultCollectionAccount:
+    method: POST
+    path: /api/v1/admin/collection-accounts/{account_id}/make-default
+    action: payments.collection_account.retire
+    path_params: { account_id: coll_active }
+    body: bodies/payments/reauth.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+
+  adminListIncomingTransfers:
+    method: GET
+    path: /api/v1/admin/incoming-transfers
+    action: payments.transfer.list
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: filters
+        query: { status: unmatched, value_date_from: "2026-10-01", value_date_to: "2026-10-02", q: KRA3CMA4HG }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+
+  adminGetIncomingTransfer:
+    method: GET
+    path: /api/v1/admin/incoming-transfers/{transfer_id}
+    action: payments.transfer.read
+    config: { orders_seed: true }
+    path_params: { transfer_id: tr_unmatched }
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: unknown
+        path_params: { transfer_id: "literal:00000000-0000-7000-8000-0000000000ad" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403   # admin surface: 403 before reading (03 §7.2-3)
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404
+
+  adminCreateIncomingTransfer:
+    method: POST
+    path: /api/v1/admin/incoming-transfers
+    action: payments.transfer.create
+    body: bodies/payments/create_transfer.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403     # 03 §5.16: create is fin only
+      finance_admin: 201
+    variants:
+      - name: pending_account
+        body: bodies/payments/create_transfer_pending_account.json
+        note: a transfer is recorded on an approved account only — 422 validation_failed
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 422
+
+  adminImportIncomingTransfers:
+    method: POST
+    path: /api/v1/admin/incoming-transfers/import
+    action: payments.transfer.create
+    idempotency: required
+    body: bodies/payments/import.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 202
+
+  adminMatchIncomingTransfer:
+    method: POST
+    path: /api/v1/admin/incoming-transfers/{transfer_id}/match
+    action: payments.transfer.match
+    idempotency: required
+    config: { orders_seed: true }
+    path_params: { transfer_id: tr_unmatched }
+    body: bodies/payments/match.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403     # k27: fin only
+      finance_admin: 200
+    variants:
+      - name: already_matched
+        path_params: { transfer_id: tr_matched }
+        note: one transfer is captured once — 409 payments.transfer_already_matched
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 409
+      - name: reference_mismatch
+        body: bodies/payments/match_mismatch.json
+        note: expected_order_no is not the order's reference code — 422 payments.order_reference_mismatch
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 422
+
+  adminIgnoreIncomingTransfer:
+    method: POST
+    path: /api/v1/admin/incoming-transfers/{transfer_id}/ignore
+    action: payments.transfer.ignore
+    path_params: { transfer_id: tr_unmatched_b }
+    body: bodies/payments/ignore.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 200
+    variants:
+      - name: matched
+        path_params: { transfer_id: tr_matched }
+        note: only an unmatched transfer is ignored — 409 payments.transfer_already_matched
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 409
+
+  adminRequestIncomingTransferReturn:
+    method: POST
+    path: /api/v1/admin/incoming-transfers/{transfer_id}/request-return
+    action: payments.transfer.mark_returned
+    path_params: { transfer_id: tr_unmatched_b }
+    body: bodies/payments/request_return.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403     # k28: fin only
+      finance_admin: 200
+    variants:
+      - name: unknown
+        path_params: { transfer_id: "literal:00000000-0000-7000-8000-0000000000ae" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 404
+
+  adminApproveIncomingTransferReturn:
+    method: POST
+    path: /api/v1/admin/incoming-transfers/{transfer_id}/approve-return
+    action: payments.transfer.mark_returned
+    path_params: { transfer_id: tr_return_requested }
+    body: bodies/payments/approve.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 200      # second eye ≠ requester (finance_admin_2)
+    variants:
+      - name: own_request
+        path_params: { transfer_id: tr_return_own }
+        note: four eyes — finance_admin requested this return (06 H-18)
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 403
+      - name: not_requested
+        path_params: { transfer_id: tr_unmatched_b }
+        note: no return was requested — 409 payments.invalid_state
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 409
+
+  adminMarkIncomingTransferReturned:
+    method: POST
+    path: /api/v1/admin/incoming-transfers/{transfer_id}/mark-returned
+    action: payments.transfer.mark_returned
+    path_params: { transfer_id: tr_return_approved }
+    body: bodies/payments/mark_returned.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 200
+    variants:
+      - name: not_approved
+        path_params: { transfer_id: tr_return_requested }
+        note: the receipt closes an approved return only — 409 payments.invalid_state
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 409
+
+  adminConfirmDirectPayment:
+    method: POST
+    path: /api/v1/admin/payments/direct-confirmations
+    action: payments.transfer.match
+    idempotency: required
+    config: { orders_seed: true }
+    body: bodies/payments/direct.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 200
+    variants:
+      - name: model_a_order
+        body: bodies/payments/direct_model_a.json
+        note: only a model C order is paid by a direct confirmation — 409 orders.invalid_state
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 409
+
+pending_actions:
+  # BE-043: payments and refunds (03 §5.16).
+  - payments.payment.list
+  - payments.payment.read
+  - payments.refund.list
+  - payments.refund.create
+  - payments.refund.approve
+  - payments.refund.reject
+  - payments.refund.complete

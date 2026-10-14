@@ -419,15 +419,18 @@ func TestSyncWritesAreAllowed(t *testing.T) {
 	// identity, directory, students and feed → files.Files.Delete (BE-057),
 	// + outreach → entitlements.Entitlements.Release and feed →
 	// outreach.Targeting.DiscardDispatch (BE-035: the dispatch unit back,
-	// the dispatch of a withdrawn draft).
-	if len(allow) != 28 {
-		t.Fatalf("sync_writes.txt has %d lines, want 28", len(allow))
+	// the dispatch of a withdrawn draft), + payments →
+	// orders.Orders.ConfirmDirectPayment (BE-041: the model C direct
+	// payment confirmation pays the order in its transaction).
+	if len(allow) != 29 {
+		t.Fatalf("sync_writes.txt has %d lines, want 29", len(allow))
 	}
 	for _, must := range []string{"kvkk files.Files.Delete", "feed entitlements.Entitlements.Release",
 		"outreach entitlements.Entitlements.Release", "feed outreach.Targeting.DiscardDispatch",
 		"feed outreach.Targeting.ScheduleDispatch", "outreach entitlements.Entitlements.Consume",
 		"identity files.Files.Delete", "directory files.Files.Delete", "students files.Files.Delete", "feed files.Files.Delete",
 		"* audit.Logger.Log", "* files.Files.Attach", "payments orders.Orders.ApplyPayment", "payments ledger.Poster.Post",
+		"payments orders.Orders.ConfirmDirectPayment",
 		"directory orgs.OrgAdmin.GrantRole", "directory orgs.OrgAdmin.Create", "orders catalog.Offerings.Release",
 	} {
 		if !allow[must] {

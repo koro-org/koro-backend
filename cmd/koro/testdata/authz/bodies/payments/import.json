@@ -1,0 +1,1 @@
+{"collection_account_id": "{{fixture:coll_default}}", "csv": "value_date;amount;description;bank_reference\n02.10.2026;1.200,00;KRA3CMA4HG STANT;B-1\n2026-10-02;50,00;faiz;B-2\n2026-10-02;-10,00;giden EFT;B-3\n"}

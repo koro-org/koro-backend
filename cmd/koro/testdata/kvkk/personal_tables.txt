@@ -126,7 +126,7 @@ orders                      personal  orders        provider:orders
 order_lines                 staff     orders        -
 # payments
 collection_accounts         staff     payments      -
-incoming_bank_transfers     personal  payments      todo:BE-041
+incoming_bank_transfers     personal  payments      provider:payments
 payments                    staff     payments      -
 payment_splits              none      payments      -
 refunds                     staff     payments      -

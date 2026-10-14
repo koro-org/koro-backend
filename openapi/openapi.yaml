@@ -1470,6 +1470,20 @@ components:
       required:
         - decision
       type: object
+    ApproveAccountInputBody:
+      additionalProperties: false
+      properties:
+        decision:
+          enum:
+            - approved
+            - rejected
+          type: string
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof (03 §6.2)
+      required:
+        - decision
+      type: object
     ApproveInputBody:
       additionalProperties: false
       properties:
@@ -1487,6 +1501,20 @@ components:
           type: string
       required:
         - stage
+      type: object
+    ApproveReturnInputBody:
+      additionalProperties: false
+      properties:
+        decision:
+          enum:
+            - approved
+            - rejected
+          type: string
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof (03 §6.2)
+      required:
+        - decision
       type: object
     AssignmentInputBody:
       additionalProperties: false
@@ -2498,6 +2526,71 @@ components:
       required:
         - code
       type: object
+    CollectionAccountDTO:
+      additionalProperties: false
+      properties:
+        account_id:
+          format: uuid
+          type: string
+        approved_at:
+          format: date-time
+          type: string
+        approved_by:
+          description: The admin who decided it (approved or rejected)
+          format: uuid
+          type: string
+        bank_name:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        created_by:
+          format: uuid
+          type: string
+        holder_name:
+          type: string
+        iban:
+          type: string
+        is_default:
+          description: The account of every new payment instruction
+          type: boolean
+        label:
+          type: string
+        legal_party_id:
+          format: uuid
+          type: string
+        retired_at:
+          format: date-time
+          type: string
+        status:
+          enum:
+            - pending_approval
+            - active
+            - rejected
+            - retired
+          type: string
+      required:
+        - account_id
+        - label
+        - legal_party_id
+        - iban
+        - holder_name
+        - bank_name
+        - status
+        - is_default
+        - created_by
+        - created_at
+      type: object
+    CollectionAccountList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/CollectionAccountDTO"
+          type: array
+      required:
+        - items
+      type: object
     CommercePolicyDTO:
       additionalProperties: false
       properties:
@@ -2830,6 +2923,40 @@ components:
           $ref: "#/components/schemas/SegmentDefinitionDTO"
       required:
         - definition
+      type: object
+    CreateAccountInputBody:
+      additionalProperties: false
+      properties:
+        bank_name:
+          maxLength: 120
+          minLength: 2
+          type: string
+        holder_name:
+          maxLength: 300
+          minLength: 2
+          type: string
+        iban:
+          description: TR IBAN; spaces are ignored
+          maxLength: 42
+          type: string
+        label:
+          description: Shown to finance only
+          maxLength: 100
+          minLength: 1
+          type: string
+        legal_party_id:
+          description: Koro's own legal party (kind platform)
+          format: uuid
+          type: string
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof (03 §6.2)
+      required:
+        - label
+        - legal_party_id
+        - iban
+        - holder_name
+        - bank_name
       type: object
     CreateBreachInputBody:
       additionalProperties: false
@@ -3325,6 +3452,48 @@ components:
         - name
         - definition
       type: object
+    CreateTransferInputBody:
+      additionalProperties: false
+      properties:
+        amount:
+          description: Kuruş
+          format: int64
+          minimum: 1
+          type: integer
+        bank_reference:
+          description: The bank's receipt or transaction number
+          maxLength: 100
+          minLength: 1
+          type: string
+        collection_account_id:
+          format: uuid
+          type: string
+        description:
+          description: The transfer's description as the bank shows it
+          maxLength: 500
+          minLength: 1
+          type: string
+        receipt_file_id:
+          description: A transfer_receipt upload
+          format: uuid
+          type: string
+        sender_iban:
+          maxLength: 42
+          type: string
+        sender_name:
+          maxLength: 300
+          type: string
+        value_date:
+          description: The bank's value date (not in the future)
+          format: date
+          type: string
+      required:
+        - collection_account_id
+        - value_date
+        - amount
+        - description
+        - bank_reference
+      type: object
     CreateUploadInputBody:
       additionalProperties: false
       properties:
@@ -3552,6 +3721,37 @@ components:
         - finished_at
         - details
         - created_at
+      type: object
+    DirectInputBody:
+      additionalProperties: false
+      properties:
+        evidence_file_id:
+          description: "A transfer_receipt upload: the buyer's transfer to the payee"
+          format: uuid
+          type: string
+        expected_order_no:
+          description: The order's reference code
+          maxLength: 20
+          minLength: 10
+          type: string
+        order_id:
+          format: uuid
+          type: string
+      required:
+        - order_id
+        - expected_order_no
+        - evidence_file_id
+      type: object
+    DirectResultDTO:
+      additionalProperties: false
+      properties:
+        order:
+          $ref: "#/components/schemas/OrderSummaryDTO"
+        payment:
+          $ref: "#/components/schemas/PaymentSummaryDTO"
+      required:
+        - payment
+        - order
       type: object
     DispatchBody:
       additionalProperties: false
@@ -5118,6 +5318,256 @@ components:
         - role
         - reason
       type: object
+    IgnoreInputBody:
+      additionalProperties: false
+      properties:
+        ignore_reason:
+          description: Audited; no personal data
+          maxLength: 500
+          minLength: 1
+          type: string
+      required:
+        - ignore_reason
+      type: object
+    ImportInputBody:
+      additionalProperties: false
+      properties:
+        collection_account_id:
+          format: uuid
+          type: string
+        csv:
+          description: The bank statement as CSV text
+          maxLength: 1048576
+          minLength: 1
+          type: string
+      required:
+        - collection_account_id
+        - csv
+      type: object
+    ImportResultDTO:
+      additionalProperties: false
+      properties:
+        duplicates:
+          format: int64
+          type: integer
+        imported:
+          format: int64
+          type: integer
+        rejected:
+          format: int64
+          type: integer
+        rows:
+          items:
+            $ref: "#/components/schemas/ImportRowDTO"
+          type: array
+      required:
+        - imported
+        - duplicates
+        - rejected
+        - rows
+      type: object
+    ImportRowDTO:
+      additionalProperties: false
+      properties:
+        error:
+          description: Why the row was rejected (never a value of the row)
+          type: string
+        line:
+          description: Line of the CSV text (the header is line 1)
+          format: int64
+          type: integer
+        outcome:
+          enum:
+            - imported
+            - duplicate
+            - rejected
+          type: string
+        transfer_id:
+          format: uuid
+          type: string
+      required:
+        - line
+        - outcome
+      type: object
+    IncomingTransferDTO:
+      additionalProperties: false
+      properties:
+        amount:
+          description: Kuruş
+          format: int64
+          type: integer
+        bank_reference:
+          type: string
+        collection_account_id:
+          format: uuid
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        currency:
+          enum:
+            - TRY
+          type: string
+        description:
+          type: string
+        entered_by:
+          format: uuid
+          type: string
+        entry_method:
+          enum:
+            - manual
+            - csv_import
+            - bank_api
+          type: string
+        extracted_order_no:
+          description: The reference code found in the description
+          type: string
+        ignore_reason:
+          type: string
+        matched_at:
+          format: date-time
+          type: string
+        matched_by:
+          format: uuid
+          type: string
+        matched_order_id:
+          format: uuid
+          type: string
+        receipt_file_id:
+          format: uuid
+          type: string
+        return:
+          $ref: "#/components/schemas/TransferReturnDTO"
+        sender_iban:
+          type: string
+        sender_name:
+          type: string
+        status:
+          enum:
+            - unmatched
+            - matched
+            - ignored
+            - return_requested
+            - return_approved
+            - returned
+          type: string
+        transfer_id:
+          format: uuid
+          type: string
+        value_date:
+          format: date
+          type: string
+      required:
+        - transfer_id
+        - collection_account_id
+        - value_date
+        - amount
+        - currency
+        - description
+        - bank_reference
+        - status
+        - entry_method
+        - entered_by
+        - created_at
+      type: object
+    IncomingTransferDetailDTO:
+      additionalProperties: false
+      properties:
+        amount:
+          description: Kuruş
+          format: int64
+          type: integer
+        bank_reference:
+          type: string
+        collection_account_id:
+          format: uuid
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        currency:
+          enum:
+            - TRY
+          type: string
+        description:
+          type: string
+        entered_by:
+          format: uuid
+          type: string
+        entry_method:
+          enum:
+            - manual
+            - csv_import
+            - bank_api
+          type: string
+        extracted_order_no:
+          description: The reference code found in the description
+          type: string
+        ignore_reason:
+          type: string
+        matched_at:
+          format: date-time
+          type: string
+        matched_by:
+          format: uuid
+          type: string
+        matched_order_id:
+          format: uuid
+          type: string
+        receipt_file_id:
+          format: uuid
+          type: string
+        return:
+          $ref: "#/components/schemas/TransferReturnDTO"
+        sender_iban:
+          type: string
+        sender_name:
+          type: string
+        status:
+          enum:
+            - unmatched
+            - matched
+            - ignored
+            - return_requested
+            - return_approved
+            - returned
+          type: string
+        suggestions:
+          items:
+            $ref: "#/components/schemas/SuggestionDTO"
+          type: array
+        transfer_id:
+          format: uuid
+          type: string
+        value_date:
+          format: date
+          type: string
+      required:
+        - suggestions
+        - transfer_id
+        - collection_account_id
+        - value_date
+        - amount
+        - currency
+        - description
+        - bank_reference
+        - status
+        - entry_method
+        - entered_by
+        - created_at
+      type: object
+    IncomingTransferList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/IncomingTransferDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
     InvitationDTO:
       additionalProperties: false
       properties:
@@ -5498,6 +5948,74 @@ components:
       required:
         - bank_reference
         - receipt_file_id
+      type: object
+    MarkReturnedInputBody:
+      additionalProperties: false
+      properties:
+        bank_reference:
+          description: The EFT's bank reference
+          maxLength: 100
+          minLength: 1
+          type: string
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof (03 §6.2)
+        receipt_file_id:
+          description: A refund_receipt upload
+          format: uuid
+          type: string
+      required:
+        - bank_reference
+        - receipt_file_id
+      type: object
+    MatchInputBody:
+      additionalProperties: false
+      properties:
+        expected_order_no:
+          description: The order's reference code, as finance reads it
+          maxLength: 20
+          minLength: 10
+          type: string
+        order_id:
+          format: uuid
+          type: string
+        refund_iban:
+          description: "Where an overpayment goes back (default: the sender's IBAN)"
+          maxLength: 42
+          type: string
+      required:
+        - order_id
+        - expected_order_no
+      type: object
+    MatchResultDTO:
+      additionalProperties: false
+      properties:
+        applied_amount:
+          description: Kuruş applied to the order
+          format: int64
+          type: integer
+        order:
+          $ref: "#/components/schemas/OrderSummaryDTO"
+        overpayment_refund_id:
+          description: The overpayment refund request, or null
+          format: uuid
+          type:
+            - string
+            - "null"
+        payment:
+          $ref: "#/components/schemas/PaymentSummaryDTO"
+        status:
+          type: string
+        transfer_id:
+          format: uuid
+          type: string
+      required:
+        - transfer_id
+        - status
+        - payment
+        - order
+        - applied_amount
+        - overpayment_refund_id
       type: object
     MeDTO:
       additionalProperties: false
@@ -6893,6 +7411,35 @@ components:
       required:
         - items
       type: object
+    OrderSummaryDTO:
+      additionalProperties: false
+      properties:
+        due_amount:
+          description: Kuruş Koro still waits for
+          format: int64
+          type: integer
+        order_id:
+          format: uuid
+          type: string
+        order_no:
+          type: string
+        paid:
+          description: This capture completed the order
+          type: boolean
+        paid_amount:
+          description: Kuruş Koro has collected
+          format: int64
+          type: integer
+        status:
+          type: string
+      required:
+        - order_id
+        - order_no
+        - status
+        - paid_amount
+        - due_amount
+        - paid
+      type: object
     OrgCardDTO:
       additionalProperties: false
       properties:
@@ -7302,6 +7849,35 @@ components:
         - bank_name
         - expires_at
         - instructions_tr
+      type: object
+    PaymentSummaryDTO:
+      additionalProperties: false
+      properties:
+        amount:
+          description: Kuruş
+          format: int64
+          type: integer
+        captured_at:
+          format: date-time
+          type: string
+        payment_id:
+          format: uuid
+          type: string
+        provider:
+          enum:
+            - bank_transfer
+            - iyzico
+            - direct_confirmed
+            - manual
+          type: string
+        status:
+          type: string
+      required:
+        - payment_id
+        - provider
+        - amount
+        - status
+        - captured_at
       type: object
     PayoutAdminDTO:
       additionalProperties: false
@@ -8137,6 +8713,13 @@ components:
       required:
         - reason
       type: object
+    ReauthAccountInputBody:
+      additionalProperties: false
+      properties:
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof (03 §6.2)
+      type: object
     ReauthDTO:
       additionalProperties: false
       properties:
@@ -8631,6 +9214,24 @@ components:
         - status
         - audience_kind
         - commercial_flag
+      type: object
+    RequestReturnInputBody:
+      additionalProperties: false
+      properties:
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof (03 §6.2)
+        return_reason:
+          description: Audited; no personal data
+          maxLength: 500
+          minLength: 1
+          type: string
+        target_iban:
+          description: "Default: the sender's IBAN"
+          maxLength: 42
+          type: string
+      required:
+        - return_reason
       type: object
     RequestSensitivityInputBody:
       additionalProperties: false
@@ -9654,6 +10255,32 @@ components:
         - updated_at
         - etag
       type: object
+    SuggestionDTO:
+      additionalProperties: false
+      properties:
+        amount_due_amount:
+          description: Kuruş the order still waits for
+          format: int64
+          type: integer
+        order_id:
+          format: uuid
+          type: string
+        order_no:
+          type: string
+        order_status:
+          type: string
+        score:
+          format: double
+          maximum: 1
+          minimum: 0
+          type: number
+      required:
+        - order_id
+        - order_no
+        - amount_due_amount
+        - order_status
+        - score
+      type: object
     SuppressionDTO:
       additionalProperties: false
       properties:
@@ -9912,6 +10539,34 @@ components:
           description: Re-authentication proof (03 §6.2)
       required:
         - new_owner_user_id
+      type: object
+    TransferReturnDTO:
+      additionalProperties: false
+      properties:
+        approved_at:
+          format: date-time
+          type: string
+        approved_by:
+          format: uuid
+          type: string
+        bank_reference:
+          type: string
+        reason:
+          type: string
+        receipt_file_id:
+          format: uuid
+          type: string
+        requested_at:
+          format: date-time
+          type: string
+        requested_by:
+          format: uuid
+          type: string
+        returned_at:
+          format: date-time
+          type: string
+        target_iban:
+          type: string
       type: object
     UniversityCardDTO:
       additionalProperties: false
@@ -11496,6 +12151,228 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+  /api/v1/admin/collection-accounts:
+    get:
+      description: Every account, newest first. The default active account is the IBAN of every payment instruction.
+      operationId: adminListCollectionAccounts
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollectionAccountList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List Koro's collection accounts
+      tags:
+        - payments
+      x-koro-action: payments.collection_account.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+    post:
+      description: Requires re-authentication. The account belongs to Koro's own legal party (kind platform) and waits for another admin's approval (pending_approval, four eyes). An IBAN that another pending or active account has is 409 payments.iban_in_use.
+      operationId: adminCreateCollectionAccount
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAccountInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollectionAccountDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Create a collection account
+      tags:
+        - payments
+      x-koro-action: payments.collection_account.create
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/collection-accounts/{account_id}/approve:
+    post:
+      description: Requires re-authentication. The creator never decides (403 authz.four_eyes_violation). An approval sends a security notice to every platform and finance admin; it does not make the account the default.
+      operationId: adminApproveCollectionAccount
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Collection account ID (an unknown or malformed ID is 404)
+          in: path
+          name: account_id
+          required: true
+          schema:
+            description: Collection account ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApproveAccountInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollectionAccountDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Approve or reject a collection account
+      tags:
+        - payments
+      x-koro-action: payments.collection_account.approve
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/collection-accounts/{account_id}/make-default:
+    post:
+      description: Requires re-authentication. Only an active account (409 payments.invalid_state). New payment instructions show its IBAN; the previous default stays active.
+      operationId: adminMakeDefaultCollectionAccount
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Collection account ID (an unknown or malformed ID is 404)
+          in: path
+          name: account_id
+          required: true
+          schema:
+            description: Collection account ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReauthAccountInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollectionAccountDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Make a collection account the default
+      tags:
+        - payments
+      x-koro-action: payments.collection_account.retire
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/collection-accounts/{account_id}/retire:
+    post:
+      description: "Requires re-authentication. Only an active account (409 payments.invalid_state). A retired default leaves no default: payment instructions answer 409 payments.no_active_collection_account until another account is made the default."
+      operationId: adminRetireCollectionAccount
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Collection account ID (an unknown or malformed ID is 404)
+          in: path
+          name: account_id
+          required: true
+          schema:
+            description: Collection account ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReauthAccountInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollectionAccountDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Retire a collection account
+      tags:
+        - payments
+      x-koro-action: payments.collection_account.retire
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
   /api/v1/admin/commerce-policies:
     get:
       description: Newest valid_from first; at keeps the policies in effect at that time.
@@ -12609,6 +13486,462 @@ paths:
         - events
       x-koro-action: events.lint_rule.manage
       x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/incoming-transfers:
+    get:
+      description: Newest value date first. q matches part of the description, the sender's name or the bank reference, or a reference code exactly.
+      operationId: adminListIncomingTransfers
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - explode: false
+          in: query
+          name: status
+          schema:
+            enum:
+              - unmatched
+              - matched
+              - ignored
+              - return_requested
+              - return_approved
+              - returned
+            type: string
+        - description: YYYY-MM-DD (inclusive)
+          explode: false
+          in: query
+          name: value_date_from
+          schema:
+            description: YYYY-MM-DD (inclusive)
+            maxLength: 10
+            type: string
+        - description: YYYY-MM-DD (inclusive)
+          explode: false
+          in: query
+          name: value_date_to
+          schema:
+            description: YYYY-MM-DD (inclusive)
+            maxLength: 10
+            type: string
+        - description: Part of the description, the sender's name or the bank reference; or a reference code
+          explode: false
+          in: query
+          name: q
+          schema:
+            description: Part of the description, the sender's name or the bank reference; or a reference code
+            maxLength: 100
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncomingTransferList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List incoming bank transfers
+      tags:
+        - payments
+      x-koro-action: payments.transfer.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+    post:
+      description: The transfer is recorded unmatched on an approved collection account; the reference code of its description is extracted for the suggestions. A bank reference the account already has is 409 payments.duplicate_bank_reference.
+      operationId: adminCreateIncomingTransfer
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTransferInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncomingTransferDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Record an incoming bank transfer
+      tags:
+        - payments
+      x-koro-action: payments.transfer.create
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/incoming-transfers/import:
+    post:
+      description: csv is the statement text (UTF-8, ';' or ',' separated, header line first; columns value_date, amount, description, bank_reference, optional sender_name, sender_iban; at most 1 MiB and 2000 rows). Each row is imported, skipped as a duplicate (its bank reference is already recorded on the account) or rejected with a reason; the answer counts them and lists every row.
+      operationId: adminImportIncomingTransfers
+      parameters:
+        - description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportInputBody"
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportResultDTO"
+          description: Accepted
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Import a bank statement (CSV)
+      tags:
+        - payments
+      x-koro-action: payments.transfer.create
+      x-koro-idempotency: required
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/incoming-transfers/{transfer_id}:
+    get:
+      description: "An unmatched transfer suggests the order of the reference code in its description, scored by its amount: 1 exactly what the order waits for, 0.7 less (partial), 0.5 more (an overpayment refund opens), 0 the order does not wait for a payment."
+      operationId: adminGetIncomingTransfer
+      parameters:
+        - description: Incoming transfer ID (an unknown or malformed ID is 404)
+          in: path
+          name: transfer_id
+          required: true
+          schema:
+            description: Incoming transfer ID (an unknown or malformed ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncomingTransferDetailDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get an incoming bank transfer with match suggestions
+      tags:
+        - payments
+      x-koro-action: payments.transfer.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+  /api/v1/admin/incoming-transfers/{transfer_id}/approve-return:
+    post:
+      description: "Requires re-authentication. Step 2 of 3: the requester never decides (403 authz.four_eyes_violation). An approval freezes the target IBAN (return_approved); a rejection makes the transfer unmatched again."
+      operationId: adminApproveIncomingTransferReturn
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Incoming transfer ID (an unknown or malformed ID is 404)
+          in: path
+          name: transfer_id
+          required: true
+          schema:
+            description: Incoming transfer ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApproveReturnInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncomingTransferDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Approve or reject the return of a transfer
+      tags:
+        - payments
+      x-koro-action: payments.transfer.mark_returned
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/incoming-transfers/{transfer_id}/ignore:
+    post:
+      description: Only an unmatched transfer (409). The reason is audited.
+      operationId: adminIgnoreIncomingTransfer
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Incoming transfer ID (an unknown or malformed ID is 404)
+          in: path
+          name: transfer_id
+          required: true
+          schema:
+            description: Incoming transfer ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IgnoreInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncomingTransferDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Ignore an unmatched transfer
+      tags:
+        - payments
+      x-koro-action: payments.transfer.ignore
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/incoming-transfers/{transfer_id}/mark-returned:
+    post:
+      description: "Requires re-authentication. Step 3 of 3: only an approved return (409 payments.invalid_state); the bank reference and the receipt (a refund_receipt upload) close it (returned)."
+      operationId: adminMarkIncomingTransferReturned
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Incoming transfer ID (an unknown or malformed ID is 404)
+          in: path
+          name: transfer_id
+          required: true
+          schema:
+            description: Incoming transfer ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarkReturnedInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncomingTransferDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Record the EFT that returned a transfer
+      tags:
+        - payments
+      x-koro-action: payments.transfer.mark_returned
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/incoming-transfers/{transfer_id}/match:
+    post:
+      description: "One transaction: the transfer is matched, the payment captured, the order paid as far as the money goes (partial payments accumulate), the ledger posted and payment.captured emitted; any failure leaves the transfer unmatched. expected_order_no must be the order's reference code (422 payments.order_reference_mismatch). Money beyond what the order waits for opens an overpayment refund request to refund_iban (default: the sender's IBAN); its approval takes four eyes."
+      operationId: adminMatchIncomingTransfer
+      parameters:
+        - description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Incoming transfer ID (an unknown or malformed ID is 404)
+          in: path
+          name: transfer_id
+          required: true
+          schema:
+            description: Incoming transfer ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MatchInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchResultDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Match a transfer to an order (payment capture)
+      tags:
+        - payments
+      x-koro-action: payments.transfer.match
+      x-koro-idempotency: required
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/incoming-transfers/{transfer_id}/request-return:
+    post:
+      description: "Requires re-authentication. Step 1 of 3 (06 H-56): an unmatched or ignored transfer waits for another finance admin's approval (return_requested). target_iban defaults to the sender's IBAN."
+      operationId: adminRequestIncomingTransferReturn
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Incoming transfer ID (an unknown or malformed ID is 404)
+          in: path
+          name: transfer_id
+          required: true
+          schema:
+            description: Incoming transfer ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestReturnInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncomingTransferDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Request the return of a transfer to its sender
+      tags:
+        - payments
+      x-koro-action: payments.transfer.mark_returned
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
       x-koro-surface: admin
   /api/v1/admin/ledger/transactions:
     get:
@@ -14150,6 +15483,50 @@ paths:
         - parties
       x-koro-action: parties.payee.verify
       x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/payments/direct-confirmations:
+    post:
+      description: "Model C (the buyer pays the payees directly, Koro collects its fee): with the receipt of the buyer's transfer (a transfer_receipt upload) a finance admin records a direct_confirmed payment and the order is paid. Only a model C order awaiting payment (409 orders.invalid_state) whose fee is in (409 orders.order_not_paid). The money never reaches Koro's account; the ledger posts nothing."
+      operationId: adminConfirmDirectPayment
+      parameters:
+        - description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DirectInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DirectResultDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Confirm a model C order's direct payment to its payees
+      tags:
+        - payments
+      x-koro-action: payments.transfer.match
+      x-koro-idempotency: required
       x-koro-rate-limit: write_default
       x-koro-surface: admin
   /api/v1/admin/payouts:

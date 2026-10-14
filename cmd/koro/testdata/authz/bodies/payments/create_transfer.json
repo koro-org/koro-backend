@@ -1,0 +1,1 @@
+{"collection_account_id": "{{fixture:coll_default}}", "value_date": "2026-10-02", "amount": 1200000, "sender_name": "ÖRNEK TEKNOLOJİ A.Ş.", "sender_iban": "TR100006200000000006295938", "description": "KRA3CMA4HG STANT", "bank_reference": "20261002-000777", "receipt_file_id": "{{fixture:file_transfer_receipt}}"}

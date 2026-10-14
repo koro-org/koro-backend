@@ -1,0 +1,8 @@
+Merhaba {{index .Data "name"}},
+
+{{if eq (index .Data "change") "retired"}}Bir Koro tahsilat hesabı emekliye ayrıldı; yeni ödeme talimatlarında artık görünmez.{{else}}Varsayılan Koro tahsilat hesabı değişti; yeni ödeme talimatlarında bu IBAN görünür.{{end}}
+
+Hesap: {{index .Data "label"}}
+IBAN: {{index .Data "iban_masked"}}
+
+Bu değişikliği beklemiyorsanız hemen Koro destek ekibine bildirin.

@@ -1284,10 +1284,46 @@
     "type": "urn:koro:problem:payload_too_large"
   },
   {
+    "code": "payments.duplicate_bank_reference",
+    "status": 409,
+    "title": "A transfer with this bank reference is already recorded",
+    "type": "urn:koro:problem:payments.duplicate_bank_reference"
+  },
+  {
+    "code": "payments.iban_in_use",
+    "status": 409,
+    "title": "Another open collection account has this IBAN",
+    "type": "urn:koro:problem:payments.iban_in_use"
+  },
+  {
+    "code": "payments.invalid_state",
+    "status": 409,
+    "title": "The current status does not allow this change",
+    "type": "urn:koro:problem:payments.invalid_state"
+  },
+  {
     "code": "payments.no_active_collection_account",
     "status": 409,
     "title": "No active collection account is configured",
     "type": "urn:koro:problem:payments.no_active_collection_account"
+  },
+  {
+    "code": "payments.nothing_due",
+    "status": 409,
+    "title": "The order does not wait for a payment to Koro",
+    "type": "urn:koro:problem:payments.nothing_due"
+  },
+  {
+    "code": "payments.order_reference_mismatch",
+    "status": 422,
+    "title": "The expected order number is not the order's reference code",
+    "type": "urn:koro:problem:payments.order_reference_mismatch"
+  },
+  {
+    "code": "payments.transfer_already_matched",
+    "status": 409,
+    "title": "The transfer is already matched",
+    "type": "urn:koro:problem:payments.transfer_already_matched"
   },
   {
     "code": "precondition_failed",

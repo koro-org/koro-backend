@@ -82,6 +82,13 @@ directory -> files.Files.Delete
 students  -> files.Files.Delete
 feed      -> files.Files.Delete
 
+# BE-041 (06 H-56, T-18, T-227; BE-040's doc patch, rationale for 01 §6.3 in the BE-041 ticket's doc
+# patch): the model C twin of "Havale eşleştirme". A finance admin's confirmation that the buyer paid the
+# payees directly records the direct_confirmed payment and pays the order (its rights active, its splits
+# written) in one transaction, so a confirmation never exists without its paid order nor a paid order
+# without the confirmation that paid it.
+payments  -> orders.Orders.ConfirmDirectPayment
+
 # BE-035 (rationale for 01 §6.3 in the BE-035 ticket's doc patch; the twin of 06 H-64): a dispatch's
 # targeted_dispatch unit goes back in the transaction that ends the dispatch without sending
 # (cancelDispatch, a post that left the feed before the run, an audience below 10), so a unit is never lost

@@ -1,0 +1,1 @@
+{"label": "Matris yedek hesap", "legal_party_id": "{{fixture:party_platform}}", "iban": "TR67 0001 5001 5800 7300 0000 01", "holder_name": "Koro Teknoloji A.Ş.", "bank_name": "Örnek Bank", "reauth": {"password": "matrix-reauth-password"}}

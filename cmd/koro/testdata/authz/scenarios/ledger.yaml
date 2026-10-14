@@ -1,4 +1,4 @@
-# Multi-step scenarios of the ledger module (03 §7.7; BE-039).
+# Multi-step scenarios of the ledger module (03 §7.7; BE-039, BE-044).
 version: 1
 scenarios:
   journal_needs_mfa:
@@ -18,3 +18,54 @@ scenarios:
           expect: 422, code: validation_failed }
       - { persona: finance_admin, operation: adminListLedgerTransactions,
           query: { kind: payment_received, ref_id: "{{fixture:ledger_payment_a}}" }, expect: 200 }
+  payout_four_eyes:
+    note: >-
+      03 §7.7 "4 göz – payout": finance_admin creates a payout and may not approve it (403
+      authz.four_eyes_violation); the second eye needs the re-authentication proof (missing / wrong /
+      right) — finance_admin approves finance_admin_2's payout; a platform admin is no eye.
+    config: { ledger_seed: true }
+    steps:
+      - { persona: finance_admin, operation: adminCreatePayout, expect: 201, save: { new_payout: payout_id } }
+      - { persona: finance_admin, operation: adminApprovePayout, path_params: { payout_id: new_payout }, expect: 403,
+          code: authz.four_eyes_violation }
+      - { persona: platform_admin, operation: adminApprovePayout, path_params: { payout_id: new_payout }, expect: 403,
+          code: forbidden }
+      - { persona: finance_admin, operation: adminApprovePayout, body: bodies/ledger/approve_no_reauth.json, expect: 403,
+          code: identity.reauth_required }
+      - { persona: finance_admin, operation: adminApprovePayout, body: bodies/ledger/approve_wrong_reauth.json, expect: 403,
+          code: identity.reauth_failed }
+      - { persona: finance_admin, operation: adminApprovePayout, expect: 200 }
+      - { persona: finance_admin, operation: adminApprovePayout, expect: 409, code: ledger.invalid_state }
+  payout_paid_chain:
+    note: >-
+      The EFT is recorded only with its receipt (422 without it); once paid, the club admin reads the
+      payout with its receipt and the balance shows the payout; a paid payout cannot be cancelled and
+      nothing else is payable.
+    config: { ledger_seed: true }
+    steps:
+      - { persona: finance_admin, operation: adminMarkPayoutPaid, body: bodies/ledger/mark_paid_no_receipt.json, expect: 422,
+          code: validation_failed }
+      - { persona: finance_admin, operation: adminMarkPayoutPaid, expect: 200 }
+      - { persona: finance_admin, operation: adminMarkPayoutPaid, expect: 409, code: ledger.invalid_state }
+      - { persona: club_admin, operation: getOrgPayout, path_params: { org_id: club_a, payout_id: po_approved }, expect: 200 }
+      - { persona: club_admin, operation: getPayeeBalance, expect: 200 }
+      - { persona: finance_admin, operation: adminCancelPayout, path_params: { payout_id: po_approved }, expect: 409,
+          code: ledger.invalid_state }
+  payout_failed_releases_lines:
+    note: >-
+      A failed transfer releases the payout's line: the next payout of the payee takes it together
+      with the free line; then nothing is payable (422 ledger.nothing_payable).
+    config: { ledger_seed: true }
+    steps:
+      - { persona: finance_admin, operation: adminMarkPayoutFailed, expect: 200 }
+      - { persona: finance_admin, operation: adminCancelPayout, path_params: { payout_id: po_own }, expect: 200 }
+      - { persona: finance_admin, operation: adminCancelPayout, expect: 200 }
+      - { persona: finance_admin, operation: adminCreatePayout, expect: 201 }
+      - { persona: finance_admin, operation: adminCreatePayout, expect: 422, code: ledger.nothing_payable }
+  payout_needs_mfa:
+    note: the finance admin's payout cells are k-mfa role paths (03 §6.4)
+    config: { ledger_seed: true }
+    steps:
+      - { persona: finance_admin, mfa: false, operation: adminListPayouts, expect: 403, code: authz.mfa_required }
+      - { persona: finance_admin, mfa: false, operation: adminCreatePayout, expect: 403, code: authz.mfa_required }
+      - { persona: finance_admin, operation: adminListPayouts, expect: 200 }

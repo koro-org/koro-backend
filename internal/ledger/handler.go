@@ -15,10 +15,10 @@ import (
 	"koro/internal/platform/page"
 )
 
-// Register adds the ledger operations of BE-039 (04 §2.17:
-// adminListLedgerTransactions) to api. svc may be nil (`koro openapi`):
-// handlers only touch it when called. The payee balance and payout
-// endpoints come with BE-044.
+// Register adds the ledger operations of 04 §2.17 to api: the journal
+// (adminListLedgerTransactions, BE-039), the payee balance and the payout
+// flow (BE-044). svc may be nil (`koro openapi`): handlers only touch it
+// when called.
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
 	tags := []string{"ledger"}
@@ -29,6 +29,7 @@ func Register(api huma.API, svc Service) {
 			"credit negative; the entries of a transaction sum to zero. Filters: kind, ref_type, ref_id and an " +
 			"occurred_at window.",
 	}, op.Meta{Action: string(authz.LedgerJournalList), Surface: op.SurfaceAdmin}), h.list)
+	registerPayouts(api, h)
 }
 
 type handler struct{ svc Service }

@@ -134,7 +134,7 @@ refunds                     staff     payments      -
 ledger_accounts             none      ledger        -
 ledger_transactions         staff     ledger        -
 ledger_entries              none      ledger        -
-payouts                     personal  ledger        todo:BE-044
+payouts                     personal  ledger        provider:ledger
 payout_items                none      ledger        -
 # billing
 invoices                    personal  billing       todo:BE-042

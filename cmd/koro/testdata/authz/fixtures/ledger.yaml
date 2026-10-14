@@ -1,9 +1,35 @@
-# Fixtures of the ledger module (cmd/koro/matrix_ledger_test.go). IDs are authztest.ID(name)
-# and name the business event (ref_id), not the ledger transaction. Posted through
-# ledger.Poster with the model A templates (02 §21.3): a captured payment of 1,200,000 kuruş
-# and the allocation of its order (one line: payee 1,080,000, commission 100,000, VAT 20,000;
-# payee authztest.ID("<name>_payee"), line authztest.ID("<name>_line")).
+# Fixtures of the ledger module (cmd/koro/matrix_ledger_test.go). IDs are authztest.ID(name).
+# Transactions (BE-039, always seeded) name the business event (ref_id), not the ledger transaction,
+# and are posted through ledger.Poster with the model A templates (02 §21.3): a captured payment of
+# 1,200,000 kuruş and the allocation of its order (one line: payee 1,080,000, commission 100,000,
+# VAT 20,000; payee authztest.ID("<name>_payee"), line authztest.ID("<name>_line")).
+# The payout fixtures (BE-044) are seeded only under the matrix config ledger_seed: true:
+#   payable_line  a completed order of company_b with one fulfilled line of payee (seller net
+#                 1,080,000, fulfilled 2026-10-02, no hold) in orders' store, its payment and
+#                 allocation in the ledger
+#   receipt       a payout_receipt upload of uploaded_by, attached to payout when given
+#   payout        a payout of line (its only item) frozen on the payee's approved account (parties
+#                 fixtures: acct_club_a), created_by; approved_by / receipt as status says
+# payee_club_a's open payouts (po_pending, po_own, po_approved: 3,240,000) plus ln_po_free stay within
+# what the ledger owes it (5 lines allocated, po_paid paid out: 4,320,000).
 version: 1
 fixtures:
   ledger_payment_a: { kind: transaction, template: payment_received, amount: 1200000 }
   ledger_order_a: { kind: transaction, template: order_allocated, amount: 1200000 }
+  ln_po_free: { kind: payable_line, payee: payee_club_a }
+  ln_po_pending: { kind: payable_line, payee: payee_club_a }
+  ln_po_own: { kind: payable_line, payee: payee_club_a }
+  ln_po_approved: { kind: payable_line, payee: payee_club_a }
+  ln_po_paid: { kind: payable_line, payee: payee_club_a }
+  # IDOR: a line and a payout of uni_a's payee (another seller org than club_a).
+  ln_po_uni: { kind: payable_line, payee: payee_uni_a }
+  receipt_a: { kind: receipt, uploaded_by: finance_admin }
+  receipt_paid: { kind: receipt, uploaded_by: finance_admin, payout: po_paid }
+  # po_pending: created by finance_admin_2, so finance_admin is the second eye.
+  po_pending: { kind: payout, line: ln_po_pending, status: pending_approval, created_by: finance_admin_2 }
+  # po_own: created by finance_admin (four eyes: finance_admin may not approve it).
+  po_own: { kind: payout, line: ln_po_own, status: pending_approval, created_by: finance_admin }
+  po_approved: { kind: payout, line: ln_po_approved, status: approved, created_by: finance_admin_2, approved_by: finance_admin }
+  po_paid: { kind: payout, line: ln_po_paid, status: paid, created_by: finance_admin_2, approved_by: finance_admin,
+             receipt: receipt_paid }
+  po_uni: { kind: payout, line: ln_po_uni, status: pending_approval, created_by: finance_admin_2 }

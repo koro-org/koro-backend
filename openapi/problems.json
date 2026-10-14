@@ -882,10 +882,28 @@
     "type": "urn:koro:problem:kvkk.unknown_user"
   },
   {
+    "code": "ledger.bank_account_changed",
+    "status": 409,
+    "title": "The payee's approved bank account changed after the payout was created",
+    "type": "urn:koro:problem:ledger.bank_account_changed"
+  },
+  {
+    "code": "ledger.invalid_state",
+    "status": 409,
+    "title": "Payout state does not allow this",
+    "type": "urn:koro:problem:ledger.invalid_state"
+  },
+  {
     "code": "ledger.invalid_transaction",
     "status": 422,
     "title": "Ledger transaction is invalid",
     "type": "urn:koro:problem:ledger.invalid_transaction"
+  },
+  {
+    "code": "ledger.line_not_payable",
+    "status": 409,
+    "title": "Order line is not payable",
+    "type": "urn:koro:problem:ledger.line_not_payable"
   },
   {
     "code": "ledger.model_not_enabled",
@@ -898,6 +916,12 @@
     "status": 409,
     "title": "Payee balance would become negative",
     "type": "urn:koro:problem:ledger.negative_payee_balance"
+  },
+  {
+    "code": "ledger.nothing_payable",
+    "status": 422,
+    "title": "Nothing is payable to the payee",
+    "type": "urn:koro:problem:ledger.nothing_payable"
   },
   {
     "code": "ledger.ref_conflict",

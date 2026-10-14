@@ -1,0 +1,10 @@
+Merhaba,
+
+{{index .Data "holder_name"}} adına hakediş ödemesi Koro'nun hesabından gönderildi.
+
+Tutar: {{index .Data "amount"}} {{index .Data "currency"}}
+IBAN: {{index .Data "iban_masked"}}
+Banka referansı: {{index .Data "bank_reference"}}
+Ödeme zamanı: {{index .Data "paid_at"}} (Türkiye saati)
+
+Dekont ve ödemeye giren sipariş kalemleri Koro'daki ödeme sayfasında; kulüp yöneticileri dekontu oradan indirebilir.

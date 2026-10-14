@@ -1,15 +1,28 @@
-# Authz matrix of the ledger module (03 §5.17, 04 §2.17; BE-039). 1 operation × 18 personas.
-# Admin surface (03 §7.2-3): everyone without the role → 403, nothing is read first.
-# platform_admin and finance_admin sessions are MFA verified (03 §7.3); the policy test and
-# scenarios/ledger.yaml cover the MFA-less session. Fixtures: fixtures/ledger.yaml
-# (matrix_ledger_test.go). The balance and payout endpoints come with BE-044 (pending_actions).
+# Authz matrix of the ledger module (03 §5.17, 04 §2.17; BE-039, BE-044). 12 operations × 18 personas.
+# Admin surface (03 §7.2-3): everyone without the role → 403, nothing is read first. Org surface
+# (/orgs/{org_id}/payees/.../balance, /orgs/{org_id}/payouts; 03 §3.6 "Payee, banka hesabı, payout,
+# hakediş bakiyesi"): members of the org without the role → 403, non-members → 404, every platform
+# role sees it (403 unless platform_admin / finance_admin). platform_admin and finance_admin sessions
+# are MFA verified (03 §7.3); the policy test and scenarios/ledger.yaml cover the MFA-less session.
+# Four eyes (03 §6.1): po_pending was created by finance_admin_2, po_own by finance_admin; the
+# approval carries the matrix password (R, identity fixtures). Fixtures: fixtures/ledger.yaml
+# (matrix_ledger_test.go); the payout fixtures are seeded only under ledger_seed: true (set by the
+# BE-044 operations and scenarios): club_a's open payouts would block orgs' closeOrg checks.
 version: 1
+config:
+  ledger_seed: false
 groups:
   # signed-in users without a platform role.
   no_platform_role: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
                      event_staff, university_rep, company_member, company_admin, other_company_member]
-  # platform roles without a ledger.journal.list cell.
+  # platform roles without a ledger cell.
   other_staff: [moderator, support, dpo, talent_auditor]
+  # signed-in users without a membership in club_a.
+  outsiders_club_a: [user_unverified, student, student_minor, other_club_admin, event_staff, university_rep,
+                     company_member, company_admin, other_company_member]
+  # signed-in users without a membership in uni_a.
+  outsiders_uni_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                    event_staff, company_member, company_admin, other_company_member]
 
 operations:
   adminListLedgerTransactions:
@@ -50,14 +63,259 @@ operations:
           platform_admin: 200
           finance_admin: 200
 
-pending_actions:
-  # BE-044: payee balance, payables and payouts (03 §5.17).
-  - ledger.balance.read
-  - ledger.payable.list
-  - ledger.payout.list
-  - ledger.payout.read
-  - ledger.payout.create
-  - ledger.payout.approve
-  - ledger.payout.mark_paid
-  - ledger.payout.mark_failed
-  - ledger.payout.cancel
+  getPayeeBalance:
+    method: GET
+    path: /api/v1/orgs/{org_id}/payees/{payee_id}/balance
+    action: ledger.balance.read
+    config: { ledger_seed: true }
+    path_params: { org_id: club_a, payee_id: payee_club_a }
+    expect:
+      anonymous: 401
+      "@outsiders_club_a": 404
+      club_member: 403
+      club_admin: 200
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: payee_of_other_org
+        path_params: { org_id: uni_a, payee_id: payee_club_a }
+        note: club_a's payee through uni_a's surface — 404 for everyone allowed on uni_a (06 H-38)
+        expect:
+          anonymous: 401
+          "@outsiders_uni_a": 404
+          university_rep: 404
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404
+
+  listOrgPayouts:
+    method: GET
+    path: /api/v1/orgs/{org_id}/payouts
+    action: ledger.payout.list
+    config: { ledger_seed: true }
+    path_params: { org_id: club_a }
+    expect:
+      anonymous: 401
+      "@outsiders_club_a": 404
+      club_member: 403
+      club_admin: 200
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: university
+        path_params: { org_id: uni_a }
+        expect:
+          anonymous: 401
+          "@outsiders_uni_a": 404
+          university_rep: 200
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+
+  getOrgPayout:
+    method: GET
+    path: /api/v1/orgs/{org_id}/payouts/{payout_id}
+    action: ledger.payout.read
+    config: { ledger_seed: true }
+    path_params: { org_id: club_a, payout_id: po_paid }
+    note: the paid payout with its receipt URL; the IBAN masked
+    expect:
+      anonymous: 401
+      "@outsiders_club_a": 404
+      club_member: 403
+      club_admin: 200
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: payout_of_other_org
+        path_params: { org_id: club_a, payout_id: po_uni }
+        note: uni_a's payout through club_a's surface — 404 after authz (06 H-38)
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403
+          club_admin: 404
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404
+
+  adminListPayables:
+    method: GET
+    path: /api/v1/admin/payables
+    action: ledger.payable.list
+    config: { ledger_seed: true }
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 200
+    variants:
+      - name: one_payee_as_of
+        query: { payee_id: "{{fixture:payee_club_a}}", as_of: "2026-10-03" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 200
+
+  adminListPayouts:
+    method: GET
+    path: /api/v1/admin/payouts
+    action: ledger.payout.list
+    config: { ledger_seed: true }
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: approval_queue
+        query: { status: pending_approval }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+
+  adminGetPayout:
+    method: GET
+    path: /api/v1/admin/payouts/{payout_id}
+    action: ledger.payout.read
+    config: { ledger_seed: true }
+    path_params: { payout_id: po_pending }
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+
+  adminCreatePayout:
+    method: POST
+    path: /api/v1/admin/payouts
+    action: ledger.payout.create
+    idempotency: required
+    config: { ledger_seed: true }
+    body: bodies/ledger/create.json
+    note: finance_admin takes payee_club_a's free line (ln_po_free) into a pending payout
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 201
+    variants:
+      - name: held_line
+        body: bodies/ledger/create_held_line.json
+        note: ln_po_pending is in po_pending — 409 ledger.line_not_payable
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 409
+
+  adminApprovePayout:
+    method: POST
+    path: /api/v1/admin/payouts/{payout_id}/approve
+    action: ledger.payout.approve
+    config: { ledger_seed: true }
+    path_params: { payout_id: po_pending }
+    body: bodies/ledger/approve.json
+    note: second eye — finance_admin approves finance_admin_2's payout (R with the matrix password)
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403     # fin only (03 §5.17)
+      finance_admin: 200
+    variants:
+      - name: own_payout
+        path_params: { payout_id: po_own }
+        note: four eyes — finance_admin created po_own and may not approve it
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 403
+      - name: already_approved
+        path_params: { payout_id: po_approved }
+        note: only a payout waiting for approval — 409 ledger.invalid_state
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 409
+
+  adminMarkPayoutPaid:
+    method: POST
+    path: /api/v1/admin/payouts/{payout_id}/mark-paid
+    action: ledger.payout.mark_paid
+    config: { ledger_seed: true }
+    path_params: { payout_id: po_approved }
+    body: bodies/ledger/mark_paid.json
+    note: the EFT with its receipt (receipt_a) and bank reference — ledger, lines and outbox in one transaction
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 200
+    variants:
+      - name: not_approved
+        path_params: { payout_id: po_pending }
+        note: only an approved payout is paid — 409 ledger.invalid_state
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 409
+
+  adminMarkPayoutFailed:
+    method: POST
+    path: /api/v1/admin/payouts/{payout_id}/mark-failed
+    action: ledger.payout.mark_failed
+    config: { ledger_seed: true }
+    path_params: { payout_id: po_approved }
+    body: bodies/ledger/mark_failed.json
+    note: the transfer failed — the line is payable again
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 200
+
+  adminCancelPayout:
+    method: POST
+    path: /api/v1/admin/payouts/{payout_id}/cancel
+    action: ledger.payout.cancel
+    config: { ledger_seed: true }
+    path_params: { payout_id: po_pending }
+    body: bodies/ledger/cancel.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 200
+    variants:
+      - name: paid
+        path_params: { payout_id: po_paid }
+        note: a paid payout is final — 409 ledger.invalid_state
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 409

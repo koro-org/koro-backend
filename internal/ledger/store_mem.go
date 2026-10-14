@@ -15,14 +15,16 @@ import (
 // MemStore is the in-memory Store of service and matrix tests (05 §13.2).
 // It emulates what the database enforces (the idempotency key, the balance
 // and payee rules of ledger_txn_balanced); a lost transaction cannot be
-// rolled back (db.NopTx). Payouts are not modelled: MarkPayoutPaid records
-// the paid payouts the integrity check compares with the ledger.
+// rolled back (db.NopTx). It is also the in-memory PayoutStore
+// (store_mem_payout.go); MarkPayoutPaid records a bare paid payout for the
+// integrity check's tests.
 type MemStore struct {
 	now func() time.Time
 
 	mu      sync.Mutex
 	txns    []Posted
-	payouts map[uuid.UUID]memPayout // paid payouts
+	payouts map[uuid.UUID]memPayout // paid payouts recorded by MarkPayoutPaid
+	po      *memPayouts             // the PayoutStore rows (BE-044)
 }
 
 type memPayout struct {
@@ -217,7 +219,8 @@ func (s *MemStore) PayoutMismatches(_ context.Context, limit int) ([]PayoutMisma
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []PayoutMismatch
-	for id, po := range s.payouts {
+	paid := s.paidPayouts()
+	for id, po := range paid {
 		i := slices.IndexFunc(s.txns, func(p Posted) bool {
 			return p.Kind == KindPayoutPaid && p.RefType == RefPayout && p.RefID == id
 		})
@@ -239,7 +242,7 @@ func (s *MemStore) PayoutMismatches(_ context.Context, limit int) ([]PayoutMisma
 		}
 	}
 	for _, p := range s.txns {
-		if _, paid := s.payouts[p.RefID]; p.Kind == KindPayoutPaid && !paid {
+		if _, ok := paid[p.RefID]; p.Kind == KindPayoutPaid && !ok {
 			txn := p.ID
 			out = append(out, PayoutMismatch{PayoutID: p.RefID, TransactionID: &txn, Problem: MismatchNotPaid})
 		}

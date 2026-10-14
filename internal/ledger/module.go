@@ -36,6 +36,23 @@
 // Templates (templates.go) build the model A transactions of 02 §21.3 from
 // the frozen amounts of the order lines; models B and C are skeletons until
 // T-11 is decided.
+//
+// Payouts (BE-044; 02 §21.4–5, 03 §6.1, 04 §2.17, §C.5): finance admin A
+// takes the payee's payable lines (orders.PayableLines: paid, fulfilled,
+// payout hold elapsed, not refunded; never model C; minus the lines of a
+// live payout) into a pending payout, freezing the IBAN and holder of the
+// payee's approved account on it (Idempotency-Key; the ledger must owe at
+// least the open payouts plus this one). Finance admin B ≠ A approves it
+// with re-authentication (authz four eyes + payouts_four_eyes_chk; the
+// frozen account must still be the approved one). After the EFT at the
+// bank any finance admin marks it paid with the receipt (payout_receipt)
+// and the bank reference: payout_paid, orders.MarkLinesPaidOut, the
+// receipt's attachment, the paid state and payout.paid commit in one
+// transaction (01 §6.3); the deferred payout_items_sum re-checks the sums
+// and the lines at COMMIT. A failed transfer (approved only) or a
+// cancellation (before paid) deletes the items: the lines are payable
+// again. The seller org reads its payouts with the IBAN masked; an open
+// payout blocks closing the org (hooks.openCommerce).
 package ledger
 
 import (
@@ -48,6 +65,8 @@ import (
 	"koro/internal/authz"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
+	"koro/internal/platform/idempotency"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/privacy"
 	"koro/internal/platform/queue"
 )
@@ -66,7 +85,7 @@ type Poster interface {
 }
 
 // Balances is the cross-module read contract (01 §4.19). The HTTP endpoint
-// getPayeeBalance comes with BE-044 (payee ∈ org needs parties).
+// is getPayeeBalance (PayoutService, BE-044: payee ∈ org through parties).
 type Balances interface {
 	// PayeeBalance returns what Koro owes the payee now (kuruş, ≥ 0 in a
 	// healthy ledger), read in one statement. Inside a transaction it
@@ -86,9 +105,19 @@ type Service interface {
 	Reverse(ctx context.Context, txnID uuid.UUID, memo string) (uuid.UUID, error)
 	// ListTransactions is adminListLedgerTransactions (ledger.journal.list).
 	ListTransactions(ctx context.Context, a authz.Actor, q JournalQuery) (JournalPage, error)
+	// PayoutService is the payee balance and the payout flow (BE-044).
+	PayoutService
 }
 
-// Deps are the dependencies of the ledger module; all but Alarm are required.
+// Deps are the dependencies of the ledger module. Store, Tx, Clock and Log
+// are required; Alarm is optional.
+//
+// The payout flow (BE-044) is on when Payouts is set: then Orders, Payees,
+// Parties, Orgs, Files, Audit, Outbox and Idempotency are required too
+// (New fails otherwise). Without Payouts (a poster-only ledger, e.g. a
+// consumer's tests) the balance and payout operations answer 503. Reauth
+// nil → the approval is 503 (fail closed); Sender or Staff nil → the
+// notice task fails and is retried.
 type Deps struct {
 	Store Store
 	Tx    db.TxManager
@@ -98,6 +127,20 @@ type Deps struct {
 	// the check itself fails). nil → an ERROR log with alarm=true only,
 	// until GlitchTip/finance paging is wired (BE-058).
 	Alarm func(ctx context.Context, f Finding)
+
+	// Payout flow (BE-044).
+	Payouts     PayoutStore
+	Orders      Orders
+	Payees      Payees
+	Parties     Parties
+	Orgs        Orgs
+	Files       Files
+	Audit       AuditLogger
+	Outbox      outbox.Writer       // payout.approved/paid (O) in the transaction, payout.created (A) after it
+	Idempotency *idempotency.Keeper // Idempotency-Key of adminCreatePayout (required) and the other POSTs (06 H-5)
+	Reauth      Reauthenticator
+	Sender      Sender
+	Staff       Staff
 }
 
 func (d Deps) validate() error {
@@ -112,6 +155,21 @@ func (d Deps) validate() error {
 			errs = append(errs, fmt.Errorf("ledger.Deps.%s is missing", c.name))
 		}
 	}
+	if d.Payouts == nil {
+		return errors.Join(errs...)
+	}
+	for _, c := range []struct {
+		name string
+		ok   bool
+	}{
+		{"Orders", d.Orders != nil}, {"Payees", d.Payees != nil}, {"Parties", d.Parties != nil}, {"Orgs", d.Orgs != nil},
+		{"Files", d.Files != nil}, {"Audit", d.Audit != nil}, {"Outbox", d.Outbox != nil},
+		{"Idempotency", d.Idempotency != nil},
+	} {
+		if !c.ok {
+			errs = append(errs, fmt.Errorf("ledger.Deps.%s is missing (the payout flow needs it)", c.name))
+		}
+	}
 	return errors.Join(errs...)
 }
 
@@ -121,6 +179,9 @@ type Module struct {
 	// Sweeper ends the retention of the financial records (10 years from
 	// the end of the calendar year; 06 H-57, BE-057).
 	Sweeper privacy.RetentionSweeper
+	// Privacy is the KVKK provider of the payouts (the finance admins who
+	// created, approved or paid them; financial records, retained).
+	Privacy privacy.Provider
 
 	svc *service
 }
@@ -132,7 +193,17 @@ func New(d Deps) (Module, error) {
 		return Module{}, err
 	}
 	s := &service{d: d}
-	return Module{Service: s, Sweeper: sweeper{s: s}, svc: s}, nil
+	return Module{Service: s, Sweeper: sweeper{s: s}, Privacy: privacyProvider{s: s}, svc: s}, nil
+}
+
+// OpenCommerce is the closeOrg check of hooks.openCommerce (BE-044): a
+// seller org with a payout waiting for approval or for its transfer cannot
+// be closed. Without the payout flow nothing is open.
+func (m Module) OpenCommerce(ctx context.Context, orgID uuid.UUID) (bool, error) {
+	if m.svc.d.Payouts == nil {
+		return false, nil
+	}
+	return m.svc.d.Payouts.HasOpenPayouts(ctx, orgID)
 }
 
 // Jobs returns the scheduled jobs of ledger (01 §7): ledger.integrity_check.

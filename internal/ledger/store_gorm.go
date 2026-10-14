@@ -271,7 +271,7 @@ func (s gormStore) LateEntries(ctx context.Context, limit int) ([]LateEntry, err
 }
 
 // PayoutMismatches implements Store. payouts belongs to the ledger module
-// (02 §21.4); the payout flow itself comes with BE-044.
+// (02 §21.4; the payout flow, BE-044, writes it: PayoutStore).
 //
 // cross-org: a platform job over every payout.
 func (s gormStore) PayoutMismatches(ctx context.Context, limit int) ([]PayoutMismatch, error) {

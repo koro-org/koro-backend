@@ -19,9 +19,9 @@ import (
 
 // Register adds the payments operations of BE-041 (04 §2.16: collection
 // accounts, incoming transfers, the match; 06 H-56 / T-79 / T-228: the
-// three return steps; T-18: the model C direct confirmation) to api. svc
-// may be nil (`koro openapi`): handlers only touch it when called. The
-// payment and refund endpoints come with BE-043.
+// three return steps; T-18: the model C direct confirmation) and of BE-043
+// (the payments, the refunds and the refunds due; handler_refunds.go) to
+// api. svc may be nil (`koro openapi`): handlers only touch it when called.
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
 
@@ -145,6 +145,8 @@ func Register(api huma.API, svc Service) {
 			"order is paid. Only a model C order awaiting payment (409 orders.invalid_state) whose fee is in (409 " +
 			"orders.order_not_paid). The money never reaches Koro's account; the ledger posts nothing.",
 	}, op.Meta{Action: string(authz.PaymentsTransferMatch), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyRequired}, h.confirmDirect)
+
+	registerRefunds(api, h)
 }
 
 // reg registers one payments operation with its Koro metadata.

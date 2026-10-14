@@ -1,0 +1,1 @@
+{"payment_id": "{{fixture:pay_a}}", "order_line_id": "{{fixture:ln_a_paid}}", "amount": 100000, "reason": "goodwill", "reason_note": "Matris iadesi", "method": "bank_eft", "target_iban": "TR100006200000000006295938"}

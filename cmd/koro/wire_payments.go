@@ -25,8 +25,10 @@ import (
 //	          the idempotency keeper join: the capture is one transaction)
 //
 // Consumed: c.orders.orders (ForPayment, FindByReference, ApplyPayment,
-// ConfirmDirectPayment, GetLine; 01 §6.3 same transaction), c.ledger.svc
-// (Poster: payment_received, order_allocated), c.audit.svc,
+// ConfirmDirectPayment, GetLine, ApplyRefund, RefundsDue; 01 §6.3 same
+// transaction), c.ledger.svc (Poster: payment_received, order_allocated,
+// refund_completed), c.ledger.mod (BE-043: the live payouts of a line and
+// the shares refunds took back from it, 06 H-59), c.audit.svc,
 // c.parties.svc (Koro's own party), c.files.svc (receipts and the direct
 // payment evidence), c.identity.svc (re-authentication, notice
 // addresses), identity's store (the platform and finance admins in effect,
@@ -72,10 +74,11 @@ func (w *paymentsWiring) build(c *container) error {
 	case c.ledger.svc == nil:
 		return errors.New("payments: ledger is not built")
 	}
+	ledgerLines := c.ledger.mod
 	d := payments.Deps{
 		Store: store, Tx: tx, Audit: c.audit.svc, Idempotency: c.infra.idempotency, Orders: c.orders.orders, Ledger: c.ledger.svc,
 		Outbox: c.infra.outbox, Queue: c.infra.queue, Clock: c.infra.clock, Log: c.infra.log.With("module", "payments"),
-		Sender: paymentsSender{c: c}, Staff: paymentsStaff{c: c},
+		Sender: paymentsSender{c: c}, Staff: paymentsStaff{c: c}, LedgerLines: ledgerLines,
 	}
 	if c.parties.svc != nil {
 		d.Parties = c.parties.svc
@@ -141,6 +144,7 @@ func (s paymentsStaff) PlatformAdmins(ctx context.Context) ([]uuid.UUID, error) 
 
 // tasks: collection_account.approved → payments.notify_collection_account_approved
 // (critical), payment.captured → payments.notify_payment_captured,
+// payment.refunded → payments.notify_payment_refunded (BE-043),
 // incoming_transfer.unmatched → payments.notify_unmatched_transfers (01
 // §6.2); the plain task payments.notify_collection_account_changed (A); the
 // job payments.unmatched_digest (01 §7: working days 09:30).
@@ -156,5 +160,7 @@ func (w *paymentsWiring) tasks(c *container) {
 
 // routes: the 15 payments operations of BE-041 (04 §2.16's 12, the return's
 // request and second eye (06 H-56, T-79, T-228) and the model C direct
-// confirmation); w.svc is nil under `koro openapi`, which Register tolerates.
+// confirmation) and the 8 of BE-043 (04 §2.16's 7 payments and refunds and
+// the refunds due); w.svc is nil under `koro openapi`, which Register
+// tolerates.
 func (w *paymentsWiring) routes(c *container, api huma.API) { payments.Register(api, w.svc) }

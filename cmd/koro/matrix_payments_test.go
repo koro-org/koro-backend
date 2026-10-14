@@ -31,6 +31,10 @@ var matrixValueDate = civil.Date{Year: 2026, Month: time.October, Day: 2}
 //	kind file      an unattached, active upload of uploaded_by (purpose transfer_receipt or refund_receipt)
 //	kind order_c   a model C order of org (party, placed_by) awaiting payment whose fee is collected, one
 //	               line of club_a's payee_club_a; seeded into orders' store under orders_seed: true only
+//	kind payment   the captured bank-transfer payment of a matched transfer (its amount, its order),
+//	               captured by captured_by (BE-043)
+//	kind refund    a refund of payment (its order; line: an order line fixture) of amount for reason,
+//	               requested by requested_by; status approved: approved by approved_by (BE-043)
 func (w *paymentsWiring) matrixFixtures(fx *matrixFixtures) error {
 	ctx := context.Background()
 	mem, ok := w.built.(*payments.MemStore)
@@ -40,7 +44,7 @@ func (w *paymentsWiring) matrixFixtures(fx *matrixFixtures) error {
 	if w.late == nil {
 		return errors.New("payments wiring was not built")
 	}
-	rank := map[string]int{"file": 0, "account": 0, "transfer": 1, "order_c": 2}
+	rank := map[string]int{"file": 0, "account": 0, "transfer": 1, "order_c": 2, "payment": 2, "refund": 3}
 	all := fx.Of("payments")
 	slices.SortStableFunc(all, func(a, b fixture) int { return cmp.Compare(rank[a.Kind], rank[b.Kind]) })
 	for _, f := range all {
@@ -58,6 +62,10 @@ func (w *paymentsWiring) matrixFixtures(fx *matrixFixtures) error {
 			ferr = matrixTransfer(ctx, fx, mem, f, id)
 		case "order_c":
 			ferr = w.matrixOrderC(ctx, fx, f, id)
+		case "payment":
+			ferr = matrixPayment(ctx, fx, mem, f, id)
+		case "refund":
+			ferr = matrixRefund(fx, mem, f, id)
 		default:
 			ferr = fmt.Errorf("unknown kind %q", f.Kind)
 		}
@@ -215,4 +223,66 @@ func (w *paymentsWiring) matrixOrderC(ctx context.Context, fx *matrixFixtures, f
 	o.SubtotalAmount, o.VATAmount, o.BuyerFeeAmount, o.TotalAmount, o.PayableAmount = 1_000_000, 200_000, 120_000, 1_320_000, 1_320_000
 	o.KoroCollectAmount, o.DirectToPayeeAmount, o.PaidAmount = 120_000, 1_200_000, 120_000
 	return mem.InsertOrder(ctx, o, []orders.Line{l})
+}
+
+func matrixPayment(ctx context.Context, fx *matrixFixtures, mem *payments.MemStore, f fixture, id uuid.UUID) error {
+	trID, err := fx.Ref(f, "transfer")
+	if err != nil {
+		return err
+	}
+	tr, err := mem.GetTransfer(ctx, trID, false)
+	if err != nil {
+		return err
+	}
+	org, err := fx.Ref(f, "org")
+	if err != nil {
+		return err
+	}
+	by, err := fx.Ref(f, "captured_by")
+	if err != nil {
+		return err
+	}
+	if tr.MatchedOrderID == nil {
+		return errors.New("the transfer is not matched")
+	}
+	t := matrixOrgTime.Add(24 * time.Hour)
+	return mem.InsertPayment(ctx, payments.Payment{ID: id, OrderID: *tr.MatchedOrderID, OrgID: org, Provider: payments.ProviderBankTransfer,
+		IncomingTransferID: &tr.ID, Amount: tr.Amount, Currency: payments.Currency, Status: payments.PaymentCaptured, CapturedAt: &t,
+		CapturedBy: &by, CreatedAt: t})
+}
+
+func matrixRefund(fx *matrixFixtures, mem *payments.MemStore, f fixture, id uuid.UUID) error {
+	pay, err := fx.Ref(f, "payment")
+	if err != nil {
+		return err
+	}
+	order, err := fx.Ref(f, "order")
+	if err != nil {
+		return err
+	}
+	by, err := fx.Ref(f, "requested_by")
+	if err != nil {
+		return err
+	}
+	amount, _ := f.Fields["amount"].(int)
+	reason, _ := f.Fields["reason"].(string)
+	target := "TR100006200000000006295938"
+	t := matrixOrgTime.Add(36 * time.Hour)
+	r := payments.Refund{ID: id, PaymentID: pay, OrderID: order, Amount: int64(amount), Reason: reason,
+		Status: payments.RefundStatusRequested, RequestedBy: by, Method: payments.RefundMethodBankEFT, TargetIBAN: &target, CreatedAt: t}
+	if _, ok := f.Fields["line"]; ok {
+		l, err := fx.Ref(f, "line")
+		if err != nil {
+			return err
+		}
+		r.OrderLineID = &l
+	}
+	if status, _ := f.Fields["status"].(string); payments.RefundStatus(status) == payments.RefundStatusApproved {
+		a, err := fx.Ref(f, "approved_by")
+		if err != nil {
+			return err
+		}
+		r.Status, r.ApprovedBy, r.ApprovedAt = payments.RefundStatusApproved, &a, &t
+	}
+	return mem.SeedRefund(r)
 }

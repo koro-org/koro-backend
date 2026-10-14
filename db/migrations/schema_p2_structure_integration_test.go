@@ -375,9 +375,9 @@ func TestSchema_P2SchemaQueryIndexes(t *testing.T) {
 	}
 }
 
-// TestSchema_P2SeedLedgerAccounts (02 §21.1): the twelve accounts with their
-// kinds; seller_payable is the only per_payee account; re-running the seed
-// changes nothing.
+// TestSchema_P2SeedLedgerAccounts (02 §21.1): the thirteen accounts with
+// their kinds (payee_receivable: 06 H-59, BE-043); seller_payable is the only
+// per_payee account; re-running the seed changes nothing.
 func TestSchema_P2SeedLedgerAccounts(t *testing.T) {
 	t.Parallel()
 	w := newP1aWorld(t)
@@ -387,6 +387,7 @@ func TestSchema_P2SeedLedgerAccounts(t *testing.T) {
 		"buyer_advances liability false true",
 		"cost_of_services expense false true",
 		"koro_bank asset false true",
+		"payee_receivable asset false true",
 		"platform_commission_revenue revenue false true",
 		"platform_sales_revenue revenue false true",
 		"psp_clearing asset false true",
@@ -462,8 +463,8 @@ func TestMigrations_P2SchemaUpDownUp(t *testing.T) {
 		}
 		return n
 	}
-	if n := accounts(); n != 12 {
-		t.Errorf("ledger accounts after the first up = %d, want 12", n)
+	if n := accounts(); n != 13 {
+		t.Errorf("ledger accounts after the first up = %d, want 13", n)
 	}
 	if err := m.Down(ctx, 120); err != nil {
 		t.Fatalf("down 120: %v", err)
@@ -477,7 +478,7 @@ func TestMigrations_P2SchemaUpDownUp(t *testing.T) {
 	if got := fingerprint(t, conn); got != first {
 		t.Fatalf("second up differs from the first:\n%s", diff(first, got))
 	}
-	if n := accounts(); n != 12 {
-		t.Errorf("ledger accounts after the second up = %d, want 12", n)
+	if n := accounts(); n != 13 {
+		t.Errorf("ledger accounts after the second up = %d, want 13", n)
 	}
 }

@@ -139,6 +139,12 @@ func pgContractWorld(t *testing.T, d *db.DB) contractWorld {
 	return contractWorld{
 		user:  func(t *testing.T) uuid.UUID { return pgUser(t, d) },
 		party: party,
+		file: func(t *testing.T) uuid.UUID {
+			fid := uuid.NewV7()
+			pgExec(t, d, `INSERT INTO files (id, purpose, bucket, storage_key, declared_mime) VALUES ($1, 'refund_receipt', 'koro-files-dev', $2, 'application/pdf')`,
+				fid, "refund_receipt/2026/10/"+fid.String())
+			return fid
+		},
 		order: func(t *testing.T) contractOrder {
 			e := &env{clk: clock.NewFake(t0), b: backend{tx: d.Tx, booth: booth}, ordStore: orders.NewGormStore(d.ORM)}
 			p := e.order(t, orderSpec{})

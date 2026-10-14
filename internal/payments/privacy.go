@@ -10,14 +10,15 @@ import (
 
 // retainedReason explains why Erase keeps what it finds (02 §20: transfers
 // and payments are financial records, "silinmez; süre sonunda hard delete").
-const retainedReason = "incoming bank transfers and payments are financial records kept for 10 years (financial_records; " +
-	"tax and commercial law): they are neither deleted nor anonymised on account erasure; the staff references " +
-	"(entered_by, matched_by, return_requested_by, return_approved_by, captured_by) stay as references to the " +
-	"anonymised account and the rows are destroyed when the retention period ends"
+const retainedReason = "incoming bank transfers, payments and refunds are financial records kept for 10 years " +
+	"(financial_records; tax and commercial law): they are neither deleted nor anonymised on account erasure; the staff " +
+	"references (entered_by, matched_by, return_requested_by, return_approved_by, captured_by, requested_by, approved_by, " +
+	"rejected_by) stay as references to the anonymised account and the rows are destroyed when the retention period ends"
 
 // privacyProvider is the KVKK provider of payments (01 §3.3). The user
 // references of payments are staff actions: who recorded, matched or
-// handled the return of a transfer, who captured a payment by hand. Export
+// handled the return of a transfer, who captured a payment by hand, who
+// requested, approved or rejected a refund (BE-043). Export
 // lists them with IDs, amounts and states (never a sender's name or IBAN:
 // the sender of a transfer is not linked to an account; a request from a
 // sender who is not a user is answered by the DPO from the rows by hand);
@@ -40,7 +41,11 @@ func (p privacyProvider) Export(ctx context.Context, userID uuid.UUID) (privacy.
 	if err != nil {
 		return privacy.ExportSection{}, err
 	}
-	out := privacy.ExportSection{Module: "payments", Items: make([]map[string]any, 0, len(ts)+len(ps))}
+	rs, err := p.s.d.Store.RefundsOfUser(ctx, userID)
+	if err != nil {
+		return privacy.ExportSection{}, err
+	}
+	out := privacy.ExportSection{Module: "payments", Items: make([]map[string]any, 0, len(ts)+len(ps)+len(rs))}
 	is := func(id *uuid.UUID) bool { return id != nil && *id == userID }
 	for _, t := range ts {
 		var roles []string
@@ -70,6 +75,23 @@ func (p privacyProvider) Export(ctx context.Context, userID uuid.UUID) (privacy.
 		}
 		out.Items = append(out.Items, item)
 	}
+	for _, r := range rs {
+		var roles []string
+		if r.RequestedBy == userID {
+			roles = append(roles, "requested")
+		}
+		if is(r.ApprovedBy) {
+			roles = append(roles, "approved")
+		}
+		if is(r.RejectedBy) {
+			roles = append(roles, "rejected")
+		}
+		out.Items = append(out.Items, map[string]any{
+			"record": "refund", "refund_id": r.ID.String(), "payment_id": r.PaymentID.String(), "roles": roles,
+			"status": string(r.Status), "amount": r.Amount, "currency": Currency, "reason": r.Reason,
+			"requested_at": r.CreatedAt.UTC().Format(time.RFC3339),
+		})
+	}
 	return out, nil
 }
 
@@ -84,7 +106,11 @@ func (p privacyProvider) Erase(ctx context.Context, userID uuid.UUID) (privacy.E
 	if err != nil {
 		return privacy.EraseResult{}, err
 	}
-	res := privacy.EraseResult{Module: "payments", Retained: len(ts) + len(ps)}
+	rs, err := p.s.d.Store.RefundsOfUser(ctx, userID)
+	if err != nil {
+		return privacy.EraseResult{}, err
+	}
+	res := privacy.EraseResult{Module: "payments", Retained: len(ts) + len(ps) + len(rs)}
 	if res.Retained > 0 {
 		res.RetainedReason = retainedReason
 	}

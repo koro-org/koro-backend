@@ -7,6 +7,11 @@
 # upload of uploaded_by (purpose transfer_receipt or refund_receipt). ord_c_direct is a model C order of
 # company_a whose fee Koro has collected (it waits for the direct payment confirmation); like orders' fixtures
 # it is seeded only under the matrix config orders_seed: true.
+# BE-043: pay_a is the captured payment of tr_matched (1,250,000 kuruş for ord_a_paid's 1,200,000: 50,000 is an
+# overpayment); refunds draw from it: ref_requested (requested by the helper finance_admin_2, finance_admin
+# decides), ref_requested_own (requested by finance_admin itself) and ref_approved (requested by the helper,
+# approved by finance_admin: any finance admin completes it), all overpayment refunds of 10,000. file_refund_receipt
+# is the EFT receipt of a refund.
 version: 1
 fixtures:
   coll_default: { kind: account, status: active, default: true, iban: TR330006100519786457841326, created_by: finance_admin_2, approved_by: platform_admin_2 }
@@ -16,7 +21,7 @@ fixtures:
   coll_pending_fin2: { kind: account, status: pending_approval, iban: TR680006400000000009876543, created_by: finance_admin_2 }
   tr_unmatched: { kind: transfer, account: coll_default, amount: 1200000, order: ord_a_unpaid, entered_by: finance_admin_2, sender_iban: TR100006200000000006295938 }
   tr_unmatched_b: { kind: transfer, account: coll_default, amount: 5000, entered_by: finance_admin_2, sender_iban: TR100006200000000006295938 }
-  tr_matched: { kind: transfer, account: coll_default, amount: 1200000, status: matched, matched_order: ord_a_paid, matched_by: finance_admin_2, entered_by: finance_admin_2 }
+  tr_matched: { kind: transfer, account: coll_default, amount: 1250000, status: matched, matched_order: ord_a_paid, matched_by: finance_admin_2, entered_by: finance_admin_2 }
   # tr_return_requested: requested by the helper (finance_admin decides); tr_return_own: by finance_admin itself.
   tr_return_requested: { kind: transfer, account: coll_default, amount: 7000, status: return_requested, requested_by: finance_admin_2, entered_by: finance_admin_2, sender_iban: TR100006200000000006295938 }
   tr_return_own: { kind: transfer, account: coll_default, amount: 8000, status: return_requested, requested_by: finance_admin, entered_by: finance_admin_2, sender_iban: TR100006200000000006295938 }
@@ -25,3 +30,8 @@ fixtures:
   file_return_receipt: { kind: file, purpose: refund_receipt, uploaded_by: finance_admin }
   file_direct_evidence: { kind: file, purpose: transfer_receipt, uploaded_by: finance_admin }
   ord_c_direct: { kind: order_c, org: company_a, party: party_buyer_a, placed_by: company_admin }
+  pay_a: { kind: payment, transfer: tr_matched, org: company_a, captured_by: finance_admin_2 }
+  ref_requested: { kind: refund, payment: pay_a, order: ord_a_paid, amount: 10000, reason: overpayment, requested_by: finance_admin_2 }
+  ref_requested_own: { kind: refund, payment: pay_a, order: ord_a_paid, amount: 10000, reason: overpayment, requested_by: finance_admin }
+  ref_approved: { kind: refund, payment: pay_a, order: ord_a_paid, amount: 10000, reason: overpayment, status: approved, requested_by: finance_admin_2, approved_by: finance_admin }
+  file_refund_receipt: { kind: file, purpose: refund_receipt, uploaded_by: finance_admin }

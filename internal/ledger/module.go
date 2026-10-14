@@ -206,6 +206,24 @@ func (m Module) OpenCommerce(ctx context.Context, orgID uuid.UUID) (bool, error)
 	return m.svc.d.Payouts.HasOpenPayouts(ctx, orgID)
 }
 
+// LinesInPayouts is payments' refund check (BE-043, 06 H-59): which of the
+// lines are items of a live payout (pending_approval, approved or paid),
+// with the payout's ID. Without the payout flow there are none.
+func (m Module) LinesInPayouts(ctx context.Context, lineIDs []uuid.UUID) (map[uuid.UUID]uuid.UUID, error) {
+	if m.svc.d.Payouts == nil {
+		return map[uuid.UUID]uuid.UUID{}, nil
+	}
+	return m.svc.d.Payouts.LinesInPayouts(ctx, lineIDs)
+}
+
+// RefundedShares returns what the completed refunds took back from an order
+// line so far, per share (BE-043: a partial refund is split against what is
+// left of the line, so the last one takes the exact remainder). It reads in
+// the transaction carried by ctx.
+func (m Module) RefundedShares(ctx context.Context, lineID uuid.UUID) (LineShares, error) {
+	return m.svc.d.Store.RefundedShares(ctx, lineID)
+}
+
 // Jobs returns the scheduled jobs of ledger (01 §7): ledger.integrity_check.
 func (m Module) Jobs() []queue.Job { return []queue.Job{m.svc.integrityJob()} }
 

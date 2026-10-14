@@ -1,6 +1,7 @@
 package payments
 
 import (
+	"slices"
 	"time"
 	"uuid"
 
@@ -236,33 +237,108 @@ type Split struct {
 // TableName implements gorm's Tabler.
 func (Split) TableName() string { return "payment_splits" }
 
-// ---- refunds (02 §20.5; 000108) — BE-041 opens overpayment refunds only
+// ---- refunds (02 §20.5; 000108)
 
-// Refund is the part of a refunds row this ticket writes: the request of an
-// overpayment refund opened by a match (03 k27, T-14). Approval, the EFT and
-// the receipt are BE-043's (four eyes).
+// RefundStatus is refunds.status.
+type RefundStatus string
+
+// Refund statuses (03 §6.1 "İade", 06 H-18): a finance or platform admin
+// requests a refund (requested); another finance admin approves it
+// (approved, four eyes, R) or a finance admin rejects it (rejected, final);
+// after the EFT at the bank any finance admin completes it with the receipt
+// and the bank reference (completed, final). processing and failed belong
+// to a bank or PSP integration (phase 2) and are never written yet.
+const (
+	RefundStatusRequested  RefundStatus = "requested"
+	RefundStatusApproved   RefundStatus = "approved"
+	RefundStatusProcessing RefundStatus = "processing"
+	RefundStatusCompleted  RefundStatus = "completed"
+	RefundStatusFailed     RefundStatus = "failed"
+	RefundStatusRejected   RefundStatus = "rejected"
+)
+
+// RefundStatuses lists every status in 02 order.
+func RefundStatuses() []RefundStatus {
+	return []RefundStatus{RefundStatusRequested, RefundStatusApproved, RefundStatusProcessing, RefundStatusCompleted,
+		RefundStatusFailed, RefundStatusRejected}
+}
+
+// Valid reports whether s is a refunds.status value.
+func (s RefundStatus) Valid() bool { return slices.Contains(RefundStatuses(), s) }
+
+// Open reports whether the refund still holds its amount (requested,
+// approved, processing): the limits of a new request count it.
+func (s RefundStatus) Open() bool {
+	return s == RefundStatusRequested || s == RefundStatusApproved || s == RefundStatusProcessing
+}
+
+// Refund reasons (refunds_reason_chk). An overpayment refund gives back the
+// part of a transfer the order did not wait for (03 k27); every other
+// reason gives back money applied to the order.
+const (
+	RefundReasonEventCancelled    = "event_cancelled"
+	RefundReasonOfferingCancelled = "offering_cancelled"
+	RefundReasonNotFulfilled      = "not_fulfilled"
+	RefundReasonDuplicatePayment  = "duplicate_payment"
+	RefundReasonOverpayment       = "overpayment"
+	RefundReasonGoodwill          = "goodwill"
+	RefundReasonOther             = "other"
+)
+
+// RefundReasons lists every reason in 02 order.
+func RefundReasons() []string {
+	return []string{RefundReasonEventCancelled, RefundReasonOfferingCancelled, RefundReasonNotFulfilled,
+		RefundReasonDuplicatePayment, RefundReasonOverpayment, RefundReasonGoodwill, RefundReasonOther}
+}
+
+// Refund methods (refunds_method_chk): a manual bank EFT (MVP); iyzico is
+// phase 2.
+const (
+	RefundMethodBankEFT = "bank_eft"
+	RefundMethodIyzico  = "iyzico"
+)
+
+// Refund is one refunds row: money going back to the buyer. The payment,
+// the order (and line), the amount, the reason, the method, the target IBAN
+// and the requester never change (refunds_frozen); the approver once set
+// (refunds_approval_frozen); a completed refund is final
+// (refunds_completed_frozen). The target IBAN may be a natural person's (an
+// overpayment goes back to the transfer's sender).
 type Refund struct {
-	ID          uuid.UUID  `gorm:"type:uuid;column:id;primaryKey"`
-	PaymentID   uuid.UUID  `gorm:"type:uuid;column:payment_id"`
-	OrderID     uuid.UUID  `gorm:"type:uuid;column:order_id"`
-	OrderLineID *uuid.UUID `gorm:"type:uuid;column:order_line_id"`
-	Amount      int64      `gorm:"column:amount"`
-	Reason      string     `gorm:"column:reason"`
-	ReasonNote  *string    `gorm:"column:reason_note"`
-	Status      string     `gorm:"column:status"`
-	RequestedBy uuid.UUID  `gorm:"type:uuid;column:requested_by"`
-	Method      string     `gorm:"column:method"`
-	TargetIBAN  *string    `gorm:"column:target_iban"`
-	CreatedAt   time.Time  `gorm:"column:created_at"`
-	UpdatedAt   time.Time  `gorm:"column:updated_at"`
+	ID              uuid.UUID    `gorm:"type:uuid;column:id;primaryKey"`
+	PaymentID       uuid.UUID    `gorm:"type:uuid;column:payment_id"`
+	OrderID         uuid.UUID    `gorm:"type:uuid;column:order_id"`
+	OrderLineID     *uuid.UUID   `gorm:"type:uuid;column:order_line_id"`
+	Amount          int64        `gorm:"column:amount"`
+	Reason          string       `gorm:"column:reason"`
+	ReasonNote      *string      `gorm:"column:reason_note"`
+	Status          RefundStatus `gorm:"column:status"`
+	RequestedBy     uuid.UUID    `gorm:"type:uuid;column:requested_by"`
+	ApprovedBy      *uuid.UUID   `gorm:"type:uuid;column:approved_by"`
+	ApprovedAt      *time.Time   `gorm:"column:approved_at"`
+	RejectedBy      *uuid.UUID   `gorm:"type:uuid;column:rejected_by"`
+	RejectedAt      *time.Time   `gorm:"column:rejected_at"`
+	RejectionReason *string      `gorm:"column:rejection_reason"`
+	Method          string       `gorm:"column:method"`
+	TargetIBAN      *string      `gorm:"column:target_iban"`
+	BankReference   *string      `gorm:"column:bank_reference"`
+	ReceiptFileID   *uuid.UUID   `gorm:"type:uuid;column:receipt_file_id"`
+	FailureReason   *string      `gorm:"column:failure_reason"`
+	CompletedAt     *time.Time   `gorm:"column:completed_at"`
+	CreatedAt       time.Time    `gorm:"column:created_at"`
+	UpdatedAt       time.Time    `gorm:"column:updated_at"`
 }
 
 // TableName implements gorm's Tabler.
 func (Refund) TableName() string { return "refunds" }
 
-// Refund values of an overpayment refund (02 §20.5).
-const (
-	RefundReasonOverpayment = "overpayment"
-	RefundStatusRequested   = "requested"
-	RefundMethodBankEFT     = "bank_eft"
-)
+// Overpayment reports a refund of a transfer's unapplied part (no order money).
+func (r Refund) Overpayment() bool { return r.Reason == RefundReasonOverpayment }
+
+// MaskedIBAN is the target IBAN as audit records show it.
+func (r Refund) MaskedIBAN() string {
+	if r.TargetIBAN == nil {
+		return ""
+	}
+	return iban.Mask(*r.TargetIBAN)
+}

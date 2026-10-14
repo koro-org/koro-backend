@@ -262,8 +262,67 @@ func (s gormStore) InsertPayment(ctx context.Context, p Payment) error {
 // GetPayment implements Store.
 //
 // cross-org: the admin surface and in-process callers address it by ID.
-func (s gormStore) GetPayment(ctx context.Context, id uuid.UUID) (Payment, error) {
-	return take[Payment]("get payment", db.Conn(ctx, s.orm).Where("id = ?", id))
+func (s gormStore) GetPayment(ctx context.Context, id uuid.UUID, lock bool) (Payment, error) {
+	return take[Payment]("get payment", lockIf(db.Conn(ctx, s.orm), lock).Where("id = ?", id))
+}
+
+// ListPayments implements Store.
+//
+// cross-org: the admin surface lists every buyer's payments.
+func (s gormStore) ListPayments(ctx context.Context, f PaymentFilter, after *TimeCursor, limit int) ([]Payment, error) {
+	q := db.Conn(ctx, s.orm).Model(&Payment{})
+	if f.OrderID != nil {
+		q = q.Where("order_id = ?", *f.OrderID)
+	}
+	if f.Status != "" {
+		q = q.Where("status = ?", string(f.Status))
+	}
+	if after != nil {
+		q = q.Where("(created_at, id) < ( ?, ?)", after.CreatedAt, after.ID)
+	}
+	var out []Payment
+	if err := q.Order("created_at DESC, id DESC").Limit(limit).Find(&out).Error; err != nil {
+		return nil, fmt.Errorf("payments: list payments: %w", err)
+	}
+	return out, nil
+}
+
+// PaymentsOfOrder implements Store (payments_order_idx).
+//
+// cross-org: the payments of one order the caller resolved.
+func (s gormStore) PaymentsOfOrder(ctx context.Context, orderID uuid.UUID) ([]Payment, error) {
+	var out []Payment
+	if err := db.Conn(ctx, s.orm).Where("order_id = ?", orderID).Order("created_at, id").Find(&out).Error; err != nil {
+		return nil, fmt.Errorf("payments: payments of order: %w", err)
+	}
+	return out, nil
+}
+
+// AddPaymentRefund implements Store: a targeted UPDATE (the frozen columns
+// are never written) guarded by the status and the amount, RETURNING the
+// row; the CHECKs of 000106 stay the last line.
+//
+// cross-org: the payment of a refund the caller resolved.
+func (s gormStore) AddPaymentRefund(ctx context.Context, paymentID uuid.UUID, amount int64) (Payment, error) {
+	var rows []Payment
+	err := db.Conn(ctx, s.orm).Raw(`UPDATE payments SET refunded_amount = refunded_amount + @amount,
+		status = CASE WHEN refunded_amount + @amount = amount THEN 'refunded' ELSE 'partially_refunded' END
+		WHERE id = @id AND status IN ('captured', 'partially_refunded') AND refunded_amount + @amount <= amount
+		RETURNING *`, map[string]any{"id": paymentID, "amount": amount}).Scan(&rows).Error
+	if err != nil {
+		return Payment{}, fmt.Errorf("payments: add payment refund: %w", constraints.Translate(err))
+	}
+	if len(rows) == 0 {
+		p, err := s.GetPayment(ctx, paymentID, false)
+		switch {
+		case err != nil:
+			return Payment{}, err
+		case p.Status != PaymentCaptured && p.Status != PaymentPartiallyRefunded:
+			return Payment{}, ErrInvalidState
+		}
+		return Payment{}, ErrRefundExceedsPaid
+	}
+	return rows[0], nil
 }
 
 // PaymentsCapturedBy implements Store.
@@ -309,4 +368,89 @@ func (s gormStore) InsertRefund(ctx context.Context, r Refund) error {
 		return fmt.Errorf("payments: insert refund: %w", constraints.Translate(err))
 	}
 	return nil
+}
+
+// GetRefund implements Store.
+//
+// cross-org: the admin surface addresses a refund by ID.
+func (s gormStore) GetRefund(ctx context.Context, id uuid.UUID, lock bool) (Refund, error) {
+	return take[Refund]("get refund", lockIf(db.Conn(ctx, s.orm), lock).Where("id = ?", id))
+}
+
+// ListRefunds implements Store.
+//
+// cross-org: the admin surface lists every buyer's refunds.
+func (s gormStore) ListRefunds(ctx context.Context, f RefundFilter, after *TimeCursor, limit int) ([]Refund, error) {
+	q := db.Conn(ctx, s.orm).Model(&Refund{})
+	if f.Status != "" {
+		q = q.Where("status = ?", string(f.Status))
+	}
+	if f.OrderID != nil {
+		q = q.Where("order_id = ?", *f.OrderID)
+	}
+	if f.PaymentID != nil {
+		q = q.Where("payment_id = ?", *f.PaymentID)
+	}
+	if after != nil {
+		q = q.Where("(created_at, id) < ( ?, ?)", after.CreatedAt, after.ID)
+	}
+	var out []Refund
+	if err := q.Order("created_at DESC, id DESC").Limit(limit).Find(&out).Error; err != nil {
+		return nil, fmt.Errorf("payments: list refunds: %w", err)
+	}
+	return out, nil
+}
+
+// RefundsOfOrder implements Store (refunds_order_idx).
+//
+// cross-org: the refunds of one order the caller resolved.
+func (s gormStore) RefundsOfOrder(ctx context.Context, orderID uuid.UUID) ([]Refund, error) {
+	var out []Refund
+	if err := db.Conn(ctx, s.orm).Where("order_id = ?", orderID).Order("created_at, id").Find(&out).Error; err != nil {
+		return nil, fmt.Errorf("payments: refunds of order: %w", err)
+	}
+	return out, nil
+}
+
+// UpdateRefund implements Store: a targeted UPDATE of the running columns
+// (the frozen ones are never written; updated_at is the trigger's),
+// guarded by the current status, RETURNING the row.
+//
+// cross-org: the admin surface addresses a refund by ID.
+func (s gormStore) UpdateRefund(ctx context.Context, next Refund, from RefundStatus) (Refund, error) {
+	var rows []Refund
+	err := db.Conn(ctx, s.orm).Raw(`UPDATE refunds SET
+		status = @status, approved_by = @approved_by, approved_at = @approved_at, rejected_by = @rejected_by,
+		rejected_at = @rejected_at, rejection_reason = @rejection_reason, bank_reference = @bank_reference,
+		receipt_file_id = @receipt_file_id, failure_reason = @failure_reason, completed_at = @completed_at
+		WHERE id = @id AND status = @from
+		RETURNING *`, map[string]any{
+		"id": next.ID, "from": string(from), "status": string(next.Status), "approved_by": next.ApprovedBy,
+		"approved_at": next.ApprovedAt, "rejected_by": next.RejectedBy, "rejected_at": next.RejectedAt,
+		"rejection_reason": next.RejectionReason, "bank_reference": next.BankReference, "receipt_file_id": next.ReceiptFileID,
+		"failure_reason": next.FailureReason, "completed_at": next.CompletedAt,
+	}).Scan(&rows).Error
+	if err != nil {
+		return Refund{}, fmt.Errorf("payments: update refund: %w", constraints.Translate(err))
+	}
+	if len(rows) == 0 {
+		if _, err := s.GetRefund(ctx, next.ID, false); err != nil {
+			return Refund{}, err
+		}
+		return Refund{}, ErrInvalidState
+	}
+	return rows[0], nil
+}
+
+// RefundsOfUser implements Store.
+//
+// cross-org: a user's staff references (KVKK export).
+func (s gormStore) RefundsOfUser(ctx context.Context, userID uuid.UUID) ([]Refund, error) {
+	var out []Refund
+	err := db.Conn(ctx, s.orm).Where("requested_by = @u OR approved_by = @u OR rejected_by = @u", map[string]any{"u": userID}).
+		Order("id").Find(&out).Error
+	if err != nil {
+		return nil, fmt.Errorf("payments: refunds of user: %w", err)
+	}
+	return out, nil
 }

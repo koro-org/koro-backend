@@ -37,6 +37,10 @@ type Store interface {
 	// List returns up to limit transactions matching f with their entries,
 	// newest occurred_at first (then ID), strictly after the cursor.
 	List(ctx context.Context, f JournalFilter, after *JournalCursor, limit int) ([]Posted, error)
+	// RefundedShares sums what the refund_completed transactions took back
+	// from one order line so far, per share (BE-043: the next partial refund
+	// of the line is split against what is left).
+	RefundedShares(ctx context.Context, lineID uuid.UUID) (LineShares, error)
 
 	// Integrity queries (ledger.integrity_check); each returns at most limit rows.
 
@@ -55,6 +59,30 @@ type Store interface {
 	PayoutMismatches(ctx context.Context, limit int) ([]PayoutMismatch, error)
 
 	RetentionStore
+}
+
+// LineShares are the shares of one order line (02 §21.3): the seller part
+// (seller_payable, or payee_receivable after a payout; 06 H-59), Koro's
+// commission and the commission's VAT.
+type LineShares struct {
+	Seller        int64
+	Commission    int64
+	CommissionVAT int64
+}
+
+// Total is the sum of the shares.
+func (s LineShares) Total() int64 { return s.Seller + s.Commission + s.CommissionVAT }
+
+// add counts a refund_completed entry of the line in its share.
+func (s *LineShares) add(a Account, amount int64) {
+	switch a {
+	case AccountSellerPayable, AccountPayeeReceivable:
+		s.Seller += amount
+	case AccountCommissionRevenue:
+		s.Commission += amount
+	case AccountVATOutput:
+		s.CommissionVAT += amount
+	}
 }
 
 // JournalFilter narrows adminListLedgerTransactions (04 §2.17).

@@ -40,6 +40,7 @@ func TestWire_Payments(t *testing.T) {
 	for topic, name := range map[string]string{
 		domainevent.TopicCollectionAccountApproved: payments.NotifyAccountApprovedTaskName,
 		domainevent.TopicPaymentCaptured:           payments.NotifyPaymentCapturedTaskName,
+		domainevent.TopicPaymentRefunded:           payments.NotifyPaymentRefundedTaskName,
 		domainevent.TopicIncomingTransferUnmatched: payments.NotifyUnmatchedTaskName,
 	} {
 		if !slices.ContainsFunc(c.infra.subs.For(topic), func(s outbox.Subscription) bool { return s.Name == name }) {

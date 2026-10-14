@@ -23,7 +23,14 @@ func paymentsTransfer(requester string) authz.Resource {
 	}}
 }
 
-// TestPaymentsPolicy_Matrix pins 03 §5.16 (BE-041's part) for the 18
+// paymentsRefund is a refund requested by requester.
+func paymentsRefund(requester uuid.UUID) authz.Resource {
+	return authz.Resource{Type: authz.TypeRefund, ID: authztest.ID("refund"), Attrs: map[string]string{
+		authz.AttrStatus: "requested", authz.AttrRequestedBy: requester.String(),
+	}}
+}
+
+// TestPaymentsPolicy_Matrix pins 03 §5.16 (BE-041's and BE-043's parts) for the 18
 // personas: the admin surface (403 before reading), the second eye on a
 // collection account created by finance_admin_2 and the return steps (the
 // HTTP matrix, testdata/authz/payments.yaml, checks the same through the API).
@@ -48,6 +55,13 @@ func TestPaymentsPolicy_Matrix(t *testing.T) {
 		{authz.PaymentsTransferIgnore, adminSurface, finOnly},
 		{authz.PaymentsTransferMarkReturned, paymentsTransfer(""), finOnly},
 		{authz.PaymentsTransferMarkReturned, paymentsTransfer(authztest.ID("finance_admin_2").String()), finOnly},
+		{authz.PaymentsPaymentList, adminSurface, staff},
+		{authz.PaymentsPaymentRead, adminSurface, staff},
+		{authz.PaymentsRefundList, adminSurface, staff},
+		{authz.PaymentsRefundCreate, adminSurface, staff},
+		{authz.PaymentsRefundApprove, paymentsRefund(authztest.ID("finance_admin_2")), finOnly},
+		{authz.PaymentsRefundReject, adminSurface, finOnly},
+		{authz.PaymentsRefundComplete, adminSurface, finOnly},
 	}
 	for _, c := range cases {
 		for _, p := range authztest.Personas() {
@@ -90,13 +104,23 @@ func TestPaymentsPolicy_EdgeCases(t *testing.T) {
 	wantErr(t, authz.Can(ctx, fin, authz.PaymentsTransferMatch, paymentsTransfer("")), authz.ErrNotFound, false)
 	wantErr(t, authz.Can(ctx, fin, authz.PaymentsTransferList, paymentsAccount(pad.UserID)), authz.ErrNotFound, false)
 
-	// The payment and refund actions stay default deny until BE-043.
-	for _, act := range []authz.Action{authz.PaymentsPaymentList, authz.PaymentsPaymentRead, authz.PaymentsRefundList,
-		authz.PaymentsRefundCreate, authz.PaymentsRefundApprove, authz.PaymentsRefundReject, authz.PaymentsRefundComplete} {
-		if err := authz.Can(ctx, fin, act, adminSurface); err == nil {
-			t.Errorf("%s: finance_admin allowed before BE-043", act)
-		}
+	// Four eyes on a refund (03 §6.1 "İade"): its requester never approves
+	// it — a platform admin's request included (pad may request, only fin
+	// approves); a refund without requested_by is refused (fail closed); the
+	// approval is never on the admin surface.
+	wantErr(t, authz.Can(ctx, fin, authz.PaymentsRefundApprove, paymentsRefund(fin.UserID)), authz.ErrFourEyes, false)
+	if err := authz.Can(ctx, fin, authz.PaymentsRefundApprove, paymentsRefund(pad.UserID)); err != nil {
+		t.Errorf("finance_admin approving a platform admin's refund: %v", err)
 	}
+	wantErr(t, authz.Can(ctx, pad, authz.PaymentsRefundApprove, paymentsRefund(fin.UserID)), authz.ErrForbidden, false)
+	wantErr(t, authz.Can(ctx, fin, authz.PaymentsRefundApprove, authz.Resource{Type: authz.TypeRefund,
+		Attrs: map[string]string{authz.AttrStatus: "requested", authz.AttrRequestedBy: ""}}), authz.ErrForbidden, true)
+	wantErr(t, authz.Can(ctx, fin, authz.PaymentsRefundApprove, adminSurface), authz.ErrForbidden, true)
+	// The other refund actions are not on the refund resource.
+	wantErr(t, authz.Can(ctx, fin, authz.PaymentsRefundComplete, paymentsRefund(pad.UserID)), authz.ErrNotFound, false)
+	// No system actor moves a refund (03 §3.7).
+	wantErr(t, authz.Can(ctx, authz.SystemActor("payments.unmatched_digest"), authz.PaymentsRefundComplete, adminSurface),
+		authz.ErrForbidden, false)
 
 	// No system actor captures a payment (03 §3.7).
 	wantErr(t, authz.Can(ctx, authz.SystemActor("payments.unmatched_digest"), authz.PaymentsTransferMatch, adminSurface),

@@ -1314,6 +1314,12 @@
     "type": "urn:koro:problem:payments.invalid_state"
   },
   {
+    "code": "payments.line_in_payout",
+    "status": 409,
+    "title": "The order line is in an open payout",
+    "type": "urn:koro:problem:payments.line_in_payout"
+  },
+  {
     "code": "payments.no_active_collection_account",
     "status": 409,
     "title": "No active collection account is configured",

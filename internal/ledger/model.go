@@ -87,6 +87,12 @@ const (
 	AccountCostOfServices    Account = "cost_of_services"
 	AccountPSPFeeExpense     Account = "psp_fee_expense"
 	AccountBankFeeExpense    Account = "bank_fee_expense"
+	// AccountPayeeReceivable is what a payee owes Koro back (06 H-59, T-231):
+	// the seller part of a refund of a line that was already paid out. It
+	// is an asset without payees (the payee rule of ledger_txn_balanced):
+	// every entry names its order line, whose payee is frozen. Collecting it
+	// is manual (finance); a later payout never offsets it automatically.
+	AccountPayeeReceivable Account = "payee_receivable"
 )
 
 // Limits of a transaction.
@@ -128,6 +134,7 @@ var chart = []AccountInfo{
 	{AccountCostOfServices, Expense, false},
 	{AccountPSPFeeExpense, Expense, false},
 	{AccountBankFeeExpense, Expense, false},
+	{AccountPayeeReceivable, Asset, false}, // 06 H-59 (BE-043)
 }
 
 // Chart returns the chart of accounts in seed order.

@@ -51,8 +51,19 @@ type Store interface {
 
 	// InsertPayment writes a captured payment.
 	InsertPayment(ctx context.Context, p Payment) error
-	// GetPayment returns a payment or ErrNotFound.
-	GetPayment(ctx context.Context, id uuid.UUID) (Payment, error)
+	// GetPayment returns a payment (FOR UPDATE when lock) or ErrNotFound.
+	GetPayment(ctx context.Context, id uuid.UUID, lock bool) (Payment, error)
+	// ListPayments returns a page of payments, newest first (created_at
+	// DESC, id DESC), after the cursor row.
+	ListPayments(ctx context.Context, f PaymentFilter, after *TimeCursor, limit int) ([]Payment, error)
+	// PaymentsOfOrder returns the payments of an order, oldest first.
+	PaymentsOfOrder(ctx context.Context, orderID uuid.UUID) ([]Payment, error)
+	// AddPaymentRefund adds a completed refund to the payment: its refunded
+	// amount grows, its status becomes partially_refunded, or refunded once
+	// all of it went back. Only a captured or partially refunded payment
+	// (ErrInvalidState); beyond its amount ErrRefundExceedsPaid
+	// (payments_refunded_limit_chk).
+	AddPaymentRefund(ctx context.Context, paymentID uuid.UUID, amount int64) (Payment, error)
 	// PaymentsCapturedBy returns the payments a user captured by hand (KVKK
 	// export of the staff references).
 	PaymentsCapturedBy(ctx context.Context, userID uuid.UUID) ([]Payment, error)
@@ -60,8 +71,44 @@ type Store interface {
 	InsertSplits(ctx context.Context, ss []Split) error
 	// SplitsOf returns the splits of a payment (the notices of a paid order).
 	SplitsOf(ctx context.Context, paymentID uuid.UUID) ([]Split, error)
-	// InsertRefund writes a refund request (an overpayment's).
+	// InsertRefund writes a refund request (requested).
 	InsertRefund(ctx context.Context, r Refund) error
+	// GetRefund returns a refund (FOR UPDATE when lock) or ErrNotFound.
+	GetRefund(ctx context.Context, id uuid.UUID, lock bool) (Refund, error)
+	// ListRefunds returns a page of refunds, newest first (created_at DESC,
+	// id DESC), after the cursor row.
+	ListRefunds(ctx context.Context, f RefundFilter, after *TimeCursor, limit int) ([]Refund, error)
+	// RefundsOfOrder returns every refund of an order (any status), oldest
+	// first: the limits of a new request and of a completion.
+	RefundsOfOrder(ctx context.Context, orderID uuid.UUID) ([]Refund, error)
+	// UpdateRefund writes the running columns of next (status, approval,
+	// rejection, bank reference, receipt, failure, completion) when the row
+	// is still in status from; otherwise ErrInvalidState (ErrNotFound for a
+	// missing row). The four-eyes CHECK answers authz.ErrFourEyes.
+	UpdateRefund(ctx context.Context, next Refund, from RefundStatus) (Refund, error)
+	// RefundsOfUser returns the refunds a user requested, approved or
+	// rejected (KVKK export of the staff references).
+	RefundsOfUser(ctx context.Context, userID uuid.UUID) ([]Refund, error)
+}
+
+// TimeCursor is the last row of a payments or refunds page (created_at
+// DESC, id DESC).
+type TimeCursor struct {
+	CreatedAt time.Time
+	ID        uuid.UUID
+}
+
+// PaymentFilter narrows ListPayments. Zero fields do not filter.
+type PaymentFilter struct {
+	OrderID *uuid.UUID
+	Status  PaymentStatus
+}
+
+// RefundFilter narrows ListRefunds. Zero fields do not filter.
+type RefundFilter struct {
+	Status    RefundStatus
+	OrderID   *uuid.UUID
+	PaymentID *uuid.UUID
 }
 
 // TransferFilter narrows ListTransfers. Zero fields do not filter.

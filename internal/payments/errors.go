@@ -39,6 +39,16 @@ var (
 	// ErrNothingDue: the order waits for no money from Koro (a model C order
 	// whose fee is paid waits for the direct confirmation only).
 	ErrNothingDue = problem.New(problem.Conflict, "payments.nothing_due", "The order does not wait for a payment to Koro")
+	// ErrLineInPayout: the order line of a refund is in a payout that is
+	// waiting for its approval or its transfer (BE-043, 06 H-59): the
+	// refund waits until the payout is paid (the payee's part is then
+	// claimed back) or cancelled.
+	ErrLineInPayout = problem.New(problem.Conflict, "payments.line_in_payout", "The order line is in an open payout")
+
+	// ErrRefundExceedsPaid is orders' 422 orders.refund_exceeds_paid: the
+	// refund is more than the payment, the order or the line still holds
+	// (requested and approved refunds count; 06 H-52).
+	ErrRefundExceedsPaid = orders.ErrRefundExceedsPaid
 
 	// ErrNoCollectionAccount is orders' 409 payments.no_active_collection_account.
 	ErrNoCollectionAccount = orders.ErrNoCollectionAccount
@@ -53,7 +63,8 @@ var (
 
 // constraints maps the named constraints of 000103–000108 onto module
 // errors (05 §6.6). The four-eyes CHECKs answer like authz (03 §6.1: the
-// database is the second layer of the same rule).
+// database is the second layer of the same rule); a payment refunded
+// beyond its amount is the refund limit's 422.
 var constraints = db.Constraints{
 	"collection_accounts_iban_uq":                    ErrIBANInUse,
 	"collection_accounts_iban_chk":                   ErrIBANInvalid,
@@ -65,6 +76,8 @@ var constraints = db.Constraints{
 	"incoming_bank_transfers_return_four_eyes_chk":   authz.ErrFourEyes,
 	"payments_incoming_transfer_id_uq":               ErrTransferAlreadyMatched,
 	"refunds_target_iban_chk":                        ErrIBANInvalid,
+	"refunds_four_eyes_chk":                          authz.ErrFourEyes,
+	"payments_refunded_limit_chk":                    ErrRefundExceedsPaid,
 }
 
 // fieldErr is a 422 validation_failed with one field error.

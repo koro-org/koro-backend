@@ -23,11 +23,22 @@ package authz
 //	                                     requester when the service passes requested_by (the second
 //	                                     eye's decision); the request and the receipt pass it empty.
 //
-// The payment and refund actions (payments.payment.*, payments.refund.*) stay
-// default deny until BE-043 binds their endpoints. Visibility: the admin
-// surface, a collection account and a transfer are visible to every
-// signed-in user (03 §7.2-3: 403 for an actor without the role, never 404).
-// MFA follows from the role paths (k-mfa: pad, fin).
+// BE-043 adds the payments and the refunds (03 §5.16, §6.1 "İade"):
+//
+//	payments.payment.list / read         admin surface: pad, fin
+//	payments.refund.list                 admin surface: pad, fin (the refunds and the refunds due)
+//	payments.refund.create               admin surface: pad, fin (Idempotency-Key)
+//	payments.refund.approve              on the refund: fin·4 (R is the service's); never its requester
+//	                                     (the core four-eyes table demands requested_by). The
+//	                                     service's "403 before reading" gate is payments.refund.list
+//	                                     on the admin surface (ledger's payout approval pattern).
+//	payments.refund.reject               admin surface: fin (the requester may withdraw it)
+//	payments.refund.complete             admin surface: fin (any finance admin, with the receipt)
+//
+// Visibility: the admin surface, a collection account, a transfer and a
+// refund are visible to every signed-in user with a platform role path
+// (03 §7.2-3: 403 for an actor without the role, never 404). MFA follows
+// from the role paths (k-mfa: pad, fin).
 func paymentsPolicy() Policy {
 	return Policy{
 		Visible: func(a Actor, act Action, r Resource) bool {
@@ -38,6 +49,8 @@ func paymentsPolicy() Policy {
 				return act == PaymentsCollectionAccountApprove && AdminSurfaceVisible(a)
 			case TypeIncomingTransfer:
 				return act == PaymentsTransferMarkReturned && AdminSurfaceVisible(a)
+			case TypeRefund:
+				return act == PaymentsRefundApprove && AdminSurfaceVisible(a)
 			}
 			return false
 		},
@@ -46,9 +59,11 @@ func paymentsPolicy() Policy {
 			switch r.Type {
 			case TypeAdminSurface:
 				switch act {
-				case PaymentsCollectionAccountList, PaymentsCollectionAccountRetire, PaymentsTransferList, PaymentsTransferRead:
+				case PaymentsCollectionAccountList, PaymentsCollectionAccountRetire, PaymentsTransferList, PaymentsTransferRead,
+					PaymentsPaymentList, PaymentsPaymentRead, PaymentsRefundList, PaymentsRefundCreate:
 					return []Grant{pad, fin}
-				case PaymentsCollectionAccountCreate, PaymentsTransferCreate, PaymentsTransferMatch, PaymentsTransferIgnore:
+				case PaymentsCollectionAccountCreate, PaymentsTransferCreate, PaymentsTransferMatch, PaymentsTransferIgnore,
+					PaymentsRefundReject, PaymentsRefundComplete:
 					return []Grant{fin}
 				}
 			case TypeCollectionAccount:
@@ -57,6 +72,11 @@ func paymentsPolicy() Policy {
 				}
 			case TypeIncomingTransfer:
 				if act == PaymentsTransferMarkReturned {
+					return []Grant{fin}
+				}
+			case TypeRefund:
+				if act == PaymentsRefundApprove {
+					// The eyes: the core table refuses the refund's requester.
 					return []Grant{fin}
 				}
 			}

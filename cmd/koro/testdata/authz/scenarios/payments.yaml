@@ -68,3 +68,53 @@ scenarios:
           code: payments.no_active_collection_account }
       - { persona: platform_admin, operation: adminMakeDefaultCollectionAccount, expect: 200 }
       - { persona: company_member, operation: getOrderPaymentInstructions, path_params: { order_id: ord_a_unpaid }, expect: 200 }
+  refund_four_eyes:
+    config: { orders_seed: true }
+    note: >-
+      03 §6.1, §7.7 "4 göz – iade": the finance admin who requests a refund never approves it (403
+      authz.four_eyes_violation); another finance admin approves it once (a second decision is 409); the EFT receipt
+      completes it once (ledger refund_completed from buyer_advances, the payment partially refunded, payment.refunded)
+      and a completed refund neither completes again nor is rejected. The refund is pay_a's overpayment (the matrix
+      ledger holds no allocation of ord_a_paid: a line refund would be 409 ledger.negative_payee_balance there).
+    steps:
+      - { persona: finance_admin, operation: adminCreateRefund, body: bodies/payments/create_refund_overpayment.json, expect: 201,
+          save: { new_refund: refund_id } }
+      - { persona: finance_admin, operation: adminApproveRefund, path_params: { refund_id: new_refund },
+          expect: 403, code: authz.four_eyes_violation }
+      - { persona: finance_admin, operation: adminCompleteRefund, path_params: { refund_id: new_refund },
+          expect: 409, code: payments.invalid_state }
+      - { persona: finance_admin_2, operation: adminApproveRefund, path_params: { refund_id: new_refund }, expect: 200 }
+      - { persona: finance_admin, operation: adminApproveRefund, path_params: { refund_id: new_refund },
+          expect: 403, code: authz.four_eyes_violation }
+      - { persona: finance_admin_2, operation: adminRejectRefund, path_params: { refund_id: new_refund },
+          expect: 409, code: payments.invalid_state }
+      - { persona: finance_admin, operation: adminCompleteRefund, path_params: { refund_id: new_refund }, expect: 200 }
+      - { persona: finance_admin_2, operation: adminCompleteRefund, path_params: { refund_id: new_refund },
+          expect: 409, code: payments.invalid_state }
+      - { persona: finance_admin_2, operation: adminGetPayment, expect: 200 }
+  refund_four_eyes_platform_admin:
+    config: { orders_seed: true }
+    note: >-
+      03 §5.16: a platform admin may request a refund but never approve one (fin·4·R); a finance admin approves the
+      platform admin's request.
+    steps:
+      - { persona: platform_admin, operation: adminCreateRefund, expect: 201, save: { pad_refund: refund_id } }
+      - { persona: platform_admin_2, operation: adminApproveRefund, path_params: { refund_id: pad_refund }, expect: 403 }
+      - { persona: finance_admin, operation: adminApproveRefund, path_params: { refund_id: pad_refund }, expect: 200 }
+  refund_reauth:
+    note: >-
+      03 §6.2 (R): the approval of a refund carries the re-authentication proof — without it 403
+      identity.reauth_required, with a wrong one 403 identity.reauth_failed; nothing changes until it is right.
+    steps:
+      - { persona: finance_admin, operation: adminApproveRefund, body: bodies/payments/approve_refund_no_reauth.json,
+          expect: 403, code: identity.reauth_required }
+      - { persona: finance_admin, operation: adminApproveRefund, body: bodies/payments/approve_refund_wrong_reauth.json,
+          expect: 403, code: identity.reauth_failed }
+      - { persona: finance_admin, operation: adminApproveRefund, expect: 200 }
+  refund_reject_by_requester:
+    note: >-
+      A refund request may be rejected by any finance admin — its requester included (no money moves); a rejected
+      refund is never approved.
+    steps:
+      - { persona: finance_admin_2, operation: adminRejectRefund, expect: 200 }
+      - { persona: finance_admin, operation: adminApproveRefund, expect: 409, code: payments.invalid_state }

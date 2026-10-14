@@ -232,6 +232,24 @@ func TestTemplates_ModelA_Shapes(t *testing.T) {
 		t.Fatalf("RefundCompleted(line) = %+v", rf)
 	}
 
+	// 06 H-59: a paid-out line's seller part is claimed back from the payee
+	// (payee_receivable, naming the line, no payee) instead of
+	// seller_payable; commission and VAT come back as usual.
+	part.PaidOut = true
+	cb := txn(t)(ledger.RefundCompleted(ledger.ModelA, refund, 0, []ledger.RefundLine{part}, t0))
+	if sum(cb.Entries) != 0 || len(cb.Entries) != 4 ||
+		cb.Entries[0].Account != ledger.AccountPayeeReceivable || cb.Entries[0].Amount != 1_080_000 ||
+		cb.Entries[0].OrderLineID == nil || *cb.Entries[0].OrderLineID != part.OrderLineID ||
+		cb.Entries[1].Account != ledger.AccountCommissionRevenue || cb.Entries[2].Account != ledger.AccountVATOutput ||
+		cb.Entries[3] != (ledger.Entry{Account: ledger.AccountKoroBank, Amount: -1_200_000}) {
+		t.Fatalf("RefundCompleted(paid-out line) = %+v", cb)
+	}
+	for _, e := range cb.Entries {
+		if e.PayeeID != nil {
+			t.Fatalf("a clawback entry names a payee: %+v", e)
+		}
+	}
+
 	for _, c := range []struct {
 		name string
 		err  error
@@ -286,8 +304,8 @@ func TestTemplates_SplitRefund_LosesNoKurus(t *testing.T) {
 func TestChart_PerPayeeAccountsAreLiabilities(t *testing.T) {
 	t.Parallel()
 	chart := ledger.Chart()
-	if len(chart) != 12 {
-		t.Fatalf("chart has %d accounts, want the 12 of 000110", len(chart))
+	if len(chart) != 13 {
+		t.Fatalf("chart has %d accounts, want the 13 of 000110", len(chart))
 	}
 	perPayee := 0
 	for _, a := range chart {

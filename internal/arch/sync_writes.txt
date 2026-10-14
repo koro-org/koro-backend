@@ -97,3 +97,10 @@ payments  -> orders.Orders.ConfirmDirectPayment
 # unit goes back and the dispatch row goes before the post row (the composite FK of 06 H-38).
 outreach  -> entitlements.Entitlements.Release
 feed      -> outreach.Targeting.DiscardDispatch
+
+# BE-043 (orchestrator note 2026-10-14; rationale for 01 §6.3 in the BE-043 ticket's doc patch): "İade tamamlama".
+# Completing a refund after its EFT records it on the order (the order's and the line's refunded amounts, the
+# partially_refunded / refunded status, the rights of a fully refunded line revoked) in the transaction that completes
+# the refund, raises the payment's refunded amount, posts refund_completed and writes payment.refunded, so money that
+# left Koro's account is never missing from the order nor an order refunded without its ledger entry.
+payments  -> orders.Orders.ApplyRefund

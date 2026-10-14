@@ -1,12 +1,14 @@
-# Authz matrix of the payments module (03 §5.16, 04 §2.16; BE-041). 15 operations × 18 personas: 04 §2.16's 12, the
-# return's request and second eye (06 H-56, T-79, T-228) and the model C direct confirmation (T-18). Everything is the
-# admin surface (03 §7.2-3): an actor without the role gets 403 before anything is read. Cells: collection accounts
-# list pad, fin; create fin·R; approve pad·4·R, fin·4·R; retire / make-default pad·R, fin·R; transfers list / read pad,
-# fin; create, import, match (k27), ignore and the direct confirmation fin; the three return steps fin·R (k28, four
-# eyes on the second). platform_admin and finance_admin sessions are MFA verified (03 §7.3). Four eyes, R, MFA and the
-# capture's effects are scenarios (scenarios/payments.yaml). Fixtures: fixtures/payments.yaml; orders' ord_a_unpaid /
-# ord_a_paid and payments' ord_c_direct exist only under config orders_seed: true (set by the operations that need
-# them). The matrix app has no idempotency middleware: Idempotency-Key replays are service and PostgreSQL tests.
+# Authz matrix of the payments module (03 §5.16, 04 §2.16; BE-041, BE-043). 23 operations × 18 personas: 04 §2.16's
+# 19, the return's request and second eye (06 H-56, T-79, T-228), the model C direct confirmation (T-18) and the
+# refunds due (BE-043). Everything is the admin surface (03 §7.2-3): an actor without the role gets 403 before
+# anything is read. Cells: collection accounts list pad, fin; create fin·R; approve pad·4·R, fin·4·R; retire /
+# make-default pad·R, fin·R; transfers list / read pad, fin; create, import, match (k27), ignore and the direct
+# confirmation fin; the three return steps fin·R (k28, four eyes on the second); payments list / read pad, fin;
+# refunds list, due list and create pad, fin; approve fin·4·R; reject and complete fin. platform_admin and
+# finance_admin sessions are MFA verified (03 §7.3). Four eyes, R, MFA and the capture's and the refund's effects
+# are scenarios (scenarios/payments.yaml). Fixtures: fixtures/payments.yaml; orders' ord_a_unpaid / ord_a_paid and
+# payments' ord_c_direct exist only under config orders_seed: true (set by the operations that need them). The
+# matrix app has no idempotency middleware: Idempotency-Key replays are service and PostgreSQL tests.
 version: 1
 groups:
   # signed-in users without a platform role.
@@ -377,12 +379,205 @@ operations:
           platform_admin: 403
           finance_admin: 409
 
-pending_actions:
-  # BE-043: payments and refunds (03 §5.16).
-  - payments.payment.list
-  - payments.payment.read
-  - payments.refund.list
-  - payments.refund.create
-  - payments.refund.approve
-  - payments.refund.reject
-  - payments.refund.complete
+  adminListPayments:
+    method: GET
+    path: /api/v1/admin/payments
+    action: payments.payment.list
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: filters
+        query: { order_id: "{{fixture:ord_a_paid}}", status: captured }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+
+  adminGetPayment:
+    method: GET
+    path: /api/v1/admin/payments/{payment_id}
+    action: payments.payment.read
+    config: { orders_seed: true }
+    path_params: { payment_id: pay_a }
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: unknown
+        path_params: { payment_id: "literal:00000000-0000-7000-8000-0000000000b1" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403   # admin surface: 403 before reading (03 §7.2-3)
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404
+
+  adminListRefunds:
+    method: GET
+    path: /api/v1/admin/refunds
+    action: payments.refund.list
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: filters
+        query: { status: requested, payment_id: "{{fixture:pay_a}}" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+
+  adminListRefundsDue:
+    method: GET
+    path: /api/v1/admin/refunds/due
+    action: payments.refund.list
+    config: { orders_seed: true }
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+
+  adminCreateRefund:
+    method: POST
+    path: /api/v1/admin/refunds
+    action: payments.refund.create
+    idempotency: required
+    config: { orders_seed: true }
+    body: bodies/payments/create_refund.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 201     # 03 §5.16: pad and fin request
+      finance_admin: 201
+    variants:
+      - name: overpayment
+        body: bodies/payments/create_refund_overpayment.json
+        note: the 20,000 of pay_a's overpayment the fixture refunds leave
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 201
+          finance_admin: 201
+      - name: exceeds_line
+        body: bodies/payments/create_refund_exceeds.json
+        note: one kuruş more than Koro holds of ln_a_paid — 422 orders.refund_exceeds_paid
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 422
+          finance_admin: 422
+
+  adminApproveRefund:
+    method: POST
+    path: /api/v1/admin/refunds/{refund_id}/approve
+    action: payments.refund.approve
+    path_params: { refund_id: ref_requested }
+    body: bodies/payments/reauth.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403     # 03 §5.16: approve is fin·4·R only
+      finance_admin: 200      # second eye ≠ requester (finance_admin_2)
+    variants:
+      - name: own_request
+        path_params: { refund_id: ref_requested_own }
+        note: four eyes — finance_admin requested this refund (03 §6.1)
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 403
+      - name: approved
+        path_params: { refund_id: ref_approved }
+        note: an approved refund is decided — 409 payments.invalid_state
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 409
+      - name: unknown
+        path_params: { refund_id: "literal:00000000-0000-7000-8000-0000000000b2" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 404     # the gate (refund.list) admits pad; the refund is read first
+          finance_admin: 404
+
+  adminRejectRefund:
+    method: POST
+    path: /api/v1/admin/refunds/{refund_id}/reject
+    action: payments.refund.reject
+    path_params: { refund_id: ref_requested }
+    body: bodies/payments/reject_refund.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403     # 03 §5.16: reject is fin only
+      finance_admin: 200
+    variants:
+      - name: approved
+        path_params: { refund_id: ref_approved }
+        note: only a requested refund is rejected — 409 payments.invalid_state
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 409
+
+  adminCompleteRefund:
+    method: POST
+    path: /api/v1/admin/refunds/{refund_id}/complete
+    action: payments.refund.complete
+    config: { orders_seed: true }
+    path_params: { refund_id: ref_approved }
+    body: bodies/payments/complete_refund.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403     # 03 §5.16: complete is fin only
+      finance_admin: 200
+    variants:
+      - name: not_approved
+        path_params: { refund_id: ref_requested }
+        note: only an approved refund is completed — 409 payments.invalid_state
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 409
+      - name: no_receipt
+        body: bodies/payments/complete_refund_no_receipt.json
+        note: the EFT receipt (a refund_receipt upload) is required — 422 validation_failed
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 422

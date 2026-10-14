@@ -1502,6 +1502,13 @@ components:
       required:
         - stage
       type: object
+    ApproveRefundInputBody:
+      additionalProperties: false
+      properties:
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof (03 §6.2)
+      type: object
     ApproveReturnInputBody:
       additionalProperties: false
       properties:
@@ -2909,6 +2916,22 @@ components:
       required:
         - response_summary
       type: object
+    CompleteRefundInputBody:
+      additionalProperties: false
+      properties:
+        bank_reference:
+          description: The EFT's bank reference
+          maxLength: 100
+          minLength: 1
+          type: string
+        receipt_file_id:
+          description: A refund_receipt upload (required)
+          format: uuid
+          type: string
+      required:
+        - bank_reference
+        - receipt_file_id
+      type: object
     CompleteUploadInputBody:
       additionalProperties: false
       properties:
@@ -2918,6 +2941,112 @@ components:
           type: string
       required:
         - sha256
+      type: object
+    CompletedRefundDTO:
+      additionalProperties: false
+      properties:
+        amount:
+          description: Kuruş
+          format: int64
+          type: integer
+        approved_at:
+          format: date-time
+          type: string
+        approved_by:
+          format: uuid
+          type: string
+        bank_reference:
+          type: string
+        clawback_amount:
+          description: Kuruş claimed back from the payee of a line already paid out (06 H-59)
+          format: int64
+          type: integer
+        completed_at:
+          format: date-time
+          type: string
+        currency:
+          enum:
+            - TRY
+          type: string
+        ledger_transaction_id:
+          description: The refund_completed transaction
+          format: uuid
+          type: string
+        method:
+          enum:
+            - bank_eft
+            - iyzico
+          type: string
+        order_id:
+          format: uuid
+          type: string
+        order_line_id:
+          format: uuid
+          type: string
+        payment_id:
+          format: uuid
+          type: string
+        reason:
+          enum:
+            - event_cancelled
+            - offering_cancelled
+            - not_fulfilled
+            - duplicate_payment
+            - overpayment
+            - goodwill
+            - other
+          type: string
+        reason_note:
+          type: string
+        receipt_file_id:
+          format: uuid
+          type: string
+        refund_id:
+          format: uuid
+          type: string
+        rejected_at:
+          format: date-time
+          type: string
+        rejected_by:
+          format: uuid
+          type: string
+        rejection_reason:
+          type: string
+        requested_at:
+          format: date-time
+          type: string
+        requested_by:
+          format: uuid
+          type: string
+        status:
+          enum:
+            - requested
+            - approved
+            - processing
+            - completed
+            - failed
+            - rejected
+          type: string
+        target_iban:
+          type: string
+        unallocated_amount:
+          description: Kuruş back from buyer_advances (overpayment, unpaid order, Koro's own line)
+          format: int64
+          type: integer
+      required:
+        - ledger_transaction_id
+        - unallocated_amount
+        - clawback_amount
+        - refund_id
+        - payment_id
+        - order_id
+        - amount
+        - currency
+        - reason
+        - status
+        - method
+        - requested_by
+        - requested_at
       type: object
     ConfirmInputBody:
       additionalProperties: false
@@ -3572,6 +3701,51 @@ components:
         - tax_no
         - address
         - email
+      type: object
+    CreateRefundInputBody:
+      additionalProperties: false
+      properties:
+        amount:
+          description: Kuruş
+          format: int64
+          minimum: 1
+          type: integer
+        method:
+          default: bank_eft
+          enum:
+            - bank_eft
+          type: string
+        order_line_id:
+          description: A line of a paid order; empty for an overpayment or an unpaid order's money
+          format: uuid
+          type: string
+        payment_id:
+          description: The captured bank-transfer payment the money goes back from
+          format: uuid
+          type: string
+        reason:
+          enum:
+            - event_cancelled
+            - offering_cancelled
+            - not_fulfilled
+            - duplicate_payment
+            - overpayment
+            - goodwill
+            - other
+          type: string
+        reason_note:
+          description: Audited; no personal data
+          maxLength: 1000
+          type: string
+        target_iban:
+          description: TR IBAN the EFT goes to; spaces are ignored
+          maxLength: 42
+          type: string
+      required:
+        - payment_id
+        - amount
+        - reason
+        - target_iban
       type: object
     CreateRegistrationInputBody:
       additionalProperties: false
@@ -5465,6 +5639,20 @@ components:
       required:
         - schema_version
         - fields
+      type: object
+    FundingPaymentDTO:
+      additionalProperties: false
+      properties:
+        available_amount:
+          description: Kuruş neither refunded nor held by an open refund
+          format: int64
+          type: integer
+        payment_id:
+          format: uuid
+          type: string
+      required:
+        - payment_id
+        - available_amount
       type: object
     GrantRoleInputBody:
       additionalProperties: false
@@ -8477,6 +8665,155 @@ components:
       required:
         - items
       type: object
+    PaymentDTO:
+      additionalProperties: false
+      properties:
+        amount:
+          description: Kuruş; a bank transfer's whole amount (an overpayment included)
+          format: int64
+          type: integer
+        captured_at:
+          format: date-time
+          type: string
+        captured_by:
+          description: The finance admin who captured it by hand
+          format: uuid
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        currency:
+          enum:
+            - TRY
+          type: string
+        evidence_file_id:
+          format: uuid
+          type: string
+        incoming_transfer_id:
+          format: uuid
+          type: string
+        order_id:
+          format: uuid
+          type: string
+        org_id:
+          description: The buying org
+          format: uuid
+          type: string
+        payment_id:
+          format: uuid
+          type: string
+        provider:
+          enum:
+            - bank_transfer
+            - iyzico
+            - direct_confirmed
+            - manual
+          type: string
+        refunded_amount:
+          description: Kuruş of completed refunds
+          format: int64
+          type: integer
+        status:
+          enum:
+            - initiated
+            - captured
+            - failed
+            - partially_refunded
+            - refunded
+            - chargeback
+          type: string
+      required:
+        - payment_id
+        - order_id
+        - org_id
+        - provider
+        - amount
+        - currency
+        - status
+        - refunded_amount
+        - created_at
+      type: object
+    PaymentDetailDTO:
+      additionalProperties: false
+      properties:
+        amount:
+          description: Kuruş; a bank transfer's whole amount (an overpayment included)
+          format: int64
+          type: integer
+        captured_at:
+          format: date-time
+          type: string
+        captured_by:
+          description: The finance admin who captured it by hand
+          format: uuid
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        currency:
+          enum:
+            - TRY
+          type: string
+        evidence_file_id:
+          format: uuid
+          type: string
+        incoming_transfer_id:
+          format: uuid
+          type: string
+        order_id:
+          format: uuid
+          type: string
+        order_no:
+          type: string
+        org_id:
+          description: The buying org
+          format: uuid
+          type: string
+        payment_id:
+          format: uuid
+          type: string
+        provider:
+          enum:
+            - bank_transfer
+            - iyzico
+            - direct_confirmed
+            - manual
+          type: string
+        refunded_amount:
+          description: Kuruş of completed refunds
+          format: int64
+          type: integer
+        refunds:
+          items:
+            $ref: "#/components/schemas/RefundDTO"
+          type: array
+        splits:
+          items:
+            $ref: "#/components/schemas/SplitDTO"
+          type: array
+        status:
+          enum:
+            - initiated
+            - captured
+            - failed
+            - partially_refunded
+            - refunded
+            - chargeback
+          type: string
+      required:
+        - order_no
+        - splits
+        - refunds
+        - payment_id
+        - order_id
+        - org_id
+        - provider
+        - amount
+        - currency
+        - status
+        - refunded_amount
+        - created_at
+      type: object
     PaymentInstructionsDTO:
       additionalProperties: false
       properties:
@@ -8508,6 +8845,18 @@ components:
         - bank_name
         - expires_at
         - instructions_tr
+      type: object
+    PaymentList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/PaymentDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
       type: object
     PaymentSummaryDTO:
       additionalProperties: false
@@ -9450,6 +9799,154 @@ components:
       required:
         - recovery_codes
       type: object
+    RefundDTO:
+      additionalProperties: false
+      properties:
+        amount:
+          description: Kuruş
+          format: int64
+          type: integer
+        approved_at:
+          format: date-time
+          type: string
+        approved_by:
+          format: uuid
+          type: string
+        bank_reference:
+          type: string
+        completed_at:
+          format: date-time
+          type: string
+        currency:
+          enum:
+            - TRY
+          type: string
+        method:
+          enum:
+            - bank_eft
+            - iyzico
+          type: string
+        order_id:
+          format: uuid
+          type: string
+        order_line_id:
+          format: uuid
+          type: string
+        payment_id:
+          format: uuid
+          type: string
+        reason:
+          enum:
+            - event_cancelled
+            - offering_cancelled
+            - not_fulfilled
+            - duplicate_payment
+            - overpayment
+            - goodwill
+            - other
+          type: string
+        reason_note:
+          type: string
+        receipt_file_id:
+          format: uuid
+          type: string
+        refund_id:
+          format: uuid
+          type: string
+        rejected_at:
+          format: date-time
+          type: string
+        rejected_by:
+          format: uuid
+          type: string
+        rejection_reason:
+          type: string
+        requested_at:
+          format: date-time
+          type: string
+        requested_by:
+          format: uuid
+          type: string
+        status:
+          enum:
+            - requested
+            - approved
+            - processing
+            - completed
+            - failed
+            - rejected
+          type: string
+        target_iban:
+          type: string
+      required:
+        - refund_id
+        - payment_id
+        - order_id
+        - amount
+        - currency
+        - reason
+        - status
+        - method
+        - requested_by
+        - requested_at
+      type: object
+    RefundDueDTO:
+      additionalProperties: false
+      properties:
+        amount:
+          description: Kuruş still to request
+          format: int64
+          type: integer
+        order_id:
+          format: uuid
+          type: string
+        order_line_id:
+          description: "The cancelled line; empty: the whole order's paid money"
+          format: uuid
+          type: string
+        order_no:
+          type: string
+        org_id:
+          description: The buying org
+          format: uuid
+          type: string
+        payments:
+          items:
+            $ref: "#/components/schemas/FundingPaymentDTO"
+          type: array
+        since:
+          format: date-time
+          type: string
+      required:
+        - order_id
+        - order_no
+        - org_id
+        - amount
+        - since
+        - payments
+      type: object
+    RefundDueList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/RefundDueDTO"
+          type: array
+      required:
+        - items
+      type: object
+    RefundList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/RefundDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
     RegisterInputBody:
       additionalProperties: false
       properties:
@@ -9759,6 +10256,17 @@ components:
           type: string
       required:
         - rejection_reason
+      type: object
+    RejectRefundInputBody:
+      additionalProperties: false
+      properties:
+        note:
+          description: Why the refund is rejected (audited; no personal data)
+          maxLength: 1000
+          minLength: 1
+          type: string
+      required:
+        - note
       type: object
     RemoveInputBody:
       additionalProperties: false
@@ -10411,6 +10919,38 @@ components:
           type: string
       required:
         - org_id
+      type: object
+    SplitDTO:
+      additionalProperties: false
+      properties:
+        order_line_id:
+          format: uuid
+          type: string
+        platform_amount:
+          description: "Kuruş: Koro's commission, its VAT and the buyer fee"
+          format: int64
+          type: integer
+        seller_amount:
+          description: "Kuruş: the payee's share"
+          format: int64
+          type: integer
+        split_id:
+          format: uuid
+          type: string
+        status:
+          enum:
+            - held
+            - approved
+            - disapproved
+            - released
+            - refunded
+          type: string
+      required:
+        - split_id
+        - order_line_id
+        - seller_amount
+        - platform_amount
+        - status
       type: object
     StaffDTO:
       additionalProperties: false
@@ -16455,6 +16995,72 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+  /api/v1/admin/payments:
+    get:
+      description: Every captured payment, newest first. A bank transfer's amount is the whole transfer (an overpayment included).
+      operationId: adminListPayments
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: One order's payments
+          explode: false
+          in: query
+          name: order_id
+          schema:
+            description: One order's payments
+            maxLength: 36
+            type: string
+        - explode: false
+          in: query
+          name: status
+          schema:
+            enum:
+              - initiated
+              - captured
+              - failed
+              - partially_refunded
+              - refunded
+              - chargeback
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List payments
+      tags:
+        - payments
+      x-koro-action: payments.payment.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
   /api/v1/admin/payments/direct-confirmations:
     post:
       description: "Model C (the buyer pays the payees directly, Koro collects its fee): with the receipt of the buyer's transfer (a transfer_receipt upload) a finance admin records a direct_confirmed payment and the order is paid. Only a model C order awaiting payment (409 orders.invalid_state) whose fee is in (409 orders.order_not_paid). The money never reaches Koro's account; the ledger posts nothing."
@@ -16498,6 +17104,40 @@ paths:
       x-koro-action: payments.transfer.match
       x-koro-idempotency: required
       x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/payments/{payment_id}:
+    get:
+      description: The splits of the order it paid (seller and Koro shares per line) and the refunds drawn from it.
+      operationId: adminGetPayment
+      parameters:
+        - description: Payment ID (an unknown or malformed ID is 404)
+          in: path
+          name: payment_id
+          required: true
+          schema:
+            description: Payment ID (an unknown or malformed ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentDetailDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a payment with its splits and refunds
+      tags:
+        - payments
+      x-koro-action: payments.payment.read
+      x-koro-rate-limit: read_default
       x-koro-surface: admin
   /api/v1/admin/payouts:
     get:
@@ -17049,6 +17689,312 @@ paths:
       tags:
         - feed
       x-koro-action: feed.post.moderate
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/refunds:
+    get:
+      description: Newest first; filter by status, order or payment.
+      operationId: adminListRefunds
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - explode: false
+          in: query
+          name: status
+          schema:
+            enum:
+              - requested
+              - approved
+              - processing
+              - completed
+              - failed
+              - rejected
+            type: string
+        - description: One order's refunds
+          explode: false
+          in: query
+          name: order_id
+          schema:
+            description: One order's refunds
+            maxLength: 36
+            type: string
+        - description: One payment's refunds
+          explode: false
+          in: query
+          name: payment_id
+          schema:
+            description: One payment's refunds
+            maxLength: 36
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List refunds
+      tags:
+        - payments
+      x-koro-action: payments.refund.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+    post:
+      description: "The refund waits for another finance admin's approval (requested; four eyes). It draws from one captured bank-transfer payment: an overpayment (no order_line_id), the money of an order cancelled or expired before it was paid in full (no order_line_id) or a line of a paid order (order_line_id required). Requested and approved refunds count against every limit (422 orders.refund_exceeds_paid). A line in a payout waiting for approval or for its transfer is 409 payments.line_in_payout; a line already paid out is refunded and its seller part claimed back from the payee."
+      operationId: adminCreateRefund
+      parameters:
+        - description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRefundInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Request a refund
+      tags:
+        - payments
+      x-koro-action: payments.refund.create
+      x-koro-idempotency: required
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/refunds/due:
+    get:
+      description: The cancelled lines of paid orders (offering cancelled, dispute resolved with a refund) and the orders cancelled or expired with money paid, oldest first, minus what open refunds already cover; each with the order's payments that can fund it. A finance or platform admin opens the refund (adminCreateRefund). At most limit rows, no cursor.
+      operationId: adminListRefundsDue
+      parameters:
+        - description: Rows (the oldest first)
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Rows (the oldest first)
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundDueList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the money waiting for a refund
+      tags:
+        - payments
+      x-koro-action: payments.refund.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+  /api/v1/admin/refunds/{refund_id}/approve:
+    post:
+      description: Requires re-authentication. The requester never approves (403 authz.four_eyes_violation); only a requested refund (409 payments.invalid_state). The approval covers the target IBAN.
+      operationId: adminApproveRefund
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Refund ID (an unknown or malformed ID is 404)
+          in: path
+          name: refund_id
+          required: true
+          schema:
+            description: Refund ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApproveRefundInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Approve a refund
+      tags:
+        - payments
+      x-koro-action: payments.refund.approve
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/refunds/{refund_id}/complete:
+    post:
+      description: "Only an approved refund (409 payments.invalid_state); the receipt (a refund_receipt upload) and the bank reference are required (422). One transaction: the refund completed, the payment's refunded amount, the order (orders.ApplyRefund; not for an overpayment), the ledger (refund_completed) and payment.refunded; any failure leaves the refund approved. Models B and C have no ledger template yet (422 ledger.model_not_enabled)."
+      operationId: adminCompleteRefund
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Refund ID (an unknown or malformed ID is 404)
+          in: path
+          name: refund_id
+          required: true
+          schema:
+            description: Refund ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteRefundInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompletedRefundDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Record the EFT of an approved refund
+      tags:
+        - payments
+      x-koro-action: payments.refund.complete
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/refunds/{refund_id}/reject:
+    post:
+      description: Only a requested refund (409 payments.invalid_state); the requester may withdraw it this way. The note is audited.
+      operationId: adminRejectRefund
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Refund ID (an unknown or malformed ID is 404)
+          in: path
+          name: refund_id
+          required: true
+          schema:
+            description: Refund ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RejectRefundInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Reject a refund request
+      tags:
+        - payments
+      x-koro-action: payments.refund.reject
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin

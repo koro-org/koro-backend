@@ -424,8 +424,8 @@ func TestMigrations_EachStepRestoresThePreviousSchema(t *testing.T) {
 		}
 	}
 	if latest >= 110 {
-		if n := rowCount(seedRows[110]); n != 12 {
-			t.Fatalf("seed rows after the last up: ledger accounts %d; want 12", n)
+		if n := rowCount(seedRows[110]); n != 13 { // + payee_receivable (06 H-59, BE-043)
+			t.Fatalf("seed rows after the last up: ledger accounts %d; want 13", n)
 		}
 	}
 

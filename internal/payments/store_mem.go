@@ -370,13 +370,70 @@ func (m *MemStore) InsertPayment(_ context.Context, p Payment) error {
 }
 
 // GetPayment implements Store.
-func (m *MemStore) GetPayment(_ context.Context, id uuid.UUID) (Payment, error) {
+func (m *MemStore) GetPayment(_ context.Context, id uuid.UUID, _ bool) (Payment, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p, ok := m.payments[id]
 	if !ok {
 		return Payment{}, ErrNotFound
 	}
+	return p, nil
+}
+
+// ListPayments implements Store.
+func (m *MemStore) ListPayments(_ context.Context, f PaymentFilter, after *TimeCursor, limit int) ([]Payment, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Payment
+	for _, p := range m.payments {
+		switch {
+		case f.OrderID != nil && p.OrderID != *f.OrderID,
+			f.Status != "" && p.Status != f.Status,
+			after != nil && compareTime(p.CreatedAt, p.ID, after.CreatedAt, after.ID) >= 0:
+			continue
+		}
+		out = append(out, p)
+	}
+	slices.SortFunc(out, func(a, b Payment) int { return compareTime(b.CreatedAt, b.ID, a.CreatedAt, a.ID) })
+	return firstN(out, limit), nil
+}
+
+// PaymentsOfOrder implements Store.
+func (m *MemStore) PaymentsOfOrder(_ context.Context, orderID uuid.UUID) ([]Payment, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Payment
+	for _, p := range m.payments {
+		if p.OrderID == orderID {
+			out = append(out, p)
+		}
+	}
+	slices.SortFunc(out, func(a, b Payment) int { return compareTime(a.CreatedAt, a.ID, b.CreatedAt, b.ID) })
+	return out, nil
+}
+
+// AddPaymentRefund implements Store.
+func (m *MemStore) AddPaymentRefund(_ context.Context, paymentID uuid.UUID, amount int64) (Payment, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.payments[paymentID]
+	switch {
+	case !ok:
+		return Payment{}, ErrNotFound
+	case p.Status != PaymentCaptured && p.Status != PaymentPartiallyRefunded:
+		return Payment{}, ErrInvalidState
+	case amount <= 0:
+		return Payment{}, errors.New("payments: add payment refund: the amount must be positive")
+	case p.RefundedAmount+amount > p.Amount:
+		return Payment{}, ErrRefundExceedsPaid // payments_refunded_limit_chk
+	}
+	p.RefundedAmount += amount
+	p.Status = PaymentPartiallyRefunded
+	if p.RefundedAmount == p.Amount {
+		p.Status = PaymentRefunded
+	}
+	p.UpdatedAt = m.stamp()
+	m.payments[paymentID] = p
 	return p, nil
 }
 
@@ -452,8 +509,141 @@ func (m *MemStore) InsertRefund(_ context.Context, r Refund) error {
 	case r.Status != RefundStatusRequested:
 		return errors.New("payments: insert refund: a new refund is requested (refunds_initial_status_chk)")
 	}
+	if err := checkRefund(r); err != nil {
+		return err
+	}
 	t := m.stamp()
 	r.CreatedAt, r.UpdatedAt = t, t
+	m.refunds[r.ID] = r
+	return nil
+}
+
+// GetRefund implements Store.
+func (m *MemStore) GetRefund(_ context.Context, id uuid.UUID, _ bool) (Refund, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.refunds[id]
+	if !ok {
+		return Refund{}, ErrNotFound
+	}
+	return r, nil
+}
+
+// ListRefunds implements Store.
+func (m *MemStore) ListRefunds(_ context.Context, f RefundFilter, after *TimeCursor, limit int) ([]Refund, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Refund
+	for _, r := range m.refunds {
+		switch {
+		case f.Status != "" && r.Status != f.Status,
+			f.OrderID != nil && r.OrderID != *f.OrderID,
+			f.PaymentID != nil && r.PaymentID != *f.PaymentID,
+			after != nil && compareTime(r.CreatedAt, r.ID, after.CreatedAt, after.ID) >= 0:
+			continue
+		}
+		out = append(out, r)
+	}
+	slices.SortFunc(out, func(a, b Refund) int { return compareTime(b.CreatedAt, b.ID, a.CreatedAt, a.ID) })
+	return firstN(out, limit), nil
+}
+
+// RefundsOfOrder implements Store.
+func (m *MemStore) RefundsOfOrder(_ context.Context, orderID uuid.UUID) ([]Refund, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Refund
+	for _, r := range m.refunds {
+		if r.OrderID == orderID {
+			out = append(out, r)
+		}
+	}
+	slices.SortFunc(out, func(a, b Refund) int { return compareTime(a.CreatedAt, a.ID, b.CreatedAt, b.ID) })
+	return out, nil
+}
+
+// UpdateRefund implements Store with the guards of 000108: the status
+// guard, the frozen columns, the approver once set, a completed refund is
+// final, one CHECK per state and the four eyes.
+func (m *MemStore) UpdateRefund(_ context.Context, next Refund, from RefundStatus) (Refund, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cur, ok := m.refunds[next.ID]
+	switch {
+	case !ok:
+		return Refund{}, ErrNotFound
+	case cur.Status != from:
+		return Refund{}, ErrInvalidState
+	case cur.PaymentID != next.PaymentID || cur.OrderID != next.OrderID || !sameID(cur.OrderLineID, next.OrderLineID) ||
+		cur.Amount != next.Amount || cur.Reason != next.Reason || cur.Method != next.Method ||
+		!sameStr(cur.TargetIBAN, next.TargetIBAN) || cur.RequestedBy != next.RequestedBy:
+		return Refund{}, fmt.Errorf("payments: refund %s: a frozen column changed (refunds_frozen)", next.ID)
+	case cur.ApprovedBy != nil && (!sameID(cur.ApprovedBy, next.ApprovedBy) || !sameTime(cur.ApprovedAt, next.ApprovedAt)):
+		return Refund{}, fmt.Errorf("payments: refund %s: the approval is frozen (refunds_approval_frozen)", next.ID)
+	case cur.Status == RefundStatusCompleted:
+		return Refund{}, fmt.Errorf("payments: refund %s: a completed refund is final (refunds_completed_frozen)", next.ID)
+	}
+	if err := checkRefund(next); err != nil {
+		return Refund{}, err
+	}
+	next.CreatedAt, next.UpdatedAt = cur.CreatedAt, m.stamp()
+	m.refunds[next.ID] = next
+	return next, nil
+}
+
+// checkRefund applies the per-state CHECKs of 000108 to r.
+func checkRefund(r Refund) error {
+	approved := r.Status == RefundStatusApproved || r.Status == RefundStatusProcessing || r.Status == RefundStatusCompleted ||
+		r.Status == RefundStatusFailed
+	rejected, completed := r.Status == RefundStatusRejected, r.Status == RefundStatusCompleted
+	bankStates := r.Status == RefundStatusProcessing || completed || r.Status == RefundStatusFailed
+	switch {
+	case r.ApprovedBy != nil && *r.ApprovedBy == r.RequestedBy:
+		return authz.ErrFourEyes // refunds_four_eyes_chk
+	case approved != (r.ApprovedBy != nil) || approved != (r.ApprovedAt != nil):
+		return fmt.Errorf("payments: refund %s: approval columns do not match %s (refunds_approved_chk)", r.ID, r.Status)
+	case rejected != (r.RejectedBy != nil) || rejected != (r.RejectedAt != nil) || (r.RejectionReason != nil && !rejected):
+		return fmt.Errorf("payments: refund %s: rejection columns do not match %s (refunds_rejected_chk)", r.ID, r.Status)
+	case completed != (r.CompletedAt != nil) || completed != (r.ReceiptFileID != nil) || (completed && r.BankReference == nil) ||
+		(r.BankReference != nil && !bankStates):
+		return fmt.Errorf("payments: refund %s: completion columns do not match %s (refunds_completed_chk)", r.ID, r.Status)
+	case (r.Status == RefundStatusFailed) != (r.FailureReason != nil):
+		return fmt.Errorf("payments: refund %s: failure_reason does not match %s (refunds_failed_chk)", r.ID, r.Status)
+	}
+	return nil
+}
+
+// RefundsOfUser implements Store.
+func (m *MemStore) RefundsOfUser(_ context.Context, userID uuid.UUID) ([]Refund, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	is := func(id *uuid.UUID) bool { return id != nil && *id == userID }
+	var out []Refund
+	for _, r := range m.refunds {
+		if r.RequestedBy == userID || is(r.ApprovedBy) || is(r.RejectedBy) {
+			out = append(out, r)
+		}
+	}
+	slices.SortFunc(out, func(a, b Refund) int { return compareUUID(a.ID, b.ID) })
+	return out, nil
+}
+
+// SeedRefund stores r as it is, any status (matrix fixtures and tests that
+// need a refund past the request without going through the service).
+func (m *MemStore) SeedRefund(r Refund) error {
+	if err := checkRefund(r); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, dup := m.refunds[r.ID]; dup {
+		return fmt.Errorf("payments: seed refund %s: duplicate id", r.ID)
+	}
+	t := m.stamp()
+	if r.CreatedAt.IsZero() {
+		r.CreatedAt = t
+	}
+	r.UpdatedAt = t
 	m.refunds[r.ID] = r
 	return nil
 }
@@ -484,3 +674,24 @@ func (m *MemStore) Payments() []Payment {
 
 // compareUUID orders UUIDs by their bytes (PostgreSQL's uuid order).
 func compareUUID(a, b uuid.UUID) int { return slices.Compare(a[:], b[:]) }
+
+// compareTime orders (time, id) positions ascending.
+func compareTime(at time.Time, a uuid.UUID, bt time.Time, b uuid.UUID) int {
+	if c := at.Compare(bt); c != 0 {
+		return c
+	}
+	return compareUUID(a, b)
+}
+
+// sameTime reports equal optional instants.
+func sameTime(a, b *time.Time) bool {
+	return a == nil && b == nil || a != nil && b != nil && a.Equal(*b)
+}
+
+// firstN returns at most n rows.
+func firstN[T any](rows []T, n int) []T {
+	if len(rows) > n {
+		return rows[:n]
+	}
+	return rows
+}

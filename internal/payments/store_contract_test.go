@@ -18,6 +18,7 @@ type contractWorld struct {
 	user  func(t *testing.T) uuid.UUID
 	party uuid.UUID
 	order func(t *testing.T) contractOrder
+	file  func(t *testing.T) uuid.UUID // a files row (PostgreSQL FKs); nil in memory
 }
 
 type contractOrder struct{ id, org, line uuid.UUID }
@@ -274,11 +275,11 @@ func storeContract(t *testing.T, mk func(t *testing.T) (payments.Store, contract
 		if err := s.InsertPayment(ctx, again); !errors.Is(err, payments.ErrTransferAlreadyMatched) {
 			t.Fatalf("second payment of the transfer = %v", err)
 		}
-		got, err := s.GetPayment(ctx, pay.ID)
+		got, err := s.GetPayment(ctx, pay.ID, false)
 		if err != nil || got.Amount != 1_500_000 || got.IncomingTransferID == nil || *got.IncomingTransferID != tr.ID {
 			t.Fatalf("get = %+v, %v", got, err)
 		}
-		if _, err := s.GetPayment(ctx, uuid.NewV7()); !errors.Is(err, payments.ErrNotFound) {
+		if _, err := s.GetPayment(ctx, uuid.NewV7(), false); !errors.Is(err, payments.ErrNotFound) {
 			t.Fatalf("missing payment = %v", err)
 		}
 		sp := payments.Split{ID: uuid.NewV7(), PaymentID: pay.ID, OrderID: o.id, OrderLineID: o.line, SellerAmount: 1_080_000,
@@ -308,6 +309,158 @@ func storeContract(t *testing.T, mk func(t *testing.T) (payments.Store, contract
 			t.Fatalf("captured by = %+v, %v", ps, err)
 		}
 	})
+
+	t.Run("refunds", func(t *testing.T) {
+		t.Parallel()
+		s, w := mk(t)
+		ctx := t.Context()
+		acct := contractAccount(t, s, w, ibanKoro2)
+		o := w.order(t)
+		fin, fin2 := w.user(t), w.user(t)
+		at := t0
+		pay := contractPayment(t, s, acct, o, fin, 1_500_000, "R-1")
+		newRefund := func(amount int64, line *uuid.UUID, reason string) payments.Refund {
+			r := payments.Refund{ID: uuid.NewV7(), PaymentID: pay.ID, OrderID: o.id, OrderLineID: line, Amount: amount, Reason: reason,
+				Status: payments.RefundStatusRequested, RequestedBy: fin, Method: payments.RefundMethodBankEFT, TargetIBAN: ptr(ibanSender), CreatedAt: at}
+			if err := s.InsertRefund(ctx, r); err != nil {
+				t.Fatal(err)
+			}
+			got, err := s.GetRefund(ctx, r.ID, true)
+			if err != nil || got.Status != payments.RefundStatusRequested || got.Amount != amount {
+				t.Fatalf("get = %+v, %v", got, err)
+			}
+			return got
+		}
+		r1 := newRefund(1_200_000, &o.line, payments.RefundReasonGoodwill)
+		r2 := newRefund(300_000, nil, payments.RefundReasonOverpayment)
+		if _, err := s.GetRefund(ctx, uuid.NewV7(), false); !errors.Is(err, payments.ErrNotFound) {
+			t.Fatalf("missing refund = %v", err)
+		}
+
+		// Four eyes (refunds_four_eyes_chk) and the status guard.
+		self := r1
+		self.Status, self.ApprovedBy, self.ApprovedAt = payments.RefundStatusApproved, &fin, &at
+		if _, err := s.UpdateRefund(ctx, self, payments.RefundStatusRequested); !errors.Is(err, authz.ErrFourEyes) {
+			t.Fatalf("approval by the requester = %v", err)
+		}
+		ok := r1
+		ok.Status, ok.ApprovedBy, ok.ApprovedAt = payments.RefundStatusApproved, &fin2, &at
+		if _, err := s.UpdateRefund(ctx, ok, payments.RefundStatusApproved); !errors.Is(err, payments.ErrInvalidState) {
+			t.Fatalf("wrong from = %v", err)
+		}
+		r1, err := s.UpdateRefund(ctx, ok, payments.RefundStatusRequested)
+		if err != nil || r1.Status != payments.RefundStatusApproved || r1.ApprovedBy == nil || *r1.ApprovedBy != fin2 {
+			t.Fatalf("approve = %+v, %v", r1, err)
+		}
+		// A completed refund carries its receipt and bank reference
+		// (refunds_completed_chk).
+		half := r1
+		half.Status, half.CompletedAt = payments.RefundStatusCompleted, &at
+		if _, err := s.UpdateRefund(ctx, half, payments.RefundStatusApproved); err == nil {
+			t.Fatal("a completed refund without its receipt")
+		}
+		// A rejection carries who and when (refunds_rejected_chk).
+		rej := r2
+		why := "Hatalı"
+		rej.Status, rej.RejectedBy, rej.RejectedAt, rej.RejectionReason = payments.RefundStatusRejected, &fin2, &at, &why
+		if r2, err = s.UpdateRefund(ctx, rej, payments.RefundStatusRequested); err != nil || r2.Status != payments.RefundStatusRejected {
+			t.Fatalf("reject = %+v, %v", r2, err)
+		}
+
+		// The payment's refunded amount: partially, then fully; never more
+		// (payments_refunded_limit_chk).
+		got, err := s.AddPaymentRefund(ctx, pay.ID, 1_200_000)
+		if err != nil || got.Status != payments.PaymentPartiallyRefunded || got.RefundedAmount != 1_200_000 {
+			t.Fatalf("partial = %+v, %v", got, err)
+		}
+		if _, err := s.AddPaymentRefund(ctx, pay.ID, 300_001); !errors.Is(err, payments.ErrRefundExceedsPaid) {
+			t.Fatalf("beyond the payment = %v", err)
+		}
+		if got, err = s.AddPaymentRefund(ctx, pay.ID, 300_000); err != nil || got.Status != payments.PaymentRefunded {
+			t.Fatalf("full = %+v, %v", got, err)
+		}
+		if _, err := s.AddPaymentRefund(ctx, pay.ID, 1); !errors.Is(err, payments.ErrInvalidState) {
+			t.Fatalf("a refunded payment = %v", err)
+		}
+		if _, err := s.AddPaymentRefund(ctx, uuid.NewV7(), 1); !errors.Is(err, payments.ErrNotFound) {
+			t.Fatalf("missing payment = %v", err)
+		}
+
+		receipt, ref := uuid.NewV7(), "EFT-9"
+		if w.file != nil {
+			receipt = w.file(t)
+		}
+		done := r1
+		done.Status, done.CompletedAt, done.ReceiptFileID, done.BankReference = payments.RefundStatusCompleted, &at, &receipt, &ref
+		if r1, err = s.UpdateRefund(ctx, done, payments.RefundStatusApproved); err != nil || r1.Status != payments.RefundStatusCompleted {
+			t.Fatalf("complete = %+v, %v", r1, err)
+		}
+		again := r1
+		again.Status = payments.RefundStatusFailed
+		why2 := "x"
+		again.FailureReason = &why2
+		if _, err := s.UpdateRefund(ctx, again, payments.RefundStatusCompleted); err == nil {
+			t.Fatal("a completed refund changed")
+		}
+
+		// Reads: the order's refunds oldest first, the list newest first
+		// with filters and pages, the payments of the order, the staff
+		// references of a user.
+		rs, err := s.RefundsOfOrder(ctx, o.id)
+		if err != nil || len(rs) != 2 || rs[0].ID != r1.ID || rs[1].ID != r2.ID {
+			t.Fatalf("refunds of order = %+v, %v", rs, err)
+		}
+		page1, err := s.ListRefunds(ctx, payments.RefundFilter{}, nil, 1)
+		if err != nil || len(page1) != 1 || page1[0].ID != r2.ID {
+			t.Fatalf("page 1 = %+v, %v", page1, err)
+		}
+		page2, err := s.ListRefunds(ctx, payments.RefundFilter{}, &payments.TimeCursor{CreatedAt: page1[0].CreatedAt, ID: page1[0].ID}, 5)
+		if err != nil || len(page2) != 1 || page2[0].ID != r1.ID {
+			t.Fatalf("page 2 = %+v, %v", page2, err)
+		}
+		if f, _ := s.ListRefunds(ctx, payments.RefundFilter{Status: payments.RefundStatusRejected, OrderID: &o.id, PaymentID: &pay.ID}, nil, 5); len(f) != 1 ||
+			f[0].ID != r2.ID {
+			t.Fatalf("filtered = %+v", f)
+		}
+		if ps, err := s.PaymentsOfOrder(ctx, o.id); err != nil || len(ps) != 1 || ps[0].ID != pay.ID {
+			t.Fatalf("payments of order = %+v, %v", ps, err)
+		}
+		if ps, err := s.ListPayments(ctx, payments.PaymentFilter{OrderID: &o.id, Status: payments.PaymentRefunded}, nil, 5); err != nil || len(ps) != 1 {
+			t.Fatalf("list payments = %+v, %v", ps, err)
+		}
+		if ps, _ := s.ListPayments(ctx, payments.PaymentFilter{Status: payments.PaymentCaptured}, nil, 5); len(ps) != 0 {
+			t.Fatalf("captured payments = %+v", ps)
+		}
+		if rs, err := s.RefundsOfUser(ctx, fin2); err != nil || len(rs) != 2 {
+			t.Fatalf("refunds of user = %+v, %v", rs, err)
+		}
+	})
+}
+
+// contractPayment records a transfer of amount on acct, matches it to o
+// and captures its payment.
+func contractPayment(t *testing.T, s payments.Store, acct payments.CollectionAccount, o contractOrder, by uuid.UUID, amount int64,
+	ref string) payments.Payment {
+	t.Helper()
+	ctx := t.Context()
+	at := t0
+	tr, _, err := s.InsertTransfer(ctx, payments.IncomingTransfer{ID: uuid.NewV7(), CollectionAccountID: acct.ID, ValueDate: civil.From(t0),
+		Amount: amount, Currency: "TRY", Description: "x", BankReference: ref, Status: payments.TransferUnmatched,
+		EntryMethod: payments.EntryManual, EnteredBy: by, CreatedAt: t0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := tr
+	m.Status, m.MatchedOrderID, m.MatchedBy, m.MatchedAt = payments.TransferMatched, &o.id, &by, &at
+	if _, err := s.UpdateTransfer(ctx, m, payments.TransferUnmatched); err != nil {
+		t.Fatal(err)
+	}
+	pay := payments.Payment{ID: uuid.NewV7(), OrderID: o.id, OrgID: o.org, Provider: payments.ProviderBankTransfer, IncomingTransferID: &tr.ID,
+		Amount: amount, Currency: "TRY", Status: payments.PaymentCaptured, CapturedAt: &at, CapturedBy: &by, CreatedAt: at}
+	if err := s.InsertPayment(ctx, pay); err != nil {
+		t.Fatal(err)
+	}
+	return pay
 }
 
 // contractAccount inserts an active account of the world's party.

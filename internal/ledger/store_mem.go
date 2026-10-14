@@ -155,6 +155,24 @@ func (s *MemStore) List(_ context.Context, f JournalFilter, after *JournalCursor
 	return out, nil
 }
 
+// RefundedShares implements Store.
+func (s *MemStore) RefundedShares(_ context.Context, lineID uuid.UUID) (LineShares, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out LineShares
+	for _, p := range s.txns {
+		if p.Kind != KindRefundCompleted {
+			continue
+		}
+		for _, e := range p.Entries {
+			if e.OrderLineID != nil && *e.OrderLineID == lineID {
+				out.add(e.Account, e.Amount)
+			}
+		}
+	}
+	return out, nil
+}
+
 func cursorOf(p Posted) JournalCursor { return JournalCursor{OccurredAt: p.OccurredAt, ID: p.ID} }
 
 // compareCursor orders journal positions ascending (occurred_at, id).

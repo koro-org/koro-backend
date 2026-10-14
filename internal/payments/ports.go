@@ -46,8 +46,22 @@ type Orders interface {
 	//
 	// sync-write: orders.Orders.ConfirmDirectPayment
 	ConfirmDirectPayment(ctx context.Context, orderID, paymentID uuid.UUID) (orders.PaymentEffect, error)
-	// GetLine returns an order line (the seller of a payment notice).
+	// GetLine returns an order line (the seller of a payment notice, the
+	// shares of a refunded line).
 	GetLine(ctx context.Context, lineID uuid.UUID) (orders.Line, error)
+	// ApplyRefund records a completed refund of the order (a line of it when
+	// lineID is set) in the completion transaction (BE-043): the order's
+	// and the line's refunded amounts grow (422 orders.refund_exceeds_paid
+	// beyond what was paid or what Koro holds of the line), a paid order
+	// becomes partially_refunded or refunded, a fully refunded line loses
+	// its rights.
+	//
+	// sync-write: orders.Orders.ApplyRefund
+	ApplyRefund(ctx context.Context, orderID uuid.UUID, lineID *uuid.UUID, amount int64) error
+	// RefundsDue lists the money that waits for a refund (a cancelled line
+	// of a paid order, an order cancelled or expired with money paid),
+	// oldest first: finance opens the refunds from it.
+	RefundsDue(ctx context.Context, limit int) ([]orders.RefundDue, error)
 }
 
 // Poster is the ledger's Poster (L11, 01 §4.19): the capture posts
@@ -61,6 +75,17 @@ type Poster interface {
 	Post(ctx context.Context, t ledger.Txn) (uuid.UUID, error)
 }
 
+// LedgerLines is what a line refund reads from the ledger (L11; BE-043,
+// 06 H-59). It is ledger.Module; both read in the caller's transaction.
+type LedgerLines interface {
+	// LinesInPayouts returns which of the lines are items of a live payout
+	// (pending_approval, approved or paid), with the payout's ID.
+	LinesInPayouts(ctx context.Context, lineIDs []uuid.UUID) (map[uuid.UUID]uuid.UUID, error)
+	// RefundedShares returns what the completed refunds took back from the
+	// line so far, per share (seller, commission, commission VAT).
+	RefundedShares(ctx context.Context, lineID uuid.UUID) (ledger.LineShares, error)
+}
+
 // Parties is what payments needs of the legal parties (parties L7): Koro's
 // own party, the owner of every collection account (02 §20.1).
 type Parties interface {
@@ -70,7 +95,7 @@ type Parties interface {
 
 // Files is what payments needs from files (L2): the transfer receipt of a
 // recorded transfer and of a direct payment (purpose transfer_receipt) and
-// the EFT receipt of a return (purpose refund_receipt).
+// the EFT receipt of a return or of a refund (purpose refund_receipt).
 type Files interface {
 	// Get returns the file's metadata or files.ErrNotFound.
 	Get(ctx context.Context, fileID uuid.UUID) (files.FileMeta, error)
@@ -83,8 +108,8 @@ type Files interface {
 
 // Reauthenticator verifies the re-authentication proof of the R operations
 // (03 §6.2: payments.collection_account.create/approve/retire,
-// payments.transfer.mark_returned) after authz.Can and before any business
-// write. It is identity.Service (L4).
+// payments.transfer.mark_returned, payments.refund.approve) after authz.Can
+// and before any business write. It is identity.Service (L4).
 type Reauthenticator interface {
 	Verify(ctx context.Context, userID uuid.UUID, proof identity.ReauthProof) (kind string, err error)
 }

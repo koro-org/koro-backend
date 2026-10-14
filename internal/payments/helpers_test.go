@@ -328,6 +328,7 @@ type env struct {
 	ordersM  orders.Module
 	ledStore ledger.Store
 	ledger   ledger.Service
+	ledMod   ledger.Module
 	audit    *auditLog
 	outbox   *outbox.Mem
 	queue    *queue.Mem
@@ -343,6 +344,21 @@ type envOption func(*payments.Deps)
 
 func withPoster(wrap func(payments.Poster) payments.Poster) envOption {
 	return func(d *payments.Deps) { d.Ledger = wrap(d.Ledger) }
+}
+
+// withLedgerLines wraps the ledger reads of a line refund (BE-043).
+func withLedgerLines(wrap func(payments.LedgerLines) payments.LedgerLines) envOption {
+	return func(d *payments.Deps) { d.LedgerLines = wrap(d.LedgerLines) }
+}
+
+// withOrders wraps payments' orders port.
+func withOrders(wrap func(payments.Orders) payments.Orders) envOption {
+	return func(d *payments.Deps) { d.Orders = wrap(d.Orders) }
+}
+
+// withOutbox wraps payments' outbox writer.
+func withOutbox(wrap func(outbox.Writer) outbox.Writer) envOption {
+	return func(d *payments.Deps) { d.Outbox = wrap(d.Outbox) }
 }
 
 // newEnv is the in-memory env.
@@ -376,11 +392,11 @@ func newEnvOn(t *testing.T, clk *clock.Fake, b backend, platform uuid.UUID, opts
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.ledger = led.Service
+	e.ledger, e.ledMod = led.Service, led
 	d := payments.Deps{
 		Store: e.store, Tx: b.tx, Audit: e.audit, Idempotency: e.keeper, Orders: e.ordersM.Orders, Ledger: e.ledger, Outbox: e.outbox,
 		Queue: e.queue, Clock: clk, Log: discardLog(), Parties: fakeParties{platform: e.platform}, Files: e.files, Reauth: fakeReauth{},
-		Orgs: fakeOrgs{}, Sender: e.sender, Users: fakeUsers{}, Staff: fakeStaff{},
+		Orgs: fakeOrgs{}, Sender: e.sender, Users: fakeUsers{}, Staff: fakeStaff{}, LedgerLines: led,
 	}
 	for _, o := range opts {
 		o(&d)

@@ -23,6 +23,7 @@ const (
 	DigestJobName                 = "payments.unmatched_digest"
 	NotifyAccountApprovedTaskName = "payments.notify_collection_account_approved"
 	NotifyPaymentCapturedTaskName = "payments.notify_payment_captured"
+	NotifyPaymentRefundedTaskName = "payments.notify_payment_refunded"
 	NotifyUnmatchedTaskName       = "payments.notify_unmatched_transfers"
 	// NotifyAccountChangedTaskName is a plain task (A, queue.AfterCommit):
 	// 01 §6.2 has no topic for a retired or newly default account.
@@ -48,16 +49,21 @@ const (
 	tmplPaymentReceived = "payments.payment_received"            // the buyer's admins (in-app)
 	tmplOrderPaid       = "payments.order_paid"                  // the sellers' admins (in-app)
 	tmplUnmatched       = "payments.unmatched_transfers"         // finance admins (in-app)
+	tmplRefundCompleted = "payments.refund_completed"            // the buyer's admins (in-app)
+	tmplLineRefunded    = "payments.order_line_refunded"         // the seller's admins (in-app)
 )
 
 // Subscribe registers the outbox subscriptions of payments (01 §6.2):
 // collection_account.approved → the security notice (critical);
 // payment.captured → the buyer's and the sellers' notices;
+// payment.refunded → the buyer's and the seller's notices (BE-043);
 // incoming_transfer.unmatched → the finance digest.
 func (m Module) Subscribe(r *outbox.Registry) {
 	r.Subscribe(domainevent.TopicCollectionAccountApproved, NotifyAccountApprovedTaskName, m.svc.handleAccountApproved,
 		outbox.Queue(queue.Critical))
 	r.Subscribe(domainevent.TopicPaymentCaptured, NotifyPaymentCapturedTaskName, m.svc.handlePaymentCaptured,
+		outbox.Queue(queue.Default))
+	r.Subscribe(domainevent.TopicPaymentRefunded, NotifyPaymentRefundedTaskName, m.svc.handlePaymentRefunded,
 		outbox.Queue(queue.Default))
 	r.Subscribe(domainevent.TopicIncomingTransferUnmatched, NotifyUnmatchedTaskName, m.svc.handleUnmatched,
 		outbox.Queue(queue.Default))
@@ -224,6 +230,52 @@ func (s *service) handlePaymentCaptured(ctx context.Context, e domainevent.Envel
 		}
 		errs = append(errs, s.notifyInApp(ctx, tmplOrderPaid, key, admins, "/orgs/"+seller.String()+"/sales", ids, nil))
 	}
+	return errors.Join(errs...)
+}
+
+// handlePaymentRefunded tells the buying company's admins that a refund
+// left Koro's account and, for a line with a payee, the selling org's
+// admins that the line was refunded (their payable, or a claim back after
+// a payout, changed).
+func (s *service) handlePaymentRefunded(ctx context.Context, e domainevent.Envelope) error {
+	p, err := domainevent.Decode[domainevent.PaymentRefunded](e)
+	if err != nil {
+		return queue.Permanent(err)
+	}
+	if s.d.Orgs == nil {
+		return errors.New("payments: the org directory is not wired")
+	}
+	o, err := s.d.Orders.ForPayment(ctx, p.OrderID)
+	if isNotFound(err) {
+		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "refund notice: order not found", slog.String("order_id", p.OrderID.String()))
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	ids := map[string]any{"order_id": o.ID.String(), "refund_id": p.RefundID.String(), "payment_id": p.PaymentID.String()}
+	buyers, err := s.membersWith(ctx, o.OrgID, authz.MemberCompanyAdmin, authz.MemberCompanyOwner)
+	if err != nil {
+		return err
+	}
+	key := e.ID.String()
+	errs := []error{s.notifyInApp(ctx, tmplRefundCompleted, key, buyers, "/orders/"+o.ID.String(), ids, nil)}
+	if p.OrderLineID == uuid.Nil() {
+		return errors.Join(errs...)
+	}
+	l, err := s.d.Orders.GetLine(ctx, p.OrderLineID)
+	if err != nil {
+		return err
+	}
+	if l.PayeeID == nil {
+		return errors.Join(errs...)
+	}
+	ids["order_line_id"] = l.ID.String()
+	sellers, err := s.membersWith(ctx, l.SellerOrgID, authz.MemberClubAdmin, authz.MemberUniversityRep)
+	if err != nil {
+		return err
+	}
+	errs = append(errs, s.notifyInApp(ctx, tmplLineRefunded, key, sellers, "/orgs/"+l.SellerOrgID.String()+"/sales", ids, nil))
 	return errors.Join(errs...)
 }
 

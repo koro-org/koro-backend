@@ -1,0 +1,1 @@
+{"payment_id": "{{fixture:pay_a}}", "amount": 20000, "reason": "overpayment", "method": "bank_eft", "target_iban": "TR100006200000000006295938"}

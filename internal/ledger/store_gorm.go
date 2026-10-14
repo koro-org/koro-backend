@@ -198,6 +198,28 @@ func (s gormStore) List(ctx context.Context, f JournalFilter, after *JournalCurs
 	return s.withEntries(ctx, hs)
 }
 
+// RefundedShares implements Store (ledger_entries_line_idx).
+//
+// cross-org: one order line the caller resolved.
+func (s gormStore) RefundedShares(ctx context.Context, lineID uuid.UUID) (LineShares, error) {
+	var rows []struct {
+		Account Account `gorm:"column:account_code"`
+		Amount  int64   `gorm:"column:amount"`
+	}
+	err := db.Conn(ctx, s.orm).Raw(`SELECT e.account_code, sum(e.amount)::bigint AS amount
+		FROM ledger_entries e JOIN ledger_transactions t ON t.id = e.transaction_id
+		WHERE e.order_line_id = ? AND t.kind = 'refund_completed'
+		GROUP BY e.account_code`, lineID).Scan(&rows).Error
+	if err != nil {
+		return LineShares{}, fmt.Errorf("ledger: refunded shares: %w", err)
+	}
+	var out LineShares
+	for _, r := range rows {
+		out.add(r.Account, r.Amount)
+	}
+	return out, nil
+}
+
 // Unbalanced implements Store.
 //
 // cross-org: a platform job over the whole ledger.

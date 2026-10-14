@@ -188,6 +188,45 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (ledger.Store, worl
 		}
 	})
 
+	t.Run("refunded shares of a line", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		p := w.payee(t)
+		l1, l2 := w.line(t, p), w.line(t, p)
+		// The allocation is not a refund: it does not count.
+		h, rows := row(ledger.KindOrderAllocated, ledger.RefOrder, t0,
+			ledger.Entry{Account: ledger.AccountBuyerAdvances, OrderLineID: &l1, Amount: 1_200_000},
+			ledger.Entry{Account: ledger.AccountSellerPayable, PayeeID: &p, OrderLineID: &l1, Amount: -1_080_000},
+			ledger.Entry{Account: ledger.AccountCommissionRevenue, OrderLineID: &l1, Amount: -100_000},
+			ledger.Entry{Account: ledger.AccountVATOutput, OrderLineID: &l1, Amount: -20_000})
+		mustInsert(t, s, w, h, rows)
+		// A partial refund from the payable, a later one claimed back from
+		// the payee after a payout (06 H-59), one of another line.
+		h, rows = row(ledger.KindRefundCompleted, ledger.RefRefund, t0,
+			ledger.Entry{Account: ledger.AccountSellerPayable, PayeeID: &p, OrderLineID: &l1, Amount: 540_000},
+			ledger.Entry{Account: ledger.AccountCommissionRevenue, OrderLineID: &l1, Amount: 50_000},
+			ledger.Entry{Account: ledger.AccountVATOutput, OrderLineID: &l1, Amount: 10_000},
+			ledger.Entry{Account: ledger.AccountKoroBank, Amount: -600_000})
+		mustInsert(t, s, w, h, rows)
+		h, rows = row(ledger.KindRefundCompleted, ledger.RefRefund, t0,
+			ledger.Entry{Account: ledger.AccountPayeeReceivable, OrderLineID: &l1, Amount: 1},
+			ledger.Entry{Account: ledger.AccountCommissionRevenue, OrderLineID: &l1, Amount: 2},
+			ledger.Entry{Account: ledger.AccountBuyerAdvances, Amount: 7},
+			ledger.Entry{Account: ledger.AccountKoroBank, Amount: -10})
+		mustInsert(t, s, w, h, rows)
+		h, rows = row(ledger.KindRefundCompleted, ledger.RefRefund, t0,
+			ledger.Entry{Account: ledger.AccountSellerPayable, PayeeID: &p, OrderLineID: &l2, Amount: 3},
+			ledger.Entry{Account: ledger.AccountKoroBank, Amount: -3})
+		mustInsert(t, s, w, h, rows)
+		got, err := s.RefundedShares(t.Context(), l1)
+		if err != nil || got != (ledger.LineShares{Seller: 540_001, Commission: 50_002, CommissionVAT: 10_000}) || got.Total() != 600_003 {
+			t.Fatalf("RefundedShares(l1) = %+v, %v", got, err)
+		}
+		if got, err := s.RefundedShares(t.Context(), w.line(t, p)); err != nil || got != (ledger.LineShares{}) {
+			t.Fatalf("RefundedShares(new line) = %+v, %v", got, err)
+		}
+	})
+
 	t.Run("journal list", func(t *testing.T) {
 		t.Parallel()
 		s, w := newStore(t)

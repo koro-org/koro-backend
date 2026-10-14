@@ -178,9 +178,14 @@ func PayoutPaid(m Model, payoutID, payeeID uuid.UUID, amount int64, at time.Time
 type RefundLine struct {
 	OrderLineID         uuid.UUID
 	PayeeID             uuid.UUID
-	SellerAmount        int64 // back from the payee's payable
+	SellerAmount        int64 // back from the payee's payable (or claimed back from the payee when PaidOut)
 	CommissionAmount    int64 // back from Koro's commission
 	CommissionVATAmount int64 // back from the commission's VAT
+	// PaidOut: the line was already paid out to the payee (06 H-59, T-231).
+	// Its seller part cannot come back from seller_payable (the payee
+	// balance would turn negative); Koro claims it back from the payee
+	// instead: payee_receivable +seller, naming the line.
+	PaidOut bool
 }
 
 // SplitRefund splits a refund of amount on an allocated line into its
@@ -214,9 +219,11 @@ func SplitRefund(l AllocationLine, amount int64) (RefundLine, error) {
 //
 //	buyer_advances +unallocated
 //	per line: seller_payable(payee) +seller / platform_commission_revenue +commission / vat_output +commission_vat
+//	          (a paid-out line: payee_receivable +seller instead of seller_payable; 06 H-59)
 //	koro_bank −(unallocated + Σ lines)
 //
-// Post rejects it (ErrNegativeBalance) when the payee was already paid out.
+// Post rejects it (ErrNegativeBalance) when the payee is owed less than the
+// seller part of a line that was not paid out.
 func RefundCompleted(m Model, refundID uuid.UUID, unallocated int64, lines []RefundLine, at time.Time) (Txn, error) {
 	if err := ledgerModelA(m); err != nil {
 		return Txn{}, err
@@ -238,7 +245,11 @@ func RefundCompleted(m Model, refundID uuid.UUID, unallocated int64, lines []Ref
 			return Txn{}, invalid(loc, "amounts must not be negative")
 		}
 		line := ptr(l.OrderLineID)
-		t.Entries = appendNonZero(t.Entries, Entry{Account: AccountSellerPayable, PayeeID: ptr(l.PayeeID), OrderLineID: line, Amount: l.SellerAmount})
+		seller := Entry{Account: AccountSellerPayable, PayeeID: ptr(l.PayeeID), OrderLineID: line, Amount: l.SellerAmount}
+		if l.PaidOut {
+			seller = Entry{Account: AccountPayeeReceivable, OrderLineID: line, Amount: l.SellerAmount}
+		}
+		t.Entries = appendNonZero(t.Entries, seller)
 		t.Entries = appendNonZero(t.Entries, Entry{Account: AccountCommissionRevenue, OrderLineID: line, Amount: l.CommissionAmount})
 		t.Entries = appendNonZero(t.Entries, Entry{Account: AccountVATOutput, OrderLineID: line, Amount: l.CommissionVATAmount})
 		parts = append(parts, l.SellerAmount, l.CommissionAmount, l.CommissionVATAmount)

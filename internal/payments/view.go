@@ -186,3 +186,99 @@ func summaryOf(p Payment) PaymentSummary {
 func orderSummaryOf(o orders.PayableOrder, paid bool) OrderSummary {
 	return OrderSummary{OrderID: o.ID, OrderNo: o.OrderNo, Status: o.Status, PaidAmount: o.PaidAmount, DueAmount: o.DueAmount, Paid: paid}
 }
+
+// ---- payments and refunds (BE-043)
+
+// PaymentQuery narrows adminListPayments.
+type PaymentQuery struct {
+	Filter PaymentFilter
+	Limit  int
+	After  *TimeCursor
+
+	// invalid is a malformed parameter or cursor found by the handler,
+	// reported after authorisation (03 §7.2).
+	invalid error
+}
+
+// PaymentPage is a page of payments, newest first.
+type PaymentPage struct {
+	Items []Payment
+	Next  *TimeCursor // nil on the last page
+}
+
+// PaymentView is adminGetPayment: the payment, its order's reference code,
+// its splits and its refunds (newest first).
+type PaymentView struct {
+	Payment Payment
+	OrderNo string
+	Splits  []Split
+	Refunds []Refund
+}
+
+// RefundQuery narrows adminListRefunds.
+type RefundQuery struct {
+	Filter RefundFilter
+	Limit  int
+	After  *TimeCursor
+
+	invalid error
+}
+
+// RefundPage is a page of refunds, newest first.
+type RefundPage struct {
+	Items []Refund
+	Next  *TimeCursor // nil on the last page
+}
+
+// FundingPayment is a payment of the order that can fund a refund: what of
+// it is not refunded nor held by an open refund.
+type FundingPayment struct {
+	PaymentID uuid.UUID
+	Available int64
+}
+
+// RefundDue is money orders says waits for a refund (a cancelled line of a
+// paid order, an order cancelled or expired with money paid) that no open
+// refund covers yet: Amount is what is still to request. Payments are the
+// order's captured transfers that can fund it.
+type RefundDue struct {
+	OrderID  uuid.UUID
+	OrderNo  string
+	OrgID    uuid.UUID
+	LineID   *uuid.UUID
+	Amount   int64
+	Since    time.Time
+	Payments []FundingPayment
+}
+
+// RefundInput is the body of adminCreateRefund (04 §2.16).
+type RefundInput struct {
+	PaymentID   uuid.UUID
+	OrderLineID *uuid.UUID // a line of a paid order; nil: an overpayment or an unpaid order's money
+	Amount      int64      // kuruş
+	Reason      string
+	ReasonNote  string
+	Method      string // bank_eft (iyzico is phase 2)
+	TargetIBAN  string
+}
+
+// RefundReceipt is the body of adminCompleteRefund (04 §2.16).
+type RefundReceipt struct {
+	BankReference string
+	ReceiptFileID uuid.UUID // a refund_receipt upload
+}
+
+// RefundResult is the answer of a completion: the refund and how the
+// ledger took the money back. It survives a JSON round trip
+// (Idempotency-Key replay).
+type RefundResult struct {
+	Refund Refund `json:"refund"`
+	// TransactionID is the refund_completed ledger transaction.
+	TransactionID uuid.UUID `json:"transaction_id"`
+	// Unallocated came back from buyer_advances (an overpayment, an unpaid
+	// order's money, Koro's own platform-native line).
+	Unallocated int64 `json:"unallocated"`
+	// Clawback is the seller part claimed back from the payee of a line
+	// that was already paid out (06 H-59; payee_receivable).
+	Clawback int64 `json:"clawback"`
+}

@@ -38,6 +38,31 @@
 //   - Model C (06 H-56, T-18, T-227): a finance admin's confirmation that the
 //     buyer paid the payees directly records a direct_confirmed payment and
 //     pays the order (orders.ConfirmDirectPayment) once Koro's fee is in.
+//   - Refunds (BE-043; 03 §6.1 "İade", 02 §20.5): money going back to the
+//     buyer leaves in three steps. A finance or platform admin requests it
+//     (Idempotency-Key) from a payment: an overpayment (the part of a
+//     transfer the order did not wait for, 03 k27; also opened by the match
+//     itself), the money of an order cancelled or expired before it was
+//     paid in full, or a line of a paid order (the cancelled lines wait in
+//     orders.RefundsDue; ListRefundsDue shows them with the payments that
+//     can fund them). Every limit counts the requested and approved
+//     refunds: the payment's amount, the order's unapplied money, what Koro
+//     holds of the line (its buyer fee only in model C). Another finance
+//     admin approves it with re-authentication (authz four eyes +
+//     refunds_four_eyes_chk, again on the locked row); a finance admin may
+//     reject a request. After the EFT any finance admin completes it with
+//     the receipt (refund_receipt) and the bank reference: in ONE
+//     transaction the refund is completed, the payment's refunded amount
+//     grows, orders.ApplyRefund records it on the order (not for an
+//     overpayment: that money was never the order's), the ledger posts
+//     refund_completed (unallocated money from buyer_advances; a line's
+//     shares split against what is left of them, platform/money) and
+//     payment.refunded leaves (O). A line in a payout waiting for approval
+//     or for its transfer cannot be refunded (409 payments.line_in_payout,
+//     checked again after the ledger took the payee's lock); a line already
+//     paid out is refunded under the same four eyes and its seller part is
+//     claimed back from the payee (payee_receivable; 06 H-59: collected by
+//     hand, never offset against a later payout).
 //   - Personal data: a transfer's sender may be a natural person (name,
 //     IBAN); the rows are financial records (10 years) and are neither
 //     deleted nor anonymised on account erasure (privacy.go).
@@ -108,6 +133,26 @@ type Service interface {
 	// ConfirmDirectPayment is adminConfirmDirectPayment (model C;
 	// Idempotency-Key).
 	ConfirmDirectPayment(ctx context.Context, a authz.Actor, in DirectInput) (DirectResult, error)
+
+	// ListPayments is adminListPayments (BE-043).
+	ListPayments(ctx context.Context, a authz.Actor, q PaymentQuery) (PaymentPage, error)
+	// GetPaymentView is adminGetPayment: the payment, its splits and refunds.
+	GetPaymentView(ctx context.Context, a authz.Actor, id uuid.UUID) (PaymentView, error)
+	// ListRefunds is adminListRefunds.
+	ListRefunds(ctx context.Context, a authz.Actor, q RefundQuery) (RefundPage, error)
+	// ListRefundsDue is adminListRefundsDue: the money orders says waits for
+	// a refund that no open refund covers yet, with the payments that can
+	// fund it.
+	ListRefundsDue(ctx context.Context, a authz.Actor, limit int) ([]RefundDue, error)
+	// CreateRefund is adminCreateRefund (Idempotency-Key): a refund request.
+	CreateRefund(ctx context.Context, a authz.Actor, in RefundInput) (Refund, error)
+	// ApproveRefund is adminApproveRefund (four eyes, R).
+	ApproveRefund(ctx context.Context, a authz.Actor, id uuid.UUID, proof identity.ReauthProof) (Refund, error)
+	// RejectRefund is adminRejectRefund.
+	RejectRefund(ctx context.Context, a authz.Actor, id uuid.UUID, note string) (Refund, error)
+	// CompleteRefund is adminCompleteRefund: the EFT's receipt and bank
+	// reference; ledger, order and payment.refunded in one transaction.
+	CompleteRefund(ctx context.Context, a authz.Actor, id uuid.UUID, in RefundReceipt) (RefundResult, error)
 }
 
 // Deps are the dependencies of the payments module. Store, Tx, Audit,
@@ -125,11 +170,13 @@ type Deps struct {
 	Clock       clock.Clock
 	Log         *slog.Logger
 
-	// Parties (Koro's party), Files (receipts) and Reauth (R operations):
-	// nil → the operations that need them fail closed (503).
-	Parties Parties
-	Files   Files
-	Reauth  Reauthenticator
+	// Parties (Koro's party), Files (receipts), Reauth (R operations) and
+	// LedgerLines (the payout and share reads of a line refund): nil → the
+	// operations that need them fail closed (503).
+	Parties     Parties
+	Files       Files
+	Reauth      Reauthenticator
+	LedgerLines LedgerLines
 
 	// Orgs, Sender, Users and Staff serve the notices in the worker; nil
 	// Sender or Staff → the notice task fails and is retried; nil Users →
@@ -196,7 +243,7 @@ func (s *service) now() time.Time { return s.d.Clock.Now().UTC().Truncate(time.M
 
 // Get implements Payments.
 func (s *service) Get(ctx context.Context, paymentID uuid.UUID) (Payment, error) {
-	return s.d.Store.GetPayment(ctx, paymentID)
+	return s.d.Store.GetPayment(ctx, paymentID, false)
 }
 
 // adminSurface is the authz view of /admin/** (03 §3.2: 403 before reading).

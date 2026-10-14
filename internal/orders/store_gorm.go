@@ -410,6 +410,21 @@ func (s gormStore) RefundsDue(ctx context.Context, limit int) ([]RefundDue, erro
 	return out, nil
 }
 
+// CollectedLines implements Store (BE-067).
+//
+// cross-org: the ledger's allocation check over every order Koro collected.
+func (s gormStore) CollectedLines(ctx context.Context, after uuid.UUID, platformOnly bool, limit int) ([]Line, error) {
+	var rows []Line
+	err := db.Conn(ctx, s.orm).Raw(`SELECT l.* FROM order_lines l JOIN orders o ON o.id = l.order_id
+		WHERE l.id > @after AND o.paid_at IS NOT NULL AND o.collection_method <> 'direct_to_payee'
+		  AND (NOT @platform OR l.payee_id IS NULL)
+		ORDER BY l.id LIMIT @limit`, map[string]any{"after": after, "platform": platformOnly, "limit": limit}).Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("orders: collected lines: %w", err)
+	}
+	return rows, nil
+}
+
 // OrdersPlacedBy implements Store.
 //
 // cross-org: a data subject's own records (KVKK export).

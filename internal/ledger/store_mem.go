@@ -173,6 +173,24 @@ func (s *MemStore) RefundedShares(_ context.Context, lineID uuid.UUID) (LineShar
 	return out, nil
 }
 
+// LineAllocations implements Store.
+func (s *MemStore) LineAllocations(_ context.Context, lineIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[uuid.UUID]int64, len(lineIDs))
+	for _, p := range s.txns {
+		if p.Kind != KindOrderAllocated && p.Kind != KindAdjustment {
+			continue
+		}
+		for _, e := range p.Entries {
+			if e.Account == AccountBuyerAdvances && e.OrderLineID != nil && slices.Contains(lineIDs, *e.OrderLineID) {
+				out[*e.OrderLineID] += e.Amount
+			}
+		}
+	}
+	return out, nil
+}
+
 func cursorOf(p Posted) JournalCursor { return JournalCursor{OccurredAt: p.OccurredAt, ID: p.ID} }
 
 // compareCursor orders journal positions ascending (occurred_at, id).

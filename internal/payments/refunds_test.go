@@ -797,20 +797,25 @@ func TestPayments_ListAndGet(t *testing.T) {
 }
 
 // TestRefund_PlatformLine_RevokesRights: Koro's own platform-native line
-// was never allocated (T-293): its refund comes back from buyer_advances
-// and, refunded in full, revokes its rights.
+// was allocated as Koro's sale (BE-067, T-293): its refund takes the sale
+// and its VAT back (nothing from buyer_advances) and, refunded in full,
+// revokes its rights.
 func TestRefund_PlatformLine_RevokesRights(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	po := e.paid(t, e.activeAccount(t, ibanKoro, true), orderSpec{platformLine: true}, 0)
 	r := e.approved(t, lineRefund(po.payment.ID, po.lines[1].ID, 300_000))
 	res, err := e.completeAs(t, "finance_admin", r.ID)
-	if err != nil || res.Unallocated != 300_000 || res.Clawback != 0 {
+	if err != nil || res.Unallocated != 0 || res.Clawback != 0 {
 		t.Fatalf("complete = %+v, %v", res, err)
 	}
 	rights, _ := e.entStore.BySource(t.Context(), entitlements.SourceOrderLine, po.lines[1].ID)
 	if len(rights) != 1 || rights[0].Status == entitlements.StatusActive {
 		t.Fatalf("rights = %+v", rights)
+	}
+	b := balances(e.journal(t))
+	if b["platform_sales_revenue"] != 0 || b["vat_output"] != -20_000 || b["buyer_advances"] != 0 || b["koro_bank"] != 1_200_000 {
+		t.Fatalf("balances after the refund of Koro's line = %v", b)
 	}
 }
 

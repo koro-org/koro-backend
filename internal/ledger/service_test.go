@@ -362,10 +362,13 @@ func TestIntegrityCheck_DetectsNegativeBalance(t *testing.T) {
 		t.Fatalf("findings %+v, want one negative balance of -75000 for %s", rep.Findings, broken)
 	}
 
-	// The job raises the alarm for every finding and succeeds.
+	// The job raises the alarm for every finding and succeeds. The late
+	// recognition of Koro's own sales runs before it (BE-067).
 	jobs := e.mod.Jobs()
-	if len(jobs) != 1 || jobs[0].Name != ledger.IntegrityJobName || jobs[0].Cron != "15 5 * * *" || jobs[0].Queue != queue.Low ||
-		jobs[0].Unique <= 0 || jobs[0].Unique >= 24*time.Hour {
+	if len(jobs) != 2 || jobs[0].Name != ledger.IntegrityJobName || jobs[0].Cron != "15 5 * * *" || jobs[0].Queue != queue.Low ||
+		jobs[0].Unique <= 0 || jobs[0].Unique >= 24*time.Hour ||
+		jobs[1].Name != ledger.RecognizeJobName || jobs[1].Cron != "5 5 * * *" || jobs[1].Queue != queue.Low ||
+		jobs[1].Unique <= 0 || jobs[1].Unique >= 24*time.Hour {
 		t.Fatalf("jobs %+v", jobs)
 	}
 	if err := jobs[0].Handle(t.Context()); err != nil {

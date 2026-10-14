@@ -220,6 +220,31 @@ func (s gormStore) RefundedShares(ctx context.Context, lineID uuid.UUID) (LineSh
 	return out, nil
 }
 
+// LineAllocations implements Store (ledger_entries_line_idx).
+//
+// cross-org: order lines the caller resolved (the allocation check).
+func (s gormStore) LineAllocations(ctx context.Context, lineIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
+	out := make(map[uuid.UUID]int64, len(lineIDs))
+	if len(lineIDs) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		LineID uuid.UUID `gorm:"column:order_line_id"`
+		Amount int64     `gorm:"column:amount"`
+	}
+	err := db.Conn(ctx, s.orm).Raw(`SELECT e.order_line_id, sum(e.amount)::bigint AS amount
+		FROM ledger_entries e JOIN ledger_transactions t ON t.id = e.transaction_id
+		WHERE e.order_line_id IN ? AND e.account_code = 'buyer_advances' AND t.kind IN ('order_allocated', 'adjustment')
+		GROUP BY e.order_line_id`, lineIDs).Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("ledger: line allocations: %w", err)
+	}
+	for _, r := range rows {
+		out[r.LineID] = r.Amount
+	}
+	return out, nil
+}
+
 // Unbalanced implements Store.
 //
 // cross-org: a platform job over the whole ledger.

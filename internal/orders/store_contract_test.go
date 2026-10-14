@@ -392,6 +392,45 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (orders.Store, worl
 		}
 	})
 
+	t.Run("collected lines (BE-067)", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		b, sl := w.buyer(t), w.seller(t)
+		paid := newFixture(b, t0, []offeringRef{w.offering(t, sl), w.offering(t, sl), w.offering(t, sl)}, []sellerRef{sl, sl, sl})
+		insert(t, s, paid)
+		pay(t, s, paid.o)
+		unpaid := one(t, s, w, b, sl, t0)
+		direct := directFixture(newFixture(b, t0, []offeringRef{w.offering(t, sl)}, []sellerRef{sl}))
+		insert(t, s, direct)
+		pay(t, s, direct.o)
+		want := []uuid.UUID{paid.lines[0].ID, paid.lines[1].ID, paid.lines[2].ID}
+		slices.SortFunc(want, func(a, b uuid.UUID) int { return slices.Compare(a[:], b[:]) })
+		var got []uuid.UUID
+		after := uuid.Nil()
+		for {
+			page, err := s.CollectedLines(ctx, after, false, 2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, l := range page {
+				got = append(got, l.ID)
+				if l.ID == unpaid.lines[0].ID || l.ID == direct.lines[0].ID {
+					t.Fatalf("CollectedLines returned line %s of an unpaid or model C order", l.ID)
+				}
+			}
+			if len(page) < 2 {
+				break
+			}
+			after = page[len(page)-1].ID
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("CollectedLines = %v, want %v (line ID order, paged)", got, want)
+		}
+		if ls, err := s.CollectedLines(ctx, uuid.Nil(), true, 10); err != nil || len(ls) != 0 {
+			t.Fatalf("CollectedLines(platform only) = %d, %v; the fixture's lines all have a payee", len(ls), err)
+		}
+	})
+
 	t.Run("model C: never paid out, refunds of the fee only", func(t *testing.T) {
 		t.Parallel()
 		s, w := newStore(t)

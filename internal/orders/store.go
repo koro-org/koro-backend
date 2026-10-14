@@ -80,6 +80,10 @@ type Store interface {
 	// and orders cancelled or expired with money paid, not refunded yet;
 	// oldest first.
 	RefundsDue(ctx context.Context, limit int) ([]RefundDue, error)
+	// CollectedLines returns up to limit lines of the orders Koro collected in
+	// full (paid_at set, collection not direct_to_payee) with an ID greater
+	// than after, in ID order; platformOnly keeps the lines without a payee.
+	CollectedLines(ctx context.Context, after uuid.UUID, platformOnly bool, limit int) ([]Line, error)
 
 	// OrdersPlacedBy returns the orders a user placed (KVKK export).
 	OrdersPlacedBy(ctx context.Context, userID uuid.UUID) ([]Order, error)

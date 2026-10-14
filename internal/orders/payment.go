@@ -10,6 +10,7 @@ import (
 	"uuid"
 
 	"koro/internal/entitlements"
+	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 )
 
@@ -396,4 +397,61 @@ func (s *service) RefundsDue(ctx context.Context, limit int) ([]RefundDue, error
 		limit = maxRefundsDue
 	}
 	return s.d.Store.RefundsDue(ctx, limit)
+}
+
+// maxCollectedLines bounds one CollectedLines page.
+const maxCollectedLines = 1000
+
+// CollectedLines implements Orders (BE-067).
+func (s *service) CollectedLines(ctx context.Context, after uuid.UUID, platformOnly bool, limit int) ([]CollectedLine, error) {
+	if limit < 1 || limit > maxCollectedLines {
+		limit = maxCollectedLines
+	}
+	lines, err := s.d.Store.CollectedLines(ctx, after, platformOnly, limit)
+	if err != nil || len(lines) == 0 {
+		return []CollectedLine{}, err
+	}
+	ids := make([]uuid.UUID, 0, len(lines))
+	for _, l := range lines {
+		ids = append(ids, l.OrderID)
+	}
+	byID, err := s.d.Store.OrdersByID(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]CollectedLine, 0, len(lines))
+	for _, l := range lines {
+		o, ok := byID[l.OrderID]
+		if !ok {
+			return nil, fmt.Errorf("orders: collected line %s: order %s not found", l.ID, l.OrderID)
+		}
+		out = append(out, CollectedLine{PaidLine: paidLineOf(l), OrderID: l.OrderID, ModelCode: o.ModelCode, RefundedAmount: l.RefundedAmount})
+	}
+	return out, nil
+}
+
+// ForAllocation implements Orders. Derive the parent from the stored line,
+// then lock parent before child (the same order as ApplyRefund). No ledger
+// header may be inserted before these locks: its order_line FK would wait
+// behind a refund that is waiting to insert the same recognition header.
+func (s *service) ForAllocation(ctx context.Context, lineID uuid.UUID) (CollectedLine, error) {
+	if !db.InTx(ctx) {
+		return CollectedLine{}, errors.New("orders: ForAllocation needs a transaction")
+	}
+	l, err := s.d.Store.GetLine(ctx, lineID, false)
+	if err != nil {
+		return CollectedLine{}, err
+	}
+	o, err := s.d.Store.GetOrder(ctx, l.OrderID, true)
+	if err != nil {
+		return CollectedLine{}, err
+	}
+	if o.PaidAt == nil || o.DirectToPayee() {
+		return CollectedLine{}, ErrInvalidState
+	}
+	l, err = s.d.Store.GetLine(ctx, lineID, true)
+	if err != nil {
+		return CollectedLine{}, err
+	}
+	return CollectedLine{PaidLine: paidLineOf(l), OrderID: o.ID, ModelCode: o.ModelCode, RefundedAmount: l.RefundedAmount}, nil
 }

@@ -388,7 +388,9 @@ func newEnvOn(t *testing.T, clk *clock.Fake, b backend, platform uuid.UUID, opts
 		Log: discardLog()}); err != nil {
 		t.Fatal(err)
 	}
-	led, err := ledger.New(ledger.Deps{Store: e.ledStore, Tx: b.tx, Clock: clk, Log: discardLog()})
+	// The ledger reads the settled lines through the real orders module
+	// (the allocation check and the late recognition, BE-067).
+	led, err := ledger.New(ledger.Deps{Store: e.ledStore, Tx: b.tx, Clock: clk, Log: discardLog(), Orders: e.ordersM.Orders})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -454,6 +456,11 @@ type orderSpec struct {
 	platformLine bool
 	modelC       bool
 	paidFee      bool // model C: the fee is already collected
+	// platformOnly: Koro's platform-native line alone, no booth (BE-067).
+	platformOnly bool
+	// withheld: the platform line's VAT is withheld 5/10 by the buyer
+	// (tevkifat; 25,000 of its 50,000 VAT; BE-067).
+	withheld bool
 }
 
 type placed struct {
@@ -480,17 +487,27 @@ func (e *env) order(t *testing.T, spec orderSpec) placed {
 		booth.CommissionPayer, booth.BuyerFeeAmount, booth.SellerNetAmount, booth.PayableAmount = "buyer", 120_000, 1_200_000, 1_320_000
 	}
 	lines := []orders.Line{booth}
+	if spec.platformOnly {
+		lines, spec.platformLine = nil, true
+	}
 	if spec.platformLine {
 		pp := e.b.platform(t)
-		lines = append(lines, orders.Line{ID: uuid.NewV7(), OrderID: o.ID, OrgID: o.OrgID, SellerOrgID: pp.seller,
+		pl := orders.Line{ID: uuid.NewV7(), OrderID: o.ID, OrgID: o.OrgID, SellerOrgID: pp.seller,
 			OfferingID: pp.offering, ServiceID: pp.service, CommercePolicyID: pp.policy, TitleSnapshot: "5 hedefli gönderi",
 			Quantity: 1, UnitPriceAmount: 250_000, NetAmount: 250_000, VATRateBP: 2000, VATAmount: 50_000, GrossAmount: 300_000,
 			CommissionBasis: "net_excl_vat", CommissionPayer: "seller", CommissionVATRateBP: 2000, DisputeWindowDays: 7,
-			SellerNetAmount: 300_000, PayableAmount: 300_000, FulfillmentStatus: orders.FulfillNotApplicable, CreatedAt: now, UpdatedAt: now})
+			SellerNetAmount: 300_000, PayableAmount: 300_000, FulfillmentStatus: orders.FulfillNotApplicable, CreatedAt: now, UpdatedAt: now}
+		if spec.withheld {
+			num, den := int16(5), int16(10)
+			pl.VATWithholdingNum, pl.VATWithholdingDen, pl.VATWithheldAmount = &num, &den, 25_000
+			pl.SellerNetAmount, pl.PayableAmount = 275_000, 275_000
+		}
+		lines = append(lines, pl)
 	}
 	for _, l := range lines {
 		o.SubtotalAmount += l.NetAmount
 		o.VATAmount += l.VATAmount
+		o.VATWithheldAmount += l.VATWithheldAmount
 		o.BuyerFeeAmount += l.BuyerFeeAmount
 		o.TotalAmount += l.GrossAmount + l.BuyerFeeAmount
 		o.PayableAmount += l.PayableAmount
@@ -507,7 +524,7 @@ func (e *env) order(t *testing.T, spec orderSpec) placed {
 		t.Fatal(err)
 	}
 	if spec.platformLine {
-		q, src := 5, lines[1].ID
+		q, src := 5, lines[len(lines)-1].ID
 		if _, err := e.ents.Grant(t.Context(), entitlements.GrantInput{OrgID: o.OrgID, Feature: entitlements.FeatureTargetedPost,
 			Quantity: &q, ValidFrom: now, ValidTo: now.AddDate(0, 3, 0), Status: entitlements.StatusPending,
 			SourceType: entitlements.SourceOrderLine, SourceID: &src}); err != nil {

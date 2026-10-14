@@ -276,7 +276,7 @@ type RefundResult struct {
 	// TransactionID is the refund_completed ledger transaction.
 	TransactionID uuid.UUID `json:"transaction_id"`
 	// Unallocated came back from buyer_advances (an overpayment, an unpaid
-	// order's money, Koro's own platform-native line).
+	// order's money; Koro's own line gives back its sale since BE-067).
 	Unallocated int64 `json:"unallocated"`
 	// Clawback is the seller part claimed back from the payee of a line
 	// that was already paid out (06 H-59; payee_receivable).

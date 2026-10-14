@@ -151,7 +151,9 @@ type PaymentEffect struct {
 }
 
 // PaidLine is the split of one line of a paid order (02 §20.4 seller /
-// platform amounts; 02 §21.3 order_allocated).
+// platform amounts; 02 §21.3 order_allocated). NetAmount and VATAmount are
+// the sale of Koro's own platform-native line (its ledger revenue and VAT,
+// BE-067); a payee line's sale is the payee's.
 type PaidLine struct {
 	LineID              uuid.UUID
 	OfferingID          uuid.UUID
@@ -163,6 +165,8 @@ type PaidLine struct {
 	CommissionAmount    int64
 	CommissionVATAmount int64
 	BuyerFeeAmount      int64 // commission + its VAT when the buyer pays it
+	NetAmount           int64 // the sale excluding VAT
+	VATAmount           int64 // the sale's VAT
 	VATWithheldAmount   int64
 }
 
@@ -170,8 +174,24 @@ func paidLineOf(l Line) PaidLine {
 	return PaidLine{
 		LineID: l.ID, OfferingID: l.OfferingID, SellerOrgID: l.SellerOrgID, PayeeID: l.PayeeID, CommissionPayer: l.CommissionPayer,
 		PayableAmount: l.PayableAmount, SellerNetAmount: l.SellerNetAmount, CommissionAmount: l.CommissionAmount,
-		CommissionVATAmount: l.CommissionVATAmount, BuyerFeeAmount: l.BuyerFeeAmount, VATWithheldAmount: l.VATWithheldAmount,
+		CommissionVATAmount: l.CommissionVATAmount, BuyerFeeAmount: l.BuyerFeeAmount, NetAmount: l.NetAmount, VATAmount: l.VATAmount,
+		VATWithheldAmount: l.VATWithheldAmount,
 	}
+}
+
+// Paid returns the frozen money of l as a line of a paid order (payments'
+// refund of a line, BE-067).
+func (l Line) Paid() PaidLine { return paidLineOf(l) }
+
+// CollectedLine is a line of an order Koro collected in full: paid (paid_at
+// set), not a direct-to-payee (model C) order. The ledger allocates every
+// one of them (02 §21.3 order_allocated; ledger.integrity_check and the
+// late recognition of Koro's own lines, BE-067).
+type CollectedLine struct {
+	PaidLine
+	OrderID        uuid.UUID
+	ModelCode      string
+	RefundedAmount int64
 }
 
 // PayableLine is a line a payout may take (ledger, BE-044).

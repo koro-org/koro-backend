@@ -118,6 +118,16 @@ type Orders interface {
 	// written by MarkLinesPaidOut), in line order: billing's commission
 	// invoice on payout.paid (BE-042). An unknown payout has none.
 	PayoutLines(ctx context.Context, payoutID uuid.UUID) ([]Line, error)
+	// CollectedLines returns up to limit lines of the orders Koro collected
+	// in full (paid, not model C) after the line ID after (uuid.Nil() for
+	// the first page), in line ID order; platformOnly keeps Koro's own
+	// platform-native lines (payee NULL). The ledger checks and recognises
+	// their allocation (BE-067).
+	CollectedLines(ctx context.Context, after uuid.UUID, platformOnly bool, limit int) ([]CollectedLine, error)
+	// ForAllocation reads a collected line under its order and line locks,
+	// in that order. The caller must carry a transaction and keep it through
+	// the ledger post; this serialises late recognition with refunds.
+	ForAllocation(ctx context.Context, lineID uuid.UUID) (CollectedLine, error)
 }
 
 // Service is the orders service: the cross-module contract plus the HTTP

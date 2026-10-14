@@ -466,6 +466,25 @@ func (m *MemStore) MarkLinesPaidOut(_ context.Context, lineIDs []uuid.UUID, payo
 	return len(ok), nil
 }
 
+// CollectedLines implements Store.
+func (m *MemStore) CollectedLines(_ context.Context, after uuid.UUID, platformOnly bool, limit int) ([]Line, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []Line{}
+	for _, l := range m.lines {
+		o := m.orders[l.OrderID]
+		if compareUUID(l.ID, after) <= 0 || o.PaidAt == nil || o.DirectToPayee() || platformOnly && l.PayeeID != nil {
+			continue
+		}
+		out = append(out, cloneLine(l))
+	}
+	slices.SortFunc(out, func(a, b Line) int { return compareUUID(a.ID, b.ID) })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
 // RefundsDue implements Store.
 func (m *MemStore) RefundsDue(_ context.Context, limit int) ([]RefundDue, error) {
 	m.mu.Lock()

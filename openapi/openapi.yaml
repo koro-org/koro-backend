@@ -3030,7 +3030,7 @@ components:
         target_iban:
           type: string
         unallocated_amount:
-          description: Kuruş back from buyer_advances (overpayment, unpaid order, Koro's own line)
+          description: Kuruş back from buyer_advances (overpayment, unpaid order)
           format: int64
           type: integer
       required:

@@ -76,14 +76,19 @@ type Poster interface {
 }
 
 // LedgerLines is what a line refund reads from the ledger (L11; BE-043,
-// 06 H-59). It is ledger.Module; both read in the caller's transaction.
+// 06 H-59, BE-067). It is ledger.Module; every read joins the caller's
+// transaction.
 type LedgerLines interface {
 	// LinesInPayouts returns which of the lines are items of a live payout
 	// (pending_approval, approved or paid), with the payout's ID.
 	LinesInPayouts(ctx context.Context, lineIDs []uuid.UUID) (map[uuid.UUID]uuid.UUID, error)
 	// RefundedShares returns what the completed refunds took back from the
-	// line so far, per share (seller, commission, commission VAT).
+	// line so far, per share (seller, Koro's sale, commission, VAT).
 	RefundedShares(ctx context.Context, lineID uuid.UUID) (ledger.LineShares, error)
+	// LineAllocation returns what the ledger allocated of the line: its
+	// payable amount, or 0 for Koro's own line paid before its template
+	// (BE-067: the refund recognises it first).
+	LineAllocation(ctx context.Context, lineID uuid.UUID) (int64, error)
 }
 
 // Parties is what payments needs of the legal parties (parties L7): Koro's

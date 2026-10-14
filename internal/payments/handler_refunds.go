@@ -409,7 +409,7 @@ func (h handler) rejectRefund(ctx context.Context, in *rejectRefundInput) (*refu
 type CompletedRefundDTO struct {
 	RefundDTO
 	LedgerTransactionID string `json:"ledger_transaction_id" format:"uuid" doc:"The refund_completed transaction"`
-	UnallocatedAmount   int64  `json:"unallocated_amount" doc:"Kuruş back from buyer_advances (overpayment, unpaid order, Koro's own line)"`
+	UnallocatedAmount   int64  `json:"unallocated_amount" doc:"Kuruş back from buyer_advances (overpayment, unpaid order)"`
 	ClawbackAmount      int64  `json:"clawback_amount" doc:"Kuruş claimed back from the payee of a line already paid out (06 H-59)"`
 }
 

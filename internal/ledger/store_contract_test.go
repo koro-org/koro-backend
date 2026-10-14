@@ -227,6 +227,54 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (ledger.Store, worl
 		}
 	})
 
+	t.Run("line allocations (BE-067)", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		p := w.payee(t)
+		l1, l2, l3, l4, l5 := w.line(t, p), w.line(t, p), w.line(t, p), w.line(t, p), w.line(t, p)
+		// l1: allocated at payment.
+		h, rows := row(ledger.KindOrderAllocated, ledger.RefOrder, t0,
+			ledger.Entry{Account: ledger.AccountBuyerAdvances, OrderLineID: &l1, Amount: 1_200_000},
+			ledger.Entry{Account: ledger.AccountSellerPayable, PayeeID: &p, OrderLineID: &l1, Amount: -1_080_000},
+			ledger.Entry{Account: ledger.AccountCommissionRevenue, OrderLineID: &l1, Amount: -100_000},
+			ledger.Entry{Account: ledger.AccountVATOutput, OrderLineID: &l1, Amount: -20_000})
+		mustInsert(t, s, w, h, rows)
+		// l2: recognised late (an adjustment naming the line).
+		h, rows = row(ledger.KindAdjustment, ledger.RefManual, t0,
+			ledger.Entry{Account: ledger.AccountBuyerAdvances, OrderLineID: &l2, Amount: 300_000},
+			ledger.Entry{Account: ledger.AccountSalesRevenue, OrderLineID: &l2, Amount: -250_000},
+			ledger.Entry{Account: ledger.AccountVATOutput, OrderLineID: &l2, Amount: -50_000})
+		mustInsert(t, s, w, h, rows)
+		// l3: a buyer_advances entry of another kind does not allocate.
+		h, rows = row(ledger.KindRefundCompleted, ledger.RefRefund, t0,
+			ledger.Entry{Account: ledger.AccountBuyerAdvances, OrderLineID: &l3, Amount: 5},
+			ledger.Entry{Account: ledger.AccountKoroBank, Amount: -5})
+		mustInsert(t, s, w, h, rows)
+		// l4: allocated, then reversed.
+		for _, sign := range []int64{1, -1} {
+			kind, ref := ledger.KindOrderAllocated, ledger.RefOrder
+			if sign < 0 {
+				kind, ref = ledger.KindAdjustment, ledger.RefManual
+			}
+			h, rows = row(kind, ref, t0,
+				ledger.Entry{Account: ledger.AccountBuyerAdvances, OrderLineID: &l4, Amount: sign * 7},
+				ledger.Entry{Account: ledger.AccountCommissionRevenue, OrderLineID: &l4, Amount: -sign * 7})
+			mustInsert(t, s, w, h, rows)
+		}
+		got, err := s.LineAllocations(t.Context(), []uuid.UUID{l1, l2, l3, l4, l5})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for l, want := range map[uuid.UUID]int64{l1: 1_200_000, l2: 300_000, l3: 0, l4: 0, l5: 0} {
+			if got[l] != want {
+				t.Errorf("LineAllocations[%s] = %d, want %d (all %v)", l, got[l], want, got)
+			}
+		}
+		if got, err := s.LineAllocations(t.Context(), nil); err != nil || len(got) != 0 {
+			t.Fatalf("LineAllocations(nil) = %v, %v", got, err)
+		}
+	})
+
 	t.Run("journal list", func(t *testing.T) {
 		t.Parallel()
 		s, w := newStore(t)

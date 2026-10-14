@@ -36,6 +36,15 @@ type Orders interface {
 	GetLine(ctx context.Context, lineID uuid.UUID) (orders.Line, error)
 	// ForPayment returns an order's reference code (the items' order_no).
 	ForPayment(ctx context.Context, orderID uuid.UUID) (orders.PayableOrder, error)
+	// CollectedLines returns a page of the lines of the orders Koro collected
+	// in full (paid, not model C) after a line ID, in line ID order;
+	// platformOnly keeps Koro's own platform-native lines. The allocation
+	// check of ledger.integrity_check and the late recognition of Koro's own
+	// lines read them (BE-067).
+	CollectedLines(ctx context.Context, after uuid.UUID, platformOnly bool, limit int) ([]orders.CollectedLine, error)
+	// ForAllocation rereads a collected line while locking its order and
+	// then its line in the caller's transaction, before any ledger write.
+	ForAllocation(ctx context.Context, lineID uuid.UUID) (orders.CollectedLine, error)
 }
 
 // Payees is what the payouts need from parties (L7, 01 §4.12): the payee

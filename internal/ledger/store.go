@@ -41,6 +41,12 @@ type Store interface {
 	// from one order line so far, per share (BE-043: the next partial refund
 	// of the line is split against what is left).
 	RefundedShares(ctx context.Context, lineID uuid.UUID) (LineShares, error)
+	// LineAllocations sums, per order line among lineIDs, the buyer_advances
+	// entries naming the line in order_allocated and adjustment transactions:
+	// what the ledger allocated of the line (its payable amount once
+	// allocated, at payment or by the late recognition of Koro's own line;
+	// 0 or missing before; BE-067).
+	LineAllocations(ctx context.Context, lineIDs []uuid.UUID) (map[uuid.UUID]int64, error)
 
 	// Integrity queries (ledger.integrity_check); each returns at most limit rows.
 
@@ -63,21 +69,26 @@ type Store interface {
 
 // LineShares are the shares of one order line (02 §21.3): the seller part
 // (seller_payable, or payee_receivable after a payout; 06 H-59), Koro's
-// commission and the commission's VAT.
+// sale on its own platform-native line (platform_sales_revenue; BE-067),
+// Koro's commission and the VAT (vat_output: the commission's; on Koro's
+// own line also the sale's after withholding).
 type LineShares struct {
 	Seller        int64
+	Sales         int64
 	Commission    int64
 	CommissionVAT int64
 }
 
 // Total is the sum of the shares.
-func (s LineShares) Total() int64 { return s.Seller + s.Commission + s.CommissionVAT }
+func (s LineShares) Total() int64 { return s.Seller + s.Sales + s.Commission + s.CommissionVAT }
 
 // add counts a refund_completed entry of the line in its share.
 func (s *LineShares) add(a Account, amount int64) {
 	switch a {
 	case AccountSellerPayable, AccountPayeeReceivable:
 		s.Seller += amount
+	case AccountSalesRevenue:
+		s.Sales += amount
 	case AccountCommissionRevenue:
 		s.Commission += amount
 	case AccountVATOutput:

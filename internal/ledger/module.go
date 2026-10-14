@@ -30,12 +30,19 @@
 // transaction-scoped advisory lock per payee, then checks the balance:
 // concurrent debits are serialised and cannot overdraw it together. The
 // nightly ledger.integrity_check (05:15) re-checks every transaction's
-// sum, every payee balance, entries written after their header (T-226) and
-// paid payouts against the ledger, and raises the alarm hook.
+// sum, every payee balance, entries written after their header (T-226),
+// paid payouts against the ledger and the allocation of every settled
+// order line (BE-067), and raises the alarm hook.
 //
 // Templates (templates.go) build the model A transactions of 02 §21.3 from
 // the frozen amounts of the order lines; models B and C are skeletons until
-// T-11 is decided.
+// T-11 is decided. Koro's own platform-native line (payee NULL) is Koro's
+// sale (BE-067, T-293): order_allocated credits its net to
+// platform_sales_revenue and its VAT, less the buyer's withholding (an
+// entry of its own), to vat_output, in the same transaction as the payee
+// lines of a mixed order; its refund takes them back. Lines paid before
+// the template are recognised once by ledger.recognize_platform_sales
+// (recognize.go).
 //
 // Payouts (BE-044; 02 §21.4–5, 03 §6.1, 04 §2.17, §C.5): finance admin A
 // takes the payee's payable lines (orders.PayableLines: paid, fulfilled,
@@ -224,8 +231,27 @@ func (m Module) RefundedShares(ctx context.Context, lineID uuid.UUID) (LineShare
 	return m.svc.d.Store.RefundedShares(ctx, lineID)
 }
 
-// Jobs returns the scheduled jobs of ledger (01 §7): ledger.integrity_check.
-func (m Module) Jobs() []queue.Job { return []queue.Job{m.svc.integrityJob()} }
+// LineAllocation returns what the ledger allocated of an order line: its
+// payable amount once allocated (at payment, or by the late recognition of
+// Koro's own line), 0 before (BE-067: payments recognises a platform-native
+// line it refunds when it finds 0). It reads in the transaction carried by
+// ctx.
+func (m Module) LineAllocation(ctx context.Context, lineID uuid.UUID) (int64, error) {
+	alloc, err := m.svc.d.Store.LineAllocations(ctx, []uuid.UUID{lineID})
+	return alloc[lineID], err
+}
+
+// Jobs returns the scheduled jobs of ledger (01 §7): ledger.integrity_check
+// (05:15) and the late recognition of Koro's own sales before it (05:05,
+// ledger.recognize_platform_sales; BE-067).
+func (m Module) Jobs() []queue.Job { return []queue.Job{m.svc.integrityJob(), m.svc.recognizeJob()} }
+
+// RecognizePlatformSales runs ledger.recognize_platform_sales once (tests,
+// an admin tool later): the late recognition of Koro's own lines paid
+// before their template (BE-067, T-293). Idempotent.
+func (m Module) RecognizePlatformSales(ctx context.Context) (RecognitionReport, error) {
+	return m.svc.recognizePlatformSales(ctx)
+}
 
 // CheckIntegrity runs the checks of ledger.integrity_check once and returns
 // the findings without raising the alarm (tests, an admin tool later).

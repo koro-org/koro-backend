@@ -36,8 +36,9 @@ import (
 //     waits for (T-14: partial payments accumulate; a full one pays the
 //     order and activates its rights);
 //  5. the ledger posts payment_received (the whole amount) and, once the
-//     order is paid, order_allocated of its payee lines; the splits of a
-//     paid order are written;
+//     order is paid, order_allocated of its lines — the payee lines and
+//     Koro's own platform-native lines (Koro's sale and its VAT, BE-067)
+//     together; the splits of a paid order are written;
 //  6. the rest of an overpayment opens a refund request (overpayment,
 //     requested; 03 k27: its approval takes four eyes, BE-043) to the
 //     refund IBAN (the sender's when not given; 422 without one);
@@ -275,20 +276,18 @@ func (s *service) writeSplits(ctx context.Context, p Payment, eff orders.Payment
 	return s.d.Store.InsertSplits(ctx, ss)
 }
 
-// allocation is the order_allocated transaction of a paid order's payee
-// lines (02 §21.3 model A). Koro's own platform-native lines have no
-// template yet (ledger TODO T-11, T-293): their money stays in
-// buyer_advances. ok is false when no line has a payee.
+// allocation is the order_allocated transaction of a paid order (02 §21.3
+// model A): its payee lines and Koro's own platform-native lines (Koro's
+// sale, BE-067, T-293) in one transaction. ok is false when no line moves
+// money.
 func allocation(eff orders.PaymentEffect, now time.Time) (ledger.Txn, bool, error) {
-	var lines []ledger.AllocationLine
+	lines := make([]ledger.AllocationLine, 0, len(eff.Lines))
+	var total int64
 	for _, l := range eff.Lines {
-		if l.PayeeID == nil {
-			continue
-		}
-		lines = append(lines, ledger.AllocationLine{OrderLineID: l.LineID, PayeeID: l.PayeeID, PayableAmount: l.PayableAmount,
-			SellerNetAmount: l.SellerNetAmount, CommissionAmount: l.CommissionAmount, CommissionVATAmount: l.CommissionVATAmount})
+		lines = append(lines, ledger.AllocationOf(l))
+		total += l.PayableAmount // bounded: the order's payable amount fits
 	}
-	if len(lines) == 0 {
+	if total == 0 {
 		return ledger.Txn{}, false, nil
 	}
 	t, err := ledger.OrderAllocated(ledger.Model(eff.ModelCode), eff.OrderID, lines, now)

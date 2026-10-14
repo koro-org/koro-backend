@@ -242,6 +242,12 @@ func TestMatch_SingleTxChain_AllOrNothing(t *testing.T) {
 	if n := pgCount(t, d, `SELECT count(*) FROM payments`); n != 1 {
 		t.Fatalf("payments = %d", n)
 	}
+	// One order_allocated for both lines: Koro's sale with the booth (BE-067).
+	if n := pgCount(t, d, `SELECT count(*) FROM ledger_entries e JOIN ledger_transactions x ON x.id = e.transaction_id
+		WHERE x.kind = 'order_allocated' AND e.account_code = 'platform_sales_revenue' AND e.amount = -250000 AND e.order_line_id = $1`,
+		p.lines[1].ID); n != 1 {
+		t.Fatalf("Koro's sale entries in the allocation = %d", n)
+	}
 }
 
 // TestMatch_ConcurrentSameTransfer_OneCapture: six finance admins' clicks
@@ -321,7 +327,8 @@ func TestMatch_Postgres_Chain(t *testing.T) {
 		coalesce(sum(amount) FILTER (WHERE account_code = 'buyer_advances'), 0) FROM ledger_entries`).Scan(&sum, &bank, &advances); err != nil {
 		t.Fatal(err)
 	}
-	if sum != 0 || bank != 1_600_000 || advances != -1_600_000+1_200_000 {
+	// The booth and Koro's own line are allocated (BE-067); the overpayment waits.
+	if sum != 0 || bank != 1_600_000 || advances != -1_600_000+1_200_000+300_000 {
 		t.Fatalf("ledger: sum %d, koro_bank %d, buyer_advances %d", sum, bank, advances)
 	}
 	rights, _ := e.entStore.BySource(t.Context(), entitlements.SourceOrderLine, p.lines[1].ID)

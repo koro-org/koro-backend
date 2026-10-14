@@ -134,7 +134,8 @@ func (s ledgerStaff) FinanceAdmins(ctx context.Context) ([]uuid.UUID, error) {
 	return st.UsersWithRole(ctx, authz.PlatformFinanceAdmin)
 }
 
-// tasks schedules ledger.integrity_check (01 §7: daily at 05:15, low) and
+// tasks schedules ledger.integrity_check (01 §7: daily at 05:15, low), the
+// late recognition of Koro's own sales before it (05:05, low; BE-067) and
 // subscribes the payout notices (payout.created, .approved, .paid).
 func (w *ledgerWiring) tasks(c *container) {
 	for _, j := range w.mod.Jobs() {

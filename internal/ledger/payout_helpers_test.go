@@ -1,6 +1,7 @@
 package ledger_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"slices"
@@ -36,10 +37,11 @@ var testIBANs = []string{"TR330006100519786457841326", "TR9500012009452000580000
 // fakeOrders is the orders port over in-memory lines: a line is payable
 // while it is unpaid-out and fulfilled at or before asOf (hold 0).
 type fakeOrders struct {
-	mu     sync.Mutex
-	lines  map[uuid.UUID]*fakeLine
-	orders map[uuid.UUID]string // order → order_no
-	marks  int                  // MarkLinesPaidOut calls that wrote
+	mu        sync.Mutex
+	lines     map[uuid.UUID]*fakeLine
+	orders    map[uuid.UUID]string   // order → order_no
+	marks     int                    // MarkLinesPaidOut calls that wrote
+	collected []orders.CollectedLine // CollectedLines (BE-067), set by collect
 }
 
 type fakeLine struct {
@@ -114,6 +116,48 @@ func (f *fakeOrders) ForPayment(_ context.Context, orderID uuid.UUID) (orders.Pa
 		return orders.PayableOrder{}, orders.ErrNotFound
 	}
 	return orders.PayableOrder{ID: orderID, OrderNo: no}, nil
+}
+
+// collect adds lines of orders Koro collected in full (CollectedLines).
+func (f *fakeOrders) collect(ls ...orders.CollectedLine) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.collected = append(f.collected, ls...)
+	slices.SortFunc(f.collected, func(a, b orders.CollectedLine) int { return bytes.Compare(a.LineID[:], b.LineID[:]) })
+}
+
+// refund records a refunded amount on a settled line.
+func (f *fakeOrders) refund(lineID uuid.UUID, amount int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.collected {
+		if f.collected[i].LineID == lineID {
+			f.collected[i].RefundedAmount += amount
+		}
+	}
+}
+
+func (f *fakeOrders) CollectedLines(_ context.Context, after uuid.UUID, platformOnly bool, limit int) ([]orders.CollectedLine, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := []orders.CollectedLine{}
+	for _, l := range f.collected {
+		if bytes.Compare(l.LineID[:], after[:]) > 0 && (!platformOnly || l.PayeeID == nil) && len(out) < limit {
+			out = append(out, l)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeOrders) ForAllocation(_ context.Context, lineID uuid.UUID) (orders.CollectedLine, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, l := range f.collected {
+		if l.LineID == lineID {
+			return l, nil
+		}
+	}
+	return orders.CollectedLine{}, orders.ErrNotFound
 }
 
 func (f *fakeOrders) paidOut(id uuid.UUID) *uuid.UUID {

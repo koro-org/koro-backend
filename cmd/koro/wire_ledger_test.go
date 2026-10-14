@@ -56,7 +56,8 @@ func TestWire_LedgerPayouts(t *testing.T) {
 }
 
 // TestWire_LedgerJobs pins what the ledger module registers (01 §7):
-// ledger.integrity_check daily at 05:15 on the low queue.
+// ledger.integrity_check daily at 05:15 on the low queue and, before it,
+// the late recognition of Koro's own sales at 05:05 (BE-067).
 func TestWire_LedgerJobs(t *testing.T) {
 	t.Parallel()
 	c := newTestContainer(t)
@@ -69,7 +70,7 @@ func TestWire_LedgerJobs(t *testing.T) {
 			jobs = append(jobs, j.Name+" "+j.Cron+" "+j.Queue)
 		}
 	}
-	if want := []string{"ledger.integrity_check 15 5 * * * low"}; !slices.Equal(jobs, want) {
+	if want := []string{"ledger.integrity_check 15 5 * * * low", "ledger.recognize_platform_sales 5 5 * * * low"}; !slices.Equal(jobs, want) {
 		t.Fatalf("ledger jobs %q, want %q", jobs, want)
 	}
 	if c.ledger.svc == nil {

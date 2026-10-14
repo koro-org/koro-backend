@@ -181,7 +181,9 @@ func TestMatch_Overpayment_CreatesRefundRecord(t *testing.T) {
 
 // TestMatch_LedgerBalanced (02 §21.3): every posted transaction sums to
 // zero; Koro's bank holds the transfer, the payee is owed its net, Koro
-// earned its commission and its VAT, and the overpayment waits in
+// earned its commission and its VAT and, on its own platform-native line,
+// its sale and the sale's VAT (BE-067, T-293: allocated with the booth in
+// the same order_allocated), and only the overpayment waits in
 // buyer_advances until the refund (BE-043).
 func TestMatch_LedgerBalanced(t *testing.T) {
 	t.Parallel()
@@ -205,10 +207,11 @@ func TestMatch_LedgerBalanced(t *testing.T) {
 	payee := "seller_payable:" + id("payee_club_a").String()
 	want := map[string]int64{
 		"koro_bank":                   1_600_000,
-		"buyer_advances":              -1_600_000 + 1_200_000, // the booth is allocated; the platform line (T-293) and the overpayment wait
+		"buyer_advances":              -1_600_000 + 1_200_000 + 300_000, // the booth and Koro's line are allocated; the overpayment waits
 		payee:                         -1_080_000,
 		"platform_commission_revenue": -100_000,
-		"vat_output":                  -20_000,
+		"platform_sales_revenue":      -250_000,
+		"vat_output":                  -20_000 - 50_000,
 	}
 	for k, v := range want {
 		if b[k] != v {
@@ -218,6 +221,12 @@ func TestMatch_LedgerBalanced(t *testing.T) {
 	bal, err := e.ledger.PayeeBalance(t.Context(), id("payee_club_a"))
 	if err != nil || bal != 1_080_000 {
 		t.Fatalf("payee balance = %d, %v", bal, err)
+	}
+	if n := len(ps); n != 2 {
+		t.Fatalf("%d transactions, want payment_received and one order_allocated for both lines", n)
+	}
+	if rep, err := e.ledMod.CheckIntegrity(t.Context()); err != nil || !rep.OK() {
+		t.Fatalf("integrity = %+v, %v", rep.Findings, err)
 	}
 }
 

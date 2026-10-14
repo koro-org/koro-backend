@@ -30,9 +30,9 @@
 //     unmatched.
 //   - Ledger (BE-039 templates, 02 §21.3): a captured transfer posts
 //     payment_received; a fully paid order posts order_allocated for its
-//     payee lines. Koro's own platform-native lines (payee NULL) have no
-//     allocation template yet (ledger TODO T-11): their money stays in
-//     buyer_advances, unallocated (T-293). Models B and C have no ledger
+//     lines: the payee lines and Koro's own platform-native lines (payee
+//     NULL: Koro's sale revenue and its VAT less the buyer's withholding;
+//     BE-067, T-293) in one transaction. Models B and C have no ledger
 //     template (ledger.model_not_enabled): their fee transfers cannot be
 //     captured until T-11 decides them.
 //   - Model C (06 H-56, T-18, T-227): a finance admin's confirmation that the
@@ -56,7 +56,8 @@
 //     grows, orders.ApplyRefund records it on the order (not for an
 //     overpayment: that money was never the order's), the ledger posts
 //     refund_completed (unallocated money from buyer_advances; a line's
-//     shares split against what is left of them, platform/money) and
+//     shares — Koro's own line's sale, fee and VAT too, BE-067 — split
+//     against what is left of them, platform/money) and
 //     payment.refunded leaves (O). A line in a payout waiting for approval
 //     or for its transfer cannot be refunded (409 payments.line_in_payout,
 //     checked again after the ledger took the payee's lock); a line already

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"time"
 	"uuid"
 
 	"koro/internal/audit"
@@ -48,8 +49,9 @@ import (
 //     proportion to what is left of them (platform/money Allocate over the
 //     ledger's refunded shares, so the last refund of the line takes the
 //     exact remainder); a line already paid out gives its seller part back
-//     from payee_receivable (06 H-59). Koro's own platform-native line was
-//     never allocated (T-293): from buyer_advances.
+//     from payee_receivable (06 H-59). Koro's own platform-native line gives
+//     back its sale, buyer fee and VAT the same way (BE-067; a line paid
+//     before its template is recognised first, in the same transaction).
 //
 // Every limit of a request counts the open (requested, approved) refunds,
 // so two requests never promise the same money; the completion checks
@@ -692,7 +694,7 @@ func (s *service) complete(ctx context.Context, a authz.Actor, id uuid.UUID, ref
 	if _, err := ledger.RefundCompleted(model, r.ID, r.Amount, nil, now); err != nil {
 		return RefundResult{}, err // ledger.model_not_enabled: models B and C (T-11; the C reversal is BE-066's)
 	}
-	shares, err := s.applyToOrder(ctx, r)
+	shares, err := s.applyToOrder(ctx, r, model, now)
 	if err != nil {
 		return RefundResult{}, err
 	}
@@ -752,7 +754,7 @@ type refundShares struct {
 
 // applyToOrder records the refund on the order (not for an overpayment)
 // and returns its ledger shares.
-func (s *service) applyToOrder(ctx context.Context, r Refund) (refundShares, error) {
+func (s *service) applyToOrder(ctx context.Context, r Refund, model ledger.Model, now time.Time) (refundShares, error) {
 	if r.Overpayment() {
 		m, err := s.orderMoney(ctx, r.OrderID)
 		if err != nil {
@@ -784,19 +786,17 @@ func (s *service) applyToOrder(ctx context.Context, r Refund) (refundShares, err
 	if err != nil {
 		return refundShares{}, err
 	}
-	if l.PayeeID == nil {
-		// Koro's own platform-native line: its money was never allocated
-		// (T-293; its ledger template is BE-067's).
-		return refundShares{unallocated: r.Amount}, nil
-	}
 	if s.d.LedgerLines == nil {
 		return refundShares{}, ErrUnavailable
+	}
+	if l.PayeeID == nil {
+		return s.platformRefund(ctx, r, before, l, model, now)
 	}
 	done, err := s.d.LedgerLines.RefundedShares(ctx, l.ID)
 	if err != nil {
 		return refundShares{}, err
 	}
-	rl, err := lineRefund(l, done, r.Amount)
+	rl, err := lineRefund(l, ledger.AllocationOf(l.Paid()), done, r.Amount)
 	if err != nil {
 		return refundShares{}, err
 	}
@@ -809,12 +809,54 @@ func (s *service) applyToOrder(ctx context.Context, r Refund) (refundShares, err
 	return out, nil
 }
 
+// platformRefund is the refund of Koro's own platform-native line (BE-067,
+// T-293): its sale was allocated at payment (order_allocated) — or, for a
+// line paid before the template, is recognised now, in this transaction,
+// with the same idempotent adjustment ledger.recognize_platform_sales posts
+// (a line already refunded through buyer_advances before is left to
+// finance: 409). The refund takes back the sale, the buyer fee and the VAT
+// in proportion to what is left of them, as a payee line's shares.
+func (s *service) platformRefund(ctx context.Context, r Refund, before, l orders.Line, model ledger.Model, now time.Time) (refundShares, error) {
+	a := ledger.AllocationOf(l.Paid())
+	alloc, err := s.d.LedgerLines.LineAllocation(ctx, l.ID)
+	switch {
+	case err != nil:
+		return refundShares{}, err
+	case alloc == 0:
+		if before.RefundedAmount != 0 {
+			return refundShares{}, ErrInvalidState.WithFields(fieldErrOf("body.order_line_id",
+				"Koro's own line was refunded before its sale was recognised: finance corrects the ledger by hand"))
+		}
+		t, err := ledger.PlatformSaleRecognized(model, a, now)
+		if err != nil {
+			return refundShares{}, err
+		}
+		if _, err := s.d.Ledger.Post(ctx, t); err != nil {
+			return refundShares{}, err
+		}
+	case alloc != l.PayableAmount:
+		return refundShares{}, fmt.Errorf("payments: line %s: the ledger allocated %d of %d", l.ID, alloc, l.PayableAmount)
+	}
+	done, err := s.d.LedgerLines.RefundedShares(ctx, l.ID)
+	if err != nil {
+		return refundShares{}, err
+	}
+	rl, err := lineRefund(l, a, done, r.Amount)
+	if err != nil {
+		return refundShares{}, err
+	}
+	return refundShares{lines: []ledger.RefundLine{rl}}, nil
+}
+
 // lineRefund splits amount over what is left of an allocated line's shares
-// (its seller net, commission and commission VAT minus what refunds took
-// back so far): platform/money Allocate, so every share stays within what
-// is left and the last refund of the line takes the exact remainder.
-func lineRefund(l orders.Line, done ledger.LineShares, amount int64) (ledger.RefundLine, error) {
-	left := []int64{l.SellerNetAmount - done.Seller, l.CommissionAmount - done.Commission, l.CommissionVATAmount - done.CommissionVAT}
+// (a: the line's allocation; done: what refunds took back so far): a payee
+// line's seller net, commission and commission VAT, Koro's own line's sale,
+// buyer fee and VAT (BE-067). platform/money Allocate, so every share stays
+// within what is left and the last refund of the line takes the exact
+// remainder; the zero shares of the other kind of line take nothing.
+func lineRefund(l orders.Line, a ledger.AllocationLine, done ledger.LineShares, amount int64) (ledger.RefundLine, error) {
+	sh := a.Shares()
+	left := []int64{sh.Seller - done.Seller, sh.Sales - done.Sales, sh.Commission - done.Commission, sh.CommissionVAT - done.CommissionVAT}
 	var total int64
 	for _, v := range left {
 		if v < 0 {
@@ -829,8 +871,12 @@ func lineRefund(l orders.Line, done ledger.LineShares, amount int64) (ledger.Ref
 	if err != nil {
 		return ledger.RefundLine{}, fmt.Errorf("payments: line %s: split the refund: %w", l.ID, err)
 	}
-	return ledger.RefundLine{
-		OrderLineID: l.ID, PayeeID: *l.PayeeID, SellerAmount: parts[0], CommissionAmount: parts[1], CommissionVATAmount: parts[2],
+	rl := ledger.RefundLine{
+		OrderLineID: l.ID, SellerAmount: parts[0], SalesAmount: parts[1], CommissionAmount: parts[2], CommissionVATAmount: parts[3],
 		PaidOut: l.PayoutID != nil,
-	}, nil
+	}
+	if l.PayeeID != nil {
+		rl.PayeeID = *l.PayeeID
+	}
+	return rl, nil
 }

@@ -7,9 +7,8 @@
 # appears exactly once. A module file may add file-local groups.
 # config: default platform configuration of every case; a module declares
 # its own keys under config: in its <module>.yaml.
-# strict_action_coverage: false while module tickets are in flight: an
-# unbound HTTP action of a module WITHOUT a matrix file is only logged. The
-# orchestrator sets it to true once every module has its file (03 §7.4-5).
+# BE-045 / 06 H-29: every HTTP action must be bound or explicitly tracked
+# in its module pending_actions with the implementing ticket (including P3).
 version: 1
 personas: [anonymous, user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
            event_staff, university_rep, company_member, company_admin, other_company_member,
@@ -25,4 +24,4 @@ groups:
               moderator, support, dpo, platform_admin, finance_admin, talent_auditor]
 config:
   talent_auditor_api_enabled: false
-strict_action_coverage: false
+strict_action_coverage: true

@@ -24,6 +24,9 @@
 // 02 §9.1), confirmed_count (confirmed + checked_in), like_count, segment
 // estimates rounded like outreach.Bucket, ticket tokens derived with the
 // configured CRYPTO_TOKEN_KEYS (so the QR of a seeded ticket checks in).
+// Commerce adds a synthetic Model A catalogue, verified legal parties,
+// unpaid orders and their pending/revoked rights. Collection accounts and
+// paid histories are separate setup; no bank evidence or transfer is seeded.
 package seed
 
 import (
@@ -102,6 +105,7 @@ type Demo struct {
 	SegmentID           uuid.UUID // CompanyOrgID's segment of the main university
 	PendingCompanyOrgID uuid.UUID // a company in pending_review
 	SensitiveClubOrgIDs []uuid.UUID
+	Commerce            CommerceDemo
 }
 
 // Account is a well-known demo account and what it is for. NoPassword

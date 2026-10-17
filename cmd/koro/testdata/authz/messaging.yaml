@@ -1,0 +1,12 @@
+# BE-056: the P3 HTTP surface is not implemented yet. Strict coverage
+# keeps each pending action explicit until that ticket binds its operation.
+version: 1
+pending_actions:
+  - messaging.contact_request.create # BE-056
+  - messaging.contact_request.list_sent # BE-056
+  - messaging.contact_request.read # BE-056
+  - messaging.contact_request.withdraw # BE-056
+  - messaging.contact_request.list_received # BE-056
+  - messaging.contact_request.respond # BE-056
+  - messaging.block.manage # BE-056
+  - messaging.block.list_own # BE-056

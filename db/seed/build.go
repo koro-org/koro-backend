@@ -20,7 +20,7 @@ import (
 // kinds are the ID spaces of the plan, in insertion order; an ID's time
 // part is the kind's base plus the row's ordinal (demoID).
 var kinds = []string{"user", "role", "edu", "org", "member", "ent", "usage", "segment", "event", "form", "formver",
-	"reg", "ticket", "checkin", "post", "notice"}
+	"reg", "ticket", "checkin", "post", "notice", "party", "payee", "service", "offering", "policy", "order", "line", "commerce_ent"}
 
 // istanbul is the zone of the demo's local times (events at 18:00).
 var istanbul = func() *time.Location {
@@ -157,7 +157,7 @@ func (b *builder) build() error {
 	b.notice()
 	u := b.ref.Universities[0]
 	b.p.Demo.MainUniversity = u
-	return nil
+	return b.commerce()
 }
 
 // user adds an active, verified account with the demo password (if any).

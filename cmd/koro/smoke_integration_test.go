@@ -283,7 +283,7 @@ func TestSmoke_ClubFirstPilotFlow(t *testing.T) {
 		t.Fatal("a minor sees a commercial targeted post")
 	}
 	var used int
-	q(`SELECT quantity_used FROM entitlements WHERE org_id = $1 AND feature = 'targeted_post'`, &used, company)
+	q(`SELECT quantity_used FROM entitlements WHERE org_id = $1 AND feature = 'targeted_post' AND source_type = 'admin_grant'`, &used, company)
 	if used != 2 {
 		t.Fatalf("quota used = %d, want 2", used)
 	}

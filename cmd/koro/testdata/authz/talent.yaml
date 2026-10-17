@@ -1,0 +1,10 @@
+# BE-052: the P3 HTTP surface is not implemented yet. Strict coverage
+# keeps each pending action explicit until that ticket binds its operation.
+version: 1
+pending_actions:
+  - talent.report.read # BE-052
+  - talent.distribution.read # BE-052
+  - talent.neutralization.manage # BE-052
+  - talent.reversal.create # BE-052
+  - talent.config.read # BE-052
+  - talent.config.manage # BE-052

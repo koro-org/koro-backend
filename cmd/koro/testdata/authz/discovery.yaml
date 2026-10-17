@@ -1,0 +1,6 @@
+# BE-051: the P3 HTTP surface is not implemented yet. Strict coverage
+# keeps each pending action explicit until that ticket binds its operation.
+version: 1
+pending_actions:
+  - discovery.profile.search # BE-051
+  - discovery.profile.read # BE-051

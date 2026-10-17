@@ -24,6 +24,10 @@
 //     consent.recorded outbox event in the recording transaction (ADR-0009,
 //     mechanism O); the consent.submit_iys task delivers it and
 //     consent.iys_reconcile (05:30) retries what is still open.
+//   - Every commercial e-mail carries a one-click unsubscribe link
+//     (unsubscribe.go, BE-062): a signed, expiring token bound to the user
+//     and the purpose; following it withdraws through the email_link
+//     channel, idempotently, without revealing the subject or its state.
 package consent
 
 import (
@@ -106,6 +110,16 @@ type Service interface {
 	ListPurposes(ctx context.Context, a authz.Actor) ([]PurposeDef, error)
 	// UpdatePurpose is adminUpdateConsentPurpose (consent.purpose.manage, R).
 	UpdatePurpose(ctx context.Context, a authz.Actor, code Purpose, p PurposePatch, proof ReauthProof) (PurposeDef, error)
+
+	// UnsubscribeLinks mints the one-click unsubscribe links (BE-062).
+	UnsubscribeLinks
+	// GetUnsubscribe is getUnsubscribeLink: the purpose a valid link
+	// withdraws, nothing else. The token is the credential (the subject's,
+	// consent.record.create); the HTTP caller is not the actor.
+	GetUnsubscribe(ctx context.Context, token string) (UnsubscribeLink, error)
+	// Unsubscribe is confirmUnsubscribe (RFC 8058 one-click): withdraws the
+	// link's consent if it is in force, idempotently, with the İYS RET.
+	Unsubscribe(ctx context.Context, token string) error
 }
 
 // Deps are the dependencies of the consent module. Everything but IYS and
@@ -128,6 +142,10 @@ type Deps struct {
 	// IYSRequired is CONSENT_IYS_REQUIRED: refuse to start without a real
 	// İYS client (live operation, H-14).
 	IYSRequired bool
+	// Unsubscribe configures the one-click unsubscribe links of commercial
+	// e-mail (BE-062). Zero → no link is minted (commercial e-mail is
+	// refused upstream) and every link is refused.
+	Unsubscribe UnsubscribeConfig
 }
 
 func (d *Deps) validate() error {
@@ -149,6 +167,9 @@ func (d *Deps) validate() error {
 	if d.IYSRequired && !d.IYS.Real() {
 		errs = append(errs, fmt.Errorf("consent: CONSENT_IYS_REQUIRED=true needs a real İYS client, got %q (BE-055)", d.IYS.Name()))
 	}
+	if err := d.Unsubscribe.validate(); err != nil {
+		errs = append(errs, err)
+	}
 	return errors.Join(errs...)
 }
 
@@ -160,6 +181,9 @@ type Module struct {
 	// Sweeper ends the retention of the consent proof (consent_proof,
 	// 02 §24.2; BE-057).
 	Sweeper privacy.RetentionSweeper
+	// Links mints the unsubscribe links of commercial e-mail; nil when
+	// Deps.Unsubscribe has no base URL (commercial e-mail is unavailable).
+	Links UnsubscribeLinks
 
 	svc *service
 }
@@ -172,7 +196,11 @@ func New(d Deps) (Module, error) {
 		return Module{}, err
 	}
 	s := &service{d: d}
-	return Module{Service: s, Privacy: privacyProvider{s: s}, Sweeper: sweeper{s: s}, svc: s}, nil
+	m := Module{Service: s, Privacy: privacyProvider{s: s}, Sweeper: sweeper{s: s}, svc: s}
+	if d.Unsubscribe.enabled() {
+		m.Links = s
+	}
+	return m, nil
 }
 
 // Subscribe registers the outbox subscription of consent (01 §6.2):

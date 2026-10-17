@@ -52,3 +52,14 @@ scenarios:
       - { persona: student, operation: recordMyConsent, expect: 201 }
       - { persona: student, operation: listMyConsents, expect: 200 }
       - { persona: student, operation: adminListUserConsents, path_params: { user_id: student_b }, expect: 403, code: forbidden }
+  one_click_unsubscribe:
+    note: >-
+      BE-062: a granted commercial_email consent is withdrawn by the one-click link without a session;
+      a second click and the student's own withdrawal afterwards change nothing; a forged link is 422
+    steps:
+      - { persona: student, operation: recordMyConsent, expect: 201 }
+      - { persona: anonymous, operation: getUnsubscribeLink, expect: 200 }
+      - { persona: anonymous, operation: confirmUnsubscribe, expect: 204 }
+      - { persona: anonymous, operation: confirmUnsubscribe, expect: 204 }
+      - { persona: student_b, operation: confirmUnsubscribe, path_params: { token: "literal:AQFHZwkCPPlZ-LRuER97ECn1AAAAAPSGVwAFdGVzdDHSlz3r8ur9IOaZz6XQA57A00szcsl3aqr3nOZZWSdung" }, expect: 422, code: consent.invalid_unsubscribe_link }
+      - { persona: student, operation: listMyConsents, expect: 200 }

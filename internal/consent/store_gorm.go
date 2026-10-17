@@ -322,6 +322,22 @@ func (s gormStore) Latest(ctx context.Context, userID uuid.UUID, purpose Purpose
 	return toConsent(rows[0]), true, nil
 }
 
+// subjectLockKey namespaces the advisory locks of LockSubject.
+const subjectLockKey = "consent.subject:"
+
+// LockSubject implements Store with a transaction-scoped advisory lock on
+// (user, purpose) (released at commit or rollback).
+//
+// cross-org: personal ledger addressed by user.
+func (s gormStore) LockSubject(ctx context.Context, userID uuid.UUID, purpose Purpose) error {
+	err := db.Conn(ctx, s.orm).Exec(`SELECT pg_advisory_xact_lock(hashtextextended( ?, 0))`,
+		subjectLockKey+userID.String()+":"+string(purpose)).Error
+	if err != nil {
+		return fmt.Errorf("consent: lock subject: %w", err)
+	}
+	return nil
+}
+
 // CurrentOf implements Store over the consent_current view.
 //
 // cross-org: personal ledger addressed by user.

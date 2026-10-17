@@ -63,18 +63,22 @@ type pgEnv struct {
 	svc   consent.Service
 }
 
-func newPGEnv(t *testing.T) *pgEnv {
+func newPGEnv(t *testing.T, opts ...func(*consent.Deps)) *pgEnv {
 	t.Helper()
 	d := testutil.NewDB(t)
 	clk := clock.NewFake(time.Now().UTC().Truncate(time.Second))
 	e := &pgEnv{d: d, clk: clk, store: consent.NewGormStore(d.ORM), iys: &consent.FakeIYS{}}
 	ob := outbox.New(outbox.Deps{Store: outbox.NewGormStore(d.ORM), Tx: d.Tx, Subs: outbox.NewRegistry(), Queue: queue.NewMem(), Clock: clk, Log: obs.Discard()})
-	mod, err := consent.New(consent.Deps{
+	deps := consent.Deps{
 		Store: e.store, Tx: d.Tx, Outbox: ob, Clock: clk, Log: obs.Discard(),
 		Audit:       audit.New(audit.Deps{Store: audit.NewGormStore(d.ORM), Tx: d.Tx, Clock: clk, Log: obs.Discard()}).Service,
 		Idempotency: idempotency.New(idempotency.Deps{Tx: d.Tx, Store: idempotency.NewGormStore(d.ORM), Clock: clk, Log: obs.Discard()}),
 		Reauth:      fakeReauth{}, IYS: e.iys,
-	})
+	}
+	for _, o := range opts {
+		o(&deps)
+	}
+	mod, err := consent.New(deps)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,4 +279,128 @@ func TestIYS_Gorm_DeliverAndReconcile(t *testing.T) {
 	if sub.Status != consent.SubmissionSent || sub.Attempts != 2 || sub.SentAt == nil || sub.LastError != nil {
 		t.Fatalf("after reconcile = %+v", sub)
 	}
+}
+
+// TestUnsubscribe_Gorm_ConcurrentClicksWithdrawOnce (BE-062): a mailbox
+// provider retrying the one-click POST, or several clicks at once, withdraw
+// the consent once — one withdrawn row, one İYS submission, one outbox
+// event, one audit row — because the (user, purpose) advisory lock makes
+// the "latest row is a grant" check and the append atomic.
+func TestUnsubscribe_Gorm_ConcurrentClicksWithdrawOnce(t *testing.T) {
+	t.Parallel()
+	e := newPGEnv(t, withLinks(unsubBase, deriver(t, tokenKey("k1", 0x11))))
+	uid := insertUser(t, e.d, uuid.NewV7())
+	text := e.consentText(t, consent.PurposeCommercialEmail)
+	if _, err := e.svc.Record(t.Context(), grant(uid, text, consent.ChannelWeb)); err != nil {
+		t.Fatal(err)
+	}
+	e.clk.Advance(time.Second)
+	link, err := e.mod.Links.UnsubscribeURL(uid, consent.PurposeCommercialEmail)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok := link[len(unsubBase)+1:]
+
+	const clicks = 8
+	errs := make(chan error, clicks)
+	start := make(chan struct{})
+	for range clicks {
+		go func() {
+			<-start
+			errs <- e.svc.Unsubscribe(context.Background(), tok)
+		}()
+	}
+	close(start)
+	for range clicks {
+		if err := <-errs; err != nil {
+			t.Fatalf("Unsubscribe: %v", err)
+		}
+	}
+	if n := e.count(t, `SELECT count(*) FROM consents WHERE user_id = $1 AND action = 'withdrawn' AND channel = 'email_link'`, uid); n != 1 {
+		t.Fatalf("withdrawn rows = %d, want 1", n)
+	}
+	if n := e.count(t, `SELECT count(*) FROM iys_submissions s JOIN consents c ON c.id = s.consent_id
+		WHERE c.user_id = $1 AND c.action = 'withdrawn'`, uid); n != 1 {
+		t.Fatalf("İYS submissions of the withdrawal = %d, want 1", n)
+	}
+	if n := e.count(t, `SELECT count(*) FROM outbox WHERE topic = $1`, domainevent.TopicConsentRecorded); n != 2 {
+		t.Fatalf("consent.recorded events = %d", n)
+	}
+	if n := e.count(t, `SELECT count(*) FROM audit_events WHERE action = 'consent.record.create' AND actor_user_id = $1
+		AND metadata->>'channel' = 'email_link'`, uid); n != 1 {
+		t.Fatalf("audit rows of the withdrawal = %d, want 1", n)
+	}
+	if ok, err := e.svc.HasActive(t.Context(), uid, consent.PurposeCommercialEmail, nil); err != nil || ok {
+		t.Fatalf("HasActive after unsubscribe = %v, %v", ok, err)
+	}
+}
+
+// Failing the last write must leave the grant intact and roll back every
+// withdrawal artifact; retrying the same link can then complete normally.
+func TestUnsubscribe_Gorm_OutboxFailureRollsBackWithdrawal(t *testing.T) {
+	t.Parallel()
+	var failing *unsubscribeFailOutbox
+	e := newPGEnv(t, withLinks(unsubBase, deriver(t, tokenKey("k1", 0x11))), func(d *consent.Deps) {
+		failing = &unsubscribeFailOutbox{Writer: d.Outbox}
+		d.Outbox = failing
+	})
+	ctx, purpose := t.Context(), consent.PurposeCommercialEmail
+	uid := insertUser(t, e.d, uuid.NewV7())
+	if _, err := e.svc.Record(ctx, grant(uid, e.consentText(t, purpose), consent.ChannelWeb)); err != nil {
+		t.Fatal(err)
+	}
+	e.clk.Advance(time.Second)
+	link, err := e.mod.Links.UnsubscribeURL(uid, purpose)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok := link[len(unsubBase)+1:]
+	counts := func() [4]int {
+		return [4]int{
+			e.count(t, `SELECT count(*) FROM consents WHERE user_id = $1`, uid),
+			e.count(t, `SELECT count(*) FROM iys_submissions`),
+			e.count(t, `SELECT count(*) FROM outbox WHERE topic = $1`, domainevent.TopicConsentRecorded),
+			e.count(t, `SELECT count(*) FROM audit_events WHERE action = 'consent.record.create' AND actor_user_id = $1`, uid),
+		}
+	}
+	before := counts()
+	failing.fail.Store(true)
+	if err := e.svc.Unsubscribe(ctx, tok); !errors.Is(err, errBoom) {
+		t.Fatalf("Unsubscribe with failing outbox = %v, want injected failure", err)
+	}
+	if after := counts(); after != before {
+		t.Fatalf("failed unsubscribe persisted artifacts: before %v, after %v", before, after)
+	}
+	if active, err := e.svc.HasActive(ctx, uid, purpose, nil); err != nil || !active {
+		t.Fatalf("HasActive after rollback = %v, %v", active, err)
+	}
+	failing.fail.Store(false)
+	if err := e.svc.Unsubscribe(ctx, tok); err != nil {
+		t.Fatalf("retry after rollback: %v", err)
+	}
+	want := before
+	for i := range want {
+		want[i]++
+	}
+	if after := counts(); after != want {
+		t.Fatalf("retry artifacts = %v, want %v", after, want)
+	}
+	if active, err := e.svc.HasActive(ctx, uid, purpose, nil); err != nil || active {
+		t.Fatalf("HasActive after retry = %v, %v", active, err)
+	}
+}
+
+type unsubscribeFailOutbox struct {
+	outbox.Writer
+	fail atomic.Bool
+}
+
+func (w *unsubscribeFailOutbox) Add(ctx context.Context, ev domainevent.Envelope) error {
+	if err := w.Writer.Add(ctx, ev); err != nil {
+		return err
+	}
+	if w.fail.Load() {
+		return errBoom
+	}
+	return nil
 }

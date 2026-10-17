@@ -109,6 +109,15 @@ type Consents interface {
 	FilterActive(ctx context.Context, userIDs []uuid.UUID, purpose consent.Purpose) ([]uuid.UUID, error)
 }
 
+// UnsubscribeLinks mints the one-click unsubscribe link of a commercial
+// e-mail's recipient (consent, L2; BE-062): a signed, expiring token bound
+// to the user and the purpose, which notify puts in List-Unsubscribe,
+// List-Unsubscribe-Post and the footer (6563 ret, RFC 8058). It is
+// consent.Module.Links.
+type UnsubscribeLinks interface {
+	UnsubscribeURL(userID uuid.UUID, purpose consent.Purpose) (string, error)
+}
+
 // Sender is notify (L3; 01 §4.5): one notification per recipient and
 // channel, idempotent by its dedupe key.
 type Sender interface {

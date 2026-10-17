@@ -197,6 +197,30 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 		}
 	})
 
+	t.Run("subject lock (BE-062)", func(t *testing.T) {
+		t.Parallel()
+		w := newWorld(t)
+		u := w.user(t)
+		err := w.tx.WithTx(t.Context(), func(ctx context.Context) error {
+			for range 2 { // re-entrant within the transaction
+				if err := w.s.LockSubject(ctx, u, email); err != nil {
+					return err
+				}
+			}
+			if err := w.s.LockSubject(ctx, u, consent.PurposeCommercialPush); err != nil {
+				return err
+			}
+			_, found, err := w.s.Latest(ctx, u, email, nil)
+			if err == nil && found {
+				err = errors.New("a fresh user has a consent")
+			}
+			return err
+		})
+		if err != nil {
+			t.Fatalf("LockSubject: %v", err)
+		}
+	})
+
 	t.Run("consent ledger", func(t *testing.T) {
 		t.Parallel()
 		w := newWorld(t)

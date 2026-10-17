@@ -1,10 +1,16 @@
-# Authz matrix of the consent module (03 §5.5, 04 §2.5; BE-012). 10 operations × 18 personas.
+# Authz matrix of the consent module (03 §5.5, 04 §2.5; BE-012, BE-062). 12 operations × 18 personas.
 # notice.read is public (P); record.create/list_own are O cells on /me (every signed-in
 # user; 03 k12: a minor's grant of a restricted purpose is 422); list_admin is dpo ✓ and
 # support B; notice.manage and purpose.manage are dpo · R. Admin surface (03 §7.2-3):
 # everyone without the role → 403. dpo and support sessions are MFA verified (03 §7.3);
 # the MFA-less session, R and B are pinned in scenarios/consent.yaml and the policy test.
 # R bodies carry the test re-authentication proof (wire_consent_test.go).
+# BE-062: the one-click unsubscribe link (getUnsubscribeLink, confirmUnsubscribe) is public: the
+# signed token in the path is the subject's credential (consent.record.create, O cell through the
+# token), so every persona — anonymous, a mailbox provider or another signed-in user — gets the same
+# answer. The literal tokens are signed with the shared test key (testDeriver, key "test1"): user
+# student, purpose commercial_email, expiry 2100-01-01 (valid) or 2026-01-01 (expired); "tampered"
+# changes one MAC character.
 version: 1
 groups:
   no_platform_role: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
@@ -153,3 +159,36 @@ operations:
         note: the admin surface answers 403 first; dpo learns the code does not exist
         expect: { anonymous: 401, "@no_platform_role": 403, moderator: 403, support: 403, dpo: 404,
                   platform_admin: 403, finance_admin: 403, talent_auditor: 403 }
+
+  getUnsubscribeLink:
+    method: GET
+    path: /api/v1/unsubscribe-links/{token}
+    action: consent.record.create
+    public: true
+    path_params: { token: "literal:AQFHZwkCPPlZ-LRuER97ECn1AAAAAPSGVwAFdGVzdDHSlz3r8ur9IOaZz6XQc57A00szcsl3aqr3nOZZWSdung" }
+    note: the confirmation page data (purpose only); the session, if any, plays no part
+    expect: { "@all": 200 }
+    variants:
+      - name: expired
+        path_params: { token: "literal:AQFHZwkCPPlZ-LRuER97ECn1AAAAAGlVuQAFdGVzdDGVNkrgfhy3qOSqDvDZdMYQGN9wCUYtz1xpqqVRHXBLrw" }
+        note: an expired link is the same 422 as a forged one
+        expect: { "@all": 422 }
+      - name: tampered
+        path_params: { token: "literal:AQFHZwkCPPlZ-LRuER97ECn1AAAAAPSGVwAFdGVzdDHSlz3r8ur9IOaZz6XQA57A00szcsl3aqr3nOZZWSdung" }
+        expect: { "@all": 422 }
+
+  confirmUnsubscribe:
+    method: POST
+    path: /api/v1/unsubscribe-links/{token}
+    action: consent.record.create
+    public: true
+    path_params: { token: "literal:AQFHZwkCPPlZ-LRuER97ECn1AAAAAPSGVwAFdGVzdDHSlz3r8ur9IOaZz6XQc57A00szcsl3aqr3nOZZWSdung" }
+    note: RFC 8058 one-click; 204 whether a consent was withdrawn or none was in force (no state leak)
+    expect: { "@all": 204 }
+    variants:
+      - name: expired
+        path_params: { token: "literal:AQFHZwkCPPlZ-LRuER97ECn1AAAAAGlVuQAFdGVzdDGVNkrgfhy3qOSqDvDZdMYQGN9wCUYtz1xpqqVRHXBLrw" }
+        expect: { "@all": 422 }
+      - name: tampered
+        path_params: { token: "literal:AQFHZwkCPPlZ-LRuER97ECn1AAAAAPSGVwAFdGVzdDHSlz3r8ur9IOaZz6XQA57A00szcsl3aqr3nOZZWSdung" }
+        expect: { "@all": 422 }

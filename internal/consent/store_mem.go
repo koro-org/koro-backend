@@ -296,6 +296,11 @@ func sameScope(a, b *uuid.UUID) bool {
 	return *a == *b
 }
 
+// LockSubject implements Store. The in-memory store serialises every call
+// with its mutex; there is no transaction to hold a lock for (NopTx), so
+// the concurrency guarantee is PostgreSQL's (store_integration_test.go).
+func (*memStore) LockSubject(context.Context, uuid.UUID, Purpose) error { return nil }
+
 func (s *memStore) Latest(_ context.Context, userID uuid.UUID, purpose Purpose, scopeID *uuid.UUID) (Consent, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

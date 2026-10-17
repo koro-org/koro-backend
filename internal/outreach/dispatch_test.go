@@ -248,8 +248,8 @@ func TestRunDispatch_CommercialOnlyConsented(t *testing.T) {
 			t.Fatalf("dedupe key %q", m.DedupeKey)
 		case m.LinkPath != "/posts/"+p.ID.String():
 			t.Fatalf("link %q", m.LinkPath)
-		case m.Channel == notify.ChannelEmail && (m.UnsubscribeURL != testUnsubscribe || m.ToEmail == ""):
-			t.Fatalf("commercial e-mail without the unsubscribe link: %+v", m)
+		case m.Channel == notify.ChannelEmail && (m.UnsubscribeURL != linkOf(*m.UserID, consent.PurposeCommercialEmail) || m.ToEmail == ""):
+			t.Fatalf("commercial e-mail without the recipient's own unsubscribe link: %+v", m)
 		case m.Channel == notify.ChannelPush:
 			for k, v := range m.Data {
 				if _, ok := v.(uuid.UUID); !ok {
@@ -603,6 +603,28 @@ func TestRunDispatch_AudienceTooSmall_FailsWithoutCount(t *testing.T) {
 	}
 }
 
+// TestRunDispatch_CommercialEmail_LinkRefusedFailsPermanently (BE-062): a
+// commercial e-mail never leaves without its recipient's unsubscribe link;
+// a link consent cannot mint fails the dispatch for good (no retry, no
+// mail).
+func TestRunDispatch_CommercialEmail_LinkRefusedFailsPermanently(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, func(_ *env, d *outreach.Deps) { d.Unsubscribe = fakeLinks{fail: consent.ErrUnsubscribeUnavailable} })
+	e.grantDispatches(t, companyA, 1)
+	ids := e.audience.add(12, true, uniKey(uniA))
+	e.users.add(false, ids...)
+	e.consents.grant(consent.PurposeCommercialEmail, ids...)
+	d := e.schedule(t, "company_admin", e.targetedPost(companyA, outreach.AuthorCompany, uniKey(uniA)), outreach.ChannelEmail)
+	if err := e.deliver(t); err != nil {
+		t.Fatal(err)
+	}
+	got := e.dispatch(t, d)
+	if got.Status != outreach.DispatchFailed || got.LastError == nil || *got.LastError != "notify.invalid_message" ||
+		e.sender.attempts != 0 {
+		t.Fatalf("dispatch %s (%v), sends %d", got.Status, got.LastError, e.sender.attempts)
+	}
+}
+
 // TestScheduleDispatch_Rules: what a dispatch refuses before any unit is
 // spent.
 func TestScheduleDispatch_Rules(t *testing.T) {
@@ -670,7 +692,7 @@ func TestScheduleDispatch_Rules(t *testing.T) {
 	}
 
 	// Commercial e-mail needs the unsubscribe endpoint; informational e-mail does not.
-	noUnsub := newEnv(t, func(_ *env, d *outreach.Deps) { d.UnsubscribeURL = "" })
+	noUnsub := newEnv(t, func(_ *env, d *outreach.Deps) { d.Unsubscribe = nil })
 	noUnsub.grantDispatches(t, companyA, 1)
 	_, err := noUnsub.svc.ScheduleDispatch(ctx, outreach.DispatchInput{Actor: cma,
 		Post: noUnsub.targetedPost(companyA, outreach.AuthorCompany, uniKey(uniA)), Channels: []outreach.Channel{outreach.ChannelEmail}})

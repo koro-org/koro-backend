@@ -176,3 +176,9 @@ func afterOf(cursor, fp string) (*After, error) {
 	}
 	return &After{At: at, ID: id}, nil
 }
+
+// UnsubscribeLinkDTO is the body of getUnsubscribeLink (BE-062): what the
+// confirmation page needs and nothing about the recipient.
+type UnsubscribeLinkDTO struct {
+	PurposeCode string `json:"purpose_code" enum:"commercial_email" doc:"The consent the link withdraws"`
+}

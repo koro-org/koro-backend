@@ -30,8 +30,10 @@ import (
 // c.identity.svc (active adult accounts, language, e-mail address),
 // c.consent.svc (the commercial filter, FilterActive), c.notify.svc (read
 // at call time), c.feed.svc (L9, above outreach: a post's facts, read at
-// call time), OUTREACH_UNSUBSCRIBE_URL and IDENTITY_LINK_BASE_URL (the web
-// origin of e-mail links).
+// call time) and IDENTITY_LINK_BASE_URL (the web origin of e-mail links).
+// BE-062: c.consent.links (each recipient's one-click unsubscribe link of
+// commercial e-mail; nil without CONSENT_UNSUBSCRIBE_BASE_URL, which keeps
+// commercial dispatches off e-mail). It replaced OUTREACH_UNSUBSCRIBE_URL.
 //
 // Provided, set in build: svc (outreach.Service: Targeting.Compile,
 // ScheduleDispatch, DiscardDispatch and DispatchOfPost for feed's targeted
@@ -64,7 +66,7 @@ func (w *outreachWiring) build(c *container) error {
 		Clock: c.infra.clock, Log: c.infra.log.With("module", "outreach"),
 		DailyCountLimit: c.infra.cfg.Outreach.CountDailyLimit,
 		Sender:          outreachSender{c: c}, Posts: outreachPosts{c: c},
-		UnsubscribeURL: c.infra.cfg.Outreach.UnsubscribeURL, LinkBaseURL: c.infra.cfg.Identity.LinkBaseURL,
+		LinkBaseURL: c.infra.cfg.Identity.LinkBaseURL,
 	}
 	if c.infra.outbox != nil {
 		d.Outbox = c.infra.outbox
@@ -86,6 +88,9 @@ func (w *outreachWiring) build(c *container) error {
 	}
 	if svc := c.consent.svc; svc != nil {
 		d.Consents = svc
+	}
+	if l := c.consent.links; l != nil {
+		d.Unsubscribe = l
 	}
 	mod, err := outreach.New(d)
 	if err != nil {

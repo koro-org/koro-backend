@@ -84,6 +84,29 @@ func Register(api huma.API, svc Service) {
 		Summary:     "Switch a consent purpose on or off, or edit its description",
 		Description: "An inactive purpose is never in force for anyone; the ledger keeps its rows.",
 	}, op.Meta{Action: string(authz.ConsentPurposeManage), Surface: op.SurfaceAdmin, Reauth: true, RateLimit: op.RateReauth}), h.updatePurpose)
+
+	// One-click unsubscribe (BE-062): the token in the path is the
+	// subject's credential (consent.record.create, O); cookies and bearer
+	// tokens play no part. read_default/write_default (anonymous: per IP,
+	// fail open), not token_confirm: mailbox providers post one-click
+	// unsubscribes from shared server addresses and a limiter outage must
+	// not turn the legal opt-out into a 503.
+	huma.Register(api, op.Koro(huma.Operation{
+		OperationID: "getUnsubscribeLink", Method: http.MethodGet, Path: "/unsubscribe-links/{token}", Tags: tags,
+		Summary: "Show what an unsubscribe link withdraws",
+		Description: "The data of the unsubscribe confirmation page: the consent purpose of the link (commercial_email). " +
+			"Nothing about the recipient or the current consent state; no side effect (mail scanners open links). " +
+			"A malformed, tampered or expired link is 422 consent.invalid_unsubscribe_link, the same answer for every reason.",
+	}, op.Meta{Action: string(authz.ConsentRecordCreate), Surface: op.SurfacePublic}), h.getUnsubscribe)
+
+	huma.Register(api, op.Koro(huma.Operation{
+		OperationID: "confirmUnsubscribe", Method: http.MethodPost, Path: "/unsubscribe-links/{token}", Tags: tags,
+		Summary: "Unsubscribe with one click (RFC 8058)", DefaultStatus: http.StatusNoContent,
+		Description: "The List-Unsubscribe-Post target of commercial e-mail: the request body (List-Unsubscribe=One-Click, " +
+			"form or multipart) and its content type are ignored. Withdraws the recipient's consent to the link's purpose " +
+			"through the email_link channel and queues the İYS refusal (RET). Idempotent: 204 whether a consent was " +
+			"withdrawn or none was in force. A malformed, tampered or expired link is 422 consent.invalid_unsubscribe_link.",
+	}, op.Meta{Action: string(authz.ConsentRecordCreate), Surface: op.SurfacePublic, Idempotency: op.IdempotencyOptional}), h.confirmUnsubscribe)
 }
 
 type handler struct{ svc Service }
@@ -431,4 +454,28 @@ func (h handler) updatePurpose(ctx context.Context, in *updatePurposeInput) (*pu
 		return nil, err
 	}
 	return &purposeOutput{Body: toPurposeDTO(p)}, nil
+}
+
+// ---- getUnsubscribeLink, confirmUnsubscribe
+
+type unsubscribeInput struct {
+	// No schema bounds: a token of the wrong length gets the same
+	// consent.invalid_unsubscribe_link as every other unusable token.
+	Token string `path:"token" doc:"The signed token of the unsubscribe link (base64url, at most 200 characters)"`
+}
+
+type unsubscribeOutput struct {
+	Body UnsubscribeLinkDTO
+}
+
+func (h handler) getUnsubscribe(ctx context.Context, in *unsubscribeInput) (*unsubscribeOutput, error) {
+	l, err := h.svc.GetUnsubscribe(ctx, in.Token)
+	if err != nil {
+		return nil, err
+	}
+	return &unsubscribeOutput{Body: UnsubscribeLinkDTO{PurposeCode: string(l.Purpose)}}, nil
+}
+
+func (h handler) confirmUnsubscribe(ctx context.Context, in *unsubscribeInput) (*struct{}, error) {
+	return nil, h.svc.Unsubscribe(ctx, in.Token)
 }

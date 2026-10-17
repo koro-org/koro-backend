@@ -11884,6 +11884,17 @@ components:
       required:
         - id
       type: object
+    UnsubscribeLinkDTO:
+      additionalProperties: false
+      properties:
+        purpose_code:
+          description: The consent the link withdraws
+          enum:
+            - commercial_email
+          type: string
+      required:
+        - purpose_code
+      type: object
     UpdateBreachInputBody:
       additionalProperties: false
       properties:
@@ -28013,6 +28024,64 @@ paths:
         - directory
       x-koro-action: directory.department.list
       x-koro-rate-limit: read_default
+      x-koro-surface: public
+  /api/v1/unsubscribe-links/{token}:
+    get:
+      description: "The data of the unsubscribe confirmation page: the consent purpose of the link (commercial_email). Nothing about the recipient or the current consent state; no side effect (mail scanners open links). A malformed, tampered or expired link is 422 consent.invalid_unsubscribe_link, the same answer for every reason."
+      operationId: getUnsubscribeLink
+      parameters:
+        - description: The signed token of the unsubscribe link (base64url, at most 200 characters)
+          in: path
+          name: token
+          required: true
+          schema:
+            description: The signed token of the unsubscribe link (base64url, at most 200 characters)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnsubscribeLinkDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: Show what an unsubscribe link withdraws
+      tags:
+        - consent
+      x-koro-action: consent.record.create
+      x-koro-rate-limit: read_default
+      x-koro-surface: public
+    post:
+      description: "The List-Unsubscribe-Post target of commercial e-mail: the request body (List-Unsubscribe=One-Click, form or multipart) and its content type are ignored. Withdraws the recipient's consent to the link's purpose through the email_link channel and queues the İYS refusal (RET). Idempotent: 204 whether a consent was withdrawn or none was in force. A malformed, tampered or expired link is 422 consent.invalid_unsubscribe_link."
+      operationId: confirmUnsubscribe
+      parameters:
+        - description: The signed token of the unsubscribe link (base64url, at most 200 characters)
+          in: path
+          name: token
+          required: true
+          schema:
+            description: The signed token of the unsubscribe link (base64url, at most 200 characters)
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: Unsubscribe with one click (RFC 8058)
+      tags:
+        - consent
+      x-koro-action: consent.record.create
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
       x-koro-surface: public
   /api/v1/webhooks/email/{provider}:
     post:

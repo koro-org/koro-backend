@@ -11,6 +11,7 @@ import (
 	"koro/internal/consent"
 	"koro/internal/identity"
 	"koro/internal/platform/config"
+	"koro/internal/platform/crypto"
 	"koro/internal/platform/db"
 )
 
@@ -25,6 +26,8 @@ import (
 //	        (CONSENT_IYS_*, BE-055), else consent.NoopIYS (submissions
 //	        "skipped"; CONSENT_IYS_REQUIRED refuses that)
 //	cfg     tests only; nil → the consent section of the loaded configuration
+//	deriver nil → crypto.Deriver over CRYPTO_TOKEN_KEYS (the one-click
+//	        unsubscribe tokens, BE-062); tests preset the shared test deriver
 //	reauth  the re-authentication verifier of the R operations (03 §6.2:
 //	        identity.Reauth.Verify). identity is L4 and builds after
 //	        consent, so the binding is late: BE-014 sets c.consent.reauth
@@ -41,15 +44,20 @@ import (
 // "// sync-write: consent.Recorder.Record", 01 §6.3), consent.Checker
 // (notify's commercial message port, BE-015; outreach dispatch) and
 // consent.Notices (identity registration shows the current privacy notice).
+// links (consent.UnsubscribeLinks, BE-062) is set only with
+// CONSENT_UNSUBSCRIBE_BASE_URL: outreach mints each commercial e-mail
+// recipient's link with it and refuses commercial e-mail while it is nil.
 type consentWiring struct {
-	store  consent.Store
-	tx     db.TxManager
-	iys    consent.IYSClient
-	cfg    *config.Consent
-	reauth func(ctx context.Context, userID uuid.UUID, password, totpCode string) (kind string, err error)
+	store   consent.Store
+	tx      db.TxManager
+	iys     consent.IYSClient
+	cfg     *config.Consent
+	deriver *crypto.Deriver
+	reauth  func(ctx context.Context, userID uuid.UUID, password, totpCode string) (kind string, err error)
 
-	mod consent.Module
-	svc consent.Service // set by build
+	mod   consent.Module
+	svc   consent.Service          // set by build
+	links consent.UnsubscribeLinks // set by build; nil without CONSENT_UNSUBSCRIBE_BASE_URL
 }
 
 // lateReauth adapts consentWiring.reauth to consent.Reauthenticator and
@@ -113,15 +121,26 @@ func (w *consentWiring) build(c *container) error {
 	if tx == nil {
 		tx = c.infra.db.Tx
 	}
+	deriver := w.deriver
+	if deriver == nil {
+		keys, err := crypto.ParseKeyring(c.infra.platform.Crypto.TokenKeys.Reveal())
+		if err != nil {
+			return fmt.Errorf("consent: CRYPTO_TOKEN_KEYS: %w", err)
+		}
+		if deriver, err = crypto.NewDeriver(keys); err != nil {
+			return fmt.Errorf("consent: CRYPTO_TOKEN_KEYS: %w", err)
+		}
+	}
 	mod, err := consent.New(consent.Deps{
 		Store: store, Tx: tx, Outbox: c.infra.outbox, Audit: c.audit.svc, Idempotency: c.infra.idempotency,
 		Clock: c.infra.clock, Log: c.infra.log.With("module", "consent"),
 		Reauth: lateReauth{w: w}, IYS: iys, IYSRequired: cfg.IYSRequired,
+		Unsubscribe: consent.UnsubscribeConfig{BaseURL: cfg.UnsubscribeBaseURL, TTL: cfg.UnsubscribeTTL, Deriver: deriver},
 	})
 	if err != nil {
 		return err
 	}
-	w.mod, w.svc = mod, mod.Service
+	w.mod, w.svc, w.links = mod, mod.Service, mod.Links
 	c.privacy = append(c.privacy, mod.Privacy)
 	c.sweepers = append(c.sweepers, mod.Sweeper)
 	return nil
@@ -136,6 +155,7 @@ func (w *consentWiring) tasks(c *container) {
 	}
 }
 
-// routes: the 10 consent operations (04 §2.5); w.svc is nil under
+// routes: the 12 consent operations (04 §2.5; BE-062: getUnsubscribeLink,
+// confirmUnsubscribe); w.svc is nil under
 // `koro openapi`, which Register tolerates.
 func (w *consentWiring) routes(c *container, api huma.API) { consent.Register(api, w.svc) }

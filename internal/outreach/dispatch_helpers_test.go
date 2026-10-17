@@ -213,6 +213,21 @@ func (f *fakePosts) DispatchPost(_ context.Context, id uuid.UUID) (outreach.Post
 
 const testUnsubscribe = "https://koro.example.test/unsubscribe"
 
+// fakeLinks mints one link per recipient and purpose, as consent does
+// (BE-062): the base, the purpose and the user ID; fail makes it refuse.
+type fakeLinks struct{ fail error }
+
+func (f fakeLinks) UnsubscribeURL(userID uuid.UUID, purpose consent.Purpose) (string, error) {
+	if f.fail != nil {
+		return "", f.fail
+	}
+	return linkOf(userID, purpose), nil
+}
+
+func linkOf(userID uuid.UUID, purpose consent.Purpose) string {
+	return testUnsubscribe + "/" + string(purpose) + "-" + userID.String()
+}
+
 // targetedPost puts a published targeted post of org (author kind) for keys.
 func (e *env) targetedPost(org uuid.UUID, kind outreach.AuthorKind, keys ...string) outreach.PostInfo {
 	p := outreach.PostInfo{

@@ -369,7 +369,7 @@ func newEnvWith(t *testing.T, clk *clock.Fake, store outreach.Store, tx db.TxMan
 		Limiter: e.limiter, Clock: clk, Log: obs.Discard(), Idempotency: idem,
 		Outbox: e.out, Entitlements: e.ents, Recipients: e.audience, Members: e.members, Users: e.users,
 		Consents: e.consents, Sender: e.sender, Posts: e.posts, LinkBaseURL: "https://koro.example.test",
-		UnsubscribeURL: testUnsubscribe,
+		Unsubscribe: fakeLinks{},
 	}
 	for _, o := range opts {
 		o(e, &d)

@@ -227,7 +227,7 @@ func (s *service) checkChannels(in []Channel, commercial bool) ([]string, error)
 		return nil, fieldErr(loc, "a commercial dispatch goes by push or e-mail (an in-app message has no opt-out)")
 	case slices.Contains(out, string(ChannelEmail)) && s.d.LinkBaseURL == "":
 		return nil, fieldErr(loc, "e-mail is not available (no link origin configured)")
-	case commercial && slices.Contains(out, string(ChannelEmail)) && s.d.UnsubscribeURL == "":
+	case commercial && slices.Contains(out, string(ChannelEmail)) && s.d.Unsubscribe == nil:
 		return nil, fieldErr(loc, "commercial e-mail is not available (no unsubscribe endpoint configured)")
 	}
 	return out, nil

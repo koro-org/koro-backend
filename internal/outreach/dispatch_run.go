@@ -382,7 +382,16 @@ func (s *service) send(ctx context.Context, d Dispatch, org orgs.OrgSummary, u i
 		}
 		m.Data = map[string]any{"title": title, "org_name": org.Name, "url": s.d.LinkBaseURL + d.DeepLink}
 		if d.Commercial {
-			m.UnsubscribeURL = s.d.UnsubscribeURL
+			// The recipient's own link (BE-062). Without one the mail
+			// cannot go out lawfully; nothing a retry can fix.
+			if s.d.Unsubscribe == nil {
+				return sendFailed, fmt.Errorf("%w: commercial e-mail without unsubscribe links", errPermanentSend)
+			}
+			link, err := s.d.Unsubscribe.UnsubscribeURL(u.ID, consent.PurposeCommercialEmail)
+			if err != nil {
+				return sendFailed, fmt.Errorf("%w: unsubscribe link: %w", errPermanentSend, err)
+			}
+			m.UnsubscribeURL = link
 		}
 	default:
 		// Fixed texts: the data holds opaque IDs only (no personal data).

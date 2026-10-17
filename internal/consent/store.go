@@ -53,6 +53,12 @@ type Store interface {
 	// occurred_at then id; found=false when there is none. scopeID nil
 	// means the unscoped row.
 	Latest(ctx context.Context, userID uuid.UUID, purpose Purpose, scopeID *uuid.UUID) (c Consent, found bool, err error)
+	// LockSubject serialises the unscoped chain of (user, purpose) for the
+	// rest of the transaction carried by ctx (a transaction-scoped advisory
+	// lock): concurrent one-click unsubscribes read the latest row one
+	// after the other and withdraw once (BE-062). Outside a transaction it
+	// guards nothing.
+	LockSubject(ctx context.Context, userID uuid.UUID, purpose Purpose) error
 	// CurrentOf returns the newest row of every (purpose, scope) of a user
 	// (the consent_current view), ordered by purpose then scope.
 	CurrentOf(ctx context.Context, userID uuid.UUID) ([]Consent, error)

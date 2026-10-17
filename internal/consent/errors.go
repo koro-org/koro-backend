@@ -51,6 +51,11 @@ var (
 	// verifier is bound (identity, BE-014). Fail closed.
 	ErrReauthUnavailable = problem.New(problem.Unavailable, "consent.reauth_unavailable", "Re-authentication is not available")
 
+	// ErrInvalidUnsubscribeLink: an unsubscribe link that is malformed,
+	// tampered with, signed by an unknown key or expired (BE-062). Every
+	// reason is the same answer: the link reveals nothing about its subject.
+	ErrInvalidUnsubscribeLink = problem.New(problem.Invalid, "consent.invalid_unsubscribe_link", "Invalid or expired unsubscribe link")
+
 	// ErrNotFound: the record does not exist (or is not visible).
 	ErrNotFound = problem.ErrNotFound
 )

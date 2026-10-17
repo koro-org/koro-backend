@@ -218,11 +218,11 @@ type Deps struct {
 	Sender       Sender        // notify
 	Posts        Posts         // feed (bound late by cmd/koro)
 
-	// UnsubscribeURL is the https one-click unsubscribe endpoint of
-	// commercial e-mail (RFC 8058; notify puts it in the footer and the
-	// List-Unsubscribe headers). "" → a commercial dispatch cannot use
-	// e-mail (OUTREACH_UNSUBSCRIBE_URL).
-	UnsubscribeURL string
+	// Unsubscribe mints each recipient's one-click unsubscribe link of
+	// commercial e-mail (consent, BE-062; notify puts it in the footer and
+	// the List-Unsubscribe headers). nil → a commercial dispatch cannot use
+	// e-mail (CONSENT_UNSUBSCRIBE_BASE_URL unset).
+	Unsubscribe UnsubscribeLinks
 	// LinkBaseURL is the web origin of the post link in e-mail
 	// (IDENTITY_LINK_BASE_URL). "" → no dispatch uses e-mail.
 	LinkBaseURL string

@@ -29,10 +29,10 @@ func TestSeedDemo_CommerceIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	inserted, existing := first.Total()
-	if inserted != len(p.Rows) || existing != 0 {
-		t.Fatalf("first application: %d inserted, %d existing; plan has %d rows", inserted, existing, len(p.Rows))
+	if inserted != plannedTotal(p) || existing != 0 {
+		t.Fatalf("first application: %d inserted, %d existing; plan has %d rows", inserted, existing, plannedTotal(p))
 	}
-	for table, want := range map[string]int{"legal_parties": 2, "payees": 1, "services": 2,
+	for table, want := range map[string]int{"legal_parties": 3, "collection_accounts": 1, "payees": 1, "services": 2,
 		"offerings": 3, "commerce_policies": 3, "orders": 4, "order_lines": 4} {
 		if got := first.Inserted[table]; got != want {
 			t.Errorf("%s inserted = %d, want %d", table, got, want)
@@ -49,7 +49,7 @@ func TestSeedDemo_CommerceIdempotent(t *testing.T) {
 	count(`SELECT count(*) FROM users u JOIN platform_role_assignments r ON r.user_id = u.id
 		WHERE u.password_hash IS NOT NULL`, 0)
 	count(`SELECT count(*) FROM legal_parties WHERE status = 'verified' AND tax_no IS NOT NULL
-		AND address->>'line1' <> '' AND address->>'city' <> '' AND verified_by <> created_by`, 2)
+		AND address->>'line1' <> '' AND address->>'city' <> '' AND verified_by <> created_by`, 3)
 	count(`SELECT count(*) FROM payees p JOIN legal_parties lp ON lp.id = p.legal_party_id
 		WHERE p.status = 'active' AND p.is_default AND p.verified_by <> p.created_by AND lp.status = 'verified'`, 1)
 	count(`SELECT count(*) FROM offerings WHERE status = 'active' AND approved_by <> created_by`, 3)
@@ -96,7 +96,7 @@ func TestSeedDemo_CommerceIdempotent(t *testing.T) {
 		AND e.quantity_total = 5 AND e.quantity_used = 0 AND e.activated_at IS NULL
 		AND ((o.status = 'awaiting_payment' AND e.status = 'pending' AND l.fulfillment_status = 'not_applicable')
 		 OR (o.status = 'expired' AND e.status = 'revoked' AND e.revoked_at = o.expires_at AND l.fulfillment_status = 'cancelled'))`, 2)
-	for _, table := range []string{"collection_accounts", "payee_bank_accounts", "payments", "incoming_bank_transfers",
+	for _, table := range []string{"payee_bank_accounts", "payments", "incoming_bank_transfers",
 		"ledger_transactions", "ledger_entries", "invoices", "outbox"} {
 		count("SELECT count(*) FROM "+table, 0)
 	}
@@ -104,7 +104,7 @@ func TestSeedDemo_CommerceIdempotent(t *testing.T) {
 	snapshot := func() map[string]string {
 		t.Helper()
 		out := map[string]string{}
-		for _, table := range []string{"legal_parties", "payees", "services", "offerings", "commerce_policies", "orders", "order_lines", "entitlements"} {
+		for _, table := range []string{"legal_parties", "collection_accounts", "payees", "services", "offerings", "commerce_policies", "orders", "order_lines", "entitlements"} {
 			var value string
 			if err := d.Pool.QueryRow(t.Context(), "SELECT jsonb_agg(to_jsonb(r) ORDER BY r.id)::text FROM "+table+" r").Scan(&value); err != nil {
 				t.Fatal(err)

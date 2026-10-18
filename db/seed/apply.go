@@ -22,7 +22,7 @@ type Stmt struct {
 }
 
 // Result is what Apply did: the inserted rows per table (a row that was
-// there already counts as existing).
+// there already, including a protected operator setup, counts as existing).
 type Result struct {
 	Inserted map[string]int
 	Existing map[string]int
@@ -42,7 +42,8 @@ func (r Result) Total() (inserted, existing int) {
 // Apply writes the plan in one transaction (an advisory lock keeps two
 // runs from interleaving). Every row is `INSERT … ON CONFLICT DO NOTHING`
 // with its deterministic ID, so a second run inserts nothing (idempotent)
-// and never touches what the demo users changed since.
+// and never touches what the demo users changed since. Conditional collection
+// setup may approve only the pending account it inserts in this transaction.
 func Apply(ctx context.Context, pool *pgxpool.Pool, p *Plan) (Result, error) {
 	res := Result{Inserted: map[string]int{}, Existing: map[string]int{}}
 	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
@@ -77,6 +78,9 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, p *Plan) (Result, error) {
 			if _, err := tx.Exec(ctx, s.SQL, s.Args...); err != nil {
 				return fmt.Errorf("seed: %w", err)
 			}
+		}
+		if p.collection != nil {
+			return p.collection.apply(ctx, tx, &res)
 		}
 		return nil
 	})

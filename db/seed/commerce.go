@@ -9,8 +9,8 @@ import (
 )
 
 // CommerceDemo identifies the synthetic Model A/C catalogue and unpaid
-// orders. The collection account is deliberately left to its own setup:
-// no payment, ledger entry, invoice or bank evidence is fabricated here.
+// orders. A separate conditional step initializes Koro's collection account;
+// no payment, ledger entry, invoice or payee bank evidence is fabricated.
 type CommerceDemo struct {
 	BuyerPartyID, PayeePartyID, PayeeID         uuid.UUID
 	PackageOfferingID, ClubOfferingID           uuid.UUID

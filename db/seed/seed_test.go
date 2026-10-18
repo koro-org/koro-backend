@@ -13,6 +13,7 @@ import (
 
 	"koro/db/seed"
 	"koro/internal/platform/crypto"
+	"koro/internal/platform/iban"
 	"koro/internal/platform/testutil/fake"
 )
 
@@ -72,6 +73,7 @@ var (
 	// without separators (dates and UUIDs use '-', so they never match).
 	phoneRe = regexp.MustCompile(`\+\d[\d ]{8,}\d|\b0?5\d{2} ?\d{3} ?\d{2} ?\d{2}\b`)
 	fakePhn = regexp.MustCompile(`^\+90 000 000 00 \d\d$`)
+	ibanRe  = regexp.MustCompile(`TR[0-9]{24}`)
 	tcknRe  = regexp.MustCompile(`\b[1-9]\d{10}\b`)
 )
 
@@ -82,7 +84,8 @@ var allowedDomains = map[string]bool{"example.test": true, "koro.test": true}
 // is synthetic: e-mail addresses only @example.test (no real domain, no
 // .edu.tr address: the students are verified by document), phone numbers
 // only in the invalid +90 000 000 00 NN pattern, no national ID other than
-// the documented test vectors. The files of db/seed are scanned as well
+// the documented test vectors, IBANs only checksum-valid nonexistent bank
+// codes 99999/00000. The files of db/seed are scanned as well
 // (05 §13.7 TestSyntheticOnly).
 func TestSeedDemo_NoRealPII(t *testing.T) {
 	t.Parallel()
@@ -100,6 +103,11 @@ func TestSeedDemo_NoRealPII(t *testing.T) {
 		for _, m := range phoneRe.FindAllString(s, -1) {
 			if !fakePhn.MatchString(m) {
 				t.Errorf("%s: phone-like value %q outside the invalid pattern", where, m)
+			}
+		}
+		for _, m := range ibanRe.FindAllString(s, -1) {
+			if !iban.Valid(m) || (m[4:9] != "99999" && m[4:9] != "00000") {
+				t.Errorf("%s: IBAN outside the synthetic vector: %q", where, m)
 			}
 		}
 		for _, m := range tcknRe.FindAllString(s, -1) {

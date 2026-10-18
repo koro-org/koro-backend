@@ -77,7 +77,7 @@ func (p *Plan) add(table string, kv ...any) {
 // scans them): plain strings, string slices and the JSON of jsonb values.
 func (p *Plan) Strings() []string {
 	var out []string
-	for _, r := range p.Rows {
+	for _, r := range p.plannedRows() {
 		for _, v := range r.Vals {
 			switch x := v.(type) {
 			case string:
@@ -98,11 +98,19 @@ func (p *Plan) Strings() []string {
 	return out
 }
 
-// Counts returns the number of planned rows per table.
+// Counts returns the number of planned rows per table, including conditional
+// collection candidates that an existing operator setup can satisfy.
 func (p *Plan) Counts() map[string]int {
 	out := map[string]int{}
-	for _, r := range p.Rows {
+	for _, r := range p.plannedRows() {
 		out[r.Table]++
 	}
 	return out
+}
+
+func (p *Plan) plannedRows() []Row {
+	if p.collection == nil {
+		return p.Rows
+	}
+	return append(append([]Row(nil), p.Rows...), p.collection.rows...)
 }

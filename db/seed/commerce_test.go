@@ -72,7 +72,7 @@ func TestBuild_ModelCCommerce(t *testing.T) {
 		check(find("orders", id), want)
 	}
 	for table, want := range map[string]int{"services": 2, "offerings": 3, "commerce_policies": 3, "orders": 4,
-		"order_lines": 4, "student_profiles": seed.StudentCount, "collection_accounts": 0, "payee_bank_accounts": 0,
+		"order_lines": 4, "student_profiles": seed.StudentCount, "collection_accounts": 1, "payee_bank_accounts": 0,
 		"payments": 0, "ledger_transactions": 0, "ledger_entries": 0, "invoices": 0, "outbox": 0} {
 		if got := p.Counts()[table]; got != want {
 			t.Errorf("%s: %d rows, want %d", table, got, want)

@@ -34,7 +34,8 @@ var commerceSlot = make(chan struct{}, 1)
 // These are synthetic arithmetic and checksum vectors, not commercial terms
 // or bank accounts. A booth costs 10000 + 2000 VAT; its illustrative 1000 bp
 // commission and 200 VAT leave 10800 payable. Koro's quota costs 2500 + 500.
-const commerceIBAN = "TR809999900000000000000001"
+// The all-zero BBAN vector from ibantest stays distinct from seed.CollectionIBAN.
+const commerceIBAN = "TR470000000000000000000000"
 const commercePayeeIBAN = "TR039999901234567890123456"
 
 type commerceEnv struct {
@@ -108,8 +109,11 @@ func newCommerce(t *testing.T) *commerceEnv {
 	e.exec(`INSERT INTO org_members (org_id,org_kind,user_id,role,status,source,joined_at)
  VALUES ($1,'platform',$2,'staff','active','admin',now())`, e.platform, e.adminID)
 	e.legalFixtures()
-	// The account belongs to this test, goes through both eyes, and is never
-	// seeded by demo (the separate bootstrap-commerce ticket owns that command).
+	// Demo supplies its own active default. This test creates a distinct
+	// account through both eyes, then exercises the real default switch.
+	if n := e.count(`SELECT count(*) FROM collection_accounts WHERE iban=$1 AND status='active' AND is_default`, seed.CollectionIBAN); n != 1 {
+		t.Fatalf("seed default before fixture account: %d", n)
+	}
 	var platformParty string
 	e.q(`SELECT id FROM legal_parties WHERE kind='platform'`, &platformParty)
 	ac := e.post("/admin/collection-accounts", e.finA, map[string]any{"label": "Synthetic commerce fixture", "legal_party_id": platformParty, "iban": commerceIBAN, "holder_name": "Synthetic Platform", "bank_name": "Synthetic Bank", "reauth": e.proof(e.finATOTP)}, http.StatusCreated)
@@ -117,6 +121,9 @@ func newCommerce(t *testing.T) *commerceEnv {
 	e.deny("/admin/collection-accounts/"+e.account+"/approve", e.finA, map[string]any{"decision": "approved"}, "authz.four_eyes_violation")
 	e.post("/admin/collection-accounts/"+e.account+"/approve", e.finB, map[string]any{"decision": "approved", "reauth": e.proof(e.finBTOTP)}, http.StatusOK)
 	e.post("/admin/collection-accounts/"+e.account+"/make-default", e.finA, map[string]any{"reauth": e.proof(e.finATOTP)}, http.StatusOK)
+	if n := e.count(`SELECT count(*) FROM collection_accounts WHERE iban=$1 AND status='active' AND NOT is_default`, seed.CollectionIBAN); n != 1 {
+		t.Fatalf("seed account after fixture default switch: %d", n)
+	}
 	e.balances(0, 0, 0, 0, 0)
 	return e
 }

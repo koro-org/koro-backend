@@ -5,7 +5,8 @@
 //   - names come from internal/platform/testutil/fake (frequent given names
 //     and surnames, invented clubs and companies), e-mail addresses are
 //     @example.test only (fake.EmailDomain), there are no phone numbers,
-//     national IDs or IBANs, and nobody's verification uses a real .edu.tr
+//     national IDs; the collection IBAN uses a nonexistent test bank code,
+//     and nobody's verification uses a real .edu.tr
 //     address (the demo students are verified by document);
 //   - the universities, faculties and departments are the public reference
 //     data of `koro seed reference` (run it first), read from the database.
@@ -25,8 +26,9 @@
 // estimates rounded like outreach.Bucket, ticket tokens derived with the
 // configured CRYPTO_TOKEN_KEYS (so the QR of a seeded ticket checks in).
 // Commerce adds a synthetic Model A/C catalogue, verified legal parties,
-// unpaid orders and their pending/revoked rights. Collection accounts and
-// paid histories are separate setup; no bank evidence or transfer is seeded.
+// unpaid orders and their pending/revoked rights. A synthetic default Koro
+// collection account is initialized only when it cannot replace operator
+// choices; payee bank accounts and paid histories require separate setup.
 package seed
 
 import (
@@ -123,6 +125,9 @@ type Plan struct {
 	After    []Stmt
 	Demo     Demo
 	Accounts []Account
+	// collection is conditional setup after Rows; its candidate rows are
+	// included in Strings and Counts, and never replace operator records.
+	collection *collectionPlan
 }
 
 // StudentCount is the number of demo students (BE-033: at least 300).
@@ -157,5 +162,6 @@ func Build(ref Reference, o Options) (*Plan, error) {
 	if err := b.build(); err != nil {
 		return nil, err
 	}
+	b.collectionAccount()
 	return b.p, nil
 }

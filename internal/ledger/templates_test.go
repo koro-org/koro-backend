@@ -170,7 +170,7 @@ func TestTemplates_ModelA_AllocationSumsToZero(t *testing.T) {
 		{"no lines", ledger.ModelA, nil, ledger.ErrInvalidTxn},
 		{"only free lines", ledger.ModelA, []ledger.AllocationLine{{OrderLineID: uuid.NewV7(), PayeeID: &p1}}, ledger.ErrInvalidTxn},
 		{"model B (T-11)", ledger.ModelB, []ledger.AllocationLine{line(p1)}, ledger.ErrModelNotEnabled},
-		{"model C (T-11)", ledger.ModelC, []ledger.AllocationLine{line(p1)}, ledger.ErrModelNotEnabled},
+		{"model C excludes direct money", ledger.ModelC, []ledger.AllocationLine{line(p1)}, ledger.ErrInvalidTxn},
 		{"unknown model", ledger.Model("Z"), []ledger.AllocationLine{line(p1)}, ledger.ErrInvalidTxn},
 	}
 	for _, c := range negative {
@@ -183,11 +183,8 @@ func TestTemplates_ModelA_AllocationSumsToZero(t *testing.T) {
 		})
 	}
 
-	// A2 posts like A (only the invoice direction differs, 02 §18.3).
-	a, errA := ledger.OrderAllocated(ledger.ModelA, uuid.NewV7(), []ledger.AllocationLine{line(p1)}, t0)
-	a2, errA2 := ledger.OrderAllocated(ledger.ModelA2, uuid.NewV7(), []ledger.AllocationLine{line(p1)}, t0)
-	if errA != nil || errA2 != nil || len(a.Entries) != len(a2.Entries) {
-		t.Fatalf("A %v / A2 %v", errA, errA2)
+	if _, err := ledger.OrderAllocated(ledger.ModelA2, uuid.NewV7(), []ledger.AllocationLine{line(p1)}, t0); !errors.Is(err, ledger.ErrModelNotEnabled) {
+		t.Fatalf("A2 allocation = %v", err)
 	}
 }
 
@@ -256,7 +253,7 @@ func TestTemplates_ModelA_Shapes(t *testing.T) {
 		want error
 	}{
 		{"payment of zero", errOf(ledger.PaymentReceived(ledger.ModelA, payment, 0, t0)), ledger.ErrInvalidTxn},
-		{"payment model C", errOf(ledger.PaymentReceived(ledger.ModelC, payment, 1, t0)), ledger.ErrModelNotEnabled},
+		{"payment model A2", errOf(ledger.PaymentReceived(ledger.ModelA2, payment, 1, t0)), ledger.ErrModelNotEnabled},
 		{"payout of zero", errOf(ledger.PayoutPaid(ledger.ModelA, payout, payee, 0, t0)), ledger.ErrInvalidTxn},
 		{"payout without payee", errOf(ledger.PayoutPaid(ledger.ModelA, payout, uuid.Nil(), 1, t0)), ledger.ErrInvalidTxn},
 		{"payout model B", errOf(ledger.PayoutPaid(ledger.ModelB, payout, payee, 1, t0)), ledger.ErrModelNotEnabled},

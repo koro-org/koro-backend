@@ -258,6 +258,7 @@ func TestSchema_P2SchemaIDColumnsAndTriggers(t *testing.T) {
 		"order_lines.order_lines_frozen koro_freeze_columns",
 		"order_lines.order_lines_paid_out_frozen koro_freeze_columns",
 		"order_lines.orders_totals_match_lines orders_check_lines_total" + deferred,
+		"orders.orders_direct_confirmation_guard koro_orders_direct_confirmation_guard",
 		"orders.orders_frozen koro_freeze_columns",
 		"orders.orders_totals_match_lines orders_check_lines_total" + deferred,
 		"payee_bank_accounts.payee_bank_accounts_frozen koro_freeze_columns",

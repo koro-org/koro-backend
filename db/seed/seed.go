@@ -24,7 +24,7 @@
 // 02 §9.1), confirmed_count (confirmed + checked_in), like_count, segment
 // estimates rounded like outreach.Bucket, ticket tokens derived with the
 // configured CRYPTO_TOKEN_KEYS (so the QR of a seeded ticket checks in).
-// Commerce adds a synthetic Model A catalogue, verified legal parties,
+// Commerce adds a synthetic Model A/C catalogue, verified legal parties,
 // unpaid orders and their pending/revoked rights. Collection accounts and
 // paid histories are separate setup; no bank evidence or transfer is seeded.
 package seed

@@ -114,6 +114,7 @@ type Order struct {
 	RefundedAmount      int64         `gorm:"column:refunded_amount"`
 	ExpiresAt           time.Time     `gorm:"column:expires_at"`
 	PlacedAt            time.Time     `gorm:"column:placed_at"`
+	DirectConfirmedAt   *time.Time    `gorm:"column:direct_confirmed_at"`
 	PaidAt              *time.Time    `gorm:"column:paid_at"`
 	CompletedAt         *time.Time    `gorm:"column:completed_at"`
 	CancelledAt         *time.Time    `gorm:"column:cancelled_at"`

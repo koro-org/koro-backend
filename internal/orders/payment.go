@@ -52,8 +52,8 @@ func (s *service) FindByReference(ctx context.Context, ref string) (PayableOrder
 // never more than it still waits for (payments refunds an overpayment).
 // When Koro has collected everything (paid_amount = koro_collect_amount, the
 // orders_paid_full_chk rule) a model A, A2 or B order is paid (settle). A
-// model C order collects only Koro's fee here and is paid by
-// ConfirmDirectPayment (T-18, T-227, 06 H-56).
+// model C order collects only Koro's fee here; it settles once the fee
+// is complete and direct payment has been confirmed, in either order.
 func (s *service) ApplyPayment(ctx context.Context, orderID, paymentID uuid.UUID, amount int64) (PaymentEffect, error) {
 	if amount <= 0 {
 		return PaymentEffect{}, fieldErr("amount", "must be positive")
@@ -72,7 +72,7 @@ func (s *service) ApplyPayment(ctx context.Context, orderID, paymentID uuid.UUID
 		}
 		next := o
 		next.PaidAmount += amount
-		paid := next.DueAmount() == 0 && !o.DirectToPayee()
+		paid := next.DueAmount() == 0 && (!o.DirectToPayee() || o.DirectConfirmedAt != nil)
 		if eff, err = s.settle(ctx, o, next, paid); err != nil {
 			return err
 		}
@@ -86,16 +86,9 @@ func (s *service) ApplyPayment(ctx context.Context, orderID, paymentID uuid.UUID
 	return eff, nil
 }
 
-// ConfirmDirectPayment implements Orders (model C; 00 T-18, T-227, 06 H-56:
-// as in model A, an order is paid only once the buyer has paid all of it).
-// payments records a finance admin's confirmation that the buyer paid the
-// payees directly (payments provider direct_confirmed, BE-041) and calls
-// this in its transaction: the order must be a model C order awaiting
-// payment whose fee Koro has collected in full (else 409
-// orders.order_not_paid: payments confirms the direct payment once the fee
-// is in; an order without a fee is paid at once). The order is then paid
-// like a model A order (settle). The direct amount never enters
-// paid_amount (T-227).
+// ConfirmDirectPayment remembers a finance admin's evidence in the same
+// order transaction. Fee capture and direct confirmation may arrive in
+// either order; the second one settles exactly once under the order lock.
 func (s *service) ConfirmDirectPayment(ctx context.Context, orderID, paymentID uuid.UUID) (PaymentEffect, error) {
 	var eff PaymentEffect
 	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
@@ -105,10 +98,13 @@ func (s *service) ConfirmDirectPayment(ctx context.Context, orderID, paymentID u
 			return err
 		case !o.DirectToPayee() || o.Status != StatusAwaitingPayment:
 			return ErrInvalidState
-		case o.DueAmount() != 0:
-			return ErrOrderNotPaid
+		case o.DirectConfirmedAt != nil:
+			return ErrInvalidState
 		}
-		if eff, err = s.settle(ctx, o, o, true); err != nil {
+		next := o
+		now := s.now()
+		next.DirectConfirmedAt = &now
+		if eff, err = s.settle(ctx, o, next, o.DueAmount() == 0); err != nil {
 			return err
 		}
 		s.d.Log.LogAttrs(ctx, slog.LevelInfo, "order direct payment confirmed", slog.String("order_id", o.ID.String()),

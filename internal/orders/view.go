@@ -65,10 +65,11 @@ type ResolveInput struct {
 // only that seller's lines and the DTO shows the buyer's title, never the
 // order totals or the payment.
 type OrderView struct {
-	Order      Order
-	Lines      []Line
-	Sellers    map[uuid.UUID]string // seller org → name
-	SellerView bool
+	Order          Order
+	Lines          []Line
+	Sellers        map[uuid.UUID]string // seller org → name
+	SellerView     bool
+	DirectPayments []DirectInstruction
 }
 
 // OrderPage is a page of orders.
@@ -78,14 +79,26 @@ type OrderPage struct {
 }
 
 // Instructions are the payment instructions of an order (04 §C.3).
+// DirectInstruction is a distinct transfer to one frozen payee. It is
+// returned only to the buyer's administrators while direct payment is due.
+type DirectInstruction struct {
+	PayeeID    uuid.UUID
+	Title      string
+	Amount     int64
+	IBAN       string
+	HolderName string
+	BankName   string
+}
+
 type Instructions struct {
-	ReferenceCode string
-	AmountDue     int64
-	Currency      string
-	IBAN          string
-	HolderName    string
-	BankName      string
-	ExpiresAt     time.Time
+	ReferenceCode  string
+	AmountDue      int64
+	Currency       string
+	IBAN           string
+	HolderName     string
+	BankName       string
+	ExpiresAt      time.Time
+	DirectPayments []DirectInstruction
 }
 
 // SalesItem is one sold line of listOrgSales with its order's reference
@@ -114,24 +127,25 @@ type LineView struct {
 
 // PayableOrder is what payments needs to match money to an order.
 type PayableOrder struct {
-	ID                uuid.UUID
-	OrderNo           string
-	OrgID             uuid.UUID
-	Status            Status
-	ModelCode         string
-	CollectionMethod  string
-	Currency          string
-	KoroCollectAmount int64 // what Koro collects in total
-	PaidAmount        int64 // captured so far
-	DueAmount         int64 // KoroCollectAmount − PaidAmount
-	RefundedAmount    int64
-	ExpiresAt         time.Time
+	ID                  uuid.UUID
+	OrderNo             string
+	OrgID               uuid.UUID
+	Status              Status
+	ModelCode           string
+	CollectionMethod    string
+	Currency            string
+	DirectToPayeeAmount int64
+	KoroCollectAmount   int64 // what Koro collects in total
+	PaidAmount          int64 // captured so far
+	DueAmount           int64 // KoroCollectAmount − PaidAmount
+	RefundedAmount      int64
+	ExpiresAt           time.Time
 }
 
 func payableOf(o Order) PayableOrder {
 	return PayableOrder{
 		ID: o.ID, OrderNo: o.OrderNo, OrgID: o.OrgID, Status: o.Status, ModelCode: o.ModelCode,
-		CollectionMethod: o.CollectionMethod, Currency: o.Currency, KoroCollectAmount: o.KoroCollectAmount,
+		DirectToPayeeAmount: o.DirectToPayeeAmount, CollectionMethod: o.CollectionMethod, Currency: o.Currency, KoroCollectAmount: o.KoroCollectAmount,
 		PaidAmount: o.PaidAmount, DueAmount: o.DueAmount(), RefundedAmount: o.RefundedAmount, ExpiresAt: o.ExpiresAt,
 	}
 }

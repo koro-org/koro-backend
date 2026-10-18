@@ -4092,6 +4092,31 @@ components:
         - expected_order_no
         - evidence_file_id
       type: object
+    DirectPaymentDTO:
+      additionalProperties: false
+      properties:
+        bank_name:
+          type: string
+        direct_to_payee_amount:
+          format: int64
+          type: integer
+        holder_name:
+          type: string
+        iban:
+          type: string
+        payee_id:
+          format: uuid
+          type: string
+        title:
+          type: string
+      required:
+        - payee_id
+        - title
+        - direct_to_payee_amount
+        - iban
+        - holder_name
+        - bank_name
+      type: object
     DirectResultDTO:
       additionalProperties: false
       properties:
@@ -8059,9 +8084,20 @@ components:
           type: string
         currency:
           type: string
+        direct_payments:
+          description: "Unpaid model C: approved payee accounts, visible only to the buying company administrators"
+          items:
+            $ref: "#/components/schemas/DirectPaymentDTO"
+          type: array
+        direct_to_payee_amount:
+          format: int64
+          type: integer
         expires_at:
           format: date-time
           type: string
+        koro_collect_amount:
+          format: int64
+          type: integer
         lines:
           items:
             $ref: "#/components/schemas/OrderLineDTO"
@@ -8825,6 +8861,11 @@ components:
           type: string
         currency:
           type: string
+        direct_payments:
+          description: Separate payee transfers; buyer administrators only; hidden after direct confirmation
+          items:
+            $ref: "#/components/schemas/DirectPaymentDTO"
+          type: array
         expires_at:
           format: date-time
           type: string
@@ -17074,7 +17115,7 @@ paths:
       x-koro-surface: admin
   /api/v1/admin/payments/direct-confirmations:
     post:
-      description: "Model C (the buyer pays the payees directly, Koro collects its fee): with the receipt of the buyer's transfer (a transfer_receipt upload) a finance admin records a direct_confirmed payment and the order is paid. Only a model C order awaiting payment (409 orders.invalid_state) whose fee is in (409 orders.order_not_paid). The money never reaches Koro's account; the ledger posts nothing."
+      description: "Model C (the buyer pays the payees directly, Koro collects its fee): with the receipt of the buyer's transfer (a transfer_receipt upload) a finance admin records a direct_confirmed payment and the order is paid once Koro's fee is also complete. Fee capture and direct confirmation may arrive in either order. Confirmation is recorded once on an awaiting-payment order (409 orders.invalid_state otherwise). The direct amount never enters Koro's ledger; final settlement allocates only its fee and fee VAT."
       operationId: adminConfirmDirectPayment
       parameters:
         - description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
@@ -17911,7 +17952,7 @@ paths:
       x-koro-surface: admin
   /api/v1/admin/refunds/{refund_id}/complete:
     post:
-      description: "Only an approved refund (409 payments.invalid_state); the receipt (a refund_receipt upload) and the bank reference are required (422). One transaction: the refund completed, the payment's refunded amount, the order (orders.ApplyRefund; not for an overpayment), the ledger (refund_completed) and payment.refunded; any failure leaves the refund approved. Models B and C have no ledger template yet (422 ledger.model_not_enabled)."
+      description: "Only an approved refund (409 payments.invalid_state); the receipt (a refund_receipt upload) and the bank reference are required (422). One transaction: the refund completed, the payment's refunded amount, the order (orders.ApplyRefund; not for an overpayment), the ledger (refund_completed) and payment.refunded; any failure leaves the refund approved. Models A2 and B have no ledger template yet (422 ledger.model_not_enabled)."
       operationId: adminCompleteRefund
       parameters:
         - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
@@ -24230,7 +24271,7 @@ paths:
       x-koro-surface: resource
   /api/v1/orders/{order_id}:
     get:
-      description: "The buyer's members and platform staff get the whole order (view buyer: totals, payment, every line; never the commission or the payee). A seller's club admin or university representative gets only its own lines with its net share and the commission, and the buyer's title (view seller). Anyone else: 404."
+      description: "The buyer's members and platform staff get the whole order (view buyer: totals, payment, every line; never the commission). Only MFA-verified buyer administrators see approved payee bank instructions on an unpaid, unconfirmed model C order; bank access is audited. A seller's club admin or university representative gets only its own lines with its net share and the commission, and the buyer's title (view seller). Anyone else: 404."
       operationId: getOrder
       parameters:
         - description: Order ID (an unknown or malformed ID is 404)
@@ -24314,7 +24355,7 @@ paths:
       x-koro-surface: resource
   /api/v1/orders/{order_id}/payment-instructions:
     get:
-      description: "Koro's collection account, the reference code to write into the transfer description and the amount still due, while the order awaits payment (409 orders.invalid_state otherwise). Without an active collection account: 409 payments.no_active_collection_account."
+      description: "Koro's collection account, the reference code to write into the transfer description and the amount still due, while the order awaits payment (409 orders.invalid_state otherwise). Without an active collection account while Koro is owed money: 409 payments.no_active_collection_account. Model C adds one separate direct transfer per payee, visible only to MFA-verified buyer administrators until direct confirmation; each account access is audited."
       operationId: getOrderPaymentInstructions
       parameters:
         - description: Order ID (an unknown or malformed ID is 404)

@@ -111,6 +111,20 @@ operations:
       platform_admin: 200
       finance_admin: 200
     variants:
+      - name: direct_payee
+        path_params: { order_id: ord_c_direct }
+        note: Model C bank-account projection is checked by TestOrders_ModelCIBANMatrix.
+        expect:
+          anonymous: 401
+          "@outsiders_order_a": 404
+          company_member: 200
+          company_admin: 200
+          club_member: 403
+          club_admin: 200
+          "@non_order_staff": 403
+          support: 200
+          platform_admin: 200
+          finance_admin: 200
       - name: other_company
         path_params: { order_id: ord_b_unpaid }
         note: IDOR — company_b's order; club_a's admin sees its own line as the seller (03 k26)
@@ -157,6 +171,22 @@ operations:
       platform_admin: 403
       finance_admin: 200
       talent_auditor: 403
+    variants:
+      - name: direct_payee
+        path_params: { order_id: ord_c_direct }
+        expect:
+          anonymous: 401
+          "@outsiders_order_a": 404
+          company_member: 200
+          company_admin: 200
+          club_member: 403
+          club_admin: 403
+          moderator: 403
+          support: 403
+          dpo: 403
+          platform_admin: 403
+          finance_admin: 200
+          talent_auditor: 403
 
   cancelOrder:
     method: POST

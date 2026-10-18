@@ -431,6 +431,48 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (orders.Store, worl
 		}
 	})
 
+	t.Run("direct confirmation is a permanent model C fact", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		b, sl := w.buyer(t), w.seller(t)
+		f := directFixture(newFixture(b, t0, []offeringRef{w.offering(t, sl)}, []sellerRef{sl}))
+		insert(t, s, f)
+		at := t0.Add(time.Minute)
+		next := f.o
+		next.DirectConfirmedAt = &at
+		got, err := s.UpdateOrder(ctx, next, orders.StatusAwaitingPayment)
+		if err != nil || got.DirectConfirmedAt == nil || !got.DirectConfirmedAt.Equal(at) {
+			t.Fatalf("confirm=%+v,%v", got, err)
+		}
+		for _, stamp := range []*time.Time{nil, ptr(at.Add(time.Second))} {
+			bad := got
+			bad.DirectConfirmedAt = stamp
+			if _, err := s.UpdateOrder(ctx, bad, orders.StatusAwaitingPayment); err == nil {
+				t.Fatal("confirmation changed")
+			}
+		}
+		got.Status, got.CancelledAt = orders.StatusCancelled, &at
+		if kept, err := s.UpdateOrder(ctx, got, orders.StatusAwaitingPayment); err != nil || kept.DirectConfirmedAt == nil {
+			t.Fatalf("cancel lost confirmation=%+v,%v", kept, err)
+		}
+		a := newFixture(b, t0, []offeringRef{w.offering(t, sl)}, []sellerRef{sl})
+		insert(t, s, a)
+		a.o.DirectConfirmedAt = &at
+		if _, err := s.UpdateOrder(ctx, a.o, orders.StatusAwaitingPayment); err == nil {
+			t.Fatal("model A confirmed directly")
+		}
+		late := directFixture(newFixture(b, t0, []offeringRef{w.offering(t, sl)}, []sellerRef{sl}))
+		insert(t, s, late)
+		late.o.Status, late.o.CancelledAt = orders.StatusCancelled, &at
+		if _, err := s.UpdateOrder(ctx, late.o, orders.StatusAwaitingPayment); err != nil {
+			t.Fatal(err)
+		}
+		late.o.DirectConfirmedAt = &at
+		if _, err := s.UpdateOrder(ctx, late.o, orders.StatusCancelled); err == nil {
+			t.Fatal("cancelled order accepted new confirmation")
+		}
+	})
+
 	t.Run("model C: never paid out, refunds of the fee only", func(t *testing.T) {
 		t.Parallel()
 		s, w := newStore(t)

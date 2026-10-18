@@ -16,7 +16,6 @@ import (
 	"koro/internal/ledger"
 	"koro/internal/orders"
 	"koro/internal/payments"
-	"koro/internal/platform/civil"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/problem"
@@ -618,56 +617,6 @@ func TestCreateRefund_Pools(t *testing.T) {
 	bal := balances(e.journal(t))
 	if bal["buyer_advances"] != -1_200_000+1_200_000 || bal["koro_bank"] != 1_200_000 {
 		t.Fatalf("balances = %v", bal)
-	}
-}
-
-// TestRefund_ModelC_FeeBoundNoTemplate (T-11, BE-066): a model C order's
-// refund through Koro is bounded by the fee Koro holds of the line; its
-// completion is 422 ledger.model_not_enabled until the C reversal exists
-// (BE-066) and changes nothing.
-func TestRefund_ModelC_FeeBoundNoTemplate(t *testing.T) {
-	t.Parallel()
-	e := newEnv(t)
-	acct := e.activeAccount(t, ibanKoro, true)
-	p := e.order(t, orderSpec{modelC: true, paidFee: true})
-	fin := actor(t, "finance_admin")
-	if _, err := e.svc.ConfirmDirectPayment(ctxOf(t, fin), fin, payments.DirectInput{OrderID: p.order.ID,
-		ExpectedOrderNo: p.order.OrderNo, EvidenceFileID: e.files.add(files.PurposeTransferReceipt)}); err != nil {
-		t.Fatal(err)
-	}
-	direct := e.mem.Payments()[0]
-	if _, err := e.request(t, "finance_admin_2", lineRefund(direct.ID, p.lines[0].ID, 1)); !errors.Is(err, payments.ErrInvalidState) {
-		t.Fatalf("a refund of the direct payment = %v", err)
-	}
-	// The fee's transfer (captured outside the ledger here: the C template
-	// does not exist yet, T-295).
-	ctx := t.Context()
-	tr, _, err := e.store.InsertTransfer(ctx, payments.IncomingTransfer{ID: uuid.NewV7(), CollectionAccountID: acct.ID, ValueDate: civil.From(t0),
-		Amount: 120_000, Currency: "TRY", Description: p.order.OrderNo, BankReference: "FEE-1", Status: payments.TransferUnmatched,
-		EntryMethod: payments.EntryManual, EnteredBy: id("finance_admin_2"), CreatedAt: t0})
-	if err != nil {
-		t.Fatal(err)
-	}
-	by, at := id("finance_admin"), t0
-	m := tr
-	m.Status, m.MatchedOrderID, m.MatchedBy, m.MatchedAt = payments.TransferMatched, &p.order.ID, &by, &at
-	if _, err := e.store.UpdateTransfer(ctx, m, payments.TransferUnmatched); err != nil {
-		t.Fatal(err)
-	}
-	fee := payments.Payment{ID: uuid.NewV7(), OrderID: p.order.ID, OrgID: p.order.OrgID, Provider: payments.ProviderBankTransfer,
-		IncomingTransferID: &tr.ID, Amount: 120_000, Currency: "TRY", Status: payments.PaymentCaptured, CapturedAt: &at, CapturedBy: &by}
-	if err := e.store.InsertPayment(ctx, fee); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := e.request(t, "finance_admin_2", lineRefund(fee.ID, p.lines[0].ID, 120_001)); !errors.Is(err, payments.ErrRefundExceedsPaid) {
-		t.Fatalf("more than the fee = %v", err)
-	}
-	r := e.approved(t, lineRefund(fee.ID, p.lines[0].ID, 120_000))
-	if _, err := e.completeAs(t, "finance_admin", r.ID); !errors.Is(err, ledger.ErrModelNotEnabled) {
-		t.Fatalf("model C completion = %v", err)
-	}
-	if o, _ := e.ordersM.Orders.ForPayment(ctx, p.order.ID); o.RefundedAmount != 0 {
-		t.Fatalf("the order changed: %+v", o)
 	}
 }
 

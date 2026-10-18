@@ -166,8 +166,9 @@ func buyerParty(companyOrg string, st parties.Status) parties.LegalParty {
 
 // fakePayees holds payees.
 type fakePayees struct {
-	mu sync.Mutex
-	m  map[uuid.UUID]parties.Payee
+	mu       sync.Mutex
+	m        map[uuid.UUID]parties.Payee
+	accounts map[uuid.UUID]parties.BankAccount
 }
 
 func (f *fakePayees) add(orgName string, st parties.PayeeStatus) uuid.UUID {
@@ -205,6 +206,26 @@ func (f *fakePayees) IsActive(_ context.Context, id uuid.UUID) (bool, error) {
 		return false, parties.ErrNotFound
 	}
 	return p.Status == parties.PayeeActive, nil
+}
+
+func (f *fakePayees) Get(_ context.Context, id uuid.UUID) (parties.Payee, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	p, ok := f.m[id]
+	if !ok {
+		return parties.Payee{}, parties.ErrNotFound
+	}
+	return p, nil
+}
+
+func (f *fakePayees) ApprovedAccount(_ context.Context, id uuid.UUID) (parties.BankAccount, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	a, ok := f.accounts[id]
+	if !ok {
+		return parties.BankAccount{}, parties.ErrNoApprovedAccount
+	}
+	return a, nil
 }
 
 // fakeSender records the notices (deduplicated by key).

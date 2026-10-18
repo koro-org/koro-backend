@@ -142,8 +142,9 @@ func Register(api huma.API, svc Service) {
 		Summary: "Confirm a model C order's direct payment to its payees",
 		Description: "Model C (the buyer pays the payees directly, Koro collects its fee): with the receipt of the " +
 			"buyer's transfer (a transfer_receipt upload) a finance admin records a direct_confirmed payment and the " +
-			"order is paid. Only a model C order awaiting payment (409 orders.invalid_state) whose fee is in (409 " +
-			"orders.order_not_paid). The money never reaches Koro's account; the ledger posts nothing.",
+			"order is paid once Koro's fee is also complete. Fee capture and direct confirmation may arrive in either " +
+			"order. Confirmation is recorded once on an awaiting-payment order (409 orders.invalid_state otherwise). " +
+			"The direct amount never enters Koro's ledger; final settlement allocates only its fee and fee VAT.",
 	}, op.Meta{Action: string(authz.PaymentsTransferMatch), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyRequired}, h.confirmDirect)
 
 	registerRefunds(api, h)

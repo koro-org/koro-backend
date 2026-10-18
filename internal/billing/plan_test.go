@@ -148,11 +148,19 @@ func TestPlan_ModelCFeeOnly_UndecidedModelsNothing(t *testing.T) {
 	e := newEnv(t)
 	c, _ := e.order(t, orders.ModelC, lineSpec{payee: true, trigger: catalog.InvoiceOnPayment, payer: "buyer"},
 		lineSpec{payee: true, trigger: catalog.InvoiceOnFulfillment, payer: "buyer"})
+	e.mustDeliver(t, domainevent.PaymentCaptured{PaymentID: uuid.NewV7(), OrderID: c.ID, Amount: 240_000, OrderPaid: false})
+	if got := e.invoices(t, billing.Filter{OrderID: &c.ID}); len(got) != 0 {
+		t.Fatalf("partial C invoice plan = %+v", got)
+	}
 	e.mustDeliver(t, domainevent.PaymentCaptured{PaymentID: uuid.NewV7(), OrderID: c.ID, Amount: 240_000, OrderPaid: true})
 	invs := e.invoices(t, billing.Filter{OrderID: &c.ID})
 	if len(invs) != 1 || invs[0].Kind != billing.KindPlatformFee || invs[0].IssuerPartyID != e.koro ||
 		invs[0].RecipientPartyID != e.buyer || invs[0].NetAmount != 200_000 || invs[0].TotalAmount != 240_000 {
 		t.Fatalf("model C plan = %+v", invs)
+	}
+	e.mustDeliver(t, domainevent.PaymentCaptured{PaymentID: uuid.NewV7(), OrderID: c.ID, Amount: 2_400_000, OrderPaid: true})
+	if got := e.invoices(t, billing.Filter{OrderID: &c.ID}); len(got) != 1 {
+		t.Fatalf("replayed C invoice plan = %+v", got)
 	}
 	if ls := e.lines(t, invs[0].ID); len(ls) != 2 {
 		t.Fatalf("fee lines = %d", len(ls))

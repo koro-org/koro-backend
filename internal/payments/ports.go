@@ -40,9 +40,8 @@ type Orders interface {
 	//
 	// sync-write: orders.Orders.ApplyPayment
 	ApplyPayment(ctx context.Context, orderID, paymentID uuid.UUID, amount int64) (orders.PaymentEffect, error)
-	// ConfirmDirectPayment pays a model C order whose fee is collected once a
-	// finance admin confirmed the buyer's direct payment to the payees (T-18,
-	// T-227, 06 H-56), in the transaction that records the confirmation.
+	// ConfirmDirectPayment records direct evidence once and settles when the
+	// fee is also complete. Both steps share the order lock and transaction.
 	//
 	// sync-write: orders.Orders.ConfirmDirectPayment
 	ConfirmDirectPayment(ctx context.Context, orderID, paymentID uuid.UUID) (orders.PaymentEffect, error)

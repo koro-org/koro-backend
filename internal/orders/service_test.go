@@ -487,9 +487,8 @@ func TestApplyPayment_Full_PaidActivatesEntitlements(t *testing.T) {
 // TestModelC_PaidOnDirectConfirmation (00 T-18, T-227, 06 H-56): a model C
 // order (the buyer pays the payee directly, Koro its fee) is paid as in
 // model A only once all of it is paid: Koro's fee alone leaves it awaiting
-// payment; ConfirmDirectPayment before the fee is in is 409
-// orders.order_not_paid, after it the order is paid with every line in the
-// effect; a model A order or a paid one is 409 orders.invalid_state. Koro
+// payment; confirmation then pays the order with every line in the effect.
+// A model A order or a paid one is 409 orders.invalid_state. Koro
 // holds no seller money of it: its delivered line is never paid out (nor
 // keeps the seller's org open) and a refund through Koro covers its fee.
 func TestModelC_PaidOnDirectConfirmation(t *testing.T) {
@@ -504,8 +503,6 @@ func TestModelC_PaidOnDirectConfirmation(t *testing.T) {
 	if o.KoroCollectAmount != 120_000 || o.DirectToPayeeAmount != 1_200_000 {
 		t.Fatalf("model C order = %+v", o)
 	}
-	_, err := e.mod.Orders.ConfirmDirectPayment(t.Context(), o.ID, uuid.NewV7())
-	wantProblem(t, err, 409, "orders.order_not_paid")
 	eff, err := e.mod.Orders.ApplyPayment(t.Context(), o.ID, uuid.NewV7(), 120_000)
 	if err != nil || eff.Paid || eff.DueAmount != 0 || len(eff.Lines) != 0 {
 		t.Fatalf("fee = %+v, %v", eff, err)

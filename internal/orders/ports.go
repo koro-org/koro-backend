@@ -71,6 +71,10 @@ type Parties interface {
 // default payee of a seller and whether it may be paid. It is
 // parties.Payees.
 type Payees interface {
+	// Get returns the frozen payee's current legal-party link.
+	Get(ctx context.Context, payeeID uuid.UUID) (parties.Payee, error)
+	// ApprovedAccount returns the current four-eyes approved bank account.
+	ApprovedAccount(ctx context.Context, payeeID uuid.UUID) (parties.BankAccount, error)
 	// DefaultFor returns the default payee of a seller org that is active now.
 	DefaultFor(ctx context.Context, sellerOrgID uuid.UUID) (parties.Payee, bool, error)
 	// IsActive reports whether the payee may be paid now.

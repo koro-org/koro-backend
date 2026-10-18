@@ -268,8 +268,7 @@ func TestMatch_SameIdempotencyKey_NoDoubleCapture(t *testing.T) {
 
 // TestMatch_Refusals: the reference code must be the order's (422), an
 // order that does not wait for payment is 409 orders.invalid_state, an
-// unknown order is 422, an ignored transfer 409, a model C fee has no
-// ledger template yet (422 ledger.model_not_enabled), the role is fin only
+// unknown order is 422, an ignored transfer 409, the role is fin only
 // (403) — and nothing is written in any of these cases.
 func TestMatch_Refusals(t *testing.T) {
 	t.Parallel()
@@ -291,10 +290,6 @@ func TestMatch_Refusals(t *testing.T) {
 	pad := actor(t, "platform_admin")
 	if _, err := e.svc.MatchTransfer(ctxOf(t, pad), pad, tr.ID, payments.MatchInput{OrderID: p.order.ID, ExpectedOrderNo: p.order.OrderNo}); !errors.Is(err, authz.ErrForbidden) {
 		t.Fatalf("platform admin matches = %v", err)
-	}
-	c := e.order(t, orderSpec{modelC: true})
-	if _, err := e.match(t, e.transfer(t, acct, 120_000, c.order.OrderNo, false), c, ""); !errors.Is(err, ledger.ErrModelNotEnabled) {
-		t.Fatalf("model C fee = %v", err)
 	}
 	if _, err := e.match(t, tr, p, ""); err != nil {
 		t.Fatal(err)
@@ -318,26 +313,21 @@ func TestMatch_Refusals(t *testing.T) {
 // TestConfirmDirectPayment_ModelC (06 H-56, T-18, T-227): with Koro's fee
 // in, the confirmation of the buyer's direct payment records a
 // direct_confirmed payment of the direct amount, pays the order, attaches
-// the evidence, writes the splits and emits payment.captured; before the
-// fee it is 409 orders.order_not_paid; a model A order is 409.
+// the evidence, allocates the collected fee and emits payment.captured.
+// A model A order is 409.
 func TestConfirmDirectPayment_ModelC(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	fin := actor(t, "finance_admin")
 	ctx := ctxOf(t, fin)
 	evidence := e.files.add(files.PurposeTransferReceipt)
-	unpaid := e.order(t, orderSpec{modelC: true})
-	in := payments.DirectInput{OrderID: unpaid.order.ID, ExpectedOrderNo: unpaid.order.OrderNo, EvidenceFileID: evidence}
-	if _, err := e.svc.ConfirmDirectPayment(ctx, fin, in); !errors.Is(err, orders.ErrOrderNotPaid) {
-		t.Fatalf("fee not in = %v", err)
-	}
 	a := e.order(t, orderSpec{})
 	if _, err := e.svc.ConfirmDirectPayment(ctx, fin, payments.DirectInput{OrderID: a.order.ID, ExpectedOrderNo: a.order.OrderNo,
 		EvidenceFileID: evidence}); !errors.Is(err, orders.ErrInvalidState) {
 		t.Fatalf("model A = %v", err)
 	}
 	c := e.order(t, orderSpec{modelC: true, paidFee: true})
-	in = payments.DirectInput{OrderID: c.order.ID, ExpectedOrderNo: c.order.OrderNo, EvidenceFileID: evidence}
+	in := payments.DirectInput{OrderID: c.order.ID, ExpectedOrderNo: c.order.OrderNo, EvidenceFileID: evidence}
 	res, err := e.svc.ConfirmDirectPayment(ctx, fin, in)
 	if err != nil {
 		t.Fatal(err)
@@ -353,11 +343,11 @@ func TestConfirmDirectPayment_ModelC(t *testing.T) {
 	if mod, owner := e.files.owner(evidence); mod != "payments" || owner != pay.ID {
 		t.Fatalf("evidence attached to %s/%s", mod, owner)
 	}
-	if s, _ := e.store.SplitsOf(t.Context(), pay.ID); len(s) != 1 || s[0].SellerAmount != 1_200_000 || s[0].PlatformAmount != 120_000 {
+	if s, _ := e.store.SplitsOf(t.Context(), pay.ID); len(s) != 1 || s[0].SellerAmount != 0 || s[0].PlatformAmount != 120_000 {
 		t.Fatalf("splits = %+v", s)
 	}
-	if len(e.journal(t)) != 0 {
-		t.Fatal("a direct payment posted the ledger")
+	if len(e.journal(t)) != 1 {
+		t.Fatal("the completed C order did not allocate its fee")
 	}
 	if evs := e.events(domainevent.TopicPaymentCaptured); len(evs) != 1 {
 		t.Fatalf("payment.captured = %d", len(evs))

@@ -243,6 +243,9 @@ func (s *service) priceRequestLine(ctx context.Context, i int, li LineInput, now
 	if err != nil {
 		return pricedLine{}, err
 	}
+	if pol.ModelCode == catalog.ModelC && payee == nil {
+		return pricedLine{}, fieldErr(fmt.Sprintf("body.lines[%d].offering_id", i), "model C requires a direct payee; platform products use model A")
+	}
 	amt, err := priceLine(priceInput{
 		Quantity: li.Quantity, UnitPriceAmount: co.UnitPriceAmount, VATRateBP: co.VATRateBP, VATClass: co.VATClass,
 		WithholdingNum: co.VATWithholdingNum, WithholdingDen: co.VATWithholdingDen, Policy: pol,

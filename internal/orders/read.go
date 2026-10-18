@@ -2,9 +2,11 @@ package orders
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"uuid"
 
+	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/platform/page"
 )
@@ -57,7 +59,11 @@ func (s *service) GetOrder(ctx context.Context, a authz.Actor, id uuid.UUID) (Or
 		return OrderView{}, err
 	}
 	if a.HasOrgRole(o.OrgID, authz.MemberRecruiter, authz.MemberCompanyAdmin, authz.MemberCompanyOwner) || staff(a) {
-		return s.viewOf(ctx, o, lines, false)
+		v, err := s.viewOf(ctx, o, lines, false)
+		if err == nil {
+			v.DirectPayments, err = s.directInstructions(ctx, a, o, lines)
+		}
+		return v, err
 	}
 	own := slices.DeleteFunc(slices.Clone(lines), func(l Line) bool { return !a.HasOrgRole(l.SellerOrgID, sellerRoles...) })
 	if len(own) == 0 { // authz granted a seller path, so this is unreachable; fail closed
@@ -69,6 +75,8 @@ func (s *service) GetOrder(ctx context.Context, a authz.Actor, id uuid.UUID) (Or
 // PaymentInstructions implements Service (04 §C.3): the reference code,
 // the amount still due and Koro's active collection account (none → 409
 // payments.no_active_collection_account) of an order awaiting payment.
+// Model C includes the permitted direct instructions, and needs no Koro
+// account once its fee due is zero.
 func (s *service) PaymentInstructions(ctx context.Context, a authz.Actor, id uuid.UUID) (Instructions, error) {
 	o, lines, err := s.loadOrder(ctx, id)
 	if err != nil {
@@ -80,12 +88,81 @@ func (s *service) PaymentInstructions(ctx context.Context, a authz.Actor, id uui
 	if o.Status != StatusAwaitingPayment {
 		return Instructions{}, ErrInvalidState
 	}
-	acct, err := s.collectionAccount(ctx)
+	var acct CollectionAccount
+	if !o.DirectToPayee() || o.DueAmount() > 0 {
+		acct, err = s.collectionAccount(ctx)
+		if err != nil {
+			return Instructions{}, err
+		}
+	}
+	direct, err := s.directInstructions(ctx, a, o, lines)
 	if err != nil {
 		return Instructions{}, err
 	}
-	return Instructions{ReferenceCode: o.OrderNo, AmountDue: o.DueAmount(), Currency: o.Currency, IBAN: acct.IBAN,
+	return Instructions{DirectPayments: direct, ReferenceCode: o.OrderNo, AmountDue: o.DueAmount(), Currency: o.Currency, IBAN: acct.IBAN,
 		HolderName: acct.HolderName, BankName: acct.BankName, ExpiresAt: o.ExpiresAt}, nil
+}
+
+// directInstructions groups the frozen direct amount by payee. No admin,
+// support or ordinary buyer-member shortcut may disclose another party's
+// bank account. The audit contains identifiers and amounts, never the IBAN.
+func (s *service) directInstructions(ctx context.Context, a authz.Actor, o Order, lines []Line) ([]DirectInstruction, error) {
+	if !o.DirectToPayee() || o.Status != StatusAwaitingPayment || o.DirectConfirmedAt != nil ||
+		(!a.MFAVerified || !a.HasOrgRole(o.OrgID, authz.MemberCompanyAdmin, authz.MemberCompanyOwner)) {
+		return nil, nil
+	}
+	amounts := make(map[uuid.UUID]int64)
+	var ids []uuid.UUID
+	for _, l := range lines {
+		amount := l.PayableAmount - l.BuyerFeeAmount
+		if amount == 0 {
+			continue
+		}
+		if l.PayeeID == nil {
+			return nil, ErrInvalidState
+		}
+		if _, ok := amounts[*l.PayeeID]; !ok {
+			ids = append(ids, *l.PayeeID)
+		}
+		amounts[*l.PayeeID] += amount
+	}
+	out := make([]DirectInstruction, 0, len(ids))
+	var total int64
+	for _, id := range ids {
+		py, err := s.d.Payees.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		party, err := s.d.Parties.Get(ctx, py.LegalPartyID)
+		if err != nil {
+			return nil, err
+		}
+		if party.LegalType.NaturalPerson() {
+			return nil, ErrInvalidState
+		}
+		acct, err := s.d.Payees.ApprovedAccount(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		bank := ""
+		if acct.BankName != nil {
+			bank = *acct.BankName
+		}
+		out = append(out, DirectInstruction{PayeeID: id, Title: party.Title, Amount: amounts[id],
+			IBAN: acct.IBAN, HolderName: acct.HolderName, BankName: bank})
+		total += amounts[id]
+	}
+	if total != o.DirectToPayeeAmount {
+		return nil, errors.New("orders: direct payment instructions do not match the frozen total")
+	}
+	if len(out) != 0 {
+		if err := s.d.Audit.Log(ctx, audit.Event{Action: string(authz.OrdersOrderPaymentInstructions), Outcome: audit.Success,
+			ResourceType: authz.TypeOrder, ResourceID: &o.ID,
+			Metadata: map[string]any{"via": "direct_payment_instructions", "payee_count": len(out), "direct_amount": total}}.By(a)); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 // collectionAccount returns Koro's active collection account or 409.

@@ -171,7 +171,7 @@ func TestTemplates_PlatformLine_AllocationSumsToZero(t *testing.T) {
 		}(), ledger.ErrInvalidTxn},
 		{"only a free Koro line", ledger.ModelA, []ledger.AllocationLine{{OrderLineID: uuid.NewV7()}}, ledger.ErrInvalidTxn},
 		{"model B (T-11)", ledger.ModelB, []ledger.AllocationLine{base}, ledger.ErrModelNotEnabled},
-		{"model C (BE-066)", ledger.ModelC, []ledger.AllocationLine{base}, ledger.ErrModelNotEnabled},
+		{"model C excludes a sale", ledger.ModelC, []ledger.AllocationLine{base}, ledger.ErrInvalidTxn},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -258,7 +258,7 @@ func TestTemplates_PlatformSaleRecognized(t *testing.T) {
 		!tx.OccurredAt.Equal(t0) {
 		t.Fatalf("header %+v", tx)
 	}
-	alloc := txn(t)(ledger.OrderAllocated(ledger.ModelA2, uuid.NewV7(), []ledger.AllocationLine{l}, t0))
+	alloc := txn(t)(ledger.OrderAllocated(ledger.ModelA, uuid.NewV7(), []ledger.AllocationLine{l}, t0))
 	if !slices.EqualFunc(tx.Entries, alloc.Entries, func(a, b ledger.Entry) bool { return entryKey(a) == entryKey(b) }) || sum(tx.Entries) != 0 {
 		t.Fatalf("entries %+v, want the allocation's %+v", tx.Entries, alloc.Entries)
 	}

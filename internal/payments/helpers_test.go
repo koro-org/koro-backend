@@ -261,7 +261,9 @@ func (noOfferings) ResolvePolicy(context.Context, uuid.UUID, time.Time) (catalog
 func (noOfferings) Reserve(context.Context, uuid.UUID, int, uuid.UUID) error {
 	return errors.New("no catalog")
 }
-func (noOfferings) Release(context.Context, uuid.UUID, int) error { return errors.New("no catalog") }
+
+// Payment fixtures insert their orders directly, so there is no reserved inventory to release.
+func (noOfferings) Release(context.Context, uuid.UUID, int) error { return nil }
 
 type noParties struct{}
 
@@ -614,4 +616,11 @@ func containsAll(got []uuid.UUID, want ...uuid.UUID) bool {
 		}
 	}
 	return true
+}
+
+func (noPayees) Get(context.Context, uuid.UUID) (parties.Payee, error) {
+	return parties.Payee{}, parties.ErrNotFound
+}
+func (noPayees) ApprovedAccount(context.Context, uuid.UUID) (parties.BankAccount, error) {
+	return parties.BankAccount{}, parties.ErrNoApprovedAccount
 }

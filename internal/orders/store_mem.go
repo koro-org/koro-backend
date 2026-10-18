@@ -43,6 +43,9 @@ func cloneLine(l Line) Line {
 func (m *MemStore) InsertOrder(_ context.Context, o Order, lines []Line) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if o.DirectConfirmedAt != nil && o.ModelCode != ModelC {
+		return ErrInvalidState
+	}
 	if len(lines) == 0 {
 		return fmt.Errorf("orders: insert order %s: no lines (orders_totals_match_lines)", o.ID)
 	}
@@ -183,11 +186,18 @@ func (m *MemStore) UpdateOrder(_ context.Context, o Order, from Status) (Order, 
 		return Order{}, ErrNotFound
 	case cur.Status != from:
 		return Order{}, ErrInvalidState
+	case o.DirectConfirmedAt != nil && cur.ModelCode != ModelC:
+		return Order{}, ErrInvalidState
+	case cur.DirectConfirmedAt != nil && (o.DirectConfirmedAt == nil || !cur.DirectConfirmedAt.Equal(*o.DirectConfirmedAt)):
+		return Order{}, ErrInvalidState
+	case cur.DirectConfirmedAt == nil && o.DirectConfirmedAt != nil && cur.Status != StatusAwaitingPayment:
+		return Order{}, ErrInvalidState
 	case o.PaidAmount > cur.KoroCollectAmount:
 		return Order{}, ErrAmountExceedsDue
 	case o.RefundedAmount > o.PaidAmount:
 		return Order{}, ErrRefundExceedsPaid
 	}
+	cur.DirectConfirmedAt = o.DirectConfirmedAt
 	cur.Status, cur.PaidAmount, cur.RefundedAmount = o.Status, o.PaidAmount, o.RefundedAmount
 	cur.PaidAt, cur.CompletedAt, cur.CancelledAt, cur.CancelReason = o.PaidAt, o.CompletedAt, o.CancelledAt, o.CancelReason
 	cur.UpdatedAt = m.stamp()

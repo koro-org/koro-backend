@@ -30,7 +30,7 @@ import (
 //     payments.order_reference_mismatch), it waits for payment (409
 //     orders.invalid_state) and for money from Koro (409 payments.nothing_due);
 //  3. the ledger template of the order's model is built before any write
-//     (422 ledger.model_not_enabled for models B and C, T-11);
+//     (422 ledger.model_not_enabled for models A2 and B, T-11);
 //  4. the transfer is matched, the payment captured (bank_transfer, the
 //     whole transfer amount), orders.ApplyPayment applies what the order
 //     waits for (T-14: partial payments accumulate; a full one pays the
@@ -108,7 +108,7 @@ func (s *service) match(ctx context.Context, a authz.Actor, id, orderID uuid.UUI
 	paymentID := uuid.NewV7()
 	received, err := ledger.PaymentReceived(ledger.Model(o.ModelCode), paymentID, t.Amount, now)
 	if err != nil {
-		return MatchResult{}, err // ledger.model_not_enabled: models B and C (T-11)
+		return MatchResult{}, err // ledger.model_not_enabled: models A2 and B (T-11)
 	}
 	if refundIBAN, err = overpaymentIBAN(t, t.Amount-min(t.Amount, o.DueAmount), refundIBAN); err != nil {
 		return MatchResult{}, err // fail before any write; checked again after the order is locked
@@ -117,21 +117,23 @@ func (s *service) match(ctx context.Context, a authz.Actor, id, orderID uuid.UUI
 	by := a.UserID
 	next := t
 	next.Status, next.MatchedOrderID, next.MatchedBy, next.MatchedAt = TransferMatched, &o.ID, &by, &now
-	matched, err := s.d.Store.UpdateTransfer(ctx, next, TransferUnmatched)
-	if err != nil {
-		return MatchResult{}, err
-	}
-	transferID := matched.ID
+	transferID := t.ID
 	p := Payment{
 		ID: paymentID, OrderID: o.ID, OrgID: o.OrgID, Provider: ProviderBankTransfer, IncomingTransferID: &transferID,
 		Amount: t.Amount, Currency: Currency, Status: PaymentCaptured, CapturedAt: &now, CapturedBy: &by,
 		CreatedAt: now, UpdatedAt: now,
 	}
-	if err := s.d.Store.InsertPayment(ctx, p); err != nil {
-		return MatchResult{}, err
-	}
+	// Lock the order before child FK writes: a concurrent direct confirmation
+	// must never wait behind a KEY SHARE lock while this capture upgrades it.
 	eff, applied, err := s.applyPayment(ctx, o, p)
 	if err != nil {
+		return MatchResult{}, err
+	}
+	matched, err := s.d.Store.UpdateTransfer(ctx, next, TransferUnmatched)
+	if err != nil {
+		return MatchResult{}, err
+	}
+	if err := s.d.Store.InsertPayment(ctx, p); err != nil {
 		return MatchResult{}, err
 	}
 	over := t.Amount - applied
@@ -250,13 +252,16 @@ func (s *service) settle(ctx context.Context, p Payment, eff orders.PaymentEffec
 // writeSplits writes one released split per line of a paid order: a payee
 // line splits into the payee's net and Koro's commission with its VAT (the
 // buyer fee included); Koro's own platform-native line is Koro's alone. A
-// line that moves no money has no split (payment_splits_amount_chk).
+// model C line splits only its buyer fee to Koro. A line that moves no
+// money has no split (payment_splits_amount_chk).
 func (s *service) writeSplits(ctx context.Context, p Payment, eff orders.PaymentEffect, now time.Time) error {
 	ss := make([]Split, 0, len(eff.Lines))
 	for _, l := range eff.Lines {
 		sp := Split{ID: uuid.NewV7(), PaymentID: p.ID, OrderID: p.OrderID, OrderLineID: l.LineID, Status: SplitReleased,
 			CreatedAt: now, UpdatedAt: now}
-		if l.PayeeID == nil {
+		if eff.ModelCode == orders.ModelC {
+			sp.PlatformAmount = l.BuyerFeeAmount
+		} else if l.PayeeID == nil {
 			sp.PlatformAmount = l.PayableAmount
 		} else {
 			fee, err := money.Add(l.CommissionAmount, l.CommissionVATAmount)
@@ -278,14 +283,18 @@ func (s *service) writeSplits(ctx context.Context, p Payment, eff orders.Payment
 
 // allocation is the order_allocated transaction of a paid order (02 §21.3
 // model A): its payee lines and Koro's own platform-native lines (Koro's
-// sale, BE-067, T-293) in one transaction. ok is false when no line moves
-// money.
+// sale, BE-067, T-293) in one transaction. Model C allocates only the
+// buyer fee. ok is false when no line moves money.
 func allocation(eff orders.PaymentEffect, now time.Time) (ledger.Txn, bool, error) {
 	lines := make([]ledger.AllocationLine, 0, len(eff.Lines))
 	var total int64
 	for _, l := range eff.Lines {
-		lines = append(lines, ledger.AllocationOf(l))
-		total += l.PayableAmount // bounded: the order's payable amount fits
+		a := ledger.AllocationOf(l)
+		if eff.ModelCode == orders.ModelC {
+			a = ledger.FeeAllocationOf(l)
+		}
+		lines = append(lines, a)
+		total += a.PayableAmount // bounded: the order's payable amount fits
 	}
 	if total == 0 {
 		return ledger.Txn{}, false, nil
@@ -305,19 +314,10 @@ func refundEvent(a authz.Actor, refundID uuid.UUID, p Payment, amount int64) aud
 	}.By(a)
 }
 
-// ConfirmDirectPayment implements Service (fin; action payments.transfer.match,
-// Idempotency-Key): model C (06 H-56, T-18, T-227) — a finance admin
-// confirms, with the receipt of the buyer's transfer to the payee, that the
-// buyer paid the payees directly. Order of checks: authz (403) → body
-// (422; the evidence: a transfer_receipt upload) → in one transaction: the
-// order (422 unknown, 422 payments.order_reference_mismatch; a model C
-// order awaiting payment, else 409 orders.invalid_state) →
-// orders.ConfirmDirectPayment (409 orders.order_not_paid while Koro's fee
-// is not in; the order is paid, its rights active) → the direct_confirmed
-// payment (the direct amount: what the buyer owed the payees), the
-// evidence attached → the splits → audit → payment.captured (O). The money
-// never reaches Koro's account: the ledger posts nothing (no model C
-// template, T-11).
+// ConfirmDirectPayment records evidence that the buyer paid the payees
+// directly. The direct amount is informational. Confirmation and fee
+// capture may arrive in either order; the final condition settles the
+// order and allocates only Koro's fee. All writes share one transaction.
 func (s *service) ConfirmDirectPayment(ctx context.Context, a authz.Actor, in DirectInput) (DirectResult, error) {
 	if err := authz.Can(ctx, a, authz.PaymentsTransferMatch, adminSurface); err != nil {
 		return DirectResult{}, err
@@ -353,12 +353,7 @@ func (s *service) ConfirmDirectPayment(ctx context.Context, a authz.Actor, in Di
 		if err != nil {
 			return DirectResult{}, err
 		}
-		var direct int64
-		for _, l := range eff.Lines {
-			if direct, err = money.Add(direct, l.PayableAmount-l.BuyerFeeAmount); err != nil {
-				return DirectResult{}, err
-			}
-		}
+		direct := o.DirectToPayeeAmount
 		if direct <= 0 {
 			return DirectResult{}, ErrNothingDue
 		}
@@ -370,10 +365,12 @@ func (s *service) ConfirmDirectPayment(ctx context.Context, a authz.Actor, in Di
 		if err := s.d.Store.InsertPayment(ctx, p); err != nil {
 			return DirectResult{}, err
 		}
-		if err := s.attach(ctx, a, evidence, p.ID, files.PurposeTransferReceipt); err != nil {
-			return DirectResult{}, err
+		if eff.Paid {
+			if err := s.settle(ctx, p, eff, now); err != nil {
+				return DirectResult{}, err
+			}
 		}
-		if err := s.writeSplits(ctx, p, eff, now); err != nil {
+		if err := s.attach(ctx, a, evidence, p.ID, files.PurposeTransferReceipt); err != nil {
 			return DirectResult{}, err
 		}
 		after, err := s.d.Orders.ForPayment(ctx, o.ID)
@@ -389,15 +386,15 @@ func (s *service) ConfirmDirectPayment(ctx context.Context, a authz.Actor, in Di
 			return DirectResult{}, err
 		}
 		if err := s.emit(ctx, aggregatePayment, p.ID, domainevent.PaymentCaptured{PaymentID: p.ID, OrderID: o.ID, Amount: direct,
-			OrderPaid: true}); err != nil {
+			OrderPaid: eff.Paid}); err != nil {
 			return DirectResult{}, err
 		}
 		s.logInfo(ctx, "direct payment confirmed", slog.String("payment_id", p.ID.String()), slog.String("order_id", o.ID.String()),
 			slog.Int64("amount", direct))
-		return DirectResult{Payment: summaryOf(p), Order: orderSummaryOf(after, true)}, nil
+		return DirectResult{Payment: summaryOf(p), Order: orderSummaryOf(after, eff.Paid)}, nil
 	})
 	if err != nil {
-		return DirectResult{}, err
+		return DirectResult{}, ledger.TranslateError(err)
 	}
 	return res, nil
 }

@@ -77,7 +77,7 @@ func registerRefunds(api huma.API, h handler) {
 		Description: "Only an approved refund (409 payments.invalid_state); the receipt (a refund_receipt upload) and the " +
 			"bank reference are required (422). One transaction: the refund completed, the payment's refunded amount, the " +
 			"order (orders.ApplyRefund; not for an overpayment), the ledger (refund_completed) and payment.refunded; any " +
-			"failure leaves the refund approved. Models B and C have no ledger template yet (422 ledger.model_not_enabled).",
+			"failure leaves the refund approved. Models A2 and B have no ledger template yet (422 ledger.model_not_enabled).",
 	}, op.Meta{Action: string(authz.PaymentsRefundComplete), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.completeRefund)
 }
 

@@ -39,7 +39,8 @@ func Register(api huma.API, svc Service) {
 		OperationID: "getOrder", Method: http.MethodGet, Path: "/orders/{order_id}",
 		Summary: "Get an order",
 		Description: "The buyer's members and platform staff get the whole order (view buyer: totals, payment, every " +
-			"line; never the commission or the payee). A seller's club admin or university representative gets only its " +
+			"line; never the commission). Only MFA-verified buyer administrators see approved payee bank instructions " +
+			"on an unpaid, unconfirmed model C order; bank access is audited. A seller's club admin or university representative gets only its " +
 			"own lines with its net share and the commission, and the buyer's title (view seller). Anyone else: 404.",
 	}, op.Meta{Action: string(authz.OrdersOrderRead), Surface: op.SurfaceResource}, h.get)
 
@@ -48,7 +49,9 @@ func Register(api huma.API, svc Service) {
 		Summary: "Get the bank transfer instructions of an order",
 		Description: "Koro's collection account, the reference code to write into the transfer description and the " +
 			"amount still due, while the order awaits payment (409 orders.invalid_state otherwise). Without an active " +
-			"collection account: 409 payments.no_active_collection_account.",
+			"collection account while Koro is owed money: 409 payments.no_active_collection_account. Model C adds " +
+			"one separate direct transfer per payee, visible only to MFA-verified buyer administrators until direct " +
+			"confirmation; each account access is audited.",
 	}, op.Meta{Action: string(authz.OrdersOrderPaymentInstructions), Surface: op.SurfaceResource}, h.instructions)
 
 	reg(api, huma.Operation{
@@ -201,29 +204,32 @@ type OrderLineDTO struct {
 // or SellerOrderView (view seller, 03 k26: order_no, buyer_title,
 // placed_at, status and the seller's own lines only).
 type OrderDTO struct {
-	OrderID           string            `json:"order_id" format:"uuid"`
-	OrderNo           string            `json:"order_no" doc:"The bank transfer reference code"`
-	View              string            `json:"view" enum:"buyer,seller"`
-	Status            string            `json:"status" enum:"awaiting_payment,paid,in_fulfilment,completed,cancelled,expired,partially_refunded,refunded,disputed"`
-	Currency          string            `json:"currency"`
-	PlacedAt          time.Time         `json:"placed_at"`
-	BuyerTitle        string            `json:"buyer_title,omitempty" doc:"Seller view: the billed company's title"`
-	OrgID             string            `json:"org_id,omitempty" format:"uuid" doc:"Buyer view: the buying company"`
-	ModelCode         string            `json:"model_code,omitempty"`
-	SubtotalAmount    *int64            `json:"subtotal_amount,omitempty"`
-	VATAmount         *int64            `json:"vat_amount,omitempty"`
-	VATWithheldAmount *int64            `json:"vat_withheld_amount,omitempty"`
-	BuyerFeeAmount    *int64            `json:"buyer_fee_amount,omitempty"`
-	TotalAmount       *int64            `json:"total_amount,omitempty"`
-	PayableAmount     *int64            `json:"payable_amount,omitempty"`
-	PaidAmount        *int64            `json:"paid_amount,omitempty"`
-	RefundedAmount    *int64            `json:"refunded_amount,omitempty"`
-	ExpiresAt         *time.Time        `json:"expires_at,omitempty"`
-	PaidAt            *time.Time        `json:"paid_at,omitempty"`
-	CompletedAt       *time.Time        `json:"completed_at,omitempty"`
-	CancelledAt       *time.Time        `json:"cancelled_at,omitempty"`
-	BuyerSnapshot     *BuyerSnapshotDTO `json:"buyer_snapshot,omitempty"`
-	Lines             []OrderLineDTO    `json:"lines"`
+	OrderID             string             `json:"order_id" format:"uuid"`
+	OrderNo             string             `json:"order_no" doc:"The bank transfer reference code"`
+	View                string             `json:"view" enum:"buyer,seller"`
+	Status              string             `json:"status" enum:"awaiting_payment,paid,in_fulfilment,completed,cancelled,expired,partially_refunded,refunded,disputed"`
+	Currency            string             `json:"currency"`
+	PlacedAt            time.Time          `json:"placed_at"`
+	BuyerTitle          string             `json:"buyer_title,omitempty" doc:"Seller view: the billed company's title"`
+	OrgID               string             `json:"org_id,omitempty" format:"uuid" doc:"Buyer view: the buying company"`
+	ModelCode           string             `json:"model_code,omitempty"`
+	SubtotalAmount      *int64             `json:"subtotal_amount,omitempty"`
+	VATAmount           *int64             `json:"vat_amount,omitempty"`
+	VATWithheldAmount   *int64             `json:"vat_withheld_amount,omitempty"`
+	BuyerFeeAmount      *int64             `json:"buyer_fee_amount,omitempty"`
+	TotalAmount         *int64             `json:"total_amount,omitempty"`
+	PayableAmount       *int64             `json:"payable_amount,omitempty"`
+	PaidAmount          *int64             `json:"paid_amount,omitempty"`
+	RefundedAmount      *int64             `json:"refunded_amount,omitempty"`
+	ExpiresAt           *time.Time         `json:"expires_at,omitempty"`
+	PaidAt              *time.Time         `json:"paid_at,omitempty"`
+	CompletedAt         *time.Time         `json:"completed_at,omitempty"`
+	CancelledAt         *time.Time         `json:"cancelled_at,omitempty"`
+	BuyerSnapshot       *BuyerSnapshotDTO  `json:"buyer_snapshot,omitempty"`
+	DirectPayments      []DirectPaymentDTO `json:"direct_payments,omitempty" doc:"Unpaid model C: approved payee accounts, visible only to the buying company administrators"`
+	KoroCollectAmount   *int64             `json:"koro_collect_amount,omitempty"`
+	DirectToPayeeAmount *int64             `json:"direct_to_payee_amount,omitempty"`
+	Lines               []OrderLineDTO     `json:"lines"`
 }
 
 func addressText(a SnapshotAddress) string {
@@ -251,6 +257,8 @@ func orderDTO(v OrderView) OrderDTO {
 		out.OrgID, out.ModelCode = o.OrgID.String(), o.ModelCode
 		out.SubtotalAmount, out.VATAmount, out.VATWithheldAmount = i64(o.SubtotalAmount), i64(o.VATAmount), i64(o.VATWithheldAmount)
 		out.BuyerFeeAmount, out.TotalAmount, out.PayableAmount = i64(o.BuyerFeeAmount), i64(o.TotalAmount), i64(o.PayableAmount)
+		out.DirectPayments = directPaymentDTOs(v.DirectPayments)
+		out.KoroCollectAmount, out.DirectToPayeeAmount = i64(o.KoroCollectAmount), i64(o.DirectToPayeeAmount)
 		out.PaidAmount, out.RefundedAmount = i64(o.PaidAmount), i64(o.RefundedAmount)
 		exp := o.ExpiresAt.UTC()
 		out.ExpiresAt, out.PaidAt, out.CompletedAt, out.CancelledAt = &exp, utcPtr(o.PaidAt), utcPtr(o.CompletedAt), utcPtr(o.CancelledAt)
@@ -500,16 +508,36 @@ func (h handler) get(ctx context.Context, in *OrderPath) (*orderOutput, error) {
 	return &orderOutput{Body: orderDTO(v)}, nil
 }
 
+// DirectPaymentDTO is one transfer to an approved legal-person payee.
+type DirectPaymentDTO struct {
+	PayeeID    string `json:"payee_id" format:"uuid"`
+	Title      string `json:"title"`
+	Amount     int64  `json:"direct_to_payee_amount"`
+	IBAN       string `json:"iban"`
+	HolderName string `json:"holder_name"`
+	BankName   string `json:"bank_name"`
+}
+
+func directPaymentDTOs(in []DirectInstruction) []DirectPaymentDTO {
+	var out []DirectPaymentDTO
+	for _, v := range in {
+		out = append(out, DirectPaymentDTO{PayeeID: v.PayeeID.String(), Title: v.Title,
+			Amount: v.Amount, IBAN: v.IBAN, HolderName: v.HolderName, BankName: v.BankName})
+	}
+	return out
+}
+
 // PaymentInstructionsDTO is 04 §C.3.
 type PaymentInstructionsDTO struct {
-	ReferenceCode   string    `json:"reference_code"`
-	AmountDueAmount int64     `json:"amount_due_amount" doc:"Kuruş still due to Koro's account"`
-	Currency        string    `json:"currency"`
-	IBAN            string    `json:"iban"`
-	HolderName      string    `json:"holder_name"`
-	BankName        string    `json:"bank_name"`
-	ExpiresAt       time.Time `json:"expires_at"`
-	InstructionsTR  string    `json:"instructions_tr"`
+	DirectPayments  []DirectPaymentDTO `json:"direct_payments,omitempty" doc:"Separate payee transfers; buyer administrators only; hidden after direct confirmation"`
+	ReferenceCode   string             `json:"reference_code"`
+	AmountDueAmount int64              `json:"amount_due_amount" doc:"Kuruş still due to Koro's account"`
+	Currency        string             `json:"currency"`
+	IBAN            string             `json:"iban"`
+	HolderName      string             `json:"holder_name"`
+	BankName        string             `json:"bank_name"`
+	ExpiresAt       time.Time          `json:"expires_at"`
+	InstructionsTR  string             `json:"instructions_tr"`
 }
 
 type instructionsOutput struct{ Body PaymentInstructionsDTO }
@@ -524,7 +552,7 @@ func (h handler) instructions(ctx context.Context, in *OrderPath) (*instructions
 		return nil, err
 	}
 	return &instructionsOutput{Body: PaymentInstructionsDTO{
-		ReferenceCode: v.ReferenceCode, AmountDueAmount: v.AmountDue, Currency: v.Currency, IBAN: v.IBAN,
+		DirectPayments: directPaymentDTOs(v.DirectPayments), ReferenceCode: v.ReferenceCode, AmountDueAmount: v.AmountDue, Currency: v.Currency, IBAN: v.IBAN,
 		HolderName: v.HolderName, BankName: v.BankName, ExpiresAt: v.ExpiresAt.UTC(),
 		InstructionsTR: "Havale açıklamasına yalnız referans kodunu yazın: " + v.ReferenceCode,
 	}}, nil

@@ -34,9 +34,10 @@
 // paid payouts against the ledger and the allocation of every settled
 // order line (BE-067), and raises the alarm hook.
 //
-// Templates (templates.go) build the model A transactions of 02 §21.3 from
-// the frozen amounts of the order lines; models B and C are skeletons until
-// T-11 is decided. Koro's own platform-native line (payee NULL) is Koro's
+// Templates (templates.go) build model A transactions and model C's
+// fee-only collection, allocation and refund from frozen order lines.
+// Models A2 and B are disabled until T-11 is decided. Koro's own
+// platform-native line (payee NULL) is Koro's
 // sale (BE-067, T-293): order_allocated credits its net to
 // platform_sales_revenue and its VAT, less the buyer's withholding (an
 // entry of its own), to vat_output, in the same transaction as the payee

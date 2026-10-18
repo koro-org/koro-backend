@@ -142,11 +142,11 @@ func (s gormStore) UpdateOrder(ctx context.Context, o Order, from Status) (Order
 	var rows []Order
 	err := db.Conn(ctx, s.orm).Raw(`UPDATE orders SET status = @status, paid_amount = @paid_amount,
 		refunded_amount = @refunded_amount, paid_at = @paid_at, completed_at = @completed_at,
-		cancelled_at = @cancelled_at, cancel_reason = @cancel_reason
+		cancelled_at = @cancelled_at, cancel_reason = @cancel_reason, direct_confirmed_at = @direct_confirmed_at
 		WHERE id = @id AND status = @from
 		RETURNING *`, map[string]any{
 		"id": o.ID, "from": from, "status": o.Status, "paid_amount": o.PaidAmount, "refunded_amount": o.RefundedAmount,
-		"paid_at": o.PaidAt, "completed_at": o.CompletedAt, "cancelled_at": o.CancelledAt, "cancel_reason": o.CancelReason,
+		"direct_confirmed_at": o.DirectConfirmedAt, "paid_at": o.PaidAt, "completed_at": o.CompletedAt, "cancelled_at": o.CancelledAt, "cancel_reason": o.CancelReason,
 	}).Scan(&rows).Error
 	if err != nil {
 		return Order{}, fmt.Errorf("orders: update order: %w", constraints.Translate(err))

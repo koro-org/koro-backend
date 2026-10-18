@@ -58,9 +58,8 @@ import (
 // again under the row locks (orders.ApplyRefund, the payment row) and is the
 // authoritative one.
 //
-// Model C (T-11, BE-066): the upper bound applies (Koro holds the fee
-// only), but the ledger has no model C template: its completion is 422
-// ledger.model_not_enabled until BE-066 writes the reversal.
+// Model C refunds only Koro's collected fee and its VAT. The direct
+// payment to a payee is outside Koro's refund flow.
 
 // Limits of a refund (000108 CHECKs).
 const (
@@ -623,7 +622,7 @@ func (s *service) transitionRefund(ctx context.Context, hash []byte, id uuid.UUI
 //  2. the payment locked: a captured bank transfer that still holds the
 //     amount (409 / 422 orders.refund_exceeds_paid);
 //  3. the ledger template of the order's model (422 ledger.model_not_enabled:
-//     models B and C, T-11 / BE-066) before any write;
+//     models A2 and B, T-11 / BE-066) before any write;
 //  4. the order: an overpayment is checked against the order's unapplied
 //     money (orders untouched); otherwise orders.ApplyRefund (the order and
 //     the line locked; 422 orders.refund_exceeds_paid; a payee line in an
@@ -692,7 +691,7 @@ func (s *service) complete(ctx context.Context, a authz.Actor, id uuid.UUID, ref
 	now := s.now()
 	model := ledger.Model(o.ModelCode)
 	if _, err := ledger.RefundCompleted(model, r.ID, r.Amount, nil, now); err != nil {
-		return RefundResult{}, err // ledger.model_not_enabled: models B and C (T-11; the C reversal is BE-066's)
+		return RefundResult{}, err // ledger.model_not_enabled: models A2 and B (T-11)
 	}
 	shares, err := s.applyToOrder(ctx, r, model, now)
 	if err != nil {
@@ -788,6 +787,18 @@ func (s *service) applyToOrder(ctx context.Context, r Refund, model ledger.Model
 	}
 	if s.d.LedgerLines == nil {
 		return refundShares{}, ErrUnavailable
+	}
+	if model == ledger.ModelC {
+		done, err := s.d.LedgerLines.RefundedShares(ctx, l.ID)
+		if err != nil {
+			return refundShares{}, err
+		}
+		rl, err := lineRefund(l, ledger.FeeAllocationOf(l.Paid()), done, r.Amount)
+		if err != nil {
+			return refundShares{}, err
+		}
+		rl.PayeeID, rl.PaidOut = uuid.Nil(), false
+		return refundShares{lines: []ledger.RefundLine{rl}}, nil
 	}
 	if l.PayeeID == nil {
 		return s.platformRefund(ctx, r, before, l, model, now)

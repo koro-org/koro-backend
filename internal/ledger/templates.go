@@ -22,25 +22,24 @@ const (
 	ModelC  Model = "C"  // the buyer pays the payee directly; Koro collects its fee only
 )
 
-// ledgerModelA reports whether m posts with the model A templates, and
-// returns ErrModelNotEnabled for the models whose flow T-11 has not decided.
+// ledgerModelA restricts seller settlement to the enabled marketplace model.
 func ledgerModelA(m Model) error {
-	switch m {
-	case ModelA, ModelA2:
+	if m == ModelA {
 		return nil
-	case ModelB, ModelC:
-		// TODO(T-11): model B posts the sale as Koro's own revenue
-		// (buyer_advances + / platform_sales_revenue − / vat_output −; the
-		// entries of Koro's own line in OrderAllocated, BE-067) and the
-		// supplier's invoice as cost (cost_of_services + / vat_input + /
-		// seller_payable(payee) −); model C keeps no buyer money (the payee
-		// is paid directly, a direct_confirmed payment is informational) and
-		// posts only Koro's fee (koro_bank + / platform_commission_revenue − /
-		// vat_output −; BE-066). The accounts are seeded (000110); the
-		// templates come with the T-11 decision.
-		return ErrModelNotEnabled
 	}
-	return invalid("model", fmt.Sprintf("%q is not a commerce model", m))
+	return ErrModelNotEnabled
+}
+
+// collectionModel permits only the implemented A and C money flows.
+func collectionModel(m Model) error {
+	switch m {
+	case ModelA, ModelC:
+		return nil
+	case ModelA2, ModelB:
+		return ErrModelNotEnabled
+	default:
+		return invalid("model", fmt.Sprintf("%q is not a commerce model", m))
+	}
 }
 
 // AllocationLine is the frozen money of one order line (order_lines, 02
@@ -96,6 +95,13 @@ func AllocationOf(l orders.PaidLine) AllocationLine {
 		a.CommissionAmount, a.CommissionVATAmount = l.CommissionAmount, l.CommissionVATAmount
 	}
 	return a
+}
+
+// FeeAllocationOf isolates the only money Koro holds in model C. The
+// payee's service price and VAT never enter Koro's ledger.
+func FeeAllocationOf(l orders.PaidLine) AllocationLine {
+	return AllocationLine{OrderLineID: l.LineID, PayableAmount: l.BuyerFeeAmount,
+		CommissionAmount: l.CommissionAmount, CommissionVATAmount: l.CommissionVATAmount}
 }
 
 // Koro reports Koro's own platform-native line (no payee).
@@ -187,7 +193,7 @@ func ptr(id uuid.UUID) *uuid.UUID { return &id }
 //
 //	koro_bank +amount / buyer_advances −amount
 func PaymentReceived(m Model, paymentID uuid.UUID, amount int64, at time.Time) (Txn, error) {
-	if err := ledgerModelA(m); err != nil {
+	if err := collectionModel(m); err != nil {
 		return Txn{}, err
 	}
 	if amount <= 0 {
@@ -218,7 +224,7 @@ func PaymentReceived(m Model, paymentID uuid.UUID, amount int64, at time.Time) (
 // Zero shares are left out (a 0 % commission has no revenue entry); a
 // transaction with no money (only free lines) is ErrInvalidTxn.
 func OrderAllocated(m Model, orderID uuid.UUID, lines []AllocationLine, at time.Time) (Txn, error) {
-	if err := ledgerModelA(m); err != nil {
+	if err := collectionModel(m); err != nil {
 		return Txn{}, err
 	}
 	if len(lines) == 0 {
@@ -226,6 +232,9 @@ func OrderAllocated(m Model, orderID uuid.UUID, lines []AllocationLine, at time.
 	}
 	t := Txn{Kind: KindOrderAllocated, RefType: RefOrder, RefID: orderID, OccurredAt: at}
 	for i, l := range lines {
+		if m == ModelC && (l.PayeeID != nil || l.SellerNetAmount != 0 || l.NetAmount != 0 || l.VATAmount != 0 || l.VATWithheldAmount != 0) {
+			return Txn{}, invalid("lines", "model C allocates Koro's buyer fee only")
+		}
 		if err := l.check(i); err != nil {
 			return Txn{}, err
 		}
@@ -361,7 +370,7 @@ func SplitRefund(l AllocationLine, amount int64) (RefundLine, error) {
 // Post rejects it (ErrNegativeBalance) when the payee is owed less than the
 // seller part of a line that was not paid out.
 func RefundCompleted(m Model, refundID uuid.UUID, unallocated int64, lines []RefundLine, at time.Time) (Txn, error) {
-	if err := ledgerModelA(m); err != nil {
+	if err := collectionModel(m); err != nil {
 		return Txn{}, err
 	}
 	if unallocated < 0 {
@@ -372,6 +381,9 @@ func RefundCompleted(m Model, refundID uuid.UUID, unallocated int64, lines []Ref
 	parts := []int64{unallocated}
 	for i, l := range lines {
 		loc := fmt.Sprintf("lines[%d]", i)
+		if m == ModelC && (l.PayeeID != uuid.Nil() || l.SellerAmount != 0 || l.SalesAmount != 0 || l.PaidOut) {
+			return Txn{}, invalid(loc, "model C refunds Koro's buyer fee only")
+		}
 		koro := l.PayeeID == uuid.Nil()
 		switch {
 		case l.OrderLineID == uuid.Nil():

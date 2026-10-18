@@ -90,10 +90,9 @@ type Orders interface {
 	// fulfilled and the effect carries every line for the splits and the
 	// ledger. A model C order collects only Koro's fee here.
 	ApplyPayment(ctx context.Context, orderID, paymentID uuid.UUID, amount int64) (PaymentEffect, error)
-	// ConfirmDirectPayment pays a model C order whose fee is collected once
-	// a finance admin confirmed the buyer's direct payment to the payees
-	// (payments direct_confirmed, BE-041; T-18, T-227, 06 H-56); fee not in
-	// yet → 409 orders.order_not_paid.
+	// ConfirmDirectPayment records the finance admin's evidence once. Fee
+	// capture and confirmation may arrive in either order; the second
+	// condition pays the order, in the caller's transaction.
 	ConfirmDirectPayment(ctx context.Context, orderID, paymentID uuid.UUID) (PaymentEffect, error)
 	// ApplyRefund records a completed refund of the order (a line of it
 	// when lineID is set; BE-043).

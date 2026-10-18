@@ -32,12 +32,11 @@
 //     payment_received; a fully paid order posts order_allocated for its
 //     lines: the payee lines and Koro's own platform-native lines (payee
 //     NULL: Koro's sale revenue and its VAT less the buyer's withholding;
-//     BE-067, T-293) in one transaction. Models B and C have no ledger
-//     template (ledger.model_not_enabled): their fee transfers cannot be
-//     captured until T-11 decides them.
+//     BE-067, T-293) in one transaction. Model C allocates only its buyer
+//     fee and fee VAT. A2 and B remain disabled (ledger.model_not_enabled).
 //   - Model C (06 H-56, T-18, T-227): a finance admin's confirmation that the
 //     buyer paid the payees directly records a direct_confirmed payment and
-//     pays the order (orders.ConfirmDirectPayment) once Koro's fee is in.
+//     pays the order once Koro's fee is in; either condition may arrive first.
 //   - Refunds (BE-043; 03 §6.1 "İade", 02 §20.5): money going back to the
 //     buyer leaves in three steps. A finance or platform admin requests it
 //     (Idempotency-Key) from a payment: an overpayment (the part of a

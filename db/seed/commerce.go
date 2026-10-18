@@ -8,7 +8,7 @@ import (
 	"koro/internal/platform/money"
 )
 
-// CommerceDemo identifies the synthetic Model A catalogue and unpaid
+// CommerceDemo identifies the synthetic Model A/C catalogue and unpaid
 // orders. The collection account is deliberately left to its own setup:
 // no payment, ledger entry, invoice or bank evidence is fabricated here.
 type CommerceDemo struct {
@@ -16,10 +16,11 @@ type CommerceDemo struct {
 	PackageOfferingID, ClubOfferingID           uuid.UUID
 	PackageOrderID, ClubOrderID, ExpiredOrderID uuid.UUID
 	PackageEntitlementID, ExpiredEntitlementID  uuid.UUID
+	DirectOfferingID, DirectOrderID             uuid.UUID
 }
 
 // These are existing checksum-valid parties test vectors, not real tax
-// registrations. No private commercial terms are used: commission is zero.
+// registrations. The pricing examples are synthetic, not commercial terms.
 const demoBuyerTaxNo = "1111111114"
 const demoPayeeTaxNo = "4567890128"
 
@@ -29,6 +30,7 @@ func (b *builder) commerce() error {
 		PackageOfferingID: b.id("offering", 0), ClubOfferingID: b.id("offering", 1),
 		PackageOrderID: b.id("order", 0), ClubOrderID: b.id("order", 1), ExpiredOrderID: b.id("order", 2),
 		PackageEntitlementID: b.id("commerce_ent", 0), ExpiredEntitlementID: b.id("commerce_ent", 2),
+		DirectOfferingID: b.id("offering", 2), DirectOrderID: b.id("order", 3),
 	}
 	b.p.Demo.Commerce = c
 	created := b.now.AddDate(0, 0, -30)
@@ -95,7 +97,7 @@ func (b *builder) commerce() error {
 			}
 		}
 	}
-	return nil
+	return b.commerceDirect(buyer)
 }
 
 func (b *builder) commerceOrder(n, offering int, title string, price int64, seller uuid.UUID, payee any, buyer map[string]any) error {

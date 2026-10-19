@@ -176,51 +176,159 @@ func TestReserve_ConcurrentLastUnit_OneSucceeds_Postgres(t *testing.T) {
 	}
 }
 
-// TestReserve_PerBuyerLimit_Postgres: the per-buyer check reads BuyerHeld
-// under the offering's row lock, in the caller's transaction, so two
-// concurrent orders of one buyer cannot both pass the limit: the second
-// waits for the first and then counts its unit.
+// TestReserve_PerBuyerLimit_Postgres: the buyer's held units and stock are
+// written in the same transaction. Contenders must see the committed order
+// after the offering lock is released, and must not see a rolled-back order.
 func TestReserve_PerBuyerLimit_Postgres(t *testing.T) {
 	t.Parallel()
-	p := newPG(t)
-	o := p.activeOffering(t, ptr(10), ptr(1))
-	buyer := uuid.NewV7()
-	var mu sync.Mutex
-	held := 0 // the orders "table" of the test: written in the reserving transaction
-	off := p.module(t, func(context.Context, uuid.UUID, uuid.UUID) (int, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		return held, nil
-	}).Offerings
-	var wg sync.WaitGroup
-	errs := make([]error, 6)
-	for i := range errs {
-		wg.Go(func() {
-			errs[i] = p.d.Tx.WithTx(context.Background(), func(ctx context.Context) error {
-				if err := off.Reserve(ctx, o.ID, 1, buyer); err != nil {
-					return err
-				}
-				// The order line of the buyer, committed with the reservation.
-				db.AfterCommit(ctx, func(context.Context) { mu.Lock(); held++; mu.Unlock() })
-				time.Sleep(20 * time.Millisecond) // hold the row lock: the others wait
-				return nil
-			})
-		})
-	}
-	wg.Wait()
-	ok := 0
-	for _, err := range errs {
-		switch {
-		case err == nil:
-			ok++
-		case errors.Is(err, catalog.ErrPerBuyerLimit):
-		default:
-			t.Errorf("reserve: %v", err)
+	for _, rollbackFirst := range []bool{false, true} {
+		name := "commit"
+		if rollbackFirst {
+			name = "rollback"
 		}
-	}
-	got, _ := p.store.GetOffering(t.Context(), o.ID, false)
-	if ok != 1 || got.QuantitySold != 1 {
-		t.Fatalf("reservations of one buyer with limit 1 = %d, sold %d", ok, got.QuantitySold)
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			p := newPG(t)
+			o := p.activeOffering(t, ptr(10), ptr(1))
+			buyer := uuid.NewV7()
+			owner := testutil.OwnerConn(t, p.d)
+			// A shared, transactional stand-in for the orders table, not a
+			// connection-local TEMP table or an AfterCommit memory counter.
+			if _, err := owner.Exec(t.Context(), `CREATE TABLE catalog_test_buyer_holds (
+				offering_id uuid NOT NULL, buyer_id uuid NOT NULL, quantity integer NOT NULL);
+				GRANT SELECT, INSERT ON catalog_test_buyer_holds TO app_rw`); err != nil {
+				t.Fatal(err)
+			}
+			held := func(ctx context.Context, offeringID, buyerID uuid.UUID) (int, error) {
+				var n int
+				err := db.Conn(ctx, p.d.ORM).Raw(`SELECT COALESCE(SUM(quantity), 0)
+					FROM catalog_test_buyer_holds WHERE offering_id = ? AND buyer_id = ?`, offeringID, buyerID).Scan(&n).Error
+				return n, err
+			}
+			off := p.module(t, held).Offerings
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			defer cancel()
+			start, release := make(chan struct{}), make(chan struct{})
+			ready, locked := make(chan struct{}, 6), make(chan int, 1)
+			rollback := errors.New("test: roll back first reservation")
+			var first atomic.Bool
+			var wg sync.WaitGroup
+			errs := make([]error, 6)
+			// Cancellation unblocks SQL and channel waits even if an assertion
+			// fails before the first transaction is released.
+			defer func() { cancel(); wg.Wait() }()
+			for i := range errs {
+				wg.Go(func() {
+					ready <- struct{}{}
+					select {
+					case <-start:
+					case <-ctx.Done():
+						errs[i] = ctx.Err()
+						return
+					}
+					errs[i] = p.d.Tx.WithTx(ctx, func(ctx context.Context) error {
+						if err := off.Reserve(ctx, o.ID, 1, buyer); err != nil {
+							return err
+						}
+						conn := db.Conn(ctx, p.d.ORM)
+						if err := conn.Exec(`INSERT INTO catalog_test_buyer_holds (offering_id, buyer_id, quantity)
+							VALUES ( ?, ?, 1)`, o.ID, buyer).Error; err != nil {
+							return err
+						}
+						if !first.CompareAndSwap(false, true) {
+							return nil
+						}
+						var pid int
+						if err := conn.Raw(`SELECT pg_backend_pid()`).Scan(&pid).Error; err != nil {
+							return err
+						}
+						locked <- pid
+						select {
+						case <-release:
+						case <-ctx.Done():
+							return ctx.Err()
+						}
+						if rollbackFirst {
+							return rollback
+						}
+						return nil
+					})
+				})
+			}
+			for range errs {
+				select {
+				case <-ready:
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				}
+			}
+			close(start)
+			var holder int
+			select {
+			case holder = <-locked:
+			case <-ctx.Done():
+				t.Fatalf("first reservation did not reach the release gate: %v", ctx.Err())
+			}
+			// Verify actual PostgreSQL lock contention before release, rather
+			// than assuming that a short sleep let the other goroutines run.
+			tick := time.NewTicker(10 * time.Millisecond)
+			defer tick.Stop()
+			for {
+				var blocked bool
+				if err := owner.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+					WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid)))`, holder).Scan(&blocked); err != nil {
+					t.Fatal(err)
+				}
+				if blocked {
+					break
+				}
+				select {
+				case <-tick.C:
+				case <-ctx.Done():
+					t.Fatalf("no contender waited for the first reservation: %v", ctx.Err())
+				}
+			}
+			var visibleHeld, visibleSold int
+			if err := owner.QueryRow(ctx, `SELECT
+				(SELECT COALESCE(SUM(quantity), 0) FROM catalog_test_buyer_holds),
+				(SELECT quantity_sold FROM offerings WHERE id = $1)`, o.ID).Scan(&visibleHeld, &visibleSold); err != nil {
+				t.Fatal(err)
+			}
+			if visibleHeld != 0 || visibleSold != 0 {
+				t.Fatalf("uncommitted reservation visible: held=%d sold=%d", visibleHeld, visibleSold)
+			}
+			close(release)
+			wg.Wait()
+			ok, refused, rolledBack := 0, 0, 0
+			for _, err := range errs {
+				switch {
+				case err == nil:
+					ok++
+				case errors.Is(err, catalog.ErrPerBuyerLimit):
+					refused++
+				case errors.Is(err, rollback):
+					rolledBack++
+				default:
+					t.Errorf("reserve: %v", err)
+				}
+			}
+			wantRollback := 0
+			if rollbackFirst {
+				wantRollback = 1
+			}
+			if ok != 1 || refused != len(errs)-1-wantRollback || rolledBack != wantRollback {
+				t.Fatalf("reservations: success=%d limit=%d rollback=%d; want 1, %d, %d",
+					ok, refused, rolledBack, len(errs)-1-wantRollback, wantRollback)
+			}
+			got, err := p.store.GetOffering(ctx, o.ID, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			n, err := held(ctx, o.ID, buyer)
+			if err != nil || n != 1 || got.QuantitySold != 1 {
+				t.Fatalf("committed held=%d sold=%d (%v); want 1, 1", n, got.QuantitySold, err)
+			}
+		})
 	}
 }
 

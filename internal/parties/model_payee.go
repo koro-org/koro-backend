@@ -61,7 +61,8 @@ func (c InvoicingCapability) Valid() bool {
 // Payee is one payees row (02 §17.3): the legal party (kind payee) paid on
 // behalf of a seller org (a club or a university). The seller org is never
 // the party's org_id (R-003 §4.7): a foundation is the payee of several
-// clubs through one row per club.
+// clubs through one row per club. CreatedAt and UpdatedAt are read only
+// (see LegalParty).
 type Payee struct {
 	ID                    uuid.UUID           `gorm:"type:uuid;column:id;primaryKey"`
 	LegalPartyID          uuid.UUID           `gorm:"type:uuid;column:legal_party_id"`
@@ -77,8 +78,8 @@ type Payee struct {
 	ValidFrom             time.Time           `gorm:"column:valid_from"`
 	ValidTo               *time.Time          `gorm:"column:valid_to"`
 	CreatedBy             uuid.UUID           `gorm:"type:uuid;column:created_by"`
-	CreatedAt             time.Time           `gorm:"column:created_at"`
-	UpdatedAt             time.Time           `gorm:"column:updated_at"`
+	CreatedAt             time.Time           `gorm:"column:created_at;->"`
+	UpdatedAt             time.Time           `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -127,7 +128,8 @@ func (s BankAccountStatus) Pending() bool {
 // a full read by finance or platform admins is audited (03 §6.5). The IBAN,
 // the holder, the payee, the evidence and the submitter never change
 // (payee_bank_accounts_frozen): a change is a new row through four eyes.
-// The IBAN is never logged (05 §11.2).
+// The IBAN is never logged (05 §11.2). CreatedAt and UpdatedAt are read only
+// (see LegalParty).
 type BankAccount struct {
 	ID               uuid.UUID         `gorm:"type:uuid;column:id;primaryKey"`
 	PayeeID          uuid.UUID         `gorm:"type:uuid;column:payee_id"`
@@ -153,8 +155,8 @@ type BankAccount struct {
 	RevokedBy        *uuid.UUID        `gorm:"type:uuid;column:revoked_by"`
 	RevokedAt        *time.Time        `gorm:"column:revoked_at"`
 	RevokeReason     *string           `gorm:"column:revoke_reason"`
-	CreatedAt        time.Time         `gorm:"column:created_at"`
-	UpdatedAt        time.Time         `gorm:"column:updated_at"`
+	CreatedAt        time.Time         `gorm:"column:created_at;->"`
+	UpdatedAt        time.Time         `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.

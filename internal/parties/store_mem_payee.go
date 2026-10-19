@@ -70,12 +70,7 @@ func (s *MemStore) InsertPayee(_ context.Context, p Payee) (Payee, error) {
 	if err := s.uniquePayee(p); err != nil {
 		return Payee{}, err
 	}
-	if p.CreatedAt.IsZero() {
-		p.CreatedAt = now
-	}
-	if p.UpdatedAt.IsZero() {
-		p.UpdatedAt = p.CreatedAt
-	}
+	p.CreatedAt, p.UpdatedAt = now, now
 	s.payees[p.ID] = p
 	return p, nil
 }
@@ -295,10 +290,7 @@ func (s *MemStore) InsertBankAccount(_ context.Context, b BankAccount) (BankAcco
 	if b.SubmittedAt.IsZero() {
 		b.SubmittedAt = now
 	}
-	if b.CreatedAt.IsZero() {
-		b.CreatedAt = now
-	}
-	b.UpdatedAt, b.BankCode = b.CreatedAt, b.IBAN[4:9]
+	b.CreatedAt, b.UpdatedAt, b.BankCode = now, now, b.IBAN[4:9]
 	s.accounts[b.ID] = b
 	return b, nil
 }

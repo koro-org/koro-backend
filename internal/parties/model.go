@@ -158,6 +158,10 @@ func (a *Address) Scan(src any) error {
 // national ID, envelope-encrypted) and TCKNBidx (its blind index) never leave
 // the module: the cross-module reads (Parties) clear them, and no DTO maps
 // them (03 k21, 04 §2.13). Tax numbers are never logged (05 §11.2).
+//
+// CreatedAt and UpdatedAt are read only, as in every model of the package:
+// the column defaults and koro_touch_updated_at stamp them with the database
+// clock alone, so updated_at never precedes created_at (BE-064).
 type LegalParty struct {
 	ID                uuid.UUID  `gorm:"type:uuid;column:id;primaryKey"`
 	Kind              Kind       `gorm:"column:kind"`
@@ -179,8 +183,8 @@ type LegalParty struct {
 	VerifiedAt        *time.Time `gorm:"column:verified_at"`
 	VerifiedBy        *uuid.UUID `gorm:"type:uuid;column:verified_by"`
 	CreatedBy         *uuid.UUID `gorm:"type:uuid;column:created_by"`
-	CreatedAt         time.Time  `gorm:"column:created_at"`
-	UpdatedAt         time.Time  `gorm:"column:updated_at"`
+	CreatedAt         time.Time  `gorm:"column:created_at;->"`
+	UpdatedAt         time.Time  `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -197,7 +201,8 @@ func (p LegalParty) withoutSecrets() LegalParty {
 }
 
 // Document is one legal_party_documents row (02 §17.2). The file lives in
-// files (purpose party_document), attached to the document row.
+// files (purpose party_document), attached to the document row. CreatedAt
+// is read only (see LegalParty).
 type Document struct {
 	ID           uuid.UUID    `gorm:"type:uuid;column:id;primaryKey"`
 	LegalPartyID uuid.UUID    `gorm:"type:uuid;column:legal_party_id"`
@@ -206,7 +211,7 @@ type Document struct {
 	UploadedBy   uuid.UUID    `gorm:"type:uuid;column:uploaded_by"`
 	VerifiedAt   *time.Time   `gorm:"column:verified_at"`
 	VerifiedBy   *uuid.UUID   `gorm:"type:uuid;column:verified_by"`
-	CreatedAt    time.Time    `gorm:"column:created_at"`
+	CreatedAt    time.Time    `gorm:"column:created_at;->"`
 }
 
 // TableName implements gorm's Tabler.

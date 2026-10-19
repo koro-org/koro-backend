@@ -21,7 +21,8 @@ import (
 //
 //	kind party     party_kind, legal_type, status, tax_no; org (a fixture org) when given;
 //	               verified rows are verified by finance_admin_2; created and updated at
-//	               matrixOrgTime, so the ETag of an untouched party is "1hmhuo3hji000"
+//	               matrixOrgTime (the store's clock is pinned there while seeding, SeedAt),
+//	               so the ETag of an untouched party is "1hmhuo3hji000"
 //	kind payee     a payees row (org, party, status, is_default) created by platform_admin_2 at
 //	               matrixOrgTime (ETag "1hmhuo3hji000"); an active one verified by finance_admin_2
 //	kind file      an unattached, active file of uploaded_by for org (purpose party_document, or
@@ -43,6 +44,11 @@ func (w *partiesWiring) matrixFixtures(fx *matrixFixtures) error {
 	rank := map[string]int{"party": 0, "payee": 1, "file": 1, "document": 2, "account": 2}
 	all := fx.Of("parties")
 	slices.SortStableFunc(all, func(a, b fixture) int { return cmp.Compare(rank[a.Kind], rank[b.Kind]) })
+	return mem.SeedAt(matrixOrgTime, func() error { return w.seedFixtures(ctx, fx, mem, all) })
+}
+
+// seedFixtures seeds the sorted parties fixtures (matrixFixtures).
+func (w *partiesWiring) seedFixtures(ctx context.Context, fx *matrixFixtures, mem *parties.MemStore, all []fixture) error {
 	verifier := authztest.ID("finance_admin_2")
 	for _, f := range all {
 		id, err := fx.ID(f.Name)
@@ -56,7 +62,6 @@ func (w *partiesWiring) matrixFixtures(fx *matrixFixtures) error {
 			p := parties.LegalParty{
 				ID: id, Kind: parties.Kind(str("party_kind")), LegalType: parties.LegalType(str("legal_type")),
 				Title: "Matris " + f.Name, VATStatus: parties.VATUnknown, Status: parties.Status(str("status")),
-				CreatedAt: t, UpdatedAt: t,
 			}
 			if p.Kind != parties.KindPlatform {
 				office, email := "Matris Vergi Dairesi", f.Name+"@matrix.koro.test"
@@ -113,7 +118,7 @@ func (w *partiesWiring) matrixFixtures(fx *matrixFixtures) error {
 				return err
 			}
 			if _, err := mem.InsertDocument(ctx, parties.Document{ID: id, LegalPartyID: party, Kind: parties.DocTaxCertificate,
-				FileID: fileID, UploadedBy: by, CreatedAt: matrixOrgTime}); err != nil {
+				FileID: fileID, UploadedBy: by}); err != nil {
 				return fmt.Errorf("fixture %s: %w", f.Name, err)
 			}
 		case "account":
@@ -143,7 +148,7 @@ func (w *partiesWiring) matrixPayee(ctx context.Context, fx *matrixFixtures, mem
 	p := parties.Payee{
 		ID: id, LegalPartyID: party, OrgID: org, Status: parties.PayeeStatus(status), IsDefault: def,
 		PayoutMethod: parties.PayoutBankEFT, InvoicingCapability: parties.InvoicingUnknown, ValidFrom: t,
-		CreatedBy: authztest.ID("platform_admin_2"), CreatedAt: t, UpdatedAt: t,
+		CreatedBy: authztest.ID("platform_admin_2"),
 	}
 	if p.Status == parties.PayeeActive {
 		p.VerifiedAt, p.VerifiedBy = &t, &verifier
@@ -185,7 +190,7 @@ func (w *partiesWiring) matrixAccount(ctx context.Context, fx *matrixFixtures, m
 	t := matrixOrgTime
 	b := parties.BankAccount{
 		ID: id, PayeeID: py.ID, OrgID: py.OrgID, IBAN: ibanNo, HolderName: party.Title, EvidenceFileID: fileID,
-		Status: parties.AccountPendingVerification, SubmittedBy: by, SubmittedByAdmin: admin, SubmittedAt: t, CreatedAt: t,
+		Status: parties.AccountPendingVerification, SubmittedBy: by, SubmittedByAdmin: admin, SubmittedAt: t,
 	}
 	if admin {
 		b.Status = parties.AccountPendingApproval

@@ -39,9 +39,36 @@ func TestStore_Contract_Mem(t *testing.T) {
 	})
 }
 
+// TestMemStore_SeedAt pins the fixture shortcut: rows written inside are
+// stamped at the pinned time by the store itself, the store's clock is
+// back afterwards, and a caller's timestamp is still ignored (BE-064).
+func TestMemStore_SeedAt(t *testing.T) {
+	t.Parallel()
+	s := parties.NewMemStore(func() time.Time { return t0 })
+	at := t0.Add(-72 * time.Hour)
+	vkn := vknA
+	var seeded parties.LegalParty
+	err := s.SeedAt(at, func() error {
+		var err error
+		seeded, err = s.InsertParty(t.Context(), parties.LegalParty{ID: uuid.NewV7(), Kind: parties.KindPayee,
+			LegalType: parties.LegalFoundation, Title: "Örnek Vakfı", TaxNo: &vkn, VATStatus: parties.VATUnknown,
+			Status: parties.StatusPendingVerification, CreatedAt: t0, UpdatedAt: t0})
+		return err
+	})
+	if err != nil || !seeded.CreatedAt.Equal(at) || !seeded.UpdatedAt.Equal(at) {
+		t.Fatalf("SeedAt insert = %+v, %v; want stamped at %v", seeded, err, at)
+	}
+	seeded.Title = "Yeni Vakıf"
+	upd, err := s.UpdateParty(t.Context(), seeded)
+	if err != nil || !upd.UpdatedAt.Equal(t0) || !upd.CreatedAt.Equal(at) {
+		t.Fatalf("update after SeedAt = %+v, %v; want updated_at %v", upd, err, t0)
+	}
+}
+
 // storeContract is the contract both stores pass (05 §13.3).
 func storeContract(t *testing.T, newStore func(t *testing.T) (parties.Store, world)) {
 	t.Helper()
+	stale := time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC) // a caller's timestamp the stores ignore
 	party := func(kind parties.Kind, lt parties.LegalType, org *uuid.UUID, vkn string) parties.LegalParty {
 		p := parties.LegalParty{
 			ID: uuid.NewV7(), Kind: kind, LegalType: lt, OrgID: org, Title: "Örnek Ünvan A.Ş.", VATStatus: parties.VATUnknown,
@@ -67,9 +94,11 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (parties.Store, wor
 		co, by := w.org(t), w.user(t)
 		p := party(parties.KindBuyerCompany, parties.LegalCompany, &co, vknA)
 		p.CreatedBy = &by
+		// The store owns both timestamps (one clock, BE-064): a caller's value is ignored.
+		p.CreatedAt, p.UpdatedAt = stale, stale
 		got := insert(t, s, p)
 		if got.ID != p.ID || got.Title != p.Title || got.Address != p.Address || got.OrgID == nil || *got.OrgID != co ||
-			got.CreatedAt.IsZero() || got.UpdatedAt.IsZero() || *got.TaxNo != vknA {
+			got.CreatedAt.IsZero() || got.CreatedAt.Equal(stale) || !got.UpdatedAt.Equal(got.CreatedAt) || *got.TaxNo != vknA {
 			t.Fatalf("InsertParty = %+v", got)
 		}
 		if _, err := s.GetParty(t.Context(), uuid.NewV7()); !errors.Is(err, parties.ErrNotFound) {
@@ -108,7 +137,7 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (parties.Store, wor
 		}
 		if upd.Title != "Yeni Ünvan A.Ş." || upd.Kind != parties.KindBuyerCompany || upd.OrgID == nil || *upd.OrgID != co ||
 			upd.CreatedBy == nil || *upd.CreatedBy != by || upd.Status != parties.StatusVerified || !upd.UpdatedAt.After(got.UpdatedAt) &&
-			!upd.UpdatedAt.Equal(got.UpdatedAt) {
+			!upd.UpdatedAt.Equal(got.UpdatedAt) || upd.UpdatedAt.Before(upd.CreatedAt) {
 			t.Fatalf("UpdateParty = %+v", upd)
 		}
 		other := insert(t, s, party(parties.KindBuyerCompany, parties.LegalCompany, &co, vknC))

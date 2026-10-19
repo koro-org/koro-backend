@@ -70,6 +70,23 @@ func (s *MemStore) LinkPayee(id, orgID, partyID uuid.UUID, status string) {
 	s.payees[id] = p
 }
 
+// SeedAt runs seed with the store's clock pinned at t, so the rows it
+// writes are stamped at t (fixtures with a known ETag). The timestamps stay
+// the store's own, as the database's are for gormStore: callers never set
+// them. seed must not run alongside other writers of the store.
+func (s *MemStore) SeedAt(t time.Time, seed func() error) error {
+	s.mu.Lock()
+	prev := s.now
+	s.now = func() time.Time { return t }
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.now = prev
+		s.mu.Unlock()
+	}()
+	return seed()
+}
+
 func (s *MemStore) stamp(prev time.Time) time.Time {
 	t := s.now().UTC().Truncate(time.Microsecond)
 	if !t.After(prev) {
@@ -157,13 +174,9 @@ func (s *MemStore) insertParty(p LegalParty) (LegalParty, error) {
 	if err := s.uniqueParty(p); err != nil {
 		return LegalParty{}, err
 	}
+	// The store owns both timestamps, as the read-only columns of gormStore.
 	now := s.now().UTC().Truncate(time.Microsecond)
-	if p.CreatedAt.IsZero() {
-		p.CreatedAt = now
-	}
-	if p.UpdatedAt.IsZero() {
-		p.UpdatedAt = p.CreatedAt
-	}
+	p.CreatedAt, p.UpdatedAt = now, now
 	p = cloneParty(p)
 	s.parties[p.ID] = p
 	return cloneParty(p), nil
@@ -376,9 +389,7 @@ func (s *MemStore) InsertDocument(_ context.Context, d Document) (Document, erro
 			return Document{}, files.ErrAlreadyAttached
 		}
 	}
-	if d.CreatedAt.IsZero() {
-		d.CreatedAt = s.now().UTC().Truncate(time.Microsecond)
-	}
+	d.CreatedAt = s.now().UTC().Truncate(time.Microsecond)
 	s.docs[d.ID] = d
 	return d, nil
 }

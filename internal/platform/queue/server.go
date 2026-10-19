@@ -255,8 +255,16 @@ func (s *Server) Ping() error { return s.srv.Ping() }
 // Every replica running a scheduler fires every job; Job.Unique makes the
 // second enqueue a no-op (R-002 §3e).
 type Scheduler struct {
-	s   *asynq.Scheduler
+	s   schedulerBackend
 	log *slog.Logger
+}
+
+// schedulerBackend keeps registration and lifecycle together. Tests can observe
+// the options passed to the real scheduler without starting its wall clock.
+type schedulerBackend interface {
+	Register(string, *asynq.Task, ...asynq.Option) (string, error)
+	Start() error
+	Shutdown()
 }
 
 // NewScheduler returns a scheduler on rdb (shared pool). ctx is the base

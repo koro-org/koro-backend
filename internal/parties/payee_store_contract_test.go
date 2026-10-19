@@ -28,6 +28,7 @@ func TestPayeeStore_Contract_Mem(t *testing.T) {
 func payeeStoreContract(t *testing.T, newStore func(t *testing.T) (parties.Store, world)) {
 	t.Helper()
 	ts := t0.Add(-time.Hour)
+	stale := time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC) // a caller's timestamp the stores ignore (BE-064)
 	setup := func(t *testing.T) (parties.Store, world, uuid.UUID, parties.LegalParty) {
 		t.Helper()
 		s, w := newStore(t)
@@ -42,7 +43,8 @@ func payeeStoreContract(t *testing.T, newStore func(t *testing.T) (parties.Store
 	newPayee := func(t *testing.T, s parties.Store, w world, org, party uuid.UUID, st parties.PayeeStatus, def bool) parties.Payee {
 		t.Helper()
 		p := parties.Payee{ID: uuid.NewV7(), LegalPartyID: party, OrgID: org, Status: st, IsDefault: def,
-			PayoutMethod: parties.PayoutBankEFT, InvoicingCapability: parties.InvoicingUnknown, ValidFrom: ts, CreatedBy: w.user(t)}
+			PayoutMethod: parties.PayoutBankEFT, InvoicingCapability: parties.InvoicingUnknown, ValidFrom: ts, CreatedBy: w.user(t),
+			CreatedAt: stale, UpdatedAt: stale}
 		if st == parties.PayeeActive {
 			by := w.user(t)
 			p.VerifiedAt, p.VerifiedBy = &ts, &by
@@ -60,7 +62,8 @@ func payeeStoreContract(t *testing.T, newStore func(t *testing.T) (parties.Store
 			st = parties.AccountPendingApproval
 		}
 		return s.InsertBankAccount(t.Context(), parties.BankAccount{ID: uuid.NewV7(), PayeeID: py.ID, OrgID: py.OrgID, IBAN: number,
-			HolderName: "Örnek Vakfı", EvidenceFileID: w.file(t), Status: st, SubmittedBy: by, SubmittedByAdmin: admin, SubmittedAt: ts})
+			HolderName: "Örnek Vakfı", EvidenceFileID: w.file(t), Status: st, SubmittedBy: by, SubmittedByAdmin: admin, SubmittedAt: ts,
+			CreatedAt: stale, UpdatedAt: stale})
 	}
 	isFourEyes := func(err error) bool { return errors.Is(err, authz.ErrFourEyes) }
 
@@ -69,7 +72,8 @@ func payeeStoreContract(t *testing.T, newStore func(t *testing.T) (parties.Store
 		s, w, org, party := setup(t)
 		ctx := t.Context()
 		p := newPayee(t, s, w, org, party.ID, parties.PayeeDraft, true)
-		if p.PartyKind != parties.KindPayee || p.CreatedAt.IsZero() || p.UpdatedAt.IsZero() || !p.ValidFrom.Equal(ts) {
+		if p.PartyKind != parties.KindPayee || p.CreatedAt.IsZero() || p.CreatedAt.Equal(stale) || !p.UpdatedAt.Equal(p.CreatedAt) ||
+			!p.ValidFrom.Equal(ts) {
 			t.Fatalf("InsertPayee = %+v", p)
 		}
 		if _, err := s.OrgPayee(ctx, org, p.ID, true); err != nil {
@@ -106,7 +110,8 @@ func payeeStoreContract(t *testing.T, newStore func(t *testing.T) (parties.Store
 		by := w.user(t)
 		next.VerifiedAt, next.VerifiedBy = &ts, &by
 		upd, err := s.UpdatePayee(ctx, next)
-		if err != nil || upd.Status != parties.PayeeActive || !upd.UpdatedAt.After(p.UpdatedAt) || upd.CreatedBy != p.CreatedBy {
+		if err != nil || upd.Status != parties.PayeeActive || !upd.UpdatedAt.After(p.UpdatedAt) || upd.UpdatedAt.Before(upd.CreatedAt) ||
+			upd.CreatedBy != p.CreatedBy {
 			t.Fatalf("UpdatePayee = %+v, %v", upd, err)
 		}
 		if def, ok, err := s.DefaultPayee(ctx, org); err != nil || !ok || def.ID != p.ID {
@@ -166,7 +171,8 @@ func payeeStoreContract(t *testing.T, newStore func(t *testing.T) (parties.Store
 			t.Fatal("an account of another org was inserted")
 		}
 		b, err := newAccount(t, s, w, py, ibanA, clubAdmin, false)
-		if err != nil || b.Status != parties.AccountPendingVerification || b.BankCode != "00061" || b.IBAN != ibanA {
+		if err != nil || b.Status != parties.AccountPendingVerification || b.BankCode != "00061" || b.IBAN != ibanA ||
+			b.CreatedAt.IsZero() || b.CreatedAt.Equal(stale) || !b.UpdatedAt.Equal(b.CreatedAt) {
 			t.Fatalf("InsertBankAccount = %+v, %v", b, err)
 		}
 		if _, err := newAccount(t, s, w, py, ibanB, clubAdmin, false); !errors.Is(err, parties.ErrBankAccountPending) {
@@ -185,7 +191,8 @@ func payeeStoreContract(t *testing.T, newStore func(t *testing.T) (parties.Store
 			t.Fatal("an org submission was approved without its first eye")
 		}
 		v.VerifiedBy = &eyeA
-		if b, err = s.TransitionBankAccount(ctx, v, parties.AccountPendingVerification); err != nil || b.Status != parties.AccountPendingApproval {
+		if b, err = s.TransitionBankAccount(ctx, v, parties.AccountPendingVerification); err != nil || b.Status != parties.AccountPendingApproval ||
+			!b.UpdatedAt.After(b.CreatedAt) {
 			t.Fatalf("verify = %+v, %v", b, err)
 		}
 		// A stale transition (the status moved on) is 409.

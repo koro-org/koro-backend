@@ -67,8 +67,8 @@ type Org struct {
 	VerifiedBy  *uuid.UUID `gorm:"type:uuid;column:verified_by" json:"verified_by,omitempty"`
 	ClosedAt    *time.Time `gorm:"column:closed_at" json:"closed_at,omitempty"`
 	CreatedBy   *uuid.UUID `gorm:"type:uuid;column:created_by" json:"created_by,omitempty"`
-	CreatedAt   time.Time  `gorm:"column:created_at" json:"created_at"`
-	UpdatedAt   time.Time  `gorm:"column:updated_at" json:"updated_at"`
+	CreatedAt   time.Time  `gorm:"column:created_at;->" json:"created_at"`
+	UpdatedAt   time.Time  `gorm:"column:updated_at;->" json:"updated_at"`
 }
 
 // TableName implements gorm's Tabler.
@@ -94,8 +94,8 @@ type Company struct {
 	EmailDomain      *string    `gorm:"column:email_domain" json:"email_domain,omitempty"`
 	DomainVerifiedAt *time.Time `gorm:"column:domain_verified_at" json:"domain_verified_at,omitempty"`
 	HQCity           *string    `gorm:"column:hq_city" json:"hq_city,omitempty"`
-	CreatedAt        time.Time  `gorm:"column:created_at" json:"created_at"`
-	UpdatedAt        time.Time  `gorm:"column:updated_at" json:"updated_at"`
+	CreatedAt        time.Time  `gorm:"column:created_at;->" json:"created_at"`
+	UpdatedAt        time.Time  `gorm:"column:updated_at;->" json:"updated_at"`
 }
 
 // TableName implements gorm's Tabler.
@@ -175,8 +175,8 @@ type Membership struct {
 	EndReason   *EndReason       `gorm:"column:end_reason"`
 	InvitedBy   *uuid.UUID       `gorm:"type:uuid;column:invited_by"`
 	ApprovedBy  *uuid.UUID       `gorm:"type:uuid;column:approved_by"`
-	CreatedAt   time.Time        `gorm:"column:created_at"`
-	UpdatedAt   time.Time        `gorm:"column:updated_at"`
+	CreatedAt   time.Time        `gorm:"column:created_at;->"`
+	UpdatedAt   time.Time        `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.

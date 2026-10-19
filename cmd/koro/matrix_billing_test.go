@@ -90,7 +90,7 @@ func (w *billingWiring) matrixPDF(ctx context.Context, fx *matrixFixtures, f fix
 	row := files.File{
 		ID: id, Purpose: files.PurposeInvoicePDF, OrgID: org, UploadedBy: &by, Bucket: testBuckets.Files,
 		StorageKey: "matrix/" + f.Name, DeclaredMIME: files.MIMEPDF, SizeBytes: &size, SHA256: make([]byte, 32),
-		Status: files.StatusActive, ScanStatus: files.ScanSkipped, CreatedAt: now, UpdatedAt: now,
+		Status: files.StatusActive, ScanStatus: files.ScanSkipped,
 	}
 	if invoice != nil {
 		module := "billing"
@@ -127,7 +127,7 @@ func (w *billingWiring) matrixInvoice(ctx context.Context, fx *matrixFixtures, f
 		RecipientSnapshot: billing.Snapshot{Title: "Matris Alıcı"}, IssuingMode: billing.IssuingMode(str("mode")),
 		DocumentType: billing.DocUnknown, Provider: billing.ProviderNone, Status: billing.StatusPlanned,
 		Trigger: billing.TriggerOnPayment, Currency: billing.Currency, NetAmount: 1_000_000, VATAmount: 200_000,
-		TotalAmount: 1_200_000, PayableAmount: 1_200_000, IdempotencyKey: "matrix:" + f.Name, CreatedAt: at, UpdatedAt: at,
+		TotalAmount: 1_200_000, PayableAmount: 1_200_000, IdempotencyKey: "matrix:" + f.Name,
 	}
 	if inv.Kind == billing.KindCommission {
 		inv.Trigger = billing.TriggerOnPayout

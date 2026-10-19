@@ -24,12 +24,23 @@ type MemStore struct {
 
 var _ Store = (*MemStore)(nil)
 
-// NewMemStore returns an empty in-memory store; now stamps updated_at.
+// NewMemStore returns an empty in-memory store; now stamps created_at and
+// updated_at (a caller's values are ignored, as by the column defaults and
+// the touch triggers of gormStore; BE-069).
 func NewMemStore(now func() time.Time) *MemStore {
 	return &MemStore{now: now, orders: map[uuid.UUID]Order{}, lines: map[uuid.UUID]Line{}}
 }
 
 func (m *MemStore) stamp() time.Time { return m.now().UTC().Truncate(time.Microsecond) }
+
+// touch is the updated_at of a row changed now: never before its last
+// stamp (a test clock set back).
+func (m *MemStore) touch(prev time.Time) time.Time {
+	if t := m.stamp(); t.After(prev) {
+		return t
+	}
+	return prev
+}
 
 func cloneLine(l Line) Line {
 	l.DeliverablesSnapshot = slices.Clone(l.DeliverablesSnapshot)
@@ -58,12 +69,7 @@ func (m *MemStore) InsertOrder(_ context.Context, o Order, lines []Line) error {
 		}
 	}
 	t := m.stamp()
-	if o.CreatedAt.IsZero() {
-		o.CreatedAt = t
-	}
-	if o.UpdatedAt.IsZero() {
-		o.UpdatedAt = t
-	}
+	o.CreatedAt, o.UpdatedAt = t, t
 	if o.PlacedAt.IsZero() {
 		o.PlacedAt = t
 	}
@@ -78,12 +84,7 @@ func (m *MemStore) InsertOrder(_ context.Context, o Order, lines []Line) error {
 		if l.OrderID != o.ID || l.OrgID != o.OrgID {
 			return fmt.Errorf("orders: insert line %s: not of order %s (order_lines_order_id_org_id_fkey)", l.ID, o.ID)
 		}
-		if l.CreatedAt.IsZero() {
-			l.CreatedAt = t
-		}
-		if l.UpdatedAt.IsZero() {
-			l.UpdatedAt = t
-		}
+		l.CreatedAt, l.UpdatedAt = t, t
 		m.lines[l.ID] = cloneLine(l)
 	}
 	return nil
@@ -200,7 +201,7 @@ func (m *MemStore) UpdateOrder(_ context.Context, o Order, from Status) (Order, 
 	cur.DirectConfirmedAt = o.DirectConfirmedAt
 	cur.Status, cur.PaidAmount, cur.RefundedAmount = o.Status, o.PaidAmount, o.RefundedAmount
 	cur.PaidAt, cur.CompletedAt, cur.CancelledAt, cur.CancelReason = o.PaidAt, o.CompletedAt, o.CancelledAt, o.CancelReason
-	cur.UpdatedAt = m.stamp()
+	cur.UpdatedAt = m.touch(cur.UpdatedAt)
 	m.orders[o.ID] = cur
 	return cur, nil
 }
@@ -222,7 +223,7 @@ func (m *MemStore) UpdateLine(_ context.Context, l Line, from Fulfillment) (Line
 	cur.FulfillmentStatus, cur.FulfillmentMarkedAt, cur.FulfillmentMarkedBy = l.FulfillmentStatus, l.FulfillmentMarkedAt, l.FulfillmentMarkedBy
 	cur.DisputeWindowEndsAt, cur.FulfilledAt, cur.FulfilledVia = l.DisputeWindowEndsAt, l.FulfilledAt, l.FulfilledVia
 	cur.DisputeReason, cur.RefundedAmount = l.DisputeReason, l.RefundedAmount
-	cur.UpdatedAt = m.stamp()
+	cur.UpdatedAt = m.touch(cur.UpdatedAt)
 	m.lines[l.ID] = cur
 	return cloneLine(cur), nil
 }
@@ -470,7 +471,7 @@ func (m *MemStore) MarkLinesPaidOut(_ context.Context, lineIDs []uuid.UUID, payo
 	for _, id := range ok {
 		l := m.lines[id]
 		p, t := payoutID, at
-		l.PayoutID, l.PaidOutAt, l.UpdatedAt = &p, &t, m.stamp()
+		l.PayoutID, l.PaidOutAt, l.UpdatedAt = &p, &t, m.touch(l.UpdatedAt)
 		m.lines[id] = l
 	}
 	return len(ok), nil

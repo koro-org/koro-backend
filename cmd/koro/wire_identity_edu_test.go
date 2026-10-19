@@ -32,7 +32,7 @@ func (e *actorEnv) verified(t *testing.T, u identity.User, address string, expir
 	_, domain, _ := strings.Cut(address, "@")
 	v := identity.EduRecord{ID: uuid.NewV7(), UserID: u.ID, Method: identity.EduMethodEmail, EduEmail: address,
 		EduEmailNormalized: strings.ToLower(address), EmailDomain: strings.ToLower(domain), UniversityID: &uni,
-		Status: identity.EduVerified, VerifiedAt: &now, ExpiresAt: &expires, CreatedAt: now, UpdatedAt: now}
+		Status: identity.EduVerified, VerifiedAt: &now, ExpiresAt: &expires}
 	if err := e.store.InsertEduVerification(t.Context(), v); err != nil {
 		t.Fatal(err)
 	}

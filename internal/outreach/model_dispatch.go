@@ -121,8 +121,8 @@ type Dispatch struct {
 	CompletedAt        *time.Time     `gorm:"column:completed_at"`
 	LastError          *string        `gorm:"column:last_error"`
 	CreatedBy          uuid.UUID      `gorm:"type:uuid;column:created_by"`
-	CreatedAt          time.Time      `gorm:"column:created_at"`
-	UpdatedAt          time.Time      `gorm:"column:updated_at"`
+	CreatedAt          time.Time      `gorm:"column:created_at;->"`
+	UpdatedAt          time.Time      `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.

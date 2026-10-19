@@ -11,6 +11,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/identity"
 	"koro/internal/platform/civil"
+	"koro/internal/platform/clock"
 	"koro/internal/platform/token"
 )
 
@@ -21,12 +22,23 @@ type storeWorld struct {
 
 var contractBase = time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
 
+// contractStale is a caller's timestamp the stores ignore: created_at and
+// updated_at come from one clock, the database's (02 §0.1 [ts], BE-069).
+var contractStale = time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// ticking is the clock of the in-memory contract stores: it moves on each
+// reading, as the database's does between statements.
+func ticking() func() time.Time {
+	clk := clock.NewFake(contractBase)
+	return func() time.Time { clk.Advance(time.Millisecond); return clk.Now() }
+}
+
 func contractUser(email string) identity.User {
 	b, _ := civil.New(2001, time.June, 2)
 	return identity.User{
 		ID: uuid.NewV7(), Status: identity.StatusActive, Email: email, EmailNormalized: email, PasswordHash: "$argon2id$x",
 		FirstName: "Ada", LastName: "Yılmaz", BirthDate: &b, Persona: identity.PersonaStudent, Locale: identity.LocaleTR,
-		CreatedAt: contractBase, UpdatedAt: contractBase,
+		CreatedAt: contractStale, UpdatedAt: contractStale,
 	}
 }
 
@@ -55,6 +67,10 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 		if err != nil || got.Email != u.Email || got.BirthDate == nil || *got.BirthDate != *u.BirthDate || got.Persona != u.Persona {
 			t.Fatalf("User = %+v, %v", got, err)
 		}
+		// The store stamps both columns on insert, at once (BE-069).
+		if got.CreatedAt.IsZero() || got.CreatedAt.Equal(contractStale) || !got.UpdatedAt.Equal(got.CreatedAt) {
+			t.Fatalf("insert stamps created_at %v, updated_at %v; want one store stamp", got.CreatedAt, got.UpdatedAt)
+		}
 		if _, found, _ := s.UserByEmail(ctx, u.EmailNormalized); !found {
 			t.Fatal("UserByEmail missed")
 		}
@@ -67,7 +83,8 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 			t.Fatal(err)
 		}
 		again, _ := s.LockUser(ctx, u.ID)
-		if again.FailedLogins != 3 || again.LockedUntil == nil || !again.LockedUntil.Equal(lock) || again.Locale != identity.LocaleEN || again.FirstName != "Ayşe" {
+		if again.FailedLogins != 3 || again.LockedUntil == nil || !again.LockedUntil.Equal(lock) || again.Locale != identity.LocaleEN || again.FirstName != "Ayşe" ||
+			!again.CreatedAt.Equal(got.CreatedAt) || again.UpdatedAt.Before(again.CreatedAt) {
 			t.Fatalf("after update = %+v", again)
 		}
 		other := contractUser(uuid.NewV7().String() + "@contract.test")
@@ -381,11 +398,18 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 		if used, _ := s.UseTOTPStep(ctx, u.ID, 10); used {
 			t.Fatal("a step was used without a TOTP")
 		}
-		if err := s.PutTOTP(ctx, identity.TOTP{UserID: u.ID, SecretEnc: []byte("sealed-1"), CreatedAt: contractBase}); err != nil {
+		if err := s.PutTOTP(ctx, identity.TOTP{UserID: u.ID, SecretEnc: []byte("sealed-1"), CreatedAt: contractStale}); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.PutTOTP(ctx, identity.TOTP{UserID: u.ID, SecretEnc: []byte("sealed-2"), CreatedAt: contractBase}); err != nil {
+		first, _, _ := s.TOTP(ctx, u.ID)
+		if first.CreatedAt.IsZero() || first.CreatedAt.Equal(contractStale) {
+			t.Fatalf("enrollment stamped %v; want the store's created_at (BE-069)", first.CreatedAt)
+		}
+		if err := s.PutTOTP(ctx, identity.TOTP{UserID: u.ID, SecretEnc: []byte("sealed-2"), CreatedAt: contractStale}); err != nil {
 			t.Fatalf("re-enrollment: %v", err)
+		}
+		if again, _, _ := s.TOTP(ctx, u.ID); again.CreatedAt.Before(first.CreatedAt) {
+			t.Fatalf("re-enrollment stamped %v before the first %v", again.CreatedAt, first.CreatedAt)
 		}
 		if used, _ := s.UseTOTPStep(ctx, u.ID, 10); used {
 			t.Fatal("an unconfirmed TOTP accepted a step")
@@ -400,7 +424,7 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 		if !found || string(got.SecretEnc) != "sealed-2" || got.ConfirmedAt == nil || got.LastUsedStep == nil || *got.LastUsedStep != 100 {
 			t.Fatalf("TOTP = %+v", got)
 		}
-		if err := s.PutTOTP(ctx, identity.TOTP{UserID: u.ID, SecretEnc: []byte("sealed-3"), CreatedAt: contractBase}); !errors.Is(err, identity.ErrMFAAlreadyEnabled) {
+		if err := s.PutTOTP(ctx, identity.TOTP{UserID: u.ID, SecretEnc: []byte("sealed-3")}); !errors.Is(err, identity.ErrMFAAlreadyEnabled) {
 			t.Fatalf("enrollment over a confirmed TOTP = %v", err)
 		}
 		// Replay guard: a step ≤ the last used one is refused, a later one once.
@@ -556,5 +580,5 @@ func ids(ss []identity.Session) []uuid.UUID {
 
 func TestStore_Contract_Mem(t *testing.T) {
 	t.Parallel()
-	storeContract(t, func(*testing.T) storeWorld { return storeWorld{s: identity.NewMemStore()} })
+	storeContract(t, func(*testing.T) storeWorld { return storeWorld{s: identity.NewMemStore(ticking())} })
 }

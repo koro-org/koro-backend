@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	"slices"
+	"time"
 	"uuid"
 
 	"koro/internal/authz"
@@ -70,6 +71,10 @@ func (s *MemStore) InsertPayout(_ context.Context, p Payout, items []PayoutItem)
 	if p.Currency == "" {
 		p.Currency = Currency
 	}
+	// The store owns both timestamps, as the column defaults of gormStore
+	// (one clock, BE-069): the caller's are ignored.
+	now := s.now().UTC().Truncate(time.Microsecond)
+	p.CreatedAt, p.UpdatedAt = now, now
 	po.rows[p.ID] = p
 	stored := make([]PayoutItem, len(items))
 	for i, it := range items {
@@ -128,7 +133,9 @@ func (s *MemStore) TransitionPayout(_ context.Context, next Payout, from PayoutS
 	cur.Status, cur.ApprovedBy, cur.ApprovedAt = next.Status, next.ApprovedBy, next.ApprovedAt
 	cur.PaidBy, cur.PaidAt, cur.BankReference, cur.ReceiptFileID = next.PaidBy, next.PaidAt, next.BankReference, next.ReceiptFileID
 	cur.FailureReason, cur.CancelledAt, cur.CancelReason = next.FailureReason, next.CancelledAt, next.CancelReason
-	cur.UpdatedAt = s.now().UTC()
+	if now := s.now().UTC().Truncate(time.Microsecond); now.After(cur.UpdatedAt) {
+		cur.UpdatedAt = now // never before the last stamp (a test clock set back)
+	}
 	po.rows[cur.ID] = cur
 	return cur, nil
 }

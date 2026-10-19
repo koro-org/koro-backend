@@ -14,7 +14,8 @@ import (
 // UPDATEs, never Save).
 type Store interface {
 	// InsertOrder writes a new order with its lines (the database checks the
-	// totals at commit: orders_totals_match_lines).
+	// totals at commit: orders_totals_match_lines). The store stamps their
+	// created_at and updated_at; the callers' are ignored (BE-069).
 	InsertOrder(ctx context.Context, o Order, lines []Line) error
 	// OrderNoTaken reports whether a reference code is in use.
 	OrderNoTaken(ctx context.Context, orderNo string) (bool, error)

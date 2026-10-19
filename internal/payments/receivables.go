@@ -107,10 +107,9 @@ func (s *service) CreateCollection(ctx context.Context, a authz.Actor, in Collec
 		if err := s.collectionLimit(ctx, l.ID, uuid.Nil(), t.Amount); err != nil {
 			return uuid.Nil(), err
 		}
-		now := s.now()
 		c := ReceivableCollection{ID: uuid.NewV7(), IncomingTransferID: t.ID, OrderLineID: l.ID, OrderID: l.OrderID, PayeeID: *l.PayeeID, OrgID: l.SellerOrgID,
 			CollectionAccountID: t.CollectionAccountID, Amount: t.Amount, BankReference: t.BankReference, ReceiptFileID: *t.ReceiptFileID,
-			Status: CollectionRequested, RequestedBy: a.UserID, CreatedAt: now, UpdatedAt: now}
+			Status: CollectionRequested, RequestedBy: a.UserID}
 		if err := s.d.Store.InsertCollection(ctx, c); err != nil {
 			return uuid.Nil(), err
 		}

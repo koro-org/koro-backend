@@ -9,6 +9,7 @@ import (
 	"uuid"
 
 	"koro/internal/files"
+	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
 	"koro/internal/platform/problem"
 )
@@ -18,15 +19,30 @@ import (
 func storeContract(t *testing.T, newStore func(t *testing.T) (files.Store, db.TxManager)) {
 	t.Helper()
 	base := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
+	// A caller's timestamps the stores ignore: created_at and updated_at
+	// come from one clock, the database's (02 §0.1 [ts], BE-069).
+	stale := time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)
 	user := uuid.NewV7()
-	row := func(purpose files.Purpose, created time.Time) files.File {
+	row := func(purpose files.Purpose) files.File {
 		id := uuid.NewV7()
 		size := int64(42)
 		return files.File{
 			ID: id, Purpose: purpose, OwnerUserID: &user, UploadedBy: &user, Bucket: "q", StorageKey: string(purpose) + "/" + id.String(),
 			DeclaredMIME: files.MIMEPDF, SizeBytes: &size, Status: files.StatusUploading, ScanStatus: files.ScanPending,
-			CreatedAt: created, UpdatedAt: created,
+			CreatedAt: stale, UpdatedAt: stale,
 		}
+	}
+	stored := func(t *testing.T, s files.Store, ids ...uuid.UUID) []files.File {
+		t.Helper()
+		out := make([]files.File, len(ids))
+		for i, id := range ids {
+			f, err := s.Get(t.Context(), id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out[i] = f
+		}
+		return out
 	}
 	activate := func(f files.File) files.File {
 		mime := files.MIMEPDF
@@ -38,7 +54,7 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (files.Store, db.Tx
 		t.Parallel()
 		s, _ := newStore(t)
 		ctx := t.Context()
-		f := row(files.PurposeCV, base)
+		f := row(files.PurposeCV)
 		name := "CV.pdf"
 		f.OriginalName = &name
 		if err := s.Insert(ctx, f); err != nil {
@@ -46,8 +62,12 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (files.Store, db.Tx
 		}
 		got, err := s.Get(ctx, f.ID)
 		if err != nil || got.Purpose != f.Purpose || *got.OriginalName != name || *got.UploadedBy != user || *got.SizeBytes != 42 ||
-			got.Status != files.StatusUploading || got.SHA256 != nil || !got.CreatedAt.Equal(base) {
+			got.Status != files.StatusUploading || got.SHA256 != nil {
 			t.Fatalf("Get = %+v, %v", got, err)
+		}
+		// The store stamps both columns on insert, at once (BE-069).
+		if got.CreatedAt.IsZero() || got.CreatedAt.Equal(stale) || !got.UpdatedAt.Equal(got.CreatedAt) {
+			t.Fatalf("insert stamps created_at %v, updated_at %v; want one store stamp, not the caller's", got.CreatedAt, got.UpdatedAt)
 		}
 		got = activate(got)
 		module, entity, now := "students", uuid.NewV7(), base.Add(time.Hour)
@@ -57,7 +77,8 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (files.Store, db.Tx
 		}
 		again, _ := s.Get(ctx, f.ID)
 		if again.Status != files.StatusActive || !bytes.Equal(again.SHA256, got.SHA256) || !again.Attached() ||
-			*again.AttachedEntityID != entity || !again.CreatedAt.Equal(base) {
+			*again.AttachedEntityID != entity || !again.CreatedAt.Equal(got.CreatedAt) ||
+			again.UpdatedAt.Before(again.CreatedAt) || again.UpdatedAt.Before(got.UpdatedAt) {
 			t.Fatalf("after Update: %+v", again)
 		}
 		if err := s.Delete(ctx, f.ID); err != nil {
@@ -78,27 +99,27 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (files.Store, db.Tx
 		t.Parallel()
 		s, _ := newStore(t)
 		ctx := t.Context()
-		f := row(files.PurposeCV, base)
+		f := row(files.PurposeCV)
 		if err := s.Insert(ctx, f); err != nil {
 			t.Fatal(err)
 		}
-		dup := row(files.PurposeCV, base)
+		dup := row(files.PurposeCV)
 		dup.StorageKey = f.StorageKey
 		if err := s.Insert(ctx, dup); !errors.Is(err, problem.ErrConflict) {
 			t.Fatalf("duplicate storage key = %v, want 409 (files_storage_key_uq)", err)
 		}
-		bad := row(files.PurposeCV, base)
+		bad := row(files.PurposeCV)
 		bad.Status = files.StatusActive // without sha256: files_active_chk
 		if err := s.Insert(ctx, bad); !errors.Is(err, problem.ErrValidation) {
 			t.Fatalf("active without sha256 = %v, want 422", err)
 		}
-		half := activate(row(files.PurposeCV, base))
+		half := activate(row(files.PurposeCV))
 		module := "students"
 		half.AttachedModule = &module // without entity: files_attached_chk
 		if err := s.Insert(ctx, half); !errors.Is(err, problem.ErrValidation) {
 			t.Fatalf("half attached = %v, want 422", err)
 		}
-		unknown := row("selfie", base)
+		unknown := row("selfie")
 		if err := s.Insert(ctx, unknown); !errors.Is(err, problem.ErrValidation) {
 			t.Fatalf("unknown purpose = %v, want 422", err)
 		}
@@ -110,26 +131,40 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (files.Store, db.Tx
 		ctx := t.Context()
 		var old []uuid.UUID
 		for range 3 {
-			f := row(files.PurposeCV, base)
+			f := row(files.PurposeCV)
 			if err := s.Insert(ctx, f); err != nil {
 				t.Fatal(err)
 			}
 			old = append(old, f.ID)
 		}
-		young := row(files.PurposeCV, base.Add(48*time.Hour))
-		attached := activate(row(files.PurposeCV, base))
+		attached := activate(row(files.PurposeCV))
 		module, entity := "students", uuid.NewV7()
 		attached.AttachedModule, attached.AttachedEntityID, attached.AttachedAt = &module, &entity, &base
 		attached.ScanStatus = files.ScanSkipped
-		pending := activate(row(files.PurposeAvatar, base))
+		pending := activate(row(files.PurposeAvatar))
 		pending.DeclaredMIME = files.MIMEPNG
-		for _, f := range []files.File{young, attached, pending} {
+		for _, f := range []files.File{attached, pending} {
 			if err := s.Insert(ctx, f); err != nil {
 				t.Fatal(err)
 			}
 		}
 		old = append(old, pending.ID)
-		cutoff := base.Add(24 * time.Hour)
+		// The store's clock decides what is old: the cutoff follows the
+		// last stamp, and a row inserted afterwards is younger.
+		var cutoff time.Time
+		for _, f := range stored(t, s, append(old, attached.ID)...) {
+			if f.CreatedAt.After(cutoff) {
+				cutoff = f.CreatedAt
+			}
+		}
+		cutoff = cutoff.Add(time.Microsecond)
+		young := row(files.PurposeCV)
+		if err := s.Insert(ctx, young); err != nil {
+			t.Fatal(err)
+		}
+		if y := stored(t, s, young.ID)[0]; !y.CreatedAt.After(cutoff) {
+			t.Fatalf("young row stamped %v, not after the cutoff %v", y.CreatedAt, cutoff)
+		}
 		first, err := s.Orphans(ctx, cutoff, uuid.Nil(), 2)
 		if err != nil || len(first) != 2 {
 			t.Fatalf("Orphans page 1 = %d, %v", len(first), err)
@@ -156,7 +191,7 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (files.Store, db.Tx
 			t.Fatalf("UnattachedOf = %d rows, %v; want 5", len(mine), err)
 		}
 		// Skipped scans (files.rescan_skipped) page by id too.
-		skipped2 := activate(row(files.PurposeCV, base))
+		skipped2 := activate(row(files.PurposeCV))
 		skipped2.ScanStatus = files.ScanSkipped
 		if err := s.Insert(ctx, skipped2); err != nil {
 			t.Fatal(err)
@@ -174,7 +209,7 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (files.Store, db.Tx
 	t.Run("lock in a transaction", func(t *testing.T) {
 		t.Parallel()
 		s, tx := newStore(t)
-		f := row(files.PurposeCV, base)
+		f := row(files.PurposeCV)
 		if err := s.Insert(t.Context(), f); err != nil {
 			t.Fatal(err)
 		}
@@ -198,6 +233,9 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (files.Store, db.Tx
 func TestStore_Contract_Mem(t *testing.T) {
 	t.Parallel()
 	storeContract(t, func(*testing.T) (files.Store, db.TxManager) {
-		return files.NewMemStore(func() time.Time { return time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC) }), db.NopTx{}
+		// A clock that moves on each reading, as the database's does
+		// between statements.
+		clk := clock.NewFake(time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC))
+		return files.NewMemStore(func() time.Time { clk.Advance(time.Millisecond); return clk.Now() }), db.NopTx{}
 	})
 }

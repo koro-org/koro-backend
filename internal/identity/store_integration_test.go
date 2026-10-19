@@ -238,8 +238,7 @@ func (p *pgIdentity) pgUser(t *testing.T, store identity.Store, email string, ro
 	}
 	now := p.clk.Now().UTC().Truncate(time.Microsecond)
 	u := identity.User{ID: uuid.NewV7(), Status: identity.StatusActive, Email: email, EmailNormalized: email, EmailVerifiedAt: &now,
-		PasswordHash: hash, FirstName: "Pg", LastName: "User", Persona: identity.PersonaPlatform, Locale: identity.LocaleTR,
-		CreatedAt: now, UpdatedAt: now}
+		PasswordHash: hash, FirstName: "Pg", LastName: "User", Persona: identity.PersonaPlatform, Locale: identity.LocaleTR}
 	if err := store.InsertUser(t.Context(), u); err != nil {
 		t.Fatal(err)
 	}

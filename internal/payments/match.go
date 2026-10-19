@@ -121,7 +121,6 @@ func (s *service) match(ctx context.Context, a authz.Actor, id, orderID uuid.UUI
 	p := Payment{
 		ID: paymentID, OrderID: o.ID, OrgID: o.OrgID, Provider: ProviderBankTransfer, IncomingTransferID: &transferID,
 		Amount: t.Amount, Currency: Currency, Status: PaymentCaptured, CapturedAt: &now, CapturedBy: &by,
-		CreatedAt: now, UpdatedAt: now,
 	}
 	// Lock the order before child FK writes: a concurrent direct confirmation
 	// must never wait behind a KEY SHARE lock while this capture upgrades it.
@@ -153,7 +152,7 @@ func (s *service) match(ctx context.Context, a authz.Actor, id, orderID uuid.UUI
 		rid := uuid.NewV7()
 		if err := s.d.Store.InsertRefund(ctx, Refund{
 			ID: rid, PaymentID: p.ID, OrderID: o.ID, Amount: over, Reason: RefundReasonOverpayment, Status: RefundStatusRequested,
-			RequestedBy: by, Method: RefundMethodBankEFT, TargetIBAN: &refundIBAN, CreatedAt: now, UpdatedAt: now,
+			RequestedBy: by, Method: RefundMethodBankEFT, TargetIBAN: &refundIBAN,
 		}); err != nil {
 			return MatchResult{}, err
 		}
@@ -258,8 +257,7 @@ func (s *service) settle(ctx context.Context, p Payment, eff orders.PaymentEffec
 func (s *service) writeSplits(ctx context.Context, p Payment, eff orders.PaymentEffect, now time.Time) error {
 	ss := make([]Split, 0, len(eff.Lines))
 	for _, l := range eff.Lines {
-		sp := Split{ID: uuid.NewV7(), PaymentID: p.ID, OrderID: p.OrderID, OrderLineID: l.LineID, Status: SplitReleased,
-			CreatedAt: now, UpdatedAt: now}
+		sp := Split{ID: uuid.NewV7(), PaymentID: p.ID, OrderID: p.OrderID, OrderLineID: l.LineID, Status: SplitReleased}
 		if eff.ModelCode == orders.ModelC {
 			sp.PlatformAmount = l.BuyerFeeAmount
 		} else if l.PayeeID == nil {
@@ -361,7 +359,7 @@ func (s *service) ConfirmDirectPayment(ctx context.Context, a authz.Actor, in Di
 		evidence := in.EvidenceFileID
 		p := Payment{
 			ID: paymentID, OrderID: o.ID, OrgID: o.OrgID, Provider: ProviderDirectConfirmed, Amount: direct, Currency: Currency,
-			Status: PaymentCaptured, CapturedAt: &now, CapturedBy: &by, EvidenceFileID: &evidence, CreatedAt: now, UpdatedAt: now,
+			Status: PaymentCaptured, CapturedAt: &now, CapturedBy: &by, EvidenceFileID: &evidence,
 		}
 		if err := s.d.Store.InsertPayment(ctx, p); err != nil {
 			return DirectResult{}, err

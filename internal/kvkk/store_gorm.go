@@ -53,8 +53,8 @@ type dsrRow struct {
 	ExportFileID       *uuid.UUID `gorm:"column:export_file_id"`
 	RejectionReason    *string    `gorm:"column:rejection_reason"`
 	CompletedAt        *time.Time `gorm:"column:completed_at"`
-	CreatedAt          time.Time  `gorm:"column:created_at"`
-	UpdatedAt          time.Time  `gorm:"column:updated_at"`
+	CreatedAt          time.Time  `gorm:"column:created_at;->"`
+	UpdatedAt          time.Time  `gorm:"column:updated_at;->"`
 }
 
 func str(p *string) string {

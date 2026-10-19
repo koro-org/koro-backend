@@ -19,9 +19,14 @@ import (
 // (05 §13.2). It mirrors the constraints the services rely on (unique
 // address and token hashes, the open-assignment index and the main
 // platform_role_assignments CHECKs) and passes the same contract test as
-// the GORM store. Transactions are not emulated (db.NopTx).
+// the GORM store. Transactions are not emulated (db.NopTx). The store
+// stamps created_at and updated_at of users, edu_verifications and
+// mfa_totp with its own clock, as the column defaults and the touch
+// triggers do for gormStore (one clock, BE-069): a caller's values are
+// ignored.
 type MemStore struct {
 	mu       sync.Mutex
+	now      func() time.Time
 	users    map[uuid.UUID]User
 	sessions map[uuid.UUID]Session
 	tokens   map[uuid.UUID]EmailToken
@@ -38,9 +43,11 @@ type memRecovery struct {
 	usedAt *time.Time
 }
 
-// NewMemStore returns an empty in-memory store.
-func NewMemStore() *MemStore {
+// NewMemStore returns an empty in-memory store; now stamps created_at and
+// updated_at.
+func NewMemStore(now func() time.Time) *MemStore {
 	return &MemStore{
+		now:   now,
 		users: map[uuid.UUID]User{}, sessions: map[uuid.UUID]Session{},
 		tokens: map[uuid.UUID]EmailToken{}, roles: map[uuid.UUID]RoleAssignment{},
 		totp: map[uuid.UUID]TOTP{}, recovery: map[uuid.UUID]memRecovery{}, actions: map[uuid.UUID]AccountActionRequest{},
@@ -49,6 +56,35 @@ func NewMemStore() *MemStore {
 }
 
 var _ Store = (*MemStore)(nil)
+
+// SeedAt runs seed with the store's clock pinned at t, so the rows it
+// writes are stamped at t (fixtures of a known age). The timestamps stay
+// the store's own, as the database's are for gormStore: callers never set
+// them. seed must not run alongside other writers of the store.
+func (m *MemStore) SeedAt(t time.Time, seed func() error) error {
+	m.mu.Lock()
+	prev := m.now
+	m.now = func() time.Time { return t }
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		m.now = prev
+		m.mu.Unlock()
+	}()
+	return seed()
+}
+
+// stamp is the store's clock; mu is held.
+func (m *MemStore) stamp() time.Time { return m.now().UTC().Truncate(time.Microsecond) }
+
+// touch is the updated_at of a row changed now: never before its last
+// stamp (a test clock set back); mu is held.
+func (m *MemStore) touch(prev time.Time) time.Time {
+	if t := m.stamp(); t.After(prev) {
+		return t
+	}
+	return prev
+}
 
 var errMemCheck = errors.New("identity memstore: check constraint")
 
@@ -95,6 +131,8 @@ func (m *MemStore) InsertUser(_ context.Context, u User) error {
 	if err := checkUser(u); err != nil {
 		return err
 	}
+	now := m.stamp()
+	u.CreatedAt, u.UpdatedAt = now, now
 	m.users[u.ID] = u.clone()
 	return nil
 }
@@ -159,6 +197,7 @@ func (m *MemStore) UpdateUser(_ context.Context, u User) error {
 	if err := checkUser(cur); err != nil {
 		return err
 	}
+	cur.UpdatedAt = m.touch(cur.UpdatedAt)
 	m.users[u.ID] = cur
 	return nil
 }
@@ -176,7 +215,7 @@ func (m *MemStore) EraseUser(_ context.Context, id uuid.UUID, at time.Time) (boo
 	}
 	m.users[id] = User{
 		ID: u.ID, Status: StatusErased, Persona: u.Persona, Locale: u.Locale, MFAEnabled: false,
-		ErasedAt: &at, CreatedAt: u.CreatedAt, UpdatedAt: at,
+		ErasedAt: &at, CreatedAt: u.CreatedAt, UpdatedAt: m.touch(u.UpdatedAt),
 	}
 	return true, nil
 }
@@ -708,7 +747,7 @@ func (m *MemStore) PutTOTP(_ context.Context, t TOTP) error {
 		return ErrMFAAlreadyEnabled
 	}
 	n := t.clone()
-	n.ConfirmedAt, n.LastUsedStep = nil, nil
+	n.ConfirmedAt, n.LastUsedStep, n.CreatedAt = nil, nil, m.stamp() // a new enrollment: created now
 	m.totp[t.UserID] = n
 	return nil
 }

@@ -80,10 +80,9 @@ func (s *service) CreateCollectionAccount(ctx context.Context, a authz.Actor, in
 		return CollectionAccount{}, err
 	}
 	id, _, err := idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (uuid.UUID, error) {
-		now := s.now()
 		stored, err := s.d.Store.InsertAccount(ctx, CollectionAccount{
 			ID: uuid.NewV7(), Label: label, LegalPartyID: in.LegalPartyID, PartyKind: PartyKindPlatform, IBAN: number,
-			HolderName: holder, BankName: bank, Status: AccountPending, CreatedBy: a.UserID, CreatedAt: now, UpdatedAt: now,
+			HolderName: holder, BankName: bank, Status: AccountPending, CreatedBy: a.UserID,
 		})
 		if err != nil {
 			return uuid.Nil(), err

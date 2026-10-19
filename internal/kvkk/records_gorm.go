@@ -64,8 +64,8 @@ type policyRow struct {
 	Enabled       bool       `gorm:"column:enabled"`
 	DescriptionTR string     `gorm:"column:description_tr"`
 	UpdatedBy     *uuid.UUID `gorm:"column:updated_by"`
-	CreatedAt     time.Time  `gorm:"column:created_at"`
-	UpdatedAt     time.Time  `gorm:"column:updated_at"`
+	CreatedAt     time.Time  `gorm:"column:created_at;->"`
+	UpdatedAt     time.Time  `gorm:"column:updated_at;->"`
 }
 
 func (r policyRow) policy() Policy {
@@ -254,8 +254,8 @@ type breachRow struct {
 	Status               string       `gorm:"column:status"`
 	OwnerUserID          uuid.UUID    `gorm:"column:owner_user_id"`
 	ClosedAt             *time.Time   `gorm:"column:closed_at"`
-	CreatedAt            time.Time    `gorm:"column:created_at"`
-	UpdatedAt            time.Time    `gorm:"column:updated_at"`
+	CreatedAt            time.Time    `gorm:"column:created_at;->"`
+	UpdatedAt            time.Time    `gorm:"column:updated_at;->"`
 }
 
 func (r breachRow) breach() Breach {
@@ -366,8 +366,8 @@ type subRow struct {
 	AuthorityNotifiedAt *civil.Date  `gorm:"column:authority_notified_at"`
 	Active              bool         `gorm:"column:active"`
 	Notes               *string      `gorm:"column:notes"`
-	CreatedAt           time.Time    `gorm:"column:created_at"`
-	UpdatedAt           time.Time    `gorm:"column:updated_at"`
+	CreatedAt           time.Time    `gorm:"column:created_at;->"`
+	UpdatedAt           time.Time    `gorm:"column:updated_at;->"`
 }
 
 func (r subRow) sub() Subprocessor {

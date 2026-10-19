@@ -168,7 +168,7 @@ func matrixOrder(fx *matrixFixtures, f fixture, id uuid.UUID) (orders.Order, err
 	o := orders.Order{ID: id, OrderNo: matrixOrderNo(id), OrgID: org, OrgKind: "company", PlacedByUserID: by, BuyerPartyID: party,
 		BuyerSnapshot: orders.BuyerSnapshot{Title: "Matris Şirketi A.Ş.", TaxOffice: "Kozyatağı", TaxNo: "1234567890"},
 		ModelCode:     orders.ModelA, CollectionMethod: orders.CollectBankTransfer, Status: orders.Status(status), Currency: "TRY",
-		ExpiresAt: t.Add(orders.DefaultPaymentWindow), PlacedAt: t, CreatedAt: t, UpdatedAt: t}
+		ExpiresAt: t.Add(orders.DefaultPaymentWindow), PlacedAt: t}
 	if o.Status.PaidState() {
 		paid := t.Add(24 * time.Hour)
 		o.PaidAt = &paid
@@ -219,7 +219,7 @@ func matrixLine(fx *matrixFixtures, f fixture, o orders.Order) (orders.Line, err
 		Quantity: 1, UnitPriceAmount: 1_000_000, NetAmount: 1_000_000, VATRateBP: 2000, VATAmount: 200_000, GrossAmount: 1_200_000,
 		CommissionRateBP: 1000, CommissionBasis: "net_excl_vat", CommissionPayer: "seller", CommissionAmount: 100_000,
 		CommissionVATRateBP: 2000, CommissionVATAmount: 20_000, DisputeWindowDays: 7, SellerNetAmount: 1_080_000,
-		PayableAmount: 1_200_000, FulfillmentStatus: orders.Fulfillment(status), CreatedAt: t, UpdatedAt: t}
+		PayableAmount: 1_200_000, FulfillmentStatus: orders.Fulfillment(status)}
 	if l.FulfillmentStatus == orders.FulfillMarked || l.FulfillmentStatus == orders.FulfillDisputed {
 		by, err := fx.Ref(f, "marked_by")
 		if err != nil {

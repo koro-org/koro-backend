@@ -127,7 +127,7 @@ func (b *Bootstrapper) Run(ctx context.Context, admins []AdminSeed) ([]Bootstrap
 			case u == nil:
 				nu := User{
 					ID: uuid.NewV7(), Status: StatusActive, Email: sd.email, EmailNormalized: sd.normalized, EmailVerifiedAt: &now,
-					FirstName: sd.first, LastName: sd.last, Persona: PersonaPlatform, Locale: LocaleTR, CreatedAt: now, UpdatedAt: now,
+					FirstName: sd.first, LastName: sd.last, Persona: PersonaPlatform, Locale: LocaleTR,
 				}
 				if err := b.d.Store.InsertUser(ctx, nu); err != nil {
 					return err

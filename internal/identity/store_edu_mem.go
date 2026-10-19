@@ -73,6 +73,8 @@ func (m *MemStore) InsertEduVerification(_ context.Context, v EduRecord) error {
 	if err := m.eduConflict(v); err != nil {
 		return err
 	}
+	now := m.stamp()
+	v.CreatedAt, v.UpdatedAt = now, now
 	m.edu[v.ID] = v.clone()
 	return nil
 }
@@ -129,9 +131,7 @@ func (m *MemStore) UpdateEduVerification(_ context.Context, v EduRecord) error {
 	}
 	cur.Status, cur.UniversityID, cur.DocumentFileID = v.Status, cloneID(v.UniversityID), cloneID(v.DocumentFileID)
 	cur.VerifiedAt, cur.ExpiresAt, cur.ReviewedBy, cur.ReviewNote = cloneTime(v.VerifiedAt), cloneTime(v.ExpiresAt), cloneID(v.ReviewedBy), v.ReviewNote
-	if !v.UpdatedAt.IsZero() {
-		cur.UpdatedAt = v.UpdatedAt
-	}
+	cur.UpdatedAt = m.touch(cur.UpdatedAt)
 	if err := checkEdu(cur); err != nil {
 		return err
 	}
@@ -220,7 +220,7 @@ func (m *MemStore) ExpireEduVerifications(_ context.Context, now time.Time, limi
 	}, false)
 	rows = rows[:min(len(rows), max(limit, 0))]
 	for i := range rows {
-		rows[i].Status, rows[i].UpdatedAt = EduExpired, now
+		rows[i].Status, rows[i].UpdatedAt = EduExpired, m.touch(rows[i].UpdatedAt)
 		m.edu[rows[i].ID] = rows[i].clone()
 	}
 	return rows, nil

@@ -44,6 +44,11 @@ const PartyKindPlatform = "platform"
 // CollectionAccount is one collection_accounts row: a Koro bank account
 // buyers pay into. The IBAN, the holder, the party and the creator never
 // change (collection_accounts_frozen); a new IBAN is a new account.
+//
+// CreatedAt and UpdatedAt are read only, as in every [ts] model of the
+// package: the column defaults and the touch triggers stamp them with the
+// database clock alone, so updated_at never precedes created_at (02 §0.1,
+// BE-069).
 type CollectionAccount struct {
 	ID           uuid.UUID     `gorm:"type:uuid;column:id;primaryKey"`
 	Label        string        `gorm:"column:label"`
@@ -58,8 +63,8 @@ type CollectionAccount struct {
 	ApprovedBy   *uuid.UUID    `gorm:"type:uuid;column:approved_by"` // the deciding admin (approve or reject)
 	ApprovedAt   *time.Time    `gorm:"column:approved_at"`
 	RetiredAt    *time.Time    `gorm:"column:retired_at"`
-	CreatedAt    time.Time     `gorm:"column:created_at"`
-	UpdatedAt    time.Time     `gorm:"column:updated_at"`
+	CreatedAt    time.Time     `gorm:"column:created_at;->"`
+	UpdatedAt    time.Time     `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -120,6 +125,7 @@ const (
 // at a Koro collection account. The bank data (account, value date,
 // amount, reference, entry) never change (incoming_bank_transfers_frozen).
 // The sender's name and IBAN may be a natural person's (02 §20.2).
+// CreatedAt and UpdatedAt are read only (see CollectionAccount).
 type IncomingTransfer struct {
 	ID                  uuid.UUID      `gorm:"type:uuid;column:id;primaryKey"`
 	CollectionAccountID uuid.UUID      `gorm:"type:uuid;column:collection_account_id"`
@@ -148,8 +154,8 @@ type IncomingTransfer struct {
 	ReturnedAt          *time.Time     `gorm:"column:returned_at"`
 	ReturnBankReference *string        `gorm:"column:return_bank_reference"`
 	ReturnReceiptFileID *uuid.UUID     `gorm:"type:uuid;column:return_receipt_file_id"`
-	CreatedAt           time.Time      `gorm:"column:created_at"`
-	UpdatedAt           time.Time      `gorm:"column:updated_at"`
+	CreatedAt           time.Time      `gorm:"column:created_at;->"`
+	UpdatedAt           time.Time      `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -194,6 +200,7 @@ const (
 
 // Payment is one payments row: money captured for an order. The order, the
 // provider, the transfer and the amount never change (payments_frozen).
+// CreatedAt and UpdatedAt are read only (see CollectionAccount).
 type Payment struct {
 	ID                 uuid.UUID     `gorm:"type:uuid;column:id;primaryKey"`
 	OrderID            uuid.UUID     `gorm:"type:uuid;column:order_id"`
@@ -208,8 +215,8 @@ type Payment struct {
 	CapturedAt         *time.Time    `gorm:"column:captured_at"`
 	CapturedBy         *uuid.UUID    `gorm:"type:uuid;column:captured_by"`
 	EvidenceFileID     *uuid.UUID    `gorm:"type:uuid;column:evidence_file_id"`
-	CreatedAt          time.Time     `gorm:"column:created_at"`
-	UpdatedAt          time.Time     `gorm:"column:updated_at"`
+	CreatedAt          time.Time     `gorm:"column:created_at;->"`
+	UpdatedAt          time.Time     `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -224,6 +231,7 @@ const SplitReleased = "released"
 // Split is one payment_splits row: how a paid order line divides between
 // its payee (seller_amount) and Koro (platform_amount: commission, its VAT
 // and the buyer fee; the whole line for Koro's own platform-native lines).
+// CreatedAt and UpdatedAt are read only (see CollectionAccount).
 type Split struct {
 	ID             uuid.UUID `gorm:"type:uuid;column:id;primaryKey"`
 	PaymentID      uuid.UUID `gorm:"type:uuid;column:payment_id"`
@@ -232,8 +240,8 @@ type Split struct {
 	SellerAmount   int64     `gorm:"column:seller_amount"`
 	PlatformAmount int64     `gorm:"column:platform_amount"`
 	Status         string    `gorm:"column:status"`
-	CreatedAt      time.Time `gorm:"column:created_at"`
-	UpdatedAt      time.Time `gorm:"column:updated_at"`
+	CreatedAt      time.Time `gorm:"column:created_at;->"`
+	UpdatedAt      time.Time `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -306,7 +314,8 @@ const (
 // and the requester never change (refunds_frozen); the approver once set
 // (refunds_approval_frozen); a completed refund is final
 // (refunds_completed_frozen). The target IBAN may be a natural person's (an
-// overpayment goes back to the transfer's sender).
+// overpayment goes back to the transfer's sender). CreatedAt and UpdatedAt
+// are read only (see CollectionAccount).
 type Refund struct {
 	ID              uuid.UUID    `gorm:"type:uuid;column:id;primaryKey"`
 	PaymentID       uuid.UUID    `gorm:"type:uuid;column:payment_id"`
@@ -331,8 +340,8 @@ type Refund struct {
 	ClosedAt        *time.Time   `gorm:"column:closed_at"`
 	CancelReason    *string      `gorm:"column:cancel_reason"`
 	CompletedAt     *time.Time   `gorm:"column:completed_at"`
-	CreatedAt       time.Time    `gorm:"column:created_at"`
-	UpdatedAt       time.Time    `gorm:"column:updated_at"`
+	CreatedAt       time.Time    `gorm:"column:created_at;->"`
+	UpdatedAt       time.Time    `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.

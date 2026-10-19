@@ -419,6 +419,13 @@ func TestImportTransfers_Postgres(t *testing.T) {
 	if n := pgCount(t, d, `SELECT count(*) FROM incoming_bank_transfers WHERE entry_method = 'csv_import'`); n != 2 {
 		t.Fatalf("imported rows = %d", n)
 	}
+	// The digest ages a transfer by its created_at, the database's clock
+	// (one clock, BE-069): the service clock starts there, as in production.
+	var dbNow time.Time
+	if err := d.Pool.QueryRow(t.Context(), `SELECT now()`).Scan(&dbNow); err != nil {
+		t.Fatal(err)
+	}
+	e.clk.Set(dbNow)
 	sum, err := e.mod.RunDigest(t.Context())
 	if err != nil || sum.Count != 0 {
 		t.Fatalf("digest of fresh transfers = %+v, %v", sum, err)

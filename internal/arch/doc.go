@@ -13,6 +13,11 @@
 //     ones of sync_writes.txt, the machine-readable 01 §6.3 (05 §2.4-3, 06 H-2).
 //   - TestArch_GormParenParams: no GORM SQL string has a parameter directly
 //     after "(" (06 H-30; BE-006).
+//   - TestArch_TsStampsFromDatabase: created_at and updated_at of a [ts]
+//     table (a koro_touch_updated_at trigger in db/migrations) come from the
+//     database clock alone: GORM models map them read only and no raw
+//     INSERT names them; writableStamps lists the reasoned exceptions
+//     (02 §0.1; BE-064, BE-069).
 //
 // Every rule also runs on testdata/violations, a miniature tree that breaks
 // it, so a rule that silently stops matching fails its own test.

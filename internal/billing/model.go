@@ -169,7 +169,9 @@ func (s *Snapshot) Scan(src any) error {
 // written when the invoice is planned and never change; the upload, the
 // verification and the state are the running columns. Once issued the
 // document columns freeze too (invoices_frozen): a correction is a credit
-// note. Writes are targeted updates (06 H-56), never a Save.
+// note. Writes are targeted updates (06 H-56), never a Save. CreatedAt and
+// UpdatedAt are read only: the column defaults and invoices_touch_updated_at
+// stamp them with the database clock alone (02 §0.1 [ts], BE-069).
 type Invoice struct {
 	ID                uuid.UUID    `gorm:"type:uuid;column:id;primaryKey"`
 	OrderID           *uuid.UUID   `gorm:"type:uuid;column:order_id"`
@@ -205,8 +207,8 @@ type Invoice struct {
 	VerifiedBy        *uuid.UUID   `gorm:"type:uuid;column:verified_by"`
 	VerifiedAt        *time.Time   `gorm:"column:verified_at"`
 	IssuedAt          *time.Time   `gorm:"column:issued_at"`
-	CreatedAt         time.Time    `gorm:"column:created_at"`
-	UpdatedAt         time.Time    `gorm:"column:updated_at"`
+	CreatedAt         time.Time    `gorm:"column:created_at;->"`
+	UpdatedAt         time.Time    `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -264,7 +266,7 @@ func (Line) TableName() string { return "invoice_lines" }
 
 // Credential is one integration_credentials row (02 §22.5; 000120): the
 // OAuth tokens of an integration, envelope-encrypted. The encrypted values
-// never leave the module.
+// never leave the module. UpdatedAt is read only (see Invoice).
 type Credential struct {
 	Provider        string     `gorm:"column:provider;primaryKey"`
 	ExternalAccount *string    `gorm:"column:external_account"`
@@ -272,7 +274,7 @@ type Credential struct {
 	RefreshTokenEnc []byte     `gorm:"column:refresh_token_enc" json:"-"`
 	ExpiresAt       *time.Time `gorm:"column:expires_at"`
 	RotatedAt       *time.Time `gorm:"column:rotated_at"`
-	UpdatedAt       time.Time  `gorm:"column:updated_at"`
+	UpdatedAt       time.Time  `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.

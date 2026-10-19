@@ -11,16 +11,37 @@ import (
 )
 
 // eduWorld is one fresh store with the rows edu_verifications refers to:
-// a university (FK) and edu_document files (FK) of a user.
+// a university (FK) and edu_document files (FK) of a user. insertAt
+// inserts a row as if it had been written at at: its created_at and
+// updated_at are the store's, a callers' are ignored (one clock, BE-069),
+// so the age of a row is the store's to set.
 type eduWorld struct {
-	s    identity.Store
-	uni  func(t *testing.T) uuid.UUID
-	file func(t *testing.T, owner uuid.UUID) uuid.UUID
+	s        identity.Store
+	uni      func(t *testing.T) uuid.UUID
+	file     func(t *testing.T, owner uuid.UUID) uuid.UUID
+	insertAt func(t *testing.T, v identity.EduRecord, at time.Time)
+}
+
+// memEduWorld is a fresh in-memory store; insertAt pins its clock.
+func memEduWorld() eduWorld {
+	s := identity.NewMemStore(ticking())
+	return eduWorld{
+		s:    s,
+		uni:  func(*testing.T) uuid.UUID { return uuid.NewV7() },
+		file: func(*testing.T, uuid.UUID) uuid.UUID { return uuid.NewV7() },
+		insertAt: func(t *testing.T, v identity.EduRecord, at time.Time) {
+			t.Helper()
+			if err := s.SeedAt(at, func() error { return s.InsertEduVerification(t.Context(), v) }); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
 }
 
 func eduEmailRow(userID, uni uuid.UUID, address string, status identity.EduStatus, at time.Time) identity.EduRecord {
 	v := identity.EduRecord{ID: uuid.NewV7(), UserID: userID, Method: identity.EduMethodEmail, EduEmail: address,
-		EduEmailNormalized: address, EmailDomain: "uni.edu.tr", UniversityID: &uni, Status: status, CreatedAt: at, UpdatedAt: at}
+		EduEmailNormalized: address, EmailDomain: "uni.edu.tr", UniversityID: &uni, Status: status,
+		CreatedAt: contractStale, UpdatedAt: contractStale}
 	if status == identity.EduVerified || status == identity.EduExpired || status == identity.EduSuperseded {
 		exp := at.AddDate(1, 0, 0)
 		v.VerifiedAt, v.ExpiresAt = &at, &exp
@@ -54,6 +75,10 @@ func eduStoreContract(t *testing.T, newWorld func(t *testing.T) eduWorld) {
 		if err != nil || got.EduEmail != addr || *got.UniversityID != uni || !got.ExpiresAt.Equal(*first.ExpiresAt) || got.Status != identity.EduVerified {
 			t.Fatalf("EduVerification = %+v, %v", got, err)
 		}
+		// The store stamps both columns on insert, at once (BE-069).
+		if got.CreatedAt.IsZero() || got.CreatedAt.Equal(contractStale) || !got.UpdatedAt.Equal(got.CreatedAt) {
+			t.Fatalf("insert stamps created_at %v, updated_at %v; want one store stamp", got.CreatedAt, got.UpdatedAt)
+		}
 		// One .edu.tr address verifies one account; one verified row per user.
 		if err := s.InsertEduVerification(ctx, eduEmailRow(v.ID, uni, addr, identity.EduVerified, contractBase)); !errors.Is(err, identity.ErrEduEmailTaken) {
 			t.Fatalf("taken address = %v, want ErrEduEmailTaken", err)
@@ -64,7 +89,7 @@ func eduStoreContract(t *testing.T, newWorld func(t *testing.T) eduWorld) {
 		// A pending document of u (one pending per user).
 		file := w.file(t, u.ID)
 		doc := identity.EduRecord{ID: uuid.NewV7(), UserID: u.ID, Method: identity.EduMethodDocument, UniversityID: &uni,
-			DocumentFileID: &file, Status: identity.EduPending, CreatedAt: contractBase, UpdatedAt: contractBase}
+			DocumentFileID: &file, Status: identity.EduPending, CreatedAt: contractStale, UpdatedAt: contractStale}
 		if err := s.InsertEduVerification(ctx, doc); err != nil {
 			t.Fatal(err)
 		}
@@ -95,12 +120,15 @@ func eduStoreContract(t *testing.T, newWorld func(t *testing.T) eduWorld) {
 		}
 		// Approval: the old row superseded first, then the document verified.
 		at := contractBase.Add(time.Hour)
-		first.Status, first.UpdatedAt = identity.EduSuperseded, at
+		first.Status, first.UpdatedAt = identity.EduSuperseded, contractStale // the store stamps updated_at
 		if err := s.UpdateEduVerification(ctx, first); err != nil {
 			t.Fatal(err)
 		}
+		if sup, _ := s.EduVerification(ctx, first.ID); !sup.CreatedAt.Equal(got.CreatedAt) || sup.UpdatedAt.Before(sup.CreatedAt) {
+			t.Fatalf("after update created_at %v (was %v), updated_at %v", sup.CreatedAt, got.CreatedAt, sup.UpdatedAt)
+		}
 		exp := at.AddDate(1, 0, 0)
-		doc.Status, doc.VerifiedAt, doc.ExpiresAt, doc.ReviewedBy, doc.ReviewNote, doc.UpdatedAt = identity.EduVerified, &at, &exp, &reviewer.ID, "tamam", at
+		doc.Status, doc.VerifiedAt, doc.ExpiresAt, doc.ReviewedBy, doc.ReviewNote = identity.EduVerified, &at, &exp, &reviewer.ID, "tamam"
 		if err := s.UpdateEduVerification(ctx, doc); err != nil {
 			t.Fatal(err)
 		}
@@ -165,7 +193,7 @@ func eduStoreContract(t *testing.T, newWorld func(t *testing.T) eduWorld) {
 			}
 			f := w.file(t, x.ID)
 			d := identity.EduRecord{ID: uuid.NewV7(), UserID: x.ID, Method: identity.EduMethodDocument, UniversityID: &uni,
-				DocumentFileID: &f, Status: identity.EduPending, CreatedAt: contractBase, UpdatedAt: contractBase}
+				DocumentFileID: &f, Status: identity.EduPending}
 			if err := s.InsertEduVerification(ctx, d); err != nil {
 				t.Fatal(err)
 			}
@@ -195,11 +223,5 @@ func eduStoreContract(t *testing.T, newWorld func(t *testing.T) eduWorld) {
 
 func TestEduStore_Contract_Mem(t *testing.T) {
 	t.Parallel()
-	eduStoreContract(t, func(*testing.T) eduWorld {
-		return eduWorld{
-			s:    identity.NewMemStore(),
-			uni:  func(*testing.T) uuid.UUID { return uuid.NewV7() },
-			file: func(*testing.T, uuid.UUID) uuid.UUID { return uuid.NewV7() },
-		}
-	})
+	eduStoreContract(t, func(*testing.T) eduWorld { return memEduWorld() })
 }

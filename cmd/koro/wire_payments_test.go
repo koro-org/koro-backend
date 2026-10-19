@@ -72,7 +72,7 @@ func TestWire_Payments(t *testing.T) {
 	at := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
 	acct, err := mem.InsertAccount(t.Context(), payments.CollectionAccount{ID: matrixCollectionAccount.ID, Label: "Ana",
 		LegalPartyID: matrixCollectionAccount.ID, IBAN: matrixCollectionAccount.IBAN, HolderName: matrixCollectionAccount.HolderName,
-		BankName: matrixCollectionAccount.BankName, Status: payments.AccountPending, CreatedBy: matrixCollectionAccount.ID, CreatedAt: at})
+		BankName: matrixCollectionAccount.BankName, Status: payments.AccountPending, CreatedBy: matrixCollectionAccount.ID})
 	if err != nil {
 		t.Fatal(err)
 	}

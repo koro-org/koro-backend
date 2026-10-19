@@ -12,7 +12,8 @@ import (
 // transaction carried by ctx (db.Conn). The tables are Koro's finance
 // records: they have no org scope (admin surface only). Updates are
 // targeted (06 H-56: no Save over the frozen columns) and guarded by the
-// row's current status.
+// row's current status. The store stamps created_at and updated_at of
+// every insert; a caller's values are ignored (one clock, BE-069).
 type Store interface {
 	CollectionStore
 	// InsertAccount writes a new collection account (pending_approval).

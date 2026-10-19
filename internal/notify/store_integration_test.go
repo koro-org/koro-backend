@@ -44,7 +44,14 @@ func TestStore_Contract_Gorm(t *testing.T) {
 	t.Parallel()
 	world := func(t *testing.T) storeWorld {
 		d := testutil.NewDB(t)
-		return storeWorld{s: notify.NewGormStore(d.ORM), user: func(t *testing.T) uuid.UUID { return insertUser(t, d) }}
+		return storeWorld{s: notify.NewGormStore(d.ORM), user: func(t *testing.T) uuid.UUID { return insertUser(t, d) },
+			age: func(t *testing.T, id uuid.UUID, at time.Time) {
+				t.Helper()
+				// Test only: the touch trigger stamps updated_at now, after created_at.
+				if _, err := d.Pool.Exec(t.Context(), `UPDATE notification_deliveries SET created_at = $2 WHERE id = $1`, id, at); err != nil {
+					t.Fatal(err)
+				}
+			}}
 	}
 	runStoreContract(t, world)
 	runRetentionContract(t, world)

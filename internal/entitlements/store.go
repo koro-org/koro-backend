@@ -17,7 +17,8 @@ import (
 // Org scope (06 H-38): usage rows take org_id and entitlement_id from the
 // entitlement row they consume or reverse, never from a request.
 type Store interface {
-	// Insert writes a new entitlement.
+	// Insert writes a new entitlement. The store stamps created_at and
+	// updated_at (one clock, BE-069): e's are ignored.
 	Insert(ctx context.Context, e Entitlement) error
 	// Get returns the entitlement of orgID, or ErrNotFound (another org's
 	// entitlement is not found either).

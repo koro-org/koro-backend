@@ -133,8 +133,8 @@ type Event struct {
 	AttendanceFinalizedAt  *time.Time       `gorm:"column:attendance_finalized_at"`
 	AttendanceFinalizedBy  *uuid.UUID       `gorm:"type:uuid;column:attendance_finalized_by"`
 	IsSensitiveCategory    bool             `gorm:"column:is_sensitive_category"`
-	CreatedAt              time.Time        `gorm:"column:created_at"`
-	UpdatedAt              time.Time        `gorm:"column:updated_at"`
+	CreatedAt              time.Time        `gorm:"column:created_at;->"`
+	UpdatedAt              time.Time        `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -179,8 +179,8 @@ type Form struct {
 	DraftSchema      JSON       `gorm:"column:draft_schema;type:jsonb"`
 	CurrentVersionID *uuid.UUID `gorm:"type:uuid;column:current_version_id"`
 	UpdatedBy        *uuid.UUID `gorm:"type:uuid;column:updated_by"`
-	CreatedAt        time.Time  `gorm:"column:created_at"`
-	UpdatedAt        time.Time  `gorm:"column:updated_at"`
+	CreatedAt        time.Time  `gorm:"column:created_at;->"`
+	UpdatedAt        time.Time  `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -247,8 +247,8 @@ type LintRule struct {
 	DescriptionTR string     `gorm:"column:description_tr"`
 	Active        bool       `gorm:"column:active"`
 	UpdatedBy     *uuid.UUID `gorm:"type:uuid;column:updated_by"`
-	CreatedAt     time.Time  `gorm:"column:created_at"`
-	UpdatedAt     time.Time  `gorm:"column:updated_at"`
+	CreatedAt     time.Time  `gorm:"column:created_at;->"`
+	UpdatedAt     time.Time  `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.

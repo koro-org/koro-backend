@@ -4,6 +4,7 @@ package identity_test
 
 import (
 	"testing"
+	"time"
 	"uuid"
 
 	"koro/internal/identity"
@@ -23,6 +24,7 @@ func TestRetentionStore_Contract_Gorm(t *testing.T) {
 // gormEduWorld is a fresh database with university and file factories.
 func gormEduWorld(t *testing.T) eduWorld {
 	d := testutil.NewDB(t)
+	s := identity.NewGormStore(d.ORM)
 	exec := func(sql string, args ...any) {
 		t.Helper()
 		if _, err := d.Pool.Exec(t.Context(), sql, args...); err != nil {
@@ -30,7 +32,38 @@ func gormEduWorld(t *testing.T) eduWorld {
 		}
 	}
 	return eduWorld{
-		s: identity.NewGormStore(d.ORM),
+		s: s,
+		// The database stamps a new row now (column defaults); a row of a
+		// known age is backdated by the table owner with the touch trigger
+		// off for that one statement (test only: the application never
+		// writes created_at/updated_at, BE-069).
+		insertAt: func(t *testing.T, v identity.EduRecord, at time.Time) {
+			t.Helper()
+			ctx := t.Context()
+			if err := s.InsertEduVerification(ctx, v); err != nil {
+				t.Fatal(err)
+			}
+			tx, err := testutil.OwnerConn(t, d).Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = tx.Rollback(ctx) }()
+			for _, q := range []struct {
+				sql  string
+				args []any
+			}{
+				{`ALTER TABLE edu_verifications DISABLE TRIGGER edu_verifications_touch_updated_at`, nil},
+				{`UPDATE edu_verifications SET created_at = $2, updated_at = $2 WHERE id = $1`, []any{v.ID, at}},
+				{`ALTER TABLE edu_verifications ENABLE TRIGGER edu_verifications_touch_updated_at`, nil},
+			} {
+				if _, err := tx.Exec(ctx, q.sql, q.args...); err != nil {
+					t.Fatalf("%s: %v", q.sql, err)
+				}
+			}
+			if err := tx.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+		},
 		uni: func(t *testing.T) uuid.UUID {
 			org, uni := uuid.NewV7(), uuid.NewV7()
 			exec(`INSERT INTO organizations (id, kind, name, slug) VALUES ($1, 'university', $2, $3)`, org, "Üni "+org.String(), "uni-"+org.String())

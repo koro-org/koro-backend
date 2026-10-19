@@ -97,7 +97,7 @@ func (s *service) grant(ctx context.Context, in GrantInput) (Entitlement, error)
 	e := Entitlement{
 		ID: uuid.NewV7(), OrgID: in.OrgID, Feature: in.Feature, Kind: in.Feature.Kind(), QuantityTotal: in.Quantity,
 		ValidFrom: in.ValidFrom.UTC(), ValidTo: in.ValidTo.UTC(), Status: in.Status, SourceType: in.SourceType,
-		SourceID: in.SourceID, GrantedBy: in.GrantedBy, CreatedAt: now, UpdatedAt: now,
+		SourceID: in.SourceID, GrantedBy: in.GrantedBy,
 	}
 	if e.Status == StatusActive {
 		e.ActivatedAt = &now
@@ -109,7 +109,7 @@ func (s *service) grant(ctx context.Context, in GrantInput) (Entitlement, error)
 		slog.String("entitlement_id", e.ID.String()), slog.String("org_id", e.OrgID.String()),
 		slog.String("feature", string(e.Feature)), slog.String("source_type", string(e.SourceType)),
 		slog.String("status", string(e.Status)))
-	return e, nil
+	return s.d.Store.Get(ctx, e.OrgID, e.ID) // created_at and updated_at as stored (BE-069)
 }
 
 // ActivateBySource implements Entitlements.

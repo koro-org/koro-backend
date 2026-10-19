@@ -281,7 +281,7 @@ func (s *service) EnrollTOTP(ctx context.Context, a authz.Actor, proof ReauthPro
 		return TOTPEnrollment{}, fmt.Errorf("identity: seal totp secret: %w", err)
 	}
 	err = s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		if err := s.d.Store.PutTOTP(ctx, TOTP{UserID: u.ID, SecretEnc: sealed, CreatedAt: s.now()}); err != nil {
+		if err := s.d.Store.PutTOTP(ctx, TOTP{UserID: u.ID, SecretEnc: sealed}); err != nil {
 			return err
 		}
 		return s.d.Audit.Log(ctx, event(authz.IdentityMfaEnroll, audit.Success, resourceUser, u.ID,

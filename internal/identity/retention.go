@@ -131,7 +131,7 @@ func (s *service) purgeEdu(ctx context.Context, policy string, cutoff time.Time,
 			return 0, errNoFiles
 		}
 		if policy == PolicyEduDocument {
-			v.DocumentFileID, v.UpdatedAt = nil, s.now()
+			v.DocumentFileID = nil
 			if err := s.d.Store.UpdateEduVerification(ctx, v); err != nil {
 				return 0, err
 			}

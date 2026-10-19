@@ -36,10 +36,11 @@ type DeliveryStore interface {
 	//     running → ClaimInFlight;
 	//   - any other status is final → ClaimDone.
 	//
-	// UpdatedAt is the store's own clock: the database's now() in the GORM
-	// store (the touch trigger of 02 [ts] sets it on every update), now in
-	// the in-memory store; the lease is measured against it. The returned
-	// Delivery is the stored one (d.ID is used only for a new row).
+	// CreatedAt and UpdatedAt are the store's own clock: the database's
+	// now() in the GORM store (the column defaults on insert, the touch
+	// trigger of 02 [ts] on every update; one clock, BE-069), now in the
+	// in-memory store; the lease is measured against UpdatedAt. The
+	// returned Delivery is the stored one (d.ID is used only for a new row).
 	Claim(ctx context.Context, d Delivery, now time.Time, lease time.Duration) (Delivery, ClaimState, error)
 
 	// Finish records the outcome of the attempt that holds the delivery. It

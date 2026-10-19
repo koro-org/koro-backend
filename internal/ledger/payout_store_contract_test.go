@@ -47,11 +47,15 @@ func memPayoutWorld() payoutWorld {
 	}
 }
 
+// stalePayout is a caller's timestamp the payout stores ignore: created_at
+// and updated_at come from one clock, the database's (02 §0.1 [ts], BE-069).
+var stalePayout = time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)
+
 // newPayout builds a pending payout of the lines (1,080,000 each).
 func newPayout(s payoutSeller, creator uuid.UUID, at time.Time, lines ...uuid.UUID) (ledger.Payout, []ledger.PayoutItem) {
 	p := ledger.Payout{ID: uuid.NewV7(), PayeeID: s.payee, OrgID: s.org, BankAccountID: s.account, IBANSnapshot: s.iban,
 		HolderSnapshot: s.holder, Currency: ledger.Currency, Status: ledger.StatusPendingApproval, CreatedBy: creator,
-		CreatedAt: at, UpdatedAt: at}
+		CreatedAt: stalePayout, UpdatedAt: stalePayout}
 	items := make([]ledger.PayoutItem, len(lines))
 	for i, l := range lines {
 		items[i] = ledger.PayoutItem{PayoutID: p.ID, OrderLineID: l, PayeeID: s.payee, Amount: 1_080_000, CreatedAt: at}
@@ -100,6 +104,10 @@ func payoutStoreContract(t *testing.T, newStores func(t *testing.T) (ledger.Payo
 			got.OrgID != sel.org || got.CreatedBy != creator {
 			t.Fatalf("get %+v, %v", got, err)
 		}
+		// The store stamps both columns on insert, at once (BE-069).
+		if got.CreatedAt.IsZero() || got.CreatedAt.Equal(stalePayout) || !got.UpdatedAt.Equal(got.CreatedAt) {
+			t.Fatalf("insert stamps created_at %v, updated_at %v; want one store stamp", got.CreatedAt, got.UpdatedAt)
+		}
 		its, err := s.PayoutItems(t.Context(), p.ID)
 		if err != nil || len(its) != 2 {
 			t.Fatalf("items %+v, %v", its, err)
@@ -127,7 +135,8 @@ func payoutStoreContract(t *testing.T, newStores func(t *testing.T) (ledger.Payo
 			t.Fatalf("transition from the wrong state: %v", err)
 		}
 		approved, err := transition(t, s, w, next, ledger.StatusPendingApproval)
-		if err != nil || approved.Status != ledger.StatusApproved || *approved.ApprovedBy != approver {
+		if err != nil || approved.Status != ledger.StatusApproved || *approved.ApprovedBy != approver ||
+			!approved.CreatedAt.Equal(got.CreatedAt) || approved.UpdatedAt.Before(approved.CreatedAt) {
 			t.Fatalf("approve %+v, %v", approved, err)
 		}
 		// paid: every state column at once, the lines marked in the same transaction

@@ -32,9 +32,7 @@ func retentionContract(t *testing.T, newWorld func(t *testing.T) eduWorld) {
 		row := func(status identity.EduStatus, at time.Time) identity.EduRecord {
 			t.Helper()
 			v := eduEmailRow(newUser(t, s), uni, uuid.NewV7().String()+"@uni.edu.tr", status, at)
-			if err := s.InsertEduVerification(ctx, v); err != nil {
-				t.Fatal(err)
-			}
+			w.insertAt(t, v, at) // last written at at (its updated_at)
 			return v
 		}
 		expiredLong := row(identity.EduExpired, base.AddDate(-3, 0, 0))    // expired base−2y: due
@@ -47,11 +45,8 @@ func retentionContract(t *testing.T, newWorld func(t *testing.T) eduWorld) {
 		file := w.file(t, owner)
 		verified, exp := base.AddDate(0, -2, 0), base.AddDate(0, 10, 0)
 		doc := identity.EduRecord{ID: uuid.NewV7(), UserID: owner, Method: identity.EduMethodDocument, UniversityID: &uni,
-			DocumentFileID: &file, Status: identity.EduVerified, VerifiedAt: &verified, ExpiresAt: &exp, ReviewedBy: &reviewer,
-			CreatedAt: verified, UpdatedAt: verified}
-		if err := s.InsertEduVerification(ctx, doc); err != nil {
-			t.Fatal(err)
-		}
+			DocumentFileID: &file, Status: identity.EduVerified, VerifiedAt: &verified, ExpiresAt: &exp, ReviewedBy: &reviewer}
+		w.insertAt(t, doc, verified)
 
 		histCutoff := base.AddDate(-1, 0, 0)
 		if n, err := s.CountEduRetentionDue(ctx, identity.PolicyEduVerificationHistory, histCutoff); err != nil || n != 2 {
@@ -138,11 +133,5 @@ func retentionContract(t *testing.T, newWorld func(t *testing.T) eduWorld) {
 
 func TestRetentionStore_Contract_Mem(t *testing.T) {
 	t.Parallel()
-	retentionContract(t, func(*testing.T) eduWorld {
-		return eduWorld{
-			s:    identity.NewMemStore(),
-			uni:  func(*testing.T) uuid.UUID { return uuid.NewV7() },
-			file: func(*testing.T, uuid.UUID) uuid.UUID { return uuid.NewV7() },
-		}
-	})
+	retentionContract(t, func(*testing.T) eduWorld { return memEduWorld() })
 }

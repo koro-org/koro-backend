@@ -368,9 +368,7 @@ func (s *service) platformParty(ctx context.Context) (parties.LegalParty, error)
 // document completes a planned invoice: ID, state, line positions and
 // totals (platform/money, 06 H-6).
 func (s *service) document(inv Invoice, lines []Line) (expected, error) {
-	now := s.now()
 	inv.ID, inv.Status, inv.DocumentType, inv.Provider, inv.Currency = uuid.NewV7(), StatusPlanned, DocUnknown, ProviderNone, Currency
-	inv.CreatedAt, inv.UpdatedAt = now, now
 	var net, vat, withheld []int64
 	for i := range lines {
 		l := &lines[i]

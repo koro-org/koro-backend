@@ -46,7 +46,9 @@ const (
 	RejectUnprocessable RejectReason = "unprocessable"
 )
 
-// File is one row of the files table (02 §3.1).
+// File is one row of the files table (02 §3.1). CreatedAt and UpdatedAt
+// are read only: the column defaults and files_touch_updated_at stamp them
+// with the database clock alone (02 §0.1 [ts], BE-069).
 type File struct {
 	ID               uuid.UUID  `gorm:"type:uuid;primaryKey"`
 	Purpose          Purpose    `gorm:"column:purpose"`
@@ -66,8 +68,8 @@ type File struct {
 	ScanStatus       ScanStatus `gorm:"column:scan_status"`
 	ScannedAt        *time.Time `gorm:"column:scanned_at"`
 	UploadedBy       *uuid.UUID `gorm:"type:uuid;column:uploaded_by"`
-	CreatedAt        time.Time  `gorm:"column:created_at"`
-	UpdatedAt        time.Time  `gorm:"column:updated_at"`
+	CreatedAt        time.Time  `gorm:"column:created_at;->"`
+	UpdatedAt        time.Time  `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.

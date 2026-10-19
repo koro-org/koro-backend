@@ -479,7 +479,6 @@ func (s *service) createPayout(ctx context.Context, a authz.Actor, payeeID uuid.
 	p := Payout{
 		ID: uuid.NewV7(), PayeeID: py.ID, OrgID: py.OrgID, BankAccountID: acct.ID, IBANSnapshot: acct.IBAN,
 		HolderSnapshot: acct.HolderName, Currency: Currency, Status: StatusPendingApproval, CreatedBy: a.UserID,
-		CreatedAt: now, UpdatedAt: now,
 	}
 	items := make([]PayoutItem, len(chosen))
 	amounts := make([]int64, len(chosen))

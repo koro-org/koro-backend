@@ -40,8 +40,8 @@ type University struct {
 	Type       UniversityType `gorm:"column:type"`
 	WebsiteURL *string        `gorm:"column:website_url"`
 	IsActive   bool           `gorm:"column:is_active"`
-	CreatedAt  time.Time      `gorm:"column:created_at"`
-	UpdatedAt  time.Time      `gorm:"column:updated_at"`
+	CreatedAt  time.Time      `gorm:"column:created_at;->"`
+	UpdatedAt  time.Time      `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -68,8 +68,8 @@ type EmailDomain struct {
 	DomainKind   DomainKind `gorm:"column:domain_kind"`
 	IsActive     bool       `gorm:"column:is_active"`
 	VerifiedBy   *uuid.UUID `gorm:"type:uuid;column:verified_by"`
-	CreatedAt    time.Time  `gorm:"column:created_at"`
-	UpdatedAt    time.Time  `gorm:"column:updated_at"`
+	CreatedAt    time.Time  `gorm:"column:created_at;->"`
+	UpdatedAt    time.Time  `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -82,8 +82,8 @@ type Faculty struct {
 	Name         string    `gorm:"column:name"`
 	YokCode      *string   `gorm:"column:yok_code"`
 	IsActive     bool      `gorm:"column:is_active"`
-	CreatedAt    time.Time `gorm:"column:created_at"`
-	UpdatedAt    time.Time `gorm:"column:updated_at"`
+	CreatedAt    time.Time `gorm:"column:created_at;->"`
+	UpdatedAt    time.Time `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -115,8 +115,8 @@ type Department struct {
 	DegreeLevel    DegreeLevel `gorm:"column:degree_level"`
 	DurationYears  *int16      `gorm:"column:duration_years"`
 	IsActive       bool        `gorm:"column:is_active"`
-	CreatedAt      time.Time   `gorm:"column:created_at"`
-	UpdatedAt      time.Time   `gorm:"column:updated_at"`
+	CreatedAt      time.Time   `gorm:"column:created_at;->"`
+	UpdatedAt      time.Time   `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -257,8 +257,8 @@ type Club struct {
 	ClaimStatus      ClaimStatus      `gorm:"column:claim_status"`
 	FoundedYear      *int16           `gorm:"column:founded_year"`
 	SocialLinks      SocialLinks      `gorm:"column:social_links;type:jsonb"`
-	CreatedAt        time.Time        `gorm:"column:created_at"`
-	UpdatedAt        time.Time        `gorm:"column:updated_at"`
+	CreatedAt        time.Time        `gorm:"column:created_at;->"`
+	UpdatedAt        time.Time        `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -289,8 +289,8 @@ type Skill struct {
 	NameEN    *string       `gorm:"column:name_en"`
 	Category  SkillCategory `gorm:"column:category"`
 	IsActive  bool          `gorm:"column:is_active"`
-	CreatedAt time.Time     `gorm:"column:created_at"`
-	UpdatedAt time.Time     `gorm:"column:updated_at"`
+	CreatedAt time.Time     `gorm:"column:created_at;->"`
+	UpdatedAt time.Time     `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -338,8 +338,8 @@ type ClubClaim struct {
 	ReviewedBy     *uuid.UUID `gorm:"type:uuid;column:reviewed_by"`
 	ReviewedAt     *time.Time `gorm:"column:reviewed_at"`
 	DecisionNote   *string    `gorm:"column:decision_note"`
-	CreatedAt      time.Time  `gorm:"column:created_at"`
-	UpdatedAt      time.Time  `gorm:"column:updated_at"`
+	CreatedAt      time.Time  `gorm:"column:created_at;->"`
+	UpdatedAt      time.Time  `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.

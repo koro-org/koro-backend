@@ -27,6 +27,7 @@ type storeWorld struct {
 func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 	t.Helper()
 	base := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
+	stale := time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC) // a caller's timestamp the stores ignore (BE-069)
 	email := consent.PurposeCommercialEmail
 
 	notice := func(kind consent.NoticeKind, purpose *consent.Purpose, aud consent.Audience, version string) consent.Notice {
@@ -361,8 +362,7 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 		gone, kept, live := w.user(t), w.user(t), w.user(t)
 		g := add(gone, consent.Granted, long)
 		add(gone, consent.Withdrawn, long.AddDate(0, 1, 0)) // withdrawn ~6 years ago: the chain goes
-		sub := consent.Submission{ID: uuid.NewV7(), ConsentID: g.ID, Channel: consent.IYSEmail, Status: consent.SubmissionPending,
-			CreatedAt: long, UpdatedAt: long}
+		sub := consent.Submission{ID: uuid.NewV7(), ConsentID: g.ID, Channel: consent.IYSEmail, Status: consent.SubmissionPending}
 		if err := w.s.InsertSubmission(ctx, sub); err != nil {
 			t.Fatal(err)
 		}
@@ -392,8 +392,10 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 			if err := w.s.InsertConsent(ctx, c); err != nil {
 				t.Fatal(err)
 			}
+			// A caller's timestamps are ignored: the store stamps both
+			// columns, from one clock (02 §0.1 [ts], BE-069).
 			n := consent.Submission{ID: uuid.NewV7(), ConsentID: c.ID, Channel: consent.IYSEmail, Status: consent.SubmissionPending,
-				CreatedAt: base, UpdatedAt: base}
+				CreatedAt: stale, UpdatedAt: stale}
 			if err := w.s.InsertSubmission(ctx, n); err != nil {
 				t.Fatal(err)
 			}
@@ -405,7 +407,8 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 			t.Fatalf("second submission of a consent = %v, want 409", err)
 		}
 		got, err := w.s.SubmissionOf(ctx, subs[0].ConsentID)
-		if err != nil || got.ID != subs[0].ID || got.Status != consent.SubmissionPending || got.Attempts != 0 {
+		if err != nil || got.ID != subs[0].ID || got.Status != consent.SubmissionPending || got.Attempts != 0 ||
+			got.CreatedAt.IsZero() || got.CreatedAt.Equal(stale) || !got.UpdatedAt.Equal(got.CreatedAt) {
 			t.Fatalf("SubmissionOf = %+v, %v", got, err)
 		}
 		if _, err := w.s.SubmissionOf(ctx, uuid.NewV7()); !errors.Is(err, consent.ErrNotFound) {
@@ -430,7 +433,8 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 			t.Fatal(err)
 		}
 		s0, _ := w.s.SubmissionOf(ctx, subs[0].ConsentID)
-		if s0.Status != consent.SubmissionSent || !s0.SentAt.Equal(sentAt) || *s0.IYSTransactionID != tx {
+		if s0.Status != consent.SubmissionSent || !s0.SentAt.Equal(sentAt) || *s0.IYSTransactionID != tx ||
+			!s0.CreatedAt.Equal(got.CreatedAt) || s0.UpdatedAt.Before(s0.CreatedAt) {
 			t.Fatalf("sent = %+v", s0)
 		}
 		bad := s0

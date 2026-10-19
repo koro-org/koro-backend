@@ -74,7 +74,8 @@ type Store interface {
 	AllOf(ctx context.Context, userID uuid.UUID) ([]Consent, error)
 
 	// InsertSubmission writes a pending İYS submission; a second one for
-	// the same consent is a conflict (iys_submissions_consent_id_uq).
+	// the same consent is a conflict (iys_submissions_consent_id_uq). The
+	// store stamps created_at and updated_at (s's are ignored, BE-069).
 	InsertSubmission(ctx context.Context, s Submission) error
 	// SubmissionOf returns the submission of a consent or ErrNotFound.
 	SubmissionOf(ctx context.Context, consentID uuid.UUID) (Submission, error)

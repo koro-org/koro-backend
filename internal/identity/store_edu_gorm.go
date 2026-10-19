@@ -11,7 +11,8 @@ import (
 	"koro/internal/platform/db"
 )
 
-// eduRow is one edu_verifications row (02 §5.4).
+// eduRow is one edu_verifications row (02 §5.4); created_at and updated_at
+// are read only (see userRow).
 type eduRow struct {
 	ID                 uuid.UUID  `gorm:"column:id;primaryKey"`
 	UserID             uuid.UUID  `gorm:"column:user_id"`
@@ -26,8 +27,8 @@ type eduRow struct {
 	ExpiresAt          *time.Time `gorm:"column:expires_at"`
 	ReviewedBy         *uuid.UUID `gorm:"column:reviewed_by"`
 	ReviewNote         *string    `gorm:"column:review_note"`
-	CreatedAt          time.Time  `gorm:"column:created_at"`
-	UpdatedAt          time.Time  `gorm:"column:updated_at"`
+	CreatedAt          time.Time  `gorm:"column:created_at;->"`
+	UpdatedAt          time.Time  `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.

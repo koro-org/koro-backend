@@ -44,8 +44,8 @@ type deliveryRow struct {
 	LastError         *string    `gorm:"column:last_error"`
 	SentAt            *time.Time `gorm:"column:sent_at"`
 	DeliveredAt       *time.Time `gorm:"column:delivered_at"`
-	CreatedAt         time.Time  `gorm:"column:created_at"`
-	UpdatedAt         time.Time  `gorm:"column:updated_at"`
+	CreatedAt         time.Time  `gorm:"column:created_at;->"`
+	UpdatedAt         time.Time  `gorm:"column:updated_at;->"`
 }
 
 // cross-org: row conversion / helper; no query of its own beyond its callers.
@@ -63,18 +63,20 @@ func (r deliveryRow) delivery() Delivery {
 // Claim implements Store: insert-or-nothing, then the conditional takeover,
 // then a read. Each step is one atomic statement, so concurrent claims of a
 // key never both acquire it (the takeover re-checks its WHERE clause after
-// a competing update commits). The lease is measured in database time.
+// a competing update commits). The lease is measured in database time,
+// and created_at and updated_at are database time too: the column defaults
+// stamp a new row (one clock, 02 §0.1 [ts], BE-069).
 //
 // cross-org: deliveries belong to a recipient, not to an org (02 §6.1).
-func (s gormStore) Claim(ctx context.Context, d Delivery, now time.Time, lease time.Duration) (Delivery, ClaimState, error) {
+func (s gormStore) Claim(ctx context.Context, d Delivery, _ time.Time, lease time.Duration) (Delivery, ClaimState, error) {
 	c := db.Conn(ctx, s.orm)
 	var rows []deliveryRow
 	err := c.Raw(`INSERT INTO notification_deliveries
-		(id, user_id, recipient_bidx, channel, category, template, template_version, dedupe_key, status, attempts, created_at)
-		VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 1, ? )
+		(id, user_id, recipient_bidx, channel, category, template, template_version, dedupe_key, status, attempts)
+		VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 1 )
 		ON CONFLICT (dedupe_key) DO NOTHING RETURNING `+deliveryCols,
 		d.ID, d.UserID, nilIfEmpty(d.RecipientIndex), string(d.Channel), string(d.Category), d.Template,
-		d.TemplateVersion, d.DedupeKey, now).Scan(&rows).Error
+		d.TemplateVersion, d.DedupeKey).Scan(&rows).Error
 	if err != nil {
 		return Delivery{}, 0, fmt.Errorf("notify: claim insert: %w", db.Translate(err))
 	}
@@ -337,16 +339,18 @@ func (s gormStore) Preference(ctx context.Context, userID uuid.UUID, c PrefCateg
 	return rows[0].Enabled, true, nil
 }
 
-// UpsertPreferences implements Store.
+// UpsertPreferences implements Store. created_at and updated_at are the
+// database's: the column defaults on insert, the touch trigger on update
+// (one clock, 02 §0.1 [ts], BE-069).
 //
 // cross-org: the user's own preferences (02 §6.5).
-func (s gormStore) UpsertPreferences(ctx context.Context, userID uuid.UUID, prefs []Preference, now time.Time) error {
+func (s gormStore) UpsertPreferences(ctx context.Context, userID uuid.UUID, prefs []Preference, _ time.Time) error {
 	c := db.Conn(ctx, s.orm)
 	for _, p := range prefs {
-		err := c.Exec(`INSERT INTO notification_preferences (user_id, category, channel, enabled, updated_at)
-			VALUES ( ?, ?, ?, ?, ? )
+		err := c.Exec(`INSERT INTO notification_preferences (user_id, category, channel, enabled)
+			VALUES ( ?, ?, ?, ? )
 			ON CONFLICT (user_id, category, channel) DO UPDATE SET enabled = EXCLUDED.enabled`,
-			userID, string(p.Category), string(p.Channel), p.Enabled, now).Error
+			userID, string(p.Category), string(p.Channel), p.Enabled).Error
 		if err != nil {
 			return fmt.Errorf("notify: upsert preference: %w", prefConstraints.Translate(err))
 		}

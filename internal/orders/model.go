@@ -119,8 +119,8 @@ type Order struct {
 	CompletedAt         *time.Time    `gorm:"column:completed_at"`
 	CancelledAt         *time.Time    `gorm:"column:cancelled_at"`
 	CancelReason        *string       `gorm:"column:cancel_reason"`
-	CreatedAt           time.Time     `gorm:"column:created_at"`
-	UpdatedAt           time.Time     `gorm:"column:updated_at"`
+	CreatedAt           time.Time     `gorm:"column:created_at;->"`
+	UpdatedAt           time.Time     `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -295,8 +295,8 @@ type Line struct {
 	RefundedAmount       int64         `gorm:"column:refunded_amount"`
 	PayoutID             *uuid.UUID    `gorm:"type:uuid;column:payout_id"`
 	PaidOutAt            *time.Time    `gorm:"column:paid_out_at"`
-	CreatedAt            time.Time     `gorm:"column:created_at"`
-	UpdatedAt            time.Time     `gorm:"column:updated_at"`
+	CreatedAt            time.Time     `gorm:"column:created_at;->"`
+	UpdatedAt            time.Time     `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.

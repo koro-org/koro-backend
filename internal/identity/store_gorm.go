@@ -613,10 +613,12 @@ func (s gormStore) TOTP(ctx context.Context, userID uuid.UUID) (TOTP, bool, erro
 //
 // cross-org: MFA secrets belong to a user, not an org.
 func (s gormStore) PutTOTP(ctx context.Context, t TOTP) error {
-	res := db.Conn(ctx, s.orm).Exec(`INSERT INTO mfa_totp (user_id, secret_enc, confirmed_at, last_used_step, created_at)
-		VALUES ( ?, ?, NULL, NULL, ?)
+	// created_at is the column default (database clock, BE-069); a new
+	// enrollment over an unconfirmed one takes the new default too.
+	res := db.Conn(ctx, s.orm).Exec(`INSERT INTO mfa_totp (user_id, secret_enc, confirmed_at, last_used_step)
+		VALUES ( ?, ?, NULL, NULL)
 		ON CONFLICT (user_id) DO UPDATE SET secret_enc = EXCLUDED.secret_enc, last_used_step = NULL, created_at = EXCLUDED.created_at
-		WHERE mfa_totp.confirmed_at IS NULL`, t.UserID, t.SecretEnc, t.CreatedAt)
+		WHERE mfa_totp.confirmed_at IS NULL`, t.UserID, t.SecretEnc)
 	if res.Error != nil {
 		return fmt.Errorf("identity: put totp: %w", db.Translate(res.Error))
 	}

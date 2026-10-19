@@ -79,8 +79,8 @@ type Report struct {
 	AssignedTo     *uuid.UUID   `gorm:"type:uuid;column:assigned_to"`
 	ResolutionNote *string      `gorm:"column:resolution_note"`
 	ResolvedAt     *time.Time   `gorm:"column:resolved_at"`
-	CreatedAt      time.Time    `gorm:"column:created_at"`
-	UpdatedAt      time.Time    `gorm:"column:updated_at"`
+	CreatedAt      time.Time    `gorm:"column:created_at;->"`
+	UpdatedAt      time.Time    `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.

@@ -131,7 +131,7 @@ func (w *ledgerWiring) matrixPayableLine(ctx context.Context, fx *matrixFixtures
 		CollectionMethod: orders.CollectBankTransfer, Status: orders.StatusCompleted, Currency: "TRY",
 		SubtotalAmount: 1_000_000, VATAmount: 200_000, TotalAmount: 1_200_000, PayableAmount: 1_200_000,
 		KoroCollectAmount: 1_200_000, PaidAmount: 1_200_000, ExpiresAt: t.Add(orders.DefaultPaymentWindow), PaidAt: &paid,
-		PlacedAt: t, CreatedAt: t, UpdatedAt: t}
+		PlacedAt: t}
 	via := orders.ViaBuyerConfirmed
 	l := orders.Line{ID: id, OrderID: orderID, OrgID: buyer, SellerOrgID: py.OrgID, PayeeID: &payee,
 		OfferingID: authztest.ID(f.Name + "_offering"), ServiceID: authztest.ID("svc_booth"),
@@ -139,8 +139,7 @@ func (w *ledgerWiring) matrixPayableLine(ctx context.Context, fx *matrixFixtures
 		UnitPriceAmount: 1_000_000, NetAmount: 1_000_000, VATRateBP: 2000, VATAmount: 200_000, GrossAmount: 1_200_000,
 		CommissionRateBP: 1000, CommissionBasis: "net_excl_vat", CommissionPayer: "seller", CommissionAmount: 100_000,
 		CommissionVATRateBP: 2000, CommissionVATAmount: 20_000, DisputeWindowDays: 7, SellerNetAmount: 1_080_000,
-		PayableAmount: 1_200_000, FulfillmentStatus: orders.FulfillFulfilled, FulfilledAt: &fulfilled, FulfilledVia: &via,
-		CreatedAt: t, UpdatedAt: t}
+		PayableAmount: 1_200_000, FulfillmentStatus: orders.FulfillFulfilled, FulfilledAt: &fulfilled, FulfilledVia: &via}
 	if err := mem.InsertOrder(ctx, o, []orders.Line{l}); err != nil {
 		return err
 	}
@@ -190,7 +189,7 @@ func (w *ledgerWiring) matrixReceipt(ctx context.Context, fx *matrixFixtures, f 
 	row := files.File{
 		ID: id, Purpose: files.PurposePayoutReceipt, UploadedBy: &by, Bucket: testBuckets.Files,
 		StorageKey: "matrix/" + f.Name, DeclaredMIME: files.MIMEPDF, SizeBytes: &size, SHA256: make([]byte, 32),
-		Status: files.StatusActive, ScanStatus: files.ScanSkipped, CreatedAt: now, UpdatedAt: now,
+		Status: files.StatusActive, ScanStatus: files.ScanSkipped,
 	}
 	if owner != nil {
 		module := "ledger"
@@ -240,7 +239,7 @@ func (w *ledgerWiring) matrixPayout(ctx context.Context, fx *matrixFixtures, f f
 	t := matrixOrgTime.Add(36 * time.Hour)
 	p := ledger.Payout{ID: id, PayeeID: payee, OrgID: py.OrgID, BankAccountID: acct.ID, IBANSnapshot: acct.IBAN,
 		HolderSnapshot: acct.HolderName, Amount: l.SellerNetAmount, Currency: ledger.Currency,
-		Status: ledger.StatusPendingApproval, CreatedBy: by, CreatedAt: t, UpdatedAt: t}
+		Status: ledger.StatusPendingApproval, CreatedBy: by}
 	p, err = ps.InsertPayout(ctx, p, []ledger.PayoutItem{{PayoutID: id, OrderLineID: lineID, PayeeID: payee, Amount: p.Amount, CreatedAt: t}})
 	if err != nil {
 		return err

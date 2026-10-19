@@ -270,7 +270,9 @@ const (
 func (s SubmissionStatus) open() bool { return s == SubmissionPending || s == SubmissionFailed }
 
 // Submission is one iys_submissions row (02 §4.4): the İYS delivery of one
-// consent row of a requires_iys purpose.
+// consent row of a requires_iys purpose. CreatedAt and UpdatedAt are read
+// only: the column defaults and iys_submissions_touch_updated_at stamp them
+// with the database clock alone (02 §0.1 [ts], BE-069).
 type Submission struct {
 	ID               uuid.UUID        `gorm:"column:id;primaryKey"`
 	ConsentID        uuid.UUID        `gorm:"column:consent_id"`
@@ -280,8 +282,8 @@ type Submission struct {
 	Attempts         int              `gorm:"column:attempts"`
 	LastError        *string          `gorm:"column:last_error"`
 	SentAt           *time.Time       `gorm:"column:sent_at"`
-	CreatedAt        time.Time        `gorm:"column:created_at"`
-	UpdatedAt        time.Time        `gorm:"column:updated_at"`
+	CreatedAt        time.Time        `gorm:"column:created_at;->"`
+	UpdatedAt        time.Time        `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.

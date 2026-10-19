@@ -65,12 +65,10 @@ func (s *service) cleanDraft(loc string, in transferDraft) (transferDraft, error
 // newTransfer builds the unmatched row of a draft; the reference code of
 // its description (if any) is stored for the suggestions (04 §C.4).
 func (s *service) newTransfer(a authz.Actor, accountID uuid.UUID, d transferDraft, method EntryMethod) IncomingTransfer {
-	now := s.now()
 	t := IncomingTransfer{
 		ID: uuid.NewV7(), CollectionAccountID: accountID, ValueDate: d.ValueDate, Amount: d.Amount, Currency: Currency,
 		SenderName: optional(d.SenderName), SenderIBAN: optional(d.SenderIBAN), Description: d.Description,
 		BankReference: d.BankReference, Status: TransferUnmatched, EntryMethod: method, EnteredBy: a.UserID,
-		CreatedAt: now, UpdatedAt: now,
 	}
 	if ref, ok := orders.ExtractReference(d.Description); ok {
 		t.ExtractedOrderNo = &ref

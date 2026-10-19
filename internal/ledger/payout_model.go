@@ -42,7 +42,9 @@ func (s PayoutStatus) Live() bool { return s != StatusFailed && s != StatusCance
 // the account, the IBAN and holder snapshots, the amount and the creator
 // are frozen at creation (payouts_frozen); the approver once set; a paid
 // payout is final. Writes are targeted updates of the state columns (06
-// H-56), never a Save of the row.
+// H-56), never a Save of the row. CreatedAt and UpdatedAt are read only:
+// the column defaults and payouts_touch_updated_at stamp them with the
+// database clock alone (02 §0.1 [ts], BE-069).
 type Payout struct {
 	ID             uuid.UUID    `gorm:"type:uuid;column:id;primaryKey"`
 	PayeeID        uuid.UUID    `gorm:"type:uuid;column:payee_id"`
@@ -63,8 +65,8 @@ type Payout struct {
 	FailureReason  *string      `gorm:"column:failure_reason"`
 	CancelledAt    *time.Time   `gorm:"column:cancelled_at"`
 	CancelReason   *string      `gorm:"column:cancel_reason"`
-	CreatedAt      time.Time    `gorm:"column:created_at"`
-	UpdatedAt      time.Time    `gorm:"column:updated_at"`
+	CreatedAt      time.Time    `gorm:"column:created_at;->"`
+	UpdatedAt      time.Time    `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.

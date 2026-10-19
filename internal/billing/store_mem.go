@@ -107,11 +107,10 @@ func (m *MemStore) InsertInvoice(_ context.Context, inv Invoice, lines []Line) (
 	if m.noTaken(inv) {
 		return Invoice{}, false, ErrInvoiceNoTaken
 	}
+	// The store owns both timestamps, as the column defaults of gormStore
+	// (one clock, BE-069): a caller's values are ignored.
 	now := stamp(m.now())
-	if inv.CreatedAt.IsZero() {
-		inv.CreatedAt = now
-	}
-	inv.UpdatedAt = inv.CreatedAt
+	inv.CreatedAt, inv.UpdatedAt = now, now
 	m.inv[inv.ID] = cloneInvoice(inv)
 	m.lines[inv.ID] = slices.Clone(lines)
 	return cloneInvoice(inv), true, nil
@@ -163,7 +162,9 @@ func (m *MemStore) UpdateInvoice(_ context.Context, next Invoice, from Status) (
 	if m.noTaken(upd) {
 		return Invoice{}, ErrInvoiceNoTaken
 	}
-	upd.UpdatedAt = stamp(m.now())
+	if upd.UpdatedAt = stamp(m.now()); upd.UpdatedAt.Before(cur.UpdatedAt) {
+		upd.UpdatedAt = cur.UpdatedAt // a clock set back in a test: never before the last stamp
+	}
 	m.inv[upd.ID] = cloneInvoice(upd)
 	return cloneInvoice(upd), nil
 }

@@ -37,7 +37,11 @@ type fixture struct {
 	lines []billing.Line
 }
 
-func newFixture(t *testing.T, w world, at time.Time) fixture {
+// stale is a caller's timestamp the stores ignore: created_at and updated_at
+// come from one clock, the database's (02 §0.1 [ts], BE-069).
+var stale = time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)
+
+func newFixture(t *testing.T, w world) fixture {
 	t.Helper()
 	order, line := w.order(t)
 	issuerOrg, recipientOrg := w.org(t, "club"), w.org(t, "company")
@@ -48,7 +52,7 @@ func newFixture(t *testing.T, w world, at time.Time) fixture {
 		IssuingMode: billing.ModeSellerUploaded, DocumentType: billing.DocUnknown, Provider: billing.ProviderNone,
 		Status: billing.StatusPlanned, Trigger: billing.TriggerOnPayment, Currency: "TRY", NetAmount: 1_000_000,
 		VATAmount: 200_000, VATWithheldAmount: 60_000, TotalAmount: 1_200_000, PayableAmount: 1_140_000,
-		IdempotencyKey: "service_sale:" + order.String() + ":" + line.String() + ":1", CreatedAt: at, UpdatedAt: at,
+		IdempotencyKey: "service_sale:" + order.String() + ":" + line.String() + ":1", CreatedAt: stale, UpdatedAt: stale,
 	}
 	return fixture{inv: inv, lines: []billing.Line{{ID: uuid.NewV7(), InvoiceID: inv.ID, Position: 1, OrderLineID: &line,
 		Description: "Stant", Quantity: 1, UnitPriceAmount: 1_000_000, NetAmount: 1_000_000, VATRateBP: 2000, VATAmount: 200_000,
@@ -98,10 +102,14 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (billing.Store, wor
 	t.Run("insert is idempotent by key", func(t *testing.T) {
 		t.Parallel()
 		s, w := newStore(t)
-		f := newFixture(t, w, at)
+		f := newFixture(t, w)
 		stored, created := insertIn(t, s, w, f)
 		if !created || stored.ID != f.inv.ID || stored.Status != billing.StatusPlanned || stored.IssuerSnapshot.Title != "Sözleşme Vakfı" {
 			t.Fatalf("first insert = %+v, %v", stored, created)
+		}
+		// The store stamps both columns on insert, at once (BE-069).
+		if stored.CreatedAt.IsZero() || stored.CreatedAt.Equal(stale) || !stored.UpdatedAt.Equal(stored.CreatedAt) {
+			t.Fatalf("insert stamps created_at %v, updated_at %v; want one store stamp", stored.CreatedAt, stored.UpdatedAt)
 		}
 		again := f
 		again.inv.ID = uuid.NewV7()
@@ -125,7 +133,7 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (billing.Store, wor
 	t.Run("upload, four eyes, issue, frozen, cancel", func(t *testing.T) {
 		t.Parallel()
 		s, w := newStore(t)
-		f := newFixture(t, w, at)
+		f := newFixture(t, w)
 		inv, _ := insertIn(t, s, w, f)
 		ctx := t.Context()
 		uploader, verifier, file := w.user(t), w.user(t), w.file(t)
@@ -134,7 +142,7 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (billing.Store, wor
 		}
 		up, err := updateIn(ctx, s, w, uploaded(inv, "VKF1", uploader, file), billing.StatusPlanned)
 		if err != nil || up.UploadedBy == nil || *up.UploadedBy != uploader || up.InvoiceNo == nil || *up.InvoiceNo != "VKF1" ||
-			up.IssueDate == nil || up.IssueDate.Day != 13 {
+			up.IssueDate == nil || up.IssueDate.Day != 13 || !up.CreatedAt.Equal(inv.CreatedAt) || up.UpdatedAt.Before(up.CreatedAt) {
 			t.Fatalf("upload = %+v, %v", up, err)
 		}
 		now := at.Add(time.Hour)
@@ -175,8 +183,8 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (billing.Store, wor
 	t.Run("an issuer's invoice number is unique", func(t *testing.T) {
 		t.Parallel()
 		s, w := newStore(t)
-		a := newFixture(t, w, at)
-		b := newFixture(t, w, at.Add(time.Second))
+		a := newFixture(t, w)
+		b := newFixture(t, w)
 		b.inv.IssuerPartyID = a.inv.IssuerPartyID
 		ia, _ := insertIn(t, s, w, a)
 		ib, _ := insertIn(t, s, w, b)
@@ -192,8 +200,8 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (billing.Store, wor
 	t.Run("lists by org, direction, filter and cursor", func(t *testing.T) {
 		t.Parallel()
 		s, w := newStore(t)
-		a := newFixture(t, w, at)
-		b := newFixture(t, w, at.Add(time.Minute))
+		a := newFixture(t, w)
+		b := newFixture(t, w)
 		b.inv.RecipientOrgID = a.inv.IssuerOrgID // a's issuer receives b
 		b.inv.Kind = billing.KindPlatformFee
 		insertIn(t, s, w, a)

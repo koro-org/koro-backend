@@ -53,11 +53,15 @@ type fixture struct {
 	lines []orders.Line
 }
 
+// stale is a caller's timestamp the stores ignore: created_at and updated_at
+// come from one clock, the database's (02 §0.1 [ts], BE-069).
+var stale = time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)
+
 func newFixture(b buyerRef, placed time.Time, offs []offeringRef, sellers []sellerRef) fixture {
 	o := orders.Order{ID: uuid.NewV7(), OrderNo: "KR" + crockford8(), OrgID: b.org, OrgKind: "company", PlacedByUserID: b.user,
 		BuyerPartyID: b.party, BuyerSnapshot: orders.BuyerSnapshot{Title: "Örnek A.Ş.", TaxNo: "1234567890"}, ModelCode: orders.ModelA,
 		CollectionMethod: orders.CollectBankTransfer, Status: orders.StatusAwaitingPayment, Currency: "TRY",
-		ExpiresAt: placed.Add(7 * 24 * time.Hour), PlacedAt: placed, CreatedAt: placed, UpdatedAt: placed}
+		ExpiresAt: placed.Add(7 * 24 * time.Hour), PlacedAt: placed, CreatedAt: stale, UpdatedAt: stale}
 	f := fixture{o: o}
 	for i, off := range offs {
 		payee := sellers[i].payee
@@ -66,8 +70,7 @@ func newFixture(b buyerRef, placed time.Time, offs []offeringRef, sellers []sell
 			Quantity: 1, UnitPriceAmount: 1_000_000, NetAmount: 1_000_000, VATRateBP: 2000, VATAmount: 200_000, GrossAmount: 1_200_000,
 			CommissionRateBP: 1000, CommissionBasis: "net_excl_vat", CommissionPayer: "seller", CommissionAmount: 100_000,
 			CommissionVATRateBP: 2000, CommissionVATAmount: 20_000, DisputeWindowDays: 7, SellerNetAmount: 1_080_000,
-			PayableAmount: 1_200_000, FulfillmentStatus: orders.FulfillPending, CreatedAt: placed.Add(time.Duration(i) * time.Microsecond),
-			UpdatedAt: placed}
+			PayableAmount: 1_200_000, FulfillmentStatus: orders.FulfillPending, CreatedAt: stale, UpdatedAt: stale}
 		f.lines = append(f.lines, l)
 		f.o.SubtotalAmount += l.NetAmount
 		f.o.VATAmount += l.VATAmount
@@ -138,6 +141,10 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (orders.Store, worl
 			got.Status != orders.StatusAwaitingPayment || !got.PlacedAt.Equal(t0) {
 			t.Fatalf("GetOrder = %+v, %v", got, err)
 		}
+		// The store stamps both columns on insert, at once (BE-069).
+		if got.CreatedAt.IsZero() || got.CreatedAt.Equal(stale) || !got.UpdatedAt.Equal(got.CreatedAt) {
+			t.Fatalf("order insert stamps created_at %v, updated_at %v; want one store stamp", got.CreatedAt, got.UpdatedAt)
+		}
 		if got, err := s.OrderByNo(ctx, f.o.OrderNo); err != nil || got.ID != f.o.ID {
 			t.Fatalf("OrderByNo = %+v, %v", got, err)
 		}
@@ -152,7 +159,8 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (orders.Store, worl
 			t.Fatalf("LinesOf = %+v, %v", byOrder, err)
 		}
 		l, err := s.GetLine(ctx, f.lines[0].ID, true)
-		if err != nil || l.SellerNetAmount != 1_080_000 || *l.PayeeID != sl.payee || l.DisputeWindowDays != 7 || l.DeliverablesSnapshot == nil {
+		if err != nil || l.SellerNetAmount != 1_080_000 || *l.PayeeID != sl.payee || l.DisputeWindowDays != 7 || l.DeliverablesSnapshot == nil ||
+			l.CreatedAt.IsZero() || l.CreatedAt.Equal(stale) || !l.UpdatedAt.Equal(l.CreatedAt) {
 			t.Fatalf("GetLine = %+v, %v", l, err)
 		}
 		m, err := s.OrdersByID(ctx, []uuid.UUID{f.o.ID, uuid.NewV7()})
@@ -177,7 +185,8 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (orders.Store, worl
 		next.Status, next.PaidAmount, next.PaidAt = orders.StatusPaid, f.o.KoroCollectAmount, &at
 		next.PayableAmount, next.OrderNo = 1, "KRZZZZZZZZ" // frozen: never written
 		got, err := s.UpdateOrder(ctx, next, orders.StatusAwaitingPayment)
-		if err != nil || got.Status != orders.StatusPaid || got.PayableAmount != 1_200_000 || got.OrderNo != f.o.OrderNo || got.PaidAt == nil {
+		if err != nil || got.Status != orders.StatusPaid || got.PayableAmount != 1_200_000 || got.OrderNo != f.o.OrderNo || got.PaidAt == nil ||
+			got.CreatedAt.Equal(stale) || got.UpdatedAt.Before(got.CreatedAt) {
 			t.Fatalf("UpdateOrder = %+v, %v", got, err)
 		}
 		_, err = s.UpdateOrder(ctx, next, orders.StatusAwaitingPayment)
@@ -196,7 +205,7 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (orders.Store, worl
 		nl.SellerNetAmount, nl.CommissionRateBP = 1, 0 // frozen
 		gl, err := s.UpdateLine(ctx, nl, orders.FulfillPending)
 		if err != nil || gl.FulfillmentStatus != orders.FulfillMarked || gl.SellerNetAmount != 1_080_000 || gl.CommissionRateBP != 1000 ||
-			gl.DisputeWindowEndsAt == nil || !gl.DisputeWindowEndsAt.Equal(ends) {
+			gl.DisputeWindowEndsAt == nil || !gl.DisputeWindowEndsAt.Equal(ends) || gl.CreatedAt.Equal(stale) || gl.UpdatedAt.Before(gl.CreatedAt) {
 			t.Fatalf("UpdateLine = %+v, %v", gl, err)
 		}
 		_, err = s.UpdateLine(ctx, nl, orders.FulfillPending)

@@ -33,13 +33,24 @@ type MemStore struct {
 
 var _ Store = (*MemStore)(nil)
 
-// NewMemStore returns an empty in-memory store; now stamps updated_at.
+// NewMemStore returns an empty in-memory store; now stamps created_at and
+// updated_at (a caller's values are ignored, as by the column defaults and
+// the touch triggers of gormStore: one clock, BE-069).
 func NewMemStore(now func() time.Time) *MemStore {
 	return &MemStore{now: now, accounts: map[uuid.UUID]CollectionAccount{}, transfers: map[uuid.UUID]IncomingTransfer{},
 		payments: map[uuid.UUID]Payment{}, refunds: map[uuid.UUID]Refund{}}
 }
 
 func (m *MemStore) stamp() time.Time { return m.now().UTC().Truncate(time.Microsecond) }
+
+// touch is the updated_at of a row changed now: never before its last
+// stamp (a test clock set back).
+func (m *MemStore) touch(prev time.Time) time.Time {
+	if t := m.stamp(); t.After(prev) {
+		return t
+	}
+	return prev
+}
 
 // ---- collection accounts
 
@@ -57,10 +68,7 @@ func (m *MemStore) InsertAccount(_ context.Context, c CollectionAccount) (Collec
 		return CollectionAccount{}, err
 	}
 	t := m.stamp()
-	if c.CreatedAt.IsZero() {
-		c.CreatedAt = t
-	}
-	c.UpdatedAt = t
+	c.CreatedAt, c.UpdatedAt = t, t
 	if c.PartyKind == "" {
 		c.PartyKind = PartyKindPlatform
 	}
@@ -152,7 +160,7 @@ func (m *MemStore) UpdateAccount(_ context.Context, next CollectionAccount, from
 	if err := m.checkAccount(row); err != nil {
 		return CollectionAccount{}, err
 	}
-	row.UpdatedAt = m.stamp()
+	row.UpdatedAt = m.touch(cur.UpdatedAt)
 	m.accounts[row.ID] = row
 	return row, nil
 }
@@ -175,10 +183,7 @@ func (m *MemStore) InsertTransfer(_ context.Context, t IncomingTransfer) (Incomi
 		}
 	}
 	ts := m.stamp()
-	if t.CreatedAt.IsZero() {
-		t.CreatedAt = ts
-	}
-	t.UpdatedAt = ts
+	t.CreatedAt, t.UpdatedAt = ts, ts
 	if t.Currency == "" {
 		t.Currency = Currency
 	}
@@ -265,7 +270,7 @@ func (m *MemStore) UpdateTransfer(_ context.Context, next IncomingTransfer, from
 	if err := checkTransfer(row); err != nil {
 		return IncomingTransfer{}, err
 	}
-	row.UpdatedAt = m.stamp()
+	row.UpdatedAt = m.touch(cur.UpdatedAt)
 	m.transfers[row.ID] = row
 	return row, nil
 }
@@ -362,10 +367,7 @@ func (m *MemStore) InsertPayment(_ context.Context, p Payment) error {
 		}
 	}
 	t := m.stamp()
-	if p.CreatedAt.IsZero() {
-		p.CreatedAt = t
-	}
-	p.UpdatedAt = t
+	p.CreatedAt, p.UpdatedAt = t, t
 	m.payments[p.ID] = p
 	return nil
 }
@@ -433,7 +435,7 @@ func (m *MemStore) AddPaymentRefund(_ context.Context, paymentID uuid.UUID, amou
 	if p.RefundedAmount == p.Amount {
 		p.Status = PaymentRefunded
 	}
-	p.UpdatedAt = m.stamp()
+	p.UpdatedAt = m.touch(p.UpdatedAt)
 	m.payments[paymentID] = p
 	return p, nil
 }
@@ -472,10 +474,7 @@ func (m *MemStore) InsertSplits(_ context.Context, ss []Split) error {
 	}
 	t := m.stamp()
 	for _, s := range ss {
-		if s.CreatedAt.IsZero() {
-			s.CreatedAt = t
-		}
-		s.UpdatedAt = t
+		s.CreatedAt, s.UpdatedAt = t, t
 		m.splits = append(m.splits, s)
 	}
 	return nil
@@ -591,7 +590,7 @@ func (m *MemStore) UpdateRefund(_ context.Context, next Refund, from RefundStatu
 	if err := checkRefund(next); err != nil {
 		return Refund{}, err
 	}
-	next.CreatedAt, next.UpdatedAt = cur.CreatedAt, m.stamp()
+	next.CreatedAt, next.UpdatedAt = cur.CreatedAt, m.touch(cur.UpdatedAt)
 	m.refunds[next.ID] = next
 	return next, nil
 }
@@ -640,7 +639,8 @@ func (m *MemStore) RefundsOfUser(_ context.Context, userID uuid.UUID) ([]Refund,
 }
 
 // SeedRefund stores r as it is, any status (matrix fixtures and tests that
-// need a refund past the request without going through the service).
+// need a refund past the request without going through the service); the
+// store stamps created_at and updated_at, as on every insert.
 func (m *MemStore) SeedRefund(r Refund) error {
 	if err := checkRefund(r); err != nil {
 		return err
@@ -651,10 +651,7 @@ func (m *MemStore) SeedRefund(r Refund) error {
 		return fmt.Errorf("payments: seed refund %s: duplicate id", r.ID)
 	}
 	t := m.stamp()
-	if r.CreatedAt.IsZero() {
-		r.CreatedAt = t
-	}
-	r.UpdatedAt = t
+	r.CreatedAt, r.UpdatedAt = t, t
 	m.refunds[r.ID] = r
 	return nil
 }

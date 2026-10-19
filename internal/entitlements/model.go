@@ -131,7 +131,10 @@ type Ref struct {
 	ID   uuid.UUID
 }
 
-// Entitlement is one row of the entitlements table (02 §10.1).
+// Entitlement is one row of the entitlements table (02 §10.1). CreatedAt
+// and UpdatedAt are read only: the column defaults and
+// entitlements_touch_updated_at stamp them with the database clock alone
+// (02 §0.1 [ts], BE-069).
 type Entitlement struct {
 	ID            uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
 	OrgID         uuid.UUID  `gorm:"type:uuid;column:org_id" json:"org_id"`
@@ -148,8 +151,8 @@ type Entitlement struct {
 	ActivatedAt   *time.Time `gorm:"column:activated_at" json:"activated_at,omitempty"`
 	RevokedAt     *time.Time `gorm:"column:revoked_at" json:"revoked_at,omitempty"`
 	RevokeReason  *string    `gorm:"column:revoke_reason" json:"revoke_reason,omitempty"`
-	CreatedAt     time.Time  `gorm:"column:created_at" json:"created_at"`
-	UpdatedAt     time.Time  `gorm:"column:updated_at" json:"updated_at"`
+	CreatedAt     time.Time  `gorm:"column:created_at;->" json:"created_at"`
+	UpdatedAt     time.Time  `gorm:"column:updated_at;->" json:"updated_at"`
 }
 
 // TableName implements gorm's Tabler.

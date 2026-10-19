@@ -280,7 +280,7 @@ func TestMarkPaid_ItemsSumMatchesPayout(t *testing.T) {
 	l3 := e.paidLine(t, payee)
 	bad := ledger.Payout{ID: uuid.NewV7(), PayeeID: payee, OrgID: s.sellerOrg, BankAccountID: s.account, IBANSnapshot: s.iban,
 		HolderSnapshot: "Ankara Üniversitesi Vakfı", Amount: 1_080_001, Currency: ledger.Currency,
-		Status: ledger.StatusPendingApproval, CreatedBy: c.UserID, CreatedAt: now, UpdatedAt: now}
+		Status: ledger.StatusPendingApproval, CreatedBy: c.UserID}
 	err = e.d.Tx.WithTx(t.Context(), func(ctx context.Context) error {
 		_, err := ps.InsertPayout(ctx, bad, []ledger.PayoutItem{{PayoutID: bad.ID, OrderLineID: l3, PayeeID: payee, Amount: 1_080_000}})
 		return err

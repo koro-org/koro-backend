@@ -50,7 +50,6 @@ func (w *filesWiring) matrixFixtures(fx *matrixFixtures) error {
 			ID: id, Purpose: files.Purpose(purpose), OwnerUserID: &by, UploadedBy: &by,
 			Bucket: testBuckets.Quarantine, StorageKey: "matrix/" + f.Name, DeclaredMIME: files.MIMEPDF,
 			SizeBytes: &size, Status: files.Status(status), ScanStatus: files.ScanPending,
-			CreatedAt: now, UpdatedAt: now,
 		}
 		switch row.Status {
 		case files.StatusUploading:

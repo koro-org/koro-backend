@@ -23,8 +23,8 @@ type Segment struct {
 	LastCountedAt    *time.Time   `gorm:"column:last_counted_at"`
 	CreatedBy        uuid.UUID    `gorm:"type:uuid;column:created_by"`
 	ArchivedAt       *time.Time   `gorm:"column:archived_at"`
-	CreatedAt        time.Time    `gorm:"column:created_at"`
-	UpdatedAt        time.Time    `gorm:"column:updated_at"`
+	CreatedAt        time.Time    `gorm:"column:created_at;->"`
+	UpdatedAt        time.Time    `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.

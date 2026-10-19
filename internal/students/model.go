@@ -126,8 +126,8 @@ type Profile struct {
 	AudienceKeys        db.TextArray  `gorm:"column:audience_keys"`
 	AudienceEligible    bool          `gorm:"column:audience_eligible"`
 	AudienceRefreshedAt *time.Time    `gorm:"column:audience_refreshed_at"`
-	CreatedAt           time.Time     `gorm:"column:created_at"`
-	UpdatedAt           time.Time     `gorm:"column:updated_at"`
+	CreatedAt           time.Time     `gorm:"column:created_at;->"`
+	UpdatedAt           time.Time     `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -175,8 +175,8 @@ type Privacy struct {
 	ShowContactOnGrant    bool          `gorm:"column:show_contact_on_grant"`
 	ShowClubsOnGrant      bool          `gorm:"column:show_clubs_on_grant"`
 	ActivityRankingChoice RankingChoice `gorm:"column:activity_ranking_choice"`
-	CreatedAt             time.Time     `gorm:"column:created_at"`
-	UpdatedAt             time.Time     `gorm:"column:updated_at"`
+	CreatedAt             time.Time     `gorm:"column:created_at;->"`
+	UpdatedAt             time.Time     `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -208,8 +208,8 @@ type Experience struct {
 	StartMonth       civil.Date     `gorm:"column:start_month"`
 	EndMonth         *civil.Date    `gorm:"column:end_month"`
 	Description      *string        `gorm:"column:description"`
-	CreatedAt        time.Time      `gorm:"column:created_at"`
-	UpdatedAt        time.Time      `gorm:"column:updated_at"`
+	CreatedAt        time.Time      `gorm:"column:created_at;->"`
+	UpdatedAt        time.Time      `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.

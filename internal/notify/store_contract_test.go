@@ -18,6 +18,10 @@ import (
 type storeWorld struct {
 	s    notify.Store
 	user func(t *testing.T) uuid.UUID
+	// age backdates a delivery's created_at to at (a row of a known age).
+	// The GORM store stamps a new row with the database clock (one clock,
+	// BE-069); nil for the in-memory store, whose clock is Claim's now.
+	age func(t *testing.T, deliveryID uuid.UUID, at time.Time)
 }
 
 // runStoreContract is the one body that proves every notify.Store behaves the
@@ -25,9 +29,10 @@ type storeWorld struct {
 // store runs the very same body in `make test-integration`
 // (store_integration_test.go).
 //
-// UpdatedAt is the store's own clock (the database's now() for GORM, see
-// DeliveryStore.Claim), so the contract checks that it is set, not its
-// value, and tests the lease with lease 0 (always expired) and a long lease.
+// CreatedAt and UpdatedAt are the store's own clock (the database's now()
+// for GORM, see DeliveryStore.Claim; one clock, BE-069), so the contract
+// checks that a new row has both at once, not their value, and tests the
+// lease with lease 0 (always expired) and a long lease.
 func runStoreContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 	t.Helper()
 	const lease = 2 * time.Minute
@@ -50,7 +55,7 @@ func runStoreContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 		if err != nil || state != notify.ClaimAcquired {
 			t.Fatalf("Claim() = (%v, %v)", state, err)
 		}
-		if got.ID != d.ID || got.Status != notify.StatusQueued || got.Attempts != 1 || !got.CreatedAt.Equal(t0) || got.UpdatedAt.IsZero() ||
+		if got.ID != d.ID || got.Status != notify.StatusQueued || got.Attempts != 1 || got.CreatedAt.IsZero() || !got.UpdatedAt.Equal(got.CreatedAt) ||
 			got.DedupeKey != "k1" || got.Template != "notify.test_message" || !bytes.Equal(got.RecipientIndex, d.RecipientIndex) ||
 			got.UserID == nil || *got.UserID != *d.UserID {
 			t.Fatalf("stored = %+v, want the queued row of %+v", got, d)
@@ -80,7 +85,7 @@ func runStoreContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 		again.TemplateVersion = 2
 		got, state, err := w.s.Claim(t.Context(), again, t0, 0)
 		if err != nil || state != notify.ClaimAcquired || got.ID != first.ID || got.Attempts != 2 || got.TemplateVersion != 2 ||
-			got.UpdatedAt.Before(first.UpdatedAt) || !got.CreatedAt.Equal(t0) {
+			got.UpdatedAt.Before(first.UpdatedAt) || !got.CreatedAt.Equal(first.CreatedAt) || got.UpdatedAt.Before(got.CreatedAt) {
 			t.Fatalf("Claim() = (%+v, %v, %v), want attempt 2 on the first row with the new template version", got, state, err)
 		}
 		// The takeover renews the lease.
@@ -516,6 +521,9 @@ func runRetentionContract(t *testing.T, newWorld func(t *testing.T) storeWorld) 
 				Category: notify.CategoryTransactional, Template: "notify.test_message", TemplateVersion: 1, DedupeKey: "k" + strconv.Itoa(i)}
 			if _, _, err := w.s.Claim(t.Context(), d, at, time.Minute); err != nil {
 				t.Fatal(err)
+			}
+			if w.age != nil {
+				w.age(t, d.ID, at)
 			}
 		},
 		notify.PolicyEmailSuppression: func(t *testing.T, w storeWorld, _ uuid.UUID, i int, at time.Time) {

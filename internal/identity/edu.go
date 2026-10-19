@@ -230,7 +230,6 @@ func (s *service) ConfirmEduVerification(ctx context.Context, a authz.Actor, raw
 		v = EduRecord{
 			ID: uuid.NewV7(), UserID: cur.ID, Method: EduMethodEmail, EduEmail: email, EduEmailNormalized: normalized,
 			EmailDomain: domain, UniversityID: &uni, Status: EduVerified, VerifiedAt: &now, ExpiresAt: &exp,
-			CreatedAt: now, UpdatedAt: now,
 		}
 		if err := s.d.Store.InsertEduVerification(ctx, v); err != nil {
 			return err
@@ -265,7 +264,7 @@ func (s *service) supersedeOpen(ctx context.Context, userID, keep uuid.UUID, now
 			continue
 		}
 		renewal = renewal || o.activeAt(now)
-		o.Status, o.UpdatedAt = EduSuperseded, now
+		o.Status = EduSuperseded
 		if err := s.d.Store.UpdateEduVerification(ctx, o); err != nil {
 			return false, nil, err
 		}
@@ -330,10 +329,9 @@ func (s *service) SubmitEduDocument(ctx context.Context, a authz.Actor, in EduDo
 				return ErrEduPending
 			}
 		}
-		now := s.now()
 		uni, file := in.UniversityID, in.FileID
 		v = EduRecord{ID: uuid.NewV7(), UserID: a.UserID, Method: EduMethodDocument, UniversityID: &uni,
-			DocumentFileID: &file, Status: EduPending, CreatedAt: now, UpdatedAt: now}
+			DocumentFileID: &file, Status: EduPending}
 		if err := s.d.Store.InsertEduVerification(ctx, v); err != nil {
 			return err
 		}
@@ -349,6 +347,9 @@ func (s *service) SubmitEduDocument(ctx context.Context, a authz.Actor, in EduDo
 			map[string]any{"file_id": file.String(), "university_id": uni.String()}).By(a))
 	})
 	if err != nil {
+		return EduView{}, err
+	}
+	if v, err = s.d.Store.EduVerification(ctx, v.ID); err != nil { // created_at as stored (BE-069)
 		return EduView{}, err
 	}
 	return s.eduView(ctx, v, false)

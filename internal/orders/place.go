@@ -330,7 +330,6 @@ func (s *service) writeOrder(ctx context.Context, a authz.Actor, org orgs.OrgSum
 		Currency: currencyTRY, SubtotalAmount: t.Subtotal, VATAmount: t.VAT, VATWithheldAmount: t.VATWithheld,
 		BuyerFeeAmount: t.BuyerFee, TotalAmount: t.Total, PayableAmount: t.Payable, KoroCollectAmount: t.KoroCollect,
 		DirectToPayeeAmount: t.DirectToPayee, ExpiresAt: now.Add(s.d.Config.PaymentWindow), PlacedAt: now,
-		CreatedAt: now, UpdatedAt: now,
 	}
 	lines := make([]Line, len(priced))
 	for i, p := range priced {
@@ -379,7 +378,6 @@ func lineOf(o Order, p pricedLine, now time.Time) Line {
 		CommissionPayer: a.CommissionPayer, CommissionAmount: a.Commission, CommissionVATRateBP: a.CommissionVATRateBP,
 		CommissionVATAmount: a.CommissionVAT, DisputeWindowDays: p.policy.DisputeWindowDays, PayoutHoldDays: p.policy.PayoutHoldDays,
 		BuyerFeeAmount: a.BuyerFee, SellerNetAmount: a.SellerNet, PayableAmount: a.Payable, FulfillmentStatus: status,
-		CreatedAt: now, UpdatedAt: now,
 	}
 }
 

@@ -37,7 +37,7 @@ func TestSweeper_StudentDocumentsAndHistory(t *testing.T) {
 		file := e.files.add(u.ID, files.PurposeEduDocument, files.ScanClean)
 		uni := eduUni
 		v := identity.EduRecord{ID: uuid.NewV7(), UserID: u.ID, Method: identity.EduMethodDocument, UniversityID: &uni,
-			DocumentFileID: &file, Status: status, ReviewedBy: &reviewer.ID, CreatedAt: decided, UpdatedAt: decided}
+			DocumentFileID: &file, Status: status, ReviewedBy: &reviewer.ID}
 		if decided.Before(now.AddDate(-1, 0, 0)) {
 			v.DocumentFileID = nil // purged long ago, the row ended over a year ago
 		}
@@ -45,7 +45,8 @@ func TestSweeper_StudentDocumentsAndHistory(t *testing.T) {
 			exp := decided.AddDate(1, 0, 0)
 			v.VerifiedAt, v.ExpiresAt = &decided, &exp
 		}
-		if err := e.store.InsertEduVerification(ctx, v); err != nil {
+		// Decided then: the store stamps the row at decided (one clock, BE-069).
+		if err := e.store.SeedAt(decided, func() error { return e.store.InsertEduVerification(ctx, v) }); err != nil {
 			t.Fatal(err)
 		}
 		return v

@@ -220,7 +220,7 @@ func TestVerify_UploaderCannotVerify_DBCheckPostgres(t *testing.T) {
 	pw := &pgWorld{t: t, d: d}
 	w, s := worldOf(pw), billing.NewGormStore(d.ORM)
 	ctx := t.Context()
-	f := newFixture(t, w, time.Now().UTC().Truncate(time.Microsecond))
+	f := newFixture(t, w)
 	inv, _ := insertIn(t, s, w, f)
 	uploader := w.user(t)
 	if _, err := updateIn(ctx, s, w, uploaded(inv, "VKF-DB-1", uploader, w.file(t)), billing.StatusPlanned); err != nil {
@@ -245,7 +245,7 @@ func TestVerify_UploaderCannotVerify_DBCheckPostgres(t *testing.T) {
 		t.Fatalf("store: %v, want authz.four_eyes_violation", err)
 	}
 	// A verifier needs an uploader (a NULL uploader is no pass).
-	g := newFixture(t, w, now)
+	g := newFixture(t, w)
 	other, _ := insertIn(t, s, w, g)
 	_, err = d.Pool.Exec(ctx, `UPDATE invoices SET verified_by = $2, verified_at = now() WHERE id = $1`, other.ID, w.user(t))
 	if got := constraintOf(err); got != "invoices_verifier_chk" {

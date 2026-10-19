@@ -130,7 +130,7 @@ func (s *service) DecideEduVerification(ctx context.Context, a authz.Actor, id u
 			return ErrEduInvalidState
 		}
 		now, reviewer := s.now(), a.UserID
-		v.ReviewedBy, v.ReviewNote, v.UpdatedAt = &reviewer, note, now
+		v.ReviewedBy, v.ReviewNote = &reviewer, note
 		meta := map[string]any{"decision": string(in.Decision), "subject_user_id": v.UserID.String()}
 		notice := eduNoticeRejected
 		if approve {

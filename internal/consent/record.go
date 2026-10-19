@@ -265,8 +265,7 @@ func (s *service) enqueueIYS(ctx context.Context, p PurposeDef, c Consent) error
 	if p.IYSChannel == nil {
 		return fmt.Errorf("consent: purpose %s requires İYS without a channel", p.Code)
 	}
-	now := c.OccurredAt
-	sub := Submission{ID: uuid.NewV7(), ConsentID: c.ID, Channel: *p.IYSChannel, Status: SubmissionPending, CreatedAt: now, UpdatedAt: now}
+	sub := Submission{ID: uuid.NewV7(), ConsentID: c.ID, Channel: *p.IYSChannel, Status: SubmissionPending}
 	if err := s.d.Store.InsertSubmission(ctx, sub); err != nil {
 		return err
 	}

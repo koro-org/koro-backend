@@ -242,7 +242,7 @@ func newEnv(t *testing.T, opts ...func(*identity.Deps)) *env {
 		t.Fatal(err)
 	}
 	e := &env{
-		clk: clk, store: &spyStore{MemStore: identity.NewMemStore()}, tx: &spyTx{}, out: outbox.NewMem(clk), q: queue.NewMem(),
+		clk: clk, store: &spyStore{MemStore: identity.NewMemStore(clk.Now)}, tx: &spyTx{}, out: outbox.NewMem(clk), q: queue.NewMem(),
 		lim: ratelimit.NewMem(clk), consent: &fakeRecorder{}, notices: newNotices(), mail: &mailer{},
 		hasher: &countingHasher{h: sharedHasher()}, members: map[uuid.UUID][]authz.Membership{}, subs: outbox.NewRegistry(),
 		chal: identity.NewMemChallenges(clk),

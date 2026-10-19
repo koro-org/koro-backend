@@ -38,6 +38,28 @@ func TestStore_Contract_Mem(t *testing.T) {
 	})
 }
 
+// stale is a caller's timestamp the stores ignore: created_at and updated_at
+// come from one clock, the database's (02 §0.1 [ts], BE-069).
+var stale = time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// stampedOnInsert fails unless the store stamped a new row itself: both
+// columns at once, not the caller's value (BE-069).
+func stampedOnInsert(t *testing.T, what string, created, updated time.Time) {
+	t.Helper()
+	if created.IsZero() || created.Equal(stale) || !updated.Equal(created) {
+		t.Fatalf("%s: insert stamps created_at %v, updated_at %v; want one store stamp", what, created, updated)
+	}
+}
+
+// stampedOnUpdate fails unless an update kept created_at and stamped
+// updated_at no earlier (BE-069).
+func stampedOnUpdate(t *testing.T, what string, before, created, updated time.Time) {
+	t.Helper()
+	if !created.Equal(before) || updated.Before(created) {
+		t.Fatalf("%s: update has created_at %v (was %v), updated_at %v", what, created, before, updated)
+	}
+}
+
 // storeContract pins the rules both stores apply (05 §13.2): the status
 // guard of the targeted updates, the uniqueness rules and the four-eyes
 // CHECKs of 000103/000105, the list order and the payment's ties.
@@ -50,12 +72,14 @@ func storeContract(t *testing.T, mk func(t *testing.T) (payments.Store, contract
 		at := t0
 		newAcct := func(number string) payments.CollectionAccount {
 			return payments.CollectionAccount{ID: uuid.NewV7(), Label: "Ana", LegalPartyID: w.party, IBAN: number, HolderName: "Koro Teknoloji A.Ş.",
-				BankName: "Örnek Bank", Status: payments.AccountPending, CreatedBy: creator, CreatedAt: at}
+				BankName: "Örnek Bank", Status: payments.AccountPending, CreatedBy: creator, CreatedAt: stale, UpdatedAt: stale}
 		}
 		a, err := s.InsertAccount(ctx, newAcct(ibanKoro))
 		if err != nil || a.Status != payments.AccountPending || a.PartyKind != payments.PartyKindPlatform {
 			t.Fatalf("insert = %+v, %v", a, err)
 		}
+		stampedOnInsert(t, "account", a.CreatedAt, a.UpdatedAt)
+		inserted := a.CreatedAt
 		if _, err := s.InsertAccount(ctx, newAcct(ibanKoro)); !errors.Is(err, payments.ErrIBANInUse) {
 			t.Fatalf("same open IBAN = %v", err)
 		}
@@ -78,6 +102,7 @@ func storeContract(t *testing.T, mk func(t *testing.T) (payments.Store, contract
 		if err != nil || a.Status != payments.AccountActive || !a.IsDefault || a.ApprovedBy == nil || *a.ApprovedBy != approver {
 			t.Fatalf("approve = %+v, %v", a, err)
 		}
+		stampedOnUpdate(t, "account", inserted, a.CreatedAt, a.UpdatedAt)
 		// A second active default is refused (collection_accounts_default_uq).
 		b, err := s.InsertAccount(ctx, newAcct(ibanKoro2))
 		if err != nil {
@@ -128,24 +153,26 @@ func storeContract(t *testing.T, mk func(t *testing.T) (payments.Store, contract
 		acct2 := contractAccount(t, s, w, ibanKoro2)
 		by := w.user(t)
 		day := civil.From(t0)
-		mkT := func(a payments.CollectionAccount, ref string, d civil.Date, created time.Time) payments.IncomingTransfer {
+		mkT := func(a payments.CollectionAccount, ref string, d civil.Date) payments.IncomingTransfer {
 			return payments.IncomingTransfer{ID: uuid.NewV7(), CollectionAccountID: a.ID, ValueDate: d, Amount: 1000, Currency: "TRY",
 				Description: "ödeme " + ref, BankReference: ref, Status: payments.TransferUnmatched, EntryMethod: payments.EntryManual,
-				EnteredBy: by, CreatedAt: created}
+				EnteredBy: by, CreatedAt: stale, UpdatedAt: stale}
 		}
-		t1, ok, err := s.InsertTransfer(ctx, mkT(acct, "R-1", day.AddDays(-2), t0.Add(-30*time.Hour)))
+		t1, ok, err := s.InsertTransfer(ctx, mkT(acct, "R-1", day.AddDays(-2)))
 		if err != nil || !ok || t1.Status != payments.TransferUnmatched {
 			t.Fatalf("insert = %+v, %v, %v", t1, ok, err)
 		}
-		if _, ok, err := s.InsertTransfer(ctx, mkT(acct, "R-1", day, t0)); err != nil || ok {
+		stampedOnInsert(t, "transfer", t1.CreatedAt, t1.UpdatedAt)
+		if _, ok, err := s.InsertTransfer(ctx, mkT(acct, "R-1", day)); err != nil || ok {
 			t.Fatalf("same reference = %v, %v", ok, err)
 		}
-		if _, ok, err := s.InsertTransfer(ctx, mkT(acct2, "R-1", day, t0)); err != nil || !ok {
+		t2, ok, err := s.InsertTransfer(ctx, mkT(acct2, "R-1", day))
+		if err != nil || !ok {
 			t.Fatalf("same reference on another account = %v, %v", ok, err)
 		}
-		t3, _, _ := s.InsertTransfer(ctx, mkT(acct, "R-3", day, t0))
+		t3, _, _ := s.InsertTransfer(ctx, mkT(acct, "R-3", day))
 		ref := "KR7Q2M9TXA"
-		t4 := mkT(acct, "R-4", day.AddDays(-1), t0)
+		t4 := mkT(acct, "R-4", day.AddDays(-1))
 		t4.ExtractedOrderNo, t4.SenderName = &ref, ptr("ÖRNEK A.Ş.")
 		if t4, _, err = s.InsertTransfer(ctx, t4); err != nil {
 			t.Fatal(err)
@@ -196,9 +223,11 @@ func storeContract(t *testing.T, mk func(t *testing.T) (payments.Store, contract
 		req := t1
 		req.Status, req.ReturnRequestedBy, req.ReturnRequestedAt, req.ReturnReason, req.ReturnTargetIBAN =
 			payments.TransferReturnRequested, &requester, &at, ptr("iade"), ptr(ibanSender)
+		inserted := t1.CreatedAt
 		if t1, err = s.UpdateTransfer(ctx, req, payments.TransferUnmatched); err != nil {
 			t.Fatal(err)
 		}
+		stampedOnUpdate(t, "transfer", inserted, t1.CreatedAt, t1.UpdatedAt)
 		self := t1
 		self.Status, self.ReturnApprovedBy, self.ReturnApprovedAt = payments.TransferReturnApproved, &requester, &at
 		if _, err := s.UpdateTransfer(ctx, self, payments.TransferReturnRequested); !errors.Is(err, authz.ErrFourEyes) {
@@ -226,13 +255,18 @@ func storeContract(t *testing.T, mk func(t *testing.T) (payments.Store, contract
 		if got, _ := s.GetTransfer(ctx, t1.ID, true); *got.ReturnTargetIBAN != ibanSender {
 			t.Fatal("a refused update changed the row")
 		}
-		// Unmatched before: t4 (t0) is not older than t0−24h; t1 is in a return.
-		sum, err := s.UnmatchedBefore(ctx, t0.Add(-24*time.Hour))
+		// Unmatched before a cutoff, by the store's created_at: t2 and t4
+		// (t3 is ignored, t1 is in a return).
+		oldest, newest := t2.CreatedAt, t4.CreatedAt
+		if newest.Before(oldest) {
+			oldest, newest = newest, oldest
+		}
+		sum, err := s.UnmatchedBefore(ctx, oldest)
 		if err != nil || sum.Count != 0 {
 			t.Fatalf("unmatched = %+v, %v", sum, err)
 		}
-		sum, err = s.UnmatchedBefore(ctx, t0.Add(time.Hour))
-		if err != nil || sum.Count != 2 || !sum.OldestAt.Equal(t0) {
+		sum, err = s.UnmatchedBefore(ctx, newest.Add(time.Microsecond))
+		if err != nil || sum.Count != 2 || !sum.OldestAt.Equal(oldest) {
 			t.Fatalf("unmatched = %+v, %v", sum, err)
 		}
 		mine, err := s.TransfersOfUser(ctx, requester)
@@ -253,12 +287,12 @@ func storeContract(t *testing.T, mk func(t *testing.T) (payments.Store, contract
 		by, at := w.user(t), t0
 		tr, _, err := s.InsertTransfer(ctx, payments.IncomingTransfer{ID: uuid.NewV7(), CollectionAccountID: acct.ID, ValueDate: civil.From(t0),
 			Amount: 1_500_000, Currency: "TRY", Description: "x", BankReference: "P-1", Status: payments.TransferUnmatched,
-			EntryMethod: payments.EntryManual, EnteredBy: by, CreatedAt: t0})
+			EntryMethod: payments.EntryManual, EnteredBy: by})
 		if err != nil {
 			t.Fatal(err)
 		}
 		pay := payments.Payment{ID: uuid.NewV7(), OrderID: o.id, OrgID: o.org, Provider: payments.ProviderBankTransfer, IncomingTransferID: &tr.ID,
-			Amount: tr.Amount, Currency: "TRY", Status: payments.PaymentCaptured, CapturedAt: &at, CapturedBy: &by, CreatedAt: at}
+			Amount: tr.Amount, Currency: "TRY", Status: payments.PaymentCaptured, CapturedAt: &at, CapturedBy: &by, CreatedAt: stale, UpdatedAt: stale}
 		if err := s.InsertPayment(ctx, pay); err == nil {
 			t.Fatal("a payment of an unmatched transfer (payments_incoming_transfer_id_order_id_fkey)")
 		}
@@ -279,17 +313,20 @@ func storeContract(t *testing.T, mk func(t *testing.T) (payments.Store, contract
 		if err != nil || got.Amount != 1_500_000 || got.IncomingTransferID == nil || *got.IncomingTransferID != tr.ID {
 			t.Fatalf("get = %+v, %v", got, err)
 		}
+		stampedOnInsert(t, "payment", got.CreatedAt, got.UpdatedAt)
 		if _, err := s.GetPayment(ctx, uuid.NewV7(), false); !errors.Is(err, payments.ErrNotFound) {
 			t.Fatalf("missing payment = %v", err)
 		}
 		sp := payments.Split{ID: uuid.NewV7(), PaymentID: pay.ID, OrderID: o.id, OrderLineID: o.line, SellerAmount: 1_080_000,
-			PlatformAmount: 120_000, Status: payments.SplitReleased, CreatedAt: at}
+			PlatformAmount: 120_000, Status: payments.SplitReleased, CreatedAt: stale, UpdatedAt: stale}
 		if err := s.InsertSplits(ctx, []payments.Split{sp}); err != nil {
 			t.Fatal(err)
 		}
-		if ss, err := s.SplitsOf(ctx, pay.ID); err != nil || len(ss) != 1 || ss[0].SellerAmount != 1_080_000 {
+		ss, err := s.SplitsOf(ctx, pay.ID)
+		if err != nil || len(ss) != 1 || ss[0].SellerAmount != 1_080_000 {
 			t.Fatalf("splits = %+v, %v", ss, err)
 		}
+		stampedOnInsert(t, "split", ss[0].CreatedAt, ss[0].UpdatedAt)
 		dup := sp
 		dup.ID = uuid.NewV7()
 		if err := s.InsertSplits(ctx, []payments.Split{dup}); err == nil {
@@ -297,12 +334,12 @@ func storeContract(t *testing.T, mk func(t *testing.T) (payments.Store, contract
 		}
 		if err := s.InsertRefund(ctx, payments.Refund{ID: uuid.NewV7(), PaymentID: pay.ID, OrderID: o.id, Amount: 300_000,
 			Reason: payments.RefundReasonOverpayment, Status: payments.RefundStatusRequested, RequestedBy: by, Method: payments.RefundMethodBankEFT,
-			TargetIBAN: ptr(ibanSender), CreatedAt: at}); err != nil {
+			TargetIBAN: ptr(ibanSender)}); err != nil {
 			t.Fatal(err)
 		}
 		if err := s.InsertRefund(ctx, payments.Refund{ID: uuid.NewV7(), PaymentID: pay.ID, OrderID: o.id, Amount: 1,
 			Reason: payments.RefundReasonOverpayment, Status: payments.RefundStatusRequested, RequestedBy: by, Method: payments.RefundMethodBankEFT,
-			CreatedAt: at}); err == nil {
+		}); err == nil {
 			t.Fatal("a bank EFT refund without a target IBAN")
 		}
 		if ps, err := s.PaymentsCapturedBy(ctx, by); err != nil || len(ps) != 1 {
@@ -321,7 +358,8 @@ func storeContract(t *testing.T, mk func(t *testing.T) (payments.Store, contract
 		pay := contractPayment(t, s, acct, o, fin, 1_500_000, "R-1")
 		newRefund := func(amount int64, line *uuid.UUID, reason string) payments.Refund {
 			r := payments.Refund{ID: uuid.NewV7(), PaymentID: pay.ID, OrderID: o.id, OrderLineID: line, Amount: amount, Reason: reason,
-				Status: payments.RefundStatusRequested, RequestedBy: fin, Method: payments.RefundMethodBankEFT, TargetIBAN: ptr(ibanSender), CreatedAt: at}
+				Status: payments.RefundStatusRequested, RequestedBy: fin, Method: payments.RefundMethodBankEFT, TargetIBAN: ptr(ibanSender),
+				CreatedAt: stale, UpdatedAt: stale}
 			if err := s.InsertRefund(ctx, r); err != nil {
 				t.Fatal(err)
 			}
@@ -329,6 +367,7 @@ func storeContract(t *testing.T, mk func(t *testing.T) (payments.Store, contract
 			if err != nil || got.Status != payments.RefundStatusRequested || got.Amount != amount {
 				t.Fatalf("get = %+v, %v", got, err)
 			}
+			stampedOnInsert(t, "refund", got.CreatedAt, got.UpdatedAt)
 			return got
 		}
 		r1 := newRefund(1_200_000, &o.line, payments.RefundReasonGoodwill)
@@ -348,10 +387,12 @@ func storeContract(t *testing.T, mk func(t *testing.T) (payments.Store, contract
 		if _, err := s.UpdateRefund(ctx, ok, payments.RefundStatusApproved); !errors.Is(err, payments.ErrInvalidState) {
 			t.Fatalf("wrong from = %v", err)
 		}
+		inserted := r1.CreatedAt
 		r1, err := s.UpdateRefund(ctx, ok, payments.RefundStatusRequested)
 		if err != nil || r1.Status != payments.RefundStatusApproved || r1.ApprovedBy == nil || *r1.ApprovedBy != fin2 {
 			t.Fatalf("approve = %+v, %v", r1, err)
 		}
+		stampedOnUpdate(t, "refund", inserted, r1.CreatedAt, r1.UpdatedAt)
 		// A completed refund carries its receipt and bank reference
 		// (refunds_completed_chk).
 		half := r1
@@ -373,6 +414,7 @@ func storeContract(t *testing.T, mk func(t *testing.T) (payments.Store, contract
 		if err != nil || got.Status != payments.PaymentPartiallyRefunded || got.RefundedAmount != 1_200_000 {
 			t.Fatalf("partial = %+v, %v", got, err)
 		}
+		stampedOnUpdate(t, "payment", pay.CreatedAt, got.CreatedAt, got.UpdatedAt)
 		if _, err := s.AddPaymentRefund(ctx, pay.ID, 300_001); !errors.Is(err, payments.ErrRefundExceedsPaid) {
 			t.Fatalf("beyond the payment = %v", err)
 		}
@@ -446,7 +488,7 @@ func contractPayment(t *testing.T, s payments.Store, acct payments.CollectionAcc
 	at := t0
 	tr, _, err := s.InsertTransfer(ctx, payments.IncomingTransfer{ID: uuid.NewV7(), CollectionAccountID: acct.ID, ValueDate: civil.From(t0),
 		Amount: amount, Currency: "TRY", Description: "x", BankReference: ref, Status: payments.TransferUnmatched,
-		EntryMethod: payments.EntryManual, EnteredBy: by, CreatedAt: t0})
+		EntryMethod: payments.EntryManual, EnteredBy: by})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,11 +498,15 @@ func contractPayment(t *testing.T, s payments.Store, acct payments.CollectionAcc
 		t.Fatal(err)
 	}
 	pay := payments.Payment{ID: uuid.NewV7(), OrderID: o.id, OrgID: o.org, Provider: payments.ProviderBankTransfer, IncomingTransferID: &tr.ID,
-		Amount: amount, Currency: "TRY", Status: payments.PaymentCaptured, CapturedAt: &at, CapturedBy: &by, CreatedAt: at}
+		Amount: amount, Currency: "TRY", Status: payments.PaymentCaptured, CapturedAt: &at, CapturedBy: &by}
 	if err := s.InsertPayment(ctx, pay); err != nil {
 		t.Fatal(err)
 	}
-	return pay
+	stored, err := s.GetPayment(ctx, pay.ID, false) // the store's created_at and updated_at
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stored
 }
 
 // contractAccount inserts an active account of the world's party.
@@ -468,7 +514,7 @@ func contractAccount(t *testing.T, s payments.Store, w contractWorld, number str
 	t.Helper()
 	ctx := t.Context()
 	c, err := s.InsertAccount(ctx, payments.CollectionAccount{ID: uuid.NewV7(), Label: "Ana", LegalPartyID: w.party, IBAN: number,
-		HolderName: "Koro Teknoloji A.Ş.", BankName: "Örnek Bank", Status: payments.AccountPending, CreatedBy: w.user(t), CreatedAt: t0})
+		HolderName: "Koro Teknoloji A.Ş.", BankName: "Örnek Bank", Status: payments.AccountPending, CreatedBy: w.user(t)})
 	if err != nil {
 		t.Fatal(err)
 	}

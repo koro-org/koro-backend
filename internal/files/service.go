@@ -165,7 +165,6 @@ func (s *service) CreateUpload(ctx context.Context, a authz.Actor, in UploadRequ
 		f.Bucket, f.StorageKey = s.d.Buckets.Quarantine, storageKey(in.Purpose, now, f.ID)
 		f.OriginalName, f.DeclaredMIME, f.SizeBytes = &name, in.ContentType, &in.SizeBytes
 		f.Status, f.ScanStatus = StatusUploading, ScanPending
-		f.CreatedAt, f.UpdatedAt = now, now
 		if in.Purpose.Personal() {
 			f.OwnerUserID = &uploader
 		}
@@ -599,7 +598,7 @@ func (s *service) PutGenerated(ctx context.Context, in GeneratedFile) (uuid.UUID
 		SizeBytes: &size, SHA256: sum[:], Status: StatusActive,
 		// Server-generated content is trusted input: it is never scanned
 		// (scanned_at stays NULL) and is served like a clean file.
-		ScanStatus: ScanClean, CreatedAt: now, UpdatedAt: now,
+		ScanStatus: ScanClean,
 	}
 	f.StorageKey = storageKey(in.Purpose, now, f.ID)
 	err = s.d.Objects.PutObject(ctx, storage.PutInput{

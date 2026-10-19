@@ -27,11 +27,12 @@ func memWorld() world {
 func storeContract(t *testing.T, newStore func(t *testing.T) (entitlements.Store, world)) {
 	t.Helper()
 	now := t0
+	stale := time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC) // a caller's timestamp the stores ignore (BE-069)
 	quota := func(org, admin uuid.UUID, f entitlements.Feature, total int, from, to time.Time) entitlements.Entitlement {
 		return entitlements.Entitlement{
 			ID: uuid.NewV7(), OrgID: org, Feature: f, Kind: entitlements.KindQuota, QuantityTotal: &total,
 			ValidFrom: from, ValidTo: to, Status: entitlements.StatusActive, SourceType: entitlements.SourceAdminGrant,
-			GrantedBy: &admin, ActivatedAt: &from, CreatedAt: now, UpdatedAt: now,
+			GrantedBy: &admin, ActivatedAt: &from, CreatedAt: stale, UpdatedAt: stale,
 		}
 	}
 	insert := func(t *testing.T, s entitlements.Store, e entitlements.Entitlement) entitlements.Entitlement {
@@ -52,6 +53,11 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (entitlements.Store
 		if err != nil || got.ID != e.ID || *got.QuantityTotal != 5 || got.Status != entitlements.StatusActive ||
 			!got.ValidTo.Equal(e.ValidTo) || got.GrantedBy == nil || *got.GrantedBy != admin {
 			t.Fatalf("Get = %+v, %v", got, err)
+		}
+		// The store stamps both columns on insert, at once, from one clock
+		// (02 §0.1 [ts], BE-069): the caller's values are ignored.
+		if got.CreatedAt.IsZero() || got.CreatedAt.Equal(stale) || !got.UpdatedAt.Equal(got.CreatedAt) {
+			t.Fatalf("insert stamps created_at %v, updated_at %v; want one store stamp", got.CreatedAt, got.UpdatedAt)
 		}
 		if _, err := s.Get(t.Context(), other, e.ID); !errors.Is(err, entitlements.ErrNotFound) {
 			t.Fatalf("Get under another org: %v", err)
@@ -135,7 +141,8 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (entitlements.Store
 			t.Fatalf("TryConsume at valid_to = %v, %v", ok, err)
 		}
 		got, ok, err := s.TryConsume(ctx, org, e.ID, 1, now)
-		if !ok || err != nil || got.QuantityUsed != 1 || got.Status != entitlements.StatusActive || got.OrgID != org {
+		if !ok || err != nil || got.QuantityUsed != 1 || got.Status != entitlements.StatusActive || got.OrgID != org ||
+			got.CreatedAt.Equal(stale) || got.UpdatedAt.Before(got.CreatedAt) {
 			t.Fatalf("TryConsume = %+v, %v, %v", got, ok, err)
 		}
 		got, ok, err = s.TryConsume(ctx, org, e.ID, 1, now)

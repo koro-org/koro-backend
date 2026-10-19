@@ -112,8 +112,8 @@ type Post struct {
 	LikeCount            int          `gorm:"column:like_count"`
 	SaveCount            int          `gorm:"column:save_count"`
 	EntitlementUsageID   *uuid.UUID   `gorm:"type:uuid;column:entitlement_usage_id"`
-	CreatedAt            time.Time    `gorm:"column:created_at"`
-	UpdatedAt            time.Time    `gorm:"column:updated_at"`
+	CreatedAt            time.Time    `gorm:"column:created_at;->"`
+	UpdatedAt            time.Time    `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -164,8 +164,8 @@ type OrgSettings struct {
 	RestrictedUntil    *time.Time `gorm:"column:restricted_until"`
 	Reason             *string    `gorm:"column:reason"`
 	UpdatedBy          *uuid.UUID `gorm:"type:uuid;column:updated_by"`
-	CreatedAt          time.Time  `gorm:"column:created_at"`
-	UpdatedAt          time.Time  `gorm:"column:updated_at"`
+	CreatedAt          time.Time  `gorm:"column:created_at;->"`
+	UpdatedAt          time.Time  `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.

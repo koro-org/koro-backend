@@ -34,7 +34,7 @@ func (w *entitlementsWiring) matrixFixtures(fx *matrixFixtures) error {
 		e := entitlements.Entitlement{
 			ID: id, OrgID: org, Feature: entitlements.Feature(feature), Kind: entitlements.Feature(feature).Kind(),
 			ValidFrom: from, ValidTo: to, Status: entitlements.StatusActive, SourceType: entitlements.SourceAdminGrant,
-			GrantedBy: &admin, ActivatedAt: &from, CreatedAt: from, UpdatedAt: from,
+			GrantedBy: &admin, ActivatedAt: &from,
 		}
 		if q, ok := f.Fields["quantity"].(int); ok {
 			e.QuantityTotal = &q

@@ -25,6 +25,7 @@ func (s CollectionStatus) Valid() bool {
 
 // ReceivableCollection claims one whole incoming transfer for one paid-out
 // order line. Its financial facts are derived from those immutable parents.
+// CreatedAt and UpdatedAt are read only (see CollectionAccount).
 type ReceivableCollection struct {
 	ID                  uuid.UUID `gorm:"type:uuid;primaryKey"`
 	IncomingTransferID  uuid.UUID `gorm:"type:uuid"`
@@ -44,8 +45,8 @@ type ReceivableCollection struct {
 	RejectedAt          *time.Time
 	RejectionReason     *string
 	LedgerTransactionID *uuid.UUID `gorm:"type:uuid"`
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
+	CreatedAt           time.Time  `gorm:"column:created_at;->"`
+	UpdatedAt           time.Time  `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm Tabler.

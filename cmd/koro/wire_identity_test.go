@@ -22,6 +22,7 @@ import (
 	"koro/internal/identity"
 	"koro/internal/notify"
 	"koro/internal/platform/civil"
+	"koro/internal/platform/clock"
 	"koro/internal/platform/config"
 	"koro/internal/platform/crypto"
 	"koro/internal/platform/crypto/rewrap"
@@ -73,7 +74,7 @@ var testDeriver = sync.OnceValue(func() *crypto.Deriver {
 // token deriver. First owner: BE-014. Only tickets of the identity module
 // edit this file (BE-001 R4).
 func (w *identityWiring) useMemStore() {
-	w.store = identity.NewMemStore()
+	w.store = identity.NewMemStore(clock.Real().Now) // created_at/updated_at only: no test depends on them
 	w.tx = db.NopTx{}
 	w.deriver = testDeriver()
 	w.hasher = testHasher()
@@ -177,7 +178,7 @@ type actorEnv struct {
 func newActorEnv(t *testing.T) *actorEnv {
 	t.Helper()
 	c := newTestContainer(t)
-	store := identity.NewMemStore()
+	store := identity.NewMemStore(clock.Real().Now)
 	c.identity.store = store
 	if err := c.build(); err != nil {
 		t.Fatal(err)
@@ -192,7 +193,7 @@ func (e *actorEnv) user(t *testing.T, birth *civil.Date) identity.User {
 	u := identity.User{
 		ID: id, Status: identity.StatusActive, Email: id.String() + "@actor.koro.test", EmailNormalized: id.String() + "@actor.koro.test",
 		EmailVerifiedAt: &now, PasswordHash: testPasswordHash(), FirstName: "Ada", LastName: "Yılmaz", BirthDate: birth,
-		Persona: identity.PersonaStudent, Locale: identity.LocaleTR, CreatedAt: now, UpdatedAt: now,
+		Persona: identity.PersonaStudent, Locale: identity.LocaleTR,
 	}
 	if birth == nil {
 		u.Persona = identity.PersonaCompany

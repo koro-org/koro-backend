@@ -39,6 +39,8 @@ func (m *MemStore) InsertCollection(_ context.Context, c ReceivableCollection) e
 	if m.collections == nil {
 		m.collections = map[uuid.UUID]ReceivableCollection{}
 	}
+	t := m.stamp()
+	c.CreatedAt, c.UpdatedAt = t, t // the store's, as the column defaults (BE-069)
 	m.collections[c.ID] = c
 	return nil
 }
@@ -64,7 +66,7 @@ func (m *MemStore) UpdateCollection(_ context.Context, c ReceivableCollection) (
 	next := old
 	next.Status, next.ApprovedBy, next.ApprovedAt = c.Status, c.ApprovedBy, c.ApprovedAt
 	next.RejectedBy, next.RejectedAt, next.RejectionReason = c.RejectedBy, c.RejectedAt, c.RejectionReason
-	next.LedgerTransactionID, next.UpdatedAt = c.LedgerTransactionID, m.stamp()
+	next.LedgerTransactionID, next.UpdatedAt = c.LedgerTransactionID, m.touch(old.UpdatedAt)
 	if err := checkCollection(next); err != nil {
 		return ReceivableCollection{}, err
 	}

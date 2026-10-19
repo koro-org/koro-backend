@@ -44,7 +44,7 @@ func TestSweeper_ConsentProof(t *testing.T) {
 	g := add(gone, consent.Granted, now.AddDate(-5, 0, 0))
 	add(gone, consent.Withdrawn, now.AddDate(-4, 0, 0))
 	if err := e.store.InsertSubmission(ctx, consent.Submission{ID: uuid.NewV7(), ConsentID: g.ID, Channel: consent.IYSEmail,
-		Status: consent.SubmissionPending, CreatedAt: now, UpdatedAt: now}); err != nil {
+		Status: consent.SubmissionPending}); err != nil {
 		t.Fatal(err)
 	}
 	add(live, consent.Granted, now.AddDate(-5, 0, 0))

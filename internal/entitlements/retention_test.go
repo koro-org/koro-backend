@@ -19,7 +19,7 @@ func TestPrivacy_UsagesExportedAndRetained(t *testing.T) {
 	total := 5
 	ent := entitlements.Entitlement{ID: uuid.NewV7(), OrgID: uuid.NewV7(), Feature: entitlements.FeatureTargetedPost,
 		Kind: entitlements.KindQuota, QuantityTotal: &total, ValidFrom: t0, ValidTo: t0.AddDate(0, 1, 0), Status: entitlements.StatusActive,
-		SourceType: entitlements.SourceAdminGrant, GrantedBy: &e.admin, ActivatedAt: &t0, CreatedAt: t0, UpdatedAt: t0}
+		SourceType: entitlements.SourceAdminGrant, GrantedBy: &e.admin, ActivatedAt: &t0}
 	if err := e.store.Insert(ctx, ent); err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestSweeper_EntitlementOther(t *testing.T) {
 		from := ended.AddDate(0, -1, 0)
 		x := entitlements.Entitlement{ID: uuid.NewV7(), OrgID: uuid.NewV7(), Feature: entitlements.FeatureTargetedPost,
 			Kind: entitlements.KindQuota, QuantityTotal: &total, ValidFrom: from, ValidTo: ended, Status: entitlements.StatusExpired,
-			SourceType: src, GrantedBy: &e.admin, ActivatedAt: &from, CreatedAt: from, UpdatedAt: from}
+			SourceType: src, GrantedBy: &e.admin, ActivatedAt: &from}
 		if src != entitlements.SourceAdminGrant {
 			id := uuid.NewV7()
 			x.SourceID = &id

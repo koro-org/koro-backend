@@ -9,6 +9,9 @@ import (
 )
 
 // GORM row types of the identity tables (store_gorm.go scans into them).
+// The created_at and updated_at of the [ts] tables (users, mfa_totp,
+// edu_verifications) are read only: the column defaults and the touch
+// triggers stamp them with the database clock alone (02 §0.1, BE-069).
 
 // userRow is one users row.
 type userRow struct {
@@ -30,8 +33,8 @@ type userRow struct {
 	ErasedAt         *time.Time  `gorm:"column:erased_at"`
 	FailedLoginCount int16       `gorm:"column:failed_login_count"`
 	LockedUntil      *time.Time  `gorm:"column:locked_until"`
-	CreatedAt        time.Time   `gorm:"column:created_at"`
-	UpdatedAt        time.Time   `gorm:"column:updated_at"`
+	CreatedAt        time.Time   `gorm:"column:created_at;->"`
+	UpdatedAt        time.Time   `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -179,7 +182,7 @@ type totpRow struct {
 	SecretEnc    []byte     `gorm:"column:secret_enc"`
 	ConfirmedAt  *time.Time `gorm:"column:confirmed_at"`
 	LastUsedStep *int64     `gorm:"column:last_used_step"`
-	CreatedAt    time.Time  `gorm:"column:created_at"`
+	CreatedAt    time.Time  `gorm:"column:created_at;->"`
 }
 
 // TableName implements gorm's Tabler.

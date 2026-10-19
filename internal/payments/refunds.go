@@ -428,11 +428,10 @@ func (s *service) createRefund(ctx context.Context, a authz.Actor, d refundDraft
 	if err := s.checkPool(ctx, m, d.Reason, d.LineID, d.Amount, uuid.Nil()); err != nil {
 		return uuid.Nil(), err
 	}
-	now, by, note := s.now(), a.UserID, optional(d.Note)
+	by, note := a.UserID, optional(d.Note)
 	r := Refund{
 		ID: uuid.NewV7(), PaymentID: p.ID, OrderID: p.OrderID, OrderLineID: d.LineID, Amount: d.Amount, Reason: d.Reason,
 		ReasonNote: note, Status: RefundStatusRequested, RequestedBy: by, Method: d.Method, TargetIBAN: &d.TargetIBAN,
-		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := s.d.Store.InsertRefund(ctx, r); err != nil {
 		return uuid.Nil(), err

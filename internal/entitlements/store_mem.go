@@ -81,6 +81,9 @@ func (s *memStore) Insert(_ context.Context, e Entitlement) error {
 			}
 		}
 	}
+	// The store owns both timestamps, as the column defaults of gormStore.
+	now := s.now().UTC().Truncate(time.Microsecond)
+	e.CreatedAt, e.UpdatedAt = now, now
 	s.rows[e.ID] = clone(e)
 	return nil
 }
@@ -184,7 +187,9 @@ func (s *memStore) update(e Entitlement) error {
 	if err := check(e); err != nil {
 		return err
 	}
-	e.UpdatedAt = s.now()
+	if e.UpdatedAt = s.now().UTC().Truncate(time.Microsecond); e.UpdatedAt.Before(e.CreatedAt) {
+		e.UpdatedAt = e.CreatedAt // a clock set back in a test: never before created_at
+	}
 	s.rows[e.ID] = clone(e)
 	return nil
 }

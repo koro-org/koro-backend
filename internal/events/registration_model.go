@@ -113,8 +113,8 @@ type Registration struct {
 	AnswersPurgeAt      time.Time    `gorm:"column:answers_purge_at"`
 	SensitivePurgeAt    *time.Time   `gorm:"column:sensitive_purge_at"`
 	AnswersPurgedAt     *time.Time   `gorm:"column:answers_purged_at"`
-	CreatedAt           time.Time    `gorm:"column:created_at"`
-	UpdatedAt           time.Time    `gorm:"column:updated_at"`
+	CreatedAt           time.Time    `gorm:"column:created_at;->"`
+	UpdatedAt           time.Time    `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.

@@ -87,11 +87,11 @@ func (w *paymentsWiring) matrixFile(ctx context.Context, fx *matrixFixtures, f f
 		return err
 	}
 	purpose, _ := f.Fields["purpose"].(string)
-	size, t := int64(len(matrixFilePDF)), matrixOrgTime
+	size := int64(len(matrixFilePDF))
 	return w.late.files.store.Insert(ctx, files.File{
 		ID: id, Purpose: files.Purpose(purpose), UploadedBy: &by, Bucket: testBuckets.Files, StorageKey: "matrix/" + f.Name,
 		DeclaredMIME: files.MIMEPDF, SizeBytes: &size, SHA256: make([]byte, 32), Status: files.StatusActive,
-		ScanStatus: files.ScanSkipped, CreatedAt: t, UpdatedAt: t,
+		ScanStatus: files.ScanSkipped,
 	})
 }
 
@@ -108,7 +108,7 @@ func matrixAccount(ctx context.Context, fx *matrixFixtures, mem *payments.MemSto
 	status, _ := f.Fields["status"].(string)
 	t := matrixOrgTime
 	c, err := mem.InsertAccount(ctx, payments.CollectionAccount{ID: id, Label: "Matris " + f.Name, LegalPartyID: party, IBAN: number,
-		HolderName: "Koro Teknoloji A.Ş.", BankName: "Örnek Bank", Status: payments.AccountPending, CreatedBy: by, CreatedAt: t})
+		HolderName: "Koro Teknoloji A.Ş.", BankName: "Örnek Bank", Status: payments.AccountPending, CreatedBy: by})
 	if err != nil || payments.AccountStatus(status) == payments.AccountPending {
 		return err
 	}
@@ -135,7 +135,7 @@ func matrixTransfer(ctx context.Context, fx *matrixFixtures, mem *payments.MemSt
 	t := matrixOrgTime
 	tr := payments.IncomingTransfer{ID: id, CollectionAccountID: acct, ValueDate: matrixValueDate, Amount: int64(amount),
 		Currency: payments.Currency, Description: "Matris " + f.Name, BankReference: "MATRIX-" + f.Name,
-		Status: payments.TransferUnmatched, EntryMethod: payments.EntryManual, EnteredBy: by, CreatedAt: t}
+		Status: payments.TransferUnmatched, EntryMethod: payments.EntryManual, EnteredBy: by}
 	if _, ok := f.Fields["receipt"]; ok {
 		receipt, err := fx.Ref(f, "receipt")
 		if err != nil {
@@ -224,14 +224,14 @@ func (w *paymentsWiring) matrixOrderC(ctx context.Context, fx *matrixFixtures, f
 			return err
 		}
 	}
-	pid, t := ids["payee_club_a"], matrixOrgTime
+	pid := ids["payee_club_a"]
 	l := orders.Line{ID: authztest.ID(f.Name + "_line"), OrderID: o.ID, OrgID: o.OrgID, SellerOrgID: ids["club_a"], PayeeID: &pid,
 		OfferingID: authztest.ID(f.Name + "_offering"), ServiceID: ids["svc_booth"], CommercePolicyID: ids["policy_default"],
 		TitleSnapshot: "Matris doğrudan ödeme", Quantity: 1,
 		UnitPriceAmount: 1_000_000, NetAmount: 1_000_000, VATRateBP: 2000, VATAmount: 200_000, GrossAmount: 1_200_000,
 		CommissionRateBP: 1000, CommissionBasis: "net_excl_vat", CommissionPayer: "buyer", CommissionAmount: 100_000,
 		CommissionVATRateBP: 2000, CommissionVATAmount: 20_000, DisputeWindowDays: 7, BuyerFeeAmount: 120_000,
-		SellerNetAmount: 1_200_000, PayableAmount: 1_320_000, FulfillmentStatus: orders.FulfillPending, CreatedAt: t, UpdatedAt: t}
+		SellerNetAmount: 1_200_000, PayableAmount: 1_320_000, FulfillmentStatus: orders.FulfillPending}
 	o.SubtotalAmount, o.VATAmount, o.BuyerFeeAmount, o.TotalAmount, o.PayableAmount = 1_000_000, 200_000, 120_000, 1_320_000, 1_320_000
 	o.KoroCollectAmount, o.DirectToPayeeAmount, o.PaidAmount = 120_000, 1_200_000, 120_000
 	return mem.InsertOrder(ctx, o, []orders.Line{l})
@@ -260,7 +260,7 @@ func matrixPayment(ctx context.Context, fx *matrixFixtures, mem *payments.MemSto
 	t := matrixOrgTime.Add(24 * time.Hour)
 	return mem.InsertPayment(ctx, payments.Payment{ID: id, OrderID: *tr.MatchedOrderID, OrgID: org, Provider: payments.ProviderBankTransfer,
 		IncomingTransferID: &tr.ID, Amount: tr.Amount, Currency: payments.Currency, Status: payments.PaymentCaptured, CapturedAt: &t,
-		CapturedBy: &by, CreatedAt: t})
+		CapturedBy: &by})
 }
 
 func matrixRefund(fx *matrixFixtures, mem *payments.MemStore, f fixture, id uuid.UUID) error {
@@ -281,7 +281,7 @@ func matrixRefund(fx *matrixFixtures, mem *payments.MemStore, f fixture, id uuid
 	target := "TR100006200000000006295938"
 	t := matrixOrgTime.Add(36 * time.Hour)
 	r := payments.Refund{ID: id, PaymentID: pay, OrderID: order, Amount: int64(amount), Reason: reason,
-		Status: payments.RefundStatusRequested, RequestedBy: by, Method: payments.RefundMethodBankEFT, TargetIBAN: &target, CreatedAt: t}
+		Status: payments.RefundStatusRequested, RequestedBy: by, Method: payments.RefundMethodBankEFT, TargetIBAN: &target}
 	if _, ok := f.Fields["line"]; ok {
 		l, err := fx.Ref(f, "line")
 		if err != nil {
@@ -347,7 +347,7 @@ func (w *paymentsWiring) matrixCollection(ctx context.Context, fx *matrixFixture
 		return err
 	}
 	c := payments.ReceivableCollection{ID: id, IncomingTransferID: tr.ID, OrderLineID: l.ID, OrderID: l.OrderID, PayeeID: *l.PayeeID, OrgID: l.SellerOrgID,
-		CollectionAccountID: tr.CollectionAccountID, Amount: tr.Amount, BankReference: tr.BankReference, ReceiptFileID: *tr.ReceiptFileID, Status: payments.CollectionRequested, RequestedBy: by, CreatedAt: matrixOrgTime, UpdatedAt: matrixOrgTime}
+		CollectionAccountID: tr.CollectionAccountID, Amount: tr.Amount, BankReference: tr.BankReference, ReceiptFileID: *tr.ReceiptFileID, Status: payments.CollectionRequested, RequestedBy: by}
 	if err := mem.InsertCollection(ctx, c); err != nil {
 		return err
 	}

@@ -14,7 +14,8 @@ import (
 //
 // Every method works in the transaction carried by ctx, if any.
 type Store interface {
-	// Insert writes a new row.
+	// Insert writes a new row; the store stamps created_at and updated_at
+	// (one clock, BE-069): f's are ignored.
 	Insert(ctx context.Context, f File) error
 	// Get returns the row or ErrNotFound.
 	Get(ctx context.Context, id uuid.UUID) (File, error)

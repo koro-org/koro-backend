@@ -125,7 +125,7 @@ func (s *service) Register(ctx context.Context, a authz.Actor, in Registration) 
 		u := User{
 			ID: uuid.NewV7(), Status: StatusPendingEmail, Email: email, EmailNormalized: normalized,
 			PasswordHash: hash, FirstName: first, LastName: last, BirthDate: in.BirthDate,
-			Persona: in.Persona, Locale: in.Locale, CreatedAt: now, UpdatedAt: now,
+			Persona: in.Persona, Locale: in.Locale,
 		}
 		if err := s.d.Store.InsertUser(ctx, u); err != nil {
 			if errors.Is(err, ErrEmailTaken) {

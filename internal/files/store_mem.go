@@ -22,11 +22,13 @@ type memStore struct {
 	// refs simulates foreign keys of other tables (organizations.logo_file_id,
 	// club_claims.evidence_file_id, ...): a referenced row cannot be deleted.
 	refs map[uuid.UUID]bool
-	// now stamps updated_at like the files_touch_updated_at trigger.
+	// now stamps created_at and updated_at like the column defaults and
+	// the files_touch_updated_at trigger (a caller's values are ignored).
 	now func() time.Time
 }
 
-// NewMemStore returns an empty in-memory Store; now stamps updated_at.
+// NewMemStore returns an empty in-memory Store; now stamps created_at and
+// updated_at.
 func NewMemStore(now func() time.Time) Store {
 	return &memStore{rows: map[uuid.UUID]File{}, refs: map[uuid.UUID]bool{}, now: now}
 }
@@ -78,6 +80,8 @@ func (s *memStore) Insert(_ context.Context, f File) error {
 	if err := s.check(f); err != nil {
 		return err
 	}
+	now := s.now().UTC().Truncate(time.Microsecond)
+	f.CreatedAt, f.UpdatedAt = now, now
 	s.rows[f.ID] = f.clone()
 	return nil
 }
@@ -104,8 +108,10 @@ func (s *memStore) Update(_ context.Context, f File) error {
 	if err := s.check(f); err != nil {
 		return err
 	}
-	f.CreatedAt = cur.CreatedAt
-	f.UpdatedAt = s.now()
+	f.CreatedAt, f.UpdatedAt = cur.CreatedAt, s.now().UTC().Truncate(time.Microsecond)
+	if f.UpdatedAt.Before(cur.UpdatedAt) {
+		f.UpdatedAt = cur.UpdatedAt // a clock set back in a test: never before the last stamp
+	}
 	s.rows[f.ID] = f.clone()
 	return nil
 }

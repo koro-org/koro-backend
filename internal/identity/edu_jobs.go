@@ -250,7 +250,7 @@ func (s *service) handleFileRejected(ctx context.Context, e domainevent.Envelope
 			}
 			meta["withdrawn"] = true
 		} else {
-			v.DocumentFileID, v.UpdatedAt = nil, s.now()
+			v.DocumentFileID = nil
 			if err := s.d.Store.UpdateEduVerification(ctx, v); err != nil {
 				return err
 			}

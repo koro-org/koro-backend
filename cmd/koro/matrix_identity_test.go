@@ -47,7 +47,7 @@ func (w *identityWiring) matrixFixtures(fx *matrixFixtures) error {
 		u := identity.User{
 			ID: p.User(), Status: identity.StatusActive, Email: matrixEmail(p.Name), EmailNormalized: matrixEmail(p.Name),
 			EmailVerifiedAt: &now, PasswordHash: testPasswordHash(), FirstName: "Ayla", LastName: p.Name,
-			Persona: identity.PersonaCompany, Locale: identity.LocaleTR, CreatedAt: now, UpdatedAt: now,
+			Persona: identity.PersonaCompany, Locale: identity.LocaleTR,
 		}
 		switch {
 		case len(p.Actor.PlatformRoles) > 0:
@@ -82,7 +82,7 @@ func (w *identityWiring) matrixFixtures(fx *matrixFixtures) error {
 			uni, exp, addr := *p.Actor.UniversityID, now.AddDate(1, 0, 0), p.Name+"@matrix.edu.tr"
 			v := identity.EduRecord{ID: uuid.NewV7(), UserID: u.ID, Method: identity.EduMethodEmail, EduEmail: addr,
 				EduEmailNormalized: addr, EmailDomain: "matrix.edu.tr", UniversityID: &uni, Status: identity.EduVerified,
-				VerifiedAt: &now, ExpiresAt: &exp, CreatedAt: now, UpdatedAt: now}
+				VerifiedAt: &now, ExpiresAt: &exp}
 			if err := w.store.InsertEduVerification(ctx, v); err != nil {
 				return fmt.Errorf("student verification %s: %w", p.Name, err)
 			}
@@ -111,7 +111,6 @@ func (w *identityWiring) matrixFixtures(fx *matrixFixtures) error {
 			u := identity.User{
 				ID: id, Status: identity.Status(status), Email: email, EmailNormalized: email, PasswordHash: testPasswordHash(),
 				FirstName: "Ayla", LastName: f.Name, Persona: identity.PersonaCompany, Locale: identity.LocaleTR,
-				CreatedAt: now, UpdatedAt: now,
 			}
 			if u.Status == identity.StatusSuspended {
 				u.EmailVerifiedAt, u.SuspendedAt, u.SuspensionReason = &now, &now, "matrix fixture"
@@ -168,7 +167,7 @@ func (w *identityWiring) matrixFixtures(fx *matrixFixtures) error {
 			}
 			uni := authztest.UniversityID("uni_a")
 			v := identity.EduRecord{ID: id, UserID: owner, Method: identity.EduMethodDocument, UniversityID: &uni,
-				DocumentFileID: &file, Status: identity.EduPending, CreatedAt: now, UpdatedAt: now}
+				DocumentFileID: &file, Status: identity.EduPending}
 			if err := w.store.InsertEduVerification(ctx, v); err != nil {
 				return fmt.Errorf("fixture %s: %w", f.Name, err)
 			}
@@ -222,7 +221,7 @@ func (w *identityWiring) matrixEduFile(ctx context.Context, fx *matrixFixtures, 
 	row := files.File{
 		ID: id, Purpose: files.PurposeEduDocument, OwnerUserID: &by, UploadedBy: &by, Bucket: testBuckets.Files,
 		StorageKey: "matrix/" + f.Name, DeclaredMIME: files.MIMEPDF, SizeBytes: &size, SHA256: make([]byte, 32),
-		Status: files.StatusActive, ScanStatus: files.ScanSkipped, CreatedAt: now, UpdatedAt: now,
+		Status: files.StatusActive, ScanStatus: files.ScanSkipped,
 	}
 	if _, ok := f.Fields["attached_to"]; ok {
 		owner, err := fx.Ref(f, "attached_to")
@@ -278,7 +277,7 @@ func (w *identityWiring) matrixTOTP(ctx context.Context, u identity.User) error 
 	if err != nil {
 		return err
 	}
-	if err := w.store.PutTOTP(ctx, identity.TOTP{UserID: u.ID, SecretEnc: sealed, CreatedAt: u.CreatedAt}); err != nil {
+	if err := w.store.PutTOTP(ctx, identity.TOTP{UserID: u.ID, SecretEnc: sealed}); err != nil {
 		return err
 	}
 	if mode != "enabled" {

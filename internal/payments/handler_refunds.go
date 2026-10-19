@@ -72,6 +72,19 @@ func registerRefunds(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.PaymentsRefundReject), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.rejectRefund)
 
 	reg(api, huma.Operation{
+		OperationID: "adminCancelRefund", Method: http.MethodPost, Path: "/admin/refunds/{refund_id}/cancel",
+		Summary:     "Cancel an approved refund before completion",
+		Description: "Requires another finance admin and re-authentication. Only approved refunds; no ledger money moves.",
+	}, op.Meta{Action: string(authz.PaymentsRefundCancel), Surface: op.SurfaceAdmin, Reauth: true,
+		RateLimit: op.RateReauth, Idempotency: op.IdempotencyOptional}, h.cancelRefund)
+	reg(api, huma.Operation{
+		OperationID: "adminMarkRefundFailed", Method: http.MethodPost, Path: "/admin/refunds/{refund_id}/mark-failed",
+		Summary:     "Record a failed refund before completion",
+		Description: "Requires another finance admin and re-authentication. Only approved refunds; completed refunds cannot be reversed here.",
+	}, op.Meta{Action: string(authz.PaymentsRefundMarkFailed), Surface: op.SurfaceAdmin, Reauth: true,
+		RateLimit: op.RateReauth, Idempotency: op.IdempotencyOptional}, h.markRefundFailed)
+
+	reg(api, huma.Operation{
 		OperationID: "adminCompleteRefund", Method: http.MethodPost, Path: "/admin/refunds/{refund_id}/complete",
 		Summary: "Record the EFT of an approved refund",
 		Description: "Only an approved refund (409 payments.invalid_state); the receipt (a refund_receipt upload) and the " +
@@ -214,7 +227,7 @@ type RefundDTO struct {
 	Currency        string     `json:"currency" enum:"TRY"`
 	Reason          string     `json:"reason" enum:"event_cancelled,offering_cancelled,not_fulfilled,duplicate_payment,overpayment,goodwill,other"`
 	ReasonNote      string     `json:"reason_note,omitempty"`
-	Status          string     `json:"status" enum:"requested,approved,processing,completed,failed,rejected"`
+	Status          string     `json:"status" enum:"requested,approved,processing,completed,failed,rejected,cancelled"`
 	Method          string     `json:"method" enum:"bank_eft,iyzico"`
 	TargetIBAN      string     `json:"target_iban,omitempty"`
 	RequestedBy     string     `json:"requested_by" format:"uuid"`
@@ -227,6 +240,10 @@ type RefundDTO struct {
 	BankReference   string     `json:"bank_reference,omitempty"`
 	ReceiptFileID   string     `json:"receipt_file_id,omitempty" format:"uuid"`
 	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+	ClosedBy        string     `json:"closed_by,omitempty" format:"uuid"`
+	ClosedAt        *time.Time `json:"closed_at,omitempty"`
+	CancelReason    string     `json:"cancel_reason,omitempty"`
+	FailureReason   string     `json:"failure_reason,omitempty"`
 }
 
 func refundDTO(r Refund) RefundDTO {
@@ -236,7 +253,8 @@ func refundDTO(r Refund) RefundDTO {
 		Method: r.Method, TargetIBAN: str(r.TargetIBAN), RequestedBy: r.RequestedBy.String(), RequestedAt: r.CreatedAt.UTC(),
 		ApprovedBy: idStr(r.ApprovedBy), ApprovedAt: utc(r.ApprovedAt), RejectedBy: idStr(r.RejectedBy), RejectedAt: utc(r.RejectedAt),
 		RejectionReason: str(r.RejectionReason), BankReference: str(r.BankReference), ReceiptFileID: idStr(r.ReceiptFileID),
-		CompletedAt: utc(r.CompletedAt),
+		CompletedAt: utc(r.CompletedAt), ClosedBy: idStr(r.ClosedBy), ClosedAt: utc(r.ClosedAt),
+		CancelReason: str(r.CancelReason), FailureReason: str(r.FailureReason),
 	}
 }
 
@@ -248,7 +266,7 @@ type RefundList struct {
 
 type listRefundsInput struct {
 	page.Params
-	Status    string `query:"status" enum:"requested,approved,processing,completed,failed,rejected"`
+	Status    string `query:"status" enum:"requested,approved,processing,completed,failed,rejected,cancelled"`
 	OrderID   string `query:"order_id" maxLength:"36" doc:"One order's refunds"`
 	PaymentID string `query:"payment_id" maxLength:"36" doc:"One payment's refunds"`
 }
@@ -475,4 +493,46 @@ func encodeTimeCursor(next *TimeCursor, fp string) string {
 		return ""
 	}
 	return page.Next(sortNewest, fp, page.TimeVal(next.CreatedAt), page.UUIDVal(next.ID))
+}
+
+type cancelRefundInput struct {
+	idempotency.OptionalHeader
+	RefundPath
+	Body struct {
+		CancelReason string             `json:"cancel_reason" minLength:"1" maxLength:"500" doc:"Audited; no personal data"`
+		Reauth       *consent.ReauthDTO `json:"reauth,omitempty"`
+	}
+}
+
+func (h handler) cancelRefund(ctx context.Context, in *cancelRefundInput) (*refundOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	r, err := h.svc.CloseRefund(ctx, a, parseID(in.RefundID), false, in.Body.CancelReason, proofOf(in.Body.Reauth))
+	if err != nil {
+		return nil, err
+	}
+	return &refundOutput{Body: refundDTO(r)}, nil
+}
+
+type failRefundInput struct {
+	idempotency.OptionalHeader
+	RefundPath
+	Body struct {
+		FailureReason string             `json:"failure_reason" minLength:"1" maxLength:"500" doc:"Audited; no personal data"`
+		Reauth        *consent.ReauthDTO `json:"reauth,omitempty"`
+	}
+}
+
+func (h handler) markRefundFailed(ctx context.Context, in *failRefundInput) (*refundOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	r, err := h.svc.CloseRefund(ctx, a, parseID(in.RefundID), true, in.Body.FailureReason, proofOf(in.Body.Reauth))
+	if err != nil {
+		return nil, err
+	}
+	return &refundOutput{Body: refundDTO(r)}, nil
 }

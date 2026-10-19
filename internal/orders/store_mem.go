@@ -328,7 +328,7 @@ func (m *MemStore) WindowsElapsed(_ context.Context, now time.Time, limit int) (
 	defer m.mu.Unlock()
 	var out []Line
 	for _, l := range m.lines {
-		if l.FulfillmentStatus == FulfillMarked && l.DisputeWindowEndsAt != nil && !l.DisputeWindowEndsAt.After(now) {
+		if l.FulfillmentStatus == FulfillMarked && l.DisputeWindowEndsAt != nil && !l.DisputeWindowEndsAt.After(now) && !fullyRefundedService(m.orders[l.OrderID], l) {
 			out = append(out, cloneLine(l))
 		}
 	}
@@ -386,7 +386,7 @@ func sellerOpen(o Order, l Line) bool {
 	case FulfillPending, FulfillMarked, FulfillDisputed, FulfillNotApplicable:
 		return true
 	case FulfillFulfilled:
-		return l.PayeeID != nil && l.PayoutID == nil && l.RefundedAmount == 0 && !o.DirectToPayee()
+		return l.PayeeID != nil && l.PayoutID == nil && l.RefundedAmount < l.PayableAmount && !o.DirectToPayee()
 	case FulfillCancelled:
 		return o.Status.PaidState() && o.Refundable(l) > 0
 	}
@@ -427,7 +427,7 @@ func (m *MemStore) PayableLines(_ context.Context, payeeID uuid.UUID, asOf time.
 	for _, l := range m.lines {
 		o := m.orders[l.OrderID]
 		if l.PayeeID == nil || *l.PayeeID != payeeID || l.FulfillmentStatus != FulfillFulfilled || l.PayoutID != nil ||
-			l.RefundedAmount != 0 || l.FulfilledAt == nil || !slices.Contains(payableStatuses, o.Status) || o.DirectToPayee() {
+			l.RefundedAmount >= l.PayableAmount || l.FulfilledAt == nil || !slices.Contains(payableStatuses, o.Status) || o.DirectToPayee() {
 			continue
 		}
 		if l.FulfilledAt.AddDate(0, 0, int(l.PayoutHoldDays)).After(asOf) {

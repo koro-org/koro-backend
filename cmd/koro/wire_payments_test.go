@@ -47,8 +47,10 @@ func TestWire_Payments(t *testing.T) {
 			t.Errorf("%s has no %s subscription", topic, name)
 		}
 	}
-	if !slices.ContainsFunc(c.infra.jobs.Tasks(), func(q queue.Task) bool { return q.Name == payments.NotifyAccountChangedTaskName }) {
-		t.Errorf("task %s is not registered", payments.NotifyAccountChangedTaskName)
+	for _, name := range []string{payments.NotifyAccountChangedTaskName, payments.NotifyRefundRequestedTaskName} {
+		if !slices.ContainsFunc(c.infra.jobs.Tasks(), func(q queue.Task) bool { return q.Name == name }) {
+			t.Errorf("task %s is not registered", name)
+		}
 	}
 	i := slices.IndexFunc(c.infra.jobs.Jobs(), func(j queue.Job) bool { return j.Name == payments.DigestJobName })
 	if i < 0 {

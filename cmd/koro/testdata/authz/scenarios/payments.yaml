@@ -118,3 +118,29 @@ scenarios:
     steps:
       - { persona: finance_admin_2, operation: adminRejectRefund, expect: 200 }
       - { persona: finance_admin, operation: adminApproveRefund, expect: 409, code: payments.invalid_state }
+
+  receivable_collection_four_eyes:
+    config: { orders_seed: true }
+    note: An existing receipt is claimed once; another finance admin with reauthentication approves the cash and debt entry.
+    steps:
+      - { persona: finance_admin, operation: adminCreateReceivableCollection, expect: 201, save: { new_collection: collection_id } }
+      - { persona: finance_admin, operation: adminApproveReceivableCollection, path_params: { collection_id: new_collection }, expect: 403, code: authz.four_eyes_violation }
+      - { persona: finance_admin_2, operation: adminApproveReceivableCollection, path_params: { collection_id: new_collection }, body: bodies/payments/approve_refund_no_reauth.json, expect: 403, code: identity.reauth_required }
+      - { persona: finance_admin_2, operation: adminApproveReceivableCollection, path_params: { collection_id: new_collection }, expect: 200 }
+      - { persona: finance_admin_2, operation: adminApproveReceivableCollection, path_params: { collection_id: new_collection }, expect: 409, code: payments.invalid_state }
+      - { persona: finance_admin, operation: adminCreateReceivableCollection, expect: 409, code: payments.invalid_state }
+  refund_closure_four_eyes:
+    config: { orders_seed: true }
+    note: Approved EFT closure keeps its approval, has a different finance eye and reauthentication, and releases the unused refund limit.
+    steps:
+      - { persona: finance_admin_2, operation: adminCancelRefund, expect: 403, code: authz.four_eyes_violation }
+      - { persona: finance_admin, operation: adminCancelRefund, expect: 200 }
+      - { persona: finance_admin, operation: adminCompleteRefund, expect: 409, code: payments.invalid_state }
+      - { persona: finance_admin, operation: adminMarkRefundFailed, expect: 409, code: payments.invalid_state }
+  refund_failed_four_eyes:
+    config: { orders_seed: true }
+    note: A failed EFT is closed before completion; requester never marks it failed.
+    steps:
+      - { persona: finance_admin_2, operation: adminMarkRefundFailed, expect: 403, code: authz.four_eyes_violation }
+      - { persona: finance_admin, operation: adminMarkRefundFailed, expect: 200 }
+      - { persona: finance_admin, operation: adminCompleteRefund, expect: 409, code: payments.invalid_state }

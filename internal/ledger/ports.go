@@ -23,7 +23,7 @@ import (
 // orders.Orders; every call joins the caller's transaction.
 type Orders interface {
 	// PayableLines returns the payee's lines a payout may take as of asOf
-	// (paid, fulfilled, payout hold elapsed, not refunded, not paid out;
+	// (paid, fulfilled, payout hold elapsed, with a positive seller share after refunds, not paid out;
 	// never a line of a direct-to-payee order, model C). Lines already in
 	// a live payout are the ledger's to leave out.
 	PayableLines(ctx context.Context, payeeID uuid.UUID, asOf time.Time) ([]orders.PayableLine, error)

@@ -269,8 +269,10 @@ func (s gormStore) DueToExpire(ctx context.Context, now time.Time, limit int) ([
 // cross-org: the dispute window job of every line.
 func (s gormStore) WindowsElapsed(ctx context.Context, now time.Time, limit int) ([]Line, error) {
 	var rows []Line
-	err := db.Conn(ctx, s.orm).Where("fulfillment_status = 'marked' AND dispute_window_ends_at <= ?", now).
-		Order("dispute_window_ends_at, id").Limit(limit).Find(&rows).Error
+	err := db.Conn(ctx, s.orm).Raw(`SELECT l.* FROM order_lines l JOIN orders o ON o.id = l.order_id
+        WHERE l.fulfillment_status = 'marked' AND l.dispute_window_ends_at <= ?
+        AND (o.collection_method = 'direct_to_payee' OR l.refunded_amount = 0 OR l.refunded_amount < l.payable_amount)
+        ORDER BY l.dispute_window_ends_at, l.id LIMIT ?`, now, limit).Scan(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("orders: elapsed dispute windows: %w", err)
 	}
@@ -325,7 +327,7 @@ func (s gormStore) HasOpenCommerce(ctx context.Context, orgID uuid.UUID) (bool, 
 		  SELECT 1 FROM order_lines l JOIN orders o ON o.id = l.order_id
 		   WHERE l.seller_org_id = @org AND o.status NOT IN ('cancelled', 'expired', 'refunded')
 		     AND (l.fulfillment_status IN ('pending', 'marked', 'disputed', 'not_applicable')
-		          OR (l.fulfillment_status = 'fulfilled' AND l.payee_id IS NOT NULL AND l.payout_id IS NULL AND l.refunded_amount = 0
+		          OR (l.fulfillment_status = 'fulfilled' AND l.payee_id IS NOT NULL AND l.payout_id IS NULL AND l.refunded_amount < l.payable_amount
 		              AND o.collection_method <> 'direct_to_payee')
 		          OR (l.fulfillment_status = 'cancelled' AND o.paid_at IS NOT NULL AND l.refunded_amount < `+koroHeldSQL+`)))`,
 		map[string]any{"org": orgID}).Scan(&open).Error
@@ -344,7 +346,7 @@ const payableStatusSQL = `('paid', 'in_fulfilment', 'completed', 'disputed', 'pa
 func (s gormStore) PayableLines(ctx context.Context, payeeID uuid.UUID, asOf time.Time) ([]Line, error) {
 	var rows []Line
 	err := db.Conn(ctx, s.orm).Raw(`SELECT l.* FROM order_lines l JOIN orders o ON o.id = l.order_id
-		WHERE l.payee_id = @payee AND l.fulfillment_status = 'fulfilled' AND l.payout_id IS NULL AND l.refunded_amount = 0
+		WHERE l.payee_id = @payee AND l.fulfillment_status = 'fulfilled' AND l.payout_id IS NULL AND l.refunded_amount < l.payable_amount
 		  AND l.fulfilled_at + make_interval(days => l.payout_hold_days) <= @as_of
 		  AND o.status IN `+payableStatusSQL+` AND o.collection_method <> 'direct_to_payee'
 		ORDER BY l.fulfilled_at, l.id`, map[string]any{"payee": payeeID, "as_of": asOf}).Scan(&rows).Error

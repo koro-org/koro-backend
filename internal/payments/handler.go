@@ -148,6 +148,7 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.PaymentsTransferMatch), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyRequired}, h.confirmDirect)
 
 	registerRefunds(api, h)
+	registerCollections(api, h)
 }
 
 // reg registers one payments operation with its Koro metadata.
@@ -369,7 +370,7 @@ type IncomingTransferDTO struct {
 	Description         string             `json:"description"`
 	BankReference       string             `json:"bank_reference"`
 	ExtractedOrderNo    string             `json:"extracted_order_no,omitempty" doc:"The reference code found in the description"`
-	Status              string             `json:"status" enum:"unmatched,matched,ignored,return_requested,return_approved,returned"`
+	Status              string             `json:"status" enum:"unmatched,matched,ignored,return_requested,return_approved,returned,collection_requested,collected"`
 	MatchedOrderID      string             `json:"matched_order_id,omitempty" format:"uuid"`
 	MatchedBy           string             `json:"matched_by,omitempty" format:"uuid"`
 	MatchedAt           *time.Time         `json:"matched_at,omitempty"`
@@ -426,7 +427,7 @@ const sortTransfers = "-value_date"
 
 type listTransfersInput struct {
 	page.Params
-	Status        string `query:"status" enum:"unmatched,matched,ignored,return_requested,return_approved,returned"`
+	Status        string `query:"status" enum:"unmatched,matched,ignored,return_requested,return_approved,returned,collection_requested,collected"`
 	ValueDateFrom string `query:"value_date_from" maxLength:"10" doc:"YYYY-MM-DD (inclusive)"`
 	ValueDateTo   string `query:"value_date_to" maxLength:"10" doc:"YYYY-MM-DD (inclusive)"`
 	Q             string `query:"q" maxLength:"100" doc:"Part of the description, the sender's name or the bank reference; or a reference code"`

@@ -422,13 +422,14 @@ func (s gormStore) UpdateRefund(ctx context.Context, next Refund, from RefundSta
 	err := db.Conn(ctx, s.orm).Raw(`UPDATE refunds SET
 		status = @status, approved_by = @approved_by, approved_at = @approved_at, rejected_by = @rejected_by,
 		rejected_at = @rejected_at, rejection_reason = @rejection_reason, bank_reference = @bank_reference,
-		receipt_file_id = @receipt_file_id, failure_reason = @failure_reason, completed_at = @completed_at
+		receipt_file_id = @receipt_file_id, failure_reason = @failure_reason, completed_at = @completed_at, closed_by = @closed_by, closed_at = @closed_at, cancel_reason = @cancel_reason
 		WHERE id = @id AND status = @from
 		RETURNING *`, map[string]any{
 		"id": next.ID, "from": string(from), "status": string(next.Status), "approved_by": next.ApprovedBy,
 		"approved_at": next.ApprovedAt, "rejected_by": next.RejectedBy, "rejected_at": next.RejectedAt,
 		"rejection_reason": next.RejectionReason, "bank_reference": next.BankReference, "receipt_file_id": next.ReceiptFileID,
 		"failure_reason": next.FailureReason, "completed_at": next.CompletedAt,
+		"closed_by": next.ClosedBy, "closed_at": next.ClosedAt, "cancel_reason": next.CancelReason,
 	}).Scan(&rows).Error
 	if err != nil {
 		return Refund{}, fmt.Errorf("payments: update refund: %w", constraints.Translate(err))
@@ -447,7 +448,7 @@ func (s gormStore) UpdateRefund(ctx context.Context, next Refund, from RefundSta
 // cross-org: a user's staff references (KVKK export).
 func (s gormStore) RefundsOfUser(ctx context.Context, userID uuid.UUID) ([]Refund, error) {
 	var out []Refund
-	err := db.Conn(ctx, s.orm).Where("requested_by = @u OR approved_by = @u OR rejected_by = @u", map[string]any{"u": userID}).
+	err := db.Conn(ctx, s.orm).Where("requested_by = @u OR approved_by = @u OR rejected_by = @u OR closed_by = @u", map[string]any{"u": userID}).
 		Order("id").Find(&out).Error
 	if err != nil {
 		return nil, fmt.Errorf("payments: refunds of user: %w", err)

@@ -27,7 +27,8 @@ const (
 	NotifyUnmatchedTaskName       = "payments.notify_unmatched_transfers"
 	// NotifyAccountChangedTaskName is a plain task (A, queue.AfterCommit):
 	// 01 §6.2 has no topic for a retired or newly default account.
-	NotifyAccountChangedTaskName = "payments.notify_collection_account_changed"
+	NotifyAccountChangedTaskName  = "payments.notify_collection_account_changed"
+	NotifyRefundRequestedTaskName = "payments.notify_refund_requested"
 )
 
 // digest schedule (01 §7: every working day at 09:30 Europe/Istanbul).
@@ -71,7 +72,8 @@ func (m Module) Subscribe(r *outbox.Registry) {
 
 // Tasks returns the plain task handlers of payments for the worker.
 func (m Module) Tasks() []queue.Task {
-	return []queue.Task{{Name: NotifyAccountChangedTaskName, Handle: m.svc.handleAccountChanged}}
+	return []queue.Task{{Name: NotifyAccountChangedTaskName, Handle: m.svc.handleAccountChanged},
+		{Name: NotifyRefundRequestedTaskName, Handle: m.svc.handleRefundRequested}}
 }
 
 // digestJob is payments.unmatched_digest (01 §7): the unmatched transfers
@@ -365,4 +367,47 @@ func (s *service) contact(ctx context.Context, id uuid.UUID) (identity.UserConta
 		return identity.UserContact{}, false, fmt.Errorf("payments: notice contact: %w", err)
 	}
 	return c, c.Email != "", nil
+}
+
+type refundNotice struct {
+	RefundID uuid.UUID `json:"refund_id"`
+}
+
+func (s *service) notifyRefundRequested(ctx context.Context, id uuid.UUID) {
+	s.d.Queue.AfterCommit(ctx, NotifyRefundRequestedTaskName, refundNotice{RefundID: id}, NotifyRefundRequestedTaskName+":"+id.String())
+}
+
+func (s *service) handleRefundRequested(ctx context.Context, raw []byte) error {
+	var n refundNotice
+	if err := json.Unmarshal(raw, &n); err != nil {
+		return queue.Permanent(err)
+	}
+	if n.RefundID == uuid.Nil() {
+		return queue.Permanent(errors.New("payments: refund notice requires refund_id"))
+	}
+	r, err := s.d.Store.GetRefund(ctx, n.RefundID, false)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if r.Status != RefundStatusRequested {
+		return nil
+	}
+	if s.d.Staff == nil {
+		return errors.New("payments: finance staff is not wired")
+	}
+	staff, err := s.d.Staff.FinanceAdmins(ctx)
+	if err != nil {
+		return err
+	}
+	recipients := make([]uuid.UUID, 0, len(staff))
+	for _, id := range staff {
+		if id != r.RequestedBy && !slices.Contains(recipients, id) {
+			recipients = append(recipients, id)
+		}
+	}
+	return s.notifyInApp(ctx, "payments.refund_requested", r.ID.String(), recipients,
+		"/admin/refunds/"+r.ID.String(), map[string]any{"refund_id": r.ID.String()}, nil)
 }

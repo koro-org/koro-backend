@@ -440,6 +440,7 @@ func (s *service) createRefund(ctx context.Context, a authz.Actor, d refundDraft
 	if err := s.d.Audit.Log(ctx, refundAudit(a, authz.PaymentsRefundCreate, r, d.Note, map[string]any{"via": "api"})); err != nil {
 		return uuid.Nil(), err
 	}
+	s.notifyRefundRequested(ctx, r.ID)
 	s.logInfo(ctx, "refund requested", slog.String("refund_id", r.ID.String()), slog.String("payment_id", p.ID.String()),
 		slog.Int64("amount", r.Amount))
 	return r.ID, nil
@@ -719,8 +720,8 @@ func (s *service) complete(ctx context.Context, a authz.Actor, id uuid.UUID, ref
 		return RefundResult{}, err
 	}
 	if shares.payoutLine != nil {
-		// Again under the payee's lock (Post took it for the seller part):
-		// a payout created after the first check committed before it.
+		// Defensive recheck under the payee lock held since applyToOrder;
+		// payout creation uses the same lock before reserving its lines.
 		if _, err := s.inOpenPayout(ctx, *shares.payoutLine); err != nil {
 			return RefundResult{}, err
 		}
@@ -772,6 +773,14 @@ func (s *service) applyToOrder(ctx context.Context, r Refund, model ledger.Model
 	before, err := s.d.Orders.GetLine(ctx, *r.OrderLineID)
 	if err != nil {
 		return refundShares{}, err
+	}
+	if model == ledger.ModelA && before.PayeeID != nil {
+		if s.d.LedgerLines == nil {
+			return refundShares{}, ErrUnavailable
+		}
+		if err := s.d.LedgerLines.LockPayees(ctx, []uuid.UUID{*before.PayeeID}); err != nil {
+			return refundShares{}, err
+		}
 	}
 	if _, err := s.inOpenPayout(ctx, before); err != nil {
 		return refundShares{}, err

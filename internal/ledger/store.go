@@ -14,6 +14,8 @@ import (
 // every method is cross-org. Writes run in the transaction carried by ctx
 // (the caller's, 01 §6.3); InsertTxn must be called inside one.
 type Store interface {
+	LineReceivable(ctx context.Context, lineID uuid.UUID) (int64, error)
+	PayeeReceivable(ctx context.Context, payeeID uuid.UUID) (int64, error)
 	// InsertTxn writes the header and all its entries in one go (06 H-56,
 	// T-226: there is no way to append entries to a stored transaction).
 	// When (kind, ref_type, ref_id) already exists it writes nothing and

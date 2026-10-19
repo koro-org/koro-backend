@@ -104,3 +104,5 @@ payouts                     policy:financial_records
 payout_items                policy:financial_records
 invoices                    policy:financial_records
 invoice_lines               policy:financial_records
+
+receivable_collections     policy:financial_records

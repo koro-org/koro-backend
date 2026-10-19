@@ -14,6 +14,7 @@ import (
 // targeted (06 H-56: no Save over the frozen columns) and guarded by the
 // row's current status.
 type Store interface {
+	CollectionStore
 	// InsertAccount writes a new collection account (pending_approval).
 	InsertAccount(ctx context.Context, c CollectionAccount) (CollectionAccount, error)
 	// GetAccount returns an account (FOR UPDATE when lock) or ErrNotFound.

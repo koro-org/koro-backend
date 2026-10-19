@@ -10,10 +10,10 @@ import (
 
 // retainedReason explains why Erase keeps what it finds (02 §20: transfers
 // and payments are financial records, "silinmez; süre sonunda hard delete").
-const retainedReason = "incoming bank transfers, payments and refunds are financial records kept for 10 years " +
+const retainedReason = "incoming bank transfers, payments, refunds and receivable collections are financial records kept for 10 years " +
 	"(financial_records; tax and commercial law): they are neither deleted nor anonymised on account erasure; the staff " +
 	"references (entered_by, matched_by, return_requested_by, return_approved_by, captured_by, requested_by, approved_by, " +
-	"rejected_by) stay as references to the anonymised account and the rows are destroyed when the retention period ends"
+	"rejected_by, closed_by) stay as references to the anonymised account and the rows are destroyed when the retention period ends"
 
 // privacyProvider is the KVKK provider of payments (01 §3.3). The user
 // references of payments are staff actions: who recorded, matched or
@@ -45,8 +45,25 @@ func (p privacyProvider) Export(ctx context.Context, userID uuid.UUID) (privacy.
 	if err != nil {
 		return privacy.ExportSection{}, err
 	}
-	out := privacy.ExportSection{Module: "payments", Items: make([]map[string]any, 0, len(ts)+len(ps)+len(rs))}
+	cs, err := p.s.d.Store.CollectionsOfUser(ctx, userID)
+	if err != nil {
+		return privacy.ExportSection{}, err
+	}
+	out := privacy.ExportSection{Module: "payments", Items: make([]map[string]any, 0, len(ts)+len(ps)+len(rs)+len(cs))}
 	is := func(id *uuid.UUID) bool { return id != nil && *id == userID }
+	for _, c := range cs {
+		roles := []string{}
+		if c.RequestedBy == userID {
+			roles = append(roles, "requested")
+		}
+		if is(c.ApprovedBy) {
+			roles = append(roles, "approved")
+		}
+		if is(c.RejectedBy) {
+			roles = append(roles, "rejected")
+		}
+		out.Items = append(out.Items, map[string]any{"roles": roles, "record": "receivable_collection", "collection_id": c.ID.String(), "status": string(c.Status), "amount": c.Amount, "currency": Currency, "requested_at": c.CreatedAt.UTC().Format(time.RFC3339)})
+	}
 	for _, t := range ts {
 		var roles []string
 		if t.EnteredBy == userID {
@@ -83,6 +100,9 @@ func (p privacyProvider) Export(ctx context.Context, userID uuid.UUID) (privacy.
 		if is(r.ApprovedBy) {
 			roles = append(roles, "approved")
 		}
+		if is(r.ClosedBy) {
+			roles = append(roles, "closed")
+		}
 		if is(r.RejectedBy) {
 			roles = append(roles, "rejected")
 		}
@@ -110,7 +130,11 @@ func (p privacyProvider) Erase(ctx context.Context, userID uuid.UUID) (privacy.E
 	if err != nil {
 		return privacy.EraseResult{}, err
 	}
-	res := privacy.EraseResult{Module: "payments", Retained: len(ts) + len(ps) + len(rs)}
+	cs, err := p.s.d.Store.CollectionsOfUser(ctx, userID)
+	if err != nil {
+		return privacy.EraseResult{}, err
+	}
+	res := privacy.EraseResult{Module: "payments", Retained: len(ts) + len(ps) + len(rs) + len(cs)}
 	if res.Retained > 0 {
 		res.RetainedReason = retainedReason
 	}

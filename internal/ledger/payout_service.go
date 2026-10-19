@@ -184,7 +184,11 @@ func (s *service) GetPayeeBalance(ctx context.Context, a authz.Actor, orgID, pay
 	if err != nil {
 		return Balance{}, err
 	}
-	return Balance{PayeeID: p.ID, Payable: bal, PendingPayout: amts.Pending, PaidOut: amts.PaidOut}, nil
+	receivable, err := s.d.Store.PayeeReceivable(ctx, p.ID)
+	if err != nil {
+		return Balance{}, err
+	}
+	return Balance{PayeeID: p.ID, Payable: bal, PendingPayout: amts.Pending, PaidOut: amts.PaidOut, Receivable: receivable}, nil
 }
 
 // ListOrgPayouts implements PayoutService.
@@ -260,8 +264,8 @@ func (s *service) AdminListPayables(ctx context.Context, a authz.Actor, q Payabl
 	return out, nil
 }
 
-// payableLines returns the payee's payable lines with money (seller net >
-// 0) that no live payout holds.
+// payableLines returns the payee's unheld lines with a positive seller
+// remainder after completed refunds. Frozen order snapshots stay unchanged.
 func (s *service) payableLines(ctx context.Context, payeeID uuid.UUID, asOf time.Time) ([]orders.PayableLine, error) {
 	lines, err := s.d.Orders.PayableLines(ctx, payeeID, asOf)
 	if err != nil {
@@ -280,7 +284,17 @@ func (s *service) payableLines(ctx context.Context, payeeID uuid.UUID, asOf time
 		if _, in := held[l.LineID]; in || l.SellerNetAmount <= 0 || l.PayeeID != payeeID {
 			continue
 		}
-		out = append(out, l)
+		refunded, err := s.d.Store.RefundedShares(ctx, l.LineID)
+		if err != nil {
+			return nil, err
+		}
+		if refunded.Seller < 0 || refunded.Seller > l.SellerNetAmount {
+			return nil, ErrInvalidState
+		}
+		l.SellerNetAmount -= refunded.Seller
+		if l.SellerNetAmount > 0 {
+			out = append(out, l)
+		}
 	}
 	return out, nil
 }

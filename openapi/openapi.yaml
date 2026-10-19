@@ -1484,6 +1484,12 @@ components:
       required:
         - decision
       type: object
+    ApproveCollectionInputBody:
+      additionalProperties: false
+      properties:
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+      type: object
     ApproveInputBody:
       additionalProperties: false
       properties:
@@ -2022,6 +2028,19 @@ components:
           type: string
       required:
         - reason
+      type: object
+    CancelRefundInputBody:
+      additionalProperties: false
+      properties:
+        cancel_reason:
+          description: Audited; no personal data
+          maxLength: 500
+          minLength: 1
+          type: string
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+      required:
+        - cancel_reason
       type: object
     CancelledInvoiceDTO:
       additionalProperties: false
@@ -2774,6 +2793,18 @@ components:
       required:
         - items
       type: object
+    CollectionListOutputBody:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/ReceivableCollectionDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
     CommercePolicyDTO:
       additionalProperties: false
       properties:
@@ -2957,16 +2988,26 @@ components:
           type: string
         bank_reference:
           type: string
+        cancel_reason:
+          type: string
         clawback_amount:
           description: Kuruş claimed back from the payee of a line already paid out (06 H-59)
           format: int64
           type: integer
+        closed_at:
+          format: date-time
+          type: string
+        closed_by:
+          format: uuid
+          type: string
         completed_at:
           format: date-time
           type: string
         currency:
           enum:
             - TRY
+          type: string
+        failure_reason:
           type: string
         ledger_transaction_id:
           description: The refund_completed transaction
@@ -3026,6 +3067,7 @@ components:
             - completed
             - failed
             - rejected
+            - cancelled
           type: string
         target_iban:
           type: string
@@ -3364,6 +3406,19 @@ components:
           type: string
       required:
         - role_in_club
+      type: object
+    CreateCollectionInputBody:
+      additionalProperties: false
+      properties:
+        incoming_transfer_id:
+          format: uuid
+          type: string
+        order_line_id:
+          format: uuid
+          type: string
+      required:
+        - incoming_transfer_id
+        - order_line_id
       type: object
     CreateCommercePolicyInputBody:
       additionalProperties: false
@@ -5295,6 +5350,19 @@ components:
         - faculty_id
         - name
       type: object
+    FailRefundInputBody:
+      additionalProperties: false
+      properties:
+        failure_reason:
+          description: Audited; no personal data
+          maxLength: 500
+          minLength: 1
+          type: string
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+      required:
+        - failure_reason
+      type: object
     FeedOrgDTO:
       additionalProperties: false
       properties:
@@ -5839,6 +5907,8 @@ components:
             - return_requested
             - return_approved
             - returned
+            - collection_requested
+            - collected
           type: string
         transfer_id:
           format: uuid
@@ -5920,6 +5990,8 @@ components:
             - return_requested
             - return_approved
             - returned
+            - collection_requested
+            - collected
           type: string
         suggestions:
           items:
@@ -8619,7 +8691,12 @@ components:
           description: Kuruş in payouts waiting for approval or the transfer
           format: int64
           type: integer
+        receivable_amount:
+          description: Kuruş the payee owes Koro; never offset automatically
+          format: int64
+          type: integer
       required:
+        - receivable_amount
         - payee_id
         - payable_amount
         - pending_payout_amount
@@ -9802,6 +9879,88 @@ components:
           $ref: "#/components/schemas/ReauthDTO"
           description: "Re-authentication proof (03 §6.2): totp_code on an MFA account"
       type: object
+    ReceivableCollectionDTO:
+      additionalProperties: false
+      properties:
+        amount:
+          description: Kuruş; the source transfer's whole amount
+          format: int64
+          type: integer
+        approved_at:
+          format: date-time
+          type: string
+        approved_by:
+          format: uuid
+          type: string
+        bank_reference:
+          type: string
+        collection_account_id:
+          format: uuid
+          type: string
+        collection_id:
+          format: uuid
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        currency:
+          enum:
+            - TRY
+          type: string
+        incoming_transfer_id:
+          format: uuid
+          type: string
+        ledger_transaction_id:
+          format: uuid
+          type: string
+        order_id:
+          format: uuid
+          type: string
+        order_line_id:
+          format: uuid
+          type: string
+        org_id:
+          format: uuid
+          type: string
+        payee_id:
+          format: uuid
+          type: string
+        receipt_file_id:
+          format: uuid
+          type: string
+        rejected_at:
+          format: date-time
+          type: string
+        rejected_by:
+          format: uuid
+          type: string
+        rejection_reason:
+          type: string
+        requested_by:
+          format: uuid
+          type: string
+        status:
+          enum:
+            - requested
+            - collected
+            - rejected
+          type: string
+      required:
+        - collection_id
+        - incoming_transfer_id
+        - order_line_id
+        - order_id
+        - payee_id
+        - org_id
+        - collection_account_id
+        - amount
+        - currency
+        - bank_reference
+        - receipt_file_id
+        - status
+        - requested_by
+        - created_at
+      type: object
     RecordMineInputBody:
       additionalProperties: false
       properties:
@@ -9855,12 +10014,22 @@ components:
           type: string
         bank_reference:
           type: string
+        cancel_reason:
+          type: string
+        closed_at:
+          format: date-time
+          type: string
+        closed_by:
+          format: uuid
+          type: string
         completed_at:
           format: date-time
           type: string
         currency:
           enum:
             - TRY
+          type: string
+        failure_reason:
           type: string
         method:
           enum:
@@ -9916,6 +10085,7 @@ components:
             - completed
             - failed
             - rejected
+            - cancelled
           type: string
         target_iban:
           type: string
@@ -10287,6 +10457,17 @@ components:
           type: integer
       required:
         - version
+      type: object
+    RejectCollectionInputBody:
+      additionalProperties: false
+      properties:
+        note:
+          description: Audited; no personal data
+          maxLength: 500
+          minLength: 1
+          type: string
+      required:
+        - note
       type: object
     RejectInputBody:
       additionalProperties: false
@@ -14834,6 +15015,8 @@ paths:
               - return_requested
               - return_approved
               - returned
+              - collection_requested
+              - collected
             type: string
         - description: YYYY-MM-DD (inclusive)
           explode: false
@@ -16806,7 +16989,7 @@ paths:
       x-koro-surface: admin
   /api/v1/admin/payables:
     get:
-      description: "Per payee (the one asked for, or every payee the ledger owes money to): the paid, fulfilled lines whose payout hold has elapsed as of as_of (default now), not refunded, not paid out and in no payout yet."
+      description: "Per payee (the one asked for, or every payee the ledger owes money to): the paid, fulfilled lines whose payout hold has elapsed as of as_of (default now), with a positive seller share after refunds, not paid out and in no payout yet."
       operationId: adminListPayables
       parameters:
         - description: Only this payee
@@ -17744,6 +17927,210 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+  /api/v1/admin/receivable-collections:
+    get:
+      operationId: adminListReceivableCollections
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - explode: false
+          in: query
+          name: status
+          schema:
+            enum:
+              - requested
+              - collected
+              - rejected
+            type: string
+        - explode: false
+          in: query
+          name: payee_id
+          schema:
+            maxLength: 36
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollectionListOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List manual receivable collections
+      tags:
+        - payments
+      x-koro-action: payments.receivable.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+    post:
+      description: Claims one whole unmatched incoming transfer with a bank reference and receipt against a paid-out line's outstanding debt. Financial fields come from the transfer and line. A different finance admin approves it. No automatic payout offset.
+      operationId: adminCreateReceivableCollection
+      parameters:
+        - description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCollectionInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReceivableCollectionDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Request collection of a payee receivable
+      tags:
+        - payments
+      x-koro-action: payments.receivable.create
+      x-koro-idempotency: required
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/receivable-collections/{collection_id}/approve:
+    post:
+      description: A different finance admin re-authenticates; the collection, bank receipt and balanced cash/debt ledger entries commit together.
+      operationId: adminApproveReceivableCollection
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Collection ID; an unknown or malformed ID is 404
+          in: path
+          name: collection_id
+          required: true
+          schema:
+            description: Collection ID; an unknown or malformed ID is 404
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApproveCollectionInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReceivableCollectionDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Approve a receivable collection
+      tags:
+        - payments
+      x-koro-action: payments.receivable.approve
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/receivable-collections/{collection_id}/reject:
+    post:
+      description: Only requested collections. Releases the transfer for a corrected request or another finance operation; no ledger money moves.
+      operationId: adminRejectReceivableCollection
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Collection ID; an unknown or malformed ID is 404
+          in: path
+          name: collection_id
+          required: true
+          schema:
+            description: Collection ID; an unknown or malformed ID is 404
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RejectCollectionInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReceivableCollectionDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Reject a receivable collection request
+      tags:
+        - payments
+      x-koro-action: payments.receivable.reject
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
   /api/v1/admin/refunds:
     get:
       description: Newest first; filter by status, order or payment.
@@ -17779,6 +18166,7 @@ paths:
               - completed
               - failed
               - rejected
+              - cancelled
             type: string
         - description: One order's refunds
           explode: false
@@ -17950,6 +18338,57 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+  /api/v1/admin/refunds/{refund_id}/cancel:
+    post:
+      description: Requires another finance admin and re-authentication. Only approved refunds; no ledger money moves.
+      operationId: adminCancelRefund
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Refund ID (an unknown or malformed ID is 404)
+          in: path
+          name: refund_id
+          required: true
+          schema:
+            description: Refund ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelRefundInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Cancel an approved refund before completion
+      tags:
+        - payments
+      x-koro-action: payments.refund.cancel
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
   /api/v1/admin/refunds/{refund_id}/complete:
     post:
       description: "Only an approved refund (409 payments.invalid_state); the receipt (a refund_receipt upload) and the bank reference are required (422). One transaction: the refund completed, the payment's refunded amount, the order (orders.ApplyRefund; not for an overpayment), the ledger (refund_completed) and payment.refunded; any failure leaves the refund approved. Models A2 and B have no ledger template yet (422 ledger.model_not_enabled)."
@@ -17999,6 +18438,57 @@ paths:
       x-koro-action: payments.refund.complete
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/refunds/{refund_id}/mark-failed:
+    post:
+      description: Requires another finance admin and re-authentication. Only approved refunds; completed refunds cannot be reversed here.
+      operationId: adminMarkRefundFailed
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Refund ID (an unknown or malformed ID is 404)
+          in: path
+          name: refund_id
+          required: true
+          schema:
+            description: Refund ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FailRefundInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Record a failed refund before completion
+      tags:
+        - payments
+      x-koro-action: payments.refund.mark_failed
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
       x-koro-surface: admin
   /api/v1/admin/refunds/{refund_id}/reject:
     post:

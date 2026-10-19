@@ -35,3 +35,10 @@ fixtures:
   ref_requested_own: { kind: refund, payment: pay_a, order: ord_a_paid, amount: 10000, reason: overpayment, requested_by: finance_admin }
   ref_approved: { kind: refund, payment: pay_a, order: ord_a_paid, amount: 10000, reason: overpayment, status: approved, requested_by: finance_admin_2, approved_by: finance_admin }
   file_refund_receipt: { kind: file, purpose: refund_receipt, uploaded_by: finance_admin }
+
+  ln_receivable: { kind: collection_line }
+  file_collect_free: { kind: file, purpose: transfer_receipt, uploaded_by: finance_admin }
+  file_collect_pending: { kind: file, purpose: transfer_receipt, uploaded_by: finance_admin_2 }
+  tr_collect_free: { kind: transfer, account: coll_default, amount: 10000, receipt: file_collect_free, entered_by: finance_admin }
+  tr_collect_pending: { kind: transfer, account: coll_default, amount: 10000, receipt: file_collect_pending, entered_by: finance_admin_2 }
+  collection_pending: { kind: collection, transfer: tr_collect_pending, line: ln_receivable, requested_by: finance_admin_2 }

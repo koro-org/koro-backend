@@ -142,3 +142,5 @@ invoice_lines               none      billing       -
 provider_contact_map        none      billing       -
 provider_product_map        none      billing       -
 integration_credentials     none      billing       -
+
+receivable_collections     staff     payments      -

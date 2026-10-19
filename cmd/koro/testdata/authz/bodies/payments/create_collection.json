@@ -1,0 +1,1 @@
+{"incoming_transfer_id":"{{fixture:tr_collect_free}}","order_line_id":"{{fixture:ln_receivable}}"}

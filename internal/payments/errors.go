@@ -16,6 +16,7 @@ import (
 // fills through hooks.collectionAccount), the order's orders.invalid_state
 // and the ledger's refusals (ledger.model_not_enabled, ...).
 var (
+	ErrCollectionExceedsReceivable = problem.New(problem.Conflict, "payments.collection_exceeds_receivable", "The transfer exceeds the unreserved receivable")
 	// ErrTransferAlreadyMatched: the transfer is matched already (04 §1.10);
 	// a second match — another key, a concurrent click — captures nothing.
 	ErrTransferAlreadyMatched = problem.New(problem.Conflict, "payments.transfer_already_matched",
@@ -66,6 +67,11 @@ var (
 // database is the second layer of the same rule); a payment refunded
 // beyond its amount is the refund limit's 422.
 var constraints = db.Constraints{
+	"receivable_collections_transfer_uq":             ErrInvalidState,
+	"receivable_collections_receipt_uq":              ErrInvalidState,
+	"receivable_collections_source_state_chk":        ErrInvalidState,
+	"receivable_collections_limit_chk":               ErrCollectionExceedsReceivable,
+	"receivable_collections_four_eyes_chk":           authz.ErrFourEyes,
 	"collection_accounts_iban_uq":                    ErrIBANInUse,
 	"collection_accounts_iban_chk":                   ErrIBANInvalid,
 	"collection_accounts_default_uq":                 ErrInvalidState,
@@ -77,6 +83,7 @@ var constraints = db.Constraints{
 	"payments_incoming_transfer_id_uq":               ErrTransferAlreadyMatched,
 	"refunds_target_iban_chk":                        ErrIBANInvalid,
 	"refunds_four_eyes_chk":                          authz.ErrFourEyes,
+	"refunds_closure_four_eyes_chk":                  authz.ErrFourEyes,
 	"payments_refunded_limit_chk":                    ErrRefundExceedsPaid,
 }
 

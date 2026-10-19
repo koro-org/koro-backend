@@ -143,6 +143,9 @@ func (s gormStore) withEntries(ctx context.Context, hs []Transaction) ([]Posted,
 //
 // cross-org: payees are global IDs here; the lock guards ledger rows only.
 func (s gormStore) LockPayees(ctx context.Context, payeeIDs []uuid.UUID) error {
+	if !db.InTx(ctx) {
+		return errNoTx
+	}
 	conn := db.Conn(ctx, s.orm)
 	for _, id := range payeeIDs {
 		if err := conn.Exec(`SELECT pg_advisory_xact_lock(hashtextextended( ?, 0))`, payeeLockKey+id.String()).Error; err != nil {
@@ -364,4 +367,20 @@ func (s gormStore) PurgeFinancialRecords(ctx context.Context, cutoff time.Time, 
 		return 0, fmt.Errorf("ledger: purge financial records: %w", db.Translate(err))
 	}
 	return int(n), nil
+}
+
+// LineReceivable implements Store.
+// cross-org: one immutable order line resolved by the caller.
+func (s gormStore) LineReceivable(ctx context.Context, id uuid.UUID) (int64, error) {
+	var amount int64
+	err := db.Conn(ctx, s.orm).Raw(`SELECT coalesce(sum(amount),0)::bigint FROM ledger_entries WHERE order_line_id = ? AND account_code = 'payee_receivable'`, id).Scan(&amount).Error
+	return amount, err
+}
+
+// PayeeReceivable implements Store using the ledger-owned payout items.
+// cross-org: authorization scopes the payee before reading its balance.
+func (s gormStore) PayeeReceivable(ctx context.Context, id uuid.UUID) (int64, error) {
+	var amount int64
+	err := db.Conn(ctx, s.orm).Raw(`SELECT coalesce(sum(e.amount),0)::bigint FROM ledger_entries e JOIN payout_items i ON i.order_line_id = e.order_line_id WHERE i.payee_id = ? AND e.account_code = 'payee_receivable'`, id).Scan(&amount).Error
+	return amount, err
 }

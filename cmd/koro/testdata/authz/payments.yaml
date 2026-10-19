@@ -581,3 +581,85 @@ operations:
           "@other_staff": 403
           platform_admin: 403
           finance_admin: 422
+
+  adminCancelRefund:
+    method: POST
+    path: /api/v1/admin/refunds/{refund_id}/cancel
+    action: payments.refund.cancel
+    config: { orders_seed: true }
+    body: bodies/payments/cancel_refund.json
+    path_params: { refund_id: ref_approved }
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 200
+
+  adminMarkRefundFailed:
+    method: POST
+    path: /api/v1/admin/refunds/{refund_id}/mark-failed
+    action: payments.refund.mark_failed
+    config: { orders_seed: true }
+    body: bodies/payments/fail_refund.json
+    path_params: { refund_id: ref_approved }
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 200
+
+  adminListReceivableCollections:
+    method: GET
+    path: /api/v1/admin/receivable-collections
+    action: payments.receivable.list
+    config: { orders_seed: true }
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+
+  adminCreateReceivableCollection:
+    method: POST
+    path: /api/v1/admin/receivable-collections
+    action: payments.receivable.create
+    config: { orders_seed: true }
+    body: bodies/payments/create_collection.json
+    idempotency: required
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 201
+
+  adminApproveReceivableCollection:
+    method: POST
+    path: /api/v1/admin/receivable-collections/{collection_id}/approve
+    action: payments.receivable.approve
+    config: { orders_seed: true }
+    body: bodies/payments/reauth.json
+    path_params: { collection_id: collection_pending }
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 200
+
+  adminRejectReceivableCollection:
+    method: POST
+    path: /api/v1/admin/receivable-collections/{collection_id}/reject
+    action: payments.receivable.reject
+    config: { orders_seed: true }
+    body: bodies/payments/reject_collection.json
+    path_params: { collection_id: collection_pending }
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 200

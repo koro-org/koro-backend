@@ -78,6 +78,11 @@ type Poster interface {
 // 06 H-59, BE-067). It is ledger.Module; every read joins the caller's
 // transaction.
 type LedgerLines interface {
+	// LineReceivable is the net outstanding clawback, including collections.
+	LineReceivable(ctx context.Context, lineID uuid.UUID) (int64, error)
+	// LockPayees serialises refunds with payout creation before order/line row locks.
+	// sync-write: ledger.LedgerLines.LockPayees
+	LockPayees(ctx context.Context, payeeIDs []uuid.UUID) error
 	// LinesInPayouts returns which of the lines are items of a live payout
 	// (pending_approval, approved or paid), with the payout's ID.
 	LinesInPayouts(ctx context.Context, lineIDs []uuid.UUID) (map[uuid.UUID]uuid.UUID, error)

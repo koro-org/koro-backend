@@ -27,11 +27,14 @@ type eyesKey struct {
 // return requested_by are not in the 03 §3.5 Attrs table yet: the service
 // must still pass them (open question recorded by BE-004).
 var fourEyesRules = map[Action][]eyesKey{
+	PaymentsReceivableApprove:        {{AttrRequestedBy, true}},
 	PartiesBankAccountVerify:         {{AttrSubmittedBy, true}},
 	PartiesBankAccountApprove:        {{AttrSubmittedBy, true}, {AttrVerifiedBy, false}},
 	PaymentsCollectionAccountApprove: {{AttrCreatedBy, true}},
 	LedgerPayoutApprove:              {{AttrCreatedBy, true}},
 	PaymentsRefundApprove:            {{AttrRequestedBy, true}},
+	PaymentsRefundCancel:             {{AttrRequestedBy, true}},
+	PaymentsRefundMarkFailed:         {{AttrRequestedBy, true}},
 	BillingInvoiceVerify:             {{AttrUploadedBy, true}},
 	CatalogOfferingDecide:            {{AttrCreatedBy, true}},
 	KvkkDsrApprove:                   {{AttrFirstApprover, false}},

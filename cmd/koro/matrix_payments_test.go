@@ -11,6 +11,7 @@ import (
 
 	"koro/internal/authz/authztest"
 	"koro/internal/files"
+	"koro/internal/ledger"
 	"koro/internal/orders"
 	"koro/internal/payments"
 	"koro/internal/platform/civil"
@@ -44,7 +45,7 @@ func (w *paymentsWiring) matrixFixtures(fx *matrixFixtures) error {
 	if w.late == nil {
 		return errors.New("payments wiring was not built")
 	}
-	rank := map[string]int{"file": 0, "account": 0, "transfer": 1, "order_c": 2, "payment": 2, "refund": 3}
+	rank := map[string]int{"file": 0, "account": 0, "transfer": 1, "order_c": 2, "payment": 2, "refund": 3, "collection_line": 2, "collection": 4}
 	all := fx.Of("payments")
 	slices.SortStableFunc(all, func(a, b fixture) int { return cmp.Compare(rank[a.Kind], rank[b.Kind]) })
 	for _, f := range all {
@@ -64,6 +65,10 @@ func (w *paymentsWiring) matrixFixtures(fx *matrixFixtures) error {
 			ferr = w.matrixOrderC(ctx, fx, f, id)
 		case "payment":
 			ferr = matrixPayment(ctx, fx, mem, f, id)
+		case "collection_line":
+			ferr = w.matrixCollectionLine(ctx, fx, f, id)
+		case "collection":
+			ferr = w.matrixCollection(ctx, fx, mem, f, id)
 		case "refund":
 			ferr = matrixRefund(fx, mem, f, id)
 		default:
@@ -131,6 +136,13 @@ func matrixTransfer(ctx context.Context, fx *matrixFixtures, mem *payments.MemSt
 	tr := payments.IncomingTransfer{ID: id, CollectionAccountID: acct, ValueDate: matrixValueDate, Amount: int64(amount),
 		Currency: payments.Currency, Description: "Matris " + f.Name, BankReference: "MATRIX-" + f.Name,
 		Status: payments.TransferUnmatched, EntryMethod: payments.EntryManual, EnteredBy: by, CreatedAt: t}
+	if _, ok := f.Fields["receipt"]; ok {
+		receipt, err := fx.Ref(f, "receipt")
+		if err != nil {
+			return err
+		}
+		tr.ReceiptFileID = &receipt
+	}
 	if v, _ := f.Fields["sender_iban"].(string); v != "" {
 		tr.SenderIBAN = &v
 	}
@@ -285,4 +297,61 @@ func matrixRefund(fx *matrixFixtures, mem *payments.MemStore, f fixture, id uuid
 		r.Status, r.ApprovedBy, r.ApprovedAt = payments.RefundStatusApproved, &a, &t
 	}
 	return mem.SeedRefund(r)
+}
+
+// The source line has a paid payout and an outstanding clawback. No new
+// incoming cash has been posted; only approval may consume its receipt.
+func (w *paymentsWiring) matrixCollectionLine(ctx context.Context, fx *matrixFixtures, f fixture, id uuid.UUID) error {
+	if seed, _ := matrixOrderSeeds.Load(&w.late.orders); seed != true {
+		return nil
+	}
+	mem, ok := w.late.orders.built.(*orders.MemStore)
+	if !ok {
+		return errors.New("collection fixture requires orders mem store")
+	}
+	orderID := authztest.ID(f.Name + "_order")
+	org, party, buyer, seller, payee, payout := authztest.ID("company_a"), authztest.ID("party_buyer_a"), authztest.ID("company_admin"), authztest.ID("club_a"), authztest.ID("payee_club_a"), authztest.ID(f.Name+"_payout")
+	at := matrixOrgTime
+	o := orders.Order{ID: orderID, OrderNo: matrixOrderNo(orderID), OrgID: org, OrgKind: "company", PlacedByUserID: buyer, BuyerPartyID: party, ModelCode: orders.ModelA,
+		CollectionMethod: orders.CollectBankTransfer, Status: orders.StatusCompleted, Currency: "TRY", PayableAmount: 100_000, KoroCollectAmount: 100_000, PaidAmount: 100_000, PaidAt: &at, PlacedAt: at}
+	l := orders.Line{ID: id, OrderID: orderID, OrgID: org, SellerOrgID: seller, PayeeID: &payee, PayoutID: &payout, PaidOutAt: &at, TitleSnapshot: "Synthetic receivable source", Quantity: 1, PayableAmount: 100_000, SellerNetAmount: 90_000, FulfillmentStatus: orders.FulfillFulfilled, FulfilledAt: &at}
+	if err := mem.InsertOrder(ctx, o, []orders.Line{l}); err != nil {
+		return err
+	}
+	_, err := w.late.ledger.svc.Post(ctx, ledger.Txn{Kind: ledger.KindAdjustment, RefType: ledger.RefManual, RefID: authztest.ID(f.Name + "_debt"), OccurredAt: at,
+		Entries: []ledger.Entry{{Account: ledger.AccountPayeeReceivable, Amount: 90_000, OrderLineID: &id}, {Account: ledger.AccountKoroBank, Amount: -90_000, OrderLineID: &id}}})
+	return err
+}
+func (w *paymentsWiring) matrixCollection(ctx context.Context, fx *matrixFixtures, mem *payments.MemStore, f fixture, id uuid.UUID) error {
+	if seed, _ := matrixOrderSeeds.Load(&w.late.orders); seed != true {
+		return nil
+	}
+	transfer, err := fx.Ref(f, "transfer")
+	if err != nil {
+		return err
+	}
+	line, err := fx.Ref(f, "line")
+	if err != nil {
+		return err
+	}
+	by, err := fx.Ref(f, "requested_by")
+	if err != nil {
+		return err
+	}
+	tr, err := mem.GetTransfer(ctx, transfer, false)
+	if err != nil {
+		return err
+	}
+	l, err := w.late.orders.orders.GetLine(ctx, line)
+	if err != nil {
+		return err
+	}
+	c := payments.ReceivableCollection{ID: id, IncomingTransferID: tr.ID, OrderLineID: l.ID, OrderID: l.OrderID, PayeeID: *l.PayeeID, OrgID: l.SellerOrgID,
+		CollectionAccountID: tr.CollectionAccountID, Amount: tr.Amount, BankReference: tr.BankReference, ReceiptFileID: *tr.ReceiptFileID, Status: payments.CollectionRequested, RequestedBy: by, CreatedAt: matrixOrgTime, UpdatedAt: matrixOrgTime}
+	if err := mem.InsertCollection(ctx, c); err != nil {
+		return err
+	}
+	tr.Status = payments.TransferCollectionRequested
+	_, err = mem.UpdateTransfer(ctx, tr, payments.TransferUnmatched)
+	return err
 }

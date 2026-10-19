@@ -45,7 +45,7 @@ func registerPayouts(api huma.API, h handler) {
 		OperationID: "adminListPayables", Method: http.MethodGet, Path: "/admin/payables",
 		Summary: "List the order lines a payout may take",
 		Description: "Per payee (the one asked for, or every payee the ledger owes money to): the paid, fulfilled lines " +
-			"whose payout hold has elapsed as of as_of (default now), not refunded, not paid out and in no payout yet.",
+			"whose payout hold has elapsed as of as_of (default now), with a positive seller share after refunds, not paid out and in no payout yet.",
 	}, op.Meta{Action: string(authz.LedgerPayableList), Surface: op.SurfaceAdmin}, h.payables)
 
 	reg(api, huma.Operation{
@@ -222,6 +222,7 @@ type balanceInput struct {
 
 // PayeeBalanceDTO is the body of getPayeeBalance (04 §2.17).
 type PayeeBalanceDTO struct {
+	ReceivableAmount    int64  `json:"receivable_amount" doc:"Kuruş the payee owes Koro; never offset automatically"`
 	PayeeID             string `json:"payee_id" format:"uuid"`
 	PayableAmount       int64  `json:"payable_amount" doc:"Kuruş Koro owes the payee now (payouts in progress included)"`
 	PendingPayoutAmount int64  `json:"pending_payout_amount" doc:"Kuruş in payouts waiting for approval or the transfer"`
@@ -240,7 +241,7 @@ func (h handler) balance(ctx context.Context, in *balanceInput) (*balanceOutput,
 	if err != nil {
 		return nil, err
 	}
-	return &balanceOutput{Body: PayeeBalanceDTO{PayeeID: b.PayeeID.String(), PayableAmount: b.Payable,
+	return &balanceOutput{Body: PayeeBalanceDTO{PayeeID: b.PayeeID.String(), PayableAmount: b.Payable, ReceivableAmount: b.Receivable,
 		PendingPayoutAmount: b.PendingPayout, PaidOutAmount: b.PaidOut, Currency: Currency}}, nil
 }
 

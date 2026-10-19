@@ -150,7 +150,7 @@ func TestSchema_AuditRootsPurge(t *testing.T) {
 
 // financialTables are the tables 000121's financial_records_purge deletes
 // from (the target of retention_policies financial_records, files aside).
-var financialTables = []string{"orders", "order_lines", "payments", "payment_splits", "refunds", "incoming_bank_transfers",
+var financialTables = []string{"orders", "order_lines", "payments", "payment_splits", "refunds", "receivable_collections", "incoming_bank_transfers",
 	"ledger_transactions", "ledger_entries", "payouts", "payout_items", "invoices", "invoice_lines", "legal_parties",
 	"legal_party_documents", "payees", "payee_bank_accounts"}
 

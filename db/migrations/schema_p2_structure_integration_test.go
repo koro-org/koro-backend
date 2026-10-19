@@ -46,6 +46,7 @@ var p2Grants = map[string]string{
 	"payments":                "SIU",
 	"payment_splits":          "SIU",
 	"refunds":                 "SIU",
+	"receivable_collections":  "SIU",
 	// ledger
 	"ledger_accounts":     "S",
 	"ledger_transactions": "SI",
@@ -187,6 +188,9 @@ func TestSchema_P2SchemaForeignKeys(t *testing.T) {
 		"payout_items_payout_id_payee_id_fkey FOREIGN KEY (payout_id, payee_id) REFERENCES payouts(id, payee_id)",
 		"payouts_bank_account_id_payee_id_fkey FOREIGN KEY (bank_account_id, payee_id) REFERENCES payee_bank_accounts(id, payee_id)",
 		"payouts_payee_id_org_id_fkey FOREIGN KEY (payee_id, org_id) REFERENCES payees(id, org_id)",
+		"receivable_collections_line_order_fkey FOREIGN KEY (order_line_id, order_id) REFERENCES order_lines(id, order_id)",
+		"receivable_collections_line_payee_fkey FOREIGN KEY (order_line_id, payee_id) REFERENCES order_lines(id, payee_id)",
+		"receivable_collections_payee_org_fkey FOREIGN KEY (payee_id, org_id) REFERENCES payees(id, org_id)",
 		"refunds_order_line_id_order_id_fkey FOREIGN KEY (order_line_id, order_id) REFERENCES order_lines(id, order_id)",
 		"refunds_payment_id_order_id_fkey FOREIGN KEY (payment_id, order_id) REFERENCES payments(id, order_id)",
 	}
@@ -208,8 +212,8 @@ func TestSchema_P2SchemaIDColumnsAndTriggers(t *testing.T) {
 	w := newP1aWorld(t)
 	tables := p2TableNames()
 	if n := queryString(t, w.d, `SELECT count(*)::text FROM information_schema.columns
-		WHERE table_schema = 'public' AND column_name = 'id' AND table_name = ANY ($1::text[]) AND data_type = 'uuid' AND column_default = 'uuidv7()'`, tables); n != "19" {
-		t.Errorf("id columns with DEFAULT uuidv7() = %s, want 19", n)
+		WHERE table_schema = 'public' AND column_name = 'id' AND table_name = ANY ($1::text[]) AND data_type = 'uuid' AND column_default = 'uuidv7()'`, tables); n != "20" {
+		t.Errorf("id columns with DEFAULT uuidv7() = %s, want 20", n)
 	}
 	if bad := queryStrings(t, w, `SELECT table_name FROM information_schema.columns WHERE table_schema = 'public' AND column_name = 'id'
 		AND table_name = ANY ($1::text[]) AND (data_type <> 'uuid' OR column_default IS DISTINCT FROM 'uuidv7()') ORDER BY 1`, tables); len(bad) > 0 {
@@ -228,8 +232,8 @@ func TestSchema_P2SchemaIDColumnsAndTriggers(t *testing.T) {
 	if len(missing) > 0 {
 		t.Errorf("tables with updated_at but without the koro_touch_updated_at trigger: %v", missing)
 	}
-	if n := queryString(t, w.d, `SELECT count(*)::text FROM pg_attribute WHERE attname = 'updated_at' AND NOT attisdropped AND attrelid IN `+p2TableOIDs, tables); n != "17" {
-		t.Errorf("tables with updated_at = %s, want 17", n)
+	if n := queryString(t, w.d, `SELECT count(*)::text FROM pg_attribute WHERE attname = 'updated_at' AND NOT attisdropped AND attrelid IN `+p2TableOIDs, tables); n != "18" {
+		t.Errorf("tables with updated_at = %s, want 18", n)
 	}
 	others := queryStrings(t, w, `
 		SELECT c.relname || '.' || g.tgname || ' ' || p.proname || CASE WHEN g.tgconstraint <> 0 THEN
@@ -243,6 +247,7 @@ func TestSchema_P2SchemaIDColumnsAndTriggers(t *testing.T) {
 		"collection_accounts.collection_accounts_initial_status koro_initial_status",
 		"commerce_policies.commerce_policies_close_only koro_policy_close_only",
 		"commerce_policies.commerce_policies_no_truncate koro_forbid_mutation",
+		"incoming_bank_transfers.incoming_bank_transfers_collection_consistent incoming_transfer_check_collection" + deferred,
 		"incoming_bank_transfers.incoming_bank_transfers_frozen koro_freeze_columns",
 		"incoming_bank_transfers.incoming_bank_transfers_initial_status koro_initial_status",
 		"incoming_bank_transfers.incoming_bank_transfers_return_frozen koro_freeze_columns",
@@ -273,7 +278,14 @@ func TestSchema_P2SchemaIDColumnsAndTriggers(t *testing.T) {
 		"payouts.payouts_frozen koro_freeze_columns",
 		"payouts.payouts_initial_status koro_initial_status",
 		"payouts.payouts_paid_frozen koro_freeze_columns",
+		"receivable_collections.receivable_collections_approved_frozen koro_freeze_columns",
+		"receivable_collections.receivable_collections_consistent receivable_collections_check" + deferred,
+		"receivable_collections.receivable_collections_frozen koro_freeze_columns",
+		"receivable_collections.receivable_collections_initial_status koro_initial_status",
+		"receivable_collections.receivable_collections_rejected_frozen koro_freeze_columns",
 		"refunds.refunds_approval_frozen koro_freeze_columns",
+		"refunds.refunds_closure_frozen koro_freeze_columns",
+		"refunds.refunds_closure_guard refunds_guard_closure",
 		"refunds.refunds_completed_frozen koro_freeze_columns",
 		"refunds.refunds_frozen koro_freeze_columns",
 		"refunds.refunds_initial_status koro_initial_status",

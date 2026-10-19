@@ -25,6 +25,7 @@ func TestAuthzScenarios_AllFourEyesCovered(t *testing.T) {
 	env.m = m
 	required := []string{
 		"offering_four_eyes", "invoice_four_eyes", "payout_four_eyes",
+		"receivable_collection_four_eyes", "refund_closure_four_eyes", "refund_failed_four_eyes",
 		"collection_account_four_eyes", "transfer_return_four_eyes", "refund_four_eyes", "refund_four_eyes_platform_admin",
 		"document_four_eyes", "iban_four_eyes_org_submission", "iban_four_eyes_admin_submission", "dsr_profiling_four_eyes",
 		"four_eyes_grant", "four_eyes_revoke", "four_eyes_suspend_privileged", "four_eyes_revoke_sessions_privileged", "four_eyes_reset_mfa_privileged",

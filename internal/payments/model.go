@@ -80,18 +80,20 @@ type TransferStatus string
 // another approves it (return_approved), the EFT receipt closes it
 // (returned). A rejected return request makes the transfer unmatched again.
 const (
-	TransferUnmatched       TransferStatus = "unmatched"
-	TransferMatched         TransferStatus = "matched"
-	TransferIgnored         TransferStatus = "ignored"
-	TransferReturnRequested TransferStatus = "return_requested"
-	TransferReturnApproved  TransferStatus = "return_approved"
-	TransferReturned        TransferStatus = "returned"
+	TransferUnmatched           TransferStatus = "unmatched"
+	TransferMatched             TransferStatus = "matched"
+	TransferIgnored             TransferStatus = "ignored"
+	TransferReturnRequested     TransferStatus = "return_requested"
+	TransferReturnApproved      TransferStatus = "return_approved"
+	TransferReturned            TransferStatus = "returned"
+	TransferCollectionRequested TransferStatus = "collection_requested"
+	TransferCollected           TransferStatus = "collected"
 )
 
 // TransferStatuses lists every status in 02 order.
 func TransferStatuses() []TransferStatus {
 	return []TransferStatus{TransferUnmatched, TransferMatched, TransferIgnored, TransferReturnRequested,
-		TransferReturnApproved, TransferReturned}
+		TransferReturnApproved, TransferReturned, TransferCollectionRequested, TransferCollected}
 }
 
 // Valid reports whether s is an incoming_bank_transfers.status value.
@@ -255,12 +257,13 @@ const (
 	RefundStatusCompleted  RefundStatus = "completed"
 	RefundStatusFailed     RefundStatus = "failed"
 	RefundStatusRejected   RefundStatus = "rejected"
+	RefundStatusCancelled  RefundStatus = "cancelled"
 )
 
 // RefundStatuses lists every status in 02 order.
 func RefundStatuses() []RefundStatus {
 	return []RefundStatus{RefundStatusRequested, RefundStatusApproved, RefundStatusProcessing, RefundStatusCompleted,
-		RefundStatusFailed, RefundStatusRejected}
+		RefundStatusFailed, RefundStatusRejected, RefundStatusCancelled}
 }
 
 // Valid reports whether s is a refunds.status value.
@@ -324,6 +327,9 @@ type Refund struct {
 	BankReference   *string      `gorm:"column:bank_reference"`
 	ReceiptFileID   *uuid.UUID   `gorm:"type:uuid;column:receipt_file_id"`
 	FailureReason   *string      `gorm:"column:failure_reason"`
+	ClosedBy        *uuid.UUID   `gorm:"type:uuid;column:closed_by"`
+	ClosedAt        *time.Time   `gorm:"column:closed_at"`
+	CancelReason    *string      `gorm:"column:cancel_reason"`
 	CompletedAt     *time.Time   `gorm:"column:completed_at"`
 	CreatedAt       time.Time    `gorm:"column:created_at"`
 	UpdatedAt       time.Time    `gorm:"column:updated_at"`

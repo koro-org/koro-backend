@@ -21,13 +21,14 @@ import (
 // per account and of a transfer's payment, and the four-eyes CHECKs. It has
 // no locks (db.NopTx) and no foreign keys.
 type MemStore struct {
-	mu        sync.Mutex
-	now       func() time.Time
-	accounts  map[uuid.UUID]CollectionAccount
-	transfers map[uuid.UUID]IncomingTransfer
-	payments  map[uuid.UUID]Payment
-	splits    []Split
-	refunds   map[uuid.UUID]Refund
+	collections map[uuid.UUID]ReceivableCollection
+	mu          sync.Mutex
+	now         func() time.Time
+	accounts    map[uuid.UUID]CollectionAccount
+	transfers   map[uuid.UUID]IncomingTransfer
+	payments    map[uuid.UUID]Payment
+	splits      []Split
+	refunds     map[uuid.UUID]Refund
 }
 
 var _ Store = (*MemStore)(nil)
@@ -253,7 +254,7 @@ func (m *MemStore) UpdateTransfer(_ context.Context, next IncomingTransfer, from
 	case cur.ReturnApprovedBy != nil && (!sameID(cur.ReturnRequestedBy, next.ReturnRequestedBy) ||
 		!sameStr(cur.ReturnTargetIBAN, next.ReturnTargetIBAN) || !sameID(cur.ReturnApprovedBy, next.ReturnApprovedBy)):
 		return IncomingTransfer{}, fmt.Errorf("payments: transfer %s: the approved return is frozen (incoming_bank_transfers_return_frozen)", cur.ID)
-	case cur.Status == TransferReturned:
+	case cur.Status == TransferReturned || cur.Status == TransferCollected:
 		return IncomingTransfer{}, fmt.Errorf("payments: transfer %s: a returned transfer is final (incoming_bank_transfers_returned_frozen)", cur.ID)
 	}
 	row := cur
@@ -580,7 +581,11 @@ func (m *MemStore) UpdateRefund(_ context.Context, next Refund, from RefundStatu
 		return Refund{}, fmt.Errorf("payments: refund %s: a frozen column changed (refunds_frozen)", next.ID)
 	case cur.ApprovedBy != nil && (!sameID(cur.ApprovedBy, next.ApprovedBy) || !sameTime(cur.ApprovedAt, next.ApprovedAt)):
 		return Refund{}, fmt.Errorf("payments: refund %s: the approval is frozen (refunds_approval_frozen)", next.ID)
-	case cur.Status == RefundStatusCompleted:
+	case cur.Status == RefundStatusFailed && next.Status != cur.Status:
+		return Refund{}, ErrInvalidState
+	case (next.Status == RefundStatusFailed || next.Status == RefundStatusCancelled) && next.Status != cur.Status && (cur.Status != RefundStatusApproved || next.ClosedBy == nil || next.ClosedAt == nil):
+		return Refund{}, ErrInvalidState
+	case cur.Status == RefundStatusCompleted || cur.ClosedAt != nil:
 		return Refund{}, fmt.Errorf("payments: refund %s: a completed refund is final (refunds_completed_frozen)", next.ID)
 	}
 	if err := checkRefund(next); err != nil {
@@ -594,7 +599,7 @@ func (m *MemStore) UpdateRefund(_ context.Context, next Refund, from RefundStatu
 // checkRefund applies the per-state CHECKs of 000108 to r.
 func checkRefund(r Refund) error {
 	approved := r.Status == RefundStatusApproved || r.Status == RefundStatusProcessing || r.Status == RefundStatusCompleted ||
-		r.Status == RefundStatusFailed
+		r.Status == RefundStatusFailed || r.Status == RefundStatusCancelled
 	rejected, completed := r.Status == RefundStatusRejected, r.Status == RefundStatusCompleted
 	bankStates := r.Status == RefundStatusProcessing || completed || r.Status == RefundStatusFailed
 	switch {
@@ -607,6 +612,12 @@ func checkRefund(r Refund) error {
 	case completed != (r.CompletedAt != nil) || completed != (r.ReceiptFileID != nil) || (completed && r.BankReference == nil) ||
 		(r.BankReference != nil && !bankStates):
 		return fmt.Errorf("payments: refund %s: completion columns do not match %s (refunds_completed_chk)", r.ID, r.Status)
+	case r.ClosedBy != nil && *r.ClosedBy == r.RequestedBy:
+		return authz.ErrFourEyes
+	case (r.ClosedAt != nil) != (r.ClosedBy != nil), r.Status == RefundStatusCancelled && r.ClosedAt == nil,
+		r.ClosedAt != nil && r.Status != RefundStatusCancelled && r.Status != RefundStatusFailed,
+		(r.Status == RefundStatusCancelled) != (r.CancelReason != nil):
+		return fmt.Errorf("payments: refund %s: closure columns do not match status", r.ID)
 	case (r.Status == RefundStatusFailed) != (r.FailureReason != nil):
 		return fmt.Errorf("payments: refund %s: failure_reason does not match %s (refunds_failed_chk)", r.ID, r.Status)
 	}
@@ -620,7 +631,7 @@ func (m *MemStore) RefundsOfUser(_ context.Context, userID uuid.UUID) ([]Refund,
 	is := func(id *uuid.UUID) bool { return id != nil && *id == userID }
 	var out []Refund
 	for _, r := range m.refunds {
-		if r.RequestedBy == userID || is(r.ApprovedBy) || is(r.RejectedBy) {
+		if r.RequestedBy == userID || is(r.ApprovedBy) || is(r.RejectedBy) || is(r.ClosedBy) {
 			out = append(out, r)
 		}
 	}

@@ -104,3 +104,9 @@ feed      -> outreach.Targeting.DiscardDispatch
 # the refund, raises the payment's refunded amount, posts refund_completed and writes payment.refunded, so money that
 # left Koro's account is never missing from the order nor an order refunded without its ledger entry.
 payments  -> orders.Orders.ApplyRefund
+
+# BE-068: refund completion and manual receivable collection take the ledger's
+# transaction-scoped payee lock before order/line locks. It coordinates payout
+# snapshots, refunds and receipt reservations; this port changes no persistent
+# row and shares the caller's transaction (ticket DocPatch, 01 §6.3).
+payments  -> ledger.LedgerLines.LockPayees

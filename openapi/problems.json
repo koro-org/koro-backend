@@ -1302,6 +1302,12 @@
     "type": "urn:koro:problem:payload_too_large"
   },
   {
+    "code": "payments.collection_exceeds_receivable",
+    "status": 409,
+    "title": "The transfer exceeds the unreserved receivable",
+    "type": "urn:koro:problem:payments.collection_exceeds_receivable"
+  },
+  {
     "code": "payments.duplicate_bank_reference",
     "status": 409,
     "title": "A transfer with this bank reference is already recorded",

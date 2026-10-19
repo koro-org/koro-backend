@@ -147,7 +147,7 @@ func TestLedger_UnbalancedTxn_FailsAtCommit(t *testing.T) {
 		{"the owner updates an entry", `UPDATE ledger_entries SET amount = amount * 2`, nil, db.CodeRestrictViolation, ""},
 		{"the owner deletes an entry", `DELETE FROM ledger_entries`, nil, db.CodeRestrictViolation, ""},
 		{"the owner updates a transaction", `UPDATE ledger_transactions SET memo = 'x'`, nil, db.CodeRestrictViolation, ""},
-		{"the owner truncates the journal", `TRUNCATE ledger_entries, ledger_transactions`, nil, db.CodeRestrictViolation, ""},
+		{"the owner truncates the journal", `TRUNCATE ledger_entries, ledger_transactions, receivable_collections`, nil, db.CodeRestrictViolation, ""},
 	})
 	if got := queryString(t, w.d, `SELECT coalesce(sum(amount), 0)::text FROM ledger_entries`); got != "0" {
 		t.Errorf("the whole ledger sums to %s, want 0", got)

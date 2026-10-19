@@ -23,6 +23,12 @@ const (
 	PaymentsRefundApprove            Action = "payments.refund.approve"
 	PaymentsRefundReject             Action = "payments.refund.reject"
 	PaymentsRefundComplete           Action = "payments.refund.complete"
+	PaymentsRefundCancel             Action = "payments.refund.cancel"
+	PaymentsRefundMarkFailed         Action = "payments.refund.mark_failed"
+	PaymentsReceivableList           Action = "payments.receivable.list"
+	PaymentsReceivableCreate         Action = "payments.receivable.create"
+	PaymentsReceivableApprove        Action = "payments.receivable.approve"
+	PaymentsReceivableReject         Action = "payments.receivable.reject"
 )
 
 // paymentsActions lists the HTTP actions of payments in 03 §5.16 order.
@@ -44,4 +50,10 @@ var paymentsActions = []Action{
 	PaymentsRefundApprove,
 	PaymentsRefundReject,
 	PaymentsRefundComplete,
+	PaymentsRefundCancel,
+	PaymentsRefundMarkFailed,
+	PaymentsReceivableList,
+	PaymentsReceivableCreate,
+	PaymentsReceivableApprove,
+	PaymentsReceivableReject,
 }

@@ -59,10 +59,15 @@
 //     against what is left of them, platform/money) and
 //     payment.refunded leaves (O). A line in a payout waiting for approval
 //     or for its transfer cannot be refunded (409 payments.line_in_payout,
-//     checked again after the ledger took the payee's lock); a line already
+//     checked under the payee lock taken before order/line locks); a line already
 //     paid out is refunded under the same four eyes and its seller part is
 //     claimed back from the payee (payee_receivable; 06 H-59: collected by
 //     hand, never offset against a later payout).
+//   - Refund followups (BE-068): approved refunds can close as cancelled or
+//     failed before completion, with another finance eye and reauthentication.
+//     A manual receivable collection claims an existing unmatched bank receipt;
+//     another finance admin approves its bank/debt ledger entry atomically.
+//     Refund requests notify the other finance admins after commit.
 //   - Personal data: a transfer's sender may be a natural person (name,
 //     IBAN); the rows are financial records (10 years) and are neither
 //     deleted nor anonymised on account erasure (privacy.go).
@@ -96,6 +101,7 @@ type Payments interface {
 // use cases of 04 §2.16 (BE-041's part). Every method that takes an actor
 // calls authz.Can first (05 §5.3).
 type Service interface {
+	ReceivableService
 	Payments
 
 	// ListCollectionAccounts is adminListCollectionAccounts.
@@ -150,6 +156,8 @@ type Service interface {
 	ApproveRefund(ctx context.Context, a authz.Actor, id uuid.UUID, proof identity.ReauthProof) (Refund, error)
 	// RejectRefund is adminRejectRefund.
 	RejectRefund(ctx context.Context, a authz.Actor, id uuid.UUID, note string) (Refund, error)
+	// CloseRefund cancels or records a failed approved EFT under four eyes.
+	CloseRefund(ctx context.Context, a authz.Actor, id uuid.UUID, failed bool, reason string, proof identity.ReauthProof) (Refund, error)
 	// CompleteRefund is adminCompleteRefund: the EFT's receipt and bank
 	// reference; ledger, order and payment.refunded in one transaction.
 	CompleteRefund(ctx context.Context, a authz.Actor, id uuid.UUID, in RefundReceipt) (RefundResult, error)
@@ -208,8 +216,8 @@ func (d Deps) validate() error {
 type Module struct {
 	Service  Service
 	Payments Payments
-	// Privacy is the KVKK provider (the staff references of transfers and
-	// payments; financial records, retained on erasure).
+	// Privacy is the KVKK provider for staff references of transfers, payments,
+	// refunds and collections; financial records are retained on erasure.
 	Privacy privacy.Provider
 
 	svc *service

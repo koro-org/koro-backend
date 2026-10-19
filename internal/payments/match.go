@@ -157,6 +157,7 @@ func (s *service) match(ctx context.Context, a authz.Actor, id, orderID uuid.UUI
 		}); err != nil {
 			return MatchResult{}, err
 		}
+		s.notifyRefundRequested(ctx, rid)
 		refundID = &rid
 		if err := s.d.Audit.Log(ctx, refundEvent(a, rid, p, over)); err != nil {
 			return MatchResult{}, err

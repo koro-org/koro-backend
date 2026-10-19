@@ -302,3 +302,35 @@ func firstN[T any](xs []T, n int, by func(a, b T) int) []T {
 func (m *MemStore) PurgeFinancialRecords(context.Context, time.Time, int, bool) (int, error) {
 	return 0, nil
 }
+
+func (s *MemStore) LineReceivable(_ context.Context, id uuid.UUID) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lineReceivable(id), nil
+}
+func (s *MemStore) lineReceivable(id uuid.UUID) int64 {
+	var amount int64
+	for _, t := range s.txns {
+		for _, e := range t.Entries {
+			if e.Account == AccountPayeeReceivable && e.OrderLineID != nil && *e.OrderLineID == id {
+				amount += e.Amount
+			}
+		}
+	}
+	return amount
+}
+func (s *MemStore) PayeeReceivable(_ context.Context, id uuid.UUID) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var amount int64
+	if s.po != nil {
+		for _, items := range s.po.items {
+			for _, it := range items {
+				if it.PayeeID == id {
+					amount += s.lineReceivable(it.OrderLineID)
+				}
+			}
+		}
+	}
+	return amount, nil
+}

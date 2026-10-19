@@ -278,7 +278,7 @@ func TestFourEyes_Refund_Check(t *testing.T) {
 		{"the approver is replaced", `UPDATE refunds SET approved_by = $2 WHERE id = $1`, []any{id, w.user()}, db.CodeRestrictViolation, ""},
 		{"completed without the receipt", complete, []any{id, "EFT-1", nil}, chk, "refunds_completed_chk"},
 		{"completed without the bank reference", complete, []any{id, nil, receipt}, chk, "refunds_completed_chk"},
-		{"failed without a reason", `UPDATE refunds SET status = 'failed' WHERE id = $1`, []any{id}, chk, "refunds_failed_chk"},
+		{"failed without a reason", `UPDATE refunds SET status = 'failed', closed_by=$2, closed_at=now() WHERE id = $1`, []any{id, b}, chk, "refunds_failed_chk"},
 	})
 	w.exec(`UPDATE refunds SET status = 'processing', bank_reference = 'EFT-1' WHERE id = $1`, id)
 	w.exec(complete, id, "EFT-1", receipt)

@@ -62,6 +62,7 @@ const (
 	TypePayment                = "payment"
 	TypeLedger                 = "ledger"
 	TypeRefund                 = "refund"
+	TypeReceivableCollection   = "receivable_collection"
 	TypePayout                 = "payout"
 	TypeInvoice                = "invoice"
 	TypeNotification           = "notification"

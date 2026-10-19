@@ -41,6 +41,7 @@ package authz
 // from the role paths (k-mfa: pad, fin).
 func paymentsPolicy() Policy {
 	return Policy{
+		Types: map[string][]string{TypeReceivableCollection: {AttrStatus, AttrRequestedBy}},
 		Visible: func(a Actor, act Action, r Resource) bool {
 			switch r.Type {
 			case TypeAdminSurface:
@@ -49,8 +50,10 @@ func paymentsPolicy() Policy {
 				return act == PaymentsCollectionAccountApprove && AdminSurfaceVisible(a)
 			case TypeIncomingTransfer:
 				return act == PaymentsTransferMarkReturned && AdminSurfaceVisible(a)
+			case TypeReceivableCollection:
+				return act == PaymentsReceivableApprove && AdminSurfaceVisible(a)
 			case TypeRefund:
-				return act == PaymentsRefundApprove && AdminSurfaceVisible(a)
+				return (act == PaymentsRefundApprove || act == PaymentsRefundCancel || act == PaymentsRefundMarkFailed) && AdminSurfaceVisible(a)
 			}
 			return false
 		},
@@ -60,10 +63,10 @@ func paymentsPolicy() Policy {
 			case TypeAdminSurface:
 				switch act {
 				case PaymentsCollectionAccountList, PaymentsCollectionAccountRetire, PaymentsTransferList, PaymentsTransferRead,
-					PaymentsPaymentList, PaymentsPaymentRead, PaymentsRefundList, PaymentsRefundCreate:
+					PaymentsPaymentList, PaymentsPaymentRead, PaymentsRefundList, PaymentsRefundCreate, PaymentsReceivableList:
 					return []Grant{pad, fin}
 				case PaymentsCollectionAccountCreate, PaymentsTransferCreate, PaymentsTransferMatch, PaymentsTransferIgnore,
-					PaymentsRefundReject, PaymentsRefundComplete:
+					PaymentsRefundReject, PaymentsRefundComplete, PaymentsReceivableCreate, PaymentsReceivableReject:
 					return []Grant{fin}
 				}
 			case TypeCollectionAccount:
@@ -74,8 +77,12 @@ func paymentsPolicy() Policy {
 				if act == PaymentsTransferMarkReturned {
 					return []Grant{fin}
 				}
+			case TypeReceivableCollection:
+				if act == PaymentsReceivableApprove {
+					return []Grant{fin}
+				}
 			case TypeRefund:
-				if act == PaymentsRefundApprove {
+				if act == PaymentsRefundApprove || act == PaymentsRefundCancel || act == PaymentsRefundMarkFailed {
 					// The eyes: the core table refuses the refund's requester.
 					return []Grant{fin}
 				}

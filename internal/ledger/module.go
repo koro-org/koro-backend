@@ -47,7 +47,7 @@
 //
 // Payouts (BE-044; 02 §21.4–5, 03 §6.1, 04 §2.17, §C.5): finance admin A
 // takes the payee's payable lines (orders.PayableLines: paid, fulfilled,
-// payout hold elapsed, not refunded; never model C; minus the lines of a
+// payout hold elapsed, with a positive seller share remaining after refunds; never model C; minus the lines of a
 // live payout) into a pending payout, freezing the IBAN and holder of the
 // payee's approved account on it (Idempotency-Key; the ledger must owe at
 // least the open payouts plus this one). Finance admin B ≠ A approves it
@@ -258,4 +258,16 @@ func (m Module) RecognizePlatformSales(ctx context.Context) (RecognitionReport, 
 // the findings without raising the alarm (tests, an admin tool later).
 func (m Module) CheckIntegrity(ctx context.Context) (IntegrityReport, error) {
 	return m.svc.checkIntegrity(ctx)
+}
+
+// LockPayees lets a refund acquire the same lock as payouts before locking
+// its order and line. The caller must carry an active transaction.
+func (m Module) LockPayees(ctx context.Context, payeeIDs []uuid.UUID) error {
+	return m.svc.d.Store.LockPayees(ctx, payeeIDs)
+}
+
+// LineReceivable returns the remaining debt of a paid-out line; collection
+// adjustments reduce it without changing refunded allocation shares.
+func (m Module) LineReceivable(ctx context.Context, lineID uuid.UUID) (int64, error) {
+	return m.svc.d.Store.LineReceivable(ctx, lineID)
 }

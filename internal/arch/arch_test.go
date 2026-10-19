@@ -424,15 +424,15 @@ func TestSyncWritesAreAllowed(t *testing.T) {
 	// payment confirmation pays the order in its transaction), + payments →
 	// orders.Orders.ApplyRefund (BE-043: a completed refund is recorded on
 	// the order in its transaction).
-	if len(allow) != 30 {
-		t.Fatalf("sync_writes.txt has %d lines, want 30", len(allow))
+	if len(allow) != 31 {
+		t.Fatalf("sync_writes.txt has %d lines, want 31", len(allow))
 	}
 	for _, must := range []string{"kvkk files.Files.Delete", "feed entitlements.Entitlements.Release",
 		"outreach entitlements.Entitlements.Release", "feed outreach.Targeting.DiscardDispatch",
 		"feed outreach.Targeting.ScheduleDispatch", "outreach entitlements.Entitlements.Consume",
 		"identity files.Files.Delete", "directory files.Files.Delete", "students files.Files.Delete", "feed files.Files.Delete",
 		"* audit.Logger.Log", "* files.Files.Attach", "payments orders.Orders.ApplyPayment", "payments ledger.Poster.Post",
-		"payments orders.Orders.ConfirmDirectPayment", "payments orders.Orders.ApplyRefund",
+		"payments orders.Orders.ConfirmDirectPayment", "payments orders.Orders.ApplyRefund", "payments ledger.LedgerLines.LockPayees",
 		"directory orgs.OrgAdmin.GrantRole", "directory orgs.OrgAdmin.Create", "orders catalog.Offerings.Release",
 	} {
 		if !allow[must] {

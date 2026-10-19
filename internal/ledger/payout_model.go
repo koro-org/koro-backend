@@ -75,8 +75,8 @@ func (Payout) TableName() string { return "payouts" }
 func (p Payout) MaskedIBAN() string { return iban.Mask(p.IBANSnapshot) }
 
 // PayoutItem is one payout_items row (02 §21.5; 000115): a line the payout
-// pays and its amount (the line's seller_net_amount; T-291: a refunded line
-// is never payable, so there is no refund share to subtract).
+// pays and its amount: the seller_net_amount remaining after completed
+// refunds, frozen when the payout is created (BE-068, T-305).
 type PayoutItem struct {
 	PayoutID    uuid.UUID `gorm:"type:uuid;column:payout_id;primaryKey"`
 	OrderLineID uuid.UUID `gorm:"type:uuid;column:order_line_id;primaryKey"`
@@ -146,6 +146,7 @@ type PayoutQuery struct {
 // payouts, open payouts included), the part of it in open payouts
 // (PendingPayout) and what was paid out so far (PaidOut).
 type Balance struct {
+	Receivable    int64
 	PayeeID       uuid.UUID
 	Payable       int64
 	PendingPayout int64
@@ -157,7 +158,7 @@ type PayableLineView struct {
 	OrderLineID uuid.UUID
 	OrderID     uuid.UUID
 	OrderNo     string
-	Amount      int64 // the line's seller_net_amount
+	Amount      int64 // seller net remaining after completed refunds
 	FulfilledAt time.Time
 }
 

@@ -11,7 +11,7 @@ import (
 // own error (06 H-52), passed through as is.
 var (
 	// ErrNothingPayable: the payee has no line a payout may take (paid,
-	// fulfilled, its payout hold elapsed, not refunded, in no live payout).
+	// fulfilled, its payout hold elapsed, with a positive seller share after refunds, in no live payout).
 	ErrNothingPayable = problem.New(problem.Invalid, "ledger.nothing_payable", "Nothing is payable to the payee")
 	// ErrLineNotPayable: a requested line is not payable to the payee now:
 	// another payee's, not fulfilled, still held, refunded, already paid out

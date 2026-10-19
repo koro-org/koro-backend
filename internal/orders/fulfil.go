@@ -49,7 +49,7 @@ func (s *service) MarkLineFulfilled(ctx context.Context, a authz.Actor, lineID u
 		switch {
 		case o.Status == StatusAwaitingPayment:
 			return Line{}, ErrOrderNotPaid
-		case !deliverable(o.Status):
+		case !deliverable(o.Status) || fullyRefundedService(o, cur):
 			return Line{}, ErrInvalidState
 		case cur.FulfillmentStatus != FulfillPending:
 			return Line{}, ErrInvalidState
@@ -103,7 +103,7 @@ func (s *service) ConfirmLine(ctx context.Context, a authz.Actor, lineID uuid.UU
 		return LineView{}, err
 	}
 	return s.lineChange(ctx, hash, lineID, func(ctx context.Context, o Order, cur Line, now time.Time) (Line, error) {
-		if !deliverable(o.Status) || cur.FulfillmentStatus != FulfillMarked {
+		if !deliverable(o.Status) || fullyRefundedService(o, cur) || cur.FulfillmentStatus != FulfillMarked {
 			return Line{}, ErrInvalidState
 		}
 		return s.fulfil(ctx, a, authz.OrdersLineConfirm, cur, ViaBuyerConfirmed, now, "")
@@ -220,6 +220,9 @@ func (s *service) AdminResolveDispute(ctx context.Context, a authz.Actor, lineID
 			return Line{}, ErrInvalidState
 		}
 		if in.Outcome == OutcomeFulfilled {
+			if fullyRefundedService(o, cur) {
+				return Line{}, ErrInvalidState
+			}
 			return s.fulfil(ctx, a, authz.OrdersLineResolveDispute, cur, ViaAdmin, now, note)
 		}
 		amount := o.Refundable(cur)
@@ -299,14 +302,15 @@ func (s *service) closeWindows(ctx context.Context) error {
 			}
 			n = len(due)
 			for _, l := range due {
-				if _, err := s.d.Store.GetOrder(ctx, l.OrderID, true); err != nil {
+				o, err := s.d.Store.GetOrder(ctx, l.OrderID, true)
+				if err != nil {
 					return err
 				}
 				cur, err := s.d.Store.GetLine(ctx, l.ID, true)
 				if err != nil {
 					return err
 				}
-				if cur.FulfillmentStatus != FulfillMarked || cur.DisputeWindowEndsAt == nil || cur.DisputeWindowEndsAt.After(now) {
+				if fullyRefundedService(o, cur) || cur.FulfillmentStatus != FulfillMarked || cur.DisputeWindowEndsAt == nil || cur.DisputeWindowEndsAt.After(now) {
 					continue
 				}
 				if _, err := s.fulfil(ctx, sys, authz.OrdersLineAutoFulfill, cur, ViaWindowElapsed, now, ""); err != nil {
@@ -329,4 +333,11 @@ func (s *service) closeWindows(ctx context.Context) error {
 	}
 	s.d.Log.LogAttrs(ctx, slog.LevelInfo, "dispute windows closed", slog.Int("count", total))
 	return nil
+}
+
+// fullyRefundedService only identifies money Koro collected for the service.
+// Model C's fee refund does not establish that the directly paid service was
+// refunded; its existing order status and rights rules remain unchanged.
+func fullyRefundedService(o Order, l Line) bool {
+	return !o.DirectToPayee() && l.RefundedAmount > 0 && l.RefundedAmount >= l.PayableAmount
 }

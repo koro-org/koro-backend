@@ -61,6 +61,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 	"uuid"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -1050,7 +1051,8 @@ func (env *matrixEnv) newMatrixApp(t *testing.T, cfg map[string]any) *matrixApp 
 
 	ready := httpx.NewReady(c.readyChecks...)
 	ready.Set(true)
-	app, err := httpx.New(httpx.Deps{Log: obs.Discard(), Version: apiVersion, Actors: c.actors, Ready: ready})
+	app, err := httpx.New(httpx.Deps{Log: obs.Discard(), Version: apiVersion, Actors: c.actors, Ready: ready,
+		RequestTimeout: matrixRequestTimeout})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1062,6 +1064,15 @@ func (env *matrixEnv) newMatrixApp(t *testing.T, cfg map[string]any) *matrixApp 
 	}
 	return a
 }
+
+// matrixRequestTimeout replaces the production request budget
+// (httpx.DefaultRequestTimeout) on matrix applications: under -race and a
+// loaded machine a request may wait longer than 15 s for a CPU-bound gate
+// (the Argon2 semaphore of identity); a case is judged on its authz
+// outcome, not on the server's time budget (BE-070, T-315). Only the
+// budget changes, the middleware stays; the test timeout still bounds a
+// stuck request.
+const matrixRequestTimeout = 5 * time.Minute
 
 // checkMembershipsHook keeps the orgs fixtures and the personas in step:
 // once orgs fills hooks.memberships, it must return exactly the

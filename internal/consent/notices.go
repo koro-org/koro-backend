@@ -180,19 +180,32 @@ func (s *service) GetNotice(ctx context.Context, a authz.Actor, id uuid.UUID) (N
 }
 
 // reauth verifies the proof of an R operation after authz.Can (03 §6.2) and
-// returns its kind for the audit row. A rejected proof is audited as
-// denied with reason reauth_failed.
+// returns its kind for the audit row. Only a verdict is audited: a refused
+// proof (a 4xx: reauth_required, reauth_failed, rate_limited) is denied
+// with reason reauth_failed. An error without a verdict — the request
+// budget ran out before identity could check the proof (BE-070/071), or a
+// dependency failed — writes nothing and goes back unchanged; httpx answers
+// 503 (WARN) or 500 and logs it once (BE-072).
 func (s *service) reauth(ctx context.Context, a authz.Actor, act authz.Action, resType string, resID *uuid.UUID, proof ReauthProof) (string, error) {
 	if s.d.Reauth == nil {
 		return "", ErrReauthUnavailable
 	}
 	kind, err := s.d.Reauth.Verify(ctx, a.UserID, proof)
-	if err == nil {
+	switch {
+	case err == nil:
 		return kind, nil
+	case !problem.IsClientError(err):
+		return "", err
 	}
 	ev := audit.Event{Action: string(act), Outcome: audit.Denied, Reason: "reauth_failed", ResourceType: resType, ResourceID: resID}.By(a)
 	if lerr := s.d.Audit.Log(ctx, ev); lerr != nil {
-		s.d.Log.LogAttrs(ctx, slog.LevelError, "reauth failure not audited", slog.String("action", string(act)), slog.String("err", lerr.Error()))
+		// A request that ended right after the verdict cannot write its
+		// row: an overload signal (WARN, like httpx), not an audit fault.
+		level := slog.LevelError
+		if ctx.Err() != nil {
+			level = slog.LevelWarn
+		}
+		s.d.Log.LogAttrs(ctx, level, "reauth failure not audited", slog.String("action", string(act)), slog.String("err", lerr.Error()))
 	}
 	return "", err
 }

@@ -36,7 +36,11 @@ func (ReauthProof) GoString() string { return "kvkk.ReauthProof([REDACTED])" }
 // Reauthenticator verifies a re-authentication proof (identity.Reauth,
 // 03 §6.2): after authz.Can, before any business data. It returns the
 // proof kind for the audit row ("password" | "totp") or identity's 403
-// identity.reauth_required / identity.reauth_failed, and counts failures.
+// identity.reauth_required / identity.reauth_failed, and counts failures
+// (429 once exhausted). Any other error is no verdict on the proof: the
+// request context ended before the check (overload, BE-070), or a
+// dependency failed; it is returned unchanged and never audited as denied
+// (BE-072).
 type Reauthenticator interface {
 	Verify(ctx context.Context, userID uuid.UUID, proof ReauthProof) (kind string, err error)
 }

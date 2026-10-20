@@ -139,6 +139,20 @@ func (e *Error) WithFields(f ...FieldError) *Error {
 	return &c
 }
 
+// IsClientError reports whether the HTTP layer answers err with a 4xx
+// status: the first *Error of its chain (the one httpx renders) has a
+// client kind. Such an error is a decision about the request
+// (validation, authorization, a refused re-authentication proof, a rate
+// limit). nil, a 5xx *Error and an error holding none (a context deadline,
+// a driver error) are not: the server could not decide, for instance
+// because the request ran out of time (05 §10.6; httpx answers 503 or
+// 500). Callers that record a verdict (the denied audit row of a refused
+// re-authentication, BE-072) record it only for a client error.
+func IsClientError(err error) bool {
+	pe, ok := errors.AsType[*Error](err)
+	return ok && pe.Status() < http.StatusInternalServerError
+}
+
 // Entry is one row of the problem catalog (openapi/problems.json).
 type Entry struct {
 	Code   string `json:"code"`

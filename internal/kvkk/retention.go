@@ -122,7 +122,7 @@ func (s *service) UpdateRetentionPolicy(ctx context.Context, a authz.Actor, code
 	if err := authz.Can(ctx, a, authz.KvkkRetentionPolicyUpdate, adminSurface); err != nil {
 		return PolicyView{}, err
 	}
-	kind, err := s.reauthAs(ctx, a, authz.KvkkRetentionPolicyUpdate, resourcePolicy, proof)
+	kind, err := s.reauth(ctx, a, authz.KvkkRetentionPolicyUpdate, resourcePolicy, nil, proof)
 	if err != nil {
 		return PolicyView{}, err
 	}
@@ -218,23 +218,6 @@ func (s *service) UpdateRetentionPolicy(ctx context.Context, a authz.Actor, code
 	sweepers, _ := s.sweeperCodes()
 	_, ok := sweepers[code]
 	return PolicyView{Policy: out, SweeperRegistered: ok}, nil
-}
-
-// reauthAs verifies an R proof for a non-request resource; a failure is
-// audited as denied (03 §6.2).
-func (s *service) reauthAs(ctx context.Context, a authz.Actor, act authz.Action, resourceType string, proof ReauthProof) (string, error) {
-	if s.d.Reauth == nil {
-		return "", ErrReauthUnavailable
-	}
-	kind, err := s.d.Reauth.Verify(ctx, a.UserID, proof)
-	if err == nil {
-		return kind, nil
-	}
-	ev := audit.Event{Action: string(act), Outcome: audit.Denied, Reason: "reauth_failed", ResourceType: resourceType}.By(a)
-	if lerr := s.d.Audit.Log(ctx, ev); lerr != nil {
-		s.d.Log.LogAttrs(ctx, slog.LevelError, "reauth failure not audited", slog.String("action", string(act)), slog.String("err", lerr.Error()))
-	}
-	return "", err
 }
 
 // ListDestructionLogs implements Service (adminListDestructionLogs).

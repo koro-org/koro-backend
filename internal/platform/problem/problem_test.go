@@ -1,6 +1,7 @@
 package problem_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -130,6 +131,42 @@ func TestCodeForStatus(t *testing.T) {
 			t.Parallel()
 			if got := problem.CodeForStatus(tt.status); got != tt.want {
 				t.Fatalf("CodeForStatus(%d) = %q, want %q", tt.status, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIsClientError (BE-072): a 4xx *Error anywhere in the chain is a
+// decision; nil, a 5xx *Error and an error holding none (the request
+// budget, a driver error) are not. The first *Error of the chain decides,
+// as in httpx.
+func TestIsClientError(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"forbidden", problem.ErrForbidden, true},
+		{"module sentinel wrapped", fmt.Errorf("svc: %w", errTestCapacity), true},
+		{"rate limited", problem.ErrRateLimited, true},
+		{"validation with fields", problem.ErrValidation.WithFields(problem.FieldError{Location: "body.x", Message: "bad"}), true},
+		{"4xx carrying a deadline cause", problem.ErrForbidden.Wrap(context.DeadlineExceeded), true},
+		{"unavailable", problem.ErrUnavailable, false},
+		{"unavailable over a deadline", problem.ErrUnavailable.Wrap(context.DeadlineExceeded), false},
+		{"internal", problem.ErrInternal, false},
+		{"5xx over a 4xx: the outer one renders", problem.ErrUnavailable.Wrap(problem.ErrForbidden), false},
+		{"bare deadline", context.DeadlineExceeded, false},
+		{"store error over a deadline", fmt.Errorf("store: lock user: %w", context.DeadlineExceeded), false},
+		{"canceled", context.Canceled, false},
+		{"plain error", errors.New("driver: broken pipe"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := problem.IsClientError(tt.err); got != tt.want {
+				t.Fatalf("IsClientError(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
 	}

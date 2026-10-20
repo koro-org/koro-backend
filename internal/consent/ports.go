@@ -35,7 +35,9 @@ func (ReauthProof) GoString() string { return "consent.ReauthProof([REDACTED])" 
 // (cmd/koro/wire_consent.go). It returns the proof kind for the audit row
 // ("password" | "totp") or identity's 403 identity.reauth_required /
 // identity.reauth_failed; it also counts failed attempts (rate limit class
-// reauth).
+// reauth, 429). Any other error is no verdict on the proof: the request
+// context ended before the check (overload, BE-070), or a dependency
+// failed; it is returned unchanged and never audited as denied (BE-072).
 type Reauthenticator interface {
 	Verify(ctx context.Context, userID uuid.UUID, proof ReauthProof) (kind string, err error)
 }

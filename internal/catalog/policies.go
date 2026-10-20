@@ -168,7 +168,7 @@ func (s *service) AdminCreatePolicy(ctx context.Context, a authz.Actor, in Polic
 	if err != nil {
 		return CommercePolicy{}, err
 	}
-	kind, err := s.reauth(ctx, a, proof)
+	kind, err := s.reauth(ctx, a, proof, nil, "created")
 	if err != nil {
 		return CommercePolicy{}, err
 	}
@@ -214,7 +214,7 @@ func (s *service) AdminClosePolicy(ctx context.Context, a authz.Actor, id uuid.U
 	if validTo != nil && validTo.Before(now) {
 		return CommercePolicy{}, fieldErr("body.valid_to", "must not be in the past")
 	}
-	kind, err := s.reauth(ctx, a, proof)
+	kind, err := s.reauth(ctx, a, proof, &id, "closed")
 	if err != nil {
 		return CommercePolicy{}, err
 	}
@@ -262,11 +262,20 @@ func (s *service) AdminClosePolicy(ctx context.Context, a authz.Actor, id uuid.U
 }
 
 // reauth verifies the proof of catalog.policy.manage (03 §6.2, 06 H-17).
-func (s *service) reauth(ctx context.Context, a authz.Actor, proof identity.ReauthProof) (string, error) {
+// A refused proof is audited as denied with the policy (nil before it
+// exists) and the change; an error without a verdict (overload, a
+// dependency down) writes nothing (audit.ReauthFailed, BE-074).
+func (s *service) reauth(ctx context.Context, a authz.Actor, proof identity.ReauthProof, policyID *uuid.UUID, change string) (string, error) {
 	if s.d.Reauth == nil {
 		return "", ErrUnavailable
 	}
-	return s.d.Reauth.Verify(ctx, a.UserID, proof)
+	kind, err := s.d.Reauth.Verify(ctx, a.UserID, proof)
+	if err != nil {
+		denied := audit.Event{Action: string(authz.CatalogPolicyManage), ResourceType: auditPolicy, ResourceID: policyID,
+			Metadata: map[string]any{"change": change}}.By(a)
+		return "", audit.ReauthFailed(ctx, s.d.Audit, s.d.Log, denied, err)
+	}
+	return kind, nil
 }
 
 // checkScope checks that the scope row exists: a seller org (club,

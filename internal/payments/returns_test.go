@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/files"
 	"koro/internal/identity"
@@ -66,8 +67,13 @@ func TestTransferReturn_SameFinanceApprove_403(t *testing.T) {
 	if mod, owner := e.files.owner(receipt); mod != "payments" || owner != tr.ID {
 		t.Fatalf("receipt attached to %s/%s", mod, owner)
 	}
-	if ev := e.audit.of(authz.PaymentsTransferMarkReturned); len(ev) != 3 || ev[0].Reason != "Sipariş yok" {
+	if ev := e.audit.ofOutcome(authz.PaymentsTransferMarkReturned, audit.Success); len(ev) != 3 || ev[0].Reason != "Sipariş yok" {
 		t.Fatalf("audit = %+v", ev)
+	}
+	// The decision without a proof is on record as denied (03 §6.2, BE-074).
+	if ev := e.audit.ofOutcome(authz.PaymentsTransferMarkReturned, audit.Denied); len(ev) != 1 || ev[0].Reason != audit.ReasonReauthFailed ||
+		*ev[0].ActorUserID != fin2.UserID {
+		t.Fatalf("denied audit = %+v", ev)
 	}
 	if _, err := e.svc.RequestReturn(ctxOf(t, fin), fin, tr.ID, payments.ReturnRequest{Reason: "tekrar"}, good); !errors.Is(err, payments.ErrInvalidState) {
 		t.Fatalf("request on a returned transfer = %v", err)

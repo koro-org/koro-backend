@@ -251,10 +251,28 @@ func (s *service) revokeAfterCommit(ctx context.Context, userID uuid.UUID) {
 }
 
 // reauth verifies the proof of an R operation (03 §6.2) and returns its
-// kind for the audit row.
-func (s *service) reauth(ctx context.Context, a authz.Actor, proof reauthProof) (string, error) {
+// kind for the audit row. A refused proof is audited as denied (denied:
+// reauthDenied); an error without a verdict (overload, a dependency down)
+// writes nothing (audit.ReauthFailed, BE-074).
+func (s *service) reauth(ctx context.Context, a authz.Actor, proof reauthProof, denied audit.Event) (string, error) {
 	if s.d.Reauth == nil {
 		return "", problem.ErrUnavailable
 	}
-	return s.d.Reauth.Verify(ctx, a.UserID, proof)
+	kind, err := s.d.Reauth.Verify(ctx, a.UserID, proof)
+	if err != nil {
+		return "", audit.ReauthFailed(ctx, s.d.Audit, s.d.Log, denied.By(a), err)
+	}
+	return kind, nil
+}
+
+// reauthDenied is the denied record of a refused proof of act on the org
+// id: the org scope only when the org row was read (06 H-38; suspend and
+// reactivate check the proof before reading). meta names the transition of
+// a shared action, never business data: nothing happened.
+func reauthDenied(act authz.Action, id uuid.UUID, read bool, meta map[string]any) audit.Event {
+	e := audit.Event{Action: string(act), ResourceType: resourceOrg, ResourceID: &id, Metadata: meta}
+	if read {
+		e.OrgID = &id
+	}
+	return e
 }

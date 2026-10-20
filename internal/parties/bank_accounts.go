@@ -57,11 +57,27 @@ func staff(a authz.Actor) bool { return fullTaxIDs(a) }
 
 // reauth verifies the proof of an R operation (03 §6.2) and returns its
 // kind for the audit record; without a verifier the operation fails closed.
-func (s *service) reauth(ctx context.Context, a authz.Actor, proof identity.ReauthProof) (string, error) {
+// A refused proof is audited as denied (denied: reauthDenied); an error
+// without a verdict (overload, a dependency down) writes nothing
+// (audit.ReauthFailed, BE-074).
+func (s *service) reauth(ctx context.Context, a authz.Actor, proof identity.ReauthProof, denied audit.Event) (string, error) {
 	if s.d.Reauth == nil {
 		return "", ErrUnavailable
 	}
-	return s.d.Reauth.Verify(ctx, a.UserID, proof)
+	kind, err := s.d.Reauth.Verify(ctx, a.UserID, proof)
+	if err != nil {
+		return "", audit.ReauthFailed(ctx, s.d.Audit, s.d.Log, denied.By(a), err)
+	}
+	return kind, nil
+}
+
+// reauthDenied is the denied record of a refused proof of act on a bank
+// account of the payee (accountID nil before it exists), scoped to the
+// payee's org as the account's own records are. Nothing happened: no IBAN,
+// masked or not.
+func reauthDenied(act authz.Action, accountID *uuid.UUID, payeeID, orgID uuid.UUID) audit.Event {
+	return audit.Event{Action: string(act), OrgID: &orgID, ResourceType: authz.TypeBankAccount, ResourceID: accountID,
+		Metadata: map[string]any{"payee_id": payeeID.String()}}
 }
 
 // accountView builds the view of b: the party title for the first eye's
@@ -203,7 +219,7 @@ func (s *service) submit(ctx context.Context, a authz.Actor, p Payee, in BankAcc
 	if err := s.checkEvidence(ctx, a, p.OrgID, in.EvidenceFileID); err != nil {
 		return BankAccountView{}, err
 	}
-	kind, err := s.reauth(ctx, a, proof)
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.PartiesBankAccountSubmit, nil, p.ID, p.OrgID))
 	if err != nil {
 		return BankAccountView{}, err
 	}
@@ -462,10 +478,11 @@ func (s *service) AdminVerifyBankAccount(ctx context.Context, a authz.Actor, id 
 // payee_bank_account.approved (O: the security notice to the payee org's
 // admins and every finance admin).
 func (s *service) AdminApproveBankAccount(ctx context.Context, a authz.Actor, id uuid.UUID, proof identity.ReauthProof) (BankAccountView, error) {
-	if _, err := s.adminAccount(ctx, a, authz.PartiesBankAccountApprove, id); err != nil {
+	b, err := s.adminAccount(ctx, a, authz.PartiesBankAccountApprove, id)
+	if err != nil {
 		return BankAccountView{}, err
 	}
-	kind, err := s.reauth(ctx, a, proof)
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.PartiesBankAccountApprove, &b.ID, b.PayeeID, b.OrgID))
 	if err != nil {
 		return BankAccountView{}, err
 	}
@@ -593,10 +610,11 @@ func (s *service) AdminRevokeBankAccount(ctx context.Context, a authz.Actor, id 
 	if err != nil {
 		return BankAccountView{}, err
 	}
-	if _, err := s.d.Store.GetBankAccount(ctx, id, false); err != nil {
+	b, err := s.d.Store.GetBankAccount(ctx, id, false)
+	if err != nil {
 		return BankAccountView{}, err
 	}
-	kind, err := s.reauth(ctx, a, proof)
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.PartiesBankAccountRevoke, &b.ID, b.PayeeID, b.OrgID))
 	if err != nil {
 		return BankAccountView{}, err
 	}

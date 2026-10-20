@@ -363,7 +363,10 @@ func (s *service) AdminSetClubSensitivity(ctx context.Context, a authz.Actor, cl
 	}
 	kind, err := s.d.Reauth.Verify(ctx, a.UserID, proof)
 	if err != nil {
-		return ClubView{}, err
+		// A refused proof is audited as denied (the club is not read yet:
+		// no org scope); overload writes nothing (03 §6.2, BE-074).
+		denied := audit.Event{Action: string(authz.DirectoryClubSetSensitivity), ResourceType: authz.TypeClub, ResourceID: &clubID}.By(a)
+		return ClubView{}, audit.ReauthFailed(ctx, s.d.Audit, s.d.Log, denied, err)
 	}
 	hash, err := idempotency.Hash(struct {
 		Op   string

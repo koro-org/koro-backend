@@ -8,6 +8,7 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/orgs"
 	"koro/internal/platform/domainevent"
@@ -215,7 +216,10 @@ func TestTransferOwnership_TargetMustBeActiveCompanyAdmin(t *testing.T) {
 	if got := e.revoker.revoked(); !slices.Contains(got, admin.UserID) || !slices.Contains(got, owner.UserID) {
 		t.Fatalf("revoked %v, want both users", got)
 	}
-	ev := e.audit.of(authz.OrgsOwnershipTransfer)
+	if n := len(e.audit.ofOutcome(authz.OrgsOwnershipTransfer, audit.Denied)); n != 1 {
+		t.Fatalf("%d denied records for the wrong proof, want 1 (03 §6.2, BE-074)", n)
+	}
+	ev := e.audit.ofOutcome(authz.OrgsOwnershipTransfer, audit.Success)
 	if len(ev) != 1 || ev[0].Metadata["reauth"] != "password" || ev[0].Metadata["new_owner_user_id"] != admin.UserID.String() {
 		t.Fatalf("audit = %+v", ev)
 	}
@@ -360,8 +364,11 @@ func TestSuspendedOrg_WriteActions403_ReadAllowed(t *testing.T) {
 	if _, err := e.svc.UpdateOrg(ctx, owner, v.Org.ID, r.ETag, orgs.OrgPatch{Name: &name}); err != nil {
 		t.Fatalf("owner update after reactivation: %v", err)
 	}
-	if n := len(e.audit.of(authz.OrgsOrgSuspend)); n != 2 {
+	if n := len(e.audit.ofOutcome(authz.OrgsOrgSuspend, audit.Success)); n != 2 {
 		t.Fatalf("suspend/reactivate audit records = %d", n)
+	}
+	if n := len(e.audit.ofOutcome(authz.OrgsOrgSuspend, audit.Denied)); n != 1 {
+		t.Fatalf("%d denied records for the missing proof, want 1 (03 §6.2, BE-074)", n)
 	}
 	// The platform org is never suspended.
 	platform, _, err := e.store.InsertOrg(ctx, orgs.Org{ID: uuid.NewV7(), Kind: orgs.KindPlatform, Name: "Koro", Slug: "koro", Status: orgs.StatusActive})

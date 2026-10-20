@@ -66,7 +66,8 @@ func (s *service) RequestReturn(ctx context.Context, a authz.Actor, id uuid.UUID
 		}
 		target = *t.SenderIBAN
 	}
-	kind, err := s.reauth(ctx, a, proof)
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.PaymentsTransferMarkReturned, authz.TypeIncomingTransfer, &t.ID, nil,
+		map[string]any{"step": "request"}))
 	if err != nil {
 		return IncomingTransfer{}, err
 	}
@@ -117,7 +118,8 @@ func (s *service) DecideReturn(ctx context.Context, a authz.Actor, id uuid.UUID,
 	if t.Status != TransferReturnRequested {
 		return IncomingTransfer{}, stateErr(t)
 	}
-	kind, err := s.reauth(ctx, a, proof)
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.PaymentsTransferMarkReturned, authz.TypeIncomingTransfer, &t.ID, nil,
+		map[string]any{"step": "decision", "decision": string(d)}))
 	if err != nil {
 		return IncomingTransfer{}, err
 	}
@@ -177,7 +179,8 @@ func (s *service) MarkReturned(ctx context.Context, a authz.Actor, id uuid.UUID,
 	if err := authz.Can(ctx, a, authz.PaymentsTransferMarkReturned, transferResource(t, false)); err != nil {
 		return IncomingTransfer{}, err
 	}
-	kind, err := s.reauth(ctx, a, proof)
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.PaymentsTransferMarkReturned, authz.TypeIncomingTransfer, &t.ID, nil,
+		map[string]any{"step": "receipt"}))
 	if err != nil {
 		return IncomingTransfer{}, err
 	}

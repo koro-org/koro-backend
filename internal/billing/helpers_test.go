@@ -12,6 +12,7 @@ import (
 	"uuid"
 
 	"koro/internal/audit"
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/billing"
@@ -376,6 +377,7 @@ type env struct {
 	outbox  *outbox.Mem
 	queue   *queue.Mem
 	sender  *fakeSender
+	reauth  *audittest.LateReauth[identity.ReauthProof] // fakeReauth with an overload switch
 	sealer  *crypto.Envelope
 	tx      db.TxManager
 	mod     billing.Module
@@ -401,6 +403,7 @@ func newEnvWith(t *testing.T, clk *clock.Fake, store billing.Store, tx db.TxMana
 		files:   &fakeFiles{meta: map[uuid.UUID]files.FileMeta{}, attached: map[uuid.UUID]files.Owner{}},
 		audit:   &auditLog{}, outbox: outbox.NewMem(clk), queue: queue.NewMem(), sender: &fakeSender{},
 		sealer: testEnvelope(t), subs: outbox.NewRegistry(),
+		reauth: &audittest.LateReauth[identity.ReauthProof]{Next: fakeReauth{}},
 	}
 	e.tx = tx
 	e.seedParties()
@@ -423,7 +426,7 @@ func (e *env) deps(t *testing.T) billing.Deps {
 	return billing.Deps{
 		Store: e.store, Tx: e.tx, Clock: e.clk, Log: obs.Discard(), Audit: e.audit, Outbox: e.outbox, Queue: e.queue,
 		Idempotency: keeper, Orders: e.orders, Offerings: e.terms, Parties: e.parties, Payees: fakePayees{p: e.parties},
-		Orgs: fakeOrgs{}, Files: e.files, Reauth: fakeReauth{}, Sealer: e.sealer, Sender: e.sender, Staff: fakeStaff{},
+		Orgs: fakeOrgs{}, Files: e.files, Reauth: e.reauth, Sealer: e.sealer, Sender: e.sender, Staff: fakeStaff{},
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 	"uuid"
 
 	"koro/internal/audit"
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/files"
@@ -307,6 +308,7 @@ type env struct {
 	outbox *outbox.Mem
 	queue  *queue.Mem
 	reauth *fakeReauth
+	late   *audittest.LateReauth[identity.ReauthProof] // reauth with an overload switch
 	sender *fakeSender
 	svc    parties.Service
 	mod    parties.Module
@@ -339,11 +341,12 @@ func newEnv(t *testing.T, opts ...envOpt) *env {
 	clk := clock.NewFake(t0)
 	e := &env{clk: clk, store: parties.NewMemStore(clk.Now), audit: &auditLog{}, orgs: newFakeOrgs(), files: newFakeFiles(),
 		logs: &syncBuffer{}, outbox: outbox.NewMem(clk), queue: queue.NewMem(), reauth: &fakeReauth{}, sender: &fakeSender{}}
+	e.late = &audittest.LateReauth[identity.ReauthProof]{Next: e.reauth}
 	sealer, indexer := testKeys(t)
 	tx := db.NopTx{}
 	d := parties.Deps{
 		Store: e.store, Tx: tx, Audit: e.audit, Orgs: e.orgs, Files: e.files, Clock: clk, Sealer: sealer, Indexer: indexer,
-		Outbox: e.outbox, Queue: e.queue, Reauth: e.reauth, Sender: e.sender, Users: fakeUsers{}, FinanceAdmins: financeAdmins,
+		Outbox: e.outbox, Queue: e.queue, Reauth: e.late, Sender: e.sender, Users: fakeUsers{}, FinanceAdmins: financeAdmins,
 		// A plain JSON handler: no obs masks, so what the module logs is checked as is.
 		Log:         slog.New(slog.NewJSONHandler(e.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		Idempotency: idempotency.New(idempotency.Deps{Tx: tx, Store: idempotency.NewMemStore(), Clock: clk, Log: slog.New(slog.DiscardHandler)}),

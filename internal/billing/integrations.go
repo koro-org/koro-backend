@@ -100,7 +100,10 @@ func (s *service) AdminPutIntegration(ctx context.Context, a authz.Actor, provid
 	}
 	kind, err := s.d.Reauth.Verify(ctx, a.UserID, proof)
 	if err != nil {
-		return Integration{}, err
+		// A refused proof is audited as denied; overload writes nothing (03 §6.2, BE-074).
+		denied := audit.Event{Action: string(authz.BillingIntegrationManage), ResourceType: "integration",
+			Metadata: map[string]any{"provider": provider}}.By(a)
+		return Integration{}, audit.ReauthFailed(ctx, s.d.Audit, s.d.Log, denied, err)
 	}
 	if s.d.Sealer == nil {
 		return Integration{}, problem.ErrUnavailable

@@ -81,6 +81,7 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/identity"
 	"koro/internal/platform/clock"
@@ -259,11 +260,26 @@ var adminSurface = authz.Resource{Type: authz.TypeAdminSurface}
 
 // reauth verifies the proof of an R operation (03 §6.2) and returns its
 // kind for the audit record; without a verifier the operation fails closed.
-func (s *service) reauth(ctx context.Context, a authz.Actor, proof identity.ReauthProof) (string, error) {
+// A refused proof is audited as denied (the operation's record: action,
+// resource, the org when read; audit.ReauthFailed); an error without a
+// verdict (overload, a dependency down) writes nothing (BE-074).
+func (s *service) reauth(ctx context.Context, a authz.Actor, proof identity.ReauthProof, denied audit.Event) (string, error) {
 	if s.d.Reauth == nil {
 		return "", ErrUnavailable
 	}
-	return s.d.Reauth.Verify(ctx, a.UserID, proof)
+	kind, err := s.d.Reauth.Verify(ctx, a.UserID, proof)
+	if err != nil {
+		return "", audit.ReauthFailed(ctx, s.d.Audit, s.d.Log, denied.By(a), err)
+	}
+	return kind, nil
+}
+
+// reauthDenied is the denied record of a refused proof of act on a
+// resource (resID nil before the resource exists; orgID only when read
+// from the resource's row). meta names the step of a shared action, never
+// business data: nothing happened.
+func reauthDenied(act authz.Action, resType string, resID, orgID *uuid.UUID, meta map[string]any) audit.Event {
+	return audit.Event{Action: string(act), ResourceType: resType, ResourceID: resID, OrgID: orgID, Metadata: meta}
 }
 
 // logInfo logs a business step (IDs and amounts only, never personal data).

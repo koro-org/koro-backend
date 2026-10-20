@@ -13,6 +13,7 @@ import (
 	"uuid"
 
 	"koro/internal/audit"
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/catalog"
@@ -346,6 +347,7 @@ type env struct {
 	outbox *outbox.Mem
 	queue  *queue.Mem
 	reauth *fakeReauth
+	late   *audittest.LateReauth[identity.ReauthProof] // reauth with an overload switch
 	sender *fakeSender
 	logs   *bytes.Buffer
 	svc    catalog.Service
@@ -364,12 +366,13 @@ func newEnv(t *testing.T) *env {
 		payees: &fakePayees{m: map[uuid.UUID]parties.Payee{}, approved: map[uuid.UUID]bool{}},
 		held:   &fakeHeld{m: map[[2]uuid.UUID]int{}}, outbox: outbox.NewMem(clk), queue: queue.NewMem(),
 		reauth: &fakeReauth{}, sender: &fakeSender{}, logs: &bytes.Buffer{}}
+	e.late = &audittest.LateReauth[identity.ReauthProof]{Next: e.reauth}
 	tx := db.NopTx{}
 	mod, err := catalog.New(catalog.Deps{
 		Store: e.store, Tx: tx, Audit: e.audit, Orgs: e.orgs, Outbox: e.outbox, Queue: e.queue, Clock: clk,
 		Log:         slog.New(slog.DiscardHandler),
 		Idempotency: idempotency.New(idempotency.Deps{Tx: tx, Store: idempotency.NewMemStore(), Clock: clk, Log: slog.New(slog.DiscardHandler)}),
-		Payees:      e.payees, Directory: fakeDirectory{}, Events: e.events, Reauth: e.reauth, BuyerHeld: e.held.held,
+		Payees:      e.payees, Directory: fakeDirectory{}, Events: e.events, Reauth: e.late, BuyerHeld: e.held.held,
 		Sender: e.sender, Users: fakeUsers{}, Staff: fakeStaff{},
 	})
 	if err != nil {

@@ -234,7 +234,7 @@ func (s *service) CloseOrg(ctx context.Context, a authz.Actor, id uuid.UUID, rea
 	if err != nil {
 		return OrgView{}, err
 	}
-	kind, err := s.reauth(ctx, a, proof)
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.OrgsOrgClose, o.ID, true, nil))
 	if err != nil {
 		return OrgView{}, err
 	}
@@ -318,7 +318,7 @@ func (s *service) TransferOwnership(ctx context.Context, a authz.Actor, id, newO
 	if newOwner == uuid.Nil() {
 		return OrgView{}, fieldErr("body.new_owner_user_id", "is required")
 	}
-	kind, err := s.reauth(ctx, a, proof)
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.OrgsOwnershipTransfer, o.ID, true, nil))
 	if err != nil {
 		return OrgView{}, err
 	}

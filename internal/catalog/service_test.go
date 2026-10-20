@@ -10,6 +10,7 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/catalog"
@@ -418,7 +419,8 @@ func TestClosePolicy_RowImmutable(t *testing.T) {
 
 // TestPolicyChange_RequiresReauth_NotifiesAllAdmins (06 H-17): one person
 // changes a policy — with re-authentication (403 reauth_required /
-// reauth_failed, nothing written), audited with the reauth kind — and every
+// reauth_failed, nothing written but the denied records, BE-074), audited
+// with the reauth kind — and every
 // platform and finance admin is notified in-app and by e-mail (A task).
 func TestPolicyChange_RequiresReauth_NotifiesAllAdmins(t *testing.T) {
 	t.Parallel()
@@ -442,7 +444,10 @@ func TestPolicyChange_RequiresReauth_NotifiesAllAdmins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	evs := e.audit.of(authz.CatalogPolicyManage)
+	if n := len(e.audit.ofOutcome(authz.CatalogPolicyManage, audit.Denied)); n != 2 {
+		t.Fatalf("%d denied records for the two refused proofs, want 2", n)
+	}
+	evs := e.audit.ofOutcome(authz.CatalogPolicyManage, audit.Success)
 	if len(evs) != 1 || evs[0].Metadata["reauth"] != "password" || evs[0].Metadata["commission_rate_bp"] != 1000 ||
 		*evs[0].ActorUserID != fin.UserID {
 		t.Fatalf("policy audit = %+v", evs)

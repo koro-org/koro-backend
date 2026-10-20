@@ -11,6 +11,7 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/files"
@@ -147,9 +148,10 @@ func TestApprovePayout_Creator_403FourEyes(t *testing.T) {
 }
 
 // TestApprovePayout_RequiresReauth (03 §6.2): no proof → 403
-// identity.reauth_required, a wrong one → 403 identity.reauth_failed, the
-// right one approves (audit metadata reauth, payout.approved in the
-// outbox); a second approval is 409.
+// identity.reauth_required, a wrong one → 403 identity.reauth_failed (each
+// on record as denied reauth_failed, BE-074), the right one approves
+// (audit metadata reauth, payout.approved in the outbox); a second
+// approval is 409.
 func TestApprovePayout_RequiresReauth(t *testing.T) {
 	t.Parallel()
 	e := newPayoutEnv(t)
@@ -161,11 +163,12 @@ func TestApprovePayout_RequiresReauth(t *testing.T) {
 	wantProblem(t, err, identity.ErrReauthRequired)
 	_, err = e.svc.AdminApprovePayout(ctxOf(t, a), a, p.ID, identity.ReauthProof{Password: "wrong-password"})
 	wantProblem(t, err, identity.ErrReauthFailed)
-	if n := len(e.audit.of(authz.LedgerPayoutApprove)); n != 0 {
-		t.Fatalf("%d approval audit rows before a valid proof", n)
+	denied := e.audit.of(authz.LedgerPayoutApprove)
+	if len(denied) != 2 || denied[0].Outcome != audit.Denied || denied[1].Outcome != audit.Denied {
+		t.Fatalf("approval audit rows before a valid proof = %+v, want two denied records", denied)
 	}
 	e.approve(t, "finance_admin", p.ID)
-	rows := e.audit.of(authz.LedgerPayoutApprove)
+	rows := e.audit.of(authz.LedgerPayoutApprove)[2:]
 	if len(rows) != 1 || rows[0].Metadata["reauth"] != "password" || rows[0].Metadata["iban_masked"] == p.IBANSnapshot {
 		t.Fatalf("approval audit %+v", rows)
 	}

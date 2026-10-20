@@ -10,6 +10,7 @@ import (
 	"uuid"
 
 	"koro/internal/audit"
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/directory"
@@ -183,6 +184,7 @@ func (s *sender) Send(_ context.Context, m notify.Message) (uuid.UUID, error) {
 
 // env is a directory module over in-memory stores and a real orgs module.
 type env struct {
+	reauth  *audittest.LateReauth[identity.ReauthProof] // reauth{} with an overload switch
 	clk     *clock.Fake
 	tx      *spyTx
 	orgsMem *orgs.MemStore
@@ -211,7 +213,7 @@ func newEnv(t *testing.T) *env {
 		audit: &auditLog{}, members: &counter{counts: map[uuid.UUID]int{}}, sender: &sender{},
 		admins: []uuid.UUID{uuid.NewV7(), uuid.NewV7()},
 		ver:    &verifications{m: map[uuid.UUID]identity.EduVerification{}}, users: &userDir{m: map[uuid.UUID]identity.UserSummary{}},
-		removed: &removedFiles{},
+		removed: &removedFiles{}, reauth: &audittest.LateReauth[identity.ReauthProof]{Next: reauth{}},
 	}
 	e.files = &fakeFiles{m: map[uuid.UUID]files.FileMeta{}, removed: e.removed}
 	idem := idempotency.New(idempotency.Deps{Tx: e.tx, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()})
@@ -233,7 +235,7 @@ func newEnv(t *testing.T) *env {
 	e.store = &spyStore{Store: e.mem}
 	mod, err := directory.New(directory.Deps{
 		Store: e.store, Tx: e.tx, Outbox: e.out, Queue: e.queue, Audit: e.audit, Orgs: e.orgs, Idempotency: idem,
-		Clock: clk, Log: obs.Discard(), Reauth: reauth{}, MemberCount: e.members.count, Sender: e.sender,
+		Clock: clk, Log: obs.Discard(), Reauth: e.reauth, MemberCount: e.members.count, Sender: e.sender,
 		PlatformAdmins: func(context.Context) ([]uuid.UUID, error) { return e.admins, nil },
 		Students:       e.ver, Users: e.users, Files: e.files,
 	})

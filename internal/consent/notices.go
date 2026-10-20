@@ -185,29 +185,17 @@ func (s *service) GetNotice(ctx context.Context, a authz.Actor, id uuid.UUID) (N
 // with reason reauth_failed. An error without a verdict — the request
 // budget ran out before identity could check the proof (BE-070/071), or a
 // dependency failed — writes nothing and goes back unchanged; httpx answers
-// 503 (WARN) or 500 and logs it once (BE-072).
+// 503 (WARN) or 500 and logs it once (BE-072; audit.ReauthFailed, BE-074).
 func (s *service) reauth(ctx context.Context, a authz.Actor, act authz.Action, resType string, resID *uuid.UUID, proof ReauthProof) (string, error) {
 	if s.d.Reauth == nil {
 		return "", ErrReauthUnavailable
 	}
 	kind, err := s.d.Reauth.Verify(ctx, a.UserID, proof)
-	switch {
-	case err == nil:
-		return kind, nil
-	case !problem.IsClientError(err):
-		return "", err
+	if err != nil {
+		denied := audit.Event{Action: string(act), ResourceType: resType, ResourceID: resID}.By(a)
+		return "", audit.ReauthFailed(ctx, s.d.Audit, s.d.Log, denied, err)
 	}
-	ev := audit.Event{Action: string(act), Outcome: audit.Denied, Reason: "reauth_failed", ResourceType: resType, ResourceID: resID}.By(a)
-	if lerr := s.d.Audit.Log(ctx, ev); lerr != nil {
-		// A request that ended right after the verdict cannot write its
-		// row: an overload signal (WARN, like httpx), not an audit fault.
-		level := slog.LevelError
-		if ctx.Err() != nil {
-			level = slog.LevelWarn
-		}
-		s.d.Log.LogAttrs(ctx, level, "reauth failure not audited", slog.String("action", string(act)), slog.String("err", lerr.Error()))
-	}
-	return "", err
+	return kind, nil
 }
 
 // cleanBody checks a notice body: valid UTF-8, line breaks normalised to

@@ -11,6 +11,7 @@ import (
 	"uuid"
 
 	"koro/internal/audit"
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/files"
@@ -391,6 +392,7 @@ type payoutEnv struct {
 	audit  *auditLog
 	outbox *outbox.Mem
 	sender *fakeSender
+	reauth *audittest.LateReauth[identity.ReauthProof] // fakeReauth with an overload switch
 }
 
 func newPayoutEnv(t *testing.T) *payoutEnv {
@@ -414,6 +416,7 @@ func newPayoutEnvWith(t *testing.T, clk *clock.Fake, store ledger.Store, payouts
 		audit:  &auditLog{},
 		outbox: outbox.NewMem(clk),
 		sender: &fakeSender{},
+		reauth: &audittest.LateReauth[identity.ReauthProof]{Next: fakeReauth{}},
 	}
 	var orderPort ledger.Orders = e.orders
 	if ord != nil {
@@ -423,7 +426,7 @@ func newPayoutEnvWith(t *testing.T, clk *clock.Fake, store ledger.Store, payouts
 	mod, err := ledger.New(ledger.Deps{
 		Store: store, Tx: tx, Clock: clk, Log: obs.Discard(), Alarm: e.alarms.raise,
 		Payouts: payouts, Orders: orderPort, Payees: e.payees, Parties: fakeParties{p: e.payees}, Orgs: fakeOrgs{},
-		Files: e.files, Audit: e.audit, Outbox: e.outbox, Idempotency: keeper, Reauth: fakeReauth{},
+		Files: e.files, Audit: e.audit, Outbox: e.outbox, Idempotency: keeper, Reauth: e.reauth,
 		Sender: e.sender, Staff: fakeStaff{},
 	})
 	if err != nil {

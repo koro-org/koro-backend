@@ -9,6 +9,7 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/entitlements"
 	"koro/internal/files"
@@ -203,8 +204,9 @@ func TestApproveRefund_Requester_403FourEyes(t *testing.T) {
 
 // TestApproveRefund_RequiresReauth (03 §6.2): the approval carries the
 // re-authentication proof — none 403 identity.reauth_required, a wrong one
-// 403 identity.reauth_failed, and the refund stays requested; the audit
-// record of the approval names the proof's kind.
+// 403 identity.reauth_failed, and the refund stays requested; each refusal
+// is on record as denied reauth_failed (BE-074), the audit record of the
+// approval names the proof's kind.
 func TestApproveRefund_RequiresReauth(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -223,13 +225,16 @@ func TestApproveRefund_RequiresReauth(t *testing.T) {
 	if got, _ := e.store.GetRefund(t.Context(), r.ID, false); got.Status != payments.RefundStatusRequested {
 		t.Fatalf("after the failed proofs: %s", got.Status)
 	}
-	if n := len(e.audit.of(authz.PaymentsRefundApprove)); n != 0 {
+	if n := len(e.audit.ofOutcome(authz.PaymentsRefundApprove, audit.Success)); n != 0 {
 		t.Fatalf("%d approval audit records before the right proof", n)
+	}
+	if n := len(e.audit.ofOutcome(authz.PaymentsRefundApprove, audit.Denied)); n != 2 {
+		t.Fatalf("%d denied records for the two refused proofs, want 2", n)
 	}
 	if _, err := e.svc.ApproveRefund(ctxOf(t, fin), fin, r.ID, good); err != nil {
 		t.Fatal(err)
 	}
-	evs := e.audit.of(authz.PaymentsRefundApprove)
+	evs := e.audit.ofOutcome(authz.PaymentsRefundApprove, audit.Success)
 	if len(evs) != 1 || evs[0].Metadata["reauth"] != "password" || evs[0].Metadata["requested_by"] != id("finance_admin_2").String() {
 		t.Fatalf("approval audit = %+v", evs)
 	}

@@ -11,6 +11,7 @@ import (
 	"uuid"
 
 	"koro/internal/audit"
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/identity"
@@ -129,6 +130,7 @@ type env struct {
 	out      *outbox.Mem
 	audit    *auditLog
 	reauth   *reauth
+	late     *audittest.LateReauth[identity.ReauthProof] // reauth with an overload switch
 	revoker  *revoker
 	users    *users
 	students *students
@@ -149,10 +151,11 @@ func newEnv(t *testing.T) *env {
 		clubs: &clubs{facts: map[uuid.UUID]orgs.ClubFacts{}}, mailer: &mailer{},
 		avatars: &avatars{urls: map[uuid.UUID]string{}},
 	}
+	e.late = &audittest.LateReauth[identity.ReauthProof]{Next: e.reauth}
 	mod, err := orgs.New(orgs.Deps{
 		Store: e.store, Tx: e.tx, Outbox: e.out, Audit: e.audit, Clock: clk, Log: obs.Discard(),
 		Idempotency:    idempotency.New(idempotency.Deps{Tx: e.tx, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()}),
-		Reauth:         e.reauth,
+		Reauth:         e.late,
 		RevokeSessions: e.revoker.revoke,
 		OpenCommerce:   func() []orgs.OpenCommerceCheck { return e.open },
 		Users:          e.users, Students: e.students, Clubs: e.clubs.info, Mailer: e.mailer, Avatars: e.avatars.of,

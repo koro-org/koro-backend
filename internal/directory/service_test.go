@@ -7,6 +7,7 @@ import (
 	"uuid"
 
 	"koro/db/reference"
+	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/directory"
 	"koro/internal/identity"
@@ -242,7 +243,8 @@ func TestSetSensitivity_EmitsEventInSameTx(t *testing.T) {
 	proof := identity.ReauthProof{Password: goodPassword}
 	set := directory.SensitivityInput{IsSensitive: true, SensitiveReason: "philosophical_belief"}
 
-	// R: no proof, wrong proof → 403, nothing written.
+	// R: no proof, wrong proof → 403, nothing written but the two denied
+	// records (03 §6.2, BE-074).
 	_, err := e.svc.AdminSetClubSensitivity(ctx, pad(t), id, set, identity.ReauthProof{})
 	wantCode(t, err, 403, "identity.reauth_required")
 	_, err = e.svc.AdminSetClubSensitivity(ctx, pad(t), id, set, identity.ReauthProof{Password: "yanlis-parola-1"})
@@ -278,7 +280,10 @@ func TestSetSensitivity_EmitsEventInSameTx(t *testing.T) {
 	if spec, _ := domainevent.Lookup(domainevent.TopicClubSensitivityChanged); spec.Mechanism != domainevent.Outbox {
 		t.Fatal("club.sensitivity_changed must be an outbox (O) topic")
 	}
-	audits := e.audit.of(authz.DirectoryClubSetSensitivity)
+	if n := len(e.audit.ofOutcome(authz.DirectoryClubSetSensitivity, audit.Denied)); n != 2 {
+		t.Fatalf("%d denied records for the two refused proofs, want 2", n)
+	}
+	audits := e.audit.ofOutcome(authz.DirectoryClubSetSensitivity, audit.Success)
 	if len(audits) != 1 || audits[0].Metadata["reauth"] != "password" || audits[0].Metadata["sensitive"] != true {
 		t.Fatalf("audit = %+v", audits)
 	}

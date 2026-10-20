@@ -524,7 +524,7 @@ func (s *service) ApproveRefund(ctx context.Context, a authz.Actor, id uuid.UUID
 	if err := authz.Can(ctx, a, authz.PaymentsRefundApprove, refundResource(r)); err != nil {
 		return Refund{}, err
 	}
-	kind, err := s.reauth(ctx, a, proof)
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.PaymentsRefundApprove, authz.TypeRefund, &r.ID, nil, nil))
 	if err != nil {
 		return Refund{}, err
 	}

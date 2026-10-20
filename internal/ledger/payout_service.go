@@ -547,7 +547,9 @@ func (s *service) AdminApprovePayout(ctx context.Context, a authz.Actor, payoutI
 	}
 	kind, err := s.d.Reauth.Verify(ctx, a.UserID, proof)
 	if err != nil {
-		return PayoutView{}, err
+		// A refused proof is audited as denied; overload writes nothing (03 §6.2, BE-074).
+		denied := audit.Event{Action: string(authz.LedgerPayoutApprove), OrgID: &p.OrgID, ResourceType: authz.TypePayout, ResourceID: &p.ID}.By(a)
+		return PayoutView{}, audit.ReauthFailed(ctx, s.d.Audit, s.d.Log, denied, err)
 	}
 	hash, err := idempotency.Hash(struct {
 		Op     string

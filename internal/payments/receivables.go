@@ -157,7 +157,7 @@ func (s *service) ApproveCollection(ctx context.Context, a authz.Actor, id uuid.
 	if err := authz.Can(ctx, a, authz.PaymentsReceivableApprove, collectionResource(c)); err != nil {
 		return ReceivableCollection{}, err
 	}
-	kind, err := s.reauth(ctx, a, proof)
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.PaymentsReceivableApprove, authz.TypeReceivableCollection, &c.ID, &c.OrgID, nil))
 	if err != nil {
 		return ReceivableCollection{}, err
 	}

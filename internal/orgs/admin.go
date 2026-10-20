@@ -46,7 +46,7 @@ func (s *service) adminR(ctx context.Context, a authz.Actor, id uuid.UUID, reaso
 	if err != nil {
 		return OrgView{}, err
 	}
-	kind, err := s.reauth(ctx, a, proof)
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.OrgsOrgSuspend, id, false, map[string]any{"transition": t.op}))
 	if err != nil {
 		return OrgView{}, err
 	}

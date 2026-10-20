@@ -67,7 +67,7 @@ func (s *service) CreateCollectionAccount(ctx context.Context, a authz.Actor, in
 	if err := s.checkPlatformParty(ctx, in.LegalPartyID); err != nil {
 		return CollectionAccount{}, err
 	}
-	kind, err := s.reauth(ctx, a, proof)
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.PaymentsCollectionAccountCreate, authz.TypeCollectionAccount, nil, nil, nil))
 	if err != nil {
 		return CollectionAccount{}, err
 	}
@@ -140,7 +140,8 @@ func (s *service) DecideCollectionAccount(ctx context.Context, a authz.Actor, id
 	if err := authz.Can(ctx, a, authz.PaymentsCollectionAccountApprove, accountResource(c)); err != nil {
 		return CollectionAccount{}, err
 	}
-	kind, err := s.reauth(ctx, a, proof)
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.PaymentsCollectionAccountApprove, authz.TypeCollectionAccount, &c.ID, nil,
+		map[string]any{"decision": string(d)}))
 	if err != nil {
 		return CollectionAccount{}, err
 	}
@@ -246,7 +247,8 @@ func (s *service) changeAccount(ctx context.Context, a authz.Actor, id uuid.UUID
 	if _, err := s.d.Store.GetAccount(ctx, id, false); err != nil {
 		return CollectionAccount{}, err
 	}
-	kind, err := s.reauth(ctx, a, proof)
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.PaymentsCollectionAccountRetire, authz.TypeCollectionAccount, &id, nil,
+		map[string]any{"change": change}))
 	if err != nil {
 		return CollectionAccount{}, err
 	}

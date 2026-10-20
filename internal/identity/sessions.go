@@ -78,13 +78,13 @@ func (s *service) CreateSession(ctx context.Context, a authz.Actor, in Login) (L
 	}
 	if !found || u.PasswordHash == "" || u.Status == StatusErased {
 		if err := s.d.Hasher.VerifyDummy(ctx, in.Password); err != nil {
-			return LoginResult{}, err
+			return LoginResult{}, hasherErr(err)
 		}
 		return LoginResult{}, ErrInvalidCredentials
 	}
 	if u.locked(now) {
 		if err := s.d.Hasher.VerifyDummy(ctx, in.Password); err != nil {
-			return LoginResult{}, err
+			return LoginResult{}, hasherErr(err)
 		}
 		if err := s.recordFailure(ctx, u.ID, authz.IdentitySessionCreate, "locked"); err != nil {
 			return LoginResult{}, err
@@ -92,7 +92,12 @@ func (s *service) CreateSession(ctx context.Context, a authz.Actor, in Login) (L
 		return LoginResult{}, ErrInvalidCredentials
 	}
 	ok, rehash, err := s.d.Hasher.Verify(ctx, in.Password, u.PasswordHash)
-	if err != nil {
+	switch {
+	case hasherBusy(err):
+		// Overloaded: 503 and no verdict, so no failed attempt is counted
+		// (a correct password must not lock the account; BE-070).
+		return LoginResult{}, hasherErr(err)
+	case err != nil:
 		s.d.Log.LogAttrs(ctx, slog.LevelError, "stored password hash is unusable", slog.String("user_id", u.ID.String()),
 			slog.String("err", err.Error()))
 		ok = false
@@ -117,7 +122,7 @@ func (s *service) CreateSession(ctx context.Context, a authz.Actor, in Login) (L
 	newHash := ""
 	if rehash {
 		if newHash, err = s.d.Hasher.Hash(ctx, in.Password); err != nil {
-			return LoginResult{}, err
+			return LoginResult{}, hasherErr(err)
 		}
 	}
 	if u.MFAEnabled {

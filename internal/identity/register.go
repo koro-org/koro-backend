@@ -110,7 +110,7 @@ func (s *service) Register(ctx context.Context, a authz.Actor, in Registration) 
 	// Hash before looking the address up: both paths pay for one argon2id.
 	hash, err := s.d.Hasher.Hash(ctx, in.Password)
 	if err != nil {
-		return err
+		return hasherErr(err)
 	}
 
 	var created *User

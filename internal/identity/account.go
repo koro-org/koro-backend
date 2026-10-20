@@ -64,14 +64,15 @@ func (s *service) verify(ctx context.Context, userID uuid.UUID, proof ReauthProo
 // checkPassword verifies the password of a signed-in user (re-authentication,
 // current_password). A locked account is refused before any comparison; a
 // wrong password counts towards the lockout and the reauth class (failures
-// only, 04 §1.9) and becomes 429 once either is exhausted.
+// only, 04 §1.9) and becomes 429 once either is exhausted. An overloaded
+// hasher is 503 and no verdict: nothing is counted or reset (BE-070).
 func (s *service) checkPassword(ctx context.Context, u User, pw string, action authz.Action) error {
 	if s.d.Hasher == nil {
 		return ErrUnavailable
 	}
 	if u.locked(s.now()) {
 		if err := s.d.Hasher.VerifyDummy(ctx, pw); err != nil {
-			return err
+			return hasherErr(err)
 		}
 		return problem.ErrRateLimited
 	}
@@ -79,13 +80,16 @@ func (s *service) checkPassword(ctx context.Context, u User, pw string, action a
 	if u.PasswordHash != "" {
 		var err error
 		ok, _, err = s.d.Hasher.Verify(ctx, pw, u.PasswordHash)
-		if err != nil {
+		switch {
+		case hasherBusy(err):
+			return hasherErr(err)
+		case err != nil:
 			s.d.Log.LogAttrs(ctx, slog.LevelError, "stored password hash is unusable", slog.String("user_id", u.ID.String()),
 				slog.String("err", err.Error()))
 			ok = false
 		}
 	} else if err := s.d.Hasher.VerifyDummy(ctx, pw); err != nil {
-		return err
+		return hasherErr(err)
 	}
 	if ok {
 		return s.resetFailures(ctx, u)
@@ -162,7 +166,7 @@ func (s *service) ChangePassword(ctx context.Context, a authz.Actor, in Password
 	}
 	hash, err := s.d.Hasher.Hash(ctx, in.NewPassword)
 	if err != nil {
-		return err
+		return hasherErr(err) // before the transaction: nothing is written
 	}
 	keep := a.SessionID
 	err = s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
@@ -234,7 +238,7 @@ func (s *service) ConfirmPasswordReset(ctx context.Context, a authz.Actor, raw, 
 	}
 	hash, err := s.d.Hasher.Hash(ctx, newPassword)
 	if err != nil {
-		return err
+		return hasherErr(err) // before the transaction: the token stays unused
 	}
 	err = s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		cur, err := s.consumeToken(ctx, t.ID, PurposePasswordReset)

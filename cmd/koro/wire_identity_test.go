@@ -11,7 +11,9 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 	"uuid"
 
@@ -316,6 +318,97 @@ func TestSession_CookieTokenAsBearer_401(t *testing.T) {
 		`{"email":"nobody@actor.koro.test"}`)
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("public operation with a rejected credential = %d %s, want 202 (anonymous)", rec.Code, rec.Body)
+	}
+}
+
+// lateHasher is the shared test hasher on an overloaded server (BE-070):
+// while hash is set, Hash reaches the real hasher only after the request
+// context has ended (all computation slots taken until the deadline, or
+// a CPU-starved request arriving too late), so the request fails with the
+// error platform/passwd itself returns. Use it inside a synctest bubble.
+type lateHasher struct {
+	identity.PasswordHasher
+	hash atomic.Bool
+}
+
+func (h *lateHasher) Hash(ctx context.Context, pw string) (string, error) {
+	if h.hash.Load() {
+		<-ctx.Done()
+	}
+	return h.PasswordHasher.Hash(ctx, pw)
+}
+
+// TestWire_ChangePasswordPastRequestBudget_503 reproduces the BE-064 authz
+// matrix failure over HTTP (BE-070): on an overloaded -race run
+// changeMyPassword answered 500 internal_error after 18–37 s, because the
+// request budget (httpx.DefaultRequestTimeout, as in the matrix harness)
+// ran out between verifying current_password and hashing the new one. The
+// answer is now 503 unavailable, nothing is written, and the retry is 204.
+func TestWire_ChangePasswordPastRequestBudget_503(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	store := identity.NewMemStore(clock.Real().Now)
+	late := &lateHasher{PasswordHasher: testHasher()}
+	c.identity.store, c.identity.hasher = store, late
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	e := &actorEnv{c: c, store: store, clk: c.infra.clock}
+	u := e.user(t, nil)
+	tok := e.session(t, u, identity.ClientMobile)
+	other := e.session(t, u, identity.ClientWeb)
+	app, err := httpx.New(httpx.Deps{Log: obs.Discard(), Actors: c.actors}) // default request budget, as the matrix
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.registerRoutes(app.V1)
+	do := func(ctx context.Context, method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequestWithContext(ctx, method, path, strings.NewReader(body))
+		req.Header.Set("X-Koro-Client", "mobile")
+		req.Header.Set("Authorization", "Bearer "+tok)
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		rec := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+	// Warm the stack up outside the bubble (lazy initialisation stays
+	// out of it).
+	if rec := do(t.Context(), http.MethodGet, "/api/v1/me", ""); rec.Code != http.StatusOK {
+		t.Fatalf("GET /me = %d %s", rec.Code, rec.Body)
+	}
+	change := `{"current_password":"` + matrixReauthPassword + `","new_password":"Yeni-Ve-Uzun-Parola-4821"}`
+	synctest.Test(t, func(t *testing.T) {
+		late.hash.Store(true)
+		defer late.hash.Store(false)
+		start := time.Now()
+		rec := do(t.Context(), http.MethodPost, "/api/v1/me/password", change)
+		var p struct {
+			Code string `json:"code"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil || rec.Code != http.StatusServiceUnavailable || p.Code != "unavailable" {
+			t.Fatalf("POST /me/password past the request budget = %d %s, want 503 unavailable", rec.Code, rec.Body)
+		}
+		if waited := time.Since(start); waited != httpx.DefaultRequestTimeout {
+			t.Fatalf("answered after %v, want the whole budget %v", waited, httpx.DefaultRequestTimeout)
+		}
+	})
+	cur, err := store.User(t.Context(), u.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cur.PasswordHash != u.PasswordHash || cur.FailedLogins != 0 || cur.LockedUntil != nil {
+		t.Fatalf("the failed request wrote: hash changed %v, failed_logins %d", cur.PasswordHash != u.PasswordHash, cur.FailedLogins)
+	}
+	if _, err := e.resolve(t.Context(), httpx.TransportCookie, other); err != nil {
+		t.Fatalf("the other session was closed by a failed request: %v", err)
+	}
+	if rec := do(t.Context(), http.MethodPost, "/api/v1/me/password", change); rec.Code != http.StatusNoContent {
+		t.Fatalf("retry = %d %s, want 204", rec.Code, rec.Body)
+	}
+	if _, err := e.resolve(t.Context(), httpx.TransportCookie, other); !errors.Is(err, problem.ErrUnauthenticated) {
+		t.Fatalf("other session after the retry: %v, want closed", err)
 	}
 }
 

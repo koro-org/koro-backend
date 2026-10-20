@@ -9,6 +9,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -80,6 +81,11 @@ func pgWorld(d *db.DB) world {
 			id := uuid.NewV7()
 			pgExec(t, d, `INSERT INTO files (id, purpose, bucket, storage_key, declared_mime) VALUES ($1, 'cv', 'koro-files-dev', $2, 'application/pdf')`,
 				id, "cv/2026/10/"+id.String())
+			return id
+		},
+		company: func(t *testing.T) uuid.UUID {
+			id, n := uuid.NewV7(), next()
+			pgExec(t, d, `INSERT INTO organizations (id, kind, name, slug) VALUES ($1, 'company', $2, $3)`, id, "Şirket "+n, "company-"+n)
 			return id
 		},
 	}
@@ -536,5 +542,58 @@ func TestAudience_Gorm_CountSegment(t *testing.T) {
 	}
 	if want := ids(append(year2, year3...)); !slices.Equal(got, want) {
 		t.Fatalf("streamed %v, want %v", got, want)
+	}
+}
+
+// TestGrants_Postgres_ConcurrentAndScoped (02 §9.7; BE-046): concurrent
+// acceptances of several contact requests of one company leave exactly one
+// active grant (the student's advisory lock); a grant to an unknown org or
+// to a club is not found (the composite FK binds it to a company); the
+// student's revocation ends it in the database at once.
+func TestGrants_Postgres_ConcurrentAndScoped(t *testing.T) {
+	t.Parallel()
+	e := newPgEnv(t)
+	ctx := t.Context()
+	w := pgWorld(e.d)
+	a := e.pgStudent(t)
+	company := w.company(t)
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for range 8 {
+		wg.Go(func() { errs <- e.svc.Grant(ctx, a.UserID, company, students.SourceContactRequest, uuid.NewV7()) })
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent Grant: %v", err)
+		}
+	}
+	var active int
+	if err := e.d.Pool.QueryRow(ctx, `SELECT count(*) FROM profile_access_grants WHERE student_user_id = $1 AND revoked_at IS NULL`,
+		a.UserID).Scan(&active); err != nil || active != 1 {
+		t.Fatalf("active grants = %d, %v; want 1", active, err)
+	}
+	club := uuid.NewV7()
+	pgExec(t, e.d, `INSERT INTO organizations (id, kind, name, slug) VALUES ($1, 'club', 'Kulüp', $2)`, club, "club-"+next())
+	for name, org := range map[string]uuid.UUID{"unknown org": uuid.NewV7(), "club": club} {
+		if err := e.svc.Grant(ctx, a.UserID, org, students.SourceContactRequest, uuid.NewV7()); !errors.Is(err, students.ErrNotFound) {
+			t.Errorf("%s: %v, want not found", name, err)
+		}
+	}
+	mine, err := e.svc.ListMyAccessGrants(ctx, a, nil, 0)
+	if err != nil || len(mine.Items) != 1 {
+		t.Fatalf("my grants = %+v, %v", mine, err)
+	}
+	if err := e.svc.RevokeMyAccessGrant(ctx, a, mine.Items[0].Grant.ID, "Gerek kalmadı"); err != nil {
+		t.Fatal(err)
+	}
+	var kind, reason string
+	if err := e.d.Pool.QueryRow(ctx, `SELECT revoked_by_kind, revoke_reason FROM profile_access_grants WHERE id = $1`,
+		mine.Items[0].Grant.ID).Scan(&kind, &reason); err != nil || kind != "student" || reason != "Gerek kalmadı" {
+		t.Fatalf("stored revocation = %q %q, %v", kind, reason, err)
+	}
+	if ok, err := e.svc.Has(ctx, a.UserID, company); err != nil || ok {
+		t.Fatalf("Has = %v, %v", ok, err)
 	}
 }

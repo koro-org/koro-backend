@@ -18,7 +18,7 @@ import (
 //	staff  sup/pad/dpo AdminStudentViewDTO                   toAdminStudentViewDTO (BE-025, 04 §V.5)
 //	0      company  AudienceCountDTO                         NewAudienceCount (outreach; BE-025 Audience.Count)
 //	1      company  none: delivery counts are AudienceCountDTO values (outreach)
-//	2      company  AnonProfileDTO                           ToAnonProfile (discovery, BE-051)
+//	2      company  AnonProfileDTO                           ToAnonProfile, AnonProfile.WithAnonID (Discoverable.Search, BE-046; discovery, BE-051)
 //	3      company  StudentProfileL3DTO, StudentL3CardDTO    ToStudentProfileL3, ToStudentL3Card (BE-046)
 
 // ---- shared parts
@@ -224,7 +224,7 @@ type ClubFact struct {
 
 // CompanySource is everything a company view may be built from; the
 // projections copy only the fields their level allows (04 §V.2, §V.3).
-// BE-046/BE-051 fill it from this module's store and its ports.
+// BE-046 fills it from this module's store and its ports.
 type CompanySource struct {
 	View      ProfileView
 	FirstName string
@@ -317,9 +317,17 @@ func ToAnonProfile(src CompanySource, anonID string) (AnonProfileDTO, error) {
 	if !src.Discoverable() || anonID == "" {
 		return AnonProfileDTO{}, ErrNotFound
 	}
+	d := anonDTO(src)
+	d.AnonID = anonID
+	return d, nil
+}
+
+// anonDTO is the level 2 projection of src without its pseudonym (the
+// caller checked discoverability).
+func anonDTO(src CompanySource) AnonProfileDTO {
 	v, p := src.View, src.View.Profile
 	d := AnonProfileDTO{
-		AnonID: anonID, University: universityRef(v), Department: departmentRef(v), DegreeLevel: string(p.DegreeLevel),
+		University: universityRef(v), Department: departmentRef(v), DegreeLevel: string(p.DegreeLevel),
 		ClassYear: intPtr(p.ClassYear), Skills: namedSkills(src), Languages: languageDTOs(v.Languages),
 		Experiences: []AnonExperienceDTO{}, ProfileCompleteness: len(p.CompletedSections),
 	}
@@ -338,7 +346,7 @@ func ToAnonProfile(src CompanySource, anonID string) (AnonProfileDTO, error) {
 		}
 		d.Experiences = append(d.Experiences, x)
 	}
-	return d, nil
+	return d
 }
 
 // ---- level 3 (04 §V.3)

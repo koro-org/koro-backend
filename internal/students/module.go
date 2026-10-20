@@ -4,9 +4,9 @@
 // and outreach target, and the visibility DTOs of every level a company or
 // the student sees (dto.go), the CVs, the audience counts and streams
 // (Audience over count_segment), the club_admin's member card and the
-// platform staff's admin view (BE-025). Level 3 access grants and the
-// company endpoints come with BE-046, which serve the level 2 and 3
-// projections built here.
+// platform staff's admin view (BE-025), and the level 3 access grants with
+// the company views of granted students and the level 2 discoverability
+// contract (BE-046).
 //
 // Rules the package enforces:
 //
@@ -50,6 +50,19 @@
 //     card is audited. The admin view (04 §V.5) is break-glass for
 //     support and platform_admin and request-bound for the dpo (03 k11);
 //     every read is audited.
+//   - Level 3 (02 §9.7, 03 Y5, 04 §V.3): a company sees a student's full
+//     profile and current CV only while it holds an active grant the
+//     student gave (an accepted contact request) and never a minor's; any
+//     other case is 404, the same answer as an unknown student (no
+//     existence leak). Every profile read and CV download is audited, the
+//     CV by a 1-minute signed URL. The student or the company revokes a
+//     grant; the next read already fails (the grant is checked on every
+//     call). Revoked grants go 6 months later (access_grant_revoked).
+//   - Level 2 (01 §4.9, T-68, T-237): IsDiscoverable and Search check the
+//     setting, the consent in force, the verification, the age and the
+//     account at read time; a search whose filters match fewer than 10
+//     students in total answers nothing (below_threshold) and has no club
+//     filter.
 //   - Talent values never enter this module (01 §0-7): no DTO carries a
 //     talent, band, score, point or rank field (TestDTO_SelfProfileHasNoTalentField,
 //     TestDTO_NoLevelCarriesTalentField).
@@ -111,12 +124,51 @@ type Profiles interface {
 	RankingChoice(ctx context.Context, userID uuid.UUID) (RankingChoice, error)
 }
 
+// AccessGrants is the level 3 contract of messaging (01 §4.9, §6.3): a
+// student who accepts a company's contact request grants that company
+// level 3 access in the acceptance's transaction. No reason of a company is
+// ever shown to the student, nor a student's to the company.
+type AccessGrants interface {
+	// Grant gives companyOrgID level 3 access to studentID for the source
+	// request srcID, in the transaction carried by ctx (messaging → students
+	// is a sync write, 01 §6.3). Idempotent: a replay of the same source,
+	// or a company that already holds an active grant, changes nothing. A
+	// minor never grants (422 students.minor_restricted, 04 §V.0-3); an
+	// unknown account or company is not found.
+	Grant(ctx context.Context, studentID, companyOrgID uuid.UUID, src GrantSource, srcID uuid.UUID) error
+	// Revoke ends the grant of source srcID (revoked by the system), in
+	// its own transaction or the one ctx carries. A grant that is gone or
+	// already revoked is no error.
+	Revoke(ctx context.Context, studentID, companyOrgID uuid.UUID, src GrantSource, srcID uuid.UUID, reason string) error
+	// Has reports whether companyOrgID holds an active grant on studentID.
+	Has(ctx context.Context, studentID, companyOrgID uuid.UUID) (bool, error)
+}
+
+// Discoverable is the level 2 contract of discovery and messaging (01
+// §4.9): who may be found, and the anonymous search itself. Neither calls
+// authz.Can: the caller decides who searches (discovery.profile.search,
+// messaging.contact_request.create).
+type Discoverable interface {
+	// IsDiscoverable reports whether userID may be found at level 2: level
+	// 2 on with its consent in force (T-237: read now), an active student
+	// verification, an adult, an active account and an active profile.
+	IsDiscoverable(ctx context.Context, userID uuid.UUID) (bool, error)
+	// Search returns a keyset page (user_id order) of the discoverable
+	// students matching q. When fewer than 10 students match the filters
+	// in total the page is empty and BelowThreshold is set (T-68): a filter
+	// never singles a person out. AnonProfile carries the user ID for the
+	// caller's pseudonym and is never an answer itself.
+	Search(ctx context.Context, q DiscoveryQuery) (DiscoveryPage, error)
+}
+
 // Service is the students service: the cross-module contracts plus the
 // HTTP use cases (04 §2.4). Every method that takes an actor calls
 // authz.Can first (05 §5.3).
 type Service interface {
 	Profiles
 	Audience
+	AccessGrants
+	Discoverable
 
 	// GraduatedAmong reports which of userIDs have a graduated profile
 	// (orgs.admin_sweep, T-210).
@@ -161,6 +213,26 @@ type Service interface {
 	// AdminGetStudentProfile is adminGetStudentProfile
 	// (students.profile.read_admin).
 	AdminGetStudentProfile(ctx context.Context, a authz.Actor, userID uuid.UUID, access AdminAccess) (AdminView, error)
+
+	// ListMyAccessGrants is listMyAccessGrants
+	// (students.access_grant.list_own): the companies holding level 3
+	// access, newest first.
+	ListMyAccessGrants(ctx context.Context, a authz.Actor, after *GrantKey, limit int) (GrantPage, error)
+	// RevokeMyAccessGrant is revokeMyAccessGrant
+	// (students.access_grant.revoke): the company loses access at once.
+	RevokeMyAccessGrant(ctx context.Context, a authz.Actor, grantID uuid.UUID, reason string) error
+	// ListCompanyStudents is listCompanyGrantedStudents
+	// (students.access_grant.list_company).
+	ListCompanyStudents(ctx context.Context, a authz.Actor, orgID uuid.UUID, q CompanyStudentQuery) (CompanyStudentPage, error)
+	// GetCompanyStudentProfile is getCompanyStudentProfile
+	// (students.profile.read_company): audited.
+	GetCompanyStudentProfile(ctx context.Context, a authz.Actor, orgID, userID uuid.UUID) (StudentProfileL3DTO, error)
+	// DownloadCompanyStudentCV is downloadCompanyStudentCv
+	// (students.cv.read_company): every call audited.
+	DownloadCompanyStudentCV(ctx context.Context, a authz.Actor, orgID, userID uuid.UUID) (files.Download, error)
+	// RevokeCompanyAccessGrant is revokeCompanyAccessGrant
+	// (students.access_grant.revoke, the company's path).
+	RevokeCompanyAccessGrant(ctx context.Context, a authz.Actor, orgID, userID uuid.UUID, reason string) error
 }
 
 // Deps are the dependencies of the students module. Store, Tx, Outbox,
@@ -205,6 +277,16 @@ type Deps struct {
 	// builds later). nil, or a nil reader → the member card's count and
 	// the admin view's registrations are absent.
 	Registrations func() Registrations
+
+	// Contacts is identity's address lookup of level 3 contact sharing.
+	// nil → no level 3 view carries an e-mail.
+	Contacts Contacts
+	// OrgNames names companies and clubs (orgs). nil → the grant list
+	// carries no company name and no level 3 view lists clubs.
+	OrgNames OrgNames
+	// SkillNames names skills (directory, when it offers the lookup). nil
+	// → the company views carry skill IDs without names.
+	SkillNames SkillNamer
 }
 
 func (d Deps) validate() error {
@@ -228,8 +310,11 @@ func (d Deps) validate() error {
 type Module struct {
 	Service Service
 	// Privacy is the KVKK provider (profile, sections, settings, CVs,
-	// avatar and CV files).
+	// avatar and CV files, level 3 access grants).
 	Privacy privacy.Provider
+	// Sweeper deletes revoked access grants after their retention
+	// (access_grant_revoked; kvkk.retention_sweep runs it).
+	Sweeper privacy.RetentionSweeper
 
 	svc *service
 }
@@ -241,7 +326,7 @@ func New(d Deps) (Module, error) {
 		return Module{}, err
 	}
 	s := &service{d: d}
-	return Module{Service: s, Privacy: privacyProvider{s: s}, svc: s}, nil
+	return Module{Service: s, Privacy: privacyProvider{s: s}, Sweeper: sweeper{s: s}, svc: s}, nil
 }
 
 type service struct{ d Deps }

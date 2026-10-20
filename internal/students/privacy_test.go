@@ -76,3 +76,75 @@ func TestPrivacyProvider_ExportAndErase(t *testing.T) {
 		t.Fatal("another user's profile was erased")
 	}
 }
+
+// TestPrivacyProvider_AccessGrants (01 §3.3, 02 §9.7; BE-046): the export
+// lists the student's level 3 grants, revoked ones included, with the
+// student's own revocation reason but never a company's; erasure deletes
+// every grant (no company keeps access) and another student's stay.
+func TestPrivacyProvider_AccessGrants(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := t.Context()
+	orgA, recA, _ := e.company("Acme")
+	orgB, recB, _ := e.company("Beta")
+	s, req := e.granted(t, orgA)
+	if err := e.svc.Grant(ctx, s.UserID, orgB, students.SourceContactRequest, uuid.NewV7()); err != nil {
+		t.Fatal(err)
+	}
+	other, _ := e.granted(t, orgA)
+	mine, _ := e.svc.ListMyAccessGrants(ctx, s, nil, 0)
+	for _, g := range mine.Items {
+		if g.Grant.CompanyOrgID == orgA {
+			if err := e.svc.RevokeMyAccessGrant(ctx, s, g.Grant.ID, "Kendi notum"); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := e.svc.RevokeCompanyAccessGrant(ctx, recB, orgB, s.UserID, "Şirketin iç notu"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Grant(ctx, s.UserID, orgB, students.SourceContactRequest, uuid.NewV7()); err != nil {
+		t.Fatal(err)
+	}
+
+	sec, err := e.mod.Privacy.Export(ctx, s.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var grants []map[string]any
+	for _, it := range sec.Items {
+		if it["record"] == "access_grant" {
+			grants = append(grants, it)
+		}
+	}
+	if len(grants) != 3 {
+		t.Fatalf("exported grants = %v", grants)
+	}
+	first := grants[0]
+	if first["company_org_id"] != orgA.String() || first["source_id"] != req.String() || first["revoked_by"] != "student" ||
+		first["revoke_reason"] != "Kendi notum" || first["revoked_at"] == nil {
+		t.Fatalf("the student's revoked grant = %v", first)
+	}
+	if grants[1]["revoked_by"] != "company" || grants[1]["revoke_reason"] != nil {
+		t.Fatalf("the company's note reached the student: %v", grants[1])
+	}
+	if grants[2]["revoked_at"] != nil {
+		t.Fatalf("the active grant = %v", grants[2])
+	}
+
+	if _, err := e.mod.Privacy.Erase(ctx, s.UserID); err != nil {
+		t.Fatal(err)
+	}
+	if all, _ := e.store.AllGrants(ctx, s.UserID); len(all) != 0 {
+		t.Fatalf("grants survived the erasure: %+v", all)
+	}
+	if ok, _ := e.svc.Has(ctx, s.UserID, orgB); ok {
+		t.Fatal("company B kept access after the erasure")
+	}
+	if ok, _ := e.svc.Has(ctx, other.UserID, orgA); !ok {
+		t.Fatal("another student's grant was erased")
+	}
+	if _, err := e.svc.GetCompanyStudentProfile(ctx, recA, orgA, other.UserID); err != nil {
+		t.Fatalf("another student's level 3 view: %v", err)
+	}
+}

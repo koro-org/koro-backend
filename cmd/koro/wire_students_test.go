@@ -28,7 +28,7 @@ func (w *studentsWiring) useMemStore() {
 
 // TestWire_StudentsProvidesProviderHooksAndTasks pins what students binds
 // in build and registers in tasks (01 §6.2, §7): its service, its KVKK
-// provider, the two late-bound reads of orgs, six subscriptions (file.rejected
+// provider, its retention sweeper (BE-046), the two late-bound reads of orgs, six subscriptions (file.rejected
 // since BE-025, next to files' own) and two nightly jobs.
 func TestWire_StudentsProvidesProviderHooksAndTasks(t *testing.T) {
 	t.Parallel()
@@ -44,6 +44,11 @@ func TestWire_StudentsProvidesProviderHooksAndTasks(t *testing.T) {
 	}
 	if c.orgs.graduatedUsers == nil || c.orgs.avatarURLs == nil {
 		t.Fatal("orgs' late-bound students reads are not set")
+	}
+	if !slices.ContainsFunc(c.sweepers, func(s privacy.RetentionSweeper) bool {
+		return slices.Equal(s.PolicyCodes(), []string{students.PolicyAccessGrantRevoked})
+	}) {
+		t.Fatal("the access_grant_revoked sweeper is not registered (BE-046)")
 	}
 	var jobs []string
 	for _, j := range c.infra.jobs.Jobs() {

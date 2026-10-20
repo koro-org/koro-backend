@@ -10,13 +10,15 @@ import (
 
 // Store is the persistence boundary of students (05 §2.2) over
 // student_profiles, student_privacy_settings, student_skills,
-// student_experiences, student_languages and student_cvs (02 §9.1–9.6)
-// and the count_segment function (02 §9.1, 01 §1.4). The GORM store
+// student_experiences, student_languages, student_cvs and
+// profile_access_grants (02 §9.1–9.7) and the count_segment function
+// (02 §9.1, 01 §1.4). The GORM store
 // (store_gorm.go) and the in-memory store (store_mem.go) pass the same
 // contract test (store_contract_test.go).
 //
 // Every method works in the transaction carried by ctx, if any. Org scope:
-// none (02 §9: a student belongs to no org); every per-user table is
+// none (02 §9: a student belongs to no org) but for the access grants
+// (company_org_id); every per-user table is
 // addressed by user_id, and an experience is read and written only
 // together with its owner's user_id (IDOR: another user's ID is not found).
 type Store interface {
@@ -121,4 +123,51 @@ type Store interface {
 	// order, of the audience eligible profiles count_segment would count
 	// (keyset walk of Audience.Stream).
 	AudienceAfter(ctx context.Context, keys []string, dims int16, after uuid.UUID, limit int) ([]uuid.UUID, error)
+
+	// DiscoveryCandidates returns up to limit user IDs > after, in user_id
+	// order, of the active profiles whose settings have discoverable on
+	// and that match q's filters (q.After and q.Limit are ignored). The
+	// caller still checks the facts other modules hold (verification, age,
+	// account, the consent in force) before anyone sees a candidate.
+	DiscoveryCandidates(ctx context.Context, q DiscoveryQuery, after uuid.UUID, limit int) ([]uuid.UUID, error)
+
+	// Level 3 access grants (02 §9.7). Org scope: company_org_id; a grant
+	// is addressed by its student too (IDOR).
+
+	// LockGrants serialises the grant writes of studentID for the rest of
+	// the transaction (an advisory lock: no row is created).
+	LockGrants(ctx context.Context, studentID uuid.UUID) error
+	// InsertGrant writes a new active grant and returns it as stored; false
+	// and nothing written when its source already has a grant (ON CONFLICT
+	// (source, source_id) DO NOTHING keeps the transaction usable).
+	InsertGrant(ctx context.Context, g AccessGrant) (AccessGrant, bool, error)
+	// GrantBySource returns the grant of (source, sourceID) or ErrNotFound.
+	GrantBySource(ctx context.Context, source GrantSource, sourceID uuid.UUID) (AccessGrant, error)
+	// ActiveGrant returns the oldest active grant of companyOrgID on
+	// studentID or ErrNotFound.
+	ActiveGrant(ctx context.Context, studentID, companyOrgID uuid.UUID) (AccessGrant, error)
+	// GetGrant returns studentID's grant id (active or revoked) or
+	// ErrNotFound (also when id belongs to another student).
+	GetGrant(ctx context.Context, studentID, id uuid.UUID) (AccessGrant, error)
+	// RevokeGrants revokes every active grant of companyOrgID on studentID
+	// and returns the revoked rows (none: an empty slice).
+	RevokeGrants(ctx context.Context, studentID, companyOrgID uuid.UUID, by RevokedBy, reason *string, at time.Time) ([]AccessGrant, error)
+	// StudentGrants returns up to limit active grants of studentID after
+	// the position (nil: from the start), newest first.
+	StudentGrants(ctx context.Context, studentID uuid.UUID, after *GrantKey, limit int) ([]AccessGrant, error)
+	// CompanyGrants returns up to limit active grants of companyOrgID
+	// after the position (nil: from the start), newest first.
+	CompanyGrants(ctx context.Context, companyOrgID uuid.UUID, after *GrantKey, limit int) ([]AccessGrant, error)
+	// AllGrants returns every grant of studentID, revoked ones included,
+	// oldest first (the KVKK export).
+	AllGrants(ctx context.Context, studentID uuid.UUID) ([]AccessGrant, error)
+	// DeleteGrants deletes every grant of studentID and returns how many
+	// went (account erasure).
+	DeleteGrants(ctx context.Context, studentID uuid.UUID) (int, error)
+	// CountRevokedGrantsBefore counts the grants revoked before cutoff
+	// (the retention dry run).
+	CountRevokedGrantsBefore(ctx context.Context, cutoff time.Time) (int, error)
+	// PurgeRevokedGrants deletes up to limit grants revoked before cutoff,
+	// oldest revocation first, and returns how many went.
+	PurgeRevokedGrants(ctx context.Context, cutoff time.Time, limit int) (int, error)
 }

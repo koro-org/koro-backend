@@ -15,9 +15,9 @@ const eraseJob = "students.erase_account"
 
 // privacyProvider is the KVKK provider of students (01 §3.3): the profile
 // (with its derived audience columns), the skills, experiences and
-// languages, the privacy settings, the CVs and the avatar and CV files are
-// the student's personal data (02 §9.1–9.6: hard delete with the account,
-// the files included). The consent rows behind the mirrored flags belong
+// languages, the privacy settings, the CVs, the avatar and CV files and
+// the level 3 access grants are the student's personal data (02 §9.1–9.7:
+// hard delete with the account, the files included). The consent rows behind the mirrored flags belong
 // to consent's provider; the CV files' bytes are files' (the export lists
 // them).
 type privacyProvider struct{ s *service }
@@ -95,7 +95,35 @@ func (p privacyProvider) Export(ctx context.Context, userID uuid.UUID) (privacy.
 			"is_current": c.CV.IsCurrent, "created_at": c.CV.CreatedAt.UTC().Format(time.RFC3339),
 		})
 	}
+	grants, err := st.AllGrants(ctx, userID)
+	if err != nil {
+		return privacy.ExportSection{}, err
+	}
+	for _, g := range grants {
+		out.Items = append(out.Items, exportGrant(g))
+	}
 	return out, nil
+}
+
+// exportGrant is a level 3 grant in the export: which company had access,
+// from which request and until when. A company's revocation reason is the
+// company's note and is not shown to the student (BE-046); the student's
+// own reason is theirs.
+func exportGrant(g AccessGrant) map[string]any {
+	item := map[string]any{
+		"record": "access_grant", "grant_id": g.ID.String(), "company_org_id": g.CompanyOrgID.String(),
+		"source": string(g.Source), "source_id": g.SourceID.String(), "granted_at": g.GrantedAt.UTC().Format(time.RFC3339),
+	}
+	if g.RevokedAt != nil {
+		item["revoked_at"] = g.RevokedAt.UTC().Format(time.RFC3339)
+	}
+	if g.RevokedByKind != nil {
+		item["revoked_by"] = string(*g.RevokedByKind)
+		if *g.RevokedByKind == RevokedByStudent {
+			putStr(item, "revoke_reason", g.RevokeReason)
+		}
+	}
+	return item
 }
 
 func exportProfile(p Profile) map[string]any {
@@ -133,7 +161,7 @@ func putStr(item map[string]any, key string, v *string) {
 }
 
 // Erase implements privacy.Provider: in one transaction the sections, the
-// CVs, the settings and the profile are hard deleted, then the avatar and
+// access grants, the CVs, the settings and the profile are hard deleted, then the avatar and
 // the CV files (no longer referenced) are deleted through files.
 // Idempotent: a second run finds nothing.
 func (p privacyProvider) Erase(ctx context.Context, userID uuid.UUID) (privacy.EraseResult, error) {
@@ -152,6 +180,11 @@ func (p privacyProvider) Erase(ctx context.Context, userID uuid.UUID) (privacy.E
 			return err
 		}
 		res.Deleted = n
+		// Level 3 grants go with the account: no company keeps access.
+		if n, err = s.d.Store.DeleteGrants(ctx, userID); err != nil {
+			return err
+		}
+		res.Deleted += n
 		cvs, err := s.d.Store.CVs(ctx, userID)
 		if err != nil {
 			return err

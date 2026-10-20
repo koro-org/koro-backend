@@ -1,4 +1,4 @@
-# Authz matrix of the students module (03 §5.4, 04 §2.4; BE-023, BE-025). 16 operations × 18 personas.
+# Authz matrix of the students module (03 §5.4, 04 §2.4; BE-023, BE-025, BE-046). 22 operations × 18 personas.
 # Every operation is an O cell on the caller's own profile for verified students (stu, min, clm,
 # cla, stf); an account without an active student verification (usr k-uv, uni, the companies,
 # platform staff) is 403 students.verification_required, anonymous 401 (03 §5.0, §2.3). The
@@ -12,6 +12,12 @@
 # membership 404). adminGetStudentProfile is the admin surface (403 without a platform role):
 # support and platform_admin B (403 without X-Koro-Access-Reason), dpo k11 (the reason is the ID
 # of an open data subject request of the student: dsr_student_open of kvkk's fixtures).
+# BE-046 (level 3): listMyAccessGrants and revokeMyAccessGrant are the O cell of verified students
+# (grant_student_b is the persona student's grant of company_b; another student's grant 404). The
+# company operations are cmm S / cma S on the company's management surface (members of another
+# company and everyone else 404, platform staff 403); the profile and the CV add G: without an
+# active grant of that company the student is 404 (Y5) — grant_granted_a is company_a's grant on
+# helper student_granted (no CV), grant_student_b company_b's on student (CV cv_student).
 version: 1
 groups:
   # accounts without an active student verification (03 §1.1 usr; companies and staff too).
@@ -26,6 +32,12 @@ groups:
                      event_staff, university_rep, company_member, company_admin, other_company_member]
   # platform staff without a cell on the admin student view.
   staff_without_cell: [moderator, finance_admin, talent_auditor]
+  # signed-in users who are neither members of company_a nor platform staff (company_a's surface: 404).
+  not_company_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin, event_staff,
+                  university_rep, other_company_member]
+  # signed-in users who are neither members of company_b nor platform staff (company_b's surface: 404).
+  not_company_b: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin, event_staff,
+                  university_rep, company_member, company_admin]
 
 operations:
   getMyStudentProfile:
@@ -201,10 +213,82 @@ operations:
         expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_cell": 403, support: 404, dpo: 403,
                   platform_admin: 404 }
 
-pending_actions:
-  # BE-046: level 3 access grants and the company views (03 §5.4).
-  - students.access_grant.list_own
-  - students.access_grant.revoke
-  - students.access_grant.list_company
-  - students.profile.read_company
-  - students.cv.read_company
+  listMyAccessGrants:
+    method: GET
+    path: /api/v1/me/access-grants
+    action: students.access_grant.list_own
+    expect: { anonymous: 401, "@verified_students": 200, "@non_students": 403 }
+
+  revokeMyAccessGrant:
+    method: POST
+    path: /api/v1/me/access-grants/{grant_id}/revoke
+    action: students.access_grant.revoke
+    path_params: { grant_id: grant_student_b }
+    note: student's grant of company_b; another student's grant is 404 (IDOR), a non-student 403 before the lookup
+    expect: { anonymous: 401, student: 204, "@other_students": 404, "@non_students": 403 }
+    variants:
+      - name: other_students_grant
+        path_params: { grant_id: grant_granted_a }
+        note: student_granted's grant; no persona owns it
+        expect: { anonymous: 401, "@verified_students": 404, "@non_students": 403 }
+      - name: missing
+        path_params: { grant_id: "literal:00000000-0000-7000-8000-0000000000a1" }
+        expect: { anonymous: 401, "@verified_students": 404, "@non_students": 403 }
+
+  listCompanyGrantedStudents:
+    method: GET
+    path: /api/v1/orgs/{org_id}/students
+    action: students.access_grant.list_company
+    path_params: { org_id: company_a }
+    note: company_a's surface; recruiter (cmm) and company_admin (cma, MFA) S; staff see the surface (403)
+    expect: { anonymous: 401, company_member: 200, company_admin: 200, "@not_company_a": 404, "@platform_staff": 403 }
+    variants:
+      - name: company_b
+        path_params: { org_id: company_b }
+        expect: { anonymous: 401, other_company_member: 200, "@not_company_b": 404, "@platform_staff": 403 }
+
+  getCompanyStudentProfile:
+    method: GET
+    path: /api/v1/orgs/{org_id}/students/{user_id}
+    action: students.profile.read_company
+    path_params: { org_id: company_a, user_id: student_granted }
+    note: company_a holds an active grant on student_granted (G); audited
+    expect: { anonymous: 401, company_member: 200, company_admin: 200, "@not_company_a": 404, "@platform_staff": 403 }
+    variants:
+      - name: no_grant
+        path_params: { org_id: company_a, user_id: student }
+        note: student granted company_b only; company_a's roles get 404 as for an unknown student (Y5)
+        expect: { anonymous: 401, company_member: 404, company_admin: 404, "@not_company_a": 404, "@platform_staff": 403 }
+      - name: other_company_grant
+        path_params: { org_id: company_b, user_id: student }
+        expect: { anonymous: 401, other_company_member: 200, "@not_company_b": 404, "@platform_staff": 403 }
+      - name: missing
+        path_params: { org_id: company_a, user_id: "literal:00000000-0000-7000-8000-0000000000a2" }
+        expect: { anonymous: 401, company_member: 404, company_admin: 404, "@not_company_a": 404, "@platform_staff": 403 }
+
+  downloadCompanyStudentCv:
+    method: GET
+    path: /api/v1/orgs/{org_id}/students/{user_id}/cv
+    action: students.cv.read_company
+    path_params: { org_id: company_b, user_id: student }
+    note: company_b's grant on student, whose current CV is cv_student; every call audited
+    expect: { anonymous: 401, other_company_member: 200, "@not_company_b": 404, "@platform_staff": 403 }
+    variants:
+      - name: no_current_cv
+        path_params: { org_id: company_a, user_id: student_granted }
+        note: an active grant but no current CV (04 §2.4 "Güncel CV yoksa 404")
+        expect: { anonymous: 401, company_member: 404, company_admin: 404, "@not_company_a": 404, "@platform_staff": 403 }
+      - name: no_grant
+        path_params: { org_id: company_a, user_id: student }
+        expect: { anonymous: 401, company_member: 404, company_admin: 404, "@not_company_a": 404, "@platform_staff": 403 }
+
+  revokeCompanyAccessGrant:
+    method: POST
+    path: /api/v1/orgs/{org_id}/students/{user_id}/access-grant/revoke
+    action: students.access_grant.revoke
+    path_params: { org_id: company_a, user_id: student_granted }
+    expect: { anonymous: 401, company_member: 204, company_admin: 204, "@not_company_a": 404, "@platform_staff": 403 }
+    variants:
+      - name: no_grant
+        path_params: { org_id: company_a, user_id: student }
+        expect: { anonymous: 401, company_member: 404, company_admin: 404, "@not_company_a": 404, "@platform_staff": 403 }

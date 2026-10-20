@@ -147,3 +147,29 @@ type Files interface {
 	// sync-write: files.Files.Delete
 	Delete(ctx context.Context, a authz.Actor, fileID uuid.UUID) error
 }
+
+// Contacts is identity's address lookup (L4; identity.Users.Contact): the
+// e-mail of level 3 contact sharing (04 §V.3), read only when the student
+// turned show_contact_on_grant on and the contact_info_share consent is in
+// force.
+type Contacts interface {
+	// Contact returns the address of a live user; identity.ErrNotFound for
+	// an unknown or erased one.
+	Contact(ctx context.Context, id uuid.UUID) (identity.UserContact, error)
+}
+
+// OrgNames is orgs' org directory (L5; orgs.OrgDirectory.GetMany): the
+// names of the companies in a student's grant list and of the clubs of a
+// level 3 view.
+type OrgNames interface {
+	// GetMany returns the summaries of the ids that exist.
+	GetMany(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]orgs.OrgSummary, error)
+}
+
+// SkillNamer names catalog skills for the company views (level 2 and 3:
+// skills[].name). directory does not offer it yet; cmd/koro binds it when
+// the directory service implements the method (nil → empty names; the
+// public listSkills names every skill ID).
+type SkillNamer interface {
+	SkillNames(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error)
+}

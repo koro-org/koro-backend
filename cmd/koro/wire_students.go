@@ -15,8 +15,8 @@ import (
 )
 
 // studentsWiring wires the students module (L7; 01 §4.9). First owner:
-// BE-023, then BE-025. Only tickets of the students module edit this file
-// (BE-001 R4).
+// BE-023, then BE-025 and BE-046. Only tickets of the students module edit
+// this file (BE-001 R4).
 //
 // Seams (nil in production):
 //
@@ -31,20 +31,25 @@ import (
 //	       wire_events.go (BE-025 follow-up). nil → both are absent.
 //
 // Consumed (built in lower layers): c.audit.svc, c.consent.svc (Recorder
-// in the privacy transaction, Checker for the nightly reconciliation),
-// c.files.svc (avatar and CVs: Get, Attach, PresignGet; Delete of a
-// replaced, deleted, rejected or erased file), c.identity.svc (user
-// directory: age and account status; AdminUser: the account part of the
-// admin view), the identity module's student verification (eligibility,
-// graduation), c.orgs.svc (club memberships, club members, GetMember of
-// the member card) and c.directory.svc (names, department and skill
-// validation, sensitive clubs). c.kvkk.svc (L13, built later) is read at
-// call time for the dpo's data subject request (03 k11).
+// in the privacy transaction, Checker for the nightly reconciliation and
+// the read-time consent checks of levels 2 and 3), c.files.svc (avatar and
+// CVs: Get, Attach, PresignGet; Delete of a replaced, deleted, rejected or
+// erased file), c.identity.svc (user directory: age and account status;
+// AdminUser: the account part of the admin view; Contact: the level 3
+// e-mail a student shares), the identity module's student verification
+// (eligibility, graduation, discoverability), c.orgs.svc (club
+// memberships, club members, GetMember of the member card, org names of
+// the grant lists and level 3 clubs) and c.directory.svc (names, department
+// and skill validation, sensitive clubs; skill names once directory offers
+// students.SkillNamer). c.kvkk.svc (L13, built later) is read at call time
+// for the dpo's data subject request (03 k11).
 //
 // Provided, set in build: svc (students.Service: Profiles for feed,
-// outreach, talent; Audience for outreach), the students KVKK provider,
-// and the late-bound reads of orgs: c.orgs.graduatedUsers
-// (orgs.admin_sweep, T-210) and c.orgs.avatarURLs (member lists, 04 §2.2).
+// outreach, talent; Audience for outreach; AccessGrants and Discoverable
+// for messaging and discovery, BE-046), the students KVKK provider, the
+// access_grant_revoked retention sweeper, and the late-bound reads of orgs:
+// c.orgs.graduatedUsers (orgs.admin_sweep, T-210) and c.orgs.avatarURLs
+// (member lists, 04 §2.2).
 type studentsWiring struct {
 	store students.Store
 	tx    db.TxManager
@@ -87,7 +92,15 @@ func (w *studentsWiring) build(c *container) error {
 		d.Orgs, d.Members = svc, svc
 	}
 	if svc := c.identity.svc; svc != nil {
-		d.Users, d.Accounts = svc, svc
+		d.Users, d.Accounts, d.Contacts = svc, svc, svc
+	}
+	if svc := c.orgs.svc; svc != nil {
+		d.OrgNames = svc
+	}
+	// directory names skills once it offers the lookup (BE-046 notes); until
+	// then the company views carry skill IDs only.
+	if n, ok := c.directory.svc.(students.SkillNamer); ok {
+		d.SkillNames = n
 	}
 	d.DSRs = studentsDSRs{c: c}
 	d.Registrations = func() students.Registrations { return w.registrations }
@@ -103,6 +116,7 @@ func (w *studentsWiring) build(c *container) error {
 	}
 	w.mod, w.svc, w.late = mod, mod.Service, c
 	c.privacy = append(c.privacy, mod.Privacy)
+	c.sweepers = append(c.sweepers, mod.Sweeper)
 	svc := mod.Service
 	c.orgs.graduatedUsers = svc.GraduatedAmong
 	c.orgs.avatarURLs = svc.AvatarURLs
@@ -123,8 +137,8 @@ func (w *studentsWiring) tasks(c *container) {
 	}
 }
 
-// routes: the 16 students operations of BE-023 and BE-025 (04 §2.4); w.svc
-// is nil under `koro openapi`, which Register tolerates.
+// routes: the 22 students operations of BE-023, BE-025 and BE-046 (04
+// §2.4); w.svc is nil under `koro openapi`, which Register tolerates.
 func (w *studentsWiring) routes(c *container, api huma.API) { students.Register(api, w.svc) }
 
 // studentsDSRs adapts kvkk (L13, built after students: read at call time)

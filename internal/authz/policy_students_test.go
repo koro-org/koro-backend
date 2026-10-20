@@ -75,8 +75,8 @@ func TestStudentsPolicy_OtherProfileIsHidden(t *testing.T) {
 // TestStudentsPolicy_EdgeCases: no MFA on the student path (a company
 // admin who is also a student, without an MFA session); a lapsed student
 // is the usr column (403); missing Attrs keys deny as a programmer error;
-// the actions of BE-046 stay denied, and the BE-025 actions are never
-// granted on another resource type than their own.
+// the BE-025 and BE-046 actions are never granted on the own-profile
+// resource (another resource type, or no company in OrgID).
 func TestStudentsPolicy_EdgeCases(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -226,4 +226,139 @@ func TestStudentsPolicy_AdminView(t *testing.T) {
 	noOwner := adminView(reason, "")
 	noOwner.OwnerUserID = nil
 	wantErr(t, authz.Can(ctx, persona(t, "support"), authz.StudentsProfileReadAdmin, noOwner), authz.ErrNotFound, false)
+}
+
+// ownGrants is the resource of the caller's level 3 grants (03 §3.5
+// access_grant; the /me path has no OrgID): id is one grant or uuid.Nil().
+func ownGrants(owner, id uuid.UUID) authz.Resource {
+	return authz.Resource{Type: authz.TypeAccessGrant, ID: id, OwnerUserID: &owner}
+}
+
+// companyStudent is a company view of a student (BE-046): typ is
+// student_profile, student_cv or access_grant; OrgID is the company of the
+// path, OwnerUserID the student; access is the Attrs access_grant.
+func companyStudent(typ, company string, student uuid.UUID, access string) authz.Resource {
+	org := authztest.ID(company)
+	r := authz.Resource{Type: typ, ID: student, OrgID: &org, OwnerUserID: &student}
+	switch typ {
+	case authz.TypeStudentProfile:
+		r.Attrs = map[string]string{authz.AttrAccessGrant: access, "discoverable": "", "minor": "false"}
+	case authz.TypeStudentCV:
+		r.Attrs = map[string]string{authz.AttrAccessGrant: access}
+	}
+	return r
+}
+
+// TestStudentsPolicy_AccessGrants pins 03 §5.4 for the BE-046 actions and
+// the 18 personas: list_own and the /me revoke are the O cell of verified
+// students (usr, companies, staff 403; another student's grant 404 for
+// everyone); list_company and the company revoke are cmm S / cma S on
+// company_a's management surface (other_company_member 404, platform roles
+// 403, the rest 404); read_company and cv.read_company add G: without an
+// active grant company roles get 404 (Y5), staff 403 either way.
+func TestStudentsPolicy_AccessGrants(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	granted := authztest.ID("student_granted")
+	staff := []string{"moderator", "support", "dpo", "platform_admin", "finance_admin", "talent_auditor"}
+	companyA := []string{"company_member", "company_admin"}
+	for _, p := range authztest.Personas() {
+		own := error(authz.ErrForbidden)
+		if slices.Contains(verifiedStudents, p.Name) {
+			own = nil
+		}
+		wantErr(t, authz.Can(ctx, p.Actor, authz.StudentsAccessGrantListOwn, ownGrants(p.Actor.UserID, uuid.Nil())), own, false)
+		wantErr(t, authz.Can(ctx, p.Actor, authz.StudentsAccessGrantRevoke, ownGrants(p.Actor.UserID, uuid.NewV7())), own, false)
+		if p.Actor.IsUser() {
+			other := ownGrants(authztest.ID("student_b"), uuid.NewV7())
+			wantErr(t, authz.Can(ctx, p.Actor, authz.StudentsAccessGrantRevoke, other), authz.ErrNotFound, false)
+			wantErr(t, authz.Can(ctx, p.Actor, authz.StudentsAccessGrantListOwn, other), authz.ErrNotFound, false)
+		}
+
+		surface, withGrant, without := error(authz.ErrNotFound), error(authz.ErrNotFound), error(authz.ErrNotFound)
+		switch {
+		case !p.Actor.IsUser():
+			surface, withGrant, without = authz.ErrForbidden, authz.ErrForbidden, authz.ErrForbidden
+		case slices.Contains(companyA, p.Name):
+			surface, withGrant = nil, nil
+		case slices.Contains(staff, p.Name):
+			surface, withGrant, without = authz.ErrForbidden, authz.ErrForbidden, authz.ErrForbidden
+		}
+		wantErr(t, authz.Can(ctx, p.Actor, authz.StudentsAccessGrantListCompany,
+			authz.Resource{Type: authz.TypeAccessGrant, OrgID: ptrID(authztest.ID("company_a"))}), surface, false)
+		wantErr(t, authz.Can(ctx, p.Actor, authz.StudentsAccessGrantRevoke,
+			companyStudent(authz.TypeAccessGrant, "company_a", granted, "")), surface, false)
+		for _, c := range []struct {
+			act authz.Action
+			typ string
+		}{{authz.StudentsProfileReadCompany, authz.TypeStudentProfile}, {authz.StudentsCvReadCompany, authz.TypeStudentCV}} {
+			wantErr(t, authz.Can(ctx, p.Actor, c.act, companyStudent(c.typ, "company_a", granted, "active")), withGrant, false)
+			wantErr(t, authz.Can(ctx, p.Actor, c.act, companyStudent(c.typ, "company_a", granted, "none")), without, false)
+		}
+	}
+}
+
+func ptrID(id uuid.UUID) *uuid.UUID { return &id }
+
+// TestStudentsPolicy_AccessGrantEdges: the company owner is cma; a company
+// admin without an MFA session gets authz.mfa_required (only once the
+// student is visible: without a grant the answer stays 404); the recruiter
+// needs no MFA; another company's grant is not this company's (Attrs come
+// from the path's company: company_b sees 404 on company_a's path and its
+// own path decides on its own grant); a company view without an org or a
+// student is nobody's; the /me revoke never reaches a company resource and
+// the company revoke never a /me one.
+func TestStudentsPolicy_AccessGrantEdges(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	granted := authztest.ID("student_granted")
+	owner := persona(t, "company_owner_a")
+	wantErr(t, authz.Can(ctx, owner, authz.StudentsProfileReadCompany,
+		companyStudent(authz.TypeStudentProfile, "company_a", granted, "active")), nil, false)
+	wantErr(t, authz.Can(ctx, owner, authz.StudentsAccessGrantRevoke,
+		companyStudent(authz.TypeAccessGrant, "company_a", granted, "")), nil, false)
+
+	admin := persona(t, "company_admin")
+	admin.MFAVerified = false
+	wantErr(t, authz.Can(ctx, admin, authz.StudentsCvReadCompany,
+		companyStudent(authz.TypeStudentCV, "company_a", granted, "active")), authz.ErrMFARequired, false)
+	wantErr(t, authz.Can(ctx, admin, authz.StudentsCvReadCompany,
+		companyStudent(authz.TypeStudentCV, "company_a", granted, "none")), authz.ErrNotFound, false)
+	recruiter := persona(t, "company_member")
+	if recruiter.MFAVerified {
+		t.Fatal("the recruiter persona must have no MFA session")
+	}
+	wantErr(t, authz.Can(ctx, recruiter, authz.StudentsProfileReadCompany,
+		companyStudent(authz.TypeStudentProfile, "company_a", granted, "active")), nil, false)
+
+	b := persona(t, "other_company_member")
+	wantErr(t, authz.Can(ctx, b, authz.StudentsProfileReadCompany,
+		companyStudent(authz.TypeStudentProfile, "company_a", granted, "active")), authz.ErrNotFound, false)
+	wantErr(t, authz.Can(ctx, b, authz.StudentsProfileReadCompany,
+		companyStudent(authz.TypeStudentProfile, "company_b", granted, "none")), authz.ErrNotFound, false)
+	wantErr(t, authz.Can(ctx, b, authz.StudentsProfileReadCompany,
+		companyStudent(authz.TypeStudentProfile, "company_b", granted, "active")), nil, false)
+
+	noOrg := companyStudent(authz.TypeStudentProfile, "company_a", granted, "active")
+	noOrg.OrgID = nil
+	wantErr(t, authz.Can(ctx, recruiter, authz.StudentsProfileReadCompany, noOrg), authz.ErrNotFound, false)
+	noStudent := companyStudent(authz.TypeStudentCV, "company_a", granted, "active")
+	noStudent.OwnerUserID = nil
+	wantErr(t, authz.Can(ctx, recruiter, authz.StudentsCvReadCompany, noStudent), authz.ErrNotFound, false)
+	noStudent = companyStudent(authz.TypeAccessGrant, "company_a", granted, "")
+	noStudent.OwnerUserID = nil
+	wantErr(t, authz.Can(ctx, recruiter, authz.StudentsAccessGrantRevoke, noStudent), authz.ErrNotFound, false)
+
+	// The student's own grant through the company path: not visible to a
+	// student who is no member of the company.
+	st := persona(t, "student")
+	wantErr(t, authz.Can(ctx, st, authz.StudentsAccessGrantRevoke,
+		companyStudent(authz.TypeAccessGrant, "company_a", st.UserID, "")), authz.ErrNotFound, false)
+	// The company roles hold no /me path.
+	wantErr(t, authz.Can(ctx, recruiter, authz.StudentsAccessGrantRevoke, ownGrants(recruiter.UserID, uuid.NewV7())),
+		authz.ErrForbidden, false)
+	// Wrong resource types are refused.
+	wantErr(t, authz.Can(ctx, st, authz.StudentsAccessGrantListOwn, studentProfile(st.UserID, false)), authz.ErrNotFound, false)
+	wantErr(t, authz.Can(ctx, recruiter, authz.StudentsProfileReadCompany,
+		companyStudent(authz.TypeStudentCV, "company_a", granted, "active")), authz.ErrNotFound, false)
 }

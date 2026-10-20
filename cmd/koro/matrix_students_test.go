@@ -19,7 +19,8 @@ const matrixDiscoveryText = "# Keşif profili rızası\n\nProfilimin takma adla 
 // matrixFixtures seeds fixtures/students.yaml (03 §7.3): an experience of
 // the persona student (with the profile it belongs to, at the persona's
 // university), the published discovery_profile consent text in the
-// consent store installed by useMemStore, and the student's current CV.
+// consent store installed by useMemStore, the student's current CV and the
+// level 3 grants of the companies (BE-046).
 func (w *studentsWiring) matrixFixtures(fx *matrixFixtures) error {
 	ctx := context.Background()
 	for _, f := range fx.Of("students") {
@@ -39,6 +40,10 @@ func (w *studentsWiring) matrixFixtures(fx *matrixFixtures) error {
 			}
 		case "cv":
 			if err := w.matrixCV(ctx, fx, f, id); err != nil {
+				return err
+			}
+		case "grant":
+			if err := w.matrixGrant(ctx, fx, f, id); err != nil {
 				return err
 			}
 		default:
@@ -113,6 +118,32 @@ func (w *studentsWiring) matrixConsentText(ctx context.Context, f fixture, id uu
 	}
 	if err := st.Publish(ctx, id, base.Add(-24*time.Hour)); err != nil {
 		return fmt.Errorf("fixture %s: publish: %w", f.Name, err)
+	}
+	return nil
+}
+
+// matrixGrant inserts the student's profile (when missing) and an active
+// level 3 grant of the company, as an accepted contact request leaves it
+// (BE-046; the request ID is authztest.ID(<name>_request)).
+func (w *studentsWiring) matrixGrant(ctx context.Context, fx *matrixFixtures, f fixture, id uuid.UUID) error {
+	studentName, _ := f.Fields["student"].(string)
+	p, ok := authztest.Get(studentName)
+	if !ok || p.Actor.UniversityID == nil || p.Actor.IsMinor {
+		return fmt.Errorf("fixture %s: the student must be a verified adult student", f.Name)
+	}
+	company, err := fx.Ref(f, "company")
+	if err != nil {
+		return err
+	}
+	student := p.User()
+	if _, _, err := w.store.InsertProfile(ctx, students.Profile{UserID: student, UniversityID: *p.Actor.UniversityID,
+		DegreeLevel: students.DegreeBachelor, Status: students.ProfileActive}); err != nil {
+		return fmt.Errorf("fixture %s: profile: %w", f.Name, err)
+	}
+	if _, ok, err := w.store.InsertGrant(ctx, students.AccessGrant{ID: id, StudentUserID: student, CompanyOrgID: company,
+		Source: students.SourceContactRequest, SourceID: authztest.ID(f.Name + "_request"),
+		GrantedAt: time.Now().UTC().Truncate(time.Microsecond)}); err != nil || !ok {
+		return fmt.Errorf("fixture %s: grant: ok=%v %w", f.Name, ok, err)
 	}
 	return nil
 }

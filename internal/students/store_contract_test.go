@@ -3,6 +3,7 @@ package students_test
 import (
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 	"uuid"
@@ -20,12 +21,13 @@ type world struct {
 	skill      func(t *testing.T) uuid.UUID
 	file       func(t *testing.T) uuid.UUID // an avatar
 	cvFile     func(t *testing.T) uuid.UUID // a cv upload
+	company    func(t *testing.T) uuid.UUID // a company org
 }
 
 func memWorld() world {
 	id := func(*testing.T) uuid.UUID { return uuid.NewV7() }
 	return world{user: id, university: id, department: func(*testing.T, uuid.UUID) uuid.UUID { return uuid.NewV7() },
-		skill: id, file: id, cvFile: id}
+		skill: id, file: id, cvFile: id, company: id}
 }
 
 func TestStore_Contract_Mem(t *testing.T) {
@@ -437,4 +439,188 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (students.Store, wo
 			t.Fatalf("walk = %v\n want %v", walked, eligible)
 		}
 	})
+
+	t.Run("grants: insert once per source, owner scoping, revoke, pages, export, purge", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		u, v := w.user(t), w.user(t)
+		c1, c2, c3 := w.company(t), w.company(t), w.company(t)
+		stale := time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC) // a caller's stamp the stores ignore (BE-069)
+		grant := func(student, company uuid.UUID, at time.Time) students.AccessGrant {
+			t.Helper()
+			g, ok, err := s.InsertGrant(ctx, students.AccessGrant{ID: uuid.NewV7(), StudentUserID: student, CompanyOrgID: company,
+				Source: students.SourceContactRequest, SourceID: uuid.NewV7(), GrantedAt: at, CreatedAt: stale, UpdatedAt: stale})
+			if err != nil || !ok {
+				t.Fatalf("InsertGrant: ok=%v err=%v", ok, err)
+			}
+			return g
+		}
+		if err := s.LockGrants(ctx, u); err != nil {
+			t.Fatalf("LockGrants: %v", err)
+		}
+		g1 := grant(u, c1, t0)
+		if !g1.Active() || !g1.GrantedAt.Equal(t0) || g1.CreatedAt.IsZero() || g1.CreatedAt.Equal(stale) ||
+			!g1.UpdatedAt.Equal(g1.CreatedAt) || g1.Source != students.SourceContactRequest {
+			t.Fatalf("inserted = %+v (one store stamp on insert, BE-069)", g1)
+		}
+		if _, ok, err := s.InsertGrant(ctx, students.AccessGrant{ID: uuid.NewV7(), StudentUserID: v, CompanyOrgID: c2,
+			Source: g1.Source, SourceID: g1.SourceID, GrantedAt: t0}); err != nil || ok {
+			t.Fatalf("a second grant of the same request: ok=%v err=%v", ok, err)
+		}
+		if _, ok, err := s.InsertGrant(ctx, students.AccessGrant{ID: uuid.NewV7(), StudentUserID: u, CompanyOrgID: c2,
+			Source: "advert", SourceID: uuid.NewV7(), GrantedAt: t0}); !isInvalid(err) || ok {
+			t.Fatalf("unknown source: ok=%v err=%v, want 422", ok, err)
+		}
+		g2 := grant(u, c2, t0.Add(time.Minute))
+		g3 := grant(u, c3, t0.Add(2*time.Minute))
+		grant(v, c1, t0.Add(3*time.Minute))
+		if got, err := s.GrantBySource(ctx, g1.Source, g1.SourceID); err != nil || got.ID != g1.ID {
+			t.Fatalf("GrantBySource = %+v, %v", got, err)
+		}
+		if _, err := s.GetGrant(ctx, v, g1.ID); !errors.Is(err, students.ErrNotFound) {
+			t.Fatalf("another student's GetGrant: %v", err)
+		}
+		if got, err := s.ActiveGrant(ctx, u, c1); err != nil || got.ID != g1.ID {
+			t.Fatalf("ActiveGrant = %+v, %v", got, err)
+		}
+		if _, err := s.ActiveGrant(ctx, v, c2); !errors.Is(err, students.ErrNotFound) {
+			t.Fatalf("ActiveGrant without a grant: %v", err)
+		}
+
+		// Pages: newest first, keyset.
+		page, err := s.StudentGrants(ctx, u, nil, 2)
+		if err != nil || len(page) != 2 || page[0].ID != g3.ID || page[1].ID != g2.ID {
+			t.Fatalf("StudentGrants page 1 = %+v, %v", page, err)
+		}
+		page, err = s.StudentGrants(ctx, u, &students.GrantKey{GrantedAt: page[1].GrantedAt, ID: page[1].ID}, 2)
+		if err != nil || len(page) != 1 || page[0].ID != g1.ID {
+			t.Fatalf("StudentGrants page 2 = %+v, %v", page, err)
+		}
+		if page, err = s.CompanyGrants(ctx, c1, nil, 10); err != nil || len(page) != 2 || page[0].StudentUserID != v {
+			t.Fatalf("CompanyGrants = %+v, %v", page, err)
+		}
+
+		// Revoke: every active grant of the pair; a reason over 300 characters
+		// is refused; a second call revokes nothing.
+		long := strings.Repeat("x", 301)
+		if _, err := s.RevokeGrants(ctx, u, c1, students.RevokedByStudent, &long, t0); !isInvalid(err) {
+			t.Fatalf("a 301-character reason: %v, want 422", err)
+		}
+		why := "artık değil"
+		revoked, err := s.RevokeGrants(ctx, u, c1, students.RevokedByStudent, &why, t0.Add(time.Hour))
+		if err != nil || len(revoked) != 1 || revoked[0].ID != g1.ID || revoked[0].Active() ||
+			*revoked[0].RevokedByKind != students.RevokedByStudent || *revoked[0].RevokeReason != why ||
+			revoked[0].UpdatedAt.Before(revoked[0].CreatedAt) || !revoked[0].CreatedAt.Equal(g1.CreatedAt) {
+			t.Fatalf("RevokeGrants = %+v, %v", revoked, err)
+		}
+		if again, err := s.RevokeGrants(ctx, u, c1, students.RevokedByCompany, nil, t0); err != nil || len(again) != 0 {
+			t.Fatalf("revoking again = %+v, %v", again, err)
+		}
+		if _, err := s.ActiveGrant(ctx, u, c1); !errors.Is(err, students.ErrNotFound) {
+			t.Fatalf("ActiveGrant after the revocation: %v", err)
+		}
+		if got, _ := s.GetGrant(ctx, u, g1.ID); got.Active() {
+			t.Fatal("GetGrant returns the revoked grant as active")
+		}
+		if page, _ = s.CompanyGrants(ctx, c1, nil, 10); len(page) != 1 || page[0].StudentUserID != v {
+			t.Fatalf("CompanyGrants after the revocation = %+v", page)
+		}
+		if all, err := s.AllGrants(ctx, u); err != nil || len(all) != 3 || all[0].ID != g1.ID {
+			t.Fatalf("AllGrants = %+v, %v", all, err)
+		}
+
+		// Retention: revoked before the cutoff only, at most limit per call.
+		if _, err := s.RevokeGrants(ctx, u, c2, students.RevokedByCompany, nil, t0.Add(2*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		cutoff := t0.Add(90 * time.Minute)
+		if n, err := s.CountRevokedGrantsBefore(ctx, cutoff); err != nil || n != 1 {
+			t.Fatalf("CountRevokedGrantsBefore = %d, %v", n, err)
+		}
+		if n, err := s.PurgeRevokedGrants(ctx, t0.Add(3*time.Hour), 1); err != nil || n != 1 {
+			t.Fatalf("PurgeRevokedGrants(limit 1) = %d, %v", n, err)
+		}
+		if _, err := s.GetGrant(ctx, u, g1.ID); !errors.Is(err, students.ErrNotFound) {
+			t.Fatalf("the oldest revocation is not the first purged: %v", err)
+		}
+		if n, err := s.PurgeRevokedGrants(ctx, t0.Add(3*time.Hour), 10); err != nil || n != 1 {
+			t.Fatalf("PurgeRevokedGrants = %d, %v", n, err)
+		}
+		if n, err := s.DeleteGrants(ctx, u); err != nil || n != 1 {
+			t.Fatalf("DeleteGrants = %d, %v (g3 is left)", n, err)
+		}
+		if all, _ := s.AllGrants(ctx, v); len(all) != 1 {
+			t.Fatalf("another student's grants = %+v", all)
+		}
+	})
+
+	t.Run("discovery: candidates are active discoverable profiles matching every filter", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		uniA, uniB := w.university(t), w.university(t)
+		dept, skill, other := w.department(t, uniA), w.skill(t), w.skill(t)
+		mk := func(uni uuid.UUID, discoverable bool, edit func(*students.Profile)) uuid.UUID {
+			t.Helper()
+			p := newProfile(t, s, w, uni)
+			if edit != nil {
+				edit(&p)
+				if _, err := s.UpdateProfile(ctx, p); err != nil {
+					t.Fatal(err)
+				}
+			}
+			pr, err := s.LockPrivacy(ctx, p.UserID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pr.Discoverable = discoverable
+			if _, err := s.UpdatePrivacy(ctx, pr); err != nil {
+				t.Fatal(err)
+			}
+			return p.UserID
+		}
+		year := int16(3)
+		p1 := mk(uniA, true, func(p *students.Profile) { p.DepartmentID, p.ClassYear = &dept, &year })
+		if _, err := s.ReplaceSkills(ctx, p1, []students.Skill{{UserID: p1, SkillID: skill}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.ReplaceLanguages(ctx, p1, []students.Language{{UserID: p1, LanguageCode: "en", Level: "B2"}}); err != nil {
+			t.Fatal(err)
+		}
+		p2 := mk(uniA, true, nil)
+		p3 := mk(uniB, true, func(p *students.Profile) { p.DegreeLevel = students.DegreeMaster })
+		mk(uniA, false, nil) // level 2 off
+		now := t0
+		mk(uniA, true, func(p *students.Profile) { p.Status, p.GraduatedAt = students.ProfileGraduated, &now })
+		sorted := func(ids ...uuid.UUID) []uuid.UUID {
+			slices.SortFunc(ids, func(a, b uuid.UUID) int { return slices.Compare(a[:], b[:]) })
+			return ids
+		}
+		for _, c := range []struct {
+			name string
+			q    students.DiscoveryQuery
+			want []uuid.UUID
+		}{
+			{"everyone", students.DiscoveryQuery{}, sorted(p1, p2, p3)},
+			{"university", students.DiscoveryQuery{UniversityIDs: []uuid.UUID{uniA}}, sorted(p1, p2)},
+			{"two universities (OR)", students.DiscoveryQuery{UniversityIDs: []uuid.UUID{uniA, uniB}}, sorted(p1, p2, p3)},
+			{"department", students.DiscoveryQuery{DepartmentIDs: []uuid.UUID{dept}}, []uuid.UUID{p1}},
+			{"class year", students.DiscoveryQuery{ClassYears: []int16{2, 3}}, []uuid.UUID{p1}},
+			{"degree", students.DiscoveryQuery{DegreeLevel: students.DegreeMaster}, []uuid.UUID{p3}},
+			{"skill (OR)", students.DiscoveryQuery{SkillIDs: []uuid.UUID{other, skill}}, []uuid.UUID{p1}},
+			{"language", students.DiscoveryQuery{LanguageCodes: []string{"en"}}, []uuid.UUID{p1}},
+			{"AND across filters", students.DiscoveryQuery{UniversityIDs: []uuid.UUID{uniB}, SkillIDs: []uuid.UUID{skill}}, nil},
+		} {
+			got, err := s.DiscoveryCandidates(ctx, c.q, uuid.Nil(), 10)
+			if err != nil || !slices.Equal(got, c.want) {
+				t.Errorf("%s = %v, %v; want %v", c.name, got, err, c.want)
+			}
+		}
+		all := sorted(p1, p2, p3)
+		if got, err := s.DiscoveryCandidates(ctx, students.DiscoveryQuery{}, all[0], 1); err != nil || !slices.Equal(got, all[1:2]) {
+			t.Fatalf("keyset page = %v, %v", got, err)
+		}
+	})
+
 }

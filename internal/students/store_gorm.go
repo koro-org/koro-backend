@@ -44,6 +44,14 @@ var constraints = db.Constraints{
 	"student_cvs_file_id_fkey":              problem.ErrNotFound,
 	"student_cvs_file_id_uq":                problem.ErrConflict,
 	"student_cvs_current_uq":                problem.ErrConflict,
+
+	"profile_access_grants_student_user_id_fkey":         problem.ErrNotFound,
+	"profile_access_grants_company_org_id_org_kind_fkey": problem.ErrNotFound, // unknown org or not a company
+	"profile_access_grants_source_uq":                    problem.ErrConflict,
+	"profile_access_grants_revoke_reason_chk":            problem.ErrValidation,
+	"profile_access_grants_revoked_chk":                  problem.ErrValidation,
+	"profile_access_grants_source_chk":                   problem.ErrValidation,
+	"profile_access_grants_revoked_by_kind_chk":          problem.ErrValidation,
 }
 
 func wrap(op string, err error) error {

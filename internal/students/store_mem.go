@@ -33,6 +33,7 @@ type MemStore struct {
 	languages   map[uuid.UUID][]Language
 	experiences []Experience // insertion order
 	cvs         []CV         // insertion order
+	grants      []AccessGrant
 	// now stamps created_at/updated_at like the column defaults and the
 	// touch trigger.
 	now func() time.Time

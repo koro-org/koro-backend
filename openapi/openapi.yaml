@@ -35,6 +35,14 @@ components:
     AcceptedOutputBody:
       additionalProperties: false
       type: object
+    AccessGrantRevokeBody:
+      additionalProperties: false
+      properties:
+        reason:
+          description: Optional note (at most 300 characters); never shown to the other side
+          maxLength: 300
+          type: string
+      type: object
     AccountActionDTO:
       additionalProperties: false
       properties:
@@ -1469,6 +1477,21 @@ components:
           type: string
       required:
         - decision
+      type: object
+    AnonSkillDTO:
+      additionalProperties: false
+      properties:
+        level:
+          format: int64
+          type: integer
+        name:
+          type: string
+        skill_id:
+          format: uuid
+          type: string
+      required:
+        - skill_id
+        - name
       type: object
     ApproveAccountInputBody:
       additionalProperties: false
@@ -6598,6 +6621,81 @@ components:
         - membership_id
         - status
       type: object
+    L3CVDTO:
+      additionalProperties: false
+      properties:
+        available:
+          type: boolean
+        uploaded_at:
+          format: date-time
+          type: string
+      required:
+        - available
+      type: object
+    L3ClubDTO:
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+        org_id:
+          format: uuid
+          type: string
+        role:
+          type: string
+      required:
+        - org_id
+        - name
+        - role
+      type: object
+    L3ContactDTO:
+      additionalProperties: false
+      properties:
+        email:
+          format: email
+          type: string
+      required:
+        - email
+      type: object
+    L3ExperienceDTO:
+      additionalProperties: false
+      properties:
+        description:
+          type: string
+        end_month:
+          type: string
+        kind:
+          enum:
+            - internship
+            - job
+            - volunteer
+            - project
+            - club_role
+          type: string
+        organization_name:
+          type: string
+        start_month:
+          type: string
+        title:
+          type: string
+      required:
+        - kind
+        - title
+        - start_month
+      type: object
+    L3GrantDTO:
+      additionalProperties: false
+      properties:
+        contact_request_id:
+          type: string
+        granted_at:
+          format: date-time
+          type: string
+        source:
+          type: string
+      required:
+        - granted_at
+        - source
+      type: object
     LedgerEntryDTO:
       additionalProperties: false
       properties:
@@ -11231,6 +11329,41 @@ components:
         - like_count
         - save_count
       type: object
+    StudentAccessGrantDTO:
+      additionalProperties: false
+      properties:
+        company:
+          $ref: "#/components/schemas/StudentGrantCompanyDTO"
+        grant_id:
+          format: uuid
+          type: string
+        granted_at:
+          format: date-time
+          type: string
+        source:
+          description: "What you accepted: a contact request (an application in phase 3)"
+          enum:
+            - contact_request
+            - application
+          type: string
+      required:
+        - grant_id
+        - company
+        - source
+        - granted_at
+      type: object
+    StudentAccessGrantList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/StudentAccessGrantDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
     StudentCVDTO:
       additionalProperties: false
       properties:
@@ -11351,6 +11484,59 @@ components:
         - title
         - start_month
       type: object
+    StudentGrantCompanyDTO:
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+        org_id:
+          format: uuid
+          type: string
+      required:
+        - org_id
+        - name
+      type: object
+    StudentL3CardDTO:
+      additionalProperties: false
+      properties:
+        avatar_url:
+          type: string
+        class_year:
+          format: int64
+          type: integer
+        department:
+          $ref: "#/components/schemas/StudentNameRefDTO"
+        first_name:
+          type: string
+        granted_at:
+          format: date-time
+          type: string
+        last_name:
+          type: string
+        university:
+          $ref: "#/components/schemas/StudentNameRefDTO"
+        user_id:
+          format: uuid
+          type: string
+      required:
+        - user_id
+        - first_name
+        - last_name
+        - university
+        - granted_at
+      type: object
+    StudentL3CardList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/StudentL3CardDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
     StudentLanguageDTO:
       additionalProperties: false
       properties:
@@ -11413,6 +11599,74 @@ components:
         - show_contact_on_grant
         - show_clubs_on_grant
         - activity_ranking_choice
+      type: object
+    StudentProfileL3DTO:
+      additionalProperties: false
+      properties:
+        about:
+          type: string
+        avatar_url:
+          type: string
+        city:
+          type: string
+        class_year:
+          format: int64
+          type: integer
+        clubs:
+          items:
+            $ref: "#/components/schemas/L3ClubDTO"
+          type: array
+        contact:
+          $ref: "#/components/schemas/L3ContactDTO"
+        cv:
+          $ref: "#/components/schemas/L3CVDTO"
+        degree_level:
+          enum:
+            - associate
+            - bachelor
+            - master
+            - doctorate
+          type: string
+        department:
+          $ref: "#/components/schemas/StudentDepartmentDTO"
+        expected_graduation:
+          type: string
+        experiences:
+          items:
+            $ref: "#/components/schemas/L3ExperienceDTO"
+          type: array
+        first_name:
+          type: string
+        grant:
+          $ref: "#/components/schemas/L3GrantDTO"
+        headline:
+          type: string
+        languages:
+          items:
+            $ref: "#/components/schemas/StudentLanguageDTO"
+          type: array
+        last_name:
+          type: string
+        skills:
+          items:
+            $ref: "#/components/schemas/AnonSkillDTO"
+          type: array
+        university:
+          $ref: "#/components/schemas/StudentUniversityDTO"
+        user_id:
+          format: uuid
+          type: string
+      required:
+        - user_id
+        - first_name
+        - last_name
+        - university
+        - degree_level
+        - skills
+        - languages
+        - experiences
+        - cv
+        - grant
       type: object
     StudentProfileSelfDTO:
       additionalProperties: false
@@ -22028,6 +22282,97 @@ paths:
       x-koro-action: identity.account.update_own
       x-koro-rate-limit: write_default
       x-koro-surface: self
+  /api/v1/me/access-grants:
+    get:
+      description: The companies holding level 3 access to your full profile and current CV (you accepted their contact request), newest first.
+      operationId: listMyAccessGrants
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StudentAccessGrantList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the companies that see my profile
+      tags:
+        - students
+      x-koro-action: students.access_grant.list_own
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
+  /api/v1/me/access-grants/{grant_id}/revoke:
+    post:
+      description: The company loses level 3 access at once. The reason is optional and never shown to the company. Revoking a revoked grant changes nothing; another user's grant is 404.
+      operationId: revokeMyAccessGrant
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Grant ID (another user's or a malformed ID is 404)
+          in: path
+          name: grant_id
+          required: true
+          schema:
+            description: Grant ID (another user's or a malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccessGrantRevokeBody"
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Revoke a company's access
+      tags:
+        - students
+      x-koro-action: students.access_grant.revoke
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
   /api/v1/me/club-claims:
     get:
       description: Newest first.
@@ -27749,6 +28094,201 @@ paths:
       x-koro-action: outreach.segment.manage
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/students:
+    get:
+      description: Students with an active level 3 grant of this company (they accepted its contact request), newest grant first; q filters by name. Minors never appear.
+      operationId: listCompanyGrantedStudents
+      parameters:
+        - description: Company org ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Company org ID
+            type: string
+        - description: Name filter (case-insensitive)
+          explode: false
+          in: query
+          name: q
+          schema:
+            description: Name filter (case-insensitive)
+            maxLength: 100
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StudentL3CardList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the students who granted the company access
+      tags:
+        - students
+      x-koro-action: students.access_grant.list_company
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/students/{user_id}:
+    get:
+      description: The level 3 profile. Without an active grant of this company the student is not found (404, as an unknown student). The e-mail only when the student shares it; clubs only when the student shares them (never a sensitive club). Every read is audited.
+      operationId: getCompanyStudentProfile
+      parameters:
+        - description: Company org ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Company org ID
+            type: string
+        - description: Student user ID (from an accepted contact request)
+          in: path
+          name: user_id
+          required: true
+          schema:
+            description: Student user ID (from an accepted contact request)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StudentProfileL3DTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a granted student's profile
+      tags:
+        - students
+      x-koro-action: students.profile.read_company
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/students/{user_id}/access-grant/revoke:
+    post:
+      description: The company ends its level 3 access. The reason is optional and never shown to the student. Without an active grant, 404.
+      operationId: revokeCompanyAccessGrant
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Company org ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Company org ID
+            type: string
+        - description: Student user ID (from an accepted contact request)
+          in: path
+          name: user_id
+          required: true
+          schema:
+            description: Student user ID (from an accepted contact request)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccessGrantRevokeBody"
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Give up access to a student
+      tags:
+        - students
+      x-koro-action: students.access_grant.revoke
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/students/{user_id}/cv:
+    get:
+      description: A signed URL of the student's current CV, valid for 1 minute. Without an active grant, or without a current CV, 404; 409 files.not_clean while the virus scan is pending. Every call is audited.
+      operationId: downloadCompanyStudentCv
+      parameters:
+        - description: Company org ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Company org ID
+            type: string
+        - description: Student user ID (from an accepted contact request)
+          in: path
+          name: user_id
+          required: true
+          schema:
+            description: Student user ID (from an accepted contact request)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StudentCVDownloadDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Download a granted student's CV
+      tags:
+        - students
+      x-koro-action: students.cv.read_company
+      x-koro-rate-limit: read_default
       x-koro-surface: org
   /api/v1/orgs/{org_id}/targeted-posts:
     post:

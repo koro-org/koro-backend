@@ -75,3 +75,34 @@ scenarios:
           expect: 403, code: forbidden }
       - { persona: dpo, operation: adminGetStudentProfile, headers: { X-Koro-Access-Reason: "{{fixture:dsr_student_open}}" },
           expect: 200 }
+  access_grant_student_revokes:
+    note: >-
+      BE-046 (02 §9.7, 03 Y5): company_a reads the level 3 profile of the student who granted it access
+      (no CV: 404); the student lists and revokes the grant; the company's next read is 404, its list and its
+      own revocation find nothing.
+    steps:
+      - { persona: company_member, operation: getCompanyStudentProfile, path_params: { org_id: company_a, user_id: student_granted },
+          expect: 200 }
+      - { persona: company_member, operation: downloadCompanyStudentCv, path_params: { org_id: company_a, user_id: student_granted },
+          expect: 404, code: not_found }
+      - { persona: student_granted, operation: listMyAccessGrants, expect: 200 }
+      - { persona: student_granted, operation: revokeMyAccessGrant, path_params: { grant_id: grant_granted_a }, expect: 204 }
+      - { persona: company_member, operation: getCompanyStudentProfile, path_params: { org_id: company_a, user_id: student_granted },
+          expect: 404, code: not_found }
+      - { persona: company_admin, operation: listCompanyGrantedStudents, path_params: { org_id: company_a }, expect: 200 }
+      - { persona: company_admin, operation: revokeCompanyAccessGrant, path_params: { org_id: company_a, user_id: student_granted },
+          expect: 404, code: not_found }
+  access_grant_company_revokes:
+    note: >-
+      BE-046: company_b downloads the CV of the student who granted it access, then gives the access up; the
+      student's revocation of the ended grant changes nothing (204) and the company's CV download is 404.
+    steps:
+      - { persona: other_company_member, operation: downloadCompanyStudentCv, path_params: { org_id: company_b, user_id: student },
+          expect: 200 }
+      - { persona: other_company_member, operation: revokeCompanyAccessGrant, path_params: { org_id: company_b, user_id: student },
+          expect: 204 }
+      - { persona: student, operation: revokeMyAccessGrant, path_params: { grant_id: grant_student_b }, expect: 204 }
+      - { persona: other_company_member, operation: downloadCompanyStudentCv, path_params: { org_id: company_b, user_id: student },
+          expect: 404, code: not_found }
+      - { persona: other_company_member, operation: getCompanyStudentProfile, path_params: { org_id: company_b, user_id: student },
+          expect: 404, code: not_found }

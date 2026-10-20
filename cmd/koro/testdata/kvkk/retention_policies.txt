@@ -45,8 +45,8 @@ membership_ended_sensitive    inline:deleted in the transaction that ends it; or
 org_invitation                sweeper:orgs
 # directory
 club_claim                    sweeper:directory
-# students: profile_access_grants are written by messaging (P3) and students-3
-access_grant_revoked          todo:BE-046
+# students: profile_access_grants (written by messaging's acceptance; revoked by the student or the company, BE-046)
+access_grant_revoked          sweeper:students
 # events
 event_form_answers            sweeper:events
 event_form_answers_sensitive  sweeper:events

@@ -1,0 +1,99 @@
+package students
+
+import (
+	"time"
+	"uuid"
+)
+
+// GrantSource is profile_access_grants.source (02 §9.7): what the student
+// accepted to give a company level 3 access.
+type GrantSource string
+
+// Grant sources. application is phase 3 (no writer yet).
+const (
+	SourceContactRequest GrantSource = "contact_request"
+	SourceApplication    GrantSource = "application"
+)
+
+// Valid reports whether s is a source of the CHECK.
+func (s GrantSource) Valid() bool { return s == SourceContactRequest || s == SourceApplication }
+
+// RevokedBy is profile_access_grants.revoked_by_kind.
+type RevokedBy string
+
+// Who ended a grant: the student (revokeMyAccessGrant), the company
+// (revokeCompanyAccessGrant) or another module (AccessGrants.Revoke).
+const (
+	RevokedByStudent RevokedBy = "student"
+	RevokedByCompany RevokedBy = "company"
+	RevokedBySystem  RevokedBy = "system"
+)
+
+// AccessGrant is a profile_access_grants row (02 §9.7): a company's level 3
+// access to one student. It is revoked, never edited away; a revoked grant
+// is hard deleted 6 months after its revocation (access_grant_revoked).
+// org_kind is the constant 'company' of the composite FK and is not mapped.
+type AccessGrant struct {
+	ID            uuid.UUID   `gorm:"type:uuid;column:id;primaryKey"`
+	StudentUserID uuid.UUID   `gorm:"type:uuid;column:student_user_id"`
+	CompanyOrgID  uuid.UUID   `gorm:"type:uuid;column:company_org_id"`
+	Source        GrantSource `gorm:"column:source"`
+	SourceID      uuid.UUID   `gorm:"type:uuid;column:source_id"`
+	GrantedAt     time.Time   `gorm:"column:granted_at"`
+	RevokedAt     *time.Time  `gorm:"column:revoked_at"`
+	RevokedByKind *RevokedBy  `gorm:"column:revoked_by_kind"`
+	RevokeReason  *string     `gorm:"column:revoke_reason"`
+	CreatedAt     time.Time   `gorm:"column:created_at;->"`
+	UpdatedAt     time.Time   `gorm:"column:updated_at;->"`
+}
+
+// TableName implements gorm's Tabler.
+func (AccessGrant) TableName() string { return "profile_access_grants" }
+
+// Active reports whether the grant is in force.
+func (g AccessGrant) Active() bool { return g.RevokedAt == nil }
+
+// view is the grant as the level 3 projections take it (dto.go Grant).
+func (g AccessGrant) view() Grant {
+	out := Grant{CompanyOrgID: g.CompanyOrgID, Active: g.Active(), GrantedAt: g.GrantedAt, Source: string(g.Source)}
+	if g.Source == SourceContactRequest {
+		id := g.SourceID
+		out.ContactRequestID = &id
+	}
+	return out
+}
+
+// GrantKey is the keyset position of a grant list: granted_at DESC, id
+// DESC (the newest grant first).
+type GrantKey struct {
+	GrantedAt time.Time
+	ID        uuid.UUID
+}
+
+// before reports whether g sorts after the position k in a newest-first
+// list (strictly older, or as old with a smaller ID).
+func (k GrantKey) before(g AccessGrant) bool {
+	if c := g.GrantedAt.Compare(k.GrantedAt); c != 0 {
+		return c < 0
+	}
+	return compareUUID(g.ID, k.ID) < 0
+}
+
+// DiscoveryQuery is a level 2 search (01 §4.9 Discoverable.Search; 04 §2.10
+// searchDiscovery): OR inside a filter, AND across filters (the targeting
+// semantics of 02 §9.1). There is deliberately no club filter of any kind
+// (03 §5.10: no sensitive club filter; a club filter would also narrow a
+// result to a club's members). An empty filter matches everyone.
+type DiscoveryQuery struct {
+	UniversityIDs []uuid.UUID
+	DepartmentIDs []uuid.UUID
+	ClassYears    []int16
+	DegreeLevel   DegreeLevel // "" = any
+	SkillIDs      []uuid.UUID
+	LanguageCodes []string
+	// After is the keyset position: the page holds user IDs > After.
+	After uuid.UUID
+	// Limit is the page size (1–MaxDiscoveryLimit; default
+	// DefaultDiscoveryLimit).
+	Limit int
+}

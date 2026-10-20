@@ -79,17 +79,28 @@ func (s *spyStore) UpdatePrivacy(ctx context.Context, p students.Privacy) (stude
 	return s.MemStore.UpdatePrivacy(ctx, p)
 }
 
-// auditLog records the events the service writes.
+// auditLog records the events the service writes; fail makes every write
+// fail.
 type auditLog struct {
 	mu     sync.Mutex
 	events []audit.Event
+	fail   error
 }
 
 func (l *auditLog) Log(_ context.Context, e audit.Event) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.fail != nil {
+		return l.fail
+	}
 	l.events = append(l.events, e)
 	return nil
+}
+
+func (l *auditLog) setFail(err error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.fail = err
 }
 
 func (l *auditLog) of(action string) []audit.Event {
@@ -459,6 +470,57 @@ func (f *filesFake) wasDeleted(id uuid.UUID) bool {
 	return slices.Contains(f.deleted, id)
 }
 
+// contactsFake is identity's Contact: the address of every known user.
+type contactsFake struct{ users *usersFake }
+
+func (c contactsFake) Contact(_ context.Context, id uuid.UUID) (identity.UserContact, error) {
+	c.users.mu.Lock()
+	defer c.users.mu.Unlock()
+	s, ok := c.users.sum[id]
+	if !ok || s.Status == identity.StatusErased {
+		return identity.UserContact{}, identity.ErrNotFound
+	}
+	return identity.UserContact{ID: id, Email: "student-" + id.String()[:8] + "@example.test", FirstName: s.FirstName,
+		LastName: s.LastName}, nil
+}
+
+// orgNamesFake is orgs' GetMany over named orgs.
+type orgNamesFake struct {
+	mu    sync.Mutex
+	names map[uuid.UUID]string
+}
+
+func (o *orgNamesFake) GetMany(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]orgs.OrgSummary, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	out := map[uuid.UUID]orgs.OrgSummary{}
+	for _, id := range ids {
+		if n, ok := o.names[id]; ok {
+			out[id] = orgs.OrgSummary{ID: id, Name: n}
+		}
+	}
+	return out, nil
+}
+
+func (o *orgNamesFake) name(id uuid.UUID, n string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.names[id] = n
+}
+
+// skillNamesFake names the catalog skills.
+type skillNamesFake struct{ names map[uuid.UUID]string }
+
+func (f skillNamesFake) SkillNames(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error) {
+	out := map[uuid.UUID]string{}
+	for _, id := range ids {
+		if n, ok := f.names[id]; ok {
+			out[id] = n
+		}
+	}
+	return out, nil
+}
+
 // env is a students module over the in-memory store and the fakes.
 type env struct {
 	clk      *clock.Fake
@@ -475,6 +537,7 @@ type env struct {
 	dsrs     *dsrsFake
 	resolver *authztest.Resolver // newHTTP
 	regs     *regsFake
+	orgNames *orgNamesFake
 	mod      students.Module
 	svc      students.Service
 	subs     *outbox.Registry
@@ -496,7 +559,8 @@ func newEnv(t *testing.T) *env {
 		files: &filesFake{meta: map[uuid.UUID]files.FileMeta{}, attached: map[uuid.UUID]files.Owner{},
 			notClean: map[uuid.UUID]bool{}},
 		members: &membersFake{ms: map[uuid.UUID]orgs.MemberView{}}, dsrs: &dsrsFake{open: map[uuid.UUID]uuid.UUID{}},
-		uniA: uuid.NewV7(), uniB: uuid.NewV7(), deptA: uuid.NewV7(), deptB: uuid.NewV7(), deptA2: uuid.NewV7(),
+		orgNames: &orgNamesFake{names: map[uuid.UUID]string{}},
+		uniA:     uuid.NewV7(), uniB: uuid.NewV7(), deptA: uuid.NewV7(), deptB: uuid.NewV7(), deptA2: uuid.NewV7(),
 		skill1: uuid.NewV7(), skill2: uuid.NewV7(), clubPlain: uuid.NewV7(), clubSens: uuid.NewV7(),
 	}
 	e.catalog = &catalog{
@@ -513,6 +577,8 @@ func newEnv(t *testing.T) *env {
 		sensitive: map[uuid.UUID]bool{e.clubSens: true},
 		clubs:     map[uuid.UUID]bool{e.clubPlain: true, e.clubSens: true},
 	}
+	e.orgNames.name(e.clubPlain, "Satranç Kulübü")
+	e.orgNames.name(e.clubSens, "İnanç Topluluğu")
 	mod, err := students.New(students.Deps{
 		Store: e.store, Tx: e.tx, Outbox: e.out, Audit: e.audit, Clock: clk, Log: obs.Discard(),
 		Idempotency: idempotency.New(idempotency.Deps{Tx: e.tx, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()}),
@@ -525,6 +591,8 @@ func newEnv(t *testing.T) *env {
 			}
 			return e.regs
 		},
+		Contacts: contactsFake{users: e.users}, OrgNames: e.orgNames,
+		SkillNames: skillNamesFake{names: map[uuid.UUID]string{e.skill1: "Go", e.skill2: "SQL"}},
 	})
 	if err != nil {
 		t.Fatal(err)

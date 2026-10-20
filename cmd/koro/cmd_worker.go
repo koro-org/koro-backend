@@ -74,6 +74,9 @@ func runWorker(ctx context.Context, stop context.CancelFunc, environ map[string]
 	if err := c.build(); err != nil {
 		return err
 	}
+	if err := c.talent.metrics(tel.Metrics); err != nil { // koro_talent_ingest_total (BE-047)
+		return err
+	}
 	mux, err := c.workerMux(log)
 	if err != nil {
 		return err

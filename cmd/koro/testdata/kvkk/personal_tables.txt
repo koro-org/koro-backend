@@ -98,12 +98,12 @@ contact_blocks              personal  messaging     todo:BE-056
 # talent (profiling data)
 talent.config_versions      staff     talent        -
 talent.signal_defs          staff     talent        -
-talent.point_events         personal  talent        todo:BE-047
-talent.daily_counters       personal  talent        todo:BE-047
-talent.cohorts              personal  talent        todo:BE-052
-talent.scores               personal  talent        todo:BE-052
+talent.point_events         personal  talent        provider:talent
+talent.daily_counters       personal  talent        provider:talent
+talent.cohorts              personal  talent        provider:talent
+talent.scores               personal  talent        provider:talent
 talent.score_runs           none      talent        -
-talent.neutralizations      personal  talent        todo:BE-047
+talent.neutralizations      personal  talent        provider:talent
 # kvkk
 data_subject_requests       personal  kvkk          provider:kvkk
 retention_policies          staff     kvkk          -

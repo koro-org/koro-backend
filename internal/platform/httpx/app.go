@@ -173,6 +173,7 @@ func New(d Deps) (*App, error) {
 	}
 
 	api := humagin.New(r, cfg)
+	installTalentFieldGuard(api.OpenAPI()) // no talent*/band/score*/point* member outside the talent operations (BE-047)
 	// The Problem schema and a reusable "Problem" response are always part
 	// of the spec, even before the first operation references them (huma
 	// prunes unreferenced schemas, the response keeps it referenced).

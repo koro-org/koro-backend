@@ -391,6 +391,39 @@ func TestArch_TalentImportBan(t *testing.T) {
 	)
 }
 
+// TestArch_OnlyDiscoveryKvkkImportTalent (BE-047, 01 §5.4): now that the
+// talent package exists the import ban is not vacuous: talent is parsed,
+// the composition root imports it, and outside talent itself only
+// discovery, kvkk and cmd do (non-test and test files alike).
+func TestArch_OnlyDiscoveryKvkkImportTalent(t *testing.T) {
+	t.Parallel()
+	files := parseTree(t, repoRoot)
+	if v := talentViolations(files); len(v) > 0 {
+		t.Fatalf("talent imported outside discovery, kvkk and cmd:\n%s", strings.Join(v, "\n"))
+	}
+	var talentFiles, importers []string
+	for _, f := range files {
+		if f.top == "talent" {
+			talentFiles = append(talentFiles, f.rel)
+			continue
+		}
+		if slices.Contains(imports(f), modPath+"talent") {
+			importers = append(importers, f.top)
+		}
+	}
+	if len(talentFiles) == 0 {
+		t.Fatal("internal/talent was not parsed: the import ban checks nothing")
+	}
+	if !slices.Contains(importers, "cmd") {
+		t.Fatal("cmd/koro does not import talent: the module is not wired")
+	}
+	for _, top := range importers {
+		if top != "cmd" && !talentImporters[top] {
+			t.Errorf("%s imports talent", top)
+		}
+	}
+}
+
 func TestArch_ForeignStoreBan(t *testing.T) {
 	t.Parallel()
 	check(t, foreignStoreViolations,

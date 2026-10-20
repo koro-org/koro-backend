@@ -135,9 +135,27 @@ func (m *Metrics) GaugeFunc(name, help string, labels []string, fn func(ctx cont
 	return nil
 }
 
-// gaugeFunc is a collector whose samples come from fn at scrape time.
+// CounterFunc registers a counter read at scrape time from an in-process
+// monotonic source (BE-047: koro_talent_ingest_total, whose totals live in
+// the talent module). fn must never decrease a series during the life of
+// the process; label values must come from a fixed set.
+func (m *Metrics) CounterFunc(name, help string, labels []string, fn func() []Sample) error {
+	if m == nil {
+		return nil
+	}
+	c := &gaugeFunc{desc: prometheus.NewDesc(name, help, labels, nil), kind: prometheus.CounterValue,
+		fn: func(context.Context) ([]Sample, error) { return fn(), nil }}
+	if err := m.reg.Register(c); err != nil {
+		return fmt.Errorf("obs: register %s: %w", name, err)
+	}
+	return nil
+}
+
+// gaugeFunc is a collector whose samples come from fn at scrape time; kind
+// is GaugeValue (zero value: GaugeFunc) or CounterValue (CounterFunc).
 type gaugeFunc struct {
 	desc *prometheus.Desc
+	kind prometheus.ValueType
 	fn   func(ctx context.Context) ([]Sample, error)
 }
 
@@ -153,7 +171,11 @@ func (g *gaugeFunc) Collect(ch chan<- prometheus.Metric) {
 		return
 	}
 	for _, s := range samples {
-		m, err := prometheus.NewConstMetric(g.desc, prometheus.GaugeValue, s.Value, s.Labels...)
+		kind := g.kind
+		if kind == 0 {
+			kind = prometheus.GaugeValue
+		}
+		m, err := prometheus.NewConstMetric(g.desc, kind, s.Value, s.Labels...)
 		if err != nil {
 			m = prometheus.NewInvalidMetric(g.desc, err)
 		}

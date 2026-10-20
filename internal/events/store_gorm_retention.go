@@ -34,6 +34,11 @@ var purgeSQL = map[string]struct{ count, purge string }{
 			JOIN events e ON e.id = s.event_id WHERE e.ends_at < @cutoff
 			ORDER BY e.ends_at, s.event_id, s.user_id LIMIT @limit FOR UPDATE OF s SKIP LOCKED)`,
 	},
+	PolicyExportLog: {
+		`SELECT count(*) FROM event_data_exports WHERE created_at < @cutoff AND file_id IS NULL`,
+		`DELETE FROM event_data_exports WHERE id IN (SELECT id FROM event_data_exports
+			WHERE created_at < @cutoff AND file_id IS NULL ORDER BY created_at, id LIMIT @limit FOR UPDATE SKIP LOCKED)`,
+	},
 }
 
 // PurgeExpired implements Store.

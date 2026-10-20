@@ -51,8 +51,8 @@ access_grant_revoked          sweeper:students
 event_form_answers            sweeper:events
 event_form_answers_sensitive  sweeper:events
 event_staff                   sweeper:events
-event_export_log              todo:BE-050
-event_export_file             todo:BE-050
+event_export_log              sweeper:events
+event_export_file             job:events.purge_exports
 # feed (01 §7 feed.purge_removed)
 post_removed                  sweeper:feed
 content_report                sweeper:feed

@@ -125,6 +125,14 @@
 //     turns the confirmed registrations without check-in into no_show in
 //     batches; a check-in and a no_show keep confirmed_count consistent
 //     (checked_in holds its seat, no_show releases it).
+//
+// BE-050 adds the registration exports (export.go, export_build.go; 02
+// §11.9, R-003 §2.6-5, T-37, T-69): a reasoned, field-chosen, re-
+// authenticated request of the organiser's managers, built by the worker
+// as CSV or XLSX (no e-mail, never a special-category answer, formula-safe
+// cells, a personal-data warning row), downloaded only by its requester
+// while ready (counted and audited), deleted after 7 days by
+// events.purge_exports; the row stays 2 years (event_export_log).
 package events
 
 import (
@@ -136,6 +144,7 @@ import (
 	"uuid"
 
 	"koro/internal/authz"
+	"koro/internal/identity"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
 	"koro/internal/platform/idempotency"
@@ -164,7 +173,7 @@ type Registrations interface {
 }
 
 // Service is the events service: the cross-module contract plus the HTTP
-// use cases of BE-024, BE-026, BE-028 and BE-031 (04 §2.6). Every method that takes an actor calls
+// use cases of BE-024, BE-026, BE-028, BE-031 and BE-050 (04 §2.6). Every method that takes an actor calls
 // authz.Can first (05 §5.3).
 type Service interface {
 	Events
@@ -280,6 +289,16 @@ type Service interface {
 	// (events.attendance.finalize): after the end, once (409 otherwise); it
 	// returns the number of no-shows the worker marks.
 	FinalizeEventAttendance(ctx context.Context, a authz.Actor, eventID uuid.UUID) (int, error)
+
+	// CreateExport is createEventExport (events.export.create, R; BE-050):
+	// a queued export of the event's registrations with the reason and the
+	// allowed fields; the worker builds the file (export.go).
+	CreateExport(ctx context.Context, a authz.Actor, eventID uuid.UUID, in ExportInput, proof identity.ReauthProof) (Export, error)
+	// ListExports is listEventExports (events.export.list): newest first.
+	ListExports(ctx context.Context, a authz.Actor, eventID uuid.UUID, limit int, after *After) (ExportPage, error)
+	// DownloadExport is downloadEventExport (events.export.download, S·O):
+	// a presigned URL of a ready export's file, counted and audited.
+	DownloadExport(ctx context.Context, a authz.Actor, eventID, exportID uuid.UUID) (ExportDownload, error)
 }
 
 // Deps are the dependencies of the events module. Store, Tx, Outbox,
@@ -343,6 +362,12 @@ type Deps struct {
 	// ICSOrganizer is the ORGANIZER address of the .ics files (SMTP_FROM);
 	// empty → the files carry no ORGANIZER.
 	ICSOrganizer string
+
+	// Reauth verifies the re-authentication proof of createEventExport
+	// (BE-050; identity). nil → createEventExport answers 503 (as without
+	// Files or Queue, which the exports also need: the file is stored by
+	// files, the build is a task).
+	Reauth Reauthenticator
 }
 
 func (d Deps) validate() error {
@@ -366,11 +391,12 @@ func (d Deps) validate() error {
 type Module struct {
 	Service Service
 	// Privacy is the KVKK provider (event staff assignments, registrations
-	// with their answers and tickets; the events rows hold no personal
-	// data, 02 §11.1).
+	// with their answers and tickets, the exports a person requested; the
+	// events rows hold no personal data, 02 §11.1).
 	Privacy privacy.Provider
 	// Sweeper ends the retention of form answers (special category ones
-	// sooner) and staff assignments after the event (02 §24.2; BE-057).
+	// sooner) and staff assignments after the event, and of the export log
+	// 2 years after the request (02 §24.2; BE-057, BE-050).
 	Sweeper privacy.RetentionSweeper
 
 	svc *service

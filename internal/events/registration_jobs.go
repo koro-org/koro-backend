@@ -81,13 +81,14 @@ func (m Module) Subscribe(r *outbox.Registry) {
 }
 
 // Tasks returns the task handlers events enqueues itself (mechanism A):
-// the ticket resend (BE-031).
+// the ticket resend (BE-031) and the export build (BE-050).
 func (m Module) Tasks() []queue.Task {
-	return []queue.Task{{Name: ResendTicketTaskName, Handle: m.svc.handleResend}}
+	return []queue.Task{{Name: ResendTicketTaskName, Handle: m.svc.handleResend},
+		{Name: BuildExportTaskName, Handle: m.svc.handleBuildExport}}
 }
 
 // Jobs returns the scheduled jobs of 01 §7 owned by BE-028 and BE-031 (and
-// events.complete_ended, T-264).
+// events.complete_ended, T-264; events.purge_exports, BE-050).
 func (m Module) Jobs() []queue.Job {
 	return []queue.Job{
 		{Name: WaitlistExpireJobName, Cron: "*/15 * * * *", Queue: queue.Default, Unique: 14 * time.Minute,
@@ -98,6 +99,7 @@ func (m Module) Jobs() []queue.Job {
 			Handle: m.svc.autoFinalize},
 		{Name: CompleteEndedJobName, Cron: "40 * * * *", Queue: queue.Default, Unique: 50 * time.Minute,
 			Handle: m.svc.completeEnded}, // T-264 (BE-033)
+		m.svc.purgeExportsJob(), // BE-050
 	}
 }
 

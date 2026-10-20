@@ -51,6 +51,11 @@ import (
 // the web origin of the mail links (IDENTITY_LINK_BASE_URL) and SMTP_FROM
 // as the .ics ORGANIZER. The QR renderer is events.NewQRRenderer (yeqown/go-qrcode/v2).
 //
+// BE-050 consumes c.identity.svc as events.Reauthenticator (the proof of
+// createEventExport; nil → 503) and c.files.svc for the export files
+// (PutGenerated, Attach, PresignGet, Delete: the 7-day purge deletes the
+// file in the transaction that clears its reference, 01 §6.3).
+//
 // Provided, set in build: svc (events.Events for feed and catalog), the
 // students hook c.students.registrations (T-241: events.Registrations
 // adapted to students.Registrations), the events KVKK provider (staff
@@ -64,7 +69,8 @@ import (
 // events.send_schedule_update, registration.cancelled →
 // events.send_cancellation_email, attendance.finalized →
 // events.mark_no_shows, the task events.resend_ticket_email and the job
-// events.auto_finalize_attendance.
+// events.auto_finalize_attendance; BE-050: the task events.build_export
+// and the job events.purge_exports (hourly :25, low).
 type eventsWiring struct {
 	store    events.Store
 	newStore func(c *container) events.Store
@@ -76,6 +82,7 @@ type eventsWiring struct {
 	svc   events.Service    // set by build
 	built events.Store      // the store build used (wiring and matrix tests seed it)
 	keys  events.TicketKeys // the ticket key ring build used (matrix fixtures derive the tickets' tokens)
+	files events.Files      // c.files.svc, kept for the matrix fixtures (export files)
 }
 
 func (w *eventsWiring) build(c *container) error {
@@ -114,7 +121,7 @@ func (w *eventsWiring) build(c *container) error {
 		d.LinkBaseURL = c.identity.cfg.LinkBaseURL
 	}
 	if svc := c.identity.svc; svc != nil {
-		d.Users, d.Contacts = svc, svc
+		d.Users, d.Contacts, d.Reauth = svc, svc, svc
 	}
 	if svc := c.files.svc; svc != nil {
 		d.Files = svc
@@ -150,7 +157,7 @@ func (w *eventsWiring) build(c *container) error {
 	if err != nil {
 		return err
 	}
-	w.mod, w.svc, w.built, w.keys = mod, mod.Service, store, d.Tickets
+	w.mod, w.svc, w.built, w.keys, w.files = mod, mod.Service, store, d.Tickets, d.Files
 	c.privacy = append(c.privacy, mod.Privacy)
 	c.students.registrations = eventsRegistrations{svc: mod.Service} // T-241
 	c.sweepers = append(c.sweepers, mod.Sweeper)
@@ -182,9 +189,9 @@ func (r eventsRegistrations) SummaryOf(ctx context.Context, userID uuid.UUID) ([
 // tasks: event.cancelled → events.cancel_registrations, the
 // registration.submitted/waitlisted/rejected/cancelled notices (BE-028),
 // the ticket, schedule and cancellation mails and the no-shows (BE-031;
-// event.cancelled's offerings are catalog's), the resend task and the
-// jobs events.waitlist_expire, events.reconcile_counts and
-// events.auto_finalize_attendance.
+// event.cancelled's offerings are catalog's), the resend and export build
+// tasks and the jobs events.waitlist_expire, events.reconcile_counts,
+// events.auto_finalize_attendance and events.purge_exports (BE-050).
 func (w *eventsWiring) tasks(c *container) {
 	w.mod.Subscribe(c.infra.subs)
 	for _, t := range w.mod.Tasks() {
@@ -195,9 +202,9 @@ func (w *eventsWiring) tasks(c *container) {
 	}
 }
 
-// routes: the 12 operations of BE-024, the 7 of BE-026, the 8 of BE-028
-// and the 9 of BE-031 (04 §2.6); w.svc is nil under `koro openapi`, which Register
-// tolerates.
+// routes: the 12 operations of BE-024, the 7 of BE-026, the 8 of BE-028,
+// the 9 of BE-031 and the 3 of BE-050 (04 §2.6); w.svc is nil under `koro
+// openapi`, which Register tolerates.
 func (w *eventsWiring) routes(c *container, api huma.API) { events.Register(api, w.svc) }
 
 // eventsSender adapts notify (L3) to events.Sender, read at call time; a

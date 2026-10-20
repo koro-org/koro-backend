@@ -22,11 +22,14 @@ type world struct {
 	// register adds a registration to an event (BE-028's table; BE-026
 	// only reads whether one exists).
 	register func(t *testing.T, s events.Store, org, eventID uuid.UUID)
+	// file adds a files row of purpose event_export (BE-050: a ready
+	// export references its file).
+	file func(t *testing.T) uuid.UUID
 }
 
 func memWorld() world {
 	id := func(*testing.T) uuid.UUID { return uuid.NewV7() }
-	return world{org: id, user: id, university: id, register: func(_ *testing.T, s events.Store, _, eventID uuid.UUID) {
+	return world{org: id, user: id, university: id, file: id, register: func(_ *testing.T, s events.Store, _, eventID uuid.UUID) {
 		s.(*events.MemStore).MarkRegistered(eventID)
 	}}
 }

@@ -38,6 +38,7 @@ type MemStore struct {
 	regs     map[uuid.UUID]Registration // by id (BE-028)
 	tickets  []Ticket                   // insertion order (BE-028)
 	checkins []Checkin                  // insertion order (BE-031)
+	exports  map[uuid.UUID]Export       // by id (BE-050)
 	// now stamps created_at/updated_at like the column defaults and the
 	// touch trigger; updated_at always moves forward (two writes at the same
 	// fake instant still change the ETag, as two transactions do).
@@ -51,7 +52,7 @@ var _ Store = (*MemStore)(nil)
 func NewMemStore(now func() time.Time) *MemStore {
 	s := &MemStore{
 		events: map[uuid.UUID]Event{}, forms: map[uuid.UUID]Form{}, versions: map[uuid.UUID]FormVersion{},
-		reg: map[uuid.UUID]bool{}, regs: map[uuid.UUID]Registration{}, now: now,
+		reg: map[uuid.UUID]bool{}, regs: map[uuid.UUID]Registration{}, exports: map[uuid.UUID]Export{}, now: now,
 	}
 	seeded := s.stamp(time.Time{})
 	for _, r := range DefaultLintRules() {

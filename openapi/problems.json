@@ -396,6 +396,12 @@
     "type": "urn:koro:problem:events.empty_patch"
   },
   {
+    "code": "events.export_not_ready",
+    "status": 409,
+    "title": "The export file is not available",
+    "type": "urn:koro:problem:events.export_not_ready"
+  },
+  {
     "code": "events.form_blocked_field",
     "status": 422,
     "title": "The form asks for data that may not be collected",

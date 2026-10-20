@@ -41,6 +41,12 @@ func (s *MemStore) PurgeExpired(_ context.Context, policy string, cutoff time.Ti
 				rows = append(rows, due{end, [2]uuid.UUID{st.EventID, st.UserID}})
 			}
 		}
+	case PolicyExportLog:
+		for id, x := range s.exports {
+			if x.CreatedAt.Before(cutoff) && x.FileID == nil {
+				rows = append(rows, due{x.CreatedAt, [2]uuid.UUID{id}})
+			}
+		}
 	default:
 		return 0, fmt.Errorf("events: no retention purge for policy %q", policy)
 	}
@@ -64,6 +70,8 @@ func (s *MemStore) PurgeExpired(_ context.Context, policy string, cutoff time.Ti
 			s.regs[d.key[0]] = r
 		case PolicyStaff:
 			s.staff = slices.DeleteFunc(s.staff, func(st Staff) bool { return st.EventID == d.key[0] && st.UserID == d.key[1] })
+		case PolicyExportLog:
+			delete(s.exports, d.key[0])
 		}
 	}
 	return len(rows), nil

@@ -20,11 +20,13 @@ import (
 // event_staff copy org_id from their events row, never from the caller:
 // InsertForm and InsertStaff fail with ErrNotFound when the event is not
 // the given org's. Registrations and tickets (BE-028) are RegistrationStore,
-// check-ins and attendance (BE-031) CheckinStore.
+// check-ins and attendance (BE-031) CheckinStore, exports (BE-050)
+// ExportStore.
 type Store interface {
 	RegistrationStore
 	CheckinStore
 	RetentionStore
+	ExportStore
 
 	// InsertEvent writes a new event and returns it as stored (created_at
 	// and updated_at from the database). It reports false and writes

@@ -56,6 +56,21 @@ const TypeEventCatalog = "event_catalog"
 //	  events.attendance.finalize      only; platform_admin k-po (attendance.finalize is also a system
 //	                                  action, 03 §3.7, allowed by the core)
 //
+// and by BE-050 for the registration exports:
+//
+//	events.export.create      S·R: club_admin, university_rep, career_staff; platform_admin k-po
+//	                            (the re-authentication is the service's, 03 §6.2)
+//	events.export.list        S: club_admin, university_rep, career_staff; dpo ✓ (KVKK oversight);
+//	                            platform_admin k-po
+//	events.export.download    S·O: the same managers, and only the export's requester
+//
+// The export actions take the event resource (the exports are the event's
+// sub-surface, 03 §7.6: an invisible event 404, a visible one without the
+// role 403, before any export is read). download is checked twice: on the
+// event (S) before the export is read, then on the event_export resource
+// (the event's Attrs, OwnerUserID = requested_by): another manager than the
+// requester gets 403 (the export is visible to them in the list).
+//
 // The check-in actions take the event resource (the door is the event's
 // sub-surface, 03 §7.6): a visible event without the role is 403, an
 // invisible one 404, before any ticket is read.
@@ -127,6 +142,10 @@ func eventsPolicy() Policy {
 				if r.Type == TypeTicket {
 					return a.Owns(r)
 				}
+			case EventsExportDownload:
+				if r.Type == TypeEventExport {
+					return eventVisible(a, r)
+				}
 			}
 			return r.Type == TypeEvent && eventVisible(a, r)
 		},
@@ -176,8 +195,17 @@ func eventsPolicy() Policy {
 				return checkinGrants(a, r, false)
 			case EventsCheckinVoid, EventsAttendanceFinalize:
 				return checkinGrants(a, r, true)
+			case EventsExportCreate:
+				return managerGrants(a, r)
+			case EventsExportList:
+				return append(managerGrants(a, r), Grant{Role: RoleDPO})
+			case EventsExportDownload:
+				if r.Type == TypeEventExport && !a.Owns(r) {
+					return nil // ·O: the requester only
+				}
+				return managerGrants(a, r)
 			}
-			return nil // the actions of BE-050: not written yet
+			return nil
 		},
 	}
 }
@@ -199,6 +227,16 @@ func eventOrgGrants(a Actor, orgID *uuid.UUID) []Grant {
 		if a.HasOrgRole(*orgID, m.member) {
 			gs = append(gs, Grant{Role: m.role})
 		}
+	}
+	return gs
+}
+
+// managerGrants are the S grants of the organiser's managers plus
+// platform_admin for the platform org (k-po).
+func managerGrants(a Actor, r Resource) []Grant {
+	gs := eventOrgGrants(a, r.OrgID)
+	if platformOrg(a, r.OrgID) { // k-po
+		gs = append(gs, Grant{Role: RolePlatformAdmin})
 	}
 	return gs
 }

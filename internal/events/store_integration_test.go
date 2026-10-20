@@ -47,6 +47,12 @@ func pgWorld(d *db.DB) world {
 			return id
 		},
 	}
+	w.file = func(t *testing.T) uuid.UUID {
+		id := uuid.NewV7()
+		exec(t, `INSERT INTO files (id, purpose, bucket, storage_key, declared_mime) VALUES ($1, 'event_export', 'files', $2, 'text/csv')`,
+			id, "event_export/2026/10/"+id.String())
+		return id
+	}
 	w.register = func(t *testing.T, _ events.Store, org, eventID uuid.UUID) {
 		exec(t, `INSERT INTO event_registrations (event_id, org_id, user_id, status, source, answers_purge_at)
 			VALUES ($1, $2, $3, 'pending', 'web', now() + interval '90 days')`, eventID, org, w.user(t))

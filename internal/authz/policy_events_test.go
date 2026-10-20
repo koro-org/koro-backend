@@ -499,3 +499,127 @@ func TestEventsPolicy_TicketsAndCheckins(t *testing.T) {
 	draft := eventRes("club_a", "draft", "public", "", staffOfEventA)
 	wantErr(t, authz.Can(ctx, scanner, authz.EventsCheckinCreate, draft(p)), nf, false)
 }
+
+// exportRes is the event_export resource the events service builds for
+// downloadEventExport (BE-050): the event's resource with the export's ID
+// and its requester as owner.
+func exportRes(org, visibility, owner string, staffRole func(authztest.Persona) string) func(authztest.Persona) authz.Resource {
+	ev := eventRes(org, "published", visibility, "", staffRole)
+	return func(p authztest.Persona) authz.Resource {
+		r := ev(p)
+		by := authztest.ID(owner)
+		r.Type, r.ID, r.OwnerUserID = authz.TypeEventExport, authztest.ID("export_"+org), &by
+		return r
+	}
+}
+
+// TestEventsPolicy_Exports pins 03 §5.6 for BE-050's 3 actions: create
+// (S·R; R is the service's) and list (S, dpo ✓) on the event's
+// sub-surface; download S on the event, then S·O on the export (only its
+// requester among the managers); platform_admin only for the platform org
+// (k-po).
+func TestEventsPolicy_Exports(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	fb, nf := authz.ErrForbidden, authz.ErrNotFound
+	all := func(err error) map[string]error {
+		m := map[string]error{}
+		for _, n := range authztest.PersonaNames {
+			m[n] = err
+		}
+		return m
+	}
+	with := func(base map[string]error, over map[string]error) map[string]error {
+		for k, v := range over {
+			base[k] = v
+		}
+		return base
+	}
+	eventA := eventRes("club_a", "published", "public", "", staffOfEventA)
+	members := eventRes("club_a", "published", "members", "", staffOfEventA)
+	uniEvent := eventRes("uni_a", "published", "university", "uni_a", nil)
+	hiddenMembers := map[string]error{"user_unverified": nf, "student": nf, "student_minor": nf, "other_club_admin": nf,
+		"university_rep": nf, "company_member": nf, "company_admin": nf, "other_company_member": nf}
+	hiddenUni := map[string]error{"user_unverified": nf, "other_club_admin": nf, "company_member": nf, "company_admin": nf,
+		"other_company_member": nf}
+	for _, tc := range []struct {
+		name string
+		act  authz.Action
+		res  func(authztest.Persona) authz.Resource
+		want map[string]error
+	}{
+		{"create public", authz.EventsExportCreate, eventA, with(all(fb), map[string]error{"club_admin": nil})},
+		{"create members", authz.EventsExportCreate, members,
+			with(with(all(fb), hiddenMembers), map[string]error{"club_admin": nil})},
+		{"create university", authz.EventsExportCreate, uniEvent,
+			with(with(all(fb), hiddenUni), map[string]error{"university_rep": nil})},
+		{"list public", authz.EventsExportList, eventA, with(all(fb), map[string]error{"club_admin": nil, "dpo": nil})},
+		{"list members", authz.EventsExportList, members,
+			with(with(all(fb), hiddenMembers), map[string]error{"club_admin": nil, "dpo": nil})},
+		{"list university", authz.EventsExportList, uniEvent,
+			with(with(all(fb), hiddenUni), map[string]error{"university_rep": nil, "dpo": nil})},
+		{"download: the event pre-check", authz.EventsExportDownload, eventA, with(all(fb), map[string]error{"club_admin": nil})},
+		{"download own export", authz.EventsExportDownload, exportRes("club_a", "public", "club_admin", staffOfEventA),
+			with(all(fb), map[string]error{"club_admin": nil})},
+		{"download another manager's export", authz.EventsExportDownload,
+			exportRes("club_a", "public", "event_manager_a", staffOfEventA), all(fb)},
+		{"download own export of a members event", authz.EventsExportDownload,
+			exportRes("club_a", "members", "club_admin", staffOfEventA),
+			with(with(all(fb), hiddenMembers), map[string]error{"club_admin": nil})},
+		{"download university export", authz.EventsExportDownload, exportRes("uni_a", "public", "university_rep", nil),
+			with(all(fb), map[string]error{"university_rep": nil})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			for _, p := range authztest.Personas() {
+				want, ok := tc.want[p.Name]
+				if !ok {
+					t.Fatalf("no expectation for %s", p.Name)
+				}
+				t.Run(p.Name, func(t *testing.T) {
+					wantErr(t, authz.Can(ctx, p.Actor, tc.act, tc.res(p)), want, false)
+				})
+			}
+		})
+	}
+	p := authztest.Personas()[0]
+	// k-po: a platform_admin of the platform org exports its events' data.
+	pad := persona(t, "platform_admin")
+	pad.Memberships = append(pad.Memberships, authz.Membership{OrgID: authztest.ID("platform_org"), OrgKind: authz.OrgPlatform,
+		Role: authz.MemberStaff})
+	for _, act := range []authz.Action{authz.EventsExportCreate, authz.EventsExportList, authz.EventsExportDownload} {
+		wantErr(t, authz.Can(ctx, pad, act, eventRes("platform_org", "published", "public", "", nil)(p)), nil, false)
+	}
+	platformExport := exportRes("platform_org", "public", "platform_admin", nil)(p)
+	wantErr(t, authz.Can(ctx, pad, authz.EventsExportDownload, platformExport), nil, false)
+	// career_staff exports its university's events; university_rep needs
+	// its MFA session, and so does the DPO for the list.
+	cs := authz.Actor{Kind: authz.KindUser, UserID: uuid.NewV7(),
+		Memberships: []authz.Membership{{OrgID: authztest.ID("uni_a"), OrgKind: authz.OrgUniversity, Role: authz.MemberCareerStaff}}}
+	wantErr(t, authz.Can(ctx, cs, authz.EventsExportCreate, uniEvent(p)), nil, false)
+	rep := persona(t, "university_rep")
+	rep.MFAVerified = false
+	wantErr(t, authz.Can(ctx, rep, authz.EventsExportCreate, uniEvent(p)), authz.ErrMFARequired, false)
+	dpo := persona(t, "dpo")
+	dpo.MFAVerified = false
+	wantErr(t, authz.Can(ctx, dpo, authz.EventsExportList, eventA(p)), authz.ErrMFARequired, false)
+	// The DPO oversees the exports but never downloads one (no grant).
+	wantErr(t, authz.Can(ctx, persona(t, "dpo"), authz.EventsExportDownload,
+		exportRes("club_a", "public", "dpo", staffOfEventA)(p)), fb, false)
+	// A minor club admin is no club_admin (Y4).
+	minorAdmin := persona(t, "club_admin")
+	minorAdmin.IsMinor = true
+	wantErr(t, authz.Can(ctx, minorAdmin, authz.EventsExportCreate, eventA(p)), fb, false)
+	// The purge is the system's (03 §3.7); it creates nothing.
+	sys := authz.SystemActor("events.purge_exports")
+	wantErr(t, authz.Can(ctx, sys, authz.EventsExportPurge, authz.Resource{}), nil, false)
+	wantErr(t, authz.Can(ctx, sys, authz.EventsExportCreate, authz.Resource{}), fb, false)
+	// A draft event's exports are its managers' only; an export without
+	// the event's Attrs is invisible (safe default).
+	draft := eventRes("club_a", "draft", "public", "", staffOfEventA)
+	wantErr(t, authz.Can(ctx, persona(t, "student"), authz.EventsExportList, draft(p)), nf, false)
+	org := authztest.ID("club_a")
+	owner := persona(t, "club_admin").UserID
+	wantErr(t, authz.Can(ctx, persona(t, "club_admin"), authz.EventsExportDownload,
+		authz.Resource{Type: authz.TypeEventExport, OrgID: &org, OwnerUserID: &owner, Attrs: map[string]string{}}), nf, false)
+}

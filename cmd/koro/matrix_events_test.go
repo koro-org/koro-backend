@@ -3,12 +3,16 @@ package main
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
 	"uuid"
 
+	"koro/internal/authz"
 	"koro/internal/events"
+	"koro/internal/files"
 )
 
 // matrixEventStart is the start of every matrix event: after the matrix
@@ -34,7 +38,9 @@ var (
 // checkin, capacity, waitlist, mode, ended: before the matrix clock), kind
 // registration (event, persona user, status; BE-028; ticket: the manual
 // code of its active ticket, BE-031), kind staff (event, persona or helper
-// user, role) and kind checkin (registration, staff; BE-031). Every event is dated
+// user, role), kind checkin (registration, staff; BE-031) and kind export
+// (event, requested_by: a persona or helper, status queued or ready; a
+// ready one gets a small CSV file through files, BE-050). Every event is dated
 // matrixOrgTime, so an untouched event's ETag is "1hmhuo3hji000" (the
 // If-Match the matrix files send).
 func (w *eventsWiring) matrixFixtures(fx *matrixFixtures) error {
@@ -49,7 +55,7 @@ func (w *eventsWiring) matrixFixtures(fx *matrixFixtures) error {
 	}
 	fixtures := fx.Of("events")
 	// Events first, then their staff, registrations and check-ins.
-	rank := map[string]int{"event": 0, "staff": 1, "registration": 2, "checkin": 3}
+	rank := map[string]int{"event": 0, "staff": 1, "registration": 2, "checkin": 3, "export": 4}
 	slices.SortStableFunc(fixtures, func(a, b fixture) int { return cmp.Compare(rank[a.Kind], rank[b.Kind]) })
 	for _, f := range fixtures {
 		id, err := fx.ID(f.Name)
@@ -197,9 +203,55 @@ func (w *eventsWiring) matrixFixtures(fx *matrixFixtures) error {
 				Method: events.MethodQR, ClientScanID: uuid.NewV7(), ScannedAt: t, ReceivedAt: t}); err != nil {
 				return fmt.Errorf("checkin %s: %w", f.Name, err)
 			}
+		case "export":
+			if err := w.matrixExport(ctx, fx, mem, f, id); err != nil {
+				return fmt.Errorf("export %s: %w", f.Name, err)
+			}
 		default:
 			return fmt.Errorf("fixture %s: unknown kind %q", f.Name, f.Kind)
 		}
 	}
 	return nil
+}
+
+// matrixExport seeds an export of fixtures/events.yaml (BE-050): asked on
+// matrixOrgTime, alive 7 days (past the matrix clock); a ready one holds a
+// small CSV file stored and attached through files.
+func (w *eventsWiring) matrixExport(ctx context.Context, fx *matrixFixtures, mem *events.MemStore, f fixture, id uuid.UUID) error {
+	ev, err := fx.Ref(f, "event")
+	if err != nil {
+		return err
+	}
+	by, err := fx.Ref(f, "requested_by")
+	if err != nil {
+		return err
+	}
+	e, err := mem.GetEvent(ctx, ev)
+	if err != nil {
+		return err
+	}
+	t := matrixOrgTime
+	st, _ := f.Fields["status"].(string)
+	x := events.Export{ID: id, EventID: ev, OrgID: e.OrgID, RequestedBy: by, Reason: "Matris yoklama listesi gerekçesi",
+		Fields: []string{"first_name", "status"}, Format: events.FormatCSV, Status: events.ExportStatus(st),
+		ExpiresAt: t.Add(events.ExportLifetime), CreatedAt: t, UpdatedAt: t}
+	if x.Status == events.ExportReady {
+		if w.files == nil {
+			return errors.New("no files service")
+		}
+		content := []byte("first_name,status\r\nAyla,confirmed\r\n")
+		org := e.OrgID
+		fileID, err := w.files.PutGenerated(ctx, files.GeneratedFile{Purpose: files.PurposeEventExport, OrgID: &org,
+			Name: "koro-katilimcilar.csv", ContentType: files.MIMECSV, Content: content})
+		if err != nil {
+			return err
+		}
+		if err := w.files.Attach(ctx, authz.SystemActor("events.matrix"), fileID,
+			files.Owner{Module: "events", EntityID: id, Purpose: files.PurposeEventExport}); err != nil {
+			return err
+		}
+		sum, rows := sha256.Sum256(content), 1
+		x.FileID, x.FileSHA256, x.RowCount = &fileID, sum[:], &rows
+	}
+	return mem.PutExport(x)
 }

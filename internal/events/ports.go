@@ -72,16 +72,36 @@ type Users interface {
 }
 
 // Files is what events needs from files (L2) for the event cover (02 §11.1
-// cover_file_id, purpose event_cover).
+// cover_file_id, purpose event_cover) and the registration exports (02
+// §11.9 file_id, purpose event_export; BE-050).
 type Files interface {
 	// Get returns the file's metadata or files.ErrNotFound.
 	Get(ctx context.Context, fileID uuid.UUID) (files.FileMeta, error)
-	// Attach binds the cover to the event in the caller's transaction.
+	// Attach binds the cover (the export file) to the event (the export) in
+	// the caller's transaction.
 	//
 	// sync-write: files.Files.Attach
 	Attach(ctx context.Context, a authz.Actor, fileID uuid.UUID, owner files.Owner) error
 	// PresignGet returns a short-lived download URL of a clean file.
 	PresignGet(ctx context.Context, fileID uuid.UUID, ttl time.Duration) (files.Download, error)
+	// PutGenerated stores a server-generated file (the export; outside a
+	// transaction: object storage I/O).
+	PutGenerated(ctx context.Context, in files.GeneratedFile) (uuid.UUID, error)
+	// Delete removes an export file in the transaction that clears its
+	// reference (events.purge_exports after 7 days; a build that lost its
+	// row), so the file never outlives its reference nor the reference its
+	// file (01 §6.3, T-193, 06 H-49; the objects go after the commit).
+	//
+	// sync-write: files.Files.Delete
+	Delete(ctx context.Context, a authz.Actor, fileID uuid.UUID) error
+}
+
+// Reauthenticator verifies the re-authentication proof of the R operation
+// createEventExport (03 §6.2; identity.Service.Verify). A refused proof is
+// a 4xx problem (identity.reauth_required, identity.reauth_failed, 429);
+// an overloaded server answers the bare request deadline (BE-070).
+type Reauthenticator interface {
+	Verify(ctx context.Context, userID uuid.UUID, proof identity.ReauthProof) (kind string, err error)
 }
 
 // Notices is what events needs from consent (L2; 01 §4.3 Notices): the

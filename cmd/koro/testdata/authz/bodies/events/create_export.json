@@ -1,0 +1,1 @@
+{"reason": "Kapıda yoklama ve sertifika listesi için gerekli.", "fields": ["first_name", "last_name", "status", "answers.motivation"], "format": "csv", "reauth": {"password": "matrix-reauth-password"}}

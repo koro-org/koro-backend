@@ -13,11 +13,13 @@ import (
 	"uuid"
 
 	"koro/internal/audit"
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/consent"
 	"koro/internal/directory"
 	"koro/internal/events"
+	"koro/internal/files"
 	"koro/internal/identity"
 	"koro/internal/notify"
 	"koro/internal/orgs"
@@ -30,6 +32,7 @@ import (
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/problem"
 	"koro/internal/platform/queue"
+	"koro/internal/platform/storage"
 )
 
 // t0 is the test clock's start (microsecond precision, like PostgreSQL).
@@ -454,11 +457,31 @@ type env struct {
 	audit   *auditLog
 	orgs    *fakeOrgs
 	users   fakeUsers
+	files   files.Service                               // the real files service over in-memory storage (BE-050)
+	objects *storage.Mem                                // its object storage
+	reauth  *audittest.LateReauth[identity.ReauthProof] // reauth{} with an overload switch (BE-050)
 	svc     events.Service
 	mod     events.Module
 }
 
-func newEnv(t *testing.T) *env {
+// goodPassword is the re-authentication password every test user has.
+const goodPassword = "dogru-parola-12345"
+
+// reauth is identity's Verify for the tests: goodPassword passes, no
+// password is reauth_required, anything else reauth_failed.
+type reauth struct{}
+
+func (reauth) Verify(_ context.Context, _ uuid.UUID, p identity.ReauthProof) (string, error) {
+	switch p.Password {
+	case "":
+		return "", identity.ErrReauthRequired
+	case goodPassword:
+		return "password", nil
+	}
+	return "", identity.ErrReauthFailed
+}
+
+func newEnv(t *testing.T, opts ...func(*events.Deps)) *env {
 	t.Helper()
 	clk := clock.NewFake(t0)
 	e := &env{
@@ -466,17 +489,31 @@ func newEnv(t *testing.T) *env {
 		out:     &spyOutbox{Mem: outbox.NewMem(clk), txs: map[string][]int{}},
 		users:   fakeUsers{suspended: map[uuid.UUID]bool{}, erased: map[uuid.UUID]bool{}},
 		notices: &fakeNotices{missing: map[consent.Purpose]bool{}}, consent: &spyRecorder{}, sender: &spySender{},
-		queue: queue.NewMem(),
+		queue: queue.NewMem(), objects: storage.NewMem(clk), reauth: &audittest.LateReauth[identity.ReauthProof]{Next: reauth{}},
 	}
 	e.sender.mail, e.mailbox, e.prefs = realMail(t, clk)
 	e.store = &spyStore{MemStore: e.mem}
 	idem := idempotency.New(idempotency.Deps{Tx: e.tx, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()})
-	mod, err := events.New(events.Deps{
+	fm, err := files.New(files.Deps{
+		Store: files.NewMemStore(clk.Now), Objects: e.objects, Tx: e.tx, Outbox: e.out, Queue: queue.NewMem(),
+		Idempotency: idem, Clock: clk, Log: obs.Discard(), Buckets: files.Buckets{Files: "files", Quarantine: "quarantine"},
+		Audit: e.audit,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.files = fm.Service
+	d := events.Deps{
 		Store: e.store, Tx: e.tx, Outbox: e.out, Audit: e.audit, Orgs: e.orgs, Catalog: fakeCatalog{},
 		Idempotency: idem, Clock: clk, Log: obs.Discard(), Users: e.users, Notices: e.notices,
 		Consents: e.consent, Sealer: testEnvelope(), Tickets: testDeriver(), Sender: e.sender,
 		QR: events.NewQRRenderer(), Contacts: e.users, Queue: e.queue, LinkBaseURL: "https://koro.test", ICSOrganizer: "noreply@koro.test",
-	})
+		Files: e.files, Reauth: e.reauth,
+	}
+	for _, o := range opts {
+		o(&d)
+	}
+	mod, err := events.New(d)
 	if err != nil {
 		t.Fatal(err)
 	}

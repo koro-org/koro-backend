@@ -70,6 +70,11 @@ var (
 	// that scan's answer (T-137). BE-031.
 	ErrClientScanTaken = problem.ErrConflict.Wrap(errClientScan)
 
+	// ErrExportNotReady: downloadEventExport of an export whose file is
+	// not ready: still queued, failed, or deleted after its 7 days (04
+	// §2.6: only a ready export is downloaded). BE-050.
+	ErrExportNotReady = problem.New(problem.Conflict, "events.export_not_ready", "The export file is not available")
+
 	// ErrNotFound: the event (or staff member) does not exist or is not
 	// visible to the caller (03 §3.6).
 	ErrNotFound = problem.ErrNotFound

@@ -91,7 +91,8 @@ func TestWire_EventsRegistrationTasks(t *testing.T) {
 		}
 	}
 	if want := []string{"events.waitlist_expire */15 * * * * default", "events.reconcile_counts 0 3 * * * low",
-		"events.auto_finalize_attendance 20 * * * * default", "events.complete_ended 40 * * * * default"}; !slices.Equal(jobs, want) {
+		"events.auto_finalize_attendance 20 * * * * default", "events.complete_ended 40 * * * * default",
+		"events.purge_exports 25 * * * * low"}; !slices.Equal(jobs, want) {
 		t.Fatalf("events jobs = %q, want %q", jobs, want)
 	}
 	if !slices.ContainsFunc(c.keys.columns, func(col rewrap.Column) bool {
@@ -144,5 +145,34 @@ func TestWire_EventsCheckinTasks(t *testing.T) {
 	}
 	if rows, err := c.students.registrations.SummaryOf(t.Context(), uuid.NewV7()); err != nil || len(rows) != 0 {
 		t.Fatalf("SummaryOf = %+v, %v", rows, err)
+	}
+}
+
+// TestWire_EventsExports pins what BE-050 adds: the build task, the purge
+// job of 01 §7, the files service kept for the export fixtures, and the
+// three operations registered with their Koro metadata (R + export class
+// on createEventExport).
+func TestWire_EventsExports(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(c.infra.jobs.Tasks(), func(tk queue.Task) bool { return tk.Name == events.BuildExportTaskName }) {
+		t.Fatal("events.build_export has no handler")
+	}
+	if !slices.ContainsFunc(c.infra.jobs.Jobs(), func(j queue.Job) bool {
+		return j.Name == events.PurgeExportsJobName && j.Cron == "25 * * * *" && j.Queue == queue.Low
+	}) {
+		t.Fatal("events.purge_exports is not scheduled hourly at :25 on low")
+	}
+	if c.events.files == nil {
+		t.Fatal("events has no files service (export files)")
+	}
+	if !slices.ContainsFunc(c.privacy, func(p privacy.Provider) bool { return p.Name() == "events" }) ||
+		!slices.ContainsFunc(c.sweepers, func(s privacy.RetentionSweeper) bool {
+			return slices.Contains(s.PolicyCodes(), events.PolicyExportLog)
+		}) {
+		t.Fatal("the export log has no provider or sweeper")
 	}
 }

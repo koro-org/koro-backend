@@ -1,0 +1,1 @@
+{"reason": "Kapıda yoklama ve sertifika listesi için gerekli.", "fields": ["first_name"], "include_sensitive": true, "reauth": {"password": "matrix-reauth-password"}}

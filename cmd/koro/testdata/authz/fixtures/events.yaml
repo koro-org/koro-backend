@@ -13,6 +13,9 @@
 # student's confirmed registration with an active ticket (manual code MTRXK001), reg_door_in club_member's
 # checked-in one (ticket MTRXK002, check-in checkin_door by event_staff); event_ended (check-in on) ended
 # on 2026-10-01, before the matrix clock, so its attendance can be closed.
+# BE-050: kind export (event, requested_by, status) asked on 2026-10-01, alive 7 days; a ready export
+# holds a small CSV file (files, attached to it). export_ready and export_queued are club_admin's on
+# event_reg, export_other the helper event_manager_a's (not the caller: S·O), export_uni university_rep's.
 version: 1
 fixtures:
   event_a: { kind: event, org: club_a, status: published, visibility: public, form: published, checkin: true }
@@ -43,3 +46,7 @@ fixtures:
   reg_door_in: { kind: registration, event: event_door, user: club_member, status: checked_in, ticket: MTRXK002 }
   reg_ended: { kind: registration, event: event_ended, user: student, status: confirmed, ticket: MTRXK003 }
   checkin_door: { kind: checkin, registration: reg_door_in, staff: event_staff }
+  export_ready: { kind: export, event: event_reg, requested_by: club_admin, status: ready }
+  export_queued: { kind: export, event: event_reg, requested_by: club_admin, status: queued }
+  export_other: { kind: export, event: event_reg, requested_by: event_manager_a, status: ready }
+  export_uni: { kind: export, event: event_uni_a, requested_by: university_rep, status: ready }

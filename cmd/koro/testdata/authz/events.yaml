@@ -1,4 +1,4 @@
-# Authz matrix of the events module (03 §5.6, 04 §2.6; BE-024, BE-026, BE-028, BE-031). 36 operations × 18 personas.
+# Authz matrix of the events module (03 §5.6, 04 §2.6; BE-024, BE-026, BE-028, BE-031, BE-050). 39 operations × 18 personas.
 # Event visibility (03 §3.6): published public events are everyone's; a members event is its org's
 # members', its staff's and every platform role's; a university event is also the verified students'
 # of that university; a draft is its organiser's club_admin / university_rep's and every platform
@@ -22,6 +22,9 @@
 # stats) is S for the organiser's managers and E for the event's staff (event_staff scans event_door); void
 # and the attendance close are Em (the manager helper event_manager_a; the scanner 403). Business outcomes
 # of a scan are 200 with result (T-70); 409s (closed attendance, second void) live in scenarios/events.yaml.
+# BE-050 exports: the event's sub-surface. create (S·R: the proof in the body) and download (S·O: only the
+# requester, fixtures export_*) are the organiser's managers'; the list also the dpo's (✓). include_sensitive
+# and an e-mail field are 422 after authz; a queued export 409; another event's export 404 (06 H-38).
 version: 1
 groups:
   # signed-in users without a membership in club_a (and no platform role).
@@ -895,7 +898,129 @@ operations:
       club_admin: 200
       "@platform_staff": 403
 
-pending_actions:
-  - events.export.create             # BE-050
-  - events.export.list               # BE-050
-  - events.export.download           # BE-050
+  createEventExport:
+    method: POST
+    path: /api/v1/events/{event_id}/exports
+    action: events.export.create
+    path_params: { event_id: event_reg }
+    body: bodies/events/create_export.json
+    note: S·R — the organiser's managers with the re-authentication proof (03 §6.2); 202, the file is built later
+    expect:
+      anonymous: 401
+      "@ev_not_manager_a": 403
+      club_admin: 202
+      "@platform_staff": 403
+    variants:
+      - name: include_sensitive
+        body: bodies/events/create_export_sensitive.json
+        note: T-37 — special-category answers are never exported (422 after authz)
+        expect:
+          anonymous: 401
+          "@ev_not_manager_a": 403
+          club_admin: 422
+          "@platform_staff": 403
+      - name: email_field
+        body: bodies/events/create_export_email.json
+        note: T-69 — there is no e-mail column
+        expect:
+          anonymous: 401
+          "@ev_not_manager_a": 403
+          club_admin: 422
+          "@platform_staff": 403
+      - name: no_reauth
+        body: bodies/events/create_export_no_reauth.json
+        note: R — without the proof 403 identity.reauth_required
+        expect:
+          anonymous: 401
+          "@ev_not_manager_a": 403
+          club_admin: 403
+          "@platform_staff": 403
+      - name: university_event
+        path_params: { event_id: event_uni_a }
+        expect:
+          anonymous: 401
+          "@ev_uni_hidden": 404
+          "@ev_uni_a_students": 403
+          university_rep: 202
+          "@platform_staff": 403
+
+  listEventExports:
+    method: GET
+    path: /api/v1/events/{event_id}/exports
+    action: events.export.list
+    path_params: { event_id: event_reg }
+    note: S for the organiser's managers; dpo ✓ (KVKK oversight); platform_admin only for the platform org (k-po)
+    expect:
+      anonymous: 401
+      "@ev_not_manager_a": 403
+      club_admin: 200
+      dpo: 200
+      platform_admin: 403
+      "@ev_lint_denied_staff": 403
+    variants:
+      - name: members_event
+        path_params: { event_id: event_a_members }
+        expect:
+          anonymous: 401
+          "@ev_members_hidden": 404
+          club_member: 403
+          club_admin: 200
+          event_staff: 403
+          dpo: 200
+          platform_admin: 403
+          "@ev_lint_denied_staff": 403
+      - name: university_event
+        path_params: { event_id: event_uni_a }
+        expect:
+          anonymous: 401
+          "@ev_uni_hidden": 404
+          "@ev_uni_a_students": 403
+          university_rep: 200
+          dpo: 200
+          platform_admin: 403
+          "@ev_lint_denied_staff": 403
+
+  downloadEventExport:
+    method: GET
+    path: /api/v1/events/{event_id}/exports/{export_id}/download
+    action: events.export.download
+    path_params: { event_id: event_reg, export_id: export_ready }
+    note: S·O — only the requester among the organiser's managers; every download is counted and audited
+    expect:
+      anonymous: 401
+      "@ev_not_manager_a": 403
+      club_admin: 200
+      "@platform_staff": 403
+    variants:
+      - name: queued_export
+        path_params: { event_id: event_reg, export_id: export_queued }
+        note: only a ready export is downloaded (409 events.export_not_ready)
+        expect:
+          anonymous: 401
+          "@ev_not_manager_a": 403
+          club_admin: 409
+          "@platform_staff": 403
+      - name: another_managers_export
+        path_params: { event_id: event_reg, export_id: export_other }
+        note: ·O — a manager who did not request the export cannot download it
+        expect:
+          anonymous: 401
+          "@ev_not_manager_a": 403
+          club_admin: 403
+          "@platform_staff": 403
+      - name: export_of_another_event
+        path_params: { event_id: event_a, export_id: export_ready }
+        note: 06 H-38 — an export is read through its own event only
+        expect:
+          anonymous: 401
+          "@ev_not_manager_a": 403
+          club_admin: 404
+          "@platform_staff": 403
+      - name: university_event
+        path_params: { event_id: event_uni_a, export_id: export_uni }
+        expect:
+          anonymous: 401
+          "@ev_uni_hidden": 404
+          "@ev_uni_a_students": 403
+          university_rep: 200
+          "@platform_staff": 403

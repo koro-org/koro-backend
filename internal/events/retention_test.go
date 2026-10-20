@@ -28,7 +28,8 @@ func TestPurgeFormAnswers_NullsColumnsKeepsRegistration(t *testing.T) {
 		}
 		return r
 	}
-	if got := e.mod.Sweeper.PolicyCodes(); !slices.Equal(got, []string{events.PolicyFormAnswers, events.PolicyFormAnswersSensitive, events.PolicyStaff}) {
+	if got := e.mod.Sweeper.PolicyCodes(); !slices.Equal(got, []string{events.PolicyExportLog, events.PolicyFormAnswers,
+		events.PolicyFormAnswersSensitive, events.PolicyStaff}) {
 		t.Fatalf("PolicyCodes() = %v", got)
 	}
 	day := 24 * time.Hour

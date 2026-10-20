@@ -5,9 +5,11 @@ import (
 	"maps"
 	"net/http"
 	"os"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
+	"weak"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/gin-gonic/gin"
@@ -291,6 +293,74 @@ func TestAuthzMatrix_CasePartition(t *testing.T) {
 		if !allFresh {
 			t.Logf("%d cases: %d shared on %d applications, %d fresh; %d scenarios", len(all), shared, len(groups), len(fresh), len(m.scenarios))
 		}
+	}
+}
+
+// TestAuthzMatrix_AppsAreReleased: once its test is over, a matrix
+// application is garbage (BE-073). A package-level value that keeps a
+// container reachable (a map keyed by wiring pointer, a registry, a
+// goroutine) keeps every application of the real matrix alive until the end
+// of the run: ≈ 1700 containers, gigabytes under -race, and a heap above
+// GOMEMLIMIT that the GC chases without end. One application per distinct
+// config of the real matrix (cases and scenarios), each serving one read in
+// a parallel subtest, as the fresh cases do.
+func TestAuthzMatrix_AppsAreReleased(t *testing.T) {
+	t.Parallel()
+	env := &matrixEnv{opts: realMatrixOptions()}
+	m, probs := loadMatrix(os.DirFS("testdata/authz"), env.opts.modules)
+	if len(probs) > 0 {
+		t.Fatal(probs)
+	}
+	env.m = m
+	configs, reads := map[string]map[string]any{}, map[string]matrixCase{}
+	for _, c := range env.cases() {
+		k := configKey(c.config)
+		configs[k] = c.config
+		if _, ok := reads[k]; !ok && c.read() && !c.websocket {
+			reads[k] = c
+		}
+	}
+	for _, s := range m.scenarios {
+		cfg := mergeConfig(m.config, s.Config)
+		configs[configKey(cfg)] = cfg
+	}
+	keys := slices.Sorted(maps.Keys(configs))
+	held := make([]weak.Pointer[container], len(keys))
+	// Checked once every subtest is done but before this test ends, the
+	// state of the real matrix at its end: the parent keeps its finished
+	// parallel subtests (and what they still reference, such as the
+	// t.Cleanup functions they registered) until it returns.
+	t.Cleanup(func() {
+		alive := func() (out []string) {
+			for i, w := range held {
+				if w.Value() != nil {
+					out = append(out, keys[i])
+				}
+			}
+			return out
+		}
+		for range 3 {
+			if runtime.GC(); len(alive()) == 0 {
+				break
+			}
+		}
+		if left := alive(); len(left) > 0 {
+			t.Errorf("%d of %d matrix applications are still reachable after their subtest (configs %q): a package-level "+
+				"value or a function the finished subtest keeps (t.Cleanup) holds the container; release it in "+
+				"releaseMatrixApp (matrix_harness_test.go)", len(left), len(keys), left)
+			return
+		}
+		t.Logf("%d applications (one per config) released", len(keys))
+	})
+	for i, k := range keys {
+		t.Run(k, func(t *testing.T) {
+			t.Parallel() // as the fresh cases of TestAuthzMatrix
+			a := env.newMatrixApp(t, configs[k])
+			if c, ok := reads[k]; ok {
+				a.do(t, m, c)
+			}
+			held[i] = weak.Make(a.c)
+		})
 	}
 }
 

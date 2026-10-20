@@ -70,6 +70,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
+	"koro/internal/notify"
 	"koro/internal/platform/config"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
@@ -1014,6 +1015,18 @@ func realMatrixOptions() matrixOptions {
 func (env *matrixEnv) newMatrixApp(t *testing.T, cfg map[string]any) *matrixApp {
 	t.Helper()
 	c := newTestContainer(t)
+	// The finished subtest keeps this function (testing truncates its
+	// cleanup list without clearing it) and its parent keeps the subtest
+	// until the whole matrix ends: hold c through a variable cleared here.
+	held := c
+	t.Cleanup(func() { releaseMatrixApp(held); held = nil })
+	if c.notify.templates == nil {
+		tpl, err := matrixTemplates()
+		if err != nil {
+			t.Fatalf("notify templates: %v", err)
+		}
+		c.notify.templates = tpl
+	}
 	a := &matrixApp{c: c, fx: &matrixFixtures{m: env.m, saved: map[string]uuid.UUID{}}, cfg: cfg}
 	for _, k := range slices.Sorted(maps.Keys(cfg)) {
 		claimed := env.opts.configKeys[k]
@@ -1064,6 +1077,30 @@ func (env *matrixEnv) newMatrixApp(t *testing.T, cfg map[string]any) *matrixApp 
 	}
 	return a
 }
+
+// releaseMatrixApp drops what the package-level maps of the module matrix
+// files hold for c once its test is over: matrixConfig keys them by wiring
+// pointer (matrixMFAModes, matrixLedgerSeeds, matrixOrderSeeds), so each
+// entry kept the whole container reachable until the process ended. The
+// real matrix built ≈ 1700 applications and kept every one of them (heap
+// pinned above GOMEMLIMIT under -race; BE-073). An entry is deleted only
+// after every request of its application is done, and a container whose
+// entry survives stays reachable, so its address is never reused by a later
+// application. TestAuthzMatrix_AppsAreReleased fails when another
+// package-level value, or a function a finished subtest still holds, keeps
+// a container alive: release it here.
+func releaseMatrixApp(c *container) {
+	matrixMFAModes.Delete(&c.identity)
+	matrixLedgerSeeds.Delete(&c.ledger)
+	matrixOrderSeeds.Delete(&c.orders)
+}
+
+// matrixTemplates is the notify template set every matrix application
+// shares (the notifyWiring.templates seam): parsed once from the embedded
+// files, as a production process does, instead of once per application. A
+// parsed set is read only; text/template and html/template execute safely
+// in parallel (BE-073).
+var matrixTemplates = sync.OnceValues(notify.EmbeddedTemplates)
 
 // matrixRequestTimeout replaces the production request budget
 // (httpx.DefaultRequestTimeout) on matrix applications: under -race and a

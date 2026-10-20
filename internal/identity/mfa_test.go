@@ -381,8 +381,12 @@ func TestDisableTotp_RequiredRole_409(t *testing.T) {
 	if cur.MFAEnabled || found || left != 0 {
 		t.Fatalf("after disable: mfa %v, totp row %v, %d recovery codes", cur.MFAEnabled, found, left)
 	}
+	// The refusals by role are no reauth (no record); the missing proof is
+	// one denied reauth_failed record (03 §6.2, BE-075), the disable one
+	// success record.
 	ev := e.audit.of(string(authz.IdentityMfaDisable))
-	if len(ev) != 1 || ev[0].Metadata[audit.MetaReauth] != "totp" {
+	if len(ev) != 2 || ev[0].Outcome != audit.Denied || ev[0].Reason != audit.ReasonReauthFailed ||
+		ev[1].Outcome != audit.Success || ev[1].Metadata[audit.MetaReauth] != "totp" {
 		t.Fatalf("audit %+v", ev)
 	}
 	wantErr(t, e.svc.DisableTOTP(ctx, a2, identity.ReauthProof{Password: goodPassword}), identity.ErrMFANotEnabled)

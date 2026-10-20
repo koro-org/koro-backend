@@ -265,7 +265,7 @@ func (s *service) EnrollTOTP(ctx context.Context, a authz.Actor, proof ReauthPro
 	if u.MFAEnabled {
 		return TOTPEnrollment{}, ErrMFAAlreadyEnabled
 	}
-	kind, err := s.verify(ctx, a.UserID, proof, authz.IdentityMfaEnroll)
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.IdentityMfaEnroll, resourceUser, &a.UserID, nil))
 	if err != nil {
 		return TOTPEnrollment{}, err
 	}
@@ -318,7 +318,7 @@ func (s *service) ConfirmTOTP(ctx context.Context, a authz.Actor, raw string, pr
 	if !found || t.ConfirmedAt != nil {
 		return nil, ErrMFANotEnrolled
 	}
-	kind, err := s.verify(ctx, a.UserID, proof, authz.IdentityMfaConfirm)
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.IdentityMfaConfirm, resourceUser, &a.UserID, nil))
 	if err != nil {
 		return nil, err
 	}
@@ -443,7 +443,7 @@ func (s *service) DisableTOTP(ctx context.Context, a authz.Actor, proof ReauthPr
 	if required {
 		return ErrMFARequiredByRole
 	}
-	kind, err := s.verify(ctx, a.UserID, proof, authz.IdentityMfaDisable)
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.IdentityMfaDisable, resourceUser, &a.UserID, nil))
 	if err != nil {
 		return err
 	}
@@ -492,7 +492,7 @@ func (s *service) RegenerateRecoveryCodes(ctx context.Context, a authz.Actor, pr
 	if !u.MFAEnabled {
 		return nil, ErrMFANotEnabled
 	}
-	kind, err := s.verify(ctx, a.UserID, proof, authz.IdentityMfaRecoveryRegenerate)
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.IdentityMfaRecoveryRegenerate, resourceUser, &a.UserID, nil))
 	if err != nil {
 		return nil, err
 	}

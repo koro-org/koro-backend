@@ -31,17 +31,22 @@ const (
 	proofTOTP     = "totp"
 )
 
-// Verify implements Reauthenticator (the consent module's R operations
-// call it through cmd/koro; 06 H-42). The calling module audits its own
-// action; failures still count towards the lockout here.
+// Verify implements Reauthenticator: the R operations of the other modules
+// check their proof here (bound in cmd/koro). It audits nothing: the
+// calling module writes the denied record of its own action
+// (audit.ReauthFailed, BE-074), so a refused proof is one row, never two.
+// Failures still count towards the lockout here.
 func (s *service) Verify(ctx context.Context, userID uuid.UUID, proof ReauthProof) (string, error) {
-	return s.verify(ctx, userID, proof, "")
+	return s.verify(ctx, userID, proof, false)
 }
 
 // verify checks a re-authentication proof of userID: the TOTP code on an
-// MFA account, the password otherwise. action (when set) is audited as
-// denied on a wrong proof.
-func (s *service) verify(ctx context.Context, userID uuid.UUID, proof ReauthProof, action authz.Action) (string, error) {
+// MFA account, the password otherwise; withPassword (identity.password.change,
+// 03 §6.2) asks for the password always and the TOTP code on top on an MFA
+// account. It audits nothing: identity's own R operations hand a failure
+// to audit.ReauthFailed (reauth, ChangePassword), the other modules do the
+// same with Verify's (BE-075).
+func (s *service) verify(ctx context.Context, userID uuid.UUID, proof ReauthProof, withPassword bool) (string, error) {
 	u, err := s.d.Store.User(ctx, userID)
 	switch {
 	case isNotFound(err):
@@ -52,13 +57,44 @@ func (s *service) verify(ctx context.Context, userID uuid.UUID, proof ReauthProo
 	if u.Status != StatusActive {
 		return "", ErrReauthFailed
 	}
+	if withPassword {
+		if proof.Password == "" {
+			return "", ErrReauthRequired
+		}
+		if err := s.checkPassword(ctx, u, proof.Password); err != nil || !u.MFAEnabled {
+			return proofPassword, err
+		}
+		return proofTOTP, s.checkTOTP(ctx, u, proof.TOTPCode)
+	}
 	if u.MFAEnabled {
-		return proofTOTP, s.checkTOTP(ctx, u, proof.TOTPCode, action)
+		return proofTOTP, s.checkTOTP(ctx, u, proof.TOTPCode)
 	}
 	if proof.Password == "" {
 		return "", ErrReauthRequired
 	}
-	return proofPassword, s.checkPassword(ctx, u, proof.Password, action)
+	return proofPassword, s.checkPassword(ctx, u, proof.Password)
+}
+
+// reauth checks the proof of one of identity's own R operations after
+// authz.Can, before any business data (03 §6.2), and returns its kind for
+// the audit record. A refused proof (403 reauth_required / reauth_failed,
+// 429) is the operation's denied reauth_failed record by a: denied is the
+// resource of its success record, nothing more (reauthDenied). An error
+// without a verdict (an overloaded hasher, a store down) writes nothing
+// and goes back unchanged (audit.ReauthFailed; BE-070, BE-072, BE-075).
+func (s *service) reauth(ctx context.Context, a authz.Actor, proof ReauthProof, denied audit.Event) (string, error) {
+	kind, err := s.verify(ctx, a.UserID, proof, false)
+	if err != nil {
+		return "", audit.ReauthFailed(ctx, s.d.Audit, s.d.Log, denied.By(a), err)
+	}
+	return kind, nil
+}
+
+// reauthDenied is the denied record of a refused proof of act on a
+// resource of resType (resID nil before it exists). meta names the step of
+// a shared action, never business data: nothing happened.
+func reauthDenied(act authz.Action, resType string, resID *uuid.UUID, meta map[string]any) audit.Event {
+	return audit.Event{Action: string(act), ResourceType: resType, ResourceID: resID, Metadata: meta}
 }
 
 // checkPassword verifies the password of a signed-in user (re-authentication,
@@ -66,7 +102,7 @@ func (s *service) verify(ctx context.Context, userID uuid.UUID, proof ReauthProo
 // wrong password counts towards the lockout and the reauth class (failures
 // only, 04 §1.9) and becomes 429 once either is exhausted. An overloaded
 // hasher is 503 and no verdict: nothing is counted or reset (BE-070).
-func (s *service) checkPassword(ctx context.Context, u User, pw string, action authz.Action) error {
+func (s *service) checkPassword(ctx context.Context, u User, pw string) error {
 	if s.d.Hasher == nil {
 		return ErrUnavailable
 	}
@@ -94,13 +130,13 @@ func (s *service) checkPassword(ctx context.Context, u User, pw string, action a
 	if ok {
 		return s.resetFailures(ctx, u)
 	}
-	return s.reauthFailed(ctx, u, action)
+	return s.reauthFailed(ctx, u)
 }
 
 // checkTOTP verifies the TOTP code of an MFA account (03 §6.2: recovery
 // codes are not accepted for re-authentication). A code is accepted once
 // (replay guard); a wrong one counts like a wrong password.
-func (s *service) checkTOTP(ctx context.Context, u User, code string, action authz.Action) error {
+func (s *service) checkTOTP(ctx context.Context, u User, code string) error {
 	if code == "" {
 		return ErrReauthRequired
 	}
@@ -117,13 +153,14 @@ func (s *service) checkTOTP(ctx context.Context, u User, code string, action aut
 	if ok {
 		return s.resetFailures(ctx, u)
 	}
-	return s.reauthFailed(ctx, u, action)
+	return s.reauthFailed(ctx, u)
 }
 
-// reauthFailed records a wrong proof: lockout counter (+ denied audit) and
-// the reauth class keyed on failures of this user.
-func (s *service) reauthFailed(ctx context.Context, u User, action authz.Action) error {
-	if err := s.recordFailure(ctx, u.ID, action, "reauth_failed"); err != nil {
+// reauthFailed records a wrong proof: the lockout counter and the reauth
+// class keyed on failures of this user. The denied record is the caller's
+// (audit.ReauthFailed with the refusal this returns).
+func (s *service) reauthFailed(ctx context.Context, u User) error {
+	if err := s.recordFailure(ctx, u.ID, "", ""); err != nil {
 		return err
 	}
 	if err := s.allow(ctx, ruleReauth, "user:"+u.ID.String()+":failed"); err != nil {
@@ -134,6 +171,9 @@ func (s *service) reauthFailed(ctx context.Context, u User, action authz.Action)
 
 // ChangePassword implements Service (changeMyPassword, R): every other
 // session closes (password_change) and the owner gets a security notice.
+// The proof is current_password, plus the TOTP code on an MFA account
+// (03 §6.2); a refused one is the denied record of the action, like every
+// R operation (audit.ReauthFailed, BE-075).
 func (s *service) ChangePassword(ctx context.Context, a authz.Actor, in PasswordChange) error {
 	if err := authz.Can(ctx, a, authz.IdentityPasswordChange, ownUser(a)); err != nil {
 		return err
@@ -141,22 +181,14 @@ func (s *service) ChangePassword(ctx context.Context, a authz.Actor, in Password
 	if s.d.Hasher == nil {
 		return ErrUnavailable
 	}
+	kind, err := s.verify(ctx, a.UserID, ReauthProof{Password: in.CurrentPassword, TOTPCode: in.TOTPCode}, true)
+	if err != nil {
+		denied := reauthDenied(authz.IdentityPasswordChange, resourceUser, &a.UserID, nil).By(a)
+		return audit.ReauthFailed(ctx, s.d.Audit, s.d.Log, denied, err)
+	}
 	u, err := s.d.Store.User(ctx, a.UserID)
 	if err != nil {
 		return err
-	}
-	if in.CurrentPassword == "" {
-		return ErrReauthRequired
-	}
-	if err := s.checkPassword(ctx, u, in.CurrentPassword, authz.IdentityPasswordChange); err != nil {
-		return err
-	}
-	kind := proofPassword
-	if u.MFAEnabled {
-		if err := s.checkTOTP(ctx, u, in.TOTPCode, authz.IdentityPasswordChange); err != nil {
-			return err
-		}
-		kind = proofTOTP
 	}
 	if err := checkPassword(in.NewPassword, u.MFAEnabled, passwordContext{Email: u.Email, FirstName: u.FirstName, LastName: u.LastName}, "body.new_password"); err != nil {
 		return err
@@ -330,7 +362,7 @@ func (s *service) RequestEmailChange(ctx context.Context, a authz.Actor, newEmai
 	if err != nil {
 		return err
 	}
-	kind, err := s.verify(ctx, a.UserID, proof, authz.IdentityEmailChangeRequest)
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.IdentityEmailChangeRequest, resourceUser, &a.UserID, nil))
 	if err != nil {
 		return err
 	}

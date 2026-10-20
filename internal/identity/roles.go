@@ -109,7 +109,7 @@ func (s *service) GrantPlatformRole(ctx context.Context, a authz.Actor, in RoleG
 	if err != nil {
 		return RoleAssignment{}, err
 	}
-	kind, err := s.verify(ctx, a.UserID, in.Proof, authz.IdentityPlatformRoleGrant)
+	kind, err := s.reauth(ctx, a, in.Proof, reauthDenied(authz.IdentityPlatformRoleGrant, resourceRole, nil, map[string]any{"step": "request"}))
 	if err != nil {
 		return RoleAssignment{}, err
 	}
@@ -169,7 +169,7 @@ func (s *service) ApprovePlatformRole(ctx context.Context, a authz.Actor, id uui
 	if err := authz.Can(ctx, a, authz.IdentityPlatformRoleGrant, roleGate(id)); err != nil {
 		return RoleAssignment{}, err
 	}
-	kind, err := s.verify(ctx, a.UserID, proof, authz.IdentityPlatformRoleGrant)
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.IdentityPlatformRoleGrant, resourceRole, &id, map[string]any{"step": "approve"}))
 	if err != nil {
 		return RoleAssignment{}, err
 	}
@@ -235,7 +235,7 @@ func (s *service) RevokePlatformRole(ctx context.Context, a authz.Actor, id uuid
 	if err != nil {
 		return RoleAssignment{}, err
 	}
-	kind, err := s.verify(ctx, a.UserID, proof, authz.IdentityPlatformRoleRevoke)
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.IdentityPlatformRoleRevoke, resourceRole, &id, nil))
 	if err != nil {
 		return RoleAssignment{}, err
 	}

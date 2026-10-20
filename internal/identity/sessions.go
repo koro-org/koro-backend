@@ -205,7 +205,8 @@ func deviceLabel(raw string) (string, error) {
 // recordFailure counts a failed login or re-authentication against the
 // account and locks it with exponential back-off (05 §14.1), in its own
 // transaction so that it commits although the request fails. action is
-// audited as denied (empty: the caller audits, e.g. consent's R operations).
+// audited as denied (empty: the caller audits; a refused re-authentication
+// proof is the R operation's own denied record, audit.ReauthFailed).
 func (s *service) recordFailure(ctx context.Context, userID uuid.UUID, action authz.Action, reason string) error {
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		u, err := s.d.Store.LockUser(ctx, userID)

@@ -18,6 +18,12 @@
 //     database clock alone: GORM models map them read only and no raw
 //     INSERT names them; writableStamps lists the reasoned exceptions
 //     (02 §0.1; BE-064, BE-069).
+//   - TestArch_ReauthFailureAudited: the error of a re-authentication proof
+//     check (a module's Reauth port, identity's own verify) returns through
+//     audit.ReauthFailed, so a refused proof is the R operation's denied
+//     record; a module that registers an R operation (op.Meta Reauth)
+//     checks its proof that way; reauthDirect lists the reasoned exceptions
+//     (03 §6.2; BE-074, BE-075).
 //
 // Every rule also runs on testdata/violations, a miniature tree that breaks
 // it, so a rule that silently stops matching fails its own test.

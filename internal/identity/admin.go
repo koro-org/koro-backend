@@ -448,7 +448,7 @@ func (s *service) ResetUserMFA(ctx context.Context, a authz.Actor, id uuid.UUID,
 	if err != nil {
 		return nil, err
 	}
-	kind, err := s.verify(ctx, a.UserID, proof, authz.IdentityUserResetMfa)
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.IdentityUserResetMfa, resourceUser, &id, nil))
 	if err != nil {
 		return nil, err
 	}

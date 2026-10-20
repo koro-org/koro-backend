@@ -199,19 +199,12 @@ func (s *service) allow(ctx context.Context, rule ratelimit.Rule, key string) er
 // computation slot was free or, on a CPU-starved server, before the
 // request reached the hasher at all (platform/passwd bounds concurrent
 // argon2id work with a semaphore, 05 §14.1; httpx bounds every request,
-// 05 §10.6). Such an outcome is not a verdict on the password.
+// 05 §10.6). Such an outcome is not a verdict on the password: callers
+// count nothing, write nothing and return the error unchanged, which
+// httpx answers with 503 unavailable like any other request that ran out
+// of time (BE-070, T-315/BE-071).
 func hasherBusy(err error) bool {
 	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
-}
-
-// hasherErr maps a hasher error: an overloaded server (hasherBusy) is 503
-// unavailable, the cause logged once by httpx; anything else is returned
-// unchanged. Callers return it before writing anything (BE-070).
-func hasherErr(err error) error {
-	if hasherBusy(err) {
-		return ErrUnavailable.Wrap(err)
-	}
-	return err
 }
 
 // limitEmail applies auth_email (or another rule) per address and per

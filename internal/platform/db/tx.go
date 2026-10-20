@@ -24,7 +24,8 @@ type TxManager interface {
 	// unwinding). A nested call joins the outer transaction without a
 	// SAVEPOINT (01 §0.4): an inner error rolls the whole transaction back
 	// once it reaches the outermost WithTx. Commit-time errors (deferred
-	// constraints) are returned through Translate.
+	// constraints) are returned through Translate; when ctx ended before
+	// COMMIT the error wraps ctx.Err() and nothing is committed.
 	WithTx(ctx context.Context, fn func(ctx context.Context) error) error
 	// WithSerializableTx runs fn in a SERIALIZABLE transaction and retries
 	// the whole fn on 40001/40P01 (4 attempts, jittered backoff): fn must be
@@ -142,6 +143,13 @@ func (m *gormTx) run(ctx context.Context, opts *sql.TxOptions, fn func(context.C
 	if err := tx.Commit().Error; err != nil {
 		// Deferred constraints (DEFERRABLE INITIALLY DEFERRED, constraint
 		// triggers) fail here; the server has already rolled back.
+		if cerr := ctx.Err(); cerr != nil && !errors.Is(err, cerr) {
+			// The request ended before COMMIT: database/sql rolled the
+			// transaction back on its own and may report only
+			// sql.ErrTxDone. Keep the context error in the chain so the
+			// caller still sees the deadline (httpx: 503; T-315, BE-071).
+			err = fmt.Errorf("%w (%w)", err, cerr)
+		}
 		return Translate(fmt.Errorf("db: commit: %w", err))
 	}
 	hookCtx := context.WithoutCancel(ctx)

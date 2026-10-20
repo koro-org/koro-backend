@@ -2,7 +2,7 @@ package identity_test
 
 import (
 	"context"
-	"net/http"
+	"errors"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -13,6 +13,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/identity"
 	"koro/internal/platform/httpx"
+	"koro/internal/platform/problem"
 	"koro/internal/platform/token"
 )
 
@@ -20,7 +21,10 @@ import (
 // can run out before the password hasher answers: platform/passwd then
 // returns the context error of its semaphore (05 §14.1). That is neither
 // a server bug (500) nor a wrong password (lockout): every password path
-// answers 503 unavailable and writes nothing.
+// writes nothing, counts nothing and returns the context error unchanged,
+// which httpx answers with 503 unavailable (T-315, BE-071: one conversion
+// point for every request that runs out of time; see
+// TestWire_ChangePasswordPastRequestBudget_503).
 
 // lateHasher is the real argon2id hasher on an overloaded server. An
 // operation named in late reaches it only once the request context has
@@ -146,12 +150,24 @@ func (o *overload) unchanged(t *testing.T, action authz.Action) {
 
 const newPassword = "Yeni-Ve-Uzun-Parola-4821"
 
+// wantOverload asserts the error of an overloaded request: the request
+// deadline, not wrapped in any problem (a *problem.Error would take
+// precedence in httpx; T-315), so that httpx answers 503 unavailable.
+func wantOverload(t *testing.T, err error) {
+	t.Helper()
+	wantErr(t, err, context.DeadlineExceeded)
+	if pe, ok := errors.AsType[*problem.Error](err); ok {
+		t.Fatalf("overload became problem %q; httpx maps the bare deadline to 503", pe.Code())
+	}
+}
+
 // TestChangePassword_PastRequestDeadline_503NoPartialWrite reproduces the
 // BE-064 matrix failure (changeMyPassword 500 internal_error after 18–37 s
 // on an overloaded -race run): the current password is verified, but the
 // request budget is gone before the new hash can start. Before BE-070 the
-// raw context.DeadlineExceeded of platform/passwd became 500; now it is
-// 503 and nothing is written, and a retry with a fresh budget succeeds.
+// raw context.DeadlineExceeded of platform/passwd became 500; now nothing
+// is written, the deadline reaches httpx (503) and a retry with a fresh
+// budget succeeds.
 func TestChangePassword_PastRequestDeadline_503NoPartialWrite(t *testing.T) {
 	t.Parallel()
 	goodPasswordHash() // outside the bubble
@@ -160,8 +176,7 @@ func TestChangePassword_PastRequestDeadline_503NoPartialWrite(t *testing.T) {
 		o.h.late = map[string]bool{"hash": true}
 		start := time.Now()
 		err := o.svc.ChangePassword(request(t), o.a, identity.PasswordChange{CurrentPassword: goodPassword, NewPassword: newPassword})
-		wantErr(t, err, identity.ErrUnavailable)
-		wantStatus(t, err, http.StatusServiceUnavailable)
+		wantOverload(t, err)
 		if waited := time.Since(start); waited != httpx.DefaultRequestTimeout {
 			t.Fatalf("the request ended after %v, want the whole budget %v", waited, httpx.DefaultRequestTimeout)
 		}
@@ -182,8 +197,9 @@ func TestChangePassword_PastRequestDeadline_503NoPartialWrite(t *testing.T) {
 }
 
 // TestPasswordPaths_PastRequestDeadline_503NoLockout covers every argon2id
-// call of identity (BE-070 §4): an overloaded hasher is 503 on each path,
-// and a reauth/login verification that did not run is never counted as a
+// call of identity (BE-070 §4): an overloaded hasher is 503 on each path
+// (through httpx, BE-071), and a reauth/login verification that did not
+// run is never counted as a
 // wrong password (before BE-070 it was: 403/401, failed_logins+1 and a
 // denied audit — five overloaded logins locked the account).
 func TestPasswordPaths_PastRequestDeadline_503NoLockout(t *testing.T) {
@@ -218,7 +234,7 @@ func TestPasswordPaths_PastRequestDeadline_503NoLockout(t *testing.T) {
 				// Five overloaded logins in a row do not lock the account.
 				for range 4 {
 					_, err := o.svc.CreateSession(request(t), authz.Anonymous(), identity.Login{Email: o.u.Email, Password: goodPassword})
-					wantErr(t, err, identity.ErrUnavailable)
+					wantOverload(t, err)
 				}
 				o.h.late = nil
 				if _, err := o.svc.CreateSession(request(t), authz.Anonymous(), identity.Login{Email: o.u.Email, Password: goodPassword}); err != nil {
@@ -261,8 +277,7 @@ func TestPasswordPaths_PastRequestDeadline_503NoLockout(t *testing.T) {
 				o := newOverload(t)
 				o.h.late = map[string]bool{tc.late: true}
 				err := tc.call(t, o)
-				wantErr(t, err, identity.ErrUnavailable)
-				wantStatus(t, err, http.StatusServiceUnavailable)
+				wantOverload(t, err)
 				o.unchanged(t, tc.action)
 				if tc.after != nil {
 					tc.after(t, o)

@@ -17,7 +17,7 @@ Bu repo Koro'nun Go backend'idir (tek modül `koro`, tek binary `cmd/koro`). Tic
   · `make tidy-check` · `make sec` · `make check` (PR öncesi tamamı) · `make test-integration` (Docker).
 - Araçlar (golangci-lint, govulncheck) **Go 1.27 ile derlenmiş** olarak repo içi `bin/` klasörüne kurulur (`make tools`;
   `bin/` gitignore'da). Global kurulum yapma.
-- `go.mod`: `go 1.27.2`; `GOTOOLCHAIN=auto` ile 1.27.2 kendiliğinden iner (OPS-002: govulncheck GO-2026-6599…6617). Makefile `GO_TOOLCHAIN` (yalnız araç derlemesi) da go1.27.2 (OPS-001).
+- `go.mod`: `go 1.27.3`; `GOTOOLCHAIN=auto` ile 1.27.3 kendiliğinden iner (OPS-002: govulncheck GO-2026-6599…6617; OPS-003: GO-2026-6809 crypto/x509). Makefile `GO_TOOLCHAIN` (yalnız araç derlemesi) da go1.27.3 (OPS-001, OPS-003).
 
 ## Demo verisi (BE-033; yalnız dev/staging)
 - `make seed-demo` hedefi yok (Makefile dondurulmuş, R9). `make dev` (bağımlılıklar + migration + api + worker) açıkken başka

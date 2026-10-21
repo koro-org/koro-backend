@@ -960,6 +960,18 @@
     "type": "urn:koro:problem:ledger.unbalanced"
   },
   {
+    "code": "messaging.invalid_state",
+    "status": 409,
+    "title": "The current status does not allow this change",
+    "type": "urn:koro:problem:messaging.invalid_state"
+  },
+  {
+    "code": "messaging.request_pending",
+    "status": 409,
+    "title": "A pending contact request to this student exists",
+    "type": "urn:koro:problem:messaging.request_pending"
+  },
+  {
     "code": "method_not_allowed",
     "status": 405,
     "title": "Method not allowed",

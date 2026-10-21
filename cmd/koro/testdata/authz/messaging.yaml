@@ -1,12 +1,176 @@
-# BE-056: the P3 HTTP surface is not implemented yet. Strict coverage
-# keeps each pending action explicit until that ticket binds its operation.
+# Authz matrix of the messaging module (03 §5.9, 04 §2.9; BE-056). 10 operations × 18 personas + variants.
+# Company surface (/orgs/{org_id}/contact-requests…): cmm S, cma S of the path's company (company_a:
+# company_member, company_admin; company_b: other_company_member); members of another org and everyone else
+# 404; platform staff and the members of a club see the surface and get 403 (03 §7.6). k19 (an active company,
+# a discoverable adult target that has not blocked the company or declined it within 90 days, a
+# contact_request unit) is the service's: an unqualified target is 404 (variants), "Hak yok" and the block are
+# scenarios/messaging.yaml. Student surface (/me/…): O for every signed-in user; another user's request is
+# 404. Pseudonyms are the discovery literals (matrixPseudonyms, matrix_discovery_test.go): l7fbt3m4pxse7dc2 is
+# company_a's pseudonym of the discoverable helper student_granted, ael3ea4fuqkpycbd company_b's,
+# mjh6rq23ztj3hxgo company_a's of the persona student (not discoverable). Fixture request_student_a is
+# company_a's pending request to the persona student (fixtures/messaging.yaml); company_a and company_b hold
+# 20 contact_request units each (fixtures/entitlements.yaml).
 version: 1
-pending_actions:
-  - messaging.contact_request.create # BE-056
-  - messaging.contact_request.list_sent # BE-056
-  - messaging.contact_request.read # BE-056
-  - messaging.contact_request.withdraw # BE-056
-  - messaging.contact_request.list_received # BE-056
-  - messaging.contact_request.respond # BE-056
-  - messaging.block.manage # BE-056
-  - messaging.block.list_own # BE-056
+groups:
+  # signed-in users who are neither members of company_a nor platform staff (company_a's surface: 404).
+  msg_not_company_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin, event_staff,
+                      university_rep, other_company_member]
+  # signed-in users who are neither members of company_b nor platform staff (company_b's surface: 404).
+  msg_not_company_b: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin, event_staff,
+                      university_rep, company_member, company_admin]
+  # signed-in users without a platform role (a missing org has no members: 404).
+  msg_no_platform_role: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                         event_staff, university_rep, company_member, company_admin, other_company_member]
+  # signed-in users other than the persona student (request_student_a is the student's own).
+  msg_not_student: [user_unverified, student_minor, club_member, club_admin, other_club_admin, event_staff,
+                    university_rep, company_member, company_admin, other_company_member, moderator, support, dpo,
+                    platform_admin, finance_admin, talent_auditor]
+
+operations:
+  createContactRequest:
+    method: POST
+    path: /api/v1/orgs/{org_id}/contact-requests
+    action: messaging.contact_request.create
+    idempotency: required
+    path_params: { org_id: company_a }
+    body: bodies/messaging/create_granted_a.json
+    note: company_a's pseudonym of the discoverable student_granted; spends one contact_request unit (k19)
+    expect: { anonymous: 401, company_member: 201, company_admin: 201, "@msg_not_company_a": 404, "@platform_staff": 403 }
+    variants:
+      - name: company_b
+        path_params: { org_id: company_b }
+        body: bodies/messaging/create_granted_b.json
+        expect: { anonymous: 401, other_company_member: 201, "@msg_not_company_b": 404, "@platform_staff": 403 }
+      - name: other_company_pseudonym
+        path_params: { org_id: company_b }
+        body: bodies/messaging/create_granted_a.json
+        note: company_a's pseudonym does not resolve under company_b (k19)
+        expect: { anonymous: 401, other_company_member: 404, "@msg_not_company_b": 404, "@platform_staff": 403 }
+      - name: not_discoverable
+        body: bodies/messaging/create_not_discoverable.json
+        note: the persona student has a profile but level 2 is off (k19, 404)
+        expect: { anonymous: 401, company_member: 404, company_admin: 404, "@msg_not_company_a": 404, "@platform_staff": 403 }
+      - name: malformed_pseudonym
+        body: bodies/messaging/create_malformed.json
+        expect: { anonymous: 401, company_member: 404, company_admin: 404, "@msg_not_company_a": 404, "@platform_staff": 403 }
+      - name: club_org
+        path_params: { org_id: club_a }
+        note: club_a's members see the surface but hold no company role (403)
+        expect: { anonymous: 401, "@outsiders_a": 404, club_member: 403, club_admin: 403, "@platform_staff": 403 }
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000e1" }
+        expect: { anonymous: 401, "@msg_no_platform_role": 404, "@platform_staff": 403 }
+
+  listSentContactRequests:
+    method: GET
+    path: /api/v1/orgs/{org_id}/contact-requests
+    action: messaging.contact_request.list_sent
+    path_params: { org_id: company_a }
+    expect: { anonymous: 401, company_member: 200, company_admin: 200, "@msg_not_company_a": 404, "@platform_staff": 403 }
+    variants:
+      - name: company_b
+        path_params: { org_id: company_b }
+        expect: { anonymous: 401, other_company_member: 200, "@msg_not_company_b": 404, "@platform_staff": 403 }
+      - name: pending_only
+        query: { status: pending }
+        expect: { anonymous: 401, company_member: 200, company_admin: 200, "@msg_not_company_a": 404, "@platform_staff": 403 }
+      - name: club_org
+        path_params: { org_id: club_a }
+        expect: { anonymous: 401, "@outsiders_a": 404, club_member: 403, club_admin: 403, "@platform_staff": 403 }
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000e1" }
+        expect: { anonymous: 401, "@msg_no_platform_role": 404, "@platform_staff": 403 }
+
+  getSentContactRequest:
+    method: GET
+    path: /api/v1/orgs/{org_id}/contact-requests/{request_id}
+    action: messaging.contact_request.read
+    path_params: { org_id: company_a, request_id: request_student_a }
+    note: the student appears under company_a's pseudonym (pending)
+    expect: { anonymous: 401, company_member: 200, company_admin: 200, "@msg_not_company_a": 404, "@platform_staff": 403 }
+    variants:
+      - name: other_company
+        path_params: { org_id: company_b }
+        note: company_a's request is not found on company_b's surface (IDOR)
+        expect: { anonymous: 401, other_company_member: 404, "@msg_not_company_b": 404, "@platform_staff": 403 }
+      - name: unknown_request
+        path_params: { request_id: "literal:00000000-0000-7000-8000-0000000000e2" }
+        expect: { anonymous: 401, company_member: 404, company_admin: 404, "@msg_not_company_a": 404, "@platform_staff": 403 }
+
+  withdrawContactRequest:
+    method: POST
+    path: /api/v1/orgs/{org_id}/contact-requests/{request_id}/withdraw
+    action: messaging.contact_request.withdraw
+    path_params: { org_id: company_a, request_id: request_student_a }
+    note: a pending request only; the unit is not given back
+    expect: { anonymous: 401, company_member: 200, company_admin: 200, "@msg_not_company_a": 404, "@platform_staff": 403 }
+    variants:
+      - name: other_company
+        path_params: { org_id: company_b }
+        expect: { anonymous: 401, other_company_member: 404, "@msg_not_company_b": 404, "@platform_staff": 403 }
+
+  listMyContactRequests:
+    method: GET
+    path: /api/v1/me/contact-requests
+    action: messaging.contact_request.list_received
+    note: every account lists its own (03 §5.9 O; empty for most personas)
+    expect: { anonymous: 401, "@signed_in": 200 }
+
+  getMyContactRequest:
+    method: GET
+    path: /api/v1/me/contact-requests/{request_id}
+    action: messaging.contact_request.read
+    path_params: { request_id: request_student_a }
+    expect: { anonymous: 401, student: 200, "@msg_not_student": 404 }
+    variants:
+      - name: unknown_request
+        path_params: { request_id: "literal:00000000-0000-7000-8000-0000000000e2" }
+        expect: { anonymous: 401, "@signed_in": 404 }
+
+  respondMyContactRequest:
+    method: POST
+    path: /api/v1/me/contact-requests/{request_id}/respond
+    action: messaging.contact_request.respond
+    path_params: { request_id: request_student_a }
+    body: bodies/messaging/respond_accept.json
+    note: acceptance gives company_a level 3 access in the same transaction (needs an active verification)
+    expect: { anonymous: 401, student: 200, "@msg_not_student": 404 }
+    variants:
+      - name: decline
+        body: bodies/messaging/respond_decline.json
+        note: a decline carries no reason
+        expect: { anonymous: 401, student: 200, "@msg_not_student": 404 }
+
+  blockCompany:
+    method: PUT
+    path: /api/v1/me/company-blocks/{org_id}
+    action: messaging.block.manage
+    path_params: { org_id: company_a }
+    note: the student's own block; the company is never told (its pending requests read as declined)
+    expect: { anonymous: 401, "@signed_in": 204 }
+    variants:
+      - name: club_org
+        path_params: { org_id: club_a }
+        note: only a company can be blocked
+        expect: { anonymous: 401, "@signed_in": 404 }
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000e1" }
+        expect: { anonymous: 401, "@signed_in": 404 }
+
+  unblockCompany:
+    method: DELETE
+    path: /api/v1/me/company-blocks/{org_id}
+    action: messaging.block.manage
+    path_params: { org_id: company_a }
+    note: idempotent (no block is no error)
+    expect: { anonymous: 401, "@signed_in": 204 }
+    variants:
+      - name: club_org
+        path_params: { org_id: club_a }
+        expect: { anonymous: 401, "@signed_in": 404 }
+
+  listMyCompanyBlocks:
+    method: GET
+    path: /api/v1/me/company-blocks
+    action: messaging.block.list_own
+    expect: { anonymous: 401, "@signed_in": 200 }

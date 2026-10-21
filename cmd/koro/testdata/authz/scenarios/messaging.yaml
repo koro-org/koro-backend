@@ -1,0 +1,46 @@
+# Multi-step scenarios of the messaging module (03 §7.7; BE-056).
+version: 1
+scenarios:
+  contact_request_accept_flow:
+    note: >-
+      company_a asks the discoverable student_granted under its pseudonym (k19); a second request while one is
+      pending is 409; only the student answers (another student 404); after the acceptance the request is no
+      longer pending (withdraw 409) and company_a still reads it.
+    steps:
+      - { persona: company_member, operation: createContactRequest, expect: 201, save: { request_granted_a: request_id } }
+      - { persona: company_admin, operation: createContactRequest, expect: 409, code: messaging.request_pending }
+      - { persona: student_granted, operation: getMyContactRequest, path_params: { request_id: request_granted_a }, expect: 200 }
+      - { persona: student, operation: respondMyContactRequest, path_params: { request_id: request_granted_a }, expect: 404,
+          code: not_found }
+      - { persona: student_granted, operation: respondMyContactRequest, path_params: { request_id: request_granted_a },
+          expect: 200 }
+      - { persona: company_member, operation: withdrawContactRequest,
+          path_params: { org_id: company_a, request_id: request_granted_a }, expect: 409, code: messaging.invalid_state }
+      - { persona: company_admin, operation: getSentContactRequest,
+          path_params: { org_id: company_a, request_id: request_granted_a }, expect: 200 }
+  contact_request_no_entitlement:
+    note: >-
+      "Hak yok" (03 §7.7, k19): once company_a's rights are reset, a request is 403 entitlements.not_entitled
+      (after the role check: staff still 403 forbidden); company_b still sends.
+    steps:
+      - { hook: entitlements.reset, args: { org: company_a } }
+      - { persona: company_member, operation: createContactRequest, expect: 403, code: entitlements.not_entitled }
+      - { persona: platform_admin, operation: createContactRequest, expect: 403, code: forbidden }
+      - { persona: other_company_member, operation: createContactRequest, path_params: { org_id: company_b },
+          body: bodies/messaging/create_granted_b.json, expect: 201 }
+  contact_request_blocked_company:
+    note: >-
+      a student who blocked a company is the same 404 for it (02 §14.2: the company never learns of the block);
+      unblocking opens the student again; another company is not affected.
+    steps:
+      - { persona: student_granted, operation: blockCompany, path_params: { org_id: company_a }, expect: 204 }
+      - { persona: company_member, operation: createContactRequest, expect: 404, code: not_found }
+      - { persona: other_company_member, operation: createContactRequest, path_params: { org_id: company_b },
+          body: bodies/messaging/create_granted_b.json, expect: 201 }
+      - { persona: student_granted, operation: unblockCompany, path_params: { org_id: company_a }, expect: 204 }
+      - { persona: company_member, operation: createContactRequest, expect: 201 }
+  contact_request_needs_mfa:
+    note: company_admin's role path is k-mfa (03 §6.4); the recruiter's is not (T-59)
+    steps:
+      - { persona: company_admin, mfa: false, operation: createContactRequest, expect: 403, code: authz.mfa_required }
+      - { persona: company_member, mfa: false, operation: createContactRequest, expect: 201 }

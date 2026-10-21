@@ -1,0 +1,8 @@
+# Fixtures of the messaging module (cmd/koro/matrix_messaging_test.go; BE-056). IDs are authztest.ID(name).
+# request_student_a is company_a's pending contact request (sent by company_member, via discovery) to the
+# persona student, expiring 14 days after the matrix clock; its usage ID is authztest.ID("request_student_a_usage")
+# (the in-memory store has no FK). The persona student is verified, adult and has a profile (students'
+# experience_student), so accepting it gives company_a level 3 access for real.
+version: 1
+fixtures:
+  request_student_a: { kind: request, company: company_a, sender: company_member, student: student }

@@ -24,7 +24,8 @@ type ContactRequestCreated struct {
 // Topic implements Payload.
 func (ContactRequestCreated) Topic() string { return TopicContactRequestCreated }
 
-// ContactRequestClosed: Outcome is accepted | rejected | expired.
+// ContactRequestClosed: Outcome is accepted | declined | expired (a status of
+// contact_requests; a decline carries no reason; a withdrawal emits nothing).
 type ContactRequestClosed struct {
 	ContactRequestID uuid.UUID `json:"contact_request_id"`
 	OrgID            uuid.UUID `json:"org_id"`

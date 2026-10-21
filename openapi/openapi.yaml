@@ -3001,6 +3001,18 @@ components:
       required:
         - items
       type: object
+    CompanyBlockList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/ContactCompanyDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
     CompanyDTO:
       additionalProperties: false
       properties:
@@ -3356,6 +3368,165 @@ components:
           $ref: "#/components/schemas/StudentConsentProof"
           description: Required to turn discoverable on
       type: object
+    ContactCompanyDTO:
+      additionalProperties: false
+      properties:
+        kind:
+          enum:
+            - platform
+            - university
+            - club
+            - company
+            - ngo
+          type: string
+        name:
+          type: string
+        org_id:
+          format: uuid
+          type: string
+        slug:
+          type: string
+      required:
+        - org_id
+        - kind
+        - name
+        - slug
+      type: object
+    ContactOpportunityPostDTO:
+      additionalProperties: false
+      properties:
+        post_id:
+          format: uuid
+          type: string
+        title:
+          type: string
+      required:
+        - post_id
+      type: object
+    ContactRequestCompanyDTO:
+      additionalProperties: false
+      properties:
+        anon_id:
+          description: The company's pseudonym of the student (as in discovery)
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        expires_at:
+          format: date-time
+          type: string
+        message:
+          type: string
+        opportunity_post_id:
+          format: uuid
+          type: string
+        request_id:
+          format: uuid
+          type: string
+        responded_at:
+          description: When the student accepted or declined
+          format: date-time
+          type: string
+        sender_user_id:
+          description: The company member who sent it
+          format: uuid
+          type: string
+        status:
+          description: A pending request past expires_at reads as expired
+          enum:
+            - pending
+            - accepted
+            - declined
+            - expired
+            - withdrawn
+          type: string
+        student_user_id:
+          description: "Only once accepted: the student's level 3 profile (getCompanyStudentProfile)"
+          format: uuid
+          type: string
+        subject:
+          type: string
+        via:
+          enum:
+            - discovery
+            - opportunity_post
+          type: string
+      required:
+        - request_id
+        - anon_id
+        - sender_user_id
+        - via
+        - subject
+        - message
+        - status
+        - expires_at
+        - created_at
+      type: object
+    ContactRequestCompanyList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/ContactRequestCompanyDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
+    ContactRequestStudentDTO:
+      additionalProperties: false
+      properties:
+        company:
+          $ref: "#/components/schemas/ContactCompanyDTO"
+        created_at:
+          format: date-time
+          type: string
+        expires_at:
+          format: date-time
+          type: string
+        message:
+          type: string
+        opportunity_post:
+          $ref: "#/components/schemas/ContactOpportunityPostDTO"
+        request_id:
+          format: uuid
+          type: string
+        responded_at:
+          format: date-time
+          type: string
+        status:
+          description: A pending request past expires_at reads as expired
+          enum:
+            - pending
+            - accepted
+            - declined
+            - expired
+            - withdrawn
+          type: string
+        subject:
+          type: string
+      required:
+        - request_id
+        - company
+        - subject
+        - message
+        - status
+        - expires_at
+        - created_at
+      type: object
+    ContactRequestStudentList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/ContactRequestStudentDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
     CountAudienceInputBody:
       additionalProperties: false
       properties:
@@ -3666,6 +3837,32 @@ components:
           items:
             $ref: "#/components/schemas/TalentSignalDefInputDTO"
           type: array
+      type: object
+    CreateContactRequestBody:
+      additionalProperties: false
+      properties:
+        anon_id:
+          description: The company's pseudonym of the student (from discovery)
+          maxLength: 64
+          minLength: 1
+          type: string
+        message:
+          description: Shown to the student only; never in a notification
+          maxLength: 1000
+          minLength: 10
+          type: string
+        opportunity_post_id:
+          description: A published opportunity call of this company
+          format: uuid
+          type: string
+        subject:
+          maxLength: 120
+          minLength: 3
+          type: string
+      required:
+        - anon_id
+        - subject
+        - message
       type: object
     CreateExperienceInputBody:
       additionalProperties: false
@@ -11050,6 +11247,17 @@ components:
       required:
         - outcome
         - note
+      type: object
+    RespondContactRequestBody:
+      additionalProperties: false
+      properties:
+        decision:
+          enum:
+            - accepted
+            - declined
+          type: string
+      required:
+        - decision
       type: object
     RetentionPolicyDTO:
       additionalProperties: false
@@ -23635,6 +23843,111 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+  /api/v1/me/company-blocks:
+    get:
+      description: Newest first.
+      operationId: listMyCompanyBlocks
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyBlockList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the companies I blocked
+      tags:
+        - messaging
+      x-koro-action: messaging.block.list_own
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
+  /api/v1/me/company-blocks/{org_id}:
+    delete:
+      description: Removing a block that does not exist changes nothing.
+      operationId: unblockCompany
+      parameters:
+        - description: Company org ID (an unknown, malformed or non-company ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Company org ID (an unknown, malformed or non-company ID is 404)
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Unblock a company
+      tags:
+        - messaging
+      x-koro-action: messaging.block.manage
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+    put:
+      description: The company can no longer send you contact requests and its pending requests are declined. The company is not told that you blocked it. Blocking twice changes nothing.
+      operationId: blockCompany
+      parameters:
+        - description: Company org ID (an unknown, malformed or non-company ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Company org ID (an unknown, malformed or non-company ID is 404)
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Block a company's contact requests
+      tags:
+        - messaging
+      x-koro-action: messaging.block.manage
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
   /api/v1/me/consents:
     get:
       operationId: listMyConsents
@@ -23734,6 +24047,146 @@ paths:
       tags:
         - consent
       x-koro-action: consent.record.create
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/me/contact-requests:
+    get:
+      description: Newest first.
+      operationId: listMyContactRequests
+      parameters:
+        - explode: false
+          in: query
+          name: status
+          schema:
+            enum:
+              - pending
+              - accepted
+              - declined
+              - expired
+              - withdrawn
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContactRequestStudentList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the contact requests I received
+      tags:
+        - messaging
+      x-koro-action: messaging.contact_request.list_received
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
+  /api/v1/me/contact-requests/{request_id}:
+    get:
+      operationId: getMyContactRequest
+      parameters:
+        - description: Contact request ID (an unknown, malformed or another user's ID is 404)
+          in: path
+          name: request_id
+          required: true
+          schema:
+            description: Contact request ID (an unknown, malformed or another user's ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContactRequestStudentDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a contact request I received
+      tags:
+        - messaging
+      x-koro-action: messaging.contact_request.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
+  /api/v1/me/contact-requests/{request_id}/respond:
+    post:
+      description: accepted gives the company level 3 access to your profile (it can then see your full profile and current CV; contact details only if you share them in your privacy settings) and needs an active student verification (403 students.verification_required). declined needs no reason and the company is never given one. A request that is no longer pending is 409 messaging.invalid_state; the same answer again changes nothing.
+      operationId: respondMyContactRequest
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Contact request ID (an unknown, malformed or another user's ID is 404)
+          in: path
+          name: request_id
+          required: true
+          schema:
+            description: Contact request ID (an unknown, malformed or another user's ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RespondContactRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContactRequestStudentDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Accept or decline a contact request
+      tags:
+        - messaging
+      x-koro-action: messaging.contact_request.respond
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
@@ -26786,6 +27239,212 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: reauth
       x-koro-reauth: true
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/contact-requests:
+    get:
+      description: Newest first.
+      operationId: listSentContactRequests
+      parameters:
+        - description: Company org ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Company org ID (an unknown or malformed ID is 404)
+            type: string
+        - explode: false
+          in: query
+          name: status
+          schema:
+            enum:
+              - pending
+              - accepted
+              - declined
+              - expired
+              - withdrawn
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContactRequestCompanyList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the company's contact requests
+      tags:
+        - messaging
+      x-koro-action: messaging.contact_request.list_sent
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+    post:
+      description: Asks the student behind one of this company's discovery pseudonyms (anon_id) to get in touch; opportunity_post_id optionally names a published opportunity call of the company. Spends one contact_request unit (403 entitlements.not_entitled without one; never given back). A pseudonym that resolves to nobody, a student who is no longer discoverable, who blocked the company or declined it within 90 days is not found (404). At most one pending request per student (409 messaging.request_pending). The student answers within 14 days or the request expires.
+      operationId: createContactRequest
+      parameters:
+        - description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Company org ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Company org ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateContactRequestBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContactRequestCompanyDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Send a contact request to a student
+      tags:
+        - messaging
+      x-koro-action: messaging.contact_request.create
+      x-koro-idempotency: required
+      x-koro-rate-limit: contact_request
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/contact-requests/{request_id}:
+    get:
+      description: The student appears under the company's pseudonym; once the student accepted, student_user_id links the level 3 profile.
+      operationId: getSentContactRequest
+      parameters:
+        - description: Company org ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Company org ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Contact request ID (an unknown, malformed or other org's ID is 404)
+          in: path
+          name: request_id
+          required: true
+          schema:
+            description: Contact request ID (an unknown, malformed or other org's ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContactRequestCompanyDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a contact request of the company
+      tags:
+        - messaging
+      x-koro-action: messaging.contact_request.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/contact-requests/{request_id}/withdraw:
+    post:
+      description: Only a pending request (409 messaging.invalid_state otherwise); the contact_request unit is not given back. Withdrawing a withdrawn request changes nothing.
+      operationId: withdrawContactRequest
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Company org ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Company org ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Contact request ID (an unknown, malformed or other org's ID is 404)
+          in: path
+          name: request_id
+          required: true
+          schema:
+            description: Contact request ID (an unknown, malformed or other org's ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContactRequestCompanyDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Withdraw a pending contact request
+      tags:
+        - messaging
+      x-koro-action: messaging.contact_request.withdraw
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
       x-koro-surface: org
   /api/v1/orgs/{org_id}/discovery/profiles:
     get:

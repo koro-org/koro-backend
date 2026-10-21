@@ -59,8 +59,8 @@ content_report                sweeper:feed
 moderation_action             sweeper:feed
 # outreach: the dispatch rows (BE-035): finished dispatches 2 years after created_at
 outreach_dispatch             sweeper:outreach
-# messaging (P3)
-contact_request_closed        todo:BE-056
+# messaging: closed contact requests 12 months after closing (updated_at of the closed row; BE-056)
+contact_request_closed        sweeper:messaging
 # talent (BE-079): the ledger through talent.point_events_purge, then the unreferenced config versions
 talent_ledger                 sweeper:talent
 talent_counters               sweeper:talent

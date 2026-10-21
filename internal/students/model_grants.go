@@ -32,6 +32,9 @@ const (
 // AccessGrant is a profile_access_grants row (02 §9.7): a company's level 3
 // access to one student. It is revoked, never edited away; a revoked grant
 // is hard deleted 6 months after its revocation (access_grant_revoked).
+// A grant is suspended when the student's verification lapses (BE-077):
+// the company has no access, and it never becomes active again (the
+// student revokes it or accepts a new request of the company).
 // org_kind is the constant 'company' of the composite FK and is not mapped.
 type AccessGrant struct {
 	ID            uuid.UUID   `gorm:"type:uuid;column:id;primaryKey"`
@@ -40,6 +43,7 @@ type AccessGrant struct {
 	Source        GrantSource `gorm:"column:source"`
 	SourceID      uuid.UUID   `gorm:"type:uuid;column:source_id"`
 	GrantedAt     time.Time   `gorm:"column:granted_at"`
+	SuspendedAt   *time.Time  `gorm:"column:suspended_at"`
 	RevokedAt     *time.Time  `gorm:"column:revoked_at"`
 	RevokedByKind *RevokedBy  `gorm:"column:revoked_by_kind"`
 	RevokeReason  *string     `gorm:"column:revoke_reason"`
@@ -50,8 +54,34 @@ type AccessGrant struct {
 // TableName implements gorm's Tabler.
 func (AccessGrant) TableName() string { return "profile_access_grants" }
 
-// Active reports whether the grant is in force.
-func (g AccessGrant) Active() bool { return g.RevokedAt == nil }
+// GrantStatus is the state of a grant as its student sees it.
+type GrantStatus string
+
+// Grant states (BE-077): active gives the company level 3 access; a
+// suspended grant gives nothing (the verification lapsed); a revoked one
+// has ended.
+const (
+	GrantActive    GrantStatus = "active"
+	GrantSuspended GrantStatus = "suspended"
+	GrantRevoked   GrantStatus = "revoked"
+)
+
+// Open reports whether the grant has not ended (active or suspended).
+func (g AccessGrant) Open() bool { return g.RevokedAt == nil }
+
+// Active reports whether the grant is in force: open and not suspended.
+func (g AccessGrant) Active() bool { return g.Open() && g.SuspendedAt == nil }
+
+// Status is the grant's state.
+func (g AccessGrant) Status() GrantStatus {
+	switch {
+	case !g.Open():
+		return GrantRevoked
+	case g.SuspendedAt != nil:
+		return GrantSuspended
+	}
+	return GrantActive
+}
 
 // view is the grant as the level 3 projections take it (dto.go Grant).
 func (g AccessGrant) view() Grant {

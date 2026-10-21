@@ -22,6 +22,8 @@ func checkGrant(g AccessGrant) error {
 		return errCheck
 	case g.RevokeReason != nil && utf8.RuneCountInString(*g.RevokeReason) > 300:
 		return errCheck
+	case g.SuspendedAt != nil && g.SuspendedAt.Before(g.GrantedAt): // profile_access_grants_suspended_chk
+		return errCheck
 	}
 	return nil
 }
@@ -42,7 +44,7 @@ func (s *MemStore) LockGrants(context.Context, uuid.UUID) error { return nil }
 func (s *MemStore) InsertGrant(_ context.Context, g AccessGrant) (AccessGrant, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	g.RevokedAt, g.RevokedByKind, g.RevokeReason = nil, nil, nil
+	g.SuspendedAt, g.RevokedAt, g.RevokedByKind, g.RevokeReason = nil, nil, nil, nil
 	if err := checkGrant(g); err != nil {
 		return AccessGrant{}, false, err
 	}
@@ -91,7 +93,7 @@ func (s *MemStore) GetGrant(_ context.Context, studentID, id uuid.UUID) (AccessG
 	return s.findGrant(func(g AccessGrant) bool { return g.ID == id && g.StudentUserID == studentID })
 }
 
-// RevokeGrants implements Store.
+// RevokeGrants implements Store (active and suspended grants alike).
 func (s *MemStore) RevokeGrants(_ context.Context, studentID, companyOrgID uuid.UUID, by RevokedBy, reason *string,
 	at time.Time) ([]AccessGrant, error) {
 	s.mu.Lock()
@@ -99,7 +101,7 @@ func (s *MemStore) RevokeGrants(_ context.Context, studentID, companyOrgID uuid.
 	out := []AccessGrant{}
 	next := slices.Clone(s.grants)
 	for i, g := range next {
-		if g.StudentUserID != studentID || g.CompanyOrgID != companyOrgID || !g.Active() {
+		if g.StudentUserID != studentID || g.CompanyOrgID != companyOrgID || !g.Open() {
 			continue
 		}
 		t, k := at, by
@@ -115,14 +117,50 @@ func (s *MemStore) RevokeGrants(_ context.Context, studentID, companyOrgID uuid.
 	return out, nil
 }
 
-// page returns up to limit active grants matching match after the
-// position, newest first.
+// SuspendGrants implements Store.
+func (s *MemStore) SuspendGrants(_ context.Context, studentID uuid.UUID, at time.Time) ([]AccessGrant, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []AccessGrant{}
+	next := slices.Clone(s.grants)
+	for i, g := range next {
+		if g.StudentUserID != studentID || !g.Active() || g.GrantedAt.After(at) {
+			continue
+		}
+		t := at
+		g.SuspendedAt = &t
+		if err := checkGrant(g); err != nil {
+			return nil, err
+		}
+		g.UpdatedAt = s.stamp()
+		next[i] = g
+		out = append(out, g)
+	}
+	s.grants = next
+	return out, nil
+}
+
+// CountSuspendedAt implements Store.
+func (s *MemStore) CountSuspendedAt(_ context.Context, studentID uuid.UUID, at time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, g := range s.grants {
+		if g.StudentUserID == studentID && g.Open() && g.SuspendedAt != nil && g.SuspendedAt.Equal(at) {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// grantPage returns up to limit grants matching match after the position,
+// newest first.
 func (s *MemStore) grantPage(match func(AccessGrant) bool, after *GrantKey, limit int) []AccessGrant {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []AccessGrant
 	for _, g := range s.grants {
-		if g.Active() && match(g) && (after == nil || after.before(g)) {
+		if match(g) && (after == nil || after.before(g)) {
 			out = append(out, g)
 		}
 	}
@@ -133,14 +171,14 @@ func (s *MemStore) grantPage(match func(AccessGrant) bool, after *GrantKey, limi
 	return out
 }
 
-// StudentGrants implements Store.
+// StudentGrants implements Store (open grants: active and suspended).
 func (s *MemStore) StudentGrants(_ context.Context, studentID uuid.UUID, after *GrantKey, limit int) ([]AccessGrant, error) {
-	return s.grantPage(func(g AccessGrant) bool { return g.StudentUserID == studentID }, after, limit), nil
+	return s.grantPage(func(g AccessGrant) bool { return g.StudentUserID == studentID && g.Open() }, after, limit), nil
 }
 
-// CompanyGrants implements Store.
+// CompanyGrants implements Store (active grants only).
 func (s *MemStore) CompanyGrants(_ context.Context, companyOrgID uuid.UUID, after *GrantKey, limit int) ([]AccessGrant, error) {
-	return s.grantPage(func(g AccessGrant) bool { return g.CompanyOrgID == companyOrgID }, after, limit), nil
+	return s.grantPage(func(g AccessGrant) bool { return g.CompanyOrgID == companyOrgID && g.Active() }, after, limit), nil
 }
 
 // AllGrants implements Store.

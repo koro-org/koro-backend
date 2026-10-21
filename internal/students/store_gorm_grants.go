@@ -11,8 +11,8 @@ import (
 	"koro/internal/platform/db"
 )
 
-const grantCols = `id, student_user_id, company_org_id, source, source_id, granted_at, revoked_at, revoked_by_kind,
-	revoke_reason, created_at, updated_at`
+const grantCols = `id, student_user_id, company_org_id, source, source_id, granted_at, suspended_at, revoked_at,
+	revoked_by_kind, revoke_reason, created_at, updated_at`
 
 func takeGrant(op string, q *gorm.DB) (AccessGrant, error) {
 	var g AccessGrant
@@ -84,7 +84,7 @@ func (s gormStore) GrantBySource(ctx context.Context, source GrantSource, source
 func (s gormStore) ActiveGrant(ctx context.Context, studentID, companyOrgID uuid.UUID) (AccessGrant, error) {
 	var rows []AccessGrant
 	err := db.Conn(ctx, s.orm).Raw(`SELECT `+grantCols+` FROM profile_access_grants
-		WHERE company_org_id = @org_id AND student_user_id = @student AND revoked_at IS NULL
+		WHERE company_org_id = @org_id AND student_user_id = @student AND revoked_at IS NULL AND suspended_at IS NULL
 		ORDER BY granted_at, id LIMIT 1`, map[string]any{"org_id": companyOrgID, "student": studentID}).Scan(&rows).Error
 	if err != nil {
 		return AccessGrant{}, wrap("active grant", err)
@@ -102,7 +102,7 @@ func (s gormStore) GetGrant(ctx context.Context, studentID, id uuid.UUID) (Acces
 	return takeGrant("get grant", db.Conn(ctx, s.orm).Where("id = ? AND student_user_id = ?", id, studentID))
 }
 
-// RevokeGrants implements Store.
+// RevokeGrants implements Store (active and suspended grants alike).
 func (s gormStore) RevokeGrants(ctx context.Context, studentID, companyOrgID uuid.UUID, by RevokedBy, reason *string,
 	at time.Time) ([]AccessGrant, error) {
 	var rows []AccessGrant
@@ -118,7 +118,35 @@ func (s gormStore) RevokeGrants(ctx context.Context, studentID, companyOrgID uui
 	return rows, nil
 }
 
-// StudentGrants implements Store.
+// SuspendGrants implements Store.
+//
+// cross-org: the student's verification lapsed, whatever the company.
+func (s gormStore) SuspendGrants(ctx context.Context, studentID uuid.UUID, at time.Time) ([]AccessGrant, error) {
+	var rows []AccessGrant
+	err := db.Conn(ctx, s.orm).Raw(`UPDATE profile_access_grants SET suspended_at = @at
+		WHERE student_user_id = @student AND revoked_at IS NULL AND suspended_at IS NULL AND granted_at <= @at
+		RETURNING `+grantCols, map[string]any{"at": at, "student": studentID}).Scan(&rows).Error
+	if err != nil {
+		return nil, wrap("suspend grants", err)
+	}
+	return rows, nil
+}
+
+// CountSuspendedAt implements Store.
+//
+// cross-org: one lapse suspends the student's grants of every company.
+func (s gormStore) CountSuspendedAt(ctx context.Context, studentID uuid.UUID, at time.Time) (int, error) {
+	var n int64
+	err := db.Conn(ctx, s.orm).Raw(`SELECT count(*) FROM profile_access_grants
+		WHERE student_user_id = @student AND revoked_at IS NULL AND suspended_at = @at`,
+		map[string]any{"student": studentID, "at": at}).Scan(&n).Error
+	if err != nil {
+		return 0, wrap("count suspended grants", err)
+	}
+	return int(n), nil
+}
+
+// StudentGrants implements Store (open grants: active and suspended).
 //
 // cross-org: the student's own grants of every company (listMyAccessGrants).
 func (s gormStore) StudentGrants(ctx context.Context, studentID uuid.UUID, after *GrantKey, limit int) ([]AccessGrant, error) {
@@ -138,7 +166,7 @@ func (s gormStore) CompanyGrants(ctx context.Context, companyOrgID uuid.UUID, af
 	args := map[string]any{"org_id": companyOrgID, "limit": limit}
 	var rows []AccessGrant
 	err := db.Conn(ctx, s.orm).Raw(`SELECT `+grantCols+` FROM profile_access_grants
-		WHERE company_org_id = @org_id AND revoked_at IS NULL`+grantKeyArgs(args, after)+`
+		WHERE company_org_id = @org_id AND revoked_at IS NULL AND suspended_at IS NULL`+grantKeyArgs(args, after)+`
 		ORDER BY granted_at DESC, id DESC LIMIT @limit`, args).Scan(&rows).Error
 	if err != nil {
 		return nil, wrap("company grants", err)

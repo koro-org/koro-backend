@@ -17,6 +17,7 @@ import (
 	"koro/internal/directory"
 	"koro/internal/files"
 	"koro/internal/identity"
+	"koro/internal/notify"
 	"koro/internal/orgs"
 	"koro/internal/platform/civil"
 	"koro/internal/platform/clock"
@@ -521,6 +522,31 @@ func (f skillNamesFake) SkillNames(_ context.Context, ids []uuid.UUID) (map[uuid
 	return out, nil
 }
 
+// noticesFake is notify's Sender: it records every message; fail is
+// returned once per Send while set (a transient delivery failure).
+type noticesFake struct {
+	mu   sync.Mutex
+	sent []notify.Message
+	fail error
+}
+
+func (n *noticesFake) Send(_ context.Context, m notify.Message) (uuid.UUID, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.fail != nil {
+		return uuid.Nil(), n.fail
+	}
+	n.sent = append(n.sent, m)
+	return uuid.NewV7(), nil
+}
+
+// messages returns the recorded messages.
+func (n *noticesFake) messages() []notify.Message {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return slices.Clone(n.sent)
+}
+
 // env is a students module over the in-memory store and the fakes.
 type env struct {
 	clk      *clock.Fake
@@ -538,6 +564,7 @@ type env struct {
 	resolver *authztest.Resolver // newHTTP
 	regs     *regsFake
 	orgNames *orgNamesFake
+	notices  *noticesFake
 	mod      students.Module
 	svc      students.Service
 	subs     *outbox.Registry
@@ -559,8 +586,8 @@ func newEnv(t *testing.T) *env {
 		files: &filesFake{meta: map[uuid.UUID]files.FileMeta{}, attached: map[uuid.UUID]files.Owner{},
 			notClean: map[uuid.UUID]bool{}},
 		members: &membersFake{ms: map[uuid.UUID]orgs.MemberView{}}, dsrs: &dsrsFake{open: map[uuid.UUID]uuid.UUID{}},
-		orgNames: &orgNamesFake{names: map[uuid.UUID]string{}},
-		uniA:     uuid.NewV7(), uniB: uuid.NewV7(), deptA: uuid.NewV7(), deptB: uuid.NewV7(), deptA2: uuid.NewV7(),
+		orgNames: &orgNamesFake{names: map[uuid.UUID]string{}}, notices: &noticesFake{},
+		uniA: uuid.NewV7(), uniB: uuid.NewV7(), deptA: uuid.NewV7(), deptB: uuid.NewV7(), deptA2: uuid.NewV7(),
 		skill1: uuid.NewV7(), skill2: uuid.NewV7(), clubPlain: uuid.NewV7(), clubSens: uuid.NewV7(),
 	}
 	e.catalog = &catalog{
@@ -593,6 +620,7 @@ func newEnv(t *testing.T) *env {
 		},
 		Contacts: contactsFake{users: e.users}, OrgNames: e.orgNames,
 		SkillNames: skillNamesFake{names: map[uuid.UUID]string{e.skill1: "Go", e.skill2: "SQL"}},
+		Sender:     e.notices,
 	})
 	if err != nil {
 		t.Fatal(err)

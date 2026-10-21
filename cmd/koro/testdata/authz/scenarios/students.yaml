@@ -1,4 +1,4 @@
-# Multi-step scenarios of the students module (03 §7.7; BE-023, BE-025).
+# Multi-step scenarios of the students module (03 §7.7; BE-023, BE-025, BE-046, BE-077).
 version: 1
 scenarios:
   minor:
@@ -106,3 +106,18 @@ scenarios:
           expect: 404, code: not_found }
       - { persona: other_company_member, operation: getCompanyStudentProfile, path_params: { org_id: company_b, user_id: student },
           expect: 404, code: not_found }
+  access_grant_lapsed_student:
+    note: >-
+      BE-077 (KVKK md. 11): user_unverified stands for a student whose verification lapsed; its grant of
+      company_a (grant_lapsed_a) is suspended. For the company the student is unknown (404) and the company
+      cannot end the grant; the account, still unverified, lists and revokes it; a second revocation changes
+      nothing; the account's other student actions keep k-uv (403).
+    steps:
+      - { persona: company_admin, operation: getCompanyStudentProfile, path_params: { org_id: company_a, user_id: user_unverified },
+          expect: 404, code: not_found }
+      - { persona: company_member, operation: revokeCompanyAccessGrant, path_params: { org_id: company_a, user_id: user_unverified },
+          expect: 404, code: not_found }
+      - { persona: user_unverified, operation: listMyAccessGrants, expect: 200 }
+      - { persona: user_unverified, operation: revokeMyAccessGrant, path_params: { grant_id: grant_lapsed_a }, expect: 204 }
+      - { persona: user_unverified, operation: revokeMyAccessGrant, path_params: { grant_id: grant_lapsed_a }, expect: 204 }
+      - { persona: user_unverified, operation: getMyStudentProfile, expect: 403, code: students.verification_required }

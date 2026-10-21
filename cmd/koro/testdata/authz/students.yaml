@@ -1,4 +1,4 @@
-# Authz matrix of the students module (03 §5.4, 04 §2.4; BE-023, BE-025, BE-046). 22 operations × 18 personas.
+# Authz matrix of the students module (03 §5.4, 04 §2.4; BE-023, BE-025, BE-046, BE-077). 22 operations × 18 personas.
 # Every operation is an O cell on the caller's own profile for verified students (stu, min, clm,
 # cla, stf); an account without an active student verification (usr k-uv, uni, the companies,
 # platform staff) is 403 students.verification_required, anonymous 401 (03 §5.0, §2.3). The
@@ -18,6 +18,10 @@
 # company and everyone else 404, platform staff 403); the profile and the CV add G: without an
 # active grant of that company the student is 404 (Y5) — grant_granted_a is company_a's grant on
 # helper student_granted (no CV), grant_student_b company_b's on student (CV cv_student).
+# BE-077 (KVKK md. 11): listMyAccessGrants and revokeMyAccessGrant need no student verification (usr
+# O: every signed-in account on its own grants; another user's grant 404). grant_lapsed_a is the
+# suspended grant of user_unverified (a student whose verification lapsed): the account lists and
+# revokes it; for company_a the student is unknown (404) and the company cannot end it (404).
 version: 1
 groups:
   # accounts without an active student verification (03 §1.1 usr; companies and staff too).
@@ -38,6 +42,10 @@ groups:
   # signed-in users who are neither members of company_b nor platform staff (company_b's surface: 404).
   not_company_b: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin, event_staff,
                   university_rep, company_member, company_admin]
+  # signed-in users other than user_unverified (the owner of grant_lapsed_a).
+  not_user_unverified: [student, student_minor, club_member, club_admin, other_club_admin, event_staff, university_rep,
+                        company_member, company_admin, other_company_member, moderator, support, dpo, platform_admin,
+                        finance_admin, talent_auditor]
 
 operations:
   getMyStudentProfile:
@@ -217,23 +225,28 @@ operations:
     method: GET
     path: /api/v1/me/access-grants
     action: students.access_grant.list_own
-    expect: { anonymous: 401, "@verified_students": 200, "@non_students": 403 }
+    note: every signed-in account lists its own grants, without a student verification (BE-077)
+    expect: { anonymous: 401, "@signed_in": 200 }
 
   revokeMyAccessGrant:
     method: POST
     path: /api/v1/me/access-grants/{grant_id}/revoke
     action: students.access_grant.revoke
     path_params: { grant_id: grant_student_b }
-    note: student's grant of company_b; another student's grant is 404 (IDOR), a non-student 403 before the lookup
-    expect: { anonymous: 401, student: 204, "@other_students": 404, "@non_students": 403 }
+    note: student's grant of company_b; another user's grant is 404 (IDOR) for every account, verified or not (BE-077)
+    expect: { anonymous: 401, student: 204, "@other_students": 404, "@non_students": 404 }
     variants:
       - name: other_students_grant
         path_params: { grant_id: grant_granted_a }
         note: student_granted's grant; no persona owns it
-        expect: { anonymous: 401, "@verified_students": 404, "@non_students": 403 }
+        expect: { anonymous: 401, "@signed_in": 404 }
       - name: missing
         path_params: { grant_id: "literal:00000000-0000-7000-8000-0000000000a1" }
-        expect: { anonymous: 401, "@verified_students": 404, "@non_students": 403 }
+        expect: { anonymous: 401, "@signed_in": 404 }
+      - name: lapsed_students_grant
+        path_params: { grant_id: grant_lapsed_a }
+        note: the suspended grant of user_unverified (verification lapsed); its owner revokes it without a verification
+        expect: { anonymous: 401, user_unverified: 204, "@not_user_unverified": 404 }
 
   listCompanyGrantedStudents:
     method: GET
@@ -265,6 +278,10 @@ operations:
       - name: missing
         path_params: { org_id: company_a, user_id: "literal:00000000-0000-7000-8000-0000000000a2" }
         expect: { anonymous: 401, company_member: 404, company_admin: 404, "@not_company_a": 404, "@platform_staff": 403 }
+      - name: suspended_grant
+        path_params: { org_id: company_a, user_id: user_unverified }
+        note: company_a's grant on user_unverified is suspended (verification lapsed, BE-077); the student is unknown
+        expect: { anonymous: 401, company_member: 404, company_admin: 404, "@not_company_a": 404, "@platform_staff": 403 }
 
   downloadCompanyStudentCv:
     method: GET
@@ -281,6 +298,9 @@ operations:
       - name: no_grant
         path_params: { org_id: company_a, user_id: student }
         expect: { anonymous: 401, company_member: 404, company_admin: 404, "@not_company_a": 404, "@platform_staff": 403 }
+      - name: suspended_grant
+        path_params: { org_id: company_a, user_id: user_unverified }
+        expect: { anonymous: 401, company_member: 404, company_admin: 404, "@not_company_a": 404, "@platform_staff": 403 }
 
   revokeCompanyAccessGrant:
     method: POST
@@ -291,4 +311,8 @@ operations:
     variants:
       - name: no_grant
         path_params: { org_id: company_a, user_id: student }
+        expect: { anonymous: 401, company_member: 404, company_admin: 404, "@not_company_a": 404, "@platform_staff": 403 }
+      - name: suspended_grant
+        path_params: { org_id: company_a, user_id: user_unverified }
+        note: a suspended grant is the student's to end; the company finds no active grant (404, BE-077)
         expect: { anonymous: 401, company_member: 404, company_admin: 404, "@not_company_a": 404, "@platform_staff": 403 }

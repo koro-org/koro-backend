@@ -58,6 +58,12 @@
 //     CV by a 1-minute signed URL. The student or the company revokes a
 //     grant; the next read already fails (the grant is checked on every
 //     call). Revoked grants go 6 months later (access_grant_revoked).
+//   - Lapsed verification (BE-077, KVKK md. 11): a company never sees a
+//     student without an active verification (read time), and the lapse
+//     suspends every active grant; a suspended grant never reopens by
+//     itself, a new verification included (a new accepted request gives
+//     a fresh one). The student is told in-app, the company never. Any
+//     account lists and revokes its own grants without a verification.
 //   - Level 2 (01 §4.9, T-68, T-237): IsDiscoverable and Search check the
 //     setting, the consent in force, the verification, the age and the
 //     account at read time; a search whose filters match fewer than 10
@@ -134,13 +140,17 @@ type AccessGrants interface {
 	// is a sync write, 01 §6.3). Idempotent: a replay of the same source,
 	// or a company that already holds an active grant, changes nothing. A
 	// minor never grants (422 students.minor_restricted, 04 §V.0-3); an
-	// unknown account or company is not found.
+	// unknown account or company is not found; an account without an
+	// active student verification is 403 students.verification_required
+	// (BE-077). The company's suspended grant, if any, ends (by the system):
+	// the new acceptance replaces it.
 	Grant(ctx context.Context, studentID, companyOrgID uuid.UUID, src GrantSource, srcID uuid.UUID) error
-	// Revoke ends the grant of source srcID (revoked by the system), in
-	// its own transaction or the one ctx carries. A grant that is gone or
-	// already revoked is no error.
+	// Revoke ends the grant of source srcID (revoked by the system), active
+	// or suspended, in its own transaction or the one ctx carries. A grant
+	// that is gone or already revoked is no error.
 	Revoke(ctx context.Context, studentID, companyOrgID uuid.UUID, src GrantSource, srcID uuid.UUID, reason string) error
-	// Has reports whether companyOrgID holds an active grant on studentID.
+	// Has reports whether companyOrgID holds an active (not suspended)
+	// grant on studentID whose verification is active now (BE-077).
 	Has(ctx context.Context, studentID, companyOrgID uuid.UUID) (bool, error)
 }
 
@@ -215,11 +225,12 @@ type Service interface {
 	AdminGetStudentProfile(ctx context.Context, a authz.Actor, userID uuid.UUID, access AdminAccess) (AdminView, error)
 
 	// ListMyAccessGrants is listMyAccessGrants
-	// (students.access_grant.list_own): the companies holding level 3
-	// access, newest first.
+	// (students.access_grant.list_own): the open grants (active and
+	// suspended), newest first; no verification needed (BE-077).
 	ListMyAccessGrants(ctx context.Context, a authz.Actor, after *GrantKey, limit int) (GrantPage, error)
 	// RevokeMyAccessGrant is revokeMyAccessGrant
-	// (students.access_grant.revoke): the company loses access at once.
+	// (students.access_grant.revoke): the company loses access at once; a
+	// suspended grant ends too; no verification needed (BE-077).
 	RevokeMyAccessGrant(ctx context.Context, a authz.Actor, grantID uuid.UUID, reason string) error
 	// ListCompanyStudents is listCompanyGrantedStudents
 	// (students.access_grant.list_company).
@@ -287,6 +298,9 @@ type Deps struct {
 	// SkillNames names skills (directory, when it offers the lookup). nil
 	// → the company views carry skill IDs without names.
 	SkillNames SkillNamer
+	// Sender delivers the in-app notice of suspended grants (notify,
+	// BE-077). nil → the grants are suspended without a notice (logged).
+	Sender Sender
 }
 
 func (d Deps) validate() error {

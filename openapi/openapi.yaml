@@ -11585,11 +11585,22 @@ components:
             - contact_request
             - application
           type: string
+        status:
+          description: "active: the company sees your profile; suspended: your student verification lapsed, the company sees nothing and the grant never reopens by itself (revoke it, or accept a new contact request of the company after you verify again)"
+          enum:
+            - active
+            - suspended
+          type: string
+        suspended_at:
+          description: When the lapse of your verification suspended the grant (suspended grants only)
+          format: date-time
+          type: string
       required:
         - grant_id
         - company
         - source
         - granted_at
+        - status
       type: object
     StudentAccessGrantList:
       additionalProperties: false
@@ -23442,7 +23453,7 @@ paths:
       x-koro-surface: self
   /api/v1/me/access-grants:
     get:
-      description: The companies holding level 3 access to your full profile and current CV (you accepted their contact request), newest first.
+      description: "The companies you gave level 3 access to your full profile and current CV (you accepted their contact request), newest first. A grant is suspended while your student verification has lapsed: the company sees nothing, and the grant never reopens by itself. Any account lists its own grants, without a student verification."
       operationId: listMyAccessGrants
       parameters:
         - description: Page size
@@ -23488,7 +23499,7 @@ paths:
       x-koro-surface: self
   /api/v1/me/access-grants/{grant_id}/revoke:
     post:
-      description: The company loses level 3 access at once. The reason is optional and never shown to the company. Revoking a revoked grant changes nothing; another user's grant is 404.
+      description: The company loses level 3 access at once; a suspended grant ends too. No student verification is needed. The reason is optional and never shown to the company. Revoking a revoked grant changes nothing; another user's grant is 404.
       operationId: revokeMyAccessGrant
       parameters:
         - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
@@ -29410,7 +29421,7 @@ paths:
       x-koro-surface: org
   /api/v1/orgs/{org_id}/students:
     get:
-      description: Students with an active level 3 grant of this company (they accepted its contact request), newest grant first; q filters by name. Minors never appear.
+      description: Students with an active level 3 grant of this company (they accepted its contact request) and an active student verification, newest grant first; q filters by name. Minors never appear.
       operationId: listCompanyGrantedStudents
       parameters:
         - description: Company org ID
@@ -29471,7 +29482,7 @@ paths:
       x-koro-surface: org
   /api/v1/orgs/{org_id}/students/{user_id}:
     get:
-      description: The level 3 profile. Without an active grant of this company the student is not found (404, as an unknown student). The e-mail only when the student shares it; clubs only when the student shares them (never a sensitive club). Every read is audited.
+      description: The level 3 profile. Without an active grant of this company, or while the student's verification has lapsed, the student is not found (404, as an unknown student). The e-mail only when the student shares it; clubs only when the student shares them (never a sensitive club). Every read is audited.
       operationId: getCompanyStudentProfile
       parameters:
         - description: Company org ID
@@ -29512,7 +29523,7 @@ paths:
       x-koro-surface: org
   /api/v1/orgs/{org_id}/students/{user_id}/access-grant/revoke:
     post:
-      description: The company ends its level 3 access. The reason is optional and never shown to the student. Without an active grant, 404.
+      description: The company ends its level 3 access. The reason is optional and never shown to the student. Without an active grant (a suspended one included), 404.
       operationId: revokeCompanyAccessGrant
       parameters:
         - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
@@ -29564,7 +29575,7 @@ paths:
       x-koro-surface: org
   /api/v1/orgs/{org_id}/students/{user_id}/cv:
     get:
-      description: A signed URL of the student's current CV, valid for 1 minute. Without an active grant, or without a current CV, 404; 409 files.not_clean while the virus scan is pending. Every call is audited.
+      description: A signed URL of the student's current CV, valid for 1 minute. Without an active grant, while the student's verification has lapsed, or without a current CV, 404; 409 files.not_clean while the virus scan is pending. Every call is audited.
       operationId: downloadCompanyStudentCv
       parameters:
         - description: Company org ID

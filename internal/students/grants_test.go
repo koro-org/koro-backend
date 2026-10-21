@@ -299,9 +299,9 @@ func TestCompanyCv_EveryReadAudited(t *testing.T) {
 // (reason optional, stored, never shown) and the company's very next
 // profile read, CV download and list miss the student; Has turns false;
 // the revocation is audited; revoking again changes nothing; another
-// student's grant is 404 and an unverified account 403
-// students.verification_required. The old request never grants again; a
-// new accepted request does.
+// student's grant is 404, for an unverified account too (BE-077: the /me
+// path needs no verification). The old request never grants again; a new
+// accepted request does.
 func TestRevokeGrant_ByStudent_CompanyLosesAccess(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -322,8 +322,8 @@ func TestRevokeGrant_ByStudent_CompanyLosesAccess(t *testing.T) {
 	if err := e.svc.RevokeMyAccessGrant(ctx, other, grant, ""); !errors.Is(err, problem.ErrNotFound) {
 		t.Fatalf("another student's grant: %v, want 404", err)
 	}
-	if err := e.svc.RevokeMyAccessGrant(ctx, e.unverified(), grant, ""); !errors.Is(err, students.ErrVerificationRequired) {
-		t.Fatalf("unverified: %v", err)
+	if err := e.svc.RevokeMyAccessGrant(ctx, e.unverified(), grant, ""); !errors.Is(err, problem.ErrNotFound) {
+		t.Fatalf("unverified, another student's grant: %v, want 404", err)
 	}
 	if err := e.svc.RevokeMyAccessGrant(ctx, s, grant, strings.Repeat("x", 301)); !errors.Is(err, problem.ErrValidation) {
 		t.Fatalf("a 301-character reason: %v, want 422", err)
@@ -539,8 +539,8 @@ func TestListGrants_PagesAndNames(t *testing.T) {
 	if err != nil || len(mine.Items) != 1 || mine.Next != nil || mine.Items[0].CompanyName != "A1" {
 		t.Fatalf("my page 2 = %+v, %v", mine, err)
 	}
-	if _, err := e.svc.ListMyAccessGrants(ctx, rec, nil, 0); !errors.Is(err, students.ErrVerificationRequired) {
-		t.Fatalf("a company account: %v", err)
+	if p, err := e.svc.ListMyAccessGrants(ctx, rec, nil, 0); err != nil || len(p.Items) != 0 {
+		t.Fatalf("a company account's own grants (BE-077: no verification needed) = %+v, %v", p, err)
 	}
 }
 

@@ -14,13 +14,16 @@ type StudentGrantCompanyDTO struct {
 	Name  string `json:"name"`
 }
 
-// StudentAccessGrantDTO is one company that sees my level 3 profile
-// (listMyAccessGrants).
+// StudentAccessGrantDTO is one company I gave level 3 access
+// (listMyAccessGrants): active, or suspended since my student verification
+// lapsed (BE-077).
 type StudentAccessGrantDTO struct {
-	GrantID   string                 `json:"grant_id" format:"uuid"`
-	Company   StudentGrantCompanyDTO `json:"company"`
-	Source    string                 `json:"source" enum:"contact_request,application" doc:"What you accepted: a contact request (an application in phase 3)"`
-	GrantedAt time.Time              `json:"granted_at"`
+	GrantID     string                 `json:"grant_id" format:"uuid"`
+	Company     StudentGrantCompanyDTO `json:"company"`
+	Source      string                 `json:"source" enum:"contact_request,application" doc:"What you accepted: a contact request (an application in phase 3)"`
+	GrantedAt   time.Time              `json:"granted_at"`
+	Status      string                 `json:"status" enum:"active,suspended" doc:"active: the company sees your profile; suspended: your student verification lapsed, the company sees nothing and the grant never reopens by itself (revoke it, or accept a new contact request of the company after you verify again)"`
+	SuspendedAt *time.Time             `json:"suspended_at,omitempty" doc:"When the lapse of your verification suspended the grant (suspended grants only)"`
 }
 
 // StudentAccessGrantList is a page of listMyAccessGrants.
@@ -36,10 +39,16 @@ type StudentL3CardList struct {
 }
 
 func toAccessGrantDTO(v GrantView) StudentAccessGrantDTO {
-	return StudentAccessGrantDTO{
+	d := StudentAccessGrantDTO{
 		GrantID:   v.Grant.ID.String(),
 		Company:   StudentGrantCompanyDTO{OrgID: v.Grant.CompanyOrgID.String(), Name: v.CompanyName},
 		Source:    string(v.Grant.Source),
 		GrantedAt: v.Grant.GrantedAt.UTC(),
+		Status:    string(v.Grant.Status()),
 	}
+	if at := v.Grant.SuspendedAt; at != nil {
+		u := at.UTC()
+		d.SuspendedAt = &u
+	}
+	return d
 }

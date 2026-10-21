@@ -106,13 +106,18 @@ func (p privacyProvider) Export(ctx context.Context, userID uuid.UUID) (privacy.
 }
 
 // exportGrant is a level 3 grant in the export: which company had access,
-// from which request and until when. A company's revocation reason is the
-// company's note and is not shown to the student (BE-046); the student's
-// own reason is theirs.
+// from which request, its state, when a lapsed verification suspended it
+// (BE-077) and until when. A company's revocation reason is the company's
+// note and is not shown to the student (BE-046); the student's own reason
+// is theirs.
 func exportGrant(g AccessGrant) map[string]any {
 	item := map[string]any{
 		"record": "access_grant", "grant_id": g.ID.String(), "company_org_id": g.CompanyOrgID.String(),
 		"source": string(g.Source), "source_id": g.SourceID.String(), "granted_at": g.GrantedAt.UTC().Format(time.RFC3339),
+		"status": string(g.Status()),
+	}
+	if g.SuspendedAt != nil {
+		item["suspended_at"] = g.SuspendedAt.UTC().Format(time.RFC3339)
 	}
 	if g.RevokedAt != nil {
 		item["revoked_at"] = g.RevokedAt.UTC().Format(time.RFC3339)

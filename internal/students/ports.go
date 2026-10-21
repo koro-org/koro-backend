@@ -11,6 +11,7 @@ import (
 	"koro/internal/directory"
 	"koro/internal/files"
 	"koro/internal/identity"
+	"koro/internal/notify"
 	"koro/internal/orgs"
 )
 
@@ -172,4 +173,11 @@ type OrgNames interface {
 // public listSkills names every skill ID).
 type SkillNamer interface {
 	SkillNames(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error)
+}
+
+// Sender is notify's delivery (L3; notify.Sender.Send, worker only): the
+// in-app notice that a lapsed verification suspended the student's level 3
+// grants (BE-077). Idempotent per DedupeKey.
+type Sender interface {
+	Send(ctx context.Context, m notify.Message) (uuid.UUID, error)
 }

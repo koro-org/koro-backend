@@ -53,8 +53,9 @@ type GrantView struct {
 	CompanyName string
 }
 
-// GrantPage is a page of the student's active grants; Next is the position
-// after the last item when there is another page.
+// GrantPage is a page of the student's open grants (active and
+// suspended); Next is the position after the last item when there is
+// another page.
 type GrantPage struct {
 	Items []GrantView
 	Next  *GrantKey
@@ -77,8 +78,10 @@ type CompanyStudentPage struct {
 
 // companyTarget is what a company view of a student decides on, read
 // before authz: the company's active grant and whether the student is one
-// a company may see at all (a live adult account with a stored profile,
-// 04 §V.0-3). visible is false otherwise, and the view is then the same
+// a company may see at all (a live adult account with an active student
+// verification and a stored profile, 04 §V.0-3; BE-077: a lapsed
+// verification hides the student at once, before its grants are
+// suspended). visible is false otherwise, and the view is then the same
 // 404 as for an unknown student.
 type companyTarget struct {
 	grant   AccessGrant
@@ -113,6 +116,12 @@ func (s *service) companyTarget(ctx context.Context, orgID, userID uuid.UUID) (c
 	}
 	u, ok := users[userID]
 	if !ok || u.Status != identity.StatusActive || u.IsMinor {
+		return t, nil
+	}
+	switch verified, err := s.verifiedAmong(ctx, []uuid.UUID{userID}); {
+	case err != nil:
+		return t, err
+	case !verified[userID]:
 		return t, nil
 	}
 	p, err := s.d.Store.GetProfile(ctx, userID)
@@ -153,14 +162,28 @@ func ownGrantResource(a authz.Actor, id uuid.UUID) authz.Resource {
 	return authz.Resource{Type: authz.TypeAccessGrant, ID: id, OwnerUserID: &me}
 }
 
-// canOwnGrants checks an own-grant action (k-uv: 403
-// students.verification_required).
+// canOwnGrants checks an own-grant action: the O cell of every account,
+// no student verification needed (BE-077, KVKK md. 11: a student whose
+// verification lapsed still lists and revokes the grants they gave).
 func (s *service) canOwnGrants(ctx context.Context, a authz.Actor, act authz.Action, id uuid.UUID) error {
-	err := authz.Can(ctx, a, act, ownGrantResource(a, id))
-	if err != nil && errors.Is(err, authz.ErrForbidden) && a.IsUser() && !a.IsVerifiedStudent() {
-		return ErrVerificationRequired
+	return authz.Can(ctx, a, act, ownGrantResource(a, id))
+}
+
+// verifiedAmong reports which of ids have an active student verification
+// now (none without Verifications: fail closed).
+func (s *service) verifiedAmong(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error) {
+	out := map[uuid.UUID]bool{}
+	if s.d.Verifications == nil || len(ids) == 0 {
+		return out, nil
 	}
-	return err
+	vs, err := s.d.Verifications.ActiveMany(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for id := range vs {
+		out[id] = true
+	}
+	return out, nil
 }
 
 // cleanReason validates an optional revocation reason (≤ 300 characters,
@@ -183,11 +206,14 @@ func grantEvent(action string, g AccessGrant, meta map[string]any) audit.Event {
 // ---- AccessGrants (01 §4.9)
 
 // Grant implements AccessGrants. Order: the arguments → the account (an
-// unknown or inactive one is not found, a minor 422) → in the caller's
-// transaction: the student's grant lock, a replay of the same source (no
-// change; the source naming another student or company is a conflict), an
-// active grant of the company (no change), the new row and its audit
-// record (the student is the actor: the acceptance is theirs).
+// unknown or inactive one is not found, a minor 422) → an active student
+// verification (403 students.verification_required: a new grant keeps the
+// verification condition, BE-077) → in the caller's transaction: the
+// student's grant lock, a replay of the same source (no change; the source
+// naming another student or company is a conflict), an active grant of the
+// company (no change), the company's suspended grants ended (by the system:
+// the new acceptance replaces them), the new row and its audit record (the
+// student is the actor: the acceptance is theirs).
 func (s *service) Grant(ctx context.Context, studentID, companyOrgID uuid.UUID, src GrantSource, srcID uuid.UUID) error {
 	if studentID == uuid.Nil() || companyOrgID == uuid.Nil() || srcID == uuid.Nil() || !src.Valid() {
 		return problem.ErrValidation.Wrap(errors.New("students: invalid access grant"))
@@ -202,6 +228,12 @@ func (s *service) Grant(ctx context.Context, studentID, companyOrgID uuid.UUID, 
 		return ErrNotFound
 	case u.IsMinor: // 04 §V.0-3: a minor never reaches a company view
 		return ErrMinorRestricted
+	}
+	switch verified, err := s.verifiedAmong(ctx, []uuid.UUID{studentID}); {
+	case err != nil:
+		return err
+	case !verified[studentID]:
+		return ErrVerificationRequired
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		if err := s.d.Store.LockGrants(ctx, studentID); err != nil {
@@ -222,6 +254,14 @@ func (s *service) Grant(ctx context.Context, studentID, companyOrgID uuid.UUID, 
 		case !errors.Is(err, ErrNotFound):
 			return err
 		}
+		// No active grant: what is still open of the company is suspended.
+		replaced, err := s.d.Store.RevokeGrants(ctx, studentID, companyOrgID, RevokedBySystem, nil, s.now())
+		if err != nil {
+			return err
+		}
+		if err := s.auditRevocations(ctx, authz.SystemActor(grantJob), replaced, RevokedBySystem); err != nil {
+			return err
+		}
 		g, ok, err := s.d.Store.InsertGrant(ctx, AccessGrant{
 			ID: uuid.NewV7(), StudentUserID: studentID, CompanyOrgID: companyOrgID, Source: src, SourceID: srcID,
 			GrantedAt: s.now(),
@@ -240,8 +280,9 @@ func (s *service) Grant(ctx context.Context, studentID, companyOrgID uuid.UUID, 
 }
 
 // Revoke implements AccessGrants: the grant of source srcID, when it is
-// the pair's and still active, is revoked by the system (audited). The
-// reason is stored, never shown to the student or the company.
+// the pair's and still open (active or suspended), is revoked by the
+// system with every other open grant of the pair (audited). The reason is
+// stored, never shown to the student or the company.
 func (s *service) Revoke(ctx context.Context, studentID, companyOrgID uuid.UUID, src GrantSource, srcID uuid.UUID, reason string) error {
 	why, err := cleanReason(reason)
 	if err != nil {
@@ -258,7 +299,7 @@ func (s *service) Revoke(ctx context.Context, studentID, companyOrgID uuid.UUID,
 		case err != nil:
 			return err
 		}
-		if g.StudentUserID != studentID || g.CompanyOrgID != companyOrgID || !g.Active() {
+		if g.StudentUserID != studentID || g.CompanyOrgID != companyOrgID || !g.Open() {
 			return nil
 		}
 		revoked, err := s.d.Store.RevokeGrants(ctx, studentID, companyOrgID, RevokedBySystem, why, s.now())
@@ -269,7 +310,9 @@ func (s *service) Revoke(ctx context.Context, studentID, companyOrgID uuid.UUID,
 	})
 }
 
-// Has implements AccessGrants.
+// Has implements AccessGrants: an active (not suspended) grant of the
+// company and an active student verification now (a lapsed verification
+// ends the access at once, before its grants are suspended; BE-077).
 func (s *service) Has(ctx context.Context, studentID, companyOrgID uuid.UUID) (bool, error) {
 	_, err := s.d.Store.ActiveGrant(ctx, studentID, companyOrgID)
 	switch {
@@ -278,7 +321,11 @@ func (s *service) Has(ctx context.Context, studentID, companyOrgID uuid.UUID) (b
 	case err != nil:
 		return false, err
 	}
-	return true, nil
+	verified, err := s.verifiedAmong(ctx, []uuid.UUID{studentID})
+	if err != nil {
+		return false, err
+	}
+	return verified[studentID], nil
 }
 
 // auditRevocations writes one record per revoked grant (no free text: the
@@ -299,8 +346,9 @@ func (s *service) auditRevocations(ctx context.Context, by authz.Actor, revoked 
 
 // ---- the student's side
 
-// ListMyAccessGrants implements Service: the caller's active grants,
-// newest first, with the company names (orgs).
+// ListMyAccessGrants implements Service: the caller's open grants (active
+// and suspended), newest first, with the company names (orgs). Any account
+// lists its own (no student verification needed, BE-077).
 func (s *service) ListMyAccessGrants(ctx context.Context, a authz.Actor, after *GrantKey, limit int) (GrantPage, error) {
 	if err := s.canOwnGrants(ctx, a, authz.StudentsAccessGrantListOwn, uuid.Nil()); err != nil {
 		return GrantPage{}, err
@@ -351,11 +399,13 @@ func (s *service) orgNames(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]
 }
 
 // RevokeMyAccessGrant implements Service (students.access_grant.revoke,
-// the student's path). Order: authz (k-uv 403) → the reason (422) → in one
+// the student's path; any account on its own grants, no student
+// verification needed: BE-077). Order: authz → the reason (422) → in one
 // transaction: the student's grant lock, the grant (another student's or
 // an unknown one: 404; an already revoked one: done, nothing written),
-// every active grant of that company revoked (by the student) and audited.
-// The company's next read fails: every company view checks the grant.
+// every open grant (active or suspended) of that company revoked (by the
+// student) and audited. The company's next read fails: every company view
+// checks the grant.
 func (s *service) RevokeMyAccessGrant(ctx context.Context, a authz.Actor, grantID uuid.UUID, reason string) error {
 	if err := s.canOwnGrants(ctx, a, authz.StudentsAccessGrantRevoke, grantID); err != nil {
 		return err
@@ -372,7 +422,7 @@ func (s *service) RevokeMyAccessGrant(ctx context.Context, a authz.Actor, grantI
 		if err != nil {
 			return err
 		}
-		if !g.Active() {
+		if !g.Open() {
 			return nil
 		}
 		revoked, err := s.d.Store.RevokeGrants(ctx, a.UserID, g.CompanyOrgID, RevokedByStudent, why, s.now())
@@ -388,8 +438,9 @@ func (s *service) RevokeMyAccessGrant(ctx context.Context, a authz.Actor, grantI
 // RevokeCompanyAccessGrant implements Service (students.access_grant.revoke,
 // the company's path). Order: authz on the company's surface (another
 // company 404, staff 403) → the reason → in one transaction: the student's
-// grant lock, every active grant of the company on the student revoked (by
-// the company; none: 404) and audited.
+// grant lock, the company's active grant on the student (none: 404; a
+// suspended grant is the student's to end, the company never learns of
+// it), every open grant of the pair revoked (by the company) and audited.
 func (s *service) RevokeCompanyAccessGrant(ctx context.Context, a authz.Actor, orgID, userID uuid.UUID, reason string) error {
 	if err := authz.Can(ctx, a, authz.StudentsAccessGrantRevoke,
 		companyResource(authz.TypeAccessGrant, orgID, userID, companyTarget{})); err != nil {
@@ -403,12 +454,12 @@ func (s *service) RevokeCompanyAccessGrant(ctx context.Context, a authz.Actor, o
 		if err := s.d.Store.LockGrants(ctx, userID); err != nil {
 			return err
 		}
+		if _, err := s.d.Store.ActiveGrant(ctx, userID, orgID); err != nil {
+			return err
+		}
 		revoked, err := s.d.Store.RevokeGrants(ctx, userID, orgID, RevokedByCompany, why, s.now())
 		if err != nil {
 			return err
-		}
-		if len(revoked) == 0 {
-			return ErrNotFound
 		}
 		return s.auditRevocations(ctx, a, revoked, RevokedByCompany)
 	})
@@ -416,10 +467,10 @@ func (s *service) RevokeCompanyAccessGrant(ctx context.Context, a authz.Actor, o
 
 // ListCompanyStudents implements Service (students.access_grant.list_company):
 // the company's active grants, newest first, as level 3 cards of the
-// students a company may see (no minor, no inactive account, no missing
-// profile), optionally filtered by name. One request inspects at most
-// companyScanLimit grants; a sparse filter then answers a short page with
-// a cursor.
+// students a company may see (no minor, no inactive account, no lapsed
+// verification, no missing profile), optionally filtered by name. One
+// request inspects at most companyScanLimit grants; a sparse filter then
+// answers a short page with a cursor.
 func (s *service) ListCompanyStudents(ctx context.Context, a authz.Actor, orgID uuid.UUID, q CompanyStudentQuery) (CompanyStudentPage, error) {
 	org := orgID
 	if err := authz.Can(ctx, a, authz.StudentsAccessGrantListCompany,
@@ -486,7 +537,8 @@ func (s *service) ListCompanyStudents(ctx context.Context, a authz.Actor, orgID 
 }
 
 // cardSources returns the card facts of the students of rows a company may
-// see: a live adult account and a stored profile (others are absent).
+// see: a live adult account with an active student verification and a
+// stored profile (others are absent).
 func (s *service) cardSources(ctx context.Context, rows []AccessGrant) (map[uuid.UUID]CompanySource, error) {
 	out := map[uuid.UUID]CompanySource{}
 	if len(rows) == 0 {
@@ -500,6 +552,10 @@ func (s *service) cardSources(ctx context.Context, rows []AccessGrant) (map[uuid
 	if err != nil {
 		return nil, err
 	}
+	verified, err := s.verifiedAmong(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
 	profiles, err := s.d.Store.Profiles(ctx, ids)
 	if err != nil {
 		return nil, err
@@ -507,7 +563,7 @@ func (s *service) cardSources(ctx context.Context, rows []AccessGrant) (map[uuid
 	unis, depts := map[uuid.UUID]string{}, map[uuid.UUID]string{}
 	for _, p := range profiles {
 		u, ok := users[p.UserID]
-		if !ok || u.Status != identity.StatusActive || u.IsMinor {
+		if !ok || u.Status != identity.StatusActive || u.IsMinor || !verified[p.UserID] {
 			continue
 		}
 		v := ProfileView{Profile: p, Stored: true}
@@ -520,7 +576,7 @@ func (s *service) cardSources(ctx context.Context, rows []AccessGrant) (map[uuid
 			}
 		}
 		v.AvatarURL = s.avatarURL(ctx, p.UserID, p.AvatarFileID)
-		out[p.UserID] = CompanySource{View: v, FirstName: u.FirstName, LastName: u.LastName, IsMinor: u.IsMinor}
+		out[p.UserID] = CompanySource{View: v, FirstName: u.FirstName, LastName: u.LastName, IsMinor: u.IsMinor, Verified: true}
 	}
 	return out, nil
 }
@@ -528,8 +584,8 @@ func (s *service) cardSources(ctx context.Context, rows []AccessGrant) (map[uuid
 // GetCompanyStudentProfile implements Service (students.profile.read_company;
 // 03 S·G, 04 §V.3). Order: the company's active grant and the student's
 // facts → authz (another company 404; staff 403; a company role without an
-// active grant, a minor, an inactive account or no profile: 404 — the
-// answer of an unknown student) → the level 3 projection → the audit
+// active grant, a minor, an inactive account, a lapsed verification or no
+// profile: 404 — the answer of an unknown student) → the level 3 projection → the audit
 // record (the read fails if the record cannot be written).
 func (s *service) GetCompanyStudentProfile(ctx context.Context, a authz.Actor, orgID, userID uuid.UUID) (StudentProfileL3DTO, error) {
 	t, err := s.companyTarget(ctx, orgID, userID)
@@ -579,14 +635,9 @@ func (s *service) companySource(ctx context.Context, t companyTarget) (CompanySo
 		return CompanySource{}, err
 	}
 	user := t.profile.UserID
-	src := CompanySource{View: v, FirstName: t.user.FirstName, LastName: t.user.LastName, IsMinor: t.user.IsMinor}
-	if s.d.Verifications != nil {
-		ver, err := s.d.Verifications.ActiveMany(ctx, []uuid.UUID{user})
-		if err != nil {
-			return CompanySource{}, err
-		}
-		_, src.Verified = ver[user]
-	}
+	// A visible target has an active verification (companyTarget).
+	src := CompanySource{View: v, FirstName: t.user.FirstName, LastName: t.user.LastName, IsMinor: t.user.IsMinor,
+		Verified: true}
 	if src.SkillNames, err = s.skillNames(ctx, v.Skills); err != nil {
 		return CompanySource{}, err
 	}

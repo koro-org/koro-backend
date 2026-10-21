@@ -349,6 +349,8 @@ func (m Module) Subscribe(r *outbox.Registry) {
 	r.Subscribe(domainevent.TopicUserEduVerificationLapsed, ApplyEduLapsedTaskName, m.svc.handleEduLapsed, q)
 	r.Subscribe(domainevent.TopicClubSensitivityChanged, DropSensitiveClubKeyTaskName, m.svc.handleSensitivityChanged, q)
 	r.Subscribe(domainevent.TopicFileRejected, DropRejectedFileTaskName, m.svc.handleFileRejected, q)
+	r.Subscribe(domainevent.TopicUserEduVerificationLapsed, SuspendLapsedGrantsTaskName, m.svc.handleLapsedGrants, q)
+	r.Subscribe(domainevent.TopicUserEduVerified, SuspendGapGrantsTaskName, m.svc.handleGapGrants, q)
 }
 
 // Jobs returns the scheduled jobs of 01 §7.

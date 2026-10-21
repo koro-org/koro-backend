@@ -249,7 +249,7 @@ func TestSchema_P1Schema2QueryIndexes(t *testing.T) {
 		"student_experiences_user_idx":      {"(user_id, start_month DESC)"},
 		"student_cvs_current_uq":            {"UNIQUE", "(user_id) WHERE is_current"},
 		"profile_access_grants_active_idx":  {"(student_user_id, company_org_id) WHERE (revoked_at IS NULL)"},
-		"profile_access_grants_company_idx": {"(company_org_id, granted_at DESC) WHERE (revoked_at IS NULL)"},
+		"profile_access_grants_company_idx": {"(company_org_id, granted_at DESC) WHERE ((revoked_at IS NULL) AND (suspended_at IS NULL))"}, // 000130 (BE-077): active grants only
 		"entitlements_org_feature_idx":      {"(org_id, feature, valid_to)", "status = 'active'"},
 		"entitlements_source_uq":            {"UNIQUE", "(source_type, source_id, feature) WHERE (source_id IS NOT NULL)"},
 		"entitlements_expiry_idx":           {"(valid_to)", "status = 'active'"},

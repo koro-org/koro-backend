@@ -9,7 +9,7 @@ const AttrDSRID = "dsr_id"
 
 // studentsPolicy is the policy of the students module (03 §5.4). Only tickets of
 // the students module edit this file (BE-001 R5). Written by BE-023, extended by
-// BE-025 and BE-046.
+// BE-025, BE-046 and BE-077.
 //
 //	students.profile.read_own          O for verified students (stu, min, clm, cla, stf);
 //	students.profile.update_own        usr k-uv: 403 (the service answers
@@ -31,8 +31,10 @@ const AttrDSRID = "dsr_id"
 //
 // BE-046 (level 3 access grants, 03 §5.4, Y5):
 //
-//	students.access_grant.list_own      O for verified students (usr k-uv: 403, the service
-//	                                    answers students.verification_required) on
+//	students.access_grant.list_own      O for usr, stu and min (BE-077, KVKK md. 11: no student
+//	                                    verification needed, so a student whose verification
+//	                                    lapsed lists and revokes the grants they gave; every
+//	                                    account without a verification takes the usr column) on
 //	                                    access_grant with OwnerUserID = the actor, no OrgID.
 //	students.access_grant.revoke        two paths, told apart by OrgID: /me (no OrgID) is the
 //	                                    O cell above (another student's grant is the service's
@@ -108,11 +110,13 @@ func studentsPolicy() Policy {
 		},
 		Grants: func(a Actor, act Action, r Resource) []Grant {
 			switch {
-			case own[act], cv[act], act == StudentsAccessGrantListOwn:
+			case own[act], cv[act]:
 				return []Grant{{Role: RoleStudent}, {Role: RoleStudentMinor}}
+			case act == StudentsAccessGrantListOwn:
+				return ownGrantsGrants()
 			case act == StudentsAccessGrantRevoke:
 				if r.OrgID == nil {
-					return []Grant{{Role: RoleStudent}, {Role: RoleStudentMinor}}
+					return ownGrantsGrants()
 				}
 				return companyGrants(a, r.OrgID)
 			case act == StudentsAccessGrantListCompany, act == StudentsProfileReadCompany, act == StudentsCvReadCompany:
@@ -131,6 +135,12 @@ func studentsPolicy() Policy {
 			return nil
 		},
 	}
+}
+
+// ownGrantsGrants is the O cell of the student's own level 3 grants: usr,
+// stu and min (BE-077: no student verification needed; KVKK md. 11).
+func ownGrantsGrants() []Grant {
+	return []Grant{{Role: RoleUserUnverified}, {Role: RoleStudent}, {Role: RoleStudentMinor}}
 }
 
 // companyGrants returns the S grants of cmm (recruiter) and cma

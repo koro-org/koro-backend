@@ -250,9 +250,10 @@ func companyStudent(typ, company string, student uuid.UUID, access string) authz
 }
 
 // TestStudentsPolicy_AccessGrants pins 03 §5.4 for the BE-046 actions and
-// the 18 personas: list_own and the /me revoke are the O cell of verified
-// students (usr, companies, staff 403; another student's grant 404 for
-// everyone); list_company and the company revoke are cmm S / cma S on
+// the 18 personas: list_own and the /me revoke are the O cell of every
+// account, verified or not (BE-077: usr O; companies and staff take the usr
+// column; another student's grant 404 for everyone; anonymous 403);
+// list_company and the company revoke are cmm S / cma S on
 // company_a's management surface (other_company_member 404, platform roles
 // 403, the rest 404); read_company and cv.read_company add G: without an
 // active grant company roles get 404 (Y5), staff 403 either way.
@@ -263,9 +264,9 @@ func TestStudentsPolicy_AccessGrants(t *testing.T) {
 	staff := []string{"moderator", "support", "dpo", "platform_admin", "finance_admin", "talent_auditor"}
 	companyA := []string{"company_member", "company_admin"}
 	for _, p := range authztest.Personas() {
-		own := error(authz.ErrForbidden)
-		if slices.Contains(verifiedStudents, p.Name) {
-			own = nil
+		own := error(nil)
+		if !p.Actor.IsUser() {
+			own = authz.ErrForbidden
 		}
 		wantErr(t, authz.Can(ctx, p.Actor, authz.StudentsAccessGrantListOwn, ownGrants(p.Actor.UserID, uuid.Nil())), own, false)
 		wantErr(t, authz.Can(ctx, p.Actor, authz.StudentsAccessGrantRevoke, ownGrants(p.Actor.UserID, uuid.NewV7())), own, false)
@@ -354,9 +355,17 @@ func TestStudentsPolicy_AccessGrantEdges(t *testing.T) {
 	st := persona(t, "student")
 	wantErr(t, authz.Can(ctx, st, authz.StudentsAccessGrantRevoke,
 		companyStudent(authz.TypeAccessGrant, "company_a", st.UserID, "")), authz.ErrNotFound, false)
-	// The company roles hold no /me path.
-	wantErr(t, authz.Can(ctx, recruiter, authz.StudentsAccessGrantRevoke, ownGrants(recruiter.UserID, uuid.NewV7())),
-		authz.ErrForbidden, false)
+	// A company account reaches its own grants through the usr column (BE-077;
+	// it holds none: the service answers 404), never another user's.
+	wantErr(t, authz.Can(ctx, recruiter, authz.StudentsAccessGrantRevoke, ownGrants(recruiter.UserID, uuid.NewV7())), nil, false)
+	wantErr(t, authz.Can(ctx, recruiter, authz.StudentsAccessGrantRevoke, ownGrants(st.UserID, uuid.NewV7())),
+		authz.ErrNotFound, false)
+	// A student whose verification lapsed (usr) lists and revokes their own
+	// grants; the other own-profile actions stay k-uv (403).
+	lapsed := authz.Actor{Kind: authz.KindUser, UserID: uuid.NewV7(), StudentStatus: authz.StudentLapsed}
+	wantErr(t, authz.Can(ctx, lapsed, authz.StudentsAccessGrantListOwn, ownGrants(lapsed.UserID, uuid.Nil())), nil, false)
+	wantErr(t, authz.Can(ctx, lapsed, authz.StudentsAccessGrantRevoke, ownGrants(lapsed.UserID, uuid.NewV7())), nil, false)
+	wantErr(t, authz.Can(ctx, lapsed, authz.StudentsCvReadOwn, ownCV(lapsed.UserID)), authz.ErrForbidden, false)
 	// Wrong resource types are refused.
 	wantErr(t, authz.Can(ctx, st, authz.StudentsAccessGrantListOwn, studentProfile(st.UserID, false)), authz.ErrNotFound, false)
 	wantErr(t, authz.Can(ctx, recruiter, authz.StudentsProfileReadCompany,

@@ -9,7 +9,9 @@ import (
 	"uuid"
 
 	"koro/internal/authz/authztest"
+	"koro/internal/identity"
 	"koro/internal/kvkk"
+	"koro/internal/platform/civil"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
@@ -28,8 +30,8 @@ func (w *studentsWiring) useMemStore() {
 
 // TestWire_StudentsProvidesProviderHooksAndTasks pins what students binds
 // in build and registers in tasks (01 §6.2, §7): its service, its KVKK
-// provider, its retention sweeper (BE-046), the two late-bound reads of orgs, six subscriptions (file.rejected
-// since BE-025, next to files' own) and two nightly jobs.
+// provider, its retention sweeper (BE-046), the two late-bound reads of orgs, eight subscriptions (file.rejected
+// since BE-025, next to files' own; the two grant suspensions of BE-077) and two nightly jobs.
 func TestWire_StudentsProvidesProviderHooksAndTasks(t *testing.T) {
 	t.Parallel()
 	c := newTestContainer(t)
@@ -59,14 +61,17 @@ func TestWire_StudentsProvidesProviderHooksAndTasks(t *testing.T) {
 	if want := []string{"students.audience_refresh 0 2 * * * low", "students.graduation_check 15 2 * * * default"}; !slices.Equal(jobs, want) {
 		t.Fatalf("students jobs %q, want %q", jobs, want)
 	}
-	for topic, name := range map[string]string{
-		domainevent.TopicMembershipStarted:         students.AddClubKeyTaskName,
-		domainevent.TopicMembershipEnded:           students.RemoveClubKeyTaskName,
-		domainevent.TopicUserEduVerified:           students.ApplyEduVerifiedTaskName,
-		domainevent.TopicUserEduVerificationLapsed: students.ApplyEduLapsedTaskName,
-		domainevent.TopicClubSensitivityChanged:    students.DropSensitiveClubKeyTaskName,
-		domainevent.TopicFileRejected:              students.DropRejectedFileTaskName,
+	for _, sub := range [][2]string{
+		{domainevent.TopicMembershipStarted, students.AddClubKeyTaskName},
+		{domainevent.TopicMembershipEnded, students.RemoveClubKeyTaskName},
+		{domainevent.TopicUserEduVerified, students.ApplyEduVerifiedTaskName},
+		{domainevent.TopicUserEduVerificationLapsed, students.ApplyEduLapsedTaskName},
+		{domainevent.TopicClubSensitivityChanged, students.DropSensitiveClubKeyTaskName},
+		{domainevent.TopicFileRejected, students.DropRejectedFileTaskName},
+		{domainevent.TopicUserEduVerificationLapsed, students.SuspendLapsedGrantsTaskName},
+		{domainevent.TopicUserEduVerified, students.SuspendGapGrantsTaskName},
 	} {
+		topic, name := sub[0], sub[1]
 		if !slices.ContainsFunc(c.infra.subs.For(topic), func(s outbox.Subscription) bool { return s.Name == name }) {
 			t.Errorf("%s is not subscribed to %s", name, topic)
 		}
@@ -186,5 +191,79 @@ func TestWire_StudentsDSRsReadKvkkAtCallTime(t *testing.T) {
 	}
 	if _, ok, err := (studentsDSRs{c: &container{}}).OpenSubject(ctx, dpo.Actor, open); err != nil || ok {
 		t.Fatalf("without kvkk = %v, %v", ok, err)
+	}
+}
+
+// TestWire_StudentsLapseSuspendsGrantsAndNotifies (BE-077) through the
+// built container: identity's verification feeds the read-time check (the
+// lapse hides the student at once), user.edu_verification_lapsed through
+// the registered subscription suspends the grant, and notify (read at call
+// time) stores the student's in-app notice of the embedded template.
+func TestWire_StudentsLapseSuspendsGrantsAndNotifies(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	now := c.infra.clock.Now().UTC().Truncate(time.Microsecond)
+	student, company, uni := uuid.NewV7(), uuid.NewV7(), authztest.UniversityID("uni_a")
+	adult, _ := civil.New(2000, time.March, 14)
+	email := "lapse-" + student.String()[:8] + "@example.test"
+	if err := c.identity.store.InsertUser(ctx, identity.User{ID: student, Status: identity.StatusActive, Email: email,
+		EmailNormalized: email, EmailVerifiedAt: &now, FirstName: "Ayla", LastName: "Lapse", Persona: identity.PersonaStudent,
+		Locale: identity.LocaleTR, BirthDate: &adult}); err != nil {
+		t.Fatal(err)
+	}
+	exp, addr := now.AddDate(1, 0, 0), "lapse-"+student.String()[:8]+"@matrix.edu.tr"
+	v := identity.EduRecord{ID: uuid.NewV7(), UserID: student, Method: identity.EduMethodEmail, EduEmail: addr,
+		EduEmailNormalized: addr, EmailDomain: "matrix.edu.tr", UniversityID: &uni, Status: identity.EduVerified,
+		VerifiedAt: &now, ExpiresAt: &exp}
+	if err := c.identity.store.InsertEduVerification(ctx, v); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := c.students.store.InsertProfile(ctx, students.Profile{UserID: student, UniversityID: uni,
+		DegreeLevel: students.DegreeBachelor, Status: students.ProfileActive}); err != nil || !ok {
+		t.Fatalf("InsertProfile: ok=%v err=%v", ok, err)
+	}
+	if err := c.students.svc.Grant(ctx, student, company, students.SourceContactRequest, uuid.NewV7()); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := c.students.svc.Has(ctx, student, company); err != nil || !ok {
+		t.Fatalf("Has before the lapse = %v, %v", ok, err)
+	}
+
+	v.Status = identity.EduExpired
+	if err := c.identity.store.UpdateEduVerification(ctx, v); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := c.students.svc.Has(ctx, student, company); err != nil || ok {
+		t.Fatalf("Has once the verification ended = %v, %v", ok, err)
+	}
+	env, err := domainevent.New(domainevent.UserEduVerificationLapsed{UserID: student, VerificationID: v.ID}, "edu_verification", v.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.ID, env.OccurredAt = uuid.NewV7(), now
+	payload, err := json.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subs := c.infra.subs.For(domainevent.TopicUserEduVerificationLapsed)
+	i := slices.IndexFunc(subs, func(s outbox.Subscription) bool { return s.Name == students.SuspendLapsedGrantsTaskName })
+	if i < 0 {
+		t.Fatal("no grant suspension subscription")
+	}
+	if err := subs[i].HandleTask(ctx, payload); err != nil {
+		t.Fatal(err)
+	}
+	gs, err := c.students.store.StudentGrants(ctx, student, nil, 10)
+	if err != nil || len(gs) != 1 || gs[0].Status() != students.GrantSuspended {
+		t.Fatalf("grants after the lapse = %+v, %v", gs, err)
+	}
+	notes, err := c.notify.store.ListInApp(ctx, student, false, nil, 10)
+	if err != nil || len(notes) != 1 || notes[0].Kind != "students.access_grants_suspended" || notes[0].LinkPath != "/me/access-grants" ||
+		notes[0].Title == "" || notes[0].SourceOrgID != nil {
+		t.Fatalf("in-app notices = %+v, %v", notes, err)
 	}
 }

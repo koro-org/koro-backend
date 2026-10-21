@@ -97,9 +97,9 @@ func TestHTTP_AccessGrants(t *testing.T) {
 	if r = e.send(t, app, s, http.MethodPost, "/api/v1/me/access-grants/not-a-uuid/revoke", ""); r.Code != http.StatusNotFound {
 		t.Fatalf("malformed grant = %d", r.Code)
 	}
-	if r = e.send(t, app, rec, http.MethodPost, "/api/v1/me/access-grants/"+grant+"/revoke", ""); r.Code != http.StatusForbidden ||
-		code(r) != "students.verification_required" {
-		t.Fatalf("a company account on /me = %d %s", r.Code, r.Body)
+	if r = e.send(t, app, rec, http.MethodPost, "/api/v1/me/access-grants/"+grant+"/revoke", ""); r.Code != http.StatusNotFound ||
+		code(r) != "not_found" {
+		t.Fatalf("a company account on another user's grant = %d %s", r.Code, r.Body)
 	}
 	// The company's own path, with a reason.
 	adm := e.profiled(t)

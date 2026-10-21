@@ -132,7 +132,8 @@ type Store interface {
 	DiscoveryCandidates(ctx context.Context, q DiscoveryQuery, after uuid.UUID, limit int) ([]uuid.UUID, error)
 
 	// Level 3 access grants (02 §9.7). Org scope: company_org_id; a grant
-	// is addressed by its student too (IDOR).
+	// is addressed by its student too (IDOR). A grant is open until it is
+	// revoked; an open grant is active unless it is suspended (BE-077).
 
 	// LockGrants serialises the grant writes of studentID for the rest of
 	// the transaction (an advisory lock: no row is created).
@@ -143,17 +144,25 @@ type Store interface {
 	InsertGrant(ctx context.Context, g AccessGrant) (AccessGrant, bool, error)
 	// GrantBySource returns the grant of (source, sourceID) or ErrNotFound.
 	GrantBySource(ctx context.Context, source GrantSource, sourceID uuid.UUID) (AccessGrant, error)
-	// ActiveGrant returns the oldest active grant of companyOrgID on
-	// studentID or ErrNotFound.
+	// ActiveGrant returns the oldest active (open, not suspended) grant of
+	// companyOrgID on studentID or ErrNotFound.
 	ActiveGrant(ctx context.Context, studentID, companyOrgID uuid.UUID) (AccessGrant, error)
-	// GetGrant returns studentID's grant id (active or revoked) or
+	// GetGrant returns studentID's grant id (whatever its state) or
 	// ErrNotFound (also when id belongs to another student).
 	GetGrant(ctx context.Context, studentID, id uuid.UUID) (AccessGrant, error)
-	// RevokeGrants revokes every active grant of companyOrgID on studentID
-	// and returns the revoked rows (none: an empty slice).
+	// RevokeGrants revokes every open grant (active or suspended) of
+	// companyOrgID on studentID and returns the revoked rows (none: an
+	// empty slice).
 	RevokeGrants(ctx context.Context, studentID, companyOrgID uuid.UUID, by RevokedBy, reason *string, at time.Time) ([]AccessGrant, error)
-	// StudentGrants returns up to limit active grants of studentID after
-	// the position (nil: from the start), newest first.
+	// SuspendGrants suspends, at at, every active grant of studentID
+	// granted at or before at and returns the suspended rows (none: an
+	// empty slice). A suspended grant is never made active again.
+	SuspendGrants(ctx context.Context, studentID uuid.UUID, at time.Time) ([]AccessGrant, error)
+	// CountSuspendedAt counts the open grants of studentID suspended at
+	// exactly at (one lapse's suspension, also after a retry).
+	CountSuspendedAt(ctx context.Context, studentID uuid.UUID, at time.Time) (int, error)
+	// StudentGrants returns up to limit open grants (active and suspended)
+	// of studentID after the position (nil: from the start), newest first.
 	StudentGrants(ctx context.Context, studentID uuid.UUID, after *GrantKey, limit int) ([]AccessGrant, error)
 	// CompanyGrants returns up to limit active grants of companyOrgID
 	// after the position (nil: from the start), newest first.

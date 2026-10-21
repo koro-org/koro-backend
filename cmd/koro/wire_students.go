@@ -9,14 +9,15 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
+	"koro/internal/notify"
 	"koro/internal/platform/db"
 	"koro/internal/platform/problem"
 	"koro/internal/students"
 )
 
 // studentsWiring wires the students module (L7; 01 §4.9). First owner:
-// BE-023, then BE-025 and BE-046. Only tickets of the students module edit
-// this file (BE-001 R4).
+// BE-023, then BE-025, BE-046 and BE-077. Only tickets of the students
+// module edit this file (BE-001 R4).
 //
 // Seams (nil in production):
 //
@@ -42,7 +43,8 @@ import (
 // the grant lists and level 3 clubs) and c.directory.svc (names, department
 // and skill validation, sensitive clubs; skill names once directory offers
 // students.SkillNamer). c.kvkk.svc (L13, built later) is read at call time
-// for the dpo's data subject request (03 k11).
+// for the dpo's data subject request (03 k11); c.notify.svc (L3) is read
+// at call time for the in-app notice of suspended grants (BE-077).
 //
 // Provided, set in build: svc (students.Service: Profiles for feed,
 // outreach, talent; Audience for outreach; AccessGrants and Discoverable
@@ -110,6 +112,7 @@ func (w *studentsWiring) build(c *container) error {
 	if fs := c.files.svc; fs != nil {
 		d.Files = fs
 	}
+	d.Sender = studentsSender{c: c}
 	mod, err := students.New(d)
 	if err != nil {
 		return err
@@ -128,8 +131,11 @@ func (w *studentsWiring) build(c *container) error {
 // user.edu_verification_lapsed → students.apply_edu_lapsed,
 // club.sensitivity_changed → students.drop_sensitive_club_key (T-80),
 // file.rejected → students.drop_rejected_file (T-176: a rejected CV or
-// avatar loses its reference and its file); students.audience_refresh
-// (02:00, low) and students.graduation_check (02:15, default) (01 §6.2, §7).
+// avatar loses its reference and its file), user.edu_verification_lapsed →
+// students.suspend_lapsed_grants and user.edu_verified →
+// students.suspend_gap_grants (BE-077: a lapsed verification suspends the
+// level 3 grants); students.audience_refresh (02:00, low) and
+// students.graduation_check (02:15, default) (01 §6.2, §7).
 func (w *studentsWiring) tasks(c *container) {
 	w.mod.Subscribe(c.infra.subs)
 	for _, j := range w.mod.Jobs() {
@@ -140,6 +146,17 @@ func (w *studentsWiring) tasks(c *container) {
 // routes: the 22 students operations of BE-023, BE-025 and BE-046 (04
 // §2.4); w.svc is nil under `koro openapi`, which Register tolerates.
 func (w *studentsWiring) routes(c *container, api huma.API) { students.Register(api, w.svc) }
+
+// studentsSender adapts notify (L3) to students.Sender, read at call time;
+// a missing sender fails the task (retried), it never drops the notice.
+type studentsSender struct{ c *container }
+
+func (n studentsSender) Send(ctx context.Context, m notify.Message) (uuid.UUID, error) {
+	if n.c.notify.svc == nil {
+		return uuid.Nil(), errors.New("students: notify is not wired")
+	}
+	return n.c.notify.svc.Send(ctx, m)
+}
 
 // studentsDSRs adapts kvkk (L13, built after students: read at call time)
 // to students.DSRs (03 k11). The request is read as the caller (the dpo:

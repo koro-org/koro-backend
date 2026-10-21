@@ -20,7 +20,7 @@ const matrixDiscoveryText = "# Keşif profili rızası\n\nProfilimin takma adla 
 // the persona student (with the profile it belongs to, at the persona's
 // university), the published discovery_profile consent text in the
 // consent store installed by useMemStore, the student's current CV and the
-// level 3 grants of the companies (BE-046).
+// level 3 grants of the companies (BE-046; a suspended one, BE-077).
 func (w *studentsWiring) matrixFixtures(fx *matrixFixtures) error {
 	ctx := context.Background()
 	for _, f := range fx.Of("students") {
@@ -124,26 +124,46 @@ func (w *studentsWiring) matrixConsentText(ctx context.Context, f fixture, id uu
 
 // matrixGrant inserts the student's profile (when missing) and an active
 // level 3 grant of the company, as an accepted contact request leaves it
-// (BE-046; the request ID is authztest.ID(<name>_request)).
+// (BE-046; the request ID is authztest.ID(<name>_request)). suspended: true
+// is a grant whose student's verification lapsed (BE-077): the owner is an
+// account without a verification (its profile at uni_a, from when it was
+// verified), the grant given an hour ago and suspended now.
 func (w *studentsWiring) matrixGrant(ctx context.Context, fx *matrixFixtures, f fixture, id uuid.UUID) error {
 	studentName, _ := f.Fields["student"].(string)
+	suspended, _ := f.Fields["suspended"].(bool)
 	p, ok := authztest.Get(studentName)
-	if !ok || p.Actor.UniversityID == nil || p.Actor.IsMinor {
-		return fmt.Errorf("fixture %s: the student must be a verified adult student", f.Name)
+	switch {
+	case !ok || !p.Actor.IsUser() || p.Actor.IsMinor:
+		return fmt.Errorf("fixture %s: the student must be an adult account", f.Name)
+	case suspended == p.Actor.IsVerifiedStudent():
+		return fmt.Errorf("fixture %s: an active grant needs a verified student, a suspended one a lapsed account", f.Name)
 	}
 	company, err := fx.Ref(f, "company")
 	if err != nil {
 		return err
 	}
-	student := p.User()
-	if _, _, err := w.store.InsertProfile(ctx, students.Profile{UserID: student, UniversityID: *p.Actor.UniversityID,
+	student, uni := p.User(), authztest.UniversityID("uni_a")
+	if p.Actor.UniversityID != nil {
+		uni = *p.Actor.UniversityID
+	}
+	if _, _, err := w.store.InsertProfile(ctx, students.Profile{UserID: student, UniversityID: uni,
 		DegreeLevel: students.DegreeBachelor, Status: students.ProfileActive}); err != nil {
 		return fmt.Errorf("fixture %s: profile: %w", f.Name, err)
 	}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	granted := now
+	if suspended {
+		granted = now.Add(-time.Hour)
+	}
 	if _, ok, err := w.store.InsertGrant(ctx, students.AccessGrant{ID: id, StudentUserID: student, CompanyOrgID: company,
 		Source: students.SourceContactRequest, SourceID: authztest.ID(f.Name + "_request"),
-		GrantedAt: time.Now().UTC().Truncate(time.Microsecond)}); err != nil || !ok {
+		GrantedAt: granted}); err != nil || !ok {
 		return fmt.Errorf("fixture %s: grant: ok=%v %w", f.Name, ok, err)
+	}
+	if suspended {
+		if got, err := w.store.SuspendGrants(ctx, student, now); err != nil || len(got) != 1 {
+			return fmt.Errorf("fixture %s: suspend: %d rows, %w", f.Name, len(got), err)
+		}
 	}
 	return nil
 }

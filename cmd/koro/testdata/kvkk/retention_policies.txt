@@ -61,11 +61,11 @@ moderation_action             sweeper:feed
 outreach_dispatch             sweeper:outreach
 # messaging (P3)
 contact_request_closed        todo:BE-056
-# talent (P3)
-talent_ledger                 todo:BE-052
-talent_counters               todo:BE-052
-talent_runs                   todo:BE-052
-talent_neutralization         todo:BE-052
+# talent (BE-079): the ledger through talent.point_events_purge, then the unreferenced config versions
+talent_ledger                 sweeper:talent
+talent_counters               sweeper:talent
+talent_runs                   sweeper:talent
+talent_neutralization         sweeper:talent
 # entitlements
 entitlement_other             sweeper:entitlements
 # ledger (orders, payments, ledger, billing and parties tables; 06 H-57)

@@ -133,6 +133,13 @@ func (m *MemStore) AllPoints() []PointEvent {
 	return slices.Clone(m.points)
 }
 
+// Configs returns every config version (tests).
+func (m *MemStore) Configs() []ConfigVersion {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.configs)
+}
+
 // AllNeutralizations returns every neutralisation (tests).
 func (m *MemStore) AllNeutralizations() []Neutralization {
 	m.mu.Lock()
@@ -168,6 +175,14 @@ func (m *MemStore) AsApp(ctx context.Context, fn func(context.Context) error) er
 		return err
 	}
 	return fn(withRole(ctx, false))
+}
+
+// Leave implements Store.
+func (m *MemStore) Leave(ctx context.Context) (context.Context, error) {
+	if err := m.check(ctx); err != nil {
+		return ctx, err
+	}
+	return withRole(ctx, false), nil
 }
 
 // SignalDef implements Store.
@@ -757,6 +772,204 @@ func (m *MemStore) EraseUser(ctx context.Context, userID uuid.UUID) (int, error)
 	return n + before - len(m.points), nil
 }
 
+// checkBatch is koro_retention_cutoff's batch size check (000121).
+func checkBatch(limit int) error {
+	if limit < 1 || limit > 1000 {
+		return errMemBatch
+	}
+	return nil
+}
+
+// PurgeLedger implements Store (talent.point_events_purge; the memory
+// store has no policy row: approval and the clamp of the cut-off are
+// PostgreSQL's alone).
+func (m *MemStore) PurgeLedger(ctx context.Context, cutoff time.Time, limit int, dry bool) (int, error) {
+	if err := m.check(ctx); err != nil {
+		return 0, err
+	}
+	if err := checkBatch(limit); err != nil {
+		return 0, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	old := func(p PointEvent) bool { return p.CreatedAt.Before(cutoff) }
+	reversed := func(p PointEvent, younger bool) bool {
+		return slices.ContainsFunc(m.points, func(r PointEvent) bool {
+			return r.ReversalOf != nil && *r.ReversalOf == p.ID && (!younger || !old(r))
+		})
+	}
+	if dry {
+		n := 0
+		for _, p := range m.points {
+			if old(p) && !reversed(p, true) {
+				n++
+			}
+		}
+		return n, nil
+	}
+	pick := func(match func(PointEvent) bool) []PointEvent {
+		var out []PointEvent
+		for _, p := range m.points {
+			if match(p) {
+				out = append(out, p)
+			}
+		}
+		slices.SortFunc(out, func(a, b PointEvent) int {
+			if c := a.CreatedAt.Compare(b.CreatedAt); c != 0 {
+				return c
+			}
+			return bytes.Compare(a.ID[:], b.ID[:])
+		})
+		return out[:min(len(out), limit)]
+	}
+	batch := pick(func(p PointEvent) bool { return old(p) && p.ReversalOf != nil })
+	if len(batch) == 0 {
+		batch = pick(func(p PointEvent) bool { return old(p) && p.ReversalOf == nil && !reversed(p, false) })
+	}
+	gone := map[uuid.UUID]bool{}
+	for _, p := range batch {
+		gone[p.ID] = true
+	}
+	m.points = slices.DeleteFunc(m.points, func(p PointEvent) bool { return gone[p.ID] })
+	return len(batch), nil
+}
+
+// PurgeConfigVersions implements Store (talent.config_versions_purge).
+func (m *MemStore) PurgeConfigVersions(ctx context.Context, cutoff time.Time, limit int, dry bool) (int, error) {
+	if err := m.check(ctx); err != nil {
+		return 0, err
+	}
+	if err := checkBatch(limit); err != nil {
+		return 0, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := m.now()
+	used := map[uuid.UUID]bool{}
+	for _, p := range m.points {
+		used[p.ConfigVersionID] = true
+	}
+	for _, s := range m.scores {
+		used[s.ConfigVersionID] = true
+	}
+	for _, r := range m.runs {
+		used[r.ConfigVersionID] = true
+	}
+	var eligible []ConfigVersion
+	for _, v := range m.configs {
+		superseded := slices.ContainsFunc(m.configs, func(s ConfigVersion) bool {
+			return s.EffectiveFrom.After(v.EffectiveFrom) && s.EffectiveFrom.Before(cutoff) && !s.EffectiveFrom.After(now)
+		})
+		if superseded && !used[v.ID] {
+			eligible = append(eligible, v)
+		}
+	}
+	if dry {
+		return len(eligible), nil
+	}
+	slices.SortFunc(eligible, func(a, b ConfigVersion) int { return a.EffectiveFrom.Compare(b.EffectiveFrom) })
+	eligible = eligible[:min(len(eligible), limit)]
+	m.configs = slices.DeleteFunc(m.configs, func(v ConfigVersion) bool {
+		return slices.ContainsFunc(eligible, func(e ConfigVersion) bool { return e.ID == v.ID })
+	})
+	return len(eligible), nil
+}
+
+// PurgeCounters implements Store.
+func (m *MemStore) PurgeCounters(ctx context.Context, before civil.Date, limit int, dry bool) (int, error) {
+	if err := m.check(ctx); err != nil {
+		return 0, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var keys []counterKey
+	for k := range m.counter {
+		if k.day.Before(before) {
+			keys = append(keys, k)
+		}
+	}
+	if dry {
+		return len(keys), nil
+	}
+	slices.SortFunc(keys, func(a, b counterKey) int {
+		if c := a.day.Compare(b.day); c != 0 {
+			return c
+		}
+		if c := bytes.Compare(a.user[:], b.user[:]); c != 0 {
+			return c
+		}
+		return strings.Compare(a.signal, b.signal)
+	})
+	keys = keys[:min(len(keys), limit)]
+	for _, k := range keys {
+		delete(m.counter, k)
+	}
+	return len(keys), nil
+}
+
+// PurgeRuns implements Store.
+func (m *MemStore) PurgeRuns(ctx context.Context, cutoff time.Time, limit int, dry bool) (int, error) {
+	if err := m.check(ctx); err != nil {
+		return 0, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var n int
+	m.runs = deleteOldest(m.runs, limit, dry, &n, func(r ScoreRun) (time.Time, bool) { return r.StartedAt, r.StartedAt.Before(cutoff) })
+	return n, nil
+}
+
+// PurgeNeutralizations implements Store.
+func (m *MemStore) PurgeNeutralizations(ctx context.Context, cutoff time.Time, limit int, dry bool) (int, error) {
+	if err := m.check(ctx); err != nil {
+		return 0, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var n int
+	m.neutral = deleteOldest(m.neutral, limit, dry, &n, func(x Neutralization) (time.Time, bool) {
+		if x.LiftedAt == nil {
+			return time.Time{}, false
+		}
+		return *x.LiftedAt, x.LiftedAt.Before(cutoff)
+	})
+	return n, nil
+}
+
+// deleteOldest removes the at most limit oldest of the rows expired
+// reports (with the time they are ordered by) and sets *n to their
+// number; dry only counts every expired row.
+func deleteOldest[T any](rows []T, limit int, dry bool, n *int, expired func(T) (time.Time, bool)) []T {
+	type hit struct {
+		i  int
+		at time.Time
+	}
+	var hits []hit
+	for i, r := range rows {
+		if at, ok := expired(r); ok {
+			hits = append(hits, hit{i, at})
+		}
+	}
+	if dry {
+		*n = len(hits)
+		return rows
+	}
+	slices.SortStableFunc(hits, func(a, b hit) int { return a.at.Compare(b.at) })
+	hits = hits[:min(len(hits), limit)]
+	gone := make(map[int]bool, len(hits))
+	for _, h := range hits {
+		gone[h.i] = true
+	}
+	out := make([]T, 0, len(rows)-len(hits))
+	for i, r := range rows {
+		if !gone[i] {
+			out = append(out, r)
+		}
+	}
+	*n = len(hits)
+	return out
+}
+
 // stamp is created_at: the store's clock in the database's precision.
 func (m *MemStore) stamp() time.Time { return m.now().UTC().Truncate(time.Microsecond) }
 
@@ -769,4 +982,5 @@ var (
 	errMemUnique = problem.ErrConflict.Wrap(errors.New("talent: unique violation (memory store)"))
 	errMemCheck  = problem.ErrValidation.Wrap(errors.New("talent: check violation (memory store)"))
 	errNoErasure = errors.New("talent: point_events_erase_user: no completed erasure request for the user")
+	errMemBatch  = errors.New("talent: retention purge: batch size must be 1..1000 (memory store)")
 )

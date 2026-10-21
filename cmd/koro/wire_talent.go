@@ -34,8 +34,10 @@ import (
 //
 // Provided, set in build: mod (talent.Ranking for discovery, BE-051;
 // talent.Admin for the talent_auditor endpoints, BE-052), the talent KVKK
-// provider and hooks.talentAuditor (kvkk: the profiling_access report and
-// the neutralisation). tasks registers the 14 consumers of 01 §6.2 and the
+// provider, the retention sweeper on c.sweepers (talent_ledger,
+// talent_counters, talent_runs, talent_neutralization; BE-079) and
+// hooks.talentAuditor (kvkk: the profiling_access report and the
+// neutralisation). tasks registers the 14 consumers of 01 §6.2 and the
 // nightly talent.recompute (01 §7); routes the seven talent_auditor
 // operations of 04 §T; metrics registers koro_talent_ingest_total on the
 // worker's registry.
@@ -82,6 +84,7 @@ func (w *talentWiring) build(c *container) error {
 	}
 	w.mod = mod
 	c.privacy = append(c.privacy, mod.Privacy)
+	c.sweepers = append(c.sweepers, mod.Sweeper)
 	c.hooks.talentAuditor = &hookTalentAuditor{
 		Report: func(ctx context.Context, requestedBy, userID uuid.UUID, reason string) (json.RawMessage, error) {
 			return mod.Auditor.SubjectReport(ctx, requestedBy, userID, reason)

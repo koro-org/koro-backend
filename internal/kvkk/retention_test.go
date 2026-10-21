@@ -193,8 +193,9 @@ func TestRetentionSweep_WritesDestructionLogPerResult(t *testing.T) {
 func TestSweepOrder(t *testing.T) {
 	t.Parallel()
 	got := kvkk.SweepOrder([]string{"destruction_log", "post_removed", "audit_roots", "contact_request_closed",
-		"audit_events", "outreach_dispatch"})
-	want := []string{"audit_events", "contact_request_closed", "outreach_dispatch", "audit_roots", "post_removed", "destruction_log"}
+		"audit_events", "outreach_dispatch", "talent_ledger", "talent_runs", "talent_counters"})
+	want := []string{"audit_events", "contact_request_closed", "outreach_dispatch", "talent_counters", "talent_runs",
+		"audit_roots", "post_removed", "talent_ledger", "destruction_log"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("SweepOrder = %v, want %v", got, want)
 	}

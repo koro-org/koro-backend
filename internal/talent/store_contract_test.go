@@ -152,6 +152,27 @@ func storeContract(t *testing.T, newEnv func(t *testing.T) contractEnv) {
 		}
 	})
 
+	t.Run("leave", func(t *testing.T) {
+		t.Parallel()
+		ce := newEnv(t)
+		ce.must(t, func(ctx context.Context) error {
+			lctx, err := ce.store.Leave(ctx)
+			if err != nil {
+				return err
+			}
+			if _, err := ce.store.SignalDefs(lctx); err == nil {
+				t.Error("store read after Leave")
+			}
+			if _, err := ce.store.Leave(lctx); err == nil {
+				t.Error("Leave outside the talent role succeeded")
+			}
+			return nil
+		})
+		if _, err := ce.store.Leave(t.Context()); err == nil {
+			t.Error("Leave outside a transaction succeeded")
+		}
+	})
+
 	t.Run("counters", func(t *testing.T) {
 		t.Parallel()
 		ce := newEnv(t)

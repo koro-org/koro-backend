@@ -29,7 +29,7 @@ const recomputeBatch = 1000
 const maxRunError = 2000
 
 // Jobs returns the scheduled jobs of talent (01 §7). The retention purge
-// is a later ticket (see the package documentation).
+// is no job of its own: kvkk.retention_sweep runs Module.Sweeper (BE-079).
 func (m Module) Jobs() []queue.Job {
 	return []queue.Job{{Name: RecomputeJobName, Cron: "0 3 * * *", Queue: queue.Low, Unique: 23 * time.Hour,
 		Timeout: 30 * time.Minute, Handle: m.svc.recompute}}

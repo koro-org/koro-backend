@@ -143,6 +143,33 @@ func TestWire_TalentJobsAndRoutes(t *testing.T) {
 	}
 }
 
+// TestWire_TalentRetentionSweeper (BE-079; 00 T-323): talent registers
+// one retention sweeper on c.sweepers for its four policies; it has no job
+// of its own (kvkk.retention_sweep runs it, flag on or off).
+func TestWire_TalentRetentionSweeper(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	var codes []string
+	for _, sw := range c.sweepers {
+		for _, code := range sw.PolicyCodes() {
+			if strings.HasPrefix(code, "talent_") {
+				codes = append(codes, code)
+			}
+		}
+	}
+	slices.Sort(codes)
+	want := []string{talent.PolicyCounters, talent.PolicyLedger, talent.PolicyNeutralization, talent.PolicyRuns}
+	if !slices.Equal(codes, want) {
+		t.Fatalf("talent retention codes on c.sweepers = %q, want %q", codes, want)
+	}
+	if c.talent.mod.Sweeper == nil || !slices.Contains(c.sweepers, c.talent.mod.Sweeper) {
+		t.Fatal("the talent sweeper is not the module's")
+	}
+}
+
 // TestWire_TalentAuditorFlagFromConfig: TALENT_AUDITOR_API_ENABLED reaches
 // the module.
 func TestWire_TalentAuditorFlagFromConfig(t *testing.T) {

@@ -66,6 +66,20 @@ func (s gormStore) AsApp(ctx context.Context, fn func(context.Context) error) er
 	return nil
 }
 
+// Leave implements Store.
+//
+// cross-org: no org data; switches the role of the caller's transaction.
+func (s gormStore) Leave(ctx context.Context) (context.Context, error) {
+	c, err := s.conn(ctx)
+	if err != nil {
+		return ctx, err
+	}
+	if err := c.Exec(`SET LOCAL ROLE NONE`).Error; err != nil {
+		return ctx, fmt.Errorf("talent: reset role: %w", err)
+	}
+	return withRole(ctx, false), nil
+}
+
 // conn returns the transaction of ctx once Enter switched it to app_talent.
 //
 // cross-org: no statement; the transaction of every talent method.
@@ -877,6 +891,86 @@ func (s gormStore) EraseUser(ctx context.Context, userID uuid.UUID) (int, error)
 		total += int(n)
 	}
 	return total, nil
+}
+
+// ---------------------------------------------------------------- retention
+
+// purgeFunc calls a SECURITY DEFINER purge function of 000121
+// (talent.point_events_purge, talent.config_versions_purge): app_talent
+// holds EXECUTE on them, no role holds DELETE on the append-only tables.
+//
+// cross-org: retention spans every user.
+func (s gormStore) purgeFunc(ctx context.Context, fn string, cutoff time.Time, limit int, dry bool) (int, error) {
+	c, err := s.conn(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var n int64
+	if err := c.Raw(`SELECT talent.`+fn+`( ?, ?, ?)`, cutoff, limit, dry).Scan(&n).Error; err != nil {
+		return 0, wrap(fn, err)
+	}
+	return int(n), nil
+}
+
+// purgeRows counts (dry) or deletes one batch of the rows of table that
+// match where, oldest first by order; key lists the key columns.
+//
+// cross-org: retention spans every user.
+func (s gormStore) purgeRows(ctx context.Context, op, table, key, where, order string, limit int, dry bool, args ...any) (int, error) {
+	c, err := s.conn(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if dry {
+		var n int64
+		if err := c.Raw(`SELECT count(*) FROM talent.`+table+` WHERE `+where, args...).Scan(&n).Error; err != nil {
+			return 0, wrap(op, err)
+		}
+		return int(n), nil
+	}
+	res := c.Exec(`DELETE FROM talent.`+table+` WHERE (`+key+`) IN (SELECT `+key+` FROM talent.`+table+` WHERE `+where+
+		` ORDER BY `+order+` LIMIT ?)`, append(args, limit)...)
+	if res.Error != nil {
+		return 0, wrap(op, res.Error)
+	}
+	return int(res.RowsAffected), nil
+}
+
+// PurgeLedger implements Store.
+//
+// cross-org: retention spans every user.
+func (s gormStore) PurgeLedger(ctx context.Context, cutoff time.Time, limit int, dry bool) (int, error) {
+	return s.purgeFunc(ctx, "point_events_purge", cutoff, limit, dry)
+}
+
+// PurgeConfigVersions implements Store.
+//
+// cross-org: platform configuration, no org data.
+func (s gormStore) PurgeConfigVersions(ctx context.Context, cutoff time.Time, limit int, dry bool) (int, error) {
+	return s.purgeFunc(ctx, "config_versions_purge", cutoff, limit, dry)
+}
+
+// PurgeCounters implements Store.
+//
+// cross-org: retention spans every user.
+func (s gormStore) PurgeCounters(ctx context.Context, before civil.Date, limit int, dry bool) (int, error) {
+	return s.purgeRows(ctx, "purge counters", "daily_counters", "user_id, day, signal_code", "day < ?",
+		"day, user_id, signal_code", limit, dry, before)
+}
+
+// PurgeRuns implements Store.
+//
+// cross-org: platform run log, no user data.
+func (s gormStore) PurgeRuns(ctx context.Context, cutoff time.Time, limit int, dry bool) (int, error) {
+	return s.purgeRows(ctx, "purge runs", "score_runs", "id", "started_at < ?", "started_at, id", limit, dry, cutoff)
+}
+
+// PurgeNeutralizations implements Store.
+//
+// cross-org: retention spans every user.
+func (s gormStore) PurgeNeutralizations(ctx context.Context, cutoff time.Time, limit int, dry bool) (int, error) {
+	return s.purgeRows(ctx, "purge neutralizations", "neutralizations", "id", "lifted_at IS NOT NULL AND lifted_at < ?",
+		"lifted_at, id", limit, dry, cutoff)
 }
 
 // nullable maps "" to NULL.

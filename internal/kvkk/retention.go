@@ -269,12 +269,15 @@ func (s *service) exportRetention(ctx context.Context) time.Duration {
 //	edu_verification_history after edu_document (the document file)
 //	audit_roots             after audit_events (verification starts at a root)
 //	dsr_record              after dsr_export_file
+//	talent_ledger           after talent_runs (its config version purge needs
+//	                        the old score runs gone; BE-079)
 //	destruction_log         last (tonight's rows are written by this run)
 var sweepRank = map[string]int{
 	"post_removed":             1,
 	"edu_verification_history": 1,
 	"audit_roots":              1,
 	"dsr_record":               1,
+	"talent_ledger":            1,
 	"destruction_log":          2,
 }
 

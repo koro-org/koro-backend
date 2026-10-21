@@ -4,9 +4,8 @@
 // (opt-out, KVKK objection, auditor decision) and the band that discovery
 // multiplies its relevance with (BE-047); the nightly score with its
 // cohorts (talent.recompute) and the talent_auditor endpoints (04 §T,
-// BE-052). The retention sweeper (talent_ledger, talent_counters,
-// talent_runs, talent_neutralization) is a later ticket: its policies are
-// "todo" in cmd/koro/testdata/kvkk/retention_policies.txt.
+// BE-052); the retention sweeper of talent_ledger, talent_counters,
+// talent_runs and talent_neutralization (kvkk.retention_sweep, BE-079).
 //
 // Rules the package enforces:
 //
@@ -75,6 +74,11 @@
 //     talent.point_events_erase_user) and its export states only whether
 //     profiling data is held: the content goes out through the four-eyes
 //     profiling_access report (03 §5.12).
+//   - Retention (02 §24.2, BE-079): the sweeper deletes the ledger rows
+//     after 24 months (talent.point_events_purge, then the config versions
+//     nothing refers to), the daily counters after 14 days, the score runs
+//     after a year and the lifted neutralisations 3 years after the lift,
+//     with collection on or off; unapproved policies are dry runs.
 package talent
 
 import (
@@ -165,6 +169,9 @@ type Module struct {
 	// Privacy is the KVKK provider (ledger, counters, neutralisations,
 	// cohort, score).
 	Privacy privacy.Provider
+	// Sweeper is the retention sweeper (talent_ledger, talent_counters,
+	// talent_runs, talent_neutralization; kvkk.retention_sweep).
+	Sweeper privacy.RetentionSweeper
 
 	svc *service
 }
@@ -176,7 +183,7 @@ func New(d Deps) (Module, error) {
 		return Module{}, err
 	}
 	s := &service{d: d, counts: newCounters()}
-	return Module{Ranking: s, Auditor: s, Admin: s, Privacy: privacyProvider{s: s}, svc: s}, nil
+	return Module{Ranking: s, Auditor: s, Admin: s, Privacy: privacyProvider{s: s}, Sweeper: sweeper{s: s}, svc: s}, nil
 }
 
 // CollectionEnabled reports talent.default_enabled.

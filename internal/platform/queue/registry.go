@@ -75,10 +75,34 @@ func (j Job) Validate() error {
 	return errors.Join(errs...)
 }
 
+// periodResult is a memoized result of computeShortestPeriod.
+type periodResult struct {
+	d   time.Duration
+	err error
+}
+
+// periodCache memoizes shortestPeriod per cron expression. The key set is
+// bounded: specs come from the jobs registered in code, and every container
+// build (e.g. each case of the authz matrix test) validates the same ones.
+var periodCache sync.Map // string → periodResult
+
 // shortestPeriod returns the smallest gap between the next activations of
 // spec (checked over one year from a fixed instant, so monthly jobs see
-// their 28-day February gap).
+// their 28-day February gap). The result is a pure function of spec and is
+// cached per expression.
 func shortestPeriod(spec string) (time.Duration, error) {
+	if v, ok := periodCache.Load(spec); ok {
+		if r, ok := v.(periodResult); ok {
+			return r.d, r.err
+		}
+	}
+	d, err := computeShortestPeriod(spec)
+	periodCache.Store(spec, periodResult{d: d, err: err})
+	return d, err
+}
+
+// computeShortestPeriod is the uncached body of shortestPeriod.
+func computeShortestPeriod(spec string) (time.Duration, error) {
 	s, err := cronParser.Parse(spec)
 	if err != nil {
 		return 0, err

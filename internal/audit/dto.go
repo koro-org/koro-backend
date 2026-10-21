@@ -9,13 +9,16 @@ import (
 	"koro/internal/platform/page"
 )
 
-// SecurityEventDTO is one row of listMySecurityEvents (04 §2.21).
+// SecurityEventDTO is one item of listMySecurityEvents (04 §2.21).
 type SecurityEventDTO struct {
-	Action          string    `json:"action" doc:"Audit action (authz action name)"`
-	Outcome         string    `json:"outcome" enum:"success,denied,failure"`
-	OccurredAt      time.Time `json:"occurred_at"`
-	IPPrefix        string    `json:"ip_prefix,omitempty" doc:"Network of the client (/24 or /48); absent for accesses by staff"`
-	UserAgentFamily string    `json:"user_agent_family,omitempty" doc:"Browser or app family, e.g. Chrome, Koro app"`
+	Action          string     `json:"action" doc:"Audit action (authz action name)"`
+	Outcome         string     `json:"outcome" enum:"success,denied,failure"`
+	OccurredAt      time.Time  `json:"occurred_at" doc:"When it happened; for sign-in attempts the newest attempt"`
+	IPPrefix        string     `json:"ip_prefix,omitempty" doc:"Network of the client (/24 or /48) of the caller's own requests; absent otherwise (staff accesses, sign-in attempts)"`
+	UserAgentFamily string     `json:"user_agent_family,omitempty" doc:"Browser or app family, e.g. Chrome, Koro app; absent like ip_prefix"`
+	Reason          string     `json:"reason,omitempty" doc:"Reason code of a refusal, e.g. invalid_credentials, locked, invalid_mfa_code, reauth_failed"`
+	Attempts        int        `json:"attempts,omitempty" doc:"Number of refused sign-ins to the caller's account summarised by this item (anonymous or from another account): consecutive attempts with the same reason, each at most 15 minutes before the next"`
+	FirstOccurredAt *time.Time `json:"first_occurred_at,omitempty" doc:"Oldest attempt of a sign-in attempt item"`
 }
 
 // SecurityEventList is the body of listMySecurityEvents.
@@ -92,8 +95,13 @@ func afterOf(cursor, fp string) (*After, error) {
 }
 
 func toSecurityEventDTO(e SecurityEvent) SecurityEventDTO {
-	return SecurityEventDTO{Action: e.Action, Outcome: string(e.Outcome), OccurredAt: e.OccurredAt,
-		IPPrefix: e.IPPrefix, UserAgentFamily: e.UserAgentFamily}
+	out := SecurityEventDTO{Action: e.Action, Outcome: string(e.Outcome), OccurredAt: e.OccurredAt,
+		IPPrefix: e.IPPrefix, UserAgentFamily: e.UserAgentFamily, Reason: e.Reason, Attempts: e.Attempts}
+	if e.Attempts > 0 {
+		first := e.FirstOccurredAt
+		out.FirstOccurredAt = &first
+	}
+	return out
 }
 
 func toAuditEventDTO(v View) AuditEventDTO {

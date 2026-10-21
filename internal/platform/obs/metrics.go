@@ -33,6 +33,7 @@ type Metrics struct {
 	tasks        *prometheus.CounterVec
 	taskDuration *prometheus.HistogramVec
 	authzDenied  *prometheus.CounterVec
+	rlRejected   *prometheus.CounterVec
 }
 
 // NewMetrics returns a registry with the koro_* metrics registered.
@@ -59,11 +60,14 @@ func NewMetrics() *Metrics {
 		authzDenied: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "koro_authz_denied_total", Help: "Authorization denials by module, action and reason (06 H-28).",
 		}, []string{"module", "action", "reason"}),
+		rlRejected: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "koro_ratelimit_rejected_total", Help: "Requests refused with 429 by their operation's rate limit rule, by rule and action (05 §11.4, BE-078).",
+		}, []string{"rule", "action"}),
 	}
 	m.reg.MustRegister(
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
-		m.httpRequests, m.httpDuration, m.httpInFlight, m.tasks, m.taskDuration, m.authzDenied,
+		m.httpRequests, m.httpDuration, m.httpInFlight, m.tasks, m.taskDuration, m.authzDenied, m.rlRejected,
 	)
 	return m
 }
@@ -112,6 +116,16 @@ func (m *Metrics) AuthzDenied(module, action, reason string) {
 		return
 	}
 	m.authzDenied.WithLabelValues(module, action, reason).Inc()
+}
+
+// RateLimitRejected counts one request refused by the rate limit rule of
+// its operation. rule must be a 04 §1.9 class name and action the
+// operation's authz action (bounded sets); never an actor, IP or org.
+func (m *Metrics) RateLimitRejected(rule, action string) {
+	if m == nil {
+		return
+	}
+	m.rlRejected.WithLabelValues(rule, action).Inc()
 }
 
 // Sample is one gauge value with its label values (in label order).

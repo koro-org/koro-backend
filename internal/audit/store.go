@@ -50,8 +50,10 @@ type Store interface {
 	Roots(ctx context.Context, from, to civil.Date) ([]DailyRoot, error)
 
 	// ListOwn lists the security events of user: the user's own identity.*
-	// and consent.* events and the break-glass accesses to the user's data
-	// (metadata break_glass and subject_user_id).
+	// and consent.* events, the break-glass accesses to the user's data
+	// (metadata break_glass and subject_user_id) and the refused sign-ins
+	// to the user's account, whoever the actor (identity.session.create
+	// denied, resource user = user; BE-078).
 	ListOwn(ctx context.Context, user uuid.UUID, after *After, limit int) ([]Record, error)
 	// ListOrg lists the events of org orgID matching f (f.OrgID ignored).
 	ListOrg(ctx context.Context, orgID uuid.UUID, f Filter, after *After, limit int) ([]Record, error)

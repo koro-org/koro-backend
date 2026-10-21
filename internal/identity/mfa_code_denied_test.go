@@ -26,10 +26,11 @@ import (
 // (listMySecurityEvents), so a stolen session guessing codes shows there.
 // The sign-in record has the request's actor — nobody is signed in, so
 // anonymous — and the account as its resource; the answer stays the 401
-// of an unknown challenge. An overload (the code read or the counter past
-// the request budget) is no verdict: no record, nothing counted
-// (BE-070/072). Before BE-076 each of these records was written without
-// actor and reason.
+// of an unknown challenge. Since BE-078 (T-316) the owner's security
+// events show it too, as a sign-in attempt item without network facts.
+// An overload (the code read or the counter past the request budget) is
+// no verdict: no record, nothing counted (BE-070/072). Before BE-076 each
+// of these records was written without actor and reason.
 
 // lateCodeStore is the identity store on an overloaded database for the
 // steps of a code check: while one of its switches is on, that operation
@@ -107,15 +108,33 @@ func (e *codeEnv) ownEvents(t *testing.T, userID uuid.UUID) []audit.SecurityEven
 	return p.Items
 }
 
-// countEvents counts the events of act with outcome among evs.
+// countEvents counts the events of act with outcome among evs (a sign-in
+// attempt item counts its attempts, BE-078).
 func countEvents(evs []audit.SecurityEvent, act authz.Action, outcome audit.Outcome) int {
 	n := 0
 	for _, ev := range evs {
 		if ev.Action == string(act) && ev.Outcome == outcome {
-			n++
+			n += max(ev.Attempts, 1)
 		}
 	}
 	return n
+}
+
+// attemptItems returns the sign-in attempt items among evs (BE-078): the
+// refusals of requests the owner did not make, never with network facts.
+func attemptItems(t *testing.T, evs []audit.SecurityEvent) []audit.SecurityEvent {
+	t.Helper()
+	var out []audit.SecurityEvent
+	for _, ev := range evs {
+		if ev.Attempts == 0 {
+			continue
+		}
+		if ev.Action != string(authz.IdentitySessionCreate) || ev.Outcome != audit.Denied || ev.IPPrefix != "" || ev.UserAgentFamily != "" {
+			t.Fatalf("sign-in attempt item %+v: want a denied identity.session.create without network facts", ev)
+		}
+		out = append(out, ev)
+	}
+	return out
 }
 
 // wantCodeDenied asserts that rows (everything one refused code wrote, of
@@ -157,15 +176,16 @@ type codeOperation struct {
 	refused     func(t *testing.T, err error) // the answer to a wrong code
 	late        []*atomic.Bool                // the overload points of the check
 	denied      audittest.Row                 // the record of a refused code
-	ownEvent    bool                          // the record is among the owner's security events
+	attemptItem bool                          // the owner sees it as a sign-in attempt (BE-078), not as an own request
 }
 
 // run checks op (BE-076): every overload point is no verdict (the bare
 // request deadline after the whole budget, no record of any action,
 // nothing counted); three wrong codes are three refusals of one record
-// each, carrying the stored count; the owner's security events list them
-// when the user was signed in; the right code afterwards is one success
-// record.
+// each, carrying the stored count; the owner's security events list all
+// three — as own requests when the user was signed in, else as one
+// sign-in attempt item counting them (BE-078); the right code afterwards
+// is one success record.
 func (op codeOperation) run(t *testing.T, e *codeEnv) {
 	t.Helper()
 	for i, late := range op.late {
@@ -191,12 +211,16 @@ func (op codeOperation) run(t *testing.T, e *codeEnv) {
 			t.Fatalf("%s wrong code %d was not counted", op.denied.Action, i+1)
 		}
 	}
-	want := 0
-	if op.ownEvent {
-		want = 3
+	own := e.ownEvents(t, op.user)
+	if got := countEvents(own, authz.Action(op.denied.Action), audit.Denied); got != 3 {
+		t.Fatalf("%s: %d denied records among the owner's security events, want 3", op.denied.Action, got)
 	}
-	if got := countEvents(e.ownEvents(t, op.user), authz.Action(op.denied.Action), audit.Denied); got != want {
-		t.Fatalf("%s: %d denied records among the owner's security events, want %d", op.denied.Action, got, want)
+	items := attemptItems(t, own)
+	if op.attemptItem && (len(items) != 1 || items[0].Attempts != 3 || items[0].Reason != "invalid_mfa_code") {
+		t.Fatalf("%s: sign-in attempt items %+v, want one of 3 invalid_mfa_code attempts", op.denied.Action, items)
+	}
+	if !op.attemptItem && len(items) != 0 {
+		t.Fatalf("%s: the signed-in user's own refusals shown as sign-in attempts: %+v", op.denied.Action, items)
 	}
 
 	e.clk.Advance(16 * time.Minute) // the reauth class window (15 min) is over
@@ -266,8 +290,7 @@ func TestMFACodeDenied_ActorReasonAndOwnSecurityEvents(t *testing.T) {
 				good:    func(t *testing.T) string { return totpCode(t, enr.Secret, e.clk.Now()) },
 				refused: refusedAs422, late: []*atomic.Bool{&e.late.totp, &e.late.lock},
 				denied: audittest.Row{Action: string(authz.IdentityMfaConfirm), ActorUserID: &u.ID, ResourceType: "user",
-					ResourceID: &u.ID},
-				ownEvent: true}
+					ResourceID: &u.ID}}
 		}},
 		{"verifyMfa", func(t *testing.T, e *codeEnv) codeOperation {
 			u, a, secret, _ := e.mfaUser(t, "verify@example.com")
@@ -280,8 +303,7 @@ func TestMFACodeDenied_ActorReasonAndOwnSecurityEvents(t *testing.T) {
 				refused: refusedAs422, late: []*atomic.Bool{&e.late.totp, &e.late.lock},
 				// The success record names the session it steps up; so does the refusal.
 				denied: audittest.Row{Action: string(authz.IdentityMfaVerify), ActorUserID: &u.ID, ResourceType: "session",
-					ResourceID: &a.SessionID},
-				ownEvent: true}
+					ResourceID: &a.SessionID}}
 		}},
 		{"completeMfaLogin TOTP code", func(t *testing.T, e *codeEnv) codeOperation {
 			u, _, secret, _ := e.mfaUser(t, "login@example.com")
@@ -292,7 +314,8 @@ func TestMFACodeDenied_ActorReasonAndOwnSecurityEvents(t *testing.T) {
 				refused: refusedLikeUnknownChallenge(e), late: []*atomic.Bool{&e.late.totp, &e.late.lock},
 				// Nobody is signed in: no actor, the account as the resource.
 				denied: audittest.Row{Action: string(authz.IdentitySessionCreate), ResourceType: "user", ResourceID: &u.ID,
-					Metadata: map[string]any{"mfa": "totp"}}}
+					Metadata: map[string]any{"mfa": "totp"}},
+				attemptItem: true}
 		}},
 		{"completeMfaLogin recovery code", func(t *testing.T, e *codeEnv) codeOperation {
 			u, _, _, codes := e.mfaUser(t, "recovery@example.com")
@@ -302,7 +325,8 @@ func TestMFACodeDenied_ActorReasonAndOwnSecurityEvents(t *testing.T) {
 				good:    func(*testing.T) string { return codes[0] },
 				refused: refusedLikeUnknownChallenge(e), late: []*atomic.Bool{&e.late.recovery, &e.late.lock},
 				denied: audittest.Row{Action: string(authz.IdentitySessionCreate), ResourceType: "user", ResourceID: &u.ID,
-					Metadata: map[string]any{"mfa": "recovery_code"}}}
+					Metadata: map[string]any{"mfa": "recovery_code"}},
+				attemptItem: true}
 		}},
 	}
 	for _, tc := range cases {
@@ -317,8 +341,10 @@ func TestMFACodeDenied_ActorReasonAndOwnSecurityEvents(t *testing.T) {
 // TestMFALoginCodeDenied_SignedInCallerIsTheActor: completeMfaLogin is a
 // public operation; a caller already signed in to another account who
 // sends a wrong code for this account's challenge is the actor of the
-// denied record (it is among the caller's own security events, not the
-// account owner's), the account its resource, the answer unchanged.
+// denied record (among the caller's own security events), the account its
+// resource, the answer unchanged. The account owner sees it as a sign-in
+// attempt without the caller's network facts (BE-078: being signed in
+// elsewhere does not hide an attempt from the owner).
 func TestMFALoginCodeDenied_SignedInCallerIsTheActor(t *testing.T) {
 	t.Parallel()
 	e := newCodeEnv(t)
@@ -337,33 +363,52 @@ func TestMFALoginCodeDenied_SignedInCallerIsTheActor(t *testing.T) {
 	if got := countEvents(e.ownEvents(t, caller.ID), authz.IdentitySessionCreate, audit.Denied); got != 1 {
 		t.Fatalf("%d denied sign-in records among the caller's security events, want 1", got)
 	}
-	if got := countEvents(e.ownEvents(t, owner.ID), authz.IdentitySessionCreate, audit.Denied); got != 0 {
-		t.Fatalf("%d denied sign-in records among the owner's security events, want 0 (the caller acted)", got)
+	if items := attemptItems(t, e.ownEvents(t, owner.ID)); len(items) != 1 || items[0].Attempts != 1 || items[0].Reason != "invalid_mfa_code" {
+		t.Fatalf("owner's sign-in attempt items %+v, want the caller's one invalid_mfa_code attempt", items)
+	}
+	if items := attemptItems(t, e.ownEvents(t, caller.ID)); len(items) != 0 {
+		t.Fatalf("the caller's own request shown to the caller as an attempt: %+v", items)
 	}
 }
 
-// TestSignInPasswordDenied_RecordUnchanged: BE-076 changes only the
-// records of a refused second-factor code; a refused password step keeps
-// its record (recordFailure is shared): session.create denied without
-// actor or reason, the account as the resource, metadata.result
-// (invalid_credentials; locked once the fifth failure locked the account)
-// and failed_attempts.
-func TestSignInPasswordDenied_RecordUnchanged(t *testing.T) {
+// TestSignInPasswordDenied_ReasonAndOwnSecurityEvents: a refused password
+// step is session.create denied without actor (nobody signed in), the
+// account as the resource, the refusal as its reason (invalid_credentials;
+// locked once the fifth failure locked the account) and failed_attempts;
+// the answer is the 401 of an unknown address. The owner's security
+// events show the six as sign-in attempts without network facts — five
+// wrong passwords, one locked — and nobody else's do (BE-078, T-316).
+// Before BE-078 the reason was metadata.result and the owner saw nothing.
+func TestSignInPasswordDenied_ReasonAndOwnSecurityEvents(t *testing.T) {
 	t.Parallel()
 	e := newCodeEnv(t)
 	u := e.activeUser(t, "pw-step@example.com")
+	other := e.activeUser(t, "someone-else@example.com")
 	for i := 1; i <= 6; i++ {
 		n := len(e.audit.rows())
 		_, err := e.svc.CreateSession(t.Context(), authz.Anonymous(), identity.Login{Email: "pw-step@example.com", Password: "Yanlis-Parola-Deneme-1"})
 		wantErr(t, err, identity.ErrInvalidCredentials)
-		result := "invalid_credentials"
+		reason := "invalid_credentials"
 		if i == 6 {
-			result = "locked"
+			reason = "locked"
 		}
-		want := audittest.Row{Action: string(authz.IdentitySessionCreate), Outcome: audittest.Denied, ResourceType: "user",
-			ResourceID: &u.ID, Metadata: map[string]any{"result": result, "failed_attempts": i}}
+		want := audittest.Row{Action: string(authz.IdentitySessionCreate), Outcome: audittest.Denied, Reason: reason, ResourceType: "user",
+			ResourceID: &u.ID, Metadata: map[string]any{"failed_attempts": i}}
 		if rows := e.audit.rows()[n:]; len(rows) != 1 || !reflect.DeepEqual(rows[0], want) {
 			t.Fatalf("password failure %d: records %+v, want exactly %+v", i, rows, want)
 		}
+	}
+	_, unknown := e.svc.CreateSession(t.Context(), authz.Anonymous(), identity.Login{Email: "nobody@example.com", Password: "Yanlis-Parola-Deneme-1"})
+	if unknown != identity.ErrInvalidCredentials { //nolint:errorlint // the identical answer is the point
+		t.Fatalf("unknown address: %v, want the same identity.invalid_credentials", unknown)
+	}
+
+	items := attemptItems(t, e.ownEvents(t, u.ID))
+	if len(items) != 2 || items[0].Reason != "locked" || items[0].Attempts != 1 ||
+		items[1].Reason != "invalid_credentials" || items[1].Attempts != 5 {
+		t.Fatalf("owner's sign-in attempt items %+v, want locked ×1 then invalid_credentials ×5", items)
+	}
+	if evs := e.ownEvents(t, other.ID); countEvents(evs, authz.IdentitySessionCreate, audit.Denied) != 0 {
+		t.Fatalf("another user's security events show the attempts: %+v", evs)
 	}
 }

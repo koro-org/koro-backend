@@ -54,6 +54,11 @@ func httpMetrics(m *obs.Metrics) gin.HandlerFunc {
 	}
 }
 
+// MetricsFrom returns the metrics registry of the request in ctx (nil, on
+// which every obs.Metrics method is a no-op, when metrics are off): the
+// operation middlewares count with it (ratelimit: koro_ratelimit_rejected_total).
+func MetricsFrom(ctx context.Context) *obs.Metrics { return metricsFrom(ctx) }
+
 func metricsFrom(ctx context.Context) *obs.Metrics {
 	if ctx == nil {
 		return nil

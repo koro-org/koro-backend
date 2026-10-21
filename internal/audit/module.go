@@ -66,7 +66,8 @@ type Logger interface {
 type Service interface {
 	Logger
 	// ListOwn lists the security events of the actor's own account
-	// (audit.event.list_own).
+	// (audit.event.list_own), sign-in attempts against it summarised
+	// (SecurityEvent).
 	ListOwn(ctx context.Context, a authz.Actor, q OwnQuery) (Page[SecurityEvent], error)
 	// ListOrg lists the events of one org (audit.event.list_org).
 	ListOrg(ctx context.Context, a authz.Actor, orgID uuid.UUID, q OrgQuery) (Page[View], error)

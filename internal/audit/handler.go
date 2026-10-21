@@ -24,8 +24,11 @@ func Register(api huma.API, svc Service) {
 	tags := []string{"audit"}
 	huma.Register(api, op.Koro(huma.Operation{
 		OperationID: "listMySecurityEvents", Method: http.MethodGet, Path: "/me/security-events", Tags: tags,
-		Summary:     "List the security events of my account",
-		Description: "Sign-in, password, session, MFA and consent events of the caller, and break-glass accesses to the caller's data.",
+		Summary: "List the security events of my account",
+		Description: "Sign-in, password, session, MFA and consent events of the caller, break-glass accesses to the caller's data " +
+			"and refused sign-ins to the caller's account (wrong password, locked account, wrong second factor), whoever made them. " +
+			"Only the caller's own requests show network facts; consecutive sign-in attempts with the same reason are one item " +
+			"(attempts, first_occurred_at). A page may hold fewer items than limit while next_cursor is set.",
 	}, op.Meta{Action: string(authz.AuditEventListOwn), Surface: op.SurfaceSelf}), h.listOwn)
 
 	huma.Register(api, op.Koro(huma.Operation{

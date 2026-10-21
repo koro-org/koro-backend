@@ -4,9 +4,16 @@ import (
 	"context"
 	"math"
 	"slices"
+	"uuid"
 
 	"koro/internal/platform/civil"
 )
+
+// ListOwnQuery is the GORM store's ListOwn statement and arguments (plan
+// tests).
+func ListOwnQuery(user uuid.UUID, after *After, limit int) (string, []any, error) {
+	return listOwnQuery(user, after, limit)
+}
 
 // Chain runs one audit.chain pass.
 func Chain(ctx context.Context, m Module) (int, error) { return m.Service.(*service).chain(ctx) }

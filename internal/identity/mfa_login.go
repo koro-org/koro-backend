@@ -181,7 +181,8 @@ func (s *service) CompleteMFALogin(ctx context.Context, a authz.Actor, in MFALog
 // expiry) unless its attempts are used up. Nobody is signed in: the record
 // has the request's actor (anonymous, unless the caller is signed in to
 // another account), the account as its resource and the reason
-// invalid_mfa_code; the answer is the same 401 as an unknown challenge.
+// invalid_mfa_code — the owner's security events show it as a sign-in
+// attempt (BE-078); the answer is the same 401 as an unknown challenge.
 func (s *service) mfaLoginFailed(ctx context.Context, denied audit.Event, u User, key string, c challenge) error {
 	if err := s.recordFailure(ctx, u.ID, denied); err != nil {
 		return err

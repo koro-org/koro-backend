@@ -86,7 +86,7 @@ func (s *service) CreateSession(ctx context.Context, a authz.Actor, in Login) (L
 		if err := s.d.Hasher.VerifyDummy(ctx, in.Password); err != nil {
 			return LoginResult{}, err
 		}
-		if err := s.recordFailure(ctx, u.ID, signInDenied(u.ID, "locked")); err != nil {
+		if err := s.recordFailure(ctx, u.ID, signInDenied(u.ID, reasonLocked)); err != nil {
 			return LoginResult{}, err
 		}
 		return LoginResult{}, ErrInvalidCredentials
@@ -103,7 +103,7 @@ func (s *service) CreateSession(ctx context.Context, a authz.Actor, in Login) (L
 		ok = false
 	}
 	if !ok {
-		if err := s.recordFailure(ctx, u.ID, signInDenied(u.ID, "invalid_credentials")); err != nil {
+		if err := s.recordFailure(ctx, u.ID, signInDenied(u.ID, reasonInvalidCredentials)); err != nil {
 			return LoginResult{}, err
 		}
 		return LoginResult{}, ErrInvalidCredentials
@@ -242,11 +242,20 @@ func (s *service) recordFailure(ctx context.Context, userID uuid.UUID, denied au
 	})
 }
 
+// Reasons of a refused password step (createSession).
+const (
+	reasonInvalidCredentials = "invalid_credentials" //nolint:gosec // G101: an audit reason code, not a credential
+	reasonLocked             = "locked"
+)
+
 // signInDenied is the denied record of a refused password step of the
 // account userID (createSession): no actor (nobody signed in), the account
-// as the resource and the refusal as metadata.result.
-func signInDenied(userID uuid.UUID, result string) audit.Event {
-	return event(authz.IdentitySessionCreate, audit.Denied, resourceUser, userID, map[string]any{"result": result})
+// as the resource and the refusal as the reason, so the account owner's
+// security events show it (BE-078; before, metadata.result).
+func signInDenied(userID uuid.UUID, reason string) audit.Event {
+	e := event(authz.IdentitySessionCreate, audit.Denied, resourceUser, userID, nil)
+	e.Reason = reason
+	return e
 }
 
 // resetFailures clears the lockout counter after a proven password.

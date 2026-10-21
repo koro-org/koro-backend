@@ -11227,10 +11227,19 @@ components:
         action:
           description: Audit action (authz action name)
           type: string
+        attempts:
+          description: "Number of refused sign-ins to the caller's account summarised by this item (anonymous or from another account): consecutive attempts with the same reason, each at most 15 minutes before the next"
+          format: int64
+          type: integer
+        first_occurred_at:
+          description: Oldest attempt of a sign-in attempt item
+          format: date-time
+          type: string
         ip_prefix:
-          description: Network of the client (/24 or /48); absent for accesses by staff
+          description: Network of the client (/24 or /48) of the caller's own requests; absent otherwise (staff accesses, sign-in attempts)
           type: string
         occurred_at:
+          description: When it happened; for sign-in attempts the newest attempt
           format: date-time
           type: string
         outcome:
@@ -11239,8 +11248,11 @@ components:
             - denied
             - failure
           type: string
+        reason:
+          description: Reason code of a refusal, e.g. invalid_credentials, locked, invalid_mfa_code, reauth_failed
+          type: string
         user_agent_family:
-          description: Browser or app family, e.g. Chrome, Koro app
+          description: Browser or app family, e.g. Chrome, Koro app; absent like ip_prefix
           type: string
       required:
         - action
@@ -25382,7 +25394,7 @@ paths:
       x-koro-surface: self
   /api/v1/me/security-events:
     get:
-      description: Sign-in, password, session, MFA and consent events of the caller, and break-glass accesses to the caller's data.
+      description: Sign-in, password, session, MFA and consent events of the caller, break-glass accesses to the caller's data and refused sign-ins to the caller's account (wrong password, locked account, wrong second factor), whoever made them. Only the caller's own requests show network facts; consecutive sign-in attempts with the same reason are one item (attempts, first_occurred_at). A page may hold fewer items than limit while next_cursor is set.
       operationId: listMySecurityEvents
       parameters:
         - description: Page size

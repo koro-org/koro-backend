@@ -110,6 +110,43 @@ func runStoreContract(t *testing.T, newStore storeFactory) {
 		}
 	})
 
+	// BE-078: the refused sign-ins to the account, whoever the actor;
+	// nothing else that names the account, nobody else's attempts.
+	t.Run("own security events: sign-in attempts against the account", func(t *testing.T) {
+		t.Parallel()
+		s, _ := newStore(t)
+		u, other := user, uuid.NewV7()
+		attempt := func(i int, account uuid.UUID, actor *uuid.UUID, action string, outcome audit.Outcome, resType string) audit.Record {
+			r := rec(i, action, nil, `{"failed_attempts": 1}`)
+			r.ActorKind, r.ActorUserID, r.Outcome, r.ResourceType, r.ResourceID = "anonymous", nil, outcome, resType, &account
+			r.Reason = "invalid_credentials"
+			if actor != nil {
+				r.ActorKind, r.ActorUserID = "user", actor
+			}
+			return r
+		}
+		in1 := attempt(1, u, nil, "identity.session.create", audit.Denied, "user")
+		in2 := attempt(2, u, &other, "identity.session.create", audit.Denied, "user") // from another account's session
+		insert(t, s, in1, in2,
+			attempt(3, other, nil, "identity.session.create", audit.Denied, "user"),   // another account
+			attempt(4, u, nil, "identity.email.verify", audit.Denied, "user"),         // not a sign-in
+			attempt(5, u, nil, "identity.session.create", audit.Failure, "user"),      // not a refusal
+			attempt(6, u, nil, "identity.session.create", audit.Denied, "session"),    // not the account
+			attempt(7, u, &other, "events.registration.create", audit.Denied, "user"), // not identity
+		)
+		got, err := s.ListOwn(t.Context(), u, nil, 10)
+		if err != nil || len(got) != 2 || got[0].ID != in2.ID || got[1].ID != in1.ID {
+			t.Fatalf("ListOwn() = %v, %v; want the two sign-in attempts", ids(got), err)
+		}
+		if r := got[1]; r.ActorKind != "anonymous" || r.ActorUserID != nil || r.Reason != "invalid_credentials" ||
+			r.IP != "192.0.2.1" || r.ResourceID == nil || *r.ResourceID != u {
+			t.Fatalf("attempt row = %+v", r)
+		}
+		if page2, _ := s.ListOwn(t.Context(), u, &audit.After{At: got[0].OccurredAt, ID: got[0].ID}, 10); len(page2) != 1 || page2[0].ID != in1.ID {
+			t.Fatalf("ListOwn() after the newest attempt = %v", ids(page2))
+		}
+	})
+
 	t.Run("chain primitives", func(t *testing.T) {
 		t.Parallel()
 		s, tx := newStore(t)

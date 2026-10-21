@@ -60,11 +60,33 @@ func check(api huma.API, ctx huma.Context, l Limiter, log *slog.Logger, rule Rul
 		log.LogAttrs(c, slog.LevelWarn, "rate limiter unavailable (fail open)", slog.String("rule", rule.Name), slog.String("err", err.Error()))
 		return true
 	case !res.Allowed:
+		refused(c, log, rule, ctx.Operation())
 		ctx.SetHeader("Retry-After", retryAfter(res.RetryAfter))
 		_ = huma.WriteErr(api, ctx, http.StatusTooManyRequests, "", problem.ErrRateLimited)
 		return false
 	}
 	return true
+}
+
+// refused logs and counts a request refused with 429 by its operation's
+// rule (class). The refusal comes before the handler, so it is no verdict
+// on the request (for the reauth class: no proof was looked at) and no
+// audit record is written (T-322, BE-078): the log line names the rule and
+// the action (actor_id and request_id come from the context), the counter
+// koro_ratelimit_rejected_total{rule,action} (05 §11.4) never the actor.
+// The rules that fail closed (Strict: sign-in, tokens, reauth, export,
+// break-glass) are the security-relevant ones and log at WARN.
+func refused(ctx context.Context, log *slog.Logger, rule Rule, o *huma.Operation) {
+	action, _ := o.Extensions[op.ExtAction].(string)
+	if action == "" {
+		action = "unknown"
+	}
+	level := slog.LevelInfo
+	if rule.Strict {
+		level = slog.LevelWarn
+	}
+	log.LogAttrs(ctx, level, "rate limited", slog.String("rule", rule.Name), slog.String("action", action))
+	httpx.MetricsFrom(ctx).RateLimitRejected(rule.Name, action)
 }
 
 // key builds the counter key of a request; it holds IDs and IPs only.

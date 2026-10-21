@@ -1,0 +1,2 @@
+-- 000132_index_audit_events_break_glass_subject.down.sql
+DROP INDEX CONCURRENTLY IF EXISTS audit_events_break_glass_subject_idx;

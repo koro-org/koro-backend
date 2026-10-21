@@ -106,9 +106,14 @@ type View struct {
 	Metadata     json.RawMessage // nil when hidden
 }
 
-// SecurityEvent is one row of listMySecurityEvents: no full IP or
-// User-Agent, and no network facts at all for an access by someone else
-// (break-glass).
+// SecurityEvent is one item of listMySecurityEvents: no full IP or
+// User-Agent, and no network facts at all for a request by someone else
+// (break-glass, a sign-in attempt against the account).
+//
+// A sign-in attempt item (Attempts > 0, BE-078) summarises consecutive
+// refused sign-ins to the account with the same reason, each at most
+// attemptGap before the next: ID and OccurredAt are the newest one's,
+// FirstOccurredAt the oldest one's.
 type SecurityEvent struct {
 	ID              uuid.UUID
 	Action          string
@@ -116,6 +121,9 @@ type SecurityEvent struct {
 	OccurredAt      time.Time
 	IPPrefix        string // /24 (IPv4) or /48 (IPv6)
 	UserAgentFamily string
+	Reason          string // a reason code (invalid_credentials, locked, …); never free text
+	Attempts        int    // sign-in attempts summarised by the item; 0 for any other event
+	FirstOccurredAt time.Time
 }
 
 // VerifyResult is the outcome of a chain verification (04 §2.21).

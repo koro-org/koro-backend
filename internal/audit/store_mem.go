@@ -234,6 +234,9 @@ func (s *MemStore) ListOwn(_ context.Context, user uuid.UUID, after *After, limi
 		}) {
 			return true
 		}
+		if signInAttempt(r, user) {
+			return true
+		}
 		m := metaOf(r)
 		bg, _ := m[MetaBreakGlass].(bool)
 		sub, _ := m[MetaSubjectUserID].(string)

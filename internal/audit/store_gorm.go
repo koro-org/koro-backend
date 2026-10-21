@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 	"uuid"
 
 	"gorm.io/gorm"
 
+	"koro/internal/authz"
 	"koro/internal/platform/civil"
 	"koro/internal/platform/db"
 )
@@ -321,18 +323,62 @@ func (s gormStore) find(q *gorm.DB) ([]Record, error) {
 	return records(rows), nil
 }
 
-// ListOwn implements Store.
+// ListOwn implements Store. Each kind of security event is one
+// index-ordered read of at most limit rows after the cursor — the user's
+// own identity/consent events (audit_events_actor_idx), the break-glass
+// accesses to the user's data (audit_events_break_glass_subject_idx,
+// 000132) and the sign-in attempts against the account
+// (audit_events_resource_idx) — and the newest limit of their union is the
+// page; a row of two kinds is read once. One OR over the three needed a
+// sequential scan of the whole log (BE-078).
 //
-// cross-org: the user's own events across every org (actor or subject).
+// cross-org: the user's own events across every org (actor, subject or
+// the account signed in to).
 func (s gormStore) ListOwn(ctx context.Context, user uuid.UUID, after *After, limit int) ([]Record, error) {
-	sub, err := json.Marshal(map[string]any{MetaBreakGlass: true, MetaSubjectUserID: user.String()})
+	q, args, err := listOwnQuery(user, after, limit)
 	if err != nil {
+		return nil, err
+	}
+	var rows []eventRow
+	if err := db.Conn(ctx, s.orm).Raw(q, args...).Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("audit: list own: %w", err)
 	}
-	q := db.Conn(ctx, s.orm).Table("audit_events").Select(eventCols).
-		Where(`(actor_user_id = ? AND (action LIKE 'identity.%' OR action LIKE 'consent.%')) OR metadata @> CAST( ? AS jsonb)`,
-			user, string(sub))
-	return s.find(keyset(q, after, limit))
+	return records(rows), nil
+}
+
+// listOwnQuery builds ListOwn's statement and its arguments.
+func listOwnQuery(user uuid.UUID, after *After, limit int) (string, []any, error) {
+	sub, err := json.Marshal(map[string]any{MetaBreakGlass: true, MetaSubjectUserID: user.String()})
+	if err != nil {
+		return "", nil, fmt.Errorf("audit: list own: %w", err)
+	}
+	var ks string
+	var ksArgs []any
+	if after != nil {
+		ks, ksArgs = ` AND (occurred_at, id) < ( ?, ? )`, []any{after.At, after.ID}
+	}
+	kinds := []struct {
+		where string
+		args  []any
+	}{
+		{`actor_user_id = ? AND (action LIKE 'identity.%' OR action LIKE 'consent.%')`, []any{user}},
+		// The first clause is the partial index's predicate, the second
+		// its key; the containment is the rule (break_glass and the
+		// subject as a JSON string, like the in-memory store).
+		{`metadata @> '{"break_glass": true}' AND (metadata->>'subject_user_id') = ? AND metadata @> CAST( ? AS jsonb)`,
+			[]any{user.String(), string(sub)}},
+		{`resource_type = ? AND resource_id = ? AND action = ? AND outcome = ?`,
+			[]any{authz.TypeUser, user, string(authz.IdentitySessionCreate), string(Denied)}},
+	}
+	parts := make([]string, len(kinds))
+	var args []any
+	for i, k := range kinds {
+		parts[i] = `(SELECT id FROM audit_events WHERE ` + k.where + ks + ` ORDER BY occurred_at DESC, id DESC LIMIT ?)`
+		args = append(append(append(args, k.args...), ksArgs...), limit)
+	}
+	q := `SELECT ` + eventCols + ` FROM audit_events WHERE id IN (` + strings.Join(parts, " UNION ALL ") +
+		`) ORDER BY occurred_at DESC, id DESC LIMIT ?`
+	return q, append(args, limit), nil
 }
 
 // ListOrg implements Store.

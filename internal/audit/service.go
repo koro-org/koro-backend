@@ -34,29 +34,6 @@ func (s *service) Log(ctx context.Context, e Event) error {
 	return s.d.Store.Insert(ctx, r)
 }
 
-// ListOwn implements Service.
-func (s *service) ListOwn(ctx context.Context, a authz.Actor, q OwnQuery) (Page[SecurityEvent], error) {
-	uid := a.UserID
-	if err := authz.Can(ctx, a, authz.AuditEventListOwn, authz.Resource{Type: authz.TypeAuditLog, ID: uid, OwnerUserID: &uid}); err != nil {
-		return Page[SecurityEvent]{}, err
-	}
-	limit := page.ClampLimit(q.Limit)
-	rows, err := s.d.Store.ListOwn(ctx, uid, q.After, limit+1)
-	if err != nil {
-		return Page[SecurityEvent]{}, err
-	}
-	rows, more := page.Cut(rows, limit)
-	out := Page[SecurityEvent]{Items: make([]SecurityEvent, len(rows)), Next: next(rows, more)}
-	for i, r := range rows {
-		ev := SecurityEvent{ID: r.ID, Action: r.Action, Outcome: r.Outcome, OccurredAt: r.OccurredAt}
-		if r.ActorUserID != nil && *r.ActorUserID == uid { // an access by someone else shows no network facts
-			ev.IPPrefix, ev.UserAgentFamily = ipPrefix(r.IP), userAgentFamily(r.UserAgent)
-		}
-		out.Items[i] = ev
-	}
-	return out, nil
-}
-
 // ListOrg implements Service.
 func (s *service) ListOrg(ctx context.Context, a authz.Actor, orgID uuid.UUID, q OrgQuery) (Page[View], error) {
 	if err := authz.Can(ctx, a, authz.AuditEventListOrg, authz.Resource{Type: authz.TypeAuditLog, ID: orgID, OrgID: &orgID}); err != nil {

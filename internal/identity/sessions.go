@@ -86,7 +86,7 @@ func (s *service) CreateSession(ctx context.Context, a authz.Actor, in Login) (L
 		if err := s.d.Hasher.VerifyDummy(ctx, in.Password); err != nil {
 			return LoginResult{}, err
 		}
-		if err := s.recordFailure(ctx, u.ID, authz.IdentitySessionCreate, "locked"); err != nil {
+		if err := s.recordFailure(ctx, u.ID, signInDenied(u.ID, "locked")); err != nil {
 			return LoginResult{}, err
 		}
 		return LoginResult{}, ErrInvalidCredentials
@@ -103,7 +103,7 @@ func (s *service) CreateSession(ctx context.Context, a authz.Actor, in Login) (L
 		ok = false
 	}
 	if !ok {
-		if err := s.recordFailure(ctx, u.ID, authz.IdentitySessionCreate, "invalid_credentials"); err != nil {
+		if err := s.recordFailure(ctx, u.ID, signInDenied(u.ID, "invalid_credentials")); err != nil {
 			return LoginResult{}, err
 		}
 		return LoginResult{}, ErrInvalidCredentials
@@ -202,12 +202,16 @@ func deviceLabel(raw string) (string, error) {
 	return l, nil
 }
 
-// recordFailure counts a failed login or re-authentication against the
-// account and locks it with exponential back-off (05 §14.1), in its own
-// transaction so that it commits although the request fails. action is
-// audited as denied (empty: the caller audits; a refused re-authentication
-// proof is the R operation's own denied record, audit.ReauthFailed).
-func (s *service) recordFailure(ctx context.Context, userID uuid.UUID, action authz.Action, reason string) error {
+// recordFailure counts a failed login, second-factor code or
+// re-authentication against the account and locks it with exponential
+// back-off (05 §14.1), in its own transaction so that it commits although
+// the request fails. denied, when it names an action, is the denied record
+// of the failure: written in the same transaction (the count and its
+// record commit together or not at all), with the count as
+// metadata.failed_attempts. Without an action the caller audits: a refused
+// re-authentication proof is the R operation's own denied record
+// (audit.ReauthFailed).
+func (s *service) recordFailure(ctx context.Context, userID uuid.UUID, denied audit.Event) error {
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		u, err := s.d.Store.LockUser(ctx, userID)
 		if err != nil {
@@ -225,12 +229,24 @@ func (s *service) recordFailure(ctx context.Context, userID uuid.UUID, action au
 		if u.LockedUntil != nil && u.FailedLogins == lockoutThreshold {
 			s.d.Log.LogAttrs(ctx, slog.LevelWarn, "account locked after repeated failures", slog.String("user_id", u.ID.String()))
 		}
-		if action == "" {
+		if denied.Action == "" {
 			return nil
 		}
-		return s.d.Audit.Log(ctx, event(action, audit.Denied, resourceUser, u.ID,
-			map[string]any{"result": reason, "failed_attempts": u.FailedLogins}))
+		meta := maps.Clone(denied.Metadata)
+		if meta == nil {
+			meta = map[string]any{}
+		}
+		meta["failed_attempts"] = u.FailedLogins
+		denied.Outcome, denied.Metadata = audit.Denied, meta
+		return s.d.Audit.Log(ctx, denied)
 	})
+}
+
+// signInDenied is the denied record of a refused password step of the
+// account userID (createSession): no actor (nobody signed in), the account
+// as the resource and the refusal as metadata.result.
+func signInDenied(userID uuid.UUID, result string) audit.Event {
+	return event(authz.IdentitySessionCreate, audit.Denied, resourceUser, userID, map[string]any{"result": result})
 }
 
 // resetFailures clears the lockout counter after a proven password.

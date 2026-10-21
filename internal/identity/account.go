@@ -160,7 +160,7 @@ func (s *service) checkTOTP(ctx context.Context, u User, code string) error {
 // class keyed on failures of this user. The denied record is the caller's
 // (audit.ReauthFailed with the refusal this returns).
 func (s *service) reauthFailed(ctx context.Context, u User) error {
-	if err := s.recordFailure(ctx, u.ID, "", ""); err != nil {
+	if err := s.recordFailure(ctx, u.ID, audit.Event{}); err != nil {
 		return err
 	}
 	if err := s.allow(ctx, ruleReauth, "user:"+u.ID.String()+":failed"); err != nil {

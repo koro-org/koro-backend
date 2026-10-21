@@ -169,11 +169,29 @@ func (s *service) verifyTOTP(ctx context.Context, userID uuid.UUID, raw string) 
 	return used, nil
 }
 
-// mfaCodeFailed records a wrong code of a signed-in user: lockout counter
-// (+ denied audit of action) and the reauth class on failures (5 / 15 min),
-// so a stolen session cannot guess codes.
-func (s *service) mfaCodeFailed(ctx context.Context, u User, action authz.Action) error {
-	if err := s.recordFailure(ctx, u.ID, action, "invalid_mfa_code"); err != nil {
+// reasonInvalidMFACode is the audit reason of a refused second-factor code
+// (wrong, expired or replayed TOTP code, unknown or used recovery code) of
+// confirmTotp, verifyMfa and completeMfaLogin (BE-076).
+const reasonInvalidMFACode = "invalid_mfa_code"
+
+// codeDenied is the denied record of a refused second-factor code of act on
+// a resource, by the request's actor (a.Kind anonymous: no actor). The
+// reason is invalid_mfa_code; meta names the factor where several are
+// accepted, never the code: nothing happened. recordFailure adds the
+// lockout count.
+func codeDenied(act authz.Action, resType string, resID uuid.UUID, a authz.Actor, meta map[string]any) audit.Event {
+	e := event(act, audit.Denied, resType, resID, meta).By(a)
+	e.Reason = reasonInvalidMFACode
+	return e
+}
+
+// mfaCodeFailed records a wrong code of a signed-in user: the lockout
+// counter with denied, the operation's record by the user (codeDenied: it
+// is among the owner's security events, listMySecurityEvents), and the
+// reauth class on failures (5 / 15 min), so a stolen session cannot guess
+// codes.
+func (s *service) mfaCodeFailed(ctx context.Context, u User, denied audit.Event) error {
+	if err := s.recordFailure(ctx, u.ID, denied); err != nil {
 		return err
 	}
 	if err := s.allow(ctx, ruleReauth, "user:"+u.ID.String()+":failed"); err != nil {
@@ -340,7 +358,7 @@ func (s *service) ConfirmTOTP(ctx context.Context, a authz.Actor, raw string, pr
 		return nil, err
 	}
 	if !ok {
-		return nil, s.mfaCodeFailed(ctx, u, authz.IdentityMfaConfirm)
+		return nil, s.mfaCodeFailed(ctx, u, codeDenied(authz.IdentityMfaConfirm, resourceUser, u.ID, a, nil))
 	}
 	codes, hashes, err := newRecoveryCodes(u.ID)
 	if err != nil {
@@ -404,7 +422,7 @@ func (s *service) VerifyMFA(ctx context.Context, a authz.Actor, raw string) erro
 		return err
 	}
 	if !ok {
-		return s.mfaCodeFailed(ctx, u, authz.IdentityMfaVerify)
+		return s.mfaCodeFailed(ctx, u, codeDenied(authz.IdentityMfaVerify, resourceSession, a.SessionID, a, nil))
 	}
 	if err := s.resetFailures(ctx, u); err != nil {
 		return err

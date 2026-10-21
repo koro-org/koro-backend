@@ -11,6 +11,7 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/problem"
@@ -156,7 +157,8 @@ func (s *service) CompleteMFALogin(ctx context.Context, a authz.Actor, in MFALog
 		return LoginResult{}, err
 	}
 	if !ok {
-		return LoginResult{}, s.mfaLoginFailed(ctx, u, key, c)
+		return LoginResult{}, s.mfaLoginFailed(ctx, codeDenied(authz.IdentitySessionCreate, resourceUser, u.ID, a,
+			map[string]any{"mfa": kind}), u, key, c)
 	}
 	res, err := s.openSession(ctx, u, c.Client, c.DeviceLabel, "", map[string]any{"mfa": kind})
 	if err != nil {
@@ -174,10 +176,14 @@ func (s *service) CompleteMFALogin(ctx context.Context, a authz.Actor, in MFALog
 	return res, nil
 }
 
-// mfaLoginFailed records a wrong second factor and gives the challenge back
-// (same expiry) unless its attempts are used up.
-func (s *service) mfaLoginFailed(ctx context.Context, u User, key string, c challenge) error {
-	if err := s.recordFailure(ctx, u.ID, authz.IdentitySessionCreate, "invalid_mfa_code"); err != nil {
+// mfaLoginFailed records a wrong second factor — the lockout counter with
+// denied, the denied sign-in record — and gives the challenge back (same
+// expiry) unless its attempts are used up. Nobody is signed in: the record
+// has the request's actor (anonymous, unless the caller is signed in to
+// another account), the account as its resource and the reason
+// invalid_mfa_code; the answer is the same 401 as an unknown challenge.
+func (s *service) mfaLoginFailed(ctx context.Context, denied audit.Event, u User, key string, c challenge) error {
+	if err := s.recordFailure(ctx, u.ID, denied); err != nil {
 		return err
 	}
 	if err := s.allow(ctx, ruleReauth, "user:"+u.ID.String()+":mfa_login"); err != nil {

@@ -12,8 +12,10 @@ import (
 	"github.com/hibiken/asynq"
 
 	"koro/internal/audit"
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
+	"koro/internal/identity"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
@@ -97,6 +99,26 @@ func (f *fakeAudit) actions() []string {
 	return out
 }
 
+// reauthPassword is the proof the fake re-authentication accepts.
+const reauthPassword = "right-password-123"
+
+// fakeReauth is identity's Verify: no proof → reauth_required, a wrong
+// password → reauth_failed.
+type fakeReauth struct{}
+
+func (fakeReauth) Verify(_ context.Context, _ uuid.UUID, p identity.ReauthProof) (string, error) {
+	switch {
+	case p.Password == "" && p.TOTPCode == "":
+		return "", identity.ErrReauthRequired
+	case p.Password != reauthPassword:
+		return "", identity.ErrReauthFailed
+	}
+	return "password", nil
+}
+
+// goodProof is the accepted proof.
+var goodProof = identity.ReauthProof{Password: reauthPassword}
+
 // env is the module over the memory store and fake ports.
 type env struct {
 	mod      talent.Module
@@ -104,6 +126,7 @@ type env struct {
 	students *fakeStudents
 	dir      fakeDirectory
 	audit    *fakeAudit
+	reauth   *audittest.LateReauth[identity.ReauthProof]
 	clk      *clock.Fake
 	subs     *outbox.Registry
 	cfg      talent.ConfigVersion
@@ -111,16 +134,33 @@ type env struct {
 
 func newEnv(t *testing.T, enabled bool) *env { t.Helper(); return buildEnv(t, enabled, true) }
 
-// buildEnv builds the environment; withConfig inserts a config version in
-// force since the day before t0.
+// buildEnv builds the environment with the auditor API closed; withConfig
+// inserts a config version in force since the day before t0.
 func buildEnv(t *testing.T, enabled, withConfig bool) *env {
+	t.Helper()
+	return buildEnvWith(t, envOptions{collection: enabled, config: withConfig})
+}
+
+// envOptions are the switches of an environment.
+type envOptions struct {
+	collection bool // talent.default_enabled
+	auditorAPI bool // talent.auditor_api_enabled
+	config     bool // a config version in force since the day before t0
+	noReauth   bool // no re-authentication port (503)
+}
+
+func buildEnvWith(t *testing.T, o envOptions) *env {
 	t.Helper()
 	clk := clock.NewFake(t0)
 	e := &env{store: talent.NewMemStore(clk.Now), clk: clk, audit: &fakeAudit{}, subs: outbox.NewRegistry(),
 		students: &fakeStudents{cohorts: map[uuid.UUID]students.Cohort{}, choices: map[uuid.UUID]students.RankingChoice{}},
-		dir:      fakeDirectory{sensitive: map[uuid.UUID]bool{}}}
-	mod, err := talent.New(talent.Deps{Store: e.store, Tx: db.NopTx{}, Audit: e.audit, Clock: clk, Log: obs.Discard(),
-		Students: e.students, Directory: e.dir, CollectionEnabled: enabled})
+		dir:      fakeDirectory{sensitive: map[uuid.UUID]bool{}}, reauth: &audittest.LateReauth[identity.ReauthProof]{Next: fakeReauth{}}}
+	d := talent.Deps{Store: e.store, Tx: db.NopTx{}, Audit: e.audit, Clock: clk, Log: obs.Discard(),
+		Students: e.students, Directory: e.dir, CollectionEnabled: o.collection, AuditorAPIEnabled: o.auditorAPI}
+	if !o.noReauth {
+		d.Reauth = e.reauth
+	}
+	mod, err := talent.New(d)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +169,7 @@ func buildEnv(t *testing.T, enabled, withConfig bool) *env {
 	if err := e.subs.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if withConfig {
+	if o.config {
 		e.cfg = e.config(t, t0.Add(-24*time.Hour))
 	}
 	return e

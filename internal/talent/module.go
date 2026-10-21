@@ -2,9 +2,11 @@
 // the signal catalogue, the append-only point ledger with its caps and
 // dedupe key, the consumers of the activity events, the neutralisations
 // (opt-out, KVKK objection, auditor decision) and the band that discovery
-// multiplies its relevance with. The nightly score, the cohorts and the
-// talent_auditor endpoints come with BE-052, the retention purge with
-// BE-057.
+// multiplies its relevance with (BE-047); the nightly score with its
+// cohorts (talent.recompute) and the talent_auditor endpoints (04 §T,
+// BE-052). The retention sweeper (talent_ledger, talent_counters,
+// talent_runs, talent_neutralization) is a later ticket: its policies are
+// "todo" in cmd/koro/testdata/kvkk/retention_policies.txt.
 //
 // Rules the package enforces:
 //
@@ -12,10 +14,28 @@
 //     DTO, log, event or API response carries one. Band panics in every
 //     encoder and prints redacted; the huma schema guard rejects talent*,
 //     band, score* and point* members outside the talent operations
-//     (internal/platform/httpx/talentguard.go); only discovery and kvkk
-//     import the package (internal/arch). The single deliberate exception is the auditor
-//     report (Report), which goes to the talent_auditor (BE-052) and into a
-//     four-eyes approved KVKK profiling_access export.
+//     (internal/platform/httpx/talentguard.go, whose only exemption is the
+//     seven talent_auditor operations of 04 §T); only discovery and kvkk
+//     import the package (internal/arch). The deliberate exceptions are the
+//     talent_auditor endpoints (Admin) and the four-eyes approved KVKK
+//     profiling_access export (Auditor.SubjectReport).
+//   - The talent_auditor endpoints are closed while
+//     talent.auditor_api_enabled is false: 404 for every signed-in user,
+//     before any authorisation (03 §5.12 k-flag). Open, only the
+//     talent_auditor role (MFA, at most two holders: identity) passes
+//     authz (03 Y1: never platform_admin); every call carries
+//     X-Koro-Access-Reason (10–500 characters) and is audited under its
+//     action with that reason; the R operations check the proof after
+//     authz and before any business data, a refused proof is the
+//     operation's denied record (audit.ReauthFailed).
+//   - The nightly score (talent.recompute, 03:00) is off with collection
+//     (T-32). It decays every ledger row with its signal's half-life,
+//     sums by category (floored at 0, capped by the config version),
+//     ranks the users within their cohort (university + class year, the
+//     university below cohort_min, then global), shrinks the percentile
+//     towards the median with few signals and lifts only upwards: no data,
+//     no points or a low percentile is band 0, never a penalty; a
+//     neutralised user is band 0 and outside every cohort ranking.
 //   - The talent schema is reachable only as app_talent: every store
 //     statement runs in a transaction the service opened and switched with
 //     SET LOCAL ROLE app_talent (Store.Enter); app_rw gets 42501. A talent
@@ -80,14 +100,10 @@ type Ranking interface {
 	Bands(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]Band, error)
 }
 
-// Auditor is the talent_auditor surface (BE-052) and the KVKK one (kvkk
-// through hooks.talentAuditor; 01 §4.11). No method may be called inside
-// a transaction.
+// Auditor is the KVKK surface of talent (kvkk through hooks.talentAuditor;
+// 01 §4.11). The talent_auditor's endpoints are Admin. No method may be
+// called inside a transaction.
 type Auditor interface {
-	// Report is the person-level report of the talent_auditor
-	// (talent.report.read; BE-052 serves it). Every call is audited with
-	// the reason.
-	Report(ctx context.Context, a authz.Actor, userID uuid.UUID, reason string) (Report, error)
 	// SubjectReport is the report of a four-eyes approved profiling_access
 	// request (kvkk, 03 §5.12), as JSON for the export file. kvkk authorised
 	// the request; the read is audited as talent.report.read on behalf of
@@ -97,13 +113,10 @@ type Auditor interface {
 	// active neutralisation of the same reason is kept). An objection needs
 	// its data subject request.
 	Neutralize(ctx context.Context, userID uuid.UUID, reason NeutralizeReason, dsrID *uuid.UUID) error
-	// Lift ends an auditor's neutralisation (talent.neutralization.manage,
-	// BE-052): an objection is permanent, an opt-out is the student's.
-	Lift(ctx context.Context, a authz.Actor, neutralizationID uuid.UUID) error
 }
 
-// Deps are the dependencies of the talent module; all but
-// CollectionEnabled are required (New returns an error otherwise).
+// Deps are the dependencies of the talent module; all but Reauth and the
+// two flags are required (New returns an error otherwise).
 type Deps struct {
 	Store Store
 	Tx    db.TxManager
@@ -114,9 +127,18 @@ type Deps struct {
 	Students  Students  // cohort (minor), ranking choice
 	Directory Directory // sensitive clubs
 
+	// Reauth verifies the proof of the R operations (identity). nil →
+	// every R operation fails closed (503).
+	Reauth Reauthenticator
+
 	// CollectionEnabled is talent.default_enabled (TALENT_DEFAULT_ENABLED,
-	// T-32): false → no ledger row is written and every band is neutral.
+	// T-32): false → no ledger row is written, the nightly score does not
+	// run and every band is neutral.
 	CollectionEnabled bool
+	// AuditorAPIEnabled is talent.auditor_api_enabled
+	// (TALENT_AUDITOR_API_ENABLED, 03 §5.12 k-flag): false → every
+	// talent_auditor endpoint answers 404 to everyone.
+	AuditorAPIEnabled bool
 }
 
 func (d Deps) validate() error {
@@ -138,7 +160,8 @@ func (d Deps) validate() error {
 // Module is what talent hands to the composition root.
 type Module struct {
 	Ranking Ranking // discovery (BE-051)
-	Auditor Auditor // kvkk hook, talent_auditor endpoints (BE-052)
+	Auditor Auditor // kvkk hook (profiling_access report, neutralisation)
+	Admin   Admin   // the talent_auditor endpoints (04 §T, BE-052)
 	// Privacy is the KVKK provider (ledger, counters, neutralisations,
 	// cohort, score).
 	Privacy privacy.Provider
@@ -153,11 +176,14 @@ func New(d Deps) (Module, error) {
 		return Module{}, err
 	}
 	s := &service{d: d, counts: newCounters()}
-	return Module{Ranking: s, Auditor: s, Privacy: privacyProvider{s: s}, svc: s}, nil
+	return Module{Ranking: s, Auditor: s, Admin: s, Privacy: privacyProvider{s: s}, svc: s}, nil
 }
 
 // CollectionEnabled reports talent.default_enabled.
 func (m Module) CollectionEnabled() bool { return m.svc.d.CollectionEnabled }
+
+// AuditorAPIEnabled reports talent.auditor_api_enabled.
+func (m Module) AuditorAPIEnabled() bool { return m.svc.d.AuditorAPIEnabled }
 
 type service struct {
 	d      Deps
@@ -167,6 +193,7 @@ type service struct {
 var (
 	_ Ranking = (*service)(nil)
 	_ Auditor = (*service)(nil)
+	_ Admin   = (*service)(nil)
 )
 
 // now is the service clock in the database's precision (microseconds).
@@ -187,9 +214,14 @@ func (s *service) inTx(ctx context.Context, fn func(ctx context.Context) error) 
 	})
 }
 
-// system authorises a system job of talent (03 §3.7: talent.ledger.write).
+// system authorises a ledger job of talent (03 §3.7: talent.ledger.write).
 func system(ctx context.Context, job string) error {
-	if err := authz.Can(ctx, authz.SystemActor(job), authz.TalentLedgerWrite, authz.Resource{}); err != nil {
+	return systemAction(ctx, job, authz.TalentLedgerWrite)
+}
+
+// systemAction authorises system job job on act (03 §3.7).
+func systemAction(ctx context.Context, job string, act authz.Action) error {
+	if err := authz.Can(ctx, authz.SystemActor(job), act, authz.Resource{}); err != nil {
 		return fmt.Errorf("talent: %s: %w", job, err)
 	}
 	return nil

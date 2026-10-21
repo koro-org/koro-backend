@@ -1,10 +1,111 @@
-# BE-052: the P3 HTTP surface is not implemented yet. Strict coverage
-# keeps each pending action explicit until that ticket binds its operation.
+# Authz matrix of the talent module (03 §5.12, §7.7; 04 §T; BE-052). 7 operations × 18 personas.
+# k-flag: talent_auditor_api_enabled (_personas.yaml, default false) closes every operation: 404 for
+# every signed-in persona — talent_auditor and platform_admin included — before anything is read
+# (the anonymous caller gets the auth layer's 401). Open (variant flag_on): talent_auditor alone
+# (MFA-verified session, 03 §7.3); every other persona, platform_admin included (03 Y1: not a super
+# user), gets 403 on the admin surface before anything is read — the subject of the report too
+# (no O cell: a student never sees their talent). Every call carries X-Koro-Access-Reason; the R
+# operations carry the matrix password (identity fixtures). Fixtures: fixtures/talent.yaml
+# (matrix_talent_test.go). Reauth, 409/422 and the two-auditor limit: scenarios/talent.yaml.
 version: 1
-pending_actions:
-  - talent.report.read # BE-052
-  - talent.distribution.read # BE-052
-  - talent.neutralization.manage # BE-052
-  - talent.reversal.create # BE-052
-  - talent.config.read # BE-052
-  - talent.config.manage # BE-052
+groups:
+  # signed-in personas without the talent_auditor role.
+  not_auditor: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin, event_staff,
+                university_rep, company_member, company_admin, other_company_member, moderator, support, dpo,
+                platform_admin, finance_admin]
+
+operations:
+  getTalentReport:
+    method: GET
+    path: /api/v1/admin/talent/subjects/{user_id}/report
+    action: talent.report.read
+    path_params: { user_id: student }
+    headers: { X-Koro-Access-Reason: "Matris: KVKK profilleme başvurusu incelemesi" }
+    expect: { anonymous: 401, "@signed_in": 404 }   # flag off: registered but closed (03 Y1)
+    variants:
+      - name: flag_on
+        config: { talent_auditor_api_enabled: true }
+        note: the subject (student) is one of the 403s
+        expect: { anonymous: 401, "@not_auditor": 403, talent_auditor: 200 }
+      - name: flag_on_unknown_subject
+        config: { talent_auditor_api_enabled: true }
+        path_params: { user_id: "literal:00000000-0000-7000-8000-0000000000ab" }
+        note: a user without talent data is an empty report (no existence oracle; the auditor knows no names)
+        expect: { anonymous: 401, "@not_auditor": 403, talent_auditor: 200 }
+
+  getTalentDistribution:
+    method: GET
+    path: /api/v1/admin/talent/distribution
+    action: talent.distribution.read
+    headers: { X-Koro-Access-Reason: "Matris: üç aylık önyargı denetimi" }
+    expect: { anonymous: 401, "@signed_in": 404 }
+    variants:
+      - name: flag_on
+        config: { talent_auditor_api_enabled: true }
+        expect: { anonymous: 401, "@not_auditor": 403, talent_auditor: 200 }
+      - name: flag_on_university
+        config: { talent_auditor_api_enabled: true }
+        query: { university_id: "{{fixture:uni_a_university}}" }
+        expect: { anonymous: 401, "@not_auditor": 403, talent_auditor: 200 }
+
+  createTalentNeutralization:
+    method: POST
+    path: /api/v1/admin/talent/subjects/{user_id}/neutralizations
+    action: talent.neutralization.manage
+    path_params: { user_id: student }
+    headers: { X-Koro-Access-Reason: "Matris: kötüye kullanım incelemesi" }
+    body: bodies/talent/neutralize.json
+    expect: { anonymous: 401, "@signed_in": 404 }
+    variants:
+      - name: flag_on
+        config: { talent_auditor_api_enabled: true }
+        expect: { anonymous: 401, "@not_auditor": 403, talent_auditor: 201 }
+
+  liftTalentNeutralization:
+    method: POST
+    path: /api/v1/admin/talent/neutralizations/{neutralization_id}/lift
+    action: talent.neutralization.manage
+    path_params: { neutralization_id: talent_neutral_admin }
+    headers: { X-Koro-Access-Reason: "Matris: kötüye kullanım incelemesi kapandı" }
+    body: bodies/talent/lift.json
+    expect: { anonymous: 401, "@signed_in": 404 }
+    variants:
+      - name: flag_on
+        config: { talent_auditor_api_enabled: true }
+        expect: { anonymous: 401, "@not_auditor": 403, talent_auditor: 200 }
+
+  reverseTalentPointEvent:
+    method: POST
+    path: /api/v1/admin/talent/point-events/{point_event_id}/reversal
+    action: talent.reversal.create
+    path_params: { point_event_id: talent_point_student }
+    headers: { X-Koro-Access-Reason: "Matris: hatalı okutma düzeltmesi" }
+    body: bodies/talent/reverse.json
+    expect: { anonymous: 401, "@signed_in": 404 }
+    variants:
+      - name: flag_on
+        config: { talent_auditor_api_enabled: true }
+        expect: { anonymous: 401, "@not_auditor": 403, talent_auditor: 201 }
+
+  getTalentConfig:
+    method: GET
+    path: /api/v1/admin/talent/config
+    action: talent.config.read
+    headers: { X-Koro-Access-Reason: "Matris: yapılandırma gözden geçirmesi" }
+    expect: { anonymous: 401, "@signed_in": 404 }
+    variants:
+      - name: flag_on
+        config: { talent_auditor_api_enabled: true }
+        expect: { anonymous: 401, "@not_auditor": 403, talent_auditor: 200 }
+
+  createTalentConfigVersion:
+    method: POST
+    path: /api/v1/admin/talent/config/versions
+    action: talent.config.manage
+    headers: { X-Koro-Access-Reason: "Matris: pilot ayarı (test değerleri)" }
+    body: bodies/talent/config_version.json
+    expect: { anonymous: 401, "@signed_in": 404 }
+    variants:
+      - name: flag_on
+        config: { talent_auditor_api_enabled: true }
+        expect: { anonymous: 401, "@not_auditor": 403, talent_auditor: 201 }

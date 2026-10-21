@@ -191,3 +191,51 @@ func derivedID(parts ...string) uuid.UUID {
 	u[8] = (u[8] & 0x3f) | 0x80 // RFC 9562 variant
 	return u
 }
+
+// Categories lists the signal categories of talent.signal_defs.category
+// (02 §15.2), in name order: every config version caps each of them.
+func Categories() []string {
+	return []string{CategoryCommunity, CategoryEngagement, CategoryIntent, CategoryParticipation, CategoryProfile}
+}
+
+// Contribution is one entry of talent.scores.top_contributors: the decayed
+// points of one signal in the run (internal explainability, 02 §15.6).
+type Contribution struct {
+	Signal  string `json:"signal_code"`
+	ValueCP int    `json:"value_cp"`
+}
+
+// Score is one talent.scores row: the nightly result of a user (BE-052).
+// PctBP is pct_final in basis points (0..10000; the column is
+// numeric(5,4)). A neutralised score is always band 0.
+type Score struct {
+	UserID          uuid.UUID
+	RawCP           int
+	PctBP           int
+	Band            Band
+	NSignals        int
+	CohortKey       string
+	ConfigVersionID uuid.UUID
+	RunID           uuid.UUID
+	TopContributors []Contribution
+	Neutralized     bool
+	CalculatedAt    time.Time
+}
+
+// Score run statuses (talent.score_runs.status).
+const (
+	RunRunning   = "running"
+	RunSucceeded = "succeeded"
+	RunFailed    = "failed"
+)
+
+// ScoreRun is one talent.score_runs row: one nightly run (talent.recompute).
+type ScoreRun struct {
+	ID              uuid.UUID
+	ConfigVersionID uuid.UUID
+	StartedAt       time.Time
+	FinishedAt      *time.Time
+	UsersProcessed  int
+	Status          string
+	Error           string
+}

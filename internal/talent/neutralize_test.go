@@ -16,12 +16,13 @@ import (
 // TestNeutralize_Objection_CannotBeLiftedByAdmin (KVKK md. 11/1-g, 02 §15.8,
 // 04 §T liftTalentNeutralization 409): an objection neutralises the
 // subject for good. No staff persona lifts it (Y1 refuses every role but
-// talent_auditor, and the auditor's lift path refuses an objection by rule:
-// Neutralization.Liftable), the student's own ranking switch does not lift
-// it, and the subject stays neutral and collects nothing.
+// talent_auditor, and the auditor's lift refuses an objection by rule even
+// with the right proof: 409 talent.objection_permanent), the student's own
+// ranking switch does not lift it, and the subject stays neutral and
+// collects nothing.
 func TestNeutralize_Objection_CannotBeLiftedByAdmin(t *testing.T) {
 	t.Parallel()
-	e := newEnv(t, true)
+	e := buildEnvWith(t, envOptions{collection: true, auditorAPI: true, config: true})
 	user := e.student()
 	e.store.PutScore(user, 2, false)
 	dsr := uuid.NewV7()
@@ -35,8 +36,14 @@ func TestNeutralize_Objection_CannotBeLiftedByAdmin(t *testing.T) {
 	obj := act[0]
 
 	for _, p := range []string{"platform_admin", "talent_auditor", "dpo", "support", "student"} {
-		if err := e.mod.Auditor.Lift(t.Context(), persona(t, p), obj.ID); err == nil {
-			t.Fatalf("%s lifted an objection neutralisation", p)
+		_, err := e.mod.Admin.LiftNeutralization(t.Context(), persona(t, p), obj.ID,
+			talent.NeutralizationInput{Reason: "KVKK itirazı incelemesi"}, goodProof)
+		want := authz.ErrForbidden
+		if p == "talent_auditor" {
+			want = talent.ErrObjectionPermanent
+		}
+		if !errors.Is(err, want) {
+			t.Fatalf("%s lifting an objection: %v, want %v", p, err, want)
 		}
 	}
 	if err := obj.Liftable(); !errors.Is(err, talent.ErrObjectionPermanent) {
@@ -97,10 +104,10 @@ func TestNeutralize_RankingChoice_OptOutFollowsTheStudent(t *testing.T) {
 }
 
 // TestNeutralize_HookRules: the kvkk hook validates the reason; an admin
-// neutralisation is the liftable one.
+// neutralisation is the liftable one, by the talent_auditor alone.
 func TestNeutralize_HookRules(t *testing.T) {
 	t.Parallel()
-	e := newEnv(t, false)
+	e := buildEnvWith(t, envOptions{auditorAPI: true, config: true})
 	user := e.student()
 	ctx := t.Context()
 	for _, bad := range []struct {
@@ -118,10 +125,16 @@ func TestNeutralize_HookRules(t *testing.T) {
 	if len(act) != 1 || act[0].Liftable() != nil {
 		t.Fatalf("admin neutralisation = %+v, liftable %v", act, act[0].Liftable())
 	}
-	// Until BE-052 writes the talent policy nobody holds
-	// talent.neutralization.manage: the lift is refused before the row is read.
-	if err := e.mod.Auditor.Lift(ctx, persona(t, "talent_auditor"), act[0].ID); !errors.Is(err, authz.ErrForbidden) {
-		t.Fatalf("Lift before BE-052 = %v, want ErrForbidden", err)
+	in := talent.NeutralizationInput{Reason: "Kötüye kullanım incelemesi bitti"}
+	if _, err := e.mod.Admin.LiftNeutralization(ctx, persona(t, "platform_admin"), act[0].ID, in, goodProof); !errors.Is(err, authz.ErrForbidden) {
+		t.Fatalf("platform_admin lift = %v, want ErrForbidden (Y1)", err)
+	}
+	lifted, err := e.mod.Admin.LiftNeutralization(ctx, persona(t, "talent_auditor"), act[0].ID, in, goodProof)
+	if err != nil || lifted.Active() || lifted.LiftedBy == nil || *lifted.LiftedBy != persona(t, "talent_auditor").UserID {
+		t.Fatalf("auditor lift = %+v, %v", lifted, err)
+	}
+	if _, err := e.mod.Admin.LiftNeutralization(ctx, persona(t, "talent_auditor"), act[0].ID, in, goodProof); !errors.Is(err, talent.ErrNotActive) {
+		t.Fatalf("second lift = %v, want ErrNotActive", err)
 	}
 	if err := (talent.Neutralization{LiftedAt: ptr(t0)}).Liftable(); !errors.Is(err, talent.ErrNotActive) {
 		t.Fatalf("Liftable(lifted) = %v", err)
@@ -131,8 +144,8 @@ func TestNeutralize_HookRules(t *testing.T) {
 // TestReport_SubjectReportAudited (03 §5.12, 6.5): the profiling_access
 // report lists the signals by category with the band and the
 // neutralisations, renders the band explicitly, and every read is audited
-// as talent.report.read; the auditor endpoint's path stays closed for
-// every persona until BE-052 writes the policy (Y1: never platform_admin).
+// as talent.report.read; the auditor endpoint is closed (404) for every
+// persona while talent.auditor_api_enabled is false.
 func TestReport_SubjectReportAudited(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, true)
@@ -185,8 +198,8 @@ func TestReport_SubjectReportAudited(t *testing.T) {
 		t.Fatalf("neutralised report band = %d, %v", rep.Band, err)
 	}
 	for _, p := range []string{"platform_admin", "talent_auditor", "dpo", "student"} {
-		if _, err := e.mod.Auditor.Report(t.Context(), persona(t, p), user, "reason long enough"); !errors.Is(err, authz.ErrForbidden) {
-			t.Fatalf("Report as %s = %v, want ErrForbidden", p, err)
+		if _, err := e.mod.Admin.Report(t.Context(), persona(t, p), user, "reason long enough"); !errors.Is(err, talent.ErrNotFound) {
+			t.Fatalf("Report as %s with the API closed = %v, want ErrNotFound", p, err)
 		}
 	}
 }

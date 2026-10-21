@@ -1,9 +1,12 @@
 package talent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -30,8 +33,9 @@ type MemStore struct {
 	points  []PointEvent
 	counter map[counterKey]int
 	neutral []Neutralization
-	scores  map[uuid.UUID]memScore
-	cohorts map[uuid.UUID]bool
+	scores  map[uuid.UUID]Score
+	cohorts map[uuid.UUID]string
+	runs    []ScoreRun
 	// ErasedUsers lists the users whose erasure request is completed: the
 	// ledger may be erased only for them (talent.point_events_erase_user).
 	// nil means every user (wiring tests have no kvkk state to consult).
@@ -44,18 +48,13 @@ type counterKey struct {
 	signal string
 }
 
-type memScore struct {
-	band        Band
-	neutralized bool
-}
-
 var _ Store = (*MemStore)(nil)
 
 // NewMemStore returns an empty store seeded with the signal catalogue of
 // 000081 (the starting weights; a product decision, data not code).
 func NewMemStore(now func() time.Time) *MemStore {
 	m := &MemStore{now: now, defs: map[string]SignalDef{}, counter: map[counterKey]int{},
-		scores: map[uuid.UUID]memScore{}, cohorts: map[uuid.UUID]bool{}}
+		scores: map[uuid.UUID]Score{}, cohorts: map[uuid.UUID]string{}}
 	for _, d := range seedSignals() {
 		m.defs[d.Code] = d
 	}
@@ -89,12 +88,42 @@ func (m *MemStore) SetSignalEnabled(code string, on bool) {
 	m.defs[code] = d
 }
 
-// PutScore stores a score row (tests; scores are written by BE-052).
+// PutScore stores a minimal score row in the global cohort (tests and
+// matrix fixtures; the nightly run writes full rows with PutScores).
 func (m *MemStore) PutScore(userID uuid.UUID, b Band, neutralized bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.scores[userID] = memScore{band: b, neutralized: neutralized}
-	m.cohorts[userID] = true
+	m.scores[userID] = Score{UserID: userID, Band: b, Neutralized: neutralized, CohortKey: "global", PctBP: 5000,
+		TopContributors: []Contribution{}, CalculatedAt: m.stamp()}
+	m.cohorts[userID] = "global"
+}
+
+// AllScores returns every score row by user (tests).
+func (m *MemStore) AllScores() map[uuid.UUID]Score {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make(map[uuid.UUID]Score, len(m.scores))
+	for k, v := range m.scores {
+		v.TopContributors = slices.Clone(v.TopContributors)
+		out[k] = v
+	}
+	return out
+}
+
+// Cohorts returns every cohort row by user (tests).
+func (m *MemStore) Cohorts() map[uuid.UUID]string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make(map[uuid.UUID]string, len(m.cohorts))
+	maps.Copy(out, m.cohorts)
+	return out
+}
+
+// Runs returns the score runs, oldest first (tests).
+func (m *MemStore) Runs() []ScoreRun {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.runs)
 }
 
 // AllPoints returns every ledger row (tests).
@@ -208,6 +237,28 @@ func (m *MemStore) InsertConfigVersion(ctx context.Context, v ConfigVersion) (Co
 	v.CreatedAt = m.stamp()
 	m.configs = append(m.configs, v)
 	return v, nil
+}
+
+// UpdateSignalDef implements Store.
+func (m *MemStore) UpdateSignalDef(ctx context.Context, d SignalDef, _ uuid.UUID) (SignalDef, error) {
+	if err := m.check(ctx); err != nil {
+		return SignalDef{}, err
+	}
+	switch {
+	case d.DailyCapCP != nil && *d.DailyCapCP <= 0, d.WeeklyCapCP != nil && *d.WeeklyCapCP <= 0,
+		d.HalfLifeDays != nil && *d.HalfLifeDays <= 0:
+		return SignalDef{}, errMemCheck
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cur, ok := m.defs[d.Code]
+	if !ok {
+		return SignalDef{}, ErrNotFound
+	}
+	cur.BasePointsCP, cur.DailyCapCP, cur.WeeklyCapCP, cur.HalfLifeDays, cur.Enabled =
+		d.BasePointsCP, d.DailyCapCP, d.WeeklyCapCP, d.HalfLifeDays, d.Enabled
+	m.defs[d.Code] = cur
+	return cur, nil
 }
 
 // LockCounter implements Store.
@@ -332,6 +383,49 @@ func (m *MemStore) Points(ctx context.Context, userID uuid.UUID) ([]PointEvent, 
 	return out, nil
 }
 
+// GetPoint implements Store.
+func (m *MemStore) GetPoint(ctx context.Context, id uuid.UUID) (PointEvent, error) {
+	if err := m.check(ctx); err != nil {
+		return PointEvent{}, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, p := range m.points {
+		if p.ID == id {
+			return p, nil
+		}
+	}
+	return PointEvent{}, ErrNotFound
+}
+
+// PointsSince implements Store.
+func (m *MemStore) PointsSince(ctx context.Context, userIDs []uuid.UUID, since time.Time) ([]PointEvent, error) {
+	if len(userIDs) == 0 {
+		return nil, nil
+	}
+	if err := m.check(ctx); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []PointEvent
+	for _, p := range m.points {
+		if slices.Contains(userIDs, p.UserID) && p.OccurredAt.After(since) {
+			out = append(out, p)
+		}
+	}
+	slices.SortFunc(out, func(a, b PointEvent) int {
+		if c := bytes.Compare(a.UserID[:], b.UserID[:]); c != 0 {
+			return c
+		}
+		if c := a.OccurredAt.Compare(b.OccurredAt); c != 0 {
+			return c
+		}
+		return bytes.Compare(a.ID[:], b.ID[:])
+	})
+	return out, nil
+}
+
 // Neutralizations implements Store.
 func (m *MemStore) Neutralizations(ctx context.Context, userID uuid.UUID) ([]Neutralization, error) {
 	if err := m.check(ctx); err != nil {
@@ -417,10 +511,10 @@ func (m *MemStore) Bands(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUI
 	defer m.mu.Unlock()
 	for _, id := range userIDs {
 		sc, ok := m.scores[id]
-		if !ok || sc.band == BandNeutral || sc.neutralized || m.activeLocked(id) {
+		if !ok || sc.Band == BandNeutral || sc.Neutralized || m.activeLocked(id) {
 			continue
 		}
-		out[id] = sc.band
+		out[id] = sc.Band
 	}
 	return out, nil
 }
@@ -442,7 +536,162 @@ func (m *MemStore) StoredBand(ctx context.Context, userID uuid.UUID) (Band, bool
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	sc, ok := m.scores[userID]
-	return sc.band, ok, nil
+	return sc.Band, ok, nil
+}
+
+// Score implements Store.
+func (m *MemStore) Score(ctx context.Context, userID uuid.UUID) (Score, bool, error) {
+	if err := m.check(ctx); err != nil {
+		return Score{}, false, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sc, ok := m.scores[userID]
+	sc.TopContributors = slices.Clone(sc.TopContributors)
+	return sc, ok, nil
+}
+
+// BandCounts implements Store.
+func (m *MemStore) BandCounts(ctx context.Context, cohortPrefix string) (map[int]int, error) {
+	if err := m.check(ctx); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := map[int]int{}
+	for id, sc := range m.scores {
+		if sc.Neutralized || m.activeLocked(id) {
+			continue
+		}
+		if cohortPrefix != "" && sc.CohortKey != cohortPrefix && !strings.HasPrefix(sc.CohortKey, cohortPrefix+":") {
+			continue
+		}
+		out[int(sc.Band)]++
+	}
+	return out, nil
+}
+
+// ScoringUsers implements Store.
+func (m *MemStore) ScoringUsers(ctx context.Context, since time.Time) ([]uuid.UUID, error) {
+	if err := m.check(ctx); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	set := map[uuid.UUID]bool{}
+	for _, p := range m.points {
+		if p.OccurredAt.After(since) {
+			set[p.UserID] = true
+		}
+	}
+	for id := range m.scores {
+		set[id] = true
+	}
+	for id := range m.cohorts {
+		set[id] = true
+	}
+	out := slices.Collect(maps.Keys(set))
+	slices.SortFunc(out, func(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) })
+	return out, nil
+}
+
+// ActiveNeutralized implements Store.
+func (m *MemStore) ActiveNeutralized(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]bool, error) {
+	out := map[uuid.UUID]bool{}
+	if len(userIDs) == 0 {
+		return out, nil
+	}
+	if err := m.check(ctx); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, id := range userIDs {
+		if m.activeLocked(id) {
+			out[id] = true
+		}
+	}
+	return out, nil
+}
+
+// InsertRun implements Store.
+func (m *MemStore) InsertRun(ctx context.Context, r ScoreRun) error {
+	if err := m.check(ctx); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r.Status, r.FinishedAt, r.UsersProcessed, r.Error = RunRunning, nil, 0, ""
+	m.runs = append(m.runs, r)
+	return nil
+}
+
+// FinishRun implements Store.
+func (m *MemStore) FinishRun(ctx context.Context, r ScoreRun) error {
+	if err := m.check(ctx); err != nil {
+		return err
+	}
+	if r.Status != RunRunning && r.Status != RunSucceeded && r.Status != RunFailed || len([]rune(r.Error)) > 2000 {
+		return errMemCheck
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.runs {
+		if m.runs[i].ID == r.ID {
+			m.runs[i].FinishedAt, m.runs[i].UsersProcessed, m.runs[i].Status, m.runs[i].Error = r.FinishedAt, r.UsersProcessed, r.Status, r.Error
+			return nil
+		}
+	}
+	return errors.New("talent: finish run: no such run (memory store)")
+}
+
+// PutScores implements Store.
+func (m *MemStore) PutScores(ctx context.Context, scores []Score) error {
+	if err := m.check(ctx); err != nil {
+		return err
+	}
+	for _, sc := range scores {
+		switch {
+		case sc.RawCP < 0, sc.PctBP < 0, sc.PctBP > 10000, sc.Band > BandMax, sc.NSignals < 0,
+			sc.Neutralized && sc.Band != BandNeutral, !cohortKeyRe.MatchString(sc.CohortKey):
+			return errMemCheck
+		}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, sc := range scores {
+		if sc.TopContributors == nil {
+			sc.TopContributors = []Contribution{}
+		}
+		sc.TopContributors = slices.Clone(sc.TopContributors)
+		m.scores[sc.UserID] = sc
+		m.cohorts[sc.UserID] = sc.CohortKey
+	}
+	return nil
+}
+
+// DeleteScores implements Store.
+func (m *MemStore) DeleteScores(ctx context.Context, userIDs []uuid.UUID) (int, error) {
+	if len(userIDs) == 0 {
+		return 0, nil
+	}
+	if err := m.check(ctx); err != nil {
+		return 0, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, id := range userIDs {
+		if _, ok := m.scores[id]; ok {
+			delete(m.scores, id)
+			n++
+		}
+		if _, ok := m.cohorts[id]; ok {
+			delete(m.cohorts, id)
+			n++
+		}
+	}
+	return n, nil
 }
 
 // HasData implements Store.
@@ -452,7 +701,8 @@ func (m *MemStore) HasData(ctx context.Context, userID uuid.UUID) (bool, error) 
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.scores[userID]; ok || m.cohorts[userID] {
+	_, scored := m.scores[userID]
+	if _, ok := m.cohorts[userID]; ok || scored {
 		return true, nil
 	}
 	for _, p := range m.points {
@@ -495,7 +745,7 @@ func (m *MemStore) EraseUser(ctx context.Context, userID uuid.UUID) (int, error)
 		delete(m.scores, userID)
 		n++
 	}
-	if m.cohorts[userID] {
+	if _, ok := m.cohorts[userID]; ok {
 		delete(m.cohorts, userID)
 		n++
 	}
@@ -509,6 +759,9 @@ func (m *MemStore) EraseUser(ctx context.Context, userID uuid.UUID) (int, error)
 
 // stamp is created_at: the store's clock in the database's precision.
 func (m *MemStore) stamp() time.Time { return m.now().UTC().Truncate(time.Microsecond) }
+
+// cohortKeyRe is the cohorts_cohort_key_chk CHECK (000084).
+var cohortKeyRe = regexp.MustCompile(`^(uni:[0-9a-f-]{36}(:year:[1-8])?|global)$`)
 
 // Errors the memory store reports where PostgreSQL raises (db.Translate
 // maps a unique violation to 409, a check violation to 422).

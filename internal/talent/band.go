@@ -41,7 +41,10 @@ func (Band) LogValue() slog.Value { return slog.StringValue("redacted") }
 
 // bandOf maps a talent.scores.band value (0..3 by its CHECK) onto a Band;
 // anything else is neutral.
-func bandOf(v int16) Band {
+func bandOf(v int16) Band { return bandOfInt(int(v)) }
+
+// bandOfInt maps 1..3 onto a Band; anything else is neutral.
+func bandOfInt(v int) Band {
 	switch v {
 	case 1:
 		return 1

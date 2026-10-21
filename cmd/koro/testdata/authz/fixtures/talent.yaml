@@ -1,0 +1,12 @@
+# Fixtures of the talent module (cmd/koro/matrix_talent_test.go; BE-052). IDs are authztest.ID(name).
+# Seeded into the in-memory talent store whatever the flag: talent_config_v1 is a version in force
+# (created by talent_auditor, test values); the persona student has a check-in in the ledger
+# (talent_point_student, frozen with talent_config_v1) and a band 2 score; club_member has an
+# auditor neutralisation (liftable), club_admin a KVKK objection (permanent).
+version: 1
+fixtures:
+  talent_config_v1: { kind: config_version, by: talent_auditor }
+  talent_point_student: { kind: point_event, user: student, signal: event_checkin, points: 500, config: talent_config_v1 }
+  talent_score_student: { kind: score, user: student, band: 2 }
+  talent_neutral_admin: { kind: neutralization, user: club_member, reason: admin, by: talent_auditor }
+  talent_neutral_objection: { kind: neutralization, user: club_admin, reason: objection }

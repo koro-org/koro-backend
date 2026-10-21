@@ -1,0 +1,88 @@
+# Multi-step scenarios of the talent module (03 §7.7 "Talent"; 04 §T; BE-052).
+version: 1
+scenarios:
+  talent_flag_off:
+    note: >-
+      03 §7.7 Talent, flag off: the auditor's session works (getMe 200) but every talent operation is
+      404 — for talent_auditor and platform_admin alike, an R operation with the right proof too.
+    config: { talent_auditor_api_enabled: false }
+    steps:
+      - { persona: talent_auditor, operation: getMe, expect: 200 }
+      - { persona: talent_auditor, operation: getTalentReport, expect: 404, code: not_found }
+      - { persona: platform_admin, operation: getTalentReport, expect: 404, code: not_found }
+      - { persona: talent_auditor, operation: createTalentConfigVersion, expect: 404, code: not_found }
+  talent_flag_on:
+    note: >-
+      03 §7.7 Talent, flag on: talent_auditor 200, platform_admin 403 (Y1: never a super user over talent);
+      an auditor session without MFA is 403 authz.mfa_required (k-mfa).
+    config: { talent_auditor_api_enabled: true }
+    steps:
+      - { persona: talent_auditor, operation: getTalentReport, expect: 200 }
+      - { persona: platform_admin, operation: getTalentReport, expect: 403, code: forbidden }
+      - { persona: talent_auditor, mfa: false, operation: getTalentReport, expect: 403, code: authz.mfa_required }
+  talent_access_reason:
+    note: >-
+      03 §5.12: every call needs X-Koro-Access-Reason of 10–500 characters (422 validation_failed for
+      the auditor; others are refused first).
+    config: { talent_auditor_api_enabled: true }
+    steps:
+      - { persona: talent_auditor, operation: getTalentConfig, headers: { X-Koro-Access-Reason: "kısa" }, expect: 422,
+          code: validation_failed }
+      - { persona: dpo, operation: getTalentConfig, headers: { X-Koro-Access-Reason: "kısa" }, expect: 403, code: forbidden }
+      - { persona: talent_auditor, operation: getTalentConfig, expect: 200 }
+  talent_config_reauth:
+    note: >-
+      03 §6.2 (R): a config version needs the proof in the same request — missing 403
+      identity.reauth_required, wrong 403 identity.reauth_failed (each one denied record), right 201;
+      a broken version (cohort below k, a lift above 15 %) is 422.
+    config: { talent_auditor_api_enabled: true }
+    steps:
+      - { persona: talent_auditor, operation: createTalentConfigVersion, body: bodies/talent/config_version_no_reauth.json,
+          expect: 403, code: identity.reauth_required }
+      - { persona: talent_auditor, operation: createTalentConfigVersion, body: bodies/talent/config_version_wrong_reauth.json,
+          expect: 403, code: identity.reauth_failed }
+      - { persona: talent_auditor, operation: createTalentConfigVersion, body: bodies/talent/config_version_invalid.json,
+          expect: 422, code: validation_failed }
+      - { persona: talent_auditor, operation: createTalentConfigVersion, expect: 201 }
+      - { persona: talent_auditor, operation: getTalentConfig, expect: 200 }
+  talent_neutralization_rules:
+    note: >-
+      04 §T: an auditor neutralisation needs the proof (403 reauth_required) and is one per user (409);
+      it is lifted once (409 talent.neutralization_not_active after); an objection is never lifted
+      (409 talent.objection_permanent).
+    config: { talent_auditor_api_enabled: true }
+    steps:
+      - { persona: talent_auditor, operation: createTalentNeutralization, body: bodies/talent/neutralize_no_reauth.json,
+          expect: 403, code: identity.reauth_required }
+      - { persona: talent_auditor, operation: createTalentNeutralization, body: bodies/talent/neutralize_wrong_reauth.json,
+          expect: 403, code: identity.reauth_failed }
+      - { persona: talent_auditor, operation: createTalentNeutralization, expect: 201, save: { talent_new_neutral: neutralization_id } }
+      - { persona: talent_auditor, operation: createTalentNeutralization, expect: 409, code: talent.already_neutralized }
+      - { persona: talent_auditor, operation: liftTalentNeutralization, path_params: { neutralization_id: talent_new_neutral },
+          expect: 200 }
+      - { persona: talent_auditor, operation: liftTalentNeutralization, path_params: { neutralization_id: talent_new_neutral },
+          expect: 409, code: talent.neutralization_not_active }
+      - { persona: talent_auditor, operation: liftTalentNeutralization, path_params: { neutralization_id: talent_neutral_objection },
+          expect: 409, code: talent.objection_permanent }
+  talent_reversal_append_only:
+    note: >-
+      ADR-0015, 04 §T: a ledger row is reversed once by an appended row (201); a second reversal is 409
+      talent.already_reversed, the reversal row itself is not reversible (409 talent.not_reversible),
+      and the report lists both rows.
+    config: { talent_auditor_api_enabled: true }
+    steps:
+      - { persona: talent_auditor, operation: reverseTalentPointEvent, expect: 201, save: { talent_reversal_row: point_event_id } }
+      - { persona: talent_auditor, operation: reverseTalentPointEvent, expect: 409, code: talent.already_reversed }
+      - { persona: talent_auditor, operation: reverseTalentPointEvent, path_params: { point_event_id: talent_reversal_row },
+          expect: 409, code: talent.not_reversible }
+      - { persona: talent_auditor, operation: getTalentReport, expect: 200 }
+  talent_auditor_limit:
+    note: >-
+      03 §5.12 / BE-016: at most two talent auditors (in force or requested): the persona and
+      student_granted hold the role, so a third request is 409 identity.talent_auditor_limit; the
+      auditor keeps its access.
+    config: { talent_auditor_api_enabled: true }
+    steps:
+      - { persona: platform_admin, operation: adminGrantPlatformRole, body: bodies/talent/grant_third_auditor.json, expect: 409,
+          code: identity.talent_auditor_limit }
+      - { persona: talent_auditor, operation: getTalentDistribution, expect: 200 }

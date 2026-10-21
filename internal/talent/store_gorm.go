@@ -135,6 +135,28 @@ func (s gormStore) SignalDefs(ctx context.Context) ([]SignalDef, error) {
 	return out, nil
 }
 
+// UpdateSignalDef implements Store. updated_at is the touch trigger's
+// (02 §0.1: a [ts] column is never written by the application).
+//
+// cross-org: the signal catalogue is platform data.
+func (s gormStore) UpdateSignalDef(ctx context.Context, d SignalDef, by uuid.UUID) (SignalDef, error) {
+	c, err := s.conn(ctx)
+	if err != nil {
+		return SignalDef{}, err
+	}
+	var rows []signalRow
+	err = c.Raw(`UPDATE talent.signal_defs SET base_points_cp = ?, daily_cap_cp = ?, weekly_cap_cp = ?, half_life_days = ?,
+		enabled = ?, updated_by = ? WHERE code = ? RETURNING `+signalCols,
+		d.BasePointsCP, d.DailyCapCP, d.WeeklyCapCP, d.HalfLifeDays, d.Enabled, by, d.Code).Scan(&rows).Error
+	if err != nil {
+		return SignalDef{}, wrap("update signal def", err)
+	}
+	if len(rows) == 0 {
+		return SignalDef{}, ErrNotFound
+	}
+	return rows[0].def(), nil
+}
+
 // ---------------------------------------------------------------- config
 
 type configRow struct {
@@ -376,6 +398,48 @@ func (s gormStore) Points(ctx context.Context, userID uuid.UUID) ([]PointEvent, 
 	return out, nil
 }
 
+// GetPoint implements Store.
+//
+// cross-org: one ledger row by its ID (the caller authorises the auditor).
+func (s gormStore) GetPoint(ctx context.Context, id uuid.UUID) (PointEvent, error) {
+	c, err := s.conn(ctx)
+	if err != nil {
+		return PointEvent{}, err
+	}
+	var rows []pointRow
+	if err := c.Raw(`SELECT `+pointCols+` FROM talent.point_events WHERE id = ?`, id).Scan(&rows).Error; err != nil {
+		return PointEvent{}, wrap("get point", err)
+	}
+	if len(rows) == 0 {
+		return PointEvent{}, ErrNotFound
+	}
+	return rows[0].point(), nil
+}
+
+// PointsSince implements Store.
+//
+// cross-org: the nightly run's ledger read, keyed by the batch's user IDs.
+func (s gormStore) PointsSince(ctx context.Context, userIDs []uuid.UUID, since time.Time) ([]PointEvent, error) {
+	if len(userIDs) == 0 {
+		return nil, nil
+	}
+	c, err := s.conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var rows []pointRow
+	err = c.Raw(`SELECT `+pointCols+` FROM talent.point_events WHERE user_id IN ? AND occurred_at > ?
+		ORDER BY user_id, occurred_at, id`, userIDs, since).Scan(&rows).Error
+	if err != nil {
+		return nil, wrap("points since", err)
+	}
+	out := make([]PointEvent, len(rows))
+	for i, r := range rows {
+		out[i] = r.point()
+	}
+	return out, nil
+}
+
 // ---------------------------------------------------------------- neutralisations
 
 type neutralRow struct {
@@ -547,6 +611,220 @@ func (s gormStore) StoredBand(ctx context.Context, userID uuid.UUID) (Band, bool
 		return BandNeutral, false, nil
 	}
 	return bandOf(bands[0]), true, nil
+}
+
+type scoreRow struct {
+	UserID          uuid.UUID `gorm:"column:user_id"`
+	RawCP           int       `gorm:"column:raw_cp"`
+	PctBP           int       `gorm:"column:pct_bp"`
+	Band            int16     `gorm:"column:band"`
+	NSignals        int       `gorm:"column:n_signals"`
+	CohortKey       string    `gorm:"column:cohort_key"`
+	ConfigVersionID uuid.UUID `gorm:"column:config_version_id"`
+	RunID           uuid.UUID `gorm:"column:run_id"`
+	TopContributors string    `gorm:"column:top_contributors"`
+	Neutralized     bool      `gorm:"column:neutralized"`
+	CalculatedAt    time.Time `gorm:"column:calculated_at"`
+}
+
+const scoreCols = `user_id, raw_cp, round(pct_final * 10000)::int AS pct_bp, band, n_signals, cohort_key, config_version_id, run_id,
+	top_contributors::text AS top_contributors, neutralized, calculated_at`
+
+// score converts the row.
+//
+// cross-org: no statement.
+func (r scoreRow) score() (Score, error) {
+	sc := Score{UserID: r.UserID, RawCP: r.RawCP, PctBP: r.PctBP, Band: bandOf(r.Band), NSignals: r.NSignals, CohortKey: r.CohortKey,
+		ConfigVersionID: r.ConfigVersionID, RunID: r.RunID, Neutralized: r.Neutralized, CalculatedAt: r.CalculatedAt}
+	if err := json.Unmarshal([]byte(r.TopContributors), &sc.TopContributors); err != nil {
+		return Score{}, fmt.Errorf("talent: top contributors of %s: %w", r.UserID, err)
+	}
+	return sc, nil
+}
+
+// Score implements Store.
+//
+// cross-org: the subject's own score.
+func (s gormStore) Score(ctx context.Context, userID uuid.UUID) (Score, bool, error) {
+	c, err := s.conn(ctx)
+	if err != nil {
+		return Score{}, false, err
+	}
+	var rows []scoreRow
+	if err := c.Raw(`SELECT `+scoreCols+` FROM talent.scores WHERE user_id = ?`, userID).Scan(&rows).Error; err != nil {
+		return Score{}, false, wrap("score", err)
+	}
+	if len(rows) == 0 {
+		return Score{}, false, nil
+	}
+	sc, err := rows[0].score()
+	return sc, err == nil, err
+}
+
+// BandCounts implements Store.
+//
+// cross-org: aggregate counts of the auditor's distribution (no user row
+// leaves the store).
+func (s gormStore) BandCounts(ctx context.Context, cohortPrefix string) (map[int]int, error) {
+	c, err := s.conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var rows []struct {
+		Band  int `gorm:"column:band"`
+		Count int `gorm:"column:n"`
+	}
+	err = c.Raw(`SELECT s.band, count(*) AS n FROM talent.scores s
+		WHERE NOT s.neutralized
+		  AND NOT EXISTS (SELECT 1 FROM talent.neutralizations n WHERE n.user_id = s.user_id AND n.lifted_at IS NULL)
+		  AND ( @p = '' OR s.cohort_key = @p OR starts_with(s.cohort_key, @p || ':'))
+		GROUP BY s.band`, map[string]any{"p": cohortPrefix}).Scan(&rows).Error
+	if err != nil {
+		return nil, wrap("band counts", err)
+	}
+	out := map[int]int{}
+	for _, r := range rows {
+		out[r.Band] = r.Count
+	}
+	return out, nil
+}
+
+// ScoringUsers implements Store.
+//
+// cross-org: the nightly run's population (every talent subject).
+func (s gormStore) ScoringUsers(ctx context.Context, since time.Time) ([]uuid.UUID, error) {
+	c, err := s.conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var ids []uuid.UUID
+	err = c.Raw(`SELECT user_id FROM talent.point_events WHERE occurred_at > ?
+		UNION SELECT user_id FROM talent.scores
+		UNION SELECT user_id FROM talent.cohorts
+		ORDER BY user_id`, since).Scan(&ids).Error
+	if err != nil {
+		return nil, wrap("scoring users", err)
+	}
+	return ids, nil
+}
+
+// ActiveNeutralized implements Store.
+//
+// cross-org: the nightly run's batch, keyed by user IDs.
+func (s gormStore) ActiveNeutralized(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]bool, error) {
+	out := map[uuid.UUID]bool{}
+	if len(userIDs) == 0 {
+		return out, nil
+	}
+	c, err := s.conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var ids []uuid.UUID
+	err = c.Raw(`SELECT DISTINCT user_id FROM talent.neutralizations WHERE user_id IN ? AND lifted_at IS NULL`, userIDs).
+		Scan(&ids).Error
+	if err != nil {
+		return nil, wrap("active neutralized", err)
+	}
+	for _, id := range ids {
+		out[id] = true
+	}
+	return out, nil
+}
+
+// InsertRun implements Store. started_at is the run's clock (a business
+// time of the run, like finished_at).
+//
+// cross-org: platform run log, no user data.
+func (s gormStore) InsertRun(ctx context.Context, r ScoreRun) error {
+	c, err := s.conn(ctx)
+	if err != nil {
+		return err
+	}
+	if err := c.Exec(`INSERT INTO talent.score_runs (id, config_version_id, started_at, status) VALUES ( ?, ?, ?, ?)`,
+		r.ID, r.ConfigVersionID, r.StartedAt, RunRunning).Error; err != nil {
+		return wrap("insert run", err)
+	}
+	return nil
+}
+
+// FinishRun implements Store.
+//
+// cross-org: platform run log, no user data.
+func (s gormStore) FinishRun(ctx context.Context, r ScoreRun) error {
+	c, err := s.conn(ctx)
+	if err != nil {
+		return err
+	}
+	res := c.Exec(`UPDATE talent.score_runs SET finished_at = ?, users_processed = ?, status = ?, error = ? WHERE id = ?`,
+		r.FinishedAt, r.UsersProcessed, r.Status, nullable(r.Error), r.ID)
+	if res.Error != nil {
+		return wrap("finish run", res.Error)
+	}
+	if res.RowsAffected != 1 {
+		return fmt.Errorf("talent: finish run %s: no such run", r.ID)
+	}
+	return nil
+}
+
+// PutScores implements Store. calculated_at is the run's instant (a
+// business time). The cohort row's updated_at is the touch trigger's.
+//
+// cross-org: the nightly run's batch, keyed by user IDs.
+func (s gormStore) PutScores(ctx context.Context, scores []Score) error {
+	c, err := s.conn(ctx)
+	if err != nil {
+		return err
+	}
+	for _, sc := range scores {
+		top := sc.TopContributors
+		if top == nil {
+			top = []Contribution{}
+		}
+		b, err := json.Marshal(top)
+		if err != nil {
+			return fmt.Errorf("talent: top contributors: %w", err)
+		}
+		err = c.Exec(`INSERT INTO talent.scores (user_id, raw_cp, pct_final, band, n_signals, cohort_key, config_version_id, run_id,
+			top_contributors, neutralized, calculated_at)
+			VALUES ( ?, ?, CAST( ? AS numeric) / 10000, ?, ?, ?, ?, ?, CAST( ? AS jsonb), ?, ?)
+			ON CONFLICT (user_id) DO UPDATE SET raw_cp = EXCLUDED.raw_cp, pct_final = EXCLUDED.pct_final, band = EXCLUDED.band,
+			  n_signals = EXCLUDED.n_signals, cohort_key = EXCLUDED.cohort_key, config_version_id = EXCLUDED.config_version_id,
+			  run_id = EXCLUDED.run_id, top_contributors = EXCLUDED.top_contributors, neutralized = EXCLUDED.neutralized,
+			  calculated_at = EXCLUDED.calculated_at`,
+			sc.UserID, sc.RawCP, sc.PctBP, int16(sc.Band), sc.NSignals, sc.CohortKey, sc.ConfigVersionID, sc.RunID, string(b),
+			sc.Neutralized, sc.CalculatedAt).Error
+		if err != nil {
+			return wrap("put score", err)
+		}
+		if err := c.Exec(`INSERT INTO talent.cohorts (user_id, cohort_key) VALUES ( ?, ?)
+			ON CONFLICT (user_id) DO UPDATE SET cohort_key = EXCLUDED.cohort_key`, sc.UserID, sc.CohortKey).Error; err != nil {
+			return wrap("put cohort", err)
+		}
+	}
+	return nil
+}
+
+// DeleteScores implements Store.
+//
+// cross-org: the nightly run's batch, keyed by user IDs.
+func (s gormStore) DeleteScores(ctx context.Context, userIDs []uuid.UUID) (int, error) {
+	if len(userIDs) == 0 {
+		return 0, nil
+	}
+	c, err := s.conn(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, table := range []string{"scores", "cohorts"} {
+		res := c.Exec(`DELETE FROM talent.`+table+` WHERE user_id IN ?`, userIDs)
+		if res.Error != nil {
+			return 0, wrap("delete "+table, res.Error)
+		}
+		n += int(res.RowsAffected)
+	}
+	return n, nil
 }
 
 // HasData implements Store.

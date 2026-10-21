@@ -28,16 +28,17 @@ const purposeTR = "Etkinlik ve topluluk aktivitelerine dayalı, yalnız yukarı 
 	"Hiç kimseye gösterilmez; eşik, eleme veya kara liste olarak kullanılmaz; düşük değer ceza değil nötrdür."
 
 // Report is the person-level talent report (01 §4.11, 03 §5.12): the
-// signals with their categories, the band and the neutralisations. It is
-// the only place a talent value leaves the module: the talent_auditor's
-// endpoint (BE-052) and a four-eyes approved profiling_access export. It
-// carries no name or e-mail.
+// signals with their categories, the band, the nightly score and the
+// neutralisations. It leaves the module only through the talent_auditor's
+// getTalentReport (BE-052) and a four-eyes approved profiling_access
+// export. It carries no name or e-mail.
 type Report struct {
 	UserID            uuid.UUID
 	CollectionEnabled bool
 	RankingChoice     students.RankingChoice
 	Band              Band
-	Scored            bool // a score row exists (BE-052 writes them)
+	Scored            bool   // a score row exists (talent.recompute writes them)
+	Score             *Score // the score row, nil without one
 	Neutralizations   []Neutralization
 	Categories        []CategoryTotal
 	Signals           []PointEvent
@@ -45,6 +46,9 @@ type Report struct {
 
 	signalCategory map[string]string // signal code → category, for the rendering
 }
+
+// CategoryOf returns the category of a signal code of the report.
+func (r Report) CategoryOf(signal string) string { return r.signalCategory[signal] }
 
 // CategoryTotal sums the ledger of one category.
 type CategoryTotal struct {
@@ -61,6 +65,8 @@ type reportJSON struct {
 	RankingChoice     string            `json:"activity_ranking_choice"`
 	Band              int               `json:"band"`
 	Scored            bool              `json:"scored"`
+	ConfigVersionID   *string           `json:"config_version_id"` // of the score
+	CalculatedAt      *time.Time        `json:"calculated_at"`     // of the score
 	Neutralizations   []neutralJSON     `json:"neutralizations"`
 	Categories        []categoryJSON    `json:"categories"`
 	Signals           []reportPointJSON `json:"signals"`
@@ -95,6 +101,10 @@ func (r Report) JSON() (json.RawMessage, error) {
 	out := reportJSON{UserID: r.UserID.String(), GeneratedAt: r.GeneratedAt, Purpose: purposeTR,
 		CollectionEnabled: r.CollectionEnabled, RankingChoice: string(r.RankingChoice), Band: int(r.Band), Scored: r.Scored,
 		Neutralizations: []neutralJSON{}, Categories: []categoryJSON{}, Signals: []reportPointJSON{}}
+	if sc := r.Score; sc != nil {
+		v, at := sc.ConfigVersionID.String(), sc.CalculatedAt
+		out.ConfigVersionID, out.CalculatedAt = &v, &at
+	}
 	for _, n := range r.Neutralizations {
 		out.Neutralizations = append(out.Neutralizations, neutralJSON{Reason: string(n.Reason), CreatedAt: n.CreatedAt, LiftedAt: n.LiftedAt})
 	}
@@ -110,14 +120,6 @@ func (r Report) JSON() (json.RawMessage, error) {
 		return nil, fmt.Errorf("talent: report: %w", err)
 	}
 	return b, nil
-}
-
-// Report implements Auditor (talent.report.read; BE-052's endpoint).
-func (s *service) Report(ctx context.Context, a authz.Actor, userID uuid.UUID, reason string) (Report, error) {
-	if err := authz.Can(ctx, a, authz.TalentReportRead, authz.Resource{Type: authz.TypeTalentSubject, OwnerUserID: &userID}); err != nil {
-		return Report{}, err
-	}
-	return s.report(ctx, a, userID, reason)
 }
 
 // SubjectReport implements Auditor: kvkk's profiling_access request, which
@@ -162,8 +164,12 @@ func (s *service) report(ctx context.Context, by authz.Actor, userID uuid.UUID, 
 		if r.Neutralizations, err = st.Neutralizations(ctx, userID); err != nil {
 			return err
 		}
-		if r.Band, r.Scored, err = st.StoredBand(ctx, userID); err != nil {
+		sc, found, err := st.Score(ctx, userID)
+		if err != nil {
 			return err
+		}
+		if found {
+			r.Score, r.Band, r.Scored = &sc, sc.Band, true
 		}
 		for _, n := range r.Neutralizations {
 			if n.Active() {

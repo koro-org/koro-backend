@@ -7,6 +7,8 @@ import (
 	"testing"
 	"uuid"
 
+	"github.com/danielgtaylor/huma/v2"
+
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
 	"koro/internal/platform/httpx"
@@ -91,6 +93,67 @@ func TestWire_TalentTasksAndHooks(t *testing.T) {
 	m := obs.NewMetrics()
 	if err := c.talent.metrics(m); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestWire_TalentJobsAndRoutes (BE-052; 01 §7, 04 §T): talent schedules
+// talent.recompute at 03:00 on the low queue, registers the seven
+// talent_auditor operations under /admin/talent, closed by default
+// (talent.auditor_api_enabled false), and gets identity's
+// re-authentication.
+func TestWire_TalentJobsAndRoutes(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	var jobs []string
+	for _, j := range c.infra.jobs.Jobs() {
+		if strings.HasPrefix(j.Name, "talent.") {
+			jobs = append(jobs, j.Name+" "+j.Cron+" "+j.Queue)
+		}
+	}
+	if want := []string{"talent.recompute 0 3 * * * low"}; !slices.Equal(jobs, want) {
+		t.Fatalf("talent jobs %q, want %q", jobs, want)
+	}
+	if c.talent.mod.AuditorAPIEnabled() {
+		t.Fatal("the talent auditor endpoints are open by default; talent.auditor_api_enabled must default to false")
+	}
+	app, err := httpx.New(httpx.Deps{Log: obs.Discard(), Version: apiVersion})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.talent.routes(c, app.V1)
+	var ops []string
+	for path, item := range app.API.OpenAPI().Paths {
+		for _, o := range []*huma.Operation{item.Get, item.Post} {
+			if o != nil && slices.Contains(o.Tags, "talent") {
+				if !strings.HasPrefix(path, httpx.APIPrefix+"/admin/talent/") {
+					t.Errorf("talent operation %s outside /admin/talent: %s", o.OperationID, path)
+				}
+				ops = append(ops, o.OperationID)
+			}
+		}
+	}
+	slices.Sort(ops)
+	want := []string{"createTalentConfigVersion", "createTalentNeutralization", "getTalentConfig", "getTalentDistribution",
+		"getTalentReport", "liftTalentNeutralization", "reverseTalentPointEvent"}
+	if !slices.Equal(ops, want) {
+		t.Fatalf("talent operations %q, want %q", ops, want)
+	}
+}
+
+// TestWire_TalentAuditorFlagFromConfig: TALENT_AUDITOR_API_ENABLED reaches
+// the module.
+func TestWire_TalentAuditorFlagFromConfig(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	c.infra.cfg.Talent.AuditorAPIEnabled = true
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	if !c.talent.mod.AuditorAPIEnabled() || c.talent.mod.CollectionEnabled() {
+		t.Fatal("talent flags not taken from the configuration")
 	}
 }
 

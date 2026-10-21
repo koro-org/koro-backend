@@ -1,0 +1,16 @@
+{
+  "params": {
+    "shrink_k": 5,
+    "cohort_min": 30,
+    "lookback_days": 540,
+    "category_caps_cp": {"participation": 4000, "intent": 1500, "profile": 1000, "community": 600, "engagement": 300},
+    "bands": [
+      {"band": 1, "min_pct_bp": 5000, "mult_bp": 10500},
+      {"band": 2, "min_pct_bp": 7500, "mult_bp": 11000},
+      {"band": 3, "min_pct_bp": 9000, "mult_bp": 11500}
+    ]
+  },
+  "signal_defs": [{"code": "feed_like", "base_points_cp": 10, "daily_cap_cp": 50, "half_life_days": 30, "enabled": true}],
+  "notes": "Matris test sürümü (test değerleri)",
+  "reauth": {"password": "matrix-reauth-password"}
+}

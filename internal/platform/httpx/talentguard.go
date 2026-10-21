@@ -11,8 +11,16 @@ import (
 // The talent field guard (01 §4.11, 03 §3.4 Y1, 04 §T and §V.0-2, BE-047):
 // nobody sees a talent value, so no request or response schema of the API
 // may carry a member named talent*, band, band_*, score* or point*, nor a
-// parameter of that name. The talent_auditor operations (BE-052, tag
-// "talent") are the only place a talent value appears and are exempt.
+// parameter of that name. The only place a talent value appears are the
+// seven talent_auditor operations of 04 §T (BE-052), and only they are
+// exempt (talentAuditorOperations): an operation is exempt when its
+// operationId, method and path are exactly one listed row AND it is tagged
+// "talent", declares a talent.* action (x-koro-action) on the admin
+// surface (x-koro-surface). Anything else — another operation of the
+// talent tag, a listed operationId on another path or under another tag,
+// an admin operation of another module — is checked like every other
+// operation. The exemption covers the operation, not its schemas: another
+// operation that refers to a talent DTO is caught.
 //
 // New installs it on every App: each operation is checked when it is
 // added to the OpenAPI document (huma's OnAddOperation), following $refs
@@ -24,6 +32,41 @@ import (
 
 // talentTag is the tag (module) of the talent_auditor operations.
 const talentTag = "talent"
+
+// talentAuditorOperations are the talent_auditor operations of 04 §T
+// (operationId → "METHOD /api/v1/path"): the getTalentReport and
+// getTalentDistribution responses carry the band and the scores, the
+// ledger rows their points and point_event_id, the reversal its
+// point_event_id path parameter. Adding a row is a design change (04 §T,
+// 03 §5.12) and needs a reason here.
+var talentAuditorOperations = map[string]string{
+	"getTalentReport":            "GET " + APIPrefix + "/admin/talent/subjects/{user_id}/report",
+	"getTalentDistribution":      "GET " + APIPrefix + "/admin/talent/distribution",
+	"createTalentNeutralization": "POST " + APIPrefix + "/admin/talent/subjects/{user_id}/neutralizations",
+	"liftTalentNeutralization":   "POST " + APIPrefix + "/admin/talent/neutralizations/{neutralization_id}/lift",
+	"reverseTalentPointEvent":    "POST " + APIPrefix + "/admin/talent/point-events/{point_event_id}/reversal",
+	"getTalentConfig":            "GET " + APIPrefix + "/admin/talent/config",
+	"createTalentConfigVersion":  "POST " + APIPrefix + "/admin/talent/config/versions",
+}
+
+// Extensions of op (internal/platform/httpx/op imports httpx, so their
+// names are repeated here; op's tests pin them).
+const (
+	extAction  = "x-koro-action"
+	extSurface = "x-koro-surface"
+)
+
+// talentAuditorOperation reports whether op is exactly one of the
+// talent_auditor operations (see the guard's description).
+func talentAuditorOperation(op *huma.Operation) bool {
+	want, listed := talentAuditorOperations[op.OperationID]
+	if !listed || want != op.Method+" "+op.Path || len(op.Tags) != 1 || op.Tags[0] != talentTag {
+		return false
+	}
+	action, _ := op.Extensions[extAction].(string)
+	surface, _ := op.Extensions[extSurface].(string)
+	return strings.HasPrefix(action, talentTag+".") && surface == "admin"
+}
 
 // talentFieldExempt are reasoned exceptions, "<schema>.<member>".
 var talentFieldExempt = map[string]string{
@@ -52,7 +95,7 @@ func installTalentFieldGuard(oapi *huma.OpenAPI) {
 }
 
 // TalentFieldViolations returns every talent field of the operations of
-// oapi outside the talent operations, sorted.
+// oapi outside the talent_auditor operations, sorted.
 func TalentFieldViolations(oapi *huma.OpenAPI) []string {
 	var v []string
 	for _, item := range oapi.Paths {
@@ -69,7 +112,7 @@ func TalentFieldViolations(oapi *huma.OpenAPI) []string {
 // operationTalentFields checks the parameters, the request body and the
 // responses of op.
 func operationTalentFields(oapi *huma.OpenAPI, op *huma.Operation) []string {
-	if slices.Contains(op.Tags, talentTag) {
+	if talentAuditorOperation(op) {
 		return nil
 	}
 	w := talentWalker{oapi: oapi, seen: map[*huma.Schema]bool{}, at: op.OperationID}

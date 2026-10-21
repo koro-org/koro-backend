@@ -16,6 +16,8 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"koro/internal/audit"
+	"koro/internal/audit/audittest"
+	"koro/internal/identity"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
@@ -181,15 +183,23 @@ type pgEnv struct {
 
 func newPGEnv(t *testing.T, enabled bool) pgEnv {
 	t.Helper()
+	return newPGEnvWith(t, envOptions{collection: enabled})
+}
+
+// newPGEnvWith is newPGEnv with the auditor API switch and the fake
+// re-authentication of the unit tests (o.config is ignored: an empty
+// version is always in force since the day before t0).
+func newPGEnvWith(t *testing.T, o envOptions) pgEnv {
+	t.Helper()
 	d := testutil.NewDB(t)
 	clk := clock.NewFake(t0)
 	au := audit.New(audit.Deps{Store: audit.NewGormStore(d.ORM), Tx: d.Tx, Clock: clk, Log: obs.Discard()})
 	e := &env{clk: clk, subs: outbox.NewRegistry(), audit: &fakeAudit{},
 		students: &fakeStudents{cohorts: map[uuid.UUID]students.Cohort{}, choices: map[uuid.UUID]students.RankingChoice{}},
-		dir:      fakeDirectory{sensitive: map[uuid.UUID]bool{}}}
+		dir:      fakeDirectory{sensitive: map[uuid.UUID]bool{}}, reauth: &audittest.LateReauth[identity.ReauthProof]{Next: fakeReauth{}}}
 	st := talent.NewGormStore(d.ORM)
 	mod, err := talent.New(talent.Deps{Store: st, Tx: d.Tx, Audit: au.Service, Clock: clk, Log: obs.Discard(),
-		Students: e.students, Directory: e.dir, CollectionEnabled: enabled})
+		Students: e.students, Directory: e.dir, CollectionEnabled: o.collection, AuditorAPIEnabled: o.auditorAPI, Reauth: e.reauth})
 	if err != nil {
 		t.Fatal(err)
 	}

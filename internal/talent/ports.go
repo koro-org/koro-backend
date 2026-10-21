@@ -5,6 +5,7 @@ import (
 	"uuid"
 
 	"koro/internal/audit"
+	"koro/internal/identity"
 	"koro/internal/students"
 )
 
@@ -34,4 +35,13 @@ type AuditLogger interface {
 	//
 	// sync-write: audit.Logger.Log
 	Log(ctx context.Context, e audit.Event) error
+}
+
+// Reauthenticator verifies the re-authentication proof of the talent R
+// operations (talent.neutralization.manage, talent.reversal.create,
+// talent.config.manage; 03 §6.2): after authz.Can, before any business
+// data. identity.Service satisfies it; it audits nothing for its caller
+// (the refused proof is talent's denied record, audit.ReauthFailed).
+type Reauthenticator interface {
+	Verify(ctx context.Context, userID uuid.UUID, proof identity.ReauthProof) (kind string, err error)
 }

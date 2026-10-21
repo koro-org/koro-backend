@@ -223,4 +223,140 @@ func storeContract(t *testing.T, newEnv func(t *testing.T) contractEnv) {
 			t.Fatal("an objection without its request was accepted")
 		}
 	})
+
+	t.Run("signal_update_and_point_lookup", func(t *testing.T) {
+		t.Parallel()
+		ce := newEnv(t)
+		user, auditor := ce.user(t), ce.user(t)
+		ce.must(t, func(ctx context.Context) error {
+			five, week := 5, 70
+			d, err := ce.store.UpdateSignalDef(ctx, talent.SignalDef{Code: talent.SignalFeedLike, BasePointsCP: 5, DailyCapCP: &five,
+				WeeklyCapCP: &week, HalfLifeDays: nil, Enabled: false}, auditor)
+			if err != nil || d.BasePointsCP != 5 || *d.DailyCapCP != 5 || *d.WeeklyCapCP != 70 || d.HalfLifeDays != nil || d.Enabled ||
+				d.Category != talent.CategoryEngagement || !d.ExcludedWhenSensitive {
+				t.Fatalf("update = %+v %v", d, err)
+			}
+			if got, err := ce.store.SignalDef(ctx, talent.SignalFeedLike); err != nil || got.BasePointsCP != 5 || got.Enabled {
+				t.Fatalf("after update = %+v %v", got, err)
+			}
+			if _, err := ce.store.UpdateSignalDef(ctx, talent.SignalDef{Code: "no_such_signal"}, auditor); !errors.Is(err, talent.ErrNotFound) {
+				t.Fatalf("unknown signal = %v", err)
+			}
+			cfg, err := ce.store.InsertConfigVersion(ctx, talent.ConfigVersion{ID: uuid.NewV7(), EffectiveFrom: t0.Add(-time.Hour), CreatedBy: auditor})
+			if err != nil {
+				return err
+			}
+			p := talent.PointEvent{ID: uuid.NewV7(), UserID: user, Signal: talent.SignalEventCheckin, SourceType: talent.SourceCheckin,
+				SourceID: uuid.NewV7(), OccurredAt: t0.Add(-48 * time.Hour), RawPointsCP: 500, PointsCP: 500, ReasonCode: "event_checkin",
+				ConfigVersionID: cfg.ID, SourceEventID: uuid.NewV7()}
+			if _, _, err := ce.store.InsertPoint(ctx, p); err != nil {
+				return err
+			}
+			got, err := ce.store.GetPoint(ctx, p.ID)
+			if err != nil || got.ID != p.ID || got.PointsCP != 500 || got.ReversalOf != nil {
+				t.Fatalf("get point = %+v %v", got, err)
+			}
+			if _, err := ce.store.GetPoint(ctx, uuid.NewV7()); !errors.Is(err, talent.ErrNotFound) {
+				t.Fatalf("unknown point = %v", err)
+			}
+			since, err := ce.store.PointsSince(ctx, []uuid.UUID{user}, t0.Add(-72*time.Hour))
+			if err != nil || len(since) != 1 {
+				t.Fatalf("points since = %d %v", len(since), err)
+			}
+			if since, err := ce.store.PointsSince(ctx, []uuid.UUID{user}, t0.Add(-24*time.Hour)); err != nil || len(since) != 0 {
+				t.Fatalf("points since after the row = %d %v", len(since), err)
+			}
+			users, err := ce.store.ScoringUsers(ctx, t0.Add(-72*time.Hour))
+			if err != nil || len(users) != 1 || users[0] != user {
+				t.Fatalf("scoring users = %v %v", users, err)
+			}
+			return nil
+		})
+	})
+
+	t.Run("scores_cohorts_and_runs", func(t *testing.T) {
+		t.Parallel()
+		ce := newEnv(t)
+		a, b, c, creator := ce.user(t), ce.user(t), ce.user(t), ce.user(t)
+		uni := uuid.NewV7()
+		var cfg talent.ConfigVersion
+		var run talent.ScoreRun
+		ce.must(t, func(ctx context.Context) error {
+			var err error
+			cfg, err = ce.store.InsertConfigVersion(ctx, talent.ConfigVersion{ID: uuid.NewV7(), EffectiveFrom: t0.Add(-time.Hour), CreatedBy: creator})
+			if err != nil {
+				return err
+			}
+			run = talent.ScoreRun{ID: uuid.NewV7(), ConfigVersionID: cfg.ID, StartedAt: t0}
+			if err := ce.store.InsertRun(ctx, run); err != nil {
+				return err
+			}
+			at := t0.Add(time.Minute)
+			scores := []talent.Score{
+				{UserID: a, RawCP: 1200, PctBP: 6667, Band: 1, NSignals: 4, CohortKey: "uni:" + uni.String() + ":year:3",
+					ConfigVersionID: cfg.ID, RunID: run.ID, TopContributors: []talent.Contribution{{Signal: talent.SignalEventCheckin, ValueCP: 900}},
+					CalculatedAt: t0},
+				{UserID: b, RawCP: 0, PctBP: 5000, Band: 0, NSignals: 0, CohortKey: "uni:" + uni.String(), ConfigVersionID: cfg.ID,
+					RunID: run.ID, Neutralized: true, CalculatedAt: t0},
+				{UserID: c, RawCP: 300, PctBP: 9000, Band: 3, NSignals: 1, CohortKey: "global", ConfigVersionID: cfg.ID, RunID: run.ID,
+					CalculatedAt: t0},
+			}
+			if err := ce.store.PutScores(ctx, scores); err != nil {
+				return err
+			}
+			got, ok, err := ce.store.Score(ctx, a)
+			if err != nil || !ok || got.RawCP != 1200 || got.PctBP != 6667 || got.Band != 1 || got.CohortKey != scores[0].CohortKey ||
+				len(got.TopContributors) != 1 || got.TopContributors[0].ValueCP != 900 || !got.CalculatedAt.Equal(t0) || got.RunID != run.ID {
+				t.Fatalf("score = %+v %v %v", got, ok, err)
+			}
+			if _, ok, err := ce.store.Score(ctx, creator); err != nil || ok {
+				t.Fatalf("score of an unscored user = %v %v", ok, err)
+			}
+			// Replace: the next run overwrites the row.
+			scores[0].RawCP, scores[0].PctBP, scores[0].Band = 1300, 7500, 2
+			if err := ce.store.PutScores(ctx, scores[:1]); err != nil {
+				return err
+			}
+			if got, _, _ := ce.store.Score(ctx, a); got.RawCP != 1300 || got.Band != 2 {
+				t.Fatalf("replaced score = %+v", got)
+			}
+			counts, err := ce.store.BandCounts(ctx, "")
+			if err != nil || counts[2] != 1 || counts[3] != 1 || counts[0] != 0 { // b is neutralised
+				t.Fatalf("band counts = %v %v", counts, err)
+			}
+			counts, err = ce.store.BandCounts(ctx, "uni:"+uni.String())
+			if err != nil || counts[2] != 1 || counts[3] != 0 {
+				t.Fatalf("university band counts = %v %v", counts, err)
+			}
+			if _, _, err := ce.store.InsertNeutralization(ctx, talent.Neutralization{ID: uuid.NewV7(), UserID: c, Reason: talent.NeutralizeAdmin}); err != nil {
+				return err
+			}
+			if counts, _ := ce.store.BandCounts(ctx, ""); counts[3] != 0 {
+				t.Fatalf("an actively neutralised user is counted: %v", counts)
+			}
+			neutral, err := ce.store.ActiveNeutralized(ctx, []uuid.UUID{a, b, c})
+			if err != nil || !neutral[c] || neutral[a] || len(neutral) != 1 {
+				t.Fatalf("active neutralized = %v %v", neutral, err)
+			}
+			users, err := ce.store.ScoringUsers(ctx, t0)
+			if err != nil || len(users) != 3 {
+				t.Fatalf("scoring users = %v %v", users, err)
+			}
+			if n, err := ce.store.DeleteScores(ctx, []uuid.UUID{b, c}); err != nil || n != 4 {
+				t.Fatalf("delete = %d %v, want 2 scores + 2 cohorts", n, err)
+			}
+			if users, _ := ce.store.ScoringUsers(ctx, t0); len(users) != 1 || users[0] != a {
+				t.Fatalf("after delete = %v", users)
+			}
+			run.Status, run.UsersProcessed, run.FinishedAt = talent.RunSucceeded, 3, &at
+			return ce.store.FinishRun(ctx, run)
+		})
+		// A neutralised score must be band 0 (scores_neutralized_chk).
+		if err := ce.in(t, func(ctx context.Context) error {
+			return ce.store.PutScores(ctx, []talent.Score{{UserID: a, Band: 2, Neutralized: true, CohortKey: "global",
+				ConfigVersionID: cfg.ID, RunID: run.ID, CalculatedAt: t0}})
+		}); err == nil {
+			t.Fatal("a neutralised score with a band was accepted")
+		}
+	})
 }

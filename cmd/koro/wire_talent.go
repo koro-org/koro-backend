@@ -24,16 +24,21 @@ import (
 //	tx     nil → the app_rw pool's TxManager; tests preset db.NopTx
 //	cfg    tests only; nil → the talent section of the loaded configuration
 //	       (TALENT_DEFAULT_ENABLED, default false: nothing is written, T-32)
+//	       and TALENT_AUDITOR_API_ENABLED (default false: every
+//	       talent_auditor endpoint answers 404)
 //
-// Consumed (built in lower layers): c.audit.svc, c.students.svc (cohort,
-// minor flag, ranking choice) and c.directory.svc (sensitive clubs).
+// Consumed (built in lower layers): c.audit.svc, c.identity.svc (the
+// re-authentication proof of the R operations; nil → 503), c.students.svc
+// (cohort, minor flag, ranking choice) and c.directory.svc (sensitive
+// clubs).
 //
 // Provided, set in build: mod (talent.Ranking for discovery, BE-051;
-// talent.Auditor for the talent_auditor endpoints, BE-052), the talent
-// KVKK provider and hooks.talentAuditor (kvkk: the profiling_access report
-// and the neutralisation). tasks registers the 14 consumers of 01 §6.2;
-// metrics registers koro_talent_ingest_total on the worker's registry.
-// No route: the auditor endpoints are BE-052.
+// talent.Admin for the talent_auditor endpoints, BE-052), the talent KVKK
+// provider and hooks.talentAuditor (kvkk: the profiling_access report and
+// the neutralisation). tasks registers the 14 consumers of 01 §6.2 and the
+// nightly talent.recompute (01 §7); routes the seven talent_auditor
+// operations of 04 §T; metrics registers koro_talent_ingest_total on the
+// worker's registry.
 type talentWiring struct {
 	store talent.Store
 	tx    db.TxManager
@@ -63,10 +68,15 @@ func (w *talentWiring) build(c *container) error {
 		return errors.New("talent: students or directory is not built")
 	}
 	log := c.infra.log.With("module", "talent")
-	mod, err := talent.New(talent.Deps{
+	d := talent.Deps{
 		Store: store, Tx: tx, Audit: c.audit.svc, Clock: c.infra.clock, Log: log,
-		Students: c.students.svc, Directory: c.directory.svc, CollectionEnabled: cfg.DefaultEnabled,
-	})
+		Students: c.students.svc, Directory: c.directory.svc,
+		CollectionEnabled: cfg.DefaultEnabled, AuditorAPIEnabled: cfg.AuditorAPIEnabled,
+	}
+	if svc := c.identity.svc; svc != nil {
+		d.Reauth = svc
+	}
+	mod, err := talent.New(d)
 	if err != nil {
 		return err
 	}
@@ -83,17 +93,27 @@ func (w *talentWiring) build(c *container) error {
 	if cfg.DefaultEnabled {
 		log.Warn("talent collection is on (TALENT_DEFAULT_ENABLED=true): the legal basis and the privacy notice must be in force (T-32)")
 	}
+	if cfg.AuditorAPIEnabled {
+		log.Warn("talent auditor endpoints are open (TALENT_AUDITOR_API_ENABLED=true): talent_auditor only, every call audited")
+	}
 	return nil
 }
 
 // tasks: registration.confirmed/cancelled/no_show, checkin.recorded/voided,
 // membership.started/ended, student.profile_section_completed, post.liked/
 // unliked/saved and user.active_day on the low queue;
-// student.ranking_choice_changed and dsr.profiling_objection on default.
-func (w *talentWiring) tasks(c *container) { w.mod.Subscribe(c.infra.subs) }
+// student.ranking_choice_changed and dsr.profiling_objection on default;
+// the job talent.recompute (03:00, low).
+func (w *talentWiring) tasks(c *container) {
+	w.mod.Subscribe(c.infra.subs)
+	for _, j := range w.mod.Jobs() {
+		c.infra.jobs.Schedule(j)
+	}
+}
 
-// routes: none until BE-052 (the talent_auditor endpoints, 04 §T).
-func (w *talentWiring) routes(c *container, api huma.API) {}
+// routes: the talent_auditor endpoints (04 §T). w.mod.Admin is nil for
+// `koro openapi` (no build): handlers only touch it when called.
+func (w *talentWiring) routes(c *container, api huma.API) { talent.Register(api, w.mod.Admin) }
 
 // metrics registers koro_talent_ingest_total{signal, outcome} on the
 // worker's registry (the consumers run there); nil m → metrics off.

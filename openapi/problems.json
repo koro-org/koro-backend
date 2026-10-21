@@ -1410,6 +1410,42 @@
     "type": "urn:koro:problem:students.verification_required"
   },
   {
+    "code": "talent.already_neutralized",
+    "status": 409,
+    "title": "The user already has an active auditor neutralisation",
+    "type": "urn:koro:problem:talent.already_neutralized"
+  },
+  {
+    "code": "talent.already_reversed",
+    "status": 409,
+    "title": "The point event is already reversed",
+    "type": "urn:koro:problem:talent.already_reversed"
+  },
+  {
+    "code": "talent.neutralization_not_active",
+    "status": 409,
+    "title": "The neutralisation is not active",
+    "type": "urn:koro:problem:talent.neutralization_not_active"
+  },
+  {
+    "code": "talent.not_reversible",
+    "status": 409,
+    "title": "A reversal cannot be reversed",
+    "type": "urn:koro:problem:talent.not_reversible"
+  },
+  {
+    "code": "talent.objection_permanent",
+    "status": 409,
+    "title": "An objection neutralisation cannot be lifted",
+    "type": "urn:koro:problem:talent.objection_permanent"
+  },
+  {
+    "code": "talent.opt_out_student_owned",
+    "status": 409,
+    "title": "An opt-out is lifted by the student's privacy setting only",
+    "type": "urn:koro:problem:talent.opt_out_student_owned"
+  },
+  {
     "code": "unauthenticated",
     "status": 401,
     "title": "Authentication required",

@@ -3579,6 +3579,24 @@ components:
         - sector_code
         - size_band
       type: object
+    CreateConfigVersionInputBody:
+      additionalProperties: false
+      properties:
+        notes:
+          description: Why the version changes (≤ 500 characters)
+          type: string
+        params:
+          $ref: "#/components/schemas/TalentParamsInputDTO"
+          description: "Required: the score parameters (02 §15.1)"
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof (03 §6.2)
+        signal_defs:
+          description: Signal definitions to replace (others stay)
+          items:
+            $ref: "#/components/schemas/TalentSignalDefInputDTO"
+          type: array
+      type: object
     CreateExperienceInputBody:
       additionalProperties: false
       properties:
@@ -7606,6 +7624,16 @@ components:
       required:
         - name
       type: object
+    NeutralizationBody:
+      additionalProperties: false
+      properties:
+        note:
+          description: "Create: required (1–500 characters), stored with the neutralisation. Lift: optional, audited"
+          type: string
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof (03 §6.2)
+      type: object
     NoticeDTO:
       additionalProperties: false
       properties:
@@ -10881,6 +10909,16 @@ components:
         - updated_at
         - etag
       type: object
+    ReversalInputBody:
+      additionalProperties: false
+      properties:
+        reason:
+          description: "Required: why the row is wrong (1–500 characters; audited)"
+          type: string
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof (03 §6.2)
+      type: object
     RevokeRoleInputBody:
       additionalProperties: false
       properties:
@@ -12021,6 +12059,482 @@ components:
       required:
         - otpauth_uri
         - secret_base32
+      type: object
+    TalentBandBucketDTO:
+      additionalProperties: false
+      properties:
+        band:
+          format: int64
+          maximum: 3
+          minimum: 0
+          type: integer
+        below_threshold:
+          type: boolean
+        count:
+          description: null below 10
+          format: int64
+          type:
+            - integer
+            - "null"
+      required:
+        - band
+        - count
+        - below_threshold
+      type: object
+    TalentBandRuleDTO:
+      additionalProperties: false
+      properties:
+        band:
+          description: 1, 2 or 3 in order
+          format: int64
+          type: integer
+        min_pct_bp:
+          description: Shrunk percentile that reaches the band (1..10000)
+          format: int64
+          type: integer
+        mult_bp:
+          description: "Ranking multiplier (10001..11500: at most ×1.15)"
+          format: int64
+          type: integer
+      required:
+        - band
+        - min_pct_bp
+        - mult_bp
+      type: object
+    TalentCategoryDTO:
+      additionalProperties: false
+      properties:
+        category:
+          type: string
+        points_cp:
+          format: int64
+          type: integer
+        signals:
+          format: int64
+          type: integer
+      required:
+        - category
+        - signals
+        - points_cp
+      type: object
+    TalentConfigDTO:
+      additionalProperties: false
+      properties:
+        active_version:
+          $ref: "#/components/schemas/TalentConfigVersionDTO"
+          description: null before the first version
+        signal_defs:
+          items:
+            $ref: "#/components/schemas/TalentSignalDefDTO"
+          type: array
+      required:
+        - active_version
+        - signal_defs
+      type: object
+    TalentConfigVersionDTO:
+      additionalProperties: false
+      properties:
+        config_version_id:
+          format: uuid
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        created_by:
+          format: uuid
+          type: string
+        effective_from:
+          format: date-time
+          type: string
+        notes:
+          type: string
+        params:
+          $ref: "#/components/schemas/TalentParamsDTO"
+      required:
+        - config_version_id
+        - effective_from
+        - params
+        - created_by
+        - created_at
+      type: object
+    TalentContributionDTO:
+      additionalProperties: false
+      properties:
+        signal_code:
+          type: string
+        value_cp:
+          format: int64
+          type: integer
+      required:
+        - signal_code
+        - value_cp
+      type: object
+    TalentDistributionDTO:
+      additionalProperties: false
+      properties:
+        buckets:
+          items:
+            $ref: "#/components/schemas/TalentBandBucketDTO"
+          type: array
+        university_id:
+          format: uuid
+          type: string
+      required:
+        - buckets
+      type: object
+    TalentNeutralizationDTO:
+      additionalProperties: false
+      properties:
+        active:
+          type: boolean
+        created_at:
+          format: date-time
+          type: string
+        created_by:
+          format: uuid
+          type: string
+        dsr_id:
+          format: uuid
+          type: string
+        lifted_at:
+          format: date-time
+          type: string
+        lifted_by:
+          format: uuid
+          type: string
+        neutralization_id:
+          format: uuid
+          type: string
+        note:
+          type: string
+        reason:
+          enum:
+            - opt_out
+            - objection
+            - admin
+          type: string
+        user_id:
+          format: uuid
+          type: string
+      required:
+        - neutralization_id
+        - user_id
+        - reason
+        - created_at
+        - active
+      type: object
+    TalentParamsDTO:
+      additionalProperties: false
+      properties:
+        bands:
+          description: 1..3 upward-only bands
+          items:
+            $ref: "#/components/schemas/TalentBandRuleDTO"
+          type: array
+        category_caps_cp:
+          additionalProperties:
+            format: int64
+            type: integer
+          description: Cap of every category (participation, intent, profile, community, engagement)
+          type: object
+        cohort_min:
+          description: Smallest cohort (≥ 10)
+          format: int64
+          type: integer
+        lookback_days:
+          description: Window of the nightly score (≤ 730)
+          format: int64
+          type: integer
+        min_account_age_days_for_likes:
+          description: Stored, not applied yet
+          format: int64
+          type: integer
+        min_event_confirmed:
+          description: Stored, not applied yet
+          format: int64
+          type: integer
+        min_event_distinct_checkins:
+          description: Stored, not applied yet
+          format: int64
+          type: integer
+        shrink_k:
+          description: "Shrinkage k: w = n / (n + k)"
+          format: int64
+          type: integer
+      required:
+        - shrink_k
+        - cohort_min
+        - lookback_days
+        - category_caps_cp
+        - bands
+      type: object
+    TalentParamsInputDTO:
+      additionalProperties: false
+      properties:
+        bands:
+          description: Required. 1..3 rules numbered 1, 2, 3; min_pct_bp and mult_bp grow with the band
+          items:
+            $ref: "#/components/schemas/TalentBandRuleDTO"
+          type: array
+        category_caps_cp:
+          additionalProperties:
+            format: int64
+            type: integer
+          description: Required. A cap (cp) of each of participation, intent, profile, community, engagement
+          type: object
+        cohort_min:
+          description: Required. Smallest cohort (10..1000000)
+          format: int64
+          type: integer
+        lookback_days:
+          description: Required. Window of the nightly score (1..730 days)
+          format: int64
+          type: integer
+        min_account_age_days_for_likes:
+          description: Stored, not applied yet
+          format: int64
+          type: integer
+        min_event_confirmed:
+          description: Stored, not applied yet
+          format: int64
+          type: integer
+        min_event_distinct_checkins:
+          description: Stored, not applied yet
+          format: int64
+          type: integer
+        shrink_k:
+          description: "Required. Shrinkage k (0..1000): w = n / (n + k)"
+          format: int64
+          type: integer
+      type: object
+    TalentReportDTO:
+      additionalProperties: false
+      properties:
+        activity_ranking_choice:
+          enum:
+            - default
+            - enabled
+            - disabled
+          type: string
+        band:
+          description: 0 neutral (no score, low score, neutralised) .. 3
+          format: int64
+          maximum: 3
+          minimum: 0
+          type: integer
+        categories:
+          items:
+            $ref: "#/components/schemas/TalentCategoryDTO"
+          type: array
+        cohort:
+          description: Cohort key of the last run (uni:<id>[:year:<n>] or global)
+          type:
+            - string
+            - "null"
+        collection_enabled:
+          description: talent.default_enabled
+          type: boolean
+        computed_at:
+          description: Instant of the last run
+          format: date-time
+          type:
+            - string
+            - "null"
+        config_version:
+          description: Config version of the last run
+          format: uuid
+          type:
+            - string
+            - "null"
+        generated_at:
+          format: date-time
+          type: string
+        n_signals:
+          description: Signals of the last run
+          format: int64
+          type:
+            - integer
+            - "null"
+        neutralizations:
+          items:
+            $ref: "#/components/schemas/TalentNeutralizationDTO"
+          type: array
+        pct_final_bp:
+          description: Shrunk cohort percentile in basis points; null before the first run
+          format: int64
+          type:
+            - integer
+            - "null"
+        score_cp:
+          description: Raw score of the last nightly run (cp); null before the first run
+          format: int64
+          type:
+            - integer
+            - "null"
+        signals:
+          description: The ledger, oldest first (reversals included)
+          items:
+            $ref: "#/components/schemas/TalentSignalDTO"
+          type: array
+        top_contributors:
+          description: Largest decayed contributions of the last run
+          items:
+            $ref: "#/components/schemas/TalentContributionDTO"
+          type: array
+        user_id:
+          description: The subject (no name or e-mail is ever returned)
+          format: uuid
+          type: string
+      required:
+        - user_id
+        - band
+        - score_cp
+        - pct_final_bp
+        - cohort
+        - n_signals
+        - top_contributors
+        - config_version
+        - computed_at
+        - collection_enabled
+        - activity_ranking_choice
+        - categories
+        - signals
+        - neutralizations
+        - generated_at
+      type: object
+    TalentSignalDTO:
+      additionalProperties: false
+      properties:
+        cap_reason:
+          enum:
+            - daily
+            - weekly
+            - per_source
+          type: string
+        capped:
+          type: boolean
+        category:
+          description: The signal's category (in the report)
+          type: string
+        config_version_id:
+          format: uuid
+          type: string
+        occurred_at:
+          format: date-time
+          type: string
+        point_event_id:
+          format: uuid
+          type: string
+        points_cp:
+          format: int64
+          type: integer
+        raw_points_cp:
+          format: int64
+          type: integer
+        reason_code:
+          type: string
+        reversal_of:
+          format: uuid
+          type: string
+        signal_code:
+          type: string
+        source_ref:
+          $ref: "#/components/schemas/TalentSourceRefDTO"
+      required:
+        - point_event_id
+        - signal_code
+        - points_cp
+        - raw_points_cp
+        - capped
+        - reason_code
+        - occurred_at
+        - source_ref
+        - config_version_id
+      type: object
+    TalentSignalDefDTO:
+      additionalProperties: false
+      properties:
+        base_points_cp:
+          format: int64
+          type: integer
+        category:
+          enum:
+            - participation
+            - intent
+            - profile
+            - community
+            - engagement
+          type: string
+        code:
+          type: string
+        daily_cap_cp:
+          format: int64
+          type:
+            - integer
+            - "null"
+        enabled:
+          type: boolean
+        excluded_when_sensitive:
+          description: "Read only: a sensitive source never produces a signal"
+          type: boolean
+        half_life_days:
+          description: "null: no decay"
+          format: int64
+          type:
+            - integer
+            - "null"
+        weekly_cap_cp:
+          format: int64
+          type:
+            - integer
+            - "null"
+      required:
+        - code
+        - category
+        - base_points_cp
+        - daily_cap_cp
+        - weekly_cap_cp
+        - half_life_days
+        - excluded_when_sensitive
+        - enabled
+      type: object
+    TalentSignalDefInputDTO:
+      additionalProperties: false
+      properties:
+        base_points_cp:
+          description: Required (cp; negative for a penalty signal, which never goes below 0 in its category)
+          format: int64
+          type: integer
+        code:
+          description: Required. An existing signal code
+          type: string
+        daily_cap_cp:
+          description: "Omitted or null: no daily cap"
+          format: int64
+          type: integer
+        enabled:
+          description: Required
+          type: boolean
+        half_life_days:
+          description: "Omitted or null: no decay"
+          format: int64
+          type: integer
+        weekly_cap_cp:
+          description: "Omitted or null: no weekly cap"
+          format: int64
+          type: integer
+      type: object
+    TalentSourceRefDTO:
+      additionalProperties: false
+      properties:
+        id:
+          format: uuid
+          type: string
+        type:
+          type: string
+      required:
+        - type
+        - id
       type: object
     TargetedAudienceBody:
       additionalProperties: false
@@ -19390,6 +19904,300 @@ paths:
         - kvkk
       x-koro-action: kvkk.subprocessor.manage
       x-koro-rate-limit: write_default
+      x-koro-surface: admin
+  /api/v1/admin/talent/config:
+    get:
+      description: The config version in force (null before the first one) and the signal catalogue. Closed (404 for every signed-in user) while talent.auditor_api_enabled is false; open, talent_auditor only (MFA; never platform_admin). X-Koro-Access-Reason (10–500 characters) is mandatory and the call is audited under its action with that reason. No name or e-mail is ever returned.
+      operationId: getTalentConfig
+      parameters:
+        - description: Mandatory justification (10–500 characters); audited
+          in: header
+          name: X-Koro-Access-Reason
+          schema:
+            description: Mandatory justification (10–500 characters); audited
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TalentConfigDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get the talent configuration
+      tags:
+        - talent
+      x-koro-action: talent.config.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+  /api/v1/admin/talent/config/versions:
+    post:
+      description: "Replaces the listed signal definitions and opens a new version in force from now: every ledger row written from now on is frozen with it and the next nightly run scores with it. created_by is the auditor. Re-authentication required. Closed (404 for every signed-in user) while talent.auditor_api_enabled is false; open, talent_auditor only (MFA; never platform_admin). X-Koro-Access-Reason (10–500 characters) is mandatory and the call is audited under its action with that reason. No name or e-mail is ever returned."
+      operationId: createTalentConfigVersion
+      parameters:
+        - description: Mandatory justification (10–500 characters); audited
+          in: header
+          name: X-Koro-Access-Reason
+          schema:
+            description: Mandatory justification (10–500 characters); audited
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateConfigVersionInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TalentConfigDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Create a talent config version
+      tags:
+        - talent
+      x-koro-action: talent.config.manage
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/talent/distribution:
+    get:
+      description: Users by band 0..3 (neutralised users excluded); a count below 10 is null. university_id narrows it to the cohorts of one university (a university below cohort_min is in the global cohort). Closed (404 for every signed-in user) while talent.auditor_api_enabled is false; open, talent_auditor only (MFA; never platform_admin). X-Koro-Access-Reason (10–500 characters) is mandatory and the call is audited under its action with that reason. No name or e-mail is ever returned.
+      operationId: getTalentDistribution
+      parameters:
+        - description: Mandatory justification (10–500 characters); audited
+          in: header
+          name: X-Koro-Access-Reason
+          schema:
+            description: Mandatory justification (10–500 characters); audited
+            type: string
+        - description: Only the cohorts of this university
+          explode: false
+          in: query
+          name: university_id
+          schema:
+            description: Only the cohorts of this university
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TalentDistributionDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get the band distribution
+      tags:
+        - talent
+      x-koro-action: talent.distribution.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+  /api/v1/admin/talent/neutralizations/{neutralization_id}/lift:
+    post:
+      description: Re-authentication required. An objection neutralisation is permanent (409 talent.objection_permanent), an opt-out is lifted by the student's privacy setting only (409 talent.opt_out_student_owned). Closed (404 for every signed-in user) while talent.auditor_api_enabled is false; open, talent_auditor only (MFA; never platform_admin). X-Koro-Access-Reason (10–500 characters) is mandatory and the call is audited under its action with that reason. No name or e-mail is ever returned.
+      operationId: liftTalentNeutralization
+      parameters:
+        - in: path
+          name: neutralization_id
+          required: true
+          schema:
+            type: string
+        - description: Mandatory justification (10–500 characters); audited
+          in: header
+          name: X-Koro-Access-Reason
+          schema:
+            description: Mandatory justification (10–500 characters); audited
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NeutralizationBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TalentNeutralizationDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Lift an auditor neutralisation
+      tags:
+        - talent
+      x-koro-action: talent.neutralization.manage
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/talent/point-events/{point_event_id}/reversal:
+    post:
+      description: Appends the reversal row (points negated, the original's occurred_at and config version); the original never changes. One reversal per row (409 talent.already_reversed); a reversal is not reversed (409 talent.not_reversible). Re-authentication required. Closed (404 for every signed-in user) while talent.auditor_api_enabled is false; open, talent_auditor only (MFA; never platform_admin). X-Koro-Access-Reason (10–500 characters) is mandatory and the call is audited under its action with that reason. No name or e-mail is ever returned.
+      operationId: reverseTalentPointEvent
+      parameters:
+        - in: path
+          name: point_event_id
+          required: true
+          schema:
+            type: string
+        - description: Mandatory justification (10–500 characters); audited
+          in: header
+          name: X-Koro-Access-Reason
+          schema:
+            description: Mandatory justification (10–500 characters); audited
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReversalInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TalentSignalDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Reverse a talent ledger row
+      tags:
+        - talent
+      x-koro-action: talent.reversal.create
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/talent/subjects/{user_id}/neutralizations:
+    post:
+      description: "An auditor neutralisation (reason admin): the band is 0 while it is active. Re-authentication required; one active auditor neutralisation per user (409 talent.already_neutralized). Closed (404 for every signed-in user) while talent.auditor_api_enabled is false; open, talent_auditor only (MFA; never platform_admin). X-Koro-Access-Reason (10–500 characters) is mandatory and the call is audited under its action with that reason. No name or e-mail is ever returned."
+      operationId: createTalentNeutralization
+      parameters:
+        - description: The subject's user ID
+          in: path
+          name: user_id
+          required: true
+          schema:
+            description: The subject's user ID
+            type: string
+        - description: Mandatory justification (10–500 characters); audited
+          in: header
+          name: X-Koro-Access-Reason
+          schema:
+            description: Mandatory justification (10–500 characters); audited
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NeutralizationBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TalentNeutralizationDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Neutralise a user's talent band
+      tags:
+        - talent
+      x-koro-action: talent.neutralization.manage
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
+  /api/v1/admin/talent/subjects/{user_id}/report:
+    get:
+      description: The ledger (with each row's point_event_id for a reversal), the category totals, the last nightly score (band, raw score, cohort percentile, cohort, config version) and the neutralisations. Closed (404 for every signed-in user) while talent.auditor_api_enabled is false; open, talent_auditor only (MFA; never platform_admin). X-Koro-Access-Reason (10–500 characters) is mandatory and the call is audited under its action with that reason. No name or e-mail is ever returned.
+      operationId: getTalentReport
+      parameters:
+        - description: The subject's user ID
+          in: path
+          name: user_id
+          required: true
+          schema:
+            description: The subject's user ID
+            type: string
+        - description: Mandatory justification (10–500 characters); audited
+          in: header
+          name: X-Koro-Access-Reason
+          schema:
+            description: Mandatory justification (10–500 characters); audited
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TalentReportDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get the talent report of a user
+      tags:
+        - talent
+      x-koro-action: talent.report.read
+      x-koro-rate-limit: read_default
       x-koro-surface: admin
   /api/v1/admin/universities:
     post:

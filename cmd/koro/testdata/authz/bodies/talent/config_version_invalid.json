@@ -1,0 +1,10 @@
+{
+  "params": {
+    "shrink_k": 5,
+    "cohort_min": 5,
+    "lookback_days": 540,
+    "category_caps_cp": {"participation": 4000, "intent": 1500, "profile": 1000, "community": 600, "engagement": 300},
+    "bands": [{"band": 1, "min_pct_bp": 5000, "mult_bp": 12000}]
+  },
+  "reauth": {"password": "matrix-reauth-password"}
+}

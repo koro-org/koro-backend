@@ -35,8 +35,13 @@ type Store interface {
 	// CurrentConfig returns the config version in force at at (the latest
 	// effective_from ≤ at) or ErrNotFound.
 	CurrentConfig(ctx context.Context, at time.Time) (ConfigVersion, error)
-	// InsertConfigVersion appends a config version (BE-052 surface; tests).
+	// InsertConfigVersion appends a config version (createTalentConfigVersion;
+	// effective_from is unique: 409 on a clash).
 	InsertConfigVersion(ctx context.Context, v ConfigVersion) (ConfigVersion, error)
+	// UpdateSignalDef replaces the tunable fields of d's definition
+	// (base points, caps, half-life, enabled) and records by as updated_by;
+	// ErrNotFound for an unknown code. updated_at is the database's.
+	UpdateSignalDef(ctx context.Context, d SignalDef, by uuid.UUID) (SignalDef, error)
 
 	// LockCounter returns the points applied so far to (user, day, signal),
 	// creating the counter row and locking it until the transaction ends
@@ -59,6 +64,8 @@ type Store interface {
 	CountCredited(ctx context.Context, userID uuid.UUID, signal string) (int, error)
 	// Points returns the user's ledger, oldest first.
 	Points(ctx context.Context, userID uuid.UUID) ([]PointEvent, error)
+	// GetPoint returns one ledger row or ErrNotFound.
+	GetPoint(ctx context.Context, id uuid.UUID) (PointEvent, error)
 
 	// Neutralizations returns the user's neutralisations, oldest first.
 	Neutralizations(ctx context.Context, userID uuid.UUID) ([]Neutralization, error)
@@ -78,6 +85,34 @@ type Store interface {
 	// StoredBand returns the user's stored band and whether a score row
 	// exists (the report shows it as is).
 	StoredBand(ctx context.Context, userID uuid.UUID) (band Band, found bool, err error)
+	// Score returns the user's score row; found is false without one.
+	Score(ctx context.Context, userID uuid.UUID) (s Score, found bool, err error)
+	// BandCounts counts the scores by band (0..3) that are not neutralised
+	// and whose user has no active neutralisation, of the cohorts whose key
+	// is cohortPrefix or starts with cohortPrefix + ":" ("" = every cohort):
+	// getTalentDistribution.
+	BandCounts(ctx context.Context, cohortPrefix string) (map[int]int, error)
+
+	// ScoringUsers returns, sorted, the users the nightly run looks at: a
+	// ledger row that occurred after since, a score or a cohort row.
+	ScoringUsers(ctx context.Context, since time.Time) ([]uuid.UUID, error)
+	// PointsSince returns the ledger rows of userIDs that occurred after
+	// since, ordered by user, occurred_at and ID.
+	PointsSince(ctx context.Context, userIDs []uuid.UUID, since time.Time) ([]PointEvent, error)
+	// ActiveNeutralized reports the users among userIDs with an active
+	// neutralisation of any reason.
+	ActiveNeutralized(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]bool, error)
+	// InsertRun records the start of a nightly run (status running).
+	InsertRun(ctx context.Context, r ScoreRun) error
+	// FinishRun records the end of r: status, finished_at,
+	// users_processed and the error text of a failed run.
+	FinishRun(ctx context.Context, r ScoreRun) error
+	// PutScores writes the scores (insert or replace by user) and the
+	// cohort row of each user (talent.cohorts).
+	PutScores(ctx context.Context, scores []Score) error
+	// DeleteScores deletes the score and cohort rows of userIDs and
+	// returns how many rows went.
+	DeleteScores(ctx context.Context, userIDs []uuid.UUID) (int, error)
 	// HasData reports whether any talent row of the user exists.
 	HasData(ctx context.Context, userID uuid.UUID) (bool, error)
 	// EraseUser deletes every talent row of the user (KVKK erasure): the

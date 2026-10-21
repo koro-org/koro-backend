@@ -3,6 +3,7 @@ package talent
 import (
 	"context"
 	"fmt"
+	"maps"
 	"uuid"
 
 	"koro/internal/audit"
@@ -103,42 +104,25 @@ func (s *service) neutralize(ctx context.Context, job string, userID uuid.UUID, 
 	})
 }
 
-// Lift implements Auditor. The authorisation comes first (a caller without
-// the action learns nothing about the neutralisation), then the rule.
-func (s *service) Lift(ctx context.Context, a authz.Actor, id uuid.UUID) error {
-	if err := authz.Can(ctx, a, authz.TalentNeutralizationManage, authz.Resource{Type: authz.TypeTalentSubject}); err != nil {
-		return err
-	}
-	return s.inTx(ctx, func(ctx context.Context) error {
-		n, err := s.d.Store.GetNeutralization(ctx, id)
-		if err != nil {
-			return err
-		}
-		if err := n.Liftable(); err != nil {
-			return err
-		}
-		by := a.UserID
-		row, lifted, err := s.d.Store.LiftNeutralization(ctx, id, &by, s.now())
-		switch {
-		case err != nil:
-			return err
-		case !lifted:
-			return ErrNotActive
-		}
-		return s.auditNeutralization(ctx, a, row, changeLifted)
-	})
+// auditNeutralization writes the talent.neutralization.manage record of a
+// system job in the talent transaction of ctx, on the session role.
+func (s *service) auditNeutralization(ctx context.Context, a authz.Actor, n Neutralization, change string) error {
+	return s.auditNeutralizationBy(ctx, a, n, change, "", nil)
 }
 
-// auditNeutralization writes the talent.neutralization.manage record in
-// the talent transaction of ctx, on the session role.
-func (s *service) auditNeutralization(ctx context.Context, a authz.Actor, n Neutralization, change string) error {
+// auditNeutralizationBy writes the talent.neutralization.manage record of
+// a change with the access reason and extra metadata (the auditor's
+// re-authentication kind) in the talent transaction of ctx.
+func (s *service) auditNeutralizationBy(ctx context.Context, a authz.Actor, n Neutralization, change, reason string,
+	extra map[string]any) error {
 	meta := map[string]any{"change": change, "reason": string(n.Reason), "neutralization_id": n.ID.String()}
 	if n.DSRID != nil {
 		meta["dsr_id"] = n.DSRID.String()
 	}
+	maps.Copy(meta, extra)
 	uid := n.UserID
 	return s.d.Store.AsApp(ctx, func(ctx context.Context) error {
 		return s.d.Audit.Log(ctx, audit.Event{Action: string(authz.TalentNeutralizationManage), Outcome: audit.Success,
-			ResourceType: authz.TypeTalentSubject, ResourceID: &uid, Metadata: meta}.By(a))
+			ResourceType: authz.TypeTalentSubject, ResourceID: &uid, Reason: reason, Metadata: meta}.By(a))
 	})
 }

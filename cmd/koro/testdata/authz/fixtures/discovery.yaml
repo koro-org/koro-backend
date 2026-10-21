@@ -1,0 +1,7 @@
+# Fixtures of the discovery module (cmd/koro/matrix_discovery_test.go; BE-051). IDs are authztest.ID(name).
+# discoverable_granted turns level 2 on for helper student_granted (verified, adult, uni_a; its profile comes
+# from students' grant_granted_a) through updateMyPrivacy with the discovery_profile consent text of students'
+# fixture notice_discovery: the read-time checks of level 2 pass for real. The other personas stay off.
+version: 1
+fixtures:
+  discoverable_granted: { kind: discoverable, student: student_granted }

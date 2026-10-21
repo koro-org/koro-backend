@@ -1478,6 +1478,76 @@ components:
       required:
         - decision
       type: object
+    AnonExperienceDTO:
+      additionalProperties: false
+      properties:
+        end_year:
+          format: int64
+          type: integer
+        kind:
+          enum:
+            - internship
+            - job
+            - volunteer
+            - project
+          type: string
+        start_year:
+          format: int64
+          type: integer
+        title:
+          type: string
+      required:
+        - kind
+        - title
+        - start_year
+      type: object
+    AnonProfileDTO:
+      additionalProperties: false
+      properties:
+        anon_id:
+          type: string
+        class_year:
+          format: int64
+          type: integer
+        degree_level:
+          enum:
+            - associate
+            - bachelor
+            - master
+            - doctorate
+          type: string
+        department:
+          $ref: "#/components/schemas/StudentDepartmentDTO"
+        expected_graduation_year:
+          format: int64
+          type: integer
+        experiences:
+          items:
+            $ref: "#/components/schemas/AnonExperienceDTO"
+          type: array
+        languages:
+          items:
+            $ref: "#/components/schemas/StudentLanguageDTO"
+          type: array
+        profile_completeness:
+          description: Number of completed profile sections
+          format: int64
+          type: integer
+        skills:
+          items:
+            $ref: "#/components/schemas/AnonSkillDTO"
+          type: array
+        university:
+          $ref: "#/components/schemas/StudentUniversityDTO"
+      required:
+        - anon_id
+        - university
+        - degree_level
+        - skills
+        - languages
+        - experiences
+        - profile_completeness
+      type: object
     AnonSkillDTO:
       additionalProperties: false
       properties:
@@ -4252,6 +4322,22 @@ components:
       required:
         - payment
         - order
+      type: object
+    DiscoveryProfileList:
+      additionalProperties: false
+      properties:
+        below_threshold:
+          description: "Fewer than 10 students match the filters: the list is empty"
+          type: boolean
+        items:
+          items:
+            $ref: "#/components/schemas/AnonProfileDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+        - below_threshold
       type: object
     DispatchBody:
       additionalProperties: false
@@ -26677,6 +26763,161 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: reauth
       x-koro-reauth: true
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/discovery/profiles:
+    get:
+      description: Level 2 profiles of the students who chose to be discoverable, under this company's pseudonyms (anon_id). OR inside a filter (repeat the parameter), AND across filters; there is no club filter. Ordered by relevance to the skill and language filters, ties in an order fixed for the session; the order is the only trace of the ranking. When fewer than 10 students match in total the list is empty and below_threshold is true. Needs the discovery_access right; every search is audited.
+      operationId: searchDiscovery
+      parameters:
+        - description: Company org ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Company org ID
+            type: string
+        - description: University IDs (repeat the parameter)
+          explode: true
+          in: query
+          name: university_id
+          schema:
+            description: University IDs (repeat the parameter)
+            items:
+              type: string
+            maxItems: 20
+            type: array
+        - description: Department IDs (repeat the parameter)
+          explode: true
+          in: query
+          name: department_id
+          schema:
+            description: Department IDs (repeat the parameter)
+            items:
+              type: string
+            maxItems: 20
+            type: array
+        - description: Class years 1–8 (repeat the parameter)
+          explode: true
+          in: query
+          name: class_year
+          schema:
+            description: Class years 1–8 (repeat the parameter)
+            items:
+              format: int64
+              type: integer
+            maxItems: 8
+            type: array
+        - explode: false
+          in: query
+          name: degree_level
+          schema:
+            enum:
+              - associate
+              - bachelor
+              - master
+              - doctorate
+            type: string
+        - description: Skill IDs (repeat the parameter)
+          explode: true
+          in: query
+          name: skill_id
+          schema:
+            description: Skill IDs (repeat the parameter)
+            items:
+              type: string
+            maxItems: 20
+            type: array
+        - description: ISO 639 language codes (repeat the parameter)
+          explode: true
+          in: query
+          name: language_code
+          schema:
+            description: ISO 639 language codes (repeat the parameter)
+            items:
+              type: string
+            maxItems: 20
+            type: array
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryProfileList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Search anonymous student profiles
+      tags:
+        - discovery
+      x-koro-action: discovery.profile.search
+      x-koro-rate-limit: search
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/discovery/profiles/{anon_id}:
+    get:
+      description: The level 2 profile behind one of this company's pseudonyms. Another company's pseudonym, or a student who is no longer discoverable, is not found. Needs the discovery_access right; every read is audited.
+      operationId: getDiscoveryProfile
+      parameters:
+        - description: Company org ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Company org ID
+            type: string
+        - description: The company's pseudonym of the student (from searchDiscovery)
+          in: path
+          name: anon_id
+          required: true
+          schema:
+            description: The company's pseudonym of the student (from searchDiscovery)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnonProfileDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get an anonymous student profile
+      tags:
+        - discovery
+      x-koro-action: discovery.profile.read
+      x-koro-rate-limit: read_default
       x-koro-surface: org
   /api/v1/orgs/{org_id}/dispatches:
     get:

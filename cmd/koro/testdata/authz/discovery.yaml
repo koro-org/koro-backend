@@ -1,6 +1,76 @@
-# BE-051: the P3 HTTP surface is not implemented yet. Strict coverage
-# keeps each pending action explicit until that ticket binds its operation.
+# Authz matrix of the discovery module (03 §5.10, 04 §2.10; BE-051). 2 operations × 18 personas + variants.
+# Both operations are cmm S·k20 / cma S·k20 on the company's management surface: the recruiter and the
+# company_admin of company_a (company_b: other_company_member) 200; members of another org and everyone
+# else 404; platform staff see the surface and get 403 ("platform rolleri dahil başka kimse keşif yüzeyini
+# kullanamaz"); members of a club see the club's surface and get 403. k20 (an active company with a
+# running discovery_access right) holds in the fixtures (entitlements: ent_company_a_discovery,
+# ent_company_b_discovery); its refusal is scenarios/discovery.yaml ("Hak yok").
+# Pseudonyms are path literals (matrixPseudonyms in matrix_discovery_test.go, checked by
+# TestMatrixDiscovery_PseudonymLiterals): student_granted is discoverable (fixtures/discovery.yaml);
+# l7fbt3m4pxse7dc2 is its anon_id for company_a, ael3ea4fuqkpycbd for company_b; mjh6rq23ztj3hxgo is the
+# persona student's for company_a (not discoverable). Another company's anon_id, a student who is not
+# discoverable and a malformed anon_id are the same 404 (03 k20, §7.2-5).
 version: 1
-pending_actions:
-  - discovery.profile.search # BE-051
-  - discovery.profile.read # BE-051
+groups:
+  # signed-in users who are neither members of company_a nor platform staff (company_a's surface: 404).
+  not_company_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin, event_staff,
+                  university_rep, other_company_member]
+  # signed-in users who are neither members of company_b nor platform staff (company_b's surface: 404).
+  not_company_b: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin, event_staff,
+                  university_rep, company_member, company_admin]
+  # signed-in users without a platform role (a missing org has no members: 404).
+  no_platform_role: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                     event_staff, university_rep, company_member, company_admin, other_company_member]
+
+operations:
+  searchDiscovery:
+    method: GET
+    path: /api/v1/orgs/{org_id}/discovery/profiles
+    action: discovery.profile.search
+    path_params: { org_id: company_a }
+    note: one discoverable student matches (below 10 → empty list, below_threshold); audited
+    expect: { anonymous: 401, company_member: 200, company_admin: 200, "@not_company_a": 404, "@platform_staff": 403 }
+    variants:
+      - name: company_b
+        path_params: { org_id: company_b }
+        expect: { anonymous: 401, other_company_member: 200, "@not_company_b": 404, "@platform_staff": 403 }
+      - name: with_filters
+        query: { university_id: "{{fixture:uni_a_university}}", class_year: "3", degree_level: bachelor,
+                 language_code: en }
+        expect: { anonymous: 401, company_member: 200, company_admin: 200, "@not_company_a": 404, "@platform_staff": 403 }
+      - name: club_org
+        path_params: { org_id: club_a }
+        note: club_a's members see the surface but hold no company role (403)
+        expect: { anonymous: 401, "@outsiders_a": 404, club_member: 403, club_admin: 403, "@platform_staff": 403 }
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000d1" }
+        expect: { anonymous: 401, "@no_platform_role": 404, "@platform_staff": 403 }
+
+  getDiscoveryProfile:
+    method: GET
+    path: /api/v1/orgs/{org_id}/discovery/profiles/{anon_id}
+    action: discovery.profile.read
+    path_params: { org_id: company_a, anon_id: "literal:l7fbt3m4pxse7dc2" }
+    note: company_a's pseudonym of the discoverable student_granted; audited
+    expect: { anonymous: 401, company_member: 200, company_admin: 200, "@not_company_a": 404, "@platform_staff": 403 }
+    variants:
+      - name: company_b
+        path_params: { org_id: company_b, anon_id: "literal:ael3ea4fuqkpycbd" }
+        expect: { anonymous: 401, other_company_member: 200, "@not_company_b": 404, "@platform_staff": 403 }
+      - name: other_company_pseudonym
+        path_params: { org_id: company_a, anon_id: "literal:ael3ea4fuqkpycbd" }
+        note: company_b's pseudonym of the same student does not resolve under company_a (k20)
+        expect: { anonymous: 401, company_member: 404, company_admin: 404, "@not_company_a": 404, "@platform_staff": 403 }
+      - name: company_b_with_a_pseudonym
+        path_params: { org_id: company_b, anon_id: "literal:l7fbt3m4pxse7dc2" }
+        expect: { anonymous: 401, other_company_member: 404, "@not_company_b": 404, "@platform_staff": 403 }
+      - name: not_discoverable
+        path_params: { org_id: company_a, anon_id: "literal:mjh6rq23ztj3hxgo" }
+        note: the persona student has a profile but level 2 is off
+        expect: { anonymous: 401, company_member: 404, company_admin: 404, "@not_company_a": 404, "@platform_staff": 403 }
+      - name: malformed
+        path_params: { org_id: company_a, anon_id: "literal:not-a-pseudonym" }
+        expect: { anonymous: 401, company_member: 404, company_admin: 404, "@not_company_a": 404, "@platform_staff": 403 }
+      - name: club_org
+        path_params: { org_id: club_a, anon_id: "literal:l7fbt3m4pxse7dc2" }
+        expect: { anonymous: 401, "@outsiders_a": 404, club_member: 403, club_admin: 403, "@platform_staff": 403 }

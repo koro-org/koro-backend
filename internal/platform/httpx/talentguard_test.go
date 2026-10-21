@@ -57,7 +57,8 @@ type guardAllowed struct {
 	}
 }
 
-// SuggestionDTO mirrors payments' match suggestion (talentFieldExempt).
+// SuggestionDTO mirrors payments' match suggestion before BE-081 renamed
+// score to match_confidence: there is no exemption, so score is rejected.
 type SuggestionDTO struct {
 	Score float64 `json:"score"`
 }
@@ -108,6 +109,9 @@ func TestTalentFieldGuard_RejectsTalentFields(t *testing.T) {
 		"band":             func(api huma.API) string { return register[guardEmpty, guardBand](api, guardOp("band", "discovery")) },
 		"query parameter":  func(api huma.API) string { return register[guardPoints, guardEmpty](api, guardOp("points", "feed")) },
 		"map value member": func(api huma.API) string { return register[guardEmpty, guardMap](api, guardOp("bymap", "events")) },
+		"no exemption (SuggestionDTO.score, BE-081)": func(api huma.API) string {
+			return register[guardEmpty, guardSuggestion](api, guardOp("suggest", "payments"))
+		},
 		"request body": func(api huma.API) string {
 			o := guardOp("filter", "messaging")
 			o.Method = http.MethodPost
@@ -121,10 +125,10 @@ func TestTalentFieldGuard_RejectsTalentFields(t *testing.T) {
 	}
 }
 
-// TestTalentFieldGuard_AllowsTalentOperationsAndExemptions: the
-// talent_auditor operations of 04 §T (BE-052) carry the band; size_band,
-// bandwidth, activity_ranking_choice and the reasoned exemption pass.
-func TestTalentFieldGuard_AllowsTalentOperationsAndExemptions(t *testing.T) {
+// TestTalentFieldGuard_AllowsTalentOperations: the talent_auditor
+// operations of 04 §T (BE-052) carry the band; size_band, bandwidth and
+// activity_ranking_choice pass.
+func TestTalentFieldGuard_AllowsTalentOperations(t *testing.T) {
 	t.Parallel()
 	api := guardApp(t)
 	if msg := register[guardEmpty, guardBand](api, auditorOp("getTalentReport", http.MethodGet, "/admin/talent/subjects/{user_id}/report")); msg != "" {
@@ -136,9 +140,6 @@ func TestTalentFieldGuard_AllowsTalentOperationsAndExemptions(t *testing.T) {
 	}
 	if msg := register[guardEmpty, guardAllowed](api, guardOp("allowed", "orgs")); msg != "" {
 		t.Fatalf("allowed members rejected: %s", msg)
-	}
-	if msg := register[guardEmpty, guardSuggestion](api, guardOp("suggest", "payments")); msg != "" {
-		t.Fatalf("exempt SuggestionDTO.score rejected: %s", msg)
 	}
 	if v := httpx.TalentFieldViolations(api.OpenAPI()); len(v) != 0 {
 		t.Fatalf("violations = %q, want none", v)

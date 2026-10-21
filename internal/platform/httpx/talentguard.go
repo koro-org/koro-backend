@@ -68,15 +68,6 @@ func talentAuditorOperation(op *huma.Operation) bool {
 	return strings.HasPrefix(action, talentTag+".") && surface == "admin"
 }
 
-// talentFieldExempt are reasoned exceptions, "<schema>.<member>".
-var talentFieldExempt = map[string]string{
-	// payments adminGetIncomingTransfer suggestions[].score (04 §2.16,
-	// BE-041): the confidence that a bank transfer matches an order (1, 0.7,
-	// 0.5, 0), not a person. 04 §V.0-2 bans score* in every DTO; the
-	// rename is a doc patch proposal of BE-047.
-	"SuggestionDTO.score": "bank transfer ↔ order match confidence (payments), not a talent value",
-}
-
 // talentFieldName reports a member or parameter name the guard rejects.
 func talentFieldName(name string) bool {
 	n := strings.ToLower(name)
@@ -157,9 +148,8 @@ func (w *talentWalker) walk(s *huma.Schema, where string) {
 	if s == nil {
 		return
 	}
-	name := ""
 	if s.Ref != "" {
-		name = strings.TrimPrefix(s.Ref, "#/components/schemas/")
+		name := strings.TrimPrefix(s.Ref, "#/components/schemas/")
 		if w.oapi.Components == nil || w.oapi.Components.Schemas == nil {
 			return
 		}
@@ -175,9 +165,7 @@ func (w *talentWalker) walk(s *huma.Schema, where string) {
 	w.seen[s] = true
 	for prop, ps := range s.Properties {
 		if talentFieldName(prop) {
-			if _, ok := talentFieldExempt[name+"."+prop]; !ok {
-				w.v = append(w.v, fmt.Sprintf("%s: %s member %q", w.at, where, prop))
-			}
+			w.v = append(w.v, fmt.Sprintf("%s: %s member %q", w.at, where, prop))
 		}
 		w.walk(ps, where+"."+prop)
 	}

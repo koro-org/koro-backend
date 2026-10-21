@@ -189,7 +189,7 @@ func (s *service) ListTransfers(ctx context.Context, a authz.Actor, q TransferQu
 
 // GetTransfer implements Service: authz (403) → the transfer (404) → the
 // suggestions of an unmatched transfer: the order of its reference code,
-// scored by its amount against what the order waits for.
+// rated by its amount against what the order waits for.
 func (s *service) GetTransfer(ctx context.Context, a authz.Actor, id uuid.UUID) (TransferView, error) {
 	if err := authz.Can(ctx, a, authz.PaymentsTransferRead, adminSurface); err != nil {
 		return TransferView{}, err
@@ -207,12 +207,12 @@ func (s *service) GetTransfer(ctx context.Context, a authz.Actor, id uuid.UUID) 
 		return v, err
 	}
 	v.Suggestions = append(v.Suggestions, Suggestion{OrderID: o.ID, OrderNo: o.OrderNo, AmountDue: o.DueAmount,
-		OrderStatus: o.Status, Score: score(t.Amount, o)})
+		OrderStatus: o.Status, MatchConfidence: matchConfidence(t.Amount, o)})
 	return v, nil
 }
 
-// score rates how well amount pays o (Suggestion).
-func score(amount int64, o orders.PayableOrder) float64 {
+// matchConfidence rates how well amount pays o (Suggestion).
+func matchConfidence(amount int64, o orders.PayableOrder) float64 {
 	switch {
 	case o.Status != orders.StatusAwaitingPayment || o.DueAmount <= 0:
 		return 0

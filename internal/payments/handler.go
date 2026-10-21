@@ -74,7 +74,7 @@ func Register(api huma.API, svc Service) {
 	reg(api, huma.Operation{
 		OperationID: "adminGetIncomingTransfer", Method: http.MethodGet, Path: "/admin/incoming-transfers/{transfer_id}",
 		Summary: "Get an incoming bank transfer with match suggestions",
-		Description: "An unmatched transfer suggests the order of the reference code in its description, scored by its " +
+		Description: "An unmatched transfer suggests the order of the reference code in its description, rated by its " +
 			"amount: 1 exactly what the order waits for, 0.7 less (partial), 0.5 more (an overpayment refund opens), 0 " +
 			"the order does not wait for a payment.",
 	}, op.Meta{Action: string(authz.PaymentsTransferRead), Surface: op.SurfaceAdmin}, h.getTransfer)
@@ -407,7 +407,7 @@ type SuggestionDTO struct {
 	OrderNo         string  `json:"order_no"`
 	AmountDueAmount int64   `json:"amount_due_amount" doc:"Kuruş the order still waits for"`
 	OrderStatus     string  `json:"order_status"`
-	Score           float64 `json:"score" minimum:"0" maximum:"1"`
+	MatchConfidence float64 `json:"match_confidence" minimum:"0" maximum:"1" doc:"How well the transfer matches the order: 1, 0.7, 0.5 or 0"`
 }
 
 // IncomingTransferDetailDTO is the body of adminGetIncomingTransfer.
@@ -509,7 +509,7 @@ func (h handler) getTransfer(ctx context.Context, in *TransferPath) (*transferDe
 		Suggestions: make([]SuggestionDTO, len(v.Suggestions))}}
 	for i, s := range v.Suggestions {
 		out.Body.Suggestions[i] = SuggestionDTO{OrderID: s.OrderID.String(), OrderNo: s.OrderNo, AmountDueAmount: s.AmountDue,
-			OrderStatus: string(s.OrderStatus), Score: s.Score}
+			OrderStatus: string(s.OrderStatus), MatchConfidence: s.MatchConfidence}
 	}
 	return out, nil
 }

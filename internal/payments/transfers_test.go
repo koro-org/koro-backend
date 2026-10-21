@@ -90,7 +90,7 @@ func TestCreateTransfer(t *testing.T) {
 
 // TestListAndGetTransfers: newest value date first with a cursor, status /
 // date / q filters (a reference code matches exactly), and the suggestion
-// of an unmatched transfer scored by its amount.
+// of an unmatched transfer rated by its amount.
 func TestListAndGetTransfers(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -130,7 +130,7 @@ func TestListAndGetTransfers(t *testing.T) {
 
 	for tr, want := range map[payments.IncomingTransfer]float64{exact: 1, partial: 0.7} {
 		v, err := e.svc.GetTransfer(ctx, pad, tr.ID)
-		if err != nil || len(v.Suggestions) != 1 || v.Suggestions[0].OrderID != p.order.ID || v.Suggestions[0].Score != want ||
+		if err != nil || len(v.Suggestions) != 1 || v.Suggestions[0].OrderID != p.order.ID || v.Suggestions[0].MatchConfidence != want ||
 			v.Suggestions[0].AmountDue != 1_200_000 {
 			t.Fatalf("suggestions of %d = %+v, %v", tr.Amount, v.Suggestions, err)
 		}

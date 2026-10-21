@@ -93,15 +93,15 @@ type TransferPage struct {
 }
 
 // Suggestion is an order a transfer may pay (04 §2.16: the reference code
-// of its description and its amount). Score: 1 the amount is what the order
+// of its description and its amount). MatchConfidence: 1 the amount is what the order
 // waits for, 0.7 it is less (a partial payment), 0.5 it is more (an
 // overpayment refund opens), 0 the order does not wait for a payment.
 type Suggestion struct {
-	OrderID     uuid.UUID
-	OrderNo     string
-	AmountDue   int64
-	OrderStatus orders.Status
-	Score       float64
+	OrderID         uuid.UUID
+	OrderNo         string
+	AmountDue       int64
+	OrderStatus     orders.Status
+	MatchConfidence float64
 }
 
 // TransferView is a transfer with its suggestions (adminGetIncomingTransfer).

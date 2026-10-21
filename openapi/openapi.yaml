@@ -12104,6 +12104,12 @@ components:
           description: Kuruş the order still waits for
           format: int64
           type: integer
+        match_confidence:
+          description: "How well the transfer matches the order: 1, 0.7, 0.5 or 0"
+          format: double
+          maximum: 1
+          minimum: 0
+          type: number
         order_id:
           format: uuid
           type: string
@@ -12111,17 +12117,12 @@ components:
           type: string
         order_status:
           type: string
-        score:
-          format: double
-          maximum: 1
-          minimum: 0
-          type: number
       required:
         - order_id
         - order_no
         - amount_due_amount
         - order_status
-        - score
+        - match_confidence
       type: object
     SuppressionDTO:
       additionalProperties: false
@@ -16035,7 +16036,7 @@ paths:
       x-koro-surface: admin
   /api/v1/admin/incoming-transfers/{transfer_id}:
     get:
-      description: "An unmatched transfer suggests the order of the reference code in its description, scored by its amount: 1 exactly what the order waits for, 0.7 less (partial), 0.5 more (an overpayment refund opens), 0 the order does not wait for a payment."
+      description: "An unmatched transfer suggests the order of the reference code in its description, rated by its amount: 1 exactly what the order waits for, 0.7 less (partial), 0.5 more (an overpayment refund opens), 0 the order does not wait for a payment."
       operationId: adminGetIncomingTransfer
       parameters:
         - description: Incoming transfer ID (an unknown or malformed ID is 404)

@@ -275,6 +275,7 @@ func (s *service) checkIn(ctx context.Context, a authz.Actor, e Event, sens bool
 	if err := s.d.Outbox.Add(ctx, env); err != nil {
 		return CheckinResult{}, err
 	}
+	s.liveCheckedIn(ctx, stored, r.UserID) // the live board, after the commit (BE-054)
 	return s.okResult(ctx, stored)
 }
 
@@ -453,6 +454,7 @@ func (s *service) VoidCheckin(ctx context.Context, a authz.Actor, eventID, id uu
 		if err := s.d.Outbox.Add(ctx, env); err != nil {
 			return voided{}, err
 		}
+		s.liveVoided(ctx, cur.OrgID, cur.ID, c.ID, *c.VoidedAt) // the live board, after the commit (BE-054)
 		return voided{CheckinID: c.ID, VoidedAt: *c.VoidedAt, Status: r.Status}, nil
 	})
 	if err != nil {
@@ -550,7 +552,7 @@ type CheckinStats struct {
 }
 
 // GetCheckinStats implements Service (events.checkin.stats; the live
-// board is BE-054).
+// board is live.go).
 func (s *service) GetCheckinStats(ctx context.Context, a authz.Actor, eventID uuid.UUID) (CheckinStats, error) {
 	e, _, err := s.checkinEvent(ctx, a, authz.EventsCheckinStats, eventID)
 	if err != nil {

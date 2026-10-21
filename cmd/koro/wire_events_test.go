@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -11,6 +13,8 @@ import (
 	"koro/internal/platform/crypto/rewrap"
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/httpx"
+	"koro/internal/platform/obs"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/privacy"
 	"koro/internal/platform/queue"
@@ -174,5 +178,50 @@ func TestWire_EventsExports(t *testing.T) {
 			return slices.Contains(s.PolicyCodes(), events.PolicyExportLog)
 		}) {
 		t.Fatal("the export log has no provider or sweeper")
+	}
+}
+
+// TestWire_EventsLiveBoard pins what BE-054 adds: the live board's hub
+// (in-process bus without Redis) handed to events, the gin route
+// /api/v1/events/{event_id}/check-ins/live (outside OpenAPI; anonymous 401
+// as problem+json), and hub.CloseAll among the shutdown hooks (after it a
+// handshake is 503).
+func TestWire_EventsLiveBoard(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	if c.events.hub == nil {
+		t.Fatal("live board hub not built")
+	}
+	app, err := httpx.New(httpx.Deps{Log: obs.Discard(), Actors: c.actors})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.registerRoutes(app.V1)
+	if _, ok := app.API.OpenAPI().Paths["/api/v1/events/{event_id}/check-ins/live"]; ok {
+		t.Fatal("the WebSocket route must stay out of OpenAPI")
+	}
+	path := "/api/v1/events/" + uuid.NewV7().String() + "/check-ins/live"
+	do := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+		req.Header.Set("Connection", "Upgrade")
+		req.Header.Set("Upgrade", "websocket")
+		rec := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := do(); rec.Code != http.StatusUnauthorized || !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/problem+json") {
+		t.Fatalf("anonymous handshake: %d %s", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	if len(c.shutdownHooks) == 0 {
+		t.Fatal("no shutdown hook")
+	}
+	for _, f := range c.shutdownHooks {
+		f()
+	}
+	if _, err := c.events.hub.Admit(t.Context(), events.LiveTopic(uuid.NewV7()), uuid.NewV7()); err == nil {
+		t.Fatal("the hub admits connections after the shutdown hooks ran")
 	}
 }

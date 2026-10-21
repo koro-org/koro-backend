@@ -22102,7 +22102,7 @@ paths:
       x-koro-surface: resource
   /api/v1/events/{event_id}/check-ins/stats:
     get:
-      description: "confirmed: the seat holders (confirmed and checked in); checked_in; voided check-ins; waitlisted; no_show after the attendance is closed. The live board is a WebSocket (later)."
+      description: "confirmed: the seat holders (confirmed and checked in); checked_in; voided check-ins; waitlisted; no_show after the attendance is closed. The live board is the WebSocket GET /api/v1/events/{event_id}/check-ins/live (same access; outside this document)."
       operationId: getCheckinStats
       parameters:
         - description: Event ID

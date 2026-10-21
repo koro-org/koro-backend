@@ -1337,6 +1337,11 @@ func (a *matrixApp) do(t *testing.T, m *matrix, c matrixCase) (int, string) {
 			t.Fatalf("%s: %v", c.name, err)
 		}
 		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusSwitchingProtocols {
+			// The upgraded stream stays open (a real hub sends its snapshot
+			// and waits): never read it; closing the body hangs up (BE-054).
+			return resp.StatusCode, ""
+		}
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return resp.StatusCode, string(b)
 	}

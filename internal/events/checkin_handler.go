@@ -82,7 +82,8 @@ func registerCheckins(api huma.API, h handler) {
 		OperationID: "getCheckinStats", Method: http.MethodGet, Path: "/events/{event_id}/check-ins/stats",
 		Summary: "Get an event's attendance counters",
 		Description: "confirmed: the seat holders (confirmed and checked in); checked_in; voided check-ins; " +
-			"waitlisted; no_show after the attendance is closed. The live board is a WebSocket (later).",
+			"waitlisted; no_show after the attendance is closed. The live board is the WebSocket GET " +
+			"/api/v1/events/{event_id}/check-ins/live (same access; outside this document).",
 	}, op.Meta{Action: string(authz.EventsCheckinStats), Surface: op.SurfaceResource}, h.getCheckinStats)
 
 	reg(api, huma.Operation{

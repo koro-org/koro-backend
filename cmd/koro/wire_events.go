@@ -14,12 +14,21 @@ import (
 	"koro/internal/platform/crypto"
 	"koro/internal/platform/crypto/rewrap"
 	"koro/internal/platform/db"
+	"koro/internal/platform/realtime"
 	"koro/internal/students"
 )
 
 // eventsWiring wires the events module (L8; 01 §4.10). First owner: BE-024.
 // Only tickets of the events module edit this file (BE-001 R4).
 // WebSocket hub shutdown goes to c.shutdownHooks (BE-054).
+//
+// BE-054 builds the live board's realtime.Hub (Redis pub/sub over
+// c.infra.redis; without Redis — wiring and matrix tests — an in-process
+// bus; Origin check against TRUSTED_ORIGINS, c.infra.platform.Realtime),
+// hands it to events as Deps.Live, mounts GET
+// /api/v1/events/{event_id}/check-ins/live (a gin route outside OpenAPI,
+// authenticated by c.actors) and registers hub.CloseAll as a shutdown hook
+// (1001 on every socket, 05 §10.9).
 //
 // Seams (nil in production):
 //
@@ -83,6 +92,10 @@ type eventsWiring struct {
 	built events.Store      // the store build used (wiring and matrix tests seed it)
 	keys  events.TicketKeys // the ticket key ring build used (matrix fixtures derive the tickets' tokens)
 	files events.Files      // c.files.svc, kept for the matrix fixtures (export files)
+	hub   *realtime.Hub     // the live board's WebSocket hub (BE-054); nil under `koro openapi`
+	// live overrides the hub's limits and timings (tests); Bus, Clock, Log
+	// and TrustedOrigins are always set by build.
+	live realtime.Config
 }
 
 func (w *eventsWiring) build(c *container) error {
@@ -153,15 +166,38 @@ func (w *eventsWiring) build(c *container) error {
 		PurposePrefix: events.SensitiveAnswersPurposePrefix, PurposeColumn: "id"}); err != nil {
 		return fmt.Errorf("events: %w", err)
 	}
+	hub, err := w.newHub(c)
+	if err != nil {
+		return err
+	}
+	d.Live = hub
 	mod, err := events.New(d)
 	if err != nil {
 		return err
 	}
-	w.mod, w.svc, w.built, w.keys, w.files = mod, mod.Service, store, d.Tickets, d.Files
+	w.mod, w.svc, w.built, w.keys, w.files, w.hub = mod, mod.Service, store, d.Tickets, d.Files, hub
+	c.shutdownHooks = append(c.shutdownHooks, hub.CloseAll)
 	c.privacy = append(c.privacy, mod.Privacy)
 	c.students.registrations = eventsRegistrations{svc: mod.Service} // T-241
 	c.sweepers = append(c.sweepers, mod.Sweeper)
 	return nil
+}
+
+// newHub builds the live board's hub: Redis pub/sub between the API
+// replicas, an in-process bus without Redis (wiring and matrix tests).
+func (w *eventsWiring) newHub(c *container) (*realtime.Hub, error) {
+	cfg := w.live
+	cfg.Bus = realtime.NewMemBus()
+	if c.infra.redis != nil {
+		cfg.Bus = realtime.NewRedisBus(c.infra.redis)
+	}
+	cfg.Clock, cfg.Log = c.infra.clock, c.infra.log.With("component", "realtime")
+	cfg.TrustedOrigins = c.infra.platform.Realtime.TrustedOrigins
+	hub, err := realtime.NewHub(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("events: %w", err)
+	}
+	return hub, nil
 }
 
 // eventsRegistrations adapts events.Registrations to students.Registrations
@@ -203,9 +239,13 @@ func (w *eventsWiring) tasks(c *container) {
 }
 
 // routes: the 12 operations of BE-024, the 7 of BE-026, the 8 of BE-028,
-// the 9 of BE-031 and the 3 of BE-050 (04 §2.6); w.svc is nil under `koro
-// openapi`, which Register tolerates.
-func (w *eventsWiring) routes(c *container, api huma.API) { events.Register(api, w.svc) }
+// the 9 of BE-031 and the 3 of BE-050 (04 §2.6), and the live board's
+// WebSocket (BE-054; a gin route, not an operation). w.svc and w.hub are
+// nil under `koro openapi`, which both tolerate.
+func (w *eventsWiring) routes(c *container, api huma.API) {
+	events.Register(api, w.svc)
+	events.RegisterLive(api, w.svc, w.hub, c.actors)
+}
 
 // eventsSender adapts notify (L3) to events.Sender, read at call time; a
 // missing sender fails the task (retried), it never drops the notice.

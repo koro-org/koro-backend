@@ -133,6 +133,11 @@
 // cells, a personal-data warning row), downloaded only by its requester
 // while ready (counted and audited), deleted after 7 days by
 // events.purge_exports; the row stays 2 years (event_export_log).
+//
+// BE-054 adds the live check-in board (live.go, live_handler.go; 04 §W): a
+// WebSocket over platform/realtime, authorised like getCheckinStats when it
+// opens and re-checked at least every minute; check-ins and voids are
+// published after the commit.
 package events
 
 import (
@@ -173,7 +178,7 @@ type Registrations interface {
 }
 
 // Service is the events service: the cross-module contract plus the HTTP
-// use cases of BE-024, BE-026, BE-028, BE-031 and BE-050 (04 §2.6). Every method that takes an actor calls
+// use cases of BE-024, BE-026, BE-028, BE-031, BE-050 and BE-054 (04 §2.6, §W). Every method that takes an actor calls
 // authz.Can first (05 §5.3).
 type Service interface {
 	Events
@@ -285,6 +290,11 @@ type Service interface {
 	ListCheckins(ctx context.Context, a authz.Actor, eventID uuid.UUID, limit int, after *After) (CheckinPage, error)
 	// GetCheckinStats is getCheckinStats (events.checkin.stats).
 	GetCheckinStats(ctx context.Context, a authz.Actor, eventID uuid.UUID) (CheckinStats, error)
+	// OpenLiveBoard authorises the live board's WebSocket (events.checkin.stats,
+	// 04 §W; BE-054) when it opens and at every re-check.
+	OpenLiveBoard(ctx context.Context, a authz.Actor, eventID uuid.UUID) (LiveBoard, error)
+	// LiveSnapshot is the board's first message (the counters).
+	LiveSnapshot(ctx context.Context, b LiveBoard) ([]byte, error)
 	// FinalizeEventAttendance is finalizeEventAttendance
 	// (events.attendance.finalize): after the end, once (409 otherwise); it
 	// returns the number of no-shows the worker marks.
@@ -368,6 +378,10 @@ type Deps struct {
 	// Files or Queue, which the exports also need: the file is stored by
 	// files, the build is a task).
 	Reauth Reauthenticator
+
+	// Live publishes the live board's messages after a check-in or a void
+	// commits (BE-054; realtime.Hub). nil → nothing is published.
+	Live LivePublisher
 }
 
 func (d Deps) validate() error {

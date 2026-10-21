@@ -48,7 +48,7 @@ type pgEnv struct {
 	audit *auditLog
 }
 
-func newPGEnv(t *testing.T) *pgEnv {
+func newPGEnv(t *testing.T, opts ...func(*events.Deps)) *pgEnv {
 	t.Helper()
 	d := testutil.NewDB(t)
 	clk := clock.NewFake(t0)
@@ -57,11 +57,15 @@ func newPGEnv(t *testing.T) *pgEnv {
 	fo := newFakeOrgs()
 	fo.orgs[e.org] = orgs.OrgSummary{ID: e.org, Kind: orgs.KindClub, Name: "PG Kulübü", Slug: "pg-kulubu", Status: orgs.StatusActive}
 	idem := idempotency.New(idempotency.Deps{Tx: d.Tx, Store: idempotency.NewGormStore(d.ORM), Clock: clk, Log: obs.Discard()})
-	mod, err := events.New(events.Deps{
+	deps := events.Deps{
 		Store: e.store, Tx: d.Tx, Outbox: e.out, Audit: e.audit, Orgs: fo, Catalog: fakeCatalog{}, Idempotency: idem,
 		Clock: clk, Log: obs.Discard(), Consents: &spyRecorder{}, Sealer: testEnvelope(), Tickets: testDeriver(),
 		Sender: &spySender{},
-	})
+	}
+	for _, o := range opts {
+		o(&deps)
+	}
+	mod, err := events.New(deps)
 	if err != nil {
 		t.Fatal(err)
 	}

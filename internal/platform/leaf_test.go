@@ -27,6 +27,7 @@ var leafPackages = map[string][]string{
 	"passwd":        nil,
 	"crypto":        nil,
 	"sanitize":      nil,
+	"applink":       nil,
 }
 
 // thirdParty is the complete list of non-stdlib imports allowed in leaves.

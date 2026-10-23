@@ -302,7 +302,7 @@ type Deps struct {
 	Notices NoticeLookup    // the privacy notice shown at registration
 	Mailer  Mailer          // worker: verification, reset, change and security e-mails
 
-	// LinkBaseURL is IDENTITY_LINK_BASE_URL (web application origin).
+	// LinkBaseURL is APP_LINK_BASE_URL (client origin of the e-mail links; internal/platform/applink).
 	LinkBaseURL string
 
 	// Hasher hashes and verifies passwords. nil (worker) → every password

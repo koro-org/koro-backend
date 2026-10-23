@@ -6,8 +6,10 @@ import (
 
 	"koro/internal/audit"
 	"koro/internal/authz"
+	"koro/internal/consent"
 	"koro/internal/entitlements"
 	"koro/internal/feed"
+	"koro/internal/identity"
 	"koro/internal/notify"
 	"koro/internal/orgs"
 	"koro/internal/students"
@@ -46,6 +48,25 @@ type AccessGrants interface {
 	//
 	// sync-write: students.AccessGrants.Grant
 	Grant(ctx context.Context, studentID, companyOrgID uuid.UUID, src students.GrantSource, srcID uuid.UUID) error
+}
+
+// ContactSharing is students' per-company contact sharing of an
+// acceptance (L7; 01 §6.3 "İletişim talebi kabulü", T-335/T-345; BE-089):
+// with share_contact the student's e-mail is shared with the request's
+// company alone (contact_shared_at of its level 3 grant, the
+// contact_info_share consent with the text shown) in the acceptance's
+// transaction, so a sharing that cannot be written rolls the acceptance
+// back.
+type ContactSharing interface {
+	// ShareContactWithCompany shares the student a's e-mail with
+	// companyOrgID (whose grant Grant has just given) in the transaction
+	// carried by ctx; no other company starts seeing it. A minor is 422
+	// students.minor_restricted, a proof that is not the current text the
+	// consent module's 422/409.
+	//
+	// sync-write: students.ContactSharing.ShareContactWithCompany
+	ShareContactWithCompany(ctx context.Context, a authz.Actor, companyOrgID uuid.UUID, proof students.ConsentProof,
+		channel consent.Channel, requestID uuid.UUID) error
 }
 
 // Discoverable is students' level 2 contract (L7; 01 §4.9): whether a
@@ -90,8 +111,18 @@ type Orgs interface {
 	HasRole(ctx context.Context, orgID, userID uuid.UUID, roles ...authz.MemberRole) (bool, error)
 }
 
-// Sender is notify (L3; 01 §4.5): one in-app notice per recipient,
-// idempotent by its dedupe key.
+// Users is identity's address lookup (L4; 01 §4.6 Users.Contact): the
+// address and language of a notice's e-mail (T-336; BE-089). Worker path
+// only.
+type Users interface {
+	// Contact returns the address of a live user; identity.ErrNotFound for
+	// an unknown or erased one.
+	Contact(ctx context.Context, id uuid.UUID) (identity.UserContact, error)
+}
+
+// Sender is notify (L3; 01 §4.5): one notice per recipient and channel
+// (in-app, push, e-mail), idempotent by its dedupe key; notify skips a
+// channel the recipient switched off (contact_requests, 02 §6.5).
 type Sender interface {
 	Send(ctx context.Context, m notify.Message) (uuid.UUID, error)
 }

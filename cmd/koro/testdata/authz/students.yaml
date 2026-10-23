@@ -349,3 +349,26 @@ operations:
         path_params: { org_id: company_a, user_id: user_unverified }
         note: a suspended grant is the student's to end; the company finds no active grant (404, BE-077)
         expect: { anonymous: 401, company_member: 404, company_admin: 404, "@not_company_a": 404, "@platform_staff": 403 }
+
+  unshareMyAccessGrantContact:
+    method: DELETE
+    path: /api/v1/me/access-grants/{grant_id}/contact
+    action: students.access_grant.revoke
+    path_params: { grant_id: grant_student_b }
+    note: >-
+      BE-089 (T-345): the student stops sharing the e-mail with one company (a partial revoke of its own grant, the
+      revokeMyAccessGrant cell: O for every account, no verification); a grant that shares nothing is 204 too;
+      another user's grant is 404 (IDOR)
+    expect: { anonymous: 401, student: 204, "@other_students": 404, "@non_students": 404 }
+    variants:
+      - name: other_students_grant
+        path_params: { grant_id: grant_granted_a }
+        note: student_granted's grant; no persona owns it
+        expect: { anonymous: 401, "@signed_in": 404 }
+      - name: missing
+        path_params: { grant_id: "literal:00000000-0000-7000-8000-0000000000a2" }
+        expect: { anonymous: 401, "@signed_in": 404 }
+      - name: lapsed_students_grant
+        path_params: { grant_id: grant_lapsed_a }
+        note: the suspended grant of user_unverified; its owner stops the sharing without a verification
+        expect: { anonymous: 401, user_unverified: 204, "@not_user_unverified": 404 }

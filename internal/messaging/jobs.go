@@ -10,7 +10,9 @@ import (
 	"uuid"
 
 	"koro/internal/authz"
+	"koro/internal/identity"
 	"koro/internal/notify"
+	"koro/internal/orgs"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/queue"
 )
@@ -24,9 +26,12 @@ const (
 	ExpireBatch = 200
 )
 
-// Notice templates (internal/notify/templates/messaging). In-app texts are
-// fixed: the data carries the request's ID, the deep link the request, the
-// source org the company. Never the subject, the message or a reason.
+// Notice templates (internal/notify/templates/messaging): in_app, push and
+// email (T-336; BE-089), preference contact_requests on each channel. The
+// in-app and push texts are fixed: the data carries the request's ID, the
+// deep link the request, the in-app source org the company. The e-mail
+// adds the company's name (to the student) and the link. Never the subject,
+// the message or a reason.
 const (
 	tmplReceived = "messaging.contact_request_received" // the student: a company asked
 	tmplAccepted = "messaging.contact_request_accepted" // the sender: accepted (level 3 is open)
@@ -122,7 +127,27 @@ func (s *service) handleCreated(ctx context.Context, e domainevent.Envelope) err
 		return nil
 	}
 	org := r.OrgID
-	return s.notify(ctx, tmplReceived, r, []uuid.UUID{r.StudentUserID}, "/me/contact-requests/"+r.ID.String(), &org)
+	company, err := s.companyName(ctx, r.OrgID)
+	if err != nil {
+		return err
+	}
+	return s.notify(ctx, tmplReceived, r, []uuid.UUID{r.StudentUserID}, "/me/contact-requests/"+r.ID.String(), &org,
+		map[string]any{"company_name": company})
+}
+
+// companyName is the company's name for the student's e-mail: the org's
+// public name (the sender of the request, never the student's data); a
+// company gone meanwhile reads as an empty name (the template's generic
+// wording).
+func (s *service) companyName(ctx context.Context, orgID uuid.UUID) (string, error) {
+	o, err := s.d.Orgs.Get(ctx, orgID)
+	switch {
+	case errors.Is(err, orgs.ErrNotFound):
+		return "", nil
+	case err != nil:
+		return "", fmt.Errorf("messaging: notice company: %w", err)
+	}
+	return o.Name, nil
 }
 
 // handleClosed tells the company the outcome: the sender while still an
@@ -155,7 +180,7 @@ func (s *service) handleClosed(ctx context.Context, e domainevent.Envelope) erro
 	if err != nil {
 		return err
 	}
-	return s.notify(ctx, tmpl, r, to, "/orgs/"+r.OrgID.String()+"/contact-requests/"+r.ID.String(), nil)
+	return s.notify(ctx, tmpl, r, to, "/orgs/"+r.OrgID.String()+"/contact-requests/"+r.ID.String(), nil, nil)
 }
 
 // companyRecipients is the sender while an active member of the company,
@@ -181,10 +206,20 @@ func (s *service) companyRecipients(ctx context.Context, r ContactRequest) ([]uu
 	return out, nil
 }
 
-// notify sends one in-app notice per recipient; the dedupe key makes a
-// repeated task a no-op per recipient. A permanent refusal is logged, a
-// transient one retries the task.
-func (s *service) notify(ctx context.Context, tmpl string, r ContactRequest, to []uuid.UUID, link string, source *uuid.UUID) error {
+// noticeChannels are the channels of every contact request notice (T-336):
+// notify drops the ones a recipient switched off (contact_requests).
+var noticeChannels = []notify.Channel{notify.ChannelInApp, notify.ChannelPush, notify.ChannelEmail}
+
+// notify sends tmpl to every recipient on each channel: in-app (the source
+// org, the deep link), push (the deep link) and e-mail (the address and
+// language from identity; mail plus the link to the request). The dedupe
+// key per recipient and channel makes a repeated task a no-op where it
+// already went (the in-app key is BE-056's). A recipient without an
+// address (erased meanwhile) gets no e-mail; a permanent refusal is
+// logged, a transient one retries the task.
+func (s *service) notify(ctx context.Context, tmpl string, r ContactRequest, to []uuid.UUID, link string, source *uuid.UUID,
+	mail map[string]any,
+) error {
 	if len(to) == 0 {
 		return nil
 	}
@@ -194,20 +229,57 @@ func (s *service) notify(ctx context.Context, tmpl string, r ContactRequest, to 
 	var errs []error
 	for _, uid := range to {
 		u := uid
-		_, err := s.d.Sender.Send(ctx, notify.Message{
-			UserID: &u, Channel: notify.ChannelInApp, Category: notify.CategoryTransactional, Template: tmpl,
-			SourceOrgID: source, LinkPath: link, DedupeKey: tmpl + ":" + r.ID.String() + ":" + u.String(),
-			Data: map[string]any{"contact_request_id": r.ID.String()},
-		})
-		switch {
-		case err == nil:
-		case notify.IsPermanent(err):
-			s.d.Log.LogAttrs(ctx, slog.LevelError, "contact request notice not deliverable", slog.String("template", tmpl),
-				slog.String("contact_request_id", r.ID.String()), slog.String("user_id", u.String()),
-				slog.String("err", err.Error()))
-		default:
-			errs = append(errs, err)
+		key := tmpl + ":" + r.ID.String() + ":" + u.String()
+		for _, ch := range noticeChannels {
+			m := notify.Message{
+				UserID: &u, Channel: ch, Category: notify.CategoryTransactional, Template: tmpl, LinkPath: link,
+				DedupeKey: key, Data: map[string]any{"contact_request_id": r.ID.String()},
+			}
+			switch ch {
+			case notify.ChannelInApp:
+				m.SourceOrgID = source
+			case notify.ChannelPush:
+				m.DedupeKey = key + ":push"
+			case notify.ChannelEmail:
+				c, ok, err := s.contact(ctx, u)
+				if err != nil {
+					errs = append(errs, err)
+				}
+				if !ok {
+					continue
+				}
+				m.ToEmail, m.Locale, m.LinkPath, m.DedupeKey = c.Email, c.Locale, "", key+":email"
+				m.Data = map[string]any{"url": s.d.LinkBaseURL + link}
+				for k, v := range mail {
+					m.Data[k] = v
+				}
+			}
+			if _, err := s.d.Sender.Send(ctx, m); err != nil {
+				if !notify.IsPermanent(err) {
+					errs = append(errs, err)
+					continue
+				}
+				s.d.Log.LogAttrs(ctx, slog.LevelError, "contact request notice not deliverable", slog.String("template", tmpl),
+					slog.String("channel", string(ch)), slog.String("contact_request_id", r.ID.String()),
+					slog.String("user_id", u.String()), slog.String("err", err.Error()))
+			}
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// contact is the address of a notice's e-mail; none without the Users
+// port or for an unknown or erased user.
+func (s *service) contact(ctx context.Context, id uuid.UUID) (identity.UserContact, bool, error) {
+	if s.d.Users == nil {
+		return identity.UserContact{}, false, nil
+	}
+	c, err := s.d.Users.Contact(ctx, id)
+	switch {
+	case errors.Is(err, identity.ErrNotFound):
+		return identity.UserContact{}, false, nil
+	case err != nil:
+		return identity.UserContact{}, false, fmt.Errorf("messaging: notice contact: %w", err)
+	}
+	return c, c.Email != "", nil
 }

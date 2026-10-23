@@ -13,6 +13,7 @@ import (
 	"koro/internal/entitlements"
 	"koro/internal/feed"
 	"koro/internal/messaging"
+	"koro/internal/notify"
 	"koro/internal/orgs"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
@@ -162,7 +163,7 @@ func TestCreate_DeclinedWithin90Days_404(t *testing.T) {
 	ctx := t.Context()
 	cmm := actor(t, "company_member")
 	v := e.send(t, "student")
-	if _, err := e.svc.Respond(ctx, actor(t, "student"), v.Request.ID, messaging.DecisionDeclined); err != nil {
+	if _, err := e.svc.Respond(ctx, actor(t, "student"), v.Request.ID, decline); err != nil {
 		t.Fatal(err)
 	}
 	e.clk.Advance(89 * 24 * time.Hour)
@@ -265,7 +266,7 @@ func TestAccept_GrantsL3InSameTx(t *testing.T) {
 	}
 
 	e.students.failGrant = students.ErrMinorRestricted
-	_, err := e.svc.Respond(ctx, stu, v.Request.ID, messaging.DecisionAccepted)
+	_, err := e.svc.Respond(ctx, stu, v.Request.ID, accept)
 	wantErr(t, err, students.ErrMinorRestricted)
 	got, _ := e.svc.GetMine(ctx, stu, v.Request.ID)
 	if got.Status != messaging.StatusPending || got.Request.RespondedAt != nil || len(e.students.granted()) != 0 ||
@@ -274,7 +275,7 @@ func TestAccept_GrantsL3InSameTx(t *testing.T) {
 	}
 
 	e.students.failGrant = nil
-	got, err = e.svc.Respond(ctx, stu, v.Request.ID, messaging.DecisionAccepted)
+	got, err = e.svc.Respond(ctx, stu, v.Request.ID, accept)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,13 +300,13 @@ func TestAccept_GrantsL3InSameTx(t *testing.T) {
 	}
 
 	// The same answer again changes nothing; the other answer is 409.
-	if _, err := e.svc.Respond(ctx, stu, v.Request.ID, messaging.DecisionAccepted); err != nil {
+	if _, err := e.svc.Respond(ctx, stu, v.Request.ID, accept); err != nil {
 		t.Fatalf("accept again: %v", err)
 	}
 	if len(e.students.granted()) != 1 {
 		t.Fatal("a repeated acceptance granted again")
 	}
-	_, err = e.svc.Respond(ctx, stu, v.Request.ID, messaging.DecisionDeclined)
+	_, err = e.svc.Respond(ctx, stu, v.Request.ID, decline)
 	wantCode(t, err, 409, "messaging.invalid_state")
 
 	cv, err := e.svc.GetSent(ctx, actor(t, "company_admin"), e.companyA, v.Request.ID)
@@ -324,17 +325,17 @@ func TestAccept_NeedsVerification_DeclineFree(t *testing.T) {
 	v := e.send(t, "student")
 	lapsed := actor(t, "student")
 	lapsed.StudentStatus, lapsed.UniversityID = authz.StudentLapsed, nil
-	_, err := e.svc.Respond(ctx, lapsed, v.Request.ID, messaging.DecisionAccepted)
+	_, err := e.svc.Respond(ctx, lapsed, v.Request.ID, accept)
 	wantErr(t, err, students.ErrVerificationRequired)
 	wantCode(t, err, 403, "students.verification_required")
 	if len(e.students.granted()) != 0 {
 		t.Fatal("granted without a verification")
 	}
-	got, err := e.svc.Respond(ctx, lapsed, v.Request.ID, messaging.DecisionDeclined)
+	got, err := e.svc.Respond(ctx, lapsed, v.Request.ID, decline)
 	if err != nil || got.Status != messaging.StatusDeclined {
 		t.Fatalf("decline = %+v, %v", got, err)
 	}
-	_, err = e.svc.Respond(ctx, lapsed, v.Request.ID, messaging.Decision("maybe"))
+	_, err = e.svc.Respond(ctx, lapsed, v.Request.ID, messaging.RespondInput{Decision: "maybe"})
 	wantErr(t, err, problem.ErrValidation)
 }
 
@@ -347,7 +348,7 @@ func TestDecline_NoReasonExposedToCompany(t *testing.T) {
 	e := newEnv(t)
 	ctx := t.Context()
 	v := e.send(t, "student")
-	if _, err := e.svc.Respond(ctx, actor(t, "student"), v.Request.ID, messaging.DecisionDeclined); err != nil {
+	if _, err := e.svc.Respond(ctx, actor(t, "student"), v.Request.ID, decline); err != nil {
 		t.Fatal(err)
 	}
 	cv, err := e.svc.GetSent(ctx, actor(t, "company_member"), e.companyA, v.Request.ID)
@@ -378,7 +379,7 @@ func TestDecline_NoReasonExposedToCompany(t *testing.T) {
 	if err := e.mod.HandleClosed(ctx, closed[0].env); err != nil {
 		t.Fatal(err)
 	}
-	sent := e.sender.all()
+	sent := e.sender.on(notify.ChannelInApp)
 	if len(sent) != 1 || sent[0].Template != "messaging.contact_request_declined" ||
 		*sent[0].UserID != authztest.ID("company_member") || len(sent[0].Data) != 1 {
 		t.Fatalf("notices = %+v", sent)
@@ -408,11 +409,11 @@ func TestWithdraw_OnlyPending_NoRefund(t *testing.T) {
 	if n := len(e.audit.of(authz.MessagingContactRequestWithdraw)); n != 1 {
 		t.Fatalf("withdraw audit records = %d, want 1", n)
 	}
-	_, err = e.svc.Respond(ctx, actor(t, "student"), v.Request.ID, messaging.DecisionAccepted)
+	_, err = e.svc.Respond(ctx, actor(t, "student"), v.Request.ID, accept)
 	wantCode(t, err, 409, "messaging.invalid_state")
 
 	a := e.send(t, "student_granted")
-	if _, err := e.svc.Respond(ctx, actor(t, "student_granted"), a.Request.ID, messaging.DecisionAccepted); err != nil {
+	if _, err := e.svc.Respond(ctx, actor(t, "student_granted"), a.Request.ID, accept); err != nil {
 		t.Fatal(err)
 	}
 	_, err = e.svc.Withdraw(ctx, cmm, e.companyA, a.Request.ID)
@@ -451,7 +452,7 @@ func TestExpire_After14Days_NoRefund(t *testing.T) {
 	if err != nil || got.Status != messaging.StatusExpired {
 		t.Fatalf("before the job: %+v, %v", got, err)
 	}
-	_, err = e.svc.Respond(ctx, actor(t, "student"), old.Request.ID, messaging.DecisionAccepted)
+	_, err = e.svc.Respond(ctx, actor(t, "student"), old.Request.ID, accept)
 	wantCode(t, err, 409, "messaging.invalid_state")
 	left := e.ent.left(e.companyA)
 
@@ -593,9 +594,9 @@ func TestNotification_NoMessageBody(t *testing.T) {
 	if err := e.mod.HandleCreated(ctx, created[0].env); err != nil { // a redelivery
 		t.Fatal(err)
 	}
-	sent := e.sender.all()
-	if len(sent) != 1 {
-		t.Fatalf("notices = %d, want 1", len(sent))
+	sent := e.sender.on(notify.ChannelInApp)
+	if len(sent) != 1 || len(e.sender.all()) != 3 {
+		t.Fatalf("in-app notices = %d, want 1 (and push, e-mail: %d in all)", len(sent), len(e.sender.all()))
 	}
 	m := sent[0]
 	if m.Template != "messaging.contact_request_received" || *m.UserID != authztest.ID("student") ||
@@ -616,7 +617,7 @@ func TestNotification_NoMessageBody(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(e.sender.all()) != 1 {
+	if len(e.sender.all()) != 3 {
 		t.Fatal("a withdrawn request was announced")
 	}
 }
@@ -628,7 +629,7 @@ func TestClosedNotice_Recipients(t *testing.T) {
 	e := newEnv(t)
 	ctx := t.Context()
 	v := e.send(t, "student")
-	if _, err := e.svc.Respond(ctx, actor(t, "student"), v.Request.ID, messaging.DecisionAccepted); err != nil {
+	if _, err := e.svc.Respond(ctx, actor(t, "student"), v.Request.ID, accept); err != nil {
 		t.Fatal(err)
 	}
 	e.orgs.leave(e.companyA, authztest.ID("company_member"))
@@ -637,7 +638,7 @@ func TestClosedNotice_Recipients(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := map[uuid.UUID]string{}
-	for _, m := range e.sender.all() {
+	for _, m := range e.sender.on(notify.ChannelInApp) {
 		got[*m.UserID] = m.Template
 		if m.LinkPath != "/orgs/"+e.companyA.String()+"/contact-requests/"+v.Request.ID.String() {
 			t.Fatalf("link = %s", m.LinkPath)
@@ -665,7 +666,7 @@ func TestRead_IDOR(t *testing.T) {
 	v := e.send(t, "student")
 	_, err := e.svc.GetMine(ctx, actor(t, "student_granted"), v.Request.ID)
 	wantErr(t, err, problem.ErrNotFound)
-	_, err = e.svc.Respond(ctx, actor(t, "student_granted"), v.Request.ID, messaging.DecisionAccepted)
+	_, err = e.svc.Respond(ctx, actor(t, "student_granted"), v.Request.ID, accept)
 	wantErr(t, err, problem.ErrNotFound)
 	_, err = e.svc.GetSent(ctx, actor(t, "other_company_member"), e.companyB, v.Request.ID)
 	wantErr(t, err, problem.ErrNotFound)

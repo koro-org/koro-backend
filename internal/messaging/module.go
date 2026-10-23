@@ -33,10 +33,24 @@
 //   - A block declines the company's pending requests (the company sees an
 //     ordinary decline and never learns of the block) and hides the student
 //     from its new requests (404).
-//   - Notices (01 §6.2): contact_request.created → the student (in-app, a
-//     fixed text and the request's ID; the subject and the message never
-//     enter an event or a notification); contact_request.closed → the
-//     sender (accepted, declined or expired; never a reason).
+//   - share_contact (T-335, T-345; BE-089): an acceptance may share the
+//     student's e-mail with the request's company alone, in the same
+//     transaction (students.ContactSharing: contact_shared_at of the
+//     company's grant, the contact_info_share consent with the text shown).
+//     No other company starts seeing it; the student takes it back for that
+//     company (unshareMyAccessGrantContact), ends the company's access
+//     (revokeMyAccessGrant) or stops every share (updateMyPrivacy
+//     show_contact_on_grant: false). A sharing that cannot be written rolls
+//     the acceptance back.
+//   - Notices (01 §6.2): contact_request.created → the student;
+//     contact_request.closed → the sender (accepted, declined or expired;
+//     never a reason). Each goes in-app, by push and by e-mail (T-336;
+//     BE-089); notify skips a channel the recipient switched off
+//     (contact_requests, 02 §6.5). In-app and push texts are fixed, their
+//     data the request's ID; the e-mail adds the company's name (to the
+//     student) and a link to the request. The subject and the message (the
+//     company's free text) never enter an event or a notification: a
+//     transactional e-mail carries no promotional content (Law 6563).
 //   - messaging.expire_requests (01 §7, hourly at :40) closes the pending
 //     requests past their 14 days; until it runs they already read as
 //     expired and cannot be answered. Closed requests are hard deleted 12
@@ -57,6 +71,7 @@ import (
 	"uuid"
 
 	"koro/internal/authz"
+	"koro/internal/consent"
 	"koro/internal/orgs"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
@@ -65,6 +80,7 @@ import (
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/privacy"
 	"koro/internal/platform/queue"
+	"koro/internal/students"
 )
 
 const (
@@ -118,6 +134,21 @@ type StudentPage struct {
 	Next  *uuid.UUID
 }
 
+// RespondInput is respondMyContactRequest (04 §2.9).
+type RespondInput struct {
+	Decision Decision
+	// ShareContact shares the student's e-mail with the request's company
+	// alone, with the acceptance (T-335/T-345): the company's grant and the
+	// contact_info_share consent in the acceptance's transaction. Only with
+	// DecisionAccepted.
+	ShareContact bool
+	// ContactConsent is the contact_info_share text the student was shown;
+	// required with ShareContact.
+	ContactConsent *students.ConsentProof
+	// Channel is the consent channel (web | mobile; X-Koro-Client).
+	Channel consent.Channel
+}
+
 // BlockView is one of the student's blocks with the company's card.
 type BlockView struct {
 	Block   Block
@@ -148,7 +179,7 @@ type Service interface {
 	// GetMine is getMyContactRequest (messaging.contact_request.read).
 	GetMine(ctx context.Context, a authz.Actor, id uuid.UUID) (StudentView, error)
 	// Respond is respondMyContactRequest (messaging.contact_request.respond).
-	Respond(ctx context.Context, a authz.Actor, id uuid.UUID, d Decision) (StudentView, error)
+	Respond(ctx context.Context, a authz.Actor, id uuid.UUID, in RespondInput) (StudentView, error)
 
 	// Block is blockCompany (messaging.block.manage): idempotent; the
 	// company's pending requests are declined.
@@ -159,8 +190,9 @@ type Service interface {
 	ListBlocks(ctx context.Context, a authz.Actor, after *BlockKey, limit int) (BlockPage, error)
 }
 
-// Deps are the dependencies of the messaging module. Resolve, Posts and
-// Sender are optional (see their fields); the others are required.
+// Deps are the dependencies of the messaging module. Resolve, Posts,
+// Sender, Users and LinkBaseURL are optional (see their fields); the others
+// are required.
 type Deps struct {
 	Store       Store
 	Tx          db.TxManager
@@ -170,11 +202,12 @@ type Deps struct {
 	Clock       clock.Clock
 	Log         *slog.Logger
 
-	Entitlements Entitlements // the contact_request unit (same transaction)
-	Grants       AccessGrants // level 3 access on acceptance (same transaction)
-	Students     Discoverable // the target qualifies now (k19)
-	Orgs         Orgs         // the company's status, names, notice recipients
-	Pseudonyms   Pseudonyms   // the company's anon_id of a student (discovery)
+	Entitlements Entitlements   // the contact_request unit (same transaction)
+	Grants       AccessGrants   // level 3 access on acceptance (same transaction)
+	Contacts     ContactSharing // share_contact on acceptance (same transaction)
+	Students     Discoverable   // the target qualifies now (k19)
+	Orgs         Orgs           // the company's status, names, notice recipients
+	Pseudonyms   Pseudonyms     // the company's anon_id of a student (discovery)
 
 	// Resolve maps the company's pseudonym to the student (hooks.anonResolver,
 	// discovery). nil → no pseudonym resolves: every request is 404.
@@ -183,9 +216,15 @@ type Deps struct {
 	// request naming a post is refused (422) and the student's view shows
 	// the post without its title.
 	Posts Posts
-	// Sender delivers the in-app notices (notify). nil → a notice task
-	// fails and is retried; nothing is dropped.
+	// Sender delivers the notices (notify). nil → a notice task fails and
+	// is retried; nothing is dropped.
 	Sender Sender
+	// Users reads the address of a notice's e-mail (identity). nil → the
+	// notices go in-app and by push only.
+	Users Users
+	// LinkBaseURL is the web origin of the e-mail's link to the request
+	// (IDENTITY_LINK_BASE_URL); required with Users.
+	LinkBaseURL string
 }
 
 func (d Deps) validate() error {
@@ -196,7 +235,8 @@ func (d Deps) validate() error {
 	}{
 		{"Store", d.Store != nil}, {"Tx", d.Tx != nil}, {"Outbox", d.Outbox != nil}, {"Audit", d.Audit != nil},
 		{"Idempotency", d.Idempotency != nil}, {"Clock", d.Clock != nil}, {"Log", d.Log != nil},
-		{"Entitlements", d.Entitlements != nil}, {"Grants", d.Grants != nil}, {"Students", d.Students != nil},
+		{"Entitlements", d.Entitlements != nil}, {"Grants", d.Grants != nil}, {"Contacts", d.Contacts != nil},
+		{"Students", d.Students != nil}, {"LinkBaseURL", d.Users == nil || d.LinkBaseURL != ""},
 		{"Orgs", d.Orgs != nil}, {"Pseudonyms", d.Pseudonyms != nil},
 	} {
 		if !c.ok {

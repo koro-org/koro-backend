@@ -24,11 +24,13 @@ import (
 // the company's pseudonym → a discoverable student; read at call time, nil
 // → every pseudonym is 404), c.discovery.svc (AnonID: the company sees a
 // request under its pseudonym), c.students.svc (Discoverable,
-// AccessGrants.Grant in the acceptance's transaction), c.entitlements.svc
+// AccessGrants.Grant and, with share_contact, ContactSharing in the
+// acceptance's transaction: BE-089), c.entitlements.svc
 // (the contact_request unit, same transaction), c.orgs.svc (the company's
 // status and name, notice recipients), c.feed.svc (an opportunity call),
-// c.audit.svc, c.infra.outbox, c.infra.idempotency and c.notify.svc (the
-// in-app notices, read at call time).
+// c.audit.svc, c.infra.outbox, c.infra.idempotency, c.notify.svc (the
+// notices: in-app, push, e-mail; read at call time), c.identity.svc (the
+// e-mail address; BE-089) and IDENTITY_LINK_BASE_URL (the e-mail's link).
 //
 // Provided, set in build: svc (messaging.Service), the KVKK provider
 // (contact_requests, contact_blocks) and the retention sweeper of
@@ -64,7 +66,7 @@ func (w *messagingWiring) build(c *container) error {
 	d := messaging.Deps{
 		Store: store, Tx: tx, Audit: c.audit.svc, Idempotency: c.infra.idempotency, Clock: c.infra.clock,
 		Log: c.infra.log.With("module", "messaging"), Entitlements: c.entitlements.svc, Grants: c.students.svc,
-		Students: c.students.svc, Orgs: c.orgs.svc, Pseudonyms: c.discovery.svc,
+		Contacts: c.students.svc, Students: c.students.svc, Orgs: c.orgs.svc, Pseudonyms: c.discovery.svc,
 		Resolve: func(ctx context.Context, companyOrgID uuid.UUID, anonID string) (uuid.UUID, bool, error) {
 			if h := c.hooks.anonResolver; h != nil {
 				return h(ctx, companyOrgID, anonID)
@@ -78,6 +80,12 @@ func (w *messagingWiring) build(c *container) error {
 	}
 	if svc := c.feed.svc; svc != nil {
 		d.Posts = svc
+	}
+	// The e-mail of the notices needs the address (identity) and the link
+	// origin; config makes IDENTITY_LINK_BASE_URL an absolute URL, test
+	// containers may leave it empty (in-app and push only).
+	if svc, base := c.identity.svc, c.infra.cfg.Identity.LinkBaseURL; svc != nil && base != "" {
+		d.Users, d.LinkBaseURL = svc, base
 	}
 	mod, err := messaging.New(d)
 	if err != nil {

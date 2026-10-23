@@ -9,8 +9,11 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
+	"uuid"
 
 	"koro/internal/authz/authztest"
+	"koro/internal/consent"
 	"koro/internal/discovery"
 	"koro/internal/messaging"
 )
@@ -132,5 +135,104 @@ func TestMatrixMessaging_AcceptOpensLevel3(t *testing.T) {
 	code, body = call("company_admin", "GET", "/api/v1/orgs/{org_id}/contact-requests/{request_id}", req, "")
 	if code != 200 || !strings.Contains(body, `"student_user_id":"`+student.String()+`"`) {
 		t.Fatalf("accepted request (company view) = %d %s", code, body)
+	}
+}
+
+// TestMatrixMessaging_AcceptSharesContact (T-335/T-345; BE-089): on the
+// matrix application (real messaging, students, consent and identity over
+// the in-memory stores) the persona student accepts company_a's request
+// with share_contact and the current contact_info_share text: company_a's
+// level 3 view carries the e-mail, company_b's does not (its
+// grant_student_b: sharing is per company); the privacy setting mirrors
+// the consent. unshareMyAccessGrantContact on company_a's grant takes the
+// e-mail back while its level 3 access stays. (The rollback of a refused
+// sharing needs a real transaction: TestService_Postgres_AcceptShareContactSameTx,
+// TestShareContactWithCompany_ConsentFailureRollsBack_Postgres.)
+func TestMatrixMessaging_AcceptSharesContact(t *testing.T) {
+	t.Parallel()
+	env := &matrixEnv{opts: realMatrixOptions()}
+	m, probs := loadMatrix(os.DirFS("testdata/authz"), env.opts.modules)
+	if len(probs) > 0 {
+		t.Fatal(strings.Join(probs, "\n"))
+	}
+	env.m = m
+	a := env.newMatrixApp(t, m.config)
+	ctx := t.Context()
+	// The current contact_info_share text (its body is matrixDiscoveryText,
+	// whose SHA-256 the body holds).
+	id, purpose, base := uuid.NewV7(), consent.PurposeContactInfoShare, time.Now().UTC().Truncate(time.Microsecond)
+	if err := a.c.consent.store.InsertNotice(ctx, consent.Notice{ID: id, Kind: consent.KindConsentText, PurposeCode: &purpose,
+		Audience: consent.Audience("student"), Locale: consent.LocaleTR, Version: "2026.10.23", Title: "Matris iletişim paylaşımı",
+		BodyMD: matrixDiscoveryText, BodySHA256: consent.BodyDigest(matrixDiscoveryText), CreatedAt: base.Add(-48 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.c.consent.store.Publish(ctx, id, base.Add(-24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	a.fx.mu.Lock()
+	a.fx.saved["notice_contact_share"] = id
+	a.fx.mu.Unlock()
+	call := func(persona, method, path string, params map[string]string, body string) (int, string) {
+		return a.do(t, m, matrixCase{name: "messaging share " + method + " " + path, method: method, path: path,
+			req: matrixRequest{PathParams: params, Body: body}, persona: persona})
+	}
+	l3 := func(persona, org string) (int, string) {
+		return call(persona, "GET", "/api/v1/orgs/{org_id}/students/{user_id}", map[string]string{"org_id": org, "user_id": "student"}, "")
+	}
+	email := `"contact":{"email":"` + matrixEmail("student") + `"}`
+
+	code, body := call("student", "POST", "/api/v1/me/contact-requests/{request_id}/respond",
+		map[string]string{"request_id": "request_student_a"}, "bodies/messaging/respond_accept_share.json")
+	if code != 200 || !strings.Contains(body, `"status":"accepted"`) {
+		t.Fatalf("accept with share_contact = %d %s", code, body)
+	}
+	if code, body := l3("company_admin", "company_a"); code != 200 || !strings.Contains(body, email) {
+		t.Fatalf("company_a's level 3 after sharing = %d %s", code, body)
+	}
+	if code, body := l3("other_company_member", "company_b"); code != 200 || strings.Contains(body, `"contact"`) {
+		t.Fatalf("company_b's level 3 (not shared with it) = %d %s", code, body)
+	}
+	if code, body := call("student", "GET", "/api/v1/me/privacy", nil, ""); code != 200 ||
+		!strings.Contains(body, `"show_contact_on_grant":true`) {
+		t.Fatalf("privacy after sharing = %d %s", code, body)
+	}
+
+	code, body = call("student", "GET", "/api/v1/me/access-grants", nil, "")
+	var grants struct {
+		Items []struct {
+			GrantID string `json:"grant_id"`
+			Company struct {
+				OrgID string `json:"org_id"`
+			} `json:"company"`
+			ContactSharedAt *time.Time `json:"contact_shared_at"`
+		} `json:"items"`
+	}
+	if code != 200 || json.Unmarshal([]byte(body), &grants) != nil {
+		t.Fatalf("my grants = %d %s", code, body)
+	}
+	grantA := ""
+	for _, g := range grants.Items {
+		switch g.Company.OrgID {
+		case authztest.ID("company_a").String():
+			if g.ContactSharedAt == nil {
+				t.Fatalf("company_a's grant does not show the share: %s", body)
+			}
+			grantA = g.GrantID
+		case authztest.ID("company_b").String():
+			if g.ContactSharedAt != nil {
+				t.Fatalf("company_b's grant shows a share: %s", body)
+			}
+		}
+	}
+	if grantA == "" {
+		t.Fatalf("no grant of company_a: %s", body)
+	}
+	if code, body := call("student", "DELETE", "/api/v1/me/access-grants/{grant_id}/contact",
+		map[string]string{"grant_id": literalPrefix + grantA}, ""); code != 204 {
+		t.Fatalf("unshare = %d %s", code, body)
+	}
+	if code, body := l3("company_admin", "company_a"); code != 200 || strings.Contains(body, `"contact"`) {
+		t.Fatalf("company_a's level 3 after unsharing = %d %s", code, body)
 	}
 }

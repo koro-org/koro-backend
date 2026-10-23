@@ -182,7 +182,7 @@ func company(t *testing.T) (students.CompanySource, uuid.UUID, students.Grant) {
 	}
 	companyA := uuid.NewV7()
 	return src, companyA, students.Grant{CompanyOrgID: companyA, Active: true, GrantedAt: t0, Source: "contact_request",
-		ContactRequestID: ptr(uuid.NewV7())}
+		ContactRequestID: ptr(uuid.NewV7()), ContactShared: true}
 }
 
 // TestDTO_Level0_CountsOnly (04 §V.2 level 0): a number or null with
@@ -277,7 +277,8 @@ func TestDTO_Level3_ProfileFields(t *testing.T) {
 	}
 
 	// Toggles off: no clubs, no club_role entry, no contact.
-	src.View.Privacy.ShowClubsOnGrant, src.View.Privacy.ShowContactOnGrant = false, false
+	// The e-mail follows the grant's share (BE-089), not the setting.
+	src.View.Privacy.ShowClubsOnGrant, g.ContactShared = false, false
 	d, err = students.ToStudentProfileL3(src, org, g)
 	if err != nil {
 		t.Fatal(err)
@@ -289,8 +290,8 @@ func TestDTO_Level3_ProfileFields(t *testing.T) {
 	if len(d.Experiences) != 1 || d.Experiences[0].Kind == "club_role" {
 		t.Fatalf("club_role entry without show_clubs_on_grant: %+v", d.Experiences)
 	}
-	// The setting without the consent (withdrawn in the ledger): no e-mail.
-	src.View.Privacy.ShowContactOnGrant, src.ContactConsent = true, false
+	// The share without the consent (withdrawn in the ledger): no e-mail.
+	g.ContactShared, src.ContactConsent = true, false
 	if d, _ = students.ToStudentProfileL3(src, org, g); d.Contact != nil {
 		t.Fatal("e-mail shared without the consent in force")
 	}

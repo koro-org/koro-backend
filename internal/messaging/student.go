@@ -7,11 +7,13 @@ import (
 
 	"koro/internal/audit"
 	"koro/internal/authz"
+	"koro/internal/consent"
 	"koro/internal/feed"
 	"koro/internal/orgs"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 	"koro/internal/students"
 )
 
@@ -122,19 +124,21 @@ func (s *service) GetMine(ctx context.Context, a authz.Actor, id uuid.UUID) (Stu
 
 // Respond implements Service. Order: authz (O) → the decision (422) → an
 // acceptance needs an active student verification (403
-// students.verification_required; a decline never does) → in one
-// transaction: the row lock, the same answer again changes nothing, a
-// request that is no longer pending (or past its 14 days) is 409
-// messaging.invalid_state → the status → on acceptance
-// students.AccessGrants.Grant (level 3, the same transaction: 01 §6.3) →
-// contact_request.closed (O) → the audit record. The decline has no reason
-// field at all: there is nothing the company could be shown.
-func (s *service) Respond(ctx context.Context, a authz.Actor, id uuid.UUID, d Decision) (StudentView, error) {
+// students.verification_required; a decline never does) → share_contact
+// only with an acceptance and with the contact_info_share text shown (422,
+// nothing written) → in one transaction: the row lock, the same answer
+// again changes nothing, a request that is no longer pending (or past its
+// 14 days) is 409 messaging.invalid_state → the status → on acceptance
+// students.AccessGrants.Grant (level 3) and, with share_contact,
+// students.ContactSharing.ShareContactWithCompany (the e-mail to this
+// company alone; both the same transaction: 01 §6.3) → contact_request.closed (O) → the audit record. The decline
+// has no reason field at all: there is nothing the company could be shown.
+func (s *service) Respond(ctx context.Context, a authz.Actor, id uuid.UUID, in RespondInput) (StudentView, error) {
 	if _, err := s.mine(ctx, a, authz.MessagingContactRequestRespond, id); err != nil {
 		return StudentView{}, err
 	}
 	var to Status
-	switch d {
+	switch in.Decision {
 	case DecisionAccepted:
 		to = StatusAccepted
 		// 03 §2.3: a lapsed or unverified account grants nothing; students
@@ -148,23 +152,64 @@ func (s *service) Respond(ctx context.Context, a authz.Actor, id uuid.UUID, d De
 	default:
 		return StudentView{}, fieldErr("body.decision", "must be accepted or declined")
 	}
+	if err := checkShare(in, to); err != nil {
+		return StudentView{}, err
+	}
 	hash, err := idempotency.Hash(struct {
-		Op string
-		ID uuid.UUID
-		D  Decision
-	}{"respond_contact_request", id, d})
+		Op      string
+		ID      uuid.UUID
+		D       Decision
+		Share   bool
+		Proof   *students.ConsentProof
+		Channel string
+	}{"respond_contact_request", id, in.Decision, in.ShareContact, shareProof(in), string(shareChannel(in))})
 	if err != nil {
 		return StudentView{}, err
 	}
 	if _, _, err := idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (uuid.UUID, error) {
-		return s.respond(ctx, a, id, to)
+		return s.respond(ctx, a, id, to, in)
 	}); err != nil {
 		return StudentView{}, err
 	}
 	return s.GetMine(ctx, a, id)
 }
 
-func (s *service) respond(ctx context.Context, a authz.Actor, id uuid.UUID, to Status) (uuid.UUID, error) {
+// checkShare is share_contact's rule (T-335): only with an acceptance and
+// with the contact_info_share text the student was shown (the consent
+// module checks that it is the current text, in the transaction).
+func checkShare(in RespondInput, to Status) error {
+	switch {
+	case !in.ShareContact:
+		return nil
+	case to != StatusAccepted:
+		return fieldErr("body.share_contact", "only with decision accepted")
+	case in.ContactConsent == nil:
+		return consent.ErrProofRequired.WithFields(problem.FieldError{Location: "body.consent.contact_info_share",
+			Message: "the consent text shown is required to share your contact details"})
+	}
+	return nil
+}
+
+// shareProof and shareChannel are the parts of the sharing that matter
+// (an unused proof or channel does not change the request).
+func shareProof(in RespondInput) *students.ConsentProof {
+	if !in.ShareContact {
+		return nil
+	}
+	return in.ContactConsent
+}
+
+func shareChannel(in RespondInput) consent.Channel {
+	switch {
+	case !in.ShareContact:
+		return ""
+	case in.Channel == consent.ChannelMobile:
+		return consent.ChannelMobile
+	}
+	return consent.ChannelWeb
+}
+
+func (s *service) respond(ctx context.Context, a authz.Actor, id uuid.UUID, to Status, in RespondInput) (uuid.UUID, error) {
 	cur, err := s.d.Store.Lock(ctx, id)
 	switch {
 	case err != nil:
@@ -172,7 +217,9 @@ func (s *service) respond(ctx context.Context, a authz.Actor, id uuid.UUID, to S
 	case cur.StudentUserID != a.UserID:
 		return uuid.Nil(), ErrNotFound
 	case cur.Status == to:
-		return cur.ID, nil // the same answer again
+		// The same answer again (a retry): nothing changes, a sharing
+		// included; sharing later is updateMyPrivacy's.
+		return cur.ID, nil
 	case !cur.Open(s.now()):
 		return uuid.Nil(), ErrInvalidState
 	}
@@ -188,13 +235,19 @@ func (s *service) respond(ctx context.Context, a authz.Actor, id uuid.UUID, to S
 		if err := s.d.Grants.Grant(ctx, a.UserID, next.OrgID, students.SourceContactRequest, next.ID); err != nil {
 			return uuid.Nil(), err
 		}
+		if in.ShareContact {
+			if err := s.d.Contacts.ShareContactWithCompany(ctx, a, next.OrgID, *in.ContactConsent, shareChannel(in), next.ID); err != nil {
+				return uuid.Nil(), err
+			}
+		}
 	}
 	if err := s.emit(ctx, domainevent.ContactRequestClosed{
 		ContactRequestID: next.ID, OrgID: next.OrgID, Outcome: string(to),
 	}, next.ID); err != nil {
 		return uuid.Nil(), err
 	}
-	ev := requestEvent(authz.MessagingContactRequestRespond, next, nil, map[string]any{"decision": string(to)})
+	ev := requestEvent(authz.MessagingContactRequestRespond, next, nil,
+		map[string]any{"decision": string(to), "share_contact": in.ShareContact})
 	return next.ID, s.d.Audit.Log(ctx, ev.By(a))
 }
 

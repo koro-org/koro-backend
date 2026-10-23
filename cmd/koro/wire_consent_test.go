@@ -22,6 +22,7 @@ import (
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/obs"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/privacy"
 	"koro/internal/platform/problem"
 )
@@ -78,7 +79,11 @@ func TestWire_ConsentTasksAndPrivacy(t *testing.T) {
 	if want := []string{"consent.iys_reconcile 30 5 * * * default"}; !slices.Equal(jobs, want) {
 		t.Fatalf("consent jobs %q, want %q", jobs, want)
 	}
-	subs := c.infra.subs.For(domainevent.TopicConsentRecorded)
+	// consent's own subscription; other modules may consume the topic too
+	// (students.clear_contact_shares, BE-089).
+	subs := slices.DeleteFunc(c.infra.subs.For(domainevent.TopicConsentRecorded), func(s outbox.Subscription) bool {
+		return !strings.HasPrefix(s.Name, "consent.")
+	})
 	if len(subs) != 1 || subs[0].Name != consent.SubmitIYSTaskName || subs[0].Queue != "critical" {
 		t.Fatalf("consent.recorded subscriptions %+v", subs)
 	}

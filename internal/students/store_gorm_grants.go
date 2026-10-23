@@ -12,7 +12,7 @@ import (
 )
 
 const grantCols = `id, student_user_id, company_org_id, source, source_id, granted_at, suspended_at, resumed_at,
-	revoked_at, revoked_by_kind, revoke_reason, created_at, updated_at`
+	revoked_at, revoked_by_kind, revoke_reason, contact_shared_at, created_at, updated_at`
 
 func takeGrant(op string, q *gorm.DB) (AccessGrant, error) {
 	var g AccessGrant

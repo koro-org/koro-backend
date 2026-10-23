@@ -14,8 +14,10 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
+	"koro/internal/consent"
 	"koro/internal/entitlements"
 	"koro/internal/feed"
+	"koro/internal/identity"
 	"koro/internal/messaging"
 	"koro/internal/notify"
 	"koro/internal/orgs"
@@ -148,12 +150,43 @@ type grant struct {
 	srcID            uuid.UUID
 }
 
-// studentsFake is students' level 2 contract and AccessGrants.
+type share struct {
+	tx      int
+	student uuid.UUID
+	company uuid.UUID
+	proof   students.ConsentProof
+	channel consent.Channel
+	request uuid.UUID
+}
+
+// studentsFake is students' level 2 contract, AccessGrants and
+// ContactSharing.
 type studentsFake struct {
 	mu           sync.Mutex
 	discoverable map[uuid.UUID]bool
 	grants       []grant
 	failGrant    error
+	shares       []share
+	failShare    error
+}
+
+func (s *studentsFake) ShareContactWithCompany(ctx context.Context, a authz.Actor, company uuid.UUID, proof students.ConsentProof,
+	ch consent.Channel, request uuid.UUID,
+) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if txOf(ctx) == 0 {
+		return errors.New("ShareContactWithCompany outside a transaction")
+	}
+	s.shares = append(s.shares, share{tx: txOf(ctx), student: a.UserID, company: company, proof: proof, channel: ch,
+		request: request})
+	return s.failShare
+}
+
+func (s *studentsFake) shared() []share {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.shares)
 }
 
 func (s *studentsFake) IsDiscoverable(_ context.Context, id uuid.UUID) (bool, error) {
@@ -176,6 +209,7 @@ func (s *studentsFake) rollback(tx int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.grants = slices.DeleteFunc(s.grants, func(g grant) bool { return g.tx == tx })
+	s.shares = slices.DeleteFunc(s.shares, func(c share) bool { return c.tx == tx })
 }
 
 func (s *studentsFake) granted() []grant {
@@ -401,6 +435,36 @@ func (s *senderFake) all() []notify.Message {
 	return slices.Clone(s.sent)
 }
 
+// on returns the notices of one channel.
+func (s *senderFake) on(ch notify.Channel) []notify.Message {
+	return slices.DeleteFunc(s.all(), func(m notify.Message) bool { return m.Channel != ch })
+}
+
+// usersFake is identity's address lookup: every persona has an address
+// and a language; erased users are not found.
+type usersFake struct {
+	mu     sync.Mutex
+	erased map[uuid.UUID]bool
+}
+
+func (u *usersFake) Contact(_ context.Context, id uuid.UUID) (identity.UserContact, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.erased[id] {
+		return identity.UserContact{}, identity.ErrNotFound
+	}
+	return identity.UserContact{ID: id, Email: id.String() + "@example.test", FirstName: "Ada", Locale: "en"}, nil
+}
+
+func (u *usersFake) erase(id uuid.UUID) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.erased[id] = true
+}
+
+// linkBase is the e-mail link origin of the tests.
+const linkBase = "https://koro.example.test"
+
 // ---- environment
 
 type env struct {
@@ -414,6 +478,7 @@ type env struct {
 	outbox   *outboxFake
 	audit    *auditFake
 	sender   *senderFake
+	users    *usersFake
 	resolver *resolver
 	mod      messaging.Module
 	svc      messaging.Service
@@ -426,7 +491,7 @@ type env struct {
 // company_a's recruiter and company_admin its admin; other_company_member
 // company_b's recruiter); the persona student and student_granted are
 // discoverable adults, student_minor is not discoverable.
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T, opts ...func(*messaging.Deps)) *env {
 	t.Helper()
 	e := &env{clk: clock.NewFake(t0)}
 	e.companyA, e.companyB, e.clubA = authztest.ID("company_a"), authztest.ID("company_b"), authztest.ID("club_a")
@@ -451,16 +516,22 @@ func newEnv(t *testing.T) *env {
 	}
 	e.posts = &postsFake{posts: map[uuid.UUID]feed.PostSummary{}}
 	e.outbox, e.audit, e.sender = &outboxFake{}, &auditFake{}, &senderFake{}
+	e.users = &usersFake{erased: map[uuid.UUID]bool{}}
 	e.resolver = &resolver{students: e.students, known: []uuid.UUID{
 		authztest.ID("student"), authztest.ID("student_granted"), authztest.ID("student_minor"), authztest.ID("student_b"),
 	}}
 	e.tx = &txFake{store: e.store, fakes: []rollbacker{e.ent, e.students, e.outbox, e.audit}}
 	keeper := idempotency.New(idempotency.Deps{Tx: e.tx, Store: idempotency.NewMemStore(), Clock: e.clk, Log: obs.Discard()})
-	mod, err := messaging.New(messaging.Deps{
+	d := messaging.Deps{
 		Store: e.store, Tx: e.tx, Outbox: e.outbox, Audit: e.audit, Idempotency: keeper, Clock: e.clk, Log: obs.Discard(),
-		Entitlements: e.ent, Grants: e.students, Students: e.students, Orgs: e.orgs, Pseudonyms: pseudonymsFake{},
-		Resolve: e.resolver.resolve, Posts: e.posts, Sender: e.sender,
-	})
+		Entitlements: e.ent, Grants: e.students, Contacts: e.students, Students: e.students, Orgs: e.orgs,
+		Pseudonyms: pseudonymsFake{}, Resolve: e.resolver.resolve, Posts: e.posts, Sender: e.sender,
+		Users: e.users, LinkBaseURL: linkBase,
+	}
+	for _, o := range opts {
+		o(&d)
+	}
+	mod, err := messaging.New(d)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -508,6 +579,12 @@ func wantCode(t *testing.T, err error, status int, code string) {
 		t.Fatalf("err = %v, want %d %s", err, status, code)
 	}
 }
+
+// accept and decline are the plain answers (no contact sharing).
+var (
+	accept  = messaging.RespondInput{Decision: messaging.DecisionAccepted}
+	decline = messaging.RespondInput{Decision: messaging.DecisionDeclined}
+)
 
 // withKey returns ctx carrying an Idempotency-Key of a's create call.
 func withKey(ctx context.Context, a authz.Actor, key string) context.Context {

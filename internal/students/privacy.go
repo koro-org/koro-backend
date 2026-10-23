@@ -124,6 +124,9 @@ func exportGrant(g AccessGrant) map[string]any {
 	if g.ResumedAt != nil {
 		item["resumed_at"] = g.ResumedAt.UTC().Format(time.RFC3339)
 	}
+	if g.ContactSharedAt != nil { // the e-mail shared with this company (BE-089)
+		item["contact_shared_at"] = g.ContactSharedAt.UTC().Format(time.RFC3339)
+	}
 	if g.RevokedAt != nil {
 		item["revoked_at"] = g.RevokedAt.UTC().Format(time.RFC3339)
 	}

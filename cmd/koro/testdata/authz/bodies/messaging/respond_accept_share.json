@@ -1,0 +1,1 @@
+{"decision": "accepted", "share_contact": true, "consent": {"contact_info_share": {"notice_version_id": "{{fixture:notice_contact_share}}", "text_sha256": "ff266dcb50b7c8960c23b9bd082531a35e01f7821f8f86991f0c469b47a5c54e"}}}

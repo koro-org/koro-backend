@@ -80,7 +80,7 @@ func TestSweep_ClosedAfter12Months(t *testing.T) {
 	e := newEnv(t)
 	ctx := t.Context()
 	old := e.send(t, "student")
-	if _, err := e.svc.Respond(ctx, actor(t, "student"), old.Request.ID, messaging.DecisionDeclined); err != nil {
+	if _, err := e.svc.Respond(ctx, actor(t, "student"), old.Request.ID, decline); err != nil {
 		t.Fatal(err)
 	}
 	pending := e.send(t, "student_granted")

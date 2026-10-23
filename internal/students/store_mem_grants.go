@@ -27,6 +27,8 @@ func checkGrant(g AccessGrant) error {
 	case g.ResumedAt != nil && (g.ResumedAt.Before(g.GrantedAt) || // profile_access_grants_resumed_chk
 		g.SuspendedAt != nil && g.SuspendedAt.Before(*g.ResumedAt)):
 		return errCheck
+	case g.ContactSharedAt != nil && g.ContactSharedAt.Before(g.GrantedAt): // profile_access_grants_contact_shared_chk
+		return errCheck
 	}
 	return nil
 }
@@ -47,7 +49,7 @@ func (s *MemStore) LockGrants(context.Context, uuid.UUID) error { return nil }
 func (s *MemStore) InsertGrant(_ context.Context, g AccessGrant) (AccessGrant, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	g.SuspendedAt, g.ResumedAt, g.RevokedAt, g.RevokedByKind, g.RevokeReason = nil, nil, nil, nil, nil
+	g.SuspendedAt, g.ResumedAt, g.RevokedAt, g.RevokedByKind, g.RevokeReason, g.ContactSharedAt = nil, nil, nil, nil, nil, nil
 	if err := checkGrant(g); err != nil {
 		return AccessGrant{}, false, err
 	}

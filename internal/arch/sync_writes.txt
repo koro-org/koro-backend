@@ -128,3 +128,10 @@ events    -> kvkk.DestructionRecorder.Record
 # transaction that deletes it, on the session role (Store.AsApp; late bound through hooks.destruction: kvkk is
 # L13), so the profiling output never goes unrecorded nor a record without its deletion, like events.purge_exports.
 talent    -> kvkk.DestructionRecorder.Record
+
+# BE-089 (T-335/T-345, user decisions Q-06 and 2026-10-23; rationale for 01 §6.3 in the BE-089 ticket's doc
+# patch): "İletişim talebi kabulü" with share_contact. The student's e-mail is shared with the request's company alone
+# (contact_shared_at of its level 3 grant, the contact_info_share consent with the text shown) in the transaction
+# that accepts the request and gives the grant, so a sharing that cannot be recorded (a text that is not the current
+# one) never leaves an acceptance the student did not choose, nor a share without its consent record.
+messaging -> students.ContactSharing.ShareContactWithCompany

@@ -1,0 +1,7 @@
+Hello,
+
+{{with index .Data "company_name"}}{{.}}{{else}}A company{{end}} would like to get in touch with you on Koro. See the request and accept it within 14 days, or decline it without giving a reason. If you accept, the company can see your profile; a decline is never explained to the company.
+
+See the request: {{index .Data "url"}}
+
+The request's subject and message are shown on Koro only. You can turn these notifications off per channel in your notification preferences (contact requests).

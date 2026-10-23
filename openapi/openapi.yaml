@@ -11439,6 +11439,9 @@ components:
           description: "Number of refused sign-ins to the caller's account summarised by this item (anonymous or from another account): consecutive attempts with the same reason, each at most 15 minutes before the next"
           format: int64
           type: integer
+        break_glass:
+          description: A break-glass access to the caller's data by Koro support or platform admins; reason is then their justification (free text, not a code)
+          type: boolean
         first_occurred_at:
           description: Oldest attempt of a sign-in attempt item
           format: date-time
@@ -11457,7 +11460,7 @@ components:
             - failure
           type: string
         reason:
-          description: Reason code of a refusal, e.g. invalid_credentials, locked, invalid_mfa_code, reauth_failed
+          description: Reason code of a refusal, e.g. invalid_credentials, locked, invalid_mfa_code, reauth_failed; for a break-glass item (break_glass) the justification the staff member gave, free text to show as is
           type: string
         user_agent_family:
           description: Browser or app family, e.g. Chrome, Koro app; absent like ip_prefix
@@ -15924,7 +15927,7 @@ paths:
       x-koro-surface: admin
   /api/v1/admin/email-suppressions:
     get:
-      description: "Addresses are kept as blind indexes only: email finds one address by exact match. Break-glass: X-Koro-Access-Reason is mandatory and every read is audited."
+      description: "Addresses are kept as blind indexes only: email finds one address by exact match. Break-glass: X-Koro-Access-Reason is mandatory and every read is audited. When the read concerns one user, the X-Koro-Access-Reason justification is shown to that user (support access notification; reason of the break_glass item of listMySecurityEvents): write no other person's data in it."
       operationId: adminListEmailSuppressions
       parameters:
         - description: Break-glass justification (10–500 characters, mandatory)
@@ -15993,7 +15996,7 @@ paths:
       x-koro-surface: admin
   /api/v1/admin/email-suppressions/{suppression_id}:
     delete:
-      description: "The address may receive e-mail again. Break-glass: X-Koro-Access-Reason is mandatory; audited."
+      description: "The address may receive e-mail again. Break-glass: X-Koro-Access-Reason is mandatory; audited. When the read concerns one user, the X-Koro-Access-Reason justification is shown to that user (support access notification; reason of the break_glass item of listMySecurityEvents): write no other person's data in it."
       operationId: adminDeleteEmailSuppression
       parameters:
         - description: Break-glass justification (10–500 characters, mandatory)
@@ -20897,7 +20900,7 @@ paths:
       x-koro-surface: admin
   /api/v1/admin/users/{user_id}/consents:
     get:
-      description: IP, channel and text digest of every consent act. support needs X-Koro-Access-Reason (break-glass); every read is audited.
+      description: "IP, channel and text digest of every consent act. support needs X-Koro-Access-Reason (break-glass); every read is audited. When the read concerns one user, the X-Koro-Access-Reason justification is shown to that user (support access notification; reason of the break_glass item of listMySecurityEvents): write no other person's data in it."
       operationId: adminListUserConsents
       parameters:
         - description: User ID (a malformed ID is 404)
@@ -21013,7 +21016,7 @@ paths:
       x-koro-surface: admin
   /api/v1/admin/users/{user_id}/notification-deliveries:
     get:
-      description: "IDs, channel, template, status and time only: never the content, the data or the address. Break-glass: X-Koro-Access-Reason is mandatory; the read is audited and the user is notified."
+      description: "IDs, channel, template, status and time only: never the content, the data or the address. Break-glass: X-Koro-Access-Reason is mandatory; the read is audited and the user is notified. When the read concerns one user, the X-Koro-Access-Reason justification is shown to that user (support access notification; reason of the break_glass item of listMySecurityEvents): write no other person's data in it."
       operationId: adminListUserDeliveries
       parameters:
         - description: Break-glass justification (10–500 characters, mandatory)
@@ -21122,7 +21125,7 @@ paths:
       x-koro-surface: admin
   /api/v1/admin/users/{user_id}/student-profile:
     get:
-      description: "support and platform_admin: break-glass (X-Koro-Access-Reason, 10–500 characters; audited, the student is told). dpo: X-Koro-Access-Reason is the ID of an open data subject request of this student (the birth date is shown only then). Never CV files, sensitive clubs, form answers or talent values."
+      description: "support and platform_admin: break-glass (X-Koro-Access-Reason, 10–500 characters; audited, the student is told). dpo: X-Koro-Access-Reason is the ID of an open data subject request of this student (the birth date is shown only then). Never CV files, sensitive clubs, form answers or talent values. When the read concerns one user, the X-Koro-Access-Reason justification is shown to that user (support access notification; reason of the break_glass item of listMySecurityEvents): write no other person's data in it."
       operationId: adminGetStudentProfile
       parameters:
         - description: User ID
@@ -22769,7 +22772,7 @@ paths:
       x-koro-surface: resource
   /api/v1/events/{event_id}/registrations:
     get:
-      description: The organiser's managers; support and platform_admin by break-glass (X-Koro-Access-Reason, 10–500 characters; never a sensitive event). The special-category answers are never in the list. Every list is audited.
+      description: "The organiser's managers; support and platform_admin by break-glass (X-Koro-Access-Reason, 10–500 characters; never a sensitive event). The special-category answers are never in the list. Every list is audited. When the read concerns one user, the X-Koro-Access-Reason justification is shown to that user (support access notification; reason of the break_glass item of listMySecurityEvents): write no other person's data in it."
       operationId: listEventRegistrations
       parameters:
         - description: Event ID
@@ -22926,7 +22929,7 @@ paths:
       x-koro-surface: resource
   /api/v1/events/{event_id}/registrations/{registration_id}:
     get:
-      description: answers_sensitive (special-category answers) for the organiser's managers only, never by break-glass. Every read is audited (metadata.sensitive_fields).
+      description: "answers_sensitive (special-category answers) for the organiser's managers only, never by break-glass. Every read is audited (metadata.sensitive_fields). When the read concerns one user, the X-Koro-Access-Reason justification is shown to that user (support access notification; reason of the break_glass item of listMySecurityEvents): write no other person's data in it."
       operationId: getEventRegistration
       parameters:
         - description: Event ID
@@ -25895,7 +25898,7 @@ paths:
       x-koro-surface: self
   /api/v1/me/security-events:
     get:
-      description: Sign-in, password, session, MFA and consent events of the caller, break-glass accesses to the caller's data and refused sign-ins to the caller's account (wrong password, locked account, wrong second factor), whoever made them. Only the caller's own requests show network facts; consecutive sign-in attempts with the same reason are one item (attempts, first_occurred_at). A page may hold fewer items than limit while next_cursor is set.
+      description: Sign-in, password, session, MFA and consent events of the caller, break-glass accesses to the caller's data and refused sign-ins to the caller's account (wrong password, locked account, wrong second factor), whoever made them. Only the caller's own requests show network facts; consecutive sign-in attempts with the same reason are one item (attempts, first_occurred_at). A break-glass item (break_glass) shows the staff member's justification as reason. A page may hold fewer items than limit while next_cursor is set.
       operationId: listMySecurityEvents
       parameters:
         - description: Page size
@@ -28605,7 +28608,7 @@ paths:
       x-koro-surface: org
   /api/v1/orgs/{org_id}/members:
     get:
-      description: The org's admins (club_admin, university_rep, company roles) see the list; members do not see each other. support and platform_admin need X-Koro-Access-Reason (break-glass, audited). A sensitive club's list is its club_admin's only, every read is audited, and platform staff get 404.
+      description: "The org's admins (club_admin, university_rep, company roles) see the list; members do not see each other. support and platform_admin need X-Koro-Access-Reason (break-glass, audited). A sensitive club's list is its club_admin's only, every read is audited, and platform staff get 404. When the read concerns one user, the X-Koro-Access-Reason justification is shown to that user (support access notification; reason of the break_glass item of listMySecurityEvents): write no other person's data in it."
       operationId: listOrgMembers
       parameters:
         - description: Organization ID
@@ -28698,7 +28701,7 @@ paths:
       x-koro-surface: org
   /api/v1/orgs/{org_id}/members/{membership_id}:
     get:
-      description: Same rules as listOrgMembers. Ended memberships are not found.
+      description: "Same rules as listOrgMembers. Ended memberships are not found. When the read concerns one user, the X-Koro-Access-Reason justification is shown to that user (support access notification; reason of the break_glass item of listMySecurityEvents): write no other person's data in it."
       operationId: getOrgMember
       parameters:
         - description: Organization ID

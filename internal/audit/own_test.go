@@ -85,7 +85,8 @@ func runSignInAttemptsVisible(t *testing.T, e *env) {
 			ResourceID: ptr(me.UserID), Reason: "expired"}},
 		{mine, audit.Event{Action: string(authz.IdentityPasswordChange), Outcome: audit.Denied, ResourceType: authz.TypeUser,
 			ResourceID: ptr(me.UserID), Reason: audit.ReasonReauthFailed}.By(me)},
-		// A justification typed by a person is free text, never shown.
+		// A justification typed by a person is free text, shown only for a
+		// break-glass access to the owner's data (BE-091).
 		{mine, audit.Event{Action: string(authz.IdentityUserSuspend), Outcome: audit.Success, ResourceType: authz.TypeUser,
 			ResourceID: ptr(other.UserID), Reason: "Kullanım koşulları ihlali"}.By(me)},
 		{theirs, audit.Event{Action: "students.profile.read_admin", Outcome: audit.Success, Reason: "ticket SUP-1 investigation",
@@ -110,7 +111,7 @@ func runSignInAttemptsVisible(t *testing.T, e *env) {
 		}
 	}
 	want := []view{ // newest first
-		{"students.profile.read_admin", "success", "", "", "", 0}, // staff: no network, no justification
+		{"students.profile.read_admin", "success", "ticket SUP-1 investigation", "", "", 0}, // staff: justification (BE-091), no network
 		{"identity.user.suspend", "success", "", "198.51.100.0/24", "Safari", 0},
 		{"identity.password.change", "denied", "reauth_failed", "198.51.100.0/24", "Safari", 0},
 		{"identity.session.create", "denied", "invalid_mfa_code", "", "", 1},
@@ -250,6 +251,67 @@ func runAttemptBursts(t *testing.T, e *env) {
 		}
 		if fmt.Sprint(got) != fmt.Sprint(canonical) {
 			t.Fatalf("limit %d: pages put together\n got %v\nwant %v", limit, got, canonical)
+		}
+	}
+}
+
+// BE-091 (T-326, user decision 2026-10-23): a break-glass access to the
+// owner's data shows the justification the staff member gave — as the
+// support access notification does — to the owner only, still without
+// the staff member's network facts or ticket_ref. A break-glass read of
+// someone else, or of an org-wide list (no subject), is not the owner's
+// item; free text of any other row stays hidden.
+func TestListMySecurityEvents_BreakGlassShowsJustification(t *testing.T) {
+	t.Parallel()
+	runBreakGlassJustification(t, newEnv(t, nil))
+}
+
+func runBreakGlassJustification(t *testing.T, e *env) {
+	t.Helper()
+	me, other, support := persona(t, "student"), persona(t, "student_b"), persona(t, "support")
+	staff := httpx.WithUserAgent(httpx.WithClientIP(t.Context(), "203.0.113.9"), "Mozilla/5.0 (X11; Linux) Firefox/140.0")
+	const why = "  Hesabına giriş sorunu (destek kaydı SUP-7) "
+	bg := func(subject *uuid.UUID, reason string) audit.Event {
+		m := map[string]any{audit.MetaBreakGlass: true, audit.MetaTicketRef: "SUP-7"}
+		if subject != nil {
+			m[audit.MetaSubjectUserID] = subject.String()
+		}
+		return audit.Event{Action: "students.profile.read_admin", Outcome: audit.Success, Reason: reason, Metadata: m}.By(support)
+	}
+	for _, ev := range []audit.Event{
+		bg(&me.UserID, why),
+		bg(&other.UserID, "Diğer öğrencinin profili incelendi"), // someone else's data
+		bg(nil, "Kulüp üye listesi incelendi"),                  // org-wide read: no subject
+		// The owner's own request with free text: still a code-only reason.
+		audit.Event{Action: string(authz.IdentityUserSuspend), Outcome: audit.Success, ResourceType: authz.TypeUser,
+			ResourceID: ptr(other.UserID), Reason: "Kullanım koşulları ihlali"}.By(me),
+	} {
+		if err := e.svc.Log(staff, ev); err != nil {
+			t.Fatal(err)
+		}
+		e.clk.Advance(time.Minute)
+	}
+
+	got := ownEvents(t, e, me)
+	if len(got) != 2 {
+		t.Fatalf("owner's events = %+v, want the access and the suspension", got)
+	}
+	acc, own := got[1], got[0] // newest first
+	if !acc.BreakGlass || acc.Reason != strings.TrimSpace(why) || acc.IPPrefix != "" || acc.UserAgentFamily != "" || acc.Attempts != 0 {
+		t.Fatalf("break-glass item = %+v, want the trimmed justification without network facts", acc)
+	}
+	if own.BreakGlass || own.Reason != "" {
+		t.Fatalf("own suspension item = %+v, want no free-text reason", own)
+	}
+
+	theirs := ownEvents(t, e, other)
+	if len(theirs) != 1 || !theirs[0].BreakGlass || theirs[0].Reason != "Diğer öğrencinin profili incelendi" {
+		t.Fatalf("other user's events = %+v, want only the access to their data", theirs)
+	}
+	// The staff member's own list holds no break-glass item of theirs.
+	for _, ev := range ownEvents(t, e, support) {
+		if ev.BreakGlass {
+			t.Fatalf("staff member sees a break-glass item: %+v", ev)
 		}
 	}
 }

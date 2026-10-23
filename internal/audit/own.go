@@ -2,7 +2,9 @@ package audit
 
 import (
 	"context"
+	"encoding/json"
 	"regexp"
+	"strings"
 	"time"
 	"uuid"
 
@@ -18,6 +20,11 @@ import (
 // never the owner — and the item shows no network facts of a request the
 // owner did not make (like a break-glass access).
 //
+// A break-glass access to the owner's data (03 §6.3) shows the
+// justification the staff member gave (X-Koro-Access-Reason, free text;
+// T-326, BE-091), as the support access notification does — to the owner
+// only, still without the staff member's network facts or ticket_ref.
+//
 // Anyone who knows an address can add such rows (auth_login allows 10
 // requests a minute per IP and the lockout does not stop the records), so
 // a burst must not bury the owner's other events: consecutive attempts
@@ -32,7 +39,8 @@ const (
 
 // reasonCodeRe matches a machine reason code (invalid_credentials, locked,
 // invalid_mfa_code, reauth_failed). Free text — a justification typed by
-// a person — is never shown in listMySecurityEvents.
+// a person — is shown in listMySecurityEvents only as the justification
+// of a break-glass access to the owner's data (BE-091).
 var reasonCodeRe = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 
 // ListOwn implements Service.
@@ -82,10 +90,25 @@ func securityEvent(r Record, user uuid.UUID) SecurityEvent {
 		ev.IPPrefix, ev.UserAgentFamily, ev.Reason = ipPrefix(r.IP), userAgentFamily(r.UserAgent), reasonCode(r.Reason)
 	case signInAttempt(r, user): // a sign-in to the account, anonymous or from another account
 		ev.Reason, ev.Attempts, ev.FirstOccurredAt = reasonCode(r.Reason), 1, r.OccurredAt
+	case breakGlassAccess(r, user): // staff read the user's data
+		ev.BreakGlass, ev.Reason = true, strings.TrimSpace(r.Reason)
 	}
-	// Anything else is an access by staff (break-glass): no network facts
-	// and no reason (its justification is free text).
+	// Anything else shows neither network facts nor a reason.
 	return ev
+}
+
+// breakGlassAccess reports whether r is a break-glass access to user's
+// data (03 §6.3): metadata break_glass = true and subject_user_id = user,
+// the rule the stores select by.
+func breakGlassAccess(r Record, user uuid.UUID) bool {
+	var m struct {
+		BreakGlass bool   `json:"break_glass"`
+		Subject    string `json:"subject_user_id"`
+	}
+	if len(r.Metadata) == 0 || json.Unmarshal(r.Metadata, &m) != nil {
+		return false
+	}
+	return m.BreakGlass && m.Subject == user.String()
 }
 
 // absorb adds r to ev when both are sign-in attempt items (not the user's

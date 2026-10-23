@@ -25,6 +25,13 @@ func TestListMySecurityEvents_AttemptBurstsSummarisedAcrossPages_Postgres(t *tes
 	runAttemptBursts(t, newPGEnv(t, nil).env)
 }
 
+// BE-091 on PostgreSQL: the break-glass justification read back from
+// audit_events.reason through the break-glass subject read of ListOwn.
+func TestListMySecurityEvents_BreakGlassShowsJustification_Postgres(t *testing.T) {
+	t.Parallel()
+	runBreakGlassJustification(t, newPGEnv(t, nil).env)
+}
+
 // TestListOwn_EveryKindReadsAnIndex_Postgres: with sequential scans
 // disabled the plan of ListOwn has none — each kind of security event is
 // read through an index (own events: audit_events_actor_idx, break-glass

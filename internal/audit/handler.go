@@ -28,7 +28,8 @@ func Register(api huma.API, svc Service) {
 		Description: "Sign-in, password, session, MFA and consent events of the caller, break-glass accesses to the caller's data " +
 			"and refused sign-ins to the caller's account (wrong password, locked account, wrong second factor), whoever made them. " +
 			"Only the caller's own requests show network facts; consecutive sign-in attempts with the same reason are one item " +
-			"(attempts, first_occurred_at). A page may hold fewer items than limit while next_cursor is set.",
+			"(attempts, first_occurred_at). A break-glass item (break_glass) shows the staff member's justification as reason. " +
+			"A page may hold fewer items than limit while next_cursor is set.",
 	}, op.Meta{Action: string(authz.AuditEventListOwn), Surface: op.SurfaceSelf}), h.listOwn)
 
 	huma.Register(api, op.Koro(huma.Operation{

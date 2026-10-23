@@ -290,3 +290,46 @@ func TestVerify_RangeAndAuthz(t *testing.T) {
 		t.Fatalf("the verification is not logged: %+v", rows)
 	}
 }
+
+// BE-091 (T-326): over HTTP the break-glass item of listMySecurityEvents
+// carries break_glass and the justification as reason; no network facts,
+// no ticket_ref or other metadata.
+func TestListMySecurityEvents_HTTPBreakGlassReason(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, nil)
+	me, support := persona(t, "student"), persona(t, "support")
+	staff := httpx.WithUserAgent(httpx.WithClientIP(t.Context(), "203.0.113.9"), "curl/8.9.1")
+	for _, ev := range []audit.Event{
+		audit.Event{Action: "identity.session.create", Outcome: audit.Success}.By(me),
+		audit.Event{Action: "students.profile.read_admin", Outcome: audit.Success, Reason: "Rıza kaydı itirazı incelendi",
+			Metadata: map[string]any{audit.MetaBreakGlass: true, audit.MetaSubjectUserID: me.UserID.String(),
+				audit.MetaTicketRef: "SUP-42"}}.By(support),
+	} {
+		if err := e.svc.Log(staff, ev); err != nil {
+			t.Fatal(err)
+		}
+		e.clk.Advance(time.Second)
+	}
+	code, body := get(t, newHTTP(t, e), "student", "/api/v1/me/security-events", nil)
+	if code != http.StatusOK {
+		t.Fatalf("status %d: %v", code, body)
+	}
+	got := items(t, body)
+	if len(got) != 2 {
+		t.Fatalf("items = %v", got)
+	}
+	bg, own := got[0], got[1]
+	want := map[string]any{"action": "students.profile.read_admin", "outcome": "success", "break_glass": true,
+		"reason": "Rıza kaydı itirazı incelendi", "occurred_at": bg["occurred_at"]}
+	if len(bg) != len(want) {
+		t.Fatalf("break-glass item = %v, want exactly the keys of %v", bg, want)
+	}
+	for k, v := range want {
+		if bg[k] != v {
+			t.Fatalf("break-glass item %s = %v, want %v (item %v)", k, bg[k], v, bg)
+		}
+	}
+	if _, has := own["break_glass"]; has || own["ip_prefix"] != "203.0.113.0/24" {
+		t.Fatalf("own item = %v, want no break_glass and the caller's network", own)
+	}
+}

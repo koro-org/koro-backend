@@ -16,7 +16,8 @@ type SecurityEventDTO struct {
 	OccurredAt      time.Time  `json:"occurred_at" doc:"When it happened; for sign-in attempts the newest attempt"`
 	IPPrefix        string     `json:"ip_prefix,omitempty" doc:"Network of the client (/24 or /48) of the caller's own requests; absent otherwise (staff accesses, sign-in attempts)"`
 	UserAgentFamily string     `json:"user_agent_family,omitempty" doc:"Browser or app family, e.g. Chrome, Koro app; absent like ip_prefix"`
-	Reason          string     `json:"reason,omitempty" doc:"Reason code of a refusal, e.g. invalid_credentials, locked, invalid_mfa_code, reauth_failed"`
+	Reason          string     `json:"reason,omitempty" doc:"Reason code of a refusal, e.g. invalid_credentials, locked, invalid_mfa_code, reauth_failed; for a break-glass item (break_glass) the justification the staff member gave, free text to show as is"`
+	BreakGlass      bool       `json:"break_glass,omitempty" doc:"A break-glass access to the caller's data by Koro support or platform admins; reason is then their justification (free text, not a code)"`
 	Attempts        int        `json:"attempts,omitempty" doc:"Number of refused sign-ins to the caller's account summarised by this item (anonymous or from another account): consecutive attempts with the same reason, each at most 15 minutes before the next"`
 	FirstOccurredAt *time.Time `json:"first_occurred_at,omitempty" doc:"Oldest attempt of a sign-in attempt item"`
 }
@@ -96,7 +97,8 @@ func afterOf(cursor, fp string) (*After, error) {
 
 func toSecurityEventDTO(e SecurityEvent) SecurityEventDTO {
 	out := SecurityEventDTO{Action: e.Action, Outcome: string(e.Outcome), OccurredAt: e.OccurredAt,
-		IPPrefix: e.IPPrefix, UserAgentFamily: e.UserAgentFamily, Reason: e.Reason, Attempts: e.Attempts}
+		IPPrefix: e.IPPrefix, UserAgentFamily: e.UserAgentFamily, Reason: e.Reason, BreakGlass: e.BreakGlass,
+		Attempts: e.Attempts}
 	if e.Attempts > 0 {
 		first := e.FirstOccurredAt
 		out.FirstOccurredAt = &first

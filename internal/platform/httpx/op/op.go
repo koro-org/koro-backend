@@ -176,7 +176,22 @@ func Koro(o huma.Operation, m Meta) huma.Operation {
 	}
 	if m.BreakGlass {
 		ext[ExtBreakGlass] = true
+		o.Description = withBreakGlassNotice(o.Description)
 	}
 	o.Extensions = ext
 	return o
+}
+
+// BreakGlassNotice ends the description of every break-glass operation: the
+// justification is not internal (T-326, BE-091), so whoever types it knows
+// the user it concerns will read it.
+const BreakGlassNotice = "When the read concerns one user, the X-Koro-Access-Reason justification is shown to that user " +
+	"(support access notification; reason of the break_glass item of listMySecurityEvents): write no other person's data in it."
+
+// withBreakGlassNotice appends BreakGlassNotice to desc.
+func withBreakGlassNotice(desc string) string {
+	if desc == "" {
+		return BreakGlassNotice
+	}
+	return desc + " " + BreakGlassNotice
 }

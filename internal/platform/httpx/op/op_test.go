@@ -88,3 +88,26 @@ func TestRateLimits_MatchDesignTable(t *testing.T) {
 		t.Fatalf("04 §1.9 defines 18 classes, got %d", n)
 	}
 }
+
+// BE-091 (T-326): the description of a break-glass operation says the
+// justification is shown to the person whose data is read; other
+// operations keep theirs.
+func TestKoro_BreakGlassDescriptionSaysReasonIsShown(t *testing.T) {
+	t.Parallel()
+	bg := op.Koro(huma.Operation{OperationID: "adminGetStudentProfile", Method: http.MethodGet, Path: "/admin/students/{user_id}",
+		Tags: []string{"students"}, Description: "Break-glass read."},
+		op.Meta{Action: "students.profile.read_admin", Surface: op.SurfaceAdmin, BreakGlass: true})
+	if want := "Break-glass read. " + op.BreakGlassNotice; bg.Description != want {
+		t.Fatalf("description = %q, want %q", bg.Description, want)
+	}
+	empty := op.Koro(huma.Operation{OperationID: "listOrgMembers", Method: http.MethodGet, Path: "/orgs/{org_id}/members",
+		Tags: []string{"orgs"}}, op.Meta{Action: "orgs.member.list", Surface: op.SurfaceOrg, BreakGlass: true})
+	if empty.Description != op.BreakGlassNotice {
+		t.Fatalf("description = %q, want the notice alone", empty.Description)
+	}
+	plain := op.Koro(huma.Operation{OperationID: "listClubs", Method: http.MethodGet, Path: "/clubs", Tags: []string{"directory"},
+		Description: "Clubs."}, op.Meta{Action: "directory.club.list", Surface: op.SurfacePublic})
+	if plain.Description != "Clubs." {
+		t.Fatalf("non break-glass description changed: %q", plain.Description)
+	}
+}

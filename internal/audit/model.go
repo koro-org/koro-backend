@@ -108,7 +108,8 @@ type View struct {
 
 // SecurityEvent is one item of listMySecurityEvents: no full IP or
 // User-Agent, and no network facts at all for a request by someone else
-// (break-glass, a sign-in attempt against the account).
+// (break-glass, a sign-in attempt against the account). A break-glass
+// item carries the staff member's justification (BE-091).
 //
 // A sign-in attempt item (Attempts > 0, BE-078) summarises consecutive
 // refused sign-ins to the account with the same reason, each at most
@@ -121,8 +122,12 @@ type SecurityEvent struct {
 	OccurredAt      time.Time
 	IPPrefix        string // /24 (IPv4) or /48 (IPv6)
 	UserAgentFamily string
-	Reason          string // a reason code (invalid_credentials, locked, …); never free text
-	Attempts        int    // sign-in attempts summarised by the item; 0 for any other event
+	// Reason is a reason code (invalid_credentials, locked, …), or for a
+	// break-glass access (BreakGlass) the staff member's justification,
+	// free text (T-326, BE-091).
+	Reason          string
+	BreakGlass      bool // a break-glass access to the user's data by staff (03 §6.3)
+	Attempts        int  // sign-in attempts summarised by the item; 0 for any other event
 	FirstOccurredAt time.Time
 }
 

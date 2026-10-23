@@ -15,6 +15,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/identity"
 	"koro/internal/notify"
+	"koro/internal/platform/applink"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
@@ -34,7 +35,6 @@ const (
 	invitationTTL          = 7 * 24 * time.Hour // 02 §7.4: created_at + 7 days
 	invitationAggType      = "org_invitation"
 	invitationTemplate     = "orgs.invitation"
-	invitationLinkPath     = "/invitations/accept"
 	maxEmail               = 254
 )
 
@@ -420,7 +420,7 @@ func (s *service) handleInvitationCreated(ctx context.Context, e domainevent.Env
 		Data: map[string]any{
 			"org_name":   o.Name,
 			"role":       string(inv.Role),
-			"link":       s.d.LinkBaseURL + invitationLinkPath + "#token=" + raw,
+			"link":       applink.Token(s.d.LinkBaseURL, applink.AcceptInvitation, raw),
 			"token":      raw,
 			"valid_days": "7",
 		},

@@ -183,6 +183,7 @@ type Registrations interface {
 type Service interface {
 	Events
 	Registrations
+	Participation
 
 	// ListEvents is listEvents (events.event.list, P): published events the
 	// caller may see.

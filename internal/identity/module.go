@@ -173,6 +173,7 @@ type Students interface {
 type Service interface {
 	Authenticator
 	Users
+	AccountAges
 	Sessions
 	Reauthenticator
 

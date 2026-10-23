@@ -5,10 +5,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 	"uuid"
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"koro/internal/events"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
 	"koro/internal/platform/httpx"
@@ -206,5 +208,43 @@ func TestOpenAPI_NoTalentFields(t *testing.T) {
 	}
 	if len(oapi.OnAddOperation) == 0 {
 		t.Fatal("the talent field guard is not installed on the API")
+	}
+}
+
+// TestWire_TalentEventsAdapter (BE-085): talent reads the events module's
+// participation figures through talentEvents (both L8): a registration
+// maps to its event and the event's figures carry its organiser and its
+// confirmed registrations.
+func TestWire_TalentEventsAdapter(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	mem := c.events.built.(*events.MemStore)
+	start := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
+	e := events.Event{
+		ID: uuid.NewV7(), OrgID: uuid.NewV7(), CreatedBy: uuid.NewV7(), Title: "Talent Etkinliği", Slug: "talent",
+		Category: events.CategoryTalk, Format: events.FormatInPerson, StartsAt: start, EndsAt: start.Add(time.Hour),
+		Visibility: events.VisibilityPublic, Status: events.StatusPublished, PublishedAt: &start, RequiresRegistration: true,
+		RegistrationMode: events.ModeAuto, CreatedAt: start, UpdatedAt: start,
+	}
+	if err := mem.PutEvent(e); err != nil {
+		t.Fatal(err)
+	}
+	r, err := mem.InsertRegistration(ctx, events.Registration{ID: uuid.NewV7(), EventID: e.ID, OrgID: e.OrgID, UserID: uuid.NewV7(),
+		Status: events.RegConfirmed, Source: events.SourceWeb, ConfirmedAt: &start, AnswersPurgeAt: start.Add(90 * 24 * time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := talentEvents{p: c.events.svc}
+	of, err := a.EventsOf(ctx, []uuid.UUID{r.ID, uuid.NewV7()})
+	if err != nil || len(of) != 1 || of[r.ID] != e.ID {
+		t.Fatalf("EventsOf = %v, %v", of, err)
+	}
+	facts, err := a.EventFacts(ctx, []uuid.UUID{e.ID, uuid.NewV7()})
+	if want := (talent.EventFacts{OrgID: e.OrgID, Confirmed: 1}); err != nil || len(facts) != 1 || facts[e.ID] != want {
+		t.Fatalf("EventFacts = %+v, %v; want %+v", facts, err, want)
 	}
 }

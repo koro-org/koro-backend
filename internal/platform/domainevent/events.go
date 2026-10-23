@@ -133,11 +133,13 @@ type TicketReissued struct {
 // Topic implements Payload.
 func (TicketReissued) Topic() string { return TopicTicketReissued }
 
-// CheckinRecorded: an attendee was checked in.
+// CheckinRecorded: an attendee was checked in. OrgID is the organiser of
+// the event (talent: an organiser earns nothing at their own event; BE-085).
 type CheckinRecorded struct {
 	CheckinID      uuid.UUID `json:"checkin_id"`
 	RegistrationID uuid.UUID `json:"registration_id"`
 	EventID        uuid.UUID `json:"event_id"`
+	OrgID          uuid.UUID `json:"org_id"`
 	UserID         uuid.UUID `json:"user_id"`
 	StaffUserID    uuid.UUID `json:"staff_user_id"`
 	Sensitive      bool      `json:"sensitive"`

@@ -141,6 +141,7 @@ func (s *service) score(ctx context.Context, cfg ConfigVersion, runID uuid.UUID,
 
 	var kept []subjectFacts
 	var drop []uuid.UUID
+	figures := eventFigures{}
 	for batch := range slices.Chunk(users, recomputeBatch) {
 		if err := ctx.Err(); err != nil {
 			return 0, err
@@ -163,6 +164,11 @@ func (s *service) score(ctx context.Context, cfg ConfigVersion, runID uuid.UUID,
 		if err != nil {
 			return 0, err
 		}
+		// The gaming thresholds read identity and events on app_rw, after
+		// the talent transaction.
+		if rows, err = s.screenRows(ctx, p, figures, rows, neutral); err != nil {
+			return 0, err
+		}
 		byUser := map[uuid.UUID][]PointEvent{}
 		for _, r := range rows {
 			byUser[r.UserID] = append(byUser[r.UserID], r)
@@ -170,8 +176,9 @@ func (s *service) score(ctx context.Context, cfg ConfigVersion, runID uuid.UUID,
 		for _, id := range batch {
 			co, student := cohorts[id]
 			ledger := byUser[id]
-			// No student profile, a minor (T-23) or nothing in the window:
-			// no score at all (band 0 by absence).
+			// No student profile, a minor (T-23) or nothing in the window
+			// (every row dropped by a gaming threshold included): no score
+			// at all (band 0 by absence).
 			if !student || co.IsMinor || len(ledger) == 0 {
 				drop = append(drop, id)
 				continue

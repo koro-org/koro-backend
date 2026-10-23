@@ -119,16 +119,17 @@ type TalentConfigVersionDTO struct {
 }
 
 // TalentParamsDTO is the params of a version (02 §15.1). The three gaming
-// thresholds are stored but not applied yet.
+// thresholds are applied by the like consumer and the nightly score
+// (BE-085; absent or 0 = off).
 type TalentParamsDTO struct {
 	ShrinkK                   int                 `json:"shrink_k" doc:"Shrinkage k: w = n / (n + k)"`
 	CohortMin                 int                 `json:"cohort_min" doc:"Smallest cohort (≥ 10)"`
 	LookbackDays              int                 `json:"lookback_days" doc:"Window of the nightly score (≤ 730)"`
 	CategoryCapsCP            map[string]int      `json:"category_caps_cp" doc:"Cap of every category (participation, intent, profile, community, engagement)"`
 	Bands                     []TalentBandRuleDTO `json:"bands" doc:"1..3 upward-only bands"`
-	MinAccountAgeDaysForLikes *int                `json:"min_account_age_days_for_likes,omitempty" doc:"Stored, not applied yet"`
-	MinEventConfirmed         *int                `json:"min_event_confirmed,omitempty" doc:"Stored, not applied yet"`
-	MinEventDistinctCheckins  *int                `json:"min_event_distinct_checkins,omitempty" doc:"Stored, not applied yet"`
+	MinAccountAgeDaysForLikes *int                `json:"min_account_age_days_for_likes,omitempty" doc:"A like earns points only from an account at least this many days old at the like (absent or 0: off)"`
+	MinEventConfirmed         *int                `json:"min_event_confirmed,omitempty" doc:"The nightly score counts the registration, check-in and no-show of an event only with at least this many confirmed registrations (absent or 0: off)"`
+	MinEventDistinctCheckins  *int                `json:"min_event_distinct_checkins,omitempty" doc:"The nightly score counts the registration, check-in and no-show of an event only with at least this many distinct users checked in (absent or 0: off)"`
 }
 
 // TalentBandRuleDTO is one band rule.
@@ -247,9 +248,9 @@ type TalentParamsInputDTO struct {
 	LookbackDays              *int                `json:"lookback_days,omitempty" doc:"Required. Window of the nightly score (1..730 days)"`
 	CategoryCapsCP            map[string]int      `json:"category_caps_cp,omitempty" doc:"Required. A cap (cp) of each of participation, intent, profile, community, engagement"`
 	Bands                     []TalentBandRuleDTO `json:"bands,omitempty" doc:"Required. 1..3 rules numbered 1, 2, 3; min_pct_bp and mult_bp grow with the band"`
-	MinAccountAgeDaysForLikes *int                `json:"min_account_age_days_for_likes,omitempty" doc:"Stored, not applied yet"`
-	MinEventConfirmed         *int                `json:"min_event_confirmed,omitempty" doc:"Stored, not applied yet"`
-	MinEventDistinctCheckins  *int                `json:"min_event_distinct_checkins,omitempty" doc:"Stored, not applied yet"`
+	MinAccountAgeDaysForLikes *int                `json:"min_account_age_days_for_likes,omitempty" doc:"A like earns points only from an account at least this many days old at the like (absent or 0: off)"`
+	MinEventConfirmed         *int                `json:"min_event_confirmed,omitempty" doc:"The nightly score counts the registration, check-in and no-show of an event only with at least this many confirmed registrations (absent or 0: off)"`
+	MinEventDistinctCheckins  *int                `json:"min_event_distinct_checkins,omitempty" doc:"The nightly score counts the registration, check-in and no-show of an event only with at least this many distinct users checked in (absent or 0: off)"`
 }
 
 // TalentSignalDefInputDTO replaces one signal definition as a whole.

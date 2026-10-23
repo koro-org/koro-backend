@@ -2,9 +2,11 @@ package talent
 
 import (
 	"context"
+	"time"
 	"uuid"
 
 	"koro/internal/audit"
+	"koro/internal/authz"
 	"koro/internal/identity"
 	"koro/internal/students"
 )
@@ -44,4 +46,48 @@ type AuditLogger interface {
 // (the refused proof is talent's denied record, audit.ReauthFailed).
 type Reauthenticator interface {
 	Verify(ctx context.Context, userID uuid.UUID, proof identity.ReauthProof) (kind string, err error)
+}
+
+// Accounts reports when accounts were created (identity, 01 §4.6; BE-085):
+// a like earns points only from an account at least
+// min_account_age_days_for_likes days old at the like (02 §15.1, R-003
+// §3.4). identity.Service satisfies it. Read on app_rw, before or between
+// the talent transactions.
+type Accounts interface {
+	// AccountAge returns the creation instant of every account among
+	// userIDs that exists.
+	AccountAge(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]time.Time, error)
+}
+
+// Events is the participation read of the events module (BE-085): the
+// organiser of an event and the figures behind min_event_confirmed and
+// min_event_distinct_checkins (02 §15.1, R-003 §3.4). events is L8 like
+// talent, so neither imports the other: the composition root adapts
+// events.Participation. Read on app_rw, before or between the talent
+// transactions.
+type Events interface {
+	// EventsOf maps registration and check-in IDs (the sources of the event
+	// signals) to their event; an unknown ID is missing.
+	EventsOf(ctx context.Context, sourceIDs []uuid.UUID) (map[uuid.UUID]uuid.UUID, error)
+	// EventFacts returns the figures of the events among eventIDs; an
+	// unknown event is missing.
+	EventFacts(ctx context.Context, eventIDs []uuid.UUID) (map[uuid.UUID]EventFacts, error)
+}
+
+// EventFacts are the participation figures of one event.
+type EventFacts struct {
+	OrgID uuid.UUID // the organiser
+	// Confirmed counts the registrations that were confirmed and kept their
+	// place (confirmed, checked in, no-show).
+	Confirmed int
+	// DistinctCheckins counts the distinct users with a valid check-in.
+	DistinctCheckins int
+}
+
+// Memberships reports a user's active org memberships (orgs, 01 §4.7
+// OrgDirectory.MembershipsOf; BE-085): an organiser of an event earns
+// nothing at it (ADR-0015). orgs.Service satisfies it. Read on app_rw,
+// before the talent transaction.
+type Memberships interface {
+	MembershipsOf(ctx context.Context, userID uuid.UUID) ([]authz.Membership, error)
 }

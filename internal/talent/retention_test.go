@@ -9,6 +9,7 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/authz"
 	"koro/internal/platform/civil"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
@@ -396,8 +397,11 @@ func TestSweeper_BatchesOf1000(t *testing.T) {
 	rec := &recordingStore{MemStore: talent.NewMemStore(clk.Now), batches: map[string][]int{}}
 	tx := &countTx{}
 	mod, err := talent.New(talent.Deps{Store: rec, Tx: tx, Audit: &fakeAudit{}, Clock: clk, Log: obs.Discard(),
-		Students:  &fakeStudents{cohorts: map[uuid.UUID]students.Cohort{}, choices: map[uuid.UUID]students.RankingChoice{}},
-		Directory: fakeDirectory{sensitive: map[uuid.UUID]bool{}}})
+		Students:    &fakeStudents{cohorts: map[uuid.UUID]students.Cohort{}, choices: map[uuid.UUID]students.RankingChoice{}},
+		Directory:   fakeDirectory{sensitive: map[uuid.UUID]bool{}},
+		Accounts:    &fakeAccounts{created: map[uuid.UUID]time.Time{}},
+		Events:      &fakeEvents{of: map[uuid.UUID]uuid.UUID{}, facts: map[uuid.UUID]talent.EventFacts{}},
+		Memberships: &fakeMemberships{m: map[uuid.UUID][]authz.Membership{}}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 	"uuid"
 
@@ -64,8 +65,9 @@ func (s *service) handleRegistrationConfirmed(ctx context.Context, e domainevent
 	if err != nil {
 		return queue.Permanent(err)
 	}
-	return s.credit(ctx, s.newCredit(e, IngestRegistrationTaskName, SignalRegistrationConfirmed, p.UserID,
-		SourceRegistration, p.RegistrationID, p.Sensitive))
+	c := s.newCredit(e, IngestRegistrationTaskName, SignalRegistrationConfirmed, p.UserID, SourceRegistration, p.RegistrationID, p.Sensitive)
+	c.event, c.organiser = p.EventID, p.OrgID
+	return s.credit(ctx, c)
 }
 
 func (s *service) handleRegistrationCancelled(ctx context.Context, e domainevent.Envelope) error {
@@ -82,18 +84,23 @@ func (s *service) handleNoShow(ctx context.Context, e domainevent.Envelope) erro
 	if err != nil {
 		return queue.Permanent(err)
 	}
-	return s.credit(ctx, s.newCredit(e, IngestNoShowTaskName, SignalEventNoShow, p.UserID, SourceRegistration, p.RegistrationID, p.Sensitive))
+	c := s.newCredit(e, IngestNoShowTaskName, SignalEventNoShow, p.UserID, SourceRegistration, p.RegistrationID, p.Sensitive)
+	c.event = p.EventID // the payload has no org: the organiser comes from Events
+	return s.credit(ctx, c)
 }
 
 // handleCheckinRecorded: a self check-in (the attendee scanned their own
-// ticket, e.g. an organiser at their own event) is recorded with 0 points
-// (ADR-0015: the organiser earns nothing at their own event).
+// ticket) and the check-in of an organiser of the event's org are recorded
+// with 0 points (ADR-0015: the organiser earns nothing at their own event).
+// A payload without OrgID (published before BE-085) takes the organiser
+// from Events.
 func (s *service) handleCheckinRecorded(ctx context.Context, e domainevent.Envelope) error {
 	p, err := domainevent.Decode[domainevent.CheckinRecorded](e)
 	if err != nil {
 		return queue.Permanent(err)
 	}
 	c := s.newCredit(e, IngestCheckinTaskName, SignalEventCheckin, p.UserID, SourceCheckin, p.CheckinID, p.Sensitive)
+	c.event, c.organiser = p.EventID, p.OrgID
 	c.zero = p.StaffUserID == p.UserID
 	return s.credit(ctx, c)
 }
@@ -206,8 +213,17 @@ type credit struct {
 	eventID   uuid.UUID  // Envelope.ID (source_event_id)
 	sensitive bool       // the producer flagged the source sensitive
 	clubs     []uuid.UUID
-	zero      bool // recorded with 0 points (per_source): self check-in
+	zero      bool // recorded with 0 points (per_source): self check-in, organiser
 	maxActive int  // at most this many credited rows of the signal (0: no limit)
+
+	// event is the Koro event of an event signal and organiser its org from
+	// the payload (uuid.Nil: unknown, read through Events); the organiser
+	// rule sets zero (screen).
+	event, organiser uuid.UUID
+	// created is the account's creation instant of a like (screen; nil:
+	// unknown account), checked against min_account_age_days_for_likes in
+	// the transaction.
+	created *time.Time
 }
 
 func (s *service) newCredit(e domainevent.Envelope, task, signal string, userID uuid.UUID, srcType string, srcID uuid.UUID, sensitive bool) credit {
@@ -231,7 +247,7 @@ func (s *service) credit(ctx context.Context, c credit) error {
 		s.counts.inc(c.signal, OutcomeFlagOff)
 		return nil
 	}
-	outcome, err := s.screen(ctx, c)
+	outcome, err := s.screen(ctx, &c)
 	if err != nil {
 		return err
 	}
@@ -249,8 +265,11 @@ func (s *service) credit(ctx context.Context, c credit) error {
 	return nil
 }
 
-// screen returns the outcome that stops c before the ledger ("" = go on).
-func (s *service) screen(ctx context.Context, c credit) (string, error) {
+// screen returns the outcome that stops c before the ledger ("" = go on)
+// and, for an eligible subject, completes c with the public reads the
+// transaction cannot make: the organiser rule (zero) and a liker's account
+// age.
+func (s *service) screen(ctx context.Context, c *credit) (string, error) {
 	if c.sensitive {
 		return OutcomeSensitive, nil
 	}
@@ -265,7 +284,57 @@ func (s *service) screen(ctx context.Context, c credit) (string, error) {
 			}
 		}
 	}
-	return s.studentOutcome(ctx, c.key.UserID)
+	if outcome, err := s.studentOutcome(ctx, c.key.UserID); outcome != "" || err != nil {
+		return outcome, err
+	}
+	if !c.zero && c.event != uuid.Nil() {
+		org, err := s.organises(ctx, c.key.UserID, c.event, c.organiser)
+		if err != nil {
+			return "", err
+		}
+		c.zero = org
+	}
+	if c.signal == SignalFeedLike {
+		created, err := s.d.Accounts.AccountAge(ctx, []uuid.UUID{c.key.UserID})
+		if err != nil {
+			return "", fmt.Errorf("talent: account age: %w", err)
+		}
+		if at, ok := created[c.key.UserID]; ok {
+			c.created = &at
+		}
+	}
+	return "", nil
+}
+
+// organises reports whether userID organises the event: an active
+// membership of the organising org (org; uuid.Nil → the event's org from
+// Events, unknown event → no) in a role other than a participant's
+// (organiserRole).
+func (s *service) organises(ctx context.Context, userID, event, org uuid.UUID) (bool, error) {
+	if org == uuid.Nil() {
+		facts, err := s.d.Events.EventFacts(ctx, []uuid.UUID{event})
+		if err != nil {
+			return false, fmt.Errorf("talent: event facts: %w", err)
+		}
+		f, ok := facts[event]
+		if !ok {
+			return false, nil
+		}
+		org = f.OrgID
+	}
+	ms, err := s.d.Memberships.MembershipsOf(ctx, userID)
+	if err != nil {
+		return false, fmt.Errorf("talent: memberships: %w", err)
+	}
+	return slices.ContainsFunc(ms, func(m authz.Membership) bool { return m.OrgID == org && organiserRole(m.Role) }), nil
+}
+
+// organiserRole: every org role organises the org's events (club_admin,
+// university_rep and career_staff manage them, 03 §5.6; the company and
+// platform roles hold the org) except the participants': a club's
+// ordinary member (and a phase 2 NGO member) is the audience.
+func organiserRole(r authz.MemberRole) bool {
+	return r != authz.MemberMember && r != authz.MemberNGOMember
 }
 
 // studentOutcome checks the subject: a student profile, an adult, ranking
@@ -320,6 +389,15 @@ func (s *service) write(ctx context.Context, c credit) (string, error) {
 		return OutcomeNoConfig, nil
 	case err != nil:
 		return "", err
+	}
+	if c.signal == SignalFeedLike {
+		g, err := gamingOf(cfg.Params)
+		if err != nil {
+			return "", err
+		}
+		if days := minDays(g.MinAccountAgeDaysForLikes); days > 0 && !oldEnough(c.created, c.at, days) {
+			return OutcomeYoungAccount, nil
+		}
 	}
 
 	applied, capReason, counted, err := s.applyCaps(ctx, c, def)

@@ -76,6 +76,100 @@ func (f fakeDirectory) SensitiveOrgIDs(_ context.Context, ids []uuid.UUID) (map[
 	return out, nil
 }
 
+// fakeAccounts is identity's account age: the creation instants.
+type fakeAccounts struct {
+	mu      sync.Mutex
+	created map[uuid.UUID]time.Time
+}
+
+func (f *fakeAccounts) AccountAge(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]time.Time, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[uuid.UUID]time.Time{}
+	for _, id := range ids {
+		if c, ok := f.created[id]; ok {
+			out[id] = c
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeAccounts) set(id uuid.UUID, created time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.created[id] = created
+}
+
+// fakeEvents is the events participation read: the event of every source,
+// the figures of every event, and how often the figures were read.
+type fakeEvents struct {
+	mu        sync.Mutex
+	of        map[uuid.UUID]uuid.UUID
+	facts     map[uuid.UUID]talent.EventFacts
+	factReads int
+}
+
+func (f *fakeEvents) EventsOf(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]uuid.UUID, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[uuid.UUID]uuid.UUID{}
+	for _, id := range ids {
+		if ev, ok := f.of[id]; ok {
+			out[id] = ev
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeEvents) EventFacts(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]talent.EventFacts, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.factReads++
+	out := map[uuid.UUID]talent.EventFacts{}
+	for _, id := range ids {
+		if x, ok := f.facts[id]; ok {
+			out[id] = x
+		}
+	}
+	return out, nil
+}
+
+// event registers an event of org with its figures and returns its ID.
+func (f *fakeEvents) event(org uuid.UUID, confirmed, distinct int) uuid.UUID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	id := uuid.NewV7()
+	f.facts[id] = talent.EventFacts{OrgID: org, Confirmed: confirmed, DistinctCheckins: distinct}
+	return id
+}
+
+// source maps a registration or check-in ID to its event and returns it.
+func (f *fakeEvents) source(event uuid.UUID) uuid.UUID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	id := uuid.NewV7()
+	f.of[id] = event
+	return id
+}
+
+// fakeMemberships is orgs' MembershipsOf.
+type fakeMemberships struct {
+	mu sync.Mutex
+	m  map[uuid.UUID][]authz.Membership
+}
+
+func (f *fakeMemberships) MembershipsOf(_ context.Context, id uuid.UUID) ([]authz.Membership, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.m[id], nil
+}
+
+func (f *fakeMemberships) add(user, org uuid.UUID, kind authz.OrgKind, role authz.MemberRole) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.m[user] = append(f.m[user], authz.Membership{OrgID: org, OrgKind: kind, Role: role})
+}
+
 // fakeAudit records the events it is given.
 type fakeAudit struct {
 	mu     sync.Mutex
@@ -125,6 +219,9 @@ type env struct {
 	store    *talent.MemStore
 	students *fakeStudents
 	dir      fakeDirectory
+	accounts *fakeAccounts
+	events   *fakeEvents
+	members  *fakeMemberships
 	audit    *fakeAudit
 	reauth   *audittest.LateReauth[identity.ReauthProof]
 	clk      *clock.Fake
@@ -155,8 +252,10 @@ func buildEnvWith(t *testing.T, o envOptions) *env {
 	e := &env{store: talent.NewMemStore(clk.Now), clk: clk, audit: &fakeAudit{}, subs: outbox.NewRegistry(),
 		students: &fakeStudents{cohorts: map[uuid.UUID]students.Cohort{}, choices: map[uuid.UUID]students.RankingChoice{}},
 		dir:      fakeDirectory{sensitive: map[uuid.UUID]bool{}}, reauth: &audittest.LateReauth[identity.ReauthProof]{Next: fakeReauth{}}}
+	e.newPorts()
 	d := talent.Deps{Store: e.store, Tx: db.NopTx{}, Audit: e.audit, Clock: clk, Log: obs.Discard(),
-		Students: e.students, Directory: e.dir, CollectionEnabled: o.collection, AuditorAPIEnabled: o.auditorAPI}
+		Students: e.students, Directory: e.dir, Accounts: e.accounts, Events: e.events, Memberships: e.members,
+		CollectionEnabled: o.collection, AuditorAPIEnabled: o.auditorAPI}
 	if !o.noReauth {
 		d.Reauth = e.reauth
 	}
@@ -173,6 +272,13 @@ func buildEnvWith(t *testing.T, o envOptions) *env {
 		e.cfg = e.config(t, t0.Add(-24*time.Hour))
 	}
 	return e
+}
+
+// newPorts sets empty identity, events and orgs fakes (BE-085).
+func (e *env) newPorts() {
+	e.accounts = &fakeAccounts{created: map[uuid.UUID]time.Time{}}
+	e.events = &fakeEvents{of: map[uuid.UUID]uuid.UUID{}, facts: map[uuid.UUID]talent.EventFacts{}}
+	e.members = &fakeMemberships{m: map[uuid.UUID][]authz.Membership{}}
 }
 
 // isPermanent reports a task error that asynq does not retry.

@@ -8,6 +8,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"koro/internal/events"
 	"koro/internal/platform/config"
 	"koro/internal/platform/db"
 	"koro/internal/platform/obs"
@@ -28,9 +29,12 @@ import (
 //	       talent_auditor endpoint answers 404)
 //
 // Consumed (built in lower layers): c.audit.svc, c.identity.svc (the
-// re-authentication proof of the R operations; nil → 503), c.students.svc
-// (cohort, minor flag, ranking choice) and c.directory.svc (sensitive
-// clubs).
+// re-authentication proof of the R operations; the account age of
+// min_account_age_days_for_likes, BE-085), c.orgs.svc (memberships: the
+// organiser rule, BE-085), c.students.svc (cohort, minor flag, ranking
+// choice), c.directory.svc (sensitive clubs) and c.events.svc (built
+// before talent in L8: event participation figures and organiser through
+// talentEvents, BE-085).
 //
 // Provided, set in build: mod (talent.Ranking for discovery, BE-051;
 // talent.Admin for the talent_auditor endpoints, BE-052), the talent KVKK
@@ -66,17 +70,15 @@ func (w *talentWiring) build(c *container) error {
 	if store == nil || tx == nil {
 		return errors.New("talent: no store (database not opened)")
 	}
-	if c.students.svc == nil || c.directory.svc == nil {
-		return errors.New("talent: students or directory is not built")
+	if c.students.svc == nil || c.directory.svc == nil || c.identity.svc == nil || c.orgs.svc == nil || c.events.svc == nil {
+		return errors.New("talent: identity, orgs, directory, students or events is not built")
 	}
 	log := c.infra.log.With("module", "talent")
 	d := talent.Deps{
 		Store: store, Tx: tx, Audit: c.audit.svc, Clock: c.infra.clock, Log: log,
-		Students: c.students.svc, Directory: c.directory.svc,
+		Students: c.students.svc, Directory: c.directory.svc, Accounts: c.identity.svc,
+		Events: talentEvents{p: c.events.svc}, Memberships: c.orgs.svc, Reauth: c.identity.svc,
 		CollectionEnabled: cfg.DefaultEnabled, AuditorAPIEnabled: cfg.AuditorAPIEnabled,
-	}
-	if svc := c.identity.svc; svc != nil {
-		d.Reauth = svc
 	}
 	mod, err := talent.New(d)
 	if err != nil {
@@ -131,4 +133,26 @@ func (w *talentWiring) metrics(m *obs.Metrics) error {
 			}
 			return out
 		})
+}
+
+// talentEvents adapts events.Participation to talent.Events (BE-085):
+// events and talent are both L8 and import neither the other.
+type talentEvents struct{ p events.Participation }
+
+// EventsOf implements talent.Events.
+func (a talentEvents) EventsOf(ctx context.Context, sourceIDs []uuid.UUID) (map[uuid.UUID]uuid.UUID, error) {
+	return a.p.EventsOf(ctx, sourceIDs)
+}
+
+// EventFacts implements talent.Events.
+func (a talentEvents) EventFacts(ctx context.Context, eventIDs []uuid.UUID) (map[uuid.UUID]talent.EventFacts, error) {
+	got, err := a.p.ParticipationFacts(ctx, eventIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID]talent.EventFacts, len(got))
+	for id, f := range got {
+		out[id] = talent.EventFacts{OrgID: f.OrgID, Confirmed: f.Confirmed, DistinctCheckins: f.DistinctCheckins}
+	}
+	return out, nil
 }

@@ -39,8 +39,9 @@
 //     statement runs in a transaction the service opened and switched with
 //     SET LOCAL ROLE app_talent (Store.Enter); app_rw gets 42501. A talent
 //     transaction never joins another module's transaction (the role would
-//     leak into it), and the public reads (students, directory) happen
-//     before it opens, because app_talent reads no public table. The audit
+//     leak into it), and the public reads (students, directory, identity,
+//     events, orgs: ports only, never their tables) happen before it
+//     opens, because app_talent reads no public table. The audit
 //     row of a neutralisation or a report is written in the same
 //     transaction on the session role (Store.AsApp).
 //   - Collection is off until the legal basis is decided (T-32):
@@ -63,9 +64,25 @@
 //     reversal (points negated, occurred_at of the original, its config
 //     version). Caps: daily and weekly magnitudes of signal_defs through
 //     talent.daily_counters (the row lock serialises one user's signal),
-//     "at most 2 clubs" and the self check-in as per_source (recorded with
-//     0 points). Every row is frozen with the config version in force;
-//     without one nothing is written (outcome no_config).
+//     "at most 2 clubs", the self check-in and an organiser at their own
+//     event as per_source (recorded with 0 points). Every row is frozen
+//     with the config version in force; without one nothing is written
+//     (outcome no_config).
+//   - An organiser earns nothing at their own event (ADR-0015, R-003 §3.4;
+//     BE-085): the registration, check-in and no-show of a user holding a
+//     role other than member in the organising org (club_admin,
+//     university_rep, career_staff, …; orgs.MembershipsOf at consumption)
+//     is recorded with 0 points (per_source), like a self check-in.
+//   - Gaming thresholds of the config version (02 §15.1, R-003 §3.4;
+//     BE-085; absent or 0 = off): a like from an account younger than
+//     min_account_age_days_for_likes at the like writes nothing (outcome
+//     young_account) and the nightly score drops such a like; the nightly
+//     score also drops the registration, check-in and no-show rows of an
+//     event with fewer than min_event_confirmed confirmed registrations or
+//     min_event_distinct_checkins distinct users checked in (an unknown
+//     source or event fails), with their reversals. The figures are read
+//     at the run (an event earns once it took place), the ledger keeps
+//     every row.
 //   - An objection neutralisation is permanent: no staff member lifts it
 //     (Neutralization.Liftable); an opt-out follows the student's own
 //     privacy setting only.
@@ -128,8 +145,11 @@ type Deps struct {
 	Clock clock.Clock
 	Log   *slog.Logger
 
-	Students  Students  // cohort (minor), ranking choice
-	Directory Directory // sensitive clubs
+	Students    Students    // cohort (minor), ranking choice
+	Directory   Directory   // sensitive clubs
+	Accounts    Accounts    // account age (min_account_age_days_for_likes; BE-085)
+	Events      Events      // event participation figures and organiser (BE-085)
+	Memberships Memberships // the organiser rule (BE-085)
 
 	// Reauth verifies the proof of the R operations (identity). nil →
 	// every R operation fails closed (503).
@@ -153,6 +173,7 @@ func (d Deps) validate() error {
 	}{
 		{"Store", d.Store != nil}, {"Tx", d.Tx != nil}, {"Audit", d.Audit != nil}, {"Clock", d.Clock != nil},
 		{"Log", d.Log != nil}, {"Students", d.Students != nil}, {"Directory", d.Directory != nil},
+		{"Accounts", d.Accounts != nil}, {"Events", d.Events != nil}, {"Memberships", d.Memberships != nil},
 	} {
 		if !c.ok {
 			errs = append(errs, fmt.Errorf("talent.Deps.%s is missing", c.name))

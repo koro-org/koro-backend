@@ -27,6 +27,7 @@ type Store interface {
 	CheckinStore
 	RetentionStore
 	ExportStore
+	ParticipationStore
 
 	// InsertEvent writes a new event and returns it as stored (created_at
 	// and updated_at from the database). It reports false and writes

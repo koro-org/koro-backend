@@ -20,10 +20,9 @@ import (
 // refuses a version that does not validate.
 //
 // The three gaming thresholds of 02 §15.1 (min_account_age_days_for_likes,
-// min_event_confirmed, min_event_distinct_checkins) are stored with the
-// version but not applied yet: they need the account age (identity) and
-// the event figures (events), which talent does not read (BE-052 ticket
-// note: new ticket).
+// min_event_confirmed, min_event_distinct_checkins; absent or 0 = off) are
+// applied by the like consumer and the nightly score (gaming.go, BE-085)
+// with the account age (identity) and the event figures (events).
 //
 // Signals is the snapshot of the whole signal catalogue the version was
 // created with (written by the service, never by the caller): the

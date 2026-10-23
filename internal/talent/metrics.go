@@ -24,6 +24,7 @@ const (
 	OutcomeSignalDisabled = "signal_disabled" // signal_defs.enabled = false or no such signal
 	OutcomeNoConfig       = "no_config"       // no config version in force (BE-052 creates them)
 	OutcomeNoOriginal     = "no_original"     // a reversal without its original row
+	OutcomeYoungAccount   = "young_account"   // a like from an account younger than min_account_age_days_for_likes (BE-085)
 )
 
 // CounterSample is one value of koro_talent_ingest_total.

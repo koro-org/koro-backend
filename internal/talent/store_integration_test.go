@@ -197,9 +197,11 @@ func newPGEnvWith(t *testing.T, o envOptions) pgEnv {
 	e := &env{clk: clk, subs: outbox.NewRegistry(), audit: &fakeAudit{},
 		students: &fakeStudents{cohorts: map[uuid.UUID]students.Cohort{}, choices: map[uuid.UUID]students.RankingChoice{}},
 		dir:      fakeDirectory{sensitive: map[uuid.UUID]bool{}}, reauth: &audittest.LateReauth[identity.ReauthProof]{Next: fakeReauth{}}}
+	e.newPorts()
 	st := talent.NewGormStore(d.ORM)
 	mod, err := talent.New(talent.Deps{Store: st, Tx: d.Tx, Audit: au.Service, Clock: clk, Log: obs.Discard(),
-		Students: e.students, Directory: e.dir, CollectionEnabled: o.collection, AuditorAPIEnabled: o.auditorAPI, Reauth: e.reauth})
+		Students: e.students, Directory: e.dir, Accounts: e.accounts, Events: e.events, Memberships: e.members,
+		CollectionEnabled: o.collection, AuditorAPIEnabled: o.auditorAPI, Reauth: e.reauth})
 	if err != nil {
 		t.Fatal(err)
 	}

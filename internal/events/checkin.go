@@ -268,7 +268,7 @@ func (s *service) checkIn(ctx context.Context, a authz.Actor, e Event, sens bool
 		return CheckinResult{}, err
 	}
 	env, err := domainevent.New(domainevent.CheckinRecorded{CheckinID: stored.ID, RegistrationID: r.ID, EventID: cur.ID,
-		UserID: r.UserID, StaffUserID: a.UserID, Sensitive: sens}, checkinAggType, stored.ID)
+		OrgID: cur.OrgID, UserID: r.UserID, StaffUserID: a.UserID, Sensitive: sens}, checkinAggType, stored.ID)
 	if err != nil {
 		return CheckinResult{}, err
 	}

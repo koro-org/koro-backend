@@ -130,6 +130,9 @@ func TestCheckin_SameQRTwice_SecondReturnsAlreadyCheckedIn(t *testing.T) {
 		p.EventID != ev.Event.ID || p.Sensitive {
 		t.Fatalf("checkin.recorded = %+v, %v", p, err)
 	}
+	if p.OrgID != ev.Event.OrgID { // the organiser (talent, BE-085)
+		t.Fatalf("checkin.recorded org %s, want %s", p.OrgID, ev.Event.OrgID)
+	}
 	// Every scan is audited, never with the token.
 	scans := e.audit.of(authz.EventsCheckinCreate)
 	if len(scans) != 2 || scans[0].Metadata["result"] != "ok" || scans[1].Metadata["result"] != "already_checked_in" {

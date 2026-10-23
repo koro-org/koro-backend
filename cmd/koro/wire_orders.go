@@ -30,7 +30,8 @@ import (
 // ActivateBySource, RevokeBySource), hooks.collectionAccount (payments,
 // BE-041; read at call time: nil → 409 payments.no_active_collection_account),
 // c.identity.svc (the notice addresses), identity's store (the finance
-// admins in effect, 06 H-33), c.notify.svc (read at call time),
+// admins in effect, 06 H-33), c.notify.svc (read at call time), c.files.svc
+// (the delivery evidence: Get, Attach, PresignGet; BE-093),
 // c.infra.outbox, c.infra.idempotency and c.infra.cfg.Orders.
 //
 // Provided, set in build: svc (orders.Service), orders (orders.Orders for
@@ -74,6 +75,8 @@ func (w *ordersWiring) build(c *container) error {
 		return errors.New("orders: parties is not built")
 	case c.entitlements.svc == nil:
 		return errors.New("orders: entitlements is not built")
+	case c.files.svc == nil:
+		return errors.New("orders: files is not built")
 	}
 	d := orders.Deps{
 		Store: store, Tx: tx, Audit: c.audit.svc, Idempotency: c.infra.idempotency, Orgs: c.orgs.svc,
@@ -88,7 +91,7 @@ func (w *ordersWiring) build(c *container) error {
 			a, found, err := h(ctx)
 			return orders.CollectionAccount{ID: a.ID, IBAN: a.IBAN, HolderName: a.HolderName, BankName: a.BankName}, found, err
 		},
-		Sender: ordersSender{c: c}, Staff: ordersStaff{c: c},
+		Sender: ordersSender{c: c}, Staff: ordersStaff{c: c}, Files: c.files.svc,
 	}
 	if svc := c.identity.svc; svc != nil {
 		d.Users = svc
@@ -141,6 +144,6 @@ func (w *ordersWiring) tasks(c *container) {
 	}
 }
 
-// routes: the 11 orders operations (04 §2.15); w.svc is nil under `koro
+// routes: the 12 orders operations (04 §2.15; getOrderLineEvidence BE-093); w.svc is nil under `koro
 // openapi`, which Register tolerates.
 func (w *ordersWiring) routes(c *container, api huma.API) { orders.Register(api, w.svc) }

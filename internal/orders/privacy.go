@@ -13,14 +13,15 @@ import (
 // delete").
 const retainedReason = "orders and order lines are financial records kept for 10 years (financial_records; tax and " +
 	"commercial law): they are neither deleted nor anonymised on account erasure; placed_by_user_id and " +
-	"fulfillment_marked_by stay as references to the anonymised account and the rows are destroyed when the " +
-	"retention period ends"
+	"fulfillment_marked_by stay as references to the anonymised account, the delivery evidence files stay with " +
+	"their lines, and the rows are destroyed when the retention period ends"
 
 // privacyProvider is the KVKK provider of orders (01 §3.3). An order is a
 // company's (a legal entity's) purchase; the personal data are the user
 // references: who placed an order (orders.placed_by_user_id) and who marked
-// a line delivered (order_lines.fulfillment_marked_by). Export lists them
-// with the order's reference and state (no buyer snapshot: it is the
+// a line delivered (order_lines.fulfillment_marked_by, with the delivery
+// evidence file it attached). Export lists them with the order's reference
+// and state (no buyer snapshot: it is the
 // company's invoice data, not the person's); Erase retains everything (a
 // legal obligation, recorded in the DSR answer).
 type privacyProvider struct{ s *service }
@@ -55,6 +56,11 @@ func (p privacyProvider) Export(ctx context.Context, userID uuid.UUID) (privacy.
 		}
 		if l.FulfillmentMarkedAt != nil {
 			item["marked_at"] = l.FulfillmentMarkedAt.UTC().Format(time.RFC3339)
+		}
+		if l.FulfillmentEvidenceFileID != nil {
+			// The file itself is the seller org's record (BE-093); its ID lets the
+			// DPO hand it out with the answer.
+			item["evidence_file_id"] = l.FulfillmentEvidenceFileID.String()
 		}
 		out.Items = append(out.Items, item)
 	}

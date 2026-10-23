@@ -260,6 +260,7 @@ func TestSchema_P2SchemaIDColumnsAndTriggers(t *testing.T) {
 		"ledger_transactions.ledger_transactions_no_truncate koro_forbid_mutation",
 		"ledger_transactions.ledger_txn_balanced ledger_check_balanced" + deferred,
 		"offerings.offerings_draft_delete_only offerings_forbid_nondraft_delete",
+		"order_lines.order_lines_evidence_frozen koro_freeze_columns", // 000137 (BE-093)
 		"order_lines.order_lines_frozen koro_freeze_columns",
 		"order_lines.order_lines_paid_out_frozen koro_freeze_columns",
 		"order_lines.orders_totals_match_lines orders_check_lines_total" + deferred,

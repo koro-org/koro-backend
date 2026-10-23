@@ -9,6 +9,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/catalog"
 	"koro/internal/entitlements"
+	"koro/internal/files"
 	"koro/internal/identity"
 	"koro/internal/notify"
 	"koro/internal/orgs"
@@ -101,6 +102,21 @@ type Entitlements interface {
 	//
 	// sync-write: entitlements.Entitlements.RevokeBySource
 	RevokeBySource(ctx context.Context, t entitlements.SourceType, sourceID uuid.UUID, reason string) error
+}
+
+// Files is what orders needs from files (L2): the seller's delivery
+// evidence of a line (purpose delivery_evidence; BE-093, T-292). It is
+// files.Files.
+type Files interface {
+	// Get returns the file's metadata or files.ErrNotFound.
+	Get(ctx context.Context, fileID uuid.UUID) (files.FileMeta, error)
+	// Attach binds the evidence to its line in the marking transaction.
+	//
+	// sync-write: files.Files.Attach
+	Attach(ctx context.Context, a authz.Actor, fileID uuid.UUID, owner files.Owner) error
+	// PresignGet returns a short-lived download URL of a clean file
+	// (getOrderLineEvidence).
+	PresignGet(ctx context.Context, fileID uuid.UUID, ttl time.Duration) (files.Download, error)
 }
 
 // CollectionAccount is Koro's active default collection account (payments,

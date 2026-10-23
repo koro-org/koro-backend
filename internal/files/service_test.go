@@ -43,6 +43,13 @@ func TestCreateUpload_PurposeAllowList(t *testing.T) {
 		{"unverified user cv", "user_unverified", cvRequest(100), authz.ErrForbidden},
 		{"receipt by a student", "student", files.UploadRequest{Purpose: files.PurposeTransferReceipt, Filename: "r.pdf", ContentType: files.MIMEPDF, SizeBytes: 10}, authz.ErrForbidden},
 		{"logo of a foreign club", "other_club_admin", files.UploadRequest{Purpose: files.PurposeOrgLogo, Filename: "l.png", ContentType: files.MIMEPNG, SizeBytes: 10, OrgID: &org}, authz.ErrNotFound},
+		// BE-093: the seller's delivery evidence (photo or PDF, org required; k30: the markers of its lines).
+		{"delivery evidence photo", "club_admin", files.UploadRequest{Purpose: files.PurposeDeliveryEvidence, Filename: "stant.webp", ContentType: files.MIMEWebP, SizeBytes: 10, OrgID: &org}, nil},
+		{"delivery evidence pdf", "club_admin", files.UploadRequest{Purpose: files.PurposeDeliveryEvidence, Filename: "teslim.pdf", ContentType: files.MIMEPDF, SizeBytes: 10, OrgID: &org}, nil},
+		{"delivery evidence without org", "club_admin", files.UploadRequest{Purpose: files.PurposeDeliveryEvidence, Filename: "teslim.pdf", ContentType: files.MIMEPDF, SizeBytes: 10}, files.ErrInvalidUpload},
+		{"delivery evidence as csv", "club_admin", files.UploadRequest{Purpose: files.PurposeDeliveryEvidence, Filename: "teslim.csv", ContentType: files.MIMECSV, SizeBytes: 10, OrgID: &org}, files.ErrInvalidUpload},
+		{"delivery evidence by a club member", "club_member", files.UploadRequest{Purpose: files.PurposeDeliveryEvidence, Filename: "teslim.pdf", ContentType: files.MIMEPDF, SizeBytes: 10, OrgID: &org}, authz.ErrForbidden},
+		{"delivery evidence for a foreign club", "other_club_admin", files.UploadRequest{Purpose: files.PurposeDeliveryEvidence, Filename: "teslim.pdf", ContentType: files.MIMEPDF, SizeBytes: 10, OrgID: &org}, authz.ErrNotFound},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

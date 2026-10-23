@@ -10,6 +10,7 @@ import (
 	"uuid"
 
 	"koro/internal/catalog"
+	"koro/internal/files"
 	"koro/internal/orders"
 	"koro/internal/platform/config"
 )
@@ -26,8 +27,12 @@ var matrixCollectionAccount = hookCollectionAccount{ID: uuid.MustParse("6b6f726f
 //	               limit, seeded into catalog's store (the orders' own lines refer to it)
 //	kind order     org, party, placed_by, status (awaiting_payment | paid | in_fulfilment | disputed),
 //	               placed at matrixOrgTime, expiring 7 days later, paid a day later
-//	kind line      order, offering, fulfillment (pending | marked | disputed), marked_by: one unit of
-//	               1,000,000 kuruş + 20 % VAT under policy_default (10 % from the seller)
+//	kind line      order, offering, fulfillment (pending | marked | disputed), marked_by, evidence
+//	               (a file fixture, optional): one unit of 1,000,000 kuruş + 20 % VAT under
+//	               policy_default (10 % from the seller)
+//	kind file      a completed delivery_evidence upload (BE-093) of org by uploaded_by in the files
+//	               store (scan skipped: served while FILES_SCAN_REQUIRED is false), attached to the
+//	               line fixture of its line field when given
 //
 // It also installs Koro's collection account when payments did not. The
 // fixtures are seeded only under the matrix config orders_seed: true (the
@@ -52,7 +57,7 @@ func (w *ordersWiring) matrixFixtures(fx *matrixFixtures) error {
 		}
 	}
 	all := fx.Of("orders")
-	rank := map[string]int{"offering": 0, "order": 1, "line": 2}
+	rank := map[string]int{"offering": 0, "file": 0, "order": 1, "line": 2}
 	slices.SortStableFunc(all, func(a, b fixture) int { return cmp.Compare(rank[a.Kind], rank[b.Kind]) })
 	sold := map[string]int{} // offering fixture → units on the fixture lines
 	for _, f := range all {
@@ -67,6 +72,10 @@ func (w *ordersWiring) matrixFixtures(fx *matrixFixtures) error {
 		case "offering":
 			if err := matrixSoldOffering(ctx, fx, cat, f, sold[f.Name]); err != nil {
 				return err
+			}
+		case "file":
+			if err := w.matrixEvidence(ctx, fx, f); err != nil {
+				return fmt.Errorf("fixture %s: %w", f.Name, err)
 			}
 		case "order":
 			ordersOf = append(ordersOf, f)
@@ -110,6 +119,42 @@ func (w *ordersWiring) matrixFixtures(fx *matrixFixtures) error {
 		}
 	}
 	return nil
+}
+
+// matrixEvidence seeds a delivery_evidence upload (kind file; BE-093).
+func (w *ordersWiring) matrixEvidence(ctx context.Context, fx *matrixFixtures, f fixture) error {
+	id, err := fx.ID(f.Name)
+	if err != nil {
+		return err
+	}
+	org, err := fx.Ref(f, "org")
+	if err != nil {
+		return err
+	}
+	by, err := fx.Ref(f, "uploaded_by")
+	if err != nil {
+		return err
+	}
+	line, err := optRef(fx, f, "line")
+	if err != nil {
+		return err
+	}
+	objects, err := w.late.files.memObjects()
+	if err != nil {
+		return err
+	}
+	size, mime := int64(len(matrixFilePDF)), files.MIMEPDF
+	row := files.File{
+		ID: id, Purpose: files.PurposeDeliveryEvidence, OrgID: &org, UploadedBy: &by, Bucket: testBuckets.Files,
+		StorageKey: "matrix/" + f.Name, DeclaredMIME: mime, DetectedMIME: &mime, SizeBytes: &size, SHA256: make([]byte, 32),
+		Status: files.StatusActive, ScanStatus: files.ScanSkipped,
+	}
+	if line != nil {
+		module, at := "orders", matrixOrgTime.Add(24*time.Hour)
+		row.AttachedModule, row.AttachedEntityID, row.AttachedAt = &module, line, &at
+	}
+	objects.Upload(row.Bucket, row.StorageKey, matrixFilePDF, mime)
+	return w.late.files.store.Insert(ctx, row)
 }
 
 func matrixSoldOffering(ctx context.Context, fx *matrixFixtures, cat *catalog.MemStore, f fixture, sold int) error {
@@ -233,6 +278,11 @@ func matrixLine(fx *matrixFixtures, f fixture, o orders.Order) (orders.Line, err
 			l.DisputeReason = &why
 		}
 	}
+	evidence, err := optRef(fx, f, "evidence")
+	if err != nil {
+		return orders.Line{}, err
+	}
+	l.FulfillmentEvidenceFileID = evidence
 	return l, nil
 }
 

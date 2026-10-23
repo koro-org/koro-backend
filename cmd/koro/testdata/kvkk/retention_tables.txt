@@ -22,6 +22,7 @@ audit_events                policy:audit_events
 audit_daily_roots           policy:audit_roots
 # files: unattached uploads, documents and generated files by purpose; avatars and CVs live with the account
 files                       policy:files_orphan,edu_document,event_export_file,dsr_export_file,financial_records
+# files: delivery_evidence uploads (BE-093) go with their order line: financial_records (files:financial; their destruction is T-280)
 # consent
 consents                    policy:consent_proof
 iys_submissions             policy:consent_proof
@@ -94,6 +95,7 @@ payees                      policy:financial_records
 payee_bank_accounts         policy:financial_records
 orders                      policy:financial_records
 order_lines                 policy:financial_records
+# order_lines.fulfillment_evidence_file_id (BE-093): the seller's delivery evidence stays with the line (financial_records)
 incoming_bank_transfers     policy:financial_records
 payments                    policy:financial_records
 payment_splits              policy:financial_records

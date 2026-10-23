@@ -4272,6 +4272,7 @@ components:
             - payout_receipt
             - refund_receipt
             - invoice_pdf
+            - delivery_evidence
           type: string
         size_bytes:
           description: "Exact size in bytes (the purpose may allow less: avatar 5 MB)"
@@ -5687,6 +5688,19 @@ components:
           format: date-time
           type: string
         url:
+          type: string
+      required:
+        - url
+        - expires_at
+      type: object
+    EvidenceLinkDTO:
+      additionalProperties: false
+      properties:
+        expires_at:
+          format: date-time
+          type: string
+        url:
+          description: Valid for at most 5 minutes
           type: string
       required:
         - url
@@ -7318,6 +7332,9 @@ components:
           type: string
         fulfillment_status:
           type: string
+        has_fulfillment_evidence:
+          description: A delivery evidence file is attached (getOrderLineEvidence)
+          type: boolean
         line_id:
           format: uuid
           type: string
@@ -7334,6 +7351,7 @@ components:
         - order_no
         - order_status
         - fulfillment_status
+        - has_fulfillment_evidence
       type: object
     LogListOutputBody:
       additionalProperties: false
@@ -7380,7 +7398,7 @@ components:
       additionalProperties: false
       properties:
         evidence_file_id:
-          description: An uploaded file showing the delivery (recorded with the audit trail)
+          description: A completed delivery_evidence upload (photo or PDF) of the selling organization, attached to the line
           format: uuid
           type: string
         note:
@@ -8825,6 +8843,9 @@ components:
         gross_amount:
           format: int64
           type: integer
+        has_fulfillment_evidence:
+          description: The seller attached a delivery evidence file (getOrderLineEvidence)
+          type: boolean
         line_id:
           format: uuid
           type: string
@@ -8876,6 +8897,7 @@ components:
         - buyer_fee_amount
         - payable_amount
         - fulfillment_status
+        - has_fulfillment_evidence
         - seller
       type: object
     OrderListOutputBody:
@@ -11574,6 +11596,9 @@ components:
         gross_amount:
           format: int64
           type: integer
+        has_fulfillment_evidence:
+          description: A delivery evidence file is attached (getOrderLineEvidence)
+          type: boolean
         line_id:
           format: uuid
           type: string
@@ -11607,6 +11632,7 @@ components:
         - gross_amount
         - seller_net_amount
         - fulfillment_status
+        - has_fulfillment_evidence
       type: object
     SellerRefDTO:
       additionalProperties: false
@@ -26740,9 +26766,43 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+  /api/v1/order-lines/{line_id}/evidence:
+    get:
+      description: A URL valid for 5 minutes of the file the seller attached when marking the line delivered, for the buying company's administrators, the selling organization's club admins and university representatives, and finance and platform admins. A line without evidence is 404; 409 files.not_clean until the virus scan clears the file. Every download is audited.
+      operationId: getOrderLineEvidence
+      parameters:
+        - description: Order line ID (an unknown or malformed ID is 404)
+          in: path
+          name: line_id
+          required: true
+          schema:
+            description: Order line ID (an unknown or malformed ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvidenceLinkDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a download URL of an order line's delivery evidence
+      tags:
+        - orders
+      x-koro-action: orders.line.read_evidence
+      x-koro-rate-limit: read_default
+      x-koro-surface: resource
   /api/v1/order-lines/{line_id}/mark-fulfilled:
     post:
-      description: The seller says the line is delivered; the buyer's dispute window (the policy's days) starts. The order must be paid (409 orders.order_not_paid); a line that is not pending is 409 orders.invalid_state.
+      description: "The seller says the line is delivered; the buyer's dispute window (the policy's days) starts. The order must be paid (409 orders.order_not_paid); a line that is not pending is 409 orders.invalid_state. evidence_file_id, optional, is a completed delivery_evidence upload (a photo or a PDF) of the selling organization (422 otherwise; 409 files.rejected or files.not_clean when the upload was rejected or found infected, 409 files.already_attached when another record uses it): it is attached to the line for good and the buyer's administrators, finance and platform admins see it (getOrderLineEvidence)."
       operationId: markOrderLineFulfilled
       parameters:
         - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"

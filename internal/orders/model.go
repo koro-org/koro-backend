@@ -251,8 +251,8 @@ const (
 
 // Line is one order_lines row: an offering bought in a quantity, with the
 // payee, the commerce policy (its copy) and every amount frozen at
-// placement (order_lines_frozen). The running columns are the fulfilment,
-// the refunded amount and the payout.
+// placement (order_lines_frozen). The running columns are the fulfilment
+// (with the seller's delivery evidence), the refunded amount and the payout.
 type Line struct {
 	ID                   uuid.UUID     `gorm:"type:uuid;column:id;primaryKey"`
 	OrderID              uuid.UUID     `gorm:"type:uuid;column:order_id"`
@@ -297,6 +297,11 @@ type Line struct {
 	PaidOutAt            *time.Time    `gorm:"column:paid_out_at"`
 	CreatedAt            time.Time     `gorm:"column:created_at;->"`
 	UpdatedAt            time.Time     `gorm:"column:updated_at;->"`
+
+	// FulfillmentEvidenceFileID is the seller's delivery evidence (a
+	// delivery_evidence file of the seller org, attached when the line is
+	// marked; BE-093). Once set it never changes (order_lines_evidence_frozen).
+	FulfillmentEvidenceFileID *uuid.UUID `gorm:"type:uuid;column:fulfillment_evidence_file_id"`
 }
 
 // TableName implements gorm's Tabler.

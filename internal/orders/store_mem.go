@@ -207,7 +207,7 @@ func (m *MemStore) UpdateOrder(_ context.Context, o Order, from Status) (Order, 
 }
 
 // UpdateLine implements Store: only the fulfilment columns and the
-// refunded amount change.
+// refunded amount change; the delivery evidence is written once.
 func (m *MemStore) UpdateLine(_ context.Context, l Line, from Fulfillment) (Line, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -223,6 +223,10 @@ func (m *MemStore) UpdateLine(_ context.Context, l Line, from Fulfillment) (Line
 	cur.FulfillmentStatus, cur.FulfillmentMarkedAt, cur.FulfillmentMarkedBy = l.FulfillmentStatus, l.FulfillmentMarkedAt, l.FulfillmentMarkedBy
 	cur.DisputeWindowEndsAt, cur.FulfilledAt, cur.FulfilledVia = l.DisputeWindowEndsAt, l.FulfilledAt, l.FulfilledVia
 	cur.DisputeReason, cur.RefundedAmount = l.DisputeReason, l.RefundedAmount
+	if cur.FulfillmentEvidenceFileID == nil && l.FulfillmentEvidenceFileID != nil {
+		id := *l.FulfillmentEvidenceFileID
+		cur.FulfillmentEvidenceFileID = &id
+	}
 	cur.UpdatedAt = m.touch(cur.UpdatedAt)
 	m.lines[l.ID] = cur
 	return cloneLine(cur), nil

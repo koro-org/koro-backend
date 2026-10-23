@@ -1,4 +1,4 @@
-# Authz matrix of the events module (03 §5.6, 04 §2.6, §W; BE-024, BE-026, BE-028, BE-031, BE-050, BE-054). 39 operations
+# Authz matrix of the events module (03 §5.6, 04 §2.6, §W; BE-024, BE-026, BE-028, BE-031, BE-050, BE-054, BE-095). 41 operations
 # and the live board WebSocket (non_api_routes) × 18 personas.
 # Event visibility (03 §3.6): published public events are everyone's; a members event is its org's
 # members', its staff's and every platform role's; a university event is also the verified students'
@@ -29,6 +29,10 @@
 # compare: status (BE-082, pattern of BE-061): the list carries download_count/first_downloaded_at, which
 # every downloadEventExport read (a GET, run in the read phases of the shared application) advances, so
 # the list's body depends on other reads; only its status is compared.
+# BE-095 own lists (koro-mobile B-04, B-05): /me/staff-events and /me/club-events are O (my_events with the
+# caller as owner): every signed-in user 200 with its own list, anonymous 401. Which events a list holds (only
+# doors the caller may scan; only events listEvents shows the caller for its member and followed clubs, never a
+# followed sensitive club's members event) is pinned by internal/events/mine_test.go, not by status codes.
 version: 1
 groups:
   # signed-in users without a membership in club_a (and no platform role).
@@ -574,6 +578,44 @@ operations:
         expect:
           anonymous: 401
           "@signed_in": 200
+
+  listMyStaffEvents:
+    method: GET
+    path: /api/v1/me/staff-events
+    action: events.staff_event.list_own
+    expect:
+      anonymous: 401
+      "@signed_in": 200
+    variants:
+      - name: first_item
+        query: { limit: "1" }
+        expect:
+          anonymous: 401
+          "@signed_in": 200
+      - name: bad_cursor
+        query: { cursor: "bozuk" }
+        expect:
+          anonymous: 401
+          "@signed_in": 422
+
+  listMyClubEvents:
+    method: GET
+    path: /api/v1/me/club-events
+    action: events.club_event.list_own
+    expect:
+      anonymous: 401
+      "@signed_in": 200
+    variants:
+      - name: first_item
+        query: { limit: "1" }
+        expect:
+          anonymous: 401
+          "@signed_in": 200
+      - name: bad_cursor
+        query: { cursor: "bozuk" }
+        expect:
+          anonymous: 401
+          "@signed_in": 422
 
   getMyRegistration:
     method: GET

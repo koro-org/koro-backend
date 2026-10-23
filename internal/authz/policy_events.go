@@ -7,6 +7,13 @@ import "uuid"
 // visibility of each listed event is the store's filter (03 §3.6).
 const TypeEventCatalog = "event_catalog"
 
+// TypeMyEvents is the caller's own event lists (BE-095:
+// events.staff_event.list_own, events.club_event.list_own): no org,
+// OwnerUserID = the caller, no Attrs. Declared by the events policy; each
+// listed event is filtered by the service (the door's authz per event, the
+// store's visibility filter of 03 §3.6).
+const TypeMyEvents = "my_events"
+
 // eventsPolicy is the policy of the events module (03 §5.6). Only tickets of
 // the events module edit this file (BE-001 R5). Written by BE-024 for its
 // 10 actions:
@@ -63,6 +70,16 @@ const TypeEventCatalog = "event_catalog"
 //	events.export.list        S: club_admin, university_rep, career_staff; dpo ✓ (KVKK oversight);
 //	                            platform_admin k-po
 //	events.export.download    S·O: the same managers, and only the export's requester
+//
+// and by BE-095 for the caller's own event lists (koro-mobile B-04, B-05):
+//
+//	events.club_event.list_own   O for every signed-in user (my_events with OwnerUserID): upcoming
+//	                               published events of the clubs the caller is an active member of or
+//	                               follows, filtered by 03 §3.6 exactly as events.event.list
+//	events.staff_event.list_own  O for every signed-in user (my_events with OwnerUserID): upcoming
+//	                               published events whose door the caller may work (each event passes
+//	                               events.checkin.create: the event's staff, the organiser's managers,
+//	                               platform_admin for the platform org)
 //
 // The export actions take the event resource (the exports are the event's
 // sub-surface, 03 §7.6: an invisible event 404, a visible one without the
@@ -121,7 +138,7 @@ const TypeEventCatalog = "event_catalog"
 // service's; they are not authz codes.
 func eventsPolicy() Policy {
 	return Policy{
-		Types: map[string][]string{TypeEventCatalog: nil},
+		Types: map[string][]string{TypeEventCatalog: nil, TypeMyEvents: nil},
 		Visible: func(a Actor, act Action, r Resource) bool {
 			switch act {
 			case EventsEventList:
@@ -138,6 +155,8 @@ func eventsPolicy() Policy {
 				return r.Type == TypeRegistration && a.Owns(r)
 			case EventsTicketReadOwn, EventsTicketResend:
 				return r.Type == TypeTicket && a.Owns(r)
+			case EventsClubEventListOwn, EventsStaffEventListOwn:
+				return r.Type == TypeMyEvents && a.Owns(r)
 			case EventsTicketReissue:
 				if r.Type == TypeTicket {
 					return a.Owns(r)
@@ -184,7 +203,7 @@ func eventsPolicy() Policy {
 					gs = append(gs, Grant{Role: RolePlatformAdmin})
 				}
 				return gs
-			case EventsTicketReadOwn, EventsTicketResend:
+			case EventsTicketReadOwn, EventsTicketResend, EventsClubEventListOwn, EventsStaffEventListOwn:
 				return []Grant{{Role: RoleSelf}}
 			case EventsTicketReissue:
 				if r.Type == TypeTicket {

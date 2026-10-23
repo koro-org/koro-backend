@@ -623,3 +623,40 @@ func TestEventsPolicy_Exports(t *testing.T) {
 	wantErr(t, authz.Can(ctx, persona(t, "club_admin"), authz.EventsExportDownload,
 		authz.Resource{Type: authz.TypeEventExport, OrgID: &org, OwnerUserID: &owner, Attrs: map[string]string{}}), nf, false)
 }
+
+// myEvents is the my_events resource of persona owner's own lists (BE-095).
+func myEvents(owner string) func(authztest.Persona) authz.Resource {
+	return func(authztest.Persona) authz.Resource {
+		u := authztest.ID(owner)
+		return authz.Resource{Type: authz.TypeMyEvents, OwnerUserID: &u}
+	}
+}
+
+// TestEventsPolicy_MyEventLists pins 03 §5.6 for BE-095's 2 actions: the
+// caller's own lists are O for every signed-in user; another user's list is
+// 404 (anonymous: refused by the core, 401 over HTTP); another resource type
+// is never accepted.
+func TestEventsPolicy_MyEventLists(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	for _, act := range []authz.Action{authz.EventsClubEventListOwn, authz.EventsStaffEventListOwn} {
+		for _, owner := range []string{"student", "event_staff", "user_unverified", "platform_admin"} {
+			for _, p := range authztest.Personas() {
+				var want error = authz.ErrNotFound
+				switch p.Name {
+				case "anonymous":
+					want = authz.ErrForbidden
+				case owner:
+					want = nil
+				}
+				t.Run(string(act)+"/"+owner+"/"+p.Name, func(t *testing.T) {
+					t.Parallel()
+					wantErr(t, authz.Can(ctx, p.Actor, act, myEvents(owner)(p)), want, false)
+				})
+			}
+		}
+		// The event catalog is not the caller's list.
+		st := persona(t, "student")
+		wantErr(t, authz.Can(ctx, st, act, authz.Resource{Type: authz.TypeEventCatalog}), authz.ErrNotFound, false)
+	}
+}

@@ -446,3 +446,17 @@ func (r *recordingStore) InsertOrg(ctx context.Context, o orgs.Org) (orgs.Org, b
 }
 
 func (r *recordingStore) txs() []any { return r.seen }
+
+// TestOrgSummary_LogoAndVerified (BE-094, T-251): the summary other
+// modules read carries the logo file and the verification badge.
+func TestOrgSummary_LogoAndVerified(t *testing.T) {
+	t.Parallel()
+	logo, at := uuid.NewV7(), time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	s := orgs.Org{ID: uuid.NewV7(), Kind: orgs.KindClub, LogoFileID: &logo, VerifiedAt: &at}.Summary()
+	if s.LogoFileID == nil || *s.LogoFileID != logo || !s.Verified {
+		t.Fatalf("summary = %+v", s)
+	}
+	if s := (orgs.Org{ID: uuid.NewV7()}).Summary(); s.LogoFileID != nil || s.Verified {
+		t.Fatalf("summary without logo/verification = %+v", s)
+	}
+}

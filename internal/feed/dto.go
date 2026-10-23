@@ -9,10 +9,12 @@ import (
 // AuthorDTO is the author org of a post (public org data only; the person
 // who posted is never shown to readers, 04 §F.2).
 type AuthorDTO struct {
-	OrgID string `json:"org_id"`
-	Kind  string `json:"kind" enum:"platform,university,club,company"`
-	Name  string `json:"name"`
-	Slug  string `json:"slug"`
+	OrgID    string `json:"org_id"`
+	Kind     string `json:"kind" enum:"platform,university,club,company"`
+	Name     string `json:"name"`
+	Slug     string `json:"slug"`
+	LogoURL  string `json:"logo_url,omitempty" doc:"Short-lived download URL of the author org's logo (at most 5 minutes); absent when the org has no logo or the scan has not cleared it. Do not cache past its expiry; refetch the post."`
+	Verified bool   `json:"verified" doc:"True when a platform admin has verified the author org (the verification badge)"`
 }
 
 // MediaDTO is an image of a post.
@@ -136,7 +138,8 @@ func toPostDTO(v PostView) PostDTO {
 	d := PostDTO{
 		PostID: p.ID.String(), Kind: string(p.Kind), CommercialLabel: p.CommercialFlag, PublishedAt: p.PublishedAt,
 		EditedAt: p.EditedAt, LikeCount: p.LikeCount, Media: []MediaDTO{},
-		Author: AuthorDTO{OrgID: v.Org.ID.String(), Kind: string(v.Org.Kind), Name: v.Org.Name, Slug: v.Org.Slug},
+		Author: AuthorDTO{OrgID: v.Org.ID.String(), Kind: string(v.Org.Kind), Name: v.Org.Name, Slug: v.Org.Slug,
+			LogoURL: v.LogoURL, Verified: v.Org.Verified},
 	}
 	if p.Title != nil {
 		d.Title = *p.Title
@@ -186,8 +189,8 @@ func toManageDTO(v PostView) PostManageDTO {
 }
 
 // FeedOrgDTO is an org of the reader's follow and mute lists (04 §2.7
-// "OrgCardDTO"): public org data only. logo_url and verified are not in
-// orgs.OrgSummary yet (T-251, as AuthorDTO).
+// "OrgCardDTO"): public org data only. logo_url and verified are not
+// carried here yet (AuthorDTO has them since BE-094).
 type FeedOrgDTO struct {
 	OrgID string `json:"org_id"`
 	Kind  string `json:"kind" enum:"platform,university,club,company,ngo"`

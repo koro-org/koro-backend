@@ -67,6 +67,7 @@ type fakeOrgs struct {
 	mu      sync.Mutex
 	orgs    map[uuid.UUID]orgs.OrgSummary
 	members map[uuid.UUID][]authz.Membership
+	getMany int // GetMany calls (one per page, BE-094)
 }
 
 func newFakeOrgs() *fakeOrgs {
@@ -92,6 +93,7 @@ func (f *fakeOrgs) Get(_ context.Context, id uuid.UUID) (orgs.OrgSummary, error)
 func (f *fakeOrgs) GetMany(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]orgs.OrgSummary, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.getMany++
 	out := map[uuid.UUID]orgs.OrgSummary{}
 	for _, id := range ids {
 		if o, ok := f.orgs[id]; ok {
@@ -190,6 +192,7 @@ type fakeFiles struct {
 	files    map[uuid.UUID]files.FileMeta
 	attached map[uuid.UUID]uuid.UUID // file → post
 	deleted  []uuid.UUID
+	signed   map[uuid.UUID]int // PresignGet calls per file
 }
 
 func (f *fakeFiles) Delete(_ context.Context, _ authz.Actor, id uuid.UUID) error {
@@ -224,6 +227,10 @@ func (f *fakeFiles) Attach(_ context.Context, _ authz.Actor, id uuid.UUID, o fil
 func (f *fakeFiles) PresignGet(_ context.Context, id uuid.UUID, _ time.Duration) (files.Download, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.signed == nil {
+		f.signed = map[uuid.UUID]int{}
+	}
+	f.signed[id]++
 	m, ok := f.files[id]
 	if !ok || m.ScanStatus != files.ScanClean {
 		return files.Download{}, files.ErrNotClean
@@ -238,6 +245,13 @@ func (f *fakeFiles) upload(org uuid.UUID, scan files.ScanStatus) uuid.UUID {
 	id := uuid.NewV7()
 	f.files[id] = files.FileMeta{ID: id, Purpose: files.PurposePostMedia, OrgID: &org, Status: files.StatusActive, ScanStatus: scan}
 	return id
+}
+
+// presigns counts the PresignGet calls per file.
+func (f *fakeFiles) presigns(id uuid.UUID) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.signed[id]
 }
 
 func (f *fakeFiles) setScan(id uuid.UUID, scan files.ScanStatus) {

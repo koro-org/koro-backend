@@ -79,7 +79,8 @@ func (o Org) Verified() bool { return o.VerifiedAt != nil }
 
 // Summary returns the cross-module view of the org.
 func (o Org) Summary() OrgSummary {
-	return OrgSummary{ID: o.ID, Kind: o.Kind, Name: o.Name, Status: o.Status, Slug: o.Slug}
+	return OrgSummary{ID: o.ID, Kind: o.Kind, Name: o.Name, Status: o.Status, Slug: o.Slug,
+		LogoFileID: o.LogoFileID, Verified: o.Verified()}
 }
 
 // Company is one companies row (02 §7.2): the company profile of an org of
@@ -199,13 +200,17 @@ func roleFitsKind(k Kind, r authz.MemberRole) bool {
 	return false
 }
 
-// OrgSummary is an org as other modules see it (01 §4.7).
+// OrgSummary is an org as other modules see it (01 §4.7). LogoFileID and
+// Verified come with the same row (GetMany stays one statement, T-251):
+// the reader signs the logo itself (files.PresignGet, ≤ 5 min).
 type OrgSummary struct {
-	ID     uuid.UUID
-	Kind   Kind
-	Name   string
-	Status Status
-	Slug   string
+	ID         uuid.UUID
+	Kind       Kind
+	Name       string
+	Status     Status
+	Slug       string
+	LogoFileID *uuid.UUID // the org_logo upload, nil without a logo
+	Verified   bool       // a platform admin verified the org (verified_at set)
 }
 
 // CreateOrg is the input of OrgAdmin.Create (directory: imported or

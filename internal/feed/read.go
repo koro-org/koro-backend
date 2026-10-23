@@ -76,13 +76,16 @@ type ViewerFlags struct {
 // does the DTO carry the status, the audience and the author user (04
 // §F.2). Viewer is nil for an anonymous reader and in the management view.
 type PostView struct {
-	Post   Post
-	Org    orgs.OrgSummary
-	Media  []MediaView
-	Event  *events.EventSummary
-	ETag   string
-	Viewer *ViewerFlags
-	Manage bool
+	Post Post
+	Org  orgs.OrgSummary
+	// LogoURL is a short-lived URL of the author org's logo ("" without a
+	// logo, before the scan clears it or without files; T-251).
+	LogoURL string
+	Media   []MediaView
+	Event   *events.EventSummary
+	ETag    string
+	Viewer  *ViewerFlags
+	Manage  bool
 	// ReasonCode is the moderation reason of a hidden or removed post in
 	// the management view (04 §2.7 "durum + reason_code"; BE-032): the
 	// moderator's reason_code, reported_by_users for a post hidden by the
@@ -332,8 +335,9 @@ func (s *service) managedView(ctx context.Context, a authz.Actor, id uuid.UUID) 
 // views builds the views of rows with a constant number of feed store
 // statements whatever the page size (TestFeedQuery_NoNPlusOne): the
 // author orgs (one GetMany), the media (one MediaOf) and the reader's
-// state (one ViewerState). A shared event and a medium URL are read per
-// distinct event and medium (events and files have no batch read yet).
+// state (one ViewerState). A shared event, a medium URL and an author
+// logo URL are read per distinct event, medium and org (events and files
+// have no batch read yet).
 func (s *service) views(ctx context.Context, a authz.Actor, rows []Post, manage bool) ([]PostView, error) {
 	out := make([]PostView, 0, len(rows))
 	if len(rows) == 0 {
@@ -369,6 +373,7 @@ func (s *service) views(ctx context.Context, a authz.Actor, rows []Post, manage 
 		}
 		state = &st
 	}
+	logos := s.logoURLs(ctx, os)
 	evs := map[uuid.UUID]events.EventSummary{}
 	if s.d.Events != nil {
 		for _, id := range eventIDs {
@@ -387,7 +392,7 @@ func (s *service) views(ctx context.Context, a authz.Actor, rows []Post, manage 
 		if !ok {
 			continue // an org row never disappears; a missing one is not shown
 		}
-		v := PostView{Post: p, Org: o, ETag: etagOf(p), Manage: manage, ReasonCode: reasons[p.ID]}
+		v := PostView{Post: p, Org: o, LogoURL: logos[p.OrgID], ETag: etagOf(p), Manage: manage, ReasonCode: reasons[p.ID]}
 		if manage && p.Status == StatusRemoved {
 			// The author org sees a removed post's status, not its content
 			// (03 §3.6).
@@ -422,6 +427,25 @@ func (s *service) views(ctx context.Context, a authz.Actor, rows []Post, manage 
 		out = append(out, v)
 	}
 	return out, nil
+}
+
+// logoURLs signs the logo of each author org once per page (T-251). A logo
+// that cannot be signed (not clean, gone, files not wired) is left out: a
+// missing logo never fails a read.
+func (s *service) logoURLs(ctx context.Context, os map[uuid.UUID]orgs.OrgSummary) map[uuid.UUID]string {
+	out := map[uuid.UUID]string{}
+	if s.d.Files == nil {
+		return out
+	}
+	for id, o := range os {
+		if o.LogoFileID == nil {
+			continue
+		}
+		if dl, err := s.d.Files.PresignGet(ctx, *o.LogoFileID, mediaTTL); err == nil {
+			out[id] = dl.URL
+		}
+	}
+	return out
 }
 
 // reasons returns the moderation reason of the hidden and removed posts of

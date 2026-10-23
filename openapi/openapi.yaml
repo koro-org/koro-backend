@@ -1741,17 +1741,24 @@ components:
             - club
             - company
           type: string
+        logo_url:
+          description: Short-lived download URL of the author org's logo (at most 5 minutes); absent when the org has no logo or the scan has not cleared it. Do not cache past its expiry; refetch the post.
+          type: string
         name:
           type: string
         org_id:
           type: string
         slug:
           type: string
+        verified:
+          description: True when a platform admin has verified the author org (the verification badge)
+          type: boolean
       required:
         - org_id
         - kind
         - name
         - slug
+        - verified
       type: object
     AvailabilityDTO:
       additionalProperties: false

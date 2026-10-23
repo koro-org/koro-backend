@@ -657,3 +657,55 @@ func TestAudienceMatch(t *testing.T) {
 		}
 	}
 }
+
+// TestFeed_AuthorLogoAndVerified (BE-094, T-251): the author carries the
+// org's verification badge and a signed logo URL; a page reads the author
+// orgs with one GetMany and signs each logo once, whatever the number of
+// posts; a logo the scan has not cleared is left out.
+func TestFeed_AuthorLogoAndVerified(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := t.Context()
+	logo := e.files.upload(orgID("club_a"), files.ScanClean)
+	a := e.orgs.orgs[orgID("club_a")]
+	a.LogoFileID, a.Verified = &logo, true
+	e.orgs.orgs[a.ID] = a
+	pending := e.files.upload(orgID("club_b"), files.ScanPending)
+	b := e.orgs.orgs[orgID("club_b")]
+	b.LogoFileID = &pending
+	e.orgs.orgs[b.ID] = b
+	for range 3 {
+		e.published(t, "club_admin", "club_a", textInput("A"))
+	}
+	e.published(t, "other_club_admin", "club_b", textInput("B"))
+
+	before, signed := e.orgs.getMany, e.files.presigns(logo)
+	p, err := e.svc.GetFeed(ctx, persona(t, "student"), feed.FeedQuery{Limit: 10})
+	if err != nil || len(p.Items) != 4 {
+		t.Fatalf("GetFeed = %d items, %v", len(p.Items), err)
+	}
+	if n := e.orgs.getMany - before; n != 1 {
+		t.Fatalf("GetMany calls per page = %d, want 1", n)
+	}
+	if n := e.files.presigns(logo) - signed; n != 1 {
+		t.Fatalf("logo signed %d times on one page, want 1", n)
+	}
+	for _, v := range p.Items {
+		d := feed.ToPostDTO(v)
+		switch v.Post.OrgID {
+		case a.ID:
+			if !d.Author.Verified || d.Author.LogoURL != "https://files.example.test/"+logo.String() {
+				t.Fatalf("club_a author = %+v", d.Author)
+			}
+		case b.ID:
+			if d.Author.Verified || d.Author.LogoURL != "" {
+				t.Fatalf("club_b author = %+v (unscanned logo, not verified)", d.Author)
+			}
+		}
+	}
+	// The JSON names the mobile client reads.
+	raw, err := json.Marshal(feed.ToPostDTO(p.Items[0]).Author)
+	if err != nil || !strings.Contains(string(raw), `"verified":`) {
+		t.Fatalf("author JSON = %s, %v", raw, err)
+	}
+}

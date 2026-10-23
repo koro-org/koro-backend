@@ -1,0 +1,14 @@
+Merhaba {{index .Data "name"}},
+
+Bir hakediş ödemesi, ikinci finans onayından önceki bir tarihle ödendi olarak işaretlendi. Para dört göz tamamlanmadan bankadan çıkmış olabilir; kayıt defterde tutuldu ve denetim kaydında işaretlendi.
+
+Ödeme: {{index .Data "payout_id"}}
+Alıcı: {{index .Data "holder_name"}}
+Tutar: {{index .Data "amount"}} {{index .Data "currency"}}
+IBAN: {{index .Data "iban_masked"}}
+Banka referansı: {{index .Data "bank_reference"}}
+Onaylayan: {{index .Data "approved_by"}} ({{index .Data "approved_at"}})
+Ödendi işaretleyen: {{index .Data "paid_by"}}
+EFT zamanı: {{index .Data "paid_at"}} (Türkiye saati)
+
+Ödemeyi ve dekontunu Koro yönetim panelinde inceleyin. Bu ödemeyi beklemiyorsanız hemen finans ekibine ve Koro platform yöneticilerine bildirin.

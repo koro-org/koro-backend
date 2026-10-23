@@ -5,10 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
+	"strings"
+	"time"
 	"uuid"
 
 	"koro/internal/authz"
+	"koro/internal/identity"
 	"koro/internal/notify"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/domainevent"
@@ -22,6 +26,10 @@ const (
 	NotifyPayoutCreatedTaskName  = "ledger.notify_payout_created"
 	NotifyPayoutApprovedTaskName = "ledger.notify_payout_approved"
 	NotifyPayoutPaidTaskName     = "ledger.notify_payout_paid"
+	// NotifyPayoutPaidBeforeApprovalTaskName is the security notice of a
+	// transfer dated before its approval (00 T-298, BE-092): a second
+	// subscription of payout.paid, on the critical queue.
+	NotifyPayoutPaidBeforeApprovalTaskName = "ledger.notify_payout_paid_before_approval"
 )
 
 // Templates of the payout notices (internal/notify/templates/ledger).
@@ -29,13 +37,19 @@ const (
 	tmplPayoutCreated  = "ledger.payout_created"
 	tmplPayoutApproved = "ledger.payout_approved"
 	tmplPayoutPaid     = "ledger.payout_paid"
+	// tmplPayoutPaidEarly: preference category security (it cannot be
+	// switched off), in-app and e-mail (BE-092).
+	tmplPayoutPaidEarly = "ledger.payout_paid_before_approval"
 )
 
 // Subscribe registers the payout notices (01 §6.2): payout.created (A) →
 // the other finance admins, "awaiting approval"; payout.approved (O) → the
 // finance admins but the approver, "make the transfer"; payout.paid (O) →
 // the payee's contact address (e-mail) and the seller org's admins (in-app,
-// with the link to the payout and its receipt). billing consumes
+// with the link to the payout and its receipt); payout.paid of a transfer
+// dated before its approval → the security notice to the other finance and
+// platform admins (00 T-298, BE-092; critical queue: the payout.paid outbox
+// row written in the mark-paid transaction carries it). billing consumes
 // payout.paid itself (BE-042). Nothing without the payout flow.
 func (m Module) Subscribe(r *outbox.Registry) {
 	if m.svc.d.Payouts == nil {
@@ -45,6 +59,8 @@ func (m Module) Subscribe(r *outbox.Registry) {
 	r.Subscribe(domainevent.TopicPayoutCreated, NotifyPayoutCreatedTaskName, m.svc.handlePayoutCreated, q)
 	r.Subscribe(domainevent.TopicPayoutApproved, NotifyPayoutApprovedTaskName, m.svc.handlePayoutApproved, q)
 	r.Subscribe(domainevent.TopicPayoutPaid, NotifyPayoutPaidTaskName, m.svc.handlePayoutPaid, q)
+	r.Subscribe(domainevent.TopicPayoutPaid, NotifyPayoutPaidBeforeApprovalTaskName, m.svc.handlePayoutPaidBeforeApproval,
+		outbox.Queue(queue.Critical))
 }
 
 // handlePayoutCreated asks the other finance admins to approve.
@@ -101,6 +117,152 @@ func (s *service) handlePayoutPaid(ctx context.Context, e domainevent.Envelope) 
 	return errors.Join(errs...)
 }
 
+// handlePayoutPaidBeforeApproval is the security notice of 00 T-298
+// (BE-092). It re-reads the payout: only a paid payout whose transfer is
+// dated before its approval (Payout.PaidBeforeApproval, the predicate of
+// the audit flag paid_before_approval) is announced; every other
+// payout.paid is a no-op. Every platform and finance admin in effect but
+// the one who marked it paid gets an in-app notice (fixed text, the link to
+// the payout) and an e-mail with the payout, its amount, the masked IBAN,
+// the bank reference, the approval and transfer times and the names of the
+// approver and the marker. The template's preference category is security:
+// nobody can switch it off. The dedupe keys (payout, recipient, channel)
+// make a repeated task a no-op.
+func (s *service) handlePayoutPaidBeforeApproval(ctx context.Context, e domainevent.Envelope) error {
+	ev, err := domainevent.Decode[domainevent.PayoutPaid](e)
+	if err != nil {
+		return queue.Permanent(err)
+	}
+	p, ok, err := s.noticePayout(ctx, ev.PayoutID)
+	if err != nil || !ok || p.Status != StatusPaid || !p.PaidBeforeApproval() {
+		return err
+	}
+	if s.d.Staff == nil {
+		return errors.New("ledger: the admin lookup is not wired")
+	}
+	if s.d.Sender == nil {
+		return errors.New("ledger: notify is not wired")
+	}
+	to, err := s.securityRecipients(ctx, p)
+	if err != nil {
+		return err
+	}
+	if len(to) == 0 {
+		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "payout paid before approval: no other finance or platform admin to notify",
+			slog.String("payout_id", p.ID.String()))
+		return nil
+	}
+	data, err := s.earlyPaidData(ctx, p)
+	if err != nil {
+		return err
+	}
+	key := p.ID.String()
+	errs := []error{s.notifyInApp(ctx, p, tmplPayoutPaidEarly, key, to, "/admin/payouts/"+p.ID.String())}
+	for _, uid := range to {
+		errs = append(errs, s.mailStaff(ctx, p, tmplPayoutPaidEarly, key, uid, data))
+	}
+	return errors.Join(errs...)
+}
+
+// securityRecipients are the platform and finance admins in effect (06
+// H-33), each once, but the one who marked the payout paid.
+func (s *service) securityRecipients(ctx context.Context, p Payout) ([]uuid.UUID, error) {
+	pads, err := s.d.Staff.PlatformAdmins(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: platform admins: %w", err)
+	}
+	fins, err := s.d.Staff.FinanceAdmins(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ledger: finance admins: %w", err)
+	}
+	var out []uuid.UUID
+	for _, id := range slices.Concat(pads, fins) {
+		if (p.PaidBy != nil && id == *p.PaidBy) || slices.Contains(out, id) {
+			continue
+		}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
+// earlyPaidData is the e-mail data of the security notice: the payout, its
+// money and IBAN (masked only), the bank reference, the approval and
+// transfer times (Türkiye time) and who approved and who marked it paid.
+func (s *service) earlyPaidData(ctx context.Context, p Payout) (map[string]any, error) {
+	approver, err := s.staffName(ctx, p.ApprovedBy)
+	if err != nil {
+		return nil, err
+	}
+	marker, err := s.staffName(ctx, p.PaidBy)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"payout_id": p.ID.String(), "holder_name": p.HolderSnapshot, "amount": money.Decimal(p.Amount),
+		"currency": p.Currency, "iban_masked": p.MaskedIBAN(), "bank_reference": strVal(p.BankReference),
+		"approved_at": istanbulStamp(p.ApprovedAt), "paid_at": istanbulStamp(p.PaidAt),
+		"approved_by": approver, "paid_by": marker,
+	}, nil
+}
+
+// mailStaff e-mails a staff member the security notice in their language;
+// a user without an address (unknown, erased) or no Users port is in-app
+// only.
+func (s *service) mailStaff(ctx context.Context, p Payout, tmpl, key string, uid uuid.UUID, mail map[string]any) error {
+	c, ok, err := s.staffContact(ctx, uid)
+	if err != nil || !ok || c.Email == "" {
+		return err
+	}
+	data := maps.Clone(mail)
+	data["name"] = c.FirstName
+	_, err = s.d.Sender.Send(ctx, notify.Message{
+		UserID: &uid, ToEmail: c.Email, Channel: notify.ChannelEmail, Category: notify.CategoryTransactional,
+		Template: tmpl, Locale: c.Locale, DedupeKey: tmpl + ":" + key + ":" + uid.String() + ":email", Data: data,
+	})
+	return s.sendErr(ctx, tmpl, p.ID, err)
+}
+
+// staffName is a staff member's full name for the security notice; an
+// unknown or erased user, a user without a name or no Users port is named
+// by ID.
+func (s *service) staffName(ctx context.Context, id *uuid.UUID) (string, error) {
+	if id == nil {
+		return "", nil
+	}
+	c, ok, err := s.staffContact(ctx, *id)
+	if err != nil {
+		return "", err
+	}
+	if name := strings.TrimSpace(c.FirstName + " " + c.LastName); ok && name != "" {
+		return name, nil
+	}
+	return id.String(), nil
+}
+
+// staffContact reads a staff member's contact; an unknown or erased user,
+// or no Users port, is not found.
+func (s *service) staffContact(ctx context.Context, id uuid.UUID) (identity.UserContact, bool, error) {
+	if s.d.Users == nil {
+		return identity.UserContact{}, false, nil
+	}
+	c, err := s.d.Users.Contact(ctx, id)
+	switch {
+	case errors.Is(err, identity.ErrNotFound):
+		return identity.UserContact{}, false, nil
+	case err != nil:
+		return identity.UserContact{}, false, fmt.Errorf("ledger: staff contact: %w", err)
+	}
+	return c, true, nil
+}
+
+// istanbulStamp formats an instant in Türkiye time for an e-mail.
+func istanbulStamp(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	return t.In(clock.Istanbul()).Format("02.01.2006 15:04")
+}
+
 // mailPayee sends the payout.paid e-mail to the payee party's address; a
 // party without one is in-app only (logged).
 func (s *service) mailPayee(ctx context.Context, p Payout) error {
@@ -118,10 +280,7 @@ func (s *service) mailPayee(ctx context.Context, p Payout) error {
 		return nil
 	}
 	org := p.OrgID
-	paidAt := ""
-	if p.PaidAt != nil {
-		paidAt = p.PaidAt.In(clock.Istanbul()).Format("02.01.2006 15:04")
-	}
+	paidAt := istanbulStamp(p.PaidAt)
 	_, err = s.d.Sender.Send(ctx, notify.Message{
 		ToEmail: *party.Email, Channel: notify.ChannelEmail, Category: notify.CategoryTransactional,
 		Template: tmplPayoutPaid, Locale: "tr", SourceOrgID: &org,

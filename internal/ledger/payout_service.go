@@ -705,9 +705,11 @@ func (s *service) markPaid(ctx context.Context, a authz.Actor, payoutID uuid.UUI
 	}
 	meta := map[string]any{"from": string(cur.Status), "transaction_id": txnID.String(), "receipt_file_id": receipt.String(),
 		"items": len(items)}
-	if cur.ApprovedAt != nil && paidAt.Before(*cur.ApprovedAt) {
+	if next.PaidBeforeApproval() {
 		// The transfer is dated before the second eye approved it: recorded
-		// (the money left the bank) and flagged for finance's review.
+		// (the money left the bank) and flagged for finance's review; the
+		// payout.paid row below carries the security notice to the other
+		// finance and platform admins in this transaction (T-298, BE-092).
 		meta["paid_before_approval"] = true
 		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "payout marked paid with a transfer dated before its approval",
 			slog.String("payout_id", cur.ID.String()))

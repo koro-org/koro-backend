@@ -125,7 +125,9 @@ type Service interface {
 // (New fails otherwise). Without Payouts (a poster-only ledger, e.g. a
 // consumer's tests) the balance and payout operations answer 503. Reauth
 // nil → the approval is 503 (fail closed); Sender or Staff nil → the
-// notice task fails and is retried.
+// notice task fails and is retried; Users nil → the security notice of a
+// transfer dated before its approval is in-app only, naming the staff by ID
+// (BE-092).
 type Deps struct {
 	Store Store
 	Tx    db.TxManager
@@ -149,6 +151,7 @@ type Deps struct {
 	Reauth      Reauthenticator
 	Sender      Sender
 	Staff       Staff
+	Users       Users
 }
 
 func (d Deps) validate() error {

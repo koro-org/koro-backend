@@ -1,0 +1,14 @@
+Hello {{index .Data "name"}},
+
+A payout was marked paid with a transfer dated before the second finance approval. The money may have left the bank before the four eyes were complete; the ledger records it and the audit log flags it.
+
+Payout: {{index .Data "payout_id"}}
+Payee: {{index .Data "holder_name"}}
+Amount: {{index .Data "amount"}} {{index .Data "currency"}}
+IBAN: {{index .Data "iban_masked"}}
+Bank reference: {{index .Data "bank_reference"}}
+Approved by: {{index .Data "approved_by"}} ({{index .Data "approved_at"}})
+Marked paid by: {{index .Data "paid_by"}}
+Transfer time: {{index .Data "paid_at"}} (Türkiye time)
+
+Review the payout and its receipt in the Koro admin panel. If you did not expect this payout, tell the finance team and Koro's platform admins at once.

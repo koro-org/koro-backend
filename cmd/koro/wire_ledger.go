@@ -35,9 +35,10 @@ import (
 // IsActive), c.parties.svc (the payee party's contact address),
 // c.orgs.svc (the org of the path, the seller org's admins), c.files.svc
 // (the payout_receipt: Get, Attach, PresignGet), c.audit.svc,
-// c.identity.svc (re-authentication of the approval), identity's store
-// (the finance admins in effect, 06 H-33), c.notify.svc (read at call
-// time), c.infra.outbox and c.infra.idempotency.
+// c.identity.svc (re-authentication of the approval; the staff contact of
+// the security notice of a transfer dated before its approval, BE-092),
+// identity's store (the finance and platform admins in effect, 06 H-33),
+// c.notify.svc (read at call time), c.infra.outbox and c.infra.idempotency.
 // Provided: the closeOrg check "open payouts" appended to
 // hooks.openCommerce (after orders' "open orders"; never replacing it)
 // and the ledger KVKK provider (payouts).
@@ -95,7 +96,7 @@ func (w *ledgerWiring) build(c *container) error {
 		Sender: ledgerSender{c: c}, Staff: ledgerStaff{c: c},
 	}
 	if svc := c.identity.svc; svc != nil {
-		d.Reauth = svc
+		d.Reauth, d.Users = svc, svc
 	}
 	mod, err := ledger.New(d)
 	if err != nil {
@@ -119,24 +120,35 @@ func (s ledgerSender) Send(ctx context.Context, m notify.Message) (uuid.UUID, er
 	return s.c.notify.svc.Send(ctx, m)
 }
 
-// ledgerStaff lists the finance admins in effect (06 H-33) from identity's
-// store through the composition root (the orders precedent).
+// ledgerStaff lists the finance and platform admins in effect (06 H-33)
+// from identity's store through the composition root (the orders
+// precedent); the platform admins receive the security notice of a transfer
+// dated before its approval (BE-092).
 type ledgerStaff struct{ c *container }
 
-func (s ledgerStaff) FinanceAdmins(ctx context.Context) ([]uuid.UUID, error) {
+func (s ledgerStaff) holders(ctx context.Context, r authz.PlatformRole) ([]uuid.UUID, error) {
 	st := s.c.identity.store
 	if st == nil {
 		if s.c.infra.db == nil {
-			return nil, errors.New("ledger: the finance admin lookup has no identity store")
+			return nil, errors.New("ledger: the admin lookup has no identity store")
 		}
 		st = identity.NewGormStore(s.c.infra.db.ORM)
 	}
-	return st.UsersWithRole(ctx, authz.PlatformFinanceAdmin)
+	return st.UsersWithRole(ctx, r)
+}
+
+func (s ledgerStaff) FinanceAdmins(ctx context.Context) ([]uuid.UUID, error) {
+	return s.holders(ctx, authz.PlatformFinanceAdmin)
+}
+
+func (s ledgerStaff) PlatformAdmins(ctx context.Context) ([]uuid.UUID, error) {
+	return s.holders(ctx, authz.PlatformAdmin)
 }
 
 // tasks schedules ledger.integrity_check (01 §7: daily at 05:15, low), the
 // late recognition of Koro's own sales before it (05:05, low; BE-067) and
-// subscribes the payout notices (payout.created, .approved, .paid).
+// subscribes the payout notices (payout.created, .approved, .paid and the
+// security notice of payout.paid dated before its approval, BE-092).
 func (w *ledgerWiring) tasks(c *container) {
 	for _, j := range w.mod.Jobs() {
 		c.infra.jobs.Schedule(j)

@@ -1,0 +1,4 @@
+<p style="margin:0 0 12px 0;">Hello {{index .Data "name"}},</p>
+<p style="margin:0 0 12px 0;">A payout was marked paid with a transfer dated before the second finance approval. The money may have left the bank before the four eyes were complete; the ledger records it and the audit log flags it.</p>
+<p style="margin:0 0 12px 0;">Payout: {{index .Data "payout_id"}}<br>Payee: {{index .Data "holder_name"}}<br>Amount: <strong>{{index .Data "amount"}} {{index .Data "currency"}}</strong><br>IBAN: {{index .Data "iban_masked"}}<br>Bank reference: {{index .Data "bank_reference"}}<br>Approved by: {{index .Data "approved_by"}} ({{index .Data "approved_at"}})<br>Marked paid by: {{index .Data "paid_by"}}<br>Transfer time: {{index .Data "paid_at"}} (Türkiye time)</p>
+<p style="margin:0;">Review the payout and its receipt in the Koro admin panel. If you did not expect this payout, tell the finance team and Koro's platform admins at once.</p>

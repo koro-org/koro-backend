@@ -375,11 +375,38 @@ func (s *fakeSender) all() []notify.Message {
 	return slices.Clone(s.msgs)
 }
 
-// fakeStaff lists finance_admin and finance_admin_2.
+// fakeStaff lists finance_admin and finance_admin_2, platform_admin and
+// platform_admin_2.
 type fakeStaff struct{}
 
 func (fakeStaff) FinanceAdmins(context.Context) ([]uuid.UUID, error) {
 	return []uuid.UUID{authztest.ID("finance_admin"), authztest.ID("finance_admin_2")}, nil
+}
+
+func (fakeStaff) PlatformAdmins(context.Context) ([]uuid.UUID, error) {
+	return []uuid.UUID{authztest.ID("platform_admin"), authztest.ID("platform_admin_2")}, nil
+}
+
+// fakeUsers is identity's contact lookup over a fixed directory: the finance
+// admins and platform_admin have an address; any other user (platform_admin_2
+// among them) is identity.ErrNotFound, i.e. in-app only and named by ID.
+type fakeUsers struct{}
+
+// staffContacts is the directory of fakeUsers.
+var staffContacts = map[string]identity.UserContact{
+	"finance_admin":   {Email: "fin1@example.test", FirstName: "Fin", LastName: "Bir", Locale: "tr"},
+	"finance_admin_2": {Email: "fin2@example.test", FirstName: "Fin", LastName: "İki", Locale: "en"},
+	"platform_admin":  {Email: "pad1@example.test", FirstName: "Pad", LastName: "Bir", Locale: "tr"},
+}
+
+func (fakeUsers) Contact(_ context.Context, id uuid.UUID) (identity.UserContact, error) {
+	for name, c := range staffContacts {
+		if authztest.ID(name) == id {
+			c.ID = id
+			return c, nil
+		}
+	}
+	return identity.UserContact{}, identity.ErrNotFound
 }
 
 // payoutEnv is the ledger with the payout flow over in-memory stores (or
@@ -427,7 +454,7 @@ func newPayoutEnvWith(t *testing.T, clk *clock.Fake, store ledger.Store, payouts
 		Store: store, Tx: tx, Clock: clk, Log: obs.Discard(), Alarm: e.alarms.raise,
 		Payouts: payouts, Orders: orderPort, Payees: e.payees, Parties: fakeParties{p: e.payees}, Orgs: fakeOrgs{},
 		Files: e.files, Audit: e.audit, Outbox: e.outbox, Idempotency: keeper, Reauth: e.reauth,
-		Sender: e.sender, Staff: fakeStaff{},
+		Sender: e.sender, Staff: fakeStaff{}, Users: fakeUsers{},
 	})
 	if err != nil {
 		t.Fatalf("ledger.New: %v", err)

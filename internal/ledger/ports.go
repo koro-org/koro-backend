@@ -112,8 +112,17 @@ type Sender interface {
 	Send(ctx context.Context, m notify.Message) (uuid.UUID, error)
 }
 
-// Staff lists the finance admins in effect (06 H-33): the payout notices
-// of the four eyes.
+// Staff lists the finance and platform admins in effect (06 H-33): the
+// payout notices of the four eyes and the security notice of a transfer
+// dated before its approval (BE-092).
 type Staff interface {
 	FinanceAdmins(ctx context.Context) ([]uuid.UUID, error)
+	PlatformAdmins(ctx context.Context) ([]uuid.UUID, error)
+}
+
+// Users resolves a staff member's address and name for the security notice
+// of a transfer dated before its approval (identity.Users; worker path only,
+// BE-092). An unknown or erased user is identity.ErrNotFound.
+type Users interface {
+	Contact(ctx context.Context, id uuid.UUID) (identity.UserContact, error)
 }

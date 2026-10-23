@@ -168,9 +168,11 @@ type OrgNames interface {
 }
 
 // SkillNamer names catalog skills for the company views (level 2 and 3:
-// skills[].name). directory does not offer it yet; cmd/koro binds it when
-// the directory service implements the method (nil → empty names; the
-// public listSkills names every skill ID).
+// skills[].name). It is directory.Catalog.SkillNames (BE-084; cmd/koro
+// binds it by a type assertion on the directory service): one call per
+// level 3 profile and one per level 2 page or batch, never one per profile
+// of a page. An unknown or inactive skill has no key (an empty name); nil
+// → every name empty.
 type SkillNamer interface {
 	SkillNames(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error)
 }

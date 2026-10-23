@@ -6,6 +6,7 @@ import (
 	"errors"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"uuid"
@@ -509,10 +510,15 @@ func (o *orgNamesFake) name(id uuid.UUID, n string) {
 	o.names[id] = n
 }
 
-// skillNamesFake names the catalog skills.
-type skillNamesFake struct{ names map[uuid.UUID]string }
+// skillNamesFake names the catalog skills and counts its calls (BE-084:
+// one per level 2 page).
+type skillNamesFake struct {
+	names map[uuid.UUID]string
+	calls *atomic.Int32
+}
 
 func (f skillNamesFake) SkillNames(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error) {
+	f.calls.Add(1)
 	out := map[uuid.UUID]string{}
 	for _, id := range ids {
 		if n, ok := f.names[id]; ok {
@@ -565,6 +571,7 @@ type env struct {
 	regs     *regsFake
 	orgNames *orgNamesFake
 	notices  *noticesFake
+	skillN   *atomic.Int32 // SkillNames calls
 	mod      students.Module
 	svc      students.Service
 	subs     *outbox.Registry
@@ -586,7 +593,7 @@ func newEnv(t *testing.T) *env {
 		files: &filesFake{meta: map[uuid.UUID]files.FileMeta{}, attached: map[uuid.UUID]files.Owner{},
 			notClean: map[uuid.UUID]bool{}},
 		members: &membersFake{ms: map[uuid.UUID]orgs.MemberView{}}, dsrs: &dsrsFake{open: map[uuid.UUID]uuid.UUID{}},
-		orgNames: &orgNamesFake{names: map[uuid.UUID]string{}}, notices: &noticesFake{},
+		orgNames: &orgNamesFake{names: map[uuid.UUID]string{}}, notices: &noticesFake{}, skillN: &atomic.Int32{},
 		uniA: uuid.NewV7(), uniB: uuid.NewV7(), deptA: uuid.NewV7(), deptB: uuid.NewV7(), deptA2: uuid.NewV7(),
 		skill1: uuid.NewV7(), skill2: uuid.NewV7(), clubPlain: uuid.NewV7(), clubSens: uuid.NewV7(),
 	}
@@ -619,7 +626,7 @@ func newEnv(t *testing.T) *env {
 			return e.regs
 		},
 		Contacts: contactsFake{users: e.users}, OrgNames: e.orgNames,
-		SkillNames: skillNamesFake{names: map[uuid.UUID]string{e.skill1: "Go", e.skill2: "SQL"}},
+		SkillNames: skillNamesFake{names: map[uuid.UUID]string{e.skill1: "Go", e.skill2: "SQL"}, calls: e.skillN},
 		Sender:     e.notices,
 	})
 	if err != nil {

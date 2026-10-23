@@ -41,8 +41,7 @@ import (
 // (eligibility, graduation, discoverability), c.orgs.svc (club
 // memberships, club members, GetMember of the member card, org names of
 // the grant lists and level 3 clubs) and c.directory.svc (names, department
-// and skill validation, sensitive clubs; skill names once directory offers
-// students.SkillNamer). c.kvkk.svc (L13, built later) is read at call time
+// and skill validation, sensitive clubs, skill names: BE-084). c.kvkk.svc (L13, built later) is read at call time
 // for the dpo's data subject request (03 k11); c.notify.svc (L3) is read
 // at call time for the in-app notice of suspended grants (BE-077).
 //
@@ -99,10 +98,10 @@ func (w *studentsWiring) build(c *container) error {
 	if svc := c.orgs.svc; svc != nil {
 		d.OrgNames = svc
 	}
-	// directory names skills once it offers the lookup (BE-046 notes); until
-	// then the company views carry skill IDs only.
-	if n, ok := c.directory.svc.(students.SkillNamer); ok {
-		d.SkillNames = n
+	// directory names the skills of the company views (directory.Catalog.
+	// SkillNames, BE-084): one query per level 3 profile or level 2 page.
+	if c.directory.svc != nil {
+		d.SkillNames = c.directory.svc
 	}
 	d.DSRs = studentsDSRs{c: c}
 	d.Registrations = func() students.Registrations { return w.registrations }

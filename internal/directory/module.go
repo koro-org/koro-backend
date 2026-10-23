@@ -77,6 +77,10 @@ type Catalog interface {
 	GetDepartment(ctx context.Context, id uuid.UUID) (Department, error)
 	// SkillsExist returns ErrUnknownSkill unless every id is an active skill.
 	SkillsExist(ctx context.Context, ids []uuid.UUID) error
+	// SkillNames names the active skills among ids (name_tr, the platform
+	// language) in one store query; an unknown or inactive ID has no key
+	// (students.SkillNamer: skills[].name of the company views; BE-084).
+	SkillNames(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error)
 }
 
 // Service is the directory service: the cross-module contracts plus the

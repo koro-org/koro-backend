@@ -610,3 +610,25 @@ func (s gormStore) CountActiveSkills(ctx context.Context, ids []uuid.UUID) (int,
 	}
 	return int(n), nil
 }
+
+// SkillNamesTR implements Store: one query (id = ANY).
+//
+// cross-org: public reference data.
+func (s gormStore) SkillNamesTR(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error) {
+	out := map[uuid.UUID]string{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		ID     uuid.UUID `gorm:"column:id"`
+		NameTR string    `gorm:"column:name_tr"`
+	}
+	if err := db.Conn(ctx, s.orm).Model(&Skill{}).Select("id, name_tr").Where("id = ANY( ?) AND is_active", db.UUIDArray(ids)).
+		Scan(&rows).Error; err != nil {
+		return nil, wrap("skill names", err)
+	}
+	for _, r := range rows {
+		out[r.ID] = r.NameTR
+	}
+	return out, nil
+}

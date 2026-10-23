@@ -209,21 +209,47 @@ func (s *service) Search(ctx context.Context, q DiscoveryQuery) (DiscoveryPage, 
 		next := page[q.Limit-1]
 		out.Next = &next
 	}
+	var srcs []CompanySource
 	for _, id := range page {
 		src, ok, err := s.anonSource(ctx, id)
 		if err != nil {
 			return DiscoveryPage{}, err
 		}
 		if ok {
-			out.Items = append(out.Items, AnonProfile{UserID: id, dto: anonDTO(src)})
+			srcs = append(srcs, src)
 		}
+	}
+	if err := s.nameSkills(ctx, srcs); err != nil {
+		return DiscoveryPage{}, err
+	}
+	for _, src := range srcs {
+		out.Items = append(out.Items, AnonProfile{UserID: src.View.Profile.UserID, dto: anonDTO(src)})
 	}
 	return out, nil
 }
 
+// nameSkills names the skills of every source with one SkillNamer call
+// (BE-084: one directory query per page, not one per profile); the sources
+// share the read-only map.
+func (s *service) nameSkills(ctx context.Context, srcs []CompanySource) error {
+	var all []Skill
+	for _, src := range srcs {
+		all = append(all, src.View.Skills...)
+	}
+	names, err := s.skillNames(ctx, all)
+	if err != nil {
+		return err
+	}
+	for i := range srcs {
+		srcs[i].SkillNames = names
+	}
+	return nil
+}
+
 // anonSource fills the level 2 source of a discoverable student (no
-// avatar, CV, name or contact: level 2 never shows them); ok=false when the
-// profile went meanwhile.
+// avatar, CV, name or contact: level 2 never shows them) without the skill
+// names (nameSkills names a whole page at once); ok=false when the profile
+// went meanwhile.
 func (s *service) anonSource(ctx context.Context, userID uuid.UUID) (CompanySource, bool, error) {
 	p, err := s.d.Store.GetProfile(ctx, userID)
 	switch {
@@ -250,9 +276,5 @@ func (s *service) anonSource(ctx context.Context, userID uuid.UUID) (CompanySour
 	if v.Experiences, err = s.d.Store.Experiences(ctx, userID); err != nil {
 		return CompanySource{}, false, err
 	}
-	names, err := s.skillNames(ctx, v.Skills)
-	if err != nil {
-		return CompanySource{}, false, err
-	}
-	return CompanySource{View: v, Verified: true, DiscoveryConsent: true, SkillNames: names}, true, nil
+	return CompanySource{View: v, Verified: true, DiscoveryConsent: true}, true, nil
 }

@@ -609,10 +609,23 @@ func TestCatalog_SkillsAndDepartments(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantCode(t, e.svc.SkillsExist(ctx, []uuid.UUID{py.ID, uuid.NewV7()}), 422, "directory.unknown_skill")
+	// BE-084: SkillNames (students.SkillNamer) names in Turkish; duplicates
+	// collapse, an unknown ID has no key, a deactivated skill loses its name.
+	unknown := uuid.NewV7()
+	if got, err := e.svc.SkillNames(ctx, []uuid.UUID{py.ID, ml.ID, py.ID, unknown}); err != nil || len(got) != 2 ||
+		got[py.ID] != py.NameTR || got[ml.ID] != ml.NameTR || got[ml.ID] == "" {
+		t.Fatalf("SkillNames = %v, %v", got, err)
+	}
+	if got, err := e.svc.SkillNames(ctx, nil); err != nil || got == nil || len(got) != 0 {
+		t.Fatalf("SkillNames(nil) = %v, %v", got, err)
+	}
 	if _, err := e.svc.AdminUpdateSkill(ctx, pad(t), py.ID, directory.SkillPatch{IsActive: new(false)}); err != nil {
 		t.Fatal(err)
 	}
 	wantCode(t, e.svc.SkillsExist(ctx, []uuid.UUID{py.ID}), 422, "directory.unknown_skill")
+	if got, err := e.svc.SkillNames(ctx, []uuid.UUID{py.ID, ml.ID}); err != nil || len(got) != 1 || got[ml.ID] == "" {
+		t.Fatalf("SkillNames after deactivation = %v, %v", got, err)
+	}
 	page, err := e.svc.ListSkills(ctx, authz.Anonymous(), directory.SkillQuery{Q: "makine", Limit: 100})
 	if err != nil || len(page.Items) != 1 || page.Items[0].Name("en") != "Machine learning" {
 		t.Fatalf("skills = %+v, %v", page, err)

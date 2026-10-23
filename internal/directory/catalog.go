@@ -73,6 +73,17 @@ func (s *service) SkillsExist(ctx context.Context, ids []uuid.UUID) error {
 	return nil
 }
 
+// SkillNames implements Catalog: the IDs are deduplicated, then one store
+// query.
+func (s *service) SkillNames(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error) {
+	if len(ids) == 0 {
+		return map[uuid.UUID]string{}, nil
+	}
+	uniq := slices.Clone(ids)
+	slices.SortFunc(uniq, func(a, b uuid.UUID) int { return compareUUID(a, b) })
+	return s.d.Store.SkillNamesTR(ctx, slices.Compact(uniq))
+}
+
 func compareUUID(a, b uuid.UUID) int {
 	for i := range a {
 		switch {

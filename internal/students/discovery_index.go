@@ -192,11 +192,11 @@ func (s *service) AnonProfiles(ctx context.Context, ids []uuid.UUID) (map[uuid.U
 	if len(uniq) > maxAnonProfiles {
 		return nil, errTooManyProfiles
 	}
-	out := make(map[uuid.UUID]AnonProfile, len(uniq))
 	ok, err := s.discoverableAmong(ctx, uniq)
 	if err != nil {
 		return nil, err
 	}
+	var srcs []CompanySource
 	for _, id := range uniq {
 		if !ok[id] {
 			continue
@@ -213,8 +213,16 @@ func (s *service) AnonProfiles(ctx context.Context, ids []uuid.UUID) (map[uuid.U
 			return nil, err
 		}
 		if found {
-			out[id] = AnonProfile{UserID: id, dto: anonDTO(src)}
+			srcs = append(srcs, src)
 		}
+	}
+	if err := s.nameSkills(ctx, srcs); err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID]AnonProfile, len(srcs))
+	for _, src := range srcs {
+		id := src.View.Profile.UserID
+		out[id] = AnonProfile{UserID: id, dto: anonDTO(src)}
 	}
 	return out, nil
 }

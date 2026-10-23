@@ -445,12 +445,24 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (directory.Store, w
 		if n, err := s.CountActiveSkills(ctx, []uuid.UUID{k.ID, other.ID, uuid.NewV7()}); err != nil || n != 2 {
 			t.Fatalf("CountActiveSkills = %d, %v", n, err)
 		}
+		// BE-084: names of the active skills among the IDs; an unknown ID
+		// has no key, and no IDs is an empty map.
+		if got, err := s.SkillNamesTR(ctx, []uuid.UUID{k.ID, other.ID, uuid.NewV7()}); err != nil || len(got) != 2 ||
+			got[k.ID] != "Makine öğrenmesi" || got[other.ID] != "Go" {
+			t.Fatalf("SkillNamesTR = %v, %v", got, err)
+		}
+		if got, err := s.SkillNamesTR(ctx, nil); err != nil || got == nil || len(got) != 0 {
+			t.Fatalf("SkillNamesTR(nil) = %v, %v", got, err)
+		}
 		k.IsActive, k.NameEN = false, nil
 		if g, err := s.UpdateSkill(ctx, k); err != nil || g.IsActive || g.NameEN != nil {
 			t.Fatalf("UpdateSkill = %+v, %v", g, err)
 		}
 		if n, _ := s.CountActiveSkills(ctx, []uuid.UUID{k.ID}); n != 0 {
 			t.Fatalf("inactive skill counted")
+		}
+		if got, err := s.SkillNamesTR(ctx, []uuid.UUID{k.ID, other.ID}); err != nil || len(got) != 1 || got[other.ID] != "Go" {
+			t.Fatalf("SkillNamesTR after deactivation = %v, %v (an inactive skill has no name)", got, err)
 		}
 		rows, err := s.ListSkills(ctx, directory.SkillFilter{Q: "GO"}, nil, 10)
 		if err != nil || len(rows) != 1 || rows[0].ID != other.ID {

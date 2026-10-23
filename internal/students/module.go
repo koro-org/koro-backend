@@ -295,7 +295,7 @@ type Deps struct {
 	// OrgNames names companies and clubs (orgs). nil → the grant list
 	// carries no company name and no level 3 view lists clubs.
 	OrgNames OrgNames
-	// SkillNames names skills (directory, when it offers the lookup). nil
+	// SkillNames names skills (directory.Catalog.SkillNames, BE-084). nil
 	// → the company views carry skill IDs without names.
 	SkillNames SkillNamer
 	// Sender delivers the in-app notice of suspended grants (notify,

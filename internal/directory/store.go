@@ -145,6 +145,9 @@ type Store interface {
 	ListSkills(ctx context.Context, f SkillFilter, after *After, limit int) ([]Skill, error)
 	// CountActiveSkills returns how many of ids are active skills.
 	CountActiveSkills(ctx context.Context, ids []uuid.UUID) (int, error)
+	// SkillNamesTR returns name_tr of the active skills among ids in one
+	// query (an unknown or inactive ID has no key; BE-084).
+	SkillNamesTR(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error)
 }
 
 // Sort orders of the lists.

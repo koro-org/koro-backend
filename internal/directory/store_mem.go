@@ -774,3 +774,16 @@ func (s *MemStore) CountActiveSkills(_ context.Context, ids []uuid.UUID) (int, e
 	}
 	return n, nil
 }
+
+// SkillNamesTR implements Store.
+func (s *MemStore) SkillNamesTR(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[uuid.UUID]string{}
+	for _, id := range ids {
+		if k, ok := s.skills[id]; ok && k.IsActive {
+			out[id] = k.NameTR
+		}
+	}
+	return out, nil
+}

@@ -21,6 +21,7 @@ import (
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/outbox"
+	"koro/internal/platform/privacy"
 	"koro/internal/students"
 	"koro/internal/talent"
 )
@@ -183,6 +184,48 @@ func (f *fakeAudit) Log(_ context.Context, e audit.Event) error {
 	return nil
 }
 
+// fakeDestructions is kvkk's destruction record (hooks.destruction; BE-087).
+// probe, when set, runs first in every Record (the env's checks that the
+// call left the app_talent role); err fails every Record.
+type fakeDestructions struct {
+	mu    sync.Mutex
+	got   []privacy.Destruction
+	probe func(ctx context.Context) error
+	err   error
+}
+
+func (f *fakeDestructions) Record(ctx context.Context, d privacy.Destruction) error {
+	if f.probe != nil {
+		if err := f.probe(ctx); err != nil {
+			return err
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return f.err
+	}
+	f.got = append(f.got, d)
+	return nil
+}
+
+func (f *fakeDestructions) all() []privacy.Destruction {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]privacy.Destruction(nil), f.got...)
+}
+
+// offTalentRole is a probe: the talent tables must be unreachable where
+// Record runs (Store.AsApp: the session role, which writes destruction_logs).
+func offTalentRole(st talent.Store) func(ctx context.Context) error {
+	return func(ctx context.Context) error {
+		if _, _, err := st.Score(ctx, uuid.NewV7()); err == nil {
+			return errors.New("destruction recorded on the app_talent role")
+		}
+		return nil
+	}
+}
+
 func (f *fakeAudit) actions() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -223,6 +266,7 @@ type env struct {
 	events   *fakeEvents
 	members  *fakeMemberships
 	audit    *fakeAudit
+	destr    *fakeDestructions
 	reauth   *audittest.LateReauth[identity.ReauthProof]
 	clk      *clock.Fake
 	subs     *outbox.Registry
@@ -253,18 +297,9 @@ func buildEnvWith(t *testing.T, o envOptions) *env {
 		students: &fakeStudents{cohorts: map[uuid.UUID]students.Cohort{}, choices: map[uuid.UUID]students.RankingChoice{}},
 		dir:      fakeDirectory{sensitive: map[uuid.UUID]bool{}}, reauth: &audittest.LateReauth[identity.ReauthProof]{Next: fakeReauth{}}}
 	e.newPorts()
-	d := talent.Deps{Store: e.store, Tx: db.NopTx{}, Audit: e.audit, Clock: clk, Log: obs.Discard(),
-		Students: e.students, Directory: e.dir, Accounts: e.accounts, Events: e.events, Memberships: e.members,
-		CollectionEnabled: o.collection, AuditorAPIEnabled: o.auditorAPI}
-	if !o.noReauth {
-		d.Reauth = e.reauth
-	}
-	mod, err := talent.New(d)
-	if err != nil {
-		t.Fatal(err)
-	}
-	e.mod = mod
-	mod.Subscribe(e.subs)
+	e.destr = &fakeDestructions{probe: offTalentRole(e.store)}
+	e.mod = e.module(t, o)
+	e.mod.Subscribe(e.subs)
 	if err := e.subs.Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -272,6 +307,24 @@ func buildEnvWith(t *testing.T, o envOptions) *env {
 		e.cfg = e.config(t, t0.Add(-24*time.Hour))
 	}
 	return e
+}
+
+// module builds a talent module over the env's store and ports with the
+// switches of o (o.config is ignored); a second module over the same store
+// is the process after a restart with other flags (BE-087).
+func (e *env) module(t *testing.T, o envOptions) talent.Module {
+	t.Helper()
+	d := talent.Deps{Store: e.store, Tx: db.NopTx{}, Audit: e.audit, Clock: e.clk, Log: obs.Discard(),
+		Students: e.students, Directory: e.dir, Accounts: e.accounts, Events: e.events, Memberships: e.members,
+		Destructions: e.destr, CollectionEnabled: o.collection, AuditorAPIEnabled: o.auditorAPI}
+	if !o.noReauth {
+		d.Reauth = e.reauth
+	}
+	mod, err := talent.New(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return mod
 }
 
 // newPorts sets empty identity, events and orgs fakes (BE-085).

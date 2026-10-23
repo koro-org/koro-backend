@@ -23,6 +23,7 @@ var retentionSeedCodes = []string{
 	"talent_ledger", "talent_counters", "talent_runs", "talent_neutralization", "entitlement_other",
 	"financial_records", "dsr_record", "destruction_log", "breach_record", "dsr_erasure", "dormant_account",
 	"privileged_action_history", // 000121 (BE-049): privileged_account_actions of BE-016, with role_history
+	"talent_collection_off",     // 000134 (BE-087, T-324): scores and cohorts deleted while talent collection is off
 }
 
 // TestSchema_RetentionSeedComplete (02 §24.2, T-35): exactly the 44 policies
@@ -32,8 +33,8 @@ var retentionSeedCodes = []string{
 func TestSchema_RetentionSeedComplete(t *testing.T) {
 	t.Parallel()
 	w := newP1aWorld(t)
-	if len(retentionSeedCodes) != 45 {
-		t.Fatalf("the §24.2 list has %d codes, want 45", len(retentionSeedCodes))
+	if len(retentionSeedCodes) != 46 {
+		t.Fatalf("the §24.2 list has %d codes, want 46", len(retentionSeedCodes))
 	}
 	got := queryStrings(t, w, `SELECT code FROM retention_policies ORDER BY code`)
 	want := slices.Sorted(slices.Values(retentionSeedCodes))
@@ -65,6 +66,7 @@ func TestSchema_RetentionSeedComplete(t *testing.T) {
 		"talent_ledger":                "2 years created_at hard_delete talent.point_events talent",
 		"talent_counters":              "14 days created_at hard_delete talent.daily_counters talent",
 		"talent_neutralization":        "3 years ended_at hard_delete talent.neutralizations talent",
+		"talent_collection_off":        "00:00:00 created_at hard_delete talent.scores, talent.cohorts talent",
 		"financial_records":            "10 years created_at hard_delete",
 		"dsr_record":                   "3 years closed_at hard_delete data_subject_requests kvkk",
 		"breach_record":                "5 years closed_at hard_delete breach_incidents kvkk",
@@ -95,8 +97,8 @@ func TestSchema_RetentionSeedComplete(t *testing.T) {
 	if got := queryString(t, w.d, `SELECT retention::text || ' ' || legal_approved::text FROM retention_policies WHERE code = 'push_token'`); got != "60 days true" {
 		t.Errorf("the approved policy was overwritten: %s", got)
 	}
-	if n := w.count(`SELECT count(*) FROM retention_policies`); n != 45 {
-		t.Errorf("policies after the re-run = %d, want 45", n)
+	if n := w.count(`SELECT count(*) FROM retention_policies`); n != 46 {
+		t.Errorf("policies after the re-run = %d, want 46", n)
 	}
 }
 

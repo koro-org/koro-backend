@@ -40,12 +40,13 @@ var (
 )
 
 // seedPolicies reads the retention_policies seed of the migrations
-// (000090 and the 000121/000123 additions and updates) as kvkk.Policy rows, none
+// (000090 and the 000121/000123/000134 additions and updates) as kvkk.Policy rows, none
 // legally approved (T-35).
 func seedPolicies(t *testing.T) map[string]kvkk.Policy {
 	t.Helper()
 	out := map[string]kvkk.Policy{}
-	for _, name := range []string{"000090_seed_retention_policies.up.sql", "000121_create_retention_purge_and_analytics_views.up.sql", "000123_refund_followups.up.sql"} {
+	for _, name := range []string{"000090_seed_retention_policies.up.sql", "000121_create_retention_purge_and_analytics_views.up.sql", "000123_refund_followups.up.sql",
+		"000134_seed_talent_collection_off_policy.up.sql"} {
 		b, err := fs.ReadFile(migrations.FS, name)
 		if err != nil {
 			t.Fatal(err)
@@ -73,8 +74,8 @@ func seedPolicies(t *testing.T) map[string]kvkk.Policy {
 			out[m[3]] = p
 		}
 	}
-	if len(out) != 45 { // 02 §24.2 (44) + privileged_action_history (000121); TestSchema_RetentionSeedComplete
-		t.Fatalf("read %d seeded retention policies, want 45", len(out))
+	if len(out) != 46 { // 02 §24.2 (44) + privileged_action_history (000121) + talent_collection_off (000134); TestSchema_RetentionSeedComplete
+		t.Fatalf("read %d seeded retention policies, want 46", len(out))
 	}
 	return out
 }

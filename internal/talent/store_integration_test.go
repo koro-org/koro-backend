@@ -176,9 +176,11 @@ func TestRoleBoundaries_AppRwCannotReadTalent(t *testing.T) {
 // students/directory ports.
 type pgEnv struct {
 	*env
-	d    *db.DB
-	user func(t *testing.T) uuid.UUID
-	ownr *pgx.Conn // app_owner, sequential use only
+	d     *db.DB
+	user  func(t *testing.T) uuid.UUID
+	ownr  *pgx.Conn // app_owner, sequential use only
+	au    talent.AuditLogger
+	pgRec *pgDestructions // destruction_logs rows in the talent transaction (BE-087)
 }
 
 func newPGEnv(t *testing.T, enabled bool) pgEnv {
@@ -199,15 +201,9 @@ func newPGEnvWith(t *testing.T, o envOptions) pgEnv {
 		dir:      fakeDirectory{sensitive: map[uuid.UUID]bool{}}, reauth: &audittest.LateReauth[identity.ReauthProof]{Next: fakeReauth{}}}
 	e.newPorts()
 	st := talent.NewGormStore(d.ORM)
-	mod, err := talent.New(talent.Deps{Store: st, Tx: d.Tx, Audit: au.Service, Clock: clk, Log: obs.Discard(),
-		Students: e.students, Directory: e.dir, Accounts: e.accounts, Events: e.events, Memberships: e.members,
-		CollectionEnabled: o.collection, AuditorAPIEnabled: o.auditorAPI, Reauth: e.reauth})
-	if err != nil {
-		t.Fatal(err)
-	}
-	e.mod = mod
-	mod.Subscribe(e.subs)
-	p := pgEnv{env: e, d: d, user: pgUser(d), ownr: testutil.OwnerConn(t, d)}
+	p := pgEnv{env: e, d: d, user: pgUser(d), ownr: testutil.OwnerConn(t, d), au: au.Service, pgRec: &pgDestructions{orm: d.ORM}}
+	e.mod = p.module(t, o)
+	e.mod.Subscribe(e.subs)
 	creator := p.user(t)
 	ce := contractEnv{store: st, tx: d.Tx}
 	ce.must(t, func(ctx context.Context) error {
@@ -216,6 +212,21 @@ func newPGEnvWith(t *testing.T, o envOptions) pgEnv {
 		return err
 	})
 	return p
+}
+
+// module builds a talent module over the env's database with the switches
+// of o (o.config is ignored); a second module over the same database is
+// the process after a restart with other flags (BE-087).
+func (p pgEnv) module(t *testing.T, o envOptions) talent.Module {
+	t.Helper()
+	mod, err := talent.New(talent.Deps{Store: talent.NewGormStore(p.d.ORM), Tx: p.d.Tx, Audit: p.au, Clock: p.clk,
+		Log: obs.Discard(), Students: p.students, Directory: p.dir, Accounts: p.accounts, Events: p.events,
+		Memberships: p.members, Destructions: p.pgRec, CollectionEnabled: o.collection, AuditorAPIEnabled: o.auditorAPI,
+		Reauth: p.reauth})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return mod
 }
 
 // pgStudent inserts a user and registers it as an adult student.

@@ -419,6 +419,9 @@ func TestMigrations_EachStepRestoresThePreviousSchema(t *testing.T) {
 		if latest >= 121 {
 			wantPolicies = 45 // + privileged_action_history (000121, BE-049)
 		}
+		if latest >= 134 {
+			wantPolicies = 46 // + talent_collection_off (000134, BE-087)
+		}
 		if defs, policies := rowCount(seedRows[81]), rowCount(seedRows[90]); defs != 10 || policies != wantPolicies {
 			t.Fatalf("seed rows after the last up: signal defs %d, retention policies %d; want 10 and %d", defs, policies, wantPolicies)
 		}

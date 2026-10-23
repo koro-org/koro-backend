@@ -11,6 +11,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/events"
+	"koro/internal/kvkk"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
 	"koro/internal/platform/httpx"
@@ -246,5 +247,53 @@ func TestWire_TalentEventsAdapter(t *testing.T) {
 	facts, err := a.EventFacts(ctx, []uuid.UUID{e.ID, uuid.NewV7()})
 	if want := (talent.EventFacts{OrgID: e.OrgID, Confirmed: 1}); err != nil || len(facts) != 1 || facts[e.ID] != want {
 		t.Fatalf("EventFacts = %+v, %v; want %+v", facts, err, want)
+	}
+}
+
+// TestWire_TalentCollectionOffDestructionHook (BE-087, T-324): with
+// collection off (the default) talent.recompute deletes the scores and
+// cohorts and records them through hooks.destruction in kvkk's
+// destruction record, under the talent_collection_off policy seeded by
+// 000134 (the recorder checks that talent owns it); without the hook the
+// purge fails closed and keeps the rows.
+func TestWire_TalentCollectionOffDestructionHook(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	records, ok := c.kvkk.records.(*kvkk.MemRecords)
+	if !ok {
+		t.Fatalf("kvkk records = %T, want the in-memory store", c.kvkk.records)
+	}
+	p, ok := seedPolicies(t)[talent.PolicyCollectionOff]
+	if !ok || p.OwnerModule != "talent" || p.Target != "talent.scores, talent.cohorts" || p.Method != privacy.MethodHardDelete || !p.Enabled {
+		t.Fatalf("seeded policy %s = %+v, %v", talent.PolicyCollectionOff, p, ok)
+	}
+	records.PutPolicy(p)
+	st, ok := c.talent.store.(*talent.MemStore)
+	if !ok {
+		t.Fatalf("talent store = %T, want the in-memory store", c.talent.store)
+	}
+	st.PutScore(uuid.NewV7(), talent.BandNeutral, false)
+
+	hook := c.hooks.destruction
+	c.hooks.destruction = nil
+	if err := c.talent.mod.Recompute(t.Context()); err == nil {
+		t.Fatal("the purge ran without kvkk's destruction record")
+	}
+	c.hooks.destruction = hook
+	// The memory store does not roll back (db.NopTx): put the row back.
+	st.PutScore(uuid.NewV7(), talent.BandNeutral, false)
+	if err := c.talent.mod.Recompute(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(st.AllScores()) != 0 || len(st.Cohorts()) != 0 {
+		t.Fatal("collection off kept score or cohort rows")
+	}
+	logs, err := records.DestructionLogs(t.Context(), kvkk.DestructionFilter{PolicyCode: talent.PolicyCollectionOff}, nil, 10)
+	if err != nil || len(logs) != 1 || logs[0].Module != "talent" || logs[0].Target != p.Target || logs[0].Method != privacy.MethodHardDelete ||
+		logs[0].RecordCount < 2 {
+		t.Fatalf("destruction rows = %+v, %v", logs, err)
 	}
 }

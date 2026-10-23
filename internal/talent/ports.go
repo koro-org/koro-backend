@@ -8,6 +8,7 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/identity"
+	"koro/internal/platform/privacy"
 	"koro/internal/students"
 )
 
@@ -90,4 +91,18 @@ type EventFacts struct {
 // before the talent transaction.
 type Memberships interface {
 	MembershipsOf(ctx context.Context, userID uuid.UUID) ([]authz.Membership, error)
+}
+
+// Destructions is what talent needs from kvkk (L13, late bound through
+// hooks.destruction; privacy.DestructionRecorder): the destruction record
+// of the score and cohort rows talent.recompute deletes while collection
+// is off (T-324; BE-087), so the deletion is recorded where every other
+// destruction of personal data is (02 §16.3).
+type Destructions interface {
+	// Record appends one destruction_logs row in the talent transaction
+	// that deletes the rows, on the session role (Store.AsApp), so the
+	// destruction commits with its record or not at all.
+	//
+	// sync-write: kvkk.DestructionRecorder.Record
+	Record(ctx context.Context, d privacy.Destruction) error
 }

@@ -709,6 +709,39 @@ func (m *MemStore) DeleteScores(ctx context.Context, userIDs []uuid.UUID) (int, 
 	return n, nil
 }
 
+// PurgeScores implements Store.
+func (m *MemStore) PurgeScores(ctx context.Context, limit int) (int, int, error) {
+	if err := m.check(ctx); err != nil {
+		return 0, 0, err
+	}
+	if err := checkBatch(limit); err != nil {
+		return 0, 0, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	set := map[uuid.UUID]bool{}
+	for id := range m.scores {
+		set[id] = true
+	}
+	for id := range m.cohorts {
+		set[id] = true
+	}
+	ids := slices.Collect(maps.Keys(set))
+	slices.SortFunc(ids, func(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) })
+	scores, cohorts := 0, 0
+	for _, id := range ids[:min(len(ids), limit)] {
+		if _, ok := m.scores[id]; ok {
+			delete(m.scores, id)
+			scores++
+		}
+		if _, ok := m.cohorts[id]; ok {
+			delete(m.cohorts, id)
+			cohorts++
+		}
+	}
+	return scores, cohorts, nil
+}
+
 // HasData implements Store.
 func (m *MemStore) HasData(ctx context.Context, userID uuid.UUID) (bool, error) {
 	if err := m.check(ctx); err != nil {

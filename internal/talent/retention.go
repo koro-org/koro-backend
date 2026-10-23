@@ -36,9 +36,11 @@ import (
 // it deletes in batches of RetentionBatch rows, each in a talent
 // transaction of its own, oldest first, until nothing is left: an
 // interrupted run continues the next night and a second run changes
-// nothing. The scores and cohorts have no policy: talent.recompute
-// rewrites them every night and the KVKK provider erases them with the
-// account (02 §15.5, §15.6).
+// nothing. The scores and cohorts have no sweeper: talent.recompute
+// rewrites them every night with collection on, deletes them with
+// collection off (talent_collection_off, a job policy; T-324, BE-087:
+// collection_off.go) and the KVKK provider erases them with the account
+// (02 §15.5, §15.6).
 
 // Retention policy codes of talent (retention_policies.code).
 const (

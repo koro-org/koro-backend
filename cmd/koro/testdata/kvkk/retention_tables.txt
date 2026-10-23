@@ -81,8 +81,11 @@ talent.point_events         policy:talent_ledger
 talent.daily_counters       policy:talent_counters
 talent.score_runs           policy:talent_runs
 talent.neutralizations      policy:talent_neutralization
-talent.cohorts              account:overwritten nightly (02 §15.5); talent.recompute deletes it once the user has no ledger row in lookback_days, talent's provider on erasure
-talent.scores               account:overwritten nightly (02 §15.6); talent.recompute deletes it once the user has no ledger row in lookback_days, talent's provider on erasure
+# cohorts and scores: overwritten nightly while collection is on (02 §15.5, §15.6; talent.recompute deletes a user's rows
+# once the user has no ledger row in lookback_days), all deleted nightly while it is off (BE-087, T-324), and erased
+# with the account by talent's provider
+talent.cohorts              policy:talent_collection_off
+talent.scores               policy:talent_collection_off
 # kvkk
 data_subject_requests       policy:dsr_record
 destruction_logs            policy:destruction_log

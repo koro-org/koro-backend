@@ -12,6 +12,7 @@ import (
 	"koro/internal/platform/config"
 	"koro/internal/platform/db"
 	"koro/internal/platform/obs"
+	"koro/internal/platform/privacy"
 	"koro/internal/talent"
 )
 
@@ -34,7 +35,10 @@ import (
 // organiser rule, BE-085), c.students.svc (cohort, minor flag, ranking
 // choice), c.directory.svc (sensitive clubs) and c.events.svc (built
 // before talent in L8: event participation figures and organiser through
-// talentEvents, BE-085).
+// talentEvents, BE-085) and hooks.destruction (kvkk, L13, filled after
+// talent is built and read at call time through talentDestructions: the
+// destruction record of the scores and cohorts talent.recompute deletes
+// while collection is off; T-324, BE-087).
 //
 // Provided, set in build: mod (talent.Ranking for discovery, BE-051;
 // talent.Admin for the talent_auditor endpoints, BE-052), the talent KVKK
@@ -78,7 +82,7 @@ func (w *talentWiring) build(c *container) error {
 		Store: store, Tx: tx, Audit: c.audit.svc, Clock: c.infra.clock, Log: log,
 		Students: c.students.svc, Directory: c.directory.svc, Accounts: c.identity.svc,
 		Events: talentEvents{p: c.events.svc}, Memberships: c.orgs.svc, Reauth: c.identity.svc,
-		CollectionEnabled: cfg.DefaultEnabled, AuditorAPIEnabled: cfg.AuditorAPIEnabled,
+		Destructions: talentDestructions{c: c}, CollectionEnabled: cfg.DefaultEnabled, AuditorAPIEnabled: cfg.AuditorAPIEnabled,
 	}
 	mod, err := talent.New(d)
 	if err != nil {
@@ -155,4 +159,19 @@ func (a talentEvents) EventFacts(ctx context.Context, eventIDs []uuid.UUID) (map
 		out[id] = talent.EventFacts{OrgID: f.OrgID, Confirmed: f.Confirmed, DistinctCheckins: f.DistinctCheckins}
 	}
 	return out, nil
+}
+
+// talentDestructions adapts hooks.destruction (kvkk, L13; filled after
+// talent is built) to talent.Destructions, read at call time (BE-087). A
+// missing hook is an error: the purge rolls back rather than destroy
+// unrecorded.
+type talentDestructions struct{ c *container }
+
+// Record implements talent.Destructions.
+func (r talentDestructions) Record(ctx context.Context, d privacy.Destruction) error {
+	h := r.c.hooks.destruction
+	if h == nil {
+		return errors.New("talent: kvkk destruction record is not wired")
+	}
+	return h(ctx, d)
 }

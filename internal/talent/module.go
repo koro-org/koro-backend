@@ -28,8 +28,14 @@
 //     authz and before any business data, a refused proof is the
 //     operation's denied record (audit.ReauthFailed).
 //   - The nightly score (talent.recompute, 03:00) is off with collection
-//     (T-32). It decays every ledger row with its signal's half-life,
-//     sums by category (floored at 0, capped by the config version),
+//     (T-32): the run then deletes every score and cohort row instead, in
+//     batches, each recorded in destruction_logs under
+//     talent_collection_off in its transaction (T-324, BE-087; the ledger
+//     keeps its own retention), so a profile computed while the flag was on
+//     does not outlive it; the first run after the flag is back on scores
+//     everyone from the ledger again. With collection on it decays every
+//     ledger row with its signal's half-life, sums by category (floored at
+//     0, capped by the config version),
 //     ranks the users within their cohort (university + class year, the
 //     university below cohort_min, then global), shrinks the percentile
 //     towards the median with few signals and lifts only upwards: no data,
@@ -95,7 +101,11 @@
 //     after 24 months (talent.point_events_purge, then the config versions
 //     nothing refers to), the daily counters after 14 days, the score runs
 //     after a year and the lifted neutralisations 3 years after the lift,
-//     with collection on or off; unapproved policies are dry runs.
+//     with collection on or off; unapproved policies are dry runs. The
+//     scores and cohorts have no sweeper: the nightly run rewrites them
+//     with collection on and deletes them with collection off
+//     (talent_collection_off, a job policy never deferred to the legal
+//     approval: the flag, not an age, ends their purpose; T-324, BE-087).
 package talent
 
 import (
@@ -151,13 +161,19 @@ type Deps struct {
 	Events      Events      // event participation figures and organiser (BE-085)
 	Memberships Memberships // the organiser rule (BE-085)
 
+	// Destructions records the score and cohort rows the nightly run
+	// deletes while collection is off (kvkk's destruction record through
+	// hooks.destruction; T-324, BE-087).
+	Destructions Destructions
+
 	// Reauth verifies the proof of the R operations (identity). nil →
 	// every R operation fails closed (503).
 	Reauth Reauthenticator
 
 	// CollectionEnabled is talent.default_enabled (TALENT_DEFAULT_ENABLED,
-	// T-32): false → no ledger row is written, the nightly score does not
-	// run and every band is neutral.
+	// T-32): false → no ledger row is written, the nightly run deletes the
+	// scores and cohorts instead of computing them (T-324) and every band is
+	// neutral.
 	CollectionEnabled bool
 	// AuditorAPIEnabled is talent.auditor_api_enabled
 	// (TALENT_AUDITOR_API_ENABLED, 03 §5.12 k-flag): false → every
@@ -174,6 +190,7 @@ func (d Deps) validate() error {
 		{"Store", d.Store != nil}, {"Tx", d.Tx != nil}, {"Audit", d.Audit != nil}, {"Clock", d.Clock != nil},
 		{"Log", d.Log != nil}, {"Students", d.Students != nil}, {"Directory", d.Directory != nil},
 		{"Accounts", d.Accounts != nil}, {"Events", d.Events != nil}, {"Memberships", d.Memberships != nil},
+		{"Destructions", d.Destructions != nil},
 	} {
 		if !c.ok {
 			errs = append(errs, fmt.Errorf("talent.Deps.%s is missing", c.name))

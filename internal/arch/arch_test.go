@@ -459,15 +459,17 @@ func TestSyncWritesAreAllowed(t *testing.T) {
 	// the order in its transaction), + events → files.Files.Delete (BE-050:
 	// the 7-day purge of a registration export file, 01 §6.3), + events →
 	// kvkk.DestructionRecorder.Record (BE-083: the destruction record of
-	// that purge in its transaction, T-318).
-	if len(allow) != 33 {
-		t.Fatalf("sync_writes.txt has %d lines, want 33", len(allow))
+	// that purge in its transaction, T-318), + talent →
+	// kvkk.DestructionRecorder.Record (BE-087: the destruction record of the
+	// scores and cohorts deleted while collection is off, T-324).
+	if len(allow) != 34 {
+		t.Fatalf("sync_writes.txt has %d lines, want 34", len(allow))
 	}
 	for _, must := range []string{"kvkk files.Files.Delete", "feed entitlements.Entitlements.Release",
 		"outreach entitlements.Entitlements.Release", "feed outreach.Targeting.DiscardDispatch",
 		"feed outreach.Targeting.ScheduleDispatch", "outreach entitlements.Entitlements.Consume",
 		"identity files.Files.Delete", "directory files.Files.Delete", "students files.Files.Delete", "feed files.Files.Delete",
-		"events files.Files.Delete", "events kvkk.DestructionRecorder.Record",
+		"events files.Files.Delete", "events kvkk.DestructionRecorder.Record", "talent kvkk.DestructionRecorder.Record",
 		"* audit.Logger.Log", "* files.Files.Attach", "payments orders.Orders.ApplyPayment", "payments ledger.Poster.Post",
 		"payments orders.Orders.ConfirmDirectPayment", "payments orders.Orders.ApplyRefund", "payments ledger.LedgerLines.LockPayees",
 		"directory orgs.OrgAdmin.GrantRole", "directory orgs.OrgAdmin.Create", "orders catalog.Offerings.Release",

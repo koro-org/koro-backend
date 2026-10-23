@@ -841,6 +841,36 @@ func (s gormStore) DeleteScores(ctx context.Context, userIDs []uuid.UUID) (int, 
 	return n, nil
 }
 
+// PurgeScores implements Store: one statement picks the users and deletes
+// both tables' rows of them (data-modifying CTEs see the same snapshot).
+//
+// cross-org: collection is off for every user (T-324).
+func (s gormStore) PurgeScores(ctx context.Context, limit int) (int, int, error) {
+	if limit < 1 || limit > 1000 {
+		return 0, 0, fmt.Errorf("talent: purge scores: batch size %d outside 1..1000", limit)
+	}
+	c, err := s.conn(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	var row struct {
+		Scores  int `gorm:"column:scores"`
+		Cohorts int `gorm:"column:cohorts"`
+	}
+	err = c.Raw(`WITH u AS (
+			SELECT user_id FROM talent.scores UNION SELECT user_id FROM talent.cohorts ORDER BY user_id LIMIT ?
+		), s AS (
+			DELETE FROM talent.scores WHERE user_id IN (SELECT user_id FROM u) RETURNING 1
+		), c AS (
+			DELETE FROM talent.cohorts WHERE user_id IN (SELECT user_id FROM u) RETURNING 1
+		)
+		SELECT (SELECT count(*) FROM s) AS scores, (SELECT count(*) FROM c) AS cohorts`, limit).Scan(&row).Error
+	if err != nil {
+		return 0, 0, wrap("purge scores", err)
+	}
+	return row.Scores, row.Cohorts, nil
+}
+
 // HasData implements Store.
 //
 // cross-org: the subject's own rows.

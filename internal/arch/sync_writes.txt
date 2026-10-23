@@ -122,3 +122,9 @@ payments  -> ledger.LedgerLines.LockPayees
 # and marks the export purged (late bound through hooks.destruction: kvkk is L13), so a destruction never
 # commits without its record nor a record without its destruction, like kvkk.purge_exports' own rows.
 events    -> kvkk.DestructionRecorder.Record
+
+# BE-087 (T-324; rationale for 01 §6.3 in the BE-087 ticket's doc patch): talent.recompute with collection off
+# deletes the score and cohort rows in batches and records each batch in kvkk's destruction_logs in the talent
+# transaction that deletes it, on the session role (Store.AsApp; late bound through hooks.destruction: kvkk is
+# L13), so the profiling output never goes unrecorded nor a record without its deletion, like events.purge_exports.
+talent    -> kvkk.DestructionRecorder.Record

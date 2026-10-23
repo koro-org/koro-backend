@@ -1,9 +1,11 @@
 package talent_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 	"uuid"
@@ -378,6 +380,52 @@ func storeContract(t *testing.T, newEnv func(t *testing.T) contractEnv) {
 				ConfigVersionID: cfg.ID, RunID: run.ID, CalculatedAt: t0}})
 		}); err == nil {
 			t.Fatal("a neutralised score with a band was accepted")
+		}
+	})
+	// BE-087 (T-324): collection off deletes the score and cohort rows of
+	// at most limit users per call, lowest user IDs first, both rows of a
+	// user together; 1..1000 only.
+	t.Run("purge_scores", func(t *testing.T) {
+		t.Parallel()
+		ce := newEnv(t)
+		creator := ce.user(t)
+		users := make([]uuid.UUID, 5)
+		for i := range users {
+			users[i] = ce.user(t)
+		}
+		slices.SortFunc(users, func(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) })
+		ce.must(t, func(ctx context.Context) error {
+			cfg, err := ce.store.InsertConfigVersion(ctx, talent.ConfigVersion{ID: uuid.NewV7(), EffectiveFrom: t0.Add(-time.Hour), CreatedBy: creator})
+			if err != nil {
+				return err
+			}
+			var scores []talent.Score
+			for _, u := range users {
+				scores = append(scores, talent.Score{UserID: u, PctBP: 5000, CohortKey: "global", ConfigVersionID: cfg.ID,
+					RunID: uuid.NewV7(), CalculatedAt: t0})
+			}
+			return ce.store.PutScores(ctx, scores)
+		})
+		ce.must(t, func(ctx context.Context) error {
+			for _, limit := range []int{0, 1001} {
+				if _, _, err := ce.store.PurgeScores(ctx, limit); err == nil {
+					t.Errorf("purge with batch size %d accepted", limit)
+				}
+			}
+			return nil
+		})
+		for i, want := range []int{2, 2, 1, 0} {
+			ce.must(t, func(ctx context.Context) error {
+				s, c, err := ce.store.PurgeScores(ctx, 2)
+				if err != nil || s != want || c != want {
+					t.Fatalf("purge %d = %d scores, %d cohorts, %v; want %d each", i, s, c, err, want)
+				}
+				left, err := ce.store.ScoringUsers(ctx, t0)
+				if err != nil || !slices.Equal(left, users[min(2*(i+1), len(users)):]) {
+					t.Fatalf("after purge %d: %v %v, want the highest IDs %v", i, left, err, users[min(2*(i+1), len(users)):])
+				}
+				return nil
+			})
 		}
 	})
 }

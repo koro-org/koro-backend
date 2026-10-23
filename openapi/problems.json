@@ -1410,10 +1410,22 @@
     "type": "urn:koro:problem:students.empty_patch"
   },
   {
+    "code": "students.invalid_state",
+    "status": 409,
+    "title": "The grant's state does not allow this change",
+    "type": "urn:koro:problem:students.invalid_state"
+  },
+  {
     "code": "students.minor_restricted",
     "status": 422,
     "title": "Not available to users under 18",
     "type": "urn:koro:problem:students.minor_restricted"
+  },
+  {
+    "code": "students.resume_window_expired",
+    "status": 409,
+    "title": "The grant can no longer be resumed",
+    "type": "urn:koro:problem:students.resume_window_expired"
   },
   {
     "code": "students.unknown_department",

@@ -10,6 +10,10 @@
 # profile, no CV); grant_student_b is company_b's on the persona student (whose CV is cv_student).
 # BE-077: grant_lapsed_a is company_a's grant on user_unverified standing for a student whose
 # verification lapsed (profile at uni_a, given an hour ago, suspended now).
+# BE-088: reverified: true is a suspended grant of a verified student persona (verified again after the
+# lapse; times from the matrix clock): grant_resumable_a (the persona student's, company_a) was suspended an
+# hour ago and may be resumed; expired: true moves the suspension beyond the 90-day window
+# (grant_expired_a, club_member's, company_a).
 version: 1
 fixtures:
   experience_student: { kind: experience, owner: student }
@@ -18,3 +22,5 @@ fixtures:
   grant_granted_a: { kind: grant, student: student_granted, company: company_a }
   grant_student_b: { kind: grant, student: student, company: company_b }
   grant_lapsed_a: { kind: grant, student: user_unverified, company: company_a, suspended: true }
+  grant_resumable_a: { kind: grant, student: student, company: company_a, suspended: true, reverified: true }
+  grant_expired_a: { kind: grant, student: club_member, company: company_a, suspended: true, reverified: true, expired: true }

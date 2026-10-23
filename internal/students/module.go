@@ -64,6 +64,13 @@
 //     itself, a new verification included (a new accepted request gives
 //     a fresh one). The student is told in-app, the company never. Any
 //     account lists and revokes its own grants without a verification.
+//   - Suspension window (BE-088, T-331/T-332): once verified again the
+//     student may resume a suspended grant within the window (90 days by
+//     default; an explicit consent act, audited, the company is not told);
+//     after the window students.expire_suspended_grants revokes it (by the
+//     system, audited) and tells the student in-app without naming the
+//     company. The KVKK export carries every revocation reason, the
+//     company's included (Q-08); no answer of the app does.
 //   - Level 2 (01 §4.9, T-68, T-237): IsDiscoverable and Search check the
 //     setting, the consent in force, the verification, the age and the
 //     account at read time; a search whose filters match fewer than 10
@@ -232,6 +239,11 @@ type Service interface {
 	// (students.access_grant.revoke): the company loses access at once; a
 	// suspended grant ends too; no verification needed (BE-077).
 	RevokeMyAccessGrant(ctx context.Context, a authz.Actor, grantID uuid.UUID, reason string) error
+	// ResumeMyAccessGrant is resumeMyAccessGrant
+	// (students.access_grant.resume, BE-088): a suspended grant becomes
+	// active again within the suspension window; an active student
+	// verification is required (403 students.verification_required).
+	ResumeMyAccessGrant(ctx context.Context, a authz.Actor, grantID uuid.UUID) (GrantView, error)
 	// ListCompanyStudents is listCompanyGrantedStudents
 	// (students.access_grant.list_company).
 	ListCompanyStudents(ctx context.Context, a authz.Actor, orgID uuid.UUID, q CompanyStudentQuery) (CompanyStudentPage, error)
@@ -298,9 +310,14 @@ type Deps struct {
 	// SkillNames names skills (directory.Catalog.SkillNames, BE-084). nil
 	// → the company views carry skill IDs without names.
 	SkillNames SkillNamer
-	// Sender delivers the in-app notice of suspended grants (notify,
-	// BE-077). nil → the grants are suspended without a notice (logged).
+	// Sender delivers the in-app notices of suspended (BE-077) and expired
+	// (BE-088) grants (notify). nil → the grants are suspended or revoked
+	// without a notice (logged).
 	Sender Sender
+	// SuspensionWindow is how long a suspended grant may be resumed before
+	// the system revokes it (config STUDENTS_GRANT_SUSPENSION_WINDOW,
+	// BE-088). 0 → DefaultSuspensionWindow.
+	SuspensionWindow time.Duration
 }
 
 func (d Deps) validate() error {

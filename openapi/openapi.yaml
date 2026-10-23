@@ -11799,6 +11799,10 @@ components:
         granted_at:
           format: date-time
           type: string
+        resumable_until:
+          description: Until when you may resume the suspended grant once verified again; after it the grant ends (suspended grants only)
+          format: date-time
+          type: string
         source:
           description: "What you accepted: a contact request (an application in phase 3)"
           enum:
@@ -11806,7 +11810,7 @@ components:
             - application
           type: string
         status:
-          description: "active: the company sees your profile; suspended: your student verification lapsed, the company sees nothing and the grant never reopens by itself (revoke it, or accept a new contact request of the company after you verify again)"
+          description: "active: the company sees your profile; suspended: your student verification lapsed, the company sees nothing and the grant never reopens by itself (revoke it, resume it before resumable_until once verified again, or accept a new contact request of the company)"
           enum:
             - active
             - suspended
@@ -23673,7 +23677,7 @@ paths:
       x-koro-surface: self
   /api/v1/me/access-grants:
     get:
-      description: "The companies you gave level 3 access to your full profile and current CV (you accepted their contact request), newest first. A grant is suspended while your student verification has lapsed: the company sees nothing, and the grant never reopens by itself. Any account lists its own grants, without a student verification."
+      description: "The companies you gave level 3 access to your full profile and current CV (you accepted their contact request), newest first. A grant is suspended while your student verification has lapsed: the company sees nothing, and the grant never reopens by itself; once verified again you may resume it until resumable_until, after which it ends. Any account lists its own grants, without a student verification."
       operationId: listMyAccessGrants
       parameters:
         - description: Page size
@@ -23716,6 +23720,50 @@ paths:
         - students
       x-koro-action: students.access_grant.list_own
       x-koro-rate-limit: read_default
+      x-koro-surface: self
+  /api/v1/me/access-grants/{grant_id}/resume:
+    post:
+      description: "Gives the named company level 3 access again to a grant suspended when your student verification lapsed: an explicit consent, possible only with an active student verification (403 students.verification_required) and only until resumable_until (409 students.resume_window_expired; the company then needs a new contact request). A grant that is not suspended is 409 students.invalid_state; another user's grant is 404. The company is not notified."
+      operationId: resumeMyAccessGrant
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Grant ID (another user's or a malformed ID is 404)
+          in: path
+          name: grant_id
+          required: true
+          schema:
+            description: Grant ID (another user's or a malformed ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StudentAccessGrantDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Resume a suspended company access
+      tags:
+        - students
+      x-koro-action: students.access_grant.resume
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
       x-koro-surface: self
   /api/v1/me/access-grants/{grant_id}/revoke:
     post:

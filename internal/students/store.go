@@ -155,9 +155,29 @@ type Store interface {
 	// empty slice).
 	RevokeGrants(ctx context.Context, studentID, companyOrgID uuid.UUID, by RevokedBy, reason *string, at time.Time) ([]AccessGrant, error)
 	// SuspendGrants suspends, at at, every active grant of studentID
-	// granted at or before at and returns the suspended rows (none: an
-	// empty slice). A suspended grant is never made active again.
+	// granted at or before at (and not resumed after at: a late task never
+	// undoes a resume, BE-088) and returns the suspended rows (none: an
+	// empty slice). A suspended grant is never made active again but by
+	// ResumeGrant.
 	SuspendGrants(ctx context.Context, studentID uuid.UUID, at time.Time) ([]AccessGrant, error)
+	// ResumeGrant makes studentID's suspended open grant id active again at
+	// at (suspended_at cleared, resumed_at = at) and returns it, or
+	// ErrNotFound when id is not studentID's or not suspended and open
+	// (BE-088).
+	ResumeGrant(ctx context.Context, studentID, id uuid.UUID, at time.Time) (AccessGrant, error)
+	// SuspendedStudentsBefore returns up to limit students with user_id >
+	// after, in user_id order, holding an open grant suspended before
+	// cutoff (the expiry walk, BE-088).
+	SuspendedStudentsBefore(ctx context.Context, cutoff time.Time, after uuid.UUID, limit int) ([]uuid.UUID, error)
+	// ExpireSuspendedGrants revokes at at, by the system with
+	// ReasonSuspensionExpired, every open grant of studentID suspended
+	// before cutoff and returns the revoked rows (none: an empty slice).
+	ExpireSuspendedGrants(ctx context.Context, studentID uuid.UUID, cutoff, at time.Time) ([]AccessGrant, error)
+	// ExpiredRevocations returns up to limit distinct (student, revoked_at)
+	// pairs of the grants the system revoked with ReasonSuspensionExpired
+	// at or after since, after the position (nil: from the start), in
+	// (student_user_id, revoked_at) order (the expiry notices, BE-088).
+	ExpiredRevocations(ctx context.Context, since time.Time, after *ExpiryKey, limit int) ([]ExpiryKey, error)
 	// CountSuspendedAt counts the open grants of studentID suspended at
 	// exactly at (one lapse's suspension, also after a retry).
 	CountSuspendedAt(ctx context.Context, studentID uuid.UUID, at time.Time) (int, error)

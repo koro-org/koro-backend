@@ -24,6 +24,9 @@ func checkGrant(g AccessGrant) error {
 		return errCheck
 	case g.SuspendedAt != nil && g.SuspendedAt.Before(g.GrantedAt): // profile_access_grants_suspended_chk
 		return errCheck
+	case g.ResumedAt != nil && (g.ResumedAt.Before(g.GrantedAt) || // profile_access_grants_resumed_chk
+		g.SuspendedAt != nil && g.SuspendedAt.Before(*g.ResumedAt)):
+		return errCheck
 	}
 	return nil
 }
@@ -44,7 +47,7 @@ func (s *MemStore) LockGrants(context.Context, uuid.UUID) error { return nil }
 func (s *MemStore) InsertGrant(_ context.Context, g AccessGrant) (AccessGrant, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	g.SuspendedAt, g.RevokedAt, g.RevokedByKind, g.RevokeReason = nil, nil, nil, nil
+	g.SuspendedAt, g.ResumedAt, g.RevokedAt, g.RevokedByKind, g.RevokeReason = nil, nil, nil, nil, nil
 	if err := checkGrant(g); err != nil {
 		return AccessGrant{}, false, err
 	}
@@ -124,7 +127,7 @@ func (s *MemStore) SuspendGrants(_ context.Context, studentID uuid.UUID, at time
 	out := []AccessGrant{}
 	next := slices.Clone(s.grants)
 	for i, g := range next {
-		if g.StudentUserID != studentID || !g.Active() || g.GrantedAt.After(at) {
+		if g.StudentUserID != studentID || !g.Active() || g.GrantedAt.After(at) || g.ResumedAt != nil && g.ResumedAt.After(at) {
 			continue
 		}
 		t := at
@@ -138,6 +141,99 @@ func (s *MemStore) SuspendGrants(_ context.Context, studentID uuid.UUID, at time
 	}
 	s.grants = next
 	return out, nil
+}
+
+// ResumeGrant implements Store.
+func (s *MemStore) ResumeGrant(_ context.Context, studentID, id uuid.UUID, at time.Time) (AccessGrant, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, g := range s.grants {
+		if g.ID != id || g.StudentUserID != studentID || !g.Open() || g.SuspendedAt == nil {
+			continue
+		}
+		t := at
+		g.SuspendedAt, g.ResumedAt = nil, &t
+		if err := checkGrant(g); err != nil {
+			return AccessGrant{}, err
+		}
+		g.UpdatedAt = s.stamp()
+		s.grants[i] = g
+		return g, nil
+	}
+	return AccessGrant{}, ErrNotFound
+}
+
+// SuspendedStudentsBefore implements Store.
+func (s *MemStore) SuspendedStudentsBefore(_ context.Context, cutoff time.Time, after uuid.UUID, limit int) ([]uuid.UUID, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []uuid.UUID
+	for _, g := range s.grants {
+		if g.Open() && g.SuspendedAt != nil && g.SuspendedAt.Before(cutoff) && compareUUID(g.StudentUserID, after) > 0 &&
+			!slices.Contains(out, g.StudentUserID) {
+			out = append(out, g.StudentUserID)
+		}
+	}
+	slices.SortFunc(out, compareUUID)
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// ExpireSuspendedGrants implements Store.
+func (s *MemStore) ExpireSuspendedGrants(_ context.Context, studentID uuid.UUID, cutoff, at time.Time) ([]AccessGrant, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []AccessGrant{}
+	next := slices.Clone(s.grants)
+	for i, g := range next {
+		if g.StudentUserID != studentID || !g.Open() || g.SuspendedAt == nil || !g.SuspendedAt.Before(cutoff) {
+			continue
+		}
+		t, k, why := at, RevokedBySystem, ReasonSuspensionExpired
+		g.RevokedAt, g.RevokedByKind, g.RevokeReason = &t, &k, &why
+		if err := checkGrant(g); err != nil {
+			return nil, err
+		}
+		g.UpdatedAt = s.stamp()
+		next[i] = g
+		out = append(out, g)
+	}
+	s.grants = next
+	return out, nil
+}
+
+// ExpiredRevocations implements Store.
+func (s *MemStore) ExpiredRevocations(_ context.Context, since time.Time, after *ExpiryKey, limit int) ([]ExpiryKey, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []ExpiryKey
+	for _, g := range s.grants {
+		if g.RevokedAt == nil || g.RevokedByKind == nil || *g.RevokedByKind != RevokedBySystem || g.RevokeReason == nil ||
+			*g.RevokeReason != ReasonSuspensionExpired || g.RevokedAt.Before(since) {
+			continue
+		}
+		k := ExpiryKey{StudentUserID: g.StudentUserID, RevokedAt: *g.RevokedAt}
+		if (after == nil || compareExpiry(k, *after) > 0) && !slices.ContainsFunc(out, func(x ExpiryKey) bool {
+			return compareExpiry(x, k) == 0
+		}) {
+			out = append(out, k)
+		}
+	}
+	slices.SortFunc(out, compareExpiry)
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// compareExpiry orders expiries by (student_user_id, revoked_at).
+func compareExpiry(a, b ExpiryKey) int {
+	if c := compareUUID(a.StudentUserID, b.StudentUserID); c != 0 {
+		return c
+	}
+	return a.RevokedAt.Compare(b.RevokedAt)
 }
 
 // CountSuspendedAt implements Store.

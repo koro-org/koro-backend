@@ -15,6 +15,7 @@ const (
 	StudentsPrivacyUpdateOwn       Action = "students.privacy.update_own"
 	StudentsAccessGrantListOwn     Action = "students.access_grant.list_own"
 	StudentsAccessGrantRevoke      Action = "students.access_grant.revoke"
+	StudentsAccessGrantResume      Action = "students.access_grant.resume" // BE-088 (T-332)
 	StudentsAccessGrantListCompany Action = "students.access_grant.list_company"
 	StudentsProfileReadCompany     Action = "students.profile.read_company"
 	StudentsCvReadCompany          Action = "students.cv.read_company"
@@ -33,6 +34,7 @@ var studentsActions = []Action{
 	StudentsPrivacyUpdateOwn,
 	StudentsAccessGrantListOwn,
 	StudentsAccessGrantRevoke,
+	StudentsAccessGrantResume,
 	StudentsAccessGrantListCompany,
 	StudentsProfileReadCompany,
 	StudentsCvReadCompany,

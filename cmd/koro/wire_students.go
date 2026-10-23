@@ -16,8 +16,8 @@ import (
 )
 
 // studentsWiring wires the students module (L7; 01 §4.9). First owner:
-// BE-023, then BE-025, BE-046 and BE-077. Only tickets of the students
-// module edit this file (BE-001 R4).
+// BE-023, then BE-025, BE-046, BE-077 and BE-088. Only tickets of the
+// students module edit this file (BE-001 R4).
 //
 // Seams (nil in production):
 //
@@ -43,7 +43,10 @@ import (
 // the grant lists and level 3 clubs) and c.directory.svc (names, department
 // and skill validation, sensitive clubs, skill names: BE-084). c.kvkk.svc (L13, built later) is read at call time
 // for the dpo's data subject request (03 k11); c.notify.svc (L3) is read
-// at call time for the in-app notice of suspended grants (BE-077).
+// at call time for the in-app notices of suspended (BE-077) and expired
+// (BE-088) grants; c.infra.cfg.Students.GrantSuspensionWindow is the window
+// within which a suspended grant may be resumed (BE-088; zero under
+// `koro openapi` and in tests: the module's 90-day default).
 //
 // Provided, set in build: svc (students.Service: Profiles for feed,
 // outreach, talent; Audience for outreach; AccessGrants and Discoverable
@@ -112,6 +115,7 @@ func (w *studentsWiring) build(c *container) error {
 		d.Files = fs
 	}
 	d.Sender = studentsSender{c: c}
+	d.SuspensionWindow = c.infra.cfg.Students.GrantSuspensionWindow
 	mod, err := students.New(d)
 	if err != nil {
 		return err
@@ -133,8 +137,10 @@ func (w *studentsWiring) build(c *container) error {
 // avatar loses its reference and its file), user.edu_verification_lapsed →
 // students.suspend_lapsed_grants and user.edu_verified →
 // students.suspend_gap_grants (BE-077: a lapsed verification suspends the
-// level 3 grants); students.audience_refresh (02:00, low) and
-// students.graduation_check (02:15, default) (01 §6.2, §7).
+// level 3 grants); students.audience_refresh (02:00, low),
+// students.graduation_check (02:15, default) and
+// students.expire_suspended_grants (02:30, default; BE-088: a suspended
+// grant is revoked when its window ran out) (01 §6.2, §7).
 func (w *studentsWiring) tasks(c *container) {
 	w.mod.Subscribe(c.infra.subs)
 	for _, j := range w.mod.Jobs() {
@@ -142,8 +148,8 @@ func (w *studentsWiring) tasks(c *container) {
 	}
 }
 
-// routes: the 22 students operations of BE-023, BE-025 and BE-046 (04
-// §2.4); w.svc is nil under `koro openapi`, which Register tolerates.
+// routes: the 23 students operations of BE-023, BE-025, BE-046 and BE-088
+// (04 §2.4); w.svc is nil under `koro openapi`, which Register tolerates.
 func (w *studentsWiring) routes(c *container, api huma.API) { students.Register(api, w.svc) }
 
 // studentsSender adapts notify (L3) to students.Sender, read at call time;

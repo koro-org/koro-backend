@@ -1,4 +1,4 @@
-# Multi-step scenarios of the students module (03 §7.7; BE-023, BE-025, BE-046, BE-077).
+# Multi-step scenarios of the students module (03 §7.7; BE-023, BE-025, BE-046, BE-077, BE-088).
 version: 1
 scenarios:
   minor:
@@ -121,3 +121,22 @@ scenarios:
       - { persona: user_unverified, operation: revokeMyAccessGrant, path_params: { grant_id: grant_lapsed_a }, expect: 204 }
       - { persona: user_unverified, operation: revokeMyAccessGrant, path_params: { grant_id: grant_lapsed_a }, expect: 204 }
       - { persona: user_unverified, operation: getMyStudentProfile, expect: 403, code: students.verification_required }
+  access_grant_resume:
+    note: >-
+      BE-088 (T-332): the persona student's grant of company_a (grant_resumable_a) is suspended and the student is
+      verified again, inside the window: company_a does not see the student; user_unverified cannot resume its
+      own suspended grant (k-uv); the student resumes the grant and company_a reads the level 3 profile again; a
+      second resume is 409; club_member's grant beyond the window is 409 students.resume_window_expired.
+    steps:
+      - { persona: company_member, operation: getCompanyStudentProfile, path_params: { org_id: company_a, user_id: student },
+          expect: 404, code: not_found }
+      - { persona: user_unverified, operation: resumeMyAccessGrant, path_params: { grant_id: grant_lapsed_a }, expect: 403,
+          code: students.verification_required }
+      - { persona: student, operation: resumeMyAccessGrant, path_params: { grant_id: grant_resumable_a }, expect: 200 }
+      - { persona: company_member, operation: getCompanyStudentProfile, path_params: { org_id: company_a, user_id: student },
+          expect: 200 }
+      - { persona: student, operation: resumeMyAccessGrant, path_params: { grant_id: grant_resumable_a }, expect: 409,
+          code: students.invalid_state }
+      - { persona: club_member, operation: resumeMyAccessGrant, path_params: { grant_id: grant_expired_a }, expect: 409,
+          code: students.resume_window_expired }
+      - { persona: student, operation: listMyAccessGrants, expect: 200 }

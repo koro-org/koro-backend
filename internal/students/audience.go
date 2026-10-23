@@ -360,6 +360,8 @@ func (m Module) Jobs() []queue.Job {
 			Handle: m.svc.audienceRefresh},
 		{Name: GraduationCheckJobName, Cron: "15 2 * * *", Queue: queue.Default, Unique: 23 * time.Hour,
 			Handle: m.svc.graduationCheck},
+		{Name: ExpireSuspendedGrantsJobName, Cron: "30 2 * * *", Queue: queue.Default, Unique: 23 * time.Hour,
+			Handle: m.svc.expireSuspendedGrants},
 	}
 }
 

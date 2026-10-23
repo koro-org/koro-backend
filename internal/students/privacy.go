@@ -107,9 +107,11 @@ func (p privacyProvider) Export(ctx context.Context, userID uuid.UUID) (privacy.
 
 // exportGrant is a level 3 grant in the export: which company had access,
 // from which request, its state, when a lapsed verification suspended it
-// (BE-077) and until when. A company's revocation reason is the company's
-// note and is not shown to the student (BE-046); the student's own reason
-// is theirs.
+// (BE-077), when the student resumed it (BE-088) and until when, who ended
+// it and why. The revocation reason is exported whoever wrote it (user
+// decision Q-08, T-338, KVKK md. 11 right of access): the student's own,
+// the company's note and the system's (suspension_expired). It is in the
+// export only: no answer of the app shows a reason to the other side.
 func exportGrant(g AccessGrant) map[string]any {
 	item := map[string]any{
 		"record": "access_grant", "grant_id": g.ID.String(), "company_org_id": g.CompanyOrgID.String(),
@@ -119,15 +121,16 @@ func exportGrant(g AccessGrant) map[string]any {
 	if g.SuspendedAt != nil {
 		item["suspended_at"] = g.SuspendedAt.UTC().Format(time.RFC3339)
 	}
+	if g.ResumedAt != nil {
+		item["resumed_at"] = g.ResumedAt.UTC().Format(time.RFC3339)
+	}
 	if g.RevokedAt != nil {
 		item["revoked_at"] = g.RevokedAt.UTC().Format(time.RFC3339)
 	}
 	if g.RevokedByKind != nil {
 		item["revoked_by"] = string(*g.RevokedByKind)
-		if *g.RevokedByKind == RevokedByStudent {
-			putStr(item, "revoke_reason", g.RevokeReason)
-		}
 	}
+	putStr(item, "revoke_reason", g.RevokeReason)
 	return item
 }
 

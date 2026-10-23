@@ -9,7 +9,7 @@ const AttrDSRID = "dsr_id"
 
 // studentsPolicy is the policy of the students module (03 §5.4). Only tickets of
 // the students module edit this file (BE-001 R5). Written by BE-023, extended by
-// BE-025, BE-046 and BE-077.
+// BE-025, BE-046, BE-077 and BE-088.
 //
 //	students.profile.read_own          O for verified students (stu, min, clm, cla, stf);
 //	students.profile.update_own        usr k-uv: 403 (the service answers
@@ -42,6 +42,12 @@ const AttrDSRID = "dsr_id"
 //	                                    company of the path) is cmm S and cma S on the org
 //	                                    management surface (active members 403 without the
 //	                                    role, platform roles 403, everyone else 404).
+//	students.access_grant.resume        O for stu and min only (BE-088, T-332: resuming a suspended
+//	                                    grant is a new consent act and needs an active student
+//	                                    verification; usr k-uv: 403, the service answers
+//	                                    students.verification_required) on access_grant with
+//	                                    OwnerUserID = the actor, no OrgID. The suspension window
+//	                                    and the grant's state are service rules (409).
 //	students.access_grant.list_company  cmm S, cma S on the org management surface.
 //	students.profile.read_company       cmm S·G, cma S·G: the org management surface, and Y5
 //	students.cv.read_company            (absolute.go) hides the student (404) from company
@@ -82,7 +88,7 @@ func studentsPolicy() Policy {
 				return r.Type == TypeStudentProfile && a.Owns(r)
 			case cv[act]:
 				return r.Type == TypeStudentCV && a.Owns(r)
-			case act == StudentsAccessGrantListOwn:
+			case act == StudentsAccessGrantListOwn, act == StudentsAccessGrantResume:
 				return r.Type == TypeAccessGrant && r.OrgID == nil && a.Owns(r)
 			case act == StudentsAccessGrantRevoke:
 				if r.Type != TypeAccessGrant {
@@ -110,7 +116,7 @@ func studentsPolicy() Policy {
 		},
 		Grants: func(a Actor, act Action, r Resource) []Grant {
 			switch {
-			case own[act], cv[act]:
+			case own[act], cv[act], act == StudentsAccessGrantResume:
 				return []Grant{{Role: RoleStudent}, {Role: RoleStudentMinor}}
 			case act == StudentsAccessGrantListOwn:
 				return ownGrantsGrants()

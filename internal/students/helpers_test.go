@@ -582,7 +582,9 @@ type env struct {
 	clubPlain, clubSens  uuid.UUID
 }
 
-func newEnv(t *testing.T) *env {
+// newEnv builds e; opts adjust the module's dependencies before New
+// (BE-088: the suspension window).
+func newEnv(t *testing.T, opts ...func(*students.Deps)) *env {
 	t.Helper()
 	clk := clock.NewFake(t0)
 	e := &env{
@@ -613,7 +615,7 @@ func newEnv(t *testing.T) *env {
 	}
 	e.orgNames.name(e.clubPlain, "Satranç Kulübü")
 	e.orgNames.name(e.clubSens, "İnanç Topluluğu")
-	mod, err := students.New(students.Deps{
+	deps := students.Deps{
 		Store: e.store, Tx: e.tx, Outbox: e.out, Audit: e.audit, Clock: clk, Log: obs.Discard(),
 		Idempotency: idempotency.New(idempotency.Deps{Tx: e.tx, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()}),
 		Consent:     e.consent, Consents: e.consent, Catalog: e.catalog, Orgs: e.orgs, Users: e.users,
@@ -628,7 +630,11 @@ func newEnv(t *testing.T) *env {
 		Contacts: contactsFake{users: e.users}, OrgNames: e.orgNames,
 		SkillNames: skillNamesFake{names: map[uuid.UUID]string{e.skill1: "Go", e.skill2: "SQL"}, calls: e.skillN},
 		Sender:     e.notices,
-	})
+	}
+	for _, o := range opts {
+		o(&deps)
+	}
+	mod, err := students.New(deps)
 	if err != nil {
 		t.Fatal(err)
 	}

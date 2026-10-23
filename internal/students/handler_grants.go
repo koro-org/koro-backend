@@ -18,7 +18,8 @@ import (
 const sortGrants = "granted_desc"
 
 // registerGrants adds the BE-046 operations (04 §2.4): the student's level
-// 3 grants and the company's views of its granted students.
+// 3 grants and the company's views of its granted students; BE-088 adds
+// the student's resume of a suspended grant.
 func registerGrants(api huma.API, h handler) {
 	tags := []string{"students"}
 	reg := func(o huma.Operation, m op.Meta) huma.Operation {
@@ -37,8 +38,8 @@ func registerGrants(api huma.API, h handler) {
 		Summary: "List the companies that see my profile",
 		Description: "The companies you gave level 3 access to your full profile and current CV (you accepted their " +
 			"contact request), newest first. A grant is suspended while your student verification has lapsed: the " +
-			"company sees nothing, and the grant never reopens by itself. Any account lists its own grants, without " +
-			"a student verification.",
+			"company sees nothing, and the grant never reopens by itself; once verified again you may resume it until " +
+			"resumable_until, after which it ends. Any account lists its own grants, without a student verification.",
 	}, self(authz.StudentsAccessGrantListOwn, "")), h.listMyGrants)
 
 	huma.Register(api, reg(huma.Operation{
@@ -48,6 +49,16 @@ func registerGrants(api huma.API, h handler) {
 			"is needed. The reason is optional and never shown to the company. Revoking a revoked grant changes " +
 			"nothing; another user's grant is 404.",
 	}, self(authz.StudentsAccessGrantRevoke, op.IdempotencyOptional)), h.revokeMyGrant)
+
+	huma.Register(api, reg(huma.Operation{
+		OperationID: "resumeMyAccessGrant", Method: http.MethodPost, Path: "/me/access-grants/{grant_id}/resume",
+		Summary: "Resume a suspended company access",
+		Description: "Gives the named company level 3 access again to a grant suspended when your student " +
+			"verification lapsed: an explicit consent, possible only with an active student verification (403 " +
+			"students.verification_required) and only until resumable_until (409 students.resume_window_expired; " +
+			"the company then needs a new contact request). A grant that is not suspended is 409 " +
+			"students.invalid_state; another user's grant is 404. The company is not notified.",
+	}, self(authz.StudentsAccessGrantResume, op.IdempotencyOptional)), h.resumeMyGrant)
 
 	huma.Register(api, reg(huma.Operation{
 		OperationID: "listCompanyGrantedStudents", Method: http.MethodGet, Path: "/orgs/{org_id}/students",
@@ -165,6 +176,31 @@ func (h handler) revokeMyGrant(ctx context.Context, in *revokeMyGrantInput) (*st
 		id = uuid.Nil() // the role check decides first, then the unknown grant is 404
 	}
 	return nil, h.svc.RevokeMyAccessGrant(ctx, a, id, in.Body.reason())
+}
+
+type resumeMyGrantInput struct {
+	idempotency.OptionalHeader
+	GrantID string `path:"grant_id" doc:"Grant ID (another user's or a malformed ID is 404)"`
+}
+
+type resumeMyGrantOutput struct {
+	Body StudentAccessGrantDTO
+}
+
+func (h handler) resumeMyGrant(ctx context.Context, in *resumeMyGrantInput) (*resumeMyGrantOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	id, err := uuid.Parse(in.GrantID)
+	if err != nil {
+		id = uuid.Nil() // the role check decides first, then the unknown grant is 404
+	}
+	v, err := h.svc.ResumeMyAccessGrant(ctx, a, id)
+	if err != nil {
+		return nil, err
+	}
+	return &resumeMyGrantOutput{Body: toAccessGrantDTO(v)}, nil
 }
 
 // ---- the company's views

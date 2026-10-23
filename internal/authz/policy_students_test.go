@@ -96,7 +96,7 @@ func TestStudentsPolicy_EdgeCases(t *testing.T) {
 	wantErr(t, authz.Can(ctx, st, authz.StudentsProfileReadOwn, missing), authz.ErrForbidden, true)
 
 	for _, act := range []authz.Action{authz.StudentsCvManage, authz.StudentsCvReadOwn, authz.StudentsAccessGrantListOwn,
-		authz.StudentsAccessGrantRevoke, authz.StudentsAccessGrantListCompany, authz.StudentsProfileReadCompany,
+		authz.StudentsAccessGrantRevoke, authz.StudentsAccessGrantResume, authz.StudentsAccessGrantListCompany, authz.StudentsProfileReadCompany,
 		authz.StudentsCvReadCompany, authz.StudentsProfileReadMemberCard, authz.StudentsProfileReadAdmin} {
 		if err := authz.Can(ctx, st, act, studentProfile(st.UserID, false)); err == nil {
 			t.Fatalf("%s is granted on the student's own profile resource", act)
@@ -370,4 +370,33 @@ func TestStudentsPolicy_AccessGrantEdges(t *testing.T) {
 	wantErr(t, authz.Can(ctx, st, authz.StudentsAccessGrantListOwn, studentProfile(st.UserID, false)), authz.ErrNotFound, false)
 	wantErr(t, authz.Can(ctx, recruiter, authz.StudentsProfileReadCompany,
 		companyStudent(authz.TypeStudentCV, "company_a", granted, "active")), authz.ErrNotFound, false)
+}
+
+// TestStudentsPolicy_AccessGrantResume pins 03 §5.4 for BE-088 (T-332):
+// students.access_grant.resume is the O cell of verified students only (stu,
+// min, clm, cla, stf); an account without an active verification (usr: a
+// lapsed student, the companies, staff) is refused (403, the service answers
+// students.verification_required); anonymous 403; another user's grant 404
+// for every account; a company path (OrgID) or another resource type is
+// never this action's (404).
+func TestStudentsPolicy_AccessGrantResume(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	for _, p := range authztest.Personas() {
+		want := error(nil)
+		if !p.Actor.IsUser() || !p.Actor.IsVerifiedStudent() {
+			want = authz.ErrForbidden
+		}
+		wantErr(t, authz.Can(ctx, p.Actor, authz.StudentsAccessGrantResume, ownGrants(p.Actor.UserID, uuid.NewV7())), want, false)
+		if p.Actor.IsUser() {
+			other := ownGrants(authztest.ID("student_b"), uuid.NewV7())
+			wantErr(t, authz.Can(ctx, p.Actor, authz.StudentsAccessGrantResume, other), authz.ErrNotFound, false)
+		}
+	}
+	st := persona(t, "student")
+	lapsed := authz.Actor{Kind: authz.KindUser, UserID: uuid.NewV7(), StudentStatus: authz.StudentLapsed}
+	wantErr(t, authz.Can(ctx, lapsed, authz.StudentsAccessGrantResume, ownGrants(lapsed.UserID, uuid.NewV7())), authz.ErrForbidden, false)
+	company := companyStudent(authz.TypeAccessGrant, "company_a", st.UserID, "")
+	wantErr(t, authz.Can(ctx, st, authz.StudentsAccessGrantResume, company), authz.ErrNotFound, false)
+	wantErr(t, authz.Can(ctx, st, authz.StudentsAccessGrantResume, studentProfile(st.UserID, false)), authz.ErrNotFound, false)
 }

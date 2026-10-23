@@ -127,16 +127,24 @@ func (w *studentsWiring) matrixConsentText(ctx context.Context, f fixture, id uu
 // (BE-046; the request ID is authztest.ID(<name>_request)). suspended: true
 // is a grant whose student's verification lapsed (BE-077): the owner is an
 // account without a verification (its profile at uni_a, from when it was
-// verified), the grant given an hour ago and suspended now.
+// verified), the grant given an hour ago and suspended now. reverified:
+// true (BE-088) is a suspended grant of a verified student (verified again
+// after the lapse): given two hours and suspended one hour before the
+// matrix clock, so it may be resumed; expired: true moves both beyond the
+// default suspension window (409 students.resume_window_expired).
 func (w *studentsWiring) matrixGrant(ctx context.Context, fx *matrixFixtures, f fixture, id uuid.UUID) error {
 	studentName, _ := f.Fields["student"].(string)
 	suspended, _ := f.Fields["suspended"].(bool)
+	reverified, _ := f.Fields["reverified"].(bool)
+	expired, _ := f.Fields["expired"].(bool)
 	p, ok := authztest.Get(studentName)
 	switch {
 	case !ok || !p.Actor.IsUser() || p.Actor.IsMinor:
 		return fmt.Errorf("fixture %s: the student must be an adult account", f.Name)
-	case suspended == p.Actor.IsVerifiedStudent():
-		return fmt.Errorf("fixture %s: an active grant needs a verified student, a suspended one a lapsed account", f.Name)
+	case (reverified || expired) && !suspended, expired && !reverified:
+		return fmt.Errorf("fixture %s: reverified and expired describe a suspended grant of a verified student", f.Name)
+	case p.Actor.IsVerifiedStudent() != (!suspended || reverified):
+		return fmt.Errorf("fixture %s: an active or reverified grant needs a verified student, a suspended one a lapsed account", f.Name)
 	}
 	company, err := fx.Ref(f, "company")
 	if err != nil {
@@ -151,9 +159,16 @@ func (w *studentsWiring) matrixGrant(ctx context.Context, fx *matrixFixtures, f 
 		return fmt.Errorf("fixture %s: profile: %w", f.Name, err)
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	granted := now
+	granted, suspendAt := now, now
 	if suspended {
 		granted = now.Add(-time.Hour)
+	}
+	if reverified { // the service clock decides the window: times from it
+		suspendAt = w.late.infra.clock.Now().UTC().Truncate(time.Microsecond).Add(-time.Hour)
+		if expired {
+			suspendAt = suspendAt.Add(-students.DefaultSuspensionWindow)
+		}
+		granted = suspendAt.Add(-time.Hour)
 	}
 	if _, ok, err := w.store.InsertGrant(ctx, students.AccessGrant{ID: id, StudentUserID: student, CompanyOrgID: company,
 		Source: students.SourceContactRequest, SourceID: authztest.ID(f.Name + "_request"),
@@ -161,7 +176,7 @@ func (w *studentsWiring) matrixGrant(ctx context.Context, fx *matrixFixtures, f 
 		return fmt.Errorf("fixture %s: grant: ok=%v %w", f.Name, ok, err)
 	}
 	if suspended {
-		if got, err := w.store.SuspendGrants(ctx, student, now); err != nil || len(got) != 1 {
+		if got, err := w.store.SuspendGrants(ctx, student, suspendAt); err != nil || len(got) != 1 {
 			return fmt.Errorf("fixture %s: suspend: %d rows, %w", f.Name, len(got), err)
 		}
 	}

@@ -22,8 +22,10 @@ type StudentAccessGrantDTO struct {
 	Company     StudentGrantCompanyDTO `json:"company"`
 	Source      string                 `json:"source" enum:"contact_request,application" doc:"What you accepted: a contact request (an application in phase 3)"`
 	GrantedAt   time.Time              `json:"granted_at"`
-	Status      string                 `json:"status" enum:"active,suspended" doc:"active: the company sees your profile; suspended: your student verification lapsed, the company sees nothing and the grant never reopens by itself (revoke it, or accept a new contact request of the company after you verify again)"`
+	Status      string                 `json:"status" enum:"active,suspended" doc:"active: the company sees your profile; suspended: your student verification lapsed, the company sees nothing and the grant never reopens by itself (revoke it, resume it before resumable_until once verified again, or accept a new contact request of the company)"`
 	SuspendedAt *time.Time             `json:"suspended_at,omitempty" doc:"When the lapse of your verification suspended the grant (suspended grants only)"`
+	// ResumableUntil is the end of the suspension window (BE-088).
+	ResumableUntil *time.Time `json:"resumable_until,omitempty" doc:"Until when you may resume the suspended grant once verified again; after it the grant ends (suspended grants only)"`
 }
 
 // StudentAccessGrantList is a page of listMyAccessGrants.
@@ -49,6 +51,10 @@ func toAccessGrantDTO(v GrantView) StudentAccessGrantDTO {
 	if at := v.Grant.SuspendedAt; at != nil {
 		u := at.UTC()
 		d.SuspendedAt = &u
+	}
+	if at := v.ResumableUntil; at != nil {
+		u := at.UTC()
+		d.ResumableUntil = &u
 	}
 	return d
 }

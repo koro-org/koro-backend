@@ -33,8 +33,11 @@ const (
 // access to one student. It is revoked, never edited away; a revoked grant
 // is hard deleted 6 months after its revocation (access_grant_revoked).
 // A grant is suspended when the student's verification lapses (BE-077):
-// the company has no access, and it never becomes active again (the
-// student revokes it or accepts a new request of the company).
+// the company has no access, and it never becomes active again by itself:
+// the student revokes it, resumes it once verified again within the
+// suspension window (BE-088: an explicit consent act, ResumedAt) or accepts
+// a new request of the company; after the window the system revokes it
+// (ReasonSuspensionExpired).
 // org_kind is the constant 'company' of the composite FK and is not mapped.
 type AccessGrant struct {
 	ID            uuid.UUID   `gorm:"type:uuid;column:id;primaryKey"`
@@ -44,6 +47,7 @@ type AccessGrant struct {
 	SourceID      uuid.UUID   `gorm:"type:uuid;column:source_id"`
 	GrantedAt     time.Time   `gorm:"column:granted_at"`
 	SuspendedAt   *time.Time  `gorm:"column:suspended_at"`
+	ResumedAt     *time.Time  `gorm:"column:resumed_at"`
 	RevokedAt     *time.Time  `gorm:"column:revoked_at"`
 	RevokedByKind *RevokedBy  `gorm:"column:revoked_by_kind"`
 	RevokeReason  *string     `gorm:"column:revoke_reason"`
@@ -65,6 +69,19 @@ const (
 	GrantSuspended GrantStatus = "suspended"
 	GrantRevoked   GrantStatus = "revoked"
 )
+
+// ReasonSuspensionExpired is the revoke_reason of a suspended grant the
+// system revoked when its suspension window ran out (BE-088, T-331); with
+// revoked_by_kind 'system' it marks the revocations the student is told of.
+const ReasonSuspensionExpired = "suspension_expired"
+
+// ExpiryKey is one expiry the student is told of: the grants of a student
+// the system revoked at one moment (students.expire_suspended_grants), and
+// the keyset position of their walk (student_user_id, revoked_at).
+type ExpiryKey struct {
+	StudentUserID uuid.UUID
+	RevokedAt     time.Time
+}
 
 // Open reports whether the grant has not ended (active or suspended).
 func (g AccessGrant) Open() bool { return g.RevokedAt == nil }

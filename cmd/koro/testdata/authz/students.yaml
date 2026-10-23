@@ -1,4 +1,4 @@
-# Authz matrix of the students module (03 §5.4, 04 §2.4; BE-023, BE-025, BE-046, BE-077). 22 operations × 18 personas.
+# Authz matrix of the students module (03 §5.4, 04 §2.4; BE-023, BE-025, BE-046, BE-077, BE-088). 23 operations × 18 personas.
 # Every operation is an O cell on the caller's own profile for verified students (stu, min, clm,
 # cla, stf); an account without an active student verification (usr k-uv, uni, the companies,
 # platform staff) is 403 students.verification_required, anonymous 401 (03 §5.0, §2.3). The
@@ -22,6 +22,11 @@
 # O: every signed-in account on its own grants; another user's grant 404). grant_lapsed_a is the
 # suspended grant of user_unverified (a student whose verification lapsed): the account lists and
 # revokes it; for company_a the student is unknown (404) and the company cannot end it (404).
+# BE-088 (T-332): resumeMyAccessGrant is the O cell of verified students only (usr k-uv: 403
+# students.verification_required; another user's grant 404). grant_resumable_a is the persona student's
+# grant of company_a, suspended an hour ago and resumable (verified again, inside the window);
+# grant_expired_a is club_member's, suspended more than 90 days ago (409 students.resume_window_expired);
+# an active grant is 409 students.invalid_state.
 version: 1
 groups:
   # accounts without an active student verification (03 §1.1 usr; companies and staff too).
@@ -42,6 +47,8 @@ groups:
   # signed-in users who are neither members of company_b nor platform staff (company_b's surface: 404).
   not_company_b: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin, event_staff,
                   university_rep, company_member, company_admin]
+  # verified students other than club_member (the owner of grant_expired_a).
+  not_club_member_students: [student, student_minor, club_admin, other_club_admin, event_staff]
   # signed-in users other than user_unverified (the owner of grant_lapsed_a).
   not_user_unverified: [student, student_minor, club_member, club_admin, other_club_admin, event_staff, university_rep,
                         company_member, company_admin, other_company_member, moderator, support, dpo, platform_admin,
@@ -247,6 +254,32 @@ operations:
         path_params: { grant_id: grant_lapsed_a }
         note: the suspended grant of user_unverified (verification lapsed); its owner revokes it without a verification
         expect: { anonymous: 401, user_unverified: 204, "@not_user_unverified": 404 }
+
+  resumeMyAccessGrant:
+    method: POST
+    path: /api/v1/me/access-grants/{grant_id}/resume
+    action: students.access_grant.resume
+    path_params: { grant_id: grant_resumable_a }
+    note: >-
+      the persona student's suspended grant of company_a, resumable (verified again, inside the window; BE-088);
+      verified students only (usr k-uv 403 students.verification_required), another user's grant 404
+    expect: { anonymous: 401, student: 200, "@other_students": 404, "@non_students": 403 }
+    variants:
+      - name: lapsed_students_grant
+        path_params: { grant_id: grant_lapsed_a }
+        note: user_unverified's suspended grant; its owner, still unverified, cannot resume it (k-uv 403)
+        expect: { anonymous: 401, "@verified_students": 404, "@non_students": 403 }
+      - name: active_grant
+        path_params: { grant_id: grant_student_b }
+        note: the student's active grant of company_b is not suspended — 409 students.invalid_state
+        expect: { anonymous: 401, student: 409, "@other_students": 404, "@non_students": 403 }
+      - name: window_expired
+        path_params: { grant_id: grant_expired_a }
+        note: club_member's grant was suspended more than 90 days ago — 409 students.resume_window_expired
+        expect: { anonymous: 401, club_member: 409, "@not_club_member_students": 404, "@non_students": 403 }
+      - name: missing
+        path_params: { grant_id: "literal:00000000-0000-7000-8000-0000000000a3" }
+        expect: { anonymous: 401, "@verified_students": 404, "@non_students": 403 }
 
   listCompanyGrantedStudents:
     method: GET

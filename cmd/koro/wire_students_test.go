@@ -31,7 +31,8 @@ func (w *studentsWiring) useMemStore() {
 // TestWire_StudentsProvidesProviderHooksAndTasks pins what students binds
 // in build and registers in tasks (01 §6.2, §7): its service, its KVKK
 // provider, its retention sweeper (BE-046), the two late-bound reads of orgs, eight subscriptions (file.rejected
-// since BE-025, next to files' own; the two grant suspensions of BE-077) and two nightly jobs.
+// since BE-025, next to files' own; the two grant suspensions of BE-077) and three nightly jobs (the expiry of
+// suspended grants since BE-088).
 func TestWire_StudentsProvidesProviderHooksAndTasks(t *testing.T) {
 	t.Parallel()
 	c := newTestContainer(t)
@@ -58,7 +59,8 @@ func TestWire_StudentsProvidesProviderHooksAndTasks(t *testing.T) {
 			jobs = append(jobs, j.Name+" "+j.Cron+" "+j.Queue)
 		}
 	}
-	if want := []string{"students.audience_refresh 0 2 * * * low", "students.graduation_check 15 2 * * * default"}; !slices.Equal(jobs, want) {
+	if want := []string{"students.audience_refresh 0 2 * * * low", "students.graduation_check 15 2 * * * default",
+		"students.expire_suspended_grants 30 2 * * * default"}; !slices.Equal(jobs, want) {
 		t.Fatalf("students jobs %q, want %q", jobs, want)
 	}
 	for _, sub := range [][2]string{
@@ -263,6 +265,78 @@ func TestWire_StudentsLapseSuspendsGrantsAndNotifies(t *testing.T) {
 	}
 	notes, err := c.notify.store.ListInApp(ctx, student, false, nil, 10)
 	if err != nil || len(notes) != 1 || notes[0].Kind != "students.access_grants_suspended" || notes[0].LinkPath != "/me/access-grants" ||
+		notes[0].Title == "" || notes[0].SourceOrgID != nil {
+		t.Fatalf("in-app notices = %+v, %v", notes, err)
+	}
+}
+
+// TestWire_StudentsExpiryJobUsesConfiguredWindow (BE-088) through the built
+// container: the window comes from config (STUDENTS_GRANT_SUSPENSION_WINDOW,
+// here 48 hours); the scheduled students.expire_suspended_grants keeps a
+// grant suspended inside the window and revokes it after (by the system,
+// suspension_expired), and notify (read at call time) stores the student's
+// in-app notice of the embedded template without a company.
+func TestWire_StudentsExpiryJobUsesConfiguredWindow(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	c.infra.cfg.Students.GrantSuspensionWindow = 48 * time.Hour
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	clk := c.infra.clock.(*clock.Fake)
+	now := clk.Now().UTC().Truncate(time.Microsecond)
+	student, company, uni := uuid.NewV7(), uuid.NewV7(), authztest.UniversityID("uni_a")
+	adult, _ := civil.New(2000, time.March, 14)
+	email := "expiry-" + student.String()[:8] + "@example.test"
+	if err := c.identity.store.InsertUser(ctx, identity.User{ID: student, Status: identity.StatusActive, Email: email,
+		EmailNormalized: email, EmailVerifiedAt: &now, FirstName: "Eren", LastName: "Expiry", Persona: identity.PersonaStudent,
+		Locale: identity.LocaleTR, BirthDate: &adult}); err != nil {
+		t.Fatal(err)
+	}
+	exp, addr := now.AddDate(1, 0, 0), "expiry-"+student.String()[:8]+"@matrix.edu.tr"
+	v := identity.EduRecord{ID: uuid.NewV7(), UserID: student, Method: identity.EduMethodEmail, EduEmail: addr,
+		EduEmailNormalized: addr, EmailDomain: "matrix.edu.tr", UniversityID: &uni, Status: identity.EduVerified,
+		VerifiedAt: &now, ExpiresAt: &exp}
+	if err := c.identity.store.InsertEduVerification(ctx, v); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := c.students.store.InsertProfile(ctx, students.Profile{UserID: student, UniversityID: uni,
+		DegreeLevel: students.DegreeBachelor, Status: students.ProfileActive}); err != nil || !ok {
+		t.Fatalf("InsertProfile: ok=%v err=%v", ok, err)
+	}
+	if err := c.students.svc.Grant(ctx, student, company, students.SourceContactRequest, uuid.NewV7()); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := c.students.store.SuspendGrants(ctx, student, now); err != nil || len(got) != 1 {
+		t.Fatalf("SuspendGrants = %+v, %v", got, err)
+	}
+	run := func() {
+		t.Helper()
+		for _, j := range c.infra.jobs.Jobs() {
+			if j.Name == students.ExpireSuspendedGrantsJobName {
+				if err := j.Handle(ctx); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+		}
+		t.Fatal("students.expire_suspended_grants is not scheduled")
+	}
+	clk.Advance(47 * time.Hour)
+	run()
+	if gs, _ := c.students.store.StudentGrants(ctx, student, nil, 10); len(gs) != 1 || gs[0].Status() != students.GrantSuspended {
+		t.Fatalf("inside the 48-hour window = %+v", gs)
+	}
+	clk.Advance(2 * time.Hour)
+	run()
+	all, err := c.students.store.AllGrants(ctx, student)
+	if err != nil || len(all) != 1 || all[0].Status() != students.GrantRevoked || *all[0].RevokedByKind != students.RevokedBySystem ||
+		*all[0].RevokeReason != students.ReasonSuspensionExpired {
+		t.Fatalf("after the window = %+v, %v", all, err)
+	}
+	notes, err := c.notify.store.ListInApp(ctx, student, false, nil, 10)
+	if err != nil || len(notes) != 1 || notes[0].Kind != "students.access_grants_expired" || notes[0].LinkPath != "/me/access-grants" ||
 		notes[0].Title == "" || notes[0].SourceOrgID != nil {
 		t.Fatalf("in-app notices = %+v, %v", notes, err)
 	}

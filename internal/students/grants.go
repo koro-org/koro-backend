@@ -47,10 +47,12 @@ const (
 )
 
 // GrantView is one of the student's grants with the company's name
-// (listMyAccessGrants).
+// (listMyAccessGrants, resumeMyAccessGrant). ResumableUntil is the end of
+// a suspended grant's window (BE-088; nil otherwise).
 type GrantView struct {
-	Grant       AccessGrant
-	CompanyName string
+	Grant          AccessGrant
+	CompanyName    string
+	ResumableUntil *time.Time
 }
 
 // GrantPage is a page of the student's open grants (active and
@@ -282,7 +284,8 @@ func (s *service) Grant(ctx context.Context, studentID, companyOrgID uuid.UUID, 
 // Revoke implements AccessGrants: the grant of source srcID, when it is
 // the pair's and still open (active or suspended), is revoked by the
 // system with every other open grant of the pair (audited). The reason is
-// stored, never shown to the student or the company.
+// stored and shown in no answer of the app (only the student's KVKK
+// export carries it, Q-08).
 func (s *service) Revoke(ctx context.Context, studentID, companyOrgID uuid.UUID, src GrantSource, srcID uuid.UUID, reason string) error {
 	why, err := cleanReason(reason)
 	if err != nil {
@@ -374,7 +377,7 @@ func (s *service) ListMyAccessGrants(ctx context.Context, a authz.Actor, after *
 	}
 	out.Items = make([]GrantView, len(rows))
 	for i, g := range rows {
-		out.Items[i] = GrantView{Grant: g, CompanyName: names[g.CompanyOrgID]}
+		out.Items[i] = GrantView{Grant: g, CompanyName: names[g.CompanyOrgID], ResumableUntil: s.resumableUntil(g)}
 	}
 	return out, nil
 }

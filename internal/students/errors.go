@@ -35,6 +35,15 @@ var (
 	// code is registered once, by orgs (06 H-52, T-207).
 	ErrVerificationRequired = orgs.ErrVerificationRequired
 
+	// ErrInvalidState: resuming a level 3 grant that is not suspended (an
+	// active or a revoked one; BE-088).
+	ErrInvalidState = problem.New(problem.Conflict, "students.invalid_state", "The grant's state does not allow this change")
+	// ErrResumeExpired: resuming a suspended level 3 grant after its
+	// suspension window (BE-088, T-331/T-332): only a new contact request of
+	// the company, accepted, gives access again.
+	ErrResumeExpired = problem.New(problem.Conflict, "students.resume_window_expired",
+		"The grant can no longer be resumed")
+
 	// ErrNotFound: the record does not exist or is not the caller's.
 	ErrNotFound = problem.ErrNotFound
 

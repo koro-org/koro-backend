@@ -1,4 +1,4 @@
-version: 1
+version: 2
 category: transactional
 preference: security
 channels: [in_app]

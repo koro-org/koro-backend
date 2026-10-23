@@ -79,8 +79,9 @@ func TestPrivacyProvider_ExportAndErase(t *testing.T) {
 
 // TestPrivacyProvider_AccessGrants (01 §3.3, 02 §9.7; BE-046): the export
 // lists the student's level 3 grants, revoked ones included, with the
-// student's own revocation reason but never a company's; erasure deletes
-// every grant (no company keeps access) and another student's stay.
+// revocation reason of whoever wrote it (the company's too since BE-088,
+// Q-08); erasure deletes every grant (no company keeps access) and another
+// student's stay.
 func TestPrivacyProvider_AccessGrants(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -125,8 +126,8 @@ func TestPrivacyProvider_AccessGrants(t *testing.T) {
 		first["revoke_reason"] != "Kendi notum" || first["revoked_at"] == nil {
 		t.Fatalf("the student's revoked grant = %v", first)
 	}
-	if grants[1]["revoked_by"] != "company" || grants[1]["revoke_reason"] != nil {
-		t.Fatalf("the company's note reached the student: %v", grants[1])
+	if grants[1]["revoked_by"] != "company" || grants[1]["revoke_reason"] != "Şirketin iç notu" {
+		t.Fatalf("the company's reason is not in the export: %v", grants[1])
 	}
 	if grants[2]["revoked_at"] != nil {
 		t.Fatalf("the active grant = %v", grants[2])

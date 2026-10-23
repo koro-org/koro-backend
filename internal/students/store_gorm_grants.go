@@ -11,8 +11,8 @@ import (
 	"koro/internal/platform/db"
 )
 
-const grantCols = `id, student_user_id, company_org_id, source, source_id, granted_at, suspended_at, revoked_at,
-	revoked_by_kind, revoke_reason, created_at, updated_at`
+const grantCols = `id, student_user_id, company_org_id, source, source_id, granted_at, suspended_at, resumed_at,
+	revoked_at, revoked_by_kind, revoke_reason, created_at, updated_at`
 
 func takeGrant(op string, q *gorm.DB) (AccessGrant, error) {
 	var g AccessGrant
@@ -125,11 +125,87 @@ func (s gormStore) SuspendGrants(ctx context.Context, studentID uuid.UUID, at ti
 	var rows []AccessGrant
 	err := db.Conn(ctx, s.orm).Raw(`UPDATE profile_access_grants SET suspended_at = @at
 		WHERE student_user_id = @student AND revoked_at IS NULL AND suspended_at IS NULL AND granted_at <= @at
+		  AND (resumed_at IS NULL OR resumed_at <= @at)
 		RETURNING `+grantCols, map[string]any{"at": at, "student": studentID}).Scan(&rows).Error
 	if err != nil {
 		return nil, wrap("suspend grants", err)
 	}
 	return rows, nil
+}
+
+// ResumeGrant implements Store (BE-088).
+//
+// cross-org: the student's own grant, addressed by its student (IDOR).
+func (s gormStore) ResumeGrant(ctx context.Context, studentID, id uuid.UUID, at time.Time) (AccessGrant, error) {
+	var rows []AccessGrant
+	err := db.Conn(ctx, s.orm).Raw(`UPDATE profile_access_grants SET suspended_at = NULL, resumed_at = @at
+		WHERE id = @id AND student_user_id = @student AND revoked_at IS NULL AND suspended_at IS NOT NULL
+		RETURNING `+grantCols, map[string]any{"at": at, "id": id, "student": studentID}).Scan(&rows).Error
+	if err != nil {
+		return AccessGrant{}, wrap("resume grant", err)
+	}
+	if len(rows) == 0 {
+		return AccessGrant{}, ErrNotFound
+	}
+	return rows[0], nil
+}
+
+// SuspendedStudentsBefore implements Store (profile_access_grants_suspended_idx).
+//
+// cross-org: the expiry spans every company's grants.
+func (s gormStore) SuspendedStudentsBefore(ctx context.Context, cutoff time.Time, after uuid.UUID, limit int) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	err := db.Conn(ctx, s.orm).Raw(`SELECT DISTINCT student_user_id FROM profile_access_grants
+		WHERE revoked_at IS NULL AND suspended_at IS NOT NULL AND suspended_at < @cutoff AND student_user_id > @after
+		ORDER BY student_user_id LIMIT @limit`, map[string]any{"cutoff": cutoff, "after": after, "limit": limit}).
+		Scan(&ids).Error
+	if err != nil {
+		return nil, wrap("suspended students", err)
+	}
+	return ids, nil
+}
+
+// ExpireSuspendedGrants implements Store.
+//
+// cross-org: the student's suspension window ran out, whatever the company.
+func (s gormStore) ExpireSuspendedGrants(ctx context.Context, studentID uuid.UUID, cutoff, at time.Time) ([]AccessGrant, error) {
+	var rows []AccessGrant
+	err := db.Conn(ctx, s.orm).Raw(`UPDATE profile_access_grants
+		SET revoked_at = @at, revoked_by_kind = 'system', revoke_reason = @reason
+		WHERE student_user_id = @student AND revoked_at IS NULL AND suspended_at IS NOT NULL AND suspended_at < @cutoff
+		RETURNING `+grantCols, map[string]any{
+		"at": at, "reason": ReasonSuspensionExpired, "student": studentID, "cutoff": cutoff,
+	}).Scan(&rows).Error
+	if err != nil {
+		return nil, wrap("expire suspended grants", err)
+	}
+	return rows, nil
+}
+
+// ExpiredRevocations implements Store.
+//
+// cross-org: the expiry notices span every company's grants.
+func (s gormStore) ExpiredRevocations(ctx context.Context, since time.Time, after *ExpiryKey, limit int) ([]ExpiryKey, error) {
+	args := map[string]any{"since": since, "reason": ReasonSuspensionExpired, "limit": limit}
+	where := `revoked_by_kind = 'system' AND revoke_reason = @reason AND revoked_at >= @since`
+	if after != nil {
+		args["after_student"], args["after_at"] = after.StudentUserID, after.RevokedAt
+		where += ` AND (student_user_id > @after_student OR (student_user_id = @after_student AND revoked_at > @after_at))`
+	}
+	var rows []struct {
+		StudentUserID uuid.UUID `gorm:"column:student_user_id"`
+		RevokedAt     time.Time `gorm:"column:revoked_at"`
+	}
+	err := db.Conn(ctx, s.orm).Raw(`SELECT DISTINCT student_user_id, revoked_at FROM profile_access_grants
+		WHERE `+where+` ORDER BY student_user_id, revoked_at LIMIT @limit`, args).Scan(&rows).Error
+	if err != nil {
+		return nil, wrap("expired revocations", err)
+	}
+	out := make([]ExpiryKey, len(rows))
+	for i, r := range rows {
+		out[i] = ExpiryKey{StudentUserID: r.StudentUserID, RevokedAt: r.RevokedAt}
+	}
+	return out, nil
 }
 
 // CountSuspendedAt implements Store.

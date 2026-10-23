@@ -125,7 +125,7 @@ func newPgPayoutEnv(t *testing.T) *pgPayoutEnv {
 		Store: e.store, Tx: d.Tx, Clock: clk, Log: obs.Discard(), Alarm: e.alarms.raise,
 		Payouts: ledger.NewGormPayoutStore(d.ORM), Orders: om.Orders, Payees: pgPayees{d: d}, Parties: fakeParties{p: e.payees},
 		Orgs: fakeOrgs{}, Files: e.files, Audit: e.audit, Outbox: ob, Idempotency: keeper, Reauth: fakeReauth{},
-		Sender: e.sender, Staff: fakeStaff{},
+		Sender: e.sender, Staff: fakeStaff{}, Users: fakeUsers{},
 	})
 	if err != nil {
 		t.Fatal(err)

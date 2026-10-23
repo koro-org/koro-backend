@@ -76,6 +76,15 @@ func (Payout) TableName() string { return "payouts" }
 // listOrgPayouts: "IBAN maskeli").
 func (p Payout) MaskedIBAN() string { return iban.Mask(p.IBANSnapshot) }
 
+// PaidBeforeApproval reports a transfer dated before the second eye
+// approved the payout (00 T-298): the money left the bank before the four
+// eyes were complete. mark-paid records it all the same (the ledger follows
+// the bank) with the audit flag paid_before_approval, and the security
+// notice of payout.paid re-reads it from the stored payout (BE-092).
+func (p Payout) PaidBeforeApproval() bool {
+	return p.PaidAt != nil && p.ApprovedAt != nil && p.PaidAt.Before(*p.ApprovedAt)
+}
+
 // PayoutItem is one payout_items row (02 §21.5; 000115): a line the payout
 // pays and its amount: the seller_net_amount remaining after completed
 // refunds, frozen when the payout is created (BE-068, T-305).

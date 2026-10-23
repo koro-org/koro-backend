@@ -57,6 +57,16 @@ func TestPurpose_AllowListMatchesDesign(t *testing.T) {
 	if files.PurposeEventExport.Uploadable() || files.PurposeDSRExport.Uploadable() {
 		t.Error("exports are server-generated only (03 k30)")
 	}
+	// BE-093: delivery evidence is a photo or a PDF of an org, at most 10 MB.
+	for _, m := range []string{files.MIMEPDF, files.MIMEJPEG, files.MIMEPNG, files.MIMEWebP} {
+		if !files.PurposeDeliveryEvidence.AllowsMIME(m) {
+			t.Errorf("delivery_evidence must accept %s", m)
+		}
+	}
+	if files.PurposeDeliveryEvidence.MaxBytes() != 10*files.MB || files.PurposeDeliveryEvidence.Personal() ||
+		!files.PurposeDeliveryEvidence.Uploadable() {
+		t.Error("delivery_evidence: 10 MB, an org's upload, uploadable")
+	}
 	if got := files.PurposeAvatar.MaxBytes(); got != 5*files.MB {
 		t.Errorf("avatar limit %d", got)
 	}

@@ -25,6 +25,10 @@ const (
 	PurposeInvoicePDF          Purpose = "invoice_pdf"
 	PurposeEventExport         Purpose = "event_export"
 	PurposeDSRExport           Purpose = "dsr_export"
+	// PurposeDeliveryEvidence is the seller's proof of a delivered order
+	// line (orders markOrderLineFulfilled, BE-093, T-292): a photo or a PDF
+	// of the seller org, kept with the line as a financial record.
+	PurposeDeliveryEvidence Purpose = "delivery_evidence"
 )
 
 // MIME types of the allow-lists. SVG, HTML and every other type are never
@@ -69,6 +73,7 @@ const (
 var (
 	images      = []string{MIMEJPEG, MIMEPNG, MIMEWebP}
 	documents   = []string{MIMEPDF, MIMEJPEG, MIMEPNG}
+	evidence    = []string{MIMEPDF, MIMEJPEG, MIMEPNG, MIMEWebP} // a photo or a PDF
 	purposeRule = map[Purpose]rule{
 		PurposeAvatar:              {mimes: images, maxBytes: 5 * MB, personal: true},
 		PurposeCV:                  {mimes: []string{MIMEPDF}, maxBytes: 10 * MB, personal: true},
@@ -85,6 +90,7 @@ var (
 		PurposeInvoicePDF:          {mimes: documents, maxBytes: 10 * MB, org: orgOptional},
 		PurposeEventExport:         {mimes: []string{MIMECSV, MIMEXLSX}, maxBytes: 50 * MB, org: orgOptional, generated: true},
 		PurposeDSRExport:           {mimes: []string{MIMEZIP}, maxBytes: 100 * MB, personal: true, generated: true},
+		PurposeDeliveryEvidence:    {mimes: evidence, maxBytes: 10 * MB, org: orgRequired},
 	}
 )
 
@@ -110,7 +116,7 @@ func UploadPurposes() []Purpose {
 	return []Purpose{
 		PurposeAvatar, PurposeCV, PurposeEduDocument, PurposeOrgLogo, PurposeEventCover, PurposePostMedia,
 		PurposeClubClaimEvidence, PurposePartyDocument, PurposeBankAccountEvidence, PurposeTransferReceipt,
-		PurposePayoutReceipt, PurposeRefundReceipt, PurposeInvoicePDF,
+		PurposePayoutReceipt, PurposeRefundReceipt, PurposeInvoicePDF, PurposeDeliveryEvidence,
 	}
 }
 

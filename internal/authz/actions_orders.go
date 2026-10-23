@@ -14,6 +14,7 @@ const (
 	OrdersOrderListAdmin           Action = "orders.order.list_admin"
 	OrdersLineListSales            Action = "orders.line.list_sales"
 	OrdersLineMarkFulfilled        Action = "orders.line.mark_fulfilled"
+	OrdersLineReadEvidence         Action = "orders.line.read_evidence"
 	OrdersLineConfirm              Action = "orders.line.confirm"
 	OrdersLineDispute              Action = "orders.line.dispute"
 	OrdersLineResolveDispute       Action = "orders.line.resolve_dispute"
@@ -35,6 +36,7 @@ var ordersActions = []Action{
 	OrdersOrderListAdmin,
 	OrdersLineListSales,
 	OrdersLineMarkFulfilled,
+	OrdersLineReadEvidence,
 	OrdersLineConfirm,
 	OrdersLineDispute,
 	OrdersLineResolveDispute,

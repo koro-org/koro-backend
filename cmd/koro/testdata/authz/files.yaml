@@ -94,6 +94,20 @@ operations:
           university_rep: 403
           "@companies": 403
           "@platform_staff": 403
+      - name: delivery_evidence_club
+        body: bodies/files/create_delivery_evidence_club_a.json
+        note: delivery_evidence → the seller org's markers of order lines (cla/uni S, k-cs) and pad (k30; BE-093)
+        expect:
+          anonymous: 401
+          "@outsiders_a": 404
+          club_member: 403
+          club_admin: 201
+          moderator: 403
+          support: 403
+          dpo: 403
+          platform_admin: 201
+          finance_admin: 403
+          talent_auditor: 403
       - name: invoice_pdf_university
         body: bodies/files/create_invoice_pdf_uni_a.json
         note: invoice_pdf → fin and billing.invoice.upload holders (S)

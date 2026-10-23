@@ -1,11 +1,12 @@
-# Authz matrix of the orders module (03 §5.15, 04 §2.15; BE-040). 11 operations × 18 personas.
+# Authz matrix of the orders module (03 §5.15, 04 §2.15; BE-040, BE-093). 12 operations × 18 personas.
 # /orgs/{org_id}/orders and /orgs/{org_id}/sales are the org's management surface (03 §3.6, §7.6): non-members 404,
 # members without the cell and every platform role 403. /orders/{order_id} and /order-lines/{line_id} are resource
 # surfaces: an order (a line) is visible to its buyer's members, to the members of a seller org of its lines and to
 # every platform role; anyone else gets 404 (03 k26). Cells: create cma S·k25 (company_admin; the recruiter has no
 # purchase); list cmm S, cma S; read the buyer's cmm, cma, the seller's club_admin (k26 view), sup, pad, fin;
 # payment instructions cmm, cma, fin; cancel cma, pad, fin; sales cla S, uni S, pad, fin; mark cla S, uni S·k-cs,
-# pad; confirm and dispute cma S; resolve pad, fin (admin surface: 403 before reading); admin list sup, pad, fin.
+# pad; read the delivery evidence (BE-093) the buyer's cma S, the seller's cla S, uni S·k-cs, pad, fin; confirm and
+# dispute cma S; resolve pad, fin (admin surface: 403 before reading); admin list sup, pad, fin.
 # MFA (cma, uni, sup, pad, fin), the delivery states, k25 and idempotency are scenarios (scenarios/orders.yaml).
 # Fixtures: fixtures/orders.yaml (the orders of company_a sold by club_a), catalog's off_a_active, parties'
 # party_buyer_a / party_buyer_b. The fixture orders are seeded only under config orders_seed: true (set by the
@@ -37,6 +38,8 @@ groups:
   non_order_staff: [moderator, dpo, talent_auditor]
   # platform roles without a cell on the delivery of a line.
   non_delivery_staff: [moderator, support, dpo, finance_admin, talent_auditor]
+  # platform roles without a cell on the delivery evidence of a line (BE-093).
+  non_evidence_staff: [moderator, support, dpo, talent_auditor]
 
 operations:
   createOrder:
@@ -270,6 +273,59 @@ operations:
       club_admin: 200
       "@non_delivery_staff": 403
       platform_admin: 200
+
+  getOrderLineEvidence:
+    method: GET
+    path: /api/v1/order-lines/{line_id}/evidence
+    action: orders.line.read_evidence
+    config: { orders_seed: true }
+    path_params: { line_id: ln_a_evidence }
+    note: >-
+      BE-093 (T-292): a 5-minute URL of the delivery evidence club_a attached to company_a's line — the buyer's admins,
+      the seller's markers, finance and platform admins; the recruiter, the club member and support see the line (403)
+    expect:
+      anonymous: 401
+      "@outsiders_order_a": 404
+      company_member: 403
+      company_admin: 200
+      club_member: 403
+      club_admin: 200
+      "@non_evidence_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: no_evidence
+        path_params: { line_id: ln_a_marked }
+        note: a line marked without evidence has none to download — 404 for whoever holds the cell
+        expect:
+          anonymous: 401
+          "@outsiders_order_a": 404
+          company_member: 403
+          company_admin: 404
+          club_member: 403
+          club_admin: 404
+          "@non_evidence_staff": 403
+          platform_admin: 404
+          finance_admin: 404
+      - name: other_company
+        path_params: { line_id: ln_b_unpaid }
+        note: IDOR — company_b's line (no evidence); company_a's admin does not see it
+        expect:
+          anonymous: 401
+          user_unverified: 404
+          student: 404
+          student_minor: 404
+          other_club_admin: 404
+          event_staff: 404
+          university_rep: 404
+          company_member: 404
+          company_admin: 404
+          club_member: 403
+          club_admin: 404
+          other_company_member: 404
+          "@non_evidence_staff": 403
+          platform_admin: 404
+          finance_admin: 404
 
   confirmOrderLine:
     method: POST

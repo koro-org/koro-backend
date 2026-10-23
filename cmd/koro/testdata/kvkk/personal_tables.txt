@@ -124,6 +124,7 @@ commerce_policies           staff     catalog       -
 # orders
 orders                      personal  orders        provider:orders
 order_lines                 staff     orders        -
+# order_lines.fulfillment_evidence_file_id (BE-093) refers to files (delivery_evidence of the seller org), no user: orders exports it with the marker's lines
 # payments
 collection_accounts         staff     payments      -
 incoming_bank_transfers     personal  payments      provider:payments

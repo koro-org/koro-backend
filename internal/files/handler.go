@@ -54,7 +54,7 @@ type handler struct{ svc Service }
 type createUploadInput struct {
 	idempotency.OptionalHeader
 	Body struct {
-		Purpose     string `json:"purpose" enum:"avatar,cv,edu_document,org_logo,event_cover,post_media,club_claim_evidence,party_document,bank_account_evidence,transfer_receipt,payout_receipt,refund_receipt,invoice_pdf" doc:"What the file is for; decides the MIME/size allow-list and who may upload (03 k30)"`
+		Purpose     string `json:"purpose" enum:"avatar,cv,edu_document,org_logo,event_cover,post_media,club_claim_evidence,party_document,bank_account_evidence,transfer_receipt,payout_receipt,refund_receipt,invoice_pdf,delivery_evidence" doc:"What the file is for; decides the MIME/size allow-list and who may upload (03 k30)"`
 		Filename    string `json:"filename" minLength:"1" maxLength:"1024" doc:"Original file name (display only; never part of the storage key)"`
 		ContentType string `json:"content_type" enum:"application/pdf,image/jpeg,image/png,image/webp" doc:"Declared MIME type; verified by magic bytes on completion"`
 		SizeBytes   int64  `json:"size_bytes" minimum:"1" maximum:"10485760" doc:"Exact size in bytes (the purpose may allow less: avatar 5 MB)"`

@@ -23,7 +23,13 @@ const maxDisputeReason = 1000
 // order first, then the line (one lock order for every writer), and moves
 // the order's running status on (progressStatus).
 
-// MarkLineFulfilled implements Service (orders.line.mark_fulfilled).
+// MarkLineFulfilled implements Service (orders.line.mark_fulfilled). Order:
+// the line (404) → authz on it (404/403) → the note (422) → the evidence
+// file, when given (a delivery_evidence upload of the line's seller org:
+// 422; rejected or infected: 409; no files module: 503) → in one
+// transaction: the order and the line locked, the states (409), the
+// evidence attached to the line (files.Attach), the line marked with it,
+// audit, order_line.fulfillment_marked (A).
 func (s *service) MarkLineFulfilled(ctx context.Context, a authz.Actor, lineID uuid.UUID, in MarkInput) (LineView, error) {
 	l, err := s.d.Store.GetLine(ctx, lineID, false)
 	if err != nil {
@@ -35,6 +41,11 @@ func (s *service) MarkLineFulfilled(ctx context.Context, a authz.Actor, lineID u
 	note, err := cleanText("body.note", in.Note, maxReason, false)
 	if err != nil {
 		return LineView{}, err
+	}
+	if in.EvidenceFileID != nil {
+		if err := s.checkEvidence(ctx, l, *in.EvidenceFileID); err != nil {
+			return LineView{}, err
+		}
 	}
 	hash, err := idempotency.Hash(struct {
 		Op       string
@@ -58,6 +69,15 @@ func (s *service) MarkLineFulfilled(ctx context.Context, a authz.Actor, lineID u
 		ends := now.AddDate(0, 0, int(cur.DisputeWindowDays))
 		by := a.UserID
 		next.FulfillmentStatus, next.FulfillmentMarkedAt, next.FulfillmentMarkedBy, next.DisputeWindowEndsAt = FulfillMarked, &now, &by, &ends
+		if in.EvidenceFileID != nil {
+			// The same transaction binds the file to the line: it stops being an
+			// orphan and no other record may take it (files.already_attached).
+			if err := s.d.Files.Attach(ctx, a, *in.EvidenceFileID, evidenceOwner(cur.ID)); err != nil {
+				return Line{}, evidenceAttachErr(err)
+			}
+			file := *in.EvidenceFileID
+			next.FulfillmentEvidenceFileID = &file
+		}
 		stored, err := s.d.Store.UpdateLine(ctx, next, FulfillPending)
 		if err != nil {
 			return Line{}, err

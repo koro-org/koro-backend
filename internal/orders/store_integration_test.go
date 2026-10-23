@@ -17,6 +17,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/catalog"
 	"koro/internal/entitlements"
+	"koro/internal/files"
 	"koro/internal/orders"
 	"koro/internal/orgs"
 	"koro/internal/parties"
@@ -26,6 +27,7 @@ import (
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/queue"
+	"koro/internal/platform/storage"
 	"koro/internal/platform/testutil"
 )
 
@@ -160,9 +162,11 @@ type pgEnv struct {
 	outbox *outbox.Mem
 	mod    orders.Module
 	keeper *idempotency.Keeper
+	files  files.Service // the files module over PostgreSQL (the delivery evidence, BE-093)
 }
 
-func newPGEnv(t *testing.T) *pgEnv {
+// newPGEnv builds the env; opts edit the orders dependencies before New.
+func newPGEnv(t *testing.T, opts ...func(*orders.Deps)) *pgEnv {
 	t.Helper()
 	d := testutil.NewDB(t)
 	clk := clock.NewFake(t0)
@@ -188,8 +192,19 @@ func newPGEnv(t *testing.T) *pgEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mod, err = orders.New(orders.Deps{Store: orders.NewGormStore(d.ORM), Tx: d.Tx, Audit: &auditLog{}, Idempotency: p.keeper, Orgs: fo,
-		Offerings: cat.Offerings, Parties: fp, Payees: payees, Entitlements: ents.Service, Outbox: p.outbox, Clock: clk, Log: discardLog()})
+	fm, err := files.New(files.Deps{Store: files.NewGormStore(d.ORM), Objects: storage.NewMem(clk), Tx: d.Tx, Outbox: p.outbox,
+		Queue: queue.NewMem(), Idempotency: p.keeper, Clock: clk, Log: discardLog(), Buckets: evidenceBuckets, Audit: &auditLog{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.files = fm.Service
+	od := orders.Deps{Store: orders.NewGormStore(d.ORM), Tx: d.Tx, Audit: &auditLog{}, Idempotency: p.keeper, Orgs: fo,
+		Offerings: cat.Offerings, Parties: fp, Payees: payees, Entitlements: ents.Service, Outbox: p.outbox, Clock: clk, Log: discardLog(),
+		Files: p.files}
+	for _, o := range opts {
+		o(&od)
+	}
+	mod, err = orders.New(od)
 	if err != nil {
 		t.Fatal(err)
 	}

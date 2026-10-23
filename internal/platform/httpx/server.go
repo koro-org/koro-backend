@@ -58,6 +58,13 @@ type ServeOptions struct {
 // (hijacked WebSocket connections are closed by RegisterOnShutdown hooks) →
 // return. The caller then flushes telemetry and closes pools.
 func Serve(ctx context.Context, srv *http.Server, ln net.Listener, o ServeOptions) error {
+	// Ready flips before the serve goroutine starts: ln is already bound, so
+	// srv.Serve may accept and run a handler before the next statement of
+	// this goroutine. Setting it first makes "a request is being served"
+	// happen-after "Ready is true" (BE-086). A Serve error resets it below.
+	if o.Ready != nil {
+		o.Ready.Set(true)
+	}
 	errCh := make(chan error, 1)
 	go func() {
 		defer close(errCh)
@@ -65,9 +72,6 @@ func Serve(ctx context.Context, srv *http.Server, ln net.Listener, o ServeOption
 			errCh <- err
 		}
 	}()
-	if o.Ready != nil {
-		o.Ready.Set(true)
-	}
 
 	select {
 	case err := <-errCh:

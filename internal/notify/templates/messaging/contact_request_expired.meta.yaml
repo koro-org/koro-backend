@@ -1,4 +1,8 @@
-version: 1
+version: 2
 category: transactional
+# T-336 (BE-089): in-app, push and e-mail; the user switches each channel
+# off separately (contact_requests, 02 §6.5). The e-mail is informational
+# (a request on the user's account, no promotion: Law 6563), so no consent
+# or İYS; the company's free text (subject, message) never enters it.
 preference: contact_requests
-channels: [in_app]
+channels: [in_app, push, email]

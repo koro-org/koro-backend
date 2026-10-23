@@ -85,15 +85,18 @@ func Register(api huma.API, svc Service) {
 	huma.Register(api, self(huma.Operation{
 		OperationID: "updateMyPrivacy", Method: http.MethodPatch, Path: "/me/privacy",
 		Summary: "Update my privacy settings",
-		Description: "discoverable (level 2) and show_contact_on_grant (level 3 e-mail) mirror explicit consents: " +
-			"turning one on needs the consent text shown (consent.discovery_profile / consent.contact_info_share: " +
-			"notice_version_id and text_sha256), turning it off withdraws the consent; the setting and the consent " +
-			"record change in one transaction. Users under 18 cannot turn either on (422 students.minor_restricted). " +
-			"Every change is audited.",
+		Description: "discoverable (level 2) and show_contact_on_grant (the contact_info_share consent) mirror explicit " +
+			"consents: turning one on needs the consent text shown (consent.discovery_profile / " +
+			"consent.contact_info_share: notice_version_id and text_sha256), turning it off withdraws the consent; the " +
+			"setting and the consent record change in one transaction. The e-mail goes only to the companies you share " +
+			"it with when you accept their contact requests (share_contact; show_contact_on_grant is the default of " +
+			"that box); turning show_contact_on_grant off stops every share at once. Users under 18 cannot turn either " +
+			"on (422 students.minor_restricted). Every change is audited.",
 	}, authz.StudentsPrivacyUpdateOwn, ""), h.updatePrivacy)
 
 	registerViews(api, h)
 	registerGrants(api, h)
+	registerContactShare(api, h)
 }
 
 type handler struct{ svc Service }

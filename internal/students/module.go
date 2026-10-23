@@ -186,6 +186,7 @@ type Service interface {
 	Audience
 	AccessGrants
 	Discoverable
+	contactShareService
 
 	// GraduatedAmong reports which of userIDs have a graduated profile
 	// (orgs.admin_sweep, T-210).

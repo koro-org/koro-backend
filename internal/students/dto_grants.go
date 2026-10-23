@@ -26,6 +26,8 @@ type StudentAccessGrantDTO struct {
 	SuspendedAt *time.Time             `json:"suspended_at,omitempty" doc:"When the lapse of your verification suspended the grant (suspended grants only)"`
 	// ResumableUntil is the end of the suspension window (BE-088).
 	ResumableUntil *time.Time `json:"resumable_until,omitempty" doc:"Until when you may resume the suspended grant once verified again; after it the grant ends (suspended grants only)"`
+	// ContactSharedAt: BE-089 (T-345), per-company contact sharing.
+	ContactSharedAt *time.Time `json:"contact_shared_at,omitempty" doc:"Since when this company sees your e-mail (you shared it when you accepted its contact request); absent: not shared. unshareMyAccessGrantContact stops it"`
 }
 
 // StudentAccessGrantList is a page of listMyAccessGrants.
@@ -55,6 +57,10 @@ func toAccessGrantDTO(v GrantView) StudentAccessGrantDTO {
 	if at := v.ResumableUntil; at != nil {
 		u := at.UTC()
 		d.ResumableUntil = &u
+	}
+	if at := v.Grant.ContactSharedAt; at != nil {
+		u := at.UTC()
+		d.ContactSharedAt = &u
 	}
 	return d
 }

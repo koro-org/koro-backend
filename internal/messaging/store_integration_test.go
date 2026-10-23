@@ -177,7 +177,8 @@ func TestService_Postgres_CreateAcceptAndExpire(t *testing.T) {
 	store := messaging.NewGormStore(d.ORM)
 	mod, err := messaging.New(messaging.Deps{
 		Store: store, Tx: d.Tx, Outbox: ob, Audit: pgAudit{}, Idempotency: keeper, Clock: clk, Log: obs.Discard(),
-		Entitlements: pgEntitlements{d: d, ent: ent}, Grants: pgGrants{d: d, fail: fail}, Students: sf, Orgs: of,
+		Entitlements: pgEntitlements{d: d, ent: ent}, Grants: pgGrants{d: d, fail: fail},
+		Contacts: pgShares{d: d, fail: &atomic.Bool{}}, Students: sf, Orgs: of,
 		Pseudonyms: pseudonymsFake{}, Resolve: res.resolve,
 	})
 	if err != nil {
@@ -213,7 +214,7 @@ func TestService_Postgres_CreateAcceptAndExpire(t *testing.T) {
 	}
 
 	fail.Store(true)
-	_, err = mod.Service.Respond(ctx, stu, v.Request.ID, messaging.DecisionAccepted)
+	_, err = mod.Service.Respond(ctx, stu, v.Request.ID, accept)
 	wantErr(t, err, students.ErrMinorRestricted)
 	if st := count(`SELECT count(*) FROM contact_requests WHERE id = $1 AND status = 'pending' AND responded_at IS NULL`, v.Request.ID); st != 1 ||
 		count(`SELECT count(*) FROM profile_access_grants WHERE source_id = $1`, v.Request.ID) != 0 ||
@@ -221,7 +222,7 @@ func TestService_Postgres_CreateAcceptAndExpire(t *testing.T) {
 		t.Fatal("a failed grant did not roll the acceptance back")
 	}
 	fail.Store(false)
-	if _, err := mod.Service.Respond(ctx, stu, v.Request.ID, messaging.DecisionAccepted); err != nil {
+	if _, err := mod.Service.Respond(ctx, stu, v.Request.ID, accept); err != nil {
 		t.Fatal(err)
 	}
 	if count(`SELECT count(*) FROM contact_requests WHERE id = $1 AND status = 'accepted' AND responded_at IS NOT NULL`, v.Request.ID) != 1 ||

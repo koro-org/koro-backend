@@ -25,6 +25,9 @@
 # BE-050 exports: the event's sub-surface. create (S·R: the proof in the body) and download (S·O: only the
 # requester, fixtures export_*) are the organiser's managers'; the list also the dpo's (✓). include_sensitive
 # and an e-mail field are 422 after authz; a queued export 409; another event's export 404 (06 H-38).
+# compare: status (BE-082, pattern of BE-061): the list carries download_count/first_downloaded_at, which
+# every downloadEventExport read (a GET, run in the read phases of the shared application) advances, so
+# the list's body depends on other reads; only its status is compared.
 version: 1
 groups:
   # signed-in users without a membership in club_a (and no platform role).
@@ -948,6 +951,7 @@ operations:
     method: GET
     path: /api/v1/events/{event_id}/exports
     action: events.export.list
+    compare: status            # download_count grows with every downloadEventExport read (BE-082)
     path_params: { event_id: event_reg }
     note: S for the organiser's managers; dpo ✓ (KVKK oversight); platform_admin only for the platform org (k-po)
     expect:

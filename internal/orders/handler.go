@@ -71,9 +71,22 @@ func Register(api huma.API, svc Service) {
 		OperationID: "markOrderLineFulfilled", Method: http.MethodPost, Path: "/order-lines/{line_id}/mark-fulfilled",
 		Summary: "Mark an order line delivered",
 		Description: "The seller says the line is delivered; the buyer's dispute window (the policy's days) starts. The " +
-			"order must be paid (409 orders.order_not_paid); a line that is not pending is 409 orders.invalid_state.",
+			"order must be paid (409 orders.order_not_paid); a line that is not pending is 409 orders.invalid_state. " +
+			"evidence_file_id, optional, is a completed delivery_evidence upload (a photo or a PDF) of the selling " +
+			"organization (422 otherwise; 409 files.rejected or files.not_clean when the upload was rejected or found " +
+			"infected, 409 files.already_attached when another record uses it): it is attached to the line for good and " +
+			"the buyer's administrators, finance and platform admins see it (getOrderLineEvidence).",
 	}, op.Meta{Action: string(authz.OrdersLineMarkFulfilled), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional},
 		h.mark)
+
+	reg(api, huma.Operation{
+		OperationID: "getOrderLineEvidence", Method: http.MethodGet, Path: "/order-lines/{line_id}/evidence",
+		Summary: "Get a download URL of an order line's delivery evidence",
+		Description: "A URL valid for 5 minutes of the file the seller attached when marking the line delivered, for the " +
+			"buying company's administrators, the selling organization's club admins and university representatives, " +
+			"and finance and platform admins. A line without evidence is 404; 409 files.not_clean until the virus scan " +
+			"clears the file. Every download is audited.",
+	}, op.Meta{Action: string(authz.OrdersLineReadEvidence), Surface: op.SurfaceResource}, h.evidence)
 
 	reg(api, huma.Operation{
 		OperationID: "confirmOrderLine", Method: http.MethodPost, Path: "/order-lines/{line_id}/confirm",
@@ -197,6 +210,7 @@ type OrderLineDTO struct {
 	DisputeWindowEndsAt *time.Time       `json:"dispute_window_ends_at,omitempty"`
 	FulfilledAt         *time.Time       `json:"fulfilled_at,omitempty"`
 	FulfilledVia        string           `json:"fulfilled_via,omitempty" enum:"buyer_confirmed,window_elapsed,admin,auto_platform"`
+	HasEvidence         bool             `json:"has_fulfillment_evidence" doc:"The seller attached a delivery evidence file (getOrderLineEvidence)"`
 	Seller              SellerRefDTO     `json:"seller"`
 }
 
@@ -272,7 +286,8 @@ func orderDTO(v OrderView) OrderDTO {
 			VATWithheldAmount: l.VATWithheldAmount, GrossAmount: l.GrossAmount, BuyerFeeAmount: l.BuyerFeeAmount,
 			PayableAmount: l.PayableAmount, FulfillmentStatus: string(l.FulfillmentStatus),
 			DisputeWindowEndsAt: utcPtr(l.DisputeWindowEndsAt), FulfilledAt: utcPtr(l.FulfilledAt),
-			Seller: SellerRefDTO{OrgID: l.SellerOrgID.String(), Name: v.Sellers[l.SellerOrgID]},
+			HasEvidence: l.FulfillmentEvidenceFileID != nil,
+			Seller:      SellerRefDTO{OrgID: l.SellerOrgID.String(), Name: v.Sellers[l.SellerOrgID]},
 		}
 		for i, x := range l.DeliverablesSnapshot {
 			d.Deliverables[i] = DeliverableDTO(x)
@@ -594,6 +609,7 @@ type SellerLineDTO struct {
 	FulfillmentStatus   string     `json:"fulfillment_status"`
 	DisputeWindowEndsAt *time.Time `json:"dispute_window_ends_at,omitempty"`
 	PaidOutAt           *time.Time `json:"paid_out_at,omitempty"`
+	HasEvidence         bool       `json:"has_fulfillment_evidence" doc:"A delivery evidence file is attached (getOrderLineEvidence)"`
 }
 
 type salesInput struct {
@@ -632,7 +648,8 @@ func (h handler) sales(ctx context.Context, in *salesInput) (*salesOutput, error
 		out.Body.Items[i] = SellerLineDTO{LineID: l.ID.String(), OrderID: l.OrderID.String(), OrderNo: it.OrderNo,
 			OrderStatus: string(it.OrderStatus), BuyerTitle: it.BuyerTitle, TitleSnapshot: l.TitleSnapshot, Quantity: l.Quantity,
 			GrossAmount: l.GrossAmount, SellerNetAmount: l.SellerNetAmount, FulfillmentStatus: string(l.FulfillmentStatus),
-			DisputeWindowEndsAt: utcPtr(l.DisputeWindowEndsAt), PaidOutAt: utcPtr(l.PaidOutAt)}
+			DisputeWindowEndsAt: utcPtr(l.DisputeWindowEndsAt), PaidOutAt: utcPtr(l.PaidOutAt),
+			HasEvidence: l.FulfillmentEvidenceFileID != nil}
 	}
 	if k := p.Next; k != nil {
 		out.Body.NextCursor = page.Next(sortCreated, fp, page.TimeVal(k.At), page.UUIDVal(k.ID))
@@ -652,6 +669,7 @@ type LineStateDTO struct {
 	DisputeWindowEndsAt *time.Time `json:"dispute_window_ends_at,omitempty"`
 	FulfilledAt         *time.Time `json:"fulfilled_at,omitempty"`
 	FulfilledVia        string     `json:"fulfilled_via,omitempty"`
+	HasEvidence         bool       `json:"has_fulfillment_evidence" doc:"A delivery evidence file is attached (getOrderLineEvidence)"`
 }
 
 type lineOutput struct{ Body LineStateDTO }
@@ -659,7 +677,8 @@ type lineOutput struct{ Body LineStateDTO }
 func lineOut(v LineView) *lineOutput {
 	l := v.Line
 	d := LineStateDTO{LineID: l.ID.String(), OrderID: l.OrderID.String(), OrderNo: v.OrderNo, OrderStatus: string(v.OrderStatus),
-		FulfillmentStatus: string(l.FulfillmentStatus), DisputeWindowEndsAt: utcPtr(l.DisputeWindowEndsAt), FulfilledAt: utcPtr(l.FulfilledAt)}
+		FulfillmentStatus: string(l.FulfillmentStatus), DisputeWindowEndsAt: utcPtr(l.DisputeWindowEndsAt), FulfilledAt: utcPtr(l.FulfilledAt),
+		HasEvidence: l.FulfillmentEvidenceFileID != nil}
 	if l.FulfilledVia != nil {
 		d.FulfilledVia = string(*l.FulfilledVia)
 	}
@@ -671,7 +690,7 @@ type markInput struct {
 	LinePath
 	Body *struct {
 		Note           string `json:"note,omitempty" maxLength:"500"`
-		EvidenceFileID string `json:"evidence_file_id,omitempty" format:"uuid" doc:"An uploaded file showing the delivery (recorded with the audit trail)"`
+		EvidenceFileID string `json:"evidence_file_id,omitempty" format:"uuid" doc:"A completed delivery_evidence upload (photo or PDF) of the selling organization, attached to the line"`
 	}
 }
 
@@ -692,6 +711,28 @@ func (h handler) mark(ctx context.Context, in *markInput) (*lineOutput, error) {
 		return nil, err
 	}
 	return lineOut(v), nil
+}
+
+// EvidenceLinkDTO is the body of getOrderLineEvidence (04 §1.14 signed URL).
+type EvidenceLinkDTO struct {
+	URL       string    `json:"url" doc:"Valid for at most 5 minutes"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+type evidenceInput struct{ LinePath }
+
+type evidenceOutput struct{ Body EvidenceLinkDTO }
+
+func (h handler) evidence(ctx context.Context, in *evidenceInput) (*evidenceOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	dl, err := h.svc.LineEvidence(ctx, a, parseID(in.LineID))
+	if err != nil {
+		return nil, err
+	}
+	return &evidenceOutput{Body: EvidenceLinkDTO{URL: dl.URL, ExpiresAt: dl.ExpiresAt.UTC()}}, nil
 }
 
 type confirmInput struct {

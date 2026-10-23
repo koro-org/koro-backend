@@ -52,6 +52,14 @@
 //     fulfils the rest; a dispute is resolved by a platform or finance
 //     admin (delivered, or cancelled for a refund). Fulfilment emits
 //     order_line.fulfilled (O) for billing.
+//   - Delivery evidence (BE-093, T-292): the seller may attach a
+//     delivery_evidence upload of its own org when it marks a line (422
+//     otherwise: another org's file, another purpose, an unfinished upload);
+//     the file is attached in the marking transaction (files.Attach) and
+//     never changes. The buyer's admins, the seller's markers and the
+//     platform and finance admins download it through a 5-minute URL of a
+//     clean file (getOrderLineEvidence, audited); it is part of the line's
+//     financial record.
 //   - Personal data: placed_by_user_id and fulfillment_marked_by name
 //     users; orders are financial records (10 years): account erasure
 //     retains them (privacy.go).
@@ -66,6 +74,7 @@ import (
 	"uuid"
 
 	"koro/internal/authz"
+	"koro/internal/files"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
 	"koro/internal/platform/idempotency"
@@ -150,8 +159,12 @@ type Service interface {
 	CancelOrder(ctx context.Context, a authz.Actor, id uuid.UUID, reason string) (OrderView, error)
 	// ListOrgSales is listOrgSales (orders.line.list_sales).
 	ListOrgSales(ctx context.Context, a authz.Actor, orgID uuid.UUID, q SalesQuery) (SalesPage, error)
-	// MarkLineFulfilled is markOrderLineFulfilled (orders.line.mark_fulfilled).
+	// MarkLineFulfilled is markOrderLineFulfilled (orders.line.mark_fulfilled),
+	// with the seller's optional delivery evidence.
 	MarkLineFulfilled(ctx context.Context, a authz.Actor, lineID uuid.UUID, in MarkInput) (LineView, error)
+	// LineEvidence is getOrderLineEvidence (orders.line.read_evidence): a
+	// short-lived download URL of the line's delivery evidence.
+	LineEvidence(ctx context.Context, a authz.Actor, lineID uuid.UUID) (files.Download, error)
 	// ConfirmLine is confirmOrderLine (orders.line.confirm).
 	ConfirmLine(ctx context.Context, a authz.Actor, lineID uuid.UUID) (LineView, error)
 	// DisputeLine is disputeOrderLine (orders.line.dispute).
@@ -201,6 +214,10 @@ type Deps struct {
 	Sender Sender
 	Users  Users
 	Staff  Staff
+	// Files holds the delivery evidence (BE-093). nil → a mark with
+	// evidence and the evidence download fail closed (503); a mark
+	// without evidence works.
+	Files Files
 }
 
 func (d Deps) validate() error {

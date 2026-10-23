@@ -82,3 +82,18 @@ scenarios:
           body: bodies/orders/resolve_refund.json, expect: 200 }
       - { persona: platform_admin, operation: adminResolveOrderLineDispute, path_params: { line_id: ln_a_marked }, expect: 409,
           code: orders.invalid_state }
+  order_line_evidence:
+    config: { orders_seed: true }
+    note: >-
+      BE-093 (T-292): before the mark the line has no evidence (404); club_a cannot reuse the evidence of another line
+      (409 files.already_attached); it marks the paid line with its new delivery_evidence upload; then the buyer's admin
+      downloads it and the recruiter cannot (403).
+    steps:
+      - { persona: company_admin, operation: getOrderLineEvidence, path_params: { line_id: ln_a_paid }, expect: 404,
+          code: not_found }
+      - { persona: club_admin, operation: markOrderLineFulfilled, body: bodies/orders/mark_evidence_used.json, expect: 409,
+          code: files.already_attached }
+      - { persona: club_admin, operation: markOrderLineFulfilled, body: bodies/orders/mark_evidence.json, expect: 200 }
+      - { persona: company_admin, operation: getOrderLineEvidence, path_params: { line_id: ln_a_paid }, expect: 200 }
+      - { persona: company_member, operation: getOrderLineEvidence, path_params: { line_id: ln_a_paid }, expect: 403,
+          code: forbidden }

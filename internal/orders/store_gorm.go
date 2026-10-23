@@ -161,7 +161,8 @@ func (s gormStore) UpdateOrder(ctx context.Context, o Order, from Status) (Order
 }
 
 // UpdateLine implements Store: a targeted UPDATE of the fulfilment columns
-// and the refunded amount (order_lines_frozen keeps the rest).
+// and the refunded amount (order_lines_frozen keeps the rest). The delivery
+// evidence is written once: a set one is kept (order_lines_evidence_frozen).
 //
 // cross-org: addressed by ID after the service's authorisation.
 func (s gormStore) UpdateLine(ctx context.Context, l Line, from Fulfillment) (Line, error) {
@@ -169,12 +170,14 @@ func (s gormStore) UpdateLine(ctx context.Context, l Line, from Fulfillment) (Li
 	err := db.Conn(ctx, s.orm).Raw(`UPDATE order_lines SET fulfillment_status = @status,
 		fulfillment_marked_at = @marked_at, fulfillment_marked_by = @marked_by,
 		dispute_window_ends_at = @window_ends_at, fulfilled_at = @fulfilled_at, fulfilled_via = @fulfilled_via,
-		dispute_reason = @dispute_reason, refunded_amount = @refunded_amount
+		dispute_reason = @dispute_reason, refunded_amount = @refunded_amount,
+		fulfillment_evidence_file_id = COALESCE(fulfillment_evidence_file_id, @evidence)
 		WHERE id = @id AND fulfillment_status = @from
 		RETURNING *`, map[string]any{
 		"id": l.ID, "from": from, "status": l.FulfillmentStatus, "marked_at": l.FulfillmentMarkedAt,
 		"marked_by": l.FulfillmentMarkedBy, "window_ends_at": l.DisputeWindowEndsAt, "fulfilled_at": l.FulfilledAt,
 		"fulfilled_via": l.FulfilledVia, "dispute_reason": l.DisputeReason, "refunded_amount": l.RefundedAmount,
+		"evidence": l.FulfillmentEvidenceFileID,
 	}).Scan(&rows).Error
 	if err != nil {
 		return Line{}, fmt.Errorf("orders: update line: %w", constraints.Translate(err))

@@ -53,6 +53,16 @@ func TestFilesPolicy_UploadCreateK30(t *testing.T) {
 		{"university_rep", "invoice_pdf", uniA, nil},
 		{"company_admin", "invoice_pdf", companyA, authz.ErrForbidden},
 		{"finance_admin", "invoice_pdf", nil, nil},
+		// BE-093: delivery_evidence → the markers of the seller's lines (cla/uni S, k-cs), pad.
+		{"club_admin", "delivery_evidence", clubA, nil},
+		{"university_rep", "delivery_evidence", uniA, nil},
+		{"platform_admin", "delivery_evidence", clubA, nil},
+		{"club_member", "delivery_evidence", clubA, authz.ErrForbidden},
+		{"finance_admin", "delivery_evidence", clubA, authz.ErrForbidden},
+		{"support", "delivery_evidence", clubA, authz.ErrForbidden},
+		{"company_admin", "delivery_evidence", companyA, authz.ErrForbidden},
+		{"other_club_admin", "delivery_evidence", clubA, authz.ErrNotFound},
+		{"club_admin", "delivery_evidence", nil, authz.ErrForbidden},
 		{"finance_admin", "event_export", nil, authz.ErrForbidden},
 		{"student", "dsr_export", nil, authz.ErrForbidden},
 		{"student", "selfie", nil, authz.ErrForbidden},
@@ -77,6 +87,7 @@ func TestFilesPolicy_UploadCreateK30(t *testing.T) {
 	cs := member(authz.OrgUniversity, authz.MemberCareerStaff)
 	org := authztest.ID("org_university")
 	wantErr(t, authz.Can(t.Context(), cs, authz.FilesUploadCreate, fileResource("event_cover", &org, "member_career_staff")), authz.ErrForbidden, false)
+	wantErr(t, authz.Can(t.Context(), cs, authz.FilesUploadCreate, fileResource("delivery_evidence", &org, "member_career_staff")), authz.ErrForbidden, false)
 }
 
 func TestFilesPolicy_OwnFileOnly(t *testing.T) {

@@ -32,6 +32,9 @@ const (
 //	orders.line.list_sales           org (the seller): cla S, uni S (career_staff too:
 //	                                   no k-cs), pad, fin
 //	orders.line.mark_fulfilled       order_line: the seller's cla S, uni S·k-cs; pad
+//	orders.line.read_evidence        order_line: the buyer's cma S; the seller's cla S,
+//	                                   uni S·k-cs (who may attach it); pad, fin (BE-093,
+//	                                   T-292: the delivery evidence file, itiraz)
 //	orders.line.confirm / dispute    order_line: the buyer's cma S
 //	orders.line.resolve_dispute      admin surface: pad, fin (the gate before the line
 //	                                   is read: 403 for everyone else, 03 §7.2-3)
@@ -70,7 +73,7 @@ func ordersPolicy() Policy {
 				}
 			case TypeOrderLine:
 				switch act {
-				case OrdersLineMarkFulfilled, OrdersLineConfirm, OrdersLineDispute, OrdersLineResolveDispute:
+				case OrdersLineMarkFulfilled, OrdersLineReadEvidence, OrdersLineConfirm, OrdersLineDispute, OrdersLineResolveDispute:
 					return orderVisible(a, r.OrgID, lineSeller(r))
 				}
 			}
@@ -181,6 +184,15 @@ func orderLineGrants(a Actor, act Action, r Resource, pad, fin Grant) []Grant {
 			add(a.HasOrgRole(s, MemberUniversityRep), Grant{Role: RoleUniversityRep}) // k-cs: never career_staff
 		}
 		gs = append(gs, pad)
+	case OrdersLineReadEvidence:
+		// The buyer's admins (they confirm or dispute the delivery), the seller's
+		// markers (they attached it) and the staff of a dispute (BE-093).
+		add(a.HasOrgRole(buyer, MemberCompanyAdmin, MemberCompanyOwner), Grant{Role: RoleCompanyAdmin})
+		for _, s := range lineSeller(r) {
+			add(a.HasOrgRole(s, MemberClubAdmin), Grant{Role: RoleClubAdmin})
+			add(a.HasOrgRole(s, MemberUniversityRep), Grant{Role: RoleUniversityRep}) // k-cs: never career_staff
+		}
+		gs = append(gs, pad, fin)
 	case OrdersLineConfirm, OrdersLineDispute:
 		add(a.HasOrgRole(buyer, MemberCompanyAdmin, MemberCompanyOwner), Grant{Role: RoleCompanyAdmin})
 	case OrdersLineResolveDispute:

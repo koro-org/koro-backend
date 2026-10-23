@@ -90,6 +90,14 @@ func TestOrdersPolicy_Matrix(t *testing.T) {
 			surface(both, map[string]error{"club_admin": nil, "platform_admin": nil})},
 		{"mark a university's line delivered", authz.OrdersLineMarkFulfilled, lineOf("company_a", "uni_a"),
 			surface(append([]string{"university_rep"}, companyA...), map[string]error{"university_rep": nil, "platform_admin": nil})},
+		{"read the delivery evidence (BE-093)", authz.OrdersLineReadEvidence, lineOf("company_a", "club_a"),
+			surface(both, map[string]error{"company_admin": nil, "club_admin": nil, "platform_admin": nil, "finance_admin": nil})},
+		{"read a university's delivery evidence", authz.OrdersLineReadEvidence, lineOf("company_a", "uni_a"),
+			surface(append([]string{"university_rep"}, companyA...),
+				map[string]error{"company_admin": nil, "university_rep": nil, "platform_admin": nil, "finance_admin": nil})},
+		{"read another company's delivery evidence", authz.OrdersLineReadEvidence, lineOf("company_b", "club_a"),
+			surface(append([]string{"other_company_member"}, clubA...),
+				map[string]error{"other_company_member": nil, "club_admin": nil, "platform_admin": nil, "finance_admin": nil})},
 		{"confirm a line", authz.OrdersLineConfirm, lineOf("company_a", "club_a"), surface(both, map[string]error{"company_admin": nil})},
 		{"dispute a line", authz.OrdersLineDispute, lineOf("company_a", "club_a"), surface(both, map[string]error{"company_admin": nil})},
 		{"resolve a dispute (after the gate)", authz.OrdersLineResolveDispute, lineOf("company_a", "club_a"),
@@ -155,6 +163,14 @@ func TestOrdersPolicy_EdgeCases(t *testing.T) {
 	cs.MFAVerified = false
 	wantErr(t, authz.Can(ctx, cs, authz.OrdersOrderRead, orderOf("company_a", "uni_a")), nil, false)
 	wantErr(t, authz.Can(ctx, cs, authz.OrdersLineMarkFulfilled, lineOf("company_a", "uni_a")), authz.ErrForbidden, false)
+	// BE-093: nor does it read the delivery evidence; the company admin needs an MFA
+	// session for it (k-mfa), the seller's club admin none.
+	wantErr(t, authz.Can(ctx, cs, authz.OrdersLineReadEvidence, lineOf("company_a", "uni_a")), authz.ErrForbidden, false)
+	wantErr(t, authz.Can(ctx, cma, authz.OrdersLineReadEvidence, lineOf("company_a", "club_a")), authz.ErrMFARequired, false)
+	cla := persona(t, "club_admin")
+	cla.MFAVerified = false
+	wantErr(t, authz.Can(ctx, cla, authz.OrdersLineReadEvidence, lineOf("company_a", "club_a")), nil, false)
+	wantErr(t, authz.Can(ctx, persona(t, "company_owner_a"), authz.OrdersLineReadEvidence, lineOf("company_a", "club_a")), nil, false)
 	wantErr(t, authz.Can(ctx, cs, authz.OrdersLineListSales, orgOf("uni_a", "university")), nil, false)
 
 	// A seller of one line of a two-seller order sees the order (its own lines: the service).

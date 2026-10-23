@@ -17,6 +17,7 @@ import (
 	"koro/internal/authz/authztest"
 	"koro/internal/catalog"
 	"koro/internal/entitlements"
+	"koro/internal/files"
 	"koro/internal/identity"
 	"koro/internal/notify"
 	"koro/internal/orders"
@@ -30,6 +31,7 @@ import (
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/problem"
 	"koro/internal/platform/queue"
+	"koro/internal/platform/storage"
 )
 
 // t0 is the test clock's start (microsecond precision, like PostgreSQL).
@@ -292,20 +294,36 @@ type env struct {
 	svc      orders.Service
 	mod      orders.Module
 
+	// The real files module over in-memory stores (the delivery evidence, BE-093).
+	files     files.Service
+	fileStore files.Store
+	objects   *storage.Mem
+
 	booth, quota uuid.UUID // a reviewed org-bound service and a platform-native one (5 targeted posts per unit)
 	policy       catalog.CommercePolicy
 	payeeA       uuid.UUID // club_a's active default payee
 	partyA       uuid.UUID // company_a's verified buyer party
 }
 
-func newEnv(t *testing.T) *env {
+// evidenceBuckets are the buckets of the files module of the tests.
+var evidenceBuckets = files.Buckets{Files: "files-test", Quarantine: "quarantine-test"}
+
+// newEnv builds the env; opts edit the orders dependencies before New.
+func newEnv(t *testing.T, opts ...func(*orders.Deps)) *env {
 	t.Helper()
 	clk := clock.NewFake(t0)
 	e := &env{clk: clk, store: orders.NewMemStore(clk.Now), cat: catalog.NewMemStore(clk.Now), audit: &auditLog{},
 		orgs: newFakeOrgs(), parties: &fakeParties{m: map[uuid.UUID]parties.LegalParty{}},
-		payees: &fakePayees{m: map[uuid.UUID]parties.Payee{}}, outbox: outbox.NewMem(clk), sender: &fakeSender{}}
+		payees: &fakePayees{m: map[uuid.UUID]parties.Payee{}}, outbox: outbox.NewMem(clk), sender: &fakeSender{},
+		fileStore: files.NewMemStore(clk.Now), objects: storage.NewMem(clk)}
 	tx := db.NopTx{}
 	keeper := idempotency.New(idempotency.Deps{Tx: tx, Store: idempotency.NewMemStore(), Clock: clk, Log: discardLog()})
+	fm, err := files.New(files.Deps{Store: e.fileStore, Objects: e.objects, Tx: tx, Outbox: e.outbox, Queue: queue.NewMem(),
+		Idempotency: keeper, Clock: clk, Log: discardLog(), Buckets: evidenceBuckets, Audit: e.audit})
+	if err != nil {
+		t.Fatalf("files.New: %v", err)
+	}
+	e.files = fm.Service
 	var held catalog.BuyerHeld = func(ctx context.Context, offeringID, buyer uuid.UUID) (int, error) {
 		return e.mod.BuyerHeld(ctx, offeringID, buyer)
 	}
@@ -321,7 +339,7 @@ func newEnv(t *testing.T) *env {
 		t.Fatalf("entitlements.New: %v", err)
 	}
 	e.ents = ents.Service
-	mod, err := orders.New(orders.Deps{
+	d := orders.Deps{
 		Store: e.store, Tx: tx, Audit: e.audit, Idempotency: keeper, Orgs: e.orgs, Offerings: cat.Offerings, Parties: e.parties,
 		Payees: e.payees, Entitlements: e.ents, Outbox: e.outbox, Clock: clk, Log: discardLog(),
 		CollectionAccount: func(context.Context) (orders.CollectionAccount, bool, error) {
@@ -330,8 +348,12 @@ func newEnv(t *testing.T) *env {
 			}
 			return *e.acct, true, nil
 		},
-		Sender: e.sender, Users: fakeUsers{}, Staff: fakeStaff{},
-	})
+		Sender: e.sender, Users: fakeUsers{}, Staff: fakeStaff{}, Files: e.files,
+	}
+	for _, o := range opts {
+		o(&d)
+	}
+	mod, err := orders.New(d)
 	if err != nil {
 		t.Fatalf("orders.New: %v", err)
 	}

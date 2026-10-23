@@ -25,6 +25,8 @@ import "uuid"
 //	bank_account_evidence      S: club_admin, university_rep, company_admin/owner; fin; pad
 //	transfer/payout/refund_receipt  fin
 //	invoice_pdf                fin; S: club_admin, university_rep (billing.invoice.upload, k29)
+//	delivery_evidence          S: club_admin, university_rep of the seller org (k-cs); pad
+//	                           (orders.line.mark_fulfilled; BE-093, T-292)
 //	event_export, dsr_export   nobody (PutGenerated only)
 //
 // "university_rep" never includes career_staff (k-cs). k-po: platform_admin
@@ -65,10 +67,12 @@ const (
 	filePurposePayoutRcpt    = "payout_receipt"
 	filePurposeRefundRcpt    = "refund_receipt"
 	filePurposeInvoicePDF    = "invoice_pdf"
+	filePurposeDeliveryProof = "delivery_evidence"
 	fileOrgAdmins            = "admins"    // club_admin, university_rep, company_admin/owner
 	fileOrgEventers          = "eventers"  // club_admin, university_rep
 	fileOrgPosters           = "posters"   // club_admin, university_rep, recruiter, company_admin/owner
 	fileOrgInvoiceUploaders  = "invoicers" // club_admin, university_rep
+	fileOrgSellers           = "sellers"   // club_admin, university_rep (the markers of an order line)
 )
 
 // orgGrants returns the S grants the actor holds in orgID for one org role
@@ -142,6 +146,10 @@ func uploadGrants(a Actor, r Resource) []Grant {
 		return []Grant{fin}
 	case filePurposeInvoicePDF:
 		return append(orgGrants(a, r.OrgID, fileOrgInvoiceUploaders), fin)
+	case filePurposeDeliveryProof:
+		// Whoever may mark the seller's lines delivered (orders.line.mark_fulfilled):
+		// the seller org's club_admin and university_rep, and platform_admin.
+		return append(orgGrants(a, r.OrgID, fileOrgSellers), pad)
 	}
 	return nil // event_export, dsr_export and unknown purposes: 403
 }

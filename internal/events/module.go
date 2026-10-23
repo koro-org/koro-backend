@@ -134,6 +134,16 @@
 // while ready (counted and audited), deleted after 7 days by
 // events.purge_exports; the row stays 2 years (event_export_log).
 //
+// BE-095 adds the caller's own event lists of the mobile app (mine.go; 04
+// §2.6 listMyStaffEvents, listMyClubEvents): the doors the caller works
+// (its staff assignments and the organisers it manages events of; every
+// event passes events.checkin.create) and the events of its clubs (active
+// memberships from the actor, follows from feed through the Follows
+// port), the latter through the store filter of listEvents, so a members
+// event of a club the caller only follows (a sensitive club's included)
+// never appears. One events query per page; staff roles, sensitive flags
+// and organisers are read in batches.
+//
 // BE-054 adds the live check-in board (live.go, live_handler.go; 04 §W): a
 // WebSocket over platform/realtime, authorised like getCheckinStats when it
 // opens and re-checked at least every minute; check-ins and voids are
@@ -310,6 +320,16 @@ type Service interface {
 	// DownloadExport is downloadEventExport (events.export.download, S·O):
 	// a presigned URL of a ready export's file, counted and audited.
 	DownloadExport(ctx context.Context, a authz.Actor, eventID, exportID uuid.UUID) (ExportDownload, error)
+
+	// ListMyStaffEvents is listMyStaffEvents (events.staff_event.list_own,
+	// O; BE-095): the upcoming and running published events whose door
+	// the caller may work (events.checkin.create on each), soonest first.
+	ListMyStaffEvents(ctx context.Context, a authz.Actor, q MyEventsQuery) (StaffEventPage, error)
+	// ListMyClubEvents is listMyClubEvents (events.club_event.list_own, O;
+	// BE-095): the upcoming and running published events of the clubs the
+	// caller is an active member of or follows, as listEvents shows them
+	// to the caller (03 §3.6), soonest first.
+	ListMyClubEvents(ctx context.Context, a authz.Actor, q MyEventsQuery) (EventPage, error)
 }
 
 // Deps are the dependencies of the events module. Store, Tx, Outbox,
@@ -383,6 +403,9 @@ type Deps struct {
 	// Live publishes the live board's messages after a check-in or a void
 	// commits (BE-054; realtime.Hub). nil → nothing is published.
 	Live LivePublisher
+	// Follows lists the clubs the caller follows (feed; BE-095). nil →
+	// listMyClubEvents lists the caller's member clubs only.
+	Follows Follows
 	// Destructions records each export file events.purge_exports deletes
 	// in destruction_logs (T-318, BE-083; kvkk through hooks.destruction).
 	// nil → the purge refuses (a destruction must not go unrecorded) and

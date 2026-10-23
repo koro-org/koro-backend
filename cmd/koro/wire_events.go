@@ -9,11 +9,15 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"koro/internal/authz"
 	"koro/internal/events"
+	"koro/internal/feed"
 	"koro/internal/notify"
+	"koro/internal/orgs"
 	"koro/internal/platform/crypto"
 	"koro/internal/platform/crypto/rewrap"
 	"koro/internal/platform/db"
+	"koro/internal/platform/page"
 	"koro/internal/platform/privacy"
 	"koro/internal/platform/realtime"
 	"koro/internal/students"
@@ -69,6 +73,12 @@ import (
 // BE-083 (T-318) consumes hooks.destruction (kvkk, L13, read at call time)
 // as events.Destructions: the purge records each deleted export file in
 // destruction_logs in its transaction; a nil hook refuses the purge.
+//
+// BE-095 consumes c.feed.svc (L9, built after events; read at call time,
+// as outreach does) as events.Follows: the clubs the caller follows for
+// listMyClubEvents, paged through feed's own listMyFollows use case
+// (feed.follow.list_own on the caller's own list). Without the feed only
+// the member clubs are listed.
 //
 // Provided, set in build: svc (events.Events for feed and catalog), the
 // students hook c.students.registrations (T-241: events.Registrations
@@ -145,6 +155,7 @@ func (w *eventsWiring) build(c *container) error {
 		d.Files = svc
 	}
 	d.Destructions = eventsDestructions{c: c} // T-318 (BE-083)
+	d.Follows = eventsFollows{c: c}           // BE-095
 	if svc := c.consent.svc; svc != nil {
 		d.Notices, d.Consents = svc, svc
 	}
@@ -247,7 +258,7 @@ func (w *eventsWiring) tasks(c *container) {
 }
 
 // routes: the 12 operations of BE-024, the 7 of BE-026, the 8 of BE-028,
-// the 9 of BE-031 and the 3 of BE-050 (04 §2.6), and the live board's
+// the 9 of BE-031, the 3 of BE-050 and the 2 of BE-095 (04 §2.6), and the live board's
 // WebSocket (BE-054; a gin route, not an operation). w.svc and w.hub are
 // nil under `koro openapi`, which both tolerate.
 func (w *eventsWiring) routes(c *container, api huma.API) {
@@ -277,4 +288,35 @@ func (r eventsDestructions) Record(ctx context.Context, d privacy.Destruction) e
 		return errors.New("events: kvkk destruction record is not wired")
 	}
 	return h(ctx, d)
+}
+
+// eventsFollows adapts feed's listMyFollows (L9, built after events) to
+// events.Follows, read at call time (BE-095). It pages the caller's own
+// follows (feed.follow.list_own) and keeps the clubs; a feed that is not
+// wired follows nothing.
+type eventsFollows struct{ c *container }
+
+func (f eventsFollows) FollowedClubIDs(ctx context.Context, a authz.Actor, limit int) ([]uuid.UUID, error) {
+	svc := f.c.feed.svc
+	if svc == nil {
+		return nil, nil
+	}
+	out := []uuid.UUID{}
+	q := feed.PageQuery{Limit: page.MaxLimit}
+	for len(out) < limit {
+		p, err := svc.ListFollows(ctx, a, q)
+		if err != nil {
+			return nil, err
+		}
+		for _, it := range p.Items {
+			if it.Org.Kind == orgs.KindClub && len(out) < limit {
+				out = append(out, it.Org.ID)
+			}
+		}
+		if p.Next == nil {
+			break
+		}
+		q.After = p.Next
+	}
+	return out, nil
 }

@@ -11823,6 +11823,112 @@ components:
         - last_name
         - role
       type: object
+    StaffEventDTO:
+      additionalProperties: false
+      properties:
+        capacity:
+          format: int64
+          type: integer
+        category:
+          type: string
+        checkin_enabled:
+          description: Whether check-in is on for the event (createCheckin answers 409 otherwise)
+          type: boolean
+        city:
+          type: string
+        cover_url:
+          description: Short-lived download URL (at most 5 minutes)
+          type: string
+        display_timezone:
+          enum:
+            - Europe/Istanbul
+          type: string
+        door_access:
+          description: "scanner: scan tickets, list check-ins and read the counters; manager: also void check-ins and close the attendance"
+          enum:
+            - scanner
+            - manager
+          type: string
+        ends_at:
+          format: date-time
+          type: string
+        event_id:
+          type: string
+        format:
+          enum:
+            - in_person
+            - online
+            - hybrid
+          type: string
+        location_name:
+          type: string
+        org:
+          $ref: "#/components/schemas/EventOrgDTO"
+        registration_mode:
+          enum:
+            - auto
+            - manual
+          type: string
+        requires_registration:
+          type: boolean
+        slug:
+          type: string
+        staff_role:
+          description: The caller's staff role on the event; absent when it works the door as one of the organiser's managers
+          enum:
+            - scanner
+            - manager
+          type: string
+        starts_at:
+          format: date-time
+          type: string
+        status:
+          enum:
+            - draft
+            - published
+            - cancelled
+            - completed
+          type: string
+        summary:
+          type: string
+        title:
+          type: string
+        visibility:
+          enum:
+            - public
+            - university
+            - members
+          type: string
+      required:
+        - checkin_enabled
+        - door_access
+        - event_id
+        - org
+        - title
+        - slug
+        - category
+        - format
+        - starts_at
+        - ends_at
+        - display_timezone
+        - visibility
+        - status
+        - requires_registration
+        - registration_mode
+      type: object
+    StaffEventList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/StaffEventDTO"
+          type: array
+        next_cursor:
+          description: Cursor of the next page; absent on the last page
+          type: string
+      required:
+        - items
+      type: object
     StaffList:
       additionalProperties: false
       properties:
@@ -23996,6 +24102,52 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+  /api/v1/me/club-events:
+    get:
+      description: Upcoming and running published events (not ended yet) of the clubs the caller is an active member of or follows, in one list. Visibility is listEvents' (a members-only event only for the club's members and the event's staff, a university event only for that university's verified students, the club's members and the staff), so a followed club's members-only events are not listed. The response does not say whether a club is followed or joined. Sorted by starts_at (soonest first); no total count.
+      operationId: listMyClubEvents
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventCardList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List upcoming events of my clubs
+      tags:
+        - events
+      x-koro-action: events.club_event.list_own
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
   /api/v1/me/company-blocks:
     get:
       description: Newest first.
@@ -26128,6 +26280,52 @@ paths:
         - identity
       x-koro-action: identity.session.revoke_own
       x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/me/staff-events:
+    get:
+      description: "Upcoming and running published events (not ended yet) the caller may scan tickets for: the events it is staff of (scanner or manager) and the events of the orgs it manages events of (club_admin, university_rep, career_staff; platform_admin for the platform org). Every listed event passes the same authorization as createCheckin. door_access tells what the caller may do at the door; checkin_enabled tells whether scanning is on. Sorted by starts_at (soonest first); no total count."
+      operationId: listMyStaffEvents
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffEventList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the events whose door I work
+      tags:
+        - events
+      x-koro-action: events.staff_event.list_own
+      x-koro-rate-limit: read_default
       x-koro-surface: self
   /api/v1/me/student-profile:
     get:

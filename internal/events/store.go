@@ -115,6 +115,15 @@ type Store interface {
 	// DeleteStaff removes a staff member; ErrNotFound when the user is not
 	// staff of the event.
 	DeleteStaff(ctx context.Context, orgID, eventID, userID uuid.UUID) error
+	// ListStaffEvents returns up to limit published events that end after
+	// f.EndsAfter and are organised by one of f.OrgIDs or staffed by
+	// f.UserID (event_staff), after the position after, by starts_at then
+	// id (listMyStaffEvents, BE-095). The door's authz of each event stays
+	// with the service.
+	ListStaffEvents(ctx context.Context, f StaffEventFilter, after *After, limit int) ([]Event, error)
+	// StaffRolesOf returns userID's staff role on each of eventIDs that has
+	// one (one query for a page of listMyStaffEvents, BE-095).
+	StaffRolesOf(ctx context.Context, userID uuid.UUID, eventIDs []uuid.UUID) (map[uuid.UUID]StaffRole, error)
 	// StaffOfUser returns every staff row of a user, oldest first (KVKK).
 	StaffOfUser(ctx context.Context, userID uuid.UUID) ([]Staff, error)
 	// DeleteStaffOfUser deletes every staff row of a user and reports how
@@ -157,6 +166,15 @@ type ListFilter struct {
 	// it to now when no date range is given: upcoming and running events).
 	EndsAfter *time.Time
 	Sort      string // SortStartsAt (default) or SortPublishedNew
+}
+
+// StaffEventFilter narrows ListStaffEvents (BE-095): the events whose door
+// UserID may work, as staff or through one of OrgIDs (the organisers the
+// caller manages events of), that have not ended at EndsAfter.
+type StaffEventFilter struct {
+	UserID    uuid.UUID
+	OrgIDs    []uuid.UUID
+	EndsAfter time.Time
 }
 
 // OrgListFilter narrows ListOrgEvents. Empty Statuses lists every status.

@@ -9,6 +9,7 @@ const (
 	EventsEventList             Action = "events.event.list"
 	EventsEventRead             Action = "events.event.read"
 	EventsEventListOrg          Action = "events.event.list_org"
+	EventsClubEventListOwn      Action = "events.club_event.list_own"
 	EventsEventCreate           Action = "events.event.create"
 	EventsEventUpdate           Action = "events.event.update"
 	EventsEventPublish          Action = "events.event.publish"
@@ -30,6 +31,7 @@ const (
 	EventsTicketReissue         Action = "events.ticket.reissue"
 	EventsStaffList             Action = "events.staff.list"
 	EventsStaffManage           Action = "events.staff.manage"
+	EventsStaffEventListOwn     Action = "events.staff_event.list_own"
 	EventsCheckinCreate         Action = "events.checkin.create"
 	EventsCheckinVoid           Action = "events.checkin.void"
 	EventsCheckinList           Action = "events.checkin.list"
@@ -54,6 +56,7 @@ var eventsActions = []Action{
 	EventsEventList,
 	EventsEventRead,
 	EventsEventListOrg,
+	EventsClubEventListOwn,
 	EventsEventCreate,
 	EventsEventUpdate,
 	EventsEventPublish,
@@ -75,6 +78,7 @@ var eventsActions = []Action{
 	EventsTicketReissue,
 	EventsStaffList,
 	EventsStaffManage,
+	EventsStaffEventListOwn,
 	EventsCheckinCreate,
 	EventsCheckinVoid,
 	EventsCheckinList,

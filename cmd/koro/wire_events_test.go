@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -9,8 +10,11 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/authz"
 	"koro/internal/events"
+	"koro/internal/feed"
 	"koro/internal/kvkk"
+	"koro/internal/orgs"
 	"koro/internal/platform/crypto/rewrap"
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
@@ -260,5 +264,52 @@ func TestWire_EventsExportDestructionHook(t *testing.T) {
 	c.hooks.destruction = nil
 	if err := rec.Record(t.Context(), d); err == nil {
 		t.Fatal("a nil hook recorded nothing and reported no error")
+	}
+}
+
+// stubFollows is feed.Service answering listMyFollows from pages (BE-095).
+type stubFollows struct {
+	feed.Service
+	pages []feed.OrgPage
+	seen  []*feed.After
+	actor authz.Actor
+}
+
+func (s *stubFollows) ListFollows(_ context.Context, a authz.Actor, q feed.PageQuery) (feed.OrgPage, error) {
+	s.seen, s.actor = append(s.seen, q.After), a
+	return s.pages[len(s.seen)-1], nil
+}
+
+// TestWire_EventsFollowsFromFeed pins BE-095's adapter of feed's
+// listMyFollows: it pages the caller's own follows, keeps the clubs, stops
+// at the limit and follows nothing without the feed.
+func TestWire_EventsFollowsFromFeed(t *testing.T) {
+	t.Parallel()
+	club1, club2, company, club3 := uuid.NewV7(), uuid.NewV7(), uuid.NewV7(), uuid.NewV7()
+	item := func(id uuid.UUID, k orgs.Kind) feed.OrgItem {
+		return feed.OrgItem{Org: orgs.OrgSummary{ID: id, Kind: k}}
+	}
+	next := &feed.After{At: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), ID: club2}
+	stub := &stubFollows{pages: []feed.OrgPage{
+		{Items: []feed.OrgItem{item(club1, orgs.KindClub), item(company, orgs.KindCompany), item(club2, orgs.KindClub)}, Next: next},
+		{Items: []feed.OrgItem{item(club3, orgs.KindClub)}},
+	}}
+	c := &container{}
+	f := eventsFollows{c: c}
+	me := authz.Actor{Kind: authz.KindUser, UserID: uuid.NewV7()}
+	if ids, err := f.FollowedClubIDs(t.Context(), me, 10); err != nil || len(ids) != 0 {
+		t.Fatalf("without the feed = %v, %v", ids, err)
+	}
+	c.feed.svc = stub
+	ids, err := f.FollowedClubIDs(t.Context(), me, 10)
+	if err != nil || !slices.Equal(ids, []uuid.UUID{club1, club2, club3}) {
+		t.Fatalf("followed clubs = %v, %v", ids, err)
+	}
+	if len(stub.seen) != 2 || stub.seen[0] != nil || stub.seen[1] != next || stub.actor.UserID != me.UserID {
+		t.Fatalf("pages asked = %v as %v", stub.seen, stub.actor)
+	}
+	stub.seen = nil
+	if ids, err := f.FollowedClubIDs(t.Context(), me, 1); err != nil || !slices.Equal(ids, []uuid.UUID{club1}) || len(stub.seen) != 1 {
+		t.Fatalf("limit 1 = %v, %v (%d pages)", ids, err, len(stub.seen))
 	}
 }

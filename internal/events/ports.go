@@ -183,3 +183,14 @@ type Destructions interface {
 	// sync-write: kvkk.DestructionRecorder.Record
 	Record(ctx context.Context, d privacy.Destruction) error
 }
+
+// Follows is what events needs from feed (L9, above events: late bound by
+// the composition root and read at call time, 01 §5.3) for
+// listMyClubEvents (BE-095): the clubs the caller follows (org_follows,
+// manual or automatic). It reads the caller's own list
+// (feed.follow.list_own) and never another user's.
+type Follows interface {
+	// FollowedClubIDs returns up to limit club orgs a follows, newest
+	// follow first.
+	FollowedClubIDs(ctx context.Context, a authz.Actor, limit int) ([]uuid.UUID, error)
+}

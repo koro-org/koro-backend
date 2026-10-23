@@ -229,7 +229,7 @@ type Deps struct {
 	// createOrgInvitation answers 503 and acceptOrgInvitation finds nothing.
 	Deriver *crypto.Deriver
 	// LinkBaseURL is the web application origin of the invitation link
-	// (IDENTITY_LINK_BASE_URL).
+	// (APP_LINK_BASE_URL; internal/platform/applink).
 	LinkBaseURL string
 }
 

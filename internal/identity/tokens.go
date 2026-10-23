@@ -10,6 +10,7 @@ import (
 	"uuid"
 
 	"koro/internal/notify"
+	"koro/internal/platform/applink"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/queue"
 	"koro/internal/platform/token"
@@ -44,11 +45,16 @@ const (
 )
 
 // Templates (internal/notify/templates/identity/, BE-001 R8).
-var tokenTemplates = map[TokenPurpose]struct{ template, path string }{
-	PurposeAccountEmail:  {"identity.verify_email", "/auth/verify-email"},
-	PurposePasswordReset: {"identity.password_reset", "/auth/reset-password"},
-	PurposeEmailChange:   {"identity.email_change", "/auth/confirm-email-change"},
-	PurposeEduEmail:      {"identity.edu_verify", "/auth/verify-edu"},
+// The link paths are the public client contract of internal/platform/applink
+// (BE-096).
+var tokenTemplates = map[TokenPurpose]struct {
+	template string
+	path     applink.TokenPath
+}{
+	PurposeAccountEmail:  {"identity.verify_email", applink.VerifyEmail},
+	PurposePasswordReset: {"identity.password_reset", applink.ResetPassword},
+	PurposeEmailChange:   {"identity.email_change", applink.ConfirmEmailChange},
+	PurposeEduEmail:      {"identity.edu_verify", applink.VerifyEdu},
 }
 
 const (
@@ -159,7 +165,7 @@ func (s *service) handleEmailTokenIssued(ctx context.Context, e domainevent.Enve
 		Template: tpl.template, Locale: u.Locale,
 		Data: map[string]any{
 			"name":          u.FirstName,
-			"link":          s.d.LinkBaseURL + tpl.path + "#token=" + raw,
+			"link":          applink.Token(s.d.LinkBaseURL, tpl.path, raw),
 			"token":         raw,
 			"valid_minutes": strconv.Itoa(minutes),
 		},
@@ -199,7 +205,7 @@ func (s *service) handleSecurityNotice(ctx context.Context, payload []byte) erro
 	msg := notify.Message{
 		UserID: &u.ID, ToEmail: u.Email, Channel: notify.ChannelEmail, Category: notify.CategoryTransactional,
 		Template: tpl, Locale: u.Locale,
-		Data:      map[string]any{"name": u.FirstName, "kind": n.Kind, "link": s.d.LinkBaseURL + "/auth/reset-password"},
+		Data:      map[string]any{"name": u.FirstName, "kind": n.Kind, "link": applink.Page(s.d.LinkBaseURL, string(applink.ResetPassword))},
 		DedupeKey: "identity.security:" + n.Ref.String(),
 	}
 	if _, err := s.d.Mailer.Send(ctx, msg); err != nil {

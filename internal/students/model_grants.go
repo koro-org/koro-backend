@@ -51,8 +51,12 @@ type AccessGrant struct {
 	RevokedAt     *time.Time  `gorm:"column:revoked_at"`
 	RevokedByKind *RevokedBy  `gorm:"column:revoked_by_kind"`
 	RevokeReason  *string     `gorm:"column:revoke_reason"`
-	CreatedAt     time.Time   `gorm:"column:created_at;->"`
-	UpdatedAt     time.Time   `gorm:"column:updated_at;->"`
+	// ContactSharedAt is when the student shared the e-mail with this
+	// grant's company (respondMyContactRequest share_contact; BE-089);
+	// nil = not shared.
+	ContactSharedAt *time.Time `gorm:"column:contact_shared_at"`
+	CreatedAt       time.Time  `gorm:"column:created_at;->"`
+	UpdatedAt       time.Time  `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -102,7 +106,8 @@ func (g AccessGrant) Status() GrantStatus {
 
 // view is the grant as the level 3 projections take it (dto.go Grant).
 func (g AccessGrant) view() Grant {
-	out := Grant{CompanyOrgID: g.CompanyOrgID, Active: g.Active(), GrantedAt: g.GrantedAt, Source: string(g.Source)}
+	out := Grant{CompanyOrgID: g.CompanyOrgID, Active: g.Active(), GrantedAt: g.GrantedAt, Source: string(g.Source),
+		ContactShared: g.ContactSharedAt != nil}
 	if g.Source == SourceContactRequest {
 		id := g.SourceID
 		out.ContactRequestID = &id

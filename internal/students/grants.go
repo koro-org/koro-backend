@@ -629,8 +629,9 @@ func (s *service) auditRead(ctx context.Context, a authz.Actor, orgID uuid.UUID,
 
 // companySource fills the level 3 source of a visible target: the full
 // view, the names, the clubs (only with show_clubs_on_grant: the
-// projection drops the sensitive ones) and the e-mail (only with
-// show_contact_on_grant and the contact_info_share consent in force, read
+// projection drops the sensitive ones) and the e-mail (only when the
+// student shared it with this company, contact_shared_at of its grant
+// (BE-089, T-345), and the contact_info_share consent is in force, read
 // now: T-237).
 func (s *service) companySource(ctx context.Context, t companyTarget) (CompanySource, error) {
 	v, err := s.view(ctx, t.profile, true)
@@ -655,7 +656,7 @@ func (s *service) companySource(ctx context.Context, t companyTarget) (CompanySo
 			return CompanySource{}, err
 		}
 	}
-	if v.Privacy.ShowContactOnGrant {
+	if t.grant.ContactSharedAt != nil {
 		if src.ContactConsent, err = s.consentActive(ctx, user, consent.PurposeContactInfoShare); err != nil {
 			return CompanySource{}, err
 		}

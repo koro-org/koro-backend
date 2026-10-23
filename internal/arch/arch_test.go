@@ -461,9 +461,11 @@ func TestSyncWritesAreAllowed(t *testing.T) {
 	// kvkk.DestructionRecorder.Record (BE-083: the destruction record of
 	// that purge in its transaction, T-318), + talent →
 	// kvkk.DestructionRecorder.Record (BE-087: the destruction record of the
-	// scores and cohorts deleted while collection is off, T-324).
-	if len(allow) != 34 {
-		t.Fatalf("sync_writes.txt has %d lines, want 34", len(allow))
+	// scores and cohorts deleted while collection is off, T-324), + messaging →
+	// students.ContactSharing.ShareContactWithCompany (BE-089: share_contact
+	// with the request's company in the acceptance's transaction, T-335).
+	if len(allow) != 35 {
+		t.Fatalf("sync_writes.txt has %d lines, want 35", len(allow))
 	}
 	for _, must := range []string{"kvkk files.Files.Delete", "feed entitlements.Entitlements.Release",
 		"outreach entitlements.Entitlements.Release", "feed outreach.Targeting.DiscardDispatch",
@@ -473,6 +475,7 @@ func TestSyncWritesAreAllowed(t *testing.T) {
 		"* audit.Logger.Log", "* files.Files.Attach", "payments orders.Orders.ApplyPayment", "payments ledger.Poster.Post",
 		"payments orders.Orders.ConfirmDirectPayment", "payments orders.Orders.ApplyRefund", "payments ledger.LedgerLines.LockPayees",
 		"directory orgs.OrgAdmin.GrantRole", "directory orgs.OrgAdmin.Create", "orders catalog.Offerings.Release",
+		"messaging students.ContactSharing.ShareContactWithCompany",
 	} {
 		if !allow[must] {
 			t.Errorf("sync_writes.txt lacks %q", must)

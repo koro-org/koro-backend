@@ -22,6 +22,10 @@ import (
 // addressed by user_id, and an experience is read and written only
 // together with its owner's user_id (IDOR: another user's ID is not found).
 type Store interface {
+	// grantContacts is the per-company contact sharing of the level 3
+	// grants (store_contact.go; BE-089).
+	grantContacts
+
 	// GetProfile returns the profile of userID or ErrNotFound.
 	GetProfile(ctx context.Context, userID uuid.UUID) (Profile, error)
 	// LockProfile returns the profile locked for the rest of the

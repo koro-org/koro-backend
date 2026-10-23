@@ -113,7 +113,7 @@ type StudentExperienceDTO struct {
 // ranking choice only, never a talent value.
 type StudentPrivacyDTO struct {
 	Discoverable          bool   `json:"discoverable" doc:"Level 2: companies may find the anonymous profile (default off)"`
-	ShowContactOnGrant    bool   `json:"show_contact_on_grant" doc:"Level 3: the e-mail goes to a company whose contact request was accepted (default off)"`
+	ShowContactOnGrant    bool   `json:"show_contact_on_grant" doc:"Your contact_info_share consent and the default of \"share my e-mail\" when you accept a contact request (default off). The e-mail goes only to the companies you share it with (per grant); turning this off stops every share"`
 	ShowClubsOnGrant      bool   `json:"show_clubs_on_grant" doc:"Level 3: non-sensitive club memberships (default off)"`
 	ActivityRankingChoice string `json:"activity_ranking_choice" enum:"default,enabled,disabled"`
 }
@@ -253,6 +253,9 @@ type Grant struct {
 	GrantedAt        time.Time
 	Source           string // contact_request | application
 	ContactRequestID *uuid.UUID
+	// ContactShared: the student shared the e-mail with this company
+	// (contact_shared_at; BE-089).
+	ContactShared bool
 }
 
 // Discoverable is Discoverable.IsDiscoverable (01 §4.9): level 2 on (and
@@ -470,7 +473,7 @@ func ToStudentProfileL3(src CompanySource, viewerOrg uuid.UUID, g Grant) (Studen
 			d.Clubs = append(d.Clubs, L3ClubDTO{OrgID: c.OrgID.String(), Name: c.Name, Role: c.Role})
 		}
 	}
-	if pr.ShowContactOnGrant && src.ContactConsent && src.Email != "" {
+	if g.ContactShared && src.ContactConsent && src.Email != "" {
 		d.Contact = &L3ContactDTO{Email: src.Email}
 	}
 	return d, nil

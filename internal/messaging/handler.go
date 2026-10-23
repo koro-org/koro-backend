@@ -2,15 +2,18 @@ package messaging
 
 import (
 	"context"
+	"encoding/hex"
 	"net/http"
 	"uuid"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
+	"koro/internal/consent"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
+	"koro/internal/students"
 )
 
 // Cursor sort keys.
@@ -79,10 +82,16 @@ func Register(api huma.API, svc Service) {
 		OperationID: "respondMyContactRequest", Method: http.MethodPost, Path: "/me/contact-requests/{request_id}/respond",
 		Summary: "Accept or decline a contact request",
 		Description: "accepted gives the company level 3 access to your profile (it can then see your full profile " +
-			"and current CV; contact details only if you share them in your privacy settings) and needs an active " +
-			"student verification (403 students.verification_required). declined needs no reason and the company " +
-			"is never given one. A request that is no longer pending is 409 messaging.invalid_state; the same " +
-			"answer again changes nothing.",
+			"and current CV) and needs an active student verification (403 students.verification_required). " +
+			"share_contact (only with accepted) also shares your e-mail with this company alone, in the same step, " +
+			"with the contact_info_share consent text you were shown (consent.contact_info_share; 422 " +
+			"consent.proof_required without it, the consent errors of updateMyPrivacy for a text that is not the " +
+			"current one). No other company starts seeing it. Take it back for this company with " +
+			"unshareMyAccessGrantContact, end its access with revokeMyAccessGrant, or stop every share with " +
+			"updateMyPrivacy (show_contact_on_grant: false; the setting is also the default of this box). If the " +
+			"sharing cannot be recorded, nothing is accepted. declined needs no reason and the company is never " +
+			"given one. A request that is no longer pending is 409 " +
+			"messaging.invalid_state; the same answer again changes nothing (a sharing included).",
 	}, op.Meta{
 		Action: string(authz.MessagingContactRequestRespond), Surface: op.SurfaceSelf, Idempotency: op.IdempotencyOptional,
 	}), h.respond)
@@ -311,15 +320,28 @@ func (h handler) getMine(ctx context.Context, in *mineInput) (*studentOutput, er
 // ---- respondMyContactRequest
 
 // RespondContactRequestBody is the request of respondMyContactRequest. A
-// decline takes no reason (04 §2.9).
+// decline takes no reason (04 §2.9); share_contact goes with an acceptance
+// and the contact_info_share text shown (T-335; BE-089).
 type RespondContactRequestBody struct {
-	Decision string `json:"decision" enum:"accepted,declined"`
+	Decision     string `json:"decision" enum:"accepted,declined"`
+	ShareContact bool   `json:"share_contact,omitempty" doc:"Also share your e-mail with this company alone; only with accepted (default false: nothing is shared)"`
+	Consent      *struct {
+		ContactInfoShare *ContactShareConsentProof `json:"contact_info_share,omitempty" doc:"Required with share_contact"`
+	} `json:"consent,omitempty" doc:"The consent text shown for share_contact"`
+}
+
+// ContactShareConsentProof is the consent text a student saw (04 §2.4, as in
+// updateMyPrivacy).
+type ContactShareConsentProof struct {
+	NoticeVersionID string `json:"notice_version_id" format:"uuid" doc:"The current consent text of contact_info_share"`
+	TextSHA256      string `json:"text_sha256" pattern:"^[0-9a-f]{64}$" doc:"body_sha256 of that text"`
 }
 
 type respondInput struct {
 	idempotency.OptionalHeader
 	MyRequestPath
-	Body RespondContactRequestBody
+	Client string `header:"X-Koro-Client" enum:"web,mobile" doc:"Client kind; recorded as the consent channel of share_contact (default web)"`
+	Body   RespondContactRequestBody
 }
 
 func (h handler) respond(ctx context.Context, in *respondInput) (*studentOutput, error) {
@@ -327,11 +349,33 @@ func (h handler) respond(ctx context.Context, in *respondInput) (*studentOutput,
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.Respond(ctx, a, parseID(in.RequestID), Decision(in.Body.Decision))
+	r := RespondInput{Decision: Decision(in.Body.Decision), ShareContact: in.Body.ShareContact, Channel: consent.ChannelWeb}
+	if in.Client == "mobile" {
+		r.Channel = consent.ChannelMobile
+	}
+	if c := in.Body.Consent; c != nil && c.ContactInfoShare != nil {
+		if r.ContactConsent, err = proofOf("body.consent.contact_info_share", c.ContactInfoShare); err != nil {
+			return nil, err
+		}
+	}
+	v, err := h.svc.Respond(ctx, a, parseID(in.RequestID), r)
 	if err != nil {
 		return nil, err
 	}
 	return &studentOutput{Body: ToStudentDTO(v)}, nil
+}
+
+// proofOf decodes a consent proof (422 on a malformed one).
+func proofOf(loc string, b *ContactShareConsentProof) (*students.ConsentProof, error) {
+	id, err := uuid.Parse(b.NoticeVersionID)
+	if err != nil {
+		return nil, fieldErr(loc+".notice_version_id", "must be a UUID")
+	}
+	sum, err := hex.DecodeString(b.TextSHA256)
+	if err != nil || len(sum) != 32 {
+		return nil, fieldErr(loc+".text_sha256", "must be 64 hex characters")
+	}
+	return &students.ConsentProof{NoticeVersionID: id, TextSHA256: sum}, nil
 }
 
 // ---- blockCompany, unblockCompany, listMyCompanyBlocks

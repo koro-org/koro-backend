@@ -3534,6 +3534,21 @@ components:
       required:
         - items
       type: object
+    ContactShareConsentProof:
+      additionalProperties: false
+      properties:
+        notice_version_id:
+          description: The current consent text of contact_info_share
+          format: uuid
+          type: string
+        text_sha256:
+          description: body_sha256 of that text
+          pattern: ^[0-9a-f]{64}$
+          type: string
+      required:
+        - notice_version_id
+        - text_sha256
+      type: object
     CountAudienceInputBody:
       additionalProperties: false
       properties:
@@ -11258,13 +11273,26 @@ components:
     RespondContactRequestBody:
       additionalProperties: false
       properties:
+        consent:
+          $ref: "#/components/schemas/RespondContactRequestBodyConsentStruct"
+          description: The consent text shown for share_contact
         decision:
           enum:
             - accepted
             - declined
           type: string
+        share_contact:
+          description: "Also share your e-mail with this company alone; only with accepted (default false: nothing is shared)"
+          type: boolean
       required:
         - decision
+      type: object
+    RespondContactRequestBodyConsentStruct:
+      additionalProperties: false
+      properties:
+        contact_info_share:
+          $ref: "#/components/schemas/ContactShareConsentProof"
+          description: Required with share_contact
       type: object
     RetentionPolicyDTO:
       additionalProperties: false
@@ -11803,6 +11831,10 @@ components:
       properties:
         company:
           $ref: "#/components/schemas/StudentGrantCompanyDTO"
+        contact_shared_at:
+          description: "Since when this company sees your e-mail (you shared it when you accepted its contact request); absent: not shared. unshareMyAccessGrantContact stops it"
+          format: date-time
+          type: string
         grant_id:
           format: uuid
           type: string
@@ -12076,7 +12108,7 @@ components:
           description: "Level 3: non-sensitive club memberships (default off)"
           type: boolean
         show_contact_on_grant:
-          description: "Level 3: the e-mail goes to a company whose contact request was accepted (default off)"
+          description: Your contact_info_share consent and the default of "share my e-mail" when you accept a contact request (default off). The e-mail goes only to the companies you share it with (per grant); turning this off stops every share
           type: boolean
       required:
         - discoverable
@@ -23731,6 +23763,36 @@ paths:
       x-koro-action: students.access_grant.list_own
       x-koro-rate-limit: read_default
       x-koro-surface: self
+  /api/v1/me/access-grants/{grant_id}/contact:
+    delete:
+      description: The company of this grant stops seeing your e-mail at once; its level 3 access to your profile stays (revokeMyAccessGrant ends it). You shared the e-mail with this company only, when you accepted its contact request with share_contact. No student verification is needed. A grant that does not share it changes nothing; another user's grant is 404.
+      operationId: unshareMyAccessGrantContact
+      parameters:
+        - description: Grant ID (another user's or a malformed ID is 404)
+          in: path
+          name: grant_id
+          required: true
+          schema:
+            description: Grant ID (another user's or a malformed ID is 404)
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Stop sharing my contact details with a company
+      tags:
+        - students
+      x-koro-action: students.access_grant.revoke
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
   /api/v1/me/access-grants/{grant_id}/resume:
     post:
       description: "Gives the named company level 3 access again to a grant suspended when your student verification lapsed: an explicit consent, possible only with an active student verification (403 students.verification_required) and only until resumable_until (409 students.resume_window_expired; the company then needs a new contact request). A grant that is not suspended is 409 students.invalid_state; another user's grant is 404. The company is not notified."
@@ -24200,7 +24262,7 @@ paths:
       x-koro-surface: self
   /api/v1/me/contact-requests/{request_id}/respond:
     post:
-      description: accepted gives the company level 3 access to your profile (it can then see your full profile and current CV; contact details only if you share them in your privacy settings) and needs an active student verification (403 students.verification_required). declined needs no reason and the company is never given one. A request that is no longer pending is 409 messaging.invalid_state; the same answer again changes nothing.
+      description: "accepted gives the company level 3 access to your profile (it can then see your full profile and current CV) and needs an active student verification (403 students.verification_required). share_contact (only with accepted) also shares your e-mail with this company alone, in the same step, with the contact_info_share consent text you were shown (consent.contact_info_share; 422 consent.proof_required without it, the consent errors of updateMyPrivacy for a text that is not the current one). No other company starts seeing it. Take it back for this company with unshareMyAccessGrantContact, end its access with revokeMyAccessGrant, or stop every share with updateMyPrivacy (show_contact_on_grant: false; the setting is also the default of this box). If the sharing cannot be recorded, nothing is accepted. declined needs no reason and the company is never given one. A request that is no longer pending is 409 messaging.invalid_state; the same answer again changes nothing (a sharing included)."
       operationId: respondMyContactRequest
       parameters:
         - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
@@ -24218,6 +24280,15 @@ paths:
           required: true
           schema:
             description: Contact request ID (an unknown, malformed or another user's ID is 404)
+            type: string
+        - description: Client kind; recorded as the consent channel of share_contact (default web)
+          in: header
+          name: X-Koro-Client
+          schema:
+            description: Client kind; recorded as the consent channel of share_contact (default web)
+            enum:
+              - web
+              - mobile
             type: string
       requestBody:
         content:
@@ -25471,7 +25542,7 @@ paths:
       x-koro-rate-limit: read_default
       x-koro-surface: self
     patch:
-      description: "discoverable (level 2) and show_contact_on_grant (level 3 e-mail) mirror explicit consents: turning one on needs the consent text shown (consent.discovery_profile / consent.contact_info_share: notice_version_id and text_sha256), turning it off withdraws the consent; the setting and the consent record change in one transaction. Users under 18 cannot turn either on (422 students.minor_restricted). Every change is audited."
+      description: "discoverable (level 2) and show_contact_on_grant (the contact_info_share consent) mirror explicit consents: turning one on needs the consent text shown (consent.discovery_profile / consent.contact_info_share: notice_version_id and text_sha256), turning it off withdraws the consent; the setting and the consent record change in one transaction. The e-mail goes only to the companies you share it with when you accept their contact requests (share_contact; show_contact_on_grant is the default of that box); turning show_contact_on_grant off stops every share at once. Users under 18 cannot turn either on (422 students.minor_restricted). Every change is audited."
       operationId: updateMyPrivacy
       parameters:
         - description: Client kind; recorded as the consent channel (default web)

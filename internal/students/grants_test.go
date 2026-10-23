@@ -14,6 +14,7 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
+	"koro/internal/consent"
 	"koro/internal/files"
 	"koro/internal/identity"
 	"koro/internal/platform/problem"
@@ -180,8 +181,11 @@ func TestCompanyProfile_L3DTOFieldsOnly(t *testing.T) {
 	}
 	e.orgs.join(s.UserID, e.clubPlain, authz.MemberMember)
 	e.orgs.join(s.UserID, e.clubSens, authz.MemberClubAdmin)
-	if _, err := e.svc.UpdateMyPrivacy(ctx, s, students.PrivacyPatch{ShowClubsOnGrant: ptr(true), ShowContactOnGrant: ptr(true),
-		ContactConsent: proof()}); err != nil {
+	if _, err := e.svc.UpdateMyPrivacy(ctx, s, students.PrivacyPatch{ShowClubsOnGrant: ptr(true)}); err != nil {
+		t.Fatal(err)
+	}
+	// The e-mail is shared with this company at the acceptance (BE-089).
+	if err := e.svc.ShareContactWithCompany(ctx, s, org, *proof(), consent.ChannelWeb, req); err != nil {
 		t.Fatal(err)
 	}
 

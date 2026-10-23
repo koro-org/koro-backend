@@ -128,6 +128,12 @@ func (s *service) UpdateMyPrivacy(ctx context.Context, a authz.Actor, patch Priv
 			}
 			changed[string(m.purpose)+"_consent_id"] = id.String()
 		}
+		// Contact sharing off stops it with every company (BE-089).
+		if cur.ShowContactOnGrant && !next.ShowContactOnGrant {
+			if err := s.clearContactShares(ctx, a); err != nil {
+				return err
+			}
+		}
 		if _, ok := changed["activity_ranking_choice"]; ok {
 			if err := s.emitOutbox(ctx, domainevent.StudentRankingChoiceChanged{
 				UserID: a.UserID, Choice: string(next.ActivityRankingChoice),

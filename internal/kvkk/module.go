@@ -204,6 +204,10 @@ type Module struct {
 	// Sweeper ends the retention of closed requests and breaches and of the
 	// destruction record (02 §24.2; BE-057).
 	Sweeper privacy.RetentionSweeper
+	// Destructions records the destructions the module jobs run on their
+	// own clock (events.purge_exports; T-318, BE-083) in destruction_logs,
+	// in the caller's transaction: cmd/koro fills hooks.destruction with it.
+	Destructions privacy.DestructionRecorder
 
 	svc *service
 }
@@ -214,7 +218,8 @@ func New(d Deps) (Module, error) {
 		return Module{}, err
 	}
 	s := &service{d: d}
-	return Module{Service: s, Privacy: privacyProvider{s: s}, Sweeper: sweeper{s: s}, svc: s}, nil
+	return Module{Service: s, Privacy: privacyProvider{s: s}, Sweeper: sweeper{s: s},
+		Destructions: destructionRecorder{s: s}, svc: s}, nil
 }
 
 // Subscribe registers the outbox subscriptions of kvkk (01 §6.2) on the

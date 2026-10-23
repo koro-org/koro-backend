@@ -41,6 +41,10 @@ import (
 // signs an approved erasure's subject out after the commit (06 H-49);
 // identity's PlatformAdmins receive the breach alerts; kvkk fills
 // hooks.retention (the platform cleanup periods from retention_policies).
+//
+// BE-083 (T-318): kvkk fills hooks.destruction with its
+// privacy.DestructionRecorder (the destruction_logs row of a module job's
+// destruction, in the caller's transaction; events.purge_exports).
 type kvkkWiring struct {
 	store   kvkk.Store
 	records kvkk.RecordStore
@@ -107,6 +111,7 @@ func (w *kvkkWiring) build(c *container) error {
 	c.privacy = append(c.privacy, mod.Privacy)
 	c.sweepers = append(c.sweepers, mod.Sweeper)
 	c.hooks.retention = mod.RetentionPeriod
+	c.hooks.destruction = mod.Destructions.Record // T-318 (BE-083): events.purge_exports
 	return nil
 }
 

@@ -116,3 +116,9 @@ payments  -> orders.Orders.ApplyRefund
 # snapshots, refunds and receipt reservations; this port changes no persistent
 # row and shares the caller's transaction (ticket DocPatch, 01 §6.3).
 payments  -> ledger.LedgerLines.LockPayees
+
+# BE-083 (T-318; rationale for 01 §6.3 in the BE-083 ticket's doc patch): events.purge_exports records the
+# deletion of a registration export file in kvkk's destruction_logs in the transaction that deletes the file
+# and marks the export purged (late bound through hooks.destruction: kvkk is L13), so a destruction never
+# commits without its record nor a record without its destruction, like kvkk.purge_exports' own rows.
+events    -> kvkk.DestructionRecorder.Record

@@ -460,6 +460,7 @@ type env struct {
 	files   files.Service                               // the real files service over in-memory storage (BE-050)
 	objects *storage.Mem                                // its object storage
 	reauth  *audittest.LateReauth[identity.ReauthProof] // reauth{} with an overload switch (BE-050)
+	destr   *spyDestructions                            // kvkk's destruction record (BE-083, T-318)
 	svc     events.Service
 	mod     events.Module
 }
@@ -490,6 +491,7 @@ func newEnv(t *testing.T, opts ...func(*events.Deps)) *env {
 		users:   fakeUsers{suspended: map[uuid.UUID]bool{}, erased: map[uuid.UUID]bool{}},
 		notices: &fakeNotices{missing: map[consent.Purpose]bool{}}, consent: &spyRecorder{}, sender: &spySender{},
 		queue: queue.NewMem(), objects: storage.NewMem(clk), reauth: &audittest.LateReauth[identity.ReauthProof]{Next: reauth{}},
+		destr: &spyDestructions{},
 	}
 	e.sender.mail, e.mailbox, e.prefs = realMail(t, clk)
 	e.store = &spyStore{MemStore: e.mem}
@@ -508,7 +510,7 @@ func newEnv(t *testing.T, opts ...func(*events.Deps)) *env {
 		Idempotency: idem, Clock: clk, Log: obs.Discard(), Users: e.users, Notices: e.notices,
 		Consents: e.consent, Sealer: testEnvelope(), Tickets: testDeriver(), Sender: e.sender,
 		QR: events.NewQRRenderer(), Contacts: e.users, Queue: e.queue, LinkBaseURL: "https://koro.test", ICSOrganizer: "noreply@koro.test",
-		Files: e.files, Reauth: e.reauth,
+		Files: e.files, Reauth: e.reauth, Destructions: e.destr,
 	}
 	for _, o := range opts {
 		o(&d)

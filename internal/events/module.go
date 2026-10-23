@@ -382,6 +382,11 @@ type Deps struct {
 	// Live publishes the live board's messages after a check-in or a void
 	// commits (BE-054; realtime.Hub). nil → nothing is published.
 	Live LivePublisher
+	// Destructions records each export file events.purge_exports deletes
+	// in destruction_logs (T-318, BE-083; kvkk through hooks.destruction).
+	// nil → the purge refuses (a destruction must not go unrecorded) and
+	// the files wait for the next run.
+	Destructions Destructions
 }
 
 func (d Deps) validate() error {

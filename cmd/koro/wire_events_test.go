@@ -10,6 +10,7 @@ import (
 	"uuid"
 
 	"koro/internal/events"
+	"koro/internal/kvkk"
 	"koro/internal/platform/crypto/rewrap"
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
@@ -223,5 +224,41 @@ func TestWire_EventsLiveBoard(t *testing.T) {
 	}
 	if _, err := c.events.hub.Admit(t.Context(), events.LiveTopic(uuid.NewV7()), uuid.NewV7()); err == nil {
 		t.Fatal("the hub admits connections after the shutdown hooks ran")
+	}
+}
+
+// TestWire_EventsExportDestructionHook pins BE-083 (T-318): kvkk fills
+// hooks.destruction and events reads it at call time, so the export purge
+// writes its destruction_logs row through kvkk's recorder (the policy's
+// owner checked); without the hook the purge's record fails closed.
+func TestWire_EventsExportDestructionHook(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	if c.hooks.destruction == nil {
+		t.Fatal("kvkk did not fill hooks.destruction")
+	}
+	mem, ok := c.kvkk.records.(*kvkk.MemRecords)
+	if !ok {
+		t.Fatalf("kvkk records = %T, want the in-memory store", c.kvkk.records)
+	}
+	mem.PutPolicy(kvkk.Policy{Code: events.PolicyExportFile, OwnerModule: "events", Target: "files:event_export",
+		Period: kvkk.Period{Days: 7}, Anchor: "expires_at", Method: privacy.MethodFileDelete, Enabled: true})
+	rec := eventsDestructions{c: c}
+	run := uuid.NewV7()
+	d := privacy.Destruction{PolicyCode: events.PolicyExportFile, RunID: run, Module: "events",
+		Method: privacy.MethodFileDelete, Count: 1, Details: map[string]any{"job": events.PurgeExportsJobName}}
+	if err := rec.Record(t.Context(), d); err != nil {
+		t.Fatalf("Record through the hook: %v", err)
+	}
+	rows, err := mem.DestructionLogsOfRun(t.Context(), run)
+	if err != nil || len(rows) != 1 || rows[0].Module != "events" || rows[0].Target != "files:event_export" {
+		t.Fatalf("destruction rows = %+v, %v", rows, err)
+	}
+	c.hooks.destruction = nil
+	if err := rec.Record(t.Context(), d); err == nil {
+		t.Fatal("a nil hook recorded nothing and reported no error")
 	}
 }

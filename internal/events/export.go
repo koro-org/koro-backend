@@ -50,7 +50,8 @@ import (
 //     before the presigned URL (≤ 5 minutes) is returned (03 §6.5).
 //   - events.purge_exports (hourly :25): a ready export's file is deleted
 //     at expires_at (created_at + event_export_file, 7 days) in the
-//     transaction that clears file_id (status purged, purged_at); lost
+//     transaction that clears file_id (status purged, purged_at) with its
+//     destruction_logs row (kvkk through hooks.destruction; T-318); lost
 //     build tasks are queued again, builds that never ran give up after a
 //     day (failed). The row is the 2-year accountability record
 //     (event_export_log, the events sweeper).

@@ -97,3 +97,34 @@ func SubjectFrom(ctx context.Context) (Subject, bool) {
 	s, ok := ctx.Value(subjectKey{}).(Subject)
 	return s, ok
 }
+
+// Destruction is one destruction record row (02 §16.3) of a destruction a
+// module runs outside kvkk.retention_sweep (T-318: events.purge_exports
+// deletes an export file at its expiry). The sweepers return a SweepResult
+// and kvkk records their run; a module job that destroys on its own clock
+// records each destruction through a DestructionRecorder instead, so every
+// destruction of personal data leaves its row in the same place.
+//
+// It carries no personal data: counts, opaque identifiers (a file id) and
+// the job name only.
+type Destruction struct {
+	PolicyCode   string    // retention_policies.code; its owner_module must be Module
+	RunID        uuid.UUID // the rows of one job run share it
+	Module       string    // the destroying module ("events")
+	Target       string    // empty → the policy's target ("files:event_export")
+	Method       string    // Method* constants
+	Count        int       // records destroyed (≥ 0)
+	PeriodCutoff time.Time // the anchor values at or before it were destroyed
+	StartedAt    time.Time
+	FinishedAt   time.Time
+	Details      map[string]any // no personal data (job, file_id, ...)
+}
+
+// DestructionRecorder appends destruction record rows. kvkk implements it
+// (it owns destruction_logs); cmd/koro hands it to the modules late bound
+// (hooks.destruction), so no module imports kvkk.
+type DestructionRecorder interface {
+	// Record appends one row in the caller's transaction (ctx), so the row
+	// commits with the destruction or not at all.
+	Record(ctx context.Context, d Destruction) error
+}

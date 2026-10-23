@@ -21,6 +21,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/files"
 	"koro/internal/platform/clock"
+	"koro/internal/platform/privacy"
 	"koro/internal/platform/queue"
 	"koro/internal/platform/textx"
 	"koro/internal/students"
@@ -439,7 +440,8 @@ func (s *service) purgeExportsJob() queue.Job {
 
 // purgeExports deletes the file of every ready export past expires_at
 // (one transaction per export: status purged, file_id cleared, the file
-// deleted, audited as events.export.purge), queues the build of exports
+// deleted, audited as events.export.purge and recorded in destruction_logs
+// as event_export_file, one row per file; T-318), queues the build of exports
 // whose task was lost and fails the ones queued for a day. It never waits
 // for the legal approval of event_export_file: the file lives 7 days (06
 // H-48 pattern). It returns how many files it deleted.
@@ -449,6 +451,7 @@ func (s *service) purgeExports(ctx context.Context) (int, error) {
 		return 0, queue.Permanent(err)
 	}
 	now := s.now()
+	runID := uuid.NewV7()
 	purged, after := 0, uuid.Nil()
 	for {
 		rows, err := s.d.Store.ExportsDue(ctx, now, after, s.batch)
@@ -457,7 +460,7 @@ func (s *service) purgeExports(ctx context.Context) (int, error) {
 		}
 		for _, x := range rows {
 			after = x.ID
-			ok, err := s.purgeExport(ctx, sys, x, now)
+			ok, err := s.purgeExport(ctx, sys, x, now, runID)
 			if err != nil {
 				return purged, err
 			}
@@ -479,11 +482,17 @@ func (s *service) purgeExports(ctx context.Context) (int, error) {
 }
 
 // purgeExport deletes the file of x under its row lock; false when another
-// run got there first.
-func (s *service) purgeExport(ctx context.Context, sys authz.Actor, x Export, now time.Time) (bool, error) {
+// run got there first. The destruction_logs row (T-318) is written in the
+// same transaction: the status change makes a repeated run a no-op, so a
+// file is recorded once, and a failed record rolls the deletion back.
+func (s *service) purgeExport(ctx context.Context, sys authz.Actor, x Export, now time.Time, runID uuid.UUID) (bool, error) {
 	if s.d.Files == nil {
 		return false, errors.New("events: files is not wired: export files not purged")
 	}
+	if s.d.Destructions == nil {
+		return false, errors.New("events: destruction record is not wired: export files not purged")
+	}
+	started := s.now()
 	done := false
 	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		cur, err := s.d.Store.LockExport(ctx, x.OrgID, x.EventID, x.ID)
@@ -505,8 +514,13 @@ func (s *service) purgeExport(ctx context.Context, sys authz.Actor, x Export, no
 			return err
 		}
 		done = true
-		return s.d.Audit.Log(ctx, auditEvent(sys, authz.EventsExportPurge, exportAggType, cur.ID, cur.OrgID, "", map[string]any{
-			"policy_code": PolicyExportFile, "event_id": cur.EventID.String(), "file_id": fileID.String()}))
+		if err := s.d.Audit.Log(ctx, auditEvent(sys, authz.EventsExportPurge, exportAggType, cur.ID, cur.OrgID, "", map[string]any{
+			"policy_code": PolicyExportFile, "event_id": cur.EventID.String(), "file_id": fileID.String()})); err != nil {
+			return err
+		}
+		return s.d.Destructions.Record(ctx, privacy.Destruction{PolicyCode: PolicyExportFile, RunID: runID, Module: "events",
+			Target: "files:" + string(files.PurposeEventExport), Method: privacy.MethodFileDelete, Count: 1, PeriodCutoff: now, StartedAt: started,
+			FinishedAt: s.now(), Details: map[string]any{"job": PurgeExportsJobName, "file_id": fileID.String()}})
 	})
 	return done, err
 }

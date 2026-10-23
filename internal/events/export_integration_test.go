@@ -4,6 +4,7 @@ package events_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 	"uuid"
@@ -35,7 +36,9 @@ func TestStore_ExportContract_Gorm(t *testing.T) {
 // worker stores and attaches the file (the row ready, files.attached_*
 // set), a download is counted in the database, and the 7-day purge clears
 // file_id and deletes the files row in one transaction (the FK
-// event_data_exports_file_id_fkey would refuse the delete otherwise).
+// event_data_exports_file_id_fkey would refuse the delete otherwise) with
+// its destruction record (T-318, BE-083): a failing record rolls the
+// deletion back, the file and its reference stay for the next run.
 func TestExportFlow_Postgres(t *testing.T) {
 	t.Parallel()
 	d := testutil.NewDB(t)
@@ -54,10 +57,11 @@ func TestExportFlow_Postgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	destr := &spyDestructions{}
 	mod, err := events.New(events.Deps{
 		Store: e.store, Tx: d.Tx, Outbox: e.out, Audit: e.audit, Orgs: fo, Catalog: fakeCatalog{}, Idempotency: idem,
 		Clock: clk, Log: obs.Discard(), Consents: &spyRecorder{}, Sealer: testEnvelope(), Tickets: testDeriver(),
-		Sender: &spySender{}, Files: fm.Service, Reauth: reauth{}, Queue: q,
+		Sender: &spySender{}, Files: fm.Service, Reauth: reauth{}, Queue: q, Destructions: destr,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -107,12 +111,30 @@ func TestExportFlow_Postgres(t *testing.T) {
 		t.Fatalf("download_count = %d", n)
 	}
 	clk.Advance(events.ExportLifetime)
-	for _, j := range mod.Jobs() {
-		if j.Name == events.PurgeExportsJobName {
-			if err := j.Handle(ctx); err != nil {
-				t.Fatal(err)
+	purge := func() error {
+		for _, j := range mod.Jobs() {
+			if j.Name == events.PurgeExportsJobName {
+				return j.Handle(ctx)
 			}
 		}
+		t.Fatal("events.purge_exports is not registered")
+		return nil
+	}
+	destr.fail = errors.New("destruction_logs unavailable")
+	if err := purge(); err == nil {
+		t.Fatal("the purge succeeded without its destruction record")
+	}
+	if n := e.count(t, `SELECT count(*) FROM event_data_exports x JOIN files f ON f.id = x.file_id
+		WHERE x.id = $1 AND x.status = 'ready' AND x.purged_at IS NULL`, x.ID); n != 1 {
+		t.Fatal("a failed destruction record did not roll the purge back")
+	}
+	destr.fail = nil
+	if err := purge(); err != nil {
+		t.Fatal(err)
+	}
+	if recs, _ := destr.all(); len(recs) != 1 || recs[0].PolicyCode != events.PolicyExportFile || recs[0].Count != 1 ||
+		recs[0].Target != "files:event_export" {
+		t.Fatalf("destruction records = %+v", recs)
 	}
 	if n := e.count(t, `SELECT count(*) FROM event_data_exports WHERE id = $1 AND status = 'purged' AND file_id IS NULL
 		AND purged_at IS NOT NULL`, x.ID); n != 1 {

@@ -160,6 +160,13 @@ type hooks struct {
 	// nil or not found → the config default (OUTBOX_RETENTION,
 	// WEBHOOK_PAYLOAD_RETENTION, WEBHOOK_ROW_RETENTION).
 	retention func(ctx context.Context, code string) (period time.Duration, found bool, err error)
+
+	// destruction appends one destruction_logs row in the caller's
+	// transaction (02 §16.3) for a destruction a module job runs on its own
+	// clock (T-318: events.purge_exports). Provider: kvkk (BE-083).
+	// Consumer: events (BE-083). nil → the consumer refuses to destroy (the
+	// row must exist; the files wait for the next run).
+	destruction func(ctx context.Context, d privacy.Destruction) error
 }
 
 // hookClub is the result of hooks.clubInfo.

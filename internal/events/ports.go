@@ -13,6 +13,7 @@ import (
 	"koro/internal/identity"
 	"koro/internal/notify"
 	"koro/internal/orgs"
+	"koro/internal/platform/privacy"
 	"koro/internal/students"
 )
 
@@ -167,4 +168,18 @@ type Contacts interface {
 	// Contact returns the address of a live user or identity.ErrNotFound
 	// (unknown or erased: nothing is sent).
 	Contact(ctx context.Context, id uuid.UUID) (identity.UserContact, error)
+}
+
+// Destructions is what events needs from kvkk (L13, late bound through
+// hooks.destruction; privacy.DestructionRecorder): the destruction record
+// of an export file events.purge_exports deletes at its expiry (T-318,
+// BE-083; 02 §16.3), so the file's deletion is recorded where every other
+// destruction is.
+type Destructions interface {
+	// Record appends one destruction_logs row in the transaction that
+	// deletes the file and marks the export purged (01 §6.3), so the
+	// destruction commits with its record or not at all.
+	//
+	// sync-write: kvkk.DestructionRecorder.Record
+	Record(ctx context.Context, d privacy.Destruction) error
 }

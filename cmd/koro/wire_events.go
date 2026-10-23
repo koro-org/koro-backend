@@ -14,6 +14,7 @@ import (
 	"koro/internal/platform/crypto"
 	"koro/internal/platform/crypto/rewrap"
 	"koro/internal/platform/db"
+	"koro/internal/platform/privacy"
 	"koro/internal/platform/realtime"
 	"koro/internal/students"
 )
@@ -64,6 +65,10 @@ import (
 // createEventExport; nil → 503) and c.files.svc for the export files
 // (PutGenerated, Attach, PresignGet, Delete: the 7-day purge deletes the
 // file in the transaction that clears its reference, 01 §6.3).
+//
+// BE-083 (T-318) consumes hooks.destruction (kvkk, L13, read at call time)
+// as events.Destructions: the purge records each deleted export file in
+// destruction_logs in its transaction; a nil hook refuses the purge.
 //
 // Provided, set in build: svc (events.Events for feed and catalog), the
 // students hook c.students.registrations (T-241: events.Registrations
@@ -139,6 +144,7 @@ func (w *eventsWiring) build(c *container) error {
 	if svc := c.files.svc; svc != nil {
 		d.Files = svc
 	}
+	d.Destructions = eventsDestructions{c: c} // T-318 (BE-083)
 	if svc := c.consent.svc; svc != nil {
 		d.Notices, d.Consents = svc, svc
 	}
@@ -256,4 +262,17 @@ func (n eventsSender) Send(ctx context.Context, m notify.Message) (uuid.UUID, er
 		return uuid.Nil(), errors.New("events: notify is not wired")
 	}
 	return n.c.notify.svc.Send(ctx, m)
+}
+
+// eventsDestructions adapts hooks.destruction (kvkk, L13; filled after
+// events is built) to events.Destructions, read at call time. A missing
+// hook is an error: the purge rolls back rather than destroy unrecorded.
+type eventsDestructions struct{ c *container }
+
+func (r eventsDestructions) Record(ctx context.Context, d privacy.Destruction) error {
+	h := r.c.hooks.destruction
+	if h == nil {
+		return errors.New("events: kvkk destruction record is not wired")
+	}
+	return h(ctx, d)
 }

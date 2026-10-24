@@ -221,9 +221,28 @@ export function setup() {
       if (!party) throw new Error('the demo company has no verified buyer party');
       const offs = must(call('GET', '/api/v1/offerings?limit=100', { token: owner, name: 'setup_offerings' }), 200, 'offerings');
       // Model A bank-transfer offerings of the demo seed (db/seed/commerce.go).
+      // The service code alone is not enough: the Model C direct offering
+      // (db/seed/commerce_direct.go) sells demo_club_sponsorship too, and
+      // its bankless demo payee makes the order detail and the payment
+      // instructions 409 parties.no_approved_account. Offering cards carry
+      // no model, so one probe order per candidate tells it (model_code)
+      // and is cancelled at once, giving its unit back.
       const codes = ['demo_targeted_post', 'demo_club_sponsorship'];
-      const offerings = (offs.items || []).filter((o) => o.status === 'active' && o.service && codes.includes(o.service.code))
+      const candidates = (offs.items || []).filter((o) => o.status === 'active' && o.service && codes.includes(o.service.code))
         .map((o) => o.offering_id);
+      const offerings = [];
+      for (const id of candidates) {
+        const res = call('POST', `/api/v1/orgs/${org}/orders`, {
+          token: owner, idem: true, name: 'setup_probe_order', expect: [201, 409],
+          body: { buyer_party_id: party.party_id, lines: [{ offering_id: id, quantity: 1 }] },
+        });
+        const o = res.status === 201 && json(res) && (json(res).orders || [])[0];
+        if (!o) continue; // sold out (409): not usable either
+        must(call('POST', `/api/v1/orders/${o.order_id}/cancel`, {
+          token: owner, name: 'setup_probe_cancel', body: { reason: 'Yük testi: model yoklama siparişinin iptali' },
+        }), 200, `cancel of probe order ${o.order_no}`);
+        if (o.model_code === 'A' && !o.direct_to_payee_amount) offerings.push(id);
+      }
       if (offerings.length === 0) throw new Error('no demo Model A offering on sale');
       data.company.party = party.party_id;
       data.company.offerings = offerings;

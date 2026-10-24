@@ -71,7 +71,10 @@ Toplam ~500 VU (400 `browse` + açık modellerin uçuştaki VU'ları). `stress` 
   aynı işlemde).
 - Siparişler demo seed'in Model A havale tekliflerinden (`demo_targeted_post`, `demo_club_sponsorship`; 9'ar adet);
   her sipariş hemen iptal edildiği için adet teklife döner. Örtüşen siparişlerde `409 catalog.sold_out` beklenen yanıttır
-  (`koro_orders_sold_out`).
+  (`koro_orders_sold_out`). Hizmet kodu yetmez: Model C doğrudan teklifi (`db/seed/commerce_direct.go`) de
+  `demo_club_sponsorship` satar ve onaylı banka hesabı olmayan demo payee yüzünden detay/talimat
+  `409 parties.no_approved_account` döner. Teklif kartı modeli göstermediği için setup her aday teklife bir yoklama
+  siparişi verip hemen iptal eder ve yalnız `model_code: A` olanları kullanır.
 
 ### `prep.sql` neden var
 

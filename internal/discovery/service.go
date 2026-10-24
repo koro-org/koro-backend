@@ -185,11 +185,11 @@ func (s *service) Search(ctx context.Context, a authz.Actor, companyOrgID uuid.U
 		for i, m := range set.Matches {
 			ids[i] = m.UserID
 		}
-		bands, err := s.d.Ranking.Bands(ctx, ids)
+		boosts, err := s.boosts(ctx, ids)
 		if err != nil {
 			return Page{}, err
 		}
-		order := rank(set.Matches, bands, len(f.q.SkillIDs), len(f.q.LanguageCodes), seed)
+		order := rank(set.Matches, boosts, len(f.q.SkillIDs), len(f.q.LanguageCodes), seed)
 		if from < len(order) {
 			end := min(from+limit, len(order))
 			if out.Items, err = s.profiles(ctx, companyOrgID, order[from:end]); err != nil {

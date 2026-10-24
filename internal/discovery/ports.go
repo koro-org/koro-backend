@@ -35,6 +35,10 @@ type Ranking interface {
 	// Bands returns the band of the users above neutral; a missing user is
 	// neutral (no score, neutralised, collection off).
 	Bands(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]talent.Band, error)
+	// BandMultipliers returns the multipliers of the bands of the talent
+	// config version in force (bands[].mult_bp; BE-099); found is false
+	// without one (discovery then applies ADR-0015's).
+	BandMultipliers(ctx context.Context) (m talent.BandMultipliers, found bool, err error)
 }
 
 // Entitlements is the access right check of entitlements (L2; 03 §3.3:

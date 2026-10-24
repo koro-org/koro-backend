@@ -132,12 +132,34 @@ func (f *studentsFake) sorted() []uuid.UUID {
 }
 
 // rankingFake is talent's band read; it must be called outside a
-// transaction (talent opens its own, app_talent).
+// transaction (talent opens its own, app_talent). Without mults no config
+// version is in force (BE-099).
 type rankingFake struct {
 	mu    sync.Mutex
 	bands map[uuid.UUID]talent.Band
 	calls int
 	inTx  bool
+
+	mults     talent.BandMultipliers // nil: no config version in force
+	multErr   error
+	multCalls int
+}
+
+func (r *rankingFake) BandMultipliers(ctx context.Context) (talent.BandMultipliers, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.multCalls++
+	r.inTx = r.inTx || db.InTx(ctx)
+	if r.multErr != nil {
+		return nil, false, r.multErr
+	}
+	return r.mults, r.mults != nil, nil
+}
+
+func (r *rankingFake) setMults(m talent.BandMultipliers) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.mults = m
 }
 
 func (r *rankingFake) Bands(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]talent.Band, error) {

@@ -2,7 +2,8 @@
 // the signal catalogue, the append-only point ledger with its caps and
 // dedupe key, the consumers of the activity events, the neutralisations
 // (opt-out, KVKK objection, auditor decision) and the band that discovery
-// multiplies its relevance with (BE-047); the nightly score with its
+// multiplies its relevance with (BE-047), by the multiplier of the config
+// version in force (bands[].mult_bp, BE-099); the nightly score with its
 // cohorts (talent.recompute) and the talent_auditor endpoints (04 §T,
 // BE-052); the retention sweeper of talent_ledger, talent_counters,
 // talent_runs and talent_neutralization (kvkk.retention_sweep, BE-079).
@@ -129,6 +130,13 @@ type Ranking interface {
 	// above neutral; a missing user is BandNeutral (no score, neutralised,
 	// collection off). It must not be called inside a transaction.
 	Bands(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]Band, error)
+	// BandMultipliers returns the ranking multipliers of the bands of the
+	// config version in force (bands[].mult_bp; BE-099): platform
+	// configuration, no user's value. found is false without a version in
+	// force and with collection off (every band is neutral then); a version
+	// that does not validate is an error. It must not be called inside a
+	// transaction.
+	BandMultipliers(ctx context.Context) (m BandMultipliers, found bool, err error)
 }
 
 // Auditor is the KVKK surface of talent (kvkk through hooks.talentAuditor;

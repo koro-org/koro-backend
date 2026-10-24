@@ -17,10 +17,11 @@
 //     entitlements.Available).
 //   - Pseudonyms (01 §4.16): anon_id = base32(HMAC(k_discovery,
 //     company_org_id ‖ user_id))[:16], k_discovery being the
-//     "discovery.anon_id" subkey of the token keyring (CRYPTO_TOKEN_KEYS,
-//     crypto.Deriver). A user ID never leaves the module: not in an
-//     answer, a cursor, a log line or the org-visible part of an audit
-//     record. An anon_id resolves only for the company it was derived for
+//     "discovery.anon_id" subkey of discovery's own keyring
+//     (DISCOVERY_ANON_KEYS, crypto.Deriver; BE-102, T-329): the active key
+//     names, the previous one only resolves during a renewal window. A
+//     user ID never leaves the module: not in an answer, a cursor, a log
+//     line or the org-visible part of an audit record. An anon_id resolves only for the company it was derived for
 //     and only to a student who is discoverable now: another company's
 //     pseudonym, a malformed one and a student who left level 2 are the
 //     same 404.

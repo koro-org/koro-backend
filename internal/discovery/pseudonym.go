@@ -12,7 +12,9 @@ import (
 )
 
 // Purposes of the derived tokens of discovery (crypto.Deriver: independent
-// HKDF subkeys of the token keyring).
+// HKDF subkeys of discovery's keyring). They are the purposes of BE-051,
+// when the keyring was CRYPTO_TOKEN_KEYS: a former token key placed second
+// in DISCOVERY_ANON_KEYS still resolves the pseudonyms it derived.
 const (
 	anonPurpose = "discovery.anon_id"
 	seedPurpose = "discovery.session_seed"
@@ -26,11 +28,15 @@ const AnonIDLen = 16
 var anonEncoding = base32.NewEncoding("abcdefghijklmnopqrstuvwxyz234567").WithPadding(base32.NoPadding)
 
 // Pseudonyms derives the company-scoped pseudonyms of level 2 and the
-// session seeds of the ranking from the token keyring (CRYPTO_TOKEN_KEYS):
-// anon_id = base32(HMAC(k_discovery, company_org_id ‖ user_id))[:16] with
-// k_discovery the "discovery.anon_id" subkey of the active key. A pseudonym
-// derived under an older key of the ring still resolves (rotation), new
-// answers use the active key.
+// session seeds of the ranking from discovery's own keyring
+// (DISCOVERY_ANON_KEYS, BE-102; independent of CRYPTO_TOKEN_KEYS, so a
+// token rotation renames nobody): anon_id = base32(HMAC(k_discovery,
+// company_org_id ‖ user_id))[:16] with k_discovery the "discovery.anon_id"
+// subkey of the active key. A pseudonym derived under the previous key of
+// the ring still resolves (the renewal window of a rotation), new answers
+// use the active key; once the previous key leaves the ring its pseudonyms
+// are unknown (404). Rotating also changes the session seeds, so open
+// paging cursors of a search are refused (422) and the search restarts.
 type Pseudonyms struct {
 	d    *crypto.Deriver
 	keys []string // active first

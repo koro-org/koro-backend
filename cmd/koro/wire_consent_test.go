@@ -15,6 +15,7 @@ import (
 
 	"koro/internal/authz/authztest"
 	"koro/internal/consent"
+	"koro/internal/consent/iystest"
 	"koro/internal/notify"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/config"
@@ -25,6 +26,7 @@ import (
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/privacy"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/queue"
 )
 
 // testUnsubscribeBase is CONSENT_UNSUBSCRIBE_BASE_URL of wiring and matrix
@@ -62,7 +64,8 @@ func (w *consentWiring) useMemStore() {
 }
 
 // TestWire_ConsentTasksAndPrivacy pins what consent registers (01 §6.2,
-// §7): the İYS subscription on the critical queue, the reconcile job and
+// §7): the İYS subscription on the critical queue, the reconcile job, the
+// İYS status reconciliation (BE-103; the test client reads İYS states) and
 // the KVKK provider.
 func TestWire_ConsentTasksAndPrivacy(t *testing.T) {
 	t.Parallel()
@@ -76,7 +79,7 @@ func TestWire_ConsentTasksAndPrivacy(t *testing.T) {
 			jobs = append(jobs, j.Name+" "+j.Cron+" "+j.Queue)
 		}
 	}
-	if want := []string{"consent.iys_reconcile 30 5 * * * default"}; !slices.Equal(jobs, want) {
+	if want := []string{"consent.iys_reconcile 30 5 * * * default", "consent.iys_status_sync 20 * * * * default"}; !slices.Equal(jobs, want) {
 		t.Fatalf("consent jobs %q, want %q", jobs, want)
 	}
 	// consent's own subscription; other modules may consume the topic too
@@ -91,7 +94,7 @@ func TestWire_ConsentTasksAndPrivacy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{consent.SubmitIYSTaskName, consent.ReconcileJobName} {
+	for _, name := range []string{consent.SubmitIYSTaskName, consent.ReconcileJobName, consent.StatusSyncJobName} {
 		if !slices.Contains(mux.Types(), name) {
 			t.Errorf("worker does not route %s", name)
 		}
@@ -262,5 +265,96 @@ func TestWire_ConsentOneClickUnsubscribe(t *testing.T) {
 	}
 	if off.consent.links != nil {
 		t.Fatal("links wired without a base URL")
+	}
+}
+
+// TestWire_ConsentIYSStatusSync (BE-103, T-312) on the wired application:
+// with CONSENT_IYS_SYNC_MAX_AGE the commercial e-mail filter that outreach
+// and notify use holds until consent.iys_status_sync ran; a refusal the
+// recipient gave İYS itself then withdraws the consent (channel iys). The
+// HTTP adapter cannot read İYS states yet (T-354): with it the job is not
+// scheduled and the hold refuses to start.
+func TestWire_ConsentIYSStatusSync(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	c.consent.cfg = &config.Consent{UnsubscribeBaseURL: testUnsubscribeBase, IYSSyncMaxAge: 6 * time.Hour}
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	uid := uuid.NewV7()
+	purpose, now := consent.PurposeCommercialEmail, time.Now().UTC().Truncate(time.Microsecond)
+	body := "Ticari elektronik ileti izni (İYS mutabakatı)\n"
+	text := consent.Notice{ID: uuid.NewV7(), Kind: consent.KindConsentText, PurposeCode: &purpose, Audience: consent.AudienceAll,
+		Locale: consent.LocaleTR, Version: "2026.10.01", Title: "İzin", BodyMD: body, BodySHA256: consent.BodyDigest(body), CreatedAt: now}
+	if err := c.consent.store.InsertNotice(ctx, text); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.consent.store.Publish(ctx, text.ID, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.consent.svc.Record(ctx, consent.RecordInput{UserID: uid, Purpose: purpose, Action: consent.Granted,
+		NoticeVersionID: &text.ID, TextSHA256: text.BodySHA256, Channel: consent.ChannelWeb}); err != nil {
+		t.Fatal(err)
+	}
+	filter := consentFilter{c: c.consent.svc} // notify's port; outreach calls the same method
+	if _, err := filter.FilterActive(ctx, []uuid.UUID{uid}, string(purpose)); !errors.Is(err, consent.ErrIYSSyncStale) {
+		t.Fatalf("FilterActive before any reconciliation = %v, want ErrIYSSyncStale", err)
+	}
+	var sync func(context.Context) error
+	for _, j := range c.infra.jobs.Jobs() {
+		if j.Name == consent.StatusSyncJobName {
+			sync = j.Handle
+		}
+	}
+	if sync == nil {
+		t.Fatal("consent.iys_status_sync is not scheduled")
+	}
+	if err := sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := filter.FilterActive(ctx, []uuid.UUID{uid}, string(purpose)); err != nil || !slices.Equal(got, []uuid.UUID{uid}) {
+		t.Fatalf("FilterActive after the reconciliation = %v, %v", got, err)
+	}
+	fake, ok := c.consent.iys.(*consent.FakeIYS)
+	if !ok {
+		t.Fatalf("test İYS client %T", c.consent.iys)
+	}
+	fake.SetStatus(uid, consent.IYSEmail, consent.IYSState{Status: consent.IYSRefused, At: time.Now().Truncate(time.Second), Source: "IYS_WEB"})
+	if err := sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := filter.FilterActive(ctx, []uuid.UUID{uid}, string(purpose)); err != nil || len(got) != 0 {
+		t.Fatalf("FilterActive after the İYS refusal = %v, %v", got, err)
+	}
+	rows, err := c.consent.store.AllOf(ctx, uid)
+	if err != nil || len(rows) != 2 || rows[1].Action != consent.Withdrawn || rows[1].Channel != consent.ChannelIYS {
+		t.Fatalf("ledger = %+v, %v", rows, err)
+	}
+
+	srv := iystest.New(t)
+	httpClient := func(t *testing.T) consent.IYSClient {
+		t.Helper()
+		client, err := consent.NewIYSHTTP(consent.IYSHTTPConfig{BaseURL: srv.URL, Username: iystest.Username,
+			Password: iystest.Password, IYSCode: iystest.IYSCode, BrandCode: iystest.BrandCode,
+			Recipients: staticRecipients{}, Clock: clock.Real()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return client
+	}
+	plain := newTestContainer(t)
+	plain.consent.iys = httpClient(t)
+	if err := plain.build(); err != nil {
+		t.Fatal(err)
+	}
+	if slices.ContainsFunc(plain.infra.jobs.Jobs(), func(j queue.Job) bool { return j.Name == consent.StatusSyncJobName }) {
+		t.Fatal("consent.iys_status_sync scheduled with a client that cannot read İYS states")
+	}
+	held := newTestContainer(t)
+	held.consent.iys = httpClient(t)
+	held.consent.cfg = &config.Consent{UnsubscribeBaseURL: testUnsubscribeBase, IYSSyncMaxAge: 6 * time.Hour}
+	if err := held.build(); err == nil || !strings.Contains(err.Error(), "CONSENT_IYS_SYNC_MAX_AGE") {
+		t.Fatalf("build with the hold and the HTTP adapter = %v", err)
 	}
 }

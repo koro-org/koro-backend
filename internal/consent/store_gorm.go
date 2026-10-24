@@ -15,8 +15,8 @@ import (
 )
 
 // NewGormStore returns the PostgreSQL store over consent_purposes,
-// notice_versions, consents (+ the consent_current view) and
-// iys_submissions (02 §4).
+// notice_versions, consents (+ the consent_current view),
+// iys_submissions (02 §4) and iys_status_syncs (000143, BE-103).
 func NewGormStore(orm *gorm.DB) Store { return gormStore{orm: orm} }
 
 type gormStore struct{ orm *gorm.DB }
@@ -376,6 +376,23 @@ func (s gormStore) GrantedAmong(ctx context.Context, purpose Purpose, userIDs []
 	return out, nil
 }
 
+// GrantedChains implements Store over the consent_current view: the
+// purpose_code, scope_id and user_id predicates are pushed into the
+// DISTINCT ON (they are its keys; consents_current_idx), action is
+// filtered after it.
+//
+// cross-org: platform job over every user.
+func (s gormStore) GrantedChains(ctx context.Context, purpose Purpose, after uuid.UUID, limit int) ([]Consent, error) {
+	var rows []consentRow
+	err := db.Conn(ctx, s.orm).Table("consent_current").Select(consentCols).
+		Where("purpose_code = ? AND scope_id IS NULL AND action = 'granted' AND user_id > ?", string(purpose), after).
+		Order("user_id").Limit(max(limit, 1)).Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("consent: granted chains: %w", err)
+	}
+	return consents(rows), nil
+}
+
 // ListConsents implements Store (keyset over occurred_at DESC, id DESC).
 //
 // cross-org: personal ledger addressed by user.
@@ -494,6 +511,39 @@ func (s gormStore) DueSubmissions(ctx context.Context, before time.Time, after u
 		return nil, fmt.Errorf("consent: due iys submissions: %w", err)
 	}
 	return out, nil
+}
+
+// IYSSync implements Store.
+//
+// cross-org: platform state of an İYS channel (no org, no user).
+func (s gormStore) IYSSync(ctx context.Context, ch IYSChannel) (IYSSync, bool, error) {
+	var rows []IYSSync
+	if err := db.Conn(ctx, s.orm).Where("channel = ?", string(ch)).Limit(1).Find(&rows).Error; err != nil {
+		return IYSSync{}, false, fmt.Errorf("consent: iys status sync: %w", err)
+	}
+	if len(rows) == 0 {
+		return IYSSync{}, false, nil
+	}
+	st := rows[0]
+	st.SyncedAt, st.UpdatedAt = st.SyncedAt.UTC(), st.UpdatedAt.UTC()
+	return st, true, nil
+}
+
+// SaveIYSSync implements Store: an upsert that never moves synced_at back
+// (updated_at: the column default, then koro_touch_updated_at).
+//
+// cross-org: platform state of an İYS channel (no org, no user).
+func (s gormStore) SaveIYSSync(ctx context.Context, st IYSSync) error {
+	err := db.Conn(ctx, s.orm).Exec(`INSERT INTO iys_status_syncs (channel, synced_at, checked, withdrawn)
+		VALUES ( ?, ?, ?, ?)
+		ON CONFLICT (channel) DO UPDATE SET synced_at = EXCLUDED.synced_at, checked = EXCLUDED.checked,
+			withdrawn = EXCLUDED.withdrawn
+		WHERE iys_status_syncs.synced_at <= EXCLUDED.synced_at`,
+		string(st.Channel), st.SyncedAt, st.Checked, st.Withdrawn).Error
+	if err != nil {
+		return fmt.Errorf("consent: save iys status sync: %w", db.Translate(err))
+	}
+	return nil
 }
 
 // PurgeProof implements Store.

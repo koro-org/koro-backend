@@ -380,6 +380,108 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 		}
 	})
 
+	t.Run("iys status sync (BE-103)", func(t *testing.T) {
+		t.Parallel()
+		w := newWorld(t)
+		ctx := t.Context()
+		text := notice(consent.KindConsentText, &email, consent.AudienceAll, "2026.10.01")
+		if err := w.s.InsertNotice(ctx, text); err != nil {
+			t.Fatal(err)
+		}
+		users := []uuid.UUID{w.user(t), w.user(t), w.user(t), w.user(t), w.user(t)}
+		slices.SortFunc(users, uuid.UUID.Compare)
+		at := func(m int) time.Time { return base.Add(time.Duration(m) * time.Minute) }
+		row := func(u uuid.UUID, p consent.Purpose, a consent.Action, ch consent.Channel, m int) consent.Consent {
+			c := consent.Consent{ID: uuid.NewV7(), UserID: u, PurposeCode: p, Action: a, ScopeType: consent.ScopeNone,
+				Channel: ch, OccurredAt: at(m)}
+			if a == consent.Granted {
+				c.NoticeVersionID, c.TextSHA256 = &text.ID, text.BodySHA256
+			}
+			return c
+		}
+		// users[0]: granted · [1]: granted, withdrawn through İYS (000143)
+		// · [2]: withdrawn, granted again · [3]: granted · [4]: only push.
+		var latest []consent.Consent
+		for _, c := range []consent.Consent{
+			row(users[0], email, consent.Granted, consent.ChannelWeb, 1),
+			row(users[1], email, consent.Granted, consent.ChannelWeb, 1),
+			row(users[1], email, consent.Withdrawn, consent.ChannelIYS, 2),
+			row(users[2], email, consent.Granted, consent.ChannelWeb, 1),
+			row(users[2], email, consent.Withdrawn, consent.ChannelEmailLink, 2),
+			row(users[2], email, consent.Granted, consent.ChannelMobile, 3),
+			row(users[3], email, consent.Granted, consent.ChannelWeb, 1),
+			row(users[4], consent.PurposeCommercialPush, consent.Withdrawn, consent.ChannelWeb, 1),
+		} {
+			if err := w.s.InsertConsent(ctx, c); err != nil {
+				t.Fatalf("InsertConsent(%s): %v", c.Channel, err)
+			}
+			if c.UserID != users[1] && c.UserID != users[4] {
+				latest = append(latest, c)
+			}
+		}
+		latest = slices.DeleteFunc(latest, func(c consent.Consent) bool { return c.UserID == users[2] && c.Channel != consent.ChannelMobile })
+		if err := w.s.InsertConsent(ctx, row(users[0], email, consent.Withdrawn, "carrier_pigeon", 9)); !errors.Is(err, problem.ErrValidation) {
+			t.Fatalf("unknown channel = %v, want 422", err)
+		}
+		ids := func(cs []consent.Consent) []uuid.UUID {
+			out := make([]uuid.UUID, len(cs))
+			for i, c := range cs {
+				out[i] = c.ID
+			}
+			return out
+		}
+		got, err := w.s.GrantedChains(ctx, email, uuid.Nil(), 10)
+		if err != nil || !slices.Equal(ids(got), ids(latest)) || got[1].Channel != consent.ChannelMobile || !got[0].OccurredAt.Equal(at(1)) {
+			t.Fatalf("GrantedChains = %+v, %v; want the current grants of users 0, 2, 3", got, err)
+		}
+		page, _ := w.s.GrantedChains(ctx, email, uuid.Nil(), 2)
+		rest, _ := w.s.GrantedChains(ctx, email, page[1].UserID, 2)
+		if !slices.Equal(ids(append(page, rest...)), ids(latest)) {
+			t.Fatalf("GrantedChains pages = %v + %v", ids(page), ids(rest))
+		}
+		if push, _ := w.s.GrantedChains(ctx, consent.PurposeCommercialPush, uuid.Nil(), 10); len(push) != 0 {
+			t.Fatalf("withdrawn push chain listed: %+v", push)
+		}
+
+		if _, ok, err := w.s.IYSSync(ctx, consent.IYSEmail); ok || err != nil {
+			t.Fatalf("IYSSync before any run = %v, %v", ok, err)
+		}
+		first := consent.IYSSync{Channel: consent.IYSEmail, SyncedAt: at(10), Checked: 3, Withdrawn: 1, UpdatedAt: stale}
+		if err := w.s.SaveIYSSync(ctx, first); err != nil {
+			t.Fatal(err)
+		}
+		st, ok, err := w.s.IYSSync(ctx, consent.IYSEmail)
+		if err != nil || !ok || !st.SyncedAt.Equal(at(10)) || st.Checked != 3 || st.Withdrawn != 1 || st.UpdatedAt.IsZero() ||
+			st.UpdatedAt.Equal(stale) {
+			t.Fatalf("IYSSync = %+v, %v, %v", st, ok, err)
+		}
+		// A late run never moves the state back; a newer one replaces it.
+		if err := w.s.SaveIYSSync(ctx, consent.IYSSync{Channel: consent.IYSEmail, SyncedAt: at(5), Checked: 9}); err != nil {
+			t.Fatal(err)
+		}
+		if st, _, _ := w.s.IYSSync(ctx, consent.IYSEmail); !st.SyncedAt.Equal(at(10)) || st.Checked != 3 {
+			t.Fatalf("an older run overwrote the state: %+v", st)
+		}
+		if err := w.s.SaveIYSSync(ctx, consent.IYSSync{Channel: consent.IYSEmail, SyncedAt: at(70), Checked: 2}); err != nil {
+			t.Fatal(err)
+		}
+		if st, _, _ := w.s.IYSSync(ctx, consent.IYSEmail); !st.SyncedAt.Equal(at(70)) || st.Checked != 2 || st.Withdrawn != 0 {
+			t.Fatalf("newer run = %+v", st)
+		}
+		if _, ok, _ := w.s.IYSSync(ctx, consent.IYSSMS); ok {
+			t.Fatal("state of another channel")
+		}
+		for name, bad := range map[string]consent.IYSSync{
+			"unknown channel":        {Channel: "fax", SyncedAt: at(80)},
+			"more withdrawn":         {Channel: consent.IYSSMS, SyncedAt: at(80), Checked: 1, Withdrawn: 2},
+			"negative checked count": {Channel: consent.IYSSMS, SyncedAt: at(80), Checked: -1},
+		} {
+			if err := w.s.SaveIYSSync(ctx, bad); !errors.Is(err, problem.ErrValidation) {
+				t.Errorf("%s = %v, want 422", name, err)
+			}
+		}
+	})
+
 	t.Run("iys submissions", func(t *testing.T) {
 		t.Parallel()
 		w := newWorld(t)

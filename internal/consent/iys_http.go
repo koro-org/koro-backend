@@ -34,6 +34,11 @@ import (
 // transport errors are transient (the task and consent.iys_reconcile retry).
 // The recipient address, the password and the tokens never appear in an
 // error or a log line (İYS error texts are scrubbed with obs.Scrub).
+//
+// IYSHTTP does not read İYS's consent states (IYSStatusReader, BE-103):
+// those İYS calls are not part of this adapter yet (00 T-354), so
+// consent.iys_status_sync is not scheduled with it and
+// CONSENT_IYS_SYNC_MAX_AGE refuses to start.
 const (
 	iysDateLayout    = "2006-01-02 15:04:05"
 	iysTokenMargin   = time.Minute

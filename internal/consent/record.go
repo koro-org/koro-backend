@@ -118,6 +118,14 @@ func (s *service) RecordMine(ctx context.Context, a authz.Actor, in MyConsent) (
 // caller's): consent row, audit row and, for a requires_iys purpose, the
 // İYS submission and the consent.recorded event.
 func (s *service) record(ctx context.Context, in RecordInput, by authz.Actor) (Consent, error) {
+	return s.recordWith(ctx, in, by, nil)
+}
+
+// recordWith is record with extra audit metadata (IDs and codes only). A
+// withdrawal through ChannelIYS came from İYS (consent.iys_status_sync,
+// BE-103): İYS already holds the refusal, so no İYS submission and no
+// consent.recorded event are written for it.
+func (s *service) recordWith(ctx context.Context, in RecordInput, by authz.Actor, meta map[string]any) (Consent, error) {
 	if in.UserID == uuid.Nil() {
 		return Consent{}, errors.New("consent: record without a user")
 	}
@@ -142,10 +150,14 @@ func (s *service) record(ctx context.Context, in RecordInput, by authz.Actor) (C
 		if err := s.d.Store.InsertConsent(ctx, c); err != nil {
 			return err
 		}
-		if err := s.d.Audit.Log(ctx, recordEvent(c, by)); err != nil {
+		ev := recordEvent(c, by)
+		for k, v := range meta {
+			ev.Metadata[k] = v
+		}
+		if err := s.d.Audit.Log(ctx, ev); err != nil {
 			return err
 		}
-		if p.RequiresIYS {
+		if p.RequiresIYS && c.Channel != ChannelIYS {
 			if err := s.enqueueIYS(ctx, p, c); err != nil {
 				return err
 			}
@@ -178,7 +190,7 @@ func (s *service) check(ctx context.Context, p PurposeDef, in RecordInput) error
 		return invalid(ErrNotConsentBased, "body.purpose_code", "rests on "+string(p.LegalBasis))
 	}
 	switch in.Channel {
-	case ChannelWeb, ChannelMobile, ChannelEmailLink, ChannelAdmin, ChannelImport:
+	case ChannelWeb, ChannelMobile, ChannelEmailLink, ChannelAdmin, ChannelImport, ChannelIYS:
 	default:
 		return fmt.Errorf("consent: unknown channel %q", in.Channel)
 	}
@@ -200,8 +212,8 @@ func (s *service) check(ctx context.Context, p PurposeDef, in RecordInput) error
 			return invalid(ErrPurposeInactive, "body.purpose_code", "is not active")
 		case in.Minor && p.minorRestricted():
 			return ErrMinorRestricted
-		case in.Channel == ChannelEmailLink:
-			return ErrChannelNotAllowed
+		case in.Channel == ChannelEmailLink, in.Channel == ChannelIYS:
+			return ErrChannelNotAllowed // withdrawal-only channels
 		case in.NoticeVersionID == nil:
 			return invalid(ErrProofRequired, "body.notice_version_id", "is required to grant")
 		}
@@ -299,7 +311,10 @@ func (s *service) HasActive(ctx context.Context, userID uuid.UUID, purpose Purpo
 	return ok && c.Action == Granted, nil
 }
 
-// FilterActive implements Checker.
+// FilterActive implements Checker. For an İYS purpose it is also the
+// send-time hold of BE-103: while CONSENT_IYS_SYNC_MAX_AGE is set and the
+// channel's last complete İYS reconciliation is older (or never ran), it
+// fails with ErrIYSSyncStale instead of answering.
 func (s *service) FilterActive(ctx context.Context, userIDs []uuid.UUID, purpose Purpose) ([]uuid.UUID, error) {
 	p, err := s.d.Store.Purpose(ctx, purpose)
 	if err != nil {
@@ -310,6 +325,9 @@ func (s *service) FilterActive(ctx context.Context, userIDs []uuid.UUID, purpose
 		return nil, fmt.Errorf("consent: %s is per registration: %w", purpose, ErrScopeRequired)
 	case !p.Active, len(userIDs) == 0:
 		return []uuid.UUID{}, nil
+	}
+	if err := s.iysFresh(ctx, p); err != nil {
+		return nil, err
 	}
 	return s.d.Store.GrantedAmong(ctx, purpose, userIDs)
 }

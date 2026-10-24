@@ -24,7 +24,10 @@ import (
 //	tx      nil → the app_rw pool's TxManager; tests preset db.NopTx
 //	iys     nil → consent.IYSHTTP when the İYS settings are present
 //	        (CONSENT_IYS_*, BE-055), else consent.NoopIYS (submissions
-//	        "skipped"; CONSENT_IYS_REQUIRED refuses that)
+//	        "skipped"; CONSENT_IYS_REQUIRED refuses that). A client that
+//	        also reads consent states (consent.IYSStatusReader; tests'
+//	        FakeIYS) gets consent.iys_status_sync (BE-103);
+//	        CONSENT_IYS_SYNC_MAX_AGE refuses to start without one
 //	cfg     tests only; nil → the consent section of the loaded configuration
 //	deriver nil → crypto.Deriver over CRYPTO_TOKEN_KEYS (the one-click
 //	        unsubscribe tokens, BE-062); tests preset the shared test deriver
@@ -134,7 +137,7 @@ func (w *consentWiring) build(c *container) error {
 	mod, err := consent.New(consent.Deps{
 		Store: store, Tx: tx, Outbox: c.infra.outbox, Audit: c.audit.svc, Idempotency: c.infra.idempotency,
 		Clock: c.infra.clock, Log: c.infra.log.With("module", "consent"),
-		Reauth: lateReauth{w: w}, IYS: iys, IYSRequired: cfg.IYSRequired,
+		Reauth: lateReauth{w: w}, IYS: iys, IYSRequired: cfg.IYSRequired, IYSSyncMaxAge: cfg.IYSSyncMaxAge,
 		Unsubscribe: consent.UnsubscribeConfig{BaseURL: cfg.UnsubscribeBaseURL, TTL: cfg.UnsubscribeTTL, Deriver: deriver},
 	})
 	if err != nil {
@@ -147,7 +150,9 @@ func (w *consentWiring) build(c *container) error {
 }
 
 // tasks: consent.recorded → consent.submit_iys (critical); the
-// consent.iys_reconcile job (05:30, default).
+// consent.iys_reconcile job (05:30, default) and, with an İYS client that
+// reads consent states, consent.iys_status_sync (hourly :20, default;
+// BE-103: not with the HTTP adapter yet, T-354).
 func (w *consentWiring) tasks(c *container) {
 	w.mod.Subscribe(c.infra.subs)
 	for _, j := range w.mod.Jobs() {

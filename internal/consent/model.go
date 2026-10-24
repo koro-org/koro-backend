@@ -217,13 +217,17 @@ type Channel string
 // Channels. ChannelEmailLink is withdrawal-only (one-click unsubscribe): an
 // explicit consent is an affirmative act on a page that shows the consent
 // text, never a click in a message (and never part of a verification/OTP
-// step, Kurul 2025/1072).
+// step, Kurul 2025/1072). ChannelIYS is withdrawal-only too: a refusal the
+// recipient gave İYS directly (or through another brand channel İYS
+// records), written by consent.iys_status_sync (BE-103, T-312; 000143). An
+// İYS approval never becomes a Koro grant: the grant needs the shown text.
 const (
 	ChannelWeb       Channel = "web"
 	ChannelMobile    Channel = "mobile"
 	ChannelEmailLink Channel = "email_link"
 	ChannelAdmin     Channel = "admin"
 	ChannelImport    Channel = "import"
+	ChannelIYS       Channel = "iys"
 )
 
 // Consent is one consents row (02 §4.3, append-only).
@@ -288,6 +292,22 @@ type Submission struct {
 
 // TableName implements gorm's Tabler.
 func (Submission) TableName() string { return "iys_submissions" }
+
+// IYSSync is one iys_status_syncs row (000143; BE-103): the last complete
+// İYS status reconciliation of an İYS channel. SyncedAt is the start of
+// that run: every refusal İYS held at that instant for a recipient with a
+// grant in force is in the ledger. UpdatedAt is read only (the column
+// default and koro_touch_updated_at stamp it with the database clock).
+type IYSSync struct {
+	Channel   IYSChannel `gorm:"column:channel;primaryKey"`
+	SyncedAt  time.Time  `gorm:"column:synced_at"`
+	Checked   int        `gorm:"column:checked"`
+	Withdrawn int        `gorm:"column:withdrawn"`
+	UpdatedAt time.Time  `gorm:"column:updated_at;->"`
+}
+
+// TableName implements gorm's Tabler.
+func (IYSSync) TableName() string { return "iys_status_syncs" }
 
 // After is the keyset position of a consent list (occurred_at DESC, id DESC).
 type After struct {

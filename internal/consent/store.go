@@ -65,6 +65,11 @@ type Store interface {
 	// GrantedAmong returns those of userIDs whose newest unscoped row of
 	// purpose is a grant, in ascending ID order.
 	GrantedAmong(ctx context.Context, purpose Purpose, userIDs []uuid.UUID) ([]uuid.UUID, error)
+	// GrantedChains returns up to limit newest unscoped rows of purpose that
+	// are grants (one per user: the consent in force), with a user ID
+	// greater than after, in ascending user ID order
+	// (consent.iys_status_sync, BE-103).
+	GrantedChains(ctx context.Context, purpose Purpose, after uuid.UUID, limit int) ([]Consent, error)
 	// ListConsents returns up to q.Limit rows of a user, newest first
 	// (occurred_at DESC, id DESC), after q.After.
 	ListConsents(ctx context.Context, q ListQuery) ([]Consent, error)
@@ -88,6 +93,14 @@ type Store interface {
 	// updated before the cutoff, with an ID greater than after, in ID order
 	// (consent.iys_reconcile).
 	DueSubmissions(ctx context.Context, before time.Time, after uuid.UUID, limit int) ([]Submission, error)
+
+	// IYSSync returns the reconciliation state of an İYS channel;
+	// found=false before the first complete run (BE-103).
+	IYSSync(ctx context.Context, ch IYSChannel) (st IYSSync, found bool, err error)
+	// SaveIYSSync writes channel, synced_at, checked and withdrawn of st
+	// (updated_at is the database's). A row whose synced_at is newer than
+	// st's is kept: a late run never moves the state back.
+	SaveIYSSync(ctx context.Context, st IYSSync) error
 
 	// PurgeProof deletes up to limit consent rows (with their İYS
 	// submissions) of the chains whose proof retention ended: the latest

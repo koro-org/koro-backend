@@ -3296,6 +3296,7 @@ components:
             - email_link
             - admin
             - import
+            - iys
           type: string
         consent_id:
           format: uuid

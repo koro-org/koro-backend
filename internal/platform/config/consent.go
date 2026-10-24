@@ -9,7 +9,8 @@ import (
 )
 
 // Consent configures the consent module (internal/consent). Owner: BE-012,
-// BE-055 (İYS client), BE-062 (unsubscribe links); only tickets of the consent module edit this file and
+// BE-055 (İYS client), BE-062 (unsubscribe links), BE-103 (İYS status
+// hold); only tickets of the consent module edit this file and
 // the "# --- consent ---" block of .env.example (BE-001 R7).
 type Consent struct {
 	// IYSRequired refuses to start without a real İYS client (H-14: live
@@ -27,6 +28,15 @@ type Consent struct {
 	IYSRecipientType string        `env:"CONSENT_IYS_RECIPIENT_TYPE" envDefault:"BIREYSEL"`
 	IYSTimeout       time.Duration `env:"CONSENT_IYS_TIMEOUT" envDefault:"10s"`
 
+	// IYSSyncMaxAge is the optional send-time hold of BE-103 (T-312): > 0
+	// holds commercial messages of an İYS channel (e-mail) while the last
+	// complete İYS status reconciliation of that channel
+	// (consent.iys_status_sync, hourly) is older than this or never ran, so
+	// that a refusal given in İYS itself is in the ledger before a message
+	// goes out. 0 (default) sends on the ledger alone. Needs an İYS client
+	// that reads consent states (the HTTP adapter does not yet: T-354).
+	IYSSyncMaxAge time.Duration `env:"CONSENT_IYS_SYNC_MAX_AGE" envDefault:"0s"`
+
 	// UnsubscribeBaseURL is where the one-click unsubscribe links of
 	// commercial e-mail point (BE-062; 6563 ret, RFC 8058): the link is
 	// <base>/<token>. The API's own endpoint
@@ -38,8 +48,13 @@ type Consent struct {
 	UnsubscribeTTL time.Duration `env:"CONSENT_UNSUBSCRIBE_TTL" envDefault:"8760h"`
 }
 
-// Bounds of CONSENT_UNSUBSCRIBE_TTL and CONSENT_UNSUBSCRIBE_BASE_URL.
+// Bounds of CONSENT_UNSUBSCRIBE_TTL and CONSENT_UNSUBSCRIBE_BASE_URL, and
+// of CONSENT_IYS_SYNC_MAX_AGE when set (the job runs hourly: below two
+// hours one late run would already hold every message; above a week the
+// hold protects nothing).
 const (
+	minIYSSyncMaxAge      = 2 * time.Hour
+	maxIYSSyncMaxAge      = 7 * 24 * time.Hour
 	minUnsubscribeTTL     = 24 * time.Hour
 	maxUnsubscribeTTL     = 400 * 24 * time.Hour
 	maxUnsubscribeBaseURL = 300
@@ -75,6 +90,9 @@ func (s *Consent) validate(c Common) error {
 	}
 	if s.IYSTimeout <= 0 || s.IYSTimeout > time.Minute {
 		errs = append(errs, errors.New("CONSENT_IYS_TIMEOUT must be positive and at most 1m"))
+	}
+	if s.IYSSyncMaxAge != 0 && (s.IYSSyncMaxAge < minIYSSyncMaxAge || s.IYSSyncMaxAge > maxIYSSyncMaxAge) {
+		errs = append(errs, errors.New("CONSENT_IYS_SYNC_MAX_AGE must be 0 (off) or between 2h and 168h"))
 	}
 	s.UnsubscribeBaseURL = strings.TrimRight(strings.TrimSpace(s.UnsubscribeBaseURL), "/")
 	if s.UnsubscribeBaseURL != "" {

@@ -100,3 +100,26 @@ func TestConsent_UnsubscribeConfig(t *testing.T) {
 		}
 	}
 }
+
+// TestConsent_IYSSyncMaxAge (BE-103): the İYS send-time hold is off by
+// default; when set it lies between 2h (the reconciliation runs hourly) and
+// a week.
+func TestConsent_IYSSyncMaxAge(t *testing.T) {
+	t.Parallel()
+	cfg, err := config.Load[consentOnly](map[string]string{"APP_ENV": "prod"})
+	if err != nil || cfg.Consent.IYSSyncMaxAge != 0 {
+		t.Fatalf("default = %v, %v", cfg.Consent.IYSSyncMaxAge, err)
+	}
+	for v, want := range map[string]time.Duration{"0s": 0, "2h": 2 * time.Hour, "24h": 24 * time.Hour, "168h": 168 * time.Hour} {
+		cfg, err := config.Load[consentOnly](map[string]string{"APP_ENV": "prod", "CONSENT_IYS_SYNC_MAX_AGE": v})
+		if err != nil || cfg.Consent.IYSSyncMaxAge != want {
+			t.Errorf("%s = %v, %v", v, cfg.Consent.IYSSyncMaxAge, err)
+		}
+	}
+	for _, v := range []string{"1h", "119m", "169h", "-2h"} {
+		if _, err := config.Load[consentOnly](map[string]string{"APP_ENV": "prod", "CONSENT_IYS_SYNC_MAX_AGE": v}); err == nil ||
+			!strings.Contains(err.Error(), "CONSENT_IYS_SYNC_MAX_AGE") {
+			t.Errorf("%s accepted: %v", v, err)
+		}
+	}
+}

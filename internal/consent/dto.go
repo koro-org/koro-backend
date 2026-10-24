@@ -80,7 +80,7 @@ type ConsentProofDTO struct {
 	TextSHA256      string    `json:"text_sha256,omitempty" doc:"Hex SHA-256 of the text the user saw"`
 	ScopeType       string    `json:"scope_type" enum:"none,registration"`
 	ScopeID         string    `json:"scope_id,omitempty" format:"uuid"`
-	Channel         string    `json:"channel" enum:"web,mobile,email_link,admin,import"`
+	Channel         string    `json:"channel" enum:"web,mobile,email_link,admin,import,iys"`
 	IP              string    `json:"ip,omitempty"`
 	UserAgent       string    `json:"user_agent,omitempty"`
 	OccurredAt      time.Time `json:"occurred_at"`

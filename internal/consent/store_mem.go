@@ -27,6 +27,7 @@ type memStore struct {
 	notices  map[uuid.UUID]Notice
 	consents []Consent // insertion order
 	subs     map[uuid.UUID]Submission
+	syncs    map[IYSChannel]IYSSync
 	// now stamps created_at/updated_at like the column defaults and the
 	// iys_submissions_touch_updated_at trigger.
 	now func() time.Time
@@ -37,7 +38,7 @@ type memStore struct {
 func NewMemStore(now func() time.Time) Store {
 	s := &memStore{
 		purposes: map[Purpose]PurposeDef{}, notices: map[uuid.UUID]Notice{},
-		subs: map[uuid.UUID]Submission{}, now: now,
+		subs: map[uuid.UUID]Submission{}, syncs: map[IYSChannel]IYSSync{}, now: now,
 	}
 	for _, p := range seedPurposes() {
 		p.CreatedAt = now()
@@ -254,7 +255,7 @@ func (s *memStore) checkConsent(c Consent) error {
 		return errCheck
 	}
 	switch c.Channel {
-	case ChannelWeb, ChannelMobile, ChannelEmailLink, ChannelAdmin, ChannelImport:
+	case ChannelWeb, ChannelMobile, ChannelEmailLink, ChannelAdmin, ChannelImport, ChannelIYS:
 	default:
 		return errCheck
 	}
@@ -373,6 +374,30 @@ func (s *memStore) GrantedAmong(ctx context.Context, purpose Purpose, userIDs []
 		}
 		if ok && c.Action == Granted {
 			out = append(out, id)
+		}
+	}
+	return out, nil
+}
+
+func (s *memStore) GrantedChains(_ context.Context, purpose Purpose, after uuid.UUID, limit int) ([]Consent, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	latest := map[uuid.UUID]Consent{}
+	for _, c := range s.consents {
+		if c.PurposeCode != purpose || c.ScopeID != nil || c.UserID.Compare(after) <= 0 {
+			continue
+		}
+		if cur, ok := latest[c.UserID]; !ok || newestFirst(c, cur) < 0 {
+			latest[c.UserID] = c
+		}
+	}
+	var out []Consent
+	for _, id := range slices.SortedFunc(maps.Keys(latest), uuid.UUID.Compare) {
+		if c := latest[id]; c.Action == Granted {
+			out = append(out, c.clone())
+			if len(out) == max(limit, 1) {
+				break
+			}
 		}
 	}
 	return out, nil
@@ -519,6 +544,29 @@ func (s *memStore) DueSubmissions(_ context.Context, before time.Time, after uui
 		}
 	}
 	return out, nil
+}
+
+func (s *memStore) IYSSync(_ context.Context, ch IYSChannel) (IYSSync, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, ok := s.syncs[ch]
+	return st, ok, nil
+}
+
+func (s *memStore) SaveIYSSync(_ context.Context, st IYSSync) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch {
+	case st.Channel != IYSEmail && st.Channel != IYSSMS && st.Channel != IYSCall, // iys_status_syncs_channel_chk
+		st.Checked < 0, st.Withdrawn < 0, st.Withdrawn > st.Checked: // iys_status_syncs_*_chk
+		return errCheck
+	}
+	if cur, ok := s.syncs[st.Channel]; ok && cur.SyncedAt.After(st.SyncedAt) {
+		return nil // a late run never moves the state back
+	}
+	st.SyncedAt, st.UpdatedAt = st.SyncedAt.UTC().Truncate(time.Microsecond), s.now()
+	s.syncs[st.Channel] = st
+	return nil
 }
 
 // PurgeProof implements Store. The in-memory store knows no accounts: only

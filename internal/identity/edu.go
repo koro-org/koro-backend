@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
 	"strings"
 	"time"
 	"uuid"
@@ -221,32 +222,57 @@ func (s *service) ConfirmEduVerification(ctx context.Context, a authz.Actor, raw
 		if cur.Status != StatusActive {
 			return ErrInvalidToken
 		}
-		now := s.now()
-		renewal, superseded, err := s.supersedeOpen(ctx, cur.ID, uuid.Nil(), now)
-		if err != nil {
-			return err
-		}
-		exp := now.AddDate(eduValidityYears, 0, 0)
-		v = EduRecord{
-			ID: uuid.NewV7(), UserID: cur.ID, Method: EduMethodEmail, EduEmail: email, EduEmailNormalized: normalized,
-			EmailDomain: domain, UniversityID: &uni, Status: EduVerified, VerifiedAt: &now, ExpiresAt: &exp,
-		}
-		if err := s.d.Store.InsertEduVerification(ctx, v); err != nil {
-			return err
-		}
-		if err := s.emitVerified(ctx, v, renewal); err != nil {
-			return err
-		}
-		return s.d.Audit.Log(ctx, byUser(event(authz.IdentityEduVerificationConfirm, audit.Success, resourceEdu, v.ID,
-			map[string]any{"token_id": t.ID.String(), "university_id": uni.String(), "renewal": renewal,
-				"superseded": superseded}), cur.ID))
+		v, err = s.completeEduEmail(ctx, cur, t.ID, eduAddress{email: email, normalized: normalized, domain: domain, uni: uni}, nil)
+		return err
 	})
 	if err != nil {
 		return err
 	}
+	s.logVerified(ctx, v)
+	return nil
+}
+
+// eduAddress is a proven .edu.tr address with its university.
+type eduAddress struct {
+	email, normalized, domain string
+	uni                       uuid.UUID
+}
+
+// completeEduEmail writes the verified .edu.tr row of cur (locked in the
+// caller's transaction, whose address addr a token just proved): the open
+// verifications are superseded, the new one is valid for one year and
+// user.edu_verified (O) is written with it. confirmEduVerification and
+// the registration path of confirmEmail (BE-097) share it, so both follow
+// the same rules. extra adds audit metadata.
+func (s *service) completeEduEmail(ctx context.Context, cur User, tokenID uuid.UUID, addr eduAddress, extra map[string]any) (EduRecord, error) {
+	now := s.now()
+	renewal, superseded, err := s.supersedeOpen(ctx, cur.ID, uuid.Nil(), now)
+	if err != nil {
+		return EduRecord{}, err
+	}
+	exp, uni := now.AddDate(eduValidityYears, 0, 0), addr.uni
+	v := EduRecord{
+		ID: uuid.NewV7(), UserID: cur.ID, Method: EduMethodEmail, EduEmail: addr.email, EduEmailNormalized: addr.normalized,
+		EmailDomain: addr.domain, UniversityID: &uni, Status: EduVerified, VerifiedAt: &now, ExpiresAt: &exp,
+	}
+	if err := s.d.Store.InsertEduVerification(ctx, v); err != nil {
+		return EduRecord{}, err
+	}
+	if err := s.emitVerified(ctx, v, renewal); err != nil {
+		return EduRecord{}, err
+	}
+	meta := map[string]any{"token_id": tokenID.String(), "university_id": uni.String(), "renewal": renewal, "superseded": superseded}
+	maps.Copy(meta, extra)
+	if err := s.d.Audit.Log(ctx, byUser(event(authz.IdentityEduVerificationConfirm, audit.Success, resourceEdu, v.ID, meta), cur.ID)); err != nil {
+		return EduRecord{}, err
+	}
+	return v, nil
+}
+
+// logVerified logs a committed student verification (IDs only).
+func (s *service) logVerified(ctx context.Context, v EduRecord) {
 	s.d.Log.LogAttrs(ctx, slog.LevelInfo, "student verified", slog.String("user_id", v.UserID.String()),
 		slog.String("verification_id", v.ID.String()), slog.String("method", string(v.Method)))
-	return nil
 }
 
 // supersedeOpen ends the open verifications of userID except keep (in the

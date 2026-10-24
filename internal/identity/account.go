@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"log/slog"
 	"uuid"
 
@@ -301,30 +302,68 @@ func (s *service) ConfirmPasswordReset(ctx context.Context, a authz.Actor, raw, 
 }
 
 // ConfirmEmail implements Service (confirmEmail): the account_email token
-// activates a pending_email account (a verified one just consumes it).
+// activates a pending_email account (a verified one just consumes it). The
+// first token of a student's .edu.tr registration also verifies the
+// student in the same transaction (BE-097, edu_signup.go).
 func (s *service) ConfirmEmail(ctx context.Context, a authz.Actor, raw string) error {
 	if err := authz.Can(ctx, a, authz.IdentityEmailVerify, publicUser); err != nil {
 		return err
 	}
-	t, _, err := s.findToken(ctx, raw, PurposeAccountEmail)
+	t, found, err := s.findToken(ctx, raw, PurposeAccountEmail)
 	if err != nil {
 		return err
 	}
-	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
+	edu, err := s.signupEduOf(ctx, a, t, found)
+	if err != nil {
+		return err
+	}
+	verified, err := s.confirmEmailTx(ctx, t, edu)
+	if errors.Is(err, ErrEduEmailTaken) && edu.addr != nil {
+		// Another account verified the address between the check and the
+		// insert (edu_verifications_email_uq ended the transaction): the
+		// token is still open, the account alone is verified.
+		verified, err = s.confirmEmailTx(ctx, t, signupEdu{skip: signupEduAddressTaken})
+	}
+	if err != nil {
+		return err
+	}
+	if verified != nil {
+		s.logVerified(ctx, *verified)
+	}
+	return nil
+}
+
+// confirmEmailTx consumes the account_email token t and activates its
+// account with the student verification edu, in one transaction.
+func (s *service) confirmEmailTx(ctx context.Context, t EmailToken, edu signupEdu) (*EduRecord, error) {
+	var verified *EduRecord
+	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		u, err := s.consumeToken(ctx, t.ID, PurposeAccountEmail)
 		if err != nil {
 			return err
 		}
+		meta := map[string]any{"token_id": t.ID.String()}
 		if u.Status == StatusPendingEmail {
 			now := s.now()
 			u.Status, u.EmailVerifiedAt = StatusActive, &now
 			if err := s.d.Store.UpdateUser(ctx, u); err != nil {
 				return err
 			}
+			result, v, err := s.completeSignupEdu(ctx, u, t.ID, edu)
+			if err != nil {
+				return err
+			}
+			if result != "" {
+				meta["edu"] = result
+			}
+			verified = v
 		}
-		return s.d.Audit.Log(ctx, byUser(event(authz.IdentityEmailVerify, audit.Success, resourceUser, u.ID,
-			map[string]any{"token_id": t.ID.String()}), u.ID))
+		return s.d.Audit.Log(ctx, byUser(event(authz.IdentityEmailVerify, audit.Success, resourceUser, u.ID, meta), u.ID))
 	})
+	if err != nil {
+		return nil, err
+	}
+	return verified, nil
 }
 
 // ResendVerification implements Service (resendEmailVerification): 202

@@ -1,0 +1,219 @@
+# Load test environment (OPS-005; loadtest/README.md). Runs on a GitHub
+# runner from .github/workflows/loadtest.yml, never on a developer machine
+# by default: PostgreSQL 18 (ICU tr-TR, pg_stat_statements) + Redis 8 +
+# Mailpit + SeaweedFS (S3) + the real `koro api` and `koro worker` from
+# deploy/Dockerfile, over the synthetic demo seed (BE-033/045/065).
+#
+# Configuration: every variable comes from ../.env.example (dev placeholders
+# only; nothing here is a real secret) and the overrides below point it at
+# the containers. APP_ENV=dev, because the demo seed and
+# RATE_LIMIT_ENABLED=false are refused elsewhere (config/ratelimit.go).
+#
+# One-shot steps are in the "setup" profile and run with `docker compose run
+# --rm <service>` in this order: seaweedfs-buckets, migrate, seed-reference,
+# seed-demo. Ports are bound to 127.0.0.1 only; k6 runs on the host.
+name: koro-loadtest
+
+x-koro-env: &koro-env
+  APP_ENV: dev
+  LOG_FORMAT: json
+  LOG_LEVEL: INFO
+  HTTP_ADDR: ":8080"
+  # k6 reaches the API through the published port, so every request comes
+  # from this network's gateway. Trusting the subnet makes the API take the
+  # client IP from X-Forwarded-For, which k6 sets per virtual user (RFC 2544
+  # benchmarking range 198.18.0.0/15): with rate limits on, each simulated
+  # client has its own per-IP budget, as behind Traefik in production.
+  TRUSTED_PROXIES: 172.29.80.0/24
+  EXPOSE_OPENAPI: "false"
+  METRICS_ADDR: ":9090"
+  DATABASE_URL: postgres://app_rw:dev-only-change-me@postgres:5432/koro?sslmode=disable
+  MIGRATE_DATABASE_URL: postgres://app_owner:dev-only-change-me@postgres:5432/koro?sslmode=disable
+  REDIS_URL: redis://redis:6379/0
+  RATE_LIMIT_ENABLED: ${KORO_RATE_LIMIT_ENABLED:-false}
+  S3_ENDPOINT: http://seaweedfs:8333
+  SMTP_HOST: mailpit
+  SMTP_PORT: "1025"
+  # A tmpfs (below): the distroless image has no writable directory of its own.
+  AUDIT_ROOT_ARCHIVE_DIR: /var/lib/koro-audit-roots
+  WORKER_HEALTH_ADDR: 127.0.0.1:8081
+
+x-koro: &koro
+  image: koro-loadtest:local
+  pull_policy: never
+  env_file: ../.env.example
+  environment: *koro-env
+  tmpfs:
+    - /var/lib/koro-audit-roots
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.29.80.0/24
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=top
+      - -c
+      - max_connections=200
+    environment:
+      POSTGRES_DB: koro
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: dev-only-change-me
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale-provider=icu --icu-locale=tr-TR --locale=C.UTF-8" # 02 §0.3
+    ports: ["127.0.0.1:5432:5432"]
+    volumes:
+      # Same role setup as deploy/compose.dev.yaml (bootstrap + dev passwords).
+      - ../deploy/db/bootstrap.sql:/docker-entrypoint-initdb.d/01-bootstrap.sql:ro
+      - ../deploy/db/dev-passwords.sql:/docker-entrypoint-initdb.d/02-dev-passwords.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d koro"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  redis:
+    image: redis:8-alpine
+    # asynq requires AOF persistence and no eviction (R-002 §5.3).
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  mailpit:
+    image: axllent/mailpit:v1.28
+    environment:
+      # Verification, ticket and order e-mails of a whole run; older ones
+      # are pruned (k6 reads each verification e-mail within seconds).
+      MP_MAX_MESSAGES: "5000"
+    ports: ["127.0.0.1:8025:8025"] # web UI + API (k6 reads verification links)
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.48
+    command:
+      - server
+      - -dir=/data
+      - -ip=seaweedfs
+      - -ip.bind=0.0.0.0
+      - -master.volumeSizeLimitMB=256
+      - -volume.max=0
+      - -s3
+      - -s3.port=8333
+      - -s3.config=/etc/seaweedfs/s3.json
+      - -s3.autoCreateBucket=false
+    volumes:
+      - ../deploy/seaweedfs/s3.dev.json:/etc/seaweedfs/s3.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8333/healthz"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+
+  # --- one-shot setup steps (profile "setup") ---
+  seaweedfs-buckets:
+    image: chrislusf/seaweedfs:4.48
+    profiles: ["setup"]
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        for b in koro-files-dev koro-quarantine-dev; do
+          echo "s3.bucket.create -name $$b" | weed shell -master=seaweedfs:9333 >/tmp/out 2>&1 || true
+          echo "s3.bucket.list" | weed shell -master=seaweedfs:9333 | grep -q "$$b" || { cat /tmp/out; exit 1; }
+        done
+    restart: "no"
+
+  migrate:
+    <<: *koro
+    profiles: ["setup"]
+    # The only service that builds the image; the others use the tag.
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-loadtest}
+    pull_policy: build
+    command: ["migrate", "up"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    restart: "no"
+
+  seed-reference:
+    <<: *koro
+    profiles: ["setup"]
+    command: ["seed", "reference"]
+    healthcheck:
+      disable: true
+    restart: "no"
+
+  seed-demo:
+    <<: *koro
+    profiles: ["setup"]
+    # Synthetic demo password of the student, club and company accounts (at
+    # least 15 characters; platform roles never get it, 06 H-66). It opens
+    # nothing but this throwaway environment.
+    command: ["seed", "demo", "-password", "${KORO_DEMO_PASSWORD:-demo-demo-demo-demo-2026}"]
+    healthcheck:
+      disable: true
+    restart: "no"
+
+  # --- the system under test ---
+  api:
+    <<: *koro
+    command: ["api"]
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:9090:9090" # Prometheus /metrics (read after the run)
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+      seaweedfs:
+        condition: service_healthy
+    # The image's HEALTHCHECK probes /healthz on HTTP_ADDR.
+    stop_grace_period: 40s
+
+  worker:
+    <<: *koro
+    command: ["worker"]
+    ports:
+      - "127.0.0.1:9091:9090" # Prometheus /metrics (read after the run)
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+      seaweedfs:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/koro", "healthcheck", "-url", "http://127.0.0.1:8081/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    stop_grace_period: 40s

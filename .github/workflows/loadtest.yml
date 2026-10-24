@@ -1,0 +1,201 @@
+# Load test (OPS-005; loadtest/README.md): k6 against the real api + worker
+# over PostgreSQL, Redis, S3 (SeaweedFS) and Mailpit in docker compose, on
+# one GitHub runner, with the synthetic demo seed. Started by hand only
+# (Actions → loadtest → Run workflow); never on pull requests or pushes.
+#
+# The whole stack and k6 share the runner (ubuntu-24.04: 4 vCPU, 16 GB on a
+# public repository), so the numbers are a pessimistic baseline to compare
+# runs with, not the capacity of the production servers.
+#
+# Results: the job summary (thresholds, per-endpoint latencies, the slowest
+# SQL) and the artifact OPS-005-loadtest-<run> (k6 summary JSON, raw k6
+# JSON lines, HTML report, Prometheus snapshots, container logs, resource
+# samples). Every action is pinned to a commit SHA; k6 is the official
+# release archive, pinned by its SHA-256. GITHUB_TOKEN is read-only.
+name: loadtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Yük profili: smoke (~2 dk), pilot (~13 dk, ~500 eşzamanlı), soak (~33 dk), stress (~15 dk, ×2,5)"
+        type: choice
+        options: [smoke, pilot, soak, stress]
+        default: pilot
+      scenarios:
+        description: "all ya da virgüllü liste: browse,signup,register,checkin,orders,discovery"
+        type: string
+        default: all
+      vus:
+        description: "browse'un tepe VU sayısı (boş = profilinki; 1–5000)"
+        type: string
+        default: ""
+      duration:
+        description: "Kararlı evre süresi, ör. 5m (boş = profilinki)"
+        type: string
+        default: ""
+      rate_limits:
+        description: "Rate limit açık (RATE_LIMIT_ENABLED=true; her sanal kullanıcı ayrı IP'den)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: loadtest
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash # -eo pipefail
+
+jobs:
+  k6:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      K6_VERSION: 2.3.0
+      K6_SHA256: 39c3117b6af817592dcd0ce4242105c0a7af10948c2a425306f0be8f7a8a8ab1
+      COMPOSE_FILE: loadtest/compose.yaml
+      COMPOSE_PROFILES: setup
+      GIT_SHA: ${{ github.sha }}
+      # Synthetic password of the demo accounts of this throwaway
+      # environment (koro seed demo -password); not a secret.
+      KORO_DEMO_PASSWORD: demo-demo-demo-demo-2026
+      KORO_RATE_LIMIT_ENABLED: ${{ inputs.rate_limits && 'true' || 'false' }}
+      # Inputs reach the scripts only as environment variables (no
+      # expression is expanded inside a shell command).
+      IN_PROFILE: ${{ inputs.profile }}
+      IN_SCENARIOS: ${{ inputs.scenarios }}
+      IN_VUS: ${{ inputs.vus }}
+      IN_DURATION: ${{ inputs.duration }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate the inputs
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          [[ "$IN_PROFILE" =~ ^(smoke|pilot|soak|stress)$ ]] || fail "profile: $IN_PROFILE"
+          [[ "$IN_SCENARIOS" =~ ^(all|(browse|signup|register|checkin|orders|discovery)(,(browse|signup|register|checkin|orders|discovery))*)$ ]] ||
+            fail "scenarios: want all or a comma list of browse,signup,register,checkin,orders,discovery"
+          [[ -z "$IN_VUS" || "$IN_VUS" =~ ^[1-9][0-9]{0,3}$ ]] || fail "vus: want 1..5000"
+          [[ -z "$IN_VUS" || "$IN_VUS" -le 5000 ]] || fail "vus: want 1..5000"
+          [[ -z "$IN_DURATION" || "$IN_DURATION" =~ ^[1-9][0-9]{0,3}(s|m)$ ]] || fail "duration: want e.g. 90s or 5m"
+          echo "OUT=$RUNNER_TEMP/loadtest" >>"$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/loadtest"
+
+      - name: Install k6 (official release, SHA-256 pinned)
+        run: |
+          tgz="$RUNNER_TEMP/k6.tar.gz"
+          curl -fsSL -o "$tgz" "https://github.com/grafana/k6/releases/download/v${K6_VERSION}/k6-v${K6_VERSION}-linux-amd64.tar.gz"
+          echo "${K6_SHA256}  $tgz" | sha256sum -c -
+          tar -xzf "$tgz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/k6-v${K6_VERSION}-linux-amd64" >>"$GITHUB_PATH"
+          "$RUNNER_TEMP/k6-v${K6_VERSION}-linux-amd64/k6" version
+
+      - name: Build the koro image (deploy/Dockerfile)
+        run: docker compose build migrate
+
+      - name: Start PostgreSQL, Redis, Mailpit, SeaweedFS
+        run: docker compose up -d --wait --wait-timeout 300 postgres redis mailpit seaweedfs
+
+      - name: Buckets, migrations, reference + demo seed, test preparation
+        run: |
+          docker compose run --rm seaweedfs-buckets
+          docker compose run --rm migrate
+          docker compose run --rm seed-reference
+          docker compose run --rm seed-demo | tail -n 40
+          docker compose exec -T postgres psql -U postgres -d koro -q -v ON_ERROR_STOP=1 -f - <loadtest/prep.sql
+          docker compose exec -T postgres psql -U postgres -d koro -At -v ON_ERROR_STOP=1 -f - <loadtest/students.sql \
+            >"$OUT/OPS-005-students.json"
+          echo "demo students for k6: $(jq length "$OUT/OPS-005-students.json")"
+
+      - name: Start api + worker
+        run: |
+          docker compose up -d --wait --wait-timeout 180 api worker
+          curl -fsS http://127.0.0.1:8080/readyz
+
+      - name: k6 run
+        id: k6
+        run: |
+          .github/scripts/resmon.sh 30 >"$OUT/OPS-005-resmon.log" 2>&1 &
+          (while :; do
+            docker stats --no-stream --format '{{.Name}} cpu={{.CPUPerc}} mem={{.MemUsage}} net={{.NetIO}} io={{.BlockIO}}' |
+              sed "s/^/[$(date -u +%H:%M:%S)] /"
+            sleep 15
+          done) >"$OUT/OPS-005-docker-stats.log" 2>&1 &
+          trap 'kill $(jobs -p) 2>/dev/null || true' EXIT
+          rl=off
+          [ "$KORO_RATE_LIMIT_ENABLED" = true ] && rl=on
+          set +e
+          K6_WEB_DASHBOARD=true K6_WEB_DASHBOARD_HOST=127.0.0.1 K6_WEB_DASHBOARD_EXPORT="$OUT/OPS-005-report.html" \
+            k6 run --quiet --no-color \
+            --out "json=$OUT/OPS-005-k6.json.gz" \
+            -e PROFILE="$IN_PROFILE" -e SCENARIOS="$IN_SCENARIOS" -e VUS="$IN_VUS" -e DURATION="$IN_DURATION" \
+            -e RATE_LIMITS="$rl" -e DEMO_PASSWORD="$KORO_DEMO_PASSWORD" \
+            -e STUDENTS_FILE="$OUT/OPS-005-students.json" -e SUMMARY_DIR="$OUT" \
+            -e RUN_ID="${GITHUB_RUN_ID}${GITHUB_RUN_ATTEMPT}" \
+            loadtest/k6/main.js 2>&1 | tee "$OUT/OPS-005-k6.log"
+          status=${PIPESTATUS[0]}
+          echo "exit=$status" >>"$GITHUB_OUTPUT"
+          echo "k6 exit code: $status (99 = a threshold failed)"
+
+      - name: Collect diagnostics
+        if: always()
+        run: |
+          curl -fsS http://127.0.0.1:9090/metrics >"$OUT/OPS-005-api-metrics.txt" || true
+          curl -fsS http://127.0.0.1:9091/metrics >"$OUT/OPS-005-worker-metrics.txt" || true
+          docker compose exec -T postgres psql -U postgres -d koro -P pager=off -c "
+            SELECT round(total_exec_time::numeric) AS total_ms, calls, round(mean_exec_time::numeric, 2) AS mean_ms,
+                   round(max_exec_time::numeric, 1) AS max_ms, rows,
+                   left(regexp_replace(query, '\s+', ' ', 'g'), 150) AS query
+            FROM pg_stat_statements WHERE dbid = (SELECT oid FROM pg_database WHERE datname = 'koro')
+            ORDER BY total_exec_time DESC LIMIT 25" >"$OUT/OPS-005-pg-top.txt" 2>&1 || true
+          docker compose ps -a >"$OUT/OPS-005-compose-ps.txt" 2>&1 || true
+          docker compose logs --no-color --timestamps 2>&1 | gzip >"$OUT/OPS-005-compose.log.gz" || true
+          .github/scripts/resmon.sh report
+
+      - name: Job summary
+        if: always()
+        env:
+          K6_EXIT: ${{ steps.k6.outputs.exit }}
+        run: |
+          {
+            if [ -s "$OUT/OPS-005-summary.md" ]; then cat "$OUT/OPS-005-summary.md"; else echo "## Koro yük testi: k6 özeti yok (çıkış kodu ${K6_EXIT:-yok})"; fi
+            echo
+            echo "Girdiler: profil \`$IN_PROFILE\`, senaryolar \`$IN_SCENARIOS\`, VU \`${IN_VUS:-profil}\`, süre \`${IN_DURATION:-profil}\`, rate limit \`$KORO_RATE_LIMIT_ENABLED\` · k6 $K6_VERSION · commit \`${GITHUB_SHA:0:12}\`"
+            echo
+            echo "### PostgreSQL: toplam süreye göre ilk 10 sorgu (pg_stat_statements)"
+            echo
+            echo '```'
+            head -n 12 "$OUT/OPS-005-pg-top.txt" 2>/dev/null || echo "yok"
+            echo '```'
+            echo
+            echo "Ayrıntı: artifact \`OPS-005-loadtest-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}\` (OPS-005-report.html, OPS-005-summary.json, OPS-005-k6.json.gz, metrikler, loglar)."
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: OPS-005-loadtest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/loadtest/
+            !${{ runner.temp }}/loadtest/OPS-005-students.json
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose down -v --remove-orphans
+
+      - name: Result
+        env:
+          K6_EXIT: ${{ steps.k6.outputs.exit }}
+        run: |
+          if [ "${K6_EXIT:-1}" != 0 ]; then
+            echo "::error::k6 exited with ${K6_EXIT:-no code} (99: a threshold failed; see the job summary)"
+            exit 1
+          fi

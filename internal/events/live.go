@@ -106,13 +106,72 @@ func (s *service) LiveSnapshot(ctx context.Context, b LiveBoard) ([]byte, error)
 	return s.liveCounters(ctx, liveSnapshot, b.OrgID, b.EventID)
 }
 
+// liveCounters reads the counters; "at" is taken before the read, so a
+// read that may miss a commit is stamped earlier than any read made after
+// that commit (the ordering liveFreshness relies on, T-325).
 func (s *service) liveCounters(ctx context.Context, typ string, orgID, eventID uuid.UUID) ([]byte, error) {
+	at := s.now()
 	n, err := s.d.Store.CheckinCounts(ctx, orgID, eventID)
 	if err != nil {
 		return nil, err
 	}
 	return json.Marshal(liveCounters{Type: typ, Confirmed: n.Confirmed, CheckedIn: n.CheckedIn, Voided: n.Voided,
-		Waitlisted: n.Waitlisted, At: s.now()})
+		Waitlisted: n.Waitlisted, At: at})
+}
+
+// liveFreshness is a connection's guard against stale counters (T-325):
+// two check-ins committing at once each read the counters after their own
+// commit and publish them, and the publications may arrive in either
+// order, so the earlier read (missing the other check-in) can come last.
+// The guard drops a snapshot or stats message stamped before the last one
+// the connection received; checkin and void messages always pass. Ties
+// pass (the counters are absolute). Across replicas the order holds up to
+// their clock skew. It is not safe for concurrent use: the hub calls
+// Snapshot and Filter on the connection's goroutine.
+type liveFreshness struct{ last time.Time }
+
+// keep reports whether msg goes out, and records the counters' time.
+func (f *liveFreshness) keep(msg []byte) bool {
+	var m struct {
+		Type string    `json:"type"`
+		At   time.Time `json:"at"`
+	}
+	if err := json.Unmarshal(msg, &m); err != nil {
+		return false // not ours: never forward what cannot be checked
+	}
+	if m.Type != liveSnapshot && m.Type != liveStats {
+		return true
+	}
+	if m.At.Before(f.last) {
+		return false
+	}
+	f.last = m.At
+	return true
+}
+
+// LiveStream returns a connection's snapshot and filter of board b: the
+// stale-counter guard (liveFreshness) followed by LiveFilter. Each
+// connection needs its own pair.
+func LiveStream(b LiveBoard, snapshot func(ctx context.Context) ([]byte, error)) (func(ctx context.Context) ([]byte, error), func(msg []byte) ([]byte, bool)) {
+	fresh := &liveFreshness{}
+	names := LiveFilter(b)
+	snap := func(ctx context.Context) ([]byte, error) {
+		msg, err := snapshot(ctx)
+		if err == nil {
+			fresh.keep(msg)
+		}
+		return msg, err
+	}
+	filter := func(msg []byte) ([]byte, bool) {
+		if !fresh.keep(msg) {
+			return nil, false
+		}
+		if names == nil {
+			return msg, true
+		}
+		return names(msg)
+	}
+	return snap, filter
 }
 
 // LiveFilter returns the per-viewer rewrite of the board's messages: nil

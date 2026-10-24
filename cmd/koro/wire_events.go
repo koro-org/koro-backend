@@ -190,12 +190,14 @@ func (w *eventsWiring) build(c *container) error {
 }
 
 // newHub builds the live board's hub: Redis pub/sub between the API
-// replicas, an in-process bus without Redis (wiring and matrix tests).
+// replicas and the shared connection counter (BE-100), an in-process bus
+// and per-replica limits without Redis (wiring and matrix tests).
 func (w *eventsWiring) newHub(c *container) (*realtime.Hub, error) {
 	cfg := w.live
 	cfg.Bus = realtime.NewMemBus()
 	if c.infra.redis != nil {
 		cfg.Bus = realtime.NewRedisBus(c.infra.redis)
+		cfg.Counter = realtime.NewRedisCounter(c.infra.redis) // limits across replicas (BE-100, T-325)
 	}
 	cfg.Clock, cfg.Log = c.infra.clock, c.infra.log.With("component", "realtime")
 	cfg.TrustedOrigins = c.infra.platform.Realtime.TrustedOrigins

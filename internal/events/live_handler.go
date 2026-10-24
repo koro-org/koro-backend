@@ -37,10 +37,11 @@ func openLive(ctx context.Context, svc Service, a authz.Actor, rawID string) (re
 	if err != nil {
 		return realtime.Subscription{}, err
 	}
+	snapshot, filter := LiveStream(b, func(ctx context.Context) ([]byte, error) { return svc.LiveSnapshot(ctx, b) })
 	return realtime.Subscription{
 		Topic:    b.Topic(),
-		Snapshot: func(ctx context.Context) ([]byte, error) { return svc.LiveSnapshot(ctx, b) },
-		Filter:   LiveFilter(b),
+		Snapshot: snapshot,
+		Filter:   filter,
 		Recheck: func(ctx context.Context, a authz.Actor) error {
 			_, err := svc.OpenLiveBoard(ctx, a, id)
 			return err

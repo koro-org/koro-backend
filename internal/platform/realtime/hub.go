@@ -13,7 +13,8 @@
 //     authorisation. A refusal is a plain RFC 9457 answer (401/403/404,
 //     429 over the limits, 503 while shutting down): nothing is upgraded.
 //   - Limits: at most MaxPerTopic connections per topic and MaxPerUser per
-//     user (each replica counts its own); a client sends nothing but
+//     user across every replica when a shared Counter is configured (Redis;
+//     T-325), each replica's own count otherwise; a client sends nothing but
 //     ping/pong (any data message closes with 1008, frames above
 //     MaxMessageBytes with 1009); a client that does not answer a ping
 //     within PingTimeout or cannot keep up with SendBuffer messages is
@@ -37,6 +38,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -71,6 +73,12 @@ const (
 	MaxMessageBytes = 512
 	// closeWait bounds CloseAll's wait for the close handshakes.
 	closeWait = 6 * time.Second
+	// DefaultLeaseTTL is how long a connection's record in the shared
+	// Counter outlives its last heartbeat (every LeaseTTL/3): the records of
+	// a replica that dies free their slots within it.
+	DefaultLeaseTTL = 45 * time.Second
+	// counterTimeout bounds one call to the shared Counter.
+	counterTimeout = 2 * time.Second
 )
 
 // ErrTooManyConnections answers a handshake over MaxPerTopic or MaxPerUser
@@ -90,6 +98,14 @@ type Config struct {
 
 	MaxPerTopic int
 	MaxPerUser  int
+	// Counter shares the limits between the replicas (T-325); nil counts
+	// per replica (a warning when the hub starts listening). When the Counter fails, the
+	// handshake falls back to the replica's own count (fail open, logged):
+	// the limits protect capacity, the board must not go down with Redis.
+	Counter Counter
+	// LeaseTTL is the lifetime of a record in Counter without a heartbeat
+	// (default DefaultLeaseTTL; the heartbeat runs every LeaseTTL/3).
+	LeaseTTL time.Duration
 	// Recheck is the re-authorisation period (default and maximum
 	// MaxRecheck).
 	Recheck time.Duration
@@ -126,6 +142,7 @@ func (c *Config) defaults() error {
 	setDur(&c.PingInterval, DefaultPingInterval)
 	setDur(&c.PingTimeout, DefaultPingTimeout)
 	setDur(&c.WriteTimeout, DefaultWriteTimeout)
+	setDur(&c.LeaseTTL, DefaultLeaseTTL)
 	return nil
 }
 
@@ -135,12 +152,17 @@ type Hub struct {
 	origins  map[string]bool // lower-case scheme://host of TrustedOrigins
 	patterns []string        // the same as websocket.AcceptOptions.OriginPatterns
 
-	mu      sync.Mutex // closing, the counters and the clients
+	mu      sync.Mutex // closing, the counters, the leases and the clients
 	closing bool
 	topicN  map[string]int
 	userN   map[uuid.UUID]int
 	clients map[string]map[*client]struct{}
 	running sync.WaitGroup
+	// replica names this hub's records in the shared Counter; seq numbers
+	// them; shared holds the leases recorded there (the heartbeat's).
+	replica string
+	seq     uint64
+	shared  map[*Lease]struct{}
 
 	// listenMu guards the bus subscription; it is never held with mu (the
 	// bus delivers under its own locks into deliver, which takes mu).
@@ -155,7 +177,7 @@ func NewHub(cfg Config) (*Hub, error) {
 		return nil, err
 	}
 	h := &Hub{cfg: cfg, origins: map[string]bool{}, topicN: map[string]int{}, userN: map[uuid.UUID]int{},
-		clients: map[string]map[*client]struct{}{}}
+		clients: map[string]map[*client]struct{}{}, replica: uuid.NewV7().String(), shared: map[*Lease]struct{}{}}
 	for _, o := range cfg.TrustedOrigins {
 		o = strings.TrimSuffix(strings.TrimSpace(o), "/")
 		u, err := url.Parse(o)
@@ -204,31 +226,79 @@ type Lease struct {
 	h     *Hub
 	topic string
 	user  uuid.UUID
+	slot  Slot // its record in the shared Counter
 	once  sync.Once
 }
 
-// Release frees the slot (idempotent).
-func (l *Lease) Release() {
+// Release frees the slot (idempotent): the replica's count, then the
+// shared record (a failure is logged; the record expires within LeaseTTL).
+// ctx's values are kept, its cancellation is not (the request has ended).
+func (l *Lease) Release(ctx context.Context) {
 	l.once.Do(func() {
 		h := l.h
-		h.mu.Lock()
-		defer h.mu.Unlock()
-		if h.topicN[l.topic]--; h.topicN[l.topic] <= 0 {
-			delete(h.topicN, l.topic)
+		shared := h.releaseLocal(l)
+		if !shared {
+			return
 		}
-		if h.userN[l.user]--; h.userN[l.user] <= 0 {
-			delete(h.userN, l.user)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), counterTimeout)
+		defer cancel()
+		if err := h.cfg.Counter.Release(ctx, l.slot); err != nil {
+			h.cfg.Log.LogAttrs(ctx, slog.LevelWarn, "realtime counter release failed", slog.Any("err", err))
 		}
 	})
+}
+
+// releaseLocal frees l's slot in the replica's count; it reports whether
+// l was recorded in the shared Counter.
+func (h *Hub) releaseLocal(l *Lease) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.topicN[l.topic]--; h.topicN[l.topic] <= 0 {
+		delete(h.topicN, l.topic)
+	}
+	if h.userN[l.user]--; h.userN[l.user] <= 0 {
+		delete(h.userN, l.user)
+	}
+	_, shared := h.shared[l]
+	delete(h.shared, l)
+	return shared
 }
 
 // Admit reserves a slot for user on topic before the upgrade: 429 over the
 // limits, 503 while shutting down or without the bus subscription. ctx's
 // values (not its cancellation) carry the hub's subscription.
+//
+// The replica's own count is checked first (it never exceeds the shared
+// one), then the shared Counter outside the hub's lock; a refusal there
+// undoes the local reservation.
 func (h *Hub) Admit(ctx context.Context, topic string, user uuid.UUID) (*Lease, error) {
 	if err := h.listen(ctx); err != nil {
 		return nil, err
 	}
+	l, err := h.reserve(topic, user)
+	if err != nil || h.cfg.Counter == nil {
+		return l, err
+	}
+	cctx, cancel := context.WithTimeout(ctx, counterTimeout)
+	ok, err := h.cfg.Counter.Acquire(cctx, l.slot, h.cfg.MaxPerTopic, h.cfg.MaxPerUser, h.cfg.LeaseTTL)
+	cancel()
+	switch {
+	case err != nil: // fail open on the replica's own count
+		h.cfg.Log.LogAttrs(ctx, slog.LevelWarn, "realtime counter unavailable, per-replica limits apply",
+			slog.Any("err", err))
+		return l, nil
+	case !ok:
+		l.Release(ctx) // not shared yet: only the local reservation is undone
+		return nil, ErrTooManyConnections
+	}
+	h.mu.Lock()
+	h.shared[l] = struct{}{}
+	h.mu.Unlock()
+	return l, nil
+}
+
+// reserve takes a slot in the replica's own count.
+func (h *Hub) reserve(topic string, user uuid.UUID) (*Lease, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	switch {
@@ -239,7 +309,37 @@ func (h *Hub) Admit(ctx context.Context, topic string, user uuid.UUID) (*Lease, 
 	}
 	h.topicN[topic]++
 	h.userN[user]++
-	return &Lease{h: h, topic: topic, user: user}, nil
+	h.seq++
+	id := h.replica + ":" + strconv.FormatUint(h.seq, 10)
+	return &Lease{h: h, topic: topic, user: user, slot: Slot{Topic: topic, User: user, ID: id}}, nil
+}
+
+// heartbeat refreshes the replica's shared records every LeaseTTL/3 until
+// ctx ends (the bus subscription's lifetime).
+func (h *Hub) heartbeat(ctx context.Context) {
+	t := time.NewTicker(h.cfg.LeaseTTL / 3)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		h.mu.Lock()
+		slots := make([]Slot, 0, len(h.shared))
+		for l := range h.shared {
+			slots = append(slots, l.slot)
+		}
+		h.mu.Unlock()
+		if len(slots) == 0 {
+			continue
+		}
+		rctx, cancel := context.WithTimeout(ctx, counterTimeout)
+		if err := h.cfg.Counter.Refresh(rctx, slots, h.cfg.LeaseTTL); err != nil {
+			h.cfg.Log.LogAttrs(ctx, slog.LevelWarn, "realtime counter heartbeat failed", slog.Any("err", err))
+		}
+		cancel()
+	}
 }
 
 // listen subscribes the hub to the bus once (retried on the next
@@ -264,6 +364,12 @@ func (h *Hub) listen(ctx context.Context) error {
 		return problem.ErrUnavailable
 	}
 	h.listening, h.stopListen = true, cancel
+	if h.cfg.Counter != nil {
+		go h.heartbeat(lctx)
+	} else {
+		h.cfg.Log.LogAttrs(ctx, slog.LevelWarn,
+			"realtime connection limits are per replica: no shared counter (Redis) configured")
+	}
 	return nil
 }
 
@@ -295,7 +401,8 @@ func (h *Hub) deliver(channel string, payload []byte) {
 type Stream struct {
 	// Snapshot is the first message, read after the connection joined its
 	// topic (a change in between arrives after it; the boards carry
-	// absolute counters).
+	// absolute counters). Snapshot and Filter run on the connection's own
+	// goroutine, one at a time: they may share per-connection state.
 	Snapshot func(ctx context.Context) ([]byte, error)
 	// Filter rewrites or drops (false) a message for this connection; nil
 	// sends every message as published.
@@ -328,7 +435,7 @@ func (c *client) kick(code websocket.StatusCode, reason string) {
 // ends; it releases l. A failed upgrade has been answered by the websocket
 // library (it re-checks the Origin against TrustedOrigins).
 func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, l *Lease, s Stream) {
-	defer l.Release()
+	defer l.Release(r.Context())
 	// The server's read/write deadlines (httpx.ReadTimeout, WriteTimeout)
 	// stay on a hijacked connection: clear them before the upgrade.
 	rc := http.NewResponseController(w)

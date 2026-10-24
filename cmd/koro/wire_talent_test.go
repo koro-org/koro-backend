@@ -11,6 +11,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/events"
+	"koro/internal/feed"
 	"koro/internal/kvkk"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
@@ -30,8 +31,9 @@ func (w *talentWiring) useMemStore() {
 	w.tx = db.NopTx{}
 }
 
-// TestWire_TalentTasksAndHooks (BE-047): talent subscribes to the 14
-// topics of 01 §4.11 (signals on low, the two neutralisations on default),
+// TestWire_TalentTasksAndHooks (BE-047): talent subscribes to the 15
+// topics of 01 §4.11 (signals on low, the two neutralisations on default;
+// user.edu_verified since BE-090),
 // registers its KVKK provider, fills hooks.talentAuditor and starts with
 // collection off (T-32).
 func TestWire_TalentTasksAndHooks(t *testing.T) {
@@ -51,6 +53,7 @@ func TestWire_TalentTasksAndHooks(t *testing.T) {
 		"student.ranking_choice_changed": talent.ApplyRankingChoiceTaskName, "post.liked": talent.IngestLikeTaskName,
 		"post.unliked": talent.ReverseLikeTaskName, "post.saved": talent.IngestSaveTaskName,
 		"user.active_day": talent.IngestActiveDayTaskName, "dsr.profiling_objection": talent.NeutralizeObjectionTaskName,
+		"user.edu_verified": talent.IngestProfileRefreshTaskName,
 	}
 	var names []string
 	for _, s := range c.infra.subs.All() {
@@ -295,5 +298,86 @@ func TestWire_TalentCollectionOffDestructionHook(t *testing.T) {
 	if err != nil || len(logs) != 1 || logs[0].Module != "talent" || logs[0].Target != p.Target || logs[0].Method != privacy.MethodHardDelete ||
 		logs[0].RecordCount < 2 {
 		t.Fatalf("destruction rows = %+v, %v", logs, err)
+	}
+}
+
+// TestWire_TalentReconcileAdapters (BE-090; 00 T-321, T-341): over the
+// built modules' memory stores, talentEvents reports the door staff of an
+// event (in its org) and the cancelled registration among the sources;
+// talentLikes reads feed (built after talent) at call time and reports a
+// withdrawn like of an existing post only; orgs answers the ended
+// memberships through the Memberships port.
+func TestWire_TalentReconcileAdapters(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	mem := c.events.built.(*events.MemStore)
+	start := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
+	e := events.Event{
+		ID: uuid.NewV7(), OrgID: uuid.NewV7(), CreatedBy: uuid.NewV7(), Title: "Uzlaştırma", Slug: "uzlastirma",
+		Category: events.CategoryTalk, Format: events.FormatInPerson, StartsAt: start, EndsAt: start.Add(time.Hour),
+		Visibility: events.VisibilityPublic, Status: events.StatusPublished, PublishedAt: &start, RequiresRegistration: true,
+		RegistrationMode: events.ModeAuto, CreatedAt: start, UpdatedAt: start,
+	}
+	if err := mem.PutEvent(e); err != nil {
+		t.Fatal(err)
+	}
+	reg := func(st events.RegStatus) events.Registration {
+		t.Helper()
+		r, err := mem.InsertRegistration(ctx, events.Registration{ID: uuid.NewV7(), EventID: e.ID, OrgID: e.OrgID, UserID: uuid.NewV7(),
+			Status: st, Source: events.SourceWeb, ConfirmedAt: &start, AnswersPurgeAt: start.Add(90 * 24 * time.Hour)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	kept, cancelled := reg(events.RegConfirmed), reg(events.RegConfirmed)
+	by := events.ByUser
+	cancelled.Status, cancelled.CancelledAt, cancelled.CancelledByKind = events.RegCancelled, &start, &by
+	if _, err := mem.UpdateRegistration(ctx, cancelled); err != nil {
+		t.Fatal(err)
+	}
+	staff := uuid.NewV7()
+	if _, err := mem.InsertStaff(ctx, events.Staff{EventID: e.ID, UserID: staff, OrgID: e.OrgID, Role: events.StaffScanner,
+		InvitedBy: e.CreatedBy}); err != nil {
+		t.Fatal(err)
+	}
+	a := talentEvents{p: c.events.svc}
+	if got, err := a.Undone(ctx, []uuid.UUID{kept.ID, cancelled.ID, uuid.NewV7()}); err != nil || len(got) != 1 || !got[cancelled.ID] {
+		t.Fatalf("Undone = %v, %v", got, err)
+	}
+	if ok, err := a.OnStaff(ctx, e.OrgID, e.ID, staff); err != nil || !ok {
+		t.Fatalf("OnStaff(staff) = %v, %v", ok, err)
+	}
+	if ok, err := a.OnStaff(ctx, uuid.NewV7(), e.ID, staff); err != nil || ok {
+		t.Fatalf("OnStaff(another org) = %v, %v", ok, err)
+	}
+
+	posts := c.feed.built.(*feed.MemStore)
+	title := "Gönderi"
+	p, err := posts.InsertPost(ctx, feed.Post{ID: uuid.NewV7(), OrgID: uuid.NewV7(), AuthorOrgKind: feed.AuthorClub,
+		AuthorUserID: uuid.NewV7(), Kind: feed.KindText, Title: &title, BodyJSON: feed.JSON(`{"type":"doc"}`),
+		AudienceKind: feed.AudiencePublic, AudienceKeys: []string{feed.KeyAll}, AudienceDimCount: 1, Status: feed.StatusDraft})
+	if err != nil {
+		t.Fatal(err)
+	}
+	liker, unliker := uuid.NewV7(), uuid.NewV7()
+	posts.PutLike(liker, p.ID)
+	still, gone := talent.LikeRef{UserID: liker, PostID: p.ID}, talent.LikeRef{UserID: unliker, PostID: p.ID}
+	missing := talent.LikeRef{UserID: liker, PostID: uuid.NewV7()}
+	got, err := talentLikes{c: c}.WithdrawnLikes(ctx, []talent.LikeRef{still, gone, missing})
+	if err != nil || len(got) != 1 || !got[gone] {
+		t.Fatalf("WithdrawnLikes = %v, %v", got, err)
+	}
+	if _, err := (talentLikes{c: &container{}}).WithdrawnLikes(ctx, []talent.LikeRef{gone}); err == nil {
+		t.Fatal("WithdrawnLikes without feed succeeded")
+	}
+
+	var ms talent.Memberships = c.orgs.svc
+	if got, err := ms.EndedMemberships(ctx, []uuid.UUID{uuid.NewV7()}); err != nil || len(got) != 0 {
+		t.Fatalf("EndedMemberships(unknown) = %v, %v", got, err)
 	}
 }

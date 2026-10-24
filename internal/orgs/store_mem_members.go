@@ -186,6 +186,15 @@ func (s *MemStore) ActiveMembershipsOfUser(_ context.Context, userID uuid.UUID) 
 	return s.collect(func(m Membership) bool { return m.UserID == userID && m.Status == MemberActive }), nil
 }
 
+// EndedMemberships implements Store.
+func (s *MemStore) EndedMemberships(_ context.Context, ids []uuid.UUID) ([]uuid.UUID, error) {
+	out := []uuid.UUID{}
+	for _, m := range s.collect(func(m Membership) bool { return m.Status == MemberEnded && slices.Contains(ids, m.ID) }) {
+		out = append(out, m.ID)
+	}
+	return out, nil
+}
+
 // ListUserMemberships implements Store.
 func (s *MemStore) ListUserMemberships(_ context.Context, userID uuid.UUID, statuses []MemberStatus, after *uuid.UUID, limit int) ([]Membership, error) {
 	sts := statusSet(statuses)

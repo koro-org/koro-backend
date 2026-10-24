@@ -207,6 +207,14 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (orgs.Store, world)
 		if _, err := s.EndMember(ctx, co.ID, a.ID, now, orgs.EndRoleChanged); !errors.Is(err, orgs.ErrNotFound) {
 			t.Fatalf("EndMember twice: %v", err)
 		}
+		// EndedMemberships (BE-090): the ended row only; an active row and
+		// an unknown ID are missing.
+		if ids, err := s.EndedMemberships(ctx, []uuid.UUID{got.ID, a.ID, uuid.NewV7()}); err != nil || !slices.Equal(ids, []uuid.UUID{a.ID}) {
+			t.Fatalf("EndedMemberships = %v, %v; want [%s]", ids, err, a.ID)
+		}
+		if ids, err := s.EndedMemberships(ctx, nil); err != nil || len(ids) != 0 {
+			t.Fatalf("EndedMemberships(nil) = %v, %v", ids, err)
+		}
 		// The user can join again after the end (open uniqueness only).
 		if _, err := s.InsertMember(ctx, member(co.ID, admin, authz.MemberCompanyOwner)); !errors.Is(err, problem.ErrConflict) {
 			t.Fatalf("owner while another is active: %v", err)

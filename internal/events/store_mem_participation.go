@@ -52,3 +52,25 @@ func (s *MemStore) ParticipationFacts(_ context.Context, eventIDs []uuid.UUID) (
 	}
 	return out, nil
 }
+
+// Undone implements Store.
+func (s *MemStore) Undone(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	want := make(map[uuid.UUID]bool, len(ids))
+	for _, id := range ids {
+		want[id] = true
+	}
+	out := make(map[uuid.UUID]bool, len(ids))
+	for _, r := range s.regs {
+		if want[r.ID] && r.Status == RegCancelled {
+			out[r.ID] = true
+		}
+	}
+	for _, c := range s.checkins {
+		if want[c.ID] && c.VoidedAt != nil {
+			out[c.ID] = true
+		}
+	}
+	return out, nil
+}

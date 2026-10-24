@@ -15,6 +15,7 @@ const (
 	SignalRegistrationConfirmed = "event_registration_confirmed"
 	SignalEventNoShow           = "event_no_show"
 	SignalProfileSection        = "profile_section_complete"
+	SignalProfileRefresh        = "profile_refresh"
 	SignalClubMembership        = "club_membership_active"
 	SignalFeedLike              = "feed_like"
 	SignalFeedSave              = "feed_save"
@@ -30,6 +31,7 @@ const (
 	SourceMembership     = "membership"
 	SourcePost           = "post"
 	SourceProfileSection = "profile_section"
+	SourceProfileRefresh = "profile_refresh"
 	SourceDay            = "day"
 	SourceReversal       = "reversal"
 )

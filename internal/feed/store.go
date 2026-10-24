@@ -82,6 +82,9 @@ type Store interface {
 	// AddLike / RemoveLike write post_reactions and posts.like_count.
 	AddLike(ctx context.Context, userID, postID uuid.UUID) (bool, error)
 	RemoveLike(ctx context.Context, userID, postID uuid.UUID) (bool, error)
+	// WithdrawnLikes returns the pairs among likes whose post exists and
+	// holds no like of the user (talent's reconciliation, BE-090).
+	WithdrawnLikes(ctx context.Context, likes []LikeKey) (map[LikeKey]bool, error)
 	// AddSave / RemoveSave write post_saves and posts.save_count.
 	AddSave(ctx context.Context, userID, postID uuid.UUID) (bool, error)
 	RemoveSave(ctx context.Context, userID, postID uuid.UUID) (bool, error)

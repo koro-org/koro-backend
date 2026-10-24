@@ -429,6 +429,42 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (feed.Store, world)
 		}
 	})
 
+	t.Run("withdrawn likes: the post exists and holds no like of the user (BE-090)", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		org, by, liker, unliker := w.org(t, feed.AuthorClub), w.user(t), w.user(t), w.user(t)
+		p := insert(t, s, publishedAt(post(org, feed.AuthorClub, by), pub0))
+		removed := insert(t, s, post(org, feed.AuthorClub, by))
+		if _, err := s.AddLike(ctx, liker, p.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.AddLike(ctx, unliker, p.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.RemoveLike(ctx, unliker, p.ID); err != nil {
+			t.Fatal(err)
+		}
+		w.like(t, unliker, removed.ID)
+		if err := s.DeletePost(ctx, org, removed.ID); err != nil {
+			t.Fatal(err)
+		}
+		still := feed.LikeKey{UserID: liker, PostID: p.ID}
+		gone := feed.LikeKey{UserID: unliker, PostID: p.ID}
+		deleted := feed.LikeKey{UserID: unliker, PostID: removed.ID}
+		missing := feed.LikeKey{UserID: liker, PostID: uuid.NewV7()}
+		got, err := s.WithdrawnLikes(ctx, []feed.LikeKey{still, gone, deleted, missing, gone})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 || !got[gone] {
+			t.Fatalf("WithdrawnLikes = %v, want only %v", got, gone)
+		}
+		if got, err := s.WithdrawnLikes(ctx, nil); err != nil || len(got) != 0 {
+			t.Fatalf("WithdrawnLikes(nil) = %v, %v", got, err)
+		}
+	})
+
 	t.Run("saved list: visible posts only, keyset by save time", func(t *testing.T) {
 		t.Parallel()
 		s, w := newStore(t)

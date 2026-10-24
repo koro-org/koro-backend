@@ -77,6 +77,19 @@ func (s *MemStore) RemoveLike(_ context.Context, userID, postID uuid.UUID) (bool
 	return ok, nil
 }
 
+// WithdrawnLikes implements Store.
+func (s *MemStore) WithdrawnLikes(_ context.Context, likes []LikeKey) (map[LikeKey]bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[LikeKey]bool, len(likes))
+	for _, l := range likes {
+		if _, ok := s.posts[l.PostID]; ok && !has(s.likes, l.UserID, l.PostID) {
+			out[l] = true
+		}
+	}
+	return out, nil
+}
+
 // AddSave implements Store.
 func (s *MemStore) AddSave(_ context.Context, userID, postID uuid.UUID) (bool, error) {
 	s.mu.Lock()

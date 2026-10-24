@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"time"
 	"uuid"
 
@@ -35,7 +36,17 @@ const (
 	ReverseLikeTaskName          = "talent.reverse_like"           // post.unliked
 	IngestSaveTaskName           = "talent.ingest_save"            // post.saved
 	IngestActiveDayTaskName      = "talent.ingest_active_day"      // user.active_day
+	IngestProfileRefreshTaskName = "talent.ingest_profile_refresh" // user.edu_verified (a renewal; BE-090)
 	NeutralizeObjectionTaskName  = "talent.neutralize_objection"   // dsr.profiling_objection
+)
+
+// Reason codes of the reversal rows: the consumer's and the
+// reconciliation's of the same undoing (reconcile.go).
+const (
+	reasonRegistrationCancelled = "registration_cancelled"
+	reasonCheckinVoided         = "checkin_voided"
+	reasonPostUnliked           = "post_unliked"
+	reasonMembershipEnded       = "membership_ended"
 )
 
 // Subscribe registers the consumers of 01 §4.11 / §6.2.
@@ -55,6 +66,7 @@ func (m Module) Subscribe(r *outbox.Registry) {
 	r.Subscribe(domainevent.TopicPostUnliked, ReverseLikeTaskName, s.handlePostUnliked, low)
 	r.Subscribe(domainevent.TopicPostSaved, IngestSaveTaskName, s.handlePostSaved, low)
 	r.Subscribe(domainevent.TopicUserActiveDay, IngestActiveDayTaskName, s.handleActiveDay, low)
+	r.Subscribe(domainevent.TopicUserEduVerified, IngestProfileRefreshTaskName, s.handleEduVerified, low)
 	r.Subscribe(domainevent.TopicDSRProfilingObjection, NeutralizeObjectionTaskName, s.handleObjection, def)
 }
 
@@ -75,7 +87,7 @@ func (s *service) handleRegistrationCancelled(ctx context.Context, e domainevent
 	if err != nil {
 		return queue.Permanent(err)
 	}
-	return s.reverse(ctx, reversal{task: ReverseRegistrationTaskName, reason: "registration_cancelled", eventID: e.ID,
+	return s.reverse(ctx, reversal{task: ReverseRegistrationTaskName, reason: reasonRegistrationCancelled, eventID: e.ID,
 		key: SourceKey{UserID: p.UserID, Signal: SignalRegistrationConfirmed, SourceType: SourceRegistration, SourceID: p.RegistrationID}})
 }
 
@@ -110,7 +122,7 @@ func (s *service) handleCheckinVoided(ctx context.Context, e domainevent.Envelop
 	if err != nil {
 		return queue.Permanent(err)
 	}
-	return s.reverse(ctx, reversal{task: ReverseCheckinTaskName, reason: "checkin_voided", eventID: e.ID,
+	return s.reverse(ctx, reversal{task: ReverseCheckinTaskName, reason: reasonCheckinVoided, eventID: e.ID,
 		key: SourceKey{UserID: p.UserID, Signal: SignalEventCheckin, SourceType: SourceCheckin, SourceID: p.CheckinID}})
 }
 
@@ -137,7 +149,7 @@ func (s *service) handleMembershipEnded(ctx context.Context, e domainevent.Envel
 	if authz.OrgKind(p.OrgKind) != authz.OrgClub {
 		return nil
 	}
-	return s.reverse(ctx, reversal{task: ReverseMembershipTaskName, reason: "membership_ended", eventID: e.ID,
+	return s.reverse(ctx, reversal{task: ReverseMembershipTaskName, reason: reasonMembershipEnded, eventID: e.ID,
 		key: SourceKey{UserID: p.UserID, Signal: SignalClubMembership, SourceType: SourceMembership, SourceID: p.MembershipID}})
 }
 
@@ -172,7 +184,7 @@ func (s *service) handlePostUnliked(ctx context.Context, e domainevent.Envelope)
 	if err != nil {
 		return queue.Permanent(err)
 	}
-	return s.reverse(ctx, reversal{task: ReverseLikeTaskName, reason: "post_unliked", eventID: e.ID,
+	return s.reverse(ctx, reversal{task: ReverseLikeTaskName, reason: reasonPostUnliked, eventID: e.ID,
 		key: SourceKey{UserID: p.UserID, Signal: SignalFeedLike, SourceType: SourcePost, SourceID: p.PostID}})
 }
 
@@ -201,6 +213,24 @@ func (s *service) handleActiveDay(ctx context.Context, e domainevent.Envelope) e
 	return s.credit(ctx, c)
 }
 
+// handleEduVerified: a renewed student verification ("Hâlâ öğrenci
+// misin?", 000081 profile_refresh; 00 T-337, BE-090) earns once per
+// calendar year (Europe/Istanbul, the event's instant): the source is
+// derived from the user and the year, so a second renewal in the same year
+// is a duplicate. A first verification (Renewal false) earns nothing.
+func (s *service) handleEduVerified(ctx context.Context, e domainevent.Envelope) error {
+	p, err := domainevent.Decode[domainevent.UserEduVerified](e)
+	if err != nil {
+		return queue.Permanent(err)
+	}
+	if !p.Renewal {
+		return nil
+	}
+	c := s.newCredit(e, IngestProfileRefreshTaskName, SignalProfileRefresh, p.UserID, SourceProfileRefresh, uuid.Nil(), false)
+	c.key.SourceID = derivedID("profile_refresh", p.UserID.String(), strconv.Itoa(c.day.Year))
+	return s.credit(ctx, c)
+}
+
 // ---------------------------------------------------------------- credit
 
 // credit is one signal to write.
@@ -218,7 +248,7 @@ type credit struct {
 
 	// event is the Koro event of an event signal and organiser its org from
 	// the payload (uuid.Nil: unknown, read through Events); the organiser
-	// rule sets zero (screen).
+	// and staff rule sets zero (screen).
 	event, organiser uuid.UUID
 	// created is the account's creation instant of a like (screen; nil:
 	// unknown account), checked against min_account_age_days_for_likes in
@@ -309,7 +339,8 @@ func (s *service) screen(ctx context.Context, c *credit) (string, error) {
 // organises reports whether userID organises the event: an active
 // membership of the organising org (org; uuid.Nil → the event's org from
 // Events, unknown event → no) in a role other than a participant's
-// (organiserRole).
+// (organiserRole), or a place on the event's door staff (event_staff,
+// whatever the user's role in the org: 00 T-341, BE-090).
 func (s *service) organises(ctx context.Context, userID, event, org uuid.UUID) (bool, error) {
 	if org == uuid.Nil() {
 		facts, err := s.d.Events.EventFacts(ctx, []uuid.UUID{event})
@@ -326,7 +357,14 @@ func (s *service) organises(ctx context.Context, userID, event, org uuid.UUID) (
 	if err != nil {
 		return false, fmt.Errorf("talent: memberships: %w", err)
 	}
-	return slices.ContainsFunc(ms, func(m authz.Membership) bool { return m.OrgID == org && organiserRole(m.Role) }), nil
+	if slices.ContainsFunc(ms, func(m authz.Membership) bool { return m.OrgID == org && organiserRole(m.Role) }) {
+		return true, nil
+	}
+	staff, err := s.d.Events.OnStaff(ctx, org, event, userID)
+	if err != nil {
+		return false, fmt.Errorf("talent: event staff: %w", err)
+	}
+	return staff, nil
 }
 
 // organiserRole: every org role organises the org's events (club_admin,
@@ -494,13 +532,19 @@ type reversal struct {
 // reverse writes the reversal of r's original: points and raw points
 // negated, the original's occurred_at (the decay matches) and config
 // version. No original (the signal was never written: flag off,
-// ineligible, sensitive) → nothing to do. With the flag off nothing is
-// written at all (T-32), reversals included.
+// ineligible, sensitive) → nothing to do. With the flag off no ledger row
+// is written at all (T-32), reversals included; the drop is only counted
+// in talent.collection_state (no personal data, the ledger is not read),
+// so that the first nightly run with the flag on reconciles the ledger
+// with the source modules (00 T-321, BE-090; reconcile.go).
 func (s *service) reverse(ctx context.Context, r reversal) error {
 	if err := system(ctx, r.task); err != nil {
 		return queue.Permanent(err)
 	}
 	if !s.d.CollectionEnabled {
+		if err := s.inTx(ctx, func(ctx context.Context) error { return s.d.Store.StampReversalDropped(ctx, s.now()) }); err != nil {
+			return fmt.Errorf("talent: %s: count the dropped reversal: %w", r.task, err)
+		}
 		s.counts.inc(r.key.Signal, OutcomeFlagOff)
 		return nil
 	}
@@ -514,11 +558,7 @@ func (s *service) reverse(ctx context.Context, r reversal) error {
 		case err != nil:
 			return err
 		}
-		id := orig.ID
-		row := PointEvent{ID: uuid.NewV7(), UserID: orig.UserID, Signal: orig.Signal, SourceType: SourceReversal, SourceID: orig.ID,
-			OccurredAt: orig.OccurredAt, RawPointsCP: -orig.RawPointsCP, PointsCP: -orig.PointsCP, ReasonCode: r.reason,
-			ConfigVersionID: orig.ConfigVersionID, ReversalOf: &id, SourceEventID: r.eventID}
-		_, inserted, err := s.d.Store.InsertPoint(ctx, row)
+		_, inserted, err := s.d.Store.InsertPoint(ctx, reversalOf(orig, r.reason, r.eventID))
 		outcome = OutcomeReversed
 		if !inserted {
 			outcome = OutcomeDuplicate
@@ -530,6 +570,17 @@ func (s *service) reverse(ctx context.Context, r reversal) error {
 	}
 	s.counts.inc(r.key.Signal, outcome)
 	return nil
+}
+
+// reversalOf is the reversal row of orig: points and raw points negated,
+// the original's occurred_at (the decay matches) and config version.
+// eventID is the source_event_id: the consumed envelope, or the
+// reconciliation run.
+func reversalOf(orig PointEvent, reason string, eventID uuid.UUID) PointEvent {
+	id := orig.ID
+	return PointEvent{ID: uuid.NewV7(), UserID: orig.UserID, Signal: orig.Signal, SourceType: SourceReversal, SourceID: orig.ID,
+		OccurredAt: orig.OccurredAt, RawPointsCP: -orig.RawPointsCP, PointsCP: -orig.PointsCP, ReasonCode: reason,
+		ConfigVersionID: orig.ConfigVersionID, ReversalOf: &id, SourceEventID: eventID}
 }
 
 func abs(v int) int {

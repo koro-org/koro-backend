@@ -79,6 +79,18 @@ type OrgDirectory interface {
 	ActiveMemberIDs(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error)
 }
 
+// MembershipHistory is the membership history read of other modules
+// (BE-090): talent's reconciliation of a closed period (00 T-321) asks
+// which memberships its ledger credited have ended. A system read without
+// authorisation; only the IDs of the ended rows leave.
+type MembershipHistory interface {
+	// EndedMemberships returns the memberships among membershipIDs that
+	// ended (status ended: what membership.ended reports). An unknown ID
+	// (never existed, or deleted: a sensitive club's ended membership, the
+	// retention purge) is missing.
+	EndedMemberships(ctx context.Context, membershipIDs []uuid.UUID) (map[uuid.UUID]bool, error)
+}
+
 // OrgAdmin is the write contract of other modules (01 §4.7).
 type OrgAdmin interface {
 	// Create writes a new org (and the company profile of a company) in
@@ -107,6 +119,7 @@ type OrgAdmin interface {
 type Service interface {
 	OrgDirectory
 	OrgAdmin
+	MembershipHistory
 
 	// GetOrg is getOrg (orgs.org.read, P).
 	GetOrg(ctx context.Context, a authz.Actor, id uuid.UUID) (OrgView, error)

@@ -9,6 +9,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/events"
+	"koro/internal/feed"
 	"koro/internal/platform/config"
 	"koro/internal/platform/db"
 	"koro/internal/platform/obs"
@@ -34,18 +35,22 @@ import (
 // min_account_age_days_for_likes, BE-085), c.orgs.svc (memberships: the
 // organiser rule, BE-085), c.students.svc (cohort, minor flag, ranking
 // choice), c.directory.svc (sensitive clubs) and c.events.svc (built
-// before talent in L8: event participation figures and organiser through
-// talentEvents, BE-085) and hooks.destruction (kvkk, L13, filled after
-// talent is built and read at call time through talentDestructions: the
-// destruction record of the scores and cohorts talent.recompute deletes
-// while collection is off; T-324, BE-087).
+// before talent in L8: event participation figures, organiser and door
+// staff, undone registrations and check-ins through talentEvents, BE-085,
+// BE-090), c.orgs.svc also for the ended memberships and c.feed.svc (L9,
+// built after talent: read at call time through talentLikes) for the
+// withdrawn likes, the last two for the reconciliation of a closed period
+// (T-321, BE-090), and hooks.destruction (kvkk, L13, filled after talent is
+// built and read at call time through talentDestructions: the destruction
+// record of the scores and cohorts talent.recompute deletes while
+// collection is off; T-324, BE-087).
 //
 // Provided, set in build: mod (talent.Ranking for discovery, BE-051;
 // talent.Admin for the talent_auditor endpoints, BE-052), the talent KVKK
 // provider, the retention sweeper on c.sweepers (talent_ledger,
 // talent_counters, talent_runs, talent_neutralization; BE-079) and
 // hooks.talentAuditor (kvkk: the profiling_access report and the
-// neutralisation). tasks registers the 14 consumers of 01 §6.2 and the
+// neutralisation). tasks registers the 15 consumers of 01 §6.2 and the
 // nightly talent.recompute (01 §7); routes the seven talent_auditor
 // operations of 04 §T; metrics registers koro_talent_ingest_total on the
 // worker's registry.
@@ -81,7 +86,7 @@ func (w *talentWiring) build(c *container) error {
 	d := talent.Deps{
 		Store: store, Tx: tx, Audit: c.audit.svc, Clock: c.infra.clock, Log: log,
 		Students: c.students.svc, Directory: c.directory.svc, Accounts: c.identity.svc,
-		Events: talentEvents{p: c.events.svc}, Memberships: c.orgs.svc, Reauth: c.identity.svc,
+		Events: talentEvents{p: c.events.svc}, Memberships: c.orgs.svc, Likes: talentLikes{c: c}, Reauth: c.identity.svc,
 		Destructions: talentDestructions{c: c}, CollectionEnabled: cfg.DefaultEnabled, AuditorAPIEnabled: cfg.AuditorAPIEnabled,
 	}
 	mod, err := talent.New(d)
@@ -110,7 +115,8 @@ func (w *talentWiring) build(c *container) error {
 
 // tasks: registration.confirmed/cancelled/no_show, checkin.recorded/voided,
 // membership.started/ended, student.profile_section_completed, post.liked/
-// unliked/saved and user.active_day on the low queue;
+// unliked/saved, user.active_day and user.edu_verified (BE-090) on the
+// low queue;
 // student.ranking_choice_changed and dsr.profiling_objection on default;
 // the job talent.recompute (03:00, low).
 func (w *talentWiring) tasks(c *container) {
@@ -139,8 +145,8 @@ func (w *talentWiring) metrics(m *obs.Metrics) error {
 		})
 }
 
-// talentEvents adapts events.Participation to talent.Events (BE-085):
-// events and talent are both L8 and import neither the other.
+// talentEvents adapts events.Participation to talent.Events (BE-085,
+// BE-090): events and talent are both L8 and import neither the other.
 type talentEvents struct{ p events.Participation }
 
 // EventsOf implements talent.Events.
@@ -174,4 +180,41 @@ func (r talentDestructions) Record(ctx context.Context, d privacy.Destruction) e
 		return errors.New("talent: kvkk destruction record is not wired")
 	}
 	return h(ctx, d)
+}
+
+// OnStaff implements talent.Events (BE-090).
+func (a talentEvents) OnStaff(ctx context.Context, orgID, eventID, userID uuid.UUID) (bool, error) {
+	return a.p.OnStaff(ctx, orgID, eventID, userID)
+}
+
+// Undone implements talent.Events (BE-090).
+func (a talentEvents) Undone(ctx context.Context, sourceIDs []uuid.UUID) (map[uuid.UUID]bool, error) {
+	return a.p.Undone(ctx, sourceIDs)
+}
+
+// talentLikes adapts feed.Likes to talent.Likes (BE-090). feed is L9, built
+// after talent, so its service is read at call time (every task runs after
+// the build); a missing feed fails the call, so the reconciliation retries
+// rather than skip the likes.
+type talentLikes struct{ c *container }
+
+// WithdrawnLikes implements talent.Likes.
+func (l talentLikes) WithdrawnLikes(ctx context.Context, likes []talent.LikeRef) (map[talent.LikeRef]bool, error) {
+	svc := l.c.feed.svc
+	if svc == nil {
+		return nil, errors.New("talent: feed is not wired (withdrawn likes)")
+	}
+	keys := make([]feed.LikeKey, len(likes))
+	for i, x := range likes {
+		keys[i] = feed.LikeKey{UserID: x.UserID, PostID: x.PostID}
+	}
+	got, err := svc.WithdrawnLikes(ctx, keys)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[talent.LikeRef]bool, len(got))
+	for k, v := range got {
+		out[talent.LikeRef{UserID: k.UserID, PostID: k.PostID}] = v
+	}
+	return out, nil
 }

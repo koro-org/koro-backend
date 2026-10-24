@@ -176,6 +176,23 @@ func (s gormStore) ActiveMembershipsOfUser(ctx context.Context, userID uuid.UUID
 	return out, nil
 }
 
+// EndedMemberships implements Store.
+//
+// cross-org: the IDs come from talent's ledger (reconciliation of a closed
+// period, BE-090); only the IDs of the ended rows leave.
+func (s gormStore) EndedMemberships(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error) {
+	out := []uuid.UUID{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	err := db.Conn(ctx, s.orm).Raw(`SELECT id FROM org_members WHERE id = ANY( ?) AND status = 'ended' ORDER BY id`,
+		db.UUIDArray(ids)).Scan(&out).Error
+	if err != nil {
+		return nil, wrap("ended memberships", err)
+	}
+	return out, nil
+}
+
 // ListUserMemberships implements Store.
 //
 // cross-org: listMyMemberships returns the caller's own rows in every org.

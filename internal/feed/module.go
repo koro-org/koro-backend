@@ -118,11 +118,30 @@ type Posts interface {
 	Get(ctx context.Context, postID uuid.UUID) (PostSummary, error)
 }
 
+// Likes is the like read of other modules (BE-090): talent's
+// reconciliation of a closed period (00 T-321) asks which likes its ledger
+// credited were withdrawn. A system read without authorisation; only the
+// withdrawn pairs leave.
+type Likes interface {
+	// WithdrawnLikes returns the likes among likes that were withdrawn: the
+	// post exists and holds no like of the user (what post.unliked
+	// reports). A like of a post that is gone is missing: deleting a post
+	// publishes no unlike.
+	WithdrawnLikes(ctx context.Context, likes []LikeKey) (map[LikeKey]bool, error)
+}
+
+// LikeKey is one user's like of one post.
+type LikeKey struct {
+	UserID uuid.UUID
+	PostID uuid.UUID
+}
+
 // Service is the feed service: the cross-module contract plus the HTTP use
 // cases of BE-027 and BE-029 (04 §2.7). Every method that takes an actor calls
 // authz.Can first (05 §5.3).
 type Service interface {
 	Posts
+	Likes
 
 	// GetFeed is getFeed (feed.feed.read): the reader's feed.
 	GetFeed(ctx context.Context, a authz.Actor, q FeedQuery) (PostPage, error)

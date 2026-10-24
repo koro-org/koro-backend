@@ -19,7 +19,8 @@ func TestStore_ParticipationContract_Mem(t *testing.T) {
 // thresholds): registrations and check-ins map to their event; an event's
 // figures count the confirmed, checked-in and no-show registrations and
 // the distinct users with a valid check-in (a voided one does not count;
-// cancelled and waitlisted registrations do not count); unknown IDs are
+// cancelled and waitlisted registrations do not count); only a cancelled
+// registration and a voided check-in are undone (BE-090); unknown IDs are
 // missing.
 func participationContract(t *testing.T, newStore func(t *testing.T) (events.Store, world)) {
 	t.Helper()
@@ -124,6 +125,20 @@ func participationContract(t *testing.T, newStore func(t *testing.T) (events.Sto
 			if facts[id] != f {
 				t.Errorf("ParticipationFacts[%s] = %+v, want %+v", id, facts[id], f)
 			}
+		}
+
+		// Undone (BE-090): the cancelled registration and the voided
+		// check-in; a confirmed, checked-in, no-show or other org's row is
+		// not, an unknown ID is missing.
+		undone, err := s.Undone(ctx, []uuid.UUID{regs[0].ID, regs[1].ID, regs[3].ID, cancelled.ID, c0.ID, voided.ID, otherReg.ID, unknown})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(undone) != 2 || !undone[cancelled.ID] || !undone[voided.ID] {
+			t.Fatalf("Undone = %v, want the cancelled registration %s and the voided check-in %s", undone, cancelled.ID, voided.ID)
+		}
+		if got, err := s.Undone(ctx, nil); err != nil || len(got) != 0 {
+			t.Fatalf("Undone(nil) = %v, %v", got, err)
 		}
 	})
 }

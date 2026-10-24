@@ -110,7 +110,7 @@ func TestRecompute_CollectionOff_BatchesOf500Users(t *testing.T) {
 	e := newEnv(t, false)
 	tx := &countTx{}
 	mod, err := talent.New(talent.Deps{Store: e.store, Tx: tx, Audit: e.audit, Clock: e.clk, Log: obs.Discard(),
-		Students: e.students, Directory: e.dir, Accounts: e.accounts, Events: e.events, Memberships: e.members,
+		Students: e.students, Directory: e.dir, Accounts: e.accounts, Events: e.events, Memberships: e.members, Likes: e.likes,
 		Destructions: e.destr})
 	if err != nil {
 		t.Fatal(err)

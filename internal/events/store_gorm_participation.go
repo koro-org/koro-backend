@@ -61,3 +61,25 @@ func (s gormStore) ParticipationFacts(ctx context.Context, eventIDs []uuid.UUID)
 	}
 	return out, nil
 }
+
+// Undone implements Store.
+//
+// cross-org: the IDs come from talent's ledger (reconciliation of a closed
+// period, BE-090); only the IDs of the undone rows leave.
+func (s gormStore) Undone(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error) {
+	out := make(map[uuid.UUID]bool, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var rows []uuid.UUID
+	arr := db.UUIDArray(ids)
+	err := db.Conn(ctx, s.orm).Raw(`SELECT id FROM event_registrations WHERE id = ANY( ?) AND status = 'cancelled'
+		UNION ALL SELECT id FROM event_checkins WHERE id = ANY( ?) AND voided_at IS NOT NULL`, arr, arr).Scan(&rows).Error
+	if err != nil {
+		return nil, wrap("undone", err)
+	}
+	for _, id := range rows {
+		out[id] = true
+	}
+	return out, nil
+}

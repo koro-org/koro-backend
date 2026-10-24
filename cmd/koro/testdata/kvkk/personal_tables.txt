@@ -104,6 +104,7 @@ talent.cohorts              personal  talent        provider:talent
 talent.scores               personal  talent        provider:talent
 talent.score_runs           none      talent        -
 talent.neutralizations      personal  talent        provider:talent
+talent.collection_state     none      talent        -
 # kvkk
 data_subject_requests       personal  kvkk          provider:kvkk
 retention_policies          staff     kvkk          -

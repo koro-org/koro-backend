@@ -211,8 +211,18 @@ func TestSchema_P1Schema3IDColumnsAndTriggers(t *testing.T) {
 		}
 		return n
 	}
-	if n := count(`SELECT count(*) FROM pg_attribute a WHERE a.attname = 'id' AND NOT a.attisdropped AND a.attrelid IN ` + p1cTableOIDs); n != 15 {
-		t.Errorf("tables with an id column = %d, want 15", n)
+	// 16 id columns: 15 uuid ids plus talent.collection_state's boolean
+	// singleton key (000138, BE-090), which is not a uuid and has no default
+	// uuidv7() by design.
+	if n := count(`SELECT count(*) FROM pg_attribute a WHERE a.attname = 'id' AND NOT a.attisdropped AND a.attrelid IN ` + p1cTableOIDs); n != 16 {
+		t.Errorf("tables with an id column = %d, want 16", n)
+	}
+	if n := count(`SELECT count(*) FROM pg_attribute a WHERE a.attname = 'id' AND NOT a.attisdropped AND a.atttypid = 'uuid'::regtype AND a.attrelid IN ` + p1cTableOIDs); n != 15 {
+		t.Errorf("tables with a uuid id column = %d, want 15", n)
+	}
+	if n := count(`SELECT count(*) FROM pg_attribute a WHERE a.attname = 'id' AND NOT a.attisdropped AND a.atttypid = 'boolean'::regtype
+		AND a.attrelid = 'talent.collection_state'::regclass AND a.attrelid IN ` + p1cTableOIDs); n != 1 {
+		t.Errorf("talent.collection_state boolean singleton id = %d, want 1", n)
 	}
 	if n := count(`SELECT count(*) FROM pg_attribute a JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
 		WHERE a.attname = 'id' AND pg_get_expr(d.adbin, d.adrelid) = 'uuidv7()' AND a.attrelid IN ` + p1cTableOIDs); n != 15 {

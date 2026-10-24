@@ -17,7 +17,7 @@ import (
 	"koro/internal/platform/testutil"
 )
 
-// talentTables lists the tables of the talent schema (000079–000087) with
+// talentTables lists the tables of the talent schema (000079–000087, 000138) with
 // the privileges app_talent holds on them: the ledger and the config
 // versions are append-only (S+I), the signal catalogue is retired, not
 // deleted (S+I+U), the rest are hard-delete tables.
@@ -30,6 +30,9 @@ var talentTables = map[string]string{
 	"scores":          "SIUD",
 	"score_runs":      "SIUD",
 	"neutralizations": "SIUD",
+	// 000138 (BE-090): the one-row reconciliation state (T-321), upserted
+	// by the first dropped reversal (empty after the migrations).
+	"collection_state": "SIU",
 }
 
 // TestRoleBoundaries_AppRwCannotReadTalent (06 H-3, 02 §0.3, 05 §15.4): the

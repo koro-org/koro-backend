@@ -87,6 +87,24 @@ func (s *service) MembershipsOf(ctx context.Context, userID uuid.UUID) ([]authz.
 	return out, nil
 }
 
+// endedBatch bounds the IDs of one EndedMemberships store read.
+const endedBatch = 1000
+
+// EndedMemberships implements MembershipHistory.
+func (s *service) EndedMemberships(ctx context.Context, membershipIDs []uuid.UUID) (map[uuid.UUID]bool, error) {
+	out := make(map[uuid.UUID]bool)
+	for batch := range slices.Chunk(membershipIDs, endedBatch) {
+		ids, err := s.d.Store.EndedMemberships(ctx, batch)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range ids {
+			out[id] = true
+		}
+	}
+	return out, nil
+}
+
 // HasRole implements OrgDirectory.
 func (s *service) HasRole(ctx context.Context, orgID, userID uuid.UUID, roles ...authz.MemberRole) (bool, error) {
 	ms, err := s.MembershipsOf(ctx, userID)

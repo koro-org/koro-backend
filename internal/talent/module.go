@@ -57,7 +57,13 @@
 //     koro_talent_ingest_total{outcome="flag_off"}; Bands answers 0 for
 //     everyone. The neutralisation consumers (opt-out, objection) always
 //     apply: they restrict the processing and must hold the moment the
-//     flag turns on.
+//     flag turns on. A reversal consumer (cancellation, void, unlike,
+//     membership end) also counts its drop in talent.collection_state (no
+//     personal data, no ledger read); the first nightly run with the flag
+//     on then reconciles once: it asks events, feed and orgs which
+//     credited sources were undone and writes their reversals before it
+//     scores (00 T-321, BE-090; credits of the closed period are never
+//     back-filled).
 //   - No signal from a minor (T-22, T-23: an 18-year-old starts from zero,
 //     nothing is back-filled), from a user without a student profile, from
 //     a student who turned activity based ranking off or objected, from a
@@ -79,7 +85,13 @@
 //     BE-085): the registration, check-in and no-show of a user holding a
 //     role other than member in the organising org (club_admin,
 //     university_rep, career_staff, …; orgs.MembershipsOf at consumption)
-//     is recorded with 0 points (per_source), like a self check-in.
+//     or a place on the event's door staff (event_staff, whatever the
+//     org role; 00 T-341, BE-090) is recorded with 0 points (per_source),
+//     like a self check-in.
+//   - A renewed student verification (user.edu_verified with renewal)
+//     writes profile_refresh at most once per calendar year
+//     (Europe/Istanbul; the source is derived from the user and the year;
+//     00 T-337, BE-090).
 //   - Gaming thresholds of the config version (02 §15.1, R-003 §3.4;
 //     BE-085; absent or 0 = off): a like from an account younger than
 //     min_account_age_days_for_likes at the like writes nothing (outcome
@@ -167,7 +179,8 @@ type Deps struct {
 	Directory   Directory   // sensitive clubs
 	Accounts    Accounts    // account age (min_account_age_days_for_likes; BE-085)
 	Events      Events      // event participation figures and organiser (BE-085)
-	Memberships Memberships // the organiser rule (BE-085)
+	Memberships Memberships // the organiser rule (BE-085), ended memberships (BE-090)
+	Likes       Likes       // withdrawn likes: the reconciliation of a closed period (T-321, BE-090)
 
 	// Destructions records the score and cohort rows the nightly run
 	// deletes while collection is off (kvkk's destruction record through
@@ -198,7 +211,7 @@ func (d Deps) validate() error {
 		{"Store", d.Store != nil}, {"Tx", d.Tx != nil}, {"Audit", d.Audit != nil}, {"Clock", d.Clock != nil},
 		{"Log", d.Log != nil}, {"Students", d.Students != nil}, {"Directory", d.Directory != nil},
 		{"Accounts", d.Accounts != nil}, {"Events", d.Events != nil}, {"Memberships", d.Memberships != nil},
-		{"Destructions", d.Destructions != nil},
+		{"Likes", d.Likes != nil}, {"Destructions", d.Destructions != nil},
 	} {
 		if !c.ok {
 			errs = append(errs, fmt.Errorf("talent.Deps.%s is missing", c.name))

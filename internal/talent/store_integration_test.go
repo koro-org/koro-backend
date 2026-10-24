@@ -221,7 +221,7 @@ func (p pgEnv) module(t *testing.T, o envOptions) talent.Module {
 	t.Helper()
 	mod, err := talent.New(talent.Deps{Store: talent.NewGormStore(p.d.ORM), Tx: p.d.Tx, Audit: p.au, Clock: p.clk,
 		Log: obs.Discard(), Students: p.students, Directory: p.dir, Accounts: p.accounts, Events: p.events,
-		Memberships: p.members, Destructions: p.pgRec, CollectionEnabled: o.collection, AuditorAPIEnabled: o.auditorAPI,
+		Memberships: p.members, Likes: p.likes, Destructions: p.pgRec, CollectionEnabled: o.collection, AuditorAPIEnabled: o.auditorAPI,
 		Reauth: p.reauth})
 	if err != nil {
 		t.Fatal(err)

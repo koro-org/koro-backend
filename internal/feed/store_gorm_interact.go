@@ -70,6 +70,37 @@ func (s gormStore) RemoveLike(ctx context.Context, userID, postID uuid.UUID) (bo
 	return counted(ctx, s.orm, "remove like", removeLikeSQL, pair(userID, postID))
 }
 
+// WithdrawnLikes implements Store.
+//
+// cross-org: the pairs come from talent's ledger (reconciliation of a
+// closed period, BE-090); only the withdrawn pairs leave.
+func (s gormStore) WithdrawnLikes(ctx context.Context, likes []LikeKey) (map[LikeKey]bool, error) {
+	out := make(map[LikeKey]bool, len(likes))
+	if len(likes) == 0 {
+		return out, nil
+	}
+	users, posts := make([]uuid.UUID, len(likes)), make([]uuid.UUID, len(likes))
+	for i, l := range likes {
+		users[i], posts[i] = l.UserID, l.PostID
+	}
+	var rows []struct {
+		UserID uuid.UUID `gorm:"column:user_id"`
+		PostID uuid.UUID `gorm:"column:post_id"`
+	}
+	err := db.Conn(ctx, s.orm).Raw(`SELECT DISTINCT x.user_id, x.post_id
+		FROM unnest(CAST( ? AS uuid[]), CAST( ? AS uuid[])) AS x (user_id, post_id)
+		WHERE EXISTS (SELECT 1 FROM posts p WHERE p.id = x.post_id)
+		  AND NOT EXISTS (SELECT 1 FROM post_reactions r WHERE r.post_id = x.post_id AND r.user_id = x.user_id)`,
+		db.UUIDArray(users), db.UUIDArray(posts)).Scan(&rows).Error
+	if err != nil {
+		return nil, wrap("withdrawn likes", err)
+	}
+	for _, r := range rows {
+		out[LikeKey{UserID: r.UserID, PostID: r.PostID}] = true
+	}
+	return out, nil
+}
+
 // AddSave implements Store.
 //
 // cross-org: the reader's own row on a post the service authorised.

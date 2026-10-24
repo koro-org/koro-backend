@@ -40,9 +40,11 @@ func (m Module) Recompute(ctx context.Context) error { return m.svc.recompute(ct
 
 // recompute is talent.recompute. With collection off (T-32) it deletes
 // every score and cohort row instead, each batch recorded in
-// destruction_logs (T-324, BE-087; purgeScores), and records no run.
-// Without a config version in force it does nothing and records no run
-// (the scores of the last run stay). Otherwise it
+// destruction_logs (T-324, BE-087; purgeScores), and records no run. With
+// collection on it first reconciles the ledger once after reversals were
+// dropped while it was off (T-321, BE-090; reconcile.go). Without a config
+// version in force it then stops and records no run (the scores of the
+// last run stay). Otherwise it
 // records a run, scores every user in batches and records the outcome:
 // succeeded with the number of scores written, or failed with the error
 // (an invalid config version fails without retry; a new version fixes it).
@@ -58,6 +60,11 @@ func (s *service) recompute(ctx context.Context) error {
 		}
 		s.d.Log.LogAttrs(ctx, slog.LevelInfo, "talent recompute skipped: collection is off (talent.default_enabled, T-32)")
 		return nil
+	}
+	// The reversals dropped while collection was off first (T-321), so the
+	// scores never count an undone source; nothing pending → no read.
+	if _, err := s.reconcile(ctx); err != nil {
+		return fmt.Errorf("%s: reconcile: %w", RecomputeJobName, err)
 	}
 	now := s.now()
 	var cfg ConfigVersion

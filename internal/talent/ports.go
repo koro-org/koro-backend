@@ -73,6 +73,15 @@ type Events interface {
 	// EventFacts returns the figures of the events among eventIDs; an
 	// unknown event is missing.
 	EventFacts(ctx context.Context, eventIDs []uuid.UUID) (map[uuid.UUID]EventFacts, error)
+	// OnStaff reports whether userID is on the door staff (event_staff) of
+	// the event eventID of orgID: a staff member earns nothing at the event
+	// (00 T-341; BE-090). An unknown event is false.
+	OnStaff(ctx context.Context, orgID, eventID, userID uuid.UUID) (bool, error)
+	// Undone returns the registrations and check-ins among sourceIDs that
+	// were undone: a cancelled registration (what registration.cancelled
+	// reports) and a voided check-in (checkin.voided). An unknown ID is
+	// missing (the reconciliation of a closed period, 00 T-321; BE-090).
+	Undone(ctx context.Context, sourceIDs []uuid.UUID) (map[uuid.UUID]bool, error)
 }
 
 // EventFacts are the participation figures of one event.
@@ -87,10 +96,34 @@ type EventFacts struct {
 
 // Memberships reports a user's active org memberships (orgs, 01 §4.7
 // OrgDirectory.MembershipsOf; BE-085): an organiser of an event earns
-// nothing at it (ADR-0015). orgs.Service satisfies it. Read on app_rw,
-// before the talent transaction.
+// nothing at it (ADR-0015); and the ended ones among the memberships the
+// ledger credited (orgs.MembershipHistory; BE-090). orgs.Service satisfies
+// it. Read on app_rw, before or between the talent transactions.
 type Memberships interface {
 	MembershipsOf(ctx context.Context, userID uuid.UUID) ([]authz.Membership, error)
+	// EndedMemberships returns the memberships among membershipIDs that
+	// ended (what membership.ended reports); an unknown ID is missing (the
+	// reconciliation of a closed period, 00 T-321; BE-090).
+	EndedMemberships(ctx context.Context, membershipIDs []uuid.UUID) (map[uuid.UUID]bool, error)
+}
+
+// Likes is the like read of the feed module (BE-090): the reconciliation
+// of a closed period (00 T-321) asks which credited likes were withdrawn
+// while collection was off. feed is L9, above talent, so the composition
+// root adapts feed's contract. Read on app_rw, between the talent
+// transactions.
+type Likes interface {
+	// WithdrawnLikes returns the likes among likes that were withdrawn: the
+	// post exists and the user no longer likes it (what post.unliked
+	// reports). A like of a post that is gone is missing (no unlike was
+	// ever reported for it).
+	WithdrawnLikes(ctx context.Context, likes []LikeRef) (map[LikeRef]bool, error)
+}
+
+// LikeRef is one user's like of one post.
+type LikeRef struct {
+	UserID uuid.UUID
+	PostID uuid.UUID
 }
 
 // Destructions is what talent needs from kvkk (L13, late bound through

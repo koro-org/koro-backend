@@ -108,6 +108,9 @@ type Store interface {
 	// ActiveMembershipsOfUser returns the active memberships of a user in
 	// every org, oldest first (Actor resolution, 03 §2.1).
 	ActiveMembershipsOfUser(ctx context.Context, userID uuid.UUID) ([]Membership, error)
+	// EndedMemberships returns the IDs among ids of the memberships that
+	// ended (talent's reconciliation, BE-090).
+	EndedMemberships(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error)
 	// ListUserMemberships returns up to limit memberships of a user with one
 	// of statuses (empty: pending and active), newest first, after the
 	// membership ID after (nil: first page).

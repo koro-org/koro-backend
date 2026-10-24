@@ -36,6 +36,7 @@ type MemStore struct {
 	scores  map[uuid.UUID]Score
 	cohorts map[uuid.UUID]string
 	runs    []ScoreRun
+	state   CollectionState // talent.collection_state (000138; BE-090)
 	// ErasedUsers lists the users whose erasure request is completed: the
 	// ledger may be erased only for them (talent.point_events_erase_user).
 	// nil means every user (wiring tests have no kvkk state to consult).
@@ -71,7 +72,7 @@ func seedSignals() []SignalDef {
 		{Code: SignalEventNoShow, Category: CategoryParticipation, BasePointsCP: -200, WeeklyCapCP: ip(400), HalfLifeDays: ip(60), ExcludedWhenSensitive: true, Enabled: true},
 		{Code: "opportunity_application", Category: CategoryIntent, BasePointsCP: 300, DailyCapCP: ip(900), HalfLifeDays: ip(90), ExcludedWhenSensitive: true, Enabled: false},
 		{Code: SignalProfileSection, Category: CategoryProfile, BasePointsCP: 200, ExcludedWhenSensitive: true, Enabled: true},
-		{Code: "profile_refresh", Category: CategoryProfile, BasePointsCP: 200, HalfLifeDays: ip(365), ExcludedWhenSensitive: true, Enabled: true},
+		{Code: SignalProfileRefresh, Category: CategoryProfile, BasePointsCP: 200, HalfLifeDays: ip(365), ExcludedWhenSensitive: true, Enabled: true},
 		{Code: SignalClubMembership, Category: CategoryCommunity, BasePointsCP: 200, ExcludedWhenSensitive: true, Enabled: true},
 		{Code: SignalFeedLike, Category: CategoryEngagement, BasePointsCP: 10, DailyCapCP: ip(50), HalfLifeDays: ip(30), ExcludedWhenSensitive: true, Enabled: true},
 		{Code: SignalFeedSave, Category: CategoryEngagement, BasePointsCP: 10, DailyCapCP: ip(50), HalfLifeDays: ip(30), ExcludedWhenSensitive: true, Enabled: true},

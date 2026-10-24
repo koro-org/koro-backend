@@ -25,6 +25,7 @@ const (
 	OutcomeNoConfig       = "no_config"       // no config version in force (BE-052 creates them)
 	OutcomeNoOriginal     = "no_original"     // a reversal without its original row
 	OutcomeYoungAccount   = "young_account"   // a like from an account younger than min_account_age_days_for_likes (BE-085)
+	OutcomeReconciled     = "reconciled"      // a reversal row of the reconciliation of a closed period (T-321, BE-090)
 )
 
 // CounterSample is one value of koro_talent_ingest_total.

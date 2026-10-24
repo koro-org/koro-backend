@@ -102,12 +102,47 @@ func (f *fakeAccounts) set(id uuid.UUID, created time.Time) {
 }
 
 // fakeEvents is the events participation read: the event of every source,
-// the figures of every event, and how often the figures were read.
+// the figures of every event, and how often the figures were read; the
+// door staff ({org, event, user}) and the undone sources (BE-090).
 type fakeEvents struct {
 	mu        sync.Mutex
 	of        map[uuid.UUID]uuid.UUID
 	facts     map[uuid.UUID]talent.EventFacts
 	factReads int
+	staff     map[[3]uuid.UUID]bool
+	undone    map[uuid.UUID]bool
+}
+
+func (f *fakeEvents) OnStaff(_ context.Context, org, event, user uuid.UUID) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.staff[[3]uuid.UUID{org, event, user}], nil
+}
+
+func (f *fakeEvents) Undone(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[uuid.UUID]bool{}
+	for _, id := range ids {
+		if f.undone[id] {
+			out[id] = true
+		}
+	}
+	return out, nil
+}
+
+// addStaff puts user on the door staff of event (of org).
+func (f *fakeEvents) addStaff(org, event, user uuid.UUID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.staff[[3]uuid.UUID{org, event, user}] = true
+}
+
+// undo marks a registration cancelled or a check-in voided.
+func (f *fakeEvents) undo(id uuid.UUID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.undone[id] = true
 }
 
 func (f *fakeEvents) EventsOf(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]uuid.UUID, error) {
@@ -153,10 +188,58 @@ func (f *fakeEvents) source(event uuid.UUID) uuid.UUID {
 	return id
 }
 
-// fakeMemberships is orgs' MembershipsOf.
+// fakeMemberships is orgs' MembershipsOf and EndedMemberships (BE-090).
 type fakeMemberships struct {
-	mu sync.Mutex
-	m  map[uuid.UUID][]authz.Membership
+	mu    sync.Mutex
+	m     map[uuid.UUID][]authz.Membership
+	ended map[uuid.UUID]bool
+}
+
+func (f *fakeMemberships) EndedMemberships(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[uuid.UUID]bool{}
+	for _, id := range ids {
+		if f.ended[id] {
+			out[id] = true
+		}
+	}
+	return out, nil
+}
+
+// end marks a membership ended.
+func (f *fakeMemberships) end(id uuid.UUID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ended[id] = true
+}
+
+// fakeLikes is feed's withdrawn likes (BE-090): the likes withdrawn from a
+// post that still exists, and how often it was read.
+type fakeLikes struct {
+	mu        sync.Mutex
+	withdrawn map[talent.LikeRef]bool
+	reads     int
+}
+
+func (f *fakeLikes) WithdrawnLikes(_ context.Context, likes []talent.LikeRef) (map[talent.LikeRef]bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reads++
+	out := map[talent.LikeRef]bool{}
+	for _, l := range likes {
+		if f.withdrawn[l] {
+			out[l] = true
+		}
+	}
+	return out, nil
+}
+
+// unlike marks user's like of post withdrawn.
+func (f *fakeLikes) unlike(user, post uuid.UUID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.withdrawn[talent.LikeRef{UserID: user, PostID: post}] = true
 }
 
 func (f *fakeMemberships) MembershipsOf(_ context.Context, id uuid.UUID) ([]authz.Membership, error) {
@@ -265,6 +348,7 @@ type env struct {
 	accounts *fakeAccounts
 	events   *fakeEvents
 	members  *fakeMemberships
+	likes    *fakeLikes
 	audit    *fakeAudit
 	destr    *fakeDestructions
 	reauth   *audittest.LateReauth[identity.ReauthProof]
@@ -315,7 +399,7 @@ func buildEnvWith(t *testing.T, o envOptions) *env {
 func (e *env) module(t *testing.T, o envOptions) talent.Module {
 	t.Helper()
 	d := talent.Deps{Store: e.store, Tx: db.NopTx{}, Audit: e.audit, Clock: e.clk, Log: obs.Discard(),
-		Students: e.students, Directory: e.dir, Accounts: e.accounts, Events: e.events, Memberships: e.members,
+		Students: e.students, Directory: e.dir, Accounts: e.accounts, Events: e.events, Memberships: e.members, Likes: e.likes,
 		Destructions: e.destr, CollectionEnabled: o.collection, AuditorAPIEnabled: o.auditorAPI}
 	if !o.noReauth {
 		d.Reauth = e.reauth
@@ -327,11 +411,14 @@ func (e *env) module(t *testing.T, o envOptions) talent.Module {
 	return mod
 }
 
-// newPorts sets empty identity, events and orgs fakes (BE-085).
+// newPorts sets empty identity, events, orgs and feed fakes (BE-085,
+// BE-090).
 func (e *env) newPorts() {
 	e.accounts = &fakeAccounts{created: map[uuid.UUID]time.Time{}}
-	e.events = &fakeEvents{of: map[uuid.UUID]uuid.UUID{}, facts: map[uuid.UUID]talent.EventFacts{}}
-	e.members = &fakeMemberships{m: map[uuid.UUID][]authz.Membership{}}
+	e.events = &fakeEvents{of: map[uuid.UUID]uuid.UUID{}, facts: map[uuid.UUID]talent.EventFacts{},
+		staff: map[[3]uuid.UUID]bool{}, undone: map[uuid.UUID]bool{}}
+	e.members = &fakeMemberships{m: map[uuid.UUID][]authz.Membership{}, ended: map[uuid.UUID]bool{}}
+	e.likes = &fakeLikes{withdrawn: map[talent.LikeRef]bool{}}
 }
 
 // isPermanent reports a task error that asynq does not retry.

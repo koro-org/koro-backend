@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"slices"
 	"time"
 	"uuid"
@@ -478,6 +479,22 @@ func (s *service) reasons(ctx context.Context, rows []Post, manage bool) (map[uu
 		case p.Status == StatusHidden:
 			out[p.ID] = autoHideReason
 		}
+	}
+	return out, nil
+}
+
+// likesBatch bounds the pairs of one WithdrawnLikes store read.
+const likesBatch = 1000
+
+// WithdrawnLikes implements Likes.
+func (s *service) WithdrawnLikes(ctx context.Context, likes []LikeKey) (map[LikeKey]bool, error) {
+	out := make(map[LikeKey]bool)
+	for batch := range slices.Chunk(likes, likesBatch) {
+		got, err := s.d.Store.WithdrawnLikes(ctx, batch)
+		if err != nil {
+			return nil, err
+		}
+		maps.Copy(out, got)
 	}
 	return out, nil
 }

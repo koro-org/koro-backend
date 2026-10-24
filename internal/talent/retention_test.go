@@ -401,7 +401,8 @@ func TestSweeper_BatchesOf1000(t *testing.T) {
 		Directory:   fakeDirectory{sensitive: map[uuid.UUID]bool{}},
 		Accounts:    &fakeAccounts{created: map[uuid.UUID]time.Time{}},
 		Events:      &fakeEvents{of: map[uuid.UUID]uuid.UUID{}, facts: map[uuid.UUID]talent.EventFacts{}},
-		Memberships: &fakeMemberships{m: map[uuid.UUID][]authz.Membership{}}, Destructions: &fakeDestructions{}})
+		Memberships: &fakeMemberships{m: map[uuid.UUID][]authz.Membership{}},
+		Likes:       &fakeLikes{withdrawn: map[talent.LikeRef]bool{}}, Destructions: &fakeDestructions{}})
 	if err != nil {
 		t.Fatal(err)
 	}

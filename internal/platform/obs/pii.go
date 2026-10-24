@@ -21,7 +21,8 @@ var (
 	reIBAN    = regexp.MustCompile(`(?i)\bTR\d{2}(?:\s?\d{4}){5}\s?\d{2}\b`)
 	reEmail   = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)
 	reTCKN    = regexp.MustCompile(`\b[1-9]\d{10}\b`)
-	rePhone   = regexp.MustCompile(`(?:(?:\+90|0090|0)[\s.\-]?)?\(?5\d{2}\)?[\s.\-]?\d{3}[\s.\-]?\d{2}[\s.\-]?\d{2}\b`)
+	rePhone   = regexp.MustCompile(`(?:(?:\+90|0090|90|0)[\s.\-]?)?\(?5\d{2}\)?[\s.\-]?\d{3}[\s.\-]?\d{2}[\s.\-]?\d{2}\b`)
+	reUUID    = regexp.MustCompile(`\b[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\b`)
 	reBearer  = regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/=\-]+`)
 	reCookie  = regexp.MustCompile(`(?i)(__Host-koro_session|koro_session)=[^;\s"]+`)
 	reKVToken = regexp.MustCompile(`(?i)\b((?:access_|refresh_|session_|reset_)?token|password|passwd|secret|api_key)=[^&\s"]+`)
@@ -39,7 +40,70 @@ func Scrub(s string) string {
 	s = reIBAN.ReplaceAllStringFunc(s, MaskIBAN)
 	s = reEmail.ReplaceAllStringFunc(s, MaskEmail)
 	s = reTCKN.ReplaceAllStringFunc(s, MaskTCKN)
-	return rePhone.ReplaceAllStringFunc(s, MaskPhone)
+	return scrubPhones(s)
+}
+
+// scrubPhones masks phone numbers that start at a token boundary.
+//
+// rePhone has no left boundary of its own (RE2 has no lookbehind, and \b
+// would miss "+90…" and "(5xx)…"), so the digits at the tail of an
+// identifier used to match: the UUID "…-0b5553195418" logged as "…-0b***18",
+// breaking request_id correlation (BE-108). A candidate is masked only when
+// it starts the string, starts with a non-alphanumeric byte ('+', '('), or
+// follows a byte that is not an ASCII letter or digit, or follows a
+// percent-escape ("%3A0555…", "%2B90555…"). Candidates inside a UUID are
+// never masked. A rejected candidate is retried one byte further on, so a
+// phone that starts later in the same run still has its chance.
+func scrubPhones(s string) string {
+	loc := rePhone.FindStringIndex(s)
+	if loc == nil {
+		return s
+	}
+	uuids := reUUID.FindAllStringIndex(s, -1)
+	var b strings.Builder
+	last := 0
+	for off := 0; loc != nil; loc = rePhone.FindStringIndex(s[off:]) {
+		start, end := off+loc[0], off+loc[1]
+		if !phoneStartOK(s, start) || overlapsAny(uuids, start, end) {
+			off = start + 1 // every rePhone match starts with an ASCII byte
+			continue
+		}
+		b.WriteString(s[last:start])
+		b.WriteString(MaskPhone(s[start:end]))
+		last, off = end, end
+	}
+	if b.Len() == 0 {
+		return s
+	}
+	b.WriteString(s[last:])
+	return b.String()
+}
+
+func phoneStartOK(s string, i int) bool {
+	if i == 0 || !isAlnum(s[i]) {
+		return true
+	}
+	if !isAlnum(s[i-1]) {
+		return true
+	}
+	return i >= 3 && s[i-3] == '%' && isHex(s[i-2]) && isHex(s[i-1])
+}
+
+func overlapsAny(spans [][]int, start, end int) bool {
+	for _, sp := range spans {
+		if start < sp[1] && sp[0] < end {
+			return true
+		}
+	}
+	return false
+}
+
+func isAlnum(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z'
+}
+
+func isHex(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'A' && c <= 'F' || c >= 'a' && c <= 'f'
 }
 
 // MaskEmail masks an e-mail address: "ayse@ogrenci.edu.tr" → "a***@o***.tr".

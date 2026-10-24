@@ -77,6 +77,7 @@ type infra struct {
 	inbox       *inbox.Inbox          // webhook handlers: Receive; provider modules: Register
 	limiter     ratelimit.Limiter     // API rate limit middleware
 	platform    config.Platform       // queue/outbox/idempotency/inbox settings (zero in tests)
+	webcache    config.Webcache       // BE-106: the worker's publication webhook (zero outside `koro worker`)
 
 	// subs and jobs collect what modules declare in tasks(c): outbox
 	// subscriptions, scheduled jobs and task handlers. Both api and worker
@@ -222,6 +223,11 @@ type container struct {
 	// modules seal with (c.keys.envelope()), the openbao readiness check and
 	// the crypto.* jobs. Built before the modules.
 	keys cryptoKeys
+
+	// web is the publication webhook (BE-106, wire_webcache.go): the
+	// webcache.revalidate_* subscriptions, registered with the platform's
+	// tasks once the modules are built (it reads events and orgs).
+	web webRevalidation
 
 	// Feature modules, in layer order (01 §5.1).
 	audit        auditWiring        // L1
@@ -374,7 +380,8 @@ func (c *container) build() error {
 
 // platformTasks registers the platform's own jobs and tasks (01 §7):
 // outbox.cleanup, idempotency.cleanup, webhook_inbox.purge_payloads, the
-// webhook_inbox.process task and the crypto jobs.
+// webhook_inbox.process task, the crypto jobs and the publication webhook's
+// subscriptions.
 func (c *container) platformTasks() {
 	in, p := c.infra, c.infra.platform
 	if in.outbox != nil {
@@ -390,6 +397,7 @@ func (c *container) platformTasks() {
 			c.retention("webhook_row", p.Inbox.RowRetention, inbox.DefaultRowRetention)))
 	}
 	c.keys.tasks(c) // crypto.rewrap, crypto.renew_token (BE-055)
+	c.web.tasks(c)  // webcache.revalidate_* (BE-106)
 }
 
 // retention resolves a retention period at run time: hooks.retention

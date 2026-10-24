@@ -502,7 +502,7 @@ func TestDecideClaim_GrantFailure_LeavesClaimPending(t *testing.T) {
 	got, _ := w.mem.GetClaim(t.Context(), c.ID)
 	club, _ := w.mem.GetClub(t.Context(), w.club.Club.OrgID)
 	if got.Status != directory.ClaimPending || got.ReviewedBy != nil || club.ClaimStatus != directory.ClaimUnclaimed ||
-		len(w.out.Topics()) != 0 || len(w.audit.of(authz.DirectoryClubClaimDecide)) != 0 {
+		len(eventsOf(w.out, domainevent.TopicClubClaimDecided)) != 0 || len(w.audit.of(authz.DirectoryClubClaimDecide)) != 0 {
 		t.Fatalf("after failures: claim %+v, club %s, events %v", got, club.ClaimStatus, w.out.Topics())
 	}
 	// A rejection needs no grant.

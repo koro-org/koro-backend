@@ -7,6 +7,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/files"
+	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/problem"
 )
@@ -52,7 +53,8 @@ func writable(a authz.Actor, o Org) error {
 }
 
 // UpdateOrg implements Service. Order: the org (404) → authz (404/403) →
-// status (403 orgs.org_suspended, 409) → If-Match (428/412) → the patch.
+// status (403 orgs.org_suspended, 409) → If-Match (428/412) → the patch;
+// a real change writes org.updated (O) in the transaction (BE-106).
 func (s *service) UpdateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, ifMatch string, p OrgPatch) (OrgView, error) {
 	var out Org
 	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
@@ -85,6 +87,9 @@ func (s *service) UpdateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, if
 				return err
 			}
 			changed = append(changed, cc...)
+		}
+		if err := s.emitOrgUpdated(ctx, o, changed); err != nil {
+			return err
 		}
 		return s.d.Audit.Log(ctx, auditEvent(a, authz.OrgsOrgUpdate, o.ID, "", map[string]any{"fields": changed}))
 	})
@@ -211,6 +216,23 @@ func (s *service) attachLogo(ctx context.Context, a authz.Actor, o Org, fileID u
 	return s.d.Files.Attach(ctx, a, fileID, files.Owner{Module: "orgs", EntityID: o.ID, Purpose: files.PurposeOrgLogo})
 }
 
+// orgAggType is the aggregate type of org.updated.
+const orgAggType = "org"
+
+// emitOrgUpdated writes org.updated (O) in the caller's transaction: the
+// public profile of o changed (BE-106: the web revalidates its page).
+// Nothing changed → no event.
+func (s *service) emitOrgUpdated(ctx context.Context, o Org, fields []string) error {
+	if len(fields) == 0 {
+		return nil
+	}
+	env, err := domainevent.New(domainevent.OrgUpdated{OrgID: o.ID, OrgKind: string(o.Kind), Fields: fields}, orgAggType, o.ID)
+	if err != nil {
+		return err
+	}
+	return s.d.Outbox.Add(ctx, env)
+}
+
 // openCommerce returns the closeOrg checks bound at call time.
 func (s *service) openCommerce() []OpenCommerceCheck {
 	if s.d.OpenCommerce == nil {
@@ -269,6 +291,9 @@ func (s *service) CloseOrg(ctx context.Context, a authz.Actor, id uuid.UUID, rea
 		now := s.now()
 		o.Status, o.ClosedAt = StatusClosed, &now
 		if _, err := s.d.Store.UpdateOrg(ctx, o); err != nil {
+			return uuid.Nil(), err
+		}
+		if err := s.emitOrgUpdated(ctx, o, []string{"status"}); err != nil {
 			return uuid.Nil(), err
 		}
 		gone, err := s.d.Store.EndOpenMembers(ctx, o.ID, now, EndOrgClosed)

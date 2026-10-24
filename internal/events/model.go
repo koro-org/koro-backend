@@ -262,6 +262,7 @@ type EventSummary struct {
 	ID         uuid.UUID
 	OrgID      uuid.UUID
 	Title      string
+	Slug       string // the public URL identifier (BE-106: web revalidation)
 	Status     Status
 	StartsAt   time.Time
 	EndsAt     time.Time

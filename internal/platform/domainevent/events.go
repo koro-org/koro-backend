@@ -4,6 +4,8 @@ import "uuid"
 
 // Topics of the events module (01 §6.2). Owner: events tickets.
 const (
+	TopicEventPublished         = "event.published"
+	TopicEventUpdated           = "event.updated"
 	TopicEventCancelled         = "event.cancelled"
 	TopicEventScheduleChanged   = "event.schedule_changed"
 	TopicRegistrationSubmitted  = "registration.submitted"
@@ -19,6 +21,8 @@ const (
 )
 
 var _ = register(
+	spec("events", Outbox, EventPublished{}),
+	spec("events", Outbox, EventUpdated{}),
 	spec("events", Outbox, EventCancelled{}),
 	spec("events", Outbox, EventScheduleChanged{}),
 	spec("events", Outbox, RegistrationSubmitted{}),
@@ -32,6 +36,31 @@ var _ = register(
 	spec("events", Outbox, CheckinVoided{}),
 	spec("events", Outbox, AttendanceFinalized{}),
 )
+
+// EventPublished: a draft became a published event (BE-106: the web
+// revalidates the event's public page, its organiser's and the sitemap).
+type EventPublished struct {
+	EventID uuid.UUID `json:"event_id"`
+	OrgID   uuid.UUID `json:"org_id"`
+}
+
+// Topic implements Payload.
+func (EventPublished) Topic() string { return TopicEventPublished }
+
+// EventUpdated: a published event was edited (BE-106; any field, schedule
+// changes included: event.schedule_changed stays the attendees' e-mail
+// trigger). Fields lists the changed field names; PreviousSlug is the old
+// public slug when the slug changed (the old page is revalidated too),
+// empty otherwise. A slug is the public URL identifier, never personal data.
+type EventUpdated struct {
+	EventID      uuid.UUID `json:"event_id"`
+	OrgID        uuid.UUID `json:"org_id"`
+	Fields       []string  `json:"fields"`
+	PreviousSlug string    `json:"previous_slug"`
+}
+
+// Topic implements Payload.
+func (EventUpdated) Topic() string { return TopicEventUpdated }
 
 // EventCancelled: registrations are cancelled, linked offerings too.
 type EventCancelled struct {

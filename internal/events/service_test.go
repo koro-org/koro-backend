@@ -180,23 +180,29 @@ func TestUpdateEvent_ScheduleChange_EmitsEvent(t *testing.T) {
 	if _, err := e.svc.UpdateEvent(ctx, admin, d.Event.ID, d.ETag, events.EventPatch{StartsAt: new(start.Add(time.Hour))}); err != nil {
 		t.Fatal(err)
 	}
+	if topics := e.out.Topics(); len(topics) != 0 {
+		t.Fatalf("a draft's edit emitted %v", topics)
+	}
 	p := e.published(t, input("Yayımlı Program"))
-	// A title change of a published event emits nothing either.
+	// A title change of a published event emits no schedule change, only
+	// event.updated for the web (BE-106).
 	p, err := e.svc.UpdateEvent(ctx, admin, p.Event.ID, p.ETag, events.EventPatch{Title: new("Yeni Ad")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if topics := e.out.Topics(); len(topics) != 0 {
+	if topics := e.out.Topics(); !slices.Equal(topics, []string{domainevent.TopicEventPublished, domainevent.TopicEventUpdated}) {
 		t.Fatalf("events before the schedule change: %v", topics)
 	}
+	before := len(e.out.Events())
 	moved := start.Add(24 * time.Hour)
 	if _, err = e.svc.UpdateEvent(ctx, admin, p.Event.ID, p.ETag, events.EventPatch{
 		StartsAt: &moved, EndsAt: new(moved.Add(2 * time.Hour)), Summary: new("Tarih değişti"),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	evs := e.out.Events()
-	if len(evs) != 1 || evs[0].Topic != domainevent.TopicEventScheduleChanged || evs[0].AggregateID != p.Event.ID {
+	evs := e.out.Events()[before:]
+	if len(evs) != 2 || evs[0].Topic != domainevent.TopicEventScheduleChanged || evs[0].AggregateID != p.Event.ID ||
+		evs[1].Topic != domainevent.TopicEventUpdated {
 		t.Fatalf("events = %+v", evs)
 	}
 	var payload domainevent.EventScheduleChanged
@@ -205,6 +211,47 @@ func TestUpdateEvent_ScheduleChange_EmitsEvent(t *testing.T) {
 	}
 	if payload.EventID != p.Event.ID || payload.OrgID != orgID("club_a") || !slices.Equal(payload.Fields, []string{"starts_at", "ends_at"}) {
 		t.Fatalf("payload = %+v", payload)
+	}
+}
+
+// TestPublishAndUpdate_EmitWebRevalidationEvents: publishing writes
+// event.published and every edit of a published event event.updated, in
+// the transaction of the write; a slug change carries the old slug so the
+// web revalidates the old page too (BE-106).
+func TestPublishAndUpdate_EmitWebRevalidationEvents(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := t.Context()
+	admin := persona(t, "club_admin")
+	updatesBefore := len(e.store.updates)
+	p := e.published(t, input("Web Etkinliği"))
+	pub := e.eventsOf(domainevent.TopicEventPublished)
+	if len(pub) != 1 || pub[0].AggregateID != p.Event.ID {
+		t.Fatalf("event.published = %+v", pub)
+	}
+	got, err := domainevent.Decode[domainevent.EventPublished](pub[0])
+	if err != nil || got.EventID != p.Event.ID || got.OrgID != orgID("club_a") {
+		t.Fatalf("payload = %+v, %v", got, err)
+	}
+	if adds, updates := e.out.txs[domainevent.TopicEventPublished], e.store.updates[updatesBefore:]; len(adds) != 1 ||
+		adds[0] == 0 || len(updates) != 1 || adds[0] != updates[0] {
+		t.Fatalf("outbox tx %v, update tx %v", adds, updates)
+	}
+	oldSlug := p.Event.Slug
+	if _, err := e.svc.UpdateEvent(ctx, admin, p.Event.ID, p.ETag, events.EventPatch{Slug: new("web-etkinligi-yeni")}); err != nil {
+		t.Fatal(err)
+	}
+	upd := e.eventsOf(domainevent.TopicEventUpdated)
+	if len(upd) != 1 {
+		t.Fatalf("event.updated = %+v", upd)
+	}
+	u, err := domainevent.Decode[domainevent.EventUpdated](upd[0])
+	if err != nil || u.EventID != p.Event.ID || u.OrgID != orgID("club_a") || u.PreviousSlug != oldSlug ||
+		!slices.Equal(u.Fields, []string{"slug"}) {
+		t.Fatalf("payload = %+v, %v (old slug %q)", u, err, oldSlug)
+	}
+	if s, err := e.svc.Get(ctx, p.Event.ID); err != nil || s.Slug != "web-etkinligi-yeni" {
+		t.Fatalf("summary slug = %q, %v", s.Slug, err)
 	}
 }
 
@@ -226,7 +273,7 @@ func TestCancelEvent_EmitsEventInSameTx(t *testing.T) {
 	if _, err := e.svc.CancelEvent(ctx, admin, failed.Event.ID, "Hava koşulları"); err == nil {
 		t.Fatal("cancel with a failing audit succeeded")
 	}
-	if len(e.out.Events()) != 0 {
+	if len(e.eventsOf(domainevent.TopicEventCancelled)) != 0 {
 		t.Fatalf("events after the rollback: %v", e.out.Topics())
 	}
 	e.audit.setFail(nil)
@@ -235,7 +282,7 @@ func TestCancelEvent_EmitsEventInSameTx(t *testing.T) {
 	if err != nil || c.Event.Status != events.StatusCancelled || c.Event.CancelledAt == nil || *c.Event.CancelReason != "Hava koşulları" {
 		t.Fatalf("cancel = %+v, %v", c.Event, err)
 	}
-	evs := e.out.Events()
+	evs := e.eventsOf(domainevent.TopicEventCancelled)
 	if len(evs) != 1 || evs[0].Topic != domainevent.TopicEventCancelled || evs[0].AggregateID != p.Event.ID {
 		t.Fatalf("events = %+v", evs)
 	}

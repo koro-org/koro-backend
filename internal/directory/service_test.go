@@ -257,7 +257,7 @@ func TestSetSensitivity_EmitsEventInSameTx(t *testing.T) {
 		t.Fatal("set sensitivity with a failing audit succeeded")
 	}
 	e.audit.setFail(nil)
-	if len(e.out.Topics()) != 0 {
+	if len(eventsOf(e.out, domainevent.TopicClubSensitivityChanged)) != 0 {
 		t.Fatalf("events after failures: %v", e.out.Topics())
 	}
 
@@ -269,7 +269,7 @@ func TestSetSensitivity_EmitsEventInSameTx(t *testing.T) {
 		got.MemberCount != nil {
 		t.Fatalf("club after set = %+v", got.Club)
 	}
-	evs := e.out.Events()
+	evs := eventsOf(e.out, domainevent.TopicClubSensitivityChanged)
 	if len(evs) != 1 || evs[0].Topic != domainevent.TopicClubSensitivityChanged || evs[0].AggregateID != id {
 		t.Fatalf("events = %+v", evs)
 	}
@@ -296,14 +296,14 @@ func TestSetSensitivity_EmitsEventInSameTx(t *testing.T) {
 	if _, err := e.svc.AdminSetClubSensitivity(ctx, pad(t), id, set, proof); err != nil {
 		t.Fatal(err)
 	}
-	if n := len(e.out.Events()); n != 1 {
+	if n := len(eventsOf(e.out, domainevent.TopicClubSensitivityChanged)); n != 1 {
 		t.Fatalf("events after no-op and reason change = %d, want 1", n)
 	}
 	// Clearing the flag emits Sensitive=false.
 	if _, err := e.svc.AdminSetClubSensitivity(ctx, pad(t), id, directory.SensitivityInput{}, proof); err != nil {
 		t.Fatal(err)
 	}
-	evs = e.out.Events()
+	evs = eventsOf(e.out, domainevent.TopicClubSensitivityChanged)
 	p, _ = domainevent.Decode[domainevent.ClubSensitivityChanged](evs[len(evs)-1])
 	if len(evs) != 2 || p.Sensitive {
 		t.Fatalf("events after clearing = %+v", evs)
@@ -461,6 +461,31 @@ func TestListClubs_TurkishSearch_IstanbulVariants(t *testing.T) {
 	// Bad query: one character.
 	_, err = e.svc.ListClubs(ctx, authz.Anonymous(), directory.ClubQuery{Q: "i"})
 	wantCode(t, err, 422, "validation_failed")
+}
+
+// TestClubWrites_EmitClubUpdated: creating a club and a change of its
+// profile write club.updated (O) for the web's revalidation (BE-106).
+func TestClubWrites_EmitClubUpdated(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := t.Context()
+	uni := e.university(t, "U-1", "Ege Üniversitesi", "İzmir")
+	v := e.club(t, uni, "Satranç Kulübü", directory.CategorySports)
+	admin := clubAdmin(v.Club.OrgID)
+	open := directory.JoinOpen
+	if _, err := e.svc.UpdateClub(ctx, admin, v.Club.OrgID, v.ETag, directory.ClubPatch{JoinPolicy: &open}); err != nil {
+		t.Fatal(err)
+	}
+	evs := eventsOf(e.out, domainevent.TopicClubUpdated)
+	if len(evs) != 2 {
+		t.Fatalf("club.updated = %+v, want create + one change", evs)
+	}
+	for i, want := range [][]string{{"created"}, {"join_policy"}} {
+		p, err := domainevent.Decode[domainevent.ClubUpdated](evs[i])
+		if err != nil || p.ClubOrgID != v.Club.OrgID || evs[i].AggregateID != v.Club.OrgID || !slices.Equal(p.Fields, want) {
+			t.Fatalf("club.updated[%d] = %+v, %v; want fields %v", i, p, err, want)
+		}
+	}
 }
 
 func TestUpdateClub_StaleETag_412(t *testing.T) {

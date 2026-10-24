@@ -20,6 +20,7 @@ import (
 	"koro/internal/orgs"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
+	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/outbox"
@@ -315,5 +316,16 @@ func names(page directory.ClubPage) []string {
 		out[i] = c.Row.Name
 	}
 	slices.Sort(out)
+	return out
+}
+
+// eventsOf returns the recorded outbox events of topic.
+func eventsOf(m *outbox.Mem, topic string) []domainevent.Envelope {
+	var out []domainevent.Envelope
+	for _, ev := range m.Events() {
+		if ev.Topic == topic {
+			out = append(out, ev)
+		}
+	}
 	return out
 }

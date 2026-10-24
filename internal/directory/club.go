@@ -182,7 +182,8 @@ func (s *service) writableOrg(ctx context.Context, a authz.Actor, orgID uuid.UUI
 }
 
 // UpdateClub implements Service. Order: the club (404) → authz (403) → org
-// status → If-Match (428/412) → the patch (422; k7).
+// status → If-Match (428/412) → the patch (422; k7); a real change writes
+// club.updated (O) in the transaction (BE-106).
 func (s *service) UpdateClub(ctx context.Context, a authz.Actor, clubID uuid.UUID, ifMatch string, p ClubPatch) (ClubView, error) {
 	var out Club
 	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
@@ -209,6 +210,9 @@ func (s *service) UpdateClub(ctx context.Context, a authz.Actor, clubID uuid.UUI
 		if out, err = s.d.Store.UpdateClub(ctx, next); err != nil {
 			return err
 		}
+		if err := s.emitClubUpdated(ctx, c.OrgID, changed); err != nil {
+			return err
+		}
 		org := c.OrgID
 		return s.d.Audit.Log(ctx, auditEvent(a, authz.DirectoryClubUpdate, authz.TypeClub, c.OrgID, &org, "",
 			map[string]any{"fields": changed}))
@@ -217,6 +221,20 @@ func (s *service) UpdateClub(ctx context.Context, a authz.Actor, clubID uuid.UUI
 		return ClubView{}, err
 	}
 	return s.view(ctx, a, out)
+}
+
+// emitClubUpdated writes club.updated (O) in the caller's transaction: the
+// club's public profile changed (BE-106: the web revalidates its page).
+// Nothing changed → no event.
+func (s *service) emitClubUpdated(ctx context.Context, clubOrgID uuid.UUID, fields []string) error {
+	if len(fields) == 0 {
+		return nil
+	}
+	env, err := domainevent.New(domainevent.ClubUpdated{ClubOrgID: clubOrgID, Fields: fields}, "club", clubOrgID)
+	if err != nil {
+		return err
+	}
+	return s.d.Outbox.Add(ctx, env)
 }
 
 // applyClubPatch validates p against c and returns the new row and the
@@ -276,7 +294,9 @@ func cleanSensitivity(sensitive bool, reason SensitiveReason, loc string) (*Sens
 
 // AdminCreateClub implements Service: the club's org (orgs.OrgAdmin.Create)
 // and its clubs row in one transaction (01 §6.3, T-78), with the audit
-// record. A new club has no members, so its sensitivity emits no event.
+// record. A new club has no members, so its sensitivity emits no event;
+// club.updated (Fields ["created"]) lets the web add it to the sitemap
+// (BE-106).
 func (s *service) AdminCreateClub(ctx context.Context, a authz.Actor, in ClubInput) (ClubView, error) {
 	if err := authz.Can(ctx, a, authz.DirectoryClubCreate, adminSurface); err != nil {
 		return ClubView{}, err
@@ -331,6 +351,9 @@ func (s *service) AdminCreateClub(ctx context.Context, a authz.Actor, in ClubInp
 			c.SensitivitySetBy, c.SensitivitySetAt = &by, &now
 		}
 		if _, err := s.d.Store.InsertClub(ctx, c); err != nil {
+			return uuid.Nil(), err
+		}
+		if err := s.emitClubUpdated(ctx, orgID, []string{"created"}); err != nil {
 			return uuid.Nil(), err
 		}
 		return orgID, s.d.Audit.Log(ctx, auditEvent(a, authz.DirectoryClubCreate, authz.TypeClub, orgID, &orgID, "",

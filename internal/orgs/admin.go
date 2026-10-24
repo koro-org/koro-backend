@@ -89,6 +89,9 @@ func (s *service) transition(ctx context.Context, a authz.Actor, id uuid.UUID, t
 		if _, err := s.d.Store.UpdateOrg(ctx, o); err != nil {
 			return uuid.Nil(), err
 		}
+		if err := s.emitOrgUpdated(ctx, o, []string{"status"}); err != nil {
+			return uuid.Nil(), err
+		}
 		meta := map[string]any{"transition": t.op, "from": string(prev), "to": string(t.to), "org_kind": string(o.Kind)}
 		if t.reauth != "" {
 			meta["reauth"] = t.reauth

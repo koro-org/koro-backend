@@ -7,12 +7,14 @@ const (
 	TopicOrgInvitationCreated = "org_invitation.created"
 	TopicMembershipStarted    = "membership.started"
 	TopicMembershipEnded      = "membership.ended"
+	TopicOrgUpdated           = "org.updated"
 )
 
 var _ = register(
 	spec("orgs", Outbox, OrgInvitationCreated{}),
 	spec("orgs", AfterCommit, MembershipStarted{}),
 	spec("orgs", AfterCommit, MembershipEnded{}),
+	spec("orgs", Outbox, OrgUpdated{}),
 )
 
 // OrgInvitationCreated: the worker sends the invitation e-mail.
@@ -48,3 +50,16 @@ type MembershipEnded struct {
 
 // Topic implements Payload.
 func (MembershipEnded) Topic() string { return TopicMembershipEnded }
+
+// OrgUpdated: the public profile of an org changed (BE-106): updateOrg
+// (Fields = the changed field names) or a status change (verify, suspend,
+// reactivate, close: Fields = ["status"]). The web revalidates the org's
+// public page.
+type OrgUpdated struct {
+	OrgID   uuid.UUID `json:"org_id"`
+	OrgKind string    `json:"org_kind"`
+	Fields  []string  `json:"fields"`
+}
+
+// Topic implements Payload.
+func (OrgUpdated) Topic() string { return TopicOrgUpdated }

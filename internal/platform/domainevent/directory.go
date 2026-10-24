@@ -3,15 +3,17 @@ package domainevent
 import "uuid"
 
 // Topics of the directory module (01 §6.2). Owner: directory tickets
-// (BE-020 added club.sensitivity_changed, T-80).
+// (BE-020 added club.sensitivity_changed, T-80; BE-106 club.updated).
 const (
 	TopicClubClaimDecided       = "club_claim.decided"
 	TopicClubSensitivityChanged = "club.sensitivity_changed"
+	TopicClubUpdated            = "club.updated"
 )
 
 var _ = register(
 	spec("directory", Outbox, ClubClaimDecided{}),
 	spec("directory", Outbox, ClubSensitivityChanged{}),
+	spec("directory", Outbox, ClubUpdated{}),
 )
 
 // ClubClaimDecided: a club claim was approved or rejected.
@@ -37,3 +39,14 @@ type ClubSensitivityChanged struct {
 
 // Topic implements Payload.
 func (ClubSensitivityChanged) Topic() string { return TopicClubSensitivityChanged }
+
+// ClubUpdated: the club profile changed (BE-106): updateClub (Fields = the
+// changed field names) or adminCreateClub (Fields = ["created"]). The web
+// revalidates the club's public page.
+type ClubUpdated struct {
+	ClubOrgID uuid.UUID `json:"club_org_id"`
+	Fields    []string  `json:"fields"`
+}
+
+// Topic implements Payload.
+func (ClubUpdated) Topic() string { return TopicClubUpdated }

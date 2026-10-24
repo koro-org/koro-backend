@@ -191,7 +191,7 @@ func TestRegister_CapacityFull_GoesToWaitlist(t *testing.T) {
 	if n := e.seats(t, ev.Event.ID); n != 2 {
 		t.Fatalf("confirmed_count = %d", n)
 	}
-	if got := e.out.Topics(); !slices.Equal(got, []string{domainevent.TopicRegistrationConfirmed, domainevent.TopicRegistrationConfirmed,
+	if got := e.out.Topics(); !slices.Equal(got, []string{domainevent.TopicEventPublished, domainevent.TopicRegistrationConfirmed, domainevent.TopicRegistrationConfirmed,
 		domainevent.TopicRegistrationWaitlisted, domainevent.TopicRegistrationWaitlisted}) {
 		t.Fatalf("topics = %v", got)
 	}

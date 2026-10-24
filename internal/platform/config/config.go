@@ -119,12 +119,15 @@ type API struct {
 
 // Worker is the configuration of `koro worker`. AuditRoot (the daily root
 // signing keys and archive) is loaded only here: the API never signs (BE-107).
+// Webcache (BE-106) is the worker's alone too: only the worker sends the
+// publication webhook.
 type Worker struct {
 	Common
 	Obs       Obs
 	AuditRoot AuditRoot
 	Platform  Platform
 	Modules   Modules
+	Webcache  Webcache
 }
 
 // Migrate is the configuration of `koro migrate` (owner role only).

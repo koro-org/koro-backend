@@ -85,7 +85,7 @@ func (s *service) Get(ctx context.Context, eventID uuid.UUID) (EventSummary, err
 		return EventSummary{}, err
 	}
 	return EventSummary{
-		ID: e.ID, OrgID: e.OrgID, Title: e.Title, Status: e.Status, StartsAt: e.StartsAt, EndsAt: e.EndsAt,
+		ID: e.ID, OrgID: e.OrgID, Title: e.Title, Slug: e.Slug, Status: e.Status, StartsAt: e.StartsAt, EndsAt: e.EndsAt,
 		Visibility: e.Visibility, Sensitive: sens,
 	}, nil
 }

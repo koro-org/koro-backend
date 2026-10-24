@@ -151,7 +151,8 @@ func (s *service) locked(ctx context.Context, a authz.Actor, act authz.Action, i
 // → the org status (403) → the event status (409: cancelled and completed
 // events are final) → If-Match (428/412) → the patch (422). A changed
 // schedule or venue of a published event emits event.schedule_changed (O)
-// in the same transaction.
+// in the same transaction, and any change of a published event
+// event.updated (O; BE-106).
 func (s *service) UpdateEvent(ctx context.Context, a authz.Actor, id uuid.UUID, ifMatch string, p EventPatch) (EventView, error) {
 	var (
 		out Event
@@ -184,6 +185,11 @@ func (s *service) UpdateEvent(ctx context.Context, a authz.Actor, id uuid.UUID, 
 		}
 		if moved := scheduleChanges(ap.changed); e.Status == StatusPublished && len(moved) > 0 {
 			if err := s.emit(ctx, domainevent.EventScheduleChanged{EventID: e.ID, OrgID: e.OrgID, Fields: moved}, e.ID); err != nil {
+				return err
+			}
+		}
+		if e.Status == StatusPublished && len(ap.changed) > 0 {
+			if err := s.emit(ctx, publicUpdate(e, out, ap.changed), e.ID); err != nil {
 				return err
 			}
 		}
@@ -224,6 +230,17 @@ func (s *service) followRegistrations(ctx context.Context, before, after Event, 
 	return s.promote(ctx, after, sens, s.now())
 }
 
+// publicUpdate is the event.updated payload of an edited published event
+// (BE-106: the web revalidates its page; the old one too after a slug
+// change).
+func publicUpdate(before, after Event, changed []string) domainevent.EventUpdated {
+	u := domainevent.EventUpdated{EventID: before.ID, OrgID: before.OrgID, Fields: changed}
+	if before.Slug != after.Slug {
+		u.PreviousSlug = before.Slug
+	}
+	return u
+}
+
 // scheduleChanges keeps the schedule and venue fields of changed.
 func scheduleChanges(changed []string) []string {
 	out := []string{}
@@ -248,6 +265,7 @@ func (s *service) emit(ctx context.Context, p domainevent.Payload, eventID uuid.
 // the rules of a published event (an online or hybrid event needs its
 // link; 422), it must not have ended (422), and an event with registration
 // needs a published form version (422 events.form_required; BE-026).
+// event.published (O) is written in the same transaction (BE-106).
 func (s *service) PublishEvent(ctx context.Context, a authz.Actor, id uuid.UUID) (EventView, error) {
 	hash, err := idempotency.Hash(struct {
 		Op    string
@@ -285,6 +303,9 @@ func (s *service) PublishEvent(ctx context.Context, a authz.Actor, id uuid.UUID)
 			}
 		}
 		if _, err := s.d.Store.UpdateEvent(ctx, next); err != nil {
+			return uuid.Nil(), err
+		}
+		if err := s.emit(ctx, domainevent.EventPublished{EventID: e.ID, OrgID: e.OrgID}, e.ID); err != nil {
 			return uuid.Nil(), err
 		}
 		return e.ID, s.d.Audit.Log(ctx, auditEvent(a, authz.EventsEventPublish, eventAggType, e.ID, e.OrgID, "", nil))

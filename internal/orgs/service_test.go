@@ -319,6 +319,40 @@ func TestAdminVerifyOrg_PendingToActive(t *testing.T) {
 	wantErr(t, err, orgs.ErrNotFound)
 }
 
+// TestOrgWrites_EmitOrgUpdated: a profile edit and an admin status change
+// write org.updated (O) for the web's revalidation; a failed write none
+// (BE-106).
+func TestOrgWrites_EmitOrgUpdated(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	v, owner := e.company(t, "Yayın Şirketi")
+	_, err := e.svc.AdminVerifyOrg(t.Context(), owner, v.Org.ID, "")
+	wantErr(t, err, authz.ErrForbidden)
+	got, err := e.svc.AdminVerifyOrg(t.Context(), pad(t), v.Org.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	desc, size := "Yeni açıklama", "51-200"
+	if _, err := e.svc.UpdateOrg(t.Context(), owner, v.Org.ID, got.ETag, orgs.OrgPatch{Description: &desc, SizeBand: &size}); err != nil {
+		t.Fatal(err)
+	}
+	var evs []domainevent.Envelope
+	for _, ev := range e.out.Events() {
+		if ev.Topic == domainevent.TopicOrgUpdated {
+			evs = append(evs, ev)
+		}
+	}
+	if len(evs) != 2 {
+		t.Fatalf("org.updated = %+v, want verify + update", evs)
+	}
+	for i, want := range [][]string{{"status"}, {"description", "size_band"}} {
+		p, err := domainevent.Decode[domainevent.OrgUpdated](evs[i])
+		if err != nil || p.OrgID != v.Org.ID || p.OrgKind != "company" || evs[i].AggregateID != v.Org.ID || !slices.Equal(p.Fields, want) {
+			t.Fatalf("org.updated[%d] = %+v, %v; want fields %v", i, p, err, want)
+		}
+	}
+}
+
 func TestSuspendedOrg_WriteActions403_ReadAllowed(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)

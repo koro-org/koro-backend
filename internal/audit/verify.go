@@ -48,11 +48,12 @@ func (s *service) verifyRange(ctx context.Context, from, to civil.Date) (VerifyR
 	if hasAnchor {
 		signed = append([]DailyRoot{anchor}, roots...)
 	}
-	if len(signed) > 0 && s.d.Signer == nil {
+	verifier := s.verifier()
+	if len(signed) > 0 && verifier == nil {
 		return res, ErrSignerNotConfigured
 	}
 	for _, r := range signed {
-		ok, err := s.d.Signer.Verify(ctx, r.KeyID, rootMessage(r.Day, r.LastChainSeq, r.RootHash), r.Signature)
+		ok, err := verifier.Verify(ctx, r.KeyID, rootMessage(r.Day, r.LastChainSeq, r.RootHash), r.Signature)
 		if err != nil {
 			return res, err
 		}

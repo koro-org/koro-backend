@@ -15,14 +15,21 @@ import (
 	"koro/internal/platform/crypto"
 )
 
-// RootSigner signs daily roots and verifies the signatures of stored ones.
-// Implementations: Ed25519Signer (local keys from AUDIT_ROOT_SIGNING_KEYS);
-// OpenBao Transit with BE-055 (02 §2.2).
-type RootSigner interface {
-	// Sign signs msg with the active key and returns the key ID with it.
-	Sign(ctx context.Context, msg []byte) (sig []byte, keyID string, err error)
+// RootVerifier verifies the signatures of stored daily roots. It needs no
+// private key: the API verifies with Ed25519Verifier (public keys from
+// AUDIT_ROOT_VERIFY_KEYS) and never holds the seeds (BE-107).
+type RootVerifier interface {
 	// Verify checks sig of msg under keyID (an old key after rotation).
 	Verify(ctx context.Context, keyID string, msg, sig []byte) (bool, error)
+}
+
+// RootSigner signs daily roots and verifies the signatures of stored ones.
+// Implementations: Ed25519Signer (local keys from AUDIT_ROOT_SIGNING_KEYS,
+// worker only); OpenBao Transit with BE-055 (02 §2.2).
+type RootSigner interface {
+	RootVerifier
+	// Sign signs msg with the active key and returns the key ID with it.
+	Sign(ctx context.Context, msg []byte) (sig []byte, keyID string, err error)
 }
 
 // Ed25519Signer signs with local Ed25519 keys. keys[0] is active; the
@@ -63,6 +70,57 @@ func (s *Ed25519Signer) Verify(_ context.Context, keyID string, msg, sig []byte)
 	}
 	pub, _ := k.Public().(ed25519.PublicKey)
 	return ed25519.Verify(pub, msg, sig), nil
+}
+
+// Ed25519Verifier verifies root signatures with Ed25519 public keys only.
+type Ed25519Verifier struct {
+	keys map[string]ed25519.PublicKey
+}
+
+// NewEd25519Verifier returns a verifier over keys (crypto.ParseKeyring
+// format); each secret is a 32-byte Ed25519 public key.
+func NewEd25519Verifier(keys []crypto.Key) (*Ed25519Verifier, error) {
+	if len(keys) == 0 {
+		return nil, errors.New("audit: no root verify key")
+	}
+	v := &Ed25519Verifier{keys: make(map[string]ed25519.PublicKey, len(keys))}
+	for i, k := range keys {
+		if len(k.Secret) != ed25519.PublicKeySize {
+			return nil, fmt.Errorf("audit: root verify key %d (%s) must be a %d-byte Ed25519 public key", i+1, k.ID, ed25519.PublicKeySize)
+		}
+		if _, dup := v.keys[k.ID]; dup {
+			return nil, fmt.Errorf("audit: root verify key id %s is repeated", k.ID)
+		}
+		v.keys[k.ID] = ed25519.PublicKey(bytes.Clone(k.Secret))
+	}
+	return v, nil
+}
+
+// Verify implements RootVerifier. An unknown key ID is an invalid signature.
+func (v *Ed25519Verifier) Verify(_ context.Context, keyID string, msg, sig []byte) (bool, error) {
+	pub, ok := v.keys[keyID]
+	if !ok {
+		return false, nil
+	}
+	return ed25519.Verify(pub, msg, sig), nil
+}
+
+// CheckCovers reports an error unless v verifies with exactly the public
+// key of every signing key of s. A worker whose seeds do not match the
+// API's public keys would sign roots that the API reports as tampered, so
+// the mismatch stops the worker at start (BE-107). Errors name key IDs only.
+func (v *Ed25519Verifier) CheckCovers(s *Ed25519Signer) error {
+	var errs []error
+	for id, k := range s.keys {
+		pub, _ := k.Public().(ed25519.PublicKey)
+		switch got, ok := v.keys[id]; {
+		case !ok:
+			errs = append(errs, fmt.Errorf("audit: signing key %s has no AUDIT_ROOT_VERIFY_KEYS entry", id))
+		case !got.Equal(pub):
+			errs = append(errs, fmt.Errorf("audit: AUDIT_ROOT_VERIFY_KEYS entry %s is not the public key of signing key %s", id, id))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // RootArchive is the separate store that keeps a copy of every daily root

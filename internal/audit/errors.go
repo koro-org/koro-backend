@@ -18,8 +18,9 @@ var (
 	// reversed, in the future or span too long (422).
 	ErrInvalidRange = problem.New(problem.Invalid, "audit.invalid_range", "Invalid time range")
 
-	// ErrSignerNotConfigured: no daily root signing key is configured
-	// (AUDIT_ROOT_SIGNING_KEYS); roots can be neither made nor verified.
+	// ErrSignerNotConfigured: no daily root key is configured: signing in
+	// the worker (AUDIT_ROOT_SIGNING_KEYS) or verifying in the API or worker
+	// (AUDIT_ROOT_VERIFY_KEYS, BE-107).
 	ErrSignerNotConfigured = problem.New(problem.Unavailable, "audit.signer_not_configured",
 		"Audit root signing is not configured")
 

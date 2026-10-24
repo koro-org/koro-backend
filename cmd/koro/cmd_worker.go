@@ -71,6 +71,7 @@ func runWorker(ctx context.Context, stop context.CancelFunc, environ map[string]
 	}
 
 	c := newContainer(newInfra(infra{log: log, clock: clk, version: version, cfg: cfg.Modules, db: database}, rdb, cfg.Platform))
+	c.audit.root = &cfg.AuditRoot // only the worker signs daily roots (BE-107)
 	if err := c.build(); err != nil {
 		return err
 	}

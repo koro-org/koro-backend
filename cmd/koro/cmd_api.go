@@ -34,6 +34,7 @@ func runAPI(ctx context.Context, stop context.CancelFunc, environ map[string]str
 	log := obs.NewLogger(stdout, obs.LoggerOptions{
 		Level: cfg.LogLevel, Format: cfg.LogFormat, Service: "koro-api", Env: cfg.Env, Version: version,
 	})
+	warnIgnoredAPIVars(ctx, log, cfg.Common, environ)
 	tel, err := setupTelemetry(ctx, cfg.Obs, "koro-api", cfg.Env, log)
 	if err != nil {
 		return err
@@ -115,4 +116,19 @@ func runAPI(ctx context.Context, stop context.CancelFunc, environ map[string]str
 	err = errors.Join(err, shutdownTelemetry(ctx, tel))
 	log.LogAttrs(ctx, slog.LevelInfo, "api stopped", slog.Bool("clean", err == nil))
 	return err
+}
+
+// warnIgnoredAPIVars warns in staging/prod when the API container receives
+// variables only the worker uses (the daily root seeds and archive, BE-107):
+// the API ignores them and never reads the secret file, but the secret
+// should not be distributed to it at all. Only names are logged.
+func warnIgnoredAPIVars(ctx context.Context, log *slog.Logger, c config.Common, environ map[string]string) {
+	if !c.ProdLike() {
+		return // dev shares one .env between api and worker
+	}
+	for _, name := range config.AuditRootVars {
+		if _, ok := environ[name]; ok {
+			log.LogAttrs(ctx, slog.LevelWarn, "variable is used only by koro worker; remove it from the api container", slog.String("var", name))
+		}
+	}
 }

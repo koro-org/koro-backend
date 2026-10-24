@@ -92,6 +92,10 @@ type Deps struct {
 	// audit.daily_root fails with ErrSignerNotConfigured (never an
 	// in-memory key, 05 §12.2) and a range with roots cannot be verified.
 	Signer RootSigner
+	// Verifier verifies the signatures of stored roots (POST
+	// /admin/audit/verify, audit.verify_chain). nil → Signer. The API sets
+	// only this (public keys); the worker sets both (BE-107).
+	Verifier RootVerifier
 	// Archive is the separate write-once store of the daily roots. nil →
 	// audit.daily_root fails with ErrArchiveNotConfigured.
 	Archive RootArchive
@@ -155,6 +159,17 @@ type service struct {
 // now is the service clock in the database's precision (microseconds), so
 // the in-memory store hashes exactly what PostgreSQL stores.
 func (s *service) now() time.Time { return s.d.Clock.Now().UTC().Truncate(time.Microsecond) }
+
+// verifier is Deps.Verifier, else Deps.Signer, else nil.
+func (s *service) verifier() RootVerifier {
+	switch {
+	case s.d.Verifier != nil:
+		return s.d.Verifier
+	case s.d.Signer != nil:
+		return s.d.Signer
+	}
+	return nil
+}
 
 func (s *service) alarm(ctx context.Context, a Alarm) {
 	if s.d.Alarm != nil {

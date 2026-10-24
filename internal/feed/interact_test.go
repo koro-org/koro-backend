@@ -9,6 +9,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/feed"
+	"koro/internal/files"
 	"koro/internal/orgs"
 	"koro/internal/platform/domainevent"
 )
@@ -662,5 +663,72 @@ func TestPrivacy_Interactions(t *testing.T) {
 	}
 	if sec, _ := e.mod.Privacy.Export(ctx, reader.UserID); len(sec.Items) != 0 {
 		t.Fatalf("export after erase = %v", sec.Items)
+	}
+}
+
+// TestFollowMuteLists_LogoAndVerified (BE-098, T-251): the org cards of the
+// follow and mute lists carry the verification badge and a signed logo URL
+// by the rules of the post author; a page reads its orgs with one GetMany
+// and signs each logo once; a logo the scan has not cleared is left out.
+func TestFollowMuteLists_LogoAndVerified(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := t.Context()
+	reader := persona(t, "student")
+	logo := e.files.upload(orgID("club_a"), files.ScanClean)
+	a := e.orgs.orgs[orgID("club_a")]
+	a.LogoFileID, a.Verified = &logo, true
+	e.orgs.orgs[a.ID] = a
+	pending := e.files.upload(orgID("club_b"), files.ScanPending)
+	b := e.orgs.orgs[orgID("club_b")]
+	b.LogoFileID = &pending
+	e.orgs.orgs[b.ID] = b
+	for _, id := range []uuid.UUID{a.ID, b.ID} {
+		if err := e.svc.FollowOrg(ctx, reader, id, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.svc.MuteOrg(ctx, reader, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check := func(name string, items []feed.OrgItem) {
+		t.Helper()
+		if len(items) != 2 {
+			t.Fatalf("%s = %d items, want 2", name, len(items))
+		}
+		for _, it := range items {
+			d := feed.ToOrgDTO(it)
+			switch it.Org.ID {
+			case a.ID:
+				if !d.Verified || d.LogoURL != "https://files.example.test/"+logo.String() {
+					t.Fatalf("%s club_a = %+v", name, d)
+				}
+			case b.ID:
+				if d.Verified || d.LogoURL != "" {
+					t.Fatalf("%s club_b = %+v (unscanned logo, not verified)", name, d)
+				}
+			}
+		}
+	}
+	before, signed := e.orgs.getMany, e.files.presigns(logo)
+	follows, err := e.svc.ListFollows(ctx, reader, feed.PageQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("ListFollows", follows.Items)
+	mutes, err := e.svc.ListMutes(ctx, reader, feed.PageQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("ListMutes", mutes.Items)
+	if n := e.orgs.getMany - before; n != 2 {
+		t.Fatalf("GetMany calls for two pages = %d, want 2", n)
+	}
+	if n := e.files.presigns(logo) - signed; n != 2 {
+		t.Fatalf("logo signed %d times on two pages, want 2", n)
+	}
+	raw, err := json.Marshal(feed.ToOrgDTO(follows.Items[0]))
+	if err != nil || !strings.Contains(string(raw), `"verified":`) {
+		t.Fatalf("org card JSON = %s, %v", raw, err)
 	}
 }

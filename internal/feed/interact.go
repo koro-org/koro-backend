@@ -20,10 +20,13 @@ import (
 // themselves are exported and erased through KVKK).
 
 // OrgItem is an org of listMyFollows / listMyMutes. Follow is set for a
-// follow (source and notify), nil for a mute.
+// follow (source and notify), nil for a mute. LogoURL is the org's
+// short-lived logo URL ("" without a logo, before the scan clears it or
+// without files; BE-098).
 type OrgItem struct {
-	Org    orgs.OrgSummary
-	Follow *Follow
+	Org     orgs.OrgSummary
+	Follow  *Follow
+	LogoURL string
 }
 
 // OrgPage is a page of OrgItem; Next is the keyset position (created_at,
@@ -286,9 +289,10 @@ func (s *service) ListFollows(ctx context.Context, a authz.Actor, q PageQuery) (
 	if err != nil {
 		return OrgPage{}, err
 	}
+	logos := s.logoURLs(ctx, os)
 	for _, f := range rows {
 		if o, ok := os[f.OrgID]; ok {
-			out.Items = append(out.Items, OrgItem{Org: o, Follow: &f})
+			out.Items = append(out.Items, OrgItem{Org: o, Follow: &f, LogoURL: logos[f.OrgID]})
 		}
 	}
 	return out, nil
@@ -318,9 +322,10 @@ func (s *service) ListMutes(ctx context.Context, a authz.Actor, q PageQuery) (Or
 	if err != nil {
 		return OrgPage{}, err
 	}
+	logos := s.logoURLs(ctx, os)
 	for _, m := range rows {
 		if o, ok := os[m.OrgID]; ok {
-			out.Items = append(out.Items, OrgItem{Org: o})
+			out.Items = append(out.Items, OrgItem{Org: o, LogoURL: logos[m.OrgID]})
 		}
 	}
 	return out, nil

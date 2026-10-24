@@ -118,7 +118,7 @@ func toReportDTO(v ReportView) AdminReportDTO {
 	if t := v.Target; t != nil {
 		o := t.Org
 		td := &ReportTargetDTO{
-			Type: string(t.Type), Org: FeedOrgDTO{OrgID: o.ID.String(), Kind: string(o.Kind), Name: o.Name, Slug: o.Slug},
+			Type: string(t.Type), Org: FeedOrgDTO{OrgID: o.ID.String(), Kind: string(o.Kind), Name: o.Name, Slug: o.Slug, Verified: o.Verified},
 			OrgStatus: string(o.Status), TrustLevel: string(t.TrustLevel), OpenReports: t.OpenReports,
 		}
 		if p := t.Post; p != nil {

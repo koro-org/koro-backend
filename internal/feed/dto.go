@@ -189,13 +189,15 @@ func toManageDTO(v PostView) PostManageDTO {
 }
 
 // FeedOrgDTO is an org of the reader's follow and mute lists (04 §2.7
-// "OrgCardDTO"): public org data only. logo_url and verified are not
-// carried here yet (AuthorDTO has them since BE-094).
+// "OrgCardDTO"): public org data only. logo_url and verified follow the
+// rules of AuthorDTO (BE-094, BE-098).
 type FeedOrgDTO struct {
-	OrgID string `json:"org_id"`
-	Kind  string `json:"kind" enum:"platform,university,club,company,ngo"`
-	Name  string `json:"name"`
-	Slug  string `json:"slug"`
+	OrgID    string `json:"org_id"`
+	Kind     string `json:"kind" enum:"platform,university,club,company,ngo"`
+	Name     string `json:"name"`
+	Slug     string `json:"slug"`
+	LogoURL  string `json:"logo_url,omitempty" doc:"Short-lived download URL of the org's logo (at most 5 minutes); absent when the org has no logo or the scan has not cleared it. Do not cache past its expiry; refetch the list. Carried by listMyFollows and listMyMutes; absent in admin report targets."`
+	Verified bool   `json:"verified" doc:"True when a platform admin has verified the org (the verification badge)"`
 }
 
 // FeedOrgList is a page of listMyMutes.
@@ -219,5 +221,6 @@ type FollowList struct {
 
 func toOrgDTO(it OrgItem) FeedOrgDTO {
 	o := it.Org
-	return FeedOrgDTO{OrgID: o.ID.String(), Kind: string(o.Kind), Name: o.Name, Slug: o.Slug}
+	return FeedOrgDTO{OrgID: o.ID.String(), Kind: string(o.Kind), Name: o.Name, Slug: o.Slug,
+		LogoURL: it.LogoURL, Verified: o.Verified}
 }

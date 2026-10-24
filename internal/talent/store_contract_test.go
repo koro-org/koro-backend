@@ -365,8 +365,8 @@ func storeContract(t *testing.T, newEnv func(t *testing.T) contractEnv) {
 			if err != nil || len(users) != 3 {
 				t.Fatalf("scoring users = %v %v", users, err)
 			}
-			if n, err := ce.store.DeleteScores(ctx, []uuid.UUID{b, c}); err != nil || n != 4 {
-				t.Fatalf("delete = %d %v, want 2 scores + 2 cohorts", n, err)
+			if ns, nc, err := ce.store.DeleteScores(ctx, []uuid.UUID{b, c}); err != nil || ns != 2 || nc != 2 {
+				t.Fatalf("delete = %d scores %d cohorts %v, want 2 + 2", ns, nc, err)
 			}
 			if users, _ := ce.store.ScoringUsers(ctx, t0); len(users) != 1 || users[0] != a {
 				t.Fatalf("after delete = %v", users)

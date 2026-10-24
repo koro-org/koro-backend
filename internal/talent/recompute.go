@@ -210,13 +210,8 @@ func (s *service) score(ctx context.Context, cfg ConfigVersion, runID uuid.UUID,
 			return 0, err
 		}
 	}
-	for batch := range slices.Chunk(drop, recomputeBatch) {
-		if err := s.inTx(ctx, func(ctx context.Context) error {
-			_, err := s.d.Store.DeleteScores(ctx, batch)
-			return err
-		}); err != nil {
-			return 0, err
-		}
+	if err := s.dropScores(ctx, runID, now, drop); err != nil {
+		return 0, err
 	}
 	return len(scores), nil
 }

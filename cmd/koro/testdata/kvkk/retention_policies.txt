@@ -68,6 +68,8 @@ talent_runs                   sweeper:talent
 talent_neutralization         sweeper:talent
 # talent (BE-087, T-324): scores and cohorts deleted every night while collection is off (never deferred to the approval)
 talent_collection_off         job:talent.recompute
+# talent (BE-101, T-342): scores and cohorts of the users the nightly run no longer scores, with collection on
+talent_score_dropped          job:talent.recompute
 # entitlements
 entitlement_other             sweeper:entitlements
 # ledger (orders, payments, ledger, billing and parties tables; 06 H-57)

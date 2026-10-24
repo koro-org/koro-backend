@@ -822,23 +822,23 @@ func (s gormStore) PutScores(ctx context.Context, scores []Score) error {
 // DeleteScores implements Store.
 //
 // cross-org: the nightly run's batch, keyed by user IDs.
-func (s gormStore) DeleteScores(ctx context.Context, userIDs []uuid.UUID) (int, error) {
+func (s gormStore) DeleteScores(ctx context.Context, userIDs []uuid.UUID) (int, int, error) {
 	if len(userIDs) == 0 {
-		return 0, nil
+		return 0, 0, nil
 	}
 	c, err := s.conn(ctx)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	n := 0
-	for _, table := range []string{"scores", "cohorts"} {
+	var n [2]int
+	for i, table := range []string{"scores", "cohorts"} {
 		res := c.Exec(`DELETE FROM talent.`+table+` WHERE user_id IN ?`, userIDs)
 		if res.Error != nil {
-			return 0, wrap("delete "+table, res.Error)
+			return 0, 0, wrap("delete "+table, res.Error)
 		}
-		n += int(res.RowsAffected)
+		n[i] = int(res.RowsAffected)
 	}
-	return n, nil
+	return n[0], n[1], nil
 }
 
 // PurgeScores implements Store: one statement picks the users and deletes

@@ -687,27 +687,27 @@ func (m *MemStore) PutScores(ctx context.Context, scores []Score) error {
 }
 
 // DeleteScores implements Store.
-func (m *MemStore) DeleteScores(ctx context.Context, userIDs []uuid.UUID) (int, error) {
+func (m *MemStore) DeleteScores(ctx context.Context, userIDs []uuid.UUID) (int, int, error) {
 	if len(userIDs) == 0 {
-		return 0, nil
+		return 0, 0, nil
 	}
 	if err := m.check(ctx); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	n := 0
+	scores, cohorts := 0, 0
 	for _, id := range userIDs {
 		if _, ok := m.scores[id]; ok {
 			delete(m.scores, id)
-			n++
+			scores++
 		}
 		if _, ok := m.cohorts[id]; ok {
 			delete(m.cohorts, id)
-			n++
+			cohorts++
 		}
 	}
-	return n, nil
+	return scores, cohorts, nil
 }
 
 // PurgeScores implements Store.

@@ -84,9 +84,10 @@ talent.score_runs           policy:talent_runs
 talent.neutralizations      policy:talent_neutralization
 # cohorts and scores: overwritten nightly while collection is on (02 §15.5, §15.6; talent.recompute deletes a user's rows
 # once the user has no ledger row in lookback_days), all deleted nightly while it is off (BE-087, T-324), and erased
-# with the account by talent's provider
-talent.cohorts              policy:talent_collection_off
-talent.scores               policy:talent_collection_off
+# with the account by talent's provider; the run's deletions with collection on are recorded under talent_score_dropped
+# (BE-101, T-342)
+talent.cohorts              policy:talent_collection_off,talent_score_dropped
+talent.scores               policy:talent_collection_off,talent_score_dropped
 # kvkk
 data_subject_requests       policy:dsr_record
 destruction_logs            policy:destruction_log

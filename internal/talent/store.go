@@ -117,8 +117,8 @@ type Store interface {
 	// cohort row of each user (talent.cohorts).
 	PutScores(ctx context.Context, scores []Score) error
 	// DeleteScores deletes the score and cohort rows of userIDs and
-	// returns how many rows went.
-	DeleteScores(ctx context.Context, userIDs []uuid.UUID) (int, error)
+	// returns how many rows of each table went.
+	DeleteScores(ctx context.Context, userIDs []uuid.UUID) (scores, cohorts int, err error)
 	// PurgeScores deletes the score and cohort rows of at most limit users
 	// (1..1000; the lowest user IDs holding either row) and returns how
 	// many rows of each table went: the nightly run with collection off

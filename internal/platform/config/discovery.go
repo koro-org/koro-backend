@@ -64,7 +64,7 @@ func (d *Discovery) validate(c Common) error {
 	}
 	if err == nil {
 		for _, k := range keys {
-			if c.ProdLike() && weakSecret(k.Secret) {
+			if c.ProdLike() && weakKey(k.Secret) {
 				errs = append(errs, fmt.Errorf("DISCOVERY_ANON_KEYS: key %q looks like a placeholder in staging/prod", k.ID))
 			}
 		}

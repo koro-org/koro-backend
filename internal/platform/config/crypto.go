@@ -93,7 +93,7 @@ func (s *Crypto) validate(c Common) error {
 			return
 		}
 		for _, k := range keys {
-			if c.ProdLike() && weakSecret(k.Secret) {
+			if c.ProdLike() && weakKey(k.Secret) {
 				errs = append(errs, fmt.Errorf("%s: key %q looks like a placeholder in staging/prod", name, k.ID))
 			}
 		}
@@ -149,7 +149,7 @@ func (s Crypto) validateOpenBao(c Common) []error {
 		if !strings.HasPrefix(strings.TrimSpace(s.OpenBaoAddr), "https://") {
 			errs = append(errs, fmt.Errorf("CRYPTO_OPENBAO_ADDR must use https in %s", c.Env))
 		}
-		if weakSecret([]byte(s.OpenBaoToken.Reveal())) {
+		if weakSecretText(s.OpenBaoToken.Reveal()) {
 			errs = append(errs, fmt.Errorf("CRYPTO_OPENBAO_TOKEN looks like a placeholder in %s", c.Env))
 		}
 	}
@@ -157,19 +157,4 @@ func (s Crypto) validateOpenBao(c Common) []error {
 		errs = append(errs, errors.New("CRYPTO_OPENBAO_TIMEOUT must be positive and at most 30s"))
 	}
 	return errs
-}
-
-// weakSecret flags low-diversity values such as the .env.example
-// placeholders ("devdevdev…"): a random 32-byte key has about 30 distinct
-// bytes, so fewer than 16 means it was not generated.
-func weakSecret(b []byte) bool {
-	var seen [256]bool
-	n := 0
-	for _, c := range b {
-		if !seen[c] {
-			seen[c] = true
-			n++
-		}
-	}
-	return n < 16
 }

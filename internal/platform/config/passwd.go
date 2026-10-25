@@ -23,7 +23,7 @@ func (p *Passwd) validate(c Common) error {
 	switch {
 	case len(p.Pepper.Reveal()) < passwd.MinPepperLen:
 		errs = append(errs, fmt.Errorf("PASSWORD_PEPPER must be at least %d bytes", passwd.MinPepperLen))
-	case c.ProdLike() && weakSecret([]byte(p.Pepper.Reveal())):
+	case c.ProdLike() && weakSecretText(p.Pepper.Reveal()):
 		errs = append(errs, errors.New("PASSWORD_PEPPER looks like a placeholder in staging/prod (generate one: openssl rand -base64 48)"))
 	}
 	if p.Concurrency < 1 || p.Concurrency > 64 {

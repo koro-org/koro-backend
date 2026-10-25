@@ -101,7 +101,7 @@ func (a *AuditRoot) validate(c Common) error {
 		switch {
 		case len(k.Secret) != ed25519.SeedSize:
 			errs = append(errs, fmt.Errorf("AUDIT_ROOT_SIGNING_KEYS: key %q must be a %d-byte Ed25519 seed", k.ID, ed25519.SeedSize))
-		case c.ProdLike() && weakSecret(k.Secret):
+		case c.ProdLike() && weakKey(k.Secret):
 			errs = append(errs, fmt.Errorf("AUDIT_ROOT_SIGNING_KEYS: key %q looks like a placeholder in staging/prod", k.ID))
 		}
 	}

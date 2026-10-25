@@ -49,7 +49,7 @@ func (w *Webcache) validate(c Common) error {
 		errs = append(errs, fmt.Errorf("KORO_REVALIDATE_SECRET is required in %s", c.Env))
 	case secret != "" && len(secret) < minRevalidateSecret:
 		errs = append(errs, fmt.Errorf("KORO_REVALIDATE_SECRET must be at least %d characters", minRevalidateSecret))
-	case secret != "" && c.ProdLike() && weakSecret([]byte(secret)):
+	case secret != "" && c.ProdLike() && weakSecretText(secret):
 		errs = append(errs, errors.New("KORO_REVALIDATE_SECRET looks like a placeholder in staging/prod"))
 	}
 	return errors.Join(errs...)

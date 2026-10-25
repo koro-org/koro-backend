@@ -57,23 +57,10 @@ func (r *RateLimit) validate(c Common) error {
 			errs = append(errs, fmt.Errorf("RATE_LIMIT_WEB_KEYS: key %d must be 32–256 characters of [A-Za-z0-9._~+/=-]", i+1))
 		case seen[k]:
 			errs = append(errs, fmt.Errorf("RATE_LIMIT_WEB_KEYS: key %d is listed twice", i+1))
-		case c.ProdLike() && weakWebKey(k):
+		case c.ProdLike() && weakSecretText(k):
 			errs = append(errs, fmt.Errorf("RATE_LIMIT_WEB_KEYS: key %d looks like a placeholder in staging/prod", i+1))
 		}
 		seen[k] = true
 	}
 	return errors.Join(errs...)
-}
-
-// weakWebKey flags placeholders ("CHANGE-ME…", "abab…"). weakSecret's bound
-// of 16 distinct bytes suits decoded key bytes, not text: a random
-// `openssl rand -hex 32` has only 16 possible characters and misses one of
-// them about one time in four. Any random key of at least 32 characters
-// has 10 or more distinct characters (hex: all but about 1e-12 of them).
-func weakWebKey(k string) bool {
-	distinct := map[rune]bool{}
-	for _, r := range k {
-		distinct[r] = true
-	}
-	return len(distinct) < 10 || strings.Contains(strings.ToLower(k), "change")
 }

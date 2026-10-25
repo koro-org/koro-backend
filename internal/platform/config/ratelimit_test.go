@@ -19,7 +19,7 @@ type rateLimitOnly struct {
 const (
 	webKeyA   = "test-web-key-a-0123456789abcdefghijklmnopqrstuvwxyz"
 	webKeyB   = "test-web-key-b-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	webKeyNoF = "0123456789abcde0123456789abcde0123456789abcde0123456789abcde0123"
+	webKeyNoF = "139d6ae29c82542da60abdcd96c2076dec57932526c15e3a6872a51602e5755b"
 )
 
 // TestRateLimit_WebKeys (BE-119): RATE_LIMIT_WEB_KEYS is optional in every

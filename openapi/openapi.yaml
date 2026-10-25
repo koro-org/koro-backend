@@ -31609,3 +31609,47 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: webhook
       x-koro-surface: webhook
+  /api/v1/webhooks/iys/{provider}/{token}:
+    post:
+      description: "İYS's answers to Koro's consent uploads and the approvals and refusals recipients give İYS itself, pushed by the configured İYS integrator (netgsm, BE-110). The identity is the secret token of the URL (and the source address when CONSENT_IYS_NETGSM_WEBHOOK_ALLOWED_IPS is set): cookies and bearer tokens are ignored. A wrong token or address is 401 and nothing is stored; a body that is not the integrator's item list is 422; a stored delivery (a redelivery too) is 200, its items are applied by consent.iys_status_sync. A provider that is not the configured, pushing one is 404."
+      operationId: receiveIYSWebhook
+      parameters:
+        - description: "The İYS integrator (CONSENT_IYS_PROVIDER): netgsm"
+          in: path
+          name: provider
+          required: true
+          schema:
+            description: "The İYS integrator (CONSENT_IYS_PROVIDER): netgsm"
+            maxLength: 32
+            type: string
+        - description: The secret of the webhook URL (CONSENT_IYS_NETGSM_WEBHOOK_TOKEN)
+          in: path
+          name: token
+          required: true
+          schema:
+            description: The secret of the webhook URL (CONSENT_IYS_NETGSM_WEBHOOK_TOKEN)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              contentMediaType: application/octet-stream
+              format: binary
+              type: string
+        required: true
+      responses:
+        "200":
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: Receive an İYS integrator webhook
+      tags:
+        - consent
+      x-koro-action: consent.iys_webhook.receive
+      x-koro-idempotency: optional
+      x-koro-rate-limit: webhook
+      x-koro-surface: webhook

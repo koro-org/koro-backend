@@ -12,6 +12,9 @@ const (
 	ConsentRecordListAdmin Action = "consent.record.list_admin"
 	ConsentNoticeManage    Action = "consent.notice.manage"
 	ConsentPurposeManage   Action = "consent.purpose.manage"
+	// ConsentIysWebhookReceive is the webhook of an İYS integrator that
+	// pushes İYS's answers and changes (BE-110: Netgsm; 03 §5.5 doc patch).
+	ConsentIysWebhookReceive Action = "consent.iys_webhook.receive"
 )
 
 // consentActions lists the HTTP actions of consent in 03 §5.5 order.
@@ -22,4 +25,5 @@ var consentActions = []Action{
 	ConsentRecordListAdmin,
 	ConsentNoticeManage,
 	ConsentPurposeManage,
+	ConsentIysWebhookReceive,
 }

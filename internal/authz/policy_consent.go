@@ -1,5 +1,12 @@
 package authz
 
+// Resource types of the consent module beyond 03 §3.5 (Policy.Types).
+const (
+	// TypeIYSWebhook is a webhook delivery of an İYS integrator
+	// (receiveIYSWebhook; BE-110).
+	TypeIYSWebhook = "iys_webhook"
+)
+
 // consentPolicy is the policy of the consent module (03 §5.5). Only tickets of
 // the consent module edit this file (BE-001 R5). Written by BE-012.
 //
@@ -9,6 +16,9 @@ package authz
 //	consent.record.list_admin  dpo ✓, support B (break-glass reason)
 //	consent.notice.manage      dpo · R (re-authentication in the service)
 //	consent.purpose.manage     dpo · R
+//	consent.iys_webhook.receive P (identity = the secret of the webhook URL
+//	                           and the source address, checked by the İYS
+//	                           adapter; a session is ignored; BE-110)
 //
 // MFA follows from the role paths (dpo, support: k-mfa).
 //
@@ -21,14 +31,18 @@ package authz
 //	                list_own: the actor itself; list_admin: the target
 //	                user), Attrs access_reason on list_admin
 //	admin_surface   consent.purpose.manage
+//	iys_webhook     consent.iys_webhook.receive (no attributes)
 //
 // Visibility (03 §3.6): /me/consents is the actor's own ledger (another
 // subject → 404); the /admin operations are the admin surface (visible to
 // every user, 403 without the role, 03 §7.2-3).
 func consentPolicy() Policy {
 	return Policy{
+		Types: map[string][]string{TypeIYSWebhook: nil},
 		Visible: func(a Actor, act Action, r Resource) bool {
 			switch act {
+			case ConsentIysWebhookReceive:
+				return r.Type == TypeIYSWebhook
 			case ConsentNoticeRead:
 				if r.Type != TypeNoticeVersion {
 					return false
@@ -53,7 +67,7 @@ func consentPolicy() Policy {
 		},
 		Grants: func(_ Actor, act Action, _ Resource) []Grant {
 			switch act {
-			case ConsentNoticeRead:
+			case ConsentNoticeRead, ConsentIysWebhookReceive:
 				return []Grant{{Role: RolePublic}}
 			case ConsentRecordCreate, ConsentRecordListOwn:
 				return []Grant{{Role: RoleSelf}}

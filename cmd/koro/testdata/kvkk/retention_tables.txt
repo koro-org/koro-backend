@@ -26,6 +26,7 @@ files                       policy:files_orphan,edu_document,event_export_file,d
 # consent
 consents                    policy:consent_proof
 iys_submissions             policy:consent_proof
+iys_netgsm_events           policy:iys_netgsm_event
 # identity
 users                       policy:dsr_erasure,dormant_account
 sessions                    policy:session_expired

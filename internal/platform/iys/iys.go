@@ -10,7 +10,9 @@
 //   - official: İYS's own API (internal/platform/iys/official). Usable live
 //     only with direct API access (İLETİ+); a smaller service provider
 //     reaches İYS through an authorised integrator.
-//   - an integrator's API (Netgsm: BE-110).
+//   - netgsm: the Netgsm integrator's API (internal/platform/iys/netgsm;
+//     BE-110): İYS's answers and the changes recipients give İYS itself
+//     arrive by webhook (Delivery), the adapter stores them.
 //   - iysfake: the in-memory İYS of tests.
 //
 // There is no adapter interface here: the consumers declare the small
@@ -21,6 +23,7 @@
 //	Name() string; Submit(ctx, Consent) (Receipt, error)            every adapter
 //	Feed() Feed; Changes(ctx, cursor string) (ChangePage, error)    a change feed (pulled from İYS or pushed by an integrator)
 //	Statuses(ctx, Type, []uuid.UUID) (map[uuid.UUID]State, error)  single-recipient states
+//	Receive(ctx, Delivery) (int, error)                            webhook deliveries of a pushing integrator
 //
 // Rules for every adapter (pinned by internal/platform/iys/iyscontract):
 //
@@ -86,7 +89,21 @@ var (
 	// ErrRecipientGone: the user has no address for the type any more, or
 	// an address is no Koro user's.
 	ErrRecipientGone = errors.New("iys: recipient address not available")
+	// ErrUnauthenticated: a webhook delivery that does not prove it comes
+	// from the integrator (secret, source address); nothing was stored.
+	ErrUnauthenticated = errors.New("iys: webhook delivery not authenticated")
 )
+
+// Delivery is one webhook call of a pushing integrator (consent's
+// receiveIYSWebhook): the secret of the webhook URL, the client address the
+// API resolved (trusted proxies only) and the raw body. Every part may be
+// forged; the adapter checks it before storing anything, and none of it is
+// ever logged.
+type Delivery struct {
+	Token    string
+	ClientIP string
+	Body     []byte
+}
 
 // Feed describes an adapter's change feed.
 type Feed struct {

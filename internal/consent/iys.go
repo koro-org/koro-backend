@@ -21,8 +21,10 @@ import (
 // İYS adapter (a package of internal/platform/iys: the official API, an
 // integrator, the fake) implements IYSSubmitter and whichever readers it
 // can; cmd/koro/wire_consent.go picks it by configuration and wraps its
-// Submit with NewIYSClient. No adapter type, İYS error code or URL reaches
-// this package: adapters map them to the errors below.
+// Submit with NewIYSClient. An integrator that pushes (Netgsm) also
+// implements IYSPushReceiver: receiveIYSWebhook hands it the deliveries.
+// No adapter type, İYS error code or URL reaches this package: adapters
+// map them to the errors below.
 
 // IYSClient delivers consent changes of commercial purposes to İYS. The
 // adapter resolves the recipient address of UserID itself (consent holds
@@ -126,6 +128,20 @@ type IYSStateReader interface {
 	// by user; at most IYSStatusBatch users. A user İYS has no record of,
 	// or whose address is gone, is absent. An error fails the batch.
 	Statuses(ctx context.Context, t iys.Type, userIDs []uuid.UUID) (map[uuid.UUID]iys.State, error)
+}
+
+// IYSPushReceiver takes the webhook deliveries of an integrator that pushes
+// İYS's answers and the changes recipients give İYS itself
+// (receiveIYSWebhook; BE-110: Netgsm). The adapter authenticates and
+// stores a delivery itself (its change feed and its answers to uploads);
+// consent only routes it.
+type IYSPushReceiver interface {
+	// Name is the adapter's name: the {provider} of the webhook path.
+	Name() string
+	// Receive authenticates and stores one delivery and returns how many
+	// items were new: iys.ErrUnauthenticated (nothing stored),
+	// iys.ErrRejected (not the integrator's format) or a transient error.
+	Receive(ctx context.Context, d iys.Delivery) (int, error)
 }
 
 // NoopIYS is the client while no İYS adapter is configured

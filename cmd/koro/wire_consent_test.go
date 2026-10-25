@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -24,7 +25,10 @@ import (
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/httpx"
+	"koro/internal/platform/iys"
 	"koro/internal/platform/iys/iystest"
+	"koro/internal/platform/iys/netgsm"
+	"koro/internal/platform/iys/netgsm/netgsmtest"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/privacy"
@@ -54,21 +58,44 @@ func testReauth(_ context.Context, _ uuid.UUID, password, _ string) (string, err
 }
 
 // useMemStore installs the in-memory consent store used by wiring and authz
-// matrix tests (05 §13.2), a recording İYS client and the test
-// re-authentication verifier. First owner: BE-012. Only tickets of the
-// consent module edit this file (BE-001 R4).
+// matrix tests (05 §13.2), a recording İYS client, a Netgsm webhook
+// receiver over an in-memory store (receiveIYSWebhook of the matrix; its
+// addresses are no Koro user's) and the test re-authentication verifier.
+// First owner: BE-012. Only tickets of the consent module edit this file
+// (BE-001 R4).
 func (w *consentWiring) useMemStore() {
 	w.store = consent.NewMemStore(clock.Real().Now)
 	w.tx = db.NopTx{}
 	w.iys = &consent.FakeIYS{}
+	w.netgsmStore = netgsm.NewMemStore()
+	push, err := netgsm.New(netgsm.Config{BaseURL: "https://netgsm.invalid", Username: netgsmtest.Username,
+		Password: netgsmtest.Password, IYSCode: netgsmtest.IYSCode, BrandCode: netgsmtest.BrandCode,
+		WebhookToken: netgsmtest.WebhookToken, Recipients: noIYSRecipients{}, Store: w.netgsmStore, Clock: clock.Real()})
+	if err != nil {
+		panic(err) // a test configuration bug
+	}
+	w.push = push
 	w.cfg = &config.Consent{UnsubscribeBaseURL: testUnsubscribeBase}
 	w.deriver = testDeriver() // the shared test token key (identity's)
 	w.reauth = testReauth
 }
 
+// noIYSRecipients knows no İYS recipient (the matrix's webhook items are
+// strangers' and stored as anonymous markers).
+type noIYSRecipients struct{}
+
+func (noIYSRecipients) Recipient(context.Context, uuid.UUID, iys.Type) (string, error) {
+	return "", iys.ErrRecipientGone
+}
+
+func (noIYSRecipients) User(context.Context, iys.Type, string) (uuid.UUID, error) {
+	return uuid.Nil(), iys.ErrRecipientGone
+}
+
 // TestWire_ConsentTasksAndPrivacy pins what consent registers (01 §6.2,
 // §7): the İYS subscription on the critical queue, the reconcile job, the
-// İYS status reconciliation (BE-103; the test client reads İYS states) and
+// İYS status reconciliation (BE-103; the test client reads İYS states), the
+// retention of the Netgsm webhook items (BE-110) and
 // the KVKK provider.
 func TestWire_ConsentTasksAndPrivacy(t *testing.T) {
 	t.Parallel()
@@ -82,7 +109,8 @@ func TestWire_ConsentTasksAndPrivacy(t *testing.T) {
 			jobs = append(jobs, j.Name+" "+j.Cron+" "+j.Queue)
 		}
 	}
-	if want := []string{"consent.iys_reconcile 30 5 * * * default", "consent.iys_status_sync 20 * * * * default"}; !slices.Equal(jobs, want) {
+	if want := []string{"consent.iys_reconcile 30 5 * * * default", "consent.iys_status_sync 20 * * * * default",
+		"consent.iys_netgsm_purge 40 4 * * * low"}; !slices.Equal(jobs, want) {
 		t.Fatalf("consent jobs %q, want %q", jobs, want)
 	}
 	// consent's own subscription; other modules may consume the topic too
@@ -97,7 +125,7 @@ func TestWire_ConsentTasksAndPrivacy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{consent.SubmitIYSTaskName, consent.ReconcileJobName, consent.StatusSyncJobName} {
+	for _, name := range []string{consent.SubmitIYSTaskName, consent.ReconcileJobName, consent.StatusSyncJobName, netgsm.PurgeJobName} {
 		if !slices.Contains(mux.Types(), name) {
 			t.Errorf("worker does not route %s", name)
 		}
@@ -495,12 +523,13 @@ func TestWire_EveryIYSProviderIsWired(t *testing.T) {
 	}
 }
 
-// TestWire_ConsentIYSAdapterByConfig (BE-105, T-364): CONSENT_IYS_PROVIDER
-// alone picks the İYS adapter. none: no adapter, no reconciliation, and a
-// commercial consent is not collected (the registration creates the
-// account without it); fake: the in-memory İYS with identity's addresses,
-// delivery and reconciliation; netgsm: refused until BE-110 builds it; an
-// unknown name is refused.
+// TestWire_ConsentIYSAdapterByConfig (BE-105, T-364, BE-110):
+// CONSENT_IYS_PROVIDER alone picks the İYS adapter. none: no adapter, no
+// reconciliation, and a commercial consent is not collected (the
+// registration creates the account without it); fake: the in-memory İYS
+// with identity's addresses, delivery and reconciliation; netgsm: the
+// Netgsm adapter with its reconciliation and backup check (its settings
+// are required); an unknown name is refused.
 func TestWire_ConsentIYSAdapterByConfig(t *testing.T) {
 	t.Parallel()
 	build := func(t *testing.T, provider string) (*container, error) {
@@ -570,10 +599,25 @@ func TestWire_ConsentIYSAdapterByConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("netgsm until BE-110", func(t *testing.T) {
+	t.Run("netgsm", func(t *testing.T) {
 		t.Parallel()
-		if _, err := build(t, config.IYSProviderNetgsm); err == nil || !strings.Contains(err.Error(), "BE-110") {
-			t.Fatalf("build with netgsm = %v, want not built yet", err)
+		c := newTestContainer(t)
+		c.consent.iys, c.consent.push, c.consent.netgsmStore = nil, nil, netgsm.NewMemStore()
+		c.consent.cfg = netgsmConsent("https://api.netgsm.invalid", 0)
+		if err := c.build(); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := c.consent.iys.(*consent.IYSAdapterClient); !ok || c.consent.iys.Name() != "netgsm" {
+			t.Fatalf("İYS client %T, want the Netgsm adapter", c.consent.iys)
+		}
+		for _, job := range []string{consent.StatusSyncJobName, netgsm.RecheckJobName} {
+			if !slices.ContainsFunc(c.infra.jobs.Jobs(), func(j queue.Job) bool { return j.Name == job }) {
+				t.Errorf("%s is not scheduled", job)
+			}
+		}
+		// Without its settings the process does not start.
+		if _, err := build(t, config.IYSProviderNetgsm); err == nil || !strings.Contains(err.Error(), "CONSENT_IYS_NETGSM") {
+			t.Fatalf("build with netgsm and no settings = %v", err)
 		}
 	})
 
@@ -583,4 +627,125 @@ func TestWire_ConsentIYSAdapterByConfig(t *testing.T) {
 			t.Fatalf("build with an unknown adapter = %v", err)
 		}
 	})
+}
+
+// netgsmConsent is the consent configuration of the Netgsm adapter over
+// the double at base (CONSENT_IYS_PROVIDER=netgsm).
+func netgsmConsent(base string, maxAge time.Duration) *config.Consent {
+	return &config.Consent{UnsubscribeBaseURL: testUnsubscribeBase, IYSSyncMaxAge: maxAge, IYSProvider: config.IYSProviderNetgsm,
+		IYSRecipientType: "BIREYSEL", IYSTimeout: 5 * time.Second,
+		Netgsm: config.IYSNetgsm{BaseURL: base, Username: netgsmtest.Username, Password: config.NewSecret(netgsmtest.Password),
+			IYSCode: netgsmtest.IYSCode, BrandCode: netgsmtest.BrandCode, WebhookToken: config.NewSecret(netgsmtest.WebhookToken),
+			WebhookAllowedIPs: []string{"192.0.2.0/24"}, RefIDIn: "header", RequestsPerMinute: 10, StatusQueriesPerHour: 600,
+			RecheckPerHour: 60, ResendAfter: time.Hour}}
+}
+
+// TestWire_ConsentNetgsmIYSAdapter (BE-110): CONSENT_IYS_PROVIDER=netgsm
+// end to end over the Netgsm double, its webhook delivered through the
+// API's own receiveIYSWebhook: the grant is uploaded with the account's
+// address and becomes "sent" once İYS's answer arrived by webhook; the
+// first reconciliation reads it back; a refusal the recipient gives İYS
+// itself is pushed, listed once it settled and withdraws the consent
+// (channel iys); the backup check reads the grants in force; a delivery
+// with a wrong token or from another address is 401, another provider 404
+// and a foreign body 422, and none of them stores anything.
+func TestWire_ConsentNetgsmIYSAdapter(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	clk := c.infra.clock.(*clock.Fake)
+	var app *httpx.App
+	post := func(ctx context.Context, provider, token, remote string, body []byte) *httptest.ResponseRecorder {
+		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/v1/webhooks/iys/"+provider+"/"+token, strings.NewReader(string(body)))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = remote
+		rec := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+	srv := netgsmtest.New(t, netgsmtest.WithClock(clk), netgsmtest.WithWebhook(func(ctx context.Context, body []byte) error {
+		if rec := post(ctx, "netgsm", netgsmtest.WebhookToken, "192.0.2.10:443", body); rec.Code != http.StatusOK {
+			return fmt.Errorf("webhook answered %d %s", rec.Code, rec.Body)
+		}
+		return nil
+	}))
+	store := netgsm.NewMemStore()
+	c.consent.iys, c.consent.push, c.consent.netgsmStore = nil, nil, store
+	c.consent.cfg = netgsmConsent(srv.URL, 3*time.Hour)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	if app, err = httpx.New(httpx.Deps{Log: obs.Discard(), Actors: c.actors}); err != nil {
+		t.Fatal(err)
+	}
+	c.registerRoutes(app.V1)
+	ctx := t.Context()
+	const address = "ada.netgsm@ogrenci.example.test"
+	purpose := consent.PurposeCommercialEmail
+	uid := iysWireUser(t, c, address)
+	grantID := grantCommercial(t, c, uid, purpose)
+	submitIYS(t, c, grantID, uid, purpose)
+	if up := srv.Uploads(); len(up) != 1 || up[0].Recipient != address || up[0].Status != "ONAY" || up[0].Type != "EPOSTA" ||
+		up[0].Source != "HS_WEB" || up[0].RefIn != "header" {
+		t.Fatalf("uploads = %+v", up)
+	}
+	if sub, err := c.consent.store.SubmissionOf(ctx, grantID); err != nil || sub.Status != consent.SubmissionSent ||
+		sub.IYSTransactionID == nil || len(*sub.IYSTransactionID) != 64 {
+		t.Fatalf("submission = %+v, %v; want sent with İYS's transaction ID", sub, err)
+	}
+	if errs := srv.SinkErrors(); len(errs) != 0 {
+		t.Fatalf("webhook deliveries failed: %v", errs)
+	}
+
+	sync := scheduledJob(t, c, consent.StatusSyncJobName)
+	if err := sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	filter := consentFilter{c: c.consent.svc}
+	if got, err := filter.FilterActive(ctx, []uuid.UUID{uid}, string(purpose)); err != nil || !slices.Equal(got, []uuid.UUID{uid}) {
+		t.Fatalf("FilterActive after the first reconciliation = %v, %v", got, err)
+	}
+	searches := srv.Calls("search")
+	if err := scheduledJob(t, c, netgsm.RecheckJobName)(ctx); err != nil || srv.Calls("search") != searches+1 {
+		t.Fatalf("backup check = %v (%d → %d searches), want the grant read once", err, searches, srv.Calls("search"))
+	}
+
+	srv.Act(ctx, netgsmtest.Action{Recipient: address, Source: "IYS_MOBIL"})
+	srv.Act(ctx, netgsmtest.Action{Recipient: "stranger@elsewhere.example.test"}) // no Koro account
+	if errs := srv.SinkErrors(); len(errs) != 0 {
+		t.Fatalf("webhook deliveries failed: %v", errs)
+	}
+	clk.Advance(netgsm.Settle + time.Minute)
+	if err := sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := c.consent.store.AllOf(ctx, uid)
+	if err != nil || len(rows) != 2 || rows[1].Action != consent.Withdrawn || rows[1].Channel != consent.ChannelIYS {
+		t.Fatalf("ledger = %+v, %v", rows, err)
+	}
+	if got, err := filter.FilterActive(ctx, []uuid.UUID{uid}, string(purpose)); err != nil || len(got) != 0 {
+		t.Fatalf("FilterActive after the İYS refusal = %v, %v", got, err)
+	}
+
+	feed := "netgsm:" + netgsmtest.IYSCode + "/" + netgsmtest.BrandCode
+	stored := len(store.All(feed))
+	body := []byte(`[{"iyscode": 700123, "brandcode": 700124, "type": "EPOSTA", "source": "IYS_WEB", "status": "RET",
+		"recipient": "` + address + `", "consentDate": "2026-10-03 12:00:00", "resultstatus": "success", "transactionid": "ff01"}]`)
+	for _, tc := range []struct {
+		provider, token, remote string
+		body                    []byte
+		want                    int
+	}{
+		{"netgsm", "wrong-token-of-the-wiring-test-0123456789", "192.0.2.10:443", body, http.StatusUnauthorized},
+		{"netgsm", netgsmtest.WebhookToken, "198.51.100.9:443", body, http.StatusUnauthorized},
+		{"verimor", netgsmtest.WebhookToken, "192.0.2.10:443", body, http.StatusNotFound},
+		{"netgsm", netgsmtest.WebhookToken, "192.0.2.10:443", []byte(`{"html": "<b>"`), http.StatusUnprocessableEntity},
+	} {
+		if rec := post(ctx, tc.provider, tc.token, tc.remote, tc.body); rec.Code != tc.want || strings.Contains(rec.Body.String(), address) {
+			t.Errorf("POST %s from %s = %d %s, want %d", tc.provider, tc.remote, rec.Code, rec.Body, tc.want)
+		}
+	}
+	if n := len(store.All(feed)); n != stored {
+		t.Fatalf("refused deliveries stored %d items", n-stored)
+	}
 }

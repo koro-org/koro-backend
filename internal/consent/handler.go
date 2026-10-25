@@ -107,6 +107,21 @@ func Register(api huma.API, svc Service) {
 			"through the email_link channel and queues the İYS refusal (RET). Idempotent: 204 whether a consent was " +
 			"withdrawn or none was in force. A malformed, tampered or expired link is 422 consent.invalid_unsubscribe_link.",
 	}, op.Meta{Action: string(authz.ConsentRecordCreate), Surface: op.SurfacePublic, Idempotency: op.IdempotencyOptional}), h.confirmUnsubscribe)
+
+	huma.Register(api, op.Koro(huma.Operation{
+		OperationID: "receiveIYSWebhook", Method: http.MethodPost, Path: "/webhooks/iys/{provider}/{token}", Tags: tags,
+		Summary: "Receive an İYS integrator webhook",
+		Description: "İYS's answers to Koro's consent uploads and the approvals and refusals recipients give İYS " +
+			"itself, pushed by the configured İYS integrator (netgsm, BE-110). The identity is the secret token " +
+			"of the URL (and the source address when CONSENT_IYS_NETGSM_WEBHOOK_ALLOWED_IPS is set): cookies and " +
+			"bearer tokens are ignored. A wrong token or address is 401 and nothing is stored; a body that is not " +
+			"the integrator's item list is 422; a stored delivery (a redelivery too) is 200, its items are applied " +
+			"by consent.iys_status_sync. A provider that is not the configured, pushing one is 404.",
+		DefaultStatus: http.StatusOK, MaxBodyBytes: maxIYSWebhookBody,
+		// The raw body is parsed by the adapter, never by huma.
+		SkipValidateBody: true,
+	}, op.Meta{Action: string(authz.ConsentIysWebhookReceive), Surface: op.SurfaceWebhook,
+		RateLimit: op.RateWebhook, Idempotency: op.IdempotencyOptional}), h.receiveIYSWebhook)
 }
 
 type handler struct{ svc Service }
@@ -478,4 +493,21 @@ func (h handler) getUnsubscribe(ctx context.Context, in *unsubscribeInput) (*uns
 
 func (h handler) confirmUnsubscribe(ctx context.Context, in *unsubscribeInput) (*struct{}, error) {
 	return nil, h.svc.Unsubscribe(ctx, in.Token)
+}
+
+// ---- receiveIYSWebhook
+
+// maxIYSWebhookBody bounds one delivery (Netgsm: a list of items).
+const maxIYSWebhookBody = 1 << 20
+
+type iysWebhookInput struct {
+	Provider string `path:"provider" maxLength:"32" doc:"The İYS integrator (CONSENT_IYS_PROVIDER): netgsm"`
+	// No schema bounds: a token of the wrong length gets the same 401 as
+	// every other wrong token.
+	Token   string `path:"token" doc:"The secret of the webhook URL (CONSENT_IYS_NETGSM_WEBHOOK_TOKEN)"`
+	RawBody []byte `contentType:"application/json"`
+}
+
+func (h handler) receiveIYSWebhook(ctx context.Context, in *iysWebhookInput) (*struct{}, error) {
+	return nil, h.svc.ReceiveIYSWebhook(ctx, in.Provider, in.Token, in.RawBody)
 }

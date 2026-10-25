@@ -51,6 +51,14 @@ func TestConsentPolicy_Matrix(t *testing.T) {
 			return authz.Resource{Type: authz.TypeNoticeVersion}
 		}, dpoOnly, forbidden},
 		{"purpose.manage", authz.ConsentPurposeManage, func(authztest.Persona) authz.Resource { return adminSurface }, dpoOnly, forbidden},
+		// BE-110: the integrator's webhook is public; its identity is the
+		// URL's secret, checked by the İYS adapter.
+		{"iys_webhook.receive", authz.ConsentIysWebhookReceive, func(authztest.Persona) authz.Resource {
+			return authz.Resource{Type: authz.TypeIYSWebhook}
+		}, nil, nil},
+		{"iys_webhook.receive other type", authz.ConsentIysWebhookReceive, func(authztest.Persona) authz.Resource {
+			return authz.Resource{Type: authz.TypeEmailWebhook}
+		}, nil, authz.ErrNotFound},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

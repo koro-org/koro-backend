@@ -1,4 +1,4 @@
-# Authz matrix of the consent module (03 §5.5, 04 §2.5; BE-012, BE-062). 12 operations × 18 personas.
+# Authz matrix of the consent module (03 §5.5, 04 §2.5; BE-012, BE-062, BE-110). 13 operations × 18 personas.
 # notice.read is public (P); record.create/list_own are O cells on /me (every signed-in
 # user; 03 k12: a minor's grant of a restricted purpose is 422); list_admin is dpo ✓ and
 # support B; notice.manage and purpose.manage are dpo · R. Admin surface (03 §7.2-3):
@@ -11,6 +11,9 @@
 # answer. The literal tokens are signed with the shared test key (testDeriver, key "test1"): user
 # student, purpose commercial_email, expiry 2100-01-01 (valid) or 2026-01-01 (expired); "tampered"
 # changes one MAC character.
+# BE-110: receiveIYSWebhook (consent.iys_webhook.receive) is public: the secret of the URL is the
+# integrator's credential, so every persona gets the same answer (200; a wrong token 401, a provider
+# that is not the configured pushing adapter 404).
 version: 1
 groups:
   no_platform_role: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
@@ -192,3 +195,22 @@ operations:
       - name: tampered
         path_params: { token: "literal:AQFHZwkCPPlZ-LRuER97ECn1AAAAAPSGVwAFdGVzdDHSlz3r8ur9IOaZz6XQA57A00szcsl3aqr3nOZZWSdung" }
         expect: { "@all": 422 }
+
+  receiveIYSWebhook:
+    method: POST
+    path: /api/v1/webhooks/iys/{provider}/{token}
+    action: consent.iys_webhook.receive
+    public: true
+    path_params: { provider: "literal:netgsm", token: "literal:koro-netgsm-webhook-test-token-0123456789" }
+    body: bodies/consent/netgsm_webhook.json
+    note: >-
+      BE-110: the Netgsm İYS webhook; the URL's secret (netgsmtest.WebhookToken, wire_consent_test.go
+      useMemStore) is the identity, a session is ignored; a redelivery is 200 as well
+    expect: { "@all": 200 }
+    variants:
+      - name: wrong_token
+        path_params: { provider: "literal:netgsm", token: "literal:not-the-webhook-token-of-the-matrix-012345" }
+        expect: { "@all": 401 }
+      - name: other_provider
+        path_params: { provider: "literal:verimor", token: "literal:koro-netgsm-webhook-test-token-0123456789" }
+        expect: { "@all": 404 }

@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
+	"time"
 	"uuid"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -15,8 +18,10 @@ import (
 	"koro/internal/platform/db"
 	"koro/internal/platform/iys"
 	"koro/internal/platform/iys/iysfake"
+	"koro/internal/platform/iys/netgsm"
 	"koro/internal/platform/iys/official"
 	"koro/internal/platform/obs"
+	"koro/internal/platform/queue"
 )
 
 // consentWiring wires the consent module (L2; 01 §4.3). First owner: BE-012.
@@ -34,7 +39,15 @@ import (
 //	        withdrawals "skipped"; CONSENT_IYS_REQUIRED refuses that).
 //	        Tests preset FakeIYS (client and both readers). A reader gets
 //	        consent.iys_status_sync (BE-103, BE-105);
-//	        CONSENT_IYS_SYNC_MAX_AGE refuses to start without one
+//	        CONSENT_IYS_SYNC_MAX_AGE refuses to start without one. An
+//	        adapter that takes webhook deliveries (netgsm, BE-110) is
+//	        consent.IYSPushReceiver too (receiveIYSWebhook)
+//	push    nil → the adapter's own receiver when it has one; tests that
+//	        preset iys preset a Netgsm receiver over an in-memory store
+//	        (the matrix's receiveIYSWebhook)
+//	netgsmStore nil → netgsm.NewGormStore over the app_rw pool (the
+//	        webhook items, 000147; purged daily whatever the adapter);
+//	        tests preset netgsm.NewMemStore
 //	cfg     tests only; nil → the consent section of the loaded configuration
 //	deriver nil → crypto.Deriver over CRYPTO_TOKEN_KEYS (the one-click
 //	        unsubscribe tokens, BE-062); tests preset the shared test deriver
@@ -60,16 +73,19 @@ import (
 // CONSENT_UNSUBSCRIBE_BASE_URL: outreach mints each commercial e-mail
 // recipient's link with it and refuses commercial e-mail while it is nil.
 type consentWiring struct {
-	store   consent.Store
-	tx      db.TxManager
-	iys     consent.IYSClient
-	cfg     *config.Consent
-	deriver *crypto.Deriver
-	reauth  func(ctx context.Context, userID uuid.UUID, password, totpCode string) (kind string, err error)
+	store       consent.Store
+	tx          db.TxManager
+	iys         consent.IYSClient
+	push        consent.IYSPushReceiver
+	netgsmStore netgsm.Store
+	cfg         *config.Consent
+	deriver     *crypto.Deriver
+	reauth      func(ctx context.Context, userID uuid.UUID, password, totpCode string) (kind string, err error)
 
 	mod   consent.Module
 	svc   consent.Service          // set by build
 	links consent.UnsubscribeLinks // set by build; nil without CONSENT_UNSUBSCRIBE_BASE_URL
+	jobs  []queue.Job              // set by build: the adapter's own jobs (the Netgsm backup check)
 }
 
 // lateReauth adapts consentWiring.reauth to consent.Reauthenticator and
@@ -92,6 +108,7 @@ type iysRecipients struct{ c *container }
 var (
 	_ official.Recipients = iysRecipients{}
 	_ iysfake.Recipients  = iysRecipients{}
+	_ netgsm.Recipients   = iysRecipients{}
 )
 
 // Recipient returns the e-mail address of a live user.
@@ -162,10 +179,86 @@ var iysAdapters = map[string]func(c *container, cfg config.Consent) (consent.IYS
 		}
 		return a, nil
 	},
-	config.IYSProviderNetgsm: func(*container, config.Consent) (consent.IYSSubmitter, error) {
-		return nil, errors.New("consent: CONSENT_IYS_PROVIDER=netgsm: the Netgsm adapter is not built yet (BE-110)")
+	config.IYSProviderNetgsm: func(c *container, cfg config.Consent) (consent.IYSSubmitter, error) {
+		// The pilot's integrator (BE-110): uploads by API, İYS's answers
+		// and the recipients' own changes by webhook into iys_netgsm_events
+		// (shared by the api, which receives, and the worker, which reads).
+		store := c.consent.netgsmEvents(c)
+		if store == nil {
+			return nil, errors.New("consent: the Netgsm İYS adapter needs the database (webhook items)")
+		}
+		n := cfg.Netgsm
+		a, err := netgsm.New(netgsm.Config{
+			BaseURL: n.BaseURL, Username: n.Username, Password: n.Password.Reveal(), IYSCode: n.IYSCode, BrandCode: n.BrandCode,
+			RecipientType: cfg.IYSRecipientType, RefIn: n.RefIDIn, WebhookToken: n.WebhookToken.Reveal(),
+			WebhookIPs: n.AllowedPrefixes(), Recipients: iysRecipients{c: c}, Store: store, Clock: c.infra.clock,
+			Log: c.infra.log.With("module", "consent", "iys", "netgsm"), Timeout: cfg.IYSTimeout,
+			RequestsPerMinute: n.RequestsPerMinute, StatusQueriesPerHour: n.StatusQueriesPerHour,
+			ResultWait: waitOrNone(n.ResultWait), ResendAfter: n.ResendAfter,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return a, nil
 	},
 }
+
+// netgsmEvents is the store of the Netgsm webhook items (000147): the
+// preset one (tests) or the app_rw pool's; nil without a database.
+func (w *consentWiring) netgsmEvents(c *container) netgsm.Store {
+	if w.netgsmStore == nil && c.infra.db != nil {
+		w.netgsmStore = netgsm.NewGormStore(c.infra.db.ORM)
+	}
+	return w.netgsmStore
+}
+
+// waitOrNone maps CONSENT_IYS_NETGSM_RESULT_WAIT=0 to "no wait" (the
+// adapter's zero is its default).
+func waitOrNone(d time.Duration) time.Duration {
+	if d == 0 {
+		return -1
+	}
+	return d
+}
+
+// iysGrantHolders lists the users with an unscoped grant in force of an
+// İYS purpose of channel ch from consent's ledger (the Netgsm backup
+// check, consent.iys_netgsm_recheck), in user ID order without duplicates.
+func iysGrantHolders(store consent.Store, ch consent.IYSChannel) func(ctx context.Context) ([]uuid.UUID, error) {
+	return func(ctx context.Context) ([]uuid.UUID, error) {
+		purposes, err := store.Purposes(ctx)
+		if err != nil {
+			return nil, err
+		}
+		seen := map[uuid.UUID]bool{}
+		var out []uuid.UUID
+		for _, p := range purposes {
+			if !p.RequiresIYS || p.IYSChannel == nil || *p.IYSChannel != ch {
+				continue
+			}
+			for after := uuid.Nil(); ; {
+				grants, err := store.GrantedChains(ctx, p.Code, after, iysGrantPage)
+				if err != nil {
+					return nil, err
+				}
+				for _, g := range grants {
+					if !seen[g.UserID] {
+						seen[g.UserID] = true
+						out = append(out, g.UserID)
+					}
+				}
+				if len(grants) < iysGrantPage {
+					break
+				}
+				after = grants[len(grants)-1].UserID
+			}
+		}
+		slices.SortFunc(out, func(a, b uuid.UUID) int { return strings.Compare(a.String(), b.String()) })
+		return out, nil
+	}
+}
+
+const iysGrantPage = 1000
 
 // iysAdapter builds the İYS adapter CONSENT_IYS_PROVIDER names; nil for
 // none.
@@ -185,7 +278,14 @@ func (w *consentWiring) build(c *container) error {
 	if w.cfg != nil {
 		cfg = *w.cfg
 	}
-	client := w.iys
+	store, tx := w.store, w.tx
+	if store == nil {
+		if c.infra.db == nil {
+			return errors.New("consent: no store (database not opened)")
+		}
+		store = consent.NewGormStore(c.infra.db.ORM)
+	}
+	client, push := w.iys, w.push
 	var feed consent.IYSFeedReader
 	var states consent.IYSStateReader
 	if client == nil {
@@ -197,15 +297,20 @@ func (w *consentWiring) build(c *container) error {
 			client = consent.NewIYSClient(a)
 			feed, _ = a.(consent.IYSFeedReader)
 			states, _ = a.(consent.IYSStateReader)
+			if push == nil {
+				push, _ = a.(consent.IYSPushReceiver)
+			}
 			w.iys = client
 		}
-	}
-	store, tx := w.store, w.tx
-	if store == nil {
-		if c.infra.db == nil {
-			return errors.New("consent: no store (database not opened)")
+		if n, ok := a.(*netgsm.Client); ok && cfg.Netgsm.RecheckPerHour > 0 {
+			w.jobs = append(w.jobs, n.RecheckJob(iys.Email, cfg.Netgsm.RecheckPerHour, iysGrantHolders(store, consent.IYSEmail)))
 		}
-		store = consent.NewGormStore(c.infra.db.ORM)
+	}
+	// The retention of the Netgsm webhook items runs whatever the adapter:
+	// items of an earlier Netgsm period go too (iys_netgsm_event, 7 days).
+	if events := w.netgsmEvents(c); events != nil {
+		w.jobs = append(w.jobs, netgsm.PurgeJob(netgsm.PurgeDeps{Store: events, Clock: c.infra.clock,
+			Period: c.retention(netgsm.RetentionPolicyCode, 0, netgsm.Retention), Log: c.infra.log.With("module", "consent")}))
 	}
 	if tx == nil {
 		tx = c.infra.db.Tx
@@ -223,7 +328,7 @@ func (w *consentWiring) build(c *container) error {
 	mod, err := consent.New(consent.Deps{
 		Store: store, Tx: tx, Outbox: c.infra.outbox, Audit: c.audit.svc, Idempotency: c.infra.idempotency,
 		Clock: c.infra.clock, Log: c.infra.log.With("module", "consent"),
-		Reauth: lateReauth{w: w}, IYS: client, IYSFeed: feed, IYSStates: states, IYSRequired: cfg.IYSRequired,
+		Reauth: lateReauth{w: w}, IYS: client, IYSFeed: feed, IYSStates: states, IYSPush: push, IYSRequired: cfg.IYSRequired,
 		IYSSyncMaxAge: cfg.IYSSyncMaxAge,
 		Unsubscribe:   consent.UnsubscribeConfig{BaseURL: cfg.UnsubscribeBaseURL, TTL: cfg.UnsubscribeTTL, Deriver: deriver},
 	})
@@ -237,17 +342,20 @@ func (w *consentWiring) build(c *container) error {
 }
 
 // tasks: consent.recorded → consent.submit_iys (critical); the
-// consent.iys_reconcile job (05:30, default) and, with an İYS client that
-// reads İYS, consent.iys_status_sync (hourly :20, default; BE-103, BE-105).
+// consent.iys_reconcile job (05:30, default), with an İYS client that
+// reads İYS consent.iys_status_sync (hourly :20, default; BE-103, BE-105),
+// with the Netgsm adapter its backup check consent.iys_netgsm_recheck
+// (every 10 minutes, default) and always consent.iys_netgsm_purge (04:40,
+// low: the retention of the webhook items; BE-110).
 func (w *consentWiring) tasks(c *container) {
 	w.mod.Subscribe(c.infra.subs)
-	for _, j := range w.mod.Jobs() {
+	for _, j := range append(w.mod.Jobs(), w.jobs...) {
 		c.infra.jobs.Schedule(j)
 	}
 }
 
-// routes: the 12 consent operations (04 §2.5; BE-062: getUnsubscribeLink,
-// confirmUnsubscribe); w.svc is nil under
+// routes: the 13 consent operations (04 §2.5; BE-062: getUnsubscribeLink,
+// confirmUnsubscribe; BE-110: receiveIYSWebhook); w.svc is nil under
 // `koro openapi`, which Register tolerates.
 func (w *consentWiring) routes(c *container, api huma.API) { consent.Register(api, w.svc) }
 

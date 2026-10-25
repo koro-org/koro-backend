@@ -35,8 +35,8 @@
 //     withdrawal of channel iys; optionally (CONSENT_IYS_SYNC_MAX_AGE)
 //     commercial messages are held while that reconciliation is late.
 //   - İYS is reached only through the small interfaces of iys.go
-//     (IYSClient, IYSFeedReader, IYSStateReader), over any adapter of
-//     internal/platform/iys.
+//     (IYSClient, IYSFeedReader, IYSStateReader, IYSPushReceiver), over
+//     any adapter of internal/platform/iys.
 package consent
 
 import (
@@ -129,6 +129,12 @@ type Service interface {
 	// Unsubscribe is confirmUnsubscribe (RFC 8058 one-click): withdraws the
 	// link's consent if it is in force, idempotently, with the İYS RET.
 	Unsubscribe(ctx context.Context, token string) error
+
+	// ReceiveIYSWebhook is receiveIYSWebhook (consent.iys_webhook.receive,
+	// public; BE-110): one delivery of the pushing İYS integrator named
+	// provider, authenticated by the adapter (the URL's token, the source
+	// address). The HTTP caller is never an actor.
+	ReceiveIYSWebhook(ctx context.Context, provider, token string, body []byte) error
 }
 
 // Deps are the dependencies of the consent module. Everything but IYS and
@@ -159,6 +165,10 @@ type Deps struct {
 	// is not scheduled.
 	IYSFeed   IYSFeedReader
 	IYSStates IYSStateReader
+	// IYSPush receives the webhook of an integrator that pushes İYS's
+	// answers and changes (receiveIYSWebhook; BE-110). nil → every
+	// delivery is 404 (no such webhook).
+	IYSPush IYSPushReceiver
 	// IYSSyncMaxAge is CONSENT_IYS_SYNC_MAX_AGE: > 0 holds commercial
 	// messages of an İYS channel (FilterActive fails with ErrIYSSyncStale)
 	// while that channel's last complete reconciliation is older or never

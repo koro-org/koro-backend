@@ -546,6 +546,63 @@ func (s gormStore) SaveIYSSync(ctx context.Context, st IYSSync) error {
 	return nil
 }
 
+// IYSFeed implements Store.
+//
+// cross-org: platform state of an İYS change feed (no org, no user).
+func (s gormStore) IYSFeed(ctx context.Context, feed string) (IYSFeedState, bool, error) {
+	var rows []IYSFeedState
+	if err := db.Conn(ctx, s.orm).Where("feed = ?", feed).Limit(1).Find(&rows).Error; err != nil {
+		return IYSFeedState{}, false, fmt.Errorf("consent: iys change feed: %w", err)
+	}
+	if len(rows) == 0 {
+		return IYSFeedState{}, false, nil
+	}
+	st := rows[0]
+	st.Horizon, st.SweepDueAt, st.UpdatedAt = utcPtr(st.Horizon), utcPtr(st.SweepDueAt), st.UpdatedAt.UTC()
+	return st, true, nil
+}
+
+// AdvanceIYSFeed implements Store: an upsert that never moves the horizon
+// back.
+//
+// cross-org: platform state of an İYS change feed (no org, no user).
+func (s gormStore) AdvanceIYSFeed(ctx context.Context, feed, cursor string, horizon time.Time) error {
+	err := db.Conn(ctx, s.orm).Exec(`INSERT INTO iys_change_feeds (feed, cursor_token, horizon) VALUES ( ?, ?, ?)
+		ON CONFLICT (feed) DO UPDATE SET cursor_token = EXCLUDED.cursor_token, horizon = EXCLUDED.horizon
+		WHERE iys_change_feeds.horizon IS NULL OR iys_change_feeds.horizon <= EXCLUDED.horizon`,
+		feed, cursor, horizon).Error
+	if err != nil {
+		return fmt.Errorf("consent: advance iys change feed: %w", db.Translate(err))
+	}
+	return nil
+}
+
+// MarkIYSSweep implements Store (GREATEST keeps the latest mark and ignores
+// NULL).
+//
+// cross-org: platform state of an İYS change feed (no org, no user).
+func (s gormStore) MarkIYSSweep(ctx context.Context, feed string, at time.Time) error {
+	err := db.Conn(ctx, s.orm).Exec(`INSERT INTO iys_change_feeds (feed, sweep_due_at) VALUES ( ?, ?)
+		ON CONFLICT (feed) DO UPDATE SET sweep_due_at = GREATEST(iys_change_feeds.sweep_due_at, EXCLUDED.sweep_due_at)`,
+		feed, at).Error
+	if err != nil {
+		return fmt.Errorf("consent: mark iys sweep: %w", db.Translate(err))
+	}
+	return nil
+}
+
+// ClearIYSSweep implements Store.
+//
+// cross-org: platform state of an İYS change feed (no org, no user).
+func (s gormStore) ClearIYSSweep(ctx context.Context, feed string, upTo time.Time) error {
+	err := db.Conn(ctx, s.orm).Exec(`UPDATE iys_change_feeds SET sweep_due_at = NULL WHERE feed = ? AND sweep_due_at <= ?`,
+		feed, upTo).Error
+	if err != nil {
+		return fmt.Errorf("consent: clear iys sweep: %w", db.Translate(err))
+	}
+	return nil
+}
+
 // PurgeProof implements Store.
 //
 // cross-org: retention spans every user.

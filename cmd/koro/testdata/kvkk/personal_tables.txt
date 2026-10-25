@@ -29,6 +29,7 @@ notice_versions             staff     consent       -
 consents                    personal  consent       provider:consent
 iys_submissions             personal  consent       provider:consent
 iys_status_syncs            none      consent       -
+iys_change_feeds            none      consent       -
 # identity
 users                       personal  identity      provider:identity
 sessions                    personal  identity      provider:identity

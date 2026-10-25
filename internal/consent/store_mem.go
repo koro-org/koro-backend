@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 	"uuid"
 
+	"koro/internal/platform/iys"
 	"koro/internal/platform/problem"
 )
 
@@ -28,6 +29,7 @@ type memStore struct {
 	consents []Consent // insertion order
 	subs     map[uuid.UUID]Submission
 	syncs    map[IYSChannel]IYSSync
+	feeds    map[string]IYSFeedState
 	// now stamps created_at/updated_at like the column defaults and the
 	// iys_submissions_touch_updated_at trigger.
 	now func() time.Time
@@ -38,7 +40,7 @@ type memStore struct {
 func NewMemStore(now func() time.Time) Store {
 	s := &memStore{
 		purposes: map[Purpose]PurposeDef{}, notices: map[uuid.UUID]Notice{},
-		subs: map[uuid.UUID]Submission{}, syncs: map[IYSChannel]IYSSync{}, now: now,
+		subs: map[uuid.UUID]Submission{}, syncs: map[IYSChannel]IYSSync{}, feeds: map[string]IYSFeedState{}, now: now,
 	}
 	for _, p := range seedPurposes() {
 		p.CreatedAt = now()
@@ -567,6 +569,65 @@ func (s *memStore) SaveIYSSync(_ context.Context, st IYSSync) error {
 	st.SyncedAt, st.UpdatedAt = st.SyncedAt.UTC().Truncate(time.Microsecond), s.now()
 	s.syncs[st.Channel] = st
 	return nil
+}
+
+func (s *memStore) IYSFeed(_ context.Context, feed string) (IYSFeedState, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, ok := s.feeds[feed]
+	st.Horizon, st.SweepDueAt = clonePtr(st.Horizon), clonePtr(st.SweepDueAt)
+	return st, ok, nil
+}
+
+func (s *memStore) AdvanceIYSFeed(_ context.Context, feed, cursor string, horizon time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !iys.ValidFeed(feed) || !iys.ValidCursor(cursor) { // iys_change_feeds_*_chk
+		return errCheck
+	}
+	h := horizon.UTC().Truncate(time.Microsecond)
+	st, ok := s.feeds[feed]
+	if ok && st.Horizon != nil && st.Horizon.After(h) {
+		return nil // a late run never moves the feed back
+	}
+	st.Feed, st.Cursor, st.Horizon, st.UpdatedAt = feed, cursor, &h, s.now()
+	s.feeds[feed] = st
+	return nil
+}
+
+func (s *memStore) MarkIYSSweep(_ context.Context, feed string, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !iys.ValidFeed(feed) {
+		return errCheck
+	}
+	a := at.UTC().Truncate(time.Microsecond)
+	st := s.feeds[feed]
+	if st.SweepDueAt == nil || st.SweepDueAt.Before(a) {
+		st.SweepDueAt = &a
+	}
+	st.Feed, st.UpdatedAt = feed, s.now()
+	s.feeds[feed] = st
+	return nil
+}
+
+func (s *memStore) ClearIYSSweep(_ context.Context, feed string, upTo time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, ok := s.feeds[feed]
+	if ok && st.SweepDueAt != nil && !st.SweepDueAt.After(upTo) {
+		st.SweepDueAt, st.UpdatedAt = nil, s.now()
+		s.feeds[feed] = st
+	}
+	return nil
+}
+
+func clonePtr(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	c := *t
+	return &c
 }
 
 // PurgeProof implements Store. The in-memory store knows no accounts: only

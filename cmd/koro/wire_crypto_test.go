@@ -16,7 +16,6 @@ import (
 	"gorm.io/gorm"
 
 	"koro/internal/consent"
-	"koro/internal/consent/iystest"
 	"koro/internal/notify"
 	"koro/internal/notify/pushtest"
 	"koro/internal/platform/clock"
@@ -26,6 +25,9 @@ import (
 	"koro/internal/platform/crypto/openbao/openbaotest"
 	"koro/internal/platform/crypto/rewrap"
 	"koro/internal/platform/db"
+	"koro/internal/platform/iys"
+	"koro/internal/platform/iys/iystest"
+	"koro/internal/platform/iys/official"
 	"koro/internal/platform/obs"
 )
 
@@ -203,20 +205,29 @@ func TestWire_ExternalAdaptersFromConfig(t *testing.T) {
 	c.notify.cfg.PushAPNsKey = config.NewSecret(string(apns.KeyPEM))
 	c.notify.cfg.PushAPNsKeyID, c.notify.cfg.PushAPNsTeamID, c.notify.cfg.PushAPNsTopic = apns.KeyID, apns.TeamID, apns.Topic
 	c.consent.iys = nil
-	c.consent.cfg = &config.Consent{IYSBaseURL: "https://api.iys.org.tr", IYSUsername: "u", IYSPassword: config.NewSecret("p"),
-		IYSCode: "1", IYSBrandCode: "2", IYSRecipientType: "BIREYSEL", IYSRequired: true}
+	c.consent.cfg = &config.Consent{IYSProvider: config.IYSProviderOfficial, IYSBaseURL: "https://api.iys.org.tr", IYSUsername: "u",
+		IYSPassword: config.NewSecret("p"), IYSCode: "1", IYSBrandCode: "2", IYSRecipientType: "BIREYSEL", IYSRequired: true}
 	if err := c.build(); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := c.notify.deps.Push.(*notify.PushTransport); !ok {
 		t.Fatalf("push sender = %T, want *notify.PushTransport", c.notify.deps.Push)
 	}
-	_, err := iysRecipients{c: c}.IYSRecipient(t.Context(), uuid.NewV7(), consent.IYSEmail)
+	if _, ok := c.consent.iys.(*consent.IYSAdapterClient); !ok {
+		t.Fatalf("İYS client = %T, want the official adapter", c.consent.iys)
+	}
+	_, err := iysRecipients{c: c}.Recipient(t.Context(), uuid.NewV7(), iys.Email)
 	if !errors.Is(err, consent.ErrIYSRecipientGone) {
 		t.Fatalf("recipient of an unknown user = %v, want gone", err)
 	}
-	if _, err := (iysRecipients{c: c}).IYSRecipient(t.Context(), uuid.NewV7(), consent.IYSSMS); !errors.Is(err, consent.ErrIYSRecipientGone) {
+	if _, err := (iysRecipients{c: c}).Recipient(t.Context(), uuid.NewV7(), iys.Message); !errors.Is(err, consent.ErrIYSRecipientGone) {
 		t.Fatalf("sms recipient = %v", err)
+	}
+	if _, err := (iysRecipients{c: c}).User(t.Context(), iys.Email, "nobody@ogrenci.example.test"); !errors.Is(err, consent.ErrIYSRecipientGone) {
+		t.Fatalf("user of an unknown address = %v, want gone", err)
+	}
+	if _, err := (iysRecipients{c: c}).User(t.Context(), iys.Message, "+905555555555"); !errors.Is(err, consent.ErrIYSRecipientGone) {
+		t.Fatalf("user of a phone number = %v, want gone", err)
 	}
 
 	required := newTestContainer(t)
@@ -251,11 +262,20 @@ func (l *lockedBuffer) String() string {
 
 type staticRecipients map[uuid.UUID]string
 
-func (s staticRecipients) IYSRecipient(_ context.Context, id uuid.UUID, _ consent.IYSChannel) (string, error) {
+func (s staticRecipients) Recipient(_ context.Context, id uuid.UUID, _ iys.Type) (string, error) {
 	if s[id] == "" {
 		return "", consent.ErrIYSRecipientGone
 	}
 	return s[id], nil
+}
+
+func (s staticRecipients) User(_ context.Context, _ iys.Type, address string) (uuid.UUID, error) {
+	for id, a := range s {
+		if a == address {
+			return id, nil
+		}
+	}
+	return uuid.Nil(), consent.ErrIYSRecipientGone
 }
 
 // TestSecrets_NotLogged drives every external adapter of BE-055 through
@@ -333,28 +353,38 @@ func TestSecrets_NotLogged(t *testing.T) {
 
 	// İYS: password sign-in, access token, a refused record that echoes the
 	// address, an outage.
-	iys := iystest.New(t)
+	iysSrv := iystest.New(t, iystest.WithClock(clk))
 	ada := uuid.NewV7()
 	const address = "ada.secret@ogrenci.edu.tr"
-	client, err := consent.NewIYSHTTP(consent.IYSHTTPConfig{BaseURL: iys.URL, Username: iystest.Username, Password: iystest.Password,
-		IYSCode: iystest.IYSCode, BrandCode: iystest.BrandCode, Recipients: staticRecipients{ada: address}, Clock: clk})
+	adapter, err := official.New(official.Config{BaseURL: iysSrv.URL, Username: iystest.Username, Password: iystest.Password,
+		IYSCode: iystest.IYSCode, BrandCode: iystest.BrandCode, Recipients: staticRecipients{ada: address}, Clock: clk, Log: log})
 	if err != nil {
 		t.Fatal(err)
 	}
+	client := consent.NewIYSClient(adapter)
 	rec := consent.IYSRecord{SubmissionID: uuid.NewV7(), ConsentID: uuid.NewV7(), UserID: ada, Channel: consent.IYSEmail,
 		Action: consent.Granted, Source: consent.ChannelWeb, OccurredAt: clk.Now()}
 	_, err = client.Submit(ctx, rec)
 	note(err)
-	iys.Reject(address)
+	page, err := adapter.Changes(ctx, "")
+	note(err)
+	if err == nil && len(page.Changes) != 0 {
+		t.Fatalf("changes = %+v", page)
+	}
+	_, err = adapter.Statuses(ctx, iys.Email, []uuid.UUID{ada})
+	note(err)
+	iysSrv.Reject(address)
 	_, err = client.Submit(ctx, rec)
 	note(err)
-	iys.SetDown(true)
+	iysSrv.SetDown(true)
 	_, err = client.Submit(ctx, rec)
 	note(err)
-	wrongPass, _ := consent.NewIYSHTTP(consent.IYSHTTPConfig{BaseURL: iys.URL, Username: iystest.Username, Password: "wrong-iys-password-987",
-		IYSCode: iystest.IYSCode, BrandCode: iystest.BrandCode, Recipients: staticRecipients{ada: address}, Clock: clk})
-	iys.SetDown(false)
-	_, err = wrongPass.Submit(ctx, rec)
+	_, err = adapter.Statuses(ctx, iys.Email, []uuid.UUID{ada})
+	note(err)
+	wrongPass, _ := official.New(official.Config{BaseURL: iysSrv.URL, Username: iystest.Username, Password: "wrong-iys-password-987",
+		IYSCode: iystest.IYSCode, BrandCode: iystest.BrandCode, Recipients: staticRecipients{ada: address}, Clock: clk, Log: log})
+	iysSrv.SetDown(false)
+	_, err = consent.NewIYSClient(wrongPass).Submit(ctx, rec)
 	note(err)
 	for _, e := range errs {
 		log.Error("adapter error", slog.String("error", e))
@@ -375,6 +405,7 @@ func TestSecrets_NotLogged(t *testing.T) {
 		"local KEK": testKEKs[7:], "FCM private key": "BEGIN PRIVATE KEY", "FCM access token": "ya29.fake-access",
 		"FCM device token": fcmDevice, "APNs device token": apnsDevice, "APNs device token 2": strings.Repeat("cd", 32),
 		"İYS password": iystest.Password, "İYS wrong password": "wrong-iys-password-987", "İYS access token": "iys-access-",
+		"İYS refresh token": "iys-refresh-",
 		"recipient address": address,
 	}
 	for _, tok := range apns.ProviderTokens() {
@@ -385,7 +416,7 @@ func TestSecrets_NotLogged(t *testing.T) {
 			t.Errorf("%s leaked:\n%s", what, out)
 		}
 	}
-	if len(apns.ProviderTokens()) == 0 || len(fcm.IssuedAccessTokens()) == 0 || iys.SignIns() == 0 {
+	if len(apns.ProviderTokens()) == 0 || len(fcm.IssuedAccessTokens()) == 0 || iysSrv.SignIns() == 0 {
 		t.Fatal("the adapters did not authenticate: the test would prove nothing")
 	}
 }

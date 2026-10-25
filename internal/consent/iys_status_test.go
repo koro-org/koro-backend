@@ -41,12 +41,13 @@ func (e *env) recordedEvents() int {
 	return n
 }
 
-// TestIYSStatusSync_RefusalInIYSWithdrawsConsent (T-312): a recipient
-// whose approval Koro delivered refuses in İYS itself; the hourly
-// reconciliation appends a withdrawal through channel iys, audited as the
-// system job with İYS's date and source, without sending the refusal back
-// to İYS. FilterActive stops reaching the user. A second run changes
-// nothing; the channel's state records the run.
+// TestIYSStatusSync_RefusalInIYSWithdrawsConsent (T-312, T-354): a
+// recipient whose approval Koro delivered refuses in İYS itself; the hourly
+// reconciliation reads it from the change feed and appends a withdrawal
+// through channel iys, audited as the system job with İYS's date and
+// source, without sending the refusal back to İYS. FilterActive stops
+// reaching the user. A second run reads nothing new and changes nothing;
+// the channel's state records each run.
 func TestIYSStatusSync_RefusalInIYSWithdrawsConsent(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -121,8 +122,8 @@ func TestIYSStatusSync_RefusalInIYSWithdrawsConsent(t *testing.T) {
 	if again, _ := e.store.AllOf(ctx, refuser); len(again) != len(rows) {
 		t.Fatalf("second run wrote %d more rows", len(again)-len(rows))
 	}
-	if st, _, _ := e.store.IYSSync(ctx, consent.IYSEmail); st.Checked != 1 || st.Withdrawn != 0 {
-		t.Fatalf("second run state = %+v", st)
+	if st, _, _ := e.store.IYSSync(ctx, consent.IYSEmail); st.Checked != 0 || st.Withdrawn != 0 || !st.SyncedAt.Equal(e.clk.Now().UTC()) {
+		t.Fatalf("second run state = %+v (the feed had nothing new)", st)
 	}
 
 	// The user consents again in Koro: the newer approval reaches İYS and is kept.
@@ -145,8 +146,9 @@ func TestIYSStatusSync_RefusalInIYSWithdrawsConsent(t *testing.T) {
 // refusal while Koro's newer approval is on its way (submission failing);
 // within IYSInFlightGrace the grant stays. If İYS still holds the older
 // refusal after it, İYS did not take the approval and its state governs
-// sending: the grant is withdrawn as a conflict. İYS approvals and
-// recipients İYS does not know never change the ledger.
+// sending: the unconfirmed-grant check withdraws it as a conflict (an
+// alarm, counted). İYS approvals and recipients İYS does not know never
+// change the ledger.
 func TestIYSStatusSync_InFlightGrantThenConflict(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -187,6 +189,9 @@ func TestIYSStatusSync_InFlightGrantThenConflict(t *testing.T) {
 	if reason != "conflict" {
 		t.Fatalf("iys_reason = %v, want conflict", reason)
 	}
+	if got := alarmCount(e, consent.IYSAlarmConflict); got != 1 {
+		t.Fatalf("conflict alarms = %d, want 1", got)
+	}
 	for _, u := range []uuid.UUID{unknown, approved} {
 		if c := e.latestOf(t, u, consent.PurposeCommercialEmail); c.Action != consent.Granted {
 			t.Fatalf("%s changed: %+v", u, c)
@@ -194,11 +199,11 @@ func TestIYSStatusSync_InFlightGrantThenConflict(t *testing.T) {
 	}
 }
 
-// TestIYSStatusSync_BatchesAndFailures: grants are read in batches of at
-// most IYSStatusBatch users (the fake refuses more), every one is checked;
-// a failed İYS read ends the run with an error, changes nothing and leaves
-// the channel's state as it was (no refusal is lost: the next run repeats
-// the read).
+// TestIYSStatusSync_BatchesAndFailures: the first run reconciles every
+// grant (the feed has no history yet) in batches of at most IYSStatusBatch
+// users (the fake refuses more), every one is checked; a failed İYS read
+// ends the run with an error, changes nothing and leaves the channel's
+// state as it was (no refusal is lost: the next run repeats the reads).
 func TestIYSStatusSync_BatchesAndFailures(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -232,7 +237,7 @@ func TestIYSStatusSync_BatchesAndFailures(t *testing.T) {
 	if err := e.syncNow(t); err != nil {
 		t.Fatal(err)
 	}
-	if got := e.iys.StatusCalls() - calls; got != 3 {
+	if got := e.iys.StatusCalls() - calls; got != 3 { // the refusal came through the feed: 204 grants left
 		t.Fatalf("%d status reads for %d grants, want 3", got, len(users))
 	}
 	st, ok, _ := e.store.IYSSync(ctx, consent.IYSEmail)
@@ -294,17 +299,17 @@ func TestFilterActive_HoldsWhileIYSSyncStale(t *testing.T) {
 	}
 }
 
-// statusless is a real İYS client that cannot read consent states (what
-// the HTTP adapter is until T-354).
+// statusless is a real İYS client that reads nothing (an adapter that
+// only registers consents).
 type statusless struct{ consent.NoopIYS }
 
 func (statusless) Name() string { return "iys" }
 func (statusless) Real() bool   { return true }
 
-// TestNew_IYSStatusReader: the reader comes from the İYS client when it
-// reads states; without one consent.iys_status_sync is not scheduled and
-// the hold refuses to start; a negative hold is a wiring bug. iys is
-// never a channel a grant can use.
+// TestNew_IYSStatusReader: the readers come from the İYS client when it
+// reads İYS (or are given); without one consent.iys_status_sync is not
+// scheduled and the hold refuses to start; a negative hold is a wiring
+// bug. iys is never a channel a grant can use.
 func TestNew_IYSStatusReader(t *testing.T) {
 	t.Parallel()
 	jobs := func(e *env) []string {
@@ -321,8 +326,11 @@ func TestNew_IYSStatusReader(t *testing.T) {
 		t.Fatalf("jobs with a client that cannot read states = %v", got)
 	}
 	reader := &consent.FakeIYS{}
-	if got := jobs(newEnv(t, func(d *consent.Deps) { d.IYS, d.IYSStatus = statusless{}, reader })); len(got) != 2 {
-		t.Fatalf("jobs with an explicit reader = %v", got)
+	if got := jobs(newEnv(t, func(d *consent.Deps) { d.IYS, d.IYSFeed = statusless{}, reader })); len(got) != 2 {
+		t.Fatalf("jobs with an explicit feed reader = %v", got)
+	}
+	if got := jobs(newEnv(t, func(d *consent.Deps) { d.IYS, d.IYSStates = statusless{}, reader })); len(got) != 2 {
+		t.Fatalf("jobs with an explicit state reader = %v", got)
 	}
 
 	base := newEnvDeps(t)

@@ -16,8 +16,9 @@ import (
 // PostgreSQL (000143): the hold refuses the e-mail filter until the first
 // reconciliation; two runs racing over the same İYS refusal append one
 // withdrawal (channel iys, audited, no İYS submission, no outbox event):
-// the second waits on the subject lock and finds the grant gone. The
-// channel state is written once per complete run.
+// the second waits on the subject lock and finds the grant gone. Each
+// complete run writes the channel state (BE-105: the run that finds the
+// feed's gap reads every grant; a run after it reads the feed only).
 func TestIYSStatusSync_Gorm_ConcurrentRunsWithdrawOnce(t *testing.T) {
 	t.Parallel()
 	e := newPGEnv(t, func(d *consent.Deps) { d.IYSSyncMaxAge = 6 * time.Hour })
@@ -79,7 +80,7 @@ func TestIYSStatusSync_Gorm_ConcurrentRunsWithdrawOnce(t *testing.T) {
 		t.Fatalf("audit rows of the İYS withdrawal = %d, want 1", n)
 	}
 	st, ok, err := e.store.IYSSync(ctx, consent.IYSEmail)
-	if err != nil || !ok || st.Checked < 2 || st.Withdrawn > 1 || st.UpdatedAt.IsZero() {
+	if err != nil || !ok || st.Withdrawn > 1 || st.SyncedAt.IsZero() || st.SyncedAt.After(e.clk.Now()) || st.UpdatedAt.IsZero() {
 		t.Fatalf("iys_status_syncs(email) = %+v, %v, %v", st, ok, err)
 	}
 	got, err := e.svc.FilterActive(ctx, users, consent.PurposeCommercialEmail)

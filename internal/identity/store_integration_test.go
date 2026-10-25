@@ -69,7 +69,7 @@ func newPGIdentity(t *testing.T) *pgIdentity {
 	au := audit.New(audit.Deps{Store: audit.NewGormStore(d.ORM), Tx: d.Tx, Clock: clk, Log: log}).Service
 	idem := idempotency.New(idempotency.Deps{Tx: d.Tx, Store: idempotency.NewGormStore(d.ORM), Clock: clk, Log: log})
 	cm, err := consent.New(consent.Deps{Store: consent.NewGormStore(d.ORM), Tx: d.Tx, Outbox: ob, Audit: au, Idempotency: idem,
-		Clock: clk, Log: log, Reauth: passReauth{}})
+		Clock: clk, Log: log, Reauth: passReauth{}, IYS: &consent.FakeIYS{}}) // commercial grants need an İYS adapter (BE-105)
 	if err != nil {
 		t.Fatal(err)
 	}

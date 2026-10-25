@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -13,15 +14,17 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/consent"
-	"koro/internal/consent/iystest"
+	"koro/internal/identity"
 	"koro/internal/notify"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/config"
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/httpx"
+	"koro/internal/platform/iys/iystest"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/privacy"
@@ -271,9 +274,8 @@ func TestWire_ConsentOneClickUnsubscribe(t *testing.T) {
 // TestWire_ConsentIYSStatusSync (BE-103, T-312) on the wired application:
 // with CONSENT_IYS_SYNC_MAX_AGE the commercial e-mail filter that outreach
 // and notify use holds until consent.iys_status_sync ran; a refusal the
-// recipient gave İYS itself then withdraws the consent (channel iys). The
-// HTTP adapter cannot read İYS states yet (T-354): with it the job is not
-// scheduled and the hold refuses to start.
+// recipient gave İYS itself then withdraws the consent (channel iys).
+// Without an İYS adapter the hold refuses to start.
 func TestWire_ConsentIYSStatusSync(t *testing.T) {
 	t.Parallel()
 	c := newTestContainer(t)
@@ -282,34 +284,13 @@ func TestWire_ConsentIYSStatusSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := t.Context()
-	uid := uuid.NewV7()
-	purpose, now := consent.PurposeCommercialEmail, time.Now().UTC().Truncate(time.Microsecond)
-	body := "Ticari elektronik ileti izni (İYS mutabakatı)\n"
-	text := consent.Notice{ID: uuid.NewV7(), Kind: consent.KindConsentText, PurposeCode: &purpose, Audience: consent.AudienceAll,
-		Locale: consent.LocaleTR, Version: "2026.10.01", Title: "İzin", BodyMD: body, BodySHA256: consent.BodyDigest(body), CreatedAt: now}
-	if err := c.consent.store.InsertNotice(ctx, text); err != nil {
-		t.Fatal(err)
-	}
-	if err := c.consent.store.Publish(ctx, text.ID, now); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := c.consent.svc.Record(ctx, consent.RecordInput{UserID: uid, Purpose: purpose, Action: consent.Granted,
-		NoticeVersionID: &text.ID, TextSHA256: text.BodySHA256, Channel: consent.ChannelWeb}); err != nil {
-		t.Fatal(err)
-	}
+	uid, purpose := uuid.NewV7(), consent.PurposeCommercialEmail
+	grantCommercial(t, c, uid, purpose)
 	filter := consentFilter{c: c.consent.svc} // notify's port; outreach calls the same method
 	if _, err := filter.FilterActive(ctx, []uuid.UUID{uid}, string(purpose)); !errors.Is(err, consent.ErrIYSSyncStale) {
 		t.Fatalf("FilterActive before any reconciliation = %v, want ErrIYSSyncStale", err)
 	}
-	var sync func(context.Context) error
-	for _, j := range c.infra.jobs.Jobs() {
-		if j.Name == consent.StatusSyncJobName {
-			sync = j.Handle
-		}
-	}
-	if sync == nil {
-		t.Fatal("consent.iys_status_sync is not scheduled")
-	}
+	sync := scheduledJob(t, c, consent.StatusSyncJobName)
 	if err := sync(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -332,29 +313,274 @@ func TestWire_ConsentIYSStatusSync(t *testing.T) {
 		t.Fatalf("ledger = %+v, %v", rows, err)
 	}
 
-	srv := iystest.New(t)
-	httpClient := func(t *testing.T) consent.IYSClient {
+	none := newTestContainer(t)
+	none.consent.iys = nil
+	none.consent.cfg = &config.Consent{UnsubscribeBaseURL: testUnsubscribeBase, IYSSyncMaxAge: 6 * time.Hour}
+	if err := none.build(); err == nil || !strings.Contains(err.Error(), "CONSENT_IYS_SYNC_MAX_AGE") {
+		t.Fatalf("build with the hold and no İYS adapter = %v", err)
+	}
+}
+
+// officialIYS is the consent configuration of the official İYS adapter
+// over the double (CONSENT_IYS_PROVIDER=official).
+func officialIYS(srv *iystest.Server, maxAge time.Duration) *config.Consent {
+	return &config.Consent{UnsubscribeBaseURL: testUnsubscribeBase, IYSSyncMaxAge: maxAge,
+		IYSProvider: config.IYSProviderOfficial, IYSBaseURL: srv.URL, IYSUsername: iystest.Username,
+		IYSPassword: config.NewSecret(iystest.Password), IYSCode: iystest.IYSCode, IYSBrandCode: iystest.BrandCode,
+		IYSRecipientType: "BIREYSEL", IYSTimeout: 5 * time.Second}
+}
+
+// TestWire_ConsentOfficialIYSAdapter (BE-105): CONSENT_IYS_PROVIDER=official
+// wires the official adapter (submit, change feed, single states) with
+// identity as its recipient resolver; end to end over the İYS double: the
+// grant is registered as ONAY with the account's address, the first
+// reconciliation reads it back, a refusal the recipient gives İYS itself
+// is listed an hour later and withdraws the consent (channel iys); the
+// hold follows the feed's horizon.
+func TestWire_ConsentOfficialIYSAdapter(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	clk := c.infra.clock.(*clock.Fake)
+	srv := iystest.New(t, iystest.WithClock(clk))
+	c.consent.iys = nil
+	c.consent.cfg = officialIYS(srv, 3*time.Hour)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := c.consent.iys.(*consent.IYSAdapterClient); !ok || c.consent.iys.Name() != "iys" {
+		t.Fatalf("İYS client %T, want the official adapter", c.consent.iys)
+	}
+	ctx := t.Context()
+	const address = "ada.wire@ogrenci.example.test"
+	purpose := consent.PurposeCommercialEmail
+	uid := iysWireUser(t, c, address)
+	grantID := grantCommercial(t, c, uid, purpose)
+	submitIYS(t, c, grantID, uid, purpose)
+	if got := srv.Consents(); len(got) != 1 || got[0].Recipient != address || got[0].Status != "ONAY" || got[0].Type != "EPOSTA" {
+		t.Fatalf("İYS records = %+v", got)
+	}
+	filter := consentFilter{c: c.consent.svc}
+	if _, err := filter.FilterActive(ctx, []uuid.UUID{uid}, string(purpose)); !errors.Is(err, consent.ErrIYSSyncStale) {
+		t.Fatalf("FilterActive before any reconciliation = %v, want held", err)
+	}
+	sync := scheduledJob(t, c, consent.StatusSyncJobName)
+	if err := sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if srv.Calls("bulk") != 1 || srv.Calls("status") != 0 {
+		t.Fatalf("first reconciliation: %d bulk, %d single queries; want the bulk approval read only", srv.Calls("bulk"), srv.Calls("status"))
+	}
+	if got, err := filter.FilterActive(ctx, []uuid.UUID{uid}, string(purpose)); err != nil || !slices.Equal(got, []uuid.UUID{uid}) {
+		t.Fatalf("FilterActive after the reconciliation = %v, %v", got, err)
+	}
+
+	srv.Act(iystest.Action{Recipient: address, Source: "IYS_MOBIL"})
+	srv.Act(iystest.Action{Recipient: "stranger@elsewhere.example.test"}) // no Koro account
+	clk.Advance(time.Hour + time.Minute)
+	if err := sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := c.consent.store.AllOf(ctx, uid)
+	if err != nil || len(rows) != 2 || rows[1].Action != consent.Withdrawn || rows[1].Channel != consent.ChannelIYS {
+		t.Fatalf("ledger = %+v, %v", rows, err)
+	}
+	if got, err := filter.FilterActive(ctx, []uuid.UUID{uid}, string(purpose)); err != nil || len(got) != 0 {
+		t.Fatalf("FilterActive after the İYS refusal = %v, %v", got, err)
+	}
+	if srv.Calls("status") != 0 {
+		t.Fatal("the change feed was not enough: single queries were made")
+	}
+
+	// The worker registers koro_consent_iys_alarms_total{reason}.
+	m := obs.NewMetrics()
+	if err := c.consent.metrics(m); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	m.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, obs.MetricsPath, nil))
+	for _, reason := range []string{consent.IYSAlarmTooLate, consent.IYSAlarmConflict, consent.IYSAlarmSweepUnavailable,
+		consent.IYSAlarmReadRejected} {
+		if want := `koro_consent_iys_alarms_total{reason="` + reason + `"} 0`; !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("metrics lack %s", want)
+		}
+	}
+}
+
+// iysWireUser inserts the active account of address: the İYS recipient
+// the adapters resolve through identity.
+func iysWireUser(t *testing.T, c *container, address string) uuid.UUID {
+	t.Helper()
+	now := c.infra.clock.Now().UTC().Truncate(time.Microsecond)
+	uid := uuid.NewV7()
+	if err := c.identity.store.InsertUser(t.Context(), identity.User{
+		ID: uid, Status: identity.StatusActive, Email: address, EmailNormalized: address, EmailVerifiedAt: &now,
+		PasswordHash: testPasswordHash(), FirstName: "Ada", LastName: "Yılmaz", Persona: identity.PersonaPlatform,
+		Locale: identity.LocaleTR, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return uid
+}
+
+// publishNotice publishes a notice of kind (with purpose for a consent
+// text) in c's consent store.
+func publishNotice(t *testing.T, c *container, kind consent.NoticeKind, purpose *consent.Purpose, body string) consent.Notice {
+	t.Helper()
+	now := c.infra.clock.Now().UTC().Truncate(time.Microsecond)
+	n := consent.Notice{ID: uuid.NewV7(), Kind: kind, PurposeCode: purpose, Audience: consent.AudienceAll,
+		Locale: consent.LocaleTR, Version: "2026.10.01", Title: "Metin", BodyMD: body, BodySHA256: consent.BodyDigest(body), CreatedAt: now}
+	if err := c.consent.store.InsertNotice(t.Context(), n); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.consent.store.Publish(t.Context(), n.ID, now); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// grantCommercial publishes the consent text of purpose and records uid's
+// grant on the web.
+func grantCommercial(t *testing.T, c *container, uid uuid.UUID, purpose consent.Purpose) uuid.UUID {
+	t.Helper()
+	text := publishNotice(t, c, consent.KindConsentText, &purpose, "Ticari elektronik ileti izni ("+string(purpose)+")\n")
+	id, err := c.consent.svc.Record(t.Context(), consent.RecordInput{UserID: uid, Purpose: purpose, Action: consent.Granted,
+		NoticeVersionID: &text.ID, TextSHA256: text.BodySHA256, Channel: consent.ChannelWeb})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// submitIYS runs consent.submit_iys for the consent.recorded event of a
+// grant (what the outbox relay does in the worker).
+func submitIYS(t *testing.T, c *container, grantID, uid uuid.UUID, purpose consent.Purpose) {
+	t.Helper()
+	ev, err := domainevent.New(domainevent.ConsentRecorded{ConsentID: grantID, UserID: uid, Purpose: string(purpose),
+		Action: string(consent.Granted)}, "consent", grantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sub := range c.infra.subs.For(domainevent.TopicConsentRecorded) {
+		if sub.Name == consent.SubmitIYSTaskName {
+			if err := sub.Handle(t.Context(), ev); err != nil {
+				t.Fatalf("consent.submit_iys: %v", err)
+			}
+			return
+		}
+	}
+	t.Fatal("consent.submit_iys is not subscribed")
+}
+
+// scheduledJob returns the handler of the scheduled job name.
+func scheduledJob(t *testing.T, c *container, name string) func(context.Context) error {
+	t.Helper()
+	for _, j := range c.infra.jobs.Jobs() {
+		if j.Name == name {
+			return j.Handle
+		}
+	}
+	t.Fatalf("%s is not scheduled", name)
+	return nil
+}
+
+// TestWire_EveryIYSProviderIsWired (BE-105): every value of
+// CONSENT_IYS_PROVIDER but none has exactly one constructor in
+// iysAdapters, the one place adapters are chosen.
+func TestWire_EveryIYSProviderIsWired(t *testing.T) {
+	t.Parallel()
+	want := slices.DeleteFunc(config.IYSProviders(), func(p string) bool { return p == config.IYSProviderNone })
+	slices.Sort(want)
+	if got := slices.Sorted(maps.Keys(iysAdapters)); !slices.Equal(got, want) {
+		t.Fatalf("wired İYS adapters %v, configured %v", got, want)
+	}
+}
+
+// TestWire_ConsentIYSAdapterByConfig (BE-105, T-364): CONSENT_IYS_PROVIDER
+// alone picks the İYS adapter. none: no adapter, no reconciliation, and a
+// commercial consent is not collected (the registration creates the
+// account without it); fake: the in-memory İYS with identity's addresses,
+// delivery and reconciliation; netgsm: refused until BE-110 builds it; an
+// unknown name is refused.
+func TestWire_ConsentIYSAdapterByConfig(t *testing.T) {
+	t.Parallel()
+	build := func(t *testing.T, provider string) (*container, error) {
 		t.Helper()
-		client, err := consent.NewIYSHTTP(consent.IYSHTTPConfig{BaseURL: srv.URL, Username: iystest.Username,
-			Password: iystest.Password, IYSCode: iystest.IYSCode, BrandCode: iystest.BrandCode,
-			Recipients: staticRecipients{}, Clock: clock.Real()})
+		c := newTestContainer(t)
+		c.consent.iys = nil
+		c.consent.cfg = &config.Consent{UnsubscribeBaseURL: testUnsubscribeBase, IYSProvider: provider,
+			IYSRecipientType: "BIREYSEL", IYSTimeout: 5 * time.Second}
+		return c, c.build()
+	}
+
+	t.Run("none", func(t *testing.T) {
+		t.Parallel()
+		c, err := build(t, config.IYSProviderNone)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return client
-	}
-	plain := newTestContainer(t)
-	plain.consent.iys = httpClient(t)
-	if err := plain.build(); err != nil {
-		t.Fatal(err)
-	}
-	if slices.ContainsFunc(plain.infra.jobs.Jobs(), func(j queue.Job) bool { return j.Name == consent.StatusSyncJobName }) {
-		t.Fatal("consent.iys_status_sync scheduled with a client that cannot read İYS states")
-	}
-	held := newTestContainer(t)
-	held.consent.iys = httpClient(t)
-	held.consent.cfg = &config.Consent{UnsubscribeBaseURL: testUnsubscribeBase, IYSSyncMaxAge: 6 * time.Hour}
-	if err := held.build(); err == nil || !strings.Contains(err.Error(), "CONSENT_IYS_SYNC_MAX_AGE") {
-		t.Fatalf("build with the hold and the HTTP adapter = %v", err)
-	}
+		if c.consent.iys != nil || slices.ContainsFunc(c.infra.jobs.Jobs(), func(j queue.Job) bool { return j.Name == consent.StatusSyncJobName }) {
+			t.Fatalf("İYS client %T and the reconciliation without an adapter", c.consent.iys)
+		}
+		ctx := t.Context()
+		uid := iysWireUser(t, c, "ada.none@ogrenci.example.test")
+		purpose := consent.PurposeCommercialEmail
+		text := publishNotice(t, c, consent.KindConsentText, &purpose, "Ticari elektronik ileti izni\n")
+		if _, err := c.consent.svc.Record(ctx, consent.RecordInput{UserID: uid, Purpose: purpose, Action: consent.Granted,
+			NoticeVersionID: &text.ID, TextSHA256: text.BodySHA256, Channel: consent.ChannelWeb}); !errors.Is(err, consent.ErrIYSUnavailable) {
+			t.Fatalf("commercial grant without İYS = %v, want %v", err, consent.ErrIYSUnavailable)
+		}
+		// The registration page's commercial checkbox: the account is
+		// created, the consent is not (identity skips a refused consent).
+		privacyNotice := publishNotice(t, c, consent.KindPrivacyNotice, nil, "Aydınlatma metni\n")
+		const address = "bea.none@sirket.example.test"
+		if err := c.identity.svc.Register(ctx, authz.Anonymous(), identity.Registration{
+			Email: address, Password: "Uzun-ve-tahmin-edilmez-parola-2026", FirstName: "Bea", LastName: "Kaya",
+			Persona: identity.PersonaCompany, Locale: identity.LocaleTR, PrivacyNoticeID: privacyNotice.ID,
+			Consents: []identity.ConsentGrant{{Purpose: purpose, NoticeVersionID: text.ID, TextSHA256: text.BodySHA256}},
+		}); err != nil {
+			t.Fatalf("registration with the commercial consent = %v", err)
+		}
+		id, found, err := c.identity.svc.FindByEmail(ctx, address)
+		if err != nil || !found {
+			t.Fatalf("account not created: %v", err)
+		}
+		if rows, err := c.consent.store.AllOf(ctx, id); err != nil || len(rows) != 0 {
+			t.Fatalf("consents of the new account = %+v, %v; want none", rows, err)
+		}
+	})
+
+	t.Run("fake", func(t *testing.T) {
+		t.Parallel()
+		c, err := build(t, config.IYSProviderFake)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := c.consent.iys.(*consent.IYSAdapterClient); !ok || c.consent.iys.Name() != "fake" {
+			t.Fatalf("İYS client %T, want the fake adapter", c.consent.iys)
+		}
+		purpose := consent.PurposeCommercialEmail
+		uid := iysWireUser(t, c, "ada.fake@ogrenci.example.test")
+		grantID := grantCommercial(t, c, uid, purpose)
+		submitIYS(t, c, grantID, uid, purpose)
+		if sub, err := c.consent.store.SubmissionOf(t.Context(), grantID); err != nil || sub.Status != consent.SubmissionSent {
+			t.Fatalf("submission = %+v, %v; want sent", sub, err)
+		}
+		if err := scheduledJob(t, c, consent.StatusSyncJobName)(t.Context()); err != nil {
+			t.Fatalf("reconciliation over the fake: %v", err)
+		}
+	})
+
+	t.Run("netgsm until BE-110", func(t *testing.T) {
+		t.Parallel()
+		if _, err := build(t, config.IYSProviderNetgsm); err == nil || !strings.Contains(err.Error(), "BE-110") {
+			t.Fatalf("build with netgsm = %v, want not built yet", err)
+		}
+	})
+
+	t.Run("unknown", func(t *testing.T) {
+		t.Parallel()
+		if _, err := build(t, "verimor"); err == nil || !strings.Contains(err.Error(), "unknown CONSENT_IYS_PROVIDER") {
+			t.Fatalf("build with an unknown adapter = %v", err)
+		}
+	})
 }

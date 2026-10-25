@@ -31,9 +31,12 @@
 //     and the purpose; following it withdraws through the email_link
 //     channel, idempotently, without revealing the subject or its state.
 //   - A refusal given in İYS itself reaches the ledger through
-//     consent.iys_status_sync (iys_status.go, BE-103) as a withdrawal of
-//     channel iys; optionally (CONSENT_IYS_SYNC_MAX_AGE) commercial
-//     messages are held while that reconciliation is late.
+//     consent.iys_status_sync (iys_status.go, BE-103, BE-105) as a
+//     withdrawal of channel iys; optionally (CONSENT_IYS_SYNC_MAX_AGE)
+//     commercial messages are held while that reconciliation is late.
+//   - İYS is reached only through the small interfaces of iys.go
+//     (IYSClient, IYSFeedReader, IYSStateReader), over any adapter of
+//     internal/platform/iys.
 package consent
 
 import (
@@ -142,21 +145,24 @@ type Deps struct {
 	// Reauth verifies the proof of R operations (identity, late bound).
 	// nil → every R operation fails closed with ErrReauthUnavailable.
 	Reauth Reauthenticator
-	// IYS delivers commercial consents. nil → NoopIYS (submissions are
-	// skipped) unless IYSRequired.
+	// IYS delivers commercial consents (NewIYSClient over an İYS adapter,
+	// or FakeIYS). nil → NoopIYS (submissions are skipped) unless
+	// IYSRequired.
 	IYS IYSClient
 	// IYSRequired is CONSENT_IYS_REQUIRED: refuse to start without a real
 	// İYS client (live operation, H-14).
 	IYSRequired bool
-	// IYSStatus reads İYS's consent states for consent.iys_status_sync
-	// (BE-103, T-312). nil → IYS when it implements IYSStatusReader
-	// (FakeIYS); otherwise there is no reconciliation and the job is not
-	// scheduled (IYSHTTP cannot read states yet: 00 T-354).
-	IYSStatus IYSStatusReader
+	// IYSFeed and IYSStates read İYS for consent.iys_status_sync (BE-103,
+	// BE-105): the adapter's change feed and its single-state reads. nil →
+	// IYS when it implements the reader (FakeIYS); wire passes the
+	// adapter's own. Without either there is no reconciliation and the job
+	// is not scheduled.
+	IYSFeed   IYSFeedReader
+	IYSStates IYSStateReader
 	// IYSSyncMaxAge is CONSENT_IYS_SYNC_MAX_AGE: > 0 holds commercial
 	// messages of an İYS channel (FilterActive fails with ErrIYSSyncStale)
 	// while that channel's last complete reconciliation is older or never
-	// ran. It needs an IYSStatus. 0 → no hold.
+	// ran. It needs an İYS reader (IYSFeed or IYSStates). 0 → no hold.
 	IYSSyncMaxAge time.Duration
 	// Unsubscribe configures the one-click unsubscribe links of commercial
 	// e-mail (BE-062). Zero → no link is minted (commercial e-mail is
@@ -183,17 +189,18 @@ func (d *Deps) validate() error {
 	if d.IYSRequired && !d.IYS.Real() {
 		errs = append(errs, fmt.Errorf("consent: CONSENT_IYS_REQUIRED=true needs a real İYS client, got %q (BE-055)", d.IYS.Name()))
 	}
-	if d.IYSStatus == nil {
-		if r, ok := d.IYS.(IYSStatusReader); ok {
-			d.IYSStatus = r
-		}
+	if d.IYSFeed == nil {
+		d.IYSFeed, _ = d.IYS.(IYSFeedReader)
+	}
+	if d.IYSStates == nil {
+		d.IYSStates, _ = d.IYS.(IYSStateReader)
 	}
 	switch {
 	case d.IYSSyncMaxAge < 0:
 		errs = append(errs, errors.New("consent.Deps.IYSSyncMaxAge is negative"))
-	case d.IYSSyncMaxAge > 0 && d.IYSStatus == nil:
+	case d.IYSSyncMaxAge > 0 && d.IYSFeed == nil && d.IYSStates == nil:
 		errs = append(errs, fmt.Errorf("consent: CONSENT_IYS_SYNC_MAX_AGE needs an İYS client that reads consent states; "+
-			"%q does not (BE-103, T-354)", d.IYS.Name()))
+			"%q does not (BE-103, BE-105)", d.IYS.Name()))
 	}
 	if err := d.Unsubscribe.validate(); err != nil {
 		errs = append(errs, err)
@@ -224,8 +231,9 @@ func New(d Deps) (Module, error) {
 		return Module{}, err
 	}
 	s := &service{d: d}
-	if d.IYS.Real() && d.IYSStatus == nil {
-		d.Log.Warn("iys status reconciliation unavailable: refusals given in İYS do not reach the ledger (T-312, T-354)",
+	s.d.IYS = watchedIYS{IYSClient: d.IYS, s: s}
+	if d.IYS.Real() && d.IYSFeed == nil && d.IYSStates == nil {
+		d.Log.Warn("iys status reconciliation unavailable: refusals given in İYS do not reach the ledger (T-312)",
 			slog.String("client", d.IYS.Name()))
 	}
 	m := Module{Service: s, Privacy: privacyProvider{s: s}, Sweeper: sweeper{s: s}, svc: s}
@@ -245,13 +253,16 @@ func (m Module) Subscribe(r *outbox.Registry) {
 // and, with an İYS status reader, consent.iys_status_sync (BE-103).
 func (m Module) Jobs() []queue.Job {
 	jobs := []queue.Job{m.svc.reconcileJob()}
-	if m.svc.d.IYSStatus != nil {
+	if m.svc.d.IYSFeed != nil || m.svc.d.IYSStates != nil {
 		jobs = append(jobs, m.svc.statusSyncJob())
 	}
 	return jobs
 }
 
-type service struct{ d Deps }
+type service struct {
+	d      Deps
+	alarms iysAlarms
+}
 
 var _ Service = (*service)(nil)
 

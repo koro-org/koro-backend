@@ -180,6 +180,12 @@
     "type": "urn:koro:problem:consent.invalid_unsubscribe_link"
   },
   {
+    "code": "consent.iys_unavailable",
+    "status": 409,
+    "title": "Commercial consent cannot be collected while İYS is not connected",
+    "type": "urn:koro:problem:consent.iys_unavailable"
+  },
+  {
     "code": "consent.minor_restricted",
     "status": 422,
     "title": "Not available to users under 18",

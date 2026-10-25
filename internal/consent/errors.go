@@ -28,6 +28,13 @@ var (
 	ErrTextMismatch = problem.New(problem.Invalid, "consent.text_mismatch", "Text digest does not match the notice")
 	// ErrNoticeNotCurrent: a grant on a draft or retired consent text.
 	ErrNoticeNotCurrent = problem.New(problem.Conflict, "consent.notice_not_current", "Consent text is not the current version")
+	// ErrIYSUnavailable: a grant of a commercial purpose (requires_iys)
+	// while no İYS adapter is configured (CONSENT_IYS_PROVIDER=none; BE-105,
+	// T-364). A consent taken outside İYS is valid only once İYS has it,
+	// within three business days (Yönetmelik m.7/11–12); none can be
+	// delivered, so none is taken. Withdrawals are always accepted.
+	ErrIYSUnavailable = problem.New(problem.Conflict, "consent.iys_unavailable",
+		"Commercial consent cannot be collected while İYS is not connected")
 	// ErrScopeRequired: a per-registration purpose without scope_id.
 	ErrScopeRequired = problem.New(problem.Invalid, "consent.scope_required", "Purpose needs a scope")
 	// ErrScopeNotAllowed: scope_id on a purpose without scope.

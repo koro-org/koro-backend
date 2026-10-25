@@ -83,14 +83,17 @@ func TestIYSReconcile_RetriesFailed(t *testing.T) {
 	}
 }
 
-// TestSubmitIYS_NoopClientSkips: without a real İYS client (dev) the
-// submission ends as skipped instead of failing forever.
+// TestSubmitIYS_NoopClientSkips: without a real İYS client (dev) a
+// commercial grant is refused (BE-105) and the submission of a withdrawal
+// ends as skipped instead of failing forever.
 func TestSubmitIYS_NoopClientSkips(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, func(d *consent.Deps) { d.IYS = nil })
 	ctx := t.Context()
 	text := e.consentText(t, consent.PurposeCommercialEmail, "2026.10.01")
-	id := e.record(t, grant(actor(t, "student").UserID, text, consent.ChannelWeb))
+	_, err := e.svc.Record(ctx, grant(actor(t, "student").UserID, text, consent.ChannelWeb))
+	wantErr(t, err, consent.ErrIYSUnavailable)
+	id := e.record(t, withdraw(actor(t, "student").UserID, consent.PurposeCommercialEmail))
 	for _, err := range e.deliverAll(t) {
 		if err != nil {
 			t.Fatal(err)

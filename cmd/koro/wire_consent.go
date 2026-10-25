@@ -13,6 +13,10 @@ import (
 	"koro/internal/platform/config"
 	"koro/internal/platform/crypto"
 	"koro/internal/platform/db"
+	"koro/internal/platform/iys"
+	"koro/internal/platform/iys/iysfake"
+	"koro/internal/platform/iys/official"
+	"koro/internal/platform/obs"
 )
 
 // consentWiring wires the consent module (L2; 01 §4.3). First owner: BE-012.
@@ -22,11 +26,14 @@ import (
 //
 //	store   nil → consent.NewGormStore over the app_rw pool
 //	tx      nil → the app_rw pool's TxManager; tests preset db.NopTx
-//	iys     nil → consent.IYSHTTP when the İYS settings are present
-//	        (CONSENT_IYS_*, BE-055), else consent.NoopIYS (submissions
-//	        "skipped"; CONSENT_IYS_REQUIRED refuses that). A client that
-//	        also reads consent states (consent.IYSStatusReader; tests'
-//	        FakeIYS) gets consent.iys_status_sync (BE-103);
+//	iys     nil → the İYS adapter CONSENT_IYS_PROVIDER names (iysAdapters:
+//	        the one place adapters are chosen; BE-105): its Submit behind
+//	        consent.NewIYSClient, its change feed and single-state reads
+//	        (consent.IYSFeedReader, consent.IYSStateReader) when it has
+//	        them; consent.NoopIYS with none (commercial grants refused,
+//	        withdrawals "skipped"; CONSENT_IYS_REQUIRED refuses that).
+//	        Tests preset FakeIYS (client and both readers). A reader gets
+//	        consent.iys_status_sync (BE-103, BE-105);
 //	        CONSENT_IYS_SYNC_MAX_AGE refuses to start without one
 //	cfg     tests only; nil → the consent section of the loaded configuration
 //	deriver nil → crypto.Deriver over CRYPTO_TOKEN_KEYS (the one-click
@@ -38,9 +45,11 @@ import (
 //	        fake). The type uses stdlib types only (R4 hook rule). nil →
 //	        every R operation fails closed (503 consent.reauth_unavailable).
 //
-// The İYS recipient address (T-159) is resolved at delivery time from
-// identity (L4, built after consent): iysRecipients reads c.identity.svc
-// when called, so no identity code is touched here.
+// The İYS recipient address (T-159) is resolved at call time from
+// identity (L4, built after consent) in both directions (delivery and
+// status reads: user → address; the change feed: address → user):
+// iysRecipients reads c.identity.svc when called, so no identity code is
+// touched here.
 //
 // Consumers adapt svc to their own ports: consent.Recorder (identity
 // registration, students privacy settings, events form consent fields:
@@ -74,14 +83,21 @@ func (l lateReauth) Verify(ctx context.Context, userID uuid.UUID, p consent.Reau
 	return l.w.reauth(ctx, userID, p.Password, p.TOTPCode)
 }
 
-// iysRecipients resolves İYS recipients through identity's Users.Contact
-// at call time (worker only). identity holds e-mail addresses only, so the
-// sms and call channels have no recipient.
+// iysRecipients resolves İYS recipients for the adapters (their
+// Recipients interfaces) over identity's Users (Contact, FindByEmail) at
+// call time (worker only). identity holds e-mail addresses only, so the
+// MESAJ and ARAMA types have no recipient.
 type iysRecipients struct{ c *container }
 
-func (r iysRecipients) IYSRecipient(ctx context.Context, userID uuid.UUID, ch consent.IYSChannel) (string, error) {
-	if ch != consent.IYSEmail {
-		return "", fmt.Errorf("%w: identity holds no phone numbers (channel %s)", consent.ErrIYSRecipientGone, ch)
+var (
+	_ official.Recipients = iysRecipients{}
+	_ iysfake.Recipients  = iysRecipients{}
+)
+
+// Recipient returns the e-mail address of a live user.
+func (r iysRecipients) Recipient(ctx context.Context, userID uuid.UUID, t iys.Type) (string, error) {
+	if t != iys.Email {
+		return "", fmt.Errorf("%w: identity holds no phone numbers (type %s)", iys.ErrRecipientGone, t)
 	}
 	users := r.c.identity.svc
 	if users == nil {
@@ -90,11 +106,78 @@ func (r iysRecipients) IYSRecipient(ctx context.Context, userID uuid.UUID, ch co
 	contact, err := users.Contact(ctx, userID)
 	switch {
 	case errors.Is(err, identity.ErrNotFound):
-		return "", consent.ErrIYSRecipientGone // erased before the delivery (T-159)
+		return "", iys.ErrRecipientGone // erased before the delivery (T-159)
 	case err != nil:
 		return "", err
 	}
 	return contact.Email, nil
+}
+
+// User returns the live account of an address (an erased account is no
+// user any more).
+func (r iysRecipients) User(ctx context.Context, t iys.Type, address string) (uuid.UUID, error) {
+	if t != iys.Email {
+		return uuid.Nil(), iys.ErrRecipientGone
+	}
+	users := r.c.identity.svc
+	if users == nil {
+		return uuid.Nil(), errors.New("consent: identity is not wired (İYS recipient)")
+	}
+	id, found, err := users.FindByEmail(ctx, address)
+	switch {
+	case err != nil:
+		return uuid.Nil(), err
+	case !found:
+		return uuid.Nil(), iys.ErrRecipientGone
+	}
+	if _, err := users.Contact(ctx, id); errors.Is(err, identity.ErrNotFound) {
+		return uuid.Nil(), iys.ErrRecipientGone
+	} else if err != nil {
+		return uuid.Nil(), err
+	}
+	return id, nil
+}
+
+// iysAdapters is the one place İYS adapters are chosen: one constructor
+// per value of CONSENT_IYS_PROVIDER but none (config.IYSProviders;
+// TestWire_EveryIYSProviderIsWired keeps them equal). A new adapter is a
+// package of internal/platform/iys that passes iyscontract.Run, its
+// settings in config.Consent and its line here; consent does not change.
+var iysAdapters = map[string]func(c *container, cfg config.Consent) (consent.IYSSubmitter, error){
+	config.IYSProviderFake: func(c *container, _ config.Consent) (consent.IYSSubmitter, error) {
+		// Development only (config refuses it in staging and prod): İYS in
+		// the worker's memory, with İYS's time rules and identity's
+		// addresses.
+		return iysfake.New(iysfake.Options{Clock: c.infra.clock, Recipients: iysRecipients{c: c}}), nil
+	},
+	config.IYSProviderOfficial: func(c *container, cfg config.Consent) (consent.IYSSubmitter, error) {
+		a, err := official.New(official.Config{
+			BaseURL: cfg.IYSBaseURL, Username: cfg.IYSUsername, Password: cfg.IYSPassword.Reveal(),
+			IYSCode: cfg.IYSCode, BrandCode: cfg.IYSBrandCode, RecipientType: cfg.IYSRecipientType,
+			Recipients: iysRecipients{c: c}, Timeout: cfg.IYSTimeout, Clock: c.infra.clock,
+			Log: c.infra.log.With("module", "consent", "iys", "official"),
+		})
+		if err != nil {
+			return nil, err
+		}
+		return a, nil
+	},
+	config.IYSProviderNetgsm: func(*container, config.Consent) (consent.IYSSubmitter, error) {
+		return nil, errors.New("consent: CONSENT_IYS_PROVIDER=netgsm: the Netgsm adapter is not built yet (BE-110)")
+	},
+}
+
+// iysAdapter builds the İYS adapter CONSENT_IYS_PROVIDER names; nil for
+// none.
+func iysAdapter(c *container, cfg config.Consent) (consent.IYSSubmitter, error) {
+	if cfg.IYSProvider == "" || cfg.IYSProvider == config.IYSProviderNone {
+		return nil, nil
+	}
+	build, ok := iysAdapters[cfg.IYSProvider]
+	if !ok {
+		return nil, fmt.Errorf("consent: unknown CONSENT_IYS_PROVIDER %q", cfg.IYSProvider)
+	}
+	return build(c, cfg)
 }
 
 func (w *consentWiring) build(c *container) error {
@@ -102,17 +185,20 @@ func (w *consentWiring) build(c *container) error {
 	if w.cfg != nil {
 		cfg = *w.cfg
 	}
-	iys := w.iys
-	if iys == nil && cfg.IYSEnabled() {
-		client, err := consent.NewIYSHTTP(consent.IYSHTTPConfig{
-			BaseURL: cfg.IYSBaseURL, Username: cfg.IYSUsername, Password: cfg.IYSPassword.Reveal(),
-			IYSCode: cfg.IYSCode, BrandCode: cfg.IYSBrandCode, RecipientType: cfg.IYSRecipientType,
-			Recipients: iysRecipients{c: c}, Timeout: cfg.IYSTimeout, Clock: c.infra.clock,
-		})
+	client := w.iys
+	var feed consent.IYSFeedReader
+	var states consent.IYSStateReader
+	if client == nil {
+		a, err := iysAdapter(c, cfg)
 		if err != nil {
 			return err
 		}
-		iys = client
+		if a != nil {
+			client = consent.NewIYSClient(a)
+			feed, _ = a.(consent.IYSFeedReader)
+			states, _ = a.(consent.IYSStateReader)
+			w.iys = client
+		}
 	}
 	store, tx := w.store, w.tx
 	if store == nil {
@@ -137,8 +223,9 @@ func (w *consentWiring) build(c *container) error {
 	mod, err := consent.New(consent.Deps{
 		Store: store, Tx: tx, Outbox: c.infra.outbox, Audit: c.audit.svc, Idempotency: c.infra.idempotency,
 		Clock: c.infra.clock, Log: c.infra.log.With("module", "consent"),
-		Reauth: lateReauth{w: w}, IYS: iys, IYSRequired: cfg.IYSRequired, IYSSyncMaxAge: cfg.IYSSyncMaxAge,
-		Unsubscribe: consent.UnsubscribeConfig{BaseURL: cfg.UnsubscribeBaseURL, TTL: cfg.UnsubscribeTTL, Deriver: deriver},
+		Reauth: lateReauth{w: w}, IYS: client, IYSFeed: feed, IYSStates: states, IYSRequired: cfg.IYSRequired,
+		IYSSyncMaxAge: cfg.IYSSyncMaxAge,
+		Unsubscribe:   consent.UnsubscribeConfig{BaseURL: cfg.UnsubscribeBaseURL, TTL: cfg.UnsubscribeTTL, Deriver: deriver},
 	})
 	if err != nil {
 		return err
@@ -151,8 +238,7 @@ func (w *consentWiring) build(c *container) error {
 
 // tasks: consent.recorded → consent.submit_iys (critical); the
 // consent.iys_reconcile job (05:30, default) and, with an İYS client that
-// reads consent states, consent.iys_status_sync (hourly :20, default;
-// BE-103: not with the HTTP adapter yet, T-354).
+// reads İYS, consent.iys_status_sync (hourly :20, default; BE-103, BE-105).
 func (w *consentWiring) tasks(c *container) {
 	w.mod.Subscribe(c.infra.subs)
 	for _, j := range w.mod.Jobs() {
@@ -164,3 +250,19 @@ func (w *consentWiring) tasks(c *container) {
 // confirmUnsubscribe); w.svc is nil under
 // `koro openapi`, which Register tolerates.
 func (w *consentWiring) routes(c *container, api huma.API) { consent.Register(api, w.svc) }
+
+// metrics registers koro_consent_iys_alarms_total{reason} (BE-105) on the
+// worker's registry (the İYS tasks run there); nil m → metrics off.
+func (w *consentWiring) metrics(m *obs.Metrics) error {
+	return m.CounterFunc("koro_consent_iys_alarms_total",
+		"İYS alarms for the DPO by reason (too_late: İYS refused a consent older than three business days; conflict: "+
+			"İYS kept an older refusal, the grant was withdrawn; sweep_unavailable; read_rejected).",
+		[]string{"reason"}, func() []obs.Sample {
+			as := w.mod.IYSAlarms()
+			out := make([]obs.Sample, len(as))
+			for i, a := range as {
+				out[i] = obs.Sample{Labels: []string{a.Reason}, Value: float64(a.Count)}
+			}
+			return out
+		})
+}

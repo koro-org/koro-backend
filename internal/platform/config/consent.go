@@ -4,22 +4,41 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
 
 // Consent configures the consent module (internal/consent). Owner: BE-012,
 // BE-055 (İYS client), BE-062 (unsubscribe links), BE-103 (İYS status
-// hold); only tickets of the consent module edit this file and
-// the "# --- consent ---" block of .env.example (BE-001 R7).
+// hold), BE-105 (İYS adapter choice); only tickets of the consent module
+// edit this file and the "# --- consent ---" block of .env.example
+// (BE-001 R7).
 type Consent struct {
 	// IYSRequired refuses to start without a real İYS client (H-14: live
-	// operation needs İYS). While false and no CONSENT_IYS_BASE_URL is set,
-	// submissions of commercial consents end as "skipped".
+	// operation needs İYS). While false and CONSENT_IYS_PROVIDER is none,
+	// grants of commercial purposes are refused (consent.iys_unavailable:
+	// a consent İYS does not get within three business days is not valid)
+	// and the submissions of older consents end as "skipped".
 	IYSRequired bool `env:"CONSENT_IYS_REQUIRED" envDefault:"false"`
 
-	// İYS API (BE-055). All of base URL, username, password, İYS code and
-	// brand code enable the real client; none leaves the no-op client.
+	// IYSProvider picks the İYS adapter (internal/platform/iys; BE-105;
+	// the accepted values are IYSProviders, cmd/koro/wire_consent.go wires
+	// one adapter per value):
+	//   none      no adapter (default): commercial consents are not
+	//             collected; withdrawals are "skipped".
+	//   fake      the in-memory İYS (internal/platform/iys/iysfake):
+	//             development only, refused in staging and prod.
+	//   official  İYS's own API (internal/platform/iys/official) with the
+	//             CONSENT_IYS_* settings below. Live only with direct API
+	//             access (İLETİ+): a service provider with fewer than 250 000
+	//             addresses reaches İYS through an authorised integrator.
+	//   netgsm    the Netgsm integrator (BE-110; not built yet: the process
+	//             refuses to start with it).
+	IYSProvider string `env:"CONSENT_IYS_PROVIDER" envDefault:"none"`
+
+	// İYS's own API (BE-055; CONSENT_IYS_PROVIDER=official): base URL,
+	// username, password, İYS code and brand code go together.
 	IYSBaseURL       string        `env:"CONSENT_IYS_BASE_URL"`
 	IYSUsername      string        `env:"CONSENT_IYS_USERNAME"`
 	IYSPassword      Secret        `env:"CONSENT_IYS_PASSWORD"`
@@ -33,8 +52,10 @@ type Consent struct {
 	// complete İYS status reconciliation of that channel
 	// (consent.iys_status_sync, hourly) is older than this or never ran, so
 	// that a refusal given in İYS itself is in the ledger before a message
-	// goes out. 0 (default) sends on the ledger alone. Needs an İYS client
-	// that reads consent states (the HTTP adapter does not yet: T-354).
+	// goes out. 0 (default) sends on the ledger alone. Needs an İYS adapter
+	// that reads İYS (the official one does: BE-105). İYS's change list
+	// hides its last hour, so a reconciliation covers İYS up to about an
+	// hour before it ran: the hold is at least 3h.
 	IYSSyncMaxAge time.Duration `env:"CONSENT_IYS_SYNC_MAX_AGE" envDefault:"0s"`
 
 	// UnsubscribeBaseURL is where the one-click unsubscribe links of
@@ -48,19 +69,33 @@ type Consent struct {
 	UnsubscribeTTL time.Duration `env:"CONSENT_UNSUBSCRIBE_TTL" envDefault:"8760h"`
 }
 
-// Bounds of CONSENT_UNSUBSCRIBE_TTL and CONSENT_UNSUBSCRIBE_BASE_URL, and
-// of CONSENT_IYS_SYNC_MAX_AGE when set (the job runs hourly: below two
-// hours one late run would already hold every message; above a week the
-// hold protects nothing).
+// Values of CONSENT_IYS_PROVIDER.
 const (
-	minIYSSyncMaxAge      = 2 * time.Hour
+	IYSProviderNone     = "none"
+	IYSProviderFake     = "fake"
+	IYSProviderOfficial = "official"
+	IYSProviderNetgsm   = "netgsm"
+)
+
+// IYSProviders returns the accepted values of CONSENT_IYS_PROVIDER (none
+// has no adapter; cmd/koro wires every other one).
+func IYSProviders() []string {
+	return []string{IYSProviderNone, IYSProviderFake, IYSProviderOfficial, IYSProviderNetgsm}
+}
+
+// Bounds of CONSENT_UNSUBSCRIBE_TTL and CONSENT_UNSUBSCRIBE_BASE_URL, and
+// of CONSENT_IYS_SYNC_MAX_AGE when set (the job runs hourly and İYS's
+// change list hides its last hour: below three hours one late run would
+// already hold every message; above a week the hold protects nothing).
+const (
+	minIYSSyncMaxAge      = 3 * time.Hour
 	maxIYSSyncMaxAge      = 7 * 24 * time.Hour
 	minUnsubscribeTTL     = 24 * time.Hour
 	maxUnsubscribeTTL     = 400 * 24 * time.Hour
 	maxUnsubscribeBaseURL = 300
 )
 
-// IYSEnabled reports whether any İYS API setting is present.
+// IYSEnabled reports whether any setting of İYS's own API is present.
 func (s Consent) IYSEnabled() bool {
 	return s.IYSBaseURL != "" || s.IYSUsername != "" || !s.IYSPassword.IsZero() || s.IYSCode != "" || s.IYSBrandCode != ""
 }
@@ -82,8 +117,18 @@ func (s *Consent) validate(c Common) error {
 			errs = append(errs, fmt.Errorf("CONSENT_IYS_BASE_URL must use https in %s", c.Env))
 		}
 	}
-	if s.IYSRequired && !s.IYSEnabled() {
-		errs = append(errs, errors.New("CONSENT_IYS_REQUIRED=true needs the İYS API settings (CONSENT_IYS_BASE_URL, ...)"))
+	switch {
+	case !slices.Contains(IYSProviders(), s.IYSProvider):
+		errs = append(errs, fmt.Errorf("CONSENT_IYS_PROVIDER must be one of %s (got %q)", strings.Join(IYSProviders(), ", "), s.IYSProvider))
+	case s.IYSProvider == IYSProviderFake && c.ProdLike():
+		errs = append(errs, fmt.Errorf("CONSENT_IYS_PROVIDER=fake is a development adapter and is not allowed in %s", c.Env))
+	case s.IYSProvider == IYSProviderOfficial && !s.IYSEnabled():
+		errs = append(errs, errors.New("CONSENT_IYS_PROVIDER=official needs CONSENT_IYS_BASE_URL, CONSENT_IYS_USERNAME, "+
+			"CONSENT_IYS_PASSWORD, CONSENT_IYS_CODE and CONSENT_IYS_BRAND_CODE"))
+	case s.IYSProvider != IYSProviderOfficial && s.IYSEnabled():
+		errs = append(errs, errors.New("CONSENT_IYS_BASE_URL and the other settings of İYS's own API need CONSENT_IYS_PROVIDER=official"))
+	case s.IYSRequired && s.IYSProvider == IYSProviderNone:
+		errs = append(errs, errors.New("CONSENT_IYS_REQUIRED=true needs an İYS adapter (CONSENT_IYS_PROVIDER)"))
 	}
 	if s.IYSRecipientType != "BIREYSEL" && s.IYSRecipientType != "TACIR" {
 		errs = append(errs, errors.New("CONSENT_IYS_RECIPIENT_TYPE must be BIREYSEL or TACIR"))
@@ -92,7 +137,7 @@ func (s *Consent) validate(c Common) error {
 		errs = append(errs, errors.New("CONSENT_IYS_TIMEOUT must be positive and at most 1m"))
 	}
 	if s.IYSSyncMaxAge != 0 && (s.IYSSyncMaxAge < minIYSSyncMaxAge || s.IYSSyncMaxAge > maxIYSSyncMaxAge) {
-		errs = append(errs, errors.New("CONSENT_IYS_SYNC_MAX_AGE must be 0 (off) or between 2h and 168h"))
+		errs = append(errs, errors.New("CONSENT_IYS_SYNC_MAX_AGE must be 0 (off) or between 3h and 168h"))
 	}
 	s.UnsubscribeBaseURL = strings.TrimRight(strings.TrimSpace(s.UnsubscribeBaseURL), "/")
 	if s.UnsubscribeBaseURL != "" {

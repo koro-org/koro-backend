@@ -11,7 +11,9 @@ import (
 	"uuid"
 
 	"koro/internal/consent"
-	"koro/internal/consent/iystest"
+	"koro/internal/platform/iys"
+	"koro/internal/platform/iys/iystest"
+	"koro/internal/platform/iys/official"
 	"koro/internal/platform/queue"
 )
 
@@ -31,13 +33,24 @@ func (r *recipients) set(id uuid.UUID, email string) {
 	r.m[id] = email
 }
 
-func (r *recipients) IYSRecipient(_ context.Context, id uuid.UUID, ch consent.IYSChannel) (string, error) {
+func (r *recipients) Recipient(_ context.Context, id uuid.UUID, t iys.Type) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if ch != consent.IYSEmail || r.m[id] == "" {
+	if t != iys.Email || r.m[id] == "" {
 		return "", consent.ErrIYSRecipientGone
 	}
 	return r.m[id], nil
+}
+
+func (r *recipients) User(_ context.Context, t iys.Type, address string) (uuid.UUID, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, a := range r.m {
+		if t == iys.Email && strings.EqualFold(a, address) {
+			return id, nil
+		}
+	}
+	return uuid.Nil(), consent.ErrIYSRecipientGone
 }
 
 type logSink struct {
@@ -57,27 +70,28 @@ func (l *logSink) String() string {
 	return l.b.String()
 }
 
-// TestIYS_SubmitAndReconcile runs the real İYS adapter against an İYS
-// double: a grant goes out as ONAY with the address resolved from identity,
-// the Istanbul consent date and the İYS source of the channel; a withdrawal
-// during an İYS outage fails and is delivered by consent.iys_reconcile as
-// RET; an expired access token is renewed once; a record İYS refuses and an
-// address that is gone (erased account) are permanent, alarmed and never
-// leak the address.
+// TestIYS_SubmitAndReconcile runs consent's port over the official İYS
+// adapter against the İYS double: a grant goes out as ONAY with the
+// address resolved from identity, the Istanbul consent date and the İYS
+// source of the channel; a withdrawal during an İYS outage fails and is
+// delivered by consent.iys_reconcile as RET; an expired access token is
+// renewed once; a record İYS refuses and an address that is gone (erased
+// account) are permanent, alarmed and never leak the address.
 func TestIYS_SubmitAndReconcile(t *testing.T) {
 	t.Parallel()
-	iys := iystest.New(t)
 	rcp := &recipients{m: map[uuid.UUID]string{}}
 	var logs logSink
+	var srv *iystest.Server
 	e := newEnv(t, func(d *consent.Deps) {
-		client, err := consent.NewIYSHTTP(consent.IYSHTTPConfig{
-			BaseURL: iys.URL, Username: iystest.Username, Password: iystest.Password,
+		srv = iystest.New(t, iystest.WithClock(d.Clock))
+		client, err := official.New(official.Config{
+			BaseURL: srv.URL, Username: iystest.Username, Password: iystest.Password,
 			IYSCode: iystest.IYSCode, BrandCode: iystest.BrandCode, Recipients: rcp, Clock: d.Clock,
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		d.IYS = client
+		d.IYS = consent.NewIYSClient(client)
 		d.Log = slog.New(slog.NewJSONHandler(&logs, nil))
 	})
 	ctx := t.Context()
@@ -93,19 +107,19 @@ func TestIYS_SubmitAndReconcile(t *testing.T) {
 			t.Fatalf("delivery: %v", err)
 		}
 	}
-	got := iys.Consents()
+	got := srv.Consents()
 	want := iystest.Consent{ConsentDate: "2026-10-03 12:00:00", Source: "HS_MOBIL", Recipient: "ada.yilmaz@ogrenci.edu.tr",
 		RecipientType: "BIREYSEL", Status: "ONAY", Type: "EPOSTA"}
 	if len(got) != 1 || got[0] != want {
 		t.Fatalf("İYS records = %+v, want [%+v]", got, want)
 	}
 	sub, _ := e.store.SubmissionOf(ctx, grantID)
-	if sub.Status != consent.SubmissionSent || sub.IYSTransactionID == nil || *sub.IYSTransactionID != "iys-tx-1" {
+	if sub.Status != consent.SubmissionSent || sub.IYSTransactionID == nil || len(*sub.IYSTransactionID) != 64 {
 		t.Fatalf("granted submission = %+v", sub)
 	}
 
 	// 2. Withdrawal on the web while İYS is down → failed, retryable.
-	iys.SetDown(true)
+	srv.SetDown(true)
 	withdrawID := e.record(t, withdraw(ada, consent.PurposeCommercialEmail))
 	errs := e.deliverAll(t)
 	if errs[len(errs)-1] == nil || queue.IsPermanent(errs[len(errs)-1]) {
@@ -117,33 +131,33 @@ func TestIYS_SubmitAndReconcile(t *testing.T) {
 
 	// 3. İYS is back and the access token has expired: reconcile (after the
 	// grace period) signs in again and sends RET once.
-	iys.SetDown(false)
-	iys.ExpireTokens()
+	srv.SetDown(false)
+	srv.ExpireTokens()
 	e.clk.Advance(consent.ReconcileGrace + time.Minute)
 	reconcile := e.job(t, consent.ReconcileJobName)
 	if err := reconcile.Handle(ctx); err != nil {
 		t.Fatal(err)
 	}
-	got = iys.Consents()
+	got = srv.Consents()
 	if len(got) != 2 || got[1].Status != "RET" || got[1].Source != "HS_WEB" || got[1].Recipient != "ada.yilmaz@ogrenci.edu.tr" {
 		t.Fatalf("İYS records after reconcile = %+v", got)
 	}
 	if sub, _ := e.store.SubmissionOf(ctx, withdrawID); sub.Status != consent.SubmissionSent || sub.Attempts != 2 {
 		t.Fatalf("withdrawal after reconcile = %+v", sub)
 	}
-	if n := iys.SignIns(); n != 2 {
-		t.Fatalf("sign-ins = %d, want 2 (first use, then after the 401)", n)
+	if n, r := srv.SignIns(), srv.Refreshes(); n != 1 || r != 1 {
+		t.Fatalf("sign-ins = %d, refreshes = %d; want the first sign-in and one refresh after the 401", n, r)
 	}
 
 	// 4. İYS refuses Can's address: permanent, alarmed, address scrubbed.
-	iys.Reject("can.demir@ogrenci.edu.tr")
+	srv.Reject("can.demir@ogrenci.edu.tr")
 	rejectedID := e.record(t, grant(can, text, consent.ChannelWeb))
 	errs = e.deliverAll(t)
 	if last := errs[len(errs)-1]; !queue.IsPermanent(last) || strings.Contains(last.Error(), "can.demir") {
 		t.Fatalf("refused record = %v, want a permanent error without the address", last)
 	}
 	sub, _ = e.store.SubmissionOf(ctx, rejectedID)
-	if sub.Status != consent.SubmissionFailed || sub.LastError == nil || !strings.Contains(*sub.LastError, "H174") ||
+	if sub.Status != consent.SubmissionFailed || sub.LastError == nil || !strings.Contains(*sub.LastError, "H464") ||
 		strings.Contains(*sub.LastError, "can.demir") {
 		t.Fatalf("refused submission = %+v", sub)
 	}
@@ -173,31 +187,7 @@ func TestIYS_SubmitAndReconcile(t *testing.T) {
 	if err := reconcile.Handle(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if n := len(iys.Consents()); n != 2 {
+	if n := len(srv.Consents()); n != 2 {
 		t.Fatalf("İYS has %d records after the daily reconcile, want 2", n)
-	}
-}
-
-func TestIYSHTTP_Config(t *testing.T) {
-	t.Parallel()
-	e := newEnv(t)
-	base := consent.IYSHTTPConfig{BaseURL: "https://api.iys.org.tr", Username: "u", Password: "p", IYSCode: "1", BrandCode: "2",
-		Recipients: &recipients{}, Clock: e.clk}
-	if c, err := consent.NewIYSHTTP(base); err != nil || !c.Real() || c.Name() != "iys" {
-		t.Fatalf("valid config = %v", err)
-	}
-	for _, mut := range []func(*consent.IYSHTTPConfig){
-		func(c *consent.IYSHTTPConfig) { c.BaseURL = "ftp://iys" },
-		func(c *consent.IYSHTTPConfig) { c.BaseURL = "https://user:pw@iys" },
-		func(c *consent.IYSHTTPConfig) { c.Password = "" },
-		func(c *consent.IYSHTTPConfig) { c.IYSCode = "abc" },
-		func(c *consent.IYSHTTPConfig) { c.RecipientType = "KURUM" },
-		func(c *consent.IYSHTTPConfig) { c.Recipients = nil },
-	} {
-		c := base
-		mut(&c)
-		if _, err := consent.NewIYSHTTP(c); err == nil {
-			t.Errorf("NewIYSHTTP accepted %+v", c)
-		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 	"uuid"
@@ -477,6 +478,78 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 			"negative checked count": {Channel: consent.IYSSMS, SyncedAt: at(80), Checked: -1},
 		} {
 			if err := w.s.SaveIYSSync(ctx, bad); !errors.Is(err, problem.ErrValidation) {
+				t.Errorf("%s = %v, want 422", name, err)
+			}
+		}
+	})
+
+	t.Run("iys change feeds (BE-105)", func(t *testing.T) {
+		t.Parallel()
+		w := newWorld(t)
+		ctx := t.Context()
+		at := func(min int) time.Time { return base.Add(time.Duration(min) * time.Minute) }
+		const feed = "iys:700123/700124"
+		if _, ok, err := w.s.IYSFeed(ctx, feed); ok || err != nil {
+			t.Fatalf("IYSFeed before any run = %v, %v", ok, err)
+		}
+		// A first read marks the full reconciliation due before any page.
+		if err := w.s.MarkIYSSweep(ctx, feed, at(0)); err != nil {
+			t.Fatal(err)
+		}
+		st, ok, err := w.s.IYSFeed(ctx, feed)
+		if err != nil || !ok || st.Horizon != nil || st.Cursor != "" || st.SweepDueAt == nil || !st.SweepDueAt.Equal(at(0)) {
+			t.Fatalf("after the mark = %+v, %v, %v", st, ok, err)
+		}
+		if err := w.s.AdvanceIYSFeed(ctx, feed, "1597740617_632cc155", at(10)); err != nil {
+			t.Fatal(err)
+		}
+		st, _, _ = w.s.IYSFeed(ctx, feed)
+		if st.Cursor != "1597740617_632cc155" || st.Horizon == nil || !st.Horizon.Equal(at(10)) || st.SweepDueAt == nil || st.UpdatedAt.IsZero() {
+			t.Fatalf("after a page = %+v", st)
+		}
+		// A late run never moves the feed back; a newer page moves it on.
+		if err := w.s.AdvanceIYSFeed(ctx, feed, "1597740000_older", at(5)); err != nil {
+			t.Fatal(err)
+		}
+		if st, _, _ := w.s.IYSFeed(ctx, feed); st.Cursor != "1597740617_632cc155" || !st.Horizon.Equal(at(10)) {
+			t.Fatalf("an older page moved the feed: %+v", st)
+		}
+		if err := w.s.AdvanceIYSFeed(ctx, feed, "1597744217_7a1b", at(70)); err != nil {
+			t.Fatal(err)
+		}
+		// A later mark wins; a reconciliation that started before it does not clear it.
+		if err := w.s.MarkIYSSweep(ctx, feed, at(80)); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.s.MarkIYSSweep(ctx, feed, at(20)); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.s.ClearIYSSweep(ctx, feed, at(75)); err != nil {
+			t.Fatal(err)
+		}
+		if st, _, _ := w.s.IYSFeed(ctx, feed); st.SweepDueAt == nil || !st.SweepDueAt.Equal(at(80)) ||
+			st.Cursor != "1597744217_7a1b" || !st.Horizon.Equal(at(70)) {
+			t.Fatalf("after a clear older than the mark = %+v", st)
+		}
+		if err := w.s.ClearIYSSweep(ctx, feed, at(81)); err != nil {
+			t.Fatal(err)
+		}
+		if st, _, _ := w.s.IYSFeed(ctx, feed); st.SweepDueAt != nil {
+			t.Fatalf("after the reconciliation = %+v", st)
+		}
+		if err := w.s.ClearIYSSweep(ctx, "fake", at(90)); err != nil {
+			t.Fatalf("clear of an unknown feed: %v", err)
+		}
+		if _, ok, _ := w.s.IYSFeed(ctx, "fake"); ok {
+			t.Fatal("a clear created a feed")
+		}
+		for name, bad := range map[string]func() error{
+			"feed name":      func() error { return w.s.AdvanceIYSFeed(ctx, "IYS FEED", "x", at(90)) },
+			"cursor":         func() error { return w.s.AdvanceIYSFeed(ctx, feed, "has space", at(90)) },
+			"long cursor":    func() error { return w.s.AdvanceIYSFeed(ctx, feed, strings.Repeat("a", 1001), at(90)) },
+			"mark of a name": func() error { return w.s.MarkIYSSweep(ctx, "", at(90)) },
+		} {
+			if err := bad(); !errors.Is(err, problem.ErrValidation) {
 				t.Errorf("%s = %v, want 422", name, err)
 			}
 		}

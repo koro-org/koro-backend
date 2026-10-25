@@ -80,6 +80,9 @@ func runWorker(ctx context.Context, stop context.CancelFunc, environ map[string]
 	if err := c.talent.metrics(tel.Metrics); err != nil { // koro_talent_ingest_total (BE-047)
 		return err
 	}
+	if err := c.consent.metrics(tel.Metrics); err != nil { // koro_consent_iys_alarms_total (BE-105)
+		return err
+	}
 	mux, err := c.workerMux(log)
 	if err != nil {
 		return err

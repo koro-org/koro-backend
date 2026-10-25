@@ -217,6 +217,11 @@ func (s *service) check(ctx context.Context, p PurposeDef, in RecordInput) error
 			return ErrMinorRestricted
 		case in.Channel == ChannelEmailLink, in.Channel == ChannelIYS:
 			return ErrChannelNotAllowed // withdrawal-only channels
+		case p.RequiresIYS && !s.d.IYS.Real():
+			// İYS registers a consent taken outside İYS within three
+			// business days only (Yönetmelik m.7/11–12): without an İYS
+			// adapter the grant could never become valid (T-364, BE-105).
+			return ErrIYSUnavailable
 		case in.NoticeVersionID == nil:
 			return invalid(ErrProofRequired, "body.notice_version_id", "is required to grant")
 		}

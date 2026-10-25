@@ -309,6 +309,23 @@ type IYSSync struct {
 // TableName implements gorm's Tabler.
 func (IYSSync) TableName() string { return "iys_status_syncs" }
 
+// IYSFeedState is one iys_change_feeds row (000146; BE-105): the read
+// position of an İYS change feed. Horizon: every change the feed recorded
+// before it has been applied (nil before the first complete page).
+// SweepDueAt: the feed lost changes (first read, a horizon older than the
+// feed's window) and a full reconciliation of every grant in force is due
+// since then; nil when none is. UpdatedAt is read only.
+type IYSFeedState struct {
+	Feed       string     `gorm:"column:feed;primaryKey"`
+	Cursor     string     `gorm:"column:cursor_token"`
+	Horizon    *time.Time `gorm:"column:horizon"`
+	SweepDueAt *time.Time `gorm:"column:sweep_due_at"`
+	UpdatedAt  time.Time  `gorm:"column:updated_at;->"`
+}
+
+// TableName implements gorm's Tabler.
+func (IYSFeedState) TableName() string { return "iys_change_feeds" }
+
 // After is the keyset position of a consent list (occurred_at DESC, id DESC).
 type After struct {
 	At time.Time

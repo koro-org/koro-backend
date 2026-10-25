@@ -22,6 +22,7 @@ type OrgPublicDTO struct {
 	Status        string            `json:"status" enum:"pending_review,active,suspended,closed"`
 	Description   string            `json:"description,omitempty"`
 	LogoURL       string            `json:"logo_url,omitempty" doc:"Short-lived download URL (at most 5 minutes)"`
+	LogoPublicURL string            `json:"logo_public_url,omitempty" doc:"Permanent, cacheable URL of the logo (content addressed: a new logo has a new URL; served with an immutable Cache-Control). Only for an active org that is not a sensitive club, once the virus scan cleared the image; absent otherwise (use logo_url)."`
 	WebsiteURL    string            `json:"website_url,omitempty"`
 	City          string            `json:"city,omitempty"`
 	Verified      bool              `json:"verified"`
@@ -59,15 +60,17 @@ type OrgDTO struct {
 	Company     *CompanyDTO `json:"company,omitempty"`
 }
 
-// OrgCardDTO is an org in a search result (04 §2.2 searchOrgs).
+// OrgCardDTO is an org in a search result (04 §2.2 searchOrgs,
+// listCompanies).
 type OrgCardDTO struct {
-	OrgID    string `json:"org_id"`
-	Kind     string `json:"kind" enum:"platform,university,club,company,ngo"`
-	Name     string `json:"name"`
-	Slug     string `json:"slug"`
-	LogoURL  string `json:"logo_url,omitempty"`
-	City     string `json:"city,omitempty"`
-	Verified bool   `json:"verified"`
+	OrgID         string `json:"org_id"`
+	Kind          string `json:"kind" enum:"platform,university,club,company,ngo"`
+	Name          string `json:"name"`
+	Slug          string `json:"slug"`
+	LogoURL       string `json:"logo_url,omitempty" doc:"Short-lived download URL (at most 5 minutes)"`
+	LogoPublicURL string `json:"logo_public_url,omitempty" doc:"Permanent, cacheable URL of the logo; only for an active org that is not a sensitive club, once the scan cleared it"`
+	City          string `json:"city,omitempty"`
+	Verified      bool   `json:"verified"`
 }
 
 // OrgCardList is a page of OrgCardDTO.
@@ -108,8 +111,8 @@ func toPublicDTO(v OrgView) OrgPublicDTO {
 	o := v.Org
 	d := OrgPublicDTO{
 		OrgID: o.ID.String(), Kind: string(o.Kind), Name: o.Name, Slug: o.Slug, Status: string(o.Status),
-		Description: str(o.Description), LogoURL: v.LogoURL, WebsiteURL: str(o.WebsiteURL), City: str(o.City),
-		Verified: o.Verified(),
+		Description: str(o.Description), LogoURL: v.LogoURL, LogoPublicURL: v.LogoPublicURL, WebsiteURL: str(o.WebsiteURL),
+		City: str(o.City), Verified: o.Verified(),
 	}
 	if c := v.Company; c != nil {
 		d.Company = &CompanyPublicDTO{SectorCode: str(c.SectorCode), SizeBand: str(c.SizeBand), HQCity: str(c.HQCity)}
@@ -141,7 +144,7 @@ func toCardDTO(v OrgView) OrgCardDTO {
 	o := v.Org
 	return OrgCardDTO{
 		OrgID: o.ID.String(), Kind: string(o.Kind), Name: o.Name, Slug: o.Slug, LogoURL: v.LogoURL,
-		City: str(o.City), Verified: o.Verified(),
+		LogoPublicURL: v.LogoPublicURL, City: str(o.City), Verified: o.Verified(),
 	}
 }
 

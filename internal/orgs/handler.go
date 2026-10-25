@@ -40,6 +40,13 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.OrgsOrgSearch), Surface: op.SurfacePublic, RateLimit: op.RateSearch}, h.searchOrgs)
 
 	op.Register(api, "orgs", huma.Operation{
+		OperationID: "listCompanies", Method: http.MethodGet, Path: "/companies",
+		Summary: "List companies",
+		Description: "The public company list (BE-120): active companies only — pending_review, suspended and closed " +
+			"ones are left out (searchOrgs?kind=company also lists suspended ones). sort=name for A-Z; default newest first.",
+	}, op.Meta{Action: string(authz.OrgsOrgSearch), Surface: op.SurfacePublic}, h.listCompanies)
+
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "createCompany", Method: http.MethodPost, Path: "/companies", DefaultStatus: http.StatusCreated,
 		Summary: "Register a company",
 		Description: "The company starts pending_review until a platform admin verifies it. The caller becomes its " +
@@ -216,6 +223,31 @@ func (h handler) searchOrgs(ctx context.Context, in *searchInput) (*searchOutput
 	}
 	q.After = after
 	p, err := h.svc.SearchOrgs(ctx, authz.ActorOrAnonymous(ctx), q)
+	if err != nil {
+		return nil, err
+	}
+	out := &searchOutput{Body: OrgCardList{Items: make([]OrgCardDTO, len(p.Items))}}
+	for i, v := range p.Items {
+		out.Body.Items[i] = toCardDTO(v)
+	}
+	out.Body.NextCursor = nextCursor(p, fp)
+	return out, nil
+}
+
+type listCompaniesInput struct {
+	page.Params
+	Sort string `query:"sort" enum:"name" doc:"name (A-Z); default newest first"`
+}
+
+func (h handler) listCompanies(ctx context.Context, in *listCompaniesInput) (*searchOutput, error) {
+	q := CompanyListQuery{Sort: sortOf(in.Sort), Limit: in.Limit}
+	fp := page.Fingerprint("listCompanies")
+	after, err := cursorOf(in.Cursor, q.Sort, fp)
+	if err != nil {
+		return nil, err
+	}
+	q.After = after
+	p, err := h.svc.ListCompanies(ctx, authz.ActorOrAnonymous(ctx), q)
 	if err != nil {
 		return nil, err
 	}

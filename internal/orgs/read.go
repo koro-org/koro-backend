@@ -19,6 +19,14 @@ import (
 // logoTTL is the lifetime of a logo_url (04 §1.11: signed URLs ≤ 5 min).
 const logoTTL = 5 * time.Minute
 
+// CompanyListQuery narrows listCompanies (BE-120): sort name or newest
+// first, keyset pages.
+type CompanyListQuery struct {
+	Sort  string // SortNewest (default) or SortName
+	Limit int
+	After *ListAfter
+}
+
 // SearchQuery narrows searchOrgs (04 §2.2: q, kind, university_id, city,
 // sort name).
 type SearchQuery struct {
@@ -97,9 +105,9 @@ func (s *service) readable(ctx context.Context, a authz.Actor, o Org) (OrgView, 
 	return s.view(ctx, o)
 }
 
-// view loads the company profile and the logo URL of o.
+// view loads the company profile and the logo URLs of o.
 func (s *service) view(ctx context.Context, o Org) (OrgView, error) {
-	v := OrgView{Org: o, ETag: httpx.ETag(o.UpdatedAt), LogoURL: s.logoURL(ctx, o)}
+	v := OrgView{Org: o, ETag: httpx.ETag(o.UpdatedAt), LogoURL: s.logoURL(ctx, o), LogoPublicURL: s.logoPublicURL(ctx, o)}
 	if o.Kind == KindCompany {
 		c, err := s.d.Store.GetCompany(ctx, o.ID)
 		switch {
@@ -127,6 +135,40 @@ func (s *service) logoURL(ctx context.Context, o Org) string {
 		return ""
 	}
 	return dl.URL
+}
+
+// logoPublicURL returns the permanent public URL of the logo (BE-120), or
+// "": only an active org shows one (pending_review and closed are not
+// public, a suspended org may be suspended for its content), and never a
+// sensitive club (its images stay behind short-lived URLs; an unknown club
+// or a missing directory counts as sensitive). files decides whether the
+// image itself is cleared and copied.
+func (s *service) logoPublicURL(ctx context.Context, o Org) string {
+	if o.LogoFileID == nil || s.d.Files == nil || o.Status != StatusActive {
+		return ""
+	}
+	if o.Kind == KindClub {
+		if s.d.Clubs == nil {
+			return ""
+		}
+		c, found, err := s.d.Clubs(ctx, o.ID)
+		if err != nil || !found || c.Sensitive {
+			if err != nil {
+				s.d.Log.LogAttrs(ctx, slog.LevelWarn, "club facts not read: no public logo",
+					slog.String("org_id", o.ID.String()), slog.String("err", err.Error()))
+			}
+			return ""
+		}
+	}
+	u, err := s.d.Files.PublicURL(ctx, *o.LogoFileID)
+	if err != nil {
+		if !errors.Is(err, files.ErrNotClean) && !errors.Is(err, files.ErrNotFound) && !errors.Is(err, files.ErrRejected) {
+			s.d.Log.LogAttrs(ctx, slog.LevelWarn, "org logo public URL not read",
+				slog.String("org_id", o.ID.String()), slog.String("err", err.Error()))
+		}
+		return ""
+	}
+	return u
 }
 
 // cleanQuery normalises a free-text query (04 §1.7: 2–100 characters).
@@ -181,6 +223,17 @@ func (s *service) SearchOrgs(ctx context.Context, a authz.Actor, q SearchQuery) 
 	return s.list(ctx, f, q.Limit, q.After)
 }
 
+// ListCompanies implements Service (BE-120): the public company list of
+// the web — active companies only (pending_review, suspended and closed
+// are left out), name or newest order, read rate class.
+func (s *service) ListCompanies(ctx context.Context, a authz.Actor, q CompanyListQuery) (OrgPage, error) {
+	if err := authz.Can(ctx, a, authz.OrgsOrgSearch, catalogResource); err != nil {
+		return OrgPage{}, err
+	}
+	f := ListFilter{Statuses: []Status{StatusActive}, Kinds: []Kind{KindCompany}, Sort: sortOf(q.Sort)}
+	return s.list(ctx, f, q.Limit, q.After)
+}
+
 // sortOf maps the sort query value (04 §2.2 searchOrgs: "name") to the
 // store order; anything else is newest first. T-203: "name" used to fall
 // through to newest first.
@@ -201,7 +254,7 @@ func (s *service) list(ctx context.Context, f ListFilter, limit int, after *List
 	rows, more := page.Cut(rows, limit)
 	out := OrgPage{Items: make([]OrgView, len(rows)), Sort: f.Sort}
 	for i, o := range rows {
-		out.Items[i] = OrgView{Org: o, LogoURL: s.logoURL(ctx, o)}
+		out.Items[i] = OrgView{Org: o, LogoURL: s.logoURL(ctx, o), LogoPublicURL: s.logoPublicURL(ctx, o)}
 	}
 	if more {
 		last := rows[len(rows)-1]

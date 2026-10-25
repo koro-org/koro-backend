@@ -11,7 +11,8 @@ import (
 
 // Storage configures S3-compatible object storage (internal/platform/storage;
 // 05 §14.7: S3_ENDPOINT, S3_BUCKET_*, S3_ACCESS_KEY, S3_SECRET_KEY). Owner:
-// BE-008, BE-113 (STORAGE_PROVIDER) (BE-001 R7: only the owning ticket edits this file).
+// BE-008, BE-113 (STORAGE_PROVIDER), BE-120 (public media) (BE-001 R7: only
+// the owning ticket edits this file).
 //
 // The defaults point at the local SeaweedFS of deploy/compose.dev.yaml (its
 // credentials are in deploy/seaweedfs/s3.dev.json). They are rejected in
@@ -39,7 +40,21 @@ type Storage struct {
 	// receives every browser upload until files moves it (05 §14.7).
 	BucketFiles      string `env:"S3_BUCKET_FILES" envDefault:"koro-files-dev"`
 	BucketQuarantine string `env:"S3_BUCKET_QUARANTINE" envDefault:"koro-quarantine-dev"`
+	// BucketPublic is the public media bucket (BE-120): files copies the
+	// cleared org logos and event covers into it under content-addressed
+	// keys; operations make it anonymously readable without listing. Empty
+	// (with PublicBaseURL empty) turns public media off: the APIs return
+	// only the short-lived signed URLs.
+	BucketPublic string `env:"S3_BUCKET_PUBLIC"`
+	// PublicBaseURL is the origin (and optional path) the public bucket's
+	// objects are reached under by browsers and crawlers, e.g.
+	// "https://media.koro.example" or "https://s3.example/koro-public". An
+	// object's URL is PublicBaseURL + "/" + key.
+	PublicBaseURL string `env:"S3_PUBLIC_BASE_URL"`
 }
+
+// PublicMedia reports whether the public media bucket is configured.
+func (s Storage) PublicMedia() bool { return s.BucketPublic != "" && s.PublicBaseURL != "" }
 
 // Storage adapters (STORAGE_PROVIDER).
 const (
@@ -80,7 +95,42 @@ func (s *Storage) validate(c Common) error {
 	if c.ProdLike() && (strings.HasSuffix(s.BucketFiles, "-dev") || strings.HasSuffix(s.BucketQuarantine, "-dev")) {
 		errs = append(errs, fmt.Errorf("S3_BUCKET_* are the development buckets, which is not allowed in %s", c.Env))
 	}
+	errs = append(errs, s.validatePublic(c)...)
 	return errors.Join(errs...)
+}
+
+// validatePublic checks the public media settings (BE-120): both or none;
+// a bucket of its own; an http(s) base URL without credentials, query or
+// fragment (https and not loopback in staging/prod).
+func (s *Storage) validatePublic(c Common) []error {
+	s.BucketPublic = strings.TrimSpace(s.BucketPublic)
+	s.PublicBaseURL = strings.TrimRight(strings.TrimSpace(s.PublicBaseURL), "/")
+	switch {
+	case s.BucketPublic == "" && s.PublicBaseURL == "":
+		return nil
+	case s.BucketPublic == "" || s.PublicBaseURL == "":
+		return []error{errors.New("S3_BUCKET_PUBLIC and S3_PUBLIC_BASE_URL are set together (public media) or not at all")}
+	}
+	var errs []error
+	switch {
+	case !bucketRe.MatchString(s.BucketPublic):
+		errs = append(errs, errors.New("S3_BUCKET_PUBLIC must be a valid S3 bucket name"))
+	case s.BucketPublic == s.BucketFiles || s.BucketPublic == s.BucketQuarantine:
+		errs = append(errs, errors.New("S3_BUCKET_PUBLIC must differ from S3_BUCKET_FILES and S3_BUCKET_QUARANTINE (only cleared images are public)"))
+	case c.ProdLike() && strings.HasSuffix(s.BucketPublic, "-dev"):
+		errs = append(errs, fmt.Errorf("S3_BUCKET_PUBLIC is a development bucket, which is not allowed in %s", c.Env))
+	}
+	u, err := url.Parse(s.PublicBaseURL)
+	switch {
+	case err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil ||
+		u.RawQuery != "" || u.ForceQuery || u.Fragment != "":
+		errs = append(errs, errors.New("S3_PUBLIC_BASE_URL must be an http(s) URL without credentials, query or fragment"))
+	case c.ProdLike() && u.Scheme != "https":
+		errs = append(errs, fmt.Errorf("S3_PUBLIC_BASE_URL must use https in %s", c.Env))
+	case c.ProdLike() && isLoopbackHost(u.Hostname()):
+		errs = append(errs, fmt.Errorf("S3_PUBLIC_BASE_URL must not be a loopback address in %s", c.Env))
+	}
+	return errs
 }
 
 // validateS3 checks the connection settings of the s3 adapter.

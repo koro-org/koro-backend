@@ -14,9 +14,11 @@ import (
 	"koro/internal/platform/queue"
 )
 
-// EventRef is what the web needs of an event: its public slug.
+// EventRef is what the web needs of an event: its public slug and its
+// organiser (whose page lists it).
 type EventRef struct {
-	Slug string
+	Slug  string
+	OrgID uuid.UUID
 }
 
 // OrgRef is what the web needs of an org: its kind (orgs.Kind value) and
@@ -42,6 +44,17 @@ const (
 	SubClubUpdated      = "webcache.revalidate_club"
 	SubClubSensitivity  = "webcache.revalidate_club_sensitivity"
 	SubClubClaimDecided = "webcache.revalidate_claimed_club"
+	SubFilePublished    = "webcache.revalidate_published_file"
+	SubFileRejected     = "webcache.revalidate_rejected_file"
+)
+
+// Publishable file purposes and their owners (files: org_logo attached by
+// orgs to the org, event_cover attached by events to the event; BE-120).
+const (
+	purposeOrgLogo    = "org_logo"
+	purposeEventCover = "event_cover"
+	ownerOrgs         = "orgs"
+	ownerEvents       = "events"
 )
 
 // attemptTimeout bounds one task attempt (resolution + POST).
@@ -84,6 +97,8 @@ func (v *Revalidator) Subscribe(r *outbox.Registry) {
 	r.Subscribe(domainevent.TopicClubUpdated, SubClubUpdated, handle(v, v.clubUpdated), opts...)
 	r.Subscribe(domainevent.TopicClubSensitivityChanged, SubClubSensitivity, handle(v, v.clubSensitivity), opts...)
 	r.Subscribe(domainevent.TopicClubClaimDecided, SubClubClaimDecided, handle(v, v.claimDecided), opts...)
+	r.Subscribe(domainevent.TopicFilePublished, SubFilePublished, handle(v, v.filePublished), opts...)
+	r.Subscribe(domainevent.TopicFileRejected, SubFileRejected, handle(v, v.fileRejected), opts...)
 }
 
 // handle decodes the payload, builds the tags and sends them. A payload
@@ -186,6 +201,41 @@ func (v *Revalidator) claimDecided(ctx context.Context, p domainevent.ClubClaimD
 		return nil, nil
 	}
 	return v.orgTags(ctx, p.ClubOrgID, false)
+}
+
+// filePublished: an org logo or event cover got its public media copy
+// (BE-120): the owner's page may show it now.
+func (v *Revalidator) filePublished(ctx context.Context, p domainevent.FilePublished) ([]string, error) {
+	return v.fileOwnerTags(ctx, p.Purpose, p.AttachedModule, p.AttachedEntityID)
+}
+
+// fileRejected: an attached org logo or event cover was taken out of use
+// (infected, unprocessable): its page must stop showing it.
+func (v *Revalidator) fileRejected(ctx context.Context, p domainevent.FileRejected) ([]string, error) {
+	if p.AttachedEntityID == nil {
+		return nil, nil
+	}
+	return v.fileOwnerTags(ctx, p.Purpose, p.AttachedModule, *p.AttachedEntityID)
+}
+
+// fileOwnerTags: the page of the record that shows a publishable file
+// (the org's page; the event's page and its organiser's), nothing for any
+// other purpose or owner.
+func (v *Revalidator) fileOwnerTags(ctx context.Context, purpose, module string, entityID uuid.UUID) ([]string, error) {
+	switch {
+	case purpose == purposeOrgLogo && module == ownerOrgs:
+		return v.orgTags(ctx, entityID, false)
+	case purpose == purposeEventCover && module == ownerEvents:
+		ev, found, err := v.d.Resolver.Event(ctx, entityID)
+		if err != nil {
+			return nil, fmt.Errorf("webcache: resolve event: %w", err)
+		}
+		if !found {
+			return nil, nil
+		}
+		return v.eventTags(ctx, entityID, ev.OrgID, "", false)
+	}
+	return nil, nil
 }
 
 // orgTags: the org's page and optionally the sitemap; an org without a

@@ -235,6 +235,10 @@ type OrgView struct {
 	// LogoURL is a short-lived download URL of the logo (04 §1.14); empty
 	// when there is none or the file is not served (scan not clean).
 	LogoURL string
+	// LogoPublicURL is the permanent public media URL of the logo (BE-120):
+	// only for an active org that is not a sensitive club, once files has
+	// made the public copy; empty otherwise.
+	LogoPublicURL string
 }
 
 // reauthProof is the re-authentication proof of an R operation (03 §6.2).

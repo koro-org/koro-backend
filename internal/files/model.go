@@ -68,8 +68,12 @@ type File struct {
 	ScanStatus       ScanStatus `gorm:"column:scan_status"`
 	ScannedAt        *time.Time `gorm:"column:scanned_at"`
 	UploadedBy       *uuid.UUID `gorm:"type:uuid;column:uploaded_by"`
-	CreatedAt        time.Time  `gorm:"column:created_at;->"`
-	UpdatedAt        time.Time  `gorm:"column:updated_at;->"`
+	// PublicKey is the key of the public media copy (BE-120,
+	// public.go): set once a publishable file is cleared and copied to the
+	// public bucket, nil otherwise.
+	PublicKey *string   `gorm:"column:public_key"`
+	CreatedAt time.Time `gorm:"column:created_at;->"`
+	UpdatedAt time.Time `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -81,6 +85,10 @@ func (f File) Attached() bool { return f.AttachedModule != nil }
 func (f File) clone() File {
 	c := f
 	c.SHA256 = bytes.Clone(f.SHA256)
+	if f.PublicKey != nil {
+		k := *f.PublicKey
+		c.PublicKey = &k
+	}
 	return c
 }
 

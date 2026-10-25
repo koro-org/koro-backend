@@ -201,8 +201,8 @@ func toOrgPublic(v orgs.OrgView) orgs.OrgPublicDTO {
 	o := v.Org
 	return orgs.OrgPublicDTO{
 		OrgID: o.ID.String(), Kind: string(o.Kind), Name: o.Name, Slug: o.Slug, Status: string(o.Status),
-		Description: str(o.Description), LogoURL: v.LogoURL, WebsiteURL: str(o.WebsiteURL), City: str(o.City),
-		Verified: o.Verified(),
+		Description: str(o.Description), LogoURL: v.LogoURL, LogoPublicURL: v.LogoPublicURL, WebsiteURL: str(o.WebsiteURL),
+		City: str(o.City), Verified: o.Verified(),
 	}
 }
 

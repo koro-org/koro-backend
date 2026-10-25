@@ -16,7 +16,8 @@ import (
 // internal/platform/webcache): the webcache.revalidate_* subscriptions on
 // event.published / event.updated / event.cancelled (events), org.updated
 // (orgs), club.updated / club.sensitivity_changed / club_claim.decided
-// (directory). It is platform, not a feature module: wire.go registers it
+// (directory), file.published / file.rejected (files: org logos and event
+// covers, BE-120). It is platform, not a feature module: wire.go registers it
 // with the platform's tasks (c.web.tasks), after every module is built,
 // because the resolver reads events and orgs.
 //
@@ -65,7 +66,7 @@ func (r webResolver) Event(ctx context.Context, id uuid.UUID) (webcache.EventRef
 	case err != nil:
 		return webcache.EventRef{}, false, err
 	}
-	return webcache.EventRef{Slug: e.Slug}, true, nil
+	return webcache.EventRef{Slug: e.Slug, OrgID: e.OrgID}, true, nil
 }
 
 func (r webResolver) Org(ctx context.Context, id uuid.UUID) (webcache.OrgRef, bool, error) {

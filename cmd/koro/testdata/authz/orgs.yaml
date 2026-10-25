@@ -1,4 +1,4 @@
-# Authz matrix of the orgs module (03 §5.2, 04 §2.2; BE-017 + BE-019). 24 operations × 18 personas.
+# Authz matrix of the orgs module (03 §5.2, 04 §2.2; BE-017 + BE-019; BE-120 listCompanies). 25 operations × 18 personas.
 # Public profile (03 §3.6): active/suspended orgs for everyone; pending_review/closed only for
 # members and platform_admin, support, moderator (others 404). Org management surface
 # (updateOrg, closeOrg, transferOrgOwnership; 03 §7.6): members without the role → 403,
@@ -103,6 +103,18 @@ operations:
     variants:
       - name: text_and_kind
         query: { q: matris, kind: company, sort: name }
+        expect: { "@all": 200 }
+
+  listCompanies:
+    method: GET
+    path: /api/v1/companies
+    action: orgs.org.search
+    public: true
+    note: BE-120 — the public company list (active companies only)
+    expect: { "@all": 200 }
+    variants:
+      - name: sorted_by_name
+        query: { sort: name }
         expect: { "@all": 200 }
 
   createCompany:

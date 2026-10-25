@@ -1,6 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"image"
+	"image/png"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -8,6 +13,7 @@ import (
 	"uuid"
 
 	"koro/internal/authz"
+	"koro/internal/authz/authztest"
 	"koro/internal/files"
 	"koro/internal/files/clamavtest"
 	"koro/internal/notify"
@@ -55,7 +61,7 @@ func TestWire_FilesTasksAndPrivacy(t *testing.T) {
 		}
 	}
 	want := []string{"files.orphan_cleanup 40 4 * * * low", "files.rescan_pending */10 * * * * low",
-		"files.rescan_skipped 5-59/10 * * * * low"}
+		"files.rescan_skipped 5-59/10 * * * * low", "files.publish_public 2-59/10 * * * * low"}
 	if !slices.Equal(jobs, want) {
 		t.Fatalf("files jobs %q, want %q", jobs, want)
 	}
@@ -162,5 +168,62 @@ func TestWire_FilesNotifiesUploaderOfRejectedFile(t *testing.T) {
 	}
 	if len(p.Items) != 2 || kinds["files.file_infected"] != infected.String() || kinds["files.file_unprocessable"] != broken.String() {
 		t.Fatalf("inbox = %+v", p.Items)
+	}
+}
+
+// TestWire_FilesPublicMedia: S3_BUCKET_PUBLIC + S3_PUBLIC_BASE_URL reach the
+// files module (BE-120): a scanned org logo gets its public URL under the
+// configured base, and the copy lands in the public bucket.
+func TestWire_FilesPublicMedia(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	c.infra.platform.Storage.BucketPublic = "koro-public-test"
+	c.infra.platform.Storage.PublicBaseURL = "https://media.koro.test"
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	content := buf.Bytes()
+	admin, ok := authztest.Get("club_admin")
+	if !ok {
+		t.Fatal("no club_admin persona")
+	}
+	org := authztest.ID("club_a")
+	up, err := c.files.svc.CreateUpload(t.Context(), admin.Actor, files.UploadRequest{
+		Purpose: files.PurposeOrgLogo, Filename: "logo.png", ContentType: files.MIMEPNG, SizeBytes: int64(len(content)), OrgID: &org,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mem := c.files.objects.(*storage.Mem)
+	sum := sha256.Sum256(content)
+	u, err := url.Parse(up.UploadURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bucket, objKey, _ := strings.Cut(strings.TrimPrefix(u.Path, "/"), "/")
+	mem.Upload(bucket, objKey, content, files.MIMEPNG)
+	if _, err := c.files.svc.CompleteUpload(t.Context(), admin.Actor, up.FileID, sum[:]); err != nil {
+		t.Fatal(err)
+	}
+	ev, err := domainevent.New(domainevent.FileUploaded{FileID: up.FileID}, "file", up.FileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range c.infra.subs.For(domainevent.TopicFileUploaded) {
+		if err := s.Handle(t.Context(), ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pub, err := c.files.svc.PublicURL(t.Context(), up.FileID)
+	if err != nil || !strings.HasPrefix(pub, "https://media.koro.test/org_logo/"+up.FileID.String()+"-") {
+		t.Fatalf("PublicURL = %q, %v", pub, err)
+	}
+	if _, _, _, ok := mem.Object("koro-public-test", strings.TrimPrefix(pub, "https://media.koro.test/")); !ok {
+		t.Fatal("no copy in the public bucket")
 	}
 }

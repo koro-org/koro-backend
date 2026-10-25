@@ -33,6 +33,7 @@ type EventCardDTO struct {
 	EndsAt               time.Time   `json:"ends_at"`
 	DisplayTimezone      string      `json:"display_timezone" enum:"Europe/Istanbul"`
 	CoverURL             string      `json:"cover_url,omitempty" doc:"Short-lived download URL (at most 5 minutes)"`
+	CoverPublicURL       string      `json:"cover_public_url,omitempty" doc:"Permanent, cacheable URL of the cover (content addressed: a new cover has a new URL; immutable Cache-Control). Only for a published or completed public event, not of a sensitive category, of an active organiser that is not a sensitive club, once the virus scan cleared the image; absent otherwise (use cover_url)."`
 	Visibility           string      `json:"visibility" enum:"public,university,members"`
 	Status               string      `json:"status" enum:"draft,published,cancelled,completed"`
 	RequiresRegistration bool        `json:"requires_registration"`
@@ -104,7 +105,7 @@ func toCardDTO(v EventView) EventCardDTO {
 		Org:     EventOrgDTO{OrgID: v.Org.ID.String(), Kind: string(v.Org.Kind), Name: v.Org.Name, Slug: v.Org.Slug},
 		Title:   e.Title, Slug: e.Slug, Summary: str(e.Summary), Category: string(e.Category), Format: string(e.Format),
 		LocationName: str(e.LocationName), City: str(e.City), StartsAt: e.StartsAt, EndsAt: e.EndsAt,
-		DisplayTimezone: displayTimezone, CoverURL: v.CoverURL, Visibility: string(e.Visibility), Status: string(e.Status),
+		DisplayTimezone: displayTimezone, CoverURL: v.CoverURL, CoverPublicURL: v.CoverPublicURL, Visibility: string(e.Visibility), Status: string(e.Status),
 		RequiresRegistration: e.RequiresRegistration, RegistrationMode: string(e.RegistrationMode), Capacity: e.Capacity,
 	}
 }

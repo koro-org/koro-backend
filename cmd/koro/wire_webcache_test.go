@@ -48,6 +48,8 @@ func TestWire_WebcacheSubscriptionsRegistered(t *testing.T) {
 		webcache.SubClubUpdated:      domainevent.TopicClubUpdated,
 		webcache.SubClubSensitivity:  domainevent.TopicClubSensitivityChanged,
 		webcache.SubClubClaimDecided: domainevent.TopicClubClaimDecided,
+		webcache.SubFilePublished:    domainevent.TopicFilePublished,
+		webcache.SubFileRejected:     domainevent.TopicFileRejected,
 	}
 	for name, topic := range want {
 		if s, ok := subs[name]; !ok || s.Topic != topic {

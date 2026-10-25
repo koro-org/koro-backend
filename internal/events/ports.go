@@ -85,6 +85,9 @@ type Files interface {
 	Attach(ctx context.Context, a authz.Actor, fileID uuid.UUID, owner files.Owner) error
 	// PresignGet returns a short-lived download URL of a clean file.
 	PresignGet(ctx context.Context, fileID uuid.UUID, ttl time.Duration) (files.Download, error)
+	// PublicURL returns the permanent public media URL of the cover ("" while
+	// there is none; BE-120). events shows it on public events only.
+	PublicURL(ctx context.Context, fileID uuid.UUID) (string, error)
 	// PutGenerated stores a server-generated file (the export; outside a
 	// transaction: object storage I/O).
 	PutGenerated(ctx context.Context, in files.GeneratedFile) (uuid.UUID, error)

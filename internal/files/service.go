@@ -411,7 +411,8 @@ func (s *service) remove(ctx context.Context, a authz.Actor, action string, file
 }
 
 // removeObjects deletes the file's key from both buckets (a concurrent scan
-// may be moving it); a failure is retried by the files.delete_object task.
+// may be moving it) and its public media copy, if any (BE-120); a failure
+// is retried by the files.delete_object task.
 func (s *service) removeObjects(ctx context.Context, f File) {
 	for _, b := range []string{s.d.Buckets.Quarantine, s.d.Buckets.Files} {
 		if err := s.d.Objects.Delete(ctx, b, f.StorageKey); err != nil {
@@ -420,6 +421,9 @@ func (s *service) removeObjects(ctx context.Context, f File) {
 			s.d.Queue.AfterCommit(ctx, DeleteObjectTaskName, deleteObject{Bucket: b, Key: f.StorageKey},
 				f.ID.String()+":"+b)
 		}
+	}
+	if f.PublicKey != nil && s.d.Public.Enabled() {
+		s.deletePublic(ctx, f.ID, *f.PublicKey)
 	}
 	s.d.Log.LogAttrs(ctx, slog.LevelInfo, "file deleted",
 		slog.String("file_id", f.ID.String()), slog.String("purpose", string(f.Purpose)))

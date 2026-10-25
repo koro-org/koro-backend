@@ -140,6 +140,21 @@ func objectsContract(t *testing.T, s storage.Objects, fx objectsFixture) {
 		}
 	})
 
+	t.Run("copy sets the cache control of the copy only", func(t *testing.T) {
+		const cc = "public, max-age=31536000, immutable"
+		err := s.Copy(ctx, storage.CopyInput{SrcBucket: q, SrcKey: key, DstBucket: f, DstKey: key + ".public",
+			ContentType: "application/pdf", CacheControl: cc})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info, err := s.Stat(ctx, f, key+".public"); err != nil || info.CacheControl != cc {
+			t.Fatalf("Stat(copy) = %+v, %v; want Cache-Control %q", info, err, cc)
+		}
+		if info, err := s.Stat(ctx, f, key); err != nil || info.CacheControl != "" {
+			t.Fatalf("Stat(other copy) = %+v, %v; want no Cache-Control", info, err)
+		}
+	})
+
 	t.Run("delete is idempotent", func(t *testing.T) {
 		for range 2 {
 			if err := s.Delete(ctx, q, key); err != nil {

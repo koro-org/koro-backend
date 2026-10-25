@@ -37,6 +37,21 @@ func TestStorage_Defaults_TargetLocalSeaweedFS(t *testing.T) {
 	if f.ScanRequired || f.UploadURLTTL != 10*time.Minute {
 		t.Fatalf("files defaults = %+v", f)
 	}
+	if s.PublicMedia() || s.BucketPublic != "" || s.PublicBaseURL != "" {
+		t.Fatalf("public media is on by default: %+v", s)
+	}
+}
+
+func TestStorage_PublicBaseURLLosesTrailingSlash(t *testing.T) {
+	t.Parallel()
+	cfg, err := config.Load[storageOnly](storageEnv("S3_BUCKET_PUBLIC", "koro-public-dev",
+		"S3_PUBLIC_BASE_URL", " http://127.0.0.1:8333/koro-public-dev/ "))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := cfg.Storage; !s.PublicMedia() || s.PublicBaseURL != "http://127.0.0.1:8333/koro-public-dev" {
+		t.Fatalf("storage = %+v", s)
+	}
 }
 
 func TestStorage_Validation(t *testing.T) {
@@ -70,6 +85,13 @@ func TestStorage_Validation(t *testing.T) {
 		{"timeout too long", storageEnv("S3_TIMEOUT", "10m"), "S3_TIMEOUT"},
 		{"upload url ttl over 10m", storageEnv("FILES_UPLOAD_URL_TTL", "11m"), "FILES_UPLOAD_URL_TTL"},
 		{"upload url ttl too short", storageEnv("FILES_UPLOAD_URL_TTL", "10s"), "FILES_UPLOAD_URL_TTL"},
+		{"prod with public media", prod("S3_BUCKET_PUBLIC", "koro-public", "S3_PUBLIC_BASE_URL", "https://media.koro.example/"), ""},
+		{"public bucket without base url", storageEnv("S3_BUCKET_PUBLIC", "koro-public-dev"), "set together"},
+		{"public base url without bucket", storageEnv("S3_PUBLIC_BASE_URL", "http://127.0.0.1:8333/koro-public-dev"), "set together"},
+		{"public bucket is the files bucket", storageEnv("S3_BUCKET_PUBLIC", "koro-files-dev", "S3_PUBLIC_BASE_URL", "http://127.0.0.1:8333/x"), "must differ"},
+		{"public base url with a query", storageEnv("S3_BUCKET_PUBLIC", "koro-public-dev", "S3_PUBLIC_BASE_URL", "http://127.0.0.1:8333/x?a=1"), "without credentials, query"},
+		{"prod public base url over http", prod("S3_BUCKET_PUBLIC", "koro-public", "S3_PUBLIC_BASE_URL", "http://media.koro.example"), "S3_PUBLIC_BASE_URL must use https"},
+		{"prod public dev bucket", prod("S3_BUCKET_PUBLIC", "koro-public-dev", "S3_PUBLIC_BASE_URL", "https://media.koro.example"), "development bucket"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -32,8 +32,8 @@ type FakeS3 struct {
 }
 
 type fakeObject struct {
-	data                     []byte
-	contentType, disposition string
+	data                                   []byte
+	contentType, disposition, cacheControl string
 }
 
 // NewFakeS3 starts the fake; it stops when the test ends.
@@ -104,6 +104,9 @@ func (f *FakeS3) serve(w http.ResponseWriter, r *http.Request) {
 		if o.disposition != "" {
 			h.Set("Content-Disposition", o.disposition)
 		}
+		if o.cacheControl != "" {
+			h.Set("Cache-Control", o.cacheControl)
+		}
 		q := r.URL.Query()
 		if v := q.Get("response-content-type"); v != "" {
 			h.Set("Content-Type", v)
@@ -137,7 +140,7 @@ func (f *FakeS3) copy(w http.ResponseWriter, r *http.Request, dst, src string) {
 	o, ok := f.objects[src]
 	if ok {
 		f.objects[dst] = fakeObject{data: bytes.Clone(o.data), contentType: r.Header.Get("Content-Type"),
-			disposition: r.Header.Get("Content-Disposition")}
+			disposition: r.Header.Get("Content-Disposition"), cacheControl: r.Header.Get("Cache-Control")}
 	}
 	f.mu.Unlock()
 	if !ok {

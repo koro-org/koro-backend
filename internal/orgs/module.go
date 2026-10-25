@@ -127,6 +127,9 @@ type Service interface {
 	GetOrgBySlug(ctx context.Context, a authz.Actor, slug string) (OrgView, error)
 	// SearchOrgs is searchOrgs (orgs.org.search, P; rate class search).
 	SearchOrgs(ctx context.Context, a authz.Actor, q SearchQuery) (OrgPage, error)
+	// ListCompanies is listCompanies (orgs.org.search, P; BE-120): the
+	// public company list, active companies only.
+	ListCompanies(ctx context.Context, a authz.Actor, q CompanyListQuery) (OrgPage, error)
 	// CreateCompany is createCompany (orgs.company.create): the company
 	// starts pending_review, the caller becomes its company_owner and the
 	// caller's sessions are closed with role_change after the commit.
@@ -206,7 +209,7 @@ type Deps struct {
 	// they fail closed with 503 (problem.ErrUnavailable).
 	Reauth Reauthenticator
 	// Files attaches and serves the org logo. nil → logo_file_id is
-	// refused (503) and no logo_url is returned.
+	// refused (503) and no logo_url / logo_public_url is returned.
 	Files Files
 	// RevokeSessions closes a user's sessions after a role change
 	// (role_change). nil → nothing is revoked (logged).
@@ -230,7 +233,8 @@ type Deps struct {
 	// Mailer sends the invitation e-mail (worker). nil → the task retries.
 	Mailer Mailer
 	// Clubs returns a club's join facts (hooks.clubInfo, directory). nil →
-	// joinClub 404 and every club counts as sensitive.
+	// joinClub 404 and every club counts as sensitive (no logo_public_url
+	// for any club, BE-120).
 	Clubs ClubInfo
 	// Graduated reports graduated students for the admin sweep (students,
 	// late bound). nil → only the verification is checked.

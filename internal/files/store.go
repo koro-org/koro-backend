@@ -42,4 +42,8 @@ type Store interface {
 	// UnattachedOf returns the unattached rows whose data subject is userID
 	// (KVKK export and erasure), in ID order.
 	UnattachedOf(ctx context.Context, userID uuid.UUID) ([]File, error)
+	// Unpublished returns up to limit active rows of a publishable purpose
+	// without a public copy whose scan status is one of scans, with an ID
+	// greater than after, in ID order (files.publish_public, BE-120).
+	Unpublished(ctx context.Context, scans []ScanStatus, after uuid.UUID, limit int) ([]File, error)
 }

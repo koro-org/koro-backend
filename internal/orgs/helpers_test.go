@@ -92,7 +92,7 @@ type env struct {
 	mod      orgs.Module
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T, opts ...func(*orgs.Deps)) *env {
 	t.Helper()
 	clk := clock.NewFake(t0)
 	e := &env{
@@ -102,7 +102,7 @@ func newEnv(t *testing.T) *env {
 		avatars: &avatars{urls: map[uuid.UUID]string{}},
 	}
 	e.late = &audittest.LateReauth[identity.ReauthProof]{Next: e.reauth}
-	mod, err := orgs.New(orgs.Deps{
+	d := orgs.Deps{
 		Store: e.store, Tx: e.tx, Outbox: e.out, Audit: e.audit, Clock: clk, Log: obs.Discard(),
 		Idempotency:    idempotency.New(idempotency.Deps{Tx: e.tx, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()}),
 		Reauth:         e.late,
@@ -110,7 +110,11 @@ func newEnv(t *testing.T) *env {
 		OpenCommerce:   func() []orgs.OpenCommerceCheck { return e.open },
 		Users:          e.users, Students: e.students, Clubs: e.clubs.info, Mailer: e.mailer, Avatars: e.avatars.of,
 		Deriver: testDeriver(t), LinkBaseURL: "https://app.koro.test",
-	})
+	}
+	for _, o := range opts {
+		o(&d)
+	}
+	mod, err := orgs.New(d)
 	if err != nil {
 		t.Fatal(err)
 	}

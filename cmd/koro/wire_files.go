@@ -27,6 +27,8 @@ import (
 //	objects  nil → the STORAGE_PROVIDER adapter (objectStores: s3 from S3_*,
 //	         or mem); tests preset storage.Mem
 //	buckets  nil → S3_BUCKET_FILES / S3_BUCKET_QUARANTINE
+//	public   nil → S3_BUCKET_PUBLIC / S3_PUBLIC_BASE_URL (public media,
+//	         BE-120; off when unset)
 //	scanner  nil → the FILES_SCANNER adapter (scanners: "clamav" builds
 //	         files.ClamAV, clamd over TCP, BE-048; "noop"
 //	         files.NoopScanner, scan_status "skipped")
@@ -42,6 +44,7 @@ type filesWiring struct {
 	tx      db.TxManager
 	objects storage.Objects
 	buckets *files.Buckets
+	public  *files.PublicMedia
 	scanner files.Scanner
 	cfg     *config.Files
 
@@ -72,6 +75,13 @@ func (w *filesWiring) build(c *container) error {
 	if w.buckets != nil {
 		buckets = *w.buckets
 	}
+	public := files.PublicMedia{} // BE-120: S3_BUCKET_PUBLIC + S3_PUBLIC_BASE_URL, off when unset
+	if sc.PublicMedia() {
+		public = files.PublicMedia{Bucket: sc.BucketPublic, BaseURL: sc.PublicBaseURL}
+	}
+	if w.public != nil {
+		public = *w.public
+	}
 	tx := w.tx
 	if tx == nil {
 		tx = c.infra.db.Tx
@@ -86,7 +96,7 @@ func (w *filesWiring) build(c *container) error {
 	mod, err := files.New(files.Deps{
 		Store: store, Objects: objects, Tx: tx, Outbox: c.infra.outbox, Queue: c.infra.queue,
 		Idempotency: c.infra.idempotency, Clock: c.infra.clock, Log: c.infra.log.With("module", "files"),
-		Buckets: buckets, Audit: c.audit.svc, Scanner: scanner, ScanRequired: cfg.ScanRequired, UploadURLTTL: cfg.UploadURLTTL,
+		Buckets: buckets, Public: public, Audit: c.audit.svc, Scanner: scanner, ScanRequired: cfg.ScanRequired, UploadURLTTL: cfg.UploadURLTTL,
 		OrphanRetention: c.retention("files_orphan", 0, files.DefaultOrphanRetention),
 		Notifier:        filesNotifier{c: c}, RescanBatch: cfg.RescanBatch,
 	})
@@ -144,7 +154,8 @@ func scanners(cfg config.Files, c *container) adapters[files.Scanner] {
 
 // tasks: file.uploaded → files.scan_file, file.rejected →
 // files.notify_rejected; files.orphan_cleanup (04:40), files.rescan_pending
-// (every 10 min) and files.rescan_skipped (every 10 min, minute 5); the
+// (every 10 min), files.rescan_skipped (every 10 min, minute 5) and
+// files.publish_public (every 10 min, minute 2; BE-120); the
 // files.delete_object retry task.
 func (w *filesWiring) tasks(c *container) {
 	w.mod.Subscribe(c.infra.subs)

@@ -5170,6 +5170,9 @@ components:
           type: string
         city:
           type: string
+        cover_public_url:
+          description: "Permanent, cacheable URL of the cover (content addressed: a new cover has a new URL; immutable Cache-Control). Only for a published or completed public event, not of a sensitive category, of an active organiser that is not a sensitive club, once the virus scan cleared the image; absent otherwise (use cover_url)."
+          type: string
         cover_url:
           description: Short-lived download URL (at most 5 minutes)
           type: string
@@ -5275,6 +5278,9 @@ components:
           type: integer
         cover_file_id:
           description: Managers only
+          type: string
+        cover_public_url:
+          description: "Permanent, cacheable URL of the cover (content addressed: a new cover has a new URL; immutable Cache-Control). Only for a published or completed public event, not of a sensitive category, of an active organiser that is not a sensitive club, once the virus scan cleared the image; absent otherwise (use cover_url)."
           type: string
         cover_url:
           description: Short-lived download URL (at most 5 minutes)
@@ -9013,7 +9019,11 @@ components:
             - company
             - ngo
           type: string
+        logo_public_url:
+          description: Permanent, cacheable URL of the logo; only for an active org that is not a sensitive club, once the scan cleared it
+          type: string
         logo_url:
+          description: Short-lived download URL (at most 5 minutes)
           type: string
         name:
           type: string
@@ -9146,6 +9156,9 @@ components:
             - club
             - company
             - ngo
+          type: string
+        logo_public_url:
+          description: "Permanent, cacheable URL of the logo (content addressed: a new logo has a new URL; served with an immutable Cache-Control). Only for an active org that is not a sensitive club, once the virus scan cleared the image; absent otherwise (use logo_url)."
           type: string
         logo_url:
           description: Short-lived download URL (at most 5 minutes)
@@ -11870,6 +11883,9 @@ components:
           description: Whether check-in is on for the event (createCheckin answers 409 otherwise)
           type: boolean
         city:
+          type: string
+        cover_public_url:
+          description: "Permanent, cacheable URL of the cover (content addressed: a new cover has a new URL; immutable Cache-Control). Only for a published or completed public event, not of a sensitive category, of an active organiser that is not a sensitive club, once the virus scan cleared the image; absent otherwise (use cover_url)."
           type: string
         cover_url:
           description: Short-lived download URL (at most 5 minutes)
@@ -22089,6 +22105,57 @@ paths:
       x-koro-rate-limit: write_default
       x-koro-surface: resource
   /api/v1/companies:
+    get:
+      description: "The public company list (BE-120): active companies only — pending_review, suspended and closed ones are left out (searchOrgs?kind=company also lists suspended ones). sort=name for A-Z; default newest first."
+      operationId: listCompanies
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - description: name (A-Z); default newest first
+          explode: false
+          in: query
+          name: sort
+          schema:
+            description: name (A-Z); default newest first
+            enum:
+              - name
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgCardList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: List companies
+      tags:
+        - orgs
+      x-koro-action: orgs.org.search
+      x-koro-rate-limit: read_default
+      x-koro-surface: public
     post:
       description: The company starts pending_review until a platform admin verifies it. The caller becomes its company_owner; all of the caller's sessions are closed (role_change) so that the MFA policy of the role applies at the next sign-in. Tax number and MERSİS are given later with the legal party (parties).
       operationId: createCompany

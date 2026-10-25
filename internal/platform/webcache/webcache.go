@@ -4,7 +4,8 @@
 //
 // Flow (01 §6.1 mechanism O): the producing module writes event.published,
 // event.updated, event.cancelled, org.updated, club.updated,
-// club.sensitivity_changed or club_claim.decided into the outbox in its
+// club.sensitivity_changed, club_claim.decided, file.published or
+// file.rejected (an org logo / event cover, BE-120) into the outbox in its
 // business transaction → the relay enqueues one asynq task per
 // subscription (webcache.revalidate_*) → the handler resolves the current
 // slugs (Resolver), builds the tags and POSTs them, signed, to

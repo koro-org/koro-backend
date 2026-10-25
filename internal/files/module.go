@@ -30,11 +30,20 @@
 //	download       the OWNING module checks authz, then files.PresignGet:
 //	               ≤ 5 minutes, attachment, only clean (or skipped while
 //	               FILES_SCAN_REQUIRED=false) objects of the main bucket
+//	public media   (BE-120, public.go) a cleared org_logo / event_cover is
+//	               copied once into the public media bucket under a
+//	               content-addressed key with an immutable Cache-Control
+//	               (after the scan; files.publish_public catches up);
+//	               files.PublicURL returns its permanent URL and the OWNING
+//	               module shows it only on public records (active org that
+//	               is not a sensitive club, published public event). An
+//	               attached file's first copy writes file.published (O): the
+//	               web revalidates the owner's page
 //
 // Every write of a file row is audited in its transaction (audit.Logger):
 // files.upload.create, files.upload.complete (also failed verifications),
-// files.file.attach, files.file.delete_own, files.file.delete and
-// files.orphan.purge.
+// files.file.attach, files.file.publish, files.file.delete_own,
+// files.file.delete and files.orphan.purge.
 //
 // What files does not do: decide who may read or attach a file (the owning
 // module does, 01 §4.2, 03 §3.6).
@@ -45,6 +54,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 	"uuid"
 
@@ -87,6 +97,15 @@ type Files interface {
 	// is false, is served (else ErrNotClean). The caller (owning module) has
 	// checked authz and writes the access audit.
 	PresignGet(ctx context.Context, fileID uuid.UUID, ttl time.Duration) (Download, error)
+	// PublicURL returns the permanent public URL of a publishable file
+	// (org_logo, event_cover; BE-120): content addressed (a new image is a
+	// new file and so a new URL) and served with an immutable
+	// Cache-Control. It is "" while there is no public copy yet (public
+	// media off, or the copy follows the scan) and an error for a missing
+	// file (ErrNotFound), another purpose (ErrPurposeMismatch) or a file
+	// that may not be served (ErrRejected, ErrNotActive, ErrNotClean). The
+	// caller shows it only on a public record (it decides, 01 §4.2).
+	PublicURL(ctx context.Context, fileID uuid.UUID) (string, error)
 	// Read returns the content of a file the owning module sends on (the
 	// invoice PDF e-mail, BE-042) under the rule of PresignGet: only an
 	// active file whose scan is clean (or skipped while FILES_SCAN_REQUIRED
@@ -115,6 +134,17 @@ type Buckets struct {
 	Quarantine string // browser uploads until they are scanned
 }
 
+// PublicMedia is the public media bucket (BE-120; S3_BUCKET_PUBLIC,
+// S3_PUBLIC_BASE_URL): anonymously readable, without listing. The zero
+// value turns public media off.
+type PublicMedia struct {
+	Bucket  string
+	BaseURL string // the objects' URL prefix, without a trailing slash
+}
+
+// Enabled reports whether public media is configured.
+func (p PublicMedia) Enabled() bool { return p.Bucket != "" }
+
 // Deps are the dependencies of the files module. Everything but Scanner is
 // required (New panics otherwise, 05 §3).
 type Deps struct {
@@ -128,6 +158,8 @@ type Deps struct {
 	Log         *slog.Logger
 	Buckets     Buckets
 	Audit       AuditLogger // every row write, in its transaction
+	// Public is the public media bucket (BE-120); zero → off.
+	Public PublicMedia
 
 	// Scanner scans uploads. nil → NoopScanner (scan_status "skipped").
 	// A scanner with a size limit (MaxBytes() int64, the ClamAV adapter)
@@ -186,6 +218,12 @@ func (d *Deps) validate() error {
 	if d.UploadURLTTL > storage.MaxPutTTL {
 		errs = append(errs, fmt.Errorf("files: upload URL lifetime %s exceeds %s", d.UploadURLTTL, storage.MaxPutTTL))
 	}
+	switch p := d.Public; {
+	case (p.Bucket == "") != (p.BaseURL == ""), strings.HasSuffix(p.BaseURL, "/"):
+		errs = append(errs, errors.New("files.Deps.Public needs both a bucket and a base URL without a trailing slash"))
+	case p.Bucket != "" && (p.Bucket == d.Buckets.Files || p.Bucket == d.Buckets.Quarantine):
+		errs = append(errs, errors.New("files: the public media bucket must differ from the files and quarantine buckets"))
+	}
 	if d.OrphanRetention == nil {
 		d.OrphanRetention = func(context.Context) (time.Duration, error) { return DefaultOrphanRetention, nil }
 	}
@@ -221,7 +259,7 @@ func (m Module) Subscribe(r *outbox.Registry) {
 
 // Jobs returns the scheduled jobs of files (01 §7).
 func (m Module) Jobs() []queue.Job {
-	return []queue.Job{m.svc.orphanCleanupJob(), m.svc.rescanPendingJob(), m.svc.rescanSkippedJob()}
+	return []queue.Job{m.svc.orphanCleanupJob(), m.svc.rescanPendingJob(), m.svc.rescanSkippedJob(), m.svc.publishPublicJob()}
 }
 
 // MaxScanBytes is the largest object a scanner must accept: a skipped file

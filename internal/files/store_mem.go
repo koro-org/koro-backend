@@ -57,6 +57,11 @@ func (s *memStore) check(f File) error {
 		return errCheck // files_attached_chk
 	case f.SizeBytes != nil && (*f.SizeBytes < 1 || *f.SizeBytes > 100*MB):
 		return errCheck
+	case f.PublicKey != nil && (!f.Purpose.Publishable() || f.Status != StatusActive ||
+		(f.ScanStatus != ScanClean && f.ScanStatus != ScanSkipped)):
+		return errCheck // files_public_key_chk
+	case f.PublicKey != nil && !publicKeyRe.MatchString(*f.PublicKey):
+		return errCheck // files_public_key_format_chk
 	}
 	switch f.ScanStatus {
 	case ScanPending, ScanClean, ScanInfected, ScanSkipped:
@@ -66,6 +71,9 @@ func (s *memStore) check(f File) error {
 	for _, o := range s.rows {
 		if o.ID != f.ID && o.StorageKey == f.StorageKey {
 			return errUnique // files_storage_key_uq
+		}
+		if o.ID != f.ID && o.PublicKey != nil && f.PublicKey != nil && *o.PublicKey == *f.PublicKey {
+			return errUnique // files_public_key_uq
 		}
 	}
 	return nil
@@ -155,6 +163,12 @@ func (s *memStore) PendingScans(_ context.Context, before time.Time, after uuid.
 func (s *memStore) SkippedScans(_ context.Context, after uuid.UUID, limit int) ([]File, error) {
 	return s.list(func(f File) bool {
 		return f.Status == StatusActive && f.ScanStatus == ScanSkipped
+	}, after, limit), nil
+}
+
+func (s *memStore) Unpublished(_ context.Context, scans []ScanStatus, after uuid.UUID, limit int) ([]File, error) {
+	return s.list(func(f File) bool {
+		return f.PublicKey == nil && f.Status == StatusActive && f.Purpose.Publishable() && slices.Contains(scans, f.ScanStatus)
 	}, after, limit), nil
 }
 

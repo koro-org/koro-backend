@@ -194,6 +194,9 @@ func (s *service) scan(ctx context.Context, id uuid.UUID) error {
 				slog.String("file_id", f.ID.String()), slog.String("err", err.Error()))
 		}
 	}
+	if applied {
+		s.publishAfterScan(ctx, f) // BE-120: only a servable publishable file is copied
+	}
 	attrs := []slog.Attr{
 		slog.String("file_id", f.ID.String()), slog.String("purpose", string(f.Purpose)),
 		slog.String("scanner", s.d.Scanner.Name()), slog.String("scan_status", string(v.Status)),
@@ -232,12 +235,17 @@ var errKeep = errors.New("files: keep the row")
 //     or attached again — until its owning module deletes it; a row that
 //     cannot be deleted now is left to files.orphan_cleanup.
 func (s *service) takeOutInfected(ctx context.Context, f File, v ScanVerdict) error {
-	for _, b := range []string{s.d.Buckets.Quarantine, s.d.Buckets.Files} {
-		if err := s.d.Objects.Delete(ctx, b, f.StorageKey); err != nil {
+	objects := [][2]string{{s.d.Buckets.Quarantine, f.StorageKey}, {s.d.Buckets.Files, f.StorageKey}}
+	if f.PublicKey != nil && s.d.Public.Enabled() { // a skipped file published before its rescan (BE-120)
+		objects = append(objects, [2]string{s.d.Public.Bucket, *f.PublicKey})
+	}
+	for _, o := range objects {
+		if err := s.d.Objects.Delete(ctx, o[0], o[1]); err != nil {
 			return fmt.Errorf("files: delete infected %s: %w", f.ID, err)
 		}
 	}
 	var cur File
+	var published *string // a public copy recorded after f was read
 	applied := false
 	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		var err error
@@ -252,6 +260,10 @@ func (s *service) takeOutInfected(ctx context.Context, f File, v ScanVerdict) er
 		}
 		now := s.d.Clock.Now()
 		cur.ScanStatus, cur.ScannedAt = ScanInfected, &now
+		if cur.PublicKey != nil && (f.PublicKey == nil || *f.PublicKey != *cur.PublicKey) {
+			published = cur.PublicKey
+		}
+		cur.PublicKey = nil // files_public_key_chk: an infected file has no public copy
 		if err := s.d.Store.Update(ctx, cur); err != nil {
 			return err
 		}
@@ -263,6 +275,9 @@ func (s *service) takeOutInfected(ctx context.Context, f File, v ScanVerdict) er
 	})
 	if err != nil || !applied {
 		return err
+	}
+	if published != nil && s.d.Public.Enabled() {
+		s.deletePublic(ctx, f.ID, *published)
 	}
 	// Alarm line (BE-058 turns it into a metric): no file name or content.
 	s.d.Log.LogAttrs(ctx, slog.LevelWarn, "file infected: object deleted",
@@ -560,7 +575,7 @@ func (s *service) deleteObjectTask() queue.Task {
 		if err := json.Unmarshal(payload, &p); err != nil || p.Bucket == "" || p.Key == "" {
 			return queue.Permanent(fmt.Errorf("files: delete object: bad payload: %w", err))
 		}
-		if p.Bucket != s.d.Buckets.Files && p.Bucket != s.d.Buckets.Quarantine {
+		if p.Bucket != s.d.Buckets.Files && p.Bucket != s.d.Buckets.Quarantine && (!s.d.Public.Enabled() || p.Bucket != s.d.Public.Bucket) {
 			return queue.Permanent(fmt.Errorf("files: delete object: unknown bucket %q", p.Bucket))
 		}
 		return s.d.Objects.Delete(ctx, p.Bucket, p.Key)

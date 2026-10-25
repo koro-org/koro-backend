@@ -2,6 +2,7 @@ package events
 
 import (
 	"context"
+	"log/slog"
 	"slices"
 	"time"
 	"uuid"
@@ -53,10 +54,15 @@ type EventPage struct {
 // the caller's live registration (getEvent only, BE-028), confirmed or
 // checked in makes an attendee.
 type EventView struct {
-	Event          Event
-	Org            orgs.OrgSummary
-	ETag           string
-	CoverURL       string
+	Event    Event
+	Org      orgs.OrgSummary
+	ETag     string
+	CoverURL string
+	// CoverPublicURL is the permanent public media URL of the cover
+	// (BE-120): only for a published or completed public event, not of a
+	// sensitive category, of an active organiser that is not a sensitive
+	// club, once files has made the public copy; empty otherwise.
+	CoverPublicURL string
 	Manager        bool
 	MyRegistration *Registration
 }
@@ -257,26 +263,81 @@ func (s *service) page(ctx context.Context, rows []Event, limit int, sort string
 	if err != nil {
 		return EventPage{}, err
 	}
+	sensitive := s.sensitiveOrganisers(ctx, rows)
 	for _, e := range rows {
 		o, ok := os[e.OrgID]
 		if !ok {
 			continue // an org row never disappears; a missing one is not shown
 		}
-		out.Items = append(out.Items, s.view(ctx, e, o, manager(e)))
+		out.Items = append(out.Items, s.buildView(ctx, e, o, manager(e), sensitive))
 	}
 	return out, nil
 }
 
-// view builds the view of e: its ETag and a short-lived cover URL (a
-// missing or unclean cover never fails a read).
+// view builds the view of e: its ETag, a short-lived cover URL and, for a
+// public event, the permanent one (a missing or unclean cover never fails
+// a read).
 func (s *service) view(ctx context.Context, e Event, o orgs.OrgSummary, manager bool) EventView {
+	return s.buildView(ctx, e, o, manager, nil)
+}
+
+// buildView is view with the sensitive organisers of a page read at once
+// (nil: read for e alone when its cover may be public).
+func (s *service) buildView(ctx context.Context, e Event, o orgs.OrgSummary, manager bool, sensitive map[uuid.UUID]bool) EventView {
 	v := EventView{Event: e, Org: o, ETag: httpx.ETag(e.UpdatedAt), Manager: manager}
-	if e.CoverFileID != nil && s.d.Files != nil {
-		if dl, err := s.d.Files.PresignGet(ctx, *e.CoverFileID, coverTTL); err == nil {
-			v.CoverURL = dl.URL
-		}
+	if e.CoverFileID == nil || s.d.Files == nil {
+		return v
+	}
+	if dl, err := s.d.Files.PresignGet(ctx, *e.CoverFileID, coverTTL); err == nil {
+		v.CoverURL = dl.URL
+	}
+	if !publicCover(e, o) {
+		return v
+	}
+	if sensitive == nil {
+		sensitive = s.sensitiveOrganisers(ctx, []Event{e})
+	}
+	if sens, known := sensitive[e.OrgID]; !known || sens {
+		return v // a sensitive organiser, or its flag could not be read
+	}
+	if u, err := s.d.Files.PublicURL(ctx, *e.CoverFileID); err == nil {
+		v.CoverPublicURL = u
 	}
 	return v
+}
+
+// publicCover reports whether e may show a permanent cover URL (BE-120),
+// apart from its organiser's sensitivity: a published or completed event
+// everyone sees (visibility public), not of a sensitive category, of an
+// active organiser.
+func publicCover(e Event, o orgs.OrgSummary) bool {
+	return (e.Status == StatusPublished || e.Status == StatusCompleted) && e.Visibility == VisibilityPublic &&
+		!e.IsSensitiveCategory && o.Status == orgs.StatusActive
+}
+
+// sensitiveOrganisers maps the organiser of every event of rows whose cover
+// may be public to its sensitivity (directory catalog); on a read error the
+// map stays empty and no cover is public (fail closed).
+func (s *service) sensitiveOrganisers(ctx context.Context, rows []Event) map[uuid.UUID]bool {
+	out := map[uuid.UUID]bool{}
+	var ids []uuid.UUID
+	for _, e := range rows {
+		if e.CoverFileID != nil && !slices.Contains(ids, e.OrgID) {
+			ids = append(ids, e.OrgID)
+		}
+	}
+	if len(ids) == 0 || s.d.Files == nil {
+		return out
+	}
+	m, err := s.d.Catalog.SensitiveOrgIDs(ctx, ids)
+	if err != nil {
+		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "organiser sensitivity not read: no public cover", slog.String("err", err.Error()))
+		return out
+	}
+	for _, id := range ids {
+		out[id] = m[id]
+	}
+	return out
 }
 
 // ListStaff implements Service (events.staff.list).

@@ -251,7 +251,7 @@ var (
 
 func resolver() fakeResolver {
 	return fakeResolver{
-		events: map[uuid.UUID]webcache.EventRef{eventID: {Slug: "go-atolyesi"}, uniEventID: {Slug: "kariyer-gunu"}},
+		events: map[uuid.UUID]webcache.EventRef{eventID: {Slug: "go-atolyesi", OrgID: clubID}, uniEventID: {Slug: "kariyer-gunu"}},
 		orgs: map[uuid.UUID]webcache.OrgRef{
 			clubID: {Kind: "club", Slug: "odtu-robotik"}, companyID: {Kind: "company", Slug: "acme"}, uniID: {Kind: "university", Slug: "odtu"},
 		},
@@ -321,6 +321,23 @@ func TestRevalidator_TopicsToTags(t *testing.T) {
 			[]string{"club:odtu-robotik"}},
 		{"claim rejected", webcache.SubClubClaimDecided,
 			domainevent.ClubClaimDecided{ClaimID: uuid.NewV7(), ClubOrgID: clubID, UserID: uuid.NewV7(), Outcome: "rejected"}, nil},
+		{"logo published", webcache.SubFilePublished,
+			domainevent.FilePublished{FileID: uuid.NewV7(), Purpose: "org_logo", AttachedModule: "orgs", AttachedEntityID: companyID},
+			[]string{"company:acme"}},
+		{"cover published", webcache.SubFilePublished,
+			domainevent.FilePublished{FileID: uuid.NewV7(), Purpose: "event_cover", AttachedModule: "events", AttachedEntityID: eventID},
+			[]string{"event:go-atolyesi", "club:odtu-robotik"}},
+		{"cover of a missing event", webcache.SubFilePublished,
+			domainevent.FilePublished{FileID: uuid.NewV7(), Purpose: "event_cover", AttachedModule: "events", AttachedEntityID: uuid.NewV7()}, nil},
+		{"published file of another owner", webcache.SubFilePublished,
+			domainevent.FilePublished{FileID: uuid.NewV7(), Purpose: "org_logo", AttachedModule: "feed", AttachedEntityID: companyID}, nil},
+		{"rejected logo", webcache.SubFileRejected,
+			domainevent.FileRejected{FileID: uuid.NewV7(), Purpose: "org_logo", Reason: "infected", AttachedModule: "orgs", AttachedEntityID: &clubID},
+			[]string{"club:odtu-robotik"}},
+		{"rejected cv", webcache.SubFileRejected,
+			domainevent.FileRejected{FileID: uuid.NewV7(), Purpose: "cv", Reason: "infected", AttachedModule: "students", AttachedEntityID: &clubID}, nil},
+		{"rejected unattached logo", webcache.SubFileRejected,
+			domainevent.FileRejected{FileID: uuid.NewV7(), Purpose: "org_logo", Reason: "unprocessable"}, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

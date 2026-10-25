@@ -63,6 +63,10 @@ type rule struct {
 	org string
 	// generated: only PutGenerated writes it (03 k30: never over HTTP).
 	generated bool
+	// public: a cleared file gets a permanent copy in the public media
+	// bucket (BE-120): the images of public records (org logo, event
+	// cover). The owning module decides which records show its URL.
+	public bool
 }
 
 const (
@@ -78,8 +82,8 @@ var (
 		PurposeAvatar:              {mimes: images, maxBytes: 5 * MB, personal: true},
 		PurposeCV:                  {mimes: []string{MIMEPDF}, maxBytes: 10 * MB, personal: true},
 		PurposeEduDocument:         {mimes: documents, maxBytes: 10 * MB, personal: true},
-		PurposeOrgLogo:             {mimes: images, maxBytes: 10 * MB, org: orgRequired},
-		PurposeEventCover:          {mimes: images, maxBytes: 10 * MB, org: orgRequired},
+		PurposeOrgLogo:             {mimes: images, maxBytes: 10 * MB, org: orgRequired, public: true},
+		PurposeEventCover:          {mimes: images, maxBytes: 10 * MB, org: orgRequired, public: true},
 		PurposePostMedia:           {mimes: images, maxBytes: 10 * MB, org: orgRequired},
 		PurposeClubClaimEvidence:   {mimes: documents, maxBytes: 10 * MB, personal: true},
 		PurposePartyDocument:       {mimes: documents, maxBytes: 10 * MB, org: orgOptional},
@@ -109,6 +113,10 @@ func (p Purpose) AllowsMIME(mime string) bool { return slices.Contains(purposeRu
 
 // Personal reports whether the uploader is the data subject of p.
 func (p Purpose) Personal() bool { return purposeRule[p].personal }
+
+// Publishable reports whether a cleared file of p gets a public media copy
+// (BE-120: org_logo, event_cover).
+func (p Purpose) Publishable() bool { return purposeRule[p].public }
 
 // UploadPurposes lists the purposes browsers may upload, in 02 §3.1 order
 // (the OpenAPI enum of createUpload).

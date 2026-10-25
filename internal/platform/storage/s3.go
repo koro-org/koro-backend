@@ -139,7 +139,8 @@ func (s *S3) Stat(ctx context.Context, bucket, key string) (ObjectInfo, error) {
 	if err != nil {
 		return ObjectInfo{}, wrap("stat object", err)
 	}
-	return ObjectInfo{Size: aws.ToInt64(out.ContentLength), ContentType: aws.ToString(out.ContentType)}, nil
+	return ObjectInfo{Size: aws.ToInt64(out.ContentLength), ContentType: aws.ToString(out.ContentType),
+		CacheControl: aws.ToString(out.CacheControl)}, nil
 }
 
 // Open implements Objects.
@@ -148,7 +149,8 @@ func (s *S3) Open(ctx context.Context, bucket, key string) (io.ReadCloser, Objec
 	if err != nil {
 		return nil, ObjectInfo{}, wrap("open object", err)
 	}
-	return out.Body, ObjectInfo{Size: aws.ToInt64(out.ContentLength), ContentType: aws.ToString(out.ContentType)}, nil
+	return out.Body, ObjectInfo{Size: aws.ToInt64(out.ContentLength), ContentType: aws.ToString(out.ContentType),
+		CacheControl: aws.ToString(out.CacheControl)}, nil
 }
 
 // Copy implements Objects.
@@ -161,6 +163,7 @@ func (s *S3) Copy(ctx context.Context, in CopyInput) error {
 		Bucket: aws.String(in.DstBucket), Key: aws.String(in.DstKey), CopySource: aws.String(src),
 		MetadataDirective: types.MetadataDirectiveReplace,
 		ContentType:       aws.String(in.ContentType), ContentDisposition: optional(in.ContentDisposition),
+		CacheControl: optional(in.CacheControl),
 	})
 	return wrap("copy object", err)
 }

@@ -30,6 +30,11 @@ type memObject struct {
 	data               []byte
 	contentType        string
 	contentDisposition string
+	cacheControl       string
+}
+
+func (o memObject) info() ObjectInfo {
+	return ObjectInfo{Size: int64(len(o.data)), ContentType: o.contentType, CacheControl: o.cacheControl}
 }
 
 var _ Objects = (*Mem)(nil)
@@ -131,7 +136,7 @@ func (m *Mem) Stat(_ context.Context, bucket, key string) (ObjectInfo, error) {
 	if !ok {
 		return ObjectInfo{}, fmt.Errorf("storage: stat object: %w", ErrNotFound)
 	}
-	return ObjectInfo{Size: int64(len(o.data)), ContentType: o.contentType}, nil
+	return o.info(), nil
 }
 
 // Open implements Objects.
@@ -145,7 +150,7 @@ func (m *Mem) Open(_ context.Context, bucket, key string) (io.ReadCloser, Object
 	if !ok {
 		return nil, ObjectInfo{}, fmt.Errorf("storage: open object: %w", ErrNotFound)
 	}
-	return io.NopCloser(bytes.NewReader(bytes.Clone(o.data))), ObjectInfo{Size: int64(len(o.data)), ContentType: o.contentType}, nil
+	return io.NopCloser(bytes.NewReader(bytes.Clone(o.data))), o.info(), nil
 }
 
 // Copy implements Objects.
@@ -164,6 +169,7 @@ func (m *Mem) Copy(_ context.Context, in CopyInput) error {
 	}
 	m.objects[memKey(in.DstBucket, in.DstKey)] = memObject{
 		data: bytes.Clone(o.data), contentType: in.ContentType, contentDisposition: in.ContentDisposition,
+		cacheControl: in.CacheControl,
 	}
 	return nil
 }

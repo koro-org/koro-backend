@@ -206,6 +206,63 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (files.Store, db.Tx
 		}
 	})
 
+	t.Run("public keys: shape, purpose, scan and the backfill list", func(t *testing.T) {
+		t.Parallel()
+		s, _ := newStore(t)
+		ctx := t.Context()
+		logo := func(scan files.ScanStatus) files.File {
+			f := activate(row(files.PurposeOrgLogo))
+			png := files.MIMEPNG
+			f.DeclaredMIME, f.DetectedMIME, f.ScanStatus, f.OwnerUserID = png, &png, scan, nil
+			return f
+		}
+		keyOf := func(f files.File) *string {
+			k := string(f.Purpose) + "/" + f.ID.String() + "-0123456789abcdef0123456789abcdef.png"
+			return &k
+		}
+		clean, skipped, pending := logo(files.ScanClean), logo(files.ScanSkipped), logo(files.ScanPending)
+		cv := activate(row(files.PurposeCV))
+		cv.ScanStatus = files.ScanClean
+		for _, f := range []files.File{clean, skipped, pending, cv} {
+			if err := s.Insert(ctx, f); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got, err := s.Unpublished(ctx, []files.ScanStatus{files.ScanClean}, uuid.Nil(), 10)
+		if err != nil || len(got) != 1 || got[0].ID != clean.ID {
+			t.Fatalf("Unpublished(clean) = %+v, %v; want the clean logo only", got, err)
+		}
+		got, _ = s.Unpublished(ctx, []files.ScanStatus{files.ScanClean, files.ScanSkipped}, clean.ID, 10)
+		if len(got) != 1 || got[0].ID != skipped.ID {
+			t.Fatalf("Unpublished(clean, skipped) after the clean one = %+v", got)
+		}
+		clean.PublicKey = keyOf(clean)
+		if err := s.Update(ctx, clean); err != nil {
+			t.Fatalf("Update with a public key: %v", err)
+		}
+		if again := stored(t, s, clean.ID)[0]; again.PublicKey == nil || *again.PublicKey != *clean.PublicKey {
+			t.Fatalf("public key after Update = %v", again.PublicKey)
+		}
+		if got, _ := s.Unpublished(ctx, []files.ScanStatus{files.ScanClean}, uuid.Nil(), 10); len(got) != 0 {
+			t.Fatalf("Unpublished after the copy = %+v", got)
+		}
+		for name, f := range map[string]files.File{
+			"pending scan":    func() files.File { f := pending; f.PublicKey = keyOf(f); return f }(),
+			"private purpose": func() files.File { f := cv; f.PublicKey = keyOf(clean); return f }(),
+			"infected":        func() files.File { f := clean; f.ScanStatus = files.ScanInfected; return f }(),
+			"not a key":       func() files.File { f := skipped; k := "org_logo/../secret.png"; f.PublicKey = &k; return f }(),
+		} {
+			if err := s.Update(ctx, f); !errors.Is(err, problem.ErrValidation) {
+				t.Errorf("%s: Update = %v, want 422 (files_public_key_chk / _format_chk)", name, err)
+			}
+		}
+		dup := skipped
+		dup.PublicKey = clean.PublicKey
+		if err := s.Update(ctx, dup); !errors.Is(err, problem.ErrConflict) {
+			t.Fatalf("duplicate public key = %v, want 409 (files_public_key_uq)", err)
+		}
+	})
+
 	t.Run("lock in a transaction", func(t *testing.T) {
 		t.Parallel()
 		s, tx := newStore(t)

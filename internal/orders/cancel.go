@@ -13,6 +13,7 @@ import (
 	"koro/internal/entitlements"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/problem"
 	"koro/internal/platform/queue"
 	"koro/internal/platform/textx"
 )
@@ -51,11 +52,11 @@ func cleanText(loc, s string, maxRunes int, required bool) (string, error) {
 	n, err := textx.NormalizeText(s)
 	switch {
 	case err != nil:
-		return "", fieldErr(loc, "contains characters that are not allowed")
+		return "", problem.Field(loc, "contains characters that are not allowed")
 	case required && n == "":
-		return "", fieldErr(loc, "is required")
+		return "", problem.Field(loc, "is required")
 	case utf8.RuneCountInString(n) > maxRunes:
-		return "", fieldErr(loc, "must be at most "+strconv.Itoa(maxRunes)+" characters")
+		return "", problem.Field(loc, "must be at most "+strconv.Itoa(maxRunes)+" characters")
 	}
 	return n, nil
 }

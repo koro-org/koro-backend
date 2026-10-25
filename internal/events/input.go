@@ -143,7 +143,7 @@ func (s *service) apply(ctx context.Context, a authz.Actor, o orgs.OrgSummary, e
 	clear := map[string]bool{}
 	for _, f := range p.Clear {
 		if !slices.Contains(clearableFields, f) {
-			return applied{}, fieldErr("body.clear", "unknown field "+f)
+			return applied{}, problem.Field("body.clear", "unknown field "+f)
 		}
 		clear[f] = true
 	}
@@ -151,7 +151,7 @@ func (s *service) apply(ctx context.Context, a authz.Actor, o orgs.OrgSummary, e
 	set := func(loc string, v *string, maxRunes int, dst **string) error {
 		if clear[loc] {
 			if v != nil {
-				return fieldErr("body."+loc, "is both set and cleared")
+				return problem.Field("body."+loc, "is both set and cleared")
 			}
 			*dst = nil
 			return nil
@@ -195,7 +195,7 @@ func (s *service) apply(ctx context.Context, a authz.Actor, o orgs.OrgSummary, e
 	}
 	switch {
 	case clear["online_url"] && p.OnlineURL != nil:
-		return applied{}, fieldErr("body.online_url", "is both set and cleared")
+		return applied{}, problem.Field("body.online_url", "is both set and cleared")
 	case clear["online_url"]:
 		next.OnlineURL = nil
 	case p.OnlineURL != nil:
@@ -207,17 +207,17 @@ func (s *service) apply(ctx context.Context, a authz.Actor, o orgs.OrgSummary, e
 	}
 	switch {
 	case clear["description_json"] && p.Description != nil:
-		return applied{}, fieldErr("body.description_json", "is both set and cleared")
+		return applied{}, problem.Field("body.description_json", "is both set and cleared")
 	case clear["description_json"]:
 		next.DescriptionJSON, next.DescriptionText = nil, nil
 	case p.Description != nil:
 		raw, err := json.Marshal(p.Description)
 		if err != nil {
-			return applied{}, fieldErr("body.description_json", "must be a Tiptap document")
+			return applied{}, problem.Field("body.description_json", "must be a Tiptap document")
 		}
 		doc, text, err := sanitizeDescription(raw)
 		if err != nil {
-			return applied{}, fieldErr("body.description_json",
+			return applied{}, problem.Field("body.description_json",
 				"must be a Tiptap document of paragraphs, headings (2-3), lists, quotes, bold, italic and https links (at most 20000 characters)")
 		}
 		next.DescriptionJSON, next.DescriptionText = doc, nil
@@ -227,31 +227,31 @@ func (s *service) apply(ctx context.Context, a authz.Actor, o orgs.OrgSummary, e
 	}
 	if p.Category != nil {
 		if !p.Category.Valid() {
-			return applied{}, fieldErr("body.category", "unknown category")
+			return applied{}, problem.Field("body.category", "unknown category")
 		}
 		next.Category = *p.Category
 	}
 	if p.Format != nil {
 		if !p.Format.Valid() {
-			return applied{}, fieldErr("body.format", "must be in_person, online or hybrid")
+			return applied{}, problem.Field("body.format", "must be in_person, online or hybrid")
 		}
 		next.Format = *p.Format
 	}
 	if p.StartsAt != nil {
 		if p.StartsAt.IsZero() {
-			return applied{}, fieldErr("body.starts_at", "is required")
+			return applied{}, problem.Field("body.starts_at", "is required")
 		}
 		next.StartsAt = p.StartsAt.UTC().Truncate(time.Microsecond)
 	}
 	if p.EndsAt != nil {
 		if p.EndsAt.IsZero() {
-			return applied{}, fieldErr("body.ends_at", "is required")
+			return applied{}, problem.Field("body.ends_at", "is required")
 		}
 		next.EndsAt = p.EndsAt.UTC().Truncate(time.Microsecond)
 	}
 	if p.Visibility != nil {
 		if !p.Visibility.Valid() {
-			return applied{}, fieldErr("body.visibility", "must be public, university or members")
+			return applied{}, problem.Field("body.visibility", "must be public, university or members")
 		}
 		next.Visibility = *p.Visibility
 	}
@@ -260,7 +260,7 @@ func (s *service) apply(ctx context.Context, a authz.Actor, o orgs.OrgSummary, e
 	}
 	if next.Visibility != VisibilityUniversity {
 		if p.VisibilityUniversityID != nil {
-			return applied{}, fieldErr("body.visibility_university_id", "applies to university visibility only")
+			return applied{}, problem.Field("body.visibility_university_id", "applies to university visibility only")
 		}
 		next.VisibilityUniversityID = nil
 	}
@@ -269,18 +269,18 @@ func (s *service) apply(ctx context.Context, a authz.Actor, o orgs.OrgSummary, e
 	}
 	if p.RegistrationMode != nil {
 		if !p.RegistrationMode.Valid() {
-			return applied{}, fieldErr("body.registration_mode", "must be auto or manual")
+			return applied{}, problem.Field("body.registration_mode", "must be auto or manual")
 		}
 		next.RegistrationMode = *p.RegistrationMode
 	}
 	switch {
 	case clear["capacity"] && p.Capacity != nil:
-		return applied{}, fieldErr("body.capacity", "is both set and cleared")
+		return applied{}, problem.Field("body.capacity", "is both set and cleared")
 	case clear["capacity"]:
 		next.Capacity = nil
 	case p.Capacity != nil:
 		if *p.Capacity < 1 || *p.Capacity > maxCapacity {
-			return applied{}, fieldErr("body.capacity", "must be 1-100000")
+			return applied{}, problem.Field("body.capacity", "must be 1-100000")
 		}
 		next.Capacity = ptr(*p.Capacity)
 	}
@@ -295,7 +295,7 @@ func (s *service) apply(ctx context.Context, a authz.Actor, o orgs.OrgSummary, e
 	} {
 		switch {
 		case clear[f.loc] && f.v != nil:
-			return applied{}, fieldErr("body."+f.loc, "is both set and cleared")
+			return applied{}, problem.Field("body."+f.loc, "is both set and cleared")
 		case clear[f.loc]:
 			*f.dst = nil
 		case f.v != nil:
@@ -314,7 +314,7 @@ func (s *service) apply(ctx context.Context, a authz.Actor, o orgs.OrgSummary, e
 	out := applied{next: next}
 	switch {
 	case clear["cover_file_id"] && p.CoverFileID != nil:
-		return applied{}, fieldErr("body.cover_file_id", "is both set and cleared")
+		return applied{}, problem.Field("body.cover_file_id", "is both set and cleared")
 	case clear["cover_file_id"]:
 		out.next.CoverFileID = nil
 	case p.CoverFileID != nil && (e.CoverFileID == nil || *e.CoverFileID != *p.CoverFileID):
@@ -336,7 +336,7 @@ func (s *service) checkCover(ctx context.Context, a authz.Actor, o orgs.OrgSumma
 	if s.d.Files == nil {
 		return problem.ErrUnavailable
 	}
-	bad := fieldErr("body.cover_file_id", "must be an event_cover upload of this organization")
+	bad := problem.Field("body.cover_file_id", "must be an event_cover upload of this organization")
 	f, err := s.d.Files.Get(ctx, fileID)
 	switch {
 	case errors.Is(err, files.ErrNotFound):
@@ -358,29 +358,29 @@ func (s *service) checkCover(ctx context.Context, a authz.Actor, o orgs.OrgSumma
 func (s *service) validateRow(ctx context.Context, o orgs.OrgSummary, e Event) error {
 	switch {
 	case !e.EndsAt.After(e.StartsAt):
-		return fieldErr("body.ends_at", "must be after starts_at")
+		return problem.Field("body.ends_at", "must be after starts_at")
 	case e.RegistrationOpensAt != nil && e.RegistrationClosesAt != nil && !e.RegistrationClosesAt.After(*e.RegistrationOpensAt):
-		return fieldErr("body.registration_closes_at", "must be after registration_opens_at")
+		return problem.Field("body.registration_closes_at", "must be after registration_opens_at")
 	case e.RegistrationClosesAt != nil && e.RegistrationClosesAt.After(e.EndsAt):
-		return fieldErr("body.registration_closes_at", "must not be after ends_at")
+		return problem.Field("body.registration_closes_at", "must not be after ends_at")
 	case e.CancelDeadlineAt != nil && e.CancelDeadlineAt.After(e.EndsAt):
-		return fieldErr("body.cancel_deadline_at", "must not be after ends_at")
+		return problem.Field("body.cancel_deadline_at", "must not be after ends_at")
 	case !e.RequiresRegistration && (e.Capacity != nil || e.WaitlistEnabled || e.CheckinEnabled):
-		return fieldErr("body.requires_registration", "capacity, waiting list and check-in need registration")
+		return problem.Field("body.requires_registration", "capacity, waiting list and check-in need registration")
 	case e.WaitlistEnabled && e.Capacity == nil:
-		return fieldErr("body.waitlist_enabled", "a waiting list needs a capacity")
+		return problem.Field("body.waitlist_enabled", "a waiting list needs a capacity")
 	case e.Capacity != nil && *e.Capacity < e.ConfirmedCount:
-		return fieldErr("body.capacity", "is below the confirmed registrations")
+		return problem.Field("body.capacity", "is below the confirmed registrations")
 	case e.Format == FormatInPerson && e.OnlineURL != nil:
-		return fieldErr("body.online_url", "applies to online and hybrid events only")
+		return problem.Field("body.online_url", "applies to online and hybrid events only")
 	case e.Format != FormatInPerson && e.Status != StatusDraft && e.OnlineURL == nil:
-		return fieldErr("body.online_url", "is required for a published online or hybrid event")
+		return problem.Field("body.online_url", "is required for a published online or hybrid event")
 	}
 	if e.Visibility != VisibilityUniversity {
 		return nil
 	}
 	if e.VisibilityUniversityID == nil {
-		return fieldErr("body.visibility_university_id", "is required for university visibility")
+		return problem.Field("body.visibility_university_id", "is required for university visibility")
 	}
 	return s.checkUniversity(ctx, o, *e.VisibilityUniversityID)
 }
@@ -389,7 +389,7 @@ func (s *service) validateRow(ctx context.Context, o orgs.OrgSummary, e Event) e
 // club targets its own university, a university org itself; the platform
 // org any.
 func (s *service) checkUniversity(ctx context.Context, o orgs.OrgSummary, id uuid.UUID) error {
-	bad := fieldErr("body.visibility_university_id", "must be the organizer's own active university")
+	bad := problem.Field("body.visibility_university_id", "must be the organizer's own active university")
 	u, err := s.d.Catalog.GetUniversity(ctx, id)
 	switch {
 	case errors.Is(err, directory.ErrNotFound):

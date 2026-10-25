@@ -192,16 +192,16 @@ var (
 // (FormSchema.Canonical). Errors are 422 validation_failed.
 func ParseFormSchema(raw []byte, loc string) (FormSchema, error) {
 	if len(raw) > maxFormSchemaBytes {
-		return FormSchema{}, fieldErr(loc, "must be at most 64 KiB")
+		return FormSchema{}, problem.Field(loc, "must be at most 64 KiB")
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	var s FormSchema
 	if err := dec.Decode(&s); err != nil {
-		return FormSchema{}, fieldErr(loc, "is not a form schema: "+jsonReason(err))
+		return FormSchema{}, problem.Field(loc, "is not a form schema: "+jsonReason(err))
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return FormSchema{}, fieldErr(loc, "must be a single JSON object")
+		return FormSchema{}, problem.Field(loc, "must be a single JSON object")
 	}
 	c := &schemaChecker{}
 	out := c.schema(loc, s)

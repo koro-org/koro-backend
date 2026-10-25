@@ -16,6 +16,7 @@ import (
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // doorStart is the clock at the door: ten minutes before the test events
@@ -134,7 +135,7 @@ func TestCheckin_SameQRTwice_SecondReturnsAlreadyCheckedIn(t *testing.T) {
 		t.Fatalf("checkin.recorded org %s, want %s", p.OrgID, ev.Event.OrgID)
 	}
 	// Every scan is audited, never with the token.
-	scans := e.audit.of(authz.EventsCheckinCreate)
+	scans := e.audit.Of(authz.EventsCheckinCreate)
 	if len(scans) != 2 || scans[0].Metadata["result"] != "ok" || scans[1].Metadata["result"] != "already_checked_in" {
 		t.Fatalf("audit = %+v", scans)
 	}
@@ -285,9 +286,9 @@ func TestCheckin_SameClientScanID_SameResponse(t *testing.T) {
 	_, tk3 := e.ticketOf(t, persona(t, "other_club_admin"), other.Event.ID)
 	e.clk.Set(doorStart)
 	_, err = e.svc.CreateCheckin(t.Context(), mgr, ev.Event.ID, qrInput(tk2.Payload, scan, doorStart))
-	wantCode(t, err, 409, "conflict")
+	problemtest.WantProblem(t, err, 409, "conflict")
 	_, err = e.svc.CreateCheckin(t.Context(), staff, other.Event.ID, qrInput(tk3.Payload, scan, doorStart))
-	wantCode(t, err, 409, "conflict")
+	problemtest.WantProblem(t, err, 409, "conflict")
 	if got := e.scan(t, mgr, ev.Event.ID, tk2.Payload); got.Result != events.ResultOK {
 		t.Fatalf("the refused scan left state: %+v", got)
 	}
@@ -410,16 +411,16 @@ func TestCheckin_NonStaff_403(t *testing.T) {
 	e.clk.Set(doorStart)
 	_, err = e.svc.CreateCheckin(t.Context(), persona(t, "event_staff"), unstaffed.Event.ID, qrInput(tk.Payload, uuid.NewV7(), doorStart))
 	wantForbidden(t, err)
-	if len(e.mem.Checkins(r.Registration.ID)) != 0 || len(e.audit.of(authz.EventsCheckinCreate)) != 0 {
+	if len(e.mem.Checkins(r.Registration.ID)) != 0 || len(e.audit.Of(authz.EventsCheckinCreate)) != 0 {
 		t.Fatal("a refused scan left a trace")
 	}
 	// The body and the event state.
 	staff := persona(t, "event_staff")
 	_, err = e.svc.CreateCheckin(t.Context(), staff, ev.Event.ID, qrInput(tk.Payload, uuid.NewV7(), doorStart.Add(-25*time.Hour)))
-	wantCode(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 	_, err = e.svc.CreateCheckin(t.Context(), staff, ev.Event.ID, events.CheckinInput{Method: events.MethodQR,
 		ManualCode: "7KQ2M9TX", ClientScanID: uuid.NewV7(), ScannedAt: doorStart})
-	wantCode(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 	e.clk.Set(t0)
 	off := e.regEvent(t, nil, motivationField)
 	if _, err := e.svc.AddStaff(t.Context(), persona(t, "club_admin"), off.Event.ID, "event_staff@example.test", events.StaffScanner); err != nil {
@@ -427,7 +428,7 @@ func TestCheckin_NonStaff_403(t *testing.T) {
 	}
 	e.clk.Set(doorStart)
 	_, err = e.svc.CreateCheckin(t.Context(), staff, off.Event.ID, qrInput(tk.Payload, uuid.NewV7(), doorStart))
-	wantCode(t, err, 409, "events.invalid_state") // check-in is off
+	problemtest.WantProblem(t, err, 409, "events.invalid_state") // check-in is off
 }
 
 // TestQR_BadMAC_Rejected: a well-formed token that is not a derived one is
@@ -502,7 +503,7 @@ func TestQR_OldKid_Rejected(t *testing.T) {
 		t.Fatalf("retired key = %+v, %v", res, err)
 	}
 	_, err := retired.GetMyTicket(t.Context(), persona(t, "club_member"), m.Registration.ID)
-	wantCode(t, err, 409, "events.invalid_state")
+	problemtest.WantProblem(t, err, 409, "events.invalid_state")
 	nw, err := retired.ReissueMyTicket(t.Context(), persona(t, "club_member"), m.Registration.ID)
 	if err != nil || nw.Ticket.KeyID != "t2" {
 		t.Fatalf("reissue under t2 = %+v, %v", nw, err)
@@ -588,14 +589,14 @@ func TestGetMyTicket_NotConfirmed_409(t *testing.T) {
 	}
 	w := e.mustRegister(t, persona(t, "club_member"), ev.Event.ID, motivation)
 	_, err := e.svc.GetMyTicket(t.Context(), persona(t, "club_member"), w.Registration.ID)
-	wantCode(t, err, 409, "events.invalid_state")
+	problemtest.WantProblem(t, err, 409, "events.invalid_state")
 	_, err = e.svc.GetMyTicket(t.Context(), persona(t, "club_member"), r.Registration.ID)
 	wantNotFound(t, err)
 	if _, err := e.svc.CancelMyRegistration(t.Context(), adultStudent(t), r.Registration.ID, ""); err != nil {
 		t.Fatal(err)
 	}
 	_, err = e.svc.GetMyTicket(t.Context(), adultStudent(t), r.Registration.ID)
-	wantCode(t, err, 409, "events.invalid_state")
+	problemtest.WantProblem(t, err, 409, "events.invalid_state")
 	// The waitlisted one was promoted: its ticket is there now.
 	if _, err := e.svc.GetMyTicket(t.Context(), persona(t, "club_member"), w.Registration.ID); err != nil {
 		t.Fatalf("promoted: %v", err)
@@ -643,7 +644,7 @@ func TestReissue_IncrementsVersion_OldRevoked(t *testing.T) {
 	if err != nil || p.RegistrationID != r.Registration.ID || p.TicketVersion != 3 {
 		t.Fatalf("payload = %+v, %v", p, err)
 	}
-	if n := len(e.audit.of(authz.EventsTicketReissue)); n != 2 {
+	if n := len(e.audit.Of(authz.EventsTicketReissue)); n != 2 {
 		t.Fatalf("%d reissue audits", n)
 	}
 	// Others: 404 for a stranger's own path, 403 for a member, 404 for a
@@ -664,7 +665,7 @@ func TestReissue_IncrementsVersion_OldRevoked(t *testing.T) {
 		t.Fatalf("scan = %+v", res)
 	}
 	_, err = e.svc.ReissueMyTicket(t.Context(), adultStudent(t), r.Registration.ID)
-	wantCode(t, err, 409, "events.invalid_state")
+	problemtest.WantProblem(t, err, 409, "events.invalid_state")
 }
 
 // TestVoidCheckin_RevertsToConfirmed: a manager voids a check-in with a
@@ -683,7 +684,7 @@ func TestVoidCheckin_RevertsToConfirmed(t *testing.T) {
 	_, err := e.svc.VoidCheckin(t.Context(), persona(t, "event_staff"), ev.Event.ID, *first.CheckinID, "Yanlış kişi okutuldu")
 	wantForbidden(t, err)
 	_, err = e.svc.VoidCheckin(t.Context(), persona(t, "event_manager_a"), ev.Event.ID, *first.CheckinID, "kısa")
-	wantCode(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 	v, err := e.svc.VoidCheckin(t.Context(), persona(t, "event_manager_a"), ev.Event.ID, *first.CheckinID, "Yanlış kişi okutuldu")
 	if err != nil || v.RegistrationStatus != events.RegConfirmed || v.Checkin.VoidedAt == nil {
 		t.Fatalf("void = %+v, %v", v, err)
@@ -703,7 +704,7 @@ func TestVoidCheckin_RevertsToConfirmed(t *testing.T) {
 		t.Fatalf("checkin.voided = %+v, %v", p, err)
 	}
 	_, err = e.svc.VoidCheckin(t.Context(), persona(t, "club_admin"), ev.Event.ID, *first.CheckinID, "Yanlış kişi okutuldu")
-	wantCode(t, err, 409, "events.invalid_state")
+	problemtest.WantProblem(t, err, 409, "events.invalid_state")
 	other := e.doorEvent(t)
 	_, err = e.svc.VoidCheckin(t.Context(), persona(t, "club_admin"), other.Event.ID, *first.CheckinID, "Yanlış kişi okutuldu")
 	wantNotFound(t, err)
@@ -761,7 +762,7 @@ func TestFinalize_BeforeEnd_409(t *testing.T) {
 	ev := e.doorEvent(t)
 	e.clk.Set(ev.Event.EndsAt.Add(-time.Minute))
 	_, err := e.svc.FinalizeEventAttendance(t.Context(), persona(t, "club_admin"), ev.Event.ID)
-	wantCode(t, err, 409, "events.invalid_state")
+	problemtest.WantProblem(t, err, 409, "events.invalid_state")
 	e.clk.Set(ev.Event.EndsAt)
 	_, err = e.svc.FinalizeEventAttendance(t.Context(), persona(t, "event_staff"), ev.Event.ID)
 	wantForbidden(t, err)
@@ -769,7 +770,7 @@ func TestFinalize_BeforeEnd_409(t *testing.T) {
 	off := e.regEvent(t, nil, motivationField)
 	e.clk.Set(off.Event.EndsAt.Add(time.Hour))
 	_, err = e.svc.FinalizeEventAttendance(t.Context(), persona(t, "club_admin"), off.Event.ID)
-	wantCode(t, err, 409, "events.invalid_state")
+	problemtest.WantProblem(t, err, 409, "events.invalid_state")
 	if len(e.eventsOf(domainevent.TopicAttendanceFinalized)) != 0 {
 		t.Fatal("attendance.finalized written")
 	}
@@ -786,13 +787,13 @@ func TestFinalize_Twice_409(t *testing.T) {
 		t.Fatalf("finalize = %d, %v", n, err)
 	}
 	_, err = e.svc.FinalizeEventAttendance(t.Context(), persona(t, "club_admin"), ev.Event.ID)
-	wantCode(t, err, 409, "events.invalid_state")
+	problemtest.WantProblem(t, err, 409, "events.invalid_state")
 	tk, err := e.svc.GetMyTicket(t.Context(), persona(t, "club_member"), regs[1].Registration.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = e.svc.CreateCheckin(t.Context(), persona(t, "event_staff"), ev.Event.ID, qrInput(tk.Payload, uuid.NewV7(), e.clk.Now()))
-	wantCode(t, err, 409, "events.invalid_state")
+	problemtest.WantProblem(t, err, 409, "events.invalid_state")
 	fin := e.eventsOf(domainevent.TopicAttendanceFinalized)
 	p, err := domainevent.Decode[domainevent.AttendanceFinalized](fin[0])
 	if len(fin) != 1 || err != nil || p.EventID != ev.Event.ID || p.FinalizedBy != "user" {

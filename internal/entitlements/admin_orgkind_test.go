@@ -6,12 +6,14 @@ import (
 	"testing"
 	"uuid"
 
+	"koro/internal/audit/audittest"
 	"koro/internal/authz/authztest"
 	"koro/internal/entitlements"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/obs"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // TestAdminGrant_OrgMustBeCompany (06 H-40, T-148; BE-017): with the orgs
@@ -27,7 +29,7 @@ func TestAdminGrant_OrgMustBeCompany(t *testing.T) {
 	clk := clock.NewFake(t0)
 	store := entitlements.NewMemStore(clk.Now)
 	mod, err := entitlements.New(entitlements.Deps{
-		Store: store, Tx: db.NopTx{}, Audit: &auditLog{}, Clock: clk, Log: obs.Discard(),
+		Store: store, Tx: db.NopTx{}, Audit: &audittest.Recorder{}, Clock: clk, Log: obs.Discard(),
 		Idempotency: idempotency.New(idempotency.Deps{Tx: db.NopTx{}, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()}),
 		OrgKind: func(_ context.Context, id uuid.UUID) (string, bool, error) {
 			if id == broken {
@@ -52,7 +54,7 @@ func TestAdminGrant_OrgMustBeCompany(t *testing.T) {
 		{authztest.ID("missing_org"), 404, "not_found"},
 	} {
 		_, err := mod.Service.AdminGrant(t.Context(), fin, tc.org, in)
-		if st, code := problemOf(err); st != tc.status || code != tc.code {
+		if st, code := problemtest.StatusCode(err); st != tc.status || code != tc.code {
 			t.Fatalf("grant to %s = %d %q (%v), want %d %s", tc.org, st, code, err, tc.status, tc.code)
 		}
 	}

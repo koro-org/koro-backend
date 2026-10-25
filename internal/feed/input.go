@@ -102,12 +102,12 @@ func (s *service) apply(ctx context.Context, a authz.Actor, o orgs.OrgSummary, c
 		case "body_json":
 			next.BodyJSON, next.BodyText = nil, nil
 		default:
-			return applied{}, fieldErr("body.clear", "lists a field that cannot be cleared")
+			return applied{}, problem.Field("body.clear", "lists a field that cannot be cleared")
 		}
 	}
 	if p.Kind != nil {
 		if !p.Kind.Valid() {
-			return applied{}, fieldErr("body.kind", "must be text, image, event_share or opportunity_call")
+			return applied{}, problem.Field("body.kind", "must be text, image, event_share or opportunity_call")
 		}
 		next.Kind = *p.Kind
 	}
@@ -115,7 +115,7 @@ func (s *service) apply(ctx context.Context, a authz.Actor, o orgs.OrgSummary, c
 		if cur.AudienceKind == AudienceSegment && *p.AudienceKind != AudienceSegment {
 			// The audience of a targeted post was compiled (and paid for)
 			// at creation: a new audience is a new targeted post.
-			return applied{}, fieldErr("body.audience_kind", "a targeted post keeps the audience it was created with")
+			return applied{}, problem.Field("body.audience_kind", "a targeted post keeps the audience it was created with")
 		}
 		switch *p.AudienceKind {
 		case "", AudiencePublic:
@@ -123,7 +123,7 @@ func (s *service) apply(ctx context.Context, a authz.Actor, o orgs.OrgSummary, c
 		case AudienceFollowers:
 			next.AudienceKind = AudienceFollowers
 		default: // segment is createTargetedPost's (BE-032)
-			return applied{}, fieldErr("body.audience_kind", "must be public or followers")
+			return applied{}, problem.Field("body.audience_kind", "must be public or followers")
 		}
 	}
 	if p.Title != nil {
@@ -136,7 +136,7 @@ func (s *service) apply(ctx context.Context, a authz.Actor, o orgs.OrgSummary, c
 	if p.Body != nil {
 		body, text, err := sanitizeBody(p.Body)
 		if err != nil {
-			return applied{}, fieldErr("body.body_json", err.Error())
+			return applied{}, problem.Field("body.body_json", err.Error())
 		}
 		next.BodyJSON, next.BodyText = body, nil
 		if text != "" {
@@ -199,35 +199,35 @@ func shape(p Post, media int) error {
 	switch p.Kind {
 	case KindText:
 		if !hasBody {
-			return fieldErr("body.body_json", "a text post needs a body")
+			return problem.Field("body.body_json", "a text post needs a body")
 		}
 	case KindImage:
 		if media == 0 {
-			return fieldErr("body.media", "an image post needs 1-10 images")
+			return problem.Field("body.media", "an image post needs 1-10 images")
 		}
 	case KindEventShare:
 		if p.EventID == nil {
-			return fieldErr("body.event_id", "an event_share post needs an event")
+			return problem.Field("body.event_id", "an event_share post needs an event")
 		}
 	case KindOpportunityCall:
 		if p.Opportunity == nil {
-			return fieldErr("body.opportunity", "an opportunity_call post needs an opportunity")
+			return problem.Field("body.opportunity", "an opportunity_call post needs an opportunity")
 		}
 		if !hasBody {
-			return fieldErr("body.body_json", "an opportunity_call post needs a body")
+			return problem.Field("body.body_json", "an opportunity_call post needs a body")
 		}
 	}
 	switch {
 	case media > 0 && p.Kind != KindImage:
-		return fieldErr("body.media", "images belong to image posts only")
+		return problem.Field("body.media", "images belong to image posts only")
 	case media > maxMedia:
-		return fieldErr("body.media", "at most 10 images")
+		return problem.Field("body.media", "at most 10 images")
 	case p.EventID != nil && p.Kind != KindEventShare:
-		return fieldErr("body.event_id", "applies to event_share posts only")
+		return problem.Field("body.event_id", "applies to event_share posts only")
 	case p.Opportunity != nil && p.Kind != KindOpportunityCall:
-		return fieldErr("body.opportunity", "applies to opportunity_call posts only")
+		return problem.Field("body.opportunity", "applies to opportunity_call posts only")
 	case p.BodyJSON != nil && !hasBody:
-		return fieldErr("body.body_json", "has no text")
+		return problem.Field("body.body_json", "has no text")
 	}
 	return nil
 }
@@ -245,33 +245,33 @@ var (
 func cleanOpportunity(o Opportunity, author AuthorKind) (JSON, error) {
 	switch {
 	case !slices.Contains(opportunityTypes, o.Type):
-		return nil, fieldErr("body.opportunity.type", "must be internship, job, part_time, project, volunteer or talent_call")
+		return nil, problem.Field("body.opportunity.type", "must be internship, job, part_time, project, volunteer or talent_call")
 	case !slices.Contains(applyVias, o.ApplyVia):
-		return nil, fieldErr("body.opportunity.apply_via", "must be contact_request or external_url")
+		return nil, problem.Field("body.opportunity.apply_via", "must be contact_request or external_url")
 	case o.ApplyVia == "contact_request" && author != AuthorCompany:
-		return nil, fieldErr("body.opportunity.apply_via", "contact_request is for company posts; use external_url")
+		return nil, problem.Field("body.opportunity.apply_via", "contact_request is for company posts; use external_url")
 	case o.WorkMode != "" && !slices.Contains(workModes, o.WorkMode):
-		return nil, fieldErr("body.opportunity.work_mode", "must be onsite, hybrid or remote")
+		return nil, problem.Field("body.opportunity.work_mode", "must be onsite, hybrid or remote")
 	case len(o.EligibleYears) > 8:
-		return nil, fieldErr("body.opportunity.eligible_years", "at most 8 class years")
+		return nil, problem.Field("body.opportunity.eligible_years", "at most 8 class years")
 	}
 	out := o
 	out.ExternalURL = strings.TrimSpace(o.ExternalURL)
 	switch {
 	case o.ApplyVia == "external_url" && !httpsURL(out.ExternalURL):
-		return nil, fieldErr("body.opportunity.external_url", "must be an https:// URL")
+		return nil, problem.Field("body.opportunity.external_url", "must be an https:// URL")
 	case o.ApplyVia != "external_url" && out.ExternalURL != "":
-		return nil, fieldErr("body.opportunity.external_url", "applies to external_url only")
+		return nil, problem.Field("body.opportunity.external_url", "applies to external_url only")
 	}
 	if o.Deadline != "" {
 		if _, err := time.Parse(time.DateOnly, o.Deadline); err != nil {
-			return nil, fieldErr("body.opportunity.deadline", "must be a YYYY-MM-DD date")
+			return nil, problem.Field("body.opportunity.deadline", "must be a YYYY-MM-DD date")
 		}
 	}
 	if o.City != "" {
 		c, err := textx.NormalizeText(o.City)
 		if err != nil || utf8.RuneCountInString(c) > maxCity {
-			return nil, fieldErr("body.opportunity.city", "must be at most 60 characters of plain text")
+			return nil, problem.Field("body.opportunity.city", "must be at most 60 characters of plain text")
 		}
 		out.City = c
 	}
@@ -280,7 +280,7 @@ func cleanOpportunity(o Opportunity, author AuthorKind) (JSON, error) {
 	years = slices.Compact(years)
 	for _, y := range years {
 		if y < 1 || y > 8 {
-			return nil, fieldErr("body.opportunity.eligible_years", "class years are 1-8")
+			return nil, problem.Field("body.opportunity.eligible_years", "class years are 1-8")
 		}
 	}
 	out.EligibleYears = years
@@ -318,7 +318,7 @@ func (s *service) checkMedia(ctx context.Context, a authz.Actor, o orgs.OrgSumma
 		return nil
 	}
 	if len(media) > maxMedia {
-		return fieldErr("body.media", "at most 10 images")
+		return problem.Field("body.media", "at most 10 images")
 	}
 	if s.d.Files == nil {
 		return problem.ErrUnavailable
@@ -327,26 +327,26 @@ func (s *service) checkMedia(ctx context.Context, a authz.Actor, o orgs.OrgSumma
 	for i, m := range media {
 		loc := "body.media[" + strconv.Itoa(i) + "]"
 		if seen[m.FileID] {
-			return fieldErr(loc+".file_id", "is listed twice")
+			return problem.Field(loc+".file_id", "is listed twice")
 		}
 		seen[m.FileID] = true
 		if m.AltText != "" {
 			alt, err := textx.NormalizeText(m.AltText)
 			if err != nil || utf8.RuneCountInString(alt) > maxAltText {
-				return fieldErr(loc+".alt_text", "must be at most 300 characters of plain text")
+				return problem.Field(loc+".alt_text", "must be at most 300 characters of plain text")
 			}
 		}
 		f, err := s.d.Files.Get(ctx, m.FileID)
 		switch {
 		case errors.Is(err, files.ErrNotFound):
-			return fieldErr(loc+".file_id", "must be a post_media upload of this organization")
+			return problem.Field(loc+".file_id", "must be a post_media upload of this organization")
 		case err != nil:
 			return err
 		}
 		ownOrg := f.OrgID != nil && *f.OrgID == o.ID
 		ownUpload := f.UploadedBy != nil && a.IsUser() && *f.UploadedBy == a.UserID
 		if f.Purpose != files.PurposePostMedia || !ownOrg && !ownUpload {
-			return fieldErr(loc+".file_id", "must be a post_media upload of this organization")
+			return problem.Field(loc+".file_id", "must be a post_media upload of this organization")
 		}
 		if f.Status == files.StatusRejected {
 			return files.ErrRejected
@@ -374,15 +374,15 @@ func (s *service) checkEvent(ctx context.Context, o orgs.OrgSummary, id uuid.UUI
 	e, err := s.d.Events.Get(ctx, id)
 	switch {
 	case errors.Is(err, events.ErrNotFound):
-		return fieldErr("body.event_id", "must be a published public event")
+		return problem.Field("body.event_id", "must be a published public event")
 	case err != nil:
 		return err
 	}
 	if e.Status != events.StatusPublished || e.Visibility != events.VisibilityPublic {
-		return fieldErr("body.event_id", "must be a published public event")
+		return problem.Field("body.event_id", "must be a published public event")
 	}
 	if e.Sensitive && e.OrgID != o.ID {
-		return fieldErr("body.event_id", "must be a published public event")
+		return problem.Field("body.event_id", "must be a published public event")
 	}
 	return nil
 }

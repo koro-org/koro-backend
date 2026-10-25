@@ -7,6 +7,7 @@ import (
 	"testing"
 	"uuid"
 
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/directory"
 	"koro/internal/identity"
@@ -15,6 +16,7 @@ import (
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/outbox"
+	"koro/internal/platform/problem/problemtest"
 	"koro/internal/platform/queue"
 	"koro/internal/platform/testutil"
 )
@@ -32,7 +34,7 @@ func TestDecideClaim_GrantFailure_RollsBackClaim(t *testing.T) {
 	log := obs.Discard()
 	out := outbox.New(outbox.Deps{Store: outbox.NewGormStore(d.ORM), Tx: d.Tx, Subs: outbox.NewRegistry(), Queue: queue.NewMem(), Clock: clk, Log: log})
 	idem := idempotency.New(idempotency.Deps{Tx: d.Tx, Store: idempotency.NewGormStore(d.ORM), Clock: clk, Log: log})
-	al := &auditLog{}
+	al := &audittest.Recorder{}
 	ver := &verifications{m: map[uuid.UUID]identity.EduVerification{}}
 	users := &userDir{m: map[uuid.UUID]identity.UserSummary{}}
 	om, err := orgs.New(orgs.Deps{Store: orgs.NewGormStore(d.ORM), Tx: d.Tx, Outbox: out, Audit: al, Idempotency: idem, Clock: clk,
@@ -104,19 +106,19 @@ func TestDecideClaim_GrantFailure_RollsBackClaim(t *testing.T) {
 	// 1. orgs refuses the grant (the claimant is a minor after all).
 	users.set(identity.UserSummary{ID: claimant, Status: identity.StatusActive, IsMinor: true})
 	_, err = svc.AdminDecideClubClaim(ctx, pad, claimID, directory.ClaimDecision{Decision: directory.ClaimApproved})
-	wantCode(t, err, 422, "orgs.club_admin_requires_adult_student")
+	problemtest.WantProblem(t, err, 422, "orgs.club_admin_requires_adult_student")
 	untouched("grant refused")
 
 	// 2. The grant succeeds, then the decision's audit write fails: the
 	// membership orgs wrote rolls back with the rest.
 	users.set(identity.UserSummary{ID: claimant, Status: identity.StatusActive})
 	boom := errors.New("audit down")
-	al.setFail(boom)
+	al.Fail(boom)
 	_, err = svc.AdminDecideClubClaim(ctx, pad, claimID, directory.ClaimDecision{Decision: directory.ClaimApproved})
 	if !errors.Is(err, boom) {
 		t.Fatalf("decision with a failing audit = %v", err)
 	}
-	al.setFail(nil)
+	al.Fail(nil)
 	untouched("audit failed after the grant")
 
 	// 3. The approval commits the membership, the review, the club and the event together.
@@ -141,7 +143,7 @@ func TestDecideClaim_GrantFailure_RollsBackClaim(t *testing.T) {
 	// The next request's Actor carries the new role: no second claim (409).
 	student.Memberships = []authz.Membership{{OrgID: clubID, OrgKind: authz.OrgClub, Role: authz.MemberClubAdmin}}
 	_, err = svc.CreateClubClaim(ctx, student, clubID, directory.ClaimInput{RoleInClub: "YK üyesi", EvidenceText: "Tutanak"})
-	wantCode(t, err, 409, "directory.invalid_state")
+	problemtest.WantProblem(t, err, 409, "directory.invalid_state")
 
 	// The CHECK backs Y6: the claimant cannot be the reviewer.
 	other := pgUser(d)(t)

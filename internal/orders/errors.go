@@ -46,8 +46,3 @@ var (
 	// request fails closed.
 	ErrUnavailable = problem.ErrUnavailable
 )
-
-// fieldErr is a 422 validation_failed with one field error.
-func fieldErr(loc, msg string) error {
-	return problem.ErrValidation.WithFields(problem.FieldError{Location: loc, Message: msg})
-}

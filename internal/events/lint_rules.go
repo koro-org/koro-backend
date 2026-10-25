@@ -7,6 +7,7 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/problem"
 )
 
 // lintRuleAggType is the audit resource type of a lint rule.
@@ -45,7 +46,7 @@ func (s *service) ListLintRules(ctx context.Context, a authz.Actor) ([]LintRule,
 
 func checkClass(c LintClass) error {
 	if !c.Valid() {
-		return fieldErr("body.class", "must be blocked, warn_special or review_identifier")
+		return problem.Field("body.class", "must be blocked, warn_special or review_identifier")
 	}
 	return nil
 }

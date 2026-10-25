@@ -17,6 +17,7 @@ import (
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/page"
 	"koro/internal/platform/problem"
 )
@@ -160,11 +161,7 @@ func event(a authz.Actor, act authz.Action, d DSR, meta map[string]any) audit.Ev
 
 // emit writes an outbox event in the transaction carried by ctx.
 func (s *service) emit(ctx context.Context, p domainevent.Payload, id uuid.UUID) error {
-	ev, err := domainevent.New(p, "dsr", id)
-	if err != nil {
-		return err
-	}
-	return s.d.Outbox.Add(ctx, ev)
+	return outbox.Emit(ctx, s.d.Outbox, p, "dsr", id)
 }
 
 // reauth verifies the R proof of act on a resource (03 §6.2) and returns

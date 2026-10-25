@@ -85,15 +85,15 @@ func (s *service) AdminPutIntegration(ctx context.Context, a authz.Actor, provid
 	account := strings.TrimSpace(in.ExternalAccount)
 	switch {
 	case !slices.Contains(integrationProviders, provider):
-		return Integration{}, fieldErr("path.provider", "must be parasut, iyzico, iys or email")
+		return Integration{}, problem.Field("path.provider", "must be parasut, iyzico, iys or email")
 	case utf8.RuneCountInString(account) > maxExternalAccount:
-		return Integration{}, fieldErr("body.external_account", "must be at most 100 characters")
+		return Integration{}, problem.Field("body.external_account", "must be at most 100 characters")
 	case in.AccessToken == "" && in.RefreshToken == "":
-		return Integration{}, fieldErr("body.credentials", "needs an access_token or a refresh_token")
+		return Integration{}, problem.Field("body.credentials", "needs an access_token or a refresh_token")
 	case len(in.AccessToken) > maxTokenBytes || len(in.RefreshToken) > maxTokenBytes:
-		return Integration{}, fieldErr("body.credentials", "a token must be at most 8 KiB")
+		return Integration{}, problem.Field("body.credentials", "a token must be at most 8 KiB")
 	case in.ExpiresAt != nil && !in.ExpiresAt.After(s.d.Clock.Now()):
-		return Integration{}, fieldErr("body.credentials.expires_at", "must be in the future")
+		return Integration{}, problem.Field("body.credentials.expires_at", "must be in the future")
 	}
 	if s.d.Reauth == nil {
 		return Integration{}, problem.ErrUnavailable

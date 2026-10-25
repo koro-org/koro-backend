@@ -12,7 +12,7 @@ import (
 	"time"
 	"uuid"
 
-	"koro/internal/audit"
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/catalog"
@@ -65,30 +65,6 @@ func ctxOf(t *testing.T, a authz.Actor) context.Context { return authz.WithActor
 var good = identity.ReauthProof{Password: "matrix-reauth-password"}
 
 // ---- fakes
-
-type auditLog struct {
-	mu     sync.Mutex
-	events []audit.Event
-}
-
-func (l *auditLog) Log(_ context.Context, e audit.Event) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.events = append(l.events, e)
-	return nil
-}
-
-func (l *auditLog) of(act authz.Action) []audit.Event {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	var out []audit.Event
-	for _, e := range l.events {
-		if e.Action == string(act) {
-			out = append(out, e)
-		}
-	}
-	return out
-}
 
 // fakeReauth accepts good, refuses a missing or wrong proof.
 type fakeReauth struct{}
@@ -331,7 +307,7 @@ type env struct {
 	ledStore ledger.Store
 	ledger   ledger.Service
 	ledMod   ledger.Module
-	audit    *auditLog
+	audit    *audittest.Recorder
 	outbox   *outbox.Mem
 	queue    *queue.Mem
 	files    *fakeFiles
@@ -372,7 +348,7 @@ func newEnv(t *testing.T, opts ...envOption) *env {
 
 func newEnvOn(t *testing.T, clk *clock.Fake, b backend, platform uuid.UUID, opts ...envOption) *env {
 	t.Helper()
-	e := &env{clk: clk, b: b, store: b.store, ordStore: b.ordStore, entStore: b.entStore, ledStore: b.ledStore, audit: &auditLog{},
+	e := &env{clk: clk, b: b, store: b.store, ordStore: b.ordStore, entStore: b.entStore, ledStore: b.ledStore, audit: &audittest.Recorder{},
 		outbox: outbox.NewMem(clk), queue: queue.NewMem(), files: &fakeFiles{m: map[uuid.UUID]files.FileMeta{}}, sender: &fakeSender{},
 		platform: platform}
 	e.mem, _ = b.store.(*payments.MemStore)

@@ -5,6 +5,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/files"
+	"koro/internal/platform/db"
 )
 
 // DTOs of BE-025 (04 §2.4, §V.1, §V.4, §V.5). Like dto.go, every type is
@@ -79,7 +80,7 @@ func toMemberCardDTO(c MemberCard) MemberCardDTO {
 	d := MemberCardDTO{
 		UserID: m.UserID.String(), FirstName: c.Member.FirstName, LastName: c.Member.LastName, AvatarURL: c.Member.AvatarURL,
 		Membership: MemberCardMembershipDTO{MembershipID: m.ID.String(), Role: string(m.Role), Status: string(m.Status),
-			JoinedAt: utcPtr(m.JoinedAt), Source: string(m.Source)},
+			JoinedAt: db.UTCPtr(m.JoinedAt), Source: string(m.Source)},
 		ClubEventRegistrationsCount: c.RegistrationsCount,
 	}
 	if p := c.Profile; p != nil {
@@ -155,7 +156,7 @@ func toAdminStudentViewDTO(v AdminView) AdminStudentViewDTO {
 	u, p := v.Account.User, v.View.Profile
 	d := AdminStudentViewDTO{
 		UserID: u.ID.String(), Email: u.Email, FirstName: u.FirstName, LastName: u.LastName, Status: string(u.Status),
-		CreatedAt: u.CreatedAt.UTC(), LastLoginAt: utcPtr(u.LastLoginAt), MFAEnabled: u.MFAEnabled, Locale: u.Locale,
+		CreatedAt: u.CreatedAt.UTC(), LastLoginAt: db.UTCPtr(u.LastLoginAt), MFAEnabled: u.MFAEnabled, Locale: u.Locale,
 		Student:       AdminStudentVerificationDTO{Status: string(v.Account.StudentStatus)},
 		PlatformRoles: []string{}, Memberships: []AdminStudentMembershipDTO{},
 		Profile: AdminStudentProfileDTO{

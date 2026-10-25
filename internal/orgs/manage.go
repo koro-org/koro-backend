@@ -8,7 +8,9 @@ import (
 	"koro/internal/authz"
 	"koro/internal/files"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/problem"
 )
 
@@ -62,13 +64,13 @@ func (s *service) UpdateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, if
 		if err != nil {
 			return err
 		}
-		if err := authz.Can(ctx, a, authz.OrgsOrgUpdate, orgResource(o)); err != nil {
+		if err := authz.Can(ctx, a, authz.OrgsOrgUpdate, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
 			return err
 		}
 		if err := writable(a, o); err != nil {
 			return err
 		}
-		if err := checkIfMatch(ifMatch, etagOf(o.UpdatedAt)); err != nil {
+		if err := httpx.CheckIfMatch(ifMatch, httpx.ETag(o.UpdatedAt)); err != nil {
 			return err
 		}
 		if p.empty() {
@@ -200,7 +202,7 @@ func (s *service) attachLogo(ctx context.Context, a authz.Actor, o Org, fileID u
 	if s.d.Files == nil {
 		return problem.ErrUnavailable
 	}
-	bad := fieldErr("body.logo_file_id", "must be an org_logo upload of this organization")
+	bad := problem.Field("body.logo_file_id", "must be an org_logo upload of this organization")
 	f, err := s.d.Files.Get(ctx, fileID)
 	switch {
 	case errors.Is(err, files.ErrNotFound):
@@ -226,11 +228,7 @@ func (s *service) emitOrgUpdated(ctx context.Context, o Org, fields []string) er
 	if len(fields) == 0 {
 		return nil
 	}
-	env, err := domainevent.New(domainevent.OrgUpdated{OrgID: o.ID, OrgKind: string(o.Kind), Fields: fields}, orgAggType, o.ID)
-	if err != nil {
-		return err
-	}
-	return s.d.Outbox.Add(ctx, env)
+	return outbox.Emit(ctx, s.d.Outbox, domainevent.OrgUpdated{OrgID: o.ID, OrgKind: string(o.Kind), Fields: fields}, orgAggType, o.ID)
 }
 
 // openCommerce returns the closeOrg checks bound at call time.
@@ -249,7 +247,7 @@ func (s *service) CloseOrg(ctx context.Context, a authz.Actor, id uuid.UUID, rea
 	if err != nil {
 		return OrgView{}, err
 	}
-	if err := authz.Can(ctx, a, authz.OrgsOrgClose, orgResource(o)); err != nil {
+	if err := authz.Can(ctx, a, authz.OrgsOrgClose, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
 		return OrgView{}, err
 	}
 	reason, err = cleanReason("body.reason", reason)
@@ -337,11 +335,11 @@ func (s *service) TransferOwnership(ctx context.Context, a authz.Actor, id, newO
 	if err != nil {
 		return OrgView{}, err
 	}
-	if err := authz.Can(ctx, a, authz.OrgsOwnershipTransfer, orgResource(o)); err != nil {
+	if err := authz.Can(ctx, a, authz.OrgsOwnershipTransfer, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
 		return OrgView{}, err
 	}
 	if newOwner == uuid.Nil() {
-		return OrgView{}, fieldErr("body.new_owner_user_id", "is required")
+		return OrgView{}, problem.Field("body.new_owner_user_id", "is required")
 	}
 	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.OrgsOwnershipTransfer, o.ID, true, nil))
 	if err != nil {

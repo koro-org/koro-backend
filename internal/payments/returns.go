@@ -10,6 +10,7 @@ import (
 	"koro/internal/files"
 	"koro/internal/identity"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/problem"
 )
 
 // The return of a transfer to its sender (06 H-18, H-56, T-60, T-228): a
@@ -62,7 +63,7 @@ func (s *service) RequestReturn(ctx context.Context, a authz.Actor, id uuid.UUID
 	}
 	if target == "" {
 		if t.SenderIBAN == nil {
-			return IncomingTransfer{}, fieldErr("body.target_iban", "is required: the sender's IBAN is unknown")
+			return IncomingTransfer{}, problem.Field("body.target_iban", "is required: the sender's IBAN is unknown")
 		}
 		target = *t.SenderIBAN
 	}
@@ -106,7 +107,7 @@ func (s *service) DecideReturn(ctx context.Context, a authz.Actor, id uuid.UUID,
 		return IncomingTransfer{}, err
 	}
 	if !d.Valid() {
-		return IncomingTransfer{}, fieldErr("body.decision", "must be approved or rejected")
+		return IncomingTransfer{}, problem.Field("body.decision", "must be approved or rejected")
 	}
 	t, err := s.d.Store.GetTransfer(ctx, id, false)
 	if err != nil {

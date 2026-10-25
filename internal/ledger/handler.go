@@ -13,6 +13,7 @@ import (
 	"koro/internal/platform/clock"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // Register adds the ledger operations of 04 §2.17 to api: the journal
@@ -128,7 +129,7 @@ func (in *listInput) query(fp string) JournalQuery {
 	if in.RefID != "" {
 		id, err := uuid.Parse(in.RefID)
 		if err != nil {
-			q.invalid = fieldErr("query.ref_id", "must be a UUID")
+			q.invalid = problem.Field("query.ref_id", "must be a UUID")
 			return q
 		}
 		q.Filter.RefID = &id
@@ -146,7 +147,7 @@ func (in *listInput) query(fp string) JournalQuery {
 		}
 		t, err := parseBound(b.raw, b.end)
 		if err != nil {
-			q.invalid = fieldErr(b.loc, "must be an RFC 3339 time or a YYYY-MM-DD date")
+			q.invalid = problem.Field(b.loc, "must be an RFC 3339 time or a YYYY-MM-DD date")
 			return q
 		}
 		*b.dst = &t

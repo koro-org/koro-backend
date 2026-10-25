@@ -9,9 +9,11 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // Register adds the parties operations (04 §2.13) to api: legal parties
@@ -21,7 +23,7 @@ import (
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "listOrgLegalParties", Method: http.MethodGet, Path: "/orgs/{org_id}/legal-parties",
 		Summary: "List the legal parties of an organization",
 		Description: "A company sees its buyer parties (invoice titles); a club or a university sees the legal side of " +
@@ -29,13 +31,13 @@ func Register(api huma.API, svc Service) {
 			"and MERSİS number are masked for organization roles.",
 	}, op.Meta{Action: string(authz.PartiesLegalPartyRead), Surface: op.SurfaceOrg}, h.list)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "getOrgLegalParty", Method: http.MethodGet, Path: "/orgs/{org_id}/legal-parties/{party_id}",
 		Summary:     "Get a legal party of an organization",
 		Description: "The ETag is the If-Match value of updateLegalParty. A party of another organization is 404.",
 	}, op.Meta{Action: string(authz.PartiesLegalPartyRead), Surface: op.SurfaceOrg}, h.get)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "createBuyerLegalParty", Method: http.MethodPost, Path: "/orgs/{org_id}/legal-parties",
 		Summary: "Create the invoice title of a company", DefaultStatus: http.StatusCreated,
 		Description: "Creates a buyer_company party of the company (pending_verification until finance verifies it). " +
@@ -43,21 +45,21 @@ func Register(api huma.API, svc Service) {
 			"check digit and is unique among active buyer parties (409 parties.tax_id_taken).",
 	}, op.Meta{Action: string(authz.PartiesLegalPartyCreate), Surface: op.SurfaceOrg, Idempotency: op.IdempotencyOptional}, h.create)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "updateLegalParty", Method: http.MethodPatch, Path: "/orgs/{org_id}/legal-parties/{party_id}",
 		Summary: "Update the invoice title of a company",
 		Description: "If-Match with the ETag of getOrgLegalParty is required: missing → 428, stale → 412. A change to a " +
 			"verified (or rejected) party sends it back to pending_verification; orders keep their own snapshot.",
 	}, op.Meta{Action: string(authz.PartiesLegalPartyUpdate), Surface: op.SurfaceOrg}, h.update)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "uploadLegalPartyDocument", Method: http.MethodPost, Path: "/orgs/{org_id}/legal-parties/{party_id}/documents",
 		Summary: "Add a document to a legal party", DefaultStatus: http.StatusCreated,
 		Description: "file_id is a party_document upload (createUpload, then completeUpload) of the caller or of this " +
 			"organization; any other file is 422. Finance verifies the document later.",
 	}, op.Meta{Action: string(authz.PartiesDocumentUpload), Surface: op.SurfaceOrg, Idempotency: op.IdempotencyOptional}, h.upload)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "downloadLegalPartyDocument", Method: http.MethodGet,
 		Path:    "/orgs/{org_id}/legal-parties/{party_id}/documents/{document_id}/download",
 		Summary: "Download a legal party document",
@@ -65,13 +67,13 @@ func Register(api huma.API, svc Service) {
 			"is audited. A file that is not scanned clean is 409 files.not_clean.",
 	}, op.Meta{Action: string(authz.PartiesDocumentRead), Surface: op.SurfaceOrg}, h.download)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "adminListLegalParties", Method: http.MethodGet, Path: "/admin/legal-parties",
 		Summary:     "List legal parties (finance and platform admins)",
 		Description: "Newest first. q matches part of the title, or a 10-digit tax number exactly. Tax numbers are not masked here.",
 	}, op.Meta{Action: string(authz.PartiesLegalPartyRead), Surface: op.SurfaceAdmin}, h.adminList)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "adminCreateLegalParty", Method: http.MethodPost, Path: "/admin/legal-parties",
 		Summary: "Create a payee or platform legal party", DefaultStatus: http.StatusCreated,
 		Description: "kind payee: the legal side of a payee (foundation, university, association, institution). In the " +
@@ -80,21 +82,21 @@ func Register(api huma.API, svc Service) {
 			"individuals only) is stored envelope-encrypted with a blind index and never returned.",
 	}, op.Meta{Action: string(authz.PartiesLegalPartyCreate), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.adminCreate)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "adminUpdateLegalParty", Method: http.MethodPatch, Path: "/admin/legal-parties/{party_id}",
 		Summary: "Update a legal party",
 		Description: "If-Match is required (428/412). A change to a verified (or rejected) party sends it back to " +
 			"pending_verification. status inactive retires a party (kept for the financial records).",
 	}, op.Meta{Action: string(authz.PartiesLegalPartyUpdate), Surface: op.SurfaceAdmin}, h.adminUpdate)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "adminVerifyLegalParty", Method: http.MethodPost, Path: "/admin/legal-parties/{party_id}/verification",
 		Summary: "Verify or reject a legal party",
 		Description: "verified needs the tax number and an address (422 parties.verification_incomplete); a party that " +
 			"is already decided or inactive is 409 parties.invalid_state.",
 	}, op.Meta{Action: string(authz.PartiesLegalPartyVerify), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.adminVerify)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "adminVerifyLegalPartyDocument", Method: http.MethodPost, Path: "/admin/legal-party-documents/{document_id}/verify",
 		Summary: "Verify a legal party document",
 		Description: "Never by the document's uploader (403 authz.four_eyes_violation). A verified document is 409 " +
@@ -104,23 +106,7 @@ func Register(api huma.API, svc Service) {
 	registerPayees(api, h)
 }
 
-// reg registers one parties operation with its Koro metadata.
-func reg[I, O any](api huma.API, o huma.Operation, m op.Meta, fn func(context.Context, *I) (*O, error)) {
-	o.Tags = []string{"parties"}
-	huma.Register(api, op.Koro(o, m), fn)
-}
-
 type handler struct{ svc Service }
-
-// parseID parses a path ID; a malformed one becomes the nil UUID, which no
-// row has: it answers like a missing row (404) after the surface's authz.
-func parseID(s string) uuid.UUID {
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return uuid.Nil()
-	}
-	return id
-}
 
 // ---- DTOs
 
@@ -277,7 +263,7 @@ func (h handler) list(ctx context.Context, in *orgPath) (*listOutput, error) {
 	if err != nil {
 		return nil, err
 	}
-	vs, err := h.svc.ListOrgParties(ctx, a, parseID(in.OrgID))
+	vs, err := h.svc.ListOrgParties(ctx, a, httpx.ParseID(in.OrgID))
 	if err != nil {
 		return nil, err
 	}
@@ -293,7 +279,7 @@ func (h handler) get(ctx context.Context, in *partyPath) (*partyOutput, error) {
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.GetOrgParty(ctx, a, parseID(in.OrgID), parseID(in.PartyID))
+	v, err := h.svc.GetOrgParty(ctx, a, httpx.ParseID(in.OrgID), httpx.ParseID(in.PartyID))
 	if err != nil {
 		return nil, err
 	}
@@ -321,7 +307,7 @@ func (h handler) create(ctx context.Context, in *createPartyInput) (*partyOutput
 		return nil, err
 	}
 	b := in.Body
-	v, err := h.svc.CreateBuyerParty(ctx, a, parseID(in.OrgID), PartyInput{
+	v, err := h.svc.CreateBuyerParty(ctx, a, httpx.ParseID(in.OrgID), PartyInput{
 		LegalType: LegalType(b.LegalType), Title: b.Title, TaxOffice: b.TaxOffice, TaxNo: b.TaxNo, MersisNo: b.MersisNo,
 		Address: b.Address.model(), Email: b.Email, Phone: b.Phone,
 	})
@@ -353,7 +339,7 @@ func (h handler) update(ctx context.Context, in *updatePartyInput) (*partyOutput
 		return nil, err
 	}
 	b := in.Body
-	v, err := h.svc.UpdateOrgParty(ctx, a, parseID(in.OrgID), parseID(in.PartyID), in.IfMatch, PartyPatch{
+	v, err := h.svc.UpdateOrgParty(ctx, a, httpx.ParseID(in.OrgID), httpx.ParseID(in.PartyID), in.IfMatch, PartyPatch{
 		LegalType: legalTypePtr(b.LegalType), Title: b.Title, TaxOffice: b.TaxOffice, TaxNo: b.TaxNo, MersisNo: b.MersisNo,
 		Address: b.Address.model(), Email: b.Email, Phone: b.Phone,
 	})
@@ -390,9 +376,9 @@ func (h handler) upload(ctx context.Context, in *uploadDocumentInput) (*document
 	}
 	fileID, err := uuid.Parse(in.Body.FileID)
 	if err != nil {
-		return nil, fieldErr("body.file_id", "must be a UUID")
+		return nil, problem.Field("body.file_id", "must be a UUID")
 	}
-	d, err := h.svc.UploadDocument(ctx, a, parseID(in.OrgID), parseID(in.PartyID), DocumentInput{
+	d, err := h.svc.UploadDocument(ctx, a, httpx.ParseID(in.OrgID), httpx.ParseID(in.PartyID), DocumentInput{
 		Kind: DocumentKind(in.Body.Kind), FileID: fileID,
 	})
 	if err != nil {
@@ -417,7 +403,7 @@ func (h handler) download(ctx context.Context, in *downloadInput) (*downloadOutp
 	if err != nil {
 		return nil, err
 	}
-	l, err := h.svc.DownloadDocument(ctx, a, parseID(in.OrgID), parseID(in.PartyID), parseID(in.DocumentID))
+	l, err := h.svc.DownloadDocument(ctx, a, httpx.ParseID(in.OrgID), httpx.ParseID(in.PartyID), httpx.ParseID(in.DocumentID))
 	if err != nil {
 		return nil, err
 	}
@@ -500,7 +486,7 @@ func (h handler) adminCreate(ctx context.Context, in *adminCreatePartyInput) (*p
 	if b.OrgID != "" {
 		org, err := uuid.Parse(b.OrgID)
 		if err != nil {
-			return nil, fieldErr("body.org_id", "must be a UUID")
+			return nil, problem.Field("body.org_id", "must be a UUID")
 		}
 		pi.OrgID = &org
 	}
@@ -552,7 +538,7 @@ func (h handler) adminUpdate(ctx context.Context, in *adminUpdatePartyInput) (*p
 		v := VATStatus(*b.VATStatus)
 		p.VATStatus = &v
 	}
-	v, err := h.svc.AdminUpdateParty(ctx, a, parseID(in.PartyID), in.IfMatch, p)
+	v, err := h.svc.AdminUpdateParty(ctx, a, httpx.ParseID(in.PartyID), in.IfMatch, p)
 	if err != nil {
 		return nil, err
 	}
@@ -573,7 +559,7 @@ func (h handler) adminVerify(ctx context.Context, in *adminVerifyPartyInput) (*p
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.AdminVerifyParty(ctx, a, parseID(in.PartyID), Decision{Decision: Status(in.Body.Decision), Note: in.Body.Note})
+	v, err := h.svc.AdminVerifyParty(ctx, a, httpx.ParseID(in.PartyID), Decision{Decision: Status(in.Body.Decision), Note: in.Body.Note})
 	if err != nil {
 		return nil, err
 	}
@@ -590,7 +576,7 @@ func (h handler) adminVerifyDocument(ctx context.Context, in *adminVerifyDocumen
 	if err != nil {
 		return nil, err
 	}
-	d, err := h.svc.AdminVerifyDocument(ctx, a, parseID(in.DocumentID))
+	d, err := h.svc.AdminVerifyDocument(ctx, a, httpx.ParseID(in.DocumentID))
 	if err != nil {
 		return nil, err
 	}

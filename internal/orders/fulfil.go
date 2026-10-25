@@ -9,6 +9,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/problem"
 	"koro/internal/platform/queue"
 )
 
@@ -216,14 +217,14 @@ func (s *service) AdminResolveDispute(ctx context.Context, a authz.Actor, lineID
 	switch in.Outcome {
 	case OutcomeFulfilled:
 		if in.RefundAmount != nil {
-			return LineView{}, fieldErr("body.refund_amount", "applies to a refund only")
+			return LineView{}, problem.Field("body.refund_amount", "applies to a refund only")
 		}
 	case OutcomeRefund:
 		if in.RefundAmount != nil && *in.RefundAmount < 1 {
-			return LineView{}, fieldErr("body.refund_amount", "must be positive")
+			return LineView{}, problem.Field("body.refund_amount", "must be positive")
 		}
 	default:
-		return LineView{}, fieldErr("body.outcome", "must be fulfilled or refund")
+		return LineView{}, problem.Field("body.outcome", "must be fulfilled or refund")
 	}
 	hash, err := idempotency.Hash(struct {
 		Op      string
@@ -253,7 +254,7 @@ func (s *service) AdminResolveDispute(ctx context.Context, a authz.Actor, lineID
 			case *in.RefundAmount < amount:
 				// A partial refund would leave the rest of the line to pay out,
 				// which a cancelled line never is (T-291; BE-043/BE-044).
-				return Line{}, fieldErr("body.refund_amount", "must be the line's whole refundable amount: partial refunds are not supported")
+				return Line{}, problem.Field("body.refund_amount", "must be the line's whole refundable amount: partial refunds are not supported")
 			}
 		}
 		next := cur

@@ -212,11 +212,11 @@ func (s *service) ListTransactions(ctx context.Context, a authz.Actor, q Journal
 	f := q.Filter
 	switch {
 	case f.Kind != "" && !f.Kind.Valid():
-		return JournalPage{}, fieldErr("query.kind", "is not a known transaction kind")
+		return JournalPage{}, problem.Field("query.kind", "is not a known transaction kind")
 	case f.RefType != "" && !f.RefType.Valid():
-		return JournalPage{}, fieldErr("query.ref_type", "is not a known reference type")
+		return JournalPage{}, problem.Field("query.ref_type", "is not a known reference type")
 	case f.From != nil && f.To != nil && !f.To.After(*f.From):
-		return JournalPage{}, fieldErr("query.occurred_to", "must be after occurred_from")
+		return JournalPage{}, problem.Field("query.occurred_to", "must be after occurred_from")
 	}
 	limit := page.ClampLimit(q.Limit)
 	rows, err := s.d.Store.List(ctx, f, q.After, limit+1)
@@ -230,8 +230,4 @@ func (s *service) ListTransactions(ctx context.Context, a authz.Actor, q Journal
 		out.Next = &last
 	}
 	return out, nil
-}
-
-func fieldErr(location, msg string) error {
-	return problem.ErrValidation.WithFields(problem.FieldError{Location: location, Message: msg})
 }

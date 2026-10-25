@@ -13,6 +13,7 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/feed"
 	"koro/internal/platform/clock"
@@ -115,7 +116,7 @@ func TestFeedQuery_NoNPlusOne(t *testing.T) {
 	w.follow(t, reader, org)
 	clk := clock.NewFake(t0)
 	mod, err := feed.New(feed.Deps{
-		Store: store, Tx: d.Tx, Outbox: outbox.NewMem(clk), Queue: queue.NewMem(), Audit: &auditLog{}, Orgs: orgsDir,
+		Store: store, Tx: d.Tx, Outbox: outbox.NewMem(clk), Queue: queue.NewMem(), Audit: &audittest.Recorder{}, Orgs: orgsDir,
 		Idempotency: idempotency.New(idempotency.Deps{Tx: d.Tx, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()}),
 		Clock:       clk, Log: obs.Discard(), Viewers: &fakeViewers{keys: map[uuid.UUID][]string{}},
 	})
@@ -262,7 +263,7 @@ func TestLike_Service_Postgres(t *testing.T) {
 	orgsDir.orgs[org] = o
 	clk := clock.NewFake(t0)
 	mod, err := feed.New(feed.Deps{
-		Store: store, Tx: d.Tx, Outbox: outbox.NewMem(clk), Queue: queue.NewMem(), Audit: &auditLog{}, Orgs: orgsDir,
+		Store: store, Tx: d.Tx, Outbox: outbox.NewMem(clk), Queue: queue.NewMem(), Audit: &audittest.Recorder{}, Orgs: orgsDir,
 		Idempotency: idempotency.New(idempotency.Deps{Tx: d.Tx, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()}),
 		Clock:       clk, Log: obs.Discard(), Viewers: &fakeViewers{keys: map[uuid.UUID][]string{}},
 	})

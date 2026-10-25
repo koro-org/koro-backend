@@ -14,6 +14,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/files"
 	"koro/internal/kvkk"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // zipOf reads the export of request id: file names (zip order) and their
@@ -112,7 +113,7 @@ func TestExport_DownloadAudited_PresignTTL(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.DownloadMine(ctx, student, d.ID)
-	wantErr(t, err, kvkk.ErrExportNotReady)
+	problemtest.WantErr(t, err, kvkk.ErrExportNotReady)
 	e.completeAs(t, d.ID)
 	if _, err := e.deliver(t, 0); err != nil {
 		t.Fatal(err)
@@ -129,9 +130,9 @@ func TestExport_DownloadAudited_PresignTTL(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.DownloadMine(ctx, actor(t, "student_b"), d.ID)
-	wantErr(t, err, kvkk.ErrNotFound)
+	problemtest.WantErr(t, err, kvkk.ErrNotFound)
 	_, err = e.svc.AdminDownload(ctx, actor(t, "platform_admin"), d.ID)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	audits := e.audit.of(string(authz.KvkkDsrExportDownload))
 	if len(audits) != 2 || *audits[0].ActorUserID != student.UserID || *audits[1].ActorUserID != dpo.UserID ||
 		audits[0].Metadata["ttl_seconds"] != 300 || audits[1].Metadata["subject_user_id"] != student.UserID.String() {
@@ -154,7 +155,7 @@ func TestExport_DownloadAudited_PresignTTL(t *testing.T) {
 	fileID := *cur.ExportFileID
 	e.clk.Advance(24 * time.Hour)
 	_, err = e.svc.DownloadMine(ctx, student, d.ID) // purge not run yet: still refused
-	wantErr(t, err, kvkk.ErrExportExpired)
+	problemtest.WantErr(t, err, kvkk.ErrExportExpired)
 	if err := purge.Handle(workerCtx(t)); err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +167,7 @@ func TestExport_DownloadAudited_PresignTTL(t *testing.T) {
 		t.Fatal("export file kept after the purge")
 	}
 	_, err = e.svc.DownloadMine(ctx, student, d.ID)
-	wantErr(t, err, kvkk.ErrExportExpired)
+	problemtest.WantErr(t, err, kvkk.ErrExportExpired)
 	if sweep := e.audit.of(string(authz.KvkkRetentionSweep)); len(sweep) != 1 || sweep[0].SystemJob != "kvkk.purge_exports" ||
 		sweep[0].Metadata["policy_code"] != "dsr_export_file" {
 		t.Fatalf("purge audit = %+v", sweep)

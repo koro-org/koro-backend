@@ -12,13 +12,15 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/consent"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
+	"koro/internal/platform/problem"
 )
 
 // registerForms adds the 7 form and lint rule operations of BE-026 (04
 // §2.6).
 func registerForms(api huma.API, h handler) {
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "getEventForm", Method: http.MethodGet, Path: "/events/{event_id}/form",
 		Summary: "Get the registration form of an event",
 		Description: "The current published version (404 when the event has none or is not visible). answers_schema is " +
@@ -27,14 +29,14 @@ func registerForms(api huma.API, h handler) {
 			"texts of the consent fields (Accept-Language: tr or en).",
 	}, op.Meta{Action: string(authz.EventsFormRead), Surface: op.SurfacePublic}, h.getForm)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "getEventFormDraft", Method: http.MethodGet, Path: "/events/{event_id}/form/draft",
 		Summary: "Get the form draft",
 		Description: "The draft schema with a KVKK lint preview over the active rules. The ETag is the If-Match value " +
 			"of putEventFormDraft.",
 	}, op.Meta{Action: string(authz.EventsFormManage), Surface: op.SurfaceResource}, h.getFormDraft)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "putEventFormDraft", Method: http.MethodPut, Path: "/events/{event_id}/form/draft",
 		Summary: "Replace the form draft",
 		Description: "If-Match with the ETag of getEventFormDraft is required: missing → 428, stale → 412. At most 20 " +
@@ -42,7 +44,7 @@ func registerForms(api huma.API, h handler) {
 			"allow-list. Every save returns the lint preview. Cancelled and completed events: 409.",
 	}, op.Meta{Action: string(authz.EventsFormManage), Surface: op.SurfaceResource}, h.putFormDraft)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "publishEventForm", Method: http.MethodPost, Path: "/events/{event_id}/form/versions",
 		DefaultStatus: http.StatusCreated,
 		Summary:       "Publish the form draft as a new version",
@@ -54,12 +56,12 @@ func registerForms(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.EventsFormPublish), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional},
 		h.publishForm)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "adminListFormLintRules", Method: http.MethodGet, Path: "/admin/form-lint-rules",
 		Summary: "List the form lint rules", Description: "Active and retired rules, blocked first.",
 	}, op.Meta{Action: string(authz.EventsLintRuleManage), Surface: op.SurfaceAdmin}, h.listLintRules)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "adminCreateFormLintRule", Method: http.MethodPost, Path: "/admin/form-lint-rules",
 		DefaultStatus: http.StatusCreated,
 		Summary:       "Create a form lint rule",
@@ -68,7 +70,7 @@ func registerForms(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.EventsLintRuleManage), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional},
 		h.createLintRule)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "adminUpdateFormLintRule", Method: http.MethodPatch, Path: "/admin/form-lint-rules/{rule_id}",
 		Summary: "Update a form lint rule", Description: "Rules are never deleted: active=false retires one.",
 	}, op.Meta{Action: string(authz.EventsLintRuleManage), Surface: op.SurfaceAdmin}, h.updateLintRule)
@@ -246,7 +248,7 @@ func (h handler) putFormDraft(ctx context.Context, in *putFormDraftInput) (*draf
 	}
 	raw, err := json.Marshal(in.Body.DraftSchema)
 	if err != nil {
-		return nil, fieldErr("body.draft_schema", "is not a form schema")
+		return nil, problem.Field("body.draft_schema", "is not a form schema")
 	}
 	v, err := h.svc.PutFormDraft(ctx, a, in.id(), in.IfMatch, raw)
 	if err != nil {
@@ -354,7 +356,7 @@ func (h handler) updateLintRule(ctx context.Context, in *updateRuleInput) (*rule
 	if in.Body.Class != nil {
 		p.Class = ptr(LintClass(*in.Body.Class))
 	}
-	r, err := h.svc.UpdateLintRule(ctx, a, parseID(in.RuleID), p)
+	r, err := h.svc.UpdateLintRule(ctx, a, httpx.ParseID(in.RuleID), p)
 	if err != nil {
 		return nil, err
 	}

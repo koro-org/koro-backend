@@ -17,6 +17,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
+	"koro/internal/platform/problem"
 )
 
 // Reference data files of `koro seed reference` (db/reference). Every file
@@ -223,7 +224,7 @@ func (s *service) ImportReference(ctx context.Context, data ReferenceData) (Impo
 			}
 			u, err := s.d.Store.UniversityByYokCode(ctx, code)
 			if errors.Is(err, ErrNotFound) {
-				return University{}, fieldErr(fmt.Sprintf("%s:%d.university_yok_code", file, i+1), "unknown university")
+				return University{}, problem.Field(fmt.Sprintf("%s:%d.university_yok_code", file, i+1), "unknown university")
 			}
 			if err == nil {
 				unis[code] = u
@@ -313,10 +314,10 @@ func (s *service) importUniversity(ctx context.Context, r RefUniversity, loc str
 func (s *service) importDomain(ctx context.Context, u University, r RefDomain, loc string) (bool, bool, error) {
 	d := normalizeDomain(r.Domain)
 	if !domainRe.MatchString(d) {
-		return false, false, fieldErr(loc+"domain", "must be a .edu.tr domain")
+		return false, false, problem.Field(loc+"domain", "must be a .edu.tr domain")
 	}
 	if !r.DomainKind.Valid() {
-		return false, false, fieldErr(loc+"domain_kind", "must be one of student, staff, mixed")
+		return false, false, problem.Field(loc+"domain_kind", "must be one of student, staff, mixed")
 	}
 	cur, err := s.d.Store.GetDomain(ctx, d)
 	switch {
@@ -373,7 +374,7 @@ func (s *service) importDepartment(ctx context.Context, u University, r RefDepar
 	if r.Faculty != "" {
 		f, err := s.d.Store.FacultyByName(ctx, u.ID, r.Faculty)
 		if errors.Is(err, ErrNotFound) {
-			return false, false, fieldErr(loc+"faculty", "unknown faculty of the university")
+			return false, false, problem.Field(loc+"faculty", "unknown faculty of the university")
 		}
 		if err != nil {
 			return false, false, err

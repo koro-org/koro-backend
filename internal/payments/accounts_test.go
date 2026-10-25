@@ -65,7 +65,7 @@ func TestCollectionAccount_SameUserApprove_403FourEyes(t *testing.T) {
 	if _, err := e.svc.DecideCollectionAccount(ctxOf(t, fin2), fin2, c.ID, payments.DecisionRejected, good); !errors.Is(err, payments.ErrInvalidState) {
 		t.Fatalf("second decision = %v, want 409", err)
 	}
-	ev := e.audit.of(authz.PaymentsCollectionAccountApprove)
+	ev := e.audit.Of(authz.PaymentsCollectionAccountApprove)
 	if len(ev) != 1 || ev[0].Metadata["iban_masked"] != "TR33 **** **** **** **** 8413 26" || ev[0].Metadata[audit.MetaReauth] != "password" {
 		t.Fatalf("audit = %+v", ev)
 	}
@@ -177,7 +177,7 @@ func TestCollectionAccount_DefaultAndRetire(t *testing.T) {
 	if _, err := e.svc.MakeDefaultCollectionAccount(ctxOf(t, fin), fin, c.ID, good); !errors.Is(err, payments.ErrInvalidState) {
 		t.Fatalf("pending default = %v", err)
 	}
-	if n := len(e.audit.of(authz.PaymentsCollectionAccountRetire)); n != 3 {
+	if n := len(e.audit.Of(authz.PaymentsCollectionAccountRetire)); n != 3 {
 		t.Fatalf("retire audits = %d, want 3", n)
 	}
 	// The notice task reaches every platform and finance admin (in-app and e-mail).

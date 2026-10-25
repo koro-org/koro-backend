@@ -33,38 +33,11 @@ func TestReauthDenied_EveryROperation(t *testing.T) {
 			_, err := e.svc.AdminSetClubSensitivity(authz.WithActor(ctx, a), a, id, set, p)
 			return err
 		},
-		Rows:   func() []audittest.Row { return e.audit.reauthRows(authz.DirectoryClubSetSensitivity) },
-		Denied: rowOf(audit.Event{Action: string(authz.DirectoryClubSetSensitivity), ResourceType: authz.TypeClub, ResourceID: &id}.By(a)),
+		Rows:   func() []audittest.Row { return e.audit.Rows(authz.DirectoryClubSetSensitivity) },
+		Denied: audittest.RowOf(audit.Event{Action: string(authz.DirectoryClubSetSensitivity), ResourceType: authz.TypeClub, ResourceID: &id}.By(a)),
 		Late:   e.reauth,
 		Wrong:  identity.ReauthProof{Password: "yanlis-parola-1"}, WrongErr: identity.ErrReauthFailed,
 		Missing: identity.ReauthProof{}, MissingErr: identity.ErrReauthRequired,
 		Good: identity.ReauthProof{Password: goodPassword},
 	}.Run(t)
-}
-
-// ofOutcome returns the recorded events of act with outcome o.
-func (l *auditLog) ofOutcome(act authz.Action, o audit.Outcome) []audit.Event {
-	var out []audit.Event
-	for _, e := range l.of(act) {
-		if e.Outcome == o {
-			out = append(out, e)
-		}
-	}
-	return out
-}
-
-// rowOf is e in audittest's terms.
-func rowOf(e audit.Event) audittest.Row {
-	return audittest.Row{Action: e.Action, Outcome: string(e.Outcome), Reason: e.Reason, ActorUserID: e.ActorUserID,
-		ActorOrgID: e.ActorOrgID, SystemJob: e.SystemJob, OrgID: e.OrgID, ResourceType: e.ResourceType, ResourceID: e.ResourceID,
-		Metadata: e.Metadata}
-}
-
-// reauthRows returns the recorded events of act in audittest's terms.
-func (l *auditLog) reauthRows(act authz.Action) []audittest.Row {
-	var out []audittest.Row
-	for _, e := range l.of(act) {
-		out = append(out, rowOf(e))
-	}
-	return out
 }

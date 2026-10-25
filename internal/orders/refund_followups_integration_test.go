@@ -12,6 +12,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/orders"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // T-309: delivery starts while a refund still owns the order/line locks. Its
@@ -132,7 +133,7 @@ func TestRefundFollowups_DeliveryRechecksLockedRefund_Postgres(t *testing.T) {
 					t.Fatal(err)
 				}
 			} else {
-				wantProblem(t, err, 409, "orders.invalid_state")
+				problemtest.WantProblem(t, err, 409, "orders.invalid_state")
 			}
 			after, err := p.mod.Orders.GetLine(t.Context(), target.ID)
 			if err != nil {

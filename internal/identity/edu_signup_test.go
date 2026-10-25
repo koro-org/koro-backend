@@ -13,6 +13,7 @@ import (
 	"koro/internal/identity"
 	"koro/internal/platform/civil"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // BE-097 (koro-mobile B-06): the registration e-mail of a student's
@@ -82,7 +83,7 @@ func TestConfirmEmail_EduSignup_VerifiesAccountAndStudent(t *testing.T) {
 	}
 	// The token is purpose-bound: the student confirmation refuses it and
 	// leaves it usable.
-	wantErr(t, e.svc.ConfirmEduVerification(ctx, authz.Anonymous(), tok), identity.ErrInvalidToken)
+	problemtest.WantErr(t, e.svc.ConfirmEduVerification(ctx, authz.Anonymous(), tok), identity.ErrInvalidToken)
 
 	e.clk.Advance(time.Hour)
 	if err := e.svc.ConfirmEmail(ctx, authz.Anonymous(), tok); err != nil {
@@ -125,8 +126,8 @@ func TestConfirmEmail_EduSignup_VerifiesAccountAndStudent(t *testing.T) {
 		t.Fatalf("domain lookups %d, want 1 (at the confirmation)", n)
 	}
 	// Single use on both endpoints; still one e-mail in total.
-	wantErr(t, e.svc.ConfirmEmail(ctx, authz.Anonymous(), tok), identity.ErrInvalidToken)
-	wantErr(t, e.svc.ConfirmEduVerification(ctx, authz.Anonymous(), tok), identity.ErrInvalidToken)
+	problemtest.WantErr(t, e.svc.ConfirmEmail(ctx, authz.Anonymous(), tok), identity.ErrInvalidToken)
+	problemtest.WantErr(t, e.svc.ConfirmEduVerification(ctx, authz.Anonymous(), tok), identity.ErrInvalidToken)
 	e.deliver(t)
 	if n := len(e.mail.sent()); n != 1 || e.mailsOf("identity.edu_verify") != 0 {
 		t.Fatalf("%d e-mails, a second verification e-mail went out", n)
@@ -260,7 +261,7 @@ func TestConfirmEmail_EduSignup_ReissuedTokenVerifiesAccountOnly(t *testing.T) {
 				t.Fatal(err)
 			}
 			second := e.lastToken(t, "identity.verify_email")
-			wantErr(t, e.svc.ConfirmEmail(ctx, authz.Anonymous(), first), identity.ErrInvalidToken) // closed
+			problemtest.WantErr(t, e.svc.ConfirmEmail(ctx, authz.Anonymous(), first), identity.ErrInvalidToken) // closed
 			if err := e.svc.ConfirmEmail(ctx, authz.Anonymous(), second); err != nil {
 				t.Fatal(err)
 			}

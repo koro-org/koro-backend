@@ -26,93 +26,87 @@ func Register(api huma.API, svc Service, clk clock.Clock) {
 	}
 	h := handler{svc: svc, clk: clk}
 
-	huma.Register(api, kop(huma.Operation{
+	op.Register(api, "kvkk", huma.Operation{
 		OperationID: "createMyDataRequest", Method: http.MethodPost, Path: "/me/data-requests",
 		Summary: "Submit a data subject request", DefaultStatus: http.StatusCreated,
 		Description: "KVKK md. 11 application. The answer is due within 30 days (due_at). An erasure (account deletion) " +
 			"request needs the re-authentication proof in reauth (403 identity.reauth_required otherwise). One open " +
 			"request per type (409 kvkk.duplicate_request).",
 	}, op.Meta{Action: string(authz.KvkkDsrCreate), Surface: op.SurfaceSelf, Idempotency: op.IdempotencyOptional,
-		Reauth: true, RateLimit: op.RateExport}), h.createMine)
+		Reauth: true, RateLimit: op.RateExport}, h.createMine)
 
-	huma.Register(api, kop(huma.Operation{
+	op.Register(api, "kvkk", huma.Operation{
 		OperationID: "listMyDataRequests", Method: http.MethodGet, Path: "/me/data-requests",
 		Summary: "List my data subject requests",
-	}, op.Meta{Action: string(authz.KvkkDsrListOwn), Surface: op.SurfaceSelf}), h.listMine)
+	}, op.Meta{Action: string(authz.KvkkDsrListOwn), Surface: op.SurfaceSelf}, h.listMine)
 
-	huma.Register(api, kop(huma.Operation{
+	op.Register(api, "kvkk", huma.Operation{
 		OperationID: "getMyDataRequest", Method: http.MethodGet, Path: "/me/data-requests/{dsr_id}",
 		Summary: "Get my data subject request and its answer",
-	}, op.Meta{Action: string(authz.KvkkDsrReadOwn), Surface: op.SurfaceSelf}), h.getMine)
+	}, op.Meta{Action: string(authz.KvkkDsrReadOwn), Surface: op.SurfaceSelf}, h.getMine)
 
-	huma.Register(api, kop(huma.Operation{
+	op.Register(api, "kvkk", huma.Operation{
 		OperationID: "cancelMyDataRequest", Method: http.MethodPost, Path: "/me/data-requests/{dsr_id}/cancel",
 		Summary:     "Withdraw my data subject request",
 		Description: "Only while the request is received or under identity check (409 kvkk.invalid_state otherwise).",
-	}, op.Meta{Action: string(authz.KvkkDsrCancelOwn), Surface: op.SurfaceSelf, Idempotency: op.IdempotencyOptional}), h.cancelMine)
+	}, op.Meta{Action: string(authz.KvkkDsrCancelOwn), Surface: op.SurfaceSelf, Idempotency: op.IdempotencyOptional}, h.cancelMine)
 
-	huma.Register(api, kop(huma.Operation{
+	op.Register(api, "kvkk", huma.Operation{
 		OperationID: "downloadMyDataExport", Method: http.MethodGet, Path: "/me/data-requests/{dsr_id}/export",
 		Summary: "Get a download link of my data export",
 		Description: "A presigned URL valid for at most 5 minutes; every call is audited. The file is deleted 7 days " +
 			"after the request was answered (410 kvkk.export_expired); 404 kvkk.export_not_ready while it is built.",
-	}, op.Meta{Action: string(authz.KvkkDsrExportDownload), Surface: op.SurfaceSelf}), h.downloadMine)
+	}, op.Meta{Action: string(authz.KvkkDsrExportDownload), Surface: op.SurfaceSelf}, h.downloadMine)
 
-	huma.Register(api, kop(huma.Operation{
+	op.Register(api, "kvkk", huma.Operation{
 		OperationID: "adminListDataRequests", Method: http.MethodGet, Path: "/admin/data-requests",
 		Summary:     "List the data subject request queue",
 		Description: "Soonest deadline first. platform_admin sees only requests awaiting the second approval (03 k32).",
-	}, op.Meta{Action: string(authz.KvkkDsrList), Surface: op.SurfaceAdmin}), h.adminList)
+	}, op.Meta{Action: string(authz.KvkkDsrList), Surface: op.SurfaceAdmin}, h.adminList)
 
-	huma.Register(api, kop(huma.Operation{
+	op.Register(api, "kvkk", huma.Operation{
 		OperationID: "adminGetDataRequest", Method: http.MethodGet, Path: "/admin/data-requests/{dsr_id}",
 		Summary: "Get a data subject request", Description: "The ETag is the If-Match of adminUpdateDataRequest.",
-	}, op.Meta{Action: string(authz.KvkkDsrRead), Surface: op.SurfaceAdmin}), h.adminGet)
+	}, op.Meta{Action: string(authz.KvkkDsrRead), Surface: op.SurfaceAdmin}, h.adminGet)
 
-	huma.Register(api, kop(huma.Operation{
+	op.Register(api, "kvkk", huma.Operation{
 		OperationID: "adminCreateDataRequest", Method: http.MethodPost, Path: "/admin/data-requests",
 		Summary: "Record a postal, KEP, e-mail or in-person application", DefaultStatus: http.StatusCreated,
 		Description: "user_id for an account holder, requester_email (and requester_name) otherwise. The identity " +
 			"check is recorded with adminUpdateDataRequest before the request can be completed.",
-	}, op.Meta{Action: string(authz.KvkkDsrCreateAdmin), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}), h.adminCreate)
+	}, op.Meta{Action: string(authz.KvkkDsrCreateAdmin), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.adminCreate)
 
-	huma.Register(api, kop(huma.Operation{
+	op.Register(api, "kvkk", huma.Operation{
 		OperationID: "adminUpdateDataRequest", Method: http.MethodPatch, Path: "/admin/data-requests/{dsr_id}",
 		Summary: "Assign, record the identity check, set the working status or draft the answer",
-	}, op.Meta{Action: string(authz.KvkkDsrUpdate), Surface: op.SurfaceAdmin}), h.adminUpdate)
+	}, op.Meta{Action: string(authz.KvkkDsrUpdate), Surface: op.SurfaceAdmin}, h.adminUpdate)
 
-	huma.Register(api, kop(huma.Operation{
+	op.Register(api, "kvkk", huma.Operation{
 		OperationID: "adminApproveDataRequest", Method: http.MethodPost, Path: "/admin/data-requests/{dsr_id}/approve",
 		Summary: "Approve the release of a profiling report",
 		Description: "profiling_access only. The second approver must differ from the first (403 " +
 			"authz.four_eyes_violation); platform_admin may give the second approval only.",
-	}, op.Meta{Action: string(authz.KvkkDsrApprove), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}), h.approve)
+	}, op.Meta{Action: string(authz.KvkkDsrApprove), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.approve)
 
-	huma.Register(api, kop(huma.Operation{
+	op.Register(api, "kvkk", huma.Operation{
 		OperationID: "adminCompleteDataRequest", Method: http.MethodPost, Path: "/admin/data-requests/{dsr_id}/complete",
 		Summary: "Answer and close a data subject request", DefaultStatus: http.StatusAccepted,
 		Description: "Re-authentication required. Queues what the answer sets in motion: the data export (access, " +
 			"export, profiling_access) or the account erasure; the applicant is notified when it is done.",
 	}, op.Meta{Action: string(authz.KvkkDsrComplete), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional,
-		Reauth: true, RateLimit: op.RateReauth}), h.complete)
+		Reauth: true, RateLimit: op.RateReauth}, h.complete)
 
-	huma.Register(api, kop(huma.Operation{
+	op.Register(api, "kvkk", huma.Operation{
 		OperationID: "adminRejectDataRequest", Method: http.MethodPost, Path: "/admin/data-requests/{dsr_id}/reject",
 		Summary: "Reject a data subject request with a reason",
-	}, op.Meta{Action: string(authz.KvkkDsrReject), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}), h.reject)
+	}, op.Meta{Action: string(authz.KvkkDsrReject), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.reject)
 
-	huma.Register(api, kop(huma.Operation{
+	op.Register(api, "kvkk", huma.Operation{
 		OperationID: "adminDownloadDataExport", Method: http.MethodGet, Path: "/admin/data-requests/{dsr_id}/export",
 		Summary: "Get a download link of a data export", Description: "A presigned URL valid for at most 5 minutes; audited.",
-	}, op.Meta{Action: string(authz.KvkkDsrExportDownload), Surface: op.SurfaceAdmin}), h.adminDownload)
+	}, op.Meta{Action: string(authz.KvkkDsrExportDownload), Surface: op.SurfaceAdmin}, h.adminDownload)
 
 	registerRecords(api, h)
-}
-
-// kop tags an operation with the module and writes its Koro extensions.
-func kop(o huma.Operation, m op.Meta) huma.Operation {
-	o.Tags = []string{"kvkk"}
-	return op.Koro(o, m)
 }
 
 type handler struct {
@@ -120,8 +114,10 @@ type handler struct {
 	clk clock.Clock
 }
 
-// parseID parses a path ID; a malformed one is simply not found.
-func parseID(s string) (uuid.UUID, error) {
+// parseIDOrNotFound parses a path ID; a malformed one is simply not found
+// (kvkk.ErrNotFound at once, unlike httpx.ParseID, which defers the 404 to
+// the lookup).
+func parseIDOrNotFound(s string) (uuid.UUID, error) {
 	id, err := uuid.Parse(s)
 	if err != nil {
 		return uuid.Nil(), ErrNotFound
@@ -201,7 +197,7 @@ func (h handler) getMine(ctx context.Context, in *mineIDInput) (*selfDetailOutpu
 	if err != nil {
 		return nil, err
 	}
-	id, err := parseID(in.DSRID)
+	id, err := parseIDOrNotFound(in.DSRID)
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +219,7 @@ func (h handler) cancelMine(ctx context.Context, in *cancelInput) (*selfOutput, 
 	if err != nil {
 		return nil, err
 	}
-	id, err := parseID(in.DSRID)
+	id, err := parseIDOrNotFound(in.DSRID)
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +240,7 @@ func (h handler) downloadMine(ctx context.Context, in *mineIDInput) (*urlOutput,
 	if err != nil {
 		return nil, err
 	}
-	id, err := parseID(in.DSRID)
+	id, err := parseIDOrNotFound(in.DSRID)
 	if err != nil {
 		return nil, err
 	}
@@ -325,7 +321,7 @@ func (h handler) adminGet(ctx context.Context, in *adminIDInput) (*adminOutput, 
 	if err != nil {
 		return nil, err
 	}
-	id, err := parseID(in.DSRID)
+	id, err := parseIDOrNotFound(in.DSRID)
 	if err != nil {
 		return nil, err
 	}
@@ -385,7 +381,7 @@ func (h handler) adminUpdate(ctx context.Context, in *adminUpdateInput) (*adminO
 	if err != nil {
 		return nil, err
 	}
-	id, err := parseID(in.DSRID)
+	id, err := parseIDOrNotFound(in.DSRID)
 	if err != nil {
 		return nil, err
 	}
@@ -421,7 +417,7 @@ func (h handler) approve(ctx context.Context, in *approveInput) (*adminOutput, e
 	if err != nil {
 		return nil, err
 	}
-	id, err := parseID(in.DSRID)
+	id, err := parseIDOrNotFound(in.DSRID)
 	if err != nil {
 		return nil, err
 	}
@@ -446,7 +442,7 @@ func (h handler) complete(ctx context.Context, in *completeInput) (*adminOutput,
 	if err != nil {
 		return nil, err
 	}
-	id, err := parseID(in.DSRID)
+	id, err := parseIDOrNotFound(in.DSRID)
 	if err != nil {
 		return nil, err
 	}
@@ -470,7 +466,7 @@ func (h handler) reject(ctx context.Context, in *rejectInput) (*adminOutput, err
 	if err != nil {
 		return nil, err
 	}
-	id, err := parseID(in.DSRID)
+	id, err := parseIDOrNotFound(in.DSRID)
 	if err != nil {
 		return nil, err
 	}
@@ -486,7 +482,7 @@ func (h handler) adminDownload(ctx context.Context, in *adminIDInput) (*urlOutpu
 	if err != nil {
 		return nil, err
 	}
-	id, err := parseID(in.DSRID)
+	id, err := parseIDOrNotFound(in.DSRID)
 	if err != nil {
 		return nil, err
 	}

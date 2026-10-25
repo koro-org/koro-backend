@@ -9,7 +9,7 @@ import (
 	"time"
 	"uuid"
 
-	"koro/internal/audit"
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/consent"
@@ -28,6 +28,7 @@ import (
 	"koro/internal/platform/obs"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 	"koro/internal/platform/queue"
 	"koro/internal/platform/ratelimit"
 	"koro/internal/students"
@@ -35,31 +36,6 @@ import (
 
 // t0 is the test clock's start (microsecond precision, like PostgreSQL).
 var t0 = time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC)
-
-// auditLog records the audit events.
-type auditLog struct {
-	mu     sync.Mutex
-	events []audit.Event
-}
-
-func (l *auditLog) Log(_ context.Context, e audit.Event) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.events = append(l.events, e)
-	return nil
-}
-
-func (l *auditLog) of(action authz.Action) []audit.Event {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	var out []audit.Event
-	for _, e := range l.events {
-		if e.Action == string(action) {
-			out = append(out, e)
-		}
-	}
-	return out
-}
 
 // fakeOrgs is the org directory of the authztest orgs (all active) with
 // the active memberships set per user.
@@ -426,7 +402,7 @@ type env struct {
 	mem      *feed.MemStore
 	out      *outbox.Mem
 	queue    *queue.Mem
-	audit    *auditLog
+	audit    *audittest.Recorder
 	orgs     *fakeOrgs
 	viewers  *fakeViewers
 	events   *fakeEvents
@@ -453,7 +429,7 @@ func newEnvWith(t *testing.T, tweak func(*feed.Deps)) *env {
 	t.Helper()
 	clk := clock.NewFake(t0)
 	e := &env{
-		clk: clk, mem: feed.NewMemStore(clk.Now), out: outbox.NewMem(clk), queue: queue.NewMem(), audit: &auditLog{},
+		clk: clk, mem: feed.NewMemStore(clk.Now), out: outbox.NewMem(clk), queue: queue.NewMem(), audit: &audittest.Recorder{},
 		orgs: newFakeOrgs(), viewers: &fakeViewers{keys: map[uuid.UUID][]string{}},
 		events: &fakeEvents{events: map[uuid.UUID]events.EventSummary{}},
 		files:  &fakeFiles{files: map[uuid.UUID]files.FileMeta{}, attached: map[uuid.UUID]uuid.UUID{}},
@@ -576,17 +552,15 @@ func (e *env) feedIDs(t *testing.T, a authz.Actor, q feed.FeedQuery) []uuid.UUID
 	return nil
 }
 
-func wantCode(t *testing.T, err error, status int, code string) {
+func wantNotFound(t *testing.T, err error) {
 	t.Helper()
-	p, ok := errors.AsType[*problem.Error](err)
-	if !ok || p.Status() != status || p.Code() != code {
-		t.Fatalf("error = %v, want %d %s", err, status, code)
-	}
+	problemtest.WantProblem(t, err, 404, "not_found")
 }
 
-func wantNotFound(t *testing.T, err error) { t.Helper(); wantCode(t, err, 404, "not_found") }
-
-func wantForbidden(t *testing.T, err error) { t.Helper(); wantCode(t, err, 403, "forbidden") }
+func wantForbidden(t *testing.T, err error) {
+	t.Helper()
+	problemtest.WantProblem(t, err, 403, "forbidden")
+}
 
 // wantField fails unless err is a 422 validation error on loc.
 func wantField(t *testing.T, err error, loc string) {

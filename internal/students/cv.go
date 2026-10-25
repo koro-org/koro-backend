@@ -12,6 +12,7 @@ import (
 	"koro/internal/files"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/problem"
 	"koro/internal/platform/queue"
 )
 
@@ -111,7 +112,7 @@ func (s *service) CreateMyCV(ctx context.Context, a authz.Actor, fileID uuid.UUI
 	if s.d.Files == nil {
 		return CVView{}, errUnavailable
 	}
-	bad := fieldErr("body.file_id", "must be a cv upload of yours (PDF)")
+	bad := problem.Field("body.file_id", "must be a cv upload of yours (PDF)")
 	f, err := s.d.Files.Get(ctx, fileID)
 	switch {
 	case errors.Is(err, files.ErrNotFound):

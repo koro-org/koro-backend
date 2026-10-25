@@ -7,6 +7,7 @@ import (
 	"koro/internal/identity"
 	"koro/internal/platform/db"
 	"koro/internal/platform/obs"
+	"koro/internal/platform/problem/problemtest"
 )
 
 func newBootstrapper(t *testing.T, e *env) *identity.Bootstrapper {
@@ -75,13 +76,13 @@ func TestBootstrapAdmin_Idempotent(t *testing.T) {
 
 	// Other admins exist: the bootstrap refuses (the four-eyes flow applies).
 	_, err = b.Run(ctx, []identity.AdminSeed{admins[0], {Email: "eve@koro.test", FirstName: "Eve", LastName: "Kara"}})
-	wantErr(t, err, identity.ErrBootstrap)
+	problemtest.WantErr(t, err, identity.ErrBootstrap)
 	if _, found, _ := e.store.UserByEmail(ctx, "eve@koro.test"); found {
 		t.Fatal("a refused bootstrap left an account behind (in production the transaction rolls back)")
 	}
 	// Exactly two distinct admins.
-	wantErr(t, mustErr(b.Run(ctx, admins[:1])), identity.ErrBootstrap)
-	wantErr(t, mustErr(b.Run(ctx, []identity.AdminSeed{admins[0], admins[0]})), identity.ErrBootstrap)
+	problemtest.WantErr(t, mustErr(b.Run(ctx, admins[:1])), identity.ErrBootstrap)
+	problemtest.WantErr(t, mustErr(b.Run(ctx, []identity.AdminSeed{admins[0], admins[0]})), identity.ErrBootstrap)
 }
 
 func mustErr(_ []identity.BootstrapOutcome, err error) error { return err }

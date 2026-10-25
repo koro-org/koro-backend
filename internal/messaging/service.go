@@ -11,6 +11,7 @@ import (
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // ---- the company's side (04 §2.9)
@@ -151,7 +152,7 @@ func (s *service) target(ctx context.Context, orgID uuid.UUID, anonID string) (u
 // (feed.Posts.Get); anything else is the same 422 (another org's post is
 // not told apart from a missing one).
 func (s *service) checkOpportunity(ctx context.Context, orgID, postID uuid.UUID) error {
-	bad := fieldErr("body.opportunity_post_id", "must be a published opportunity call of this organization")
+	bad := problem.Field("body.opportunity_post_id", "must be a published opportunity call of this organization")
 	if s.d.Posts == nil {
 		return bad
 	}
@@ -186,7 +187,7 @@ func (s *service) ListSent(ctx context.Context, a authz.Actor, orgID uuid.UUID, 
 		return CompanyPage{}, err
 	}
 	if q.Status != "" && !q.Status.Valid() {
-		return CompanyPage{}, fieldErr("query.status", "must be pending, accepted, declined, expired or withdrawn")
+		return CompanyPage{}, problem.Field("query.status", "must be pending, accepted, declined, expired or withdrawn")
 	}
 	limit := page.ClampLimit(q.Limit)
 	q.Now, q.Limit = s.now(), limit+1

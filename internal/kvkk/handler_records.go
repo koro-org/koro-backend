@@ -18,64 +18,64 @@ import (
 
 // registerRecords adds the 9 kvkk-2 operations (04 §2.22; BE-049).
 func registerRecords(api huma.API, h handler) {
-	huma.Register(api, kop(huma.Operation{
+	op.Register(api, "kvkk", huma.Operation{
 		OperationID: "adminListRetentionPolicies", Method: http.MethodGet, Path: "/admin/retention-policies",
 		Summary: "List the retention policies",
 		Description: "Every policy with its period (ISO 8601), anchor, method, legal approval and whether a sweeper is " +
 			"registered for it. A policy that is not legally approved runs as a dry run only (count, no deletion). " +
 			"Each item carries the etag that adminUpdateRetentionPolicy expects in If-Match.",
-	}, op.Meta{Action: string(authz.KvkkRetentionPolicyList), Surface: op.SurfaceAdmin}), h.listPolicies)
+	}, op.Meta{Action: string(authz.KvkkRetentionPolicyList), Surface: op.SurfaceAdmin}, h.listPolicies)
 
-	huma.Register(api, kop(huma.Operation{
+	op.Register(api, "kvkk", huma.Operation{
 		OperationID: "adminUpdateRetentionPolicy", Method: http.MethodPatch, Path: "/admin/retention-policies/{code}",
 		Summary: "Change a retention period, method, state or legal approval",
 		Description: "Re-authentication required; If-Match (428 without, 412 when stale). Changing the period or the " +
 			"method withdraws the legal approval unless the same request approves the new values with approved_ref. " +
 			"The data export files live at most 7 days.",
 	}, op.Meta{Action: string(authz.KvkkRetentionPolicyUpdate), Surface: op.SurfaceAdmin, Reauth: true,
-		RateLimit: op.RateReauth}), h.updatePolicy)
+		RateLimit: op.RateReauth}, h.updatePolicy)
 
-	huma.Register(api, kop(huma.Operation{
+	op.Register(api, "kvkk", huma.Operation{
 		OperationID: "adminListDestructionLogs", Method: http.MethodGet, Path: "/admin/destruction-logs",
 		Summary:     "List the destruction record",
 		Description: "One row per retention policy and nightly run, and per module of an account erasure; newest first.",
-	}, op.Meta{Action: string(authz.KvkkDestructionLogList), Surface: op.SurfaceAdmin}), h.listLogs)
+	}, op.Meta{Action: string(authz.KvkkDestructionLogList), Surface: op.SurfaceAdmin}, h.listLogs)
 
-	huma.Register(api, kop(huma.Operation{
+	op.Register(api, "kvkk", huma.Operation{
 		OperationID: "adminListBreaches", Method: http.MethodGet, Path: "/admin/breaches",
 		Summary:     "List the personal data breaches",
 		Description: "With the 72-hour deadline of the Board notification and the 24-hour notice to the data controller.",
-	}, op.Meta{Action: string(authz.KvkkBreachList), Surface: op.SurfaceAdmin}), h.listBreaches)
+	}, op.Meta{Action: string(authz.KvkkBreachList), Surface: op.SurfaceAdmin}, h.listBreaches)
 
-	huma.Register(api, kop(huma.Operation{
+	op.Register(api, "kvkk", huma.Operation{
 		OperationID: "adminCreateBreach", Method: http.MethodPost, Path: "/admin/breaches",
 		Summary: "Record a personal data breach", DefaultStatus: http.StatusCreated,
 		Description: "authority_deadline_at = detected_at + 72 hours. The DPO and the platform admins are alerted at once " +
 			"and again at 48/24/6 hours left. Do not put a person's name in the title or the description.",
-	}, op.Meta{Action: string(authz.KvkkBreachManage), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}), h.createBreach)
+	}, op.Meta{Action: string(authz.KvkkBreachManage), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.createBreach)
 
-	huma.Register(api, kop(huma.Operation{
+	op.Register(api, "kvkk", huma.Operation{
 		OperationID: "adminUpdateBreach", Method: http.MethodPatch, Path: "/admin/breaches/{breach_id}",
 		Summary: "Update a breach: containment, notifications, closing",
 		Description: "If-Match. The status only moves forward (open → contained → notified → closed); notified needs " +
 			"authority_notified_at; notification times are written once; detected_at may only move earlier.",
-	}, op.Meta{Action: string(authz.KvkkBreachManage), Surface: op.SurfaceAdmin}), h.updateBreach)
+	}, op.Meta{Action: string(authz.KvkkBreachManage), Surface: op.SurfaceAdmin}, h.updateBreach)
 
-	huma.Register(api, kop(huma.Operation{
+	op.Register(api, "kvkk", huma.Operation{
 		OperationID: "adminListSubprocessors", Method: http.MethodGet, Path: "/admin/subprocessors",
 		Summary: "List the sub-processor inventory",
-	}, op.Meta{Action: string(authz.KvkkSubprocessorList), Surface: op.SurfaceAdmin}), h.listSubs)
+	}, op.Meta{Action: string(authz.KvkkSubprocessorList), Surface: op.SurfaceAdmin}, h.listSubs)
 
-	huma.Register(api, kop(huma.Operation{
+	op.Register(api, "kvkk", huma.Operation{
 		OperationID: "adminCreateSubprocessor", Method: http.MethodPost, Path: "/admin/subprocessors",
 		Summary: "Add a sub-processor", DefaultStatus: http.StatusCreated,
 		Description: "A processor abroad is never domestic (KVKK md. 9). 409 kvkk.duplicate_subprocessor on a taken name.",
-	}, op.Meta{Action: string(authz.KvkkSubprocessorManage), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}), h.createSub)
+	}, op.Meta{Action: string(authz.KvkkSubprocessorManage), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.createSub)
 
-	huma.Register(api, kop(huma.Operation{
+	op.Register(api, "kvkk", huma.Operation{
 		OperationID: "adminUpdateSubprocessor", Method: http.MethodPatch, Path: "/admin/subprocessors/{subprocessor_id}",
 		Summary: "Update a sub-processor", Description: "If-Match (the etag of the list item). Retire with active = false.",
-	}, op.Meta{Action: string(authz.KvkkSubprocessorManage), Surface: op.SurfaceAdmin}), h.updateSub)
+	}, op.Meta{Action: string(authz.KvkkSubprocessorManage), Surface: op.SurfaceAdmin}, h.updateSub)
 }
 
 // ---- DTOs
@@ -437,7 +437,7 @@ func (h handler) updateBreach(ctx context.Context, in *updateBreachInput) (*brea
 	if err != nil {
 		return nil, err
 	}
-	id, err := parseID(in.BreachID)
+	id, err := parseIDOrNotFound(in.BreachID)
 	if err != nil {
 		return nil, err
 	}
@@ -581,7 +581,7 @@ func (h handler) updateSub(ctx context.Context, in *updateSubInput) (*subOutput,
 	if err != nil {
 		return nil, err
 	}
-	id, err := parseID(in.SubprocessorID)
+	id, err := parseIDOrNotFound(in.SubprocessorID)
 	if err != nil {
 		return nil, err
 	}

@@ -10,6 +10,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/identity"
 	"koro/internal/platform/httpx"
+	"koro/internal/platform/problem/problemtest"
 	"koro/internal/platform/token"
 )
 
@@ -77,7 +78,7 @@ func (s *staffEnv) targetSessionClosed(t *testing.T, reason identity.RevokeReaso
 	t.Helper()
 	cred := httpx.Credential{Transport: httpx.TransportBearer, TokenHash: [32]byte(token.Hash(s.targetTk))}
 	_, err := s.svc.Authenticate(t.Context(), cred)
-	wantErr(t, err, identity.ErrUnauthenticated)
+	problemtest.WantErr(t, err, identity.ErrUnauthenticated)
 	cur, found, _ := s.store.SessionByTokenHash(t.Context(), token.Hash(s.targetTk))
 	if !found || cur.RevokedAt == nil || cur.RevokeReason != reason {
 		t.Fatalf("target session: found %v, revoked %v, reason %q, want %q", found, cur.RevokedAt, cur.RevokeReason, reason)
@@ -101,7 +102,7 @@ func TestGrantPrivilegedRole_SameAdminApprove_403FourEyes(t *testing.T) {
 		t.Fatalf("request %+v", ra)
 	}
 	_, err = s.svc.ApprovePlatformRole(ctx, s.a, ra.ID, proof)
-	wantErr(t, err, authz.ErrFourEyes)
+	problemtest.WantErr(t, err, authz.ErrFourEyes)
 	wantStatus(t, err, http.StatusForbidden)
 	if got, _ := s.store.RoleAssignment(ctx, ra.ID); got.Status != identity.RolePending {
 		t.Fatalf("status after the refused approval: %s", got.Status)
@@ -110,7 +111,7 @@ func TestGrantPrivilegedRole_SameAdminApprove_403FourEyes(t *testing.T) {
 	now := s.clk.Now()
 	bad := ra
 	bad.Status, bad.ApprovedBy, bad.ApprovedAt, bad.GrantedAt = identity.RoleActive, ra.RequestedBy, &now, &now
-	wantErr(t, s.store.UpdateRoleAssignment(ctx, bad), authz.ErrFourEyes)
+	problemtest.WantErr(t, s.store.UpdateRoleAssignment(ctx, bad), authz.ErrFourEyes)
 	if len(s.targetRoles(t)) != 0 {
 		t.Fatal("the refused approval granted the role")
 	}
@@ -137,7 +138,7 @@ func TestGrantPrivilegedRole_SecondAdminApprove_Active(t *testing.T) {
 	s.targetSessionClosed(t, identity.RevokeRoleChange)
 	// A second approval of the same row is a state conflict.
 	_, err = s.svc.ApprovePlatformRole(ctx, s.b, ra.ID, proof)
-	wantErr(t, err, identity.ErrRoleInvalidState)
+	problemtest.WantErr(t, err, identity.ErrRoleInvalidState)
 	// Both steps are audited with the reauth kind and alert every admin.
 	ev := s.audit.of(string(authz.IdentityPlatformRoleGrant))
 	if len(ev) != 2 || ev[1].Metadata["result"] != "approved" || ev[1].Metadata["reauth"] != "password" {
@@ -202,7 +203,7 @@ func TestGrantPrivilegedRole_PendingGrantsNothing(t *testing.T) {
 	// The target, as a would-be admin, is refused by authz.
 	a := authz.Actor{Kind: authz.KindUser, UserID: s.target.ID, SessionID: p.SessionID, PlatformRoles: p.PlatformRoles, MFAVerified: true}
 	_, err = s.svc.SearchUsers(ctx, a, identity.AdminUserQuery{})
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 }
 
 func TestGrantRole_Self_403(t *testing.T) {
@@ -210,30 +211,30 @@ func TestGrantRole_Self_403(t *testing.T) {
 	s := newStaffEnv(t)
 	ctx := t.Context()
 	_, err := s.grant(t, s.a, s.a.UserID, authz.PlatformModerator)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	_, err = s.grant(t, s.a, s.a.UserID, authz.PlatformFinanceAdmin)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	// Approving a request for oneself (requested by another admin): 403 (Y6).
 	ra, err := s.grant(t, s.b, s.a.UserID, authz.PlatformFinanceAdmin)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = s.svc.ApprovePlatformRole(ctx, s.a, ra.ID, proof)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	// Nor revoking one's own role.
 	own, _ := s.store.RoleAssignmentsOf(ctx, s.a.UserID)
 	_, err = s.svc.RevokePlatformRole(ctx, s.a, own[0].ID, "leaving the team now", proof)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	// The DB refuses a self-assignment as well (…_self_chk).
 	me := s.a.UserID
 	now := s.clk.Now()
 	err = s.store.InsertRoleAssignment(ctx, identity.RoleAssignment{ID: uuid.NewV7(), UserID: me, Role: authz.PlatformSupport,
 		Reason: "self service", Status: identity.RoleActive, RequestedBy: &me, RequestedAt: now, GrantedAt: &now})
-	wantErr(t, err, identity.ErrForbidden)
+	problemtest.WantErr(t, err, identity.ErrForbidden)
 	// A non-admin is refused before anything is read, and nothing is audited.
 	_, a := s.login(t, "target@example.com", identity.ClientMobile)
 	_, err = s.grant(t, a, s.target.ID, authz.PlatformModerator)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 }
 
 func TestGrantRole_RevokesTargetSessions(t *testing.T) {
@@ -253,7 +254,7 @@ func TestGrantRole_RevokesTargetSessions(t *testing.T) {
 	}
 	// A second open assignment of the same role: 409.
 	_, err = s.grant(t, s.b, s.target.ID, authz.PlatformModerator)
-	wantErr(t, err, identity.ErrRoleAssignmentOpen)
+	problemtest.WantErr(t, err, identity.ErrRoleAssignmentOpen)
 	// The new session of an MFA role is short (03 §6.4: 30 min idle / 12 h).
 	res, _ := s.login(t, "target@example.com", identity.ClientMobile)
 	if d := res.Session.AbsoluteExpiresAt.Sub(res.Session.CreatedAt); d != 12*time.Hour {
@@ -288,7 +289,7 @@ func TestRevokePrivilegedRole_FourEyes(t *testing.T) {
 		t.Fatalf("roles while revoke_pending: %v", roles)
 	}
 	_, err = s.svc.RevokePlatformRole(ctx, s.a, ra.ID, "confirming myself", proof)
-	wantErr(t, err, authz.ErrFourEyes)
+	problemtest.WantErr(t, err, authz.ErrFourEyes)
 	got, err := s.svc.RevokePlatformRole(ctx, s.b, ra.ID, "confirmed by the second admin", proof)
 	if err != nil || got.Status != identity.RoleRevoked || *got.RevokedBy != s.b.UserID || got.RevokeReason != "left the finance team" {
 		t.Fatalf("confirmation %+v %v", got, err)
@@ -298,7 +299,7 @@ func TestRevokePrivilegedRole_FourEyes(t *testing.T) {
 	}
 	s.targetSessionClosed(t, identity.RevokeRoleChange)
 	_, err = s.svc.RevokePlatformRole(ctx, s.b, ra.ID, "once more please", proof)
-	wantErr(t, err, identity.ErrRoleInvalidState)
+	problemtest.WantErr(t, err, identity.ErrRoleInvalidState)
 }
 
 func TestRevokePendingRequest_Rejected(t *testing.T) {
@@ -310,7 +311,7 @@ func TestRevokePendingRequest_Rejected(t *testing.T) {
 		t.Fatalf("reject %+v %v", got, err)
 	}
 	_, err = s.svc.ApprovePlatformRole(t.Context(), s.b, ra.ID, proof)
-	wantErr(t, err, identity.ErrRoleInvalidState) // a rejected request cannot be approved
+	problemtest.WantErr(t, err, identity.ErrRoleInvalidState) // a rejected request cannot be approved
 }
 
 func TestRevokeRole_LastPlatformAdmin_409(t *testing.T) {
@@ -324,7 +325,7 @@ func TestRevokeRole_LastPlatformAdmin_409(t *testing.T) {
 	}
 	// Only a is left who is not on the way out: a's revocation is refused.
 	_, err := s.svc.RevokePlatformRole(ctx, s.b, aRows[0].ID, "admin a is leaving", proof)
-	wantErr(t, err, identity.ErrLastPlatformAdmin)
+	problemtest.WantErr(t, err, identity.ErrLastPlatformAdmin)
 	wantStatus(t, err, http.StatusConflict)
 }
 
@@ -339,7 +340,7 @@ func TestGrantRole_TalentAuditorLimit_409(t *testing.T) {
 		}
 	}
 	_, err := s.grant(t, s.a, s.target.ID, authz.PlatformTalentAuditor)
-	wantErr(t, err, identity.ErrTalentAuditorLimit)
+	problemtest.WantErr(t, err, identity.ErrTalentAuditorLimit)
 }
 
 func TestListPlatformRoles_NamesAndFilters(t *testing.T) {
@@ -357,5 +358,5 @@ func TestListPlatformRoles_NamesAndFilters(t *testing.T) {
 	}
 	support := s.admin(t, "support@koro.test", authz.PlatformSupport)
 	_, err = s.svc.PlatformRoleAssignments(ctx, support, identity.RoleQuery{})
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 }

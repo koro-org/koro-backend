@@ -7,6 +7,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // SkillQuery narrows listSkills (04 §2.3: q, category).
@@ -54,7 +55,7 @@ func (s *service) ListSkills(ctx context.Context, a authz.Actor, q SkillQuery) (
 		return SkillPage{}, err
 	}
 	if q.Category != "" && !q.Category.Valid() {
-		return SkillPage{}, fieldErr("query.category", "unknown category")
+		return SkillPage{}, problem.Field("query.category", "unknown category")
 	}
 	limit := page.ClampLimit(q.Limit)
 	rows, err := s.d.Store.ListSkills(ctx, SkillFilter{Q: text, Category: q.Category}, q.After, limit+1)
@@ -72,7 +73,7 @@ func (s *service) ListSkills(ctx context.Context, a authz.Actor, q SkillQuery) (
 // cleanSkill validates the fields of a new skill.
 func cleanSkill(in SkillInput, prefix string) (Skill, error) {
 	if !skillSlugRe.MatchString(in.Slug) || len(in.Slug) > maxSlug {
-		return Skill{}, fieldErr(prefix+"slug", "must be lower-case letters and digits separated by single hyphens, at most 80")
+		return Skill{}, problem.Field(prefix+"slug", "must be lower-case letters and digits separated by single hyphens, at most 80")
 	}
 	nameTR, err := cleanText(prefix+"name_tr", in.NameTR, 1, maxName)
 	if err != nil {
@@ -83,7 +84,7 @@ func cleanSkill(in SkillInput, prefix string) (Skill, error) {
 		return Skill{}, err
 	}
 	if !in.Category.Valid() {
-		return Skill{}, fieldErr(prefix+"category", "must be one of technical, tool, soft, domain, language_tool, other")
+		return Skill{}, problem.Field(prefix+"category", "must be one of technical, tool, soft, domain, language_tool, other")
 	}
 	return Skill{Slug: in.Slug, NameTR: nameTR, NameEN: nameEN, Category: in.Category, IsActive: true}, nil
 }
@@ -149,7 +150,7 @@ func (s *service) AdminUpdateSkill(ctx context.Context, a authz.Actor, id uuid.U
 		}
 		if p.Category != nil {
 			if !p.Category.Valid() {
-				return fieldErr("body.category", "must be one of technical, tool, soft, domain, language_tool, other")
+				return problem.Field("body.category", "must be one of technical, tool, soft, domain, language_tool, other")
 			}
 			k.Category, changed = *p.Category, append(changed, "category")
 		}

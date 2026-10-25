@@ -11,6 +11,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/orgs"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/outbox"
 )
 
 // Audit resource types and outbox aggregates.
@@ -21,14 +22,6 @@ const (
 
 // adminSurface is the authz view of /admin/** (03 §3.2: 403 before reading).
 var adminSurface = authz.Resource{Type: authz.TypeAdminSurface}
-
-// orgResource is the org of /orgs/{org_id}/... (the management surface).
-func orgResource(o orgs.OrgSummary) authz.Resource {
-	id := o.ID
-	return authz.Resource{Type: authz.TypeOrg, ID: id, OrgID: &id, Attrs: map[string]string{
-		"org_kind": string(o.Kind), "org_status": string(o.Status),
-	}}
-}
 
 // sellersOf returns the distinct seller orgs of lines, sorted.
 func sellersOf(lines []Line) []uuid.UUID {
@@ -115,20 +108,12 @@ func lineEvent(a authz.Actor, act authz.Action, l Line, reason string, meta map[
 
 // emitOutbox writes an O event in the transaction carried by ctx.
 func (s *service) emitOutbox(ctx context.Context, aggregate string, id uuid.UUID, p domainevent.Payload) error {
-	env, err := domainevent.New(p, aggregate, id)
-	if err != nil {
-		return err
-	}
-	return s.d.Outbox.Add(ctx, env)
+	return outbox.Emit(ctx, s.d.Outbox, p, aggregate, id)
 }
 
 // emitAfterCommit publishes an A event once the transaction commits.
 func (s *service) emitAfterCommit(ctx context.Context, aggregate string, id uuid.UUID, p domainevent.Payload) error {
-	env, err := domainevent.New(p, aggregate, id)
-	if err != nil {
-		return err
-	}
-	return s.d.Outbox.AfterCommit(ctx, env)
+	return outbox.EmitAfterCommit(ctx, s.d.Outbox, p, aggregate, id)
 }
 
 func compareUUID(a, b uuid.UUID) int {

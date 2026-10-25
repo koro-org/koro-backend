@@ -9,6 +9,7 @@ import (
 	"koro/internal/catalog"
 	"koro/internal/orders"
 	"koro/internal/parties"
+	"koro/internal/platform/problem/problemtest"
 )
 
 func modelCPolicy(p *catalog.CommercePolicy) {
@@ -45,7 +46,7 @@ func TestModelC_DirectInstructionsMultiplePayees(t *testing.T) {
 	if amounts[e.payeeA] != 2_400_000 || amounts[b] != 1_200_000 {
 		t.Fatalf("payee amounts=%v", amounts)
 	}
-	if n := len(e.audit.of(authz.OrdersOrderPaymentInstructions)); n != 1 {
+	if n := len(e.audit.Of(authz.OrdersOrderPaymentInstructions)); n != 1 {
 		t.Fatalf("access audit=%d", n)
 	}
 	for _, name := range []string{"company_member", "finance_admin"} {
@@ -85,7 +86,7 @@ func TestModelC_PlatformProductRejected(t *testing.T) {
 	e.addPolicy(t, catalog.ScopeOffering, &offer, modelCPolicy)
 	buyer := actor(t, "company_admin")
 	_, err := e.svc.CreateOrder(ctxOf(t, buyer), buyer, org("company_a"), orders.CreateInput{BuyerPartyID: e.partyA, Lines: []orders.LineInput{line(offer, 1)}})
-	wantProblem(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 }
 
 func TestModelC_ZeroFeeNeedsNoCollectionAccount(t *testing.T) {

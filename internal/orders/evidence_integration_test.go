@@ -9,8 +9,10 @@ import (
 	"uuid"
 
 	"koro/internal/audit"
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/orders"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // pgEvidence inserts a completed delivery_evidence upload of org (app_rw;
@@ -65,7 +67,7 @@ func TestMarkWithEvidence_Postgres(t *testing.T) {
 	sa, sctx := p.sellerActor(t)
 	foreign := p.pgEvidence(t, p.buyer.org)
 	_, err := p.mod.Service.MarkLineFulfilled(sctx, sa, l.ID, orders.MarkInput{EvidenceFileID: &foreign})
-	wantProblem(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 	if ev, mod, _ := p.evidenceOf(t, l.ID, foreign); ev != nil || mod != nil {
 		t.Fatalf("after the refusal: evidence %v, attached to %v", ev, mod)
 	}
@@ -93,7 +95,7 @@ func TestMarkWithEvidence_Postgres(t *testing.T) {
 
 // failingMarkAudit fails the audit of a mark: the write after the
 // evidence's Attach and the line's UPDATE in the marking transaction.
-type failingMarkAudit struct{ auditLog }
+type failingMarkAudit struct{ audittest.Recorder }
 
 var errAuditDown = errors.New("audit store down")
 
@@ -101,7 +103,7 @@ func (f *failingMarkAudit) Log(ctx context.Context, e audit.Event) error {
 	if e.Action == string(authz.OrdersLineMarkFulfilled) {
 		return errAuditDown
 	}
-	return f.auditLog.Log(ctx, e)
+	return f.Recorder.Log(ctx, e)
 }
 
 // TestMarkWithEvidence_Postgres_OneTransaction: when the mark fails after

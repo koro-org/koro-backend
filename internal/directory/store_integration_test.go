@@ -11,6 +11,7 @@ import (
 	"uuid"
 
 	"koro/db/reference"
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/directory"
 	"koro/internal/identity"
@@ -20,6 +21,7 @@ import (
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/outbox"
+	"koro/internal/platform/problem/problemtest"
 	"koro/internal/platform/queue"
 	"koro/internal/platform/testutil"
 )
@@ -54,7 +56,7 @@ type pgEnv struct {
 	store directory.Store
 	orgs  orgs.Service
 	svc   directory.Service
-	audit *auditLog
+	audit *audittest.Recorder
 }
 
 func newPGEnv(t *testing.T) pgEnv {
@@ -64,7 +66,7 @@ func newPGEnv(t *testing.T) pgEnv {
 	log := obs.Discard()
 	out := outbox.New(outbox.Deps{Store: outbox.NewGormStore(d.ORM), Tx: d.Tx, Subs: outbox.NewRegistry(), Queue: queue.NewMem(), Clock: clk, Log: log})
 	idem := idempotency.New(idempotency.Deps{Tx: d.Tx, Store: idempotency.NewGormStore(d.ORM), Clock: clk, Log: log})
-	al := &auditLog{}
+	al := &audittest.Recorder{}
 	om, err := orgs.New(orgs.Deps{Store: orgs.NewGormStore(d.ORM), Tx: d.Tx, Outbox: out, Audit: al, Idempotency: idem, Clock: clk, Log: log})
 	if err != nil {
 		t.Fatal(err)
@@ -173,7 +175,7 @@ func TestAdminCreateClub_CreatesOrgInSameTx_Gorm(t *testing.T) {
 	// before any write; a valid club writes the org and the row together.
 	_, err = e.svc.AdminCreateClub(ctx, actor, directory.ClubInput{UniversityID: u.ID, Name: "İnanç Kulübü",
 		Category: directory.CategoryReligious, JoinPolicy: directory.JoinApproval})
-	wantCode(t, err, 422, "directory.sensitivity_required")
+	problemtest.WantProblem(t, err, 422, "directory.sensitivity_required")
 	v, err := e.svc.AdminCreateClub(ctx, actor, directory.ClubInput{UniversityID: u.ID, Name: "Kalıcı Kulüp",
 		Category: directory.CategoryArts, JoinPolicy: directory.JoinApproval})
 	if err != nil {
@@ -212,11 +214,11 @@ func TestSetSensitivity_EmitsEventInSameTx_Gorm(t *testing.T) {
 	proof := identity.ReauthProof{Password: goodPassword}
 	in := directory.SensitivityInput{IsSensitive: true, SensitiveReason: "philosophical_belief"}
 	// A failing audit write rolls back the flag and the outbox row.
-	e.audit.setFail(errors.New("audit down"))
+	e.audit.Fail(errors.New("audit down"))
 	if _, err := e.svc.AdminSetClubSensitivity(ctx, actor, v.Club.OrgID, in, proof); err == nil {
 		t.Fatal("succeeded with a failing audit")
 	}
-	e.audit.setFail(nil)
+	e.audit.Fail(nil)
 	if c, _ := e.store.GetClub(ctx, v.Club.OrgID); c.IsSensitive || outboxRows() != 0 {
 		t.Fatalf("after the rollback: sensitive=%v outbox=%d", c.IsSensitive, outboxRows())
 	}
@@ -233,7 +235,7 @@ func TestSetSensitivity_EmitsEventInSameTx_Gorm(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.AdminSetClubSensitivity(ctx, actor, v.Club.OrgID, directory.SensitivityInput{}, proof)
-	wantCode(t, err, 422, "directory.sensitivity_required")
+	problemtest.WantProblem(t, err, 422, "directory.sensitivity_required")
 	if _, err := e.d.Pool.Exec(ctx, `UPDATE clubs SET is_sensitive = false, sensitive_reason = NULL, sensitivity_set_at = NULL
 		WHERE org_id = $1`, v.Club.OrgID); err == nil {
 		t.Fatal("the CHECK let a religious club lose its flag")

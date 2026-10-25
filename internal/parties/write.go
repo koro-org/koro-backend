@@ -7,7 +7,9 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/orgs"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/problem"
 )
 
 // createCmd is the idempotency hash input of a party creation: the cleaned
@@ -84,10 +86,10 @@ func (s *service) AdminCreateParty(ctx context.Context, a authz.Actor, in PartyI
 		return PartyView{}, err
 	}
 	if in.Kind != KindPayee && in.Kind != KindPlatform {
-		return PartyView{}, fieldErr("body.kind", "must be payee or platform (buyer parties are created by their company)")
+		return PartyView{}, problem.Field("body.kind", "must be payee or platform (buyer parties are created by their company)")
 	}
 	if !in.LegalType.Valid() {
-		return PartyView{}, fieldErr("body.legal_type", "is required")
+		return PartyView{}, problem.Field("body.legal_type", "is required")
 	}
 	if err := s.checkKindRules(in.Kind, in.LegalType); err != nil {
 		return PartyView{}, err
@@ -98,11 +100,11 @@ func (s *service) AdminCreateParty(ctx context.Context, a authz.Actor, in PartyI
 	}
 	if in.OrgID != nil {
 		if in.Kind == KindPlatform {
-			return PartyView{}, fieldErr("body.org_id", "the platform party has no org")
+			return PartyView{}, problem.Field("body.org_id", "the platform party has no org")
 		}
 		o, err := s.d.Orgs.Get(ctx, *in.OrgID)
 		if errors.Is(err, orgs.ErrNotFound) || err == nil && o.Kind != orgs.KindUniversity {
-			return PartyView{}, fieldErr("body.org_id", "must be a university organization")
+			return PartyView{}, problem.Field("body.org_id", "must be a university organization")
 		}
 		if err != nil {
 			return PartyView{}, err
@@ -176,7 +178,7 @@ func (s *service) UpdateOrgParty(ctx context.Context, a authz.Actor, orgID, part
 			return err
 		}
 		if p.adminFields() {
-			return fieldErr("body", "national ID, VAT status, e-invoice alias and deactivation are admin fields")
+			return problem.Field("body", "national ID, VAT status, e-invoice alias and deactivation are admin fields")
 		}
 		return s.update(ctx, a, &org, op.Party, ifMatch, p)
 	})
@@ -210,7 +212,7 @@ func (s *service) update(ctx context.Context, a authz.Actor, orgID *uuid.UUID, c
 	if cur.Status == StatusInactive {
 		return ErrInvalidState
 	}
-	if err := checkIfMatch(ifMatch, etagOf(cur.UpdatedAt)); err != nil {
+	if err := httpx.CheckIfMatch(ifMatch, httpx.ETag(cur.UpdatedAt)); err != nil {
 		return err
 	}
 	if p.empty() {
@@ -240,7 +242,7 @@ func (s *service) AdminVerifyParty(ctx context.Context, a authz.Actor, partyID u
 		return PartyView{}, err
 	}
 	if d.Decision != StatusVerified && d.Decision != StatusRejected {
-		return PartyView{}, fieldErr("body.decision", "must be verified or rejected")
+		return PartyView{}, problem.Field("body.decision", "must be verified or rejected")
 	}
 	note, err := cleanNote("body.note", d.Note)
 	if err != nil {

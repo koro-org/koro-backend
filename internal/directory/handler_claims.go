@@ -8,13 +8,14 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/page"
 )
 
 // registerClaims adds the six club claim operations of BE-022 (04 §2.3).
 func registerClaims(api huma.API, h handler) {
-	reg(api, huma.Operation{
+	op.Register(api, "directory", huma.Operation{
 		OperationID: "createClubClaim", Method: http.MethodPost, Path: "/clubs/{club_id}/claims",
 		DefaultStatus: http.StatusCreated,
 		Summary:       "Claim a club",
@@ -25,19 +26,19 @@ func registerClaims(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.DirectoryClubClaimCreate), Surface: op.SurfaceResource,
 		Idempotency: op.IdempotencyOptional}, h.createClaim)
 
-	reg(api, huma.Operation{
+	op.Register(api, "directory", huma.Operation{
 		OperationID: "listMyClubClaims", Method: http.MethodGet, Path: "/me/club-claims",
 		Summary: "List my club claims", Description: "Newest first.",
 	}, op.Meta{Action: string(authz.DirectoryClubClaimReadOwn), Surface: op.SurfaceSelf}, h.listMyClaims)
 
-	reg(api, huma.Operation{
+	op.Register(api, "directory", huma.Operation{
 		OperationID: "withdrawMyClubClaim", Method: http.MethodPost, Path: "/me/club-claims/{claim_id}/withdraw",
 		Summary:     "Withdraw my club claim",
 		Description: "Only a pending claim (409 directory.claim_state).",
 	}, op.Meta{Action: string(authz.DirectoryClubClaimWithdraw), Surface: op.SurfaceSelf,
 		Idempotency: op.IdempotencyOptional}, h.withdrawClaim)
 
-	reg(api, huma.Operation{
+	op.Register(api, "directory", huma.Operation{
 		OperationID: "adminListClubClaims", Method: http.MethodGet, Path: "/admin/club-claims",
 		Summary: "List club claims",
 		Description: "The review queue: pending claims oldest first (default), other statuses newest first. Support and " +
@@ -45,14 +46,14 @@ func registerClaims(api huma.API, h handler) {
 			"non-sensitive clubs (the claims they decide). Audited.",
 	}, op.Meta{Action: string(authz.DirectoryClubClaimList), Surface: op.SurfaceAdmin}, h.adminListClaims)
 
-	reg(api, huma.Operation{
+	op.Register(api, "directory", huma.Operation{
 		OperationID: "adminGetClubClaim", Method: http.MethodGet, Path: "/admin/club-claims/{claim_id}",
 		Summary: "Get a club claim",
 		Description: "With a 5-minute download of the evidence file once the virus scan cleared it, and the claim's " +
 			"approver. A university representative reads only the claims they decide (others 404). Audited.",
 	}, op.Meta{Action: string(authz.DirectoryClubClaimList), Surface: op.SurfaceAdmin}, h.adminGetClaim)
 
-	reg(api, huma.Operation{
+	op.Register(api, "directory", huma.Operation{
 		OperationID: "adminDecideClubClaim", Method: http.MethodPost, Path: "/admin/club-claims/{claim_id}/decision",
 		Summary: "Decide a club claim",
 		Description: "The approver decides: the representative of the club's university when the university has " +
@@ -114,7 +115,7 @@ func (h handler) createClaim(ctx context.Context, in *createClaimInput) (*claimO
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.CreateClubClaim(ctx, a, parseID(in.ClubID), ClaimInput{
+	v, err := h.svc.CreateClubClaim(ctx, a, httpx.ParseID(in.ClubID), ClaimInput{
 		RoleInClub: in.Body.RoleInClub, EvidenceText: in.Body.EvidenceText, EvidenceFileID: file,
 	})
 	if err != nil {
@@ -156,7 +157,7 @@ func (h handler) withdrawClaim(ctx context.Context, in *ClaimPath) (*claimOutput
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.WithdrawMyClubClaim(ctx, a, parseID(in.ClaimID))
+	v, err := h.svc.WithdrawMyClubClaim(ctx, a, httpx.ParseID(in.ClaimID))
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +208,7 @@ func (h handler) adminGetClaim(ctx context.Context, in *ClaimPath) (*adminClaimO
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.AdminGetClubClaim(ctx, a, parseID(in.ClaimID))
+	v, err := h.svc.AdminGetClubClaim(ctx, a, httpx.ParseID(in.ClaimID))
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +228,7 @@ func (h handler) adminDecideClaim(ctx context.Context, in *adminDecideClaimInput
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.AdminDecideClubClaim(ctx, a, parseID(in.ClaimID),
+	v, err := h.svc.AdminDecideClubClaim(ctx, a, httpx.ParseID(in.ClaimID),
 		ClaimDecision{Decision: ClaimState(in.Body.Decision), Note: in.Body.DecisionNote})
 	if err != nil {
 		return nil, err

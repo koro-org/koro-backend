@@ -41,14 +41,10 @@ var (
 	deliverableKeyRe = regexp.MustCompile(`^[a-z][a-z0-9_]{1,40}$`)
 )
 
-func fieldErr(location, msg string) error {
-	return problem.ErrValidation.WithFields(problem.FieldError{Location: location, Message: msg})
-}
-
 func normalized(loc, s string) (string, error) {
 	n, err := textx.NormalizeText(s)
 	if err != nil {
-		return "", fieldErr(loc, "contains control or bidi characters")
+		return "", problem.Field(loc, "contains control or bidi characters")
 	}
 	return n, nil
 }
@@ -60,7 +56,7 @@ func cleanText(loc, s string, minRunes, maxRunes int) (string, error) {
 		return "", err
 	}
 	if c := utf8.RuneCountInString(n); c < minRunes || c > maxRunes {
-		return "", fieldErr(loc, "must be "+strconv.Itoa(minRunes)+"-"+strconv.Itoa(maxRunes)+" characters")
+		return "", problem.Field(loc, "must be "+strconv.Itoa(minRunes)+"-"+strconv.Itoa(maxRunes)+" characters")
 	}
 	return n, nil
 }
@@ -72,7 +68,7 @@ func cleanOptional(loc, s string, maxRunes int) (*string, error) {
 		return nil, err
 	}
 	if utf8.RuneCountInString(n) > maxRunes {
-		return nil, fieldErr(loc, "must be at most "+strconv.Itoa(maxRunes)+" characters")
+		return nil, problem.Field(loc, "must be at most "+strconv.Itoa(maxRunes)+" characters")
 	}
 	if n == "" {
 		return nil, nil
@@ -150,23 +146,23 @@ func (p ServicePatch) empty() bool {
 func checkService(s ServiceItem) error {
 	switch {
 	case !s.Category.Valid():
-		return fieldErr("body.category", "is not a service category")
+		return problem.Field("body.category", "is not a service category")
 	case !s.FulfillmentType.Valid():
-		return fieldErr("body.fulfillment_type", "is not a fulfilment type")
+		return problem.Field("body.fulfillment_type", "is not a fulfilment type")
 	case !money.ValidBP(int64(s.DefaultVATRateBP)):
-		return fieldErr("body.default_vat_rate_bp", "must be 0-10000 basis points")
+		return problem.Field("body.default_vat_rate_bp", "must be 0-10000 basis points")
 	case !s.VATClass.Valid():
-		return fieldErr("body.vat_class", "is not a VAT class")
+		return problem.Field("body.vat_class", "is not a VAT class")
 	case (s.FulfillmentType == FulfillPlatformNative) != (s.EntitlementTemplate != nil):
-		return fieldErr("body.entitlement_template", "is required for a platform-native service and only there")
+		return problem.Field("body.entitlement_template", "is required for a platform-native service and only there")
 	case (s.VATWithholdingNum == nil) != (s.VATWithholdingDen == nil):
-		return fieldErr("body.vat_withholding_den", "numerator and denominator go together")
+		return problem.Field("body.vat_withholding_den", "numerator and denominator go together")
 	case s.VATWithholdingNum != nil && (*s.VATWithholdingNum <= 0 || *s.VATWithholdingNum > *s.VATWithholdingDen):
-		return fieldErr("body.vat_withholding_num", "must be 1..denominator")
+		return problem.Field("body.vat_withholding_num", "must be 1..denominator")
 	case (s.VATClass == VATWithheld) != (s.VATWithholdingNum != nil):
-		return fieldErr("body.vat_class", "withheld goes with a withholding fraction and only it")
+		return problem.Field("body.vat_class", "withheld goes with a withholding fraction and only it")
 	case s.VATClass == VATExempt && s.VATExemptionCode == nil:
-		return fieldErr("body.vat_exemption_code", "is required for an exempt service")
+		return problem.Field("body.vat_exemption_code", "is required for an exempt service")
 	}
 	return nil
 }
@@ -181,17 +177,17 @@ func templateJSON(loc string, m map[string]any) (JSON, error) {
 	kind, _ := m["kind"].(string)
 	qty, _ := m["quantity_per_unit"].(float64)
 	if !deliverableKeyRe.MatchString(feature) || !deliverableKeyRe.MatchString(kind) || qty < 1 || qty != float64(int(qty)) {
-		return nil, fieldErr(loc, `must be {"feature", "kind", "quantity_per_unit" ≥ 1, "valid_days"?}`)
+		return nil, problem.Field(loc, `must be {"feature", "kind", "quantity_per_unit" ≥ 1, "valid_days"?}`)
 	}
 	if v, ok := m["valid_days"]; ok {
 		d, isNum := v.(float64)
 		if !isNum || d < 1 || d > 3660 || d != float64(int(d)) {
-			return nil, fieldErr(loc+".valid_days", "must be 1-3660 days")
+			return nil, problem.Field(loc+".valid_days", "must be 1-3660 days")
 		}
 	}
 	b, err := json.Marshal(m)
 	if err != nil || len(b) > 4096 {
-		return nil, fieldErr(loc, "must be a small JSON object")
+		return nil, problem.Field(loc, "must be a small JSON object")
 	}
 	return JSON(b), nil
 }
@@ -201,7 +197,7 @@ func smallint(loc string, v *int) (*int16, error) {
 		return nil, nil
 	}
 	if *v < 1 || *v > 1000 {
-		return nil, fieldErr(loc, "must be 1-1000")
+		return nil, problem.Field(loc, "must be 1-1000")
 	}
 	n := int16(*v)
 	return &n, nil
@@ -264,14 +260,14 @@ func (p OfferingPatch) empty() bool {
 // [a-z][a-z0-9_]{1,40}, labels of 1–120 characters.
 func cleanDeliverables(in []Deliverable) (Deliverables, error) {
 	if len(in) > maxDeliverables {
-		return nil, fieldErr("body.deliverables", "must have at most 20 items")
+		return nil, problem.Field("body.deliverables", "must have at most 20 items")
 	}
 	out := make(Deliverables, 0, len(in))
 	seen := map[string]bool{}
 	for i, d := range in {
 		loc := "body.deliverables[" + strconv.Itoa(i) + "]"
 		if !deliverableKeyRe.MatchString(d.Key) || seen[d.Key] {
-			return nil, fieldErr(loc+".key", "must be a unique key of lower-case letters, digits and _")
+			return nil, problem.Field(loc+".key", "must be a unique key of lower-case letters, digits and _")
 		}
 		seen[d.Key] = true
 		label, err := cleanText(loc+".label", d.Label, 1, maxDeliverableLbl)
@@ -287,7 +283,7 @@ func cleanFlags(in []SponsorFlag) ([]string, error) {
 	out := make([]string, 0, len(in))
 	for _, f := range in {
 		if !slices.Contains(SponsorFlags(), f) || slices.Contains(out, string(f)) {
-			return nil, fieldErr("body.blocked_sponsor_flags", "must be distinct values of alcohol, tobacco, gambling, political")
+			return nil, problem.Field("body.blocked_sponsor_flags", "must be distinct values of alcohol, tobacco, gambling, political")
 		}
 		out = append(out, string(f))
 	}
@@ -300,21 +296,21 @@ func cleanFlags(in []SponsorFlag) ([]string, error) {
 func checkOffering(o Offering, now time.Time) error {
 	switch {
 	case o.UnitPriceAmount <= 0 || o.UnitPriceAmount > maxUnitPrice:
-		return fieldErr("body.unit_price_amount", "must be 1-100000000000 kuruş")
+		return problem.Field("body.unit_price_amount", "must be 1-100000000000 kuruş")
 	case o.QuantityTotal != nil && (*o.QuantityTotal < 1 || *o.QuantityTotal > maxQuantity):
-		return fieldErr("body.quantity_total", "must be 1-100000")
+		return problem.Field("body.quantity_total", "must be 1-100000")
 	case o.PerBuyerLimit != nil && (*o.PerBuyerLimit < 1 || *o.PerBuyerLimit > maxQuantity):
-		return fieldErr("body.per_buyer_limit", "must be 1-100000")
+		return problem.Field("body.per_buyer_limit", "must be 1-100000")
 	case o.PerBuyerLimit != nil && o.QuantityTotal != nil && *o.PerBuyerLimit > *o.QuantityTotal:
-		return fieldErr("body.per_buyer_limit", "must not exceed quantity_total")
+		return problem.Field("body.per_buyer_limit", "must not exceed quantity_total")
 	case o.SalesStartAt != nil && o.SalesEndAt != nil && !o.SalesEndAt.After(*o.SalesStartAt):
-		return fieldErr("body.sales_end_at", "must be after sales_start_at")
+		return problem.Field("body.sales_end_at", "must be after sales_start_at")
 	case o.SalesEndAt != nil && !o.SalesEndAt.After(now):
-		return fieldErr("body.sales_end_at", "must be in the future")
+		return problem.Field("body.sales_end_at", "must be in the future")
 	case o.FulfilBy != nil && o.SalesStartAt != nil && o.FulfilBy.Before(*o.SalesStartAt):
-		return fieldErr("body.fulfil_by", "must not be before sales_start_at")
+		return problem.Field("body.fulfil_by", "must not be before sales_start_at")
 	case !o.InvoiceTrigger.Valid():
-		return fieldErr("body.invoice_trigger", "must be on_payment or on_fulfillment")
+		return problem.Field("body.invoice_trigger", "must be on_payment or on_fulfillment")
 	}
 	return nil
 }
@@ -349,7 +345,7 @@ type Decision struct {
 func cleanReason(loc, s string, required bool) (*string, error) {
 	n := strings.TrimSpace(s)
 	if required && n == "" {
-		return nil, fieldErr(loc, "is required")
+		return nil, problem.Field(loc, "is required")
 	}
 	return cleanOptional(loc, n, maxReason)
 }
@@ -420,15 +416,15 @@ func policyOf(in PolicyInput, now time.Time) (CommercePolicy, error) {
 	}
 	switch {
 	case !p.Scope.Valid():
-		return CommercePolicy{}, fieldErr("body.scope", "must be default, seller_org, service or offering")
+		return CommercePolicy{}, problem.Field("body.scope", "must be default, seller_org, service or offering")
 	case (p.Scope == ScopeDefault) != (p.ScopeID == nil):
-		return CommercePolicy{}, fieldErr("body.scope_id", "is required for every scope but default, and only there")
+		return CommercePolicy{}, problem.Field("body.scope_id", "is required for every scope but default, and only there")
 	case !p.ModelCode.Valid():
-		return CommercePolicy{}, fieldErr("body.model_code", "must be A, A2, B or C")
+		return CommercePolicy{}, problem.Field("body.model_code", "must be A, A2, B or C")
 	case in.CommissionRateBP == nil:
-		return CommercePolicy{}, fieldErr("body.commission_rate_bp", "is required (no default rate: T-10)")
+		return CommercePolicy{}, problem.Field("body.commission_rate_bp", "is required (no default rate: T-10)")
 	case !money.ValidBP(int64(*in.CommissionRateBP)):
-		return CommercePolicy{}, fieldErr("body.commission_rate_bp", "must be 0-10000 basis points")
+		return CommercePolicy{}, problem.Field("body.commission_rate_bp", "must be 0-10000 basis points")
 	}
 	p.CommissionRateBP = *in.CommissionRateBP
 	if p.CollectionMethod == "" {
@@ -464,35 +460,35 @@ func policyOf(in PolicyInput, now time.Time) (CommercePolicy, error) {
 	p.ValidTo = utc(in.ValidTo)
 	switch {
 	case !p.CollectionMethod.Valid():
-		return CommercePolicy{}, fieldErr("body.collection_method", "must be bank_transfer or direct_to_payee")
+		return CommercePolicy{}, problem.Field("body.collection_method", "must be bank_transfer or direct_to_payee")
 	case p.CollectionMethod == CollectIyzico:
-		return CommercePolicy{}, fieldErr("body.collection_method", "iyzico is not available before phase 2")
+		return CommercePolicy{}, problem.Field("body.collection_method", "iyzico is not available before phase 2")
 	case (p.ModelCode == ModelC) != (p.CollectionMethod == CollectDirectToPayee):
-		return CommercePolicy{}, fieldErr("body.collection_method", "direct_to_payee goes with model C and only it")
+		return CommercePolicy{}, problem.Field("body.collection_method", "direct_to_payee goes with model C and only it")
 	case p.CommissionPayer != PayerSeller && p.CommissionPayer != PayerBuyer:
-		return CommercePolicy{}, fieldErr("body.commission_payer", "must be seller or buyer")
+		return CommercePolicy{}, problem.Field("body.commission_payer", "must be seller or buyer")
 	case p.ModelCode == ModelC && p.CommissionPayer != PayerBuyer:
-		return CommercePolicy{}, fieldErr("body.commission_payer", "model C charges the buyer")
+		return CommercePolicy{}, problem.Field("body.commission_payer", "model C charges the buyer")
 	case p.CommissionBasis != BasisNetExclVAT && p.CommissionBasis != BasisGrossInclVAT:
-		return CommercePolicy{}, fieldErr("body.commission_basis", "must be net_excl_vat or gross_incl_vat")
+		return CommercePolicy{}, problem.Field("body.commission_basis", "must be net_excl_vat or gross_incl_vat")
 	case p.CommissionMinAmount != nil && (*p.CommissionMinAmount < 0 || *p.CommissionMinAmount > maxUnitPrice):
-		return CommercePolicy{}, fieldErr("body.commission_min_amount", "must be 0-100000000000 kuruş")
+		return CommercePolicy{}, problem.Field("body.commission_min_amount", "must be 0-100000000000 kuruş")
 	case p.CommissionMaxAmount != nil && (*p.CommissionMaxAmount < 0 || *p.CommissionMaxAmount > maxUnitPrice):
-		return CommercePolicy{}, fieldErr("body.commission_max_amount", "must be 0-100000000000 kuruş")
+		return CommercePolicy{}, problem.Field("body.commission_max_amount", "must be 0-100000000000 kuruş")
 	case p.CommissionMinAmount != nil && p.CommissionMaxAmount != nil && *p.CommissionMinAmount > *p.CommissionMaxAmount:
-		return CommercePolicy{}, fieldErr("body.commission_max_amount", "must not be below commission_min_amount")
+		return CommercePolicy{}, problem.Field("body.commission_max_amount", "must not be below commission_min_amount")
 	case !money.ValidBP(int64(p.CommissionVATRateBP)):
-		return CommercePolicy{}, fieldErr("body.commission_vat_rate_bp", "must be 0-10000 basis points")
+		return CommercePolicy{}, problem.Field("body.commission_vat_rate_bp", "must be 0-10000 basis points")
 	case p.InvoiceAutomation != InvoiceManual && p.InvoiceAutomation != InvoiceProvider:
-		return CommercePolicy{}, fieldErr("body.invoice_automation", "must be manual or provider")
+		return CommercePolicy{}, problem.Field("body.invoice_automation", "must be manual or provider")
 	case p.DisputeWindowDays < 0 || p.DisputeWindowDays > 60:
-		return CommercePolicy{}, fieldErr("body.dispute_window_days", "must be 0-60")
+		return CommercePolicy{}, problem.Field("body.dispute_window_days", "must be 0-60")
 	case p.PayoutHoldDays < 0 || p.PayoutHoldDays > 90:
-		return CommercePolicy{}, fieldErr("body.payout_hold_days", "must be 0-90")
+		return CommercePolicy{}, problem.Field("body.payout_hold_days", "must be 0-90")
 	case p.ValidFrom.Before(now):
-		return CommercePolicy{}, fieldErr("body.valid_from", "must not be in the past")
+		return CommercePolicy{}, problem.Field("body.valid_from", "must not be in the past")
 	case p.ValidTo != nil && !p.ValidTo.After(p.ValidFrom):
-		return CommercePolicy{}, fieldErr("body.valid_to", "must be after valid_from")
+		return CommercePolicy{}, problem.Field("body.valid_to", "must be after valid_from")
 	}
 	notes, err := cleanOptional("body.notes", in.Notes, maxNotes)
 	if err != nil {

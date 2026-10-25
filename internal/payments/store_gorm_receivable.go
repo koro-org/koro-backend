@@ -20,7 +20,7 @@ func (s gormStore) InsertCollection(ctx context.Context, c ReceivableCollection)
 // GetCollection implements CollectionStore.
 // cross-org: admin surface, caller checks finance authorization first.
 func (s gormStore) GetCollection(ctx context.Context, id uuid.UUID, lock bool) (ReceivableCollection, error) {
-	return take[ReceivableCollection]("get collection", lockIf(db.Conn(ctx, s.orm), lock).Where("id = ?", id))
+	return take[ReceivableCollection]("get collection", db.LockIf(db.Conn(ctx, s.orm), lock).Where("id = ?", id))
 }
 
 // UpdateCollection implements CollectionStore with a requested-state guard.

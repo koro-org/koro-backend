@@ -371,7 +371,7 @@ func TestConfigVersion_RequiresReauth(t *testing.T) {
 			return err
 		},
 		Rows:   func() []audittest.Row { return e.audit.rows(authz.TalentConfigManage) },
-		Denied: rowOf(audit.Event{Action: string(authz.TalentConfigManage), ResourceType: "talent_config_version"}.By(auditor)),
+		Denied: audittest.RowOf(audit.Event{Action: string(authz.TalentConfigManage), ResourceType: "talent_config_version"}.By(auditor)),
 		Late:   e.reauth,
 		Wrong:  identity.ReauthProof{Password: "wrong-password"}, WrongErr: identity.ErrReauthFailed,
 		Missing: identity.ReauthProof{}, MissingErr: identity.ErrReauthRequired,
@@ -525,7 +525,7 @@ func TestReauthDenied_EveryROperation(t *testing.T) {
 				Metadata: map[string]any{"point_event_id": f.point.ID.String()}}
 		}
 		audittest.ReauthCase[identity.ReauthProof]{
-			Call: call, Rows: func() []audittest.Row { return e.audit.rows(act) }, Denied: rowOf(denied.By(auditor)), Late: e.reauth,
+			Call: call, Rows: func() []audittest.Row { return e.audit.rows(act) }, Denied: audittest.RowOf(denied.By(auditor)), Late: e.reauth,
 			Wrong: identity.ReauthProof{Password: "wrong-password"}, WrongErr: identity.ErrReauthFailed,
 			Missing: identity.ReauthProof{}, MissingErr: identity.ErrReauthRequired,
 			Good: goodProof,
@@ -540,13 +540,6 @@ func TestReauthDenied_EveryROperation(t *testing.T) {
 	}
 }
 
-// rowOf is e in audittest's terms.
-func rowOf(e audit.Event) audittest.Row {
-	return audittest.Row{Action: e.Action, Outcome: string(e.Outcome), Reason: e.Reason, ActorUserID: e.ActorUserID,
-		ActorOrgID: e.ActorOrgID, SystemJob: e.SystemJob, OrgID: e.OrgID, ResourceType: e.ResourceType, ResourceID: e.ResourceID,
-		Metadata: e.Metadata}
-}
-
 // rows returns the recorded events of act in audittest's terms.
 func (f *fakeAudit) rows(act authz.Action) []audittest.Row {
 	f.mu.Lock()
@@ -554,7 +547,7 @@ func (f *fakeAudit) rows(act authz.Action) []audittest.Row {
 	var out []audittest.Row
 	for _, e := range f.events {
 		if e.Action == string(act) {
-			out = append(out, rowOf(e))
+			out = append(out, audittest.RowOf(e))
 		}
 	}
 	return out

@@ -14,7 +14,6 @@ import (
 	"time"
 	"uuid"
 
-	"koro/internal/audit"
 	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
@@ -29,7 +28,6 @@ import (
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/outbox"
-	"koro/internal/platform/problem"
 	"koro/internal/platform/queue"
 )
 
@@ -47,40 +45,6 @@ const (
 	tcknA   = "10000000146"
 	tcknB   = "12345678950"
 )
-
-// auditLog records the events a parties service writes.
-type auditLog struct {
-	mu     sync.Mutex
-	events []audit.Event
-	fail   error
-}
-
-func (l *auditLog) Log(_ context.Context, e audit.Event) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.fail != nil {
-		return l.fail
-	}
-	l.events = append(l.events, e)
-	return nil
-}
-
-func (l *auditLog) all() []audit.Event {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return append([]audit.Event(nil), l.events...)
-}
-
-// of returns the events of one action.
-func (l *auditLog) of(act authz.Action) []audit.Event {
-	var out []audit.Event
-	for _, e := range l.all() {
-		if e.Action == string(act) {
-			out = append(out, e)
-		}
-	}
-	return out
-}
 
 // fakeOrgs is orgs.OrgDirectory over the matrix orgs (authztest.Orgs) plus
 // extra ones.
@@ -301,7 +265,7 @@ func (b *syncBuffer) String() string {
 type env struct {
 	clk    *clock.Fake
 	store  *parties.MemStore
-	audit  *auditLog
+	audit  *audittest.Recorder
 	orgs   *fakeOrgs
 	files  *fakeFiles
 	logs   *syncBuffer
@@ -339,7 +303,7 @@ func testKeys(t *testing.T) (parties.Sealer, parties.Indexer) {
 func newEnv(t *testing.T, opts ...envOpt) *env {
 	t.Helper()
 	clk := clock.NewFake(t0)
-	e := &env{clk: clk, store: parties.NewMemStore(clk.Now), audit: &auditLog{}, orgs: newFakeOrgs(), files: newFakeFiles(),
+	e := &env{clk: clk, store: parties.NewMemStore(clk.Now), audit: &audittest.Recorder{}, orgs: newFakeOrgs(), files: newFakeFiles(),
 		logs: &syncBuffer{}, outbox: outbox.NewMem(clk), queue: queue.NewMem(), reauth: &fakeReauth{}, sender: &fakeSender{}}
 	e.late = &audittest.LateReauth[identity.ReauthProof]{Next: e.reauth}
 	sealer, indexer := testKeys(t)
@@ -427,28 +391,6 @@ func (e *env) verify(t *testing.T, id uuid.UUID) parties.PartyView {
 		t.Fatalf("AdminVerifyParty: %v", err)
 	}
 	return v
-}
-
-func wantErr(t *testing.T, err, want error) {
-	t.Helper()
-	if !errors.Is(err, want) {
-		t.Fatalf("error = %v, want %v", err, want)
-	}
-}
-
-// problemOf returns the status and code of a problem error.
-func problemOf(err error) (int, string) {
-	if p, ok := errors.AsType[*problem.Error](err); ok {
-		return p.Status(), p.Code()
-	}
-	return 0, ""
-}
-
-func wantProblem(t *testing.T, err error, status int, code string) {
-	t.Helper()
-	if s, c := problemOf(err); s != status || c != code {
-		t.Fatalf("error = %v (%d %s), want %d %s", err, s, c, status, code)
-	}
 }
 
 // ---- HTTP

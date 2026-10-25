@@ -8,6 +8,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/consent"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/problem"
 )
 
 // ConsentProof is the consent text a student saw when turning a mirrored
@@ -67,7 +68,7 @@ func (s *service) UpdateMyPrivacy(ctx context.Context, a authz.Actor, patch Priv
 		return Privacy{}, ErrEmptyPatch
 	}
 	if patch.ActivityRankingChoice != nil && !patch.ActivityRankingChoice.Valid() {
-		return Privacy{}, fieldErr("body.activity_ranking_choice", "must be default, enabled or disabled")
+		return Privacy{}, problem.Field("body.activity_ranking_choice", "must be default, enabled or disabled")
 	}
 	if a.IsMinor && (isTrue(patch.Discoverable) || isTrue(patch.ShowContactOnGrant)) {
 		return Privacy{}, ErrMinorRestricted

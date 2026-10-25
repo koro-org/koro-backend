@@ -143,10 +143,10 @@ func TestCompanyProfile_NoGrant_404(t *testing.T) {
 	}
 	notFound("no profile with a grant", recA, orgA, bare.UserID)
 
-	if n := len(e.audit.of(string(authz.StudentsProfileReadCompany))); n != 1 { // B's single successful read
+	if n := len(e.audit.Of(authz.StudentsProfileReadCompany)); n != 1 { // B's single successful read
 		t.Fatalf("profile read audit rows = %d, want 1", n)
 	}
-	if n := len(e.audit.of(string(authz.StudentsCvReadCompany))); n != 0 {
+	if n := len(e.audit.Of(authz.StudentsCvReadCompany)); n != 0 {
 		t.Fatalf("refused CV downloads were audited: %d", n)
 	}
 }
@@ -269,7 +269,7 @@ func TestCompanyCv_EveryReadAudited(t *testing.T) {
 	if ttls[len(ttls)-1] != time.Minute {
 		t.Fatalf("company CV URL lifetime = %v, want 1m", ttls[len(ttls)-1])
 	}
-	rows := e.audit.of(string(authz.StudentsCvReadCompany))
+	rows := e.audit.Of(authz.StudentsCvReadCompany)
 	if len(rows) != 3 {
 		t.Fatalf("CV read audit rows = %d, want 3", len(rows))
 	}
@@ -285,11 +285,11 @@ func TestCompanyCv_EveryReadAudited(t *testing.T) {
 	if _, err := e.svc.GetCompanyStudentProfile(ctx, adm, org, s.UserID); err != nil {
 		t.Fatal(err)
 	}
-	if n := len(e.audit.of(string(authz.StudentsProfileReadCompany))); n != 1 {
+	if n := len(e.audit.Of(authz.StudentsProfileReadCompany)); n != 1 {
 		t.Fatalf("profile read audit rows = %d", n)
 	}
 	// No record, no URL.
-	e.audit.setFail(errors.New("audit down"))
+	e.audit.Fail(errors.New("audit down"))
 	if dl, err := e.svc.DownloadCompanyStudentCV(ctx, rec, org, s.UserID); err == nil || dl.URL != "" {
 		t.Fatalf("download without its audit record = %+v, %v", dl, err)
 	}
@@ -355,7 +355,7 @@ func TestRevokeGrant_ByStudent_CompanyLosesAccess(t *testing.T) {
 	if err != nil || g.Active() || *g.RevokedByKind != students.RevokedByStudent || *g.RevokeReason != "Artık ilgilenmiyorum" {
 		t.Fatalf("stored grant = %+v, %v", g, err)
 	}
-	rows := e.audit.of(string(authz.StudentsAccessGrantRevoke))
+	rows := e.audit.Of(authz.StudentsAccessGrantRevoke)
 	if len(rows) != 1 || *rows[0].ActorUserID != s.UserID || rows[0].Metadata["revoked_by"] != "student" ||
 		*rows[0].ResourceID != grant || *rows[0].OrgID != org || rows[0].Reason != "" {
 		t.Fatalf("revocation audit = %+v", rows)
@@ -368,7 +368,7 @@ func TestRevokeGrant_ByStudent_CompanyLosesAccess(t *testing.T) {
 	if err := e.svc.RevokeMyAccessGrant(ctx, s, grant, ""); err != nil {
 		t.Fatalf("revoking again: %v", err)
 	}
-	if n := len(e.audit.of(string(authz.StudentsAccessGrantRevoke))); n != 1 {
+	if n := len(e.audit.Of(authz.StudentsAccessGrantRevoke)); n != 1 {
 		t.Fatalf("a second revocation was audited: %d", n)
 	}
 
@@ -416,7 +416,7 @@ func TestRevokeGrant_ByCompany(t *testing.T) {
 	if err := e.svc.RevokeCompanyAccessGrant(ctx, recA, orgA, s.UserID, ""); !errors.Is(err, problem.ErrNotFound) {
 		t.Fatalf("revoking a revoked grant: %v, want 404", err)
 	}
-	rows := e.audit.of(string(authz.StudentsAccessGrantRevoke))
+	rows := e.audit.Of(authz.StudentsAccessGrantRevoke)
 	if len(rows) != 1 || rows[0].Metadata["revoked_by"] != "company" || *rows[0].ActorOrgID != orgA || *rows[0].ActorUserID != recA.UserID {
 		t.Fatalf("revocation audit = %+v", rows)
 	}
@@ -461,7 +461,7 @@ func TestGrant_Rules(t *testing.T) {
 	if err := e.svc.Grant(ctx, s.UserID, org, "advert", uuid.NewV7()); !errors.Is(err, problem.ErrValidation) {
 		t.Fatalf("unknown source: %v", err)
 	}
-	rows := e.audit.of("students.access_grant.create")
+	rows := e.audit.Of("students.access_grant.create")
 	if len(rows) != 1 || rows[0].ActorUserID == nil || *rows[0].ActorUserID != s.UserID || *rows[0].OrgID != org ||
 		rows[0].Metadata["source_id"] != req.String() {
 		t.Fatalf("grant audit = %+v", rows)
@@ -481,7 +481,7 @@ func TestGrant_Rules(t *testing.T) {
 	if ok, _ := e.svc.Has(ctx, s.UserID, org); ok {
 		t.Fatal("the grant survived its source's revocation")
 	}
-	sys := e.audit.of(string(authz.StudentsAccessGrantRevoke))
+	sys := e.audit.Of(authz.StudentsAccessGrantRevoke)
 	if len(sys) != 1 || sys[0].SystemJob != "students.access_grants" || sys[0].Metadata["revoked_by"] != "system" {
 		t.Fatalf("system revocation audit = %+v", sys)
 	}

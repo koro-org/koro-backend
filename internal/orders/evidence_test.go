@@ -13,6 +13,7 @@ import (
 	"koro/internal/files"
 	"koro/internal/orders"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // evidenceFile inserts a completed delivery_evidence upload of orgName by
@@ -69,7 +70,7 @@ func TestMarkFulfilled_WithEvidence_AttachesFile(t *testing.T) {
 	if err != nil || f.AttachedModule != "orders" || f.AttachedEntityID != l.ID {
 		t.Fatalf("file after the mark = %+v, %v", f, err)
 	}
-	ev := e.audit.of(authz.OrdersLineMarkFulfilled)
+	ev := e.audit.Of(authz.OrdersLineMarkFulfilled)
 	if len(ev) != 1 || ev[0].Metadata["evidence_file_id"] != file.String() {
 		t.Fatalf("mark audit = %+v", ev)
 	}
@@ -135,7 +136,7 @@ func TestMarkFulfilled_EvidenceRefused(t *testing.T) {
 		l := e.paidLine(t)
 		file := tt.file()
 		_, err := e.markWith(t, "club_admin", l.ID, file)
-		if s, c := problemOf(err); s != tt.status || c != tt.code {
+		if s, c := problemtest.StatusCode(err); s != tt.status || c != tt.code {
 			t.Errorf("%s: error = %v (%d %s), want %d %s", tt.name, err, s, c, tt.status, tt.code)
 		}
 		if got := e.line(t, l.ID); got.FulfillmentStatus != orders.FulfillPending || got.FulfillmentEvidenceFileID != nil {
@@ -149,13 +150,13 @@ func TestMarkFulfilled_EvidenceRefused(t *testing.T) {
 	l := e.paidLine(t)
 	file := e.evidenceFile(t, "club_a", "club_admin", nil)
 	_, err := e.markWith(t, "other_club_admin", l.ID, file)
-	wantErr(t, err, authz.ErrNotFound)
+	problemtest.WantErr(t, err, authz.ErrNotFound)
 
 	// Without the files module: the mark with evidence fails closed, a mark without works.
 	n := newEnv(t, func(d *orders.Deps) { d.Files = nil })
 	nl := n.paidLine(t)
 	_, err = n.markWith(t, "club_admin", nl.ID, uuid.NewV7())
-	wantErr(t, err, orders.ErrUnavailable)
+	problemtest.WantErr(t, err, orders.ErrUnavailable)
 	n.mark(t, nl.ID)
 }
 
@@ -179,7 +180,7 @@ func TestLineEvidence_Download(t *testing.T) {
 			t.Errorf("%s: download = %+v, %v", p, dl, err)
 		}
 	}
-	if ev := e.audit.of(authz.OrdersLineReadEvidence); len(ev) != 5 || ev[0].Metadata["evidence_file_id"] != file.String() ||
+	if ev := e.audit.Of(authz.OrdersLineReadEvidence); len(ev) != 5 || ev[0].Metadata["evidence_file_id"] != file.String() ||
 		ev[0].ResourceID == nil || *ev[0].ResourceID != l.ID {
 		t.Fatalf("download audit = %+v", ev)
 	}
@@ -197,9 +198,9 @@ func TestLineEvidence_Download(t *testing.T) {
 	plain := e.paidLine(t)
 	e.mark(t, plain.ID)
 	_, err := e.svc.LineEvidence(ctxOf(t, buyer), buyer, plain.ID)
-	wantProblem(t, err, 404, "not_found")
+	problemtest.WantProblem(t, err, 404, "not_found")
 	_, err = e.svc.LineEvidence(ctxOf(t, buyer), buyer, uuid.NewV7())
-	wantProblem(t, err, 404, "not_found")
+	problemtest.WantProblem(t, err, 404, "not_found")
 
 	pending := e.paidLine(t)
 	unscanned := e.evidenceFile(t, "club_a", "club_admin", func(f *files.File) { f.ScanStatus = files.ScanPending })
@@ -207,8 +208,8 @@ func TestLineEvidence_Download(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.LineEvidence(ctxOf(t, buyer), buyer, pending.ID)
-	wantProblem(t, err, 409, "files.not_clean")
-	if n := len(e.audit.of(authz.OrdersLineReadEvidence)); n != 5 {
+	problemtest.WantProblem(t, err, 409, "files.not_clean")
+	if n := len(e.audit.Of(authz.OrdersLineReadEvidence)); n != 5 {
 		t.Fatalf("refused downloads were audited: %d events", n)
 	}
 }

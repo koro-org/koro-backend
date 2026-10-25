@@ -94,7 +94,7 @@ func cleanEmail(loc, s string) (string, string, error) {
 	e := strings.TrimSpace(s)
 	addr, err := mail.ParseAddress(e)
 	if err != nil || addr.Address != e || addr.Name != "" || len(e) > maxEmail || !strings.Contains(e, "@") {
-		return "", "", fieldErr(loc, "must be a bare e-mail address")
+		return "", "", problem.Field(loc, "must be a bare e-mail address")
 	}
 	return e, textx.NormalizeEmail(e), nil
 }
@@ -222,7 +222,7 @@ func (s *service) ListInvitations(ctx context.Context, a authz.Actor, orgID uuid
 	if err != nil {
 		return InvitationPage{}, err
 	}
-	if err := authz.Can(ctx, a, authz.OrgsInvitationList, orgResource(o)); err != nil {
+	if err := authz.Can(ctx, a, authz.OrgsInvitationList, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
 		return InvitationPage{}, err
 	}
 	limit := page.ClampLimit(q.Limit)

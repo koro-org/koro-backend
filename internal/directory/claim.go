@@ -206,7 +206,7 @@ func cleanMultiline(loc, s string, maxRunes int) (*string, error) {
 	for _, ln := range lines {
 		n, err := textx.NormalizeText(ln)
 		if err != nil {
-			return nil, fieldErr(loc, "contains control or bidi characters")
+			return nil, problem.Field(loc, "contains control or bidi characters")
 		}
 		if n == "" && (len(out) == 0 || out[len(out)-1] == "") {
 			continue
@@ -221,7 +221,7 @@ func cleanMultiline(loc, s string, maxRunes int) (*string, error) {
 	}
 	v := strings.Join(out, "\n")
 	if utf8.RuneCountInString(v) > maxRunes {
-		return nil, fieldErr(loc, "must be at most "+strconv.Itoa(maxRunes)+" characters")
+		return nil, problem.Field(loc, "must be at most "+strconv.Itoa(maxRunes)+" characters")
 	}
 	return &v, nil
 }
@@ -293,9 +293,9 @@ func (s *service) CreateClubClaim(ctx context.Context, a authz.Actor, clubID uui
 		return ClaimView{}, err
 	}
 	if text == nil && in.EvidenceFileID == nil {
-		return ClaimView{}, fieldErr("body.evidence_text", "evidence_text or evidence_file_id is required")
+		return ClaimView{}, problem.Field("body.evidence_text", "evidence_text or evidence_file_id is required")
 	}
-	badFile := fieldErr("body.evidence_file_id", "must be a club_claim_evidence upload of yours that is complete and unused")
+	badFile := problem.Field("body.evidence_file_id", "must be a club_claim_evidence upload of yours that is complete and unused")
 	if in.EvidenceFileID != nil {
 		if s.d.Files == nil {
 			return ClaimView{}, errUnavailable
@@ -505,7 +505,7 @@ func (s *service) AdminListClubClaims(ctx context.Context, a authz.Actor, q Admi
 		f.Status = ClaimPending
 	}
 	if !f.Status.Valid() {
-		return ClaimPage{}, fieldErr("query.status", "must be pending, approved, rejected or withdrawn")
+		return ClaimPage{}, problem.Field("query.status", "must be pending, approved, rejected or withdrawn")
 	}
 	limit := page.ClampLimit(q.Limit)
 	rows, err := s.d.Store.ListClaims(ctx, f, q.After, limit+1)
@@ -613,7 +613,7 @@ func (s *service) AdminDecideClubClaim(ctx context.Context, a authz.Actor, id uu
 	}
 	approve := in.Decision == ClaimApproved
 	if !approve && in.Decision != ClaimRejected {
-		return ClaimView{}, fieldErr("body.decision", "must be approved or rejected")
+		return ClaimView{}, problem.Field("body.decision", "must be approved or rejected")
 	}
 	note, err := cleanMultiline("body.decision_note", in.Note, maxDecisionNote)
 	if err != nil {

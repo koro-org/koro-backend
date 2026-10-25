@@ -11,6 +11,7 @@ import (
 	"koro/internal/events"
 	"koro/internal/notify"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/problem/problemtest"
 	"koro/internal/platform/queue"
 )
 
@@ -235,17 +236,17 @@ func TestResendTicket_SameTokenRederived_RateLimited(t *testing.T) {
 	if len(keys) != 3 {
 		t.Fatalf("dedupe keys = %v", keys)
 	}
-	if n := len(e.audit.of("events.ticket.resend")); n != 2 {
+	if n := len(e.audit.Of("events.ticket.resend")); n != 2 {
 		t.Fatalf("%d resend audits", n)
 	}
 	w := e.mustRegister(t, persona(t, "club_member"), ev.Event.ID, motivation)
 	err := e.svc.ResendMyTicket(t.Context(), persona(t, "club_member"), w.Registration.ID)
-	wantCode(t, err, 409, "events.invalid_state")
+	problemtest.WantProblem(t, err, 409, "events.invalid_state")
 	err = e.svc.ResendMyTicket(t.Context(), persona(t, "club_member"), r.Registration.ID)
 	wantNotFound(t, err)
 	e.queue.Fail(errors.New("redis down"))
 	err = e.svc.ResendMyTicket(t.Context(), adultStudent(t), r.Registration.ID)
-	wantCode(t, err, 503, "unavailable")
+	problemtest.WantProblem(t, err, 503, "unavailable")
 }
 
 // TestScheduleChanged_SendsICSWithIncrementedSequence: a schedule change

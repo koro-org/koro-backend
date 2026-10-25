@@ -167,13 +167,13 @@ func sessions(rows []sessionRow) []Session {
 func (s gormStore) InsertSession(ctx context.Context, x Session) error {
 	var reason *string
 	if x.RevokeReason != "" {
-		reason = nullable(string(x.RevokeReason))
+		reason = db.Nullable(string(x.RevokeReason))
 	}
 	err := db.Conn(ctx, s.orm).Exec(`INSERT INTO sessions (id, user_id, token_hash, client_kind, created_at, last_seen_at,
 		idle_expires_at, absolute_expires_at, mfa_verified_at, revoked_at, revoke_reason, ip, user_agent, device_label)
 		VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST( ? AS inet), ?, ?)`,
 		x.ID, x.UserID, x.TokenHash, string(x.ClientKind), x.CreatedAt, x.LastSeenAt, x.IdleExpiresAt, x.AbsoluteExpiresAt,
-		x.MFAVerifiedAt, x.RevokedAt, reason, nullable(x.IP), nullable(x.UserAgent), nullable(x.DeviceLabel)).Error
+		x.MFAVerifiedAt, x.RevokedAt, reason, db.Nullable(x.IP), db.Nullable(x.UserAgent), db.Nullable(x.DeviceLabel)).Error
 	if err != nil {
 		return fmt.Errorf("identity: insert session: %w", db.Translate(err))
 	}
@@ -304,7 +304,7 @@ func (s gormStore) DeleteUserSessions(ctx context.Context, userID uuid.UUID) (in
 // cross-org: tokens belong to a user, not an org.
 func (s gormStore) InsertEmailToken(ctx context.Context, t EmailToken) error {
 	r := tokenRow{
-		ID: t.ID, UserID: t.UserID, Purpose: string(t.Purpose), TargetEmail: nullable(t.TargetEmail), KeyID: t.KeyID,
+		ID: t.ID, UserID: t.UserID, Purpose: string(t.Purpose), TargetEmail: db.Nullable(t.TargetEmail), KeyID: t.KeyID,
 		TokenHash: t.TokenHash, ExpiresAt: t.ExpiresAt, ConsumedAt: t.ConsumedAt, CreatedAt: t.CreatedAt,
 	}
 	if err := db.Conn(ctx, s.orm).Create(&r).Error; err != nil {

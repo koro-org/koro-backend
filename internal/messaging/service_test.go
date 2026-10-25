@@ -18,6 +18,7 @@ import (
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 	"koro/internal/students"
 )
 
@@ -65,10 +66,10 @@ func TestCreateContactRequest_IdempotencyReplay_SingleConsume(t *testing.T) {
 	other := in
 	other.Subject = "Başka bir konu"
 	_, err = e.svc.Create(ctx, cmm, e.companyA, other)
-	wantErr(t, err, idempotency.ErrKeyReused)
+	problemtest.WantErr(t, err, idempotency.ErrKeyReused)
 
 	_, err = e.svc.Create(t.Context(), cmm, e.companyA, in)
-	wantCode(t, err, 409, "messaging.request_pending")
+	problemtest.WantProblem(t, err, 409, "messaging.request_pending")
 	if n := len(e.ent.consumed()); n != 1 {
 		t.Fatalf("a refused request consumed a unit (%d)", n)
 	}
@@ -88,8 +89,8 @@ func TestCreateContactRequest_NoQuota_403NotEntitled(t *testing.T) {
 	e.ent.units[e.companyA] = 0
 	cmm := actor(t, "company_member")
 	_, err := e.svc.Create(t.Context(), cmm, e.companyA, request(e.companyA, "student"))
-	wantErr(t, err, entitlements.ErrNoEntitlement)
-	wantCode(t, err, 403, "entitlements.not_entitled")
+	problemtest.WantErr(t, err, entitlements.ErrNoEntitlement)
+	problemtest.WantProblem(t, err, 403, "entitlements.not_entitled")
 	if rows, _ := e.store.ReceivedBy(t.Context(), authztest.ID("student")); len(rows) != 0 {
 		t.Fatalf("rows written: %+v", rows)
 	}
@@ -97,7 +98,7 @@ func TestCreateContactRequest_NoQuota_403NotEntitled(t *testing.T) {
 		t.Fatal("event or audit record without a unit")
 	}
 	_, err = e.svc.Create(t.Context(), cmm, e.companyA, request(e.companyA, "student_minor"))
-	wantErr(t, err, problem.ErrNotFound)
+	problemtest.WantErr(t, err, problem.ErrNotFound)
 }
 
 // TestCreateContactRequest_MinorTarget_404 (03 §2.3, k19): a minor is
@@ -123,7 +124,7 @@ func TestCreateContactRequest_MinorTarget_404(t *testing.T) {
 	// Discoverable once, then level 2 off: the pseudonym the company holds is 404.
 	e.students.set(authztest.ID("student_granted"), false)
 	_, err := e.svc.Create(ctx, cmm, e.companyA, request(e.companyA, "student_granted"))
-	wantErr(t, err, problem.ErrNotFound)
+	problemtest.WantErr(t, err, problem.ErrNotFound)
 	if len(e.ent.consumed()) != 0 {
 		t.Fatal("a refused target consumed a unit")
 	}
@@ -142,7 +143,7 @@ func TestCreateContactRequest_BlockedByStudent_404(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := e.svc.Create(ctx, actor(t, "company_member"), e.companyA, request(e.companyA, "student"))
-	wantErr(t, err, problem.ErrNotFound)
+	problemtest.WantErr(t, err, problem.ErrNotFound)
 	if _, err := e.svc.Create(ctx, actor(t, "other_company_member"), e.companyB, request(e.companyB, "student")); err != nil {
 		t.Fatalf("company_b: %v", err)
 	}
@@ -168,7 +169,7 @@ func TestCreate_DeclinedWithin90Days_404(t *testing.T) {
 	}
 	e.clk.Advance(89 * 24 * time.Hour)
 	_, err := e.svc.Create(ctx, cmm, e.companyA, request(e.companyA, "student"))
-	wantErr(t, err, problem.ErrNotFound)
+	problemtest.WantErr(t, err, problem.ErrNotFound)
 	e.clk.Advance(24 * time.Hour)
 	if _, err := e.svc.Create(ctx, cmm, e.companyA, request(e.companyA, "student")); err != nil {
 		t.Fatalf("after 90 days: %v", err)
@@ -197,17 +198,17 @@ func TestCreate_CompanyStatusAndValidation(t *testing.T) {
 
 	e.orgs.status(e.companyA, orgs.StatusSuspended)
 	_, err := e.svc.Create(ctx, cmm, e.companyA, in)
-	wantErr(t, err, orgs.ErrOrgSuspended)
+	problemtest.WantErr(t, err, orgs.ErrOrgSuspended)
 	e.orgs.status(e.companyA, orgs.StatusPendingReview)
 	_, err = e.svc.Create(ctx, cmm, e.companyA, in)
-	wantErr(t, err, orgs.ErrOrgNotVerified)
+	problemtest.WantErr(t, err, orgs.ErrOrgNotVerified)
 	e.orgs.status(e.companyA, orgs.StatusActive)
 
 	// Authorisation first: staff 403, outsiders 404 (03 §7.6).
 	_, err = e.svc.Create(ctx, actor(t, "platform_admin"), e.companyA, in)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	_, err = e.svc.Create(ctx, actor(t, "student"), e.companyA, in)
-	wantErr(t, err, authz.ErrNotFound)
+	problemtest.WantErr(t, err, authz.ErrNotFound)
 
 	for name, bad := range map[string]messaging.CreateInput{
 		"short subject": {AnonID: in.AnonID, Subject: "Hi", Message: in.Message},
@@ -267,7 +268,7 @@ func TestAccept_GrantsL3InSameTx(t *testing.T) {
 
 	e.students.failGrant = students.ErrMinorRestricted
 	_, err := e.svc.Respond(ctx, stu, v.Request.ID, accept)
-	wantErr(t, err, students.ErrMinorRestricted)
+	problemtest.WantErr(t, err, students.ErrMinorRestricted)
 	got, _ := e.svc.GetMine(ctx, stu, v.Request.ID)
 	if got.Status != messaging.StatusPending || got.Request.RespondedAt != nil || len(e.students.granted()) != 0 ||
 		len(e.outbox.of(domainevent.TopicContactRequestClosed)) != 0 {
@@ -307,7 +308,7 @@ func TestAccept_GrantsL3InSameTx(t *testing.T) {
 		t.Fatal("a repeated acceptance granted again")
 	}
 	_, err = e.svc.Respond(ctx, stu, v.Request.ID, decline)
-	wantCode(t, err, 409, "messaging.invalid_state")
+	problemtest.WantProblem(t, err, 409, "messaging.invalid_state")
 
 	cv, err := e.svc.GetSent(ctx, actor(t, "company_admin"), e.companyA, v.Request.ID)
 	if err != nil || ToCompany(cv).StudentUserID != stu.UserID.String() || cv.Status != messaging.StatusAccepted {
@@ -326,8 +327,8 @@ func TestAccept_NeedsVerification_DeclineFree(t *testing.T) {
 	lapsed := actor(t, "student")
 	lapsed.StudentStatus, lapsed.UniversityID = authz.StudentLapsed, nil
 	_, err := e.svc.Respond(ctx, lapsed, v.Request.ID, accept)
-	wantErr(t, err, students.ErrVerificationRequired)
-	wantCode(t, err, 403, "students.verification_required")
+	problemtest.WantErr(t, err, students.ErrVerificationRequired)
+	problemtest.WantProblem(t, err, 403, "students.verification_required")
 	if len(e.students.granted()) != 0 {
 		t.Fatal("granted without a verification")
 	}
@@ -336,7 +337,7 @@ func TestAccept_NeedsVerification_DeclineFree(t *testing.T) {
 		t.Fatalf("decline = %+v, %v", got, err)
 	}
 	_, err = e.svc.Respond(ctx, lapsed, v.Request.ID, messaging.RespondInput{Decision: "maybe"})
-	wantErr(t, err, problem.ErrValidation)
+	problemtest.WantErr(t, err, problem.ErrValidation)
 }
 
 // TestDecline_NoReasonExposedToCompany: a decline has no reason anywhere:
@@ -410,25 +411,25 @@ func TestWithdraw_OnlyPending_NoRefund(t *testing.T) {
 		t.Fatalf("withdraw audit records = %d, want 1", n)
 	}
 	_, err = e.svc.Respond(ctx, actor(t, "student"), v.Request.ID, accept)
-	wantCode(t, err, 409, "messaging.invalid_state")
+	problemtest.WantProblem(t, err, 409, "messaging.invalid_state")
 
 	a := e.send(t, "student_granted")
 	if _, err := e.svc.Respond(ctx, actor(t, "student_granted"), a.Request.ID, accept); err != nil {
 		t.Fatal(err)
 	}
 	_, err = e.svc.Withdraw(ctx, cmm, e.companyA, a.Request.ID)
-	wantCode(t, err, 409, "messaging.invalid_state")
+	problemtest.WantProblem(t, err, 409, "messaging.invalid_state")
 
 	// Another company's request is 404; a suspended company may not write.
 	_, err = e.svc.Withdraw(ctx, actor(t, "other_company_member"), e.companyB, a.Request.ID)
-	wantErr(t, err, problem.ErrNotFound)
+	problemtest.WantErr(t, err, problem.ErrNotFound)
 	b, err := e.svc.Create(ctx, actor(t, "other_company_member"), e.companyB, request(e.companyB, "student"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	e.orgs.status(e.companyB, orgs.StatusSuspended)
 	_, err = e.svc.Withdraw(ctx, actor(t, "other_company_member"), e.companyB, b.Request.ID)
-	wantErr(t, err, orgs.ErrOrgSuspended)
+	problemtest.WantErr(t, err, orgs.ErrOrgSuspended)
 	if _, err := e.svc.GetSent(ctx, actor(t, "other_company_member"), e.companyB, b.Request.ID); err != nil {
 		t.Fatalf("a suspended company still reads: %v", err)
 	}
@@ -453,7 +454,7 @@ func TestExpire_After14Days_NoRefund(t *testing.T) {
 		t.Fatalf("before the job: %+v, %v", got, err)
 	}
 	_, err = e.svc.Respond(ctx, actor(t, "student"), old.Request.ID, accept)
-	wantCode(t, err, 409, "messaging.invalid_state")
+	problemtest.WantProblem(t, err, 409, "messaging.invalid_state")
 	left := e.ent.left(e.companyA)
 
 	if err := e.mod.ExpireDue(ctx); err != nil {
@@ -550,8 +551,8 @@ func TestBlockCompany_DeclinesPending(t *testing.T) {
 		t.Fatalf("blocks = %+v, %v", page, err)
 	}
 	// Only a company can be blocked; another user's blocks are their own.
-	wantErr(t, e.svc.Block(ctx, stu, e.clubA), problem.ErrNotFound)
-	wantErr(t, e.svc.Block(ctx, stu, uuid.NewV7()), problem.ErrNotFound)
+	problemtest.WantErr(t, e.svc.Block(ctx, stu, e.clubA), problem.ErrNotFound)
+	problemtest.WantErr(t, e.svc.Block(ctx, stu, uuid.NewV7()), problem.ErrNotFound)
 	if other, _ := e.svc.ListBlocks(ctx, actor(t, "student_granted"), nil, 10); len(other.Items) != 0 {
 		t.Fatalf("another student's blocks = %+v", other)
 	}
@@ -665,15 +666,15 @@ func TestRead_IDOR(t *testing.T) {
 	ctx := t.Context()
 	v := e.send(t, "student")
 	_, err := e.svc.GetMine(ctx, actor(t, "student_granted"), v.Request.ID)
-	wantErr(t, err, problem.ErrNotFound)
+	problemtest.WantErr(t, err, problem.ErrNotFound)
 	_, err = e.svc.Respond(ctx, actor(t, "student_granted"), v.Request.ID, accept)
-	wantErr(t, err, problem.ErrNotFound)
+	problemtest.WantErr(t, err, problem.ErrNotFound)
 	_, err = e.svc.GetSent(ctx, actor(t, "other_company_member"), e.companyB, v.Request.ID)
-	wantErr(t, err, problem.ErrNotFound)
+	problemtest.WantErr(t, err, problem.ErrNotFound)
 	_, err = e.svc.GetSent(ctx, actor(t, "company_member"), e.companyA, uuid.NewV7())
-	wantErr(t, err, problem.ErrNotFound)
+	problemtest.WantErr(t, err, problem.ErrNotFound)
 	_, err = e.svc.GetSent(ctx, actor(t, "moderator"), e.companyA, v.Request.ID)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 
 	mine, err := e.svc.ListMine(ctx, actor(t, "student"), messaging.ListQuery{})
 	if err != nil || len(mine.Items) != 1 || mine.Items[0].Company.Name != "Şirket A" {
@@ -690,7 +691,7 @@ func TestRead_IDOR(t *testing.T) {
 		t.Fatalf("company_b sees company_a's requests: %+v", b)
 	}
 	_, err = e.svc.ListSent(ctx, actor(t, "company_member"), e.companyA, messaging.ListQuery{Status: "read"})
-	wantErr(t, err, problem.ErrValidation)
+	problemtest.WantErr(t, err, problem.ErrValidation)
 }
 
 // TestList_PagingAndStatusFilter: newest first, keyset pages, the

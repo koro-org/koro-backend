@@ -42,7 +42,7 @@ func TestCreateTransfer(t *testing.T) {
 	if _, err := e.svc.CreateTransfer(ctxOf(t, fin), fin, in); !errors.Is(err, payments.ErrDuplicateBankReference) {
 		t.Fatalf("same reference = %v", err)
 	}
-	ev := e.audit.of(authz.PaymentsTransferCreate)
+	ev := e.audit.Of(authz.PaymentsTransferCreate)
 	if len(ev) != 1 || ev[0].Metadata["amount"] != int64(1_200_000) {
 		t.Fatalf("audit = %+v", ev)
 	}
@@ -159,7 +159,7 @@ func TestIgnoreTransfer(t *testing.T) {
 	if _, err := e.svc.IgnoreTransfer(ctxOf(t, fin), fin, tr.ID, "tekrar"); !errors.Is(err, payments.ErrInvalidState) {
 		t.Fatalf("ignore twice = %v", err)
 	}
-	if ev := e.audit.of(authz.PaymentsTransferIgnore); len(ev) != 1 || ev[0].Reason != "Banka faizi" {
+	if ev := e.audit.Of(authz.PaymentsTransferIgnore); len(ev) != 1 || ev[0].Reason != "Banka faizi" {
 		t.Fatalf("audit = %+v", ev)
 	}
 }
@@ -210,7 +210,7 @@ func TestImportTransfers_DuplicateBankReference_SkippedRowLevel(t *testing.T) {
 	if second.Amount != 25_050 || second.ExtractedOrderNo == nil || *second.ExtractedOrderNo != "KR7Q2M9TXB" || second.SenderName != nil {
 		t.Fatalf("second row = %+v", second)
 	}
-	if ev := e.audit.of(authz.PaymentsTransferCreate); len(ev) != 2 || ev[1].Metadata["imported"] != 2 || ev[1].Metadata["duplicates"] != 2 {
+	if ev := e.audit.Of(authz.PaymentsTransferCreate); len(ev) != 2 || ev[1].Metadata["imported"] != 2 || ev[1].Metadata["duplicates"] != 2 {
 		t.Fatalf("audit = %+v", ev)
 	}
 	// A whole file that is not a statement is 422.
@@ -249,7 +249,7 @@ func TestImportTransfers_IdempotencyReplay(t *testing.T) {
 		t.Fatalf("replay = %+v, %v", again, err)
 	}
 	pg, _ := e.store.ListTransfers(t.Context(), payments.TransferFilter{}, nil, 100)
-	if len(pg) != 2 || len(e.audit.of(authz.PaymentsTransferCreate)) != 1 {
+	if len(pg) != 2 || len(e.audit.Of(authz.PaymentsTransferCreate)) != 1 {
 		t.Fatalf("a replay wrote again: %d transfers", len(pg))
 	}
 	if _, err := e.svc.ImportTransfers(ctx, fin, payments.ImportInput{CollectionAccountID: acct.ID, CSV: csv + "2026-10-04,1,x,B-3\n"}); !errors.Is(err, idempotency.ErrKeyReused) {

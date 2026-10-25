@@ -20,6 +20,7 @@ import (
 	"koro/internal/parties"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/outbox"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // TestSubmitOffering_NoApprovedIBAN_409 (BE-037 note, 04 §2.14): an
@@ -36,8 +37,8 @@ func TestSubmitOffering_NoApprovedIBAN_409(t *testing.T) {
 	v := e.offering(t, "club_admin", "club_a", func(in *catalog.OfferingInput) { in.DefaultPayeeID = &noAccount })
 	a := actor(t, "club_admin")
 	_, err := e.svc.SubmitOffering(ctxOf(t, a), a, v.Offering.ID)
-	wantProblem(t, err, http.StatusConflict, "parties.no_approved_account")
-	wantErr(t, err, parties.ErrNoApprovedAccount)
+	problemtest.WantProblem(t, err, http.StatusConflict, "parties.no_approved_account")
+	problemtest.WantErr(t, err, parties.ErrNoApprovedAccount)
 	got, _ := e.store.GetOffering(t.Context(), v.Offering.ID, false)
 	if got.Status != catalog.OfferingDraft || got.SubmittedAt != nil {
 		t.Fatalf("offering after a refused submission: %s", got.Status)
@@ -49,7 +50,7 @@ func TestSubmitOffering_NoApprovedIBAN_409(t *testing.T) {
 	inactive := e.payees.add("club_a", parties.PayeeSuspended, true)
 	v2 := e.offering(t, "club_admin", "club_a", func(in *catalog.OfferingInput) { in.DefaultPayeeID = &inactive })
 	_, err = e.svc.SubmitOffering(ctxOf(t, a), a, v2.Offering.ID)
-	wantProblem(t, err, http.StatusConflict, "catalog.payee_not_active")
+	problemtest.WantProblem(t, err, http.StatusConflict, "catalog.payee_not_active")
 
 	e.payees.setApproved(noAccount, true)
 	sub, err := e.svc.SubmitOffering(ctxOf(t, a), a, v.Offering.ID)
@@ -60,7 +61,7 @@ func TestSubmitOffering_NoApprovedIBAN_409(t *testing.T) {
 	e.payees.setApproved(noAccount, false)
 	pad := actor(t, "platform_admin")
 	_, err = e.svc.AdminDecideOffering(ctxOf(t, pad), pad, v.Offering.ID, catalog.Decision{Approve: true})
-	wantErr(t, err, parties.ErrNoApprovedAccount)
+	problemtest.WantErr(t, err, parties.ErrNoApprovedAccount)
 	got, _ = e.store.GetOffering(t.Context(), v.Offering.ID, false)
 	if got.Status != catalog.OfferingPendingApproval || got.ApprovedBy != nil {
 		t.Fatalf("approval without an approved account changed the offering: %s", got.Status)
@@ -93,11 +94,11 @@ func TestDecideOffering_CreatorCannotApprove_403(t *testing.T) {
 		t.Fatalf("SubmitOffering: %v", err)
 	}
 	_, err = e.svc.AdminDecideOffering(ctx, creator, v.Offering.ID, catalog.Decision{Approve: true})
-	wantErr(t, err, authz.ErrFourEyes)
-	wantProblem(t, err, http.StatusForbidden, "authz.four_eyes_violation")
+	problemtest.WantErr(t, err, authz.ErrFourEyes)
+	problemtest.WantProblem(t, err, http.StatusForbidden, "authz.four_eyes_violation")
 	ca := actor(t, "club_admin")
 	_, err = e.svc.AdminDecideOffering(ctxOf(t, ca), ca, v.Offering.ID, catalog.Decision{Approve: true})
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 
 	// The database refuses it too (the in-memory store mirrors offerings_approver_chk).
 	cur, _ := e.store.GetOffering(t.Context(), v.Offering.ID, false)
@@ -114,8 +115,8 @@ func TestDecideOffering_CreatorCannotApprove_403(t *testing.T) {
 		t.Fatalf("approval by another admin: %v %+v", err, got.Offering.Status)
 	}
 	_, err = e.svc.AdminDecideOffering(ctxOf(t, pad2), pad2, v.Offering.ID, catalog.Decision{Approve: true})
-	wantProblem(t, err, http.StatusConflict, "catalog.invalid_state")
-	if evs := e.audit.of(authz.CatalogOfferingDecide); len(evs) != 1 || evs[0].Metadata["outcome"] != catalog.OutcomeApproved {
+	problemtest.WantProblem(t, err, http.StatusConflict, "catalog.invalid_state")
+	if evs := e.audit.Of(authz.CatalogOfferingDecide); len(evs) != 1 || evs[0].Metadata["outcome"] != catalog.OutcomeApproved {
 		t.Fatalf("decide audit = %+v", evs)
 	}
 	if topics := e.outbox.Topics(); !slices.Contains(topics, domainevent.TopicOfferingDecided) {
@@ -154,7 +155,7 @@ func TestReserve_ConcurrentLastUnit_OneSucceeds(t *testing.T) {
 		t.Fatalf("reservations = %d, offering %s sold %d; want 1, sold_out, 1", ok, got.Status, got.QuantitySold)
 	}
 	_, err := e.mod.Offerings.ForCheckout(t.Context(), v.Offering.ID)
-	wantErr(t, err, catalog.ErrSoldOut)
+	problemtest.WantErr(t, err, catalog.ErrSoldOut)
 	// An expired order gives the unit back: on sale again.
 	if err := e.mod.Offerings.Release(t.Context(), v.Offering.ID, 1); err != nil {
 		t.Fatalf("Release: %v", err)
@@ -180,7 +181,7 @@ func TestReserve_PerBuyerLimit(t *testing.T) {
 		in.QuantityTotal, in.PerBuyerLimit, in.SalesEndAt = ptr(10), ptr(2), ptr(t0.Add(48*time.Hour))
 	})
 	_, err := e.mod.Offerings.ForCheckout(t.Context(), v.Offering.ID)
-	wantErr(t, err, catalog.ErrNotOnSale) // a draft
+	problemtest.WantErr(t, err, catalog.ErrNotOnSale) // a draft
 	e.active(t, "club_admin", v.Offering.ID)
 	off := e.mod.Offerings
 	buyer, other := org("company_a"), org("company_b")
@@ -194,7 +195,7 @@ func TestReserve_PerBuyerLimit(t *testing.T) {
 	if err := off.Reserve(t.Context(), v.Offering.ID, 2, buyer); !errors.Is(err, catalog.ErrPerBuyerLimit) {
 		t.Fatalf("1 held + 2 (limit 2): %v", err)
 	}
-	wantProblem(t, off.Reserve(t.Context(), v.Offering.ID, 2, buyer), http.StatusConflict, "catalog.per_buyer_limit")
+	problemtest.WantProblem(t, off.Reserve(t.Context(), v.Offering.ID, 2, buyer), http.StatusConflict, "catalog.per_buyer_limit")
 	if err := off.Reserve(t.Context(), v.Offering.ID, 1, buyer); err != nil {
 		t.Fatalf("1 held + 1 (limit 2): %v", err)
 	}
@@ -252,7 +253,7 @@ func TestResolvePolicy_Precedence_OfferingServiceSellerDefault(t *testing.T) {
 	if _, err := res(v.Offering.ID); !errors.Is(err, catalog.ErrNoPolicy) {
 		t.Fatalf("no policy: %v", err)
 	}
-	wantProblem(t, func() error { _, err := res(v.Offering.ID); return err }(), http.StatusConflict, "catalog.no_commerce_policy")
+	problemtest.WantProblem(t, func() error { _, err := res(v.Offering.ID); return err }(), http.StatusConflict, "catalog.no_commerce_policy")
 	steps := []struct {
 		scope catalog.PolicyScope
 		id    *uuid.UUID
@@ -330,7 +331,7 @@ func TestCreatePolicy_OverlappingRange_409(t *testing.T) {
 	mid := may.Add(48 * time.Hour)
 	overlap.ValidFrom, overlap.ValidTo = &mid, nil
 	_, err := e.svc.AdminCreatePolicy(ctx, fin, overlap, proof())
-	wantProblem(t, err, http.StatusConflict, "catalog.policy_overlap")
+	problemtest.WantProblem(t, err, http.StatusConflict, "catalog.policy_overlap")
 	adjacent := in
 	adjacent.ValidFrom, adjacent.ValidTo = &jun, nil
 	if _, err := e.svc.AdminCreatePolicy(ctx, fin, adjacent, proof()); err != nil {
@@ -344,23 +345,23 @@ func TestCreatePolicy_OverlappingRange_409(t *testing.T) {
 	past := catalog.DefaultPolicy(1000)
 	past.Scope, past.ScopeID, past.ValidFrom = catalog.ScopeService, &e.booth, ptr(t0.Add(-time.Minute))
 	_, err = e.svc.AdminCreatePolicy(ctx, fin, past, proof())
-	wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
 	noRate := catalog.DefaultPolicy(1000)
 	noRate.CommissionRateBP = nil
 	_, err = e.svc.AdminCreatePolicy(ctx, fin, noRate, proof())
-	wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
 	unknown := catalog.DefaultPolicy(1000)
 	unknown.Scope, unknown.ScopeID = catalog.ScopeService, ptr(uuid.NewV7())
 	_, err = e.svc.AdminCreatePolicy(ctx, fin, unknown, proof())
-	wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
 	company := catalog.DefaultPolicy(1000)
 	company.Scope, company.ScopeID = catalog.ScopeSellerOrg, ptr(org("company_a"))
 	_, err = e.svc.AdminCreatePolicy(ctx, fin, company, proof())
-	wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
 	c := catalog.DefaultPolicy(1000)
 	c.ModelCode, c.CollectionMethod, c.CommissionPayer = catalog.ModelC, "", catalog.PayerSeller
 	_, err = e.svc.AdminCreatePolicy(ctx, fin, c, proof())
-	wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed") // model C charges the buyer
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed") // model C charges the buyer
 	c.CommissionPayer, c.Scope, c.ScopeID = "", catalog.ScopeOffering, nil
 	if _, err := e.svc.AdminCreatePolicy(ctx, fin, c, proof()); err == nil {
 		t.Fatal("an offering scope without its id was stored")
@@ -378,14 +379,14 @@ func TestClosePolicy_RowImmutable(t *testing.T) {
 	pad := actor(t, "platform_admin")
 	ctx := ctxOf(t, pad)
 	_, err := e.svc.AdminClosePolicy(ctx, pad, p.ID, ptr(t0.Add(-time.Hour)), proof())
-	wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed") // not in the past
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed") // not in the past
 	end := t0.Add(24 * time.Hour)
 	closed, err := e.svc.AdminClosePolicy(ctx, pad, p.ID, &end, proof())
 	if err != nil || closed.ValidTo == nil || !closed.ValidTo.Equal(end) {
 		t.Fatalf("close: %+v %v", closed.ValidTo, err)
 	}
 	_, err = e.svc.AdminClosePolicy(ctx, pad, p.ID, nil, proof())
-	wantProblem(t, err, http.StatusConflict, "catalog.invalid_state")
+	problemtest.WantProblem(t, err, http.StatusConflict, "catalog.invalid_state")
 	if _, err := e.store.ClosePolicy(t.Context(), p.ID, end.Add(time.Hour)); !errors.Is(err, catalog.ErrInvalidState) {
 		t.Fatalf("store re-close: %v", err)
 	}
@@ -414,7 +415,7 @@ func TestClosePolicy_RowImmutable(t *testing.T) {
 		t.Fatalf("closing a future policy: %v %v", gone.ValidTo, err)
 	}
 	_, err = e.svc.AdminClosePolicy(ctx, pad, uuid.NewV7(), nil, proof())
-	wantErr(t, err, catalog.ErrNotFound)
+	problemtest.WantErr(t, err, catalog.ErrNotFound)
 }
 
 // TestPolicyChange_RequiresReauth_NotifiesAllAdmins (06 H-17): one person
@@ -428,9 +429,9 @@ func TestPolicyChange_RequiresReauth_NotifiesAllAdmins(t *testing.T) {
 	fin := actor(t, "finance_admin")
 	ctx := ctxOf(t, fin)
 	_, err := e.svc.AdminCreatePolicy(ctx, fin, catalog.DefaultPolicy(1000), identity.ReauthProof{})
-	wantErr(t, err, identity.ErrReauthRequired)
+	problemtest.WantErr(t, err, identity.ErrReauthRequired)
 	_, err = e.svc.AdminCreatePolicy(ctx, fin, catalog.DefaultPolicy(1000), identity.ReauthProof{Password: "wrong"})
-	wantErr(t, err, identity.ErrReauthFailed)
+	problemtest.WantErr(t, err, identity.ErrReauthFailed)
 	if ps, _ := e.store.ListPolicies(t.Context(), catalog.PolicyFilter{}); len(ps) != 0 || len(e.queue.Tasks()) != 0 {
 		t.Fatalf("a refused change wrote %d policies, %d tasks", len(ps), len(e.queue.Tasks()))
 	}
@@ -438,16 +439,16 @@ func TestPolicyChange_RequiresReauth_NotifiesAllAdmins(t *testing.T) {
 	for _, name := range []string{"club_admin", "company_admin", "moderator", "support", "dpo"} {
 		a := actor(t, name)
 		_, err := e.svc.AdminCreatePolicy(ctxOf(t, a), a, catalog.DefaultPolicy(1000), proof())
-		wantErr(t, err, authz.ErrForbidden)
+		problemtest.WantErr(t, err, authz.ErrForbidden)
 	}
 	p, err := e.svc.AdminCreatePolicy(ctx, fin, catalog.DefaultPolicy(1000), proof())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := len(e.audit.ofOutcome(authz.CatalogPolicyManage, audit.Denied)); n != 2 {
+	if n := len(e.audit.OfOutcome(authz.CatalogPolicyManage, audit.Denied)); n != 2 {
 		t.Fatalf("%d denied records for the two refused proofs, want 2", n)
 	}
-	evs := e.audit.ofOutcome(authz.CatalogPolicyManage, audit.Success)
+	evs := e.audit.OfOutcome(authz.CatalogPolicyManage, audit.Success)
 	if len(evs) != 1 || evs[0].Metadata["reauth"] != "password" || evs[0].Metadata["commission_rate_bp"] != 1000 ||
 		*evs[0].ActorUserID != fin.UserID {
 		t.Fatalf("policy audit = %+v", evs)
@@ -547,7 +548,7 @@ func TestEventCancelled_CancelsLinkedOfferings(t *testing.T) {
 	if len(cancelled) != 2 || cancelled[0].Reason != catalog.CancelEventCancelled || cancelled[1].OrgID != org("club_a") {
 		t.Fatalf("offering.cancelled = %+v", cancelled)
 	}
-	evs := e.audit.of(authz.CatalogOfferingCancel)
+	evs := e.audit.Of(authz.CatalogOfferingCancel)
 	if len(evs) != 2 || evs[0].SystemJob != catalog.CancelEventOfferingsTaskName || evs[0].Metadata["cause"] != "event_cancelled" {
 		t.Fatalf("cancel audit = %+v", evs)
 	}
@@ -602,11 +603,11 @@ func TestUniversityApprovalRequired_Flow(t *testing.T) {
 		t.Fatalf("uni_b queue = %+v %v", q.Items, err)
 	}
 	_, err = e.svc.DecideUniversityApproval(ctxOf(t, otherRep), otherRep, org("uni_b"), v.Offering.ID, catalog.Decision{Approve: true})
-	wantErr(t, err, catalog.ErrNotFound)
+	problemtest.WantErr(t, err, catalog.ErrNotFound)
 	_, err = e.svc.DecideUniversityApproval(ctxOf(t, pad), pad, org("uni_a"), v.Offering.ID, catalog.Decision{Approve: true})
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	_, err = e.svc.ListUniversityApprovals(ctxOf(t, ca), ca, org("club_a"), catalog.QueueQuery{})
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 
 	// The platform approves first: it waits for the university.
 	got, err := e.svc.AdminDecideOffering(ctxOf(t, pad), pad, v.Offering.ID, catalog.Decision{Approve: true})
@@ -624,7 +625,7 @@ func TestUniversityApprovalRequired_Flow(t *testing.T) {
 		t.Fatalf("university approval: %v %s/%s", err, got.Offering.Status, got.Offering.UniversityApprovalStatus)
 	}
 	_, err = e.svc.DecideUniversityApproval(ctxOf(t, rep), rep, org("uni_a"), v.Offering.ID, catalog.Decision{Approve: true})
-	wantErr(t, err, authz.ErrForbidden) // no longer under the university's review
+	problemtest.WantErr(t, err, authz.ErrForbidden) // no longer under the university's review
 
 	// Another offering: the university rejects it first → back to draft.
 	w := e.offering(t, "club_admin", "club_a", func(in *catalog.OfferingInput) { in.RequiresUniversityApproval = true })
@@ -638,7 +639,7 @@ func TestUniversityApprovalRequired_Flow(t *testing.T) {
 		t.Fatalf("university rejection: %v %+v", err, got.Offering)
 	}
 	_, err = e.svc.AdminDecideOffering(ctxOf(t, pad), pad, w.Offering.ID, catalog.Decision{Approve: true})
-	wantProblem(t, err, http.StatusConflict, "catalog.invalid_state")
+	problemtest.WantProblem(t, err, http.StatusConflict, "catalog.invalid_state")
 	// Resubmitted, it asks the university again.
 	got, err = e.svc.SubmitOffering(ctxOf(t, ca), ca, w.Offering.ID)
 	if err != nil || got.Offering.UniversityApprovalStatus != catalog.UniPending || got.Offering.UniversityApprovedBy != nil {
@@ -647,7 +648,7 @@ func TestUniversityApprovalRequired_Flow(t *testing.T) {
 	// A university or the platform cannot ask for a university's approval.
 	_, err = e.svc.CreateOffering(ctxOf(t, rep), rep, org("uni_a"), catalog.OfferingInput{ServiceID: e.booth, Title: "Kariyer günü standı",
 		UnitPriceAmount: 500_000, RequiresUniversityApproval: true})
-	wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
 }
 
 // TestBrowseOfferings_OnlyActive_RequiresSession (T-57, 04 §2.14): the

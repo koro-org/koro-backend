@@ -19,6 +19,7 @@ import (
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/money"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // Refunds (BE-043; 03 §5.16, §6.1 "İade"; 02 §20.5; 01 §6.3): money going
@@ -135,7 +136,7 @@ func (s *service) ListPayments(ctx context.Context, a authz.Actor, q PaymentQuer
 		return PaymentPage{}, q.invalid
 	}
 	if q.Filter.Status != "" && !q.Filter.Status.Valid() {
-		return PaymentPage{}, fieldErr("query.status", "is not a payment status")
+		return PaymentPage{}, problem.Field("query.status", "is not a payment status")
 	}
 	limit := page.ClampLimit(q.Limit)
 	rows, err := s.d.Store.ListPayments(ctx, q.Filter, q.After, limit+1)
@@ -192,7 +193,7 @@ func (s *service) ListRefunds(ctx context.Context, a authz.Actor, q RefundQuery)
 		return RefundPage{}, q.invalid
 	}
 	if q.Filter.Status != "" && !q.Filter.Status.Valid() {
-		return RefundPage{}, fieldErr("query.status", "is not a refund status")
+		return RefundPage{}, problem.Field("query.status", "is not a refund status")
 	}
 	limit := page.ClampLimit(q.Limit)
 	rows, err := s.d.Store.ListRefunds(ctx, q.Filter, q.After, limit+1)
@@ -345,24 +346,24 @@ func cleanRefund(in RefundInput) (refundDraft, error) {
 	}
 	switch {
 	case d.PaymentID == uuid.Nil():
-		return refundDraft{}, fieldErr("body.payment_id", "is required")
+		return refundDraft{}, problem.Field("body.payment_id", "is required")
 	case d.LineID != nil && *d.LineID == uuid.Nil():
-		return refundDraft{}, fieldErr("body.order_line_id", "must be an order line ID")
+		return refundDraft{}, problem.Field("body.order_line_id", "must be an order line ID")
 	case d.Amount <= 0:
-		return refundDraft{}, fieldErr("body.amount", "must be a positive amount in kuruş")
+		return refundDraft{}, problem.Field("body.amount", "must be a positive amount in kuruş")
 	case !slices.Contains(RefundReasons(), d.Reason):
-		return refundDraft{}, fieldErr("body.reason", "is not a refund reason")
+		return refundDraft{}, problem.Field("body.reason", "is not a refund reason")
 	case d.Reason == RefundReasonOverpayment && d.LineID != nil:
-		return refundDraft{}, fieldErr("body.order_line_id", "must be empty: an overpayment is not the money of a line")
+		return refundDraft{}, problem.Field("body.order_line_id", "must be empty: an overpayment is not the money of a line")
 	case d.Method != RefundMethodBankEFT:
-		return refundDraft{}, fieldErr("body.method", "must be bank_eft (iyzico refunds are not available yet)")
+		return refundDraft{}, problem.Field("body.method", "must be bank_eft (iyzico refunds are not available yet)")
 	}
 	var err error
 	if d.Note, err = cleanText("body.reason_note", in.ReasonNote, 0, maxRefundNote); err != nil {
 		return refundDraft{}, err
 	}
 	if in.TargetIBAN == "" {
-		return refundDraft{}, fieldErr("body.target_iban", "is required for a bank EFT")
+		return refundDraft{}, problem.Field("body.target_iban", "is required for a bank EFT")
 	}
 	if d.TargetIBAN, err = cleanIBAN("body.target_iban", in.TargetIBAN); err != nil {
 		return refundDraft{}, err
@@ -390,7 +391,7 @@ func (s *service) CreateRefund(ctx context.Context, a authz.Actor, in RefundInpu
 	}
 	if _, err := s.d.Store.GetPayment(ctx, d.PaymentID, false); err != nil {
 		if isNotFound(err) {
-			return Refund{}, fieldErr("body.payment_id", "is not a payment")
+			return Refund{}, problem.Field("body.payment_id", "is not a payment")
 		}
 		return Refund{}, err
 	}
@@ -459,9 +460,9 @@ func (s *service) checkPool(ctx context.Context, m orderMoney, reason string, li
 		return orders.ErrInvalidState.WithFields(fieldErrOf("body.payment_id",
 			"the order still waits for its payment: cancel it to refund what was paid, or refund an overpayment"))
 	case lineID == nil && o.Status.PaidState():
-		return fieldErr("body.order_line_id", "is required: the order is paid, a refund gives back the money of one of its lines")
+		return problem.Field("body.order_line_id", "is required: the order is paid, a refund gives back the money of one of its lines")
 	case lineID != nil && !o.Status.PaidState():
-		return fieldErr("body.order_line_id", "must be empty: the order was not paid in full, its money is refunded as a whole")
+		return problem.Field("body.order_line_id", "must be empty: the order was not paid in full, its money is refunded as a whole")
 	}
 	if amount > m.orderLeft(self) {
 		return exceeds("exceeds what the order still holds (requested and approved refunds count)")
@@ -472,7 +473,7 @@ func (s *service) checkPool(ctx context.Context, m orderMoney, reason string, li
 	l, err := s.d.Orders.GetLine(ctx, *lineID)
 	switch {
 	case errors.Is(err, orders.ErrNotFound) || err == nil && l.OrderID != o.ID:
-		return fieldErr("body.order_line_id", "is not a line of the payment's order")
+		return problem.Field("body.order_line_id", "is not a line of the payment's order")
 	case err != nil:
 		return err
 	case amount > m.lineLeft(l, self):

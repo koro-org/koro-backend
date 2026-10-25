@@ -8,7 +8,6 @@ import (
 	"uuid"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"koro/internal/authz"
 	"koro/internal/platform/db"
@@ -29,13 +28,6 @@ type gormStore struct{ orm *gorm.DB }
 
 // NewGormStore returns the PostgreSQL Store over the app_rw pool.
 func NewGormStore(orm *gorm.DB) Store { return gormStore{orm: orm} }
-
-func lockIf(q *gorm.DB, lock bool) *gorm.DB {
-	if lock {
-		return q.Clauses(clause.Locking{Strength: clause.LockingStrengthUpdate})
-	}
-	return q
-}
 
 func take[T any](op string, q *gorm.DB) (T, error) {
 	var v T
@@ -65,7 +57,7 @@ func (s gormStore) InsertService(ctx context.Context, v ServiceItem) (ServiceIte
 //
 // cross-org: the Koro catalogue has no org.
 func (s gormStore) GetService(ctx context.Context, id uuid.UUID, lock bool) (ServiceItem, error) {
-	return take[ServiceItem]("get service", lockIf(db.Conn(ctx, s.orm), lock).Where("id = ?", id))
+	return take[ServiceItem]("get service", db.LockIf(db.Conn(ctx, s.orm), lock).Where("id = ?", id))
 }
 
 // UpdateService implements Store: a targeted UPDATE of the mutable columns.
@@ -174,7 +166,7 @@ func (s gormStore) InsertOffering(ctx context.Context, o Offering) (Offering, er
 // cross-org: addressed by ID (the resource surface, cross-module reads);
 // the service authorises the row's own org.
 func (s gormStore) GetOffering(ctx context.Context, id uuid.UUID, lock bool) (Offering, error) {
-	return take[Offering]("get offering", lockIf(s.offerings(ctx), lock).Where("id = ?", id))
+	return take[Offering]("get offering", db.LockIf(s.offerings(ctx), lock).Where("id = ?", id))
 }
 
 // UpdateOffering implements Store: a targeted UPDATE of the mutable columns
@@ -328,7 +320,7 @@ func (s gormStore) UniversityQueue(ctx context.Context, after *TimeKey, limit in
 // LiveEventOfferings implements Store.
 func (s gormStore) LiveEventOfferings(ctx context.Context, orgID, eventID uuid.UUID) ([]Offering, error) {
 	out := []Offering{}
-	err := lockIf(s.offerings(ctx), true).Scopes(db.ScopeOrg(orgID)).
+	err := db.LockIf(s.offerings(ctx), true).Scopes(db.ScopeOrg(orgID)).
 		Where("event_id = ? AND status <> 'cancelled'", eventID).Order("id").Find(&out).Error
 	if err != nil {
 		return nil, fmt.Errorf("catalog: event offerings: %w", err)
@@ -394,7 +386,7 @@ func (s gormStore) InsertPolicy(ctx context.Context, p CommercePolicy) (Commerce
 //
 // cross-org: platform configuration.
 func (s gormStore) GetPolicy(ctx context.Context, id uuid.UUID, lock bool) (CommercePolicy, error) {
-	return take[CommercePolicy]("get policy", lockIf(db.Conn(ctx, s.orm), lock).Where("id = ?", id))
+	return take[CommercePolicy]("get policy", db.LockIf(db.Conn(ctx, s.orm), lock).Where("id = ?", id))
 }
 
 // ClosePolicy implements Store: the only UPDATE koro_policy_close_only lets

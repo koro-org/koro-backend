@@ -10,6 +10,7 @@ import (
 	"uuid"
 
 	"koro/internal/audit"
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/consent"
 	"koro/internal/entitlements"
@@ -26,7 +27,7 @@ import (
 // dispatch's transaction.
 type failingAudit struct {
 	fail string
-	log  auditLog
+	log  audittest.Recorder
 }
 
 func (a *failingAudit) Log(ctx context.Context, e audit.Event) error {
@@ -58,7 +59,7 @@ func TestScheduleDispatch_Postgres_RollbackReleasesUnit(t *testing.T) {
 	}
 	w := pgWorld(d)
 	idem := idempotency.New(idempotency.Deps{Tx: d.Tx, Store: idempotency.NewGormStore(d.ORM), Clock: clk, Log: obs.Discard()})
-	entsMod, err := entitlements.New(entitlements.Deps{Store: entitlements.NewGormStore(d.ORM), Tx: d.Tx, Audit: &auditLog{},
+	entsMod, err := entitlements.New(entitlements.Deps{Store: entitlements.NewGormStore(d.ORM), Tx: d.Tx, Audit: &audittest.Recorder{},
 		Idempotency: idem, Clock: clk, Log: obs.Discard()})
 	if err != nil {
 		t.Fatal(err)

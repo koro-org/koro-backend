@@ -11,7 +11,9 @@ import (
 	"koro/internal/files"
 	"koro/internal/orgs"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/outbox"
 )
 
 // CreatePost implements Service. Order: the org (404) → authz on its
@@ -24,7 +26,7 @@ func (s *service) CreatePost(ctx context.Context, a authz.Actor, orgID uuid.UUID
 	if err != nil {
 		return PostView{}, err
 	}
-	if err := authz.Can(ctx, a, authz.FeedPostCreate, orgResource(o)); err != nil {
+	if err := authz.Can(ctx, a, authz.FeedPostCreate, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
 		return PostView{}, err
 	}
 	kind, ok := authorKinds[o.Kind]
@@ -128,7 +130,7 @@ func (s *service) UpdatePost(ctx context.Context, a authz.Actor, id uuid.UUID, i
 		default:
 			return ErrInvalidState
 		}
-		if err := checkIfMatch(ifMatch, etagOf(cur)); err != nil {
+		if err := httpx.CheckIfMatch(ifMatch, httpx.ETag(cur.UpdatedAt)); err != nil {
 			return err
 		}
 		if p.empty() {
@@ -171,11 +173,7 @@ func (s *service) emit(ctx context.Context, p domainevent.Payload, postID uuid.U
 
 // emitFor is emit for an aggregate of another type (a content report).
 func (s *service) emitFor(ctx context.Context, p domainevent.Payload, aggType string, id uuid.UUID) {
-	env, err := domainevent.New(p, aggType, id)
-	if err == nil {
-		err = s.d.Outbox.AfterCommit(ctx, env)
-	}
-	if err != nil {
+	if err := outbox.EmitAfterCommit(ctx, s.d.Outbox, p, aggType, id); err != nil {
 		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "feed event not emitted",
 			slog.String("topic", p.Topic()), slog.String("aggregate_id", id.String()), slog.String("err", err.Error()))
 	}

@@ -8,6 +8,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/problem"
 )
 
 // AdminVerifyOrg implements Service: pending_review → active, verified_at
@@ -18,7 +19,7 @@ func (s *service) AdminVerifyOrg(ctx context.Context, a authz.Actor, id uuid.UUI
 	}
 	note = strings.TrimSpace(note)
 	if utf8.RuneCountInString(note) > maxReason {
-		return OrgView{}, fieldErr("body.note", "must be at most 500 characters")
+		return OrgView{}, problem.Field("body.note", "must be at most 500 characters")
 	}
 	return s.transition(ctx, a, id, transition{
 		op: "verify", action: authz.OrgsOrgVerify, from: StatusPendingReview, to: StatusActive, reason: note,

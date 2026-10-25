@@ -8,6 +8,7 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/events"
@@ -45,7 +46,7 @@ type pgEnv struct {
 	out   *outbox.Mem
 	store events.Store
 	org   uuid.UUID
-	audit *auditLog
+	audit *audittest.Recorder
 }
 
 func newPGEnv(t *testing.T, opts ...func(*events.Deps)) *pgEnv {
@@ -53,7 +54,7 @@ func newPGEnv(t *testing.T, opts ...func(*events.Deps)) *pgEnv {
 	d := testutil.NewDB(t)
 	clk := clock.NewFake(t0)
 	w := pgWorld(d)
-	e := &pgEnv{d: d, w: w, clk: clk, out: outbox.NewMem(clk), store: events.NewGormStore(d.ORM), org: w.org(t), audit: &auditLog{}}
+	e := &pgEnv{d: d, w: w, clk: clk, out: outbox.NewMem(clk), store: events.NewGormStore(d.ORM), org: w.org(t), audit: &audittest.Recorder{}}
 	fo := newFakeOrgs()
 	fo.orgs[e.org] = orgs.OrgSummary{ID: e.org, Kind: orgs.KindClub, Name: "PG Kulübü", Slug: "pg-kulubu", Status: orgs.StatusActive}
 	idem := idempotency.New(idempotency.Deps{Tx: d.Tx, Store: idempotency.NewGormStore(d.ORM), Clock: clk, Log: obs.Discard()})

@@ -6,6 +6,7 @@ import (
 
 	"koro/internal/orgs"
 	"koro/internal/platform/iban"
+	"koro/internal/platform/problem"
 	"koro/internal/platform/textx"
 )
 
@@ -98,7 +99,7 @@ func cleanAccountInput(in BankAccountInput) (number, holder string, bank *string
 		return "", "", nil, err
 	}
 	if in.EvidenceFileID == uuid.Nil() {
-		return "", "", nil, fieldErr("body.evidence_file_id", "is required")
+		return "", "", nil, problem.Field("body.evidence_file_id", "is required")
 	}
 	return number, holder, bank, nil
 }
@@ -112,9 +113,9 @@ func cleanReason(loc, s string, minRunes int) (string, error) {
 	}
 	if c := utf8.RuneCountInString(n); c < minRunes || c > maxNote {
 		if minRunes > 1 {
-			return "", fieldErr(loc, "must be 10-500 characters")
+			return "", problem.Field(loc, "must be 10-500 characters")
 		}
-		return "", fieldErr(loc, "is required (at most 500 characters)")
+		return "", problem.Field(loc, "is required (at most 500 characters)")
 	}
 	return n, nil
 }

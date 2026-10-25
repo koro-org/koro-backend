@@ -24,6 +24,15 @@
 //     record; a module that registers an R operation (op.Meta Reauth)
 //     checks its proof that way; reauthDirect lists the reasoned exceptions
 //     (03 §6.2; BE-074, BE-075).
+//   - TestArch_PlatformHelpersNotCopied: a module does not declare its own
+//     copy of a shared helper (httpx.CheckIfMatch/ETag/ParseID/OptID/IDStr,
+//     op.Register, problem.Field, db.LockIf/UTCPtr/Nullable,
+//     authz.OrgResource, textx.TrimSlug) nor of a shared test double
+//     (audittest.Recorder, dbtest.SpyTx/TxOf, problemtest.WantErr/
+//     WantProblem/StatusCode, audittest.RowOf); copyAllowed lists the
+//     modules not migrated yet (BE-111).
+//
+// A module's <module>test package (audit/audittest) may import its module.
 //
 // Every rule also runs on testdata/violations, a miniature tree that breaks
 // it, so a rule that silently stops matching fails its own test.

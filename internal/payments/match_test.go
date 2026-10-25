@@ -85,7 +85,7 @@ func TestMatch_FullPayment_OrderPaidAndEntitlementsActive(t *testing.T) {
 	if pc.PaymentID != pay.ID || pc.OrderID != p.order.ID || pc.Amount != 1_500_000 || !pc.OrderPaid {
 		t.Fatalf("payload = %+v", pc)
 	}
-	if ev := e.audit.of(authz.PaymentsTransferMatch); len(ev) != 1 || ev[0].Metadata["order_paid"] != true {
+	if ev := e.audit.Of(authz.PaymentsTransferMatch); len(ev) != 1 || ev[0].Metadata["order_paid"] != true {
 		t.Fatalf("audit = %+v", ev)
 	}
 
@@ -157,7 +157,7 @@ func TestMatch_Overpayment_CreatesRefundRecord(t *testing.T) {
 		r.PaymentID != res.Payment.PaymentID || r.OrderID != p.order.ID || r.OrderLineID != nil {
 		t.Fatalf("refund = %+v", r)
 	}
-	if ev := e.audit.of(authz.PaymentsRefundCreate); len(ev) != 1 || ev[0].Metadata["reason"] != "overpayment" {
+	if ev := e.audit.Of(authz.PaymentsRefundCreate); len(ev) != 1 || ev[0].Metadata["reason"] != "overpayment" {
 		t.Fatalf("refund audit = %+v", ev)
 	}
 

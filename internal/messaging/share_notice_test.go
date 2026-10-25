@@ -22,6 +22,7 @@ import (
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 	"koro/internal/students"
 )
 
@@ -108,7 +109,7 @@ func TestAccept_ShareContactFails_RollsBackAcceptance(t *testing.T) {
 	e.students.failShare = consent.ErrTextMismatch
 	e.students.mu.Unlock()
 	_, err := e.svc.Respond(ctx, stu, v.Request.ID, acceptSharing(contactProof(), consent.ChannelWeb))
-	wantErr(t, err, consent.ErrTextMismatch)
+	problemtest.WantErr(t, err, consent.ErrTextMismatch)
 	got, _ := e.svc.GetMine(ctx, stu, v.Request.ID)
 	if got.Status != messaging.StatusPending || got.Request.RespondedAt != nil || len(e.students.granted()) != 0 ||
 		len(e.students.shared()) != 0 || len(e.outbox.of(domainevent.TopicContactRequestClosed)) != 0 ||
@@ -138,13 +139,13 @@ func TestRespond_ShareContact_Rules(t *testing.T) {
 	declineSharing := acceptSharing(contactProof(), consent.ChannelWeb)
 	declineSharing.Decision = messaging.DecisionDeclined
 	_, err := e.svc.Respond(ctx, stu, v.Request.ID, declineSharing)
-	wantErr(t, err, problem.ErrValidation)
+	problemtest.WantErr(t, err, problem.ErrValidation)
 	var pe *problem.Error
 	if !errors.As(err, &pe) || len(pe.Fields()) != 1 || pe.Fields()[0].Location != "body.share_contact" {
 		t.Fatalf("decline with share_contact = %v", err)
 	}
 	_, err = e.svc.Respond(ctx, stu, v.Request.ID, acceptSharing(nil, consent.ChannelWeb))
-	wantCode(t, err, 422, "consent.proof_required")
+	problemtest.WantProblem(t, err, 422, "consent.proof_required")
 	if got, _ := e.svc.GetMine(ctx, stu, v.Request.ID); got.Status != messaging.StatusPending ||
 		len(e.students.granted()) != 0 || len(e.students.shared()) != 0 {
 		t.Fatalf("a refused answer wrote: %+v", got)
@@ -160,7 +161,7 @@ func TestRespond_ShareContact_Rules(t *testing.T) {
 		t.Fatalf("replay: %v", err)
 	}
 	_, err = e.svc.Respond(kctx, stu, v.Request.ID, accept)
-	wantErr(t, err, idempotency.ErrKeyReused)
+	problemtest.WantErr(t, err, idempotency.ErrKeyReused)
 	if len(e.students.shared()) != 1 {
 		t.Fatalf("shares = %+v", e.students.shared())
 	}

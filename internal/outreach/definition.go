@@ -58,13 +58,13 @@ func (d Definition) normalize(loc string) (Definition, error) {
 	}
 	ids := func(dim string, in []uuid.UUID) ([]uuid.UUID, error) {
 		if len(in) > maxPerDimension {
-			return nil, fieldErr(at(dim), "at most "+strconv.Itoa(maxPerDimension)+" values")
+			return nil, problem.Field(at(dim), "at most "+strconv.Itoa(maxPerDimension)+" values")
 		}
 		out := slices.Clone(in)
 		slices.SortFunc(out, uuid.UUID.Compare)
 		out = slices.Compact(out)
 		if slices.Contains(out, uuid.Nil()) {
-			return nil, fieldErr(at(dim), "must not contain the nil UUID")
+			return nil, problem.Field(at(dim), "must not contain the nil UUID")
 		}
 		if len(out) == 0 {
 			return nil, nil
@@ -85,18 +85,18 @@ func (d Definition) normalize(loc string) (Definition, error) {
 		return Definition{}, err
 	}
 	if len(d.Year) > maxPerDimension {
-		return Definition{}, fieldErr(at("year"), "at most "+strconv.Itoa(maxPerDimension)+" values")
+		return Definition{}, problem.Field(at("year"), "at most "+strconv.Itoa(maxPerDimension)+" values")
 	}
 	for _, y := range d.Year {
 		if y < minYear || y > maxYear {
-			return Definition{}, fieldErr(at("year"), "class years are 1-8")
+			return Definition{}, problem.Field(at("year"), "class years are 1-8")
 		}
 	}
 	if len(d.Year) > 0 {
 		n.Year = slices.Compact(slices.Sorted(slices.Values(d.Year)))
 	}
 	if n.DimCount() == 0 {
-		return Definition{}, fieldErr(loc, "at least one of uni, dept, year, club is required")
+		return Definition{}, problem.Field(loc, "at least one of uni, dept, year, club is required")
 	}
 	return n, nil
 }
@@ -164,8 +164,4 @@ func (d *Definition) Scan(src any) error {
 	}
 	*d = out
 	return nil
-}
-
-func fieldErr(location, msg string) error {
-	return problem.ErrValidation.WithFields(problem.FieldError{Location: location, Message: msg})
 }

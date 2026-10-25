@@ -47,7 +47,7 @@ func moderatedPost(p Post) authz.Resource {
 // only a platform admin suspends an org or changes a suspended one; nobody
 // moderates an org they belong to).
 func moderatedOrg(o orgs.OrgSummary, act ModAction, trust TrustLevel) authz.Resource {
-	r := orgResource(o)
+	r := authz.OrgResource(o.ID, string(o.Kind), string(o.Status))
 	r.Attrs["moderation_action"] = string(act)
 	r.Attrs["trust_level"] = string(trust)
 	return r
@@ -58,16 +58,6 @@ func moderatedOrg(o orgs.OrgSummary, act ModAction, trust TrustLevel) authz.Reso
 func reportResource(r Report) authz.Resource {
 	reporter := r.ReporterUserID
 	return authz.Resource{Type: authz.TypeContentReport, ID: r.ID, OwnerUserID: &reporter}
-}
-
-// orgResource is the authz view of an org for its management surface
-// (/orgs/{org_id}/posts) and its public page (listPosts?org_id=): 03 §3.5
-// org, Attrs org_kind and org_status.
-func orgResource(o orgs.OrgSummary) authz.Resource {
-	id := o.ID
-	return authz.Resource{Type: authz.TypeOrg, ID: id, OrgID: &id, Attrs: map[string]string{
-		"org_kind": string(o.Kind), "org_status": string(o.Status),
-	}}
 }
 
 // postResource is the authz view of a post (03 §3.5: OrgID = the author
@@ -174,29 +164,6 @@ var authorKinds = map[orgs.Kind]AuthorKind{
 	orgs.KindCompany: AuthorCompany,
 }
 
-// etagOf is the strong ETag of a version (04 §1.13): the base32 of
-// updated_at's UnixNano, quoted.
-func etagOf(p Post) string { return `"` + strconv.FormatInt(p.UpdatedAt.UnixNano(), 32) + `"` }
-
-// checkIfMatch applies If-Match (04 §1.13): missing or "*" → 428, no listed
-// tag equal to the current one → 412.
-func checkIfMatch(header, current string) error {
-	h := strings.TrimSpace(header)
-	if h == "" || h == "*" {
-		return ErrPreconditionRequired
-	}
-	for tag := range strings.SplitSeq(h, ",") {
-		if strings.TrimSpace(tag) == current {
-			return nil
-		}
-	}
-	return ErrPreconditionFailed
-}
-
-func fieldErr(location, msg string) error {
-	return problem.ErrValidation.WithFields(problem.FieldError{Location: location, Message: msg})
-}
-
 // cleanTitle normalises an optional single-line title (05 §9.5; ≤ 140
 // characters, 02 §0.4); "" clears it.
 func cleanTitle(loc, s string) (*string, error) {
@@ -205,10 +172,10 @@ func cleanTitle(loc, s string) (*string, error) {
 	}
 	n, err := textx.NormalizeText(s)
 	if err != nil {
-		return nil, fieldErr(loc, "contains control or bidi characters")
+		return nil, problem.Field(loc, "contains control or bidi characters")
 	}
 	if c := utf8.RuneCountInString(n); c < 1 || c > maxTitle {
-		return nil, fieldErr(loc, "must be at most 140 characters")
+		return nil, problem.Field(loc, "must be at most 140 characters")
 	}
 	return &n, nil
 }

@@ -20,6 +20,7 @@ import (
 	"koro/internal/platform/clock"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // eduUni is the university of the fake directory: ogr.uni.edu.tr and
@@ -185,7 +186,7 @@ func TestStartEdu_UnknownDomain_422(t *testing.T) {
 	_, a := e.student(t, "ada@example.com")
 	for _, addr := range []string{"ada@bilinmeyen.edu.tr", "ada@gmail.com", "ada@edu.tr", "ada@uni.edu.tr.evil.com"} {
 		err := e.svc.StartEduVerification(t.Context(), a, addr)
-		wantErr(t, err, identity.ErrEduDomainUnknown)
+		problemtest.WantErr(t, err, identity.ErrEduDomainUnknown)
 		wantStatus(t, err, http.StatusUnprocessableEntity)
 		pe, _ := errors.AsType[*problem.Error](err)
 		if fe := pe.Fields(); len(fe) != 1 || fe[0].Location != "body.edu_email" || strings.Contains(fe[0].Message, "ada@") {
@@ -207,7 +208,7 @@ func TestStartEdu_UnknownDomain_422(t *testing.T) {
 		t.Fatalf("subdomain: %v", err)
 	}
 	// Anonymous callers cannot start (O).
-	wantErr(t, e.svc.StartEduVerification(t.Context(), authz.Anonymous(), "x@uni.edu.tr"), authz.ErrForbidden)
+	problemtest.WantErr(t, e.svc.StartEduVerification(t.Context(), authz.Anonymous(), "x@uni.edu.tr"), authz.ErrForbidden)
 }
 
 func TestStartEdu_NilResolver_422(t *testing.T) {
@@ -217,7 +218,7 @@ func TestStartEdu_NilResolver_422(t *testing.T) {
 	e := newEduEnv(t, func(d *identity.Deps) { d.Domains = nil })
 	_, a := e.student(t, "ada@example.com")
 	err := e.svc.StartEduVerification(t.Context(), a, "ada@ogr.uni.edu.tr")
-	wantErr(t, err, identity.ErrEduDomainUnknown)
+	problemtest.WantErr(t, err, identity.ErrEduDomainUnknown)
 	wantStatus(t, err, http.StatusUnprocessableEntity)
 	if len(e.eduRows(t, a.UserID)) != 0 {
 		t.Fatal("a verification row exists")
@@ -277,14 +278,14 @@ func TestConfirmEdu_SetsVerifiedWithOneYearExpiry(t *testing.T) {
 		t.Fatalf("confirm audits %d", n)
 	}
 	// Single use.
-	wantErr(t, e.svc.ConfirmEduVerification(ctx, authz.Anonymous(), tok), identity.ErrInvalidToken)
+	problemtest.WantErr(t, e.svc.ConfirmEduVerification(ctx, authz.Anonymous(), tok), identity.ErrInvalidToken)
 	// Expired after 24 hours.
 	if err := e.svc.StartEduVerification(ctx, a, "ada@uni.edu.tr"); err != nil {
 		t.Fatal(err)
 	}
 	late := e.lastToken(t, "identity.edu_verify")
 	e.clk.Advance(25 * time.Hour)
-	wantErr(t, e.svc.ConfirmEduVerification(ctx, authz.Anonymous(), late), identity.ErrInvalidToken)
+	problemtest.WantErr(t, e.svc.ConfirmEduVerification(ctx, authz.Anonymous(), late), identity.ErrInvalidToken)
 }
 
 func TestConfirmEdu_RenewalSupersedesOld(t *testing.T) {
@@ -354,7 +355,7 @@ func TestEduConfirm_AddressTakenMeanwhile_409(t *testing.T) {
 	tokB := e.lastToken(t, "identity.edu_verify")
 	e.verifyByEmail(t, a, "ortak@uni.edu.tr")
 	err := e.svc.ConfirmEduVerification(ctx, authz.Anonymous(), tokB)
-	wantErr(t, err, identity.ErrEduEmailTaken)
+	problemtest.WantErr(t, err, identity.ErrEduEmailTaken)
 	wantStatus(t, err, http.StatusConflict)
 }
 
@@ -375,7 +376,7 @@ func TestSubmitEduDocument_QueuesForAdmin(t *testing.T) {
 		"infected":     e.files.add(u.ID, files.PurposeEduDocument, files.ScanInfected),
 	} {
 		_, err := sub(f)
-		wantErr(t, err, identity.ErrInvalidEduDocument)
+		problemtest.WantErr(t, err, identity.ErrInvalidEduDocument)
 		wantStatus(t, err, http.StatusUnprocessableEntity)
 		_ = name
 	}
@@ -396,7 +397,7 @@ func TestSubmitEduDocument_QueuesForAdmin(t *testing.T) {
 	}
 	// One document in review at a time.
 	_, err = sub(e.files.add(u.ID, files.PurposeEduDocument, files.ScanClean))
-	wantErr(t, err, identity.ErrEduPending)
+	problemtest.WantErr(t, err, identity.ErrEduPending)
 	wantStatus(t, err, http.StatusConflict)
 	// Pending is not a student (03 §2.3).
 	if st, _ := e.mod.Students.StudentStatus(ctx, u.ID); st.Status != authz.StudentNone {
@@ -413,9 +414,9 @@ func TestSubmitEduDocument_QueuesForAdmin(t *testing.T) {
 		t.Fatalf("queue = %+v, %v", p, err)
 	}
 	// Students and dpo do not see the queue.
-	wantErr(t, func() error { _, err := e.svc.EduQueue(ctx, a, identity.EduQuery{}); return err }(), authz.ErrForbidden)
+	problemtest.WantErr(t, func() error { _, err := e.svc.EduQueue(ctx, a, identity.EduQuery{}); return err }(), authz.ErrForbidden)
 	dpo := e.staff(t, "dpo@example.com", authz.PlatformDPO)
-	wantErr(t, func() error { _, err := e.svc.EduQueue(ctx, dpo, identity.EduQuery{}); return err }(), authz.ErrForbidden)
+	problemtest.WantErr(t, func() error { _, err := e.svc.EduQueue(ctx, dpo, identity.EduQuery{}); return err }(), authz.ErrForbidden)
 	if n := len(e.audit.of(string(authz.IdentityEduVerificationSubmitDocument))); n != 1 {
 		t.Fatalf("submit audits %d", n)
 	}
@@ -436,7 +437,7 @@ func TestAdminDecide_ApproveEmitsEduVerified(t *testing.T) {
 	approve := identity.EduDecision{Decision: identity.EduVerified, UniversityID: &uni, ReviewNote: "Açıköğretim belgesi"}
 	// The scan has not cleared the document yet: no approval.
 	_, err = e.svc.DecideEduVerification(ctx, pad, v.Record.ID, approve)
-	wantErr(t, err, files.ErrNotClean)
+	problemtest.WantErr(t, err, files.ErrNotClean)
 	e.files.mu.Lock()
 	m := e.files.metas[doc]
 	m.ScanStatus = files.ScanClean
@@ -444,7 +445,7 @@ func TestAdminDecide_ApproveEmitsEduVerified(t *testing.T) {
 	e.files.mu.Unlock()
 	// Approval needs the university.
 	_, err = e.svc.DecideEduVerification(ctx, pad, v.Record.ID, identity.EduDecision{Decision: identity.EduVerified})
-	wantErr(t, err, identity.ErrUniversityUnknown)
+	problemtest.WantErr(t, err, identity.ErrUniversityUnknown)
 	got, err := e.svc.DecideEduVerification(ctx, pad, v.Record.ID, approve)
 	if err != nil {
 		t.Fatal(err)
@@ -476,7 +477,7 @@ func TestAdminDecide_ApproveEmitsEduVerified(t *testing.T) {
 	}
 	// A decided verification cannot be decided again.
 	_, err = e.svc.DecideEduVerification(ctx, pad, v.Record.ID, identity.EduDecision{Decision: identity.EduRejected})
-	wantErr(t, err, identity.ErrEduInvalidState)
+	problemtest.WantErr(t, err, identity.ErrEduInvalidState)
 	wantStatus(t, err, http.StatusConflict)
 
 	// Y6: nobody decides their own document; an unknown ID is 404 for staff only.
@@ -487,11 +488,11 @@ func TestAdminDecide_ApproveEmitsEduVerified(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.DecideEduVerification(ctx, pad, ownV.Record.ID, approve)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	_, err = e.svc.DecideEduVerification(ctx, pad, uuid.NewV7(), approve)
-	wantErr(t, err, problem.ErrNotFound)
+	problemtest.WantErr(t, err, problem.ErrNotFound)
 	_, err = e.svc.DecideEduVerification(ctx, a, uuid.NewV7(), approve)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	// A rejection keeps the note for the applicant (and only then shows it).
 	sup := e.staff(t, "destek@example.com", authz.PlatformSupport)
 	rej, err := e.svc.DecideEduVerification(ctx, sup, ownV.Record.ID, identity.EduDecision{Decision: identity.EduRejected, ReviewNote: "Belge okunmuyor"})
@@ -517,7 +518,7 @@ func TestAdminGetEduDocument_Audited(t *testing.T) {
 	sup := e.staff(t, "destek@example.com", authz.PlatformSupport)
 	// Not cleared by the scan yet: 409, nothing handed out, nothing audited as a download.
 	_, err = e.svc.EduDocument(ctx, sup, v.Record.ID)
-	wantErr(t, err, files.ErrNotClean)
+	problemtest.WantErr(t, err, files.ErrNotClean)
 	if n := len(e.audit.of(string(authz.IdentityEduVerificationReview))); n != 0 {
 		t.Fatalf("%d audits for a refused download", n)
 	}
@@ -551,16 +552,16 @@ func TestAdminGetEduDocument_Audited(t *testing.T) {
 	}
 	// The applicant (no staff role) gets 403; staff without the action too.
 	_, err = e.svc.EduDocument(ctx, a, v.Record.ID)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	dpo := e.staff(t, "dpo@example.com", authz.PlatformDPO)
 	_, err = e.svc.EduDocument(ctx, dpo, v.Record.ID)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	// An e-mail verification has no document: 404.
 	_, b := e.student(t, "bora@example.com")
 	e.verifyByEmail(t, b, "bora@uni.edu.tr")
 	emailRow := e.eduRows(t, b.UserID)[0]
 	_, err = e.svc.EduDocument(ctx, sup, emailRow.ID)
-	wantErr(t, err, problem.ErrNotFound)
+	problemtest.WantErr(t, err, problem.ErrNotFound)
 }
 
 func TestEduExpire_EmitsLapsedEvent(t *testing.T) {

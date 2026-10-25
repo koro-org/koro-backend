@@ -20,6 +20,7 @@ import (
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/privacy"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // ---- transaction probe
@@ -192,15 +193,15 @@ func TestScheduleDispatch_IdempotencyReplay_NoDoubleConsume(t *testing.T) {
 			n++
 		}
 	}
-	if n != 1 || len(e.audit.actionsOf(string(authz.OutreachDispatchCreate))) != 1 {
-		t.Fatalf("events %d, audit %v", n, e.audit.actions())
+	if n != 1 || len(e.audit.Of(authz.OutreachDispatchCreate)) != 1 {
+		t.Fatalf("events %d, audit %v", n, e.audit.Actions())
 	}
 	_, err = e.svc.CreateDispatch(ctx, cm, p.ID, outreach.DispatchRequest{Channels: []outreach.Channel{outreach.ChannelEmail}})
-	if status, code := problemOf(err); status != 422 || code != "idempotency.key_reused" {
+	if status, code := problemtest.StatusCode(err); status != 422 || code != "idempotency.key_reused" {
 		t.Fatalf("same key, other body = %v", err)
 	}
 	_, err = e.svc.CreateDispatch(withKey(t.Context(), cm, "/api/v1/posts/{post_id}/dispatches", "dispatch-0002"), cm, p.ID, req)
-	if status, code := problemOf(err); status != 409 || code != "outreach.dispatch_exists" {
+	if status, code := problemtest.StatusCode(err); status != 409 || code != "outreach.dispatch_exists" {
 		t.Fatalf("second dispatch of the post = %v", err)
 	}
 	if e.units(t, companyA) != 4 {
@@ -266,7 +267,7 @@ func TestRunDispatch_CommercialOnlyConsented(t *testing.T) {
 		// 30 eligible; 17 consenting and notified → bucket 10
 		t.Fatalf("counts %v/%v/%v", deref(got.EligibleCount), deref(got.ConsentedCount), deref(got.SentCount))
 	}
-	if acts := e.audit.actionsOf(string(authz.OutreachDispatchRun)); len(acts) != 1 {
+	if acts := e.audit.Of(authz.OutreachDispatchRun); len(acts) != 1 {
 		t.Fatalf("run audit = %v", acts)
 	}
 }
@@ -313,7 +314,7 @@ func TestRunDispatch_ClubInformational_NoConsentNeeded(t *testing.T) {
 	other := e.targetedPost(clubA, outreach.AuthorClub, uniKey(uniA))
 	_, err := e.svc.ScheduleDispatch(t.Context(), outreach.DispatchInput{Actor: actor(t, "club_admin"), Post: other,
 		Channels: []outreach.Channel{outreach.ChannelInApp}})
-	wantErr(t, err, outreach.ErrTargetOutOfScope)
+	problemtest.WantErr(t, err, outreach.ErrTargetOutOfScope)
 }
 
 // TestRunDispatch_ExcludesMinorsForCommercial: a student under 18 never
@@ -387,7 +388,7 @@ func TestRunDispatch_SensitiveClubMembers_MemberList(t *testing.T) {
 	cp := e.targetedPost(companyA, outreach.AuthorCompany, clubKey(clubSensitive))
 	_, err := e.svc.ScheduleDispatch(t.Context(), outreach.DispatchInput{Actor: actor(t, "company_admin"), Post: cp,
 		Channels: []outreach.Channel{outreach.ChannelPush}})
-	wantErr(t, err, outreach.ErrSensitiveTarget)
+	problemtest.WantErr(t, err, outreach.ErrSensitiveTarget)
 }
 
 // TestRunDispatch_RetrySafe_NoDuplicateDelivery: a run that breaks in the
@@ -455,7 +456,7 @@ func TestCancelDispatch_ReleasesEntitlement(t *testing.T) {
 	if err := e.deliver(t); err != nil || e.sender.attempts != 0 {
 		t.Fatalf("a cancelled dispatch ran: %v, %d sends", err, e.sender.attempts)
 	}
-	if acts := e.audit.actionsOf(string(authz.OutreachDispatchCancel)); len(acts) != 1 {
+	if acts := e.audit.Of(authz.OutreachDispatchCancel); len(acts) != 1 {
 		t.Fatalf("cancel audit = %v", acts)
 	}
 	// A finished dispatch cannot be cancelled; another org's is not found.
@@ -464,9 +465,9 @@ func TestCancelDispatch_ReleasesEntitlement(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.CancelDispatch(t.Context(), cma, companyA, done.ID)
-	wantErr(t, err, outreach.ErrInvalidState)
+	problemtest.WantErr(t, err, outreach.ErrInvalidState)
 	_, err = e.svc.CancelDispatch(t.Context(), actor(t, "other_company_member"), companyB, done.ID)
-	wantErr(t, err, outreach.ErrNotFound)
+	problemtest.WantErr(t, err, outreach.ErrNotFound)
 	if e.units(t, companyA) != 1 {
 		t.Fatalf("units = %d: the completed dispatch keeps its unit", e.units(t, companyA))
 	}
@@ -523,7 +524,7 @@ func TestGetDispatch_CountsNullBelow10(t *testing.T) {
 	}
 	// Another org's dispatch is not found under this org.
 	_, err = e.svc.GetDispatch(t.Context(), actor(t, "other_company_member"), companyB, d.ID)
-	wantErr(t, err, outreach.ErrNotFound)
+	problemtest.WantErr(t, err, outreach.ErrNotFound)
 }
 
 // TestRunDispatch_WaitsForPublication: a dispatch of a draft (or a post in
@@ -640,7 +641,7 @@ func TestScheduleDispatch_Rules(t *testing.T) {
 
 	// No targeted_dispatch unit: 403 entitlements.not_entitled.
 	company := e.targetedPost(companyA, outreach.AuthorCompany, uniKey(uniA))
-	if status, code := problemOf(sched(cma, company, nil, push)); status != 403 || code != "entitlements.not_entitled" {
+	if status, code := problemtest.StatusCode(sched(cma, company, nil, push)); status != 403 || code != "entitlements.not_entitled" {
 		t.Fatalf("without a unit: %d %s", status, code)
 	}
 	e.grantDispatches(t, companyA, 5)
@@ -683,7 +684,7 @@ func TestScheduleDispatch_Rules(t *testing.T) {
 			return e.targetedPost(clubA, outreach.AuthorClub, clubKey(clubA))
 		}, nil, []outreach.Channel{push}, 403, "forbidden"},
 	} {
-		if status, code := problemOf(sched(tc.a, tc.post(), tc.commercial, tc.chans...)); status != tc.status || code != tc.code {
+		if status, code := problemtest.StatusCode(sched(tc.a, tc.post(), tc.commercial, tc.chans...)); status != tc.status || code != tc.code {
 			t.Fatalf("%s: %d %s, want %d %s", name, status, code, tc.status, tc.code)
 		}
 	}
@@ -696,7 +697,7 @@ func TestScheduleDispatch_Rules(t *testing.T) {
 	noUnsub.grantDispatches(t, companyA, 1)
 	_, err := noUnsub.svc.ScheduleDispatch(ctx, outreach.DispatchInput{Actor: cma,
 		Post: noUnsub.targetedPost(companyA, outreach.AuthorCompany, uniKey(uniA)), Channels: []outreach.Channel{outreach.ChannelEmail}})
-	if status, code := problemOf(err); status != 422 || code != "validation_failed" {
+	if status, code := problemtest.StatusCode(err); status != 422 || code != "validation_failed" {
 		t.Fatalf("commercial e-mail without unsubscribe: %d %s", status, code)
 	}
 	if _, err := noUnsub.svc.ScheduleDispatch(ctx, outreach.DispatchInput{Actor: actor(t, "university_rep"),
@@ -707,7 +708,7 @@ func TestScheduleDispatch_Rules(t *testing.T) {
 	// A sponsored club post is commercial; an informational post may opt into the filter.
 	sponsored := e.targetedPost(clubA, outreach.AuthorClub, clubKey(clubA))
 	sponsored.Commercial = true
-	if status, code := problemOf(sched(actor(t, "club_admin"), sponsored, ptr(false), push)); status != 422 || code != "validation_failed" {
+	if status, code := problemtest.StatusCode(sched(actor(t, "club_admin"), sponsored, ptr(false), push)); status != 422 || code != "validation_failed" {
 		t.Fatalf("sponsored post, commercial=false: %d %s", status, code)
 	}
 	uniPost := e.targetedPost(uniOrgA, outreach.AuthorUniversity, uniKey(uniA))
@@ -724,7 +725,7 @@ func TestScheduleDispatch_Rules(t *testing.T) {
 	e.orgs.set(companyB, orgs.KindCompany, orgs.StatusSuspended)
 	_, err = e.svc.ScheduleDispatch(ctx, outreach.DispatchInput{Actor: actor(t, "other_company_member"),
 		Post: e.targetedPost(companyB, outreach.AuthorCompany, uniKey(uniA)), Channels: []outreach.Channel{push}})
-	wantErr(t, err, orgs.ErrOrgSuspended)
+	problemtest.WantErr(t, err, orgs.ErrOrgSuspended)
 }
 
 // TestDiscardDispatch_ReleasesAndDeletes: a post withdrawn before it was
@@ -756,7 +757,7 @@ func TestDiscardDispatch_ReleasesAndDeletes(t *testing.T) {
 	if err := e.svc.DiscardDispatch(ctx, actor(t, "moderator"), companyA, q.ID); err != nil {
 		t.Fatal(err)
 	}
-	last := e.audit.last()
+	last := e.audit.Last()
 	if last.Action != string(authz.OutreachDispatchCancel) || last.OrgID != nil || last.Metadata["org_id"] != companyA.String() {
 		t.Fatalf("moderator's discard audit = %+v", last)
 	}
@@ -768,7 +769,7 @@ func TestDiscardDispatch_ReleasesAndDeletes(t *testing.T) {
 	if err := e.deliver(t); err != nil {
 		t.Fatal(err)
 	}
-	wantErr(t, e.svc.DiscardDispatch(ctx, cma, companyA, r.ID), outreach.ErrInvalidState)
+	problemtest.WantErr(t, e.svc.DiscardDispatch(ctx, cma, companyA, r.ID), outreach.ErrInvalidState)
 }
 
 // TestResumeDispatches_LostEventAndStaleClaim: outreach.resume_dispatches
@@ -883,7 +884,7 @@ func TestDispatch_NoPersonalDataNoExactCounts(t *testing.T) {
 	if err := e.deliver(t); err != nil {
 		t.Fatal(err)
 	}
-	for _, ev := range e.audit.all() {
+	for _, ev := range e.audit.All() {
 		for k, v := range ev.Metadata {
 			if strings.Contains(k, "count") {
 				t.Fatalf("audit %s carries %s=%v", ev.Action, k, v)

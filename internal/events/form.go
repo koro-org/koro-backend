@@ -11,6 +11,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/consent"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/problem"
 )
@@ -144,7 +145,7 @@ func (s *service) draftView(ctx context.Context, e Event, f Form) (FormDraftView
 	if err != nil {
 		return FormDraftView{}, err
 	}
-	out := FormDraftView{Form: f, Draft: draft, Lint: rep, ETag: etagOf(f.UpdatedAt)}
+	out := FormDraftView{Form: f, Draft: draft, Lint: rep, ETag: httpx.ETag(f.UpdatedAt)}
 	if f.CurrentVersionID != nil {
 		v, err := s.d.Store.GetFormVersion(ctx, e.OrgID, *f.CurrentVersionID)
 		if err != nil {
@@ -195,7 +196,7 @@ func (s *service) PutFormDraft(ctx context.Context, a authz.Actor, eventID uuid.
 		if err != nil {
 			return err
 		}
-		if err := checkIfMatch(ifMatch, etagOf(f.UpdatedAt)); err != nil {
+		if err := httpx.CheckIfMatch(ifMatch, httpx.ETag(f.UpdatedAt)); err != nil {
 			return err
 		}
 		schema, err := ParseFormSchema(draft, "body.draft_schema")

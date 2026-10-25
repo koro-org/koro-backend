@@ -20,6 +20,7 @@ import (
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/outbox"
+	"koro/internal/platform/problem/problemtest"
 	"koro/internal/platform/queue"
 	"koro/internal/platform/testutil"
 	"koro/internal/students"
@@ -102,7 +103,7 @@ func TestService_Postgres_AcceptShareContactSameTx(t *testing.T) {
 
 	fail.Store(true)
 	_, err = mod.Service.Respond(ctx, stu, v.Request.ID, acceptSharing(contactProof(), consent.ChannelWeb))
-	wantErr(t, err, consent.ErrTextMismatch)
+	problemtest.WantErr(t, err, consent.ErrTextMismatch)
 	if count(`SELECT count(*) FROM contact_requests WHERE id = $1 AND status = 'pending' AND responded_at IS NULL`, v.Request.ID) != 1 ||
 		count(`SELECT count(*) FROM profile_access_grants WHERE source_id = $1`, v.Request.ID) != 0 ||
 		count(`SELECT count(*) FROM profile_access_grants WHERE contact_shared_at IS NOT NULL`) != 0 ||

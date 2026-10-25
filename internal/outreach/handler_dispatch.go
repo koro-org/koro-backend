@@ -9,6 +9,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
@@ -16,7 +17,7 @@ import (
 
 // registerDispatch adds the 4 dispatch operations of BE-035 (04 §2.8, §F.1).
 func registerDispatch(api huma.API, h handler) {
-	reg(api, huma.Operation{
+	op.Register(api, "outreach", huma.Operation{
 		OperationID: "createDispatch", Method: http.MethodPost, Path: "/posts/{post_id}/dispatches",
 		DefaultStatus: http.StatusCreated,
 		Summary:       "Notify a targeted post's audience",
@@ -31,19 +32,19 @@ func registerDispatch(api huma.API, h handler) {
 		Action: string(authz.OutreachDispatchCreate), Surface: op.SurfaceResource, Idempotency: op.IdempotencyRequired,
 	}, h.createDispatch)
 
-	reg(api, huma.Operation{
+	op.Register(api, "outreach", huma.Operation{
 		OperationID: "listDispatches", Method: http.MethodGet, Path: "/orgs/{org_id}/dispatches",
 		Summary: "List an organization's dispatches", Description: "Newest first.",
 	}, op.Meta{Action: string(authz.OutreachDispatchList), Surface: op.SurfaceOrg}, h.listDispatches)
 
-	reg(api, huma.Operation{
+	op.Register(api, "outreach", huma.Operation{
 		OperationID: "getDispatch", Method: http.MethodGet, Path: "/orgs/{org_id}/dispatches/{dispatch_id}",
 		Summary: "Get a dispatch",
 		Description: "eligible_count, consented_count and sent_count are published estimates (rounded down like " +
 			"the audience count) and null below 10 or before the run: an exact delivery count is never shown.",
 	}, op.Meta{Action: string(authz.OutreachDispatchRead), Surface: op.SurfaceOrg}, h.getDispatch)
 
-	reg(api, huma.Operation{
+	op.Register(api, "outreach", huma.Operation{
 		OperationID: "cancelDispatch", Method: http.MethodPost, Path: "/orgs/{org_id}/dispatches/{dispatch_id}/cancel",
 		Summary: "Cancel a scheduled dispatch",
 		Description: "Only a scheduled dispatch (409 outreach.invalid_state once it runs); a company's " +
@@ -134,7 +135,7 @@ func (h handler) createDispatch(ctx context.Context, in *createDispatchInput) (*
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.CreateDispatch(ctx, a, parseID(in.PostID), in.Body.Request())
+	v, err := h.svc.CreateDispatch(ctx, a, httpx.ParseID(in.PostID), in.Body.Request())
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +156,7 @@ func (h handler) listDispatches(ctx context.Context, in *listDispatchesInput) (*
 	if err != nil {
 		return nil, err
 	}
-	orgID := parseID(in.OrgID)
+	orgID := httpx.ParseID(in.OrgID)
 	fp := page.Fingerprint("listDispatches", orgID.String())
 	var after *uuid.UUID
 	c, err := page.Decode(in.Cursor, sortNewest, fp, 1)
@@ -194,7 +195,7 @@ func (h handler) getDispatch(ctx context.Context, in *getDispatchInput) (*dispat
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.GetDispatch(ctx, a, parseID(in.OrgID), parseID(in.DispatchID))
+	v, err := h.svc.GetDispatch(ctx, a, httpx.ParseID(in.OrgID), httpx.ParseID(in.DispatchID))
 	if err != nil {
 		return nil, err
 	}
@@ -213,7 +214,7 @@ func (h handler) cancelDispatch(ctx context.Context, in *cancelDispatchInput) (*
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.CancelDispatch(ctx, a, parseID(in.OrgID), parseID(in.DispatchID))
+	v, err := h.svc.CancelDispatch(ctx, a, httpx.ParseID(in.OrgID), httpx.ParseID(in.DispatchID))
 	if err != nil {
 		return nil, err
 	}

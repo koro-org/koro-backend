@@ -3,13 +3,13 @@ package talent
 import (
 	"context"
 	"net/http"
-	"uuid"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
 	"koro/internal/consent"
 	"koro/internal/identity"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 )
 
@@ -26,21 +26,21 @@ const closedNote = "Closed (404 for every signed-in user) while talent.auditor_a
 func Register(api huma.API, svc Admin) {
 	h := handler{svc: svc}
 
-	reg(api, huma.Operation{
+	op.Register(api, "talent", huma.Operation{
 		OperationID: "getTalentReport", Method: http.MethodGet, Path: "/admin/talent/subjects/{user_id}/report",
 		Summary: "Get the talent report of a user",
 		Description: "The ledger (with each row's point_event_id for a reversal), the category totals, the last nightly " +
 			"score (band, raw score, cohort percentile, cohort, config version) and the neutralisations. " + closedNote,
 	}, op.Meta{Action: string(authz.TalentReportRead), Surface: op.SurfaceAdmin}, h.report)
 
-	reg(api, huma.Operation{
+	op.Register(api, "talent", huma.Operation{
 		OperationID: "getTalentDistribution", Method: http.MethodGet, Path: "/admin/talent/distribution",
 		Summary: "Get the band distribution",
 		Description: "Users by band 0..3 (neutralised users excluded); a count below 10 is null. university_id narrows it to " +
 			"the cohorts of one university (a university below cohort_min is in the global cohort). " + closedNote,
 	}, op.Meta{Action: string(authz.TalentDistributionRead), Surface: op.SurfaceAdmin}, h.distribution)
 
-	reg(api, huma.Operation{
+	op.Register(api, "talent", huma.Operation{
 		OperationID: "createTalentNeutralization", Method: http.MethodPost, Path: "/admin/talent/subjects/{user_id}/neutralizations",
 		DefaultStatus: http.StatusCreated,
 		Summary:       "Neutralise a user's talent band",
@@ -49,7 +49,7 @@ func Register(api huma.API, svc Admin) {
 	}, op.Meta{Action: string(authz.TalentNeutralizationManage), Surface: op.SurfaceAdmin, Reauth: true,
 		RateLimit: op.RateReauth, Idempotency: op.IdempotencyOptional}, h.createNeutralization)
 
-	reg(api, huma.Operation{
+	op.Register(api, "talent", huma.Operation{
 		OperationID: "liftTalentNeutralization", Method: http.MethodPost, Path: "/admin/talent/neutralizations/{neutralization_id}/lift",
 		Summary: "Lift an auditor neutralisation",
 		Description: "Re-authentication required. An objection neutralisation is permanent (409 talent.objection_permanent), " +
@@ -57,7 +57,7 @@ func Register(api huma.API, svc Admin) {
 	}, op.Meta{Action: string(authz.TalentNeutralizationManage), Surface: op.SurfaceAdmin, Reauth: true,
 		RateLimit: op.RateReauth, Idempotency: op.IdempotencyOptional}, h.liftNeutralization)
 
-	reg(api, huma.Operation{
+	op.Register(api, "talent", huma.Operation{
 		OperationID: "reverseTalentPointEvent", Method: http.MethodPost, Path: "/admin/talent/point-events/{point_event_id}/reversal",
 		DefaultStatus: http.StatusCreated,
 		Summary:       "Reverse a talent ledger row",
@@ -67,13 +67,13 @@ func Register(api huma.API, svc Admin) {
 	}, op.Meta{Action: string(authz.TalentReversalCreate), Surface: op.SurfaceAdmin, Reauth: true,
 		RateLimit: op.RateReauth, Idempotency: op.IdempotencyOptional}, h.reversePoint)
 
-	reg(api, huma.Operation{
+	op.Register(api, "talent", huma.Operation{
 		OperationID: "getTalentConfig", Method: http.MethodGet, Path: "/admin/talent/config",
 		Summary:     "Get the talent configuration",
 		Description: "The config version in force (null before the first one) and the signal catalogue. " + closedNote,
 	}, op.Meta{Action: string(authz.TalentConfigRead), Surface: op.SurfaceAdmin}, h.config)
 
-	reg(api, huma.Operation{
+	op.Register(api, "talent", huma.Operation{
 		OperationID: "createTalentConfigVersion", Method: http.MethodPost, Path: "/admin/talent/config/versions",
 		DefaultStatus: http.StatusCreated,
 		Summary:       "Create a talent config version",
@@ -84,22 +84,7 @@ func Register(api huma.API, svc Admin) {
 		RateLimit: op.RateReauth, Idempotency: op.IdempotencyOptional}, h.createConfigVersion)
 }
 
-func reg[I, O any](api huma.API, o huma.Operation, m op.Meta, fn func(context.Context, *I) (*O, error)) {
-	o.Tags = []string{"talent"}
-	huma.Register(api, op.Koro(o, m), fn)
-}
-
 type handler struct{ svc Admin }
-
-// parseID parses a path ID; a malformed one becomes the nil UUID, which no
-// row has (404 after the flag and authorisation).
-func parseID(s string) uuid.UUID {
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return uuid.Nil()
-	}
-	return id
-}
 
 func proofOf(r *consent.ReauthDTO) identity.ReauthProof {
 	if r == nil {
@@ -131,7 +116,7 @@ func (h handler) report(ctx context.Context, in *reportInput) (*reportOutput, er
 	if err != nil {
 		return nil, err
 	}
-	r, err := h.svc.Report(ctx, a, parseID(in.UserID), in.AccessReason.AccessReason)
+	r, err := h.svc.Report(ctx, a, httpx.ParseID(in.UserID), in.AccessReason.AccessReason)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +161,7 @@ func (h handler) createNeutralization(ctx context.Context, in *createNeutralizat
 	if err != nil {
 		return nil, err
 	}
-	n, err := h.svc.CreateNeutralization(ctx, a, parseID(in.UserID),
+	n, err := h.svc.CreateNeutralization(ctx, a, httpx.ParseID(in.UserID),
 		NeutralizationInput{Reason: in.AccessReason.AccessReason, Note: in.Body.Note}, proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err
@@ -195,7 +180,7 @@ func (h handler) liftNeutralization(ctx context.Context, in *liftNeutralizationI
 	if err != nil {
 		return nil, err
 	}
-	n, err := h.svc.LiftNeutralization(ctx, a, parseID(in.NeutralizationID),
+	n, err := h.svc.LiftNeutralization(ctx, a, httpx.ParseID(in.NeutralizationID),
 		NeutralizationInput{Reason: in.AccessReason.AccessReason, Note: in.Body.Note}, proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err
@@ -219,7 +204,7 @@ func (h handler) reversePoint(ctx context.Context, in *reversalInput) (*pointOut
 	if err != nil {
 		return nil, err
 	}
-	p, err := h.svc.ReversePoint(ctx, a, parseID(in.PointEventID),
+	p, err := h.svc.ReversePoint(ctx, a, httpx.ParseID(in.PointEventID),
 		ReversalInput{Reason: in.AccessReason.AccessReason, Why: in.Body.Reason}, proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err

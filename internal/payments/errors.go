@@ -87,11 +87,6 @@ var constraints = db.Constraints{
 	"payments_refunded_limit_chk":                    ErrRefundExceedsPaid,
 }
 
-// fieldErr is a 422 validation_failed with one field error.
-func fieldErr(loc, msg string) error {
-	return problem.ErrValidation.WithFields(problem.FieldError{Location: loc, Message: msg})
-}
-
 // fieldErrOf is one field error (for a module error that names its field).
 func fieldErrOf(loc, msg string) problem.FieldError {
 	return problem.FieldError{Location: loc, Message: msg}

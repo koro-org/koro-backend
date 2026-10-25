@@ -39,7 +39,7 @@ func TestCompleteEnded_CompletesEndedPublishedEvents(t *testing.T) {
 			t.Fatalf("event %s = %s, want %s", id, got.Status, want)
 		}
 	}
-	if n := len(e.audit.of("events.event.complete")); n != 1 {
+	if n := len(e.audit.Of("events.event.complete")); n != 1 {
 		t.Fatalf("%d completion audit records, want 1", n)
 	}
 

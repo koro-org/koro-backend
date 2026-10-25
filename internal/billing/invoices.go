@@ -16,7 +16,9 @@ import (
 	"koro/internal/orders"
 	"koro/internal/platform/civil"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/page"
 	"koro/internal/platform/problem"
 	"koro/internal/platform/queue"
@@ -95,18 +97,11 @@ type CancelResult struct {
 // now is the service clock in the database's precision.
 func (s *service) now() time.Time { return stamp(s.d.Clock.Now()) }
 
-func idStr(p *uuid.UUID) string {
-	if p == nil {
-		return ""
-	}
-	return p.String()
-}
-
 // invoiceResource is the authz view of one invoice.
 func invoiceResource(inv Invoice) authz.Resource {
 	return authz.Resource{Type: authz.TypeInvoice, ID: inv.ID, OrgID: inv.IssuerOrgID, Attrs: map[string]string{
-		attrRecipientOrg: idStr(inv.RecipientOrgID), attrIssuingMode: string(inv.IssuingMode),
-		authz.AttrUploadedBy: idStr(inv.UploadedBy),
+		attrRecipientOrg: httpx.IDStr(inv.RecipientOrgID), attrIssuingMode: string(inv.IssuingMode),
+		authz.AttrUploadedBy: httpx.IDStr(inv.UploadedBy),
 	}}
 }
 
@@ -117,10 +112,6 @@ func orgInvoices(orgID uuid.UUID) authz.Resource {
 	return authz.Resource{Type: authz.TypeInvoice, OrgID: &org, Attrs: map[string]string{
 		attrRecipientOrg: org.String(), attrIssuingMode: "", authz.AttrUploadedBy: "",
 	}}
-}
-
-func fieldErr(location, msg string) error {
-	return problem.ErrValidation.WithFields(problem.FieldError{Location: location, Message: msg})
 }
 
 // load reads an invoice and authorises act on it (404 when it does not
@@ -179,11 +170,11 @@ func (s *service) list(ctx context.Context, f Filter, q ListQuery) (InvoicePage,
 	case q.invalid != nil:
 		return InvoicePage{}, q.invalid
 	case q.Kind != "" && !q.Kind.Valid():
-		return InvoicePage{}, fieldErr("query.kind", "is not an invoice kind")
+		return InvoicePage{}, problem.Field("query.kind", "is not an invoice kind")
 	case q.Status != "" && !q.Status.Valid():
-		return InvoicePage{}, fieldErr("query.status", "is not an invoice status")
+		return InvoicePage{}, problem.Field("query.status", "is not an invoice status")
 	case q.Direction != "" && q.Direction != DirectionIssued && q.Direction != DirectionReceived:
-		return InvoicePage{}, fieldErr("query.direction", "must be issued or received")
+		return InvoicePage{}, problem.Field("query.direction", "must be issued or received")
 	}
 	f.Kind, f.Status = q.Kind, q.Status
 	limit := page.ClampLimit(q.Limit)
@@ -248,17 +239,17 @@ func (s *service) UploadInvoice(ctx context.Context, a authz.Actor, id uuid.UUID
 	today := civil.Today(s.d.Clock.Now())
 	switch {
 	case !invoiceNoRe.MatchString(no):
-		return InvoiceView{}, fieldErr("body.invoice_no", "must be 1-30 letters, digits or / . _ -")
+		return InvoiceView{}, problem.Field("body.invoice_no", "must be 1-30 letters, digits or / . _ -")
 	case derr != nil:
-		return InvoiceView{}, fieldErr("body.issue_date", "must be a YYYY-MM-DD date")
+		return InvoiceView{}, problem.Field("body.issue_date", "must be a YYYY-MM-DD date")
 	case issued.After(today):
-		return InvoiceView{}, fieldErr("body.issue_date", "must not be in the future")
+		return InvoiceView{}, problem.Field("body.issue_date", "must not be in the future")
 	case !in.DocumentType.Valid():
-		return InvoiceView{}, fieldErr("body.document_type", "must be e_fatura, e_arsiv or paper")
+		return InvoiceView{}, problem.Field("body.document_type", "must be e_fatura, e_arsiv or paper")
 	case in.PDFFileID == uuid.Nil():
-		return InvoiceView{}, fieldErr("body.pdf_file_id", "is required: an invoice_pdf upload")
+		return InvoiceView{}, problem.Field("body.pdf_file_id", "is required: an invoice_pdf upload")
 	case in.ETTN != nil && *in.ETTN == uuid.Nil():
-		return InvoiceView{}, fieldErr("body.ettn", "must be a UUID")
+		return InvoiceView{}, problem.Field("body.ettn", "must be a UUID")
 	}
 	f, err := s.uploadable(ctx, a, inv, in.PDFFileID)
 	if err != nil {
@@ -324,22 +315,22 @@ func (s *service) uploadable(ctx context.Context, a authz.Actor, inv Invoice, fi
 	f, err := s.d.Files.Get(ctx, fileID)
 	switch {
 	case errors.Is(err, files.ErrNotFound):
-		return files.FileMeta{}, fieldErr(loc, "must be an invoice_pdf upload")
+		return files.FileMeta{}, problem.Field(loc, "must be an invoice_pdf upload")
 	case err != nil:
 		return files.FileMeta{}, err
 	case f.Purpose != files.PurposeInvoicePDF:
-		return files.FileMeta{}, fieldErr(loc, "must be an invoice_pdf upload")
+		return files.FileMeta{}, problem.Field(loc, "must be an invoice_pdf upload")
 	case f.Status != files.StatusActive:
-		return files.FileMeta{}, fieldErr(loc, "must be a completed upload")
+		return files.FileMeta{}, problem.Field(loc, "must be a completed upload")
 	case f.MIME != files.MIMEPDF:
-		return files.FileMeta{}, fieldErr(loc, "must be a PDF document")
+		return files.FileMeta{}, problem.Field(loc, "must be a PDF document")
 	case f.ScanStatus == files.ScanInfected:
 		return files.FileMeta{}, files.ErrNotClean
 	}
 	mine := f.UploadedBy != nil && *f.UploadedBy == a.UserID
 	issuers := inv.IssuerOrgID != nil && f.OrgID != nil && *f.OrgID == *inv.IssuerOrgID
 	if !mine && !issuers {
-		return files.FileMeta{}, fieldErr(loc, "must be your upload or an upload of the issuing organization")
+		return files.FileMeta{}, problem.Field(loc, "must be your upload or an upload of the issuing organization")
 	}
 	return f, nil
 }
@@ -371,11 +362,11 @@ func (s *service) AdminVerifyInvoice(ctx context.Context, a authz.Actor, id uuid
 	note := strings.TrimSpace(in.Note)
 	switch {
 	case in.Result != StatusIssued && in.Result != StatusMismatch:
-		return InvoiceView{}, fieldErr("body.result", "must be issued or mismatch")
+		return InvoiceView{}, problem.Field("body.result", "must be issued or mismatch")
 	case utf8.RuneCountInString(note) > maxNoteRunes:
-		return InvoiceView{}, fieldErr("body.note", "must be at most 500 characters")
+		return InvoiceView{}, problem.Field("body.note", "must be at most 500 characters")
 	case in.Result == StatusMismatch && note == "":
-		return InvoiceView{}, fieldErr("body.note", "is required for a mismatch: what does not match")
+		return InvoiceView{}, problem.Field("body.note", "is required for a mismatch: what does not match")
 	}
 	if in.Result == StatusIssued {
 		f, err := s.d.Files.Get(ctx, *inv.PDFFileID)
@@ -436,11 +427,7 @@ func (s *service) AdminVerifyInvoice(ctx context.Context, a authz.Actor, id uuid
 
 // emitIssued writes invoice.issued (O) in the transaction.
 func (s *service) emitIssued(ctx context.Context, inv Invoice) error {
-	env, err := domainevent.New(domainevent.InvoiceIssued{InvoiceID: inv.ID}, invoiceSubject, inv.ID)
-	if err != nil {
-		return err
-	}
-	return s.d.Outbox.Add(ctx, env)
+	return outbox.Emit(ctx, s.d.Outbox, domainevent.InvoiceIssued{InvoiceID: inv.ID}, invoiceSubject, inv.ID)
 }
 
 // ---- cancellation
@@ -457,9 +444,9 @@ func (s *service) AdminCancelInvoice(ctx context.Context, a authz.Actor, id uuid
 	why := strings.TrimSpace(reason)
 	switch n := utf8.RuneCountInString(why); {
 	case n == 0:
-		return CancelResult{}, fieldErr("body.reason", "is required")
+		return CancelResult{}, problem.Field("body.reason", "is required")
 	case n > maxNoteRunes:
-		return CancelResult{}, fieldErr("body.reason", "must be at most 500 characters")
+		return CancelResult{}, problem.Field("body.reason", "must be at most 500 characters")
 	}
 	hash, err := idempotency.Hash(struct {
 		Op      string

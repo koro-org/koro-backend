@@ -56,10 +56,10 @@ type AdminGrantInput struct {
 	Reason     string     // why (the offline sale, the campaign); audited
 }
 
-// orgResource is the authz view of an org's entitlements (03 §3.5:
+// entitlementResource is the authz view of an org's entitlements (03 §3.5:
 // entitlement, OrgID = the holder). The org comes from the path; the org
 // management surface hides it from non-members (404, 03 §3.6).
-func orgResource(orgID uuid.UUID) authz.Resource {
+func entitlementResource(orgID uuid.UUID) authz.Resource {
 	return authz.Resource{Type: authz.TypeEntitlement, ID: orgID, OrgID: &orgID}
 }
 
@@ -74,7 +74,7 @@ func seesActors(a authz.Actor) bool {
 
 // List implements Service.
 func (s *service) List(ctx context.Context, a authz.Actor, orgID uuid.UUID, q ListQuery) (EntitlementPage, error) {
-	if err := authz.Can(ctx, a, authz.EntitlementsEntitlementList, orgResource(orgID)); err != nil {
+	if err := authz.Can(ctx, a, authz.EntitlementsEntitlementList, entitlementResource(orgID)); err != nil {
 		return EntitlementPage{}, err
 	}
 	limit := page.ClampLimit(q.Limit)
@@ -101,7 +101,7 @@ func (s *service) List(ctx context.Context, a authz.Actor, orgID uuid.UUID, q Li
 
 // Get implements Service.
 func (s *service) Get(ctx context.Context, a authz.Actor, orgID, id uuid.UUID) (Entitlement, error) {
-	if err := authz.Can(ctx, a, authz.EntitlementsEntitlementRead, orgResource(orgID)); err != nil {
+	if err := authz.Can(ctx, a, authz.EntitlementsEntitlementRead, entitlementResource(orgID)); err != nil {
 		return Entitlement{}, err
 	}
 	// Scoped by the path's org: another org's entitlement is not found.
@@ -110,7 +110,7 @@ func (s *service) Get(ctx context.Context, a authz.Actor, orgID, id uuid.UUID) (
 
 // ListUsages implements Service.
 func (s *service) ListUsages(ctx context.Context, a authz.Actor, orgID uuid.UUID, q UsageQuery) (UsagePage, error) {
-	if err := authz.Can(ctx, a, authz.EntitlementsUsageList, orgResource(orgID)); err != nil {
+	if err := authz.Can(ctx, a, authz.EntitlementsUsageList, entitlementResource(orgID)); err != nil {
 		return UsagePage{}, err
 	}
 	limit := page.ClampLimit(q.Limit)

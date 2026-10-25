@@ -9,21 +9,22 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/consent"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
 )
 
 func registerCollections(api huma.API, h handler) {
-	reg(api, huma.Operation{OperationID: "adminListReceivableCollections", Method: http.MethodGet, Path: "/admin/receivable-collections", Summary: "List manual receivable collections"},
+	op.Register(api, "payments", huma.Operation{OperationID: "adminListReceivableCollections", Method: http.MethodGet, Path: "/admin/receivable-collections", Summary: "List manual receivable collections"},
 		op.Meta{Action: string(authz.PaymentsReceivableList), Surface: op.SurfaceAdmin}, h.listCollections)
-	reg(api, huma.Operation{OperationID: "adminCreateReceivableCollection", Method: http.MethodPost, Path: "/admin/receivable-collections", DefaultStatus: http.StatusCreated, Summary: "Request collection of a payee receivable",
+	op.Register(api, "payments", huma.Operation{OperationID: "adminCreateReceivableCollection", Method: http.MethodPost, Path: "/admin/receivable-collections", DefaultStatus: http.StatusCreated, Summary: "Request collection of a payee receivable",
 		Description: "Claims one whole unmatched incoming transfer with a bank reference and receipt against a paid-out line's outstanding debt. Financial fields come from the transfer and line. A different finance admin approves it. No automatic payout offset."},
 		op.Meta{Action: string(authz.PaymentsReceivableCreate), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyRequired}, h.createCollection)
-	reg(api, huma.Operation{OperationID: "adminApproveReceivableCollection", Method: http.MethodPost, Path: "/admin/receivable-collections/{collection_id}/approve", Summary: "Approve a receivable collection",
+	op.Register(api, "payments", huma.Operation{OperationID: "adminApproveReceivableCollection", Method: http.MethodPost, Path: "/admin/receivable-collections/{collection_id}/approve", Summary: "Approve a receivable collection",
 		Description: "A different finance admin re-authenticates; the collection, bank receipt and balanced cash/debt ledger entries commit together."},
 		op.Meta{Action: string(authz.PaymentsReceivableApprove), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional, Reauth: true, RateLimit: op.RateReauth}, h.approveCollection)
-	reg(api, huma.Operation{OperationID: "adminRejectReceivableCollection", Method: http.MethodPost, Path: "/admin/receivable-collections/{collection_id}/reject", Summary: "Reject a receivable collection request",
+	op.Register(api, "payments", huma.Operation{OperationID: "adminRejectReceivableCollection", Method: http.MethodPost, Path: "/admin/receivable-collections/{collection_id}/reject", Summary: "Reject a receivable collection request",
 		Description: "Only requested collections. Releases the transfer for a corrected request or another finance operation; no ledger money moves."},
 		op.Meta{Action: string(authz.PaymentsReceivableReject), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.rejectCollection)
 }
@@ -57,8 +58,8 @@ func collectionDTO(c ReceivableCollection) ReceivableCollectionDTO {
 		CollectionID: c.ID.String(), IncomingTransferID: c.IncomingTransferID.String(), OrderLineID: c.OrderLineID.String(), OrderID: c.OrderID.String(),
 		PayeeID: c.PayeeID.String(), OrgID: c.OrgID.String(), CollectionAccountID: c.CollectionAccountID.String(), Amount: c.Amount, Currency: Currency,
 		BankReference: c.BankReference, ReceiptFileID: c.ReceiptFileID.String(), Status: string(c.Status), RequestedBy: c.RequestedBy.String(),
-		ApprovedBy: idStr(c.ApprovedBy), ApprovedAt: utc(c.ApprovedAt), RejectedBy: idStr(c.RejectedBy), RejectedAt: utc(c.RejectedAt),
-		RejectionReason: str(c.RejectionReason), LedgerTransactionID: idStr(c.LedgerTransactionID), CreatedAt: c.CreatedAt.UTC(),
+		ApprovedBy: httpx.IDStr(c.ApprovedBy), ApprovedAt: utc(c.ApprovedAt), RejectedBy: httpx.IDStr(c.RejectedBy), RejectedAt: utc(c.RejectedAt),
+		RejectionReason: str(c.RejectionReason), LedgerTransactionID: httpx.IDStr(c.LedgerTransactionID), CreatedAt: c.CreatedAt.UTC(),
 	}
 }
 
@@ -112,7 +113,7 @@ func (h handler) createCollection(ctx context.Context, in *createCollectionInput
 	if err != nil {
 		return nil, err
 	}
-	c, err := h.svc.CreateCollection(ctx, a, CollectionInput{IncomingTransferID: parseID(in.Body.IncomingTransferID), OrderLineID: parseID(in.Body.OrderLineID)})
+	c, err := h.svc.CreateCollection(ctx, a, CollectionInput{IncomingTransferID: httpx.ParseID(in.Body.IncomingTransferID), OrderLineID: httpx.ParseID(in.Body.OrderLineID)})
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +137,7 @@ func (h handler) approveCollection(ctx context.Context, in *approveCollectionInp
 	if err != nil {
 		return nil, err
 	}
-	c, err := h.svc.ApproveCollection(ctx, a, parseID(in.CollectionID), proofOf(in.Body.Reauth))
+	c, err := h.svc.ApproveCollection(ctx, a, httpx.ParseID(in.CollectionID), proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +157,7 @@ func (h handler) rejectCollection(ctx context.Context, in *rejectCollectionInput
 	if err != nil {
 		return nil, err
 	}
-	c, err := h.svc.RejectCollection(ctx, a, parseID(in.CollectionID), in.Body.Note)
+	c, err := h.svc.RejectCollection(ctx, a, httpx.ParseID(in.CollectionID), in.Body.Note)
 	if err != nil {
 		return nil, err
 	}

@@ -15,6 +15,7 @@ import (
 	"koro/internal/events"
 	"koro/internal/orgs"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // formJSON is a schema of the given fields (JSON objects).
@@ -71,7 +72,7 @@ func (e *env) publishForm(t *testing.T, id uuid.UUID, why string) events.FormVer
 
 func wantField(t *testing.T, err error, status int, code, loc string) {
 	t.Helper()
-	wantCode(t, err, status, code)
+	problemtest.WantProblem(t, err, status, code)
 	if loc == "" {
 		return
 	}
@@ -165,20 +166,20 @@ func TestPutDraft_StaleETag_412(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.PutFormDraft(ctx, a, ev.Event.ID, "", formJSON(motivationField))
-	wantCode(t, err, 428, "precondition_required")
+	problemtest.WantProblem(t, err, 428, "precondition_required")
 	_, err = e.svc.PutFormDraft(ctx, a, ev.Event.ID, `"0"`, formJSON(motivationField))
-	wantCode(t, err, 412, "precondition_failed")
+	problemtest.WantProblem(t, err, 412, "precondition_failed")
 	v, err := e.svc.PutFormDraft(ctx, a, ev.Event.ID, d.ETag, formJSON(motivationField))
 	if err != nil || v.ETag == d.ETag || len(v.Draft.Fields) != 1 {
 		t.Fatalf("PutFormDraft = %+v, %v", v, err)
 	}
 	// The ETag read before the save is stale now: a lost update is refused.
 	_, err = e.svc.PutFormDraft(ctx, a, ev.Event.ID, d.ETag, formJSON(tshirtField))
-	wantCode(t, err, 412, "precondition_failed")
+	problemtest.WantProblem(t, err, 412, "precondition_failed")
 	if got, _ := e.svc.GetFormDraft(ctx, a, ev.Event.ID); got.Draft.Fields[0].Key != "motivation" || got.ETag != v.ETag {
 		t.Fatalf("draft = %+v", got.Draft)
 	}
-	if n := len(e.audit.of(authz.EventsFormManage)); n != 1 {
+	if n := len(e.audit.Of(authz.EventsFormManage)); n != 1 {
 		t.Fatalf("audit records = %d", n)
 	}
 }
@@ -232,7 +233,7 @@ func TestPublishForm_WarnSpecialWithoutReason_422(t *testing.T) {
 	ev2 := e.formEvent(t)
 	e.putDraft(t, "club_admin", ev2.Event.ID, formJSON(textField("passport", "Pasaport numarası")))
 	_, err = e.svc.PublishForm(t.Context(), persona(t, "club_admin"), ev2.Event.ID, "")
-	wantCode(t, err, 422, "events.lint_override_required")
+	problemtest.WantProblem(t, err, 422, "events.lint_override_required")
 }
 
 // TestPublishForm_WarnSpecialWithReason_SetsOverride: with a reason the
@@ -254,7 +255,7 @@ func TestPublishForm_WarnSpecialWithReason_SetsOverride(t *testing.T) {
 	if err != nil || !slices.Equal(rep.SensitiveKeys(), []string{"allergy"}) || len(rep.Blocked) != 0 {
 		t.Fatalf("stored report = %+v, %v", rep, err)
 	}
-	logs := e.audit.of(authz.EventsFormPublish)
+	logs := e.audit.Of(authz.EventsFormPublish)
 	if len(logs) != 1 || logs[0].Reason != reason || logs[0].Metadata["override"] != true ||
 		logs[0].Metadata["has_sensitive_fields"] != true {
 		t.Fatalf("audit = %+v", logs)
@@ -286,7 +287,7 @@ func TestPublishForm_IncrementsVersionAndPointsCurrent(t *testing.T) {
 		t.Fatalf("GetForm = %+v, %v", form, err)
 	}
 	_, err = e.svc.PublishForm(ctx, persona(t, "club_admin"), ev.Event.ID, "")
-	wantCode(t, err, 409, "events.form_unchanged")
+	problemtest.WantProblem(t, err, 409, "events.form_unchanged")
 	e.putDraft(t, "club_admin", ev.Event.ID, formJSON(motivationField, tshirtField))
 	v2 := e.publishForm(t, ev.Event.ID, "")
 	if v2.Version.VersionNo != 2 || v2.Version.ID == v1.Version.ID || bytes.Equal(v1.Version.SchemaSHA256, v2.Version.SchemaSHA256) {
@@ -309,7 +310,7 @@ func TestPublishForm_IncrementsVersionAndPointsCurrent(t *testing.T) {
 	if err != nil || form.Version.VersionNo != 2 || len(form.Schema.Fields) != 2 {
 		t.Fatalf("GetForm(anonymous) = %+v, %v", form, err)
 	}
-	if n := len(e.audit.of(authz.EventsFormPublish)); n != 2 {
+	if n := len(e.audit.Of(authz.EventsFormPublish)); n != 2 {
 		t.Fatalf("publish audit records = %d", n)
 	}
 }
@@ -369,7 +370,7 @@ func TestFormVersion_Immutable(t *testing.T) {
 	}
 	// The store has no update or delete for versions: a draft event with a
 	// published form cannot be deleted either (the version keeps it).
-	wantCode(t, e.svc.DeleteEventDraft(ctx, persona(t, "club_admin"), ev.Event.ID), 409, "events.invalid_state")
+	problemtest.WantProblem(t, e.svc.DeleteEventDraft(ctx, persona(t, "club_admin"), ev.Event.ID), 409, "events.invalid_state")
 }
 
 // TestPublishForm_Incompatible: an earlier key keeps its type; after the
@@ -389,7 +390,7 @@ func TestPublishForm_Incompatible(t *testing.T) {
 	e.publishForm(t, ev.Event.ID, "")
 	e.putDraft(t, "club_admin", ev.Event.ID, formJSON(motivationField, textField("tshirt", "Beden")))
 	_, err = e.svc.PublishForm(t.Context(), persona(t, "club_admin"), ev.Event.ID, "")
-	wantCode(t, err, 422, "events.form_incompatible")
+	problemtest.WantProblem(t, err, 422, "events.form_incompatible")
 	// After the first registration a new field may only be optional.
 	e.mem.MarkRegistered(ev.Event.ID)
 	required := `{"key":"school","type":"short_text","label":{"tr":"Okul"},"required":true}`
@@ -513,14 +514,14 @@ func TestPutDraft_StatusAndOrgRules(t *testing.T) {
 	}
 	d, _ := e.svc.GetFormDraft(ctx, persona(t, "club_admin"), pub.Event.ID)
 	_, err := e.svc.PutFormDraft(ctx, persona(t, "club_admin"), pub.Event.ID, d.ETag, formJSON(motivationField))
-	wantCode(t, err, 409, "events.invalid_state")
+	problemtest.WantProblem(t, err, 409, "events.invalid_state")
 	_, err = e.svc.PublishForm(ctx, persona(t, "club_admin"), pub.Event.ID, "")
-	wantCode(t, err, 409, "events.invalid_state")
+	problemtest.WantProblem(t, err, 409, "events.invalid_state")
 
 	e.orgs.setStatus(orgID("club_a"), orgs.StatusSuspended)
 	d, _ = e.svc.GetFormDraft(ctx, persona(t, "club_admin"), ev.Event.ID)
 	_, err = e.svc.PutFormDraft(ctx, persona(t, "club_admin"), ev.Event.ID, d.ETag, formJSON(motivationField))
-	wantCode(t, err, 403, "orgs.org_suspended")
+	problemtest.WantProblem(t, err, 403, "orgs.org_suspended")
 }
 
 // TestGetForm_WithoutPublishedVersion_404: 04 §2.6 "Formsuz etkinlikte 404".
@@ -587,7 +588,7 @@ func TestPublishForm_IdempotencyKeyReplays(t *testing.T) {
 		len(again.Lint.WarnSpecial) != 1 || !bytes.Equal(again.Version.SchemaSHA256, first.Version.SchemaSHA256) {
 		t.Fatalf("replay = %+v, %v", again, err)
 	}
-	if n := len(e.audit.of(authz.EventsFormPublish)); n != 1 {
+	if n := len(e.audit.Of(authz.EventsFormPublish)); n != 1 {
 		t.Fatalf("published %d times", n)
 	}
 }

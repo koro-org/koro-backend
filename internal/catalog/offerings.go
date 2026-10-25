@@ -12,7 +12,9 @@ import (
 	"koro/internal/orgs"
 	"koro/internal/parties"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/problem"
 	"koro/internal/platform/queue"
 )
 
@@ -34,7 +36,7 @@ func (s *service) CreateOffering(ctx context.Context, a authz.Actor, orgID uuid.
 	if err != nil {
 		return OfferingView{}, err
 	}
-	if err := authz.Can(ctx, a, authz.CatalogOfferingCreate, orgResource(o)); err != nil {
+	if err := authz.Can(ctx, a, authz.CatalogOfferingCreate, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
 		return OfferingView{}, err
 	}
 	if err := writableOrg(a, o); err != nil {
@@ -42,7 +44,7 @@ func (s *service) CreateOffering(ctx context.Context, a authz.Actor, orgID uuid.
 	}
 	kind, ok := sellerKindOf(o.Kind)
 	if !ok {
-		return OfferingView{}, fieldErr("path.org_id", "must be a club, a university or the platform org")
+		return OfferingView{}, problem.Field("path.org_id", "must be a club, a university or the platform org")
 	}
 	now := s.now()
 	row := Offering{
@@ -90,7 +92,7 @@ func (s *service) CreateOffering(ctx context.Context, a authz.Actor, orgID uuid.
 		sv, err := s.d.Store.GetService(ctx, row.ServiceID, false)
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
-				return uuid.Nil(), fieldErr("body.service_id", "names no service")
+				return uuid.Nil(), problem.Field("body.service_id", "names no service")
 			}
 			return uuid.Nil(), err
 		}
@@ -119,10 +121,10 @@ func (s *service) CreateOffering(ctx context.Context, a authz.Actor, orgID uuid.
 // approval only for a club with a university.
 func (s *service) checkParents(ctx context.Context, o *Offering, sv ServiceItem) error {
 	if !sv.Active {
-		return fieldErr("body.service_id", "names an inactive service")
+		return problem.Field("body.service_id", "names an inactive service")
 	}
 	if sv.FulfillmentType == FulfillPlatformNative && o.SellerKind != SellerPlatform {
-		return fieldErr("body.service_id", "a platform-native service is sold by the platform only")
+		return problem.Field("body.service_id", "a platform-native service is sold by the platform only")
 	}
 	if o.EventID != nil {
 		if s.d.Events == nil {
@@ -131,18 +133,18 @@ func (s *service) checkParents(ctx context.Context, o *Offering, sv ServiceItem)
 		e, err := s.d.Events.Get(ctx, *o.EventID)
 		switch {
 		case isEventNotFound(err):
-			return fieldErr("body.event_id", "names no event of this organization")
+			return problem.Field("body.event_id", "names no event of this organization")
 		case err != nil:
 			return err
 		case e.OrgID != o.OrgID:
 			return ErrParentMismatch.WithFields(fieldError("body.event_id", "is an event of another organization"))
 		case !openEvent(e):
-			return fieldErr("body.event_id", "names a cancelled or completed event")
+			return problem.Field("body.event_id", "names a cancelled or completed event")
 		}
 	}
 	if o.DefaultPayeeID != nil {
 		if o.SellerKind == SellerPlatform {
-			return fieldErr("body.default_payee_id", "the platform sells without a payee")
+			return problem.Field("body.default_payee_id", "the platform sells without a payee")
 		}
 		if s.d.Payees == nil {
 			return ErrUnavailable
@@ -150,13 +152,13 @@ func (s *service) checkParents(ctx context.Context, o *Offering, sv ServiceItem)
 		py, err := s.d.Payees.Get(ctx, *o.DefaultPayeeID)
 		switch {
 		case errors.Is(err, parties.ErrNotFound):
-			return fieldErr("body.default_payee_id", "names no payee of this organization")
+			return problem.Field("body.default_payee_id", "names no payee of this organization")
 		case err != nil:
 			return err
 		case py.OrgID != o.OrgID:
 			return ErrParentMismatch.WithFields(fieldError("body.default_payee_id", "is a payee of another organization"))
 		case py.Status == parties.PayeeClosed:
-			return fieldErr("body.default_payee_id", "names a closed payee")
+			return problem.Field("body.default_payee_id", "names a closed payee")
 		}
 	}
 	if o.RequiresUniversityApproval {
@@ -165,7 +167,7 @@ func (s *service) checkParents(ctx context.Context, o *Offering, sv ServiceItem)
 			return err
 		}
 		if f.universityOrgID == uuid.Nil() {
-			return fieldErr("body.requires_university_approval", "only a club of a university needs its approval")
+			return problem.Field("body.requires_university_approval", "only a club of a university needs its approval")
 		}
 	}
 	return nil
@@ -178,11 +180,11 @@ func descriptionOf(m map[string]any) (JSON, error) {
 	}
 	raw, err := json.Marshal(m)
 	if err != nil {
-		return nil, fieldErr("body.description_json", "must be a Tiptap document")
+		return nil, problem.Field("body.description_json", "must be a Tiptap document")
 	}
 	doc, err := sanitizeDescription(raw)
 	if err != nil {
-		return nil, fieldErr("body.description_json", "must be a Tiptap document of paragraphs, headings 2-3, lists, quotes, bold, italic and https links")
+		return nil, problem.Field("body.description_json", "must be a Tiptap document of paragraphs, headings 2-3, lists, quotes, bold, italic and https links")
 	}
 	return doc, nil
 }
@@ -198,7 +200,7 @@ func (s *service) UpdateOffering(ctx context.Context, a authz.Actor, id uuid.UUI
 	}
 	for _, c := range p.Clear {
 		if !slices.Contains(offeringClearable, c) {
-			return OfferingView{}, fieldErr("body.clear", "names a field that cannot be cleared")
+			return OfferingView{}, problem.Field("body.clear", "names a field that cannot be cleared")
 		}
 	}
 	err = s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
@@ -206,7 +208,7 @@ func (s *service) UpdateOffering(ctx context.Context, a authz.Actor, id uuid.UUI
 		if err != nil {
 			return err
 		}
-		if err := checkIfMatch(ifMatch, etagOf(cur.UpdatedAt)); err != nil {
+		if err := httpx.CheckIfMatch(ifMatch, httpx.ETag(cur.UpdatedAt)); err != nil {
 			return err
 		}
 		if cur.Status != OfferingDraft {
@@ -222,7 +224,7 @@ func (s *service) UpdateOffering(ctx context.Context, a authz.Actor, id uuid.UUI
 		sv, err := s.d.Store.GetService(ctx, next.ServiceID, false)
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
-				return fieldErr("body.service_id", "names no service")
+				return problem.Field("body.service_id", "names no service")
 			}
 			return err
 		}

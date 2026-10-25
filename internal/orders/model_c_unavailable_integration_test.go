@@ -10,10 +10,12 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/identity"
 	"koro/internal/orders"
 	"koro/internal/parties"
+	"koro/internal/platform/problem/problemtest"
 	"koro/internal/platform/queue"
 )
 
@@ -74,7 +76,7 @@ func TestGetOrder_ModelC_RevokedAccount_Postgres(t *testing.T) {
 		}
 	})
 	var err error
-	pm, err = parties.New(parties.Deps{Store: parties.NewGormStore(p.d.ORM), Tx: p.d.Tx, Audit: &auditLog{}, Idempotency: p.keeper,
+	pm, err = parties.New(parties.Deps{Store: parties.NewGormStore(p.d.ORM), Tx: p.d.Tx, Audit: &audittest.Recorder{}, Idempotency: p.keeper,
 		Orgs: newFakeOrgs(), Clock: p.clk, Log: discardLog(), Outbox: p.outbox, Queue: queue.NewMem(), Reauth: acceptReauth{}})
 	if err != nil {
 		t.Fatal(err)
@@ -122,7 +124,7 @@ func TestGetOrder_ModelC_RevokedAccount_Postgres(t *testing.T) {
 		t.Fatalf("revoked: status=%q direct=%d order=%+v", v.DirectStatus, len(v.DirectPayments), v.Order)
 	}
 	_, err = p.mod.Service.PaymentInstructions(ctx, buyer, o.ID)
-	wantProblem(t, err, http.StatusConflict, "parties.no_approved_account")
+	problemtest.WantProblem(t, err, http.StatusConflict, "parties.no_approved_account")
 	if _, err := p.mod.Service.CancelOrder(ctx, buyer, o.ID, "payee account revoked"); err != nil {
 		t.Fatalf("CancelOrder: %v", err)
 	}

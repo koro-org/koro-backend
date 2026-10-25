@@ -6,6 +6,7 @@ import (
 	"uuid"
 
 	"koro/internal/authz"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
 )
@@ -139,7 +140,7 @@ func (s *service) UpdateSegment(ctx context.Context, a authz.Actor, orgID, id uu
 		if err != nil {
 			return err
 		}
-		if err := checkIfMatch(ifMatch, etagOf(cur.UpdatedAt)); err != nil {
+		if err := httpx.CheckIfMatch(ifMatch, httpx.ETag(cur.UpdatedAt)); err != nil {
 			return err
 		}
 		if cur.Archived() {

@@ -10,8 +10,10 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // Register adds the 9 operations of BE-027, the 12 of BE-029 and the 9
@@ -20,7 +22,7 @@ import (
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "getFeed", Method: http.MethodGet, Path: "/feed",
 		Summary: "Get the feed",
 		Description: "Published posts the reader may see, newest first by (published_at, post_id). discover lists " +
@@ -28,28 +30,28 @@ func Register(api huma.API, svc Service) {
 			"hidden posts are left out; a minor gets no commercial post.",
 	}, op.Meta{Action: string(authz.FeedFeedRead), Surface: op.SurfaceSelf}, h.getFeed)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "listPosts", Method: http.MethodGet, Path: "/posts",
 		Summary: "List an organization's posts",
 		Description: "The published posts of an organization page the caller may see (anonymous: public, " +
 			"non-commercial posts only).",
 	}, op.Meta{Action: string(authz.FeedPostListByOrg), Surface: op.SurfacePublic}, h.listPosts)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "getPost", Method: http.MethodGet, Path: "/posts/{post_id}",
 		Summary: "Get a post",
 		Description: "A post the caller may not see is 404. The author organization's writers get the management " +
 			"view (status, audience). The ETag is the If-Match value of updatePost.",
 	}, op.Meta{Action: string(authz.FeedPostRead), Surface: op.SurfacePublic}, h.getPost)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "listOrgPostsManage", Method: http.MethodGet, Path: "/orgs/{org_id}/posts",
 		Summary: "List an organization's posts for management",
 		Description: "Every post of the organization, newest first: drafts, posts in review, hidden and removed " +
 			"posts (removed: status only).",
 	}, op.Meta{Action: string(authz.FeedPostListOrgManage), Surface: op.SurfaceOrg}, h.listOrgPosts)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "createPost", Method: http.MethodPost, Path: "/orgs/{org_id}/posts", DefaultStatus: http.StatusCreated,
 		Summary: "Create a post (draft)",
 		Description: "A public or followers post starts as a draft. A company post is always commercial. The body " +
@@ -57,7 +59,7 @@ func Register(api huma.API, svc Service) {
 			"Images are post_media uploads (createUpload) of the organization.",
 	}, op.Meta{Action: string(authz.FeedPostCreate), Surface: op.SurfaceOrg, Idempotency: op.IdempotencyOptional}, h.createPost)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "updatePost", Method: http.MethodPatch, Path: "/posts/{post_id}",
 		Summary: "Update a post",
 		Description: "If-Match with the ETag of getPost is required: missing → 428, stale → 412. A published post " +
@@ -65,20 +67,20 @@ func Register(api huma.API, svc Service) {
 			"edited_at. media replaces every image.",
 	}, op.Meta{Action: string(authz.FeedPostUpdate), Surface: op.SurfaceResource}, h.updatePost)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "publishPost", Method: http.MethodPost, Path: "/posts/{post_id}/publish",
 		Summary: "Publish a draft post",
 		Description: "draft → published, or pending_review for a new organization's first posts (moderator " +
 			"approval). Images must be cleared by the virus scan (409 files.not_clean).",
 	}, op.Meta{Action: string(authz.FeedPostPublish), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional}, h.publishPost)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "deletePost", Method: http.MethodDelete, Path: "/posts/{post_id}", DefaultStatus: http.StatusNoContent,
 		Summary:     "Delete a post",
 		Description: "A post never published is deleted; a published one is removed (status removed).",
 	}, op.Meta{Action: string(authz.FeedPostDelete), Surface: op.SurfaceResource}, h.deletePost)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "getPostStats", Method: http.MethodGet, Path: "/posts/{post_id}/stats",
 		Summary:     "Get a post's statistics",
 		Description: "Like and save counts only: who liked or saved is never shown.",
@@ -88,23 +90,7 @@ func Register(api huma.API, svc Service) {
 	registerModeration(api, h)
 }
 
-// reg registers one feed operation with its Koro metadata.
-func reg[I, O any](api huma.API, o huma.Operation, m op.Meta, fn func(context.Context, *I) (*O, error)) {
-	o.Tags = []string{"feed"}
-	huma.Register(api, op.Koro(o, m), fn)
-}
-
 type handler struct{ svc Service }
-
-// parseID parses a path ID; a malformed one is the nil UUID, which no row
-// has: it answers like a missing row (404) after the authz of the surface.
-func parseID(s string) uuid.UUID {
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return uuid.Nil()
-	}
-	return id
-}
 
 // PostPath is the post_id path parameter (exported: huma reads the fields
 // of an embedded struct only when its type is exported).
@@ -112,14 +98,14 @@ type PostPath struct {
 	PostID string `path:"post_id" doc:"Post ID"`
 }
 
-func (p PostPath) id() uuid.UUID { return parseID(p.PostID) }
+func (p PostPath) id() uuid.UUID { return httpx.ParseID(p.PostID) }
 
 // OrgPath is the org_id path parameter.
 type OrgPath struct {
 	OrgID string `path:"org_id" doc:"Organization ID"`
 }
 
-func (p OrgPath) id() uuid.UUID { return parseID(p.OrgID) }
+func (p OrgPath) id() uuid.UUID { return httpx.ParseID(p.OrgID) }
 
 // FeedPage is the page of getFeed (04 §2.7: limit ≤ 50, default 20).
 type FeedPage struct {
@@ -204,7 +190,7 @@ type listPostsInput struct {
 func (h handler) listPosts(ctx context.Context, in *listPostsInput) (*listOutput, error) {
 	org, err := uuid.Parse(in.OrgID)
 	if err != nil {
-		return nil, fieldErr("query.org_id", "must be a UUID")
+		return nil, problem.Field("query.org_id", "must be a UUID")
 	}
 	fp := page.Fingerprint("listPosts", org.String())
 	q := PageQuery{Limit: in.Limit}
@@ -359,7 +345,7 @@ func (b PostWriteBody) input() (PostInput, error) {
 	if pi.Body, err = bodyBytes(b.Body); err != nil {
 		return PostInput{}, err
 	}
-	if pi.EventID, err = optID("body.event_id", b.EventID); err != nil {
+	if pi.EventID, err = httpx.OptID("body.event_id", b.EventID); err != nil {
 		return PostInput{}, err
 	}
 	if pi.Media, err = mediaInputs(b.Media); err != nil {
@@ -374,20 +360,9 @@ func bodyBytes(m map[string]any) ([]byte, error) {
 	}
 	b, err := json.Marshal(m)
 	if err != nil {
-		return nil, fieldErr("body.body_json", "must be a JSON object")
+		return nil, problem.Field("body.body_json", "must be a JSON object")
 	}
 	return b, nil
-}
-
-func optID(loc, s string) (*uuid.UUID, error) {
-	if s == "" {
-		return nil, nil
-	}
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return nil, fieldErr(loc, "must be a UUID")
-	}
-	return &id, nil
 }
 
 func mediaInputs(in []MediaBody) ([]MediaInput, error) {
@@ -398,7 +373,7 @@ func mediaInputs(in []MediaBody) ([]MediaInput, error) {
 	for i, m := range in {
 		id, err := uuid.Parse(m.FileID)
 		if err != nil {
-			return nil, fieldErr("body.media.file_id", "must be a UUID")
+			return nil, problem.Field("body.media.file_id", "must be a UUID")
 		}
 		out[i] = MediaInput{FileID: id, AltText: m.AltText}
 	}
@@ -444,9 +419,9 @@ func (h handler) updatePost(ctx context.Context, in *updatePostInput) (*manageOu
 		return nil, err
 	}
 	if b.EventID != nil {
-		if p.EventID, err = optID("body.event_id", *b.EventID); err != nil || p.EventID == nil {
+		if p.EventID, err = httpx.OptID("body.event_id", *b.EventID); err != nil || p.EventID == nil {
 			if err == nil {
-				err = fieldErr("body.event_id", "must be a UUID")
+				err = problem.Field("body.event_id", "must be a UUID")
 			}
 			return nil, err
 		}

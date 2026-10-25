@@ -1,10 +1,13 @@
-// Package audittest helps module tests check what an R operation hands to
-// audit when its re-authentication step fails (03 §6.2, BE-074): a refused
-// proof is one denied reauth_failed record, an overloaded server none.
+// Package audittest holds the audit test doubles of module service tests:
+// Recorder, the in-memory audit.Logger (BE-111), and the checks of what an
+// R operation hands to audit when its re-authentication step fails
+// (03 §6.2, BE-074): a refused proof is one denied reauth_failed record,
+// an overloaded server none.
 //
-// It is imported only by tests (module service tests). It does not import
-// audit (internal/arch: a package of internal/audit may import only lower
-// layers); a test maps its recorded audit.Event values to Row.
+// It is imported only by tests (module service tests). Recorder imports
+// audit (internal/arch lets a module's <module>test package import its
+// module); the reauth checks take Row values, which a test maps from its
+// recorded audit.Event values.
 package audittest
 
 import (

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"math"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 	"uuid"
@@ -14,23 +13,12 @@ import (
 	"koro/internal/ledger"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
+	"koro/internal/platform/db/dbtest"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 	"koro/internal/platform/queue"
 )
-
-// spyTx counts the transactions a service opens.
-type spyTx struct{ n atomic.Int64 }
-
-func (s *spyTx) WithTx(ctx context.Context, fn func(context.Context) error) error {
-	s.n.Add(1)
-	return db.NopTx{}.WithTx(ctx, fn)
-}
-
-func (s *spyTx) WithSerializableTx(ctx context.Context, fn func(context.Context) error) error {
-	s.n.Add(1)
-	return db.NopTx{}.WithSerializableTx(ctx, fn)
-}
 
 // noStore is a Store that fails the test on any call.
 type noStore struct {
@@ -113,13 +101,13 @@ func TestPost_Unbalanced_RejectedBeforeDB(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			tx := &spyTx{}
+			tx := &dbtest.SpyTx{}
 			mod, err := ledger.New(ledger.Deps{Store: noStore{t: t}, Tx: tx, Clock: clock.NewFake(t0), Log: obs.Discard()})
 			if err != nil {
 				t.Fatal(err)
 			}
 			id, err := mod.Service.Post(t.Context(), c.tx)
-			wantProblem(t, err, c.want)
+			problemtest.WantErr(t, err, c.want)
 			if id != uuid.Nil() {
 				t.Fatalf("Post returned ID %s with an error", id)
 			}
@@ -130,7 +118,7 @@ func TestPost_Unbalanced_RejectedBeforeDB(t *testing.T) {
 			if pe.Status() != 422 {
 				t.Fatalf("status %d, want 422", pe.Status())
 			}
-			if n := tx.n.Load(); n != 0 {
+			if n := tx.Count(); n != 0 {
 				t.Fatalf("%d transactions opened before the check", n)
 			}
 		})
@@ -208,7 +196,7 @@ func TestPost_NegativePayeeBalance_Rejected(t *testing.T) {
 
 	over := txn(t)(ledger.PayoutPaid(ledger.ModelA, uuid.NewV7(), payee, 1_080_001, t0))
 	_, err := e.svc.Post(t.Context(), over)
-	wantProblem(t, err, ledger.ErrNegativeBalance)
+	problemtest.WantErr(t, err, ledger.ErrNegativeBalance)
 	if pe, _ := errors.AsType[*problem.Error](err); pe.Status() != 409 {
 		t.Fatalf("status %d, want 409", pe.Status())
 	}
@@ -229,7 +217,7 @@ func TestPost_NegativePayeeBalance_Rejected(t *testing.T) {
 	// Any further debit overdraws: a payout, or a refund that takes the
 	// payee's share back after the payout (BE-043 decides that case).
 	_, err = e.svc.Post(t.Context(), txn(t)(ledger.PayoutPaid(ledger.ModelA, uuid.NewV7(), payee, 1, t0)))
-	wantProblem(t, err, ledger.ErrNegativeBalance)
+	problemtest.WantErr(t, err, ledger.ErrNegativeBalance)
 	refund := txn(t)(ledger.RefundCompleted(ledger.ModelA, uuid.NewV7(), 0, []ledger.RefundLine{split(t)(ledger.SplitRefund(line(payee), 1))}, t0))
 	if _, err := e.svc.Post(t.Context(), refund); !errors.Is(err, ledger.ErrNegativeBalance) {
 		t.Fatalf("refund after payout: %v", err)

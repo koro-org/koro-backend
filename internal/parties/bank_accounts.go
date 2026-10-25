@@ -11,7 +11,9 @@ import (
 	"koro/internal/identity"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // accountModule and accountAggregate name the bank account row as a files
@@ -283,17 +285,13 @@ func (s *service) submit(ctx context.Context, a authz.Actor, p Payee, in BankAcc
 // emit writes an outbox event of the bank account flow (O) in the
 // transaction carried by ctx.
 func (s *service) emit(ctx context.Context, b BankAccount, p domainevent.Payload) error {
-	env, err := domainevent.New(p, accountAggregate, b.ID)
-	if err != nil {
-		return err
-	}
-	return s.d.Outbox.Add(ctx, env)
+	return outbox.Emit(ctx, s.d.Outbox, p, accountAggregate, b.ID)
 }
 
 // checkEvidence accepts a bank_account_evidence upload made by the caller
 // or for the payee's org (files k30 authorised the upload itself).
 func (s *service) checkEvidence(ctx context.Context, a authz.Actor, orgID, fileID uuid.UUID) error {
-	bad := fieldErr("body.evidence_file_id", "must be a bank_account_evidence upload of this organization or of the caller")
+	bad := problem.Field("body.evidence_file_id", "must be a bank_account_evidence upload of this organization or of the caller")
 	f, err := s.d.Files.Get(ctx, fileID)
 	switch {
 	case errors.Is(err, files.ErrNotFound):
@@ -324,7 +322,7 @@ func (s *service) AdminListBankAccounts(ctx context.Context, a authz.Actor, q Ba
 	statuses := queueStatuses
 	if q.Status != "" {
 		if !q.Status.Valid() {
-			return BankAccountPage{}, fieldErr("query.status", "is not a bank account status")
+			return BankAccountPage{}, problem.Field("query.status", "is not a bank account status")
 		}
 		statuses = []BankAccountStatus{q.Status}
 	}
@@ -412,7 +410,7 @@ func (s *service) AdminVerifyBankAccount(ctx context.Context, a authz.Actor, id 
 		return BankAccountView{}, err
 	}
 	if !in.EvidenceOK {
-		return BankAccountView{}, fieldErr("body.checklist.evidence_ok",
+		return BankAccountView{}, problem.Field("body.checklist.evidence_ok",
 			"must be true: an account whose evidence does not hold is rejected (adminRejectBankAccount)")
 	}
 	note, err := cleanNote("body.note", in.Note)
@@ -440,7 +438,7 @@ func (s *service) AdminVerifyBankAccount(ctx context.Context, a authz.Actor, id 
 			return uuid.Nil(), err
 		}
 		if (!in.HolderMatchesParty || !v.HolderMatchesTitle) && note == "" {
-			return uuid.Nil(), fieldErr("body.note",
+			return uuid.Nil(), problem.Field("body.note",
 				"is required when the account holder is not the legal party's title (T-19)")
 		}
 		if err := s.checkReviewable(ctx, cur.EvidenceFileID); err != nil {

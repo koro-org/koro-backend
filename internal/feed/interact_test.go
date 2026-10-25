@@ -12,6 +12,7 @@ import (
 	"koro/internal/files"
 	"koro/internal/orgs"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // stats reads the counters of a post as its author org does.
@@ -145,7 +146,7 @@ func TestLike_InvisiblePost_404(t *testing.T) {
 		wantNotFound(t, e.svc.HidePost(ctx, c.a, c.id))
 	}
 	err := e.svc.LikePost(ctx, persona(t, "club_admin"), draft.Post.ID)
-	wantCode(t, err, 409, "feed.invalid_state")
+	problemtest.WantProblem(t, err, 409, "feed.invalid_state")
 	// The org members see the followers post: they may like it.
 	if err := e.svc.LikePost(ctx, persona(t, "club_member"), followers.Post.ID); err != nil {
 		t.Fatal(err)
@@ -288,7 +289,7 @@ func TestMuteOrg_ExcludedFromFeed(t *testing.T) {
 	wantNotFound(t, e.svc.FollowOrg(ctx, reader, orgID("company_b"), nil))
 	// A closed org takes no new follow or mute.
 	e.orgs.setStatus(orgID("company_a"), orgs.StatusClosed)
-	wantCode(t, e.svc.MuteOrg(ctx, persona(t, "company_admin"), orgID("company_a")), 409, "orgs.invalid_state")
+	problemtest.WantProblem(t, e.svc.MuteOrg(ctx, persona(t, "company_admin"), orgID("company_a")), 409, "orgs.invalid_state")
 }
 
 // TestFollowOrg_ManualAndNotify: followOrg is idempotent, keeps notify

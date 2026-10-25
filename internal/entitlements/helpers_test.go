@@ -2,13 +2,11 @@ package entitlements_test
 
 import (
 	"context"
-	"errors"
-	"sync"
 	"testing"
 	"time"
 	"uuid"
 
-	"koro/internal/audit"
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/entitlements"
@@ -16,36 +14,16 @@ import (
 	"koro/internal/platform/db"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/obs"
-	"koro/internal/platform/problem"
 )
 
 // t0 is the test clock's start (microsecond precision, like PostgreSQL).
 var t0 = time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC)
 
-// auditLog records the events an entitlements service writes.
-type auditLog struct {
-	mu     sync.Mutex
-	events []audit.Event
-}
-
-func (l *auditLog) Log(_ context.Context, e audit.Event) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.events = append(l.events, e)
-	return nil
-}
-
-func (l *auditLog) all() []audit.Event {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return append([]audit.Event(nil), l.events...)
-}
-
 // env is an entitlements module over a store (in memory by default).
 type env struct {
 	clk   *clock.Fake
 	store entitlements.Store
-	audit *auditLog
+	audit *audittest.Recorder
 	admin uuid.UUID // granted_by of env.grant
 	mod   entitlements.Module
 	svc   entitlements.Service
@@ -59,7 +37,7 @@ func newEnv(t *testing.T) *env {
 
 func newEnvWith(t *testing.T, clk *clock.Fake, store entitlements.Store, tx db.TxManager, keys idempotency.Store) *env {
 	t.Helper()
-	e := &env{clk: clk, store: store, audit: &auditLog{}, admin: authztest.ID("platform_admin")}
+	e := &env{clk: clk, store: store, audit: &audittest.Recorder{}, admin: authztest.ID("platform_admin")}
 	mod, err := entitlements.New(entitlements.Deps{
 		Store: store, Tx: tx, Audit: e.audit, Clock: clk, Log: obs.Discard(),
 		Idempotency: idempotency.New(idempotency.Deps{Tx: tx, Store: keys, Clock: clk, Log: obs.Discard()}),
@@ -119,21 +97,6 @@ func postRef() entitlements.Ref {
 
 func contactRef() entitlements.Ref {
 	return entitlements.Ref{Type: entitlements.RefContactRequest, ID: uuid.NewV7()}
-}
-
-func wantErr(t *testing.T, err, want error) {
-	t.Helper()
-	if !errors.Is(err, want) {
-		t.Fatalf("error = %v, want %v", err, want)
-	}
-}
-
-// problemOf returns the status and code of a problem error.
-func problemOf(err error) (int, string) {
-	if p, ok := errors.AsType[*problem.Error](err); ok {
-		return p.Status(), p.Code()
-	}
-	return 0, ""
 }
 
 // idemCtx carries an Idempotency-Key as the HTTP middleware would.

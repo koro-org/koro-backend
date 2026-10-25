@@ -8,7 +8,9 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/orgs"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // ListQuery narrows listEvents (04 §2.6: q, org_id, university_id,
@@ -142,7 +144,7 @@ func (s *service) ListEvents(ctx context.Context, a authz.Actor, q ListQuery) (E
 		f.Sort = SortStartsAt
 	}
 	if q.StartsFrom != nil && q.StartsTo != nil && !q.StartsTo.After(*q.StartsFrom) {
-		return EventPage{}, fieldErr("query.starts_to", "must be after starts_from")
+		return EventPage{}, problem.Field("query.starts_to", "must be after starts_from")
 	}
 	if q.StartsFrom == nil && q.StartsTo == nil {
 		now := s.now()
@@ -217,7 +219,7 @@ func (s *service) ListOrgEvents(ctx context.Context, a authz.Actor, orgID uuid.U
 	if err != nil {
 		return EventPage{}, err
 	}
-	if err := authz.Can(ctx, a, authz.EventsEventListOrg, orgResource(o)); err != nil {
+	if err := authz.Can(ctx, a, authz.EventsEventListOrg, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
 		return EventPage{}, err
 	}
 	limit := page.ClampLimit(q.Limit)
@@ -268,7 +270,7 @@ func (s *service) page(ctx context.Context, rows []Event, limit int, sort string
 // view builds the view of e: its ETag and a short-lived cover URL (a
 // missing or unclean cover never fails a read).
 func (s *service) view(ctx context.Context, e Event, o orgs.OrgSummary, manager bool) EventView {
-	v := EventView{Event: e, Org: o, ETag: etagOf(e.UpdatedAt), Manager: manager}
+	v := EventView{Event: e, Org: o, ETag: httpx.ETag(e.UpdatedAt), Manager: manager}
 	if e.CoverFileID != nil && s.d.Files != nil {
 		if dl, err := s.d.Files.PresignGet(ctx, *e.CoverFileID, coverTTL); err == nil {
 			v.CoverURL = dl.URL

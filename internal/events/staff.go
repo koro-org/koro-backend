@@ -9,6 +9,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/identity"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/problem"
 )
 
 // staffAggType is the audit resource type of a staff assignment.
@@ -28,7 +29,7 @@ func staffChangeable(e Event) error {
 
 func checkRole(r StaffRole) error {
 	if !r.Valid() {
-		return fieldErr("body.role", "must be scanner or manager")
+		return problem.Field("body.role", "must be scanner or manager")
 	}
 	return nil
 }
@@ -40,7 +41,7 @@ func checkRole(r StaffRole) error {
 func (s *service) AddStaff(ctx context.Context, a authz.Actor, eventID uuid.UUID, email string, role StaffRole) (StaffView, error) {
 	email = strings.TrimSpace(email)
 	if email == "" || len(email) > maxEmail || !strings.Contains(email, "@") {
-		return StaffView{}, fieldErr("body.email", "must be an e-mail address")
+		return StaffView{}, problem.Field("body.email", "must be an e-mail address")
 	}
 	if err := checkRole(role); err != nil {
 		return StaffView{}, err

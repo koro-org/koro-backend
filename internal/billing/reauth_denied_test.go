@@ -33,8 +33,8 @@ func TestReauthDenied_EveryROperation(t *testing.T) {
 					_, err := e.svc.AdminPutIntegration(authz.WithActor(ctx, a), a, "parasut", in, p)
 					return err
 				},
-				Rows: func() []audittest.Row { return e.audit.reauthRows(authz.BillingIntegrationManage) },
-				Denied: rowOf(audit.Event{Action: string(authz.BillingIntegrationManage), ResourceType: "integration",
+				Rows: func() []audittest.Row { return e.audit.Rows(authz.BillingIntegrationManage) },
+				Denied: audittest.RowOf(audit.Event{Action: string(authz.BillingIntegrationManage), ResourceType: "integration",
 					Metadata: map[string]any{"provider": "parasut"}}.By(a)),
 				Late:  e.reauth,
 				Wrong: identity.ReauthProof{Password: "wrong-password-not-real"}, WrongErr: identity.ErrReauthFailed,
@@ -43,20 +43,4 @@ func TestReauthDenied_EveryROperation(t *testing.T) {
 			}.Run(t)
 		})
 	}
-}
-
-// rowOf is e in audittest's terms.
-func rowOf(e audit.Event) audittest.Row {
-	return audittest.Row{Action: e.Action, Outcome: string(e.Outcome), Reason: e.Reason, ActorUserID: e.ActorUserID,
-		ActorOrgID: e.ActorOrgID, SystemJob: e.SystemJob, OrgID: e.OrgID, ResourceType: e.ResourceType, ResourceID: e.ResourceID,
-		Metadata: e.Metadata}
-}
-
-// reauthRows returns the recorded events of act in audittest's terms.
-func (l *auditLog) reauthRows(act authz.Action) []audittest.Row {
-	var out []audittest.Row
-	for _, e := range l.of(act) {
-		out = append(out, rowOf(e))
-	}
-	return out
 }

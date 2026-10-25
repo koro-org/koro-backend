@@ -15,6 +15,7 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/consent"
 	"koro/internal/directory"
@@ -139,7 +140,7 @@ func newPgEnv(t *testing.T) *pgEnv {
 	e := newEnv(t) // fakes for directory, orgs, identity, files
 	cstore := consent.NewGormStore(d.ORM)
 	cmod, err := consent.New(consent.Deps{
-		Store: cstore, Tx: d.Tx, Outbox: outbox.NewMem(clk), Audit: &auditLog{}, Clock: clk, Log: obs.Discard(),
+		Store: cstore, Tx: d.Tx, Outbox: outbox.NewMem(clk), Audit: &audittest.Recorder{}, Clock: clk, Log: obs.Discard(),
 		Idempotency: idempotency.New(idempotency.Deps{Tx: d.Tx, Store: idempotency.NewGormStore(d.ORM), Clock: clk, Log: obs.Discard()}),
 	})
 	if err != nil {
@@ -395,7 +396,7 @@ func (e *pgEnv) pgFiles(t *testing.T) (files.Service, files.Store, *storage.Mem)
 	mod, err := files.New(files.Deps{
 		Store: fstore, Objects: mem, Tx: e.d.Tx, Outbox: outbox.NewMem(clk), Queue: queue.NewMem(),
 		Idempotency: idempotency.New(idempotency.Deps{Tx: e.d.Tx, Store: idempotency.NewGormStore(e.d.ORM), Clock: clk, Log: obs.Discard()}),
-		Clock:       clk, Log: obs.Discard(), Buckets: files.Buckets{Files: "pg-files", Quarantine: "pg-quarantine"}, Audit: &auditLog{},
+		Clock:       clk, Log: obs.Discard(), Buckets: files.Buckets{Files: "pg-files", Quarantine: "pg-quarantine"}, Audit: &audittest.Recorder{},
 	})
 	if err != nil {
 		t.Fatal(err)

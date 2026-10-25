@@ -17,6 +17,7 @@ import (
 	"koro/internal/orders"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // TestUpload_OnlyPlanned: a document is uploaded only to a planned invoice
@@ -32,9 +33,9 @@ func TestUpload_OnlyPlanned(t *testing.T) {
 	club := authztest.ID("club_a")
 
 	_, err := e.upload(t, "other_club_admin", inv.ID, "X1")
-	wantProblem(t, err, authz.ErrNotFound)
+	problemtest.WantErr(t, err, authz.ErrNotFound)
 	_, err = e.upload(t, "company_admin", inv.ID, "X1")
-	wantProblem(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 
 	cla := actor(t, "club_admin")
 	in := func(file uuid.UUID) billing.UploadInput {
@@ -61,13 +62,13 @@ func TestUpload_OnlyPlanned(t *testing.T) {
 	if owner := e.files.attached[*got.PDFFileID]; owner.Module != "billing" || owner.EntityID != inv.ID {
 		t.Fatalf("PDF attached to %+v", owner)
 	}
-	if n := len(e.audit.of(authz.BillingInvoiceUpload)); n != 1 {
+	if n := len(e.audit.Of(authz.BillingInvoiceUpload)); n != 1 {
 		t.Fatalf("upload audit events = %d", n)
 	}
 
 	// Waiting for verification: no second upload (the verifier sees one document).
 	_, err = e.upload(t, "club_admin", inv.ID, "VKF2026000000002")
-	wantProblem(t, err, billing.ErrInvalidState)
+	problemtest.WantErr(t, err, billing.ErrInvalidState)
 
 	// Mismatch: the club uploads again; the verification starts over.
 	if _, err := e.verify(t, "finance_admin", inv.ID, billing.StatusMismatch, "KDV tutarı farklı"); err != nil {
@@ -86,7 +87,7 @@ func TestUpload_OnlyPlanned(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.upload(t, "finance_admin", inv.ID, "VKF2026000000003")
-	wantProblem(t, err, billing.ErrInvalidState)
+	problemtest.WantErr(t, err, billing.ErrInvalidState)
 
 	// Cancelled: final; and the issuer's numbers are unique.
 	other2 := e.planned(t)
@@ -95,10 +96,10 @@ func TestUpload_OnlyPlanned(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.upload(t, "club_admin", other2.ID, "VKF2026000000004")
-	wantProblem(t, err, billing.ErrInvalidState)
+	problemtest.WantErr(t, err, billing.ErrInvalidState)
 	third := e.planned(t)
 	_, err = e.upload(t, "club_admin", third.ID, "VKF2026000000002")
-	wantProblem(t, err, billing.ErrInvoiceNoTaken)
+	problemtest.WantErr(t, err, billing.ErrInvoiceNoTaken)
 }
 
 // TestVerify_UploaderCannotVerify_403AndDBCheck pins the four eyes of the
@@ -122,16 +123,16 @@ func TestVerify_UploaderCannotVerify_403AndDBCheck(t *testing.T) {
 
 	// club_admin may read Koro's commission invoice but not upload it (k29: seller_uploaded only).
 	_, err := e.upload(t, "club_admin", inv.ID, "KRO2026000000001")
-	wantProblem(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	e.mustUpload(t, "finance_admin", inv.ID, "KRO2026000000001")
 
 	_, err = e.verify(t, "finance_admin", inv.ID, billing.StatusIssued, "")
-	wantProblem(t, err, authz.ErrFourEyes)
+	problemtest.WantErr(t, err, authz.ErrFourEyes)
 	wantStatus(t, err, http.StatusForbidden)
 	_, err = e.verify(t, "platform_admin", inv.ID, billing.StatusIssued, "")
-	wantProblem(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	_, err = e.verify(t, "company_admin", inv.ID, billing.StatusIssued, "")
-	wantProblem(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	if got := e.invoice(t, inv.ID); got.Status != billing.StatusPlanned || got.VerifiedBy != nil {
 		t.Fatalf("after the refused verifications: %+v", got)
 	}
@@ -141,7 +142,7 @@ func TestVerify_UploaderCannotVerify_403AndDBCheck(t *testing.T) {
 	now := t0
 	cur.Status, cur.VerifiedBy, cur.VerifiedAt, cur.IssuedAt = billing.StatusIssued, cur.UploadedBy, &now, &now
 	_, err = e.store.UpdateInvoice(t.Context(), cur, billing.StatusPlanned)
-	wantProblem(t, err, authz.ErrFourEyes)
+	problemtest.WantErr(t, err, authz.ErrFourEyes)
 
 	// A mismatch needs its note; the second eye issues it.
 	_, err = e.verify(t, "finance_admin_2", inv.ID, billing.StatusMismatch, "")
@@ -159,7 +160,7 @@ func TestVerify_UploaderCannotVerify_403AndDBCheck(t *testing.T) {
 		t.Fatalf("outbox topics = %v, want invoice.issued", topics)
 	}
 	_, err = e.verify(t, "finance_admin_2", inv.ID, billing.StatusIssued, "")
-	wantProblem(t, err, billing.ErrInvalidState)
+	problemtest.WantErr(t, err, billing.ErrInvalidState)
 }
 
 // TestVerify_InfectedOrPendingPDF_409: the issue waits for the virus scan.
@@ -170,7 +171,7 @@ func TestVerify_InfectedOrPendingPDF_409(t *testing.T) {
 	v := e.mustUpload(t, "club_admin", inv.ID, "VKF2026000000010")
 	e.files.edit(*v.Invoice.PDFFileID, func(m *files.FileMeta) { m.ScanStatus = files.ScanPending })
 	_, err := e.verify(t, "finance_admin", inv.ID, billing.StatusIssued, "")
-	wantProblem(t, err, files.ErrNotClean)
+	problemtest.WantErr(t, err, files.ErrNotClean)
 	if _, err := e.verify(t, "finance_admin", inv.ID, billing.StatusMismatch, "Belge okunamıyor"); err != nil {
 		t.Fatalf("a mismatch does not need a clean file: %v", err)
 	}
@@ -187,7 +188,7 @@ func TestCancelIssued_PlansCreditNote(t *testing.T) {
 	fin := actor(t, "finance_admin")
 
 	_, err := e.svc.AdminCancelInvoice(ctxOf(t, actor(t, "platform_admin")), actor(t, "platform_admin"), inv.ID, "iade")
-	wantProblem(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	_, err = e.svc.AdminCancelInvoice(ctxOf(t, fin), fin, inv.ID, " ")
 	wantStatus(t, err, http.StatusUnprocessableEntity)
 
@@ -210,12 +211,12 @@ func TestCancelIssued_PlansCreditNote(t *testing.T) {
 	if len(mirror) != len(orig) || mirror[0].NetAmount != orig[0].NetAmount || *mirror[0].OrderLineID != *orig[0].OrderLineID {
 		t.Fatalf("credit note lines %+v, original %+v", mirror, orig)
 	}
-	if ev := e.audit.of(authz.BillingInvoiceCancel); len(ev) != 2 || ev[1].Reason != "Hizmet verilmedi" {
+	if ev := e.audit.Of(authz.BillingInvoiceCancel); len(ev) != 2 || ev[1].Reason != "Hizmet verilmedi" {
 		t.Fatalf("cancel audit = %+v", ev)
 	}
 
 	_, err = e.svc.AdminCancelInvoice(ctxOf(t, fin), fin, inv.ID, "tekrar")
-	wantProblem(t, err, billing.ErrInvalidState)
+	problemtest.WantErr(t, err, billing.ErrInvalidState)
 
 	// The club uploads the credit note; once issued it is final.
 	e.mustUpload(t, "club_admin", cn.ID, "VKF2026000000099")
@@ -223,7 +224,7 @@ func TestCancelIssued_PlansCreditNote(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.AdminCancelInvoice(ctxOf(t, fin), fin, cn.ID, "kredi notu iptali")
-	wantProblem(t, err, billing.ErrInvalidState)
+	problemtest.WantErr(t, err, billing.ErrInvalidState)
 
 	plan := e.planned(t)
 	r, err = e.svc.AdminCancelInvoice(ctxOf(t, fin), fin, plan.ID, "Plan hatalı")
@@ -333,7 +334,7 @@ func TestInvoicePDF_Rules(t *testing.T) {
 		_, err := e.svc.InvoicePDF(ctxOf(t, a), a, inv.ID)
 		return err
 	}
-	wantProblem(t, pdf("finance_admin"), billing.ErrInvalidState) // nothing uploaded
+	problemtest.WantErr(t, pdf("finance_admin"), billing.ErrInvalidState) // nothing uploaded
 	e.mustUpload(t, "club_admin", inv.ID, "VKF2026000000030")
 	for name, want := range map[string]error{"club_admin": nil, "finance_admin": nil, "company_admin": billing.ErrInvalidState,
 		"platform_admin": billing.ErrInvalidState, "other_club_admin": authz.ErrNotFound} {
@@ -440,15 +441,15 @@ func TestListAndGet_OrgScope(t *testing.T) {
 		}
 	}
 	_, err := list("club_member", "club_a", "")
-	wantProblem(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	_, err = list("other_club_admin", "club_a", "")
-	wantProblem(t, err, authz.ErrNotFound)
+	problemtest.WantErr(t, err, authz.ErrNotFound)
 	_, err = list("finance_admin", "no_such_org", "")
-	wantProblem(t, err, problem.ErrNotFound)
+	problemtest.WantErr(t, err, problem.ErrNotFound)
 
 	a := actor(t, "other_company_member")
 	_, err = e.svc.GetInvoice(ctxOf(t, a), a, inv.ID)
-	wantProblem(t, err, authz.ErrNotFound)
+	problemtest.WantErr(t, err, authz.ErrNotFound)
 	a = actor(t, "company_admin")
 	v, err := e.svc.GetInvoice(ctxOf(t, a), a, inv.ID)
 	if err != nil || len(v.Lines) != 1 {
@@ -460,7 +461,7 @@ func TestListAndGet_OrgScope(t *testing.T) {
 		t.Fatalf("admin list = %d, %v", len(p.Items), err)
 	}
 	_, err = e.svc.AdminListInvoices(ctxOf(t, actor(t, "support")), actor(t, "support"), billing.ListQuery{})
-	wantProblem(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	_, err = e.svc.AdminListInvoices(ctxOf(t, fin), fin, billing.ListQuery{Status: "nope"})
 	wantStatus(t, err, http.StatusUnprocessableEntity)
 }

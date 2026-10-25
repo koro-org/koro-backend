@@ -8,6 +8,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/files"
+	"koro/internal/platform/problem"
 )
 
 // Delivery evidence (BE-093, T-292; user decision 2026-10-23): the seller
@@ -46,15 +47,15 @@ func (s *service) checkEvidence(ctx context.Context, l Line, fileID uuid.UUID) e
 	f, err := s.d.Files.Get(ctx, fileID)
 	switch {
 	case errors.Is(err, files.ErrNotFound):
-		return fieldErr(loc, "must be a delivery_evidence upload of the selling organization")
+		return problem.Field(loc, "must be a delivery_evidence upload of the selling organization")
 	case err != nil:
 		return err
 	case f.Purpose != files.PurposeDeliveryEvidence, f.OrgID == nil, *f.OrgID != l.SellerOrgID:
-		return fieldErr(loc, "must be a delivery_evidence upload of the selling organization")
+		return problem.Field(loc, "must be a delivery_evidence upload of the selling organization")
 	case f.Status == files.StatusRejected:
 		return files.ErrRejected
 	case f.Status != files.StatusActive:
-		return fieldErr(loc, "must be a completed upload")
+		return problem.Field(loc, "must be a completed upload")
 	case f.ScanStatus == files.ScanInfected:
 		return files.ErrNotClean
 	case f.AttachedModule != "" && (f.AttachedModule != evidenceModule || f.AttachedEntityID != l.ID):
@@ -68,7 +69,7 @@ func (s *service) checkEvidence(ctx context.Context, l Line, fileID uuid.UUID) e
 // an unknown file; the files errors (409) and the rest pass through.
 func evidenceAttachErr(err error) error {
 	if errors.Is(err, files.ErrNotFound) {
-		return fieldErr("body.evidence_file_id", "must be a delivery_evidence upload of the selling organization")
+		return problem.Field("body.evidence_file_id", "must be a delivery_evidence upload of the selling organization")
 	}
 	return err
 }

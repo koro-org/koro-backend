@@ -79,7 +79,7 @@ func TestCreateCv_FourthCv_409(t *testing.T) {
 	if _, ok := e.files.attached[fourth]; ok {
 		t.Fatal("the refused CV's file was attached")
 	}
-	if got := len(e.audit.of(string(authz.StudentsCvManage))); got != 3 {
+	if got := len(e.audit.Of(authz.StudentsCvManage)); got != 3 {
 		t.Fatalf("cv.manage audit records = %d, want 3", got)
 	}
 }
@@ -136,11 +136,11 @@ func TestSetCurrentCv_SingleCurrent(t *testing.T) {
 	if got := currentOf(t, e, a); !slices.Equal(got, []uuid.UUID{c2.CV.ID}) {
 		t.Fatalf("current = %v, want only %v", got, c2.CV.ID)
 	}
-	before := len(e.audit.of(string(authz.StudentsCvManage)))
+	before := len(e.audit.Of(authz.StudentsCvManage))
 	if _, err := e.svc.SetMyCurrentCV(ctx, a, c2.CV.ID); err != nil {
 		t.Fatal(err)
 	}
-	if len(e.audit.of(string(authz.StudentsCvManage))) != before {
+	if len(e.audit.Of(authz.StudentsCvManage)) != before {
 		t.Fatal("an unchanged current CV was audited as a write")
 	}
 	if _, err := e.svc.SetMyCurrentCV(ctx, b, c1.CV.ID); !errors.Is(err, students.ErrNotFound) {
@@ -218,7 +218,7 @@ func TestDownloadCv_ShortLivedAndAudited(t *testing.T) {
 			t.Fatalf("URL lifetime %s, want ≤ 5 min", ttl)
 		}
 	}
-	reads := e.audit.of(string(authz.StudentsCvReadOwn))
+	reads := e.audit.Of(authz.StudentsCvReadOwn)
 	if len(reads) != 2 || reads[0].ResourceType != authz.TypeStudentCV || *reads[0].ResourceID != c.CV.ID ||
 		*reads[0].ActorUserID != a.UserID {
 		t.Fatalf("download audit = %+v", reads)
@@ -232,7 +232,7 @@ func TestDownloadCv_ShortLivedAndAudited(t *testing.T) {
 	e.files.mu.Unlock()
 	_, err := e.svc.DownloadMyCV(ctx, a, pending.CV.ID)
 	wantCode(t, err, "files.not_clean")
-	if len(e.audit.of(string(authz.StudentsCvReadOwn))) != 2 {
+	if len(e.audit.Of(authz.StudentsCvReadOwn)) != 2 {
 		t.Fatal("a refused download was audited")
 	}
 }
@@ -278,7 +278,7 @@ func TestStudents_FileRejected_DropsReference(t *testing.T) {
 		t.Fatal("another module's file was deleted")
 	}
 	got := []string{}
-	for _, ev := range e.audit.events {
+	for _, ev := range e.audit.All() {
 		if ev.SystemJob == students.DropRejectedFileTaskName {
 			got = append(got, ev.Action)
 			if ev.Metadata[audit.MetaSubjectUserID] != a.UserID.String() {

@@ -10,6 +10,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/events"
+	"koro/internal/platform/db/dbtest"
 	"koro/internal/platform/privacy"
 	"koro/internal/platform/problem"
 )
@@ -29,7 +30,7 @@ func (s *spyDestructions) Record(ctx context.Context, d privacy.Destruction) err
 	if s.fail != nil {
 		return s.fail
 	}
-	s.recs, s.txs = append(s.recs, d), append(s.txs, txOf(ctx))
+	s.recs, s.txs = append(s.recs, d), append(s.txs, dbtest.TxOf(ctx))
 	return nil
 }
 
@@ -80,7 +81,7 @@ func TestPurgeExports_RecordsDestruction(t *testing.T) {
 	if txs[0] == txs[1] {
 		t.Fatal("two files recorded in one transaction: want one transaction per export")
 	}
-	if n := len(e.audit.of(authz.EventsExportPurge)); n != 2 {
+	if n := len(e.audit.Of(authz.EventsExportPurge)); n != 2 {
 		t.Fatalf("purge audit records = %d, want 2 (kept next to the destruction record)", n)
 	}
 	e.clk.Advance(time.Hour)
@@ -110,7 +111,7 @@ func TestPurgeExports_DestructionNotRecorded_FileKept(t *testing.T) {
 	if _, err := e.files.Get(t.Context(), fileID); err != nil {
 		t.Fatalf("the file was deleted unrecorded: %v", err)
 	}
-	if n := len(e.audit.of(authz.EventsExportPurge)); n != 0 {
+	if n := len(e.audit.Of(authz.EventsExportPurge)); n != 0 {
 		t.Fatalf("purge audit records = %d", n)
 	}
 

@@ -13,6 +13,7 @@ import (
 	"koro/internal/events"
 	"koro/internal/orgs"
 	"koro/internal/outreach"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/page"
 )
 
@@ -232,7 +233,7 @@ func (s *service) ListPosts(ctx context.Context, a authz.Actor, orgID uuid.UUID,
 	if err != nil {
 		return PostPage{}, err
 	}
-	if err := authz.Can(ctx, a, authz.FeedPostListByOrg, orgResource(o)); err != nil {
+	if err := authz.Can(ctx, a, authz.FeedPostListByOrg, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
 		return PostPage{}, err
 	}
 	r, err := s.readerOf(ctx, a)
@@ -271,7 +272,7 @@ func (s *service) ListOrgPosts(ctx context.Context, a authz.Actor, orgID uuid.UU
 	if err != nil {
 		return PostPage{}, err
 	}
-	if err := authz.Can(ctx, a, authz.FeedPostListOrgManage, orgResource(o)); err != nil {
+	if err := authz.Can(ctx, a, authz.FeedPostListOrgManage, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
 		return PostPage{}, err
 	}
 	limit := page.ClampLimit(q.Limit)
@@ -393,7 +394,7 @@ func (s *service) views(ctx context.Context, a authz.Actor, rows []Post, manage 
 		if !ok {
 			continue // an org row never disappears; a missing one is not shown
 		}
-		v := PostView{Post: p, Org: o, LogoURL: logos[p.OrgID], ETag: etagOf(p), Manage: manage, ReasonCode: reasons[p.ID]}
+		v := PostView{Post: p, Org: o, LogoURL: logos[p.OrgID], ETag: httpx.ETag(p.UpdatedAt), Manage: manage, ReasonCode: reasons[p.ID]}
 		if manage && p.Status == StatusRemoved {
 			// The author org sees a removed post's status, not its content
 			// (03 §3.6).

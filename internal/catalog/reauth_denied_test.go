@@ -55,39 +55,12 @@ func TestReauthDenied_EveryROperation(t *testing.T) {
 				Call: func(ctx context.Context, p identity.ReauthProof) error {
 					return call(authz.WithActor(ctx, a), a, p)
 				},
-				Rows:   func() []audittest.Row { return e.audit.reauthRows(authz.CatalogPolicyManage) },
-				Denied: rowOf(denied.By(a)), Late: e.late,
+				Rows:   func() []audittest.Row { return e.audit.Rows(authz.CatalogPolicyManage) },
+				Denied: audittest.RowOf(denied.By(a)), Late: e.late,
 				Wrong: identity.ReauthProof{Password: "wrong-password"}, WrongErr: identity.ErrReauthFailed,
 				Missing: identity.ReauthProof{}, MissingErr: identity.ErrReauthRequired,
 				Good: proof(),
 			}.Run(t)
 		})
 	}
-}
-
-// ofOutcome returns the recorded events of act with outcome o.
-func (l *auditLog) ofOutcome(act authz.Action, o audit.Outcome) []audit.Event {
-	var out []audit.Event
-	for _, e := range l.of(act) {
-		if e.Outcome == o {
-			out = append(out, e)
-		}
-	}
-	return out
-}
-
-// rowOf is e in audittest's terms.
-func rowOf(e audit.Event) audittest.Row {
-	return audittest.Row{Action: e.Action, Outcome: string(e.Outcome), Reason: e.Reason, ActorUserID: e.ActorUserID,
-		ActorOrgID: e.ActorOrgID, SystemJob: e.SystemJob, OrgID: e.OrgID, ResourceType: e.ResourceType, ResourceID: e.ResourceID,
-		Metadata: e.Metadata}
-}
-
-// reauthRows returns the recorded events of act in audittest's terms.
-func (l *auditLog) reauthRows(act authz.Action) []audittest.Row {
-	var out []audittest.Row
-	for _, e := range l.of(act) {
-		out = append(out, rowOf(e))
-	}
-	return out
 }

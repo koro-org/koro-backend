@@ -5,6 +5,7 @@ import (
 	"uuid"
 
 	"koro/internal/ledger"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // T-305: the amount is the frozen seller share less completed refund ledger
@@ -29,14 +30,14 @@ func TestRefundFollowups_PayoutSubtractsCompletedSellerShares(t *testing.T) {
 		t.Fatalf("payout: %+v, want %d", p, want)
 	}
 	_, err = e.svc.AdminCreatePayout(ctxOf(t, a), a, ledger.CreatePayoutInput{PayeeID: payee, LineIDs: []uuid.UUID{id}})
-	wantProblem(t, err, ledger.ErrLineNotPayable)
+	problemtest.WantErr(t, err, ledger.ErrLineNotPayable)
 	e.approve(t, "finance_admin_2", p.ID)
 	e.markPaid(t, "finance_admin", p.ID)
 	if b := e.balance(t, payee); b != 0 {
 		t.Fatalf("remaining seller balance after payout: %d", b)
 	}
 	_, err = e.svc.AdminCreatePayout(ctxOf(t, a), a, ledger.CreatePayoutInput{PayeeID: payee})
-	wantProblem(t, err, ledger.ErrNothingPayable)
+	problemtest.WantErr(t, err, ledger.ErrNothingPayable)
 }
 
 func TestRefundFollowups_FullyReturnedSellerShareHasNoPayout(t *testing.T) {
@@ -50,5 +51,5 @@ func TestRefundFollowups_FullyReturnedSellerShareHasNoPayout(t *testing.T) {
 	e.post(t, txn(t)(ledger.RefundCompleted(ledger.ModelA, uuid.NewV7(), 0, []ledger.RefundLine{refund}, t0)))
 	a := actor(t, "finance_admin")
 	_, err := e.svc.AdminCreatePayout(ctxOf(t, a), a, ledger.CreatePayoutInput{PayeeID: payee})
-	wantProblem(t, err, ledger.ErrNothingPayable)
+	problemtest.WantErr(t, err, ledger.ErrNothingPayable)
 }

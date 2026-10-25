@@ -10,69 +10,65 @@ import (
 	"koro/internal/authz"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/problem"
 )
 
 // registerViews adds the BE-025 operations (04 §2.4): the CVs, the member
 // card and the admin view.
 func registerViews(api huma.API, h handler) {
-	tags := []string{"students"}
-	reg := func(o huma.Operation, m op.Meta) huma.Operation {
-		o.Tags = tags
-		return op.Koro(o, m)
-	}
 	self := func(act authz.Action, idem op.Idempotency) op.Meta {
 		return op.Meta{Action: string(act), Surface: op.SurfaceSelf, Idempotency: idem}
 	}
 
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "students", huma.Operation{
 		OperationID: "listMyCvs", Method: http.MethodGet, Path: "/me/cvs",
 		Summary:     "List my CVs",
 		Description: "At most 3, oldest first. The current CV is the one a company with level 3 access may download.",
-	}, self(authz.StudentsCvReadOwn, "")), h.listCVs)
+	}, self(authz.StudentsCvReadOwn, ""), h.listCVs)
 
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "students", huma.Operation{
 		OperationID: "createMyCv", Method: http.MethodPost, Path: "/me/cvs",
 		Summary: "Add a CV", DefaultStatus: http.StatusCreated,
 		Description: "file_id is a cv upload of yours (createUpload purpose cv: PDF only, 10 MB; the file is virus " +
 			"scanned and its metadata removed before it is served). At most 3 CVs: a fourth is 409 students.cv_limit. " +
 			"The first CV is current; make_current moves the mark to the new one.",
-	}, self(authz.StudentsCvManage, op.IdempotencyOptional)), h.createCV)
+	}, self(authz.StudentsCvManage, op.IdempotencyOptional), h.createCV)
 
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "students", huma.Operation{
 		OperationID: "setMyCurrentCv", Method: http.MethodPost, Path: "/me/cvs/{cv_id}/current",
 		Summary:     "Make a CV current",
 		Description: "The CV becomes the only current one. Another user's CV is 404.",
-	}, self(authz.StudentsCvManage, op.IdempotencyOptional)), h.setCurrentCV)
+	}, self(authz.StudentsCvManage, op.IdempotencyOptional), h.setCurrentCV)
 
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "students", huma.Operation{
 		OperationID: "deleteMyCv", Method: http.MethodDelete, Path: "/me/cvs/{cv_id}",
 		Summary: "Delete a CV", DefaultStatus: http.StatusNoContent,
 		Description: "Hard delete, the file included. A deleted current CV leaves no current one until you pick " +
 			"another. Another user's CV is 404.",
-	}, self(authz.StudentsCvManage, "")), h.deleteCV)
+	}, self(authz.StudentsCvManage, ""), h.deleteCV)
 
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "students", huma.Operation{
 		OperationID: "downloadMyCv", Method: http.MethodGet, Path: "/me/cvs/{cv_id}/download",
 		Summary: "Download a CV",
 		Description: "A signed URL valid for 5 minutes (attachment). 409 files.not_clean while the virus scan is " +
 			"pending. Every download is audited. Another user's CV is 404.",
-	}, self(authz.StudentsCvReadOwn, "")), h.downloadCV)
+	}, self(authz.StudentsCvReadOwn, ""), h.downloadCV)
 
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "students", huma.Operation{
 		OperationID: "getMemberCard", Method: http.MethodGet, Path: "/orgs/{org_id}/members/{membership_id}/profile",
 		Summary: "Get a club member's card",
 		Description: "The club_admin's view of an active member of the club (no e-mail, CV, skills or other clubs). " +
 			"A pending or ended membership, another club's member or a non-member caller is 404. A sensitive club's " +
 			"card is audited.",
-	}, op.Meta{Action: string(authz.StudentsProfileReadMemberCard), Surface: op.SurfaceOrg}), h.getMemberCard)
+	}, op.Meta{Action: string(authz.StudentsProfileReadMemberCard), Surface: op.SurfaceOrg}, h.getMemberCard)
 
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "students", huma.Operation{
 		OperationID: "adminGetStudentProfile", Method: http.MethodGet, Path: "/admin/users/{user_id}/student-profile",
 		Summary: "Get a student's profile (staff)",
 		Description: "support and platform_admin: break-glass (X-Koro-Access-Reason, 10–500 characters; audited, the " +
 			"student is told). dpo: X-Koro-Access-Reason is the ID of an open data subject request of this student " +
 			"(the birth date is shown only then). Never CV files, sensitive clubs, form answers or talent values.",
-	}, op.Meta{Action: string(authz.StudentsProfileReadAdmin), Surface: op.SurfaceAdmin, BreakGlass: true}), h.adminGetProfile)
+	}, op.Meta{Action: string(authz.StudentsProfileReadAdmin), Surface: op.SurfaceAdmin, BreakGlass: true}, h.adminGetProfile)
 }
 
 // pathID parses a path UUID; a malformed ID is simply not found (IDOR rule).
@@ -121,7 +117,7 @@ func (h handler) createCV(ctx context.Context, in *createCVInput) (*cvOutput, er
 	}
 	id, err := uuid.Parse(in.Body.FileID)
 	if err != nil {
-		return nil, fieldErr("body.file_id", "must be a UUID")
+		return nil, problem.Field("body.file_id", "must be a UUID")
 	}
 	v, err := h.svc.CreateMyCV(ctx, a, id, in.Body.MakeCurrent)
 	if err != nil {

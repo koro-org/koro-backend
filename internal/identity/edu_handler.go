@@ -11,11 +11,12 @@ import (
 	"koro/internal/authz"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // registerEdu adds the student verification operations (04 §2.1; BE-018).
 func registerEdu(api huma.API, h handler) {
-	reg(api, huma.Operation{
+	op.Register(api, "identity", huma.Operation{
 		OperationID: "startEduVerification", Method: http.MethodPost, Path: "/me/edu-verifications", DefaultStatus: http.StatusAccepted,
 		Summary: "Verify (or renew) my student status with a .edu.tr address",
 		Description: "A single-use link (valid 24 hours) goes to the address. 202 whether or not the address is " +
@@ -24,7 +25,7 @@ func registerEdu(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.IdentityEduVerificationStart), Surface: op.SurfaceSelf, RateLimit: op.RateAuthEmail,
 		Idempotency: op.IdempotencyOptional}, h.startEdu)
 
-	reg(api, huma.Operation{
+	op.Register(api, "identity", huma.Operation{
 		OperationID: "confirmEduVerification", Method: http.MethodPost, Path: "/auth/edu-verifications/confirm",
 		DefaultStatus: http.StatusNoContent, Summary: "Confirm a .edu.tr address",
 		Description: "Single use; an unknown, used or expired token is 422 identity.invalid_token. The account becomes a " +
@@ -33,7 +34,7 @@ func registerEdu(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.IdentityEduVerificationConfirm), Surface: op.SurfacePublic, RateLimit: op.RateTokenConfirm,
 		Idempotency: op.IdempotencyOptional}, h.confirmEdu)
 
-	reg(api, huma.Operation{
+	op.Register(api, "identity", huma.Operation{
 		OperationID: "submitEduDocument", Method: http.MethodPost, Path: "/me/edu-verifications/document",
 		DefaultStatus: http.StatusAccepted, Summary: "Submit a student document for review",
 		Description: "For students without a .edu.tr address (open education). document_file_id is a completed " +
@@ -42,26 +43,26 @@ func registerEdu(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.IdentityEduVerificationSubmitDocument), Surface: op.SurfaceSelf,
 		Idempotency: op.IdempotencyOptional}, h.submitEduDocument)
 
-	reg(api, huma.Operation{
+	op.Register(api, "identity", huma.Operation{
 		OperationID: "getMyEduVerification", Method: http.MethodGet, Path: "/me/edu-verification",
 		Summary: "My student verification", Description: "The .edu.tr address is masked (a***@ogr.x.edu.tr).",
 	}, op.Meta{Action: string(authz.IdentityEduVerificationReadOwn), Surface: op.SurfaceSelf}, h.myEdu)
 
-	reg(api, huma.Operation{
+	op.Register(api, "identity", huma.Operation{
 		OperationID: "adminListEduVerifications", Method: http.MethodGet, Path: "/admin/edu-verifications",
 		Summary: "Student document review queue",
 		Description: "Student documents of one status (default pending, oldest first; other statuses newest first). " +
 			"Applicants by name only; open a document with adminGetEduDocument.",
 	}, op.Meta{Action: string(authz.IdentityEduVerificationList), Surface: op.SurfaceAdmin}, h.listEdu)
 
-	reg(api, huma.Operation{
+	op.Register(api, "identity", huma.Operation{
 		OperationID: "adminGetEduDocument", Method: http.MethodGet, Path: "/admin/edu-verifications/{verification_id}/document",
 		Summary: "Download a student document",
 		Description: "A signed URL valid for 5 minutes; every call is audited. 409 files.not_clean while the virus " +
 			"scan is pending or found something. Not for the reviewer's own document (403).",
 	}, op.Meta{Action: string(authz.IdentityEduVerificationReview), Surface: op.SurfaceAdmin}, h.getEduDocument)
 
-	reg(api, huma.Operation{
+	op.Register(api, "identity", huma.Operation{
 		OperationID: "adminDecideEduVerification", Method: http.MethodPost, Path: "/admin/edu-verifications/{verification_id}/decision",
 		Summary: "Approve or reject a student document",
 		Description: "verified needs university_id and a clean document; the student is verified for one year (a " +
@@ -229,11 +230,11 @@ func (h handler) submitEduDocument(ctx context.Context, in *submitEduDocumentInp
 	}
 	uni, err := uuid.Parse(in.Body.UniversityID)
 	if err != nil {
-		return nil, fieldErr("body.university_id", "must be a UUID")
+		return nil, problem.Field("body.university_id", "must be a UUID")
 	}
 	file, err := uuid.Parse(in.Body.DocumentFileID)
 	if err != nil {
-		return nil, fieldErr("body.document_file_id", "must be a UUID")
+		return nil, problem.Field("body.document_file_id", "must be a UUID")
 	}
 	v, err := h.svc.SubmitEduDocument(ctx, a, EduDocumentSubmission{UniversityID: uni, FileID: file})
 	if err != nil {
@@ -364,7 +365,7 @@ func (h handler) decideEdu(ctx context.Context, in *decideEduInput) (*adminEduOu
 	if in.Body.UniversityID != "" {
 		uni, err := uuid.Parse(in.Body.UniversityID)
 		if err != nil {
-			return nil, fieldErr("body.university_id", "must be a UUID")
+			return nil, problem.Field("body.university_id", "must be a UUID")
 		}
 		d.UniversityID = &uni
 	}

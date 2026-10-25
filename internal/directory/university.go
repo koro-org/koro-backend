@@ -10,6 +10,7 @@ import (
 	"koro/internal/orgs"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // UniversityQuery narrows listUniversities (04 §2.3: q, city, type, sort name).
@@ -196,7 +197,7 @@ func cleanUniversity(in UniversityInput, prefix string) (University, error) {
 		return University{}, err
 	}
 	if !in.Type.Valid() {
-		return University{}, fieldErr(prefix+"type", "must be one of state, foundation, other")
+		return University{}, problem.Field(prefix+"type", "must be one of state, foundation, other")
 	}
 	site, err := cleanWebsite(prefix+"website_url", in.WebsiteURL)
 	if err != nil {
@@ -301,7 +302,7 @@ func (s *service) AdminUpdateUniversity(ctx context.Context, a authz.Actor, id u
 		}
 		if p.Type != nil {
 			if !p.Type.Valid() {
-				return fieldErr("body.type", "must be one of state, foundation, other")
+				return problem.Field("body.type", "must be one of state, foundation, other")
 			}
 			u.Type, changed = *p.Type, append(changed, "type")
 		}
@@ -332,10 +333,10 @@ func (s *service) AdminPutUniversityEmailDomain(ctx context.Context, a authz.Act
 	}
 	d := normalizeDomain(domain)
 	if !domainRe.MatchString(d) || len(d) > 253 {
-		return EmailDomain{}, false, fieldErr("path.domain", "must be a .edu.tr domain such as itu.edu.tr")
+		return EmailDomain{}, false, problem.Field("path.domain", "must be a .edu.tr domain such as itu.edu.tr")
 	}
 	if !in.DomainKind.Valid() {
-		return EmailDomain{}, false, fieldErr("body.domain_kind", "must be one of student, staff, mixed")
+		return EmailDomain{}, false, problem.Field("body.domain_kind", "must be one of student, staff, mixed")
 	}
 	var out EmailDomain
 	created := false
@@ -399,7 +400,7 @@ func (s *service) AdminCreateDepartment(ctx context.Context, a authz.Actor, univ
 		if d.FacultyID != nil {
 			f, err := s.d.Store.GetFaculty(ctx, *d.FacultyID)
 			if errors.Is(err, ErrNotFound) || err == nil && f.UniversityID != u.ID {
-				return uuid.Nil(), fieldErr("body.faculty_id", "must be a faculty of this university")
+				return uuid.Nil(), problem.Field("body.faculty_id", "must be a faculty of this university")
 			}
 			if err != nil {
 				return uuid.Nil(), err
@@ -427,10 +428,10 @@ func cleanDepartment(in DepartmentInput, prefix string) (Department, error) {
 		return Department{}, err
 	}
 	if !in.DegreeLevel.Valid() {
-		return Department{}, fieldErr(prefix+"degree_level", "must be one of associate, bachelor, master, doctorate")
+		return Department{}, problem.Field(prefix+"degree_level", "must be one of associate, bachelor, master, doctorate")
 	}
 	if in.DurationYears != nil && (*in.DurationYears < 1 || *in.DurationYears > 7) {
-		return Department{}, fieldErr(prefix+"duration_years", "must be 1-7")
+		return Department{}, problem.Field(prefix+"duration_years", "must be 1-7")
 	}
 	d := Department{FacultyID: in.FacultyID, Name: name, DegreeLevel: in.DegreeLevel, DurationYears: in.DurationYears, IsActive: true}
 	if in.YokProgramCode != "" {

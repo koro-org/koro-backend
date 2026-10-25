@@ -146,3 +146,12 @@ var coreTypes = map[string][]string{
 	TypeTalentSubject:          nil,
 	TypeAdminSurface:           nil,
 }
+
+// OrgResource is the TypeOrg resource of an org with its mandatory Attrs
+// (coreTypes: org_kind, org_status). Modules build it from the org row they
+// loaded (orgs.Org, orgs.OrgSummary), never from the request.
+func OrgResource(id uuid.UUID, kind, status string) Resource {
+	return Resource{Type: TypeOrg, ID: id, OrgID: &id, Attrs: map[string]string{
+		"org_kind": kind, "org_status": status,
+	}}
+}

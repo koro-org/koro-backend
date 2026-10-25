@@ -6,6 +6,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/platform/civil"
+	"koro/internal/platform/db"
 )
 
 // GORM row types of the identity tables (store_gorm.go scans into them).
@@ -47,39 +48,24 @@ func str(p *string) string {
 	return *p
 }
 
-func nullable(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
-func utcPtr(t *time.Time) *time.Time {
-	if t == nil {
-		return nil
-	}
-	u := t.UTC()
-	return &u
-}
-
 func (r userRow) user() User {
 	return User{
 		ID: r.ID, Status: Status(r.Status), Email: str(r.Email), EmailNormalized: str(r.EmailNormalized),
-		EmailVerifiedAt: utcPtr(r.EmailVerifiedAt), PasswordHash: str(r.PasswordHash), FirstName: str(r.FirstName),
+		EmailVerifiedAt: db.UTCPtr(r.EmailVerifiedAt), PasswordHash: str(r.PasswordHash), FirstName: str(r.FirstName),
 		LastName: str(r.LastName), BirthDate: r.BirthDate, Persona: Persona(r.SignupPersona), Locale: r.Locale,
-		MFAEnabled: r.MFAEnabled, LastLoginAt: utcPtr(r.LastLoginAt), SuspendedAt: utcPtr(r.SuspendedAt),
-		SuspensionReason: str(r.SuspensionReason), ErasedAt: utcPtr(r.ErasedAt), FailedLogins: int(r.FailedLoginCount),
-		LockedUntil: utcPtr(r.LockedUntil), CreatedAt: r.CreatedAt.UTC(), UpdatedAt: r.UpdatedAt.UTC(),
+		MFAEnabled: r.MFAEnabled, LastLoginAt: db.UTCPtr(r.LastLoginAt), SuspendedAt: db.UTCPtr(r.SuspendedAt),
+		SuspensionReason: str(r.SuspensionReason), ErasedAt: db.UTCPtr(r.ErasedAt), FailedLogins: int(r.FailedLoginCount),
+		LockedUntil: db.UTCPtr(r.LockedUntil), CreatedAt: r.CreatedAt.UTC(), UpdatedAt: r.UpdatedAt.UTC(),
 	}
 }
 
 func rowOf(u User) userRow {
 	return userRow{
-		ID: u.ID, Status: string(u.Status), Email: nullable(u.Email), EmailNormalized: nullable(u.EmailNormalized),
-		EmailVerifiedAt: u.EmailVerifiedAt, PasswordHash: nullable(u.PasswordHash), FirstName: nullable(u.FirstName),
-		LastName: nullable(u.LastName), BirthDate: u.BirthDate, SignupPersona: string(u.Persona), Locale: u.Locale,
+		ID: u.ID, Status: string(u.Status), Email: db.Nullable(u.Email), EmailNormalized: db.Nullable(u.EmailNormalized),
+		EmailVerifiedAt: u.EmailVerifiedAt, PasswordHash: db.Nullable(u.PasswordHash), FirstName: db.Nullable(u.FirstName),
+		LastName: db.Nullable(u.LastName), BirthDate: u.BirthDate, SignupPersona: string(u.Persona), Locale: u.Locale,
 		MFAEnabled: u.MFAEnabled, LastLoginAt: u.LastLoginAt, SuspendedAt: u.SuspendedAt,
-		SuspensionReason: nullable(u.SuspensionReason), ErasedAt: u.ErasedAt, FailedLoginCount: int16(min(u.FailedLogins, maxFailedLogins)), //nolint:gosec // bounded by maxFailedLogins
+		SuspensionReason: db.Nullable(u.SuspensionReason), ErasedAt: u.ErasedAt, FailedLoginCount: int16(min(u.FailedLogins, maxFailedLogins)), //nolint:gosec // bounded by maxFailedLogins
 		LockedUntil: u.LockedUntil, CreatedAt: u.CreatedAt, UpdatedAt: u.UpdatedAt,
 	}
 }
@@ -105,7 +91,7 @@ func (r sessionRow) session() Session {
 	return Session{
 		ID: r.ID, UserID: r.UserID, TokenHash: r.TokenHash, ClientKind: ClientKind(r.ClientKind), CreatedAt: r.CreatedAt.UTC(),
 		LastSeenAt: r.LastSeenAt.UTC(), IdleExpiresAt: r.IdleExpiresAt.UTC(), AbsoluteExpiresAt: r.AbsoluteExpiresAt.UTC(),
-		MFAVerifiedAt: utcPtr(r.MFAVerifiedAt), RevokedAt: utcPtr(r.RevokedAt), RevokeReason: RevokeReason(str(r.RevokeReason)),
+		MFAVerifiedAt: db.UTCPtr(r.MFAVerifiedAt), RevokedAt: db.UTCPtr(r.RevokedAt), RevokeReason: RevokeReason(str(r.RevokeReason)),
 		IP: canonicalIP(str(r.IP)), UserAgent: str(r.UserAgent), DeviceLabel: str(r.DeviceLabel),
 	}
 }
@@ -129,7 +115,7 @@ func (tokenRow) TableName() string { return "email_tokens" }
 func (r tokenRow) token() EmailToken {
 	return EmailToken{
 		ID: r.ID, UserID: r.UserID, Purpose: TokenPurpose(r.Purpose), TargetEmail: str(r.TargetEmail), KeyID: r.KeyID,
-		TokenHash: r.TokenHash, ExpiresAt: r.ExpiresAt.UTC(), ConsumedAt: utcPtr(r.ConsumedAt), Attempts: int(r.Attempts),
+		TokenHash: r.TokenHash, ExpiresAt: r.ExpiresAt.UTC(), ConsumedAt: db.UTCPtr(r.ConsumedAt), Attempts: int(r.Attempts),
 		CreatedAt: r.CreatedAt.UTC(),
 	}
 }
@@ -160,10 +146,10 @@ func (roleRow) TableName() string { return "platform_role_assignments" }
 func (r roleRow) assignment() RoleAssignment {
 	return RoleAssignment{
 		ID: r.ID, UserID: r.UserID, Role: authz.PlatformRole(r.Role), Reason: r.Reason, Status: RoleStatus(r.Status),
-		RequestedBy: r.RequestedBy, RequestedAt: r.RequestedAt.UTC(), ApprovedBy: r.ApprovedBy, ApprovedAt: utcPtr(r.ApprovedAt),
-		GrantedAt: utcPtr(r.GrantedAt), RejectedBy: r.RejectedBy, RejectedAt: utcPtr(r.RejectedAt), RevokeReason: str(r.RevokeReason),
-		RevokeRequestedBy: r.RevokeRequestedBy, RevokeRequestedAt: utcPtr(r.RevokeRequestedAt), RevokedBy: r.RevokedBy,
-		RevokedAt: utcPtr(r.RevokedAt),
+		RequestedBy: r.RequestedBy, RequestedAt: r.RequestedAt.UTC(), ApprovedBy: r.ApprovedBy, ApprovedAt: db.UTCPtr(r.ApprovedAt),
+		GrantedAt: db.UTCPtr(r.GrantedAt), RejectedBy: r.RejectedBy, RejectedAt: db.UTCPtr(r.RejectedAt), RevokeReason: str(r.RevokeReason),
+		RevokeRequestedBy: r.RevokeRequestedBy, RevokeRequestedAt: db.UTCPtr(r.RevokeRequestedAt), RevokedBy: r.RevokedBy,
+		RevokedAt: db.UTCPtr(r.RevokedAt),
 	}
 }
 
@@ -171,7 +157,7 @@ func roleRowOf(a RoleAssignment) roleRow {
 	return roleRow{
 		ID: a.ID, UserID: a.UserID, Role: string(a.Role), Reason: a.Reason, Status: string(a.Status),
 		RequestedBy: a.RequestedBy, RequestedAt: a.RequestedAt, ApprovedBy: a.ApprovedBy, ApprovedAt: a.ApprovedAt,
-		GrantedAt: a.GrantedAt, RejectedBy: a.RejectedBy, RejectedAt: a.RejectedAt, RevokeReason: nullable(a.RevokeReason),
+		GrantedAt: a.GrantedAt, RejectedBy: a.RejectedBy, RejectedAt: a.RejectedAt, RevokeReason: db.Nullable(a.RevokeReason),
 		RevokeRequestedBy: a.RevokeRequestedBy, RevokeRequestedAt: a.RevokeRequestedAt, RevokedBy: a.RevokedBy, RevokedAt: a.RevokedAt,
 	}
 }
@@ -189,7 +175,7 @@ type totpRow struct {
 func (totpRow) TableName() string { return "mfa_totp" }
 
 func (r totpRow) totp() TOTP {
-	return TOTP{UserID: r.UserID, SecretEnc: r.SecretEnc, ConfirmedAt: utcPtr(r.ConfirmedAt), LastUsedStep: r.LastUsedStep, CreatedAt: r.CreatedAt.UTC()}
+	return TOTP{UserID: r.UserID, SecretEnc: r.SecretEnc, ConfirmedAt: db.UTCPtr(r.ConfirmedAt), LastUsedStep: r.LastUsedStep, CreatedAt: r.CreatedAt.UTC()}
 }
 
 // recoveryRow is one mfa_recovery_codes row.
@@ -229,5 +215,5 @@ func accountActionRowOf(r AccountActionRequest) accountActionRow {
 func (r accountActionRow) request() AccountActionRequest {
 	return AccountActionRequest{ID: r.ID, TargetUserID: r.TargetUserID, Action: AccountActionKind(r.Action), Reason: r.Reason,
 		Status: AccountActionStatus(r.Status), RequestedBy: r.RequestedBy, RequestedAt: r.RequestedAt.UTC(), ExpiresAt: r.ExpiresAt.UTC(),
-		ApprovedBy: r.ApprovedBy, ApprovedAt: utcPtr(r.ApprovedAt)}
+		ApprovedBy: r.ApprovedBy, ApprovedAt: db.UTCPtr(r.ApprovedAt)}
 }

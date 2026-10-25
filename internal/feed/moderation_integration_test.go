@@ -10,6 +10,7 @@ import (
 	"uuid"
 
 	"koro/internal/audit"
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/entitlements"
 	"koro/internal/feed"
@@ -48,7 +49,7 @@ func (fixedTargeting) DispatchOfPost(context.Context, uuid.UUID, uuid.UUID) (out
 // targeted post's transaction).
 type failingAudit struct {
 	fail string
-	log  auditLog
+	log  audittest.Recorder
 }
 
 func (a *failingAudit) Log(ctx context.Context, e audit.Event) error {
@@ -72,7 +73,7 @@ func TestTargetedPost_ConsumeAndPostSameTx_RollbackReleases(t *testing.T) {
 	company, author, admin := w.org(t, feed.AuthorCompany), w.user(t), w.user(t)
 	clk := clock.NewFake(time.Now().UTC().Truncate(time.Microsecond))
 	idem := idempotency.New(idempotency.Deps{Tx: d.Tx, Store: idempotency.NewGormStore(d.ORM), Clock: clk, Log: obs.Discard()})
-	entsMod, err := entitlements.New(entitlements.Deps{Store: entitlements.NewGormStore(d.ORM), Tx: d.Tx, Audit: &auditLog{},
+	entsMod, err := entitlements.New(entitlements.Deps{Store: entitlements.NewGormStore(d.ORM), Tx: d.Tx, Audit: &audittest.Recorder{},
 		Idempotency: idem, Clock: clk, Log: obs.Discard()})
 	if err != nil {
 		t.Fatal(err)

@@ -157,18 +157,18 @@ func (m *mailer) sent() []notify.Message {
 	return slices.Clone(m.msgs)
 }
 
-// txKey marks the transaction a call ran in (spyTx).
+// txKey marks the transaction a call ran in (commitSpyTx).
 type txKey struct{}
 
-// spyTx is db.NopTx that numbers its outermost transactions and remembers
+// commitSpyTx is db.NopTx that numbers its outermost transactions and remembers
 // whether each one committed.
-type spyTx struct {
+type commitSpyTx struct {
 	n      atomic.Int64
 	mu     sync.Mutex
 	failed []any
 }
 
-func (s *spyTx) WithTx(ctx context.Context, fn func(ctx context.Context) error) error {
+func (s *commitSpyTx) WithTx(ctx context.Context, fn func(ctx context.Context) error) error {
 	if ctx.Value(txKey{}) != nil {
 		return fn(ctx)
 	}
@@ -182,7 +182,7 @@ func (s *spyTx) WithTx(ctx context.Context, fn func(ctx context.Context) error) 
 	return err
 }
 
-func (s *spyTx) WithSerializableTx(ctx context.Context, fn func(ctx context.Context) error) error {
+func (s *commitSpyTx) WithSerializableTx(ctx context.Context, fn func(ctx context.Context) error) error {
 	return s.WithTx(ctx, fn)
 }
 
@@ -204,7 +204,7 @@ func (s *spyStore) InsertUser(ctx context.Context, u identity.User) error {
 type env struct {
 	clk       *clock.Fake
 	store     *spyStore
-	tx        *spyTx
+	tx        *commitSpyTx
 	out       *outbox.Mem
 	q         *queue.Mem
 	lim       *ratelimit.Mem
@@ -242,7 +242,7 @@ func newEnv(t *testing.T, opts ...func(*identity.Deps)) *env {
 		t.Fatal(err)
 	}
 	e := &env{
-		clk: clk, store: &spyStore{MemStore: identity.NewMemStore(clk.Now)}, tx: &spyTx{}, out: outbox.NewMem(clk), q: queue.NewMem(),
+		clk: clk, store: &spyStore{MemStore: identity.NewMemStore(clk.Now)}, tx: &commitSpyTx{}, out: outbox.NewMem(clk), q: queue.NewMem(),
 		lim: ratelimit.NewMem(clk), consent: &fakeRecorder{}, notices: newNotices(), mail: &mailer{},
 		hasher: &countingHasher{h: sharedHasher()}, members: map[uuid.UUID][]authz.Membership{}, subs: outbox.NewRegistry(),
 		chal: identity.NewMemChallenges(clk),
@@ -353,13 +353,6 @@ func (e *env) login(t *testing.T, email string, client identity.ClientKind) (ide
 		t.Fatalf("login: %v", err)
 	}
 	return res, authz.Actor{Kind: authz.KindUser, UserID: res.Session.UserID, SessionID: res.Session.ID, StudentStatus: authz.StudentNone}
-}
-
-func wantErr(t *testing.T, err, want error) {
-	t.Helper()
-	if !errors.Is(err, want) {
-		t.Fatalf("error = %v, want %v", err, want)
-	}
 }
 
 func wantStatus(t *testing.T, err error, status int) {

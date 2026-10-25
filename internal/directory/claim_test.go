@@ -17,10 +17,12 @@ import (
 	"koro/internal/identity"
 	"koro/internal/notify"
 	"koro/internal/orgs"
+	"koro/internal/platform/db/dbtest"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/privacy"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // verifications is identity's student verification (orgs and directory).
@@ -178,7 +180,7 @@ func (r *removedFiles) remove(_ context.Context, _ authz.Actor, id uuid.UUID) er
 // GrantRole records the transaction of the grant (and can fail it).
 func (s *spyOrgs) GrantRole(ctx context.Context, orgID, userID uuid.UUID, role authz.MemberRole, reason string) error {
 	s.mu.Lock()
-	s.grants = append(s.grants, txOf(ctx))
+	s.grants = append(s.grants, dbtest.TxOf(ctx))
 	fail := s.failGrant
 	s.mu.Unlock()
 	if fail != nil {
@@ -190,7 +192,7 @@ func (s *spyOrgs) GrantRole(ctx context.Context, orgID, userID uuid.UUID, role a
 // UpdateClaim records the transaction of each claim write.
 func (s *spyStore) UpdateClaim(ctx context.Context, c directory.ClubClaim) (directory.ClubClaim, error) {
 	s.mu.Lock()
-	s.claimUpdates = append(s.claimUpdates, txOf(ctx))
+	s.claimUpdates = append(s.claimUpdates, dbtest.TxOf(ctx))
 	s.mu.Unlock()
 	return s.Store.UpdateClaim(ctx, c)
 }
@@ -266,13 +268,13 @@ func TestCreateClaim_Minor_403(t *testing.T) {
 	w := newClaimWorld(t)
 	_, err := w.svc.CreateClubClaim(t.Context(), w.student(t, w.uni, true), w.club.Club.OrgID,
 		directory.ClaimInput{RoleInClub: "Başkan", EvidenceText: "Tutanak"})
-	wantCode(t, err, 403, "directory.minor_restricted")
+	problemtest.WantProblem(t, err, 403, "directory.minor_restricted")
 	// An account without a student verification: H-52, the orgs value.
 	unverified := authz.Actor{Kind: authz.KindUser, UserID: uuid.NewV7(), SessionID: uuid.NewV7()}
 	_, err = w.svc.CreateClubClaim(t.Context(), unverified, w.club.Club.OrgID, directory.ClaimInput{RoleInClub: "Başkan", EvidenceText: "x"})
-	wantErr(t, err, orgs.ErrVerificationRequired)
-	wantCode(t, err, 403, "students.verification_required")
-	if len(w.audit.of(authz.DirectoryClubClaimCreate)) != 0 {
+	problemtest.WantErr(t, err, orgs.ErrVerificationRequired)
+	problemtest.WantProblem(t, err, 403, "students.verification_required")
+	if len(w.audit.Of(authz.DirectoryClubClaimCreate)) != 0 {
 		t.Fatal("a refused claim was audited as created")
 	}
 }
@@ -282,17 +284,17 @@ func TestCreateClaim_UniversityMismatch_422(t *testing.T) {
 	w := newClaimWorld(t)
 	_, err := w.svc.CreateClubClaim(t.Context(), w.student(t, w.other, false), w.club.Club.OrgID,
 		directory.ClaimInput{RoleInClub: "Başkan", EvidenceText: "Tutanak"})
-	wantCode(t, err, 422, "directory.university_mismatch")
+	problemtest.WantProblem(t, err, 422, "directory.university_mismatch")
 	// Unknown club 404; no evidence 422; a club admin of the club 409.
 	s := w.student(t, w.uni, false)
 	_, err = w.svc.CreateClubClaim(t.Context(), s, uuid.NewV7(), directory.ClaimInput{RoleInClub: "Başkan", EvidenceText: "x"})
-	wantErr(t, err, problem.ErrNotFound)
+	problemtest.WantErr(t, err, problem.ErrNotFound)
 	_, err = w.svc.CreateClubClaim(t.Context(), s, w.club.Club.OrgID, directory.ClaimInput{RoleInClub: "Başkan", EvidenceText: " \n "})
-	wantCode(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 	admin := s
 	admin.Memberships = []authz.Membership{{OrgID: w.club.Club.OrgID, OrgKind: authz.OrgClub, Role: authz.MemberClubAdmin}}
 	_, err = w.svc.CreateClubClaim(t.Context(), admin, w.club.Club.OrgID, directory.ClaimInput{RoleInClub: "Başkan", EvidenceText: "x"})
-	wantCode(t, err, 409, "directory.invalid_state")
+	problemtest.WantProblem(t, err, 409, "directory.invalid_state")
 }
 
 func TestCreateClaim_DuplicatePending_409(t *testing.T) {
@@ -304,7 +306,7 @@ func TestCreateClaim_DuplicatePending_409(t *testing.T) {
 		t.Fatalf("claim = %+v", first)
 	}
 	_, err := w.svc.CreateClubClaim(t.Context(), s, w.club.Club.OrgID, directory.ClaimInput{RoleInClub: "YK üyesi", EvidenceText: "x"})
-	wantCode(t, err, 409, "directory.claim_pending")
+	problemtest.WantProblem(t, err, 409, "directory.claim_pending")
 	// Another club is fine; after a withdrawal the same club is too.
 	w.claim(t, s, w.sens.Club.OrgID)
 	if _, err := w.svc.WithdrawMyClubClaim(t.Context(), s, first.ID); err != nil {
@@ -312,7 +314,7 @@ func TestCreateClaim_DuplicatePending_409(t *testing.T) {
 	}
 	w.claim(t, s, w.club.Club.OrgID)
 	// The claim is the claimant's record: audited without org scope.
-	evs := w.audit.of(authz.DirectoryClubClaimCreate)
+	evs := w.audit.Of(authz.DirectoryClubClaimCreate)
 	if len(evs) != 3 || evs[0].OrgID != nil || evs[0].Metadata[audit.MetaSubjectUserID] != s.UserID.String() {
 		t.Fatalf("audit = %+v", evs)
 	}
@@ -377,17 +379,17 @@ func TestWithdrawClaim_OnlyPending(t *testing.T) {
 	c := w.claim(t, s, w.club.Club.OrgID)
 	// Another user's claim is invisible (404), the platform admin's too.
 	_, err := w.svc.WithdrawMyClubClaim(t.Context(), w.student(t, w.uni, false), c.ID)
-	wantErr(t, err, problem.ErrNotFound)
+	problemtest.WantErr(t, err, problem.ErrNotFound)
 	_, err = w.svc.WithdrawMyClubClaim(t.Context(), pad(t), c.ID)
-	wantErr(t, err, problem.ErrNotFound)
+	problemtest.WantErr(t, err, problem.ErrNotFound)
 	v, err := w.svc.WithdrawMyClubClaim(t.Context(), s, c.ID)
 	if err != nil || v.Claim.Status != directory.ClaimWithdrawn || v.ClubName != "Satranç Kulübü" {
 		t.Fatalf("withdraw = %+v, %v", v, err)
 	}
 	_, err = w.svc.WithdrawMyClubClaim(t.Context(), s, c.ID)
-	wantCode(t, err, 409, "directory.claim_state")
+	problemtest.WantProblem(t, err, 409, "directory.claim_state")
 	_, err = w.svc.AdminDecideClubClaim(t.Context(), pad(t), c.ID, approveIn())
-	wantCode(t, err, 409, "directory.claim_state")
+	problemtest.WantProblem(t, err, 409, "directory.claim_state")
 	// A decided claim cannot be withdrawn either.
 	d := w.claim(t, s, w.sens.Club.OrgID)
 	if _, err := w.svc.AdminDecideClubClaim(t.Context(), pad(t), d.ID,
@@ -395,8 +397,8 @@ func TestWithdrawClaim_OnlyPending(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = w.svc.WithdrawMyClubClaim(t.Context(), s, d.ID)
-	wantCode(t, err, 409, "directory.claim_state")
-	if n := len(w.audit.of(authz.DirectoryClubClaimWithdraw)); n != 1 {
+	problemtest.WantProblem(t, err, 409, "directory.claim_state")
+	if n := len(w.audit.Of(authz.DirectoryClubClaimWithdraw)); n != 1 {
 		t.Fatalf("withdraw audits = %d", n)
 	}
 	// The claimant's list: newest first, without the decision note.
@@ -451,7 +453,7 @@ func TestDecideClaim_ApproveGrantsClubAdminInSameTx(t *testing.T) {
 		t.Fatalf("payload = %+v, %v", p, err)
 	}
 	// The approval is org-scoped in the audit (the club's admins see who became an admin).
-	au := w.audit.of(authz.DirectoryClubClaimDecide)
+	au := w.audit.Of(authz.DirectoryClubClaimDecide)
 	if len(au) != 1 || au[0].OrgID == nil || *au[0].OrgID != w.club.Club.OrgID || au[0].Metadata["granted_role"] != "club_admin" {
 		t.Fatalf("decide audit = %+v", au)
 	}
@@ -489,20 +491,20 @@ func TestDecideClaim_GrantFailure_LeavesClaimPending(t *testing.T) {
 	// The claimant turned out to be a minor in identity: orgs refuses.
 	w.users.set(identity.UserSummary{ID: s.UserID, Status: identity.StatusActive, IsMinor: true})
 	_, err := w.svc.AdminDecideClubClaim(t.Context(), pad(t), c.ID, approveIn())
-	wantCode(t, err, 422, "orgs.club_admin_requires_adult_student")
+	problemtest.WantProblem(t, err, 422, "orgs.club_admin_requires_adult_student")
 	// The verification lapsed since the claim.
 	w.users.set(identity.UserSummary{ID: s.UserID, Status: identity.StatusActive})
 	w.ver.drop(s.UserID)
 	_, err = w.svc.AdminDecideClubClaim(t.Context(), pad(t), c.ID, approveIn())
-	wantCode(t, err, 422, "orgs.club_admin_requires_adult_student")
+	problemtest.WantProblem(t, err, 422, "orgs.club_admin_requires_adult_student")
 	// The verification moved to another university.
 	w.ver.set(s.UserID, w.other.ID)
 	_, err = w.svc.AdminDecideClubClaim(t.Context(), pad(t), c.ID, approveIn())
-	wantCode(t, err, 422, "directory.university_mismatch")
+	problemtest.WantProblem(t, err, 422, "directory.university_mismatch")
 	got, _ := w.mem.GetClaim(t.Context(), c.ID)
 	club, _ := w.mem.GetClub(t.Context(), w.club.Club.OrgID)
 	if got.Status != directory.ClaimPending || got.ReviewedBy != nil || club.ClaimStatus != directory.ClaimUnclaimed ||
-		len(eventsOf(w.out, domainevent.TopicClubClaimDecided)) != 0 || len(w.audit.of(authz.DirectoryClubClaimDecide)) != 0 {
+		len(eventsOf(w.out, domainevent.TopicClubClaimDecided)) != 0 || len(w.audit.Of(authz.DirectoryClubClaimDecide)) != 0 {
 		t.Fatalf("after failures: claim %+v, club %s, events %v", got, club.ClaimStatus, w.out.Topics())
 	}
 	// A rejection needs no grant.
@@ -519,7 +521,7 @@ func TestDecideClaim_ReviewerIsClaimant_Rejected(t *testing.T) {
 	admin.PlatformRoles, admin.MFAVerified = []authz.PlatformRole{authz.PlatformAdmin}, true
 	c := w.claim(t, admin, w.club.Club.OrgID)
 	_, err := w.svc.AdminDecideClubClaim(t.Context(), admin, c.ID, approveIn())
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	// A university rep who claims a club of their own university: being the
 	// claimant, they do not count as its approver (a platform admin decides)
 	// and they cannot decide it themselves.
@@ -529,12 +531,12 @@ func TestDecideClaim_ReviewerIsClaimant_Rejected(t *testing.T) {
 	repStudent.StudentStatus, repStudent.UniversityID = authz.StudentVerified, new(w.uni.ID)
 	rc := w.claim(t, repStudent, w.sens.Club.OrgID) // sensitive: platform admin anyway
 	_, err = w.svc.AdminDecideClubClaim(t.Context(), repStudent, rc.ID, approveIn())
-	wantErr(t, err, problem.ErrNotFound)
+	problemtest.WantErr(t, err, problem.ErrNotFound)
 	// On a non-sensitive club of their university the only rep is the
 	// claimant: a platform admin approves, the rep cannot (Y6).
 	rc2 := w.claim(t, repStudent, w.club.Club.OrgID)
 	_, err = w.svc.AdminDecideClubClaim(t.Context(), repStudent, rc2.ID, approveIn())
-	wantErr(t, err, problem.ErrNotFound)
+	problemtest.WantErr(t, err, problem.ErrNotFound)
 	if v, err := w.svc.AdminGetClubClaim(t.Context(), pad(t), rc2.ID); err != nil || v.Approver != authz.ClaimApproverPlatformAdmin {
 		t.Fatalf("approver of the only rep's own claim = %+v, %v", v.Approver, err)
 	}
@@ -564,16 +566,16 @@ func TestDecideClaim_UniversityRepApproves(t *testing.T) {
 	// A platform admin may not decide where a rep does (403); another
 	// university's rep does not see the claim (404); support never decides.
 	_, err := w.svc.AdminDecideClubClaim(t.Context(), pad(t), c.ID, approveIn())
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	_, err = w.svc.AdminDecideClubClaim(t.Context(), otherRep, c.ID, approveIn())
-	wantErr(t, err, problem.ErrNotFound)
+	problemtest.WantErr(t, err, problem.ErrNotFound)
 	_, err = w.svc.AdminDecideClubClaim(t.Context(), persona(t, "support"), c.ID, approveIn())
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	// A rep without an MFA session is asked for it.
 	noMFA := rep
 	noMFA.MFAVerified = false
 	_, err = w.svc.AdminDecideClubClaim(t.Context(), noMFA, c.ID, approveIn())
-	wantErr(t, err, authz.ErrMFARequired)
+	problemtest.WantErr(t, err, authz.ErrMFARequired)
 	// The rep reads it (with the approver) and approves it.
 	got, err := w.svc.AdminGetClubClaim(t.Context(), rep, c.ID)
 	if err != nil || got.Approver != authz.ClaimApproverRep {
@@ -586,13 +588,13 @@ func TestDecideClaim_UniversityRepApproves(t *testing.T) {
 	if err != nil || v.Claim.Status != directory.ClaimApproved || *v.Claim.ReviewedBy != rep.UserID || !w.isAdmin(t, w.club.Club.OrgID, s.UserID) {
 		t.Fatalf("rep decision = %+v, %v", v.Claim, err)
 	}
-	if au := w.audit.of(authz.DirectoryClubClaimDecide); len(au) != 1 || au[0].Metadata["approver"] != authz.ClaimApproverRep {
+	if au := w.audit.Of(authz.DirectoryClubClaimDecide); len(au) != 1 || au[0].Metadata["approver"] != authz.ClaimApproverRep {
 		t.Fatalf("decide audit = %+v", au)
 	}
 	// A sensitive club's claim stays with platform staff: the rep does not see it.
 	sc := w.claim(t, s, w.sens.Club.OrgID)
 	_, err = w.svc.AdminDecideClubClaim(t.Context(), rep, sc.ID, approveIn())
-	wantErr(t, err, problem.ErrNotFound)
+	problemtest.WantErr(t, err, problem.ErrNotFound)
 	if _, err := w.svc.AdminGetClubClaim(t.Context(), rep, sc.ID); !errors.Is(err, problem.ErrNotFound) {
 		t.Fatalf("rep reads a sensitive club's claim: %v", err)
 	}
@@ -602,9 +604,9 @@ func TestDecideClaim_UniversityRepApproves(t *testing.T) {
 	// An unknown claim: 404 for the rep and the platform admin; 403 for
 	// everyone without a decide path, before anything is read.
 	_, err = w.svc.AdminDecideClubClaim(t.Context(), rep, uuid.NewV7(), approveIn())
-	wantErr(t, err, problem.ErrNotFound)
+	problemtest.WantErr(t, err, problem.ErrNotFound)
 	_, err = w.svc.AdminDecideClubClaim(t.Context(), s, uuid.NewV7(), approveIn())
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 }
 
 func TestAdminListClaims_RepScope(t *testing.T) {
@@ -634,15 +636,15 @@ func TestAdminListClaims_RepScope(t *testing.T) {
 	noMFA := rep
 	noMFA.MFAVerified = false
 	_, err = w.svc.AdminListClubClaims(t.Context(), noMFA, directory.AdminClaimQuery{})
-	wantErr(t, err, authz.ErrMFARequired)
+	problemtest.WantErr(t, err, authz.ErrMFARequired)
 	for _, other := range []authz.Actor{w.student(t, w.uni, false), persona(t, "moderator")} {
 		_, err = w.svc.AdminListClubClaims(t.Context(), other, directory.AdminClaimQuery{})
-		wantErr(t, err, authz.ErrForbidden)
+		problemtest.WantErr(t, err, authz.ErrForbidden)
 	}
 	_, err = w.svc.AdminListClubClaims(t.Context(), pad(t), directory.AdminClaimQuery{Status: "lost"})
-	wantCode(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 	// Every queue read is audited (claim IDs; sensitive when a sensitive club's claim is in it).
-	au := w.audit.of(authz.DirectoryClubClaimList)
+	au := w.audit.Of(authz.DirectoryClubClaimList)
 	if len(au) != 3 || au[0].Metadata["scope"] != authz.ClaimApproverRep || au[0].Metadata[audit.MetaSensitive] != nil ||
 		au[1].Metadata[audit.MetaSensitive] != true {
 		t.Fatalf("queue audits = %+v", au)
@@ -661,7 +663,7 @@ func TestAdminGetClaim_Audited(t *testing.T) {
 			t.Fatalf("%s view = %+v, %v", staff, v, err)
 		}
 	}
-	au := w.audit.of(authz.DirectoryClubClaimList)
+	au := w.audit.Of(authz.DirectoryClubClaimList)
 	if len(au) != 2 {
 		t.Fatalf("read audits = %d, want 2", len(au))
 	}
@@ -673,18 +675,18 @@ func TestAdminGetClaim_Audited(t *testing.T) {
 	}
 	// No read without the role (403 before reading), none of an unknown claim (404); nothing audited.
 	_, err := w.svc.AdminGetClubClaim(t.Context(), s, c.ID)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	_, err = w.svc.AdminGetClubClaim(t.Context(), persona(t, "moderator"), c.ID)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	_, err = w.svc.AdminGetClubClaim(t.Context(), pad(t), uuid.NewV7())
-	wantErr(t, err, problem.ErrNotFound)
+	problemtest.WantErr(t, err, problem.ErrNotFound)
 	// A failing audit write withholds the view.
-	w.audit.setFail(errors.New("audit down"))
+	w.audit.Fail(errors.New("audit down"))
 	if _, err := w.svc.AdminGetClubClaim(t.Context(), pad(t), c.ID); err == nil {
 		t.Fatal("view handed out without its audit record")
 	}
-	w.audit.setFail(nil)
-	if n := len(w.audit.of(authz.DirectoryClubClaimList)); n != 2 {
+	w.audit.Fail(nil)
+	if n := len(w.audit.Of(authz.DirectoryClubClaimList)); n != 2 {
 		t.Fatalf("read audits = %d after the refusals", n)
 	}
 }

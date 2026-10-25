@@ -12,6 +12,7 @@ import (
 	"koro/internal/consent"
 	"koro/internal/identity"
 	"koro/internal/platform/httpx"
+	"koro/internal/platform/problem/problemtest"
 	"koro/internal/platform/token"
 )
 
@@ -53,8 +54,8 @@ func TestRegister_ExistingEmail_Returns202NoLeak(t *testing.T) {
 	errTaken := e.svc.Register(ctx, authz.Anonymous(), bad)
 	bad.Email = "new@example.com"
 	errNew := e.svc.Register(ctx, authz.Anonymous(), bad)
-	wantErr(t, errTaken, consent.ErrTextMismatch)
-	wantErr(t, errNew, consent.ErrTextMismatch)
+	problemtest.WantErr(t, errTaken, consent.ErrTextMismatch)
+	problemtest.WantErr(t, errNew, consent.ErrTextMismatch)
 
 	// An unverified owner gets a fresh verification e-mail.
 	if err := e.svc.Register(ctx, authz.Anonymous(), e.registration("pending@example.com")); err != nil {
@@ -68,7 +69,7 @@ func TestRegister_ExistingEmail_Returns202NoLeak(t *testing.T) {
 	if first == second {
 		t.Fatal("no new verification token for an unverified owner")
 	}
-	wantErr(t, e.svc.ConfirmEmail(ctx, authz.Anonymous(), first), identity.ErrInvalidToken) // replaced
+	problemtest.WantErr(t, e.svc.ConfirmEmail(ctx, authz.Anonymous(), first), identity.ErrInvalidToken) // replaced
 }
 
 func TestRegister_StudentWithoutBirthDate_422(t *testing.T) {
@@ -77,7 +78,7 @@ func TestRegister_StudentWithoutBirthDate_422(t *testing.T) {
 	r := e.registration("student@example.com")
 	r.BirthDate = nil
 	err := e.svc.Register(t.Context(), authz.Anonymous(), r)
-	wantErr(t, err, identity.ErrBirthDateRequired)
+	problemtest.WantErr(t, err, identity.ErrBirthDateRequired)
 	wantStatus(t, err, http.StatusUnprocessableEntity)
 	if e.hasher.hash.Load() != 0 {
 		t.Fatal("an invalid request reached the hasher")
@@ -92,7 +93,7 @@ func TestRegister_StudentWithoutBirthDate_422(t *testing.T) {
 	r = e.registration("future@example.com")
 	tomorrow := r.BirthDate.AddDays(365 * 30)
 	r.BirthDate = &tomorrow
-	wantErr(t, e.svc.Register(t.Context(), authz.Anonymous(), r), identity.ErrInvalidBirthDate)
+	problemtest.WantErr(t, e.svc.Register(t.Context(), authz.Anonymous(), r), identity.ErrInvalidBirthDate)
 }
 
 func TestRegister_RecordsConsentInSameTx(t *testing.T) {
@@ -153,11 +154,11 @@ func TestCreateSession_PendingEmail_403(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := e.svc.CreateSession(t.Context(), authz.Anonymous(), identity.Login{Email: "p@example.com", Password: goodPassword})
-	wantErr(t, err, identity.ErrEmailNotVerified)
+	problemtest.WantErr(t, err, identity.ErrEmailNotVerified)
 	wantStatus(t, err, http.StatusForbidden)
 	// A wrong password on the same account is the generic 401.
 	_, err = e.svc.CreateSession(t.Context(), authz.Anonymous(), identity.Login{Email: "p@example.com", Password: "wrong-password-123"})
-	wantErr(t, err, identity.ErrInvalidCredentials)
+	problemtest.WantErr(t, err, identity.ErrInvalidCredentials)
 }
 
 func TestCreateSession_WrongPassword_SameTimingPath(t *testing.T) {
@@ -235,7 +236,7 @@ func TestSession_IdleExpirySlides_AbsoluteCaps(t *testing.T) {
 	}
 	// …but never its 30-day absolute lifetime.
 	e.clk.Advance(6 * 24 * time.Hour)
-	wantErr(t, auth(), identity.ErrUnauthenticated)
+	problemtest.WantErr(t, auth(), identity.ErrUnauthenticated)
 
 	// Unused for longer than the idle window, a session ends.
 	res2, _ := e.login(t, "slide@example.com", identity.ClientMobile)
@@ -244,7 +245,7 @@ func TestSession_IdleExpirySlides_AbsoluteCaps(t *testing.T) {
 	}
 	e.clk.Advance(31 * 24 * time.Hour)
 	_, err := e.svc.Authenticate(t.Context(), httpx.Credential{Transport: httpx.TransportBearer, TokenHash: [32]byte(token.Hash(res2.Token))})
-	wantErr(t, err, identity.ErrUnauthenticated)
+	problemtest.WantErr(t, err, identity.ErrUnauthenticated)
 
 	// An MFA role caps any session at 30 min idle / 12 h (03 §6.4).
 	res3, _ := e.login(t, "slide@example.com", identity.ClientMobile)
@@ -256,7 +257,7 @@ func TestSession_IdleExpirySlides_AbsoluteCaps(t *testing.T) {
 	}
 	e.clk.Advance(31 * time.Minute)
 	_, err = e.svc.Authenticate(t.Context(), cred3)
-	wantErr(t, err, identity.ErrUnauthenticated)
+	problemtest.WantErr(t, err, identity.ErrUnauthenticated)
 	res4, _ := e.login(t, "slide@example.com", identity.ClientWeb)
 	if got := res4.Session.AbsoluteExpiresAt.Sub(res4.Session.CreatedAt); got != 12*time.Hour {
 		t.Fatalf("privileged absolute window %v", got)
@@ -281,9 +282,9 @@ func TestSession_SuspendedUser_401(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := e.svc.Authenticate(t.Context(), cred)
-	wantErr(t, err, identity.ErrUnauthenticated)
+	problemtest.WantErr(t, err, identity.ErrUnauthenticated)
 	wantStatus(t, err, http.StatusUnauthorized)
 	// Nor can it sign in again (the same 401 as a wrong password).
 	_, err = e.svc.CreateSession(t.Context(), authz.Anonymous(), identity.Login{Email: "s@example.com", Password: goodPassword})
-	wantErr(t, err, identity.ErrInvalidCredentials)
+	problemtest.WantErr(t, err, identity.ErrInvalidCredentials)
 }

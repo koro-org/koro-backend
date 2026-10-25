@@ -13,6 +13,7 @@ import (
 	"koro/internal/orders"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 func collectionResource(c ReceivableCollection) authz.Resource {
@@ -37,7 +38,7 @@ func (s *service) ListCollections(ctx context.Context, a authz.Actor, q Collecti
 		return CollectionPage{}, q.invalid
 	}
 	if q.Filter.Status != "" && !q.Filter.Status.Valid() {
-		return CollectionPage{}, fieldErr("query.status", "is not a collection status")
+		return CollectionPage{}, problem.Field("query.status", "is not a collection status")
 	}
 	limit := page.ClampLimit(q.Limit)
 	rows, err := s.d.Store.ListCollections(ctx, q.Filter, q.After, limit+1)
@@ -61,7 +62,7 @@ func (s *service) CreateCollection(ctx context.Context, a authz.Actor, in Collec
 		return ReceivableCollection{}, err
 	}
 	if in.IncomingTransferID == uuid.Nil() || in.OrderLineID == uuid.Nil() {
-		return ReceivableCollection{}, fieldErr("body", "incoming_transfer_id and order_line_id are required")
+		return ReceivableCollection{}, problem.Field("body", "incoming_transfer_id and order_line_id are required")
 	}
 	if s.d.LedgerLines == nil {
 		return ReceivableCollection{}, ErrUnavailable
@@ -82,7 +83,7 @@ func (s *service) CreateCollection(ctx context.Context, a authz.Actor, in Collec
 			return uuid.Nil(), ErrInvalidState
 		}
 		if t.ReceiptFileID == nil || strings.TrimSpace(t.BankReference) == "" {
-			return uuid.Nil(), fieldErr("body.incoming_transfer_id", "requires a bank reference and transfer receipt")
+			return uuid.Nil(), problem.Field("body.incoming_transfer_id", "requires a bank reference and transfer receipt")
 		}
 		if err := s.checkFile(ctx, "body.incoming_transfer_id", *t.ReceiptFileID, files.PurposeTransferReceipt); err != nil {
 			return uuid.Nil(), err

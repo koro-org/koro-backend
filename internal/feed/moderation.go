@@ -13,6 +13,7 @@ import (
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // Moderation (BE-032; 02 §12.1, §12.10, 03 §5.7, 04 §2.7). Moderators and
@@ -78,7 +79,7 @@ type ActionPage struct {
 // checkModeration validates the common fields of a decision.
 func checkModeration(in ModerationInput) (*string, error) {
 	if !reasonCodePattern.MatchString(in.ReasonCode) {
-		return nil, fieldErr("body.reason_code", "must be 2-40 lowercase letters or underscores")
+		return nil, problem.Field("body.reason_code", "must be 2-40 lowercase letters or underscores")
 	}
 	return cleanText("body.note", in.Note, maxModerationNote)
 }
@@ -92,11 +93,11 @@ func (s *service) linkedReport(ctx context.Context, id *uuid.UUID, t TargetType,
 	r, err := s.d.Store.GetReport(ctx, *id)
 	switch {
 	case errors.Is(err, ErrNotFound):
-		return fieldErr("body.report_id", "must be a report of this target")
+		return problem.Field("body.report_id", "must be a report of this target")
 	case err != nil:
 		return err
 	case r.TargetType != t || r.TargetID != target:
-		return fieldErr("body.report_id", "must be a report of this target")
+		return problem.Field("body.report_id", "must be a report of this target")
 	case !r.Status.Unresolved():
 		return ErrInvalidState
 	}
@@ -135,10 +136,10 @@ func (s *service) ModeratePost(ctx context.Context, a authz.Actor, postID uuid.U
 		return PostModeration{}, err
 	}
 	if !in.Action.postAction() {
-		return PostModeration{}, fieldErr("body.action", "must be approve, hide, remove or restore")
+		return PostModeration{}, problem.Field("body.action", "must be approve, hide, remove or restore")
 	}
 	if in.RestrictedUntil != nil {
-		return PostModeration{}, fieldErr("body.restricted_until", "applies to restrict_org only")
+		return PostModeration{}, problem.Field("body.restricted_until", "applies to restrict_org only")
 	}
 	note, err := checkModeration(in)
 	if err != nil {
@@ -298,16 +299,16 @@ func (s *service) ModerateOrg(ctx context.Context, a authz.Actor, orgID uuid.UUI
 		return OrgModeration{}, err
 	}
 	if !in.Action.orgAction() {
-		return OrgModeration{}, fieldErr("body.action", "must be warn_org, restrict_org or suspend_org")
+		return OrgModeration{}, problem.Field("body.action", "must be warn_org, restrict_org or suspend_org")
 	}
 	now := s.now()
 	switch {
 	case in.Action == ModRestrictOrg && in.RestrictedUntil == nil:
-		return OrgModeration{}, fieldErr("body.restricted_until", "is required for restrict_org")
+		return OrgModeration{}, problem.Field("body.restricted_until", "is required for restrict_org")
 	case in.Action == ModRestrictOrg && (!in.RestrictedUntil.After(now) || in.RestrictedUntil.Sub(now) > maxRestriction):
-		return OrgModeration{}, fieldErr("body.restricted_until", "must be in the future, at most a year ahead")
+		return OrgModeration{}, problem.Field("body.restricted_until", "must be in the future, at most a year ahead")
 	case in.Action != ModRestrictOrg && in.RestrictedUntil != nil:
-		return OrgModeration{}, fieldErr("body.restricted_until", "applies to restrict_org only")
+		return OrgModeration{}, problem.Field("body.restricted_until", "applies to restrict_org only")
 	}
 	note, err := checkModeration(in)
 	if err != nil {

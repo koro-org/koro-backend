@@ -38,15 +38,6 @@ const (
 // catalogResource is the public event list (event_catalog).
 var catalogResource = authz.Resource{Type: authz.TypeEventCatalog}
 
-// orgResource is the authz view of the organiser's management surface
-// (/orgs/{org_id}/events; 03 §3.5 org: Attrs org_kind, org_status).
-func orgResource(o orgs.OrgSummary) authz.Resource {
-	id := o.ID
-	return authz.Resource{Type: authz.TypeOrg, ID: id, OrgID: &id, Attrs: map[string]string{
-		"org_kind": string(o.Kind), "org_status": string(o.Status),
-	}}
-}
-
 // eventResource is the authz view of an event (03 §3.5: OrgID = the
 // organiser; Attrs status, visibility, visibility_university_id, sensitive,
 // event_staff_role of the caller). The sensitive flag is never logged.
@@ -147,39 +138,14 @@ func writable(a authz.Actor, o orgs.OrgSummary) error {
 // closed in v1; ngo is phase 2).
 var organizerKinds = map[orgs.Kind]bool{orgs.KindClub: true, orgs.KindUniversity: true, orgs.KindPlatform: true}
 
-// etagOf is the strong ETag of a version (04 §1.13): the base32 of
-// updated_at's UnixNano, quoted.
-func etagOf(updatedAt time.Time) string {
-	return `"` + strconv.FormatInt(updatedAt.UnixNano(), 32) + `"`
-}
-
-// checkIfMatch applies If-Match (04 §1.13): missing or "*" → 428, no listed
-// tag equal to the current one → 412.
-func checkIfMatch(header, current string) error {
-	h := strings.TrimSpace(header)
-	if h == "" || h == "*" {
-		return ErrPreconditionRequired
-	}
-	for tag := range strings.SplitSeq(h, ",") {
-		if strings.TrimSpace(tag) == current {
-			return nil
-		}
-	}
-	return ErrPreconditionFailed
-}
-
-func fieldErr(location, msg string) error {
-	return problem.ErrValidation.WithFields(problem.FieldError{Location: location, Message: msg})
-}
-
 // cleanText normalises a single-line text (05 §9.5) and checks its length.
 func cleanText(loc, s string, minRunes, maxRunes int) (string, error) {
 	n, err := textx.NormalizeText(s)
 	if err != nil {
-		return "", fieldErr(loc, "contains control or bidi characters")
+		return "", problem.Field(loc, "contains control or bidi characters")
 	}
 	if c := utf8.RuneCountInString(n); c < minRunes || c > maxRunes {
-		return "", fieldErr(loc, "must be "+strconv.Itoa(minRunes)+"-"+strconv.Itoa(maxRunes)+" characters")
+		return "", problem.Field(loc, "must be "+strconv.Itoa(minRunes)+"-"+strconv.Itoa(maxRunes)+" characters")
 	}
 	return n, nil
 }
@@ -199,7 +165,7 @@ func cleanOptional(loc, s string, maxRunes int) (*string, error) {
 // cleanSlug checks a requested slug (events_slug_chk).
 func cleanSlug(loc, s string) (string, error) {
 	if !slugRe.MatchString(s) || len(s) > maxSlug {
-		return "", fieldErr(loc, "must be lower-case letters and digits separated by single hyphens, at most 100")
+		return "", problem.Field(loc, "must be lower-case letters and digits separated by single hyphens, at most 100")
 	}
 	return s, nil
 }
@@ -214,7 +180,7 @@ func cleanOnlineURL(loc, s string) (*string, error) {
 	u, err := url.Parse(s)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || len(s) > maxURL ||
 		!strings.HasPrefix(s, "https://") {
-		return nil, fieldErr(loc, "must be an https:// URL")
+		return nil, problem.Field(loc, "must be an https:// URL")
 	}
 	return &s, nil
 }
@@ -256,12 +222,4 @@ func textSlug(title string) string {
 		return b
 	}
 	return "event"
-}
-
-// trimSlug cuts a slug to n bytes without a trailing hyphen.
-func trimSlug(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return strings.TrimRight(s[:n], "-")
 }

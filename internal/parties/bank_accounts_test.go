@@ -21,6 +21,7 @@ import (
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/outbox"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // Test IBANs (shared vectors of platform/iban; never real accounts).
@@ -187,11 +188,11 @@ func TestBankAccount_OrgSubmit_VerifyApprove_DistinctPeople(t *testing.T) {
 	if err != nil || got.ID != a.ID || got.IBAN != ibanA {
 		t.Fatalf("ApprovedAccount = %+v, %v", got, err)
 	}
-	if n := len(e.audit.of(authz.PartiesBankAccountSubmit)) + len(e.audit.of(authz.PartiesBankAccountVerify)) +
-		len(e.audit.of(authz.PartiesBankAccountApprove)); n != 3 {
+	if n := len(e.audit.Of(authz.PartiesBankAccountSubmit)) + len(e.audit.Of(authz.PartiesBankAccountVerify)) +
+		len(e.audit.Of(authz.PartiesBankAccountApprove)); n != 3 {
 		t.Fatalf("audit records = %d, want 3", n)
 	}
-	if ev := e.audit.of(authz.PartiesBankAccountApprove)[0]; ev.Metadata[audit.MetaReauth] != "password" {
+	if ev := e.audit.Of(authz.PartiesBankAccountApprove)[0]; ev.Metadata[audit.MetaReauth] != "password" {
 		t.Fatalf("approve audit metadata = %v", ev.Metadata)
 	}
 	if got := e.outbox.Topics(); !slices.Equal(got, []string{domainevent.TopicPayeeBankAccountSubmitted,
@@ -213,7 +214,7 @@ func TestBankAccount_VerifierApprovesOwn_403FourEyes(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := e.approveAccount(t, "finance_admin", b.Account.ID)
-	wantProblem(t, err, http.StatusForbidden, "authz.four_eyes_violation")
+	problemtest.WantProblem(t, err, http.StatusForbidden, "authz.four_eyes_violation")
 	if len(e.reauth.calls) != 1 { // the submission's: the refused approval never asked for the proof
 		t.Fatalf("reauth calls = %d", len(e.reauth.calls))
 	}
@@ -239,17 +240,17 @@ func TestBankAccount_SubmitterVerifies_403(t *testing.T) {
 	turned.PlatformRoles, turned.MFAVerified = []authz.PlatformRole{authz.PlatformFinanceAdmin}, true
 	_, err := e.svc.AdminVerifyBankAccount(ctxOf(t, turned), turned, b.Account.ID,
 		parties.VerifyInput{HolderMatchesParty: true, EvidenceOK: true})
-	wantProblem(t, err, http.StatusForbidden, "authz.four_eyes_violation")
+	problemtest.WantProblem(t, err, http.StatusForbidden, "authz.four_eyes_violation")
 	// The second layer: the store refuses the same row.
 	next := b.Account
 	now := e.clk.Now().UTC()
 	next.Status, next.VerifiedBy, next.VerifiedAt = parties.AccountPendingApproval, &turned.UserID, &now
 	_, err = e.store.TransitionBankAccount(t.Context(), next, parties.AccountPendingVerification)
-	wantProblem(t, err, http.StatusForbidden, "authz.four_eyes_violation")
+	problemtest.WantProblem(t, err, http.StatusForbidden, "authz.four_eyes_violation")
 	// Nobody without a platform role is an eye: 403 before the account is read.
 	cla := actor(t, "club_admin")
 	_, err = e.svc.AdminVerifyBankAccount(ctxOf(t, cla), cla, uuid.NewV7(), parties.VerifyInput{HolderMatchesParty: true, EvidenceOK: true})
-	wantProblem(t, err, http.StatusForbidden, "forbidden")
+	problemtest.WantProblem(t, err, http.StatusForbidden, "forbidden")
 }
 
 // TestBankAccount_AdminSubmit_SameAdminApprove_403: an admin submission
@@ -265,15 +266,15 @@ func TestBankAccount_AdminSubmit_SameAdminApprove_403(t *testing.T) {
 		t.Fatalf("admin submit = %+v, %v", b.Account, err)
 	}
 	_, err = e.verifyAccount(t, "platform_admin", b.Account.ID) // no first eye for an admin submission
-	wantProblem(t, err, http.StatusConflict, "parties.invalid_state")
+	problemtest.WantProblem(t, err, http.StatusConflict, "parties.invalid_state")
 	_, err = e.approveAccount(t, "finance_admin", b.Account.ID)
-	wantProblem(t, err, http.StatusForbidden, "authz.four_eyes_violation")
+	problemtest.WantProblem(t, err, http.StatusForbidden, "authz.four_eyes_violation")
 	// The store refuses the same approver (payee_bank_accounts_approver_submitter_chk).
 	next := b.Account
 	now := e.clk.Now().UTC()
 	next.Status, next.ApprovedBy, next.ApprovedAt = parties.AccountApproved, &fin.UserID, &now
 	_, err = e.store.TransitionBankAccount(t.Context(), next, parties.AccountPendingApproval)
-	wantProblem(t, err, http.StatusForbidden, "authz.four_eyes_violation")
+	problemtest.WantProblem(t, err, http.StatusForbidden, "authz.four_eyes_violation")
 	if v, err := e.approveAccount(t, "platform_admin", b.Account.ID); err != nil || v.Account.Status != parties.AccountApproved {
 		t.Fatalf("another admin approves = %+v, %v", v.Account, err)
 	}
@@ -358,13 +359,13 @@ func TestBankAccount_ApproveSupersedesOldInSameTx(t *testing.T) {
 	if approvedN != 1 {
 		t.Fatalf("%d approved accounts", approvedN)
 	}
-	meta := e.audit.of(authz.PartiesBankAccountApprove)[1].Metadata
+	meta := e.audit.Of(authz.PartiesBankAccountApprove)[1].Metadata
 	if meta["superseded_bank_account_id"] != old.Account.ID.String() {
 		t.Fatalf("approve audit = %v", meta)
 	}
 	pad := actor(t, "platform_admin")
 	_, err = e.svc.AdminRevokeBankAccount(ctxOf(t, pad), pad, old.Account.ID, "Eski hesap", proof())
-	wantProblem(t, err, http.StatusConflict, "parties.invalid_state")
+	problemtest.WantProblem(t, err, http.StatusConflict, "parties.invalid_state")
 }
 
 // TestBankAccount_HolderMismatchWithoutNote_422 (T-19): a holder that is
@@ -381,9 +382,9 @@ func TestBankAccount_HolderMismatchWithoutNote_422(t *testing.T) {
 	}
 	fin := actor(t, "finance_admin")
 	_, err := e.svc.AdminVerifyBankAccount(ctxOf(t, fin), fin, b.Account.ID, parties.VerifyInput{EvidenceOK: true})
-	wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
 	_, err = e.svc.AdminVerifyBankAccount(ctxOf(t, fin), fin, b.Account.ID, parties.VerifyInput{HolderMatchesParty: true})
-	wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed") // the evidence must hold: reject instead
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed") // the evidence must hold: reject instead
 
 	// A holder that differs from the title: ticking "matches" is not enough.
 	cla := actor(t, "club_admin")
@@ -397,7 +398,7 @@ func TestBankAccount_HolderMismatchWithoutNote_422(t *testing.T) {
 		t.Fatalf("submit = %+v, %v", other, err)
 	}
 	_, err = e.svc.AdminVerifyBankAccount(ctxOf(t, fin), fin, other.Account.ID, parties.VerifyInput{HolderMatchesParty: true, EvidenceOK: true})
-	wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
 	if cur, _ := e.store.GetBankAccount(t.Context(), other.Account.ID, false); cur.Status != parties.AccountPendingVerification {
 		t.Fatalf("status after the refusal = %s", cur.Status)
 	}
@@ -406,7 +407,7 @@ func TestBankAccount_HolderMismatchWithoutNote_422(t *testing.T) {
 	if err != nil || v.Account.Status != parties.AccountPendingApproval {
 		t.Fatalf("verify with a note = %+v, %v", v.Account, err)
 	}
-	ev := e.audit.of(authz.PartiesBankAccountVerify)[0]
+	ev := e.audit.Of(authz.PartiesBankAccountVerify)[0]
 	if ev.Reason != note || ev.Metadata["holder_matches_party"] != false || ev.Metadata["holder_matches_title"] != false {
 		t.Fatalf("verify audit = %+v", ev)
 	}
@@ -422,7 +423,7 @@ func TestBankAccount_InvalidIBAN_422(t *testing.T) {
 	cla := actor(t, "club_admin")
 	for _, bad := range []string{ibanBad, "DE89370400440532013000", "TR33000610051978645784132", "TR33 0006 1005 1978 6457 8413 2X", ""} {
 		_, err := e.svc.SubmitPayeeBankAccount(ctxOf(t, cla), cla, org("club_a"), py.Payee.ID, e.accountInput(t, bad, "club_admin"), proof())
-		wantProblem(t, err, http.StatusUnprocessableEntity, "parties.iban_invalid")
+		problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "parties.iban_invalid")
 	}
 	if len(e.reauth.calls) != 0 {
 		t.Fatal("an invalid IBAN must be refused before the re-authentication")
@@ -430,7 +431,7 @@ func TestBankAccount_InvalidIBAN_422(t *testing.T) {
 	_, err := e.store.InsertBankAccount(t.Context(), parties.BankAccount{ID: uuid.NewV7(), PayeeID: py.Payee.ID,
 		OrgID: py.Payee.OrgID, IBAN: ibanBad, HolderName: "Örnek", EvidenceFileID: uuid.NewV7(),
 		Status: parties.AccountPendingVerification, SubmittedBy: cla.UserID})
-	wantProblem(t, err, http.StatusUnprocessableEntity, "parties.iban_invalid")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "parties.iban_invalid")
 }
 
 // TestBankAccount_MaskedForOrgRoles: club admins and university reps see
@@ -487,14 +488,14 @@ func TestBankAccount_FullIBANReadAudited(t *testing.T) {
 	if _, err := e.svc.ListPayeeBankAccounts(ctxOf(t, cla), cla, org("club_a"), py.Payee.ID); err != nil {
 		t.Fatal(err)
 	}
-	if n := len(e.audit.of(authz.PartiesBankAccountList)); n != 0 {
+	if n := len(e.audit.Of(authz.PartiesBankAccountList)); n != 0 {
 		t.Fatalf("a masked read was audited (%d)", n)
 	}
 	vs, err := e.svc.ListPayeeBankAccounts(ctxOf(t, fin), fin, org("club_a"), py.Payee.ID)
 	if err != nil || len(vs) != 2 || !vs[0].FullIBAN {
 		t.Fatalf("finance list = %+v, %v", vs, err)
 	}
-	reads := e.audit.of(authz.PartiesBankAccountList)
+	reads := e.audit.Of(authz.PartiesBankAccountList)
 	if len(reads) != 1 || reads[0].ActorUserID == nil || *reads[0].ActorUserID != fin.UserID || reads[0].Metadata["full_iban"] != true ||
 		*reads[0].OrgID != org("club_a") || !slices.Contains(reads[0].Metadata["bank_account_ids"].([]string), b.Account.ID.String()) {
 		t.Fatalf("full read audit = %+v", reads)
@@ -506,11 +507,11 @@ func TestBankAccount_FullIBANReadAudited(t *testing.T) {
 	if _, err := e.svc.AdminDownloadBankAccountEvidence(ctxOf(t, pad), pad, b.Account.ID); err != nil {
 		t.Fatal(err)
 	}
-	reads = e.audit.of(authz.PartiesBankAccountList)
+	reads = e.audit.Of(authz.PartiesBankAccountList)
 	if len(reads) != 3 || reads[1].Metadata["operation"] != "admin_queue" || reads[2].Metadata["operation"] != "evidence_download" {
 		t.Fatalf("audited reads = %+v", reads)
 	}
-	for _, ev := range e.audit.all() {
+	for _, ev := range e.audit.All() {
 		if strings.Contains(dump(ev), ibanA) || strings.Contains(dump(ev), ibanB) {
 			t.Fatalf("an audit record holds a full IBAN: %+v", ev)
 		}
@@ -544,9 +545,9 @@ func TestBankAccount_ApproveRequiresReauth(t *testing.T) {
 	}
 	pad := actor(t, "platform_admin")
 	_, err := e.svc.AdminApproveBankAccount(ctxOf(t, pad), pad, b.Account.ID, identity.ReauthProof{})
-	wantProblem(t, err, http.StatusForbidden, "identity.reauth_required")
+	problemtest.WantProblem(t, err, http.StatusForbidden, "identity.reauth_required")
 	_, err = e.svc.AdminApproveBankAccount(ctxOf(t, pad), pad, b.Account.ID, identity.ReauthProof{Password: "yanlış-parola"})
-	wantProblem(t, err, http.StatusForbidden, "identity.reauth_failed")
+	problemtest.WantProblem(t, err, http.StatusForbidden, "identity.reauth_failed")
 	if cur, _ := e.store.GetBankAccount(t.Context(), b.Account.ID, false); cur.Status != parties.AccountPendingApproval {
 		t.Fatalf("status after refused proofs = %s", cur.Status)
 	}
@@ -556,14 +557,14 @@ func TestBankAccount_ApproveRequiresReauth(t *testing.T) {
 	cla := actor(t, "club_admin")
 	_, err = e.svc.SubmitPayeeBankAccount(ctxOf(t, cla), cla, org("club_a"), py.Payee.ID, e.accountInput(t, ibanB, "club_admin"),
 		identity.ReauthProof{})
-	wantProblem(t, err, http.StatusForbidden, "identity.reauth_required")
+	problemtest.WantProblem(t, err, http.StatusForbidden, "identity.reauth_required")
 	_, err = e.svc.AdminRevokeBankAccount(ctxOf(t, pad), pad, b.Account.ID, "Hesap kapandı", identity.ReauthProof{})
-	wantProblem(t, err, http.StatusForbidden, "identity.reauth_required")
+	problemtest.WantProblem(t, err, http.StatusForbidden, "identity.reauth_required")
 
 	closed := newEnv(t, func(d *parties.Deps) { d.Reauth = nil })
 	cpy := closed.payee(t, vknC)
 	_, err = closed.svc.SubmitPayeeBankAccount(ctxOf(t, cla), cla, org("club_a"), cpy.Payee.ID, closed.accountInput(t, ibanA, "club_admin"), proof())
-	wantProblem(t, err, http.StatusServiceUnavailable, "unavailable")
+	problemtest.WantProblem(t, err, http.StatusServiceUnavailable, "unavailable")
 }
 
 // TestApproved_SecurityNotificationToAllFinance: an approval tells every
@@ -666,26 +667,26 @@ func TestBankAccount_SubmissionRules(t *testing.T) {
 	cla := actor(t, "club_admin")
 	e.orgSubmit(t, py.Payee.ID, ibanA)
 	_, err := e.svc.SubmitPayeeBankAccount(ctxOf(t, cla), cla, org("club_a"), py.Payee.ID, e.accountInput(t, ibanB, "club_admin"), proof())
-	wantProblem(t, err, http.StatusConflict, "parties.bank_account_pending")
+	problemtest.WantProblem(t, err, http.StatusConflict, "parties.bank_account_pending")
 
 	in := e.accountInput(t, ibanB, "club_admin")
 	doc := e.files.add(cla.UserID, nil) // a party_document, not evidence
 	in.EvidenceFileID = doc
 	other := e.payee(t, vknD)
 	_, err = e.svc.SubmitPayeeBankAccount(ctxOf(t, cla), cla, org("club_a"), other.Payee.ID, in, proof())
-	wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
 	stranger := e.files.addPurpose(files.PurposeBankAccountEvidence, actor(t, "other_club_admin").UserID, nil)
 	in.EvidenceFileID = stranger
 	_, err = e.svc.SubmitPayeeBankAccount(ctxOf(t, cla), cla, org("club_a"), other.Payee.ID, in, proof())
-	wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
 
 	// Another org's path: 404 for its admin and for staff alike.
 	uniRep := actor(t, "university_rep")
 	_, err = e.svc.SubmitPayeeBankAccount(ctxOf(t, uniRep), uniRep, org("uni_a"), py.Payee.ID, e.accountInput(t, ibanB, "university_rep"), proof())
-	wantErr(t, err, parties.ErrNotFound)
+	problemtest.WantErr(t, err, parties.ErrNotFound)
 	fin := actor(t, "finance_admin")
 	_, err = e.svc.ListPayeeBankAccounts(ctxOf(t, fin), fin, org("uni_a"), py.Payee.ID)
-	wantErr(t, err, parties.ErrNotFound)
+	problemtest.WantErr(t, err, parties.ErrNotFound)
 
 	// A closed payee takes no account.
 	pad := actor(t, "platform_admin")
@@ -695,7 +696,7 @@ func TestBankAccount_SubmissionRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.SubmitPayeeBankAccount(ctxOf(t, cla), cla, org("club_a"), other.Payee.ID, e.accountInput(t, ibanB, "club_admin"), proof())
-	wantProblem(t, err, http.StatusConflict, "parties.invalid_state")
+	problemtest.WantProblem(t, err, http.StatusConflict, "parties.invalid_state")
 
 	// 06 H-54: a natural person's payee (written past the API) takes no account.
 	sole := parties.LegalParty{ID: uuid.NewV7(), Kind: parties.KindPayee, LegalType: parties.LegalSoleProp, Title: "Ahmet Yılmaz",
@@ -706,7 +707,7 @@ func TestBankAccount_SubmissionRules(t *testing.T) {
 	solePayee := uuid.NewV7()
 	e.store.LinkPayee(solePayee, org("club_a"), sole.ID, "active")
 	_, err = e.svc.SubmitPayeeBankAccount(ctxOf(t, cla), cla, org("club_a"), solePayee, e.accountInput(t, ibanB, "club_admin"), proof())
-	wantErr(t, err, parties.ErrNaturalPersonPayee)
+	problemtest.WantErr(t, err, parties.ErrNaturalPersonPayee)
 }
 
 // TestBankAccount_HTTPAdminQueue pins the admin DTO: the full IBAN, the
@@ -765,18 +766,18 @@ func TestBankAccount_EvidenceMustBeViewable(t *testing.T) {
 	b := e.orgSubmit(t, py.Payee.ID, ibanA)
 	e.files.set(b.Account.EvidenceFileID, func(m *files.FileMeta) { m.ScanStatus = files.ScanPending })
 	_, err := e.verifyAccount(t, "finance_admin", b.Account.ID)
-	wantErr(t, err, files.ErrNotClean)
+	problemtest.WantErr(t, err, files.ErrNotClean)
 	e.files.set(b.Account.EvidenceFileID, func(m *files.FileMeta) { m.ScanStatus = files.ScanClean })
 	if _, err := e.verifyAccount(t, "finance_admin", b.Account.ID); err != nil {
 		t.Fatal(err)
 	}
 	e.files.set(b.Account.EvidenceFileID, func(m *files.FileMeta) { m.ScanStatus = files.ScanInfected })
 	_, err = e.approveAccount(t, "platform_admin", b.Account.ID)
-	wantErr(t, err, files.ErrNotClean)
+	problemtest.WantErr(t, err, files.ErrNotClean)
 	if cur, _ := e.store.GetBankAccount(t.Context(), b.Account.ID, false); cur.Status != parties.AccountPendingApproval {
 		t.Fatalf("status = %s", cur.Status)
 	}
 	pad := actor(t, "platform_admin")
 	_, err = e.svc.AdminDownloadBankAccountEvidence(ctxOf(t, pad), pad, b.Account.ID)
-	wantErr(t, err, files.ErrNotClean)
+	problemtest.WantErr(t, err, files.ErrNotClean)
 }

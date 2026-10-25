@@ -15,47 +15,47 @@ import (
 // registerInteractions adds the 12 operations of BE-029 (04 §2.7, §F.3,
 // §F.5): likes, saves, hides, follows and mutes of the signed-in reader.
 func registerInteractions(api huma.API, h handler) {
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "likePost", Method: http.MethodPut, Path: "/posts/{post_id}/like", DefaultStatus: http.StatusNoContent,
 		Summary: "Like a post",
 		Description: "Idempotent: a repeated like counts once. The post must be a published post the reader may see " +
 			"(404 otherwise). The author organization sees the like count only, never who liked.",
 	}, op.Meta{Action: string(authz.FeedReactionManage), Surface: op.SurfaceResource}, h.likePost)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "unlikePost", Method: http.MethodDelete, Path: "/posts/{post_id}/like", DefaultStatus: http.StatusNoContent,
 		Summary:     "Remove a like",
 		Description: "Idempotent: 204 whether or not the reader had liked the post.",
 	}, op.Meta{Action: string(authz.FeedReactionManage), Surface: op.SurfaceResource}, h.unlikePost)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "savePost", Method: http.MethodPut, Path: "/posts/{post_id}/save", DefaultStatus: http.StatusNoContent,
 		Summary: "Save a post",
 		Description: "Idempotent. The post must be a published post the reader may see (404 otherwise). The author " +
 			"organization sees the save count only.",
 	}, op.Meta{Action: string(authz.FeedSaveManage), Surface: op.SurfaceResource}, h.savePost)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "unsavePost", Method: http.MethodDelete, Path: "/posts/{post_id}/save", DefaultStatus: http.StatusNoContent,
 		Summary:     "Remove a saved post",
 		Description: "Idempotent: 204 whether or not the reader had saved the post.",
 	}, op.Meta{Action: string(authz.FeedSaveManage), Surface: op.SurfaceResource}, h.unsavePost)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "hidePost", Method: http.MethodPost, Path: "/posts/{post_id}/hide", DefaultStatus: http.StatusNoContent,
 		Summary: "Hide a post from my feed",
 		Description: "The post leaves the reader's feed (it stays on the organization page). Idempotent. The post " +
 			"must be a published post the reader may see (404 otherwise).",
 	}, op.Meta{Action: string(authz.FeedHideCreate), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional}, h.hidePost)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "listMySavedPosts", Method: http.MethodGet, Path: "/me/saved-posts",
 		Summary: "List my saved posts",
 		Description: "Newest save first. A saved post the reader may no longer see (removed, hidden by a moderator, " +
 			"out of the audience) is skipped.",
 	}, op.Meta{Action: string(authz.FeedSaveListOwn), Surface: op.SurfaceSelf}, h.listSaved)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "followOrg", Method: http.MethodPut, Path: "/me/follows/{org_id}", DefaultStatus: http.StatusNoContent,
 		Summary: "Follow an organization",
 		Description: "Idempotent. notify asks for a push digest of the organization's non-commercial posts (absent: " +
@@ -63,32 +63,32 @@ func registerInteractions(api huma.API, h handler) {
 			"follows it.",
 	}, op.Meta{Action: string(authz.FeedFollowManage), Surface: op.SurfaceSelf}, h.followOrg)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "unfollowOrg", Method: http.MethodDelete, Path: "/me/follows/{org_id}", DefaultStatus: http.StatusNoContent,
 		Summary:     "Unfollow an organization",
 		Description: "Idempotent: 204 whether or not the reader followed the organization.",
 	}, op.Meta{Action: string(authz.FeedFollowManage), Surface: op.SurfaceSelf}, h.unfollowOrg)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "listMyFollows", Method: http.MethodGet, Path: "/me/follows",
 		Summary:     "List the organizations I follow",
 		Description: "Newest first. source: manual, or auto_membership for a follow that came with a membership.",
 	}, op.Meta{Action: string(authz.FeedFollowListOwn), Surface: op.SurfaceSelf}, h.listFollows)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "muteOrg", Method: http.MethodPut, Path: "/me/mutes/{org_id}", DefaultStatus: http.StatusNoContent,
 		Summary: "Mute an organization",
 		Description: "The organization's posts leave the reader's feed (the feed's block); its page stays readable. " +
 			"Idempotent. Contact request blocks are separate (messaging).",
 	}, op.Meta{Action: string(authz.FeedMuteManage), Surface: op.SurfaceSelf}, h.muteOrg)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "unmuteOrg", Method: http.MethodDelete, Path: "/me/mutes/{org_id}", DefaultStatus: http.StatusNoContent,
 		Summary:     "Unmute an organization",
 		Description: "Idempotent: 204 whether or not the reader had muted the organization.",
 	}, op.Meta{Action: string(authz.FeedMuteManage), Surface: op.SurfaceSelf}, h.unmuteOrg)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "listMyMutes", Method: http.MethodGet, Path: "/me/mutes",
 		Summary:     "List the organizations I muted",
 		Description: "Newest first.",

@@ -36,10 +36,10 @@ func (eduRow) TableName() string { return "edu_verifications" }
 
 func eduRowOf(v EduRecord) eduRow {
 	return eduRow{
-		ID: v.ID, UserID: v.UserID, Method: string(v.Method), EduEmail: nullable(v.EduEmail),
-		EduEmailNormalized: nullable(v.EduEmailNormalized), EmailDomain: nullable(v.EmailDomain),
+		ID: v.ID, UserID: v.UserID, Method: string(v.Method), EduEmail: db.Nullable(v.EduEmail),
+		EduEmailNormalized: db.Nullable(v.EduEmailNormalized), EmailDomain: db.Nullable(v.EmailDomain),
 		UniversityID: v.UniversityID, DocumentFileID: v.DocumentFileID, Status: string(v.Status),
-		VerifiedAt: v.VerifiedAt, ExpiresAt: v.ExpiresAt, ReviewedBy: v.ReviewedBy, ReviewNote: nullable(v.ReviewNote),
+		VerifiedAt: v.VerifiedAt, ExpiresAt: v.ExpiresAt, ReviewedBy: v.ReviewedBy, ReviewNote: db.Nullable(v.ReviewNote),
 		CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt,
 	}
 }
@@ -48,8 +48,8 @@ func (r eduRow) record() EduRecord {
 	return EduRecord{
 		ID: r.ID, UserID: r.UserID, Method: EduMethod(r.Method), EduEmail: str(r.EduEmail),
 		EduEmailNormalized: str(r.EduEmailNormalized), EmailDomain: str(r.EmailDomain), UniversityID: r.UniversityID,
-		DocumentFileID: r.DocumentFileID, Status: EduStatus(r.Status), VerifiedAt: utcPtr(r.VerifiedAt),
-		ExpiresAt: utcPtr(r.ExpiresAt), ReviewedBy: r.ReviewedBy, ReviewNote: str(r.ReviewNote),
+		DocumentFileID: r.DocumentFileID, Status: EduStatus(r.Status), VerifiedAt: db.UTCPtr(r.VerifiedAt),
+		ExpiresAt: db.UTCPtr(r.ExpiresAt), ReviewedBy: r.ReviewedBy, ReviewNote: str(r.ReviewNote),
 		CreatedAt: r.CreatedAt.UTC(), UpdatedAt: r.UpdatedAt.UTC(),
 	}
 }

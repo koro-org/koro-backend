@@ -9,6 +9,7 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/catalog"
@@ -19,6 +20,7 @@ import (
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/money"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // TestLineCommission_Table (06 H-6, 02 §19.2): the commission of a line
@@ -96,7 +98,7 @@ func TestServices_AccountingReviewIsFinance(t *testing.T) {
 	pad, fin := actor(t, "platform_admin"), actor(t, "finance_admin")
 	_, err := e.svc.AdminCreateService(ctxOf(t, pad), pad, catalog.ServiceInput{Code: "logo_banner", NameTR: "Afişte logo",
 		Category: catalog.CategoryLogoPlacement, FulfillmentType: catalog.FulfillOrgBound, AccountingReviewed: true})
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	sv, err := e.svc.AdminCreateService(ctxOf(t, pad), pad, catalog.ServiceInput{Code: "logo_banner", NameTR: "Afişte logo",
 		Category: catalog.CategoryLogoPlacement, FulfillmentType: catalog.FulfillOrgBound, VATClass: catalog.VATWithheld,
 		VATWithholdingNum: ptr(5), VATWithholdingDen: ptr(10), VATWithholdingCode: "616"})
@@ -105,9 +107,9 @@ func TestServices_AccountingReviewIsFinance(t *testing.T) {
 	}
 	_, err = e.svc.AdminCreateService(ctxOf(t, pad), pad, catalog.ServiceInput{Code: "logo_banner", NameTR: "Kopya",
 		Category: catalog.CategoryOther, FulfillmentType: catalog.FulfillOrgBound})
-	wantProblem(t, err, http.StatusConflict, "catalog.service_code_taken")
+	problemtest.WantProblem(t, err, http.StatusConflict, "catalog.service_code_taken")
 	_, err = e.svc.AdminUpdateService(ctxOf(t, pad), pad, sv.ID, catalog.ServicePatch{AccountingReviewed: ptr(true)})
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	got, err := e.svc.AdminUpdateService(ctxOf(t, fin), fin, sv.ID, catalog.ServicePatch{AccountingReviewed: ptr(true),
 		AccountingReviewedRef: ptr("MM-2026-02")})
 	if err != nil || got.AccountingReviewedAt == nil || !got.Sellable() {
@@ -125,9 +127,9 @@ func TestServices_AccountingReviewIsFinance(t *testing.T) {
 		t.Fatalf("name change: %+v %v", got, err)
 	}
 	_, err = e.svc.AdminUpdateService(ctxOf(t, pad), pad, sv.ID, catalog.ServicePatch{})
-	wantProblem(t, err, http.StatusUnprocessableEntity, "catalog.empty_patch")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "catalog.empty_patch")
 	_, err = e.svc.AdminUpdateService(ctxOf(t, pad), pad, sv.ID, catalog.ServicePatch{VATClass: ptr(catalog.VATStandard)})
-	wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed") // withheld fraction left on a standard class
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed") // withheld fraction left on a standard class
 	unreviewed := e.service(t, "workshop_x", catalog.CategoryWorkshop, catalog.FulfillOrgBound, false)
 	ca := actor(t, "club_admin")
 	orgView, err := e.svc.ListServices(ctxOf(t, ca), ca, "")
@@ -167,9 +169,9 @@ func TestCreateOffering_ParentsAndFields(t *testing.T) {
 		return in
 	}
 	_, err := e.svc.CreateOffering(ctx, ca, org("club_a"), base(func(in *catalog.OfferingInput) { in.EventID = &evB }))
-	wantProblem(t, err, http.StatusUnprocessableEntity, "catalog.parent_mismatch")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "catalog.parent_mismatch")
 	_, err = e.svc.CreateOffering(ctx, ca, org("club_a"), base(func(in *catalog.OfferingInput) { in.DefaultPayeeID = &payeeB }))
-	wantProblem(t, err, http.StatusUnprocessableEntity, "catalog.parent_mismatch")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "catalog.parent_mismatch")
 	cancelled := e.events.add("club_a", events.StatusCancelled)
 	for name, in := range map[string]catalog.OfferingInput{
 		"a cancelled event":   base(func(in *catalog.OfferingInput) { in.EventID = &cancelled }),
@@ -193,17 +195,17 @@ func TestCreateOffering_ParentsAndFields(t *testing.T) {
 		}),
 	} {
 		_, err := e.svc.CreateOffering(ctx, ca, org("club_a"), in)
-		if s, _ := problemOf(err); s != http.StatusUnprocessableEntity {
+		if s, _ := problemtest.StatusCode(err); s != http.StatusUnprocessableEntity {
 			t.Errorf("%s: %v, want 422", name, err)
 		}
 	}
 	// IDOR: another club's surface is 404, a member without the role 403.
 	_, err = e.svc.CreateOffering(ctxOf(t, actor(t, "other_club_admin")), actor(t, "other_club_admin"), org("club_a"), base(nil))
-	wantErr(t, err, authz.ErrNotFound)
+	problemtest.WantErr(t, err, authz.ErrNotFound)
 	_, err = e.svc.CreateOffering(ctxOf(t, actor(t, "club_member")), actor(t, "club_member"), org("club_a"), base(nil))
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	_, err = e.svc.CreateOffering(ctx, ca, uuid.NewV7(), base(nil))
-	wantErr(t, err, catalog.ErrNotFound)
+	problemtest.WantErr(t, err, catalog.ErrNotFound)
 	// A description is sanitised to the allow-list.
 	v, err := e.svc.CreateOffering(ctx, ca, org("club_a"), base(func(in *catalog.OfferingInput) {
 		in.DescriptionJSON = map[string]any{"type": "doc", "content": []any{map[string]any{"type": "paragraph",
@@ -215,7 +217,7 @@ func TestCreateOffering_ParentsAndFields(t *testing.T) {
 		v.Offering.InvoiceTrigger != catalog.InvoiceOnFulfillment || v.Offering.CreatedBy != ca.UserID {
 		t.Fatalf("created = %+v %v", v.Offering, err)
 	}
-	if evs := e.audit.of(authz.CatalogOfferingCreate); len(evs) != 1 || *evs[0].OrgID != org("club_a") {
+	if evs := e.audit.Of(authz.CatalogOfferingCreate); len(evs) != 1 || *evs[0].OrgID != org("club_a") {
 		t.Fatalf("create audit = %+v", evs)
 	}
 	// A suspended seller writes nothing (03 §2.3).
@@ -223,7 +225,7 @@ func TestCreateOffering_ParentsAndFields(t *testing.T) {
 	sus.Status = orgs.StatusSuspended
 	e.orgs.m[org("club_a")] = sus
 	_, err = e.svc.CreateOffering(ctx, ca, org("club_a"), base(nil))
-	wantErr(t, err, orgs.ErrOrgSuspended)
+	problemtest.WantErr(t, err, orgs.ErrOrgSuspended)
 }
 
 // TestUpdateOffering_DraftOnlyWithIfMatch (04 §2.14, §1.13): drafts only,
@@ -238,16 +240,16 @@ func TestUpdateOffering_DraftOnlyWithIfMatch(t *testing.T) {
 	ca := actor(t, "club_admin")
 	ctx := ctxOf(t, ca)
 	_, err := e.svc.UpdateOffering(ctx, ca, v.Offering.ID, "", catalog.OfferingPatch{Title: ptr("Yeni başlık")})
-	wantErr(t, err, catalog.ErrPreconditionRequired)
+	problemtest.WantErr(t, err, catalog.ErrPreconditionRequired)
 	_, err = e.svc.UpdateOffering(ctx, ca, v.Offering.ID, `"stale"`, catalog.OfferingPatch{Title: ptr("Yeni başlık")})
-	wantErr(t, err, catalog.ErrPreconditionFailed)
+	problemtest.WantErr(t, err, catalog.ErrPreconditionFailed)
 	_, err = e.svc.UpdateOffering(ctx, ca, v.Offering.ID, v.ETag, catalog.OfferingPatch{})
-	wantProblem(t, err, http.StatusUnprocessableEntity, "catalog.empty_patch")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "catalog.empty_patch")
 	_, err = e.svc.UpdateOffering(ctx, ca, v.Offering.ID, v.ETag, catalog.OfferingPatch{Clear: []string{"title"}})
-	wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
 	other := actor(t, "other_club_admin")
 	_, err = e.svc.UpdateOffering(ctxOf(t, other), other, v.Offering.ID, v.ETag, catalog.OfferingPatch{Title: ptr("x y z")})
-	wantErr(t, err, authz.ErrNotFound)
+	problemtest.WantErr(t, err, authz.ErrNotFound)
 
 	lowVAT := e.service(t, "workshop_low", catalog.CategoryWorkshop, catalog.FulfillOrgBound, true)
 	fin := actor(t, "finance_admin")
@@ -261,13 +263,13 @@ func TestUpdateOffering_DraftOnlyWithIfMatch(t *testing.T) {
 		got.Offering.Title != "Atölye paketi" || got.ETag == v.ETag {
 		t.Fatalf("update: %+v %v", got.Offering, err)
 	}
-	if evs := e.audit.of(authz.CatalogOfferingUpdate); len(evs) != 1 {
+	if evs := e.audit.Of(authz.CatalogOfferingUpdate); len(evs) != 1 {
 		t.Fatalf("update audit = %+v", evs)
 	}
 	e.active(t, "club_admin", v.Offering.ID)
 	cur, _ := e.svc.GetOffering(ctx, ca, v.Offering.ID)
 	_, err = e.svc.UpdateOffering(ctx, ca, v.Offering.ID, cur.ETag, catalog.OfferingPatch{Title: ptr("Yeni başlık")})
-	wantProblem(t, err, http.StatusConflict, "catalog.invalid_state")
+	problemtest.WantProblem(t, err, http.StatusConflict, "catalog.invalid_state")
 }
 
 // TestSubmitOffering_Checks: an event-bound service needs its event (422
@@ -282,11 +284,11 @@ func TestSubmitOffering_Checks(t *testing.T) {
 	stand := e.service(t, "stand_event", catalog.CategoryBooth, catalog.FulfillEventBound, true)
 	v := e.offering(t, "club_admin", "club_a", func(in *catalog.OfferingInput) { in.ServiceID = stand })
 	_, err := e.svc.SubmitOffering(ctx, ca, v.Offering.ID)
-	wantProblem(t, err, http.StatusUnprocessableEntity, "catalog.offering_incomplete")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "catalog.offering_incomplete")
 	unreviewed := e.service(t, "unreviewed_x", catalog.CategoryWorkshop, catalog.FulfillOrgBound, false)
 	w := e.offering(t, "club_admin", "club_a", func(in *catalog.OfferingInput) { in.ServiceID = unreviewed })
 	_, err = e.svc.SubmitOffering(ctx, ca, w.Offering.ID)
-	wantProblem(t, err, http.StatusConflict, "catalog.service_not_sellable")
+	problemtest.WantProblem(t, err, http.StatusConflict, "catalog.service_not_sellable")
 
 	x := e.offering(t, "club_admin", "club_a", nil)
 	fin := actor(t, "finance_admin")
@@ -301,10 +303,10 @@ func TestSubmitOffering_Checks(t *testing.T) {
 	// The approval needs a commerce policy (T-10).
 	pad := actor(t, "platform_admin")
 	_, err = e.svc.AdminDecideOffering(ctxOf(t, pad), pad, x.Offering.ID, catalog.Decision{Approve: true})
-	wantProblem(t, err, http.StatusConflict, "catalog.no_commerce_policy")
+	problemtest.WantProblem(t, err, http.StatusConflict, "catalog.no_commerce_policy")
 	// A rejection needs a reason and sends it back to draft.
 	_, err = e.svc.AdminDecideOffering(ctxOf(t, pad), pad, x.Offering.ID, catalog.Decision{})
-	wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
 	got, err = e.svc.AdminDecideOffering(ctxOf(t, pad), pad, x.Offering.ID, catalog.Decision{Reason: "Fiyat belirsiz"})
 	if err != nil || got.Offering.Status != catalog.OfferingDraft || *got.Offering.RejectionReason != "Fiyat belirsiz" {
 		t.Fatalf("reject: %+v %v", got.Offering, err)
@@ -341,7 +343,7 @@ func TestCancelOffering_Codes(t *testing.T) {
 	e.active(t, "club_admin", b.Offering.ID)
 	ca, pad := actor(t, "club_admin"), actor(t, "platform_admin")
 	_, err := e.svc.CancelOffering(ctxOf(t, ca), ca, a.Offering.ID, " ")
-	wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
 	if _, err := e.svc.CancelOffering(ctxOf(t, ca), ca, a.Offering.ID, "Vazgeçtik"); err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +351,7 @@ func TestCancelOffering_Codes(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.CancelOffering(ctxOf(t, ca), ca, a.Offering.ID, "Vazgeçtik")
-	wantProblem(t, err, http.StatusConflict, "catalog.invalid_state")
+	problemtest.WantProblem(t, err, http.StatusConflict, "catalog.invalid_state")
 	var reasons []string
 	for _, ev := range e.outbox.Events() {
 		if ev.Topic == domainevent.TopicOfferingCancelled {
@@ -360,7 +362,7 @@ func TestCancelOffering_Codes(t *testing.T) {
 	if !slices.Equal(reasons, []string{catalog.CancelBySeller, catalog.CancelByPlatform}) {
 		t.Fatalf("reasons = %v", reasons)
 	}
-	if evs := e.audit.of(authz.CatalogOfferingCancel); len(evs) != 2 || evs[0].Reason != "Vazgeçtik" {
+	if evs := e.audit.Of(authz.CatalogOfferingCancel); len(evs) != 2 || evs[0].Reason != "Vazgeçtik" {
 		t.Fatalf("cancel audit = %+v", evs)
 	}
 	// A cancelled offering that was on sale stays readable; one that never was is the seller's.
@@ -558,7 +560,7 @@ func TestHTTP_OfferingFlow(t *testing.T) {
 func TestSeeder_DefaultPolicyIdempotent(t *testing.T) {
 	t.Parallel()
 	store := catalog.NewMemStore(func() time.Time { return t0 })
-	au := &auditLog{}
+	au := &audittest.Recorder{}
 	sd, err := catalog.NewSeeder(catalog.SeederDeps{Store: store, Tx: db.NopTx{}, Audit: au, Clock: clock.NewFake(t0), Log: discardLog()})
 	if err != nil {
 		t.Fatal(err)
@@ -573,7 +575,7 @@ func TestSeeder_DefaultPolicyIdempotent(t *testing.T) {
 	if err != nil || created || again.ID != p.ID {
 		t.Fatalf("second run = %+v %v %v", again.ID, created, err)
 	}
-	if evs := au.of(authz.CatalogPolicyManage); len(evs) != 1 || evs[0].SystemJob != catalog.SeedJob {
+	if evs := au.Of(authz.CatalogPolicyManage); len(evs) != 1 || evs[0].SystemJob != catalog.SeedJob {
 		t.Fatalf("seed audit = %+v", evs)
 	}
 	if _, err := catalog.NewSeeder(catalog.SeederDeps{}); err == nil {

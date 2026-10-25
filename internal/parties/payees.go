@@ -8,7 +8,9 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/orgs"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/problem"
 )
 
 // payeeCollection is the authz view of an org's payees on its surface
@@ -147,7 +149,7 @@ func (s *service) payeeViews(ctx context.Context, ps []Payee) ([]PayeeView, erro
 			lp = lp.withoutSecrets()
 			partyOf[p.LegalPartyID] = lp
 		}
-		out[i] = PayeeView{Payee: p, Party: lp, ETag: etagOf(p.UpdatedAt)}
+		out[i] = PayeeView{Payee: p, Party: lp, ETag: httpx.ETag(p.UpdatedAt)}
 		if b, ok := approved[p.ID]; ok {
 			out[i].Approved = &b
 		}
@@ -194,7 +196,7 @@ func (s *service) AdminCreatePayee(ctx context.Context, a authz.Actor, in PayeeI
 	o, err := s.d.Orgs.Get(ctx, in.OrgID)
 	switch {
 	case errors.Is(err, orgs.ErrNotFound) || err == nil && !isSellerKind(o.Kind):
-		return PayeeView{}, fieldErr("body.org_id", "must be a club or university organization")
+		return PayeeView{}, problem.Field("body.org_id", "must be a club or university organization")
 	case err != nil:
 		return PayeeView{}, err
 	case o.Status == orgs.StatusClosed:
@@ -203,7 +205,7 @@ func (s *service) AdminCreatePayee(ctx context.Context, a authz.Actor, in PayeeI
 	party, err := s.d.Store.GetParty(ctx, in.LegalPartyID)
 	switch {
 	case errors.Is(err, ErrNotFound) || err == nil && party.Kind != KindPayee:
-		return PayeeView{}, fieldErr("body.legal_party_id", "must be a payee legal party (kind payee)")
+		return PayeeView{}, problem.Field("body.legal_party_id", "must be a payee legal party (kind payee)")
 	case err != nil:
 		return PayeeView{}, err
 	}
@@ -249,10 +251,10 @@ func (s *service) checkPayeeParty(p LegalParty) error {
 // phase 2: it needs a sub-merchant key the API does not take).
 func checkPayeeFields(p Payee) error {
 	if !p.PayoutMethod.Valid() || p.PayoutMethod == PayoutIyzico {
-		return fieldErr("body.payout_method", "must be bank_eft or none")
+		return problem.Field("body.payout_method", "must be bank_eft or none")
 	}
 	if !p.InvoicingCapability.Valid() {
-		return fieldErr("body.invoicing_capability", "must be can_issue, cannot_issue or unknown")
+		return problem.Field("body.invoicing_capability", "must be can_issue, cannot_issue or unknown")
 	}
 	return nil
 }
@@ -274,7 +276,7 @@ func (s *service) AdminUpdatePayee(ctx context.Context, a authz.Actor, payeeID u
 		if cur.Status == PayeeClosed {
 			return ErrInvalidState
 		}
-		if err := checkIfMatch(ifMatch, etagOf(cur.UpdatedAt)); err != nil {
+		if err := httpx.CheckIfMatch(ifMatch, httpx.ETag(cur.UpdatedAt)); err != nil {
 			return err
 		}
 		if pt.empty() {
@@ -320,7 +322,7 @@ func (s *service) applyPayeePatch(cur Payee, pt PayeePatch) (Payee, []string, er
 				next.ValidTo = &now
 			}
 		default:
-			return Payee{}, nil, fieldErr("body.status", "must be suspended or closed (adminVerifyPayee activates)")
+			return Payee{}, nil, problem.Field("body.status", "must be suspended or closed (adminVerifyPayee activates)")
 		}
 		next.Status = *pt.Status
 		changed = append(changed, "status")

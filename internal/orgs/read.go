@@ -10,7 +10,9 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/files"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 	"koro/internal/platform/textx"
 )
 
@@ -89,7 +91,7 @@ func (s *service) GetOrgBySlug(ctx context.Context, a authz.Actor, slug string) 
 // readable authorises the public profile read (03 §3.6: pending_review
 // and closed orgs only for members and staff) and builds the view.
 func (s *service) readable(ctx context.Context, a authz.Actor, o Org) (OrgView, error) {
-	if err := authz.Can(ctx, a, authz.OrgsOrgRead, orgResource(o)); err != nil {
+	if err := authz.Can(ctx, a, authz.OrgsOrgRead, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
 		return OrgView{}, err
 	}
 	return s.view(ctx, o)
@@ -97,7 +99,7 @@ func (s *service) readable(ctx context.Context, a authz.Actor, o Org) (OrgView, 
 
 // view loads the company profile and the logo URL of o.
 func (s *service) view(ctx context.Context, o Org) (OrgView, error) {
-	v := OrgView{Org: o, ETag: etagOf(o.UpdatedAt), LogoURL: s.logoURL(ctx, o)}
+	v := OrgView{Org: o, ETag: httpx.ETag(o.UpdatedAt), LogoURL: s.logoURL(ctx, o)}
 	if o.Kind == KindCompany {
 		c, err := s.d.Store.GetCompany(ctx, o.ID)
 		switch {
@@ -134,10 +136,10 @@ func cleanQuery(loc, q string) (string, error) {
 	}
 	n, err := textx.NormalizeText(q)
 	if err != nil {
-		return "", fieldErr(loc, "contains control or bidi characters")
+		return "", problem.Field(loc, "contains control or bidi characters")
 	}
 	if c := utf8.RuneCountInString(n); c < 2 || c > 100 {
-		return "", fieldErr(loc, "must be 2-100 characters")
+		return "", problem.Field(loc, "must be 2-100 characters")
 	}
 	return n, nil
 }

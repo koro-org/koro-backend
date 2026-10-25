@@ -17,6 +17,7 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/queue"
 	"koro/internal/platform/storage"
 )
@@ -297,11 +298,7 @@ func (s *service) rejectedInTx(ctx context.Context, cur File, reason RejectReaso
 	if cur.Attached() {
 		p.AttachedModule, p.AttachedEntityID = *cur.AttachedModule, cur.AttachedEntityID
 	}
-	ev, err := domainevent.New(p, "file", cur.ID)
-	if err != nil {
-		return err
-	}
-	return s.d.Outbox.Add(ctx, ev)
+	return outbox.Emit(ctx, s.d.Outbox, p, "file", cur.ID)
 }
 
 // readVerified reads the quarantined object of f and checks it against the

@@ -14,6 +14,7 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/catalog"
 	"koro/internal/platform/clock"
@@ -134,7 +135,7 @@ func (p pgService) module(t *testing.T, held catalog.BuyerHeld) catalog.Module {
 	t.Helper()
 	clk := clock.Real()
 	mod, err := catalog.New(catalog.Deps{
-		Store: p.store, Tx: p.d.Tx, Audit: &auditLog{}, Orgs: newFakeOrgs(), Outbox: outbox.NewMem(clk), Queue: queue.NewMem(),
+		Store: p.store, Tx: p.d.Tx, Audit: &audittest.Recorder{}, Orgs: newFakeOrgs(), Outbox: outbox.NewMem(clk), Queue: queue.NewMem(),
 		Clock: clk, Log: slog.New(slog.DiscardHandler), BuyerHeld: held,
 		Idempotency: idempotency.New(idempotency.Deps{Tx: p.d.Tx, Store: idempotency.NewGormStore(p.d.ORM), Clock: clk,
 			Log: slog.New(slog.DiscardHandler)}),

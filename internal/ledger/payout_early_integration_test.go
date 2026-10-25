@@ -33,14 +33,14 @@ func TestMarkPaid_PaidBeforeApproval_NoticeFromCommittedRow(t *testing.T) {
 	early := p.ApprovedAt.Add(-time.Hour)
 	in := ledger.MarkPaidInput{BankReference: "EFT-20261120-0001", ReceiptFileID: &receipt, PaidAt: &early}
 
-	e.audit.failOn(authz.LedgerPayoutMarkPaid)
+	e.audit.FailOn(authz.LedgerPayoutMarkPaid, errAuditDown)
 	if _, err := e.svc.AdminMarkPayoutPaid(ctxOf(t, c), c, p.ID, in); !errors.Is(err, errAuditDown) {
 		t.Fatalf("mark-paid with the audit down: %v", err)
 	}
 	if n := e.w.count(`SELECT count(*) FROM outbox WHERE topic = 'payout.paid' AND aggregate_id = $1`, p.ID); n != 0 {
 		t.Fatalf("payout.paid rows after the rollback: %d", n)
 	}
-	e.audit.failOn("")
+	e.audit.FailOn("", nil)
 	v, err := e.svc.AdminMarkPayoutPaid(ctxOf(t, c), c, p.ID, in)
 	if err != nil {
 		t.Fatalf("mark-paid: %v", err)
@@ -48,7 +48,7 @@ func TestMarkPaid_PaidBeforeApproval_NoticeFromCommittedRow(t *testing.T) {
 	if !v.PaidBeforeApproval() {
 		t.Fatalf("stored payout approved %v, paid %v: not flagged", v.ApprovedAt, v.PaidAt)
 	}
-	if rows := e.audit.of(authz.LedgerPayoutMarkPaid); len(rows) != 1 || rows[0].Metadata["paid_before_approval"] != true {
+	if rows := e.audit.Of(authz.LedgerPayoutMarkPaid); len(rows) != 1 || rows[0].Metadata["paid_before_approval"] != true {
 		t.Fatalf("mark-paid audit %+v", rows)
 	}
 

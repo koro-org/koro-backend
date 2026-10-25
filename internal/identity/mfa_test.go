@@ -20,6 +20,7 @@ import (
 	"koro/internal/identity"
 	"koro/internal/notify"
 	"koro/internal/platform/httpx"
+	"koro/internal/platform/problem/problemtest"
 	"koro/internal/platform/token"
 )
 
@@ -109,15 +110,15 @@ func TestTOTP_ReplaySameCode_Rejected(t *testing.T) {
 	}
 	// Same code, same 30-second window: refused (R-002: the library does not do this).
 	err := e.svc.VerifyMFA(ctx, a, c)
-	wantErr(t, err, identity.ErrInvalidMFACode)
+	problemtest.WantErr(t, err, identity.ErrInvalidMFACode)
 	// The previous step is still inside the ±1 tolerance but older than the
 	// last used one: refused too.
-	wantErr(t, e.svc.VerifyMFA(ctx, a, totpCode(t, secret, e.clk.Now().Add(-30*time.Second))), identity.ErrInvalidMFACode)
+	problemtest.WantErr(t, e.svc.VerifyMFA(ctx, a, totpCode(t, secret, e.clk.Now().Add(-30*time.Second))), identity.ErrInvalidMFACode)
 	// The same code as a re-authentication proof: refused as well.
 	err = e.svc.RequestEmailChange(ctx, a, "new@example.com", identity.ReauthProof{TOTPCode: c})
-	wantErr(t, err, identity.ErrReauthFailed)
+	problemtest.WantErr(t, err, identity.ErrReauthFailed)
 	// Two steps out of tolerance: refused.
-	wantErr(t, e.svc.VerifyMFA(ctx, a, totpCode(t, secret, e.clk.Now().Add(90*time.Second))), identity.ErrInvalidMFACode)
+	problemtest.WantErr(t, e.svc.VerifyMFA(ctx, a, totpCode(t, secret, e.clk.Now().Add(90*time.Second))), identity.ErrInvalidMFACode)
 	// The next window works again (inside the reauth class: 4 failures so far).
 	if err := e.svc.VerifyMFA(ctx, a, e.nextCode(t, secret)); err != nil {
 		t.Fatalf("next window: %v", err)
@@ -218,7 +219,7 @@ func TestRecoveryCode_SingleUse(t *testing.T) {
 	// The same code again: refused.
 	ch = e.passwordStep(t, "recovery@example.com", identity.ClientMobile)
 	_, err = e.svc.CompleteMFALogin(ctx, authz.Anonymous(), identity.MFALogin{ChallengeID: ch.ID, RecoveryCode: codes[0]})
-	wantErr(t, err, identity.ErrMFALoginFailed)
+	problemtest.WantErr(t, err, identity.ErrMFALoginFailed)
 	wantStatus(t, err, http.StatusUnauthorized)
 	// Another code, typed without dashes in upper case, works on the same challenge.
 	other := strings.ToUpper(strings.ReplaceAll(codes[1], "-", ""))
@@ -228,7 +229,7 @@ func TestRecoveryCode_SingleUse(t *testing.T) {
 	// Recovery codes are not a re-authentication proof (03 §6.2).
 	_, a := e.loginMFA(t, "recovery@example.com", codes[2])
 	err = e.svc.RequestEmailChange(ctx, a, "x@example.com", identity.ReauthProof{TOTPCode: codes[3]})
-	wantErr(t, err, identity.ErrReauthFailed)
+	problemtest.WantErr(t, err, identity.ErrReauthFailed)
 }
 
 // loginMFA signs an MFA account in with a recovery code and returns the
@@ -255,7 +256,7 @@ func TestMFALogin_ChallengeExpiresAfter5Min(t *testing.T) {
 	}
 	e.clk.Advance(5 * time.Minute)
 	_, err := e.svc.CompleteMFALogin(ctx, authz.Anonymous(), identity.MFALogin{ChallengeID: ch.ID, TOTPCode: totpCode(t, secret, e.clk.Now())})
-	wantErr(t, err, identity.ErrMFALoginFailed)
+	problemtest.WantErr(t, err, identity.ErrMFALoginFailed)
 	if e.chal.Len() != 0 {
 		t.Fatalf("an expired challenge stays in the store")
 	}
@@ -272,7 +273,7 @@ func TestMFALogin_ChallengeExpiresAfter5Min(t *testing.T) {
 	}
 	// Single use: the challenge is gone.
 	_, err = e.svc.CompleteMFALogin(ctx, authz.Anonymous(), identity.MFALogin{ChallengeID: ch.ID, TOTPCode: e.nextCode(t, secret)})
-	wantErr(t, err, identity.ErrMFALoginFailed)
+	problemtest.WantErr(t, err, identity.ErrMFALoginFailed)
 }
 
 func TestMFALogin_NoHalfAuthenticatedSession(t *testing.T) {
@@ -290,11 +291,11 @@ func TestMFALogin_NoHalfAuthenticatedSession(t *testing.T) {
 	for _, raw := range []string{ch.ID.String(), strings.ReplaceAll(ch.ID.String(), "-", "")} {
 		cred := httpx.Credential{Transport: httpx.TransportBearer, TokenHash: [32]byte(token.Hash(raw))}
 		_, err := e.svc.Authenticate(ctx, cred)
-		wantErr(t, err, identity.ErrUnauthenticated)
+		problemtest.WantErr(t, err, identity.ErrUnauthenticated)
 	}
 	// A wrong code opens nothing either; the challenge survives it.
 	_, err := e.svc.CompleteMFALogin(ctx, authz.Anonymous(), identity.MFALogin{ChallengeID: ch.ID, TOTPCode: "000000"})
-	wantErr(t, err, identity.ErrMFALoginFailed)
+	problemtest.WantErr(t, err, identity.ErrMFALoginFailed)
 	if n := len(e.sessionsOf(t, u.ID)); n != before {
 		t.Fatalf("a wrong code opened a session")
 	}
@@ -333,14 +334,14 @@ func TestMFALogin_WrongCodesLockTheAccount(t *testing.T) {
 	}
 	// Locked now: the password step is refused, and so is a right code on an old challenge.
 	_, err := e.svc.CreateSession(ctx, authz.Anonymous(), identity.Login{Email: "guess@example.com", Password: goodPassword})
-	wantErr(t, err, identity.ErrInvalidCredentials)
+	problemtest.WantErr(t, err, identity.ErrInvalidCredentials)
 	// Even after the lock, the counter keeps the back-off growing (not reset by the password step).
 	e.clk.Advance(time.Hour)
 	ch := e.passwordStep(t, "guess@example.com", identity.ClientMobile)
 	_, err = e.svc.CompleteMFALogin(ctx, authz.Anonymous(), identity.MFALogin{ChallengeID: ch.ID, TOTPCode: "999999"})
-	wantErr(t, err, identity.ErrMFALoginFailed)
+	problemtest.WantErr(t, err, identity.ErrMFALoginFailed)
 	_, err = e.svc.CreateSession(ctx, authz.Anonymous(), identity.Login{Email: "guess@example.com", Password: goodPassword})
-	wantErr(t, err, identity.ErrInvalidCredentials)
+	problemtest.WantErr(t, err, identity.ErrInvalidCredentials)
 	// A right code after the lock expired opens the session and resets the counter.
 	e.clk.Advance(time.Hour)
 	ch = e.passwordStep(t, "guess@example.com", identity.ClientMobile)
@@ -359,19 +360,19 @@ func TestDisableTotp_RequiredRole_409(t *testing.T) {
 	staff := a
 	staff.PlatformRoles = []authz.PlatformRole{authz.PlatformSupport}
 	err := e.svc.DisableTOTP(ctx, staff, identity.ReauthProof{TOTPCode: e.nextCode(t, secret)})
-	wantErr(t, err, identity.ErrMFARequiredByRole)
+	problemtest.WantErr(t, err, identity.ErrMFARequiredByRole)
 	wantStatus(t, err, http.StatusConflict)
 
 	// A company_admin membership from the membership source (k1 lists
 	// company_admin/owner and university_rep).
 	u2, a2, secret2, _ := e.mfaUser(t, "companyadmin@example.com")
 	e.members[u2.ID] = []authz.Membership{{OrgID: uuid.NewV7(), OrgKind: authz.OrgCompany, Role: authz.MemberCompanyAdmin}}
-	wantErr(t, e.svc.DisableTOTP(ctx, a2, identity.ReauthProof{TOTPCode: e.nextCode(t, secret2)}), identity.ErrMFARequiredByRole)
+	problemtest.WantErr(t, e.svc.DisableTOTP(ctx, a2, identity.ReauthProof{TOTPCode: e.nextCode(t, secret2)}), identity.ErrMFARequiredByRole)
 	// A recruiter is not an MFA role.
 	e.members[u2.ID] = []authz.Membership{{OrgID: uuid.NewV7(), OrgKind: authz.OrgCompany, Role: authz.MemberRecruiter}}
 
 	// Without the role: the proof is required, then MFA goes away.
-	wantErr(t, e.svc.DisableTOTP(ctx, a2, identity.ReauthProof{Password: goodPassword}), identity.ErrReauthRequired)
+	problemtest.WantErr(t, e.svc.DisableTOTP(ctx, a2, identity.ReauthProof{Password: goodPassword}), identity.ErrReauthRequired)
 	if err := e.svc.DisableTOTP(ctx, a2, identity.ReauthProof{TOTPCode: e.nextCode(t, secret2)}); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
@@ -389,7 +390,7 @@ func TestDisableTotp_RequiredRole_409(t *testing.T) {
 		ev[1].Outcome != audit.Success || ev[1].Metadata[audit.MetaReauth] != "totp" {
 		t.Fatalf("audit %+v", ev)
 	}
-	wantErr(t, e.svc.DisableTOTP(ctx, a2, identity.ReauthProof{Password: goodPassword}), identity.ErrMFANotEnabled)
+	problemtest.WantErr(t, e.svc.DisableTOTP(ctx, a2, identity.ReauthProof{Password: goodPassword}), identity.ErrMFANotEnabled)
 }
 
 func TestReauth_TOTPPathForMFAUsers(t *testing.T) {
@@ -399,8 +400,8 @@ func TestReauth_TOTPPathForMFAUsers(t *testing.T) {
 	u, a, secret, _ := e.mfaUser(t, "reauth-mfa@example.com")
 
 	// An MFA account proves itself with TOTP: the password alone is no proof.
-	wantErr(t, e.svc.RequestEmailChange(ctx, a, "n1@example.com", identity.ReauthProof{Password: goodPassword}), identity.ErrReauthRequired)
-	wantErr(t, e.svc.RequestEmailChange(ctx, a, "n1@example.com", identity.ReauthProof{TOTPCode: "123456"}), identity.ErrReauthFailed)
+	problemtest.WantErr(t, e.svc.RequestEmailChange(ctx, a, "n1@example.com", identity.ReauthProof{Password: goodPassword}), identity.ErrReauthRequired)
+	problemtest.WantErr(t, e.svc.RequestEmailChange(ctx, a, "n1@example.com", identity.ReauthProof{TOTPCode: "123456"}), identity.ErrReauthFailed)
 	if err := e.svc.RequestEmailChange(ctx, a, "n1@example.com", identity.ReauthProof{TOTPCode: e.nextCode(t, secret)}); err != nil {
 		t.Fatalf("totp proof: %v", err)
 	}
@@ -415,7 +416,7 @@ func TestReauth_TOTPPathForMFAUsers(t *testing.T) {
 	}
 	// changeMyPassword: current password AND the TOTP code.
 	in := identity.PasswordChange{CurrentPassword: goodPassword, NewPassword: "Yeni-Parola-Kayik-77"}
-	wantErr(t, e.svc.ChangePassword(ctx, a, in), identity.ErrReauthRequired)
+	problemtest.WantErr(t, e.svc.ChangePassword(ctx, a, in), identity.ErrReauthRequired)
 	in.TOTPCode = e.nextCode(t, secret)
 	if err := e.svc.ChangePassword(ctx, a, in); err != nil {
 		t.Fatalf("change password: %v", err)
@@ -434,13 +435,13 @@ func TestConfirmTotp_WrongCodeKeepsMFAOff(t *testing.T) {
 	u := e.activeUser(t, "confirm@example.com")
 	_, a := e.login(t, "confirm@example.com", identity.ClientMobile)
 	_, err := e.svc.ConfirmTOTP(ctx, a, "123456", pwProof)
-	wantErr(t, err, identity.ErrMFANotEnrolled)
+	problemtest.WantErr(t, err, identity.ErrMFANotEnrolled)
 	enr, err := e.svc.EnrollTOTP(ctx, a, pwProof)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = e.svc.ConfirmTOTP(ctx, a, "not-a-code", pwProof)
-	wantErr(t, err, identity.ErrInvalidMFACode)
+	problemtest.WantErr(t, err, identity.ErrInvalidMFACode)
 	wantStatus(t, err, http.StatusUnprocessableEntity)
 	cur, _ := e.store.User(ctx, u.ID)
 	if cur.MFAEnabled || cur.FailedLogins != 1 {
@@ -466,14 +467,14 @@ func TestRegenerateRecoveryCodes_OldCodesStop(t *testing.T) {
 	ctx := t.Context()
 	_, a, secret, old := e.mfaUser(t, "regen@example.com")
 	_, err := e.svc.RegenerateRecoveryCodes(ctx, a, identity.ReauthProof{})
-	wantErr(t, err, identity.ErrReauthRequired)
+	problemtest.WantErr(t, err, identity.ErrReauthRequired)
 	fresh, err := e.svc.RegenerateRecoveryCodes(ctx, a, identity.ReauthProof{TOTPCode: e.nextCode(t, secret)})
 	if err != nil || len(fresh) != 10 || slices.Contains(fresh, old[0]) {
 		t.Fatalf("regenerate: %v %d", err, len(fresh))
 	}
 	ch := e.passwordStep(t, "regen@example.com", identity.ClientMobile)
 	_, err = e.svc.CompleteMFALogin(ctx, authz.Anonymous(), identity.MFALogin{ChallengeID: ch.ID, RecoveryCode: old[0]})
-	wantErr(t, err, identity.ErrMFALoginFailed)
+	problemtest.WantErr(t, err, identity.ErrMFALoginFailed)
 	if _, err := e.svc.CompleteMFALogin(ctx, authz.Anonymous(), identity.MFALogin{ChallengeID: ch.ID, RecoveryCode: fresh[0]}); err != nil {
 		t.Fatalf("new code: %v", err)
 	}
@@ -485,6 +486,6 @@ func TestMFA_FailsClosedWithoutSecrets(t *testing.T) {
 	e2 := newEnv(t, func(d *identity.Deps) { d.Challenges = nil })
 	e2.mfaUser(t, "closed2@example.com")
 	_, err := e2.svc.CreateSession(t.Context(), authz.Anonymous(), identity.Login{Email: "closed2@example.com", Password: goodPassword})
-	wantErr(t, err, identity.ErrMFAUnavailable)
+	problemtest.WantErr(t, err, identity.ErrMFAUnavailable)
 	wantStatus(t, err, http.StatusServiceUnavailable)
 }

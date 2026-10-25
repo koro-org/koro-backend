@@ -13,6 +13,7 @@ import (
 	"koro/internal/kvkk"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // TestCreateDSR_ErasureRequiresReauth (03 k31, §6.2): an erasure request
@@ -25,9 +26,9 @@ func TestCreateDSR_ErasureRequiresReauth(t *testing.T) {
 	ctx, student := t.Context(), actor(t, "student")
 
 	_, err := e.svc.CreateMine(ctx, student, kvkk.MyRequest{Type: kvkk.TypeErasure})
-	wantErr(t, err, errBadProof)
+	problemtest.WantErr(t, err, errBadProof)
 	_, err = e.svc.CreateMine(ctx, student, kvkk.MyRequest{Type: kvkk.TypeErasure, Proof: kvkk.ReauthProof{Password: "wrong"}})
-	wantErr(t, err, errBadProof)
+	problemtest.WantErr(t, err, errBadProof)
 	denied := e.audit.of(string(authz.KvkkDsrCreate))
 	if len(denied) != 2 || denied[0].Outcome != audit.Denied || denied[0].Reason != "reauth_failed" {
 		t.Fatalf("denied audit rows = %+v", denied)
@@ -67,7 +68,7 @@ func TestCreateDSR_ErasureRequiresReauth(t *testing.T) {
 	}
 	// One open request per type.
 	_, err = e.svc.CreateMine(ctx, student, kvkk.MyRequest{Type: kvkk.TypeErasure, Proof: proof})
-	wantErr(t, err, kvkk.ErrDuplicateRequest)
+	problemtest.WantErr(t, err, kvkk.ErrDuplicateRequest)
 	// Other types need no proof: the session is the identity check.
 	x, err := e.svc.CreateMine(ctx, student, kvkk.MyRequest{Type: kvkk.TypeExport})
 	if err != nil || x.IdentityVerifiedAt == nil {
@@ -116,13 +117,13 @@ func TestAdminFlow_UpdateIfMatchAndState(t *testing.T) {
 	}
 	// Not verified yet: cannot be completed.
 	_, err = e.svc.Complete(ctx, dpo, d.ID, "Düzeltildi.", proof)
-	wantErr(t, err, kvkk.ErrIdentityNotVerified)
+	problemtest.WantErr(t, err, kvkk.ErrIdentityNotVerified)
 	// If-Match is mandatory and must be fresh.
 	st := kvkk.StatusIdentityCheck
 	_, err = e.svc.AdminUpdate(ctx, dpo, d.ID, "", kvkk.Patch{Status: &st})
-	wantErr(t, err, problem.ErrPreconditionRequired)
+	problemtest.WantErr(t, err, problem.ErrPreconditionRequired)
 	_, err = e.svc.AdminUpdate(ctx, dpo, d.ID, `"stale"`, kvkk.Patch{Status: &st})
-	wantErr(t, err, problem.ErrPreconditionFailed)
+	problemtest.WantErr(t, err, problem.ErrPreconditionFailed)
 	at := e.clk.Now().Add(-time.Minute)
 	me := dpo.UserID
 	u, err := e.svc.AdminUpdate(ctx, dpo, d.ID, kvkk.ETag(d), kvkk.Patch{Status: &st, IdentityVerifiedAt: &at, AssignedTo: &me})
@@ -133,10 +134,10 @@ func TestAdminFlow_UpdateIfMatchAndState(t *testing.T) {
 		t.Fatalf("updated = %+v", u)
 	}
 	_, err = e.svc.AdminUpdate(ctx, dpo, d.ID, kvkk.ETag(d), kvkk.Patch{Status: &st})
-	wantErr(t, err, problem.ErrPreconditionFailed)
+	problemtest.WantErr(t, err, problem.ErrPreconditionFailed)
 	bad := kvkk.StatusCompleted
 	_, err = e.svc.AdminUpdate(ctx, dpo, d.ID, kvkk.ETag(u), kvkk.Patch{Status: &bad})
-	wantErr(t, err, kvkk.ErrInvalidRequest)
+	problemtest.WantErr(t, err, kvkk.ErrInvalidRequest)
 	// Answer: the applicant without an account is e-mailed at the address
 	// the DPO entered.
 	c := e.completeAs(t, d.ID)
@@ -150,9 +151,9 @@ func TestAdminFlow_UpdateIfMatchAndState(t *testing.T) {
 		t.Fatalf("completion mail = %+v", m)
 	}
 	_, err = e.svc.Reject(ctx, dpo, d.ID, "Geç kaldı.")
-	wantErr(t, err, kvkk.ErrState)
+	problemtest.WantErr(t, err, kvkk.ErrState)
 	_, err = e.svc.AdminUpdate(ctx, dpo, d.ID, kvkk.ETag(c), kvkk.Patch{Status: &st})
-	wantErr(t, err, kvkk.ErrState)
+	problemtest.WantErr(t, err, kvkk.ErrState)
 }
 
 func TestAdmin_PlatformAdminSeesAwaitingOnly_AndNoOwnRequest(t *testing.T) {
@@ -175,7 +176,7 @@ func TestAdmin_PlatformAdminSeesAwaitingOnly_AndNoOwnRequest(t *testing.T) {
 		t.Fatalf("platform_admin list = %+v, %v", p.Items, err)
 	}
 	_, err = e.svc.AdminGet(ctx, actor(t, "platform_admin"), open.ID)
-	wantErr(t, err, authz.ErrNotFound)
+	problemtest.WantErr(t, err, authz.ErrNotFound)
 	if all, _ := e.svc.AdminList(ctx, actor(t, "dpo"), kvkk.AdminFilter{}, nil, 0); len(all.Items) != 2 {
 		t.Fatalf("dpo list = %d items", len(all.Items))
 	}
@@ -185,13 +186,13 @@ func TestAdmin_PlatformAdminSeesAwaitingOnly_AndNoOwnRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.Complete(ctx, actor(t, "dpo"), mine.ID, "Kendime yanıt.", proof)
-	wantErr(t, err, kvkk.ErrOwnRequest)
+	problemtest.WantErr(t, err, kvkk.ErrOwnRequest)
 	// A non-staff user is refused before anything is read.
 	_, err = e.svc.AdminGet(ctx, actor(t, "student"), uuid.NewV7())
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	// Another user's request is not found on /me.
 	_, err = e.svc.GetMine(ctx, actor(t, "student_b"), open.ID)
-	wantErr(t, err, kvkk.ErrNotFound)
+	problemtest.WantErr(t, err, kvkk.ErrNotFound)
 }
 
 // TestProfilingAccess_TwoApproversThenReport: the profiling report is
@@ -207,14 +208,14 @@ func TestProfilingAccess_TwoApproversThenReport(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.Complete(ctx, actor(t, "dpo"), d.ID, "Rapor ektedir.", proof)
-	wantErr(t, err, kvkk.ErrSecondApprovalRequired)
+	problemtest.WantErr(t, err, kvkk.ErrSecondApprovalRequired)
 	if _, err := e.svc.Approve(ctx, actor(t, "dpo"), d.ID, kvkk.StageFirst); err != nil {
 		t.Fatal(err)
 	}
 	_, err = e.svc.Approve(ctx, actor(t, "dpo"), d.ID, kvkk.StageSecond)
-	wantErr(t, err, authz.ErrFourEyes)
+	problemtest.WantErr(t, err, authz.ErrFourEyes)
 	_, err = e.svc.Approve(ctx, actor(t, "platform_admin"), d.ID, kvkk.StageFirst)
-	wantErr(t, err, authz.ErrForbidden) // visible now (awaiting), but never a first approver (k32)
+	problemtest.WantErr(t, err, authz.ErrForbidden) // visible now (awaiting), but never a first approver (k32)
 	dpo2, _ := authztest.Get("dpo_2")
 	if _, err := e.svc.Approve(ctx, dpo2.Actor, d.ID, kvkk.StageSecond); err != nil {
 		t.Fatal(err)
@@ -241,20 +242,20 @@ func TestCancelAndReject(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.CancelMine(ctx, actor(t, "student_b"), d.ID)
-	wantErr(t, err, kvkk.ErrNotFound)
+	problemtest.WantErr(t, err, kvkk.ErrNotFound)
 	c, err := e.svc.CancelMine(ctx, student, d.ID)
 	if err != nil || c.Status != kvkk.StatusCancelled {
 		t.Fatalf("cancel = %+v, %v", c, err)
 	}
 	_, err = e.svc.CancelMine(ctx, student, d.ID)
-	wantErr(t, err, kvkk.ErrState)
+	problemtest.WantErr(t, err, kvkk.ErrState)
 
 	r, err := e.svc.CreateMine(ctx, student, kvkk.MyRequest{Type: kvkk.TypeRestriction})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = e.svc.Reject(ctx, actor(t, "dpo"), r.ID, "  ")
-	wantErr(t, err, kvkk.ErrInvalidRequest)
+	problemtest.WantErr(t, err, kvkk.ErrInvalidRequest)
 	rj, err := e.svc.Reject(ctx, actor(t, "dpo"), r.ID, "Kanuni dayanak mevcut.")
 	if err != nil || rj.Status != kvkk.StatusRejected || rj.CompletedAt == nil || rj.RejectionReason == "" {
 		t.Fatalf("reject = %+v, %v", rj, err)
@@ -281,5 +282,5 @@ func TestComplete_ProfilingObjectionEmitsEvent(t *testing.T) {
 	}
 	// Without the proof the answer is refused.
 	_, err = e.svc.Complete(t.Context(), actor(t, "dpo"), d.ID, "x", kvkk.ReauthProof{})
-	wantErr(t, err, errBadProof)
+	problemtest.WantErr(t, err, errBadProof)
 }

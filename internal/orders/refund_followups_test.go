@@ -8,6 +8,7 @@ import (
 	"koro/internal/catalog"
 	"koro/internal/orders"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // T-309: a fully refunded line must not be delivered merely because another
@@ -56,7 +57,7 @@ func TestRefundFollowups_FullyRefundedLineCannotBeDelivered(t *testing.T) {
 					t.Fatal(err)
 				}
 			} else {
-				wantProblem(t, err, 409, "orders.invalid_state")
+				problemtest.WantProblem(t, err, 409, "orders.invalid_state")
 			}
 			after := e.line(t, target.ID)
 			if after.FulfillmentStatus != before.FulfillmentStatus || after.FulfilledAt != nil {

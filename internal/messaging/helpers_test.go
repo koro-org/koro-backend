@@ -26,7 +26,6 @@ import (
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/obs"
-	"koro/internal/platform/problem"
 	"koro/internal/students"
 )
 
@@ -37,7 +36,7 @@ var t0 = time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC)
 // txKey carries the number of the transaction a call runs in.
 type txKey struct{}
 
-func txOf(ctx context.Context) int {
+func fakeTxOf(ctx context.Context) int {
 	n, _ := ctx.Value(txKey{}).(int)
 	return n
 }
@@ -57,7 +56,7 @@ type txFake struct {
 }
 
 func (t *txFake) WithTx(ctx context.Context, fn func(context.Context) error) error {
-	if txOf(ctx) > 0 {
+	if fakeTxOf(ctx) > 0 {
 		return fn(ctx)
 	}
 	t.mu.Lock()
@@ -102,7 +101,7 @@ func (e *entitlementsFake) Consume(ctx context.Context, org uuid.UUID, f entitle
 	if f != entitlements.FeatureContactRequest || qty != 1 || ref.Type != entitlements.RefContactRequest {
 		return uuid.Nil(), errors.New("unexpected consumption")
 	}
-	if txOf(ctx) == 0 {
+	if fakeTxOf(ctx) == 0 {
 		return uuid.Nil(), errors.New("Consume outside a transaction")
 	}
 	for _, c := range e.used {
@@ -114,7 +113,7 @@ func (e *entitlementsFake) Consume(ctx context.Context, org uuid.UUID, f entitle
 		return uuid.Nil(), entitlements.ErrNoEntitlement
 	}
 	e.units[org]--
-	c := consumption{tx: txOf(ctx), org: org, ref: ref, usage: uuid.NewV7()}
+	c := consumption{tx: fakeTxOf(ctx), org: org, ref: ref, usage: uuid.NewV7()}
 	e.used = append(e.used, c)
 	return c.usage, nil
 }
@@ -175,10 +174,10 @@ func (s *studentsFake) ShareContactWithCompany(ctx context.Context, a authz.Acto
 ) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if txOf(ctx) == 0 {
+	if fakeTxOf(ctx) == 0 {
 		return errors.New("ShareContactWithCompany outside a transaction")
 	}
-	s.shares = append(s.shares, share{tx: txOf(ctx), student: a.UserID, company: company, proof: proof, channel: ch,
+	s.shares = append(s.shares, share{tx: fakeTxOf(ctx), student: a.UserID, company: company, proof: proof, channel: ch,
 		request: request})
 	return s.failShare
 }
@@ -198,10 +197,10 @@ func (s *studentsFake) IsDiscoverable(_ context.Context, id uuid.UUID) (bool, er
 func (s *studentsFake) Grant(ctx context.Context, student, company uuid.UUID, src students.GrantSource, srcID uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if txOf(ctx) == 0 {
+	if fakeTxOf(ctx) == 0 {
 		return errors.New("Grant outside a transaction")
 	}
-	s.grants = append(s.grants, grant{tx: txOf(ctx), student: student, company: company, src: src, srcID: srcID})
+	s.grants = append(s.grants, grant{tx: fakeTxOf(ctx), student: student, company: company, src: src, srcID: srcID})
 	return s.failGrant
 }
 
@@ -343,10 +342,10 @@ type outboxFake struct {
 func (o *outboxFake) Add(ctx context.Context, e domainevent.Envelope) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if txOf(ctx) == 0 {
+	if fakeTxOf(ctx) == 0 {
 		return errors.New("outbox: Add outside a transaction")
 	}
-	o.events = append(o.events, event{tx: txOf(ctx), env: e})
+	o.events = append(o.events, event{tx: fakeTxOf(ctx), env: e})
 	return nil
 }
 
@@ -386,10 +385,10 @@ type auditFake struct {
 func (a *auditFake) Log(ctx context.Context, e audit.Event) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if txOf(ctx) == 0 {
+	if fakeTxOf(ctx) == 0 {
 		return errors.New("audit outside a transaction")
 	}
-	a.events = append(a.events, logged{tx: txOf(ctx), ev: e})
+	a.events = append(a.events, logged{tx: fakeTxOf(ctx), ev: e})
 	return nil
 }
 
@@ -563,21 +562,6 @@ func (e *env) send(t *testing.T, student string) messaging.CompanyView {
 		t.Fatalf("Create: %v", err)
 	}
 	return v
-}
-
-func wantErr(t *testing.T, err, want error) {
-	t.Helper()
-	if !errors.Is(err, want) {
-		t.Fatalf("err = %v, want %v", err, want)
-	}
-}
-
-func wantCode(t *testing.T, err error, status int, code string) {
-	t.Helper()
-	var pe *problem.Error
-	if !errors.As(err, &pe) || pe.Status() != status || pe.Code() != code {
-		t.Fatalf("err = %v, want %d %s", err, status, code)
-	}
 }
 
 // accept and decline are the plain answers (no contact sharing).

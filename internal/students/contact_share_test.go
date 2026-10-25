@@ -82,7 +82,7 @@ func TestShareContactWithCompany_OnlyThatCompany(t *testing.T) {
 	if p, _ := e.svc.GetMyPrivacy(ctx, s); !p.ShowContactOnGrant {
 		t.Fatal("the setting does not mirror the consent given")
 	}
-	ev := e.audit.of("students.access_grant.share_contact")
+	ev := e.audit.Of("students.access_grant.share_contact")
 	if len(ev) != 1 || ev[0].OrgID == nil || *ev[0].OrgID != orgA || ev[0].Metadata["contact_request_id"] != req.String() ||
 		ev[0].Metadata["contact_info_share_consent_id"] == nil || ev[0].ActorUserID == nil || *ev[0].ActorUserID != s.UserID {
 		t.Fatalf("audit = %+v", ev)
@@ -99,7 +99,7 @@ func TestShareContactWithCompany_OnlyThatCompany(t *testing.T) {
 	if err := e.svc.ShareContactWithCompany(ctx, s, orgA, *proof(), consent.ChannelWeb, uuid.NewV7()); err != nil {
 		t.Fatal(err)
 	}
-	if len(e.audit.of("students.access_grant.share_contact")) != 2 {
+	if len(e.audit.Of("students.access_grant.share_contact")) != 2 {
 		t.Fatal("sharing again with the same company wrote")
 	}
 }
@@ -130,12 +130,12 @@ func TestUnshareMyAccessGrantContact(t *testing.T) {
 	if e.sharedWith(t, recA, orgA, s) || !e.sharedWith(t, recB, orgB, s) {
 		t.Fatal("unsharing with A must hide the e-mail from A only (and keep A's access)")
 	}
-	ev := e.audit.of(string(authz.StudentsAccessGrantRevoke))
+	ev := e.audit.Of(authz.StudentsAccessGrantRevoke)
 	if len(ev) != 1 || ev[0].Metadata["revoked"] != "contact" || *ev[0].OrgID != orgA || *ev[0].ResourceID != gA.ID {
 		t.Fatalf("audit = %+v", ev)
 	}
 	if err := e.svc.UnshareMyAccessGrantContact(ctx, s, gA.ID); err != nil ||
-		len(e.audit.of(string(authz.StudentsAccessGrantRevoke))) != 1 {
+		len(e.audit.Of(authz.StudentsAccessGrantRevoke)) != 1 {
 		t.Fatalf("unshare again = %v (it must change nothing)", err)
 	}
 	other := e.profiled(t)
@@ -174,7 +174,7 @@ func TestShareContact_PrivacyOffStopsEveryShare_NoRevival(t *testing.T) {
 		e.grantOf(t, s, orgB).ContactSharedAt != nil {
 		t.Fatal("turning contact sharing off left a share")
 	}
-	if n := len(e.audit.of(string(authz.StudentsAccessGrantRevoke))); n != 2 {
+	if n := len(e.audit.Of(authz.StudentsAccessGrantRevoke)); n != 2 {
 		t.Fatalf("unshare audit records = %d, want 2", n)
 	}
 	if _, err := e.svc.UpdateMyPrivacy(ctx, s, students.PrivacyPatch{ShowContactOnGrant: ptr(true), ContactConsent: proof()}); err != nil {
@@ -277,7 +277,7 @@ func TestShareContactWithCompany_Refusals(t *testing.T) {
 	if err := e.svc.ShareContactWithCompany(ctx, s, orgA, *proof(), consent.ChannelWeb, uuid.NewV7()); !errors.Is(err, consent.ErrTextMismatch) {
 		t.Fatalf("refused consent = %v", err)
 	}
-	if len(e.consent.records()) != 0 || len(e.audit.of("students.access_grant.share_contact")) != 0 {
+	if len(e.consent.records()) != 0 || len(e.audit.Of("students.access_grant.share_contact")) != 0 {
 		t.Fatal("a refused sharing wrote")
 	}
 }
@@ -429,7 +429,7 @@ func TestClearContactShares_FollowsTheConsentInForce(t *testing.T) {
 	if g := e.grantOf(t, s, orgA); g.ContactSharedAt != nil {
 		t.Fatalf("a share outlived the withdrawn consent: %+v", g)
 	}
-	if ev := e.audit.of(string(authz.StudentsAccessGrantRevoke)); len(ev) != 1 || ev[0].Metadata["by"] != "consent_withdrawn" ||
+	if ev := e.audit.Of(authz.StudentsAccessGrantRevoke); len(ev) != 1 || ev[0].Metadata["by"] != "consent_withdrawn" ||
 		ev[0].SystemJob != "students.contact_shares" || *ev[0].OrgID != orgA {
 		t.Fatalf("unshare audit = %+v", ev)
 	}
@@ -493,7 +493,7 @@ func TestReconcilePrivacy_ClearsContactShares(t *testing.T) {
 	if g := e.grantOf(t, s, orgA); g.ContactSharedAt != nil {
 		t.Fatalf("the share outlived the consent: %+v", g)
 	}
-	ev := e.audit.of(string(authz.StudentsAccessGrantRevoke))
+	ev := e.audit.Of(authz.StudentsAccessGrantRevoke)
 	if len(ev) != 1 || ev[0].Metadata["by"] != "consent_not_in_force" || ev[0].SystemJob != students.AudienceRefreshJobName ||
 		ev[0].Metadata["contact_shared_at"] == nil {
 		t.Fatalf("unshare audit = %+v", ev)

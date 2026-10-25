@@ -27,19 +27,15 @@ const (
 	maxAnonID = 64
 )
 
-func fieldErr(loc, msg string) error {
-	return problem.ErrValidation.WithFields(problem.FieldError{Location: loc, Message: msg})
-}
-
 // cleanSubject normalises a one-line subject (NFC, trimmed; no control or
 // bidi characters).
 func cleanSubject(s string) (string, error) {
 	n, err := textx.NormalizeText(s)
 	if err != nil {
-		return "", fieldErr("body.subject", "contains control or bidi characters")
+		return "", problem.Field("body.subject", "contains control or bidi characters")
 	}
 	if c := utf8.RuneCountInString(n); c < minSubject || c > maxSubject {
-		return "", fieldErr("body.subject", "must be "+strconv.Itoa(minSubject)+" to "+strconv.Itoa(maxSubject)+" characters")
+		return "", problem.Field("body.subject", "must be "+strconv.Itoa(minSubject)+" to "+strconv.Itoa(maxSubject)+" characters")
 	}
 	return n, nil
 }
@@ -48,16 +44,16 @@ func cleanSubject(s string) (string, error) {
 // other control and bidi characters are refused.
 func cleanMessage(s string) (string, error) {
 	if !utf8.ValidString(s) {
-		return "", fieldErr("body.message", "must be UTF-8")
+		return "", problem.Field("body.message", "must be UTF-8")
 	}
 	for _, r := range s {
 		if (unicode.IsControl(r) && r != '\n' && r != '\t' && r != '\r') || bidi(r) {
-			return "", fieldErr("body.message", "contains control or bidi characters")
+			return "", problem.Field("body.message", "contains control or bidi characters")
 		}
 	}
 	n := norm.NFC.String(strings.TrimSpace(strings.ReplaceAll(s, "\r", "")))
 	if c := utf8.RuneCountInString(n); c < minMessage || c > maxMessage {
-		return "", fieldErr("body.message", "must be "+strconv.Itoa(minMessage)+" to "+strconv.Itoa(maxMessage)+" characters")
+		return "", problem.Field("body.message", "must be "+strconv.Itoa(minMessage)+" to "+strconv.Itoa(maxMessage)+" characters")
 	}
 	return n, nil
 }
@@ -73,7 +69,7 @@ func cleanCreate(in CreateInput) (CreateInput, error) {
 	var err error
 	in.AnonID = strings.TrimSpace(in.AnonID)
 	if in.AnonID == "" || len(in.AnonID) > maxAnonID {
-		return in, fieldErr("body.anon_id", "is required (the company's pseudonym of the student)")
+		return in, problem.Field("body.anon_id", "is required (the company's pseudonym of the student)")
 	}
 	if in.Subject, err = cleanSubject(in.Subject); err != nil {
 		return in, err
@@ -82,7 +78,7 @@ func cleanCreate(in CreateInput) (CreateInput, error) {
 		return in, err
 	}
 	if in.OpportunityPostID != nil && *in.OpportunityPostID == uuid.Nil() {
-		return in, fieldErr("body.opportunity_post_id", "must be a post ID")
+		return in, problem.Field("body.opportunity_post_id", "must be a post ID")
 	}
 	return in, nil
 }

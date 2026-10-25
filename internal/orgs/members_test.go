@@ -17,6 +17,7 @@ import (
 	"koro/internal/platform/obs"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/privacy"
+	"koro/internal/platform/problem/problemtest"
 	"koro/internal/platform/queue"
 )
 
@@ -102,12 +103,12 @@ func TestJoinClub_OpenPolicy_ActiveImmediately(t *testing.T) {
 	if got := e.topics(); !slices.Equal(got, []string{domainevent.TopicMembershipStarted}) {
 		t.Fatalf("events %v", got)
 	}
-	if ev := e.audit.of(authz.OrgsMemberJoin); len(ev) != 1 || *ev[0].ActorUserID != minor.UserID {
+	if ev := e.audit.Of(authz.OrgsMemberJoin); len(ev) != 1 || *ev[0].ActorUserID != minor.UserID {
 		t.Fatalf("audit %+v", ev)
 	}
 	// One open membership per user and club.
 	_, err = e.svc.JoinClub(t.Context(), minor, club, "")
-	wantCode(t, err, 409, "orgs.already_member")
+	problemtest.WantProblem(t, err, 409, "orgs.already_member")
 	// The Actor sees it at once (hooks.memberships).
 	ms, err := e.svc.MembershipsOf(t.Context(), minor.UserID)
 	if err != nil || len(ms) != 1 || ms[0].OrgID != club || ms[0].Role != authz.MemberMember {
@@ -121,7 +122,7 @@ func TestJoinClub_OpenPolicy_ActiveImmediately(t *testing.T) {
 	}
 	// A message over 300 characters is refused.
 	_, err = e.svc.JoinClub(t.Context(), e.student(false), club, strings.Repeat("a", 301))
-	wantCode(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 }
 
 func TestJoinClub_ApprovalPolicy_Pending(t *testing.T) {
@@ -148,11 +149,11 @@ func TestJoinClub_ApprovalPolicy_Pending(t *testing.T) {
 	delete(e.clubs.facts, other)
 	e.clubs.mu.Unlock()
 	_, err = e.svc.JoinClub(t.Context(), s, other, "")
-	wantErr(t, err, orgs.ErrNotFound)
+	problemtest.WantErr(t, err, orgs.ErrNotFound)
 	// A company is not a club.
 	co, _ := e.company(t, "Kulüp Değil")
 	_, err = e.svc.JoinClub(t.Context(), s, co.Org.ID, "")
-	wantErr(t, err, orgs.ErrNotFound)
+	problemtest.WantErr(t, err, orgs.ErrNotFound)
 }
 
 // TestJoinClub_NoProvider_404: with hooks.clubInfo unbound (directory not
@@ -171,7 +172,7 @@ func TestJoinClub_NoProvider_404(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = mod.Service.JoinClub(t.Context(), e.student(false), club, "")
-	wantErr(t, err, orgs.ErrNotFound)
+	problemtest.WantErr(t, err, orgs.ErrNotFound)
 }
 
 func TestJoinClub_UnverifiedUser_403(t *testing.T) {
@@ -179,17 +180,17 @@ func TestJoinClub_UnverifiedUser_403(t *testing.T) {
 	e := newEnv(t)
 	club := e.club(t, "Doğrulama Kulübü", orgs.JoinOpen, false)
 	_, err := e.svc.JoinClub(t.Context(), user(), club, "")
-	wantCode(t, err, 403, "students.verification_required")
+	problemtest.WantProblem(t, err, 403, "students.verification_required")
 	lapsed := user()
 	lapsed.StudentStatus = authz.StudentLapsed
 	_, err = e.svc.JoinClub(t.Context(), lapsed, club, "")
-	wantCode(t, err, 403, "students.verification_required")
+	problemtest.WantProblem(t, err, 403, "students.verification_required")
 	// Platform staff are no students either; a missing club stays 404.
 	_, err = e.svc.JoinClub(t.Context(), pad(t), club, "")
-	wantCode(t, err, 403, "students.verification_required")
+	problemtest.WantProblem(t, err, 403, "students.verification_required")
 	_, err = e.svc.JoinClub(t.Context(), user(), uuid.NewV7(), "")
-	wantErr(t, err, orgs.ErrNotFound)
-	if len(e.audit.of(authz.OrgsMemberJoin)) != 0 {
+	problemtest.WantErr(t, err, orgs.ErrNotFound)
+	if len(e.audit.Of(authz.OrgsMemberJoin)) != 0 {
 		t.Fatal("a refused join was audited as a success")
 	}
 }
@@ -207,10 +208,10 @@ func TestApproveJoinRequest_EmitsMembershipStarted(t *testing.T) {
 	// Only the club_admin decides (03 §5.2): a member 403, an outsider 404.
 	_, mem := e.join(t, e.club(t, "Başka", orgs.JoinOpen, false), e.student(false))
 	_, err = e.svc.ApproveJoinRequest(t.Context(), mem, club, req.ID)
-	wantErr(t, err, orgs.ErrNotFound)
+	problemtest.WantErr(t, err, orgs.ErrNotFound)
 	member := as(e.student(false), club, orgs.KindClub, authz.MemberMember)
 	_, err = e.svc.ApproveJoinRequest(t.Context(), member, club, req.ID)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 
 	v, err := e.svc.ApproveJoinRequest(t.Context(), admin, club, req.ID)
 	if err != nil {
@@ -227,14 +228,14 @@ func TestApproveJoinRequest_EmitsMembershipStarted(t *testing.T) {
 	if err != nil || p.MembershipID != req.ID || p.UserID != s.UserID || p.OrgKind != "club" || p.Role != "member" {
 		t.Fatalf("membership.started = %+v, %v", p, err)
 	}
-	if ev := e.audit.of(authz.OrgsMemberDecide); len(ev) != 1 || ev[0].Metadata["decision"] != "approved" {
+	if ev := e.audit.Of(authz.OrgsMemberDecide); len(ev) != 1 || ev[0].Metadata["decision"] != "approved" {
 		t.Fatalf("audit %+v", ev)
 	}
 	// Approving again is a state conflict; rejecting an active member too.
 	_, err = e.svc.ApproveJoinRequest(t.Context(), admin, club, req.ID)
-	wantCode(t, err, 409, "orgs.member_state")
+	problemtest.WantProblem(t, err, 409, "orgs.member_state")
 	_, err = e.svc.RejectJoinRequest(t.Context(), admin, club, req.ID)
-	wantCode(t, err, 409, "orgs.member_state")
+	problemtest.WantProblem(t, err, 409, "orgs.member_state")
 
 	// A rejected request ends (rejected) and emits nothing.
 	s2 := e.student(false)
@@ -249,7 +250,7 @@ func TestApproveJoinRequest_EmitsMembershipStarted(t *testing.T) {
 	}
 	// H-38: another club's ID in the path finds nothing.
 	_, err = e.svc.ApproveJoinRequest(t.Context(), admin, club, uuid.NewV7())
-	wantErr(t, err, orgs.ErrNotFound)
+	problemtest.WantErr(t, err, orgs.ErrNotFound)
 }
 
 // TestMembership_OrgIsolation_404: a membership of another org addressed
@@ -269,11 +270,11 @@ func TestMembership_OrgIsolation_404(t *testing.T) {
 			return err
 		}(),
 	} {
-		wantErr(t, err, orgs.ErrNotFound)
+		problemtest.WantErr(t, err, orgs.ErrNotFound)
 	}
 	// And b's member under b's path is 404 for a's admin (not a member of b).
 	_, err := e.svc.GetMember(t.Context(), adminA, b, mb.ID, orgs.Access{})
-	wantErr(t, err, orgs.ErrNotFound)
+	problemtest.WantErr(t, err, orgs.ErrNotFound)
 	if m, ok := e.memberOf(t, b, mb.ID); !ok || m.Status != orgs.MemberActive {
 		t.Fatalf("b's membership changed: %+v", m)
 	}
@@ -289,12 +290,12 @@ func TestLeave_LastAdmin_409(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = e.svc.LeaveMembership(t.Context(), admin, own.ID)
-	wantCode(t, err, 409, "orgs.last_admin")
+	problemtest.WantProblem(t, err, 409, "orgs.last_admin")
 	// Demoting or removing the last admin is refused too (by a platform admin as well).
 	_, err = e.svc.ChangeMemberRole(t.Context(), admin, club, own.ID, authz.MemberMember)
-	wantCode(t, err, 409, "orgs.last_admin")
+	problemtest.WantProblem(t, err, 409, "orgs.last_admin")
 	err = e.svc.RemoveMember(t.Context(), pad(t), club, own.ID, "")
-	wantCode(t, err, 409, "orgs.last_admin")
+	problemtest.WantProblem(t, err, 409, "orgs.last_admin")
 
 	// With a second admin the first may leave.
 	second := e.clubAdmin(t, club)
@@ -306,15 +307,15 @@ func TestLeave_LastAdmin_409(t *testing.T) {
 	}
 	// Another user's membership is 404 on /me; leaving twice is a state conflict.
 	err = e.svc.LeaveMembership(t.Context(), second, own.ID)
-	wantErr(t, err, orgs.ErrNotFound)
+	problemtest.WantErr(t, err, orgs.ErrNotFound)
 	err = e.svc.LeaveMembership(t.Context(), admin, own.ID)
-	wantCode(t, err, 409, "orgs.member_state")
+	problemtest.WantProblem(t, err, 409, "orgs.member_state")
 
 	// The company owner never leaves (only a transfer replaces the owner).
 	co, owner := e.company(t, "Sahipli Şirket")
 	ownerRow, _ := e.store.LockOwner(t.Context(), co.Org.ID)
 	err = e.svc.LeaveMembership(t.Context(), owner, ownerRow.ID)
-	wantCode(t, err, 409, "orgs.last_admin")
+	problemtest.WantProblem(t, err, 409, "orgs.last_admin")
 	// A company_admin leaving closes their sessions (MFA role lost, 03 §2.2-6).
 	ca := e.member(t, co.Org.ID, authz.MemberCompanyAdmin)
 	caRow, _ := e.store.LockOpenMember(t.Context(), co.Org.ID, ca.UserID)
@@ -333,7 +334,7 @@ func TestChangeRole_MinorToClubAdmin_Rejected(t *testing.T) {
 	admin := e.clubAdmin(t, club)
 	minor, _ := e.join(t, club, e.student(true))
 	_, err := e.svc.ChangeMemberRole(t.Context(), admin, club, minor.ID, authz.MemberClubAdmin)
-	wantCode(t, err, 422, "orgs.club_admin_requires_adult_student")
+	problemtest.WantProblem(t, err, 422, "orgs.club_admin_requires_adult_student")
 	// An adult without a student verification neither.
 	unverified := user()
 	e.users.add(unverified.UserID, "u@example.com", false)
@@ -344,7 +345,7 @@ func TestChangeRole_MinorToClubAdmin_Rejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.ChangeMemberRole(t.Context(), admin, club, um.ID, authz.MemberClubAdmin)
-	wantCode(t, err, 422, "orgs.club_admin_requires_adult_student")
+	problemtest.WantProblem(t, err, 422, "orgs.club_admin_requires_adult_student")
 	if m, _ := e.memberOf(t, club, minor.ID); m.Status != orgs.MemberActive || m.Role != authz.MemberMember {
 		t.Fatalf("a refused change touched the row: %+v", m)
 	}
@@ -363,14 +364,14 @@ func TestChangeRole_MinorToClubAdmin_Rejected(t *testing.T) {
 	}
 	// Roles that do not exist for the org, the owner role and the same role are refused.
 	_, err = e.svc.ChangeMemberRole(t.Context(), admin, club, v.Membership.ID, authz.MemberRecruiter)
-	wantCode(t, err, 422, "orgs.role_not_allowed")
+	problemtest.WantProblem(t, err, 422, "orgs.role_not_allowed")
 	_, err = e.svc.ChangeMemberRole(t.Context(), admin, club, v.Membership.ID, authz.MemberClubAdmin)
-	wantCode(t, err, 422, "orgs.role_unchanged")
+	problemtest.WantProblem(t, err, 422, "orgs.role_unchanged")
 	co, owner := e.company(t, "Rol Şirketi")
 	rec := e.member(t, co.Org.ID, authz.MemberRecruiter)
 	recRow, _ := e.store.LockOpenMember(t.Context(), co.Org.ID, rec.UserID)
 	_, err = e.svc.ChangeMemberRole(t.Context(), owner, co.Org.ID, recRow.ID, authz.MemberCompanyOwner)
-	wantCode(t, err, 422, "orgs.role_not_allowed")
+	problemtest.WantProblem(t, err, 422, "orgs.role_not_allowed")
 	// recruiter → company_admin gains an MFA role: sessions close after the commit.
 	if _, err := e.svc.ChangeMemberRole(t.Context(), owner, co.Org.ID, recRow.ID, authz.MemberCompanyAdmin); err != nil {
 		t.Fatal(err)
@@ -420,17 +421,17 @@ func TestInvitation_TokenFlow(t *testing.T) {
 			t.Fatal("the token entered an event")
 		}
 	}
-	if ev := e.audit.of(authz.OrgsInvitationCreate); len(ev) != 1 || strings.Contains(stringify(ev[0].Metadata), "example.com") {
+	if ev := e.audit.Of(authz.OrgsInvitationCreate); len(ev) != 1 || strings.Contains(stringify(ev[0].Metadata), "example.com") {
 		t.Fatalf("audit %+v (the address must not be audited)", ev)
 	}
 	// A second open invitation to the same address is refused.
 	_, err := e.svc.CreateInvitation(t.Context(), owner, co.Org.ID, "AYSE@example.com", authz.MemberRecruiter)
-	wantCode(t, err, 409, "orgs.invitation_exists")
+	problemtest.WantProblem(t, err, 409, "orgs.invitation_exists")
 	// company_owner is never invited; a club role does not fit a company.
 	_, err = e.svc.CreateInvitation(t.Context(), owner, co.Org.ID, "b@example.com", authz.MemberCompanyOwner)
-	wantCode(t, err, 422, "orgs.role_not_allowed")
+	problemtest.WantProblem(t, err, 422, "orgs.role_not_allowed")
 	_, err = e.svc.CreateInvitation(t.Context(), owner, co.Org.ID, "not an address", authz.MemberRecruiter)
-	wantCode(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 	if p, err := e.svc.ListInvitations(t.Context(), owner, co.Org.ID, orgs.InvitationQuery{}); err != nil || len(p.Items) != 1 {
 		t.Fatalf("list = %+v, %v", p, err)
 	}
@@ -447,13 +448,13 @@ func TestInvitation_TokenFlow(t *testing.T) {
 	}
 	// Single use: the same token is gone.
 	_, err = e.svc.AcceptInvitation(t.Context(), invitee, raw)
-	wantErr(t, err, orgs.ErrNotFound)
+	problemtest.WantErr(t, err, orgs.ErrNotFound)
 	if p, _ := e.svc.ListInvitations(t.Context(), owner, co.Org.ID, orgs.InvitationQuery{}); len(p.Items) != 0 {
 		t.Fatalf("an accepted invitation is still listed: %+v", p.Items)
 	}
 	// The member's address cannot be invited to the role it already holds.
 	_, err = e.svc.CreateInvitation(t.Context(), owner, co.Org.ID, "ayse@example.com", authz.MemberRecruiter)
-	wantCode(t, err, 409, "orgs.already_member")
+	problemtest.WantProblem(t, err, 409, "orgs.already_member")
 
 	// Revoke: the token stops working.
 	other := user()
@@ -463,12 +464,12 @@ func TestInvitation_TokenFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.AcceptInvitation(t.Context(), other, raw2)
-	wantErr(t, err, orgs.ErrNotFound)
+	problemtest.WantErr(t, err, orgs.ErrNotFound)
 	err = e.svc.RevokeInvitation(t.Context(), owner, co.Org.ID, inv2.ID)
-	wantErr(t, err, orgs.ErrNotFound)
+	problemtest.WantErr(t, err, orgs.ErrNotFound)
 	// Garbage tokens are simply not found.
 	_, err = e.svc.AcceptInvitation(t.Context(), other, "kısa")
-	wantErr(t, err, orgs.ErrNotFound)
+	problemtest.WantErr(t, err, orgs.ErrNotFound)
 }
 
 func stringify(v any) string {
@@ -488,10 +489,10 @@ func TestAcceptInvitation_EmailMismatch_404(t *testing.T) {
 	// learns nothing; the invitation stays usable for its addressee.
 	thief := e.student(false)
 	_, err := e.svc.AcceptInvitation(t.Context(), thief, raw)
-	wantErr(t, err, orgs.ErrNotFound)
+	problemtest.WantErr(t, err, orgs.ErrNotFound)
 	// An account without an address in identity neither.
 	_, err = e.svc.AcceptInvitation(t.Context(), user(), raw)
-	wantErr(t, err, orgs.ErrNotFound)
+	problemtest.WantErr(t, err, orgs.ErrNotFound)
 	if ms, _ := e.svc.MembershipsOf(t.Context(), thief.UserID); len(ms) != 0 {
 		t.Fatalf("the mismatching account became a member: %+v", ms)
 	}
@@ -515,7 +516,7 @@ func TestInvitation_Expired_Rejected(t *testing.T) {
 	}
 	e.clk.Advance(7 * 24 * time.Hour)
 	_, err := e.svc.AcceptInvitation(t.Context(), invitee, raw)
-	wantCode(t, err, 409, "orgs.invitation_expired")
+	problemtest.WantProblem(t, err, 409, "orgs.invitation_expired")
 	// Expired invitations are not listed and get no e-mail.
 	if p, _ := e.svc.ListInvitations(t.Context(), admin, club, orgs.InvitationQuery{}); len(p.Items) != 0 {
 		t.Fatalf("expired invitation listed: %+v", p.Items)
@@ -570,7 +571,7 @@ func TestAcceptInvitation_ClubAdminNeedsAdultStudent(t *testing.T) {
 	minor := e.student(true)
 	_, raw := e.invite(t, admin, club, minor.UserID.String()+"@ogr.example.edu.tr", authz.MemberClubAdmin)
 	_, err := e.svc.AcceptInvitation(t.Context(), minor, raw)
-	wantCode(t, err, 422, "orgs.club_admin_requires_adult_student")
+	problemtest.WantProblem(t, err, 422, "orgs.club_admin_requires_adult_student")
 	// A member accepting a club_admin invitation moves up (the old row ends).
 	adult := e.student(false)
 	m, _ := e.join(t, club, adult)
@@ -621,7 +622,7 @@ func TestEduLapsed_EndsClubAdminRole(t *testing.T) {
 	if _, ok := e.memberOf(t, c2, sensRow.ID); ok {
 		t.Fatal("the sensitive club_admin row survived its end")
 	}
-	ended := e.audit.of(authz.OrgsMemberEndRole)
+	ended := e.audit.Of(authz.OrgsMemberEndRole)
 	if len(ended) != 2 || ended[0].SystemJob != orgs.EndLapsedAdminRolesTaskName || ended[0].Metadata["end_reason"] != "verification_lapsed" {
 		t.Fatalf("audit %+v", ended)
 	}
@@ -660,7 +661,7 @@ func TestAdminSweep_EndsRolesWithoutVerification(t *testing.T) {
 	if ok, _ := e.svc.HasRole(t.Context(), club, valid.UserID, authz.MemberClubAdmin); !ok {
 		t.Fatal("the sweep ended a verified club_admin")
 	}
-	ev := e.audit.of(authz.OrgsMemberEndRole)
+	ev := e.audit.Of(authz.OrgsMemberEndRole)
 	if len(ev) != 1 || ev[0].SystemJob != orgs.AdminSweepJobName || ev[0].Metadata["end_reason"] != "verification_lapsed" {
 		t.Fatalf("audit %+v", ev)
 	}
@@ -668,7 +669,7 @@ func TestAdminSweep_EndsRolesWithoutVerification(t *testing.T) {
 	if err := e.job(t, orgs.AdminSweepJobName).Handle(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if len(e.audit.of(authz.OrgsMemberEndRole)) != 1 {
+	if len(e.audit.Of(authz.OrgsMemberEndRole)) != 1 {
 		t.Fatal("the second sweep ended something")
 	}
 	if j := e.job(t, orgs.AdminSweepJobName); j.Cron != "0 1 * * *" || j.Queue != queue.Default || j.Unique <= 0 {
@@ -793,10 +794,10 @@ func TestListMembers_MemberRole_403(t *testing.T) {
 	_, member := e.join(t, club, e.student(false))
 	// T-20: members do not see each other.
 	_, err := e.svc.ListMembers(t.Context(), member, club, orgs.MemberQuery{}, orgs.Access{})
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	// An outsider does not see the surface at all.
 	_, err = e.svc.ListMembers(t.Context(), e.student(false), club, orgs.MemberQuery{}, orgs.Access{})
-	wantErr(t, err, orgs.ErrNotFound)
+	problemtest.WantErr(t, err, orgs.ErrNotFound)
 	// The admin does; names come from identity, sort by join date works.
 	p, err := e.svc.ListMembers(t.Context(), admin, club, orgs.MemberQuery{Sort: orgs.SortMemberJoined}, orgs.Access{})
 	if err != nil || len(p.Items) != 2 || p.Items[0].FirstName != "Ada" {
@@ -813,12 +814,12 @@ func TestListMembers_MemberRole_403(t *testing.T) {
 	}
 	// Platform staff read only by break-glass: without a reason 403, with one 200 + audit.
 	_, err = e.svc.ListMembers(t.Context(), persona(t, "support"), club, orgs.MemberQuery{}, orgs.Access{})
-	wantErr(t, err, authz.ErrBreakGlassReason)
+	problemtest.WantErr(t, err, authz.ErrBreakGlassReason)
 	if _, err := e.svc.ListMembers(t.Context(), persona(t, "support"), club, orgs.MemberQuery{},
 		orgs.Access{Reason: "Destek talebi 4711 inceleniyor"}); err != nil {
 		t.Fatal(err)
 	}
-	ev := e.audit.of(authz.OrgsMemberList)
+	ev := e.audit.Of(authz.OrgsMemberList)
 	if len(ev) != 1 || ev[0].Metadata[audit.MetaBreakGlass] != true || ev[0].Reason == "" {
 		t.Fatalf("break-glass audit %+v", ev)
 	}
@@ -868,7 +869,7 @@ func TestSensitiveClubMemberList_Audited(t *testing.T) {
 			t.Fatalf("list = %+v, %v", p, err)
 		}
 	}
-	ev := e.audit.of(authz.OrgsMemberList)
+	ev := e.audit.Of(authz.OrgsMemberList)
 	if len(ev) != 2 || ev[0].Metadata[audit.MetaSensitive] != true || *ev[0].OrgID != club || *ev[0].ActorUserID != admin.UserID {
 		t.Fatalf("audit %+v", ev)
 	}
@@ -876,17 +877,17 @@ func TestSensitiveClubMemberList_Audited(t *testing.T) {
 	for _, name := range []string{"support", "platform_admin", "dpo"} {
 		_, err := e.svc.ListMembers(t.Context(), persona(t, name), club, orgs.MemberQuery{},
 			orgs.Access{Reason: "Destek talebi 4711 inceleniyor"})
-		wantErr(t, err, orgs.ErrNotFound)
+		problemtest.WantErr(t, err, orgs.ErrNotFound)
 		_, err = e.svc.GetMember(t.Context(), persona(t, name), club, m.ID, orgs.Access{Reason: "Destek talebi 4711 inceleniyor"})
-		wantErr(t, err, orgs.ErrNotFound)
+		problemtest.WantErr(t, err, orgs.ErrNotFound)
 	}
 	_, err := e.svc.ListMembers(t.Context(), member, club, orgs.MemberQuery{}, orgs.Access{})
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	// A single sensitive membership read is audited as well.
 	if _, err := e.svc.GetMember(t.Context(), admin, club, m.ID, orgs.Access{}); err != nil {
 		t.Fatal(err)
 	}
-	if ev := e.audit.of(authz.OrgsMemberRead); len(ev) != 1 || ev[0].Metadata[audit.MetaSensitive] != true {
+	if ev := e.audit.Of(authz.OrgsMemberRead); len(ev) != 1 || ev[0].Metadata[audit.MetaSensitive] != true {
 		t.Fatalf("read audit %+v", ev)
 	}
 	// Unknown sensitivity (no directory facts) counts as sensitive.
@@ -895,7 +896,7 @@ func TestSensitiveClubMemberList_Audited(t *testing.T) {
 	e.clubs.mu.Unlock()
 	_, err = e.svc.ListMembers(t.Context(), persona(t, "platform_admin"), club, orgs.MemberQuery{},
 		orgs.Access{Reason: "Destek talebi 4711 inceleniyor"})
-	wantErr(t, err, orgs.ErrNotFound)
+	problemtest.WantErr(t, err, orgs.ErrNotFound)
 }
 
 // TestOrgAdmin_GrantAndEndRoles: directory's claim approval grants
@@ -920,9 +921,9 @@ func TestOrgAdmin_GrantAndEndRoles(t *testing.T) {
 		t.Fatalf("the member row did not end: %+v", old)
 	}
 	err := e.svc.GrantRole(t.Context(), club, e.student(true).UserID, authz.MemberClubAdmin, "minor")
-	wantCode(t, err, 422, "orgs.club_admin_requires_adult_student")
+	problemtest.WantProblem(t, err, 422, "orgs.club_admin_requires_adult_student")
 	err = e.svc.GrantRole(t.Context(), club, s.UserID, authz.MemberCompanyOwner, "")
-	wantCode(t, err, 422, "orgs.role_not_allowed")
+	problemtest.WantProblem(t, err, 422, "orgs.role_not_allowed")
 	n, err := e.svc.EndRoles(t.Context(), s.UserID, []authz.MemberRole{authz.MemberClubAdmin}, orgs.EndClaimRevoked)
 	if err != nil || n != 1 {
 		t.Fatalf("EndRoles = %d, %v", n, err)

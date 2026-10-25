@@ -12,6 +12,7 @@ import (
 	"koro/internal/entitlements"
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/problem"
 )
 
 // Revocation reasons of the rights of a line (entitlements.revoke_reason).
@@ -56,7 +57,7 @@ func (s *service) FindByReference(ctx context.Context, ref string) (PayableOrder
 // is complete and direct payment has been confirmed, in either order.
 func (s *service) ApplyPayment(ctx context.Context, orderID, paymentID uuid.UUID, amount int64) (PaymentEffect, error) {
 	if amount <= 0 {
-		return PaymentEffect{}, fieldErr("amount", "must be positive")
+		return PaymentEffect{}, problem.Field("amount", "must be positive")
 	}
 	var eff PaymentEffect
 	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
@@ -254,7 +255,7 @@ func (s *service) advance(ctx context.Context, orderID uuid.UUID, now time.Time)
 // order, loses its rights.
 func (s *service) ApplyRefund(ctx context.Context, orderID uuid.UUID, lineID *uuid.UUID, amount int64) error {
 	if amount <= 0 {
-		return fieldErr("amount", "must be positive")
+		return problem.Field("amount", "must be positive")
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		o, err := s.d.Store.GetOrder(ctx, orderID, true)

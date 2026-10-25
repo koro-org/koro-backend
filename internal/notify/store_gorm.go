@@ -55,7 +55,7 @@ func (r deliveryRow) delivery() Delivery {
 		Category: Category(r.Category), Template: r.Template, TemplateVersion: r.TemplateVersion,
 		DedupeKey: r.DedupeKey, Provider: deref(r.Provider), ProviderMessageID: deref(r.ProviderMessageID),
 		Status: Status(r.Status), Attempts: r.Attempts, LastError: deref(r.LastError),
-		SentAt: utcPtr(r.SentAt), DeliveredAt: utcPtr(r.DeliveredAt),
+		SentAt: db.UTCPtr(r.SentAt), DeliveredAt: db.UTCPtr(r.DeliveredAt),
 		CreatedAt: r.CreatedAt.UTC(), UpdatedAt: r.UpdatedAt.UTC(),
 	}
 }
@@ -389,7 +389,7 @@ type inAppRow struct {
 // cross-org: row conversion / helper; no query of its own beyond its callers.
 func (r inAppRow) notification() (InAppNotification, error) {
 	n := InAppNotification{ID: r.ID, UserID: r.UserID, Kind: r.Kind, Title: r.Title, Body: deref(r.Body),
-		LinkPath: deref(r.LinkPath), SourceOrgID: r.SourceOrgID, ReadAt: utcPtr(r.ReadAt), CreatedAt: r.CreatedAt.UTC(),
+		LinkPath: deref(r.LinkPath), SourceOrgID: r.SourceOrgID, ReadAt: db.UTCPtr(r.ReadAt), CreatedAt: r.CreatedAt.UTC(),
 		Data: map[string]string{}}
 	if err := json.Unmarshal([]byte(r.Data), &n.Data); err != nil {
 		return InAppNotification{}, fmt.Errorf("notify: in-app data: %w", err)
@@ -506,7 +506,7 @@ type pushRow struct {
 func (r pushRow) token() PushToken {
 	return PushToken{ID: r.ID, UserID: r.UserID, SessionID: r.SessionID, Platform: PushPlatform(r.Platform), Token: r.Token,
 		TokenSHA256: r.TokenSHA256, AppVersion: deref(r.AppVersion), CreatedAt: r.CreatedAt.UTC(),
-		LastSeenAt: r.LastSeenAt.UTC(), RevokedAt: utcPtr(r.RevokedAt)}
+		LastSeenAt: r.LastSeenAt.UTC(), RevokedAt: db.UTCPtr(r.RevokedAt)}
 }
 
 // UpsertPushToken implements Store.
@@ -617,12 +617,4 @@ func nilIfEmpty(b []byte) []byte {
 		return nil
 	}
 	return b
-}
-
-func utcPtr(t *time.Time) *time.Time {
-	if t == nil {
-		return nil
-	}
-	u := t.UTC()
-	return &u
 }

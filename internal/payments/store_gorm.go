@@ -20,13 +20,6 @@ type gormStore struct{ orm *gorm.DB }
 // NewGormStore returns the PostgreSQL store over the app_rw pool.
 func NewGormStore(orm *gorm.DB) Store { return gormStore{orm: orm} }
 
-func lockIf(q *gorm.DB, lock bool) *gorm.DB {
-	if lock {
-		return q.Clauses(clause.Locking{Strength: clause.LockingStrengthUpdate})
-	}
-	return q
-}
-
 func take[T any](op string, q *gorm.DB) (T, error) {
 	var v T
 	err := q.Take(&v).Error
@@ -58,7 +51,7 @@ func (s gormStore) InsertAccount(ctx context.Context, c CollectionAccount) (Coll
 //
 // cross-org: Koro's own accounts (no org scope).
 func (s gormStore) GetAccount(ctx context.Context, id uuid.UUID, lock bool) (CollectionAccount, error) {
-	return take[CollectionAccount]("get account", lockIf(db.Conn(ctx, s.orm), lock).Where("id = ?", id))
+	return take[CollectionAccount]("get account", db.LockIf(db.Conn(ctx, s.orm), lock).Where("id = ?", id))
 }
 
 // ListAccounts implements Store.
@@ -139,7 +132,7 @@ func (s gormStore) InsertTransfer(ctx context.Context, t IncomingTransfer) (Inco
 //
 // cross-org: Koro's own accounts (no org scope).
 func (s gormStore) GetTransfer(ctx context.Context, id uuid.UUID, lock bool) (IncomingTransfer, error) {
-	return take[IncomingTransfer]("get transfer", lockIf(db.Conn(ctx, s.orm), lock).Where("id = ?", id))
+	return take[IncomingTransfer]("get transfer", db.LockIf(db.Conn(ctx, s.orm), lock).Where("id = ?", id))
 }
 
 // ListTransfers implements Store.
@@ -263,7 +256,7 @@ func (s gormStore) InsertPayment(ctx context.Context, p Payment) error {
 //
 // cross-org: the admin surface and in-process callers address it by ID.
 func (s gormStore) GetPayment(ctx context.Context, id uuid.UUID, lock bool) (Payment, error) {
-	return take[Payment]("get payment", lockIf(db.Conn(ctx, s.orm), lock).Where("id = ?", id))
+	return take[Payment]("get payment", db.LockIf(db.Conn(ctx, s.orm), lock).Where("id = ?", id))
 }
 
 // ListPayments implements Store.
@@ -374,7 +367,7 @@ func (s gormStore) InsertRefund(ctx context.Context, r Refund) error {
 //
 // cross-org: the admin surface addresses a refund by ID.
 func (s gormStore) GetRefund(ctx context.Context, id uuid.UUID, lock bool) (Refund, error) {
-	return take[Refund]("get refund", lockIf(db.Conn(ctx, s.orm), lock).Where("id = ?", id))
+	return take[Refund]("get refund", db.LockIf(db.Conn(ctx, s.orm), lock).Where("id = ?", id))
 }
 
 // ListRefunds implements Store.

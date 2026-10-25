@@ -23,6 +23,7 @@ import (
 	"koro/internal/platform/obs"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/privacy"
+	"koro/internal/platform/problem/problemtest"
 	"koro/internal/platform/queue"
 	"koro/internal/platform/testutil"
 	"koro/internal/students"
@@ -215,7 +216,7 @@ func TestService_Postgres_CreateAcceptAndExpire(t *testing.T) {
 
 	fail.Store(true)
 	_, err = mod.Service.Respond(ctx, stu, v.Request.ID, accept)
-	wantErr(t, err, students.ErrMinorRestricted)
+	problemtest.WantErr(t, err, students.ErrMinorRestricted)
 	if st := count(`SELECT count(*) FROM contact_requests WHERE id = $1 AND status = 'pending' AND responded_at IS NULL`, v.Request.ID); st != 1 ||
 		count(`SELECT count(*) FROM profile_access_grants WHERE source_id = $1`, v.Request.ID) != 0 ||
 		count(`SELECT count(*) FROM outbox WHERE topic = 'contact_request.closed'`) != 0 {

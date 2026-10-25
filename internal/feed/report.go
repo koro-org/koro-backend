@@ -13,6 +13,7 @@ import (
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 	"koro/internal/platform/textx"
 )
 
@@ -91,11 +92,11 @@ func cleanText(loc, s string, maxRunes int) (*string, error) {
 	n, err := textx.NormalizeText(s)
 	switch {
 	case err != nil:
-		return nil, fieldErr(loc, "contains control or bidi characters")
+		return nil, problem.Field(loc, "contains control or bidi characters")
 	case n == "":
 		return nil, nil
 	case utf8.RuneCountInString(n) > maxRunes:
-		return nil, fieldErr(loc, "is too long")
+		return nil, problem.Field(loc, "is too long")
 	}
 	return &n, nil
 }
@@ -122,9 +123,9 @@ func (s *service) reportTarget(ctx context.Context, a authz.Actor, t TargetType,
 		if err != nil {
 			return nil, err
 		}
-		return nil, authz.Can(ctx, a, authz.FeedReportCreate, orgResource(o))
+		return nil, authz.Can(ctx, a, authz.FeedReportCreate, authz.OrgResource(o.ID, string(o.Kind), string(o.Status)))
 	}
-	return nil, fieldErr("body.target_type", "must be post or org")
+	return nil, problem.Field("body.target_type", "must be post or org")
 }
 
 // CreateReport implements Service. Order: the input (422) → the target
@@ -137,7 +138,7 @@ func (s *service) CreateReport(ctx context.Context, a authz.Actor, in ReportInpu
 		return ReportResult{}, authz.ErrForbidden
 	}
 	if !in.Reason.Valid() {
-		return ReportResult{}, fieldErr("body.reason", "is not a report reason")
+		return ReportResult{}, problem.Field("body.reason", "is not a report reason")
 	}
 	details, err := cleanText("body.details", in.Details, maxReportText)
 	if err != nil {
@@ -295,7 +296,7 @@ func (s *service) ResolveReport(ctx context.Context, a authz.Actor, id uuid.UUID
 	switch in.Status {
 	case ReportInReview, ReportActioned, ReportDismissed:
 	default:
-		return ReportView{}, fieldErr("body.status", "must be in_review, actioned or dismissed")
+		return ReportView{}, problem.Field("body.status", "must be in_review, actioned or dismissed")
 	}
 	note, err := cleanText("body.resolution_note", in.Note, maxReportText)
 	if err != nil {

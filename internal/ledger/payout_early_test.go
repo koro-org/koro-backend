@@ -65,7 +65,7 @@ func TestMarkPaid_PaidBeforeApproval_SecurityNotice(t *testing.T) {
 	if v.Status != ledger.StatusPaid || v.PaidAt == nil || !v.PaidAt.Equal(early) || !v.PaidBeforeApproval() {
 		t.Fatalf("paid payout %+v", v.Payout)
 	}
-	rows := e.audit.of(authz.LedgerPayoutMarkPaid)
+	rows := e.audit.Of(authz.LedgerPayoutMarkPaid)
 	if len(rows) != 1 || rows[0].Metadata["paid_before_approval"] != true {
 		t.Fatalf("mark-paid audit %+v", rows)
 	}
@@ -162,7 +162,7 @@ func TestMarkPaid_AfterApproval_NoSecurityNotice(t *testing.T) {
 	if v.ApprovedAt == nil || v.PaidAt == nil || !v.PaidAt.Equal(*v.ApprovedAt) || v.PaidBeforeApproval() {
 		t.Fatalf("paid payout %+v", v.Payout)
 	}
-	if rows := e.audit.of(authz.LedgerPayoutMarkPaid); len(rows) != 1 || rows[0].Metadata["paid_before_approval"] != nil {
+	if rows := e.audit.Of(authz.LedgerPayoutMarkPaid); len(rows) != 1 || rows[0].Metadata["paid_before_approval"] != nil {
 		t.Fatalf("mark-paid audit %+v", rows)
 	}
 	e.dispatchAll(t, reg)

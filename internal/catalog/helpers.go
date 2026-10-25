@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"strconv"
-	"strings"
-	"time"
 	"uuid"
 
 	"koro/internal/audit"
@@ -14,6 +12,7 @@ import (
 	"koro/internal/events"
 	"koro/internal/orgs"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/problem"
 )
 
@@ -26,14 +25,6 @@ const (
 
 // adminSurface is the authz view of /admin/** (03 §3.2: 403 before reading).
 var adminSurface = authz.Resource{Type: authz.TypeAdminSurface}
-
-// orgResource is the org of /orgs/{org_id}/... (the management surface).
-func orgResource(o orgs.OrgSummary) authz.Resource {
-	id := o.ID
-	return authz.Resource{Type: authz.TypeOrg, ID: id, OrgID: &id, Attrs: map[string]string{
-		"org_kind": string(o.Kind), "org_status": string(o.Status),
-	}}
-}
 
 // offeringFacts are what authz needs beyond the row: the seller club's
 // university (03 §3.5 university_id; the org ID for the U cells).
@@ -135,27 +126,6 @@ func writableOrg(a authz.Actor, o orgs.OrgSummary) error {
 	return nil
 }
 
-// etagOf is the strong ETag of an offering version (04 §1.13): the base32
-// of updated_at's UnixNano, quoted.
-func etagOf(updatedAt time.Time) string {
-	return `"` + strconv.FormatInt(updatedAt.UnixNano(), 32) + `"`
-}
-
-// checkIfMatch applies If-Match (04 §1.13, RFC 9110 strong comparison):
-// missing (or "*") → 428, no listed tag equal to the current one → 412.
-func checkIfMatch(header, current string) error {
-	h := strings.TrimSpace(header)
-	if h == "" || h == "*" {
-		return ErrPreconditionRequired
-	}
-	for tag := range strings.SplitSeq(h, ",") {
-		if strings.TrimSpace(tag) == current {
-			return nil
-		}
-	}
-	return ErrPreconditionFailed
-}
-
 // offeringEvent is the audit record of an offering write by a. Metadata
 // carries states and field names, never free text (05 §11.2).
 func offeringEvent(a authz.Actor, act authz.Action, o Offering, reason string, meta map[string]any) audit.Event {
@@ -173,21 +143,13 @@ func offeringEvent(a authz.Actor, act authz.Action, o Offering, reason string, m
 // emitAfterCommit publishes an A event of the offering (01 §6.2:
 // offering.submitted, offering.decided) once the transaction commits.
 func (s *service) emitAfterCommit(ctx context.Context, o Offering, p domainevent.Payload) error {
-	env, err := domainevent.New(p, auditOffering, o.ID)
-	if err != nil {
-		return err
-	}
-	return s.d.Outbox.AfterCommit(ctx, env)
+	return outbox.EmitAfterCommit(ctx, s.d.Outbox, p, auditOffering, o.ID)
 }
 
 // emitOutbox writes an O event of the offering (offering.cancelled) in the
 // transaction carried by ctx.
 func (s *service) emitOutbox(ctx context.Context, o Offering, p domainevent.Payload) error {
-	env, err := domainevent.New(p, auditOffering, o.ID)
-	if err != nil {
-		return err
-	}
-	return s.d.Outbox.Add(ctx, env)
+	return outbox.Emit(ctx, s.d.Outbox, p, auditOffering, o.ID)
 }
 
 func fieldError(loc, msg string) problem.FieldError {

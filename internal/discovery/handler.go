@@ -18,11 +18,7 @@ import (
 // (`koro openapi`): handlers only touch it when called.
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
-	reg := func(o huma.Operation, m op.Meta) huma.Operation {
-		o.Tags = []string{"discovery"}
-		return op.Koro(o, m)
-	}
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "discovery", huma.Operation{
 		OperationID: "searchDiscovery", Method: http.MethodGet, Path: "/orgs/{org_id}/discovery/profiles",
 		Summary: "Search anonymous student profiles",
 		Description: "Level 2 profiles of the students who chose to be discoverable, under this company's pseudonyms " +
@@ -30,14 +26,14 @@ func Register(api huma.API, svc Service) {
 			"Ordered by relevance to the skill and language filters, ties in an order fixed for the session; the " +
 			"order is the only trace of the ranking. When fewer than 10 students match in total the list is empty " +
 			"and below_threshold is true. Needs the discovery_access right; every search is audited.",
-	}, op.Meta{Action: string(authz.DiscoveryProfileSearch), Surface: op.SurfaceOrg, RateLimit: op.RateSearch}), h.search)
+	}, op.Meta{Action: string(authz.DiscoveryProfileSearch), Surface: op.SurfaceOrg, RateLimit: op.RateSearch}, h.search)
 
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "discovery", huma.Operation{
 		OperationID: "getDiscoveryProfile", Method: http.MethodGet, Path: "/orgs/{org_id}/discovery/profiles/{anon_id}",
 		Summary: "Get an anonymous student profile",
 		Description: "The level 2 profile behind one of this company's pseudonyms. Another company's pseudonym, or a " +
 			"student who is no longer discoverable, is not found. Needs the discovery_access right; every read is audited.",
-	}, op.Meta{Action: string(authz.DiscoveryProfileRead), Surface: op.SurfaceOrg}), h.get)
+	}, op.Meta{Action: string(authz.DiscoveryProfileRead), Surface: op.SurfaceOrg}, h.get)
 }
 
 type handler struct {

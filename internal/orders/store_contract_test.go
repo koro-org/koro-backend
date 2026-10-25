@@ -8,6 +8,7 @@ import (
 	"uuid"
 
 	"koro/internal/orders"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // world creates the parent rows a store needs (FKs in PostgreSQL; plain IDs
@@ -172,7 +173,7 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (orders.Store, worl
 			func() error { _, err := s.GetLine(ctx, uuid.NewV7(), false); return err }(),
 			func() error { _, err := s.OrderByNo(ctx, "KR00000000"); return err }(),
 		} {
-			wantErr(t, err, orders.ErrNotFound)
+			problemtest.WantErr(t, err, orders.ErrNotFound)
 		}
 	})
 
@@ -190,13 +191,13 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (orders.Store, worl
 			t.Fatalf("UpdateOrder = %+v, %v", got, err)
 		}
 		_, err = s.UpdateOrder(ctx, next, orders.StatusAwaitingPayment)
-		wantErr(t, err, orders.ErrInvalidState)
+		problemtest.WantErr(t, err, orders.ErrInvalidState)
 		_, err = s.UpdateOrder(ctx, orders.Order{ID: uuid.NewV7()}, orders.StatusAwaitingPayment)
-		wantErr(t, err, orders.ErrNotFound)
+		problemtest.WantErr(t, err, orders.ErrNotFound)
 		over := got
 		over.RefundedAmount = got.PaidAmount + 1
 		_, err = s.UpdateOrder(ctx, over, orders.StatusPaid)
-		wantErr(t, err, orders.ErrRefundExceedsPaid)
+		problemtest.WantErr(t, err, orders.ErrRefundExceedsPaid)
 
 		l := f.lines[0]
 		marked, by, ends := t0.Add(2*time.Hour), w.buyer(t).user, t0.Add(9*24*time.Hour)
@@ -209,11 +210,11 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (orders.Store, worl
 			t.Fatalf("UpdateLine = %+v, %v", gl, err)
 		}
 		_, err = s.UpdateLine(ctx, nl, orders.FulfillPending)
-		wantErr(t, err, orders.ErrInvalidState)
+		problemtest.WantErr(t, err, orders.ErrInvalidState)
 		over2 := gl
 		over2.RefundedAmount = gl.PayableAmount + 1
 		_, err = s.UpdateLine(ctx, over2, orders.FulfillMarked)
-		wantErr(t, err, orders.ErrRefundExceedsPaid)
+		problemtest.WantErr(t, err, orders.ErrRefundExceedsPaid)
 	})
 
 	t.Run("lists: scope, filters and keyset pages", func(t *testing.T) {

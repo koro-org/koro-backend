@@ -12,6 +12,7 @@ import (
 	"koro/internal/parties"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/problem"
 )
 
 // Changes of a collection account announced by the security notice task
@@ -102,7 +103,7 @@ func (s *service) checkPlatformParty(ctx context.Context, id uuid.UUID) error {
 	if s.d.Parties == nil {
 		return ErrUnavailable
 	}
-	bad := fieldErr("body.legal_party_id", "must be Koro's own legal party (kind platform)")
+	bad := problem.Field("body.legal_party_id", "must be Koro's own legal party (kind platform)")
 	if id == uuid.Nil() {
 		return bad
 	}
@@ -131,7 +132,7 @@ func (s *service) DecideCollectionAccount(ctx context.Context, a authz.Actor, id
 		return CollectionAccount{}, err
 	}
 	if !d.Valid() {
-		return CollectionAccount{}, fieldErr("body.decision", "must be approved or rejected")
+		return CollectionAccount{}, problem.Field("body.decision", "must be approved or rejected")
 	}
 	c, err := s.d.Store.GetAccount(ctx, id, false)
 	if err != nil {

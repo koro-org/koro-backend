@@ -8,6 +8,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/page"
 )
@@ -15,7 +16,7 @@ import (
 // registerMembers adds the 13 membership operations of BE-019 (04 §2.2,
 // §2.3 joinClub).
 func registerMembers(api huma.API, h handler) {
-	reg(api, huma.Operation{
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "listOrgMembers", Method: http.MethodGet, Path: "/orgs/{org_id}/members",
 		Summary: "List an organization's members",
 		Description: "The org's admins (club_admin, university_rep, company roles) see the list; members do not see each " +
@@ -23,32 +24,32 @@ func registerMembers(api huma.API, h handler) {
 			"is its club_admin's only, every read is audited, and platform staff get 404.",
 	}, op.Meta{Action: string(authz.OrgsMemberList), Surface: op.SurfaceOrg, BreakGlass: true}, h.listMembers)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "getOrgMember", Method: http.MethodGet, Path: "/orgs/{org_id}/members/{membership_id}",
 		Summary:     "Get one membership of an organization",
 		Description: "Same rules as listOrgMembers. Ended memberships are not found.",
 	}, op.Meta{Action: string(authz.OrgsMemberRead), Surface: op.SurfaceOrg, BreakGlass: true}, h.getMember)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "approveJoinRequest", Method: http.MethodPost, Path: "/orgs/{org_id}/members/{membership_id}/approve",
 		Summary:     "Approve a join request",
 		Description: "club_admin only. pending → active; another status is 409 orgs.member_state.",
 	}, op.Meta{Action: string(authz.OrgsMemberDecide), Surface: op.SurfaceOrg, Idempotency: op.IdempotencyOptional}, h.approve)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "rejectJoinRequest", Method: http.MethodPost, Path: "/orgs/{org_id}/members/{membership_id}/reject",
 		Summary:     "Reject a join request",
 		Description: "club_admin only. No reason is shown to the student; in a sensitive club the request is deleted.",
 	}, op.Meta{Action: string(authz.OrgsMemberDecide), Surface: op.SurfaceOrg, Idempotency: op.IdempotencyOptional}, h.reject)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "removeOrgMember", Method: http.MethodPost, Path: "/orgs/{org_id}/members/{membership_id}/remove",
 		DefaultStatus: http.StatusNoContent,
 		Summary:       "Remove a member",
 		Description:   "The last club_admin and the company_owner cannot be removed (409 orgs.last_admin).",
 	}, op.Meta{Action: string(authz.OrgsMemberRemove), Surface: op.SurfaceOrg, Idempotency: op.IdempotencyOptional}, h.remove)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "changeOrgMemberRole", Method: http.MethodPost, Path: "/orgs/{org_id}/members/{membership_id}/role",
 		Summary: "Change a member's role",
 		Description: "The old membership ends (role_changed) and a new one starts: the answer carries the new " +
@@ -57,20 +58,20 @@ func registerMembers(api huma.API, h handler) {
 			"club_admin cannot be demoted (409 orgs.last_admin).",
 	}, op.Meta{Action: string(authz.OrgsMemberChangeRole), Surface: op.SurfaceOrg, Idempotency: op.IdempotencyOptional}, h.changeRole)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "listMyMemberships", Method: http.MethodGet, Path: "/me/memberships",
 		Summary:     "List my memberships",
 		Description: "Sensitive club memberships included (only for their owner). Default: pending and active.",
 	}, op.Meta{Action: string(authz.OrgsMembershipListOwn), Surface: op.SurfaceSelf}, h.listMine)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "leaveMyMembership", Method: http.MethodPost, Path: "/me/memberships/{membership_id}/leave",
 		DefaultStatus: http.StatusNoContent,
 		Summary:       "Leave a membership (or withdraw a join request)",
 		Description:   "The last club_admin and the company_owner cannot leave (409 orgs.last_admin).",
 	}, op.Meta{Action: string(authz.OrgsMembershipLeave), Surface: op.SurfaceSelf, Idempotency: op.IdempotencyOptional}, h.leave)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "createOrgInvitation", Method: http.MethodPost, Path: "/orgs/{org_id}/invitations",
 		DefaultStatus: http.StatusCreated,
 		Summary:       "Invite someone to an organization by e-mail",
@@ -78,18 +79,18 @@ func registerMembers(api huma.API, h handler) {
 			"address only. company_owner is never invited; university roles are invited by platform_admin.",
 	}, op.Meta{Action: string(authz.OrgsInvitationCreate), Surface: op.SurfaceOrg, Idempotency: op.IdempotencyOptional}, h.invite)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "listOrgInvitations", Method: http.MethodGet, Path: "/orgs/{org_id}/invitations",
 		Summary: "List an organization's open invitations",
 	}, op.Meta{Action: string(authz.OrgsInvitationList), Surface: op.SurfaceOrg}, h.listInvitations)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "revokeOrgInvitation", Method: http.MethodDelete, Path: "/orgs/{org_id}/invitations/{invitation_id}",
 		DefaultStatus: http.StatusNoContent,
 		Summary:       "Revoke an open invitation",
 	}, op.Meta{Action: string(authz.OrgsInvitationRevoke), Surface: op.SurfaceOrg}, h.revokeInvitation)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "acceptOrgInvitation", Method: http.MethodPost, Path: "/invitations/accept",
 		Summary: "Accept an invitation",
 		Description: "The token comes from the invitation e-mail. The invitation must be addressed to the signed-in " +
@@ -97,23 +98,13 @@ func registerMembers(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.OrgsInvitationAccept), Surface: op.SurfaceSelf, RateLimit: op.RateTokenConfirm,
 		Idempotency: op.IdempotencyOptional}, h.accept)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "joinClub", Method: http.MethodPost, Path: "/clubs/{club_id}/join-requests",
 		DefaultStatus: http.StatusCreated,
 		Summary:       "Ask to join a club",
 		Description: "Verified students only (403 students.verification_required). An open club makes the membership " +
 			"active at once, an approval club leaves it pending for the club_admin.",
 	}, op.Meta{Action: string(authz.OrgsMemberJoin), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional}, h.join)
-}
-
-// parseID parses a path ID; a malformed one becomes the nil UUID, which no
-// row has (404).
-func parseID(s string) uuid.UUID {
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return uuid.Nil()
-	}
-	return id
 }
 
 // MemberPath is the org_id and membership_id path parameters.
@@ -211,7 +202,7 @@ func (h handler) getMember(ctx context.Context, in *getMemberInput) (*memberOutp
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.GetMember(ctx, a, in.id(), parseID(in.MembershipID), Access{Reason: in.AccessReason})
+	v, err := h.svc.GetMember(ctx, a, in.id(), httpx.ParseID(in.MembershipID), Access{Reason: in.AccessReason})
 	if err != nil {
 		return nil, err
 	}
@@ -224,7 +215,7 @@ func (h handler) decide(ctx context.Context, in *MemberPath,
 	if err != nil {
 		return nil, err
 	}
-	v, err := fn(ctx, a, in.id(), parseID(in.MembershipID))
+	v, err := fn(ctx, a, in.id(), httpx.ParseID(in.MembershipID))
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +246,7 @@ func (h handler) remove(ctx context.Context, in *removeInput) (*struct{}, error)
 	if in.Body != nil {
 		reason = in.Body.Reason
 	}
-	return nil, h.svc.RemoveMember(ctx, a, in.id(), parseID(in.MembershipID), reason)
+	return nil, h.svc.RemoveMember(ctx, a, in.id(), httpx.ParseID(in.MembershipID), reason)
 }
 
 type roleInput struct {
@@ -270,7 +261,7 @@ func (h handler) changeRole(ctx context.Context, in *roleInput) (*memberOutput, 
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.ChangeMemberRole(ctx, a, in.id(), parseID(in.MembershipID), authz.MemberRole(in.Body.Role))
+	v, err := h.svc.ChangeMemberRole(ctx, a, in.id(), httpx.ParseID(in.MembershipID), authz.MemberRole(in.Body.Role))
 	if err != nil {
 		return nil, err
 	}
@@ -344,7 +335,7 @@ func (h handler) leave(ctx context.Context, in *leaveInput) (*struct{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	return nil, h.svc.LeaveMembership(ctx, a, parseID(in.MembershipID))
+	return nil, h.svc.LeaveMembership(ctx, a, httpx.ParseID(in.MembershipID))
 }
 
 type inviteInput struct {
@@ -412,7 +403,7 @@ func (h handler) revokeInvitation(ctx context.Context, in *revokeInvitationInput
 	if err != nil {
 		return nil, err
 	}
-	return nil, h.svc.RevokeInvitation(ctx, a, in.id(), parseID(in.InvitationID))
+	return nil, h.svc.RevokeInvitation(ctx, a, in.id(), httpx.ParseID(in.InvitationID))
 }
 
 type acceptInput struct {
@@ -457,7 +448,7 @@ func (h handler) join(ctx context.Context, in *joinInput) (*joinOutput, error) {
 	if in.Body != nil {
 		msg = in.Body.Message
 	}
-	m, err := h.svc.JoinClub(ctx, a, parseID(in.ClubID), msg)
+	m, err := h.svc.JoinClub(ctx, a, httpx.ParseID(in.ClubID), msg)
 	if err != nil {
 		return nil, err
 	}

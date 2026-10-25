@@ -15,6 +15,7 @@ import (
 	"koro/internal/identity"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // maxJoinMessage is the length limit of joinClub's message (04 §2.3).
@@ -89,7 +90,7 @@ func memberResource(m Membership, sensitive bool, reason string) authz.Resource 
 // orgSurface is the authz view of an org's member or invitation collection
 // (an org resource with the club's sensitivity: 03 k4).
 func orgSurface(o Org, sensitive bool, reason string) authz.Resource {
-	r := orgResource(o)
+	r := authz.OrgResource(o.ID, string(o.Kind), string(o.Status))
 	r.Attrs[authz.AttrSensitive] = boolAttr(sensitive)
 	if reason != "" {
 		r.Attrs[authz.AttrAccessReason] = reason
@@ -279,11 +280,11 @@ func (s *service) ListMembers(ctx context.Context, a authz.Actor, orgID uuid.UUI
 	}
 	for _, st := range q.Statuses {
 		if st != MemberPending && st != MemberActive {
-			return MemberPage{}, fieldErr("query.status", "must be pending or active")
+			return MemberPage{}, problem.Field("query.status", "must be pending or active")
 		}
 	}
 	if q.Role != "" && !roleFitsKind(o.Kind, q.Role) {
-		return MemberPage{}, fieldErr("query.role", "is not a role of this organization")
+		return MemberPage{}, problem.Field("query.role", "is not a role of this organization")
 	}
 	sort := SortMemberNewest
 	if q.Sort == SortMemberJoined {
@@ -452,7 +453,7 @@ func (s *service) RejectJoinRequest(ctx context.Context, a authz.Actor, orgID, i
 func (s *service) RemoveMember(ctx context.Context, a authz.Actor, orgID, id uuid.UUID, reason string) error {
 	reason = strings.TrimSpace(reason)
 	if utf8.RuneCountInString(reason) > maxReason {
-		return fieldErr("body.reason", "must be at most 500 characters")
+		return problem.Field("body.reason", "must be at most 500 characters")
 	}
 	hash, err := idempotency.Hash(struct {
 		Op      string
@@ -702,7 +703,7 @@ func (s *service) JoinClub(ctx context.Context, a authz.Actor, clubID uuid.UUID,
 	// The message has no column (02 §7.3): it is validated and dropped
 	// (T-205); the club_admin sees the request itself.
 	if utf8.RuneCountInString(strings.TrimSpace(message)) > maxJoinMessage {
-		return Membership{}, fieldErr("body.message", "must be at most 300 characters")
+		return Membership{}, problem.Field("body.message", "must be at most 300 characters")
 	}
 	hash, err := idempotency.Hash(struct {
 		Op   string

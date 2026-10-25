@@ -95,7 +95,7 @@ func TestResume_WithinWindowCompanySeesAgain(t *testing.T) {
 	if ok, err := e.svc.Has(ctx, s.UserID, org); err != nil || !ok {
 		t.Fatalf("Has after the resume = %v, %v", ok, err)
 	}
-	rows := e.audit.of(string(authz.StudentsAccessGrantResume))
+	rows := e.audit.Of(authz.StudentsAccessGrantResume)
 	if len(rows) != 1 || rows[0].ActorUserID == nil || *rows[0].ActorUserID != s.UserID || *rows[0].ResourceID != g.ID ||
 		*rows[0].OrgID != org || rows[0].Metadata["subject_user_id"] != s.UserID.String() || rows[0].Metadata["suspended_at"] == nil {
 		t.Fatalf("resume audit = %+v", rows)
@@ -106,7 +106,7 @@ func TestResume_WithinWindowCompanySeesAgain(t *testing.T) {
 
 	_, err = e.svc.ResumeMyAccessGrant(ctx, s, g.ID)
 	wantCode(t, err, "students.invalid_state")
-	if n := len(e.audit.of(string(authz.StudentsAccessGrantResume))); n != 1 {
+	if n := len(e.audit.Of(authz.StudentsAccessGrantResume)); n != 1 {
 		t.Fatalf("a refused resume was audited: %d", n)
 	}
 }

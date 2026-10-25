@@ -10,34 +10,36 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/consent"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // registerRefunds adds the payment and refund operations of BE-043 (04
 // §2.16; adminListRefundsDue is the queue of the money orders says waits
 // for a refund, payments.refund.list).
 func registerRefunds(api huma.API, h handler) {
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminListPayments", Method: http.MethodGet, Path: "/admin/payments",
 		Summary:     "List payments",
 		Description: "Every captured payment, newest first. A bank transfer's amount is the whole transfer (an overpayment included).",
 	}, op.Meta{Action: string(authz.PaymentsPaymentList), Surface: op.SurfaceAdmin}, h.listPayments)
 
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminGetPayment", Method: http.MethodGet, Path: "/admin/payments/{payment_id}",
 		Summary:     "Get a payment with its splits and refunds",
 		Description: "The splits of the order it paid (seller and Koro shares per line) and the refunds drawn from it.",
 	}, op.Meta{Action: string(authz.PaymentsPaymentRead), Surface: op.SurfaceAdmin}, h.getPayment)
 
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminListRefunds", Method: http.MethodGet, Path: "/admin/refunds",
 		Summary:     "List refunds",
 		Description: "Newest first; filter by status, order or payment.",
 	}, op.Meta{Action: string(authz.PaymentsRefundList), Surface: op.SurfaceAdmin}, h.listRefunds)
 
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminListRefundsDue", Method: http.MethodGet, Path: "/admin/refunds/due",
 		Summary: "List the money waiting for a refund",
 		Description: "The cancelled lines of paid orders (offering cancelled, dispute resolved with a refund) and the orders " +
@@ -46,7 +48,7 @@ func registerRefunds(api huma.API, h handler) {
 			"limit rows, no cursor.",
 	}, op.Meta{Action: string(authz.PaymentsRefundList), Surface: op.SurfaceAdmin}, h.listRefundsDue)
 
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminCreateRefund", Method: http.MethodPost, Path: "/admin/refunds",
 		Summary: "Request a refund", DefaultStatus: http.StatusCreated,
 		Description: "The refund waits for another finance admin's approval (requested; four eyes). It draws from one " +
@@ -57,7 +59,7 @@ func registerRefunds(api huma.API, h handler) {
 			"seller part claimed back from the payee.",
 	}, op.Meta{Action: string(authz.PaymentsRefundCreate), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyRequired}, h.createRefund)
 
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminApproveRefund", Method: http.MethodPost, Path: "/admin/refunds/{refund_id}/approve",
 		Summary: "Approve a refund",
 		Description: "Requires re-authentication. The requester never approves (403 authz.four_eyes_violation); only a " +
@@ -65,26 +67,26 @@ func registerRefunds(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.PaymentsRefundApprove), Surface: op.SurfaceAdmin, Reauth: true,
 		RateLimit: op.RateReauth, Idempotency: op.IdempotencyOptional}, h.approveRefund)
 
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminRejectRefund", Method: http.MethodPost, Path: "/admin/refunds/{refund_id}/reject",
 		Summary:     "Reject a refund request",
 		Description: "Only a requested refund (409 payments.invalid_state); the requester may withdraw it this way. The note is audited.",
 	}, op.Meta{Action: string(authz.PaymentsRefundReject), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.rejectRefund)
 
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminCancelRefund", Method: http.MethodPost, Path: "/admin/refunds/{refund_id}/cancel",
 		Summary:     "Cancel an approved refund before completion",
 		Description: "Requires another finance admin and re-authentication. Only approved refunds; no ledger money moves.",
 	}, op.Meta{Action: string(authz.PaymentsRefundCancel), Surface: op.SurfaceAdmin, Reauth: true,
 		RateLimit: op.RateReauth, Idempotency: op.IdempotencyOptional}, h.cancelRefund)
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminMarkRefundFailed", Method: http.MethodPost, Path: "/admin/refunds/{refund_id}/mark-failed",
 		Summary:     "Record a failed refund before completion",
 		Description: "Requires another finance admin and re-authentication. Only approved refunds; completed refunds cannot be reversed here.",
 	}, op.Meta{Action: string(authz.PaymentsRefundMarkFailed), Surface: op.SurfaceAdmin, Reauth: true,
 		RateLimit: op.RateReauth, Idempotency: op.IdempotencyOptional}, h.markRefundFailed)
 
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminCompleteRefund", Method: http.MethodPost, Path: "/admin/refunds/{refund_id}/complete",
 		Summary: "Record the EFT of an approved refund",
 		Description: "Only an approved refund (409 payments.invalid_state); the receipt (a refund_receipt upload) and the " +
@@ -121,9 +123,9 @@ type PaymentDTO struct {
 func paymentRowDTO(p Payment) PaymentDTO {
 	return PaymentDTO{
 		PaymentID: p.ID.String(), OrderID: p.OrderID.String(), OrgID: p.OrgID.String(), Provider: string(p.Provider),
-		IncomingTransferID: idStr(p.IncomingTransferID), Amount: p.Amount, Currency: p.Currency, Status: string(p.Status),
-		RefundedAmount: p.RefundedAmount, CapturedAt: utc(p.CapturedAt), CapturedBy: idStr(p.CapturedBy),
-		EvidenceFileID: idStr(p.EvidenceFileID), CreatedAt: p.CreatedAt.UTC(),
+		IncomingTransferID: httpx.IDStr(p.IncomingTransferID), Amount: p.Amount, Currency: p.Currency, Status: string(p.Status),
+		RefundedAmount: p.RefundedAmount, CapturedAt: utc(p.CapturedAt), CapturedBy: httpx.IDStr(p.CapturedBy),
+		EvidenceFileID: httpx.IDStr(p.EvidenceFileID), CreatedAt: p.CreatedAt.UTC(),
 	}
 }
 
@@ -192,7 +194,7 @@ func (h handler) getPayment(ctx context.Context, in *PaymentPath) (*paymentDetai
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.GetPaymentView(ctx, a, parseID(in.PaymentID))
+	v, err := h.svc.GetPaymentView(ctx, a, httpx.ParseID(in.PaymentID))
 	if err != nil {
 		return nil, err
 	}
@@ -248,12 +250,12 @@ type RefundDTO struct {
 
 func refundDTO(r Refund) RefundDTO {
 	return RefundDTO{
-		RefundID: r.ID.String(), PaymentID: r.PaymentID.String(), OrderID: r.OrderID.String(), OrderLineID: idStr(r.OrderLineID),
+		RefundID: r.ID.String(), PaymentID: r.PaymentID.String(), OrderID: r.OrderID.String(), OrderLineID: httpx.IDStr(r.OrderLineID),
 		Amount: r.Amount, Currency: Currency, Reason: r.Reason, ReasonNote: str(r.ReasonNote), Status: string(r.Status),
 		Method: r.Method, TargetIBAN: str(r.TargetIBAN), RequestedBy: r.RequestedBy.String(), RequestedAt: r.CreatedAt.UTC(),
-		ApprovedBy: idStr(r.ApprovedBy), ApprovedAt: utc(r.ApprovedAt), RejectedBy: idStr(r.RejectedBy), RejectedAt: utc(r.RejectedAt),
-		RejectionReason: str(r.RejectionReason), BankReference: str(r.BankReference), ReceiptFileID: idStr(r.ReceiptFileID),
-		CompletedAt: utc(r.CompletedAt), ClosedBy: idStr(r.ClosedBy), ClosedAt: utc(r.ClosedAt),
+		ApprovedBy: httpx.IDStr(r.ApprovedBy), ApprovedAt: utc(r.ApprovedAt), RejectedBy: httpx.IDStr(r.RejectedBy), RejectedAt: utc(r.RejectedAt),
+		RejectionReason: str(r.RejectionReason), BankReference: str(r.BankReference), ReceiptFileID: httpx.IDStr(r.ReceiptFileID),
+		CompletedAt: utc(r.CompletedAt), ClosedBy: httpx.IDStr(r.ClosedBy), ClosedAt: utc(r.ClosedAt),
 		CancelReason: str(r.CancelReason), FailureReason: str(r.FailureReason),
 	}
 }
@@ -338,7 +340,7 @@ func (h handler) listRefundsDue(ctx context.Context, in *listRefundsDueInput) (*
 	}
 	out := &refundDueOutput{Body: RefundDueList{Items: make([]RefundDueDTO, len(dues))}}
 	for i, d := range dues {
-		item := RefundDueDTO{OrderID: d.OrderID.String(), OrderNo: d.OrderNo, OrgID: d.OrgID.String(), OrderLineID: idStr(d.LineID),
+		item := RefundDueDTO{OrderID: d.OrderID.String(), OrderNo: d.OrderNo, OrgID: d.OrgID.String(), OrderLineID: httpx.IDStr(d.LineID),
 			Amount: d.Amount, Since: d.Since.UTC(), Payments: make([]FundingPaymentDTO, len(d.Payments))}
 		for j, p := range d.Payments {
 			item.Payments[j] = FundingPaymentDTO{PaymentID: p.PaymentID.String(), AvailableAmount: p.Available}
@@ -369,10 +371,10 @@ func (h handler) createRefund(ctx context.Context, in *createRefundInput) (*refu
 		return nil, err
 	}
 	b := in.Body
-	ri := RefundInput{PaymentID: parseID(b.PaymentID), Amount: b.Amount, Reason: b.Reason, ReasonNote: b.ReasonNote, Method: b.Method,
+	ri := RefundInput{PaymentID: httpx.ParseID(b.PaymentID), Amount: b.Amount, Reason: b.Reason, ReasonNote: b.ReasonNote, Method: b.Method,
 		TargetIBAN: b.TargetIBAN}
 	if b.OrderLineID != "" {
-		id := parseID(b.OrderLineID)
+		id := httpx.ParseID(b.OrderLineID)
 		ri.OrderLineID = &id
 	}
 	r, err := h.svc.CreateRefund(ctx, a, ri)
@@ -395,7 +397,7 @@ func (h handler) approveRefund(ctx context.Context, in *approveRefundInput) (*re
 	if err != nil {
 		return nil, err
 	}
-	r, err := h.svc.ApproveRefund(ctx, a, parseID(in.RefundID), proofOf(in.Body.Reauth))
+	r, err := h.svc.ApproveRefund(ctx, a, httpx.ParseID(in.RefundID), proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err
 	}
@@ -415,7 +417,7 @@ func (h handler) rejectRefund(ctx context.Context, in *rejectRefundInput) (*refu
 	if err != nil {
 		return nil, err
 	}
-	r, err := h.svc.RejectRefund(ctx, a, parseID(in.RefundID), in.Body.Note)
+	r, err := h.svc.RejectRefund(ctx, a, httpx.ParseID(in.RefundID), in.Body.Note)
 	if err != nil {
 		return nil, err
 	}
@@ -447,8 +449,8 @@ func (h handler) completeRefund(ctx context.Context, in *completeRefundInput) (*
 	if err != nil {
 		return nil, err
 	}
-	r, err := h.svc.CompleteRefund(ctx, a, parseID(in.RefundID), RefundReceipt{BankReference: in.Body.BankReference,
-		ReceiptFileID: parseID(in.Body.ReceiptFileID)})
+	r, err := h.svc.CompleteRefund(ctx, a, httpx.ParseID(in.RefundID), RefundReceipt{BankReference: in.Body.BankReference,
+		ReceiptFileID: httpx.ParseID(in.Body.ReceiptFileID)})
 	if err != nil {
 		return nil, err
 	}
@@ -465,7 +467,7 @@ func optionalID(loc, s string) (*uuid.UUID, error) {
 	}
 	id, err := uuid.Parse(s)
 	if err != nil {
-		return nil, fieldErr(loc, "must be a UUID")
+		return nil, problem.Field(loc, "must be a UUID")
 	}
 	return &id, nil
 }
@@ -509,7 +511,7 @@ func (h handler) cancelRefund(ctx context.Context, in *cancelRefundInput) (*refu
 	if err != nil {
 		return nil, err
 	}
-	r, err := h.svc.CloseRefund(ctx, a, parseID(in.RefundID), false, in.Body.CancelReason, proofOf(in.Body.Reauth))
+	r, err := h.svc.CloseRefund(ctx, a, httpx.ParseID(in.RefundID), false, in.Body.CancelReason, proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err
 	}
@@ -530,7 +532,7 @@ func (h handler) markRefundFailed(ctx context.Context, in *failRefundInput) (*re
 	if err != nil {
 		return nil, err
 	}
-	r, err := h.svc.CloseRefund(ctx, a, parseID(in.RefundID), true, in.Body.FailureReason, proofOf(in.Body.Reauth))
+	r, err := h.svc.CloseRefund(ctx, a, httpx.ParseID(in.RefundID), true, in.Body.FailureReason, proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err
 	}

@@ -15,6 +15,7 @@ import (
 	"koro/internal/parties"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/problem/problemtest"
 )
 
 var orderNoRe = regexp.MustCompile(`^KR[0-9A-HJKMNP-TV-Z]{8}$`)
@@ -53,7 +54,7 @@ func TestCreateOrder_PlacesOneOrder(t *testing.T) {
 	if n := e.sold(t, off); n != 1 {
 		t.Errorf("units sold = %d, want 1", n)
 	}
-	if got := e.audit.of(authz.OrdersOrderCreate); len(got) != 1 || *got[0].ResourceID != o.ID {
+	if got := e.audit.Of(authz.OrdersOrderCreate); len(got) != 1 || *got[0].ResourceID != o.ID {
 		t.Errorf("audit = %+v", got)
 	}
 	placed := e.events(domainevent.TopicOrderPlaced)
@@ -141,7 +142,7 @@ func TestCreateOrder_SameIdempotencyKey_SingleOrderSingleReservation(t *testing.
 	}
 	in.Lines[0].Quantity = 2
 	_, err = e.svc.CreateOrder(ctx, a, org("company_a"), in)
-	wantProblem(t, err, 422, "idempotency.key_reused")
+	problemtest.WantProblem(t, err, 422, "idempotency.key_reused")
 }
 
 // TestCreateOrder_RecruiterRole_403 (03 §5.15, §1.1: company_member has no
@@ -152,15 +153,15 @@ func TestCreateOrder_RecruiterRole_403(t *testing.T) {
 	off := e.offering(t, nil)
 	a := actor(t, "company_member")
 	_, err := e.svc.CreateOrder(ctxOf(t, a), a, org("company_a"), orders.CreateInput{BuyerPartyID: e.partyA, Lines: []orders.LineInput{line(off, 1)}})
-	wantErr(t, err, authz.ErrForbidden)
-	wantProblem(t, err, 403, "forbidden")
+	problemtest.WantErr(t, err, authz.ErrForbidden)
+	problemtest.WantProblem(t, err, 403, "forbidden")
 	if n := e.sold(t, off); n != 0 {
 		t.Fatalf("a refused order reserved %d units", n)
 	}
 	// Another company's admin does not even see company_a (IDOR: 404).
 	b := actor(t, "other_company_member")
 	_, err = e.svc.CreateOrder(ctxOf(t, b), b, org("company_a"), orders.CreateInput{BuyerPartyID: e.partyA, Lines: []orders.LineInput{line(off, 1)}})
-	wantErr(t, err, authz.ErrNotFound)
+	problemtest.WantErr(t, err, authz.ErrNotFound)
 }
 
 // TestCreateOrder_CompanyAdminWithoutMFA_403 (03 §6.4: company_admin is an
@@ -172,8 +173,8 @@ func TestCreateOrder_CompanyAdminWithoutMFA_403(t *testing.T) {
 	a := actor(t, "company_admin")
 	a.MFAVerified = false
 	_, err := e.svc.CreateOrder(ctxOf(t, a), a, org("company_a"), orders.CreateInput{BuyerPartyID: e.partyA, Lines: []orders.LineInput{line(off, 1)}})
-	wantErr(t, err, authz.ErrMFARequired)
-	wantProblem(t, err, 403, "authz.mfa_required")
+	problemtest.WantErr(t, err, authz.ErrMFARequired)
+	problemtest.WantProblem(t, err, 403, "authz.mfa_required")
 	// The owner holds company_admin too (k-own adds rights, never removes them).
 	owner := actor(t, "company_owner_a")
 	if _, err := e.svc.CreateOrder(ctxOf(t, owner), owner, org("company_a"),
@@ -200,14 +201,14 @@ func TestCreateOrder_K25(t *testing.T) {
 		Status: parties.StatusVerified})
 	for name, party := range map[string]uuid.UUID{"unverified": pending, "another company's": foreign, "a payee party": payeeParty,
 		"unknown": uuid.NewV7()} {
-		if s, c := problemOf(try(party)); s != 422 || c != "orders.buyer_party_required" {
+		if s, c := problemtest.StatusCode(try(party)); s != 422 || c != "orders.buyer_party_required" {
 			t.Errorf("%s party: %d %s, want 422 orders.buyer_party_required", name, s, c)
 		}
 	}
 	for st, code := range map[orgs.Status]string{orgs.StatusPendingReview: "orgs.org_not_verified",
 		orgs.StatusSuspended: "orgs.org_suspended", orgs.StatusClosed: "orgs.invalid_state"} {
 		e.orgs.setStatus("company_a", st)
-		_, s := problemOf(try(e.partyA))
+		_, s := problemtest.StatusCode(try(e.partyA))
 		if s != code {
 			t.Errorf("company %s: code %s, want %s", st, s, code)
 		}
@@ -236,8 +237,8 @@ func TestCreateOrder_NoCommercePolicy_409(t *testing.T) {
 	})
 	a := actor(t, "company_admin")
 	_, err := e.svc.CreateOrder(ctxOf(t, a), a, org("company_a"), orders.CreateInput{BuyerPartyID: e.partyA, Lines: []orders.LineInput{line(off, 1)}})
-	wantErr(t, err, catalog.ErrNoPolicy)
-	wantProblem(t, err, 409, "catalog.no_commerce_policy")
+	problemtest.WantErr(t, err, catalog.ErrNoPolicy)
+	problemtest.WantProblem(t, err, 409, "catalog.no_commerce_policy")
 	if n := e.sold(t, off); n != 0 {
 		t.Fatalf("units reserved without a policy = %d", n)
 	}
@@ -259,22 +260,22 @@ func TestCreateOrder_CheckoutRefusals(t *testing.T) {
 	draft := e.offering(t, func(o *catalog.Offering) {
 		o.Status, o.ApprovedBy, o.ApprovedAt, o.SubmittedAt = catalog.OfferingDraft, nil, nil, nil
 	})
-	wantProblem(t, try(line(draft, 1)), 409, "catalog.not_on_sale")
+	problemtest.WantProblem(t, try(line(draft, 1)), 409, "catalog.not_on_sale")
 	small := e.offering(t, func(o *catalog.Offering) { o.QuantityTotal = ptr(1) })
-	wantProblem(t, try(line(small, 2)), 409, "catalog.sold_out")
+	problemtest.WantProblem(t, try(line(small, 2)), 409, "catalog.sold_out")
 	limited := e.offering(t, func(o *catalog.Offering) { o.PerBuyerLimit = ptr(1) })
 	if err := try(line(limited, 1)); err != nil {
 		t.Fatal(err)
 	}
-	wantProblem(t, try(line(limited, 1)), 409, "catalog.per_buyer_limit") // the first order holds the buyer's unit
+	problemtest.WantProblem(t, try(line(limited, 1)), 409, "catalog.per_buyer_limit") // the first order holds the buyer's unit
 	other := e.offering(t, nil)
-	wantProblem(t, try(line(other, 1), line(other, 1)), 422, "validation_failed")
+	problemtest.WantProblem(t, try(line(other, 1), line(other, 1)), 422, "validation_failed")
 	e.payees.set(e.payeeA, parties.PayeeSuspended)
-	wantProblem(t, try(line(other, 1)), 409, "catalog.payee_not_active")
+	problemtest.WantProblem(t, try(line(other, 1)), 409, "catalog.payee_not_active")
 	if n := e.sold(t, other); n != 0 {
 		t.Fatalf("refused orders reserved %d units", n)
 	}
-	wantProblem(t, try(line(uuid.NewV7(), 1)), 422, "validation_failed")
+	problemtest.WantProblem(t, try(line(uuid.NewV7(), 1)), 422, "validation_failed")
 }
 
 // TestCreateOrder_MixedModels_Split (T-12): lines that fall under different
@@ -408,9 +409,9 @@ func TestApplyPayment_Partial_Accumulates(t *testing.T) {
 		t.Fatalf("after a part the order is %s", got.Status)
 	}
 	_, err = ord.ApplyPayment(t.Context(), o.ID, uuid.NewV7(), 700_001)
-	wantProblem(t, err, 409, "orders.amount_exceeds_due")
+	problemtest.WantProblem(t, err, 409, "orders.amount_exceeds_due")
 	_, err = ord.ApplyPayment(t.Context(), o.ID, uuid.NewV7(), 0)
-	wantProblem(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 	eff, err = ord.ApplyPayment(t.Context(), o.ID, uuid.NewV7(), 700_000)
 	if err != nil || !eff.Paid || eff.PaidAmount != 1_200_000 || eff.DueAmount != 0 || len(eff.Lines) != 1 {
 		t.Fatalf("second part = %+v, %v", eff, err)
@@ -424,7 +425,7 @@ func TestApplyPayment_Partial_Accumulates(t *testing.T) {
 		t.Fatalf("paid order = %+v", got)
 	}
 	_, err = ord.ApplyPayment(t.Context(), o.ID, uuid.NewV7(), 1)
-	wantProblem(t, err, 409, "orders.invalid_state")
+	problemtest.WantProblem(t, err, 409, "orders.invalid_state")
 }
 
 // TestApplyPayment_Full_PaidActivatesEntitlements (01 §6.3 "Havale
@@ -512,7 +513,7 @@ func TestModelC_PaidOnDirectConfirmation(t *testing.T) {
 	}
 	club := actor(t, "club_admin")
 	_, err = e.svc.MarkLineFulfilled(ctxOf(t, club), club, v.Lines[0].ID, orders.MarkInput{})
-	wantProblem(t, err, 409, "orders.order_not_paid")
+	problemtest.WantProblem(t, err, 409, "orders.order_not_paid")
 	if eff, err = e.mod.Orders.ConfirmDirectPayment(t.Context(), o.ID, uuid.NewV7()); err != nil || !eff.Paid || len(eff.Lines) != 1 ||
 		eff.PaidAmount != 120_000 {
 		t.Fatalf("direct confirmation = %+v, %v", eff, err)
@@ -521,7 +522,7 @@ func TestModelC_PaidOnDirectConfirmation(t *testing.T) {
 		t.Fatalf("order after the direct confirmation = %+v", got)
 	}
 	_, err = e.mod.Orders.ConfirmDirectPayment(t.Context(), o.ID, uuid.NewV7())
-	wantProblem(t, err, 409, "orders.invalid_state")
+	problemtest.WantProblem(t, err, 409, "orders.invalid_state")
 
 	// Delivered: no payout of money Koro never held; the seller org is free.
 	e.mark(t, v.Lines[0].ID)
@@ -537,7 +538,7 @@ func TestModelC_PaidOnDirectConfirmation(t *testing.T) {
 	}
 	a := e.placeOne(t).Order
 	_, err = e.mod.Orders.ConfirmDirectPayment(t.Context(), a.ID, uuid.NewV7())
-	wantProblem(t, err, 409, "orders.invalid_state")
+	problemtest.WantProblem(t, err, 409, "orders.invalid_state")
 
 	// Refunded through Koro: the fee only.
 	d := e.place(t, line(c, 1))[0]
@@ -554,7 +555,7 @@ func TestModelC_PaidOnDirectConfirmation(t *testing.T) {
 	fin := actor(t, "finance_admin")
 	_, err = e.svc.AdminResolveDispute(ctxOf(t, fin), fin, d.Lines[0].ID, orders.ResolveInput{Outcome: orders.OutcomeRefund, Note: "İade",
 		RefundAmount: ptr(int64(1_320_000))})
-	wantProblem(t, err, 422, "orders.refund_exceeds_paid")
+	problemtest.WantProblem(t, err, 422, "orders.refund_exceeds_paid")
 	if _, err := e.svc.AdminResolveDispute(ctxOf(t, fin), fin, d.Lines[0].ID, orders.ResolveInput{Outcome: orders.OutcomeRefund, Note: "İade"}); err != nil {
 		t.Fatal(err)
 	}
@@ -563,7 +564,7 @@ func TestModelC_PaidOnDirectConfirmation(t *testing.T) {
 		t.Fatalf("refunds due = %+v, %v", due, err)
 	}
 	err = e.mod.Orders.ApplyRefund(t.Context(), d.Order.ID, &d.Lines[0].ID, 120_001)
-	wantProblem(t, err, 422, "orders.refund_exceeds_paid")
+	problemtest.WantProblem(t, err, 422, "orders.refund_exceeds_paid")
 	if err := e.mod.Orders.ApplyRefund(t.Context(), d.Order.ID, &d.Lines[0].ID, 120_000); err != nil {
 		t.Fatal(err)
 	}
@@ -583,8 +584,8 @@ func TestPaymentInstructions_NoCollectionAccount_409(t *testing.T) {
 	o := e.placeOne(t).Order
 	buyer := actor(t, "company_member")
 	_, err := e.svc.PaymentInstructions(ctxOf(t, buyer), buyer, o.ID)
-	wantErr(t, err, orders.ErrNoCollectionAccount)
-	wantProblem(t, err, 409, "payments.no_active_collection_account")
+	problemtest.WantErr(t, err, orders.ErrNoCollectionAccount)
+	problemtest.WantProblem(t, err, 409, "payments.no_active_collection_account")
 	e.acct = &orders.CollectionAccount{ID: uuid.NewV7(), IBAN: "TR330006100519786457841326", HolderName: "Koro Teknoloji A.Ş.", BankName: "Örnek Bank"}
 	if _, err := e.mod.Orders.ApplyPayment(t.Context(), o.ID, uuid.NewV7(), 200_000); err != nil {
 		t.Fatal(err)
@@ -599,15 +600,15 @@ func TestPaymentInstructions_NoCollectionAccount_409(t *testing.T) {
 	}
 	club := actor(t, "club_admin")
 	_, err = e.svc.PaymentInstructions(ctxOf(t, club), club, o.ID)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	other := actor(t, "other_company_member")
 	_, err = e.svc.PaymentInstructions(ctxOf(t, other), other, o.ID)
-	wantErr(t, err, authz.ErrNotFound)
+	problemtest.WantErr(t, err, authz.ErrNotFound)
 	if _, err := e.mod.Orders.ApplyPayment(t.Context(), o.ID, uuid.NewV7(), 1_000_000); err != nil {
 		t.Fatal(err)
 	}
 	_, err = e.svc.PaymentInstructions(ctxOf(t, buyer), buyer, o.ID)
-	wantProblem(t, err, 409, "orders.invalid_state")
+	problemtest.WantProblem(t, err, 409, "orders.invalid_state")
 }
 
 // TestGetOrder_SellerViewK26 (03 k26): a seller's club_admin sees only its
@@ -654,10 +655,10 @@ func TestCancelOrder_ReleasesUnitsAndRights(t *testing.T) {
 	v := e.place(t, line(booth, 2), line(quota, 1))[0]
 	rec := actor(t, "company_member")
 	_, err := e.svc.CancelOrder(ctxOf(t, rec), rec, v.Order.ID, "Vazgeçtik")
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	a := actor(t, "company_admin")
 	_, err = e.svc.CancelOrder(ctxOf(t, a), a, v.Order.ID, "  ")
-	wantProblem(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 	got, err := e.svc.CancelOrder(ctxOf(t, a), a, v.Order.ID, "Bütçe değişti")
 	if err != nil || got.Order.Status != orders.StatusCancelled || got.Order.CancelledAt == nil || *got.Order.CancelReason != "Bütçe değişti" {
 		t.Fatalf("cancelled = %+v, %v", got.Order, err)
@@ -679,7 +680,7 @@ func TestCancelOrder_ReleasesUnitsAndRights(t *testing.T) {
 		t.Fatalf("order.cancelled events = %d", len(evs))
 	}
 	_, err = e.svc.CancelOrder(ctxOf(t, a), a, v.Order.ID, "Bütçe değişti")
-	wantProblem(t, err, 409, "orders.invalid_state")
+	problemtest.WantProblem(t, err, 409, "orders.invalid_state")
 }
 
 // TestLists pins the order lists (newest first, cursor pages, filters) and
@@ -714,10 +715,10 @@ func TestLists(t *testing.T) {
 		t.Fatalf("admin list by reference = %+v, %v", p, err)
 	}
 	_, err = e.svc.AdminListOrders(ctxOf(t, fin), fin, orders.ListQuery{OrderNo: "nope"})
-	wantProblem(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 	club := actor(t, "club_admin")
 	_, err = e.svc.AdminListOrders(ctxOf(t, club), club, orders.ListQuery{})
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	s, err := e.svc.ListOrgSales(ctxOf(t, club), club, org("club_a"), orders.SalesQuery{})
 	if err != nil || len(s.Items) != 3 || s.Items[0].OrderNo == "" || s.Items[0].BuyerTitle != "Örnek Teknoloji A.Ş." {
 		t.Fatalf("sales = %+v, %v", s, err)
@@ -728,5 +729,5 @@ func TestLists(t *testing.T) {
 	}
 	other := actor(t, "other_club_admin")
 	_, err = e.svc.ListOrgSales(ctxOf(t, other), other, org("club_a"), orders.SalesQuery{})
-	wantErr(t, err, authz.ErrNotFound)
+	problemtest.WantErr(t, err, authz.ErrNotFound)
 }

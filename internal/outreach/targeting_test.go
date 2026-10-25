@@ -10,6 +10,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/outreach"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 )
 
 func inline(d outreach.Definition) outreach.SegmentSpec { return outreach.SegmentSpec{Definition: &d} }
@@ -33,8 +34,8 @@ func TestCompile_Below10_TooSmallNoCount(t *testing.T) {
 	def := outreach.Definition{Uni: []uuid.UUID{uniA}, Year: []int16{4}}
 
 	got, err := e.svc.Compile(ctx, cma, specFor(companyA, def))
-	wantErr(t, err, outreach.ErrAudienceTooSmall)
-	if status, code := problemOf(err); status != 422 || code != "outreach.audience_too_small" {
+	problemtest.WantErr(t, err, outreach.ErrAudienceTooSmall)
+	if status, code := problemtest.StatusCode(err); status != 422 || code != "outreach.audience_too_small" {
 		t.Fatalf("problem = %d %s", status, code)
 	}
 	if got.Size != 0 || got.Keys != nil || got.DimCount != 0 {
@@ -54,7 +55,7 @@ func TestCompile_Below10_TooSmallNoCount(t *testing.T) {
 		t.Fatalf("segment estimate %+v", seg.Estimate)
 	}
 	_, err = e.svc.Compile(ctx, cma, outreach.SegmentSpec{OrgID: companyA, SegmentID: &seg.ID})
-	wantErr(t, err, outreach.ErrAudienceTooSmall)
+	problemtest.WantErr(t, err, outreach.ErrAudienceTooSmall)
 
 	// The tenth eligible student makes it: the estimate is 10.
 	e.audience.add(1, true, uniKey(uniA), yearKey(4))
@@ -88,7 +89,7 @@ func TestCompile_CompanyTargetsSensitiveClub_Rejected(t *testing.T) {
 		{"platform_admin", actor(t, "platform_admin"), platformOrg, outreach.Definition{Club: []uuid.UUID{clubSensitive}}},
 	} {
 		_, err := e.svc.Compile(ctx, tc.actor, specFor(tc.org, tc.def))
-		if status, code := problemOf(err); status != 422 || code != "outreach.sensitive_target" {
+		if status, code := problemtest.StatusCode(err); status != 422 || code != "outreach.sensitive_target" {
 			t.Fatalf("%s: %v, want 422 outreach.sensitive_target", tc.name, err)
 		}
 	}
@@ -109,12 +110,12 @@ func TestCompile_CompanyTargetsSensitiveClub_Rejected(t *testing.T) {
 	}
 	e.catalog.markSensitive(clubA)
 	_, err = e.svc.Compile(ctx, cma, outreach.SegmentSpec{OrgID: companyA, SegmentID: &seg.ID})
-	wantErr(t, err, outreach.ErrSensitiveTarget)
+	problemtest.WantErr(t, err, outreach.ErrSensitiveTarget)
 	// countAudience and createSegment refuse it the same way.
 	_, err = e.svc.CountAudience(ctx, cma, companyA, outreach.Definition{Club: []uuid.UUID{clubA}})
-	wantErr(t, err, outreach.ErrSensitiveTarget)
+	problemtest.WantErr(t, err, outreach.ErrSensitiveTarget)
 	_, err = e.svc.CreateSegment(ctx, cma, companyA, outreach.SegmentInput{Name: "Yine", Definition: outreach.Definition{Club: []uuid.UUID{clubA}}})
-	wantErr(t, err, outreach.ErrSensitiveTarget)
+	problemtest.WantErr(t, err, outreach.ErrSensitiveTarget)
 }
 
 // TestCompile_ClubOwnMembers_NoKThreshold: a club_admin addresses its own
@@ -154,13 +155,13 @@ func TestCompile_ClubOwnMembers_NoKThreshold(t *testing.T) {
 		"a university":         {Uni: []uuid.UUID{uniA}},
 	} {
 		_, err := e.svc.Compile(ctx, cla, specFor(clubA, def))
-		if status, code := problemOf(err); status != 422 || code != "outreach.target_out_of_scope" {
+		if status, code := problemtest.StatusCode(err); status != 422 || code != "outreach.target_out_of_scope" {
 			t.Fatalf("%s: %v, want 422 outreach.target_out_of_scope", name, err)
 		}
 	}
 	// A club_admin acting for another org has no scope there.
 	_, err = e.svc.Compile(ctx, cla, specFor(clubB, outreach.Definition{Club: []uuid.UUID{clubB}}))
-	wantErr(t, err, outreach.ErrTargetOutOfScope)
+	problemtest.WantErr(t, err, outreach.ErrTargetOutOfScope)
 
 	// The university_rep: uni:<own> (+ dept, year), never a club or another university.
 	rep := actor(t, "university_rep")
@@ -181,7 +182,7 @@ func TestCompile_ClubOwnMembers_NoKThreshold(t *testing.T) {
 	}
 	// A university targeting below 10 needs k.
 	_, err = e.svc.Compile(ctx, rep, specFor(uniOrgA, outreach.Definition{Uni: []uuid.UUID{uniA}, Year: []int16{1}}))
-	wantErr(t, err, outreach.ErrAudienceTooSmall)
+	problemtest.WantErr(t, err, outreach.ErrAudienceTooSmall)
 }
 
 // TestCompile_OrWithinDimAndAcrossDims: values of one dimension are ORed,
@@ -246,7 +247,7 @@ func TestCompile_OrWithinDimAndAcrossDims(t *testing.T) {
 		"both":             {OrgID: companyA, SegmentID: ptr(uuid.NewV7()), Definition: &outreach.Definition{Year: []int16{3}}},
 	} {
 		_, err := e.svc.Compile(ctx, cmm, spec)
-		if status, code := problemOf(err); status != 422 || code != "validation_failed" {
+		if status, code := problemtest.StatusCode(err); status != 422 || code != "validation_failed" {
 			t.Fatalf("%s: %v, want 422 validation_failed", name, err)
 		}
 	}
@@ -273,7 +274,7 @@ func TestCompile_SavedSegment_ScopedArchivedAndBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.Compile(ctx, actor(t, "other_company_member"), outreach.SegmentSpec{OrgID: companyB, SegmentID: &seg.ID})
-	wantErr(t, err, outreach.ErrNotFound)
+	problemtest.WantErr(t, err, outreach.ErrNotFound)
 	if _, err := e.svc.Compile(ctx, cma, outreach.SegmentSpec{OrgID: companyA, SegmentID: &seg.ID}); err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +282,7 @@ func TestCompile_SavedSegment_ScopedArchivedAndBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.Compile(ctx, cma, outreach.SegmentSpec{OrgID: companyA, SegmentID: &seg.ID})
-	wantErr(t, err, outreach.ErrInvalidState)
+	problemtest.WantErr(t, err, outreach.ErrInvalidState)
 	// create (1) + compile (2) spent; two more, then 429.
 	for range 2 {
 		if _, err := e.svc.Compile(ctx, cma, specFor(companyA, outreach.Definition{Uni: []uuid.UUID{uniA}})); err != nil {
@@ -289,12 +290,12 @@ func TestCompile_SavedSegment_ScopedArchivedAndBudget(t *testing.T) {
 		}
 	}
 	_, err = e.svc.Compile(ctx, cma, specFor(companyA, outreach.Definition{Uni: []uuid.UUID{uniA}}))
-	if status, code := problemOf(err); status != 429 || code != "rate_limited" {
+	if status, code := problemtest.StatusCode(err); status != 429 || code != "rate_limited" {
 		t.Fatalf("budget spent: %v, want 429 rate_limited", err)
 	}
 	// An actor without a targeting role in the org has no scope.
 	_, err = e.svc.Compile(ctx, actor(t, "student"), specFor(companyB, outreach.Definition{Uni: []uuid.UUID{uniA}}))
-	wantErr(t, err, outreach.ErrTargetOutOfScope)
+	problemtest.WantErr(t, err, outreach.ErrTargetOutOfScope)
 }
 
 // TestBucket pins the rounding of published estimates.

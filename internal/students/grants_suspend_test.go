@@ -153,7 +153,7 @@ func TestSuspend_LapseCutsCompanyAccess(t *testing.T) {
 	if states[orgA] != students.GrantSuspended || states[orgB] != students.GrantSuspended || states[orgC] != students.GrantRevoked {
 		t.Fatalf("grant states = %v", states)
 	}
-	rows := e.audit.of("students.access_grant.suspend")
+	rows := e.audit.Of("students.access_grant.suspend")
 	if len(rows) != 2 {
 		t.Fatalf("suspension audit rows = %d, want 2", len(rows))
 	}
@@ -184,7 +184,7 @@ func TestSuspend_LapseCutsCompanyAccess(t *testing.T) {
 	if err := e.handle(t, domainevent.TopicUserEduVerificationLapsed, students.SuspendLapsedGrantsTaskName, body); err != nil {
 		t.Fatal(err)
 	}
-	if n := len(e.audit.of("students.access_grant.suspend")); n != 2 {
+	if n := len(e.audit.Of("students.access_grant.suspend")); n != 2 {
 		t.Fatalf("a redelivery audited again: %d", n)
 	}
 	if msgs = e.notices.messages(); len(msgs) != 2 || msgs[1].DedupeKey != m.DedupeKey {
@@ -234,7 +234,7 @@ func TestSuspend_ReverificationDoesNotReopen(t *testing.T) {
 	if g, err := e.store.GetGrant(ctx, s.UserID, old); err != nil || g.Status() != students.GrantSuspended {
 		t.Fatalf("the suspended grant after the new verification = %+v, %v", g, err)
 	}
-	if n := len(e.audit.of("students.access_grant.suspend")); n != 1 {
+	if n := len(e.audit.Of("students.access_grant.suspend")); n != 1 {
 		t.Fatalf("suspension audit rows = %d, want 1 (the new verification suspends nothing more)", n)
 	}
 
@@ -250,7 +250,7 @@ func TestSuspend_ReverificationDoesNotReopen(t *testing.T) {
 		*g.RevokedByKind != students.RevokedBySystem {
 		t.Fatalf("the replaced suspended grant = %+v, %v", g, err)
 	}
-	sys := e.audit.of(string(authz.StudentsAccessGrantRevoke))
+	sys := e.audit.Of(authz.StudentsAccessGrantRevoke)
 	if len(sys) != 1 || sys[0].SystemJob != "students.access_grants" || *sys[0].ResourceID != old {
 		t.Fatalf("replacement audit = %+v", sys)
 	}
@@ -310,14 +310,14 @@ func TestSuspend_LapsedStudentListsAndRevokes(t *testing.T) {
 	if err != nil || g.Status() != students.GrantRevoked || *g.RevokedByKind != students.RevokedByStudent {
 		t.Fatalf("revoked grant = %+v, %v", g, err)
 	}
-	rows := e.audit.of(string(authz.StudentsAccessGrantRevoke))
+	rows := e.audit.Of(authz.StudentsAccessGrantRevoke)
 	if len(rows) != 1 || *rows[0].ActorUserID != s.UserID || rows[0].Metadata["revoked_by"] != "student" {
 		t.Fatalf("revocation audit = %+v", rows)
 	}
 	if err := e.svc.RevokeMyAccessGrant(ctx, lapsed, grantA, ""); err != nil {
 		t.Fatalf("revoking again: %v", err)
 	}
-	if n := len(e.audit.of(string(authz.StudentsAccessGrantRevoke))); n != 1 {
+	if n := len(e.audit.Of(authz.StudentsAccessGrantRevoke)); n != 1 {
 		t.Fatalf("a second revocation was audited: %d", n)
 	}
 
@@ -368,7 +368,7 @@ func TestSuspend_GapRenewalSuspends(t *testing.T) {
 	if ok, err := e.svc.Has(ctx, s.UserID, other); err != nil || !ok {
 		t.Fatalf("the grant given after the verification: Has = %v, %v", ok, err)
 	}
-	rows := e.audit.of("students.access_grant.suspend")
+	rows := e.audit.Of("students.access_grant.suspend")
 	if len(rows) != 1 || rows[0].SystemJob != students.SuspendGapGrantsTaskName || rows[0].Metadata["reason"] != "verification_gap" {
 		t.Fatalf("gap suspension audit = %+v", rows)
 	}
@@ -405,7 +405,7 @@ func TestSuspend_NoticeRetriedAfterSendFailure(t *testing.T) {
 	if n := len(e.notices.messages()); n != 1 {
 		t.Fatalf("notices after the retry = %d, want 1", n)
 	}
-	if n := len(e.audit.of("students.access_grant.suspend")); n != 1 {
+	if n := len(e.audit.Of("students.access_grant.suspend")); n != 1 {
 		t.Fatalf("suspension audit rows = %d, want 1", n)
 	}
 

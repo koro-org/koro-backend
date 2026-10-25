@@ -9,6 +9,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/events"
 	"koro/internal/orgs"
+	"koro/internal/platform/httpx"
 )
 
 // OfferingView is an offering as the HTTP operations return it: its
@@ -54,7 +55,7 @@ func (s *service) views(ctx context.Context, a authz.Actor, os []Offering) ([]Of
 	evs := map[uuid.UUID]*events.EventSummary{}
 	out := make([]OfferingView, len(os))
 	for i, o := range os {
-		v := OfferingView{Offering: o, Service: svcs[o.ServiceID], Seller: sellers[o.OrgID], ETag: etagOf(o.UpdatedAt),
+		v := OfferingView{Offering: o, Service: svcs[o.ServiceID], Seller: sellers[o.OrgID], ETag: httpx.ETag(o.UpdatedAt),
 			Management: manager(a, o)}
 		if v.Seller.ID == uuid.Nil() {
 			v.Seller = orgs.OrgSummary{ID: o.OrgID}

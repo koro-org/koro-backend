@@ -7,6 +7,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/identity"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // TestEnrollTotp_RequiresPasswordReauth is 06 H-46: a stolen session cannot
@@ -21,9 +22,9 @@ func TestEnrollTotp_RequiresPasswordReauth(t *testing.T) {
 	_, a := e.login(t, "h46@example.com", identity.ClientMobile)
 
 	_, err := e.svc.EnrollTOTP(ctx, a, identity.ReauthProof{})
-	wantErr(t, err, identity.ErrReauthRequired)
+	problemtest.WantErr(t, err, identity.ErrReauthRequired)
 	_, err = e.svc.EnrollTOTP(ctx, a, identity.ReauthProof{Password: "Yanlis-Parola-Deneme-1"})
-	wantErr(t, err, identity.ErrReauthFailed)
+	problemtest.WantErr(t, err, identity.ErrReauthFailed)
 	if _, found, _ := e.store.TOTP(ctx, u.ID); found {
 		t.Fatal("an enrollment was stored without the password")
 	}
@@ -33,9 +34,9 @@ func TestEnrollTotp_RequiresPasswordReauth(t *testing.T) {
 	}
 	code := totpCode(t, enr.Secret, e.clk.Now())
 	_, err = e.svc.ConfirmTOTP(ctx, a, code, identity.ReauthProof{})
-	wantErr(t, err, identity.ErrReauthRequired)
+	problemtest.WantErr(t, err, identity.ErrReauthRequired)
 	_, err = e.svc.ConfirmTOTP(ctx, a, code, identity.ReauthProof{Password: "Yanlis-Parola-Deneme-1"})
-	wantErr(t, err, identity.ErrReauthFailed)
+	problemtest.WantErr(t, err, identity.ErrReauthFailed)
 	wantStatus(t, err, http.StatusForbidden)
 	if cur, _ := e.store.User(ctx, u.ID); cur.MFAEnabled {
 		t.Fatal("MFA turned on without the password")
@@ -51,10 +52,10 @@ func TestEnrollTotp_RequiresPasswordReauth(t *testing.T) {
 	}
 	// Turning it off and new recovery codes need the TOTP proof (R).
 	a.MFAVerified = true
-	wantErr(t, e.svc.DisableTOTP(ctx, a, identity.ReauthProof{}), identity.ErrReauthRequired)
-	wantErr(t, e.svc.DisableTOTP(ctx, a, pwProof), identity.ErrReauthRequired)
+	problemtest.WantErr(t, e.svc.DisableTOTP(ctx, a, identity.ReauthProof{}), identity.ErrReauthRequired)
+	problemtest.WantErr(t, e.svc.DisableTOTP(ctx, a, pwProof), identity.ErrReauthRequired)
 	_, err = e.svc.RegenerateRecoveryCodes(ctx, a, pwProof)
-	wantErr(t, err, identity.ErrReauthRequired)
+	problemtest.WantErr(t, err, identity.ErrReauthRequired)
 	if _, err := e.svc.RegenerateRecoveryCodes(ctx, a, identity.ReauthProof{TOTPCode: e.nextCode(t, enr.Secret)}); err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +108,7 @@ func TestSuspendPrivilegedUser_FourEyes(t *testing.T) {
 	s.targetSessionLive(t)
 	// The requester again: 403 four eyes; the request stays pending.
 	_, err = s.svc.SuspendUser(ctx, s.a, s.target.ID, "suspicious payouts")
-	wantErr(t, err, authz.ErrFourEyes)
+	problemtest.WantErr(t, err, authz.ErrFourEyes)
 	// The second platform_admin approves and the suspension happens.
 	res, err = s.svc.SuspendUser(ctx, s.b, s.target.ID, "confirmed, suspend now")
 	if err != nil || res.Pending != nil || res.User.User.Status != identity.StatusSuspended {
@@ -125,7 +126,7 @@ func TestSuspendPrivilegedUser_FourEyes(t *testing.T) {
 	// The DB is the second layer: an approval by the requester is refused.
 	r := rows[0]
 	r.ApprovedBy = &r.RequestedBy
-	wantErr(t, s.store.UpdateAccountAction(ctx, r), authz.ErrFourEyes)
+	problemtest.WantErr(t, s.store.UpdateAccountAction(ctx, r), authz.ErrFourEyes)
 }
 
 // TestRevokeSessionsPrivilegedUser_FourEyes: support may open the request,
@@ -143,7 +144,7 @@ func TestRevokeSessionsPrivilegedUser_FourEyes(t *testing.T) {
 	}
 	s.targetSessionLive(t)
 	_, err = s.svc.RevokeUserSessions(ctx, sup, s.target.ID, "again from support")
-	wantErr(t, err, authz.ErrForbidden) // the second eye is a platform_admin only
+	problemtest.WantErr(t, err, authz.ErrForbidden) // the second eye is a platform_admin only
 	// The request expires after 24 hours: a later call opens a new one.
 	s.clk.Advance(25 * time.Hour)
 	p2, err := s.svc.RevokeUserSessions(ctx, s.a, s.target.ID, "takeover, second try")
@@ -188,7 +189,7 @@ func TestResetMFAPrivilegedUser_FourEyes(t *testing.T) {
 		t.Fatal("the first eye reset MFA alone")
 	}
 	_, err = s.svc.ResetUserMFA(ctx, s.a, s.target.ID, "lost phone, identity checked", proof)
-	wantErr(t, err, authz.ErrFourEyes)
+	problemtest.WantErr(t, err, authz.ErrFourEyes)
 	if p, err := s.svc.ResetUserMFA(ctx, s.b, s.target.ID, "confirmed after a call", proof); err != nil || p != nil {
 		t.Fatalf("second eye: %+v %v", p, err)
 	}
@@ -208,7 +209,7 @@ func TestSuspend_LastActivePrivilegedHolder_409(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := s.svc.SuspendUser(ctx, s.a, s.target.ID, "only finance admin")
-	wantErr(t, err, identity.ErrLastPrivilegedHolder)
+	problemtest.WantErr(t, err, identity.ErrLastPrivilegedHolder)
 	wantStatus(t, err, http.StatusConflict)
 	// A second, active finance_admin lifts the block (the request opens).
 	s.admin(t, "fin-2@koro.test", authz.PlatformFinanceAdmin)
@@ -218,5 +219,5 @@ func TestSuspend_LastActivePrivilegedHolder_409(t *testing.T) {
 	}
 	// An admin cannot open a request against their own privileged account.
 	_, err = s.svc.RevokeUserSessions(ctx, s.a, s.a.UserID, "my own sessions")
-	wantErr(t, err, identity.ErrUserInvalidState)
+	problemtest.WantErr(t, err, identity.ErrUserInvalidState)
 }

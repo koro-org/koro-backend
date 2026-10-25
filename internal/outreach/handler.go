@@ -10,9 +10,11 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 	"koro/internal/students"
 )
 
@@ -22,14 +24,14 @@ import (
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
 
-	reg(api, huma.Operation{
+	op.Register(api, "outreach", huma.Operation{
 		OperationID: "listSegments", Method: http.MethodGet, Path: "/orgs/{org_id}/segments",
 		Summary: "List an organization's segments",
 		Description: "Newest first. archived=true lists the archived segments, otherwise the active ones. The count " +
 			"is the stored estimate (refreshed daily at 06:00): null below 10 students.",
 	}, op.Meta{Action: string(authz.OutreachSegmentList), Surface: op.SurfaceOrg}, h.list)
 
-	reg(api, huma.Operation{
+	op.Register(api, "outreach", huma.Operation{
 		OperationID: "createSegment", Method: http.MethodPost, Path: "/orgs/{org_id}/segments", DefaultStatus: http.StatusCreated,
 		Summary: "Create a segment",
 		Description: "OR inside a dimension, AND across dimensions; at least one dimension. Scope (03 k16): a club " +
@@ -42,12 +44,12 @@ func Register(api huma.API, svc Service) {
 		Idempotency: op.IdempotencyOptional,
 	}, h.create)
 
-	reg(api, huma.Operation{
+	op.Register(api, "outreach", huma.Operation{
 		OperationID: "getSegment", Method: http.MethodGet, Path: "/orgs/{org_id}/segments/{segment_id}",
 		Summary: "Get a segment", Description: "The ETag is the If-Match value of updateSegment.",
 	}, op.Meta{Action: string(authz.OutreachSegmentRead), Surface: op.SurfaceOrg}, h.get)
 
-	reg(api, huma.Operation{
+	op.Register(api, "outreach", huma.Operation{
 		OperationID: "updateSegment", Method: http.MethodPatch, Path: "/orgs/{org_id}/segments/{segment_id}",
 		Summary: "Update a segment",
 		Description: "If-Match with the ETag of getSegment is required: missing → 428, stale → 412. A new definition " +
@@ -55,12 +57,12 @@ func Register(api huma.API, svc Service) {
 			"outreach.invalid_state).",
 	}, op.Meta{Action: string(authz.OutreachSegmentManage), Surface: op.SurfaceOrg, RateLimit: op.RateAudienceCount}, h.update)
 
-	reg(api, huma.Operation{
+	op.Register(api, "outreach", huma.Operation{
 		OperationID: "archiveSegment", Method: http.MethodPost, Path: "/orgs/{org_id}/segments/{segment_id}/archive",
 		Summary: "Archive a segment", Description: "Archiving an archived segment changes nothing.",
 	}, op.Meta{Action: string(authz.OutreachSegmentManage), Surface: op.SurfaceOrg, Idempotency: op.IdempotencyOptional}, h.archive)
 
-	reg(api, huma.Operation{
+	op.Register(api, "outreach", huma.Operation{
 		OperationID: "countAudience", Method: http.MethodPost, Path: "/orgs/{org_id}/audience-counts",
 		Summary: "Estimate an audience",
 		Description: "Level 0 (04 §V.2): a number only, never an identity or a sample. Below 10 students count is " +
@@ -76,23 +78,7 @@ func Register(api huma.API, svc Service) {
 	registerDispatch(api, h)
 }
 
-// reg registers one outreach operation with its Koro metadata.
-func reg[I, O any](api huma.API, o huma.Operation, m op.Meta, fn func(context.Context, *I) (*O, error)) {
-	o.Tags = []string{"outreach"}
-	huma.Register(api, op.Koro(o, m), fn)
-}
-
 type handler struct{ svc Service }
-
-// parseID parses a path ID; a malformed one is the nil UUID, which no row
-// has: it answers like a missing row (404) after the authz of the surface.
-func parseID(s string) uuid.UUID {
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return uuid.Nil()
-	}
-	return id
-}
 
 // Cursor sort key (04 §1.6).
 const sortNewest = "-id"
@@ -197,7 +183,7 @@ func definitionOf(loc string, in SegmentDefinitionDTO) (Definition, error) {
 		for i, s := range raw {
 			id, err := uuid.Parse(s)
 			if err != nil {
-				return nil, fieldErr(loc+"."+dim+"["+strconv.Itoa(i)+"]", "must be a UUID")
+				return nil, problem.Field(loc+"."+dim+"["+strconv.Itoa(i)+"]", "must be a UUID")
 			}
 			out[i] = id
 		}
@@ -218,7 +204,7 @@ func definitionOf(loc string, in SegmentDefinitionDTO) (Definition, error) {
 	}
 	for i, y := range in.Year {
 		if y < minYear || y > maxYear {
-			return Definition{}, fieldErr(loc+".year["+strconv.Itoa(i)+"]", "class years are 1-8")
+			return Definition{}, problem.Field(loc+".year["+strconv.Itoa(i)+"]", "class years are 1-8")
 		}
 		d.Year = append(d.Year, int16(y))
 	}
@@ -249,7 +235,7 @@ func (h handler) list(ctx context.Context, in *listSegmentsInput) (*listOutput, 
 	if err != nil {
 		return nil, err
 	}
-	orgID := parseID(in.OrgID)
+	orgID := httpx.ParseID(in.OrgID)
 	fp := page.Fingerprint("listSegments", orgID.String(), strconv.FormatBool(in.Archived))
 	var after *uuid.UUID
 	c, err := page.Decode(in.Cursor, sortNewest, fp, 1)
@@ -297,7 +283,7 @@ func (h handler) create(ctx context.Context, in *createSegmentInput) (*segmentOu
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.CreateSegment(ctx, a, parseID(in.OrgID), SegmentInput{Name: in.Body.Name, Definition: def})
+	v, err := h.svc.CreateSegment(ctx, a, httpx.ParseID(in.OrgID), SegmentInput{Name: in.Body.Name, Definition: def})
 	if err != nil {
 		return nil, err
 	}
@@ -315,7 +301,7 @@ func (h handler) get(ctx context.Context, in *getSegmentInput) (*segmentOutput, 
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.GetSegment(ctx, a, parseID(in.OrgID), parseID(in.SegmentID))
+	v, err := h.svc.GetSegment(ctx, a, httpx.ParseID(in.OrgID), httpx.ParseID(in.SegmentID))
 	if err != nil {
 		return nil, err
 	}
@@ -346,7 +332,7 @@ func (h handler) update(ctx context.Context, in *updateSegmentInput) (*segmentOu
 		}
 		p.Definition = &def
 	}
-	v, err := h.svc.UpdateSegment(ctx, a, parseID(in.OrgID), parseID(in.SegmentID), in.IfMatch, p)
+	v, err := h.svc.UpdateSegment(ctx, a, httpx.ParseID(in.OrgID), httpx.ParseID(in.SegmentID), in.IfMatch, p)
 	if err != nil {
 		return nil, err
 	}
@@ -365,7 +351,7 @@ func (h handler) archive(ctx context.Context, in *archiveSegmentInput) (*segment
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.ArchiveSegment(ctx, a, parseID(in.OrgID), parseID(in.SegmentID))
+	v, err := h.svc.ArchiveSegment(ctx, a, httpx.ParseID(in.OrgID), httpx.ParseID(in.SegmentID))
 	if err != nil {
 		return nil, err
 	}
@@ -393,7 +379,7 @@ func (h handler) count(ctx context.Context, in *countAudienceInput) (*countOutpu
 	if err != nil {
 		return nil, err
 	}
-	r, err := h.svc.CountAudience(ctx, a, parseID(in.OrgID), def)
+	r, err := h.svc.CountAudience(ctx, a, httpx.ParseID(in.OrgID), def)
 	if err != nil {
 		return nil, err
 	}

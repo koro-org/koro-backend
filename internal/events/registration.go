@@ -14,6 +14,7 @@ import (
 	"koro/internal/orgs"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/problem"
 )
 
@@ -198,7 +199,7 @@ func (s *service) CreateRegistration(ctx context.Context, a authz.Actor, eventID
 		in.Source = SourceWeb
 	}
 	if in.Source != SourceWeb && in.Source != SourceMobile {
-		return RegistrationView{}, fieldErr("header.X-Koro-Client", "must be web or mobile")
+		return RegistrationView{}, problem.Field("header.X-Koro-Client", "must be web or mobile")
 	}
 	hash, err := idempotency.Hash(struct {
 		Op    string
@@ -497,11 +498,7 @@ func (s *service) emitAdmitted(ctx context.Context, r Registration, sens, promot
 
 // emitReg writes a registration event to the outbox in the transaction.
 func (s *service) emitReg(ctx context.Context, p domainevent.Payload, registrationID uuid.UUID) error {
-	env, err := domainevent.New(p, regAggType, registrationID)
-	if err != nil {
-		return err
-	}
-	return s.d.Outbox.Add(ctx, env)
+	return outbox.Emit(ctx, s.d.Outbox, p, regAggType, registrationID)
 }
 
 // purgeDates are answers_purge_at and sensitive_purge_at of an event ending

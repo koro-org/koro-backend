@@ -197,7 +197,7 @@ func (s *service) followable(ctx context.Context, a authz.Actor, act authz.Actio
 	if err != nil {
 		return orgs.OrgSummary{}, err
 	}
-	if err := authz.Can(ctx, a, act, orgResource(o)); err != nil {
+	if err := authz.Can(ctx, a, act, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
 		return orgs.OrgSummary{}, err
 	}
 	if o.Status == orgs.StatusClosed {
@@ -215,7 +215,7 @@ func (s *service) unfollowable(ctx context.Context, a authz.Actor, act authz.Act
 	if err != nil {
 		return err
 	}
-	authErr := authz.Can(ctx, a, act, orgResource(o))
+	authErr := authz.Can(ctx, a, act, authz.OrgResource(o.ID, string(o.Kind), string(o.Status)))
 	if authErr != nil && !errors.Is(authErr, authz.ErrNotFound) {
 		return authErr
 	}

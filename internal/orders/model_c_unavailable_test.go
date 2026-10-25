@@ -9,6 +9,7 @@ import (
 	"koro/internal/catalog"
 	"koro/internal/orders"
 	"koro/internal/parties"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // Synthetic payee accounts (bank code 99999 is not a bank); the fakes never
@@ -57,7 +58,7 @@ func TestGetOrder_ModelC_PayeeAccountRevoked(t *testing.T) {
 	if err != nil || v.DirectStatus != orders.DirectAvailable || len(v.DirectPayments) != 2 {
 		t.Fatalf("approved accounts: status=%q direct=%d err=%v", v.DirectStatus, len(v.DirectPayments), err)
 	}
-	if n := len(e.audit.of(authz.OrdersOrderPaymentInstructions)); n != 1 {
+	if n := len(e.audit.Of(authz.OrdersOrderPaymentInstructions)); n != 1 {
 		t.Fatalf("access audit=%d, want 1", n)
 	}
 
@@ -72,11 +73,11 @@ func TestGetOrder_ModelC_PayeeAccountRevoked(t *testing.T) {
 	if v.Order.ID != o.ID || v.Order.DirectToPayeeAmount != 3_600_000 || len(v.Lines) != 2 || v.SellerView {
 		t.Fatalf("the rest of the order: %+v lines=%d", v.Order, len(v.Lines))
 	}
-	if n := len(e.audit.of(authz.OrdersOrderPaymentInstructions)); n != 1 {
+	if n := len(e.audit.Of(authz.OrdersOrderPaymentInstructions)); n != 1 {
 		t.Fatalf("an unavailable read was audited as an account access: %d", n)
 	}
 	_, err = e.svc.PaymentInstructions(ctxOf(t, buyer), buyer, o.ID)
-	wantProblem(t, err, http.StatusConflict, "parties.no_approved_account")
+	problemtest.WantProblem(t, err, http.StatusConflict, "parties.no_approved_account")
 
 	// Readers that never see the direct transfers get no status either.
 	for _, name := range []string{"company_member", "finance_admin", "platform_admin", "support"} {
@@ -108,7 +109,7 @@ func TestGetOrder_ModelC_PayeeAccountRevoked(t *testing.T) {
 			t.Fatalf("payee B shows %q, want its current approved account", p.IBAN)
 		}
 	}
-	if n := len(e.audit.of(authz.OrdersOrderPaymentInstructions)); n != 2 {
+	if n := len(e.audit.Of(authz.OrdersOrderPaymentInstructions)); n != 2 {
 		t.Fatalf("access audit=%d, want 2", n)
 	}
 }
@@ -151,11 +152,11 @@ func TestGetOrder_ModelC_NaturalPersonPayeeUnavailable(t *testing.T) {
 	if err != nil || v.DirectStatus != orders.DirectUnavailable || len(v.DirectPayments) != 0 {
 		t.Fatalf("natural person payee: status=%q direct=%+v err=%v", v.DirectStatus, v.DirectPayments, err)
 	}
-	if n := len(e.audit.of(authz.OrdersOrderPaymentInstructions)); n != 0 {
+	if n := len(e.audit.Of(authz.OrdersOrderPaymentInstructions)); n != 0 {
 		t.Fatalf("access audit=%d, want 0", n)
 	}
 	_, err = e.svc.PaymentInstructions(ctxOf(t, buyer), buyer, o.ID)
-	wantProblem(t, err, http.StatusConflict, "orders.invalid_state")
+	problemtest.WantProblem(t, err, http.StatusConflict, "orders.invalid_state")
 }
 
 // TestGetOrder_ModelC_BrokenPayeeStillFails (BE-109): only a payee that
@@ -168,7 +169,7 @@ func TestGetOrder_ModelC_BrokenPayeeStillFails(t *testing.T) {
 	delete(e.payees.m, b)
 	buyer := actor(t, "company_admin")
 	_, err := e.svc.GetOrder(ctxOf(t, buyer), buyer, o.ID)
-	wantErr(t, err, parties.ErrNotFound)
+	problemtest.WantErr(t, err, parties.ErrNotFound)
 }
 
 // TestGetOrder_ModelC_DirectStatusHTTP (BE-109): the OrderDTO carries

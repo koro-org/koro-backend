@@ -6,7 +6,6 @@ import (
 	"uuid"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"koro/internal/authz"
 	"koro/internal/platform/db"
@@ -36,13 +35,6 @@ func takePayee(op string, q *gorm.DB) (Payee, error) {
 	return p, nil
 }
 
-func lockIf(q *gorm.DB, lock bool) *gorm.DB {
-	if lock {
-		return q.Clauses(clause.Locking{Strength: clause.LockingStrengthUpdate})
-	}
-	return q
-}
-
 // InsertPayee implements Store.
 //
 // cross-org: a new row carries its own org_id (the seller org the service
@@ -60,7 +52,7 @@ func (s gormStore) InsertPayee(ctx context.Context, p Payee) (Payee, error) {
 // cross-org: addressed by ID (cross-module reads, the admin surface, a row
 // the service resolves within its org first).
 func (s gormStore) GetPayee(ctx context.Context, id uuid.UUID, lock bool) (Payee, error) {
-	return takePayee("get payee", lockIf(db.Conn(ctx, s.orm), lock).Where("id = ?", id))
+	return takePayee("get payee", db.LockIf(db.Conn(ctx, s.orm), lock).Where("id = ?", id))
 }
 
 // OrgPayee implements Store.
@@ -68,7 +60,7 @@ func (s gormStore) OrgPayee(ctx context.Context, orgID, id uuid.UUID, lock bool)
 	if orgID == uuid.Nil() {
 		return Payee{}, db.ErrMissingOrgScope
 	}
-	return takePayee("org payee", lockIf(db.Conn(ctx, s.orm), lock).Scopes(db.ScopeOrg(orgID)).Where("id = ?", id))
+	return takePayee("org payee", db.LockIf(db.Conn(ctx, s.orm), lock).Scopes(db.ScopeOrg(orgID)).Where("id = ?", id))
 }
 
 // OrgPayees implements Store.
@@ -174,7 +166,7 @@ func (s gormStore) InsertBankAccount(ctx context.Context, b BankAccount) (BankAc
 // cross-org: addressed by ID (the admin surface, cross-module reads); the
 // org surface compares its payee with the payee resolved within the org.
 func (s gormStore) GetBankAccount(ctx context.Context, id uuid.UUID, lock bool) (BankAccount, error) {
-	return takeAccount("get bank account", lockIf(db.Conn(ctx, s.orm), lock).Where("id = ?", id))
+	return takeAccount("get bank account", db.LockIf(db.Conn(ctx, s.orm), lock).Where("id = ?", id))
 }
 
 // PayeeBankAccounts implements Store.
@@ -198,7 +190,7 @@ func (s gormStore) ApprovedAccounts(ctx context.Context, payeeIDs []uuid.UUID, l
 		return out, nil
 	}
 	var rows []BankAccount
-	q := lockIf(db.Conn(ctx, s.orm), lock).Where("payee_id IN ? AND status = 'approved'", payeeIDs).Order("id")
+	q := db.LockIf(db.Conn(ctx, s.orm), lock).Where("payee_id IN ? AND status = 'approved'", payeeIDs).Order("id")
 	if err := q.Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("parties: approved bank accounts: %w", err)
 	}

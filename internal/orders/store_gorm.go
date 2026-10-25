@@ -29,13 +29,6 @@ type gormStore struct{ orm *gorm.DB }
 // NewGormStore returns the PostgreSQL Store over the app_rw pool.
 func NewGormStore(orm *gorm.DB) Store { return gormStore{orm: orm} }
 
-func lockIf(q *gorm.DB, lock bool) *gorm.DB {
-	if lock {
-		return q.Clauses(clause.Locking{Strength: clause.LockingStrengthUpdate})
-	}
-	return q
-}
-
 func take[T any](op string, q *gorm.DB) (T, error) {
 	var v T
 	err := q.Take(&v).Error
@@ -81,7 +74,7 @@ func (s gormStore) OrderNoTaken(ctx context.Context, orderNo string) (bool, erro
 //
 // cross-org: addressed by ID; the service authorises the loaded order.
 func (s gormStore) GetOrder(ctx context.Context, id uuid.UUID, lock bool) (Order, error) {
-	return take[Order]("get order", lockIf(db.Conn(ctx, s.orm), lock).Where("id = ?", id))
+	return take[Order]("get order", db.LockIf(db.Conn(ctx, s.orm), lock).Where("id = ?", id))
 }
 
 // OrderByNo implements Store.
@@ -131,7 +124,7 @@ func (s gormStore) LinesOf(ctx context.Context, orderIDs []uuid.UUID) (map[uuid.
 //
 // cross-org: addressed by ID; the service authorises the loaded line.
 func (s gormStore) GetLine(ctx context.Context, id uuid.UUID, lock bool) (Line, error) {
-	return take[Line]("get line", lockIf(db.Conn(ctx, s.orm), lock).Where("id = ?", id))
+	return take[Line]("get line", db.LockIf(db.Conn(ctx, s.orm), lock).Where("id = ?", id))
 }
 
 // UpdateOrder implements Store: a targeted UPDATE of the running columns

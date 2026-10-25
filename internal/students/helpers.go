@@ -19,6 +19,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/platform/civil"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/problem"
 	"koro/internal/platform/textx"
 )
@@ -74,18 +75,14 @@ func writeEvent(a authz.Actor, act authz.Action, meta map[string]any) audit.Even
 		Metadata: meta}.By(a)
 }
 
-func fieldErr(location, msg string) error {
-	return problem.ErrValidation.WithFields(problem.FieldError{Location: location, Message: msg})
-}
-
 // cleanLine normalises an optional single-line field; "" clears it (nil).
 func cleanLine(loc, s string, maxRunes int) (*string, error) {
 	n, err := textx.NormalizeText(s)
 	if err != nil {
-		return nil, fieldErr(loc, "contains control or bidi characters")
+		return nil, problem.Field(loc, "contains control or bidi characters")
 	}
 	if utf8.RuneCountInString(n) > maxRunes {
-		return nil, fieldErr(loc, "must be at most "+strconv.Itoa(maxRunes)+" characters")
+		return nil, problem.Field(loc, "must be at most "+strconv.Itoa(maxRunes)+" characters")
 	}
 	if n == "" {
 		return nil, nil
@@ -97,16 +94,16 @@ func cleanLine(loc, s string, maxRunes int) (*string, error) {
 // characters; "" clears it.
 func cleanMultiline(loc, s string, maxRunes int) (*string, error) {
 	if !utf8.ValidString(s) {
-		return nil, fieldErr(loc, "must be UTF-8")
+		return nil, problem.Field(loc, "must be UTF-8")
 	}
 	for _, r := range s {
 		if (unicode.IsControl(r) && r != '\n' && r != '\t' && r != '\r') || bidiControl(r) {
-			return nil, fieldErr(loc, "contains control or bidi characters")
+			return nil, problem.Field(loc, "contains control or bidi characters")
 		}
 	}
 	d := norm.NFC.String(strings.TrimSpace(strings.ReplaceAll(s, "\r", "")))
 	if utf8.RuneCountInString(d) > maxRunes {
-		return nil, fieldErr(loc, "must be at most "+strconv.Itoa(maxRunes)+" characters")
+		return nil, problem.Field(loc, "must be at most "+strconv.Itoa(maxRunes)+" characters")
 	}
 	if d == "" {
 		return nil, nil
@@ -124,13 +121,13 @@ func bidiControl(r rune) bool {
 func parseMonth(loc, s string) (civil.Date, error) {
 	m := monthRe.FindStringSubmatch(s)
 	if m == nil {
-		return civil.Date{}, fieldErr(loc, "must be a month YYYY-MM")
+		return civil.Date{}, problem.Field(loc, "must be a month YYYY-MM")
 	}
 	y, _ := strconv.Atoi(m[1])
 	mo, _ := strconv.Atoi(m[2])
 	d, err := civil.New(y, time.Month(mo), 1)
 	if err != nil || y < 1950 || y > 2100 {
-		return civil.Date{}, fieldErr(loc, "must be a month YYYY-MM between 1950 and 2100")
+		return civil.Date{}, problem.Field(loc, "must be a month YYYY-MM between 1950 and 2100")
 	}
 	return d, nil
 }
@@ -141,11 +138,7 @@ func monthString(d civil.Date) string { return fmt.Sprintf("%04d-%02d", d.Year, 
 // emitAfterCommit writes an A event (01 §6.1): a failure is logged, never
 // returned (the write itself succeeded).
 func (s *service) emitAfterCommit(ctx context.Context, p domainevent.Payload, aggregate string, id uuid.UUID) {
-	env, err := domainevent.New(p, aggregate, id)
-	if err == nil {
-		err = s.d.Outbox.AfterCommit(ctx, env)
-	}
-	if err != nil {
+	if err := outbox.EmitAfterCommit(ctx, s.d.Outbox, p, aggregate, id); err != nil {
 		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "students event not emitted",
 			slog.String("topic", p.Topic()), slog.String("user_id", id.String()), slog.String("err", err.Error()))
 	}
@@ -153,11 +146,7 @@ func (s *service) emitAfterCommit(ctx context.Context, p domainevent.Payload, ag
 
 // emitOutbox writes an O event in the transaction carried by ctx.
 func (s *service) emitOutbox(ctx context.Context, p domainevent.Payload, aggregate string, id uuid.UUID) error {
-	env, err := domainevent.New(p, aggregate, id)
-	if err != nil {
-		return err
-	}
-	return s.d.Outbox.Add(ctx, env)
+	return outbox.Emit(ctx, s.d.Outbox, p, aggregate, id)
 }
 
 // fieldError names the offending request member of a 422.

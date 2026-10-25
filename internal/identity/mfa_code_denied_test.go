@@ -15,6 +15,7 @@ import (
 	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/identity"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // BE-076: a refused second-factor code — the first code of confirmTotp,
@@ -236,7 +237,7 @@ func (op codeOperation) run(t *testing.T, e *codeEnv) {
 // refusedAs422 is the answer of confirmTotp and verifyMfa to a wrong code.
 func refusedAs422(t *testing.T, err error) {
 	t.Helper()
-	wantErr(t, err, identity.ErrInvalidMFACode)
+	problemtest.WantErr(t, err, identity.ErrInvalidMFACode)
 	wantStatus(t, err, http.StatusUnprocessableEntity)
 }
 
@@ -387,7 +388,7 @@ func TestSignInPasswordDenied_ReasonAndOwnSecurityEvents(t *testing.T) {
 	for i := 1; i <= 6; i++ {
 		n := len(e.audit.rows())
 		_, err := e.svc.CreateSession(t.Context(), authz.Anonymous(), identity.Login{Email: "pw-step@example.com", Password: "Yanlis-Parola-Deneme-1"})
-		wantErr(t, err, identity.ErrInvalidCredentials)
+		problemtest.WantErr(t, err, identity.ErrInvalidCredentials)
 		reason := "invalid_credentials"
 		if i == 6 {
 			reason = "locked"

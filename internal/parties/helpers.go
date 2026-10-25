@@ -89,32 +89,6 @@ func fullTaxIDs(a authz.Actor) bool {
 	return a.HasPlatformRole(authz.PlatformAdmin) || a.HasPlatformRole(authz.PlatformFinanceAdmin)
 }
 
-// etagOf is the strong ETag of a party version (04 §1.13): the base32 of
-// updated_at's UnixNano, quoted.
-func etagOf(updatedAt time.Time) string {
-	return `"` + strconv.FormatInt(updatedAt.UnixNano(), 32) + `"`
-}
-
-// checkIfMatch applies If-Match (04 §1.13, RFC 9110 §13.1.1 strong
-// comparison): missing (or "*") → 428, no listed tag equal to the current
-// one → 412.
-func checkIfMatch(header, current string) error {
-	h := strings.TrimSpace(header)
-	if h == "" || h == "*" {
-		return ErrPreconditionRequired
-	}
-	for tag := range strings.SplitSeq(h, ",") {
-		if strings.TrimSpace(tag) == current {
-			return nil
-		}
-	}
-	return ErrPreconditionFailed
-}
-
-func fieldErr(location, msg string) error {
-	return problem.ErrValidation.WithFields(problem.FieldError{Location: location, Message: msg})
-}
-
 // writableOrg is the org status rule of writes on behalf of an org (03
 // §2.3): a closed org takes no change, a suspended one only platform
 // staff's (finance and platform admins act for the platform).
@@ -162,7 +136,7 @@ func partyEvent(a authz.Actor, act authz.Action, orgID *uuid.UUID, p LegalParty,
 func normalized(loc, s string) (string, error) {
 	n, err := textx.NormalizeText(s)
 	if err != nil {
-		return "", fieldErr(loc, "contains control or bidi characters")
+		return "", problem.Field(loc, "contains control or bidi characters")
 	}
 	return n, nil
 }
@@ -173,7 +147,7 @@ func cleanTitle(loc, s string) (string, error) {
 		return "", err
 	}
 	if c := utf8.RuneCountInString(n); c < minTitle || c > maxTitle {
-		return "", fieldErr(loc, "must be 2-300 characters")
+		return "", problem.Field(loc, "must be 2-300 characters")
 	}
 	return n, nil
 }
@@ -185,7 +159,7 @@ func cleanLine(loc, s string, maxRunes int) (*string, error) {
 		return nil, err
 	}
 	if utf8.RuneCountInString(n) > maxRunes {
-		return nil, fieldErr(loc, "must be at most "+strconv.Itoa(maxRunes)+" characters")
+		return nil, problem.Field(loc, "must be at most "+strconv.Itoa(maxRunes)+" characters")
 	}
 	if n == "" {
 		return nil, nil
@@ -200,7 +174,7 @@ func cleanVKN(loc, s string) (*string, error) {
 	}
 	d, ok := digitsOnly(s)
 	if !ok || !ValidVKN(d) {
-		return nil, fieldErr(loc, "must be a valid 10-digit tax number (VKN)")
+		return nil, problem.Field(loc, "must be a valid 10-digit tax number (VKN)")
 	}
 	return &d, nil
 }
@@ -209,7 +183,7 @@ func cleanVKN(loc, s string) (*string, error) {
 func cleanTCKN(loc, s string) (string, error) {
 	d, ok := digitsOnly(s)
 	if !ok || !ValidTCKN(d) {
-		return "", fieldErr(loc, "must be a valid 11-digit national ID (TCKN)")
+		return "", problem.Field(loc, "must be a valid 11-digit national ID (TCKN)")
 	}
 	return d, nil
 }
@@ -221,7 +195,7 @@ func cleanMERSIS(loc, s string) (*string, error) {
 	}
 	d, ok := digitsOnly(s)
 	if !ok || !ValidMERSIS(d) {
-		return nil, fieldErr(loc, "must be a 16-digit MERSİS number")
+		return nil, problem.Field(loc, "must be a 16-digit MERSİS number")
 	}
 	return &d, nil
 }
@@ -234,7 +208,7 @@ func cleanEmail(loc, s string) (*string, error) {
 	}
 	a, err := mail.ParseAddress(e)
 	if err != nil || a.Address != e || len(e) > maxEmail || !strings.Contains(e[strings.LastIndex(e, "@"):], ".") {
-		return nil, fieldErr(loc, "must be an e-mail address")
+		return nil, problem.Field(loc, "must be an e-mail address")
 	}
 	return &e, nil
 }
@@ -256,7 +230,7 @@ func cleanPhone(loc, s string) (*string, error) {
 		p = "+90" + p[1:]
 	}
 	if !phoneRe.MatchString(p) {
-		return nil, fieldErr(loc, "must be a phone number in +<country><number> form")
+		return nil, problem.Field(loc, "must be a phone number in +<country><number> form")
 	}
 	return &p, nil
 }
@@ -276,9 +250,9 @@ func cleanAddress(loc string, a Address) (Address, error) {
 		}
 		switch c := utf8.RuneCountInString(n); {
 		case required && c == 0:
-			err = fieldErr(loc+"."+name, "is required")
+			err = problem.Field(loc+"."+name, "is required")
 		case c > maxRunes:
-			err = fieldErr(loc+"."+name, "must be at most "+strconv.Itoa(maxRunes)+" characters")
+			err = problem.Field(loc+"."+name, "must be at most "+strconv.Itoa(maxRunes)+" characters")
 		}
 		return n
 	}
@@ -291,13 +265,13 @@ func cleanAddress(loc string, a Address) (Address, error) {
 		return Address{}, err
 	}
 	if out.PostalCode != "" && !postalRe.MatchString(out.PostalCode) {
-		return Address{}, fieldErr(loc+".postal_code", "must be 5 digits")
+		return Address{}, problem.Field(loc+".postal_code", "must be 5 digits")
 	}
 	if out.Country == "" {
 		out.Country = "TR"
 	}
 	if !countryRe.MatchString(out.Country) {
-		return Address{}, fieldErr(loc+".country", "must be a two-letter country code")
+		return Address{}, problem.Field(loc+".country", "must be a two-letter country code")
 	}
 	return out, nil
 }
@@ -306,14 +280,14 @@ func cleanAddress(loc string, a Address) (Address, error) {
 func cleanNote(loc, s string) (string, error) {
 	n := strings.TrimSpace(s)
 	if utf8.RuneCountInString(n) > maxNote {
-		return "", fieldErr(loc, "must be at most 500 characters")
+		return "", problem.Field(loc, "must be at most 500 characters")
 	}
 	return n, nil
 }
 
 func validLegalType(loc string, t LegalType, allowed []LegalType) error {
 	if !t.Valid() || allowed != nil && !slices.Contains(allowed, t) {
-		return fieldErr(loc, "is not an allowed legal type here")
+		return problem.Field(loc, "is not an allowed legal type here")
 	}
 	return nil
 }

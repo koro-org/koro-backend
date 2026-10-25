@@ -20,6 +20,7 @@ import (
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/money"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/page"
 	"koro/internal/platform/problem"
 )
@@ -129,14 +130,10 @@ func payoutEvent(a authz.Actor, act authz.Action, p Payout, reason string, meta 
 // emit writes a payout event: O topics into the outbox in the transaction,
 // A topics after the commit (01 §6.2).
 func (s *service) emit(ctx context.Context, p Payout, payload domainevent.Payload) error {
-	env, err := domainevent.New(payload, payoutAggregate, p.ID)
-	if err != nil {
-		return err
-	}
 	if payload.Topic() == domainevent.TopicPayoutCreated {
-		return s.d.Outbox.AfterCommit(ctx, env)
+		return outbox.EmitAfterCommit(ctx, s.d.Outbox, payload, payoutAggregate, p.ID)
 	}
-	return s.d.Outbox.Add(ctx, env)
+	return outbox.Emit(ctx, s.d.Outbox, payload, payoutAggregate, p.ID)
 }
 
 // orgSurface resolves the org of an org-surface request (unknown → 404)
@@ -305,7 +302,7 @@ func (s *service) AdminListPayouts(ctx context.Context, a authz.Actor, q PayoutQ
 		return PayoutPage{}, err
 	}
 	if q.Status != "" && !q.Status.Valid() {
-		return PayoutPage{}, fieldErr("query.status", "is not a payout status")
+		return PayoutPage{}, problem.Field("query.status", "is not a payout status")
 	}
 	return s.listPayouts(ctx, PayoutFilter{Status: q.Status}, q)
 }
@@ -400,13 +397,13 @@ func (s *service) AdminCreatePayout(ctx context.Context, a authz.Actor, in Creat
 	slices.SortFunc(lines, func(x, y uuid.UUID) int { return strings.Compare(x.String(), y.String()) })
 	switch {
 	case in.PayeeID == uuid.Nil():
-		return PayoutView{}, fieldErr("body.payee_id", "is required")
+		return PayoutView{}, problem.Field("body.payee_id", "is required")
 	case len(lines) > maxPayoutLines:
-		return PayoutView{}, fieldErr("body.order_line_ids", fmt.Sprintf("must be at most %d", maxPayoutLines))
+		return PayoutView{}, problem.Field("body.order_line_ids", fmt.Sprintf("must be at most %d", maxPayoutLines))
 	case len(slices.Compact(slices.Clone(lines))) != len(lines):
-		return PayoutView{}, fieldErr("body.order_line_ids", "lists a line twice")
+		return PayoutView{}, problem.Field("body.order_line_ids", "lists a line twice")
 	case slices.Contains(lines, uuid.Nil()):
-		return PayoutView{}, fieldErr("body.order_line_ids", "must be UUIDs")
+		return PayoutView{}, problem.Field("body.order_line_ids", "must be UUIDs")
 	}
 	hash, err := idempotency.Hash(struct {
 		Op    string
@@ -429,7 +426,7 @@ func (s *service) createPayout(ctx context.Context, a authz.Actor, payeeID uuid.
 	py, err := s.d.Payees.Get(ctx, payeeID)
 	switch {
 	case errors.Is(err, parties.ErrNotFound):
-		return uuid.Nil(), fieldErr("body.payee_id", "is not a payee")
+		return uuid.Nil(), problem.Field("body.payee_id", "is not a payee")
 	case err != nil:
 		return uuid.Nil(), err
 	}
@@ -618,13 +615,13 @@ func (s *service) AdminMarkPayoutPaid(ctx context.Context, a authz.Actor, payout
 	}
 	switch {
 	case ref == "":
-		return PayoutView{}, fieldErr("body.bank_reference", "is required: the reference of the transfer at the bank")
+		return PayoutView{}, problem.Field("body.bank_reference", "is required: the reference of the transfer at the bank")
 	case utf8.RuneCountInString(ref) > maxBankRefRunes:
-		return PayoutView{}, fieldErr("body.bank_reference", "must be at most 100 characters")
+		return PayoutView{}, problem.Field("body.bank_reference", "must be at most 100 characters")
 	case in.ReceiptFileID == nil || *in.ReceiptFileID == uuid.Nil():
-		return PayoutView{}, fieldErr("body.receipt_file_id", "is required: the bank receipt (dekont) of the transfer")
+		return PayoutView{}, problem.Field("body.receipt_file_id", "is required: the bank receipt (dekont) of the transfer")
 	case paidAt.After(now.Add(paidAtSkew)):
-		return PayoutView{}, fieldErr("body.paid_at", "must not be in the future")
+		return PayoutView{}, problem.Field("body.paid_at", "must not be in the future")
 	}
 	receipt := *in.ReceiptFileID
 	// The hash takes paid_at as given: a retry without paid_at replays the
@@ -636,11 +633,11 @@ func (s *service) AdminMarkPayoutPaid(ctx context.Context, a authz.Actor, payout
 	f, err := s.d.Files.Get(ctx, receipt)
 	switch {
 	case errors.Is(err, files.ErrNotFound):
-		return PayoutView{}, fieldErr("body.receipt_file_id", "must be a payout_receipt upload")
+		return PayoutView{}, problem.Field("body.receipt_file_id", "must be a payout_receipt upload")
 	case err != nil:
 		return PayoutView{}, err
 	case f.Purpose != files.PurposePayoutReceipt:
-		return PayoutView{}, fieldErr("body.receipt_file_id", "must be a payout_receipt upload")
+		return PayoutView{}, problem.Field("body.receipt_file_id", "must be a payout_receipt upload")
 	}
 	hash, err := idempotency.Hash(struct {
 		Op      string
@@ -756,9 +753,9 @@ func (s *service) release(ctx context.Context, a authz.Actor, act authz.Action, 
 	why := strings.TrimSpace(reason)
 	switch n := utf8.RuneCountInString(why); {
 	case n == 0:
-		return PayoutView{}, fieldErr(loc, "is required")
+		return PayoutView{}, problem.Field(loc, "is required")
 	case n > maxReasonRunes:
-		return PayoutView{}, fieldErr(loc, "must be at most 500 characters")
+		return PayoutView{}, problem.Field(loc, "must be at most 500 characters")
 	}
 	hash, err := idempotency.Hash(struct {
 		Op     string

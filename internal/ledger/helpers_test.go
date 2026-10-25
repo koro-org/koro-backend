@@ -2,7 +2,6 @@ package ledger_test
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -14,7 +13,6 @@ import (
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
 	"koro/internal/platform/obs"
-	"koro/internal/platform/problem"
 )
 
 // t0 is the test clock's start (microsecond precision, like PostgreSQL).
@@ -136,14 +134,6 @@ func sum(es []ledger.Entry) int64 {
 		s += e.Amount
 	}
 	return s
-}
-
-// wantProblem fails unless err is (or wraps) the problem sentinel want.
-func wantProblem(t *testing.T, err error, want *problem.Error) {
-	t.Helper()
-	if !errors.Is(err, want) {
-		t.Fatalf("error %v, want %s", err, want.Code())
-	}
 }
 
 func actor(t *testing.T, name string) authz.Actor {

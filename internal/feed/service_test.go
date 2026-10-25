@@ -14,6 +14,7 @@ import (
 	"koro/internal/files"
 	"koro/internal/orgs"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // TestCreatePost_CompanyForcesCommercialFlag: a company post is always
@@ -54,7 +55,7 @@ func TestCreatePost_CompanyForcesCommercialFlag(t *testing.T) {
 	if strings.Contains(string(b), v.Post.AuthorUserID.String()) || strings.Contains(string(b), "audience") {
 		t.Fatalf("reader DTO leaks author or audience: %s", b)
 	}
-	if got := e.audit.of(authz.FeedPostCreate); len(got) != 3 {
+	if got := e.audit.Of(authz.FeedPostCreate); len(got) != 3 {
 		t.Fatalf("audit records = %d", len(got))
 	}
 }
@@ -80,7 +81,7 @@ func TestPublish_NewOrgFirst3_PendingReview(t *testing.T) {
 		}
 		// A second publication is a state error.
 		_, err = e.svc.PublishPost(ctx, admin, v.Post.ID)
-		wantCode(t, err, 409, "feed.invalid_state")
+		problemtest.WantProblem(t, err, 409, "feed.invalid_state")
 	}
 	if got := e.out.Topics(); len(got) != 3 || got[0] != domainevent.TopicPostSubmittedForReview {
 		t.Fatalf("events = %v", got)
@@ -105,9 +106,9 @@ func TestPublish_NewOrgFirst3_PendingReview(t *testing.T) {
 	v = e.create(t, "company_admin", "company_a", textInput("Askıda"))
 	e.mem.PutSettings(feed.OrgSettings{OrgID: orgID("company_a"), TrustLevel: feed.TrustSuspended, Reason: &reason})
 	_, err := e.svc.PublishPost(ctx, admin, v.Post.ID)
-	wantCode(t, err, 403, "feed.posting_suspended")
+	problemtest.WantProblem(t, err, 403, "feed.posting_suspended")
 	_, err = e.svc.CreatePost(ctx, admin, orgID("company_a"), textInput("Askıda 2"))
-	wantCode(t, err, 403, "feed.posting_suspended")
+	problemtest.WantProblem(t, err, 403, "feed.posting_suspended")
 	// The platform org is trusted without a settings row (k-po author).
 	pa := authz.Actor{Kind: authz.KindUser, UserID: uuid.NewV7(), PlatformRoles: []authz.PlatformRole{authz.PlatformAdmin},
 		Memberships: []authz.Membership{{OrgID: orgID("platform_org"), OrgKind: authz.OrgPlatform, Role: authz.MemberStaff}},
@@ -135,7 +136,7 @@ func TestPublish_EmitsPostPublished(t *testing.T) {
 		t.Fatal("the image was not attached to the post")
 	}
 	_, err := e.svc.PublishPost(ctx, persona(t, "club_admin"), v.Post.ID)
-	wantCode(t, err, 409, "files.not_clean")
+	problemtest.WantProblem(t, err, 409, "files.not_clean")
 	if len(e.out.Events()) != 0 {
 		t.Fatal("an event was emitted for a failed publication")
 	}
@@ -155,7 +156,7 @@ func TestPublish_EmitsPostPublished(t *testing.T) {
 	if len(p.Media) != 1 || p.Media[0].URL == "" || *p.Media[0].AltText != "afiş" {
 		t.Fatalf("media = %+v", p.Media)
 	}
-	if len(e.audit.of(authz.FeedPostPublish)) != 1 {
+	if len(e.audit.Of(authz.FeedPostPublish)) != 1 {
 		t.Fatal("publication not audited")
 	}
 	// The follower hook (T-84: a no-op in P1) accepts the event.
@@ -413,12 +414,12 @@ func TestUpdatePost_PublishedAudienceImmutable(t *testing.T) {
 	fol, img, on := feed.AudienceFollowers, feed.KindImage, true
 	for _, p := range []feed.PostPatch{{AudienceKind: &fol}, {Kind: &img}, {CommercialFlag: &on}} {
 		_, err := e.svc.UpdatePost(ctx, admin, v.Post.ID, cur.ETag, p)
-		wantCode(t, err, 409, "feed.published_immutable")
+		problemtest.WantProblem(t, err, 409, "feed.published_immutable")
 	}
 	_, err = e.svc.UpdatePost(ctx, admin, v.Post.ID, "", feed.PostPatch{Body: doc("x")})
-	wantCode(t, err, 428, "precondition_required")
+	problemtest.WantProblem(t, err, 428, "precondition_required")
 	_, err = e.svc.UpdatePost(ctx, admin, v.Post.ID, `"0"`, feed.PostPatch{Body: doc("x")})
-	wantCode(t, err, 412, "precondition_failed")
+	problemtest.WantProblem(t, err, 412, "precondition_failed")
 	e.clk.Advance(time.Minute)
 	u, err := e.svc.UpdatePost(ctx, admin, v.Post.ID, cur.ETag, feed.PostPatch{Body: doc("düzeltilmiş metin")})
 	if err != nil || u.Post.EditedAt == nil || *u.Post.BodyText != "düzeltilmiş metin" || u.ETag == cur.ETag ||
@@ -426,9 +427,9 @@ func TestUpdatePost_PublishedAudienceImmutable(t *testing.T) {
 		t.Fatalf("UpdatePost(text) = %+v, %v", u.Post, err)
 	}
 	_, err = e.svc.UpdatePost(ctx, admin, v.Post.ID, cur.ETag, feed.PostPatch{Body: doc("y")})
-	wantCode(t, err, 412, "precondition_failed")
+	problemtest.WantProblem(t, err, 412, "precondition_failed")
 	_, err = e.svc.UpdatePost(ctx, admin, v.Post.ID, u.ETag, feed.PostPatch{})
-	wantCode(t, err, 422, "feed.empty_patch")
+	problemtest.WantProblem(t, err, 422, "feed.empty_patch")
 	// A draft may still change its audience and kind.
 	d := e.create(t, "club_admin", "club_a", textInput("taslak"))
 	if u, err := e.svc.UpdatePost(ctx, admin, d.Post.ID, d.ETag, feed.PostPatch{AudienceKind: &fol}); err != nil ||
@@ -493,7 +494,7 @@ func TestDeletePost_DraftHardDelete_PublishedRemoved(t *testing.T) {
 	if err != nil || len(list.Items) != 1 || list.Items[0].Post.Status != feed.StatusRemoved || list.Items[0].Post.BodyJSON != nil {
 		t.Fatalf("management list = %+v, %v", list.Items, err)
 	}
-	if n := len(e.audit.of(authz.FeedPostDelete)); n != 3 {
+	if n := len(e.audit.Of(authz.FeedPostDelete)); n != 3 {
 		t.Fatalf("delete audits = %d", n)
 	}
 }
@@ -526,10 +527,10 @@ func TestPost_OrgIsolation(t *testing.T) {
 	wantNotFound(t, err)
 	e.orgs.setStatus(orgID("club_a"), orgs.StatusSuspended)
 	_, err = e.svc.CreatePost(ctx, persona(t, "club_admin"), orgID("club_a"), textInput("x"))
-	wantCode(t, err, 403, "orgs.org_suspended")
+	problemtest.WantProblem(t, err, 403, "orgs.org_suspended")
 	e.orgs.setStatus(orgID("company_b"), orgs.StatusPendingReview)
 	_, err = e.svc.CreatePost(ctx, persona(t, "other_company_member"), orgID("company_b"), textInput("x"))
-	wantCode(t, err, 403, "orgs.org_not_verified")
+	problemtest.WantProblem(t, err, 403, "orgs.org_not_verified")
 	// Stats: the writers' counters, nobody else's.
 	p := e.published(t, "company_admin", "company_a", textInput("istatistik"))
 	if st, err := e.svc.PostStats(ctx, persona(t, "company_member"), p.Post.ID); err != nil || st.LikeCount != 0 {

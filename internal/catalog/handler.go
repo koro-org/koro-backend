@@ -13,9 +13,12 @@ import (
 	"koro/internal/authz"
 	"koro/internal/consent"
 	"koro/internal/identity"
+	"koro/internal/platform/db"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // Register adds the catalog operations (04 §2.14) to api. svc may be nil
@@ -23,14 +26,14 @@ import (
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
 
-	reg(api, huma.Operation{
+	op.Register(api, "catalog", huma.Operation{
 		OperationID: "listServices", Method: http.MethodGet, Path: "/services",
 		Summary: "List the Koro services",
 		Description: "The services an organization may offer: active and reviewed by the accountant. Finance and " +
 			"platform admins see every service with its VAT profile.",
 	}, op.Meta{Action: string(authz.CatalogServiceList), Surface: op.SurfaceResource}, h.listServices)
 
-	reg(api, huma.Operation{
+	op.Register(api, "catalog", huma.Operation{
 		OperationID: "adminCreateService", Method: http.MethodPost, Path: "/admin/services",
 		Summary: "Create a service", DefaultStatus: http.StatusCreated,
 		Description: "The invoice wording and VAT profile of what may be sold. Offerings of a service go on sale only " +
@@ -39,7 +42,7 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.CatalogServiceManage), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional},
 		h.adminCreateService)
 
-	reg(api, huma.Operation{
+	op.Register(api, "catalog", huma.Operation{
 		OperationID: "adminUpdateService", Method: http.MethodPatch, Path: "/admin/services/{service_id}",
 		Summary: "Update a service",
 		Description: "Partial update; clear empties optional fields; active false withdraws the service. The " +
@@ -47,14 +50,14 @@ func Register(api huma.API, svc Service) {
 			"change to the VAT profile withdraws the review unless the same request reviews it again.",
 	}, op.Meta{Action: string(authz.CatalogServiceManage), Surface: op.SurfaceAdmin}, h.adminUpdateService)
 
-	reg(api, huma.Operation{
+	op.Register(api, "catalog", huma.Operation{
 		OperationID: "browseOfferings", Method: http.MethodGet, Path: "/offerings",
 		Summary: "Browse the marketplace",
 		Description: "Active offerings whose sales have not ended. Prices are kuruş excluding VAT; the payee and the " +
 			"commission are never shown.",
 	}, op.Meta{Action: string(authz.CatalogOfferingBrowse), Surface: op.SurfaceResource, RateLimit: op.RateSearch}, h.browse)
 
-	reg(api, huma.Operation{
+	op.Register(api, "catalog", huma.Operation{
 		OperationID: "getOffering", Method: http.MethodGet, Path: "/offerings/{offering_id}",
 		Summary: "Get an offering",
 		Description: "A published offering for every signed-in user; a draft or an offering under review only for its " +
@@ -63,13 +66,13 @@ func Register(api huma.API, svc Service) {
 			"when the commission is charged to the buyer.",
 	}, op.Meta{Action: string(authz.CatalogOfferingRead), Surface: op.SurfaceResource}, h.get)
 
-	reg(api, huma.Operation{
+	op.Register(api, "catalog", huma.Operation{
 		OperationID: "listOrgOfferings", Method: http.MethodGet, Path: "/orgs/{org_id}/offerings",
 		Summary:     "List the offerings of an organization",
 		Description: "Drafts included, newest first, with the approval block.",
 	}, op.Meta{Action: string(authz.CatalogOfferingListOrg), Surface: op.SurfaceOrg}, h.listOrg)
 
-	reg(api, huma.Operation{
+	op.Register(api, "catalog", huma.Operation{
 		OperationID: "createOffering", Method: http.MethodPost, Path: "/orgs/{org_id}/offerings",
 		Summary: "Create an offering (package)", DefaultStatus: http.StatusCreated,
 		Description: "A draft of a club or a university (for its payee: the default payee when omitted) or of the " +
@@ -77,14 +80,14 @@ func Register(api huma.API, svc Service) {
 			"(422 catalog.parent_mismatch). A platform-native service is the platform's only.",
 	}, op.Meta{Action: string(authz.CatalogOfferingCreate), Surface: op.SurfaceOrg, Idempotency: op.IdempotencyOptional}, h.create)
 
-	reg(api, huma.Operation{
+	op.Register(api, "catalog", huma.Operation{
 		OperationID: "updateOffering", Method: http.MethodPatch, Path: "/offerings/{offering_id}",
 		Summary: "Update a draft offering",
 		Description: "Drafts only (409 catalog.invalid_state). If-Match with the ETag of getOffering is required: " +
 			"missing → 428, stale → 412. clear empties optional fields.",
 	}, op.Meta{Action: string(authz.CatalogOfferingUpdate), Surface: op.SurfaceResource}, h.update)
 
-	reg(api, huma.Operation{
+	op.Register(api, "catalog", huma.Operation{
 		OperationID: "submitOffering", Method: http.MethodPost, Path: "/offerings/{offering_id}/submit",
 		Summary: "Submit an offering for approval",
 		Description: "draft → pending_approval. The service must be reviewed (409 catalog.service_not_sellable), an " +
@@ -93,7 +96,7 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.CatalogOfferingSubmit), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional},
 		h.submit)
 
-	reg(api, huma.Operation{
+	op.Register(api, "catalog", huma.Operation{
 		OperationID: "cancelOffering", Method: http.MethodPost, Path: "/offerings/{offering_id}/cancel",
 		Summary: "Cancel an offering",
 		Description: "Any offering that is not cancelled. Unpaid orders of it are cancelled and paid ones queued for " +
@@ -101,13 +104,13 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.CatalogOfferingCancel), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional},
 		h.cancel)
 
-	reg(api, huma.Operation{
+	op.Register(api, "catalog", huma.Operation{
 		OperationID: "adminListOfferingReviewQueue", Method: http.MethodGet, Path: "/admin/offerings",
 		Summary:     "List the offerings waiting for the platform decision",
 		Description: "Oldest submission first.",
 	}, op.Meta{Action: string(authz.CatalogOfferingReviewQueue), Surface: op.SurfaceAdmin}, h.adminQueue)
 
-	reg(api, huma.Operation{
+	op.Register(api, "catalog", huma.Operation{
 		OperationID: "adminDecideOffering", Method: http.MethodPost, Path: "/admin/offerings/{offering_id}/decision",
 		Summary: "Approve or reject an offering",
 		Description: "Its creator never decides it (403 authz.four_eyes_violation). An approval puts it on sale — " +
@@ -116,13 +119,13 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.CatalogOfferingDecide), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional},
 		h.adminDecide)
 
-	reg(api, huma.Operation{
+	op.Register(api, "catalog", huma.Operation{
 		OperationID: "listUniversityOfferingApprovals", Method: http.MethodGet, Path: "/orgs/{org_id}/offering-approvals",
 		Summary:     "List the offerings waiting for a university's approval",
 		Description: "org_id is a university; the offerings of its clubs that require its approval, oldest first.",
 	}, op.Meta{Action: string(authz.CatalogOfferingReviewQueue), Surface: op.SurfaceOrg}, h.uniQueue)
 
-	reg(api, huma.Operation{
+	op.Register(api, "catalog", huma.Operation{
 		OperationID: "decideUniversityOfferingApproval", Method: http.MethodPost,
 		Path:    "/orgs/{org_id}/offering-approvals/{offering_id}/decision",
 		Summary: "Approve or reject an offering as its university",
@@ -131,13 +134,13 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.CatalogOfferingUniversityDecide), Surface: op.SurfaceOrg, Idempotency: op.IdempotencyOptional},
 		h.uniDecide)
 
-	reg(api, huma.Operation{
+	op.Register(api, "catalog", huma.Operation{
 		OperationID: "adminListCommercePolicies", Method: http.MethodGet, Path: "/admin/commerce-policies",
 		Summary:     "List commerce policies",
 		Description: "Newest valid_from first; at keeps the policies in effect at that time.",
 	}, op.Meta{Action: string(authz.CatalogPolicyList), Surface: op.SurfaceAdmin}, h.listPolicies)
 
-	reg(api, huma.Operation{
+	op.Register(api, "catalog", huma.Operation{
 		OperationID: "adminCreateCommercePolicy", Method: http.MethodPost, Path: "/admin/commerce-policies",
 		Summary: "Create a commerce policy", DefaultStatus: http.StatusCreated,
 		Description: "Requires re-authentication. A policy never changes: a change is \"close + new row\". Periods of " +
@@ -146,7 +149,7 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.CatalogPolicyManage), Surface: op.SurfaceAdmin, Reauth: true, RateLimit: op.RateReauth,
 		Idempotency: op.IdempotencyOptional}, h.createPolicy)
 
-	reg(api, huma.Operation{
+	op.Register(api, "catalog", huma.Operation{
 		OperationID: "adminCloseCommercePolicy", Method: http.MethodPost, Path: "/admin/commerce-policies/{policy_id}/close",
 		Summary: "Close a commerce policy",
 		Description: "Requires re-authentication. Sets valid_to (now when omitted, never in the past); the row " +
@@ -155,55 +158,13 @@ func Register(api huma.API, svc Service) {
 		Idempotency: op.IdempotencyOptional}, h.closePolicy)
 }
 
-// reg registers one catalog operation with its Koro metadata.
-func reg[I, O any](api huma.API, o huma.Operation, m op.Meta, fn func(context.Context, *I) (*O, error)) {
-	o.Tags = []string{"catalog"}
-	huma.Register(api, op.Koro(o, m), fn)
-}
-
 type handler struct{ svc Service }
-
-// parseID parses a path ID; a malformed one becomes the nil UUID, which no
-// row has: it answers like a missing row (404) after the surface's authz.
-func parseID(s string) uuid.UUID {
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return uuid.Nil()
-	}
-	return id
-}
-
-func optID(loc, s string) (*uuid.UUID, error) {
-	if s == "" {
-		return nil, nil
-	}
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return nil, fieldErr(loc, "must be a UUID")
-	}
-	return &id, nil
-}
 
 func str(p *string) string {
 	if p == nil {
 		return ""
 	}
 	return *p
-}
-
-func idStr(p *uuid.UUID) string {
-	if p == nil {
-		return ""
-	}
-	return p.String()
-}
-
-func utcPtr(t *time.Time) *time.Time {
-	if t == nil {
-		return nil
-	}
-	u := t.UTC()
-	return &u
 }
 
 // ---- services
@@ -239,7 +200,7 @@ func serviceDTO(v ServiceItem, admin bool) CatalogServiceDTO {
 		out.VATClass, out.VATExemptionCode, out.VATWithholdingCode = string(v.VATClass), str(v.VATExemptionCode), str(v.VATWithholdingCode)
 		out.VATWithholdingNum, out.VATWithholdingDen = v.VATWithholdingNum, v.VATWithholdingDen
 		out.InvoiceDescription, out.AccountingReviewedRef = str(v.InvoiceDescriptionTR), str(v.AccountingReviewedRef)
-		out.AccountingReviewedAt, out.Active = utcPtr(v.AccountingReviewedAt), &v.Active
+		out.AccountingReviewedAt, out.Active = db.UTCPtr(v.AccountingReviewedAt), &v.Active
 		if v.EntitlementTemplate != nil {
 			_ = json.Unmarshal(v.EntitlementTemplate, &out.EntitlementTemplate)
 		}
@@ -365,7 +326,7 @@ func (h handler) adminUpdateService(ctx context.Context, in *adminUpdateServiceI
 	if b.VATClass != nil {
 		p.VATClass = ptr(VATClass(*b.VATClass))
 	}
-	v, err := h.svc.AdminUpdateService(ctx, a, parseID(in.ServiceID), p)
+	v, err := h.svc.AdminUpdateService(ctx, a, httpx.ParseID(in.ServiceID), p)
 	if err != nil {
 		return nil, err
 	}
@@ -458,7 +419,7 @@ func cardDTO(v OfferingView) OfferingCardDTO {
 			Category: string(v.Service.Category), FulfillmentType: string(v.Service.FulfillmentType)},
 		Seller:          OfferingSellerDTO{OrgID: o.OrgID.String(), Name: v.Seller.Name, Kind: string(v.Seller.Kind)},
 		UnitPriceAmount: o.UnitPriceAmount, VATRateBP: o.VATRateBP, Currency: o.Currency, QuantityRemaining: o.Remaining(),
-		SalesStartAt: utcPtr(o.SalesStartAt), SalesEndAt: utcPtr(o.SalesEndAt), Status: string(o.Status),
+		SalesStartAt: db.UTCPtr(o.SalesStartAt), SalesEndAt: db.UTCPtr(o.SalesEndAt), Status: string(o.Status),
 	}
 	if e := v.Event; e != nil {
 		out.Event = &OfferingEventDTO{EventID: e.ID.String(), Title: e.Title, StartsAt: e.StartsAt.UTC()}
@@ -468,7 +429,7 @@ func cardDTO(v OfferingView) OfferingCardDTO {
 
 func offeringDTO(v OfferingView) OfferingDTO {
 	o := v.Offering
-	out := OfferingDTO{OfferingCardDTO: cardDTO(v), PerBuyerLimit: o.PerBuyerLimit, FulfilBy: utcPtr(o.FulfilBy),
+	out := OfferingDTO{OfferingCardDTO: cardDTO(v), PerBuyerLimit: o.PerBuyerLimit, FulfilBy: db.UTCPtr(o.FulfilBy),
 		BuyerFeeAmount: v.BuyerFee, Deliverables: make([]OfferingDeliverableDTO, len(o.Deliverables))}
 	for i, d := range o.Deliverables {
 		out.Deliverables[i] = OfferingDeliverableDTO(d)
@@ -482,11 +443,11 @@ func offeringDTO(v OfferingView) OfferingDTO {
 			flags = []string{}
 		}
 		out.Approval = &OfferingApprovalDTO{
-			DefaultPayeeID: idStr(o.DefaultPayeeID), QuantityTotal: o.QuantityTotal, QuantitySold: o.QuantitySold,
+			DefaultPayeeID: httpx.IDStr(o.DefaultPayeeID), QuantityTotal: o.QuantityTotal, QuantitySold: o.QuantitySold,
 			InvoiceTrigger: string(o.InvoiceTrigger), BlockedSponsorFlags: flags,
 			RequiresUniversityApproval: o.RequiresUniversityApproval, UniversityApprovalStatus: string(o.UniversityApprovalStatus),
-			UniversityDecidedAt: utcPtr(o.UniversityApprovedAt), SubmittedAt: utcPtr(o.SubmittedAt), ApprovedAt: utcPtr(o.ApprovedAt),
-			RejectionReason: str(o.RejectionReason), CancelledAt: utcPtr(o.CancelledAt), CancelReason: str(o.CancelReason),
+			UniversityDecidedAt: db.UTCPtr(o.UniversityApprovedAt), SubmittedAt: db.UTCPtr(o.SubmittedAt), ApprovedAt: db.UTCPtr(o.ApprovedAt),
+			RejectionReason: str(o.RejectionReason), CancelledAt: db.UTCPtr(o.CancelledAt), CancelReason: str(o.CancelReason),
 			CreatedAt: o.CreatedAt.UTC(), UpdatedAt: o.UpdatedAt.UTC(),
 		}
 	}
@@ -553,13 +514,13 @@ func (h handler) browse(ctx context.Context, in *browseInput) (*browseOfferingsO
 	if q.Sort == "" {
 		q.Sort = SortNewest
 	}
-	if q.OrgID, err = optID("query.org_id", in.OrgID); err != nil {
+	if q.OrgID, err = httpx.OptID("query.org_id", in.OrgID); err != nil {
 		return nil, err
 	}
-	if q.EventID, err = optID("query.event_id", in.EventID); err != nil {
+	if q.EventID, err = httpx.OptID("query.event_id", in.EventID); err != nil {
 		return nil, err
 	}
-	if q.UniversityID, err = optID("query.university_id", in.UniversityID); err != nil {
+	if q.UniversityID, err = httpx.OptID("query.university_id", in.UniversityID); err != nil {
 		return nil, err
 	}
 	if in.PriceMaxAmount > 0 {
@@ -610,7 +571,7 @@ func (h handler) get(ctx context.Context, in *OfferingPath) (*offeringOutput, er
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.GetOffering(ctx, a, parseID(in.OfferingID))
+	v, err := h.svc.GetOffering(ctx, a, httpx.ParseID(in.OfferingID))
 	if err != nil {
 		return nil, err
 	}
@@ -667,7 +628,7 @@ func (h handler) listOrg(ctx context.Context, in *listOrgOfferingsInput) (*offer
 	if err != nil {
 		return nil, err
 	}
-	p, err := h.svc.ListOrgOfferings(ctx, a, parseID(in.OrgID), OrgQuery{Status: OfferingStatus(in.Status), Limit: in.Limit, After: after})
+	p, err := h.svc.ListOrgOfferings(ctx, a, httpx.ParseID(in.OrgID), OrgQuery{Status: OfferingStatus(in.Status), Limit: in.Limit, After: after})
 	if err != nil {
 		return nil, err
 	}
@@ -725,7 +686,7 @@ func (h handler) create(ctx context.Context, in *createInput) (*offeringOutput, 
 	b := in.Body
 	svc, err := uuid.Parse(b.ServiceID)
 	if err != nil {
-		return nil, fieldErr("body.service_id", "must be a UUID")
+		return nil, problem.Field("body.service_id", "must be a UUID")
 	}
 	oi := OfferingInput{
 		ServiceID: svc, Title: b.Title, DescriptionJSON: b.DescriptionJSON, Deliverables: deliverablesOf(b.Deliverables),
@@ -733,13 +694,13 @@ func (h handler) create(ctx context.Context, in *createInput) (*offeringOutput, 
 		SalesStartAt: b.SalesStartAt, SalesEndAt: b.SalesEndAt, FulfilBy: b.FulfilBy, InvoiceTrigger: InvoiceTrigger(b.InvoiceTrigger),
 		BlockedSponsorFlags: flagsOf(b.BlockedSponsorFlags), RequiresUniversityApproval: b.RequiresUniversityApproval,
 	}
-	if oi.EventID, err = optID("body.event_id", b.EventID); err != nil {
+	if oi.EventID, err = httpx.OptID("body.event_id", b.EventID); err != nil {
 		return nil, err
 	}
-	if oi.DefaultPayeeID, err = optID("body.default_payee_id", b.DefaultPayeeID); err != nil {
+	if oi.DefaultPayeeID, err = httpx.OptID("body.default_payee_id", b.DefaultPayeeID); err != nil {
 		return nil, err
 	}
-	v, err := h.svc.CreateOffering(ctx, a, parseID(in.OrgID), oi)
+	v, err := h.svc.CreateOffering(ctx, a, httpx.ParseID(in.OrgID), oi)
 	if err != nil {
 		return nil, err
 	}
@@ -791,7 +752,7 @@ func (h handler) update(ctx context.Context, in *updateOfferingInput) (*offering
 		}
 		id, err := uuid.Parse(*f.v)
 		if err != nil {
-			return nil, fieldErr(f.loc, "must be a UUID (use clear to remove it)")
+			return nil, problem.Field(f.loc, "must be a UUID (use clear to remove it)")
 		}
 		*f.dst = &id
 	}
@@ -806,7 +767,7 @@ func (h handler) update(ctx context.Context, in *updateOfferingInput) (*offering
 		fs := flagsOf(*b.BlockedSponsorFlags)
 		p.BlockedSponsorFlags = &fs
 	}
-	v, err := h.svc.UpdateOffering(ctx, a, parseID(in.OfferingID), in.IfMatch, p)
+	v, err := h.svc.UpdateOffering(ctx, a, httpx.ParseID(in.OfferingID), in.IfMatch, p)
 	if err != nil {
 		return nil, err
 	}
@@ -823,7 +784,7 @@ func (h handler) submit(ctx context.Context, in *offeringActionInput) (*offering
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.SubmitOffering(ctx, a, parseID(in.OfferingID))
+	v, err := h.svc.SubmitOffering(ctx, a, httpx.ParseID(in.OfferingID))
 	if err != nil {
 		return nil, err
 	}
@@ -843,7 +804,7 @@ func (h handler) cancel(ctx context.Context, in *cancelOfferingInput) (*offering
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.CancelOffering(ctx, a, parseID(in.OfferingID), in.Body.CancelReason)
+	v, err := h.svc.CancelOffering(ctx, a, httpx.ParseID(in.OfferingID), in.Body.CancelReason)
 	if err != nil {
 		return nil, err
 	}
@@ -891,7 +852,7 @@ func (h handler) adminDecide(ctx context.Context, in *adminDecideInput) (*offeri
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.AdminDecideOffering(ctx, a, parseID(in.OfferingID),
+	v, err := h.svc.AdminDecideOffering(ctx, a, httpx.ParseID(in.OfferingID),
 		Decision{Approve: in.Body.Decision == "approved", Reason: in.Body.RejectionReason})
 	if err != nil {
 		return nil, err
@@ -915,7 +876,7 @@ func (h handler) uniQueue(ctx context.Context, in *uniQueueInput) (*offeringList
 	if err != nil {
 		return nil, err
 	}
-	p, err := h.svc.ListUniversityApprovals(ctx, a, parseID(in.OrgID), QueueQuery{Limit: in.Limit, After: after})
+	p, err := h.svc.ListUniversityApprovals(ctx, a, httpx.ParseID(in.OrgID), QueueQuery{Limit: in.Limit, After: after})
 	if err != nil {
 		return nil, err
 	}
@@ -937,7 +898,7 @@ func (h handler) uniDecide(ctx context.Context, in *universityDecisionInput) (*o
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.DecideUniversityApproval(ctx, a, parseID(in.OrgID), parseID(in.OfferingID),
+	v, err := h.svc.DecideUniversityApproval(ctx, a, httpx.ParseID(in.OrgID), httpx.ParseID(in.OfferingID),
 		Decision{Approve: in.Body.Decision == "approved", Reason: in.Body.Note})
 	if err != nil {
 		return nil, err
@@ -972,13 +933,13 @@ type CommercePolicyDTO struct {
 
 func policyDTO(p CommercePolicy) CommercePolicyDTO {
 	return CommercePolicyDTO{
-		PolicyID: p.ID.String(), Scope: string(p.Scope), ScopeID: idStr(p.ScopeID), ModelCode: string(p.ModelCode),
+		PolicyID: p.ID.String(), Scope: string(p.Scope), ScopeID: httpx.IDStr(p.ScopeID), ModelCode: string(p.ModelCode),
 		CollectionMethod: string(p.CollectionMethod), CommissionRateBP: p.CommissionRateBP,
 		CommissionMinAmount: p.CommissionMinAmount, CommissionMaxAmount: p.CommissionMaxAmount,
 		CommissionBasis: string(p.CommissionBasis), CommissionPayer: string(p.CommissionPayer),
 		CommissionVATRateBP: p.CommissionVATRateBP, InvoiceAutomation: string(p.InvoiceAutomation),
 		DisputeWindowDays: p.DisputeWindowDays, PayoutHoldDays: p.PayoutHoldDays, ValidFrom: p.ValidFrom.UTC(),
-		ValidTo: utcPtr(p.ValidTo), Notes: str(p.Notes), CreatedBy: p.CreatedBy.String(), CreatedAt: p.CreatedAt.UTC(),
+		ValidTo: db.UTCPtr(p.ValidTo), Notes: str(p.Notes), CreatedBy: p.CreatedBy.String(), CreatedAt: p.CreatedAt.UTC(),
 	}
 }
 
@@ -1002,7 +963,7 @@ func (h handler) listPolicies(ctx context.Context, in *listPoliciesInput) (*comm
 	if in.At != "" {
 		at, err := time.Parse(time.RFC3339Nano, in.At)
 		if err != nil {
-			return nil, fieldErr("query.at", "must be an RFC 3339 instant")
+			return nil, problem.Field("query.at", "must be an RFC 3339 instant")
 		}
 		at = at.UTC()
 		f.At = &at
@@ -1066,7 +1027,7 @@ func (h handler) createPolicy(ctx context.Context, in *createCommercePolicyInput
 		DisputeWindowDays: b.DisputeWindowDays, PayoutHoldDays: b.PayoutHoldDays, ValidFrom: b.ValidFrom, ValidTo: b.ValidTo,
 		Notes: b.Notes,
 	}
-	if pi.ScopeID, err = optID("body.scope_id", b.ScopeID); err != nil {
+	if pi.ScopeID, err = httpx.OptID("body.scope_id", b.ScopeID); err != nil {
 		return nil, err
 	}
 	p, err := h.svc.AdminCreatePolicy(ctx, a, pi, proofOf(b.Reauth))
@@ -1090,7 +1051,7 @@ func (h handler) closePolicy(ctx context.Context, in *closeCommercePolicyInput) 
 	if err != nil {
 		return nil, err
 	}
-	p, err := h.svc.AdminClosePolicy(ctx, a, parseID(in.PolicyID), in.Body.ValidTo, proofOf(in.Body.Reauth))
+	p, err := h.svc.AdminClosePolicy(ctx, a, httpx.ParseID(in.PolicyID), in.Body.ValidTo, proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err
 	}

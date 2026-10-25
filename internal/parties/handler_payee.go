@@ -11,35 +11,37 @@ import (
 	"koro/internal/authz"
 	"koro/internal/consent"
 	"koro/internal/identity"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // registerPayees adds the payee and bank account operations of BE-037
 // (04 §2.13) and the admin legal party operations of 06 H-60 and T-234.
 func registerPayees(api huma.API, h handler) {
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "listOrgPayees", Method: http.MethodGet, Path: "/orgs/{org_id}/payees",
 		Summary: "List the payees of an organization",
 		Description: "The legal parties paid on behalf of a club or university, with their approved bank account " +
 			"(the IBAN masked for everyone here).",
 	}, op.Meta{Action: string(authz.PartiesPayeeList), Surface: op.SurfaceOrg}, h.listPayees)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "getOrgPayee", Method: http.MethodGet, Path: "/orgs/{org_id}/payees/{payee_id}",
 		Summary:     "Get a payee of an organization",
 		Description: "The ETag is the If-Match value of adminUpdatePayee. A payee of another organization is 404.",
 	}, op.Meta{Action: string(authz.PartiesPayeeRead), Surface: op.SurfaceOrg}, h.getPayee)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "listPayeeBankAccounts", Method: http.MethodGet, Path: "/orgs/{org_id}/payees/{payee_id}/bank-accounts",
 		Summary: "List the bank accounts of a payee",
 		Description: "Newest first. Organization roles see the IBAN masked; finance and platform admins see it in full " +
 			"and the read is audited.",
 	}, op.Meta{Action: string(authz.PartiesBankAccountList), Surface: op.SurfaceOrg}, h.listAccounts)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "submitPayeeBankAccount", Method: http.MethodPost, Path: "/orgs/{org_id}/payees/{payee_id}/bank-accounts",
 		Summary: "Submit a bank account (IBAN) of a payee", DefaultStatus: http.StatusCreated,
 		Description: "Requires re-authentication (reauth). The account waits for four eyes (pending_verification: a " +
@@ -49,7 +51,7 @@ func registerPayees(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.PartiesBankAccountSubmit), Surface: op.SurfaceOrg, Reauth: true, RateLimit: op.RateReauth,
 		Idempotency: op.IdempotencyOptional}, h.submitAccount)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "adminCreatePayee", Method: http.MethodPost, Path: "/admin/payees",
 		Summary: "Create a payee", DefaultStatus: http.StatusCreated,
 		Description: "Relates a payee legal party (kind payee) to the club or university it is paid for (draft until " +
@@ -57,28 +59,28 @@ func registerPayees(api huma.API, h handler) {
 			"the same party for the organization 409 parties.payee_exists.",
 	}, op.Meta{Action: string(authz.PartiesPayeeManage), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.adminCreatePayee)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "adminUpdatePayee", Method: http.MethodPatch, Path: "/admin/payees/{payee_id}",
 		Summary: "Update a payee",
 		Description: "If-Match is required (428/412). status suspended stops payouts, closed ends the payee (kept for " +
 			"the financial records). Making an active payee the default moves the organization's default to it.",
 	}, op.Meta{Action: string(authz.PartiesPayeeManage), Surface: op.SurfaceAdmin}, h.adminUpdatePayee)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "adminVerifyPayee", Method: http.MethodPost, Path: "/admin/payees/{payee_id}/verify",
 		Summary: "Verify (activate) a payee",
 		Description: "draft, pending_verification or suspended → active. The legal party must be verified (422 " +
 			"parties.verification_incomplete); an active or closed payee is 409 parties.invalid_state.",
 	}, op.Meta{Action: string(authz.PartiesPayeeVerify), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.adminVerifyPayee)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "adminListBankAccounts", Method: http.MethodGet, Path: "/admin/bank-accounts",
 		Summary: "List payee bank accounts (four-eyes queue)",
 		Description: "Oldest first; without status the accounts waiting for an eye. Full IBANs: the read is audited. " +
 			"holder_matches_title compares the holder with the legal party's title (advisory; the first eye decides).",
 	}, op.Meta{Action: string(authz.PartiesBankAccountList), Surface: op.SurfaceAdmin}, h.adminListAccounts)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "adminSubmitBankAccount", Method: http.MethodPost, Path: "/admin/payees/{payee_id}/bank-accounts",
 		Summary: "Submit a bank account (IBAN) of a payee as an admin", DefaultStatus: http.StatusCreated,
 		Description: "Requires re-authentication. The submitting admin is the first eye: the account starts " +
@@ -86,7 +88,7 @@ func registerPayees(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.PartiesBankAccountSubmit), Surface: op.SurfaceAdmin, Reauth: true, RateLimit: op.RateReauth,
 		Idempotency: op.IdempotencyOptional}, h.adminSubmitAccount)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "adminVerifyBankAccount", Method: http.MethodPost, Path: "/admin/bank-accounts/{bank_account_id}/verify",
 		Summary: "Verify a bank account (first eye)",
 		Description: "The submitter never verifies (403 authz.four_eyes_violation). The evidence must hold (otherwise " +
@@ -94,7 +96,7 @@ func registerPayees(api huma.API, h handler) {
 			"pending_verification (409 parties.invalid_state); an evidence file that is not scanned clean is 409 files.not_clean.",
 	}, op.Meta{Action: string(authz.PartiesBankAccountVerify), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.adminVerifyAccount)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "adminApproveBankAccount", Method: http.MethodPost, Path: "/admin/bank-accounts/{bank_account_id}/approve",
 		Summary: "Approve a bank account (second eye)",
 		Description: "Requires re-authentication. Neither the submitter nor the first eye approves (403 " +
@@ -104,13 +106,13 @@ func registerPayees(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.PartiesBankAccountApprove), Surface: op.SurfaceAdmin, Reauth: true, RateLimit: op.RateReauth,
 		Idempotency: op.IdempotencyOptional}, h.adminApproveAccount)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "adminRejectBankAccount", Method: http.MethodPost, Path: "/admin/bank-accounts/{bank_account_id}/reject",
 		Summary:     "Reject a bank account",
 		Description: "Only an account waiting for an eye (409 parties.invalid_state otherwise); the submitter is notified.",
 	}, op.Meta{Action: string(authz.PartiesBankAccountReject), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.adminRejectAccount)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "adminRevokeBankAccount", Method: http.MethodPost, Path: "/admin/bank-accounts/{bank_account_id}/revoke",
 		Summary: "Revoke an approved bank account",
 		Description: "Requires re-authentication. No payout can be approved to a revoked account; payouts created " +
@@ -118,7 +120,7 @@ func registerPayees(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.PartiesBankAccountRevoke), Surface: op.SurfaceAdmin, Reauth: true, RateLimit: op.RateReauth,
 		Idempotency: op.IdempotencyOptional}, h.adminRevokeAccount)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "adminDownloadBankAccountEvidence", Method: http.MethodGet,
 		Path:    "/admin/bank-accounts/{bank_account_id}/evidence/download",
 		Summary: "Download the evidence of a bank account",
@@ -126,27 +128,27 @@ func registerPayees(api huma.API, h handler) {
 			"download audited. A file that is not scanned clean is 409 files.not_clean.",
 	}, op.Meta{Action: string(authz.PartiesBankAccountList), Surface: op.SurfaceAdmin}, h.adminDownloadEvidence)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "adminGetLegalParty", Method: http.MethodGet, Path: "/admin/legal-parties/{party_id}",
 		Summary:     "Get a legal party (finance and platform admins)",
 		Description: "With its documents and the ETag that adminUpdateLegalParty takes as If-Match. Tax numbers are not masked.",
 	}, op.Meta{Action: string(authz.PartiesLegalPartyRead), Surface: op.SurfaceAdmin}, h.adminGetParty)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "adminUploadLegalPartyDocument", Method: http.MethodPost, Path: "/admin/legal-parties/{party_id}/documents",
 		Summary: "Add a document to any legal party", DefaultStatus: http.StatusCreated,
 		Description: "file_id is a party_document upload of the caller. For parties no organization surface reaches " +
 			"(a foundation before its payee, Koro's own party). Another admin verifies it.",
 	}, op.Meta{Action: string(authz.PartiesDocumentUpload), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.adminUploadDocument)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "adminDownloadLegalPartyDocument", Method: http.MethodGet,
 		Path:        "/admin/legal-party-documents/{document_id}/download",
 		Summary:     "Download a legal party document (finance and platform admins)",
 		Description: "A URL valid for at most 5 minutes; every download is audited. A file that is not scanned clean is 409 files.not_clean.",
 	}, op.Meta{Action: string(authz.PartiesDocumentRead), Surface: op.SurfaceAdmin}, h.adminDownloadDocument)
 
-	reg(api, huma.Operation{
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "adminCorrectLegalPartyOwnership", Method: http.MethodPost,
 		Path:    "/admin/legal-parties/{party_id}/ownership-correction",
 		Summary: "Correct the ownership of a tax ID (platform admins)",
@@ -271,21 +273,14 @@ type BankAccountAdminDTO struct {
 	HolderMatchesTitle bool   `json:"holder_matches_title" doc:"Holder equals the title after Turkish-insensitive folding (advisory)"`
 }
 
-func idStr(p *uuid.UUID) string {
-	if p == nil {
-		return ""
-	}
-	return p.String()
-}
-
 func accountAdminDTO(v BankAccountView) BankAccountAdminDTO {
 	b := v.Account
 	v.FullIBAN = true
 	return BankAccountAdminDTO{
 		BankAccountDTO: accountDTO(v), OrgID: b.OrgID.String(), EvidenceFileID: b.EvidenceFileID.String(),
-		SubmittedBy: b.SubmittedBy.String(), SubmittedByAdmin: b.SubmittedByAdmin, VerifiedBy: idStr(b.VerifiedBy),
-		ApprovedBy: idStr(b.ApprovedBy), RejectedBy: idStr(b.RejectedBy), RevokedBy: idStr(b.RevokedBy),
-		SupersededByID: idStr(b.SupersededByID), PartyTitle: v.PartyTitle, HolderMatchesTitle: v.HolderMatchesTitle,
+		SubmittedBy: b.SubmittedBy.String(), SubmittedByAdmin: b.SubmittedByAdmin, VerifiedBy: httpx.IDStr(b.VerifiedBy),
+		ApprovedBy: httpx.IDStr(b.ApprovedBy), RejectedBy: httpx.IDStr(b.RejectedBy), RevokedBy: httpx.IDStr(b.RevokedBy),
+		SupersededByID: httpx.IDStr(b.SupersededByID), PartyTitle: v.PartyTitle, HolderMatchesTitle: v.HolderMatchesTitle,
 	}
 }
 
@@ -313,7 +308,7 @@ func (h handler) listPayees(ctx context.Context, in *orgPath) (*payeeListOutput,
 	if err != nil {
 		return nil, err
 	}
-	vs, err := h.svc.ListOrgPayees(ctx, a, parseID(in.OrgID))
+	vs, err := h.svc.ListOrgPayees(ctx, a, httpx.ParseID(in.OrgID))
 	if err != nil {
 		return nil, err
 	}
@@ -337,7 +332,7 @@ func (h handler) getPayee(ctx context.Context, in *orgPayeePath) (*payeeOutput, 
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.GetOrgPayee(ctx, a, parseID(in.OrgID), parseID(in.PayeeID))
+	v, err := h.svc.GetOrgPayee(ctx, a, httpx.ParseID(in.OrgID), httpx.ParseID(in.PayeeID))
 	if err != nil {
 		return nil, err
 	}
@@ -356,7 +351,7 @@ func (h handler) listAccounts(ctx context.Context, in *orgPayeePath) (*accountLi
 	if err != nil {
 		return nil, err
 	}
-	vs, err := h.svc.ListPayeeBankAccounts(ctx, a, parseID(in.OrgID), parseID(in.PayeeID))
+	vs, err := h.svc.ListPayeeBankAccounts(ctx, a, httpx.ParseID(in.OrgID), httpx.ParseID(in.PayeeID))
 	if err != nil {
 		return nil, err
 	}
@@ -381,7 +376,7 @@ type SubmitAccountBody struct {
 func (b SubmitAccountBody) input() (BankAccountInput, error) {
 	file, err := uuid.Parse(b.EvidenceFileID)
 	if err != nil {
-		return BankAccountInput{}, fieldErr("body.evidence_file_id", "must be a UUID")
+		return BankAccountInput{}, problem.Field("body.evidence_file_id", "must be a UUID")
 	}
 	return BankAccountInput{IBAN: b.IBAN, HolderName: b.HolderName, BankName: b.BankName, EvidenceFileID: file}, nil
 }
@@ -407,7 +402,7 @@ func (h handler) submitAccount(ctx context.Context, in *submitAccountInput) (*ac
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.SubmitPayeeBankAccount(ctx, a, parseID(in.OrgID), parseID(in.PayeeID), bi, proofOf(in.Body.Reauth))
+	v, err := h.svc.SubmitPayeeBankAccount(ctx, a, httpx.ParseID(in.OrgID), httpx.ParseID(in.PayeeID), bi, proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err
 	}
@@ -436,11 +431,11 @@ func (h handler) adminCreatePayee(ctx context.Context, in *adminCreatePayeeInput
 	b := in.Body
 	party, err := uuid.Parse(b.LegalPartyID)
 	if err != nil {
-		return nil, fieldErr("body.legal_party_id", "must be a UUID")
+		return nil, problem.Field("body.legal_party_id", "must be a UUID")
 	}
 	org, err := uuid.Parse(b.OrgID)
 	if err != nil {
-		return nil, fieldErr("body.org_id", "must be a UUID")
+		return nil, problem.Field("body.org_id", "must be a UUID")
 	}
 	v, err := h.svc.AdminCreatePayee(ctx, a, PayeeInput{
 		LegalPartyID: party, OrgID: org, IsDefault: b.IsDefault, PayoutMethod: PayoutMethod(b.PayoutMethod),
@@ -483,7 +478,7 @@ func (h handler) adminUpdatePayee(ctx context.Context, in *adminUpdatePayeeInput
 		c := InvoicingCapability(*b.InvoicingCapability)
 		pt.InvoicingCapability = &c
 	}
-	v, err := h.svc.AdminUpdatePayee(ctx, a, parseID(in.PayeeID), in.IfMatch, pt)
+	v, err := h.svc.AdminUpdatePayee(ctx, a, httpx.ParseID(in.PayeeID), in.IfMatch, pt)
 	if err != nil {
 		return nil, err
 	}
@@ -500,7 +495,7 @@ func (h handler) adminVerifyPayee(ctx context.Context, in *adminPayeeActionInput
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.AdminVerifyPayee(ctx, a, parseID(in.PayeeID))
+	v, err := h.svc.AdminVerifyPayee(ctx, a, httpx.ParseID(in.PayeeID))
 	if err != nil {
 		return nil, err
 	}
@@ -586,7 +581,7 @@ func (h handler) adminSubmitAccount(ctx context.Context, in *adminSubmitAccountI
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.AdminSubmitBankAccount(ctx, a, parseID(in.PayeeID), bi, proofOf(in.Body.Reauth))
+	v, err := h.svc.AdminSubmitBankAccount(ctx, a, httpx.ParseID(in.PayeeID), bi, proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err
 	}
@@ -614,7 +609,7 @@ func (h handler) adminVerifyAccount(ctx context.Context, in *adminVerifyAccountI
 		return nil, err
 	}
 	b := in.Body
-	v, err := h.svc.AdminVerifyBankAccount(ctx, a, parseID(in.BankAccountID), VerifyInput{
+	v, err := h.svc.AdminVerifyBankAccount(ctx, a, httpx.ParseID(in.BankAccountID), VerifyInput{
 		HolderMatchesParty: b.Checklist.HolderMatchesParty, EvidenceOK: b.Checklist.EvidenceOK, Note: b.Note,
 	})
 	if err != nil {
@@ -636,7 +631,7 @@ func (h handler) adminApproveAccount(ctx context.Context, in *adminApproveAccoun
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.AdminApproveBankAccount(ctx, a, parseID(in.BankAccountID), proofOf(in.Body.Reauth))
+	v, err := h.svc.AdminApproveBankAccount(ctx, a, httpx.ParseID(in.BankAccountID), proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err
 	}
@@ -656,7 +651,7 @@ func (h handler) adminRejectAccount(ctx context.Context, in *adminRejectAccountI
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.AdminRejectBankAccount(ctx, a, parseID(in.BankAccountID), in.Body.RejectionReason)
+	v, err := h.svc.AdminRejectBankAccount(ctx, a, httpx.ParseID(in.BankAccountID), in.Body.RejectionReason)
 	if err != nil {
 		return nil, err
 	}
@@ -677,7 +672,7 @@ func (h handler) adminRevokeAccount(ctx context.Context, in *adminRevokeAccountI
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.AdminRevokeBankAccount(ctx, a, parseID(in.BankAccountID), in.Body.RevokeReason, proofOf(in.Body.Reauth))
+	v, err := h.svc.AdminRevokeBankAccount(ctx, a, httpx.ParseID(in.BankAccountID), in.Body.RevokeReason, proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err
 	}
@@ -689,7 +684,7 @@ func (h handler) adminDownloadEvidence(ctx context.Context, in *AccountPath) (*d
 	if err != nil {
 		return nil, err
 	}
-	l, err := h.svc.AdminDownloadBankAccountEvidence(ctx, a, parseID(in.BankAccountID))
+	l, err := h.svc.AdminDownloadBankAccountEvidence(ctx, a, httpx.ParseID(in.BankAccountID))
 	if err != nil {
 		return nil, err
 	}
@@ -703,7 +698,7 @@ func (h handler) adminGetParty(ctx context.Context, in *AdminPartyPath) (*partyO
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.AdminGetParty(ctx, a, parseID(in.PartyID))
+	v, err := h.svc.AdminGetParty(ctx, a, httpx.ParseID(in.PartyID))
 	if err != nil {
 		return nil, err
 	}
@@ -726,9 +721,9 @@ func (h handler) adminUploadDocument(ctx context.Context, in *adminUploadDocumen
 	}
 	fileID, err := uuid.Parse(in.Body.FileID)
 	if err != nil {
-		return nil, fieldErr("body.file_id", "must be a UUID")
+		return nil, problem.Field("body.file_id", "must be a UUID")
 	}
-	d, err := h.svc.AdminUploadDocument(ctx, a, parseID(in.PartyID), DocumentInput{Kind: DocumentKind(in.Body.Kind), FileID: fileID})
+	d, err := h.svc.AdminUploadDocument(ctx, a, httpx.ParseID(in.PartyID), DocumentInput{Kind: DocumentKind(in.Body.Kind), FileID: fileID})
 	if err != nil {
 		return nil, err
 	}
@@ -744,7 +739,7 @@ func (h handler) adminDownloadDocument(ctx context.Context, in *adminDocumentPat
 	if err != nil {
 		return nil, err
 	}
-	l, err := h.svc.AdminDownloadDocument(ctx, a, parseID(in.DocumentID))
+	l, err := h.svc.AdminDownloadDocument(ctx, a, httpx.ParseID(in.DocumentID))
 	if err != nil {
 		return nil, err
 	}
@@ -767,9 +762,9 @@ func (h handler) adminCorrectOwnership(ctx context.Context, in *adminCorrectOwne
 	}
 	file, err := uuid.Parse(in.Body.EvidenceFileID)
 	if err != nil {
-		return nil, fieldErr("body.evidence_file_id", "must be a UUID")
+		return nil, problem.Field("body.evidence_file_id", "must be a UUID")
 	}
-	v, err := h.svc.AdminCorrectOwnership(ctx, a, parseID(in.PartyID), OwnershipCorrection{Reason: in.Body.Reason, EvidenceFileID: file})
+	v, err := h.svc.AdminCorrectOwnership(ctx, a, httpx.ParseID(in.PartyID), OwnershipCorrection{Reason: in.Body.Reason, EvidenceFileID: file})
 	if err != nil {
 		return nil, err
 	}

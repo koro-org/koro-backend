@@ -13,6 +13,7 @@ import (
 	"koro/internal/notify"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // report files a report of a published post by actor.
@@ -60,7 +61,7 @@ func TestReport_DuplicateOpen_409(t *testing.T) {
 	if !first.Created || again.Created || again.ID != first.ID {
 		t.Fatalf("first %+v, again %+v", first, again)
 	}
-	if n := len(e.audit.of(authz.FeedReportCreate)); n != 1 {
+	if n := len(e.audit.Of(authz.FeedReportCreate)); n != 1 {
 		t.Fatalf("audit records = %d", n)
 	}
 	if n := len(slices.DeleteFunc(e.out.Topics(), func(s string) bool { return s != domainevent.TopicContentReportCreated })); n != 1 {
@@ -114,7 +115,7 @@ func TestReport_TargetRules(t *testing.T) {
 	wantNotFound(t, err)
 	_, err = e.svc.CreateReport(ctx, persona(t, "club_admin"), feed.ReportInput{TargetType: feed.TargetPost, TargetID: draft,
 		Reason: feed.ReasonSpam})
-	wantCode(t, err, 409, "feed.invalid_state")
+	problemtest.WantProblem(t, err, 409, "feed.invalid_state")
 	_, err = e.svc.CreateReport(ctx, persona(t, "student"), feed.ReportInput{TargetType: feed.TargetOrg, TargetID: uuid.NewV7(),
 		Reason: feed.ReasonSpam})
 	wantNotFound(t, err)
@@ -175,7 +176,7 @@ func TestReport_ReporterIdentityOnlyInAdmin(t *testing.T) {
 		t.Fatalf("management view leaks the reporter: %s", b)
 	}
 	// The audit record of a report has no org scope (never in the org's trail).
-	for _, ev := range e.audit.of(authz.FeedReportCreate) {
+	for _, ev := range e.audit.Of(authz.FeedReportCreate) {
 		if ev.OrgID != nil {
 			t.Fatalf("report audit with org scope: %+v", ev)
 		}
@@ -223,7 +224,7 @@ func TestReport_AutoHideAfterThreshold(t *testing.T) {
 	if !moderated {
 		t.Fatal("no post.moderated for the automatic hide")
 	}
-	if got := e.audit.of("feed.post.auto_hide"); len(got) != 1 || got[0].SystemJob == "" || got[0].OrgID != nil {
+	if got := e.audit.Of("feed.post.auto_hide"); len(got) != 1 || got[0].SystemJob == "" || got[0].OrgID != nil {
 		t.Fatalf("auto-hide audit = %+v", got)
 	}
 	// The moderator restores it.
@@ -249,7 +250,7 @@ func TestReport_ResolveRules(t *testing.T) {
 		t.Fatalf("in_review = %+v, %v", v.Report, err)
 	}
 	_, err = e.svc.ResolveReport(ctx, mod, r.ID, feed.ResolveInput{Status: feed.ReportActioned})
-	wantCode(t, err, 409, "feed.moderation_action_required")
+	problemtest.WantProblem(t, err, 409, "feed.moderation_action_required")
 	if _, err := e.svc.ModeratePost(ctx, mod, post, feed.ModerationInput{Action: feed.ModHide, ReasonCode: "misleading_job",
 		ReportID: &r.ID}); err != nil {
 		t.Fatal(err)
@@ -262,11 +263,11 @@ func TestReport_ResolveRules(t *testing.T) {
 		t.Fatalf("repeated outcome: %v", err)
 	}
 	_, err = e.svc.ResolveReport(ctx, mod, r.ID, feed.ResolveInput{Status: feed.ReportDismissed})
-	wantCode(t, err, 409, "feed.invalid_state")
+	problemtest.WantProblem(t, err, 409, "feed.invalid_state")
 	// A decision citing a resolved report is 409; citing another target's 422.
 	_, err = e.svc.ModeratePost(ctx, mod, post, feed.ModerationInput{Action: feed.ModRestore, ReasonCode: "appeal",
 		ReportID: &r.ID})
-	wantCode(t, err, 409, "feed.invalid_state")
+	problemtest.WantProblem(t, err, 409, "feed.invalid_state")
 	other := e.published(t, "club_admin", "club_a", textInput("Diğer")).Post.ID
 	r2 := e.report(t, "club_member", other)
 	_, err = e.svc.ModeratePost(ctx, mod, post, feed.ModerationInput{Action: feed.ModRestore, ReasonCode: "appeal",
@@ -332,12 +333,12 @@ func TestModeratePost_AppendOnlyAction(t *testing.T) {
 	if err != nil || first != hide.Action {
 		t.Fatalf("first action = %+v, %v (was %+v)", first, err, hide.Action)
 	}
-	for _, ev := range e.audit.of(authz.FeedPostModerate) {
+	for _, ev := range e.audit.Of(authz.FeedPostModerate) {
 		if ev.OrgID != nil || ev.Metadata["org_id"] != orgID("club_a").String() {
 			t.Fatalf("moderation audit = %+v", ev)
 		}
 	}
-	if n := len(e.audit.of(authz.FeedPostModerate)); n != 3 {
+	if n := len(e.audit.Of(authz.FeedPostModerate)); n != 3 {
 		t.Fatalf("audit records = %d", n)
 	}
 	manage, _ := e.svc.ListOrgPosts(ctx, persona(t, "club_admin"), orgID("club_a"), feed.ManageQuery{})
@@ -351,10 +352,10 @@ func TestModeratePost_AppendOnlyAction(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.ModeratePost(ctx, persona(t, "moderator"), own, feed.ModerationInput{Action: feed.ModRestore, ReasonCode: "appeal"})
-	wantCode(t, err, 409, "feed.invalid_state")
+	problemtest.WantProblem(t, err, 409, "feed.invalid_state")
 	// Outside the state machine: 409; outside the admin surface: 403.
 	_, err = e.svc.ModeratePost(ctx, persona(t, "moderator"), post, feed.ModerationInput{Action: feed.ModApprove, ReasonCode: "ok"})
-	wantCode(t, err, 409, "feed.invalid_state")
+	problemtest.WantProblem(t, err, 409, "feed.invalid_state")
 	_, err = e.svc.ModeratePost(ctx, persona(t, "club_admin"), post, feed.ModerationInput{Action: feed.ModHide, ReasonCode: "spam"})
 	wantForbidden(t, err)
 	_, err = e.svc.ModeratePost(ctx, persona(t, "moderator"), post, feed.ModerationInput{Action: feed.ModHide, ReasonCode: "Spam!"})
@@ -436,9 +437,9 @@ func TestModerateOrg_RestrictBlocksPosting(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.CreatePost(ctx, admin, orgID("club_a"), textInput("Askıda"))
-	wantCode(t, err, 403, "feed.posting_suspended")
+	problemtest.WantProblem(t, err, 403, "feed.posting_suspended")
 	_, err = e.svc.PublishPost(ctx, admin, draft.Post.ID)
-	wantCode(t, err, 403, "feed.posting_suspended")
+	problemtest.WantProblem(t, err, 403, "feed.posting_suspended")
 	// Only a platform admin changes a suspended org; a warning is anyone's.
 	later := e.clk.Now().Add(24 * time.Hour)
 	_, err = e.svc.ModerateOrg(ctx, persona(t, "moderator"), orgID("club_a"), feed.ModerationInput{
@@ -476,7 +477,7 @@ func TestModerateOrg_RestrictBlocksPosting(t *testing.T) {
 	_, err = e.svc.ModerateOrg(ctx, member, orgID("company_a"), feed.ModerationInput{Action: feed.ModWarnOrg, ReasonCode: "x_y"})
 	wantForbidden(t, err)
 	_, err = e.svc.ModerateOrg(ctx, pa, orgID("platform_org"), feed.ModerationInput{Action: feed.ModWarnOrg, ReasonCode: "x_y"})
-	wantCode(t, err, 409, "feed.invalid_state")
+	problemtest.WantProblem(t, err, 409, "feed.invalid_state")
 	_, err = e.svc.ModerateOrg(ctx, pa, uuid.NewV7(), feed.ModerationInput{Action: feed.ModWarnOrg, ReasonCode: "x_y"})
 	wantNotFound(t, err)
 }
@@ -543,7 +544,7 @@ func TestReviewQueue_ApprovePublishes(t *testing.T) {
 	}
 	// A rejected post is not restored (never published; a new post is a new unit).
 	_, err = e.svc.ModeratePost(ctx, persona(t, "moderator"), tp.Post.ID, feed.ModerationInput{Action: feed.ModRestore, ReasonCode: "appeal"})
-	wantCode(t, err, 409, "feed.invalid_state")
+	problemtest.WantProblem(t, err, 409, "feed.invalid_state")
 }
 
 // TestAutoTrust_AfterThreshold: the third approved post of a new org makes
@@ -569,7 +570,7 @@ func TestAutoTrust_AfterThreshold(t *testing.T) {
 			t.Fatalf("after approval %d: %+v", i+1, st)
 		}
 	}
-	got := e.audit.of(authz.FeedOrgSettingsAutoTrust)
+	got := e.audit.Of(authz.FeedOrgSettingsAutoTrust)
 	if len(got) != 1 || got[0].SystemJob != "feed.auto_trust" || got[0].ActorUserID != nil {
 		t.Fatalf("auto_trust audit = %+v", got)
 	}

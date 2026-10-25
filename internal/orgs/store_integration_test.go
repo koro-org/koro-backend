@@ -10,6 +10,7 @@ import (
 	"testing"
 	"uuid"
 
+	"koro/internal/audit/audittest"
 	"koro/internal/orgs"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
@@ -51,7 +52,7 @@ func TestOrgAdminCreate_JoinsCallerTx_Rollback(t *testing.T) {
 	clk := clock.NewFake(t0)
 	store := orgs.NewGormStore(d.ORM)
 	mod, err := orgs.New(orgs.Deps{
-		Store: store, Tx: d.Tx, Outbox: outbox.NewMem(clk), Audit: &auditLog{}, Clock: clk, Log: obs.Discard(),
+		Store: store, Tx: d.Tx, Outbox: outbox.NewMem(clk), Audit: &audittest.Recorder{}, Clock: clk, Log: obs.Discard(),
 		Idempotency: idempotency.New(idempotency.Deps{Tx: d.Tx, Store: idempotency.NewGormStore(d.ORM), Clock: clk, Log: obs.Discard()}),
 	})
 	if err != nil {

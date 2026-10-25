@@ -10,6 +10,7 @@ import (
 	"koro/internal/feed"
 	"koro/internal/outreach"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // BE-035: the feed's side of the dispatch — "notify on publish" on a
@@ -82,7 +83,7 @@ func TestTargetedPost_NotifyOnPublish_SchedulesDispatch(t *testing.T) {
 
 	// A commercial dispatch never goes in-app (notify: no opt-out there).
 	_, err = e.svc.CreateTargetedPost(ctx, cm, orgID("company_a"), withDispatch(uniTargeted("Staj 2"), outreach.ChannelInApp))
-	wantCode(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 
 	// A club's notice to its own members: informational, no unit.
 	e.audience.add(3, "club:"+orgID("club_a").String())

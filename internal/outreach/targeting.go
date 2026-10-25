@@ -140,7 +140,7 @@ func (s *service) Compile(ctx context.Context, a authz.Actor, spec SegmentSpec) 
 		return Compiled{}, ErrNotFound
 	}
 	if (spec.SegmentID == nil) == (spec.Definition == nil) {
-		return Compiled{}, fieldErr("body.audience", "exactly one of segment_id and definition is required")
+		return Compiled{}, problem.Field("body.audience", "exactly one of segment_id and definition is required")
 	}
 	sc := ScopeOf(a, spec.OrgID)
 	if sc == ScopeNone { // nothing of the org is read for an actor without a targeting role there

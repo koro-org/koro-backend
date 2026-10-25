@@ -91,7 +91,7 @@ func (s *service) DecideUniversityApproval(ctx context.Context, a authz.Actor, o
 		return OfferingView{}, err
 	}
 	// The gate: the university's surface, before the offering is read.
-	if err := authz.Can(ctx, a, authz.CatalogOfferingUniversityDecide, orgResource(uni)); err != nil {
+	if err := authz.Can(ctx, a, authz.CatalogOfferingUniversityDecide, authz.OrgResource(uni.ID, string(uni.Kind), string(uni.Status))); err != nil {
 		return OfferingView{}, err
 	}
 	why, err := cleanReason("body.note", d.Reason, false)

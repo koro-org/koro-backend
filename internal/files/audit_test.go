@@ -11,6 +11,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/files"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // TestFiles_WritesAudit: every write of a file row is in the audit log
@@ -30,7 +31,7 @@ func TestFiles_WritesAudit(t *testing.T) {
 	}
 	bad := e.upload(t, "student", cvRequest(len(png)), png) // PNG declared as PDF
 	_, err := e.svc.CompleteUpload(ctx, student, bad.FileID, digest(png))
-	wantErr(t, err, files.ErrContentMismatch)
+	problemtest.WantErr(t, err, files.ErrContentMismatch)
 	owner := files.Owner{Module: "students", EntityID: uuid.NewV7(), Purpose: files.PurposeCV}
 	if err := e.svc.Attach(ctx, student, up.FileID, owner); err != nil {
 		t.Fatal(err)

@@ -57,13 +57,6 @@ func deref(p *string) string {
 	return *p
 }
 
-func nullable(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
 func toRecord(r eventRow) Record {
 	out := Record{
 		ID: r.ID, Seq: r.Seq, OccurredAt: r.OccurredAt.UTC(), ActorKind: r.ActorKind, ActorUserID: r.ActorUserID,
@@ -125,9 +118,9 @@ func (s gormStore) Insert(ctx context.Context, r Record) error {
 	err := db.Conn(ctx, s.orm).Exec(`INSERT INTO audit_events (id, occurred_at, actor_kind, actor_user_id, actor_org_id,
 		system_job, action, outcome, org_id, resource_type, resource_id, reason, ip, user_agent, request_id, metadata)
 		VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST( ? AS inet), ?, ?, CAST( ? AS jsonb))`,
-		r.ID, r.OccurredAt, r.ActorKind, r.ActorUserID, r.ActorOrgID, nullable(r.SystemJob), r.Action, string(r.Outcome),
-		r.OrgID, nullable(r.ResourceType), r.ResourceID, nullable(r.Reason), nullable(r.IP), nullable(r.UserAgent),
-		nullable(r.RequestID), string(meta)).Error
+		r.ID, r.OccurredAt, r.ActorKind, r.ActorUserID, r.ActorOrgID, db.Nullable(r.SystemJob), r.Action, string(r.Outcome),
+		r.OrgID, db.Nullable(r.ResourceType), r.ResourceID, db.Nullable(r.Reason), db.Nullable(r.IP), db.Nullable(r.UserAgent),
+		db.Nullable(r.RequestID), string(meta)).Error
 	if err != nil {
 		return fmt.Errorf("audit: insert: %w", err)
 	}

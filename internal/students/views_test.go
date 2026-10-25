@@ -145,7 +145,7 @@ func TestGetMemberCard_SensitiveClubAudited(t *testing.T) {
 	if _, err := e.svc.GetMemberCard(ctx, e.clubAdmin(t, e.clubPlain), e.clubPlain, plainID); err != nil {
 		t.Fatal(err)
 	}
-	if got := e.audit.of(string(authz.StudentsProfileReadMemberCard)); len(got) != 0 {
+	if got := e.audit.Of(authz.StudentsProfileReadMemberCard); len(got) != 0 {
 		t.Fatalf("plain club card audited: %+v", got)
 	}
 	admin := e.clubAdmin(t, e.clubSens)
@@ -154,7 +154,7 @@ func TestGetMemberCard_SensitiveClubAudited(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got := e.audit.of(string(authz.StudentsProfileReadMemberCard))
+	got := e.audit.Of(authz.StudentsProfileReadMemberCard)
 	if len(got) != 2 || got[0].Metadata[audit.MetaSensitive] != true || got[0].Metadata[audit.MetaSubjectUserID] != member.UserID.String() ||
 		*got[0].OrgID != e.clubSens || *got[0].ActorUserID != admin.UserID {
 		t.Fatalf("sensitive card audit = %+v", got)
@@ -182,7 +182,7 @@ func TestAdminGetStudentProfile_Audited(t *testing.T) {
 			t.Fatalf("break-glass read = %+v, %v", v.ShowBirthDate, err)
 		}
 	}
-	got := e.audit.of(string(authz.StudentsProfileReadAdmin))
+	got := e.audit.Of(authz.StudentsProfileReadAdmin)
 	if len(got) != 2 {
 		t.Fatalf("admin reads audited = %d, want 2", len(got))
 	}
@@ -201,7 +201,7 @@ func TestAdminGetStudentProfile_Audited(t *testing.T) {
 	if _, err := e.svc.AdminGetStudentProfile(ctx, sup, noProfile.UserID, students.AdminAccess{Reason: reason}); !errors.Is(err, students.ErrNotFound) {
 		t.Fatalf("no profile: %v, want 404", err)
 	}
-	if len(e.audit.of(string(authz.StudentsProfileReadAdmin))) != 2 {
+	if len(e.audit.Of(authz.StudentsProfileReadAdmin)) != 2 {
 		t.Fatal("refused reads were audited")
 	}
 }
@@ -237,7 +237,7 @@ func TestAdminGetStudentProfile_DPORequiresOpenRequest(t *testing.T) {
 	if err != nil || !v.ShowBirthDate {
 		t.Fatalf("dpo with the open request = %+v, %v", v.ShowBirthDate, err)
 	}
-	got := e.audit.of(string(authz.StudentsProfileReadAdmin))
+	got := e.audit.Of(authz.StudentsProfileReadAdmin)
 	if len(got) != 1 || got[0].Metadata["dsr_id"] != dsr.String() || got[0].Metadata[audit.MetaBreakGlass] != nil {
 		t.Fatalf("dpo audit = %+v", got)
 	}

@@ -13,6 +13,7 @@ import (
 	"koro/internal/authz/authztest"
 	"koro/internal/files"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/problem/problemtest"
 	"koro/internal/platform/storage"
 )
 
@@ -57,7 +58,7 @@ func TestCreateUpload_PurposeAllowList(t *testing.T) {
 			e := newEnv(t)
 			up, err := e.svc.CreateUpload(t.Context(), actor(t, tt.persona), tt.req)
 			if tt.want != nil {
-				wantErr(t, err, tt.want)
+				problemtest.WantErr(t, err, tt.want)
 				if e.mem.Len() != 0 {
 					t.Fatal("a rejected upload left an object behind")
 				}
@@ -109,7 +110,7 @@ func TestCreateUpload_SizeLimitPerPurpose(t *testing.T) {
 				t.Fatalf("CreateUpload: %v", err)
 			}
 			if tt.want != nil {
-				wantErr(t, err, tt.want)
+				problemtest.WantErr(t, err, tt.want)
 			}
 		})
 	}
@@ -155,13 +156,13 @@ func TestCompleteUpload_ActivatesAndQueuesScan(t *testing.T) {
 		t.Fatalf("repeated CompleteUpload: %v", err)
 	}
 	_, err = e.svc.CompleteUpload(t.Context(), actor(t, "student"), up.FileID, digest(png))
-	wantErr(t, err, files.ErrNotUploading)
+	problemtest.WantErr(t, err, files.ErrNotUploading)
 	if len(e.out.Events()) != 1 {
 		t.Fatal("a repeated completion queued the scan again")
 	}
 	// Only the uploader sees the file (03 §3.6).
 	_, err = e.svc.CompleteUpload(t.Context(), actor(t, "student_b"), up.FileID, digest(pdf))
-	wantErr(t, err, authz.ErrNotFound)
+	problemtest.WantErr(t, err, authz.ErrNotFound)
 }
 
 func TestCompleteUpload_MagicByteMismatch_422(t *testing.T) {
@@ -176,7 +177,7 @@ func TestCompleteUpload_MagicByteMismatch_422(t *testing.T) {
 			e := newEnv(t)
 			up := e.upload(t, "student", cvRequest(len(content)), content)
 			_, err := e.svc.CompleteUpload(t.Context(), actor(t, "student"), up.FileID, digest(content))
-			wantErr(t, err, files.ErrContentMismatch)
+			problemtest.WantErr(t, err, files.ErrContentMismatch)
 			if pe := problemStatus(err); pe != 422 {
 				t.Fatalf("status = %d, want 422", pe)
 			}
@@ -191,7 +192,7 @@ func TestCompleteUpload_MagicByteMismatch_422(t *testing.T) {
 	req := files.UploadRequest{Purpose: files.PurposeAvatar, Filename: "a.jpg", ContentType: files.MIMEJPEG, SizeBytes: int64(len(png))}
 	up := e.upload(t, "student", req, png)
 	_, err := e.svc.CompleteUpload(t.Context(), actor(t, "student"), up.FileID, digest(png))
-	wantErr(t, err, files.ErrContentMismatch)
+	problemtest.WantErr(t, err, files.ErrContentMismatch)
 }
 
 func TestCompleteUpload_ChecksumMismatch_422(t *testing.T) {
@@ -199,7 +200,7 @@ func TestCompleteUpload_ChecksumMismatch_422(t *testing.T) {
 	e := newEnv(t)
 	up := e.upload(t, "student", cvRequest(len(pdf)), pdf)
 	_, err := e.svc.CompleteUpload(t.Context(), actor(t, "student"), up.FileID, digest([]byte("something else")))
-	wantErr(t, err, files.ErrChecksumMismatch)
+	problemtest.WantErr(t, err, files.ErrChecksumMismatch)
 	if problemStatus(err) != 422 {
 		t.Fatalf("status = %d, want 422", problemStatus(err))
 	}
@@ -207,7 +208,7 @@ func TestCompleteUpload_ChecksumMismatch_422(t *testing.T) {
 		t.Fatalf("status %s with %d objects; want uploading and the object deleted", f.Status, e.mem.Len())
 	}
 	_, err = e.svc.CompleteUpload(t.Context(), actor(t, "student"), up.FileID, []byte{1, 2, 3})
-	wantErr(t, err, files.ErrChecksumMismatch)
+	problemtest.WantErr(t, err, files.ErrChecksumMismatch)
 }
 
 func TestCompleteUpload_SizeAndObjectChecks(t *testing.T) {
@@ -217,18 +218,18 @@ func TestCompleteUpload_SizeAndObjectChecks(t *testing.T) {
 
 	up := e.upload(t, "student", cvRequest(len(pdf)), nil)
 	_, err := e.svc.CompleteUpload(t.Context(), a, up.FileID, digest(pdf))
-	wantErr(t, err, files.ErrObjectMissing)
+	problemtest.WantErr(t, err, files.ErrObjectMissing)
 
 	bigger := append(bytes.Clone(pdf), ' ')
 	up = e.upload(t, "student", cvRequest(len(pdf)), bigger)
 	_, err = e.svc.CompleteUpload(t.Context(), a, up.FileID, digest(bigger))
-	wantErr(t, err, files.ErrSizeMismatch)
+	problemtest.WantErr(t, err, files.ErrSizeMismatch)
 
 	// The object exceeds the purpose limit whatever was declared.
 	huge := append(bytes.Clone(pdf), make([]byte, 10*files.MB)...)
 	up = e.upload(t, "student", cvRequest(len(pdf)), huge)
 	_, err = e.svc.CompleteUpload(t.Context(), a, up.FileID, digest(huge))
-	wantErr(t, err, files.ErrTooLarge)
+	problemtest.WantErr(t, err, files.ErrTooLarge)
 	if e.mem.Len() != 0 {
 		t.Fatalf("%d rejected objects left in quarantine", e.mem.Len())
 	}
@@ -296,9 +297,9 @@ func TestScan_VerdictsAndErrors(t *testing.T) {
 			t.Fatalf("infected: row lookup %v with %d objects", err, e.mem.Len())
 		}
 		_, err := e.svc.PresignGet(t.Context(), id, 0)
-		wantErr(t, err, files.ErrNotFound)
+		problemtest.WantErr(t, err, files.ErrNotFound)
 		err = e.svc.Attach(t.Context(), actor(t, "student"), id, files.Owner{Module: "students", EntityID: uuid.NewV7(), Purpose: files.PurposeCV})
-		wantErr(t, err, files.ErrNotFound)
+		problemtest.WantErr(t, err, files.ErrNotFound)
 	})
 	t.Run("scanner error keeps the file pending", func(t *testing.T) {
 		t.Parallel()
@@ -335,13 +336,13 @@ func TestPresignGet_PendingScan_Rejected(t *testing.T) {
 	e := newEnv(t)
 	id := e.active(t, cvRequest(len(pdf)), pdf)
 	_, err := e.svc.PresignGet(t.Context(), id, time.Minute)
-	wantErr(t, err, files.ErrNotClean)
+	problemtest.WantErr(t, err, files.ErrNotClean)
 	if problemStatus(err) != 409 {
 		t.Fatalf("status = %d, want 409 files.not_clean (04 §1.14)", problemStatus(err))
 	}
 	up := e.upload(t, "student", cvRequest(len(pdf)), pdf)
 	_, err = e.svc.PresignGet(t.Context(), up.FileID, time.Minute)
-	wantErr(t, err, files.ErrNotActive)
+	problemtest.WantErr(t, err, files.ErrNotActive)
 }
 
 func TestPresignGet_SkippedAllowedWhenScanNotRequired(t *testing.T) {
@@ -389,7 +390,7 @@ func TestPresignGet_SkippedAllowedWhenScanNotRequired(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = strict.svc.PresignGet(t.Context(), id, time.Minute)
-	wantErr(t, err, files.ErrNotClean)
+	problemtest.WantErr(t, err, files.ErrNotClean)
 }
 
 func TestNew_ScanRequiredNeedsRealScanner(t *testing.T) {
@@ -409,7 +410,7 @@ func TestDeleteMyFile_Attached_409(t *testing.T) {
 		t.Fatalf("Attach: %v", err)
 	}
 	err := e.svc.DeleteOwn(t.Context(), a, id)
-	wantErr(t, err, files.ErrAttached)
+	problemtest.WantErr(t, err, files.ErrAttached)
 	if problemStatus(err) != 409 {
 		t.Fatalf("status = %d, want 409", problemStatus(err))
 	}
@@ -419,11 +420,11 @@ func TestDeleteMyFile_Attached_409(t *testing.T) {
 
 	// An unattached file: only its uploader deletes it, objects included.
 	other := e.active(t, cvRequest(len(pdf)), pdf)
-	wantErr(t, e.svc.DeleteOwn(t.Context(), actor(t, "student_b"), other), authz.ErrNotFound)
+	problemtest.WantErr(t, e.svc.DeleteOwn(t.Context(), actor(t, "student_b"), other), authz.ErrNotFound)
 	if err := e.svc.DeleteOwn(t.Context(), a, other); err != nil {
 		t.Fatalf("DeleteOwn: %v", err)
 	}
-	wantErr(t, e.svc.DeleteOwn(t.Context(), a, other), files.ErrNotFound)
+	problemtest.WantErr(t, e.svc.DeleteOwn(t.Context(), a, other), files.ErrNotFound)
 	if e.mem.Len() != 1 {
 		t.Fatalf("%d objects left, want only the attached one", e.mem.Len())
 	}
@@ -434,12 +435,12 @@ func TestAttach_Rules(t *testing.T) {
 	e := newEnv(t)
 	owner := files.Owner{Module: "students", EntityID: uuid.NewV7(), Purpose: files.PurposeCV}
 	up := e.upload(t, "student", cvRequest(len(pdf)), pdf)
-	wantErr(t, e.svc.Attach(t.Context(), actor(t, "student"), up.FileID, owner), files.ErrNotActive)
+	problemtest.WantErr(t, e.svc.Attach(t.Context(), actor(t, "student"), up.FileID, owner), files.ErrNotActive)
 
 	id := e.active(t, cvRequest(len(pdf)), pdf)
 	wrong := owner
 	wrong.Purpose = files.PurposeAvatar
-	wantErr(t, e.svc.Attach(t.Context(), actor(t, "student"), id, wrong), files.ErrPurposeMismatch)
+	problemtest.WantErr(t, e.svc.Attach(t.Context(), actor(t, "student"), id, wrong), files.ErrPurposeMismatch)
 	if err := e.svc.Attach(t.Context(), actor(t, "student"), id, owner); err != nil {
 		t.Fatal(err)
 	}
@@ -448,14 +449,14 @@ func TestAttach_Rules(t *testing.T) {
 	}
 	another := owner
 	another.EntityID = uuid.NewV7()
-	wantErr(t, e.svc.Attach(t.Context(), actor(t, "student"), id, another), files.ErrAlreadyAttached)
+	problemtest.WantErr(t, e.svc.Attach(t.Context(), actor(t, "student"), id, another), files.ErrAlreadyAttached)
 	if m, _ := e.svc.Get(t.Context(), id); m.AttachedModule != "students" || m.AttachedEntityID != owner.EntityID {
 		t.Fatalf("meta = %+v", m)
 	}
 	if err := e.svc.Attach(t.Context(), actor(t, "student"), id, files.Owner{Module: "Bad Module", EntityID: owner.EntityID, Purpose: files.PurposeCV}); err == nil {
 		t.Fatal("invalid owner accepted")
 	}
-	wantErr(t, e.svc.Attach(t.Context(), actor(t, "student"), uuid.NewV7(), owner), files.ErrNotFound)
+	problemtest.WantErr(t, e.svc.Attach(t.Context(), actor(t, "student"), uuid.NewV7(), owner), files.ErrNotFound)
 }
 
 func TestDelete_RemovesObjectsAndRetriesFailures(t *testing.T) {
@@ -496,7 +497,7 @@ func TestDelete_RemovesObjectsAndRetriesFailures(t *testing.T) {
 	// A file another table still references is not deleted.
 	ref := e.active(t, cvRequest(len(pdf)), pdf)
 	files.Reference(e.store, ref)
-	wantErr(t, e.svc.Delete(t.Context(), actor(t, "student"), ref), files.ErrReferenced)
+	problemtest.WantErr(t, e.svc.Delete(t.Context(), actor(t, "student"), ref), files.ErrReferenced)
 	if e.mem.Len() != 1 {
 		t.Fatal("the referenced file's object was deleted")
 	}
@@ -521,9 +522,9 @@ func TestPutGenerated_StoresCleanFileInMainBucket(t *testing.T) {
 		t.Fatalf("PresignGet(generated): %v", err)
 	}
 	_, err = e.svc.PutGenerated(t.Context(), files.GeneratedFile{Purpose: files.PurposeEventExport, Name: "x", ContentType: "text/html", Content: csv})
-	wantErr(t, err, files.ErrInvalidUpload)
+	problemtest.WantErr(t, err, files.ErrInvalidUpload)
 	_, err = e.svc.PutGenerated(t.Context(), files.GeneratedFile{Purpose: files.PurposeAvatar, Name: "x", ContentType: files.MIMEPNG, Content: make([]byte, 5*files.MB+1)})
-	wantErr(t, err, files.ErrTooLarge)
+	problemtest.WantErr(t, err, files.ErrTooLarge)
 }
 
 func TestOrphanCleanup_DeletesOldUnattachedFiles(t *testing.T) {
@@ -587,7 +588,7 @@ func TestRead_ServableOnly(t *testing.T) {
 	e := newEnv(t)
 	pending := e.active(t, cvRequest(len(pdf)), pdf)
 	_, _, err := e.svc.Read(t.Context(), pending, files.MaxUploadBytes)
-	wantErr(t, err, files.ErrNotClean)
+	problemtest.WantErr(t, err, files.ErrNotClean)
 	if err := e.scan(t, pending); err != nil {
 		t.Fatal(err)
 	}
@@ -597,7 +598,7 @@ func TestRead_ServableOnly(t *testing.T) {
 		t.Fatalf("Read = %d bytes, %+v, %v", len(b), meta, err)
 	}
 	_, _, err = e.svc.Read(t.Context(), pending, int64(len(b)-1))
-	wantErr(t, err, files.ErrTooLarge)
+	problemtest.WantErr(t, err, files.ErrTooLarge)
 	_, _, err = e.svc.Read(t.Context(), uuid.NewV7(), files.MaxUploadBytes)
-	wantErr(t, err, files.ErrNotFound)
+	problemtest.WantErr(t, err, files.ErrNotFound)
 }

@@ -14,6 +14,7 @@ import (
 	"koro/internal/identity"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 	"koro/internal/platform/token"
 )
 
@@ -155,7 +156,7 @@ const newPassword = "Yeni-Ve-Uzun-Parola-4821"
 // precedence in httpx; T-315), so that httpx answers 503 unavailable.
 func wantOverload(t *testing.T, err error) {
 	t.Helper()
-	wantErr(t, err, context.DeadlineExceeded)
+	problemtest.WantErr(t, err, context.DeadlineExceeded)
 	if pe, ok := errors.AsType[*problem.Error](err); ok {
 		t.Fatalf("overload became problem %q; httpx maps the bare deadline to 503", pe.Code())
 	}

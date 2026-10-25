@@ -22,6 +22,7 @@ import (
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // sensitiveReason is the lint override of a form with a health field.
@@ -199,7 +200,7 @@ func TestRegister_CapacityFull_GoesToWaitlist(t *testing.T) {
 	if err != nil || c.TicketVersion != 1 || c.Promoted || c.UserID != students[0].UserID || c.OrgID != orgID("club_a") || c.Sensitive {
 		t.Fatalf("confirmed payload = %+v, %v", c, err)
 	}
-	if got := e.audit.of(authz.EventsRegistrationCreate); len(got) != 4 || got[0].Metadata["status"] != "confirmed" {
+	if got := e.audit.Of(authz.EventsRegistrationCreate); len(got) != 4 || got[0].Metadata["status"] != "confirmed" {
 		t.Fatalf("audit = %+v", got)
 	}
 
@@ -208,7 +209,7 @@ func TestRegister_CapacityFull_GoesToWaitlist(t *testing.T) {
 	e.mustRegister(t, newStudent(), full.Event.ID, motivation)
 	late := newStudent()
 	_, err = e.register(t, late, full.Event.ID, motivation)
-	wantCode(t, err, 409, "events.capacity_full")
+	problemtest.WantProblem(t, err, 409, "events.capacity_full")
 	if n := e.seats(t, full.Event.ID); n != 1 {
 		t.Fatalf("confirmed_count after the refusal = %d", n)
 	}
@@ -219,7 +220,7 @@ func TestRegister_CapacityFull_GoesToWaitlist(t *testing.T) {
 	// Once the event has started the waiting list takes nobody.
 	e.clk.Set(start.Add(time.Minute))
 	_, err = e.register(t, newStudent(), ev.Event.ID, motivation)
-	wantCode(t, err, 409, "events.capacity_full")
+	problemtest.WantProblem(t, err, 409, "events.capacity_full")
 }
 
 // raceEnv is one backend of the concurrency test.
@@ -346,15 +347,15 @@ func TestRegister_SameIdempotencyKey_ReplaysSameRegistration(t *testing.T) {
 	if err != nil || again.Registration.ID != first.Registration.ID || again.Registration.Status != events.RegConfirmed {
 		t.Fatalf("replay = %+v, %v", again.Registration, err)
 	}
-	if n := len(e.audit.of(authz.EventsRegistrationCreate)); n != 1 || e.seats(t, ev.Event.ID) != 1 ||
+	if n := len(e.audit.Of(authz.EventsRegistrationCreate)); n != 1 || e.seats(t, ev.Event.ID) != 1 ||
 		len(e.eventsOf(domainevent.TopicRegistrationConfirmed)) != 1 || len(e.mem.Tickets(first.Registration.ID)) != 1 {
 		t.Fatalf("the replay wrote again: %d audits, %d seats", n, e.seats(t, ev.Event.ID))
 	}
 	_, err = e.svc.CreateRegistration(key("reg-7b1d4c2e9a"), a, ev.Event.ID,
 		events.RegistrationInput{Answers: map[string]any{"motivation": "Başka bir gövde"}})
-	wantCode(t, err, 422, "idempotency.key_reused")
+	problemtest.WantProblem(t, err, 422, "idempotency.key_reused")
 	_, err = e.svc.CreateRegistration(key("reg-another-key"), a, ev.Event.ID, in)
-	wantCode(t, err, 409, "events.already_registered")
+	problemtest.WantProblem(t, err, 409, "events.already_registered")
 }
 
 // TestRegister_DuplicateUser_409: one live registration per user and event
@@ -367,7 +368,7 @@ func TestRegister_DuplicateUser_409(t *testing.T) {
 	a := persona(t, "student")
 	v := e.mustRegister(t, a, ev.Event.ID, motivation)
 	_, err := e.register(t, a, ev.Event.ID, motivation)
-	wantCode(t, err, 409, "events.already_registered")
+	problemtest.WantProblem(t, err, 409, "events.already_registered")
 	if n := e.seats(t, ev.Event.ID); n != 1 {
 		t.Fatalf("confirmed_count = %d after the duplicate", n)
 	}
@@ -388,12 +389,12 @@ func TestRegister_UnverifiedUser_403(t *testing.T) {
 	e := newEnv(t)
 	ev := e.regEvent(t, nil, motivationField)
 	_, err := e.register(t, persona(t, "user_unverified"), ev.Event.ID, motivation)
-	wantCode(t, err, 403, "students.verification_required")
+	problemtest.WantProblem(t, err, 403, "students.verification_required")
 	// Accounts without a student verification hold no grant; like
 	// joinClub (orgs) they are told what is missing.
 	for _, p := range []string{"university_rep", "company_member", "company_admin", "support", "platform_admin", "dpo"} {
 		_, err := e.register(t, persona(t, p), ev.Event.ID, motivation)
-		wantCode(t, err, 403, "students.verification_required")
+		problemtest.WantProblem(t, err, 403, "students.verification_required")
 	}
 	_, err = e.register(t, authz.Anonymous(), ev.Event.ID, motivation)
 	wantForbidden(t, err)
@@ -419,7 +420,7 @@ func TestRegister_UnverifiedUser_403(t *testing.T) {
 	_, err = e.register(t, stranger, uniEvent.Event.ID, motivation)
 	wantForbidden(t, err)
 	e.mustRegister(t, persona(t, "student"), uniEvent.Event.ID, motivation)
-	if n := len(e.audit.of(authz.EventsRegistrationCreate)); n != 7 {
+	if n := len(e.audit.Of(authz.EventsRegistrationCreate)); n != 7 {
 		t.Fatalf("%d registrations audited, want 7", n)
 	}
 }
@@ -443,8 +444,8 @@ func TestRegister_InvalidAnswers_422(t *testing.T) {
 	wantField(t, err, 422, "validation_failed", "body.answers.share_sponsor")
 	stale := uuid.NewV7()
 	_, err = e.svc.CreateRegistration(ctx, a, ev.Event.ID, events.RegistrationInput{FormVersionID: &stale, Answers: motivation})
-	wantCode(t, err, 409, "events.form_version_stale")
-	if n := e.seats(t, ev.Event.ID); n != 0 || len(e.audit.of(authz.EventsRegistrationCreate)) != 0 {
+	problemtest.WantProblem(t, err, 409, "events.form_version_stale")
+	if n := e.seats(t, ev.Event.ID); n != 0 || len(e.audit.Of(authz.EventsRegistrationCreate)) != 0 {
 		t.Fatalf("refused answers wrote: %d seats", n)
 	}
 	// The current version by ID is accepted; the stored answers are typed
@@ -561,7 +562,7 @@ func TestRegister_SensitiveAnswersEncrypted_NotInList(t *testing.T) {
 	if mine.AnswersSensitive["allergy"] != "Fıstık alerjim var" || mine.Answers["allergy"] != nil {
 		t.Fatalf("own view = %v / %v", mine.Answers, mine.AnswersSensitive)
 	}
-	if got := e.audit.of(authz.EventsRegistrationReadOwn); len(got) != 1 ||
+	if got := e.audit.Of(authz.EventsRegistrationReadOwn); len(got) != 1 ||
 		!slices.Equal(got[0].Metadata["sensitive_fields"].([]string), []string{"allergy"}) {
 		t.Fatalf("own sensitive read audit = %+v", got)
 	}
@@ -643,11 +644,11 @@ func TestRegister_ManualMode_Submitted(t *testing.T) {
 		t.Fatalf("the student sees the note: %s", j)
 	}
 	_, err = e.svc.DecideRegistration(ctx, admin, ev.Event.ID, pa.Registration.ID, events.Decision{Status: events.RegRejected})
-	wantCode(t, err, 409, "events.invalid_state")
+	problemtest.WantProblem(t, err, 409, "events.invalid_state")
 	_, err = e.svc.DecideRegistration(ctx, admin, ev.Event.ID, pb.Registration.ID, events.Decision{Status: events.RegConfirmed})
-	wantCode(t, err, 409, "events.capacity_full")
+	problemtest.WantProblem(t, err, 409, "events.capacity_full")
 	_, err = e.svc.DecideRegistration(ctx, admin, ev.Event.ID, pb.Registration.ID, events.Decision{Status: events.RegWaitlisted})
-	wantCode(t, err, 409, "events.invalid_state") // no waiting list
+	problemtest.WantProblem(t, err, 409, "events.invalid_state") // no waiting list
 	r, err := e.svc.DecideRegistration(ctx, admin, ev.Event.ID, pb.Registration.ID, events.Decision{Status: events.RegRejected})
 	if err != nil || r.Registration.Status != events.RegRejected {
 		t.Fatalf("rejection = %+v, %v", r.Registration, err)
@@ -661,7 +662,7 @@ func TestRegister_ManualMode_Submitted(t *testing.T) {
 		t.Fatalf("withdrawal = %+v, %v", v.Registration, err)
 	}
 	e.mustRegister(t, b, ev.Event.ID, motivation)
-	if got := e.audit.of(authz.EventsRegistrationDecide); len(got) != 2 || got[0].Metadata["decision"] != "confirmed" {
+	if got := e.audit.Of(authz.EventsRegistrationDecide); len(got) != 2 || got[0].Metadata["decision"] != "confirmed" {
 		t.Fatalf("decision audit = %+v", got)
 	}
 }
@@ -710,7 +711,7 @@ func TestCancel_PromotesFirstWaitlisted_FIFO(t *testing.T) {
 	if !p.Promoted || p.RegistrationID != vs[2].Registration.ID || p.TicketVersion != 1 {
 		t.Fatalf("promotion payload = %+v", p)
 	}
-	if got := e.audit.of(authz.EventsRegistrationPromoteWaitlist); len(got) != 1 || got[0].SystemJob != "events.promote_waitlist" {
+	if got := e.audit.Of(authz.EventsRegistrationPromoteWaitlist); len(got) != 1 || got[0].SystemJob != "events.promote_waitlist" {
 		t.Fatalf("promotion audit = %+v", got)
 	}
 	// The last on the list withdraws: no seat moves, no cancellation event.
@@ -731,7 +732,7 @@ func TestCancel_PromotesFirstWaitlisted_FIFO(t *testing.T) {
 		t.Fatalf("second promotion = %+v", p.Registration)
 	}
 	_, err = e.svc.CancelEventRegistration(ctx, persona(t, "club_admin"), ev.Event.ID, vs[1].Registration.ID, "Kural ihlali")
-	wantCode(t, err, 409, "events.invalid_state")
+	problemtest.WantProblem(t, err, 409, "events.invalid_state")
 	// Promotion is idempotent: a reconciliation without drift moves no one.
 	before := len(e.eventsOf(domainevent.TopicRegistrationConfirmed))
 	e.job(t, events.ReconcileCountsJobName)
@@ -756,7 +757,7 @@ func TestCancel_AfterDeadline_409(t *testing.T) {
 	vb := e.mustRegister(t, b, ev.Event.ID, motivation)
 	e.clk.Set(deadline.Add(time.Minute))
 	_, err := e.svc.CancelMyRegistration(ctx, a, va.Registration.ID, "")
-	wantCode(t, err, 409, "events.registration_closed")
+	problemtest.WantProblem(t, err, 409, "events.registration_closed")
 	// Someone else's registration is not found.
 	_, err = e.svc.CancelMyRegistration(ctx, b, va.Registration.ID, "")
 	wantNotFound(t, err)
@@ -823,7 +824,7 @@ func TestEventCancelled_CancelsAllRegistrations(t *testing.T) {
 	}
 	// A cancelled event takes no registration.
 	_, err := e.register(t, newStudent(), ev.Event.ID, motivation)
-	wantCode(t, err, 409, "events.registration_closed")
+	problemtest.WantProblem(t, err, 409, "events.registration_closed")
 }
 
 // TestWaitlistExpire_AfterEventStart: events.waitlist_expire turns the
@@ -848,12 +849,12 @@ func TestWaitlistExpire_AfterEventStart(t *testing.T) {
 	if got := e.reg(t, a, va.Registration.ID); got.Registration.Status != events.RegConfirmed {
 		t.Fatalf("confirmed = %s", got.Registration.Status)
 	}
-	if got := e.audit.of(authz.EventsRegistrationExpire); len(got) != 1 || got[0].SystemJob != "events.waitlist_expire" ||
+	if got := e.audit.Of(authz.EventsRegistrationExpire); len(got) != 1 || got[0].SystemJob != "events.waitlist_expire" ||
 		*got[0].ResourceID != vb.Registration.ID {
 		t.Fatalf("expire audit = %+v", got)
 	}
 	e.job(t, events.WaitlistExpireJobName)
-	if n := len(e.audit.of(authz.EventsRegistrationExpire)); n != 1 {
+	if n := len(e.audit.Of(authz.EventsRegistrationExpire)); n != 1 {
 		t.Fatalf("expired again: %d", n)
 	}
 }
@@ -907,15 +908,15 @@ func TestListRegistrations_SupportWithoutReason_403(t *testing.T) {
 	q := events.EventRegistrationQuery{}
 	for _, p := range []string{"support", "platform_admin"} {
 		_, err := e.svc.ListEventRegistrations(ctx, persona(t, p), ev.Event.ID, q, events.Access{})
-		wantCode(t, err, 403, "authz.break_glass_reason_required")
+		problemtest.WantProblem(t, err, 403, "authz.break_glass_reason_required")
 		_, err = e.svc.ListEventRegistrations(ctx, persona(t, p), ev.Event.ID, q, events.Access{Reason: "kısa"})
-		wantCode(t, err, 403, "authz.break_glass_reason_required")
+		problemtest.WantProblem(t, err, 403, "authz.break_glass_reason_required")
 	}
 	for _, p := range []string{"club_member", "student", "dpo", "moderator", "event_staff", "other_club_admin"} {
 		_, err := e.svc.ListEventRegistrations(ctx, persona(t, p), ev.Event.ID, q, events.Access{})
 		wantForbidden(t, err)
 	}
-	if n := len(e.audit.of(authz.EventsRegistrationList)); n != 0 {
+	if n := len(e.audit.Of(authz.EventsRegistrationList)); n != 0 {
 		t.Fatalf("refused lists audited: %d", n)
 	}
 	why := events.Access{Reason: "Destek talebi 4711: kayıt sorunu inceleniyor", TicketRef: "4711"}
@@ -924,7 +925,7 @@ func TestListRegistrations_SupportWithoutReason_403(t *testing.T) {
 		page.Items[0].User.LastName != "Yılmaz" {
 		t.Fatalf("break-glass list = %+v, %v", page, err)
 	}
-	logs := e.audit.of(authz.EventsRegistrationList)
+	logs := e.audit.Of(authz.EventsRegistrationList)
 	if len(logs) != 1 || logs[0].Reason != why.Reason || logs[0].Metadata[audit.MetaBreakGlass] != true ||
 		logs[0].Metadata[audit.MetaTicketRef] != "4711" || *logs[0].ResourceID != ev.Event.ID {
 		t.Fatalf("break-glass audit = %+v", logs)
@@ -932,7 +933,7 @@ func TestListRegistrations_SupportWithoutReason_403(t *testing.T) {
 	if _, err := e.svc.ListEventRegistrations(ctx, persona(t, "club_admin"), ev.Event.ID, q, events.Access{}); err != nil {
 		t.Fatal(err)
 	}
-	if logs := e.audit.of(authz.EventsRegistrationList); len(logs) != 2 || logs[1].Metadata[audit.MetaBreakGlass] != nil {
+	if logs := e.audit.Of(authz.EventsRegistrationList); len(logs) != 2 || logs[1].Metadata[audit.MetaBreakGlass] != nil {
 		t.Fatalf("manager list audit = %+v", logs)
 	}
 	// One registration by break-glass: no sensitive answers, the subject is
@@ -941,7 +942,7 @@ func TestListRegistrations_SupportWithoutReason_403(t *testing.T) {
 	if err != nil || one.AnswersSensitive != nil {
 		t.Fatalf("break-glass read = %+v, %v", one, err)
 	}
-	if r := e.audit.of(authz.EventsRegistrationRead); len(r) != 1 || r[0].Metadata[audit.MetaSubjectUserID] != v.Registration.UserID.String() {
+	if r := e.audit.Of(authz.EventsRegistrationRead); len(r) != 1 || r[0].Metadata[audit.MetaSubjectUserID] != v.Registration.UserID.String() {
 		t.Fatalf("break-glass read audit = %+v", r)
 	}
 	// A sensitive club's event: hidden from break-glass.
@@ -975,7 +976,7 @@ func TestGetRegistration_SensitiveReadAudited(t *testing.T) {
 	if err != nil || got.AnswersSensitive["allergy"] != "Glüten" || got.Answers["motivation"] != "x" || !got.ShowNote {
 		t.Fatalf("read = %+v, %v", got, err)
 	}
-	logs := e.audit.of(authz.EventsRegistrationRead)
+	logs := e.audit.Of(authz.EventsRegistrationRead)
 	if len(logs) != 1 || !slices.Equal(logs[0].Metadata["sensitive_fields"].([]string), []string{"allergy"}) ||
 		logs[0].Metadata[audit.MetaBreakGlass] != nil || *logs[0].ResourceID != v.Registration.ID {
 		t.Fatalf("audit = %+v", logs)
@@ -1122,21 +1123,21 @@ func TestRegister_ClosedWindowAndState(t *testing.T) {
 	opens := t0.Add(24 * time.Hour)
 	ev := e.regEvent(t, func(in *events.EventInput) { in.RegistrationOpensAt = &opens }, motivationField)
 	_, err := e.register(t, newStudent(), ev.Event.ID, motivation)
-	wantCode(t, err, 409, "events.registration_closed")
+	problemtest.WantProblem(t, err, 409, "events.registration_closed")
 	e.clk.Set(opens)
 	e.mustRegister(t, newStudent(), ev.Event.ID, motivation)
 	e.clk.Set(start.Add(3 * time.Hour))
 	_, err = e.register(t, newStudent(), ev.Event.ID, motivation)
-	wantCode(t, err, 409, "events.registration_closed")
+	problemtest.WantProblem(t, err, 409, "events.registration_closed")
 	e.clk.Set(t0)
 	draft := e.create(t, "club_admin", "club_a", input("Taslak Kayıt"))
 	_, err = e.register(t, persona(t, "club_admin"), draft.Event.ID, motivation)
-	wantCode(t, err, 409, "events.invalid_state")
+	problemtest.WantProblem(t, err, 409, "events.invalid_state")
 	noReg := input("Kayıtsız")
 	noReg.RequiresRegistration = new(false)
 	open := e.published(t, noReg)
 	_, err = e.register(t, persona(t, "student"), open.Event.ID, motivation)
-	wantCode(t, err, 409, "events.invalid_state")
+	problemtest.WantProblem(t, err, 409, "events.invalid_state")
 }
 
 // TestRegistrationTemplates_Exist: every notice template of the module is

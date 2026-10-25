@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 	"uuid"
+
+	"koro/internal/platform/problem"
 )
 
 // ForCheckout implements Offerings: the offering must be on sale now with
@@ -37,7 +39,7 @@ func (s *service) ForCheckout(ctx context.Context, offeringID uuid.UUID) (Checko
 // UPDATE takes the units; the last one turns the offering sold_out.
 func (s *service) Reserve(ctx context.Context, offeringID uuid.UUID, qty int, buyerOrgID uuid.UUID) error {
 	if qty <= 0 || qty > maxQuantity {
-		return fieldErr("quantity", "must be 1-100000")
+		return problem.Field("quantity", "must be 1-100000")
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		cur, err := s.d.Store.GetOffering(ctx, offeringID, true)
@@ -98,7 +100,7 @@ func reserveRefusal(o Offering, qty int, now time.Time) error {
 // order, BE-040); a sold-out offering is on sale again.
 func (s *service) Release(ctx context.Context, offeringID uuid.UUID, qty int) error {
 	if qty <= 0 || qty > maxQuantity {
-		return fieldErr("quantity", "must be 1-100000")
+		return problem.Field("quantity", "must be 1-100000")
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		_, ok, err := s.d.Store.Release(ctx, offeringID, qty)

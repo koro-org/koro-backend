@@ -11,15 +11,18 @@ import (
 	"koro/internal/authz"
 	"koro/internal/consent"
 	"koro/internal/identity"
+	"koro/internal/platform/db"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // registerPayouts adds the balance and payout operations of BE-044 (04
 // §2.17) to api.
 func registerPayouts(api huma.API, h handler) {
-	reg(api, huma.Operation{
+	op.Register(api, "ledger", huma.Operation{
 		OperationID: "getPayeeBalance", Method: http.MethodGet, Path: "/orgs/{org_id}/payees/{payee_id}/balance",
 		Summary: "Get the earnings balance of a payee",
 		Description: "What Koro owes the payee now (payable_amount: the payee's share of the paid orders minus what was " +
@@ -28,39 +31,39 @@ func registerPayouts(api huma.API, h handler) {
 			"organization is 404.",
 	}, op.Meta{Action: string(authz.LedgerBalanceRead), Surface: op.SurfaceOrg}, h.balance)
 
-	reg(api, huma.Operation{
+	op.Register(api, "ledger", huma.Operation{
 		OperationID: "listOrgPayouts", Method: http.MethodGet, Path: "/orgs/{org_id}/payouts",
 		Summary:     "List the payouts of an organization",
 		Description: "Newest first. The IBAN is masked.",
 	}, op.Meta{Action: string(authz.LedgerPayoutList), Surface: op.SurfaceOrg}, h.listOrg)
 
-	reg(api, huma.Operation{
+	op.Register(api, "ledger", huma.Operation{
 		OperationID: "getOrgPayout", Method: http.MethodGet, Path: "/orgs/{org_id}/payouts/{payout_id}",
 		Summary: "Get a payout of an organization",
 		Description: "The payout with the order lines it pays and, once paid, a download URL of the bank receipt valid " +
 			"for 5 minutes. The IBAN is masked. A payout of another organization is 404.",
 	}, op.Meta{Action: string(authz.LedgerPayoutRead), Surface: op.SurfaceOrg}, h.getOrg)
 
-	reg(api, huma.Operation{
+	op.Register(api, "ledger", huma.Operation{
 		OperationID: "adminListPayables", Method: http.MethodGet, Path: "/admin/payables",
 		Summary: "List the order lines a payout may take",
 		Description: "Per payee (the one asked for, or every payee the ledger owes money to): the paid, fulfilled lines " +
 			"whose payout hold has elapsed as of as_of (default now), with a positive seller share after refunds, not paid out and in no payout yet.",
 	}, op.Meta{Action: string(authz.LedgerPayableList), Surface: op.SurfaceAdmin}, h.payables)
 
-	reg(api, huma.Operation{
+	op.Register(api, "ledger", huma.Operation{
 		OperationID: "adminListPayouts", Method: http.MethodGet, Path: "/admin/payouts",
 		Summary:     "List every payout",
 		Description: "Newest first; status narrows the list (e.g. the approval queue: pending_approval).",
 	}, op.Meta{Action: string(authz.LedgerPayoutList), Surface: op.SurfaceAdmin}, h.adminList)
 
-	reg(api, huma.Operation{
+	op.Register(api, "ledger", huma.Operation{
 		OperationID: "adminGetPayout", Method: http.MethodGet, Path: "/admin/payouts/{payout_id}",
 		Summary:     "Get a payout",
 		Description: "The payout with the full IBAN snapshot, its eyes, its items and, once paid, the receipt URL.",
 	}, op.Meta{Action: string(authz.LedgerPayoutRead), Surface: op.SurfaceAdmin}, h.adminGet)
 
-	reg(api, huma.Operation{
+	op.Register(api, "ledger", huma.Operation{
 		OperationID: "adminCreatePayout", Method: http.MethodPost, Path: "/admin/payouts", DefaultStatus: http.StatusCreated,
 		Summary: "Create a payout",
 		Description: "Takes the payee's payable lines (all, or the order_line_ids given: each must be payable, 409 " +
@@ -69,7 +72,7 @@ func registerPayouts(api huma.API, h handler) {
 			"Another finance admin approves it.",
 	}, op.Meta{Action: string(authz.LedgerPayoutCreate), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyRequired}, h.create)
 
-	reg(api, huma.Operation{
+	op.Register(api, "ledger", huma.Operation{
 		OperationID: "adminApprovePayout", Method: http.MethodPost, Path: "/admin/payouts/{payout_id}/approve",
 		Summary: "Approve a payout (second eye)",
 		Description: "Requires re-authentication. The finance admin who created the payout cannot approve it (403 " +
@@ -78,7 +81,7 @@ func registerPayouts(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.LedgerPayoutApprove), Surface: op.SurfaceAdmin, Reauth: true, RateLimit: op.RateReauth,
 		Idempotency: op.IdempotencyOptional}, h.approve)
 
-	reg(api, huma.Operation{
+	op.Register(api, "ledger", huma.Operation{
 		OperationID: "adminMarkPayoutPaid", Method: http.MethodPost, Path: "/admin/payouts/{payout_id}/mark-paid",
 		Summary: "Record the transfer of an approved payout",
 		Description: "After the EFT at the bank: the bank reference and the receipt (a payout_receipt upload) are " +
@@ -86,53 +89,22 @@ func registerPayouts(api huma.API, h handler) {
 			"out and payout.paid is written. Only an approved payout (409 ledger.invalid_state).",
 	}, op.Meta{Action: string(authz.LedgerPayoutMarkPaid), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.markPaid)
 
-	reg(api, huma.Operation{
+	op.Register(api, "ledger", huma.Operation{
 		OperationID: "adminMarkPayoutFailed", Method: http.MethodPost, Path: "/admin/payouts/{payout_id}/mark-failed",
 		Summary:     "Record that the transfer of an approved payout failed",
 		Description: "Only an approved payout (409 ledger.invalid_state); its lines are payable again.",
 	}, op.Meta{Action: string(authz.LedgerPayoutMarkFailed), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional},
 		h.markFailed)
 
-	reg(api, huma.Operation{
+	op.Register(api, "ledger", huma.Operation{
 		OperationID: "adminCancelPayout", Method: http.MethodPost, Path: "/admin/payouts/{payout_id}/cancel",
 		Summary:     "Cancel a payout before it is paid",
 		Description: "Only a payout waiting for approval or approved (409 ledger.invalid_state); its lines are payable again.",
 	}, op.Meta{Action: string(authz.LedgerPayoutCancel), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.cancel)
 }
 
-// reg registers one ledger operation with its Koro metadata.
-func reg[I, O any](api huma.API, o huma.Operation, m op.Meta, fn func(context.Context, *I) (*O, error)) {
-	o.Tags = []string{"ledger"}
-	huma.Register(api, op.Koro(o, m), fn)
-}
-
 // sortPayouts is the only order of the payout lists (cursor fingerprint).
 const sortPayouts = "-created_at"
-
-// parseID parses a path ID; a malformed one becomes the nil UUID, which no
-// row has: it answers like a missing row (404) after the surface's authz.
-func parseID(s string) uuid.UUID {
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return uuid.Nil()
-	}
-	return id
-}
-
-func idStr(p *uuid.UUID) string {
-	if p == nil {
-		return ""
-	}
-	return p.String()
-}
-
-func utcPtr(t *time.Time) *time.Time {
-	if t == nil {
-		return nil
-	}
-	u := t.UTC()
-	return &u
-}
 
 func strVal(p *string) string {
 	if p == nil {
@@ -190,9 +162,9 @@ func payoutDTO(v PayoutView) PayoutDTO {
 	d := PayoutDTO{
 		PayoutID: p.ID.String(), PayeeID: p.PayeeID.String(), OrgID: p.OrgID.String(), Status: string(p.Status),
 		Amount: p.Amount, Currency: p.Currency, IBANMasked: p.MaskedIBAN(), HolderSnapshot: p.HolderSnapshot,
-		CreatedAt: p.CreatedAt.UTC(), ApprovedAt: utcPtr(p.ApprovedAt), PaidAt: utcPtr(p.PaidAt),
-		BankReference: strVal(p.BankReference), FailureReason: strVal(p.FailureReason), CancelledAt: utcPtr(p.CancelledAt),
-		CancelReason: strVal(p.CancelReason), ReceiptURL: v.ReceiptURL, ReceiptURLExpiresAt: utcPtr(v.ReceiptExp),
+		CreatedAt: p.CreatedAt.UTC(), ApprovedAt: db.UTCPtr(p.ApprovedAt), PaidAt: db.UTCPtr(p.PaidAt),
+		BankReference: strVal(p.BankReference), FailureReason: strVal(p.FailureReason), CancelledAt: db.UTCPtr(p.CancelledAt),
+		CancelReason: strVal(p.CancelReason), ReceiptURL: v.ReceiptURL, ReceiptURLExpiresAt: db.UTCPtr(v.ReceiptExp),
 	}
 	if d.Currency == "" {
 		d.Currency = Currency
@@ -208,8 +180,8 @@ func payoutAdminDTO(v PayoutView) PayoutAdminDTO {
 	p := v.Payout
 	return PayoutAdminDTO{
 		PayoutDTO: payoutDTO(v), IBANSnapshot: p.IBANSnapshot, BankAccountID: p.BankAccountID.String(),
-		CreatedBy: p.CreatedBy.String(), ApprovedBy: idStr(p.ApprovedBy), PaidBy: idStr(p.PaidBy),
-		ReceiptFileID: idStr(p.ReceiptFileID),
+		CreatedBy: p.CreatedBy.String(), ApprovedBy: httpx.IDStr(p.ApprovedBy), PaidBy: httpx.IDStr(p.PaidBy),
+		ReceiptFileID: httpx.IDStr(p.ReceiptFileID),
 	}
 }
 
@@ -237,7 +209,7 @@ func (h handler) balance(ctx context.Context, in *balanceInput) (*balanceOutput,
 	if err != nil {
 		return nil, err
 	}
-	b, err := h.svc.GetPayeeBalance(ctx, a, parseID(in.OrgID), parseID(in.PayeeID))
+	b, err := h.svc.GetPayeeBalance(ctx, a, httpx.ParseID(in.OrgID), httpx.ParseID(in.PayeeID))
 	if err != nil {
 		return nil, err
 	}
@@ -268,7 +240,7 @@ func (h handler) listOrg(ctx context.Context, in *listOrgPayoutsInput) (*payoutL
 	fp := page.Fingerprint("listOrgPayouts", in.OrgID)
 	q := PayoutQuery{Limit: in.Limit}
 	q.After, q.invalid = payoutAfter(in.Cursor, fp)
-	p, err := h.svc.ListOrgPayouts(ctx, a, parseID(in.OrgID), q)
+	p, err := h.svc.ListOrgPayouts(ctx, a, httpx.ParseID(in.OrgID), q)
 	if err != nil {
 		return nil, err
 	}
@@ -351,7 +323,7 @@ func (h handler) getOrg(ctx context.Context, in *orgPayoutInput) (*payoutOutput,
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.GetOrgPayout(ctx, a, parseID(in.OrgID), parseID(in.PayoutID))
+	v, err := h.svc.GetOrgPayout(ctx, a, httpx.ParseID(in.OrgID), httpx.ParseID(in.PayoutID))
 	if err != nil {
 		return nil, err
 	}
@@ -374,7 +346,7 @@ func (h handler) adminGet(ctx context.Context, in *adminGetInput) (*payoutAdminO
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.AdminGetPayout(ctx, a, parseID(in.PayoutID))
+	v, err := h.svc.AdminGetPayout(ctx, a, httpx.ParseID(in.PayoutID))
 	if err != nil {
 		return nil, err
 	}
@@ -422,7 +394,7 @@ func (h handler) payables(ctx context.Context, in *payablesInput) (*payablesOutp
 	if in.PayeeID != "" {
 		id, err := uuid.Parse(in.PayeeID)
 		if err != nil {
-			q.invalid = fieldErr("query.payee_id", "must be a UUID")
+			q.invalid = problem.Field("query.payee_id", "must be a UUID")
 		} else {
 			q.PayeeID = &id
 		}
@@ -430,7 +402,7 @@ func (h handler) payables(ctx context.Context, in *payablesInput) (*payablesOutp
 	if in.AsOf != "" && q.invalid == nil {
 		t, err := parseBound(in.AsOf, true)
 		if err != nil {
-			q.invalid = fieldErr("query.as_of", "must be an RFC 3339 time or a YYYY-MM-DD date")
+			q.invalid = problem.Field("query.as_of", "must be an RFC 3339 time or a YYYY-MM-DD date")
 		} else {
 			q.AsOf = &t
 		}
@@ -467,9 +439,9 @@ func (h handler) create(ctx context.Context, in *createInput) (*payoutAdminOutpu
 	if err != nil {
 		return nil, err
 	}
-	ci := CreatePayoutInput{PayeeID: parseID(in.Body.PayeeID)}
+	ci := CreatePayoutInput{PayeeID: httpx.ParseID(in.Body.PayeeID)}
 	for _, s := range in.Body.OrderLineIDs {
-		ci.LineIDs = append(ci.LineIDs, parseID(s))
+		ci.LineIDs = append(ci.LineIDs, httpx.ParseID(s))
 	}
 	v, err := h.svc.AdminCreatePayout(ctx, a, ci)
 	if err != nil {
@@ -497,7 +469,7 @@ func (h handler) approve(ctx context.Context, in *approveInput) (*payoutAdminOut
 	if r := in.Body.Reauth; r != nil {
 		proof = identity.ReauthProof{Password: r.Password, TOTPCode: r.TOTPCode}
 	}
-	v, err := h.svc.AdminApprovePayout(ctx, a, parseID(in.PayoutID), proof)
+	v, err := h.svc.AdminApprovePayout(ctx, a, httpx.ParseID(in.PayoutID), proof)
 	if err != nil {
 		return nil, err
 	}
@@ -523,10 +495,10 @@ func (h handler) markPaid(ctx context.Context, in *markPaidInput) (*payoutAdminO
 	}
 	mi := MarkPaidInput{BankReference: in.Body.BankReference, PaidAt: in.Body.PaidAt}
 	if in.Body.ReceiptFileID != "" {
-		id := parseID(in.Body.ReceiptFileID)
+		id := httpx.ParseID(in.Body.ReceiptFileID)
 		mi.ReceiptFileID = &id
 	}
-	v, err := h.svc.AdminMarkPayoutPaid(ctx, a, parseID(in.PayoutID), mi)
+	v, err := h.svc.AdminMarkPayoutPaid(ctx, a, httpx.ParseID(in.PayoutID), mi)
 	if err != nil {
 		return nil, err
 	}
@@ -548,7 +520,7 @@ func (h handler) markFailed(ctx context.Context, in *markFailedInput) (*payoutAd
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.AdminMarkPayoutFailed(ctx, a, parseID(in.PayoutID), in.Body.FailureReason)
+	v, err := h.svc.AdminMarkPayoutFailed(ctx, a, httpx.ParseID(in.PayoutID), in.Body.FailureReason)
 	if err != nil {
 		return nil, err
 	}
@@ -568,7 +540,7 @@ func (h handler) cancel(ctx context.Context, in *cancelInput) (*payoutAdminOutpu
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.AdminCancelPayout(ctx, a, parseID(in.PayoutID), in.Body.CancelReason)
+	v, err := h.svc.AdminCancelPayout(ctx, a, httpx.ParseID(in.PayoutID), in.Body.CancelReason)
 	if err != nil {
 		return nil, err
 	}

@@ -11,6 +11,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/consent"
 	"koro/internal/identity"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
@@ -18,7 +19,7 @@ import (
 
 // registerExports adds the 3 export operations of BE-050 (04 §2.6).
 func registerExports(api huma.API, h handler) {
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "createEventExport", Method: http.MethodPost, Path: "/events/{event_id}/exports",
 		DefaultStatus: http.StatusAccepted,
 		Summary:       "Request an export of an event's registrations",
@@ -33,13 +34,13 @@ func registerExports(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.EventsExportCreate), Surface: op.SurfaceResource, Reauth: true, RateLimit: op.RateExport,
 		Idempotency: op.IdempotencyOptional}, h.createExport)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "listEventExports", Method: http.MethodGet, Path: "/events/{event_id}/exports",
 		Summary:     "List an event's exports",
 		Description: "Newest first: who asked, why, which fields, the status, the row and download counts.",
 	}, op.Meta{Action: string(authz.EventsExportList), Surface: op.SurfaceResource}, h.listExports)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "downloadEventExport", Method: http.MethodGet, Path: "/events/{event_id}/exports/{export_id}/download",
 		Summary: "Get a download link of an export",
 		Description: "Only the manager who requested the export, only while it is ready and not expired (409 " +
@@ -170,7 +171,7 @@ type ExportPath struct {
 	ExportID string `path:"export_id" doc:"Export ID"`
 }
 
-func (p ExportPath) exportID() uuid.UUID { return parseID(p.ExportID) }
+func (p ExportPath) exportID() uuid.UUID { return httpx.ParseID(p.ExportID) }
 
 type exportURLOutput struct {
 	CacheControl string `header:"Cache-Control"`

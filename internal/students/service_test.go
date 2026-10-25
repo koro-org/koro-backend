@@ -58,7 +58,7 @@ func TestUpdateProfile_UniversityImmutable(t *testing.T) {
 	if v.Profile.UniversityID != e.uniB || v.Profile.DepartmentID != nil {
 		t.Fatalf("after re-verification = %v / %v", v.Profile.UniversityID, v.Profile.DepartmentID)
 	}
-	if len(e.audit.of(string(authz.StudentsProfileUpdateOwn))) < 2 {
+	if len(e.audit.Of(authz.StudentsProfileUpdateOwn)) < 2 {
 		t.Fatal("profile writes are not audited")
 	}
 }
@@ -191,7 +191,7 @@ func TestSections_CompletedEventsAndAudit(t *testing.T) {
 	if e.profile(t, a.UserID).Completed(students.SectionSkills) {
 		t.Fatal("skills still complete with no skill")
 	}
-	if n := len(e.audit.of(string(authz.StudentsProfileSectionManage))); n != 3 {
+	if n := len(e.audit.Of(authz.StudentsProfileSectionManage)); n != 3 {
 		t.Fatalf("section audit rows = %d", n)
 	}
 }

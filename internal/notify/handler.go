@@ -10,6 +10,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
+	"koro/internal/platform/db"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
@@ -421,4 +422,4 @@ func boolText(b bool) string {
 }
 
 // timeOrNil returns nil for a nil pointer and the UTC instant otherwise.
-func timeOrNil(t *time.Time) *time.Time { return utcPtr(t) }
+func timeOrNil(t *time.Time) *time.Time { return db.UTCPtr(t) }

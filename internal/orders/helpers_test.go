@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http/httptest"
 	"sync"
@@ -12,7 +11,7 @@ import (
 	"time"
 	"uuid"
 
-	"koro/internal/audit"
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/catalog"
@@ -29,7 +28,6 @@ import (
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/outbox"
-	"koro/internal/platform/problem"
 	"koro/internal/platform/queue"
 	"koro/internal/platform/storage"
 )
@@ -42,31 +40,6 @@ func org(name string) uuid.UUID { return authztest.ID(name) }
 func ptr[T any](v T) *T { return &v }
 
 func discardLog() *slog.Logger { return slog.New(slog.DiscardHandler) }
-
-// auditLog records the events a service writes.
-type auditLog struct {
-	mu     sync.Mutex
-	events []audit.Event
-}
-
-func (l *auditLog) Log(_ context.Context, e audit.Event) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.events = append(l.events, e)
-	return nil
-}
-
-func (l *auditLog) of(act authz.Action) []audit.Event {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	var out []audit.Event
-	for _, e := range l.events {
-		if e.Action == string(act) {
-			out = append(out, e)
-		}
-	}
-	return out
-}
 
 // fakeOrgs is orgs.OrgDirectory over the matrix orgs (authztest.Orgs).
 type fakeOrgs struct {
@@ -284,7 +257,7 @@ type env struct {
 	catalog  catalog.Module
 	entStore entitlements.Store
 	ents     entitlements.Service
-	audit    *auditLog
+	audit    *audittest.Recorder
 	orgs     *fakeOrgs
 	parties  *fakeParties
 	payees   *fakePayees
@@ -312,7 +285,7 @@ var evidenceBuckets = files.Buckets{Files: "files-test", Quarantine: "quarantine
 func newEnv(t *testing.T, opts ...func(*orders.Deps)) *env {
 	t.Helper()
 	clk := clock.NewFake(t0)
-	e := &env{clk: clk, store: orders.NewMemStore(clk.Now), cat: catalog.NewMemStore(clk.Now), audit: &auditLog{},
+	e := &env{clk: clk, store: orders.NewMemStore(clk.Now), cat: catalog.NewMemStore(clk.Now), audit: &audittest.Recorder{},
 		orgs: newFakeOrgs(), parties: &fakeParties{m: map[uuid.UUID]parties.LegalParty{}},
 		payees: &fakePayees{m: map[uuid.UUID]parties.Payee{}}, outbox: outbox.NewMem(clk), sender: &fakeSender{},
 		fileStore: files.NewMemStore(clk.Now), objects: storage.NewMem(clk)}
@@ -525,27 +498,6 @@ func (e *env) events(topic string) []domainevent.Envelope {
 		}
 	}
 	return out
-}
-
-func wantErr(t *testing.T, err, want error) {
-	t.Helper()
-	if !errors.Is(err, want) {
-		t.Fatalf("error = %v, want %v", err, want)
-	}
-}
-
-func problemOf(err error) (int, string) {
-	if p, ok := errors.AsType[*problem.Error](err); ok {
-		return p.Status(), p.Code()
-	}
-	return 0, ""
-}
-
-func wantProblem(t *testing.T, err error, status int, code string) {
-	t.Helper()
-	if s, c := problemOf(err); s != status || c != code {
-		t.Fatalf("error = %v (%d %s), want %d %s", err, s, c, status, code)
-	}
 }
 
 // ---- HTTP

@@ -114,7 +114,7 @@ func TestPutIntegration_SecretEncrypted_NeverReturned(t *testing.T) {
 	if err != nil || string(plain) != fakeRefreshToken {
 		t.Fatalf("Open(refresh) = %q, %v", plain, err)
 	}
-	ev := e.audit.of(authz.BillingIntegrationManage)
+	ev := e.audit.Of(authz.BillingIntegrationManage)
 	if len(ev) != 1 || ev[0].Metadata["reauth"] != "password" || ev[0].Metadata["provider"] != "parasut" {
 		t.Fatalf("audit = %+v", ev)
 	}

@@ -12,6 +12,7 @@ import (
 	"koro/internal/identity"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // Register adds the orgs operations (04 §2.2; BE-017's 11 and BE-019's 13,
@@ -20,25 +21,25 @@ import (
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
 
-	reg(api, huma.Operation{
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "getOrg", Method: http.MethodGet, Path: "/orgs/{org_id}",
 		Summary: "Get an organization's public profile",
 		Description: "Active and suspended orgs are public; a pending_review or closed org is visible to its members and " +
 			"platform staff only (others get 404). The ETag is the If-Match value of updateOrg.",
 	}, op.Meta{Action: string(authz.OrgsOrgRead), Surface: op.SurfacePublic}, h.getOrg)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "getOrgBySlug", Method: http.MethodGet, Path: "/orgs/by-slug/{slug}",
 		Summary: "Get an organization's public profile by slug",
 	}, op.Meta{Action: string(authz.OrgsOrgRead), Surface: op.SurfacePublic}, h.getOrgBySlug)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "searchOrgs", Method: http.MethodGet, Path: "/orgs",
 		Summary:     "Search organizations",
 		Description: "Active and suspended orgs only. q matches name and description (full text) or part of the name.",
 	}, op.Meta{Action: string(authz.OrgsOrgSearch), Surface: op.SurfacePublic, RateLimit: op.RateSearch}, h.searchOrgs)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "createCompany", Method: http.MethodPost, Path: "/companies", DefaultStatus: http.StatusCreated,
 		Summary: "Register a company",
 		Description: "The company starts pending_review until a platform admin verifies it. The caller becomes its " +
@@ -46,14 +47,14 @@ func Register(api huma.API, svc Service) {
 			"applies at the next sign-in. Tax number and MERSİS are given later with the legal party (parties).",
 	}, op.Meta{Action: string(authz.OrgsCompanyCreate), Surface: op.SurfaceSelf, Idempotency: op.IdempotencyOptional}, h.createCompany)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "updateOrg", Method: http.MethodPatch, Path: "/orgs/{org_id}",
 		Summary: "Update an organization's profile",
 		Description: "If-Match with the ETag of getOrg is required: missing → 428, stale → 412. Company fields apply to " +
 			"companies only. A suspended org cannot be changed by its members (403 orgs.org_suspended).",
 	}, op.Meta{Action: string(authz.OrgsOrgUpdate), Surface: op.SurfaceOrg}, h.updateOrg)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "closeOrg", Method: http.MethodPost, Path: "/orgs/{org_id}/close",
 		Summary: "Close an organization",
 		Description: "Company owner or platform admin, with re-authentication. Open orders or payouts → 409 " +
@@ -61,7 +62,7 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.OrgsOrgClose), Surface: op.SurfaceOrg, Reauth: true, RateLimit: op.RateReauth,
 		Idempotency: op.IdempotencyOptional}, h.closeOrg)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "transferOrgOwnership", Method: http.MethodPost, Path: "/orgs/{org_id}/ownership-transfer",
 		Summary: "Transfer company ownership",
 		Description: "The new owner must be an active company_admin of the company (422 orgs.transfer_target_invalid). " +
@@ -69,35 +70,29 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.OrgsOwnershipTransfer), Surface: op.SurfaceOrg, Reauth: true, RateLimit: op.RateReauth,
 		Idempotency: op.IdempotencyOptional}, h.transfer)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "adminListOrgs", Method: http.MethodGet, Path: "/admin/orgs",
 		Summary: "List organizations (platform staff)",
 	}, op.Meta{Action: string(authz.OrgsOrgListAdmin), Surface: op.SurfaceAdmin}, h.adminList)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "adminVerifyOrg", Method: http.MethodPost, Path: "/admin/orgs/{org_id}/verify",
 		Summary: "Verify an organization", Description: "pending_review → active; another status is 409 orgs.invalid_state.",
 	}, op.Meta{Action: string(authz.OrgsOrgVerify), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.adminVerify)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "adminSuspendOrg", Method: http.MethodPost, Path: "/admin/orgs/{org_id}/suspend",
 		Summary: "Suspend an organization", Description: "active → suspended, with re-authentication.",
 	}, op.Meta{Action: string(authz.OrgsOrgSuspend), Surface: op.SurfaceAdmin, Reauth: true, RateLimit: op.RateReauth,
 		Idempotency: op.IdempotencyOptional}, h.adminSuspend)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orgs", huma.Operation{
 		OperationID: "adminReactivateOrg", Method: http.MethodPost, Path: "/admin/orgs/{org_id}/reactivate",
 		Summary: "Reactivate a suspended organization", Description: "suspended → active, with re-authentication.",
 	}, op.Meta{Action: string(authz.OrgsOrgSuspend), Surface: op.SurfaceAdmin, Reauth: true, RateLimit: op.RateReauth,
 		Idempotency: op.IdempotencyOptional}, h.adminReactivate)
 
 	registerMembers(api, h)
-}
-
-// reg registers one orgs operation with its Koro metadata.
-func reg[I, O any](api huma.API, o huma.Operation, m op.Meta, fn func(context.Context, *I) (*O, error)) {
-	o.Tags = []string{"orgs"}
-	huma.Register(api, op.Koro(o, m), fn)
 }
 
 type handler struct{ svc Service }
@@ -210,7 +205,7 @@ func (h handler) searchOrgs(ctx context.Context, in *searchInput) (*searchOutput
 	if in.UniversityID != "" {
 		u, err := uuid.Parse(in.UniversityID)
 		if err != nil {
-			return nil, fieldErr("query.university_id", "must be a UUID")
+			return nil, problem.Field("query.university_id", "must be a UUID")
 		}
 		q.UniversityID = &u
 	}
@@ -330,7 +325,7 @@ func (h handler) updateOrg(ctx context.Context, in *updateOrgInput) (*orgOutput,
 		} else {
 			f, err := uuid.Parse(*b.LogoFileID)
 			if err != nil {
-				return nil, fieldErr("body.logo_file_id", "must be a UUID")
+				return nil, problem.Field("body.logo_file_id", "must be a UUID")
 			}
 			p.Logo = &f
 		}
@@ -394,7 +389,7 @@ func (h handler) transfer(ctx context.Context, in *transferInput) (*orgOutput, e
 	id := in.id()
 	owner, err := uuid.Parse(in.Body.NewOwnerUserID)
 	if err != nil {
-		return nil, fieldErr("body.new_owner_user_id", "must be a UUID")
+		return nil, problem.Field("body.new_owner_user_id", "must be a UUID")
 	}
 	v, err := h.svc.TransferOwnership(ctx, a, id, owner, proofOf(in.Body.Reauth))
 	if err != nil {

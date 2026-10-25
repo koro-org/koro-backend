@@ -272,7 +272,7 @@ func TestGraduationCheck_EmitsGraduated(t *testing.T) {
 	if got, err := e.svc.GraduatedAmong(ctx, []uuid.UUID{gone.UserID, renewed.UserID}); err != nil || !got[gone.UserID] || got[renewed.UserID] {
 		t.Fatalf("GraduatedAmong = %v, %v", got, err)
 	}
-	if len(e.audit.of("students.profile.graduate")) != 1 {
+	if len(e.audit.Of("students.profile.graduate")) != 1 {
 		t.Fatal("graduation not audited")
 	}
 	// The graduate verifies again (e.g. a master's): active again.
@@ -345,15 +345,15 @@ func TestAudienceRefresh_FixesDrift(t *testing.T) {
 	if pr, _ := e.svc.GetMyPrivacy(ctx, c); !pr.ShowContactOnGrant {
 		t.Fatal("c lost contact sharing despite the consent")
 	}
-	if len(e.audit.of("students.privacy.reconcile")) != 1 || len(e.audit.of("students.profile.follow_verification")) != 1 {
+	if len(e.audit.Of("students.privacy.reconcile")) != 1 || len(e.audit.Of("students.profile.follow_verification")) != 1 {
 		t.Fatalf("reconcile audit = %d, university audit = %d",
-			len(e.audit.of("students.privacy.reconcile")), len(e.audit.of("students.profile.follow_verification")))
+			len(e.audit.Of("students.privacy.reconcile")), len(e.audit.Of("students.profile.follow_verification")))
 	}
 	// A second run finds nothing to fix.
-	before := len(e.audit.events)
+	before := len(e.audit.All())
 	pc := e.profile(t, c.UserID)
 	e.job(t, students.AudienceRefreshJobName)
-	if len(e.audit.events) != before || !e.profile(t, c.UserID).UpdatedAt.Equal(pc.UpdatedAt) {
+	if len(e.audit.All()) != before || !e.profile(t, c.UserID).UpdatedAt.Equal(pc.UpdatedAt) {
 		t.Fatal("the second refresh changed something")
 	}
 }

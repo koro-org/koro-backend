@@ -63,7 +63,7 @@ type statementRow struct {
 // parseStatement reads the CSV text into rows (422 body.csv for a file that
 // cannot be read as a statement).
 func parseStatement(text string) ([]statementRow, error) {
-	bad := func(msg string) error { return fieldErr("body.csv", msg) }
+	bad := func(msg string) error { return problem.Field("body.csv", msg) }
 	if len(text) > MaxImportBytes {
 		return nil, bad(fmt.Sprintf("must be at most %d bytes", MaxImportBytes))
 	}

@@ -12,6 +12,7 @@ import (
 	"koro/internal/files"
 	"koro/internal/parties"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 )
 
 func ids(vs []parties.PartyView) []uuid.UUID {
@@ -64,7 +65,7 @@ func TestOrgScope_K21_PayeeSideOnly(t *testing.T) {
 		t.Fatalf("finance on uni_a: %v %v", got, err)
 	}
 	_, err = e.svc.GetOrgParty(ctxOf(t, ur), ur, org("uni_a"), uniOwn.Party.ID)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	e.store.LinkPayee(uuid.NewV7(), org("uni_a"), uniOwn.Party.ID, "pending_verification")
 	if got, err := list(ur, "uni_a"); err != nil || !slices.Equal(got, []uuid.UUID{uniOwn.Party.ID}) {
 		t.Fatalf("university_rep list with payee: %v %v", got, err)
@@ -131,7 +132,7 @@ func TestUploadDocument_FilesPipeline(t *testing.T) {
 			t.Fatalf("upload %s: %+v %v", f, d, err)
 		}
 	}
-	if ev := e.audit.of(authz.PartiesDocumentUpload); len(ev) != 2 || ev[0].OrgID == nil || *ev[0].OrgID != club {
+	if ev := e.audit.Of(authz.PartiesDocumentUpload); len(ev) != 2 || ev[0].OrgID == nil || *ev[0].OrgID != club {
 		t.Fatalf("upload audit = %+v", ev)
 	}
 	// Someone else's file, another org's file, another purpose, a missing file: 422.
@@ -141,20 +142,20 @@ func TestUploadDocument_FilesPipeline(t *testing.T) {
 	otherOrg := e.files.add(authztest.ID("stranger"), &companyA)
 	for _, f := range []uuid.UUID{e.files.add(authztest.ID("stranger"), nil), otherOrg, cv, uuid.NewV7()} {
 		_, err := e.svc.UploadDocument(ctxOf(t, ca), ca, club, found.Party.ID, in(f))
-		wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
+		problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
 	}
 	// A file attached to one document cannot back another (files: 409).
 	_, err := e.svc.UploadDocument(ctxOf(t, ca), ca, club, found.Party.ID, in(own))
-	wantProblem(t, err, http.StatusConflict, "files.already_attached")
+	problemtest.WantProblem(t, err, http.StatusConflict, "files.already_attached")
 	// A bad kind is 422; another org's party (H-38) is 404; no role is 403.
 	_, err = e.svc.UploadDocument(ctxOf(t, ca), ca, club, found.Party.ID, parties.DocumentInput{Kind: "passport", FileID: e.files.add(ca.UserID, nil)})
-	wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
 	buyer := e.buyer(t, vknA)
 	_, err = e.svc.UploadDocument(ctxOf(t, ca), ca, club, buyer.Party.ID, in(e.files.add(ca.UserID, nil)))
-	wantErr(t, err, authz.ErrNotFound)
+	problemtest.WantErr(t, err, authz.ErrNotFound)
 	cm := actor(t, "club_member")
 	_, err = e.svc.UploadDocument(ctxOf(t, cm), cm, club, found.Party.ID, in(e.files.add(cm.UserID, nil)))
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	// The documents are listed with the party.
 	v, err := e.svc.GetOrgParty(ctxOf(t, ca), ca, club, found.Party.ID)
 	if err != nil || len(v.Documents) != 2 {
@@ -164,7 +165,7 @@ func TestUploadDocument_FilesPipeline(t *testing.T) {
 	nf := newEnv(t, func(d *parties.Deps) { d.Files = nil })
 	f2 := nf.foundation(t, vknB)
 	_, err = nf.svc.UploadDocument(ctxOf(t, ca), ca, club, f2.Party.ID, in(uuid.NewV7()))
-	wantErr(t, err, problem.ErrUnavailable)
+	problemtest.WantErr(t, err, problem.ErrUnavailable)
 }
 
 // TestVerifyDocument_FourEyesAndCleanFile: finance or platform admins verify
@@ -182,29 +183,29 @@ func TestVerifyDocument_FourEyesAndCleanFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.AdminVerifyDocument(ctxOf(t, pad), pad, d.ID)
-	wantProblem(t, err, http.StatusForbidden, "authz.four_eyes_violation")
+	problemtest.WantProblem(t, err, http.StatusForbidden, "authz.four_eyes_violation")
 	ca := actor(t, "club_admin")
 	_, err = e.svc.AdminVerifyDocument(ctxOf(t, ca), ca, d.ID)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	_, err = e.svc.AdminVerifyDocument(ctxOf(t, fin), fin, uuid.NewV7())
-	wantErr(t, err, parties.ErrNotFound)
+	problemtest.WantErr(t, err, parties.ErrNotFound)
 	e.files.set(f, func(m *files.FileMeta) { m.ScanStatus = files.ScanInfected })
 	_, err = e.svc.AdminVerifyDocument(ctxOf(t, fin), fin, d.ID)
-	wantProblem(t, err, http.StatusConflict, "files.not_clean")
+	problemtest.WantProblem(t, err, http.StatusConflict, "files.not_clean")
 	e.files.set(f, func(m *files.FileMeta) { m.Status, m.ScanStatus = files.StatusRejected, files.ScanClean })
 	_, err = e.svc.AdminVerifyDocument(ctxOf(t, fin), fin, d.ID)
-	wantProblem(t, err, http.StatusConflict, "files.rejected")
+	problemtest.WantProblem(t, err, http.StatusConflict, "files.rejected")
 	e.files.set(f, func(m *files.FileMeta) { m.Status, m.ScanStatus = files.StatusActive, files.ScanSkipped })
 	got, err := e.svc.AdminVerifyDocument(ctxOf(t, fin), fin, d.ID)
 	if err != nil || got.VerifiedAt == nil || got.VerifiedBy == nil || *got.VerifiedBy != fin.UserID {
 		t.Fatalf("verify: %+v %v", got, err)
 	}
-	ev := e.audit.of(authz.PartiesDocumentVerify)
+	ev := e.audit.Of(authz.PartiesDocumentVerify)
 	if len(ev) != 1 || ev[0].ResourceID == nil || *ev[0].ResourceID != d.ID || ev[0].Metadata["legal_party_id"] != found.Party.ID.String() {
 		t.Fatalf("verify audit = %+v", ev)
 	}
 	_, err = e.svc.AdminVerifyDocument(ctxOf(t, fin), fin, d.ID)
-	wantProblem(t, err, http.StatusConflict, "parties.invalid_state")
+	problemtest.WantProblem(t, err, http.StatusConflict, "parties.invalid_state")
 }
 
 // TestAdminVerifyParty_StateMachine: draft, pending or rejected → verified
@@ -221,12 +222,12 @@ func TestAdminVerifyParty_StateMachine(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.AdminVerifyParty(ctxOf(t, fin), fin, bare.Party.ID, parties.Decision{Decision: parties.StatusVerified})
-	wantProblem(t, err, http.StatusUnprocessableEntity, "parties.verification_incomplete")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "parties.verification_incomplete")
 	_, err = e.svc.AdminVerifyParty(ctxOf(t, fin), fin, bare.Party.ID, parties.Decision{Decision: "inactive"})
-	wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
 	cma := actor(t, "company_admin")
 	_, err = e.svc.AdminVerifyParty(ctxOf(t, cma), cma, bare.Party.ID, parties.Decision{Decision: parties.StatusVerified})
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 
 	p := e.buyer(t, vknA)
 	ctx := idemCtx(t, fin, "verify-key-1")
@@ -235,18 +236,18 @@ func TestAdminVerifyParty_StateMachine(t *testing.T) {
 		t.Fatalf("verify: %+v %v", v1.Party, err)
 	}
 	v2, err := e.svc.AdminVerifyParty(ctx, fin, p.Party.ID, parties.Decision{Decision: parties.StatusVerified, Note: "Levha uygun"})
-	if err != nil || v2.Party.Status != parties.StatusVerified || len(e.audit.of(authz.PartiesLegalPartyVerify)) != 1 {
-		t.Fatalf("replay: %+v %v (%d events)", v2.Party, err, len(e.audit.of(authz.PartiesLegalPartyVerify)))
+	if err != nil || v2.Party.Status != parties.StatusVerified || len(e.audit.Of(authz.PartiesLegalPartyVerify)) != 1 {
+		t.Fatalf("replay: %+v %v (%d events)", v2.Party, err, len(e.audit.Of(authz.PartiesLegalPartyVerify)))
 	}
-	if ev := e.audit.of(authz.PartiesLegalPartyVerify)[0]; ev.Reason != "Levha uygun" || ev.Metadata["to"] != "verified" {
+	if ev := e.audit.Of(authz.PartiesLegalPartyVerify)[0]; ev.Reason != "Levha uygun" || ev.Metadata["to"] != "verified" {
 		t.Fatalf("verify audit = %+v", ev)
 	}
 	_, err = e.svc.AdminVerifyParty(ctxOf(t, fin), fin, p.Party.ID, parties.Decision{Decision: parties.StatusVerified})
-	wantProblem(t, err, http.StatusConflict, "parties.invalid_state")
+	problemtest.WantProblem(t, err, http.StatusConflict, "parties.invalid_state")
 	_, err = e.svc.AdminVerifyParty(ctxOf(t, fin), fin, p.Party.ID, parties.Decision{Decision: parties.StatusRejected})
-	wantProblem(t, err, http.StatusConflict, "parties.invalid_state")
+	problemtest.WantProblem(t, err, http.StatusConflict, "parties.invalid_state")
 	_, err = e.svc.AdminVerifyParty(ctxOf(t, fin), fin, uuid.NewV7(), parties.Decision{Decision: parties.StatusVerified})
-	wantErr(t, err, parties.ErrNotFound)
+	problemtest.WantErr(t, err, parties.ErrNotFound)
 }
 
 // TestAdminListParties_FiltersAndPages: filters by kind, status and q (title
@@ -292,11 +293,11 @@ func TestAdminListParties_FiltersAndPages(t *testing.T) {
 	}
 	for _, bad := range []parties.AdminQuery{{Kind: "x"}, {Status: "x"}, {Q: "a"}} {
 		_, err := e.svc.AdminListParties(ctxOf(t, fin), fin, bad)
-		wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
+		problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
 	}
 	cma := actor(t, "company_admin")
 	_, err = e.svc.AdminListParties(ctxOf(t, cma), cma, parties.AdminQuery{})
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 }
 
 // TestPrivacy_ExportAndRetain: the KVKK provider exports the parties and

@@ -11,8 +11,11 @@ import (
 	"koro/internal/identity"
 	"koro/internal/orgs"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // MemberThreshold is the k-anonymity threshold of member counts (k ≥ 10).
@@ -117,7 +120,7 @@ func (s *service) ListClubs(ctx context.Context, a authz.Actor, q ClubQuery) (Cl
 		return ClubPage{}, err
 	}
 	if q.Category != "" && !q.Category.Valid() {
-		return ClubPage{}, fieldErr("query.category", "unknown category")
+		return ClubPage{}, problem.Field("query.category", "unknown category")
 	}
 	f := ClubFilter{Q: text, UniversityID: q.UniversityID, Category: q.Category, Claimed: q.Claimed, Sort: sortOf(q.Sort)}
 	limit := page.ClampLimit(q.Limit)
@@ -160,7 +163,7 @@ func (s *service) view(ctx context.Context, a authz.Actor, c Club) (ClubView, er
 	if err != nil {
 		return ClubView{}, err
 	}
-	return ClubView{Club: c, Org: o, University: u, MemberCount: s.countOf(ctx, c), ETag: etagOf(c.UpdatedAt)}, nil
+	return ClubView{Club: c, Org: o, University: u, MemberCount: s.countOf(ctx, c), ETag: httpx.ETag(c.UpdatedAt)}, nil
 }
 
 // writableOrg is the org status rule of a club write (03 §2.3): a closed
@@ -197,7 +200,7 @@ func (s *service) UpdateClub(ctx context.Context, a authz.Actor, clubID uuid.UUI
 		if err := s.writableOrg(ctx, a, c.OrgID); err != nil {
 			return err
 		}
-		if err := checkIfMatch(ifMatch, etagOf(c.UpdatedAt)); err != nil {
+		if err := httpx.CheckIfMatch(ifMatch, httpx.ETag(c.UpdatedAt)); err != nil {
 			return err
 		}
 		if p.empty() {
@@ -230,11 +233,7 @@ func (s *service) emitClubUpdated(ctx context.Context, clubOrgID uuid.UUID, fiel
 	if len(fields) == 0 {
 		return nil
 	}
-	env, err := domainevent.New(domainevent.ClubUpdated{ClubOrgID: clubOrgID, Fields: fields}, "club", clubOrgID)
-	if err != nil {
-		return err
-	}
-	return s.d.Outbox.Add(ctx, env)
+	return outbox.Emit(ctx, s.d.Outbox, domainevent.ClubUpdated{ClubOrgID: clubOrgID, Fields: fields}, "club", clubOrgID)
 }
 
 // applyClubPatch validates p against c and returns the new row and the
@@ -243,7 +242,7 @@ func applyClubPatch(c Club, p ClubPatch) (Club, []string, error) {
 	next, changed := c, []string{}
 	if p.Category != nil {
 		if !p.Category.Valid() {
-			return Club{}, nil, fieldErr("body.category", "unknown category")
+			return Club{}, nil, problem.Field("body.category", "unknown category")
 		}
 		// 03 k7: a sensitive category needs the flag, which only a platform
 		// admin sets (adminSetClubSensitivity).
@@ -254,7 +253,7 @@ func applyClubPatch(c Club, p ClubPatch) (Club, []string, error) {
 	}
 	if p.JoinPolicy != nil {
 		if !p.JoinPolicy.Valid() {
-			return Club{}, nil, fieldErr("body.join_policy", "must be open or approval")
+			return Club{}, nil, problem.Field("body.join_policy", "must be open or approval")
 		}
 		next.JoinPolicy, changed = *p.JoinPolicy, append(changed, "join_policy")
 	}
@@ -268,7 +267,7 @@ func applyClubPatch(c Club, p ClubPatch) (Club, []string, error) {
 	switch {
 	case p.FoundedYear != nil:
 		if y := *p.FoundedYear; y < 1900 || y > 2100 {
-			return Club{}, nil, fieldErr("body.founded_year", "must be 1900-2100")
+			return Club{}, nil, problem.Field("body.founded_year", "must be 1900-2100")
 		}
 		next.FoundedYear, changed = ptr(*p.FoundedYear), append(changed, "founded_year")
 	case p.ClearFoundedYear:
@@ -281,11 +280,11 @@ func applyClubPatch(c Club, p ClubPatch) (Club, []string, error) {
 func cleanSensitivity(sensitive bool, reason SensitiveReason, loc string) (*SensitiveReason, error) {
 	switch {
 	case sensitive && reason == "":
-		return nil, fieldErr(loc, "is required for a sensitive club")
+		return nil, problem.Field(loc, "is required for a sensitive club")
 	case sensitive && !reason.Valid():
-		return nil, fieldErr(loc, "unknown reason")
+		return nil, problem.Field(loc, "unknown reason")
 	case !sensitive && reason != "":
-		return nil, fieldErr(loc, "applies to a sensitive club only")
+		return nil, problem.Field(loc, "applies to a sensitive club only")
 	case sensitive:
 		return ptr(reason), nil
 	}
@@ -306,13 +305,13 @@ func (s *service) AdminCreateClub(ctx context.Context, a authz.Actor, in ClubInp
 		return ClubView{}, err
 	}
 	if in.Slug != "" && (!skillSlugRe.MatchString(in.Slug) || len(in.Slug) > maxSlug) {
-		return ClubView{}, fieldErr("body.slug", "must be lower-case letters and digits separated by single hyphens, at most 80")
+		return ClubView{}, problem.Field("body.slug", "must be lower-case letters and digits separated by single hyphens, at most 80")
 	}
 	switch {
 	case !in.Category.Valid():
-		return ClubView{}, fieldErr("body.category", "unknown category")
+		return ClubView{}, problem.Field("body.category", "unknown category")
 	case !in.JoinPolicy.Valid():
-		return ClubView{}, fieldErr("body.join_policy", "must be open or approval")
+		return ClubView{}, problem.Field("body.join_policy", "must be open or approval")
 	case in.Category.Sensitive() && !in.IsSensitive:
 		return ClubView{}, ErrSensitivityRequired
 	}
@@ -331,7 +330,7 @@ func (s *service) AdminCreateClub(ctx context.Context, a authz.Actor, in ClubInp
 	id, _, err := idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (uuid.UUID, error) {
 		u, err := s.d.Store.LockUniversity(ctx, in.UniversityID)
 		if errors.Is(err, ErrNotFound) || err == nil && !u.IsActive {
-			return uuid.Nil(), fieldErr("body.university_id", "must be an active university")
+			return uuid.Nil(), problem.Field("body.university_id", "must be an active university")
 		}
 		if err != nil {
 			return uuid.Nil(), err
@@ -459,7 +458,7 @@ func (s *service) RequestClubSensitivity(ctx context.Context, a authz.Actor, clu
 		return err
 	}
 	if !reason.Valid() {
-		return fieldErr("body.sensitive_reason", "unknown reason")
+		return problem.Field("body.sensitive_reason", "unknown reason")
 	}
 	n, err := cleanOptional("body.note", note, maxNote)
 	if err != nil {

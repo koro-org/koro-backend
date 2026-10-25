@@ -23,6 +23,7 @@ import (
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/outbox"
+	"koro/internal/platform/problem/problemtest"
 	"koro/internal/platform/queue"
 	"koro/internal/platform/storage"
 	"koro/internal/platform/storage/storagetest"
@@ -133,7 +134,7 @@ func TestFiles_SeaweedFS_UploadVerifyScanDownload(t *testing.T) {
 	// A tampered upload (PNG declared as PDF) is rejected and deleted.
 	bad := e.browserUpload(t, png)
 	_, err := svc.CompleteUpload(t.Context(), actor(t, "student"), bad.FileID, digest(png))
-	wantErr(t, err, files.ErrContentMismatch)
+	problemtest.WantErr(t, err, files.ErrContentMismatch)
 	badRow, _ := e.store.Get(t.Context(), bad.FileID)
 	if badRow.Status != files.StatusUploading || e.exists(t, e.b.Quarantine, badRow.StorageKey) {
 		t.Fatalf("rejected upload: status %s, object kept %v", badRow.Status, e.exists(t, e.b.Quarantine, badRow.StorageKey))
@@ -146,7 +147,7 @@ func TestFiles_SeaweedFS_UploadVerifyScanDownload(t *testing.T) {
 		t.Fatalf("CompleteUpload = %+v, %v", m, err)
 	}
 	_, err = svc.PresignGet(t.Context(), up.FileID, time.Minute)
-	wantErr(t, err, files.ErrNotClean)
+	problemtest.WantErr(t, err, files.ErrNotClean)
 
 	e.scan(t, up.FileID)
 	f, _ := e.store.Get(t.Context(), up.FileID)

@@ -12,6 +12,7 @@ import (
 	"koro/internal/events"
 	"koro/internal/orgs"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/problem/problemtest"
 )
 
 func TestCreateEvent_CreatesDraftForm(t *testing.T) {
@@ -30,7 +31,7 @@ func TestCreateEvent_CreatesDraftForm(t *testing.T) {
 		string(f.DraftSchema) != `{"schema_version":1,"fields":[]}` {
 		t.Fatalf("form draft = %+v, %v", f, ok)
 	}
-	if got := e.audit.of(authz.EventsEventCreate); len(got) != 1 || *got[0].ResourceID != ev.ID || *got[0].OrgID != ev.OrgID {
+	if got := e.audit.Of(authz.EventsEventCreate); len(got) != 1 || *got[0].ResourceID != ev.ID || *got[0].OrgID != ev.OrgID {
 		t.Fatalf("audit = %+v", got)
 	}
 	// The same title again takes the next free slug; a requested slug that is
@@ -41,7 +42,7 @@ func TestCreateEvent_CreatesDraftForm(t *testing.T) {
 	in := input("Başka Bir Atölye")
 	in.Slug = "go-atolyesi"
 	_, err := e.svc.CreateEvent(ctx, persona(t, "club_admin"), orgID("club_a"), in)
-	wantCode(t, err, 409, "events.slug_taken")
+	problemtest.WantProblem(t, err, 409, "events.slug_taken")
 	// university_rep organises for its university (MFA session), not for a club of it.
 	if u := e.create(t, "university_rep", "uni_a", input("Kariyer Günü")); u.Event.OrgID != orgID("uni_a") {
 		t.Fatalf("university event org = %s", u.Event.OrgID)
@@ -57,13 +58,13 @@ func TestCreateEvent_CreatesDraftForm(t *testing.T) {
 	bad := input("Ters Tarihli")
 	bad.EndsAt = bad.StartsAt
 	_, err = e.svc.CreateEvent(ctx, persona(t, "club_admin"), orgID("club_a"), bad)
-	wantCode(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 	uniOnly := input("Yalnız Üniversite")
 	uniOnly.Visibility = events.VisibilityUniversity
 	other := authzUniversity("uni_b")
 	uniOnly.VisibilityUniversityID = &other
 	_, err = e.svc.CreateEvent(ctx, persona(t, "club_admin"), orgID("club_a"), uniOnly)
-	wantCode(t, err, 422, "validation_failed") // club_a belongs to uni_a
+	problemtest.WantProblem(t, err, 422, "validation_failed") // club_a belongs to uni_a
 	own := authzUniversity("uni_a")
 	uniOnly.VisibilityUniversityID = &own
 	if v := e.create(t, "club_admin", "club_a", uniOnly); *v.Event.VisibilityUniversityID != own {
@@ -72,7 +73,7 @@ func TestCreateEvent_CreatesDraftForm(t *testing.T) {
 	// A suspended org's admin cannot create (03 §2.3).
 	e.orgs.setStatus(orgID("club_a"), orgs.StatusSuspended)
 	_, err = e.svc.CreateEvent(ctx, persona(t, "club_admin"), orgID("club_a"), input("Askıda"))
-	wantCode(t, err, 403, "orgs.org_suspended")
+	problemtest.WantProblem(t, err, 403, "orgs.org_suspended")
 }
 
 func TestCreateEvent_CompanyOrg_403(t *testing.T) {
@@ -87,7 +88,7 @@ func TestCreateEvent_CompanyOrg_403(t *testing.T) {
 	// Another company's admin does not see company_a's surface.
 	_, err := e.svc.CreateEvent(ctx, persona(t, "other_company_member"), orgID("company_a"), input("Şirket Etkinliği"))
 	wantNotFound(t, err)
-	if n := len(e.audit.of(authz.EventsEventCreate)); n != 0 {
+	if n := len(e.audit.Of(authz.EventsEventCreate)); n != 0 {
 		t.Fatalf("%d audit records of refused creations", n)
 	}
 }
@@ -99,7 +100,7 @@ func TestPublishEvent_RequiresRegistrationWithoutForm_422(t *testing.T) {
 	admin := persona(t, "club_admin")
 	v := e.create(t, "club_admin", "club_a", input("Formsuz Etkinlik"))
 	_, err := e.svc.PublishEvent(ctx, admin, v.Event.ID)
-	wantCode(t, err, 422, "events.form_required")
+	problemtest.WantProblem(t, err, 422, "events.form_required")
 	if got, _ := e.mem.GetEvent(ctx, v.Event.ID); got.Status != events.StatusDraft {
 		t.Fatalf("status after the refused publication = %s", got.Status)
 	}
@@ -112,13 +113,13 @@ func TestPublishEvent_RequiresRegistrationWithoutForm_422(t *testing.T) {
 		t.Fatalf("publish = %+v, %v", p.Event, err)
 	}
 	_, err = e.svc.PublishEvent(ctx, admin, v.Event.ID)
-	wantCode(t, err, 409, "events.invalid_state")
+	problemtest.WantProblem(t, err, 409, "events.invalid_state")
 	// Without registration no form is needed; an online event needs its link.
 	in := input("Kayıtsız Çevrim İçi")
 	in.RequiresRegistration, in.Format, in.City, in.LocationName = new(false), events.FormatOnline, "", ""
 	o := e.create(t, "club_admin", "club_a", in)
 	_, err = e.svc.PublishEvent(ctx, admin, o.Event.ID)
-	wantCode(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 	_, err = e.svc.UpdateEvent(ctx, admin, o.Event.ID, o.ETag, events.EventPatch{OnlineURL: new("https://meet.example.test/oda")})
 	if err != nil {
 		t.Fatal(err)
@@ -131,7 +132,7 @@ func TestPublishEvent_RequiresRegistrationWithoutForm_422(t *testing.T) {
 	_ = e.mem.SetFormVersion(old.Event.ID, uuid.NewV7())
 	e.clk.Set(start.Add(3 * time.Hour))
 	_, err = e.svc.PublishEvent(ctx, admin, old.Event.ID)
-	wantCode(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 }
 
 func TestUpdateEvent_StaleETag_412(t *testing.T) {
@@ -142,27 +143,27 @@ func TestUpdateEvent_StaleETag_412(t *testing.T) {
 	v := e.create(t, "club_admin", "club_a", input("Sürüm Etkinliği"))
 	title := new("Yeni Başlık")
 	_, err := e.svc.UpdateEvent(ctx, admin, v.Event.ID, "", events.EventPatch{Title: title})
-	wantCode(t, err, 428, "precondition_required")
+	problemtest.WantProblem(t, err, 428, "precondition_required")
 	_, err = e.svc.UpdateEvent(ctx, admin, v.Event.ID, `"stale"`, events.EventPatch{Title: title})
-	wantCode(t, err, 412, "precondition_failed")
+	problemtest.WantProblem(t, err, 412, "precondition_failed")
 	u, err := e.svc.UpdateEvent(ctx, admin, v.Event.ID, v.ETag, events.EventPatch{Title: title})
 	if err != nil || u.Event.Title != "Yeni Başlık" || u.ETag == v.ETag {
 		t.Fatalf("update = %+v (etag %s → %s), %v", u.Event, v.ETag, u.ETag, err)
 	}
 	// The first ETag is stale now.
 	_, err = e.svc.UpdateEvent(ctx, admin, v.Event.ID, v.ETag, events.EventPatch{Title: new("Üçüncü")})
-	wantCode(t, err, 412, "precondition_failed")
+	problemtest.WantProblem(t, err, 412, "precondition_failed")
 	// An empty patch, a field both set and cleared.
 	_, err = e.svc.UpdateEvent(ctx, admin, v.Event.ID, u.ETag, events.EventPatch{})
-	wantCode(t, err, 422, "events.empty_patch")
+	problemtest.WantProblem(t, err, 422, "events.empty_patch")
 	_, err = e.svc.UpdateEvent(ctx, admin, v.Event.ID, u.ETag, events.EventPatch{City: new("Ankara"), Clear: []string{"city"}})
-	wantCode(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 	// Clearing works; audit names the fields, never values.
 	c, err := e.svc.UpdateEvent(ctx, admin, v.Event.ID, u.ETag, events.EventPatch{Clear: []string{"city"}})
 	if err != nil || c.Event.City != nil {
 		t.Fatalf("clear city = %+v, %v", c.Event, err)
 	}
-	if got := e.audit.of(authz.EventsEventUpdate); len(got) != 2 || !slices.Equal(got[1].Metadata["fields"].([]string), []string{"city"}) {
+	if got := e.audit.Of(authz.EventsEventUpdate); len(got) != 2 || !slices.Equal(got[1].Metadata["fields"].([]string), []string{"city"}) {
 		t.Fatalf("audit = %+v", got)
 	}
 	// Another club's admin does not see the draft (06 H-38: 404, nothing written).
@@ -262,21 +263,21 @@ func TestCancelEvent_EmitsEventInSameTx(t *testing.T) {
 	admin := persona(t, "club_admin")
 	d := e.create(t, "club_admin", "club_a", input("İptal Taslağı"))
 	_, err := e.svc.CancelEvent(ctx, admin, d.Event.ID, "Hava koşulları")
-	wantCode(t, err, 409, "events.invalid_state") // a draft is deleted, not cancelled
+	problemtest.WantProblem(t, err, 409, "events.invalid_state") // a draft is deleted, not cancelled
 	p := e.published(t, input("İptal Edilecek"))
 	_, err = e.svc.CancelEvent(ctx, admin, p.Event.ID, " ")
-	wantCode(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 	// A failing audit write fails the transaction: no event leaves (the
 	// in-memory store has no rollback, so that event is not reused).
 	failed := e.published(t, input("Başarısız İptal"))
-	e.audit.setFail(errors.New("audit down"))
+	e.audit.Fail(errors.New("audit down"))
 	if _, err := e.svc.CancelEvent(ctx, admin, failed.Event.ID, "Hava koşulları"); err == nil {
 		t.Fatal("cancel with a failing audit succeeded")
 	}
 	if len(e.eventsOf(domainevent.TopicEventCancelled)) != 0 {
 		t.Fatalf("events after the rollback: %v", e.out.Topics())
 	}
-	e.audit.setFail(nil)
+	e.audit.Fail(nil)
 	updatesBefore := len(e.store.updates)
 	c, err := e.svc.CancelEvent(ctx, admin, p.Event.ID, "Hava koşulları")
 	if err != nil || c.Event.Status != events.StatusCancelled || c.Event.CancelledAt == nil || *c.Event.CancelReason != "Hava koşulları" {
@@ -293,10 +294,10 @@ func TestCancelEvent_EmitsEventInSameTx(t *testing.T) {
 		t.Fatalf("outbox tx %v, update tx %v", adds, updates)
 	}
 	_, err = e.svc.CancelEvent(ctx, admin, p.Event.ID, "Tekrar")
-	wantCode(t, err, 409, "events.invalid_state")
+	problemtest.WantProblem(t, err, 409, "events.invalid_state")
 	// A cancelled event takes no edit.
 	_, err = e.svc.UpdateEvent(ctx, admin, p.Event.ID, c.ETag, events.EventPatch{Title: new("Sonradan")})
-	wantCode(t, err, 409, "events.invalid_state")
+	problemtest.WantProblem(t, err, 409, "events.invalid_state")
 }
 
 func TestDeleteEvent_OnlyDraft(t *testing.T) {
@@ -326,12 +327,12 @@ func TestDeleteEvent_OnlyDraft(t *testing.T) {
 	wantNotFound(t, e.svc.DeleteEventDraft(ctx, admin, d.Event.ID))
 	// A published or cancelled event is never deleted.
 	p := e.published(t, input("Yayımlı"))
-	wantCode(t, e.svc.DeleteEventDraft(ctx, admin, p.Event.ID), 409, "events.invalid_state")
+	problemtest.WantProblem(t, e.svc.DeleteEventDraft(ctx, admin, p.Event.ID), 409, "events.invalid_state")
 	if _, err := e.svc.CancelEvent(ctx, admin, p.Event.ID, "Vazgeçildi"); err != nil {
 		t.Fatal(err)
 	}
-	wantCode(t, e.svc.DeleteEventDraft(ctx, admin, p.Event.ID), 409, "events.invalid_state")
-	if got := e.audit.of(authz.EventsEventDelete); len(got) != 1 {
+	problemtest.WantProblem(t, e.svc.DeleteEventDraft(ctx, admin, p.Event.ID), 409, "events.invalid_state")
+	if got := e.audit.Of(authz.EventsEventDelete); len(got) != 1 {
 		t.Fatalf("delete audit = %+v", got)
 	}
 }
@@ -413,7 +414,7 @@ func TestListEvents_AnonymousOnlyPublic(t *testing.T) {
 		t.Errorf("org_id+university_id → %v", got)
 	}
 	_, err := e.svc.ListEvents(ctx, anon, events.ListQuery{Q: "a"})
-	wantCode(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 	// Ended events leave the default list.
 	e.clk.Set(start.Add(3 * time.Hour))
 	if got := titles(anon, events.ListQuery{}); len(got) != 0 {
@@ -534,14 +535,14 @@ func TestAddStaff_ClubAdminOnly(t *testing.T) {
 		t.Fatalf("added = %+v, %v", s, err)
 	}
 	_, err = e.svc.AddStaff(ctx, admin, id, "student@example.test", events.StaffManager)
-	wantCode(t, err, 409, "events.staff_exists")
+	problemtest.WantProblem(t, err, 409, "events.staff_exists")
 	_, err = e.svc.AddStaff(ctx, admin, id, "nobody@example.test", events.StaffScanner)
 	wantNotFound(t, err) // no account: invitations are phase 2
 	e.users.suspended[persona(t, "club_member").UserID] = true
 	_, err = e.svc.AddStaff(ctx, admin, id, "club_member@example.test", events.StaffScanner)
 	wantNotFound(t, err)
 	_, err = e.svc.AddStaff(ctx, admin, id, "student@example.test", "boss")
-	wantCode(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 	// The staff row takes org_id from the event (06 H-38).
 	rows, _ := e.mem.StaffOfUser(ctx, s.UserID)
 	if len(rows) != 1 || rows[0].OrgID != orgID("club_a") || rows[0].InvitedBy != admin.UserID {
@@ -564,10 +565,10 @@ func TestAddStaff_ClubAdminOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantNotFound(t, e.svc.RemoveStaff(ctx, admin, id, s.UserID))
-	if got := e.audit.of(authz.EventsStaffManage); len(got) != 3 {
+	if got := e.audit.Of(authz.EventsStaffManage); len(got) != 3 {
 		t.Fatalf("staff audit = %+v", got)
 	}
-	for _, a := range e.audit.of(authz.EventsStaffManage) {
+	for _, a := range e.audit.Of(authz.EventsStaffManage) {
 		if b, _ := json.Marshal(a.Metadata); containsAny(string(b), "@") {
 			t.Fatalf("an address in the audit metadata: %s", b)
 		}
@@ -607,7 +608,7 @@ func TestEventsGet_SensitiveFromClub(t *testing.T) {
 		t.Fatalf("Get(unknown) = %v", err)
 	}
 	// The flag never reaches the audit record.
-	for _, a := range e.audit.of(authz.EventsEventCreate) {
+	for _, a := range e.audit.Of(authz.EventsEventCreate) {
 		if _, ok := a.Metadata["sensitive"]; ok {
 			t.Fatalf("audit carries the sensitive flag: %+v", a)
 		}
@@ -702,6 +703,6 @@ func TestCreateEvent_DescriptionAllowList(t *testing.T) {
 		in := input("Kötü Metin")
 		in.Description = doc(bad)
 		_, err := e.svc.CreateEvent(ctx, persona(t, "club_admin"), orgID("club_a"), in)
-		wantCode(t, err, 422, "validation_failed")
+		problemtest.WantProblem(t, err, 422, "validation_failed")
 	}
 }

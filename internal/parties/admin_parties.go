@@ -8,6 +8,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/files"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/problem"
 )
 
 // ownershipResource is the authz view of an ownership correction (06
@@ -36,7 +37,7 @@ func (s *service) AdminUploadDocument(ctx context.Context, a authz.Actor, partyI
 		return Document{}, err
 	}
 	if !in.Kind.Valid() {
-		return Document{}, fieldErr("body.kind", "is not a document kind")
+		return Document{}, problem.Field("body.kind", "is not a document kind")
 	}
 	if s.d.Files == nil {
 		return Document{}, ErrUnavailable
@@ -100,7 +101,7 @@ func (s *service) attachDocument(ctx context.Context, a authz.Actor, p LegalPart
 // checkOwnUpload accepts a party_document upload of the caller (the admin
 // surface has no org to accept uploads for).
 func (s *service) checkOwnUpload(ctx context.Context, a authz.Actor, fileID uuid.UUID, loc string) error {
-	bad := fieldErr(loc, "must be a party_document upload of the caller")
+	bad := problem.Field(loc, "must be a party_document upload of the caller")
 	f, err := s.d.Files.Get(ctx, fileID)
 	switch {
 	case errors.Is(err, files.ErrNotFound):
@@ -188,9 +189,9 @@ func (s *service) AdminCorrectOwnership(ctx context.Context, a authz.Actor, part
 		}
 		switch {
 		case cur.Kind == KindPlatform:
-			return uuid.Nil(), fieldErr("path.party_id", "the platform party is not corrected (it has no competing owner)")
+			return uuid.Nil(), problem.Field("path.party_id", "the platform party is not corrected (it has no competing owner)")
 		case cur.TaxNo == nil && !cur.HasTCKN():
-			return uuid.Nil(), fieldErr("path.party_id", "the party holds no tax ID: retire it with adminUpdateLegalParty")
+			return uuid.Nil(), problem.Field("path.party_id", "the party holds no tax ID: retire it with adminUpdateLegalParty")
 		case cur.Status == StatusInactive:
 			return uuid.Nil(), ErrInvalidState
 		}

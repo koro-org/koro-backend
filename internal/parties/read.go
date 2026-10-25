@@ -8,7 +8,9 @@ import (
 	"uuid"
 
 	"koro/internal/authz"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 	"koro/internal/platform/textx"
 )
 
@@ -99,18 +101,18 @@ func (s *service) AdminListParties(ctx context.Context, a authz.Actor, q AdminQu
 	}
 	f := ListFilter{Kind: q.Kind, Status: q.Status}
 	if q.Kind != "" && !q.Kind.Valid() {
-		return PartyPage{}, fieldErr("query.kind", "must be platform, buyer_company or payee")
+		return PartyPage{}, problem.Field("query.kind", "must be platform, buyer_company or payee")
 	}
 	if q.Status != "" && !q.Status.Valid() {
-		return PartyPage{}, fieldErr("query.status", "is not a legal party status")
+		return PartyPage{}, problem.Field("query.status", "is not a legal party status")
 	}
 	if q.Q != "" {
 		n, err := textx.NormalizeText(q.Q)
 		if err != nil {
-			return PartyPage{}, fieldErr("query.q", "contains control or bidi characters")
+			return PartyPage{}, problem.Field("query.q", "contains control or bidi characters")
 		}
 		if c := utf8.RuneCountInString(n); c < 2 || c > 100 {
-			return PartyPage{}, fieldErr("query.q", "must be 2-100 characters")
+			return PartyPage{}, problem.Field("query.q", "must be 2-100 characters")
 		}
 		f.Q = n
 	}
@@ -157,7 +159,7 @@ func (s *service) views(ctx context.Context, ps []LegalParty, full bool) ([]Part
 	}
 	for i, p := range ps {
 		out[i] = PartyView{
-			Party: p.withoutSecrets(), ETag: etagOf(p.UpdatedAt), FullTaxIDs: full, TCKNOnFile: p.HasTCKN(),
+			Party: p.withoutSecrets(), ETag: httpx.ETag(p.UpdatedAt), FullTaxIDs: full, TCKNOnFile: p.HasTCKN(),
 			Documents: slices.DeleteFunc(slices.Clone(docs), func(d Document) bool { return d.LegalPartyID != p.ID }),
 		}
 	}

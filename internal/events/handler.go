@@ -11,8 +11,10 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // Register adds the 12 event core operations of BE-024, the 7 form and
@@ -24,7 +26,7 @@ import (
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "listEvents", Method: http.MethodGet, Path: "/events",
 		Summary: "List events",
 		Description: "Published events the caller may see (anonymous: public events only). Without a date range, events " +
@@ -33,26 +35,26 @@ func Register(api huma.API, svc Service) {
 			"starts_from / starts_to is the start / end of that day in Europe/Istanbul.",
 	}, op.Meta{Action: string(authz.EventsEventList), Surface: op.SurfacePublic}, h.listEvents)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "getEvent", Method: http.MethodGet, Path: "/events/{event_id}",
 		Summary: "Get an event",
 		Description: "An event the caller may not see is 404. online_url is shown to the event's managers only. The " +
 			"ETag is the If-Match value of updateEvent.",
 	}, op.Meta{Action: string(authz.EventsEventRead), Surface: op.SurfacePublic}, h.getEvent)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "listOrgEvents", Method: http.MethodGet, Path: "/orgs/{org_id}/events",
 		Summary: "List an organization's events", Description: "Drafts included; sorted by starts_at.",
 	}, op.Meta{Action: string(authz.EventsEventListOrg), Surface: op.SurfaceOrg}, h.listOrgEvents)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "createEvent", Method: http.MethodPost, Path: "/orgs/{org_id}/events", DefaultStatus: http.StatusCreated,
 		Summary: "Create an event (draft)",
 		Description: "Clubs, universities and the platform org organise events (companies: 403 in v1). The event starts " +
 			"as a draft with an empty registration form draft. A suspended org cannot create (403 orgs.org_suspended).",
 	}, op.Meta{Action: string(authz.EventsEventCreate), Surface: op.SurfaceOrg, Idempotency: op.IdempotencyOptional}, h.createEvent)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "updateEvent", Method: http.MethodPatch, Path: "/events/{event_id}",
 		Summary: "Update an event",
 		Description: "If-Match with the ETag of getEvent is required: missing → 428, stale → 412. Cancelled and " +
@@ -60,43 +62,43 @@ func Register(api huma.API, svc Service) {
 			"event notifies its attendees. clear lists the optional fields to empty.",
 	}, op.Meta{Action: string(authz.EventsEventUpdate), Surface: op.SurfaceResource}, h.updateEvent)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "publishEvent", Method: http.MethodPost, Path: "/events/{event_id}/publish",
 		Summary: "Publish a draft event",
 		Description: "draft → published. An event with registration needs a published form version (422 " +
 			"events.form_required); an online or hybrid event needs online_url; a past event cannot be published.",
 	}, op.Meta{Action: string(authz.EventsEventPublish), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional}, h.publishEvent)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "cancelEvent", Method: http.MethodPost, Path: "/events/{event_id}/cancel",
 		Summary: "Cancel a published event",
 		Description: "published → cancelled. Registrations and tickets are cancelled and attendees notified " +
 			"(event.cancelled).",
 	}, op.Meta{Action: string(authz.EventsEventCancel), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional}, h.cancelEvent)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "deleteEventDraft", Method: http.MethodDelete, Path: "/events/{event_id}", DefaultStatus: http.StatusNoContent,
 		Summary: "Delete a draft event", Description: "Drafts only (409 events.invalid_state otherwise).",
 	}, op.Meta{Action: string(authz.EventsEventDelete), Surface: op.SurfaceResource}, h.deleteEvent)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "listEventStaff", Method: http.MethodGet, Path: "/events/{event_id}/staff",
 		Summary: "List an event's staff", Description: "First name and the initial of the last name only.",
 	}, op.Meta{Action: string(authz.EventsStaffList), Surface: op.SurfaceResource}, h.listStaff)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "addEventStaff", Method: http.MethodPost, Path: "/events/{event_id}/staff", DefaultStatus: http.StatusCreated,
 		Summary: "Add a staff member",
 		Description: "The address must belong to an active account (404 otherwise; invitations come later). Staff are " +
 			"managed while the event is a draft or published.",
 	}, op.Meta{Action: string(authz.EventsStaffManage), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional}, h.addStaff)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "updateEventStaff", Method: http.MethodPatch, Path: "/events/{event_id}/staff/{user_id}",
 		Summary: "Change a staff member's role",
 	}, op.Meta{Action: string(authz.EventsStaffManage), Surface: op.SurfaceResource}, h.updateStaff)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "removeEventStaff", Method: http.MethodDelete, Path: "/events/{event_id}/staff/{user_id}",
 		DefaultStatus: http.StatusNoContent,
 		Summary:       "Remove a staff member",
@@ -109,23 +111,7 @@ func Register(api huma.API, svc Service) {
 	registerMine(api, h)
 }
 
-// reg registers one events operation with its Koro metadata.
-func reg[I, O any](api huma.API, o huma.Operation, m op.Meta, fn func(context.Context, *I) (*O, error)) {
-	o.Tags = []string{"events"}
-	huma.Register(api, op.Koro(o, m), fn)
-}
-
 type handler struct{ svc Service }
-
-// parseID parses a path ID; a malformed one is the nil UUID, which no row
-// has: it answers like a missing row (404) after the authz of the surface.
-func parseID(s string) uuid.UUID {
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return uuid.Nil()
-	}
-	return id
-}
 
 // EventPath is the event_id path parameter (exported: huma reads the
 // fields of an embedded struct only when its type is exported).
@@ -133,14 +119,14 @@ type EventPath struct {
 	EventID string `path:"event_id" doc:"Event ID"`
 }
 
-func (p EventPath) id() uuid.UUID { return parseID(p.EventID) }
+func (p EventPath) id() uuid.UUID { return httpx.ParseID(p.EventID) }
 
 // OrgPath is the org_id path parameter.
 type OrgPath struct {
 	OrgID string `path:"org_id" doc:"Organization ID"`
 }
 
-func (p OrgPath) id() uuid.UUID { return parseID(p.OrgID) }
+func (p OrgPath) id() uuid.UUID { return httpx.ParseID(p.OrgID) }
 
 type eventOutput struct {
 	ETag string `header:"ETag"`
@@ -206,7 +192,7 @@ func parseIDs(loc string, raw []string) ([]uuid.UUID, error) {
 	for _, s := range raw {
 		id, err := uuid.Parse(s)
 		if err != nil {
-			return nil, fieldErr(loc, "must be a UUID")
+			return nil, problem.Field(loc, "must be a UUID")
 		}
 		out = append(out, id)
 	}
@@ -235,7 +221,7 @@ func parseBound(loc, s string, end bool) (*time.Time, error) {
 	}
 	d, err := time.ParseInLocation(time.DateOnly, s, istanbul())
 	if err != nil {
-		return nil, fieldErr(loc, "must be an RFC 3339 time or a YYYY-MM-DD date")
+		return nil, problem.Field(loc, "must be an RFC 3339 time or a YYYY-MM-DD date")
 	}
 	if end {
 		d = d.AddDate(0, 0, 1)
@@ -361,10 +347,10 @@ func (h handler) createEvent(ctx context.Context, in *createEventInput) (*eventO
 		RegistrationClosesAt: b.RegistrationClosesAt, CancelDeadlineAt: b.CancelDeadlineAt, CheckinEnabled: b.CheckinEnabled,
 		IsSensitiveCategory: b.IsSensitiveCategory,
 	}
-	if ev.CoverFileID, err = optID("body.cover_file_id", b.CoverFileID); err != nil {
+	if ev.CoverFileID, err = httpx.OptID("body.cover_file_id", b.CoverFileID); err != nil {
 		return nil, err
 	}
-	if ev.VisibilityUniversityID, err = optID("body.visibility_university_id", b.VisibilityUniversityID); err != nil {
+	if ev.VisibilityUniversityID, err = httpx.OptID("body.visibility_university_id", b.VisibilityUniversityID); err != nil {
 		return nil, err
 	}
 	v, err := h.svc.CreateEvent(ctx, a, in.id(), ev)
@@ -372,17 +358,6 @@ func (h handler) createEvent(ctx context.Context, in *createEventInput) (*eventO
 		return nil, err
 	}
 	return eventOut(v), nil
-}
-
-func optID(loc, s string) (*uuid.UUID, error) {
-	if s == "" {
-		return nil, nil
-	}
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return nil, fieldErr(loc, "must be a UUID")
-	}
-	return &id, nil
 }
 
 // ---- updateEvent
@@ -450,14 +425,14 @@ func (h handler) updateEvent(ctx context.Context, in *updateEventInput) (*eventO
 		p.RegistrationMode = ptr(RegistrationMode(*b.RegistrationMode))
 	}
 	if b.CoverFileID != nil {
-		if p.CoverFileID, err = optID("body.cover_file_id", *b.CoverFileID); err != nil || p.CoverFileID == nil {
-			return nil, firstErr(err, fieldErr("body.cover_file_id", "must be a UUID (use clear to remove the cover)"))
+		if p.CoverFileID, err = httpx.OptID("body.cover_file_id", *b.CoverFileID); err != nil || p.CoverFileID == nil {
+			return nil, firstErr(err, problem.Field("body.cover_file_id", "must be a UUID (use clear to remove the cover)"))
 		}
 	}
 	if b.VisibilityUniversityID != nil {
-		if p.VisibilityUniversityID, err = optID("body.visibility_university_id", *b.VisibilityUniversityID); err != nil ||
+		if p.VisibilityUniversityID, err = httpx.OptID("body.visibility_university_id", *b.VisibilityUniversityID); err != nil ||
 			p.VisibilityUniversityID == nil {
-			return nil, firstErr(err, fieldErr("body.visibility_university_id", "must be a UUID"))
+			return nil, firstErr(err, problem.Field("body.visibility_university_id", "must be a UUID"))
 		}
 	}
 	v, err := h.svc.UpdateEvent(ctx, a, in.id(), in.IfMatch, p)
@@ -581,7 +556,7 @@ func (h handler) updateStaff(ctx context.Context, in *updateStaffInput) (*staffO
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.UpdateStaff(ctx, a, in.id(), parseID(in.UserID), StaffRole(in.Body.Role))
+	v, err := h.svc.UpdateStaff(ctx, a, in.id(), httpx.ParseID(in.UserID), StaffRole(in.Body.Role))
 	if err != nil {
 		return nil, err
 	}
@@ -593,5 +568,5 @@ func (h handler) removeStaff(ctx context.Context, in *StaffPath) (*struct{}, err
 	if err != nil {
 		return nil, err
 	}
-	return nil, h.svc.RemoveStaff(ctx, a, in.id(), parseID(in.UserID))
+	return nil, h.svc.RemoveStaff(ctx, a, in.id(), httpx.ParseID(in.UserID))
 }

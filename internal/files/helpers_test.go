@@ -178,13 +178,6 @@ func (e *env) job(t *testing.T, name string) queue.Job {
 	return queue.Job{}
 }
 
-func wantErr(t *testing.T, err, want error) {
-	t.Helper()
-	if !errors.Is(err, want) {
-		t.Fatalf("error = %v, want %v", err, want)
-	}
-}
-
 // fakeScanner returns a fixed verdict and records whether it read the object.
 type fakeScanner struct {
 	verdict files.ScanVerdict

@@ -5,6 +5,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/events"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // TestLintRule_InvalidRE2_422: a rule pattern must compile as RE2 (Go
@@ -28,7 +29,7 @@ func TestLintRule_InvalidRE2_422(t *testing.T) {
 	if again, _ := e.svc.ListLintRules(ctx, dpo); again[0].Pattern != rules[0].Pattern {
 		t.Fatal("an invalid pattern was stored")
 	}
-	if n := len(e.audit.of(authz.EventsLintRuleManage)); n != 0 {
+	if n := len(e.audit.Of(authz.EventsLintRuleManage)); n != 0 {
 		t.Fatalf("audit records = %d", n)
 	}
 }
@@ -76,11 +77,11 @@ func TestLintRules_ManagedAsData(t *testing.T) {
 	if r, err := e.svc.UpdateLintRule(ctx, dpo, religion.ID, events.LintRulePatch{Class: &blocked}); err != nil || r.Class != blocked {
 		t.Fatalf("reclassify = %+v, %v", r, err)
 	}
-	if n := len(e.audit.of(authz.EventsLintRuleManage)); n != 3 {
+	if n := len(e.audit.Of(authz.EventsLintRuleManage)); n != 3 {
 		t.Fatalf("audit records = %d", n)
 	}
 	_, err = e.svc.UpdateLintRule(ctx, dpo, religion.ID, events.LintRulePatch{})
-	wantCode(t, err, 422, "events.empty_patch")
+	problemtest.WantProblem(t, err, 422, "events.empty_patch")
 	_, err = e.svc.UpdateLintRule(ctx, dpo, ev.Event.ID, events.LintRulePatch{Active: &off})
 	wantNotFound(t, err)
 	for _, who := range []string{"club_admin", "moderator", "support", "student"} {

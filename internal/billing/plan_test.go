@@ -76,10 +76,10 @@ func TestPlan_PaymentCaptured_ModelA_CreatesExpectedInvoices(t *testing.T) {
 	if _, ok := byLine[later.ID]; ok {
 		t.Fatal("the on_fulfillment line was planned on payment")
 	}
-	if n := len(e.audit.of(authz.BillingInvoicePlan)); n != 2 {
+	if n := len(e.audit.Of(authz.BillingInvoicePlan)); n != 2 {
 		t.Fatalf("plan audit events = %d, want 2", n)
 	}
-	if ev := e.audit.of(authz.BillingInvoicePlan)[0]; ev.SystemJob != billing.PlanOnPaymentTaskName || ev.ActorUserID != nil {
+	if ev := e.audit.Of(authz.BillingInvoicePlan)[0]; ev.SystemJob != billing.PlanOnPaymentTaskName || ev.ActorUserID != nil {
 		t.Fatalf("plan audit actor = %+v", ev)
 	}
 
@@ -208,7 +208,7 @@ func TestPlan_DuplicateEvent_NoDuplicateInvoice(t *testing.T) {
 	if len(invs) != 2 {
 		t.Fatalf("invoices after duplicates = %d, want 2 (service + fee)", len(invs))
 	}
-	if n := len(e.audit.of(authz.BillingInvoicePlan)); n != 2 {
+	if n := len(e.audit.Of(authz.BillingInvoicePlan)); n != 2 {
 		t.Fatalf("plan audit events = %d, want 2", n)
 	}
 	for _, inv := range invs {

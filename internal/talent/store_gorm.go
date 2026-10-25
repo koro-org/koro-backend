@@ -230,7 +230,7 @@ func (s gormStore) InsertConfigVersion(ctx context.Context, v ConfigVersion) (Co
 	var rows []configRow
 	err = c.Raw(`INSERT INTO talent.config_versions (id, effective_from, params, notes, created_by)
 		VALUES ( ?, ?, CAST( ? AS jsonb), ?, ?) RETURNING `+configCols,
-		v.ID, v.EffectiveFrom, params, nullable(v.Notes), v.CreatedBy).Scan(&rows).Error
+		v.ID, v.EffectiveFrom, params, nullArg(v.Notes), v.CreatedBy).Scan(&rows).Error
 	if err != nil {
 		return ConfigVersion{}, wrap("insert config version", err)
 	}
@@ -343,7 +343,7 @@ func (s gormStore) InsertPoint(ctx context.Context, p PointEvent) (PointEvent, b
 		points_cp, capped, cap_reason, reason_code, config_version_id, reversal_of, source_event_id)
 		VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING `+pointCols,
 		p.ID, p.UserID, p.Signal, p.SourceType, p.SourceID, p.OccurredAt, p.RawPointsCP, p.PointsCP, p.Capped,
-		nullable(p.CapReason), p.ReasonCode, p.ConfigVersionID, p.ReversalOf, p.SourceEventID).Scan(&rows).Error
+		nullArg(p.CapReason), p.ReasonCode, p.ConfigVersionID, p.ReversalOf, p.SourceEventID).Scan(&rows).Error
 	if err != nil {
 		return PointEvent{}, false, wrap("insert point", err)
 	}
@@ -536,7 +536,7 @@ func (s gormStore) InsertNeutralization(ctx context.Context, n Neutralization) (
 	var rows []neutralRow
 	err = c.Raw(`INSERT INTO talent.neutralizations (id, user_id, reason, dsr_id, note, created_by)
 		VALUES ( ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING `+neutralCols,
-		n.ID, n.UserID, string(n.Reason), n.DSRID, nullable(n.Note), n.CreatedBy).Scan(&rows).Error
+		n.ID, n.UserID, string(n.Reason), n.DSRID, nullArg(n.Note), n.CreatedBy).Scan(&rows).Error
 	if err != nil {
 		return Neutralization{}, false, wrap("insert neutralization", err)
 	}
@@ -771,7 +771,7 @@ func (s gormStore) FinishRun(ctx context.Context, r ScoreRun) error {
 		return err
 	}
 	res := c.Exec(`UPDATE talent.score_runs SET finished_at = ?, users_processed = ?, status = ?, error = ? WHERE id = ?`,
-		r.FinishedAt, r.UsersProcessed, r.Status, nullable(r.Error), r.ID)
+		r.FinishedAt, r.UsersProcessed, r.Status, nullArg(r.Error), r.ID)
 	if res.Error != nil {
 		return wrap("finish run", res.Error)
 	}
@@ -1003,8 +1003,9 @@ func (s gormStore) PurgeNeutralizations(ctx context.Context, cutoff time.Time, l
 		"lifted_at, id", limit, dry, cutoff)
 }
 
-// nullable maps "" to NULL.
-func nullable(s string) any {
+// nullArg maps "" to a NULL raw SQL argument (untyped nil; db.Nullable
+// gives a *string column value).
+func nullArg(s string) any {
 	if s == "" {
 		return nil
 	}

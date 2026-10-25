@@ -208,7 +208,7 @@ func TestMarkPaid_LedgerOrdersOutboxSameTx(t *testing.T) {
 	receipt := e.receipt(t)
 	in := ledger.MarkPaidInput{BankReference: "EFT-20261120-7781", ReceiptFileID: &receipt}
 
-	e.audit.failOn(authz.LedgerPayoutMarkPaid)
+	e.audit.FailOn(authz.LedgerPayoutMarkPaid, errAuditDown)
 	if _, err := e.svc.AdminMarkPayoutPaid(ctxOf(t, c), c, p.ID, in); !errors.Is(err, errAuditDown) {
 		t.Fatalf("mark-paid with the audit down: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestMarkPaid_LedgerOrdersOutboxSameTx(t *testing.T) {
 		t.Fatalf("balance after the rollback %d", b)
 	}
 
-	e.audit.failOn("")
+	e.audit.FailOn("", nil)
 	v, err := e.svc.AdminMarkPayoutPaid(ctxOf(t, c), c, p.ID, in)
 	if err != nil {
 		t.Fatalf("mark-paid: %v", err)

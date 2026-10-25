@@ -2,16 +2,17 @@ package events
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
-	"strconv"
 	"uuid"
 
 	"koro/internal/authz"
 	"koro/internal/files"
 	"koro/internal/orgs"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/outbox"
+	"koro/internal/platform/problem"
+	"koro/internal/platform/textx"
 )
 
 // eventAggType is the aggregate type of the events' domain events.
@@ -27,7 +28,7 @@ func (s *service) CreateEvent(ctx context.Context, a authz.Actor, orgID uuid.UUI
 	if err != nil {
 		return EventView{}, err
 	}
-	if err := authz.Can(ctx, a, authz.EventsEventCreate, orgResource(o)); err != nil {
+	if err := authz.Can(ctx, a, authz.EventsEventCreate, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
 		return EventView{}, err
 	}
 	if !organizerKinds[o.Kind] {
@@ -92,27 +93,19 @@ func (s *service) insertEvent(ctx context.Context, e Event, requested bool) (Eve
 		return stored, nil
 	}
 	base := textSlug(e.Title)
-	for i := 1; i <= slugAttempts+1; i++ {
-		var suffix string
-		switch {
-		case i == 1:
-		case i <= slugAttempts:
-			suffix = "-" + strconv.Itoa(i)
-		default:
-			b := make([]byte, 4)
-			_, _ = rand.Read(b)
-			suffix = "-" + hex.EncodeToString(b)
-		}
-		e.Slug = trimSlug(base, maxSlug-len(suffix)) + suffix
-		stored, ok, err := s.d.Store.InsertEvent(ctx, e)
-		if err != nil {
-			return Event{}, err
-		}
-		if ok {
-			return stored, nil
-		}
+	var stored Event
+	ok, err := textx.FreeSlug(base, maxSlug, slugAttempts, func(slug string) (inserted bool, err error) {
+		e.Slug = slug
+		stored, inserted, err = s.d.Store.InsertEvent(ctx, e)
+		return inserted, err
+	})
+	switch {
+	case err != nil:
+		return Event{}, err
+	case !ok:
+		return Event{}, ErrSlugTaken
 	}
-	return Event{}, ErrSlugTaken
+	return stored, nil
 }
 
 // attachCover binds a new cover to the event in the transaction (files k30:
@@ -167,7 +160,7 @@ func (s *service) UpdateEvent(ctx context.Context, a authz.Actor, id uuid.UUID, 
 		if e.Status != StatusDraft && e.Status != StatusPublished {
 			return ErrInvalidState
 		}
-		if err := checkIfMatch(ifMatch, etagOf(e.UpdatedAt)); err != nil {
+		if err := httpx.CheckIfMatch(ifMatch, httpx.ETag(e.UpdatedAt)); err != nil {
 			return err
 		}
 		if p.empty() {
@@ -254,11 +247,7 @@ func scheduleChanges(changed []string) []string {
 
 // emit writes a domain event to the outbox in the transaction (O).
 func (s *service) emit(ctx context.Context, p domainevent.Payload, eventID uuid.UUID) error {
-	env, err := domainevent.New(p, eventAggType, eventID)
-	if err != nil {
-		return err
-	}
-	return s.d.Outbox.Add(ctx, env)
+	return outbox.Emit(ctx, s.d.Outbox, p, eventAggType, eventID)
 }
 
 // PublishEvent implements Service: draft → published. The row must pass
@@ -286,7 +275,7 @@ func (s *service) PublishEvent(ctx context.Context, a authz.Actor, id uuid.UUID)
 		}
 		now := s.now()
 		if !e.EndsAt.After(now) {
-			return uuid.Nil(), fieldErr("body.ends_at", "a past event cannot be published")
+			return uuid.Nil(), problem.Field("body.ends_at", "a past event cannot be published")
 		}
 		next := e
 		next.Status, next.PublishedAt = StatusPublished, &now

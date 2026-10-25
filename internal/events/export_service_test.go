@@ -22,6 +22,7 @@ import (
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/privacy"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // exportWhy is a valid export reason.
@@ -140,17 +141,6 @@ func xlsxRows(t *testing.T, b []byte) [][]string {
 	return rows
 }
 
-// rowsOf returns the recorded events of act in audittest's terms.
-func (l *auditLog) rowsOf(act authz.Action) []audittest.Row {
-	var out []audittest.Row
-	for _, e := range l.of(act) {
-		out = append(out, audittest.Row{Action: e.Action, Outcome: string(e.Outcome), Reason: e.Reason,
-			ActorUserID: e.ActorUserID, ActorOrgID: e.ActorOrgID, SystemJob: e.SystemJob, OrgID: e.OrgID,
-			ResourceType: e.ResourceType, ResourceID: e.ResourceID, Metadata: e.Metadata})
-	}
-	return out
-}
-
 // TestCreateExport_IncludeSensitive_422 (T-37): special-category answers
 // never leave Koro. include_sensitive is refused with 422 before the proof
 // is checked and nothing is written; a special-category or consent field
@@ -167,7 +157,7 @@ func TestCreateExport_IncludeSensitive_422(t *testing.T) {
 		_, err := e.svc.CreateExport(t.Context(), a, ev.Event.ID, events.ExportInput{Reason: exportWhy, Fields: []string{f}}, good)
 		wantField(t, err, 422, "validation_failed", "body.fields[0]")
 	}
-	if n := len(e.audit.of(authz.EventsExportCreate)); n != 0 {
+	if n := len(e.audit.Of(authz.EventsExportCreate)); n != 0 {
 		t.Fatalf("%d audit records for refused bodies (the proof was never checked)", n)
 	}
 	if p, _ := e.svc.ListExports(t.Context(), a, ev.Event.ID, 10, nil); len(p.Items) != 0 {
@@ -218,11 +208,11 @@ func TestCreateExport_RequiresReauthAndReason(t *testing.T) {
 		proof identity.ReauthProof
 		want  error
 	}{{identity.ReauthProof{}, identity.ErrReauthRequired}, {identity.ReauthProof{Password: "yanlis-parola-1"}, identity.ErrReauthFailed}} {
-		n := len(e.audit.rowsOf(authz.EventsExportCreate))
+		n := len(e.audit.Rows(authz.EventsExportCreate))
 		if _, err := e.svc.CreateExport(ctx, a, ev.Event.ID, in, tc.proof); !errors.Is(err, tc.want) {
 			t.Fatalf("proof %v: %v, want %v", tc.proof, err, tc.want)
 		}
-		audittest.WantDenied(t, e.audit.rowsOf(authz.EventsExportCreate)[n:], denied)
+		audittest.WantDenied(t, e.audit.Rows(authz.EventsExportCreate)[n:], denied)
 	}
 	if len(e.queue.Tasks()) != 0 {
 		t.Fatal("a refused request queued a build")
@@ -235,7 +225,7 @@ func TestCreateExport_RequiresReauthAndReason(t *testing.T) {
 		*x.IP != "198.51.100.23" || !x.ExpiresAt.Equal(t0.Add(events.ExportLifetime)) || x.Format != events.FormatCSV {
 		t.Fatalf("export = %+v", x)
 	}
-	recs := e.audit.of(authz.EventsExportCreate)
+	recs := e.audit.Of(authz.EventsExportCreate)
 	last := recs[len(recs)-1]
 	if last.Outcome != audit.Success || last.Reason != exportWhy || last.Metadata[audit.MetaReauth] != "password" ||
 		*last.ResourceID != x.ID || *last.OrgID != org || !slices.Equal(last.Metadata["fields"].([]string), in.Fields) {
@@ -257,13 +247,13 @@ func TestCreateExport_RequiresReauthAndReason(t *testing.T) {
 	// A suspended organiser exports nothing (03 §2.3).
 	e.orgs.setStatus(orgID("club_a"), "suspended")
 	_, err = e.svc.CreateExport(ctx, a, ev.Event.ID, in, good)
-	wantCode(t, err, 403, "orgs.org_suspended")
+	problemtest.WantProblem(t, err, 403, "orgs.org_suspended")
 	e.orgs.setStatus(orgID("club_a"), "active")
 	// Without identity (or files, or the queue) nothing can be exported.
 	noReauth := newEnv(t, func(d *events.Deps) { d.Reauth = nil })
 	ev2 := noReauth.exportEvent(t)
 	_, err = noReauth.svc.CreateExport(ctx, a, ev2.Event.ID, in, good)
-	wantCode(t, err, 503, "unavailable")
+	problemtest.WantProblem(t, err, 503, "unavailable")
 }
 
 // TestReauthDenied_EveryROperation (03 §6.2, BE-074): events' R operation
@@ -283,7 +273,7 @@ func TestReauthDenied_EveryROperation(t *testing.T) {
 			_, err := e.svc.CreateExport(authz.WithActor(ctx, a), a, ev.Event.ID, in, p)
 			return err
 		},
-		Rows: func() []audittest.Row { return e.audit.rowsOf(authz.EventsExportCreate) },
+		Rows: func() []audittest.Row { return e.audit.Rows(authz.EventsExportCreate) },
 		Denied: audittest.Row{Action: string(authz.EventsExportCreate), ActorUserID: &a.UserID,
 			ResourceType: authz.TypeEventExport, OrgID: &org},
 		Late:  e.reauth,
@@ -359,17 +349,17 @@ func TestDownloadExport_NotReady_409(t *testing.T) {
 	a := persona(t, "club_admin")
 	x := e.export(t, ev.Event.ID, events.ExportInput{Reason: exportWhy, Fields: []string{"first_name"}})
 	_, err := e.svc.DownloadExport(t.Context(), a, ev.Event.ID, x.ID)
-	wantCode(t, err, 409, "events.export_not_ready")
+	problemtest.WantProblem(t, err, 409, "events.export_not_ready")
 	e.build(t)
 	if _, err := e.svc.DownloadExport(t.Context(), a, ev.Event.ID, x.ID); err != nil {
 		t.Fatalf("ready export: %v", err)
 	}
 	e.clk.Advance(events.ExportLifetime)
 	_, err = e.svc.DownloadExport(t.Context(), a, ev.Event.ID, x.ID)
-	wantCode(t, err, 409, "events.export_not_ready")
+	problemtest.WantProblem(t, err, 409, "events.export_not_ready")
 	e.job(t, events.PurgeExportsJobName)
 	_, err = e.svc.DownloadExport(t.Context(), a, ev.Event.ID, x.ID)
-	wantCode(t, err, 409, "events.export_not_ready")
+	problemtest.WantProblem(t, err, 409, "events.export_not_ready")
 	// A build that never ran is failed after a day: 409 too.
 	stale := e.export(t, ev.Event.ID, events.ExportInput{Reason: exportWhy, Fields: []string{"status"}})
 	e.queue.Reset()
@@ -379,8 +369,8 @@ func TestDownloadExport_NotReady_409(t *testing.T) {
 		t.Fatalf("stale export = %s, want failed", got.Status)
 	}
 	_, err = e.svc.DownloadExport(t.Context(), a, ev.Event.ID, stale.ID)
-	wantCode(t, err, 409, "events.export_not_ready")
-	if n := len(e.audit.of(authz.EventsExportDownload)); n != 1 {
+	problemtest.WantProblem(t, err, 409, "events.export_not_ready")
+	if n := len(e.audit.Of(authz.EventsExportDownload)); n != 1 {
 		t.Fatalf("%d download records, want only the ready one's", n)
 	}
 	if got := e.stored(t, x); got.DownloadCount != 1 {
@@ -413,7 +403,7 @@ func TestDownloadExport_IncrementsCountAndAudits(t *testing.T) {
 	if got.DownloadCount != 2 || got.FirstDownloadedAt == nil || !got.FirstDownloadedAt.Equal(first) {
 		t.Fatalf("export after two downloads = %+v", got)
 	}
-	recs := e.audit.of(authz.EventsExportDownload)
+	recs := e.audit.Of(authz.EventsExportDownload)
 	if len(recs) != 2 {
 		t.Fatalf("%d download records, want 2", len(recs))
 	}
@@ -436,7 +426,7 @@ func TestDownloadExport_IncrementsCountAndAudits(t *testing.T) {
 	ev2 := e.exportEvent(t)
 	_, err = e.svc.DownloadExport(t.Context(), a, ev2.Event.ID, x.ID)
 	wantNotFound(t, err)
-	if n := len(e.audit.of(authz.EventsExportDownload)); n != 2 {
+	if n := len(e.audit.Of(authz.EventsExportDownload)); n != 2 {
 		t.Fatalf("refused downloads wrote records: %d", n)
 	}
 	// The list shows the counts; the DPO oversees it, the student does not.
@@ -480,13 +470,13 @@ func TestPurgeExports_After7Days(t *testing.T) {
 	if n := e.objects.Len(); n != objects-1 {
 		t.Fatalf("objects = %d, want %d (the file's object deleted)", n, objects-1)
 	}
-	recs := e.audit.of(authz.EventsExportPurge)
+	recs := e.audit.Of(authz.EventsExportPurge)
 	if len(recs) != 1 || recs[0].SystemJob != events.PurgeExportsJobName || *recs[0].ResourceID != x.ID ||
 		recs[0].Metadata["policy_code"] != events.PolicyExportFile || recs[0].Metadata["file_id"] != fileID.String() {
 		t.Fatalf("purge records = %+v", recs)
 	}
 	e.job(t, events.PurgeExportsJobName)
-	if n := len(e.audit.of(authz.EventsExportPurge)); n != 1 {
+	if n := len(e.audit.Of(authz.EventsExportPurge)); n != 1 {
 		t.Fatalf("a second run purged again: %d records", n)
 	}
 	// A lost build task (Redis down at the commit): queued again after 15

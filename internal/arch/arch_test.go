@@ -117,6 +117,7 @@ func layerViolations(files []goFile) []string {
 			case p == modPath+"authz/authztest" || strings.HasPrefix(p, modPath+"authz/authztest/"):
 				v = append(v, fmt.Sprintf("%s imports %s: authztest is for tests only", f.rel, p))
 			case dst == "platform" || dst == "authz":
+			case dst == f.top && ownTestPackage(f):
 			case !dstFeature:
 				v = append(v, fmt.Sprintf("%s imports %s: unknown package", f.rel, p))
 			case !feature:
@@ -127,6 +128,14 @@ func layerViolations(files []goFile) []string {
 		}
 	}
 	return v
+}
+
+// ownTestPackage reports whether f is in the test-helper package of its
+// module (internal/<m>/<m>test, e.g. audit/audittest): imported by tests
+// only, it may import its module (BE-111: audittest.Recorder is an
+// audit.Logger).
+func ownTestPackage(f goFile) bool {
+	return strings.HasPrefix(f.rel, "internal/"+f.top+"/"+f.top+"test/")
 }
 
 // talentViolations is 01 §5.4: talent is imported only by discovery, kvkk

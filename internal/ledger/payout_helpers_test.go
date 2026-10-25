@@ -10,7 +10,6 @@ import (
 	"time"
 	"uuid"
 
-	"koro/internal/audit"
 	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
@@ -306,42 +305,7 @@ func (f *fakeFiles) PresignGet(_ context.Context, id uuid.UUID, ttl time.Duratio
 	return files.Download{URL: "https://files.test/" + id.String(), ExpiresAt: t0.Add(ttl)}, nil
 }
 
-// auditLog records the events; fail makes the next Log of an action fail.
-type auditLog struct {
-	mu     sync.Mutex
-	events []audit.Event
-	fail   string
-}
-
 var errAuditDown = errors.New("audit is down")
-
-func (l *auditLog) Log(_ context.Context, e audit.Event) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.fail != "" && e.Action == l.fail {
-		return errAuditDown
-	}
-	l.events = append(l.events, e)
-	return nil
-}
-
-func (l *auditLog) of(act authz.Action) []audit.Event {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	var out []audit.Event
-	for _, e := range l.events {
-		if e.Action == string(act) {
-			out = append(out, e)
-		}
-	}
-	return out
-}
-
-func (l *auditLog) failOn(act authz.Action) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.fail = string(act)
-}
 
 // fakeReauth accepts reauthPassword.
 type fakeReauth struct{}
@@ -416,7 +380,7 @@ type payoutEnv struct {
 	orders *fakeOrders
 	payees *fakePayees
 	files  *fakeFiles
-	audit  *auditLog
+	audit  *audittest.Recorder
 	outbox *outbox.Mem
 	sender *fakeSender
 	reauth *audittest.LateReauth[identity.ReauthProof] // fakeReauth with an overload switch
@@ -440,7 +404,7 @@ func newPayoutEnvWith(t *testing.T, clk *clock.Fake, store ledger.Store, payouts
 		payees: &fakePayees{payees: map[uuid.UUID]parties.Payee{}, accounts: map[uuid.UUID]parties.BankAccount{},
 			parties: map[uuid.UUID]parties.LegalParty{}},
 		files:  &fakeFiles{meta: map[uuid.UUID]files.FileMeta{}, attached: map[uuid.UUID]files.Owner{}},
-		audit:  &auditLog{},
+		audit:  &audittest.Recorder{},
 		outbox: outbox.NewMem(clk),
 		sender: &fakeSender{},
 		reauth: &audittest.LateReauth[identity.ReauthProof]{Next: fakeReauth{}},

@@ -9,9 +9,12 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
+	"koro/internal/platform/db"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // Register adds the orders operations (04 §2.15) to api. svc may be nil
@@ -19,7 +22,7 @@ import (
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
 
-	reg(api, huma.Operation{
+	op.Register(api, "orders", huma.Operation{
 		OperationID: "createOrder", Method: http.MethodPost, Path: "/orgs/{org_id}/orders",
 		Summary: "Place an order", DefaultStatus: http.StatusCreated,
 		Description: "A company admin buys offerings for the company, billed to a verified buyer party of the company " +
@@ -29,13 +32,13 @@ func Register(api huma.API, svc Service) {
 			"transaction; an unpaid order expires after the payment window and releases it.",
 	}, op.Meta{Action: string(authz.OrdersOrderCreate), Surface: op.SurfaceOrg, Idempotency: op.IdempotencyRequired}, h.create)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orders", huma.Operation{
 		OperationID: "listOrgOrders", Method: http.MethodGet, Path: "/orgs/{org_id}/orders",
 		Summary:     "List the orders of a company",
 		Description: "Newest placement first.",
 	}, op.Meta{Action: string(authz.OrdersOrderList), Surface: op.SurfaceOrg}, h.listOrg)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orders", huma.Operation{
 		OperationID: "getOrder", Method: http.MethodGet, Path: "/orders/{order_id}",
 		Summary: "Get an order",
 		Description: "The buyer's members and platform staff get the whole order (view buyer: totals, payment, every " +
@@ -46,7 +49,7 @@ func Register(api huma.API, svc Service) {
 			"own lines with its net share and the commission, and the buyer's title (view seller). Anyone else: 404.",
 	}, op.Meta{Action: string(authz.OrdersOrderRead), Surface: op.SurfaceResource}, h.get)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orders", huma.Operation{
 		OperationID: "getOrderPaymentInstructions", Method: http.MethodGet, Path: "/orders/{order_id}/payment-instructions",
 		Summary: "Get the bank transfer instructions of an order",
 		Description: "Koro's collection account, the reference code to write into the transfer description and the " +
@@ -56,20 +59,20 @@ func Register(api huma.API, svc Service) {
 			"confirmation; each account access is audited.",
 	}, op.Meta{Action: string(authz.OrdersOrderPaymentInstructions), Surface: op.SurfaceResource}, h.instructions)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orders", huma.Operation{
 		OperationID: "cancelOrder", Method: http.MethodPost, Path: "/orders/{order_id}/cancel",
 		Summary: "Cancel an unpaid order",
 		Description: "Only an order awaiting payment (409 orders.invalid_state). Its units go back to the offerings and " +
 			"its pending rights are revoked; money already paid in part waits for a refund.",
 	}, op.Meta{Action: string(authz.OrdersOrderCancel), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional}, h.cancel)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orders", huma.Operation{
 		OperationID: "listOrgSales", Method: http.MethodGet, Path: "/orgs/{org_id}/sales",
 		Summary:     "List the sold order lines of an organization",
 		Description: "The seller's lines, newest first, with the order's reference and status and the buyer's title.",
 	}, op.Meta{Action: string(authz.OrdersLineListSales), Surface: op.SurfaceOrg}, h.sales)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orders", huma.Operation{
 		OperationID: "markOrderLineFulfilled", Method: http.MethodPost, Path: "/order-lines/{line_id}/mark-fulfilled",
 		Summary: "Mark an order line delivered",
 		Description: "The seller says the line is delivered; the buyer's dispute window (the policy's days) starts. The " +
@@ -81,7 +84,7 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.OrdersLineMarkFulfilled), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional},
 		h.mark)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orders", huma.Operation{
 		OperationID: "getOrderLineEvidence", Method: http.MethodGet, Path: "/order-lines/{line_id}/evidence",
 		Summary: "Get a download URL of an order line's delivery evidence",
 		Description: "A URL valid for 5 minutes of the file the seller attached when marking the line delivered, for the " +
@@ -90,20 +93,20 @@ func Register(api huma.API, svc Service) {
 			"clears the file. Every download is audited.",
 	}, op.Meta{Action: string(authz.OrdersLineReadEvidence), Surface: op.SurfaceResource}, h.evidence)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orders", huma.Operation{
 		OperationID: "confirmOrderLine", Method: http.MethodPost, Path: "/order-lines/{line_id}/confirm",
 		Summary:     "Confirm the delivery of an order line",
 		Description: "The buyer confirms a marked line: it is fulfilled (buyer_confirmed).",
 	}, op.Meta{Action: string(authz.OrdersLineConfirm), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional}, h.confirm)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orders", huma.Operation{
 		OperationID: "disputeOrderLine", Method: http.MethodPost, Path: "/order-lines/{line_id}/dispute",
 		Summary: "Dispute the delivery of an order line",
 		Description: "The buyer disputes a marked line inside its dispute window (after it: 409 " +
 			"orders.dispute_window_closed); a platform or finance admin resolves it.",
 	}, op.Meta{Action: string(authz.OrdersLineDispute), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional}, h.dispute)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orders", huma.Operation{
 		OperationID: "adminResolveOrderLineDispute", Method: http.MethodPost, Path: "/admin/order-lines/{line_id}/resolve-dispute",
 		Summary: "Resolve a disputed order line",
 		Description: "fulfilled: the line is delivered (admin). refund: the line is cancelled and all the money Koro holds " +
@@ -112,56 +115,14 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.OrdersLineResolveDispute), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional},
 		h.resolve)
 
-	reg(api, huma.Operation{
+	op.Register(api, "orders", huma.Operation{
 		OperationID: "adminListOrders", Method: http.MethodGet, Path: "/admin/orders",
 		Summary:     "List every order",
 		Description: "Newest placement first; order_no takes the reference code however it was typed.",
 	}, op.Meta{Action: string(authz.OrdersOrderListAdmin), Surface: op.SurfaceAdmin}, h.adminList)
 }
 
-// reg registers one orders operation with its Koro metadata.
-func reg[I, O any](api huma.API, o huma.Operation, m op.Meta, fn func(context.Context, *I) (*O, error)) {
-	o.Tags = []string{"orders"}
-	huma.Register(api, op.Koro(o, m), fn)
-}
-
 type handler struct{ svc Service }
-
-// parseID parses a path ID; a malformed one becomes the nil UUID, which no
-// row has: it answers like a missing row (404) after the surface's authz.
-func parseID(s string) uuid.UUID {
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return uuid.Nil()
-	}
-	return id
-}
-
-func optID(loc, s string) (*uuid.UUID, error) {
-	if s == "" {
-		return nil, nil
-	}
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return nil, fieldErr(loc, "must be a UUID")
-	}
-	return &id, nil
-}
-
-func idStr(p *uuid.UUID) string {
-	if p == nil {
-		return ""
-	}
-	return p.String()
-}
-
-func utcPtr(t *time.Time) *time.Time {
-	if t == nil {
-		return nil
-	}
-	u := t.UTC()
-	return &u
-}
 
 func i64(v int64) *int64 { return &v }
 
@@ -278,17 +239,17 @@ func orderDTO(v OrderView) OrderDTO {
 		out.KoroCollectAmount, out.DirectToPayeeAmount = i64(o.KoroCollectAmount), i64(o.DirectToPayeeAmount)
 		out.PaidAmount, out.RefundedAmount = i64(o.PaidAmount), i64(o.RefundedAmount)
 		exp := o.ExpiresAt.UTC()
-		out.ExpiresAt, out.PaidAt, out.CompletedAt, out.CancelledAt = &exp, utcPtr(o.PaidAt), utcPtr(o.CompletedAt), utcPtr(o.CancelledAt)
+		out.ExpiresAt, out.PaidAt, out.CompletedAt, out.CancelledAt = &exp, db.UTCPtr(o.PaidAt), db.UTCPtr(o.CompletedAt), db.UTCPtr(o.CancelledAt)
 		out.BuyerSnapshot = &BuyerSnapshotDTO{Title: b.Title, TaxOffice: b.TaxOffice, TaxNo: b.TaxNo, Address: addressText(b.Address), Email: b.Email}
 	}
 	for _, l := range v.Lines {
 		d := OrderLineDTO{
-			LineID: l.ID.String(), OfferingID: l.OfferingID.String(), EventID: idStr(l.EventID), TitleSnapshot: l.TitleSnapshot,
+			LineID: l.ID.String(), OfferingID: l.OfferingID.String(), EventID: httpx.IDStr(l.EventID), TitleSnapshot: l.TitleSnapshot,
 			Deliverables: make([]DeliverableDTO, len(l.DeliverablesSnapshot)), Quantity: l.Quantity,
 			UnitPriceAmount: l.UnitPriceAmount, NetAmount: l.NetAmount, VATRateBP: l.VATRateBP, VATAmount: l.VATAmount,
 			VATWithheldAmount: l.VATWithheldAmount, GrossAmount: l.GrossAmount, BuyerFeeAmount: l.BuyerFeeAmount,
 			PayableAmount: l.PayableAmount, FulfillmentStatus: string(l.FulfillmentStatus),
-			DisputeWindowEndsAt: utcPtr(l.DisputeWindowEndsAt), FulfilledAt: utcPtr(l.FulfilledAt),
+			DisputeWindowEndsAt: db.UTCPtr(l.DisputeWindowEndsAt), FulfilledAt: db.UTCPtr(l.FulfilledAt),
 			HasEvidence: l.FulfillmentEvidenceFileID != nil,
 			Seller:      SellerRefDTO{OrgID: l.SellerOrgID.String(), Name: v.Sellers[l.SellerOrgID]},
 		}
@@ -373,17 +334,17 @@ func (h handler) create(ctx context.Context, in *createOrderInput) (*createOrder
 	}
 	party, err := uuid.Parse(in.Body.BuyerPartyID)
 	if err != nil {
-		return nil, fieldErr("body.buyer_party_id", "must be a UUID")
+		return nil, problem.Field("body.buyer_party_id", "must be a UUID")
 	}
 	lines := make([]LineInput, len(in.Body.Lines))
 	for i, l := range in.Body.Lines {
 		id, err := uuid.Parse(l.OfferingID)
 		if err != nil {
-			return nil, fieldErr("body.lines.offering_id", "must be a UUID")
+			return nil, problem.Field("body.lines.offering_id", "must be a UUID")
 		}
 		lines[i] = LineInput{OfferingID: id, Quantity: l.Quantity}
 	}
-	vs, err := h.svc.CreateOrder(ctx, a, parseID(in.OrgID), CreateInput{BuyerPartyID: party, Lines: lines})
+	vs, err := h.svc.CreateOrder(ctx, a, httpx.ParseID(in.OrgID), CreateInput{BuyerPartyID: party, Lines: lines})
 	if err != nil {
 		return nil, err
 	}
@@ -452,7 +413,7 @@ func (h handler) listOrg(ctx context.Context, in *listOrgOrdersInput) (*orderLis
 	if err != nil {
 		return nil, err
 	}
-	p, err := h.svc.ListOrgOrders(ctx, a, parseID(in.OrgID), ListQuery{Status: Status(in.Status), Limit: in.Limit, After: after})
+	p, err := h.svc.ListOrgOrders(ctx, a, httpx.ParseID(in.OrgID), ListQuery{Status: Status(in.Status), Limit: in.Limit, After: after})
 	if err != nil {
 		return nil, err
 	}
@@ -474,7 +435,7 @@ func parseTime(loc, s string) (*time.Time, error) {
 	}
 	t, err := time.Parse(time.RFC3339Nano, s)
 	if err != nil {
-		return nil, fieldErr(loc, "must be an RFC 3339 time")
+		return nil, problem.Field(loc, "must be an RFC 3339 time")
 	}
 	u := t.UTC()
 	return &u, nil
@@ -485,7 +446,7 @@ func (h handler) adminList(ctx context.Context, in *adminListOrdersInput) (*orde
 	if err != nil {
 		return nil, err
 	}
-	org, err := optID("query.org_id", in.OrgID)
+	org, err := httpx.OptID("query.org_id", in.OrgID)
 	if err != nil {
 		return nil, err
 	}
@@ -519,7 +480,7 @@ func (h handler) get(ctx context.Context, in *OrderPath) (*orderOutput, error) {
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.GetOrder(ctx, a, parseID(in.OrderID))
+	v, err := h.svc.GetOrder(ctx, a, httpx.ParseID(in.OrderID))
 	if err != nil {
 		return nil, err
 	}
@@ -565,7 +526,7 @@ func (h handler) instructions(ctx context.Context, in *OrderPath) (*instructions
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.PaymentInstructions(ctx, a, parseID(in.OrderID))
+	v, err := h.svc.PaymentInstructions(ctx, a, httpx.ParseID(in.OrderID))
 	if err != nil {
 		return nil, err
 	}
@@ -589,7 +550,7 @@ func (h handler) cancel(ctx context.Context, in *cancelOrderInput) (*orderOutput
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.CancelOrder(ctx, a, parseID(in.OrderID), in.Body.Reason)
+	v, err := h.svc.CancelOrder(ctx, a, httpx.ParseID(in.OrderID), in.Body.Reason)
 	if err != nil {
 		return nil, err
 	}
@@ -640,7 +601,7 @@ func (h handler) sales(ctx context.Context, in *salesInput) (*salesOutput, error
 	if err != nil {
 		return nil, err
 	}
-	p, err := h.svc.ListOrgSales(ctx, a, parseID(in.OrgID), SalesQuery{Fulfillment: Fulfillment(in.FulfillmentStatus), Limit: in.Limit, After: after})
+	p, err := h.svc.ListOrgSales(ctx, a, httpx.ParseID(in.OrgID), SalesQuery{Fulfillment: Fulfillment(in.FulfillmentStatus), Limit: in.Limit, After: after})
 	if err != nil {
 		return nil, err
 	}
@@ -651,7 +612,7 @@ func (h handler) sales(ctx context.Context, in *salesInput) (*salesOutput, error
 		out.Body.Items[i] = SellerLineDTO{LineID: l.ID.String(), OrderID: l.OrderID.String(), OrderNo: it.OrderNo,
 			OrderStatus: string(it.OrderStatus), BuyerTitle: it.BuyerTitle, TitleSnapshot: l.TitleSnapshot, Quantity: l.Quantity,
 			GrossAmount: l.GrossAmount, SellerNetAmount: l.SellerNetAmount, FulfillmentStatus: string(l.FulfillmentStatus),
-			DisputeWindowEndsAt: utcPtr(l.DisputeWindowEndsAt), PaidOutAt: utcPtr(l.PaidOutAt),
+			DisputeWindowEndsAt: db.UTCPtr(l.DisputeWindowEndsAt), PaidOutAt: db.UTCPtr(l.PaidOutAt),
 			HasEvidence: l.FulfillmentEvidenceFileID != nil}
 	}
 	if k := p.Next; k != nil {
@@ -680,7 +641,7 @@ type lineOutput struct{ Body LineStateDTO }
 func lineOut(v LineView) *lineOutput {
 	l := v.Line
 	d := LineStateDTO{LineID: l.ID.String(), OrderID: l.OrderID.String(), OrderNo: v.OrderNo, OrderStatus: string(v.OrderStatus),
-		FulfillmentStatus: string(l.FulfillmentStatus), DisputeWindowEndsAt: utcPtr(l.DisputeWindowEndsAt), FulfilledAt: utcPtr(l.FulfilledAt),
+		FulfillmentStatus: string(l.FulfillmentStatus), DisputeWindowEndsAt: db.UTCPtr(l.DisputeWindowEndsAt), FulfilledAt: db.UTCPtr(l.FulfilledAt),
 		HasEvidence: l.FulfillmentEvidenceFileID != nil}
 	if l.FulfilledVia != nil {
 		d.FulfilledVia = string(*l.FulfilledVia)
@@ -705,11 +666,11 @@ func (h handler) mark(ctx context.Context, in *markInput) (*lineOutput, error) {
 	var mi MarkInput
 	if in.Body != nil {
 		mi.Note = in.Body.Note
-		if mi.EvidenceFileID, err = optID("body.evidence_file_id", in.Body.EvidenceFileID); err != nil {
+		if mi.EvidenceFileID, err = httpx.OptID("body.evidence_file_id", in.Body.EvidenceFileID); err != nil {
 			return nil, err
 		}
 	}
-	v, err := h.svc.MarkLineFulfilled(ctx, a, parseID(in.LineID), mi)
+	v, err := h.svc.MarkLineFulfilled(ctx, a, httpx.ParseID(in.LineID), mi)
 	if err != nil {
 		return nil, err
 	}
@@ -731,7 +692,7 @@ func (h handler) evidence(ctx context.Context, in *evidenceInput) (*evidenceOutp
 	if err != nil {
 		return nil, err
 	}
-	dl, err := h.svc.LineEvidence(ctx, a, parseID(in.LineID))
+	dl, err := h.svc.LineEvidence(ctx, a, httpx.ParseID(in.LineID))
 	if err != nil {
 		return nil, err
 	}
@@ -748,7 +709,7 @@ func (h handler) confirm(ctx context.Context, in *confirmInput) (*lineOutput, er
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.ConfirmLine(ctx, a, parseID(in.LineID))
+	v, err := h.svc.ConfirmLine(ctx, a, httpx.ParseID(in.LineID))
 	if err != nil {
 		return nil, err
 	}
@@ -768,7 +729,7 @@ func (h handler) dispute(ctx context.Context, in *disputeInput) (*lineOutput, er
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.DisputeLine(ctx, a, parseID(in.LineID), in.Body.DisputeReason)
+	v, err := h.svc.DisputeLine(ctx, a, httpx.ParseID(in.LineID), in.Body.DisputeReason)
 	if err != nil {
 		return nil, err
 	}
@@ -790,7 +751,7 @@ func (h handler) resolve(ctx context.Context, in *resolveInput) (*lineOutput, er
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.AdminResolveDispute(ctx, a, parseID(in.LineID),
+	v, err := h.svc.AdminResolveDispute(ctx, a, httpx.ParseID(in.LineID),
 		ResolveInput{Outcome: in.Body.Outcome, Note: in.Body.Note, RefundAmount: in.Body.RefundAmount})
 	if err != nil {
 		return nil, err

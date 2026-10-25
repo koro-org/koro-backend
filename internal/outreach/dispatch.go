@@ -14,6 +14,7 @@ import (
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // Dispatch of targeted posts (BE-035; 01 §6.3 "Hedefli gönderi yayını",
@@ -135,7 +136,7 @@ func (s *service) planDispatch(ctx context.Context, a authz.Actor, p PostInfo, c
 	c := must
 	if commercial != nil {
 		if must && !*commercial {
-			return Dispatch{}, fieldErr("body.commercial",
+			return Dispatch{}, problem.Field("body.commercial",
 				"the dispatch of a company's or a sponsored post is commercial (only consenting students)")
 		}
 		c = *commercial
@@ -209,26 +210,26 @@ func (s *service) checkDispatchScope(ctx context.Context, sc Scope, p PostInfo) 
 func (s *service) checkChannels(in []Channel, commercial bool) ([]string, error) {
 	const loc = "body.channels"
 	if len(in) == 0 || len(in) > 3 {
-		return nil, fieldErr(loc, "1-3 of push, email, in_app")
+		return nil, problem.Field(loc, "1-3 of push, email, in_app")
 	}
 	out := make([]string, 0, len(in))
 	for _, c := range in {
 		if !c.valid() {
-			return nil, fieldErr(loc, "must be push, email or in_app")
+			return nil, problem.Field(loc, "must be push, email or in_app")
 		}
 		out = append(out, string(c))
 	}
 	slices.Sort(out)
 	if len(slices.Compact(slices.Clone(out))) != len(out) {
-		return nil, fieldErr(loc, "a channel is given twice")
+		return nil, problem.Field(loc, "a channel is given twice")
 	}
 	switch {
 	case commercial && slices.Contains(out, string(ChannelInApp)):
-		return nil, fieldErr(loc, "a commercial dispatch goes by push or e-mail (an in-app message has no opt-out)")
+		return nil, problem.Field(loc, "a commercial dispatch goes by push or e-mail (an in-app message has no opt-out)")
 	case slices.Contains(out, string(ChannelEmail)) && s.d.LinkBaseURL == "":
-		return nil, fieldErr(loc, "e-mail is not available (no link origin configured)")
+		return nil, problem.Field(loc, "e-mail is not available (no link origin configured)")
 	case commercial && slices.Contains(out, string(ChannelEmail)) && s.d.Unsubscribe == nil:
-		return nil, fieldErr(loc, "commercial e-mail is not available (no unsubscribe endpoint configured)")
+		return nil, problem.Field(loc, "commercial e-mail is not available (no unsubscribe endpoint configured)")
 	}
 	return out, nil
 }

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http/httptest"
 	"slices"
 	"strconv"
@@ -14,7 +13,7 @@ import (
 	"time"
 	"uuid"
 
-	"koro/internal/audit"
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/consent"
@@ -29,7 +28,6 @@ import (
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/outbox"
-	"koro/internal/platform/problem"
 	"koro/internal/platform/ratelimit"
 	"koro/internal/students"
 )
@@ -226,59 +224,6 @@ func (o *fakeOrgs) set(id uuid.UUID, kind orgs.Kind, st orgs.Status) {
 	o.rows[id] = orgs.OrgSummary{ID: id, Kind: kind, Name: "Org", Status: st}
 }
 
-// auditLog records the events an outreach service writes.
-type auditLog struct {
-	mu     sync.Mutex
-	events []audit.Event
-}
-
-func (l *auditLog) Log(_ context.Context, e audit.Event) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.events = append(l.events, e)
-	return nil
-}
-
-// actionsOf returns the recorded events of action.
-func (l *auditLog) actionsOf(action string) []audit.Event {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	var out []audit.Event
-	for _, e := range l.events {
-		if e.Action == action {
-			out = append(out, e)
-		}
-	}
-	return out
-}
-
-// all returns every recorded event.
-func (l *auditLog) all() []audit.Event {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return slices.Clone(l.events)
-}
-
-// last returns the last recorded event.
-func (l *auditLog) last() audit.Event {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if len(l.events) == 0 {
-		return audit.Event{}
-	}
-	return l.events[len(l.events)-1]
-}
-
-func (l *auditLog) actions() []string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	out := make([]string, len(l.events))
-	for i, e := range l.events {
-		out[i] = e.Action
-	}
-	return out
-}
-
 // failingLimiter simulates an unavailable Redis.
 type failingLimiter struct{}
 
@@ -295,7 +240,7 @@ type env struct {
 	audience *fakeAudience
 	catalog  *fakeCatalog
 	orgs     *fakeOrgs
-	audit    *auditLog
+	audit    *audittest.Recorder
 	limiter  outreach.Limiter
 	mod      outreach.Module
 	svc      outreach.Service
@@ -331,7 +276,7 @@ func newEnv(t *testing.T, opts ...envOption) *env {
 func newEnvWith(t *testing.T, clk *clock.Fake, store outreach.Store, tx db.TxManager, keys idempotency.Store, opts ...envOption) *env {
 	t.Helper()
 	e := &env{
-		clk: clk, store: store, audit: &auditLog{},
+		clk: clk, store: store, audit: &audittest.Recorder{},
 		audience: &fakeAudience{sensitive: map[string]bool{"club:" + clubSensitive.String(): true}},
 		catalog: &fakeCatalog{
 			unis: map[uuid.UUID]directory.University{
@@ -416,21 +361,6 @@ func clubKey(id uuid.UUID) string { return "club:" + id.String() }
 func yearKey(y int) string        { return "year:" + strconv.Itoa(y) }
 
 func ptr[T any](v T) *T { return &v }
-
-func wantErr(t *testing.T, err, want error) {
-	t.Helper()
-	if !errors.Is(err, want) {
-		t.Fatalf("error = %v, want %v", err, want)
-	}
-}
-
-// problemOf returns the status and code of a problem error.
-func problemOf(err error) (int, string) {
-	if p, ok := errors.AsType[*problem.Error](err); ok {
-		return p.Status(), p.Code()
-	}
-	return 0, ""
-}
 
 // ---- HTTP
 

@@ -10,6 +10,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/parties"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // loadOrder reads an order with its lines (404 when it does not exist).
@@ -226,11 +227,11 @@ func (s *service) ListOrgOrders(ctx context.Context, a authz.Actor, orgID uuid.U
 	if err != nil {
 		return OrderPage{}, err
 	}
-	if err := authz.Can(ctx, a, authz.OrdersOrderList, orgResource(o)); err != nil {
+	if err := authz.Can(ctx, a, authz.OrdersOrderList, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
 		return OrderPage{}, err
 	}
 	if q.Status != "" && !q.Status.Valid() {
-		return OrderPage{}, fieldErr("query.status", "is not an order status")
+		return OrderPage{}, problem.Field("query.status", "is not an order status")
 	}
 	limit := page.ClampLimit(q.Limit)
 	rows, err := s.d.Store.ListOrgOrders(ctx, o.ID, OrderFilter{Status: q.Status}, q.After, limit+1)
@@ -248,17 +249,17 @@ func (s *service) AdminListOrders(ctx context.Context, a authz.Actor, q ListQuer
 	}
 	f := OrderFilter{Status: q.Status, OrgID: q.OrgID, PlacedFrom: q.PlacedFrom, PlacedUntil: q.PlacedUntil}
 	if q.Status != "" && !q.Status.Valid() {
-		return OrderPage{}, fieldErr("query.status", "is not an order status")
+		return OrderPage{}, problem.Field("query.status", "is not an order status")
 	}
 	if q.OrderNo != "" {
 		code, ok := NormalizeReference(q.OrderNo)
 		if !ok {
-			return OrderPage{}, fieldErr("query.order_no", "is not a reference code (KR + 8 characters)")
+			return OrderPage{}, problem.Field("query.order_no", "is not a reference code (KR + 8 characters)")
 		}
 		f.OrderNo = code
 	}
 	if f.PlacedFrom != nil && f.PlacedUntil != nil && !f.PlacedUntil.After(*f.PlacedFrom) {
-		return OrderPage{}, fieldErr("query.placed_to", "must be after placed_from")
+		return OrderPage{}, problem.Field("query.placed_to", "must be after placed_from")
 	}
 	limit := page.ClampLimit(q.Limit)
 	rows, err := s.d.Store.ListOrders(ctx, f, q.After, limit+1)
@@ -286,11 +287,11 @@ func (s *service) ListOrgSales(ctx context.Context, a authz.Actor, orgID uuid.UU
 	if err != nil {
 		return SalesPage{}, err
 	}
-	if err := authz.Can(ctx, a, authz.OrdersLineListSales, orgResource(o)); err != nil {
+	if err := authz.Can(ctx, a, authz.OrdersLineListSales, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
 		return SalesPage{}, err
 	}
 	if q.Fulfillment != "" && !q.Fulfillment.Valid() {
-		return SalesPage{}, fieldErr("query.fulfillment_status", "is not a fulfilment status")
+		return SalesPage{}, problem.Field("query.fulfillment_status", "is not a fulfilment status")
 	}
 	limit := page.ClampLimit(q.Limit)
 	rows, err := s.d.Store.ListSales(ctx, o.ID, SalesFilter{Fulfillment: q.Fulfillment}, q.After, limit+1)

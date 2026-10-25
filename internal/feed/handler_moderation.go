@@ -12,14 +12,16 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/outreach"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // registerModeration adds the 9 operations of BE-032 (04 §2.7, §F.1,
 // §F.4): targeted posts, reports and moderation.
 func registerModeration(api huma.API, h handler) {
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "createTargetedPost", Method: http.MethodPost, Path: "/orgs/{org_id}/targeted-posts",
 		DefaultStatus: http.StatusCreated,
 		Summary:       "Create a targeted post (draft)",
@@ -33,7 +35,7 @@ func registerModeration(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.FeedPostCreateTargeted), Surface: op.SurfaceOrg, Idempotency: op.IdempotencyRequired},
 		h.createTargetedPost)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "createContentReport", Method: http.MethodPost, Path: "/reports", DefaultStatus: http.StatusCreated,
 		Summary: "Report a post or an organization",
 		Description: "The target must be a published post or an organization the caller may see (404 otherwise). " +
@@ -42,19 +44,19 @@ func registerModeration(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.FeedReportCreate), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional},
 		h.createReport)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "adminListReports", Method: http.MethodGet, Path: "/admin/reports",
 		Summary:     "List content reports",
 		Description: "The moderation queue: oldest first (sort=-created_at: newest first). The reporter's identity is shown here.",
 	}, op.Meta{Action: string(authz.FeedReportList), Surface: op.SurfaceAdmin}, h.listReports)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "adminGetReport", Method: http.MethodGet, Path: "/admin/reports/{report_id}",
 		Summary:     "Get a content report",
 		Description: "The report with a summary of its target (the post or organization, its trust level, its open reports).",
 	}, op.Meta{Action: string(authz.FeedReportRead), Surface: op.SurfaceAdmin}, h.getReport)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "adminResolveReport", Method: http.MethodPost, Path: "/admin/reports/{report_id}/resolve",
 		Summary: "Take, action or dismiss a report",
 		Description: "in_review takes the report (assign_to_me assigns it to the caller); actioned needs a moderation " +
@@ -64,13 +66,13 @@ func registerModeration(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.FeedReportResolve), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional},
 		h.resolveReport)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "adminListReviewQueue", Method: http.MethodGet, Path: "/admin/review-queue",
 		Summary:     "List the posts waiting for review",
 		Description: "Posts in pending_review (new or restricted organizations), oldest first.",
 	}, op.Meta{Action: string(authz.FeedReviewQueueList), Surface: op.SurfaceAdmin}, h.listReviewQueue)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "adminModeratePost", Method: http.MethodPost, Path: "/admin/posts/{post_id}/moderation",
 		Summary: "Moderate a post",
 		Description: "approve: pending_review → published (counts towards the organization's trust); hide: " +
@@ -81,7 +83,7 @@ func registerModeration(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.FeedPostModerate), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional},
 		h.moderatePost)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "adminModerateOrg", Method: http.MethodPost, Path: "/admin/orgs/{org_id}/moderation",
 		Summary: "Moderate an organization",
 		Description: "warn_org records a warning; restrict_org sends every post of the organization to review until " +
@@ -91,7 +93,7 @@ func registerModeration(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.FeedOrgModerate), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional},
 		h.moderateOrg)
 
-	reg(api, huma.Operation{
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "adminListModerationActions", Method: http.MethodGet, Path: "/admin/moderation-actions",
 		Summary:     "List moderation decisions",
 		Description: "Newest first; narrowed by target_type and target_id.",
@@ -151,7 +153,7 @@ func (h handler) createTargetedPost(ctx context.Context, in *createTargetedInput
 		r := b.Dispatch.Request()
 		ti.Dispatch = &r
 	}
-	if ti.SegmentID, err = optID("body.audience.segment_id", b.Audience.SegmentID); err != nil {
+	if ti.SegmentID, err = httpx.OptID("body.audience.segment_id", b.Audience.SegmentID); err != nil {
 		return nil, err
 	}
 	if d := b.Audience.Definition; d != nil {
@@ -176,7 +178,7 @@ func definitionOf(loc string, in outreach.SegmentDefinitionDTO) (outreach.Defini
 		for i, s := range raw {
 			id, err := uuid.Parse(s)
 			if err != nil {
-				return nil, fieldErr(loc+"."+dim+"["+strconv.Itoa(i)+"]", "must be a UUID")
+				return nil, problem.Field(loc+"."+dim+"["+strconv.Itoa(i)+"]", "must be a UUID")
 			}
 			out = append(out, id)
 		}
@@ -197,7 +199,7 @@ func definitionOf(loc string, in outreach.SegmentDefinitionDTO) (outreach.Defini
 	}
 	for i, y := range in.Year {
 		if y < 1 || y > 8 {
-			return outreach.Definition{}, fieldErr(loc+".year["+strconv.Itoa(i)+"]", "class years are 1-8")
+			return outreach.Definition{}, problem.Field(loc+".year["+strconv.Itoa(i)+"]", "class years are 1-8")
 		}
 		d.Year = append(d.Year, int16(y))
 	}
@@ -230,7 +232,7 @@ func (h handler) createReport(ctx context.Context, in *createReportInput) (*repo
 	}
 	target, err := uuid.Parse(in.Body.TargetID)
 	if err != nil {
-		return nil, fieldErr("body.target_id", "must be a UUID")
+		return nil, problem.Field("body.target_id", "must be a UUID")
 	}
 	res, err := h.svc.CreateReport(ctx, a, ReportInput{
 		TargetType: TargetType(in.Body.TargetType), TargetID: target, Reason: ReportReason(in.Body.Reason),
@@ -324,7 +326,7 @@ func (h handler) getReport(ctx context.Context, in *ReportPath) (*reportOutput, 
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.GetReport(ctx, a, parseID(in.ReportID))
+	v, err := h.svc.GetReport(ctx, a, httpx.ParseID(in.ReportID))
 	if err != nil {
 		return nil, err
 	}
@@ -348,7 +350,7 @@ func (h handler) resolveReport(ctx context.Context, in *resolveInput) (*reportOu
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.ResolveReport(ctx, a, parseID(in.ReportID), ResolveInput{
+	v, err := h.svc.ResolveReport(ctx, a, httpx.ParseID(in.ReportID), ResolveInput{
 		Status: ReportStatus(in.Body.Status), Note: in.Body.ResolutionNote, AssignToMe: in.Body.AssignToMe,
 	})
 	if err != nil {
@@ -426,7 +428,7 @@ func (h handler) moderatePost(ctx context.Context, in *moderatePostInput) (*post
 		return nil, err
 	}
 	mi := ModerationInput{Action: ModAction(in.Body.Action), ReasonCode: in.Body.ReasonCode, Note: in.Body.Note}
-	if mi.ReportID, err = optID("body.report_id", in.Body.ReportID); err != nil {
+	if mi.ReportID, err = httpx.OptID("body.report_id", in.Body.ReportID); err != nil {
 		return nil, err
 	}
 	r, err := h.svc.ModeratePost(ctx, a, in.id(), mi)
@@ -462,7 +464,7 @@ func (h handler) moderateOrg(ctx context.Context, in *moderateOrgInput) (*orgMod
 	}
 	mi := ModerationInput{Action: ModAction(in.Body.Action), ReasonCode: in.Body.ReasonCode, Note: in.Body.Note,
 		RestrictedUntil: in.Body.RestrictedUntil}
-	if mi.ReportID, err = optID("body.report_id", in.Body.ReportID); err != nil {
+	if mi.ReportID, err = httpx.OptID("body.report_id", in.Body.ReportID); err != nil {
 		return nil, err
 	}
 	r, err := h.svc.ModerateOrg(ctx, a, in.id(), mi)
@@ -492,7 +494,7 @@ func (h handler) listModerationActions(ctx context.Context, in *listActionsInput
 		return nil, err
 	}
 	f := ActionFilter{TargetType: TargetType(in.TargetType)}
-	if f.TargetID, err = optID("query.target_id", in.TargetID); err != nil {
+	if f.TargetID, err = httpx.OptID("query.target_id", in.TargetID); err != nil {
 		return nil, err
 	}
 	fp := page.Fingerprint("adminListModerationActions", in.TargetType, in.TargetID)

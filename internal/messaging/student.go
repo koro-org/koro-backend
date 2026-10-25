@@ -26,7 +26,7 @@ func (s *service) ListMine(ctx context.Context, a authz.Actor, q ListQuery) (Stu
 		return StudentPage{}, err
 	}
 	if q.Status != "" && !q.Status.Valid() {
-		return StudentPage{}, fieldErr("query.status", "must be pending, accepted, declined, expired or withdrawn")
+		return StudentPage{}, problem.Field("query.status", "must be pending, accepted, declined, expired or withdrawn")
 	}
 	limit := page.ClampLimit(q.Limit)
 	q.Now, q.Limit = s.now(), limit+1
@@ -150,7 +150,7 @@ func (s *service) Respond(ctx context.Context, a authz.Actor, id uuid.UUID, in R
 	case DecisionDeclined:
 		to = StatusDeclined
 	default:
-		return StudentView{}, fieldErr("body.decision", "must be accepted or declined")
+		return StudentView{}, problem.Field("body.decision", "must be accepted or declined")
 	}
 	if err := checkShare(in, to); err != nil {
 		return StudentView{}, err
@@ -182,7 +182,7 @@ func checkShare(in RespondInput, to Status) error {
 	case !in.ShareContact:
 		return nil
 	case to != StatusAccepted:
-		return fieldErr("body.share_contact", "only with decision accepted")
+		return problem.Field("body.share_contact", "only with decision accepted")
 	case in.ContactConsent == nil:
 		return consent.ErrProofRequired.WithFields(problem.FieldError{Location: "body.consent.contact_info_share",
 			Message: "the consent text shown is required to share your contact details"})

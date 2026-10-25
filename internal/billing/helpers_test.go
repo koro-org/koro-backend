@@ -11,7 +11,6 @@ import (
 	"time"
 	"uuid"
 
-	"koro/internal/audit"
 	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
@@ -56,14 +55,6 @@ func actor(t *testing.T, name string) authz.Actor {
 func ctxOf(t *testing.T, a authz.Actor) context.Context { return authz.WithActor(t.Context(), a) }
 
 func ptr[T any](v T) *T { return &v }
-
-// wantProblem fails unless err is (or wraps) want.
-func wantProblem(t *testing.T, err error, want error) {
-	t.Helper()
-	if !errors.Is(err, want) {
-		t.Fatalf("error = %v, want %v", err, want)
-	}
-}
 
 func wantStatus(t *testing.T, err error, status int) {
 	t.Helper()
@@ -286,31 +277,6 @@ func (f *fakeFiles) Read(_ context.Context, id uuid.UUID, _ int64) ([]byte, file
 	return slices.Clone(pdfBytes), m, nil
 }
 
-// auditLog records the events.
-type auditLog struct {
-	mu     sync.Mutex
-	events []audit.Event
-}
-
-func (l *auditLog) Log(_ context.Context, e audit.Event) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.events = append(l.events, e)
-	return nil
-}
-
-func (l *auditLog) of(act authz.Action) []audit.Event {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	var out []audit.Event
-	for _, e := range l.events {
-		if e.Action == string(act) {
-			out = append(out, e)
-		}
-	}
-	return out
-}
-
 // fakeReauth accepts reauthPassword.
 type fakeReauth struct{}
 
@@ -373,7 +339,7 @@ type env struct {
 	terms   *fakeTerms
 	parties *fakeParties
 	files   *fakeFiles
-	audit   *auditLog
+	audit   *audittest.Recorder
 	outbox  *outbox.Mem
 	queue   *queue.Mem
 	sender  *fakeSender
@@ -401,7 +367,7 @@ func newEnvWith(t *testing.T, clk *clock.Fake, store billing.Store, tx db.TxMana
 		terms:   &fakeTerms{triggers: map[uuid.UUID]catalog.InvoiceTrigger{}},
 		parties: &fakeParties{parties: map[uuid.UUID]parties.LegalParty{}, payees: map[uuid.UUID]parties.Payee{}},
 		files:   &fakeFiles{meta: map[uuid.UUID]files.FileMeta{}, attached: map[uuid.UUID]files.Owner{}},
-		audit:   &auditLog{}, outbox: outbox.NewMem(clk), queue: queue.NewMem(), sender: &fakeSender{},
+		audit:   &audittest.Recorder{}, outbox: outbox.NewMem(clk), queue: queue.NewMem(), sender: &fakeSender{},
 		sealer: testEnvelope(t), subs: outbox.NewRegistry(),
 		reauth: &audittest.LateReauth[identity.ReauthProof]{Next: fakeReauth{}},
 	}

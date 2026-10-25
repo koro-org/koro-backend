@@ -15,6 +15,7 @@ import (
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/money"
+	"koro/internal/platform/problem"
 )
 
 // MatchTransfer implements Service (fin·k27; Idempotency-Key): the payment
@@ -52,11 +53,11 @@ func (s *service) MatchTransfer(ctx context.Context, a authz.Actor, id uuid.UUID
 		return MatchResult{}, err
 	}
 	if in.OrderID == uuid.Nil() {
-		return MatchResult{}, fieldErr("body.order_id", "is required")
+		return MatchResult{}, problem.Field("body.order_id", "is required")
 	}
 	expected, ok := orders.NormalizeReference(in.ExpectedOrderNo)
 	if !ok {
-		return MatchResult{}, fieldErr("body.expected_order_no", "must be a reference code (KR + 8 characters)")
+		return MatchResult{}, problem.Field("body.expected_order_no", "must be a reference code (KR + 8 characters)")
 	}
 	var refundIBAN string
 	if in.RefundIBAN != "" {
@@ -215,7 +216,7 @@ func overpaymentIBAN(t IncomingTransfer, over int64, requested string) (string, 
 	case over <= 0 || requested != "":
 		return requested, nil
 	case t.SenderIBAN == nil:
-		return "", fieldErr("body.refund_iban",
+		return "", problem.Field("body.refund_iban",
 			"is required: the transfer pays more than the order waits for and its sender IBAN is unknown")
 	}
 	return *t.SenderIBAN, nil
@@ -226,7 +227,7 @@ func (s *service) payableOrder(ctx context.Context, orderID uuid.UUID, expected 
 	o, err := s.d.Orders.ForPayment(ctx, orderID)
 	switch {
 	case errors.Is(err, orders.ErrNotFound):
-		return orders.PayableOrder{}, fieldErr("body.order_id", "is not an order")
+		return orders.PayableOrder{}, problem.Field("body.order_id", "is not an order")
 	case err != nil:
 		return orders.PayableOrder{}, err
 	case o.OrderNo != expected:
@@ -322,11 +323,11 @@ func (s *service) ConfirmDirectPayment(ctx context.Context, a authz.Actor, in Di
 		return DirectResult{}, err
 	}
 	if in.OrderID == uuid.Nil() {
-		return DirectResult{}, fieldErr("body.order_id", "is required")
+		return DirectResult{}, problem.Field("body.order_id", "is required")
 	}
 	expected, ok := orders.NormalizeReference(in.ExpectedOrderNo)
 	if !ok {
-		return DirectResult{}, fieldErr("body.expected_order_no", "must be a reference code (KR + 8 characters)")
+		return DirectResult{}, problem.Field("body.expected_order_no", "must be a reference code (KR + 8 characters)")
 	}
 	if err := s.checkFile(ctx, "body.evidence_file_id", in.EvidenceFileID, files.PurposeTransferReceipt); err != nil {
 		return DirectResult{}, err

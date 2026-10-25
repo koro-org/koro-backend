@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
+	"koro/internal/platform/problem"
 	"koro/internal/platform/textx"
 )
 
@@ -214,14 +215,14 @@ const (
 // would flag every form).
 func checkPattern(loc, p string) (string, error) {
 	if p == "" || len(p) > maxLintPattern {
-		return "", fieldErr(loc, "must be 1-500 characters")
+		return "", problem.Field(loc, "must be 1-500 characters")
 	}
 	re, err := regexp.Compile(p)
 	if err != nil {
-		return "", fieldErr(loc, "must be a valid RE2 expression")
+		return "", problem.Field(loc, "must be a valid RE2 expression")
 	}
 	if re.MatchString("") {
-		return "", fieldErr(loc, "must not match the empty text")
+		return "", problem.Field(loc, "must not match the empty text")
 	}
 	return p, nil
 }

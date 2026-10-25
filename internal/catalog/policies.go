@@ -14,6 +14,7 @@ import (
 	"koro/internal/parties"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/money"
+	"koro/internal/platform/problem"
 	"koro/internal/platform/queue"
 )
 
@@ -151,7 +152,7 @@ func (s *service) AdminListPolicies(ctx context.Context, a authz.Actor, f Policy
 		return nil, err
 	}
 	if f.Scope != "" && !f.Scope.Valid() {
-		return nil, fieldErr("query.scope", "must be default, seller_org, service or offering")
+		return nil, problem.Field("query.scope", "must be default, seller_org, service or offering")
 	}
 	return s.d.Store.ListPolicies(ctx, f)
 }
@@ -212,7 +213,7 @@ func (s *service) AdminClosePolicy(ctx context.Context, a authz.Actor, id uuid.U
 	}
 	now := s.now()
 	if validTo != nil && validTo.Before(now) {
-		return CommercePolicy{}, fieldErr("body.valid_to", "must not be in the past")
+		return CommercePolicy{}, problem.Field("body.valid_to", "must not be in the past")
 	}
 	kind, err := s.reauth(ctx, a, proof, &id, "closed")
 	if err != nil {
@@ -240,7 +241,7 @@ func (s *service) AdminClosePolicy(ctx context.Context, a authz.Actor, id uuid.U
 		}
 		if !end.After(cur.ValidFrom) {
 			if validTo != nil {
-				return uuid.Nil(), fieldErr("body.valid_to", "must be after the policy's valid_from")
+				return uuid.Nil(), problem.Field("body.valid_to", "must be after the policy's valid_from")
 			}
 			end = cur.ValidFrom.Add(time.Microsecond) // not started: it never applies
 		}
@@ -281,7 +282,7 @@ func (s *service) reauth(ctx context.Context, a authz.Actor, proof identity.Reau
 // checkScope checks that the scope row exists: a seller org (club,
 // university or the platform), a service, an offering.
 func (s *service) checkScope(ctx context.Context, p CommercePolicy) error {
-	bad := fieldErr("body.scope_id", "names no "+string(p.Scope))
+	bad := problem.Field("body.scope_id", "names no "+string(p.Scope))
 	switch p.Scope {
 	case ScopeSellerOrg:
 		o, err := s.d.Orgs.Get(ctx, *p.ScopeID)
@@ -292,7 +293,7 @@ func (s *service) checkScope(ctx context.Context, p CommercePolicy) error {
 			return err
 		}
 		if _, ok := sellerKindOf(o.Kind); !ok {
-			return fieldErr("body.scope_id", "must be a club, a university or the platform org")
+			return problem.Field("body.scope_id", "must be a club, a university or the platform org")
 		}
 	case ScopeService:
 		if _, err := s.d.Store.GetService(ctx, *p.ScopeID, false); err != nil {

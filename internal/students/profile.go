@@ -313,7 +313,7 @@ func (s *service) apply(ctx context.Context, a authz.Actor, p Profile, patch Pro
 	}
 	if patch.DegreeLevel != nil {
 		if !patch.DegreeLevel.Valid() {
-			return p, nil, fieldErr("body.degree_level", "must be associate, bachelor, master or doctorate")
+			return p, nil, problem.Field("body.degree_level", "must be associate, bachelor, master or doctorate")
 		}
 		if *patch.DegreeLevel != next.DegreeLevel {
 			next.DegreeLevel = *patch.DegreeLevel
@@ -322,7 +322,7 @@ func (s *service) apply(ctx context.Context, a authz.Actor, p Profile, patch Pro
 	}
 	if patch.ClassYear != nil {
 		if y := *patch.ClassYear; y < 1 || y > 8 {
-			return p, nil, fieldErr("body.class_year", "must be 1-8")
+			return p, nil, problem.Field("body.class_year", "must be 1-8")
 		}
 		if p.ClassYear == nil || *p.ClassYear != *patch.ClassYear {
 			y := *patch.ClassYear
@@ -396,7 +396,7 @@ func (s *service) attachAvatar(ctx context.Context, a authz.Actor, fileID uuid.U
 	if s.d.Files == nil {
 		return errUnavailable
 	}
-	bad := fieldErr("body.avatar_file_id", "must be an avatar upload of yours")
+	bad := problem.Field("body.avatar_file_id", "must be an avatar upload of yours")
 	f, err := s.d.Files.Get(ctx, fileID)
 	switch {
 	case errors.Is(err, files.ErrNotFound):
@@ -452,17 +452,17 @@ func (s *service) PutMySkills(ctx context.Context, a authz.Actor, items []SkillI
 		return nil, err
 	}
 	if len(items) > maxSkills {
-		return nil, fieldErr("body.items", "at most 30 skills")
+		return nil, problem.Field("body.items", "at most 30 skills")
 	}
 	rows := make([]Skill, 0, len(items))
 	ids := make([]uuid.UUID, 0, len(items))
 	for i, it := range items {
 		loc := "body.items[" + strconv.Itoa(i) + "]"
 		if slices.Contains(ids, it.SkillID) {
-			return nil, fieldErr(loc+".skill_id", "is listed twice")
+			return nil, problem.Field(loc+".skill_id", "is listed twice")
 		}
 		if it.Level != nil && (*it.Level < 1 || *it.Level > 5) {
-			return nil, fieldErr(loc+".level", "must be 1-5")
+			return nil, problem.Field(loc+".level", "must be 1-5")
 		}
 		ids = append(ids, it.SkillID)
 		rows = append(rows, Skill{UserID: a.UserID, SkillID: it.SkillID, Level: it.Level})
@@ -494,18 +494,18 @@ func (s *service) PutMyLanguages(ctx context.Context, a authz.Actor, items []Lan
 		return nil, err
 	}
 	if len(items) > maxLanguages {
-		return nil, fieldErr("body.items", "at most 20 languages")
+		return nil, problem.Field("body.items", "at most 20 languages")
 	}
 	rows := make([]Language, 0, len(items))
 	for i, it := range items {
 		loc := "body.items[" + strconv.Itoa(i) + "]"
 		switch {
 		case !languageCodeRe.MatchString(it.LanguageCode):
-			return nil, fieldErr(loc+".language_code", "must be an ISO 639 code (2-3 lower-case letters)")
+			return nil, problem.Field(loc+".language_code", "must be an ISO 639 code (2-3 lower-case letters)")
 		case !it.Level.Valid():
-			return nil, fieldErr(loc+".level", "must be A1-C2 or native")
+			return nil, problem.Field(loc+".level", "must be A1-C2 or native")
 		case slices.ContainsFunc(rows, func(l Language) bool { return l.LanguageCode == it.LanguageCode }):
-			return nil, fieldErr(loc+".language_code", "is listed twice")
+			return nil, problem.Field(loc+".language_code", "is listed twice")
 		}
 		rows = append(rows, Language{UserID: a.UserID, LanguageCode: it.LanguageCode, Level: it.Level})
 	}
@@ -530,14 +530,14 @@ func (s *service) PutMyLanguages(ctx context.Context, a authz.Actor, items []Lan
 // cleanExperience validates and normalises an experience.
 func cleanExperience(e Experience) (Experience, error) {
 	if !e.Kind.Valid() {
-		return e, fieldErr("body.kind", "must be internship, job, volunteer, project or club_role")
+		return e, problem.Field("body.kind", "must be internship, job, volunteer, project or club_role")
 	}
 	title, err := cleanLine("body.title", e.Title, maxTitle)
 	if err != nil {
 		return e, err
 	}
 	if title == nil {
-		return e, fieldErr("body.title", "is required")
+		return e, problem.Field("body.title", "is required")
 	}
 	e.Title = *title
 	if e.OrganizationName != nil {
@@ -551,7 +551,7 @@ func cleanExperience(e Experience) (Experience, error) {
 		}
 	}
 	if e.EndMonth != nil && e.EndMonth.Before(e.StartMonth) {
-		return e, fieldErr("body.end_month", "must not be before start_month")
+		return e, problem.Field("body.end_month", "must not be before start_month")
 	}
 	return e, nil
 }
@@ -588,7 +588,7 @@ func (s *service) CreateMyExperience(ctx context.Context, a authz.Actor, in Expe
 				return err
 			}
 			if len(cur) >= maxExperiences {
-				return fieldErr("body", "at most 50 experiences")
+				return problem.Field("body", "at most 50 experiences")
 			}
 			e.ID = uuid.NewV7()
 			if out, err = s.d.Store.InsertExperience(ctx, e); err != nil {

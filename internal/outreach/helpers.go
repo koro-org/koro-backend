@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"strconv"
-	"strings"
 	"unicode/utf8"
 	"uuid"
 
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/orgs"
+	"koro/internal/platform/httpx"
+	"koro/internal/platform/problem"
 	"koro/internal/platform/textx"
 )
 
@@ -72,27 +73,12 @@ func (s *service) usableOrg(ctx context.Context, a authz.Actor, orgID uuid.UUID)
 func cleanName(loc, s string) (string, error) {
 	n, err := textx.NormalizeText(s)
 	if err != nil {
-		return "", fieldErr(loc, "contains control or bidi characters")
+		return "", problem.Field(loc, "contains control or bidi characters")
 	}
 	if c := utf8.RuneCountInString(n); c < minName || c > maxName {
-		return "", fieldErr(loc, "must be "+strconv.Itoa(minName)+"-"+strconv.Itoa(maxName)+" characters")
+		return "", problem.Field(loc, "must be "+strconv.Itoa(minName)+"-"+strconv.Itoa(maxName)+" characters")
 	}
 	return n, nil
-}
-
-// checkIfMatch applies If-Match (04 §1.13): missing or "*" → 428, no listed
-// tag equal to the current one → 412.
-func checkIfMatch(header, current string) error {
-	h := strings.TrimSpace(header)
-	if h == "" || h == "*" {
-		return ErrPreconditionRequired
-	}
-	for tag := range strings.SplitSeq(h, ",") {
-		if strings.TrimSpace(tag) == current {
-			return nil
-		}
-	}
-	return ErrPreconditionFailed
 }
 
 // auditSegment is the audit record of a segment write by a. The metadata
@@ -107,5 +93,5 @@ func auditSegment(a authz.Actor, action string, seg Segment, meta map[string]any
 
 // view is the API view of a segment.
 func view(seg Segment) SegmentView {
-	return SegmentView{Segment: seg, Estimate: estimateOf(seg), ETag: etagOf(seg.UpdatedAt)}
+	return SegmentView{Segment: seg, Estimate: estimateOf(seg), ETag: httpx.ETag(seg.UpdatedAt)}
 }

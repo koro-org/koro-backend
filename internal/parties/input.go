@@ -99,7 +99,7 @@ func cleanInput(in PartyInput) (LegalParty, string, error) {
 	var p LegalParty
 	var err error
 	if !in.LegalType.Valid() {
-		return LegalParty{}, "", fieldErr("body.legal_type", "is required")
+		return LegalParty{}, "", problem.Field("body.legal_type", "is required")
 	}
 	p.LegalType = in.LegalType
 	if p.Title, err = cleanTitle("body.title", in.Title); err != nil {
@@ -128,7 +128,7 @@ func cleanInput(in PartyInput) (LegalParty, string, error) {
 	p.VATStatus = VATUnknown
 	if in.VATStatus != "" {
 		if !in.VATStatus.Valid() {
-			return LegalParty{}, "", fieldErr("body.vat_status", "must be vat_payer, vat_exempt, not_vat_payer or unknown")
+			return LegalParty{}, "", problem.Field("body.vat_status", "must be vat_payer, vat_exempt, not_vat_payer or unknown")
 		}
 		p.VATStatus = in.VATStatus
 	}
@@ -142,7 +142,7 @@ func cleanInput(in PartyInput) (LegalParty, string, error) {
 			return LegalParty{}, "", err
 		}
 	case in.TCKN != "":
-		return LegalParty{}, "", fieldErr("body.tckn", "applies to individual parties only")
+		return LegalParty{}, "", problem.Field("body.tckn", "applies to individual parties only")
 	}
 	return p, tckn, nil
 }
@@ -152,13 +152,13 @@ func cleanInput(in PartyInput) (LegalParty, string, error) {
 func requireBuyerFields(p LegalParty) error {
 	switch {
 	case p.TaxOffice == nil:
-		return fieldErr("body.tax_office", "is required")
+		return problem.Field("body.tax_office", "is required")
 	case p.TaxNo == nil:
-		return fieldErr("body.tax_no", "is required")
+		return problem.Field("body.tax_no", "is required")
 	case p.Address.Empty():
-		return fieldErr("body.address", "is required")
+		return problem.Field("body.address", "is required")
 	case p.Email == nil:
-		return fieldErr("body.email", "is required")
+		return problem.Field("body.email", "is required")
 	}
 	return nil
 }
@@ -176,7 +176,7 @@ func (s *service) checkKindRules(k Kind, t LegalType) error {
 		}
 	case KindPlatform:
 		if t == LegalIndividual {
-			return fieldErr("body.legal_type", "is not an allowed legal type here")
+			return problem.Field("body.legal_type", "is not an allowed legal type here")
 		}
 	}
 	return nil
@@ -229,10 +229,10 @@ func (s *service) applyPatch(ctx context.Context, cur LegalParty, p PartyPatch) 
 	if p.LegalType != nil {
 		t := *p.LegalType
 		if !t.Valid() {
-			return patchResult{}, fieldErr("body.legal_type", "is not an allowed legal type here")
+			return patchResult{}, problem.Field("body.legal_type", "is not an allowed legal type here")
 		}
 		if (t == LegalIndividual) != (cur.LegalType == LegalIndividual) {
-			return patchResult{}, fieldErr("body.legal_type", "cannot change between individual and other legal types")
+			return patchResult{}, problem.Field("body.legal_type", "cannot change between individual and other legal types")
 		}
 		if err := s.checkKindRules(cur.Kind, t); err != nil {
 			return patchResult{}, err
@@ -283,14 +283,14 @@ func (s *service) applyPatch(ctx context.Context, cur LegalParty, p PartyPatch) 
 	}
 	if p.VATStatus != nil {
 		if !p.VATStatus.Valid() {
-			return patchResult{}, fieldErr("body.vat_status", "must be vat_payer, vat_exempt, not_vat_payer or unknown")
+			return patchResult{}, problem.Field("body.vat_status", "must be vat_payer, vat_exempt, not_vat_payer or unknown")
 		}
 		next.VATStatus = *p.VATStatus
 		mark("vat_status", next.VATStatus == cur.VATStatus)
 	}
 	if p.TCKN != nil {
 		if cur.LegalType != LegalIndividual {
-			return patchResult{}, fieldErr("body.tckn", "applies to individual parties only")
+			return patchResult{}, problem.Field("body.tckn", "applies to individual parties only")
 		}
 		d, err := cleanTCKN("body.tckn", *p.TCKN)
 		if err != nil {

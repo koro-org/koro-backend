@@ -8,6 +8,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/problem"
 )
 
 // ownResource is the authz view of the caller's own registration (03 §3.5
@@ -132,7 +133,7 @@ func (s *service) DecideRegistration(ctx context.Context, a authz.Actor, eventID
 	switch d.Status {
 	case RegConfirmed, RegWaitlisted, RegRejected:
 	default:
-		return RegistrationView{}, fieldErr("body.decision", "must be confirmed, waitlisted or rejected")
+		return RegistrationView{}, problem.Field("body.decision", "must be confirmed, waitlisted or rejected")
 	}
 	note, err := cleanOptional("body.decision_note", d.Note, maxDecisionNote)
 	if err != nil {

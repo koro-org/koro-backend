@@ -16,6 +16,7 @@ import (
 	"koro/internal/entitlements"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // consumeConcurrently runs n consumptions of one unit with distinct refs
@@ -116,7 +117,7 @@ func TestConsume_SameRefTwice_Idempotent(t *testing.T) {
 	other := uuid.NewV7()
 	e.quota(t, other, entitlements.FeatureContactRequest, 5)
 	_, err = e.svc.Consume(t.Context(), other, entitlements.FeatureContactRequest, 1, ref)
-	wantErr(t, err, entitlements.ErrRefConflict)
+	problemtest.WantErr(t, err, entitlements.ErrRefConflict)
 }
 
 // TestConsume_NoEntitlement_403Code: every way of lacking a right is 403
@@ -128,8 +129,8 @@ func TestConsume_NoEntitlement_403Code(t *testing.T) {
 	check := func(name string, org uuid.UUID) {
 		t.Helper()
 		_, err := e.svc.Consume(t.Context(), org, entitlements.FeatureTargetedPost, 1, postRef())
-		wantErr(t, err, entitlements.ErrNoEntitlement)
-		if status, code := problemOf(err); status != http.StatusForbidden || code != "entitlements.not_entitled" {
+		problemtest.WantErr(t, err, entitlements.ErrNoEntitlement)
+		if status, code := problemtest.StatusCode(err); status != http.StatusForbidden || code != "entitlements.not_entitled" {
 			t.Fatalf("%s: problem %d %q, want 403 entitlements.not_entitled", name, status, code)
 		}
 	}
@@ -179,7 +180,7 @@ func TestConsume_NoEntitlement_403Code(t *testing.T) {
 	one := uuid.NewV7()
 	e.quota(t, one, entitlements.FeatureTargetedPost, 1)
 	_, err := e.svc.Consume(t.Context(), one, entitlements.FeatureTargetedPost, 2, postRef())
-	wantErr(t, err, entitlements.ErrNoEntitlement)
+	problemtest.WantErr(t, err, entitlements.ErrNoEntitlement)
 }
 
 func TestConsume_EarliestEndingRightFirstAndActorRecorded(t *testing.T) {
@@ -283,7 +284,7 @@ func TestRelease_CreatesReversalRow(t *testing.T) {
 	}
 	// The released unit is usable again, but not by the released ref.
 	_, err = e.svc.Consume(t.Context(), org, entitlements.FeatureTargetedPost, 1, ref)
-	wantErr(t, err, entitlements.ErrUsageReleased)
+	problemtest.WantErr(t, err, entitlements.ErrUsageReleased)
 	if _, err := e.svc.Consume(t.Context(), org, entitlements.FeatureTargetedPost, 1, postRef()); err != nil {
 		t.Fatalf("the released unit is not usable: %v", err)
 	}
@@ -340,7 +341,7 @@ func TestExpire_MarksExpired(t *testing.T) {
 			t.Fatalf("right %s: status %s, want %s", id, got, st)
 		}
 	}
-	ev := e.audit.all()
+	ev := e.audit.All()
 	if len(ev) != 1 || ev[0].Action != "entitlements.entitlement.expire" || ev[0].SystemJob != entitlements.ExpireJobName ||
 		ev[0].ActorUserID != nil || *ev[0].ResourceID != ending || *ev[0].OrgID != org {
 		t.Fatalf("audit events = %+v", ev)
@@ -349,7 +350,7 @@ func TestExpire_MarksExpired(t *testing.T) {
 	if err := jobs[0].Handle(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if len(e.audit.all()) != 1 {
+	if len(e.audit.All()) != 1 {
 		t.Fatal("a second run expired again")
 	}
 	e.clk.Advance(time.Hour)
@@ -395,7 +396,7 @@ func TestAdminGrant_IdempotencyKeyReplay(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("%d rights after a replay, want 1", len(rows))
 	}
-	ev := e.audit.all()
+	ev := e.audit.All()
 	if len(ev) != 1 || ev[0].Action != "entitlements.entitlement.grant" || *ev[0].ActorUserID != fin.UserID ||
 		ev[0].Reason != in.Reason || *ev[0].ResourceID != first.ID {
 		t.Fatalf("audit events = %+v", ev)
@@ -403,7 +404,7 @@ func TestAdminGrant_IdempotencyKeyReplay(t *testing.T) {
 	// The same key with another body is refused (04 §1.8).
 	in.Quantity = ptr(11)
 	_, err = e.svc.AdminGrant(ctx, fin, org, in)
-	wantErr(t, err, idempotency.ErrKeyReused)
+	problemtest.WantErr(t, err, idempotency.ErrKeyReused)
 	// Without the key the same body grants again (a deliberate second package).
 	in.Quantity = ptr(10)
 	if second, err := e.svc.AdminGrant(authz.WithActor(t.Context(), fin), fin, org, in); err != nil || second.ID == first.ID {
@@ -439,11 +440,11 @@ func TestAdminGrant_RulesAndAuthz(t *testing.T) {
 		}
 	}
 	_, err := e.svc.AdminGrant(t.Context(), pad, uuid.Nil(), base)
-	wantErr(t, err, entitlements.ErrNotFound)
+	problemtest.WantErr(t, err, entitlements.ErrNotFound)
 	// A company cannot grant itself rights; nothing is written.
 	_, err = e.svc.AdminGrant(t.Context(), actor(t, "other_company_member"), org, base)
-	wantErr(t, err, authz.ErrForbidden)
-	if rows, _ := e.store.List(t.Context(), org, entitlements.ListFilter{}, nil, 10); len(rows) != 0 || len(e.audit.all()) != 0 {
+	problemtest.WantErr(t, err, authz.ErrForbidden)
+	if rows, _ := e.store.List(t.Context(), org, entitlements.ListFilter{}, nil, 10); len(rows) != 0 || len(e.audit.All()) != 0 {
 		t.Fatalf("a refused grant wrote %d rights", len(rows))
 	}
 	// A promotion is its own source; access rights carry no total.
@@ -468,7 +469,7 @@ func TestAdminRevoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := e.svc.AdminRevoke(t.Context(), actor(t, "company_admin"), id, "not allowed")
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 
 	got, err := e.svc.AdminRevoke(t.Context(), pad, id, "Granted to the wrong org")
 	if err != nil || got.Status != entitlements.StatusRevoked || got.RevokedAt == nil || *got.RevokeReason != "Granted to the wrong org" || got.QuantityUsed != 1 {
@@ -478,11 +479,11 @@ func TestAdminRevoke(t *testing.T) {
 	if err != nil || again.Status != entitlements.StatusRevoked {
 		t.Fatalf("second revoke = %+v, %v", again, err)
 	}
-	if ev := e.audit.all(); len(ev) != 1 || ev[0].Action != "entitlements.entitlement.revoke" || ev[0].Metadata["previous_status"] != "active" {
+	if ev := e.audit.All(); len(ev) != 1 || ev[0].Action != "entitlements.entitlement.revoke" || ev[0].Metadata["previous_status"] != "active" {
 		t.Fatalf("audit events = %+v", ev)
 	}
 	_, err = e.svc.AdminRevoke(t.Context(), pad, uuid.NewV7(), "missing")
-	wantErr(t, err, entitlements.ErrNotFound)
+	problemtest.WantErr(t, err, entitlements.ErrNotFound)
 
 	ended := e.grant(t, org, entitlements.FeatureTargetedPost, ptr(1), t0.Add(-time.Hour), t0.Add(time.Minute))
 	e.clk.Advance(time.Hour)
@@ -490,7 +491,7 @@ func TestAdminRevoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.AdminRevoke(t.Context(), pad, ended, "too late")
-	wantErr(t, err, entitlements.ErrInvalidState)
+	problemtest.WantErr(t, err, entitlements.ErrInvalidState)
 }
 
 func TestListUsages_ActorOnlyForPadFin(t *testing.T) {
@@ -519,9 +520,9 @@ func TestListUsages_ActorOnlyForPadFin(t *testing.T) {
 		}
 	}
 	_, err := e.svc.ListUsages(t.Context(), actor(t, "other_company_member"), org, entitlements.UsageQuery{})
-	wantErr(t, err, authz.ErrNotFound)
+	problemtest.WantErr(t, err, authz.ErrNotFound)
 	_, err = e.svc.ListUsages(t.Context(), actor(t, "dpo"), org, entitlements.UsageQuery{})
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 }
 
 func TestList_PagesAndAvailability(t *testing.T) {
@@ -569,10 +570,10 @@ func TestGet_OtherOrgsEntitlementIsNotFound(t *testing.T) {
 	}
 	for _, p := range []string{"company_admin", "platform_admin"} {
 		_, err := e.svc.Get(t.Context(), actor(t, p), a, idb)
-		wantErr(t, err, entitlements.ErrNotFound)
+		problemtest.WantErr(t, err, entitlements.ErrNotFound)
 	}
 	_, err := e.svc.Get(t.Context(), actor(t, "company_admin"), b, idb)
-	wantErr(t, err, authz.ErrNotFound) // not a member of company_b
+	problemtest.WantErr(t, err, authz.ErrNotFound) // not a member of company_b
 }
 
 // TestGrant_SourceLifecycle is the orders path (BE-040): a pending right
@@ -595,7 +596,7 @@ func TestGrant_SourceLifecycle(t *testing.T) {
 	other := in
 	other.OrgID = uuid.NewV7()
 	_, err = e.svc.Grant(t.Context(), other)
-	wantErr(t, err, problem.ErrConflict)
+	problemtest.WantErr(t, err, problem.ErrConflict)
 	dispatch := in
 	dispatch.Feature = entitlements.FeatureTargetedDispatch
 	if did, err := e.svc.Grant(t.Context(), dispatch); err != nil || did == id {
@@ -623,11 +624,11 @@ func TestGrant_SourceLifecycle(t *testing.T) {
 	bad := in
 	bad.SourceID = nil
 	_, err = e.svc.Grant(t.Context(), bad)
-	wantErr(t, err, entitlements.ErrInvalidGrant)
+	problemtest.WantErr(t, err, entitlements.ErrInvalidGrant)
 	bad = in
 	bad.Status = entitlements.StatusExhausted
 	_, err = e.svc.Grant(t.Context(), bad)
-	wantErr(t, err, entitlements.ErrInvalidGrant)
+	problemtest.WantErr(t, err, entitlements.ErrInvalidGrant)
 }
 
 func TestNew_RequiresEveryDependency(t *testing.T) {

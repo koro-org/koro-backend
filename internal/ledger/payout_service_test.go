@@ -23,6 +23,7 @@ import (
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // TestCreatePayout_IdempotencyReplay_SinglePayout: the same
@@ -50,17 +51,17 @@ func TestCreatePayout_IdempotencyReplay_SinglePayout(t *testing.T) {
 	if err != nil || len(page.Items) != 1 {
 		t.Fatalf("payouts %v, %v", page.Items, err)
 	}
-	if n := len(e.audit.of(authz.LedgerPayoutCreate)); n != 1 {
+	if n := len(e.audit.Of(authz.LedgerPayoutCreate)); n != 1 {
 		t.Fatalf("%d create audit rows, want 1", n)
 	}
 	if got := e.outbox.Topics(); !slices.Equal(got, []string{domainevent.TopicPayoutCreated}) {
 		t.Fatalf("events %v", got)
 	}
 	_, err = e.svc.AdminCreatePayout(ctx, a, ledger.CreatePayoutInput{PayeeID: payee, LineIDs: []uuid.UUID{l1}})
-	wantProblem(t, err, idempotency.ErrKeyReused)
+	problemtest.WantErr(t, err, idempotency.ErrKeyReused)
 	// Without a key, the lines are held: nothing is left to pay.
 	_, err = e.svc.AdminCreatePayout(ctxOf(t, a), a, ledger.CreatePayoutInput{PayeeID: payee, LineIDs: []uuid.UUID{l2}})
-	wantProblem(t, err, ledger.ErrLineNotPayable)
+	problemtest.WantErr(t, err, ledger.ErrLineNotPayable)
 }
 
 // TestCreatePayout_LineAlreadyInPayout_409: a line in a live payout is not
@@ -77,32 +78,32 @@ func TestCreatePayout_LineAlreadyInPayout_409(t *testing.T) {
 	}
 	a := actor(t, "finance_admin")
 	_, err := e.svc.AdminCreatePayout(ctxOf(t, a), a, ledger.CreatePayoutInput{PayeeID: payee, LineIDs: []uuid.UUID{l1}})
-	wantProblem(t, err, ledger.ErrLineNotPayable)
+	problemtest.WantErr(t, err, ledger.ErrLineNotPayable)
 	_, err = e.svc.AdminCreatePayout(ctxOf(t, a), a, ledger.CreatePayoutInput{PayeeID: payee, LineIDs: []uuid.UUID{l2, l1}})
-	wantProblem(t, err, ledger.ErrLineNotPayable)
+	problemtest.WantErr(t, err, ledger.ErrLineNotPayable)
 	second := e.create(t, "finance_admin_2", payee)
 	if len(second.Items) != 1 || second.Items[0].OrderLineID != l2 {
 		t.Fatalf("second payout %+v", second.Items)
 	}
 	_, err = e.svc.AdminCreatePayout(ctxOf(t, a), a, ledger.CreatePayoutInput{PayeeID: payee})
-	wantProblem(t, err, ledger.ErrNothingPayable)
+	problemtest.WantErr(t, err, ledger.ErrNothingPayable)
 	// Another payee's line is not this payee's.
 	other := e.seller(t, "club_b")
 	lo := e.payable(t, other)
 	_, err = e.svc.AdminCreatePayout(ctxOf(t, a), a, ledger.CreatePayoutInput{PayeeID: payee, LineIDs: []uuid.UUID{lo}})
-	wantProblem(t, err, ledger.ErrLineNotPayable)
+	problemtest.WantErr(t, err, ledger.ErrLineNotPayable)
 	// No approved account: 409 parties.no_approved_account; an unknown payee is 422.
 	e.payees.mu.Lock()
 	delete(e.payees.accounts, other)
 	e.payees.mu.Unlock()
 	_, err = e.svc.AdminCreatePayout(ctxOf(t, a), a, ledger.CreatePayoutInput{PayeeID: other})
-	wantProblem(t, err, parties.ErrNoApprovedAccount)
+	problemtest.WantErr(t, err, parties.ErrNoApprovedAccount)
 	_, err = e.svc.AdminCreatePayout(ctxOf(t, a), a, ledger.CreatePayoutInput{PayeeID: uuid.NewV7()})
-	wantProblem(t, err, problem.ErrValidation)
+	problemtest.WantErr(t, err, problem.ErrValidation)
 	// Only a finance admin creates (03 §5.17).
 	pad := actor(t, "platform_admin")
 	_, err = e.svc.AdminCreatePayout(ctxOf(t, pad), pad, ledger.CreatePayoutInput{PayeeID: payee})
-	wantProblem(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 }
 
 // TestCreatePayout_LedgerMustOwe: a line whose allocation was never posted
@@ -116,7 +117,7 @@ func TestCreatePayout_LedgerMustOwe(t *testing.T) {
 		fulfilled: t0.Add(-time.Hour)})
 	a := actor(t, "finance_admin")
 	_, err := e.svc.AdminCreatePayout(ctxOf(t, a), a, ledger.CreatePayoutInput{PayeeID: payee})
-	wantProblem(t, err, ledger.ErrNegativeBalance)
+	problemtest.WantErr(t, err, ledger.ErrNegativeBalance)
 }
 
 // TestApprovePayout_Creator_403FourEyes (03 §6.1, §7.7 "4 göz – payout"):
@@ -135,7 +136,7 @@ func TestApprovePayout_Creator_403FourEyes(t *testing.T) {
 		if name == "finance_admin" {
 			want = authz.ErrFourEyes
 		}
-		wantProblem(t, err, want)
+		problemtest.WantErr(t, err, want)
 	}
 	got, err := e.svc.AdminGetPayout(ctxOf(t, actor(t, "finance_admin")), actor(t, "finance_admin"), p.ID)
 	if err != nil || got.Status != ledger.StatusPendingApproval || got.ApprovedBy != nil {
@@ -160,15 +161,15 @@ func TestApprovePayout_RequiresReauth(t *testing.T) {
 	p := e.create(t, "finance_admin_2", payee)
 	a := actor(t, "finance_admin")
 	_, err := e.svc.AdminApprovePayout(ctxOf(t, a), a, p.ID, identity.ReauthProof{})
-	wantProblem(t, err, identity.ErrReauthRequired)
+	problemtest.WantErr(t, err, identity.ErrReauthRequired)
 	_, err = e.svc.AdminApprovePayout(ctxOf(t, a), a, p.ID, identity.ReauthProof{Password: "wrong-password"})
-	wantProblem(t, err, identity.ErrReauthFailed)
-	denied := e.audit.of(authz.LedgerPayoutApprove)
+	problemtest.WantErr(t, err, identity.ErrReauthFailed)
+	denied := e.audit.Of(authz.LedgerPayoutApprove)
 	if len(denied) != 2 || denied[0].Outcome != audit.Denied || denied[1].Outcome != audit.Denied {
 		t.Fatalf("approval audit rows before a valid proof = %+v, want two denied records", denied)
 	}
 	e.approve(t, "finance_admin", p.ID)
-	rows := e.audit.of(authz.LedgerPayoutApprove)[2:]
+	rows := e.audit.Of(authz.LedgerPayoutApprove)[2:]
 	if len(rows) != 1 || rows[0].Metadata["reauth"] != "password" || rows[0].Metadata["iban_masked"] == p.IBANSnapshot {
 		t.Fatalf("approval audit %+v", rows)
 	}
@@ -176,9 +177,9 @@ func TestApprovePayout_RequiresReauth(t *testing.T) {
 		t.Fatalf("events %v", got)
 	}
 	_, err = e.svc.AdminApprovePayout(ctxOf(t, a), a, p.ID, identity.ReauthProof{Password: reauthPassword})
-	wantProblem(t, err, ledger.ErrInvalidState)
+	problemtest.WantErr(t, err, ledger.ErrInvalidState)
 	_, err = e.svc.AdminApprovePayout(ctxOf(t, a), a, uuid.NewV7(), identity.ReauthProof{Password: reauthPassword})
-	wantProblem(t, err, ledger.ErrNotFound)
+	problemtest.WantErr(t, err, ledger.ErrNotFound)
 }
 
 // approved returns an approved payout of one payable line of a new payee.
@@ -210,7 +211,7 @@ func TestMarkPaid_WithoutReceipt_422(t *testing.T) {
 		{"no bank reference", ledger.MarkPaidInput{BankReference: "  ", ReceiptFileID: &invoice}, "body.bank_reference"},
 	} {
 		_, err := e.svc.AdminMarkPayoutPaid(ctxOf(t, a), a, p.ID, c.in)
-		wantProblem(t, err, problem.ErrValidation)
+		problemtest.WantErr(t, err, problem.ErrValidation)
 		var pe *problem.Error
 		if !errors.As(err, &pe) || len(pe.Fields()) == 0 || pe.Fields()[0].Location != c.loc {
 			t.Errorf("%s: %v, want a field error at %s", c.name, err, c.loc)
@@ -230,7 +231,7 @@ func TestMarkPaid_WithoutReceipt_422(t *testing.T) {
 	pad := actor(t, "platform_admin")
 	receipt := e.files.put(files.PurposePayoutReceipt)
 	_, err := e.svc.AdminMarkPayoutPaid(ctxOf(t, pad), pad, p.ID, ledger.MarkPaidInput{BankReference: "EFT-1", ReceiptFileID: &receipt})
-	wantProblem(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 }
 
 // TestMarkPaid_Chain: the chain of 01 §6.3 "Payout ödendi" over the
@@ -269,7 +270,7 @@ func TestMarkPaid_Chain(t *testing.T) {
 	a := actor(t, "finance_admin")
 	receipt := e.files.put(files.PurposePayoutReceipt)
 	_, err = e.svc.AdminMarkPayoutPaid(ctxOf(t, a), a, p.ID, ledger.MarkPaidInput{BankReference: "EFT-2", ReceiptFileID: &receipt})
-	wantProblem(t, err, ledger.ErrInvalidState)
+	problemtest.WantErr(t, err, ledger.ErrInvalidState)
 	bal, err := e.svc.GetPayeeBalance(ctxOf(t, a), a, authztest.ID("club_a"), payee)
 	if err != nil || bal.Payable != 0 || bal.PaidOut != 1_080_000 || bal.PendingPayout != 0 {
 		t.Fatalf("balance %+v, %v", bal, err)
@@ -303,8 +304,8 @@ func TestMarkPaid_IdempotencyReplay(t *testing.T) {
 			n++
 		}
 	}
-	if n != 1 || len(e.audit.of(authz.LedgerPayoutMarkPaid)) != 1 {
-		t.Fatalf("%d payout.paid events, %d audit rows", n, len(e.audit.of(authz.LedgerPayoutMarkPaid)))
+	if n != 1 || len(e.audit.Of(authz.LedgerPayoutMarkPaid)) != 1 {
+		t.Fatalf("%d payout.paid events, %d audit rows", n, len(e.audit.Of(authz.LedgerPayoutMarkPaid)))
 	}
 }
 
@@ -325,15 +326,15 @@ func TestMarkFailed_ReleasesLines(t *testing.T) {
 		t.Fatalf("payables after the failure %+v, %v", gs, err)
 	}
 	_, err = e.svc.AdminMarkPayoutFailed(ctxOf(t, a), a, p.ID, "again")
-	wantProblem(t, err, ledger.ErrInvalidState)
+	problemtest.WantErr(t, err, ledger.ErrInvalidState)
 	again := e.create(t, "finance_admin", payee)
 	if len(again.Items) != 1 || again.Items[0].OrderLineID != l {
 		t.Fatalf("the released line was not taken again: %+v", again.Items)
 	}
 	_, err = e.svc.AdminMarkPayoutFailed(ctxOf(t, a), a, again.ID, "not approved yet")
-	wantProblem(t, err, ledger.ErrInvalidState)
+	problemtest.WantErr(t, err, ledger.ErrInvalidState)
 	_, err = e.svc.AdminMarkPayoutFailed(ctxOf(t, a), a, again.ID, "")
-	wantProblem(t, err, problem.ErrValidation)
+	problemtest.WantErr(t, err, problem.ErrValidation)
 	if b := e.balance(t, payee); b != 1_080_000 {
 		t.Fatalf("a failed payout moved money: balance %d", b)
 	}
@@ -360,13 +361,13 @@ func TestCancelPayout_OnlyBeforePaid(t *testing.T) {
 	paid, _, _ := e.approved(t)
 	e.markPaid(t, "finance_admin", paid.ID)
 	_, err = e.svc.AdminCancelPayout(ctxOf(t, a), a, paid.ID, "geç")
-	wantProblem(t, err, ledger.ErrInvalidState)
+	problemtest.WantErr(t, err, ledger.ErrInvalidState)
 	_, err = e.svc.AdminCancelPayout(ctxOf(t, a), a, pending.ID, "tekrar")
-	wantProblem(t, err, ledger.ErrInvalidState)
+	problemtest.WantErr(t, err, ledger.ErrInvalidState)
 	receipt := e.files.put(files.PurposePayoutReceipt)
 	_, err = e.svc.AdminMarkPayoutPaid(ctxOf(t, a), a, approved.ID, ledger.MarkPaidInput{BankReference: "EFT-9", ReceiptFileID: &receipt})
-	wantProblem(t, err, ledger.ErrInvalidState)
-	if n := len(e.audit.of(authz.LedgerPayoutCancel)); n != 2 {
+	problemtest.WantErr(t, err, ledger.ErrInvalidState)
+	if n := len(e.audit.Of(authz.LedgerPayoutCancel)); n != 2 {
 		t.Fatalf("%d cancel audit rows", n)
 	}
 }
@@ -393,7 +394,7 @@ func TestPayout_FrozenIBANSnapshot(t *testing.T) {
 		t.Fatalf("snapshot after the change %+v, %v", got.Payout, err)
 	}
 	_, err = e.svc.AdminApprovePayout(ctxOf(t, a), a, p.ID, identity.ReauthProof{Password: reauthPassword})
-	wantProblem(t, err, ledger.ErrBankAccountChanged)
+	problemtest.WantErr(t, err, ledger.ErrBankAccountChanged)
 	if _, err := e.svc.AdminCancelPayout(ctxOf(t, a), a, p.ID, "Hesap değişti"); err != nil {
 		t.Fatal(err)
 	}
@@ -417,19 +418,19 @@ func TestGetPayeeBalance_PayeeOfOtherOrg_404(t *testing.T) {
 		t.Fatalf("own balance %+v, %v", bal, err)
 	}
 	_, err = e.svc.GetPayeeBalance(ctxOf(t, club), club, authztest.ID("club_a"), other)
-	wantProblem(t, err, ledger.ErrNotFound)
+	problemtest.WantErr(t, err, ledger.ErrNotFound)
 	fin := actor(t, "finance_admin")
 	_, err = e.svc.GetPayeeBalance(ctxOf(t, fin), fin, authztest.ID("club_a"), other)
-	wantProblem(t, err, ledger.ErrNotFound)
+	problemtest.WantErr(t, err, ledger.ErrNotFound)
 	_, err = e.svc.GetPayeeBalance(ctxOf(t, club), club, authztest.ID("club_b"), other)
-	wantProblem(t, err, authz.ErrNotFound)
+	problemtest.WantErr(t, err, authz.ErrNotFound)
 	_, err = e.svc.GetPayeeBalance(ctxOf(t, club), club, authztest.ID("club_a"), uuid.NewV7())
-	wantProblem(t, err, ledger.ErrNotFound)
+	problemtest.WantErr(t, err, ledger.ErrNotFound)
 	member := actor(t, "club_member")
 	_, err = e.svc.GetPayeeBalance(ctxOf(t, member), member, authztest.ID("club_a"), own)
-	wantProblem(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	_, err = e.svc.GetPayeeBalance(ctxOf(t, fin), fin, uuid.NewV7(), own)
-	wantProblem(t, err, problem.ErrNotFound)
+	problemtest.WantErr(t, err, problem.ErrNotFound)
 	// A payout in progress is part of the balance and shown as pending.
 	e.create(t, "finance_admin", own)
 	bal, _ = e.svc.GetPayeeBalance(ctxOf(t, club), club, authztest.ID("club_a"), own)
@@ -624,7 +625,7 @@ func TestAdminListPayables_AsOf(t *testing.T) {
 	}
 	pad := actor(t, "platform_admin")
 	_, err = e.svc.AdminListPayables(ctxOf(t, pad), pad, ledger.PayablesQuery{})
-	wantProblem(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 }
 
 // TestPayouts_WithoutPayoutFlow: a poster-only ledger (no Deps.Payouts)
@@ -634,7 +635,7 @@ func TestPayouts_WithoutPayoutFlow(t *testing.T) {
 	e := newEnv(t)
 	a := actor(t, "finance_admin")
 	_, err := e.svc.AdminListPayouts(ctxOf(t, a), a, ledger.PayoutQuery{})
-	wantProblem(t, err, problem.ErrUnavailable)
+	problemtest.WantErr(t, err, problem.ErrUnavailable)
 	if open, err := e.mod.OpenCommerce(t.Context(), uuid.NewV7()); err != nil || open {
 		t.Fatalf("open commerce %v, %v", open, err)
 	}

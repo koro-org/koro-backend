@@ -8,6 +8,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/orgs"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // browseCatalog is the authz view of the marketplace.
@@ -37,7 +38,7 @@ func (s *service) BrowseOfferings(ctx context.Context, a authz.Actor, q BrowseQu
 		f.Sort = SortNewest
 	case SortNewest, SortPrice, SortSalesEnd:
 	default:
-		return OfferingPage{}, fieldErr("query.sort", "must be -created_at, unit_price_amount or sales_end_at")
+		return OfferingPage{}, problem.Field("query.sort", "must be -created_at, unit_price_amount or sales_end_at")
 	}
 	if q.Q != "" {
 		n, err := normalized("query.q", q.Q)
@@ -45,12 +46,12 @@ func (s *service) BrowseOfferings(ctx context.Context, a authz.Actor, q BrowseQu
 			return OfferingPage{}, err
 		}
 		if c := utf8.RuneCountInString(n); c < 2 || c > maxQueryLen {
-			return OfferingPage{}, fieldErr("query.q", "must be 2-100 characters")
+			return OfferingPage{}, problem.Field("query.q", "must be 2-100 characters")
 		}
 		f.Q = n
 	}
 	if q.Category != "" && !q.Category.Valid() {
-		return OfferingPage{}, fieldErr("query.service_category", "is not a service category")
+		return OfferingPage{}, problem.Field("query.service_category", "is not a service category")
 	}
 	if q.UniversityID != nil {
 		f.OrgIDs = []uuid.UUID{}
@@ -94,11 +95,11 @@ func (s *service) ListOrgOfferings(ctx context.Context, a authz.Actor, orgID uui
 	if err != nil {
 		return OfferingPage{}, err
 	}
-	if err := authz.Can(ctx, a, authz.CatalogOfferingListOrg, orgResource(o)); err != nil {
+	if err := authz.Can(ctx, a, authz.CatalogOfferingListOrg, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
 		return OfferingPage{}, err
 	}
 	if q.Status != "" && !q.Status.Valid() {
-		return OfferingPage{}, fieldErr("query.status", "is not an offering status")
+		return OfferingPage{}, problem.Field("query.status", "is not an offering status")
 	}
 	limit := page.ClampLimit(q.Limit)
 	rows, err := s.d.Store.ListOrgOfferings(ctx, o.ID, OrgOfferingFilter{Status: q.Status}, q.After, limit+1)
@@ -135,7 +136,7 @@ func (s *service) ListUniversityApprovals(ctx context.Context, a authz.Actor, or
 	if err != nil {
 		return OfferingPage{}, err
 	}
-	if err := authz.Can(ctx, a, authz.CatalogOfferingReviewQueue, orgResource(uni)); err != nil {
+	if err := authz.Can(ctx, a, authz.CatalogOfferingReviewQueue, authz.OrgResource(uni.ID, string(uni.Kind), string(uni.Status))); err != nil {
 		return OfferingPage{}, err
 	}
 	if uni.Kind != orgs.KindUniversity {

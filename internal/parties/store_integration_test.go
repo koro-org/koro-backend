@@ -22,6 +22,7 @@ import (
 	"koro/internal/platform/db"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/outbox"
+	"koro/internal/platform/problem/problemtest"
 	"koro/internal/platform/queue"
 	"koro/internal/platform/testutil"
 )
@@ -135,7 +136,7 @@ func TestService_Gorm_EndToEnd(t *testing.T) {
 		t.Fatalf("BuyerPartyOf = %v %v %v", p.ID, found, err)
 	}
 	_, err = svc.UpdateOrgParty(ctxOf(t, cma), cma, company, v.Party.ID, v.ETag, parties.PartyPatch{Title: ptr("Yeni Ünvan A.Ş.")})
-	wantErr(t, err, parties.ErrPreconditionFailed)
+	problemtest.WantErr(t, err, parties.ErrPreconditionFailed)
 	upd, err := svc.UpdateOrgParty(ctxOf(t, cma), cma, company, v.Party.ID, ver.ETag, parties.PartyPatch{Title: ptr("Yeni Ünvan A.Ş.")})
 	if err != nil || upd.Party.Status != parties.StatusPendingVerification || upd.Party.VerifiedAt != nil || upd.ETag == ver.ETag {
 		t.Fatalf("update of a verified party: %+v %v", upd.Party, err)
@@ -174,7 +175,7 @@ func TestService_Gorm_EndToEnd(t *testing.T) {
 		t.Fatalf("stored national ID: %d / %d bytes", len(enc), len(bidx))
 	}
 	_, err = svc.AdminCreateParty(ctxOf(t, fin), fin, ind)
-	wantProblem(t, err, 409, "parties.tax_id_taken")
+	problemtest.WantProblem(t, err, 409, "parties.tax_id_taken")
 	// The audit rows exist (one per write and the document verification).
 	var n int
 	if err := d.Pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_events WHERE action LIKE 'parties.%'`).Scan(&n); err != nil {
@@ -286,7 +287,7 @@ func TestBankAccount_Gorm_ApproveRollsBackTogether(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = svc.AdminApproveBankAccount(ctxOf(t, fin), fin, old.Account.ID, proof())
-	wantProblem(t, err, 403, "authz.four_eyes_violation")
+	problemtest.WantProblem(t, err, 403, "authz.four_eyes_violation")
 	if _, err := svc.AdminApproveBankAccount(ctxOf(t, pad), pad, old.Account.ID, proof()); err != nil {
 		t.Fatal(err)
 	}

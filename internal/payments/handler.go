@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"time"
-	"uuid"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -12,9 +11,11 @@ import (
 	"koro/internal/consent"
 	"koro/internal/identity"
 	"koro/internal/platform/civil"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // Register adds the payments operations of BE-041 (04 §2.16: collection
@@ -25,13 +26,13 @@ import (
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
 
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminListCollectionAccounts", Method: http.MethodGet, Path: "/admin/collection-accounts",
 		Summary:     "List Koro's collection accounts",
 		Description: "Every account, newest first. The default active account is the IBAN of every payment instruction.",
 	}, op.Meta{Action: string(authz.PaymentsCollectionAccountList), Surface: op.SurfaceAdmin}, h.listAccounts)
 
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminCreateCollectionAccount", Method: http.MethodPost, Path: "/admin/collection-accounts",
 		Summary: "Create a collection account", DefaultStatus: http.StatusCreated,
 		Description: "Requires re-authentication. The account belongs to Koro's own legal party (kind platform) and waits " +
@@ -40,7 +41,7 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.PaymentsCollectionAccountCreate), Surface: op.SurfaceAdmin, Reauth: true,
 		RateLimit: op.RateReauth, Idempotency: op.IdempotencyOptional}, h.createAccount)
 
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminApproveCollectionAccount", Method: http.MethodPost, Path: "/admin/collection-accounts/{account_id}/approve",
 		Summary: "Approve or reject a collection account",
 		Description: "Requires re-authentication. The creator never decides (403 authz.four_eyes_violation). An approval " +
@@ -48,7 +49,7 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.PaymentsCollectionAccountApprove), Surface: op.SurfaceAdmin, Reauth: true,
 		RateLimit: op.RateReauth, Idempotency: op.IdempotencyOptional}, h.approveAccount)
 
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminRetireCollectionAccount", Method: http.MethodPost, Path: "/admin/collection-accounts/{account_id}/retire",
 		Summary: "Retire a collection account",
 		Description: "Requires re-authentication. Only an active account (409 payments.invalid_state). A retired default " +
@@ -57,7 +58,7 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.PaymentsCollectionAccountRetire), Surface: op.SurfaceAdmin, Reauth: true,
 		RateLimit: op.RateReauth, Idempotency: op.IdempotencyOptional}, h.retireAccount)
 
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminMakeDefaultCollectionAccount", Method: http.MethodPost, Path: "/admin/collection-accounts/{account_id}/make-default",
 		Summary: "Make a collection account the default",
 		Description: "Requires re-authentication. Only an active account (409 payments.invalid_state). New payment " +
@@ -65,13 +66,13 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.PaymentsCollectionAccountRetire), Surface: op.SurfaceAdmin, Reauth: true,
 		RateLimit: op.RateReauth, Idempotency: op.IdempotencyOptional}, h.makeDefault)
 
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminListIncomingTransfers", Method: http.MethodGet, Path: "/admin/incoming-transfers",
 		Summary:     "List incoming bank transfers",
 		Description: "Newest value date first. q matches part of the description, the sender's name or the bank reference, or a reference code exactly.",
 	}, op.Meta{Action: string(authz.PaymentsTransferList), Surface: op.SurfaceAdmin}, h.listTransfers)
 
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminGetIncomingTransfer", Method: http.MethodGet, Path: "/admin/incoming-transfers/{transfer_id}",
 		Summary: "Get an incoming bank transfer with match suggestions",
 		Description: "An unmatched transfer suggests the order of the reference code in its description, rated by its " +
@@ -79,7 +80,7 @@ func Register(api huma.API, svc Service) {
 			"the order does not wait for a payment.",
 	}, op.Meta{Action: string(authz.PaymentsTransferRead), Surface: op.SurfaceAdmin}, h.getTransfer)
 
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminCreateIncomingTransfer", Method: http.MethodPost, Path: "/admin/incoming-transfers",
 		Summary: "Record an incoming bank transfer", DefaultStatus: http.StatusCreated,
 		Description: "The transfer is recorded unmatched on an approved collection account; the reference code of its " +
@@ -87,7 +88,7 @@ func Register(api huma.API, svc Service) {
 			"payments.duplicate_bank_reference.",
 	}, op.Meta{Action: string(authz.PaymentsTransferCreate), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.createTransfer)
 
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminImportIncomingTransfers", Method: http.MethodPost, Path: "/admin/incoming-transfers/import",
 		Summary: "Import a bank statement (CSV)", DefaultStatus: http.StatusAccepted, MaxBodyBytes: 2 * MaxImportBytes,
 		Description: "csv is the statement text (UTF-8, ';' or ',' separated, header line first; columns value_date, " +
@@ -96,7 +97,7 @@ func Register(api huma.API, svc Service) {
 			"with a reason; the answer counts them and lists every row.",
 	}, op.Meta{Action: string(authz.PaymentsTransferCreate), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyRequired}, h.importTransfers)
 
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminMatchIncomingTransfer", Method: http.MethodPost, Path: "/admin/incoming-transfers/{transfer_id}/match",
 		Summary: "Match a transfer to an order (payment capture)",
 		Description: "One transaction: the transfer is matched, the payment captured, the order paid as far as the money " +
@@ -106,13 +107,13 @@ func Register(api huma.API, svc Service) {
 			"request to refund_iban (default: the sender's IBAN); its approval takes four eyes.",
 	}, op.Meta{Action: string(authz.PaymentsTransferMatch), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyRequired}, h.match)
 
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminIgnoreIncomingTransfer", Method: http.MethodPost, Path: "/admin/incoming-transfers/{transfer_id}/ignore",
 		Summary:     "Ignore an unmatched transfer",
 		Description: "Only an unmatched transfer (409). The reason is audited.",
 	}, op.Meta{Action: string(authz.PaymentsTransferIgnore), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.ignore)
 
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminRequestIncomingTransferReturn", Method: http.MethodPost, Path: "/admin/incoming-transfers/{transfer_id}/request-return",
 		Summary: "Request the return of a transfer to its sender",
 		Description: "Requires re-authentication. Step 1 of 3 (06 H-56): an unmatched or ignored transfer waits for another " +
@@ -120,7 +121,7 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.PaymentsTransferMarkReturned), Surface: op.SurfaceAdmin, Reauth: true,
 		RateLimit: op.RateReauth, Idempotency: op.IdempotencyOptional}, h.requestReturn)
 
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminApproveIncomingTransferReturn", Method: http.MethodPost, Path: "/admin/incoming-transfers/{transfer_id}/approve-return",
 		Summary: "Approve or reject the return of a transfer",
 		Description: "Requires re-authentication. Step 2 of 3: the requester never decides (403 " +
@@ -129,7 +130,7 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.PaymentsTransferMarkReturned), Surface: op.SurfaceAdmin, Reauth: true,
 		RateLimit: op.RateReauth, Idempotency: op.IdempotencyOptional}, h.approveReturn)
 
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminMarkIncomingTransferReturned", Method: http.MethodPost, Path: "/admin/incoming-transfers/{transfer_id}/mark-returned",
 		Summary: "Record the EFT that returned a transfer",
 		Description: "Requires re-authentication. Step 3 of 3: only an approved return (409 payments.invalid_state); the " +
@@ -137,7 +138,7 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.PaymentsTransferMarkReturned), Surface: op.SurfaceAdmin, Reauth: true,
 		RateLimit: op.RateReauth, Idempotency: op.IdempotencyOptional}, h.markReturned)
 
-	reg(api, huma.Operation{
+	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminConfirmDirectPayment", Method: http.MethodPost, Path: "/admin/payments/direct-confirmations",
 		Summary: "Confirm a model C order's direct payment to its payees",
 		Description: "Model C (the buyer pays the payees directly, Koro collects its fee): with the receipt of the " +
@@ -151,24 +152,7 @@ func Register(api huma.API, svc Service) {
 	registerCollections(api, h)
 }
 
-// reg registers one payments operation with its Koro metadata.
-func reg[I, O any](api huma.API, o huma.Operation, m op.Meta, fn func(context.Context, *I) (*O, error)) {
-	o.Tags = []string{"payments"}
-	huma.Register(api, op.Koro(o, m), fn)
-}
-
 type handler struct{ svc Service }
-
-// parseID parses a path or body ID; a malformed one becomes the nil UUID,
-// which no row has (404 after the surface's authz; body IDs are validated
-// by their format first).
-func parseID(s string) uuid.UUID {
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return uuid.Nil()
-	}
-	return id
-}
 
 // proofOf turns the reauth body part into identity's proof.
 func proofOf(r *consent.ReauthDTO) identity.ReauthProof {
@@ -176,13 +160,6 @@ func proofOf(r *consent.ReauthDTO) identity.ReauthProof {
 		return identity.ReauthProof{}
 	}
 	return identity.ReauthProof{Password: r.Password, TOTPCode: r.TOTPCode}
-}
-
-func idStr(id *uuid.UUID) string {
-	if id == nil {
-		return ""
-	}
-	return id.String()
 }
 
 func utc(t *time.Time) *time.Time {
@@ -229,7 +206,7 @@ func accountDTO(c CollectionAccount) CollectionAccountDTO {
 	return CollectionAccountDTO{
 		AccountID: c.ID.String(), Label: c.Label, LegalPartyID: c.LegalPartyID.String(), IBAN: c.IBAN, HolderName: c.HolderName,
 		BankName: c.BankName, Status: string(c.Status), IsDefault: c.IsDefault, CreatedBy: c.CreatedBy.String(),
-		ApprovedBy: idStr(c.ApprovedBy), ApprovedAt: utc(c.ApprovedAt), RetiredAt: utc(c.RetiredAt), CreatedAt: c.CreatedAt.UTC(),
+		ApprovedBy: httpx.IDStr(c.ApprovedBy), ApprovedAt: utc(c.ApprovedAt), RetiredAt: utc(c.RetiredAt), CreatedAt: c.CreatedAt.UTC(),
 	}
 }
 
@@ -276,7 +253,7 @@ func (h handler) createAccount(ctx context.Context, in *createAccountInput) (*ac
 		return nil, err
 	}
 	b := in.Body
-	c, err := h.svc.CreateCollectionAccount(ctx, a, AccountInput{Label: b.Label, LegalPartyID: parseID(b.LegalPartyID), IBAN: b.IBAN,
+	c, err := h.svc.CreateCollectionAccount(ctx, a, AccountInput{Label: b.Label, LegalPartyID: httpx.ParseID(b.LegalPartyID), IBAN: b.IBAN,
 		HolderName: b.HolderName, BankName: b.BankName}, proofOf(b.Reauth))
 	if err != nil {
 		return nil, err
@@ -298,7 +275,7 @@ func (h handler) approveAccount(ctx context.Context, in *approveAccountInput) (*
 	if err != nil {
 		return nil, err
 	}
-	c, err := h.svc.DecideCollectionAccount(ctx, a, parseID(in.AccountID), Decision(in.Body.Decision), proofOf(in.Body.Reauth))
+	c, err := h.svc.DecideCollectionAccount(ctx, a, httpx.ParseID(in.AccountID), Decision(in.Body.Decision), proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +295,7 @@ func (h handler) retireAccount(ctx context.Context, in *reauthAccountInput) (*ac
 	if err != nil {
 		return nil, err
 	}
-	c, err := h.svc.RetireCollectionAccount(ctx, a, parseID(in.AccountID), proofOf(in.Body.Reauth))
+	c, err := h.svc.RetireCollectionAccount(ctx, a, httpx.ParseID(in.AccountID), proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err
 	}
@@ -330,7 +307,7 @@ func (h handler) makeDefault(ctx context.Context, in *reauthAccountInput) (*acco
 	if err != nil {
 		return nil, err
 	}
-	c, err := h.svc.MakeDefaultCollectionAccount(ctx, a, parseID(in.AccountID), proofOf(in.Body.Reauth))
+	c, err := h.svc.MakeDefaultCollectionAccount(ctx, a, httpx.ParseID(in.AccountID), proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err
 	}
@@ -387,15 +364,15 @@ func transferDTO(t IncomingTransfer) IncomingTransferDTO {
 		TransferID: t.ID.String(), CollectionAccountID: t.CollectionAccountID.String(), ValueDate: t.ValueDate.String(),
 		Amount: t.Amount, Currency: t.Currency, SenderName: str(t.SenderName), SenderIBAN: str(t.SenderIBAN),
 		Description: t.Description, BankReference: t.BankReference, ExtractedOrderNo: str(t.ExtractedOrderNo),
-		Status: string(t.Status), MatchedOrderID: idStr(t.MatchedOrderID), MatchedBy: idStr(t.MatchedBy), MatchedAt: utc(t.MatchedAt),
-		IgnoreReason: str(t.IgnoreReason), ReceiptFileID: idStr(t.ReceiptFileID), EntryMethod: string(t.EntryMethod),
+		Status: string(t.Status), MatchedOrderID: httpx.IDStr(t.MatchedOrderID), MatchedBy: httpx.IDStr(t.MatchedBy), MatchedAt: utc(t.MatchedAt),
+		IgnoreReason: str(t.IgnoreReason), ReceiptFileID: httpx.IDStr(t.ReceiptFileID), EntryMethod: string(t.EntryMethod),
 		EnteredBy: t.EnteredBy.String(), CreatedAt: t.CreatedAt.UTC(),
 	}
 	if t.ReturnRequestedBy != nil {
 		d.Return = &TransferReturnDTO{
-			RequestedBy: idStr(t.ReturnRequestedBy), RequestedAt: utc(t.ReturnRequestedAt), Reason: str(t.ReturnReason),
-			TargetIBAN: str(t.ReturnTargetIBAN), ApprovedBy: idStr(t.ReturnApprovedBy), ApprovedAt: utc(t.ReturnApprovedAt),
-			ReturnedAt: utc(t.ReturnedAt), BankReference: str(t.ReturnBankReference), ReceiptFileID: idStr(t.ReturnReceiptFileID),
+			RequestedBy: httpx.IDStr(t.ReturnRequestedBy), RequestedAt: utc(t.ReturnRequestedAt), Reason: str(t.ReturnReason),
+			TargetIBAN: str(t.ReturnTargetIBAN), ApprovedBy: httpx.IDStr(t.ReturnApprovedBy), ApprovedAt: utc(t.ReturnApprovedAt),
+			ReturnedAt: utc(t.ReturnedAt), BankReference: str(t.ReturnBankReference), ReceiptFileID: httpx.IDStr(t.ReturnReceiptFileID),
 		}
 	}
 	return d
@@ -468,7 +445,7 @@ func (in *listTransfersInput) query(fp string) TransferQuery {
 		}
 		d, err := civil.Parse(b.raw)
 		if err != nil {
-			q.invalid = fieldErr(b.loc, "must be a date (YYYY-MM-DD)")
+			q.invalid = problem.Field(b.loc, "must be a date (YYYY-MM-DD)")
 			return q
 		}
 		*b.dst = &d
@@ -501,7 +478,7 @@ func (h handler) getTransfer(ctx context.Context, in *TransferPath) (*transferDe
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.GetTransfer(ctx, a, parseID(in.TransferID))
+	v, err := h.svc.GetTransfer(ctx, a, httpx.ParseID(in.TransferID))
 	if err != nil {
 		return nil, err
 	}
@@ -536,13 +513,13 @@ func (h handler) createTransfer(ctx context.Context, in *createTransferInput) (*
 		return nil, err
 	}
 	b := in.Body
-	ti := TransferInput{CollectionAccountID: parseID(b.CollectionAccountID), Amount: b.Amount, SenderName: b.SenderName,
+	ti := TransferInput{CollectionAccountID: httpx.ParseID(b.CollectionAccountID), Amount: b.Amount, SenderName: b.SenderName,
 		SenderIBAN: b.SenderIBAN, Description: b.Description, BankReference: b.BankReference}
 	if d, err := civil.Parse(b.ValueDate); err == nil {
 		ti.ValueDate = d
 	}
 	if b.ReceiptFileID != "" {
-		id := parseID(b.ReceiptFileID)
+		id := httpx.ParseID(b.ReceiptFileID)
 		ti.ReceiptFileID = &id
 	}
 	t, err := h.svc.CreateTransfer(ctx, a, ti)
@@ -583,14 +560,14 @@ func (h handler) importTransfers(ctx context.Context, in *importInput) (*importO
 	if err != nil {
 		return nil, err
 	}
-	r, err := h.svc.ImportTransfers(ctx, a, ImportInput{CollectionAccountID: parseID(in.Body.CollectionAccountID), CSV: in.Body.CSV})
+	r, err := h.svc.ImportTransfers(ctx, a, ImportInput{CollectionAccountID: httpx.ParseID(in.Body.CollectionAccountID), CSV: in.Body.CSV})
 	if err != nil {
 		return nil, err
 	}
 	out := &importOutput{Body: ImportResultDTO{Imported: r.Imported, Duplicates: r.Duplicates, Rejected: r.Rejected,
 		Rows: make([]ImportRowDTO, len(r.Rows))}}
 	for i, row := range r.Rows {
-		out.Body.Rows[i] = ImportRowDTO{Line: row.Line, Outcome: row.Outcome, TransferID: idStr(row.TransferID), Error: row.Error}
+		out.Body.Rows[i] = ImportRowDTO{Line: row.Line, Outcome: row.Outcome, TransferID: httpx.IDStr(row.TransferID), Error: row.Error}
 	}
 	return out, nil
 }
@@ -651,7 +628,7 @@ func (h handler) match(ctx context.Context, in *matchInput) (*matchOutput, error
 	if err != nil {
 		return nil, err
 	}
-	r, err := h.svc.MatchTransfer(ctx, a, parseID(in.TransferID), MatchInput{OrderID: parseID(in.Body.OrderID),
+	r, err := h.svc.MatchTransfer(ctx, a, httpx.ParseID(in.TransferID), MatchInput{OrderID: httpx.ParseID(in.Body.OrderID),
 		ExpectedOrderNo: in.Body.ExpectedOrderNo, RefundIBAN: in.Body.RefundIBAN})
 	if err != nil {
 		return nil, err
@@ -678,7 +655,7 @@ func (h handler) ignore(ctx context.Context, in *ignoreInput) (*transferOutput, 
 	if err != nil {
 		return nil, err
 	}
-	t, err := h.svc.IgnoreTransfer(ctx, a, parseID(in.TransferID), in.Body.IgnoreReason)
+	t, err := h.svc.IgnoreTransfer(ctx, a, httpx.ParseID(in.TransferID), in.Body.IgnoreReason)
 	if err != nil {
 		return nil, err
 	}
@@ -700,7 +677,7 @@ func (h handler) requestReturn(ctx context.Context, in *requestReturnInput) (*tr
 	if err != nil {
 		return nil, err
 	}
-	t, err := h.svc.RequestReturn(ctx, a, parseID(in.TransferID), ReturnRequest{Reason: in.Body.ReturnReason, TargetIBAN: in.Body.TargetIBAN},
+	t, err := h.svc.RequestReturn(ctx, a, httpx.ParseID(in.TransferID), ReturnRequest{Reason: in.Body.ReturnReason, TargetIBAN: in.Body.TargetIBAN},
 		proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err
@@ -722,7 +699,7 @@ func (h handler) approveReturn(ctx context.Context, in *approveReturnInput) (*tr
 	if err != nil {
 		return nil, err
 	}
-	t, err := h.svc.DecideReturn(ctx, a, parseID(in.TransferID), Decision(in.Body.Decision), proofOf(in.Body.Reauth))
+	t, err := h.svc.DecideReturn(ctx, a, httpx.ParseID(in.TransferID), Decision(in.Body.Decision), proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err
 	}
@@ -744,8 +721,8 @@ func (h handler) markReturned(ctx context.Context, in *markReturnedInput) (*tran
 	if err != nil {
 		return nil, err
 	}
-	t, err := h.svc.MarkReturned(ctx, a, parseID(in.TransferID), ReturnReceipt{BankReference: in.Body.BankReference,
-		ReceiptFileID: parseID(in.Body.ReceiptFileID)}, proofOf(in.Body.Reauth))
+	t, err := h.svc.MarkReturned(ctx, a, httpx.ParseID(in.TransferID), ReturnReceipt{BankReference: in.Body.BankReference,
+		ReceiptFileID: httpx.ParseID(in.Body.ReceiptFileID)}, proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err
 	}
@@ -774,8 +751,8 @@ func (h handler) confirmDirect(ctx context.Context, in *directInput) (*directOut
 	if err != nil {
 		return nil, err
 	}
-	r, err := h.svc.ConfirmDirectPayment(ctx, a, DirectInput{OrderID: parseID(in.Body.OrderID), ExpectedOrderNo: in.Body.ExpectedOrderNo,
-		EvidenceFileID: parseID(in.Body.EvidenceFileID)})
+	r, err := h.svc.ConfirmDirectPayment(ctx, a, DirectInput{OrderID: httpx.ParseID(in.Body.OrderID), ExpectedOrderNo: in.Body.ExpectedOrderNo,
+		EvidenceFileID: httpx.ParseID(in.Body.EvidenceFileID)})
 	if err != nil {
 		return nil, err
 	}

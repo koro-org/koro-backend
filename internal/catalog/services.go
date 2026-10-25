@@ -8,6 +8,7 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/problem"
 )
 
 // serviceClearable are the optional service fields Clear may empty.
@@ -22,7 +23,7 @@ func (s *service) ListServices(ctx context.Context, a authz.Actor, category Cate
 		return nil, err
 	}
 	if category != "" && !category.Valid() {
-		return nil, fieldErr("query.category", "is not a service category")
+		return nil, problem.Field("query.category", "is not a service category")
 	}
 	return s.d.Store.ListServices(ctx, ServiceFilter{Category: category, SellableOnly: !staff(a)})
 }
@@ -67,7 +68,7 @@ func (s *service) AdminCreateService(ctx context.Context, a authz.Actor, in Serv
 // newService validates the input of adminCreateService.
 func (s *service) newService(in ServiceInput) (ServiceItem, error) {
 	if !serviceCodeRe.MatchString(in.Code) {
-		return ServiceItem{}, fieldErr("body.code", "must be 3-41 lower-case letters, digits and _, starting with a letter")
+		return ServiceItem{}, problem.Field("body.code", "must be 3-41 lower-case letters, digits and _, starting with a letter")
 	}
 	row := ServiceItem{ID: uuid.NewV7(), Code: in.Code, Category: in.Category, FulfillmentType: in.FulfillmentType,
 		DefaultVATRateBP: 2000, VATClass: VATStandard, Active: true}
@@ -124,7 +125,7 @@ func (s *service) AdminUpdateService(ctx context.Context, a authz.Actor, id uuid
 	}
 	for _, c := range p.Clear {
 		if !slices.Contains(serviceClearable, c) {
-			return ServiceItem{}, fieldErr("body.clear", "names a field that cannot be cleared")
+			return ServiceItem{}, problem.Field("body.clear", "names a field that cannot be cleared")
 		}
 	}
 	var out ServiceItem

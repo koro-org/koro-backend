@@ -19,6 +19,7 @@ import (
 	"koro/internal/platform/civil"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/httpx"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/problem"
 	"koro/internal/platform/ratelimit"
 	"koro/internal/platform/textx"
@@ -233,11 +234,7 @@ func (s *service) markActiveDay(ctx context.Context, userID uuid.UUID, prev, now
 	if !prev.IsZero() && civil.Today(prev) == today {
 		return
 	}
-	env, err := domainevent.New(domainevent.UserActiveDay{UserID: userID, Day: today}, resourceUser, userID)
-	if err == nil {
-		err = s.d.Outbox.AfterCommit(ctx, env)
-	}
-	if err != nil {
+	if err := outbox.EmitAfterCommit(ctx, s.d.Outbox, domainevent.UserActiveDay{UserID: userID, Day: today}, resourceUser, userID); err != nil {
 		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "user.active_day not emitted",
 			slog.String("user_id", userID.String()), slog.String("err", err.Error()))
 	}

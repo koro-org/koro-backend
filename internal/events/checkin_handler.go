@@ -9,15 +9,17 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // registerCheckins adds the 9 ticket, check-in and attendance operations
 // of BE-031 (04 §2.6, §E.3, §E.5).
 func registerCheckins(api huma.API, h handler) {
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "getMyTicket", Method: http.MethodGet, Path: "/me/registrations/{registration_id}/ticket",
 		Summary: "Get my ticket",
 		Description: "The QR payload (KORO1:<token>; no personal data, no URL) and the manual code of a confirmed or " +
@@ -25,7 +27,7 @@ func registerCheckins(api huma.API, h handler) {
 			"is the same as in the ticket e-mail: the app may keep it to show the QR offline. Treat it as a secret.",
 	}, op.Meta{Action: string(authz.EventsTicketReadOwn), Surface: op.SurfaceSelf}, h.getMyTicket)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "resendMyTicket", Method: http.MethodPost, Path: "/me/registrations/{registration_id}/ticket/resend",
 		DefaultStatus: http.StatusAccepted,
 		Summary:       "E-mail my ticket again",
@@ -34,7 +36,7 @@ func registerCheckins(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.EventsTicketResend), Surface: op.SurfaceSelf, RateLimit: op.RateTicketResend,
 		Idempotency: op.IdempotencyOptional}, h.resendMyTicket)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "reissueMyTicket", Method: http.MethodPost, Path: "/me/registrations/{registration_id}/ticket/reissue",
 		Summary: "Reissue my ticket",
 		Description: "A new ticket (version + 1) replaces the active one: the old QR and manual code stop working " +
@@ -43,7 +45,7 @@ func registerCheckins(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.EventsTicketReissue), Surface: op.SurfaceSelf, Idempotency: op.IdempotencyOptional},
 		h.reissueMyTicket)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "reissueRegistrationTicket", Method: http.MethodPost,
 		Path:    "/events/{event_id}/registrations/{registration_id}/ticket/reissue",
 		Summary: "Reissue a registration's ticket",
@@ -52,7 +54,7 @@ func registerCheckins(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.EventsTicketReissue), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional},
 		h.reissueRegistrationTicket)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "createCheckin", Method: http.MethodPost, Path: "/events/{event_id}/check-ins",
 		Summary: "Check an attendee in",
 		Description: "The event's staff and the organiser's managers scan a QR (method qr, token = the scanned " +
@@ -64,7 +66,7 @@ func registerCheckins(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.EventsCheckinCreate), Surface: op.SurfaceResource, RateLimit: op.RateQRScan,
 		Idempotency: op.IdempotencyRequired}, h.createCheckin)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "voidCheckin", Method: http.MethodPost, Path: "/events/{event_id}/check-ins/{checkin_id}/void",
 		Summary: "Void a check-in",
 		Description: "A manager (staff role manager or the organiser's managers) voids a check-in with a reason; the " +
@@ -72,13 +74,13 @@ func registerCheckins(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.EventsCheckinVoid), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional},
 		h.voidCheckin)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "listCheckins", Method: http.MethodGet, Path: "/events/{event_id}/check-ins",
 		Summary:     "List an event's check-ins",
 		Description: "The latest scan first; the attendee as first name and last-name initial only.",
 	}, op.Meta{Action: string(authz.EventsCheckinList), Surface: op.SurfaceResource}, h.listCheckins)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "getCheckinStats", Method: http.MethodGet, Path: "/events/{event_id}/check-ins/stats",
 		Summary: "Get an event's attendance counters",
 		Description: "confirmed: the seat holders (confirmed and checked in); checked_in; voided check-ins; " +
@@ -86,7 +88,7 @@ func registerCheckins(api huma.API, h handler) {
 			"/api/v1/events/{event_id}/check-ins/live (same access; outside this document).",
 	}, op.Meta{Action: string(authz.EventsCheckinStats), Surface: op.SurfaceResource}, h.getCheckinStats)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "finalizeEventAttendance", Method: http.MethodPost, Path: "/events/{event_id}/attendance/finalize",
 		Summary: "Close an event's attendance",
 		Description: "After the event's end, once: the confirmed registrations without a check-in become no_show " +
@@ -189,7 +191,7 @@ type CheckinPath struct {
 	CheckinID string `path:"checkin_id" doc:"Check-in ID"`
 }
 
-func (p CheckinPath) checkinID() uuid.UUID { return parseID(p.CheckinID) }
+func (p CheckinPath) checkinID() uuid.UUID { return httpx.ParseID(p.CheckinID) }
 
 // ---- tickets
 
@@ -293,7 +295,7 @@ func (h handler) createCheckin(ctx context.Context, in *createCheckinInput) (*ch
 	}
 	scan, err := uuid.Parse(in.Body.ClientScanID)
 	if err != nil {
-		return nil, fieldErr("body.client_scan_id", "must be a UUID")
+		return nil, problem.Field("body.client_scan_id", "must be a UUID")
 	}
 	r, err := h.svc.CreateCheckin(ctx, a, in.id(), CheckinInput{
 		Method: CheckinMethod(in.Body.Method), Token: in.Body.Token, ManualCode: in.Body.ManualCode, ClientScanID: scan,

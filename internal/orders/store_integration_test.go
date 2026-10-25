@@ -14,6 +14,7 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/catalog"
 	"koro/internal/entitlements"
@@ -182,23 +183,23 @@ func newPGEnv(t *testing.T, opts ...func(*orders.Deps)) *pgEnv {
 	payees := &fakePayees{m: map[uuid.UUID]parties.Payee{p.seller.payee: {ID: p.seller.payee, OrgID: p.seller.org, Status: parties.PayeeActive, IsDefault: true}}}
 	p.keeper = idempotency.New(idempotency.Deps{Tx: d.Tx, Store: idempotency.NewGormStore(d.ORM), Clock: clk, Log: discardLog()})
 	var mod orders.Module
-	cat, err := catalog.New(catalog.Deps{Store: p.cat, Tx: d.Tx, Audit: &auditLog{}, Idempotency: p.keeper, Orgs: fo, Outbox: p.outbox,
+	cat, err := catalog.New(catalog.Deps{Store: p.cat, Tx: d.Tx, Audit: &audittest.Recorder{}, Idempotency: p.keeper, Orgs: fo, Outbox: p.outbox,
 		Queue: queue.NewMem(), Clock: clk, Log: discardLog(),
 		BuyerHeld: func(ctx context.Context, off, buyer uuid.UUID) (int, error) { return mod.BuyerHeld(ctx, off, buyer) }})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ents, err := entitlements.New(entitlements.Deps{Store: p.ents, Tx: d.Tx, Audit: &auditLog{}, Idempotency: p.keeper, Clock: clk, Log: discardLog()})
+	ents, err := entitlements.New(entitlements.Deps{Store: p.ents, Tx: d.Tx, Audit: &audittest.Recorder{}, Idempotency: p.keeper, Clock: clk, Log: discardLog()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	fm, err := files.New(files.Deps{Store: files.NewGormStore(d.ORM), Objects: storage.NewMem(clk), Tx: d.Tx, Outbox: p.outbox,
-		Queue: queue.NewMem(), Idempotency: p.keeper, Clock: clk, Log: discardLog(), Buckets: evidenceBuckets, Audit: &auditLog{}})
+		Queue: queue.NewMem(), Idempotency: p.keeper, Clock: clk, Log: discardLog(), Buckets: evidenceBuckets, Audit: &audittest.Recorder{}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	p.files = fm.Service
-	od := orders.Deps{Store: orders.NewGormStore(d.ORM), Tx: d.Tx, Audit: &auditLog{}, Idempotency: p.keeper, Orgs: fo,
+	od := orders.Deps{Store: orders.NewGormStore(d.ORM), Tx: d.Tx, Audit: &audittest.Recorder{}, Idempotency: p.keeper, Orgs: fo,
 		Offerings: cat.Offerings, Parties: fp, Payees: payees, Entitlements: ents.Service, Outbox: p.outbox, Clock: clk, Log: discardLog(),
 		Files: p.files}
 	for _, o := range opts {

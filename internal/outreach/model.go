@@ -2,7 +2,6 @@ package outreach
 
 import (
 	"slices"
-	"strconv"
 	"time"
 	"uuid"
 
@@ -175,12 +174,6 @@ type SegmentPatch struct {
 type CountResult struct {
 	Estimate
 	Dimensions int16
-}
-
-// etagOf is the strong ETag of a version (04 §1.13): the base32 of
-// updated_at's UnixNano, quoted.
-func etagOf(updatedAt time.Time) string {
-	return `"` + strconv.FormatInt(updatedAt.UnixNano(), 32) + `"`
 }
 
 // estimateOf is the stored estimate of a segment.

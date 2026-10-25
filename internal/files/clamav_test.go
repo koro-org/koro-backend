@@ -18,6 +18,7 @@ import (
 	"koro/internal/platform/clock"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/outbox"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // BE-048: the ClamAV scanner in the upload pipeline, infected files, the
@@ -208,9 +209,9 @@ func TestInfected_DeletedAndOwnerNotified(t *testing.T) {
 			t.Fatalf("attached infected row = %+v, %d objects", f, e.mem.Len())
 		}
 		_, err := e.svc.PresignGet(t.Context(), id, 0)
-		wantErr(t, err, files.ErrNotClean)
+		problemtest.WantErr(t, err, files.ErrNotClean)
 		err = e.svc.Attach(t.Context(), student, id, owner)
-		wantErr(t, err, files.ErrNotClean)
+		problemtest.WantErr(t, err, files.ErrNotClean)
 		evs := e.rejectedEvents(t)
 		if len(evs) != 1 || evs[0].AttachedModule != "students" || evs[0].AttachedEntityID == nil || *evs[0].AttachedEntityID != owner.EntityID {
 			t.Fatalf("file.rejected = %+v, want the owner", evs)

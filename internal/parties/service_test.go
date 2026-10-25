@@ -18,6 +18,7 @@ import (
 	"koro/internal/parties"
 	"koro/internal/platform/db"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // TestLegalParty_TCKNNeverInDTO: an individual's national ID is stored
@@ -80,7 +81,7 @@ func TestLegalParty_TCKNNeverInDTO(t *testing.T) {
 	if err != nil || got.TCKNEnc != nil || got.TCKNBidx != nil || !strings.Contains(dump(got), "Ayşe") {
 		t.Fatalf("Parties.Get = %+v, %v", got, err)
 	}
-	noDigits(t, "audit log", dump(e.audit.all()), tcknA)
+	noDigits(t, "audit log", dump(e.audit.All()), tcknA)
 
 	// The DTO type has no national ID field at all.
 	dt := reflect.TypeFor[parties.LegalPartyDTO]()
@@ -149,7 +150,7 @@ func TestLegalParty_DuplicateTaxID_BlindIndex409(t *testing.T) {
 	first := e.buyer(t, vknA)
 	ocm := actor(t, "other_company_member") // company_b's admin
 	_, err := e.svc.CreateBuyerParty(ctxOf(t, ocm), ocm, org("company_b"), buyerInput("123 456 7890"))
-	wantProblem(t, err, http.StatusConflict, "parties.tax_id_taken")
+	problemtest.WantProblem(t, err, http.StatusConflict, "parties.tax_id_taken")
 	noDigits(t, "conflict error", err.Error(), vknA)
 	// Another kind may carry the same VKN (a company's foundation, say).
 	fin := actor(t, "finance_admin")
@@ -162,7 +163,7 @@ func TestLegalParty_DuplicateTaxID_BlindIndex409(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.UpdateOrgParty(ctxOf(t, ocm), ocm, org("company_b"), second.Party.ID, second.ETag, parties.PartyPatch{TaxNo: ptr(vknA)})
-	wantProblem(t, err, http.StatusConflict, "parties.tax_id_taken")
+	problemtest.WantProblem(t, err, http.StatusConflict, "parties.tax_id_taken")
 
 	// National IDs: the blind index finds the duplicate.
 	ind := func(tckn string) parties.PartyInput {
@@ -172,13 +173,13 @@ func TestLegalParty_DuplicateTaxID_BlindIndex409(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.AdminCreateParty(ctxOf(t, fin), fin, ind("100-000-001-46"))
-	wantProblem(t, err, http.StatusConflict, "parties.tax_id_taken")
+	problemtest.WantProblem(t, err, http.StatusConflict, "parties.tax_id_taken")
 	if _, err := e.svc.AdminCreateParty(ctxOf(t, fin), fin, ind(tcknB)); err != nil {
 		t.Fatalf("another national ID: %v", err)
 	}
 	// An invalid national ID is 422 and never echoed.
 	_, err = e.svc.AdminCreateParty(ctxOf(t, fin), fin, ind("10000000147"))
-	wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
 	noDigits(t, "validation error", dump(err), "10000000147")
 
 	// Retiring the first buyer party frees its VKN.
@@ -218,9 +219,9 @@ func TestUpdateVerifiedParty_ResetsToPendingVerification(t *testing.T) {
 	id := created.Party.ID
 	patch := parties.PartyPatch{Title: ptr("Örnek Yazılım ve Danışmanlık A.Ş.")}
 	_, err := e.svc.UpdateOrgParty(ctx, cma, org("company_a"), id, "", patch)
-	wantErr(t, err, parties.ErrPreconditionRequired)
+	problemtest.WantErr(t, err, parties.ErrPreconditionRequired)
 	_, err = e.svc.UpdateOrgParty(ctx, cma, org("company_a"), id, created.ETag, patch) // the ETag before verification
-	wantErr(t, err, parties.ErrPreconditionFailed)
+	problemtest.WantErr(t, err, parties.ErrPreconditionFailed)
 
 	e.clk.Advance(time.Minute)
 	got, err := e.svc.UpdateOrgParty(ctx, cma, org("company_a"), id, verified.ETag, patch)
@@ -231,7 +232,7 @@ func TestUpdateVerifiedParty_ResetsToPendingVerification(t *testing.T) {
 		got.Party.Title != *patch.Title || got.ETag == verified.ETag {
 		t.Fatalf("after the change: %+v (etag %s)", got.Party, got.ETag)
 	}
-	ev := e.audit.of(authz.PartiesLegalPartyUpdate)
+	ev := e.audit.Of(authz.PartiesLegalPartyUpdate)
 	if len(ev) != 1 || ev[0].Metadata["from"] != "verified" || ev[0].Metadata["to"] != "pending_verification" ||
 		!slices.Equal(ev[0].Metadata["fields"].([]string), []string{"title"}) {
 		t.Fatalf("update audit = %+v", ev)
@@ -246,11 +247,11 @@ func TestUpdateVerifiedParty_ResetsToPendingVerification(t *testing.T) {
 	if err != nil || same.Party.Status != parties.StatusVerified || same.ETag != again.ETag {
 		t.Fatalf("no-op update: %+v %v", same.Party, err)
 	}
-	if n := len(e.audit.of(authz.PartiesLegalPartyUpdate)); n != 1 {
+	if n := len(e.audit.Of(authz.PartiesLegalPartyUpdate)); n != 1 {
 		t.Fatalf("a no-op update is audited (%d events)", n)
 	}
 	_, err = e.svc.UpdateOrgParty(ctx, cma, org("company_a"), id, again.ETag, parties.PartyPatch{})
-	wantErr(t, err, parties.ErrEmptyPatch)
+	problemtest.WantErr(t, err, parties.ErrEmptyPatch)
 
 	// A rejected party goes back to the queue when it is corrected.
 	fin := actor(t, "finance_admin")
@@ -263,20 +264,20 @@ func TestUpdateVerifiedParty_ResetsToPendingVerification(t *testing.T) {
 		t.Fatalf("reject: %+v %v", rej.Party, err)
 	}
 	_, err = e.svc.AdminVerifyParty(ctxOf(t, fin), fin, other.Party.ID, parties.Decision{Decision: parties.StatusRejected})
-	wantProblem(t, err, http.StatusConflict, "parties.invalid_state")
+	problemtest.WantProblem(t, err, http.StatusConflict, "parties.invalid_state")
 	fixed, err := e.svc.UpdateOrgParty(ctx, cma, org("company_a"), other.Party.ID, rej.ETag, parties.PartyPatch{TaxOffice: ptr("Mecidiyeköy")})
 	if err != nil || fixed.Party.Status != parties.StatusPendingVerification {
 		t.Fatalf("corrected rejected party: %+v %v", fixed.Party, err)
 	}
 	// Admin fields are refused on the org route; an inactive party is frozen.
 	_, err = e.svc.UpdateOrgParty(ctx, cma, org("company_a"), other.Party.ID, fixed.ETag, parties.PartyPatch{Deactivate: true})
-	wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
 	off, err := e.svc.AdminUpdateParty(ctxOf(t, fin), fin, other.Party.ID, fixed.ETag, parties.PartyPatch{Deactivate: true})
 	if err != nil || off.Party.Status != parties.StatusInactive {
 		t.Fatalf("deactivate: %+v %v", off.Party, err)
 	}
 	_, err = e.svc.UpdateOrgParty(ctx, cma, org("company_a"), other.Party.ID, off.ETag, patch)
-	wantProblem(t, err, http.StatusConflict, "parties.invalid_state")
+	problemtest.WantProblem(t, err, http.StatusConflict, "parties.invalid_state")
 }
 
 // TestCreateBuyerParty_OnlyBuyerCompanyKind: the org route creates only
@@ -297,7 +298,7 @@ func TestCreateBuyerParty_OnlyBuyerCompanyKind(t *testing.T) {
 		v.Party.Status != parties.StatusPendingVerification || v.Party.CreatedBy == nil || *v.Party.CreatedBy != cma.UserID {
 		t.Fatalf("created = %+v", v.Party)
 	}
-	if ev := e.audit.of(authz.PartiesLegalPartyCreate); len(ev) != 1 || ev[0].OrgID == nil || *ev[0].OrgID != org("company_a") {
+	if ev := e.audit.Of(authz.PartiesLegalPartyCreate); len(ev) != 1 || ev[0].OrgID == nil || *ev[0].OrgID != org("company_a") {
 		t.Fatalf("create audit = %+v", ev)
 	}
 
@@ -310,13 +311,13 @@ func TestCreateBuyerParty_OnlyBuyerCompanyKind(t *testing.T) {
 	}{{"club_admin", 403, "forbidden"}, {"club_member", 403, "forbidden"}, {"platform_admin", 422, "parties.org_not_company"}} {
 		a := actor(t, tc.persona)
 		_, err := e.svc.CreateBuyerParty(ctxOf(t, a), a, org("club_a"), buyerInput(vknC))
-		wantProblem(t, err, tc.status, tc.code)
+		problemtest.WantProblem(t, err, tc.status, tc.code)
 	}
 	// A recruiter or another company's admin cannot create; an outsider does not see the surface.
 	for p, status := range map[string]int{"company_member": 403, "other_company_member": 404, "student": 404} {
 		a := actor(t, p)
 		_, err := e.svc.CreateBuyerParty(ctxOf(t, a), a, org("company_a"), buyerInput(vknC))
-		if s, _ := problemOf(err); s != status {
+		if s, _ := problemtest.StatusCode(err); s != status {
 			t.Fatalf("%s: %v, want %d", p, err, status)
 		}
 	}
@@ -324,7 +325,7 @@ func TestCreateBuyerParty_OnlyBuyerCompanyKind(t *testing.T) {
 	bad := buyerInput(vknC)
 	bad.LegalType = parties.LegalIndividual
 	_, err = e.svc.CreateBuyerParty(ctxOf(t, cma), cma, org("company_a"), bad)
-	wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
 	for _, f := range []func(*parties.PartyInput){
 		func(p *parties.PartyInput) { p.TaxNo = "" },
 		func(p *parties.PartyInput) { p.TaxNo = "1234567891" }, // wrong check digit
@@ -337,14 +338,14 @@ func TestCreateBuyerParty_OnlyBuyerCompanyKind(t *testing.T) {
 		in := buyerInput(vknC)
 		f(&in)
 		_, err := e.svc.CreateBuyerParty(ctxOf(t, cma), cma, org("company_a"), in)
-		wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
+		problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
 	}
 	// The admin route takes payee and platform parties only.
 	fin := actor(t, "finance_admin")
 	adm := buyerInput(vknC)
 	adm.Kind, adm.OrgID = parties.KindBuyerCompany, ptr(org("company_a"))
 	_, err = e.svc.AdminCreateParty(ctxOf(t, fin), fin, adm)
-	wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
 	// A payee may name the university it is, never a company or a club.
 	uni := foundationInput(vknC)
 	uni.LegalType, uni.OrgID = parties.LegalUniversity, ptr(org("uni_a"))
@@ -353,19 +354,19 @@ func TestCreateBuyerParty_OnlyBuyerCompanyKind(t *testing.T) {
 	}
 	uni.OrgID, uni.TaxNo = ptr(org("club_a")), vknD
 	_, err = e.svc.AdminCreateParty(ctxOf(t, fin), fin, uni)
-	wantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
 	// k22: a company admin cannot change a payee party; a suspended or
 	// closed company takes no change from its members.
 	f := e.foundation(t, vknE)
 	cur, _ := e.svc.GetOrgParty(ctxOf(t, fin), fin, org("club_a"), f.Party.ID)
 	ca := actor(t, "club_admin")
 	_, err = e.svc.UpdateOrgParty(ctxOf(t, ca), ca, org("club_a"), f.Party.ID, cur.ETag, parties.PartyPatch{Title: ptr("Başka Vakıf")})
-	wantProblem(t, err, http.StatusForbidden, "forbidden")
+	problemtest.WantProblem(t, err, http.StatusForbidden, "forbidden")
 	for name, code := range map[string]string{"company_suspended": "orgs.org_suspended", "company_closed": "orgs.invalid_state"} {
 		m := authz.Actor{Kind: authz.KindUser, UserID: authztest.ID(name + "_admin"), MFAVerified: true,
 			Memberships: []authz.Membership{{OrgID: org(name), OrgKind: authz.OrgCompany, Role: authz.MemberCompanyAdmin}}}
 		_, err := e.svc.CreateBuyerParty(ctxOf(t, m), m, org(name), buyerInput(vknD))
-		if _, c := problemOf(err); c != code {
+		if _, c := problemtest.StatusCode(err); c != code {
 			t.Fatalf("%s: %v, want %s", name, err, code)
 		}
 	}
@@ -377,7 +378,7 @@ func TestCreateBuyerParty_OnlyBuyerCompanyKind(t *testing.T) {
 			p.TaxNo, p.TCKN = "", tcknA
 		}
 		_, err := e.svc.AdminCreateParty(ctxOf(t, fin), fin, p)
-		wantProblem(t, err, http.StatusUnprocessableEntity, "parties.natural_person_payee")
+		problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "parties.natural_person_payee")
 	}
 }
 
@@ -408,7 +409,7 @@ func TestDownloadDocument_Audited_PresignTTL(t *testing.T) {
 			rec.Header().Get("Cache-Control") != "no-store" {
 			t.Fatalf("%s: %v %v", persona, out, rec.Header())
 		}
-		ev := e.audit.of(authz.PartiesDocumentRead)
+		ev := e.audit.Of(authz.PartiesDocumentRead)
 		if len(ev) != i+1 {
 			t.Fatalf("%d download events after %d downloads", len(ev), i+1)
 		}
@@ -433,23 +434,19 @@ func TestDownloadDocument_Audited_PresignTTL(t *testing.T) {
 	rec, _ := call(t, app, "company_admin", http.MethodGet,
 		orgPath("company_a", idPath(other.Party.ID), "/documents/", d.ID.String(), "/download"), nil, nil)
 	wantStatus(t, rec, http.StatusNotFound)
-	if n := len(e.audit.of(authz.PartiesDocumentRead)); n != 2 {
+	if n := len(e.audit.Of(authz.PartiesDocumentRead)); n != 2 {
 		t.Fatalf("refused downloads were audited: %d events", n)
 	}
 	// The audit write fails: no URL.
-	e.audit.mu.Lock()
-	e.audit.fail = errors.New("audit down")
-	e.audit.mu.Unlock()
+	e.audit.Fail(errors.New("audit down"))
 	if _, err := e.svc.DownloadDocument(ctxOf(t, cma), cma, co, p.Party.ID, d.ID); err == nil {
 		t.Fatal("a download whose audit failed was handed out")
 	}
-	e.audit.mu.Lock()
-	e.audit.fail = nil
-	e.audit.mu.Unlock()
+	e.audit.Fail(nil)
 	// A file that is not scanned clean is 409 files.not_clean.
 	e.files.set(fileID, func(m *files.FileMeta) { m.ScanStatus = files.ScanPending })
 	_, err = e.svc.DownloadDocument(ctxOf(t, cma), cma, co, p.Party.ID, d.ID)
-	wantProblem(t, err, http.StatusConflict, "files.not_clean")
+	problemtest.WantProblem(t, err, http.StatusConflict, "files.not_clean")
 }
 
 // TestSeedPlatformParty_DraftIdempotent: `koro seed bootstrap-commerce`
@@ -470,16 +467,16 @@ func TestSeedPlatformParty_DraftIdempotent(t *testing.T) {
 		p.OrgID != nil || p.CreatedBy != nil {
 		t.Fatalf("first run: %+v created=%v err=%v", p, created, err)
 	}
-	ev := e.audit.of(authz.PartiesLegalPartyCreate)
+	ev := e.audit.Of(authz.PartiesLegalPartyCreate)
 	if len(ev) != 1 || ev[0].SystemJob != parties.SeedJob || ev[0].ActorUserID != nil {
 		t.Fatalf("seed audit = %+v", ev)
 	}
 	// Finance fills it in; the seed leaves it alone.
 	fin := actor(t, "finance_admin")
 	_, err = e.svc.AdminVerifyParty(ctxOf(t, fin), fin, p.ID, parties.Decision{Decision: parties.StatusVerified})
-	wantProblem(t, err, http.StatusUnprocessableEntity, "parties.verification_incomplete")
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "parties.verification_incomplete")
 	cur, err := e.svc.AdminUpdateParty(ctxOf(t, fin), fin, p.ID, `"`+strings.Repeat("0", 3)+`"`, parties.PartyPatch{Title: ptr("Koro Teknoloji A.Ş.")})
-	wantErr(t, err, parties.ErrPreconditionFailed)
+	problemtest.WantErr(t, err, parties.ErrPreconditionFailed)
 	page, err := e.svc.AdminListParties(ctxOf(t, fin), fin, parties.AdminQuery{Kind: parties.KindPlatform})
 	if err != nil || len(page.Items) != 1 {
 		t.Fatalf("admin list of the platform party: %+v %v", page, err)
@@ -492,7 +489,7 @@ func TestSeedPlatformParty_DraftIdempotent(t *testing.T) {
 	if err != nil || created || again.ID != p.ID || again.Title != "Koro Teknoloji A.Ş." || again.Status != parties.StatusDraft {
 		t.Fatalf("second run: %+v created=%v err=%v", again, created, err)
 	}
-	if n := len(e.audit.of(authz.PartiesLegalPartyCreate)); n != 1 {
+	if n := len(e.audit.Of(authz.PartiesLegalPartyCreate)); n != 1 {
 		t.Fatalf("the second run was audited as a create (%d events)", n)
 	}
 	got, err := e.svc.Platform(t.Context())
@@ -501,9 +498,9 @@ func TestSeedPlatformParty_DraftIdempotent(t *testing.T) {
 	}
 	// One platform party: a second one is 409; the platform party cannot be retired.
 	_, err = e.svc.AdminCreateParty(ctxOf(t, fin), fin, parties.PartyInput{Kind: parties.KindPlatform, LegalType: parties.LegalCompany, Title: "Koro 2"})
-	wantProblem(t, err, http.StatusConflict, "parties.platform_exists")
+	problemtest.WantProblem(t, err, http.StatusConflict, "parties.platform_exists")
 	_, err = e.svc.AdminUpdateParty(ctxOf(t, fin), fin, p.ID, cur.ETag, parties.PartyPatch{Deactivate: true})
-	wantProblem(t, err, http.StatusConflict, "parties.invalid_state")
+	problemtest.WantProblem(t, err, http.StatusConflict, "parties.invalid_state")
 }
 
 // TestLogs_NoTaxIDs: tax numbers, MERSİS numbers and national IDs never
@@ -563,9 +560,9 @@ func TestLogs_NoTaxIDs(t *testing.T) {
 	}
 	noDigits(t, "HTTP logs", httpLogs.String(), secrets...)
 	noDigits(t, "module logs", e.logs.String(), secrets...)
-	noDigits(t, "audit rows", dump(e.audit.all()), secrets...)
+	noDigits(t, "audit rows", dump(e.audit.All()), secrets...)
 	noDigits(t, "error responses", strings.Join(bodies, "\n"), secrets...)
-	for _, ev := range e.audit.all() {
+	for _, ev := range e.audit.All() {
 		if ev.Action == string(authz.PartiesLegalPartyUpdate) && !slices.Contains(ev.Metadata["fields"].([]string), "tax_no") {
 			t.Fatalf("update audit names the changed fields: %+v", ev.Metadata)
 		}

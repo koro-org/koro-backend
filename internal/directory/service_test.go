@@ -14,6 +14,7 @@ import (
 	"koro/internal/orgs"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 )
 
 func TestUniversityByEmailDomain_SubdomainMatch(t *testing.T) {
@@ -81,11 +82,11 @@ func TestUniversityByEmailDomain_SubdomainMatch(t *testing.T) {
 	// A domain of another university is 409.
 	_, _, err = e.svc.AdminPutUniversityEmailDomain(ctx, pad(t), u1, "ogr.birinci.edu.tr",
 		directory.DomainInput{DomainKind: directory.DomainMixed, IsActive: true})
-	wantCode(t, err, 409, "directory.domain_taken")
+	problemtest.WantProblem(t, err, 409, "directory.domain_taken")
 	// Only .edu.tr domains are registered.
 	_, _, err = e.svc.AdminPutUniversityEmailDomain(ctx, pad(t), u1, "example.com",
 		directory.DomainInput{DomainKind: directory.DomainMixed, IsActive: true})
-	wantCode(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 }
 
 func TestSeedReference_Idempotent(t *testing.T) {
@@ -176,9 +177,9 @@ func TestSeedReference_Idempotent(t *testing.T) {
 	_, err = e.svc.ImportReference(ctx, directory.ReferenceData{
 		Domains: []directory.RefDomain{{Domain: "yok.edu.tr", UniversityYokCode: "NO-SUCH", DomainKind: directory.DomainMixed}},
 	})
-	wantCode(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 	// One system-actor audit record per run.
-	if got := e.audit.of(authz.DirectoryUniversityManage); len(got) < 4 || got[0].SystemJob != "directory.seed_reference" {
+	if got := e.audit.Of(authz.DirectoryUniversityManage); len(got) < 4 || got[0].SystemJob != "directory.seed_reference" {
 		t.Fatalf("seed audit = %+v", got)
 	}
 }
@@ -200,7 +201,7 @@ func TestAdminCreateClub_CreatesOrgInSameTx(t *testing.T) {
 		v.Club.ClaimStatus != directory.ClaimUnclaimed || *v.Org.Org.City != "İzmir" {
 		t.Fatalf("club view = %+v", v)
 	}
-	if ev := e.audit.of(authz.DirectoryClubCreate); len(ev) != 1 || *ev[0].OrgID != v.Club.OrgID {
+	if ev := e.audit.Of(authz.DirectoryClubCreate); len(ev) != 1 || *ev[0].OrgID != v.Club.OrgID {
 		t.Fatalf("audit = %+v", ev)
 	}
 	// A failing club row fails the whole operation (the org goes with it in
@@ -211,7 +212,7 @@ func TestAdminCreateClub_CreatesOrgInSameTx(t *testing.T) {
 	_, err := e.svc.AdminCreateClub(ctx, pad(t), directory.ClubInput{
 		UniversityID: uni.ID, Name: "Başarısız Kulüp", Category: directory.CategoryArts, JoinPolicy: directory.JoinOpen,
 	})
-	wantErr(t, err, problem.ErrConflict)
+	problemtest.WantErr(t, err, problem.ErrConflict)
 	if a, b := e.orgs.creates[2], e.store.clubInserts[1]; a != b {
 		t.Fatalf("failed attempt: org tx %d, club tx %d", a, b)
 	}
@@ -227,10 +228,10 @@ func TestAdminCreateClub_CreatesOrgInSameTx(t *testing.T) {
 		{directory.ClubInput{UniversityID: uni.ID, Name: "W Kulübü", Category: directory.CategoryArts, JoinPolicy: directory.JoinOpen, IsSensitive: true}, "validation_failed"},
 	} {
 		_, err := e.svc.AdminCreateClub(ctx, pad(t), tc.in)
-		wantCode(t, err, 422, tc.code)
+		problemtest.WantProblem(t, err, 422, tc.code)
 	}
 	_, err = e.svc.AdminCreateClub(ctx, clubAdmin(v.Club.OrgID), directory.ClubInput{UniversityID: uni.ID})
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 }
 
 func TestSetSensitivity_EmitsEventInSameTx(t *testing.T) {
@@ -246,17 +247,17 @@ func TestSetSensitivity_EmitsEventInSameTx(t *testing.T) {
 	// R: no proof, wrong proof → 403, nothing written but the two denied
 	// records (03 §6.2, BE-074).
 	_, err := e.svc.AdminSetClubSensitivity(ctx, pad(t), id, set, identity.ReauthProof{})
-	wantCode(t, err, 403, "identity.reauth_required")
+	problemtest.WantProblem(t, err, 403, "identity.reauth_required")
 	_, err = e.svc.AdminSetClubSensitivity(ctx, pad(t), id, set, identity.ReauthProof{Password: "yanlis-parola-1"})
-	wantCode(t, err, 403, "identity.reauth_failed")
+	problemtest.WantProblem(t, err, 403, "identity.reauth_failed")
 	// A failing audit write fails the transaction: no event is committed
 	// (another club: the in-memory store has no rollback).
 	scratch := e.club(t, uni, "Deneme Kulübü", directory.CategoryCulture)
-	e.audit.setFail(errors.New("audit down"))
+	e.audit.Fail(errors.New("audit down"))
 	if _, err := e.svc.AdminSetClubSensitivity(ctx, pad(t), scratch.Club.OrgID, set, proof); err == nil {
 		t.Fatal("set sensitivity with a failing audit succeeded")
 	}
-	e.audit.setFail(nil)
+	e.audit.Fail(nil)
 	if len(eventsOf(e.out, domainevent.TopicClubSensitivityChanged)) != 0 {
 		t.Fatalf("events after failures: %v", e.out.Topics())
 	}
@@ -280,10 +281,10 @@ func TestSetSensitivity_EmitsEventInSameTx(t *testing.T) {
 	if spec, _ := domainevent.Lookup(domainevent.TopicClubSensitivityChanged); spec.Mechanism != domainevent.Outbox {
 		t.Fatal("club.sensitivity_changed must be an outbox (O) topic")
 	}
-	if n := len(e.audit.ofOutcome(authz.DirectoryClubSetSensitivity, audit.Denied)); n != 2 {
+	if n := len(e.audit.OfOutcome(authz.DirectoryClubSetSensitivity, audit.Denied)); n != 2 {
 		t.Fatalf("%d denied records for the two refused proofs, want 2", n)
 	}
-	audits := e.audit.ofOutcome(authz.DirectoryClubSetSensitivity, audit.Success)
+	audits := e.audit.OfOutcome(authz.DirectoryClubSetSensitivity, audit.Success)
 	if len(audits) != 1 || audits[0].Metadata["reauth"] != "password" || audits[0].Metadata["sensitive"] != true {
 		t.Fatalf("audit = %+v", audits)
 	}
@@ -310,9 +311,9 @@ func TestSetSensitivity_EmitsEventInSameTx(t *testing.T) {
 	}
 	// Non-admins are refused before anything is read; an unknown club is 404.
 	_, err = e.svc.AdminSetClubSensitivity(ctx, clubAdmin(id), id, set, proof)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	_, err = e.svc.AdminSetClubSensitivity(ctx, pad(t), uuid.NewV7(), set, proof)
-	wantErr(t, err, directory.ErrNotFound)
+	problemtest.WantErr(t, err, directory.ErrNotFound)
 }
 
 func TestSensitiveCategory_RequiresFlag(t *testing.T) {
@@ -325,11 +326,11 @@ func TestSensitiveCategory_RequiresFlag(t *testing.T) {
 	// 03 k7: the club admin cannot move the club to a sensitive category.
 	for _, cat := range []directory.Category{directory.CategoryReligious, directory.CategoryPolitical, directory.CategoryIdentity} {
 		_, err := e.svc.UpdateClub(ctx, admin, v.Club.OrgID, v.ETag, directory.ClubPatch{Category: new(cat)})
-		wantCode(t, err, 422, "directory.sensitivity_required")
+		problemtest.WantProblem(t, err, 422, "directory.sensitivity_required")
 	}
 	// Neither can the platform admin while the flag is off …
 	_, err := e.svc.UpdateClub(ctx, pad(t), v.Club.OrgID, v.ETag, directory.ClubPatch{Category: new(directory.CategoryReligious)})
-	wantCode(t, err, 422, "directory.sensitivity_required")
+	problemtest.WantProblem(t, err, 422, "directory.sensitivity_required")
 	// … but once flagged the category is allowed, and the flag of a
 	// religious club cannot be cleared.
 	proof := identity.ReauthProof{Password: goodPassword}
@@ -343,7 +344,7 @@ func TestSensitiveCategory_RequiresFlag(t *testing.T) {
 		t.Fatalf("religious category on a flagged club: %+v, %v", rel.Club, err)
 	}
 	_, err = e.svc.AdminSetClubSensitivity(ctx, pad(t), v.Club.OrgID, directory.SensitivityInput{}, proof)
-	wantCode(t, err, 422, "directory.sensitivity_required")
+	problemtest.WantProblem(t, err, 422, "directory.sensitivity_required")
 	// The CHECK itself (store level): see the store contract
 	// ("clubs: sensitive category requires the flag").
 }
@@ -397,7 +398,7 @@ func TestGetClub_SensitiveHidesMemberCount(t *testing.T) {
 	}
 	// Unknown club → 404.
 	_, err = e.svc.GetClubView(ctx, authz.Anonymous(), uuid.NewV7())
-	wantErr(t, err, directory.ErrNotFound)
+	problemtest.WantErr(t, err, directory.ErrNotFound)
 }
 
 func TestListClubs_TurkishSearch_IstanbulVariants(t *testing.T) {
@@ -460,7 +461,7 @@ func TestListClubs_TurkishSearch_IstanbulVariants(t *testing.T) {
 	}
 	// Bad query: one character.
 	_, err = e.svc.ListClubs(ctx, authz.Anonymous(), directory.ClubQuery{Q: "i"})
-	wantCode(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 }
 
 // TestClubWrites_EmitClubUpdated: creating a club and a change of its
@@ -499,25 +500,25 @@ func TestUpdateClub_StaleETag_412(t *testing.T) {
 	patch := directory.ClubPatch{JoinPolicy: &open}
 
 	_, err := e.svc.UpdateClub(ctx, admin, v.Club.OrgID, "", patch)
-	wantCode(t, err, 428, "precondition_required")
+	problemtest.WantProblem(t, err, 428, "precondition_required")
 	_, err = e.svc.UpdateClub(ctx, admin, v.Club.OrgID, `"0"`, patch)
-	wantCode(t, err, 412, "precondition_failed")
+	problemtest.WantProblem(t, err, 412, "precondition_failed")
 	got, err := e.svc.UpdateClub(ctx, admin, v.Club.OrgID, `"x", `+v.ETag, patch)
 	if err != nil || got.Club.JoinPolicy != directory.JoinOpen || got.ETag == v.ETag {
 		t.Fatalf("update = %+v, %v", got, err)
 	}
 	// The old ETag is stale now.
 	_, err = e.svc.UpdateClub(ctx, admin, v.Club.OrgID, v.ETag, patch)
-	wantCode(t, err, 412, "precondition_failed")
-	if ev := e.audit.of(authz.DirectoryClubUpdate); len(ev) != 1 || !slices.Equal(ev[0].Metadata["fields"].([]string), []string{"join_policy"}) {
+	problemtest.WantProblem(t, err, 412, "precondition_failed")
+	if ev := e.audit.Of(authz.DirectoryClubUpdate); len(ev) != 1 || !slices.Equal(ev[0].Metadata["fields"].([]string), []string{"join_policy"}) {
 		t.Fatalf("audit = %+v", ev)
 	}
 	// Authorisation comes before the precondition: another club's admin
 	// gets 403, not 428; an empty patch is 422.
 	_, err = e.svc.UpdateClub(ctx, clubAdmin(uuid.NewV7()), v.Club.OrgID, "", patch)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	_, err = e.svc.UpdateClub(ctx, admin, v.Club.OrgID, got.ETag, directory.ClubPatch{})
-	wantCode(t, err, 422, "directory.empty_patch")
+	problemtest.WantProblem(t, err, 422, "directory.empty_patch")
 	// A suspended club takes no change from its admin (03 §2.3); the
 	// platform admin may still act.
 	o, err := e.orgsMem.GetOrg(ctx, v.Club.OrgID)
@@ -529,7 +530,7 @@ func TestUpdateClub_StaleETag_412(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.UpdateClub(ctx, admin, v.Club.OrgID, got.ETag, patch)
-	wantErr(t, err, orgs.ErrOrgSuspended)
+	problemtest.WantErr(t, err, orgs.ErrOrgSuspended)
 	if _, err := e.svc.UpdateClub(ctx, pad(t), v.Club.OrgID, got.ETag, patch); err != nil {
 		t.Fatalf("platform admin on a suspended club: %v", err)
 	}
@@ -580,13 +581,13 @@ func TestRequestClubSensitivity_AuditsAndNotifiesAdmins(t *testing.T) {
 	v := e.club(t, uni, "Kültür Kulübü", directory.CategoryCulture)
 	admin := clubAdmin(v.Club.OrgID)
 	// Only the club's admin asks; platform admins set the flag directly.
-	wantErr(t, e.svc.RequestClubSensitivity(ctx, pad(t), v.Club.OrgID, "religion", ""), authz.ErrForbidden)
-	wantErr(t, e.svc.RequestClubSensitivity(ctx, clubAdmin(uuid.NewV7()), v.Club.OrgID, "religion", ""), authz.ErrForbidden)
-	wantCode(t, e.svc.RequestClubSensitivity(ctx, admin, v.Club.OrgID, "nope", ""), 422, "validation_failed")
+	problemtest.WantErr(t, e.svc.RequestClubSensitivity(ctx, pad(t), v.Club.OrgID, "religion", ""), authz.ErrForbidden)
+	problemtest.WantErr(t, e.svc.RequestClubSensitivity(ctx, clubAdmin(uuid.NewV7()), v.Club.OrgID, "religion", ""), authz.ErrForbidden)
+	problemtest.WantProblem(t, e.svc.RequestClubSensitivity(ctx, admin, v.Club.OrgID, "nope", ""), 422, "validation_failed")
 	if err := e.svc.RequestClubSensitivity(ctx, admin, v.Club.OrgID, "religion", "Kulüp bir inanç topluluğu"); err != nil {
 		t.Fatal(err)
 	}
-	ev := e.audit.of(authz.DirectoryClubRequestSensitivity)
+	ev := e.audit.Of(authz.DirectoryClubRequestSensitivity)
 	if len(ev) != 1 || ev[0].Reason != "Kulüp bir inanç topluluğu" || ev[0].Metadata["sensitive_reason"] != "religion" {
 		t.Fatalf("audit = %+v", ev)
 	}
@@ -633,7 +634,7 @@ func TestCatalog_SkillsAndDepartments(t *testing.T) {
 	if err := e.svc.SkillsExist(ctx, []uuid.UUID{py.ID, ml.ID, py.ID}); err != nil {
 		t.Fatal(err)
 	}
-	wantCode(t, e.svc.SkillsExist(ctx, []uuid.UUID{py.ID, uuid.NewV7()}), 422, "directory.unknown_skill")
+	problemtest.WantProblem(t, e.svc.SkillsExist(ctx, []uuid.UUID{py.ID, uuid.NewV7()}), 422, "directory.unknown_skill")
 	// BE-084: SkillNames (students.SkillNamer) names in Turkish; duplicates
 	// collapse, an unknown ID has no key, a deactivated skill loses its name.
 	unknown := uuid.NewV7()
@@ -647,7 +648,7 @@ func TestCatalog_SkillsAndDepartments(t *testing.T) {
 	if _, err := e.svc.AdminUpdateSkill(ctx, pad(t), py.ID, directory.SkillPatch{IsActive: new(false)}); err != nil {
 		t.Fatal(err)
 	}
-	wantCode(t, e.svc.SkillsExist(ctx, []uuid.UUID{py.ID}), 422, "directory.unknown_skill")
+	problemtest.WantProblem(t, e.svc.SkillsExist(ctx, []uuid.UUID{py.ID}), 422, "directory.unknown_skill")
 	if got, err := e.svc.SkillNames(ctx, []uuid.UUID{py.ID, ml.ID}); err != nil || len(got) != 1 || got[ml.ID] == "" {
 		t.Fatalf("SkillNames after deactivation = %v, %v", got, err)
 	}
@@ -685,13 +686,13 @@ func TestCatalog_SkillsAndDepartments(t *testing.T) {
 	_, err = e.svc.AdminCreateDepartment(ctx, pad(t), other.ID, directory.DepartmentInput{
 		FacultyID: &view.Faculties[0].ID, Name: "Yanlış Bölüm", DegreeLevel: directory.DegreeBachelor,
 	})
-	wantCode(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 	// An inactive university is hidden from the public, not from the admin.
 	if _, err := e.svc.AdminUpdateUniversity(ctx, pad(t), itu.ID, directory.UniversityPatch{IsActive: new(false)}); err != nil {
 		t.Fatal(err)
 	}
 	_, err = e.svc.GetUniversityView(ctx, authz.Anonymous(), itu.ID)
-	wantErr(t, err, authz.ErrNotFound)
+	problemtest.WantErr(t, err, authz.ErrNotFound)
 	if _, err := e.svc.GetUniversityView(ctx, pad(t), itu.ID); err != nil {
 		t.Fatal(err)
 	}

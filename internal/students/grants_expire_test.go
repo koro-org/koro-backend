@@ -106,7 +106,7 @@ func TestExpire_AfterWindowRevokedAndStudentTold(t *testing.T) {
 			t.Fatalf("expired grant = %+v", g)
 		}
 	}
-	rows := e.audit.of(string(authz.StudentsAccessGrantRevoke))
+	rows := e.audit.Of(authz.StudentsAccessGrantRevoke)
 	if len(rows) != 2 {
 		t.Fatalf("expiry audit rows = %d, want 2", len(rows))
 	}
@@ -144,7 +144,7 @@ func TestExpire_AfterWindowRevokedAndStudentTold(t *testing.T) {
 	if err := e.runJob(t, students.ExpireSuspendedGrantsJobName); err != nil {
 		t.Fatal(err)
 	}
-	if n := len(e.audit.of(string(authz.StudentsAccessGrantRevoke))); n != 2 {
+	if n := len(e.audit.Of(authz.StudentsAccessGrantRevoke)); n != 2 {
 		t.Fatalf("a second run audited again: %d", n)
 	}
 	if len(e.expiryNotices(late.UserID)) != 0 {
@@ -199,7 +199,7 @@ func TestExpire_NoticeRetriedAfterSendFailure(t *testing.T) {
 	if n := len(e.expiryNotices(s.UserID)); n != 1 {
 		t.Fatalf("notices after the retry = %d, want 1", n)
 	}
-	if n := len(e.audit.of(string(authz.StudentsAccessGrantRevoke))); n != 1 {
+	if n := len(e.audit.Of(authz.StudentsAccessGrantRevoke)); n != 1 {
 		t.Fatalf("revocation audit rows = %d, want 1", n)
 	}
 

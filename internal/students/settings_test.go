@@ -93,7 +93,7 @@ func TestUpdatePrivacy_RecordsConsentSameTx(t *testing.T) {
 	if e.consent.tx[0] == 0 || e.consent.tx[0] != e.store.privacyTx[0] {
 		t.Fatalf("consent in tx %d, setting in tx %d: not the same transaction", e.consent.tx[0], e.store.privacyTx[0])
 	}
-	ev := e.audit.of(string(authz.StudentsPrivacyUpdateOwn))
+	ev := e.audit.Of(authz.StudentsPrivacyUpdateOwn)
 	if len(ev) != 1 || ev[0].Metadata["discoverable"] != true || ev[0].Metadata["discovery_profile_consent_id"] == nil {
 		t.Fatalf("audit = %+v", ev)
 	}
@@ -116,12 +116,12 @@ func TestUpdatePrivacy_RecordsConsentSameTx(t *testing.T) {
 
 	// A failing consent record fails the change; no audit, no event.
 	e.consent.fail = errors.New("consent store down")
-	auditBefore, topicsBefore := len(e.audit.of(string(authz.StudentsPrivacyUpdateOwn))), len(e.topics())
+	auditBefore, topicsBefore := len(e.audit.Of(authz.StudentsPrivacyUpdateOwn)), len(e.topics())
 	if _, err := e.svc.UpdateMyPrivacy(ctx, a, students.PrivacyPatch{Discoverable: ptr(true), DiscoveryConsent: proof(),
 		ActivityRankingChoice: ptr(students.RankingEnabled)}); err == nil {
 		t.Fatal("the change succeeded without its consent record")
 	}
-	if len(e.audit.of(string(authz.StudentsPrivacyUpdateOwn))) != auditBefore || len(e.topics()) != topicsBefore {
+	if len(e.audit.Of(authz.StudentsPrivacyUpdateOwn)) != auditBefore || len(e.topics()) != topicsBefore {
 		t.Fatal("audit or event written for a failed change")
 	}
 }
@@ -152,7 +152,7 @@ func TestUpdatePrivacy_RankingChoiceEventAndClubsFlag(t *testing.T) {
 	if _, err := e.svc.UpdateMyPrivacy(ctx, a, students.PrivacyPatch{ActivityRankingChoice: ptr(students.RankingDisabled)}); err != nil {
 		t.Fatal(err)
 	}
-	if len(e.out.Events()) != 1 || len(e.audit.of(string(authz.StudentsPrivacyUpdateOwn))) != 1 {
+	if len(e.out.Events()) != 1 || len(e.audit.Of(authz.StudentsPrivacyUpdateOwn)) != 1 {
 		t.Fatal("an unchanged setting was written again")
 	}
 	_, err = e.svc.UpdateMyPrivacy(ctx, a, students.PrivacyPatch{})

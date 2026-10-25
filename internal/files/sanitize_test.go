@@ -17,6 +17,7 @@ import (
 
 	"koro/internal/audit"
 	"koro/internal/files"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // jpegMarkers lists the markers of a JPEG's header segments up to SOS.
@@ -338,11 +339,11 @@ func TestFiles_RejectsUnprocessableContent(t *testing.T) {
 				t.Fatalf("%d objects left (main bucket or quarantine)", e.mem.Len())
 			}
 			_, err := e.svc.PresignGet(t.Context(), id, 0)
-			wantErr(t, err, files.ErrRejected)
-			wantErr(t, e.svc.Attach(t.Context(), actor(t, "student"), id,
+			problemtest.WantErr(t, err, files.ErrRejected)
+			problemtest.WantErr(t, e.svc.Attach(t.Context(), actor(t, "student"), id,
 				files.Owner{Module: "students", EntityID: uuid.NewV7(), Purpose: tt.req.Purpose}), files.ErrRejected)
 			_, err = e.svc.CompleteUpload(t.Context(), actor(t, "student"), id, digest(tt.content))
-			wantErr(t, err, files.ErrRejected)
+			problemtest.WantErr(t, err, files.ErrRejected)
 			if err := e.scan(t, id); err != nil { // a redelivery changes nothing
 				t.Fatal(err)
 			}

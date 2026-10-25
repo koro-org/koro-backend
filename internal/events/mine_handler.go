@@ -14,7 +14,7 @@ import (
 // registerMine adds the 2 operations of BE-095 (04 §2.6; koro-mobile B-04,
 // B-05): the caller's door list and the events of its clubs.
 func registerMine(api huma.API, h handler) {
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "listMyStaffEvents", Method: http.MethodGet, Path: "/me/staff-events",
 		Summary: "List the events whose door I work",
 		Description: "Upcoming and running published events (not ended yet) the caller may scan tickets for: the " +
@@ -24,7 +24,7 @@ func registerMine(api huma.API, h handler) {
 			"tells whether scanning is on. Sorted by starts_at (soonest first); no total count.",
 	}, op.Meta{Action: string(authz.EventsStaffEventListOwn), Surface: op.SurfaceSelf}, h.listMyStaffEvents)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "listMyClubEvents", Method: http.MethodGet, Path: "/me/club-events",
 		Summary: "List upcoming events of my clubs",
 		Description: "Upcoming and running published events (not ended yet) of the clubs the caller is an active " +

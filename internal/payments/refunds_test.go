@@ -133,7 +133,7 @@ func TestCreateRefund_IdempotencyReplay(t *testing.T) {
 	if n := len(e.mem.Refunds()); n != 1 {
 		t.Fatalf("%d refunds after the replay", n)
 	}
-	if n := len(e.audit.of(authz.PaymentsRefundCreate)); n != 1 {
+	if n := len(e.audit.Of(authz.PaymentsRefundCreate)); n != 1 {
 		t.Fatalf("%d audit records after the replay", n)
 	}
 	other := in
@@ -147,7 +147,7 @@ func TestCreateRefund_IdempotencyReplay(t *testing.T) {
 		t.Fatalf("another key = %+v, %v", second, err)
 	}
 	// The audit record carries the masked IBAN only.
-	ev := e.audit.of(authz.PaymentsRefundCreate)[0]
+	ev := e.audit.Of(authz.PaymentsRefundCreate)[0]
 	if ev.Metadata["target_iban_masked"] == ibanSender || ev.Metadata["target_iban_masked"] == nil || ev.Reason != "Etkinlik ertelendi" {
 		t.Fatalf("audit = %+v", ev)
 	}
@@ -225,16 +225,16 @@ func TestApproveRefund_RequiresReauth(t *testing.T) {
 	if got, _ := e.store.GetRefund(t.Context(), r.ID, false); got.Status != payments.RefundStatusRequested {
 		t.Fatalf("after the failed proofs: %s", got.Status)
 	}
-	if n := len(e.audit.ofOutcome(authz.PaymentsRefundApprove, audit.Success)); n != 0 {
+	if n := len(e.audit.OfOutcome(authz.PaymentsRefundApprove, audit.Success)); n != 0 {
 		t.Fatalf("%d approval audit records before the right proof", n)
 	}
-	if n := len(e.audit.ofOutcome(authz.PaymentsRefundApprove, audit.Denied)); n != 2 {
+	if n := len(e.audit.OfOutcome(authz.PaymentsRefundApprove, audit.Denied)); n != 2 {
 		t.Fatalf("%d denied records for the two refused proofs, want 2", n)
 	}
 	if _, err := e.svc.ApproveRefund(ctxOf(t, fin), fin, r.ID, good); err != nil {
 		t.Fatal(err)
 	}
-	evs := e.audit.ofOutcome(authz.PaymentsRefundApprove, audit.Success)
+	evs := e.audit.OfOutcome(authz.PaymentsRefundApprove, audit.Success)
 	if len(evs) != 1 || evs[0].Metadata["reauth"] != "password" || evs[0].Metadata["requested_by"] != id("finance_admin_2").String() {
 		t.Fatalf("approval audit = %+v", evs)
 	}
@@ -472,7 +472,7 @@ func TestRefund_PaidOutLine_ClawsBackFromPayee(t *testing.T) {
 	if receivable != 1_080_000 {
 		t.Fatalf("payee_receivable %d", receivable)
 	}
-	if evs := e.audit.of(authz.PaymentsRefundComplete); len(evs) != 1 || evs[0].Metadata["clawback_amount"] != int64(1_080_000) {
+	if evs := e.audit.Of(authz.PaymentsRefundComplete); len(evs) != 1 || evs[0].Metadata["clawback_amount"] != int64(1_080_000) {
 		t.Fatalf("completion audit = %+v", evs)
 	}
 }

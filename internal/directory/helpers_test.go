@@ -2,14 +2,12 @@ package directory_test
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"sync"
 	"testing"
 	"time"
 	"uuid"
 
-	"koro/internal/audit"
 	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
@@ -19,12 +17,11 @@ import (
 	"koro/internal/notify"
 	"koro/internal/orgs"
 	"koro/internal/platform/clock"
-	"koro/internal/platform/db"
+	"koro/internal/platform/db/dbtest"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/outbox"
-	"koro/internal/platform/problem"
 	"koro/internal/platform/queue"
 )
 
@@ -33,41 +30,6 @@ var t0 = time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC)
 
 // goodPassword is the re-authentication password every test user has.
 const goodPassword = "dogru-parola-12345"
-
-// auditLog records the events the service writes; fail makes Log fail.
-type auditLog struct {
-	mu     sync.Mutex
-	events []audit.Event
-	fail   error
-}
-
-func (l *auditLog) Log(_ context.Context, e audit.Event) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.fail != nil {
-		return l.fail
-	}
-	l.events = append(l.events, e)
-	return nil
-}
-
-func (l *auditLog) of(action authz.Action) []audit.Event {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	var out []audit.Event
-	for _, e := range l.events {
-		if e.Action == string(action) {
-			out = append(out, e)
-		}
-	}
-	return out
-}
-
-func (l *auditLog) setFail(err error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.fail = err
-}
 
 // reauth accepts goodPassword.
 type reauth struct{}
@@ -82,38 +44,6 @@ func (reauth) Verify(_ context.Context, _ uuid.UUID, p identity.ReauthProof) (st
 	return "", identity.ErrReauthFailed
 }
 
-// txKey marks the context of an open spyTx transaction.
-type txKey struct{}
-
-// spyTx is db.NopTx that marks its transaction in the context (value: the
-// transaction's number), so a test can tell which calls share it.
-type spyTx struct {
-	mu sync.Mutex
-	n  int
-}
-
-func (s *spyTx) WithTx(ctx context.Context, fn func(context.Context) error) error {
-	if ctx.Value(txKey{}) != nil {
-		return fn(ctx)
-	}
-	s.mu.Lock()
-	s.n++
-	n := s.n
-	s.mu.Unlock()
-	return db.NopTx{}.WithTx(ctx, func(inner context.Context) error {
-		return fn(context.WithValue(inner, txKey{}, n))
-	})
-}
-
-func (s *spyTx) WithSerializableTx(ctx context.Context, fn func(context.Context) error) error {
-	return s.WithTx(ctx, fn)
-}
-
-func txOf(ctx context.Context) int {
-	n, _ := ctx.Value(txKey{}).(int)
-	return n
-}
-
 // spyOrgs wraps the orgs service and records the transaction of each
 // Create.
 type spyOrgs struct {
@@ -126,7 +56,7 @@ type spyOrgs struct {
 
 func (s *spyOrgs) Create(ctx context.Context, in orgs.CreateOrg) (uuid.UUID, error) {
 	s.mu.Lock()
-	s.creates = append(s.creates, txOf(ctx))
+	s.creates = append(s.creates, dbtest.TxOf(ctx))
 	s.mu.Unlock()
 	return s.Service.Create(ctx, in)
 }
@@ -142,7 +72,7 @@ type spyStore struct {
 
 func (s *spyStore) InsertClub(ctx context.Context, c directory.Club) (directory.Club, error) {
 	s.mu.Lock()
-	s.clubInserts = append(s.clubInserts, txOf(ctx))
+	s.clubInserts = append(s.clubInserts, dbtest.TxOf(ctx))
 	fail := s.failClub
 	s.mu.Unlock()
 	if fail != nil {
@@ -187,14 +117,14 @@ func (s *sender) Send(_ context.Context, m notify.Message) (uuid.UUID, error) {
 type env struct {
 	reauth  *audittest.LateReauth[identity.ReauthProof] // reauth{} with an overload switch
 	clk     *clock.Fake
-	tx      *spyTx
+	tx      *dbtest.SpyTx
 	orgsMem *orgs.MemStore
 	orgs    *spyOrgs
 	store   *spyStore
 	mem     *directory.MemStore
 	out     *outbox.Mem
 	queue   *queue.Mem
-	audit   *auditLog
+	audit   *audittest.Recorder
 	members *counter
 	sender  *sender
 	admins  []uuid.UUID
@@ -210,8 +140,8 @@ func newEnv(t *testing.T) *env {
 	t.Helper()
 	clk := clock.NewFake(t0)
 	e := &env{
-		clk: clk, tx: &spyTx{}, orgsMem: orgs.NewMemStore(clk.Now), out: outbox.NewMem(clk), queue: queue.NewMem(),
-		audit: &auditLog{}, members: &counter{counts: map[uuid.UUID]int{}}, sender: &sender{},
+		clk: clk, tx: &dbtest.SpyTx{}, orgsMem: orgs.NewMemStore(clk.Now), out: outbox.NewMem(clk), queue: queue.NewMem(),
+		audit: &audittest.Recorder{}, members: &counter{counts: map[uuid.UUID]int{}}, sender: &sender{},
 		admins: []uuid.UUID{uuid.NewV7(), uuid.NewV7()},
 		ver:    &verifications{m: map[uuid.UUID]identity.EduVerification{}}, users: &userDir{m: map[uuid.UUID]identity.UserSummary{}},
 		removed: &removedFiles{}, reauth: &audittest.LateReauth[identity.ReauthProof]{Next: reauth{}},
@@ -292,21 +222,6 @@ func clubAdmin(org uuid.UUID) authz.Actor {
 	return authz.Actor{
 		Kind: authz.KindUser, UserID: uuid.NewV7(), SessionID: uuid.NewV7(), StudentStatus: authz.StudentVerified,
 		Memberships: []authz.Membership{{OrgID: org, OrgKind: authz.OrgClub, Role: authz.MemberClubAdmin}},
-	}
-}
-
-func wantErr(t *testing.T, err, want error) {
-	t.Helper()
-	if !errors.Is(err, want) {
-		t.Fatalf("error = %v, want %v", err, want)
-	}
-}
-
-func wantCode(t *testing.T, err error, status int, code string) {
-	t.Helper()
-	p, ok := errors.AsType[*problem.Error](err)
-	if !ok || p.Status() != status || p.Code() != code {
-		t.Fatalf("error = %v, want %d %s", err, status, code)
 	}
 }
 

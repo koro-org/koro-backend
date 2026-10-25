@@ -10,6 +10,7 @@ import (
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // Check-in at the door (BE-031; ADR-0013, 01 §6.3 "Check-in", 02 §11.8,
@@ -165,21 +166,21 @@ func (s *service) cleanCheckin(in CheckinInput) (CheckinInput, error) {
 	switch in.Method {
 	case MethodQR:
 		if in.Token == "" || in.ManualCode != "" {
-			return in, fieldErr("body.token", "method qr needs token and no manual_code")
+			return in, problem.Field("body.token", "method qr needs token and no manual_code")
 		}
 	case MethodManualCode:
 		if in.ManualCode == "" || in.Token != "" {
-			return in, fieldErr("body.manual_code", "method manual_code needs manual_code and no token")
+			return in, problem.Field("body.manual_code", "method manual_code needs manual_code and no token")
 		}
 	default:
-		return in, fieldErr("body.method", "must be qr or manual_code")
+		return in, problem.Field("body.method", "must be qr or manual_code")
 	}
 	if in.ClientScanID == uuid.Nil() {
-		return in, fieldErr("body.client_scan_id", "must be a UUID")
+		return in, problem.Field("body.client_scan_id", "must be a UUID")
 	}
 	now := s.now()
 	if in.ScannedAt.IsZero() || in.ScannedAt.After(now.Add(scanFuture)) || in.ScannedAt.Before(now.Add(-scanPast)) {
-		return in, fieldErr("body.scanned_at", "must be within the last 24 hours (device clock)")
+		return in, problem.Field("body.scanned_at", "must be within the last 24 hours (device clock)")
 	}
 	in.ScannedAt = in.ScannedAt.UTC().Truncate(time.Microsecond)
 	if in.DeviceID != "" {

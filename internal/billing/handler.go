@@ -4,13 +4,14 @@ import (
 	"context"
 	"net/http"
 	"time"
-	"uuid"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
 	"koro/internal/consent"
 	"koro/internal/identity"
+	"koro/internal/platform/db"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
@@ -20,7 +21,7 @@ import (
 // (`koro openapi`): handlers only touch it when called.
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
-	reg(api, huma.Operation{
+	op.Register(api, "billing", huma.Operation{
 		OperationID: "listOrgInvoices", Method: http.MethodGet, Path: "/orgs/{org_id}/invoices",
 		Summary: "List the invoices of an organization",
 		Description: "The invoices the organization issues (direction=issued: a payee's service invoices) and receives " +
@@ -28,13 +29,13 @@ func Register(api huma.API, svc Service) {
 			"direction is omitted. Planned invoices are the documents the commerce model expects (02 §18.3).",
 	}, op.Meta{Action: string(authz.BillingInvoiceList), Surface: op.SurfaceOrg}, h.listOrg)
 
-	reg(api, huma.Operation{
+	op.Register(api, "billing", huma.Operation{
 		OperationID: "getInvoice", Method: http.MethodGet, Path: "/invoices/{invoice_id}",
 		Summary:     "Get an invoice",
 		Description: "The invoice with its lines, for its issuing and receiving organizations and finance.",
 	}, op.Meta{Action: string(authz.BillingInvoiceRead), Surface: op.SurfaceResource}, h.get)
 
-	reg(api, huma.Operation{
+	op.Register(api, "billing", huma.Operation{
 		OperationID: "downloadInvoicePdf", Method: http.MethodGet, Path: "/invoices/{invoice_id}/pdf",
 		Summary: "Get a download URL of an invoice's PDF",
 		Description: "A URL valid for 5 minutes. Only an issued invoice (409 billing.invalid_state); an uploaded PDF " +
@@ -42,7 +43,7 @@ func Register(api huma.API, svc Service) {
 			"clears the file.",
 	}, op.Meta{Action: string(authz.BillingInvoiceRead), Surface: op.SurfaceResource}, h.pdf)
 
-	reg(api, huma.Operation{
+	op.Register(api, "billing", huma.Operation{
 		OperationID: "uploadInvoice", Method: http.MethodPost, Path: "/invoices/{invoice_id}/upload",
 		Summary: "Upload the document of a planned invoice",
 		Description: "The PDF (an invoice_pdf upload of the caller or of the issuing organization), the invoice number, " +
@@ -52,13 +53,13 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.BillingInvoiceUpload), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional},
 		h.upload)
 
-	reg(api, huma.Operation{
+	op.Register(api, "billing", huma.Operation{
 		OperationID: "adminListInvoices", Method: http.MethodGet, Path: "/admin/invoices",
 		Summary:     "List every invoice",
 		Description: "Newest first; status narrows the queue (planned: to upload or verify, mismatch).",
 	}, op.Meta{Action: string(authz.BillingInvoiceListAdmin), Surface: op.SurfaceAdmin}, h.adminList)
 
-	reg(api, huma.Operation{
+	op.Register(api, "billing", huma.Operation{
 		OperationID: "adminVerifyInvoice", Method: http.MethodPost, Path: "/admin/invoices/{invoice_id}/verify",
 		Summary: "Verify an uploaded invoice (second eye)",
 		Description: "The number, date and amounts of the uploaded document match the planned invoice (issued: the PDF " +
@@ -68,7 +69,7 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.BillingInvoiceVerify), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional},
 		h.verify)
 
-	reg(api, huma.Operation{
+	op.Register(api, "billing", huma.Operation{
 		OperationID: "adminCancelInvoice", Method: http.MethodPost, Path: "/admin/invoices/{invoice_id}/cancel",
 		Summary: "Cancel an invoice",
 		Description: "An unissued invoice is cancelled; an issued one is cancelled and a credit note of it is planned " +
@@ -76,13 +77,13 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.BillingInvoiceCancel), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional},
 		h.cancel)
 
-	reg(api, huma.Operation{
+	op.Register(api, "billing", huma.Operation{
 		OperationID: "adminListIntegrations", Method: http.MethodGet, Path: "/admin/integrations",
 		Summary:     "List the integration connections",
 		Description: "The account and the token state of each integration; secret values are never returned.",
 	}, op.Meta{Action: string(authz.BillingIntegrationManage), Surface: op.SurfaceAdmin}, h.listIntegrations)
 
-	reg(api, huma.Operation{
+	op.Register(api, "billing", huma.Operation{
 		OperationID: "adminPutIntegration", Method: http.MethodPut, Path: "/admin/integrations/{provider}",
 		Summary: "Set the credentials of an integration",
 		Description: "Requires re-authentication. The tokens are write-only: they are stored envelope-encrypted and " +
@@ -93,43 +94,8 @@ func Register(api huma.API, svc Service) {
 
 type handler struct{ svc Service }
 
-// reg registers one billing operation with its Koro metadata.
-func reg[I, O any](api huma.API, o huma.Operation, m op.Meta, fn func(context.Context, *I) (*O, error)) {
-	o.Tags = []string{"billing"}
-	huma.Register(api, op.Koro(o, m), fn)
-}
-
 // sortInvoices is the only order of the invoice lists (cursor fingerprint).
 const sortInvoices = "-created_at"
-
-// parseID parses a path ID; a malformed one becomes the nil UUID, which no
-// row has: it answers like a missing row (404) after the surface's authz.
-func parseID(s string) uuid.UUID {
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return uuid.Nil()
-	}
-	return id
-}
-
-func optID(s, loc string) (*uuid.UUID, error) {
-	if s == "" {
-		return nil, nil
-	}
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return nil, fieldErr(loc, "must be a UUID")
-	}
-	return &id, nil
-}
-
-func utcPtr(t *time.Time) *time.Time {
-	if t == nil {
-		return nil
-	}
-	u := t.UTC()
-	return &u
-}
 
 // ---- DTOs
 
@@ -224,14 +190,14 @@ func snapshotDTO(s Snapshot) InvoicePartyDTO {
 func invoiceDTO(inv Invoice, lines []Line) InvoiceDTO {
 	d := InvoiceDTO{
 		InvoiceID: inv.ID.String(), Kind: string(inv.Kind), Status: string(inv.Status), IssuingMode: string(inv.IssuingMode),
-		DocumentType: string(inv.DocumentType), Trigger: string(inv.Trigger), OrderID: idStr(inv.OrderID),
-		PayoutID: idStr(inv.PayoutID), IssuerPartyID: inv.IssuerPartyID.String(), RecipientPartyID: inv.RecipientPartyID.String(),
-		IssuerOrgID: idStr(inv.IssuerOrgID), RecipientOrgID: idStr(inv.RecipientOrgID),
+		DocumentType: string(inv.DocumentType), Trigger: string(inv.Trigger), OrderID: httpx.IDStr(inv.OrderID),
+		PayoutID: httpx.IDStr(inv.PayoutID), IssuerPartyID: inv.IssuerPartyID.String(), RecipientPartyID: inv.RecipientPartyID.String(),
+		IssuerOrgID: httpx.IDStr(inv.IssuerOrgID), RecipientOrgID: httpx.IDStr(inv.RecipientOrgID),
 		IssuerSnapshot: snapshotDTO(inv.IssuerSnapshot), RecipientSnapshot: snapshotDTO(inv.RecipientSnapshot),
-		ETTN: idStr(inv.ETTN), Currency: inv.Currency, NetAmount: inv.NetAmount, VATAmount: inv.VATAmount,
+		ETTN: httpx.IDStr(inv.ETTN), Currency: inv.Currency, NetAmount: inv.NetAmount, VATAmount: inv.VATAmount,
 		VATWithheldAmount: inv.VATWithheldAmount, TotalAmount: inv.TotalAmount, PayableAmount: inv.PayableAmount,
-		RefersToInvoiceID: idStr(inv.RefersToInvoiceID), HasPDF: inv.PDFFileID != nil, UploadedBy: idStr(inv.UploadedBy),
-		IssuedAt: utcPtr(inv.IssuedAt), CreatedAt: inv.CreatedAt.UTC(), UpdatedAt: inv.UpdatedAt.UTC(),
+		RefersToInvoiceID: httpx.IDStr(inv.RefersToInvoiceID), HasPDF: inv.PDFFileID != nil, UploadedBy: httpx.IDStr(inv.UploadedBy),
+		IssuedAt: db.UTCPtr(inv.IssuedAt), CreatedAt: inv.CreatedAt.UTC(), UpdatedAt: inv.UpdatedAt.UTC(),
 	}
 	if d.Currency == "" {
 		d.Currency = Currency
@@ -247,7 +213,7 @@ func invoiceDTO(inv Invoice, lines []Line) InvoiceDTO {
 	}
 	for _, l := range lines {
 		ld := InvoiceLineDTO{
-			Position: int(l.Position), OrderLineID: idStr(l.OrderLineID), Description: l.Description, Quantity: l.Quantity,
+			Position: int(l.Position), OrderLineID: httpx.IDStr(l.OrderLineID), Description: l.Description, Quantity: l.Quantity,
 			UnitPriceAmount: l.UnitPriceAmount, NetAmount: l.NetAmount, VATRateBP: l.VATRateBP, VATAmount: l.VATAmount,
 			VATWithheldAmount: l.VATWithheldAmount, TotalAmount: l.TotalAmount,
 		}
@@ -263,8 +229,8 @@ func invoiceDTO(inv Invoice, lines []Line) InvoiceDTO {
 }
 
 func invoiceAdminDTO(inv Invoice, lines []Line) InvoiceAdminDTO {
-	d := InvoiceAdminDTO{InvoiceDTO: invoiceDTO(inv, lines), PDFFileID: idStr(inv.PDFFileID), VerifiedBy: idStr(inv.VerifiedBy),
-		VerifiedAt: utcPtr(inv.VerifiedAt), IdempotencyKey: inv.IdempotencyKey}
+	d := InvoiceAdminDTO{InvoiceDTO: invoiceDTO(inv, lines), PDFFileID: httpx.IDStr(inv.PDFFileID), VerifiedBy: httpx.IDStr(inv.VerifiedBy),
+		VerifiedAt: db.UTCPtr(inv.VerifiedAt), IdempotencyKey: inv.IdempotencyKey}
 	if inv.LastError != nil {
 		d.LastError = *inv.LastError
 	}
@@ -297,7 +263,7 @@ func (h handler) listOrg(ctx context.Context, in *listOrgInput) (*invoiceListOut
 	fp := page.Fingerprint("listOrgInvoices", in.OrgID, in.Direction, in.Kind, in.Status)
 	q := ListQuery{Direction: Direction(in.Direction), Kind: Kind(in.Kind), Status: Status(in.Status), Limit: in.Limit}
 	q.After, q.invalid = invoiceAfter(in.Cursor, fp)
-	p, err := h.svc.ListOrgInvoices(ctx, a, parseID(in.OrgID), q)
+	p, err := h.svc.ListOrgInvoices(ctx, a, httpx.ParseID(in.OrgID), q)
 	if err != nil {
 		return nil, err
 	}
@@ -334,10 +300,10 @@ func (h handler) adminList(ctx context.Context, in *adminListInput) (*invoiceAdm
 	q := ListQuery{Kind: Kind(in.Kind), Status: Status(in.Status), Limit: in.Limit}
 	q.After, q.invalid = invoiceAfter(in.Cursor, fp)
 	if q.invalid == nil {
-		q.OrderID, q.invalid = optID(in.OrderID, "query.order_id")
+		q.OrderID, q.invalid = httpx.OptID("query.order_id", in.OrderID)
 	}
 	if q.invalid == nil {
-		q.PayoutID, q.invalid = optID(in.PayoutID, "query.payout_id")
+		q.PayoutID, q.invalid = httpx.OptID("query.payout_id", in.PayoutID)
 	}
 	p, err := h.svc.AdminListInvoices(ctx, a, q)
 	if err != nil {
@@ -391,7 +357,7 @@ func (h handler) get(ctx context.Context, in *getInput) (*invoiceOutput, error) 
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.GetInvoice(ctx, a, parseID(in.InvoiceID))
+	v, err := h.svc.GetInvoice(ctx, a, httpx.ParseID(in.InvoiceID))
 	if err != nil {
 		return nil, err
 	}
@@ -411,7 +377,7 @@ func (h handler) pdf(ctx context.Context, in *getInput) (*pdfOutput, error) {
 	if err != nil {
 		return nil, err
 	}
-	d, err := h.svc.InvoicePDF(ctx, a, parseID(in.InvoiceID))
+	d, err := h.svc.InvoicePDF(ctx, a, httpx.ParseID(in.InvoiceID))
 	if err != nil {
 		return nil, err
 	}
@@ -436,12 +402,12 @@ func (h handler) upload(ctx context.Context, in *uploadInput) (*invoiceOutput, e
 		return nil, err
 	}
 	ui := UploadInput{InvoiceNo: in.Body.InvoiceNo, IssueDate: in.Body.IssueDate, DocumentType: DocumentType(in.Body.DocumentType),
-		PDFFileID: parseID(in.Body.PDFFileID)}
+		PDFFileID: httpx.ParseID(in.Body.PDFFileID)}
 	if in.Body.ETTN != "" {
-		e := parseID(in.Body.ETTN)
+		e := httpx.ParseID(in.Body.ETTN)
 		ui.ETTN = &e
 	}
-	v, err := h.svc.UploadInvoice(ctx, a, parseID(in.InvoiceID), ui)
+	v, err := h.svc.UploadInvoice(ctx, a, httpx.ParseID(in.InvoiceID), ui)
 	if err != nil {
 		return nil, err
 	}
@@ -464,7 +430,7 @@ func (h handler) verify(ctx context.Context, in *verifyInput) (*invoiceAdminOutp
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.AdminVerifyInvoice(ctx, a, parseID(in.InvoiceID), VerifyInput{Result: Status(in.Body.Result), Note: in.Body.Note})
+	v, err := h.svc.AdminVerifyInvoice(ctx, a, httpx.ParseID(in.InvoiceID), VerifyInput{Result: Status(in.Body.Result), Note: in.Body.Note})
 	if err != nil {
 		return nil, err
 	}
@@ -492,7 +458,7 @@ func (h handler) cancel(ctx context.Context, in *cancelInput) (*cancelOutput, er
 	if err != nil {
 		return nil, err
 	}
-	r, err := h.svc.AdminCancelInvoice(ctx, a, parseID(in.InvoiceID), in.Body.Reason)
+	r, err := h.svc.AdminCancelInvoice(ctx, a, httpx.ParseID(in.InvoiceID), in.Body.Reason)
 	if err != nil {
 		return nil, err
 	}
@@ -519,7 +485,7 @@ type IntegrationDTO struct {
 
 func integrationDTO(i Integration) IntegrationDTO {
 	return IntegrationDTO{Provider: i.Provider, ExternalAccount: i.ExternalAccount, HasAccessToken: i.HasAccessToken,
-		HasRefreshToken: i.HasRefreshToken, ExpiresAt: utcPtr(i.ExpiresAt), RotatedAt: utcPtr(i.RotatedAt),
+		HasRefreshToken: i.HasRefreshToken, ExpiresAt: db.UTCPtr(i.ExpiresAt), RotatedAt: db.UTCPtr(i.RotatedAt),
 		UpdatedAt: i.UpdatedAt.UTC()}
 }
 

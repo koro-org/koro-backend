@@ -10,9 +10,11 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/consent"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 	"koro/internal/students"
 )
 
@@ -26,12 +28,7 @@ const (
 // nil (`koro openapi`): handlers only touch it when called.
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
-	reg := func(o huma.Operation, m op.Meta) huma.Operation {
-		o.Tags = []string{"messaging"}
-		return op.Koro(o, m)
-	}
-
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "messaging", huma.Operation{
 		OperationID: "createContactRequest", Method: http.MethodPost, Path: "/orgs/{org_id}/contact-requests",
 		DefaultStatus: http.StatusCreated,
 		Summary:       "Send a contact request to a student",
@@ -44,21 +41,21 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{
 		Action: string(authz.MessagingContactRequestCreate), Surface: op.SurfaceOrg, RateLimit: op.RateContactRequest,
 		Idempotency: op.IdempotencyRequired,
-	}), h.create)
+	}, h.create)
 
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "messaging", huma.Operation{
 		OperationID: "listSentContactRequests", Method: http.MethodGet, Path: "/orgs/{org_id}/contact-requests",
 		Summary: "List the company's contact requests", Description: "Newest first.",
-	}, op.Meta{Action: string(authz.MessagingContactRequestListSent), Surface: op.SurfaceOrg}), h.listSent)
+	}, op.Meta{Action: string(authz.MessagingContactRequestListSent), Surface: op.SurfaceOrg}, h.listSent)
 
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "messaging", huma.Operation{
 		OperationID: "getSentContactRequest", Method: http.MethodGet, Path: "/orgs/{org_id}/contact-requests/{request_id}",
 		Summary: "Get a contact request of the company",
 		Description: "The student appears under the company's pseudonym; once the student accepted, student_user_id " +
 			"links the level 3 profile.",
-	}, op.Meta{Action: string(authz.MessagingContactRequestRead), Surface: op.SurfaceOrg}), h.getSent)
+	}, op.Meta{Action: string(authz.MessagingContactRequestRead), Surface: op.SurfaceOrg}, h.getSent)
 
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "messaging", huma.Operation{
 		OperationID: "withdrawContactRequest", Method: http.MethodPost,
 		Path:    "/orgs/{org_id}/contact-requests/{request_id}/withdraw",
 		Summary: "Withdraw a pending contact request",
@@ -66,19 +63,19 @@ func Register(api huma.API, svc Service) {
 			"not given back. Withdrawing a withdrawn request changes nothing.",
 	}, op.Meta{
 		Action: string(authz.MessagingContactRequestWithdraw), Surface: op.SurfaceOrg, Idempotency: op.IdempotencyOptional,
-	}), h.withdraw)
+	}, h.withdraw)
 
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "messaging", huma.Operation{
 		OperationID: "listMyContactRequests", Method: http.MethodGet, Path: "/me/contact-requests",
 		Summary: "List the contact requests I received", Description: "Newest first.",
-	}, op.Meta{Action: string(authz.MessagingContactRequestListReceived), Surface: op.SurfaceSelf}), h.listMine)
+	}, op.Meta{Action: string(authz.MessagingContactRequestListReceived), Surface: op.SurfaceSelf}, h.listMine)
 
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "messaging", huma.Operation{
 		OperationID: "getMyContactRequest", Method: http.MethodGet, Path: "/me/contact-requests/{request_id}",
 		Summary: "Get a contact request I received",
-	}, op.Meta{Action: string(authz.MessagingContactRequestRead), Surface: op.SurfaceSelf}), h.getMine)
+	}, op.Meta{Action: string(authz.MessagingContactRequestRead), Surface: op.SurfaceSelf}, h.getMine)
 
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "messaging", huma.Operation{
 		OperationID: "respondMyContactRequest", Method: http.MethodPost, Path: "/me/contact-requests/{request_id}/respond",
 		Summary: "Accept or decline a contact request",
 		Description: "accepted gives the company level 3 access to your profile (it can then see your full profile " +
@@ -94,40 +91,31 @@ func Register(api huma.API, svc Service) {
 			"messaging.invalid_state; the same answer again changes nothing (a sharing included).",
 	}, op.Meta{
 		Action: string(authz.MessagingContactRequestRespond), Surface: op.SurfaceSelf, Idempotency: op.IdempotencyOptional,
-	}), h.respond)
+	}, h.respond)
 
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "messaging", huma.Operation{
 		OperationID: "blockCompany", Method: http.MethodPut, Path: "/me/company-blocks/{org_id}",
 		DefaultStatus: http.StatusNoContent,
 		Summary:       "Block a company's contact requests",
 		Description: "The company can no longer send you contact requests and its pending requests are declined. " +
 			"The company is not told that you blocked it. Blocking twice changes nothing.",
-	}, op.Meta{Action: string(authz.MessagingBlockManage), Surface: op.SurfaceSelf}), h.block)
+	}, op.Meta{Action: string(authz.MessagingBlockManage), Surface: op.SurfaceSelf}, h.block)
 
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "messaging", huma.Operation{
 		OperationID: "unblockCompany", Method: http.MethodDelete, Path: "/me/company-blocks/{org_id}",
 		DefaultStatus: http.StatusNoContent,
 		Summary:       "Unblock a company",
 		Description:   "Removing a block that does not exist changes nothing.",
-	}, op.Meta{Action: string(authz.MessagingBlockManage), Surface: op.SurfaceSelf}), h.unblock)
+	}, op.Meta{Action: string(authz.MessagingBlockManage), Surface: op.SurfaceSelf}, h.unblock)
 
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "messaging", huma.Operation{
 		OperationID: "listMyCompanyBlocks", Method: http.MethodGet, Path: "/me/company-blocks",
 		Summary: "List the companies I blocked", Description: "Newest first.",
-	}, op.Meta{Action: string(authz.MessagingBlockListOwn), Surface: op.SurfaceSelf}), h.listBlocks)
+	}, op.Meta{Action: string(authz.MessagingBlockListOwn), Surface: op.SurfaceSelf}, h.listBlocks)
 }
 
 type handler struct {
 	svc Service
-}
-
-// parseID parses a path ID; a malformed one is not found (IDOR rule).
-func parseID(s string) uuid.UUID {
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return uuid.Nil()
-	}
-	return id
 }
 
 // OrgPath is the org_id path parameter of the company surface.
@@ -179,10 +167,10 @@ func (h handler) create(ctx context.Context, in *createInput) (*companyOutput, e
 	}
 	ci := CreateInput{AnonID: in.Body.AnonID, Subject: in.Body.Subject, Message: in.Body.Message}
 	if in.Body.OpportunityPostID != "" {
-		id := parseID(in.Body.OpportunityPostID)
+		id := httpx.ParseID(in.Body.OpportunityPostID)
 		ci.OpportunityPostID = &id
 	}
-	v, err := h.svc.Create(ctx, a, parseID(in.OrgID), ci)
+	v, err := h.svc.Create(ctx, a, httpx.ParseID(in.OrgID), ci)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +190,7 @@ func (h handler) listSent(ctx context.Context, in *listSentInput) (*companyListO
 	if err != nil {
 		return nil, err
 	}
-	orgID := parseID(in.OrgID)
+	orgID := httpx.ParseID(in.OrgID)
 	fp := page.Fingerprint("listSentContactRequests", orgID.String(), in.Status)
 	after, err := afterID(in.Cursor, fp)
 	if err != nil {
@@ -246,7 +234,7 @@ func (h handler) getSent(ctx context.Context, in *sentInput) (*companyOutput, er
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.GetSent(ctx, a, parseID(in.OrgID), parseID(in.RequestID))
+	v, err := h.svc.GetSent(ctx, a, httpx.ParseID(in.OrgID), httpx.ParseID(in.RequestID))
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +251,7 @@ func (h handler) withdraw(ctx context.Context, in *withdrawInput) (*companyOutpu
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.Withdraw(ctx, a, parseID(in.OrgID), parseID(in.RequestID))
+	v, err := h.svc.Withdraw(ctx, a, httpx.ParseID(in.OrgID), httpx.ParseID(in.RequestID))
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +298,7 @@ func (h handler) getMine(ctx context.Context, in *mineInput) (*studentOutput, er
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.GetMine(ctx, a, parseID(in.RequestID))
+	v, err := h.svc.GetMine(ctx, a, httpx.ParseID(in.RequestID))
 	if err != nil {
 		return nil, err
 	}
@@ -358,7 +346,7 @@ func (h handler) respond(ctx context.Context, in *respondInput) (*studentOutput,
 			return nil, err
 		}
 	}
-	v, err := h.svc.Respond(ctx, a, parseID(in.RequestID), r)
+	v, err := h.svc.Respond(ctx, a, httpx.ParseID(in.RequestID), r)
 	if err != nil {
 		return nil, err
 	}
@@ -369,11 +357,11 @@ func (h handler) respond(ctx context.Context, in *respondInput) (*studentOutput,
 func proofOf(loc string, b *ContactShareConsentProof) (*students.ConsentProof, error) {
 	id, err := uuid.Parse(b.NoticeVersionID)
 	if err != nil {
-		return nil, fieldErr(loc+".notice_version_id", "must be a UUID")
+		return nil, problem.Field(loc+".notice_version_id", "must be a UUID")
 	}
 	sum, err := hex.DecodeString(b.TextSHA256)
 	if err != nil || len(sum) != 32 {
-		return nil, fieldErr(loc+".text_sha256", "must be 64 hex characters")
+		return nil, problem.Field(loc+".text_sha256", "must be 64 hex characters")
 	}
 	return &students.ConsentProof{NoticeVersionID: id, TextSHA256: sum}, nil
 }
@@ -389,7 +377,7 @@ func (h handler) block(ctx context.Context, in *blockInput) (*struct{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	return nil, h.svc.Block(ctx, a, parseID(in.OrgID))
+	return nil, h.svc.Block(ctx, a, httpx.ParseID(in.OrgID))
 }
 
 func (h handler) unblock(ctx context.Context, in *blockInput) (*struct{}, error) {
@@ -397,7 +385,7 @@ func (h handler) unblock(ctx context.Context, in *blockInput) (*struct{}, error)
 	if err != nil {
 		return nil, err
 	}
-	return nil, h.svc.Unblock(ctx, a, parseID(in.OrgID))
+	return nil, h.svc.Unblock(ctx, a, httpx.ParseID(in.OrgID))
 }
 
 type listBlocksInput struct {

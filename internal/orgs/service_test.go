@@ -11,9 +11,11 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/orgs"
+	"koro/internal/platform/db/dbtest"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/obs"
+	"koro/internal/platform/problem/problemtest"
 )
 
 func TestCreateCompany_CreatorBecomesOwner_SessionsRevoked(t *testing.T) {
@@ -43,7 +45,7 @@ func TestCreateCompany_CreatorBecomesOwner_SessionsRevoked(t *testing.T) {
 	if got := e.topics(); !slices.Equal(got, []string{domainevent.TopicMembershipStarted}) {
 		t.Fatalf("events %v, want membership.started", got)
 	}
-	if ev := e.audit.of(authz.OrgsCompanyCreate); len(ev) != 1 || *ev[0].OrgID != v.Org.ID || *ev[0].ActorUserID != founder.UserID {
+	if ev := e.audit.Of(authz.OrgsCompanyCreate); len(ev) != 1 || *ev[0].OrgID != v.Org.ID || *ev[0].ActorUserID != founder.UserID {
 		t.Fatalf("audit = %+v", ev)
 	}
 	// A failed company (slug taken) revokes nothing and writes no owner.
@@ -51,7 +53,7 @@ func TestCreateCompany_CreatorBecomesOwner_SessionsRevoked(t *testing.T) {
 	in := companyInput("Başka Şirket")
 	in.Slug = v.Org.Slug
 	_, err = e.svc.CreateCompany(t.Context(), other, in)
-	wantCode(t, err, 409, "orgs.slug_taken")
+	problemtest.WantProblem(t, err, 409, "orgs.slug_taken")
 	if got := e.revoker.revoked(); len(got) != 1 {
 		t.Fatalf("a failed registration revoked sessions: %v", got)
 	}
@@ -80,9 +82,9 @@ func TestCreateCompany_StartsPendingReview(t *testing.T) {
 	// pending_review is hidden from the public, visible to members and staff
 	// (03 §3.6).
 	_, err := e.svc.GetOrg(t.Context(), authz.Anonymous(), o.ID)
-	wantErr(t, err, orgs.ErrNotFound)
+	problemtest.WantErr(t, err, orgs.ErrNotFound)
 	_, err = e.svc.GetOrg(t.Context(), user(), o.ID)
-	wantErr(t, err, orgs.ErrNotFound)
+	problemtest.WantErr(t, err, orgs.ErrNotFound)
 	if _, err := e.svc.GetOrg(t.Context(), pad(t), o.ID); err != nil {
 		t.Fatalf("platform_admin reads a pending company: %v", err)
 	}
@@ -95,11 +97,11 @@ func TestCreateCompany_StartsPendingReview(t *testing.T) {
 	bad := companyInput("Eksik")
 	bad.SizeBand = ""
 	_, err = e.svc.CreateCompany(t.Context(), user(), bad)
-	wantCode(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 	_, err = e.svc.CreateCompany(t.Context(), persona(t, "student_minor"), companyInput("Reşit Değil"))
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	_, err = e.svc.CreateCompany(t.Context(), pad(t), companyInput("Personel"))
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 }
 
 func TestUpdateOrg_StaleETag_412(t *testing.T) {
@@ -110,9 +112,9 @@ func TestUpdateOrg_StaleETag_412(t *testing.T) {
 	p := orgs.OrgPatch{Description: &desc}
 
 	_, err := e.svc.UpdateOrg(t.Context(), owner, v.Org.ID, "", p)
-	wantCode(t, err, 428, "precondition_required")
+	problemtest.WantProblem(t, err, 428, "precondition_required")
 	_, err = e.svc.UpdateOrg(t.Context(), owner, v.Org.ID, "*", p)
-	wantCode(t, err, 428, "precondition_required")
+	problemtest.WantProblem(t, err, 428, "precondition_required")
 
 	got, err := e.svc.UpdateOrg(t.Context(), owner, v.Org.ID, v.ETag, p)
 	if err != nil || got.Org.Description == nil || *got.Org.Description != desc {
@@ -124,7 +126,7 @@ func TestUpdateOrg_StaleETag_412(t *testing.T) {
 	// The old ETag is stale now: a concurrent editor gets 412 and nothing changes.
 	other := "Kayıp güncelleme"
 	_, err = e.svc.UpdateOrg(t.Context(), owner, v.Org.ID, v.ETag, orgs.OrgPatch{Description: &other})
-	wantCode(t, err, 412, "precondition_failed")
+	problemtest.WantProblem(t, err, 412, "precondition_failed")
 	cur, err := e.svc.GetOrg(t.Context(), owner, v.Org.ID)
 	if err != nil || *cur.Org.Description != desc || cur.ETag != got.ETag {
 		t.Fatalf("after the 412: %+v (etag %s), %v", cur.Org, cur.ETag, err)
@@ -134,7 +136,7 @@ func TestUpdateOrg_StaleETag_412(t *testing.T) {
 	if _, err := e.svc.UpdateOrg(t.Context(), owner, v.Org.ID, `"x", `+got.ETag, orgs.OrgPatch{SizeBand: &size}); err != nil {
 		t.Fatalf("If-Match list: %v", err)
 	}
-	if ev := e.audit.of(authz.OrgsOrgUpdate); len(ev) != 2 {
+	if ev := e.audit.Of(authz.OrgsOrgUpdate); len(ev) != 2 {
 		t.Fatalf("update audit records = %d, want 2", len(ev))
 	}
 }
@@ -147,15 +149,15 @@ func TestUpdateOrg_OrgIsolation_404(t *testing.T) {
 	name := "Ele Geçirildi"
 	// The owner of A on B's management surface: 404 (03 §3.6), and B is unchanged.
 	_, err := e.svc.UpdateOrg(t.Context(), ownerA, b.Org.ID, b.ETag, orgs.OrgPatch{Name: &name})
-	wantErr(t, err, orgs.ErrNotFound)
+	problemtest.WantErr(t, err, orgs.ErrNotFound)
 	_, err = e.svc.CloseOrg(t.Context(), ownerA, b.Org.ID, "kapat", proof(goodPassword))
-	wantErr(t, err, orgs.ErrNotFound)
+	problemtest.WantErr(t, err, orgs.ErrNotFound)
 	_, err = e.svc.TransferOwnership(t.Context(), ownerA, b.Org.ID, ownerA.UserID, proof(goodPassword))
-	wantErr(t, err, orgs.ErrNotFound)
+	problemtest.WantErr(t, err, orgs.ErrNotFound)
 	// A recruiter of A: member without the role → 403.
 	rec := e.member(t, a.Org.ID, authz.MemberRecruiter)
 	_, err = e.svc.UpdateOrg(t.Context(), rec, a.Org.ID, a.ETag, orgs.OrgPatch{Name: &name})
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	if e.reauth.calls != 0 {
 		t.Fatal("re-authentication ran before authz")
 	}
@@ -179,7 +181,7 @@ func TestUpdateOrg_OrgIsolation_404(t *testing.T) {
 	}
 	sector := "software"
 	_, err = e.svc.UpdateOrg(t.Context(), pad(t), club, cv.ETag, orgs.OrgPatch{SectorCode: &sector})
-	wantErr(t, err, orgs.ErrCompanyFieldOnly)
+	problemtest.WantErr(t, err, orgs.ErrCompanyFieldOnly)
 }
 
 func TestTransferOwnership_TargetMustBeActiveCompanyAdmin(t *testing.T) {
@@ -193,13 +195,13 @@ func TestTransferOwnership_TargetMustBeActiveCompanyAdmin(t *testing.T) {
 
 	for _, target := range []uuid.UUID{recruiter.UserID, uuid.NewV7(), owner.UserID} {
 		_, err := e.svc.TransferOwnership(ctx, owner, org, target, proof(goodPassword))
-		wantCode(t, err, 422, "orgs.transfer_target_invalid")
+		problemtest.WantProblem(t, err, 422, "orgs.transfer_target_invalid")
 	}
 	// company_admin is not the owner (k-own); a wrong proof is 403.
 	_, err := e.svc.TransferOwnership(ctx, admin, org, admin.UserID, proof(goodPassword))
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	_, err = e.svc.TransferOwnership(ctx, owner, org, admin.UserID, proof("yanlis"))
-	wantCode(t, err, 403, "identity.reauth_failed")
+	problemtest.WantProblem(t, err, 403, "identity.reauth_failed")
 
 	e.revoker.users = nil
 	if _, err := e.svc.TransferOwnership(ctx, owner, org, admin.UserID, proof(goodPassword)); err != nil {
@@ -216,10 +218,10 @@ func TestTransferOwnership_TargetMustBeActiveCompanyAdmin(t *testing.T) {
 	if got := e.revoker.revoked(); !slices.Contains(got, admin.UserID) || !slices.Contains(got, owner.UserID) {
 		t.Fatalf("revoked %v, want both users", got)
 	}
-	if n := len(e.audit.ofOutcome(authz.OrgsOwnershipTransfer, audit.Denied)); n != 1 {
+	if n := len(e.audit.OfOutcome(authz.OrgsOwnershipTransfer, audit.Denied)); n != 1 {
 		t.Fatalf("%d denied records for the wrong proof, want 1 (03 §6.2, BE-074)", n)
 	}
-	ev := e.audit.ofOutcome(authz.OrgsOwnershipTransfer, audit.Success)
+	ev := e.audit.OfOutcome(authz.OrgsOwnershipTransfer, audit.Success)
 	if len(ev) != 1 || ev[0].Metadata["reauth"] != "password" || ev[0].Metadata["new_owner_user_id"] != admin.UserID.String() {
 		t.Fatalf("audit = %+v", ev)
 	}
@@ -231,7 +233,7 @@ func TestTransferOwnership_TargetMustBeActiveCompanyAdmin(t *testing.T) {
 	// A club has no owner to transfer.
 	club, _ := e.svc.Create(ctx, orgs.CreateOrg{Kind: orgs.KindClub, Name: "Kulüp"})
 	_, err = e.svc.TransferOwnership(ctx, pad(t), club, admin.UserID, proof(goodPassword))
-	wantCode(t, err, 409, "orgs.invalid_state")
+	problemtest.WantProblem(t, err, 409, "orgs.invalid_state")
 }
 
 func TestCloseOrg_HookReportsOpenCommerce_409(t *testing.T) {
@@ -246,7 +248,7 @@ func TestCloseOrg_HookReportsOpenCommerce_409(t *testing.T) {
 		func(_ context.Context, id uuid.UUID) (bool, error) { asked = append(asked, id); return open, nil },
 	}
 	_, err := e.svc.CloseOrg(t.Context(), owner, v.Org.ID, "Faaliyet sona erdi", proof(goodPassword))
-	wantCode(t, err, 409, "orgs.open_commerce")
+	problemtest.WantProblem(t, err, 409, "orgs.open_commerce")
 	if len(asked) != 1 || asked[0] != v.Org.ID {
 		t.Fatalf("hook asked %v", asked)
 	}
@@ -279,11 +281,11 @@ func TestCloseOrg_HookReportsOpenCommerce_409(t *testing.T) {
 		t.Fatalf("membership.ended events = %d, want 2", ended)
 	}
 	_, err = e.svc.CloseOrg(t.Context(), pad(t), v.Org.ID, "Tekrar", proof(goodPassword))
-	wantCode(t, err, 409, "orgs.invalid_state")
+	problemtest.WantProblem(t, err, 409, "orgs.invalid_state")
 	// Without a proof: 403 identity.reauth_required, before any business data.
 	v2, owner2 := e.company(t, "İkinci Şirket")
 	_, err = e.svc.CloseOrg(t.Context(), owner2, v2.Org.ID, "Neden", proof(""))
-	wantCode(t, err, 403, "identity.reauth_required")
+	problemtest.WantProblem(t, err, 403, "identity.reauth_required")
 }
 
 func TestAdminVerifyOrg_PendingToActive(t *testing.T) {
@@ -291,9 +293,9 @@ func TestAdminVerifyOrg_PendingToActive(t *testing.T) {
 	e := newEnv(t)
 	v, owner := e.company(t, "Doğrulanacak Şirket")
 	_, err := e.svc.AdminVerifyOrg(t.Context(), owner, v.Org.ID, "")
-	wantErr(t, err, authz.ErrForbidden) // admin surface
+	problemtest.WantErr(t, err, authz.ErrForbidden) // admin surface
 	_, err = e.svc.AdminVerifyOrg(t.Context(), persona(t, "moderator"), v.Org.ID, "")
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	e.clk.Advance(time.Hour)
 	admin := pad(t)
 	got, err := e.svc.AdminVerifyOrg(t.Context(), admin, v.Org.ID, "Vergi levhası görüldü")
@@ -305,7 +307,7 @@ func TestAdminVerifyOrg_PendingToActive(t *testing.T) {
 		o.VerifiedBy == nil || *o.VerifiedBy != admin.UserID {
 		t.Fatalf("verified org = %+v", o)
 	}
-	ev := e.audit.of(authz.OrgsOrgVerify)
+	ev := e.audit.Of(authz.OrgsOrgVerify)
 	if len(ev) != 1 || ev[0].Reason != "Vergi levhası görüldü" || ev[0].Metadata["from"] != "pending_review" {
 		t.Fatalf("audit = %+v", ev)
 	}
@@ -314,9 +316,9 @@ func TestAdminVerifyOrg_PendingToActive(t *testing.T) {
 		t.Fatalf("anonymous read after verification: %v", err)
 	}
 	_, err = e.svc.AdminVerifyOrg(t.Context(), admin, v.Org.ID, "")
-	wantCode(t, err, 409, "orgs.invalid_state")
+	problemtest.WantProblem(t, err, 409, "orgs.invalid_state")
 	_, err = e.svc.AdminVerifyOrg(t.Context(), admin, uuid.NewV7(), "")
-	wantErr(t, err, orgs.ErrNotFound)
+	problemtest.WantErr(t, err, orgs.ErrNotFound)
 }
 
 // TestOrgWrites_EmitOrgUpdated: a profile edit and an admin status change
@@ -327,7 +329,7 @@ func TestOrgWrites_EmitOrgUpdated(t *testing.T) {
 	e := newEnv(t)
 	v, owner := e.company(t, "Yayın Şirketi")
 	_, err := e.svc.AdminVerifyOrg(t.Context(), owner, v.Org.ID, "")
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	got, err := e.svc.AdminVerifyOrg(t.Context(), pad(t), v.Org.ID, "")
 	if err != nil {
 		t.Fatal(err)
@@ -363,19 +365,19 @@ func TestSuspendedOrg_WriteActions403_ReadAllowed(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := e.svc.AdminSuspendOrg(ctx, admin, v.Org.ID, "Şikâyet incelemesi", proof(""))
-	wantCode(t, err, 403, "identity.reauth_required")
+	problemtest.WantProblem(t, err, 403, "identity.reauth_required")
 	s, err := e.svc.AdminSuspendOrg(ctx, admin, v.Org.ID, "Şikâyet incelemesi", proof(goodPassword))
 	if err != nil || s.Org.Status != orgs.StatusSuspended {
 		t.Fatalf("suspend = %+v, %v", s.Org, err)
 	}
 	name := "Yeni Ad"
 	_, err = e.svc.UpdateOrg(ctx, owner, v.Org.ID, s.ETag, orgs.OrgPatch{Name: &name})
-	wantCode(t, err, 403, "orgs.org_suspended")
+	problemtest.WantProblem(t, err, 403, "orgs.org_suspended")
 	_, err = e.svc.CloseOrg(ctx, owner, v.Org.ID, "Kaçış", proof(goodPassword))
-	wantCode(t, err, 403, "orgs.org_suspended")
+	problemtest.WantProblem(t, err, 403, "orgs.org_suspended")
 	adminRow := e.member(t, v.Org.ID, authz.MemberCompanyAdmin)
 	_, err = e.svc.TransferOwnership(ctx, owner, v.Org.ID, adminRow.UserID, proof(goodPassword))
-	wantCode(t, err, 403, "orgs.org_suspended")
+	problemtest.WantProblem(t, err, 403, "orgs.org_suspended")
 	// Reads stay allowed, for everyone.
 	for _, a := range []authz.Actor{authz.Anonymous(), user(), owner} {
 		if _, err := e.svc.GetOrg(ctx, a, v.Org.ID); err != nil {
@@ -390,7 +392,7 @@ func TestSuspendedOrg_WriteActions403_ReadAllowed(t *testing.T) {
 		t.Fatalf("platform_admin update of a suspended org: %v", err)
 	}
 	_, err = e.svc.AdminSuspendOrg(ctx, admin, v.Org.ID, "Tekrar", proof(goodPassword))
-	wantCode(t, err, 409, "orgs.invalid_state")
+	problemtest.WantProblem(t, err, 409, "orgs.invalid_state")
 	r, err := e.svc.AdminReactivateOrg(ctx, admin, v.Org.ID, "İnceleme bitti", proof(goodPassword))
 	if err != nil || r.Org.Status != orgs.StatusActive {
 		t.Fatalf("reactivate = %+v, %v", r.Org, err)
@@ -398,10 +400,10 @@ func TestSuspendedOrg_WriteActions403_ReadAllowed(t *testing.T) {
 	if _, err := e.svc.UpdateOrg(ctx, owner, v.Org.ID, r.ETag, orgs.OrgPatch{Name: &name}); err != nil {
 		t.Fatalf("owner update after reactivation: %v", err)
 	}
-	if n := len(e.audit.ofOutcome(authz.OrgsOrgSuspend, audit.Success)); n != 2 {
+	if n := len(e.audit.OfOutcome(authz.OrgsOrgSuspend, audit.Success)); n != 2 {
 		t.Fatalf("suspend/reactivate audit records = %d", n)
 	}
-	if n := len(e.audit.ofOutcome(authz.OrgsOrgSuspend, audit.Denied)); n != 1 {
+	if n := len(e.audit.OfOutcome(authz.OrgsOrgSuspend, audit.Denied)); n != 1 {
 		t.Fatalf("%d denied records for the missing proof, want 1 (03 §6.2, BE-074)", n)
 	}
 	// The platform org is never suspended.
@@ -410,7 +412,7 @@ func TestSuspendedOrg_WriteActions403_ReadAllowed(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.svc.AdminSuspendOrg(ctx, admin, platform.ID, "Deneme", proof(goodPassword))
-	wantCode(t, err, 409, "orgs.invalid_state")
+	problemtest.WantProblem(t, err, 409, "orgs.invalid_state")
 }
 
 func TestOrgAdminCreate_JoinsCallerTx(t *testing.T) {
@@ -427,13 +429,13 @@ func TestOrgAdminCreate_JoinsCallerTx(t *testing.T) {
 	ctx := t.Context()
 	var id uuid.UUID
 	err = e.tx.WithTx(ctx, func(ctx context.Context) error {
-		caller := ctx.Value(txKey{})
+		caller := dbtest.TxOf(ctx)
 		var err error
 		id, err = mod.Service.Create(ctx, orgs.CreateOrg{Kind: orgs.KindUniversity, Name: "Ege Üniversitesi", City: "İzmir"})
 		if err != nil {
 			return err
 		}
-		if !slices.Equal(tx.txs(), []any{caller}) {
+		if !slices.Equal(tx.txs(), []int{caller}) {
 			t.Errorf("Create wrote in transactions %v, want the caller's %v", tx.txs(), caller)
 		}
 		return nil
@@ -441,8 +443,8 @@ func TestOrgAdminCreate_JoinsCallerTx(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if e.tx.n != 1 {
-		t.Fatalf("Create opened its own transaction (%d transactions)", e.tx.n)
+	if e.tx.Count() != 1 {
+		t.Fatalf("Create opened its own transaction (%d transactions)", e.tx.Count())
 	}
 	s, err := mod.Service.Get(ctx, id)
 	if err != nil || s.Kind != orgs.KindUniversity || s.Status != orgs.StatusActive || s.Slug != "ege-universitesi" {
@@ -471,15 +473,15 @@ func TestOrgAdminCreate_JoinsCallerTx(t *testing.T) {
 // recordingStore remembers the transaction of every InsertOrg.
 type recordingStore struct {
 	*orgs.MemStore
-	seen []any
+	seen []int
 }
 
 func (r *recordingStore) InsertOrg(ctx context.Context, o orgs.Org) (orgs.Org, bool, error) {
-	r.seen = append(r.seen, ctx.Value(txKey{}))
+	r.seen = append(r.seen, dbtest.TxOf(ctx))
 	return r.MemStore.InsertOrg(ctx, o)
 }
 
-func (r *recordingStore) txs() []any { return r.seen }
+func (r *recordingStore) txs() []int { return r.seen }
 
 // TestOrgSummary_LogoAndVerified (BE-094, T-251): the summary other
 // modules read carries the logo file and the verification badge.

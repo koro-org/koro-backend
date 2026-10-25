@@ -62,10 +62,10 @@ type Range struct {
 // window parses the range into [from, to).
 func (r Range) window() (from, to time.Time, err error) {
 	if from, err = parseBound(r.OccurredFrom, false); err != nil {
-		return from, to, fieldErr("query.occurred_from", "must be an RFC 3339 time or a YYYY-MM-DD date")
+		return from, to, problem.Field("query.occurred_from", "must be an RFC 3339 time or a YYYY-MM-DD date")
 	}
 	if to, err = parseBound(r.OccurredTo, true); err != nil {
-		return from, to, fieldErr("query.occurred_to", "must be an RFC 3339 time or a YYYY-MM-DD date")
+		return from, to, problem.Field("query.occurred_to", "must be an RFC 3339 time or a YYYY-MM-DD date")
 	}
 	return from, to, nil
 }
@@ -90,10 +90,6 @@ func parseBound(s string, end bool) (time.Time, error) {
 		t = t.Add(time.Microsecond) // inclusive at the database's precision
 	}
 	return t.UTC(), nil
-}
-
-func fieldErr(location, msg string) error {
-	return problem.ErrValidation.WithFields(problem.FieldError{Location: location, Message: msg})
 }
 
 func optionalID(id uuid.UUID) *uuid.UUID {

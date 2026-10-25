@@ -277,11 +277,7 @@ func (s *service) now() time.Time { return s.d.Clock.Now().UTC().Truncate(time.M
 
 // emit writes an outbox event in the transaction carried by ctx.
 func (s *service) emit(ctx context.Context, p domainevent.Payload, id uuid.UUID) error {
-	env, err := domainevent.New(p, "contact_request", id)
-	if err != nil {
-		return err
-	}
-	return s.d.Outbox.Add(ctx, env)
+	return outbox.Emit(ctx, s.d.Outbox, p, "contact_request", id)
 }
 
 // Subscribe registers the outbox subscriptions of messaging (01 §6.2):

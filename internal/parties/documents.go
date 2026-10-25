@@ -43,7 +43,7 @@ func (s *service) UploadDocument(ctx context.Context, a authz.Actor, orgID, part
 		return Document{}, ErrInvalidState
 	}
 	if !in.Kind.Valid() {
-		return Document{}, fieldErr("body.kind", "is not a document kind")
+		return Document{}, problem.Field("body.kind", "is not a document kind")
 	}
 	if s.d.Files == nil {
 		return Document{}, problem.ErrUnavailable
@@ -90,7 +90,7 @@ func (s *service) UploadDocument(ctx context.Context, a authz.Actor, orgID, part
 // checkUpload accepts a party_document upload made by the caller or for
 // this org (files k30 authorised the upload itself; 04 §1.14).
 func (s *service) checkUpload(ctx context.Context, a authz.Actor, orgID, fileID uuid.UUID) error {
-	bad := fieldErr("body.file_id", "must be a party_document upload of this organization")
+	bad := problem.Field("body.file_id", "must be a party_document upload of this organization")
 	f, err := s.d.Files.Get(ctx, fileID)
 	switch {
 	case errors.Is(err, files.ErrNotFound):

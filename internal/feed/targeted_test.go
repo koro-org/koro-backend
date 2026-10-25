@@ -15,6 +15,7 @@ import (
 	"koro/internal/outreach"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // uniKey is students' audience key of uni_a's university.
@@ -65,7 +66,7 @@ func TestTargetedPost_CompanyWithoutEntitlement_403NotEntitled(t *testing.T) {
 	e.audience.add(42, uniKey, "year:3")
 	cm := persona(t, "company_member")
 	_, err := e.svc.CreateTargetedPost(ctx, cm, orgID("company_a"), uniTargeted("Staj"))
-	wantCode(t, err, 403, "entitlements.not_entitled")
+	problemtest.WantProblem(t, err, 403, "entitlements.not_entitled")
 	if rows, _ := e.mem.PostsOfAuthor(ctx, cm.UserID); len(rows) != 0 {
 		t.Fatalf("posts = %d after a refused targeted post", len(rows))
 	}
@@ -89,7 +90,7 @@ func TestTargetedPost_CompanyWithoutEntitlement_403NotEntitled(t *testing.T) {
 	if err := json.Unmarshal(p.AudienceSnapshot, &snap); err != nil || snap["uni"] == nil {
 		t.Fatalf("snapshot = %s", p.AudienceSnapshot)
 	}
-	if got := e.audit.of(authz.FeedPostCreateTargeted); len(got) != 1 || got[0].Metadata["quota_consumed"] != true {
+	if got := e.audit.Of(authz.FeedPostCreateTargeted); len(got) != 1 || got[0].Metadata["quota_consumed"] != true {
 		t.Fatalf("audit = %+v", got)
 	}
 	// The DTO of the author org shows the estimate and the units left.
@@ -123,12 +124,12 @@ func TestTargetedPost_IdempotencyReplay_NoDoubleConsume(t *testing.T) {
 	if again.Post.ID != first.Post.ID || e.remaining(t, "company_a") != 4 {
 		t.Fatalf("replay = %s (first %s), remaining %d", again.Post.ID, first.Post.ID, e.remaining(t, "company_a"))
 	}
-	if n := len(e.audit.of(authz.FeedPostCreateTargeted)); n != 1 {
+	if n := len(e.audit.Of(authz.FeedPostCreateTargeted)); n != 1 {
 		t.Fatalf("audit records = %d", n)
 	}
 	// The same key with another body is 422 idempotency.key_reused.
 	_, err = e.svc.CreateTargetedPost(ctx, cm, orgID("company_a"), uniTargeted("Başka"))
-	wantCode(t, err, 422, "idempotency.key_reused")
+	problemtest.WantProblem(t, err, 422, "idempotency.key_reused")
 	// A new key is a new post and spends a new unit.
 	other, err := e.svc.CreateTargetedPost(idempotency.WithKey(t.Context(), key("targeted-2")), cm, orgID("company_a"),
 		uniTargeted("Staj"))
@@ -149,7 +150,7 @@ func TestTargetedPost_Below10_422NoCount(t *testing.T) {
 	e.grantPosts(t, "company_a", 3)
 	cm := persona(t, "company_member")
 	_, err := e.svc.CreateTargetedPost(ctx, cm, orgID("company_a"), uniTargeted("Az"))
-	wantCode(t, err, 422, "outreach.audience_too_small")
+	problemtest.WantProblem(t, err, 422, "outreach.audience_too_small")
 	p, _ := errors.AsType[*problem.Error](err)
 	for _, f := range p.Fields() {
 		if strings.ContainsAny(f.Message, "0123456789") {
@@ -168,10 +169,10 @@ func TestTargetedPost_Below10_422NoCount(t *testing.T) {
 	// A company never targets a sensitive club.
 	e.clubs.set(orgID("club_sensitive"), true)
 	_, err = e.svc.CreateTargetedPost(ctx, cm, orgID("company_a"), clubTargeted("club_sensitive", "Hassas"))
-	wantCode(t, err, 422, "outreach.sensitive_target")
+	problemtest.WantProblem(t, err, 422, "outreach.sensitive_target")
 	// A club targets its own members only.
 	_, err = e.svc.CreateTargetedPost(ctx, persona(t, "club_admin"), orgID("club_a"), clubTargeted("club_b", "Başkası"))
-	wantCode(t, err, 422, "outreach.target_out_of_scope")
+	problemtest.WantProblem(t, err, 422, "outreach.target_out_of_scope")
 	// Neither a segment nor a definition, or both: 422.
 	in := uniTargeted("İkisi")
 	seg := uuid.NewV7()
@@ -291,7 +292,7 @@ func TestDeleteTargetedDraft_ReleasesEntitlement(t *testing.T) {
 	if e.remaining(t, "company_a") != 2 {
 		t.Fatalf("remaining after delete = %d", e.remaining(t, "company_a"))
 	}
-	if got := e.audit.of(authz.FeedPostDelete); len(got) != 1 || got[0].Metadata["quota_released"] != true {
+	if got := e.audit.Of(authz.FeedPostDelete); len(got) != 1 || got[0].Metadata["quota_released"] != true {
 		t.Fatalf("audit = %+v", got)
 	}
 	// Published, then removed: the unit was used.
@@ -363,14 +364,14 @@ func TestTargetedPost_SuspendedOrgAndMissingWiring(t *testing.T) {
 	reason := "spam"
 	e.mem.PutSettings(feed.OrgSettings{OrgID: orgID("company_a"), TrustLevel: feed.TrustSuspended, Reason: &reason})
 	_, err := e.svc.CreateTargetedPost(ctx, persona(t, "company_member"), orgID("company_a"), uniTargeted("x"))
-	wantCode(t, err, 403, "feed.posting_suspended")
+	problemtest.WantProblem(t, err, 403, "feed.posting_suspended")
 
 	n := newEnvWith(t, func(d *feed.Deps) { d.Entitlements = nil })
 	_, err = n.svc.CreateTargetedPost(ctx, persona(t, "company_member"), orgID("company_a"), uniTargeted("x"))
-	wantCode(t, err, 503, "unavailable")
+	problemtest.WantProblem(t, err, 503, "unavailable")
 	m := newEnvWith(t, func(d *feed.Deps) { d.Targeting = nil })
 	_, err = m.svc.CreateTargetedPost(ctx, persona(t, "club_admin"), orgID("club_a"), clubTargeted("club_a", "x"))
-	wantCode(t, err, 503, "unavailable")
+	problemtest.WantProblem(t, err, 503, "unavailable")
 	// Another org's member: 404 (org management surface).
 	_, err = e.svc.CreateTargetedPost(ctx, persona(t, "other_club_admin"), orgID("club_a"), clubTargeted("club_a", "x"))
 	wantNotFound(t, err)
@@ -393,5 +394,5 @@ func TestPublishTargeted_SensitiveSinceDraft_422(t *testing.T) {
 	}
 	e.clubs.set(orgID("club_a"), true)
 	_, err = e.svc.PublishPost(ctx, cm, v.Post.ID)
-	wantCode(t, err, 422, "outreach.sensitive_target")
+	problemtest.WantProblem(t, err, 422, "outreach.sensitive_target")
 }

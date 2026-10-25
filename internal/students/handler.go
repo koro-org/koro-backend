@@ -14,6 +14,7 @@ import (
 	"koro/internal/platform/civil"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/problem"
 )
 
 // Register adds the students operations of BE-023, BE-025 and BE-046
@@ -126,7 +127,7 @@ func optionalID(loc string, s *string) (id *uuid.UUID, clear bool, err error) {
 	}
 	v, err := uuid.Parse(*s)
 	if err != nil {
-		return nil, false, fieldErr(loc, "must be a UUID")
+		return nil, false, problem.Field(loc, "must be a UUID")
 	}
 	return &v, false, nil
 }
@@ -213,7 +214,7 @@ func (h handler) putSkills(ctx context.Context, in *putSkillsInput) (*skillsOutp
 	for i, it := range in.Body.Items {
 		id, err := uuid.Parse(it.SkillID)
 		if err != nil {
-			return nil, fieldErr("body.items["+strconv.Itoa(i)+"].skill_id", "must be a UUID")
+			return nil, problem.Field("body.items["+strconv.Itoa(i)+"].skill_id", "must be a UUID")
 		}
 		items[i] = SkillInput{SkillID: id, Level: it.Level}
 	}
@@ -415,11 +416,11 @@ func proofOf(loc string, b *studentConsentProof) (*ConsentProof, error) {
 	}
 	id, err := uuid.Parse(b.NoticeVersionID)
 	if err != nil {
-		return nil, fieldErr(loc+".notice_version_id", "must be a UUID")
+		return nil, problem.Field(loc+".notice_version_id", "must be a UUID")
 	}
 	sum, err := hex.DecodeString(b.TextSHA256)
 	if err != nil || len(sum) != 32 {
-		return nil, fieldErr(loc+".text_sha256", "must be 64 hex characters")
+		return nil, problem.Field(loc+".text_sha256", "must be 64 hex characters")
 	}
 	return &ConsentProof{NoticeVersionID: id, TextSHA256: sum}, nil
 }

@@ -13,6 +13,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/files"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/problem"
 )
 
@@ -302,12 +303,8 @@ func (s *service) supersedeOpen(ctx context.Context, userID, keep uuid.UUID, now
 // emitVerified writes user.edu_verified (O) in the transaction of the
 // verification (students: audiences; talent: profile refresh on a renewal).
 func (s *service) emitVerified(ctx context.Context, v EduRecord, renewal bool) error {
-	env, err := domainevent.New(domainevent.UserEduVerified{UserID: v.UserID, UniversityID: *v.UniversityID,
+	return outbox.Emit(ctx, s.d.Outbox, domainevent.UserEduVerified{UserID: v.UserID, UniversityID: *v.UniversityID,
 		ExpiresAt: *v.ExpiresAt, Renewal: renewal}, eduAggType, v.ID)
-	if err != nil {
-		return err
-	}
-	return s.d.Outbox.Add(ctx, env)
 }
 
 // usableDocument reports whether f can become a student document of

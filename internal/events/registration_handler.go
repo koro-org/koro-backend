@@ -13,15 +13,17 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/consent"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // registerRegistrations adds the 8 registration operations of BE-028 (04
 // §2.6, §E.2, §E.6, §V.6).
 func registerRegistrations(api huma.API, h handler) {
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "createRegistration", Method: http.MethodPost, Path: "/events/{event_id}/registrations",
 		DefaultStatus: http.StatusCreated,
 		Summary:       "Register for an event",
@@ -35,19 +37,19 @@ func registerRegistrations(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.EventsRegistrationCreate), Surface: op.SurfaceResource, Idempotency: op.IdempotencyRequired},
 		h.createRegistration)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "listMyRegistrations", Method: http.MethodGet, Path: "/me/registrations",
 		Summary:     "List my registrations",
 		Description: "The caller's registrations by the event's start (no answers); upcoming=true keeps events that have not ended.",
 	}, op.Meta{Action: string(authz.EventsRegistrationListOwn), Surface: op.SurfaceSelf}, h.listMyRegistrations)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "getMyRegistration", Method: http.MethodGet, Path: "/me/registrations/{registration_id}",
 		Summary:     "Get my registration",
 		Description: "With the answers; the special-category answers are opened for the owner (the read is audited).",
 	}, op.Meta{Action: string(authz.EventsRegistrationReadOwn), Surface: op.SurfaceSelf}, h.getMyRegistration)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "cancelMyRegistration", Method: http.MethodPost, Path: "/me/registrations/{registration_id}/cancel",
 		Summary: "Cancel my registration",
 		Description: "A confirmed registration is cancelled until cancel_deadline_at and the event's start (409 " +
@@ -56,7 +58,7 @@ func registerRegistrations(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.EventsRegistrationCancelOwn), Surface: op.SurfaceSelf, Idempotency: op.IdempotencyOptional},
 		h.cancelMyRegistration)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "listEventRegistrations", Method: http.MethodGet, Path: "/events/{event_id}/registrations",
 		Summary: "List an event's registrations",
 		Description: "The organiser's managers; support and platform_admin by break-glass (X-Koro-Access-Reason, " +
@@ -65,7 +67,7 @@ func registerRegistrations(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.EventsRegistrationList), Surface: op.SurfaceResource, BreakGlass: true},
 		h.listEventRegistrations)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "getEventRegistration", Method: http.MethodGet, Path: "/events/{event_id}/registrations/{registration_id}",
 		Summary: "Get an event registration",
 		Description: "answers_sensitive (special-category answers) for the organiser's managers only, never by " +
@@ -73,7 +75,7 @@ func registerRegistrations(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.EventsRegistrationRead), Surface: op.SurfaceResource, BreakGlass: true},
 		h.getEventRegistration)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "decideEventRegistration", Method: http.MethodPost,
 		Path:    "/events/{event_id}/registrations/{registration_id}/decision",
 		Summary: "Decide a pending application",
@@ -83,7 +85,7 @@ func registerRegistrations(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.EventsRegistrationDecide), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional},
 		h.decideRegistration)
 
-	reg(api, huma.Operation{
+	op.Register(api, "events", huma.Operation{
 		OperationID: "cancelEventRegistration", Method: http.MethodPost,
 		Path:    "/events/{event_id}/registrations/{registration_id}/cancel",
 		Summary: "Cancel a registration on behalf of the organiser",
@@ -230,7 +232,7 @@ type RegistrationPath struct {
 	RegistrationID string `path:"registration_id" doc:"Registration ID"`
 }
 
-func (p RegistrationPath) id() uuid.UUID { return parseID(p.RegistrationID) }
+func (p RegistrationPath) id() uuid.UUID { return httpx.ParseID(p.RegistrationID) }
 
 // EventRegistrationPath is /events/{event_id}/registrations/{registration_id}.
 type EventRegistrationPath struct {
@@ -238,7 +240,7 @@ type EventRegistrationPath struct {
 	RegistrationID string `path:"registration_id" doc:"Registration ID"`
 }
 
-func (p EventRegistrationPath) regID() uuid.UUID { return parseID(p.RegistrationID) }
+func (p EventRegistrationPath) regID() uuid.UUID { return httpx.ParseID(p.RegistrationID) }
 
 // AccessHeaders are the break-glass headers of the organiser's reads (03 §6.3).
 type AccessHeaders struct {
@@ -283,7 +285,7 @@ func (h handler) createRegistration(ctx context.Context, in *createRegistrationI
 	if in.Body.FormVersionID != "" {
 		id, err := uuid.Parse(in.Body.FormVersionID)
 		if err != nil {
-			return nil, fieldErr("body.form_version_id", "must be a UUID")
+			return nil, problem.Field("body.form_version_id", "must be a UUID")
 		}
 		ri.FormVersionID = &id
 	}
@@ -291,11 +293,11 @@ func (h handler) createRegistration(ctx context.Context, in *createRegistrationI
 		loc := "body.consents[" + strconv.Itoa(i) + "]"
 		nid, err := uuid.Parse(c.NoticeVersionID)
 		if err != nil {
-			return nil, fieldErr(loc+".notice_version_id", "must be a UUID")
+			return nil, problem.Field(loc+".notice_version_id", "must be a UUID")
 		}
 		sum, err := hex.DecodeString(c.TextSHA256)
 		if err != nil || len(sum) != 32 {
-			return nil, fieldErr(loc+".text_sha256", "must be a hex SHA-256 digest")
+			return nil, problem.Field(loc+".text_sha256", "must be a hex SHA-256 digest")
 		}
 		ri.Consents = append(ri.Consents, ConsentProof{Purpose: consent.Purpose(c.PurposeCode), NoticeVersionID: nid, TextSHA256: sum})
 	}

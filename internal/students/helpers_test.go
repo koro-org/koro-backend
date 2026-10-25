@@ -11,7 +11,7 @@ import (
 	"time"
 	"uuid"
 
-	"koro/internal/audit"
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/consent"
@@ -22,7 +22,7 @@ import (
 	"koro/internal/orgs"
 	"koro/internal/platform/civil"
 	"koro/internal/platform/clock"
-	"koro/internal/platform/db"
+	"koro/internal/platform/db/dbtest"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/obs"
@@ -34,39 +34,6 @@ import (
 // t0 is the test clock's start (2026-10-04 09:00 UTC, 12:00 in Istanbul).
 var t0 = time.Date(2026, 10, 4, 9, 0, 0, 0, time.UTC)
 
-// txKey marks the context of an open spyTx transaction; its value is the
-// transaction's number.
-type txKey struct{}
-
-// spyTx is db.NopTx that numbers its transactions in the context (the
-// marker is gone in AfterCommit hooks: they get the caller's context).
-type spyTx struct {
-	mu sync.Mutex
-	n  int
-}
-
-func (s *spyTx) WithTx(ctx context.Context, fn func(context.Context) error) error {
-	if ctx.Value(txKey{}) != nil {
-		return fn(ctx)
-	}
-	s.mu.Lock()
-	s.n++
-	n := s.n
-	s.mu.Unlock()
-	return db.NopTx{}.WithTx(ctx, func(inner context.Context) error {
-		return fn(context.WithValue(inner, txKey{}, n))
-	})
-}
-
-func (s *spyTx) WithSerializableTx(ctx context.Context, fn func(context.Context) error) error {
-	return s.WithTx(ctx, fn)
-}
-
-func txOf(ctx context.Context) int {
-	n, _ := ctx.Value(txKey{}).(int)
-	return n
-}
-
 // spyStore records the transaction of every privacy update.
 type spyStore struct {
 	*students.MemStore
@@ -76,45 +43,9 @@ type spyStore struct {
 
 func (s *spyStore) UpdatePrivacy(ctx context.Context, p students.Privacy) (students.Privacy, error) {
 	s.mu.Lock()
-	s.privacyTx = append(s.privacyTx, txOf(ctx))
+	s.privacyTx = append(s.privacyTx, dbtest.TxOf(ctx))
 	s.mu.Unlock()
 	return s.MemStore.UpdatePrivacy(ctx, p)
-}
-
-// auditLog records the events the service writes; fail makes every write
-// fail.
-type auditLog struct {
-	mu     sync.Mutex
-	events []audit.Event
-	fail   error
-}
-
-func (l *auditLog) Log(_ context.Context, e audit.Event) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.fail != nil {
-		return l.fail
-	}
-	l.events = append(l.events, e)
-	return nil
-}
-
-func (l *auditLog) setFail(err error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.fail = err
-}
-
-func (l *auditLog) of(action string) []audit.Event {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	var out []audit.Event
-	for _, e := range l.events {
-		if e.Action == action {
-			out = append(out, e)
-		}
-	}
-	return out
 }
 
 // consents is consent.Recorder + Checker: the ledger of mirrored
@@ -138,7 +69,7 @@ func (c *consents) Record(ctx context.Context, in consent.RecordInput) (uuid.UUI
 		return uuid.Nil(), consent.ErrProofRequired
 	}
 	c.rows = append(c.rows, in)
-	c.tx = append(c.tx, txOf(ctx))
+	c.tx = append(c.tx, dbtest.TxOf(ctx))
 	return uuid.NewV7(), nil
 }
 
@@ -452,7 +383,7 @@ func (f *filesFake) Delete(ctx context.Context, _ authz.Actor, id uuid.UUID) err
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.deleted = append(f.deleted, id)
-	f.deleteTx = append(f.deleteTx, txOf(ctx))
+	f.deleteTx = append(f.deleteTx, dbtest.TxOf(ctx))
 	delete(f.meta, id)
 	return nil
 }
@@ -557,9 +488,9 @@ func (n *noticesFake) messages() []notify.Message {
 type env struct {
 	clk      *clock.Fake
 	store    *spyStore
-	tx       *spyTx
+	tx       *dbtest.SpyTx
 	out      *outbox.Mem
-	audit    *auditLog
+	audit    *audittest.Recorder
 	consent  *consents
 	catalog  *catalog
 	orgs     *orgsFake
@@ -588,8 +519,8 @@ func newEnv(t *testing.T, opts ...func(*students.Deps)) *env {
 	t.Helper()
 	clk := clock.NewFake(t0)
 	e := &env{
-		clk: clk, store: &spyStore{MemStore: students.NewMemStore(clk.Now)}, tx: &spyTx{}, out: outbox.NewMem(clk),
-		audit: &auditLog{}, consent: &consents{removed: map[uuid.UUID]bool{}},
+		clk: clk, store: &spyStore{MemStore: students.NewMemStore(clk.Now)}, tx: &dbtest.SpyTx{}, out: outbox.NewMem(clk),
+		audit: &audittest.Recorder{}, consent: &consents{removed: map[uuid.UUID]bool{}},
 		orgs:  &orgsFake{ms: map[uuid.UUID][]authz.Membership{}},
 		users: &usersFake{sum: map[uuid.UUID]identity.UserSummary{}, ver: map[uuid.UUID]identity.EduVerification{}},
 		files: &filesFake{meta: map[uuid.UUID]files.FileMeta{}, attached: map[uuid.UUID]files.Owner{},

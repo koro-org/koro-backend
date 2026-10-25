@@ -15,6 +15,7 @@ import (
 	"koro/internal/platform/civil"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 )
 
 func (e *env) newBreach(t *testing.T, detected time.Time) kvkk.Breach {
@@ -86,12 +87,12 @@ func TestBreach_DeadlineIs72h(t *testing.T) {
 	ctx, dpo := t.Context(), actor(t, "dpo")
 	_, err := e.svc.CreateBreach(ctx, dpo, kvkk.BreachInput{Title: "x", DetectedAt: e.clk.Now().Add(time.Hour),
 		Description: "y", OwnerUserID: authztest.ID("dpo")})
-	wantErr(t, err, kvkk.ErrInvalidRequest) // detection in the future
+	problemtest.WantErr(t, err, kvkk.ErrInvalidRequest) // detection in the future
 	_, err = e.svc.CreateBreach(ctx, dpo, kvkk.BreachInput{Title: "x", DetectedAt: e.clk.Now(), Description: "y",
 		OwnerUserID: uuid.NewV7()})
-	wantErr(t, err, kvkk.ErrUnknownUser)
+	problemtest.WantErr(t, err, kvkk.ErrUnknownUser)
 	_, err = e.svc.CreateBreach(ctx, actor(t, "moderator"), kvkk.BreachInput{})
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 }
 
 // TestBreach_UpdateRules: If-Match; detected_at only earlier (the deadline
@@ -105,10 +106,10 @@ func TestBreach_UpdateRules(t *testing.T) {
 	etag := func(x kvkk.Breach) string { return kvkk.ETagOf(x.UpdatedAt) }
 	contained := kvkk.BreachContained
 	_, err := e.svc.UpdateBreach(ctx, pad, b.ID, "", kvkk.BreachPatch{Status: &contained})
-	wantErr(t, err, problem.ErrPreconditionRequired)
+	problemtest.WantErr(t, err, problem.ErrPreconditionRequired)
 	later := b.DetectedAt.Add(time.Hour)
 	_, err = e.svc.UpdateBreach(ctx, pad, b.ID, etag(b), kvkk.BreachPatch{DetectedAt: &later})
-	wantErr(t, err, kvkk.ErrInvalidRequest)
+	problemtest.WantErr(t, err, kvkk.ErrInvalidRequest)
 	earlier := b.DetectedAt.Add(-3 * time.Hour)
 	ctrl := e.clk.Now().Add(-time.Hour)
 	b2, err := e.svc.UpdateBreach(ctx, pad, b.ID, etag(b), kvkk.BreachPatch{DetectedAt: &earlier, Status: &contained,
@@ -117,16 +118,16 @@ func TestBreach_UpdateRules(t *testing.T) {
 		t.Fatalf("update = %+v, %v", b2, err)
 	}
 	_, err = e.svc.UpdateBreach(ctx, pad, b.ID, etag(b), kvkk.BreachPatch{Status: &contained})
-	wantErr(t, err, problem.ErrPreconditionFailed)
+	problemtest.WantErr(t, err, problem.ErrPreconditionFailed)
 	other := ctrl.Add(-time.Minute)
 	_, err = e.svc.UpdateBreach(ctx, pad, b.ID, etag(b2), kvkk.BreachPatch{ControllerNotifiedAt: &other})
-	wantErr(t, err, kvkk.ErrState) // written once
+	problemtest.WantErr(t, err, kvkk.ErrState) // written once
 	open := kvkk.BreachOpen
 	_, err = e.svc.UpdateBreach(ctx, pad, b.ID, etag(b2), kvkk.BreachPatch{Status: &open})
-	wantErr(t, err, kvkk.ErrState) // forward only
+	problemtest.WantErr(t, err, kvkk.ErrState) // forward only
 	notified := kvkk.BreachNotified
 	_, err = e.svc.UpdateBreach(ctx, pad, b.ID, etag(b2), kvkk.BreachPatch{Status: &notified})
-	wantErr(t, err, kvkk.ErrInvalidRequest) // needs the Board time
+	problemtest.WantErr(t, err, kvkk.ErrInvalidRequest) // needs the Board time
 	auth := e.clk.Now()
 	b3, err := e.svc.UpdateBreach(ctx, pad, b.ID, etag(b2), kvkk.BreachPatch{Status: &notified, AuthorityNotifiedAt: &auth})
 	if err != nil || b3.Status != kvkk.BreachNotified {
@@ -139,9 +140,9 @@ func TestBreach_UpdateRules(t *testing.T) {
 	}
 	title := "Yeni başlık"
 	_, err = e.svc.UpdateBreach(ctx, pad, b.ID, etag(b4), kvkk.BreachPatch{Title: &title})
-	wantErr(t, err, kvkk.ErrState)
+	problemtest.WantErr(t, err, kvkk.ErrState)
 	_, err = e.svc.UpdateBreach(ctx, pad, uuid.NewV7(), etag(b4), kvkk.BreachPatch{Title: &title})
-	wantErr(t, err, kvkk.ErrNotFound)
+	problemtest.WantErr(t, err, kvkk.ErrNotFound)
 }
 
 // TestBreachTimer_WarnsAt48_24_6 (01 §7 kvkk.breach_timer): hourly, the
@@ -236,28 +237,28 @@ func TestSubprocessor_Rules(t *testing.T) {
 		t.Fatalf("create = %+v, %v", x, err)
 	}
 	_, err = e.svc.CreateSubprocessor(ctx, dpo, in)
-	wantErr(t, err, kvkk.ErrDuplicateSubprocessor)
+	problemtest.WantErr(t, err, kvkk.ErrDuplicateSubprocessor)
 	abroad := in
 	abroad.Name, abroad.TransferMechanism = "Yurt dışı", "domestic"
 	_, err = e.svc.CreateSubprocessor(ctx, dpo, abroad)
-	wantErr(t, err, kvkk.ErrInvalidRequest)
+	problemtest.WantErr(t, err, kvkk.ErrInvalidRequest)
 	future := civil.Date{Year: 2030, Month: time.January, Day: 1}
 	bad := in
 	bad.Name, bad.ContractSignedAt = "Gelecek", &future
 	_, err = e.svc.CreateSubprocessor(ctx, dpo, bad)
-	wantErr(t, err, kvkk.ErrInvalidRequest)
+	problemtest.WantErr(t, err, kvkk.ErrInvalidRequest)
 	_, err = e.svc.CreateSubprocessor(ctx, actor(t, "platform_admin"), in)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 
 	no := false
 	_, err = e.svc.UpdateSubprocessor(ctx, dpo, x.ID, "", kvkk.SubprocessorPatch{Active: &no})
-	wantErr(t, err, problem.ErrPreconditionRequired)
+	problemtest.WantErr(t, err, problem.ErrPreconditionRequired)
 	y, err := e.svc.UpdateSubprocessor(ctx, dpo, x.ID, kvkk.ETagOf(x.UpdatedAt), kvkk.SubprocessorPatch{Active: &no})
 	if err != nil || y.Active {
 		t.Fatalf("retire = %+v, %v", y, err)
 	}
 	_, err = e.svc.UpdateSubprocessor(ctx, dpo, x.ID, kvkk.ETagOf(x.UpdatedAt), kvkk.SubprocessorPatch{Active: &no})
-	wantErr(t, err, problem.ErrPreconditionFailed)
+	problemtest.WantErr(t, err, problem.ErrPreconditionFailed)
 	yes := true
 	active, err := e.svc.ListSubprocessors(ctx, actor(t, "platform_admin"), &yes)
 	if err != nil || len(active) != 0 {

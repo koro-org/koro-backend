@@ -9,6 +9,7 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/events"
 	"koro/internal/files"
@@ -44,7 +45,7 @@ func TestExportFlow_Postgres(t *testing.T) {
 	d := testutil.NewDB(t)
 	clk := clock.NewFake(t0)
 	w := pgWorld(d)
-	e := &pgEnv{d: d, w: w, clk: clk, out: outbox.NewMem(clk), store: events.NewGormStore(d.ORM), org: w.org(t), audit: &auditLog{}}
+	e := &pgEnv{d: d, w: w, clk: clk, out: outbox.NewMem(clk), store: events.NewGormStore(d.ORM), org: w.org(t), audit: &audittest.Recorder{}}
 	fo := newFakeOrgs()
 	fo.orgs[e.org] = orgs.OrgSummary{ID: e.org, Kind: orgs.KindClub, Name: "PG Kulübü", Slug: "pg-kulubu", Status: orgs.StatusActive}
 	idem := idempotency.New(idempotency.Deps{Tx: d.Tx, Store: idempotency.NewGormStore(d.ORM), Clock: clk, Log: obs.Discard()})

@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
-	"errors"
 	"slices"
 	"strings"
 	"sync"
@@ -12,7 +11,6 @@ import (
 	"time"
 	"uuid"
 
-	"koro/internal/audit"
 	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
@@ -26,11 +24,12 @@ import (
 	"koro/internal/platform/clock"
 	"koro/internal/platform/crypto"
 	"koro/internal/platform/db"
+	"koro/internal/platform/db/dbtest"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/outbox"
-	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 	"koro/internal/platform/queue"
 	"koro/internal/platform/storage"
 )
@@ -41,73 +40,6 @@ var t0 = time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC)
 // start is a future start time of the test events.
 var start = time.Date(2026, 11, 20, 15, 0, 0, 0, time.UTC)
 
-// auditLog records the audit events; fail makes Log fail.
-type auditLog struct {
-	mu     sync.Mutex
-	events []audit.Event
-	fail   error
-}
-
-func (l *auditLog) Log(_ context.Context, e audit.Event) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.fail != nil {
-		return l.fail
-	}
-	l.events = append(l.events, e)
-	return nil
-}
-
-func (l *auditLog) of(action authz.Action) []audit.Event {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	var out []audit.Event
-	for _, e := range l.events {
-		if e.Action == string(action) {
-			out = append(out, e)
-		}
-	}
-	return out
-}
-
-func (l *auditLog) setFail(err error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.fail = err
-}
-
-// txKey marks the context of an open spyTx transaction.
-type txKey struct{}
-
-// spyTx is db.NopTx that numbers its transactions in the context, so a
-// test can tell which calls share one.
-type spyTx struct {
-	mu sync.Mutex
-	n  int
-}
-
-func (s *spyTx) WithTx(ctx context.Context, fn func(context.Context) error) error {
-	if ctx.Value(txKey{}) != nil {
-		return fn(ctx)
-	}
-	s.mu.Lock()
-	s.n++
-	n := s.n
-	s.mu.Unlock()
-	return db.NopTx{}.WithTx(ctx, func(inner context.Context) error {
-		return fn(context.WithValue(inner, txKey{}, n))
-	})
-}
-
-func (s *spyTx) WithSerializableTx(ctx context.Context, fn func(context.Context) error) error {
-	return s.WithTx(ctx, fn)
-}
-
-func txOf(ctx context.Context) int {
-	n, _ := ctx.Value(txKey{}).(int)
-	return n
-}
-
 // spyOutbox records the transaction of each Add.
 type spyOutbox struct {
 	*outbox.Mem
@@ -117,7 +49,7 @@ type spyOutbox struct {
 
 func (s *spyOutbox) Add(ctx context.Context, e domainevent.Envelope) error {
 	s.mu.Lock()
-	s.txs[e.Topic] = append(s.txs[e.Topic], txOf(ctx))
+	s.txs[e.Topic] = append(s.txs[e.Topic], dbtest.TxOf(ctx))
 	s.mu.Unlock()
 	return s.Mem.Add(ctx, e)
 }
@@ -131,7 +63,7 @@ type spyStore struct {
 
 func (s *spyStore) UpdateEvent(ctx context.Context, e events.Event) (events.Event, error) {
 	s.mu.Lock()
-	s.updates = append(s.updates, txOf(ctx))
+	s.updates = append(s.updates, dbtest.TxOf(ctx))
 	s.mu.Unlock()
 	return s.MemStore.UpdateEvent(ctx, e)
 }
@@ -348,7 +280,7 @@ func (r *spyRecorder) Record(ctx context.Context, in consent.RecordInput) (uuid.
 		return uuid.Nil(), r.fail
 	}
 	r.recs = append(r.recs, in)
-	r.txs = append(r.txs, txOf(ctx))
+	r.txs = append(r.txs, dbtest.TxOf(ctx))
 	return uuid.NewV7(), nil
 }
 
@@ -410,7 +342,7 @@ func realMail(t *testing.T, clk *clock.Fake) (notify.Sender, *notify.MemTranspor
 	}
 	tr, st := notify.NewMemTransport(), notify.NewMemStore()
 	mod := notify.New(notify.Deps{Store: st, Tx: db.NopTx{}, Transport: tr, Templates: tpl, Clock: clk,
-		Log: obs.Discard(), FromAddress: "noreply@koro.test", FromName: "Koro", Recipients: hashIndex{}, Audit: &auditLog{}})
+		Log: obs.Discard(), FromAddress: "noreply@koro.test", FromName: "Koro", Recipients: hashIndex{}, Audit: &audittest.Recorder{}})
 	return mod.Service, tr, st
 }
 
@@ -450,11 +382,11 @@ type env struct {
 	prefs   notify.Store         // notify's store (notification preferences)
 	queue   *queue.Mem
 	clk     *clock.Fake
-	tx      *spyTx
+	tx      *dbtest.SpyTx
 	mem     *events.MemStore
 	store   *spyStore
 	out     *spyOutbox
-	audit   *auditLog
+	audit   *audittest.Recorder
 	orgs    *fakeOrgs
 	users   fakeUsers
 	files   files.Service                               // the real files service over in-memory storage (BE-050)
@@ -486,7 +418,7 @@ func newEnv(t *testing.T, opts ...func(*events.Deps)) *env {
 	t.Helper()
 	clk := clock.NewFake(t0)
 	e := &env{
-		clk: clk, tx: &spyTx{}, mem: events.NewMemStore(clk.Now), audit: &auditLog{}, orgs: newFakeOrgs(),
+		clk: clk, tx: &dbtest.SpyTx{}, mem: events.NewMemStore(clk.Now), audit: &audittest.Recorder{}, orgs: newFakeOrgs(),
 		out:     &spyOutbox{Mem: outbox.NewMem(clk), txs: map[string][]int{}},
 		users:   fakeUsers{suspended: map[uuid.UUID]bool{}, erased: map[uuid.UUID]bool{}},
 		notices: &fakeNotices{missing: map[consent.Purpose]bool{}}, consent: &spyRecorder{}, sender: &spySender{},
@@ -567,17 +499,15 @@ func (e *env) published(t *testing.T, in events.EventInput) events.EventView {
 	return p
 }
 
-func wantCode(t *testing.T, err error, status int, code string) {
+func wantNotFound(t *testing.T, err error) {
 	t.Helper()
-	p, ok := errors.AsType[*problem.Error](err)
-	if !ok || p.Status() != status || p.Code() != code {
-		t.Fatalf("error = %v, want %d %s", err, status, code)
-	}
+	problemtest.WantProblem(t, err, 404, "not_found")
 }
 
-func wantNotFound(t *testing.T, err error) { t.Helper(); wantCode(t, err, 404, "not_found") }
-
-func wantForbidden(t *testing.T, err error) { t.Helper(); wantCode(t, err, 403, "forbidden") }
+func wantForbidden(t *testing.T, err error) {
+	t.Helper()
+	problemtest.WantProblem(t, err, 403, "forbidden")
+}
 
 func authzUniversity(name string) uuid.UUID { return authztest.UniversityID(name) }
 

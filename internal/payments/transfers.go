@@ -11,6 +11,7 @@ import (
 	"koro/internal/platform/civil"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // Limits of a recorded transfer (000105 CHECKs).
@@ -38,11 +39,11 @@ func (s *service) cleanDraft(loc string, in transferDraft) (transferDraft, error
 	out := transferDraft{ValueDate: in.ValueDate, Amount: in.Amount}
 	switch {
 	case !in.ValueDate.IsValid():
-		return transferDraft{}, fieldErr(loc+"value_date", "must be a date (YYYY-MM-DD)")
+		return transferDraft{}, problem.Field(loc+"value_date", "must be a date (YYYY-MM-DD)")
 	case in.ValueDate.After(civil.Today(s.d.Clock.Now())):
-		return transferDraft{}, fieldErr(loc+"value_date", "must not be in the future")
+		return transferDraft{}, problem.Field(loc+"value_date", "must not be in the future")
 	case in.Amount <= 0:
-		return transferDraft{}, fieldErr(loc+"amount", "must be a positive amount in kuruş")
+		return transferDraft{}, problem.Field(loc+"amount", "must be a positive amount in kuruş")
 	}
 	var err error
 	if out.Description, err = cleanText(loc+"description", in.Description, 1, maxDescription); err != nil {
@@ -83,11 +84,11 @@ func (s *service) recordingAccount(ctx context.Context, loc string, id uuid.UUID
 	c, err := s.d.Store.GetAccount(ctx, id, false)
 	switch {
 	case isNotFound(err):
-		return CollectionAccount{}, fieldErr(loc, "must be an approved collection account")
+		return CollectionAccount{}, problem.Field(loc, "must be an approved collection account")
 	case err != nil:
 		return CollectionAccount{}, err
 	case c.Status != AccountActive && c.Status != AccountRetired:
-		return CollectionAccount{}, fieldErr(loc, "must be an approved collection account")
+		return CollectionAccount{}, problem.Field(loc, "must be an approved collection account")
 	}
 	return c, nil
 }
@@ -159,9 +160,9 @@ func (s *service) ListTransfers(ctx context.Context, a authz.Actor, q TransferQu
 	f := q.Filter
 	switch {
 	case f.Status != "" && !f.Status.Valid():
-		return TransferPage{}, fieldErr("query.status", "is not a transfer status")
+		return TransferPage{}, problem.Field("query.status", "is not a transfer status")
 	case f.ValueFrom != nil && f.ValueTo != nil && f.ValueTo.Before(*f.ValueFrom):
-		return TransferPage{}, fieldErr("query.value_date_to", "must not be before value_date_from")
+		return TransferPage{}, problem.Field("query.value_date_to", "must not be before value_date_from")
 	}
 	if f.Q != "" {
 		v, err := cleanText("query.q", f.Q, 0, 100)

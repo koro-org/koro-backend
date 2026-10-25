@@ -17,6 +17,7 @@ import (
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 	"koro/internal/platform/ratelimit"
 	"koro/internal/platform/token"
 )
@@ -39,14 +40,14 @@ func TestConfirmEmail_TokenSingleUse(t *testing.T) {
 		t.Fatalf("after confirmation: %s", u.Status)
 	}
 	err := e.svc.ConfirmEmail(ctx, authz.Anonymous(), tok)
-	wantErr(t, err, identity.ErrInvalidToken)
+	problemtest.WantErr(t, err, identity.ErrInvalidToken)
 	wantStatus(t, err, http.StatusUnprocessableEntity)
 	// Garbage and a token of another purpose are the same answer.
-	wantErr(t, e.svc.ConfirmEmail(ctx, authz.Anonymous(), "nope"), identity.ErrInvalidToken)
+	problemtest.WantErr(t, e.svc.ConfirmEmail(ctx, authz.Anonymous(), "nope"), identity.ErrInvalidToken)
 	if err := e.svc.RequestPasswordReset(ctx, authz.Anonymous(), "once@example.com"); err != nil {
 		t.Fatal(err)
 	}
-	wantErr(t, e.svc.ConfirmEmail(ctx, authz.Anonymous(), e.lastToken(t, "identity.password_reset")), identity.ErrInvalidToken)
+	problemtest.WantErr(t, e.svc.ConfirmEmail(ctx, authz.Anonymous(), e.lastToken(t, "identity.password_reset")), identity.ErrInvalidToken)
 }
 
 func TestConfirmEmail_ExpiredToken(t *testing.T) {
@@ -58,7 +59,7 @@ func TestConfirmEmail_ExpiredToken(t *testing.T) {
 	}
 	tok := e.lastToken(t, "identity.verify_email")
 	e.clk.Advance(24*time.Hour + time.Second)
-	wantErr(t, e.svc.ConfirmEmail(ctx, authz.Anonymous(), tok), identity.ErrInvalidToken)
+	problemtest.WantErr(t, e.svc.ConfirmEmail(ctx, authz.Anonymous(), tok), identity.ErrInvalidToken)
 	id, _, _ := e.svc.FindByEmail(ctx, "late@example.com")
 	if u, _ := e.store.User(ctx, id); u.Status != identity.StatusPendingEmail {
 		t.Fatalf("expired token activated the account: %s", u.Status)
@@ -90,7 +91,7 @@ func TestPasswordReset_ClosesAllSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	tok := e.lastToken(t, "identity.password_reset")
-	wantErr(t, e.svc.ConfirmPasswordReset(ctx, authz.Anonymous(), tok, "short"), identity.ErrWeakPassword)
+	problemtest.WantErr(t, e.svc.ConfirmPasswordReset(ctx, authz.Anonymous(), tok, "short"), identity.ErrWeakPassword)
 	newPW := "Yeni-Ve-Uzun-Parola-4821"
 	if err := e.svc.ConfirmPasswordReset(ctx, authz.Anonymous(), tok, newPW); err != nil {
 		t.Fatal(err)
@@ -101,7 +102,7 @@ func TestPasswordReset_ClosesAllSessions(t *testing.T) {
 			t.Fatalf("session %s after reset: %+v", r.Session.ClientKind, s.RevokeReason)
 		}
 	}
-	wantErr(t, e.svc.ConfirmPasswordReset(ctx, authz.Anonymous(), tok, newPW), identity.ErrInvalidToken)
+	problemtest.WantErr(t, e.svc.ConfirmPasswordReset(ctx, authz.Anonymous(), tok, newPW), identity.ErrInvalidToken)
 	if _, err := e.svc.CreateSession(ctx, authz.Anonymous(), identity.Login{Email: "reset@example.com", Password: newPW}); err != nil {
 		t.Fatalf("login with the new password: %v", err)
 	}
@@ -115,7 +116,7 @@ func TestPasswordReset_ClosesAllSessions(t *testing.T) {
 	}
 	tok = e.lastToken(t, "identity.password_reset")
 	e.clk.Advance(31 * time.Minute)
-	wantErr(t, e.svc.ConfirmPasswordReset(ctx, authz.Anonymous(), tok, "Baska-Uzun-Parola-9090"), identity.ErrInvalidToken)
+	problemtest.WantErr(t, e.svc.ConfirmPasswordReset(ctx, authz.Anonymous(), tok, "Baska-Uzun-Parola-9090"), identity.ErrInvalidToken)
 }
 
 func TestChangePassword_ReauthMissing_403(t *testing.T) {
@@ -124,10 +125,10 @@ func TestChangePassword_ReauthMissing_403(t *testing.T) {
 	e.activeUser(t, "c@example.com")
 	_, a := e.login(t, "c@example.com", identity.ClientWeb)
 	err := e.svc.ChangePassword(t.Context(), a, identity.PasswordChange{NewPassword: "Yeni-Ve-Uzun-Parola-4821"})
-	wantErr(t, err, identity.ErrReauthRequired)
+	problemtest.WantErr(t, err, identity.ErrReauthRequired)
 	wantStatus(t, err, http.StatusForbidden)
 	// The same proof is required by e-mail change.
-	wantErr(t, e.svc.RequestEmailChange(t.Context(), a, "new@example.com", identity.ReauthProof{}), identity.ErrReauthRequired)
+	problemtest.WantErr(t, e.svc.RequestEmailChange(t.Context(), a, "new@example.com", identity.ReauthProof{}), identity.ErrReauthRequired)
 }
 
 func TestChangePassword_ReauthWrong_403AndRateLimited(t *testing.T) {
@@ -141,7 +142,7 @@ func TestChangePassword_ReauthWrong_403AndRateLimited(t *testing.T) {
 	wrong := identity.PasswordChange{CurrentPassword: "not-the-password-1", NewPassword: "Yeni-Ve-Uzun-Parola-4821"}
 	for i := range 5 {
 		err := e.svc.ChangePassword(ctx, a, wrong)
-		wantErr(t, err, identity.ErrReauthFailed)
+		problemtest.WantErr(t, err, identity.ErrReauthFailed)
 		wantStatus(t, err, http.StatusForbidden) // 403, not 401: the client keeps its session
 		if i == 0 {
 			denied := e.audit.of(string(authz.IdentityPasswordChange))
@@ -152,7 +153,7 @@ func TestChangePassword_ReauthWrong_403AndRateLimited(t *testing.T) {
 	}
 	// Locked: even the right password is refused until the lock ends.
 	err := e.svc.ChangePassword(ctx, a, identity.PasswordChange{CurrentPassword: goodPassword, NewPassword: "Yeni-Ve-Uzun-Parola-4821"})
-	wantErr(t, err, problem.ErrRateLimited)
+	problemtest.WantErr(t, err, problem.ErrRateLimited)
 	wantStatus(t, err, http.StatusTooManyRequests)
 	// The reauth class counts failures per user in the service (06 H-6).
 	if !slices.ContainsFunc(e.lim.Calls(), func(c string) bool { return strings.HasPrefix(c, "reauth|user:") }) {
@@ -177,7 +178,7 @@ func TestChangePassword_ReauthWrong_403AndRateLimited(t *testing.T) {
 		_, _ = e.svc.Verify(ctx, a.UserID, identity.ReauthProof{Password: "still-wrong-123"})
 	}
 	_, err = e.svc.Verify(ctx, a.UserID, identity.ReauthProof{Password: "Yeni-Ve-Uzun-Parola-4821"})
-	wantErr(t, err, problem.ErrRateLimited)
+	problemtest.WantErr(t, err, problem.ErrRateLimited)
 }
 
 func TestEmailChange_NotifiesOldAddress(t *testing.T) {
@@ -208,7 +209,7 @@ func TestEmailChange_NotifiesOldAddress(t *testing.T) {
 	if cur.Email != "New@Example.com" || cur.EmailNormalized != "new@example.com" {
 		t.Fatalf("address after confirmation: %q", cur.Email)
 	}
-	wantErr(t, e.svc.ConfirmEmailChange(ctx, authz.Anonymous(), tok), identity.ErrInvalidToken)
+	problemtest.WantErr(t, e.svc.ConfirmEmailChange(ctx, authz.Anonymous(), tok), identity.ErrInvalidToken)
 
 	// An address of another account is answered alike (202) and gets nothing.
 	e.activeUser(t, "taken@example.com")
@@ -230,12 +231,12 @@ func TestRevokeMySession_OtherUsersSession_404(t *testing.T) {
 	sa, a := e.login(t, "a@example.com", identity.ClientWeb)
 	_, b := e.login(t, "b@example.com", identity.ClientWeb)
 	err := e.svc.RevokeMySession(ctx, b, sa.Session.ID)
-	wantErr(t, err, identity.ErrNotFound)
+	problemtest.WantErr(t, err, identity.ErrNotFound)
 	wantStatus(t, err, http.StatusNotFound)
 	if s, _ := e.store.Session(ctx, sa.Session.ID); s.RevokedAt != nil {
 		t.Fatal("another user's session was revoked")
 	}
-	wantErr(t, e.svc.RevokeMySession(ctx, b, uuid.NewV7()), identity.ErrNotFound)
+	problemtest.WantErr(t, e.svc.RevokeMySession(ctx, b, uuid.NewV7()), identity.ErrNotFound)
 	// Its owner may, and sees only live sessions afterwards.
 	second, _ := e.login(t, "a@example.com", identity.ClientMobile)
 	p, err := e.svc.ListMySessions(ctx, a, identity.SessionQuery{})
@@ -303,7 +304,7 @@ func TestGetMe_CapabilitiesForRoles(t *testing.T) {
 	}
 	// Another user's account is not reachable through getMe.
 	_, err = e.svc.Me(t.Context(), authz.Actor{Kind: authz.KindUser, UserID: uuid.NewV7()})
-	wantErr(t, err, problem.ErrNotFound)
+	problemtest.WantErr(t, err, problem.ErrNotFound)
 	// updateMe changes names and locale.
 	en := identity.LocaleEN
 	me, err = e.svc.UpdateMe(t.Context(), base, identity.MePatch{Locale: &en})
@@ -311,7 +312,7 @@ func TestGetMe_CapabilitiesForRoles(t *testing.T) {
 		t.Fatalf("UpdateMe = %+v, %v", me.Locale, err)
 	}
 	_, err = e.svc.UpdateMe(t.Context(), base, identity.MePatch{})
-	wantErr(t, err, identity.ErrEmptyPatch)
+	problemtest.WantErr(t, err, identity.ErrEmptyPatch)
 }
 
 func TestEmailTokenEvent_PayloadHasNoToken(t *testing.T) {
@@ -368,10 +369,10 @@ func TestAuthRateLimits_StrictClasses(t *testing.T) {
 		}
 	}
 	err := e.svc.ResendVerification(ctx, authz.Anonymous(), "RL@example.com")
-	wantErr(t, err, problem.ErrRateLimited)
+	problemtest.WantErr(t, err, problem.ErrRateLimited)
 	// Another IP does not reset the per-address count.
 	err = e.svc.ResendVerification(httpx.WithClientIP(t.Context(), "198.51.100.1"), authz.Anonymous(), "rl@example.com")
-	wantErr(t, err, problem.ErrRateLimited)
+	problemtest.WantErr(t, err, problem.ErrRateLimited)
 	// The keys never contain the address.
 	for _, c := range e.lim.Calls() {
 		hasNoSecret(t, "rate limit key", strings.ToLower(c), "rl@example.com")
@@ -380,19 +381,19 @@ func TestAuthRateLimits_StrictClasses(t *testing.T) {
 	for range 3 {
 		_ = e.svc.ResendVerification(ctx, authz.Anonymous(), "ghost@example.com")
 	}
-	wantErr(t, e.svc.ResendVerification(ctx, authz.Anonymous(), "ghost@example.com"), problem.ErrRateLimited)
+	problemtest.WantErr(t, e.svc.ResendVerification(ctx, authz.Anonymous(), "ghost@example.com"), problem.ErrRateLimited)
 	// Password reset: 5 per hour per address.
 	for range 5 {
 		if err := e.svc.RequestPasswordReset(ctx, authz.Anonymous(), "rl@example.com"); err != nil {
 			t.Fatal(err)
 		}
 	}
-	wantErr(t, e.svc.RequestPasswordReset(ctx, authz.Anonymous(), "rl@example.com"), problem.ErrRateLimited)
+	problemtest.WantErr(t, e.svc.RequestPasswordReset(ctx, authz.Anonymous(), "rl@example.com"), problem.ErrRateLimited)
 
 	// Strict: an unavailable limiter fails closed (503), never open.
 	e.lim.Fail(ratelimit.ErrUnavailable)
 	err = e.svc.RequestPasswordReset(ctx, authz.Anonymous(), "other@example.com")
-	wantErr(t, err, problem.ErrUnavailable)
+	problemtest.WantErr(t, err, problem.ErrUnavailable)
 	wantStatus(t, err, http.StatusServiceUnavailable)
 	e.lim.Fail(nil)
 

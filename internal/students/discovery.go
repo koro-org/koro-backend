@@ -8,6 +8,7 @@ import (
 
 	"koro/internal/consent"
 	"koro/internal/identity"
+	"koro/internal/platform/problem"
 )
 
 // Level 2 discoverability (01 §4.9 Discoverable; 03 §5.10 k20, Y4; 04
@@ -73,20 +74,20 @@ func cleanDiscovery(q DiscoveryQuery) (DiscoveryQuery, error) {
 		{"query.class_year", len(q.ClassYears)}, {"query.skill_id", len(q.SkillIDs)}, {"query.language_code", len(q.LanguageCodes)},
 	} {
 		if f.n > maxDiscoveryFilter {
-			return q, fieldErr(f.loc, "at most 50 values")
+			return q, problem.Field(f.loc, "at most 50 values")
 		}
 	}
 	if q.DegreeLevel != "" && !q.DegreeLevel.Valid() {
-		return q, fieldErr("query.degree_level", "must be associate, bachelor, master or doctorate")
+		return q, problem.Field("query.degree_level", "must be associate, bachelor, master or doctorate")
 	}
 	for _, y := range q.ClassYears {
 		if y < 1 || y > 8 {
-			return q, fieldErr("query.class_year", "must be between 1 and 8")
+			return q, problem.Field("query.class_year", "must be between 1 and 8")
 		}
 	}
 	for _, c := range q.LanguageCodes {
 		if !languageCodeRe.MatchString(c) {
-			return q, fieldErr("query.language_code", "must be an ISO 639 code")
+			return q, problem.Field("query.language_code", "must be an ISO 639 code")
 		}
 	}
 	uniq := func(ids []uuid.UUID) []uuid.UUID {

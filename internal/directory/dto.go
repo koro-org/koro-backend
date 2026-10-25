@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"koro/internal/orgs"
+	"koro/internal/platform/db"
 )
 
 // UniversityCardDTO is a university in listUniversities (04 §2.3).
@@ -291,7 +292,7 @@ func toClubClaimDTO(v ClaimView) ClubClaimDTO {
 	return ClubClaimDTO{
 		ClaimID: c.ID.String(), ClubID: c.ClubOrgID.String(), ClubName: v.ClubName, Status: string(c.Status),
 		RoleInClub: c.RoleInClub, HasEvidenceFile: c.EvidenceFileID != nil, CreatedAt: c.CreatedAt.UTC(),
-		DecidedAt: utcPtr(c.ReviewedAt),
+		DecidedAt: db.UTCPtr(c.ReviewedAt),
 	}
 }
 
@@ -305,7 +306,7 @@ func toAdminClaimDTO(v ClaimView) AdminClubClaimDTO {
 		},
 		Claimant:   ClaimantDTO{UserID: c.ClaimantUserID.String()},
 		RoleInClub: c.RoleInClub, EvidenceText: str(c.EvidenceText), EvidenceState: v.EvidenceState, Approver: v.Approver,
-		CreatedAt: c.CreatedAt.UTC(), ReviewedAt: utcPtr(c.ReviewedAt), DecisionNote: str(c.DecisionNote),
+		CreatedAt: c.CreatedAt.UTC(), ReviewedAt: db.UTCPtr(c.ReviewedAt), DecisionNote: str(c.DecisionNote),
 	}
 	if d.EvidenceState == "" {
 		d.EvidenceState = EvidenceNone
@@ -323,12 +324,4 @@ func toAdminClaimDTO(v ClaimView) AdminClubClaimDTO {
 		d.Evidence = &EvidenceDownloadDTO{URL: v.Evidence.URL, ExpiresAt: v.Evidence.ExpiresAt.UTC()}
 	}
 	return d
-}
-
-func utcPtr(t *time.Time) *time.Time {
-	if t == nil {
-		return nil
-	}
-	u := t.UTC()
-	return &u
 }

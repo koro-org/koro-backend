@@ -4,6 +4,8 @@ import (
 	"slices"
 	"time"
 	"uuid"
+
+	"koro/internal/platform/db"
 )
 
 // Visibility DTOs (04 §V). Every level is a separate type whose fields are
@@ -443,7 +445,7 @@ func ToStudentProfileL3(src CompanySource, viewerOrg uuid.UUID, g Grant) (Studen
 		University: universityRef(v), Department: departmentRef(v), DegreeLevel: string(p.DegreeLevel),
 		ClassYear: intPtr(p.ClassYear), Headline: str(p.Headline), About: str(p.About), City: str(p.City),
 		Skills: namedSkills(src), Languages: languageDTOs(v.Languages), Experiences: []L3ExperienceDTO{},
-		CV:    L3CVDTO{Available: src.CVUploadedAt != nil, UploadedAt: utcPtr(src.CVUploadedAt)},
+		CV:    L3CVDTO{Available: src.CVUploadedAt != nil, UploadedAt: db.UTCPtr(src.CVUploadedAt)},
 		Grant: L3GrantDTO{GrantedAt: g.GrantedAt.UTC(), Source: g.Source},
 	}
 	if p.ExpectedGraduation != nil {
@@ -493,12 +495,4 @@ func ToStudentL3Card(src CompanySource, viewerOrg uuid.UUID, g Grant) (StudentL3
 		d.Department = &StudentNameRefDTO{Name: v.DepartmentName}
 	}
 	return d, nil
-}
-
-func utcPtr(t *time.Time) *time.Time {
-	if t == nil {
-		return nil
-	}
-	u := t.UTC()
-	return &u
 }

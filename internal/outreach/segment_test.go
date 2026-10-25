@@ -13,6 +13,7 @@ import (
 	"koro/internal/orgs"
 	"koro/internal/outreach"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // TestSegment_LastCountNullWhenBelow10: a segment below k = 10 is saved
@@ -120,11 +121,11 @@ func TestSegment_CRUD(t *testing.T) {
 	// Update: If-Match is required and must be current.
 	name := "Yeni ad"
 	_, err = e.svc.UpdateSegment(ctx, cma, companyA, first.ID, "", outreach.SegmentPatch{Name: &name})
-	wantErr(t, err, outreach.ErrPreconditionRequired)
+	problemtest.WantErr(t, err, outreach.ErrPreconditionRequired)
 	_, err = e.svc.UpdateSegment(ctx, cma, companyA, first.ID, `"stale"`, outreach.SegmentPatch{Name: &name})
-	wantErr(t, err, outreach.ErrPreconditionFailed)
+	problemtest.WantErr(t, err, outreach.ErrPreconditionFailed)
 	_, err = e.svc.UpdateSegment(ctx, cma, companyA, first.ID, first.ETag, outreach.SegmentPatch{})
-	wantErr(t, err, outreach.ErrEmptyPatch)
+	problemtest.WantErr(t, err, outreach.ErrEmptyPatch)
 	same := first.Name
 	unchanged, err := e.svc.UpdateSegment(ctx, cma, companyA, first.ID, first.ETag, outreach.SegmentPatch{Name: &same, Definition: &def})
 	if err != nil || unchanged.ETag != first.ETag {
@@ -165,7 +166,7 @@ func TestSegment_CRUD(t *testing.T) {
 		t.Fatalf("second archive = %v, %v", arch2.ETag, err)
 	}
 	_, err = e.svc.UpdateSegment(ctx, cma, companyA, first.ID, arch.ETag, outreach.SegmentPatch{Name: &name})
-	wantErr(t, err, outreach.ErrInvalidState)
+	problemtest.WantErr(t, err, outreach.ErrInvalidState)
 	p, _ = e.svc.ListSegments(ctx, cma, companyA, outreach.ListQuery{Limit: 10})
 	if len(p.Items) != 1 || p.Items[0].ID != second.ID {
 		t.Fatalf("active list %+v", p.Items)
@@ -175,15 +176,15 @@ func TestSegment_CRUD(t *testing.T) {
 		t.Fatalf("archived list %+v", p.Items)
 	}
 	_, err = e.svc.ArchiveSegment(ctx, cma, companyA, uuid.NewV7())
-	wantErr(t, err, outreach.ErrNotFound)
+	problemtest.WantErr(t, err, outreach.ErrNotFound)
 
 	// Every write is audited once, without a count.
 	want := []string{"outreach.segment.create", "outreach.segment.update", "outreach.segment.create",
 		"outreach.segment.create", "outreach.segment.archive"}
-	if got := e.audit.actions(); !slices.Equal(got, want) {
+	if got := e.audit.Actions(); !slices.Equal(got, want) {
 		t.Fatalf("audit %v, want %v", got, want)
 	}
-	for _, ev := range e.audit.events {
+	for _, ev := range e.audit.All() {
 		for k := range ev.Metadata {
 			if strings.Contains(k, "count") {
 				t.Fatalf("audit metadata carries a count: %v", ev.Metadata)
@@ -214,15 +215,15 @@ func TestSegment_OrgStatus(t *testing.T) {
 	} {
 		e.orgs.set(companyA, orgs.KindCompany, tc.status)
 		_, err := e.svc.CountAudience(ctx, cma, companyA, def)
-		if _, code := problemOf(err); code != tc.code {
+		if _, code := problemtest.StatusCode(err); code != tc.code {
 			t.Fatalf("%s: count = %v, want %s", tc.status, err, tc.code)
 		}
 		_, err = e.svc.CreateSegment(ctx, cma, companyA, outreach.SegmentInput{Name: "Seg B", Definition: def})
-		if _, code := problemOf(err); code != tc.code {
+		if _, code := problemtest.StatusCode(err); code != tc.code {
 			t.Fatalf("%s: create = %v, want %s", tc.status, err, tc.code)
 		}
 		_, err = e.svc.ArchiveSegment(ctx, cma, companyA, seg.ID)
-		if _, code := problemOf(err); code != tc.code {
+		if _, code := problemtest.StatusCode(err); code != tc.code {
 			t.Fatalf("%s: archive = %v, want %s", tc.status, err, tc.code)
 		}
 		if _, err := e.svc.GetSegment(ctx, cma, companyA, seg.ID); err != nil {
@@ -235,7 +236,7 @@ func TestSegment_OrgStatus(t *testing.T) {
 		t.Fatalf("platform_admin count for a suspended org: %v", err)
 	}
 	_, err = e.svc.CountAudience(ctx, actor(t, "platform_admin"), uuid.NewV7(), def)
-	wantErr(t, err, outreach.ErrNotFound)
+	problemtest.WantErr(t, err, outreach.ErrNotFound)
 }
 
 // TestCountAudience_RateLimitedPerOrg: countAudience (with createSegment
@@ -281,11 +282,11 @@ func TestCountAudience_RateLimitedPerOrg(t *testing.T) {
 		}
 	}
 	_, err := b.svc.CountAudience(ctx, actor(t, "company_admin"), companyA, def)
-	if status, code := problemOf(err); status != 429 || code != "rate_limited" {
+	if status, code := problemtest.StatusCode(err); status != 429 || code != "rate_limited" {
 		t.Fatalf("4th count of the day = %v", err)
 	}
 	_, err = b.svc.CreateSegment(ctx, actor(t, "company_admin"), companyA, outreach.SegmentInput{Name: "Seg X", Definition: def})
-	wantErr(t, err, outreach.ErrRateLimited)
+	problemtest.WantErr(t, err, outreach.ErrRateLimited)
 	if _, err := b.svc.CountAudience(ctx, actor(t, "other_company_member"), companyB, def); err != nil {
 		t.Fatalf("company_b's budget: %v", err)
 	}
@@ -302,7 +303,7 @@ func TestCountAudience_RateLimitedPerOrg(t *testing.T) {
 	// Without the limiter nothing is counted (fail closed).
 	f := newEnv(t, withLimiter(failingLimiter{}))
 	_, err = f.svc.CountAudience(ctx, actor(t, "company_member"), companyA, def)
-	if status, _ := problemOf(err); status != http.StatusServiceUnavailable {
+	if status, _ := problemtest.StatusCode(err); status != http.StatusServiceUnavailable {
 		t.Fatalf("limiter down: %v, want 503", err)
 	}
 	if f.audience.callCount() != 0 {

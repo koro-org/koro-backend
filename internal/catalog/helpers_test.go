@@ -12,7 +12,6 @@ import (
 	"time"
 	"uuid"
 
-	"koro/internal/audit"
 	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
@@ -28,7 +27,6 @@ import (
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/outbox"
-	"koro/internal/platform/problem"
 	"koro/internal/platform/queue"
 )
 
@@ -38,31 +36,6 @@ var t0 = time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC)
 func org(name string) uuid.UUID { return authztest.ID(name) }
 
 func ptr[T any](v T) *T { return &v }
-
-// auditLog records the events a catalog service writes.
-type auditLog struct {
-	mu     sync.Mutex
-	events []audit.Event
-}
-
-func (l *auditLog) Log(_ context.Context, e audit.Event) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.events = append(l.events, e)
-	return nil
-}
-
-func (l *auditLog) of(act authz.Action) []audit.Event {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	var out []audit.Event
-	for _, e := range l.events {
-		if e.Action == string(act) {
-			out = append(out, e)
-		}
-	}
-	return out
-}
 
 // fakeOrgs is orgs.OrgDirectory over the matrix orgs (authztest.Orgs).
 type fakeOrgs struct{ m map[uuid.UUID]orgs.OrgSummary }
@@ -339,7 +312,7 @@ func (f *fakeHeld) held(_ context.Context, offering, buyer uuid.UUID) (int, erro
 type env struct {
 	clk    *clock.Fake
 	store  *catalog.MemStore
-	audit  *auditLog
+	audit  *audittest.Recorder
 	orgs   *fakeOrgs
 	events *fakeEvents
 	payees *fakePayees
@@ -361,7 +334,7 @@ type env struct {
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	clk := clock.NewFake(t0)
-	e := &env{clk: clk, store: catalog.NewMemStore(clk.Now), audit: &auditLog{}, orgs: newFakeOrgs(),
+	e := &env{clk: clk, store: catalog.NewMemStore(clk.Now), audit: &audittest.Recorder{}, orgs: newFakeOrgs(),
 		events: &fakeEvents{m: map[uuid.UUID]events.EventSummary{}},
 		payees: &fakePayees{m: map[uuid.UUID]parties.Payee{}, approved: map[uuid.UUID]bool{}},
 		held:   &fakeHeld{m: map[[2]uuid.UUID]int{}}, outbox: outbox.NewMem(clk), queue: queue.NewMem(),
@@ -455,27 +428,6 @@ func actor(t *testing.T, name string) authz.Actor {
 }
 
 func ctxOf(t *testing.T, a authz.Actor) context.Context { return authz.WithActor(t.Context(), a) }
-
-func wantErr(t *testing.T, err, want error) {
-	t.Helper()
-	if !errors.Is(err, want) {
-		t.Fatalf("error = %v, want %v", err, want)
-	}
-}
-
-func problemOf(err error) (int, string) {
-	if p, ok := errors.AsType[*problem.Error](err); ok {
-		return p.Status(), p.Code()
-	}
-	return 0, ""
-}
-
-func wantProblem(t *testing.T, err error, status int, code string) {
-	t.Helper()
-	if s, c := problemOf(err); s != status || c != code {
-		t.Fatalf("error = %v (%d %s), want %d %s", err, s, c, status, code)
-	}
-}
 
 // ---- HTTP
 

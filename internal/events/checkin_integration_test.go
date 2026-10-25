@@ -15,6 +15,7 @@ import (
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/outbox"
+	"koro/internal/platform/problem/problemtest"
 	"koro/internal/platform/testutil"
 )
 
@@ -126,7 +127,7 @@ func TestCheckinFlow_Postgres(t *testing.T) {
 	key := idempotency.WithKey(ctx, idempotency.Key{Scope: second.UserID.String() + ":POST /events/{event_id}/check-ins",
 		Value: "pg-collide-01", Status: 200})
 	_, err = e.svc.CreateCheckin(key, second, ev.ID, qrInput(payloads[1], scan, t0))
-	wantCode(t, err, 409, "conflict")
+	problemtest.WantProblem(t, err, 409, "conflict")
 	if st := e.count(t, `SELECT count(*) FROM event_registrations WHERE id = $1 AND status = 'confirmed'`, regs[1]); st != 1 {
 		t.Fatal("the refused scan changed the registration")
 	}

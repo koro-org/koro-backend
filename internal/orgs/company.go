@@ -2,14 +2,12 @@ package orgs
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
-	"strconv"
 	"uuid"
 
 	"koro/internal/authz"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/problem"
 	"koro/internal/platform/textx"
 )
 
@@ -46,39 +44,19 @@ func (s *service) insertOrg(ctx context.Context, o Org, requested string) (Org, 
 	if base == "" {
 		base = "org"
 	}
-	for i := 1; i <= slugAttempts+1; i++ {
-		var suffix string
-		switch {
-		case i == 1:
-		case i <= slugAttempts:
-			suffix = "-" + strconv.Itoa(i)
-		default:
-			b := make([]byte, 4)
-			_, _ = rand.Read(b)
-			suffix = "-" + hex.EncodeToString(b)
-		}
-		o.Slug = trimSlug(base, maxSlug-len(suffix)) + suffix
-		stored, ok, err := s.d.Store.InsertOrg(ctx, o)
-		if err != nil {
-			return Org{}, err
-		}
-		if ok {
-			return stored, nil
-		}
+	var stored Org
+	ok, err := textx.FreeSlug(base, maxSlug, slugAttempts, func(slug string) (inserted bool, err error) {
+		o.Slug = slug
+		stored, inserted, err = s.d.Store.InsertOrg(ctx, o)
+		return inserted, err
+	})
+	switch {
+	case err != nil:
+		return Org{}, err
+	case !ok:
+		return Org{}, ErrSlugTaken
 	}
-	return Org{}, ErrSlugTaken
-}
-
-// trimSlug cuts a slug to n bytes without a trailing hyphen.
-func trimSlug(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	s = s[:n]
-	for len(s) > 0 && s[len(s)-1] == '-' {
-		s = s[:len(s)-1]
-	}
-	return s
+	return stored, nil
 }
 
 // companyFields validates the company profile fields of a request.
@@ -90,10 +68,10 @@ func cleanCompany(sector, size, domain, hq string, requireProfile bool) (company
 	var f companyFields
 	var err error
 	if requireProfile && sector == "" {
-		return f, fieldErr("body.sector_code", "is required")
+		return f, problem.Field("body.sector_code", "is required")
 	}
 	if requireProfile && size == "" {
-		return f, fieldErr("body.size_band", "is required")
+		return f, problem.Field("body.size_band", "is required")
 	}
 	if f.sector, err = cleanSector("body.sector_code", sector); err != nil {
 		return f, err

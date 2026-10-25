@@ -64,21 +64,6 @@ func str(p *string) string {
 	return *p
 }
 
-func nullable(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
-func utcPtr(t *time.Time) *time.Time {
-	if t == nil {
-		return nil
-	}
-	u := t.UTC()
-	return &u
-}
-
 // dsr converts a scanned row.
 //
 // cross-org: data subject requests belong to a person, not an org.
@@ -86,10 +71,10 @@ func (r dsrRow) dsr() DSR {
 	return DSR{
 		ID: r.ID, UserID: r.UserID, RequesterName: str(r.RequesterName), RequesterEmail: str(r.RequesterEmail),
 		Type: Type(r.Type), Channel: Channel(r.Channel), Status: Status(r.Status), Details: str(r.Details),
-		ReceivedAt: r.ReceivedAt.UTC(), DueAt: r.DueAt.UTC(), IdentityVerifiedAt: utcPtr(r.IdentityVerifiedAt),
+		ReceivedAt: r.ReceivedAt.UTC(), DueAt: r.DueAt.UTC(), IdentityVerifiedAt: db.UTCPtr(r.IdentityVerifiedAt),
 		AssignedTo: r.AssignedTo, FirstApprover: r.FirstApprover, SecondApprover: r.SecondApprover,
 		ResponseSummary: str(r.ResponseSummary), ExportFileID: r.ExportFileID, RejectionReason: str(r.RejectionReason),
-		CompletedAt: utcPtr(r.CompletedAt), CreatedAt: r.CreatedAt.UTC(), UpdatedAt: r.UpdatedAt.UTC(),
+		CompletedAt: db.UTCPtr(r.CompletedAt), CreatedAt: r.CreatedAt.UTC(), UpdatedAt: r.UpdatedAt.UTC(),
 	}
 }
 
@@ -108,8 +93,8 @@ func (s gormStore) Insert(ctx context.Context, d DSR) error {
 	err := db.Conn(ctx, s.orm).Exec(`INSERT INTO data_subject_requests (id, user_id, requester_name, requester_email, type,
 		channel, status, details, received_at, due_at, identity_verified_at, created_at, updated_at)
 		VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		d.ID, d.UserID, nullable(d.RequesterName), nullable(d.RequesterEmail), string(d.Type), string(d.Channel),
-		string(d.Status), nullable(d.Details), d.ReceivedAt, d.DueAt, d.IdentityVerifiedAt, d.ReceivedAt, d.ReceivedAt).Error
+		d.ID, d.UserID, db.Nullable(d.RequesterName), db.Nullable(d.RequesterEmail), string(d.Type), string(d.Channel),
+		string(d.Status), db.Nullable(d.Details), d.ReceivedAt, d.DueAt, d.IdentityVerifiedAt, d.ReceivedAt, d.ReceivedAt).Error
 	if err != nil {
 		return fmt.Errorf("kvkk: insert request: %w", constraints.Translate(err))
 	}
@@ -157,7 +142,7 @@ func (s gormStore) Update(ctx context.Context, d DSR) error {
 		first_approver = ?, second_approver = ?, response_summary = ?, export_file_id = ?, rejection_reason = ?,
 		completed_at = ? WHERE id = ?`,
 		string(d.Status), d.IdentityVerifiedAt, d.AssignedTo, d.FirstApprover, d.SecondApprover,
-		nullable(d.ResponseSummary), d.ExportFileID, nullable(d.RejectionReason), d.CompletedAt, d.ID)
+		db.Nullable(d.ResponseSummary), d.ExportFileID, db.Nullable(d.RejectionReason), d.CompletedAt, d.ID)
 	if res.Error != nil {
 		return fmt.Errorf("kvkk: update request: %w", constraints.Translate(res.Error))
 	}

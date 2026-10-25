@@ -11,8 +11,10 @@ import (
 	"koro/internal/authz"
 	"koro/internal/consent"
 	"koro/internal/identity"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // Register adds the directory operations (04 §2.3: BE-020's catalog, BE-022's
@@ -21,48 +23,48 @@ import (
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
 
-	reg(api, huma.Operation{
+	op.Register(api, "directory", huma.Operation{
 		OperationID: "listUniversities", Method: http.MethodGet, Path: "/universities",
 		Summary:     "List universities",
 		Description: "Active universities. q matches name, short name and city (Turkish full text) or part of the name.",
 	}, op.Meta{Action: string(authz.DirectoryUniversityList), Surface: op.SurfacePublic}, h.listUniversities)
 
-	reg(api, huma.Operation{
+	op.Register(api, "directory", huma.Operation{
 		OperationID: "getUniversity", Method: http.MethodGet, Path: "/universities/{university_id}",
 		Summary: "Get a university with its faculties",
 	}, op.Meta{Action: string(authz.DirectoryUniversityRead), Surface: op.SurfacePublic}, h.getUniversity)
 
-	reg(api, huma.Operation{
+	op.Register(api, "directory", huma.Operation{
 		OperationID: "listDepartments", Method: http.MethodGet, Path: "/universities/{university_id}/departments",
 		Summary: "List the departments of a university",
 	}, op.Meta{Action: string(authz.DirectoryDepartmentList), Surface: op.SurfacePublic}, h.listDepartments)
 
-	reg(api, huma.Operation{
+	op.Register(api, "directory", huma.Operation{
 		OperationID: "listSkills", Method: http.MethodGet, Path: "/skills",
 		Summary: "List the skill taxonomy", Description: "name follows Accept-Language (tr or en).",
 	}, op.Meta{Action: string(authz.DirectorySkillList), Surface: op.SurfacePublic}, h.listSkills)
 
-	reg(api, huma.Operation{
+	op.Register(api, "directory", huma.Operation{
 		OperationID: "listClubs", Method: http.MethodGet, Path: "/clubs",
 		Summary: "List clubs",
 		Description: "q matches the club name with Turkish rules (İSTANBUL, Istanbul and istanbul are the same word). " +
 			"member_count is null below 10 members and for sensitive clubs.",
 	}, op.Meta{Action: string(authz.DirectoryClubList), Surface: op.SurfacePublic}, h.listClubs)
 
-	reg(api, huma.Operation{
+	op.Register(api, "directory", huma.Operation{
 		OperationID: "getClub", Method: http.MethodGet, Path: "/clubs/{club_id}",
 		Summary:     "Get a club",
 		Description: "club_id is the club's org_id. The ETag is the If-Match value of updateClub.",
 	}, op.Meta{Action: string(authz.DirectoryClubRead), Surface: op.SurfacePublic}, h.getClub)
 
-	reg(api, huma.Operation{
+	op.Register(api, "directory", huma.Operation{
 		OperationID: "updateClub", Method: http.MethodPatch, Path: "/clubs/{club_id}",
 		Summary: "Update a club's catalog data",
 		Description: "If-Match with the ETag of getClub is required: missing → 428, stale → 412. A religious, political " +
 			"or identity category needs the sensitive flag first (422 directory.sensitivity_required).",
 	}, op.Meta{Action: string(authz.DirectoryClubUpdate), Surface: op.SurfaceResource}, h.updateClub)
 
-	reg(api, huma.Operation{
+	op.Register(api, "directory", huma.Operation{
 		OperationID: "requestClubSensitivity", Method: http.MethodPost, Path: "/clubs/{club_id}/sensitivity-requests",
 		DefaultStatus: http.StatusAccepted,
 		Summary:       "Ask for the sensitive club flag",
@@ -70,12 +72,12 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.DirectoryClubRequestSensitivity), Surface: op.SurfaceResource,
 		Idempotency: op.IdempotencyOptional}, h.requestSensitivity)
 
-	reg(api, huma.Operation{
+	op.Register(api, "directory", huma.Operation{
 		OperationID: "adminCreateClub", Method: http.MethodPost, Path: "/admin/clubs", DefaultStatus: http.StatusCreated,
 		Summary: "Add a club to the catalog", Description: "Opens the club's org and its catalog row together.",
 	}, op.Meta{Action: string(authz.DirectoryClubCreate), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.adminCreateClub)
 
-	reg(api, huma.Operation{
+	op.Register(api, "directory", huma.Operation{
 		OperationID: "adminSetClubSensitivity", Method: http.MethodPost, Path: "/admin/clubs/{club_id}/sensitivity",
 		Summary: "Set or clear the sensitive club flag",
 		Description: "With re-authentication. A change of the flag emits club.sensitivity_changed in the same " +
@@ -83,36 +85,36 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.DirectoryClubSetSensitivity), Surface: op.SurfaceAdmin, Reauth: true,
 		RateLimit: op.RateReauth, Idempotency: op.IdempotencyOptional}, h.adminSetSensitivity)
 
-	reg(api, huma.Operation{
+	op.Register(api, "directory", huma.Operation{
 		OperationID: "adminCreateUniversity", Method: http.MethodPost, Path: "/admin/universities",
 		DefaultStatus: http.StatusCreated,
 		Summary:       "Add a university", Description: "Bulk import is the `koro seed reference` command.",
 	}, op.Meta{Action: string(authz.DirectoryUniversityManage), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.adminCreateUniversity)
 
-	reg(api, huma.Operation{
+	op.Register(api, "directory", huma.Operation{
 		OperationID: "adminUpdateUniversity", Method: http.MethodPatch, Path: "/admin/universities/{university_id}",
 		Summary: "Update a university", Description: "The org profile (name, logo) is changed with updateOrg.",
 	}, op.Meta{Action: string(authz.DirectoryUniversityManage), Surface: op.SurfaceAdmin}, h.adminUpdateUniversity)
 
-	reg(api, huma.Operation{
+	op.Register(api, "directory", huma.Operation{
 		OperationID: "adminPutUniversityEmailDomain", Method: http.MethodPut,
 		Path:        "/admin/universities/{university_id}/email-domains/{domain}",
 		Summary:     "Add or change a university's e-mail domain",
 		Description: "A .edu.tr domain; a domain of another university is 409 directory.domain_taken.",
 	}, op.Meta{Action: string(authz.DirectoryUniversityManage), Surface: op.SurfaceAdmin}, h.adminPutDomain)
 
-	reg(api, huma.Operation{
+	op.Register(api, "directory", huma.Operation{
 		OperationID: "adminCreateDepartment", Method: http.MethodPost, Path: "/admin/universities/{university_id}/departments",
 		DefaultStatus: http.StatusCreated,
 		Summary:       "Add a department",
 	}, op.Meta{Action: string(authz.DirectoryUniversityManage), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.adminCreateDepartment)
 
-	reg(api, huma.Operation{
+	op.Register(api, "directory", huma.Operation{
 		OperationID: "adminCreateSkill", Method: http.MethodPost, Path: "/admin/skills", DefaultStatus: http.StatusCreated,
 		Summary: "Add a skill",
 	}, op.Meta{Action: string(authz.DirectorySkillManage), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.adminCreateSkill)
 
-	reg(api, huma.Operation{
+	op.Register(api, "directory", huma.Operation{
 		OperationID: "adminUpdateSkill", Method: http.MethodPatch, Path: "/admin/skills/{skill_id}",
 		Summary: "Update or deactivate a skill",
 	}, op.Meta{Action: string(authz.DirectorySkillManage), Surface: op.SurfaceAdmin}, h.adminUpdateSkill)
@@ -120,23 +122,7 @@ func Register(api huma.API, svc Service) {
 	registerClaims(api, h)
 }
 
-// reg registers one directory operation with its Koro metadata.
-func reg[I, O any](api huma.API, o huma.Operation, m op.Meta, fn func(context.Context, *I) (*O, error)) {
-	o.Tags = []string{"directory"}
-	huma.Register(api, op.Koro(o, m), fn)
-}
-
 type handler struct{ svc Service }
-
-// parseID parses a path ID; a malformed one becomes the nil UUID, which no
-// row has (404, after the admin surface's 403).
-func parseID(s string) uuid.UUID {
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return uuid.Nil()
-	}
-	return id
-}
 
 func optionalID(s, location string) (*uuid.UUID, error) {
 	if s == "" {
@@ -144,7 +130,7 @@ func optionalID(s, location string) (*uuid.UUID, error) {
 	}
 	id, err := uuid.Parse(s)
 	if err != nil {
-		return nil, fieldErr(location, "must be a UUID")
+		return nil, problem.Field(location, "must be a UUID")
 	}
 	return &id, nil
 }
@@ -253,7 +239,7 @@ type UniversityPath struct {
 type universityOutput struct{ Body UniversityDTO }
 
 func (h handler) getUniversity(ctx context.Context, in *UniversityPath) (*universityOutput, error) {
-	v, err := h.svc.GetUniversityView(ctx, authz.ActorOrAnonymous(ctx), parseID(in.UniversityID))
+	v, err := h.svc.GetUniversityView(ctx, authz.ActorOrAnonymous(ctx), httpx.ParseID(in.UniversityID))
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +266,7 @@ func (h handler) listDepartments(ctx context.Context, in *listDepartmentsInput) 
 	if err != nil {
 		return nil, err
 	}
-	p, err := h.svc.ListDepartments(ctx, authz.ActorOrAnonymous(ctx), parseID(in.UniversityID), DepartmentQuery{
+	p, err := h.svc.ListDepartments(ctx, authz.ActorOrAnonymous(ctx), httpx.ParseID(in.UniversityID), DepartmentQuery{
 		Q: in.Q, FacultyID: faculty, DegreeLevel: DegreeLevel(in.DegreeLevel), Limit: in.Limit, After: after,
 	})
 	if err != nil {
@@ -384,7 +370,7 @@ type clubOutput struct {
 func clubOut(v ClubView) *clubOutput { return &clubOutput{ETag: v.ETag, Body: toClubDTO(v)} }
 
 func (h handler) getClub(ctx context.Context, in *ClubPath) (*clubOutput, error) {
-	v, err := h.svc.GetClubView(ctx, authz.ActorOrAnonymous(ctx), parseID(in.ClubID))
+	v, err := h.svc.GetClubView(ctx, authz.ActorOrAnonymous(ctx), httpx.ParseID(in.ClubID))
 	if err != nil {
 		return nil, err
 	}
@@ -425,7 +411,7 @@ func (h handler) updateClub(ctx context.Context, in *updateClubInput) (*clubOutp
 			p.FoundedYear = b.FoundedYear
 		}
 	}
-	v, err := h.svc.UpdateClub(ctx, a, parseID(in.ClubID), in.IfMatch, p)
+	v, err := h.svc.UpdateClub(ctx, a, httpx.ParseID(in.ClubID), in.IfMatch, p)
 	if err != nil {
 		return nil, err
 	}
@@ -447,7 +433,7 @@ func (h handler) requestSensitivity(ctx context.Context, in *requestSensitivityI
 	if err != nil {
 		return nil, err
 	}
-	if err := h.svc.RequestClubSensitivity(ctx, a, parseID(in.ClubID), SensitiveReason(in.Body.SensitiveReason), in.Body.Note); err != nil {
+	if err := h.svc.RequestClubSensitivity(ctx, a, httpx.ParseID(in.ClubID), SensitiveReason(in.Body.SensitiveReason), in.Body.Note); err != nil {
 		return nil, err
 	}
 	return &acceptedOutput{}, nil
@@ -473,7 +459,7 @@ func (h handler) adminCreateClub(ctx context.Context, in *adminCreateClubInput) 
 	b := in.Body
 	uni, err := uuid.Parse(b.UniversityID)
 	if err != nil {
-		return nil, fieldErr("body.university_id", "must be a UUID")
+		return nil, problem.Field("body.university_id", "must be a UUID")
 	}
 	v, err := h.svc.AdminCreateClub(ctx, a, ClubInput{
 		UniversityID: uni, Name: b.Name, Slug: b.Slug, Category: Category(b.Category), JoinPolicy: JoinPolicy(b.JoinPolicy),
@@ -500,7 +486,7 @@ func (h handler) adminSetSensitivity(ctx context.Context, in *adminSensitivityIn
 		return nil, err
 	}
 	b := in.Body
-	v, err := h.svc.AdminSetClubSensitivity(ctx, a, parseID(in.ClubID),
+	v, err := h.svc.AdminSetClubSensitivity(ctx, a, httpx.ParseID(in.ClubID),
 		SensitivityInput{IsSensitive: b.IsSensitive, SensitiveReason: SensitiveReason(b.SensitiveReason)}, proofOf(b.Reauth))
 	if err != nil {
 		return nil, err
@@ -558,7 +544,7 @@ func (h handler) adminUpdateUniversity(ctx context.Context, in *adminUpdateUnive
 	if b.Type != nil {
 		p.Type = ptr(UniversityType(*b.Type))
 	}
-	u, err := h.svc.AdminUpdateUniversity(ctx, a, parseID(in.UniversityID), p)
+	u, err := h.svc.AdminUpdateUniversity(ctx, a, httpx.ParseID(in.UniversityID), p)
 	if err != nil {
 		return nil, err
 	}
@@ -581,7 +567,7 @@ func (h handler) adminPutDomain(ctx context.Context, in *adminPutDomainInput) (*
 	if err != nil {
 		return nil, err
 	}
-	d, _, err := h.svc.AdminPutUniversityEmailDomain(ctx, a, parseID(in.UniversityID), in.Domain,
+	d, _, err := h.svc.AdminPutUniversityEmailDomain(ctx, a, httpx.ParseID(in.UniversityID), in.Domain,
 		DomainInput{DomainKind: DomainKind(in.Body.DomainKind), IsActive: in.Body.IsActive})
 	if err != nil {
 		return nil, err
@@ -612,7 +598,7 @@ func (h handler) adminCreateDepartment(ctx context.Context, in *adminCreateDepar
 	if err != nil {
 		return nil, err
 	}
-	d, err := h.svc.AdminCreateDepartment(ctx, a, parseID(in.UniversityID), DepartmentInput{
+	d, err := h.svc.AdminCreateDepartment(ctx, a, httpx.ParseID(in.UniversityID), DepartmentInput{
 		FacultyID: faculty, Name: b.Name, DegreeLevel: DegreeLevel(b.DegreeLevel), DurationYears: b.DurationYears,
 		YokProgramCode: b.YokProgramCode,
 	})
@@ -668,7 +654,7 @@ func (h handler) adminUpdateSkill(ctx context.Context, in *adminUpdateSkillInput
 	if b.Category != nil {
 		p.Category = ptr(SkillCategory(*b.Category))
 	}
-	k, err := h.svc.AdminUpdateSkill(ctx, a, parseID(in.SkillID), p)
+	k, err := h.svc.AdminUpdateSkill(ctx, a, httpx.ParseID(in.SkillID), p)
 	if err != nil {
 		return nil, err
 	}

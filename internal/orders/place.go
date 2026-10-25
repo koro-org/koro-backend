@@ -15,6 +15,7 @@ import (
 	"koro/internal/parties"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/problem"
 )
 
 // Limits of one createOrder request.
@@ -39,7 +40,7 @@ func (s *service) CreateOrder(ctx context.Context, a authz.Actor, orgID uuid.UUI
 	if err != nil {
 		return nil, err
 	}
-	if err := authz.Can(ctx, a, authz.OrdersOrderCreate, orgResource(org)); err != nil {
+	if err := authz.Can(ctx, a, authz.OrdersOrderCreate, authz.OrgResource(org.ID, string(org.Kind), string(org.Status))); err != nil {
 		return nil, err
 	}
 	if err := buyerOrgUsable(org); err != nil {
@@ -101,23 +102,23 @@ func buyerOrgUsable(o orgs.OrgSummary) error {
 func checkCreate(in CreateInput) error {
 	switch {
 	case in.BuyerPartyID == uuid.Nil():
-		return fieldErr("body.buyer_party_id", "is required")
+		return problem.Field("body.buyer_party_id", "is required")
 	case len(in.Lines) == 0 || len(in.Lines) > maxLines:
-		return fieldErr("body.lines", fmt.Sprintf("must have 1-%d lines", maxLines))
+		return problem.Field("body.lines", fmt.Sprintf("must have 1-%d lines", maxLines))
 	}
 	seen := map[uuid.UUID]bool{}
 	for i, l := range in.Lines {
 		loc := fmt.Sprintf("body.lines[%d]", i)
 		switch {
 		case l.OfferingID == uuid.Nil():
-			return fieldErr(loc+".offering_id", "is required")
+			return problem.Field(loc+".offering_id", "is required")
 		case seen[l.OfferingID]:
 			// One line per offering: the per-buyer limit of catalog.Reserve
 			// counts the buyer's committed lines, not a second line of the
 			// same request.
-			return fieldErr(loc+".offering_id", "appears in another line: one line per offering")
+			return problem.Field(loc+".offering_id", "appears in another line: one line per offering")
 		case l.Quantity < 1 || l.Quantity > maxQuantity:
-			return fieldErr(loc+".quantity", fmt.Sprintf("must be 1-%d", maxQuantity))
+			return problem.Field(loc+".quantity", fmt.Sprintf("must be 1-%d", maxQuantity))
 		}
 		seen[l.OfferingID] = true
 	}
@@ -229,7 +230,7 @@ func (s *service) priceRequestLine(ctx context.Context, i int, li LineInput, now
 	co, err := s.d.Offerings.ForCheckout(ctx, li.OfferingID)
 	switch {
 	case errors.Is(err, catalog.ErrNotFound):
-		return pricedLine{}, fieldErr(fmt.Sprintf("body.lines[%d].offering_id", i), "is not an offering")
+		return pricedLine{}, problem.Field(fmt.Sprintf("body.lines[%d].offering_id", i), "is not an offering")
 	case err != nil:
 		return pricedLine{}, err
 	case co.Currency != currencyTRY:
@@ -244,7 +245,7 @@ func (s *service) priceRequestLine(ctx context.Context, i int, li LineInput, now
 		return pricedLine{}, err
 	}
 	if pol.ModelCode == catalog.ModelC && payee == nil {
-		return pricedLine{}, fieldErr(fmt.Sprintf("body.lines[%d].offering_id", i), "model C requires a direct payee; platform products use model A")
+		return pricedLine{}, problem.Field(fmt.Sprintf("body.lines[%d].offering_id", i), "model C requires a direct payee; platform products use model A")
 	}
 	amt, err := priceLine(priceInput{
 		Quantity: li.Quantity, UnitPriceAmount: co.UnitPriceAmount, VATRateBP: co.VATRateBP, VATClass: co.VATClass,

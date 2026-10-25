@@ -21,11 +21,6 @@ const sortGrants = "granted_desc"
 // 3 grants and the company's views of its granted students; BE-088 adds
 // the student's resume of a suspended grant.
 func registerGrants(api huma.API, h handler) {
-	tags := []string{"students"}
-	reg := func(o huma.Operation, m op.Meta) huma.Operation {
-		o.Tags = tags
-		return op.Koro(o, m)
-	}
 	self := func(act authz.Action, idem op.Idempotency) op.Meta {
 		return op.Meta{Action: string(act), Surface: op.SurfaceSelf, Idempotency: idem}
 	}
@@ -33,24 +28,24 @@ func registerGrants(api huma.API, h handler) {
 		return op.Meta{Action: string(act), Surface: op.SurfaceOrg, Idempotency: idem}
 	}
 
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "students", huma.Operation{
 		OperationID: "listMyAccessGrants", Method: http.MethodGet, Path: "/me/access-grants",
 		Summary: "List the companies that see my profile",
 		Description: "The companies you gave level 3 access to your full profile and current CV (you accepted their " +
 			"contact request), newest first. A grant is suspended while your student verification has lapsed: the " +
 			"company sees nothing, and the grant never reopens by itself; once verified again you may resume it until " +
 			"resumable_until, after which it ends. Any account lists its own grants, without a student verification.",
-	}, self(authz.StudentsAccessGrantListOwn, "")), h.listMyGrants)
+	}, self(authz.StudentsAccessGrantListOwn, ""), h.listMyGrants)
 
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "students", huma.Operation{
 		OperationID: "revokeMyAccessGrant", Method: http.MethodPost, Path: "/me/access-grants/{grant_id}/revoke",
 		Summary: "Revoke a company's access", DefaultStatus: http.StatusNoContent,
 		Description: "The company loses level 3 access at once; a suspended grant ends too. No student verification " +
 			"is needed. The reason is optional and never shown to the company. Revoking a revoked grant changes " +
 			"nothing; another user's grant is 404.",
-	}, self(authz.StudentsAccessGrantRevoke, op.IdempotencyOptional)), h.revokeMyGrant)
+	}, self(authz.StudentsAccessGrantRevoke, op.IdempotencyOptional), h.revokeMyGrant)
 
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "students", huma.Operation{
 		OperationID: "resumeMyAccessGrant", Method: http.MethodPost, Path: "/me/access-grants/{grant_id}/resume",
 		Summary: "Resume a suspended company access",
 		Description: "Gives the named company level 3 access again to a grant suspended when your student " +
@@ -58,38 +53,38 @@ func registerGrants(api huma.API, h handler) {
 			"students.verification_required) and only until resumable_until (409 students.resume_window_expired; " +
 			"the company then needs a new contact request). A grant that is not suspended is 409 " +
 			"students.invalid_state; another user's grant is 404. The company is not notified.",
-	}, self(authz.StudentsAccessGrantResume, op.IdempotencyOptional)), h.resumeMyGrant)
+	}, self(authz.StudentsAccessGrantResume, op.IdempotencyOptional), h.resumeMyGrant)
 
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "students", huma.Operation{
 		OperationID: "listCompanyGrantedStudents", Method: http.MethodGet, Path: "/orgs/{org_id}/students",
 		Summary: "List the students who granted the company access",
 		Description: "Students with an active level 3 grant of this company (they accepted its contact request) and " +
 			"an active student verification, newest grant first; q filters by name. Minors never appear.",
-	}, org(authz.StudentsAccessGrantListCompany, "")), h.listCompanyStudents)
+	}, org(authz.StudentsAccessGrantListCompany, ""), h.listCompanyStudents)
 
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "students", huma.Operation{
 		OperationID: "getCompanyStudentProfile", Method: http.MethodGet, Path: "/orgs/{org_id}/students/{user_id}",
 		Summary: "Get a granted student's profile",
 		Description: "The level 3 profile. Without an active grant of this company, or while the student's " +
 			"verification has lapsed, the student is not found (404, as an unknown student). The e-mail only when " +
 			"the student shares it; clubs only when the student shares them (never a sensitive club). Every read " +
 			"is audited.",
-	}, org(authz.StudentsProfileReadCompany, "")), h.getCompanyStudent)
+	}, org(authz.StudentsProfileReadCompany, ""), h.getCompanyStudent)
 
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "students", huma.Operation{
 		OperationID: "downloadCompanyStudentCv", Method: http.MethodGet, Path: "/orgs/{org_id}/students/{user_id}/cv",
 		Summary: "Download a granted student's CV",
 		Description: "A signed URL of the student's current CV, valid for 1 minute. Without an active grant, while " +
 			"the student's verification has lapsed, or without a current CV, 404; 409 files.not_clean while the " +
 			"virus scan is pending. Every call is audited.",
-	}, org(authz.StudentsCvReadCompany, "")), h.downloadCompanyCV)
+	}, org(authz.StudentsCvReadCompany, ""), h.downloadCompanyCV)
 
-	huma.Register(api, reg(huma.Operation{
+	op.Register(api, "students", huma.Operation{
 		OperationID: "revokeCompanyAccessGrant", Method: http.MethodPost, Path: "/orgs/{org_id}/students/{user_id}/access-grant/revoke",
 		Summary: "Give up access to a student", DefaultStatus: http.StatusNoContent,
 		Description: "The company ends its level 3 access. The reason is optional and never shown to the student. " +
 			"Without an active grant (a suspended one included), 404.",
-	}, org(authz.StudentsAccessGrantRevoke, op.IdempotencyOptional)), h.revokeCompanyGrant)
+	}, org(authz.StudentsAccessGrantRevoke, op.IdempotencyOptional), h.revokeCompanyGrant)
 }
 
 // grantAfter decodes a grant list cursor.

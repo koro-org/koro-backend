@@ -12,6 +12,8 @@ import (
 	"koro/internal/files"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/iban"
+	"koro/internal/platform/outbox"
+	"koro/internal/platform/problem"
 	"koro/internal/platform/textx"
 )
 
@@ -82,11 +84,7 @@ func transferEvent(a authz.Actor, act authz.Action, t IncomingTransfer, reason s
 
 // emit writes an O event in the transaction carried by ctx.
 func (s *service) emit(ctx context.Context, aggregate string, id uuid.UUID, p domainevent.Payload) error {
-	env, err := domainevent.New(p, aggregate, id)
-	if err != nil {
-		return err
-	}
-	return s.d.Outbox.Add(ctx, env)
+	return outbox.Emit(ctx, s.d.Outbox, p, aggregate, id)
 }
 
 // cleanText normalises a single-line text (05 §9.5) and checks its length
@@ -94,16 +92,16 @@ func (s *service) emit(ctx context.Context, aggregate string, id uuid.UUID, p do
 func cleanText(loc, s string, minLen, maxLen int) (string, error) {
 	v, err := textx.NormalizeText(s)
 	if err != nil {
-		return "", fieldErr(loc, "contains characters that are not allowed")
+		return "", problem.Field(loc, "contains characters that are not allowed")
 	}
 	n := utf8.RuneCountInString(v)
 	switch {
 	case n == 0 && minLen > 0:
-		return "", fieldErr(loc, "is required")
+		return "", problem.Field(loc, "is required")
 	case n > 0 && n < minLen:
-		return "", fieldErr(loc, fmt.Sprintf("must be at least %d characters", minLen))
+		return "", problem.Field(loc, fmt.Sprintf("must be at least %d characters", minLen))
 	case n > maxLen:
-		return "", fieldErr(loc, fmt.Sprintf("must be at most %d characters", maxLen))
+		return "", problem.Field(loc, fmt.Sprintf("must be at most %d characters", maxLen))
 	}
 	return v, nil
 }
@@ -132,7 +130,7 @@ func (s *service) checkFile(ctx context.Context, loc string, id uuid.UUID, purpo
 	if s.d.Files == nil {
 		return ErrUnavailable
 	}
-	bad := fieldErr(loc, fmt.Sprintf("must be a %s upload", purpose))
+	bad := problem.Field(loc, fmt.Sprintf("must be a %s upload", purpose))
 	f, err := s.d.Files.Get(ctx, id)
 	switch {
 	case errors.Is(err, files.ErrNotFound):

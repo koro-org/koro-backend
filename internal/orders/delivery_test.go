@@ -14,6 +14,7 @@ import (
 	"koro/internal/orders"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/outbox"
+	"koro/internal/platform/problem/problemtest"
 	"koro/internal/platform/queue"
 )
 
@@ -72,12 +73,12 @@ func TestMarkFulfilled_UnpaidOrder_409(t *testing.T) {
 	v := e.placeOne(t)
 	club := actor(t, "club_admin")
 	_, err := e.svc.MarkLineFulfilled(ctxOf(t, club), club, v.Lines[0].ID, orders.MarkInput{})
-	wantErr(t, err, orders.ErrOrderNotPaid)
-	wantProblem(t, err, 409, "orders.order_not_paid")
+	problemtest.WantErr(t, err, orders.ErrOrderNotPaid)
+	problemtest.WantProblem(t, err, 409, "orders.order_not_paid")
 	e.pay(t, v.Order.ID)
 	buyer := actor(t, "company_admin")
 	_, err = e.svc.MarkLineFulfilled(ctxOf(t, buyer), buyer, v.Lines[0].ID, orders.MarkInput{})
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	got := e.mark(t, v.Lines[0].ID)
 	l := got.Line
 	if l.FulfillmentStatus != orders.FulfillMarked || l.FulfillmentMarkedBy == nil || *l.FulfillmentMarkedBy != club.UserID ||
@@ -87,14 +88,14 @@ func TestMarkFulfilled_UnpaidOrder_409(t *testing.T) {
 	if evs := e.events(domainevent.TopicOrderLineFulfillmentMarked); len(evs) != 1 {
 		t.Fatalf("fulfillment_marked events = %d", len(evs))
 	}
-	if ev := e.audit.of(authz.OrdersLineMarkFulfilled); len(ev) != 1 || ev[0].Reason != "Stant kuruldu" {
+	if ev := e.audit.Of(authz.OrdersLineMarkFulfilled); len(ev) != 1 || ev[0].Reason != "Stant kuruldu" {
 		t.Fatalf("audit = %+v", ev)
 	}
 	_, err = e.svc.MarkLineFulfilled(ctxOf(t, club), club, v.Lines[0].ID, orders.MarkInput{})
-	wantProblem(t, err, 409, "orders.invalid_state")
+	problemtest.WantProblem(t, err, 409, "orders.invalid_state")
 	other := actor(t, "other_club_admin")
 	_, err = e.svc.MarkLineFulfilled(ctxOf(t, other), other, v.Lines[0].ID, orders.MarkInput{})
-	wantErr(t, err, authz.ErrNotFound)
+	problemtest.WantErr(t, err, authz.ErrNotFound)
 }
 
 // TestConfirmLine_CompletesOrder: the buyer's admin confirms a marked line
@@ -106,7 +107,7 @@ func TestConfirmLine_CompletesOrder(t *testing.T) {
 	l := e.paidLine(t)
 	a := actor(t, "company_admin")
 	_, err := e.svc.ConfirmLine(ctxOf(t, a), a, l.ID)
-	wantProblem(t, err, 409, "orders.invalid_state")
+	problemtest.WantProblem(t, err, 409, "orders.invalid_state")
 	e.mark(t, l.ID)
 	v, err := e.svc.ConfirmLine(ctxOf(t, a), a, l.ID)
 	if err != nil || v.Line.FulfillmentStatus != orders.FulfillFulfilled || *v.Line.FulfilledVia != orders.ViaBuyerConfirmed ||
@@ -122,7 +123,7 @@ func TestConfirmLine_CompletesOrder(t *testing.T) {
 	}
 	rec := actor(t, "company_member")
 	_, err = e.svc.ConfirmLine(ctxOf(t, rec), rec, l.ID)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 }
 
 // TestDispute_OutsideWindow_409 (04 §2.15 "Pencere dışı 409"): inside its
@@ -137,7 +138,7 @@ func TestDispute_OutsideWindow_409(t *testing.T) {
 	e.mark(t, outside.ID)
 	a := actor(t, "company_admin")
 	_, err := e.svc.DisputeLine(ctxOf(t, a), a, inside.ID, "")
-	wantProblem(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 	e.clk.Advance(6 * 24 * time.Hour)
 	v, err := e.svc.DisputeLine(ctxOf(t, a), a, inside.ID, "Stant kurulmadı")
 	if err != nil || v.Line.FulfillmentStatus != orders.FulfillDisputed || *v.Line.DisputeReason != "Stant kurulmadı" ||
@@ -146,8 +147,8 @@ func TestDispute_OutsideWindow_409(t *testing.T) {
 	}
 	e.clk.Advance(24 * time.Hour) // exactly the end of the window: closed
 	_, err = e.svc.DisputeLine(ctxOf(t, a), a, outside.ID, "Geç kaldık")
-	wantErr(t, err, orders.ErrDisputeWindowClosed)
-	wantProblem(t, err, 409, "orders.dispute_window_closed")
+	problemtest.WantErr(t, err, orders.ErrDisputeWindowClosed)
+	problemtest.WantProblem(t, err, 409, "orders.dispute_window_closed")
 }
 
 // TestDisputeWindowClose_EmitsFulfilled (01 §7 orders.close_dispute_windows):
@@ -198,7 +199,7 @@ func TestDisputeWindowClose_EmitsFulfilled(t *testing.T) {
 	if n := len(e.events(domainevent.TopicOrderLineFulfilled)); n != 1 {
 		t.Fatalf("a second run wrote %d events", n)
 	}
-	if ev := e.audit.of(authz.OrdersLineAutoFulfill); len(ev) != 1 || ev[0].SystemJob != orders.CloseWindowsJobName {
+	if ev := e.audit.Of(authz.OrdersLineAutoFulfill); len(ev) != 1 || ev[0].SystemJob != orders.CloseWindowsJobName {
 		t.Fatalf("audit = %+v", ev)
 	}
 }
@@ -223,18 +224,18 @@ func TestResolveDispute(t *testing.T) {
 	pad, fin := actor(t, "platform_admin"), actor(t, "finance_admin")
 	delivered := dispute()
 	_, err := e.svc.AdminResolveDispute(ctxOf(t, a), a, delivered.ID, orders.ResolveInput{Outcome: orders.OutcomeFulfilled, Note: "Bakıldı"})
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	v, err := e.svc.AdminResolveDispute(ctxOf(t, pad), pad, delivered.ID, orders.ResolveInput{Outcome: orders.OutcomeFulfilled, Note: "Fotoğraflar teslimi gösteriyor"})
 	if err != nil || v.Line.FulfillmentStatus != orders.FulfillFulfilled || *v.Line.FulfilledVia != orders.ViaAdmin || v.OrderStatus != orders.StatusCompleted {
 		t.Fatalf("resolved delivered = %+v (%s), %v", v.Line, v.OrderStatus, err)
 	}
 	_, err = e.svc.AdminResolveDispute(ctxOf(t, pad), pad, delivered.ID, orders.ResolveInput{Outcome: orders.OutcomeFulfilled, Note: "Tekrar"})
-	wantProblem(t, err, 409, "orders.invalid_state")
+	problemtest.WantProblem(t, err, 409, "orders.invalid_state")
 	refund := dispute()
 	_, err = e.svc.AdminResolveDispute(ctxOf(t, fin), fin, refund.ID, orders.ResolveInput{Outcome: orders.OutcomeRefund, Note: "İade", RefundAmount: ptr(int64(1_200_001))})
-	wantProblem(t, err, 422, "orders.refund_exceeds_paid")
+	problemtest.WantProblem(t, err, 422, "orders.refund_exceeds_paid")
 	_, err = e.svc.AdminResolveDispute(ctxOf(t, fin), fin, refund.ID, orders.ResolveInput{Outcome: orders.OutcomeRefund, Note: "Yarısı", RefundAmount: ptr(int64(600_000))})
-	wantProblem(t, err, 422, "validation_failed")
+	problemtest.WantProblem(t, err, 422, "validation_failed")
 	v, err = e.svc.AdminResolveDispute(ctxOf(t, fin), fin, refund.ID, orders.ResolveInput{Outcome: orders.OutcomeRefund, Note: "Stant yoktu", RefundAmount: ptr(int64(1_200_000))})
 	if err != nil || v.Line.FulfillmentStatus != orders.FulfillCancelled || v.OrderStatus != orders.StatusPaid {
 		t.Fatalf("resolved refund = %+v (%s), %v", v.Line, v.OrderStatus, err)
@@ -243,11 +244,11 @@ func TestResolveDispute(t *testing.T) {
 	if err != nil || len(due) != 1 || due[0].LineID == nil || *due[0].LineID != refund.ID || due[0].Amount != 1_200_000 {
 		t.Fatalf("refunds due = %+v, %v", due, err)
 	}
-	if ev := e.audit.of(authz.OrdersLineResolveDispute); len(ev) != 2 || ev[1].Metadata["refund_amount"] != int64(1_200_000) {
+	if ev := e.audit.Of(authz.OrdersLineResolveDispute); len(ev) != 2 || ev[1].Metadata["refund_amount"] != int64(1_200_000) {
 		t.Fatalf("audit = %+v", ev)
 	}
 	_, err = e.svc.AdminResolveDispute(ctxOf(t, pad), pad, uuid.NewV7(), orders.ResolveInput{Outcome: orders.OutcomeFulfilled, Note: "x"})
-	wantErr(t, err, orders.ErrNotFound)
+	problemtest.WantErr(t, err, orders.ErrNotFound)
 }
 
 // TestExpireUnpaid_ReleasesStockAndRevokesEntitlements (01 §7
@@ -315,12 +316,12 @@ func TestExpireUnpaid_ReleasesStockAndRevokesEntitlements(t *testing.T) {
 	if n := len(e.events(domainevent.TopicOrderExpired)); n != 2 {
 		t.Fatalf("a second run wrote %d events", n)
 	}
-	if ev := e.audit.of(authz.OrdersOrderExpire); len(ev) != 2 || ev[0].SystemJob != orders.ExpireJobName {
+	if ev := e.audit.Of(authz.OrdersOrderExpire); len(ev) != 2 || ev[0].SystemJob != orders.ExpireJobName {
 		t.Fatalf("audit = %+v", ev)
 	}
 	// A transfer that arrives after expiry is not applied (payments refunds it).
 	_, err = e.mod.Orders.ApplyPayment(t.Context(), stale.Order.ID, uuid.NewV7(), 1)
-	wantProblem(t, err, 409, "orders.invalid_state")
+	problemtest.WantProblem(t, err, 409, "orders.invalid_state")
 }
 
 // TestOfferingCancelled_UnpaidCancelled_PaidQueuedForRefund (01 §6.2
@@ -397,9 +398,9 @@ func TestApplyRefund_Limits(t *testing.T) {
 	v := e.place(t, line(e.platformOffering(t), 1))[0]
 	e.pay(t, v.Order.ID)
 	ord := e.mod.Orders
-	wantProblem(t, ord.ApplyRefund(t.Context(), v.Order.ID, nil, v.Order.PayableAmount+1), 422, "orders.refund_exceeds_paid")
+	problemtest.WantProblem(t, ord.ApplyRefund(t.Context(), v.Order.ID, nil, v.Order.PayableAmount+1), 422, "orders.refund_exceeds_paid")
 	other := e.placeOne(t)
-	wantErr(t, ord.ApplyRefund(t.Context(), v.Order.ID, &other.Lines[0].ID, 1), orders.ErrNotFound)
+	problemtest.WantErr(t, ord.ApplyRefund(t.Context(), v.Order.ID, &other.Lines[0].ID, 1), orders.ErrNotFound)
 	if err := ord.ApplyRefund(t.Context(), v.Order.ID, nil, 100); err != nil {
 		t.Fatal(err)
 	}
@@ -443,14 +444,14 @@ func TestPayableLines_AndPaidOut(t *testing.T) {
 		t.Fatalf("payable = %+v, %v", ls, err)
 	}
 	payout := uuid.NewV7()
-	wantErr(t, ord.MarkLinesPaidOut(t.Context(), []uuid.UUID{l.ID, open.ID}, payout), orders.ErrInvalidState)
+	problemtest.WantErr(t, ord.MarkLinesPaidOut(t.Context(), []uuid.UUID{l.ID, open.ID}, payout), orders.ErrInvalidState)
 	if err := ord.MarkLinesPaidOut(t.Context(), []uuid.UUID{l.ID}, payout); err != nil {
 		t.Fatal(err)
 	}
 	if got := e.line(t, l.ID); got.PayoutID == nil || *got.PayoutID != payout || got.PaidOutAt == nil {
 		t.Fatalf("paid out line = %+v", got)
 	}
-	wantErr(t, ord.MarkLinesPaidOut(t.Context(), []uuid.UUID{l.ID}, uuid.NewV7()), orders.ErrInvalidState)
+	problemtest.WantErr(t, ord.MarkLinesPaidOut(t.Context(), []uuid.UUID{l.ID}, uuid.NewV7()), orders.ErrInvalidState)
 	if ls, _ := ord.PayableLines(t.Context(), e.payeeA, e.clk.Now().Add(48*time.Hour)); len(ls) != 0 {
 		t.Fatalf("payable after the payout = %+v", ls)
 	}
@@ -463,7 +464,7 @@ func TestPayableLines_AndPaidOut(t *testing.T) {
 		t.Fatalf("ForBilling = %+v, %d lines, %v", o, len(lines), err)
 	}
 	_, _, err = ord.ForBilling(t.Context(), uuid.NewV7())
-	wantErr(t, err, orders.ErrNotFound)
+	problemtest.WantErr(t, err, orders.ErrNotFound)
 	if ls, err := ord.PayoutLines(t.Context(), payout); err != nil || len(ls) != 1 || ls[0].ID != l.ID {
 		t.Fatalf("PayoutLines = %+v, %v", ls, err)
 	}

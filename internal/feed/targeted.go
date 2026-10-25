@@ -100,7 +100,7 @@ func (s *service) CreateTargetedPost(ctx context.Context, a authz.Actor, orgID u
 	if err != nil {
 		return TargetedView{}, err
 	}
-	if err := authz.Can(ctx, a, authz.FeedPostCreateTargeted, orgResource(o)); err != nil {
+	if err := authz.Can(ctx, a, authz.FeedPostCreateTargeted, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
 		return TargetedView{}, err
 	}
 	kind, ok := authorKinds[o.Kind]
@@ -118,10 +118,10 @@ func (s *service) CreateTargetedPost(ctx context.Context, a authz.Actor, orgID u
 		return TargetedView{}, problem.ErrUnavailable
 	}
 	if in.Dispatch != nil && len(in.Dispatch.Channels) == 0 {
-		return TargetedView{}, fieldErr("body.dispatch.channels", "at least one channel is required")
+		return TargetedView{}, problem.Field("body.dispatch.channels", "at least one channel is required")
 	}
 	if (in.SegmentID == nil) == (in.Definition == nil) {
-		return TargetedView{}, fieldErr("body.audience", "exactly one of segment_id and definition is required")
+		return TargetedView{}, problem.Field("body.audience", "exactly one of segment_id and definition is required")
 	}
 	base := Post{
 		OrgID: o.ID, AuthorOrgKind: kind, AuthorUserID: a.UserID, Status: StatusDraft, AudienceKind: AudienceSegment,

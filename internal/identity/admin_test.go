@@ -11,6 +11,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/identity"
 	"koro/internal/notify"
+	"koro/internal/platform/problem/problemtest"
 )
 
 func TestSuspendUser_RevokesSessionsWithReason(t *testing.T) {
@@ -33,22 +34,22 @@ func TestSuspendUser_RevokesSessionsWithReason(t *testing.T) {
 	}
 	// The account can no longer sign in (the same 401 as a wrong password).
 	_, err = s.svc.CreateSession(ctx, authz.Anonymous(), identity.Login{Email: "target@example.com", Password: goodPassword})
-	wantErr(t, err, identity.ErrInvalidCredentials)
+	problemtest.WantErr(t, err, identity.ErrInvalidCredentials)
 	ev := s.audit.of(string(authz.IdentityUserSuspend))
 	if len(ev) != 1 || ev[0].Reason != "spam reports" || ev[0].Metadata["sessions_revoked"] != 2 {
 		t.Fatalf("audit %+v", ev)
 	}
 	// Twice: a state conflict; a too short reason: 422; own account: 409.
 	_, err = s.svc.SuspendUser(ctx, s.a, s.target.ID, "again please")
-	wantErr(t, err, identity.ErrUserInvalidState)
+	problemtest.WantErr(t, err, identity.ErrUserInvalidState)
 	_, err = s.svc.UnsuspendUser(ctx, s.a, s.target.ID, "ok")
 	wantStatus(t, err, http.StatusUnprocessableEntity)
 	_, err = s.svc.SuspendUser(ctx, s.a, s.a.UserID, "testing myself")
-	wantErr(t, err, identity.ErrUserInvalidState)
+	problemtest.WantErr(t, err, identity.ErrUserInvalidState)
 	// support may not suspend (03 §5.1: pad only).
 	sup := s.admin(t, "sup@koro.test", authz.PlatformSupport)
 	_, err = s.svc.SuspendUser(ctx, sup, s.target.ID, "support tries this")
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 
 	v, err = s.svc.UnsuspendUser(ctx, s.a, s.target.ID, "appeal accepted")
 	if err != nil || v.User.Status != identity.StatusActive || v.User.SuspendedAt != nil {
@@ -100,11 +101,11 @@ func TestAdminSearchUsers_Audited(t *testing.T) {
 	n := len(s.audit.of(string(authz.IdentityUserSearch)))
 	_, a := s.login(t, "target@example.com", identity.ClientMobile)
 	_, err = s.svc.SearchUsers(ctx, a, identity.AdminUserQuery{Q: "admin"})
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	noMFA := sup
 	noMFA.MFAVerified = false
 	_, err = s.svc.SearchUsers(ctx, noMFA, identity.AdminUserQuery{Q: "admin"})
-	wantErr(t, err, authz.ErrMFARequired)
+	problemtest.WantErr(t, err, authz.ErrMFARequired)
 	if len(s.audit.of(string(authz.IdentityUserSearch))) != n {
 		t.Fatal("a refused search was audited as a search")
 	}
@@ -131,10 +132,10 @@ func TestAdminGetUser_NoClubMembership(t *testing.T) {
 		t.Fatalf("dpo view: %v %v", v.ShowBirthDate, err)
 	}
 	_, err = s.svc.AdminUser(ctx, s.a, uuid.NewV7())
-	wantErr(t, err, identity.ErrNotFound)
+	problemtest.WantErr(t, err, identity.ErrNotFound)
 	fin := s.admin(t, "fin@koro.test", authz.PlatformFinanceAdmin)
 	_, err = s.svc.AdminUser(ctx, fin, uuid.NewV7())
-	wantErr(t, err, authz.ErrForbidden) // decided before the read: no ID oracle
+	problemtest.WantErr(t, err, authz.ErrForbidden) // decided before the read: no ID oracle
 }
 
 func TestAdminResetUserMfa_NotifiesAndClosesSessions(t *testing.T) {
@@ -145,7 +146,7 @@ func TestAdminResetUserMfa_NotifiesAndClosesSessions(t *testing.T) {
 	s.q.Reset()
 
 	_, err := s.svc.ResetUserMFA(ctx, s.a, u.ID, "lost phone, id checked", identity.ReauthProof{})
-	wantErr(t, err, identity.ErrReauthRequired)
+	problemtest.WantErr(t, err, identity.ErrReauthRequired)
 	if p, err := s.svc.ResetUserMFA(ctx, s.a, u.ID, "lost phone, id checked", proof); err != nil || p != nil {
 		t.Fatal(err, p)
 	}
@@ -163,7 +164,7 @@ func TestAdminResetUserMfa_NotifiesAndClosesSessions(t *testing.T) {
 	}
 	// Own MFA: 403 (k2, Y6).
 	_, err = s.svc.ResetUserMFA(ctx, s.a, s.a.UserID, "my own phone", proof)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 }
 
 func TestAdminRevokeUserSessions(t *testing.T) {
@@ -176,5 +177,5 @@ func TestAdminRevokeUserSessions(t *testing.T) {
 	s.targetSessionClosed(t, identity.RevokeAdmin)
 	dpo := s.admin(t, "dpo@koro.test", authz.PlatformDPO)
 	_, err := s.svc.RevokeUserSessions(t.Context(), dpo, s.target.ID, "dpo cannot do this")
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 }

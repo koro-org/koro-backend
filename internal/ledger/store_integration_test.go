@@ -25,6 +25,7 @@ import (
 	"koro/internal/platform/db"
 	"koro/internal/platform/iban"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 	"koro/internal/platform/testutil"
 )
 
@@ -349,7 +350,7 @@ func TestPost_Unbalanced_RejectedBeforeDB_Postgres(t *testing.T) {
 		{Account: ledger.AccountKoroBank, Amount: 1_200_000}, {Account: ledger.AccountBuyerAdvances, Amount: -1_199_999},
 	}}
 	_, err := e.svc.Post(qc.Context(t.Context()), tx)
-	wantProblem(t, err, ledger.ErrUnbalanced)
+	problemtest.WantErr(t, err, ledger.ErrUnbalanced)
 	if qc.Count() != 0 {
 		t.Fatalf("%d statements ran for a rejected transaction", qc.Count())
 	}
@@ -744,7 +745,7 @@ func TestPayeeBalance_AfterAllocation_Postgres(t *testing.T) {
 	// A line of p1 allocated to p2 breaks the (order_line_id, payee_id) FK.
 	o4, l4 := e.w.line(p1)
 	_, err := e.svc.Post(t.Context(), txn(t)(ledger.OrderAllocated(ledger.ModelA, o4, []ledger.AllocationLine{allocation(p2, l4)}, time.Time{})))
-	wantProblem(t, err, ledger.ErrInvalidTxn)
+	problemtest.WantErr(t, err, ledger.ErrInvalidTxn)
 	// A half refund of l1 takes back half of each share.
 	half := split(t)(ledger.SplitRefund(allocation(p1, l1), 600_000))
 	e.post(t, txn(t)(ledger.RefundCompleted(ledger.ModelA, uuid.NewV7(), 0, []ledger.RefundLine{half}, time.Time{})))

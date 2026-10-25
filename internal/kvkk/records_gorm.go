@@ -128,7 +128,7 @@ func (s gormRecords) UpdatePolicy(ctx context.Context, p Policy) error {
 	res := db.Conn(ctx, s.orm).Exec(`UPDATE retention_policies SET retention = make_interval( ?, ?, 0, ?, ?), method = ?,
 		enabled = ?, legal_approved = ?, approved_ref = ?, updated_by = ? WHERE code = ?`,
 		p.Period.Years, p.Period.Months, p.Period.Days, p.Period.Hours, p.Method, p.Enabled, p.LegalApproved,
-		nullable(p.ApprovedRef), p.UpdatedBy, p.Code)
+		db.Nullable(p.ApprovedRef), p.UpdatedBy, p.Code)
 	if res.Error != nil {
 		return fmt.Errorf("kvkk: update retention policy: %w", recordConstraints.Translate(res.Error))
 	}
@@ -260,9 +260,9 @@ type breachRow struct {
 
 func (r breachRow) breach() Breach {
 	return Breach{ID: r.ID, Title: r.Title, DetectedAt: r.DetectedAt.UTC(), AuthorityDeadlineAt: r.AuthorityDeadlineAt.UTC(),
-		ControllerNotifiedAt: utcPtr(r.ControllerNotifiedAt), AuthorityNotifiedAt: utcPtr(r.AuthorityNotifiedAt),
+		ControllerNotifiedAt: db.UTCPtr(r.ControllerNotifiedAt), AuthorityNotifiedAt: db.UTCPtr(r.AuthorityNotifiedAt),
 		DataCategories: []string(r.DataCategories), AffectedEstimate: r.AffectedEstimate, Description: r.Description,
-		Status: BreachStatus(r.Status), OwnerUserID: r.OwnerUserID, ClosedAt: utcPtr(r.ClosedAt),
+		Status: BreachStatus(r.Status), OwnerUserID: r.OwnerUserID, ClosedAt: db.UTCPtr(r.ClosedAt),
 		CreatedAt: r.CreatedAt.UTC(), UpdatedAt: r.UpdatedAt.UTC()}
 }
 
@@ -384,7 +384,7 @@ func (s gormRecords) InsertSubprocessor(ctx context.Context, x Subprocessor) err
 	err := db.Conn(ctx, s.orm).Exec(`INSERT INTO subprocessors (id, name, service, data_categories, region, country_code,
 		transfer_mechanism, contract_signed_at, authority_notified_at, active, notes) VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		x.ID, x.Name, x.Service, db.TextArray(x.DataCategories), x.Region, x.CountryCode, x.TransferMechanism,
-		x.ContractSignedAt, x.AuthorityNotifiedAt, x.Active, nullable(x.Notes)).Error
+		x.ContractSignedAt, x.AuthorityNotifiedAt, x.Active, db.Nullable(x.Notes)).Error
 	if err != nil {
 		return fmt.Errorf("kvkk: insert sub-processor: %w", recordConstraints.Translate(err))
 	}
@@ -439,7 +439,7 @@ func (s gormRecords) UpdateSubprocessor(ctx context.Context, x Subprocessor) err
 		country_code = ?, transfer_mechanism = ?, contract_signed_at = ?, authority_notified_at = ?, active = ?, notes = ?
 		WHERE id = ?`,
 		x.Name, x.Service, db.TextArray(x.DataCategories), x.Region, x.CountryCode, x.TransferMechanism, x.ContractSignedAt,
-		x.AuthorityNotifiedAt, x.Active, nullable(x.Notes), x.ID)
+		x.AuthorityNotifiedAt, x.Active, db.Nullable(x.Notes), x.ID)
 	if res.Error != nil {
 		return fmt.Errorf("kvkk: update sub-processor: %w", recordConstraints.Translate(res.Error))
 	}

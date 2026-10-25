@@ -78,6 +78,25 @@ func (s *service) GetMany(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]O
 	return out, nil
 }
 
+// PublicLogoURLs implements OrgLogos: one batch read of the orgs, then
+// logoPublicURL (the BE-120 rule) for each org with a logo.
+func (s *service) PublicLogoURLs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error) {
+	out := map[uuid.UUID]string{}
+	if len(ids) == 0 || s.d.Files == nil {
+		return out, nil
+	}
+	rows, err := s.d.Store.GetOrgs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, o := range rows {
+		if u := s.logoPublicURL(ctx, o); u != "" {
+			out[o.ID] = u
+		}
+	}
+	return out, nil
+}
+
 // GetOrg implements Service.
 func (s *service) GetOrg(ctx context.Context, a authz.Actor, id uuid.UUID) (OrgView, error) {
 	o, err := s.d.Store.GetOrg(ctx, id)

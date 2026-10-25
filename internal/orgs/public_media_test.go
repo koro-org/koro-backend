@@ -51,6 +51,7 @@ func (e *env) withLogo(t *testing.T, id uuid.UUID, status orgs.Status) uuid.UUID
 // TestOrgs_LogoPublicURL_OnlyPublicOrgs (BE-120): the permanent logo URL is
 // shown for an active org that is not a sensitive club; a sensitive club,
 // a club unknown to directory and a suspended org keep the signed URL only.
+// PublicLogoURLs (BE-126) answers the same for a batch.
 func TestOrgs_LogoPublicURL_OnlyPublicOrgs(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, func(d *orgs.Deps) { d.Files = logoFiles{} })
@@ -88,6 +89,23 @@ func TestOrgs_LogoPublicURL_OnlyPublicOrgs(t *testing.T) {
 	for _, v := range page.Items {
 		if (v.LogoPublicURL != "") != wantPublic[v.Org.ID] {
 			t.Errorf("searchOrgs card %s: logo_public_url = %q", v.Org.Name, v.LogoPublicURL)
+		}
+	}
+	// BE-126: other modules' cards read the same rule in one call.
+	ids := []uuid.UUID{uuid.NewV7()} // an unknown org is missing too
+	for id := range logos {
+		ids = append(ids, id)
+	}
+	got, err := e.svc.PublicLogoURLs(t.Context(), ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(wantPublic) {
+		t.Errorf("PublicLogoURLs = %v, want %d orgs", got, len(wantPublic))
+	}
+	for id := range wantPublic {
+		if got[id] != publicLogo(logos[id]) {
+			t.Errorf("PublicLogoURLs[%s] = %q", id, got[id])
 		}
 	}
 	// Without the directory hook every club counts as sensitive.

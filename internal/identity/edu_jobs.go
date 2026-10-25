@@ -13,6 +13,7 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/notify"
+	"koro/internal/platform/applink"
 	"koro/internal/platform/civil"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
@@ -108,7 +109,8 @@ func (s *service) handleEduNotice(ctx context.Context, payload []byte) error {
 			return err
 		}
 	}
-	data := map[string]any{"name": u.FirstName, "kind": n.Kind, "link": s.d.LinkBaseURL + "/me/student-verification"}
+	link := applink.Page(s.d.LinkBaseURL, notify.MyStudentVerificationLink().String())
+	data := map[string]any{"name": u.FirstName, "kind": n.Kind, "link": link}
 	if n.DaysLeft > 0 {
 		data["days_left"] = strconv.Itoa(n.DaysLeft)
 	}

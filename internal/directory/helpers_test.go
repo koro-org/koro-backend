@@ -136,7 +136,11 @@ type env struct {
 	svc     directory.Service
 }
 
-func newEnv(t *testing.T) *env {
+// envOption adjusts the orgs module of an env before it is built (e
+// is the env being built: a late-bound hook reads e at call time).
+type envOption func(e *env, d *orgs.Deps)
+
+func newEnv(t *testing.T, opts ...envOption) *env {
 	t.Helper()
 	clk := clock.NewFake(t0)
 	e := &env{
@@ -148,10 +152,14 @@ func newEnv(t *testing.T) *env {
 	}
 	e.files = &fakeFiles{m: map[uuid.UUID]files.FileMeta{}, removed: e.removed}
 	idem := idempotency.New(idempotency.Deps{Tx: e.tx, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()})
-	om, err := orgs.New(orgs.Deps{
+	od := orgs.Deps{
 		Store: e.orgsMem, Tx: e.tx, Outbox: e.out, Audit: e.audit, Idempotency: idem, Clock: clk, Log: obs.Discard(),
 		Students: e.ver, Users: e.users,
-	})
+	}
+	for _, o := range opts {
+		o(e, &od)
+	}
+	om, err := orgs.New(od)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -102,6 +102,7 @@ type ClubCardDTO struct {
 	ClaimStatus       string `json:"claim_status" enum:"unclaimed,claimed"`
 	MembershipPrivate bool   `json:"membership_private" doc:"true for a sensitive club: its membership is never shown"`
 	MemberCount       *int   `json:"member_count" doc:"null below 10 members or for a sensitive club (k-anonymity)"`
+	LogoPublicURL     string `json:"logo_public_url,omitempty" doc:"Permanent, cacheable URL of the club's logo (content addressed; immutable Cache-Control), the org's logo_public_url: only for an active club that is not sensitive, once the virus scan cleared the image; absent otherwise (BE-126)."`
 }
 
 // ClubCardList is a page of ClubCardDTO.
@@ -191,7 +192,7 @@ func toClubCard(c ClubCard) ClubCardDTO {
 	return ClubCardDTO{
 		ClubID: r.OrgID.String(), Name: r.Name, Slug: r.Slug, UniversityID: r.UniversityID.String(),
 		Category: string(r.Category), JoinPolicy: string(r.JoinPolicy), ClaimStatus: string(r.ClaimStatus),
-		MembershipPrivate: r.IsSensitive, MemberCount: c.MemberCount,
+		MembershipPrivate: r.IsSensitive, MemberCount: c.MemberCount, LogoPublicURL: c.LogoPublicURL,
 	}
 }
 

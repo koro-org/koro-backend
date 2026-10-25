@@ -10,6 +10,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/notify"
+	"koro/internal/platform/applink"
 	"koro/internal/platform/queue"
 )
 
@@ -23,7 +24,6 @@ const (
 	// SendRoleAlertTaskName is the task of the role alerts.
 	SendRoleAlertTaskName = "identity.send_role_alert"
 	roleAlertTemplate     = "identity.role_alert"
-	linkAdminRoles        = "/admin/platform-roles"
 )
 
 // Role alert kinds.
@@ -82,7 +82,7 @@ func (s *service) handleRoleAlert(ctx context.Context, payload []byte) error {
 			UserID: &u.ID, ToEmail: u.Email, Channel: notify.ChannelEmail, Category: notify.CategoryTransactional,
 			Template: roleAlertTemplate, Locale: u.Locale,
 			Data: map[string]any{"name": u.FirstName, "kind": n.Kind, "role": string(ra.Role),
-				"link": s.d.LinkBaseURL + linkAdminRoles},
+				"link": applink.Page(s.d.LinkBaseURL, notify.AdminPlatformRolesLink().String())},
 			DedupeKey: "identity.role_alert:" + n.Ref.String() + ":" + u.ID.String(),
 		}
 		if _, err := s.d.Mailer.Send(ctx, msg); err != nil {

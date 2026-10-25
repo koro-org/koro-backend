@@ -37,6 +37,9 @@ type ClubQuery struct {
 type ClubCard struct {
 	Row         ClubRow
 	MemberCount *int
+	// LogoPublicURL is the permanent public logo URL ("" for a sensitive
+	// or inactive club, without a logo or before the scan; BE-126).
+	LogoPublicURL string
 }
 
 // ClubPage is a page of clubs.
@@ -129,9 +132,17 @@ func (s *service) ListClubs(ctx context.Context, a authz.Actor, q ClubQuery) (Cl
 		return ClubPage{}, err
 	}
 	rows, more := page.Cut(rows, limit)
+	ids := make([]uuid.UUID, len(rows))
+	for i, r := range rows {
+		ids[i] = r.OrgID
+	}
+	logos, err := s.d.Orgs.PublicLogoURLs(ctx, ids)
+	if err != nil {
+		return ClubPage{}, err
+	}
 	out := ClubPage{Items: make([]ClubCard, len(rows)), Sort: f.Sort}
 	for i, r := range rows {
-		out.Items[i] = ClubCard{Row: r, MemberCount: s.countOf(ctx, r.Club)}
+		out.Items[i] = ClubCard{Row: r, MemberCount: s.countOf(ctx, r.Club), LogoPublicURL: logos[r.OrgID]}
 	}
 	if more {
 		last := rows[len(rows)-1]

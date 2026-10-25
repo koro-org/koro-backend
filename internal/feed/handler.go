@@ -40,8 +40,15 @@ func Register(api huma.API, svc Service) {
 	op.Register(api, "feed", huma.Operation{
 		OperationID: "getPost", Method: http.MethodGet, Path: "/posts/{post_id}",
 		Summary: "Get a post",
-		Description: "A post the caller may not see is 404. The author organization's writers get the management " +
-			"view (status, audience). The ETag is the If-Match value of updatePost.",
+		Description: "The post page behind the /posts/{post_id} links of notifications and e-mails. A reader opens " +
+			"exactly the posts the feed would list them (published, in the audience, a followers post for a " +
+			"follower or member of the author organization, no commercial post for a minor); an anonymous reader " +
+			"the public, non-commercial ones of the organization pages. Muting the organization or hiding the post " +
+			"only filters the feed: the link still opens it. Any other post (a draft, in review, hidden or removed " +
+			"by moderation, out of the audience) is the same 404 as a post that does not exist. The author " +
+			"organization's writers also read its drafts, posts in review and hidden posts, moderators and platform " +
+			"admins every post, all in the reader view (the management view is listOrgPostsManage). The ETag is the " +
+			"If-Match value of updatePost.",
 	}, op.Meta{Action: string(authz.FeedPostRead), Surface: op.SurfacePublic}, h.getPost)
 
 	op.Register(api, "feed", huma.Operation{

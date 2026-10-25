@@ -50,6 +50,9 @@ type Orgs interface {
 	// GetOrg returns the public profile of an org as a sees it (404 for a
 	// pending_review or closed org a may not see).
 	GetOrg(ctx context.Context, a authz.Actor, orgID uuid.UUID) (orgs.OrgView, error)
+	// PublicLogoURLs returns the permanent logo URLs of the club cards
+	// (orgs' BE-120 rule: active, not sensitive, cleared; BE-126).
+	PublicLogoURLs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error)
 }
 
 // Reauthenticator verifies the re-authentication proof of the R operation

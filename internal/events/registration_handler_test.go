@@ -94,6 +94,15 @@ func TestHTTP_CreateRegistration(t *testing.T) {
 	if rec.Code != http.StatusOK || out["answers"].(map[string]any)["motivation"] != "Veri bilimi" {
 		t.Fatalf("own: %d %v", rec.Code, out)
 	}
+	// BE-126: the event carries its slug (the link to the event page).
+	if slug := out["event"].(map[string]any)["slug"]; ev.Event.Slug == "" || slug != ev.Event.Slug {
+		t.Fatalf("own event slug = %v, want %q", slug, ev.Event.Slug)
+	}
+	rec, out = call(t, app, "student", http.MethodGet, "/api/v1/me/registrations", "", nil)
+	if items, _ := out["items"].([]any); rec.Code != http.StatusOK || len(items) != 1 ||
+		items[0].(map[string]any)["event"].(map[string]any)["slug"] != ev.Event.Slug {
+		t.Fatalf("own list: %d %v", rec.Code, out)
+	}
 	rec, out = call(t, app, "club_admin", http.MethodGet, path+"?sort=-created_at&limit=1", "", nil)
 	items, _ := out["items"].([]any)
 	if rec.Code != http.StatusOK || len(items) != 1 || out["next_cursor"] == nil {

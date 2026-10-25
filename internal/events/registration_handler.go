@@ -101,6 +101,7 @@ func registerRegistrations(api huma.API, h handler) {
 type RegistrationEventDTO struct {
 	EventID         string    `json:"event_id" format:"uuid"`
 	Title           string    `json:"title"`
+	Slug            string    `json:"slug" doc:"The event's public URL identifier (web: /etkinlikler/<event_id>-<slug>; BE-126)"`
 	Status          string    `json:"status" enum:"draft,published,cancelled,completed"`
 	StartsAt        time.Time `json:"starts_at"`
 	EndsAt          time.Time `json:"ends_at"`
@@ -186,8 +187,8 @@ func toSelfDTO(v RegistrationView) RegistrationSelfDTO {
 		RegistrationID: r.ID.String(), Status: string(r.Status), CreatedAt: r.CreatedAt, ConfirmedAt: r.ConfirmedAt,
 		WaitlistedAt: r.WaitlistedAt, CancelledAt: r.CancelledAt, WaitlistPosition: v.WaitlistPosition,
 		TicketAvailable: v.TicketAvailable, Answers: v.Answers, AnswersSensitive: v.AnswersSensitive,
-		Event: RegistrationEventDTO{EventID: e.ID.String(), Title: e.Title, Status: string(e.Status), StartsAt: e.StartsAt,
-			EndsAt: e.EndsAt, DisplayTimezone: displayTimezone, LocationName: str(e.LocationName)},
+		Event: RegistrationEventDTO{EventID: e.ID.String(), Title: e.Title, Slug: e.Slug, Status: string(e.Status),
+			StartsAt: e.StartsAt, EndsAt: e.EndsAt, DisplayTimezone: displayTimezone, LocationName: str(e.LocationName)},
 	}
 	if len(v.ConsentSnapshot) > 0 {
 		d.ConsentSnapshot = v.ConsentSnapshot

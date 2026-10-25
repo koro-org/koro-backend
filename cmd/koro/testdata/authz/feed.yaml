@@ -129,6 +129,23 @@ operations:
           "@fd_draft_hidden_a": 404
           club_admin: 404
           "@fd_post_staff": 200
+      - name: hidden_by_moderation
+        path_params: { post_id: post_a_hidden }
+        note: BE-126 — the feed never lists it; its writers and the moderators read it, everyone else the 404 of an unknown post
+        expect:
+          anonymous: 404
+          "@fd_draft_hidden_a": 404
+          club_admin: 200
+          "@fd_post_staff": 200
+      - name: pending_review
+        path_params: { post_id: post_company_review }
+        note: BE-126 — a company post in review, not yet in any feed
+        expect:
+          anonymous: 404
+          "@fd_draft_hidden_company": 404
+          company_member: 200
+          company_admin: 200
+          "@fd_post_staff": 200
       - name: unknown_post
         path_params: { post_id: "literal:00000000-0000-7000-8000-0000000000aa" }
         expect: { "@all": 404 }

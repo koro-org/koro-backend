@@ -13,6 +13,7 @@ import (
 	"koro/internal/identity"
 	"koro/internal/notify"
 	"koro/internal/orgs"
+	"koro/internal/platform/applink"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/queue"
 )
@@ -330,8 +331,14 @@ func (s *service) mailData(e Event, o orgs.OrgSummary, r Registration, c identit
 	return map[string]any{
 		"name": c.FirstName, "event_title": e.Title, "org_name": o.Name,
 		"when": whenText(e), "location": locationText(e),
-		"ticket_url": s.d.LinkBaseURL + "/me/registrations/" + r.ID.String(),
+		"ticket_url": s.ticketURL(r),
 	}
+}
+
+// ticketURL is the e-mail link of the registrant's own registration page
+// (the catalog form /me/registrations/{registration_id}).
+func (s *service) ticketURL(r Registration) string {
+	return applink.Page(s.d.LinkBaseURL, notify.MyRegistrationLink(r.ID).String())
 }
 
 // icsOf is the calendar entry of registration r.
@@ -339,7 +346,7 @@ func (s *service) icsOf(e Event, o orgs.OrgSummary, r Registration, c identity.U
 	return icsEvent{
 		Method: method, EventID: e.ID, RegistrationID: r.ID, Sequence: seq, Stamp: s.now(),
 		Start: e.StartsAt, End: e.EndsAt, Summary: e.Title, Location: locationText(e),
-		Description: o.Name, URL: s.d.LinkBaseURL + "/me/registrations/" + r.ID.String(),
+		Description: o.Name, URL: s.ticketURL(r),
 		OrganizerName: o.Name, OrganizerEmail: s.d.ICSOrganizer, AttendeeEmail: c.Email,
 	}
 }

@@ -2684,6 +2684,9 @@ components:
             - open
             - approval
           type: string
+        logo_public_url:
+          description: "Permanent, cacheable URL of the club's logo (content addressed; immutable Cache-Control), the org's logo_public_url: only for an active club that is not sensitive, once the virus scan cleared the image; absent otherwise (BE-126)."
+          type: string
         member_count:
           description: null below 10 members or for a sensitive club (k-anonymity)
           format: int64
@@ -8223,7 +8226,7 @@ components:
           description: The notification kind (template ID)
           type: string
         link_path:
-          description: "Client-independent in-app path (web and mobile map it to their own routes; a form a client does not know is shown without a link). One of: `/me/access-grants`; `/me/club-claims`; `/me/contact-requests/{contact_request_id}`; `/me/registrations/{registration_id}`; `/me/security-events`; `/me/terms`; `/orders/{order_id}`; `/orders/{order_id}/payment-instructions`; `/invoices/{invoice_id}`; `/posts/{post_id}`; `/clubs/by-slug/{club_slug}`; `/events/{event_id}/registrations/{registration_id}`; `/orgs/{org_id}/sales`; `/orgs/{org_id}/payouts/{payout_id}`; `/orgs/{org_id}/offerings`; `/orgs/{org_id}/offering-approvals`; `/orgs/{org_id}/posts`; `/orgs/{org_id}/payees/{payee_id}`; `/orgs/{org_id}/contact-requests/{contact_request_id}`; `/admin/audit-events`; `/admin/bank-accounts`; `/admin/breaches`; `/admin/clubs/{club_org_id}`; `/admin/club-claims/{claim_id}`; `/admin/collection-accounts`; `/admin/commerce-policies`; `/admin/offerings`; `/admin/orders?order_no={order_no}`; `/admin/payouts/{payout_id}`; `/admin/refunds/{refund_id}`; `/admin/reports/{report_id}`; `/admin/review-queue`; `/admin/incoming-transfers?status=unmatched`; `/clubs/{club_org_id}` (legacy). {<name>_id} is a UUID, {club_slug} an organization slug (getOrgBySlug), {order_no} an order number. Legacy forms are no longer produced but older notifications may carry them."
+          description: "Client-independent in-app path (web and mobile map it to their own routes; a form a client does not know is shown without a link). One of: `/me/access-grants`; `/me/club-claims`; `/me/contact-requests/{contact_request_id}`; `/me/registrations/{registration_id}`; `/me/security-events`; `/me/terms`; `/me/student-verification`; `/orders/{order_id}`; `/orders/{order_id}/payment-instructions`; `/invoices/{invoice_id}`; `/posts/{post_id}`; `/clubs/by-slug/{club_slug}`; `/events/{event_id}/registrations/{registration_id}`; `/orgs/{org_id}/sales`; `/orgs/{org_id}/payouts/{payout_id}`; `/orgs/{org_id}/offerings`; `/orgs/{org_id}/offering-approvals`; `/orgs/{org_id}/posts`; `/orgs/{org_id}/payees/{payee_id}`; `/orgs/{org_id}/contact-requests/{contact_request_id}`; `/admin/audit-events`; `/admin/bank-accounts`; `/admin/breaches`; `/admin/clubs/{club_org_id}`; `/admin/club-claims/{claim_id}`; `/admin/collection-accounts`; `/admin/commerce-policies`; `/admin/offerings`; `/admin/orders?order_no={order_no}`; `/admin/platform-roles`; `/admin/payouts/{payout_id}`; `/admin/refunds/{refund_id}`; `/admin/reports/{report_id}`; `/admin/review-queue`; `/admin/incoming-transfers?status=unmatched`; `/clubs/{club_org_id}` (legacy). {<name>_id} is a UUID, {club_slug} an organization slug (getOrgBySlug), {order_no} an order number. Legacy forms are no longer produced but older notifications may carry them."
           type: string
           x-koro-link-paths:
             - pattern: /me/access-grants
@@ -8237,6 +8240,8 @@ components:
             - pattern: /me/security-events
               audience: user
             - pattern: /me/terms
+              audience: user
+            - pattern: /me/student-verification
               audience: user
             - pattern: /orders/{order_id}
               audience: user
@@ -8281,6 +8286,8 @@ components:
             - pattern: /admin/offerings
               audience: admin
             - pattern: /admin/orders?order_no={order_no}
+              audience: admin
+            - pattern: /admin/platform-roles
               audience: admin
             - pattern: /admin/payouts/{payout_id}
               audience: admin
@@ -11015,6 +11022,9 @@ components:
           type: string
         location_name:
           type: string
+        slug:
+          description: "The event's public URL identifier (web: /etkinlikler/<event_id>-<slug>; BE-126)"
+          type: string
         starts_at:
           format: date-time
           type: string
@@ -11030,6 +11040,7 @@ components:
       required:
         - event_id
         - title
+        - slug
         - status
         - starts_at
         - ends_at
@@ -31442,7 +31453,7 @@ paths:
       x-koro-surface: resource
       x-koro-terms-gate: enforced
     get:
-      description: A post the caller may not see is 404. The author organization's writers get the management view (status, audience). The ETag is the If-Match value of updatePost.
+      description: "The post page behind the /posts/{post_id} links of notifications and e-mails. A reader opens exactly the posts the feed would list them (published, in the audience, a followers post for a follower or member of the author organization, no commercial post for a minor); an anonymous reader the public, non-commercial ones of the organization pages. Muting the organization or hiding the post only filters the feed: the link still opens it. Any other post (a draft, in review, hidden or removed by moderation, out of the audience) is the same 404 as a post that does not exist. The author organization's writers also read its drafts, posts in review and hidden posts, moderators and platform admins every post, all in the reader view (the management view is listOrgPostsManage). The ETag is the If-Match value of updatePost."
       operationId: getPost
       parameters:
         - description: Post ID

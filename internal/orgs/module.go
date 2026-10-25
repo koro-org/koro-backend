@@ -95,6 +95,18 @@ type MembershipHistory interface {
 	EndedMemberships(ctx context.Context, membershipIDs []uuid.UUID) (map[uuid.UUID]bool, error)
 }
 
+// OrgLogos is the public logo read of other modules (BE-126): the
+// cards that list orgs elsewhere (directory's club list) show the same
+// permanent logo URL as the org's own profile, under the one rule of
+// BE-120 kept here.
+type OrgLogos interface {
+	// PublicLogoURLs returns the permanent public logo URL of each of ids
+	// that shows one: an active org that is not a sensitive club, once
+	// files cleared and copied the image. The others are missing; a
+	// missing logo never fails the read.
+	PublicLogoURLs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error)
+}
+
 // OrgAdmin is the write contract of other modules (01 §4.7).
 type OrgAdmin interface {
 	// Create writes a new org (and the company profile of a company) in
@@ -124,6 +136,7 @@ type Service interface {
 	OrgDirectory
 	OrgAdmin
 	MembershipHistory
+	OrgLogos
 
 	// GetOrg is getOrg (orgs.org.read, P).
 	GetOrg(ctx context.Context, a authz.Actor, id uuid.UUID) (OrgView, error)

@@ -10,8 +10,9 @@ import (
 
 // Link is the in-app deep link of an in_app or push notification
 // (in_app_notifications.link_path): a client-independent app path that
-// web and mobile map to their own routes (BE-122). The zero Link is "no
-// link".
+// web and mobile map to their own routes (BE-122). The page links of the
+// e-mails are the same paths (applink.Page(APP_LINK_BASE_URL, link);
+// BE-126), so one catalog serves both. The zero Link is "no link".
 //
 // A Link has no exported constructor but the route builders below, so
 // every link_path a producer can hand to notify is one of the forms of
@@ -155,6 +156,7 @@ var (
 	routeMyRegistration    = route("/me/registrations/{registration_id}", LinkForUser)       // events
 	routeMySecurityEvents  = route("/me/security-events", LinkForUser)                       // notify (audit alerts)
 	routeMyTerms           = route("/me/terms", LinkForUser)                                 // identity (a new terms of use version, BE-124)
+	routeMyStudentVerif    = route("/me/student-verification", LinkForUser)                  // identity (e-mail)
 	routeOrder             = route("/orders/{order_id}", LinkForUser)                        // orders, payments
 	routeOrderInstructions = route("/orders/{order_id}/payment-instructions", LinkForUser)   // orders
 	routeInvoice           = route("/invoices/{invoice_id}", LinkForUser)                    // billing
@@ -181,6 +183,7 @@ var (
 	routeAdminCommercePolicies   = route("/admin/commerce-policies", LinkForAdmin)                   // catalog
 	routeAdminOfferings          = route("/admin/offerings", LinkForAdmin)                           // catalog
 	routeAdminOrder              = route("/admin/orders?order_no={order_no}", LinkForAdmin)          // orders
+	routeAdminPlatformRoles      = route("/admin/platform-roles", LinkForAdmin)                      // identity (e-mail)
 	routeAdminPayout             = route("/admin/payouts/{payout_id}", LinkForAdmin)                 // ledger
 	routeAdminRefund             = route("/admin/refunds/{refund_id}", LinkForAdmin)                 // payments
 	routeAdminReport             = route("/admin/reports/{report_id}", LinkForAdmin)                 // feed
@@ -202,6 +205,7 @@ func MyContactRequestLink(req uuid.UUID) Link { return routeMyContactRequest.lin
 func MyRegistrationLink(reg uuid.UUID) Link   { return routeMyRegistration.link(reg.String()) }
 func MySecurityEventsLink() Link              { return routeMySecurityEvents.link() }
 func MyTermsLink() Link                       { return routeMyTerms.link() }
+func MyStudentVerificationLink() Link         { return routeMyStudentVerif.link() }
 func OrderLink(order uuid.UUID) Link          { return routeOrder.link(order.String()) }
 func OrderPaymentInstructionsLink(order uuid.UUID) Link {
 	return routeOrderInstructions.link(order.String())
@@ -241,6 +245,7 @@ func AdminCollectionAccountsLink() Link       { return routeAdminCollectionAccou
 func AdminCommercePoliciesLink() Link         { return routeAdminCommercePolicies.link() }
 func AdminOfferingsLink() Link                { return routeAdminOfferings.link() }
 func AdminOrderLink(orderNo string) Link      { return routeAdminOrder.link(orderNo) }
+func AdminPlatformRolesLink() Link            { return routeAdminPlatformRoles.link() }
 func AdminPayoutLink(payout uuid.UUID) Link   { return routeAdminPayout.link(payout.String()) }
 func AdminRefundLink(refund uuid.UUID) Link   { return routeAdminRefund.link(refund.String()) }
 func AdminReportLink(report uuid.UUID) Link   { return routeAdminReport.link(report.String()) }

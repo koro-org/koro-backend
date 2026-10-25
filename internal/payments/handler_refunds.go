@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"time"
-	"uuid"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -14,7 +13,6 @@ import (
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
-	"koro/internal/platform/problem"
 )
 
 // registerRefunds adds the payment and refund operations of BE-043 (04
@@ -171,7 +169,7 @@ func (h handler) listPayments(ctx context.Context, in *listPaymentsInput) (*paym
 	}
 	fp := page.Fingerprint("adminListPayments", in.OrderID, in.Status)
 	q := PaymentQuery{Filter: PaymentFilter{Status: PaymentStatus(in.Status)}, Limit: in.Limit}
-	q.Filter.OrderID, q.invalid = optionalID("query.order_id", in.OrderID)
+	q.Filter.OrderID, q.invalid = httpx.OptID("query.order_id", in.OrderID)
 	if q.invalid == nil {
 		q.After, q.invalid = decodeTimeCursor(in.Cursor, fp)
 	}
@@ -282,9 +280,9 @@ func (h handler) listRefunds(ctx context.Context, in *listRefundsInput) (*refund
 	}
 	fp := page.Fingerprint("adminListRefunds", in.Status, in.OrderID, in.PaymentID)
 	q := RefundQuery{Filter: RefundFilter{Status: RefundStatus(in.Status)}, Limit: in.Limit}
-	q.Filter.OrderID, q.invalid = optionalID("query.order_id", in.OrderID)
+	q.Filter.OrderID, q.invalid = httpx.OptID("query.order_id", in.OrderID)
 	if q.invalid == nil {
-		q.Filter.PaymentID, q.invalid = optionalID("query.payment_id", in.PaymentID)
+		q.Filter.PaymentID, q.invalid = httpx.OptID("query.payment_id", in.PaymentID)
 	}
 	if q.invalid == nil {
 		q.After, q.invalid = decodeTimeCursor(in.Cursor, fp)
@@ -459,18 +457,6 @@ func (h handler) completeRefund(ctx context.Context, in *completeRefundInput) (*
 }
 
 // ---- query helpers
-
-// optionalID parses an optional ID query parameter (422 when malformed).
-func optionalID(loc, s string) (*uuid.UUID, error) {
-	if s == "" {
-		return nil, nil
-	}
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return nil, problem.Field(loc, "must be a UUID")
-	}
-	return &id, nil
-}
 
 // decodeTimeCursor decodes a (created_at, id) cursor of the lists.
 func decodeTimeCursor(raw, fp string) (*TimeCursor, error) {

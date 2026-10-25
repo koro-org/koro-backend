@@ -117,8 +117,8 @@ func optionalMonth(loc string, s *string) (d *civil.Date, clear bool, err error)
 	return &m, false, nil
 }
 
-// optionalID parses an optional UUID member ("" means clear).
-func optionalID(loc string, s *string) (id *uuid.UUID, clear bool, err error) {
+// patchID parses an optional UUID patch member (absent: keep, "": clear).
+func patchID(loc string, s *string) (id *uuid.UUID, clear bool, err error) {
 	if s == nil {
 		return nil, false, nil
 	}
@@ -170,10 +170,10 @@ func (h handler) updateProfile(ctx context.Context, in *updateProfileInput) (*pr
 	}
 	b := in.Body
 	p := ProfilePatch{ClassYear: b.ClassYear, Headline: b.Headline, About: b.About, City: b.City}
-	if p.Department, p.ClearDepartment, err = optionalID("body.department_id", b.DepartmentID); err != nil {
+	if p.Department, p.ClearDepartment, err = patchID("body.department_id", b.DepartmentID); err != nil {
 		return nil, err
 	}
-	if p.Avatar, p.ClearAvatar, err = optionalID("body.avatar_file_id", b.AvatarFileID); err != nil {
+	if p.Avatar, p.ClearAvatar, err = patchID("body.avatar_file_id", b.AvatarFileID); err != nil {
 		return nil, err
 	}
 	if p.ExpectedGraduation, p.ClearExpectedGraduation, err = optionalMonth("body.expected_graduation", b.ExpectedGraduation); err != nil {

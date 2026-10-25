@@ -15,6 +15,7 @@ var platformHelpers = map[string]string{
 	"etagOf":       "httpx.ETag",
 	"parseID":      "httpx.ParseID",
 	"optID":        "httpx.OptID",
+	"optionalID":   "httpx.OptID",
 	"idStr":        "httpx.IDStr",
 	"reg":          "op.Register",
 	"fieldErr":     "problem.Field",

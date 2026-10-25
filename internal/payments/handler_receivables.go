@@ -83,7 +83,7 @@ func (h handler) listCollections(ctx context.Context, in *listCollectionsInput) 
 	}
 	fp := page.Fingerprint("adminListReceivableCollections", in.Status, in.PayeeID)
 	q := CollectionQuery{Filter: CollectionFilter{Status: CollectionStatus(in.Status)}, Limit: in.Limit}
-	q.Filter.PayeeID, q.invalid = optionalID("query.payee_id", in.PayeeID)
+	q.Filter.PayeeID, q.invalid = httpx.OptID("query.payee_id", in.PayeeID)
 	if q.invalid == nil {
 		q.After, q.invalid = decodeTimeCursor(in.Cursor, fp)
 	}

@@ -92,7 +92,8 @@ func parseBound(s string, end bool) (time.Time, error) {
 	return t.UTC(), nil
 }
 
-func optionalID(id uuid.UUID) *uuid.UUID {
+// nonZeroID maps the zero UUID of an omitted query parameter to nil.
+func nonZeroID(id uuid.UUID) *uuid.UUID {
 	if id == (uuid.UUID{}) {
 		return nil
 	}
@@ -146,7 +147,7 @@ func (h handler) listOrg(ctx context.Context, in *listOrgInput) (*eventListOutpu
 		return nil, err
 	}
 	actor := ""
-	if id := optionalID(in.ActorUserID); id != nil {
+	if id := nonZeroID(in.ActorUserID); id != nil {
 		actor = id.String()
 	}
 	fp := page.Fingerprint("listOrgAuditEvents", in.OrgID.String(), in.OccurredFrom, in.OccurredTo, in.Action, actor)
@@ -156,7 +157,7 @@ func (h handler) listOrg(ctx context.Context, in *listOrgInput) (*eventListOutpu
 	}
 	p, err := h.svc.ListOrg(ctx, a, in.OrgID, OrgQuery{
 		PageQuery: PageQuery{Limit: in.Limit, After: after}, From: from, To: to,
-		Action: in.Action, ActorUserID: optionalID(in.ActorUserID),
+		Action: in.Action, ActorUserID: nonZeroID(in.ActorUserID),
 	})
 	if err != nil {
 		return nil, err
@@ -186,8 +187,8 @@ func (h handler) adminList(ctx context.Context, in *adminListInput) (*eventListO
 		return nil, err
 	}
 	q := AdminQuery{
-		From: from, To: to, ActorUserID: optionalID(in.ActorUserID), OrgID: optionalID(in.OrgID),
-		ResourceType: in.ResourceType, ResourceID: optionalID(in.ResourceID), Action: in.Action, Outcome: Outcome(in.Outcome),
+		From: from, To: to, ActorUserID: nonZeroID(in.ActorUserID), OrgID: nonZeroID(in.OrgID),
+		ResourceType: in.ResourceType, ResourceID: nonZeroID(in.ResourceID), Action: in.Action, Outcome: Outcome(in.Outcome),
 	}
 	if in.BreakGlass != "" {
 		bg := in.BreakGlass == "true"

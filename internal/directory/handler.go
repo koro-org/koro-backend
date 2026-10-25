@@ -124,17 +124,6 @@ func Register(api huma.API, svc Service) {
 
 type handler struct{ svc Service }
 
-func optionalID(s, location string) (*uuid.UUID, error) {
-	if s == "" {
-		return nil, nil
-	}
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return nil, problem.Field(location, "must be a UUID")
-	}
-	return &id, nil
-}
-
 // localeOf maps Accept-Language to tr or en (04 §1.12; tr otherwise).
 func localeOf(acceptLanguage string) string {
 	for tag := range strings.SplitSeq(acceptLanguage, ",") {
@@ -257,7 +246,7 @@ type listDepartmentsInput struct {
 type listDepartmentsOutput struct{ Body DepartmentList }
 
 func (h handler) listDepartments(ctx context.Context, in *listDepartmentsInput) (*listDepartmentsOutput, error) {
-	faculty, err := optionalID(in.FacultyID, "query.faculty_id")
+	faculty, err := httpx.OptID("query.faculty_id", in.FacultyID)
 	if err != nil {
 		return nil, err
 	}
@@ -329,7 +318,7 @@ type listClubsInput struct {
 type listClubsOutput struct{ Body ClubCardList }
 
 func (h handler) listClubs(ctx context.Context, in *listClubsInput) (*listClubsOutput, error) {
-	uni, err := optionalID(in.UniversityID, "query.university_id")
+	uni, err := httpx.OptID("query.university_id", in.UniversityID)
 	if err != nil {
 		return nil, err
 	}
@@ -594,7 +583,7 @@ func (h handler) adminCreateDepartment(ctx context.Context, in *adminCreateDepar
 		return nil, err
 	}
 	b := in.Body
-	faculty, err := optionalID(b.FacultyID, "body.faculty_id")
+	faculty, err := httpx.OptID("body.faculty_id", b.FacultyID)
 	if err != nil {
 		return nil, err
 	}

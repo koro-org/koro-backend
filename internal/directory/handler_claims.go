@@ -111,7 +111,7 @@ func (h handler) createClaim(ctx context.Context, in *createClaimInput) (*claimO
 	if err != nil {
 		return nil, err
 	}
-	file, err := optionalID(in.Body.EvidenceFileID, "body.evidence_file_id")
+	file, err := httpx.OptID("body.evidence_file_id", in.Body.EvidenceFileID)
 	if err != nil {
 		return nil, err
 	}

@@ -1,8 +1,10 @@
 # CI (docs/design/05 §15.5, OPS-001): fmt → lint → tidy → OpenAPI diff
 # (check) → unit + integration tests under -race (test-integration) →
 # govulncheck/gosec + gitleaks (security) → image build + Trivy + SBOM
-# (image). Every action is pinned to a commit SHA (tag in the comment);
-# GITHUB_TOKEN is read-only. The Go version comes from go.mod.
+# (image, pull requests) or, on main, the same plus GHCR push, cosign
+# signature and SBOM attestation (publish; OPS-008). Every action is pinned
+# to a commit SHA (tag in the comment); GITHUB_TOKEN is read-only except in
+# `publish`. The Go version comes from go.mod.
 #
 # Budget: private repo on the free plan (2000 min/month; runners have
 # 2 vCPU, 7.9 GB RAM, 3 GB swap). Go caches are restored in every job and
@@ -22,9 +24,12 @@ on:
 permissions:
   contents: read
 
+# A newer push to a pull request cancels the older run. On main every
+# commit runs to the end: each one gets its signed image, which a release
+# tag may later promote (release.yml).
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   GOTOOLCHAIN: local
@@ -45,9 +50,9 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 2 # HEAD^1 = the base of a pull request's merge commit
-      # The image job runs on main pushes and on pull requests that touch the
-      # image's inputs (Dockerfile, modules, CI); Go code is tested by the
-      # other jobs and the image is rebuilt and scanned on main.
+      # The image job runs on pull requests that touch the image's inputs
+      # (Dockerfile, modules, CI); Go code is tested by the other jobs and
+      # every main push builds, scans and publishes the image (publish).
       - name: Does the change touch the image?
         id: changes
         run: |
@@ -243,9 +248,10 @@ jobs:
             ~/.cache/golangci-lint
           key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
+  # Pull requests: build and scan only (no registry, read-only token).
   image:
     needs: [check, test-integration, security]
-    if: needs.check.outputs.image == 'true' && needs.check.outputs.merged != 'true'
+    if: github.event_name == 'pull_request' && needs.check.outputs.image == 'true' && needs.check.outputs.merged != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -253,8 +259,6 @@ jobs:
         with:
           persist-credentials: false
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      # Built in CI, never on the server; tagged with the git sha (no latest).
-      # Push + cosign signing are added when the registry is chosen.
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -263,6 +267,8 @@ jobs:
           tags: koro:${{ github.sha }}
           load: true
           push: false
+          provenance: false
+          sbom: false
       - name: Trivy (fail on HIGH/CRITICAL)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -275,3 +281,106 @@ jobs:
         with:
           image: koro:${{ github.sha }}
           format: spdx-json
+
+  # main: the image that passed the tests and the scan goes to GHCR as
+  # ghcr.io/koro-org/koro-backend:<git sha> (no latest), signed keyless with
+  # cosign (GitHub OIDC → Sigstore; no key secret) and with its SBOM as a
+  # signed attestation. Built once and loaded, so the pushed image is the
+  # scanned image. Deployers verify the signature against this workflow on
+  # refs/heads/main (koro-infra scripts/deploy/verify-image.sh), so an image
+  # pushed but not signed (a failed or cancelled run) is never deployed.
+  publish:
+    needs: [check, test-integration, security]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write # push the image, its signature and attestation
+      id-token: write # cosign keyless signing (Fulcio certificate)
+    env:
+      IMAGE: ghcr.io/koro-org/koro-backend
+      COSIGN_YES: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/Dockerfile
+          build-args: GIT_SHA=${{ github.sha }}
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          load: true
+          push: false
+          provenance: false
+          sbom: false
+      - name: Trivy (fail on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}:${{ github.sha }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ${{ env.IMAGE }}:${{ github.sha }}
+          format: spdx-json
+          output-file: ${{ runner.temp }}/sbom.spdx.json
+          artifact-name: sbom-koro-backend-${{ github.sha }}.spdx.json
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Push
+        id: push
+        run: |
+          docker push --quiet "$IMAGE:$GITHUB_SHA"
+          digest=$(docker buildx imagetools inspect "$IMAGE:$GITHUB_SHA" --format '{{json .Manifest}}' | jq -r .digest)
+          case "$digest" in sha256:*) ;; *) echo "::error::no digest for $IMAGE:$GITHUB_SHA"; exit 1 ;; esac
+          echo "ref=$IMAGE:$GITHUB_SHA@$digest" >>"$GITHUB_OUTPUT"
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.0.6
+      - name: Sign and attest the SBOM (keyless)
+        env:
+          REF: ${{ steps.push.outputs.ref }}
+        run: |
+          cosign sign "$REF"
+          cosign attest --type spdxjson --predicate "$RUNNER_TEMP/sbom.spdx.json" "$REF"
+          {
+            echo "### Image"
+            echo '```'
+            echo "$REF"
+            echo '```'
+            echo "Signed by \`$GITHUB_REPOSITORY/.github/workflows/ci.yml@$GITHUB_REF\` (keyless, Sigstore)."
+          } >>"$GITHUB_STEP_SUMMARY"
+      # Staging deploy (koro-infra deploy.yml). Off until the servers exist:
+      # the repository variable DEPLOY_ENABLED turns it on. The GitHub App
+      # token can only dispatch workflows of the deploy repository (Actions:
+      # write); it cannot read or push its code.
+      - name: Deploy token
+        id: deploy-token
+        if: vars.DEPLOY_ENABLED == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.DEPLOY_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DEPLOY_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: koro-infra
+          permission-actions: write
+      - name: Deploy to staging
+        if: vars.DEPLOY_ENABLED == 'true'
+        env:
+          GH_TOKEN: ${{ steps.deploy-token.outputs.token }}
+          REF: ${{ steps.push.outputs.ref }}
+        run: |
+          gh workflow run deploy.yml -R "$GITHUB_REPOSITORY_OWNER/koro-infra" --ref main \
+            -f environment=staging -f component=api -f image="$REF"
+          echo "Staging deploy requested: $REF" >>"$GITHUB_STEP_SUMMARY"

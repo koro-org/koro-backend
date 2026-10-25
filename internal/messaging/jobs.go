@@ -13,6 +13,7 @@ import (
 	"koro/internal/identity"
 	"koro/internal/notify"
 	"koro/internal/orgs"
+	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/queue"
 )
@@ -72,36 +73,27 @@ func (s *service) ExpireDue(ctx context.Context) error {
 	if err := authz.Can(ctx, authz.SystemActor(ExpireJobName), authz.MessagingContactRequestExpire, authz.Resource{}); err != nil {
 		return err
 	}
+	// A batch reports the rows it saw (a short batch is the last one); the
+	// log counts the requests closed (read only when every batch committed).
 	total := 0
-	for {
-		var n, seen int
-		err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-			rows, err := s.d.Store.DueForExpiry(ctx, s.now(), ExpireBatch)
-			if err != nil {
-				return err
-			}
-			seen = len(rows)
-			for _, r := range rows {
-				ok, err := s.expire(ctx, r)
-				if err != nil {
-					return err
-				}
-				if ok {
-					n++
-				}
-			}
-			return nil
-		})
+	_, err := db.Batches(ctx, s.d.Tx, ExpireBatch, func(ctx context.Context) (int, error) {
+		rows, err := s.d.Store.DueForExpiry(ctx, s.now(), ExpireBatch)
 		if err != nil {
-			return err
+			return 0, err
 		}
-		total += n
-		if seen < ExpireBatch {
-			break
+		for _, r := range rows {
+			ok, err := s.expire(ctx, r)
+			if err != nil {
+				return 0, err
+			}
+			if ok {
+				total++
+			}
 		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
+		return len(rows), nil
+	})
+	if err != nil {
+		return err
 	}
 	if total > 0 {
 		s.d.Log.LogAttrs(ctx, slog.LevelInfo, "contact requests expired", slog.Int("count", total))

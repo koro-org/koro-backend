@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/queue"
@@ -83,22 +84,12 @@ func (s *service) cleanup(ctx context.Context, job string, retention Retention, 
 		}
 	}
 	cutoff := s.now().Add(-period)
-	total := 0
-	for {
-		var n int
-		err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-			var err error
-			n, err = del(ctx, cutoff, cleanupBatch)
-			return err
-		})
-		if err != nil {
-			return fmt.Errorf("%s: %w", job, err)
-		}
-		total += n
-		if n < cleanupBatch || ctx.Err() != nil {
-			break
-		}
+	total, err := db.Batches(ctx, s.d.Tx, cleanupBatch, func(ctx context.Context) (int, error) {
+		return del(ctx, cutoff, cleanupBatch)
+	})
+	if err != nil {
+		return fmt.Errorf("%s: %w", job, err)
 	}
 	s.d.Log.LogAttrs(ctx, slog.LevelInfo, "cleanup done", slog.String("job", job), slog.Int("deleted", total))
-	return ctx.Err()
+	return nil
 }

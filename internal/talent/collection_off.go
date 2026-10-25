@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"uuid"
 
+	"koro/internal/platform/db"
 	"koro/internal/platform/privacy"
 )
 
@@ -43,32 +44,27 @@ const purgeBatch = RetentionBatch / 2
 // returns how many of each went.
 func (s *service) purgeScores(ctx context.Context) (scores, cohorts int, err error) {
 	runID := uuid.NewV7()
-	for {
+	// Fewer rows than users asked for: fewer users were left.
+	_, err = db.Batches(ctx, db.TxFunc(s.inTx), purgeBatch, func(ctx context.Context) (int, error) {
 		started := s.now()
-		var ns, nc int
-		err := s.inTx(ctx, func(ctx context.Context) error {
-			var err error
-			if ns, nc, err = s.d.Store.PurgeScores(ctx, purgeBatch); err != nil || ns+nc == 0 {
-				return err
-			}
-			return s.d.Store.AsApp(ctx, func(ctx context.Context) error {
-				return s.d.Destructions.Record(ctx, privacy.Destruction{PolicyCode: PolicyCollectionOff, RunID: runID,
-					Module: providerName, Method: privacy.MethodHardDelete, Count: ns + nc, PeriodCutoff: started,
-					StartedAt: started, FinishedAt: s.now(),
-					Details: map[string]any{"job": RecomputeJobName, "reason": "collection_off", "scores": ns, "cohorts": nc}})
-			})
-		})
-		if err != nil {
-			return scores, cohorts, fmt.Errorf("%s: purge scores (collection off): %w", RecomputeJobName, err)
+		ns, nc, err := s.d.Store.PurgeScores(ctx, purgeBatch)
+		if err != nil || ns+nc == 0 {
+			return 0, err
 		}
-		scores, cohorts = scores+ns, cohorts+nc
-		// Fewer rows than users asked for: fewer users were left.
-		if ns+nc < purgeBatch {
-			break
+		if err := s.d.Store.AsApp(ctx, func(ctx context.Context) error {
+			return s.d.Destructions.Record(ctx, privacy.Destruction{PolicyCode: PolicyCollectionOff, RunID: runID,
+				Module: providerName, Method: privacy.MethodHardDelete, Count: ns + nc, PeriodCutoff: started,
+				StartedAt: started, FinishedAt: s.now(),
+				Details: map[string]any{"job": RecomputeJobName, "reason": "collection_off", "scores": ns, "cohorts": nc}})
+		}); err != nil {
+			return 0, err
 		}
-		if err := ctx.Err(); err != nil {
-			return scores, cohorts, err
-		}
+		// Counted on commit: an error returns the committed batches only.
+		db.AfterCommit(ctx, func(context.Context) { scores, cohorts = scores+ns, cohorts+nc })
+		return ns + nc, nil
+	})
+	if err != nil {
+		return scores, cohorts, fmt.Errorf("%s: purge scores (collection off): %w", RecomputeJobName, err)
 	}
 	if scores+cohorts > 0 {
 		s.d.Log.LogAttrs(ctx, slog.LevelInfo, "talent scores deleted: collection is off (talent.default_enabled, T-324)",

@@ -7,6 +7,7 @@ import (
 	"uuid"
 
 	"koro/internal/authz"
+	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/problem"
@@ -313,44 +314,44 @@ func (s *service) closeWindows(ctx context.Context) error {
 	if err := authz.Can(ctx, sys, authz.OrdersLineAutoFulfill, authz.Resource{Type: authz.TypeOrderLine}); err != nil {
 		return queue.Permanent(err)
 	}
+	// total counts the fulfilled lines (read only when every batch
+	// committed); a batch that fulfils none ends the loop, since its
+	// skipped lines would come back unchanged.
 	now, total := s.now(), 0
-	for {
-		n, done := 0, 0
-		err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-			due, err := s.d.Store.WindowsElapsed(ctx, now, jobBatch)
-			if err != nil {
-				return err
-			}
-			n = len(due)
-			for _, l := range due {
-				o, err := s.d.Store.GetOrder(ctx, l.OrderID, true)
-				if err != nil {
-					return err
-				}
-				cur, err := s.d.Store.GetLine(ctx, l.ID, true)
-				if err != nil {
-					return err
-				}
-				if fullyRefundedService(o, cur) || cur.FulfillmentStatus != FulfillMarked || cur.DisputeWindowEndsAt == nil || cur.DisputeWindowEndsAt.After(now) {
-					continue
-				}
-				if _, err := s.fulfil(ctx, sys, authz.OrdersLineAutoFulfill, cur, ViaWindowElapsed, now, ""); err != nil {
-					return err
-				}
-				if _, err := s.advance(ctx, cur.OrderID, now); err != nil {
-					return err
-				}
-				done++
-			}
-			return nil
-		})
+	_, err := db.Batches(ctx, s.d.Tx, jobBatch, func(ctx context.Context) (int, error) {
+		due, err := s.d.Store.WindowsElapsed(ctx, now, jobBatch)
 		if err != nil {
-			return err
+			return 0, err
+		}
+		done := 0
+		for _, l := range due {
+			o, err := s.d.Store.GetOrder(ctx, l.OrderID, true)
+			if err != nil {
+				return 0, err
+			}
+			cur, err := s.d.Store.GetLine(ctx, l.ID, true)
+			if err != nil {
+				return 0, err
+			}
+			if fullyRefundedService(o, cur) || cur.FulfillmentStatus != FulfillMarked || cur.DisputeWindowEndsAt == nil || cur.DisputeWindowEndsAt.After(now) {
+				continue
+			}
+			if _, err := s.fulfil(ctx, sys, authz.OrdersLineAutoFulfill, cur, ViaWindowElapsed, now, ""); err != nil {
+				return 0, err
+			}
+			if _, err := s.advance(ctx, cur.OrderID, now); err != nil {
+				return 0, err
+			}
+			done++
 		}
 		total += done
-		if n < jobBatch || done == 0 {
-			break
+		if done == 0 {
+			return 0, nil
 		}
+		return len(due), nil
+	})
+	if err != nil {
+		return err
 	}
 	s.d.Log.LogAttrs(ctx, slog.LevelInfo, "dispute windows closed", slog.Int("count", total))
 	return nil

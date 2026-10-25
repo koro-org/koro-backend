@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"koro/internal/authz"
+	"koro/internal/platform/db"
 )
 
 // T-264 (BE-033): nothing wrote events.status = completed. The system now
@@ -36,30 +37,22 @@ const (
 // the next run.
 func (s *service) completeEnded(ctx context.Context) error {
 	sys := authz.SystemActor(CompleteEndedJobName)
-	total := 0
-	for {
-		var rows []Event
-		err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-			var err error
-			if rows, err = s.d.Store.CompleteEnded(ctx, s.now(), jobBatch); err != nil {
-				return err
-			}
-			for _, e := range rows {
-				ev := auditEvent(sys, authz.Action(auditEventComplete), eventAggType, e.ID, e.OrgID, "",
-					map[string]any{"ended_at": e.EndsAt.UTC().Format(time.RFC3339)})
-				if err := s.d.Audit.Log(ctx, ev); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
+	total, err := db.Batches(ctx, s.d.Tx, jobBatch, func(ctx context.Context) (int, error) {
+		rows, err := s.d.Store.CompleteEnded(ctx, s.now(), jobBatch)
 		if err != nil {
-			return err
+			return 0, err
 		}
-		total += len(rows)
-		if len(rows) < jobBatch {
-			break
+		for _, e := range rows {
+			ev := auditEvent(sys, authz.Action(auditEventComplete), eventAggType, e.ID, e.OrgID, "",
+				map[string]any{"ended_at": e.EndsAt.UTC().Format(time.RFC3339)})
+			if err := s.d.Audit.Log(ctx, ev); err != nil {
+				return 0, err
+			}
 		}
+		return len(rows), nil
+	})
+	if err != nil {
+		return err
 	}
 	if total > 0 {
 		s.d.Log.LogAttrs(ctx, slog.LevelInfo, "ended events completed", slog.Int("count", total))

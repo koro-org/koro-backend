@@ -9,6 +9,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/notify"
+	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/queue"
@@ -115,39 +116,30 @@ func (s *service) handleEventCancelled(ctx context.Context, env domainevent.Enve
 		return queue.Permanent(err)
 	}
 	sys := authz.SystemActor(cancelEventJob)
-	total := 0
-	for {
-		n := 0
-		err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-			e, err := s.d.Store.LockEvent(ctx, p.EventID)
-			switch {
-			case errors.Is(err, ErrNotFound):
-				return nil
-			case err != nil:
-				return err
-			case e.OrgID != p.OrgID || e.Status != StatusCancelled:
-				return nil // not this org's event, or not cancelled: nothing to do
-			}
-			rows, err := s.d.Store.LockActiveRegistrations(ctx, e.OrgID, e.ID, jobBatch)
-			if err != nil {
-				return err
-			}
-			n = len(rows)
-			now := s.now()
-			for _, r := range rows {
-				if err := s.endRegistration(ctx, sys, e, r, RegCancelled, BySystem, nil, RevokeEventCancelled, now); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
+	total, err := db.Batches(ctx, s.d.Tx, jobBatch, func(ctx context.Context) (int, error) {
+		e, err := s.d.Store.LockEvent(ctx, p.EventID)
+		switch {
+		case errors.Is(err, ErrNotFound):
+			return 0, nil
+		case err != nil:
+			return 0, err
+		case e.OrgID != p.OrgID || e.Status != StatusCancelled:
+			return 0, nil // not this org's event, or not cancelled: nothing to do
+		}
+		rows, err := s.d.Store.LockActiveRegistrations(ctx, e.OrgID, e.ID, jobBatch)
 		if err != nil {
-			return err
+			return 0, err
 		}
-		total += n
-		if n < jobBatch {
-			break
+		now := s.now()
+		for _, r := range rows {
+			if err := s.endRegistration(ctx, sys, e, r, RegCancelled, BySystem, nil, RevokeEventCancelled, now); err != nil {
+				return 0, err
+			}
 		}
+		return len(rows), nil
+	})
+	if err != nil {
+		return err
 	}
 	s.d.Log.LogAttrs(ctx, slog.LevelInfo, "registrations of a cancelled event cancelled",
 		slog.String("event_id", p.EventID.String()), slog.Int("count", total))
@@ -252,29 +244,21 @@ func (s *service) expireWaitlists(ctx context.Context) error {
 	if err := authz.Can(ctx, sys, authz.EventsRegistrationExpire, authz.Resource{}); err != nil {
 		return err
 	}
-	total := 0
-	for {
-		var rows []Registration
-		err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-			var err error
-			if rows, err = s.d.Store.ExpireWaitlisted(ctx, s.now(), jobBatch); err != nil {
-				return err
-			}
-			for _, r := range rows {
-				if err := s.d.Audit.Log(ctx, auditEvent(sys, authz.EventsRegistrationExpire, regAggType, r.ID, r.OrgID, "",
-					map[string]any{"event_id": r.EventID.String()})); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
+	total, err := db.Batches(ctx, s.d.Tx, jobBatch, func(ctx context.Context) (int, error) {
+		rows, err := s.d.Store.ExpireWaitlisted(ctx, s.now(), jobBatch)
 		if err != nil {
-			return err
+			return 0, err
 		}
-		total += len(rows)
-		if len(rows) < jobBatch {
-			break
+		for _, r := range rows {
+			if err := s.d.Audit.Log(ctx, auditEvent(sys, authz.EventsRegistrationExpire, regAggType, r.ID, r.OrgID, "",
+				map[string]any{"event_id": r.EventID.String()})); err != nil {
+				return 0, err
+			}
 		}
+		return len(rows), nil
+	})
+	if err != nil {
+		return err
 	}
 	s.d.Log.LogAttrs(ctx, slog.LevelInfo, "waiting lists expired", slog.Int("count", total))
 	return nil

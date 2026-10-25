@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"koro/internal/authz"
+	"koro/internal/platform/db"
 	"koro/internal/platform/privacy"
 )
 
@@ -154,23 +155,7 @@ func (s *service) purgeBatches(ctx context.Context, approved bool, purge func(ct
 	if !approved {
 		return purge(ctx, 0, true)
 	}
-	total := 0
-	for {
-		var n int
-		err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-			var err error
-			n, err = purge(ctx, RetentionBatch, false)
-			return err
-		})
-		if err != nil {
-			return total, err
-		}
-		total += n
-		if n < RetentionBatch {
-			return total, nil
-		}
-		if err := ctx.Err(); err != nil {
-			return total, err
-		}
-	}
+	return db.Batches(ctx, s.d.Tx, RetentionBatch, func(ctx context.Context) (int, error) {
+		return purge(ctx, RetentionBatch, false)
+	})
 }

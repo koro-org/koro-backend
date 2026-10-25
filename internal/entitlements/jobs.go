@@ -7,6 +7,7 @@ import (
 
 	"koro/internal/audit"
 	"koro/internal/authz"
+	"koro/internal/platform/db"
 	"koro/internal/platform/queue"
 )
 
@@ -36,33 +37,25 @@ func (s *service) expire(ctx context.Context) error {
 	if err := authz.Can(ctx, sys, authz.EntitlementsEntitlementExpire, authz.Resource{Type: authz.TypeEntitlement}); err != nil {
 		return queue.Permanent(err)
 	}
-	now, total := s.d.Clock.Now(), 0
-	for {
-		n := 0
-		err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-			rows, err := s.d.Store.Expire(ctx, now, batchSize)
-			if err != nil {
-				return err
-			}
-			n = len(rows)
-			for _, e := range rows {
-				if err := s.d.Audit.Log(ctx, audit.Event{
-					Action: string(authz.EntitlementsEntitlementExpire), Outcome: audit.Success, OrgID: &e.OrgID,
-					ResourceType: authz.TypeEntitlement, ResourceID: &e.ID,
-					Metadata: map[string]any{"feature": string(e.Feature), "quantity_used": e.QuantityUsed},
-				}.By(sys)); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
+	now := s.d.Clock.Now()
+	total, err := db.Batches(ctx, s.d.Tx, batchSize, func(ctx context.Context) (int, error) {
+		rows, err := s.d.Store.Expire(ctx, now, batchSize)
 		if err != nil {
-			return err
+			return 0, err
 		}
-		total += n
-		if n < batchSize {
-			break
+		for _, e := range rows {
+			if err := s.d.Audit.Log(ctx, audit.Event{
+				Action: string(authz.EntitlementsEntitlementExpire), Outcome: audit.Success, OrgID: &e.OrgID,
+				ResourceType: authz.TypeEntitlement, ResourceID: &e.ID,
+				Metadata: map[string]any{"feature": string(e.Feature), "quantity_used": e.QuantityUsed},
+			}.By(sys)); err != nil {
+				return 0, err
+			}
 		}
+		return len(rows), nil
+	})
+	if err != nil {
+		return err
 	}
 	s.d.Log.LogAttrs(ctx, slog.LevelInfo, "entitlements expired", slog.Int("count", total))
 	return nil

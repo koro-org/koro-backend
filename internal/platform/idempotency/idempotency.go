@@ -183,16 +183,12 @@ func (k *Keeper) CleanupJob() queue.Job {
 	return queue.Job{
 		Name: CleanupJobName, Cron: cleanupCron, Queue: queue.Low, Unique: cleanupUnique,
 		Handle: func(ctx context.Context) error {
-			now, total := k.d.Clock.Now(), 0
-			for {
-				n, err := k.d.Store.DeleteExpired(ctx, now, cleanupBatch)
-				if err != nil {
-					return err
-				}
-				total += n
-				if n < cleanupBatch {
-					break
-				}
+			now := k.d.Clock.Now()
+			total, err := db.Drain(ctx, cleanupBatch, func(ctx context.Context) (int, error) {
+				return k.d.Store.DeleteExpired(ctx, now, cleanupBatch)
+			})
+			if err != nil {
+				return err
 			}
 			if k.d.Log != nil {
 				k.d.Log.LogAttrs(ctx, slog.LevelInfo, "idempotency cleanup done", slog.Int("deleted", total))

@@ -15,6 +15,7 @@ import (
 	"koro/internal/consent"
 	"koro/internal/identity"
 	"koro/internal/platform/civil"
+	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/queue"
@@ -454,22 +455,18 @@ func (s *service) handleSensitivityChanged(ctx context.Context, e domainevent.En
 		return queue.Permanent(err)
 	}
 	if p.Sensitive {
-		key, total := ClubKey(p.ClubOrgID), 0
-		for ctx.Err() == nil {
-			n, err := s.d.Store.RemoveAudienceKey(ctx, key, s.now(), batchSize)
-			if err != nil {
-				return fmt.Errorf("%s: %w", DropSensitiveClubKeyTaskName, err)
-			}
-			total += n
-			if n < batchSize {
-				break
-			}
+		key := ClubKey(p.ClubOrgID)
+		total, err := db.Drain(ctx, batchSize, func(ctx context.Context) (int, error) {
+			return s.d.Store.RemoveAudienceKey(ctx, key, s.now(), batchSize)
+		})
+		if err != nil {
+			return fmt.Errorf("%s: %w", DropSensitiveClubKeyTaskName, err)
 		}
 		if total > 0 {
 			s.d.Log.LogAttrs(ctx, slog.LevelInfo, "sensitive club key removed from audiences",
 				slog.String("org_id", p.ClubOrgID.String()), slog.Int("profiles", total))
 		}
-		return ctx.Err()
+		return nil
 	}
 	members, err := s.d.Orgs.ActiveMemberIDs(ctx, p.ClubOrgID)
 	if err != nil {

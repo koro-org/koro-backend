@@ -125,23 +125,16 @@ func (w sweeper) Sweep(ctx context.Context, p privacy.RetentionPolicy, now time.
 		return res, err
 	}
 	for _, pg := range purges {
-		for {
-			var n int
-			err := w.s.inTx(ctx, func(ctx context.Context) error {
-				var err error
-				n, err = pg.run(ctx, RetentionBatch, false)
-				return err
-			})
-			if err != nil {
-				return res, fmt.Errorf("talent: retention %s: %w", p.Code, err)
-			}
-			res.Count += n
-			if n == 0 || (!pg.phased && n < RetentionBatch) {
-				break
-			}
-			if err := ctx.Err(); err != nil {
-				return res, err
-			}
+		size := RetentionBatch
+		if pg.phased {
+			size = db.UntilEmpty
+		}
+		n, err := db.Batches(ctx, db.TxFunc(w.s.inTx), size, func(ctx context.Context) (int, error) {
+			return pg.run(ctx, RetentionBatch, false)
+		})
+		res.Count += n
+		if err != nil {
+			return res, fmt.Errorf("talent: retention %s: %w", p.Code, err)
 		}
 	}
 	return res, nil

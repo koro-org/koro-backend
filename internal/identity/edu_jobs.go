@@ -15,6 +15,7 @@ import (
 	"koro/internal/notify"
 	"koro/internal/platform/civil"
 	"koro/internal/platform/clock"
+	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/queue"
 )
@@ -133,42 +134,32 @@ func (s *service) expireEdu(ctx context.Context) error {
 	if err := authz.Can(ctx, sys, authz.IdentityEduVerificationExpire, authz.Resource{Type: authz.TypeEduVerification}); err != nil {
 		return err
 	}
-	total := 0
-	for {
-		var n int
-		err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-			now := s.now()
-			rows, err := s.d.Store.ExpireEduVerifications(ctx, now, eduBatch)
-			if err != nil {
-				return err
-			}
-			n = len(rows)
-			for _, v := range rows {
-				env, err := domainevent.New(domainevent.UserEduVerificationLapsed{UserID: v.UserID, VerificationID: v.ID}, eduAggType, v.ID)
-				if err != nil {
-					return err
-				}
-				if err := s.d.Outbox.Add(ctx, env); err != nil {
-					return err
-				}
-				s.notifyEdu(ctx, eduNotice{UserID: v.UserID, VerificationID: v.ID, Kind: eduNoticeLapsed})
-				if err := s.d.Audit.Log(ctx, event(authz.IdentityEduVerificationExpire, audit.Success, resourceEdu, v.ID,
-					map[string]any{"subject_user_id": v.UserID.String()}).By(sys)); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
+	total, err := db.Batches(ctx, s.d.Tx, eduBatch, func(ctx context.Context) (int, error) {
+		rows, err := s.d.Store.ExpireEduVerifications(ctx, s.now(), eduBatch)
 		if err != nil {
-			return fmt.Errorf("%s: %w", EduExpireJobName, err)
+			return 0, err
 		}
-		total += n
-		if n < eduBatch || ctx.Err() != nil {
-			break
+		for _, v := range rows {
+			env, err := domainevent.New(domainevent.UserEduVerificationLapsed{UserID: v.UserID, VerificationID: v.ID}, eduAggType, v.ID)
+			if err != nil {
+				return 0, err
+			}
+			if err := s.d.Outbox.Add(ctx, env); err != nil {
+				return 0, err
+			}
+			s.notifyEdu(ctx, eduNotice{UserID: v.UserID, VerificationID: v.ID, Kind: eduNoticeLapsed})
+			if err := s.d.Audit.Log(ctx, event(authz.IdentityEduVerificationExpire, audit.Success, resourceEdu, v.ID,
+				map[string]any{"subject_user_id": v.UserID.String()}).By(sys)); err != nil {
+				return 0, err
+			}
 		}
+		return len(rows), nil
+	})
+	if err != nil {
+		return fmt.Errorf("%s: %w", EduExpireJobName, err)
 	}
 	s.d.Log.LogAttrs(ctx, slog.LevelInfo, "student verifications expired", slog.String("job", EduExpireJobName), slog.Int("expired", total))
-	return ctx.Err()
+	return nil
 }
 
 // remindEdu is identity.edu_renewal_reminders (01 §7): a reminder to every

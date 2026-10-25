@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"koro/internal/platform/db"
 	"koro/internal/platform/privacy"
 )
 
@@ -44,22 +45,9 @@ func (w sweeper) Sweep(ctx context.Context, p privacy.RetentionPolicy, now time.
 		res.Count = n
 		return res, err
 	}
-	for {
-		var n int
-		err := w.s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-			var err error
-			n, err = w.s.d.Store.PurgeDispatches(ctx, cutoff, RetentionBatch, false)
-			return err
-		})
-		res.Count += n
-		if err != nil {
-			return res, err
-		}
-		if n < RetentionBatch {
-			return res, nil
-		}
-		if err := ctx.Err(); err != nil {
-			return res, err
-		}
-	}
+	n, err := db.Batches(ctx, w.s.d.Tx, RetentionBatch, func(ctx context.Context) (int, error) {
+		return w.s.d.Store.PurgeDispatches(ctx, cutoff, RetentionBatch, false)
+	})
+	res.Count = n
+	return res, err
 }

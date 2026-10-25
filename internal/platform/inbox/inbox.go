@@ -316,13 +316,15 @@ func (in *Inbox) PurgeJob(payloadRetention, rowRetention func(ctx context.Contex
 				return err
 			}
 			now := in.d.Clock.Now()
-			purged, err := batches(func() (int, error) {
+			purged, err := db.Drain(ctx, purgeBatch, func(ctx context.Context) (int, error) {
 				return in.d.Store.PurgePayloads(ctx, now.Add(-keepPayload), now, purgeBatch)
 			})
 			if err != nil {
 				return err
 			}
-			deleted, err := batches(func() (int, error) { return in.d.Store.DeleteOld(ctx, now.Add(-keepRow), purgeBatch) })
+			deleted, err := db.Drain(ctx, purgeBatch, func(ctx context.Context) (int, error) {
+				return in.d.Store.DeleteOld(ctx, now.Add(-keepRow), purgeBatch)
+			})
 			if err != nil {
 				return err
 			}
@@ -330,20 +332,6 @@ func (in *Inbox) PurgeJob(payloadRetention, rowRetention func(ctx context.Contex
 				slog.Int("payloads_purged", purged), slog.Int("rows_deleted", deleted))
 			return nil
 		},
-	}
-}
-
-func batches(step func() (int, error)) (int, error) {
-	total := 0
-	for {
-		n, err := step()
-		if err != nil {
-			return total, err
-		}
-		total += n
-		if n < purgeBatch {
-			return total, nil
-		}
 	}
 }
 

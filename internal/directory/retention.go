@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"koro/internal/authz"
+	"koro/internal/platform/db"
 	"koro/internal/platform/privacy"
 )
 
@@ -48,35 +49,23 @@ func (w sweeper) Sweep(ctx context.Context, p privacy.RetentionPolicy, now time.
 		return res, err
 	}
 	sys := authz.SystemActor(retentionJob)
-	for {
-		var n int
-		err := w.s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-			claims, err := w.s.d.Store.ClaimsDecidedBefore(ctx, cutoff, RetentionBatch)
-			if err != nil {
-				return err
-			}
-			for _, c := range claims {
-				if err := w.s.d.Store.DeleteClaim(ctx, c.ID); err != nil {
-					return err
-				}
-				if c.EvidenceFileID != nil {
-					if err := w.s.removeFile(ctx, sys, *c.EvidenceFileID); err != nil {
-						return err
-					}
-				}
-			}
-			n = len(claims)
-			return nil
-		})
+	n, err := db.Batches(ctx, w.s.d.Tx, RetentionBatch, func(ctx context.Context) (int, error) {
+		claims, err := w.s.d.Store.ClaimsDecidedBefore(ctx, cutoff, RetentionBatch)
 		if err != nil {
-			return res, err
+			return 0, err
 		}
-		res.Count += n
-		if n < RetentionBatch {
-			return res, nil
+		for _, c := range claims {
+			if err := w.s.d.Store.DeleteClaim(ctx, c.ID); err != nil {
+				return 0, err
+			}
+			if c.EvidenceFileID != nil {
+				if err := w.s.removeFile(ctx, sys, *c.EvidenceFileID); err != nil {
+					return 0, err
+				}
+			}
 		}
-		if err := ctx.Err(); err != nil {
-			return res, err
-		}
-	}
+		return len(claims), nil
+	})
+	res.Count = n
+	return res, err
 }

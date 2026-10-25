@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"koro/internal/platform/civil"
+	"koro/internal/platform/db"
 	"koro/internal/platform/privacy"
 )
 
@@ -96,22 +97,7 @@ func (w sweeper) sweepRoots(ctx context.Context, p privacy.RetentionPolicy, now 
 	if !p.LegalApproved {
 		return w.s.d.Store.PurgeRoots(ctx, cutoff, RetentionBatch, true)
 	}
-	total := 0
-	for {
-		var n int
-		if err := w.s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-			var err error
-			n, err = w.s.d.Store.PurgeRoots(ctx, cutoff, RetentionBatch, false)
-			return err
-		}); err != nil {
-			return total, err
-		}
-		total += n
-		if n < RetentionBatch {
-			return total, nil
-		}
-		if err := ctx.Err(); err != nil {
-			return total, err
-		}
-	}
+	return db.Batches(ctx, w.s.d.Tx, RetentionBatch, func(ctx context.Context) (int, error) {
+		return w.s.d.Store.PurgeRoots(ctx, cutoff, RetentionBatch, false)
+	})
 }

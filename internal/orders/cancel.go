@@ -11,6 +11,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/entitlements"
+	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/problem"
@@ -168,38 +169,30 @@ func (s *service) expire(ctx context.Context) error {
 	if err := authz.Can(ctx, sys, authz.OrdersOrderExpire, authz.Resource{Type: authz.TypeOrder}); err != nil {
 		return queue.Permanent(err)
 	}
-	now, total := s.now(), 0
-	for {
-		n := 0
-		err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-			due, err := s.d.Store.DueToExpire(ctx, now, jobBatch)
-			if err != nil {
-				return err
-			}
-			n = len(due)
-			for _, o := range due {
-				stored, err := s.endUnpaid(ctx, o, StatusExpired, nil, revokeExpired)
-				if err != nil {
-					return err
-				}
-				if err := s.d.Audit.Log(ctx, orderEvent(sys, authz.OrdersOrderExpire, stored, "", map[string]any{
-					"from": string(o.Status), "paid_amount": stored.PaidAmount,
-				})); err != nil {
-					return err
-				}
-				if err := s.emitAfterCommit(ctx, auditOrder, stored.ID, domainevent.OrderExpired{OrderID: stored.ID}); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
+	now := s.now()
+	total, err := db.Batches(ctx, s.d.Tx, jobBatch, func(ctx context.Context) (int, error) {
+		due, err := s.d.Store.DueToExpire(ctx, now, jobBatch)
 		if err != nil {
-			return err
+			return 0, err
 		}
-		total += n
-		if n < jobBatch {
-			break
+		for _, o := range due {
+			stored, err := s.endUnpaid(ctx, o, StatusExpired, nil, revokeExpired)
+			if err != nil {
+				return 0, err
+			}
+			if err := s.d.Audit.Log(ctx, orderEvent(sys, authz.OrdersOrderExpire, stored, "", map[string]any{
+				"from": string(o.Status), "paid_amount": stored.PaidAmount,
+			})); err != nil {
+				return 0, err
+			}
+			if err := s.emitAfterCommit(ctx, auditOrder, stored.ID, domainevent.OrderExpired{OrderID: stored.ID}); err != nil {
+				return 0, err
+			}
 		}
+		return len(due), nil
+	})
+	if err != nil {
+		return err
 	}
 	s.d.Log.LogAttrs(ctx, slog.LevelInfo, "unpaid orders expired", slog.Int("count", total))
 	return nil

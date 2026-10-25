@@ -10,6 +10,7 @@ import (
 	"uuid"
 
 	"koro/internal/authz"
+	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/queue"
@@ -266,7 +267,7 @@ func (s *service) handleSensitivityChanged(ctx context.Context, e domainevent.En
 	if !p.Sensitive {
 		return nil
 	}
-	n, err := s.batches(ctx, func(ctx context.Context) (int, error) {
+	n, err := db.Batches(ctx, s.d.Tx, sweepBatch, func(ctx context.Context) (int, error) {
 		return s.d.Store.DeleteEndedMembers(ctx, p.ClubOrgID, sweepBatch)
 	})
 	if err != nil {
@@ -346,7 +347,7 @@ func (s *service) adminSweep(ctx context.Context) error {
 // Deleting the closed ones after their retention is the Sweeper's.
 func (s *service) expireInvitations(ctx context.Context) error {
 	now := s.now()
-	closed, err := s.batches(ctx, func(ctx context.Context) (int, error) {
+	closed, err := db.Batches(ctx, s.d.Tx, sweepBatch, func(ctx context.Context) (int, error) {
 		return s.d.Store.CloseExpiredInvitations(ctx, now, sweepBatch)
 	})
 	if err != nil {
@@ -354,25 +355,4 @@ func (s *service) expireInvitations(ctx context.Context) error {
 	}
 	s.d.Log.LogAttrs(ctx, slog.LevelInfo, "invitations expired", slog.Int("closed", closed))
 	return ctx.Err()
-}
-
-// batches runs fn in its own transaction until it handles fewer than
-// sweepBatch rows.
-func (s *service) batches(ctx context.Context, fn func(context.Context) (int, error)) (int, error) {
-	total := 0
-	for ctx.Err() == nil {
-		var n int
-		if err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-			var err error
-			n, err = fn(ctx)
-			return err
-		}); err != nil {
-			return total, err
-		}
-		total += n
-		if n < sweepBatch {
-			break
-		}
-	}
-	return total, nil
 }

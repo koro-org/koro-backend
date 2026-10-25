@@ -8,6 +8,7 @@ import (
 	"uuid"
 
 	"koro/internal/authz"
+	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/queue"
@@ -114,47 +115,38 @@ func (s *service) handleAttendanceFinalized(ctx context.Context, env domainevent
 	if err := authz.Can(ctx, sys, authz.EventsAttendanceFinalize, authz.Resource{}); err != nil {
 		return err
 	}
-	total := 0
-	for {
-		n := 0
-		err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-			e, err := s.d.Store.LockEvent(ctx, p.EventID)
-			switch {
-			case errors.Is(err, ErrNotFound):
-				return nil
-			case err != nil:
-				return err
-			case e.AttendanceFinalizedAt == nil:
-				return nil // not finalised: nothing to mark
-			}
-			rows, err := s.d.Store.MarkNoShows(ctx, e.OrgID, e.ID, s.batch)
-			if err != nil {
-				return err
-			}
-			n = len(rows)
-			sens, err := s.sensitive(ctx, e)
-			if err != nil {
-				return err
-			}
-			for _, r := range rows {
-				if err := s.d.Audit.Log(ctx, auditEvent(sys, authz.EventsAttendanceFinalize, regAggType, r.ID, e.OrgID, "",
-					map[string]any{"event_id": e.ID.String(), "status": string(RegNoShow)})); err != nil {
-					return err
-				}
-				if err := s.emitReg(ctx, domainevent.RegistrationNoShow{RegistrationID: r.ID, EventID: e.ID, UserID: r.UserID,
-					Sensitive: sens}, r.ID); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
+	total, err := db.Batches(ctx, s.d.Tx, s.batch, func(ctx context.Context) (int, error) {
+		e, err := s.d.Store.LockEvent(ctx, p.EventID)
+		switch {
+		case errors.Is(err, ErrNotFound):
+			return 0, nil
+		case err != nil:
+			return 0, err
+		case e.AttendanceFinalizedAt == nil:
+			return 0, nil // not finalised: nothing to mark
+		}
+		rows, err := s.d.Store.MarkNoShows(ctx, e.OrgID, e.ID, s.batch)
 		if err != nil {
-			return err
+			return 0, err
 		}
-		total += n
-		if n < s.batch {
-			break
+		sens, err := s.sensitive(ctx, e)
+		if err != nil {
+			return 0, err
 		}
+		for _, r := range rows {
+			if err := s.d.Audit.Log(ctx, auditEvent(sys, authz.EventsAttendanceFinalize, regAggType, r.ID, e.OrgID, "",
+				map[string]any{"event_id": e.ID.String(), "status": string(RegNoShow)})); err != nil {
+				return 0, err
+			}
+			if err := s.emitReg(ctx, domainevent.RegistrationNoShow{RegistrationID: r.ID, EventID: e.ID, UserID: r.UserID,
+				Sensitive: sens}, r.ID); err != nil {
+				return 0, err
+			}
+		}
+		return len(rows), nil
+	})
+	if err != nil {
+		return err
 	}
 	s.d.Log.LogAttrs(ctx, slog.LevelInfo, "no-shows marked", slog.String("event_id", p.EventID.String()),
 		slog.Int("count", total))

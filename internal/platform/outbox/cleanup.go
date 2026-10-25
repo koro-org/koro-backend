@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"koro/internal/platform/db"
 	"koro/internal/platform/queue"
 )
 
@@ -28,16 +29,11 @@ func (o *Outbox) CleanupJob(retention func(ctx context.Context) (time.Duration, 
 				return err
 			}
 			cutoff := o.d.Clock.Now().Add(-keep)
-			total := 0
-			for {
-				n, err := o.d.Store.DeletePublished(ctx, cutoff, cleanupBatch)
-				if err != nil {
-					return err
-				}
-				total += n
-				if n < cleanupBatch {
-					break
-				}
+			total, err := db.Drain(ctx, cleanupBatch, func(ctx context.Context) (int, error) {
+				return o.d.Store.DeletePublished(ctx, cutoff, cleanupBatch)
+			})
+			if err != nil {
+				return err
 			}
 			o.d.Log.LogAttrs(ctx, slog.LevelInfo, "outbox cleanup done", slog.Int("deleted", total))
 			return nil

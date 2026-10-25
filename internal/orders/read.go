@@ -8,6 +8,7 @@ import (
 
 	"koro/internal/audit"
 	"koro/internal/authz"
+	"koro/internal/parties"
 	"koro/internal/platform/page"
 )
 
@@ -61,7 +62,7 @@ func (s *service) GetOrder(ctx context.Context, a authz.Actor, id uuid.UUID) (Or
 	if a.HasOrgRole(o.OrgID, authz.MemberRecruiter, authz.MemberCompanyAdmin, authz.MemberCompanyOwner) || staff(a) {
 		v, err := s.viewOf(ctx, o, lines, false)
 		if err == nil {
-			v.DirectPayments, err = s.directInstructions(ctx, a, o, lines)
+			v.DirectPayments, v.DirectStatus, err = s.orderDirect(ctx, a, o, lines)
 		}
 		return v, err
 	}
@@ -103,12 +104,50 @@ func (s *service) PaymentInstructions(ctx context.Context, a authz.Actor, id uui
 		HolderName: acct.HolderName, BankName: acct.BankName, ExpiresAt: o.ExpiresAt}, nil
 }
 
-// directInstructions groups the frozen direct amount by payee. No admin,
+// errNaturalPersonPayee is the cause of the 409 orders.invalid_state of a
+// direct transfer to a payee whose legal party is a natural person (06
+// H-54: such a payee cannot be opened in the MVP, so this is a broken
+// invariant; its account is personal data and never disclosed).
+var errNaturalPersonPayee = errors.New("orders: a natural person payee is not paid directly (06 H-54)")
+
+// directVisible reports whether a may see the direct transfers of o (03
+// BE-066): an unpaid model C order not yet confirmed as paid directly,
+// read by an MFA-verified administrator of the buying company. No admin,
 // support or ordinary buyer-member shortcut may disclose another party's
-// bank account. The audit contains identifiers and amounts, never the IBAN.
+// bank account.
+func directVisible(a authz.Actor, o Order) bool {
+	return o.DirectToPayee() && o.Status == StatusAwaitingPayment && o.DirectConfirmedAt == nil &&
+		a.MFAVerified && a.HasOrgRole(o.OrgID, authz.MemberCompanyAdmin, authz.MemberCompanyOwner)
+}
+
+// orderDirect is the direct part of getOrder (BE-109). Unlike the payment
+// instructions, a payee that cannot be paid directly now (no approved bank
+// account: revoked or never approved; a natural person, 06 H-54) does not
+// hide the order: the buyer still reads it and may cancel it. The status
+// says the transfers are unavailable, and no account is disclosed — not
+// even an approved one of another payee, so the direct amount is never
+// paid in part. Nothing was opened, so nothing is audited. Any other
+// failure (a missing payee, a total that does not match) stays an error.
+func (s *service) orderDirect(ctx context.Context, a authz.Actor, o Order, lines []Line) ([]DirectInstruction, DirectStatus, error) {
+	if !directVisible(a, o) {
+		return nil, "", nil
+	}
+	out, err := s.directInstructions(ctx, a, o, lines)
+	switch {
+	case errors.Is(err, parties.ErrNoApprovedAccount) || errors.Is(err, errNaturalPersonPayee):
+		return nil, DirectUnavailable, nil
+	case err != nil:
+		return nil, "", err
+	}
+	return out, DirectAvailable, nil
+}
+
+// directInstructions groups the frozen direct amount by payee (nothing
+// unless directVisible). Every payee needs its current approved account
+// (409 parties.no_approved_account otherwise): the instructions are all or
+// nothing. The audit contains identifiers and amounts, never the IBAN.
 func (s *service) directInstructions(ctx context.Context, a authz.Actor, o Order, lines []Line) ([]DirectInstruction, error) {
-	if !o.DirectToPayee() || o.Status != StatusAwaitingPayment || o.DirectConfirmedAt != nil ||
-		(!a.MFAVerified || !a.HasOrgRole(o.OrgID, authz.MemberCompanyAdmin, authz.MemberCompanyOwner)) {
+	if !directVisible(a, o) {
 		return nil, nil
 	}
 	amounts := make(map[uuid.UUID]int64)
@@ -138,7 +177,7 @@ func (s *service) directInstructions(ctx context.Context, a authz.Actor, o Order
 			return nil, err
 		}
 		if party.LegalType.NaturalPerson() {
-			return nil, ErrInvalidState
+			return nil, ErrInvalidState.Wrap(errNaturalPersonPayee)
 		}
 		acct, err := s.d.Payees.ApprovedAccount(ctx, id)
 		if err != nil {

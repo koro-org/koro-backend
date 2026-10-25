@@ -8733,6 +8733,12 @@ components:
           items:
             $ref: "#/components/schemas/DirectPaymentDTO"
           type: array
+        direct_payments_status:
+          description: "Present only when direct_payments may be shown: an MFA-verified buyer administrator reading an unpaid, unconfirmed model C order. available: direct_payments lists every payee transfer. unavailable: a payee has no approved bank account now (revoked or not yet approved; getOrderPaymentInstructions answers 409 parties.no_approved_account) or cannot be paid directly (409 orders.invalid_state); direct_payments is then absent, no payee account is disclosed (not even an approved one) and the rest of the order reads as usual"
+          enum:
+            - available
+            - unavailable
+          type: string
         direct_to_payee_amount:
           format: int64
           type: integer
@@ -27135,7 +27141,7 @@ paths:
       x-koro-surface: resource
   /api/v1/orders/{order_id}:
     get:
-      description: "The buyer's members and platform staff get the whole order (view buyer: totals, payment, every line; never the commission). Only MFA-verified buyer administrators see approved payee bank instructions on an unpaid, unconfirmed model C order; bank access is audited. A seller's club admin or university representative gets only its own lines with its net share and the commission, and the buyer's title (view seller). Anyone else: 404."
+      description: "The buyer's members and platform staff get the whole order (view buyer: totals, payment, every line; never the commission). Only MFA-verified buyer administrators see approved payee bank instructions on an unpaid, unconfirmed model C order; bank access is audited. When a payee has no approved bank account (direct_payments_status unavailable) the order still reads in full without any payee account; only the payment instructions answer 409. A seller's club admin or university representative gets only its own lines with its net share and the commission, and the buyer's title (view seller). Anyone else: 404."
       operationId: getOrder
       parameters:
         - description: Order ID (an unknown or malformed ID is 404)

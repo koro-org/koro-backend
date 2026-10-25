@@ -34,6 +34,9 @@ func TestOrders_ModelCIBANMatrix(t *testing.T) {
 				t.Fatal(err)
 			}
 			direct, exists := obj["direct_payments"]
+			// BE-109: getOrder marks the direct part for the buyer admin only.
+			state, hasState := obj["direct_payments_status"]
+			getOrder := !strings.HasSuffix(c.path, "/payment-instructions")
 			if c.persona == "company_admin" {
 				if !exists || len(direct.([]any)) != 1 {
 					t.Fatalf("buyer admin instructions: %s", body)
@@ -42,7 +45,10 @@ func TestOrders_ModelCIBANMatrix(t *testing.T) {
 				if p["iban"] != "TR330006100519786457841326" || p["direct_to_payee_amount"] != float64(1_200_000) {
 					t.Fatalf("payee: %v", p)
 				}
-			} else if exists {
+				if getOrder && state != "available" || !getOrder && hasState {
+					t.Fatalf("buyer admin direct_payments_status: %s", body)
+				}
+			} else if exists || hasState {
 				t.Fatalf("payee IBAN exposed to %s: %s", c.persona, body)
 			}
 		})

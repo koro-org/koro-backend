@@ -70,7 +70,28 @@ type OrderView struct {
 	Sellers        map[uuid.UUID]string // seller org → name
 	SellerView     bool
 	DirectPayments []DirectInstruction
+	// DirectStatus is set only where DirectPayments may be shown (getOrder,
+	// BE-109): an unpaid, unconfirmed model C order read by an MFA-verified
+	// buyer administrator. Empty for every other reader and order.
+	DirectStatus DirectStatus
 }
+
+// DirectStatus tells the buyer's administrators whether getOrder could
+// list the direct transfers of an unpaid model C order (BE-109). The
+// order itself is readable either way; the payment instructions keep
+// refusing (409) while the transfers are unavailable.
+type DirectStatus string
+
+const (
+	// DirectAvailable: DirectPayments lists every transfer of the order.
+	DirectAvailable DirectStatus = "available"
+	// DirectUnavailable: a payee of the order has no approved bank account
+	// now (revoked or never approved; parties.no_approved_account), or may
+	// not be paid directly (06 H-54). DirectPayments is empty: no payee
+	// account is disclosed, not even the ones that are approved, so the
+	// buyer never pays a part of the direct amount on partial instructions.
+	DirectUnavailable DirectStatus = "unavailable"
+)
 
 // OrderPage is a page of orders.
 type OrderPage struct {

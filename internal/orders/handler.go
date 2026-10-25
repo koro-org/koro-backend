@@ -40,7 +40,9 @@ func Register(api huma.API, svc Service) {
 		Summary: "Get an order",
 		Description: "The buyer's members and platform staff get the whole order (view buyer: totals, payment, every " +
 			"line; never the commission). Only MFA-verified buyer administrators see approved payee bank instructions " +
-			"on an unpaid, unconfirmed model C order; bank access is audited. A seller's club admin or university representative gets only its " +
+			"on an unpaid, unconfirmed model C order; bank access is audited. When a payee has no approved bank account " +
+			"(direct_payments_status unavailable) the order still reads in full without any payee account; only the " +
+			"payment instructions answer 409. A seller's club admin or university representative gets only its " +
 			"own lines with its net share and the commission, and the buyer's title (view seller). Anyone else: 404.",
 	}, op.Meta{Action: string(authz.OrdersOrderRead), Surface: op.SurfaceResource}, h.get)
 
@@ -241,6 +243,7 @@ type OrderDTO struct {
 	CancelledAt         *time.Time         `json:"cancelled_at,omitempty"`
 	BuyerSnapshot       *BuyerSnapshotDTO  `json:"buyer_snapshot,omitempty"`
 	DirectPayments      []DirectPaymentDTO `json:"direct_payments,omitempty" doc:"Unpaid model C: approved payee accounts, visible only to the buying company administrators"`
+	DirectStatus        string             `json:"direct_payments_status,omitempty" enum:"available,unavailable" doc:"Present only when direct_payments may be shown: an MFA-verified buyer administrator reading an unpaid, unconfirmed model C order. available: direct_payments lists every payee transfer. unavailable: a payee has no approved bank account now (revoked or not yet approved; getOrderPaymentInstructions answers 409 parties.no_approved_account) or cannot be paid directly (409 orders.invalid_state); direct_payments is then absent, no payee account is disclosed (not even an approved one) and the rest of the order reads as usual"`
 	KoroCollectAmount   *int64             `json:"koro_collect_amount,omitempty"`
 	DirectToPayeeAmount *int64             `json:"direct_to_payee_amount,omitempty"`
 	Lines               []OrderLineDTO     `json:"lines"`
@@ -271,7 +274,7 @@ func orderDTO(v OrderView) OrderDTO {
 		out.OrgID, out.ModelCode = o.OrgID.String(), o.ModelCode
 		out.SubtotalAmount, out.VATAmount, out.VATWithheldAmount = i64(o.SubtotalAmount), i64(o.VATAmount), i64(o.VATWithheldAmount)
 		out.BuyerFeeAmount, out.TotalAmount, out.PayableAmount = i64(o.BuyerFeeAmount), i64(o.TotalAmount), i64(o.PayableAmount)
-		out.DirectPayments = directPaymentDTOs(v.DirectPayments)
+		out.DirectPayments, out.DirectStatus = directPaymentDTOs(v.DirectPayments), string(v.DirectStatus)
 		out.KoroCollectAmount, out.DirectToPayeeAmount = i64(o.KoroCollectAmount), i64(o.DirectToPayeeAmount)
 		out.PaidAmount, out.RefundedAmount = i64(o.PaidAmount), i64(o.RefundedAmount)
 		exp := o.ExpiresAt.UTC()

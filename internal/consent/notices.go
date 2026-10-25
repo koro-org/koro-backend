@@ -161,6 +161,12 @@ type CurrentNotice struct {
 	// show the checkbox of a false one. It does not depend on the reader:
 	// a minor is still refused the restricted purposes (03 k12).
 	Collectable *bool
+	// ScopeType is set on a consent text of a known purpose only (BE-123):
+	// "registration" purposes are granted per event registration (with the
+	// event form), never from the account's consent page, so clients show
+	// no grant button for them (a grant without scope_id is 422
+	// consent.scope_required).
+	ScopeType *ScopeType
 }
 
 // ListCurrentNotices implements Service (listCurrentNotices).
@@ -180,7 +186,7 @@ func (s *service) ListCurrentNotices(ctx context.Context, a authz.Actor, q Notic
 }
 
 // withCollectable marks the consent texts of ns with CurrentNotice's
-// Collectable; the purposes are read once, only when a consent text is
+// Collectable and ScopeType; the purposes are read once, only when a consent text is
 // listed. A text whose purpose is unknown is not collectable.
 func (s *service) withCollectable(ctx context.Context, ns []Notice) ([]CurrentNotice, error) {
 	out := make([]CurrentNotice, len(ns))
@@ -200,8 +206,13 @@ func (s *service) withCollectable(ctx context.Context, ns []Notice) ([]CurrentNo
 				defs[p.Code] = p
 			}
 		}
-		ok := s.collectable(defs[*n.PurposeCode])
+		def := defs[*n.PurposeCode]
+		ok := s.collectable(def)
 		out[i].Collectable = &ok
+		if def.ScopeType != "" {
+			st := def.ScopeType
+			out[i].ScopeType = &st
+		}
 	}
 	return out, nil
 }

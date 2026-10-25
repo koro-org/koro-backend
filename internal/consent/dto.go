@@ -15,6 +15,7 @@ type NoticeDTO struct {
 	Kind            string     `json:"kind" enum:"privacy_notice,consent_text,terms_of_use,cookie_notice"`
 	PurposeCode     string     `json:"purpose_code,omitempty" doc:"Consent purpose of a consent_text; absent for every other kind"`
 	Collectable     *bool      `json:"collectable,omitempty" doc:"listCurrentNotices, consent_text only: whether a grant of the purpose can be recorded now. false: the purpose is switched off, or it needs İYS and no İYS connection is configured (a grant would be 409 consent.iys_unavailable): do not show its checkbox. Minors are still refused the restricted purposes (422 consent.minor_restricted)."`
+	ScopeType       string     `json:"scope_type,omitempty" enum:"none,registration" doc:"listCurrentNotices, consent_text only: none = granted once for the account (consents page); registration = granted per event registration with the event form, never from the consents page (a grant without scope_id is 422 consent.scope_required): show no grant button"`
 	Audience        string     `json:"audience" enum:"all,student,company,club,university"`
 	Locale          string     `json:"locale" enum:"tr-TR,en-US"`
 	Version         string     `json:"version" doc:"YYYY.MM.DD or YYYY.MM.DD-N"`

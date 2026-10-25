@@ -201,7 +201,7 @@ type Service interface {
 	UpdateMyProfile(ctx context.Context, a authz.Actor, p ProfilePatch) (ProfileView, error)
 	// PutMySkills is putMySkills (students.profile_section.manage): the
 	// list replaces the student's skills (≤ 30).
-	PutMySkills(ctx context.Context, a authz.Actor, items []SkillInput) ([]Skill, error)
+	PutMySkills(ctx context.Context, a authz.Actor, items []SkillInput) (SkillSet, error)
 	// CreateMyExperience is createMyExperience (students.profile_section.manage).
 	CreateMyExperience(ctx context.Context, a authz.Actor, in ExperienceInput) (Experience, error)
 	// UpdateMyExperience is updateMyExperience: another user's entry is 404.

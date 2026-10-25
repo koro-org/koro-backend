@@ -108,14 +108,14 @@ func TestHTTP_UpdateProfile_UniversityCannotBeSent(t *testing.T) {
 // TestHTTP_NonStudents_403VerificationRequired (03 §2.3 k-uv): accounts
 // without a student verification (a company admin of another company, a
 // recruiter, an unverified user, platform staff) get 403
-// students.verification_required on /me/student-profile and /me/privacy;
-// anonymous 401.
+// students.verification_required on /me/student-profile, /me/privacy and
+// /me/cvs (BE-123: documented in the contract); anonymous 401.
 func TestHTTP_NonStudents_403VerificationRequired(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	app := newHTTP(t, e)
 	for _, p := range []string{"user_unverified", "company_member", "company_admin", "other_company_member", "university_rep", "dpo"} {
-		for _, path := range []string{"/api/v1/me/student-profile", "/api/v1/me/privacy"} {
+		for _, path := range []string{"/api/v1/me/student-profile", "/api/v1/me/privacy", "/api/v1/me/cvs"} {
 			rec := call(t, app, p, http.MethodGet, path, "", nil)
 			if rec.Code != http.StatusForbidden || code(rec) != "students.verification_required" {
 				t.Fatalf("%s %s = %d %s", p, path, rec.Code, rec.Body)

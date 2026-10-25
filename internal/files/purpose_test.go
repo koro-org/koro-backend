@@ -1,6 +1,7 @@
 package files_test
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -130,5 +131,57 @@ func TestRegister_EnumsMatchAllowList(t *testing.T) {
 	}
 	if !strings.Contains(o.Description, "presigned") {
 		t.Error("createUpload lacks its description")
+	}
+}
+
+// TestRegister_UploadRulesPublished (BE-123): createUpload publishes the
+// allow-list of every uploadable purpose as x-koro-upload-rules, read from
+// the table the service checks with; the size bound is MaxUploadBytes and
+// no purpose's limit exceeds it. Clients pre-check with it (koro-web).
+func TestRegister_UploadRulesPublished(t *testing.T) {
+	t.Parallel()
+	_, api := humatest.New(t)
+	files.Register(api, nil)
+	raw, err := json.Marshal(api.OpenAPI())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Paths map[string]map[string]map[string]json.RawMessage `json:"paths"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]files.UploadRule
+	if err := json.Unmarshal(doc.Paths["/files/uploads"]["post"][files.ExtUploadRules], &got); err != nil {
+		t.Fatalf("%s: %v", files.ExtUploadRules, err)
+	}
+	if len(got) != len(files.UploadPurposes()) {
+		t.Fatalf("%d rules, want %d", len(got), len(files.UploadPurposes()))
+	}
+	for _, p := range files.UploadPurposes() {
+		r, ok := got[string(p)]
+		if !ok {
+			t.Fatalf("no rule for %s", p)
+		}
+		if r.MaxBytes != p.MaxBytes() || r.MaxBytes > files.MaxUploadBytes {
+			t.Errorf("%s max_bytes %d, want %d (≤ %d)", p, r.MaxBytes, p.MaxBytes(), files.MaxUploadBytes)
+		}
+		for _, m := range files.UploadMIMEs() {
+			if slices.Contains(r.MIMETypes, m) != p.AllowsMIME(m) {
+				t.Errorf("%s: %s published %v, service allows %v", p, m, slices.Contains(r.MIMETypes, m), p.AllowsMIME(m))
+			}
+		}
+		if !slices.Contains([]string{files.UploadOrgRequired, files.UploadOrgOptional, files.UploadOrgNone}, r.OrgID) {
+			t.Errorf("%s org_id %q", p, r.OrgID)
+		}
+	}
+	if got[string(files.PurposeCV)].OrgID != files.UploadOrgNone || got[string(files.PurposeOrgLogo)].OrgID != files.UploadOrgRequired {
+		t.Errorf("org rules: cv %q, org_logo %q", got[string(files.PurposeCV)].OrgID, got[string(files.PurposeOrgLogo)].OrgID)
+	}
+	o := api.OpenAPI().Paths["/files/uploads"].Post
+	size := api.OpenAPI().Components.Schemas.SchemaFromRef(o.RequestBody.Content["application/json"].Schema.Ref).Properties["size_bytes"]
+	if size.Maximum == nil || *size.Maximum != files.MaxUploadBytes || size.Minimum == nil || *size.Minimum != 1 {
+		t.Errorf("size_bytes bounds %v..%v, want 1..%d", size.Minimum, size.Maximum, files.MaxUploadBytes)
 	}
 }

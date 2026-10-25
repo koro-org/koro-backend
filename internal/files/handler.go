@@ -24,7 +24,10 @@ func Register(api huma.API, svc Service) {
 		Summary: "Start a file upload", Tags: []string{"files"}, DefaultStatus: http.StatusCreated,
 		Description: "Checks the purpose's MIME/size allow-list and returns a presigned PUT URL " +
 			"(valid 10 minutes) for the object storage. Send exactly upload_headers with the PUT; " +
-			"the API never receives the file itself (04 §1.14).",
+			"the API never receives the file itself (04 §1.14). The allow-list of every purpose (mime_types, " +
+			"max_bytes, whether org_id is required, optional or none) is the " + ExtUploadRules + " extension of " +
+			"this operation; clients may pre-check a file with it, the API checks every upload itself.",
+		Extensions: map[string]any{ExtUploadRules: uploadRulesExtension()},
 	}, op.Meta{
 		Action: string(authz.FilesUploadCreate), Surface: op.SurfaceSelf,
 		RateLimit: op.RateUpload, Idempotency: op.IdempotencyOptional,
@@ -54,11 +57,11 @@ type handler struct{ svc Service }
 type createUploadInput struct {
 	idempotency.OptionalHeader
 	Body struct {
-		Purpose     string `json:"purpose" enum:"avatar,cv,edu_document,org_logo,event_cover,post_media,club_claim_evidence,party_document,bank_account_evidence,transfer_receipt,payout_receipt,refund_receipt,invoice_pdf,delivery_evidence" doc:"What the file is for; decides the MIME/size allow-list and who may upload (03 k30)"`
-		Filename    string `json:"filename" minLength:"1" maxLength:"1024" doc:"Original file name (display only; never part of the storage key)"`
-		ContentType string `json:"content_type" enum:"application/pdf,image/jpeg,image/png,image/webp" doc:"Declared MIME type; verified by magic bytes on completion"`
-		SizeBytes   int64  `json:"size_bytes" minimum:"1" maximum:"10485760" doc:"Exact size in bytes (the purpose may allow less: avatar 5 MB)"`
-		OrgID       string `json:"org_id,omitempty" format:"uuid" doc:"Owning organisation (required for org_logo, event_cover, post_media)"`
+		Purpose     uploadPurpose `json:"purpose" doc:"What the file is for; decides the MIME/size allow-list and who may upload (03 k30; x-koro-upload-rules)"`
+		Filename    string        `json:"filename" minLength:"1" maxLength:"1024" doc:"Original file name (display only; never part of the storage key)"`
+		ContentType uploadMIME    `json:"content_type" doc:"Declared MIME type; verified by magic bytes on completion"`
+		SizeBytes   uploadSize    `json:"size_bytes" doc:"Exact size in bytes; the purpose may allow less (x-koro-upload-rules max_bytes)"`
+		OrgID       string        `json:"org_id,omitempty" format:"uuid" doc:"Owning organisation (x-koro-upload-rules org_id: required, optional or none)"`
 	}
 }
 
@@ -79,8 +82,8 @@ func (h handler) createUpload(ctx context.Context, in *createUploadInput) (*crea
 		return nil, err
 	}
 	req := UploadRequest{
-		Purpose: Purpose(in.Body.Purpose), Filename: in.Body.Filename, ContentType: in.Body.ContentType,
-		SizeBytes: in.Body.SizeBytes,
+		Purpose: Purpose(in.Body.Purpose), Filename: in.Body.Filename, ContentType: string(in.Body.ContentType),
+		SizeBytes: int64(in.Body.SizeBytes),
 	}
 	if in.Body.OrgID != "" {
 		id, err := uuid.Parse(in.Body.OrgID)

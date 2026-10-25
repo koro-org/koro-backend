@@ -241,6 +241,13 @@ type CV struct {
 // TableName implements gorm's Tabler.
 func (CV) TableName() string { return "student_cvs" }
 
+// SkillSet is a student's skills with their catalog names (putMySkills;
+// BE-123): a skill the catalog no longer names has no key in Names.
+type SkillSet struct {
+	Skills []Skill
+	Names  map[uuid.UUID]string
+}
+
 // ProfileView is a profile with its sections and the display facts other
 // modules hold (names of the university and department, the avatar URL).
 // Stored is false for the profile of a verified student who has never
@@ -252,8 +259,11 @@ type ProfileView struct {
 	DepartmentName string
 	AvatarURL      string
 	Skills         []Skill
-	Experiences    []Experience
-	Languages      []Language
-	Privacy        Privacy
-	CVs            []CVView
+	// SkillNames names Skills (catalog name_tr, SkillNamer); a skill the
+	// catalog no longer names has no key.
+	SkillNames  map[uuid.UUID]string
+	Experiences []Experience
+	Languages   []Language
+	Privacy     Privacy
+	CVs         []CVView
 }

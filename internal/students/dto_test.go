@@ -118,7 +118,7 @@ func TestDTO_SelfProfileHasNoTalentField(t *testing.T) {
 	wantFields(t, "StudentProfileSelfDTO", fields, []string{
 		"user_id", "university", "university.university_id", "university.name", "department", "department.department_id",
 		"department.name", "degree_level", "class_year", "expected_graduation", "status", "headline", "about", "city",
-		"avatar_url", "completed_sections", "skills", "skills[].skill_id", "skills[].level", "experiences",
+		"avatar_url", "completed_sections", "skills", "skills[].skill_id", "skills[].name", "skills[].level", "experiences",
 		"experiences[].experience_id", "experiences[].kind", "experiences[].title", "experiences[].organization_name",
 		"experiences[].start_month", "experiences[].end_month", "experiences[].description", "languages",
 		"languages[].language_code", "languages[].level", "privacy", "privacy.discoverable", "privacy.show_contact_on_grant",

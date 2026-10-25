@@ -175,6 +175,9 @@ func (h handler) listCurrent(ctx context.Context, in *listCurrentInput) (*listCu
 	for i, n := range rows {
 		d := toNoticeDTO(n.Notice)
 		d.Collectable = n.Collectable
+		if n.ScopeType != nil {
+			d.ScopeType = string(*n.ScopeType)
+		}
 		out.Body.Items[i] = d
 	}
 	return out, nil

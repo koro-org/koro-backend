@@ -22,14 +22,16 @@ func registerViews(api huma.API, h handler) {
 
 	op.Register(api, "students", huma.Operation{
 		OperationID: "listMyCvs", Method: http.MethodGet, Path: "/me/cvs",
-		Summary:     "List my CVs",
-		Description: "At most 3, oldest first. The current CV is the one a company with level 3 access may download.",
+		Summary: "List my CVs",
+		Description: "At most 3, oldest first. The current CV is the one a company with level 3 access may download. " +
+			"Without an active student verification (never verified, or lapsed): 403 students.verification_required, " +
+			"also for CVs stored while verified; they stay stored and are part of the KVKK data export (createMyDataRequest).",
 	}, self(authz.StudentsCvReadOwn, ""), h.listCVs)
 
 	op.Register(api, "students", huma.Operation{
 		OperationID: "createMyCv", Method: http.MethodPost, Path: "/me/cvs",
 		Summary: "Add a CV", DefaultStatus: http.StatusCreated,
-		Description: "file_id is a cv upload of yours (createUpload purpose cv: PDF only, 10 MB; the file is virus " +
+		Description: "file_id is a cv upload of yours (createUpload purpose cv; its types and size are createUpload's x-koro-upload-rules; the file is virus " +
 			"scanned and its metadata removed before it is served). At most 3 CVs: a fourth is 409 students.cv_limit. " +
 			"The first CV is current; make_current moves the mark to the new one.",
 	}, self(authz.StudentsCvManage, op.IdempotencyOptional), h.createCV)

@@ -161,7 +161,7 @@ func toAdminStudentViewDTO(v AdminView) AdminStudentViewDTO {
 		PlatformRoles: []string{}, Memberships: []AdminStudentMembershipDTO{},
 		Profile: AdminStudentProfileDTO{
 			Headline: str(p.Headline), About: str(p.About), Department: departmentRef(v.View), ClassYear: intPtr(p.ClassYear),
-			Skills: skillDTOs(v.View.Skills), Languages: languageDTOs(v.View.Languages),
+			Skills: skillDTOs(v.View.Skills, v.View.SkillNames), Languages: languageDTOs(v.View.Languages),
 			Experiences: make([]StudentExperienceDTO, len(v.View.Experiences)),
 		},
 		Privacy: toPrivacyDTO(v.View.Privacy),

@@ -4286,11 +4286,11 @@ components:
           minLength: 1
           type: string
         org_id:
-          description: Owning organisation (required for org_logo, event_cover, post_media)
+          description: "Owning organisation (x-koro-upload-rules org_id: required, optional or none)"
           format: uuid
           type: string
         purpose:
-          description: What the file is for; decides the MIME/size allow-list and who may upload (03 k30)
+          description: What the file is for; decides the MIME/size allow-list and who may upload (03 k30; x-koro-upload-rules)
           enum:
             - avatar
             - cv
@@ -4308,7 +4308,7 @@ components:
             - delivery_evidence
           type: string
         size_bytes:
-          description: "Exact size in bytes (the purpose may allow less: avatar 5 MB)"
+          description: Exact size in bytes; the purpose may allow less (x-koro-upload-rules max_bytes)
           format: int64
           maximum: 10485760
           minimum: 1
@@ -8137,6 +8137,12 @@ components:
           type: string
         retired_at:
           format: date-time
+          type: string
+        scope_type:
+          description: "listCurrentNotices, consent_text only: none = granted once for the account (consents page); registration = granted per event registration with the event form, never from the consents page (a grant without scope_id is 422 consent.scope_required): show no grant button"
+          enum:
+            - none
+            - registration
           type: string
         status:
           description: Retired versions stay readable as proof
@@ -12436,11 +12442,15 @@ components:
           maximum: 5
           minimum: 1
           type: integer
+        name:
+          description: Catalog name of the skill (Turkish); empty when the catalog no longer lists it
+          type: string
         skill_id:
           format: uuid
           type: string
       required:
         - skill_id
+        - name
       type: object
     StudentSkillList:
       additionalProperties: false
@@ -23583,7 +23593,7 @@ paths:
       x-koro-surface: self
   /api/v1/files/uploads:
     post:
-      description: Checks the purpose's MIME/size allow-list and returns a presigned PUT URL (valid 10 minutes) for the object storage. Send exactly upload_headers with the PUT; the API never receives the file itself (04 §1.14).
+      description: Checks the purpose's MIME/size allow-list and returns a presigned PUT URL (valid 10 minutes) for the object storage. Send exactly upload_headers with the PUT; the API never receives the file itself (04 §1.14). The allow-list of every purpose (mime_types, max_bytes, whether org_id is required, optional or none) is the x-koro-upload-rules extension of this operation; clients may pre-check a file with it, the API checks every upload itself.
       operationId: createUpload
       parameters:
         - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
@@ -23624,6 +23634,104 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: upload
       x-koro-surface: self
+      x-koro-upload-rules:
+        avatar:
+          mime_types:
+            - image/jpeg
+            - image/png
+            - image/webp
+          max_bytes: 5242880
+          org_id: none
+        bank_account_evidence:
+          mime_types:
+            - application/pdf
+            - image/jpeg
+            - image/png
+          max_bytes: 10485760
+          org_id: optional
+        club_claim_evidence:
+          mime_types:
+            - application/pdf
+            - image/jpeg
+            - image/png
+          max_bytes: 10485760
+          org_id: none
+        cv:
+          mime_types:
+            - application/pdf
+          max_bytes: 10485760
+          org_id: none
+        delivery_evidence:
+          mime_types:
+            - application/pdf
+            - image/jpeg
+            - image/png
+            - image/webp
+          max_bytes: 10485760
+          org_id: required
+        edu_document:
+          mime_types:
+            - application/pdf
+            - image/jpeg
+            - image/png
+          max_bytes: 10485760
+          org_id: none
+        event_cover:
+          mime_types:
+            - image/jpeg
+            - image/png
+            - image/webp
+          max_bytes: 10485760
+          org_id: required
+        invoice_pdf:
+          mime_types:
+            - application/pdf
+            - image/jpeg
+            - image/png
+          max_bytes: 10485760
+          org_id: optional
+        org_logo:
+          mime_types:
+            - image/jpeg
+            - image/png
+            - image/webp
+          max_bytes: 10485760
+          org_id: required
+        party_document:
+          mime_types:
+            - application/pdf
+            - image/jpeg
+            - image/png
+          max_bytes: 10485760
+          org_id: optional
+        payout_receipt:
+          mime_types:
+            - application/pdf
+            - image/jpeg
+            - image/png
+          max_bytes: 10485760
+          org_id: none
+        post_media:
+          mime_types:
+            - image/jpeg
+            - image/png
+            - image/webp
+          max_bytes: 10485760
+          org_id: required
+        refund_receipt:
+          mime_types:
+            - application/pdf
+            - image/jpeg
+            - image/png
+          max_bytes: 10485760
+          org_id: none
+        transfer_receipt:
+          mime_types:
+            - application/pdf
+            - image/jpeg
+            - image/png
+          max_bytes: 10485760
+          org_id: none
   /api/v1/files/{file_id}:
     delete:
       description: Deletes a file the caller uploaded and no record uses yet; an attached file is deleted where it is used (409).
@@ -24558,7 +24666,7 @@ paths:
       x-koro-surface: self
   /api/v1/me/cvs:
     get:
-      description: At most 3, oldest first. The current CV is the one a company with level 3 access may download.
+      description: "At most 3, oldest first. The current CV is the one a company with level 3 access may download. Without an active student verification (never verified, or lapsed): 403 students.verification_required, also for CVs stored while verified; they stay stored and are part of the KVKK data export (createMyDataRequest)."
       operationId: listMyCvs
       responses:
         "200":
@@ -24583,7 +24691,7 @@ paths:
       x-koro-rate-limit: read_default
       x-koro-surface: self
     post:
-      description: "file_id is a cv upload of yours (createUpload purpose cv: PDF only, 10 MB; the file is virus scanned and its metadata removed before it is served). At most 3 CVs: a fourth is 409 students.cv_limit. The first CV is current; make_current moves the mark to the new one."
+      description: "file_id is a cv upload of yours (createUpload purpose cv; its types and size are createUpload's x-koro-upload-rules; the file is virus scanned and its metadata removed before it is served). At most 3 CVs: a fourth is 409 students.cv_limit. The first CV is current; make_current moves the mark to the new one."
       operationId: createMyCv
       parameters:
         - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
@@ -25754,7 +25862,7 @@ paths:
       x-koro-surface: self
   /api/v1/me/privacy:
     get:
-      description: Everything is off until the student turns it on; the activity ranking choice starts at default.
+      description: "Everything is off until the student turns it on; the activity ranking choice starts at default. Without an active student verification (never verified, or lapsed): 403 students.verification_required; the stored settings are kept, but no company search or level 3 view shows the account meanwhile."
       operationId: getMyPrivacy
       responses:
         "200":

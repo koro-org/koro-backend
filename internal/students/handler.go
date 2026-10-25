@@ -79,8 +79,10 @@ func Register(api huma.API, svc Service) {
 
 	huma.Register(api, self(huma.Operation{
 		OperationID: "getMyPrivacy", Method: http.MethodGet, Path: "/me/privacy",
-		Summary:     "Get my privacy settings",
-		Description: "Everything is off until the student turns it on; the activity ranking choice starts at default.",
+		Summary: "Get my privacy settings",
+		Description: "Everything is off until the student turns it on; the activity ranking choice starts at default. " +
+			"Without an active student verification (never verified, or lapsed): 403 students.verification_required; " +
+			"the stored settings are kept, but no company search or level 3 view shows the account meanwhile.",
 	}, authz.StudentsPrivacyReadOwn, ""), h.getPrivacy)
 
 	huma.Register(api, self(huma.Operation{
@@ -218,11 +220,11 @@ func (h handler) putSkills(ctx context.Context, in *putSkillsInput) (*skillsOutp
 		}
 		items[i] = SkillInput{SkillID: id, Level: it.Level}
 	}
-	rows, err := h.svc.PutMySkills(ctx, a, items)
+	set, err := h.svc.PutMySkills(ctx, a, items)
 	if err != nil {
 		return nil, err
 	}
-	return &skillsOutput{Body: StudentSkillList{Items: skillDTOs(rows)}}, nil
+	return &skillsOutput{Body: StudentSkillList{Items: skillDTOs(set.Skills, set.Names)}}, nil
 }
 
 // ---- experiences

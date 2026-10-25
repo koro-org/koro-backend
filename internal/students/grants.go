@@ -642,9 +642,7 @@ func (s *service) companySource(ctx context.Context, t companyTarget) (CompanySo
 	// A visible target has an active verification (companyTarget).
 	src := CompanySource{View: v, FirstName: t.user.FirstName, LastName: t.user.LastName, IsMinor: t.user.IsMinor,
 		Verified: true}
-	if src.SkillNames, err = s.skillNames(ctx, v.Skills); err != nil {
-		return CompanySource{}, err
-	}
+	src.SkillNames = v.SkillNames // named by view (one SkillNamer call)
 	for _, c := range v.CVs {
 		if c.CV.IsCurrent {
 			at := c.CV.CreatedAt

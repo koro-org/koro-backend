@@ -132,6 +132,9 @@ func (s *service) view(ctx context.Context, p Profile, stored bool) (ProfileView
 	if v.Skills, err = s.d.Store.Skills(ctx, p.UserID); err != nil {
 		return ProfileView{}, err
 	}
+	if v.SkillNames, err = s.skillNames(ctx, v.Skills); err != nil {
+		return ProfileView{}, err
+	}
 	if v.Experiences, err = s.d.Store.Experiences(ctx, p.UserID); err != nil {
 		return ProfileView{}, err
 	}
@@ -446,32 +449,38 @@ func (s *service) markSection(ctx context.Context, p Profile, sec Section, done 
 
 // ---- sections
 
-// PutMySkills implements Service.
-func (s *service) PutMySkills(ctx context.Context, a authz.Actor, items []SkillInput) ([]Skill, error) {
+// PutMySkills implements Service. The names are read before the
+// transaction (the listed skills exist and are named once), so a commit is
+// never followed by a failure.
+func (s *service) PutMySkills(ctx context.Context, a authz.Actor, items []SkillInput) (SkillSet, error) {
 	if err := s.can(ctx, a, authz.StudentsProfileSectionManage); err != nil {
-		return nil, err
+		return SkillSet{}, err
 	}
 	if len(items) > maxSkills {
-		return nil, problem.Field("body.items", "at most 30 skills")
+		return SkillSet{}, problem.Field("body.items", "at most 30 skills")
 	}
 	rows := make([]Skill, 0, len(items))
 	ids := make([]uuid.UUID, 0, len(items))
 	for i, it := range items {
 		loc := "body.items[" + strconv.Itoa(i) + "]"
 		if slices.Contains(ids, it.SkillID) {
-			return nil, problem.Field(loc+".skill_id", "is listed twice")
+			return SkillSet{}, problem.Field(loc+".skill_id", "is listed twice")
 		}
 		if it.Level != nil && (*it.Level < 1 || *it.Level > 5) {
-			return nil, problem.Field(loc+".level", "must be 1-5")
+			return SkillSet{}, problem.Field(loc+".level", "must be 1-5")
 		}
 		ids = append(ids, it.SkillID)
 		rows = append(rows, Skill{UserID: a.UserID, SkillID: it.SkillID, Level: it.Level})
 	}
 	if err := s.d.Catalog.SkillsExist(ctx, ids); err != nil {
-		return nil, err
+		return SkillSet{}, err
+	}
+	names, err := s.skillNames(ctx, rows)
+	if err != nil {
+		return SkillSet{}, err
 	}
 	var out []Skill
-	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
+	err = s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		p, err := s.ensureProfile(ctx, a)
 		if err != nil {
 			return err
@@ -485,7 +494,10 @@ func (s *service) PutMySkills(ctx context.Context, a authz.Actor, items []SkillI
 		return s.d.Audit.Log(ctx, writeEvent(a, authz.StudentsProfileSectionManage,
 			map[string]any{"section": string(SectionSkills), "count": len(out)}))
 	})
-	return out, err
+	if err != nil {
+		return SkillSet{}, err
+	}
+	return SkillSet{Skills: out, Names: names}, nil
 }
 
 // PutMyLanguages implements Service.

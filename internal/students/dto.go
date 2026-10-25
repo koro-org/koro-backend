@@ -87,6 +87,7 @@ func departmentRef(v ProfileView) *StudentDepartmentDTO {
 // StudentSkillDTO is one skill of the student's own profile.
 type StudentSkillDTO struct {
 	SkillID string `json:"skill_id" format:"uuid"`
+	Name    string `json:"name" doc:"Catalog name of the skill (Turkish); empty when the catalog no longer lists it"`
 	Level   *int   `json:"level,omitempty" minimum:"1" maximum:"5"`
 }
 
@@ -143,14 +144,11 @@ type StudentProfileSelfDTO struct {
 	Privacy            StudentPrivacyDTO      `json:"privacy"`
 }
 
-func toSkillDTO(s Skill) StudentSkillDTO {
-	return StudentSkillDTO{SkillID: s.SkillID.String(), Level: intPtr(s.Level)}
-}
-
-func skillDTOs(ss []Skill) []StudentSkillDTO {
+// skillDTOs maps skills with their catalog names (a missing name is "").
+func skillDTOs(ss []Skill, names map[uuid.UUID]string) []StudentSkillDTO {
 	out := make([]StudentSkillDTO, len(ss))
 	for i, s := range ss {
-		out[i] = toSkillDTO(s)
+		out[i] = StudentSkillDTO{SkillID: s.SkillID.String(), Name: names[s.SkillID], Level: intPtr(s.Level)}
 	}
 	return out
 }
@@ -180,7 +178,7 @@ func toSelfDTO(v ProfileView) StudentProfileSelfDTO {
 		DegreeLevel: string(p.DegreeLevel), ClassYear: intPtr(p.ClassYear), Status: string(p.Status),
 		Headline: str(p.Headline), About: str(p.About), City: str(p.City), AvatarURL: v.AvatarURL,
 		CompletedSections: append([]string{}, p.CompletedSections...),
-		Skills:            skillDTOs(v.Skills), Languages: languageDTOs(v.Languages),
+		Skills:            skillDTOs(v.Skills, v.SkillNames), Languages: languageDTOs(v.Languages),
 		Experiences: make([]StudentExperienceDTO, len(v.Experiences)), CVs: cvDTOs(v.CVs), Privacy: toPrivacyDTO(v.Privacy),
 	}
 	if p.ExpectedGraduation != nil {

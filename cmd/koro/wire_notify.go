@@ -21,15 +21,16 @@ import (
 )
 
 // notifyWiring wires the notify module (L3; 01 §4.5). Owner: BE-005, then
-// BE-015. Only tickets of the notify module edit this file (BE-001 R4).
+// BE-015, BE-055 (push), BE-113 (adapter selection). Only tickets of the notify
+// module edit this file (BE-001 R4).
 //
 // Seams (all nil in production unless noted):
 //
 //	store      nil → notify.NewGormStore over the app_rw pool; tests preset
 //	           the in-memory store
 //	tx         nil → the app_rw pool's TxManager; tests preset db.NopTx
-//	transport  nil → the SMTP adapter from config (SMTP_*); tests preset a
-//	           notify.MemTransport
+//	transport  nil → the NOTIFY_EMAIL_PROVIDER adapter (emailTransports:
+//	           smtp from SMTP_*, or mem); tests preset a notify.MemTransport
 //	consent    nil → c.consent.svc adapted to notify.ConsentChecker
 //	           (consent.Checker.FilterActive, 06 H-43 note); consent is L2
 //	           and built before notify
@@ -39,8 +40,9 @@ import (
 //	auditFeed  nil → audit's GORM store (Chained, HeadAt: read only), or the
 //	           in-memory audit store of the tests
 //	cursor     nil → Redis (the audit alert job position), in-memory without Redis
-//	push       nil → notify.PushTransport over FCM/APNs from config (PUSH_*,
-//	           BE-055), or the no-op adapter when neither is configured
+//	push       nil → the NOTIFY_PUSH_PROVIDER adapter (newPushSender:
+//	           notify.PushTransport over FCM/APNs from PUSH_*, BE-055, or the
+//	           no-op adapter)
 //	cfg        tests only; nil → the notify section of the loaded configuration
 //
 // Late binding (R4; filled by a higher layer, read at call time):
@@ -173,12 +175,8 @@ func (w *notifyWiring) build(c *container) error {
 	transport := w.transport
 	if transport == nil {
 		var err error
-		transport, err = notify.NewSMTPTransport(notify.SMTPConfig{
-			Host: cfg.SMTPHost, Port: cfg.SMTPPort, TLS: cfg.SMTPTLS,
-			Username: cfg.SMTPUsername, Password: cfg.SMTPPassword.Reveal(), Timeout: cfg.SMTPTimeout,
-		})
-		if err != nil {
-			return fmt.Errorf("smtp transport: %w", err)
+		if transport, err = emailTransports(cfg).pick("NOTIFY_EMAIL_PROVIDER", cfg.EmailProvider); err != nil {
+			return err
 		}
 	}
 	indexer := w.indexer
@@ -242,7 +240,7 @@ func (w *notifyWiring) build(c *container) error {
 		Recipients:  indexer,
 		Audit:       c.audit.svc,
 		Consent:     consentChecker,
-		Push:        push, // nil → NoopPush
+		Push:        push,
 		Webhooks:    notify.WebhookConfig{ResendSecret: resendSecret, SESTopicARNs: cfg.SESTopicARNs(), SNSCerts: certs},
 		AuditFeed:   feed,
 		Cursor:      cursor,
@@ -263,39 +261,76 @@ func (w *notifyWiring) build(c *container) error {
 	return nil
 }
 
-// newPushSender builds the FCM/APNs transport from the push settings
-// (BE-055); nil (no-op adapter) when no provider is configured, an error
-// when PUSH_REQUIRED and none is (also caught by config validation) or a
-// credential does not parse (the process does not start).
+// emailTransports is the selection point of NOTIFY_EMAIL_PROVIDER (BE-113):
+// one line per notify.EmailTransport adapter; each passes
+// emailTransportContract (internal/notify/transport_contract_test.go).
+func emailTransports(cfg config.Notify) adapters[notify.EmailTransport] {
+	return adapters[notify.EmailTransport]{
+		config.EmailProviderSMTP: func() (notify.EmailTransport, error) {
+			t, err := notify.NewSMTPTransport(notify.SMTPConfig{
+				Host: cfg.SMTPHost, Port: cfg.SMTPPort, TLS: cfg.SMTPTLS,
+				Username: cfg.SMTPUsername, Password: cfg.SMTPPassword.Reveal(), Timeout: cfg.SMTPTimeout,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("smtp transport: %w", err)
+			}
+			return t, nil
+		},
+		config.EmailProviderMem: func() (notify.EmailTransport, error) { return notify.NewMemTransport(), nil },
+	}
+}
+
+// pushOption installs one push provider into the push transport.
+type pushOption func(*notify.PushTransportConfig)
+
+// pushProviders is the selection point of NOTIFY_PUSH_PROVIDER (BE-113): one
+// line per push provider of notify.PushTransport (BE-055). The transport
+// routes each device to the provider of its platform.
+func pushProviders(cfg config.Notify, c *container) adapters[pushOption] {
+	return adapters[pushOption]{
+		config.PushProviderFCM: func() (pushOption, error) {
+			f, err := notify.NewFCM(notify.FCMConfig{ProjectID: cfg.PushFCMProjectID,
+				CredentialsJSON: []byte(cfg.PushFCMCredentials.Reveal()), Timeout: cfg.PushTimeout, Clock: c.infra.clock})
+			if err != nil {
+				return nil, err
+			}
+			return func(p *notify.PushTransportConfig) { p.FCM = f }, nil
+		},
+		config.PushProviderAPNs: func() (pushOption, error) {
+			a, err := notify.NewAPNs(notify.APNsConfig{KeyPEM: []byte(cfg.PushAPNsKey.Reveal()), KeyID: cfg.PushAPNsKeyID,
+				TeamID: cfg.PushAPNsTeamID, Topic: cfg.PushAPNsTopic, Sandbox: cfg.PushAPNsSandbox, Timeout: cfg.PushTimeout,
+				Clock: c.infra.clock})
+			if err != nil {
+				return nil, err
+			}
+			return func(p *notify.PushTransportConfig) { p.APNs = a }, nil
+		},
+	}
+}
+
+// newPushSender builds the notify.PushSender NOTIFY_PUSH_PROVIDER selects:
+// the FCM/APNs transport over the resolved providers, or the no-op adapter
+// when none is (an error when PUSH_REQUIRED, also caught by config
+// validation). A credential that does not parse stops the process.
 func newPushSender(cfg config.Notify, tokens notify.PushTokens, c *container) (notify.PushSender, error) {
-	var (
-		fcm  *notify.FCM
-		apns *notify.APNs
-		err  error
-	)
-	if cfg.FCMEnabled() {
-		fcm, err = notify.NewFCM(notify.FCMConfig{ProjectID: cfg.PushFCMProjectID,
-			CredentialsJSON: []byte(cfg.PushFCMCredentials.Reveal()), Timeout: cfg.PushTimeout, Clock: c.infra.clock})
-		if err != nil {
-			return nil, err
-		}
-	}
-	if cfg.APNsEnabled() {
-		apns, err = notify.NewAPNs(notify.APNsConfig{KeyPEM: []byte(cfg.PushAPNsKey.Reveal()), KeyID: cfg.PushAPNsKeyID,
-			TeamID: cfg.PushAPNsTeamID, Topic: cfg.PushAPNsTopic, Sandbox: cfg.PushAPNsSandbox, Timeout: cfg.PushTimeout,
-			Clock: c.infra.clock})
-		if err != nil {
-			return nil, err
-		}
-	}
-	if fcm == nil && apns == nil {
+	names := cfg.ActivePushProviders()
+	if len(names) == 0 {
 		if cfg.PushRequired {
 			return nil, errors.New("notify: PUSH_REQUIRED=true but neither FCM nor APNs is configured")
 		}
-		return nil, nil
+		return notify.NoopPush{}, nil
 	}
-	return notify.NewPushTransport(notify.PushTransportConfig{Tokens: tokens, FCM: fcm, APNs: apns, Clock: c.infra.clock,
-		Log: c.infra.log.With("module", "notify", "component", "push")})
+	tc := notify.PushTransportConfig{Tokens: tokens, Clock: c.infra.clock,
+		Log: c.infra.log.With("module", "notify", "component", "push")}
+	options := pushProviders(cfg, c)
+	for _, name := range names {
+		install, err := options.pick("NOTIFY_PUSH_PROVIDER", name)
+		if err != nil {
+			return nil, err
+		}
+		install(&tc)
+	}
+	return notify.NewPushTransport(tc)
 }
 
 // tasks schedules notify.send_audit_alerts (every minute, default; 06 H-40,

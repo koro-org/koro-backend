@@ -46,8 +46,8 @@ func TestFiles_ScannerDefaultsAndValidation(t *testing.T) {
 		{"no connections", clam("FILES_CLAMAV_MAX_CONNS", "0"), "FILES_CLAMAV_MAX_CONNS"},
 		{"stream limit below twice the upload limit", clam("FILES_CLAMAV_MAX_BYTES", "10485760"), "FILES_CLAMAV_MAX_BYTES"},
 		{"rescan batch too large", storageEnv("FILES_RESCAN_BATCH", "5000"), "FILES_RESCAN_BATCH"},
-		{"prod with the no-op scanner", prod("FILES_SCANNER", "noop"), "FILES_SCANNER=clamav and FILES_SCAN_REQUIRED=true are required in prod"},
-		{"staging without scan required", prod("APP_ENV", "staging", "FILES_SCAN_REQUIRED", "false"), "required in staging"},
+		{"prod with the no-op scanner", prod("FILES_SCANNER", "noop"), "FILES_SCANNER=noop is a development adapter, which is not allowed in prod"},
+		{"staging without scan required", prod("APP_ENV", "staging", "FILES_SCAN_REQUIRED", "false"), "FILES_SCAN_REQUIRED=true is required in staging"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

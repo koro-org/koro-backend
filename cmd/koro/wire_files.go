@@ -17,18 +17,19 @@ import (
 )
 
 // filesWiring wires the files module (L2; 01 §4.2). Owner: BE-008, then
-// BE-048 (ClamAV scanner). Only tickets of the files module edit this file
-// (BE-001 R4).
+// BE-048 (ClamAV scanner), BE-113 (adapter selection). Only tickets of the
+// files module edit this file (BE-001 R4).
 //
 // Seams (nil in production):
 //
 //	store    nil → files.NewGormStore over the app_rw pool
 //	tx       nil → the app_rw pool's TxManager; tests preset db.NopTx
-//	objects  nil → the S3 client from config (S3_*); tests preset storage.Mem
+//	objects  nil → the STORAGE_PROVIDER adapter (objectStores: s3 from S3_*,
+//	         or mem); tests preset storage.Mem
 //	buckets  nil → S3_BUCKET_FILES / S3_BUCKET_QUARANTINE
-//	scanner  nil → FILES_SCANNER: "clamav" builds the ClamAV adapter
-//	         (files.ClamAV, clamd over TCP; BE-048), "noop"
-//	         files.NoopScanner (scan_status "skipped")
+//	scanner  nil → the FILES_SCANNER adapter (scanners: "clamav" builds
+//	         files.ClamAV, clamd over TCP, BE-048; "noop"
+//	         files.NoopScanner, scan_status "skipped")
 //	cfg      tests only; nil → the files section of the loaded configuration
 //
 // Every file row write is audited through c.audit.svc (L1, BE-059).
@@ -62,15 +63,10 @@ func (w *filesWiring) build(c *container) error {
 	}
 	objects := w.objects
 	if objects == nil {
-		s3, err := storage.NewS3(storage.Config{
-			Endpoint: sc.Endpoint, PresignEndpoint: sc.PresignEndpoint, Region: sc.Region,
-			AccessKey: sc.AccessKey.Reveal(), SecretKey: sc.SecretKey.Reveal(),
-			PathStyle: sc.PathStyle, Timeout: sc.Timeout, Clock: c.infra.clock,
-		})
-		if err != nil {
-			return fmt.Errorf("object storage: %w", err)
+		var err error
+		if objects, err = objectStores(sc, c).pick("STORAGE_PROVIDER", sc.Provider); err != nil {
+			return err
 		}
-		objects = s3
 	}
 	buckets := files.Buckets{Files: sc.BucketFiles, Quarantine: sc.BucketQuarantine}
 	if w.buckets != nil {
@@ -81,19 +77,11 @@ func (w *filesWiring) build(c *container) error {
 		tx = c.infra.db.Tx
 	}
 	scanner := w.scanner
-	if scanner == nil && cfg.Scanner == config.ScannerClamAV {
-		sc, err := files.NewClamAV(files.ClamAVConfig{
-			Addr: cfg.ClamAVAddr, Timeout: cfg.ClamAVTimeout, MaxConns: cfg.ClamAVMaxConns,
-			MaxBytes: cfg.ClamAVMaxBytes, Clock: c.infra.clock,
-		})
-		if err != nil {
+	if scanner == nil {
+		var err error
+		if scanner, err = scanners(cfg, c).pick("FILES_SCANNER", cfg.Scanner); err != nil {
 			return err
 		}
-		if cfg.ClamAVReadyCheck {
-			c.readyChecks = append(c.readyChecks, httpx.Check{Name: "clamav", Run: sc.Ping})
-		}
-		c.shutdownHooks = append(c.shutdownHooks, sc.Close)
-		scanner = sc
 	}
 	mod, err := files.New(files.Deps{
 		Store: store, Objects: objects, Tx: tx, Outbox: c.infra.outbox, Queue: c.infra.queue,
@@ -108,6 +96,50 @@ func (w *filesWiring) build(c *container) error {
 	w.mod, w.svc = mod, mod.Service
 	c.privacy = append(c.privacy, mod.Privacy)
 	return nil
+}
+
+// objectStores is the selection point of STORAGE_PROVIDER (BE-113): one line
+// per storage.Objects adapter; each passes objectsContract
+// (internal/platform/storage/objects_contract_test.go).
+func objectStores(sc config.Storage, c *container) adapters[storage.Objects] {
+	return adapters[storage.Objects]{
+		config.StorageProviderS3: func() (storage.Objects, error) {
+			s3, err := storage.NewS3(storage.Config{
+				Endpoint: sc.Endpoint, PresignEndpoint: sc.PresignEndpoint, Region: sc.Region,
+				AccessKey: sc.AccessKey.Reveal(), SecretKey: sc.SecretKey.Reveal(),
+				PathStyle: sc.PathStyle, Timeout: sc.Timeout, Clock: c.infra.clock,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("object storage: %w", err)
+			}
+			return s3, nil
+		},
+		config.StorageProviderMem: func() (storage.Objects, error) { return storage.NewMem(c.infra.clock), nil },
+	}
+}
+
+// scanners is the selection point of FILES_SCANNER (BE-113): one line per
+// files.Scanner adapter; each passes scannerContract
+// (internal/files/scanner_contract_test.go). FILES_CLAMAV_READY_CHECK=true
+// adds clamd to /readyz.
+func scanners(cfg config.Files, c *container) adapters[files.Scanner] {
+	return adapters[files.Scanner]{
+		config.ScannerNoop: func() (files.Scanner, error) { return files.NoopScanner{}, nil },
+		config.ScannerClamAV: func() (files.Scanner, error) {
+			sc, err := files.NewClamAV(files.ClamAVConfig{
+				Addr: cfg.ClamAVAddr, Timeout: cfg.ClamAVTimeout, MaxConns: cfg.ClamAVMaxConns,
+				MaxBytes: cfg.ClamAVMaxBytes, Clock: c.infra.clock,
+			})
+			if err != nil {
+				return nil, err
+			}
+			if cfg.ClamAVReadyCheck {
+				c.readyChecks = append(c.readyChecks, httpx.Check{Name: "clamav", Run: sc.Ping})
+			}
+			c.shutdownHooks = append(c.shutdownHooks, sc.Close)
+			return sc, nil
+		},
+	}
 }
 
 // tasks: file.uploaded → files.scan_file, file.rejected →

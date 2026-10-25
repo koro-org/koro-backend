@@ -44,7 +44,8 @@ func (w *notifyWiring) useMemStore() {
 	w.cursor = &memCursor{}
 	// Test containers carry no loaded configuration: give the sender identity
 	// and the webhook secret.
-	w.cfg = &config.Notify{SMTPFrom: "noreply@koro.test", SMTPFromName: "Koro",
+	w.cfg = &config.Notify{EmailProvider: config.EmailProviderMem, PushProvider: config.PushProviderAuto,
+		SMTPFrom: "noreply@koro.test", SMTPFromName: "Koro",
 		EmailWebhookResendSecret: config.NewSecret(matrixResendSecret)}
 }
 
@@ -140,7 +141,7 @@ func TestWire_Notify_SMTPTransportBuiltFromConfig(t *testing.T) {
 	c := newTestContainer(t)
 	c.notify.transport, c.notify.cfg = nil, nil // production state: SMTP from the loaded SMTP_* settings
 	c.infra.cfg.Notify = config.Notify{
-		SMTPHost: "localhost", SMTPPort: 1025, SMTPTLS: config.SMTPTLSNone,
+		EmailProvider: config.EmailProviderSMTP, PushProvider: config.PushProviderAuto, SMTPHost: "localhost", SMTPPort: 1025, SMTPTLS: config.SMTPTLSNone,
 		SMTPFrom: "noreply@koro.test", SMTPFromName: "Koro", SMTPTimeout: time.Second,
 	}
 	if err := c.build(); err != nil {

@@ -12,6 +12,10 @@
 //     or shared-file lookups (configuration comes from internal/platform/config).
 //   - Mem (NewMem): an in-memory store for service, wiring and matrix tests.
 //
+// cmd/koro picks one by STORAGE_PROVIDER (s3 | mem, BE-113); both pass the
+// contract suite objectsContract (objects_contract_test.go), which a new
+// adapter must pass too.
+//
 // Rules the package enforces for every caller:
 //
 //   - A presigned GET lives at most MaxGetTTL (5 minutes) and always carries

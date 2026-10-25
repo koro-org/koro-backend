@@ -36,7 +36,7 @@ func (w *filesWiring) useMemStore() {
 	w.objects = storage.NewMem(clk)
 	w.tx = db.NopTx{}
 	w.buckets = &testBuckets
-	w.cfg = &config.Files{UploadURLTTL: storage.MaxPutTTL}
+	w.cfg = &config.Files{UploadURLTTL: storage.MaxPutTTL, Scanner: config.ScannerNoop}
 }
 
 // TestWire_FilesTasksAndPrivacy pins what the files module registers (01 §6.2,
@@ -88,7 +88,7 @@ func TestWire_FilesTasksAndPrivacy(t *testing.T) {
 func TestWire_FilesRefusesScanRequiredWithoutScanner(t *testing.T) {
 	t.Parallel()
 	c := newTestContainer(t)
-	c.files.cfg = &config.Files{ScanRequired: true, UploadURLTTL: storage.MaxPutTTL}
+	c.files.cfg = &config.Files{ScanRequired: true, UploadURLTTL: storage.MaxPutTTL, Scanner: config.ScannerNoop}
 	if err := c.build(); err == nil || !strings.Contains(err.Error(), "FILES_SCAN_REQUIRED") {
 		t.Fatalf("build() error = %v", err)
 	}

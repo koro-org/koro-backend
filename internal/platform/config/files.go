@@ -10,7 +10,7 @@ import (
 )
 
 // Files configures the files module (internal/files). Owner: BE-008, then
-// BE-048 (ClamAV); only tickets of the files module edit this file and the
+// BE-048 (ClamAV), BE-113 (adapter selection); only tickets of the files module edit this file and the
 // "# --- files ---" block of .env.example (BE-001 R7).
 //
 // Development defaults run the no-op scanner (scan_status "skipped") so that
@@ -26,8 +26,10 @@ type Files struct {
 	// 10 minutes; at most storage.MaxPutTTL).
 	UploadURLTTL time.Duration `env:"FILES_UPLOAD_URL_TTL" envDefault:"10m"`
 
-	// Scanner selects the scanner of the upload pipeline: "noop" (marks
-	// every file skipped) or "clamav" (clamd over TCP, INSTREAM).
+	// Scanner selects the files.Scanner adapter of the upload pipeline
+	// (the port's <SECTION>_PROVIDER key; the name predates BE-113): "noop"
+	// (marks every file skipped; development only) or "clamav" (clamd over
+	// TCP, INSTREAM).
 	Scanner string `env:"FILES_SCANNER" envDefault:"noop"`
 	// ClamAVAddr is clamd's TCPSocket as host:port (deploy/compose.dev.yaml
 	// publishes it on 127.0.0.1:3310).
@@ -54,9 +56,13 @@ type Files struct {
 
 // Scanner names (FILES_SCANNER).
 const (
-	ScannerNoop   = "noop"
+	ScannerNoop   = ProviderNoop
 	ScannerClamAV = "clamav"
 )
+
+// Scanners lists the accepted FILES_SCANNER values; cmd/koro has one
+// constructor per name (wire_files.go).
+func Scanners() []string { return []string{ScannerNoop, ScannerClamAV} }
 
 // minClamAVBytes is twice the largest browser upload (02 §3.1: 10 MB): a
 // skipped file is rescanned after its metadata removal, which may grow it
@@ -69,19 +75,17 @@ func (f *Files) validate(c Common) error {
 	if f.UploadURLTTL < time.Minute || f.UploadURLTTL > 10*time.Minute {
 		errs = append(errs, errors.New("FILES_UPLOAD_URL_TTL must be between 1m and 10m (04 §1.14)"))
 	}
-	f.Scanner = strings.ToLower(strings.TrimSpace(f.Scanner))
-	switch f.Scanner {
-	case ScannerNoop:
-	case ScannerClamAV:
+	if err := checkProvider(c, "FILES_SCANNER", &f.Scanner, Scanners()); err != nil {
+		errs = append(errs, err)
+	} else if f.Scanner == ScannerClamAV {
 		errs = append(errs, f.validateClamAV()...)
-	default:
-		errs = append(errs, fmt.Errorf("FILES_SCANNER must be noop or clamav (got %q)", f.Scanner))
 	}
 	if f.RescanBatch < 1 || f.RescanBatch > 1000 {
 		errs = append(errs, errors.New("FILES_RESCAN_BATCH must be between 1 and 1000 (01 §7: ≤ 1000 rows per batch)"))
 	}
-	if c.ProdLike() && (f.Scanner != ScannerClamAV || !f.ScanRequired) {
-		errs = append(errs, fmt.Errorf("FILES_SCANNER=clamav and FILES_SCAN_REQUIRED=true are required in %s (real uploads are scanned, T-81)", c.Env))
+	// The no-op scanner is refused by checkProvider (a development adapter).
+	if c.ProdLike() && !f.ScanRequired {
+		errs = append(errs, fmt.Errorf("FILES_SCAN_REQUIRED=true is required in %s (real uploads are scanned, T-81)", c.Env))
 	}
 	return errors.Join(errs...)
 }

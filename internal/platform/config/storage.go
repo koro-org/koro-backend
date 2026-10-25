@@ -11,7 +11,7 @@ import (
 
 // Storage configures S3-compatible object storage (internal/platform/storage;
 // 05 §14.7: S3_ENDPOINT, S3_BUCKET_*, S3_ACCESS_KEY, S3_SECRET_KEY). Owner:
-// BE-008 (BE-001 R7: only the owning ticket edits this file).
+// BE-008, BE-113 (STORAGE_PROVIDER) (BE-001 R7: only the owning ticket edits this file).
 //
 // The defaults point at the local SeaweedFS of deploy/compose.dev.yaml (its
 // credentials are in deploy/seaweedfs/s3.dev.json). They are rejected in
@@ -20,6 +20,11 @@ import (
 // must be private; the quarantine bucket needs a 1-day lifecycle rule
 // (05 §14.7), configured by operations on the provider.
 type Storage struct {
+	// Provider selects the storage.Objects adapter (STORAGE_PROVIDER,
+	// BE-113): "s3" (any S3-compatible server) or "mem" (in memory,
+	// development only; refused in staging and prod). The S3_* settings are
+	// checked only for s3.
+	Provider string `env:"STORAGE_PROVIDER" envDefault:"s3"`
 	// Endpoint is the S3 API the api/worker processes talk to.
 	Endpoint string `env:"S3_ENDPOINT" envDefault:"http://127.0.0.1:8333"`
 	// PresignEndpoint is the S3 API host browsers reach; presigned URLs
@@ -36,6 +41,16 @@ type Storage struct {
 	BucketQuarantine string `env:"S3_BUCKET_QUARANTINE" envDefault:"koro-quarantine-dev"`
 }
 
+// Storage adapters (STORAGE_PROVIDER).
+const (
+	StorageProviderS3  = "s3"
+	StorageProviderMem = ProviderMem
+)
+
+// StorageProviders lists the accepted STORAGE_PROVIDER values; cmd/koro has
+// one constructor per name (wire_files.go).
+func StorageProviders() []string { return []string{StorageProviderS3, StorageProviderMem} }
+
 // Development placeholders of .env.example / s3.dev.json.
 const (
 	devS3AccessKey = "koro-dev-access-key"
@@ -46,6 +61,30 @@ const (
 var bucketRe = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
 
 func (s *Storage) validate(c Common) error {
+	if err := checkProvider(c, "STORAGE_PROVIDER", &s.Provider, StorageProviders()); err != nil {
+		return err
+	}
+	var errs []error
+	if s.Provider == StorageProviderS3 {
+		errs = s.validateS3(c)
+	}
+	// The bucket names belong to every adapter (files keeps uploads apart).
+	for name, b := range map[string]string{"S3_BUCKET_FILES": s.BucketFiles, "S3_BUCKET_QUARANTINE": s.BucketQuarantine} {
+		if !bucketRe.MatchString(b) {
+			errs = append(errs, fmt.Errorf("%s must be a valid S3 bucket name", name))
+		}
+	}
+	if s.BucketFiles == s.BucketQuarantine {
+		errs = append(errs, errors.New("S3_BUCKET_FILES and S3_BUCKET_QUARANTINE must differ (quarantine, 05 §14.7)"))
+	}
+	if c.ProdLike() && (strings.HasSuffix(s.BucketFiles, "-dev") || strings.HasSuffix(s.BucketQuarantine, "-dev")) {
+		errs = append(errs, fmt.Errorf("S3_BUCKET_* are the development buckets, which is not allowed in %s", c.Env))
+	}
+	return errors.Join(errs...)
+}
+
+// validateS3 checks the connection settings of the s3 adapter.
+func (s *Storage) validateS3(c Common) []error {
 	var errs []error
 	endpoint := func(name, v string) {
 		u, err := url.Parse(v)
@@ -75,16 +114,5 @@ func (s *Storage) validate(c Common) error {
 	if s.Timeout <= 0 || s.Timeout > 5*time.Minute {
 		errs = append(errs, errors.New("S3_TIMEOUT must be positive and at most 5m"))
 	}
-	for name, b := range map[string]string{"S3_BUCKET_FILES": s.BucketFiles, "S3_BUCKET_QUARANTINE": s.BucketQuarantine} {
-		if !bucketRe.MatchString(b) {
-			errs = append(errs, fmt.Errorf("%s must be a valid S3 bucket name", name))
-		}
-	}
-	if s.BucketFiles == s.BucketQuarantine {
-		errs = append(errs, errors.New("S3_BUCKET_FILES and S3_BUCKET_QUARANTINE must differ (quarantine, 05 §14.7)"))
-	}
-	if c.ProdLike() && (strings.HasSuffix(s.BucketFiles, "-dev") || strings.HasSuffix(s.BucketQuarantine, "-dev")) {
-		errs = append(errs, fmt.Errorf("S3_BUCKET_* are the development buckets, which is not allowed in %s", c.Env))
-	}
-	return errors.Join(errs...)
+	return errs
 }

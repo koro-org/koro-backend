@@ -137,3 +137,11 @@ func TestClamAV_EICAR_Infected(t *testing.T) {
 		t.Fatalf("Scan after the limit error = %+v, %v", v, err)
 	}
 }
+
+// TestClamAV_ContractSuite_Clamd runs the Scanner contract suite (BE-113)
+// against a real clamd (the shared container of this package).
+func TestClamAV_ContractSuite_Clamd(t *testing.T) { //nolint:tparallel // the contract's steps share the adapter's state and run in order
+	t.Parallel()
+	s := newClamAV(t, files.ClamAVConfig{Addr: clamavtest.Start(t), Timeout: 30 * time.Second})
+	scannerContract(t, s, scannerFixture{Infected: clamavtest.EICAR})
+}

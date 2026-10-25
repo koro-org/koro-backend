@@ -157,3 +157,17 @@ func TestS3_SeaweedFS_PutObjectWithoutChecksumTrailer(t *testing.T) {
 		t.Fatalf("Stat(missing) = %v", err)
 	}
 }
+
+// TestS3_ContractSuite_SeaweedFS runs the Objects contract suite (BE-113)
+// against SeaweedFS, which verifies the presigned signatures.
+func TestS3_ContractSuite_SeaweedFS(t *testing.T) { //nolint:tparallel // the contract's steps share the adapter's state and run in order
+	t.Parallel()
+	s3 := storagetest.Client(t)
+	objectsContract(t, s3, objectsFixture{Quarantine: storagetest.Bucket(t, s3), Files: storagetest.Bucket(t, s3),
+		Now: time.Now, ClientPut: func(t *testing.T, p storage.Presigned, body []byte) {
+			t.Helper()
+			if resp := browserPut(t, p, body); resp.StatusCode != http.StatusOK {
+				t.Fatalf("presigned PUT = %d", resp.StatusCode)
+			}
+		}})
+}

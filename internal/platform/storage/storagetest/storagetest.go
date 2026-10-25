@@ -1,6 +1,6 @@
 //go:build integration
 
-// Package storagetest starts a SeaweedFS S3 server (the local object storage
+// This file starts a SeaweedFS S3 server (the local object storage
 // of deploy/compose.dev.yaml) for integration tests (05 §14.7: the S3 client
 // is tested against the target storage). One container serves the whole
 // test binary: Main starts it once per package, in the background while run
@@ -16,6 +16,7 @@
 // and retried with backoff, the container is "ready" only once S3 accepts a
 // bucket creation (SeaweedFS answers /healthz before its first volume can
 // take writes), and bucket creation itself is retried.
+
 package storagetest
 
 import (

@@ -198,3 +198,26 @@ func TestSMTP_Mailpit_Delivers(t *testing.T) {
 		t.Errorf("commercial footer missing: %q", promo.Text)
 	}
 }
+
+// TestSMTPTransport_ContractSuite_Mailpit runs the EmailTransport contract
+// suite (BE-113) against Mailpit, the relay of `make dev`. Mailpit accepts
+// every recipient, so the refusal steps run against the fake server only.
+func TestSMTPTransport_ContractSuite_Mailpit(t *testing.T) { //nolint:tparallel // the contract's steps share the adapter's state and run in order
+	t.Parallel()
+	host, port, api := startMailpit(t)
+	tr, err := notify.NewSMTPTransport(notify.SMTPConfig{Host: host, Port: port, TLS: notify.SMTPTLSNone, Timeout: 10 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	emailTransportContract(t, tr, emailFixture{Delivered: func(t *testing.T) []string {
+		var list struct {
+			Messages []struct{ MessageID string }
+		}
+		mailpitGet(t, api+"/api/v1/messages?limit=200", &list)
+		ids := make([]string, 0, len(list.Messages))
+		for _, m := range list.Messages {
+			ids = append(ids, m.MessageID)
+		}
+		return ids
+	}})
+}

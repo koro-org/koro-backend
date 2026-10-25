@@ -80,8 +80,11 @@ func validateMessage(m Message) []problem.FieldError {
 		if len(m.Inline) > 0 || len(m.Attachments) > 0 {
 			bad("attachments", "are only supported on the email channel")
 		}
-		if m.LinkPath != "" && (len(m.LinkPath) > maxLinkPath || !reLinkPath.MatchString(m.LinkPath) || strings.HasPrefix(m.LinkPath, "//")) {
+		if l := m.LinkPath.String(); l != "" && (len(l) > maxLinkPath || !reLinkPath.MatchString(l) || strings.HasPrefix(l, "//")) {
 			bad("link_path", "must be an in-app relative path (/..., letters, digits and / _ - ? = & .)")
+		} else if _, ok := ParseLink(l); l != "" && !ok {
+			// A builder fed a malformed slug or order number.
+			bad("link_path", "must be one of the link forms of the catalog (x-koro-link-paths)")
 		}
 		if m.SourceOrgID != nil && *m.SourceOrgID == uuid.Nil() {
 			bad("source_org_id", "must not be the nil UUID")

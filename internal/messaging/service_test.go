@@ -601,7 +601,7 @@ func TestNotification_NoMessageBody(t *testing.T) {
 	}
 	m := sent[0]
 	if m.Template != "messaging.contact_request_received" || *m.UserID != authztest.ID("student") ||
-		m.SourceOrgID == nil || *m.SourceOrgID != e.companyA || m.LinkPath != "/me/contact-requests/"+v.Request.ID.String() {
+		m.SourceOrgID == nil || *m.SourceOrgID != e.companyA || m.LinkPath.String() != "/me/contact-requests/"+v.Request.ID.String() {
 		t.Fatalf("notice = %+v", m)
 	}
 	b, _ := json.Marshal(m.Data)
@@ -641,8 +641,8 @@ func TestClosedNotice_Recipients(t *testing.T) {
 	got := map[uuid.UUID]string{}
 	for _, m := range e.sender.on(notify.ChannelInApp) {
 		got[*m.UserID] = m.Template
-		if m.LinkPath != "/orgs/"+e.companyA.String()+"/contact-requests/"+v.Request.ID.String() {
-			t.Fatalf("link = %s", m.LinkPath)
+		if m.LinkPath.String() != "/orgs/"+e.companyA.String()+"/contact-requests/"+v.Request.ID.String() {
+			t.Fatalf("link = %s", m.LinkPath.String())
 		}
 	}
 	want := map[uuid.UUID]string{

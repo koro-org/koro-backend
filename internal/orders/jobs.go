@@ -81,20 +81,20 @@ func (s *service) handlePlaced(ctx context.Context, e domainevent.Envelope) erro
 		if err != nil {
 			return err
 		}
-		errs = append(errs, s.notifyInApp(ctx, o, seller, tmplOrderPlaced, key, admins, "/orgs/"+seller.String()+"/sales"))
+		errs = append(errs, s.notifyInApp(ctx, o, seller, tmplOrderPlaced, key, admins, notify.OrgSalesLink(seller)))
 	}
 	fins, err := s.d.Staff.FinanceAdmins(ctx)
 	if err != nil {
 		return fmt.Errorf("orders: finance admins: %w", err)
 	}
-	errs = append(errs, s.notifyInApp(ctx, o, o.OrgID, tmplOrderPlaced, key, fins, "/admin/orders?order_no="+o.OrderNo))
+	errs = append(errs, s.notifyInApp(ctx, o, o.OrgID, tmplOrderPlaced, key, fins, notify.AdminOrderLink(o.OrderNo)))
 	return errors.Join(errs...)
 }
 
 // sendInstructions sends the payment instructions to the placer.
 func (s *service) sendInstructions(ctx context.Context, o Order, key string) error {
 	u := o.PlacedByUserID
-	link := "/orders/" + o.ID.String() + "/payment-instructions"
+	link := notify.OrderPaymentInstructionsLink(o.ID)
 	errs := []error{s.notifyInApp(ctx, o, o.OrgID, tmplPaymentInstructions, key, []uuid.UUID{u}, link)}
 	c, ok, err := s.contact(ctx, u)
 	if err != nil || !ok {
@@ -135,13 +135,13 @@ func (s *service) handleCancelled(ctx context.Context, e domainevent.Envelope) e
 		return err
 	}
 	key := e.ID.String()
-	errs := []error{s.notifyInApp(ctx, o, o.OrgID, tmplOrderCancelled, key, []uuid.UUID{o.PlacedByUserID}, "/orders/"+o.ID.String())}
+	errs := []error{s.notifyInApp(ctx, o, o.OrgID, tmplOrderCancelled, key, []uuid.UUID{o.PlacedByUserID}, notify.OrderLink(o.ID))}
 	for _, seller := range sellersOf(lines) {
 		admins, err := s.membersWith(ctx, seller, authz.MemberClubAdmin, authz.MemberUniversityRep)
 		if err != nil {
 			return err
 		}
-		errs = append(errs, s.notifyInApp(ctx, o, seller, tmplOrderCancelled, key, admins, "/orgs/"+seller.String()+"/sales"))
+		errs = append(errs, s.notifyInApp(ctx, o, seller, tmplOrderCancelled, key, admins, notify.OrgSalesLink(seller)))
 	}
 	return errors.Join(errs...)
 }
@@ -156,7 +156,7 @@ func (s *service) handleExpired(ctx context.Context, e domainevent.Envelope) err
 	if err != nil || !ok {
 		return err
 	}
-	return s.notifyInApp(ctx, o, o.OrgID, tmplOrderExpired, e.ID.String(), []uuid.UUID{o.PlacedByUserID}, "/orders/"+o.ID.String())
+	return s.notifyInApp(ctx, o, o.OrgID, tmplOrderExpired, e.ID.String(), []uuid.UUID{o.PlacedByUserID}, notify.OrderLink(o.ID))
 }
 
 // handleMarked asks the buyer company's admins to confirm the delivery (or
@@ -174,7 +174,7 @@ func (s *service) handleMarked(ctx context.Context, e domainevent.Envelope) erro
 	if err != nil {
 		return err
 	}
-	return s.notifyInApp(ctx, o, o.OrgID, tmplDeliveryMarked, e.ID.String(), admins, "/orders/"+o.ID.String())
+	return s.notifyInApp(ctx, o, o.OrgID, tmplDeliveryMarked, e.ID.String(), admins, notify.OrderLink(o.ID))
 }
 
 // handleFulfilled tells the seller's admins that a line is fulfilled
@@ -197,7 +197,7 @@ func (s *service) handleFulfilled(ctx context.Context, e domainevent.Envelope) e
 	if err != nil {
 		return err
 	}
-	return s.notifyInApp(ctx, o, seller, tmplLineFulfilled, e.ID.String(), admins, "/orgs/"+seller.String()+"/sales")
+	return s.notifyInApp(ctx, o, seller, tmplLineFulfilled, e.ID.String(), admins, notify.OrgSalesLink(seller))
 }
 
 // noticeOrder reads the order of a notice with its lines; a missing one (a
@@ -235,7 +235,7 @@ func (s *service) membersWith(ctx context.Context, orgID uuid.UUID, roles ...aut
 
 // notifyInApp sends an in-app notice (IDs only) to every recipient; the
 // dedupe key (the event and the recipient) makes a repeated task a no-op.
-func (s *service) notifyInApp(ctx context.Context, o Order, sourceOrg uuid.UUID, tmpl, key string, to []uuid.UUID, link string) error {
+func (s *service) notifyInApp(ctx context.Context, o Order, sourceOrg uuid.UUID, tmpl, key string, to []uuid.UUID, link notify.Link) error {
 	if len(to) == 0 {
 		return nil
 	}

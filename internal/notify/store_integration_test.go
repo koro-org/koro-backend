@@ -145,7 +145,7 @@ func TestSend_SuppressionAndInApp_Gorm(t *testing.T) {
 	}
 	ev := uuid.NewV7()
 	nid, err := mod.Service.Send(ctx, notify.Message{UserID: &uid, Channel: notify.ChannelInApp, Category: notify.CategoryTransactional,
-		Template: "notify.test_notice", Data: map[string]any{"event_id": ev}, LinkPath: "/events/" + ev.String(), DedupeKey: "n1"})
+		Template: "notify.test_notice", Data: map[string]any{"event_id": ev}, LinkPath: notify.MyRegistrationLink(ev), DedupeKey: "n1"})
 	if err != nil {
 		t.Fatal(err)
 	}

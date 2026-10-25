@@ -34,11 +34,9 @@ const (
 	// deploy, lost Redis): the chain head of one day ago.
 	AuditAlertLookback = 24 * time.Hour
 
-	// Templates and links of the alerts.
+	// Templates of the alerts.
 	templateSupportAccess      = "notify.support_access"
 	templateEntitlementGranted = "notify.entitlement_granted"
-	linkSecurityEvents         = "/me/security-events"
-	linkAdminAudit             = "/admin/audit-events"
 )
 
 func (s *service) auditAlertJob() queue.Job {
@@ -116,7 +114,7 @@ func (s *service) alertFor(ctx context.Context, r audit.Record) (int, error) {
 		if raw, _ := meta[audit.MetaSubjectUserID].(string); raw != "" {
 			subject, err := uuid.Parse(raw)
 			if err == nil && subject != uuid.Nil() && (r.ActorUserID == nil || *r.ActorUserID != subject) {
-				if err := s.alert(ctx, r, subject, templateSupportAccess, linkSecurityEvents, nil); err != nil {
+				if err := s.alert(ctx, r, subject, templateSupportAccess, MySecurityEventsLink(), nil); err != nil {
 					return sent, err
 				}
 				sent++
@@ -141,7 +139,7 @@ func (s *service) alertFor(ctx context.Context, r audit.Record) (int, error) {
 			data["org_id"] = *r.OrgID
 		}
 		for _, admin := range admins {
-			if err := s.alert(ctx, r, admin, templateEntitlementGranted, linkAdminAudit, data); err != nil {
+			if err := s.alert(ctx, r, admin, templateEntitlementGranted, AdminAuditEventsLink(), data); err != nil {
 				return sent, err
 			}
 			sent++
@@ -166,7 +164,7 @@ func metadataOf(r audit.Record) (map[string]any, bool) {
 // alert sends one in-app alert. A permanent failure (a recipient that can
 // no longer receive) is logged and skipped so that one record cannot stall
 // the job; anything transient stops the pass and is retried.
-func (s *service) alert(ctx context.Context, r audit.Record, to uuid.UUID, template, link string, data map[string]any) error {
+func (s *service) alert(ctx context.Context, r audit.Record, to uuid.UUID, template string, link Link, data map[string]any) error {
 	d := map[string]any{"audit_event_id": r.ID}
 	for k, v := range data {
 		d[k] = v

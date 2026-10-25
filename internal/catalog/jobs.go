@@ -74,7 +74,7 @@ func (s *service) handleSubmitted(ctx context.Context, e domainevent.Envelope) e
 		return fmt.Errorf("catalog: platform admins: %w", err)
 	}
 	key := tmplReviewPending + ":" + o.ID.String() + ":" + e.ID.String()
-	errs := []error{s.notifyInApp(ctx, o, tmplReviewPending, key, admins, "/admin/offerings")}
+	errs := []error{s.notifyInApp(ctx, o, tmplReviewPending, key, admins, notify.AdminOfferingsLink())}
 	if o.RequiresUniversityApproval {
 		f, err := s.facts(ctx, o)
 		if err != nil {
@@ -86,7 +86,7 @@ func (s *service) handleSubmitted(ctx context.Context, e domainevent.Envelope) e
 				return err
 			}
 			errs = append(errs, s.notifyInApp(ctx, o, tmplReviewPending, key, reps,
-				"/orgs/"+f.universityOrgID.String()+"/offering-approvals"))
+				notify.OrgOfferingApprovalsLink(f.universityOrgID)))
 		}
 	}
 	return errors.Join(errs...)
@@ -132,7 +132,7 @@ func (s *service) notifySeller(ctx context.Context, offeringID uuid.UUID, tmpl, 
 	if err != nil {
 		return err
 	}
-	return s.notifyInApp(ctx, o, tmpl, key, admins, "/orgs/"+o.OrgID.String()+"/offerings")
+	return s.notifyInApp(ctx, o, tmpl, key, admins, notify.OrgOfferingsLink(o.OrgID))
 }
 
 // noticeOffering reads the offering of a notice; a missing one (never
@@ -170,7 +170,7 @@ func (s *service) membersWith(ctx context.Context, orgID uuid.UUID, roles ...aut
 
 // notifyInApp sends an in-app notice (IDs only) to every recipient; the
 // dedupe key makes a repeated task a no-op per recipient.
-func (s *service) notifyInApp(ctx context.Context, o Offering, tmpl, key string, to []uuid.UUID, link string) error {
+func (s *service) notifyInApp(ctx context.Context, o Offering, tmpl, key string, to []uuid.UUID, link notify.Link) error {
 	if len(to) == 0 {
 		return nil
 	}
@@ -235,7 +235,7 @@ func (s *service) handlePolicyChanged(ctx context.Context, payload []byte) error
 		u := uid
 		msgs := []notify.Message{{
 			UserID: &u, Channel: notify.ChannelInApp, Category: notify.CategoryTransactional, Template: tmplPolicyChanged,
-			LinkPath: "/admin/commerce-policies", DedupeKey: key + ":" + u.String() + ":in_app",
+			LinkPath: notify.AdminCommercePoliciesLink(), DedupeKey: key + ":" + u.String() + ":in_app",
 			Data: map[string]any{"policy_id": p.ID.String()},
 		}}
 		c, ok, err := s.contact(ctx, u)

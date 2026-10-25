@@ -2,6 +2,7 @@ package feed
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"uuid"
 
@@ -10,6 +11,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // registerInteractions adds the 12 operations of BE-029 (04 §2.7, §F.3,
@@ -93,6 +95,16 @@ func registerInteractions(api huma.API, h handler) {
 		Summary:     "List the organizations I muted",
 		Description: "Newest first.",
 	}, op.Meta{Action: string(authz.FeedMuteListOwn), Surface: op.SurfaceSelf}, h.listMutes)
+
+	op.Register(api, "feed", huma.Operation{
+		OperationID: "listMyOrgRelations", Method: http.MethodGet, Path: "/me/org-relations",
+		Summary: "Get my relations to organizations",
+		Description: "The signed-in reader's own follow, mute and membership state of each organization asked " +
+			"(the buttons of an org page or card; BE-122). The public organization reads (getOrgBySlug, getClub, " +
+			"listClubs, searchOrgs) never carry the reader's state, so their anonymous responses stay cacheable; " +
+			"clients read this alongside, outside any shared cache. Every ID gets an item, existing or not: an " +
+			"unknown organization is following=false, muted=false, membership_status=none.",
+	}, op.Meta{Action: string(authz.FeedFollowListOwn), Surface: op.SurfaceSelf}, h.listOrgRelations)
 }
 
 // postAction runs one reader action on a post.
@@ -268,4 +280,30 @@ func (h handler) listMutes(ctx context.Context, in *page.Params) (*mutesOutput, 
 		out.Body.NextCursor = page.Next(sortCreated, fp, page.TimeVal(p.Next.At), page.UUIDVal(p.Next.ID))
 	}
 	return out, nil
+}
+
+type orgRelationsInput struct {
+	OrgID []string `query:"org_id,explode" required:"true" minItems:"1" maxItems:"50" doc:"Organization IDs (repeat the parameter)"`
+}
+
+type orgRelationsOutput struct {
+	Body OrgRelationList
+}
+
+func (h handler) listOrgRelations(ctx context.Context, in *orgRelationsInput) (*orgRelationsOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]uuid.UUID, len(in.OrgID))
+	for i, raw := range in.OrgID {
+		if ids[i], err = uuid.Parse(raw); err != nil {
+			return nil, problem.Field(fmt.Sprintf("query.org_id[%d]", i), "must be a UUID")
+		}
+	}
+	rs, err := h.svc.OrgRelations(ctx, a, ids)
+	if err != nil {
+		return nil, err
+	}
+	return &orgRelationsOutput{Body: toOrgRelationList(rs)}, nil
 }

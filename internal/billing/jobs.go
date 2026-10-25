@@ -229,7 +229,7 @@ func (s *service) notifyInApp(ctx context.Context, inv Invoice, tmpl, key string
 		u := uid
 		_, err := s.d.Sender.Send(ctx, notify.Message{
 			UserID: &u, Channel: notify.ChannelInApp, Category: notify.CategoryTransactional, Template: tmpl,
-			SourceOrgID: org, LinkPath: "/invoices/" + inv.ID.String(), DedupeKey: tmpl + ":" + key + ":" + u.String(),
+			SourceOrgID: org, LinkPath: notify.InvoiceLink(inv.ID), DedupeKey: tmpl + ":" + key + ":" + u.String(),
 			Data: map[string]any{"invoice_id": inv.ID.String()},
 		})
 		errs = append(errs, s.sendErr(ctx, tmpl, inv.ID, err))

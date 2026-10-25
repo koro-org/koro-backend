@@ -72,6 +72,10 @@ type OrgDirectory interface {
 	// sensitive clubs included (Actor resolution, 03 §2.1; the result is
 	// never serialised to anyone but the user).
 	MembershipsOf(ctx context.Context, userID uuid.UUID) ([]authz.Membership, error)
+	// OpenMembershipsOf returns the status (pending or active) of every
+	// open membership of a user by org, sensitive clubs included (the
+	// reader's own relations, BE-122; never shown to anyone but the user).
+	OpenMembershipsOf(ctx context.Context, userID uuid.UUID) (map[uuid.UUID]MemberStatus, error)
 	// HasRole reports whether userID holds one of roles in orgID (active).
 	HasRole(ctx context.Context, orgID, userID uuid.UUID, roles ...authz.MemberRole) (bool, error)
 	// ActiveMemberIDs returns the user IDs of an org's active members (a

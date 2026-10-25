@@ -517,6 +517,16 @@ operations:
       anonymous: 401
       "@signed_in": 200
 
+  # BE-122: the reader's own relations (never on the public org reads).
+  listMyOrgRelations:
+    method: GET
+    path: /api/v1/me/org-relations
+    action: feed.follow.list_own
+    query: { org_id: "{{fixture:club_a}}" }
+    expect:
+      anonymous: 401
+      "@signed_in": 200
+
   # ---- BE-032: targeted posts, reports, moderation
 
   createTargetedPost:

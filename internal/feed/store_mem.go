@@ -372,7 +372,7 @@ func (s *MemStore) Follows(_ context.Context, userID, orgID uuid.UUID) (bool, er
 func (s *MemStore) ViewerState(_ context.Context, userID uuid.UUID, postIDs, orgIDs []uuid.UUID) (ViewerState, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := ViewerState{Liked: map[uuid.UUID]bool{}, Saved: map[uuid.UUID]bool{}, Following: map[uuid.UUID]bool{}}
+	out := newViewerState()
 	for _, id := range postIDs {
 		if has(s.likes, userID, id) {
 			out.Liked[id] = true
@@ -384,6 +384,9 @@ func (s *MemStore) ViewerState(_ context.Context, userID uuid.UUID, postIDs, org
 	for _, id := range orgIDs {
 		if has(s.follows, userID, id) {
 			out.Following[id] = true
+		}
+		if has(s.mutes, userID, id) {
+			out.Muted[id] = true
 		}
 	}
 	return out, nil

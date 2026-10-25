@@ -13,6 +13,7 @@ import (
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/outbox"
+	"koro/internal/platform/page"
 	"koro/internal/platform/queue"
 )
 
@@ -86,6 +87,30 @@ func (s *service) MembershipsOf(ctx context.Context, userID uuid.UUID) ([]authz.
 		out = append(out, authz.Membership{OrgID: m.OrgID, OrgKind: m.OrgKind, Role: m.Role})
 	}
 	return out, nil
+}
+
+// OpenMembershipsOf implements OrgDirectory: the open memberships of a
+// user (pending join requests and active memberships) by org, read page by
+// page; an active row wins over a pending one of the same org.
+func (s *service) OpenMembershipsOf(ctx context.Context, userID uuid.UUID) (map[uuid.UUID]MemberStatus, error) {
+	out := make(map[uuid.UUID]MemberStatus)
+	var after *uuid.UUID
+	for {
+		rows, err := s.d.Store.ListUserMemberships(ctx, userID, []MemberStatus{MemberPending, MemberActive}, after, page.MaxLimit)
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range rows {
+			if out[m.OrgID] != MemberActive {
+				out[m.OrgID] = m.Status
+			}
+		}
+		if len(rows) < page.MaxLimit {
+			return out, nil
+		}
+		last := rows[len(rows)-1].ID
+		after = &last
+	}
 }
 
 // endedBatch bounds the IDs of one EndedMemberships store read.

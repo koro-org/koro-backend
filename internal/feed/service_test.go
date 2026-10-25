@@ -565,8 +565,8 @@ func TestPost_KindsAndEventShare(t *testing.T) {
 	wantField(t, create(feed.PostInput{Kind: feed.KindText, Body: doc("x"), AudienceKind: segment}), "body.audience_kind")
 
 	start := time.Date(2026, 11, 20, 15, 0, 0, 0, time.UTC)
-	pub := events.EventSummary{ID: uuid.NewV7(), OrgID: orgID("club_b"), Title: "Açık etkinlik", Status: events.StatusPublished,
-		StartsAt: start, EndsAt: start.Add(time.Hour), Visibility: events.VisibilityPublic}
+	pub := events.EventSummary{ID: uuid.NewV7(), OrgID: orgID("club_b"), Title: "Açık etkinlik", Slug: "acik-etkinlik",
+		Status: events.StatusPublished, StartsAt: start, EndsAt: start.Add(time.Hour), Visibility: events.VisibilityPublic}
 	members := pub
 	members.ID, members.Visibility = uuid.NewV7(), events.VisibilityMembers
 	sensitive := pub
@@ -589,6 +589,10 @@ func TestPost_KindsAndEventShare(t *testing.T) {
 	p, err := e.svc.PublishPost(ctx, admin, v.Post.ID)
 	if err != nil || p.Event == nil || p.Event.Title != "Açık etkinlik" {
 		t.Fatalf("event share = %+v, %v", p.Event, err)
+	}
+	// The card links the event page without a redirect (BE-122).
+	if d := feed.ToPostDTO(p); d.Event == nil || d.Event.Slug != "acik-etkinlik" || d.Event.EventID != pub.ID.String() {
+		t.Fatalf("event share DTO = %+v", d.Event)
 	}
 	// The sensitive club shares its own sensitive event.
 	sv := e.create(t, "club_admin_sensitive", "club_sensitive", feed.PostInput{Kind: feed.KindEventShare, EventID: &sensitive.ID})

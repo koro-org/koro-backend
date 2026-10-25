@@ -203,7 +203,7 @@ func TestBreachTimer_WarnsAt48_24_6(t *testing.T) {
 	}
 	// In-app copies go to the platform admins and the owner, with the ID only.
 	for _, m := range e.mail.of("kvkk.breach_deadline") {
-		if m.Channel == notify.ChannelInApp && (len(m.Data) != 1 || m.LinkPath != "/admin/breaches") {
+		if m.Channel == notify.ChannelInApp && (len(m.Data) != 1 || m.LinkPath.String() != "/admin/breaches") {
 			t.Fatalf("in-app warning = %+v", m)
 		}
 	}

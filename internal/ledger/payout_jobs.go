@@ -106,7 +106,7 @@ func (s *service) handlePayoutPaid(ctx context.Context, e domainevent.Envelope) 
 		return errors.New("ledger: notify is not wired")
 	}
 	key := e.ID.String()
-	link := "/orgs/" + p.OrgID.String() + "/payouts/" + p.ID.String()
+	link := notify.OrgPayoutLink(p.OrgID, p.ID)
 	var errs []error
 	errs = append(errs, s.mailPayee(ctx, p))
 	admins, err := s.orgAdmins(ctx, p.OrgID)
@@ -157,7 +157,7 @@ func (s *service) handlePayoutPaidBeforeApproval(ctx context.Context, e domainev
 		return err
 	}
 	key := p.ID.String()
-	errs := []error{s.notifyInApp(ctx, p, tmplPayoutPaidEarly, key, to, "/admin/payouts/"+p.ID.String())}
+	errs := []error{s.notifyInApp(ctx, p, tmplPayoutPaidEarly, key, to, notify.AdminPayoutLink(p.ID))}
 	for _, uid := range to {
 		errs = append(errs, s.mailStaff(ctx, p, tmplPayoutPaidEarly, key, uid, data))
 	}
@@ -303,7 +303,7 @@ func (s *service) notifyFinance(ctx context.Context, p Payout, tmpl, key string,
 		return fmt.Errorf("ledger: finance admins: %w", err)
 	}
 	fins = slices.DeleteFunc(slices.Clone(fins), func(id uuid.UUID) bool { return id == skip })
-	return s.notifyInApp(ctx, p, tmpl, key, fins, "/admin/payouts/"+p.ID.String())
+	return s.notifyInApp(ctx, p, tmpl, key, fins, notify.AdminPayoutLink(p.ID))
 }
 
 // orgAdmins returns the seller org's active club admins and university
@@ -328,7 +328,7 @@ func (s *service) orgAdmins(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, 
 
 // notifyInApp sends an in-app notice (IDs only) to every recipient; the
 // dedupe key (the event and the recipient) makes a repeated task a no-op.
-func (s *service) notifyInApp(ctx context.Context, p Payout, tmpl, key string, to []uuid.UUID, link string) error {
+func (s *service) notifyInApp(ctx context.Context, p Payout, tmpl, key string, to []uuid.UUID, link notify.Link) error {
 	if len(to) == 0 {
 		return nil
 	}

@@ -170,7 +170,7 @@ func (s *service) tellAll(ctx context.Context, to []uuid.UUID, c ClubClaim, tmpl
 		_, err := s.d.Sender.Send(ctx, notify.Message{
 			UserID: &user, Channel: notify.ChannelInApp, Category: notify.CategoryTransactional, Template: tmpl,
 			SourceOrgID: &club, Data: map[string]any{"claim_id": c.ID, "club_org_id": c.ClubOrgID},
-			LinkPath: "/admin/club-claims/" + c.ID.String(), DedupeKey: dedupe + c.ID.String() + ":" + id.String(),
+			LinkPath: notify.AdminClubClaimLink(c.ID), DedupeKey: dedupe + c.ID.String() + ":" + id.String(),
 		})
 		switch {
 		case err == nil:

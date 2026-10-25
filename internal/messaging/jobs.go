@@ -123,7 +123,7 @@ func (s *service) handleCreated(ctx context.Context, e domainevent.Envelope) err
 	if err != nil {
 		return err
 	}
-	return s.notify(ctx, tmplReceived, r, []uuid.UUID{r.StudentUserID}, "/me/contact-requests/"+r.ID.String(), &org,
+	return s.notify(ctx, tmplReceived, r, []uuid.UUID{r.StudentUserID}, notify.MyContactRequestLink(r.ID), &org,
 		map[string]any{"company_name": company})
 }
 
@@ -172,7 +172,7 @@ func (s *service) handleClosed(ctx context.Context, e domainevent.Envelope) erro
 	if err != nil {
 		return err
 	}
-	return s.notify(ctx, tmpl, r, to, "/orgs/"+r.OrgID.String()+"/contact-requests/"+r.ID.String(), nil, nil)
+	return s.notify(ctx, tmpl, r, to, notify.OrgContactRequestLink(r.OrgID, r.ID), nil, nil)
 }
 
 // companyRecipients is the sender while an active member of the company,
@@ -209,7 +209,7 @@ var noticeChannels = []notify.Channel{notify.ChannelInApp, notify.ChannelPush, n
 // already went (the in-app key is BE-056's). A recipient without an
 // address (erased meanwhile) gets no e-mail; a permanent refusal is
 // logged, a transient one retries the task.
-func (s *service) notify(ctx context.Context, tmpl string, r ContactRequest, to []uuid.UUID, link string, source *uuid.UUID,
+func (s *service) notify(ctx context.Context, tmpl string, r ContactRequest, to []uuid.UUID, link notify.Link, source *uuid.UUID,
 	mail map[string]any,
 ) error {
 	if len(to) == 0 {
@@ -240,8 +240,8 @@ func (s *service) notify(ctx context.Context, tmpl string, r ContactRequest, to 
 				if !ok {
 					continue
 				}
-				m.ToEmail, m.Locale, m.LinkPath, m.DedupeKey = c.Email, c.Locale, "", key+":email"
-				m.Data = map[string]any{"url": s.d.LinkBaseURL + link}
+				m.ToEmail, m.Locale, m.LinkPath, m.DedupeKey = c.Email, c.Locale, notify.Link{}, key+":email"
+				m.Data = map[string]any{"url": s.d.LinkBaseURL + link.String()}
 				for k, v := range mail {
 					m.Data[k] = v
 				}

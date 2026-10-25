@@ -356,7 +356,7 @@ func (s gormStore) Follows(ctx context.Context, userID, orgID uuid.UUID) (bool, 
 //
 // cross-org: the reader's own rows (reactions, saves, follows).
 func (s gormStore) ViewerState(ctx context.Context, userID uuid.UUID, postIDs, orgIDs []uuid.UUID) (ViewerState, error) {
-	out := ViewerState{Liked: map[uuid.UUID]bool{}, Saved: map[uuid.UUID]bool{}, Following: map[uuid.UUID]bool{}}
+	out := newViewerState()
 	if len(postIDs) == 0 && len(orgIDs) == 0 {
 		return out, nil
 	}
@@ -369,7 +369,9 @@ func (s gormStore) ViewerState(ctx context.Context, userID uuid.UUID, postIDs, o
 		UNION ALL
 		SELECT 'save', post_id FROM post_saves WHERE user_id = @user AND post_id = ANY(CAST( @posts AS uuid[]))
 		UNION ALL
-		SELECT 'follow', org_id FROM org_follows WHERE user_id = @user AND org_id = ANY(CAST( @orgs AS uuid[]))`,
+		SELECT 'follow', org_id FROM org_follows WHERE user_id = @user AND org_id = ANY(CAST( @orgs AS uuid[]))
+		UNION ALL
+		SELECT 'mute', org_id FROM org_mutes WHERE user_id = @user AND org_id = ANY(CAST( @orgs AS uuid[]))`,
 		map[string]any{"user": userID, "posts": db.UUIDArray(postIDs), "orgs": db.UUIDArray(orgIDs)}).Scan(&rows).Error
 	if err != nil {
 		return ViewerState{}, wrap("viewer state", err)
@@ -382,6 +384,8 @@ func (s gormStore) ViewerState(ctx context.Context, userID uuid.UUID, postIDs, o
 			out.Saved[r.ID] = true
 		case "follow":
 			out.Following[r.ID] = true
+		case "mute":
+			out.Muted[r.ID] = true
 		}
 	}
 	return out, nil

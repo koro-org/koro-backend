@@ -143,13 +143,13 @@ func (s *service) deliver(ctx context.Context, m Message, c content, d Delivery)
 		provider = s.d.Push.Name()
 		providerID, err = s.d.Push.SendPush(ctx, PushMessage{
 			DeliveryID: d.ID, UserID: *m.UserID, Kind: m.Template, Title: c.notice.Title, Body: c.notice.Body,
-			LinkPath: m.LinkPath, Data: opaqueData(m.Data),
+			LinkPath: m.LinkPath.String(), Data: opaqueData(m.Data),
 		})
 	case ChannelInApp:
 		provider, providerID = inAppProvider, d.ID.String()
 		_, err = s.d.Store.InsertInApp(ctx, InAppNotification{
 			ID: d.ID, UserID: *m.UserID, Kind: m.Template, Title: c.notice.Title, Body: c.notice.Body,
-			LinkPath: m.LinkPath, SourceOrgID: m.SourceOrgID, Data: opaqueData(m.Data), CreatedAt: s.d.Clock.Now(),
+			LinkPath: m.LinkPath.String(), SourceOrgID: m.SourceOrgID, Data: opaqueData(m.Data), CreatedAt: s.d.Clock.Now(),
 		})
 	}
 	if err != nil {

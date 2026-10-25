@@ -30,6 +30,7 @@ type MediaDTO struct {
 type EventRefDTO struct {
 	EventID  string    `json:"event_id"`
 	Title    string    `json:"title"`
+	Slug     string    `json:"slug" doc:"The event's public URL identifier (web: /etkinlikler/<event_id>-<slug>; BE-122)"`
 	StartsAt time.Time `json:"starts_at"`
 	EndsAt   time.Time `json:"ends_at"`
 	Status   string    `json:"status" enum:"draft,published,cancelled,completed"`
@@ -158,7 +159,7 @@ func toPostDTO(v PostView) PostDTO {
 		d.Media = append(d.Media, md)
 	}
 	if e := v.Event; e != nil {
-		d.Event = &EventRefDTO{EventID: e.ID.String(), Title: e.Title, StartsAt: e.StartsAt, EndsAt: e.EndsAt,
+		d.Event = &EventRefDTO{EventID: e.ID.String(), Title: e.Title, Slug: e.Slug, StartsAt: e.StartsAt, EndsAt: e.EndsAt,
 			Status: string(e.Status)}
 	}
 	if o := decodeOpportunity(p.Opportunity); o != nil {
@@ -198,6 +199,28 @@ type FeedOrgDTO struct {
 	Slug     string `json:"slug"`
 	LogoURL  string `json:"logo_url,omitempty" doc:"Short-lived download URL of the org's logo (at most 5 minutes); absent when the org has no logo or the scan has not cleared it. Do not cache past its expiry; refetch the list. Carried by listMyFollows and listMyMutes; absent in admin report targets."`
 	Verified bool   `json:"verified" doc:"True when a platform admin has verified the org (the verification badge)"`
+}
+
+// OrgRelationDTO is the reader's own relation to an org (listMyOrgRelations).
+type OrgRelationDTO struct {
+	OrgID            string `json:"org_id" format:"uuid"`
+	Following        bool   `json:"following"`
+	Muted            bool   `json:"muted"`
+	MembershipStatus string `json:"membership_status" enum:"none,pending,active" doc:"pending: a join request awaiting the club"`
+}
+
+// OrgRelationList is listMyOrgRelations.
+type OrgRelationList struct {
+	Items []OrgRelationDTO `json:"items" doc:"One item per requested org, in the order asked (repeated IDs once)"`
+}
+
+func toOrgRelationList(rs []OrgRelation) OrgRelationList {
+	out := OrgRelationList{Items: make([]OrgRelationDTO, len(rs))}
+	for i, r := range rs {
+		out.Items[i] = OrgRelationDTO{OrgID: r.OrgID.String(), Following: r.Following, Muted: r.Muted,
+			MembershipStatus: string(r.Membership)}
+	}
+	return out
 }
 
 // FeedOrgList is a page of listMyMutes.

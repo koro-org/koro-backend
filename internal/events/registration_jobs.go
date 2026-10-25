@@ -155,7 +155,7 @@ func (s *service) handleSubmitted(ctx context.Context, env domainevent.Envelope)
 	}
 	org := p.OrgID
 	data := map[string]any{"registration_id": p.RegistrationID, "event_id": p.EventID}
-	if err := s.notice(ctx, p.UserID, templateSubmitted, "/me/registrations/"+p.RegistrationID.String(), &org, data,
+	if err := s.notice(ctx, p.UserID, templateSubmitted, notify.MyRegistrationLink(p.RegistrationID), &org, data,
 		"events.registration_submitted:"+p.RegistrationID.String()); err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func (s *service) handleSubmitted(ctx context.Context, env domainevent.Envelope)
 	if err != nil {
 		return err
 	}
-	link := "/events/" + p.EventID.String() + "/registrations/" + p.RegistrationID.String()
+	link := notify.EventRegistrationLink(p.EventID, p.RegistrationID)
 	for _, m := range members {
 		ok, err := s.d.Orgs.HasRole(ctx, p.OrgID, m, managerRoles...)
 		if err != nil {
@@ -186,7 +186,7 @@ func (s *service) handleWaitlisted(ctx context.Context, env domainevent.Envelope
 	if err != nil {
 		return queue.Permanent(err)
 	}
-	return s.notice(ctx, p.UserID, templateWaitlisted, "/me/registrations/"+p.RegistrationID.String(), nil,
+	return s.notice(ctx, p.UserID, templateWaitlisted, notify.MyRegistrationLink(p.RegistrationID), nil,
 		map[string]any{"registration_id": p.RegistrationID, "event_id": p.EventID},
 		"events.registration_waitlisted:"+p.RegistrationID.String())
 }
@@ -197,7 +197,7 @@ func (s *service) handleRejected(ctx context.Context, env domainevent.Envelope) 
 	if err != nil {
 		return queue.Permanent(err)
 	}
-	return s.notice(ctx, p.UserID, templateRejected, "/me/registrations/"+p.RegistrationID.String(), nil,
+	return s.notice(ctx, p.UserID, templateRejected, notify.MyRegistrationLink(p.RegistrationID), nil,
 		map[string]any{"registration_id": p.RegistrationID, "event_id": p.EventID},
 		"events.registration_rejected:"+p.RegistrationID.String())
 }
@@ -212,7 +212,7 @@ func (s *service) handleCancelled(ctx context.Context, env domainevent.Envelope)
 	if p.By == string(ByUser) {
 		return nil
 	}
-	return s.notice(ctx, p.UserID, templateCancelled, "/me/registrations/"+p.RegistrationID.String(), nil,
+	return s.notice(ctx, p.UserID, templateCancelled, notify.MyRegistrationLink(p.RegistrationID), nil,
 		map[string]any{"registration_id": p.RegistrationID, "event_id": p.EventID},
 		"events.registration_cancelled:"+p.RegistrationID.String())
 }
@@ -220,7 +220,7 @@ func (s *service) handleCancelled(ctx context.Context, env domainevent.Envelope)
 // notice sends one in-app notice (dedupe key: one per registration and
 // recipient). A permanent failure (the account is gone) is logged and
 // dropped; anything else is retried.
-func (s *service) notice(ctx context.Context, to uuid.UUID, tmpl, link string, org *uuid.UUID, data map[string]any, dedupe string) error {
+func (s *service) notice(ctx context.Context, to uuid.UUID, tmpl string, link notify.Link, org *uuid.UUID, data map[string]any, dedupe string) error {
 	if s.d.Sender == nil {
 		return errors.New("events: notify is not wired")
 	}

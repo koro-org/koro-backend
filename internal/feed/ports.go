@@ -41,6 +41,9 @@ type Orgs interface {
 	ActiveMemberIDs(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error)
 	// HasRole reports whether userID holds one of roles in orgID (active).
 	HasRole(ctx context.Context, orgID, userID uuid.UUID, roles ...authz.MemberRole) (bool, error)
+	// OpenMembershipsOf returns the pending or active membership of a user
+	// by org (the reader's own relations, listMyOrgRelations).
+	OpenMembershipsOf(ctx context.Context, userID uuid.UUID) (map[uuid.UUID]orgs.MemberStatus, error)
 }
 
 // Clubs is what feed needs from directory (L6; 01 §4.6 Catalog): which

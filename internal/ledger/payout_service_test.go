@@ -556,7 +556,7 @@ func TestPayout_Notices(t *testing.T) {
 			}
 		case notify.ChannelInApp:
 			inApp++
-			if *m.UserID != authztest.ID("club_admin") || !strings.HasSuffix(m.LinkPath, "/payouts/"+p.ID.String()) {
+			if *m.UserID != authztest.ID("club_admin") || !strings.HasSuffix(m.LinkPath.String(), "/payouts/"+p.ID.String()) {
 				t.Fatalf("org notice %+v", m)
 			}
 		}

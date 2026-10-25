@@ -43,11 +43,13 @@ type fakeOrgs struct {
 	mu      sync.Mutex
 	orgs    map[uuid.UUID]orgs.OrgSummary
 	members map[uuid.UUID][]authz.Membership
-	getMany int // GetMany calls (one per page, BE-094)
+	pending map[uuid.UUID][]uuid.UUID // user → orgs with a join request
+	getMany int                       // GetMany calls (one per page, BE-094)
 }
 
 func newFakeOrgs() *fakeOrgs {
-	f := &fakeOrgs{orgs: map[uuid.UUID]orgs.OrgSummary{}, members: map[uuid.UUID][]authz.Membership{}}
+	f := &fakeOrgs{orgs: map[uuid.UUID]orgs.OrgSummary{}, members: map[uuid.UUID][]authz.Membership{},
+		pending: map[uuid.UUID][]uuid.UUID{}}
 	for _, o := range authztest.Orgs() {
 		id := authztest.ID(o.Name)
 		f.orgs[id] = orgs.OrgSummary{ID: id, Kind: orgs.Kind(o.Kind), Name: "Org " + o.Name,
@@ -83,6 +85,19 @@ func (f *fakeOrgs) MembershipsOf(_ context.Context, userID uuid.UUID) ([]authz.M
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]authz.Membership(nil), f.members[userID]...), nil
+}
+
+func (f *fakeOrgs) OpenMembershipsOf(_ context.Context, userID uuid.UUID) (map[uuid.UUID]orgs.MemberStatus, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[uuid.UUID]orgs.MemberStatus{}
+	for _, o := range f.pending[userID] {
+		out[o] = orgs.MemberPending
+	}
+	for _, m := range f.members[userID] {
+		out[m.OrgID] = orgs.MemberActive
+	}
+	return out, nil
 }
 
 func (f *fakeOrgs) ActiveMemberIDs(_ context.Context, orgID uuid.UUID) ([]uuid.UUID, error) {

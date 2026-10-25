@@ -99,7 +99,7 @@ func TestMarkPaid_PaidBeforeApproval_SecurityNotice(t *testing.T) {
 		switch {
 		case !ok:
 			t.Errorf("no in-app notice to %s", id)
-		case m.LinkPath != "/admin/payouts/"+p.ID.String() || len(m.Data) != 1 || m.Data["payout_id"] != p.ID.String():
+		case m.LinkPath.String() != "/admin/payouts/"+p.ID.String() || len(m.Data) != 1 || m.Data["payout_id"] != p.ID.String():
 			t.Errorf("in-app notice %+v", m)
 		}
 	}

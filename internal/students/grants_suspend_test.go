@@ -169,7 +169,7 @@ func TestSuspend_LapseCutsCompanyAccess(t *testing.T) {
 	}
 	m := msgs[0]
 	if *m.UserID != s.UserID || m.Channel != notify.ChannelInApp || m.Category != notify.CategoryTransactional ||
-		m.Template != "students.access_grants_suspended" || m.LinkPath != "/me/access-grants" || len(m.Data) != 0 ||
+		m.Template != "students.access_grants_suspended" || m.LinkPath.String() != "/me/access-grants" || len(m.Data) != 0 ||
 		m.SourceOrgID != nil || m.DedupeKey == "" {
 		t.Fatalf("notice = %+v", m)
 	}

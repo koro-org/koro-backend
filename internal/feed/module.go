@@ -189,6 +189,10 @@ type Service interface {
 	UnmuteOrg(ctx context.Context, a authz.Actor, orgID uuid.UUID) error
 	// ListMutes is listMyMutes (feed.mute.list_own).
 	ListMutes(ctx context.Context, a authz.Actor, q PageQuery) (OrgPage, error)
+	// OrgRelations is listMyOrgRelations (feed.follow.list_own; BE-122):
+	// the reader's follow, mute and membership state of each org, in the
+	// order asked, repeated IDs once.
+	OrgRelations(ctx context.Context, a authz.Actor, orgIDs []uuid.UUID) ([]OrgRelation, error)
 
 	// CreateTargetedPost is createTargetedPost (feed.post.create_targeted,
 	// 03 k16): a segment draft with its compiled audience and, for a

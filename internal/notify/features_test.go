@@ -165,22 +165,25 @@ func TestSend_InAppAndPushCarryNoPersonalData(t *testing.T) {
 			t.Errorf("Data %v: error = %v, want ErrInvalidMessage", data, err)
 		}
 	}
-	for _, link := range []string{"//evil.example/x", "https://evil.example", "/a b", "javascript:alert(1)"} {
+	// A Link comes from the catalog builders only; a builder fed a bad
+	// parameter still cannot smuggle a foreign path (BE-122).
+	for _, link := range []notify.Link{notify.ClubLink("a b"), notify.ClubLink("x/../../admin"), notify.ClubLink(""),
+		notify.AdminOrderLink("KR1&next=//evil.example")} {
 		_, err := f.svc.Send(workerCtx(t), notify.Message{UserID: &uid, Channel: notify.ChannelInApp,
-			Category: notify.CategoryTransactional, Template: "notify.test_notice", LinkPath: link, DedupeKey: "l" + link})
+			Category: notify.CategoryTransactional, Template: "notify.test_notice", LinkPath: link, DedupeKey: "l" + link.String()})
 		if !errors.Is(err, notify.ErrInvalidMessage) {
 			t.Errorf("LinkPath %q: error = %v, want ErrInvalidMessage", link, err)
 		}
 	}
 	ev := newID()
 	mustSend(t, f, notify.Message{UserID: &uid, Channel: notify.ChannelInApp, Category: notify.CategoryTransactional,
-		Template: "notify.test_notice", Data: map[string]any{"event_id": ev}, LinkPath: "/events/" + ev.String(), DedupeKey: "ok"})
+		Template: "notify.test_notice", Data: map[string]any{"event_id": ev}, LinkPath: notify.MyRegistrationLink(ev), DedupeKey: "ok"})
 	p, err := f.svc.ListMine(t.Context(), userActor(uid), notify.InAppQuery{})
 	if err != nil || len(p.Items) != 1 {
 		t.Fatalf("ListMine() = (%+v, %v)", p, err)
 	}
 	n := p.Items[0]
-	if n.Title != "Yeni bir bildiriminiz var" || n.Data["event_id"] != ev.String() || n.LinkPath != "/events/"+ev.String() {
+	if n.Title != "Yeni bir bildiriminiz var" || n.Data["event_id"] != ev.String() || n.LinkPath != "/me/registrations/"+ev.String() {
 		t.Fatalf("notification = %+v, want the fixed text and the opaque ID", n)
 	}
 	// A template that reads Data in its in_app text does not load.

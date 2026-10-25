@@ -142,7 +142,7 @@ func (s *service) noticeExpired(ctx context.Context, k ExpiryKey) error {
 	to := k.StudentUserID
 	_, err := s.d.Sender.Send(ctx, notify.Message{
 		UserID: &to, Channel: notify.ChannelInApp, Category: notify.CategoryTransactional,
-		Template: templateGrantsExpired, LinkPath: grantsLinkPath,
+		Template: templateGrantsExpired, LinkPath: notify.MyAccessGrantsLink(),
 		DedupeKey: templateGrantsExpired + ":" + k.StudentUserID.String() + ":" + strconv.FormatInt(k.RevokedAt.UnixMicro(), 10),
 	})
 	if err != nil && notify.IsPermanent(err) {

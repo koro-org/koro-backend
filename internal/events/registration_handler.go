@@ -124,6 +124,13 @@ type RegistrationSelfDTO struct {
 	Answers          map[string]any       `json:"answers,omitempty" doc:"getMyRegistration only"`
 	AnswersSensitive map[string]any       `json:"answers_sensitive,omitempty" doc:"Special-category answers (getMyRegistration only)"`
 	ConsentSnapshot  map[string]bool      `json:"consent_snapshot,omitempty" doc:"Consent fields answered (purpose → answer)"`
+	AnsweredForm     *AnsweredFormDTO     `json:"answered_form,omitempty" doc:"getMyRegistration only: the form version the answers were given to (form_version_id), with its own labels; a later version of the event's form never changes it (BE-122). Absent for a registration without a form."`
+}
+
+// AnsweredFormDTO is the answered form version of getMyRegistration.
+type AnsweredFormDTO struct {
+	VersionNo int        `json:"version_no"`
+	Schema    FormSchema `json:"schema"`
 }
 
 // RegistrationSelfList is a page of the caller's registrations.
@@ -187,6 +194,9 @@ func toSelfDTO(v RegistrationView) RegistrationSelfDTO {
 	}
 	if r.FormVersionID != nil {
 		d.FormVersionID = r.FormVersionID.String()
+	}
+	if f := v.AnsweredForm; f != nil {
+		d.AnsweredForm = &AnsweredFormDTO{VersionNo: f.VersionNo, Schema: f.Schema}
 	}
 	return d
 }

@@ -11,6 +11,7 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/notify"
+	"koro/internal/orgs"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/queue"
@@ -84,10 +85,19 @@ func (s *service) handleClaimDecided(ctx context.Context, e domainevent.Envelope
 	if err != nil {
 		return queue.Permanent(err)
 	}
-	tmpl, link := templateClaimRejected, "/me/club-claims"
+	tmpl, link := templateClaimRejected, notify.MyClubClaimsLink()
 	switch p.Outcome {
 	case OutcomeApproved:
-		tmpl, link = templateClaimApproved, "/clubs/"+p.ClubOrgID.String()
+		// The club's public page by its slug (BE-122): web and mobile
+		// open it without another lookup.
+		o, err := s.d.Orgs.Get(ctx, p.ClubOrgID)
+		switch {
+		case errors.Is(err, orgs.ErrNotFound):
+			return queue.Permanent(err)
+		case err != nil:
+			return err
+		}
+		tmpl, link = templateClaimApproved, notify.ClubLink(o.Slug)
 	case OutcomeRejected:
 	default:
 		return queue.Permanent(fmt.Errorf("directory: club_claim.decided: unknown outcome %q", p.Outcome))
@@ -172,7 +182,7 @@ func (s *service) handleSensitivityRequest(ctx context.Context, payload []byte) 
 			UserID: &to, Channel: notify.ChannelInApp, Category: notify.CategoryTransactional,
 			Template: templateSensitivityRequested, SourceOrgID: &club,
 			Data:      map[string]any{"club_org_id": r.ClubOrgID, "request_id": r.RequestID},
-			LinkPath:  "/admin/clubs/" + r.ClubOrgID.String(),
+			LinkPath:  notify.AdminClubLink(r.ClubOrgID),
 			DedupeKey: "directory.sensitivity_request:" + r.RequestID.String() + ":" + admin.String(),
 		})
 		switch {

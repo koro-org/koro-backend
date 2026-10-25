@@ -275,7 +275,7 @@ func TestInvoiceIssued_EmailsPDF(t *testing.T) {
 		case "in_app":
 			inApp[m.DedupeKey] = true
 			if m.UserID == nil || (*m.UserID != authztest.ID("company_admin") && *m.UserID != authztest.ID("company_owner_a")) ||
-				m.LinkPath != "/invoices/"+inv.ID.String() {
+				m.LinkPath.String() != "/invoices/"+inv.ID.String() {
 				t.Fatalf("in-app notice = %+v", m)
 			}
 		}

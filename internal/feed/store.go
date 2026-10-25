@@ -64,7 +64,7 @@ type Store interface {
 	// Follows reports whether userID follows orgID (org_follows).
 	Follows(ctx context.Context, userID, orgID uuid.UUID) (bool, error)
 	// ViewerState returns which of postIDs userID liked and saved and which
-	// of orgIDs they follow (one statement for a page).
+	// of orgIDs they follow and muted (one statement for a page).
 	ViewerState(ctx context.Context, userID uuid.UUID, postIDs, orgIDs []uuid.UUID) (ViewerState, error)
 
 	// PostsOfAuthor returns every post authored by userID, oldest first
@@ -252,6 +252,12 @@ type ViewerState struct {
 	Liked     map[uuid.UUID]bool // post id
 	Saved     map[uuid.UUID]bool // post id
 	Following map[uuid.UUID]bool // org id
+	Muted     map[uuid.UUID]bool // org id (org_mutes; BE-122 listMyOrgRelations)
+}
+
+func newViewerState() ViewerState {
+	return ViewerState{Liked: map[uuid.UUID]bool{}, Saved: map[uuid.UUID]bool{}, Following: map[uuid.UUID]bool{},
+		Muted: map[uuid.UUID]bool{}}
 }
 
 // After is the keyset position of a published page: the last row's

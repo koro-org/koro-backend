@@ -247,8 +247,8 @@ func TestRunDispatch_CommercialOnlyConsented(t *testing.T) {
 			t.Fatalf("message %s/%s", m.Category, m.Template)
 		case m.DedupeKey != "dispatch:"+d.ID.String()+":"+m.UserID.String()+":"+string(m.Channel):
 			t.Fatalf("dedupe key %q", m.DedupeKey)
-		case m.LinkPath != "/posts/"+p.ID.String():
-			t.Fatalf("link %q", m.LinkPath)
+		case m.LinkPath.String() != "/posts/"+p.ID.String():
+			t.Fatalf("link %q", m.LinkPath.String())
 		case m.Channel == notify.ChannelEmail && (m.UnsubscribeURL != linkOf(*m.UserID, consent.PurposeCommercialEmail) || m.ToEmail == ""):
 			t.Fatalf("commercial e-mail without the recipient's own unsubscribe link: %+v", m)
 		case m.Channel == notify.ChannelPush:

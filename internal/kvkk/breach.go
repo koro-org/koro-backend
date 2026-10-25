@@ -40,7 +40,6 @@ const (
 
 	tmplBreachRecorded = "kvkk.breach_recorded"
 	tmplBreachDeadline = "kvkk.breach_deadline"
-	linkBreaches       = "/admin/breaches"
 
 	maxBreachTitle       = 200
 	maxBreachDescription = 10000
@@ -394,7 +393,7 @@ func (s *service) alert(ctx context.Context, b Breach, template, key string, dat
 	for _, u := range to {
 		uid := u
 		if err := s.send(ctx, notify.Message{UserID: &uid, Channel: notify.ChannelInApp, Category: notify.CategoryTransactional,
-			Template: template, Data: map[string]any{"breach_id": b.ID.String()}, LinkPath: linkBreaches,
+			Template: template, Data: map[string]any{"breach_id": b.ID.String()}, LinkPath: notify.AdminBreachesLink(),
 			DedupeKey: key + ":" + uid.String()}, uuid.Nil()); err != nil {
 			return err
 		}

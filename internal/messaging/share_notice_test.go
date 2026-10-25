@@ -197,13 +197,13 @@ func TestNotification_PushAndEmail(t *testing.T) {
 	if len(e.sender.all()) != 3 || len(push) != 1 || len(mail) != 1 {
 		t.Fatalf("notices = %+v", e.sender.all())
 	}
-	if p := push[0]; *p.UserID != stu || p.Template != "messaging.contact_request_received" || p.LinkPath != link ||
+	if p := push[0]; *p.UserID != stu || p.Template != "messaging.contact_request_received" || p.LinkPath.String() != link ||
 		p.SourceOrgID != nil || p.Category != notify.CategoryTransactional || !strings.HasSuffix(p.DedupeKey, ":push") ||
 		len(p.Data) != 1 || p.Data["contact_request_id"] != id {
 		t.Fatalf("push = %+v", p)
 	}
 	m := mail[0]
-	if *m.UserID != stu || m.ToEmail != stu.String()+"@example.test" || m.Locale != "en" || m.LinkPath != "" ||
+	if *m.UserID != stu || m.ToEmail != stu.String()+"@example.test" || m.Locale != "en" || m.LinkPath.String() != "" ||
 		m.Category != notify.CategoryTransactional || !strings.HasSuffix(m.DedupeKey, ":email") ||
 		m.Data["company_name"] != "Şirket A" || m.Data["url"] != linkBase+link {
 		t.Fatalf("e-mail = %+v", m)

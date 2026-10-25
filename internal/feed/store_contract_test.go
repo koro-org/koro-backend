@@ -347,8 +347,12 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (feed.Store, world)
 		if f, _ := s.Follows(ctx, reader, org); !f {
 			t.Fatal("follow row not read")
 		}
+		if _, err := s.AddMute(ctx, reader, other); err != nil {
+			t.Fatal(err)
+		}
 		vs, err := s.ViewerState(ctx, reader, []uuid.UUID{a.ID, b.ID, c.ID}, []uuid.UUID{org, other})
-		if err != nil || !vs.Liked[b.ID] || vs.Liked[a.ID] || !vs.Saved[a.ID] || vs.Saved[b.ID] || !vs.Following[org] || vs.Following[other] {
+		if err != nil || !vs.Liked[b.ID] || vs.Liked[a.ID] || !vs.Saved[a.ID] || vs.Saved[b.ID] || !vs.Following[org] || vs.Following[other] ||
+			!vs.Muted[other] || vs.Muted[org] {
 			t.Fatalf("ViewerState = %+v, %v", vs, err)
 		}
 		if vs, err := s.ViewerState(ctx, reader, nil, nil); err != nil || len(vs.Liked) != 0 {

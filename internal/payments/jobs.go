@@ -123,7 +123,7 @@ func (s *service) handleUnmatched(ctx context.Context, e domainevent.Envelope) e
 	if err != nil {
 		return fmt.Errorf("payments: finance admins: %w", err)
 	}
-	return s.notifyInApp(ctx, tmplUnmatched, e.ID.String(), fins, "/admin/incoming-transfers?status=unmatched", nil, nil)
+	return s.notifyInApp(ctx, tmplUnmatched, e.ID.String(), fins, notify.AdminUnmatchedTransfersLink(), nil, nil)
 }
 
 // handleAccountApproved sends the security notice of an approved
@@ -179,7 +179,7 @@ func (s *service) notifyAccount(ctx context.Context, id uuid.UUID, tmpl, change,
 		}
 	}
 	mail := map[string]any{"label": c.Label, "iban_masked": c.MaskedIBAN(), "change": change, "status": string(c.Status)}
-	return s.notifyInApp(ctx, tmpl, key, to, "/admin/collection-accounts", map[string]any{"collection_account_id": c.ID.String()}, mail)
+	return s.notifyInApp(ctx, tmpl, key, to, notify.AdminCollectionAccountsLink(), map[string]any{"collection_account_id": c.ID.String()}, mail)
 }
 
 // handlePaymentCaptured tells the buying company's admins that the money
@@ -207,7 +207,7 @@ func (s *service) handlePaymentCaptured(ctx context.Context, e domainevent.Envel
 		return err
 	}
 	key := e.ID.String()
-	errs := []error{s.notifyInApp(ctx, tmplPaymentReceived, key, buyers, "/orders/"+o.ID.String(), ids, nil)}
+	errs := []error{s.notifyInApp(ctx, tmplPaymentReceived, key, buyers, notify.OrderLink(o.ID), ids, nil)}
 	if !p.OrderPaid {
 		return errors.Join(errs...)
 	}
@@ -230,7 +230,7 @@ func (s *service) handlePaymentCaptured(ctx context.Context, e domainevent.Envel
 		if err != nil {
 			return err
 		}
-		errs = append(errs, s.notifyInApp(ctx, tmplOrderPaid, key, admins, "/orgs/"+seller.String()+"/sales", ids, nil))
+		errs = append(errs, s.notifyInApp(ctx, tmplOrderPaid, key, admins, notify.OrgSalesLink(seller), ids, nil))
 	}
 	return errors.Join(errs...)
 }
@@ -261,7 +261,7 @@ func (s *service) handlePaymentRefunded(ctx context.Context, e domainevent.Envel
 		return err
 	}
 	key := e.ID.String()
-	errs := []error{s.notifyInApp(ctx, tmplRefundCompleted, key, buyers, "/orders/"+o.ID.String(), ids, nil)}
+	errs := []error{s.notifyInApp(ctx, tmplRefundCompleted, key, buyers, notify.OrderLink(o.ID), ids, nil)}
 	if p.OrderLineID == uuid.Nil() {
 		return errors.Join(errs...)
 	}
@@ -277,7 +277,7 @@ func (s *service) handlePaymentRefunded(ctx context.Context, e domainevent.Envel
 	if err != nil {
 		return err
 	}
-	errs = append(errs, s.notifyInApp(ctx, tmplLineRefunded, key, sellers, "/orgs/"+l.SellerOrgID.String()+"/sales", ids, nil))
+	errs = append(errs, s.notifyInApp(ctx, tmplLineRefunded, key, sellers, notify.OrgSalesLink(l.SellerOrgID), ids, nil))
 	return errors.Join(errs...)
 }
 
@@ -304,7 +304,7 @@ func (s *service) membersWith(ctx context.Context, orgID uuid.UUID, roles ...aut
 // when mail is set, the e-mail of the template to those with an address.
 // The dedupe key (the event and the recipient) makes a repeated task a
 // no-op.
-func (s *service) notifyInApp(ctx context.Context, tmpl, key string, to []uuid.UUID, link string, ids, mail map[string]any) error {
+func (s *service) notifyInApp(ctx context.Context, tmpl, key string, to []uuid.UUID, link notify.Link, ids, mail map[string]any) error {
 	if len(to) == 0 {
 		return nil
 	}
@@ -409,5 +409,5 @@ func (s *service) handleRefundRequested(ctx context.Context, raw []byte) error {
 		}
 	}
 	return s.notifyInApp(ctx, "payments.refund_requested", r.ID.String(), recipients,
-		"/admin/refunds/"+r.ID.String(), map[string]any{"refund_id": r.ID.String()}, nil)
+		notify.AdminRefundLink(r.ID), map[string]any{"refund_id": r.ID.String()}, nil)
 }

@@ -472,6 +472,10 @@ func TestDecideClaim_ApproveGrantsClubAdminInSameTx(t *testing.T) {
 		w.sender.msgs[0].Channel != notify.ChannelInApp || w.sender.msgs[0].DedupeKey != "directory.claim_decided:"+c.ID.String() {
 		t.Fatalf("notice = %+v", w.sender.msgs)
 	}
+	// It links the club's public page by slug (BE-122), not by ID.
+	if r, ok := notify.MatchLinkRoute(w.sender.msgs[0].LinkPath.String()); !ok || r.Pattern != "/clubs/by-slug/{club_slug}" {
+		t.Fatalf("claim approved link = %q", w.sender.msgs[0].LinkPath)
+	}
 	// A second claimant of the claimed club becomes a second admin (E-21).
 	s2 := w.student(t, w.uni, false)
 	c2 := w.claim(t, s2, w.club.Club.OrgID)

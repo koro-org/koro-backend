@@ -78,7 +78,7 @@ func (m Module) Tasks() []queue.Task {
 // notice sends one in-app moderation notice. A permanent failure (an
 // account that cannot receive it) is logged and skipped; anything else is
 // returned so the task is retried.
-func (s *service) notice(ctx context.Context, to uuid.UUID, tmpl, link string, org *uuid.UUID, data map[string]any, dedupe string) error {
+func (s *service) notice(ctx context.Context, to uuid.UUID, tmpl string, link notify.Link, org *uuid.UUID, data map[string]any, dedupe string) error {
 	if s.d.Sender == nil {
 		return errors.New("feed: notify is not wired")
 	}
@@ -140,7 +140,7 @@ func (s *service) handleSubmittedForReview(ctx context.Context, e domainevent.En
 	}
 	org := p.OrgID
 	for _, u := range to {
-		if err := s.notice(ctx, u, templateReviewSubmitted, "/admin/review-queue", &org,
+		if err := s.notice(ctx, u, templateReviewSubmitted, notify.AdminReviewQueueLink(), &org,
 			map[string]any{"post_id": p.PostID, "org_id": p.OrgID},
 			"feed.review_submitted:"+p.PostID.String()+":"+u.String()); err != nil {
 			return err
@@ -161,7 +161,7 @@ func (s *service) handleReportCreated(ctx context.Context, e domainevent.Envelop
 		return err
 	}
 	for _, u := range to {
-		if err := s.notice(ctx, u, templateReportCreated, "/admin/reports/"+p.ReportID.String(), nil,
+		if err := s.notice(ctx, u, templateReportCreated, notify.AdminReportLink(p.ReportID), nil,
 			map[string]any{"report_id": p.ReportID},
 			"feed.report_created:"+p.ReportID.String()+":"+u.String()); err != nil {
 			return err
@@ -194,7 +194,7 @@ func (s *service) handlePostModerated(ctx context.Context, e domainevent.Envelop
 	}
 	org := p.OrgID
 	for _, u := range to {
-		if err := s.notice(ctx, u, tmpl, "/orgs/"+p.OrgID.String()+"/posts", &org,
+		if err := s.notice(ctx, u, tmpl, notify.OrgPostsLink(p.OrgID), &org,
 			map[string]any{"post_id": p.PostID, "org_id": p.OrgID},
 			"feed.post_moderated:"+e.ID.String()+":"+u.String()); err != nil {
 			return err
@@ -216,7 +216,7 @@ func (s *service) handleOrgModerated(ctx context.Context, payload []byte) error 
 	}
 	org := t.OrgID
 	for _, u := range to {
-		if err := s.notice(ctx, u, templateOrgModerated, "/orgs/"+t.OrgID.String()+"/posts", &org,
+		if err := s.notice(ctx, u, templateOrgModerated, notify.OrgPostsLink(t.OrgID), &org,
 			map[string]any{"org_id": t.OrgID, "moderation_action_id": t.ActionID},
 			"feed.org_moderated:"+t.ActionID.String()+":"+u.String()); err != nil {
 			return err
@@ -232,6 +232,6 @@ func (s *service) handleReportResolved(ctx context.Context, payload []byte) erro
 	if err := json.Unmarshal(payload, &t); err != nil || t.ReportID == uuid.Nil() || t.ReporterUserID == uuid.Nil() {
 		return queue.Permanent(fmt.Errorf("feed: bad report notice payload: %w", errors.Join(err, errors.New("ids required"))))
 	}
-	return s.notice(ctx, t.ReporterUserID, templateReportResolved, "", nil, map[string]any{"report_id": t.ReportID},
+	return s.notice(ctx, t.ReporterUserID, templateReportResolved, notify.Link{}, nil, map[string]any{"report_id": t.ReportID},
 		"feed.report_resolved:"+t.ReportID.String())
 }

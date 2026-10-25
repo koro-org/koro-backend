@@ -359,9 +359,13 @@ const (
 // transient.
 func (s *service) send(ctx context.Context, d Dispatch, org orgs.OrgSummary, u identity.UserSummary, ch Channel) (sendOutcome, error) {
 	uid, src := u.ID, d.OrgID
+	link, ok := notify.ParseLink(d.DeepLink)
+	if !ok {
+		return sendFailed, fmt.Errorf("%w: deep link is not a notify link form", errPermanentSend)
+	}
 	m := notify.Message{
 		UserID: &uid, Channel: notify.Channel(ch), Category: notify.CategoryTransactional, Template: templateNotice,
-		Locale: u.Locale, DedupeKey: dedupeKey(d.ID, u.ID, ch), LinkPath: d.DeepLink,
+		Locale: u.Locale, DedupeKey: dedupeKey(d.ID, u.ID, ch), LinkPath: link,
 	}
 	if d.Commercial {
 		m.Category, m.Template = notify.CategoryCommercial, templateCommercial
@@ -380,7 +384,7 @@ func (s *service) send(ctx context.Context, d Dispatch, org orgs.OrgSummary, u i
 		if title == "" {
 			title = org.Name
 		}
-		m.Data = map[string]any{"title": title, "org_name": org.Name, "url": s.d.LinkBaseURL + d.DeepLink}
+		m.Data = map[string]any{"title": title, "org_name": org.Name, "url": s.d.LinkBaseURL + link.String()}
 		if d.Commercial {
 			// The recipient's own link (BE-062). Without one the mail
 			// cannot go out lawfully; nothing a retry can fix.

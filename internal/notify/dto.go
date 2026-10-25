@@ -17,7 +17,7 @@ type NotificationDTO struct {
 	Kind           string            `json:"kind" doc:"The notification kind (template ID)"`
 	Title          string            `json:"title"`
 	Body           string            `json:"body,omitempty"`
-	LinkPath       string            `json:"link_path,omitempty" doc:"In-app relative path"`
+	LinkPath       linkPathText      `json:"link_path,omitempty"`
 	SourceOrg      *SourceOrgDTO     `json:"source_org,omitempty"`
 	Data           map[string]string `json:"data,omitempty" doc:"Opaque IDs only"`
 	CreatedAt      time.Time         `json:"created_at"`
@@ -31,7 +31,7 @@ type NotificationList struct {
 }
 
 func toNotificationDTO(n InAppNotification) NotificationDTO {
-	d := NotificationDTO{NotificationID: n.ID.String(), Kind: n.Kind, Title: n.Title, Body: n.Body, LinkPath: n.LinkPath,
+	d := NotificationDTO{NotificationID: n.ID.String(), Kind: n.Kind, Title: n.Title, Body: n.Body, LinkPath: linkPathText(n.LinkPath),
 		Data: n.Data, CreatedAt: n.CreatedAt.UTC(), ReadAt: timeOrNil(n.ReadAt)}
 	if len(d.Data) == 0 {
 		d.Data = nil

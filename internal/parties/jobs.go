@@ -86,14 +86,14 @@ func (s *service) handleSubmitted(ctx context.Context, e domainevent.Envelope) e
 	}
 	data := map[string]any{"stage": p.Stage}
 	key := "parties.bank_account_pending:" + b.ID.String() + ":" + p.Stage
-	errs := []error{s.notifyAll(ctx, b, tmplPending, key, fin, "/admin/bank-accounts", data)}
+	errs := []error{s.notifyAll(ctx, b, tmplPending, key, fin, notify.AdminBankAccountsLink(), data)}
 	if stage == AccountPendingVerification || b.SubmittedByAdmin {
 		admins, err := s.orgAdmins(ctx, py.OrgID)
 		if err != nil {
 			return err
 		}
 		errs = append(errs, s.notifyAll(ctx, b, tmplChanged, "parties.bank_account_changed:"+b.ID.String(), admins,
-			payeeLink(py), nil))
+			notify.OrgPayeeLink(py.OrgID, py.ID), nil))
 	}
 	return errors.Join(errs...)
 }
@@ -128,9 +128,9 @@ func (s *service) handleRejected(ctx context.Context, e domainevent.Envelope) er
 	if err != nil || b.ID == uuid.Nil() {
 		return err
 	}
-	link := payeeLink(py)
+	link := notify.OrgPayeeLink(py.OrgID, py.ID)
 	if b.SubmittedByAdmin {
-		link = "/admin/bank-accounts"
+		link = notify.AdminBankAccountsLink()
 	}
 	return s.notifyAll(ctx, b, tmplRejected, "parties.bank_account_rejected:"+b.ID.String(), []uuid.UUID{b.SubmittedBy}, link, nil)
 }
@@ -150,8 +150,8 @@ func (s *service) notifyOrgAndFinance(ctx context.Context, accountID uuid.UUID, 
 	}
 	key := tmpl + ":" + b.ID.String()
 	return errors.Join(
-		s.notifyAll(ctx, b, tmpl, key, admins, payeeLink(py), nil),
-		s.notifyAll(ctx, b, tmpl, key, fin, "/admin/bank-accounts", nil),
+		s.notifyAll(ctx, b, tmpl, key, admins, notify.OrgPayeeLink(py.OrgID, py.ID), nil),
+		s.notifyAll(ctx, b, tmpl, key, fin, notify.AdminBankAccountsLink(), nil),
 	)
 }
 
@@ -205,13 +205,11 @@ func (s *service) orgAdmins(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, 
 	return out, nil
 }
 
-func payeeLink(p Payee) string { return "/orgs/" + p.OrgID.String() + "/payees/" + p.ID.String() }
-
 // notifyAll sends tmpl to every recipient: in-app (IDs only) and, when the
 // address resolves, e-mail (the masked IBAN). The dedupe keys make a
 // repeated task a no-op per recipient and channel; a permanent failure for
 // one recipient is logged and skipped, anything else is retried.
-func (s *service) notifyAll(ctx context.Context, b BankAccount, tmpl, key string, to []uuid.UUID, link string, data map[string]any) error {
+func (s *service) notifyAll(ctx context.Context, b BankAccount, tmpl, key string, to []uuid.UUID, link notify.Link, data map[string]any) error {
 	if len(to) == 0 {
 		return nil
 	}

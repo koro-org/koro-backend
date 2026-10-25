@@ -79,6 +79,9 @@ func (s *service) GetMyRegistration(ctx context.Context, a authz.Actor, id uuid.
 	if err != nil {
 		return RegistrationView{}, err
 	}
+	if v.AnsweredForm, err = s.answeredForm(ctx, a, r); err != nil {
+		return RegistrationView{}, err
+	}
 	if len(v.AnswersSensitive) > 0 {
 		meta := map[string]any{"event_id": r.EventID.String(), "sensitive_fields": keysOf(v.AnswersSensitive)}
 		if err := s.logRead(ctx, auditEvent(a, authz.EventsRegistrationReadOwn, regAggType, r.ID, r.OrgID, "", meta)); err != nil {
@@ -86,6 +89,26 @@ func (s *service) GetMyRegistration(ctx context.Context, a authz.Actor, id uuid.
 		}
 	}
 	return v, nil
+}
+
+// answeredForm returns the form version r was answered against (nil for a
+// registration without a form), as its registrant read it: a minor never
+// saw the minor-restricted consent fields (ForReader). The version comes
+// through r's org (06 H-38); versions are immutable, so the labels are the
+// ones the registrant answered.
+func (s *service) answeredForm(ctx context.Context, a authz.Actor, r Registration) (*AnsweredForm, error) {
+	if r.FormVersionID == nil {
+		return nil, nil
+	}
+	v, err := s.d.Store.GetFormVersion(ctx, r.OrgID, *r.FormVersionID)
+	if err != nil {
+		return nil, err
+	}
+	schema, err := DecodeFormSchema(v.Schema)
+	if err != nil {
+		return nil, err
+	}
+	return &AnsweredForm{VersionNo: v.VersionNo, Schema: schema.ForReader(a.IsMinor)}, nil
 }
 
 // ownView reads registration id of userID with its event; withAnswers

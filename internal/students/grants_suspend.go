@@ -46,8 +46,6 @@ const (
 	// templateGrantsSuspended is the student's in-app notice
 	// (internal/notify/templates/students).
 	templateGrantsSuspended = "students.access_grants_suspended"
-	// grantsLinkPath is the student's grant list in the app.
-	grantsLinkPath = "/me/access-grants"
 )
 
 // handleLapsedGrants is students.suspend_lapsed_grants
@@ -133,7 +131,7 @@ func (s *service) noticeSuspended(ctx context.Context, studentID uuid.UUID, job 
 	to := studentID
 	_, err := s.d.Sender.Send(ctx, notify.Message{
 		UserID: &to, Channel: notify.ChannelInApp, Category: notify.CategoryTransactional,
-		Template: templateGrantsSuspended, LinkPath: grantsLinkPath,
+		Template: templateGrantsSuspended, LinkPath: notify.MyAccessGrantsLink(),
 		DedupeKey: templateGrantsSuspended + ":" + eventID.String(),
 	})
 	if err != nil && notify.IsPermanent(err) {

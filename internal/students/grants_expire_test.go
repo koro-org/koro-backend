@@ -122,7 +122,7 @@ func TestExpire_AfterWindowRevokedAndStudentTold(t *testing.T) {
 	}
 	m := notes[0]
 	if m.UserID == nil || *m.UserID != s.UserID || m.Channel != notify.ChannelInApp || m.Category != notify.CategoryTransactional ||
-		m.LinkPath != "/me/access-grants" || len(m.Data) != 0 || m.SourceOrgID != nil || m.DedupeKey == "" {
+		m.LinkPath.String() != "/me/access-grants" || len(m.Data) != 0 || m.SourceOrgID != nil || m.DedupeKey == "" {
 		t.Fatalf("expiry notice = %+v", m)
 	}
 	if ok, err := e.svc.Has(ctx, keeper.UserID, orgA); err != nil || !ok {

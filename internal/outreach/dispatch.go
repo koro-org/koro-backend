@@ -11,6 +11,7 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/entitlements"
+	"koro/internal/notify"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
@@ -47,7 +48,7 @@ func dispatchSurface(orgID uuid.UUID) authz.Resource {
 }
 
 // deepLink is the in-app path of a post (outreach_dispatches.deep_link).
-func deepLink(postID uuid.UUID) string { return "/posts/" + postID.String() }
+func deepLink(postID uuid.UUID) string { return notify.PostLink(postID).String() }
 
 // commercialPost reports whether a post's dispatch must be commercial: a
 // company's post (posts_company_commercial_chk) and a sponsored post (T-16:

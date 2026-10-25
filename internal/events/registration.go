@@ -124,6 +124,15 @@ type RegistrationView struct {
 	// ShowNote: the decision note is shown (the organiser's managers; not
 	// the student, not break-glass).
 	ShowNote bool
+	// AnsweredForm is the form version the answers were given to
+	// (getMyRegistration only, BE-122): its labels, not the current form's.
+	AnsweredForm *AnsweredForm
+}
+
+// AnsweredForm is a registration's form version as its registrant reads it.
+type AnsweredForm struct {
+	VersionNo int
+	Schema    FormSchema
 }
 
 // Registrant is the registrant card of the organiser's views (04 §V.6):

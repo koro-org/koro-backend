@@ -107,10 +107,10 @@ type Message struct {
 	// unsubscribe. Required for commercial e-mail, ignored otherwise.
 	UnsubscribeURL string
 
-	// LinkPath is the in-app deep link of an in_app or push message, a
-	// relative path such as "/me/security-events" (in_app_notifications
-	// link_path CHECK). Ignored on the email channel.
-	LinkPath string
+	// LinkPath is the in-app deep link of an in_app or push message, one
+	// of the catalog forms (links.go: built only by the route builders,
+	// such as MySecurityEventsLink). Ignored on the email channel.
+	LinkPath Link
 	// SourceOrgID names the org an in_app message comes from (optional).
 	SourceOrgID *uuid.UUID
 }

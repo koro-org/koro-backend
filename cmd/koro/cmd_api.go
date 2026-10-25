@@ -62,8 +62,12 @@ func runAPI(ctx context.Context, stop context.CancelFunc, environ map[string]str
 	}
 	var global []gin.HandlerFunc
 	if cfg.RateLimit.Enabled {
+		web := ratelimit.NewWebKeys(cfg.RateLimit.WebKeyList())
+		if web.Len() == 0 && cfg.ProdLike() {
+			log.LogAttrs(ctx, slog.LevelWarn, "RATE_LIMIT_WEB_KEYS is unset: koro-web's cached public reads count against its IP (global_ip)")
+		}
 		//nolint:contextcheck // the middleware uses each request's context, not ctx
-		global = append(global, ratelimit.GlobalIP(c.infra.limiter, log, cfg.HTTP.ProblemTypeBase))
+		global = append(global, ratelimit.GlobalIP(c.infra.limiter, log, cfg.HTTP.ProblemTypeBase, web))
 	}
 
 	ready := httpx.NewReady(c.readyChecks...)

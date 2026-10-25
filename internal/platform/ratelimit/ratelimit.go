@@ -2,7 +2,8 @@
 // interface with a Redis implementation (go-redis/redis_rate, GCRA) and an
 // in-memory fake, the class table of 04 §1.9, the huma middleware that
 // applies an operation's x-koro-rate-limit class and the gin middleware of
-// the global per-IP limit.
+// the global per-IP limit, which also recognises koro-web's cookie-free
+// server calls and counts them in a bucket of their own (web.go, BE-119).
 //
 // Failure policy: a Strict class fails closed (limiter unavailable → 503
 // unavailable); the others fail open with a warning. A rejected request is
@@ -40,6 +41,7 @@ const (
 	KeyActor    KeyKind = "actor"    // authenticated user; anonymous callers by IP
 	KeyOrg      KeyKind = "org"      // path parameter org_id; actor without it
 	KeyProvider KeyKind = "provider" // path parameter provider (webhooks); IP without it
+	KeyWeb      KeyKind = "web"      // koro-web's cookie-free calls as one caller (WebRule, BE-119)
 )
 
 // Rule is one rate limit class.

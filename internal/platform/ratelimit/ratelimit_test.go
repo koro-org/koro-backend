@@ -178,7 +178,7 @@ func TestRateLimit_GlobalIP(t *testing.T) {
 	t.Parallel()
 	clk := clock.NewFake(time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC))
 	mem := ratelimit.NewMem(clk)
-	app, err := httpx.New(httpx.Deps{Log: obs.Discard(), Middleware: []gin.HandlerFunc{ratelimit.GlobalIP(mem, obs.Discard(), "urn:koro:problem:")}})
+	app, err := httpx.New(httpx.Deps{Log: obs.Discard(), Middleware: []gin.HandlerFunc{ratelimit.GlobalIP(mem, obs.Discard(), "urn:koro:problem:", ratelimit.WebKeys{})}})
 	if err != nil {
 		t.Fatal(err)
 	}

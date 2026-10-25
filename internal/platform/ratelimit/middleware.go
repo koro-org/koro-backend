@@ -47,10 +47,16 @@ func Middleware(api huma.API, l Limiter, log *slog.Logger) func(huma.Context, fu
 	}
 }
 
-// check counts the request; false means a response was written.
+// check counts the request; false means a response was written. A
+// non-strict class that would count koro-web's cookie-free call by IP is
+// skipped: GlobalIP already counted it in WebRule (web.go).
 func check(api huma.API, ctx huma.Context, l Limiter, log *slog.Logger, rule Rule) bool {
 	c := ctx.Context()
-	res, err := l.Allow(c, rule, key(ctx, rule.Key))
+	k, byIP := key(ctx, rule.Key)
+	if byIP && !rule.Strict && isWebCall(c) {
+		return true
+	}
+	res, err := l.Allow(c, rule, k)
 	switch {
 	case err != nil && rule.Strict:
 		log.LogAttrs(c, slog.LevelError, "rate limiter unavailable (fail closed)", slog.String("rule", rule.Name), slog.String("err", err.Error()))
@@ -60,7 +66,8 @@ func check(api huma.API, ctx huma.Context, l Limiter, log *slog.Logger, rule Rul
 		log.LogAttrs(c, slog.LevelWarn, "rate limiter unavailable (fail open)", slog.String("rule", rule.Name), slog.String("err", err.Error()))
 		return true
 	case !res.Allowed:
-		refused(c, log, rule, ctx.Operation())
+		action, _ := ctx.Operation().Extensions[op.ExtAction].(string)
+		refused(c, log, rule, action)
 		ctx.SetHeader("Retry-After", retryAfter(res.RetryAfter))
 		_ = huma.WriteErr(api, ctx, http.StatusTooManyRequests, "", problem.ErrRateLimited)
 		return false
@@ -75,14 +82,15 @@ func check(api huma.API, ctx huma.Context, l Limiter, log *slog.Logger, rule Rul
 // the action (actor_id and request_id come from the context), the counter
 // koro_ratelimit_rejected_total{rule,action} (05 §11.4) never the actor.
 // The rules that fail closed (Strict: sign-in, tokens, reauth, export,
-// break-glass) are the security-relevant ones and log at WARN.
-func refused(ctx context.Context, log *slog.Logger, rule Rule, o *huma.Operation) {
-	action, _ := o.Extensions[op.ExtAction].(string)
+// break-glass) are the security-relevant ones and log at WARN; so does
+// koro-web's bucket (WebRule, action "unknown": it is applied before the
+// route's operation), whose refusals mean public pages fail (BE-119).
+func refused(ctx context.Context, log *slog.Logger, rule Rule, action string) {
 	if action == "" {
 		action = "unknown"
 	}
 	level := slog.LevelInfo
-	if rule.Strict {
+	if rule.Strict || rule.Key == KeyWeb {
 		level = slog.LevelWarn
 	}
 	log.LogAttrs(ctx, level, "rate limited", slog.String("rule", rule.Name), slog.String("action", action))
@@ -90,25 +98,25 @@ func refused(ctx context.Context, log *slog.Logger, rule Rule, o *huma.Operation
 }
 
 // key builds the counter key of a request; it holds IDs and IPs only.
-func key(ctx huma.Context, kind KeyKind) string {
+// byIP reports that the key is the client IP.
+func key(ctx huma.Context, kind KeyKind) (k string, byIP bool) {
 	c := ctx.Context()
 	switch kind {
 	case KeyOrg:
 		if id, err := uuid.Parse(ctx.Param("org_id")); err == nil {
-			return "org:" + id.String()
+			return "org:" + id.String(), false
 		}
 		return key(ctx, KeyActor)
 	case KeyProvider:
 		if p := ctx.Param("provider"); p != "" && len(p) <= 32 {
-			return "provider:" + p
+			return "provider:" + p, false
 		}
-		return ipKey(c)
 	case KeyActor:
 		if a := authz.ActorOrAnonymous(c); a.IsUser() {
-			return "user:" + a.UserID.String()
+			return "user:" + a.UserID.String(), false
 		}
 	}
-	return ipKey(c)
+	return ipKey(c), true
 }
 
 func ipKey(ctx context.Context) string {
@@ -120,20 +128,34 @@ func ipKey(ctx context.Context) string {
 }
 
 // GlobalIP is the gin middleware of global_ip (every route except the
-// health probes); it fails open. typeBase is PROBLEM_TYPE_BASE.
-func GlobalIP(l Limiter, log *slog.Logger, typeBase string) gin.HandlerFunc {
-	rule := Rules()[op.RateGlobalIP]
+// health probes); it fails open. typeBase is PROBLEM_TYPE_BASE. web holds
+// koro-web's keys (zero value: none): a request web recognises is counted
+// in WebRule instead and marked for Middleware (web.go). WebKeyHeader is
+// removed from every request here, so nothing after it sees the key.
+func GlobalIP(l Limiter, log *slog.Logger, typeBase string, web WebKeys) gin.HandlerFunc {
+	global, webRule := Rules()[op.RateGlobalIP], WebRule()
 	return func(c *gin.Context) {
+		isWeb := web.webCall(c.Request)
+		c.Request.Header.Del(WebKeyHeader)
 		if p := c.Request.URL.Path; p == "/healthz" || p == "/readyz" {
 			c.Next()
 			return
 		}
 		ctx := c.Request.Context()
-		res, err := l.Allow(ctx, rule, ipKey(ctx))
+		rule, k := global, ipKey(ctx)
+		if isWeb {
+			ctx = withWebCall(ctx)
+			c.Request = c.Request.WithContext(ctx)
+			rule, k = webRule, webBucket
+		}
+		res, err := l.Allow(ctx, rule, k)
 		switch {
 		case err != nil:
 			log.LogAttrs(ctx, slog.LevelWarn, "rate limiter unavailable (fail open)", slog.String("rule", rule.Name), slog.String("err", err.Error()))
 		case !res.Allowed:
+			if isWeb {
+				refused(ctx, log, rule, "")
+			}
 			p := problem.FromError(problem.ErrRateLimited, typeBase)
 			if rid := obs.RequestID(ctx); rid != "" {
 				p.Instance = "urn:koro:request:" + rid

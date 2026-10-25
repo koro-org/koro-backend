@@ -2473,8 +2473,8 @@ components:
           maxLength: 1024
           type: string
         new_password:
-          maxLength: 1024
-          minLength: 1
+          maxLength: 128
+          minLength: 8
           type: string
         reauth:
           $ref: "#/components/schemas/ReauthDTO"
@@ -4318,8 +4318,8 @@ components:
             - rejected
           type: string
         review_note:
-          description: At most 500 characters; shown to the student on a rejection
-          maxLength: 2000
+          description: Shown to the student on a rejection
+          maxLength: 500
           type: string
         university_id:
           description: Required to approve
@@ -5025,7 +5025,7 @@ components:
       additionalProperties: false
       properties:
         new_email:
-          maxLength: 320
+          maxLength: 254
           type: string
         reauth:
           $ref: "#/components/schemas/ReauthDTO"
@@ -5058,7 +5058,7 @@ components:
       additionalProperties: false
       properties:
         email:
-          maxLength: 320
+          maxLength: 254
           type: string
       required:
         - email
@@ -6234,9 +6234,9 @@ components:
       additionalProperties: false
       properties:
         reason:
-          description: 5-500 characters; audited
-          maxLength: 1000
-          minLength: 1
+          description: Audited
+          maxLength: 500
+          minLength: 5
           type: string
         reauth:
           $ref: "#/components/schemas/ReauthDTO"
@@ -10418,9 +10418,9 @@ components:
       additionalProperties: false
       properties:
         reason:
-          description: 5-500 characters; audited
-          maxLength: 1000
-          minLength: 1
+          description: Audited
+          maxLength: 500
+          minLength: 5
           type: string
       required:
         - reason
@@ -10757,14 +10757,14 @@ components:
           maxItems: 10
           type: array
         email:
-          maxLength: 320
+          maxLength: 254
           type: string
         first_name:
-          maxLength: 200
+          maxLength: 100
           minLength: 1
           type: string
         last_name:
-          maxLength: 200
+          maxLength: 100
           minLength: 1
           type: string
         locale:
@@ -10773,9 +10773,9 @@ components:
             - en-US
           type: string
         password:
-          description: 15-128 characters; common passwords are refused
-          maxLength: 1024
-          minLength: 1
+          description: Common passwords are refused
+          maxLength: 128
+          minLength: 15
           type: string
         privacy_notice_version_id:
           description: The privacy notice shown on the page
@@ -11246,8 +11246,8 @@ components:
       additionalProperties: false
       properties:
         new_password:
-          maxLength: 1024
-          minLength: 1
+          maxLength: 128
+          minLength: 8
           type: string
         token:
           maxLength: 128
@@ -11261,9 +11261,9 @@ components:
       additionalProperties: false
       properties:
         reason:
-          description: 5-500 characters; audited
-          maxLength: 1000
-          minLength: 1
+          description: Audited
+          maxLength: 500
+          minLength: 5
           type: string
         reauth:
           $ref: "#/components/schemas/ReauthDTO"
@@ -11406,9 +11406,9 @@ components:
       additionalProperties: false
       properties:
         reason:
-          description: 5-500 characters; audited
-          maxLength: 1000
-          minLength: 1
+          description: Audited
+          maxLength: 500
+          minLength: 5
           type: string
         reauth:
           $ref: "#/components/schemas/ReauthDTO"
@@ -11954,7 +11954,7 @@ components:
       properties:
         edu_email:
           description: A .edu.tr address of the caller's university
-          maxLength: 320
+          maxLength: 254
           type: string
       required:
         - edu_email
@@ -13628,11 +13628,11 @@ components:
       additionalProperties: false
       properties:
         first_name:
-          maxLength: 200
+          maxLength: 100
           minLength: 1
           type: string
         last_name:
-          maxLength: 200
+          maxLength: 100
           minLength: 1
           type: string
         locale:

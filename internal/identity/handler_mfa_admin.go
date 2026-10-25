@@ -368,7 +368,7 @@ func (h handler) getUser(ctx context.Context, in *userIDInput) (*adminUserOutput
 type reasonInput struct {
 	UserID string `path:"user_id" doc:"User ID (an unknown or malformed ID is 404)"`
 	Body   struct {
-		Reason string `json:"reason" minLength:"1" maxLength:"1000" doc:"5-500 characters; audited"`
+		Reason reasonText `json:"reason" doc:"Audited"`
 	}
 }
 
@@ -377,7 +377,7 @@ func (h handler) suspendUser(ctx context.Context, in *reasonInput) (*adminAction
 	if err != nil {
 		return nil, notFoundAfterGate(ctx, a, authz.IdentityUserSuspend, err)
 	}
-	res, err := h.svc.SuspendUser(ctx, a, id, in.Body.Reason)
+	res, err := h.svc.SuspendUser(ctx, a, id, string(in.Body.Reason))
 	if err != nil {
 		return nil, err
 	}
@@ -393,7 +393,7 @@ func (h handler) unsuspendUser(ctx context.Context, in *reasonInput) (*adminUser
 	if err != nil {
 		return nil, notFoundAfterGate(ctx, a, authz.IdentityUserSuspend, err)
 	}
-	v, err := h.svc.UnsuspendUser(ctx, a, id, in.Body.Reason)
+	v, err := h.svc.UnsuspendUser(ctx, a, id, string(in.Body.Reason))
 	if err != nil {
 		return nil, err
 	}
@@ -405,7 +405,7 @@ func (h handler) revokeUserSessions(ctx context.Context, in *reasonInput) (*pend
 	if err != nil {
 		return nil, notFoundAfterGate(ctx, a, authz.IdentityUserRevokeSessions, err)
 	}
-	r, err := h.svc.RevokeUserSessions(ctx, a, id, in.Body.Reason)
+	r, err := h.svc.RevokeUserSessions(ctx, a, id, string(in.Body.Reason))
 	if err != nil {
 		return nil, err
 	}
@@ -415,7 +415,7 @@ func (h handler) revokeUserSessions(ctx context.Context, in *reasonInput) (*pend
 type resetMFAInput struct {
 	UserID string `path:"user_id" doc:"User ID (an unknown or malformed ID is 404)"`
 	Body   struct {
-		Reason string             `json:"reason" minLength:"1" maxLength:"1000" doc:"5-500 characters; audited"`
+		Reason reasonText         `json:"reason" doc:"Audited"`
 		Reauth *consent.ReauthDTO `json:"reauth,omitempty" doc:"Re-authentication proof of the admin (03 §6.2)"`
 	}
 }
@@ -425,7 +425,7 @@ func (h handler) resetUserMFA(ctx context.Context, in *resetMFAInput) (*pendingO
 	if err != nil {
 		return nil, notFoundAfterGate(ctx, a, authz.IdentityUserResetMfa, err)
 	}
-	r, err := h.svc.ResetUserMFA(ctx, a, id, in.Body.Reason, reauthProof(in.Body.Reauth))
+	r, err := h.svc.ResetUserMFA(ctx, a, id, string(in.Body.Reason), reauthProof(in.Body.Reauth))
 	if err != nil {
 		return nil, err
 	}
@@ -507,7 +507,7 @@ type grantRoleInput struct {
 	Body struct {
 		UserID string             `json:"user_id" format:"uuid"`
 		Role   string             `json:"role" enum:"platform_admin,moderator,finance_admin,talent_auditor,support,dpo"`
-		Reason string             `json:"reason" minLength:"1" maxLength:"1000" doc:"5-500 characters; audited"`
+		Reason reasonText         `json:"reason" doc:"Audited"`
 		Reauth *consent.ReauthDTO `json:"reauth,omitempty" doc:"Re-authentication proof of the admin (03 §6.2)"`
 	}
 }
@@ -534,7 +534,7 @@ func (h handler) grantPlatformRole(ctx context.Context, in *grantRoleInput) (*ro
 		return nil, problem.Field("body.user_id", "must be a UUID")
 	}
 	ra, err := h.svc.GrantPlatformRole(ctx, a, RoleGrant{
-		UserID: target, Role: authz.PlatformRole(in.Body.Role), Reason: in.Body.Reason, Proof: reauthProof(in.Body.Reauth),
+		UserID: target, Role: authz.PlatformRole(in.Body.Role), Reason: string(in.Body.Reason), Proof: reauthProof(in.Body.Reauth),
 	})
 	if err != nil {
 		return nil, err
@@ -571,7 +571,7 @@ func (h handler) approvePlatformRole(ctx context.Context, in *assignmentInput) (
 type revokeRoleInput struct {
 	AssignmentID string `path:"assignment_id" doc:"Assignment ID (an unknown or malformed ID is 404)"`
 	Body         struct {
-		Reason string             `json:"reason" minLength:"1" maxLength:"1000" doc:"5-500 characters; audited"`
+		Reason reasonText         `json:"reason" doc:"Audited"`
 		Reauth *consent.ReauthDTO `json:"reauth,omitempty" doc:"Re-authentication proof of the admin (03 §6.2)"`
 	}
 }
@@ -588,7 +588,7 @@ func (h handler) revokePlatformRole(ctx context.Context, in *revokeRoleInput) (*
 		}
 		return nil, ErrNotFound
 	}
-	ra, err := h.svc.RevokePlatformRole(ctx, a, id, in.Body.Reason, reauthProof(in.Body.Reauth))
+	ra, err := h.svc.RevokePlatformRole(ctx, a, id, string(in.Body.Reason), reauthProof(in.Body.Reauth))
 	if err != nil {
 		return nil, err
 	}

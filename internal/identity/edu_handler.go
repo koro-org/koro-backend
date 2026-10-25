@@ -193,7 +193,7 @@ func toAdminEduDTO(v EduView) AdminEduVerificationDTO {
 
 type startEduInput struct {
 	Body struct {
-		EduEmail string `json:"edu_email" maxLength:"320" doc:"A .edu.tr address of the caller's university"`
+		EduEmail emailText `json:"edu_email" doc:"A .edu.tr address of the caller's university"`
 	}
 }
 
@@ -202,7 +202,7 @@ func (h handler) startEdu(ctx context.Context, in *startEduInput) (*acceptedOutp
 	if err != nil {
 		return nil, err
 	}
-	if err := h.svc.StartEduVerification(ctx, a, in.Body.EduEmail); err != nil {
+	if err := h.svc.StartEduVerification(ctx, a, string(in.Body.EduEmail)); err != nil {
 		return nil, err
 	}
 	return &acceptedOutput{}, nil
@@ -342,9 +342,9 @@ func (h handler) getEduDocument(ctx context.Context, in *verificationIDInput) (*
 type decideEduInput struct {
 	VerificationID string `path:"verification_id" doc:"Verification ID (an unknown or malformed ID is 404)"`
 	Body           struct {
-		Decision     string `json:"decision" enum:"verified,rejected"`
-		UniversityID string `json:"university_id,omitempty" format:"uuid" doc:"Required to approve"`
-		ReviewNote   string `json:"review_note,omitempty" maxLength:"2000" doc:"At most 500 characters; shown to the student on a rejection"`
+		Decision     string         `json:"decision" enum:"verified,rejected"`
+		UniversityID string         `json:"university_id,omitempty" format:"uuid" doc:"Required to approve"`
+		ReviewNote   reviewNoteText `json:"review_note,omitempty" doc:"Shown to the student on a rejection"`
 	}
 }
 
@@ -361,7 +361,7 @@ func (h handler) decideEdu(ctx context.Context, in *decideEduInput) (*adminEduOu
 	if err != nil {
 		return nil, err
 	}
-	d := EduDecision{Decision: EduStatus(in.Body.Decision), ReviewNote: in.Body.ReviewNote}
+	d := EduDecision{Decision: EduStatus(in.Body.Decision), ReviewNote: string(in.Body.ReviewNote)}
 	if in.Body.UniversityID != "" {
 		uni, err := uuid.Parse(in.Body.UniversityID)
 		if err != nil {

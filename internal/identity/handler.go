@@ -151,10 +151,10 @@ type consentGrantBody struct {
 type registerInput struct {
 	Client string `header:"X-Koro-Client" enum:"web,mobile" doc:"Client kind (consent channel); default web"`
 	Body   struct {
-		Email                  string             `json:"email" maxLength:"320"`
-		Password               string             `json:"password" minLength:"1" maxLength:"1024" doc:"15-128 characters; common passwords are refused"`
-		FirstName              string             `json:"first_name" minLength:"1" maxLength:"200"`
-		LastName               string             `json:"last_name" minLength:"1" maxLength:"200"`
+		Email                  emailText          `json:"email"`
+		Password               signupPassword     `json:"password" doc:"Common passwords are refused"`
+		FirstName              nameText           `json:"first_name"`
+		LastName               nameText           `json:"last_name"`
 		BirthDate              string             `json:"birth_date,omitempty" format:"date" doc:"YYYY-MM-DD; required for students (age gate)"`
 		SignupPersona          string             `json:"signup_persona" enum:"student,company,university,club"`
 		Locale                 string             `json:"locale" enum:"tr-TR,en-US"`
@@ -165,7 +165,7 @@ type registerInput struct {
 
 func (h handler) register(ctx context.Context, in *registerInput) (*acceptedOutput, error) {
 	r := Registration{
-		Email: in.Body.Email, Password: in.Body.Password, FirstName: in.Body.FirstName, LastName: in.Body.LastName,
+		Email: string(in.Body.Email), Password: string(in.Body.Password), FirstName: string(in.Body.FirstName), LastName: string(in.Body.LastName),
 		Persona: Persona(in.Body.SignupPersona), Locale: in.Body.Locale, Client: clientKind(in.Client),
 	}
 	if in.Body.BirthDate != "" {
@@ -327,19 +327,19 @@ func (h handler) confirmEmailChange(ctx context.Context, in *tokenInput) (*struc
 
 type emailInput struct {
 	Body struct {
-		Email string `json:"email" maxLength:"320"`
+		Email emailText `json:"email"`
 	}
 }
 
 func (h handler) resend(ctx context.Context, in *emailInput) (*acceptedOutput, error) {
-	if err := h.svc.ResendVerification(ctx, authz.ActorOrAnonymous(ctx), in.Body.Email); err != nil {
+	if err := h.svc.ResendVerification(ctx, authz.ActorOrAnonymous(ctx), string(in.Body.Email)); err != nil {
 		return nil, err
 	}
 	return &acceptedOutput{}, nil
 }
 
 func (h handler) resetRequest(ctx context.Context, in *emailInput) (*acceptedOutput, error) {
-	if err := h.svc.RequestPasswordReset(ctx, authz.ActorOrAnonymous(ctx), in.Body.Email); err != nil {
+	if err := h.svc.RequestPasswordReset(ctx, authz.ActorOrAnonymous(ctx), string(in.Body.Email)); err != nil {
 		return nil, err
 	}
 	return &acceptedOutput{}, nil
@@ -347,13 +347,13 @@ func (h handler) resetRequest(ctx context.Context, in *emailInput) (*acceptedOut
 
 type resetConfirmInput struct {
 	Body struct {
-		Token       string `json:"token" minLength:"1" maxLength:"128"`
-		NewPassword string `json:"new_password" minLength:"1" maxLength:"1024"`
+		Token       string      `json:"token" minLength:"1" maxLength:"128"`
+		NewPassword newPassword `json:"new_password"`
 	}
 }
 
 func (h handler) resetConfirm(ctx context.Context, in *resetConfirmInput) (*struct{}, error) {
-	return nil, h.svc.ConfirmPasswordReset(ctx, authz.ActorOrAnonymous(ctx), in.Body.Token, in.Body.NewPassword)
+	return nil, h.svc.ConfirmPasswordReset(ctx, authz.ActorOrAnonymous(ctx), in.Body.Token, string(in.Body.NewPassword))
 }
 
 // ---- changeMyPassword
@@ -361,7 +361,7 @@ func (h handler) resetConfirm(ctx context.Context, in *resetConfirmInput) (*stru
 type changePasswordInput struct {
 	Body struct {
 		CurrentPassword string             `json:"current_password,omitempty" maxLength:"1024" doc:"Re-authentication proof (03 §6.2)"`
-		NewPassword     string             `json:"new_password" minLength:"1" maxLength:"1024"`
+		NewPassword     newPassword        `json:"new_password"`
 		Reauth          *consent.ReauthDTO `json:"reauth,omitempty" doc:"MFA accounts: reauth.totp_code"`
 	}
 }
@@ -372,7 +372,7 @@ func (h handler) changePassword(ctx context.Context, in *changePasswordInput) (*
 		return nil, err
 	}
 	return nil, h.svc.ChangePassword(ctx, a, PasswordChange{
-		CurrentPassword: in.Body.CurrentPassword, NewPassword: in.Body.NewPassword, TOTPCode: reauthProof(in.Body.Reauth).TOTPCode,
+		CurrentPassword: in.Body.CurrentPassword, NewPassword: string(in.Body.NewPassword), TOTPCode: reauthProof(in.Body.Reauth).TOTPCode,
 	})
 }
 
@@ -380,7 +380,7 @@ func (h handler) changePassword(ctx context.Context, in *changePasswordInput) (*
 
 type emailChangeInput struct {
 	Body struct {
-		NewEmail string             `json:"new_email" maxLength:"320"`
+		NewEmail emailText          `json:"new_email"`
 		Reauth   *consent.ReauthDTO `json:"reauth,omitempty" doc:"Re-authentication proof (03 §6.2)"`
 	}
 }
@@ -390,7 +390,7 @@ func (h handler) emailChange(ctx context.Context, in *emailChangeInput) (*accept
 	if err != nil {
 		return nil, err
 	}
-	if err := h.svc.RequestEmailChange(ctx, a, in.Body.NewEmail, reauthProof(in.Body.Reauth)); err != nil {
+	if err := h.svc.RequestEmailChange(ctx, a, string(in.Body.NewEmail), reauthProof(in.Body.Reauth)); err != nil {
 		return nil, err
 	}
 	return &acceptedOutput{}, nil
@@ -416,9 +416,9 @@ func (h handler) getMe(ctx context.Context, _ *struct{}) (*meOutput, error) {
 
 type updateMeInput struct {
 	Body struct {
-		FirstName *string `json:"first_name,omitempty" minLength:"1" maxLength:"200"`
-		LastName  *string `json:"last_name,omitempty" minLength:"1" maxLength:"200"`
-		Locale    *string `json:"locale,omitempty" enum:"tr-TR,en-US"`
+		FirstName *nameText `json:"first_name,omitempty"`
+		LastName  *nameText `json:"last_name,omitempty"`
+		Locale    *string   `json:"locale,omitempty" enum:"tr-TR,en-US"`
 	}
 }
 
@@ -427,7 +427,7 @@ func (h handler) updateMe(ctx context.Context, in *updateMeInput) (*meOutput, er
 	if err != nil {
 		return nil, err
 	}
-	m, err := h.svc.UpdateMe(ctx, a, MePatch{FirstName: in.Body.FirstName, LastName: in.Body.LastName, Locale: in.Body.Locale})
+	m, err := h.svc.UpdateMe(ctx, a, MePatch{FirstName: (*string)(in.Body.FirstName), LastName: (*string)(in.Body.LastName), Locale: in.Body.Locale})
 	if err != nil {
 		return nil, err
 	}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -378,6 +379,79 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 		}
 		if _, err := w.s.SubmissionOf(ctx, g.ID); err != nil {
 			t.Fatalf("a dry run deleted the submission: %v", err)
+		}
+	})
+
+	t.Run("terms acceptances (BE-118)", func(t *testing.T) {
+		t.Parallel()
+		w := newWorld(t)
+		ctx := t.Context()
+		terms := notice(consent.KindTermsOfUse, nil, consent.AudienceAll, "2026.10.01")
+		later := notice(consent.KindTermsOfUse, nil, consent.AudienceStudent, "2026.10.02")
+		privacyNotice := notice(consent.KindPrivacyNotice, nil, consent.AudienceAll, "2026.10.01")
+		for _, n := range []consent.Notice{terms, later, privacyNotice} {
+			if err := w.s.InsertNotice(ctx, n); err != nil {
+				t.Fatal(err)
+			}
+			if err := w.s.Publish(ctx, n.ID, base); err != nil {
+				t.Fatal(err)
+			}
+		}
+		u, other := w.user(t), w.user(t)
+		row := func(user uuid.UUID, n consent.Notice, m int) consent.TermsAcceptance {
+			return consent.TermsAcceptance{ID: uuid.NewV7(), UserID: user, NoticeVersionID: n.ID, TextSHA256: n.BodySHA256,
+				Channel: consent.ChannelWeb, RequestID: "req-BE118-" + strconv.Itoa(m), AcceptedAt: base.Add(time.Duration(m) * time.Minute),
+				CreatedAt: stale}
+		}
+		second, first := row(u, later, 2), row(u, terms, 1)
+		for _, a := range []consent.TermsAcceptance{second, first, row(other, terms, 3)} {
+			if ok, err := w.s.InsertTermsAcceptance(ctx, a); err != nil || !ok {
+				t.Fatalf("insert %+v = %v, %v", a, ok, err)
+			}
+		}
+		// The same version again: nothing inserted, no error.
+		dup := row(u, terms, 9)
+		if ok, err := w.s.InsertTermsAcceptance(ctx, dup); err != nil || ok {
+			t.Fatalf("second acceptance of a version = %v, %v; want a no-op", ok, err)
+		}
+		got, err := w.s.TermsAcceptancesOf(ctx, u)
+		if err != nil || len(got) != 2 || got[0].ID != first.ID || got[1].ID != second.ID {
+			t.Fatalf("TermsAcceptancesOf = %+v, %v; want oldest first", got, err)
+		}
+		g := got[0]
+		if g.UserID != u || g.NoticeVersionID != terms.ID || !bytes.Equal(g.TextSHA256, terms.BodySHA256) || g.Channel != consent.ChannelWeb ||
+			g.RequestID != "req-BE118-1" || !g.AcceptedAt.Equal(first.AcceptedAt) || g.CreatedAt.IsZero() || g.CreatedAt.Equal(stale) {
+			t.Fatalf("stored acceptance = %+v", g)
+		}
+		if none, err := w.s.TermsAcceptancesOf(ctx, uuid.NewV7()); err != nil || len(none) != 0 {
+			t.Fatalf("acceptances of nobody = %+v, %v", none, err)
+		}
+		with := func(a consent.TermsAcceptance, f func(*consent.TermsAcceptance)) consent.TermsAcceptance {
+			f(&a)
+			return a
+		}
+		// terms_acceptances_notice_fkey: a terms of use with this very digest.
+		for name, bad := range map[string]consent.TermsAcceptance{
+			"privacy notice": row(other, privacyNotice, 4),
+			"other digest":   with(row(other, later, 5), func(a *consent.TermsAcceptance) { a.TextSHA256 = privacyNotice.BodySHA256 }),
+			"unknown notice": with(row(other, later, 6), func(a *consent.TermsAcceptance) { a.NoticeVersionID = uuid.NewV7() }),
+		} {
+			if _, err := w.s.InsertTermsAcceptance(ctx, bad); !errors.Is(err, problem.ErrConflict) {
+				t.Errorf("%s = %v, want 409", name, err)
+			}
+		}
+		for name, bad := range map[string]consent.TermsAcceptance{
+			"channel":    with(row(other, later, 7), func(a *consent.TermsAcceptance) { a.Channel = consent.ChannelAdmin }),
+			"request id": with(row(other, later, 8), func(a *consent.TermsAcceptance) { a.RequestID = "has space" }),
+			"digest":     with(row(other, later, 9), func(a *consent.TermsAcceptance) { a.TextSHA256 = []byte("short") }),
+		} {
+			if _, err := w.s.InsertTermsAcceptance(ctx, bad); !errors.Is(err, problem.ErrValidation) {
+				t.Errorf("%s = %v, want 422", name, err)
+			}
+		}
+		// Live accounts are never purged.
+		if n, err := w.s.PurgeTerms(ctx, base.AddDate(10, 0, 0), 1000, true); err != nil || n != 0 {
+			t.Fatalf("dry run over live accounts = %d, %v", n, err)
 		}
 	})
 

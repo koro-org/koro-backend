@@ -60,7 +60,8 @@ import (
 //	                verifications, role history, privileged account
 //	                requests; BE-057)
 //
-// Consumed: c.consent.svc (registration consents, privacy notice lookup),
+// Consumed: c.consent.svc (registration consents, privacy notice lookup,
+// the terms of use ledger: registration, acceptTerms, getMe; BE-118),
 // c.notify.svc (worker e-mails), c.audit.svc, c.files.svc (student
 // documents: Get, Attach, PresignGet, Delete — 01 §6.3, T-221),
 // hooks.memberships and hooks.domainResolver (read at call time, so orgs
@@ -146,7 +147,7 @@ func (w *identityWiring) build(c *container) error {
 	d := identity.Deps{
 		Store: store, Tx: tx, Outbox: c.infra.outbox, Queue: c.infra.queue, Audit: c.audit.svc,
 		Clock: c.infra.clock, Log: c.infra.log.With("module", "identity"), Limiter: c.infra.limiter,
-		Deriver: deriver, Consent: c.consent.svc, Notices: noticeLookup{svc: c.consent.svc}, Mailer: c.notify.svc,
+		Deriver: deriver, Consent: c.consent.svc, Terms: c.consent.svc, Notices: noticeLookup{svc: c.consent.svc}, Mailer: c.notify.svc,
 		LinkBaseURL: cfg.LinkBaseURL,
 		Memberships: func(ctx context.Context, userID uuid.UUID) ([]authz.Membership, error) {
 			if h := c.hooks.memberships; h != nil {

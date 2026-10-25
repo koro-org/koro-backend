@@ -21,6 +21,7 @@ import (
 	"github.com/pquerna/otp/totp"
 
 	"koro/internal/authz"
+	"koro/internal/consent"
 	"koro/internal/identity"
 	"koro/internal/notify"
 	"koro/internal/platform/civil"
@@ -608,5 +609,141 @@ func TestWire_IdentityUsesSharedEnvelope(t *testing.T) {
 	none.identity.secrets = nil
 	if err := none.build(); err == nil {
 		t.Fatal("identity built without a key-encryption key")
+	}
+}
+
+// TestWire_TermsAcceptanceOverHTTP (BE-118, Q-17): registerAccount without
+// terms_notice_version_id is 422 (a required member), with a retired
+// version 422 consent.terms_not_current; with the current one the account
+// and its acceptance exist and the KVKK export shows it. A new version makes
+// getMe answer terms.acceptance_required until acceptTerms records it.
+func TestWire_TermsAcceptanceOverHTTP(t *testing.T) {
+	t.Parallel()
+	e := newActorEnv(t)
+	ctx := t.Context()
+	app, err := httpx.New(httpx.Deps{Log: obs.Discard(), Actors: e.c.actors})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.c.registerRoutes(app.V1)
+	do := func(method, path, tok, body string) (int, map[string]any) {
+		t.Helper()
+		req := httptest.NewRequestWithContext(ctx, method, path, strings.NewReader(body))
+		req.Header.Set("X-Koro-Client", "mobile")
+		req.Header.Set(httpx.RequestIDHeader, "req-BE118-wire")
+		if tok != "" {
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		rec := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rec, req)
+		var out map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec.Code, out
+	}
+	privacyNotice := publishNotice(t, e.c, consent.KindPrivacyNotice, nil, "Aydınlatma metni\n")
+	terms := func(version, body string, retire *consent.Notice) consent.Notice {
+		t.Helper()
+		now := e.clk.Now().UTC().Truncate(time.Microsecond)
+		if retire != nil {
+			if err := e.c.consent.store.Retire(ctx, retire.ID, now); err != nil {
+				t.Fatal(err)
+			}
+		}
+		n := consent.Notice{ID: uuid.NewV7(), Kind: consent.KindTermsOfUse, Audience: consent.AudienceAll, Locale: consent.LocaleTR,
+			Version: version, Title: "Kullanım koşulları", BodyMD: body, BodySHA256: consent.BodyDigest(body), CreatedAt: now}
+		if err := e.c.consent.store.InsertNotice(ctx, n); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.c.consent.store.Publish(ctx, n.ID, now); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	old := terms("2026.09.01", "Eski kullanım koşulları\n", nil)
+	v1 := terms("2026.10.01", "Kullanım koşulları\n", &old)
+	register := func(address, termsField string) (int, map[string]any) {
+		return do(http.MethodPost, "/api/v1/auth/register", "", `{"email":"`+address+`","password":"Uzun-ve-tahmin-edilmez-parola-2026",`+
+			`"first_name":"Bea","last_name":"Kaya","signup_persona":"company","locale":"tr-TR",`+
+			`"privacy_notice_version_id":"`+privacyNotice.ID.String()+`"`+termsField+`}`)
+	}
+	if code, body := register("no.terms@sirket.example.test", ""); code != http.StatusUnprocessableEntity {
+		t.Fatalf("registration without terms = %d %v, want 422", code, body)
+	}
+	if code, body := register("old.terms@sirket.example.test", `,"terms_notice_version_id":"`+old.ID.String()+`"`); code != http.StatusUnprocessableEntity ||
+		body["code"] != "consent.terms_not_current" {
+		t.Fatalf("registration with a retired version = %d %v", code, body)
+	}
+	const address = "bea.terms@sirket.example.test"
+	if code, body := register(address, `,"terms_notice_version_id":"`+v1.ID.String()+`"`); code != http.StatusAccepted {
+		t.Fatalf("registration = %d %v", code, body)
+	}
+	id, found, err := e.c.identity.svc.FindByEmail(ctx, address)
+	if err != nil || !found {
+		t.Fatalf("account missing: %v", err)
+	}
+	rows, err := e.c.consent.store.TermsAcceptancesOf(ctx, id)
+	if err != nil || len(rows) != 1 || rows[0].NoticeVersionID != v1.ID || rows[0].Channel != consent.ChannelMobile ||
+		rows[0].RequestID != "req-BE118-wire" {
+		t.Fatalf("acceptances = %+v, %v", rows, err)
+	}
+	for _, a := range []string{"no.terms@sirket.example.test", "old.terms@sirket.example.test"} {
+		if _, found, _ := e.c.identity.svc.FindByEmail(ctx, a); found {
+			t.Fatalf("%s: an account without accepted terms", a)
+		}
+	}
+	var exported bool
+	for _, p := range e.c.privacy {
+		if p.Name() != "consent" {
+			continue
+		}
+		sec, err := p.Export(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, it := range sec.Items {
+			exported = exported || it["terms_acceptance_id"] == rows[0].ID.String()
+		}
+	}
+	if !exported {
+		t.Fatal("the acceptance is not in the KVKK export")
+	}
+
+	// A new version: getMe asks for it, acceptTerms records it.
+	u, err := e.store.User(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := e.clk.Now().UTC().Truncate(time.Microsecond)
+	u.Status, u.EmailVerifiedAt = identity.StatusActive, &now
+	if err := e.store.UpdateUser(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	tok := e.session(t, u, identity.ClientMobile)
+	if code, body := do(http.MethodGet, "/api/v1/me", tok, ""); code != http.StatusOK || body["terms"].(map[string]any)["acceptance_required"] != false {
+		t.Fatalf("getMe after registration = %d %v", code, body["terms"])
+	}
+	v2 := terms("2026.11.01", "Yeni kullanım koşulları\n", &v1)
+	code, body := do(http.MethodGet, "/api/v1/me", tok, "")
+	st, _ := body["terms"].(map[string]any)
+	if code != http.StatusOK || st["acceptance_required"] != true || st["current_notice_version_id"] != v2.ID.String() ||
+		st["current_version"] != "2026.11.01" || st["accepted_notice_version_id"] != v1.ID.String() {
+		t.Fatalf("getMe after a new version = %d %v", code, st)
+	}
+	if code, body := do(http.MethodPost, "/api/v1/me/terms-acceptances", tok, `{"notice_version_id":"`+v1.ID.String()+`"}`); code != http.StatusUnprocessableEntity ||
+		body["code"] != "consent.terms_not_current" {
+		t.Fatalf("acceptTerms with the retired version = %d %v", code, body)
+	}
+	code, body = do(http.MethodPost, "/api/v1/me/terms-acceptances", tok, `{"notice_version_id":"`+v2.ID.String()+`"}`)
+	if code != http.StatusOK || body["acceptance_required"] != false || body["accepted_notice_version_id"] != v2.ID.String() {
+		t.Fatalf("acceptTerms = %d %v", code, body)
+	}
+	if rows, _ := e.c.consent.store.TermsAcceptancesOf(ctx, id); len(rows) != 2 {
+		t.Fatalf("acceptances after acceptTerms = %d, want 2", len(rows))
+	}
+	if code, _ := do(http.MethodPost, "/api/v1/me/terms-acceptances", "", `{"notice_version_id":"`+v2.ID.String()+`"}`); code != http.StatusUnauthorized {
+		t.Fatalf("anonymous acceptTerms = %d", code)
 	}
 }

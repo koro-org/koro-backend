@@ -200,7 +200,8 @@ func TestBuild_SizesAndConsistency(t *testing.T) {
 		"segments":               {count("segments", nil), 3},
 		"university reps":        {count("org_members", is("role", "university_rep")), 3},
 		"club admins":            {count("org_members", is("role", "club_admin")), 20},
-		"privacy notices":        {count("notice_versions", nil), 1},
+		"privacy notices":        {count("notice_versions", is("kind", "privacy_notice")), 1},
+		"terms of use":           {count("notice_versions", is("kind", "terms_of_use")), 1}, // BE-118: registration needs them
 		"waitlisted":             {count("event_registrations", is("status", "waitlisted")), 1},
 		"pending (applications)": {count("event_registrations", is("status", "pending")), 1},
 		"no-shows":               {count("event_registrations", is("status", "no_show")), 1},

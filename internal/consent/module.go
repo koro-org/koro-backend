@@ -34,6 +34,10 @@
 //     consent.iys_status_sync (iys_status.go, BE-103, BE-105) as a
 //     withdrawal of channel iys; optionally (CONSENT_IYS_SYNC_MAX_AGE)
 //     commercial messages are held while that reconciliation is late.
+//   - The terms of use are accepted, never consented to (terms.go,
+//     BE-118): an acceptance names the current terms_of_use version and
+//     goes to its own append-only ledger (terms_acceptances), never to the
+//     consents; it forms the contract, so nothing gates on it here.
 //   - İYS is reached only through the small interfaces of iys.go
 //     (IYSClient, IYSFeedReader, IYSStateReader, IYSPushReceiver), over
 //     any adapter of internal/platform/iys.
@@ -95,6 +99,7 @@ type Service interface {
 	Recorder
 	Checker
 	Notices
+	TermsLedger
 
 	// ListCurrentNotices is listCurrentNotices (consent.notice.read): each
 	// consent text says whether its purpose is collectable now (BE-114).

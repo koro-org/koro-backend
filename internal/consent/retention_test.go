@@ -18,7 +18,7 @@ func TestSweeper_ConsentProof(t *testing.T) {
 	e := newEnv(t)
 	ctx := t.Context()
 	now := e.clk.Now()
-	if got := e.mod.Sweeper.PolicyCodes(); !slices.Equal(got, []string{consent.PolicyConsentProof}) {
+	if got := e.mod.Sweeper.PolicyCodes(); !slices.Equal(got, []string{consent.PolicyConsentProof, consent.PolicyTermsAcceptance}) {
 		t.Fatalf("PolicyCodes() = %v", got)
 	}
 	gone, live := uuid.NewV7(), uuid.NewV7()
@@ -67,5 +67,34 @@ func TestSweeper_ConsentProof(t *testing.T) {
 	}
 	if rows, _ := e.store.AllOf(ctx, live); len(rows) != 1 {
 		t.Fatalf("the granted chain was purged: %d rows", len(rows))
+	}
+}
+
+// TestSweeper_TermsAcceptance (terms_acceptance, BE-118): the sweep of the
+// terms ledger reports its table; the in-memory store knows no accounts, so
+// nothing belongs to an erased one and nothing goes (the erased-account
+// purge is TestTermsAcceptances_Postgres_PurgeAfterErasure). An unknown
+// policy is an error.
+func TestSweeper_TermsAcceptance(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := t.Context()
+	now := e.clk.Now()
+	n := e.terms(t, consent.AudienceAll, "2026.10.01")
+	u := uuid.NewV7()
+	if _, err := e.svc.RecordTerms(ctx, consent.TermsInput{UserID: u, NoticeVersionID: n.ID, Audience: consent.AudienceStudent,
+		Channel: consent.ChannelWeb}); err != nil {
+		t.Fatal(err)
+	}
+	p := privacy.RetentionPolicy{Code: consent.PolicyTermsAcceptance, Retention: now.Sub(now.AddDate(-3, 0, 0)), LegalApproved: true}
+	if res, err := e.mod.Sweeper.Sweep(ctx, p, now.AddDate(10, 0, 0)); err != nil || res.Count != 0 || res.Table != "terms_acceptances" ||
+		res.Method != privacy.MethodHardDelete {
+		t.Fatalf("sweep = %+v, %v", res, err)
+	}
+	if rows, _ := e.store.TermsAcceptancesOf(ctx, u); len(rows) != 1 {
+		t.Fatalf("the acceptance of a live account went: %d rows left", len(rows))
+	}
+	if _, err := e.mod.Sweeper.Sweep(ctx, privacy.RetentionPolicy{Code: "talent_ledger"}, now); err == nil {
+		t.Fatal("a foreign policy was swept")
 	}
 }

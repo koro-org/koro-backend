@@ -18,6 +18,16 @@ components:
       required:
         - token
       type: object
+    AcceptTermsInputBody:
+      additionalProperties: false
+      properties:
+        notice_version_id:
+          description: The terms of use version shown and accepted
+          format: uuid
+          type: string
+      required:
+        - notice_version_id
+      type: object
     AcceptedInvitationDTO:
       additionalProperties: false
       properties:
@@ -7570,6 +7580,9 @@ components:
           type: string
         student:
           $ref: "#/components/schemas/StudentDTO"
+        terms:
+          $ref: "#/components/schemas/TermsDTO"
+          description: Terms of use acceptance (BE-118)
         user_id:
           format: uuid
           type: string
@@ -7586,6 +7599,7 @@ components:
         - memberships
         - platform_roles
         - capabilities
+        - terms
       type: object
     MediaBody:
       additionalProperties: false
@@ -10788,6 +10802,10 @@ components:
             - university
             - club
           type: string
+        terms_notice_version_id:
+          description: The terms of use accepted (mandatory box)
+          format: uuid
+          type: string
       required:
         - email
         - password
@@ -10796,6 +10814,7 @@ components:
         - signup_persona
         - locale
         - privacy_notice_version_id
+        - terms_notice_version_id
       type: object
     RegisterPushInputBody:
       additionalProperties: false
@@ -13318,6 +13337,29 @@ components:
         - media
         - commercial_label
         - like_count
+      type: object
+    TermsDTO:
+      additionalProperties: false
+      properties:
+        acceptance_required:
+          description: "true: the current terms of use are not accepted yet; show them (getNoticeVersion current_notice_version_id) and call acceptTerms"
+          type: boolean
+        accepted_at:
+          format: date-time
+          type: string
+        accepted_notice_version_id:
+          description: "The accepted version: the current one if accepted, else the newest accepted"
+          format: uuid
+          type: string
+        current_notice_version_id:
+          description: The terms of use in force for the caller's audience and locale; absent when none is published
+          format: uuid
+          type: string
+        current_version:
+          description: Version of the current terms (YYYY.MM.DD)
+          type: string
+      required:
+        - acceptance_required
       type: object
     TicketDTO:
       additionalProperties: false
@@ -21599,7 +21641,7 @@ paths:
       x-koro-surface: public
   /api/v1/auth/register:
     post:
-      description: Always 202 for a valid request, whether the address is new or already registered (no account enumeration); a verification e-mail follows. birth_date is required for students (age gate). The privacy notice shown on the page is recorded as shown, never as consent; consents are optional, one per purpose.
+      description: Always 202 for a valid request, whether the address is new or already registered (no account enumeration); a verification e-mail follows. birth_date is required for students (age gate). The privacy notice shown on the page is recorded as shown, never as consent; terms_notice_version_id is the current terms of use the user accepted with the mandatory box (422 consent.terms_not_current otherwise); consents are optional, one per purpose.
       operationId: registerAccount
       parameters:
         - description: Client kind (consent channel); default web
@@ -26568,6 +26610,49 @@ paths:
       tags:
         - students
       x-koro-action: students.profile_section.manage
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+  /api/v1/me/terms-acceptances:
+    post:
+      description: When getMe answers terms.acceptance_required (a new version was published), the client shows the current terms and sends their notice_version_id here. Anything but the current terms of use of the caller's audience is 422 consent.terms_not_current. Accepting a version again changes nothing (same answer, so a retry is safe).
+      operationId: acceptTerms
+      parameters:
+        - description: Client kind (acceptance channel); default web
+          in: header
+          name: X-Koro-Client
+          schema:
+            description: Client kind (acceptance channel); default web
+            enum:
+              - web
+              - mobile
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AcceptTermsInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TermsDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Accept the current terms of use
+      tags:
+        - identity
+      x-koro-action: identity.account.update_own
+      x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
   /api/v1/notices/current:

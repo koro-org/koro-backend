@@ -428,6 +428,9 @@ func TestMigrations_EachStepRestoresThePreviousSchema(t *testing.T) {
 		if latest >= 147 {
 			wantPolicies = 48 // + iys_netgsm_event (000147, BE-110)
 		}
+		if latest >= 148 {
+			wantPolicies = 49 // + terms_acceptance (000148, BE-118)
+		}
 		if defs, policies := rowCount(seedRows[81]), rowCount(seedRows[90]); defs != 10 || policies != wantPolicies {
 			t.Fatalf("seed rows after the last up: signal defs %d, retention policies %d; want 10 and %d", defs, policies, wantPolicies)
 		}

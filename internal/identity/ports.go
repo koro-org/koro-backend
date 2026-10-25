@@ -30,8 +30,27 @@ type ConsentRecorder interface {
 	Record(ctx context.Context, in consent.RecordInput) (uuid.UUID, error)
 }
 
+// TermsLedger is consent's terms of use acceptance ledger (BE-118, Q-17):
+// registration and acceptTerms record the acceptance in identity's
+// transaction; getMe reads whether the current terms are accepted.
+type TermsLedger interface {
+	// CheckTerms returns consent.ErrTermsNotCurrent unless noticeID is the
+	// current terms of use of the audience (read only: before the address
+	// lookup of a registration).
+	CheckTerms(ctx context.Context, noticeID uuid.UUID, aud consent.Audience) error
+	// RecordTerms appends one acceptance in the transaction carried by ctx;
+	// consent.ErrTermsNotCurrent when the notice is not the current terms
+	// of use of the audience. A version accepted before is not recorded
+	// twice.
+	// sync-write: consent.TermsLedger.RecordTerms
+	RecordTerms(ctx context.Context, in consent.TermsInput) (consent.TermsAcceptance, error)
+	// TermsStatus returns the terms of use in force for the audience and
+	// locale and whether userID accepted them.
+	TermsStatus(ctx context.Context, userID uuid.UUID, aud consent.Audience, locale string) (consent.TermsStatus, error)
+}
+
 // NoticeInfo is what registration needs to know about the privacy notice
-// the client showed (02 §4.2).
+// and the terms of use the client showed (02 §4.2).
 type NoticeInfo struct {
 	ID         uuid.UUID
 	Kind       consent.NoticeKind

@@ -32,6 +32,8 @@ type Me struct {
 	// Capabilities are menu hints (04 §2.1): actions the client may offer.
 	// They are not authorization decisions; every request is checked again.
 	Capabilities []authz.Action
+	// Terms is the caller's position towards the terms of use (BE-118).
+	Terms TermsState
 }
 
 // MePatch is the body of updateMe; nil fields stay.
@@ -50,17 +52,21 @@ func (s *service) Me(ctx context.Context, a authz.Actor) (Me, error) {
 	if err != nil {
 		return Me{}, err
 	}
-	return s.me(u, a), nil
+	return s.me(ctx, u, a)
 }
 
-func (s *service) me(u User, a authz.Actor) Me {
+func (s *service) me(ctx context.Context, u User, a authz.Actor) (Me, error) {
+	terms, err := s.termsState(ctx, u)
+	if err != nil {
+		return Me{}, err
+	}
 	return Me{
 		UserID: u.ID, Email: u.Email, FirstName: u.FirstName, LastName: u.LastName, Locale: u.Locale,
 		Persona: u.Persona, MFAEnabled: u.MFAEnabled, EmailVerifiedAt: u.EmailVerifiedAt, BirthDate: u.clone().BirthDate,
 		IsMinor: u.IsMinor(s.now()), StudentStatus: a.StudentStatus, UniversityID: a.UniversityID,
 		Memberships: slices.Clone(a.Memberships), PlatformRoles: slices.Clone(a.PlatformRoles),
-		Capabilities: Capabilities(a),
-	}
+		Capabilities: Capabilities(a), Terms: terms,
+	}, nil
 }
 
 // UpdateMe implements Service (updateMe): names and locale.
@@ -117,7 +123,7 @@ func (s *service) UpdateMe(ctx context.Context, a authz.Actor, p MePatch) (Me, e
 	if err != nil {
 		return Me{}, err
 	}
-	return s.me(out, a), nil
+	return s.me(ctx, out, a)
 }
 
 // ---- Users (01 §4.6)

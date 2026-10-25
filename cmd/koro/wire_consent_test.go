@@ -548,10 +548,11 @@ func TestWire_ConsentIYSAdapterByConfig(t *testing.T) {
 		// The registration page's commercial checkbox: the account is
 		// created, the consent is not (identity skips a refused consent).
 		privacyNotice := publishNotice(t, c, consent.KindPrivacyNotice, nil, "Aydınlatma metni\n")
+		terms := publishNotice(t, c, consent.KindTermsOfUse, nil, "Kullanım koşulları\n")
 		const address = "bea.none@sirket.example.test"
 		if err := c.identity.svc.Register(ctx, authz.Anonymous(), identity.Registration{
 			Email: address, Password: "Uzun-ve-tahmin-edilmez-parola-2026", FirstName: "Bea", LastName: "Kaya",
-			Persona: identity.PersonaCompany, Locale: identity.LocaleTR, PrivacyNoticeID: privacyNotice.ID,
+			Persona: identity.PersonaCompany, Locale: identity.LocaleTR, PrivacyNoticeID: privacyNotice.ID, TermsNoticeID: terms.ID,
 			Consents: []identity.ConsentGrant{{Purpose: purpose, NoticeVersionID: text.ID, TextSHA256: text.BodySHA256}},
 		}); err != nil {
 			t.Fatalf("registration with the commercial consent = %v", err)

@@ -56,6 +56,7 @@ type pgIdentity struct {
 	d       *db.DB
 	consent consent.Service
 	privacy consent.Notice
+	terms   consent.Notice
 	cc      consent.Notice
 	build   func(t *testing.T, out outbox.Writer) identity.Service
 }
@@ -93,6 +94,7 @@ func newPGIdentity(t *testing.T) *pgIdentity {
 	}
 	cc := consent.PurposeCommercialEmail
 	p.privacy = publish(consent.KindPrivacyNotice, nil, consent.AudienceStudent)
+	p.terms = publish(consent.KindTermsOfUse, nil, consent.AudienceAll)
 	p.cc = publish(consent.KindConsentText, &cc, consent.AudienceAll)
 	der, err := crypto.NewDeriver([]crypto.Key{{ID: "k1", Secret: []byte("identity-integration-token-key-identity-integ")}})
 	if err != nil {
@@ -105,7 +107,7 @@ func newPGIdentity(t *testing.T) *pgIdentity {
 		}
 		m, err := identity.New(identity.Deps{
 			Store: identity.NewGormStore(d.ORM), Tx: d.Tx, Outbox: out, Queue: queue.NewMem(), Audit: au, Clock: clk, Log: log,
-			Limiter: ratelimit.NewMem(clk), Deriver: der, Consent: cm.Service, Notices: lookup{cm.Service}, Mailer: &mailer{},
+			Limiter: ratelimit.NewMem(clk), Deriver: der, Consent: cm.Service, Terms: cm.Service, Notices: lookup{cm.Service}, Mailer: &mailer{},
 			LinkBaseURL: "https://app.koro.test", Hasher: sharedHasher(), Secrets: testEnvelope(), Challenges: identity.NewMemChallenges(clk),
 		})
 		if err != nil {
@@ -144,7 +146,7 @@ func (p *pgIdentity) registration(email string) identity.Registration {
 	b, _ := civil.New(2002, time.May, 5)
 	return identity.Registration{
 		Email: email, Password: goodPassword, FirstName: "Ada", LastName: "Yılmaz", BirthDate: &b, Persona: identity.PersonaStudent,
-		Locale: identity.LocaleTR, PrivacyNoticeID: p.privacy.ID, Client: identity.ClientWeb,
+		Locale: identity.LocaleTR, PrivacyNoticeID: p.privacy.ID, TermsNoticeID: p.terms.ID, Client: identity.ClientWeb,
 		Consents: []identity.ConsentGrant{{Purpose: consent.PurposeCommercialEmail, NoticeVersionID: p.cc.ID, TextSHA256: p.cc.BodySHA256}},
 	}
 }
@@ -172,6 +174,14 @@ func TestRegister_Postgres_UserAndConsentCommitTogether(t *testing.T) {
 	if n := p.count(t, `SELECT count(*) FROM email_tokens WHERE user_id = $1 AND purpose = 'account_email'`, id); n != 1 {
 		t.Fatalf("tokens = %d", n)
 	}
+	// BE-118: the accepted terms of use, with the notice's digest, and its audit row.
+	if n := p.count(t, `SELECT count(*) FROM terms_acceptances WHERE user_id = $1 AND notice_version_id = $2 AND text_sha256 = $3
+		AND channel = 'web'`, id, p.terms.ID, p.terms.BodySHA256); n != 1 {
+		t.Fatalf("terms acceptances = %d", n)
+	}
+	if n := p.count(t, `SELECT count(*) FROM audit_events WHERE action = 'terms.accepted' AND actor_user_id = $1`, id); n != 1 {
+		t.Fatalf("terms.accepted audit rows = %d", n)
+	}
 
 	// The token event fails after the consent step: nothing remains.
 	failing := p.build(t, failingOutbox{})
@@ -187,6 +197,9 @@ func TestRegister_Postgres_UserAndConsentCommitTogether(t *testing.T) {
 	}
 	if n := p.count(t, `SELECT count(*) FROM consents`); n != 1 {
 		t.Fatalf("consents after the failed registration = %d, want 1", n)
+	}
+	if n := p.count(t, `SELECT count(*) FROM terms_acceptances`); n != 1 {
+		t.Fatalf("terms acceptances after the failed registration = %d, want 1", n)
 	}
 }
 

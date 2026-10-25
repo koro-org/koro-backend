@@ -84,7 +84,7 @@ func newPGSignup(t *testing.T) *pgSignup {
 		}
 		m, err := identity.New(identity.Deps{
 			Store: store, Tx: p.d.Tx, Outbox: out, Queue: queue.NewMem(), Audit: au, Clock: p.clk, Log: log,
-			Limiter: ratelimit.NewMem(p.clk), Deriver: der, Consent: p.consent, Notices: lookup{p.consent}, Mailer: &mailer{},
+			Limiter: ratelimit.NewMem(p.clk), Deriver: der, Consent: p.consent, Terms: p.consent, Notices: lookup{p.consent}, Mailer: &mailer{},
 			LinkBaseURL: "https://app.koro.test", Hasher: sharedHasher(), Secrets: testEnvelope(), Challenges: identity.NewMemChallenges(p.clk),
 			Domains: func(_ context.Context, domain string) (uuid.UUID, bool, error) {
 				return uni, domain == "uni.edu.tr" || strings.HasSuffix(domain, ".uni.edu.tr"), nil

@@ -34,6 +34,7 @@ privileged_action_history     sweeper:identity
 dormant_account               none:disabled until the lawyer decides a period (T-36); placeholder 100 years
 # consent
 consent_proof                 sweeper:consent
+terms_acceptance              sweeper:consent
 iys_netgsm_event              job:consent.iys_netgsm_purge
 # notify (01 §7 notify.purge)
 notification_delivery         sweeper:notify

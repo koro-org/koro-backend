@@ -15,6 +15,12 @@
 identity  -> consent.Recorder.Record
 students  -> consent.Recorder.Record
 events    -> consent.Recorder.Record
+# BE-118 (user decision Q-17; rationale for 01 §6.3 in the BE-118 ticket's doc patch): registration
+# records the accepted terms of use in consent's terms ledger in the registration transaction, so an
+# account never exists without the proof of the terms it accepted nor a proof without its account;
+# acceptTerms records a new version's acceptance under the account row lock. Not a consent: the
+# terms_acceptances ledger is separate from consents (Kurul 2026/347).
+identity  -> consent.TermsLedger.RecordTerms
 
 # Targeted post publication (feed) and dispatch quota (outreach).
 feed      -> entitlements.Entitlements.Consume

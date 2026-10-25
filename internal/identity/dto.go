@@ -51,6 +51,27 @@ type StudentDTO struct {
 	UniversityID string `json:"university_id,omitempty" format:"uuid"`
 }
 
+// TermsDTO is the caller's position towards the terms of use (BE-118):
+// getMe, updateMe and acceptTerms.
+type TermsDTO struct {
+	AcceptanceRequired      bool       `json:"acceptance_required" doc:"true: the current terms of use are not accepted yet; show them (getNoticeVersion current_notice_version_id) and call acceptTerms"`
+	CurrentNoticeVersionID  string     `json:"current_notice_version_id,omitempty" format:"uuid" doc:"The terms of use in force for the caller's audience and locale; absent when none is published"`
+	CurrentVersion          string     `json:"current_version,omitempty" doc:"Version of the current terms (YYYY.MM.DD)"`
+	AcceptedNoticeVersionID string     `json:"accepted_notice_version_id,omitempty" format:"uuid" doc:"The accepted version: the current one if accepted, else the newest accepted"`
+	AcceptedAt              *time.Time `json:"accepted_at,omitempty"`
+}
+
+func toTermsDTO(t TermsState) TermsDTO {
+	d := TermsDTO{AcceptanceRequired: t.Required, CurrentVersion: t.CurrentVersion, AcceptedAt: t.AcceptedAt}
+	if t.CurrentID != nil {
+		d.CurrentNoticeVersionID = t.CurrentID.String()
+	}
+	if t.AcceptedID != nil {
+		d.AcceptedNoticeVersionID = t.AcceptedID.String()
+	}
+	return d
+}
+
 // MeDTO is the identity part of getMe (04 §V.1). Student profile sections
 // are added by the students module (BE-022).
 type MeDTO struct {
@@ -68,6 +89,7 @@ type MeDTO struct {
 	Memberships     []MembershipDTO `json:"memberships"`
 	PlatformRoles   []string        `json:"platform_roles"`
 	Capabilities    []string        `json:"capabilities" doc:"Menu hints only; every request is authorized on its own"`
+	Terms           TermsDTO        `json:"terms" doc:"Terms of use acceptance (BE-118)"`
 }
 
 func toMeDTO(m Me) MeDTO {
@@ -76,7 +98,7 @@ func toMeDTO(m Me) MeDTO {
 		SignupPersona: string(m.Persona), MFAEnabled: m.MFAEnabled, EmailVerifiedAt: m.EmailVerifiedAt, IsMinor: m.IsMinor,
 		Student:     StudentDTO{Status: string(m.StudentStatus)},
 		Memberships: make([]MembershipDTO, 0, len(m.Memberships)), PlatformRoles: make([]string, 0, len(m.PlatformRoles)),
-		Capabilities: make([]string, 0, len(m.Capabilities)),
+		Capabilities: make([]string, 0, len(m.Capabilities)), Terms: toTermsDTO(m.Terms),
 	}
 	if d.Student.Status == "" {
 		d.Student.Status = "none"

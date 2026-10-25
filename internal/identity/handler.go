@@ -28,7 +28,9 @@ func Register(api huma.API, svc Service) {
 		Summary: "Register an account",
 		Description: "Always 202 for a valid request, whether the address is new or already registered (no account " +
 			"enumeration); a verification e-mail follows. birth_date is required for students (age gate). The privacy " +
-			"notice shown on the page is recorded as shown, never as consent; consents are optional, one per purpose.",
+			"notice shown on the page is recorded as shown, never as consent; terms_notice_version_id is the current terms of " +
+			"use the user accepted with the mandatory box (422 consent.terms_not_current otherwise); consents are optional, one " +
+			"per purpose.",
 	}, op.Meta{Action: string(authz.IdentityAccountRegister), Surface: op.SurfacePublic, RateLimit: op.RateAuthRegister,
 		Idempotency: op.IdempotencyOptional}, h.register)
 
@@ -111,6 +113,15 @@ func Register(api huma.API, svc Service) {
 		Summary: "Update my name or language",
 	}, op.Meta{Action: string(authz.IdentityAccountUpdateOwn), Surface: op.SurfaceSelf}, h.updateMe)
 
+	op.Register(api, "identity", huma.Operation{
+		OperationID: "acceptTerms", Method: http.MethodPost, Path: "/me/terms-acceptances",
+		Summary: "Accept the current terms of use",
+		Description: "When getMe answers terms.acceptance_required (a new version was published), the client shows the current " +
+			"terms and sends their notice_version_id here. Anything but the current terms of use of the caller's audience is " +
+			"422 consent.terms_not_current. Accepting a version again changes nothing (same answer, so a retry is safe).",
+	}, op.Meta{Action: string(authz.IdentityAccountUpdateOwn), Surface: op.SurfaceSelf,
+		Idempotency: op.IdempotencyOptional}, h.acceptTerms)
+
 	registerMFAAndAdmin(api, h)
 	registerEdu(api, h)
 }
@@ -159,6 +170,7 @@ type registerInput struct {
 		SignupPersona          string             `json:"signup_persona" enum:"student,company,university,club"`
 		Locale                 string             `json:"locale" enum:"tr-TR,en-US"`
 		PrivacyNoticeVersionID string             `json:"privacy_notice_version_id" format:"uuid" doc:"The privacy notice shown on the page"`
+		TermsNoticeVersionID   string             `json:"terms_notice_version_id" format:"uuid" doc:"The terms of use accepted (mandatory box)"`
 		Consents               []consentGrantBody `json:"consents,omitempty" maxItems:"10" doc:"Optional consents, one per purpose (unticked by default)"`
 	}
 }
@@ -180,6 +192,9 @@ func (h handler) register(ctx context.Context, in *registerInput) (*acceptedOutp
 		return nil, problem.Field("body.privacy_notice_version_id", "must be a UUID")
 	}
 	r.PrivacyNoticeID = id
+	if r.TermsNoticeID, err = uuid.Parse(in.Body.TermsNoticeVersionID); err != nil {
+		return nil, problem.Field("body.terms_notice_version_id", "must be a UUID")
+	}
 	for _, c := range in.Body.Consents {
 		nid, err := uuid.Parse(c.NoticeVersionID)
 		if err != nil {
@@ -432,4 +447,33 @@ func (h handler) updateMe(ctx context.Context, in *updateMeInput) (*meOutput, er
 		return nil, err
 	}
 	return &meOutput{Body: toMeDTO(m)}, nil
+}
+
+// ---- acceptTerms
+
+type acceptTermsInput struct {
+	Client string `header:"X-Koro-Client" enum:"web,mobile" doc:"Client kind (acceptance channel); default web"`
+	Body   struct {
+		NoticeVersionID string `json:"notice_version_id" format:"uuid" doc:"The terms of use version shown and accepted"`
+	}
+}
+
+type termsOutput struct {
+	Body TermsDTO
+}
+
+func (h handler) acceptTerms(ctx context.Context, in *acceptTermsInput) (*termsOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	id, err := uuid.Parse(in.Body.NoticeVersionID)
+	if err != nil {
+		return nil, problem.Field("body.notice_version_id", "must be a UUID")
+	}
+	st, err := h.svc.AcceptTerms(ctx, a, TermsAcceptanceInput{NoticeVersionID: id, Client: clientKind(in.Client)})
+	if err != nil {
+		return nil, err
+	}
+	return &termsOutput{Body: toTermsDTO(st)}, nil
 }

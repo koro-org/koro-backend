@@ -40,6 +40,14 @@ var (
 	// ErrScopeNotAllowed: scope_id on a purpose without scope.
 	ErrScopeNotAllowed = problem.New(problem.Invalid, "consent.scope_not_allowed", "Purpose takes no scope")
 
+	// ErrTermsNotCurrent: an acceptance (registerAccount's
+	// terms_notice_version_id, acceptTerms) names something other than the
+	// current terms of use of the reader's audience: unknown, a draft, a
+	// retired version, another kind of notice or another audience (BE-118,
+	// Q-17). The client reads the current one (listCurrentNotices,
+	// kind=terms_of_use) and shows it again.
+	ErrTermsNotCurrent = problem.New(problem.Invalid, "consent.terms_not_current", "The current terms of use must be accepted")
+
 	// ErrInvalidNotice: a draft breaks the notice rules (kind/purpose,
 	// version format, title, body).
 	ErrInvalidNotice = problem.New(problem.Invalid, "consent.invalid_notice", "Notice is invalid")

@@ -156,9 +156,17 @@ func TestSmoke_ClubFirstPilotFlow(t *testing.T) {
 		t.Fatal("no current privacy notice (the demo seed publishes one)")
 	}
 	noticeID := items[0].(map[string]any)["notice_version_id"].(string)
+	// BE-118: the mandatory terms of use box (the demo seed publishes them).
+	terms := c.do(http.MethodGet, "/api/v1/notices/current?audience=student&kind=terms_of_use", "", nil, nil, http.StatusOK)
+	termsItems, _ := terms["items"].([]any)
+	if len(termsItems) == 0 {
+		t.Fatal("no current terms of use (the demo seed publishes them)")
+	}
+	termsID := termsItems[0].(map[string]any)["notice_version_id"].(string)
 	c.do(http.MethodPost, "/api/v1/auth/register", "", map[string]any{
 		"email": studentEmail, "password": studentPassword, "first_name": "Deniz", "last_name": "Yılmaz",
 		"birth_date": "2004-05-20", "locale": "tr-TR", "signup_persona": "student", "privacy_notice_version_id": noticeID,
+		"terms_notice_version_id": termsID,
 	}, nil, http.StatusAccepted)
 	token := mail.token(studentEmail)
 	c.do(http.MethodPost, "/api/v1/auth/email-verifications/confirm", "", map[string]any{"token": token}, nil, http.StatusNoContent)
@@ -169,6 +177,9 @@ func TestSmoke_ClubFirstPilotFlow(t *testing.T) {
 	me := c.do(http.MethodGet, "/api/v1/me", student, nil, nil, http.StatusOK)
 	if st, _ := me["student"].(map[string]any); st == nil || st["university_id"] != mainUni.String() {
 		t.Fatalf("after the .edu.tr verification: student = %v", me["student"])
+	}
+	if tm, _ := me["terms"].(map[string]any); tm == nil || tm["acceptance_required"] != false || tm["accepted_notice_version_id"] != termsID {
+		t.Fatalf("after the registration: terms = %v", me["terms"])
 	}
 	join := c.do(http.MethodPost, "/api/v1/clubs/"+mainClub.String()+"/join-requests", student, map[string]any{}, nil, http.StatusCreated)
 	if join["status"] != "active" {

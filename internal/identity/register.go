@@ -28,6 +28,12 @@ type Registration struct {
 	// recorded as notice.shown in the audit log; it is never "accepted"
 	// (02 §4.2: aydınlatma is shown, not consented to).
 	PrivacyNoticeID uuid.UUID
+	// TermsNoticeID is the terms of use version the user accepted with the
+	// mandatory box (BE-118, Q-17): the current terms of use of the
+	// persona's audience, recorded in consent's terms ledger in the
+	// registration transaction. Accepting the terms forms the contract; it
+	// is not a consent.
+	TermsNoticeID uuid.UUID
 	// Consents are the optional, unticked-by-default consents the user
 	// gave on the registration page: one row per purpose, never bundled
 	// with the account and never part of the e-mail verification
@@ -98,6 +104,15 @@ func (s *service) Register(ctx context.Context, a authz.Actor, in Registration) 
 	if err := s.checkPrivacyNotice(ctx, in.PrivacyNoticeID, audience); err != nil {
 		return err
 	}
+	// BE-118: the accepted terms of use are checked before the address is
+	// looked up too (a taken address and a new one fail alike).
+	err = s.d.Terms.CheckTerms(ctx, in.TermsNoticeID, audience)
+	if errors.Is(err, consent.ErrTermsNotCurrent) {
+		return termsNotCurrent("body.terms_notice_version_id")
+	}
+	if err != nil {
+		return err
+	}
 	if err := s.checkConsents(ctx, in.Consents); err != nil {
 		return err
 	}
@@ -144,9 +159,17 @@ func (s *service) Register(ctx context.Context, a authz.Actor, in Registration) 
 		if err := s.d.Audit.Log(ctx, byUser(shown, u.ID)); err != nil {
 			return err
 		}
-		channel := consent.ChannelWeb
-		if in.Client == ClientMobile {
-			channel = consent.ChannelMobile
+		channel := channelOf(in.Client)
+		// BE-118: the accepted terms of use, in the registration
+		// transaction (an account never exists without its acceptance).
+		_, err = s.d.Terms.RecordTerms(ctx, consent.TermsInput{
+			UserID: u.ID, NoticeVersionID: in.TermsNoticeID, Audience: audience, Channel: channel,
+		})
+		if errors.Is(err, consent.ErrTermsNotCurrent) {
+			return termsNotCurrent("body.terms_notice_version_id") // retired since the check above
+		}
+		if err != nil {
+			return err
 		}
 		for _, c := range in.Consents {
 			nid := c.NoticeVersionID

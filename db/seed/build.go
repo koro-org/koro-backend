@@ -595,17 +595,28 @@ func postBody(text string) (typed, string) {
 	}}), text
 }
 
-// noticeBody is the demo privacy notice.
-const noticeBody = "# Aydınlatma Metni (demo)\n\nBu metin Koro demo ortamı içindir ve hukuki metnin yerini tutmaz. " +
-	"Demo ortamındaki tüm kişiler, kulüpler ve şirketler sentetiktir."
+// noticeBody is the demo privacy notice; termsBody the demo terms of use.
+const (
+	noticeBody = "# Aydınlatma Metni (demo)\n\nBu metin Koro demo ortamı içindir ve hukuki metnin yerini tutmaz. " +
+		"Demo ortamındaki tüm kişiler, kulüpler ve şirketler sentetiktir."
+	termsBody = "# Kullanım Koşulları (demo)\n\nBu metin Koro demo ortamı içindir ve hukuki metnin yerini tutmaz. " +
+		"Demo ortamındaki tüm kişiler, kulüpler ve şirketler sentetiktir."
+)
 
-// notice publishes a demo privacy notice for every audience when none is
-// current (the current-notice unique index makes it a no-op otherwise):
-// registration needs one (04 §1.12).
+// notice publishes a demo privacy notice and demo terms of use for every
+// audience when none is current (the current-notice unique index makes
+// each a no-op otherwise): registration needs both (04 §1.12; the
+// mandatory terms box, BE-118). The demo accounts have no acceptance: getMe
+// asks them to accept (the re-acceptance flow).
 func (b *builder) notice() {
-	sum := sha256.Sum256([]byte(noticeBody))
 	at := b.now.AddDate(0, 0, -90)
-	b.p.add("notice_versions", "id", b.id("notice", 0), "kind", "privacy_notice", "audience", "all", "locale", "tr-TR",
-		"version", "2026.10.01", "title", "Aydınlatma Metni (demo)", "body_md", noticeBody, "body_sha256", sum[:],
-		"published_at", at, "created_by", b.admin1, "created_at", at)
+	for i, n := range []struct{ kind, title, body string }{
+		{"privacy_notice", "Aydınlatma Metni (demo)", noticeBody},
+		{"terms_of_use", "Kullanım Koşulları (demo)", termsBody},
+	} {
+		sum := sha256.Sum256([]byte(n.body))
+		b.p.add("notice_versions", "id", b.id("notice", i), "kind", n.kind, "audience", "all", "locale", "tr-TR",
+			"version", "2026.10.01", "title", n.title, "body_md", n.body, "body_sha256", sum[:],
+			"published_at", at, "created_by", b.admin1, "created_at", at)
+	}
 }

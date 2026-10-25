@@ -17,11 +17,16 @@ import (
 // consent in force. kvkk.retention_sweep calls the sweeper; an unapproved
 // policy is a dry run (count only, inside a transaction kvkk rolls back),
 // an approved one deletes in batches of RetentionBatch consents, one
-// transaction each, oldest first.
+// transaction each, oldest first. The terms of use acceptances of an
+// account go 3 years after its erasure (terms_acceptance, BE-118), the
+// same way: never while the account lives.
 
 const (
-	// PolicyConsentProof is the retention policy consent sweeps.
+	// PolicyConsentProof is the retention policy of the consent ledger.
 	PolicyConsentProof = "consent_proof"
+	// PolicyTermsAcceptance is the retention policy of the terms of use
+	// acceptances (000148).
+	PolicyTermsAcceptance = "terms_acceptance"
 	// RetentionBatch is the most consents one purge transaction deletes.
 	RetentionBatch = 1000
 )
@@ -32,22 +37,31 @@ type sweeper struct{ s *service }
 var _ privacy.RetentionSweeper = sweeper{}
 
 // PolicyCodes implements privacy.RetentionSweeper.
-func (sweeper) PolicyCodes() []string { return []string{PolicyConsentProof} }
+func (sweeper) PolicyCodes() []string { return []string{PolicyConsentProof, PolicyTermsAcceptance} }
 
 // Sweep implements privacy.RetentionSweeper.
 func (w sweeper) Sweep(ctx context.Context, p privacy.RetentionPolicy, now time.Time) (privacy.SweepResult, error) {
-	if p.Code != PolicyConsentProof {
+	var (
+		table string
+		purge func(ctx context.Context, cutoff time.Time, limit int, dryRun bool) (int, error)
+	)
+	switch p.Code {
+	case PolicyConsentProof:
+		table, purge = "consents", w.s.d.Store.PurgeProof
+	case PolicyTermsAcceptance:
+		table, purge = "terms_acceptances", w.s.d.Store.PurgeTerms
+	default:
 		return privacy.SweepResult{}, fmt.Errorf("consent: no retention sweep for policy %q", p.Code)
 	}
 	cutoff := now.Add(-p.Retention)
-	res := privacy.SweepResult{PolicyCode: p.Code, Table: "consents", Method: privacy.MethodHardDelete}
+	res := privacy.SweepResult{PolicyCode: p.Code, Table: table, Method: privacy.MethodHardDelete}
 	if !p.LegalApproved {
-		n, err := w.s.d.Store.PurgeProof(ctx, cutoff, RetentionBatch, true)
+		n, err := purge(ctx, cutoff, RetentionBatch, true)
 		res.Count = n
 		return res, err
 	}
 	n, err := db.Batches(ctx, w.s.d.Tx, RetentionBatch, func(ctx context.Context) (int, error) {
-		return w.s.d.Store.PurgeProof(ctx, cutoff, RetentionBatch, false)
+		return purge(ctx, cutoff, RetentionBatch, false)
 	})
 	res.Count = n
 	return res, err

@@ -2,10 +2,12 @@
 # authztest.ID(name). notice_cc_email's body is matrixConsentText;
 # bodies/consent/grant_commercial_email.json holds its SHA-256.
 # notice_privacy_current and notice_privacy_draft share one key: publishing
-# the draft retires the current version.
+# the draft retires the current version. notice_terms_current is the terms
+# of use registerAccount and acceptTerms accept (BE-118).
 version: 1
 fixtures:
   notice_cc_email: { kind: notice, notice_kind: consent_text, purpose: commercial_email, audience: all, version: "2026.10.01", status: published }
   notice_privacy_current: { kind: notice, notice_kind: privacy_notice, audience: student, version: "2026.10.01", status: published }
   notice_privacy_draft: { kind: notice, notice_kind: privacy_notice, audience: student, version: "2026.10.03", status: draft }
   notice_privacy_retired: { kind: notice, notice_kind: privacy_notice, audience: all, version: "2026.09.01", status: retired }
+  notice_terms_current: { kind: notice, notice_kind: terms_of_use, audience: all, version: "2026.10.01", status: published }

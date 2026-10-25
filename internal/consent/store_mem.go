@@ -27,6 +27,7 @@ type memStore struct {
 	purposes map[Purpose]PurposeDef
 	notices  map[uuid.UUID]Notice
 	consents []Consent // insertion order
+	terms    []TermsAcceptance
 	subs     map[uuid.UUID]Submission
 	syncs    map[IYSChannel]IYSSync
 	feeds    map[string]IYSFeedState

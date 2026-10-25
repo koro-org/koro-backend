@@ -207,6 +207,9 @@ type Service interface {
 	Me(ctx context.Context, a authz.Actor) (Me, error)
 	// UpdateMe is updateMe (names, locale).
 	UpdateMe(ctx context.Context, a authz.Actor, p MePatch) (Me, error)
+	// AcceptTerms is acceptTerms: the caller accepts the current terms of
+	// use (a new version, or an account older than the ledger; BE-118).
+	AcceptTerms(ctx context.Context, a authz.Actor, in TermsAcceptanceInput) (TermsState, error)
 
 	// CompleteMFALogin is completeMfaLogin: the second step of an MFA
 	// login opens the session (03 §6.4-1).
@@ -299,7 +302,8 @@ type Deps struct {
 	Limiter Limiter         // auth_email, auth_password_reset and reauth in the service (06 H-6)
 	Deriver *crypto.Deriver // e-mail tokens (CRYPTO_TOKEN_KEYS) and the e-mail digest of rate limit keys
 	Consent ConsentRecorder // registration consents (same transaction)
-	Notices NoticeLookup    // the privacy notice shown at registration
+	Terms   TermsLedger     // terms of use acceptances (registration, acceptTerms, getMe)
+	Notices NoticeLookup    // the privacy notice and the terms shown at registration
 	Mailer  Mailer          // worker: verification, reset, change and security e-mails
 
 	// LinkBaseURL is APP_LINK_BASE_URL (client origin of the e-mail links; internal/platform/applink).
@@ -340,7 +344,7 @@ func (d *Deps) validate() error {
 	}{
 		{"Store", d.Store != nil}, {"Tx", d.Tx != nil}, {"Outbox", d.Outbox != nil}, {"Queue", d.Queue != nil},
 		{"Audit", d.Audit != nil}, {"Clock", d.Clock != nil}, {"Log", d.Log != nil}, {"Limiter", d.Limiter != nil},
-		{"Deriver", d.Deriver != nil}, {"Consent", d.Consent != nil}, {"Notices", d.Notices != nil},
+		{"Deriver", d.Deriver != nil}, {"Consent", d.Consent != nil}, {"Terms", d.Terms != nil}, {"Notices", d.Notices != nil},
 		{"Mailer", d.Mailer != nil}, {"LinkBaseURL", d.LinkBaseURL != ""},
 	} {
 		if !c.ok {

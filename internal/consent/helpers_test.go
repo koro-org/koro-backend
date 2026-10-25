@@ -135,6 +135,16 @@ func (e *env) consentText(t *testing.T, purpose consent.Purpose, v string) conse
 	})
 }
 
+// terms publishes the terms of use of audience aud (version v, tr-TR); a
+// later version of the same audience retires the earlier one.
+func (e *env) terms(t *testing.T, aud consent.Audience, v string) consent.Notice {
+	t.Helper()
+	return e.publish(t, consent.NoticeDraft{
+		Kind: consent.KindTermsOfUse, Audience: aud, Locale: consent.LocaleTR, Version: v,
+		Title: "Kullanım koşulları " + v, BodyMD: "Kullanım koşulları " + string(aud) + " " + v + "\n",
+	})
+}
+
 // grant records a grant of purpose for userID with the text n.
 func grant(userID uuid.UUID, n consent.Notice, ch consent.Channel) consent.RecordInput {
 	id := n.ID

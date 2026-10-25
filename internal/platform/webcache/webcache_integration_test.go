@@ -37,7 +37,7 @@ func TestRevalidate_OutboxRelayWorker_PostsSignedTags(t *testing.T) {
 	web := newFakeWeb(t)
 
 	subs := outbox.NewRegistry()
-	webcache.New(webcache.Deps{Resolver: resolver(), Sender: newSender(t, web.srv.URL), Log: log}).Subscribe(subs)
+	webcache.New(webcache.Deps{Resolver: resolver(), Sender: newSender(t, web), Log: log}).Subscribe(subs)
 	client := queue.NewClient(rdb, log)
 	t.Cleanup(func() { _ = client.Close() })
 	ob := outbox.New(outbox.Deps{Store: outbox.NewGormStore(d.ORM), Tx: d.Tx, Subs: subs, Queue: client, Clock: clock.NewFake(t0), Log: log})

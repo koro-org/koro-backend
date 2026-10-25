@@ -135,9 +135,15 @@ func (w *fakeWeb) got(t *testing.T) [][]string {
 	return slices.Clone(w.calls)
 }
 
-func newSender(t *testing.T, url string) *webcache.Sender {
+// newSender targets w through w's own client. The default client would share
+// http.DefaultTransport with every parallel test, and httptest.Server.Close
+// calls DefaultTransport.CloseIdleConnections: another test's server closing
+// then breaks this test's request ("CloseIdleConnections called", BE-125).
+func newSender(t *testing.T, w *fakeWeb) *webcache.Sender {
 	t.Helper()
-	s, err := webcache.NewSender(webcache.SenderConfig{BaseURL: url + "/", Secret: vectorSecret, Clock: clock.NewFake(t0)})
+	s, err := webcache.NewSender(webcache.SenderConfig{
+		BaseURL: w.srv.URL + "/", Secret: vectorSecret, Clock: clock.NewFake(t0), Client: w.srv.Client(),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +154,7 @@ func TestSender_PostsSignedTags(t *testing.T) {
 	t.Parallel()
 	web := newFakeWeb(t)
 	tags := []string{"club:odtu-robotik", "event:go-atolyesi", "club:odtu-robotik", "sitemap"}
-	if err := newSender(t, web.srv.URL).Send(t.Context(), tags); err != nil {
+	if err := newSender(t, web).Send(t.Context(), tags); err != nil {
 		t.Fatal(err)
 	}
 	got := web.got(t)
@@ -167,7 +173,7 @@ func TestSender_SplitsAbove64Tags(t *testing.T) {
 	for i := range 130 {
 		tags = append(tags, webcache.EventTag("e-"+strconv.Itoa(i)))
 	}
-	if err := newSender(t, web.srv.URL).Send(t.Context(), tags); err != nil {
+	if err := newSender(t, web).Send(t.Context(), tags); err != nil {
 		t.Fatal(err)
 	}
 	got := web.got(t)
@@ -198,7 +204,7 @@ func TestSender_RetryableAndPermanentFailures(t *testing.T) {
 		t.Run(strconv.Itoa(c.status), func(t *testing.T) {
 			t.Parallel()
 			web := newFakeWeb(t, c.status)
-			err := newSender(t, web.srv.URL).Send(t.Context(), []string{"sitemap"})
+			err := newSender(t, web).Send(t.Context(), []string{"sitemap"})
 			if err == nil || queue.IsPermanent(err) != c.permanent {
 				t.Fatalf("Send() = %v, want permanent=%v", err, c.permanent)
 			}
@@ -211,14 +217,14 @@ func TestSender_RetryableAndPermanentFailures(t *testing.T) {
 		t.Parallel()
 		web := newFakeWeb(t)
 		web.srv.Close()
-		if err := newSender(t, web.srv.URL).Send(t.Context(), []string{"sitemap"}); err == nil || queue.IsPermanent(err) {
+		if err := newSender(t, web).Send(t.Context(), []string{"sitemap"}); err == nil || queue.IsPermanent(err) {
 			t.Fatalf("Send() to a closed server = %v, want a retryable error", err)
 		}
 	})
 	t.Run("invalid tag", func(t *testing.T) {
 		t.Parallel()
 		web := newFakeWeb(t)
-		if err := newSender(t, web.srv.URL).Send(t.Context(), []string{"Club A"}); !queue.IsPermanent(err) {
+		if err := newSender(t, web).Send(t.Context(), []string{"Club A"}); !queue.IsPermanent(err) {
 			t.Fatalf("Send(invalid) = %v, want permanent", err)
 		}
 		if got := web.got(t); len(got) != 0 {
@@ -343,7 +349,7 @@ func TestRevalidator_TopicsToTags(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			web := newFakeWeb(t)
-			subs := subscriptions(t, resolver(), newSender(t, web.srv.URL))
+			subs := subscriptions(t, resolver(), newSender(t, web))
 			sub, ok := subs[c.sub]
 			if !ok || sub.Topic != c.payload.Topic() || sub.Queue != queue.Default {
 				t.Fatalf("subscription %s = %+v", c.sub, sub)
@@ -370,19 +376,19 @@ func TestRevalidator_FailuresAndDisabled(t *testing.T) {
 	web := newFakeWeb(t)
 	r := resolver()
 	r.err = errors.New("db down")
-	err := subscriptions(t, r, newSender(t, web.srv.URL))[webcache.SubEventPublished].Handle(t.Context(), envelope(t, pub))
+	err := subscriptions(t, r, newSender(t, web))[webcache.SubEventPublished].Handle(t.Context(), envelope(t, pub))
 	if err == nil || queue.IsPermanent(err) || len(web.got(t)) != 0 {
 		t.Fatalf("resolver failure = %v", err)
 	}
 	// A payload that does not decode is permanent.
 	bad := envelope(t, pub)
 	bad.Payload = []byte(`{"event_id":1}`)
-	if err := subscriptions(t, resolver(), newSender(t, web.srv.URL))[webcache.SubEventPublished].Handle(t.Context(), bad); !queue.IsPermanent(err) {
+	if err := subscriptions(t, resolver(), newSender(t, web))[webcache.SubEventPublished].Handle(t.Context(), bad); !queue.IsPermanent(err) {
 		t.Fatalf("undecodable payload = %v", err)
 	}
 	// koro-web refuses for good: permanent (the queue archives the task).
 	refusing := newFakeWeb(t, http.StatusUnprocessableEntity)
-	err = subscriptions(t, resolver(), newSender(t, refusing.srv.URL))[webcache.SubEventPublished].Handle(t.Context(), envelope(t, pub))
+	err = subscriptions(t, resolver(), newSender(t, refusing))[webcache.SubEventPublished].Handle(t.Context(), envelope(t, pub))
 	if !queue.IsPermanent(err) {
 		t.Fatalf("422 = %v, want permanent", err)
 	}
@@ -390,7 +396,7 @@ func TestRevalidator_FailuresAndDisabled(t *testing.T) {
 	odd := resolver()
 	odd.events[eventID] = webcache.EventRef{Slug: "Büyük Harf"}
 	web2 := newFakeWeb(t)
-	if err := subscriptions(t, odd, newSender(t, web2.srv.URL))[webcache.SubEventPublished].Handle(t.Context(), envelope(t, pub)); err != nil {
+	if err := subscriptions(t, odd, newSender(t, web2))[webcache.SubEventPublished].Handle(t.Context(), envelope(t, pub)); err != nil {
 		t.Fatal(err)
 	}
 	if got := web2.got(t); len(got) != 1 || !slices.Equal(got[0], []string{"club:odtu-robotik", "sitemap"}) {
@@ -412,7 +418,7 @@ func TestRevalidator_OutboxToTaskToHTTP(t *testing.T) {
 	web := newFakeWeb(t)
 	clk := clock.NewFake(t0)
 	subs := outbox.NewRegistry()
-	webcache.New(webcache.Deps{Resolver: resolver(), Sender: newSender(t, web.srv.URL), Log: obs.Discard()}).Subscribe(subs)
+	webcache.New(webcache.Deps{Resolver: resolver(), Sender: newSender(t, web), Log: obs.Discard()}).Subscribe(subs)
 	q := queue.NewMem()
 	ob := outbox.New(outbox.Deps{Store: outbox.NewMemStore(), Tx: db.NopTx{}, Subs: subs, Queue: q, Clock: clk, Log: obs.Discard()})
 	env, err := domainevent.New(domainevent.EventPublished{EventID: eventID, OrgID: clubID}, "event", eventID)

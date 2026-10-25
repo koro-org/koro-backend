@@ -1,6 +1,7 @@
 package students_test
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -359,5 +360,146 @@ func grantContactsContract(t *testing.T, s students.Store, w world) {
 	}
 	if ok, err := s.ShareGrantContact(ctx, g2.ID, t0.Add(9*time.Minute)); err != nil || ok {
 		t.Fatalf("share a revoked grant = %v, %v", ok, err)
+	}
+}
+
+// deliverAt hands a consent.recorded event written at `at` to
+// students.clear_contact_shares.
+func (e *env) deliverAt(t *testing.T, p domainevent.ConsentRecorded, at time.Time) {
+	t.Helper()
+	ev, err := domainevent.New(p, "consent", p.ConsentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev.ID, ev.OccurredAt = uuid.NewV7(), at
+	body, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range e.subs.For(domainevent.TopicConsentRecorded) {
+		if s.Name == students.ClearContactSharesTaskName {
+			if err := s.HandleTask(t.Context(), body); err != nil {
+				t.Fatalf("%s: %v", s.Name, err)
+			}
+			return
+		}
+	}
+	t.Fatalf("no subscription %s", students.ClearContactSharesTaskName)
+}
+
+// setConsent marks s's consents as withdrawn elsewhere (off) or given
+// again (on) in the fake ledger.
+func (e *env) setConsent(s authz.Actor, on bool) {
+	e.consent.mu.Lock()
+	defer e.consent.mu.Unlock()
+	if on {
+		delete(e.consent.removed, s.UserID)
+	} else {
+		e.consent.removed[s.UserID] = true
+	}
+}
+
+// TestClearContactShares_FollowsTheConsentInForce (BE-104, T-355): the
+// withdrawal task reads the consent under the student's grant lock. Still
+// not in force: every share goes, also one written after the event's time
+// (given concurrently with the withdrawal) — a share never outlives the
+// consent it was given under. Given again before the task ran: the shares
+// of the withdrawn consent go, the share given under the new consent stays
+// (a late redelivery too), so the new consent revives nothing old.
+func TestClearContactShares_FollowsTheConsentInForce(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := t.Context()
+	orgA, recA, _ := e.company("Acme")
+	orgB, recB, _ := e.company("Beta")
+	s, req := e.granted(t, orgA)
+	if err := e.svc.Grant(ctx, s.UserID, orgB, students.SourceContactRequest, uuid.NewV7()); err != nil {
+		t.Fatal(err)
+	}
+	withdrawal := domainevent.ConsentRecorded{ConsentID: uuid.NewV7(), UserID: s.UserID,
+		Purpose: string(consent.PurposeContactInfoShare), Action: string(consent.Withdrawn)}
+
+	// Concurrent: the withdrawal's event is older than the share.
+	e.clk.Advance(time.Minute)
+	if err := e.svc.ShareContactWithCompany(ctx, s, orgA, *proof(), consent.ChannelWeb, req); err != nil {
+		t.Fatal(err)
+	}
+	e.setConsent(s, false)
+	e.deliverAt(t, withdrawal, e.clk.Now().Add(-time.Second))
+	if g := e.grantOf(t, s, orgA); g.ContactSharedAt != nil {
+		t.Fatalf("a share outlived the withdrawn consent: %+v", g)
+	}
+	if ev := e.audit.of(string(authz.StudentsAccessGrantRevoke)); len(ev) != 1 || ev[0].Metadata["by"] != "consent_withdrawn" ||
+		ev[0].SystemJob != "students.contact_shares" || *ev[0].OrgID != orgA {
+		t.Fatalf("unshare audit = %+v", ev)
+	}
+
+	// Shared with A, withdrawn, given again (a share with B under the new
+	// consent) before the task ran.
+	e.setConsent(s, true)
+	e.clk.Advance(time.Minute)
+	if err := e.svc.ShareContactWithCompany(ctx, s, orgA, *proof(), consent.ChannelWeb, req); err != nil {
+		t.Fatal(err)
+	}
+	e.clk.Advance(time.Minute)
+	withdrawnAt := e.clk.Now()
+	e.setConsent(s, false)
+	e.clk.Advance(time.Minute)
+	e.setConsent(s, true)
+	if err := e.svc.ShareContactWithCompany(ctx, s, orgB, *proof(), consent.ChannelWeb, uuid.NewV7()); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 { // at least once
+		e.deliverAt(t, withdrawal, withdrawnAt)
+		if e.grantOf(t, s, orgA).ContactSharedAt != nil || e.grantOf(t, s, orgB).ContactSharedAt == nil {
+			t.Fatalf("after the withdrawal task: A %+v, B %+v", e.grantOf(t, s, orgA), e.grantOf(t, s, orgB))
+		}
+		if e.sharedWith(t, recA, orgA, s) || !e.sharedWith(t, recB, orgB, s) {
+			t.Fatal("the new consent must show the e-mail to B alone")
+		}
+	}
+	// A grant, another purpose: nothing changes.
+	for _, p := range []domainevent.ConsentRecorded{
+		{ConsentID: uuid.NewV7(), UserID: s.UserID, Purpose: string(consent.PurposeContactInfoShare), Action: string(consent.Granted)},
+		{ConsentID: uuid.NewV7(), UserID: s.UserID, Purpose: string(consent.PurposeCommercialEmail), Action: string(consent.Withdrawn)},
+	} {
+		e.setConsent(s, false)
+		e.deliverAt(t, p, e.clk.Now())
+		if e.grantOf(t, s, orgB).ContactSharedAt == nil {
+			t.Fatalf("%s %s cleared a share", p.Purpose, p.Action)
+		}
+	}
+}
+
+// TestReconcilePrivacy_ClearsContactShares (BE-104): the nightly refresh
+// that turns show_contact_on_grant off for a consent no longer in force
+// (its consent.recorded lost, or legacy rows of an earlier withdrawal)
+// also stops every share, as the student's own switch does; a consent
+// given later revives none.
+func TestReconcilePrivacy_ClearsContactShares(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := t.Context()
+	orgA, recA, _ := e.company("Acme")
+	s, req := e.granted(t, orgA)
+	if err := e.svc.ShareContactWithCompany(ctx, s, orgA, *proof(), consent.ChannelWeb, req); err != nil {
+		t.Fatal(err)
+	}
+	e.setConsent(s, false) // withdrawn through the consent ledger, no event delivered
+	e.job(t, students.AudienceRefreshJobName)
+	if p, _ := e.svc.GetMyPrivacy(ctx, s); p.ShowContactOnGrant {
+		t.Fatal("the mirror stays on without the consent")
+	}
+	if g := e.grantOf(t, s, orgA); g.ContactSharedAt != nil {
+		t.Fatalf("the share outlived the consent: %+v", g)
+	}
+	ev := e.audit.of(string(authz.StudentsAccessGrantRevoke))
+	if len(ev) != 1 || ev[0].Metadata["by"] != "consent_not_in_force" || ev[0].SystemJob != students.AudienceRefreshJobName ||
+		ev[0].Metadata["contact_shared_at"] == nil {
+		t.Fatalf("unshare audit = %+v", ev)
+	}
+	e.setConsent(s, true)
+	if e.sharedWith(t, recA, orgA, s) {
+		t.Fatal("a new consent revived the old share")
 	}
 }

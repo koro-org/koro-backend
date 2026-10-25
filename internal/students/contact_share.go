@@ -27,7 +27,9 @@ import (
 // it; a share turns it on). Turning it on records the consent and shares
 // with nobody; turning it off withdraws the consent and stops the sharing
 // with every company in the same transaction; a withdrawal recorded
-// elsewhere (the consent module) stops it through consent.recorded. A
+// elsewhere (the consent module) stops it through consent.recorded, and
+// the nightly privacy reconciliation turning the setting off does too
+// (BE-104). A
 // share never outlives the consent it was given under: shares older than
 // a withdrawal are cleared, so a later consent revives none of them.
 const (
@@ -180,10 +182,19 @@ func (s *service) clearContactShares(ctx context.Context, a authz.Actor) error {
 }
 
 // handleConsentRecorded is ClearContactSharesTaskName: a contact_info_share
-// withdrawal recorded anywhere (the consent module's recordMyConsent, an
-// unsubscribe) clears the shares given at or before it, so a consent given
-// later revives none of them. Until the task runs the views already hide
-// the e-mail (the consent is read at every view).
+// withdrawal recorded anywhere (the consent module's recordMyConsent, the
+// admin and import channels, a KVKK erasure; consent writes the event for
+// every purpose since BE-104) clears the shares given under the withdrawn
+// consent, so a consent given later revives none of them. Until the task
+// runs the views already hide the e-mail (the consent is read at every
+// view). Every other purpose and every grant is ignored.
+//
+// Under the student's grant lock (ShareContactWithCompany takes it too):
+// when the consent is still not in force every remaining share is stale —
+// a share is only ever given while the consent is in force — including
+// one given concurrently with the withdrawal; when it was given again
+// since, only the shares given at or before the withdrawal event go and
+// those of the new consent stay. A late redelivery is harmless either way.
 func (s *service) handleConsentRecorded(ctx context.Context, e domainevent.Envelope) error {
 	p, err := domainevent.Decode[domainevent.ConsentRecorded](e)
 	if err != nil {
@@ -192,12 +203,20 @@ func (s *service) handleConsentRecorded(ctx context.Context, e domainevent.Envel
 	if p.Purpose != string(consent.PurposeContactInfoShare) || p.Action != string(consent.Withdrawn) {
 		return nil
 	}
-	at := e.OccurredAt
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		if err := s.d.Store.LockGrants(ctx, p.UserID); err != nil {
 			return err
 		}
-		gs, err := s.d.Store.ClearGrantContacts(ctx, p.UserID, &at)
+		on, err := s.consentActive(ctx, p.UserID, consent.PurposeContactInfoShare)
+		if err != nil {
+			return err
+		}
+		var before *time.Time // not in force (or no checker: fail closed): every share
+		if on {
+			at := e.OccurredAt
+			before = &at
+		}
+		gs, err := s.d.Store.ClearGrantContacts(ctx, p.UserID, before)
 		if err != nil {
 			return err
 		}

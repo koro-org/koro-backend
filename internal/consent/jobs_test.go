@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"uuid"
 
 	"koro/internal/audit"
 	"koro/internal/authz"
@@ -107,6 +108,42 @@ func TestSubmitIYS_NoopClientSkips(t *testing.T) {
 	// CONSENT_IYS_REQUIRED refuses the no-op client.
 	if _, err := consent.New(consent.Deps{IYSRequired: true}); err == nil || !strings.Contains(err.Error(), "CONSENT_IYS_REQUIRED") {
 		t.Fatalf("New with IYSRequired and no client = %v", err)
+	}
+}
+
+// TestSubmitIYS_EventWithoutSubmission (BE-104): consent.submit_iys ends
+// an event without a submission as a no-op for a purpose without İYS
+// (every consent act writes consent.recorded); for a requires_iys purpose
+// (the submission is written with the event) or an unknown purpose it is a
+// permanent failure, not something a retry fixes.
+func TestSubmitIYS_EventWithoutSubmission(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	sub := e.subscription(t)
+	user := actor(t, "student").UserID
+	for _, tc := range []struct {
+		purpose   string
+		permanent bool
+	}{
+		{string(consent.PurposeContactInfoShare), false},
+		{string(consent.PurposeCommercialPush), false},
+		{string(consent.PurposeCommercialEmail), true},
+		{string(consent.PurposeCommercialSMS), true},
+		{"no_such_purpose", true},
+	} {
+		id := uuid.NewV7()
+		ev, err := domainevent.New(domainevent.ConsentRecorded{ConsentID: id, UserID: user, Purpose: tc.purpose,
+			Action: string(consent.Withdrawn)}, "consent", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = sub.Handle(t.Context(), ev)
+		if tc.permanent != queue.IsPermanent(err) || (!tc.permanent && err != nil) {
+			t.Errorf("%s without a submission = %v, want permanent=%v", tc.purpose, err, tc.permanent)
+		}
+	}
+	if sent := e.iys.Sent(); len(sent) != 0 {
+		t.Fatalf("İYS received %+v", sent)
 	}
 }
 

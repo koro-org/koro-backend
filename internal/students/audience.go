@@ -562,7 +562,10 @@ func (s *service) refreshBatch(ctx context.Context, rows []Profile) (int, error)
 // reconcilePrivacy turns off a mirrored flag whose consent is no longer in
 // force (withdrawn through the consent ledger, or the purpose switched
 // off) and every flag of a minor (02 §9.2: never true for minors). Each
-// change is audited. Without a consent checker it does nothing.
+// change is audited. Turning show_contact_on_grant off also stops every
+// contact share of the student, as the student's own switch does (BE-104:
+// the backstop of a lost consent.recorded). Without a consent checker it
+// does nothing.
 func (s *service) reconcilePrivacy(ctx context.Context) error {
 	if s.d.Consents == nil {
 		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "privacy reconciliation skipped: no consent checker")
@@ -625,10 +628,11 @@ func (s *service) reconcilePrivacyBatch(ctx context.Context, rows []Privacy) (in
 			if _, err := s.d.Store.UpdatePrivacy(ctx, next); err != nil {
 				return err
 			}
-			meta := map[string]any{"reason": "consent_not_in_force"}
+			reason := "consent_not_in_force"
 			if minor {
-				meta["reason"] = "minor"
+				reason = "minor"
 			}
+			meta := map[string]any{"reason": reason}
 			if next.Discoverable != cur.Discoverable {
 				meta["discoverable"] = false
 			}
@@ -637,6 +641,17 @@ func (s *service) reconcilePrivacyBatch(ctx context.Context, rows []Privacy) (in
 			}
 			if err := s.d.Audit.Log(ctx, systemEvent(AudienceRefreshJobName, auditPrivacyReconcile, id, meta)); err != nil {
 				return err
+			}
+			if next.ShowContactOnGrant != cur.ShowContactOnGrant {
+				// Like the student turning it off: no share outlives the
+				// consent (the backstop of students.clear_contact_shares; BE-104).
+				gs, err := s.d.Store.ClearGrantContacts(ctx, id, nil)
+				if err != nil {
+					return err
+				}
+				if err := s.auditUnshares(ctx, authz.SystemActor(AudienceRefreshJobName), gs, reason); err != nil {
+					return err
+				}
 			}
 			n++
 		}

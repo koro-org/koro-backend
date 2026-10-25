@@ -115,8 +115,10 @@ func (s *service) RecordMine(ctx context.Context, a authz.Actor, in MyConsent) (
 }
 
 // record validates in and appends it in a transaction (joining the
-// caller's): consent row, audit row and, for a requires_iys purpose, the
-// İYS submission and the consent.recorded event.
+// caller's): consent row, audit row, the consent.recorded event (every
+// purpose, BE-104: students clears the contact shares of a
+// contact_info_share withdrawal) and, for a requires_iys purpose, the İYS
+// submission.
 func (s *service) record(ctx context.Context, in RecordInput, by authz.Actor) (Consent, error) {
 	return s.recordWith(ctx, in, by, nil)
 }
@@ -124,7 +126,8 @@ func (s *service) record(ctx context.Context, in RecordInput, by authz.Actor) (C
 // recordWith is record with extra audit metadata (IDs and codes only). A
 // withdrawal through ChannelIYS came from İYS (consent.iys_status_sync,
 // BE-103): İYS already holds the refusal, so no İYS submission and no
-// consent.recorded event are written for it.
+// consent.recorded event are written for it (only requires_iys purposes
+// come from İYS, and no consumer but consent.submit_iys acts on them).
 func (s *service) recordWith(ctx context.Context, in RecordInput, by authz.Actor, meta map[string]any) (Consent, error) {
 	if in.UserID == uuid.Nil() {
 		return Consent{}, errors.New("consent: record without a user")
@@ -157,8 +160,8 @@ func (s *service) recordWith(ctx context.Context, in RecordInput, by authz.Actor
 		if err := s.d.Audit.Log(ctx, ev); err != nil {
 			return err
 		}
-		if p.RequiresIYS && c.Channel != ChannelIYS {
-			if err := s.enqueueIYS(ctx, p, c); err != nil {
+		if c.Channel != ChannelIYS {
+			if err := s.emitRecorded(ctx, p, c); err != nil {
 				return err
 			}
 		}
@@ -271,15 +274,22 @@ func recordEvent(c Consent, by authz.Actor) audit.Event {
 	}.By(by)
 }
 
-// enqueueIYS writes the pending İYS submission of c and the
-// consent.recorded event in the recording transaction (ADR-0009, O).
-func (s *service) enqueueIYS(ctx context.Context, p PurposeDef, c Consent) error {
-	if p.IYSChannel == nil {
-		return fmt.Errorf("consent: purpose %s requires İYS without a channel", p.Code)
-	}
-	sub := Submission{ID: uuid.NewV7(), ConsentID: c.ID, Channel: *p.IYSChannel, Status: SubmissionPending}
-	if err := s.d.Store.InsertSubmission(ctx, sub); err != nil {
-		return err
+// emitRecorded writes the consent.recorded event of c in the recording
+// transaction (ADR-0009, O) for every purpose (BE-104, T-355: its
+// consumers filter by purpose — consent.submit_iys delivers the
+// submission of a requires_iys purpose and does nothing for the others,
+// students.clear_contact_shares acts on a contact_info_share withdrawal).
+// A requires_iys purpose also gets its pending İYS submission, in the
+// same transaction.
+func (s *service) emitRecorded(ctx context.Context, p PurposeDef, c Consent) error {
+	if p.RequiresIYS {
+		if p.IYSChannel == nil {
+			return fmt.Errorf("consent: purpose %s requires İYS without a channel", p.Code)
+		}
+		sub := Submission{ID: uuid.NewV7(), ConsentID: c.ID, Channel: *p.IYSChannel, Status: SubmissionPending}
+		if err := s.d.Store.InsertSubmission(ctx, sub); err != nil {
+			return err
+		}
 	}
 	ev, err := domainevent.New(domainevent.ConsentRecorded{
 		ConsentID: c.ID, UserID: c.UserID, Purpose: string(c.PurposeCode), Action: string(c.Action),

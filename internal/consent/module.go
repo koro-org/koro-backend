@@ -20,9 +20,11 @@
 //     (user, purpose, scope) is the current state. A published notice never
 //     changes (notice_versions_guard); a new version is a new row and
 //     publishing it retires the previous version of the same key.
-//   - Commercial purposes (requires_iys) get an iys_submissions row and a
-//     consent.recorded outbox event in the recording transaction (ADR-0009,
-//     mechanism O); the consent.submit_iys task delivers it and
+//   - Every consent act writes a consent.recorded outbox event in the
+//     recording transaction (ADR-0009, mechanism O; every purpose since
+//     BE-104, consumers filter by purpose). Commercial purposes
+//     (requires_iys) also get an iys_submissions row; the
+//     consent.submit_iys task delivers it (a no-op for other purposes) and
 //     consent.iys_reconcile (05:30) retries what is still open.
 //   - Every commercial e-mail carries a one-click unsubscribe link
 //     (unsubscribe.go, BE-062): a signed, expiring token bound to the user
@@ -56,9 +58,9 @@ import (
 // consent fields → consent.Recorder.Record). Consumers declare it in their
 // ports.go with "// sync-write: consent.Recorder.Record".
 type Recorder interface {
-	// Record validates and appends one consent row; for a requires_iys
-	// purpose it also writes the İYS submission and the consent.recorded
-	// outbox event, all in the transaction carried by ctx (a rollback of
+	// Record validates and appends one consent row with its
+	// consent.recorded outbox event and, for a requires_iys purpose, the
+	// İYS submission, all in the transaction carried by ctx (a rollback of
 	// the caller removes everything). It returns the consent ID.
 	Record(ctx context.Context, in RecordInput) (uuid.UUID, error)
 }

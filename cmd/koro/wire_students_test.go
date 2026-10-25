@@ -2,13 +2,16 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 	"uuid"
 
+	"koro/internal/authz"
 	"koro/internal/authz/authztest"
+	"koro/internal/consent"
 	"koro/internal/identity"
 	"koro/internal/kvkk"
 	"koro/internal/platform/civil"
@@ -339,5 +342,120 @@ func TestWire_StudentsExpiryJobUsesConfiguredWindow(t *testing.T) {
 	if err != nil || len(notes) != 1 || notes[0].Kind != "students.access_grants_expired" || notes[0].LinkPath != "/me/access-grants" ||
 		notes[0].Title == "" || notes[0].SourceOrgID != nil {
 		t.Fatalf("in-app notices = %+v, %v", notes, err)
+	}
+}
+
+// TestWire_ConsentWithdrawalClearsContactShares (BE-104, T-355) through the
+// built container: the real consent module writes consent.recorded for
+// every purpose, so a contact_info_share withdrawal recorded through
+// recordMyConsent reaches students.clear_contact_shares over the outbox;
+// consent.submit_iys passes the non-İYS events without a submission or an
+// error (drain fails on a task error). The share is gone, a consent given
+// again revives nothing, and only a new acceptance shares again (and
+// survives the redelivered withdrawal). The topic's consumers are exactly
+// the two that filter by purpose.
+func TestWire_ConsentWithdrawalClearsContactShares(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, s := range c.infra.subs.For(domainevent.TopicConsentRecorded) {
+		names = append(names, s.Name)
+	}
+	slices.Sort(names)
+	// A new consumer must filter by purpose (every consent act is an event).
+	if want := []string{consent.SubmitIYSTaskName, students.ClearContactSharesTaskName}; !slices.Equal(names, want) {
+		t.Fatalf("consent.recorded consumers %q, want %q", names, want)
+	}
+	ctx := t.Context()
+	now := c.infra.clock.Now().UTC().Truncate(time.Microsecond)
+	student, company, uni := uuid.NewV7(), uuid.NewV7(), authztest.UniversityID("uni_a")
+	adult, _ := civil.New(2001, time.May, 9)
+	email := "share-" + student.String()[:8] + "@example.test"
+	if err := c.identity.store.InsertUser(ctx, identity.User{ID: student, Status: identity.StatusActive, Email: email,
+		EmailNormalized: email, EmailVerifiedAt: &now, FirstName: "Deniz", LastName: "Paylaşım", Persona: identity.PersonaStudent,
+		Locale: identity.LocaleTR, BirthDate: &adult}); err != nil {
+		t.Fatal(err)
+	}
+	exp, addr := now.AddDate(1, 0, 0), "share-"+student.String()[:8]+"@matrix.edu.tr"
+	if err := c.identity.store.InsertEduVerification(ctx, identity.EduRecord{ID: uuid.NewV7(), UserID: student,
+		Method: identity.EduMethodEmail, EduEmail: addr, EduEmailNormalized: addr, EmailDomain: "matrix.edu.tr", UniversityID: &uni,
+		Status: identity.EduVerified, VerifiedAt: &now, ExpiresAt: &exp}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := c.students.store.InsertProfile(ctx, students.Profile{UserID: student, UniversityID: uni,
+		DegreeLevel: students.DegreeBachelor, Status: students.ProfileActive}); err != nil || !ok {
+		t.Fatalf("InsertProfile: ok=%v err=%v", ok, err)
+	}
+	if err := c.students.svc.Grant(ctx, student, company, students.SourceContactRequest, uuid.NewV7()); err != nil {
+		t.Fatal(err)
+	}
+	purpose, body := consent.PurposeContactInfoShare, "İletişim bilgimin paylaşılmasına açık rıza veriyorum.\n"
+	text := consent.Notice{ID: uuid.NewV7(), Kind: consent.KindConsentText, PurposeCode: &purpose, Audience: consent.Audience("student"),
+		Locale: consent.LocaleTR, Version: "2026.10.25", Title: "İletişim paylaşımı", BodyMD: body,
+		BodySHA256: consent.BodyDigest(body), CreatedAt: now.Add(-2 * time.Hour)}
+	if err := c.consent.store.InsertNotice(ctx, text); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.consent.store.Publish(ctx, text.ID, now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	me := authz.Actor{Kind: authz.KindUser, UserID: student, StudentStatus: authz.StudentVerified}
+	shared := func() bool {
+		t.Helper()
+		gs, err := c.students.store.StudentGrants(ctx, student, nil, 10)
+		if err != nil || len(gs) != 1 {
+			t.Fatalf("grants = %+v, %v", gs, err)
+		}
+		return gs[0].ContactSharedAt != nil
+	}
+	mine := func(action consent.Action) consent.Consent {
+		t.Helper()
+		in := consent.MyConsent{Purpose: purpose, Action: action, Channel: consent.ChannelWeb}
+		if action == consent.Granted {
+			in.NoticeVersionID, in.TextSHA256 = &text.ID, text.BodySHA256
+		}
+		rec, err := c.consent.svc.RecordMine(ctx, me, in)
+		if err != nil {
+			t.Fatalf("recordMyConsent %s: %v", action, err)
+		}
+		return rec
+	}
+	share := func() {
+		t.Helper()
+		pr := students.ConsentProof{NoticeVersionID: text.ID, TextSHA256: text.BodySHA256}
+		if err := c.students.svc.ShareContactWithCompany(ctx, me, company, pr, consent.ChannelWeb, uuid.NewV7()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	clk := c.infra.clock.(*clock.Fake)
+	share() // the acceptance records the consent and shares
+	drain(t, c)
+	if !shared() {
+		t.Fatal("the acceptance did not share")
+	}
+	clk.Advance(time.Second)
+	w := mine(consent.Withdrawn)
+	drain(t, c)
+	if shared() {
+		t.Fatal("the withdrawal through the consent module left the share")
+	}
+	if _, err := c.consent.store.SubmissionOf(ctx, w.ID); !errors.Is(err, consent.ErrNotFound) {
+		t.Fatalf("İYS submission of a contact_info_share withdrawal: %v", err)
+	}
+	clk.Advance(time.Second)
+	mine(consent.Granted)
+	drain(t, c)
+	if on, err := c.consent.svc.HasActive(ctx, student, purpose, nil); err != nil || !on || shared() {
+		t.Fatalf("consent again: in force %v (%v), shared %v (must not revive)", on, err, shared())
+	}
+	clk.Advance(time.Second)
+	share()
+	drain(t, c) // drain runs every queued task again: the old withdrawal is redelivered
+	if !shared() {
+		t.Fatal("a new acceptance under the new consent did not share (or a redelivered withdrawal cleared it)")
 	}
 }

@@ -36,6 +36,8 @@ const (
 )
 
 // handleRecorded is the consent.recorded subscription (consent.submit_iys).
+// The event is written for every purpose (BE-104); only a requires_iys
+// purpose has a submission to deliver, every other purpose is a no-op.
 func (s *service) handleRecorded(ctx context.Context, e domainevent.Envelope) error {
 	p, err := domainevent.Decode[domainevent.ConsentRecorded](e)
 	if err != nil {
@@ -44,13 +46,28 @@ func (s *service) handleRecorded(ctx context.Context, e domainevent.Envelope) er
 	sub, err := s.d.Store.SubmissionOf(ctx, p.ConsentID)
 	switch {
 	case errors.Is(err, ErrNotFound):
-		// The event is written with its submission in one transaction; a
-		// missing row is a bug, not something a retry fixes.
-		return queue.Permanent(fmt.Errorf("consent: no İYS submission for consent %s", p.ConsentID))
+		return s.noSubmission(ctx, p)
 	case err != nil:
 		return err
 	}
 	return s.deliver(ctx, sub)
+}
+
+// noSubmission decides an event without a submission: nothing to send for
+// a purpose without İYS; for a requires_iys purpose (the submission is
+// written with the event in one transaction) or an unknown one it is a
+// bug, not something a retry fixes.
+func (s *service) noSubmission(ctx context.Context, p domainevent.ConsentRecorded) error {
+	def, err := s.d.Store.Purpose(ctx, Purpose(p.Purpose))
+	switch {
+	case errors.Is(err, ErrUnknownPurpose):
+		return queue.Permanent(fmt.Errorf("consent: event of consent %s names unknown purpose %q", p.ConsentID, p.Purpose))
+	case err != nil:
+		return err
+	case def.RequiresIYS:
+		return queue.Permanent(fmt.Errorf("consent: no İYS submission for consent %s", p.ConsentID))
+	}
+	return nil
 }
 
 // deliver sends one open submission to İYS outside any transaction (05 §6.2:

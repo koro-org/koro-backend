@@ -2,6 +2,7 @@ package consent_test
 
 import (
 	"bytes"
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -224,23 +225,59 @@ func TestRecord_IYSPurpose_EmitsOutboxEvent(t *testing.T) {
 	}
 }
 
-// TestRecord_NonIYSPurpose_NoEvent: purposes without İYS write neither a
-// submission nor an outbox event.
-func TestRecord_NonIYSPurpose_NoEvent(t *testing.T) {
+// TestRecord_NonIYSPurpose_EventWithoutIYSSubmission (BE-104, T-355):
+// every consent act writes consent.recorded in the recording transaction
+// (students.clear_contact_shares needs the contact_info_share
+// withdrawal); a purpose without İYS gets no İYS submission, and
+// consent.submit_iys does nothing for its events — no submission, nothing
+// sent to İYS, no error (a redelivery neither).
+func TestRecord_NonIYSPurpose_EventWithoutIYSSubmission(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	ctx := t.Context()
 	user := actor(t, "student").UserID
-	for _, p := range []consent.Purpose{consent.PurposeCommercialPush, consent.PurposeDiscoveryProfile, consent.PurposeContactInfoShare} {
-		text := e.consentText(t, p, "2026.10.01")
-		id := e.record(t, grant(user, text, consent.ChannelWeb))
-		if _, err := e.store.SubmissionOf(ctx, id); err == nil {
-			t.Fatalf("%s: unexpected İYS submission", p)
-		}
-		e.record(t, withdraw(user, p))
+	reg := uuid.NewV7()
+	type act struct {
+		purpose consent.Purpose
+		action  consent.Action
 	}
-	if got := e.out.Events(); len(got) != 0 {
-		t.Fatalf("outbox = %v, want nothing", e.out.Topics())
+	var want []act
+	var ids []uuid.UUID
+	for _, p := range []consent.Purpose{consent.PurposeCommercialPush, consent.PurposeDiscoveryProfile,
+		consent.PurposeContactInfoShare, consent.PurposeEventSponsor} {
+		g, w := grant(user, e.consentText(t, p, "2026.10.01"), consent.ChannelWeb), withdraw(user, p)
+		if p == consent.PurposeEventSponsor {
+			g.ScopeID, w.ScopeID = &reg, &reg
+		}
+		ids = append(ids, e.record(t, g), e.record(t, w))
+		want = append(want, act{p, consent.Granted}, act{p, consent.Withdrawn})
+	}
+	evs := e.out.Events()
+	if len(evs) != len(want) {
+		t.Fatalf("outbox = %v, want %d consent.recorded", e.out.Topics(), len(want))
+	}
+	for i, ev := range evs {
+		p, err := domainevent.Decode[domainevent.ConsentRecorded](ev)
+		if err != nil || ev.AggregateID != ids[i] || p.ConsentID != ids[i] || p.UserID != user ||
+			p.Purpose != string(want[i].purpose) || p.Action != string(want[i].action) {
+			t.Fatalf("event %d = %+v (%+v), %v; want %v of %s", i, p, ev, err, want[i], ids[i])
+		}
+		if _, err := e.store.SubmissionOf(ctx, ids[i]); !errors.Is(err, consent.ErrNotFound) {
+			t.Fatalf("%s %s: İYS submission lookup = %v, want none", want[i].purpose, want[i].action, err)
+		}
+	}
+	for range 2 { // at least once: a redelivery is a no-op too
+		for i, err := range e.deliverAll(t) {
+			if err != nil {
+				t.Fatalf("consent.submit_iys of %v = %v, want a no-op", want[i], err)
+			}
+		}
+	}
+	if sent := e.iys.Sent(); len(sent) != 0 {
+		t.Fatalf("İYS received %+v for purposes without İYS", sent)
+	}
+	if due, err := e.store.DueSubmissions(ctx, e.clk.Now().Add(time.Hour), uuid.Nil(), 100); err != nil || len(due) != 0 {
+		t.Fatalf("open İYS submissions = %+v, %v", due, err)
 	}
 }
 

@@ -8097,6 +8097,9 @@ components:
         body_sha256:
           description: Lower-case hex SHA-256 of the UTF-8 bytes of body_md
           type: string
+        collectable:
+          description: "listCurrentNotices, consent_text only: whether a grant of the purpose can be recorded now. false: the purpose is switched off, or it needs İYS and no İYS connection is configured (a grant would be 409 consent.iys_unavailable): do not show its checkbox. Minors are still refused the restricted purposes (422 consent.minor_restricted)."
+          type: boolean
         kind:
           enum:
             - privacy_notice

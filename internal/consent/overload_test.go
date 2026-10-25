@@ -21,6 +21,7 @@ import (
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // BE-072: on an overloaded server identity cannot check a re-authentication
@@ -146,9 +147,9 @@ func request(t *testing.T) context.Context {
 // would take precedence in httpx: T-315), so that httpx answers 503.
 func wantOverload(t *testing.T, err error, start time.Time) {
 	t.Helper()
-	wantErr(t, err, context.DeadlineExceeded)
-	if pe, ok := errors.AsType[*problem.Error](err); ok {
-		t.Fatalf("overload became problem %q; httpx maps the bare deadline to 503", pe.Code())
+	problemtest.WantErr(t, err, context.DeadlineExceeded)
+	if _, code := problemtest.StatusCode(err); code != "" {
+		t.Fatalf("overload became problem %q; httpx maps the bare deadline to 503", code)
 	}
 	if waited := time.Since(start); waited != httpx.DefaultRequestTimeout {
 		t.Fatalf("answered after %v, want the whole budget %v", waited, httpx.DefaultRequestTimeout)
@@ -279,7 +280,7 @@ func TestReauth_OnlyVerdictsAreAudited(t *testing.T) {
 			t.Parallel()
 			o := newOverloadEnv(t, &overloadReauth{fail: tc.err})
 			_, err := o.svc.UpdatePurpose(t.Context(), dpoActor(), consent.PurposeCommercialPush, consent.PurposePatch{Active: ptr(false)}, proof)
-			wantErr(t, err, tc.err)
+			problemtest.WantErr(t, err, tc.err)
 			denied := o.audit.of(string(authz.ConsentPurposeManage))
 			switch {
 			case tc.audited && (len(denied) != 1 || denied[0].Outcome != audit.Denied || denied[0].Reason != "reauth_failed"):
@@ -308,7 +309,7 @@ func TestReauth_VerdictAtDeadline_UnauditedIsWarn(t *testing.T) {
 		o := newOverloadEnv(t, &overloadReauth{verdict: errBadProof})
 		o.reauth.late.Store(true)
 		_, err := o.svc.UpdatePurpose(request(t), dpoActor(), consent.PurposeCommercialPush, consent.PurposePatch{Active: ptr(false)}, proof)
-		wantErr(t, err, errBadProof)
+		problemtest.WantErr(t, err, errBadProof)
 		out := o.logs.String()
 		if o.pg.attempts(authz.ConsentPurposeManage) != 1 || !strings.Contains(out, `"level":"WARN","msg":"reauth failure not audited"`) ||
 			strings.Contains(out, `"level":"ERROR"`) {
@@ -320,7 +321,7 @@ func TestReauth_VerdictAtDeadline_UnauditedIsWarn(t *testing.T) {
 	o := newOverloadEnv(t, &overloadReauth{fail: errBadProof})
 	o.pg.next = failingAudit{}
 	_, err := o.svc.UpdatePurpose(t.Context(), dpoActor(), consent.PurposeCommercialPush, consent.PurposePatch{Active: ptr(false)}, proof)
-	wantErr(t, err, errBadProof)
+	problemtest.WantErr(t, err, errBadProof)
 	if out := o.logs.String(); !strings.Contains(out, `"level":"ERROR","msg":"reauth failure not audited"`) {
 		t.Fatalf("audit fault on a live request must log ERROR; logs %s", out)
 	}

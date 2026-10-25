@@ -201,7 +201,8 @@ func TestNetgsm_ErrorsAreClassified(t *testing.T) {
 		t.Fatalf("wrong brand = %v, want ErrRejected code 60", err)
 	}
 
-	r := newRig(t, clk, dir, []netgsmtest.Option{netgsmtest.WithRateLimit(2)}, func(c *netgsm.Config) { c.RequestsPerMinute = 3 })
+	// An approval costs two calls (the upload and its confirmation, Q-16).
+	r := newRig(t, clk, dir, []netgsmtest.Option{netgsmtest.WithRateLimit(3)}, func(c *netgsm.Config) { c.RequestsPerMinute = 4 })
 	ctx := t.Context()
 	var errs []error
 	_, err = r.client.Submit(ctx, approval(bad, clk.Now()))
@@ -443,11 +444,12 @@ func TestNetgsm_StatusesWithoutDates(t *testing.T) {
 	ada := dir.Add("ada.yilmaz@ogrenci.example.test")
 	r := newRig(t, clk, dir, []netgsmtest.Option{netgsmtest.WithoutDates()})
 	if _, err := r.client.Submit(t.Context(), approval(ada, clk.Now())); err != nil {
-		t.Fatal(err)
+		t.Fatal(err) // confirmed by the status alone
 	}
+	searches := r.srv.Calls("search")
 	got, err := r.client.Statuses(t.Context(), iys.Email, []uuid.UUID{ada, ada})
-	if err != nil || got[ada].Status != iys.Approved || !got[ada].At.IsZero() || got[ada].Source != "" || r.srv.Calls("search") != 1 {
-		t.Fatalf("Statuses = %+v, %v (%d searches)", got, err, r.srv.Calls("search"))
+	if err != nil || got[ada].Status != iys.Approved || !got[ada].At.IsZero() || got[ada].Source != "" || r.srv.Calls("search") != searches+1 {
+		t.Fatalf("Statuses = %+v, %v (%d searches)", got, err, r.srv.Calls("search")-searches)
 	}
 }
 
@@ -537,5 +539,91 @@ func TestNetgsm_PurgeFollowsTheRetentionPolicy(t *testing.T) {
 				t.Fatalf("left after the purge = %+v", left)
 			}
 		})
+	}
+}
+
+// forgedSuccess is a webhook item that claims İYS registered the upload
+// ref of user's address (Q-16: the URL's secret is the only proof).
+func forgedSuccess(address, ref string, at time.Time) []byte {
+	return []byte(`[{"iyscode": 700123, "brandcode": 700124, "submitid": "00000000-0000-4000-8000-999999999999",
+		"resultstatus": "success", "errcode": "", "creationdate": "` + at.In(clock.Istanbul()).Format("2006-01-02 15:04:05") + `",
+		"user_refcode": "` + ref + `", "transactionid": "ff00ff00", "type": "EPOSTA", "source": "HS_WEB", "recipient": "` + address + `",
+		"status": "ONAY", "consentDate": "` + at.In(clock.Istanbul()).Format("2006-01-02 15:04:05") + `", "recipientType": "BIREYSEL"}]`)
+}
+
+// TestNetgsm_SuccessAnswerNeedsIYSRecord (Q-16, BE-114): a success answer
+// to an approval counts only once İYS's own record (/iys/search) holds
+// the approval. A forged success over a lost failure is not taken: Submit
+// fails transiently, does not upload again before ResendAfter, and then
+// uploads again and gets İYS's real answer. A search that cannot be made
+// (spent budget) is transient and uploads nothing; a success answer to a
+// refusal needs no search.
+func TestNetgsm_SuccessAnswerNeedsIYSRecord(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewFake(iyscontract.Start)
+	dir := iyscontract.NewDirectory()
+	const address = "ada.yilmaz@ogrenci.example.test"
+	ada := dir.Add(address)
+	r := newRig(t, clk, dir, nil, func(c *netgsm.Config) { c.ResendAfter = 30 * time.Minute })
+	ctx := t.Context()
+
+	// İYS refuses a week-old consent (H467): the real answer is lost and
+	// a forged success arrives with the right token and reference.
+	c := approval(ada, clk.Now().Add(-7*24*time.Hour))
+	r.srv.DropWebhooks(true)
+	if _, err := r.client.Submit(ctx, c); err == nil || !strings.Contains(err.Error(), "has not arrived") {
+		t.Fatalf("Submit without an answer = %v", err)
+	}
+	if n, err := r.client.Receive(ctx, iys.Delivery{Token: netgsmtest.WebhookToken, ClientIP: "192.0.2.10",
+		Body: forgedSuccess(address, c.Ref, c.ConsentDate)}); err != nil || n != 1 {
+		t.Fatalf("forged delivery = %d, %v (stored like any authenticated one)", n, err)
+	}
+	searches := r.srv.Calls("search")
+	rc, err := r.client.Submit(ctx, c)
+	if err == nil || rc.TransactionID != "" || errors.Is(err, iys.ErrRejected) || !strings.Contains(err.Error(), "not confirmed") {
+		t.Fatalf("Submit over the forged success = %+v, %v; want a transient, unconfirmed answer", rc, err)
+	}
+	if got := r.srv.Calls("search"); got != searches+1 {
+		t.Fatalf("%d searches, want İYS's record read once", got-searches)
+	}
+	if n := r.srv.Calls("add"); n != 1 {
+		t.Fatalf("%d uploads, want no resend before ResendAfter", n)
+	}
+	// After ResendAfter the upload goes again and İYS's real answer decides.
+	r.srv.DropWebhooks(false)
+	clk.Advance(31 * time.Minute)
+	if _, err := r.client.Submit(ctx, c); !errors.Is(err, iys.ErrTooLate) || !errors.Is(err, iys.ErrRejected) {
+		t.Fatalf("Submit after ResendAfter = %v, want İYS's H467", err)
+	}
+	if n := r.srv.Calls("add"); n != 2 {
+		t.Fatalf("%d uploads, want the resend", n)
+	}
+
+	// A success answer to a refusal is taken without a search (the safe
+	// direction).
+	if _, err := r.client.Submit(ctx, approval(ada, clk.Now())); err != nil {
+		t.Fatal(err)
+	}
+	searches = r.srv.Calls("search")
+	refusal := iys.Consent{Ref: uuid.NewV7().String(), UserID: ada, Type: iys.Email, Status: iys.Refused, Source: "HS_EPOSTA",
+		ConsentDate: clk.Now().Add(time.Second)}
+	if rc, err := r.client.Submit(ctx, refusal); err != nil || rc.TransactionID == "" || r.srv.Calls("search") != searches {
+		t.Fatalf("refusal = %+v, %v (%d searches)", rc, err, r.srv.Calls("search")-searches)
+	}
+
+	// The confirmation cannot be made (the single-query budget is spent):
+	// transient, and the upload is not sent again.
+	tight := newRig(t, clk, dir, nil, func(c *netgsm.Config) { c.StatusQueriesPerHour = 1 })
+	if _, err := tight.client.Submit(ctx, approval(ada, clk.Now())); err != nil {
+		t.Fatal(err)
+	}
+	next := approval(ada, clk.Now().Add(2*time.Second))
+	for range 2 {
+		if _, err := tight.client.Submit(ctx, next); !errors.Is(err, iys.ErrThrottled) || errors.Is(err, iys.ErrRejected) {
+			t.Fatalf("Submit with the budget spent = %v, want throttled", err)
+		}
+	}
+	if n := tight.srv.Calls("add"); n != 2 {
+		t.Fatalf("%d uploads, want one per consent", n)
 	}
 }

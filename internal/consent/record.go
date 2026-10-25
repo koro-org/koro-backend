@@ -14,6 +14,7 @@ import (
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/page"
 	"koro/internal/platform/problem"
 )
@@ -217,10 +218,7 @@ func (s *service) check(ctx context.Context, p PurposeDef, in RecordInput) error
 			return ErrMinorRestricted
 		case in.Channel == ChannelEmailLink, in.Channel == ChannelIYS:
 			return ErrChannelNotAllowed // withdrawal-only channels
-		case p.RequiresIYS && !s.d.IYS.Real():
-			// İYS registers a consent taken outside İYS within three
-			// business days only (Yönetmelik m.7/11–12): without an İYS
-			// adapter the grant could never become valid (T-364, BE-105).
+		case s.iysGateClosed(p):
 			return ErrIYSUnavailable
 		case in.NoticeVersionID == nil:
 			return invalid(ErrProofRequired, "body.notice_version_id", "is required to grant")
@@ -233,6 +231,21 @@ func (s *service) check(ctx context.Context, p PurposeDef, in RecordInput) error
 		return nil
 	}
 	return invalid(problem.ErrValidation, "body.action", "must be granted or withdrawn")
+}
+
+// iysGateClosed is the İYS gate of a grant (T-364, BE-105): İYS registers
+// a consent taken outside İYS within three business days only (Yönetmelik
+// m.7/11–12), so without an İYS adapter a grant of a requires_iys purpose
+// could never become valid and is refused. listCurrentNotices' collectable
+// reads the same rule (BE-114).
+func (s *service) iysGateClosed(p PurposeDef) bool { return p.RequiresIYS && !s.d.IYS.Real() }
+
+// collectable reports whether a grant of p can be recorded now (for an
+// adult; 03 k12 still applies to minors): an active explicit-consent
+// purpose whose İYS gate is open. The zero PurposeDef (an unknown purpose)
+// is not collectable.
+func (s *service) collectable(p PurposeDef) bool {
+	return p.Active && p.LegalBasis == BasisExplicitConsent && !s.iysGateClosed(p)
 }
 
 // checkText verifies that noticeID is the consent text of purpose p and
@@ -296,13 +309,9 @@ func (s *service) emitRecorded(ctx context.Context, p PurposeDef, c Consent) err
 			return err
 		}
 	}
-	ev, err := domainevent.New(domainevent.ConsentRecorded{
+	return outbox.Emit(ctx, s.d.Outbox, domainevent.ConsentRecorded{
 		ConsentID: c.ID, UserID: c.UserID, Purpose: string(c.PurposeCode), Action: string(c.Action),
 	}, "consent", c.ID)
-	if err != nil {
-		return err
-	}
-	return s.d.Outbox.Add(ctx, ev)
 }
 
 // HasActive implements Checker.

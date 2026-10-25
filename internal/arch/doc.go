@@ -29,8 +29,11 @@
 //     op.Register, problem.Field, db.LockIf/UTCPtr/Nullable,
 //     authz.OrgResource, textx.TrimSlug) nor of a shared test double
 //     (audittest.Recorder, dbtest.SpyTx/TxOf, problemtest.WantErr/
-//     WantProblem/StatusCode, audittest.RowOf); copyAllowed lists the
-//     modules not migrated yet (BE-111).
+//     WantProblem/StatusCode, audittest.RowOf); no module is exempt
+//     (BE-111; consent since BE-114).
+//   - TestArch_BatchLoopsUseDB: a job or retention sweep that works in
+//     batches, one transaction each, calls db.Batches instead of its own
+//     loop (BE-112; no file is exempt since BE-114).
 //
 // A module's <module>test package (audit/audittest) may import its module.
 //

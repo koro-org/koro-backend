@@ -6,7 +6,6 @@ import (
 	"net/netip"
 	"net/url"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 )
@@ -97,8 +96,9 @@ type IYSNetgsm struct {
 	WebhookToken Secret `env:"CONSENT_IYS_NETGSM_WEBHOOK_TOKEN"`
 	// WebhookAllowedIPs, when set, are the only addresses (IPs or CIDRs,
 	// comma-separated) a delivery may come from (Netgsm's sending addresses;
-	// 00 T-368). The API resolves the client address through
-	// TRUSTED_PROXIES.
+	// 00 T-368). Required in prod with CONSENT_IYS_PROVIDER=netgsm (Q-16,
+	// BE-114; a /0 prefix is refused there); optional in dev and staging.
+	// The API resolves the client address through TRUSTED_PROXIES.
 	WebhookAllowedIPs []string `env:"CONSENT_IYS_NETGSM_WEBHOOK_ALLOWED_IPS" envSeparator:","`
 	// RefIDIn places Koro's reference of an upload: header (Netgsm's
 	// parameter table) or item (Netgsm's PHP package).
@@ -180,9 +180,19 @@ func (n *IYSNetgsm) validate(c Common, active bool) []error {
 		errs = append(errs, errors.New("CONSENT_IYS_NETGSM_WEBHOOK_TOKEN must be 32–200 characters of [A-Za-z0-9_-]"))
 	}
 	for _, s := range n.WebhookAllowedIPs {
-		if _, err := parsePrefix(s); err != nil {
+		switch p, err := parsePrefix(s); {
+		case err != nil:
 			errs = append(errs, fmt.Errorf("CONSENT_IYS_NETGSM_WEBHOOK_ALLOWED_IPS: %q is not an IP address or CIDR", s))
+		case active && c.Env == EnvProd && p.Bits() == 0:
+			errs = append(errs, fmt.Errorf("CONSENT_IYS_NETGSM_WEBHOOK_ALLOWED_IPS: %q allows every address, which is no allow list in prod", s))
 		}
+	}
+	// Q-16 (BE-114): the webhook carries no signature, so in prod a delivery
+	// must also come from one of Netgsm's sending addresses; staging may
+	// leave the list empty (Netgsm's test calls, 00 T-368).
+	if active && c.Env == EnvProd && len(n.WebhookAllowedIPs) == 0 {
+		errs = append(errs, errors.New("CONSENT_IYS_PROVIDER=netgsm needs CONSENT_IYS_NETGSM_WEBHOOK_ALLOWED_IPS in prod "+
+			"(Netgsm's webhook source addresses; the webhook carries no signature)"))
 	}
 	if n.RefIDIn != "header" && n.RefIDIn != "item" {
 		errs = append(errs, errors.New("CONSENT_IYS_NETGSM_REFID_IN must be header or item"))
@@ -252,10 +262,12 @@ func (s *Consent) validate(c Common) error {
 			errs = append(errs, fmt.Errorf("CONSENT_IYS_BASE_URL must use https in %s", c.Env))
 		}
 	}
-	switch {
-	case !slices.Contains(IYSProviders(), s.IYSProvider):
-		errs = append(errs, fmt.Errorf("CONSENT_IYS_PROVIDER must be one of %s (got %q)", strings.Join(IYSProviders(), ", "), s.IYSProvider))
+	switch err := checkProvider(c, "CONSENT_IYS_PROVIDER", &s.IYSProvider, IYSProviders()); {
+	case err != nil:
+		errs = append(errs, err)
 	case s.IYSProvider == IYSProviderFake && c.ProdLike():
+		// fake is İYS's development adapter (checkProvider knows only
+		// mem and noop by name).
 		errs = append(errs, fmt.Errorf("CONSENT_IYS_PROVIDER=fake is a development adapter and is not allowed in %s", c.Env))
 	case s.IYSProvider == IYSProviderOfficial && !s.IYSEnabled():
 		errs = append(errs, errors.New("CONSENT_IYS_PROVIDER=official needs CONSENT_IYS_BASE_URL, CONSENT_IYS_USERNAME, "+

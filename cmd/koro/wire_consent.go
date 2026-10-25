@@ -32,7 +32,7 @@ import (
 //	store   nil → consent.NewGormStore over the app_rw pool
 //	tx      nil → the app_rw pool's TxManager; tests preset db.NopTx
 //	iys     nil → the İYS adapter CONSENT_IYS_PROVIDER names (iysAdapters:
-//	        the one place adapters are chosen; BE-105): its Submit behind
+//	        the adapters[T] selection point; BE-105, BE-114): its Submit behind
 //	        consent.NewIYSClient, its change feed and single-state reads
 //	        (consent.IYSFeedReader, consent.IYSStateReader) when it has
 //	        them; consent.NoopIYS with none (commercial grants refused,
@@ -155,52 +155,58 @@ func (r iysRecipients) User(ctx context.Context, t iys.Type, address string) (uu
 	return id, nil
 }
 
-// iysAdapters is the one place İYS adapters are chosen: one constructor
-// per value of CONSENT_IYS_PROVIDER but none (config.IYSProviders;
-// TestWire_EveryIYSProviderIsWired keeps them equal). A new adapter is a
-// package of internal/platform/iys that passes iyscontract.Run, its
-// settings in config.Consent and its line here; consent does not change.
-var iysAdapters = map[string]func(c *container, cfg config.Consent) (consent.IYSSubmitter, error){
-	config.IYSProviderFake: func(c *container, _ config.Consent) (consent.IYSSubmitter, error) {
-		// Development only (config refuses it in staging and prod): İYS in
-		// the worker's memory, with İYS's time rules and identity's
-		// addresses.
-		return iysfake.New(iysfake.Options{Clock: c.infra.clock, Recipients: iysRecipients{c: c}}), nil
-	},
-	config.IYSProviderOfficial: func(c *container, cfg config.Consent) (consent.IYSSubmitter, error) {
-		a, err := official.New(official.Config{
-			BaseURL: cfg.IYSBaseURL, Username: cfg.IYSUsername, Password: cfg.IYSPassword.Reveal(),
-			IYSCode: cfg.IYSCode, BrandCode: cfg.IYSBrandCode, RecipientType: cfg.IYSRecipientType,
-			Recipients: iysRecipients{c: c}, Timeout: cfg.IYSTimeout, Clock: c.infra.clock,
-			Log: c.infra.log.With("module", "consent", "iys", "official"),
-		})
-		if err != nil {
-			return nil, err
-		}
-		return a, nil
-	},
-	config.IYSProviderNetgsm: func(c *container, cfg config.Consent) (consent.IYSSubmitter, error) {
-		// The pilot's integrator (BE-110): uploads by API, İYS's answers
-		// and the recipients' own changes by webhook into iys_netgsm_events
-		// (shared by the api, which receives, and the worker, which reads).
-		store := c.consent.netgsmEvents(c)
-		if store == nil {
-			return nil, errors.New("consent: the Netgsm İYS adapter needs the database (webhook items)")
-		}
-		n := cfg.Netgsm
-		a, err := netgsm.New(netgsm.Config{
-			BaseURL: n.BaseURL, Username: n.Username, Password: n.Password.Reveal(), IYSCode: n.IYSCode, BrandCode: n.BrandCode,
-			RecipientType: cfg.IYSRecipientType, RefIn: n.RefIDIn, WebhookToken: n.WebhookToken.Reveal(),
-			WebhookIPs: n.AllowedPrefixes(), Recipients: iysRecipients{c: c}, Store: store, Clock: c.infra.clock,
-			Log: c.infra.log.With("module", "consent", "iys", "netgsm"), Timeout: cfg.IYSTimeout,
-			RequestsPerMinute: n.RequestsPerMinute, StatusQueriesPerHour: n.StatusQueriesPerHour,
-			ResultWait: waitOrNone(n.ResultWait), ResendAfter: n.ResendAfter,
-		})
-		if err != nil {
-			return nil, err
-		}
-		return a, nil
-	},
+// iysAdapters is the selection point of CONSENT_IYS_PROVIDER (the BE-113
+// pattern since BE-114): one constructor per value config.IYSProviders accepts
+// (TestWire_EveryConfiguredAdapterIsWired keeps them equal); none builds
+// no adapter (nil: consent uses NoopIYS). A new adapter is a package of
+// internal/platform/iys that passes iyscontract.Run, its settings in
+// config.Consent and its line here; consent does not change. The fake is
+// refused in staging and prod by the configuration (config.Consent).
+func iysAdapters(c *container, cfg config.Consent) adapters[consent.IYSSubmitter] {
+	return adapters[consent.IYSSubmitter]{
+		config.IYSProviderNone: func() (consent.IYSSubmitter, error) { return nil, nil },
+		config.IYSProviderFake: func() (consent.IYSSubmitter, error) {
+			// Development only: İYS in the worker's memory, with İYS's
+			// time rules and identity's addresses.
+			return iysfake.New(iysfake.Options{Clock: c.infra.clock, Recipients: iysRecipients{c: c}}), nil
+		},
+		config.IYSProviderOfficial: func() (consent.IYSSubmitter, error) {
+			a, err := official.New(official.Config{
+				BaseURL: cfg.IYSBaseURL, Username: cfg.IYSUsername, Password: cfg.IYSPassword.Reveal(),
+				IYSCode: cfg.IYSCode, BrandCode: cfg.IYSBrandCode, RecipientType: cfg.IYSRecipientType,
+				Recipients: iysRecipients{c: c}, Timeout: cfg.IYSTimeout, Clock: c.infra.clock,
+				Log: c.infra.log.With("module", "consent", "iys", "official"),
+			})
+			if err != nil {
+				return nil, err
+			}
+			return a, nil
+		},
+		config.IYSProviderNetgsm: func() (consent.IYSSubmitter, error) {
+			// The pilot's integrator (BE-110): uploads by API, İYS's answers
+			// and the recipients' own changes by webhook into
+			// iys_netgsm_events (shared by the api, which receives, and the
+			// worker, which reads and confirms each success answer with
+			// /iys/search before it counts: Q-16, BE-114).
+			store := c.consent.netgsmEvents(c)
+			if store == nil {
+				return nil, errors.New("consent: the Netgsm İYS adapter needs the database (webhook items)")
+			}
+			n := cfg.Netgsm
+			a, err := netgsm.New(netgsm.Config{
+				BaseURL: n.BaseURL, Username: n.Username, Password: n.Password.Reveal(), IYSCode: n.IYSCode, BrandCode: n.BrandCode,
+				RecipientType: cfg.IYSRecipientType, RefIn: n.RefIDIn, WebhookToken: n.WebhookToken.Reveal(),
+				WebhookIPs: n.AllowedPrefixes(), Recipients: iysRecipients{c: c}, Store: store, Clock: c.infra.clock,
+				Log: c.infra.log.With("module", "consent", "iys", "netgsm"), Timeout: cfg.IYSTimeout,
+				RequestsPerMinute: n.RequestsPerMinute, StatusQueriesPerHour: n.StatusQueriesPerHour,
+				ResultWait: waitOrNone(n.ResultWait), ResendAfter: n.ResendAfter,
+			})
+			if err != nil {
+				return nil, err
+			}
+			return a, nil
+		},
+	}
 }
 
 // netgsmEvents is the store of the Netgsm webhook items (000147): the
@@ -261,16 +267,13 @@ func iysGrantHolders(store consent.Store, ch consent.IYSChannel) func(ctx contex
 const iysGrantPage = 1000
 
 // iysAdapter builds the İYS adapter CONSENT_IYS_PROVIDER names; nil for
-// none.
+// none (also the zero configuration of tests).
 func iysAdapter(c *container, cfg config.Consent) (consent.IYSSubmitter, error) {
-	if cfg.IYSProvider == "" || cfg.IYSProvider == config.IYSProviderNone {
-		return nil, nil
+	name := cfg.IYSProvider
+	if name == "" {
+		name = config.IYSProviderNone
 	}
-	build, ok := iysAdapters[cfg.IYSProvider]
-	if !ok {
-		return nil, fmt.Errorf("consent: unknown CONSENT_IYS_PROVIDER %q", cfg.IYSProvider)
-	}
-	return build(c, cfg)
+	return iysAdapters(c, cfg).pick("CONSENT_IYS_PROVIDER", name)
 }
 
 func (w *consentWiring) build(c *container) error {

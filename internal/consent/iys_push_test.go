@@ -11,6 +11,7 @@ import (
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/iys"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // pushRecorder is a pushing İYS adapter's receiver that remembers the
@@ -69,8 +70,7 @@ func TestIYSWebhook_RoutesToTheReceiver(t *testing.T) {
 		rec.err = tc.err
 		rec.mu.Unlock()
 		err := e.svc.ReceiveIYSWebhook(ctx, "netgsm", "the-token", body)
-		pe, ok := errors.AsType[*problem.Error](err)
-		if !ok || pe.Status() != tc.status {
+		if status, _ := problemtest.StatusCode(err); status != tc.status {
 			t.Fatalf("receiver error %v → %v, want HTTP %d", tc.err, err, tc.status)
 		}
 	}

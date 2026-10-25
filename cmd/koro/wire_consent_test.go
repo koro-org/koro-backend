@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -511,18 +510,6 @@ func scheduledJob(t *testing.T, c *container, name string) func(context.Context)
 	return nil
 }
 
-// TestWire_EveryIYSProviderIsWired (BE-105): every value of
-// CONSENT_IYS_PROVIDER but none has exactly one constructor in
-// iysAdapters, the one place adapters are chosen.
-func TestWire_EveryIYSProviderIsWired(t *testing.T) {
-	t.Parallel()
-	want := slices.DeleteFunc(config.IYSProviders(), func(p string) bool { return p == config.IYSProviderNone })
-	slices.Sort(want)
-	if got := slices.Sorted(maps.Keys(iysAdapters)); !slices.Equal(got, want) {
-		t.Fatalf("wired İYS adapters %v, configured %v", got, want)
-	}
-}
-
 // TestWire_ConsentIYSAdapterByConfig (BE-105, T-364, BE-110):
 // CONSENT_IYS_PROVIDER alone picks the İYS adapter. none: no adapter, no
 // reconciliation, and a commercial consent is not collected (the
@@ -623,7 +610,8 @@ func TestWire_ConsentIYSAdapterByConfig(t *testing.T) {
 
 	t.Run("unknown", func(t *testing.T) {
 		t.Parallel()
-		if _, err := build(t, "verimor"); err == nil || !strings.Contains(err.Error(), "unknown CONSENT_IYS_PROVIDER") {
+		if _, err := build(t, "verimor"); err == nil ||
+			!strings.Contains(err.Error(), `CONSENT_IYS_PROVIDER="verimor": no such adapter (wired: fake, netgsm, none, official)`) {
 			t.Fatalf("build with an unknown adapter = %v", err)
 		}
 	})
@@ -747,5 +735,155 @@ func TestWire_ConsentNetgsmIYSAdapter(t *testing.T) {
 	}
 	if n := len(store.All(feed)); n != stored {
 		t.Fatalf("refused deliveries stored %d items", n-stored)
+	}
+}
+
+// TestWire_ConsentNoticesCollectable (BE-114, T-367): the consent texts of
+// listCurrentNotices carry collectable over the API, from the İYS gate of
+// the configured adapter: with CONSENT_IYS_PROVIDER=none commercial_email
+// is false (the client hides its checkbox) and commercial_push true; with
+// an adapter (fake) commercial_email is true; a privacy notice has none.
+func TestWire_ConsentNoticesCollectable(t *testing.T) {
+	t.Parallel()
+	collectable := func(t *testing.T, provider string) map[string]any {
+		t.Helper()
+		c := newTestContainer(t)
+		c.consent.iys = nil
+		c.consent.cfg = &config.Consent{UnsubscribeBaseURL: testUnsubscribeBase, IYSProvider: provider,
+			IYSRecipientType: "BIREYSEL", IYSTimeout: 5 * time.Second}
+		if err := c.build(); err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range []consent.Purpose{consent.PurposeCommercialEmail, consent.PurposeCommercialPush} {
+			publishNotice(t, c, consent.KindConsentText, &p, "Ticari ileti izni ("+string(p)+")\n")
+		}
+		publishNotice(t, c, consent.KindPrivacyNotice, nil, "Aydınlatma metni\n")
+		app, err := httpx.New(httpx.Deps{Log: obs.Discard(), Actors: c.actors})
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.registerRoutes(app.V1)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/notices/current?audience=student", nil)
+		rec := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rec, req)
+		var body struct {
+			Items []map[string]any `json:"items"`
+		}
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &body) != nil {
+			t.Fatalf("listCurrentNotices = %d %s", rec.Code, rec.Body)
+		}
+		out := map[string]any{}
+		for _, it := range body.Items {
+			v, has := it["collectable"]
+			switch {
+			case it["kind"] == string(consent.KindConsentText) && !has:
+				t.Fatalf("consent text without collectable: %v", it)
+			case it["kind"] != string(consent.KindConsentText) && has:
+				t.Fatalf("%v notice with collectable", it["kind"])
+			case has:
+				out[it["purpose_code"].(string)] = v
+			}
+		}
+		return out
+	}
+	if got := collectable(t, config.IYSProviderNone); got["commercial_email"] != false || got["commercial_push"] != true {
+		t.Fatalf("none: collectable = %v", got)
+	}
+	if got := collectable(t, config.IYSProviderFake); got["commercial_email"] != true || got["commercial_push"] != true {
+		t.Fatalf("fake: collectable = %v", got)
+	}
+}
+
+// TestWire_ConsentNetgsmForgedSuccessIsNotSent (Q-16, BE-114): a "success"
+// webhook item for Koro's upload that İYS's record does not confirm
+// (/iys/search) never makes the submission "sent", even with the right
+// token and source address; the same item from an address outside the
+// allow list is refused (401) and not stored.
+func TestWire_ConsentNetgsmForgedSuccessIsNotSent(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	clk := c.infra.clock.(*clock.Fake)
+	var app *httpx.App
+	post := func(ctx context.Context, remote string, body []byte) *httptest.ResponseRecorder {
+		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/v1/webhooks/iys/netgsm/"+netgsmtest.WebhookToken,
+			strings.NewReader(string(body)))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = remote
+		rec := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+	srv := netgsmtest.New(t, netgsmtest.WithClock(clk), netgsmtest.WithWebhook(func(ctx context.Context, body []byte) error {
+		if rec := post(ctx, "192.0.2.10:443", body); rec.Code != http.StatusOK {
+			return fmt.Errorf("webhook answered %d %s", rec.Code, rec.Body)
+		}
+		return nil
+	}))
+	store := netgsm.NewMemStore()
+	c.consent.iys, c.consent.push, c.consent.netgsmStore = nil, nil, store
+	c.consent.cfg = netgsmConsent(srv.URL, 0)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	if app, err = httpx.New(httpx.Deps{Log: obs.Discard(), Actors: c.actors}); err != nil {
+		t.Fatal(err)
+	}
+	c.registerRoutes(app.V1)
+	ctx := t.Context()
+	const address = "ada.forged@ogrenci.example.test"
+	purpose := consent.PurposeCommercialEmail
+	uid := iysWireUser(t, c, address)
+	grantID := grantCommercial(t, c, uid, purpose)
+	sub, err := c.consent.store.SubmissionOf(ctx, grantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, err := domainevent.New(domainevent.ConsentRecorded{ConsentID: grantID, UserID: uid, Purpose: string(purpose),
+		Action: string(consent.Granted)}, "consent", grantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deliver := func() error {
+		for _, s := range c.infra.subs.For(domainevent.TopicConsentRecorded) {
+			if s.Name == consent.SubmitIYSTaskName {
+				return s.Handle(ctx, ev)
+			}
+		}
+		t.Fatal("consent.submit_iys is not subscribed")
+		return nil
+	}
+
+	// İYS does not take the upload (an İYS error) and its answer is lost.
+	srv.DropWebhooks(true)
+	srv.FailNext("H103")
+	if err := deliver(); err == nil {
+		t.Fatal("delivery without İYS's answer succeeded")
+	}
+	consentRow, err := c.consent.store.ConsentByID(ctx, grantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamp := consentRow.OccurredAt.In(clock.Istanbul()).Format("2006-01-02 15:04:05")
+	forged := []byte(`[{"iyscode": 700123, "brandcode": 700124, "submitid": "00000000-0000-4000-8000-999999999999",
+		"resultstatus": "success", "creationdate": "` + stamp + `", "user_refcode": "` + sub.ID.String() + `",
+		"transactionid": "ff00ff00", "type": "EPOSTA", "source": "HS_WEB", "recipient": "` + address + `", "status": "ONAY",
+		"consentDate": "` + stamp + `", "recipientType": "BIREYSEL"}]`)
+	feed := "netgsm:" + netgsmtest.IYSCode + "/" + netgsmtest.BrandCode
+	if rec := post(ctx, "198.51.100.9:443", forged); rec.Code != http.StatusUnauthorized || len(store.All(feed)) != 0 {
+		t.Fatalf("forged item from outside the allow list = %d, %d stored", rec.Code, len(store.All(feed)))
+	}
+	if rec := post(ctx, "192.0.2.10:443", forged); rec.Code != http.StatusOK {
+		t.Fatalf("forged item with the token = %d %s (stored; checked on use)", rec.Code, rec.Body)
+	}
+	if err := deliver(); err == nil || !strings.Contains(err.Error(), "not confirmed") {
+		t.Fatalf("delivery over the forged success = %v, want unconfirmed", err)
+	}
+	got, err := c.consent.store.SubmissionOf(ctx, grantID)
+	if err != nil || got.Status == consent.SubmissionSent || got.IYSTransactionID != nil || got.SentAt != nil {
+		t.Fatalf("submission = %+v, %v; want it open (not sent)", got, err)
+	}
+	if _, _, _, held := srv.Held(address, "EPOSTA"); held {
+		t.Fatal("the double holds a record: the test premise is wrong")
 	}
 }

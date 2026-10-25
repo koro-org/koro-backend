@@ -13,8 +13,9 @@ import (
 )
 
 // TestWire_EveryConfiguredAdapterIsWired: each selection map has exactly one
-// constructor per name its configuration key accepts (BE-113), so a name
-// added on one side only fails here and not at a deployment.
+// constructor per name its configuration key accepts (BE-113; İYS since
+// BE-114, none included), so a name added on one side only fails here and
+// not at a deployment.
 func TestWire_EveryConfiguredAdapterIsWired(t *testing.T) {
 	t.Parallel()
 	c := newTestContainer(t)
@@ -27,6 +28,7 @@ func TestWire_EveryConfiguredAdapterIsWired(t *testing.T) {
 		{"NOTIFY_PUSH_PROVIDER", pushProviders(config.Notify{}, c).names(), config.PushProviders()},
 		{"STORAGE_PROVIDER", objectStores(config.Storage{}, c).names(), config.StorageProviders()},
 		{"FILES_SCANNER", scanners(config.Files{}, c).names(), config.Scanners()},
+		{"CONSENT_IYS_PROVIDER", iysAdapters(c, config.Consent{}).names(), config.IYSProviders()},
 	} {
 		if !slices.Equal(p.wired, sorted(p.want)) {
 			t.Errorf("%s: wired adapters %v, configuration accepts %v", p.key, p.wired, p.want)

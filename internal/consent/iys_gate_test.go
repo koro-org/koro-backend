@@ -1,12 +1,12 @@
 package consent_test
 
 import (
-	"errors"
 	"net/http"
 	"testing"
 
+	"koro/internal/authz"
 	"koro/internal/consent"
-	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // TestRecord_CommercialGrantNeedsIYS (BE-105, T-364): while no İYS adapter
@@ -25,15 +25,12 @@ func TestRecord_CommercialGrantNeedsIYS(t *testing.T) {
 	for _, purpose := range []consent.Purpose{consent.PurposeCommercialEmail, consent.PurposeCommercialSMS} {
 		text := off.consentText(t, purpose, "2026.10.01")
 		_, err := off.svc.Record(ctx, grant(student.UserID, text, consent.ChannelWeb))
-		wantErr(t, err, consent.ErrIYSUnavailable)
-		pe, ok := errors.AsType[*problem.Error](err)
-		if !ok || pe.Status() != http.StatusConflict || pe.Code() != "consent.iys_unavailable" {
-			t.Fatalf("%s grant without İYS = %v, want 409 consent.iys_unavailable", purpose, err)
-		}
+		problemtest.WantErr(t, err, consent.ErrIYSUnavailable)
+		problemtest.WantProblem(t, err, http.StatusConflict, "consent.iys_unavailable")
 		id := text.ID
 		_, err = off.svc.RecordMine(ctx, student, consent.MyConsent{Purpose: purpose, Action: consent.Granted,
 			NoticeVersionID: &id, TextSHA256: text.BodySHA256, Channel: consent.ChannelMobile})
-		wantErr(t, err, consent.ErrIYSUnavailable)
+		problemtest.WantErr(t, err, consent.ErrIYSUnavailable)
 	}
 	if rows, err := off.store.AllOf(ctx, student.UserID); err != nil || len(rows) != 0 {
 		t.Fatalf("refused grants left %d consent rows (%v)", len(rows), err)
@@ -51,4 +48,75 @@ func TestRecord_CommercialGrantNeedsIYS(t *testing.T) {
 
 	on := newEnv(t) // FakeIYS: an adapter is configured
 	on.record(t, grant(student.UserID, on.consentText(t, consent.PurposeCommercialEmail, "2026.10.01"), consent.ChannelWeb))
+}
+
+// TestCurrentNotices_Collectable (BE-114, T-367): listCurrentNotices says
+// for every consent text whether its purpose is collectable now, from the
+// same rule that refuses the grant: without an İYS adapter a commercial
+// purpose (requires_iys) is not, a purpose without İYS is; a switched-off
+// purpose is not; with an adapter the commercial purpose is. Other kinds
+// carry no flag.
+func TestCurrentNotices_Collectable(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	list := func(t *testing.T, e *env) map[consent.Purpose]*bool {
+		t.Helper()
+		rows, err := e.svc.ListCurrentNotices(ctx, authz.Anonymous(), consent.NoticeFilter{Audience: consent.AudienceStudent, Locale: consent.LocaleTR})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[consent.Purpose]*bool{}
+		for _, n := range rows {
+			switch {
+			case n.Kind != consent.KindConsentText && n.Collectable != nil:
+				t.Fatalf("%s notice carries collectable", n.Kind)
+			case n.Kind == consent.KindConsentText && n.Collectable == nil:
+				t.Fatalf("consent text of %s without collectable", *n.PurposeCode)
+			case n.Kind == consent.KindConsentText:
+				out[*n.PurposeCode] = n.Collectable
+			}
+		}
+		return out
+	}
+	setup := func(e *env) {
+		e.publish(t, privacyDraft(consent.AudienceAll, consent.LocaleTR, "2026.10.01"))
+		for _, p := range []consent.Purpose{consent.PurposeCommercialEmail, consent.PurposeCommercialSMS, consent.PurposeCommercialPush,
+			consent.PurposeContactInfoShare} {
+			e.consentText(t, p, "2026.10.01")
+		}
+	}
+
+	off := newEnv(t, func(d *consent.Deps) { d.IYS = nil }) // CONSENT_IYS_PROVIDER=none
+	setup(off)
+	got := list(t, off)
+	for p, want := range map[consent.Purpose]bool{consent.PurposeCommercialEmail: false, consent.PurposeCommercialSMS: false,
+		consent.PurposeCommercialPush: true, consent.PurposeContactInfoShare: true} {
+		if got[p] == nil || *got[p] != want {
+			t.Errorf("without İYS: %s collectable = %v, want %v", p, got[p], want)
+		}
+	}
+	// The flag and the gate agree: what is not collectable is refused.
+	student := actor(t, "student")
+	text, err := off.svc.Current(ctx, consent.NoticeKey{Kind: consent.KindConsentText, Purpose: ptr(consent.PurposeCommercialEmail),
+		Audience: consent.AudienceStudent, Locale: consent.LocaleTR})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = off.svc.Record(ctx, grant(student.UserID, text, consent.ChannelWeb))
+	problemtest.WantErr(t, err, consent.ErrIYSUnavailable)
+	// A switched-off purpose is not collectable either.
+	if _, err := off.svc.UpdatePurpose(ctx, actor(t, "dpo"), consent.PurposeContactInfoShare,
+		consent.PurposePatch{Active: ptr(false)}, proof); err != nil {
+		t.Fatal(err)
+	}
+	if got := list(t, off); *got[consent.PurposeContactInfoShare] {
+		t.Error("a switched-off purpose is collectable")
+	}
+
+	on := newEnv(t) // an İYS adapter is configured (FakeIYS)
+	setup(on)
+	if got := list(t, on); !*got[consent.PurposeCommercialEmail] || !*got[consent.PurposeCommercialSMS] {
+		t.Errorf("with İYS: commercial_email %v, commercial_sms %v; want collectable", *got[consent.PurposeCommercialEmail],
+			*got[consent.PurposeCommercialSMS])
+	}
 }

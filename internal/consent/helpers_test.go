@@ -110,13 +110,6 @@ func actor(t *testing.T, name string) authz.Actor {
 	return p.Actor
 }
 
-func wantErr(t *testing.T, err, want error) {
-	t.Helper()
-	if !errors.Is(err, want) {
-		t.Fatalf("error = %v, want %v", err, want)
-	}
-}
-
 func ptr[T any](v T) *T { return &v }
 
 // publish creates and publishes a notice as dpo and returns it.

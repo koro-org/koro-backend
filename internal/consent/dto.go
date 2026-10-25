@@ -3,8 +3,8 @@ package consent
 import (
 	"encoding/hex"
 	"time"
-	"uuid"
 
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/page"
 )
 
@@ -14,6 +14,7 @@ type NoticeDTO struct {
 	NoticeVersionID string     `json:"notice_version_id" format:"uuid"`
 	Kind            string     `json:"kind" enum:"privacy_notice,consent_text,terms_of_use,cookie_notice"`
 	PurposeCode     string     `json:"purpose_code,omitempty" doc:"Consent purpose of a consent_text; absent for every other kind"`
+	Collectable     *bool      `json:"collectable,omitempty" doc:"listCurrentNotices, consent_text only: whether a grant of the purpose can be recorded now. false: the purpose is switched off, or it needs İYS and no İYS connection is configured (a grant would be 409 consent.iys_unavailable): do not show its checkbox. Minors are still refused the restricted purposes (422 consent.minor_restricted)."`
 	Audience        string     `json:"audience" enum:"all,student,company,club,university"`
 	Locale          string     `json:"locale" enum:"tr-TR,en-US"`
 	Version         string     `json:"version" doc:"YYYY.MM.DD or YYYY.MM.DD-N"`
@@ -53,7 +54,7 @@ type ConsentDTO struct {
 
 func toConsentDTO(c Consent) ConsentDTO {
 	return ConsentDTO{ConsentID: c.ID.String(), PurposeCode: string(c.PurposeCode), Action: string(c.Action),
-		ScopeID: idText(c.ScopeID), OccurredAt: c.OccurredAt}
+		ScopeID: httpx.IDStr(c.ScopeID), OccurredAt: c.OccurredAt}
 }
 
 // ConsentStateDTO is the current state of one purpose (and scope).
@@ -89,7 +90,7 @@ type ConsentProofDTO struct {
 func toProofDTO(c Consent) ConsentProofDTO {
 	d := ConsentProofDTO{
 		ConsentID: c.ID.String(), PurposeCode: string(c.PurposeCode), Action: string(c.Action),
-		NoticeVersionID: idText(c.NoticeVersionID), ScopeType: string(c.ScopeType), ScopeID: idText(c.ScopeID),
+		NoticeVersionID: httpx.IDStr(c.NoticeVersionID), ScopeType: string(c.ScopeType), ScopeID: httpx.IDStr(c.ScopeID),
 		Channel: string(c.Channel), IP: c.IP, UserAgent: c.UserAgent, OccurredAt: c.OccurredAt,
 	}
 	if len(c.TextSHA256) > 0 {
@@ -142,13 +143,6 @@ func (r *ReauthDTO) proof() ReauthProof {
 		return ReauthProof{}
 	}
 	return ReauthProof{Password: r.Password, TOTPCode: r.TOTPCode}
-}
-
-func idText(id *uuid.UUID) string {
-	if id == nil {
-		return ""
-	}
-	return id.String()
 }
 
 // Sort key of every consent list cursor.

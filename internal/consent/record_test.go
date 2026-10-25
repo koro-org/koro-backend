@@ -13,6 +13,7 @@ import (
 	"koro/internal/consent"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/httpx"
+	"koro/internal/platform/problem/problemtest"
 )
 
 // TestRecord_AppendOnly_WithdrawCreatesNewRow (02 §4.3): a withdrawal never
@@ -369,7 +370,7 @@ func TestRecord_Rules(t *testing.T) {
 		if err == nil {
 			t.Fatalf("%s: recorded", tt.name)
 		}
-		wantErr(t, err, tt.want)
+		problemtest.WantErr(t, err, tt.want)
 	}
 	if rows, _ := e.store.AllOf(ctx, user); len(rows) != 0 {
 		t.Fatalf("rejected records left %d rows", len(rows))
@@ -406,9 +407,9 @@ func TestRecordMine_ActorRules(t *testing.T) {
 		TextSHA256: text.BodySHA256, Channel: consent.ChannelMobile}
 
 	_, err := e.svc.RecordMine(ctx, actor(t, "student_minor"), in)
-	wantErr(t, err, consent.ErrMinorRestricted)
+	problemtest.WantErr(t, err, consent.ErrMinorRestricted)
 	_, err = e.svc.RecordMine(ctx, authz.Anonymous(), in)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 
 	c, err := e.svc.RecordMine(ctx, actor(t, "student"), in)
 	if err != nil || c.UserID != actor(t, "student").UserID || c.Channel != consent.ChannelMobile {

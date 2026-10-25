@@ -279,9 +279,9 @@ func (s gormStore) Append(ctx context.Context, feed string, events []Event) (int
 			status, source, consent_at, recorded_at, result, err_code, transaction_id, received_at)
 			VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? )
 			ON CONFLICT (feed, event_key) DO NOTHING`,
-			feed, e.Key, string(e.Kind), nullStr(e.Ref), nullStr(e.SubmitID), user, string(e.Type), string(e.Status),
-			e.Source, nullTime(e.ConsentAt), nullTime(e.RecordedAt), nullStr(e.Result), nullStr(e.ErrCode),
-			nullStr(e.TransactionID), e.ReceivedAt)
+			feed, e.Key, string(e.Kind), db.Nullable(e.Ref), db.Nullable(e.SubmitID), user, string(e.Type), string(e.Status),
+			e.Source, nullTime(e.ConsentAt), nullTime(e.RecordedAt), db.Nullable(e.Result), db.Nullable(e.ErrCode),
+			db.Nullable(e.TransactionID), e.ReceivedAt)
 		if res.Error != nil {
 			return added, fmt.Errorf("iys netgsm: store event: %w", db.Translate(res.Error))
 		}
@@ -352,13 +352,6 @@ func deref(s *string) string {
 		return ""
 	}
 	return *s
-}
-
-func nullStr(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
 }
 
 func nullTime(t time.Time) *time.Time {

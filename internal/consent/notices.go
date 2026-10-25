@@ -150,8 +150,21 @@ func (s *service) Current(ctx context.Context, key NoticeKey) (Notice, error) {
 	return Notice{}, ErrNoNotice
 }
 
+// CurrentNotice is one notice of listCurrentNotices.
+type CurrentNotice struct {
+	Notice
+	// Collectable is set on a consent text only (nil for every other
+	// kind): whether a grant of its purpose can be recorded now (BE-114,
+	// T-367). false when the purpose is switched off, or when it needs İYS
+	// and no İYS adapter is configured: the gate that refuses that grant
+	// with consent.iys_unavailable (iysGateClosed, T-364). Clients do not
+	// show the checkbox of a false one. It does not depend on the reader:
+	// a minor is still refused the restricted purposes (03 k12).
+	Collectable *bool
+}
+
 // ListCurrentNotices implements Service (listCurrentNotices).
-func (s *service) ListCurrentNotices(ctx context.Context, a authz.Actor, q NoticeFilter) ([]Notice, error) {
+func (s *service) ListCurrentNotices(ctx context.Context, a authz.Actor, q NoticeFilter) ([]CurrentNotice, error) {
 	if err := authz.Can(ctx, a, authz.ConsentNoticeRead, publishedNotices); err != nil {
 		return nil, err
 	}
@@ -163,7 +176,34 @@ func (s *service) ListCurrentNotices(ctx context.Context, a authz.Actor, q Notic
 	if err != nil {
 		return nil, err
 	}
-	return best(rows, q.Audience, q.Locale), nil
+	return s.withCollectable(ctx, best(rows, q.Audience, q.Locale))
+}
+
+// withCollectable marks the consent texts of ns with CurrentNotice's
+// Collectable; the purposes are read once, only when a consent text is
+// listed. A text whose purpose is unknown is not collectable.
+func (s *service) withCollectable(ctx context.Context, ns []Notice) ([]CurrentNotice, error) {
+	out := make([]CurrentNotice, len(ns))
+	var defs map[Purpose]PurposeDef
+	for i, n := range ns {
+		out[i] = CurrentNotice{Notice: n}
+		if n.Kind != KindConsentText || n.PurposeCode == nil {
+			continue
+		}
+		if defs == nil {
+			ps, err := s.d.Store.Purposes(ctx)
+			if err != nil {
+				return nil, err
+			}
+			defs = make(map[Purpose]PurposeDef, len(ps))
+			for _, p := range ps {
+				defs[p.Code] = p
+			}
+		}
+		ok := s.collectable(defs[*n.PurposeCode])
+		out[i].Collectable = &ok
+	}
+	return out, nil
 }
 
 // GetNotice implements Service (getNoticeVersion). Retired versions stay

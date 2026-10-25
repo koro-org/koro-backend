@@ -10,6 +10,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
@@ -142,22 +143,6 @@ func localeOf(acceptLanguage string) string {
 	return LocaleTR
 }
 
-func fieldErr(location, msg string) error {
-	return problem.ErrValidation.WithFields(problem.FieldError{Location: location, Message: msg})
-}
-
-// optionalID parses an optional UUID member.
-func optionalID(s, location string) (*uuid.UUID, error) {
-	if s == "" {
-		return nil, nil
-	}
-	id, err := uuid.Parse(s)
-	if err != nil {
-		return nil, fieldErr(location, "must be a UUID")
-	}
-	return &id, nil
-}
-
 // ---- listCurrentNotices
 
 type listCurrentInput struct {
@@ -188,7 +173,9 @@ func (h handler) listCurrent(ctx context.Context, in *listCurrentInput) (*listCu
 	}
 	out := &listCurrentOutput{ContentLanguage: q.Locale, Body: NoticeList{Items: make([]NoticeDTO, len(rows))}}
 	for i, n := range rows {
-		out.Body.Items[i] = toNoticeDTO(n)
+		d := toNoticeDTO(n.Notice)
+		d.Collectable = n.Collectable
+		out.Body.Items[i] = d
 	}
 	return out, nil
 }
@@ -242,15 +229,15 @@ func (h handler) recordMine(ctx context.Context, in *recordMineInput) (*consentO
 	if in.Client == string(ChannelMobile) {
 		mc.Channel = ChannelMobile
 	}
-	if mc.NoticeVersionID, err = optionalID(in.Body.NoticeVersionID, "body.notice_version_id"); err != nil {
+	if mc.NoticeVersionID, err = httpx.OptID("body.notice_version_id", in.Body.NoticeVersionID); err != nil {
 		return nil, err
 	}
-	if mc.ScopeID, err = optionalID(in.Body.ScopeID, "body.scope_id"); err != nil {
+	if mc.ScopeID, err = httpx.OptID("body.scope_id", in.Body.ScopeID); err != nil {
 		return nil, err
 	}
 	if in.Body.TextSHA256 != "" {
 		if mc.TextSHA256, err = hex.DecodeString(in.Body.TextSHA256); err != nil {
-			return nil, fieldErr("body.text_sha256", "must be hex")
+			return nil, problem.Field("body.text_sha256", "must be hex")
 		}
 	}
 	c, err := h.svc.RecordMine(ctx, a, mc)
@@ -303,7 +290,7 @@ func (h handler) listMine(ctx context.Context, in *listMineInput) (*listMineOutp
 		NextCursor: cursorOf(fp, m.Page.Next),
 	}}
 	for i, c := range m.Current {
-		out.Body.Current[i] = ConsentStateDTO{PurposeCode: string(c.PurposeCode), ScopeID: idText(c.ScopeID),
+		out.Body.Current[i] = ConsentStateDTO{PurposeCode: string(c.PurposeCode), ScopeID: httpx.IDStr(c.ScopeID),
 			State: string(c.Action), Since: c.OccurredAt}
 	}
 	for i, c := range m.Page.Items {

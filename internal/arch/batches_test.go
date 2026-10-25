@@ -8,12 +8,6 @@ import (
 	"testing"
 )
 
-// batchLoopAllowed lists the files whose hand-written batch loops are not
-// migrated to db.Batches yet (each with the reason). It only shrinks.
-var batchLoopAllowed = map[string]string{
-	"internal/consent/retention.go": "BE-105 in flight in consent; migrate after it merges (BE-112 follow-up)",
-}
-
 // batchName is a batch size constant or variable ("RetentionBatch", "jobBatch").
 var batchName = regexp.MustCompile(`(?i)batch`)
 
@@ -26,7 +20,7 @@ var txCalls = map[string]bool{"WithTx": true, "WithSerializableTx": true, "inTx"
 func batchLoopViolations(files []goFile) []string {
 	var v []string
 	for _, f := range files {
-		if f.test || layers[f.top] == 0 || batchLoopAllowed[f.rel] != "" {
+		if f.test || layers[f.top] == 0 {
 			continue
 		}
 		ast.Inspect(f.ast, func(n ast.Node) bool {

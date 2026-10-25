@@ -24,6 +24,17 @@
 //     up to ResultWait for the answer in the store right after sending (a
 //     later attempt only looks it up); without one it fails transiently
 //     (consent retries), so a submission is "sent" only once İYS took it.
+//   - A success answer to an approval counts only once İYS's own record
+//     confirms it (Q-16, BE-114): the webhook proves itself by its URL's
+//     secret alone, and a forged success would make a grant İYS never
+//     registered look registered. Submit then reads the recipient's record
+//     with one /iys/search (within the budgets) and takes the answer only
+//     when İYS holds ONAY. Otherwise the answer is unconfirmed: Submit fails
+//     transiently (the submission stays open and is retried) and the
+//     upload goes again once ResendAfter passed, so İYS answers anew; a
+//     search that fails (budget, outage, any Netgsm code) is transient too
+//     and sends nothing. A success answer to a refusal is taken as it is
+//     (the safe direction: a forged one stops messages, never starts them).
 //   - İYS's answer: H174 and H175 of a refusal are successes
 //     (Receipt.AlreadyHeld); H467 is iys.ErrTooLate; H103, H470, H412, H015,
 //     H124, H084 and H086 (İYS errors and limits) send again; any other code
@@ -141,6 +152,10 @@ var (
 	// errNoAddress: the user has no address for the type (query asked
 	// nothing).
 	errNoAddress = errors.New("iys netgsm: no address")
+	// errUnconfirmed: İYS's success answer to an approval arrived by
+	// webhook, but İYS's record (/iys/search) does not hold the approval;
+	// the caller retries (Q-16).
+	errUnconfirmed = errors.New("iys netgsm: İYS's success answer is not confirmed by İYS's record (/iys/search) yet")
 )
 
 // Recipients resolves users and İYS recipient addresses in both
@@ -314,13 +329,21 @@ func (c *Client) Submit(ctx context.Context, con iys.Consent) (iys.Receipt, erro
 	if err != nil {
 		return iys.Receipt{}, err
 	}
+	pending := errAwaitingResult // sent recently: the answer is on its way (no wait here)
+	failed := false              // the latest answer is a transient İYS failure: send again
 	if found {
-		if rc, done, err := c.receipt(ctx, con, r); done {
+		rc, v, err := c.receipt(ctx, con, recipient, r)
+		switch v {
+		case settled:
 			return rc, err
+		case unconfirmed:
+			pending = err // like no answer: sent again after ResendAfter
+		case again:
+			failed = true
 		}
 	}
-	if !c.due(con.Ref, r, found) {
-		return iys.Receipt{}, errAwaitingResult // sent recently: the answer is on its way (no wait here)
+	if !c.due(con.Ref, r, failed) {
+		return iys.Receipt{}, pending
 	}
 	uid, err := c.add(ctx, con, recipient, at)
 	if err != nil {
@@ -333,42 +356,83 @@ func (c *Client) Submit(ctx context.Context, con iys.Consent) (iys.Receipt, erro
 		return iys.Receipt{}, err
 	}
 	if found {
-		if rc, done, err := c.receipt(ctx, con, r); done {
-			return rc, err
+		if rc, v, err := c.receipt(ctx, con, recipient, r); v != again {
+			return rc, err // settled, or a success İYS does not confirm yet (transient)
 		}
 	}
 	return iys.Receipt{}, errAwaitingResult
 }
 
-// receipt maps İYS's answer r to Submit's result; done is false for a
-// transient failure (send again).
-func (c *Client) receipt(ctx context.Context, con iys.Consent, r Event) (iys.Receipt, bool, error) {
+// verdict is what Submit does with İYS's answer to an upload.
+type verdict int
+
+const (
+	// settled: the answer decides (a receipt, a final error, or a
+	// transient error of the confirmation: nothing is sent again).
+	settled verdict = iota
+	// again: a transient İYS failure; the upload is sent again.
+	again
+	// unconfirmed: a success İYS's record does not confirm (Q-16); treated
+	// like no answer (sent again after ResendAfter).
+	unconfirmed
+)
+
+// receipt maps İYS's answer r to the upload of con (to recipient) to
+// Submit's result. A success to an approval is confirmed first (confirm).
+func (c *Client) receipt(ctx context.Context, con iys.Consent, recipient string, r Event) (iys.Receipt, verdict, error) {
 	if r.Result == ResultSuccess {
 		tx := r.TransactionID
 		if tx == "" {
 			tx = "netgsm:" + r.SubmitID
 		}
-		return iys.Receipt{TransactionID: tx}, true, nil
+		if con.Status == iys.Approved {
+			if err := c.confirm(ctx, con, recipient); errors.Is(err, errUnconfirmed) {
+				return iys.Receipt{}, unconfirmed, err
+			} else if err != nil {
+				return iys.Receipt{}, settled, err
+			}
+		}
+		return iys.Receipt{TransactionID: tx}, settled, nil
 	}
 	switch {
 	case con.Status == iys.Refused && (r.ErrCode == "H174" || r.ErrCode == "H175"):
 		c.c.Log.LogAttrs(ctx, slog.LevelDebug, "iys refusal already held", slog.String("code", r.ErrCode), slog.String("ref", con.Ref))
-		return iys.Receipt{AlreadyHeld: true}, true, nil
+		return iys.Receipt{AlreadyHeld: true}, settled, nil
 	case r.ErrCode == "H467":
-		return iys.Receipt{}, true, fmt.Errorf("iys netgsm: İYS answered H467: %w", errors.Join(iys.ErrRejected, iys.ErrTooLate))
+		return iys.Receipt{}, settled, fmt.Errorf("iys netgsm: İYS answered H467: %w", errors.Join(iys.ErrRejected, iys.ErrTooLate))
 	case transientH[r.ErrCode]:
-		return iys.Receipt{}, false, nil
+		return iys.Receipt{}, again, nil
 	}
 	code := r.ErrCode
 	if code == "" {
 		code = "without a code"
 	}
-	return iys.Receipt{}, true, fmt.Errorf("%w: İYS refused the upload (%s)", iys.ErrRejected, code)
+	return iys.Receipt{}, settled, fmt.Errorf("%w: İYS refused the upload (%s)", iys.ErrRejected, code)
+}
+
+// confirm reads İYS's record of recipient for con's type (one /iys/search
+// of the budgets) and accepts a success answer to the approval con only
+// when İYS holds ONAY (Q-16). errUnconfirmed when it does not (no record,
+// or a refusal). Any error of the search is transient (the submission
+// stays open); only a spent budget keeps its class (iys.ErrThrottled).
+func (c *Client) confirm(ctx context.Context, con iys.Consent, recipient string) error {
+	st, _, found, err := c.queryAddress(ctx, con.Type, recipient)
+	switch {
+	case errors.Is(err, iys.ErrThrottled):
+		return fmt.Errorf("iys netgsm: confirming İYS's answer: %w", err)
+	case err != nil:
+		return fmt.Errorf("iys netgsm: confirming İYS's answer: %s", err.Error()) // transient whatever its class
+	case !found || st.Status != iys.Approved:
+		c.c.Log.LogAttrs(ctx, slog.LevelWarn, "iys netgsm success answer not confirmed by İYS",
+			slog.String("ref", con.Ref), slog.Bool("record", found), slog.String("held", string(st.Status)))
+		return errUnconfirmed
+	}
+	return nil
 }
 
 // due reports whether the upload of ref is sent (again): never sent by
-// this process, sent longer than ResendAfter ago without an answer, or
-// answered with a transient failure after it was sent.
+// this process, sent longer than ResendAfter ago without a (confirmed)
+// answer, or answered with a transient failure after it was sent.
 func (c *Client) due(ref string, last Event, answered bool) bool {
 	now := c.c.Clock.Now()
 	c.mu.Lock()
@@ -544,6 +608,11 @@ func (c *Client) query(ctx context.Context, t iys.Type, user uuid.UUID) (iys.Sta
 	case err != nil:
 		return iys.State{}, "", false, fmt.Errorf("iys netgsm: recipient: %w", err)
 	}
+	return c.queryAddress(ctx, t, a)
+}
+
+// queryAddress is the single query of address a (resolved by the caller).
+func (c *Client) queryAddress(ctx context.Context, t iys.Type, a string) (iys.State, string, bool, error) {
 	if err := c.takeQuery(); err != nil {
 		return iys.State{}, "", false, err
 	}

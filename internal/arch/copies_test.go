@@ -37,18 +37,12 @@ var testHelpers = map[string]string{
 	"rowOf":       "audittest.RowOf",
 }
 
-// copyAllowed lists the modules not migrated yet (each with the reason).
-// It only shrinks.
-var copyAllowed = map[string]string{
-	"consent": "BE-104/BE-105 in flight; migrated by BE-110 or a follow-up",
-}
-
 // copyViolations reports a top-level function or type of a feature module
 // named like a platform helper.
 func copyViolations(files []goFile) []string {
 	var v []string
 	for _, f := range files {
-		if _, feature := layers[f.top]; !feature || copyAllowed[f.top] != "" {
+		if _, feature := layers[f.top]; !feature {
 			continue
 		}
 		names := platformHelpers

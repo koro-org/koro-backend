@@ -1,7 +1,6 @@
 package consent_test
 
 import (
-	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -10,7 +9,7 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/consent"
-	"koro/internal/platform/problem"
+	"koro/internal/platform/problem/problemtest"
 )
 
 func privacyDraft(aud consent.Audience, locale, version string) consent.NoticeDraft {
@@ -90,15 +89,15 @@ func TestPublishNotice_RetiresPreviousSameKey(t *testing.T) {
 
 	// State machine: no second publication, no retirement of a draft or of a retired version.
 	_, err = e.svc.PublishNotice(ctx, dpo, v2.ID, proof)
-	wantErr(t, err, consent.ErrNoticeState)
+	problemtest.WantErr(t, err, consent.ErrNoticeState)
 	_, err = e.svc.RetireNotice(ctx, dpo, v1.ID, proof)
-	wantErr(t, err, consent.ErrNoticeState)
+	problemtest.WantErr(t, err, consent.ErrNoticeState)
 	d, _ := e.svc.CreateNotice(ctx, dpo, privacyDraft(consent.AudienceAll, consent.LocaleTR, "2026.10.05"), proof)
 	_, err = e.svc.RetireNotice(ctx, dpo, d.ID, proof)
-	wantErr(t, err, consent.ErrNoticeState)
+	problemtest.WantErr(t, err, consent.ErrNoticeState)
 	// The same version twice for one key.
 	_, err = e.svc.CreateNotice(ctx, dpo, privacyDraft(consent.AudienceStudent, consent.LocaleTR, "2026.10.02"), proof)
-	wantErr(t, err, consent.ErrNoticeVersionTaken)
+	problemtest.WantErr(t, err, consent.ErrNoticeVersionTaken)
 }
 
 // TestNotice_RetiredVersionStillReadable (04 §2.5): a retired version is
@@ -131,7 +130,7 @@ func TestNotice_RetiredVersionStillReadable(t *testing.T) {
 		}
 	}
 	_, err = e.svc.Record(ctx, grant(actor(t, "student_b").UserID, text, consent.ChannelWeb))
-	wantErr(t, err, consent.ErrNoticeNotCurrent)
+	problemtest.WantErr(t, err, consent.ErrNoticeNotCurrent)
 	// Withdrawing with the retired text as reference stays possible.
 	in := grant(user, text, consent.ChannelWeb)
 	in.Action = consent.Withdrawn
@@ -141,12 +140,12 @@ func TestNotice_RetiredVersionStillReadable(t *testing.T) {
 	// A draft is invisible to everyone but dpo.
 	d, _ := e.svc.CreateNotice(ctx, actor(t, "dpo"), privacyDraft(consent.AudienceAll, consent.LocaleTR, "2026.12.01"), proof)
 	_, err = e.svc.GetNotice(ctx, authz.Anonymous(), d.ID)
-	wantErr(t, err, authz.ErrNotFound)
+	problemtest.WantErr(t, err, authz.ErrNotFound)
 	if _, err := e.svc.GetNotice(ctx, actor(t, "dpo"), d.ID); err != nil {
 		t.Fatalf("dpo GetNotice(draft) = %v", err)
 	}
 	_, err = e.svc.GetNotice(ctx, authz.Anonymous(), uuid.NewV7())
-	wantErr(t, err, consent.ErrNotFound)
+	problemtest.WantErr(t, err, consent.ErrNotFound)
 }
 
 // TestCurrentNotices_Fallbacks (04 §1.12): the reader's audience before
@@ -194,7 +193,7 @@ func TestCurrentNotices_Fallbacks(t *testing.T) {
 		t.Fatalf("Current(consent text, student, en) = %v, %v", n.ID, err)
 	}
 	_, err = e.svc.Current(ctx, consent.NoticeKey{Kind: consent.KindCookieNotice, Audience: consent.AudienceAll, Locale: consent.LocaleTR})
-	wantErr(t, err, consent.ErrNoNotice)
+	problemtest.WantErr(t, err, consent.ErrNoNotice)
 }
 
 // TestCreateNotice_Validation (02 §4.2, Kurul 2026/347).
@@ -231,7 +230,7 @@ func TestCreateNotice_Validation(t *testing.T) {
 		if err == nil {
 			t.Fatalf("%s: created", tt.name)
 		}
-		wantErr(t, err, tt.want)
+		problemtest.WantErr(t, err, tt.want)
 	}
 
 	// The digest is the SHA-256 of the stored body (LF line breaks).
@@ -253,9 +252,9 @@ func TestNoticeManage_ReauthAndAuthz(t *testing.T) {
 	d := privacyDraft(consent.AudienceAll, consent.LocaleTR, "2026.10.01")
 
 	_, err := e.svc.CreateNotice(ctx, actor(t, "platform_admin"), d, proof)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 	_, err = e.svc.CreateNotice(ctx, actor(t, "dpo"), d, consent.ReauthProof{Password: "wrong"})
-	wantErr(t, err, errBadProof)
+	problemtest.WantErr(t, err, errBadProof)
 	denied := e.audit.of(string(authz.ConsentNoticeManage))
 	if len(denied) != 1 || denied[0].Outcome != audit.Denied || denied[0].Reason != "reauth_failed" {
 		t.Fatalf("audit of the failed proof = %+v", denied)
@@ -271,9 +270,8 @@ func TestNoticeManage_ReauthAndAuthz(t *testing.T) {
 	// Without a verifier (identity not wired) R operations fail closed.
 	closed := newEnv(t, func(d *consent.Deps) { d.Reauth = nil })
 	_, err = closed.svc.CreateNotice(ctx, actor(t, "dpo"), d, proof)
-	wantErr(t, err, consent.ErrReauthUnavailable)
-	var pe *problem.Error
-	if !errors.As(err, &pe) || pe.Status() != 503 {
+	problemtest.WantErr(t, err, consent.ErrReauthUnavailable)
+	if status, _ := problemtest.StatusCode(err); status != 503 {
 		t.Fatalf("unwired reauth = %v", err)
 	}
 }
@@ -286,11 +284,11 @@ func TestUpdatePurpose(t *testing.T) {
 	dpo := actor(t, "dpo")
 
 	_, err := e.svc.UpdatePurpose(ctx, dpo, consent.PurposeCommercialPush, consent.PurposePatch{}, proof)
-	wantErr(t, err, consent.ErrEmptyPatch)
+	problemtest.WantErr(t, err, consent.ErrEmptyPatch)
 	_, err = e.svc.UpdatePurpose(ctx, dpo, "unknown_purpose", consent.PurposePatch{Active: ptr(true)}, proof)
-	wantErr(t, err, consent.ErrNotFound)
+	problemtest.WantErr(t, err, consent.ErrNotFound)
 	_, err = e.svc.UpdatePurpose(ctx, actor(t, "support"), consent.PurposeCommercialPush, consent.PurposePatch{Active: ptr(true)}, proof)
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 
 	p, err := e.svc.UpdatePurpose(ctx, dpo, consent.PurposeCommercialPush,
 		consent.PurposePatch{Active: ptr(false), DescriptionTR: ptr("  Mobil   kampanya bildirimleri. ")}, proof)

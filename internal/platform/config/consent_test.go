@@ -137,10 +137,12 @@ func TestConsent_IYSSyncMaxAge(t *testing.T) {
 	}
 }
 
-// TestConsent_NetgsmValidation (BE-110): CONSENT_IYS_PROVIDER=netgsm needs
-// the account, the İYS codes and the webhook secret; the Netgsm settings
-// need the provider; https in prod; the budgets stay within Netgsm's 10
-// requests per minute; secrets never appear in an error or a print.
+// TestConsent_NetgsmValidation (BE-110, BE-114): CONSENT_IYS_PROVIDER=netgsm
+// needs the account, the İYS codes and the webhook secret, and in prod the
+// webhook's source addresses (Q-16; not every address); the Netgsm
+// settings need the provider; https in prod; the budgets stay within
+// Netgsm's 10 requests per minute; secrets never appear in an error or a
+// print.
 func TestConsent_NetgsmValidation(t *testing.T) {
 	t.Parallel()
 	const password, token = "netgsm-s3cret-pass", "netgsm-webhook-secret-token-0123456789abcd"
@@ -148,7 +150,7 @@ func TestConsent_NetgsmValidation(t *testing.T) {
 		m := map[string]string{"APP_ENV": "prod", "CONSENT_IYS_PROVIDER": "netgsm", "CONSENT_IYS_REQUIRED": "true",
 			"CONSENT_IYS_NETGSM_USERNAME": "8500000000", "CONSENT_IYS_NETGSM_PASSWORD": password,
 			"CONSENT_IYS_NETGSM_IYS_CODE": "700123", "CONSENT_IYS_NETGSM_BRAND_CODE": "700124",
-			"CONSENT_IYS_NETGSM_WEBHOOK_TOKEN": token}
+			"CONSENT_IYS_NETGSM_WEBHOOK_TOKEN": token, "CONSENT_IYS_NETGSM_WEBHOOK_ALLOWED_IPS": "192.0.2.0/24"}
 		for i := 0; i+1 < len(kv); i += 2 {
 			if kv[i+1] == "<unset>" {
 				delete(m, kv[i])
@@ -182,6 +184,14 @@ func TestConsent_NetgsmValidation(t *testing.T) {
 		{"short token", full("CONSENT_IYS_NETGSM_WEBHOOK_TOKEN", "short"), "CONSENT_IYS_NETGSM_WEBHOOK_TOKEN must be"},
 		{"token characters", full("CONSENT_IYS_NETGSM_WEBHOOK_TOKEN", strings.Repeat("a", 40)+"/x"), "CONSENT_IYS_NETGSM_WEBHOOK_TOKEN must be"},
 		{"allowed ips", full("CONSENT_IYS_NETGSM_WEBHOOK_ALLOWED_IPS", "192.0.2.0/24,netgsm"), "ALLOWED_IPS"},
+		// Q-16 (BE-114): in prod the webhook's source addresses are required.
+		{"no allow list in prod", full("CONSENT_IYS_NETGSM_WEBHOOK_ALLOWED_IPS", "<unset>"), "needs CONSENT_IYS_NETGSM_WEBHOOK_ALLOWED_IPS in prod"},
+		{"empty allow list in prod", full("CONSENT_IYS_NETGSM_WEBHOOK_ALLOWED_IPS", ""), "needs CONSENT_IYS_NETGSM_WEBHOOK_ALLOWED_IPS in prod"},
+		{"every address in prod", full("CONSENT_IYS_NETGSM_WEBHOOK_ALLOWED_IPS", "198.51.100.7,0.0.0.0/0"), "allows every address"},
+		{"every v6 address in prod", full("CONSENT_IYS_NETGSM_WEBHOOK_ALLOWED_IPS", "::/0"), "allows every address"},
+		{"no allow list in staging", full("APP_ENV", "staging", "CONSENT_IYS_NETGSM_WEBHOOK_ALLOWED_IPS", "<unset>"), ""},
+		{"no allow list in dev", full("APP_ENV", "dev", "CONSENT_IYS_NETGSM_WEBHOOK_ALLOWED_IPS", "<unset>"), ""},
+		{"provider in upper case", full("CONSENT_IYS_PROVIDER", " Netgsm "), ""},
 		{"refid", full("CONSENT_IYS_NETGSM_REFID_IN", "query"), "REFID_IN"},
 		{"rate", full("CONSENT_IYS_NETGSM_REQUESTS_PER_MINUTE", "11"), "REQUESTS_PER_MINUTE"},
 		{"queries over the rate", full("CONSENT_IYS_NETGSM_REQUESTS_PER_MINUTE", "2", "CONSENT_IYS_NETGSM_STATUS_QUERIES_PER_HOUR", "121"),

@@ -8,6 +8,7 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/queue"
@@ -116,7 +117,7 @@ func (s *service) deliver(ctx context.Context, sub Submission) error {
 			now := s.now()
 			tx := receipt.TransactionID
 			cur.Status, cur.SentAt, cur.LastError = SubmissionSent, &now, nil
-			cur.IYSTransactionID = nullable(tx)
+			cur.IYSTransactionID = db.Nullable(tx)
 			cur.Attempts++
 		}
 		final = cur

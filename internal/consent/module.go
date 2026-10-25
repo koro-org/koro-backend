@@ -96,8 +96,9 @@ type Service interface {
 	Checker
 	Notices
 
-	// ListCurrentNotices is listCurrentNotices (consent.notice.read).
-	ListCurrentNotices(ctx context.Context, a authz.Actor, q NoticeFilter) ([]Notice, error)
+	// ListCurrentNotices is listCurrentNotices (consent.notice.read): each
+	// consent text says whether its purpose is collectable now (BE-114).
+	ListCurrentNotices(ctx context.Context, a authz.Actor, q NoticeFilter) ([]CurrentNotice, error)
 	// GetNotice is getNoticeVersion: published and retired versions for
 	// everyone, drafts for dpo only.
 	GetNotice(ctx context.Context, a authz.Actor, id uuid.UUID) (Notice, error)

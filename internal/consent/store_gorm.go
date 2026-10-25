@@ -74,13 +74,6 @@ func consents(rows []consentRow) []Consent {
 	return out
 }
 
-func nullable(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
 // canonicalIP returns the canonical text of an IP address ("" if s is not
 // one), as PostgreSQL's host(inet) prints a host address.
 func canonicalIP(s string) string {
@@ -91,17 +84,9 @@ func canonicalIP(s string) string {
 	return a.Unmap().WithZone("").String()
 }
 
-func utcPtr(t *time.Time) *time.Time {
-	if t == nil {
-		return nil
-	}
-	u := t.UTC()
-	return &u
-}
-
 // noticeUTC normalises the timestamps of a scanned notice.
 func noticeUTC(n Notice) Notice {
-	n.PublishedAt, n.RetiredAt, n.CreatedAt = utcPtr(n.PublishedAt), utcPtr(n.RetiredAt), n.CreatedAt.UTC()
+	n.PublishedAt, n.RetiredAt, n.CreatedAt = db.UTCPtr(n.PublishedAt), db.UTCPtr(n.RetiredAt), n.CreatedAt.UTC()
 	return n
 }
 
@@ -294,7 +279,7 @@ func (s gormStore) InsertConsent(ctx context.Context, c Consent) error {
 		text_sha256, scope_type, scope_id, channel, ip, user_agent, occurred_at)
 		VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST( ? AS inet), ?, ?)`,
 		c.ID, c.UserID, string(c.PurposeCode), string(c.Action), c.NoticeVersionID, c.TextSHA256,
-		string(c.ScopeType), c.ScopeID, string(c.Channel), nullable(c.IP), nullable(c.UserAgent), c.OccurredAt).Error
+		string(c.ScopeType), c.ScopeID, string(c.Channel), db.Nullable(c.IP), db.Nullable(c.UserAgent), c.OccurredAt).Error
 	if err != nil {
 		return fmt.Errorf("consent: insert consent: %w", db.Translate(err))
 	}
@@ -478,7 +463,7 @@ func (s gormStore) submission(ctx context.Context, cond string, id uuid.UUID, lo
 		}
 		return Submission{}, fmt.Errorf("consent: iys submission: %w", err)
 	}
-	n.CreatedAt, n.UpdatedAt, n.SentAt = n.CreatedAt.UTC(), n.UpdatedAt.UTC(), utcPtr(n.SentAt)
+	n.CreatedAt, n.UpdatedAt, n.SentAt = n.CreatedAt.UTC(), n.UpdatedAt.UTC(), db.UTCPtr(n.SentAt)
 	return n, nil
 }
 
@@ -558,7 +543,7 @@ func (s gormStore) IYSFeed(ctx context.Context, feed string) (IYSFeedState, bool
 		return IYSFeedState{}, false, nil
 	}
 	st := rows[0]
-	st.Horizon, st.SweepDueAt, st.UpdatedAt = utcPtr(st.Horizon), utcPtr(st.SweepDueAt), st.UpdatedAt.UTC()
+	st.Horizon, st.SweepDueAt, st.UpdatedAt = db.UTCPtr(st.Horizon), db.UTCPtr(st.SweepDueAt), st.UpdatedAt.UTC()
 	return st, true, nil
 }
 

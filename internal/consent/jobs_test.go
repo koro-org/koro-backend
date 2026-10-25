@@ -11,6 +11,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/consent"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/problem/problemtest"
 	"koro/internal/platform/queue"
 )
 
@@ -92,7 +93,7 @@ func TestSubmitIYS_NoopClientSkips(t *testing.T) {
 	ctx := t.Context()
 	text := e.consentText(t, consent.PurposeCommercialEmail, "2026.10.01")
 	_, err := e.svc.Record(ctx, grant(actor(t, "student").UserID, text, consent.ChannelWeb))
-	wantErr(t, err, consent.ErrIYSUnavailable)
+	problemtest.WantErr(t, err, consent.ErrIYSUnavailable)
 	id := e.record(t, withdraw(actor(t, "student").UserID, consent.PurposeCommercialEmail))
 	for _, err := range e.deliverAll(t) {
 		if err != nil {
@@ -203,9 +204,9 @@ func TestAdminListUser_AuditedBreakGlass(t *testing.T) {
 	}
 
 	_, err := e.svc.AdminListUser(ctx, actor(t, "support"), user, consent.Access{}, consent.PageQuery{})
-	wantErr(t, err, authz.ErrBreakGlassReason)
+	problemtest.WantErr(t, err, authz.ErrBreakGlassReason)
 	_, err = e.svc.AdminListUser(ctx, actor(t, "platform_admin"), user, consent.Access{Reason: "Ticket 4711: checking"}, consent.PageQuery{})
-	wantErr(t, err, authz.ErrForbidden)
+	problemtest.WantErr(t, err, authz.ErrForbidden)
 
 	reason := "Ticket 4711: user cannot unsubscribe"
 	p, err := e.svc.AdminListUser(ctx, actor(t, "support"), user, consent.Access{Reason: reason, TicketRef: "T-4711"}, consent.PageQuery{Limit: 2})

@@ -154,6 +154,7 @@ var (
 	routeMyContactRequest  = route("/me/contact-requests/{contact_request_id}", LinkForUser) // messaging
 	routeMyRegistration    = route("/me/registrations/{registration_id}", LinkForUser)       // events
 	routeMySecurityEvents  = route("/me/security-events", LinkForUser)                       // notify (audit alerts)
+	routeMyTerms           = route("/me/terms", LinkForUser)                                 // identity (a new terms of use version, BE-124)
 	routeOrder             = route("/orders/{order_id}", LinkForUser)                        // orders, payments
 	routeOrderInstructions = route("/orders/{order_id}/payment-instructions", LinkForUser)   // orders
 	routeInvoice           = route("/invoices/{invoice_id}", LinkForUser)                    // billing
@@ -200,6 +201,7 @@ func MyClubClaimsLink() Link                  { return routeMyClubClaims.link() 
 func MyContactRequestLink(req uuid.UUID) Link { return routeMyContactRequest.link(req.String()) }
 func MyRegistrationLink(reg uuid.UUID) Link   { return routeMyRegistration.link(reg.String()) }
 func MySecurityEventsLink() Link              { return routeMySecurityEvents.link() }
+func MyTermsLink() Link                       { return routeMyTerms.link() }
 func OrderLink(order uuid.UUID) Link          { return routeOrder.link(order.String()) }
 func OrderPaymentInstructionsLink(order uuid.UUID) Link {
 	return routeOrderInstructions.link(order.String())

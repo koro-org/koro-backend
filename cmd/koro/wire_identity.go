@@ -53,6 +53,11 @@ import (
 //	                nil (the authz matrix presets its persona resolver)
 //	c.consent.reauth the re-authentication verifier of consent's R
 //	                operations (06 H-42), only when nil (tests preset a fake)
+//	c.terms         the terms gate's check (BE-124; apiMiddleware installs
+//	                httpx.TermsGate over it), only when nil
+//	c.consent.termsPublished what a published terms of use version
+//	                triggers (BE-124: the gate drops its cached versions,
+//	                identity.notify_terms_published is queued), only when nil
 //	c.notify.platformAdmins the platform_admins in effect (06 H-33) for
 //	                notify's admin alerts (06 H-40), only when nil
 //	c.privacy       the identity KVKK provider (kvkk calls it last)
@@ -184,6 +189,12 @@ func (w *identityWiring) build(c *container) error {
 	c.sweepers = append(c.sweepers, mod.Sweeper)
 	if c.actors == nil {
 		c.actors = actorResolver{auth: mod.Service, students: mod.Students, clock: c.infra.clock}
+	}
+	if c.terms == nil { // the terms gate (BE-124)
+		c.terms = mod.TermsGate
+	}
+	if c.consent.termsPublished == nil { // a published terms version: gate cache + reader notices (BE-124)
+		c.consent.termsPublished = mod.TermsPublished
 	}
 	if c.notify.platformAdmins == nil { // 06 H-40 admin alerts (BE-015 hook)
 		c.notify.platformAdmins = mod.PlatformAdmins

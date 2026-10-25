@@ -37,7 +37,10 @@
 //   - The terms of use are accepted, never consented to (terms.go,
 //     BE-118): an acceptance names the current terms_of_use version and
 //     goes to its own append-only ledger (terms_acceptances), never to the
-//     consents; it forms the contract, so nothing gates on it here.
+//     consents; it forms the contract, so no consent gates on it. The HTTP
+//     terms gate (httpx, identity's check; BE-124) refuses a signed-in
+//     user's writes with ErrTermsAcceptanceRequired until the version in
+//     force is accepted; a published version is announced to TermsWatch.
 //   - İYS is reached only through the small interfaces of iys.go
 //     (IYSClient, IYSFeedReader, IYSStateReader, IYSPushReceiver), over
 //     any adapter of internal/platform/iys.
@@ -184,6 +187,10 @@ type Deps struct {
 	// e-mail (BE-062). Zero → no link is minted (commercial e-mail is
 	// refused upstream) and every link is refused.
 	Unsubscribe UnsubscribeConfig
+	// TermsWatch hears of every published terms of use version (identity,
+	// late bound; BE-124). nil → nobody is told (no notice to the readers;
+	// the terms gate still sees the version within its cache period).
+	TermsWatch TermsWatcher
 }
 
 func (d *Deps) validate() error {

@@ -1,7 +1,8 @@
 // Package httpx is the HTTP core (05 §10): gin + huma (humagin), the
 // /api/v1 group, RFC 9457 error conversion, request ID, security headers,
 // client IP, CSRF protection, request timeouts, health routes, the auth
-// middleware skeleton and the graceful server lifecycle.
+// middleware skeleton, the terms gate (termsgate.go, BE-124) and the
+// graceful server lifecycle.
 //
 // All API operations are huma operations registered on App.V1 (use
 // httpx/op.Koro for the x-koro-* extensions). The only raw gin routes are
@@ -166,7 +167,11 @@ func New(d Deps) (*App, error) {
 	if d.ExposeOpenAPI {
 		cfg.OpenAPIPath = OpenAPIPath
 	}
-	cfg.Info.Description = "Koro backend API. Errors are RFC 9457 application/problem+json with a stable `code`."
+	cfg.Info.Description = "Koro backend API. Errors are RFC 9457 application/problem+json with a stable `code`. " +
+		"A signed-in user who has not accepted the terms of use in force for them (getMe terms.acceptance_required) gets " +
+		"403 consent.terms_acceptance_required from every operation marked " + ExtTermsGate + ": " + TermsGateEnforced +
+		" until acceptTerms records the current version; reads and the operations marked " + TermsGateExempt +
+		" (the acceptance, logout, account security, KVKK rights and consent acts) stay open."
 	cfg.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
 		SchemeSessionCookie: {Type: "apiKey", In: "cookie", Name: SessionCookieName},
 		SchemeBearer:        {Type: "http", Scheme: "bearer", BearerFormat: "opaque"},
@@ -174,6 +179,7 @@ func New(d Deps) (*App, error) {
 
 	api := humagin.New(r, cfg)
 	installTalentFieldGuard(api.OpenAPI()) // no talent*/band/score*/point* member outside the talent operations (BE-047)
+	installTermsGate(api.OpenAPI())        // x-koro-terms-gate on every protected write operation (BE-124)
 	// The Problem schema and a reusable "Problem" response are always part
 	// of the spec, even before the first operation references them (huma
 	// prunes unreferenced schemas, the response keeps it referenced).

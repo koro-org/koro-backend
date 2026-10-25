@@ -153,6 +153,11 @@ type fakeTerms struct {
 	txs      []any
 	accepted []consent.TermsAcceptance
 	err      error
+
+	statusReads, currentReads int
+	// inForceFor, when set, limits the readers the current terms are in
+	// force for (Current answers consent.ErrNoNotice to the others).
+	inForceFor func(consent.NoticeKey) bool
 }
 
 func (f *fakeTerms) CheckTerms(_ context.Context, id uuid.UUID, _ consent.Audience) error {
@@ -189,6 +194,7 @@ func (f *fakeTerms) RecordTerms(ctx context.Context, in consent.TermsInput) (con
 func (f *fakeTerms) TermsStatus(_ context.Context, userID uuid.UUID, _ consent.Audience, _ string) (consent.TermsStatus, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.statusReads++
 	var st consent.TermsStatus
 	if f.current.Published {
 		st.Current = &consent.Notice{ID: f.current.ID, Kind: f.current.Kind, Audience: f.current.Audience, Version: f.current.Version}
@@ -210,12 +216,38 @@ func (f *fakeTerms) TermsStatus(_ context.Context, userID uuid.UUID, _ consent.A
 	return st, nil
 }
 
+// Current returns the current terms of use for every audience and locale
+// (BE-124: the gate's version in force) and counts the reads.
+func (f *fakeTerms) Current(_ context.Context, key consent.NoticeKey) (consent.Notice, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.currentReads++
+	if key.Kind != consent.KindTermsOfUse || !f.current.Published || f.inForceFor != nil && !f.inForceFor(key) {
+		return consent.Notice{}, consent.ErrNoNotice
+	}
+	return consent.Notice{ID: f.current.ID, Kind: f.current.Kind, Audience: f.current.Audience, Version: f.current.Version}, nil
+}
+
+// reads returns how many TermsStatus and Current calls the fake answered.
+func (f *fakeTerms) reads() (status, current int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.statusReads, f.currentReads
+}
+
 // publish makes n the current terms of use (a new version).
 func (f *fakeTerms) publish(n identity.NoticeInfo) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	n.Published = true
 	f.current = n
+}
+
+// retire leaves no terms of use published.
+func (f *fakeTerms) retire() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.current.Published = false
 }
 
 // mailer records the messages notify would send.

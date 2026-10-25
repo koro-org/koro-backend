@@ -28,6 +28,9 @@
 //     by a single-use link to a .edu.tr address of a known university, or
 //     by a student document a platform admin approved (never their own).
 //     A verification lasts a year; identity.edu_expire lapses it.
+//   - The terms of use in force must be accepted before any write the HTTP
+//     terms gate covers (Module.TermsGate, BE-124); a new version is
+//     announced to its readers (TermsPublished, in-app and e-mail).
 package identity
 
 import (
@@ -302,7 +305,7 @@ type Deps struct {
 	Limiter Limiter         // auth_email, auth_password_reset and reauth in the service (06 H-6)
 	Deriver *crypto.Deriver // e-mail tokens (CRYPTO_TOKEN_KEYS) and the e-mail digest of rate limit keys
 	Consent ConsentRecorder // registration consents (same transaction)
-	Terms   TermsLedger     // terms of use acceptances (registration, acceptTerms, getMe)
+	Terms   TermsLedger     // terms of use acceptances (registration, acceptTerms, getMe, the terms gate; BE-124)
 	Notices NoticeLookup    // the privacy notice and the terms shown at registration
 	Mailer  Mailer          // worker: verification, reset, change and security e-mails
 
@@ -367,6 +370,9 @@ type Module struct {
 	// platform role assignments and privileged account requests (02 §24.2;
 	// BE-057).
 	Sweeper privacy.RetentionSweeper
+	// TermsGate answers the HTTP terms gate (httpx.TermsGate; BE-124): has
+	// the user accepted the terms of use in force for them.
+	TermsGate httpx.TermsChecker
 
 	svc *service
 }
@@ -385,12 +391,14 @@ func New(d Deps) (Module, error) {
 	}
 	s := &service{d: d}
 	s.students = eduStudents{s: s}
-	return Module{Service: s, Students: s.students, Privacy: privacyProvider{s: s}, Sweeper: sweeper{s: s}, svc: s}, nil
+	s.gate = newTermsGate(s)
+	return Module{Service: s, Students: s.students, Privacy: privacyProvider{s: s}, Sweeper: sweeper{s: s}, TermsGate: s.gate, svc: s}, nil
 }
 
 type service struct {
 	d        Deps
 	students Students
+	gate     *termsGate // the terms gate's passes and versions in force (BE-124)
 }
 
 var _ Service = (*service)(nil)

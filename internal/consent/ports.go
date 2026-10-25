@@ -41,3 +41,16 @@ func (ReauthProof) GoString() string { return "consent.ReauthProof([REDACTED])" 
 type Reauthenticator interface {
 	Verify(ctx context.Context, userID uuid.UUID, proof ReauthProof) (kind string, err error)
 }
+
+// TermsWatcher hears of a new terms of use version (BE-124): identity tells
+// the readers the version applies to (in-app and transactional e-mail) and
+// drops its terms gate's cached view of the version in force. identity is
+// L4, above consent: the composition root binds it late
+// (cmd/koro/wire_consent.go).
+type TermsWatcher interface {
+	// TermsPublished runs in the publishing transaction (ctx carries it)
+	// once noticeID, a terms_of_use version, is published. It only
+	// schedules work for after the commit (queue.AfterCommit,
+	// db.AfterCommit): a publication that rolls back tells nobody.
+	TermsPublished(ctx context.Context, noticeID uuid.UUID)
+}

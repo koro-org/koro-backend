@@ -258,6 +258,12 @@
     "type": "urn:koro:problem:consent.scope_required"
   },
   {
+    "code": "consent.terms_acceptance_required",
+    "status": 403,
+    "title": "Accept the current terms of use to continue",
+    "type": "urn:koro:problem:consent.terms_acceptance_required"
+  },
+  {
     "code": "consent.terms_not_current",
     "status": 422,
     "title": "The current terms of use must be accepted",

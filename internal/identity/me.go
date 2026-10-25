@@ -95,6 +95,7 @@ func (s *service) UpdateMe(ctx context.Context, a authz.Actor, p MePatch) (Me, e
 		}
 	}
 	var out User
+	var localeChanged bool
 	err = s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		u, err := s.d.Store.LockUser(ctx, a.UserID)
 		if err != nil {
@@ -108,7 +109,7 @@ func (s *service) UpdateMe(ctx context.Context, a authz.Actor, p MePatch) (Me, e
 			u.LastName, fields = last, append(fields, "last_name")
 		}
 		if p.Locale != nil && *p.Locale != u.Locale {
-			u.Locale, fields = *p.Locale, append(fields, "locale")
+			u.Locale, fields, localeChanged = *p.Locale, append(fields, "locale"), true
 		}
 		out = u
 		if len(fields) == 0 {
@@ -122,6 +123,9 @@ func (s *service) UpdateMe(ctx context.Context, a authz.Actor, p MePatch) (Me, e
 	})
 	if err != nil {
 		return Me{}, err
+	}
+	if localeChanged { // the terms in force may be another language's version (BE-124)
+		s.gate.forget(a.UserID)
 	}
 	return s.me(ctx, out, a)
 }

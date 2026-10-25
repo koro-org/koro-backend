@@ -100,8 +100,9 @@ var testEnvelope = sync.OnceValue(func() *crypto.Envelope {
 })
 
 // TestWire_IdentityTasksAndPrivacy pins what identity registers (01 §6.2,
-// §7): the e-mail token subscription, the notice tasks, the cleanup and
-// student verification jobs and the KVKK provider.
+// §7): the e-mail token subscription, the notice tasks (BE-124: the terms
+// of use fan-out and notice), the cleanup and student verification jobs
+// and the KVKK provider.
 func TestWire_IdentityTasksAndPrivacy(t *testing.T) {
 	t.Parallel()
 	c := newTestContainer(t)
@@ -129,7 +130,8 @@ func TestWire_IdentityTasksAndPrivacy(t *testing.T) {
 	}
 	for _, name := range []string{identity.SendEmailTokenTaskName, identity.SendSecurityNoticeTaskName, identity.SendRoleAlertTaskName,
 		identity.SessionsCleanupJobName, identity.EmailTokensCleanupJobName, identity.SendEduNoticeTaskName,
-		identity.EduExpireJobName, identity.EduRenewalRemindersJobName} {
+		identity.EduExpireJobName, identity.EduRenewalRemindersJobName,
+		identity.NotifyTermsPublishedTaskName, identity.SendTermsNoticeTaskName} {
 		if !slices.Contains(mux.Types(), name) {
 			t.Errorf("worker does not route %s", name)
 		}

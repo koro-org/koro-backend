@@ -57,6 +57,11 @@ import (
 //	        in wire_identity.go build, only when it is nil (tests preset a
 //	        fake). The type uses stdlib types only (R4 hook rule). nil →
 //	        every R operation fails closed (503 consent.reauth_unavailable).
+//	termsPublished what a published terms of use version triggers
+//	        (consent.TermsWatcher; BE-124): identity sets it in
+//	        wire_identity.go build (its terms gate and the reader notices),
+//	        only when nil; read at call time (lateTermsWatcher). nil → nobody
+//	        is told.
 //
 // The İYS recipient address (T-159) is resolved at call time from
 // identity (L4, built after consent) in both directions (delivery and
@@ -82,6 +87,8 @@ type consentWiring struct {
 	deriver     *crypto.Deriver
 	reauth      func(ctx context.Context, userID uuid.UUID, password, totpCode string) (kind string, err error)
 
+	termsPublished func(ctx context.Context, noticeID uuid.UUID)
+
 	mod   consent.Module
 	svc   consent.Service          // set by build
 	links consent.UnsubscribeLinks // set by build; nil without CONSENT_UNSUBSCRIBE_BASE_URL
@@ -97,6 +104,16 @@ func (l lateReauth) Verify(ctx context.Context, userID uuid.UUID, p consent.Reau
 		return "", consent.ErrReauthUnavailable
 	}
 	return l.w.reauth(ctx, userID, p.Password, p.TOTPCode)
+}
+
+// lateTermsWatcher adapts consentWiring.termsPublished to
+// consent.TermsWatcher and reads it at call time (see consentWiring).
+type lateTermsWatcher struct{ w *consentWiring }
+
+func (l lateTermsWatcher) TermsPublished(ctx context.Context, noticeID uuid.UUID) {
+	if f := l.w.termsPublished; f != nil {
+		f(ctx, noticeID)
+	}
 }
 
 // iysRecipients resolves İYS recipients for the adapters (their
@@ -334,6 +351,7 @@ func (w *consentWiring) build(c *container) error {
 		Reauth: lateReauth{w: w}, IYS: client, IYSFeed: feed, IYSStates: states, IYSPush: push, IYSRequired: cfg.IYSRequired,
 		IYSSyncMaxAge: cfg.IYSSyncMaxAge,
 		Unsubscribe:   consent.UnsubscribeConfig{BaseURL: cfg.UnsubscribeBaseURL, TTL: cfg.UnsubscribeTTL, Deriver: deriver},
+		TermsWatch:    lateTermsWatcher{w: w},
 	})
 	if err != nil {
 		return err

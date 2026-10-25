@@ -51,6 +51,8 @@ func (m Module) Tasks() []queue.Task {
 		{Name: SendSecurityNoticeTaskName, Handle: m.svc.handleSecurityNotice},
 		{Name: SendRoleAlertTaskName, Handle: m.svc.handleRoleAlert},
 		{Name: SendEduNoticeTaskName, Handle: m.svc.handleEduNotice},
+		{Name: NotifyTermsPublishedTaskName, Handle: m.svc.handleTermsPublished},
+		{Name: SendTermsNoticeTaskName, Handle: m.svc.handleTermsNotice},
 	}
 }
 

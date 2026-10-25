@@ -30,6 +30,7 @@ func builderCases() map[string]struct {
 		"MyContactRequestLink":         {MyContactRequestLink(a), "/me/contact-requests/{contact_request_id}"},
 		"MyRegistrationLink":           {MyRegistrationLink(a), "/me/registrations/{registration_id}"},
 		"MySecurityEventsLink":         {MySecurityEventsLink(), "/me/security-events"},
+		"MyTermsLink":                  {MyTermsLink(), "/me/terms"},
 		"OrderLink":                    {OrderLink(a), "/orders/{order_id}"},
 		"OrderPaymentInstructionsLink": {OrderPaymentInstructionsLink(a), "/orders/{order_id}/payment-instructions"},
 		"InvoiceLink":                  {InvoiceLink(a), "/invoices/{invoice_id}"},

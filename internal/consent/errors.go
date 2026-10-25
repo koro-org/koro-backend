@@ -47,6 +47,15 @@ var (
 	// Q-17). The client reads the current one (listCurrentNotices,
 	// kind=terms_of_use) and shows it again.
 	ErrTermsNotCurrent = problem.New(problem.Invalid, "consent.terms_not_current", "The current terms of use must be accepted")
+	// ErrTermsAcceptanceRequired: a signed-in user who has not accepted the
+	// terms of use in force for them (a new version, or an account older
+	// than the ledger) calls a write operation the terms gate covers
+	// (BE-124, Q-17; httpx x-koro-terms-gate: enforced). Reads, the
+	// acceptance itself and the KVKK and account security operations stay
+	// open. The client shows the current terms (getMe terms) and calls
+	// acceptTerms, then repeats the request.
+	ErrTermsAcceptanceRequired = problem.New(problem.Forbidden, "consent.terms_acceptance_required",
+		"Accept the current terms of use to continue")
 
 	// ErrInvalidNotice: a draft breaks the notice rules (kind/purpose,
 	// version format, title, body).

@@ -8223,7 +8223,7 @@ components:
           description: The notification kind (template ID)
           type: string
         link_path:
-          description: "Client-independent in-app path (web and mobile map it to their own routes; a form a client does not know is shown without a link). One of: `/me/access-grants`; `/me/club-claims`; `/me/contact-requests/{contact_request_id}`; `/me/registrations/{registration_id}`; `/me/security-events`; `/orders/{order_id}`; `/orders/{order_id}/payment-instructions`; `/invoices/{invoice_id}`; `/posts/{post_id}`; `/clubs/by-slug/{club_slug}`; `/events/{event_id}/registrations/{registration_id}`; `/orgs/{org_id}/sales`; `/orgs/{org_id}/payouts/{payout_id}`; `/orgs/{org_id}/offerings`; `/orgs/{org_id}/offering-approvals`; `/orgs/{org_id}/posts`; `/orgs/{org_id}/payees/{payee_id}`; `/orgs/{org_id}/contact-requests/{contact_request_id}`; `/admin/audit-events`; `/admin/bank-accounts`; `/admin/breaches`; `/admin/clubs/{club_org_id}`; `/admin/club-claims/{claim_id}`; `/admin/collection-accounts`; `/admin/commerce-policies`; `/admin/offerings`; `/admin/orders?order_no={order_no}`; `/admin/payouts/{payout_id}`; `/admin/refunds/{refund_id}`; `/admin/reports/{report_id}`; `/admin/review-queue`; `/admin/incoming-transfers?status=unmatched`; `/clubs/{club_org_id}` (legacy). {<name>_id} is a UUID, {club_slug} an organization slug (getOrgBySlug), {order_no} an order number. Legacy forms are no longer produced but older notifications may carry them."
+          description: "Client-independent in-app path (web and mobile map it to their own routes; a form a client does not know is shown without a link). One of: `/me/access-grants`; `/me/club-claims`; `/me/contact-requests/{contact_request_id}`; `/me/registrations/{registration_id}`; `/me/security-events`; `/me/terms`; `/orders/{order_id}`; `/orders/{order_id}/payment-instructions`; `/invoices/{invoice_id}`; `/posts/{post_id}`; `/clubs/by-slug/{club_slug}`; `/events/{event_id}/registrations/{registration_id}`; `/orgs/{org_id}/sales`; `/orgs/{org_id}/payouts/{payout_id}`; `/orgs/{org_id}/offerings`; `/orgs/{org_id}/offering-approvals`; `/orgs/{org_id}/posts`; `/orgs/{org_id}/payees/{payee_id}`; `/orgs/{org_id}/contact-requests/{contact_request_id}`; `/admin/audit-events`; `/admin/bank-accounts`; `/admin/breaches`; `/admin/clubs/{club_org_id}`; `/admin/club-claims/{claim_id}`; `/admin/collection-accounts`; `/admin/commerce-policies`; `/admin/offerings`; `/admin/orders?order_no={order_no}`; `/admin/payouts/{payout_id}`; `/admin/refunds/{refund_id}`; `/admin/reports/{report_id}`; `/admin/review-queue`; `/admin/incoming-transfers?status=unmatched`; `/clubs/{club_org_id}` (legacy). {<name>_id} is a UUID, {club_slug} an organization slug (getOrgBySlug), {order_no} an order number. Legacy forms are no longer produced but older notifications may carry them."
           type: string
           x-koro-link-paths:
             - pattern: /me/access-grants
@@ -8235,6 +8235,8 @@ components:
             - pattern: /me/registrations/{registration_id}
               audience: user
             - pattern: /me/security-events
+              audience: user
+            - pattern: /me/terms
               audience: user
             - pattern: /orders/{order_id}
               audience: user
@@ -14385,7 +14387,7 @@ components:
       name: __Host-koro_session
       type: apiKey
 info:
-  description: Koro backend API. Errors are RFC 9457 application/problem+json with a stable `code`.
+  description: "Koro backend API. Errors are RFC 9457 application/problem+json with a stable `code`. A signed-in user who has not accepted the terms of use in force for them (getMe terms.acceptance_required) gets 403 consent.terms_acceptance_required from every operation marked x-koro-terms-gate: enforced until acceptTerms records the current version; reads and the operations marked exempt (the acceptance, logout, account security, KVKK rights and consent acts) stay open."
   title: Koro API
   version: 1.0.0
 openapi: 3.1.0
@@ -14549,6 +14551,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/bank-accounts:
     get:
       description: "Oldest first; without status the accounts waiting for an eye. Full IBANs: the read is audited. holder_matches_title compares the holder with the legal party's title (advisory; the first eye decides)."
@@ -14668,6 +14671,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/bank-accounts/{bank_account_id}/evidence/download:
     get:
       description: "The account statement or bank letter the eyes check: a URL valid for at most 5 minutes, every download audited. A file that is not scanned clean is 409 files.not_clean."
@@ -14760,6 +14764,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/bank-accounts/{bank_account_id}/revoke:
     post:
       description: Requires re-authentication. No payout can be approved to a revoked account; payouts created before must be cancelled. Only an approved account (409 parties.invalid_state).
@@ -14815,6 +14820,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/bank-accounts/{bank_account_id}/verify:
     post:
       description: The submitter never verifies (403 authz.four_eyes_violation). The evidence must hold (otherwise reject the account); a holder that is not the legal party's title needs a note (T-19). Only pending_verification (409 parties.invalid_state); an evidence file that is not scanned clean is 409 files.not_clean.
@@ -14869,6 +14875,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/breaches:
     get:
       description: With the 72-hour deadline of the Board notification and the 24-hour notice to the data controller.
@@ -14959,6 +14966,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/breaches/{breach_id}:
     patch:
       description: If-Match. The status only moves forward (open → contained → notified → closed); notified needs authority_notified_at; notification times are written once; detected_at may only move earlier.
@@ -15013,6 +15021,7 @@ paths:
       x-koro-action: kvkk.breach.manage
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/club-claims:
     get:
       description: "The review queue: pending claims oldest first (default), other statuses newest first. Support and platform admins see every claim; a university representative the claims of their universities' non-sensitive clubs (the claims they decide). Audited."
@@ -15146,6 +15155,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/clubs:
     post:
       description: Opens the club's org and its catalog row together.
@@ -15183,6 +15193,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/clubs/{club_id}/sensitivity:
     post:
       description: With re-authentication. A change of the flag emits club.sensitivity_changed in the same transaction (the club's audience keys are removed). Religious, political and identity clubs stay sensitive.
@@ -15229,6 +15240,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/collection-accounts:
     get:
       description: Every account, newest first. The default active account is the IBAN of every payment instruction.
@@ -15298,6 +15310,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/collection-accounts/{account_id}/approve:
     post:
       description: Requires re-authentication. The creator never decides (403 authz.four_eyes_violation). An approval sends a security notice to every platform and finance admin; it does not make the account the default.
@@ -15349,6 +15362,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/collection-accounts/{account_id}/make-default:
     post:
       description: Requires re-authentication. Only an active account (409 payments.invalid_state). New payment instructions show its IBAN; the previous default stays active.
@@ -15400,6 +15414,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/collection-accounts/{account_id}/retire:
     post:
       description: "Requires re-authentication. Only an active account (409 payments.invalid_state). A retired default leaves no default: payment instructions answer 409 payments.no_active_collection_account until another account is made the default."
@@ -15451,6 +15466,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/commerce-policies:
     get:
       description: Newest valid_from first; at keeps the policies in effect at that time.
@@ -15539,6 +15555,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/commerce-policies/{policy_id}/close:
     post:
       description: Requires re-authentication. Sets valid_to (now when omitted, never in the past); the row changes no other way; a closed policy is 409 catalog.invalid_state. Every platform and finance admin is notified.
@@ -15590,6 +15607,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/consent-purposes:
     get:
       operationId: adminListConsentPurposes
@@ -15656,6 +15674,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/data-requests:
     get:
       description: Soonest deadline first. platform_admin sees only requests awaiting the second approval (03 k32).
@@ -15791,6 +15810,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/data-requests/{dsr_id}:
     get:
       description: The ETag is the If-Match of adminUpdateDataRequest.
@@ -15884,6 +15904,7 @@ paths:
       x-koro-action: kvkk.dsr.update
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/data-requests/{dsr_id}/approve:
     post:
       description: profiling_access only. The second approver must differ from the first (403 authz.four_eyes_violation); platform_admin may give the second approval only.
@@ -15941,6 +15962,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/data-requests/{dsr_id}/complete:
     post:
       description: "Re-authentication required. Queues what the answer sets in motion: the data export (access, export, profiling_access) or the account erasure; the applicant is notified when it is done."
@@ -15999,6 +16021,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/data-requests/{dsr_id}/export:
     get:
       description: A presigned URL valid for at most 5 minutes; audited.
@@ -16093,6 +16116,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/destruction-logs:
     get:
       description: One row per retention policy and nightly run, and per module of an account erasure; newest first.
@@ -16268,6 +16292,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/edu-verifications/{verification_id}/document:
     get:
       description: A signed URL valid for 5 minutes; every call is audited. 409 files.not_clean while the virus scan is pending or found something. Not for the reviewer's own document (403).
@@ -16417,6 +16442,7 @@ paths:
       x-koro-break-glass: true
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/entitlements/{entitlement_id}/revoke:
     post:
       description: "Units already used stay used. Revoking an expired right is 409; a revoked one is returned unchanged. A right bought with an order is revoked without a refund: warning order_refund_not_started tells the admin to start the refund separately."
@@ -16467,6 +16493,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/form-lint-rules:
     get:
       description: Active and retired rules, blocked first.
@@ -16525,6 +16552,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/form-lint-rules/{rule_id}:
     patch:
       description: "Rules are never deleted: active=false retires one."
@@ -16565,6 +16593,7 @@ paths:
       x-koro-action: events.lint_rule.manage
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/incoming-transfers:
     get:
       description: Newest value date first. q matches part of the description, the sender's name or the bank reference, or a reference code exactly.
@@ -16691,6 +16720,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/incoming-transfers/import:
     post:
       description: csv is the statement text (UTF-8, ';' or ',' separated, header line first; columns value_date, amount, description, bank_reference, optional sender_name, sender_iban; at most 1 MiB and 2000 rows). Each row is imported, skipped as a duplicate (its bank reference is already recorded on the account) or rejected with a reason; the answer counts them and lists every row.
@@ -16735,6 +16765,7 @@ paths:
       x-koro-idempotency: required
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/incoming-transfers/{transfer_id}:
     get:
       description: "An unmatched transfer suggests the order of the reference code in its description, rated by its amount: 1 exactly what the order waits for, 0.7 less (partial), 0.5 more (an overpayment refund opens), 0 the order does not wait for a payment."
@@ -16820,6 +16851,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/incoming-transfers/{transfer_id}/ignore:
     post:
       description: Only an unmatched transfer (409). The reason is audited.
@@ -16870,6 +16902,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/incoming-transfers/{transfer_id}/mark-returned:
     post:
       description: "Requires re-authentication. Step 3 of 3: only an approved return (409 payments.invalid_state); the bank reference and the receipt (a refund_receipt upload) close it (returned)."
@@ -16921,6 +16954,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/incoming-transfers/{transfer_id}/match:
     post:
       description: "One transaction: the transfer is matched, the payment captured, the order paid as far as the money goes (partial payments accumulate), the ledger posted and payment.captured emitted; any failure leaves the transfer unmatched. expected_order_no must be the order's reference code (422 payments.order_reference_mismatch). Money beyond what the order waits for opens an overpayment refund request to refund_iban (default: the sender's IBAN); its approval takes four eyes."
@@ -16972,6 +17006,7 @@ paths:
       x-koro-idempotency: required
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/incoming-transfers/{transfer_id}/request-return:
     post:
       description: "Requires re-authentication. Step 1 of 3 (06 H-56): an unmatched or ignored transfer waits for another finance admin's approval (return_requested). target_iban defaults to the sender's IBAN."
@@ -17023,6 +17058,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/integrations:
     get:
       description: The account and the token state of each integration; secret values are never returned.
@@ -17093,6 +17129,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/invoices:
     get:
       description: "Newest first; status narrows the queue (planned: to upload or verify, mismatch)."
@@ -17224,6 +17261,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/invoices/{invoice_id}/verify:
     post:
       description: "The number, date and amounts of the uploaded document match the planned invoice (issued: the PDF is e-mailed to the recipient) or not (mismatch with a note: the uploader side may upload again). The uploader cannot verify (403 authz.four_eyes_violation). Only an upload waiting for verification (409 billing.invalid_state)."
@@ -17273,6 +17311,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/ledger/transactions:
     get:
       description: "The double-entry journal, newest occurred_at first. Amounts are kuruş; debit is positive, credit negative; the entries of a transaction sum to zero. Filters: kind, ref_type, ref_id and an occurred_at window."
@@ -17486,6 +17525,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/legal-parties/{party_id}:
     get:
       description: With its documents and the ETag that adminUpdateLegalParty takes as If-Match. Tax numbers are not masked.
@@ -17573,6 +17613,7 @@ paths:
       x-koro-action: parties.legal_party.update
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/legal-parties/{party_id}/documents:
     post:
       description: file_id is a party_document upload of the caller. For parties no organization surface reaches (a foundation before its payee, Koro's own party). Another admin verifies it.
@@ -17623,6 +17664,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/legal-parties/{party_id}/ownership-correction:
     post:
       description: "06 H-60: the party holds a tax ID it does not own (the real owner gets 409 parties.tax_id_taken). It is retired (inactive: out of the tax ID uniqueness) with the reason and the evidence, which is kept as a document of the party. Platform admins only; orders keep their buyer snapshot."
@@ -17677,6 +17719,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/legal-parties/{party_id}/verification:
     post:
       description: verified needs the tax number and an address (422 parties.verification_incomplete); a party that is already decided or inactive is 409 parties.invalid_state.
@@ -17731,6 +17774,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/legal-party-documents/{document_id}/download:
     get:
       description: A URL valid for at most 5 minutes; every download is audited. A file that is not scanned clean is 409 files.not_clean.
@@ -17813,6 +17857,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/moderation-actions:
     get:
       description: Newest first; narrowed by target_type and target_id.
@@ -17918,6 +17963,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/notices/{notice_version_id}/publish:
     post:
       description: The published version of the same kind, purpose, audience and locale is retired in the same step. A published version never changes.
@@ -17969,6 +18015,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/notices/{notice_version_id}/retire:
     post:
       operationId: adminRetireNotice
@@ -18019,6 +18066,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/offerings:
     get:
       description: Oldest submission first.
@@ -18129,6 +18177,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/order-lines/{line_id}/resolve-dispute:
     post:
       description: "fulfilled: the line is delivered (admin). refund: the line is cancelled and all the money Koro holds of it (refund_amount, when given, must be that amount: no partial refund) waits for a refund that a finance admin opens under four eyes."
@@ -18179,6 +18228,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/orders:
     get:
       description: Newest placement first; order_no takes the reference code however it was typed.
@@ -18395,6 +18445,7 @@ paths:
       x-koro-idempotency: required
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/orgs/{org_id}/moderation:
     post:
       description: warn_org records a warning; restrict_org sends every post of the organization to review until restricted_until (required, at most a year ahead); suspend_org stops its posting (platform admins only; only they change a suspended organization). The organization's managers are notified. Nobody moderates an organization they belong to.
@@ -18436,6 +18487,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/orgs/{org_id}/reactivate:
     post:
       description: suspended → active, with re-authentication.
@@ -18482,6 +18534,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/orgs/{org_id}/suspend:
     post:
       description: active → suspended, with re-authentication.
@@ -18528,6 +18581,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/orgs/{org_id}/verify:
     post:
       description: pending_review → active; another status is 409 orgs.invalid_state.
@@ -18572,6 +18626,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/payables:
     get:
       description: "Per payee (the one asked for, or every payee the ledger owes money to): the paid, fulfilled lines whose payout hold has elapsed as of as_of (default now), with a positive seller share after refunds, not paid out and in no payout yet."
@@ -18662,6 +18717,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/payees/{payee_id}:
     patch:
       description: If-Match is required (428/412). status suspended stops payouts, closed ends the payee (kept for the financial records). Making an active payee the default moves the organization's default to it.
@@ -18712,6 +18768,7 @@ paths:
       x-koro-action: parties.payee.manage
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/payees/{payee_id}/bank-accounts:
     post:
       description: "Requires re-authentication. The submitting admin is the first eye: the account starts pending_approval and a different admin approves it."
@@ -18767,6 +18824,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/payees/{payee_id}/verify:
     post:
       description: draft, pending_verification or suspended → active. The legal party must be verified (422 parties.verification_incomplete); an active or closed payee is 409 parties.invalid_state.
@@ -18815,6 +18873,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/payments:
     get:
       description: Every captured payment, newest first. A bank transfer's amount is the whole transfer (an overpayment included).
@@ -18925,6 +18984,7 @@ paths:
       x-koro-idempotency: required
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/payments/{payment_id}:
     get:
       description: The splits of the order it paid (seller and Koro shares per line) and the refunds drawn from it.
@@ -19059,6 +19119,7 @@ paths:
       x-koro-idempotency: required
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/payouts/{payout_id}:
     get:
       description: The payout with the full IBAN snapshot, its eyes, its items and, once paid, the receipt URL.
@@ -19142,6 +19203,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/payouts/{payout_id}/cancel:
     post:
       description: Only a payout waiting for approval or approved (409 ledger.invalid_state); its lines are payable again.
@@ -19191,6 +19253,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/payouts/{payout_id}/mark-failed:
     post:
       description: Only an approved payout (409 ledger.invalid_state); its lines are payable again.
@@ -19240,6 +19303,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/payouts/{payout_id}/mark-paid:
     post:
       description: "After the EFT at the bank: the bank reference and the receipt (a payout_receipt upload) are required. In one transaction the ledger records the payout (payout_paid), the order lines are marked paid out and payout.paid is written. Only an approved payout (409 ledger.invalid_state)."
@@ -19289,6 +19353,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/platform-roles:
     get:
       description: Open assignments (pending, active, revoke_pending) unless include_revoked.
@@ -19387,6 +19452,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/platform-roles/{assignment_id}/approve:
     post:
       description: "The second eye (06 H-17): a platform_admin other than the requester and the user. The requester gets 403 authz.four_eyes_violation. The role takes effect and the user's sessions close."
@@ -19429,6 +19495,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/platform-roles/{assignment_id}/revoke:
     post:
       description: "moderator, support, dpo: revoked at once. platform_admin, finance_admin, talent_auditor: the first call requests the revocation (revoke_pending; the role stays in effect), a second platform_admin's call confirms it (the requester gets 403 authz.four_eyes_violation). A pending request is rejected. The last active platform_admin cannot be revoked (409)."
@@ -19471,6 +19538,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/posts/{post_id}/moderation:
     post:
       description: "approve: pending_review → published (counts towards the organization's trust); hide: published → hidden; remove: published or hidden → removed, pending_review → removed (rejected; a targeted_post unit goes back); restore: hidden → published, or a post removed by a moderator → published (an appeal). Every decision is kept (append-only) and the author organization is notified with the reason code. Nobody moderates a post of an organization they write for."
@@ -19512,6 +19580,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/receivable-collections:
     get:
       operationId: adminListReceivableCollections
@@ -19615,6 +19684,7 @@ paths:
       x-koro-idempotency: required
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/receivable-collections/{collection_id}/approve:
     post:
       description: A different finance admin re-authenticates; the collection, bank receipt and balanced cash/debt ledger entries commit together.
@@ -19666,6 +19736,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/receivable-collections/{collection_id}/reject:
     post:
       description: Only requested collections. Releases the transfer for a corrected request or another finance operation; no ledger money moves.
@@ -19716,6 +19787,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/refunds:
     get:
       description: Newest first; filter by status, order or payment.
@@ -19834,6 +19906,7 @@ paths:
       x-koro-idempotency: required
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/refunds/due:
     get:
       description: The cancelled lines of paid orders (offering cancelled, dispute resolved with a refund) and the orders cancelled or expired with money paid, oldest first, minus what open refunds already cover; each with the order's payments that can fund it. A finance or platform admin opens the refund (adminCreateRefund). At most limit rows, no cursor.
@@ -19923,6 +19996,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/refunds/{refund_id}/cancel:
     post:
       description: Requires another finance admin and re-authentication. Only approved refunds; no ledger money moves.
@@ -19974,6 +20048,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/refunds/{refund_id}/complete:
     post:
       description: "Only an approved refund (409 payments.invalid_state); the receipt (a refund_receipt upload) and the bank reference are required (422). One transaction: the refund completed, the payment's refunded amount, the order (orders.ApplyRefund; not for an overpayment), the ledger (refund_completed) and payment.refunded; any failure leaves the refund approved. Models A2 and B have no ledger template yet (422 ledger.model_not_enabled)."
@@ -20024,6 +20099,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/refunds/{refund_id}/mark-failed:
     post:
       description: Requires another finance admin and re-authentication. Only approved refunds; completed refunds cannot be reversed here.
@@ -20075,6 +20151,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/refunds/{refund_id}/reject:
     post:
       description: Only a requested refund (409 payments.invalid_state); the requester may withdraw it this way. The note is audited.
@@ -20125,6 +20202,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/reports:
     get:
       description: "The moderation queue: oldest first (sort=-created_at: newest first). The reporter's identity is shown here."
@@ -20293,6 +20371,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/retention-policies:
     get:
       description: Every policy with its period (ISO 8601), anchor, method, legal approval and whether a sweeper is registered for it. A policy that is not legally approved runs as a dry run only (count, no deletion). Each item carries the etag that adminUpdateRetentionPolicy expects in If-Match.
@@ -20379,6 +20458,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/review-queue:
     get:
       description: Posts in pending_review (new or restricted organizations), oldest first.
@@ -20468,6 +20548,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/services/{service_id}:
     patch:
       description: Partial update; clear empties optional fields; active false withdraws the service. The accountant's review (accounting_reviewed, accounting_reviewed_ref) is finance admins' only (03 k23); a change to the VAT profile withdraws the review unless the same request reviews it again.
@@ -20508,6 +20589,7 @@ paths:
       x-koro-action: catalog.service.manage
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/skills:
     post:
       operationId: adminCreateSkill
@@ -20540,6 +20622,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/skills/{skill_id}:
     patch:
       operationId: adminUpdateSkill
@@ -20579,6 +20662,7 @@ paths:
       x-koro-action: directory.skill.manage
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/subprocessors:
     get:
       operationId: adminListSubprocessors
@@ -20668,6 +20752,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/subprocessors/{subprocessor_id}:
     patch:
       description: If-Match (the etag of the list item). Retire with active = false.
@@ -20722,6 +20807,7 @@ paths:
       x-koro-action: kvkk.subprocessor.manage
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/talent/config:
     get:
       description: The config version in force (null before the first one) and the signal catalogue. Closed (404 for every signed-in user) while talent.auditor_api_enabled is false; open, talent_auditor only (MFA; never platform_admin). X-Koro-Access-Reason (10–500 characters) is mandatory and the call is audited under its action with that reason. No name or e-mail is ever returned.
@@ -20796,6 +20882,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/talent/distribution:
     get:
       description: Users by band 0..3 (neutralised users excluded); a count below 10 is null. university_id narrows it to the cohorts of one university (a university below cohort_min is in the global cohort). Closed (404 for every signed-in user) while talent.auditor_api_enabled is false; open, talent_auditor only (MFA; never platform_admin). X-Koro-Access-Reason (10–500 characters) is mandatory and the call is audited under its action with that reason. No name or e-mail is ever returned.
@@ -20882,6 +20969,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/talent/point-events/{point_event_id}/reversal:
     post:
       description: Appends the reversal row (points negated, the original's occurred_at and config version); the original never changes. One reversal per row (409 talent.already_reversed); a reversal is not reversed (409 talent.not_reversible). Re-authentication required. Closed (404 for every signed-in user) while talent.auditor_api_enabled is false; open, talent_auditor only (MFA; never platform_admin). X-Koro-Access-Reason (10–500 characters) is mandatory and the call is audited under its action with that reason. No name or e-mail is ever returned.
@@ -20928,6 +21016,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/talent/subjects/{user_id}/neutralizations:
     post:
       description: "An auditor neutralisation (reason admin): the band is 0 while it is active. Re-authentication required; one active auditor neutralisation per user (409 talent.already_neutralized). Closed (404 for every signed-in user) while talent.auditor_api_enabled is false; open, talent_auditor only (MFA; never platform_admin). X-Koro-Access-Reason (10–500 characters) is mandatory and the call is audited under its action with that reason. No name or e-mail is ever returned."
@@ -20976,6 +21065,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/talent/subjects/{user_id}/report:
     get:
       description: The ledger (with each row's point_event_id for a reversal), the category totals, the last nightly score (band, raw score, cohort percentile, cohort, config version) and the neutralisations. Closed (404 for every signed-in user) while talent.auditor_api_enabled is false; open, talent_auditor only (MFA; never platform_admin). X-Koro-Access-Reason (10–500 characters) is mandatory and the call is audited under its action with that reason. No name or e-mail is ever returned.
@@ -21049,6 +21139,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/universities/{university_id}:
     patch:
       description: The org profile (name, logo) is changed with updateOrg.
@@ -21089,6 +21180,7 @@ paths:
       x-koro-action: directory.university.manage
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/universities/{university_id}/departments:
     post:
       operationId: adminCreateDepartment
@@ -21129,6 +21221,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/universities/{university_id}/email-domains/{domain}:
     put:
       description: A .edu.tr domain; a domain of another university is 409 directory.domain_taken.
@@ -21177,6 +21270,7 @@ paths:
       x-koro-action: directory.university.manage
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/users:
     get:
       description: q is an exact e-mail address or a fragment of the name (2-100 characters). Every search is audited (query kind and the users found, not the query).
@@ -21391,6 +21485,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/users/{user_id}/notification-deliveries:
     get:
       description: "IDs, channel, template, status and time only: never the content, the data or the address. Break-glass: X-Koro-Access-Reason is mandatory; the read is audited and the user is notified. When the read concerns one user, the X-Koro-Access-Reason justification is shown to that user (support access notification; reason of the break_glass item of listMySecurityEvents): write no other person's data in it."
@@ -21500,6 +21595,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/users/{user_id}/student-profile:
     get:
       description: "support and platform_admin: break-glass (X-Koro-Access-Reason, 10–500 characters; audited, the student is told). dpo: X-Koro-Access-Reason is the ID of an open data subject request of this student (the birth date is shown only then). Never CV files, sensitive clubs, form answers or talent values. When the read concerns one user, the X-Koro-Access-Reason justification is shown to that user (support access notification; reason of the break_glass item of listMySecurityEvents): write no other person's data in it."
@@ -21583,6 +21679,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/users/{user_id}/unsuspend:
     post:
       operationId: adminUnsuspendUser
@@ -21623,6 +21720,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/auth/edu-verifications/confirm:
     post:
       description: Single use; an unknown, used or expired token is 422 identity.invalid_token. The account becomes a verified student for one year; a renewal supersedes the previous verification. An address that verifies another account is 409 identity.edu_email_taken.
@@ -21896,6 +21994,7 @@ paths:
       x-koro-action: identity.session.delete_current
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: exempt
   /api/v1/auth/sessions/mfa:
     post:
       description: "Second step of an MFA account's login: the challenge of createSession (valid 5 minutes, single use) with a TOTP code or a recovery code (exactly one). The session opens MFA-verified; web clients get the cookie, mobile clients the token (the client kind of the password step). Any failure is 401 identity.mfa_login_failed. A recovery code sign-in sends a security notice."
@@ -22107,6 +22206,7 @@ paths:
       x-koro-action: directory.club.update
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/clubs/{club_id}/claims:
     post:
       description: "An adult student whose verified university is the club's asks to become its club admin (403 students.verification_required, 403 directory.minor_restricted, 422 directory.university_mismatch). Evidence: evidence_text and/or evidence_file_id (a club_claim_evidence upload). One pending claim per club (409 directory.claim_pending). A club may have several admins, so a claimed club takes claims too."
@@ -22148,6 +22248,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/clubs/{club_id}/join-requests:
     post:
       description: Verified students only (403 students.verification_required). An open club makes the membership active at once, an approval club leaves it pending for the club_admin.
@@ -22188,6 +22289,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/clubs/{club_id}/sensitivity-requests:
     post:
       description: Audited; the platform admins get an in-app notice. Only a platform admin sets the flag.
@@ -22225,6 +22327,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/companies:
     get:
       description: "The public company list (BE-120): active companies only — pending_review, suspended and closed ones are left out (searchOrgs?kind=company also lists suspended ones). sort=name for A-Z; default newest first."
@@ -22313,6 +22416,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/events:
     get:
       description: "Published events the caller may see (anonymous: public events only). Without a date range, events that have ended are left out. q matches title, summary and description (full text) or part of the title. Repeated org_id / university_id values are ORed; the two filters together intersect. A date-only starts_from / starts_to is the start / end of that day in Europe/Istanbul."
@@ -22471,6 +22575,7 @@ paths:
       x-koro-action: events.event.delete
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
     get:
       description: An event the caller may not see is 404. online_url is shown to the event's managers only. The ETag is the If-Match value of updateEvent.
       operationId: getEvent
@@ -22554,6 +22659,7 @@ paths:
       x-koro-action: events.event.update
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/events/{event_id}/attendance/finalize:
     post:
       description: "After the event's end, once: the confirmed registrations without a check-in become no_show (in the background); check-ins and voids stop. Before the end, a second time or without check-in: 409 events.invalid_state. Otherwise the system closes it 24 hours after the end."
@@ -22598,6 +22704,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/events/{event_id}/cancel:
     post:
       description: published → cancelled. Registrations and tickets are cancelled and attendees notified (event.cancelled).
@@ -22643,6 +22750,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/events/{event_id}/check-ins:
     get:
       description: The latest scan first; the attendee as first name and last-name initial only.
@@ -22755,6 +22863,7 @@ paths:
       x-koro-idempotency: required
       x-koro-rate-limit: qr_scan
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/events/{event_id}/check-ins/stats:
     get:
       description: "confirmed: the seat holders (confirmed and checked in); checked_in; voided check-ins; waitlisted; no_show after the attendance is closed. The live board is the WebSocket GET /api/v1/events/{event_id}/check-ins/live (same access; outside this document)."
@@ -22846,6 +22955,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/events/{event_id}/exports:
     get:
       description: "Newest first: who asked, why, which fields, the status, the row and download counts."
@@ -22949,6 +23059,7 @@ paths:
       x-koro-rate-limit: export
       x-koro-reauth: true
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/events/{event_id}/exports/{export_id}/download:
     get:
       description: Only the manager who requested the export, only while it is ready and not expired (409 events.export_not_ready otherwise). The presigned URL lives at most 5 minutes; every download is counted and audited.
@@ -23119,6 +23230,7 @@ paths:
       x-koro-action: events.form.manage
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/events/{event_id}/form/versions:
     post:
       description: "The draft becomes the next immutable version and the current form. A blocked field: 422 events.form_blocked_field (no override). A warn_special or review_identifier field needs lint_override_reason (422 events.lint_override_required). A draft equal to the current version: 409 events.form_unchanged. An earlier key with another type, or a new required field after the first registration: 422 events.form_incompatible. Consent fields need a published consent text."
@@ -23159,6 +23271,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/events/{event_id}/publish:
     post:
       description: draft → published. An event with registration needs a published form version (422 events.form_required); an online or hybrid event needs online_url; a past event cannot be published.
@@ -23198,6 +23311,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/events/{event_id}/registrations:
     get:
       description: "The organiser's managers; support and platform_admin by break-glass (X-Koro-Access-Reason, 10–500 characters; never a sensitive event). The special-category answers are never in the list. Every list is audited. When the read concerns one user, the X-Koro-Access-Reason justification is shown to that user (support access notification; reason of the break_glass item of listMySecurityEvents): write no other person's data in it."
@@ -23355,6 +23469,7 @@ paths:
       x-koro-idempotency: required
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/events/{event_id}/registrations/{registration_id}:
     get:
       description: "answers_sensitive (special-category answers) for the organiser's managers only, never by break-glass. Every read is audited (metadata.sensitive_fields). When the read concerns one user, the X-Koro-Access-Reason justification is shown to that user (support access notification; reason of the break_glass item of listMySecurityEvents): write no other person's data in it."
@@ -23459,6 +23574,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/events/{event_id}/registrations/{registration_id}/decision:
     post:
       description: manual mode, pending registrations only (409 events.invalid_state otherwise). confirmed takes a seat (409 events.capacity_full) and issues the ticket; waitlisted needs the waiting list; the note is never shown to the student.
@@ -23507,6 +23623,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/events/{event_id}/registrations/{registration_id}/ticket/reissue:
     post:
       description: "The organiser's managers replace a confirmed registration's ticket (version + 1, the old QR revoked). The token is never returned: the registrant gets the new ticket by e-mail."
@@ -23558,6 +23675,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/events/{event_id}/staff:
     get:
       description: First name and the initial of the last name only.
@@ -23632,6 +23750,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/events/{event_id}/staff/{user_id}:
     delete:
       operationId: removeEventStaff
@@ -23668,6 +23787,7 @@ paths:
       x-koro-action: events.staff.manage
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
     patch:
       operationId: updateEventStaff
       parameters:
@@ -23713,6 +23833,7 @@ paths:
       x-koro-action: events.staff.manage
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/feed:
     get:
       description: Published posts the reader may see, newest first by (published_at, post_id). discover lists every visible post, following the posts of followed and member organizations. Muted organizations and hidden posts are left out; a minor gets no commercial post.
@@ -23822,6 +23943,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: upload
       x-koro-surface: self
+      x-koro-terms-gate: enforced
       x-koro-upload-rules:
         avatar:
           mime_types:
@@ -23950,6 +24072,7 @@ paths:
       x-koro-action: files.file.delete_own
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/files/{file_id}/complete:
     post:
       description: Verifies the uploaded object (size, SHA-256, magic bytes; 422 on a mismatch) and queues the virus scan. Repeating it with the same sha256 returns the current state.
@@ -24000,6 +24123,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/invitations/accept:
     post:
       description: The token comes from the invitation e-mail. The invitation must be addressed to the signed-in account's e-mail (otherwise 404); an expired one is 409 orgs.invitation_expired.
@@ -24033,6 +24157,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: token_confirm
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/invoices/{invoice_id}:
     get:
       description: The invoice with its lines, for its issuing and receiving organizations and finance.
@@ -24148,6 +24273,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/me:
     get:
       description: capabilities are menu hints, not authorization decisions.
@@ -24204,6 +24330,7 @@ paths:
       x-koro-action: identity.account.update_own
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/access-grants:
     get:
       description: "The companies you gave level 3 access to your full profile and current CV (you accepted their contact request), newest first. A grant is suspended while your student verification has lapsed: the company sees nothing, and the grant never reopens by itself; once verified again you may resume it until resumable_until, after which it ends. Any account lists its own grants, without a student verification."
@@ -24280,6 +24407,7 @@ paths:
       x-koro-action: students.access_grant.revoke
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: exempt
   /api/v1/me/access-grants/{grant_id}/resume:
     post:
       description: "Gives the named company level 3 access again to a grant suspended when your student verification lapsed: an explicit consent, possible only with an active student verification (403 students.verification_required) and only until resumable_until (409 students.resume_window_expired; the company then needs a new contact request). A grant that is not suspended is 409 students.invalid_state; another user's grant is 404. The company is not notified."
@@ -24324,6 +24452,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/access-grants/{grant_id}/revoke:
     post:
       description: The company loses level 3 access at once; a suspended grant ends too. No student verification is needed. The reason is optional and never shown to the company. Revoking a revoked grant changes nothing; another user's grant is 404.
@@ -24369,6 +24498,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: exempt
   /api/v1/me/club-claims:
     get:
       description: Newest first.
@@ -24450,6 +24580,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/club-events:
     get:
       description: Upcoming and running published events (not ended yet) of the clubs the caller is an active member of or follows, in one list. Visibility is listEvents' (a members-only event only for the club's members and the event's staff, a university event only for that university's verified students, the club's members and the staff), so a followed club's members-only events are not listed. The response does not say whether a club is followed or joined. Sorted by starts_at (soonest first); no total count.
@@ -24572,6 +24703,7 @@ paths:
       x-koro-action: messaging.block.manage
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
     put:
       description: The company can no longer send you contact requests and its pending requests are declined. The company is not told that you blocked it. Blocking twice changes nothing.
       operationId: blockCompany
@@ -24601,6 +24733,7 @@ paths:
       x-koro-action: messaging.block.manage
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/consents:
     get:
       operationId: listMyConsents
@@ -24703,6 +24836,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: exempt
   /api/v1/me/contact-requests:
     get:
       description: Newest first.
@@ -24852,6 +24986,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/cvs:
     get:
       description: "At most 3, oldest first. The current CV is the one a company with level 3 access may download. Without an active student verification (never verified, or lapsed): 403 students.verification_required, also for CVs stored while verified; they stay stored and are part of the KVKK data export (createMyDataRequest)."
@@ -24920,6 +25055,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/cvs/{cv_id}:
     delete:
       description: Hard delete, the file included. A deleted current CV leaves no current one until you pick another. Another user's CV is 404.
@@ -24950,6 +25086,7 @@ paths:
       x-koro-action: students.cv.manage
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/cvs/{cv_id}/current:
     post:
       description: The CV becomes the only current one. Another user's CV is 404.
@@ -24994,6 +25131,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/cvs/{cv_id}/download:
     get:
       description: A signed URL valid for 5 minutes (attachment). 409 files.not_clean while the virus scan is pending. Every download is audited. Another user's CV is 404.
@@ -25124,6 +25262,7 @@ paths:
       x-koro-rate-limit: export
       x-koro-reauth: true
       x-koro-surface: self
+      x-koro-terms-gate: exempt
   /api/v1/me/data-requests/{dsr_id}:
     get:
       operationId: getMyDataRequest
@@ -25209,6 +25348,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: exempt
   /api/v1/me/data-requests/{dsr_id}/export:
     get:
       description: A presigned URL valid for at most 5 minutes; every call is audited. The file is deleted 7 days after the request was answered (410 kvkk.export_expired); 404 kvkk.export_not_ready while it is built.
@@ -25306,6 +25446,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: auth_email
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/edu-verifications/document:
     post:
       description: For students without a .edu.tr address (open education). document_file_id is a completed edu_document upload of the caller (createUpload). The document waits for platform staff; one at a time (409 identity.edu_verification_pending).
@@ -25339,6 +25480,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/email-change:
     post:
       description: A confirmation link goes to the new address, a notice to the current one.
@@ -25373,6 +25515,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: self
+      x-koro-terms-gate: exempt
   /api/v1/me/follows:
     get:
       description: "Newest first. source: manual, or auto_membership for a follow that came with a membership."
@@ -25449,6 +25592,7 @@ paths:
       x-koro-action: feed.follow.manage
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
     put:
       description: "Idempotent. notify asks for a push digest of the organization's non-commercial posts (absent: unchanged). An automatic follow (membership) becomes the reader's own. The organization never sees who follows it."
       operationId: followOrg
@@ -25483,6 +25627,7 @@ paths:
       x-koro-action: feed.follow.manage
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/memberships:
     get:
       description: "Sensitive club memberships included (only for their owner). Default: pending and active."
@@ -25571,6 +25716,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/mfa/recovery-codes:
     post:
       description: reauth.totp_code is the proof; the old codes stop working.
@@ -25605,6 +25751,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: self
+      x-koro-terms-gate: exempt
   /api/v1/me/mfa/totp:
     post:
       description: reauth.password is the proof (06 H-46). Returns a new TOTP secret (only in this response; stored encrypted). An earlier unconfirmed enrollment is replaced. 409 identity.mfa_already_enabled when TOTP is on.
@@ -25639,6 +25786,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: self
+      x-koro-terms-gate: exempt
   /api/v1/me/mfa/totp/confirm:
     post:
       description: reauth.password is the proof (06 H-46). The first code from the authenticator turns MFA on and returns ten single-use recovery codes (shown once). The current session becomes MFA-verified. A wrong code is 422 identity.invalid_mfa_code.
@@ -25673,6 +25821,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: self
+      x-koro-terms-gate: exempt
   /api/v1/me/mfa/totp/disable:
     post:
       description: reauth.totp_code is the proof. Users holding a role that requires MFA (platform roles, university_rep, company_admin/owner) get 409 identity.mfa_required_by_role.
@@ -25703,6 +25852,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: self
+      x-koro-terms-gate: exempt
   /api/v1/me/mfa/verify:
     post:
       description: Step-up after a role that requires MFA arrived (403 authz.mfa_required). A code is accepted once; recovery codes are not accepted here.
@@ -25732,6 +25882,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: exempt
   /api/v1/me/mutes:
     get:
       description: Newest first.
@@ -25808,6 +25959,7 @@ paths:
       x-koro-action: feed.mute.manage
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
     put:
       description: The organization's posts leave the reader's feed (the feed's block); its page stays readable. Idempotent. Contact request blocks are separate (messaging).
       operationId: muteOrg
@@ -25837,6 +25989,7 @@ paths:
       x-koro-action: feed.mute.manage
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/notification-preferences:
     get:
       description: Every category × channel pair, defaults included. Commercial messages are governed by consents, not here.
@@ -25894,6 +26047,7 @@ paths:
       x-koro-action: notify.preference.update_own
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/notifications:
     get:
       description: Newest first. Texts are fixed per notification kind and carry no personal data; data holds opaque IDs only.
@@ -25979,6 +26133,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/notifications/{notification_id}/read:
     post:
       operationId: markMyNotificationRead
@@ -26018,6 +26173,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/org-relations:
     get:
       description: "The signed-in reader's own follow, mute and membership state of each organization asked (the buttons of an org page or card; BE-122). The public organization reads (getOrgBySlug, getClub, listClubs, searchOrgs) never carry the reader's state, so their anonymous responses stay cacheable; clients read this alongside, outside any shared cache. Every ID gets an item, existing or not: an unknown organization is following=false, muted=false, membership_status=none."
@@ -26087,6 +26243,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: self
+      x-koro-terms-gate: exempt
   /api/v1/me/privacy:
     get:
       description: "Everything is off until the student turns it on; the activity ranking choice starts at default. Without an active student verification (never verified, or lapsed): 403 students.verification_required; the stored settings are kept, but no company search or level 3 view shows the account meanwhile."
@@ -26154,6 +26311,7 @@ paths:
       x-koro-action: students.privacy.update_own
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: exempt
   /api/v1/me/push-tokens:
     post:
       description: Bound to the current session. Registering a known token again moves it to this account and session.
@@ -26197,6 +26355,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/push-tokens/{push_token_id}:
     delete:
       operationId: deleteMyPushToken
@@ -26226,6 +26385,7 @@ paths:
       x-koro-action: notify.push_token.manage
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: exempt
   /api/v1/me/registrations:
     get:
       description: The caller's registrations by the event's start (no answers); upcoming=true keeps events that have not ended.
@@ -26382,6 +26542,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/registrations/{registration_id}/ticket:
     get:
       description: "The QR payload (KORO1:<token>; no personal data, no URL) and the manual code of a confirmed or checked-in registration's active ticket; 409 events.invalid_state for any other registration. The payload is the same as in the ticket e-mail: the app may keep it to show the QR offline. Treat it as a secret."
@@ -26460,6 +26621,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/registrations/{registration_id}/ticket/resend:
     post:
       description: The same ticket (the same QR) is e-mailed again from the worker. At most 3 per hour (ticket_resend, 429). 409 events.invalid_state without an active ticket; 503 when the mail queue is down.
@@ -26500,6 +26662,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: ticket_resend
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/saved-posts:
     get:
       description: Newest save first. A saved post the reader may no longer see (removed, hidden by a moderator, out of the audience) is skipped.
@@ -26668,6 +26831,7 @@ paths:
       x-koro-action: identity.session.revoke_own
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: exempt
   /api/v1/me/staff-events:
     get:
       description: "Upcoming and running published events (not ended yet) the caller may scan tickets for: the events it is staff of (scanner or manager) and the events of the orgs it manages events of (club_admin, university_rep, career_staff; platform_admin for the platform org). Every listed event passes the same authorization as createCheckin. door_access tells what the caller may do at the door; checkin_enabled tells whether scanning is on. Sorted by starts_at (soonest first); no total count."
@@ -26771,6 +26935,7 @@ paths:
       x-koro-action: students.profile.update_own
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/student-profile/experiences:
     post:
       description: "At most 50. A club_role entry may name a sensitive club: it never reaches a company's anonymous view and reaches level 3 only when show_clubs_on_grant is on."
@@ -26814,6 +26979,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/student-profile/experiences/{experience_id}:
     delete:
       description: Hard delete. Another user's entry is 404.
@@ -26844,6 +27010,7 @@ paths:
       x-koro-action: students.profile_section.manage
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
     patch:
       description: Partial update; an empty string clears an optional member. Another user's entry is 404.
       operationId: updateMyExperience
@@ -26883,6 +27050,7 @@ paths:
       x-koro-action: students.profile_section.manage
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/student-profile/languages:
     put:
       description: The list replaces the current languages (at most 20; ISO 639 codes, CEFR levels or native).
@@ -26915,6 +27083,7 @@ paths:
       x-koro-action: students.profile_section.manage
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/student-profile/skills:
     put:
       description: The list replaces the current skills (at most 30, active catalog skills only).
@@ -26947,6 +27116,7 @@ paths:
       x-koro-action: students.profile_section.manage
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/terms-acceptances:
     post:
       description: When getMe answers terms.acceptance_required (a new version was published), the client shows the current terms and sends their notice_version_id here. Anything but the current terms of use of the caller's audience is 422 consent.terms_not_current. Accepting a version again changes nothing (same answer, so a retry is safe).
@@ -26990,6 +27160,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: self
+      x-koro-terms-gate: exempt
   /api/v1/notices/current:
     get:
       description: The published version of every notice for the audience (falling back to audience all) in the Accept-Language locale (falling back to tr-TR). Privacy notices are shown, never consented to.
@@ -27283,6 +27454,7 @@ paths:
       x-koro-action: catalog.offering.update
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/offerings/{offering_id}/cancel:
     post:
       description: Any offering that is not cancelled. Unpaid orders of it are cancelled and paid ones queued for refund (offering.cancelled).
@@ -27337,6 +27509,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/offerings/{offering_id}/submit:
     post:
       description: draft → pending_approval. The service must be reviewed (409 catalog.service_not_sellable), an organization's payee active (409 catalog.payee_not_active) with an approved bank account (409 parties.no_approved_account); what is missing is 422 catalog.offering_incomplete.
@@ -27385,6 +27558,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/order-lines/{line_id}/confirm:
     post:
       description: "The buyer confirms a marked line: it is fulfilled (buyer_confirmed)."
@@ -27429,6 +27603,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/order-lines/{line_id}/dispute:
     post:
       description: "The buyer disputes a marked line inside its dispute window (after it: 409 orders.dispute_window_closed); a platform or finance admin resolves it."
@@ -27479,6 +27654,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/order-lines/{line_id}/evidence:
     get:
       description: A URL valid for 5 minutes of the file the seller attached when marking the line delivered, for the buying company's administrators, the selling organization's club admins and university representatives, and finance and platform admins. A line without evidence is 404; 409 files.not_clean until the virus scan clears the file. Every download is audited.
@@ -27562,6 +27738,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/orders/{order_id}:
     get:
       description: "The buyer's members and platform staff get the whole order (view buyer: totals, payment, every line; never the commission). Only MFA-verified buyer administrators see approved payee bank instructions on an unpaid, unconfirmed model C order; bank access is audited. When a payee has no approved bank account (direct_payments_status unavailable) the order still reads in full without any payee account; only the payment instructions answer 409. A seller's club admin or university representative gets only its own lines with its net share and the commission, and the buyer's title (view seller). Anyone else: 404."
@@ -27646,6 +27823,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/orders/{order_id}/payment-instructions:
     get:
       description: "Koro's collection account, the reference code to write into the transfer description and the amount still due, while the order awaits payment (409 orders.invalid_state otherwise). Without an active collection account while Koro is owed money: 409 payments.no_active_collection_account. Model C adds one separate direct transfer per payee, visible only to MFA-verified buyer administrators until direct confirmation; each account access is audited."
@@ -27883,6 +28061,7 @@ paths:
       x-koro-action: orgs.org.update
       x-koro-rate-limit: write_default
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/audience-counts:
     post:
       description: "Level 0 (04 §V.2): a number only, never an identity or a sample. Below 10 students count is null and below_threshold true; from 10 on the count is rounded down (to 10 below 100, 50 below 1000, 100 below 10000, then 1000). Only audience eligible students count (verified, adult, active). The scope rules of createSegment apply. Each count spends the org's daily audience count budget (429 rate_limited when spent)."
@@ -27933,6 +28112,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: audience_count
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/audit-events:
     get:
       description: ip and user_agent are returned to dpo and platform_admin only.
@@ -28064,6 +28244,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/contact-requests:
     get:
       description: Newest first.
@@ -28178,6 +28359,7 @@ paths:
       x-koro-idempotency: required
       x-koro-rate-limit: contact_request
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/contact-requests/{request_id}:
     get:
       description: The student appears under the company's pseudonym; once the student accepted, student_user_id links the level 3 profile.
@@ -28270,6 +28452,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/discovery/profiles:
     get:
       description: Level 2 profiles of the students who chose to be discoverable, under this company's pseudonyms (anon_id). OR inside a filter (repeat the parameter), AND across filters; there is no club filter. Ordered by relevance to the skill and language filters, ties in an order fixed for the session; the order is the only trace of the ranking. When fewer than 10 students match in total the list is empty and below_threshold is true. Needs the discovery_access right; every search is audited.
@@ -28570,6 +28753,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/entitlement-usages:
     get:
       description: Consumptions (positive quantity) and their reversals (negative quantity), newest first. actor_user_id is returned to platform_admin and finance_admin only.
@@ -28868,6 +29052,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/invitations:
     get:
       operationId: listOrgInvitations
@@ -28960,6 +29145,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/invitations/{invitation_id}:
     delete:
       operationId: revokeOrgInvitation
@@ -28996,6 +29182,7 @@ paths:
       x-koro-action: orgs.invitation.revoke
       x-koro-rate-limit: write_default
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/invoices:
     get:
       description: "The invoices the organization issues (direction=issued: a payee's service invoices) and receives (direction=received: a company's invoices, Koro's commission invoices to a payee), newest first; both when direction is omitted. Planned invoices are the documents the commerce model expects (02 §18.3)."
@@ -29169,6 +29356,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/legal-parties/{party_id}:
     get:
       description: The ETag is the If-Match value of updateLegalParty. A party of another organization is 404.
@@ -29270,6 +29458,7 @@ paths:
       x-koro-action: parties.legal_party.update
       x-koro-rate-limit: write_default
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/legal-parties/{party_id}/documents:
     post:
       description: file_id is a party_document upload (createUpload, then completeUpload) of the caller or of this organization; any other file is 422. Finance verifies the document later.
@@ -29327,6 +29516,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/legal-parties/{party_id}/documents/{document_id}/download:
     get:
       description: "Returns a download URL valid for at most 5 minutes (Content-Disposition: attachment). Every download is audited. A file that is not scanned clean is 409 files.not_clean."
@@ -29563,6 +29753,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/members/{membership_id}/profile:
     get:
       description: The club_admin's view of an active member of the club (no e-mail, CV, skills or other clubs). A pending or ended membership, another club's member or a non-member caller is 404. A sensitive club's card is audited.
@@ -29646,6 +29837,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/members/{membership_id}/remove:
     post:
       description: The last club_admin and the company_owner cannot be removed (409 orgs.last_admin).
@@ -29689,6 +29881,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/members/{membership_id}/role:
     post:
       description: "The old membership ends (role_changed) and a new one starts: the answer carries the new membership_id. club_admin goes to verified adult students only (422 orgs.club_admin_requires_adult_student); company_owner moves by ownership transfer only; the last club_admin cannot be demoted (409 orgs.last_admin)."
@@ -29737,6 +29930,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/offering-approvals:
     get:
       description: org_id is a university; the offerings of its clubs that require its approval, oldest first.
@@ -29861,6 +30055,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/offerings:
     get:
       description: Drafts included, newest first, with the approval block.
@@ -29979,6 +30174,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/orders:
     get:
       description: Newest placement first.
@@ -30106,6 +30302,7 @@ paths:
       x-koro-idempotency: required
       x-koro-rate-limit: write_default
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/ownership-transfer:
     post:
       description: The new owner must be an active company_admin of the company (422 orgs.transfer_target_invalid). The former owner stays as company_admin; both users' sessions are closed.
@@ -30152,6 +30349,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/payees:
     get:
       description: The legal parties paid on behalf of a club or university, with their approved bank account (the IBAN masked for everyone here).
@@ -30376,6 +30574,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/payouts:
     get:
       description: Newest first. The IBAN is masked.
@@ -30580,6 +30779,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/sales:
     get:
       description: The seller's lines, newest first, with the order's reference and status and the buyer's title.
@@ -30758,6 +30958,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: audience_count
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/segments/{segment_id}:
     get:
       description: The ETag is the If-Match value of updateSegment.
@@ -30859,6 +31060,7 @@ paths:
       x-koro-action: outreach.segment.manage
       x-koro-rate-limit: audience_count
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/segments/{segment_id}/archive:
     post:
       description: Archiving an archived segment changes nothing.
@@ -30914,6 +31116,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/students:
     get:
       description: Students with an active level 3 grant of this company (they accepted its contact request) and an active student verification, newest grant first; q filters by name. Minors never appear.
@@ -31068,6 +31271,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/students/{user_id}/cv:
     get:
       description: A signed URL of the student's current CV, valid for 1 minute. Without an active grant, while the student's verification has lapsed, or without a current CV, 404; 409 files.not_clean while the virus scan is pending. Every call is audited.
@@ -31154,6 +31358,7 @@ paths:
       x-koro-idempotency: required
       x-koro-rate-limit: write_default
       x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/posts:
     get:
       description: "The published posts of an organization page the caller may see (anonymous: public, non-commercial posts only)."
@@ -31235,6 +31440,7 @@ paths:
       x-koro-action: feed.post.delete
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
     get:
       description: A post the caller may not see is 404. The author organization's writers get the management view (status, audience). The ETag is the If-Match value of updatePost.
       operationId: getPost
@@ -31318,6 +31524,7 @@ paths:
       x-koro-action: feed.post.update
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/posts/{post_id}/dispatches:
     post:
       description: "Schedules the notification of a targeted post's audience (at most one dispatch per post, 409 outreach.dispatch_exists); it runs once the post is published. A company's dispatch, and the dispatch of a sponsored post, is commercial: it reaches only the students whose commercial consent of the channel is in force, goes by push or e-mail (never in-app) and spends one targeted_dispatch unit (403 entitlements.not_entitled without one). A club's or university's informational notice needs neither consent nor a unit. Students under 18 and sensitive clubs are never reached; a club's notice to its own members goes to its member list. Counts are published estimates only (null below 10)."
@@ -31369,6 +31576,7 @@ paths:
       x-koro-idempotency: required
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/posts/{post_id}/hide:
     post:
       description: The post leaves the reader's feed (it stays on the organization page). Idempotent. The post must be a published post the reader may see (404 otherwise).
@@ -31400,6 +31608,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/posts/{post_id}/like:
     delete:
       description: "Idempotent: 204 whether or not the reader had liked the post."
@@ -31430,6 +31639,7 @@ paths:
       x-koro-action: feed.reaction.manage
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
     put:
       description: "Idempotent: a repeated like counts once. The post must be a published post the reader may see (404 otherwise). The author organization sees the like count only, never who liked."
       operationId: likePost
@@ -31459,6 +31669,7 @@ paths:
       x-koro-action: feed.reaction.manage
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/posts/{post_id}/publish:
     post:
       description: draft → published, or pending_review for a new organization's first posts (moderator approval). Images must be cleared by the virus scan (409 files.not_clean).
@@ -31494,6 +31705,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/posts/{post_id}/save:
     delete:
       description: "Idempotent: 204 whether or not the reader had saved the post."
@@ -31524,6 +31736,7 @@ paths:
       x-koro-action: feed.save.manage
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
     put:
       description: Idempotent. The post must be a published post the reader may see (404 otherwise). The author organization sees the save count only.
       operationId: savePost
@@ -31553,6 +31766,7 @@ paths:
       x-koro-action: feed.save.manage
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/posts/{post_id}/stats:
     get:
       description: "Like and save counts only: who liked or saved is never shown."
@@ -31620,6 +31834,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/services:
     get:
       description: "The services an organization may offer: active and reviewed by the accountant. Finance and platform admins see every service with its VAT profile."

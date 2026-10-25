@@ -492,7 +492,9 @@ func (c *smokeClient) status(method, path string, token ...string) int {
 	return st
 }
 
-// login signs in as a mobile client and returns the bearer token.
+// login signs in as a mobile client and returns the bearer token. Like the
+// clients (koro-web's TermsGate), it accepts the terms of use in force
+// when getMe asks for them (acceptTerms).
 func (c *smokeClient) login(email, password string) string {
 	c.t.Helper()
 	out := c.do(http.MethodPost, "/api/v1/auth/sessions", "", map[string]any{"email": email, "password": password}, nil, http.StatusOK)
@@ -500,7 +502,31 @@ func (c *smokeClient) login(email, password string) string {
 	if tok == "" {
 		c.t.Fatalf("sign-in of %s: no token: %v", email, out)
 	}
+	c.acceptTerms(tok)
 	return tok
+}
+
+// acceptTerms accepts the current terms of use of the session's account
+// when getMe asks for them: the demo accounts predate the seeded terms
+// (BE-118), and the terms gate refuses every write until then (BE-124) —
+// which it checks first on a write the gate covers (updateMe, refused
+// before its body is read).
+func (c *smokeClient) acceptTerms(token string) {
+	c.t.Helper()
+	me := c.do(http.MethodGet, "/api/v1/me", token, nil, nil, http.StatusOK)
+	terms, _ := me["terms"].(map[string]any)
+	if terms == nil || terms["acceptance_required"] != true {
+		return
+	}
+	if out, st := c.try(http.MethodPatch, "/api/v1/me", token, map[string]any{}); st != http.StatusForbidden ||
+		out["code"] != "consent.terms_acceptance_required" {
+		c.t.Fatalf("a write before accepting the terms = %d %v, want 403 consent.terms_acceptance_required", st, out)
+	}
+	id, _ := terms["current_notice_version_id"].(string)
+	got := c.do(http.MethodPost, "/api/v1/me/terms-acceptances", token, map[string]any{"notice_version_id": id}, nil, http.StatusOK)
+	if got["acceptance_required"] != false {
+		c.t.Fatalf("acceptTerms = %v", got)
+	}
 }
 
 // feedItem returns the item of postID in the reader's feed (first page).

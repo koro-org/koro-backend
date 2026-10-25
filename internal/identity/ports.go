@@ -47,6 +47,11 @@ type TermsLedger interface {
 	// TermsStatus returns the terms of use in force for the audience and
 	// locale and whether userID accepted them.
 	TermsStatus(ctx context.Context, userID uuid.UUID, aud consent.Audience, locale string) (consent.TermsStatus, error)
+	// Current returns the published version of key (consent.Notices:
+	// audience all, then locale tr-TR, as fallbacks) or consent.ErrNoNotice:
+	// the terms gate's view of the terms in force and the readers of a new
+	// version (BE-124).
+	Current(ctx context.Context, key consent.NoticeKey) (consent.Notice, error)
 }
 
 // NoticeInfo is what registration needs to know about the privacy notice

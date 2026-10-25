@@ -373,7 +373,9 @@ func (s *service) CreateNotice(ctx context.Context, a authz.Actor, in NoticeDraf
 
 // PublishNotice implements Service (adminPublishNotice): the current
 // version of the same key is retired in the same transaction, then the
-// draft is published. The notice becomes immutable.
+// draft is published. The notice becomes immutable. A terms of use version
+// is announced to Deps.TermsWatch in the transaction (BE-124: the readers
+// it applies to are told after the commit).
 func (s *service) PublishNotice(ctx context.Context, a authz.Actor, id uuid.UUID, proof ReauthProof) (Notice, error) {
 	return s.transition(ctx, a, id, proof, "publish", func(ctx context.Context, n Notice) (map[string]any, error) {
 		if n.Status() != StatusDraft {
@@ -391,7 +393,13 @@ func (s *service) PublishNotice(ctx context.Context, a authz.Actor, id uuid.UUID
 			}
 			meta["retired_notice_id"] = cur.ID.String()
 		}
-		return meta, s.d.Store.Publish(ctx, n.ID, now)
+		if err := s.d.Store.Publish(ctx, n.ID, now); err != nil {
+			return nil, err
+		}
+		if n.Kind == KindTermsOfUse && s.d.TermsWatch != nil {
+			s.d.TermsWatch.TermsPublished(ctx, n.ID)
+		}
+		return meta, nil
 	})
 }
 

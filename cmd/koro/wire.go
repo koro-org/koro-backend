@@ -210,6 +210,12 @@ type container struct {
 	// A module therefore sets actors only when it is nil.
 	actors httpx.ActorResolver
 
+	// terms answers the terms gate (httpx.TermsGate, BE-124): has the
+	// signed-in user accepted the terms of use in force. identity sets it in
+	// build (only when nil: tests may preset one); nil → apiMiddleware
+	// installs no gate.
+	terms httpx.TermsChecker
+
 	// privacy and sweepers are the KVKK registries read by kvkk (01 §3.3).
 	privacy  []privacy.Provider
 	sweepers []privacy.RetentionSweeper
@@ -437,13 +443,18 @@ func (c *container) workerMux(log *slog.Logger) (*queue.Mux, error) {
 	return mux, errors.Join(errs...)
 }
 
-// apiMiddleware installs the BE-006 operation middlewares on the root API,
-// after authentication and before any route is registered: the
-// x-koro-rate-limit class (unless disabled in dev) and Idempotency-Key
-// parsing (06 H-5: the key is stored by the service, not here).
+// apiMiddleware installs the operation middlewares on the root API, after
+// authentication and before any route is registered: the
+// x-koro-rate-limit class (unless disabled in dev; BE-006), the terms gate
+// (BE-124: a refused write still counts against its rate limit and is
+// refused before its Idempotency-Key is read) and Idempotency-Key parsing
+// (06 H-5: the key is stored by the service, not here).
 func (c *container) apiMiddleware(api huma.API, rateLimit bool) {
 	if rateLimit && c.infra.limiter != nil {
 		api.UseMiddleware(ratelimit.Middleware(api, c.infra.limiter, c.infra.log))
+	}
+	if c.terms != nil {
+		api.UseMiddleware(httpx.TermsGate(api, c.terms))
 	}
 	api.UseMiddleware(idempotency.Middleware(api))
 }

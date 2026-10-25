@@ -19,8 +19,20 @@ type followupHTTPResult struct {
 	err    error
 }
 
+// followupTimeouts lifts the server's own request and statement timeouts
+// (15 s each) above the test's lock-wait budget. A request held behind
+// the test's row lock lives until the test releases it; under CI load
+// (-race, the matrix in parallel) the next request could take longer than
+// 15 s to reach its lock, and the held refund was then rolled back
+// (REQUEST_TIMEOUT / DB_STATEMENT_TIMEOUT), so the payout saw no refund
+// and no lock (BE-115). The test bounds every wait with followupBudget.
+var followupTimeouts = map[string]string{"REQUEST_TIMEOUT": "5m", "DB_STATEMENT_TIMEOUT": "5m"}
+
+const followupBudget = 3 * time.Minute
+
 // Unlike the synchronous fixture helpers, an asynchronous request reports
 // errors to the owning test goroutine instead of calling Fatal from a worker.
+// It has no client timeout of its own: ctx bounds it.
 func followupPost(t *testing.T, e *commerceEnv, ctx context.Context, path, token string, body any, headers map[string]string) <-chan followupHTTPResult {
 	t.Helper()
 	raw, err := json.Marshal(body)
@@ -37,9 +49,11 @@ func followupPost(t *testing.T, e *commerceEnv, ctx context.Context, path, token
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
+	client := *e.c.http
+	client.Timeout = 0
 	done := make(chan followupHTTPResult, 1)
 	go func() {
-		resp, err := e.c.http.Do(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			done <- followupHTTPResult{err: err}
 			return
@@ -55,19 +69,32 @@ func followupPost(t *testing.T, e *commerceEnv, ctx context.Context, path, token
 	return done
 }
 
-func followupWaitLock(t *testing.T, e *commerceEnv, ctx context.Context, blockerPID int, advisory bool, done <-chan followupHTTPResult) int {
+// Lock waits are matched exactly: the refund is the session that waits for
+// the test's order row lock while holding the payee's advisory lock (the
+// ledger's LockPayees key, as pg_locks shows a bigint key: classid = high,
+// objid = low 32 bits); the payout is the session that waits for that same
+// advisory lock behind the refund. No other session (a worker job reading
+// the order, another request) can stand in for either.
+const (
+	followupRowWait = `SELECT coalesce((SELECT a.pid FROM pg_stat_activity a WHERE a.datname=current_database() AND a.pid<>pg_backend_pid()
+   AND $1=ANY(pg_blocking_pids(a.pid)) AND a.wait_event_type='Lock' AND a.query LIKE '%orders%' AND a.query LIKE '%FOR UPDATE%'
+   AND EXISTS (SELECT 1 FROM pg_locks l, (SELECT hashtextextended('ledger.payee:'||$2, 0) AS k) h WHERE l.pid=a.pid AND l.granted
+     AND l.locktype='advisory' AND l.objsubid=1 AND l.classid::bigint=((h.k>>32)&4294967295) AND l.objid::bigint=(h.k&4294967295))
+   LIMIT 1),0)`
+	followupAdvisoryWait = `SELECT coalesce((SELECT a.pid FROM pg_stat_activity a WHERE a.datname=current_database() AND a.pid<>pg_backend_pid()
+   AND $1=ANY(pg_blocking_pids(a.pid)) AND a.wait_event_type='Lock' AND a.wait_event='advisory'
+   AND EXISTS (SELECT 1 FROM pg_locks l, (SELECT hashtextextended('ledger.payee:'||$2, 0) AS k) h WHERE l.pid=a.pid AND NOT l.granted
+     AND l.locktype='advisory' AND l.objsubid=1 AND l.classid::bigint=((h.k>>32)&4294967295) AND l.objid::bigint=(h.k&4294967295))
+   LIMIT 1),0)`
+)
+
+func followupWaitLock(t *testing.T, e *commerceEnv, ctx context.Context, query string, blockerPID int, payee string, done <-chan followupHTTPResult) int {
 	t.Helper()
 	tick := time.NewTicker(10 * time.Millisecond)
 	defer tick.Stop()
 	for {
 		var waitingPID int
-		query := `SELECT coalesce((SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()
-   AND $1=ANY(pg_blocking_pids(pid)) AND wait_event_type='Lock' AND query LIKE '%orders%' AND query LIKE '%FOR UPDATE%' LIMIT 1),0)`
-		if advisory {
-			query = `SELECT coalesce((SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()
-   AND $1=ANY(pg_blocking_pids(pid)) AND wait_event_type='Lock' AND wait_event='advisory' LIMIT 1),0)`
-		}
-		if err := e.d.Pool.QueryRow(ctx, query, blockerPID).Scan(&waitingPID); err != nil {
+		if err := e.d.Pool.QueryRow(ctx, query, blockerPID, payee).Scan(&waitingPID); err != nil {
 			t.Fatal(err)
 		}
 		if waitingPID != 0 {
@@ -77,7 +104,7 @@ func followupWaitLock(t *testing.T, e *commerceEnv, ctx context.Context, blocker
 		case result := <-done:
 			t.Fatalf("operation ended without expected lock wait: %+v", result)
 		case <-ctx.Done():
-			t.Fatal(ctx.Err())
+			t.Fatalf("no expected lock wait behind pid %d: %v", blockerPID, ctx.Err())
 		case <-tick.C:
 		}
 	}
@@ -89,7 +116,7 @@ func followupWaitLock(t *testing.T, e *commerceEnv, ctx context.Context, blocker
 // seller share, leaving the earlier refunded share out of the clawback.
 func TestCommerce_RefundFollowups_PartialPayoutLaterClawback(t *testing.T) {
 	t.Parallel()
-	e := newCommerce(t)
+	e := newCommerce(t, followupTimeouts)
 	p := e.place(false)
 	capture := e.match(p, p.amount)
 	payment := capture["payment"].(map[string]any)["payment_id"]
@@ -102,13 +129,19 @@ func TestCommerce_RefundFollowups_PartialPayoutLaterClawback(t *testing.T) {
 	receipt := e.upload(e.finA, "refund_receipt")
 	body := map[string]any{"bank_reference": "SYNTHETIC-PARTIAL-REFUND", "receipt_file_id": receipt}
 	key := map[string]string{"Idempotency-Key": uuid.NewV7().String()}
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), followupBudget)
 	defer cancel()
 	blocker, err := e.d.Pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = blocker.Rollback(context.WithoutCancel(ctx)) }()
+	// The blocker sits idle in its transaction while the requests queue
+	// behind it; the pool's idle_in_transaction_session_timeout (30 s) would
+	// end it and release the row early under CI load (BE-115). ctx bounds it.
+	if _, err := blocker.Exec(ctx, `SET LOCAL idle_in_transaction_session_timeout = 0`); err != nil {
+		t.Fatal(err)
+	}
 	var blockerPID int
 	if err := blocker.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&blockerPID); err != nil {
 		t.Fatal(err)
@@ -117,9 +150,18 @@ func TestCommerce_RefundFollowups_PartialPayoutLaterClawback(t *testing.T) {
 		t.Fatal(err)
 	}
 	refundDone := followupPost(t, e, ctx, "/admin/refunds/"+rid+"/complete", e.finA, body, key)
-	refundPID := followupWaitLock(t, e, ctx, blockerPID, false, refundDone)
+	refundPID := followupWaitLock(t, e, ctx, followupRowWait, blockerPID, e.payee, refundDone)
 	payoutDone := followupPost(t, e, ctx, "/admin/payouts", e.finA, map[string]any{"payee_id": e.payee, "order_line_ids": []string{p.booth}}, map[string]string{"Idempotency-Key": uuid.NewV7().String()})
-	followupWaitLock(t, e, ctx, refundPID, true, payoutDone)
+	t.Cleanup(func() { // the other request's outcome, when a wait fails
+		if t.Failed() {
+			select {
+			case r := <-refundDone:
+				t.Logf("refund completion result: %+v", r)
+			default:
+			}
+		}
+	})
+	followupWaitLock(t, e, ctx, followupAdvisoryWait, refundPID, e.payee, payoutDone)
 	if err := blocker.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}

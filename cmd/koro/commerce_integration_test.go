@@ -56,7 +56,10 @@ type commerceOrder struct {
 	amount                int64
 }
 
-func newCommerce(t *testing.T) *commerceEnv {
+// newCommerce starts the commerce fixture; overrides replace (or add) its
+// environment variables, e.g. longer server timeouts for a test that holds
+// a request behind a lock (BE-115).
+func newCommerce(t *testing.T, overrides ...map[string]string) *commerceEnv {
 	t.Helper()
 	select {
 	case commerceSlot <- struct{}{}:
@@ -79,6 +82,11 @@ func newCommerce(t *testing.T) *commerceEnv {
 		"SMTP_HOST": smtpHost, "SMTP_PORT": strconv.Itoa(smtpPort), "SMTP_TLS": "none", "IDENTITY_LINK_BASE_URL": "http://localhost:3000",
 	} {
 		env[k] = v
+	}
+	for _, o := range overrides {
+		for k, v := range o {
+			env[k] = v
+		}
 	}
 	seedCmd(t, env, "reference")
 	seedCmd(t, env, "demo", "-password", demoPassword)

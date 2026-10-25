@@ -16,9 +16,21 @@ alarm='^\s*--- FAIL|^panic:|test timed out|WARNING: DATA RACE|race detected|smok
 noise='^([0-9]{4}/[0-9]{2}/[0-9]{2} [0-9:]{8} |  (Server Version|API Version|Operating System|Total Memory|Testcontainers for Go Version|Resolved Docker Host|Resolved Docker Socket Path|Test SessionID|Test ProcessID): )'
 case "${1:-}" in
 live)
-	jq -Rj --unbuffered "$parse"' | select(.Action == "build-output"
-		or (.Action == "output" and (.Test == null or (.Output | test($alarm)))))
-		| select(.Output | test($noise) | not) | .Output' --arg noise "$noise" --arg alarm "$alarm"
+	# A test's own lines (t.Fatal's message among them) are held until it
+	# ends: printed in front of its "--- FAIL", dropped when it passes, so
+	# `gh run view --log-failed` shows why a test failed (BE-115).
+	jq -nRj --unbuffered --arg noise "$noise" --arg alarm "$alarm" '
+		foreach (inputs | '"$parse"') as $e ({buf: {}, out: null};
+			($e.Package + " " + ($e.Test // "")) as $k
+			| if $e.Action == "build-output" or ($e.Action == "output" and $e.Test == null) then
+				.out = (if $e.Output | test($noise) then null else $e.Output end)
+			elif $e.Action == "output" and ($e.Output | test("^\\s*--- FAIL")) then
+				.out = ((.buf[$k] // []) + [$e.Output] | add) | .buf |= del(.[$k])
+			elif $e.Action == "output" and ($e.Output | test($alarm)) then .out = $e.Output
+			elif $e.Action == "output" and ($e.Output | test($noise) | not) then .buf[$k] += [$e.Output] | .out = null
+			elif $e.Action == "pass" or $e.Action == "skip" or $e.Action == "fail" then .buf |= del(.[$k]) | .out = null
+			else .out = null end;
+			.out | select(. != null))'
 	;;
 slowest)
 	echo "--- slowest packages (s)"

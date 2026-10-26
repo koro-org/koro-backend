@@ -24,8 +24,8 @@ func (w *ordersWiring) useMemStore() {
 // TestWire_Orders pins what the orders module provides and consumes: its
 // service and the Orders contract, catalog's per-buyer count (BE-038's
 // late binding), the closeOrg check, the KVKK provider, the subscriptions
-// of 01 §6.2 (offering.cancelled on the critical queue, the notices) and
-// the jobs of 01 §7.
+// of 01 §6.2 (offering.cancelled on the critical queue, the notices), the
+// dropped line's notice task (BE-134) and the jobs of 01 §7.
 func TestWire_Orders(t *testing.T) {
 	t.Parallel()
 	c := newTestContainer(t)
@@ -55,6 +55,9 @@ func TestWire_Orders(t *testing.T) {
 		if !slices.ContainsFunc(c.infra.subs.For(topic), func(s outbox.Subscription) bool { return s.Name == name }) {
 			t.Errorf("%s has no %s subscription", topic, name)
 		}
+	}
+	if !slices.ContainsFunc(c.infra.jobs.Tasks(), func(task queue.Task) bool { return task.Name == orders.NotifyLineDroppedTaskName }) {
+		t.Errorf("task %s is not handled", orders.NotifyLineDroppedTaskName)
 	}
 	for name, cron := range map[string]string{orders.ExpireJobName: "50 * * * *", orders.CloseWindowsJobName: "55 * * * *"} {
 		i := slices.IndexFunc(c.infra.jobs.Jobs(), func(j queue.Job) bool { return j.Name == name })

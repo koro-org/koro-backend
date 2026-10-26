@@ -32,7 +32,8 @@ import (
 // c.identity.svc (the notice addresses), identity's store (the finance
 // admins in effect, 06 H-33), c.notify.svc (read at call time), c.files.svc
 // (the delivery evidence: Get, Attach, PresignGet; BE-093),
-// c.infra.outbox, c.infra.idempotency and c.infra.cfg.Orders.
+// c.infra.outbox, c.infra.queue (the notices of a dropped line, BE-134),
+// c.infra.idempotency and c.infra.cfg.Orders.
 //
 // Provided, set in build: svc (orders.Service), orders (orders.Orders for
 // payments, ledger and billing), catalog's per-buyer count
@@ -91,7 +92,7 @@ func (w *ordersWiring) build(c *container) error {
 			a, found, err := h(ctx)
 			return orders.CollectionAccount{ID: a.ID, IBAN: a.IBAN, HolderName: a.HolderName, BankName: a.BankName}, found, err
 		},
-		Sender: ordersSender{c: c}, Staff: ordersStaff{c: c}, Files: c.files.svc,
+		Sender: ordersSender{c: c}, Staff: ordersStaff{c: c}, Files: c.files.svc, Queue: c.infra.queue,
 	}
 	if svc := c.identity.svc; svc != nil {
 		d.Users = svc
@@ -135,10 +136,14 @@ func (s ordersStaff) FinanceAdmins(ctx context.Context) ([]uuid.UUID, error) {
 
 // tasks: offering.cancelled → orders.cancel_offering_orders (critical);
 // order.placed, .cancelled, .expired, order_line.fulfillment_marked and
-// .fulfilled → the notices (01 §6.2); the jobs orders.expire_unpaid (:50)
+// .fulfilled → the notices (01 §6.2); the task without a topic
+// orders.notify_line_dropped (BE-134); the jobs orders.expire_unpaid (:50)
 // and orders.close_dispute_windows (:55) (01 §7).
 func (w *ordersWiring) tasks(c *container) {
 	w.mod.Subscribe(c.infra.subs)
+	for _, t := range w.mod.Tasks() {
+		c.infra.jobs.Handle(t)
+	}
 	for _, j := range w.mod.Jobs() {
 		c.infra.jobs.Schedule(j)
 	}

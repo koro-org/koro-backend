@@ -136,12 +136,39 @@ func (o Order) DirectToPayee() bool { return o.CollectionMethod == CollectDirect
 
 // KoroHeld is what Koro collected for line l of order o: its payable
 // amount, or only its buyer fee when the buyer paid the payee directly
-// (model C). A refund through Koro never exceeds it.
-func (o Order) KoroHeld(l Line) int64 {
-	if o.DirectToPayee() {
+// (model C); nothing of a line dropped before payment (BE-134: it is not
+// in what the buyer pays). A refund through Koro never exceeds it.
+func (o Order) KoroHeld(l Line) int64 { return koroHeld(o.DirectToPayee(), l) }
+
+// koroHeld is Order.KoroHeld and PayableOrder.KoroHeld (koroHeldSQL in the
+// GORM store says the same).
+func koroHeld(direct bool, l Line) int64 {
+	switch {
+	case l.Dropped():
+		return 0
+	case direct:
 		return l.BuyerFeeAmount
 	}
 	return l.PayableAmount
+}
+
+// LinesDroppable reports whether a line may still drop out of o (Q-28c,
+// BE-134): the order awaits payment and took no money — no transfer was
+// matched to it, not even in part, and no direct payment was confirmed
+// (model C). Once money arrived the order's amount is what was paid
+// against: an offering cancelled then ends the order through the
+// cancellation and refund flows instead (order_lines_drop_guard checks the
+// same).
+func (o Order) LinesDroppable() bool {
+	return o.Status == StatusAwaitingPayment && o.PaidAmount == 0 && o.DirectConfirmedAt == nil
+}
+
+// withTotals is o with the frozen amounts of t (placement, and the
+// recomputation after a line dropped: totalsOf of the live lines).
+func (o Order) withTotals(t orderTotals) Order {
+	o.SubtotalAmount, o.VATAmount, o.VATWithheldAmount, o.BuyerFeeAmount = t.Subtotal, t.VAT, t.VATWithheld, t.BuyerFee
+	o.TotalAmount, o.PayableAmount, o.KoroCollectAmount, o.DirectToPayeeAmount = t.Total, t.Payable, t.KoroCollect, t.DirectToPayee
+	return o
 }
 
 // Refundable is what may still be refunded through Koro on line l of o.
@@ -210,7 +237,11 @@ type Fulfillment string
 // dispute) or disputed. A platform-native line (a Koro feature right) is
 // not_applicable until payment and fulfilled (auto_platform) at payment. A
 // line of a cancelled offering (or a dispute resolved with a refund) is
-// cancelled: its money waits for a refund (RefundsDue, BE-043).
+// cancelled: its money waits for a refund (RefundsDue, BE-043). A line of
+// an offering cancelled while its order waited for payment and took no
+// money is cancelled and dropped (Line.DroppedAt; Q-28c, BE-134): it left
+// the order, whose amounts are the sums of its other lines, and carries no
+// money.
 const (
 	FulfillNotApplicable Fulfillment = "not_applicable"
 	FulfillPending       Fulfillment = "pending"
@@ -310,10 +341,30 @@ type Line struct {
 	// delivery_evidence file of the seller org, attached when the line is
 	// marked; BE-093). Once set it never changes (order_lines_evidence_frozen).
 	FulfillmentEvidenceFileID *uuid.UUID `gorm:"type:uuid;column:fulfillment_evidence_file_id"`
+
+	// DroppedAt is when the line left its unpaid order (its offering was
+	// cancelled; Q-28c, BE-134): the line is cancelled, its amounts stay as
+	// they were frozen but the order's totals no longer include them, and it
+	// is never paid, refunded nor paid out (order_lines_dropped_chk). Once
+	// set it never changes (order_lines_dropped_frozen).
+	DroppedAt *time.Time `gorm:"column:dropped_at"`
 }
 
 // TableName implements gorm's Tabler.
 func (Line) TableName() string { return "order_lines" }
+
+// Dropped reports whether the line left its unpaid order (BE-134).
+func (l Line) Dropped() bool { return l.DroppedAt != nil }
+
+// amounts are the frozen amounts of the line as priceLine computed them:
+// what totalsOf sums for its order.
+func (l Line) amounts() lineAmounts {
+	return lineAmounts{Net: l.NetAmount, VATRateBP: l.VATRateBP, VAT: l.VATAmount, WithholdingNum: l.VATWithholdingNum,
+		WithholdingDen: l.VATWithholdingDen, VATWithheld: l.VATWithheldAmount, Gross: l.GrossAmount,
+		CommissionRateBP: l.CommissionRateBP, CommissionBasis: l.CommissionBasis, CommissionPayer: l.CommissionPayer,
+		Commission: l.CommissionAmount, CommissionVATRateBP: l.CommissionVATRateBP, CommissionVAT: l.CommissionVATAmount,
+		BuyerFee: l.BuyerFeeAmount, SellerNet: l.SellerNetAmount, Payable: l.PayableAmount}
+}
 
 // PlatformNative reports whether the line is a Koro feature right (no
 // seller delivery: not_applicable until payment).

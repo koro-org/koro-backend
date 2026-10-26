@@ -9570,6 +9570,10 @@ components:
         dispute_window_ends_at:
           format: date-time
           type: string
+        dropped_at:
+          description: "Set when the line left the order before payment because its offering was cancelled (fulfillment_status cancelled): its amounts stay as they were, but the order's amounts no longer include them and nothing is paid, refunded or delivered for it"
+          format: date-time
+          type: string
         event_id:
           format: uuid
           type: string
@@ -12966,6 +12970,10 @@ components:
           description: The order's currency (ISO 4217) of the amounts
           type: string
         dispute_window_ends_at:
+          format: date-time
+          type: string
+        dropped_at:
+          description: "Set when the line left its order before payment because the offering was cancelled (fulfillment_status cancelled): nothing is paid for it"
           format: date-time
           type: string
         fulfillment_status:
@@ -29746,7 +29754,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/orders/{order_id}:
     get:
-      description: "The buyer's members and platform staff get the whole order (view buyer: totals, payment, every line; never the commission, never a payee bank account: the direct transfers of an unpaid model C order are in getOrderPaymentInstructions). MFA-verified buyer administrators get direct_payments_status; when a payee has no approved bank account (unavailable) the order still reads in full and only the payment instructions answer 409. A seller's club admin or university representative gets only its own lines with its net share and the commission, and the buyer's title (view seller). Anyone else: 404."
+      description: "The buyer's members and platform staff get the whole order (view buyer: totals, payment, every line; never the commission, never a payee bank account: the direct transfers of an unpaid model C order are in getOrderPaymentInstructions). MFA-verified buyer administrators get direct_payments_status; when a payee has no approved bank account (unavailable) the order still reads in full and only the payment instructions answer 409. A seller's club admin or university representative gets only its own lines with its net share and the commission, and the buyer's title (view seller). Anyone else: 404. A line with dropped_at left the unpaid order when its offering was cancelled: the order's amounts are the sums of the other lines."
       operationId: getOrder
       parameters:
         - description: Order ID (an unknown or malformed ID is 404)
@@ -29831,7 +29839,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/orders/{order_id}/payment-instructions:
     get:
-      description: "Koro's collection account, the reference code to write into the transfer description and the amount still due, while the order awaits payment (409 orders.invalid_state otherwise). Without an active collection account while Koro is owed money: 409 payments.no_active_collection_account. Model C adds one separate direct transfer per payee, visible only to MFA-verified buyer administrators until direct confirmation; each account access is audited."
+      description: "Koro's collection account, the reference code to write into the transfer description and the amount still due, while the order awaits payment (409 orders.invalid_state otherwise). Without an active collection account while Koro is owed money: 409 payments.no_active_collection_account. Model C adds one separate direct transfer per payee, visible only to MFA-verified buyer administrators until direct confirmation; each account access is audited. After a line dropped out of the order (its offering was cancelled before payment) the amounts and the direct transfers are those of the lines left; a transfer of the previous amount is applied up to what the order waits for and the rest is refunded as an overpayment."
       operationId: getOrderPaymentInstructions
       parameters:
         - description: Order ID (an unknown or malformed ID is 404)
@@ -32214,7 +32222,7 @@ paths:
       x-koro-rate-limit: read_default
       x-koro-surface: org
     post:
-      description: "A company admin buys offerings for the company, billed to a verified buyer party of the company (422 orders.buyer_party_required). The lines are the cart: 1-20 offerings of any sellers, one line each. Prices, VAT, withholding and commission are computed per line on the server from the offering and the commerce policy in effect (none: 409 catalog.no_commerce_policy); lines under different money models become separate orders, each with its own reference code, while the lines of several sellers under one model share one order and one transfer. The stock of every line is reserved in the same transaction: when one line is refused (sold out, not on sale, the per-buyer limit, no policy, an inactive payee) nothing is placed and the problem's errors[].location names the line (body.lines[i].offering_id). An unpaid order expires after the payment window and releases its stock."
+      description: "A company admin buys offerings for the company, billed to a verified buyer party of the company (422 orders.buyer_party_required). The lines are the cart: 1-20 offerings of any sellers, one line each. Prices, VAT, withholding and commission are computed per line on the server from the offering and the commerce policy in effect (none: 409 catalog.no_commerce_policy); lines under different money models become separate orders, each with its own reference code, while the lines of several sellers under one model share one order and one transfer. The stock of every line is reserved in the same transaction: when one line is refused (sold out, not on sale, the per-buyer limit, no policy, an inactive payee) nothing is placed and the problem's errors[].location names the line (body.lines[i].offering_id). An unpaid order expires after the payment window and releases its stock. When an offering of an unpaid order is cancelled before any money arrived, only its line leaves the order (lines[].dropped_at): the reference code stays, the amounts become the sums of the other lines and the buyer is told; the last line, or money already paid, cancels the order."
       operationId: createOrder
       parameters:
         - description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
@@ -33017,7 +33025,7 @@ paths:
       x-koro-surface: org
   /api/v1/orgs/{org_id}/sales:
     get:
-      description: The seller's lines, newest first, with the order's reference and status and the buyer's title.
+      description: The seller's lines, newest first, with the order's reference and status and the buyer's title. A line with dropped_at left its unpaid order when the offering was cancelled.
       operationId: listOrgSales
       parameters:
         - description: Organization ID (an unknown or malformed ID is 404)

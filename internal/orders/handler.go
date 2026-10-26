@@ -33,7 +33,9 @@ func Register(api huma.API, svc Service) {
 			"one order and one transfer. The stock of every line is reserved in the same transaction: when one line is " +
 			"refused (sold out, not on sale, the per-buyer limit, no policy, an inactive payee) nothing is placed and the " +
 			"problem's errors[].location names the line (body.lines[i].offering_id). An unpaid order expires after the " +
-			"payment window and releases its stock.",
+			"payment window and releases its stock. When an offering of an unpaid order is cancelled before any money " +
+			"arrived, only its line leaves the order (lines[].dropped_at): the reference code stays, the amounts become " +
+			"the sums of the other lines and the buyer is told; the last line, or money already paid, cancels the order.",
 	}, op.Meta{Action: string(authz.OrdersOrderCreate), Surface: op.SurfaceOrg, Idempotency: op.IdempotencyRequired}, h.create)
 
 	op.Register(api, "orders", huma.Operation{
@@ -50,7 +52,9 @@ func Register(api huma.API, svc Service) {
 			"are in getOrderPaymentInstructions). MFA-verified buyer administrators get direct_payments_status; when a " +
 			"payee has no approved bank account (unavailable) the order still reads in full and only the payment " +
 			"instructions answer 409. A seller's club admin or university representative gets only its " +
-			"own lines with its net share and the commission, and the buyer's title (view seller). Anyone else: 404.",
+			"own lines with its net share and the commission, and the buyer's title (view seller). Anyone else: 404. " +
+			"A line with dropped_at left the unpaid order when its offering was cancelled: the order's amounts are the " +
+			"sums of the other lines.",
 	}, op.Meta{Action: string(authz.OrdersOrderRead), Surface: op.SurfaceResource}, h.get)
 
 	op.Register(api, "orders", huma.Operation{
@@ -60,7 +64,9 @@ func Register(api huma.API, svc Service) {
 			"amount still due, while the order awaits payment (409 orders.invalid_state otherwise). Without an active " +
 			"collection account while Koro is owed money: 409 payments.no_active_collection_account. Model C adds " +
 			"one separate direct transfer per payee, visible only to MFA-verified buyer administrators until direct " +
-			"confirmation; each account access is audited.",
+			"confirmation; each account access is audited. After a line dropped out of the order (its offering was " +
+			"cancelled before payment) the amounts and the direct transfers are those of the lines left; a transfer of " +
+			"the previous amount is applied up to what the order waits for and the rest is refunded as an overpayment.",
 	}, op.Meta{Action: string(authz.OrdersOrderPaymentInstructions), Surface: op.SurfaceResource}, h.instructions)
 
 	op.Register(api, "orders", huma.Operation{
@@ -72,8 +78,9 @@ func Register(api huma.API, svc Service) {
 
 	op.Register(api, "orders", huma.Operation{
 		OperationID: "listOrgSales", Method: http.MethodGet, Path: "/orgs/{org_id}/sales",
-		Summary:     "List the sold order lines of an organization",
-		Description: "The seller's lines, newest first, with the order's reference and status and the buyer's title.",
+		Summary: "List the sold order lines of an organization",
+		Description: "The seller's lines, newest first, with the order's reference and status and the buyer's title. " +
+			"A line with dropped_at left its unpaid order when the offering was cancelled.",
 	}, op.Meta{Action: string(authz.OrdersLineListSales), Surface: op.SurfaceOrg}, h.sales)
 
 	op.Register(api, "orders", huma.Operation{
@@ -178,6 +185,7 @@ type OrderLineDTO struct {
 	FulfilledAt         *time.Time       `json:"fulfilled_at,omitempty"`
 	FulfilledVia        string           `json:"fulfilled_via,omitempty"`
 	HasEvidence         bool             `json:"has_fulfillment_evidence" doc:"The seller attached a delivery evidence file (getOrderLineEvidence)"`
+	DroppedAt           *time.Time       `json:"dropped_at,omitempty" doc:"Set when the line left the order before payment because its offering was cancelled (fulfillment_status cancelled): its amounts stay as they were, but the order's amounts no longer include them and nothing is paid, refunded or delivered for it"`
 	Seller              SellerRefDTO     `json:"seller"`
 }
 
@@ -257,8 +265,8 @@ func orderDTO(v OrderView) OrderDTO {
 			VATWithheldAmount: l.VATWithheldAmount, GrossAmount: l.GrossAmount, BuyerFeeAmount: l.BuyerFeeAmount,
 			PayableAmount: l.PayableAmount, FulfillmentStatus: string(l.FulfillmentStatus),
 			DisputeWindowEndsAt: db.UTCPtr(l.DisputeWindowEndsAt), FulfilledAt: db.UTCPtr(l.FulfilledAt),
-			HasEvidence: l.FulfillmentEvidenceFileID != nil,
-			Seller:      SellerRefDTO{OrgID: l.SellerOrgID.String(), Name: v.Sellers[l.SellerOrgID]},
+			HasEvidence: l.FulfillmentEvidenceFileID != nil, DroppedAt: db.UTCPtr(l.DroppedAt),
+			Seller: SellerRefDTO{OrgID: l.SellerOrgID.String(), Name: v.Sellers[l.SellerOrgID]},
 		}
 		for i, x := range l.DeliverablesSnapshot {
 			d.Deliverables[i] = DeliverableDTO(x)
@@ -582,6 +590,7 @@ type SellerLineDTO struct {
 	DisputeWindowEndsAt *time.Time `json:"dispute_window_ends_at,omitempty"`
 	PaidOutAt           *time.Time `json:"paid_out_at,omitempty"`
 	HasEvidence         bool       `json:"has_fulfillment_evidence" doc:"A delivery evidence file is attached (getOrderLineEvidence)"`
+	DroppedAt           *time.Time `json:"dropped_at,omitempty" doc:"Set when the line left its order before payment because the offering was cancelled (fulfillment_status cancelled): nothing is paid for it"`
 }
 
 type salesInput struct {
@@ -621,7 +630,7 @@ func (h handler) sales(ctx context.Context, in *salesInput) (*salesOutput, error
 			OrderStatus: string(it.OrderStatus), Currency: it.Currency, BuyerTitle: it.BuyerTitle, TitleSnapshot: l.TitleSnapshot, Quantity: l.Quantity,
 			GrossAmount: l.GrossAmount, SellerNetAmount: l.SellerNetAmount, FulfillmentStatus: string(l.FulfillmentStatus),
 			DisputeWindowEndsAt: db.UTCPtr(l.DisputeWindowEndsAt), PaidOutAt: db.UTCPtr(l.PaidOutAt),
-			HasEvidence: l.FulfillmentEvidenceFileID != nil}
+			HasEvidence: l.FulfillmentEvidenceFileID != nil, DroppedAt: db.UTCPtr(l.DroppedAt)}
 	}
 	if k := p.Next; k != nil {
 		out.Body.NextCursor = page.Next(sortCreated, fp, page.TimeVal(k.At), page.UUIDVal(k.ID))

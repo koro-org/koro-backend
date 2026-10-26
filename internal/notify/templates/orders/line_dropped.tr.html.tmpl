@@ -1,0 +1,4 @@
+<p style="margin:0 0 12px 0;">Merhaba {{index .Data "name"}},</p>
+<p style="margin:0 0 12px 0;">Siparişinizdeki bir teklif ödemeden önce iptal edildi; bu nedenle kalemi ({{index .Data "line_title"}}) çıkarıldı ve sipariş tutarı yeniden hesaplandı. Diğer kalemler siparişte kalır.</p>
+<p style="margin:0 0 12px 0;">Referans kodu: <strong>{{index .Data "reference_code"}}</strong> (değişmedi)<br>Ödenecek yeni tutar: {{index .Data "amount"}} {{index .Data "currency"}}<br>Son ödeme: {{index .Data "expires_at"}} (Türkiye saati)</p>
+<p style="margin:0;">Yalnız yeni tutarı ödeyin ve havale açıklamasına yalnız referans kodunu yazın. Önceki tutarı gönderdiyseniz fark size iade edilir.</p>

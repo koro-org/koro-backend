@@ -3,6 +3,7 @@ package orders
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 	"uuid"
 
@@ -22,6 +23,9 @@ var constraints = db.Constraints{
 	"order_lines_refunded_limit_chk":    ErrRefundExceedsPaid,
 	"order_lines_payout_line_chk":       ErrInvalidState,
 	"order_lines_seller_net_amount_chk": ErrCommissionExceedsShare,
+	"order_lines_drop_unpaid":           ErrInvalidState, // 000157: the order took money (BE-134)
+	"orders_amounts_frozen":             ErrInvalidState, // 000157: the totals are not the live lines'
+	"order_lines_dropped_chk":           ErrInvalidState,
 }
 
 type gormStore struct{ orm *gorm.DB }
@@ -184,6 +188,62 @@ func (s gormStore) UpdateLine(ctx context.Context, l Line, from Fulfillment) (Li
 	return rows[0], nil
 }
 
+// DropLines implements Store (BE-134): the lines first, then the order's
+// amounts — written only when they are the sums of the live lines (the
+// in-memory store's rule; orders_amounts_guard and, at commit,
+// orders_totals_match_lines check the same) — in one savepoint of the
+// caller's transaction. The dropped lines come back in creation order.
+//
+// cross-org: the lines are addressed with their order, the order by ID
+// after the service read it under its row lock.
+func (s gormStore) DropLines(ctx context.Context, o Order, lineIDs []uuid.UUID, at time.Time) (Order, []Line, error) {
+	if len(lineIDs) == 0 {
+		return Order{}, nil, ErrInvalidState
+	}
+	var (
+		stored []Order
+		lines  []Line
+	)
+	err := db.Conn(ctx, s.orm).Transaction(func(q *gorm.DB) error {
+		err := q.Raw(`UPDATE order_lines SET fulfillment_status = 'cancelled', dropped_at = @at
+			WHERE id IN @ids AND order_id = @order AND dropped_at IS NULL AND fulfillment_status IN ('pending', 'not_applicable')
+			RETURNING *`, map[string]any{"ids": lineIDs, "order": o.ID, "at": at}).Scan(&lines).Error
+		switch {
+		case err != nil:
+			return fmt.Errorf("orders: drop lines: %w", constraints.Translate(err))
+		case len(lines) != len(lineIDs):
+			return ErrInvalidState
+		}
+		err = q.Raw(`UPDATE orders SET subtotal_amount = @subtotal, vat_amount = @vat, vat_withheld_amount = @withheld,
+			buyer_fee_amount = @fee, total_amount = @total, payable_amount = @payable, koro_collect_amount = @collect,
+			direct_to_payee_amount = @direct
+			WHERE id = @id AND status = 'awaiting_payment' AND paid_amount = 0 AND direct_confirmed_at IS NULL
+			  AND ( @subtotal, @vat, @withheld, @fee, @payable) = (SELECT sum(net_amount), sum(vat_amount), sum(vat_withheld_amount),
+			      sum(buyer_fee_amount), sum(payable_amount) FROM order_lines WHERE order_id = @id AND dropped_at IS NULL)
+			RETURNING *`, map[string]any{
+			"id": o.ID, "subtotal": o.SubtotalAmount, "vat": o.VATAmount, "withheld": o.VATWithheldAmount, "fee": o.BuyerFeeAmount,
+			"total": o.TotalAmount, "payable": o.PayableAmount, "collect": o.KoroCollectAmount, "direct": o.DirectToPayeeAmount,
+		}).Scan(&stored).Error
+		switch {
+		case err != nil:
+			return fmt.Errorf("orders: drop lines: order amounts: %w", constraints.Translate(err))
+		case len(stored) == 0:
+			return ErrInvalidState
+		}
+		return nil
+	})
+	if err != nil {
+		return Order{}, nil, err
+	}
+	slices.SortFunc(lines, func(a, b Line) int {
+		if c := a.CreatedAt.Compare(b.CreatedAt); c != 0 {
+			return c
+		}
+		return compareUUID(a.ID, b.ID)
+	})
+	return stored[0], lines, nil
+}
+
 // keyset adds "(col, id) < (at, id)" for a newest-first page.
 func keyset(q *gorm.DB, col string, after *TimeKey) *gorm.DB {
 	if after == nil {
@@ -276,8 +336,10 @@ func (s gormStore) WindowsElapsed(ctx context.Context, now time.Time, limit int)
 }
 
 // koroHeldSQL is Order.KoroHeld of line l of order o: a model C order's
-// line holds only its buyer fee at Koro (the rest went to the payee).
-const koroHeldSQL = `(CASE WHEN o.collection_method = 'direct_to_payee' THEN l.buyer_fee_amount ELSE l.payable_amount END)`
+// line holds only its buyer fee at Koro (the rest went to the payee), a
+// line dropped before payment nothing (BE-134).
+const koroHeldSQL = `(CASE WHEN l.dropped_at IS NOT NULL THEN 0 WHEN o.collection_method = 'direct_to_payee' THEN l.buyer_fee_amount
+	ELSE l.payable_amount END)`
 
 // refundDueLineSQL is a cancelled line of a paid order whose money Koro
 // still holds (o: the order, l: the line; the in-memory refundDueLine):
@@ -424,7 +486,7 @@ func (s gormStore) RefundsDue(ctx context.Context, limit int) ([]RefundDue, erro
 func (s gormStore) CollectedLines(ctx context.Context, after uuid.UUID, platformOnly bool, limit int) ([]Line, error) {
 	var rows []Line
 	err := db.Conn(ctx, s.orm).Raw(`SELECT l.* FROM order_lines l JOIN orders o ON o.id = l.order_id
-		WHERE l.id > @after AND o.paid_at IS NOT NULL AND o.collection_method <> 'direct_to_payee'
+		WHERE l.id > @after AND o.paid_at IS NOT NULL AND o.collection_method <> 'direct_to_payee' AND l.dropped_at IS NULL
 		  AND (NOT @platform OR l.payee_id IS NULL)
 		ORDER BY l.id LIMIT @limit`, map[string]any{"after": after, "platform": platformOnly, "limit": limit}).Scan(&rows).Error
 	if err != nil {

@@ -1,0 +1,4 @@
+<p style="margin:0 0 12px 0;">Hello {{index .Data "name"}},</p>
+<p style="margin:0 0 12px 0;">An offering of your order was cancelled before payment, so its line ({{index .Data "line_title"}}) was removed and the order amount was recalculated. The other lines stay in the order.</p>
+<p style="margin:0 0 12px 0;">Reference code: <strong>{{index .Data "reference_code"}}</strong> (unchanged)<br>New amount to pay: {{index .Data "amount"}} {{index .Data "currency"}}<br>Pay by: {{index .Data "expires_at"}} (Türkiye time)</p>
+<p style="margin:0;">Pay only the new amount and write only the reference code into the transfer description. If you already sent the previous amount, the difference is refunded to you.</p>

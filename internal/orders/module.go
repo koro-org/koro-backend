@@ -22,7 +22,9 @@
 //   - Money (06 H-6, ADR-0014): the request carries offerings and
 //     quantities only; every amount comes from catalog (price, VAT rate,
 //     VAT class, withholding) and the commerce policy in effect, computed per
-//     line (pricing.go) and frozen (orders_frozen, order_lines_frozen).
+//     line (pricing.go) and frozen (order_lines_frozen; the order's totals
+//     change only when a line drops from an unpaid order, BE-134:
+//     orders_amounts_guard).
 //     Without a policy in effect there is no order (409
 //     catalog.no_commerce_policy; T-10: production has no default rate
 //     until the team decides it). Lines of different models are split
@@ -39,9 +41,21 @@
 //     policy, an inactive payee) refuses the cart, nothing stays reserved,
 //     and the problem names the line (errors[].location
 //     body.lines[i].offering_id). Delivery, refunds, invoices and payouts
-//     are per line; an unpaid order whose offering is cancelled is
-//     cancelled whole (its amounts are frozen; the buyer orders the rest
-//     again).
+//     are per line.
+//   - A cancelled offering in an unpaid cart (Q-28c, BE-134; drop.go): an
+//     order awaiting payment that took no money (nothing paid, no transfer
+//     matched even in part, no direct payment confirmed) drops only that
+//     line — cancelled with dropped_at, its units back, its pending rights
+//     revoked — and keeps its other lines and its reference code; its
+//     amounts become the sums of the lines left (totalsOf of their frozen
+//     per-line amounts, kuruş), the buyer (e-mail + in-app) and the seller
+//     are told. Dropping the last line, or a line of an order that already
+//     took money, cancels the order whole (paid money waits for a refund).
+//     A transfer of the old amount that arrives later is applied up to the
+//     new amount and payments refunds the rest as an overpayment. A dropped
+//     line carries no money: it is never paid, refunded, invoiced, allocated
+//     nor paid out (order_lines_dropped_chk; the drop and amount guards of
+//     000157).
 //   - Idempotency-Key (06 H-5): placement is one transaction — offering,
 //     policy, payee, stock reservation, the orders and lines, the pending
 //     rights and order.placed (O) — and the key is stored in it, so a
@@ -59,8 +73,9 @@
 //     order expires (orders.expire_unpaid), its units go back to the
 //     offerings and its pending rights are revoked; a cancelled order
 //     likewise. An offering cancelled after the order (offering.cancelled)
-//     cancels the unpaid orders and queues the undelivered lines of paid
-//     ones for refund (RefundsDue; BE-043 refunds them).
+//     drops its line from the unpaid orders (see the cart above) and
+//     queues the undelivered lines of paid ones for refund (RefundsDue;
+//     BE-043 refunds them).
 //   - Delivery: a line is marked only on a paid order; the dispute window
 //     of the frozen policy (dispute_window_days) starts then; the buyer
 //     confirms or disputes it inside the window; orders.close_dispute_windows
@@ -233,6 +248,10 @@ type Deps struct {
 	// evidence and the evidence download fail closed (503); a mark
 	// without evidence works.
 	Files Files
+	// Queue queues the notices of a line dropped from an unpaid order after
+	// the commit (orders.notify_line_dropped, BE-134). nil → the notices are
+	// left out (logged); the drop itself works.
+	Queue queue.Enqueuer
 }
 
 func (d Deps) validate() error {

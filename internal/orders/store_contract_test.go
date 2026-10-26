@@ -441,6 +441,81 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (orders.Store, worl
 		}
 	})
 
+	t.Run("dropping a line of an unpaid order (BE-134)", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		b, kept, gone := w.buyer(t), w.seller(t), w.seller(t)
+		f := newFixture(b, t0, []offeringRef{w.offering(t, kept), w.offering(t, gone)}, []sellerRef{kept, gone})
+		insert(t, s, f)
+		keep, drop := f.lines[0], f.lines[1]
+		next := f.o
+		next.SubtotalAmount, next.VATAmount, next.TotalAmount = keep.NetAmount, keep.VATAmount, keep.GrossAmount
+		next.PayableAmount, next.KoroCollectAmount = keep.PayableAmount, keep.PayableAmount
+		at := t0.Add(time.Hour)
+		for name, call := range map[string]func() error{
+			"the old amounts": func() error { _, _, err := s.DropLines(ctx, f.o, []uuid.UUID{drop.ID}, at); return err },
+			"every line": func() error {
+				zero := f.o
+				zero.SubtotalAmount, zero.VATAmount, zero.TotalAmount, zero.PayableAmount, zero.KoroCollectAmount = 0, 0, 0, 0, 0
+				_, _, err := s.DropLines(ctx, zero, []uuid.UUID{keep.ID, drop.ID}, at)
+				return err
+			},
+			"a line of another order": func() error { _, _, err := s.DropLines(ctx, next, []uuid.UUID{uuid.NewV7()}, at); return err },
+			"no line":                 func() error { _, _, err := s.DropLines(ctx, next, nil, at); return err },
+		} {
+			problemtest.WantErr(t, call(), orders.ErrInvalidState)
+			if got, _ := s.GetOrder(ctx, f.o.ID, false); got.PayableAmount != f.o.PayableAmount {
+				t.Fatalf("%s: the refused drop wrote the order (%d)", name, got.PayableAmount)
+			}
+			if l, _ := s.GetLine(ctx, drop.ID, false); l.Dropped() || l.FulfillmentStatus != orders.FulfillPending {
+				t.Fatalf("%s: the refused drop wrote the line (%+v)", name, l)
+			}
+		}
+		if n, err := s.BuyerHeld(ctx, drop.OfferingID, b.org); err != nil || n != 1 {
+			t.Fatalf("BuyerHeld before the drop = %d, %v", n, err)
+		}
+		o, dropped, err := s.DropLines(ctx, next, []uuid.UUID{drop.ID}, at)
+		if err != nil || o.PayableAmount != keep.PayableAmount || o.KoroCollectAmount != keep.PayableAmount || o.Status != orders.StatusAwaitingPayment ||
+			o.OrderNo != f.o.OrderNo || len(dropped) != 1 || dropped[0].ID != drop.ID || !dropped[0].Dropped() ||
+			dropped[0].FulfillmentStatus != orders.FulfillCancelled || !dropped[0].DroppedAt.Equal(at) || dropped[0].PayableAmount != drop.PayableAmount {
+			t.Fatalf("DropLines = %+v, %+v, %v", o, dropped, err)
+		}
+		_, _, err = s.DropLines(ctx, next, []uuid.UUID{drop.ID}, at)
+		problemtest.WantErr(t, err, orders.ErrInvalidState)
+		if n, err := s.BuyerHeld(ctx, drop.OfferingID, b.org); err != nil || n != 0 {
+			t.Fatalf("BuyerHeld after the drop = %d, %v", n, err)
+		}
+		gotLine, err := s.GetLine(ctx, drop.ID, false)
+		if err != nil || !gotLine.Dropped() {
+			t.Fatalf("GetLine = %+v, %v", gotLine, err)
+		}
+		refunded := gotLine
+		refunded.RefundedAmount = 1
+		if _, err := s.UpdateLine(ctx, refunded, orders.FulfillCancelled); err == nil {
+			t.Fatal("a dropped line was refunded")
+		}
+		paid := pay(t, s, o)
+		if paid.PaidAmount != keep.PayableAmount {
+			t.Fatalf("paid = %+v", paid)
+		}
+		_, _, err = s.DropLines(ctx, paid, []uuid.UUID{keep.ID}, at)
+		problemtest.WantErr(t, err, orders.ErrInvalidState)
+		if due, err := s.RefundsDue(ctx, 10); err != nil || len(due) != 0 {
+			t.Fatalf("RefundsDue = %+v, %v (a dropped line holds no money)", due, err)
+		}
+		if open, err := s.HasOpenCommerce(ctx, gone.org); err != nil || open {
+			t.Fatalf("HasOpenCommerce(the dropped line's seller) = %v, %v", open, err)
+		}
+		if open, err := s.HasOpenCommerce(ctx, kept.org); err != nil || !open {
+			t.Fatalf("HasOpenCommerce(the live line's seller) = %v, %v", open, err)
+		}
+		collected, err := s.CollectedLines(ctx, uuid.Nil(), false, 100)
+		if err != nil || slices.ContainsFunc(collected, func(l orders.Line) bool { return l.ID == drop.ID }) ||
+			!slices.ContainsFunc(collected, func(l orders.Line) bool { return l.ID == keep.ID }) {
+			t.Fatalf("CollectedLines = %+v, %v", collected, err)
+		}
+	})
+
 	t.Run("collected lines (BE-067)", func(t *testing.T) {
 		t.Parallel()
 		s, w := newStore(t)

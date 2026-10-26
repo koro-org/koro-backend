@@ -176,7 +176,7 @@ func (s *service) directInstructions(ctx context.Context, a authz.Actor, o Order
 func (s *service) directPlan(ctx context.Context, o Order, lines []Line) ([]DirectInstruction, error) {
 	amounts := make(map[uuid.UUID]int64)
 	var ids []uuid.UUID
-	for _, l := range lines {
+	for _, l := range liveLines(lines) { // a dropped line is not paid (BE-134): its payee gets no transfer
 		amount := l.PayableAmount - l.BuyerFeeAmount
 		if amount == 0 {
 			continue

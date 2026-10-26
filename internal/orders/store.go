@@ -37,6 +37,15 @@ type Store interface {
 	// UpdateLine writes the fulfilment columns and the refunded amount of l
 	// when its fulfilment is still from; ErrInvalidState otherwise.
 	UpdateLine(ctx context.Context, l Line, from Fulfillment) (Line, error)
+	// DropLines takes the lines out of their unpaid order (Q-28c, BE-134):
+	// each is cancelled with dropped_at = at, then the order's amounts
+	// become o's (the service's totals of the lines left). Only while the
+	// order awaits payment and took no money (Order.LinesDroppable), only
+	// pending or not-yet-active lines of the order not dropped before, and
+	// never the last live one; the amounts must be the sums of the live
+	// lines (orders_amounts_guard, orders_totals_match_lines). Anything
+	// else is ErrInvalidState and writes nothing.
+	DropLines(ctx context.Context, o Order, lineIDs []uuid.UUID, at time.Time) (Order, []Line, error)
 
 	// ListOrgOrders returns a page of the buyer's orders, newest placement
 	// first by (placed_at, id).
@@ -79,13 +88,15 @@ type Store interface {
 	// LinesOfPayout returns the lines a payout paid out, by (created_at, id).
 	LinesOfPayout(ctx context.Context, payoutID uuid.UUID) ([]Line, error)
 	// RefundsDue returns up to limit money that waits for a refund: paid
-	// lines that were cancelled (what Koro holds of them, Order.Refundable)
+	// lines that were cancelled (what Koro holds of them, Order.Refundable;
+	// never a line dropped before payment)
 	// and orders cancelled or expired with money paid, not refunded yet;
 	// oldest first.
 	RefundsDue(ctx context.Context, limit int) ([]RefundDue, error)
 	// CollectedLines returns up to limit lines of the orders Koro collected in
 	// full (paid_at set, collection not direct_to_payee) with an ID greater
-	// than after, in ID order; platformOnly keeps the lines without a payee.
+	// than after, in ID order, leaving out the lines dropped before payment
+	// (BE-134: never collected); platformOnly keeps the lines without a payee.
 	CollectedLines(ctx context.Context, after uuid.UUID, platformOnly bool, limit int) ([]Line, error)
 
 	// OrdersPlacedBy returns the orders a user placed (KVKK export).

@@ -333,10 +333,8 @@ func (s *service) writeOrder(ctx context.Context, a authz.Actor, org orgs.OrgSum
 	o := Order{
 		ID: uuid.NewV7(), OrderNo: no, OrgID: org.ID, OrgKind: orgKindBuyer, PlacedByUserID: a.UserID, BuyerPartyID: party.ID,
 		BuyerSnapshot: snapshotOf(party), ModelCode: model, CollectionMethod: method, Status: StatusAwaitingPayment,
-		Currency: currencyTRY, SubtotalAmount: t.Subtotal, VATAmount: t.VAT, VATWithheldAmount: t.VATWithheld,
-		BuyerFeeAmount: t.BuyerFee, TotalAmount: t.Total, PayableAmount: t.Payable, KoroCollectAmount: t.KoroCollect,
-		DirectToPayeeAmount: t.DirectToPayee, ExpiresAt: now.Add(s.d.Config.PaymentWindow), PlacedAt: now,
-	}
+		Currency: currencyTRY, ExpiresAt: now.Add(s.d.Config.PaymentWindow), PlacedAt: now,
+	}.withTotals(t)
 	lines := make([]Line, len(priced))
 	for i, p := range priced {
 		lines[i] = lineOf(o, p, now)

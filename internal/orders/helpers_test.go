@@ -262,6 +262,7 @@ type env struct {
 	parties  *fakeParties
 	payees   *fakePayees
 	outbox   *outbox.Mem
+	queue    *queue.Mem // the tasks without a topic (the notices of a dropped line, BE-134)
 	sender   *fakeSender
 	acct     *orders.CollectionAccount // nil: no active collection account
 	svc      orders.Service
@@ -287,7 +288,7 @@ func newEnv(t *testing.T, opts ...func(*orders.Deps)) *env {
 	clk := clock.NewFake(t0)
 	e := &env{clk: clk, store: orders.NewMemStore(clk.Now), cat: catalog.NewMemStore(clk.Now), audit: &audittest.Recorder{},
 		orgs: newFakeOrgs(), parties: &fakeParties{m: map[uuid.UUID]parties.LegalParty{}},
-		payees: &fakePayees{m: map[uuid.UUID]parties.Payee{}}, outbox: outbox.NewMem(clk), sender: &fakeSender{},
+		payees: &fakePayees{m: map[uuid.UUID]parties.Payee{}}, outbox: outbox.NewMem(clk), queue: queue.NewMem(), sender: &fakeSender{},
 		fileStore: files.NewMemStore(clk.Now), objects: storage.NewMem(clk)}
 	tx := db.NopTx{}
 	keeper := idempotency.New(idempotency.Deps{Tx: tx, Store: idempotency.NewMemStore(), Clock: clk, Log: discardLog()})
@@ -321,7 +322,7 @@ func newEnv(t *testing.T, opts ...func(*orders.Deps)) *env {
 			}
 			return *e.acct, true, nil
 		},
-		Sender: e.sender, Users: fakeUsers{}, Staff: fakeStaff{}, Files: e.files,
+		Sender: e.sender, Users: fakeUsers{}, Staff: fakeStaff{}, Files: e.files, Queue: e.queue,
 	}
 	for _, o := range opts {
 		o(&d)

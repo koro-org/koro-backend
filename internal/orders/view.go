@@ -165,6 +165,13 @@ type PayableOrder struct {
 	ExpiresAt           time.Time
 }
 
+// KoroHeld is Order.KoroHeld for payments' refund limits: what Koro
+// collected of line l (its buyer fee only in model C; nothing of a dropped
+// line, BE-134).
+func (o PayableOrder) KoroHeld(l Line) int64 {
+	return koroHeld(o.CollectionMethod == CollectDirectToPayee, l)
+}
+
 func payableOf(o Order) PayableOrder {
 	return PayableOrder{
 		ID: o.ID, OrderNo: o.OrderNo, OrgID: o.OrgID, Status: o.Status, ModelCode: o.ModelCode,

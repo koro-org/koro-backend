@@ -219,6 +219,8 @@ func (m *MemStore) UpdateLine(_ context.Context, l Line, from Fulfillment) (Line
 		return Line{}, ErrInvalidState
 	case l.RefundedAmount > cur.PayableAmount:
 		return Line{}, ErrRefundExceedsPaid
+	case cur.Dropped() && (l.FulfillmentStatus != cur.FulfillmentStatus || l.RefundedAmount != cur.RefundedAmount):
+		return Line{}, ErrInvalidState // order_lines_dropped_frozen (BE-134)
 	}
 	cur.FulfillmentStatus, cur.FulfillmentMarkedAt, cur.FulfillmentMarkedBy = l.FulfillmentStatus, l.FulfillmentMarkedAt, l.FulfillmentMarkedBy
 	cur.DisputeWindowEndsAt, cur.FulfilledAt, cur.FulfilledVia = l.DisputeWindowEndsAt, l.FulfilledAt, l.FulfilledVia
@@ -230,6 +232,61 @@ func (m *MemStore) UpdateLine(_ context.Context, l Line, from Fulfillment) (Line
 	cur.UpdatedAt = m.touch(cur.UpdatedAt)
 	m.lines[l.ID] = cur
 	return cloneLine(cur), nil
+}
+
+// DropLines implements Store (BE-134) with the rules of 000157: the order
+// takes no more money, the lines are pending or not yet active lines of it,
+// at least one line stays, and the new amounts are the sums of the lines
+// left (Koro's part the model's). It writes only when everything holds.
+func (m *MemStore) DropLines(_ context.Context, o Order, lineIDs []uuid.UUID, at time.Time) (Order, []Line, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cur, ok := m.orders[o.ID]
+	switch {
+	case !ok:
+		return Order{}, nil, ErrNotFound
+	case !cur.LinesDroppable() || len(lineIDs) == 0:
+		return Order{}, nil, ErrInvalidState
+	}
+	dropping := map[uuid.UUID]bool{}
+	for _, id := range lineIDs {
+		l, found := m.lines[id]
+		if !found || l.OrderID != o.ID || l.Dropped() || dropping[id] ||
+			l.FulfillmentStatus != FulfillPending && l.FulfillmentStatus != FulfillNotApplicable {
+			return Order{}, nil, ErrInvalidState
+		}
+		dropping[id] = true
+	}
+	var live int
+	var net, vat, withheld, fee, payable int64
+	for _, l := range m.lines {
+		if l.OrderID != o.ID || l.Dropped() || dropping[l.ID] {
+			continue
+		}
+		live++
+		net, vat, withheld, fee, payable = net+l.NetAmount, vat+l.VATAmount, withheld+l.VATWithheldAmount, fee+l.BuyerFeeAmount,
+			payable+l.PayableAmount
+	}
+	collect := payable
+	if cur.DirectToPayee() {
+		collect = fee
+	}
+	if live == 0 || o.SubtotalAmount != net || o.VATAmount != vat || o.VATWithheldAmount != withheld || o.BuyerFeeAmount != fee ||
+		o.PayableAmount != payable || o.KoroCollectAmount != collect || o.TotalAmount != net+vat+fee ||
+		o.DirectToPayeeAmount != payable-collect {
+		return Order{}, nil, ErrInvalidState // orders_amounts_guard, orders_totals_match_lines
+	}
+	cur.SubtotalAmount, cur.VATAmount, cur.VATWithheldAmount, cur.BuyerFeeAmount = net, vat, withheld, fee
+	cur.TotalAmount, cur.PayableAmount, cur.KoroCollectAmount, cur.DirectToPayeeAmount = o.TotalAmount, payable, collect, o.DirectToPayeeAmount
+	cur.UpdatedAt = m.touch(cur.UpdatedAt)
+	m.orders[o.ID] = cur
+	when := at
+	for id := range dropping {
+		l := m.lines[id]
+		l.FulfillmentStatus, l.DroppedAt, l.UpdatedAt = FulfillCancelled, &when, m.touch(l.UpdatedAt)
+		m.lines[id] = l
+	}
+	return cur, m.linesOrdered(func(l Line) bool { return dropping[l.ID] }), nil
 }
 
 // before reports whether (at, id) comes after the keyset position k in a
@@ -495,7 +552,7 @@ func (m *MemStore) CollectedLines(_ context.Context, after uuid.UUID, platformOn
 	out := []Line{}
 	for _, l := range m.lines {
 		o := m.orders[l.OrderID]
-		if compareUUID(l.ID, after) <= 0 || o.PaidAt == nil || o.DirectToPayee() || platformOnly && l.PayeeID != nil {
+		if compareUUID(l.ID, after) <= 0 || o.PaidAt == nil || o.DirectToPayee() || l.Dropped() || platformOnly && l.PayeeID != nil {
 			continue
 		}
 		out = append(out, cloneLine(l))

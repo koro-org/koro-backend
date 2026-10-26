@@ -138,6 +138,9 @@ func (s *service) endUnpaid(ctx context.Context, o Order, to Status, reason *str
 	lines := byOrder[o.ID]
 	for _, i := range lockOrder(len(lines), func(i int) uuid.UUID { return lines[i].OfferingID }) {
 		l := lines[i]
+		if l.Dropped() {
+			continue // it left the order when its offering was cancelled: its units are back, its rights revoked (BE-134)
+		}
 		native := l.FulfillmentStatus == FulfillNotApplicable
 		if l.FulfillmentStatus == FulfillPending || native {
 			cancelled := l
@@ -202,46 +205,56 @@ func (s *service) expire(ctx context.Context) error {
 }
 
 // handleOfferingCancelled consumes offering.cancelled (01 §6.2; O): as the
-// system, in one transaction, every unpaid order with a line of the
-// offering is cancelled (its units back, its rights revoked, order.cancelled
-// O), and the undelivered lines of the offering on paid orders are
-// cancelled: their money waits for a refund (RefundsDue; BE-043 refunds).
-// Delivered lines stay. Idempotent: cancelled orders and lines are skipped.
+// system, in one transaction, every open order with a line of the offering
+// (locked in ID order) lets that line go. An unpaid order that took no
+// money drops the line and keeps its other lines and its reference code,
+// its amounts recomputed (Q-28c, BE-134: dropLines); when that was its last
+// line, or money already arrived (a partial payment, a confirmed direct
+// payment), the order is cancelled whole (its units back, its rights
+// revoked, order.cancelled O; paid money waits for a refund). On paid
+// orders the undelivered lines of the offering are cancelled: their money
+// waits for a refund (RefundsDue; BE-043 refunds). Delivered lines stay.
+// Idempotent: cancelled orders, dropped and cancelled lines are skipped.
 func (s *service) handleOfferingCancelled(ctx context.Context, env domainevent.Envelope) error {
 	p, err := domainevent.Decode[domainevent.OfferingCancelled](env)
 	if err != nil {
 		return queue.Permanent(err)
 	}
 	sys := authz.SystemActor(CancelOfferingOrdersTaskName)
-	why := CancelOfferingClosed
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		open, err := s.d.Store.OpenOrdersWithOffering(ctx, p.OfferingID)
 		if err != nil {
 			return err
 		}
 		for _, o := range open {
+			end := s.cancelPaidLines
 			if o.Status == StatusAwaitingPayment {
-				stored, err := s.endUnpaid(ctx, o, StatusCancelled, &why, revokeCancelled)
-				if err != nil {
-					return err
-				}
-				if err := s.d.Audit.Log(ctx, orderEvent(sys, authz.OrdersOrderCancel, stored, "", map[string]any{
-					"from": string(o.Status), "cause": CancelOfferingClosed, "offering_id": p.OfferingID.String(),
-					"offering_cause": p.Reason, "paid_amount": stored.PaidAmount,
-				})); err != nil {
-					return err
-				}
-				if err := s.emitOutbox(ctx, auditOrder, stored.ID, domainevent.OrderCancelled{OrderID: stored.ID, Reason: CancelOfferingClosed}); err != nil {
-					return err
-				}
-				continue
+				end = s.cancelUnpaidLines
 			}
-			if err := s.cancelPaidLines(ctx, sys, o, p); err != nil {
+			if err := end(ctx, sys, o, p); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+// cancelUnpaidOrder cancels a whole unpaid order of a cancelled offering
+// (its units back, its rights revoked, order.cancelled O; money paid in
+// part waits for a refund).
+func (s *service) cancelUnpaidOrder(ctx context.Context, sys authz.Actor, o Order, p domainevent.OfferingCancelled) error {
+	why := CancelOfferingClosed
+	stored, err := s.endUnpaid(ctx, o, StatusCancelled, &why, revokeCancelled)
+	if err != nil {
+		return err
+	}
+	if err := s.d.Audit.Log(ctx, orderEvent(sys, authz.OrdersOrderCancel, stored, "", map[string]any{
+		"from": string(o.Status), "cause": CancelOfferingClosed, "offering_id": p.OfferingID.String(),
+		"offering_cause": p.Reason, "paid_amount": stored.PaidAmount,
+	})); err != nil {
+		return err
+	}
+	return s.emitOutbox(ctx, auditOrder, stored.ID, domainevent.OrderCancelled{OrderID: stored.ID, Reason: CancelOfferingClosed})
 }
 
 // cancelPaidLines cancels the undelivered lines of the offering on a paid

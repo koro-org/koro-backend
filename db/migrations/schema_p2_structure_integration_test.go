@@ -102,7 +102,7 @@ func TestSchema_P2SchemaGrantsAndOwnership(t *testing.T) {
 		}
 	}
 	for _, fn := range []string{"koro_freeze_columns()", "koro_initial_status()", "offerings_forbid_nondraft_delete()",
-		"orders_check_lines_total()", "ledger_check_balanced()", "payouts_check_bank_account()", "payout_items_check()", "payouts_check_items()"} {
+		"orders_check_lines_total()", "orders_amounts_guard()", "order_lines_drop_guard()", "ledger_check_balanced()", "payouts_check_bank_account()", "payout_items_check()", "payouts_check_items()"} {
 		if got := queryString(t, w.d, `SELECT proowner::regrole::text || ' ' || prosecdef::text FROM pg_proc WHERE oid = ('public.' || $1)::regprocedure`, fn); got != "app_owner false" {
 			t.Errorf("%s: owner and SECURITY DEFINER = %q, want app_owner, invoker", fn, got)
 		}
@@ -260,10 +260,13 @@ func TestSchema_P2SchemaIDColumnsAndTriggers(t *testing.T) {
 		"ledger_transactions.ledger_transactions_no_truncate koro_forbid_mutation",
 		"ledger_transactions.ledger_txn_balanced ledger_check_balanced" + deferred,
 		"offerings.offerings_draft_delete_only offerings_forbid_nondraft_delete",
+		"order_lines.order_lines_drop_guard order_lines_drop_guard",   // 000157 (BE-134)
+		"order_lines.order_lines_dropped_frozen koro_freeze_columns",  // 000157 (BE-134)
 		"order_lines.order_lines_evidence_frozen koro_freeze_columns", // 000137 (BE-093)
 		"order_lines.order_lines_frozen koro_freeze_columns",
 		"order_lines.order_lines_paid_out_frozen koro_freeze_columns",
 		"order_lines.orders_totals_match_lines orders_check_lines_total" + deferred,
+		"orders.orders_amounts_guard orders_amounts_guard", // 000157 (BE-134)
 		"orders.orders_direct_confirmation_guard koro_orders_direct_confirmation_guard",
 		"orders.orders_frozen koro_freeze_columns",
 		"orders.orders_totals_match_lines orders_check_lines_total" + deferred,

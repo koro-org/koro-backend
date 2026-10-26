@@ -271,14 +271,11 @@ func (m orderMoney) orderLeft(self uuid.UUID) int64 {
 	return m.order.PaidAmount - m.order.RefundedAmount - m.held(self, false, func(r Refund) bool { return !r.Overpayment() })
 }
 
-// lineLeft is what Koro holds of line l (the buyer fee only in model C)
-// not refunded nor promised by another open refund of the line.
+// lineLeft is what Koro holds of line l (orders' KoroHeld: the buyer fee
+// only in model C, nothing of a line dropped before payment, BE-134) not
+// refunded nor promised by another open refund of the line.
 func (m orderMoney) lineLeft(l orders.Line, self uuid.UUID) int64 {
-	held := l.PayableAmount
-	if m.order.CollectionMethod == orders.CollectDirectToPayee {
-		held = l.BuyerFeeAmount
-	}
-	return held - l.RefundedAmount - m.held(self, false, func(r Refund) bool { return r.OrderLineID != nil && *r.OrderLineID == l.ID })
+	return m.order.KoroHeld(l) - l.RefundedAmount - m.held(self, false, func(r Refund) bool { return r.OrderLineID != nil && *r.OrderLineID == l.ID })
 }
 
 // ListRefundsDue implements Service (pad, fin; payments.refund.list): the

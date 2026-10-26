@@ -121,7 +121,8 @@ func (s *service) ConfirmDirectPayment(ctx context.Context, orderID, paymentID u
 // settle writes next (o with its new paid amount) and, when paid, makes it
 // paid: the rights of its platform-native lines are activated and those
 // lines fulfilled (auto_platform, order_line.fulfilled O), and the effect
-// carries every line for payment_splits and the ledger.
+// carries every line for payment_splits and the ledger — but a line that
+// dropped out before payment (BE-134): the buyer did not pay for it.
 func (s *service) settle(ctx context.Context, o, next Order, paid bool) (PaymentEffect, error) {
 	var lines []Line
 	if paid {
@@ -142,7 +143,7 @@ func (s *service) settle(ctx context.Context, o, next Order, paid bool) (Payment
 	}
 	eff := PaymentEffect{OrderID: stored.ID, OrgID: stored.OrgID, ModelCode: stored.ModelCode, PaidAmount: stored.PaidAmount,
 		DueAmount: stored.DueAmount(), Paid: paid}
-	for _, l := range lines {
+	for _, l := range liveLines(lines) {
 		eff.Lines = append(eff.Lines, paidLineOf(l))
 	}
 	return eff, nil
@@ -443,8 +444,8 @@ func (s *service) ForAllocation(ctx context.Context, lineID uuid.UUID) (Collecte
 	if err != nil {
 		return CollectedLine{}, err
 	}
-	if o.PaidAt == nil || o.DirectToPayee() {
-		return CollectedLine{}, ErrInvalidState
+	if o.PaidAt == nil || o.DirectToPayee() || l.Dropped() {
+		return CollectedLine{}, ErrInvalidState // a dropped line was never collected (BE-134)
 	}
 	l, err = s.d.Store.GetLine(ctx, lineID, true)
 	if err != nil {

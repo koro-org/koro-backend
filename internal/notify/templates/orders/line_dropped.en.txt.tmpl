@@ -1,0 +1,9 @@
+Hello {{index .Data "name"}},
+
+An offering of your order was cancelled before payment, so its line ({{index .Data "line_title"}}) was removed and the order amount was recalculated. The other lines stay in the order.
+
+Reference code: {{index .Data "reference_code"}} (unchanged)
+New amount to pay: {{index .Data "amount"}} {{index .Data "currency"}}
+Pay by: {{index .Data "expires_at"}} (Türkiye time)
+
+Pay only the new amount and write only the reference code into the transfer description. If you already sent the previous amount, the difference is refunded to you.

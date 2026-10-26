@@ -325,16 +325,19 @@ func TestExpireUnpaid_ReleasesStockAndRevokesEntitlements(t *testing.T) {
 }
 
 // TestOfferingCancelled_UnpaidCancelled_PaidQueuedForRefund (01 §6.2
-// offering.cancelled ⇠ orders): when an offering is cancelled, its unpaid
-// orders are cancelled (units back, order.cancelled) and its undelivered
-// lines on paid orders are cancelled — their money waits for a refund
-// (RefundsDue; BE-043) — while delivered lines and other offerings' lines
-// stay. Delivering the event twice changes nothing.
+// offering.cancelled ⇠ orders): when an offering is cancelled, an unpaid
+// order of it alone is cancelled (units back, order.cancelled), an unpaid
+// cart keeps its other line and drops only this one (Q-28c, BE-134;
+// drop_test.go), and its undelivered lines on paid orders are cancelled —
+// their money waits for a refund (RefundsDue; BE-043) — while delivered
+// lines and other offerings' lines stay. Delivering the event twice
+// changes nothing.
 func TestOfferingCancelled_UnpaidCancelled_PaidQueuedForRefund(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	off, other := e.offering(t, nil), e.offering(t, nil)
-	unpaid := e.place(t, line(off, 1), line(other, 1))[0]
+	unpaid := e.place(t, line(off, 1))[0]
+	cart := e.place(t, line(off, 1), line(other, 1))[0]
 	paid := e.place(t, line(off, 1), line(other, 1))[0]
 	e.pay(t, paid.Order.ID)
 	delivered := e.place(t, line(off, 1))[0]
@@ -353,8 +356,11 @@ func TestOfferingCancelled_UnpaidCancelled_PaidQueuedForRefund(t *testing.T) {
 	if o := e.order(t, unpaid.Order.ID); o.Status != orders.StatusCancelled || *o.CancelReason != orders.CancelOfferingClosed {
 		t.Fatalf("unpaid order = %+v", o)
 	}
-	if n := e.sold(t, other); n != 1 {
-		t.Fatalf("units of the other offering sold = %d, want 1 (the paid order's)", n)
+	if o := e.order(t, cart.Order.ID); o.Status != orders.StatusAwaitingPayment || o.PayableAmount != 1_200_000 {
+		t.Fatalf("unpaid cart = %+v, want awaiting payment of its other line", o)
+	}
+	if n := e.sold(t, other); n != 2 {
+		t.Fatalf("units of the other offering sold = %d, want 2 (the cart's and the paid order's)", n)
 	}
 	if evs := e.events(domainevent.TopicOrderCancelled); len(evs) != 1 {
 		t.Fatalf("order.cancelled events = %d, want 1", len(evs))

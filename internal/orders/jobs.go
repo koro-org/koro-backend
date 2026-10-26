@@ -123,8 +123,9 @@ func (s *service) sendInstructions(ctx context.Context, o Order, key string) err
 	return errors.Join(append(errs, s.sendErr(ctx, tmplPaymentInstructions, o.ID, u, err))...)
 }
 
-// handleCancelled tells the buyer who placed the order and the sellers'
-// admins that it was cancelled.
+// handleCancelled tells the buyer who placed the order and the admins of
+// the sellers of its lines (not of the lines that dropped out before) that
+// it was cancelled.
 func (s *service) handleCancelled(ctx context.Context, e domainevent.Envelope) error {
 	p, err := domainevent.Decode[domainevent.OrderCancelled](e)
 	if err != nil {
@@ -136,7 +137,7 @@ func (s *service) handleCancelled(ctx context.Context, e domainevent.Envelope) e
 	}
 	key := e.ID.String()
 	errs := []error{s.notifyInApp(ctx, o, o.OrgID, tmplOrderCancelled, key, []uuid.UUID{o.PlacedByUserID}, notify.OrderLink(o.ID))}
-	for _, seller := range sellersOf(lines) {
+	for _, seller := range sellersOf(liveLines(lines)) { // a dropped line's seller was told when it dropped (BE-134)
 		admins, err := s.membersWith(ctx, seller, authz.MemberClubAdmin, authz.MemberUniversityRep)
 		if err != nil {
 			return err

@@ -27,6 +27,21 @@
 //     catalog.no_commerce_policy; T-10: production has no default rate
 //     until the team decides it). Lines of different models are split
 //     into one order per model (T-12).
+//   - The cart (Q-25, BE-131): createOrder's lines are the cart — no cart
+//     is stored on the server. Up to 20 offerings, one line each, of any
+//     sellers: one order per model, each with one reference code, one
+//     bank transfer for Koro (model A: Koro pays every payee its lines'
+//     share in its own payout; model C: one direct transfer per payee).
+//     VAT, withholding and commission are per line, the order totals are
+//     the sums. The stock of every line is reserved in the placement
+//     transaction in offering ID order (no deadlock between carts); one
+//     refused line (sold out, not on sale, the per-buyer limit, no
+//     policy, an inactive payee) refuses the cart, nothing stays reserved,
+//     and the problem names the line (errors[].location
+//     body.lines[i].offering_id). Delivery, refunds, invoices and payouts
+//     are per line; an unpaid order whose offering is cancelled is
+//     cancelled whole (its amounts are frozen; the buyer orders the rest
+//     again).
 //   - Idempotency-Key (06 H-5): placement is one transaction — offering,
 //     policy, payee, stock reservation, the orders and lines, the pending
 //     rights and order.placed (O) — and the key is stored in it, so a
@@ -273,8 +288,8 @@ func (m Module) BuyerHeld(ctx context.Context, offeringID, buyerOrgID uuid.UUID)
 }
 
 // OpenCommerce is the closeOrg check of hooks.openCommerce: an org with an
-// open order (as the buyer) or a line still to deliver, refund or pay out
-// (as the seller) cannot be closed.
+// open order or money still to refund to it (as the buyer) or a line still
+// to deliver, refund or pay out (as the seller) cannot be closed.
 func (m Module) OpenCommerce(ctx context.Context, orgID uuid.UUID) (bool, error) {
 	return m.svc.d.Store.HasOpenCommerce(ctx, orgID)
 }

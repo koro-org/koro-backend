@@ -61,9 +61,11 @@ type Store interface {
 	// BuyerHeld sums the quantity of the buyer's lines of the offering on
 	// open orders (lines not cancelled): catalog's per_buyer_limit.
 	BuyerHeld(ctx context.Context, offeringID, buyerOrgID uuid.UUID) (int, error)
-	// HasOpenCommerce reports whether the org has an open order as a buyer,
-	// or as a seller a line still to deliver, to refund or to pay out (a
-	// model C line is never paid out: its payee was paid directly).
+	// HasOpenCommerce reports whether the org has an open order as a buyer
+	// (or one with money still to refund to it: a cancelled or expired
+	// order paid in part, a cancelled line of a paid order), or as a seller
+	// a line still to deliver, to refund or to pay out (a model C line is
+	// never paid out: its payee was paid directly).
 	HasOpenCommerce(ctx context.Context, orgID uuid.UUID) (bool, error)
 
 	// PayableLines returns the payee's lines a payout may take as of asOf

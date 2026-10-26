@@ -408,7 +408,8 @@ func (m *MemStore) HasOpenCommerce(_ context.Context, orgID uuid.UUID) (bool, er
 		}
 	}
 	for _, l := range m.lines {
-		if l.SellerOrgID == orgID && sellerOpen(m.orders[l.OrderID], l) {
+		o := m.orders[l.OrderID]
+		if (l.SellerOrgID == orgID && sellerOpen(o, l)) || (o.OrgID == orgID && refundDueLine(o, l)) {
 			return true, nil
 		}
 	}
@@ -419,6 +420,12 @@ func (m *MemStore) HasOpenCommerce(_ context.Context, orgID uuid.UUID) (bool, er
 // and not refunded yet.
 func refundDueOrder(o Order) bool {
 	return (o.Status == StatusCancelled || o.Status == StatusExpired) && o.PaidAmount > o.RefundedAmount
+}
+
+// refundDueLine reports a cancelled line of a paid order whose money Koro
+// still holds (RefundsDue; the buyer's open commerce, BE-131).
+func refundDueLine(o Order, l Line) bool {
+	return l.FulfillmentStatus == FulfillCancelled && o.Status.PaidState() && o.Status != StatusRefunded && o.Refundable(l) > 0
 }
 
 // payableStatuses are the order states whose fulfilled lines may be paid out.
@@ -507,7 +514,7 @@ func (m *MemStore) RefundsDue(_ context.Context, limit int) ([]RefundDue, error)
 	var out []RefundDue
 	for _, l := range m.lines {
 		o := m.orders[l.OrderID]
-		if l.FulfillmentStatus == FulfillCancelled && o.Status.PaidState() && o.Status != StatusRefunded && o.Refundable(l) > 0 {
+		if refundDueLine(o, l) {
 			id := l.ID
 			out = append(out, RefundDue{OrderID: o.ID, LineID: &id, OrgID: o.OrgID, Amount: o.Refundable(l), Since: l.UpdatedAt})
 		}

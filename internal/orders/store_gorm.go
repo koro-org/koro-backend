@@ -279,6 +279,12 @@ func (s gormStore) WindowsElapsed(ctx context.Context, now time.Time, limit int)
 // line holds only its buyer fee at Koro (the rest went to the payee).
 const koroHeldSQL = `(CASE WHEN o.collection_method = 'direct_to_payee' THEN l.buyer_fee_amount ELSE l.payable_amount END)`
 
+// refundDueLineSQL is a cancelled line of a paid order whose money Koro
+// still holds (o: the order, l: the line; the in-memory refundDueLine):
+// RefundsDue lists it, it keeps the buyer's commerce open.
+const refundDueLineSQL = `l.fulfillment_status = 'cancelled' AND l.refunded_amount < ` + koroHeldSQL +
+	` AND o.status IN ` + payableStatusSQL
+
 // openStatuses are the states of Status.Open.
 const openStatuses = `('awaiting_payment', 'paid', 'in_fulfilment', 'disputed', 'partially_refunded')`
 
@@ -310,7 +316,9 @@ func (s gormStore) BuyerHeld(ctx context.Context, offeringID, buyerOrgID uuid.UU
 }
 
 // HasOpenCommerce implements Store (the same rule as the in-memory
-// sellerOpen and refundDueOrder).
+// sellerOpen, refundDueOrder and refundDueLine). The buyer's side also
+// counts a completed order with a cancelled line whose money Koro still
+// holds (a cart whose other lines were delivered, BE-131).
 //
 // cross-org: the org is the buyer (org_id) or a seller (seller_org_id).
 func (s gormStore) HasOpenCommerce(ctx context.Context, orgID uuid.UUID) (bool, error) {
@@ -319,6 +327,9 @@ func (s gormStore) HasOpenCommerce(ctx context.Context, orgID uuid.UUID) (bool, 
 		  SELECT 1 FROM orders WHERE org_id = @org
 		     AND (status IN `+openStatuses+`
 		          OR (status IN ('cancelled', 'expired') AND paid_amount > refunded_amount)))
+		OR EXISTS (
+		  SELECT 1 FROM orders o JOIN order_lines l ON l.order_id = o.id
+		   WHERE o.org_id = @org AND `+refundDueLineSQL+`)
 		OR EXISTS (
 		  SELECT 1 FROM order_lines l JOIN orders o ON o.id = l.order_id
 		   WHERE l.seller_org_id = @org AND o.status NOT IN ('cancelled', 'expired', 'refunded')
@@ -392,8 +403,7 @@ func (s gormStore) RefundsDue(ctx context.Context, limit int) ([]RefundDue, erro
 	err := db.Conn(ctx, s.orm).Raw(`SELECT * FROM (
 		  SELECT l.order_id, l.id AS line_id, l.org_id, `+koroHeldSQL+` - l.refunded_amount AS amount, l.updated_at AS since
 		    FROM order_lines l JOIN orders o ON o.id = l.order_id
-		   WHERE l.fulfillment_status = 'cancelled' AND l.refunded_amount < `+koroHeldSQL+`
-		     AND o.status IN ('paid', 'in_fulfilment', 'completed', 'disputed', 'partially_refunded')
+		   WHERE `+refundDueLineSQL+`
 		  UNION ALL
 		  SELECT id, NULL, org_id, paid_amount - refunded_amount, updated_at
 		    FROM orders WHERE status IN ('cancelled', 'expired') AND paid_amount > refunded_amount

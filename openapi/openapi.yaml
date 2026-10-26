@@ -31969,7 +31969,7 @@ paths:
       x-koro-rate-limit: read_default
       x-koro-surface: org
     post:
-      description: "A company admin buys offerings for the company, billed to a verified buyer party of the company (422 orders.buyer_party_required). Prices, VAT, withholding and commission are computed on the server from the offering and the commerce policy in effect (none: 409 catalog.no_commerce_policy); lines under different money models become separate orders, each with its own reference code. The stock is reserved in the same transaction; an unpaid order expires after the payment window and releases it."
+      description: "A company admin buys offerings for the company, billed to a verified buyer party of the company (422 orders.buyer_party_required). The lines are the cart: 1-20 offerings of any sellers, one line each. Prices, VAT, withholding and commission are computed per line on the server from the offering and the commerce policy in effect (none: 409 catalog.no_commerce_policy); lines under different money models become separate orders, each with its own reference code, while the lines of several sellers under one model share one order and one transfer. The stock of every line is reserved in the same transaction: when one line is refused (sold out, not on sale, the per-buyer limit, no policy, an inactive payee) nothing is placed and the problem's errors[].location names the line (body.lines[i].offering_id). An unpaid order expires after the payment window and releases its stock."
       operationId: createOrder
       parameters:
         - description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"

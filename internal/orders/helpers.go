@@ -3,6 +3,7 @@ package orders
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"uuid"
@@ -12,6 +13,7 @@ import (
 	"koro/internal/orgs"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/outbox"
+	"koro/internal/platform/problem"
 )
 
 // Audit resource types and outbox aggregates.
@@ -114,6 +116,39 @@ func (s *service) emitOutbox(ctx context.Context, aggregate string, id uuid.UUID
 // emitAfterCommit publishes an A event once the transaction commits.
 func (s *service) emitAfterCommit(ctx context.Context, aggregate string, id uuid.UUID, p domainevent.Payload) error {
 	return outbox.EmitAfterCommit(ctx, s.d.Outbox, p, aggregate, id)
+}
+
+// lineLoc is the location of the offering of createOrder's line i.
+func lineLoc(i int) string { return fmt.Sprintf("body.lines[%d].offering_id", i) }
+
+// atLine points the refusal of one line of a cart at that line (BE-131,
+// Q-25): sold out, not on sale, the per-buyer limit, no policy in effect,
+// an inactive payee, a commission larger than the seller's share. The
+// status and the code stay the ones catalog or orders defines (06 H-52);
+// the problem's errors[] names body.lines[i].offering_id so a client of a
+// cart of many lines knows which one to change. A refusal that names its
+// own location, and any server error, are returned unchanged.
+func atLine(i int, err error) error {
+	pe, ok := errors.AsType[*problem.Error](err)
+	if !ok || !problem.IsClientError(err) || len(pe.Fields()) > 0 {
+		return err
+	}
+	return pe.WithFields(problem.FieldError{Location: lineLoc(i), Message: pe.Title()})
+}
+
+// lockOrder returns 0…n-1 sorted by the offering of each (offering(i)):
+// every path that locks several offering rows in one transaction — the
+// reservations of a placement, the release of an unpaid order's units —
+// takes them in offering ID order, the order catalog locks an event's
+// offerings in, so two carts sharing offerings, or a cart and an expiry,
+// never wait on each other in a cycle (no 40P01 deadlock, BE-131).
+func lockOrder(n int, offering func(i int) uuid.UUID) []int {
+	idx := make([]int, n)
+	for i := range idx {
+		idx[i] = i
+	}
+	slices.SortStableFunc(idx, func(a, b int) int { return compareUUID(offering(a), offering(b)) })
+	return idx
 }
 
 func compareUUID(a, b uuid.UUID) int {

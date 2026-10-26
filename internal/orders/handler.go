@@ -26,10 +26,14 @@ func Register(api huma.API, svc Service) {
 		OperationID: "createOrder", Method: http.MethodPost, Path: "/orgs/{org_id}/orders",
 		Summary: "Place an order", DefaultStatus: http.StatusCreated,
 		Description: "A company admin buys offerings for the company, billed to a verified buyer party of the company " +
-			"(422 orders.buyer_party_required). Prices, VAT, withholding and commission are computed on the server from " +
-			"the offering and the commerce policy in effect (none: 409 catalog.no_commerce_policy); lines under different " +
-			"money models become separate orders, each with its own reference code. The stock is reserved in the same " +
-			"transaction; an unpaid order expires after the payment window and releases it.",
+			"(422 orders.buyer_party_required). The lines are the cart: 1-20 offerings of any sellers, one line each. " +
+			"Prices, VAT, withholding and commission are computed per line on the server from the offering and the " +
+			"commerce policy in effect (none: 409 catalog.no_commerce_policy); lines under different money models become " +
+			"separate orders, each with its own reference code, while the lines of several sellers under one model share " +
+			"one order and one transfer. The stock of every line is reserved in the same transaction: when one line is " +
+			"refused (sold out, not on sale, the per-buyer limit, no policy, an inactive payee) nothing is placed and the " +
+			"problem's errors[].location names the line (body.lines[i].offering_id). An unpaid order expires after the " +
+			"payment window and releases its stock.",
 	}, op.Meta{Action: string(authz.OrdersOrderCreate), Surface: op.SurfaceOrg, Idempotency: op.IdempotencyRequired}, h.create)
 
 	op.Register(api, "orders", huma.Operation{

@@ -35,6 +35,8 @@ const (
 // Idempotency-Key — the checkout of every offering, the policy in effect,
 // the payee, the stock, the server-side amounts, one order per model
 // (T-12), the pending rights of platform-native lines and order.placed (O).
+// The lines are the buyer's cart (Q-25, BE-131): every line is placed, or
+// none, and a refused line is named in the problem (atLine).
 func (s *service) CreateOrder(ctx context.Context, a authz.Actor, orgID uuid.UUID, in CreateInput) ([]OrderView, error) {
 	org, err := s.org(ctx, orgID)
 	if err != nil {
@@ -183,15 +185,18 @@ func (s *service) place(ctx context.Context, a authz.Actor, org orgs.OrgSummary,
 	for i, li := range in {
 		p, err := s.priceRequestLine(ctx, i, li, now)
 		if err != nil {
-			return nil, err
+			return nil, atLine(i, err)
 		}
 		priced = append(priced, p)
 	}
 	// The stock of every line, under each offering's row lock (the per-buyer
-	// limit reads the buyer's committed lines through BuyerHeld).
-	for _, p := range priced {
+	// limit reads the buyer's committed lines through BuyerHeld), in offering
+	// ID order (lockOrder). A refusal of any line rolls the whole placement
+	// back: no line of the cart stays reserved (BE-131).
+	for _, i := range lockOrder(len(priced), func(i int) uuid.UUID { return priced[i].offer.ID }) {
+		p := priced[i]
 		if err := s.d.Offerings.Reserve(ctx, p.offer.ID, p.in.Quantity, org.ID); err != nil {
-			return nil, err
+			return nil, atLine(i, err)
 		}
 	}
 	type group struct {
@@ -230,7 +235,7 @@ func (s *service) priceRequestLine(ctx context.Context, i int, li LineInput, now
 	co, err := s.d.Offerings.ForCheckout(ctx, li.OfferingID)
 	switch {
 	case errors.Is(err, catalog.ErrNotFound):
-		return pricedLine{}, problem.Field(fmt.Sprintf("body.lines[%d].offering_id", i), "is not an offering")
+		return pricedLine{}, problem.Field(lineLoc(i), "is not an offering")
 	case err != nil:
 		return pricedLine{}, err
 	case co.Currency != currencyTRY:
@@ -245,7 +250,7 @@ func (s *service) priceRequestLine(ctx context.Context, i int, li LineInput, now
 		return pricedLine{}, err
 	}
 	if pol.ModelCode == catalog.ModelC && payee == nil {
-		return pricedLine{}, problem.Field(fmt.Sprintf("body.lines[%d].offering_id", i), "model C requires a direct payee; platform products use model A")
+		return pricedLine{}, problem.Field(lineLoc(i), "model C requires a direct payee; platform products use model A")
 	}
 	amt, err := priceLine(priceInput{
 		Quantity: li.Quantity, UnitPriceAmount: co.UnitPriceAmount, VATRateBP: co.VATRateBP, VATClass: co.VATClass,

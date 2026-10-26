@@ -117,8 +117,9 @@ func (s *service) CancelOrder(ctx context.Context, a authz.Actor, id uuid.UUID, 
 
 // endUnpaid ends an order awaiting payment (cancelled or expired) in the
 // caller's transaction: its lines are cancelled, their units released
-// (catalog.Release) and the pending rights of its platform-native lines
-// revoked (01 §7 orders.expire_unpaid).
+// (catalog.Release, in offering ID order like the reservations: lockOrder)
+// and the pending rights of its platform-native lines revoked (01 §7
+// orders.expire_unpaid).
 func (s *service) endUnpaid(ctx context.Context, o Order, to Status, reason *string, revokeReason string) (Order, error) {
 	now := s.now()
 	next := o
@@ -134,7 +135,9 @@ func (s *service) endUnpaid(ctx context.Context, o Order, to Status, reason *str
 	if err != nil {
 		return Order{}, err
 	}
-	for _, l := range byOrder[o.ID] {
+	lines := byOrder[o.ID]
+	for _, i := range lockOrder(len(lines), func(i int) uuid.UUID { return lines[i].OfferingID }) {
+		l := lines[i]
 		native := l.FulfillmentStatus == FulfillNotApplicable
 		if l.FulfillmentStatus == FulfillPending || native {
 			cancelled := l

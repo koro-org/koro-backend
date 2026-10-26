@@ -402,6 +402,45 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (orders.Store, worl
 		}
 	})
 
+	t.Run("a cart's cancelled line keeps the buyer open until refunded (BE-131)", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		b, s1, s2 := w.buyer(t), w.seller(t), w.seller(t)
+		f := newFixture(b, t0, []offeringRef{w.offering(t, s1), w.offering(t, s2)}, []sellerRef{s1, s2})
+		insert(t, s, f)
+		paid := pay(t, s, f.o)
+		fulfil(t, s, f.lines[0], t0.Add(2*time.Hour))
+		c := f.lines[1]
+		c.FulfillmentStatus = orders.FulfillCancelled
+		cancelled, err := s.UpdateLine(ctx, c, orders.FulfillPending)
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := paid
+		at := t0.Add(3 * time.Hour)
+		done.Status, done.CompletedAt = orders.StatusCompleted, &at
+		if _, err := s.UpdateOrder(ctx, done, orders.StatusPaid); err != nil {
+			t.Fatal(err)
+		}
+		if ok, err := s.HasOpenCommerce(ctx, b.org); err != nil || !ok {
+			t.Fatalf("HasOpenCommerce(buyer) with a line refund due = %v, %v", ok, err)
+		}
+		refunded := cancelled
+		refunded.RefundedAmount = cancelled.PayableAmount
+		if _, err := s.UpdateLine(ctx, refunded, orders.FulfillCancelled); err != nil {
+			t.Fatal(err)
+		}
+		if ok, err := s.HasOpenCommerce(ctx, b.org); err != nil || ok {
+			t.Fatalf("HasOpenCommerce(buyer) after the refund = %v, %v", ok, err)
+		}
+		if ok, err := s.HasOpenCommerce(ctx, s2.org); err != nil || ok {
+			t.Fatalf("HasOpenCommerce(seller of the refunded line) = %v, %v", ok, err)
+		}
+		if ok, err := s.HasOpenCommerce(ctx, s1.org); err != nil || !ok {
+			t.Fatalf("HasOpenCommerce(seller with a line to pay out) = %v, %v", ok, err)
+		}
+	})
+
 	t.Run("collected lines (BE-067)", func(t *testing.T) {
 		t.Parallel()
 		s, w := newStore(t)

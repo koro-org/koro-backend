@@ -36,6 +36,11 @@ var matrixValueDate = civil.Date{Year: 2026, Month: time.October, Day: 2}
 //	               captured by captured_by (BE-043)
 //	kind refund    a refund of payment (its order; line: an order line fixture) of amount for reason,
 //	               requested by requested_by; status approved: approved by approved_by (BE-043)
+//	kind rr_file   a completed, clean refund_request_evidence upload of org by uploaded_by (its object in
+//	               the files bucket), attached to the refund_request fixture of attached when set (BE-132)
+//	kind refund_request  a buyer's refund request of line (of order; orders' fixtures) of amount for org,
+//	               sold by seller, asked by requested_by (with evidence: an rr_file); status in_review:
+//	               reviewed by reviewed_by; rejected: decided by decided_by (BE-132)
 func (w *paymentsWiring) matrixFixtures(fx *matrixFixtures) error {
 	ctx := context.Background()
 	mem, ok := w.built.(*payments.MemStore)
@@ -45,7 +50,8 @@ func (w *paymentsWiring) matrixFixtures(fx *matrixFixtures) error {
 	if w.late == nil {
 		return errors.New("payments wiring was not built")
 	}
-	rank := map[string]int{"file": 0, "account": 0, "transfer": 1, "order_c": 2, "payment": 2, "refund": 3, "collection_line": 2, "collection": 4}
+	rank := map[string]int{"file": 0, "account": 0, "rr_file": 0, "transfer": 1, "order_c": 2, "payment": 2, "refund": 3,
+		"collection_line": 2, "collection": 4, "refund_request": 4}
 	all := fx.Of("payments")
 	slices.SortStableFunc(all, func(a, b fixture) int { return cmp.Compare(rank[a.Kind], rank[b.Kind]) })
 	for _, f := range all {
@@ -71,6 +77,10 @@ func (w *paymentsWiring) matrixFixtures(fx *matrixFixtures) error {
 			ferr = w.matrixCollection(ctx, fx, mem, f, id)
 		case "refund":
 			ferr = matrixRefund(fx, mem, f, id)
+		case "rr_file":
+			ferr = w.matrixRequestFile(ctx, fx, f, id)
+		case "refund_request":
+			ferr = matrixRefundRequest(fx, mem, f, id)
 		default:
 			ferr = fmt.Errorf("unknown kind %q", f.Kind)
 		}
@@ -354,4 +364,75 @@ func (w *paymentsWiring) matrixCollection(ctx context.Context, fx *matrixFixture
 	tr.Status = payments.TransferCollectionRequested
 	_, err = mem.UpdateTransfer(ctx, tr, payments.TransferUnmatched)
 	return err
+}
+
+// matrixRequestFile seeds a buyer's evidence upload (BE-132): active and
+// scanned, its object in the files bucket so that the download is signed.
+func (w *paymentsWiring) matrixRequestFile(ctx context.Context, fx *matrixFixtures, f fixture, id uuid.UUID) error {
+	org, err := fx.Ref(f, "org")
+	if err != nil {
+		return err
+	}
+	by, err := fx.Ref(f, "uploaded_by")
+	if err != nil {
+		return err
+	}
+	owner, err := optRef(fx, f, "attached")
+	if err != nil {
+		return err
+	}
+	objects, err := w.late.files.memObjects()
+	if err != nil {
+		return err
+	}
+	size, mime := int64(len(matrixFilePDF)), files.MIMEPDF
+	row := files.File{
+		ID: id, Purpose: files.PurposeRefundRequestEvidence, OrgID: &org, UploadedBy: &by, Bucket: testBuckets.Files,
+		StorageKey: "matrix/" + f.Name, DeclaredMIME: mime, DetectedMIME: &mime, SizeBytes: &size, SHA256: make([]byte, 32),
+		Status: files.StatusActive, ScanStatus: files.ScanSkipped,
+	}
+	if owner != nil {
+		module, at := "payments", matrixOrgTime.Add(48*time.Hour)
+		row.AttachedModule, row.AttachedEntityID, row.AttachedAt = &module, owner, &at
+	}
+	objects.Upload(row.Bucket, row.StorageKey, matrixFilePDF, mime)
+	return w.late.files.store.Insert(ctx, row)
+}
+
+// matrixRefundRequest seeds a refund request of an orders fixture line.
+func matrixRefundRequest(fx *matrixFixtures, mem *payments.MemStore, f fixture, id uuid.UUID) error {
+	var errs []error
+	ref := func(field string) uuid.UUID {
+		v, err := fx.Ref(f, field)
+		errs = append(errs, err)
+		return v
+	}
+	amount, _ := f.Fields["amount"].(int)
+	order := ref("order")
+	r := payments.RefundRequest{ID: id, OrderID: order, OrderLineID: ref("line"), OrgID: ref("org"), SellerOrgID: ref("seller"),
+		OrderNo: matrixOrderNo(order), LineTitle: "Matris stant", Amount: int64(amount), Reason: payments.RefundReasonNotFulfilled,
+		Explanation: "Matris: stant kurulmadı, alan boştu.", TargetIBAN: "TR100006200000000006295938", Status: payments.RequestOpen,
+		RequestedBy: ref("requested_by")}
+	ev, err := optRef(fx, f, "evidence")
+	if err != nil {
+		return err
+	}
+	r.EvidenceFileID = ev
+	at := matrixOrgTime.Add(48 * time.Hour)
+	status, _ := f.Fields["status"].(string)
+	switch payments.RefundRequestStatus(status) {
+	case "", payments.RequestOpen:
+	case payments.RequestInReview:
+		by := ref("reviewed_by")
+		r.Status, r.ReviewedBy, r.ReviewedAt = payments.RequestInReview, &by, &at
+	case payments.RequestRejected:
+		by, why := ref("decided_by"), "Matris: teslim tutanağı imzalı"
+		r.Status, r.DecidedBy, r.DecidedAt, r.RejectionReason = payments.RequestRejected, &by, &at, &why
+	default:
+		return fmt.Errorf("unknown refund request status %q", status)
+	}
+	if err := errors.Join(errs...); err != nil {
+		return err
+	}
+	return mem.SeedRefundRequest(r)
 }

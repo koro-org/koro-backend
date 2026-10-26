@@ -1,0 +1,1 @@
+{"order_line_id": "{{fixture:ln_a_evidence}}", "amount": 50000, "reason": "not_fulfilled", "explanation": "Matris: stant kurulmadı, alan boştu.", "target_iban": "TR100006200000000006295938", "evidence_file_id": "{{fixture:file_rr_new}}"}

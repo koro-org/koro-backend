@@ -45,23 +45,16 @@ func (s *service) checkEvidence(ctx context.Context, l Line, fileID uuid.UUID) e
 		return ErrUnavailable
 	}
 	f, err := s.d.Files.Get(ctx, fileID)
-	switch {
-	case errors.Is(err, files.ErrNotFound):
-		return problem.Field(loc, "must be a delivery_evidence upload of the selling organization")
-	case err != nil:
-		return err
-	case f.Purpose != files.PurposeDeliveryEvidence, f.OrgID == nil, *f.OrgID != l.SellerOrgID:
-		return problem.Field(loc, "must be a delivery_evidence upload of the selling organization")
-	case f.Status == files.StatusRejected:
-		return files.ErrRejected
-	case f.Status != files.StatusActive:
-		return problem.Field(loc, "must be a completed upload")
-	case f.ScanStatus == files.ScanInfected:
-		return files.ErrNotClean
-	case f.AttachedModule != "" && (f.AttachedModule != evidenceModule || f.AttachedEntityID != l.ID):
-		return files.ErrAlreadyAttached
+	if err == nil {
+		err = f.CheckOrgUpload(l.SellerOrgID, evidenceOwner(l.ID))
 	}
-	return nil
+	switch {
+	case errors.Is(err, files.ErrNotFound), errors.Is(err, files.ErrNotOrgUpload):
+		return problem.Field(loc, "must be a delivery_evidence upload of the selling organization")
+	case errors.Is(err, files.ErrUploadNotActive):
+		return problem.Field(loc, "must be a completed upload")
+	}
+	return err
 }
 
 // evidenceAttachErr is the answer to a failed Attach of the evidence: a

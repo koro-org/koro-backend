@@ -10,15 +10,18 @@ import (
 
 // retainedReason explains why Erase keeps what it finds (02 §20: transfers
 // and payments are financial records, "silinmez; süre sonunda hard delete").
-const retainedReason = "incoming bank transfers, payments, refunds and receivable collections are financial records kept for 10 years " +
-	"(financial_records; tax and commercial law): they are neither deleted nor anonymised on account erasure; the staff " +
-	"references (entered_by, matched_by, return_requested_by, return_approved_by, captured_by, requested_by, approved_by, " +
-	"rejected_by, closed_by) stay as references to the anonymised account and the rows are destroyed when the retention period ends"
+const retainedReason = "incoming bank transfers, payments, refunds, receivable collections and refund requests are financial records " +
+	"kept for 10 years (financial_records; tax and commercial law; a refund request with its order): they are neither deleted " +
+	"nor anonymised on account erasure; the user references (entered_by, matched_by, return_requested_by, return_approved_by, " +
+	"captured_by, requested_by, approved_by, rejected_by, closed_by, reviewed_by, decided_by, withdrawn_by) stay as references " +
+	"to the anonymised account and the rows are destroyed when the retention period ends"
 
 // privacyProvider is the KVKK provider of payments (01 §3.3). The user
 // references of payments are staff actions: who recorded, matched or
 // handled the return of a transfer, who captured a payment by hand, who
-// requested, approved or rejected a refund (BE-043). Export
+// requested, approved or rejected a refund (BE-043); and a buying
+// company's admin who asked for a refund — with the explanation they wrote —
+// or withdrew it, the staff who reviewed or decided it (BE-132). Export
 // lists them with IDs, amounts and states (never a sender's name or IBAN:
 // the sender of a transfer is not linked to an account; a request from a
 // sender who is not a user is answered by the DPO from the rows by hand);
@@ -49,8 +52,33 @@ func (p privacyProvider) Export(ctx context.Context, userID uuid.UUID) (privacy.
 	if err != nil {
 		return privacy.ExportSection{}, err
 	}
-	out := privacy.ExportSection{Module: "payments", Items: make([]map[string]any, 0, len(ts)+len(ps)+len(rs)+len(cs))}
+	qs, err := p.s.d.Store.RefundRequestsOfUser(ctx, userID)
+	if err != nil {
+		return privacy.ExportSection{}, err
+	}
+	out := privacy.ExportSection{Module: "payments", Items: make([]map[string]any, 0, len(ts)+len(ps)+len(rs)+len(cs)+len(qs))}
 	is := func(id *uuid.UUID) bool { return id != nil && *id == userID }
+	for _, q := range qs {
+		roles := []string{}
+		item := map[string]any{"record": "refund_request", "refund_request_id": q.ID.String(), "order_id": q.OrderID.String(),
+			"status": string(q.Status), "amount": q.Amount, "currency": q.Currency, "reason": q.Reason,
+			"requested_at": q.CreatedAt.UTC().Format(time.RFC3339)}
+		if q.RequestedBy == userID {
+			roles = append(roles, "requested")
+			item["explanation"] = q.Explanation // the requester's own words
+		}
+		if is(q.ReviewedBy) {
+			roles = append(roles, "reviewed")
+		}
+		if is(q.DecidedBy) {
+			roles = append(roles, "decided")
+		}
+		if is(q.WithdrawnBy) {
+			roles = append(roles, "withdrawn")
+		}
+		item["roles"] = roles
+		out.Items = append(out.Items, item)
+	}
 	for _, c := range cs {
 		roles := []string{}
 		if c.RequestedBy == userID {
@@ -134,7 +162,11 @@ func (p privacyProvider) Erase(ctx context.Context, userID uuid.UUID) (privacy.E
 	if err != nil {
 		return privacy.EraseResult{}, err
 	}
-	res := privacy.EraseResult{Module: "payments", Retained: len(ts) + len(ps) + len(rs) + len(cs)}
+	qs, err := p.s.d.Store.RefundRequestsOfUser(ctx, userID)
+	if err != nil {
+		return privacy.EraseResult{}, err
+	}
+	res := privacy.EraseResult{Module: "payments", Retained: len(ts) + len(ps) + len(rs) + len(cs) + len(qs)}
 	if res.Retained > 0 {
 		res.RetainedReason = retainedReason
 	}

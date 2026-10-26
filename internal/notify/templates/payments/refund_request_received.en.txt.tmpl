@@ -1,0 +1,9 @@
+Hello {{index .Data "name"}},
+
+The buying company asked for a refund of a line you sold. Koro finance will review it and you will be told of the decision.
+
+Order: {{index .Data "order_no"}}
+Line: {{index .Data "line_title"}}
+Amount: {{index .Data "amount"}} {{index .Data "currency"}}
+
+The details and the buyer's evidence are in the sales section of your Koro panel.

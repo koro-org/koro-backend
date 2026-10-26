@@ -46,6 +46,16 @@ var (
 	// claimed back) or cancelled.
 	ErrLineInPayout = problem.New(problem.Conflict, "payments.line_in_payout", "The order line is in an open payout")
 
+	// ErrRefundRequestOpen: the order line already has a refund request
+	// waiting for finance (BE-132; refund_requests_line_pending_uq): the
+	// buyer withdraws it or waits for its decision.
+	ErrRefundRequestOpen = problem.New(problem.Conflict, "payments.refund_request_open",
+		"The order line already has a refund request waiting for a decision")
+	// ErrRefundRequestWindowClosed: the line was delivered longer ago than
+	// the refund request window (PAYMENTS_REFUND_REQUEST_WINDOW, BE-132).
+	ErrRefundRequestWindowClosed = problem.New(problem.Conflict, "payments.refund_request_window_closed",
+		"The refund request window of the order line has ended")
+
 	// ErrRefundExceedsPaid is orders' 422 orders.refund_exceeds_paid: the
 	// refund is more than the payment, the order or the line still holds
 	// (requested and approved refunds count; 06 H-52).
@@ -85,6 +95,10 @@ var constraints = db.Constraints{
 	"refunds_four_eyes_chk":                          authz.ErrFourEyes,
 	"refunds_closure_four_eyes_chk":                  authz.ErrFourEyes,
 	"payments_refunded_limit_chk":                    ErrRefundExceedsPaid,
+	"refund_requests_line_pending_uq":                ErrRefundRequestOpen,
+	"refund_requests_target_iban_chk":                ErrIBANInvalid,
+	"refund_requests_review_eyes_chk":                authz.ErrFourEyes,
+	"refund_requests_decision_eyes_chk":              authz.ErrFourEyes,
 }
 
 // fieldErrOf is one field error (for a module error that names its field).

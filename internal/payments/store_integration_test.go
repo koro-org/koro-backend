@@ -148,7 +148,7 @@ func pgContractWorld(t *testing.T, d *db.DB) contractWorld {
 		order: func(t *testing.T) contractOrder {
 			e := &env{clk: clock.NewFake(t0), b: backend{tx: d.Tx, booth: booth}, ordStore: orders.NewGormStore(d.ORM)}
 			p := e.order(t, orderSpec{})
-			return contractOrder{id: p.order.ID, org: p.order.OrgID, line: p.lines[0].ID}
+			return contractOrder{id: p.order.ID, org: p.order.OrgID, line: p.lines[0].ID, seller: p.lines[0].SellerOrgID, no: p.order.OrderNo}
 		},
 	}
 }

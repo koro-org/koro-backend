@@ -16,6 +16,7 @@ import (
 // every insert; a caller's values are ignored (one clock, BE-069).
 type Store interface {
 	CollectionStore
+	RefundRequestStore
 	// InsertAccount writes a new collection account (pending_approval).
 	InsertAccount(ctx context.Context, c CollectionAccount) (CollectionAccount, error)
 	// GetAccount returns an account (FOR UPDATE when lock) or ErrNotFound.

@@ -1,0 +1,11 @@
+Merhaba {{index .Data "name"}},
+
+İade talebiniz Koro finans ekibi tarafından reddedildi.
+
+Sipariş: {{index .Data "order_no"}}
+Kalem: {{index .Data "line_title"}}
+Tutar: {{index .Data "amount"}} {{index .Data "currency"}}
+
+Gerekçe: {{index .Data "reason"}}
+
+Sorunuz varsa Koro destek ekibine yazabilirsiniz.

@@ -73,7 +73,8 @@ func (m Module) Subscribe(r *outbox.Registry) {
 // Tasks returns the plain task handlers of payments for the worker.
 func (m Module) Tasks() []queue.Task {
 	return []queue.Task{{Name: NotifyAccountChangedTaskName, Handle: m.svc.handleAccountChanged},
-		{Name: NotifyRefundRequestedTaskName, Handle: m.svc.handleRefundRequested}}
+		{Name: NotifyRefundRequestedTaskName, Handle: m.svc.handleRefundRequested},
+		{Name: NotifyRefundRequestTaskName, Handle: m.svc.handleRefundRequest}}
 }
 
 // digestJob is payments.unmatched_digest (01 §7): the unmatched transfers

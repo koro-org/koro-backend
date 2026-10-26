@@ -1,0 +1,1 @@
+{"order_line_id": "{{fixture:ln_a_paid}}", "amount": 1000, "reason": "other", "explanation": "Matris: ikinci bir talep denemesi.", "target_iban": "TR100006200000000006295938"}

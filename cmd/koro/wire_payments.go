@@ -32,7 +32,9 @@ import (
 // c.parties.svc (Koro's own party), c.files.svc (receipts and the direct
 // payment evidence), c.identity.svc (re-authentication, notice
 // addresses), identity's store (the platform and finance admins in effect,
-// 06 H-33), c.orgs.svc (the admins of buyer and seller orgs), c.notify.svc
+// 06 H-33), c.orgs.svc (the admins of buyer and seller orgs; the org and the
+// names of a refund request, BE-132), c.infra.cfg.Payments (the refund
+// request window), c.notify.svc
 // (read at call time), c.infra.outbox, c.infra.queue and
 // c.infra.idempotency.
 //
@@ -78,6 +80,7 @@ func (w *paymentsWiring) build(c *container) error {
 	d := payments.Deps{
 		Store: store, Tx: tx, Audit: c.audit.svc, Idempotency: c.infra.idempotency, Orders: c.orders.orders, Ledger: c.ledger.svc,
 		Outbox: c.infra.outbox, Queue: c.infra.queue, Clock: c.infra.clock, Log: c.infra.log.With("module", "payments"),
+		Config: payments.Config{RefundRequestWindow: c.infra.cfg.Payments.RefundRequestWindow},
 		Sender: paymentsSender{c: c}, Staff: paymentsStaff{c: c}, LedgerLines: ledgerLines,
 	}
 	if c.parties.svc != nil {
@@ -160,7 +163,7 @@ func (w *paymentsWiring) tasks(c *container) {
 
 // routes: the 15 payments operations of BE-041 (04 §2.16's 12, the return's
 // request and second eye (06 H-56, T-79, T-228) and the model C direct
-// confirmation) and the 8 of BE-043 (04 §2.16's 7 payments and refunds and
-// the refunds due); w.svc is nil under `koro openapi`, which Register
-// tolerates.
+// confirmation), the 8 of BE-043 (04 §2.16's 7 payments and refunds and
+// the refunds due) and the 12 refund request operations of BE-132; w.svc is
+// nil under `koro openapi`, which Register tolerates.
 func (w *paymentsWiring) routes(c *container, api huma.API) { payments.Register(api, w.svc) }

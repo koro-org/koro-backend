@@ -150,3 +150,5 @@ provider_product_map        none      billing       -
 integration_credentials     none      billing       -
 
 receivable_collections     staff     payments      -
+# BE-132: a buying company's refund request names the admin who asked (and their explanation) and the staff who decided it
+refund_requests             personal  payments      provider:payments

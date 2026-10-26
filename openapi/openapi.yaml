@@ -18,6 +18,32 @@ components:
       required:
         - token
       type: object
+    AcceptRefundRequestInputBody:
+      additionalProperties: false
+      properties:
+        note:
+          description: The refund's note (audited; no personal data)
+          maxLength: 1000
+          type: string
+        payment_id:
+          description: "The captured payment the refund draws from; empty: the order's oldest one that holds the amount"
+          format: uuid
+          type: string
+        refund_reason:
+          description: "The refund's reason; empty: the buyer's"
+          enum:
+            - event_cancelled
+            - offering_cancelled
+            - not_fulfilled
+            - duplicate_payment
+            - goodwill
+            - other
+          type: string
+        target_iban:
+          description: Overrides the buyer's IBAN (TR); spaces are ignored
+          maxLength: 42
+          type: string
+      type: object
     AcceptTermsInputBody:
       additionalProperties: false
       properties:
@@ -4526,6 +4552,46 @@ components:
         - reason
         - target_iban
       type: object
+    CreateRefundRequestInputBody:
+      additionalProperties: false
+      properties:
+        amount:
+          description: Kuruş, at most the line's refundable_amount
+          format: int64
+          minimum: 1
+          type: integer
+        evidence_file_id:
+          description: A refund_request_evidence upload of the buying company
+          format: uuid
+          type: string
+        explanation:
+          description: What happened (the seller's admins and finance read it)
+          maxLength: 2000
+          minLength: 10
+          type: string
+        order_line_id:
+          description: The line of the order to refund
+          format: uuid
+          type: string
+        reason:
+          enum:
+            - not_fulfilled
+            - event_cancelled
+            - offering_cancelled
+            - duplicate_payment
+            - other
+          type: string
+        target_iban:
+          description: TR IBAN the money goes back to; spaces are ignored
+          maxLength: 42
+          type: string
+      required:
+        - order_line_id
+        - amount
+        - reason
+        - explanation
+        - target_iban
+      type: object
     CreateRegistrationInputBody:
       additionalProperties: false
       properties:
@@ -4660,6 +4726,7 @@ components:
             - refund_receipt
             - invoice_pdf
             - delivery_evidence
+            - refund_request_evidence
           type: string
         size_bytes:
           description: Exact size in bytes; the purpose may allow less (x-koro-upload-rules max_bytes)
@@ -8711,7 +8778,7 @@ components:
           description: The notification kind (template ID)
           type: string
         link_path:
-          description: "Client-independent in-app path (web and mobile map it to their own routes; a form a client does not know is shown without a link). One of: `/me/access-grants`; `/me/club-claims`; `/me/contact-requests/{contact_request_id}`; `/me/registrations/{registration_id}`; `/me/security-events`; `/me/terms`; `/me/student-verification`; `/orders/{order_id}`; `/orders/{order_id}/payment-instructions`; `/invoices/{invoice_id}`; `/posts/{post_id}`; `/clubs/by-slug/{club_slug}`; `/orgs/{org_id}/events/{event_id}/registrations/{registration_id}`; `/orgs/{org_id}/sales`; `/orgs/{org_id}/payouts/{payout_id}`; `/orgs/{org_id}/offerings`; `/orgs/{org_id}/offering-approvals`; `/orgs/{org_id}/posts`; `/orgs/{org_id}/payees/{payee_id}`; `/orgs/{org_id}/contact-requests/{contact_request_id}`; `/admin/audit-events`; `/admin/bank-accounts`; `/admin/breaches`; `/admin/clubs/{club_org_id}`; `/admin/club-claims/{claim_id}`; `/admin/collection-accounts`; `/admin/commerce-policies`; `/admin/offerings`; `/admin/orders?order_no={order_no}`; `/admin/platform-roles`; `/admin/payouts/{payout_id}`; `/admin/refunds/{refund_id}`; `/admin/reports/{report_id}`; `/admin/review-queue`; `/admin/incoming-transfers?status=unmatched`; `/clubs/{club_org_id}` (legacy); `/events/{event_id}/registrations/{registration_id}` (legacy). {<name>_id} is a UUID, {club_slug} an organization slug (getOrgBySlug), {order_no} an order number. Every current org form starts with /orgs/{org_id}/: the client opens it in the panel of that org's kind (getMe memberships[].org_kind). Legacy forms are no longer produced but older notifications may carry them."
+          description: "Client-independent in-app path (web and mobile map it to their own routes; a form a client does not know is shown without a link). One of: `/me/access-grants`; `/me/club-claims`; `/me/contact-requests/{contact_request_id}`; `/me/registrations/{registration_id}`; `/me/security-events`; `/me/terms`; `/me/student-verification`; `/orders/{order_id}`; `/orders/{order_id}/payment-instructions`; `/invoices/{invoice_id}`; `/posts/{post_id}`; `/clubs/by-slug/{club_slug}`; `/orgs/{org_id}/events/{event_id}/registrations/{registration_id}`; `/orgs/{org_id}/sales`; `/orgs/{org_id}/payouts/{payout_id}`; `/orgs/{org_id}/offerings`; `/orgs/{org_id}/offering-approvals`; `/orgs/{org_id}/posts`; `/orgs/{org_id}/payees/{payee_id}`; `/orgs/{org_id}/contact-requests/{contact_request_id}`; `/orgs/{org_id}/refund-requests/{refund_request_id}`; `/orgs/{org_id}/sales/refund-requests/{refund_request_id}`; `/admin/audit-events`; `/admin/bank-accounts`; `/admin/breaches`; `/admin/clubs/{club_org_id}`; `/admin/club-claims/{claim_id}`; `/admin/collection-accounts`; `/admin/commerce-policies`; `/admin/offerings`; `/admin/orders?order_no={order_no}`; `/admin/platform-roles`; `/admin/payouts/{payout_id}`; `/admin/refunds/{refund_id}`; `/admin/refund-requests/{refund_request_id}`; `/admin/reports/{report_id}`; `/admin/review-queue`; `/admin/incoming-transfers?status=unmatched`; `/clubs/{club_org_id}` (legacy); `/events/{event_id}/registrations/{registration_id}` (legacy). {<name>_id} is a UUID, {club_slug} an organization slug (getOrgBySlug), {order_no} an order number. Every current org form starts with /orgs/{org_id}/: the client opens it in the panel of that org's kind (getMe memberships[].org_kind). Legacy forms are no longer produced but older notifications may carry them."
           type: string
           x-koro-link-paths:
             - pattern: /me/access-grants
@@ -8754,6 +8821,10 @@ components:
               audience: org
             - pattern: /orgs/{org_id}/contact-requests/{contact_request_id}
               audience: org
+            - pattern: /orgs/{org_id}/refund-requests/{refund_request_id}
+              audience: org
+            - pattern: /orgs/{org_id}/sales/refund-requests/{refund_request_id}
+              audience: org
             - pattern: /admin/audit-events
               audience: admin
             - pattern: /admin/bank-accounts
@@ -8777,6 +8848,8 @@ components:
             - pattern: /admin/payouts/{payout_id}
               audience: admin
             - pattern: /admin/refunds/{refund_id}
+              audience: admin
+            - pattern: /admin/refund-requests/{refund_request_id}
               audience: admin
             - pattern: /admin/reports/{report_id}
               audience: admin
@@ -11631,6 +11704,343 @@ components:
       required:
         - items
       type: object
+    RefundOptionDTO:
+      additionalProperties: false
+      properties:
+        blocked_reason:
+          description: Why no request may be opened now
+          enum:
+            - order_state
+            - line_cancelled
+            - window_closed
+            - open_request
+            - nothing_left
+          type: string
+        eligible:
+          type: boolean
+        open_refund_request_id:
+          description: The line's waiting request
+          format: uuid
+          type: string
+        order_line_id:
+          format: uuid
+          type: string
+        refundable_amount:
+          description: Kuruş a request may ask now (0 when blocked)
+          format: int64
+          type: integer
+        request_deadline:
+          description: The line's delivery + the refund request window; absent while undelivered
+          format: date-time
+          type: string
+        seller_org_id:
+          format: uuid
+          type: string
+        title:
+          type: string
+      required:
+        - order_line_id
+        - title
+        - seller_org_id
+        - refundable_amount
+        - eligible
+      type: object
+    RefundOptionsDTO:
+      additionalProperties: false
+      properties:
+        currency:
+          enum:
+            - TRY
+          type: string
+        items:
+          description: The order's refund requests, newest first
+          items:
+            $ref: "#/components/schemas/RefundRequestDTO"
+          type: array
+        lines:
+          items:
+            $ref: "#/components/schemas/RefundOptionDTO"
+          type: array
+        order_id:
+          format: uuid
+          type: string
+        order_no:
+          type: string
+        status:
+          description: The order's status
+          type: string
+      required:
+        - order_id
+        - order_no
+        - status
+        - currency
+        - lines
+        - items
+      type: object
+    RefundRequestDTO:
+      additionalProperties: false
+      properties:
+        amount:
+          description: Kuruş
+          format: int64
+          type: integer
+        buyer_name:
+          type: string
+        currency:
+          enum:
+            - TRY
+          type: string
+        decided_at:
+          format: date-time
+          type: string
+        decided_by:
+          description: Staff view
+          format: uuid
+          type: string
+        explanation:
+          type: string
+        has_evidence:
+          description: downloadRefundRequestEvidence serves it to the parties
+          type: boolean
+        line_title:
+          type: string
+        order_id:
+          format: uuid
+          type: string
+        order_line_id:
+          format: uuid
+          type: string
+        order_no:
+          type: string
+        org_id:
+          description: The buying company
+          format: uuid
+          type: string
+        reason:
+          enum:
+            - not_fulfilled
+            - event_cancelled
+            - offering_cancelled
+            - duplicate_payment
+            - other
+          type: string
+        refund_id:
+          description: "Staff view: the refund an acceptance opened"
+          format: uuid
+          type: string
+        refund_request_id:
+          format: uuid
+          type: string
+        refund_status:
+          description: The status of that refund (one request's reads)
+          enum:
+            - requested
+            - approved
+            - processing
+            - completed
+            - failed
+            - rejected
+            - cancelled
+          type: string
+        rejection_reason:
+          type: string
+        requested_at:
+          format: date-time
+          type: string
+        requested_by:
+          description: The buyer's admin who asked (the buyer's and staff's view)
+          format: uuid
+          type: string
+        reviewed_at:
+          format: date-time
+          type: string
+        reviewed_by:
+          description: Staff view
+          format: uuid
+          type: string
+        seller_name:
+          type: string
+        seller_org_id:
+          description: The line's seller
+          format: uuid
+          type: string
+        status:
+          enum:
+            - open
+            - in_review
+            - accepted
+            - rejected
+            - withdrawn
+          type: string
+        target_iban_masked:
+          description: Where the money goes back, masked (the buyer's and staff's view)
+          type: string
+        withdrawn_at:
+          format: date-time
+          type: string
+      required:
+        - refund_request_id
+        - order_id
+        - order_no
+        - order_line_id
+        - line_title
+        - org_id
+        - buyer_name
+        - seller_org_id
+        - seller_name
+        - amount
+        - currency
+        - reason
+        - explanation
+        - has_evidence
+        - status
+        - requested_at
+      type: object
+    RefundRequestDetailDTO:
+      additionalProperties: false
+      properties:
+        amount:
+          description: Kuruş
+          format: int64
+          type: integer
+        buyer_name:
+          type: string
+        currency:
+          enum:
+            - TRY
+          type: string
+        decided_at:
+          format: date-time
+          type: string
+        decided_by:
+          description: Staff view
+          format: uuid
+          type: string
+        explanation:
+          type: string
+        has_evidence:
+          description: downloadRefundRequestEvidence serves it to the parties
+          type: boolean
+        line_refundable_amount:
+          description: Kuruş the line may still give back now (the request's own amount not counted)
+          format: int64
+          type: integer
+        line_title:
+          type: string
+        order_id:
+          format: uuid
+          type: string
+        order_line_id:
+          format: uuid
+          type: string
+        order_no:
+          type: string
+        org_id:
+          description: The buying company
+          format: uuid
+          type: string
+        payments:
+          description: The order's payments that can fund the refund
+          items:
+            $ref: "#/components/schemas/FundingPaymentDTO"
+          type: array
+        reason:
+          enum:
+            - not_fulfilled
+            - event_cancelled
+            - offering_cancelled
+            - duplicate_payment
+            - other
+          type: string
+        refund:
+          $ref: "#/components/schemas/RefundDTO"
+          description: The refund an acceptance opened
+        refund_id:
+          description: "Staff view: the refund an acceptance opened"
+          format: uuid
+          type: string
+        refund_request_id:
+          format: uuid
+          type: string
+        refund_status:
+          description: The status of that refund (one request's reads)
+          enum:
+            - requested
+            - approved
+            - processing
+            - completed
+            - failed
+            - rejected
+            - cancelled
+          type: string
+        rejection_reason:
+          type: string
+        requested_at:
+          format: date-time
+          type: string
+        requested_by:
+          description: The buyer's admin who asked (the buyer's and staff's view)
+          format: uuid
+          type: string
+        reviewed_at:
+          format: date-time
+          type: string
+        reviewed_by:
+          description: Staff view
+          format: uuid
+          type: string
+        seller_name:
+          type: string
+        seller_org_id:
+          description: The line's seller
+          format: uuid
+          type: string
+        status:
+          enum:
+            - open
+            - in_review
+            - accepted
+            - rejected
+            - withdrawn
+          type: string
+        target_iban_masked:
+          description: Where the money goes back, masked (the buyer's and staff's view)
+          type: string
+        withdrawn_at:
+          format: date-time
+          type: string
+      required:
+        - line_refundable_amount
+        - payments
+        - refund_request_id
+        - order_id
+        - order_no
+        - order_line_id
+        - line_title
+        - org_id
+        - buyer_name
+        - seller_org_id
+        - seller_name
+        - amount
+        - currency
+        - reason
+        - explanation
+        - has_evidence
+        - status
+        - requested_at
+      type: object
+    RefundRequestList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/RefundRequestDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
     RegisterInputBody:
       additionalProperties: false
       properties:
@@ -11974,6 +12384,17 @@ components:
           type: string
       required:
         - note
+      type: object
+    RejectRefundRequestInputBody:
+      additionalProperties: false
+      properties:
+        reason:
+          description: Why the request is rejected (shown to the buyer, audited)
+          maxLength: 1000
+          minLength: 1
+          type: string
+      required:
+        - reason
       type: object
     RemoveInputBody:
       additionalProperties: false
@@ -20804,6 +21225,260 @@ paths:
       x-koro-rate-limit: write_default
       x-koro-surface: admin
       x-koro-terms-gate: enforced
+  /api/v1/admin/refund-requests:
+    get:
+      description: Every buyer's requests, oldest first; pending=true keeps the waiting ones (open or in_review).
+      operationId: adminListRefundRequests
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - explode: false
+          in: query
+          name: status
+          schema:
+            enum:
+              - open
+              - in_review
+              - accepted
+              - rejected
+              - withdrawn
+            type: string
+        - description: Only the waiting requests (open or in_review)
+          explode: false
+          in: query
+          name: pending
+          schema:
+            description: Only the waiting requests (open or in_review)
+            type: boolean
+        - description: One order's requests
+          explode: false
+          in: query
+          name: order_id
+          schema:
+            description: One order's requests
+            maxLength: 36
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundRequestList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the refund requests (finance's queue)
+      tags:
+        - payments
+      x-koro-action: payments.refund_request.list_admin
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+  /api/v1/admin/refund-requests/{refund_request_id}:
+    get:
+      description: The request, what its line may still give back now (line_refundable_amount) and the order's payments that can fund the refund, with the refund an acceptance opened.
+      operationId: adminGetRefundRequest
+      parameters:
+        - description: Refund request ID (an unknown or malformed ID is 404)
+          in: path
+          name: refund_request_id
+          required: true
+          schema:
+            description: Refund request ID (an unknown or malformed ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundRequestDetailDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a refund request with its money
+      tags:
+        - payments
+      x-koro-action: payments.refund_request.list_admin
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+  /api/v1/admin/refund-requests/{refund_request_id}/accept:
+    post:
+      description: "A waiting request (409 payments.invalid_state), never by its requester (403). In one transaction a refund of the request's line and amount is requested (adminCreateRefund's rules: every limit again, 422 orders.refund_exceeds_paid; a line in an open payout 409 payments.line_in_payout): it draws from payment_id or, when empty, the order's oldest captured bank transfer that still holds the amount (422 when none does); its IBAN is target_iban or the buyer's, its reason refund_reason or the buyer's. Another finance admin approves the refund (four eyes). The buyer and the seller are told."
+      operationId: adminAcceptRefundRequest
+      parameters:
+        - description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Refund request ID (an unknown or malformed ID is 404)
+          in: path
+          name: refund_request_id
+          required: true
+          schema:
+            description: Refund request ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AcceptRefundRequestInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundRequestDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Accept a refund request
+      tags:
+        - payments
+      x-koro-action: payments.refund_request.accept
+      x-koro-idempotency: required
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+      x-koro-terms-gate: enforced
+  /api/v1/admin/refund-requests/{refund_request_id}/reject:
+    post:
+      description: A waiting request (409 payments.invalid_state), never by its requester (403); the reason is shown to the buyer and audited.
+      operationId: adminRejectRefundRequest
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Refund request ID (an unknown or malformed ID is 404)
+          in: path
+          name: refund_request_id
+          required: true
+          schema:
+            description: Refund request ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RejectRefundRequestInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundRequestDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Reject a refund request
+      tags:
+        - payments
+      x-koro-action: payments.refund_request.reject
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+      x-koro-terms-gate: enforced
+  /api/v1/admin/refund-requests/{refund_request_id}/review:
+    post:
+      description: Only an open request (409 payments.invalid_state); never by its requester (403 authz.four_eyes_violation). The buyer is told.
+      operationId: adminReviewRefundRequest
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Refund request ID (an unknown or malformed ID is 404)
+          in: path
+          name: refund_request_id
+          required: true
+          schema:
+            description: Refund request ID (an unknown or malformed ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundRequestDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Take a refund request into review
+      tags:
+        - payments
+      x-koro-action: payments.refund_request.review
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/refunds:
     get:
       description: Newest first; filter by status, order or payment.
@@ -25357,6 +26032,14 @@ paths:
             - image/png
           max_bytes: 10485760
           org_id: none
+        refund_request_evidence:
+          mime_types:
+            - application/pdf
+            - image/jpeg
+            - image/png
+            - image/webp
+          max_bytes: 10485760
+          org_id: required
         transfer_receipt:
           mime_types:
             - application/pdf
@@ -31581,6 +32264,105 @@ paths:
       x-koro-rate-limit: write_default
       x-koro-surface: org
       x-koro-terms-gate: enforced
+  /api/v1/orgs/{org_id}/orders/{order_id}/refund-requests:
+    get:
+      description: "The buying company's members: every line of the order with what a refund request may still ask of it (refundable_amount, kuruş: what Koro holds of the line — its buyer fee only in model C — less the refunds, the open refunds and, within the order, the other lines' waiting requests), the request deadline (the line's delivery + the refund request window; none while undelivered) and why a line cannot be asked (blocked_reason), and the order's requests, newest first. Another org's order is 404."
+      operationId: listOrderRefundRequests
+      parameters:
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Order ID (an unknown or malformed ID, or another org's order, is 404)
+          in: path
+          name: order_id
+          required: true
+          schema:
+            description: Order ID (an unknown or malformed ID, or another org's order, is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundOptionsDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List an order's refund options and requests
+      tags:
+        - payments
+      x-koro-action: payments.refund_request.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+    post:
+      description: "A company admin or owner of the buying company asks for a refund of one line of a paid order (the order is paid, in fulfilment, completed, disputed or partially refunded: 409 orders.order_not_paid or orders.invalid_state otherwise; a cancelled line is refunded by finance without a request, 409). An undelivered line may be asked any time, a delivered one within the refund request window after its delivery (409 payments.refund_request_window_closed); one waiting request per line (409 payments.refund_request_open). amount is at most the line's refundable_amount (422 orders.refund_exceeds_paid). target_iban is where the money goes back (a TR IBAN; shown masked). evidence_file_id, optional, is a completed refund_request_evidence upload of the buying company (422 otherwise; 409 files.rejected, files.not_clean or files.already_attached): the seller's admins and finance see it. The request waits for finance (open); the seller's admins and finance are told."
+      operationId: createOrderRefundRequest
+      parameters:
+        - description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Order ID (an unknown or malformed ID, or another org's order, is 404)
+          in: path
+          name: order_id
+          required: true
+          schema:
+            description: Order ID (an unknown or malformed ID, or another org's order, is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRefundRequestInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundRequestDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Ask for a refund of an order line
+      tags:
+        - payments
+      x-koro-action: payments.refund_request.create
+      x-koro-idempotency: required
+      x-koro-rate-limit: write_default
+      x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/ownership-transfer:
     post:
       description: The new owner must be an active company_admin of the company (422 orgs.transfer_target_invalid). The former owner stays as company_admin; both users' sessions are closed.
@@ -32154,6 +32936,85 @@ paths:
       x-koro-action: feed.post.list_org_manage
       x-koro-rate-limit: read_default
       x-koro-surface: org
+  /api/v1/orgs/{org_id}/refund-requests:
+    get:
+      description: "Newest first; filter by status, waiting ones (pending: open or in_review) or one order."
+      operationId: listOrgRefundRequests
+      parameters:
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - explode: false
+          in: query
+          name: status
+          schema:
+            enum:
+              - open
+              - in_review
+              - accepted
+              - rejected
+              - withdrawn
+            type: string
+        - description: Only the waiting requests (open or in_review)
+          explode: false
+          in: query
+          name: pending
+          schema:
+            description: Only the waiting requests (open or in_review)
+            type: boolean
+        - description: One order's requests
+          explode: false
+          in: query
+          name: order_id
+          schema:
+            description: One order's requests
+            maxLength: 36
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundRequestList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List a buying company's refund requests
+      tags:
+        - payments
+      x-koro-action: payments.refund_request.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
   /api/v1/orgs/{org_id}/sales:
     get:
       description: The seller's lines, newest first, with the order's reference and status and the buyer's title.
@@ -32217,6 +33078,85 @@ paths:
       tags:
         - orders
       x-koro-action: orders.line.list_sales
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/sales/refund-requests:
+    get:
+      description: "The selling org's club admins, university representatives and career staff, and finance and platform admins: the requests on the org's order lines, newest first (pending=true: the open ones; order_id: one order). The seller's view carries neither the buyer's IBAN nor its user."
+      operationId: listOrgSalesRefundRequests
+      parameters:
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - explode: false
+          in: query
+          name: status
+          schema:
+            enum:
+              - open
+              - in_review
+              - accepted
+              - rejected
+              - withdrawn
+            type: string
+        - description: Only the waiting requests (open or in_review)
+          explode: false
+          in: query
+          name: pending
+          schema:
+            description: Only the waiting requests (open or in_review)
+            type: boolean
+        - description: One order's requests
+          explode: false
+          in: query
+          name: order_id
+          schema:
+            description: One order's requests
+            maxLength: 36
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundRequestList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the refund requests on a seller's lines
+      tags:
+        - payments
+      x-koro-action: payments.refund_request.list_sales
       x-koro-rate-limit: read_default
       x-koro-surface: org
   /api/v1/orgs/{org_id}/segments:
@@ -33156,6 +34096,123 @@ paths:
       x-koro-action: feed.post.stats
       x-koro-rate-limit: read_default
       x-koro-surface: resource
+  /api/v1/refund-requests/{refund_request_id}:
+    get:
+      description: "The buying company's members, the seller's staff (the seller's view: no IBAN, no buyer user) and support, finance and platform admins; anyone else 404. refund_status is the status of the refund an accepted request opened."
+      operationId: getRefundRequest
+      parameters:
+        - description: Refund request ID (an unknown or malformed ID is 404)
+          in: path
+          name: refund_request_id
+          required: true
+          schema:
+            description: Refund request ID (an unknown or malformed ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundRequestDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a refund request
+      tags:
+        - payments
+      x-koro-action: payments.refund_request.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: resource
+  /api/v1/refund-requests/{refund_request_id}/evidence:
+    get:
+      description: "A URL valid for 5 minutes of the buyer's evidence file, for the parties only: the buying company's admins, the seller's club admins and university representatives, finance and platform admins. A request without evidence is 404; 409 files.not_clean until the virus scan clears the file. Every download is audited."
+      operationId: downloadRefundRequestEvidence
+      parameters:
+        - description: Refund request ID (an unknown or malformed ID is 404)
+          in: path
+          name: refund_request_id
+          required: true
+          schema:
+            description: Refund request ID (an unknown or malformed ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReceiptLinkDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a download URL of a refund request's evidence
+      tags:
+        - payments
+      x-koro-action: payments.refund_request.read_evidence
+      x-koro-rate-limit: read_default
+      x-koro-surface: resource
+  /api/v1/refund-requests/{refund_request_id}/withdraw:
+    post:
+      description: The buying company's admin, while it waits (open or in_review; 409 payments.invalid_state once decided).
+      operationId: withdrawRefundRequest
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Refund request ID (an unknown or malformed ID is 404)
+          in: path
+          name: refund_request_id
+          required: true
+          schema:
+            description: Refund request ID (an unknown or malformed ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundRequestDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Withdraw a refund request
+      tags:
+        - payments
+      x-koro-action: payments.refund_request.withdraw
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/reports:
     post:
       description: "The target must be a published post or an organization the caller may see (404 otherwise). A user has one open report per target: reporting it again returns that report (200). The reported organization never learns who reported."

@@ -1,0 +1,7 @@
+Hello {{index .Data "name"}},
+
+{{if eq (index .Data "change") "accepted"}}The refund request on your sale was accepted; the refund goes to the buyer after finance's approval and changes your share of the sale.{{else if eq (index .Data "change") "rejected"}}The refund request on your sale was rejected.{{else}}The buyer withdrew the refund request on your sale.{{end}}
+
+Order: {{index .Data "order_no"}}
+Line: {{index .Data "line_title"}}
+Amount: {{index .Data "amount"}} {{index .Data "currency"}}

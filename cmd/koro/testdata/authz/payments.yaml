@@ -1,4 +1,4 @@
-# Authz matrix of the payments module (03 §5.16, 04 §2.16; BE-041, BE-043, BE-128, BE-129). 34 operations × 18 personas: 04 §2.16's
+# Authz matrix of the payments module (03 §5.16, 04 §2.16; BE-041, BE-043, BE-128, BE-129, BE-132). 46 operations × 18 personas: 04 §2.16's
 # 19, the return's request and second eye (06 H-56, T-79, T-228), the model C direct confirmation (T-18) and the
 # refunds due (BE-043). Everything is the admin surface (03 §7.2-3): an actor without the role gets 403 before
 # anything is read. Cells: collection accounts list pad, fin; create fin·R; approve pad·4·R, fin·4·R; retire /
@@ -9,6 +9,10 @@
 # are scenarios (scenarios/payments.yaml). Fixtures: fixtures/payments.yaml; orders' ord_a_unpaid / ord_a_paid and
 # payments' ord_c_direct exist only under config orders_seed: true (set by the operations that need them). The
 # matrix app has no idempotency middleware: Idempotency-Key replays are service and PostgreSQL tests.
+# BE-132 adds the buyers' refund requests (Q-26): the buyer's org surface (cma asks; cmm and cma list), the seller's
+# (club admin, university rep, career staff, pad, fin list), one request (the buyer's members, the seller's staff, sup,
+# pad, fin read; cma withdraws; the evidence: cma, the seller's markers, pad, fin) and finance's queue and decisions
+# (admin surface pad, fin; never the requester).
 version: 1
 groups:
   # signed-in users without a platform role.
@@ -16,6 +20,20 @@ groups:
                      event_staff, university_rep, company_member, company_admin, other_company_member]
   # platform roles without a payments cell.
   other_staff: [moderator, support, dpo, talent_auditor]
+  # BE-132 refund requests: signed-in users outside company_a (its org surface is 404), outside club_a, outside
+  # uni_a, outside company_b, and outside both company_a and club_a (a request of company_a's line sold by club_a).
+  rr_outsiders_company_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin, event_staff,
+                           university_rep, other_company_member]
+  rr_outsiders_club_a: [user_unverified, student, student_minor, other_club_admin, event_staff, university_rep, company_member,
+                        company_admin, other_company_member]
+  rr_outsiders_uni_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin, event_staff,
+                       company_member, company_admin, other_company_member]
+  rr_outsiders_company_b: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin, event_staff,
+                           university_rep, company_member, company_admin]
+  rr_outsiders_request_a: [user_unverified, student, student_minor, other_club_admin, event_staff, university_rep,
+                           other_company_member]
+  # platform roles without a cell on a request's evidence.
+  rr_non_evidence_staff: [moderator, support, dpo, talent_auditor]
 
 operations:
   adminListCollectionAccounts:
@@ -767,3 +785,354 @@ operations:
       "@other_staff": 403
       platform_admin: 403
       finance_admin: 200
+
+  # ---- BE-132: refund requests
+
+  listOrderRefundRequests:
+    method: GET
+    path: /api/v1/orgs/{org_id}/orders/{order_id}/refund-requests
+    action: payments.refund_request.list
+    config: { orders_seed: true }
+    path_params: { org_id: company_a, order_id: ord_a_paid }
+    note: the order's lines with what a request may ask and the order's requests — the buyer's members
+    expect:
+      anonymous: 401
+      "@rr_outsiders_company_a": 404
+      company_member: 200
+      company_admin: 200
+      "@platform_staff": 403
+    variants:
+      - name: other_company
+        path_params: { org_id: company_b, order_id: ord_a_paid }
+        note: IDOR — company_a's order under company_b's surface is 404 for its members too
+        expect:
+          anonymous: 401
+          "@rr_outsiders_company_b": 404
+          other_company_member: 404
+          "@platform_staff": 403
+
+  createOrderRefundRequest:
+    method: POST
+    path: /api/v1/orgs/{org_id}/orders/{order_id}/refund-requests
+    action: payments.refund_request.create
+    idempotency: required
+    config: { orders_seed: true }
+    path_params: { org_id: company_a, order_id: ord_a_evidence }
+    body: bodies/payments/create_refund_request.json
+    note: the buyer's company admin asks (a line of a paid order, undelivered — no deadline)
+    expect:
+      anonymous: 401
+      "@rr_outsiders_company_a": 404
+      company_member: 403
+      company_admin: 201
+      "@platform_staff": 403
+    variants:
+      - name: with_evidence
+        body: bodies/payments/create_refund_request_evidence.json
+        note: the evidence is a refund_request_evidence upload of company_a (attached to the request)
+        expect:
+          anonymous: 401
+          "@rr_outsiders_company_a": 404
+          company_member: 403
+          company_admin: 201
+          "@platform_staff": 403
+      - name: open_request
+        path_params: { org_id: company_a, order_id: ord_a_paid }
+        body: bodies/payments/create_refund_request_open.json
+        note: ln_a_paid already has a waiting request (rr_open) — 409 payments.refund_request_open
+        expect:
+          anonymous: 401
+          "@rr_outsiders_company_a": 404
+          company_member: 403
+          company_admin: 409
+          "@platform_staff": 403
+      - name: exceeds_line
+        body: bodies/payments/create_refund_request_exceeds.json
+        note: one kuruş more than Koro holds of ln_a_evidence — 422 orders.refund_exceeds_paid
+        expect:
+          anonymous: 401
+          "@rr_outsiders_company_a": 404
+          company_member: 403
+          company_admin: 422
+          "@platform_staff": 403
+      - name: unpaid_order
+        path_params: { org_id: company_a, order_id: ord_a_unpaid }
+        body: bodies/payments/create_refund_request_unpaid.json
+        note: an order waiting for its payment has nothing to refund — 409 orders.order_not_paid
+        expect:
+          anonymous: 401
+          "@rr_outsiders_company_a": 404
+          company_member: 403
+          company_admin: 409
+          "@platform_staff": 403
+
+  listOrgRefundRequests:
+    method: GET
+    path: /api/v1/orgs/{org_id}/refund-requests
+    action: payments.refund_request.list
+    path_params: { org_id: company_a }
+    expect:
+      anonymous: 401
+      "@rr_outsiders_company_a": 404
+      company_member: 200
+      company_admin: 200
+      "@platform_staff": 403
+    variants:
+      - name: pending
+        query: { pending: "true", order_id: "{{fixture:ord_a_paid}}" }
+        expect:
+          anonymous: 401
+          "@rr_outsiders_company_a": 404
+          company_member: 200
+          company_admin: 200
+          "@platform_staff": 403
+      - name: other_company
+        path_params: { org_id: company_b }
+        note: IDOR — company_b's requests are company_b's members' only
+        expect:
+          anonymous: 401
+          "@rr_outsiders_company_b": 404
+          other_company_member: 200
+          "@platform_staff": 403
+
+  listOrgSalesRefundRequests:
+    method: GET
+    path: /api/v1/orgs/{org_id}/sales/refund-requests
+    action: payments.refund_request.list_sales
+    path_params: { org_id: club_a }
+    note: the requests on club_a's lines (the seller's view)
+    expect:
+      anonymous: 401
+      "@rr_outsiders_club_a": 404
+      club_member: 403
+      club_admin: 200
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: university
+        path_params: { org_id: uni_a }
+        note: a university sells too; its rep lists the requests on its lines (career_staff as well, no k-cs)
+        expect:
+          anonymous: 401
+          "@rr_outsiders_uni_a": 404
+          university_rep: 200
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+
+  getRefundRequest:
+    method: GET
+    path: /api/v1/refund-requests/{refund_request_id}
+    action: payments.refund_request.read
+    path_params: { refund_request_id: rr_open }
+    expect:
+      anonymous: 401
+      "@rr_outsiders_request_a": 404
+      company_member: 200
+      company_admin: 200
+      club_member: 403
+      club_admin: 200
+      moderator: 403
+      dpo: 403
+      talent_auditor: 403
+      support: 200
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: other_company
+        path_params: { refund_request_id: rr_b }
+        note: IDOR — company_b's request; club_a's admin reads it as the seller
+        expect:
+          anonymous: 401
+          user_unverified: 404
+          student: 404
+          student_minor: 404
+          other_club_admin: 404
+          event_staff: 404
+          university_rep: 404
+          company_member: 404
+          company_admin: 404
+          other_company_member: 200
+          club_member: 403
+          club_admin: 200
+          moderator: 403
+          dpo: 403
+          talent_auditor: 403
+          support: 200
+          platform_admin: 200
+          finance_admin: 200
+      - name: unknown
+        path_params: { refund_request_id: "literal:00000000-0000-7000-8000-0000000000d1" }
+        expect: { anonymous: 401, "@signed_in": 404 }
+
+  withdrawRefundRequest:
+    method: POST
+    path: /api/v1/refund-requests/{refund_request_id}/withdraw
+    action: payments.refund_request.withdraw
+    path_params: { refund_request_id: rr_open }
+    expect:
+      anonymous: 401
+      "@rr_outsiders_request_a": 404
+      company_member: 403
+      company_admin: 200
+      club_member: 403
+      club_admin: 403
+      "@platform_staff": 403
+    variants:
+      - name: rejected
+        path_params: { refund_request_id: rr_rejected }
+        note: a decided request is final — 409 payments.invalid_state
+        expect:
+          anonymous: 401
+          "@rr_outsiders_request_a": 404
+          company_member: 403
+          company_admin: 409
+          club_member: 403
+          club_admin: 403
+          "@platform_staff": 403
+
+  downloadRefundRequestEvidence:
+    method: GET
+    path: /api/v1/refund-requests/{refund_request_id}/evidence
+    action: payments.refund_request.read_evidence
+    path_params: { refund_request_id: rr_open }
+    note: a 5-minute URL of the buyer's evidence — the parties only (KVKK); every download audited
+    expect:
+      anonymous: 401
+      "@rr_outsiders_request_a": 404
+      company_member: 403
+      company_admin: 200
+      club_member: 403
+      club_admin: 200
+      "@rr_non_evidence_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: no_evidence
+        path_params: { refund_request_id: rr_review }
+        note: a request without evidence has none to download — 404 for whoever holds the cell
+        expect:
+          anonymous: 401
+          "@rr_outsiders_request_a": 404
+          company_member: 403
+          company_admin: 404
+          club_member: 403
+          club_admin: 404
+          "@rr_non_evidence_staff": 403
+          platform_admin: 404
+          finance_admin: 404
+
+  adminListRefundRequests:
+    method: GET
+    path: /api/v1/admin/refund-requests
+    action: payments.refund_request.list_admin
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: pending
+        query: { pending: "true" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+
+  adminGetRefundRequest:
+    method: GET
+    path: /api/v1/admin/refund-requests/{refund_request_id}
+    action: payments.refund_request.list_admin
+    config: { orders_seed: true }
+    path_params: { refund_request_id: rr_open }
+    note: the request with what its line still holds and the payments that can fund it
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+
+  adminReviewRefundRequest:
+    method: POST
+    path: /api/v1/admin/refund-requests/{refund_request_id}/review
+    action: payments.refund_request.review
+    path_params: { refund_request_id: rr_open }
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: in_review
+        path_params: { refund_request_id: rr_review }
+        note: only an open request is taken into review — 409 payments.invalid_state
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 409
+          finance_admin: 409
+      - name: own_request
+        path_params: { refund_request_id: rr_own }
+        note: four eyes — finance_admin asked for this refund itself (a buyer's admin too)
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 403
+
+  adminAcceptRefundRequest:
+    method: POST
+    path: /api/v1/admin/refund-requests/{refund_request_id}/accept
+    action: payments.refund_request.accept
+    idempotency: required
+    config: { orders_seed: true }
+    path_params: { refund_request_id: rr_open }
+    body: bodies/payments/accept_refund_request.json
+    note: the refund of ln_a_paid is requested from pay_a in the same transaction (its four eyes follow)
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: rejected
+        path_params: { refund_request_id: rr_rejected }
+        note: a decided request is final — 409 payments.invalid_state
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 409
+          finance_admin: 409
+
+  adminRejectRefundRequest:
+    method: POST
+    path: /api/v1/admin/refund-requests/{refund_request_id}/reject
+    action: payments.refund_request.reject
+    path_params: { refund_request_id: rr_open }
+    body: bodies/payments/reject_refund_request.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: rejected
+        path_params: { refund_request_id: rr_rejected }
+        note: a decided request is final — 409 payments.invalid_state
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 409
+          finance_admin: 409

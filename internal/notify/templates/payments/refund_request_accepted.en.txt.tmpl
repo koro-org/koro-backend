@@ -1,0 +1,7 @@
+Hello {{index .Data "name"}},
+
+Koro finance accepted your refund request. The refund is sent by EFT to the account in your request after a second finance approval; you will be told when it is sent.
+
+Order: {{index .Data "order_no"}}
+Line: {{index .Data "line_title"}}
+Amount: {{index .Data "amount"}} {{index .Data "currency"}}

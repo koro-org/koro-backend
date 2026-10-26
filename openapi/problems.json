@@ -1404,6 +1404,18 @@
     "type": "urn:koro:problem:payments.order_reference_mismatch"
   },
   {
+    "code": "payments.refund_request_open",
+    "status": 409,
+    "title": "The order line already has a refund request waiting for a decision",
+    "type": "urn:koro:problem:payments.refund_request_open"
+  },
+  {
+    "code": "payments.refund_request_window_closed",
+    "status": 409,
+    "title": "The refund request window of the order line has ended",
+    "type": "urn:koro:problem:payments.refund_request_window_closed"
+  },
+  {
     "code": "payments.transfer_already_matched",
     "status": 409,
     "title": "The transfer is already matched",

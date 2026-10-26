@@ -32,6 +32,19 @@ const (
 	// PaymentsIbanReveal is the audited read of one full IBAN of a
 	// collection account, an incoming transfer or a refund (BE-129).
 	PaymentsIbanReveal Action = "payments.iban.reveal"
+	// The refund requests of a buying company (BE-132, Q-26): the buyer
+	// asks, finance decides; an accepted request opens a refund that keeps
+	// its four eyes.
+	PaymentsRefundRequestCreate       Action = "payments.refund_request.create"
+	PaymentsRefundRequestList         Action = "payments.refund_request.list"
+	PaymentsRefundRequestListSales    Action = "payments.refund_request.list_sales"
+	PaymentsRefundRequestRead         Action = "payments.refund_request.read"
+	PaymentsRefundRequestWithdraw     Action = "payments.refund_request.withdraw"
+	PaymentsRefundRequestReadEvidence Action = "payments.refund_request.read_evidence"
+	PaymentsRefundRequestListAdmin    Action = "payments.refund_request.list_admin"
+	PaymentsRefundRequestReview       Action = "payments.refund_request.review"
+	PaymentsRefundRequestAccept       Action = "payments.refund_request.accept"
+	PaymentsRefundRequestReject       Action = "payments.refund_request.reject"
 )
 
 // paymentsActions lists the HTTP actions of payments in 03 §5.16 order.
@@ -60,4 +73,14 @@ var paymentsActions = []Action{
 	PaymentsReceivableApprove,
 	PaymentsReceivableReject,
 	PaymentsIbanReveal,
+	PaymentsRefundRequestCreate,
+	PaymentsRefundRequestList,
+	PaymentsRefundRequestListSales,
+	PaymentsRefundRequestRead,
+	PaymentsRefundRequestWithdraw,
+	PaymentsRefundRequestReadEvidence,
+	PaymentsRefundRequestListAdmin,
+	PaymentsRefundRequestReview,
+	PaymentsRefundRequestAccept,
+	PaymentsRefundRequestReject,
 }

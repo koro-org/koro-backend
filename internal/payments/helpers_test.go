@@ -107,6 +107,26 @@ func (f *fakeFiles) add(purpose files.Purpose) uuid.UUID {
 	return fid
 }
 
+// addOrg adds a completed, clean upload of org (an org's evidence, BE-132).
+func (f *fakeFiles) addOrg(purpose files.Purpose, org uuid.UUID) uuid.UUID {
+	fid := f.add(purpose)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m := f.m[fid]
+	m.OrgID = &org
+	f.m[fid] = m
+	return fid
+}
+
+// set changes an upload's metadata (status, scan).
+func (f *fakeFiles) set(fid uuid.UUID, edit func(*files.FileMeta)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m := f.m[fid]
+	edit(&m)
+	f.m[fid] = m
+}
+
 func (f *fakeFiles) Get(_ context.Context, fid uuid.UUID) (files.FileMeta, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -155,8 +175,27 @@ func (f *fakeFiles) owner(fid uuid.UUID) (string, uuid.UUID) {
 	return f.m[fid].AttachedModule, f.m[fid].AttachedEntityID
 }
 
-// fakeOrgs answers from the matrix personas (authztest).
+// fakeOrgs answers from the matrix personas and org fixtures (authztest).
 type fakeOrgs struct{}
+
+func (fakeOrgs) Get(_ context.Context, orgID uuid.UUID) (orgs.OrgSummary, error) {
+	for _, o := range authztest.Orgs() {
+		if id(o.Name) == orgID {
+			return orgs.OrgSummary{ID: orgID, Kind: orgs.Kind(o.Kind), Name: "Org " + o.Name, Status: orgs.StatusActive}, nil
+		}
+	}
+	return orgs.OrgSummary{}, orgs.ErrNotFound
+}
+
+func (f fakeOrgs) GetMany(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]orgs.OrgSummary, error) {
+	out := map[uuid.UUID]orgs.OrgSummary{}
+	for _, oid := range ids {
+		if o, err := f.Get(ctx, oid); err == nil {
+			out[oid] = o
+		}
+	}
+	return out, nil
+}
 
 func (fakeOrgs) ActiveMemberIDs(_ context.Context, orgID uuid.UUID) ([]uuid.UUID, error) {
 	var out []uuid.UUID

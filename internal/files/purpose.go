@@ -29,6 +29,11 @@ const (
 	// line (orders markOrderLineFulfilled, BE-093, T-292): a photo or a PDF
 	// of the seller org, kept with the line as a financial record.
 	PurposeDeliveryEvidence Purpose = "delivery_evidence"
+	// PurposeRefundRequestEvidence is the buying company's proof of a
+	// refund request (payments, BE-132, Q-26): a photo or a PDF of the
+	// buyer org, kept with the request; only the parties of the request
+	// (the buyer's and the seller's admins, finance) download it.
+	PurposeRefundRequestEvidence Purpose = "refund_request_evidence"
 )
 
 // MIME types of the allow-lists. SVG, HTML and every other type are never
@@ -79,22 +84,23 @@ var (
 	documents   = []string{MIMEPDF, MIMEJPEG, MIMEPNG}
 	evidence    = []string{MIMEPDF, MIMEJPEG, MIMEPNG, MIMEWebP} // a photo or a PDF
 	purposeRule = map[Purpose]rule{
-		PurposeAvatar:              {mimes: images, maxBytes: 5 * MB, personal: true},
-		PurposeCV:                  {mimes: []string{MIMEPDF}, maxBytes: 10 * MB, personal: true},
-		PurposeEduDocument:         {mimes: documents, maxBytes: 10 * MB, personal: true},
-		PurposeOrgLogo:             {mimes: images, maxBytes: 10 * MB, org: orgRequired, public: true},
-		PurposeEventCover:          {mimes: images, maxBytes: 10 * MB, org: orgRequired, public: true},
-		PurposePostMedia:           {mimes: images, maxBytes: 10 * MB, org: orgRequired},
-		PurposeClubClaimEvidence:   {mimes: documents, maxBytes: 10 * MB, personal: true},
-		PurposePartyDocument:       {mimes: documents, maxBytes: 10 * MB, org: orgOptional},
-		PurposeBankAccountEvidence: {mimes: documents, maxBytes: 10 * MB, org: orgOptional},
-		PurposeTransferReceipt:     {mimes: documents, maxBytes: 10 * MB},
-		PurposePayoutReceipt:       {mimes: documents, maxBytes: 10 * MB},
-		PurposeRefundReceipt:       {mimes: documents, maxBytes: 10 * MB},
-		PurposeInvoicePDF:          {mimes: documents, maxBytes: 10 * MB, org: orgOptional},
-		PurposeEventExport:         {mimes: []string{MIMECSV, MIMEXLSX}, maxBytes: 50 * MB, org: orgOptional, generated: true},
-		PurposeDSRExport:           {mimes: []string{MIMEZIP}, maxBytes: 100 * MB, personal: true, generated: true},
-		PurposeDeliveryEvidence:    {mimes: evidence, maxBytes: 10 * MB, org: orgRequired},
+		PurposeAvatar:                {mimes: images, maxBytes: 5 * MB, personal: true},
+		PurposeCV:                    {mimes: []string{MIMEPDF}, maxBytes: 10 * MB, personal: true},
+		PurposeEduDocument:           {mimes: documents, maxBytes: 10 * MB, personal: true},
+		PurposeOrgLogo:               {mimes: images, maxBytes: 10 * MB, org: orgRequired, public: true},
+		PurposeEventCover:            {mimes: images, maxBytes: 10 * MB, org: orgRequired, public: true},
+		PurposePostMedia:             {mimes: images, maxBytes: 10 * MB, org: orgRequired},
+		PurposeClubClaimEvidence:     {mimes: documents, maxBytes: 10 * MB, personal: true},
+		PurposePartyDocument:         {mimes: documents, maxBytes: 10 * MB, org: orgOptional},
+		PurposeBankAccountEvidence:   {mimes: documents, maxBytes: 10 * MB, org: orgOptional},
+		PurposeTransferReceipt:       {mimes: documents, maxBytes: 10 * MB},
+		PurposePayoutReceipt:         {mimes: documents, maxBytes: 10 * MB},
+		PurposeRefundReceipt:         {mimes: documents, maxBytes: 10 * MB},
+		PurposeInvoicePDF:            {mimes: documents, maxBytes: 10 * MB, org: orgOptional},
+		PurposeEventExport:           {mimes: []string{MIMECSV, MIMEXLSX}, maxBytes: 50 * MB, org: orgOptional, generated: true},
+		PurposeDSRExport:             {mimes: []string{MIMEZIP}, maxBytes: 100 * MB, personal: true, generated: true},
+		PurposeDeliveryEvidence:      {mimes: evidence, maxBytes: 10 * MB, org: orgRequired},
+		PurposeRefundRequestEvidence: {mimes: evidence, maxBytes: 10 * MB, org: orgRequired},
 	}
 )
 
@@ -125,6 +131,7 @@ func UploadPurposes() []Purpose {
 		PurposeAvatar, PurposeCV, PurposeEduDocument, PurposeOrgLogo, PurposeEventCover, PurposePostMedia,
 		PurposeClubClaimEvidence, PurposePartyDocument, PurposeBankAccountEvidence, PurposeTransferReceipt,
 		PurposePayoutReceipt, PurposeRefundReceipt, PurposeInvoicePDF, PurposeDeliveryEvidence,
+		PurposeRefundRequestEvidence,
 	}
 }
 

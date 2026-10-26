@@ -42,3 +42,21 @@ fixtures:
   tr_collect_free: { kind: transfer, account: coll_default, amount: 10000, receipt: file_collect_free, entered_by: finance_admin }
   tr_collect_pending: { kind: transfer, account: coll_default, amount: 10000, receipt: file_collect_pending, entered_by: finance_admin_2 }
   collection_pending: { kind: collection, transfer: tr_collect_pending, line: ln_receivable, requested_by: finance_admin_2 }
+
+  # BE-132: buyers' refund requests of orders' fixture lines (company_a's, sold by club_a). rr_open waits on ln_a_paid
+  # (ord_a_paid; pay_a can fund it) with its evidence file_rr_evidence; rr_review is in review (ln_a_marked);
+  # rr_rejected is decided (ln_a_disputed); rr_own was asked by finance_admin (a staff member who is also a buyer's
+  # admin: the four eyes of the decisions; ln_a_unpaid); rr_b is company_b's (IDOR; ord_b_unpaid's line, sold by
+  # club_a too). file_rr_new is an unattached evidence upload of company_a.
+  file_rr_evidence: { kind: rr_file, org: company_a, uploaded_by: company_admin, attached: rr_open }
+  file_rr_new: { kind: rr_file, org: company_a, uploaded_by: company_admin }
+  rr_open: { kind: refund_request, order: ord_a_paid, line: ln_a_paid, org: company_a, seller: club_a, amount: 100000,
+             requested_by: company_admin, evidence: file_rr_evidence }
+  rr_review: { kind: refund_request, order: ord_a_marked, line: ln_a_marked, org: company_a, seller: club_a, amount: 50000,
+               requested_by: company_admin, status: in_review, reviewed_by: finance_admin_2 }
+  rr_rejected: { kind: refund_request, order: ord_a_disputed, line: ln_a_disputed, org: company_a, seller: club_a, amount: 50000,
+                 requested_by: company_admin, status: rejected, decided_by: finance_admin_2 }
+  rr_own: { kind: refund_request, order: ord_a_unpaid, line: ln_a_unpaid, org: company_a, seller: club_a, amount: 1000,
+            requested_by: finance_admin }
+  rr_b: { kind: refund_request, order: ord_b_unpaid, line: ln_b_unpaid, org: company_b, seller: club_a, amount: 1000,
+          requested_by: other_company_member }

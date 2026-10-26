@@ -172,6 +172,8 @@ var (
 	routeOrgPosts           = route("/orgs/{org_id}/posts", LinkForOrg)                                             // feed
 	routeOrgPayee           = route("/orgs/{org_id}/payees/{payee_id}", LinkForOrg)                                 // parties
 	routeOrgContactRequest  = route("/orgs/{org_id}/contact-requests/{contact_request_id}", LinkForOrg)
+	routeOrgRefundRequest   = route("/orgs/{org_id}/refund-requests/{refund_request_id}", LinkForOrg)       // payments (the buyer, BE-132)
+	routeOrgSalesRefundReq  = route("/orgs/{org_id}/sales/refund-requests/{refund_request_id}", LinkForOrg) // payments (the seller, BE-132)
 
 	// Platform staff screens.
 	routeAdminAuditEvents        = route("/admin/audit-events", LinkForAdmin)                        // notify (audit alerts)
@@ -186,6 +188,7 @@ var (
 	routeAdminPlatformRoles      = route("/admin/platform-roles", LinkForAdmin)                      // identity (e-mail)
 	routeAdminPayout             = route("/admin/payouts/{payout_id}", LinkForAdmin)                 // ledger
 	routeAdminRefund             = route("/admin/refunds/{refund_id}", LinkForAdmin)                 // payments
+	routeAdminRefundRequest      = route("/admin/refund-requests/{refund_request_id}", LinkForAdmin) // payments (BE-132)
 	routeAdminReport             = route("/admin/reports/{report_id}", LinkForAdmin)                 // feed
 	routeAdminReviewQueue        = route("/admin/review-queue", LinkForAdmin)                        // feed
 	routeAdminUnmatched          = route("/admin/incoming-transfers?status=unmatched", LinkForAdmin) // payments
@@ -240,6 +243,16 @@ func OrgContactRequestLink(org, req uuid.UUID) Link {
 	return routeOrgContactRequest.link(org.String(), req.String())
 }
 
+// OrgRefundRequestLink is a refund request in the buying company's panel.
+func OrgRefundRequestLink(org, req uuid.UUID) Link {
+	return routeOrgRefundRequest.link(org.String(), req.String())
+}
+
+// OrgSalesRefundRequestLink is a refund request in the selling org's panel.
+func OrgSalesRefundRequestLink(org, req uuid.UUID) Link {
+	return routeOrgSalesRefundReq.link(org.String(), req.String())
+}
+
 // Builders of the platform staff screens.
 
 func AdminAuditEventsLink() Link              { return routeAdminAuditEvents.link() }
@@ -254,9 +267,12 @@ func AdminOrderLink(orderNo string) Link      { return routeAdminOrder.link(orde
 func AdminPlatformRolesLink() Link            { return routeAdminPlatformRoles.link() }
 func AdminPayoutLink(payout uuid.UUID) Link   { return routeAdminPayout.link(payout.String()) }
 func AdminRefundLink(refund uuid.UUID) Link   { return routeAdminRefund.link(refund.String()) }
-func AdminReportLink(report uuid.UUID) Link   { return routeAdminReport.link(report.String()) }
-func AdminReviewQueueLink() Link              { return routeAdminReviewQueue.link() }
-func AdminUnmatchedTransfersLink() Link       { return routeAdminUnmatched.link() }
+func AdminRefundRequestLink(req uuid.UUID) Link {
+	return routeAdminRefundRequest.link(req.String())
+}
+func AdminReportLink(report uuid.UUID) Link { return routeAdminReport.link(report.String()) }
+func AdminReviewQueueLink() Link            { return routeAdminReviewQueue.link() }
+func AdminUnmatchedTransfersLink() Link     { return routeAdminUnmatched.link() }
 
 // linkPathText is NotificationDTO.link_path: its OpenAPI description and
 // x-koro-link-paths come from the catalog, so the contract can never miss

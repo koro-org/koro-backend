@@ -29,6 +29,7 @@ type MemStore struct {
 	payments    map[uuid.UUID]Payment
 	splits      []Split
 	refunds     map[uuid.UUID]Refund
+	requests    map[uuid.UUID]RefundRequest // BE-132
 }
 
 var _ Store = (*MemStore)(nil)

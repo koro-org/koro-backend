@@ -12,6 +12,7 @@ import (
 	"koro/internal/ledger"
 	"koro/internal/notify"
 	"koro/internal/orders"
+	"koro/internal/orgs"
 	"koro/internal/parties"
 )
 
@@ -62,6 +63,9 @@ type Orders interface {
 	// of a paid order, an order cancelled or expired with money paid),
 	// oldest first: finance opens the refunds from it.
 	RefundsDue(ctx context.Context, limit int) ([]orders.RefundDue, error)
+	// ForBilling returns an order with all its lines (any status;
+	// orders.ErrNotFound): the lines a buyer may ask a refund of (BE-132).
+	ForBilling(ctx context.Context, orderID uuid.UUID) (orders.Order, []orders.Line, error)
 }
 
 // Poster is the ledger's Poster (L11, 01 §4.19): the capture posts
@@ -127,9 +131,15 @@ type Reauthenticator interface {
 	Verify(ctx context.Context, userID uuid.UUID, proof identity.ReauthProof) (kind string, err error)
 }
 
-// Orgs is what the payment notices need from orgs (L5): the admins of the
-// buying company and of the selling orgs. It is orgs.OrgDirectory.
+// Orgs is what payments needs from orgs (L5): the org of a refund request
+// surface and the names of the buyer and the seller (BE-132), and for the
+// notices the admins of the buying company and of the selling orgs. It is
+// orgs.OrgDirectory.
 type Orgs interface {
+	// Get returns the summary of an org (any status) or orgs.ErrNotFound.
+	Get(ctx context.Context, orgID uuid.UUID) (orgs.OrgSummary, error)
+	// GetMany returns the summaries of the ids that exist.
+	GetMany(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]orgs.OrgSummary, error)
 	// ActiveMemberIDs returns the user IDs of an org's active members.
 	ActiveMemberIDs(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error)
 	// HasRole reports whether userID holds one of roles in orgID (active).

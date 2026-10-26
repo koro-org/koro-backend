@@ -114,3 +114,5 @@ invoices                    policy:financial_records
 invoice_lines               policy:financial_records
 
 receivable_collections     policy:financial_records
+# BE-132: a refund request goes with its order (FK ON DELETE CASCADE in the financial_records purge); its evidence file stays (T-280)
+refund_requests             parent:orders

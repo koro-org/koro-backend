@@ -27,6 +27,8 @@ import "uuid"
 //	invoice_pdf                fin; S: club_admin, university_rep (billing.invoice.upload, k29)
 //	delivery_evidence          S: club_admin, university_rep of the seller org (k-cs); pad
 //	                           (orders.line.mark_fulfilled; BE-093, T-292)
+//	refund_request_evidence    S: company_admin, company_owner of the buyer org
+//	                           (payments.refund_request.create; BE-132, Q-26)
 //	event_export, dsr_export   nobody (PutGenerated only)
 //
 // "university_rep" never includes career_staff (k-cs). k-po: platform_admin
@@ -68,11 +70,13 @@ const (
 	filePurposeRefundRcpt    = "refund_receipt"
 	filePurposeInvoicePDF    = "invoice_pdf"
 	filePurposeDeliveryProof = "delivery_evidence"
+	filePurposeRefundRequest = "refund_request_evidence"
 	fileOrgAdmins            = "admins"    // club_admin, university_rep, company_admin/owner
 	fileOrgEventers          = "eventers"  // club_admin, university_rep
 	fileOrgPosters           = "posters"   // club_admin, university_rep, recruiter, company_admin/owner
 	fileOrgInvoiceUploaders  = "invoicers" // club_admin, university_rep
 	fileOrgSellers           = "sellers"   // club_admin, university_rep (the markers of an order line)
+	fileOrgBuyers            = "buyers"    // company_admin/owner (who may ask for a refund)
 )
 
 // orgGrants returns the S grants the actor holds in orgID for one org role
@@ -87,6 +91,8 @@ func orgGrants(a Actor, orgID *uuid.UUID, set string) []Grant {
 	}
 	pairs := []pair{{MemberClubAdmin, RoleClubAdmin}, {MemberUniversityRep, RoleUniversityRep}}
 	switch set {
+	case fileOrgBuyers:
+		pairs = []pair{{MemberCompanyAdmin, RoleCompanyAdmin}, {MemberCompanyOwner, RoleCompanyOwner}}
 	case fileOrgAdmins:
 		pairs = append(pairs, pair{MemberCompanyAdmin, RoleCompanyAdmin}, pair{MemberCompanyOwner, RoleCompanyOwner})
 	case fileOrgPosters:
@@ -150,6 +156,10 @@ func uploadGrants(a Actor, r Resource) []Grant {
 		// Whoever may mark the seller's lines delivered (orders.line.mark_fulfilled):
 		// the seller org's club_admin and university_rep, and platform_admin.
 		return append(orgGrants(a, r.OrgID, fileOrgSellers), pad)
+	case filePurposeRefundRequest:
+		// Whoever may ask for a refund (payments.refund_request.create): the
+		// buyer org's company admin and owner; the service checks the org kind.
+		return orgGrants(a, r.OrgID, fileOrgBuyers)
 	}
 	return nil // event_export, dsr_export and unknown purposes: 403
 }

@@ -68,6 +68,16 @@ func TestPurpose_AllowListMatchesDesign(t *testing.T) {
 		!files.PurposeDeliveryEvidence.Uploadable() {
 		t.Error("delivery_evidence: 10 MB, an org's upload, uploadable")
 	}
+	// BE-132: a refund request's evidence is a photo or a PDF of the buyer org, at most 10 MB.
+	for _, m := range []string{files.MIMEPDF, files.MIMEJPEG, files.MIMEPNG, files.MIMEWebP} {
+		if !files.PurposeRefundRequestEvidence.AllowsMIME(m) {
+			t.Errorf("refund_request_evidence must accept %s", m)
+		}
+	}
+	if files.PurposeRefundRequestEvidence.MaxBytes() != 10*files.MB || files.PurposeRefundRequestEvidence.Personal() ||
+		!files.PurposeRefundRequestEvidence.Uploadable() || files.UploadRules()[files.PurposeRefundRequestEvidence].OrgID != files.UploadOrgRequired {
+		t.Error("refund_request_evidence: 10 MB, an org's upload (org_id required), uploadable")
+	}
 	if got := files.PurposeAvatar.MaxBytes(); got != 5*files.MB {
 		t.Errorf("avatar limit %d", got)
 	}

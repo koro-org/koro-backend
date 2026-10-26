@@ -108,6 +108,15 @@ operations:
           platform_admin: 201
           finance_admin: 403
           talent_auditor: 403
+      - name: refund_request_evidence_company
+        body: bodies/files/create_refund_request_evidence_company_a.json
+        note: refund_request_evidence → whoever asks for a refund of the buyer org (cma/owner S; BE-132)
+        expect:
+          anonymous: 401
+          "@outsiders_company_a": 404
+          company_member: 403
+          company_admin: 201
+          "@platform_staff": 403
       - name: invoice_pdf_university
         body: bodies/files/create_invoice_pdf_uni_a.json
         note: invoice_pdf → fin and billing.invoice.upload holders (S)

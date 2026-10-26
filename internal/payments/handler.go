@@ -179,6 +179,7 @@ func Register(api huma.API, svc Service) {
 
 	registerRefunds(api, h)
 	registerCollections(api, h)
+	registerRefundRequests(api, h)
 }
 
 type handler struct{ svc Service }

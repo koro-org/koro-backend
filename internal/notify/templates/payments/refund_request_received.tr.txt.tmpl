@@ -1,0 +1,9 @@
+Merhaba {{index .Data "name"}},
+
+Alıcı şirket, satışınıza ait bir kalem için iade talep etti. Talebi Koro finans ekibi inceleyecek; karar verildiğinde size bildirilecek.
+
+Sipariş: {{index .Data "order_no"}}
+Kalem: {{index .Data "line_title"}}
+Tutar: {{index .Data "amount"}} {{index .Data "currency"}}
+
+Talebin ayrıntılarını ve alıcının kanıtını Koro panelinizdeki satışlar bölümünde görebilirsiniz.

@@ -1,0 +1,3 @@
+<p style="margin:0 0 12px 0;">Hello {{index .Data "name"}},</p>
+<p style="margin:0 0 12px 0;">{{if eq (index .Data "change") "accepted"}}The refund request on your sale was accepted; the refund goes to the buyer after finance's approval and changes your share of the sale.{{else if eq (index .Data "change") "rejected"}}The refund request on your sale was rejected.{{else}}The buyer withdrew the refund request on your sale.{{end}}</p>
+<p style="margin:0;">Order: {{index .Data "order_no"}}<br>Line: {{index .Data "line_title"}}<br>Amount: {{index .Data "amount"}} {{index .Data "currency"}}</p>

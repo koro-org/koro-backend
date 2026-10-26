@@ -1,0 +1,11 @@
+Hello {{index .Data "name"}},
+
+Koro finance rejected your refund request.
+
+Order: {{index .Data "order_no"}}
+Line: {{index .Data "line_title"}}
+Amount: {{index .Data "amount"}} {{index .Data "currency"}}
+
+Reason: {{index .Data "reason"}}
+
+If you have questions, write to Koro support.

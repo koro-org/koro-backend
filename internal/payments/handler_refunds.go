@@ -484,9 +484,15 @@ func (h handler) completeRefund(ctx context.Context, in *completeRefundInput) (*
 
 // ---- query helpers
 
-// decodeTimeCursor decodes a (created_at, id) cursor of the lists.
+// decodeTimeCursor decodes a (created_at, id) cursor of the newest-first lists.
 func decodeTimeCursor(raw, fp string) (*TimeCursor, error) {
-	c, err := page.Decode(raw, sortNewest, fp, 2)
+	return decodeSortedCursor(raw, sortNewest, fp)
+}
+
+// decodeSortedCursor decodes a (created_at, id) cursor of a list in sort
+// order (sortNewest, or sortOldest for finance's refund request queue).
+func decodeSortedCursor(raw, sort, fp string) (*TimeCursor, error) {
+	c, err := page.Decode(raw, sort, fp, 2)
 	if err != nil || c == nil {
 		return nil, err
 	}
@@ -501,12 +507,17 @@ func decodeTimeCursor(raw, fp string) (*TimeCursor, error) {
 	return &TimeCursor{CreatedAt: at, ID: id}, nil
 }
 
-// encodeTimeCursor is the next_cursor of a page ("" on the last page).
+// encodeTimeCursor is the next_cursor of a newest-first page ("" on the last page).
 func encodeTimeCursor(next *TimeCursor, fp string) string {
+	return encodeSortedCursor(next, sortNewest, fp)
+}
+
+// encodeSortedCursor is the next_cursor of a page in sort order.
+func encodeSortedCursor(next *TimeCursor, sort, fp string) string {
 	if next == nil {
 		return ""
 	}
-	return page.Next(sortNewest, fp, page.TimeVal(next.CreatedAt), page.UUIDVal(next.ID))
+	return page.Next(sort, fp, page.TimeVal(next.CreatedAt), page.UUIDVal(next.ID))
 }
 
 type cancelRefundInput struct {

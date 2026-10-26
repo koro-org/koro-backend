@@ -68,6 +68,21 @@
 //     A manual receivable collection claims an existing unmatched bank receipt;
 //     another finance admin approves its bank/debt ledger entry atomically.
 //     Refund requests notify the other finance admins after commit.
+//   - Refund requests (BE-132, Q-26): a buying company's admin asks for a
+//     refund of a paid order's line (amount in kuruş, a reason, an
+//     explanation, the IBAN, an optional evidence file of the buyer org)
+//     while the line is undelivered or within the window after its
+//     delivery (PAYMENTS_REFUND_REQUEST_WINDOW, 30 days). The amount stays
+//     within what Koro holds of the line and of the order less the refunds
+//     and the other waiting requests (Go, kuruş); one waiting request per
+//     line. It waits in finance's queue (open → in_review); a finance or
+//     platform admin — never its requester — accepts it, which opens a
+//     refund in the same transaction through the refund request path above
+//     (the four eyes, the EFT and the ledger stay as they are), or rejects
+//     it with a reason; the buyer may withdraw it while it waits. The
+//     seller's staff see the requests on their lines (no IBAN, no buyer
+//     user); the evidence goes to the parties only (a 5-minute URL,
+//     audited). The buyer, the seller and finance are told after commit.
 //   - Personal data: a transfer's sender may be a natural person (name,
 //     IBAN); the rows are financial records (10 years) and are neither
 //     deleted nor anonymised on account erasure (privacy.go).
@@ -104,6 +119,7 @@ type Payments interface {
 // calls authz.Can first (05 §5.3).
 type Service interface {
 	ReceivableService
+	RefundRequestService
 	Payments
 
 	// ListCollectionAccounts is adminListCollectionAccounts.
@@ -189,6 +205,7 @@ type Deps struct {
 	Queue       queue.Enqueuer // the collection account change notice (A, no topic)
 	Clock       clock.Clock
 	Log         *slog.Logger
+	Config      Config
 
 	// Parties (Koro's party), Files (receipts), Reauth (R operations) and
 	// LedgerLines (the payout and share reads of a line refund): nil → the
@@ -200,11 +217,19 @@ type Deps struct {
 
 	// Orgs, Sender, Users and Staff serve the notices in the worker; nil
 	// Sender or Staff → the notice task fails and is retried; nil Users →
-	// in-app only; nil Orgs → the payment notices fail and are retried.
+	// in-app only; nil Orgs → the payment notices fail and are retried and
+	// the refund request operations fail closed (503).
 	Orgs   Orgs
 	Sender Sender
 	Users  Users
 	Staff  Staff
+}
+
+// Config is the payments configuration (config.Payments).
+type Config struct {
+	// RefundRequestWindow is how long after a line's delivery its buyer may
+	// ask for a refund (BE-132); 0 → DefaultRefundRequestWindow.
+	RefundRequestWindow time.Duration
 }
 
 func (d Deps) validate() error {
@@ -220,6 +245,9 @@ func (d Deps) validate() error {
 		if !c.ok {
 			errs = append(errs, fmt.Errorf("payments.Deps.%s is missing", c.name))
 		}
+	}
+	if d.Config.RefundRequestWindow < 0 {
+		errs = append(errs, errors.New("payments.Deps.Config.RefundRequestWindow is negative"))
 	}
 	return errors.Join(errs...)
 }
@@ -240,6 +268,9 @@ type Module struct {
 func New(d Deps) (Module, error) {
 	if err := d.validate(); err != nil {
 		return Module{}, err
+	}
+	if d.Config.RefundRequestWindow == 0 {
+		d.Config.RefundRequestWindow = DefaultRefundRequestWindow
 	}
 	s := &service{d: d}
 	return Module{Service: s, Payments: s, Privacy: privacyProvider{s: s}, svc: s}, nil

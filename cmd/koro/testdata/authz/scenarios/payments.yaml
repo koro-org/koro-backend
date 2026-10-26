@@ -144,3 +144,34 @@ scenarios:
       - { persona: finance_admin_2, operation: adminMarkRefundFailed, expect: 403, code: authz.four_eyes_violation }
       - { persona: finance_admin, operation: adminMarkRefundFailed, expect: 200 }
       - { persona: finance_admin, operation: adminCompleteRefund, expect: 409, code: payments.invalid_state }
+
+  refund_request_accept_four_eyes:
+    config: { orders_seed: true }
+    note: >-
+      BE-132 (Q-26): finance accepts the buyer's request — the refund is requested in the same transaction by the
+      accepting admin, who never approves it (403 authz.four_eyes_violation); another finance admin does; the buyer can
+      no longer withdraw an accepted request (409) and a second acceptance is 409.
+    steps:
+      - { persona: finance_admin, operation: adminAcceptRefundRequest, expect: 200, save: { accepted_refund: refund_id } }
+      - { persona: finance_admin, operation: adminApproveRefund, path_params: { refund_id: accepted_refund },
+          expect: 403, code: authz.four_eyes_violation }
+      - { persona: finance_admin_2, operation: adminApproveRefund, path_params: { refund_id: accepted_refund }, expect: 200 }
+      - { persona: company_admin, operation: withdrawRefundRequest, expect: 409, code: payments.invalid_state }
+      - { persona: finance_admin_2, operation: adminAcceptRefundRequest, expect: 409, code: payments.invalid_state }
+  refund_request_withdraw:
+    note: >-
+      BE-132: the buyer withdraws a waiting request; finance can then neither take it into review nor reject it (409).
+    steps:
+      - { persona: company_admin, operation: withdrawRefundRequest, expect: 200 }
+      - { persona: finance_admin, operation: adminReviewRefundRequest, expect: 409, code: payments.invalid_state }
+      - { persona: finance_admin, operation: adminRejectRefundRequest, expect: 409, code: payments.invalid_state }
+  refund_request_one_per_line:
+    config: { orders_seed: true }
+    note: >-
+      BE-132: one waiting request per order line (409 payments.refund_request_open); once finance rejects it the
+      buyer may ask again.
+    steps:
+      - { persona: company_admin, operation: createOrderRefundRequest, expect: 201, save: { first_request: refund_request_id } }
+      - { persona: company_admin, operation: createOrderRefundRequest, expect: 409, code: payments.refund_request_open }
+      - { persona: finance_admin, operation: adminRejectRefundRequest, path_params: { refund_request_id: first_request }, expect: 200 }
+      - { persona: company_admin, operation: createOrderRefundRequest, expect: 201 }

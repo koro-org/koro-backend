@@ -42,17 +42,63 @@ package authz
 //	                                     and the audit record are the service's)
 //	payments.transfer.read               also the download of a transfer's bank receipt
 //
+// BE-132 (Q-26) adds the refund requests of a buying company: the buyer
+// asks for its money back, finance decides, an accepted request opens a
+// refund (payments.refund.create's path: its approval keeps the four eyes).
+//
+//	payments.refund_request.create        org (the buyer): cma S (company admin or owner
+//	                                      of a company org; the order, its state, the line,
+//	                                      the window and the amount are the service's)
+//	payments.refund_request.list          org (the buyer): cmm S, cma S (the org's requests
+//	                                      and one order's refund options)
+//	payments.refund_request.list_sales    org (the seller): cla S, uni S, career_staff (no
+//	                                      k-cs, as orders.line.list_sales), pad, fin
+//	payments.refund_request.read          refund_request: the buyer's cmm S, cma S; the
+//	                                      seller's cla, uni, career_staff (the service's
+//	                                      seller view: no IBAN, no buyer user); sup, pad, fin
+//	payments.refund_request.withdraw      refund_request: the buyer's cma S
+//	payments.refund_request.read_evidence refund_request: the buyer's cma S; the seller's
+//	                                      cla S, uni S·k-cs; pad, fin (the buyer's evidence
+//	                                      file: the parties of the dispute only, KVKK)
+//	payments.refund_request.list_admin    admin surface: pad, fin (the queue and one
+//	                                      request with its money)
+//	payments.refund_request.review /      admin surface: pad, fin (403 before reading), then
+//	  accept / reject                     on the request: pad, fin, never its requester (a
+//	                                      staff member who asked for its own company's money
+//	                                      does not decide it: requested_by, four eyes)
+//
+// Resource refund_request: OrgID = the buyer, Attrs status, seller_org_id
+// (the line's seller) and requested_by. Visibility (03 §3.6, as an order):
+// the buyer org's members, the seller org's members and every platform
+// role; anyone else gets 404. The decisions are visible to the admin
+// surface only.
+//
 // Visibility: the admin surface, a collection account, a transfer and a
 // refund are visible to every signed-in user with a platform role path
 // (03 §7.2-3: 403 for an actor without the role, never 404). MFA follows
 // from the role paths (k-mfa: pad, fin).
 func paymentsPolicy() Policy {
 	return Policy{
-		Types: map[string][]string{TypeReceivableCollection: {AttrStatus, AttrRequestedBy}},
+		Types: map[string][]string{
+			TypeReceivableCollection: {AttrStatus, AttrRequestedBy},
+			TypeRefundRequest:        {AttrStatus, AttrOrderLineSellerOrgID, AttrRequestedBy},
+		},
 		Visible: func(a Actor, act Action, r Resource) bool {
 			switch r.Type {
 			case TypeAdminSurface:
 				return AdminSurfaceVisible(a)
+			case TypeOrg:
+				switch act {
+				case PaymentsRefundRequestCreate, PaymentsRefundRequestList, PaymentsRefundRequestListSales:
+					return OrgSurfaceVisible(a, r.OrgID)
+				}
+			case TypeRefundRequest:
+				switch act {
+				case PaymentsRefundRequestRead, PaymentsRefundRequestWithdraw, PaymentsRefundRequestReadEvidence:
+					return orderVisible(a, r.OrgID, lineSeller(r))
+				case PaymentsRefundRequestReview, PaymentsRefundRequestAccept, PaymentsRefundRequestReject:
+					return AdminSurfaceVisible(a)
+				}
 			case TypeCollectionAccount:
 				return act == PaymentsCollectionAccountApprove && AdminSurfaceVisible(a)
 			case TypeIncomingTransfer:
@@ -64,14 +110,19 @@ func paymentsPolicy() Policy {
 			}
 			return false
 		},
-		Grants: func(_ Actor, act Action, r Resource) []Grant {
+		Grants: func(a Actor, act Action, r Resource) []Grant {
 			pad, fin := Grant{Role: RolePlatformAdmin}, Grant{Role: RoleFinanceAdmin}
 			switch r.Type {
+			case TypeOrg:
+				return refundRequestOrgGrants(a, act, r, pad, fin)
+			case TypeRefundRequest:
+				return refundRequestGrants(a, act, r, pad, fin)
 			case TypeAdminSurface:
 				switch act {
 				case PaymentsCollectionAccountList, PaymentsCollectionAccountRetire, PaymentsTransferList, PaymentsTransferRead,
 					PaymentsPaymentList, PaymentsPaymentRead, PaymentsRefundList, PaymentsRefundCreate, PaymentsReceivableList,
-					PaymentsIbanReveal:
+					PaymentsIbanReveal, PaymentsRefundRequestListAdmin, PaymentsRefundRequestReview, PaymentsRefundRequestAccept,
+					PaymentsRefundRequestReject:
 					return []Grant{pad, fin}
 				case PaymentsCollectionAccountCreate, PaymentsTransferCreate, PaymentsTransferMatch, PaymentsTransferIgnore,
 					PaymentsRefundReject, PaymentsRefundComplete, PaymentsReceivableCreate, PaymentsReceivableReject:
@@ -98,4 +149,78 @@ func paymentsPolicy() Policy {
 			return nil
 		},
 	}
+}
+
+// TypeRefundRequest is a buying company's refund request (BE-132).
+const TypeRefundRequest = "refund_request"
+
+// refundRequestOrgGrants are the cells on /orgs/{org_id}/orders/…/refund-requests,
+// /orgs/{org_id}/refund-requests (the buyer) and
+// /orgs/{org_id}/sales/refund-requests (the seller).
+func refundRequestOrgGrants(a Actor, act Action, r Resource, pad, fin Grant) []Grant {
+	if r.OrgID == nil {
+		return nil
+	}
+	org := *r.OrgID
+	var gs []Grant
+	add := func(ok bool, g Grant) {
+		if ok {
+			gs = append(gs, g)
+		}
+	}
+	company := r.Attr("org_kind") == string(OrgCompany)
+	switch act {
+	case PaymentsRefundRequestCreate:
+		add(company && a.HasOrgRole(org, MemberCompanyAdmin, MemberCompanyOwner), Grant{Role: RoleCompanyAdmin})
+	case PaymentsRefundRequestList:
+		add(company && a.HasOrgRole(org, MemberRecruiter), Grant{Role: RoleCompanyMember})
+		add(company && a.HasOrgRole(org, MemberCompanyAdmin, MemberCompanyOwner), Grant{Role: RoleCompanyAdmin})
+	case PaymentsRefundRequestListSales:
+		add(a.HasOrgRole(org, MemberClubAdmin), Grant{Role: RoleClubAdmin})
+		add(a.HasOrgRole(org, MemberUniversityRep), Grant{Role: RoleUniversityRep})
+		add(a.HasOrgRole(org, MemberCareerStaff), Grant{Role: RoleCareerStaff}) // as orders.line.list_sales: no k-cs
+		gs = append(gs, pad, fin)
+	}
+	return gs
+}
+
+// refundRequestGrants are the cells on one refund request.
+func refundRequestGrants(a Actor, act Action, r Resource, pad, fin Grant) []Grant {
+	if r.OrgID == nil {
+		return nil
+	}
+	buyer := *r.OrgID
+	var gs []Grant
+	add := func(ok bool, g Grant) {
+		if ok {
+			gs = append(gs, g)
+		}
+	}
+	admin := a.HasOrgRole(buyer, MemberCompanyAdmin, MemberCompanyOwner)
+	switch act {
+	case PaymentsRefundRequestRead:
+		add(a.HasOrgRole(buyer, MemberRecruiter), Grant{Role: RoleCompanyMember})
+		add(admin, Grant{Role: RoleCompanyAdmin})
+		for _, s := range lineSeller(r) {
+			add(a.HasOrgRole(s, MemberClubAdmin), Grant{Role: RoleClubAdmin})
+			add(a.HasOrgRole(s, MemberUniversityRep), Grant{Role: RoleUniversityRep})
+			add(a.HasOrgRole(s, MemberCareerStaff), Grant{Role: RoleCareerStaff})
+		}
+		gs = append(gs, Grant{Role: RoleSupport}, pad, fin)
+	case PaymentsRefundRequestWithdraw:
+		add(admin, Grant{Role: RoleCompanyAdmin})
+	case PaymentsRefundRequestReadEvidence:
+		add(admin, Grant{Role: RoleCompanyAdmin})
+		for _, s := range lineSeller(r) {
+			add(a.HasOrgRole(s, MemberClubAdmin), Grant{Role: RoleClubAdmin})
+			add(a.HasOrgRole(s, MemberUniversityRep), Grant{Role: RoleUniversityRep}) // k-cs: never career_staff
+		}
+		gs = append(gs, pad, fin)
+	case PaymentsRefundRequestReview, PaymentsRefundRequestAccept, PaymentsRefundRequestReject:
+		// The requester is never the decider (a staff member who is also an
+		// admin of the buying company).
+		eyes := []string{AttrRequestedBy}
+		gs = append(gs, Grant{Role: RolePlatformAdmin, FourEyes: eyes}, Grant{Role: RoleFinanceAdmin, FourEyes: eyes})
+	}
+	return gs
 }

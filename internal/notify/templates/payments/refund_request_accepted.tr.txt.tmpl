@@ -1,0 +1,7 @@
+Merhaba {{index .Data "name"}},
+
+İade talebiniz Koro finans ekibi tarafından kabul edildi. İade, ikinci bir finans onayından sonra talebinizde belirttiğiniz hesaba EFT ile gönderilecek; gönderildiğinde ayrıca bildirilecek.
+
+Sipariş: {{index .Data "order_no"}}
+Kalem: {{index .Data "line_title"}}
+Tutar: {{index .Data "amount"}} {{index .Data "currency"}}

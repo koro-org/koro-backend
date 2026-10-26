@@ -403,7 +403,7 @@ func (s *service) CreateRefund(ctx context.Context, a authz.Actor, in RefundInpu
 		return Refund{}, err
 	}
 	id, _, err := idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (uuid.UUID, error) {
-		return s.createRefund(ctx, a, d)
+		return s.createRefund(ctx, a, d, map[string]any{"via": "api"})
 	})
 	if err != nil {
 		return Refund{}, err
@@ -411,7 +411,10 @@ func (s *service) CreateRefund(ctx context.Context, a authz.Actor, in RefundInpu
 	return s.d.Store.GetRefund(ctx, id, false)
 }
 
-func (s *service) createRefund(ctx context.Context, a authz.Actor, d refundDraft) (uuid.UUID, error) {
+// createRefund opens the refund of d in the transaction carried by ctx;
+// meta names the path in its audit record (via: api, or the refund request
+// an acceptance opens it from, BE-132).
+func (s *service) createRefund(ctx context.Context, a authz.Actor, d refundDraft, meta map[string]any) (uuid.UUID, error) {
 	p, err := s.d.Store.GetPayment(ctx, d.PaymentID, true)
 	if err != nil {
 		return uuid.Nil(), err
@@ -437,7 +440,7 @@ func (s *service) createRefund(ctx context.Context, a authz.Actor, d refundDraft
 	if err := s.d.Store.InsertRefund(ctx, r); err != nil {
 		return uuid.Nil(), err
 	}
-	if err := s.d.Audit.Log(ctx, refundAudit(a, authz.PaymentsRefundCreate, r, d.Note, map[string]any{"via": "api"})); err != nil {
+	if err := s.d.Audit.Log(ctx, refundAudit(a, authz.PaymentsRefundCreate, r, d.Note, meta)); err != nil {
 		return uuid.Nil(), err
 	}
 	s.notifyRefundRequested(ctx, r.ID)

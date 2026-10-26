@@ -1,0 +1,7 @@
+Merhaba {{index .Data "name"}},
+
+{{if eq (index .Data "change") "accepted"}}Satışınıza ait iade talebi kabul edildi; iade finans onayından sonra alıcıya gönderilecek ve satış payınıza yansıyacak.{{else if eq (index .Data "change") "rejected"}}Satışınıza ait iade talebi reddedildi.{{else}}Satışınıza ait iade talebi alıcı tarafından geri çekildi.{{end}}
+
+Sipariş: {{index .Data "order_no"}}
+Kalem: {{index .Data "line_title"}}
+Tutar: {{index .Data "amount"}} {{index .Data "currency"}}

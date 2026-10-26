@@ -21,13 +21,20 @@ type contractWorld struct {
 	file  func(t *testing.T) uuid.UUID // a files row (PostgreSQL FKs); nil in memory
 }
 
-type contractOrder struct{ id, org, line uuid.UUID }
+// contractOrder is an order of the world: its buyer org, one line, the
+// line's seller and the order's number.
+type contractOrder struct {
+	id, org, line, seller uuid.UUID
+	no                    string
+}
 
 func memContractWorld() contractWorld {
 	return contractWorld{
 		user:  func(*testing.T) uuid.UUID { return uuid.NewV7() },
 		party: uuid.NewV7(),
-		order: func(*testing.T) contractOrder { return contractOrder{uuid.NewV7(), uuid.NewV7(), uuid.NewV7()} },
+		order: func(*testing.T) contractOrder {
+			return contractOrder{id: uuid.NewV7(), org: uuid.NewV7(), line: uuid.NewV7(), seller: uuid.NewV7(), no: "KR0000AB12"}
+		},
 	}
 }
 
@@ -347,6 +354,10 @@ func storeContract(t *testing.T, mk func(t *testing.T) (payments.Store, contract
 		}
 	})
 
+	t.Run("refund requests", func(t *testing.T) {
+		t.Parallel()
+		refundRequestContract(t, mk)
+	})
 	t.Run("refunds", func(t *testing.T) {
 		t.Parallel()
 		s, w := mk(t)
@@ -527,3 +538,152 @@ func contractAccount(t *testing.T, s payments.Store, w contractWorld, number str
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// refundRequestContract pins 000156 on both stores (BE-132): the initial
+// status and the store's stamps, one waiting request per line, the TR IBAN,
+// the eyes, the status guard, one CHECK per state, the final states, the
+// lists (newest or oldest first, the filters, the cursor) and the KVKK read.
+func refundRequestContract(t *testing.T, mk func(t *testing.T) (payments.Store, contractWorld)) {
+	s, w := mk(t)
+	ctx := t.Context()
+	o, o2 := w.order(t), w.order(t)
+	buyer, fin := w.user(t), w.user(t)
+	at := t0
+	draft := func(o contractOrder, amount int64) payments.RefundRequest {
+		return payments.RefundRequest{ID: uuid.NewV7(), OrderID: o.id, OrderLineID: o.line, OrgID: o.org, SellerOrgID: o.seller,
+			OrderNo: o.no, LineTitle: "Stant", Amount: amount, Reason: payments.RefundReasonNotFulfilled,
+			Explanation: "Stant kurulmadı, alan boştu.", TargetIBAN: ibanSender, Status: payments.RequestOpen, RequestedBy: buyer,
+			CreatedAt: stale, UpdatedAt: stale}
+	}
+	insert := func(r payments.RefundRequest) payments.RefundRequest {
+		t.Helper()
+		if err := s.InsertRefundRequest(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.GetRefundRequest(ctx, r.ID, true)
+		if err != nil || got.Status != payments.RequestOpen || got.Currency != payments.Currency || got.Amount != r.Amount {
+			t.Fatalf("get = %+v, %v", got, err)
+		}
+		stampedOnInsert(t, "refund request", got.CreatedAt, got.UpdatedAt)
+		return got
+	}
+	update := func(next payments.RefundRequest, from payments.RefundRequestStatus) (payments.RefundRequest, error) {
+		return s.UpdateRefundRequest(ctx, next, from)
+	}
+	r1 := insert(draft(o, 100_000))
+	if _, err := s.GetRefundRequest(ctx, uuid.NewV7(), false); !errors.Is(err, payments.ErrNotFound) {
+		t.Fatalf("missing request = %v", err)
+	}
+	// One waiting request per line (refund_requests_line_pending_uq); a TR IBAN only.
+	if err := s.InsertRefundRequest(ctx, draft(o, 1)); !errors.Is(err, payments.ErrRefundRequestOpen) {
+		t.Fatalf("second waiting request = %v", err)
+	}
+	bad := draft(o2, 1)
+	bad.TargetIBAN = "TR000000000000000000000000"
+	if err := s.InsertRefundRequest(ctx, bad); !errors.Is(err, payments.ErrIBANInvalid) {
+		t.Fatalf("bad IBAN = %v", err)
+	}
+	// The requester never reviews (refund_requests_review_eyes_chk); the status guard.
+	self := r1
+	self.Status, self.ReviewedBy, self.ReviewedAt = payments.RequestInReview, &buyer, &at
+	if _, err := update(self, payments.RequestOpen); !errors.Is(err, authz.ErrFourEyes) {
+		t.Fatalf("review by the requester = %v", err)
+	}
+	rev := r1
+	rev.Status, rev.ReviewedBy, rev.ReviewedAt = payments.RequestInReview, &fin, &at
+	if _, err := update(rev, payments.RequestInReview); !errors.Is(err, payments.ErrInvalidState) {
+		t.Fatalf("wrong from = %v", err)
+	}
+	inserted := r1.CreatedAt
+	r1, err := update(rev, payments.RequestOpen)
+	if err != nil || r1.Status != payments.RequestInReview || r1.ReviewedBy == nil || *r1.ReviewedBy != fin {
+		t.Fatalf("review = %+v, %v", r1, err)
+	}
+	stampedOnUpdate(t, "refund request", inserted, r1.CreatedAt, r1.UpdatedAt)
+	back := r1
+	back.Status, back.ReviewedBy, back.ReviewedAt = payments.RequestOpen, nil, nil
+	if _, err := update(back, payments.RequestInReview); err == nil {
+		t.Fatal("a review was undone")
+	}
+	// A rejection carries its reason (refund_requests_rejected_chk); a decision is final.
+	rej := r1
+	rej.Status, rej.DecidedBy, rej.DecidedAt = payments.RequestRejected, &fin, &at
+	if _, err := update(rej, payments.RequestInReview); err == nil {
+		t.Fatal("a rejection without its reason")
+	}
+	why := "Kanıt yok"
+	rej.RejectionReason = &why
+	if r1, err = update(rej, payments.RequestInReview); err != nil || r1.Status != payments.RequestRejected {
+		t.Fatalf("reject = %+v, %v", r1, err)
+	}
+	wd := r1
+	wd.Status, wd.WithdrawnBy, wd.WithdrawnAt, wd.DecidedBy, wd.DecidedAt, wd.RejectionReason = payments.RequestWithdrawn, &buyer, &at, nil, nil, nil
+	if _, err := update(wd, payments.RequestRejected); err == nil {
+		t.Fatal("a rejected request was withdrawn")
+	}
+	// The line is free again: a new waiting request, withdrawn by the buyer.
+	r2 := insert(draft(o, 50_000))
+	wd = r2
+	wd.Status, wd.WithdrawnBy, wd.WithdrawnAt = payments.RequestWithdrawn, &buyer, &at
+	if r2, err = update(wd, payments.RequestOpen); err != nil || r2.Status != payments.RequestWithdrawn {
+		t.Fatalf("withdraw = %+v, %v", r2, err)
+	}
+	// An accepted request names its refund (refund_requests_accepted_chk).
+	acct := contractAccount(t, s, w, ibanKoro3)
+	pay := contractPayment(t, s, acct, o2, fin, 1_200_000, "RR-1")
+	ref := payments.Refund{ID: uuid.NewV7(), PaymentID: pay.ID, OrderID: o2.id, OrderLineID: &o2.line, Amount: 70_000,
+		Reason: payments.RefundReasonNotFulfilled, Status: payments.RefundStatusRequested, RequestedBy: fin,
+		Method: payments.RefundMethodBankEFT, TargetIBAN: ptr(ibanSender)}
+	if err := s.InsertRefund(ctx, ref); err != nil {
+		t.Fatal(err)
+	}
+	r3 := insert(draft(o2, 70_000))
+	acc := r3
+	acc.Status, acc.DecidedBy, acc.DecidedAt = payments.RequestAccepted, &fin, &at
+	if _, err := update(acc, payments.RequestOpen); err == nil {
+		t.Fatal("an acceptance without its refund")
+	}
+	acc.RefundID = &ref.ID
+	if r3, err = update(acc, payments.RequestOpen); err != nil || r3.Status != payments.RequestAccepted || r3.RefundID == nil {
+		t.Fatalf("accept = %+v, %v", r3, err)
+	}
+	// The lists.
+	ids := func(rs []payments.RefundRequest, err error) []uuid.UUID {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := make([]uuid.UUID, len(rs))
+		for i, r := range rs {
+			out[i] = r.ID
+		}
+		return out
+	}
+	eq := func(name string, got []uuid.UUID, want ...uuid.UUID) {
+		t.Helper()
+		if len(got) != len(want) {
+			t.Fatalf("%s = %v, want %v", name, got, want)
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				t.Fatalf("%s = %v, want %v", name, got, want)
+			}
+		}
+	}
+	eq("newest first", ids(s.ListRefundRequests(ctx, payments.RefundRequestFilter{OrderID: &o.id}, nil, 10)), r2.ID, r1.ID)
+	eq("oldest first", ids(s.ListRefundRequests(ctx, payments.RefundRequestFilter{OrderID: &o.id, Oldest: true}, nil, 10)), r1.ID, r2.ID)
+	eq("after the oldest", ids(s.ListRefundRequests(ctx, payments.RefundRequestFilter{OrderID: &o.id, Oldest: true},
+		&payments.TimeCursor{CreatedAt: r1.CreatedAt, ID: r1.ID}, 10)), r2.ID)
+	eq("after the newest", ids(s.ListRefundRequests(ctx, payments.RefundRequestFilter{OrderID: &o.id},
+		&payments.TimeCursor{CreatedAt: r2.CreatedAt, ID: r2.ID}, 10)), r1.ID)
+	eq("the seller's", ids(s.ListRefundRequests(ctx, payments.RefundRequestFilter{SellerOrgID: &o2.seller, OrderID: &o2.id}, nil, 10)), r3.ID)
+	eq("the buyer's accepted", ids(s.ListRefundRequests(ctx, payments.RefundRequestFilter{OrgID: &o2.org, Status: payments.RequestAccepted}, nil, 10)), r3.ID)
+	eq("pending", ids(s.ListRefundRequests(ctx, payments.RefundRequestFilter{OrderID: &o2.id, Pending: true}, nil, 10)))
+	eq("of the order", ids(s.RefundRequestsOfOrder(ctx, o.id)), r1.ID, r2.ID)
+	if got := ids(s.RefundRequestsOfUser(ctx, buyer)); len(got) != 3 {
+		t.Fatalf("the buyer's = %v", got)
+	}
+	if got := ids(s.RefundRequestsOfUser(ctx, fin)); len(got) != 2 {
+		t.Fatalf("the finance admin's = %v", got)
+	}
+}

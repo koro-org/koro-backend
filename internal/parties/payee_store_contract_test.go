@@ -2,6 +2,7 @@ package parties_test
 
 import (
 	"errors"
+	"slices"
 	"testing"
 	"time"
 	"uuid"
@@ -146,6 +147,59 @@ func payeeStoreContract(t *testing.T, newStore func(t *testing.T) (parties.Store
 		created, err := s.PayeesCreatedBy(ctx, p.CreatedBy)
 		if err != nil || len(created) != 1 || created[0].ID != p.ID {
 			t.Fatalf("PayeesCreatedBy = %+v, %v", created, err)
+		}
+	})
+
+	// BE-129: adminQueryPayees reads every org's payees, newest first, by
+	// org, status and the legal party's title (Turkish-insensitive part) or
+	// VKN (exact), a page at a time.
+	t.Run("payees: the staff search", func(t *testing.T) {
+		t.Parallel()
+		s, w, org, party := setup(t) // "Örnek Vakfı", vknC
+		ctx := t.Context()
+		vkn2 := vknD
+		party2, err := s.InsertParty(ctx, parties.LegalParty{ID: uuid.NewV7(), Kind: parties.KindPayee, LegalType: parties.LegalFoundation,
+			Title: "İKİNCİ EĞİTİM VAKFI", TaxNo: &vkn2, VATStatus: parties.VATUnknown, Status: parties.StatusPendingVerification})
+		if err != nil {
+			t.Fatal(err)
+		}
+		other := w.org(t)
+		a := newPayee(t, s, w, org, party.ID, parties.PayeeDraft, false)
+		b := newPayee(t, s, w, org, party2.ID, parties.PayeeActive, false)
+		c := newPayee(t, s, w, other, party.ID, parties.PayeeActive, false)
+		ids := func(ps []parties.Payee) []uuid.UUID {
+			out := make([]uuid.UUID, len(ps))
+			for i, p := range ps {
+				out[i] = p.ID
+			}
+			return out
+		}
+		active := parties.PayeeActive
+		for name, c2 := range map[string]struct {
+			f    parties.PayeeFilter
+			want []uuid.UUID
+		}{
+			"every org, newest first": {parties.PayeeFilter{}, []uuid.UUID{c.ID, b.ID, a.ID}},
+			"one org":                 {parties.PayeeFilter{OrgID: &org}, []uuid.UUID{b.ID, a.ID}},
+			"status":                  {parties.PayeeFilter{Status: active}, []uuid.UUID{c.ID, b.ID}},
+			"title part, folded":      {parties.PayeeFilter{Q: "ikinci eğitim"}, []uuid.UUID{b.ID}},
+			"title of two payees":     {parties.PayeeFilter{Q: "ORNEK"}, []uuid.UUID{c.ID, a.ID}},
+			"vkn exact":               {parties.PayeeFilter{Q: vknD}, []uuid.UUID{b.ID}},
+			"vkn of nobody":           {parties.PayeeFilter{Q: "9999999999"}, []uuid.UUID{}},
+			"org and title":           {parties.PayeeFilter{OrgID: &other, Q: "vakf"}, []uuid.UUID{c.ID}},
+		} {
+			got, err := s.ListPayees(ctx, c2.f, nil, 10)
+			if err != nil || !slices.Equal(ids(got), c2.want) {
+				t.Errorf("%s: ListPayees = %v, %v; want %v", name, ids(got), err, c2.want)
+			}
+		}
+		first, err := s.ListPayees(ctx, parties.PayeeFilter{}, nil, 2)
+		if err != nil || len(first) != 2 {
+			t.Fatalf("first page = %v, %v", ids(first), err)
+		}
+		rest, err := s.ListPayees(ctx, parties.PayeeFilter{}, &first[1].ID, 2)
+		if err != nil || !slices.Equal(ids(rest), []uuid.UUID{a.ID}) {
+			t.Fatalf("second page = %v, %v", ids(rest), err)
 		}
 	})
 

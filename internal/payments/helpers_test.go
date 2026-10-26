@@ -117,6 +117,21 @@ func (f *fakeFiles) Get(_ context.Context, fid uuid.UUID) (files.FileMeta, error
 	return m, nil
 }
 
+// PresignGet answers a fake URL of a clean file (files.ErrNotClean for one
+// not scanned clean).
+func (f *fakeFiles) PresignGet(_ context.Context, fid uuid.UUID, ttl time.Duration) (files.Download, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m, ok := f.m[fid]
+	switch {
+	case !ok:
+		return files.Download{}, files.ErrNotFound
+	case m.ScanStatus != files.ScanClean:
+		return files.Download{}, files.ErrNotClean
+	}
+	return files.Download{URL: "https://files.example.test/" + fid.String(), ExpiresAt: time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC).Add(ttl)}, nil
+}
+
 func (f *fakeFiles) Attach(_ context.Context, _ authz.Actor, fid uuid.UUID, o files.Owner) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

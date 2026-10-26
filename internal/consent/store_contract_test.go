@@ -198,6 +198,42 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 		if len(some) != 1 || some[0].ID != v2.ID {
 			t.Fatalf("CurrentNotices by purpose = %v", some)
 		}
+
+		// ListNotices (BE-129): every version — drafts and the retired too —
+		// newest first, filtered, a page at a time.
+		d := notice(consent.KindPrivacyNotice, nil, consent.AudienceAll, "2026.10.03")
+		if err := w.s.InsertNotice(ctx, d); err != nil {
+			t.Fatal(err)
+		}
+		draft, published, retired := consent.StatusDraft, consent.StatusPublished, consent.StatusRetired
+		consentText, student, en, tr := consent.KindConsentText, consent.AudienceStudent, consent.LocaleEN, consent.LocaleTR
+		for name, c := range map[string]struct {
+			f    consent.NoticeListFilter
+			want []uuid.UUID
+		}{
+			"every version":     {consent.NoticeListFilter{}, []uuid.UUID{d.ID, terms.ID, priv.ID, v2.ID, v1.ID}},
+			"drafts":            {consent.NoticeListFilter{Status: &draft}, []uuid.UUID{d.ID}},
+			"published":         {consent.NoticeListFilter{Status: &published}, []uuid.UUID{terms.ID, priv.ID, v2.ID}},
+			"retired":           {consent.NoticeListFilter{Status: &retired}, []uuid.UUID{v1.ID}},
+			"kind":              {consent.NoticeListFilter{Kind: &consentText}, []uuid.UUID{v2.ID, v1.ID}},
+			"purpose":           {consent.NoticeListFilter{Purpose: &email, Status: &retired}, []uuid.UUID{v1.ID}},
+			"audience":          {consent.NoticeListFilter{Audience: &student}, []uuid.UUID{priv.ID}},
+			"locale":            {consent.NoticeListFilter{Locale: &tr, Kind: &kind}, []uuid.UUID{d.ID, priv.ID}},
+			"locale of nothing": {consent.NoticeListFilter{Locale: &en}, nil},
+		} {
+			got, err := w.s.ListNotices(ctx, c.f, nil, 10)
+			var gotIDs []uuid.UUID
+			for _, n := range got {
+				gotIDs = append(gotIDs, n.ID)
+			}
+			if err != nil || !slices.Equal(gotIDs, c.want) {
+				t.Errorf("ListNotices %s = %v, %v; want %v", name, gotIDs, err, c.want)
+			}
+		}
+		page, err := w.s.ListNotices(ctx, consent.NoticeListFilter{}, &terms.ID, 2)
+		if err != nil || len(page) != 2 || page[0].ID != priv.ID || page[1].ID != v2.ID || page[1].BodyMD == "" {
+			t.Fatalf("ListNotices after terms = %+v, %v", page, err)
+		}
 	})
 
 	t.Run("subject lock (BE-062)", func(t *testing.T) {

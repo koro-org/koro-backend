@@ -179,8 +179,17 @@ func TestPartiesPolicy_EdgeCases(t *testing.T) {
 	wantErr(t, authz.Can(ctx, persona(t, "platform_admin"), authz.PartiesDocumentUpload, adminSurface), nil, false)
 	wantErr(t, authz.Can(ctx, persona(t, "finance_admin"), authz.PartiesDocumentRead, adminSurface), nil, false)
 	wantErr(t, authz.Can(ctx, persona(t, "club_admin"), authz.PartiesDocumentRead, adminSurface), authz.ErrForbidden, false)
-	// Org-only payee actions have no admin-surface cell.
-	wantErr(t, authz.Can(ctx, persona(t, "platform_admin"), authz.PartiesPayeeList, adminSurface), authz.ErrForbidden, false)
+	// BE-129: the staff's payee search and the IBAN reveal are admin-surface reads of pad and fin only.
+	for _, act := range []authz.Action{authz.PartiesPayeeList, authz.PartiesIbanReveal} {
+		for _, name := range []string{"platform_admin", "finance_admin"} {
+			wantErr(t, authz.Can(ctx, persona(t, name), act, adminSurface), nil, false)
+		}
+		for _, name := range []string{"club_admin", "university_rep", "support", "dpo", "moderator"} {
+			wantErr(t, authz.Can(ctx, persona(t, name), act, adminSurface), authz.ErrForbidden, false)
+		}
+	}
+	// The reveal is an admin-surface action only: on an org's payees it is no one's.
+	wantErr(t, authz.Can(ctx, persona(t, "finance_admin"), authz.PartiesIbanReveal, payeesOf("club_a")), authz.ErrNotFound, false)
 }
 
 // payeesOf is the payees collection of an org surface (BE-037).

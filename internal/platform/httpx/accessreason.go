@@ -1,8 +1,10 @@
 package httpx
 
 import (
+	"fmt"
 	"net/url"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -18,10 +20,18 @@ const HeaderAccessReason = "X-Koro-Access-Reason"
 // justification (charset, then an optional language tag between quotes).
 const accessReasonExt = "utf-8'"
 
+// Bounds of a justification in characters, after decoding (03 §6.3:
+// authz checks them for a break-glass cell, RequireAccessReason for an
+// operation that always needs one).
+const (
+	MinAccessReason = 10
+	MaxAccessReason = 500
+)
+
 // MaxAccessReasonHeader bounds the raw header: the ext-value prefix and
 // 500 characters of 4 UTF-8 bytes, each byte percent-encoded (3 octets).
 // The 10–500 character rule applies to the decoded text (authz).
-const MaxAccessReasonHeader = len(accessReasonPrefix) + 500*4*3
+const MaxAccessReasonHeader = len(accessReasonPrefix) + MaxAccessReason*4*3
 
 // accessReasonPrefix is the prefix koro-web writes (no language tag).
 const accessReasonPrefix = "UTF-8''"
@@ -94,6 +104,20 @@ func languageTag(s string) bool {
 		}
 	}
 	return true
+}
+
+// RequireAccessReason returns the decoded justification trimmed when it is
+// MinAccessReason–MaxAccessReason characters long, or 422 at
+// header.X-Koro-Access-Reason: the check of an operation that always asks
+// for a reason outside authz's break-glass cells (the talent_auditor reads,
+// an audited IBAN reveal of a finance admin; BE-129). A service calls it
+// after authz, so that a caller without the right gets 403/404 first.
+func RequireAccessReason(reason string) (string, error) {
+	reason = strings.TrimSpace(reason)
+	if n := utf8.RuneCountInString(reason); n < MinAccessReason || n > MaxAccessReason {
+		return "", accessReasonInvalid(fmt.Sprintf("the access reason (%d–%d characters) is required", MinAccessReason, MaxAccessReason))
+	}
+	return reason, nil
 }
 
 func accessReasonInvalid(msg string) error {

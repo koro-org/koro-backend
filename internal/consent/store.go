@@ -39,6 +39,10 @@ type Store interface {
 	// LockCurrent returns the published, unretired notice of key locked
 	// for the transaction; found=false when the key has none.
 	LockCurrent(ctx context.Context, key NoticeKey) (n Notice, found bool, err error)
+	// ListNotices returns up to limit notices matching f — drafts, current
+	// and retired versions — newest first (id DESC: UUIDv7 creation
+	// order), after the position after (nil: the first page; BE-129).
+	ListNotices(ctx context.Context, f NoticeListFilter, after *uuid.UUID, limit int) ([]Notice, error)
 	// CurrentNotices returns the published, unretired notices matching q,
 	// ordered by kind, purpose, audience and locale.
 	CurrentNotices(ctx context.Context, q CurrentQuery) ([]Notice, error)
@@ -161,6 +165,15 @@ type CurrentQuery struct {
 	Purpose   *Purpose
 	Audiences []Audience
 	Locales   []string
+}
+
+// NoticeListFilter filters Store.ListNotices; nil pointers do not filter.
+type NoticeListFilter struct {
+	Kind     *NoticeKind
+	Purpose  *Purpose
+	Audience *Audience
+	Locale   *string
+	Status   *NoticeStatus
 }
 
 // ListQuery is one page of a user's consents.

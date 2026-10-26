@@ -18,6 +18,7 @@ import (
 	"koro/internal/platform/clock"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/page"
 	"koro/internal/platform/problem"
 	"koro/internal/platform/queue"
 )
@@ -127,15 +128,35 @@ func (s *service) userExists(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// ListBreaches implements Service (adminListBreaches).
-func (s *service) ListBreaches(ctx context.Context, a authz.Actor, status *BreachStatus) ([]Breach, error) {
+// BreachPage is a page of adminListBreaches; Next is the position after
+// its last row (nil: the last page).
+type BreachPage struct {
+	Items []Breach
+	Next  *After
+}
+
+// ListBreaches implements Service (adminListBreaches): authz (403) → the
+// status (422) → a page, the most recently detected first (BE-129: keyset
+// on detected_at, id).
+func (s *service) ListBreaches(ctx context.Context, a authz.Actor, status *BreachStatus, after *After, limit int) (BreachPage, error) {
 	if err := authz.Can(ctx, a, authz.KvkkBreachList, adminSurface); err != nil {
-		return nil, err
+		return BreachPage{}, err
 	}
 	if status != nil && !status.Valid() {
-		return nil, invalid("query.status", "unknown status")
+		return BreachPage{}, invalid("query.status", "unknown status")
 	}
-	return s.d.Records.Breaches(ctx, status)
+	limit = page.ClampLimit(limit)
+	rows, err := s.d.Records.Breaches(ctx, status, after, limit+1)
+	if err != nil {
+		return BreachPage{}, err
+	}
+	items, more := page.Cut(rows, limit)
+	p := BreachPage{Items: items}
+	if more {
+		last := items[len(items)-1]
+		p.Next = &After{At: last.DetectedAt, ID: last.ID}
+	}
+	return p, nil
 }
 
 // CreateBreach implements Service (adminCreateBreach): the deadline of the
@@ -447,7 +468,7 @@ func warningMark(left time.Duration, marks []time.Duration) (time.Duration, bool
 // mark reached. It returns the number of warnings sent.
 func (s *service) breachTimer(ctx context.Context) (int, error) {
 	now := s.now()
-	bs, err := s.d.Records.Breaches(ctx, nil)
+	bs, err := s.d.Records.Breaches(ctx, nil, nil, 0)
 	if err != nil {
 		return 0, err
 	}

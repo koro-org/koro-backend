@@ -37,8 +37,8 @@ func registerPayees(api huma.API, h handler) {
 	op.Register(api, "parties", huma.Operation{
 		OperationID: "listPayeeBankAccounts", Method: http.MethodGet, Path: "/orgs/{org_id}/payees/{payee_id}/bank-accounts",
 		Summary: "List the bank accounts of a payee",
-		Description: "Newest first. Organization roles see the IBAN masked; finance and platform admins see it in full " +
-			"and the read is audited.",
+		Description: "Newest first, the IBAN masked for everyone (BE-129: finance and platform admins reveal a full " +
+			"IBAN with adminRevealBankAccountIban, audited).",
 	}, op.Meta{Action: string(authz.PartiesBankAccountList), Surface: op.SurfaceOrg}, h.listAccounts)
 
 	op.Register(api, "parties", huma.Operation{
@@ -67,17 +67,29 @@ func registerPayees(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.PartiesPayeeManage), Surface: op.SurfaceAdmin}, h.adminUpdatePayee)
 
 	op.Register(api, "parties", huma.Operation{
+		OperationID: "adminQueryPayees", Method: http.MethodPost, Path: "/admin/payees/search",
+		Summary: "Search the payees of every organization (finance and platform admins)",
+		Description: "Read-only (BE-129): the criteria are in the body, since a legal party's title or tax number may " +
+			"name a sole proprietor (BE-128). Newest first; org_id narrows it to one club or university (find the org " +
+			"by name with searchOrgs), q matches part of the legal party's title or a 10-digit tax number exactly. " +
+			"Each payee comes with its org's name and kind; the IBAN is masked. next_cursor goes back in the body.",
+	}, op.Meta{Action: string(authz.PartiesPayeeList), Surface: op.SurfaceAdmin, RateLimit: op.RateReadDefault,
+		Idempotency: op.IdempotencyOptional}, h.adminQueryPayees)
+
+	op.Register(api, "parties", huma.Operation{
 		OperationID: "adminVerifyPayee", Method: http.MethodPost, Path: "/admin/payees/{payee_id}/verify",
 		Summary: "Verify (activate) a payee",
-		Description: "draft, pending_verification or suspended → active. The legal party must be verified (422 " +
-			"parties.verification_incomplete); an active or closed payee is 409 parties.invalid_state.",
+		Description: "draft, pending_verification or suspended → active. If-Match is required as for adminUpdatePayee " +
+			"(the payee's ETag: missing → 428, stale → 412, checked after the state; BE-129). The legal party must be " +
+			"verified (422 parties.verification_incomplete); an active or closed payee is 409 parties.invalid_state.",
 	}, op.Meta{Action: string(authz.PartiesPayeeVerify), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.adminVerifyPayee)
 
 	op.Register(api, "parties", huma.Operation{
 		OperationID: "adminListBankAccounts", Method: http.MethodGet, Path: "/admin/bank-accounts",
 		Summary: "List payee bank accounts (four-eyes queue)",
-		Description: "Oldest first; without status the accounts waiting for an eye. Full IBANs: the read is audited. " +
-			"holder_matches_title compares the holder with the legal party's title (advisory; the first eye decides).",
+		Description: "Oldest first; without status the accounts waiting for an eye. The IBAN is masked: an eye that " +
+			"needs the full number reveals it with adminRevealBankAccountIban (audited, BE-129). holder_matches_title " +
+			"compares the holder with the legal party's title (advisory; the first eye decides).",
 	}, op.Meta{Action: string(authz.PartiesBankAccountList), Surface: op.SurfaceAdmin}, h.adminListAccounts)
 
 	op.Register(api, "parties", huma.Operation{
@@ -127,6 +139,13 @@ func registerPayees(api huma.API, h handler) {
 		Description: "The account statement or bank letter the eyes check: a URL valid for at most 5 minutes, every " +
 			"download audited. A file that is not scanned clean is 409 files.not_clean.",
 	}, op.Meta{Action: string(authz.PartiesBankAccountList), Surface: op.SurfaceAdmin}, h.adminDownloadEvidence)
+
+	op.Register(api, "parties", huma.Operation{
+		OperationID: "adminRevealBankAccountIban", Method: http.MethodGet, Path: "/admin/bank-accounts/{bank_account_id}/iban",
+		Summary: "Reveal the full IBAN of a bank account",
+		Description: "For the eye that checks the number against the evidence (every list and detail shows it masked). " +
+			RevealNote,
+	}, op.Meta{Action: string(authz.PartiesIbanReveal), Surface: op.SurfaceAdmin, RateLimit: op.RateBreakGlass}, h.adminRevealIBAN)
 
 	op.Register(api, "parties", huma.Operation{
 		OperationID: "adminGetLegalParty", Method: http.MethodGet, Path: "/admin/legal-parties/{party_id}",
@@ -220,13 +239,13 @@ func payeeDTO(v PayeeView) PayeeDTO {
 	return out
 }
 
-// BankAccountDTO is 04 §2.13 BankAccountDTO (+ the decision columns). iban
-// is set for finance and platform admins only; everyone sees iban_masked.
+// BankAccountDTO is 04 §2.13 BankAccountDTO (+ the decision columns). The
+// IBAN is masked for everyone (BE-129: data minimisation; the full number
+// only through the audited adminRevealBankAccountIban).
 type BankAccountDTO struct {
 	BankAccountID   string     `json:"bank_account_id" format:"uuid"`
 	PayeeID         string     `json:"payee_id" format:"uuid"`
 	IBANMasked      string     `json:"iban_masked" doc:"TR12 **** **** **** **** 1234 56"`
-	IBAN            string     `json:"iban,omitempty" doc:"Finance and platform admins only (the read is audited)"`
 	HolderName      string     `json:"holder_name"`
 	BankCode        string     `json:"bank_code" doc:"Characters 5-9 of the IBAN"`
 	BankName        string     `json:"bank_name,omitempty"`
@@ -243,21 +262,17 @@ type BankAccountDTO struct {
 
 func accountDTO(v BankAccountView) BankAccountDTO {
 	b := v.Account
-	out := BankAccountDTO{
+	return BankAccountDTO{
 		BankAccountID: b.ID.String(), PayeeID: b.PayeeID.String(), IBANMasked: b.MaskedIBAN(), HolderName: b.HolderName,
 		BankCode: b.BankCode, BankName: str(b.BankName), Status: string(b.Status), SubmittedAt: b.SubmittedAt.UTC(),
 		VerifiedAt: utc(b.VerifiedAt), ApprovedAt: utc(b.ApprovedAt), RejectedAt: utc(b.RejectedAt),
 		RejectionReason: str(b.RejectionReason), SupersededAt: utc(b.SupersededAt), RevokedAt: utc(b.RevokedAt),
 		RevokeReason: str(b.RevokeReason),
 	}
-	if v.FullIBAN {
-		out.IBAN = b.IBAN
-	}
-	return out
 }
 
-// BankAccountAdminDTO is 04 §2.13 BankAccountAdminDTO: the full IBAN, the
-// eyes and what the first eye compares (T-19).
+// BankAccountAdminDTO is 04 §2.13 BankAccountAdminDTO: the eyes and what
+// the first eye compares (T-19). The IBAN stays masked (BE-129).
 type BankAccountAdminDTO struct {
 	BankAccountDTO
 	OrgID              string `json:"org_id" format:"uuid"`
@@ -275,7 +290,6 @@ type BankAccountAdminDTO struct {
 
 func accountAdminDTO(v BankAccountView) BankAccountAdminDTO {
 	b := v.Account
-	v.FullIBAN = true
 	return BankAccountAdminDTO{
 		BankAccountDTO: accountDTO(v), OrgID: b.OrgID.String(), EvidenceFileID: b.EvidenceFileID.String(),
 		SubmittedBy: b.SubmittedBy.String(), SubmittedByAdmin: b.SubmittedByAdmin, VerifiedBy: httpx.IDStr(b.VerifiedBy),
@@ -488,6 +502,7 @@ func (h handler) adminUpdatePayee(ctx context.Context, in *adminUpdatePayeeInput
 type adminPayeeActionInput struct {
 	idempotency.OptionalHeader
 	PayeePath
+	IfMatch string `header:"If-Match" doc:"ETag of the payee (required: missing → 428, stale → 412)"`
 }
 
 func (h handler) adminVerifyPayee(ctx context.Context, in *adminPayeeActionInput) (*payeeOutput, error) {
@@ -495,11 +510,72 @@ func (h handler) adminVerifyPayee(ctx context.Context, in *adminPayeeActionInput
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.AdminVerifyPayee(ctx, a, httpx.ParseID(in.PayeeID))
+	v, err := h.svc.AdminVerifyPayee(ctx, a, httpx.ParseID(in.PayeeID), in.IfMatch)
 	if err != nil {
 		return nil, err
 	}
 	return payeeOut(v), nil
+}
+
+// AdminPayeeDTO is a payee of adminQueryPayees: PayeeDTO with the org it
+// is paid for.
+type AdminPayeeDTO struct {
+	PayeeDTO
+	OrgName string `json:"org_name" doc:"The club or university the payee is paid for"`
+	OrgKind string `json:"org_kind" enum:"club,university"`
+}
+
+// AdminPayeeList is the body of adminQueryPayees.
+type AdminPayeeList struct {
+	Items      []AdminPayeeDTO `json:"items"`
+	NextCursor string          `json:"next_cursor,omitempty"`
+}
+
+type adminQueryPayeesInput struct {
+	Body struct {
+		OrgID  string `json:"org_id,omitempty" format:"uuid" doc:"Only the payees of this club or university"`
+		Status string `json:"status,omitempty" enum:"draft,pending_verification,active,suspended,closed"`
+		Q      string `json:"q,omitempty" maxLength:"100" doc:"Part of the legal party's title (2-100 characters), or a 10-digit tax number"`
+		page.BodyParams
+	}
+}
+
+type adminPayeeListOutput struct{ Body AdminPayeeList }
+
+func (h handler) adminQueryPayees(ctx context.Context, in *adminQueryPayeesInput) (*adminPayeeListOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	b := in.Body
+	fp := page.Fingerprint("adminQueryPayees", b.OrgID, b.Status, b.Q)
+	q := PayeeQuery{Status: PayeeStatus(b.Status), Q: b.Q, Limit: b.Limit}
+	if q.OrgID, err = httpx.OptID("body.org_id", b.OrgID); err != nil {
+		return nil, err
+	}
+	c, err := page.Decode(b.Cursor, sortNewest, fp, 1)
+	if err != nil {
+		return nil, err
+	}
+	if c != nil {
+		id, err := c.UUID(0)
+		if err != nil {
+			return nil, err
+		}
+		q.After = &id
+	}
+	p, err := h.svc.AdminQueryPayees(ctx, a, q)
+	if err != nil {
+		return nil, err
+	}
+	out := &adminPayeeListOutput{Body: AdminPayeeList{Items: make([]AdminPayeeDTO, len(p.Items))}}
+	for i, v := range p.Items {
+		out.Body.Items[i] = AdminPayeeDTO{PayeeDTO: payeeDTO(v.PayeeView), OrgName: v.Org.Name, OrgKind: string(v.Org.Kind)}
+	}
+	if p.Next != nil {
+		out.Body.NextCursor = page.Next(sortNewest, fp, page.UUIDVal(*p.Next))
+	}
+	return out, nil
 }
 
 // ---- admin surface: bank accounts
@@ -689,6 +765,23 @@ func (h handler) adminDownloadEvidence(ctx context.Context, in *AccountPath) (*d
 		return nil, err
 	}
 	return &downloadOutput{CacheControl: "no-store", Body: DownloadDTO{URL: l.URL, ExpiresAt: l.ExpiresAt.UTC()}}, nil
+}
+
+type adminRevealInput struct {
+	AccountPath
+	httpx.AccessReasonHeader
+}
+
+func (h handler) adminRevealIBAN(ctx context.Context, in *adminRevealInput) (*RevealOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	n, err := h.svc.AdminRevealBankAccountIBAN(ctx, a, httpx.ParseID(in.BankAccountID), in.AccessReason.String())
+	if err != nil {
+		return nil, err
+	}
+	return RevealOut(n), nil
 }
 
 // ---- admin surface: legal parties (06 H-60, T-234)

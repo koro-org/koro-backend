@@ -319,6 +319,25 @@ func (s *MemStore) lineReceivable(id uuid.UUID) int64 {
 	}
 	return amount
 }
+
+// ReceivableLines implements Store.
+func (s *MemStore) ReceivableLines(_ context.Context, id uuid.UUID) ([]ReceivableLine, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []ReceivableLine
+	if s.po != nil {
+		for payout, items := range s.po.items {
+			for _, it := range items {
+				if amount := s.lineReceivable(it.OrderLineID); it.PayeeID == id && amount > 0 {
+					out = append(out, ReceivableLine{OrderLineID: it.OrderLineID, PayoutID: payout, Amount: amount})
+				}
+			}
+		}
+	}
+	slices.SortFunc(out, func(a, b ReceivableLine) int { return cmp.Compare(a.OrderLineID.String(), b.OrderLineID.String()) })
+	return out, nil
+}
+
 func (s *MemStore) PayeeReceivable(_ context.Context, id uuid.UUID) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

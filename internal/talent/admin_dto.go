@@ -108,8 +108,10 @@ type TalentConfigDTO struct {
 	SignalDefs    []TalentSignalDefDTO    `json:"signal_defs"`
 }
 
-// TalentConfigVersionDTO is one config version.
+// TalentConfigVersionDTO is one config version. Its schema is nullable:
+// TalentConfigDTO.active_version is null before the first version (BE-129).
 type TalentConfigVersionDTO struct {
+	_               struct{}        `nullable:"true"`
 	ConfigVersionID string          `json:"config_version_id" format:"uuid"`
 	EffectiveFrom   time.Time       `json:"effective_from"`
 	Params          TalentParamsDTO `json:"params"`

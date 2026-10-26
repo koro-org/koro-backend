@@ -7,11 +7,14 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 	"uuid"
+
+	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/audit"
 	"koro/internal/audit/audittest"
@@ -642,5 +645,63 @@ func TestAuditorAPI_Distribution_KThreshold(t *testing.T) {
 	rows := e.audit.rows(authz.TalentDistributionRead)
 	if len(rows) != 2 || rows[1].Metadata["university_id"] != uni.String() || rows[0].Reason != accessReason {
 		t.Fatalf("distribution records = %+v", rows)
+	}
+}
+
+// TestTalentStatus_SideEffectFree (BE-129): getTalentStatus tells the
+// talent_auditor whether the API is open — with the flag off too, without
+// an access reason — and writes nothing; everyone else, platform_admin
+// included, gets 403 (the anonymous caller 401), so a client tells a closed
+// API from a refused call without probing getTalentConfig.
+func TestTalentStatus_SideEffectFree(t *testing.T) {
+	t.Parallel()
+	status := adminCall{op: "getTalentStatus", method: http.MethodGet, path: "/admin/talent/status"}
+	for _, open := range []bool{false, true} {
+		e, _, h := adminEnv(t, open)
+		for _, p := range append(authztest.Personas(), authztest.Helpers()...) {
+			code, body := do(t, h, p.Name, status, "")
+			want := http.StatusForbidden
+			switch p.Name {
+			case "anonymous":
+				want = http.StatusUnauthorized
+			case "talent_auditor":
+				want = http.StatusOK
+				if body["auditor_api_enabled"] != open {
+					t.Fatalf("open %v: status = %v", open, body)
+				}
+			}
+			if code != want {
+				t.Fatalf("open %v: getTalentStatus as %s = %d %v, want %d", open, p.Name, code, body, want)
+			}
+		}
+		if got := e.audit.actions(); len(got) != 0 {
+			t.Fatalf("open %v: the status read audited %q", open, got)
+		}
+	}
+}
+
+// TestTalentContract_BoundsAndNullableConfig (BE-129, BE-117): the
+// auditor's texts carry the service's 500-character bound in the contract
+// (the requirement stays the service's: 422 after the flag and authz), and
+// active_version is nullable (null before the first version).
+func TestTalentContract_BoundsAndNullableConfig(t *testing.T) {
+	t.Parallel()
+	reg := huma.NewMapRegistry("#/components/schemas/", huma.DefaultSchemaNamer)
+	s := huma.SchemaFromType(reg, reflect.TypeFor[talent.NeutralizationBody]())
+	if n := s.Properties["note"]; n == nil || n.MaxLength == nil || *n.MaxLength != 500 || n.MinLength != nil {
+		t.Fatalf("note = %+v", n)
+	}
+	huma.SchemaFromType(reg, reflect.TypeFor[talent.TalentConfigDTO]())
+	v := reg.Map()["TalentConfigVersionDTO"]
+	if v == nil || !v.Nullable {
+		t.Fatalf("TalentConfigVersionDTO = %+v, want a nullable object", v)
+	}
+	// Over HTTP an over-long reversal reason is refused by the contract.
+	_, f, h := adminEnv(t, true)
+	long := adminCall{op: "reverseTalentPointEvent", method: http.MethodPost,
+		path: "/admin/talent/point-events/" + f.point.ID.String() + "/reversal",
+		body: `{"reason":"` + strings.Repeat("ç", 501) + `","reauth":{"password":"` + reauthPassword + `"}}`}
+	if code, body := do(t, h, "talent_auditor", long, accessReason); code != http.StatusUnprocessableEntity {
+		t.Fatalf("501-character reason = %d %v", code, body)
 	}
 }

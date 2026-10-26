@@ -1,4 +1,4 @@
-# Authz matrix of the parties module (03 §5.13, 04 §2.13; BE-036, BE-037, BE-128). 30 operations × 18 personas.
+# Authz matrix of the parties module (03 §5.13, 04 §2.13; BE-036, BE-037, BE-128, BE-129). 32 operations × 18 personas.
 # Org surface (03 §3.6, §7.6): members of the org without the role → 403 before any row is read
 # (no ID probing), non-members → 404, every platform role sees the surface (403 unless
 # platform_admin/finance_admin); the org is looked up first, so an unknown org is 404 for everyone.
@@ -620,11 +620,25 @@ operations:
           platform_admin: 404
           finance_admin: 404
 
+  adminQueryPayees:
+    method: POST
+    path: /api/v1/admin/payees/search
+    action: parties.payee.list
+    body: bodies/parties/query_payees.json
+    note: BE-129 every org's payees for the staff (a read sent as POST; the org surface keeps listOrgPayees)
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+
   adminVerifyPayee:
     method: POST
     path: /api/v1/admin/payees/{payee_id}/verify
     action: parties.payee.verify
     path_params: { payee_id: payee_draft }
+    headers: { If-Match: '"1hmhuo3hji000"' }   # BE-129: required like adminUpdatePayee's (fixtures' updated_at)
     expect:
       anonymous: 401
       "@no_platform_role": 403
@@ -810,6 +824,29 @@ operations:
     path: /api/v1/admin/bank-accounts/{bank_account_id}/evidence/download
     action: parties.bank_account.list
     path_params: { bank_account_id: acct_club_a }
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: missing_account
+        path_params: { bank_account_id: "literal:00000000-0000-7000-8000-000000000003" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404
+
+  adminRevealBankAccountIban:
+    method: GET
+    path: /api/v1/admin/bank-accounts/{bank_account_id}/iban
+    action: parties.iban.reveal
+    path_params: { bank_account_id: acct_club_a }
+    headers: { X-Koro-Access-Reason: "Matris: dekontla IBAN karşılaştırması" }
+    note: BE-129 the one full IBAN read (reason required, audited like a break-glass read)
     expect:
       anonymous: 401
       "@no_platform_role": 403

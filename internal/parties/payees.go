@@ -10,6 +10,7 @@ import (
 	"koro/internal/orgs"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/page"
 	"koro/internal/platform/problem"
 )
 
@@ -166,6 +167,51 @@ func (s *service) payeeView(ctx context.Context, p Payee) (PayeeView, error) {
 }
 
 // ---- admin surface
+
+// AdminQueryPayees implements Service (BE-129, the finance admins' way to
+// a club's or university's payee without knowing its ID): authz (403
+// before reading) → the criteria (422) → every org's payees matching them,
+// newest first, with their legal side, approved account (masked) and org.
+func (s *service) AdminQueryPayees(ctx context.Context, a authz.Actor, q PayeeQuery) (PayeePage, error) {
+	if err := authz.Can(ctx, a, authz.PartiesPayeeList, adminSurface); err != nil {
+		return PayeePage{}, err
+	}
+	f := PayeeFilter{OrgID: q.OrgID, Status: q.Status}
+	if q.Status != "" && !q.Status.Valid() {
+		return PayeePage{}, problem.Field("body.status", "is not a payee status")
+	}
+	var err error
+	if f.Q, err = searchText(q.Q); err != nil {
+		return PayeePage{}, err
+	}
+	limit := page.ClampLimit(q.Limit)
+	rows, err := s.d.Store.ListPayees(ctx, f, q.After, limit+1)
+	if err != nil {
+		return PayeePage{}, err
+	}
+	rows, more := page.Cut(rows, limit)
+	views, err := s.payeeViews(ctx, rows)
+	if err != nil {
+		return PayeePage{}, err
+	}
+	out := PayeePage{Items: make([]AdminPayeeView, len(views))}
+	orgOf := map[uuid.UUID]orgs.OrgSummary{}
+	for i, v := range views {
+		o, ok := orgOf[v.Payee.OrgID]
+		if !ok {
+			if o, err = s.org(ctx, v.Payee.OrgID); err != nil {
+				return PayeePage{}, err
+			}
+			orgOf[v.Payee.OrgID] = o
+		}
+		out.Items[i] = AdminPayeeView{PayeeView: v, Org: o}
+	}
+	if more {
+		next := rows[len(rows)-1].ID
+		out.Next = &next
+	}
+	return out, nil
+}
 
 // AdminCreatePayee implements Service: authz (403 before reading) → body →
 // the seller org (a club or a university: 422; closed: 409) → the legal
@@ -359,8 +405,10 @@ func (s *service) applyPayeePatch(cur Payee, pt PayeePatch) (Payee, []string, er
 // suspended → active (verified by and at). The legal party must be
 // verified (422 parties.verification_incomplete) and a legal entity (06
 // H-54); a default payee takes the default over in the same transaction.
-// Anything else is 409 parties.invalid_state.
-func (s *service) AdminVerifyPayee(ctx context.Context, a authz.Actor, payeeID uuid.UUID) (PayeeView, error) {
+// Anything else is 409 parties.invalid_state. If-Match is required like
+// adminUpdatePayee's (428/412, after the state check; BE-129): the admin
+// activates the payee they looked at.
+func (s *service) AdminVerifyPayee(ctx context.Context, a authz.Actor, payeeID uuid.UUID, ifMatch string) (PayeeView, error) {
 	if err := authz.Can(ctx, a, authz.PartiesPayeeVerify, adminSurface); err != nil {
 		return PayeeView{}, err
 	}
@@ -380,6 +428,9 @@ func (s *service) AdminVerifyPayee(ctx context.Context, a authz.Actor, payeeID u
 		case PayeeDraft, PayeePendingVerification, PayeeSuspended:
 		default:
 			return uuid.Nil(), ErrInvalidState
+		}
+		if err := httpx.CheckIfMatch(ifMatch, httpx.ETag(cur.UpdatedAt)); err != nil {
+			return uuid.Nil(), err
 		}
 		party, err := s.d.Store.GetParty(ctx, cur.LegalPartyID)
 		if err != nil {

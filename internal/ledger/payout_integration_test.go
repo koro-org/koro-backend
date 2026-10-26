@@ -371,3 +371,47 @@ func TestApprovePayout_RevokedAccount_Postgres(t *testing.T) {
 		t.Fatalf("store approval after the revocation: %v", err)
 	}
 }
+
+// TestReceivableLines_Postgres (BE-129, 06 H-59): on PostgreSQL the open
+// receivable lines of a payee are its paid-out lines whose payee_receivable
+// sum is positive, with the payout that paid them, and they add up to the
+// balance's receivable; another payee's claim is not listed.
+func TestReceivableLines_Postgres(t *testing.T) {
+	t.Parallel()
+	e := newPgPayoutEnv(t)
+	payee, other := e.w.payee(), e.w.payee()
+	l1, l2 := e.paidLine(t, payee), e.paidLine(t, payee)
+	p := e.approvedPgPayout(t, payee)
+	c := e.finance(t)
+	receipt := e.receipt(t)
+	if _, err := e.svc.AdminMarkPayoutPaid(ctxOf(t, c), c, p.ID, ledger.MarkPaidInput{BankReference: "EFT-RCV-1", ReceiptFileID: &receipt}); err != nil {
+		t.Fatal(err)
+	}
+	refund := split(t)(ledger.SplitRefund(allocation(payee, l1), 600_000))
+	refund.PaidOut = true
+	e.post(t, txn(t)(ledger.RefundCompleted(ledger.ModelA, uuid.NewV7(), 0, []ledger.RefundLine{refund}, time.Time{})))
+	ol := e.paidLine(t, other)
+	op := e.approvedPgPayout(t, other)
+	r2 := e.receipt(t)
+	if _, err := e.svc.AdminMarkPayoutPaid(ctxOf(t, c), c, op.ID, ledger.MarkPaidInput{BankReference: "EFT-RCV-2", ReceiptFileID: &r2}); err != nil {
+		t.Fatal(err)
+	}
+	theirs := split(t)(ledger.SplitRefund(allocation(other, ol), 300_000))
+	theirs.PaidOut = true
+	e.post(t, txn(t)(ledger.RefundCompleted(ledger.ModelA, uuid.NewV7(), 0, []ledger.RefundLine{theirs}, time.Time{})))
+
+	ls, err := e.store.ReceivableLines(t.Context(), payee)
+	if err != nil || len(ls) != 1 || ls[0].OrderLineID != l1 || ls[0].PayoutID != p.ID || ls[0].Amount != refund.SellerAmount {
+		t.Fatalf("ReceivableLines = %+v, %v (l2 %s)", ls, err, l2)
+	}
+	if sum, err := e.store.PayeeReceivable(t.Context(), payee); err != nil || sum != ls[0].Amount {
+		t.Fatalf("PayeeReceivable = %d, %v", sum, err)
+	}
+	// Once collected in full the line is closed.
+	e.post(t, ledger.Txn{Kind: ledger.KindAdjustment, RefType: ledger.RefManual, RefID: uuid.NewV7(),
+		Entries: []ledger.Entry{{Account: ledger.AccountPayeeReceivable, OrderLineID: &l1, Amount: -refund.SellerAmount},
+			{Account: ledger.AccountKoroBank, Amount: refund.SellerAmount}}})
+	if ls, err := e.store.ReceivableLines(t.Context(), payee); err != nil || len(ls) != 0 {
+		t.Fatalf("ReceivableLines after the collection = %+v, %v", ls, err)
+	}
+}

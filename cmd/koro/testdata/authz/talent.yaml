@@ -1,10 +1,11 @@
-# Authz matrix of the talent module (03 §5.12, §7.7; 04 §T; BE-052). 7 operations × 18 personas.
-# k-flag: talent_auditor_api_enabled (_personas.yaml, default false) closes every operation: 404 for
+# Authz matrix of the talent module (03 §5.12, §7.7; 04 §T; BE-052, BE-129). 8 operations × 18 personas.
+# k-flag: talent_auditor_api_enabled (_personas.yaml, default false) closes every operation but
+# getTalentStatus (BE-129: it answers the flag itself, talent_auditor only): 404 for
 # every signed-in persona — talent_auditor and platform_admin included — before anything is read
 # (the anonymous caller gets the auth layer's 401). Open (variant flag_on): talent_auditor alone
 # (MFA-verified session, 03 §7.3); every other persona, platform_admin included (03 Y1: not a super
 # user), gets 403 on the admin surface before anything is read — the subject of the report too
-# (no O cell: a student never sees their talent). Every call carries X-Koro-Access-Reason; the R
+# (no O cell: a student never sees their talent). Every call but the status carries X-Koro-Access-Reason; the R
 # operations carry the matrix password (identity fixtures). Fixtures: fixtures/talent.yaml
 # (matrix_talent_test.go). Reauth, 409/422 and the two-auditor limit: scenarios/talent.yaml.
 version: 1
@@ -86,6 +87,17 @@ operations:
       - name: flag_on
         config: { talent_auditor_api_enabled: true }
         expect: { anonymous: 401, "@not_auditor": 403, talent_auditor: 201 }
+
+  getTalentStatus:
+    method: GET
+    path: /api/v1/admin/talent/status
+    action: talent.config.read
+    note: BE-129 the one talent operation open with the flag off (side-effect free; no reason, no audit)
+    expect: { anonymous: 401, "@not_auditor": 403, talent_auditor: 200 }
+    variants:
+      - name: flag_on
+        config: { talent_auditor_api_enabled: true }
+        expect: { anonymous: 401, "@not_auditor": 403, talent_auditor: 200 }
 
   getTalentConfig:
     method: GET

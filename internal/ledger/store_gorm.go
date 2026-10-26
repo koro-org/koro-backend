@@ -377,6 +377,20 @@ func (s gormStore) LineReceivable(ctx context.Context, id uuid.UUID) (int64, err
 	return amount, err
 }
 
+// ReceivableLines implements Store over the ledger-owned payout items (a
+// line is in one payout at a time: payout_items_line_uq).
+// cross-org: authorization scopes the payee before reading its lines.
+func (s gormStore) ReceivableLines(ctx context.Context, id uuid.UUID) ([]ReceivableLine, error) {
+	var out []ReceivableLine
+	err := db.Conn(ctx, s.orm).Raw(`SELECT i.order_line_id, i.payout_id, sum(e.amount)::bigint AS amount
+		FROM payout_items i JOIN ledger_entries e ON e.order_line_id = i.order_line_id AND e.account_code = 'payee_receivable'
+		WHERE i.payee_id = ? GROUP BY i.order_line_id, i.payout_id HAVING sum(e.amount) > 0 ORDER BY i.order_line_id`, id).Scan(&out).Error
+	if err != nil {
+		return nil, fmt.Errorf("ledger: receivable lines: %w", err)
+	}
+	return out, nil
+}
+
 // PayeeReceivable implements Store using the ledger-owned payout items.
 // cross-org: authorization scopes the payee before reading its balance.
 func (s gormStore) PayeeReceivable(ctx context.Context, id uuid.UUID) (int64, error) {

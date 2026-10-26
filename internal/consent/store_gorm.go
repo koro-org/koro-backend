@@ -209,6 +209,46 @@ func (s gormStore) LockCurrent(ctx context.Context, key NoticeKey) (Notice, bool
 	return noticeUTC(out[0]), true, nil
 }
 
+// ListNotices implements Store.
+//
+// cross-org: platform-wide texts.
+func (s gormStore) ListNotices(ctx context.Context, f NoticeListFilter, after *uuid.UUID, limit int) ([]Notice, error) {
+	tx := db.Conn(ctx, s.orm).Model(&Notice{})
+	if f.Kind != nil {
+		tx = tx.Where("kind = ?", string(*f.Kind))
+	}
+	if f.Purpose != nil {
+		tx = tx.Where("purpose_code = ?", string(*f.Purpose))
+	}
+	if f.Audience != nil {
+		tx = tx.Where("audience = ?", string(*f.Audience))
+	}
+	if f.Locale != nil {
+		tx = tx.Where("locale = ?", *f.Locale)
+	}
+	if f.Status != nil {
+		switch *f.Status {
+		case StatusDraft:
+			tx = tx.Where("published_at IS NULL AND retired_at IS NULL")
+		case StatusPublished:
+			tx = tx.Where("published_at IS NOT NULL AND retired_at IS NULL")
+		default:
+			tx = tx.Where("retired_at IS NOT NULL")
+		}
+	}
+	if after != nil {
+		tx = tx.Where("id < ?", *after)
+	}
+	var out []Notice
+	if err := tx.Order("id DESC").Limit(limit).Find(&out).Error; err != nil {
+		return nil, fmt.Errorf("consent: list notices: %w", err)
+	}
+	for i := range out {
+		out[i] = noticeUTC(out[i])
+	}
+	return out, nil
+}
+
 // CurrentNotices implements Store.
 //
 // cross-org: platform-wide texts.

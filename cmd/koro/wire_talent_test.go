@@ -143,7 +143,7 @@ func TestWire_TalentJobsAndRoutes(t *testing.T) {
 	}
 	slices.Sort(ops)
 	want := []string{"createTalentConfigVersion", "createTalentNeutralization", "getTalentConfig", "getTalentDistribution",
-		"getTalentReport", "liftTalentNeutralization", "reverseTalentPointEvent"}
+		"getTalentReport", "getTalentStatus", "liftTalentNeutralization", "reverseTalentPointEvent"} // getTalentStatus: BE-129
 	if !slices.Equal(ops, want) {
 		t.Fatalf("talent operations %q, want %q", ops, want)
 	}

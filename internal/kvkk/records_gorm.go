@@ -341,12 +341,19 @@ func (s gormRecords) UpdateBreach(ctx context.Context, b Breach) error {
 // Breaches implements RecordStore.
 //
 // cross-org: the breach register is platform-wide.
-func (s gormRecords) Breaches(ctx context.Context, status *BreachStatus) ([]Breach, error) {
+func (s gormRecords) Breaches(ctx context.Context, status *BreachStatus, after *After, limit int) ([]Breach, error) {
+	sql, args := `SELECT `+breachCols+` FROM breach_incidents WHERE true`, []any{}
 	if status != nil {
-		return s.breaches(ctx, `SELECT `+breachCols+` FROM breach_incidents WHERE status = ? ORDER BY detected_at DESC, id DESC`,
-			string(*status))
+		sql, args = sql+` AND status = ?`, append(args, string(*status))
 	}
-	return s.breaches(ctx, `SELECT `+breachCols+` FROM breach_incidents ORDER BY detected_at DESC, id DESC`)
+	if after != nil {
+		sql, args = sql+` AND (detected_at, id) < ( ?, ?)`, append(args, after.At, after.ID)
+	}
+	sql += ` ORDER BY detected_at DESC, id DESC`
+	if limit > 0 {
+		sql, args = sql+` LIMIT ?`, append(args, limit)
+	}
+	return s.breaches(ctx, sql, args...)
 }
 
 // ---------------------------------------------------------------- subprocessors

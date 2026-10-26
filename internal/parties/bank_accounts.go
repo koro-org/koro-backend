@@ -53,8 +53,7 @@ func accountEvent(a authz.Actor, act authz.Action, b BankAccount, reason string,
 	}.By(a)
 }
 
-// staff reports a finance or platform admin (an admin submission, the full
-// IBAN).
+// staff reports a finance or platform admin (an admin submission).
 func staff(a authz.Actor) bool { return fullTaxIDs(a) }
 
 // reauth verifies the proof of an R operation (03 §6.2) and returns its
@@ -82,9 +81,9 @@ func reauthDenied(act authz.Action, accountID *uuid.UUID, payeeID, orgID uuid.UU
 		Metadata: map[string]any{"payee_id": payeeID.String()}}
 }
 
-// accountView builds the view of b: the party title for the first eye's
-// check and the full IBAN for staff.
-func (s *service) accountViews(ctx context.Context, bs []BankAccount, full bool) ([]BankAccountView, error) {
+// accountViews builds the views of bs: the party title for the first
+// eye's check.
+func (s *service) accountViews(ctx context.Context, bs []BankAccount) ([]BankAccountView, error) {
 	out := make([]BankAccountView, len(bs))
 	titles := map[uuid.UUID]string{} // payee → party title
 	for i, b := range bs {
@@ -101,47 +100,24 @@ func (s *service) accountViews(ctx context.Context, bs []BankAccount, full bool)
 			title = lp.Title
 			titles[b.PayeeID] = title
 		}
-		out[i] = BankAccountView{Account: b, FullIBAN: full, PartyTitle: title, HolderMatchesTitle: holderMatchesTitle(b.HolderName, title)}
+		out[i] = BankAccountView{Account: b, PartyTitle: title, HolderMatchesTitle: holderMatchesTitle(b.HolderName, title)}
 	}
 	return out, nil
 }
 
-func (s *service) accountView(ctx context.Context, b BankAccount, full bool) (BankAccountView, error) {
-	vs, err := s.accountViews(ctx, []BankAccount{b}, full)
+func (s *service) accountView(ctx context.Context, b BankAccount) (BankAccountView, error) {
+	vs, err := s.accountViews(ctx, []BankAccount{b})
 	if err != nil {
 		return BankAccountView{}, err
 	}
 	return vs[0], nil
 }
 
-// auditFullRead records that a finance or platform admin received full
-// IBANs (03 §6.5: parties.bank_account.list is an always-audited read when
-// staff see the IBAN in full). One record per response.
-func (s *service) auditFullRead(ctx context.Context, a authz.Actor, orgID *uuid.UUID, op string, bs []BankAccount) error {
-	if len(bs) == 0 {
-		return nil
-	}
-	ids := make([]string, len(bs))
-	for i, b := range bs {
-		ids[i] = b.ID.String()
-	}
-	e := audit.Event{
-		Action: string(authz.PartiesBankAccountList), Outcome: audit.Success, OrgID: orgID, ResourceType: authz.TypeBankAccount,
-		Metadata: map[string]any{"operation": op, "full_iban": true, "count": len(bs), "bank_account_ids": ids},
-	}.By(a)
-	if len(bs) == 1 {
-		id := bs[0].ID
-		e.ResourceID = &id
-	}
-	return s.d.Audit.Log(ctx, e)
-}
-
 // ---- org surface
 
 // ListPayeeBankAccounts implements Service: the org (404) → authz on the
 // org's payees (404/403) → the payee within the org (404) → its accounts,
-// newest first. Org roles see the IBAN masked; a finance or platform
-// admin's full read is audited before the response leaves.
+// newest first, the IBAN masked for everyone (BE-129).
 func (s *service) ListPayeeBankAccounts(ctx context.Context, a authz.Actor, orgID, payeeID uuid.UUID) ([]BankAccountView, error) {
 	_, p, err := s.orgPayee(ctx, a, authz.PartiesBankAccountList, orgID, payeeID)
 	if err != nil {
@@ -151,18 +127,7 @@ func (s *service) ListPayeeBankAccounts(ctx context.Context, a authz.Actor, orgI
 	if err != nil {
 		return nil, err
 	}
-	full := staff(a)
-	views, err := s.accountViews(ctx, bs, full)
-	if err != nil {
-		return nil, err
-	}
-	if full {
-		org := p.OrgID
-		if err := s.auditFullRead(ctx, a, &org, "list_payee_accounts", bs); err != nil {
-			return nil, err
-		}
-	}
-	return views, nil
+	return s.accountViews(ctx, bs)
 }
 
 // SubmitPayeeBankAccount implements Service (R). Order: the org (404) →
@@ -279,7 +244,7 @@ func (s *service) submit(ctx context.Context, a authz.Actor, p Payee, in BankAcc
 	if err != nil {
 		return BankAccountView{}, err
 	}
-	return s.accountView(ctx, stored, admin)
+	return s.accountView(ctx, stored)
 }
 
 // emit writes an outbox event of the bank account flow (O) in the
@@ -313,8 +278,8 @@ func (s *service) checkEvidence(ctx context.Context, a authz.Actor, orgID, fileI
 var queueStatuses = []BankAccountStatus{AccountPendingVerification, AccountPendingApproval}
 
 // AdminListBankAccounts implements Service: authz (403) → the accounts
-// waiting for an eye (or of one status), oldest first, with full IBANs,
-// the submitter and the first eye; the read is audited.
+// waiting for an eye (or of one status), oldest first, with the submitter
+// and the first eye; the IBAN masked (BE-129).
 func (s *service) AdminListBankAccounts(ctx context.Context, a authz.Actor, q BankAccountQuery) (BankAccountPage, error) {
 	if err := authz.Can(ctx, a, authz.PartiesBankAccountList, adminSurface); err != nil {
 		return BankAccountPage{}, err
@@ -332,11 +297,8 @@ func (s *service) AdminListBankAccounts(ctx context.Context, a authz.Actor, q Ba
 		return BankAccountPage{}, err
 	}
 	rows, more := page.Cut(rows, limit)
-	views, err := s.accountViews(ctx, rows, true)
+	views, err := s.accountViews(ctx, rows)
 	if err != nil {
-		return BankAccountPage{}, err
-	}
-	if err := s.auditFullRead(ctx, a, nil, "admin_queue", rows); err != nil {
 		return BankAccountPage{}, err
 	}
 	out := BankAccountPage{Items: views}
@@ -433,7 +395,7 @@ func (s *service) AdminVerifyBankAccount(ctx context.Context, a authz.Actor, id 
 		if err != nil {
 			return uuid.Nil(), err
 		}
-		v, err := s.accountView(ctx, cur, true)
+		v, err := s.accountView(ctx, cur)
 		if err != nil {
 			return uuid.Nil(), err
 		}
@@ -679,10 +641,26 @@ func (s *service) AdminDownloadBankAccountEvidence(ctx context.Context, a authz.
 	return DocumentLink{URL: dl.URL, ExpiresAt: dl.ExpiresAt}, nil
 }
 
+// AdminRevealBankAccountIBAN implements Service (BE-129): authz (403
+// before reading) → the account (404) → the access reason (422) and the
+// audit record (RevealIBAN) → its full IBAN.
+func (s *service) AdminRevealBankAccountIBAN(ctx context.Context, a authz.Actor, id uuid.UUID, reason string) (string, error) {
+	if err := authz.Can(ctx, a, authz.PartiesIbanReveal, adminSurface); err != nil {
+		return "", err
+	}
+	b, err := s.d.Store.GetBankAccount(ctx, id, false)
+	if err != nil {
+		return "", err
+	}
+	org := b.OrgID
+	return RevealIBAN(ctx, s.d.Audit, a, Revealed{Action: authz.PartiesIbanReveal, ResourceType: authz.TypeBankAccount,
+		ResourceID: b.ID, OrgID: &org, Field: "iban", IBAN: b.IBAN}, reason)
+}
+
 func (s *service) reloadAccount(ctx context.Context, id uuid.UUID) (BankAccountView, error) {
 	b, err := s.d.Store.GetBankAccount(ctx, id, false)
 	if err != nil {
 		return BankAccountView{}, err
 	}
-	return s.accountView(ctx, b, true)
+	return s.accountView(ctx, b)
 }

@@ -314,8 +314,9 @@ type RecordStore interface {
 	// UpdateBreach writes every mutable column of b; updated_at moves.
 	UpdateBreach(ctx context.Context, b Breach) error
 	// Breaches returns the breaches (status filter optional), the most
-	// recently detected first.
-	Breaches(ctx context.Context, status *BreachStatus) ([]Breach, error)
+	// recently detected first (detected_at DESC, id DESC), after the cursor;
+	// up to limit rows, every row when limit ≤ 0 (the breach timer).
+	Breaches(ctx context.Context, status *BreachStatus, after *After, limit int) ([]Breach, error)
 	// PurgeBreaches deletes up to limit breaches closed before cutoff,
 	// oldest first; dryRun counts (retention breach_record, BE-057).
 	PurgeBreaches(ctx context.Context, cutoff time.Time, limit int, dryRun bool) (int, error)

@@ -16,6 +16,10 @@ import (
 type Store interface {
 	LineReceivable(ctx context.Context, lineID uuid.UUID) (int64, error)
 	PayeeReceivable(ctx context.Context, payeeID uuid.UUID) (int64, error)
+	// ReceivableLines returns the paid-out lines of a payee whose
+	// payee_receivable sum is positive (what it still owes back, 06 H-59),
+	// in line order (BE-129).
+	ReceivableLines(ctx context.Context, payeeID uuid.UUID) ([]ReceivableLine, error)
 	// InsertTxn writes the header and all its entries in one go (06 H-56,
 	// T-226: there is no way to append entries to a stored transaction).
 	// When (kind, ref_type, ref_id) already exists it writes nothing and

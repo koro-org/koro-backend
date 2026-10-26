@@ -2,6 +2,7 @@ package httpx_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -13,6 +14,7 @@ import (
 
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
+	"koro/internal/platform/problem"
 )
 
 type reasonInput struct {
@@ -109,5 +111,37 @@ func TestAccessReason_HeaderBound(t *testing.T) {
 	long := strings.Repeat("ş", 500)
 	if rec := a.do(t, http.MethodGet, "/api/v1/reason", nil, map[string]string{httpx.HeaderAccessReason: encode(long)}); rec.Code != http.StatusOK {
 		t.Fatalf("500 Turkish letters: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestRequireAccessReason (BE-129): an operation that always asks for a
+// justification outside authz's break-glass cells takes 10–500 characters
+// of decoded text (runes, not bytes), trimmed; anything else is 422 at
+// header.X-Koro-Access-Reason.
+func TestRequireAccessReason(t *testing.T) {
+	t.Parallel()
+	for name, c := range map[string]struct {
+		in, want string
+		ok       bool
+	}{
+		"empty":            {"", "", false},
+		"too short":        {"   kısa   ", "", false},
+		"ten runes":        {"çğıöşüÇĞİÖ", "çğıöşüÇĞİÖ", true},
+		"trimmed":          {"  EFT için dekont kontrolü  ", "EFT için dekont kontrolü", true},
+		"500 runes":        {strings.Repeat("ş", 500), strings.Repeat("ş", 500), true},
+		"501 runes":        {strings.Repeat("ş", 501), "", false},
+		"spaces only (10)": {strings.Repeat(" ", 12), "", false},
+	} {
+		got, err := httpx.RequireAccessReason(c.in)
+		if c.ok != (err == nil) || got != c.want {
+			t.Errorf("%s: RequireAccessReason = %q, %v", name, got, err)
+			continue
+		}
+		if err != nil {
+			var p *problem.Error
+			if !errors.As(err, &p) || len(p.Fields()) != 1 || p.Fields()[0].Location != "header."+httpx.HeaderAccessReason {
+				t.Errorf("%s: error = %v, want 422 at header.%s", name, err, httpx.HeaderAccessReason)
+			}
+		}
 	}
 }

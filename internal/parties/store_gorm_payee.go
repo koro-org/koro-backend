@@ -9,6 +9,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/platform/db"
+	"koro/internal/platform/textx"
 )
 
 // payeeConstraints maps the named constraints of 000096/000097 onto
@@ -68,6 +69,35 @@ func (s gormStore) OrgPayees(ctx context.Context, orgID uuid.UUID) ([]Payee, err
 	var out []Payee
 	if err := db.Conn(ctx, s.orm).Scopes(db.ScopeOrg(orgID)).Order("id").Find(&out).Error; err != nil {
 		return nil, fmt.Errorf("parties: org payees: %w", err)
+	}
+	return out, nil
+}
+
+// ListPayees implements Store.
+//
+// cross-org: the staff search of every org's payees (finance and platform
+// admins; adminQueryPayees).
+func (s gormStore) ListPayees(ctx context.Context, f PayeeFilter, after *uuid.UUID, limit int) ([]Payee, error) {
+	q := db.Conn(ctx, s.orm).Model(&Payee{})
+	if f.OrgID != nil {
+		q = q.Where("org_id = ?", *f.OrgID)
+	}
+	if f.Status != "" {
+		q = q.Where("status = ?", f.Status)
+	}
+	switch {
+	case f.Q != "" && isVKNQuery(f.Q):
+		q = q.Where("legal_party_id IN (SELECT id FROM legal_parties WHERE tax_no = ?)", f.Q)
+	case f.Q != "":
+		q = q.Where("legal_party_id IN (SELECT id FROM legal_parties WHERE public.koro_norm(title) LIKE '%' || public.koro_norm( ?) || '%')",
+			textx.EscapeLike(f.Q))
+	}
+	if after != nil {
+		q = q.Where("id < ?", *after)
+	}
+	var out []Payee
+	if err := q.Order("id DESC").Limit(limit).Find(&out).Error; err != nil {
+		return nil, fmt.Errorf("parties: list payees: %w", err)
 	}
 	return out, nil
 }

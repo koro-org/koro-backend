@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -20,6 +21,7 @@ import (
 	"koro/internal/notify"
 	"koro/internal/parties"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/problem"
@@ -441,7 +443,8 @@ func TestGetPayeeBalance_PayeeOfOtherOrg_404(t *testing.T) {
 
 // TestOrgPayouts_IBANMasked (04 §2.17): the organization sees its payouts
 // with the IBAN masked and without the finance admins' identities, its own
-// payouts only; finance gets the full snapshot on /admin.
+// payouts only; finance sees it masked on /admin too and reveals it with
+// the access reason, audited (BE-129).
 func TestOrgPayouts_IBANMasked(t *testing.T) {
 	t.Parallel()
 	e := newPayoutEnv(t)
@@ -488,9 +491,44 @@ func TestOrgPayouts_IBANMasked(t *testing.T) {
 	if code, _ := call("other_club_admin", "/orgs/"+club+"/payouts"); code != http.StatusNotFound {
 		t.Fatalf("non-member: %d", code)
 	}
+	// BE-129: finance sees the snapshot masked on /admin too; the full IBAN
+	// comes from adminRevealPayoutIban alone, with the access reason, audited.
 	code, body = call("finance_admin", "/admin/payouts/"+p.ID.String())
-	if code != http.StatusOK || !strings.Contains(body, `"iban_snapshot":"`+paid.IBANSnapshot+`"`) {
+	if code != http.StatusOK || strings.Contains(body, paid.IBANSnapshot) || strings.Contains(body, "iban_snapshot") ||
+		!strings.Contains(body, `"iban_masked":"`+paid.MaskedIBAN()+`"`) {
 		t.Fatalf("admin payout %d %s", code, body)
+	}
+	reveal := func(persona, reason string) (int, map[string]any, string) {
+		t.Helper()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/admin/payouts/"+p.ID.String()+"/iban", nil)
+		req.Header.Set("Authorization", "Bearer "+func() string { pp, _ := authztest.Get(persona); return pp.Token }())
+		if reason != "" {
+			req.Header.Set(httpx.HeaderAccessReason, "UTF-8''"+url.PathEscape(reason))
+		}
+		rec := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rec, req)
+		var out map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec.Code, out, rec.Header().Get("Cache-Control")
+	}
+	if code, _, _ := reveal("finance_admin", ""); code != http.StatusUnprocessableEntity {
+		t.Fatalf("reveal without a reason: %d", code)
+	}
+	if code, _, _ := reveal("club_admin", "Hakediş kontrolü yapılacak"); code != http.StatusForbidden {
+		t.Fatalf("reveal as club_admin: %d", code)
+	}
+	if n := len(e.audit.Of(authz.LedgerIbanReveal)); n != 0 {
+		t.Fatalf("a refused reveal was audited (%d)", n)
+	}
+	code, out, cache := reveal("finance_admin", "EFT'yi bankaya yazmak için")
+	if code != http.StatusOK || out["iban"] != paid.IBANSnapshot || out["iban_masked"] != paid.MaskedIBAN() || cache != "no-store" {
+		t.Fatalf("reveal %d %v %q", code, out, cache)
+	}
+	rs := e.audit.Of(authz.LedgerIbanReveal)
+	if len(rs) != 1 || rs[0].Reason != "EFT'yi bankaya yazmak için" || rs[0].ResourceType != authz.TypePayout || *rs[0].ResourceID != p.ID ||
+		*rs[0].OrgID != authztest.ID("club_a") || rs[0].Metadata["field"] != "iban_snapshot" || rs[0].Metadata[audit.MetaBreakGlass] != true ||
+		rs[0].Metadata["iban_masked"] != paid.MaskedIBAN() {
+		t.Fatalf("reveal audit = %+v", rs)
 	}
 }
 

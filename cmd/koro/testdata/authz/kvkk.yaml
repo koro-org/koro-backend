@@ -170,6 +170,11 @@ operations:
     path: /api/v1/admin/breaches
     action: kvkk.breach.list
     expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 200, platform_admin: 200 }
+    variants:
+      - name: page
+        query: { status: open, limit: "1" }
+        note: BE-129 the register is paged (limit, cursor; detected_at DESC)
+        expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 200, platform_admin: 200 }
 
   adminCreateBreach:
     method: POST

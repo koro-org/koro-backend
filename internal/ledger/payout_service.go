@@ -49,6 +49,13 @@ type PayoutService interface {
 	AdminListPayouts(ctx context.Context, a authz.Actor, q PayoutQuery) (PayoutPage, error)
 	// AdminGetPayout is adminGetPayout (ledger.payout.read).
 	AdminGetPayout(ctx context.Context, a authz.Actor, payoutID uuid.UUID) (PayoutView, error)
+	// AdminRevealPayoutIBAN is adminRevealPayoutIban (ledger.iban.reveal;
+	// BE-129): the payout's frozen IBAN, audited with the access reason.
+	AdminRevealPayoutIBAN(ctx context.Context, a authz.Actor, payoutID uuid.UUID, reason string) (string, error)
+	// AdminListPayeeReceivables is adminListPayeeReceivables
+	// (ledger.balance.read on the admin surface; BE-129): the paid-out
+	// lines the payee still owes money back for.
+	AdminListPayeeReceivables(ctx context.Context, a authz.Actor, payeeID uuid.UUID) ([]ReceivableLineView, error)
 	// AdminCreatePayout is adminCreatePayout (ledger.payout.create;
 	// Idempotency-Key): the payable lines are taken into a pending payout
 	// and the approved IBAN is frozen on it.
@@ -385,19 +392,11 @@ func (s *service) view(ctx context.Context, p Payout) (PayoutView, error) {
 	v := PayoutView{Payout: p, Items: make([]PayoutItemView, len(items))}
 	orderNo := map[uuid.UUID]string{}
 	for i, it := range items {
-		l, err := s.d.Orders.GetLine(ctx, it.OrderLineID)
+		orderID, no, err := s.lineOrder(ctx, orderNo, it.OrderLineID)
 		if err != nil {
-			return PayoutView{}, fmt.Errorf("ledger: payout %s line %s: %w", p.ID, it.OrderLineID, err)
+			return PayoutView{}, fmt.Errorf("ledger: payout %s: %w", p.ID, err)
 		}
-		no, ok := orderNo[l.OrderID]
-		if !ok {
-			o, err := s.d.Orders.ForPayment(ctx, l.OrderID)
-			if err != nil {
-				return PayoutView{}, fmt.Errorf("ledger: payout %s order %s: %w", p.ID, l.OrderID, err)
-			}
-			no, orderNo[l.OrderID] = o.OrderNo, o.OrderNo
-		}
-		v.Items[i] = PayoutItemView{OrderLineID: it.OrderLineID, OrderID: l.OrderID, OrderNo: no, Amount: it.Amount}
+		v.Items[i] = PayoutItemView{OrderLineID: it.OrderLineID, OrderID: orderID, OrderNo: no, Amount: it.Amount}
 	}
 	if p.Status == StatusPaid && p.ReceiptFileID != nil {
 		d, err := s.d.Files.PresignGet(ctx, *p.ReceiptFileID, receiptURLTTL)
@@ -414,6 +413,72 @@ func (s *service) view(ctx context.Context, p Payout) (PayoutView, error) {
 		}
 	}
 	return v, nil
+}
+
+// lineOrder returns the order of an order line and its reference code;
+// orderNo caches the codes of the orders already read.
+func (s *service) lineOrder(ctx context.Context, orderNo map[uuid.UUID]string, lineID uuid.UUID) (uuid.UUID, string, error) {
+	l, err := s.d.Orders.GetLine(ctx, lineID)
+	if err != nil {
+		return uuid.Nil(), "", fmt.Errorf("line %s: %w", lineID, err)
+	}
+	no, ok := orderNo[l.OrderID]
+	if !ok {
+		o, err := s.d.Orders.ForPayment(ctx, l.OrderID)
+		if err != nil {
+			return uuid.Nil(), "", fmt.Errorf("order %s: %w", l.OrderID, err)
+		}
+		no, orderNo[l.OrderID] = o.OrderNo, o.OrderNo
+	}
+	return l.OrderID, no, nil
+}
+
+// AdminRevealPayoutIBAN implements PayoutService (BE-129): authz (403
+// before reading) → the payout (404) → the access reason (422) and the
+// audit record (parties.RevealIBAN) → the IBAN frozen on it, which the EFT
+// is typed with.
+func (s *service) AdminRevealPayoutIBAN(ctx context.Context, a authz.Actor, payoutID uuid.UUID, reason string) (string, error) {
+	if err := s.adminGate(ctx, a, authz.LedgerIbanReveal); err != nil {
+		return "", err
+	}
+	p, err := s.d.Payouts.GetPayout(ctx, payoutID, false)
+	if err != nil {
+		return "", err
+	}
+	org := p.OrgID
+	return parties.RevealIBAN(ctx, s.d.Audit, a, parties.Revealed{Action: authz.LedgerIbanReveal, ResourceType: authz.TypePayout,
+		ResourceID: p.ID, OrgID: &org, Field: "iban_snapshot", IBAN: p.IBANSnapshot}, reason)
+}
+
+// AdminListPayeeReceivables implements PayoutService (BE-129; 06 H-59):
+// authz on the admin surface (403 before reading) → the payee (404) → its
+// paid-out lines with an open receivable, each with its order's reference
+// code: the order_line_id a receivable collection claims.
+func (s *service) AdminListPayeeReceivables(ctx context.Context, a authz.Actor, payeeID uuid.UUID) ([]ReceivableLineView, error) {
+	if err := s.adminGate(ctx, a, authz.LedgerBalanceRead); err != nil {
+		return nil, err
+	}
+	p, err := s.d.Payees.Get(ctx, payeeID)
+	switch {
+	case errors.Is(err, parties.ErrNotFound):
+		return nil, ErrNotFound
+	case err != nil:
+		return nil, err
+	}
+	lines, err := s.d.Store.ReceivableLines(ctx, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ReceivableLineView, len(lines))
+	orderNo := map[uuid.UUID]string{}
+	for i, l := range lines {
+		orderID, no, err := s.lineOrder(ctx, orderNo, l.OrderLineID)
+		if err != nil {
+			return nil, fmt.Errorf("ledger: receivables of payee %s: %w", p.ID, err)
+		}
+		out[i] = ReceivableLineView{ReceivableLine: l, OrderID: orderID, OrderNo: no}
+	}
+	return out, nil
 }
 
 // AdminCreatePayout implements PayoutService: authz (403) → the input (422)

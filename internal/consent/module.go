@@ -104,6 +104,9 @@ type Service interface {
 	Notices
 	TermsLedger
 
+	// AdminListNotices is adminListNotices (consent.notice.manage; BE-129):
+	// every version, drafts included, newest first.
+	AdminListNotices(ctx context.Context, a authz.Actor, q NoticeListQuery) (NoticePage, error)
 	// ListCurrentNotices is listCurrentNotices (consent.notice.read): each
 	// consent text says whether its purpose is collectable now (BE-114).
 	ListCurrentNotices(ctx context.Context, a authz.Actor, q NoticeFilter) ([]CurrentNotice, error)

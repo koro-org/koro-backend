@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"strings"
+	"time"
 	"uuid"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -54,6 +55,14 @@ func Register(api huma.API, svc Service) {
 		Description: "IP, channel and text digest of every consent act. support needs X-Koro-Access-Reason " +
 			"(break-glass); every read is audited.",
 	}, op.Meta{Action: string(authz.ConsentRecordListAdmin), Surface: op.SurfaceAdmin, BreakGlass: true}), h.adminListUser)
+
+	huma.Register(api, op.Koro(huma.Operation{
+		OperationID: "adminListNotices", Method: http.MethodGet, Path: "/admin/notices", Tags: tags,
+		Summary: "List every notice version (drafts and history)",
+		Description: "BE-129: drafts, the versions in force and the retired ones, newest first, without their texts " +
+			"(getNoticeVersion reads one, a draft too). status draft is the DPO's work in progress; published is " +
+			"in force; retired stays as the proof of what earlier consents agreed to.",
+	}, op.Meta{Action: string(authz.ConsentNoticeManage), Surface: op.SurfaceAdmin}), h.adminListNotices)
 
 	huma.Register(api, op.Koro(huma.Operation{
 		OperationID: "adminCreateNotice", Method: http.MethodPost, Path: "/admin/notices", Tags: tags,
@@ -179,6 +188,99 @@ func (h handler) listCurrent(ctx context.Context, in *listCurrentInput) (*listCu
 			d.ScopeType = string(*n.ScopeType)
 		}
 		out.Body.Items[i] = d
+	}
+	return out, nil
+}
+
+// ---- adminListNotices
+
+// sortNotices is the only order of adminListNotices (cursor fingerprint).
+const sortNotices = "-id"
+
+type adminListNoticesInput struct {
+	page.Params
+	Kind        string `query:"kind" enum:"privacy_notice,consent_text,terms_of_use,cookie_notice"`
+	PurposeCode string `query:"purpose_code" pattern:"^[a-z][a-z0-9_]{2,40}$" doc:"Only the consent texts of this purpose"`
+	Audience    string `query:"audience" enum:"all,student,company,club,university"`
+	Locale      string `query:"locale" enum:"tr-TR,en-US"`
+	Status      string `query:"status" enum:"draft,published,retired"`
+}
+
+// NoticeSummaryDTO is a notice version of adminListNotices: NoticeDTO
+// without the text.
+type NoticeSummaryDTO struct {
+	NoticeVersionID string     `json:"notice_version_id" format:"uuid"`
+	Kind            string     `json:"kind" enum:"privacy_notice,consent_text,terms_of_use,cookie_notice"`
+	PurposeCode     string     `json:"purpose_code,omitempty" doc:"Consent purpose of a consent_text"`
+	Audience        string     `json:"audience" enum:"all,student,company,club,university"`
+	Locale          string     `json:"locale" enum:"tr-TR,en-US"`
+	Version         string     `json:"version" doc:"YYYY.MM.DD or YYYY.MM.DD-N"`
+	Title           string     `json:"title"`
+	BodySHA256      string     `json:"body_sha256" doc:"Lower-case hex SHA-256 of body_md"`
+	Status          string     `json:"status" enum:"draft,published,retired"`
+	CreatedAt       time.Time  `json:"created_at"`
+	PublishedAt     *time.Time `json:"published_at,omitempty"`
+	RetiredAt       *time.Time `json:"retired_at,omitempty"`
+}
+
+// NoticeSummaryList is the body of adminListNotices.
+type NoticeSummaryList struct {
+	Items      []NoticeSummaryDTO `json:"items"`
+	NextCursor string             `json:"next_cursor,omitempty"`
+}
+
+type adminListNoticesOutput struct{ Body NoticeSummaryList }
+
+func (h handler) adminListNotices(ctx context.Context, in *adminListNoticesInput) (*adminListNoticesOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	fp := page.Fingerprint("adminListNotices", in.Kind, in.PurposeCode, in.Audience, in.Locale, in.Status)
+	q := NoticeListQuery{Limit: in.Limit}
+	if in.Kind != "" {
+		k := NoticeKind(in.Kind)
+		q.Filter.Kind = &k
+	}
+	if in.PurposeCode != "" {
+		p := Purpose(in.PurposeCode)
+		q.Filter.Purpose = &p
+	}
+	if in.Audience != "" {
+		au := Audience(in.Audience)
+		q.Filter.Audience = &au
+	}
+	if in.Locale != "" {
+		q.Filter.Locale = &in.Locale
+	}
+	if in.Status != "" {
+		st := NoticeStatus(in.Status)
+		q.Filter.Status = &st
+	}
+	c, err := page.Decode(in.Cursor, sortNotices, fp, 1)
+	if err != nil {
+		return nil, err
+	}
+	if c != nil {
+		id, err := c.UUID(0)
+		if err != nil {
+			return nil, err
+		}
+		q.After = &id
+	}
+	p, err := h.svc.AdminListNotices(ctx, a, q)
+	if err != nil {
+		return nil, err
+	}
+	out := &adminListNoticesOutput{Body: NoticeSummaryList{Items: make([]NoticeSummaryDTO, len(p.Items))}}
+	for i, n := range p.Items {
+		d := toNoticeDTO(n)
+		out.Body.Items[i] = NoticeSummaryDTO{NoticeVersionID: d.NoticeVersionID, Kind: d.Kind, PurposeCode: d.PurposeCode,
+			Audience: d.Audience, Locale: d.Locale, Version: d.Version, Title: d.Title, BodySHA256: d.BodySHA256,
+			Status: d.Status, CreatedAt: n.CreatedAt.UTC(), PublishedAt: d.PublishedAt, RetiredAt: d.RetiredAt}
+	}
+	if p.Next != nil {
+		out.Body.NextCursor = page.Next(sortNotices, fp, page.UUIDVal(*p.Next))
 	}
 	return out, nil
 }

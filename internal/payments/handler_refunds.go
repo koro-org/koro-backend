@@ -9,6 +9,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/consent"
+	"koro/internal/parties"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
@@ -36,6 +37,12 @@ func registerRefunds(api huma.API, h handler) {
 		Summary:     "List refunds",
 		Description: "Newest first; filter by status, order or payment.",
 	}, op.Meta{Action: string(authz.PaymentsRefundList), Surface: op.SurfaceAdmin}, h.listRefunds)
+
+	op.Register(api, "payments", huma.Operation{
+		OperationID: "adminRevealRefundIban", Method: http.MethodGet, Path: "/admin/refunds/{refund_id}/iban",
+		Summary:     "Reveal the full IBAN of a refund",
+		Description: "The target IBAN (target_iban_masked's full form; maybe a natural person's), for the refund EFT. " + parties.RevealNote,
+	}, op.Meta{Action: string(authz.PaymentsIbanReveal), Surface: op.SurfaceAdmin, RateLimit: op.RateBreakGlass}, h.revealRefund)
 
 	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminListRefundsDue", Method: http.MethodGet, Path: "/admin/refunds/due",
@@ -215,47 +222,65 @@ type RefundPath struct {
 	RefundID string `path:"refund_id" doc:"Refund ID (an unknown or malformed ID is 404)"`
 }
 
-// RefundDTO is 04 §2.16 RefundDTO. The target IBAN is shown in full to
-// finance and platform admins: the second eye approves the destination
-// (it may be a natural person's: an overpayment goes back to its sender).
+// RefundDTO is 04 §2.16 RefundDTO. The target IBAN may be a natural
+// person's (an overpayment goes back to its sender): it is masked (BE-129);
+// the second eye compares it with the sender's, the finance admin who
+// types the EFT reveals it (adminRevealRefundIban).
 type RefundDTO struct {
-	RefundID        string     `json:"refund_id" format:"uuid"`
-	PaymentID       string     `json:"payment_id" format:"uuid"`
-	OrderID         string     `json:"order_id" format:"uuid"`
-	OrderLineID     string     `json:"order_line_id,omitempty" format:"uuid"`
-	Amount          int64      `json:"amount" doc:"Kuruş"`
-	Currency        string     `json:"currency" enum:"TRY"`
-	Reason          string     `json:"reason" enum:"event_cancelled,offering_cancelled,not_fulfilled,duplicate_payment,overpayment,goodwill,other"`
-	ReasonNote      string     `json:"reason_note,omitempty"`
-	Status          string     `json:"status" enum:"requested,approved,processing,completed,failed,rejected,cancelled"`
-	Method          string     `json:"method" enum:"bank_eft,iyzico"`
-	TargetIBAN      string     `json:"target_iban,omitempty"`
-	RequestedBy     string     `json:"requested_by" format:"uuid"`
-	RequestedAt     time.Time  `json:"requested_at"`
-	ApprovedBy      string     `json:"approved_by,omitempty" format:"uuid"`
-	ApprovedAt      *time.Time `json:"approved_at,omitempty"`
-	RejectedBy      string     `json:"rejected_by,omitempty" format:"uuid"`
-	RejectedAt      *time.Time `json:"rejected_at,omitempty"`
-	RejectionReason string     `json:"rejection_reason,omitempty"`
-	BankReference   string     `json:"bank_reference,omitempty"`
-	ReceiptFileID   string     `json:"receipt_file_id,omitempty" format:"uuid"`
-	CompletedAt     *time.Time `json:"completed_at,omitempty"`
-	ClosedBy        string     `json:"closed_by,omitempty" format:"uuid"`
-	ClosedAt        *time.Time `json:"closed_at,omitempty"`
-	CancelReason    string     `json:"cancel_reason,omitempty"`
-	FailureReason   string     `json:"failure_reason,omitempty"`
+	RefundID         string     `json:"refund_id" format:"uuid"`
+	PaymentID        string     `json:"payment_id" format:"uuid"`
+	OrderID          string     `json:"order_id" format:"uuid"`
+	OrderLineID      string     `json:"order_line_id,omitempty" format:"uuid"`
+	Amount           int64      `json:"amount" doc:"Kuruş"`
+	Currency         string     `json:"currency" enum:"TRY"`
+	Reason           string     `json:"reason" enum:"event_cancelled,offering_cancelled,not_fulfilled,duplicate_payment,overpayment,goodwill,other"`
+	ReasonNote       string     `json:"reason_note,omitempty"`
+	Status           string     `json:"status" enum:"requested,approved,processing,completed,failed,rejected,cancelled"`
+	Method           string     `json:"method" enum:"bank_eft,iyzico"`
+	TargetIBANMasked string     `json:"target_iban_masked,omitempty" doc:"Where the EFT goes, masked"`
+	RequestedBy      string     `json:"requested_by" format:"uuid"`
+	RequestedAt      time.Time  `json:"requested_at"`
+	ApprovedBy       string     `json:"approved_by,omitempty" format:"uuid"`
+	ApprovedAt       *time.Time `json:"approved_at,omitempty"`
+	RejectedBy       string     `json:"rejected_by,omitempty" format:"uuid"`
+	RejectedAt       *time.Time `json:"rejected_at,omitempty"`
+	RejectionReason  string     `json:"rejection_reason,omitempty"`
+	BankReference    string     `json:"bank_reference,omitempty"`
+	ReceiptFileID    string     `json:"receipt_file_id,omitempty" format:"uuid"`
+	CompletedAt      *time.Time `json:"completed_at,omitempty"`
+	ClosedBy         string     `json:"closed_by,omitempty" format:"uuid"`
+	ClosedAt         *time.Time `json:"closed_at,omitempty"`
+	CancelReason     string     `json:"cancel_reason,omitempty"`
+	FailureReason    string     `json:"failure_reason,omitempty"`
 }
 
 func refundDTO(r Refund) RefundDTO {
 	return RefundDTO{
 		RefundID: r.ID.String(), PaymentID: r.PaymentID.String(), OrderID: r.OrderID.String(), OrderLineID: httpx.IDStr(r.OrderLineID),
 		Amount: r.Amount, Currency: Currency, Reason: r.Reason, ReasonNote: str(r.ReasonNote), Status: string(r.Status),
-		Method: r.Method, TargetIBAN: str(r.TargetIBAN), RequestedBy: r.RequestedBy.String(), RequestedAt: r.CreatedAt.UTC(),
+		Method: r.Method, TargetIBANMasked: r.MaskedIBAN(), RequestedBy: r.RequestedBy.String(), RequestedAt: r.CreatedAt.UTC(),
 		ApprovedBy: httpx.IDStr(r.ApprovedBy), ApprovedAt: utc(r.ApprovedAt), RejectedBy: httpx.IDStr(r.RejectedBy), RejectedAt: utc(r.RejectedAt),
 		RejectionReason: str(r.RejectionReason), BankReference: str(r.BankReference), ReceiptFileID: httpx.IDStr(r.ReceiptFileID),
 		CompletedAt: utc(r.CompletedAt), ClosedBy: httpx.IDStr(r.ClosedBy), ClosedAt: utc(r.ClosedAt),
 		CancelReason: str(r.CancelReason), FailureReason: str(r.FailureReason),
 	}
+}
+
+type revealRefundInput struct {
+	RefundPath
+	httpx.AccessReasonHeader
+}
+
+func (h handler) revealRefund(ctx context.Context, in *revealRefundInput) (*parties.RevealOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	n, err := h.svc.RevealRefundIBAN(ctx, a, httpx.ParseID(in.RefundID), in.AccessReason.String())
+	if err != nil {
+		return nil, err
+	}
+	return parties.RevealOut(n), nil
 }
 
 // RefundList is the body of adminListRefunds.
@@ -312,6 +337,7 @@ type RefundDueDTO struct {
 	OrgID       string              `json:"org_id" format:"uuid" doc:"The buying org"`
 	OrderLineID string              `json:"order_line_id,omitempty" format:"uuid" doc:"The cancelled line; empty: the whole order's paid money"`
 	Amount      int64               `json:"amount" doc:"Kuruş still to request"`
+	Currency    string              `json:"currency" enum:"TRY"`
 	Since       time.Time           `json:"since"`
 	Payments    []FundingPaymentDTO `json:"payments"`
 }
@@ -339,7 +365,7 @@ func (h handler) listRefundsDue(ctx context.Context, in *listRefundsDueInput) (*
 	out := &refundDueOutput{Body: RefundDueList{Items: make([]RefundDueDTO, len(dues))}}
 	for i, d := range dues {
 		item := RefundDueDTO{OrderID: d.OrderID.String(), OrderNo: d.OrderNo, OrgID: d.OrgID.String(), OrderLineID: httpx.IDStr(d.LineID),
-			Amount: d.Amount, Since: d.Since.UTC(), Payments: make([]FundingPaymentDTO, len(d.Payments))}
+			Amount: d.Amount, Currency: Currency, Since: d.Since.UTC(), Payments: make([]FundingPaymentDTO, len(d.Payments))}
 		for j, p := range d.Payments {
 			item.Payments[j] = FundingPaymentDTO{PaymentID: p.PaymentID.String(), AvailableAmount: p.Available}
 		}

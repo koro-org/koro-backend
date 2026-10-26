@@ -214,21 +214,25 @@ func (m *MemRecords) UpdateBreach(_ context.Context, b Breach) error {
 }
 
 // Breaches implements RecordStore.
-func (m *MemRecords) Breaches(_ context.Context, status *BreachStatus) ([]Breach, error) {
+func (m *MemRecords) Breaches(_ context.Context, status *BreachStatus, after *After, limit int) ([]Breach, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var out []Breach
-	for _, b := range m.breaches {
-		if status == nil || b.Status == *status {
-			out = append(out, b.clone())
-		}
-	}
-	slices.SortFunc(out, func(a, b Breach) int {
+	newer := func(a, b Breach) int { // detected_at DESC, id DESC
 		if c := b.DetectedAt.Compare(a.DetectedAt); c != 0 {
 			return c
 		}
 		return strings.Compare(b.ID.String(), a.ID.String())
-	})
+	}
+	var out []Breach
+	for _, b := range m.breaches {
+		if (status == nil || b.Status == *status) && (after == nil || newer(Breach{DetectedAt: after.At, ID: after.ID}, b) < 0) {
+			out = append(out, b.clone())
+		}
+	}
+	slices.SortFunc(out, newer)
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
 	return out, nil
 }
 

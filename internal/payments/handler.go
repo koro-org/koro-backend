@@ -10,6 +10,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/consent"
 	"koro/internal/identity"
+	"koro/internal/parties"
 	"koro/internal/platform/civil"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
@@ -28,9 +29,17 @@ func Register(api huma.API, svc Service) {
 
 	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminListCollectionAccounts", Method: http.MethodGet, Path: "/admin/collection-accounts",
-		Summary:     "List Koro's collection accounts",
-		Description: "Every account, newest first. The default active account is the IBAN of every payment instruction.",
+		Summary: "List Koro's collection accounts",
+		Description: "Every account, newest first. The default active account is the IBAN of every payment instruction. " +
+			"The IBAN is masked (BE-129): the second eye who checks it against the bank reveals it with " +
+			"adminRevealCollectionAccountIban.",
 	}, op.Meta{Action: string(authz.PaymentsCollectionAccountList), Surface: op.SurfaceAdmin}, h.listAccounts)
+
+	op.Register(api, "payments", huma.Operation{
+		OperationID: "adminRevealCollectionAccountIban", Method: http.MethodGet, Path: "/admin/collection-accounts/{account_id}/iban",
+		Summary:     "Reveal the full IBAN of a collection account",
+		Description: "Koro's own account (iban_masked's full form), for the check against the bank before an approval. " + parties.RevealNote,
+	}, op.Meta{Action: string(authz.PaymentsIbanReveal), Surface: op.SurfaceAdmin, RateLimit: op.RateBreakGlass}, h.revealAccount)
 
 	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminCreateCollectionAccount", Method: http.MethodPost, Path: "/admin/collection-accounts",
@@ -90,6 +99,23 @@ func Register(api huma.API, svc Service) {
 			"amount: 1 exactly what the order waits for, 0.7 less (partial), 0.5 more (an overpayment refund opens), 0 " +
 			"the order does not wait for a payment.",
 	}, op.Meta{Action: string(authz.PaymentsTransferRead), Surface: op.SurfaceAdmin}, h.getTransfer)
+
+	op.Register(api, "payments", huma.Operation{
+		OperationID: "adminRevealIncomingTransferIban", Method: http.MethodGet, Path: "/admin/incoming-transfers/{transfer_id}/iban",
+		Summary: "Reveal a full IBAN of an incoming transfer",
+		Description: "field sender is sender_iban_masked's full form (the sender's account, maybe a natural person's), " +
+			"return_target the return's target (return.target_iban_masked), for the return EFT. An IBAN the transfer " +
+			"does not hold is 404. " + parties.RevealNote,
+	}, op.Meta{Action: string(authz.PaymentsIbanReveal), Surface: op.SurfaceAdmin, RateLimit: op.RateBreakGlass}, h.revealTransfer)
+
+	op.Register(api, "payments", huma.Operation{
+		OperationID: "adminDownloadIncomingTransferReceipt", Method: http.MethodGet,
+		Path:    "/admin/incoming-transfers/{transfer_id}/receipt",
+		Summary: "Get a download URL of a transfer's bank receipt",
+		Description: "BE-129: the receipt recorded with the transfer (receipt_file_id; a transfer_receipt upload), for the " +
+			"check of a receivable collection or a refund: a URL valid for 5 minutes, every download audited. A transfer " +
+			"without a receipt is 404; 409 files.not_clean until the virus scan clears the file.",
+	}, op.Meta{Action: string(authz.PaymentsTransferRead), Surface: op.SurfaceAdmin}, h.transferReceipt)
 
 	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminCreateIncomingTransfer", Method: http.MethodPost, Path: "/admin/incoming-transfers",
@@ -195,13 +221,14 @@ type AccountPath struct {
 	AccountID string `path:"account_id" doc:"Collection account ID (an unknown or malformed ID is 404)"`
 }
 
-// CollectionAccountDTO is 04 §2.16 CollectionAccountDTO. Koro's IBAN is
-// shown in full (it is printed on every payment instruction).
+// CollectionAccountDTO is 04 §2.16 CollectionAccountDTO. The IBAN is
+// masked like every IBAN of a finance response (BE-129; a payment
+// instruction shows the default account's in full to its buyer).
 type CollectionAccountDTO struct {
 	AccountID    string     `json:"account_id" format:"uuid"`
 	Label        string     `json:"label"`
 	LegalPartyID string     `json:"legal_party_id" format:"uuid"`
-	IBAN         string     `json:"iban"`
+	IBANMasked   string     `json:"iban_masked" doc:"TR12 **** **** **** **** 1234 56 (adminRevealCollectionAccountIban)"`
 	HolderName   string     `json:"holder_name"`
 	BankName     string     `json:"bank_name"`
 	Status       string     `json:"status" enum:"pending_approval,active,rejected,retired"`
@@ -215,7 +242,7 @@ type CollectionAccountDTO struct {
 
 func accountDTO(c CollectionAccount) CollectionAccountDTO {
 	return CollectionAccountDTO{
-		AccountID: c.ID.String(), Label: c.Label, LegalPartyID: c.LegalPartyID.String(), IBAN: c.IBAN, HolderName: c.HolderName,
+		AccountID: c.ID.String(), Label: c.Label, LegalPartyID: c.LegalPartyID.String(), IBANMasked: c.MaskedIBAN(), HolderName: c.HolderName,
 		BankName: c.BankName, Status: string(c.Status), IsDefault: c.IsDefault, CreatedBy: c.CreatedBy.String(),
 		ApprovedBy: httpx.IDStr(c.ApprovedBy), ApprovedAt: utc(c.ApprovedAt), RetiredAt: utc(c.RetiredAt), CreatedAt: c.CreatedAt.UTC(),
 	}
@@ -325,6 +352,23 @@ func (h handler) makeDefault(ctx context.Context, in *reauthAccountInput) (*acco
 	return &accountOutput{Body: accountDTO(c)}, nil
 }
 
+type revealAccountInput struct {
+	AccountPath
+	httpx.AccessReasonHeader
+}
+
+func (h handler) revealAccount(ctx context.Context, in *revealAccountInput) (*parties.RevealOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	n, err := h.svc.RevealCollectionAccountIBAN(ctx, a, httpx.ParseID(in.AccountID), in.AccessReason.String())
+	if err != nil {
+		return nil, err
+	}
+	return parties.RevealOut(n), nil
+}
+
 // ---- incoming transfers
 
 // TransferPath is the transfer_id path parameter.
@@ -334,19 +378,20 @@ type TransferPath struct {
 
 // TransferReturnDTO is the return of a transfer to its sender (06 H-18).
 type TransferReturnDTO struct {
-	RequestedBy   string     `json:"requested_by,omitempty" format:"uuid"`
-	RequestedAt   *time.Time `json:"requested_at,omitempty"`
-	Reason        string     `json:"reason,omitempty"`
-	TargetIBAN    string     `json:"target_iban,omitempty"`
-	ApprovedBy    string     `json:"approved_by,omitempty" format:"uuid"`
-	ApprovedAt    *time.Time `json:"approved_at,omitempty"`
-	ReturnedAt    *time.Time `json:"returned_at,omitempty"`
-	BankReference string     `json:"bank_reference,omitempty"`
-	ReceiptFileID string     `json:"receipt_file_id,omitempty" format:"uuid"`
+	RequestedBy      string     `json:"requested_by,omitempty" format:"uuid"`
+	RequestedAt      *time.Time `json:"requested_at,omitempty"`
+	Reason           string     `json:"reason,omitempty"`
+	TargetIBANMasked string     `json:"target_iban_masked,omitempty" doc:"Where the return EFT goes, masked (adminRevealIncomingTransferIban field return_target)"`
+	ApprovedBy       string     `json:"approved_by,omitempty" format:"uuid"`
+	ApprovedAt       *time.Time `json:"approved_at,omitempty"`
+	ReturnedAt       *time.Time `json:"returned_at,omitempty"`
+	BankReference    string     `json:"bank_reference,omitempty"`
+	ReceiptFileID    string     `json:"receipt_file_id,omitempty" format:"uuid"`
 }
 
 // IncomingTransferDTO is 04 §2.16 IncomingTransferDTO. The sender's name and
-// IBAN may be a natural person's: finance and platform admins only.
+// IBAN may be a natural person's: finance and platform admins only, the
+// IBAN masked (BE-129).
 type IncomingTransferDTO struct {
 	TransferID          string             `json:"transfer_id" format:"uuid"`
 	CollectionAccountID string             `json:"collection_account_id" format:"uuid"`
@@ -354,7 +399,7 @@ type IncomingTransferDTO struct {
 	Amount              int64              `json:"amount" doc:"Kuruş"`
 	Currency            string             `json:"currency" enum:"TRY"`
 	SenderName          string             `json:"sender_name,omitempty"`
-	SenderIBAN          string             `json:"sender_iban,omitempty"`
+	SenderIBANMasked    string             `json:"sender_iban_masked,omitempty" doc:"Masked (adminRevealIncomingTransferIban field sender)"`
 	Description         string             `json:"description"`
 	BankReference       string             `json:"bank_reference"`
 	ExtractedOrderNo    string             `json:"extracted_order_no,omitempty" doc:"The reference code found in the description"`
@@ -373,7 +418,7 @@ type IncomingTransferDTO struct {
 func transferDTO(t IncomingTransfer) IncomingTransferDTO {
 	d := IncomingTransferDTO{
 		TransferID: t.ID.String(), CollectionAccountID: t.CollectionAccountID.String(), ValueDate: t.ValueDate.String(),
-		Amount: t.Amount, Currency: t.Currency, SenderName: str(t.SenderName), SenderIBAN: str(t.SenderIBAN),
+		Amount: t.Amount, Currency: t.Currency, SenderName: str(t.SenderName), SenderIBANMasked: masked(t.SenderIBAN),
 		Description: t.Description, BankReference: t.BankReference, ExtractedOrderNo: str(t.ExtractedOrderNo),
 		Status: string(t.Status), MatchedOrderID: httpx.IDStr(t.MatchedOrderID), MatchedBy: httpx.IDStr(t.MatchedBy), MatchedAt: utc(t.MatchedAt),
 		IgnoreReason: str(t.IgnoreReason), ReceiptFileID: httpx.IDStr(t.ReceiptFileID), EntryMethod: string(t.EntryMethod),
@@ -382,7 +427,7 @@ func transferDTO(t IncomingTransfer) IncomingTransferDTO {
 	if t.ReturnRequestedBy != nil {
 		d.Return = &TransferReturnDTO{
 			RequestedBy: httpx.IDStr(t.ReturnRequestedBy), RequestedAt: utc(t.ReturnRequestedAt), Reason: str(t.ReturnReason),
-			TargetIBAN: str(t.ReturnTargetIBAN), ApprovedBy: httpx.IDStr(t.ReturnApprovedBy), ApprovedAt: utc(t.ReturnApprovedAt),
+			TargetIBANMasked: masked(t.ReturnTargetIBAN), ApprovedBy: httpx.IDStr(t.ReturnApprovedBy), ApprovedAt: utc(t.ReturnApprovedAt),
 			ReturnedAt: utc(t.ReturnedAt), BankReference: str(t.ReturnBankReference), ReceiptFileID: httpx.IDStr(t.ReturnReceiptFileID),
 		}
 	}
@@ -539,6 +584,58 @@ func (h handler) getTransfer(ctx context.Context, in *TransferPath) (*transferDe
 			OrderStatus: string(s.OrderStatus), MatchConfidence: s.MatchConfidence}
 	}
 	return out, nil
+}
+
+// transferIBANParam is the field of adminRevealIncomingTransferIban; its
+// enum is TransferIBANs (BE-117: the contract cannot drift from the check).
+type transferIBANParam string
+
+// TransformSchema implements huma.SchemaTransformer.
+func (transferIBANParam) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
+	s.Enum = op.Enum(TransferIBANs())
+	return s
+}
+
+type revealTransferInput struct {
+	TransferPath
+	Field transferIBANParam `query:"field" required:"true" doc:"sender or return_target"`
+	httpx.AccessReasonHeader
+}
+
+func (h handler) revealTransfer(ctx context.Context, in *revealTransferInput) (*parties.RevealOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	n, err := h.svc.RevealTransferIBAN(ctx, a, httpx.ParseID(in.TransferID), TransferIBAN(in.Field), in.AccessReason.String())
+	if err != nil {
+		return nil, err
+	}
+	return parties.RevealOut(n), nil
+}
+
+// ReceiptLinkDTO is the body of adminDownloadIncomingTransferReceipt (04
+// §1.14 signed URL).
+type ReceiptLinkDTO struct {
+	URL       string    `json:"url" doc:"Valid for at most 5 minutes"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+type receiptOutput struct {
+	CacheControl string `header:"Cache-Control"`
+	Body         ReceiptLinkDTO
+}
+
+func (h handler) transferReceipt(ctx context.Context, in *TransferPath) (*receiptOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	d, err := h.svc.TransferReceipt(ctx, a, httpx.ParseID(in.TransferID))
+	if err != nil {
+		return nil, err
+	}
+	return &receiptOutput{CacheControl: "no-store", Body: ReceiptLinkDTO{URL: d.URL, ExpiresAt: d.ExpiresAt.UTC()}}, nil
 }
 
 type transferOutput struct{ Body IncomingTransferDTO }

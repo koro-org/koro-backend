@@ -97,6 +97,9 @@ type PayeeStore interface {
 	OrgPayee(ctx context.Context, orgID, id uuid.UUID, lock bool) (Payee, error)
 	// OrgPayees returns the payees of orgID (closed ones included), by id.
 	OrgPayees(ctx context.Context, orgID uuid.UUID) ([]Payee, error)
+	// ListPayees returns up to limit payees of every org matching f, newest
+	// first, after the position after (nil: the first page; BE-129).
+	ListPayees(ctx context.Context, f PayeeFilter, after *uuid.UUID, limit int) ([]Payee, error)
 	// DefaultPayee returns the active default payee of a seller org; found
 	// is false when it has none.
 	DefaultPayee(ctx context.Context, orgID uuid.UUID) (Payee, bool, error)
@@ -143,6 +146,14 @@ type BankAccountStore interface {
 	// BankAccountsSubmittedBy returns the accounts a user submitted, oldest
 	// first (KVKK export).
 	BankAccountsSubmittedBy(ctx context.Context, userID uuid.UUID) ([]BankAccount, error)
+}
+
+// PayeeFilter narrows ListPayees. Zero fields do not filter; Q matches the
+// payee's legal party as ListFilter.Q does.
+type PayeeFilter struct {
+	OrgID  *uuid.UUID
+	Status PayeeStatus
+	Q      string
 }
 
 // ListFilter narrows ListParties. Zero fields do not filter.

@@ -83,6 +83,7 @@ import (
 
 	"koro/internal/audit"
 	"koro/internal/authz"
+	"koro/internal/files"
 	"koro/internal/identity"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
@@ -136,6 +137,16 @@ type Service interface {
 	DecideReturn(ctx context.Context, a authz.Actor, id uuid.UUID, d Decision, proof identity.ReauthProof) (IncomingTransfer, error)
 	// MarkReturned is adminMarkIncomingTransferReturned (step 3, R).
 	MarkReturned(ctx context.Context, a authz.Actor, id uuid.UUID, in ReturnReceipt, proof identity.ReauthProof) (IncomingTransfer, error)
+	// TransferReceipt is adminDownloadIncomingTransferReceipt
+	// (payments.transfer.read; BE-129): a 5-minute URL, audited.
+	TransferReceipt(ctx context.Context, a authz.Actor, id uuid.UUID) (files.Download, error)
+
+	// The audited reveals of one full IBAN (payments.iban.reveal; BE-129):
+	// adminRevealCollectionAccountIban, adminRevealIncomingTransferIban and
+	// adminRevealRefundIban.
+	RevealCollectionAccountIBAN(ctx context.Context, a authz.Actor, id uuid.UUID, reason string) (string, error)
+	RevealTransferIBAN(ctx context.Context, a authz.Actor, id uuid.UUID, which TransferIBAN, reason string) (string, error)
+	RevealRefundIBAN(ctx context.Context, a authz.Actor, id uuid.UUID, reason string) (string, error)
 
 	// ConfirmDirectPayment is adminConfirmDirectPayment (model C;
 	// Idempotency-Key).

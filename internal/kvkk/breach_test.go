@@ -1,6 +1,10 @@
 package kvkk_test
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -14,6 +18,8 @@ import (
 	"koro/internal/notify"
 	"koro/internal/platform/civil"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/httpx"
+	"koro/internal/platform/obs"
 	"koro/internal/platform/problem"
 	"koro/internal/platform/problem/problemtest"
 )
@@ -315,5 +321,69 @@ func TestErasure_SessionsRevokedAtApproval_DestructionLogged(t *testing.T) {
 	}
 	if again, _ := e.records.DestructionLogsOfRun(t.Context(), d.ID); len(again) != len(logs) {
 		t.Fatalf("redelivery wrote %d more rows", len(again)-len(logs))
+	}
+}
+
+// TestHTTP_ListBreaches_PagesAndHoursLeft (BE-129): adminListBreaches pages
+// the register (the most recently detected first; limit, cursor) and
+// shows the whole hours left to each notification not made yet: the Board's
+// (72 h) and the data controller's (24 h), negative once overdue, absent
+// once made or closed.
+func TestHTTP_ListBreaches_PagesAndHoursLeft(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	now := e.clk.Now()
+	old := e.newBreach(t, now.Add(-30*time.Hour))    // controller notice overdue by 6 h
+	fresh := e.newBreach(t, now.Add(-5*time.Hour))   // 19 h and 67 h left
+	middle := e.newBreach(t, now.Add(-10*time.Hour)) // the controller was told already
+	at := now.Add(-time.Hour)
+	if _, err := e.svc.UpdateBreach(t.Context(), actor(t, "dpo"), middle.ID, kvkk.ETagOf(middle.UpdatedAt),
+		kvkk.BreachPatch{ControllerNotifiedAt: &at}); err != nil {
+		t.Fatal(err)
+	}
+	app, err := httpx.New(httpx.Deps{Log: obs.Discard(), Actors: authztest.NewResolver(authztest.Personas()...)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kvkk.Register(app.V1, e.svc, e.clk)
+	list := func(persona, query string) (int, map[string]any) {
+		t.Helper()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/admin/breaches"+query, nil)
+		pp, _ := authztest.Get(persona)
+		req.Header.Set("Authorization", "Bearer "+pp.Token)
+		rec := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rec, req)
+		var out map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec.Code, out
+	}
+	var got []map[string]any
+	query := "?limit=2"
+	for range 3 {
+		code, out := list("dpo", query)
+		if code != http.StatusOK {
+			t.Fatalf("list %s = %d %v", query, code, out)
+		}
+		for _, it := range out["items"].([]any) {
+			got = append(got, it.(map[string]any))
+		}
+		next, _ := out["next_cursor"].(string)
+		if next == "" {
+			break
+		}
+		query = "?limit=2&cursor=" + url.QueryEscape(next)
+	}
+	if len(got) != 3 || got[0]["breach_id"] != fresh.ID.String() || got[1]["breach_id"] != middle.ID.String() ||
+		got[2]["breach_id"] != old.ID.String() {
+		t.Fatalf("pages = %v", got)
+	}
+	hours := func(it map[string]any, key string) any { return it[key] }
+	if hours(got[0], "controller_hours_left") != float64(19) || hours(got[0], "authority_hours_left") != float64(67) ||
+		hours(got[1], "controller_hours_left") != nil || hours(got[1], "authority_hours_left") != float64(62) ||
+		hours(got[2], "controller_hours_left") != float64(-6) || hours(got[2], "authority_hours_left") != float64(42) {
+		t.Fatalf("hours left = %v", got)
+	}
+	if code, _ := list("moderator", ""); code != http.StatusForbidden {
+		t.Fatalf("moderator = %d", code)
 	}
 }

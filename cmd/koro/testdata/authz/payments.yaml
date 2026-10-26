@@ -1,4 +1,4 @@
-# Authz matrix of the payments module (03 §5.16, 04 §2.16; BE-041, BE-043, BE-128). 30 operations × 18 personas: 04 §2.16's
+# Authz matrix of the payments module (03 §5.16, 04 §2.16; BE-041, BE-043, BE-128, BE-129). 34 operations × 18 personas: 04 §2.16's
 # 19, the return's request and second eye (06 H-56, T-79, T-228), the model C direct confirmation (T-18) and the
 # refunds due (BE-043). Everything is the admin surface (03 §7.2-3): an actor without the role gets 403 before
 # anything is read. Cells: collection accounts list pad, fin; create fin·R; approve pad·4·R, fin·4·R; retire /
@@ -28,6 +28,29 @@ operations:
       "@other_staff": 403
       platform_admin: 200
       finance_admin: 200
+
+  adminRevealCollectionAccountIban:
+    method: GET
+    path: /api/v1/admin/collection-accounts/{account_id}/iban
+    action: payments.iban.reveal
+    path_params: { account_id: coll_pending_fin2 }
+    headers: { X-Koro-Access-Reason: "Matris: iade EFT'si için IBAN gerekli" }
+    note: BE-129 Koro's account in full for the second eye (masked in the list); reason required, audited
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: unknown
+        path_params: { account_id: "literal:00000000-0000-7000-8000-0000000000c1" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404
 
   adminCreateCollectionAccount:
     method: POST
@@ -195,6 +218,62 @@ operations:
         expect:
           anonymous: 401
           "@no_platform_role": 403   # admin surface: 403 before reading (03 §7.2-3)
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404
+
+  adminRevealIncomingTransferIban:
+    method: GET
+    path: /api/v1/admin/incoming-transfers/{transfer_id}/iban
+    action: payments.iban.reveal
+    path_params: { transfer_id: tr_unmatched }
+    query: { field: sender }
+    headers: { X-Koro-Access-Reason: "Matris: iade EFT'si için IBAN gerekli" }
+    note: BE-129 the sender's IBAN (maybe a natural person's); reason required, audited
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: return_target
+        path_params: { transfer_id: tr_return_requested }
+        query: { field: return_target }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 200
+          finance_admin: 200
+      - name: no_return
+        query: { field: return_target }
+        note: an unmatched transfer has no return target — 404 after authz
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404
+
+  adminDownloadIncomingTransferReceipt:
+    method: GET
+    path: /api/v1/admin/incoming-transfers/{transfer_id}/receipt
+    action: payments.transfer.read
+    path_params: { transfer_id: tr_collect_free }
+    note: BE-129 the transfer's bank receipt, a 5-minute URL, every download audited
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: no_receipt
+        path_params: { transfer_id: tr_unmatched_b }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
           "@other_staff": 403
           platform_admin: 404
           finance_admin: 404
@@ -465,6 +544,29 @@ operations:
       "@other_staff": 403
       platform_admin: 200
       finance_admin: 200
+
+  adminRevealRefundIban:
+    method: GET
+    path: /api/v1/admin/refunds/{refund_id}/iban
+    action: payments.iban.reveal
+    path_params: { refund_id: ref_approved }
+    headers: { X-Koro-Access-Reason: "Matris: iade EFT'si için IBAN gerekli" }
+    note: BE-129 the refund's target IBAN for the EFT; reason required, audited
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: unknown
+        path_params: { refund_id: "literal:00000000-0000-7000-8000-0000000000c2" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404
 
   adminCreateRefund:
     method: POST

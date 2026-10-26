@@ -164,11 +164,14 @@ type PayeeService interface {
 	AdminCreatePayee(ctx context.Context, a authz.Actor, in PayeeInput) (PayeeView, error)
 	// AdminUpdatePayee is adminUpdatePayee (parties.payee.manage; If-Match).
 	AdminUpdatePayee(ctx context.Context, a authz.Actor, payeeID uuid.UUID, ifMatch string, p PayeePatch) (PayeeView, error)
-	// AdminVerifyPayee is adminVerifyPayee (parties.payee.verify): active.
-	AdminVerifyPayee(ctx context.Context, a authz.Actor, payeeID uuid.UUID) (PayeeView, error)
+	// AdminVerifyPayee is adminVerifyPayee (parties.payee.verify; If-Match): active.
+	AdminVerifyPayee(ctx context.Context, a authz.Actor, payeeID uuid.UUID, ifMatch string) (PayeeView, error)
+	// AdminQueryPayees is adminQueryPayees (parties.payee.list on the admin
+	// surface; BE-129): every org's payees, newest first, with their org.
+	AdminQueryPayees(ctx context.Context, a authz.Actor, q PayeeQuery) (PayeePage, error)
 
 	// AdminListBankAccounts is adminListBankAccounts
-	// (parties.bank_account.list): the four-eyes queue, full IBANs, audited.
+	// (parties.bank_account.list): the four-eyes queue, the IBAN masked.
 	AdminListBankAccounts(ctx context.Context, a authz.Actor, q BankAccountQuery) (BankAccountPage, error)
 	// AdminSubmitBankAccount is adminSubmitBankAccount
 	// (parties.bank_account.submit, R): pending_approval, the submitter is
@@ -192,6 +195,10 @@ type PayeeService interface {
 	// adminDownloadBankAccountEvidence (parties.bank_account.list): the
 	// evidence the eyes check, a 5-minute URL, audited.
 	AdminDownloadBankAccountEvidence(ctx context.Context, a authz.Actor, id uuid.UUID) (DocumentLink, error)
+	// AdminRevealBankAccountIBAN is adminRevealBankAccountIban
+	// (parties.iban.reveal; BE-129): the account's full IBAN, audited with
+	// the access reason.
+	AdminRevealBankAccountIBAN(ctx context.Context, a authz.Actor, id uuid.UUID, reason string) (string, error)
 }
 
 // Payees is the payee contract of other modules (01 §4.12: catalog,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -19,6 +20,7 @@ import (
 	"koro/internal/parties"
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/problem/problemtest"
@@ -44,7 +46,7 @@ func (e *env) payee(t *testing.T, vkn string) parties.PayeeView {
 	if err != nil {
 		t.Fatalf("AdminCreatePayee: %v", err)
 	}
-	if v, err = e.svc.AdminVerifyPayee(ctxOf(t, pad), pad, v.Payee.ID); err != nil {
+	if v, err = e.svc.AdminVerifyPayee(ctxOf(t, pad), pad, v.Payee.ID, v.ETag); err != nil {
 		t.Fatalf("AdminVerifyPayee: %v", err)
 	}
 	return v
@@ -162,8 +164,8 @@ func TestBankAccount_OrgSubmit_VerifyApprove_DistinctPeople(t *testing.T) {
 	py := e.payee(t, vknC)
 	b := e.orgSubmit(t, py.Payee.ID, "tr33 0006 1005 1978 6457 8413 26")
 	if b.Account.Status != parties.AccountPendingVerification || b.Account.IBAN != ibanA || b.Account.SubmittedByAdmin ||
-		b.Account.OrgID != org("club_a") || b.Account.BankCode != "00061" || b.FullIBAN {
-		t.Fatalf("submitted = %+v (full %v)", b.Account, b.FullIBAN)
+		b.Account.OrgID != org("club_a") || b.Account.BankCode != "00061" {
+		t.Fatalf("submitted = %+v", b.Account)
 	}
 	if _, err := e.payees().ApprovedAccount(t.Context(), py.Payee.ID); !errors.Is(err, parties.ErrNoApprovedAccount) {
 		t.Fatalf("ApprovedAccount before the eyes: %v, want parties.no_approved_account", err)
@@ -262,7 +264,7 @@ func TestBankAccount_AdminSubmit_SameAdminApprove_403(t *testing.T) {
 	py := e.payee(t, vknC)
 	fin := actor(t, "finance_admin")
 	b, err := e.svc.AdminSubmitBankAccount(ctxOf(t, fin), fin, py.Payee.ID, e.accountInput(t, ibanA, "finance_admin"), proof())
-	if err != nil || b.Account.Status != parties.AccountPendingApproval || !b.Account.SubmittedByAdmin || !b.FullIBAN {
+	if err != nil || b.Account.Status != parties.AccountPendingApproval || !b.Account.SubmittedByAdmin {
 		t.Fatalf("admin submit = %+v, %v", b.Account, err)
 	}
 	_, err = e.verifyAccount(t, "platform_admin", b.Account.ID) // no first eye for an admin submission
@@ -434,36 +436,32 @@ func TestBankAccount_InvalidIBAN_422(t *testing.T) {
 	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "parties.iban_invalid")
 }
 
-// TestBankAccount_MaskedForOrgRoles: club admins and university reps see
-// the IBAN masked (list, payee view, submission answer), the HTTP body
-// carries no full IBAN; finance and platform admins see it in full.
-func TestBankAccount_MaskedForOrgRoles(t *testing.T) {
+// TestBankAccount_MaskedForEveryone (BE-129): every list, payee view and
+// submission answer shows the IBAN masked, to club admins and to finance
+// and platform admins alike; the HTTP body carries no full IBAN.
+func TestBankAccount_MaskedForEveryone(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	py := e.payee(t, vknC)
 	e.approved(t, py.Payee.ID, ibanA)
 	app := newHTTP(t, e, nil)
 	base := "/api/v1/orgs/" + org("club_a").String() + "/payees"
-	for _, path := range []string{base, base + "/" + py.Payee.ID.String(), base + "/" + py.Payee.ID.String() + "/bank-accounts"} {
-		rec, _ := call(t, app, "club_admin", http.MethodGet, path, nil, nil)
-		wantStatus(t, rec, http.StatusOK)
-		body := rec.Body.String()
-		if strings.Contains(body, ibanA) || strings.Contains(body, `"iban"`) || !strings.Contains(body, "TR33 **** **** **** **** 8413 26") {
-			t.Fatalf("club_admin %s:\n%s", path, body)
+	for _, persona := range []string{"club_admin", "finance_admin", "platform_admin"} {
+		for _, path := range []string{base, base + "/" + py.Payee.ID.String(), base + "/" + py.Payee.ID.String() + "/bank-accounts"} {
+			rec, _ := call(t, app, persona, http.MethodGet, path, nil, nil)
+			wantStatus(t, rec, http.StatusOK)
+			body := rec.Body.String()
+			if strings.Contains(body, ibanA) || strings.Contains(body, `"iban"`) || !strings.Contains(body, "TR33 **** **** **** **** 8413 26") {
+				t.Fatalf("%s %s:\n%s", persona, path, body)
+			}
 		}
 	}
-	rec, out := call(t, app, "finance_admin", http.MethodGet, base+"/"+py.Payee.ID.String()+"/bank-accounts", nil, nil)
+	rec, _ := call(t, app, "finance_admin", http.MethodGet, "/api/v1/admin/bank-accounts?status=approved", nil, nil)
 	wantStatus(t, rec, http.StatusOK)
-	items, _ := out["items"].([]any)
-	if len(items) != 1 || items[0].(map[string]any)["iban"] != ibanA || rec.Header().Get("Cache-Control") != "no-store" {
-		t.Fatalf("finance_admin list:\n%s", rec.Body.String())
+	if strings.Contains(rec.Body.String(), ibanA) || strings.Contains(rec.Body.String(), `"iban"`) || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("admin queue:\n%s", rec.Body.String())
 	}
-	// The payee view masks for everyone (a full read is the audited list only).
-	rec, _ = call(t, app, "finance_admin", http.MethodGet, base+"/"+py.Payee.ID.String(), nil, nil)
-	if strings.Contains(rec.Body.String(), ibanA) {
-		t.Fatalf("payee view carries the full IBAN:\n%s", rec.Body.String())
-	}
-	// The submission answer of an org role is masked too.
+	// The submission answer is masked too.
 	in := e.accountInput(t, ibanB, "club_admin")
 	rec, _ = call(t, app, "club_admin", http.MethodPost, base+"/"+py.Payee.ID.String()+"/bank-accounts", map[string]any{
 		"iban": in.IBAN, "holder_name": in.HolderName, "evidence_file_id": in.EvidenceFileID.String(),
@@ -475,44 +473,61 @@ func TestBankAccount_MaskedForOrgRoles(t *testing.T) {
 	}
 }
 
-// TestBankAccount_FullIBANReadAudited (03 §6.5): every response that shows
-// finance or platform admins a full IBAN is audited (the payee's list, the
-// queue, the evidence); an org role's masked read is not.
-func TestBankAccount_FullIBANReadAudited(t *testing.T) {
+// TestBankAccount_RevealIBANAudited (BE-129, 03 §6.5): a masked read is
+// not audited; the evidence download is; the full IBAN comes only from
+// adminRevealBankAccountIban — finance and platform admins, the access
+// reason required (422 without it, nothing recorded), every call recorded
+// like a break-glass read with the reason and the masked number, never the
+// number itself.
+func TestBankAccount_RevealIBANAudited(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	py := e.payee(t, vknC)
 	b := e.approved(t, py.Payee.ID, ibanA)
-	pending := e.orgSubmit(t, py.Payee.ID, ibanB)
 	cla, fin, pad := actor(t, "club_admin"), actor(t, "finance_admin"), actor(t, "platform_admin")
-	if _, err := e.svc.ListPayeeBankAccounts(ctxOf(t, cla), cla, org("club_a"), py.Payee.ID); err != nil {
+	for _, a := range []authz.Actor{cla, fin} {
+		if _, err := e.svc.ListPayeeBankAccounts(ctxOf(t, a), a, org("club_a"), py.Payee.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := e.svc.AdminListBankAccounts(ctxOf(t, pad), pad, parties.BankAccountQuery{}); err != nil {
 		t.Fatal(err)
 	}
 	if n := len(e.audit.Of(authz.PartiesBankAccountList)); n != 0 {
 		t.Fatalf("a masked read was audited (%d)", n)
 	}
-	vs, err := e.svc.ListPayeeBankAccounts(ctxOf(t, fin), fin, org("club_a"), py.Payee.ID)
-	if err != nil || len(vs) != 2 || !vs[0].FullIBAN {
-		t.Fatalf("finance list = %+v, %v", vs, err)
-	}
-	reads := e.audit.Of(authz.PartiesBankAccountList)
-	if len(reads) != 1 || reads[0].ActorUserID == nil || *reads[0].ActorUserID != fin.UserID || reads[0].Metadata["full_iban"] != true ||
-		*reads[0].OrgID != org("club_a") || !slices.Contains(reads[0].Metadata["bank_account_ids"].([]string), b.Account.ID.String()) {
-		t.Fatalf("full read audit = %+v", reads)
-	}
-	page, err := e.svc.AdminListBankAccounts(ctxOf(t, pad), pad, parties.BankAccountQuery{})
-	if err != nil || len(page.Items) != 1 || page.Items[0].Account.ID != pending.Account.ID {
-		t.Fatalf("queue = %+v, %v", page, err)
-	}
 	if _, err := e.svc.AdminDownloadBankAccountEvidence(ctxOf(t, pad), pad, b.Account.ID); err != nil {
 		t.Fatal(err)
 	}
-	reads = e.audit.Of(authz.PartiesBankAccountList)
-	if len(reads) != 3 || reads[1].Metadata["operation"] != "admin_queue" || reads[2].Metadata["operation"] != "evidence_download" {
-		t.Fatalf("audited reads = %+v", reads)
+	if reads := e.audit.Of(authz.PartiesBankAccountList); len(reads) != 1 || reads[0].Metadata["operation"] != "evidence_download" {
+		t.Fatalf("evidence download audit = %+v", reads)
+	}
+
+	_, err := e.svc.AdminRevealBankAccountIBAN(ctxOf(t, cla), cla, b.Account.ID, "Kulüp hesabı kontrolü için")
+	problemtest.WantErr(t, err, authz.ErrForbidden)
+	for _, short := range []string{"", "kısa", strings.Repeat("ç", 501)} {
+		_, err = e.svc.AdminRevealBankAccountIBAN(ctxOf(t, fin), fin, b.Account.ID, short)
+		problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
+	}
+	_, err = e.svc.AdminRevealBankAccountIBAN(ctxOf(t, fin), fin, uuid.NewV7(), "Dekont karşılaştırması BE-129")
+	problemtest.WantErr(t, err, parties.ErrNotFound)
+	if n := len(e.audit.Of(authz.PartiesIbanReveal)); n != 0 {
+		t.Fatalf("a refused reveal was audited (%d)", n)
+	}
+	reason := "Hakediş EFT'si için banka dekontuyla karşılaştırma"
+	got, err := e.svc.AdminRevealBankAccountIBAN(ctxOf(t, fin), fin, b.Account.ID, "  "+reason+" ")
+	if err != nil || got != ibanA {
+		t.Fatalf("reveal = %q, %v", got, err)
+	}
+	rs := e.audit.Of(authz.PartiesIbanReveal)
+	if len(rs) != 1 || rs[0].ActorUserID == nil || *rs[0].ActorUserID != fin.UserID || rs[0].Reason != reason ||
+		rs[0].ResourceID == nil || *rs[0].ResourceID != b.Account.ID || rs[0].ResourceType != authz.TypeBankAccount ||
+		*rs[0].OrgID != org("club_a") || rs[0].Metadata[audit.MetaBreakGlass] != true || rs[0].Metadata["field"] != "iban" ||
+		rs[0].Metadata["iban_masked"] != "TR33 **** **** **** **** 8413 26" {
+		t.Fatalf("reveal audit = %+v", rs)
 	}
 	for _, ev := range e.audit.All() {
-		if strings.Contains(dump(ev), ibanA) || strings.Contains(dump(ev), ibanB) {
+		if strings.Contains(dump(ev), ibanA) {
 			t.Fatalf("an audit record holds a full IBAN: %+v", ev)
 		}
 	}
@@ -710,9 +725,10 @@ func TestBankAccount_SubmissionRules(t *testing.T) {
 	problemtest.WantErr(t, err, parties.ErrNaturalPersonPayee)
 }
 
-// TestBankAccount_HTTPAdminQueue pins the admin DTO: the full IBAN, the
-// eyes, the party title and the advisory holder match; the queue is
-// oldest first with a cursor.
+// TestBankAccount_HTTPAdminQueue pins the admin DTO: the masked IBAN
+// (BE-129), the eyes, the party title and the advisory holder match; the
+// queue is oldest first with a cursor; the reveal answers the full IBAN
+// with the access reason only, never cached.
 func TestBankAccount_HTTPAdminQueue(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -725,7 +741,8 @@ func TestBankAccount_HTTPAdminQueue(t *testing.T) {
 	wantStatus(t, rec, http.StatusOK)
 	items := out["items"].([]any)
 	item := items[0].(map[string]any)
-	if len(items) != 1 || item["bank_account_id"] != a.Account.ID.String() || item["iban"] != ibanA ||
+	if len(items) != 1 || item["bank_account_id"] != a.Account.ID.String() || item["iban"] != nil ||
+		item["iban_masked"] != "TR33 **** **** **** **** 8413 26" ||
 		item["submitted_by"] != authztest.ID("club_admin").String() || item["party_title"] != "Örnek Eğitim Vakfı" ||
 		item["holder_matches_title"] != true || out["next_cursor"] == "" {
 		t.Fatalf("queue page 1:\n%s", rec.Body.String())
@@ -736,6 +753,20 @@ func TestBankAccount_HTTPAdminQueue(t *testing.T) {
 		t.Fatalf("queue page 2:\n%s", rec.Body.String())
 	}
 	rec, _ = call(t, app, "club_admin", http.MethodGet, "/api/v1/admin/bank-accounts", nil, nil)
+	wantStatus(t, rec, http.StatusForbidden)
+	reveal := "/api/v1/admin/bank-accounts/" + a.Account.ID.String() + "/iban"
+	rec, _ = call(t, app, "finance_admin", http.MethodGet, reveal, nil, nil)
+	wantStatus(t, rec, http.StatusUnprocessableEntity)
+	rec, out = call(t, app, "finance_admin", http.MethodGet, reveal, nil,
+		map[string]string{httpx.HeaderAccessReason: "UTF-8''" + url.PathEscape("İlk göz: dekont karşılaştırması")})
+	wantStatus(t, rec, http.StatusOK)
+	if out["iban"] != ibanA || out["iban_masked"] != "TR33 **** **** **** **** 8413 26" || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("reveal:\n%s", rec.Body.String())
+	}
+	if rs := e.audit.Of(authz.PartiesIbanReveal); len(rs) != 1 || rs[0].Reason != "İlk göz: dekont karşılaştırması" {
+		t.Fatalf("reveal audit = %+v", rs)
+	}
+	rec, _ = call(t, app, "club_admin", http.MethodGet, reveal, nil, map[string]string{httpx.HeaderAccessReason: "Kulüp hesabı kontrolü"})
 	wantStatus(t, rec, http.StatusForbidden)
 	// The verify body's checklist and the approval's proof travel as JSON.
 	rec, _ = call(t, app, "platform_admin", http.MethodPost, "/api/v1/admin/bank-accounts/"+a.Account.ID.String()+"/verify",

@@ -105,7 +105,7 @@ type Service interface {
 	// ListDestructionLogs is adminListDestructionLogs (kvkk.destruction_log.list).
 	ListDestructionLogs(ctx context.Context, a authz.Actor, f DestructionFilter, after *After, limit int) (DestructionPage, error)
 	// ListBreaches is adminListBreaches (kvkk.breach.list).
-	ListBreaches(ctx context.Context, a authz.Actor, status *BreachStatus) ([]Breach, error)
+	ListBreaches(ctx context.Context, a authz.Actor, status *BreachStatus, after *After, limit int) (BreachPage, error)
 	// CreateBreach is adminCreateBreach (kvkk.breach.manage).
 	CreateBreach(ctx context.Context, a authz.Actor, in BreachInput) (Breach, error)
 	// UpdateBreach is adminUpdateBreach (kvkk.breach.manage; If-Match).

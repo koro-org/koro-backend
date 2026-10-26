@@ -68,6 +68,14 @@ func Register(api huma.API, svc Admin) {
 		RateLimit: op.RateReauth, Idempotency: op.IdempotencyOptional}, h.reversePoint)
 
 	op.Register(api, "talent", huma.Operation{
+		OperationID: "getTalentStatus", Method: http.MethodGet, Path: "/admin/talent/status",
+		Summary: "Get whether the talent auditor API is open",
+		Description: "BE-129: talent_auditor only (MFA; every other signed-in user, platform_admin included, gets 403), " +
+			"answered whether talent.auditor_api_enabled is true or false, so a client tells a closed API from a refused " +
+			"call without probing another operation. No access reason, no audit record: it reads no talent data.",
+	}, op.Meta{Action: string(authz.TalentConfigRead), Surface: op.SurfaceAdmin}, h.status)
+
+	op.Register(api, "talent", huma.Operation{
 		OperationID: "getTalentConfig", Method: http.MethodGet, Path: "/admin/talent/config",
 		Summary:     "Get the talent configuration",
 		Description: "The config version in force (null before the first one) and the signal catalogue. " + closedNote,
@@ -142,9 +150,39 @@ func (h handler) distribution(ctx context.Context, in *distributionInput) (*dist
 	return &distributionOutput{Body: distributionDTO(d)}, nil
 }
 
+// TalentStatusDTO is the body of getTalentStatus.
+type TalentStatusDTO struct {
+	AuditorAPIEnabled bool `json:"auditor_api_enabled" doc:"false: every other talent operation answers 404"`
+}
+
+type statusOutput struct{ Body TalentStatusDTO }
+
+func (h handler) status(ctx context.Context, _ *struct{}) (*statusOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	on, err := h.svc.Status(ctx, a)
+	if err != nil {
+		return nil, err
+	}
+	return &statusOutput{Body: TalentStatusDTO{AuditorAPIEnabled: on}}, nil
+}
+
+// noteText is an auditor's text: the neutralisation note, the reversal
+// reason, the config version notes (≤ maxNote characters; BE-117: the
+// contract bound is the service's constant). Whether it is required is the
+// service's (422 after the flag and authz).
+type noteText string
+
+// TransformSchema implements huma.SchemaTransformer.
+func (noteText) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
+	return op.LengthBounds(s, 0, maxNote)
+}
+
 // NeutralizationBody is the body of the neutralisation operations.
 type NeutralizationBody struct {
-	Note   string             `json:"note,omitempty" doc:"Create: required (1–500 characters), stored with the neutralisation. Lift: optional, audited"`
+	Note   noteText           `json:"note,omitempty" doc:"Create: required (1–500 characters), stored with the neutralisation. Lift: optional, audited"`
 	Reauth *consent.ReauthDTO `json:"reauth,omitempty" doc:"Re-authentication proof (03 §6.2)"`
 }
 
@@ -162,7 +200,7 @@ func (h handler) createNeutralization(ctx context.Context, in *createNeutralizat
 		return nil, err
 	}
 	n, err := h.svc.CreateNeutralization(ctx, a, httpx.ParseID(in.UserID),
-		NeutralizationInput{Reason: in.AccessReason.AccessReason.String(), Note: in.Body.Note}, proofOf(in.Body.Reauth))
+		NeutralizationInput{Reason: in.AccessReason.AccessReason.String(), Note: string(in.Body.Note)}, proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +219,7 @@ func (h handler) liftNeutralization(ctx context.Context, in *liftNeutralizationI
 		return nil, err
 	}
 	n, err := h.svc.LiftNeutralization(ctx, a, httpx.ParseID(in.NeutralizationID),
-		NeutralizationInput{Reason: in.AccessReason.AccessReason.String(), Note: in.Body.Note}, proofOf(in.Body.Reauth))
+		NeutralizationInput{Reason: in.AccessReason.AccessReason.String(), Note: string(in.Body.Note)}, proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +230,7 @@ type reversalInput struct {
 	PointEventID string `path:"point_event_id"`
 	AccessReason
 	Body struct {
-		Reason string             `json:"reason,omitempty" doc:"Required: why the row is wrong (1–500 characters; audited)"`
+		Reason noteText           `json:"reason,omitempty" doc:"Required: why the row is wrong (1–500 characters; audited)"`
 		Reauth *consent.ReauthDTO `json:"reauth,omitempty" doc:"Re-authentication proof (03 §6.2)"`
 	}
 }
@@ -205,7 +243,7 @@ func (h handler) reversePoint(ctx context.Context, in *reversalInput) (*pointOut
 		return nil, err
 	}
 	p, err := h.svc.ReversePoint(ctx, a, httpx.ParseID(in.PointEventID),
-		ReversalInput{Reason: in.AccessReason.AccessReason.String(), Why: in.Body.Reason}, proofOf(in.Body.Reauth))
+		ReversalInput{Reason: in.AccessReason.AccessReason.String(), Why: string(in.Body.Reason)}, proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +273,7 @@ type createConfigVersionInput struct {
 	Body struct {
 		Params     TalentParamsInputDTO      `json:"params,omitzero" doc:"Required: the score parameters (02 §15.1)"`
 		SignalDefs []TalentSignalDefInputDTO `json:"signal_defs,omitempty" doc:"Signal definitions to replace (others stay)"`
-		Notes      string                    `json:"notes,omitempty" doc:"Why the version changes (≤ 500 characters)"`
+		Notes      noteText                  `json:"notes,omitempty" doc:"Why the version changes (≤ 500 characters)"`
 		Reauth     *consent.ReauthDTO        `json:"reauth,omitempty" doc:"Re-authentication proof (03 §6.2)"`
 	}
 }
@@ -247,7 +285,7 @@ func (h handler) createConfigVersion(ctx context.Context, in *createConfigVersio
 	}
 	b := in.Body
 	v, err := h.svc.CreateConfigVersion(ctx, a, ConfigInput{Reason: in.AccessReason.AccessReason.String(), Params: paramsOf(b.Params),
-		Signals: signalUpdatesOf(b.SignalDefs), Notes: b.Notes}, proofOf(b.Reauth))
+		Signals: signalUpdatesOf(b.SignalDefs), Notes: string(b.Notes)}, proofOf(b.Reauth))
 	if err != nil {
 		return nil, err
 	}

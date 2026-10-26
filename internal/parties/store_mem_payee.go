@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"slices"
+	"strings"
 	"time"
 	"unicode/utf8"
 	"uuid"
@@ -124,6 +125,30 @@ func (s *MemStore) OrgPayees(_ context.Context, orgID uuid.UUID) ([]Payee, error
 		}
 	}
 	slices.SortFunc(out, byID(payeeID))
+	return out, nil
+}
+
+// ListPayees implements Store.
+func (s *MemStore) ListPayees(_ context.Context, f PayeeFilter, after *uuid.UUID, limit int) ([]Payee, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []Payee
+	for _, p := range s.payees {
+		lp := s.parties[p.LegalPartyID]
+		switch {
+		case f.OrgID != nil && p.OrgID != *f.OrgID:
+		case f.Status != "" && p.Status != f.Status:
+		case after != nil && p.ID.String() >= after.String():
+		case f.Q != "" && isVKNQuery(f.Q) && (lp.TaxNo == nil || *lp.TaxNo != f.Q):
+		case f.Q != "" && !isVKNQuery(f.Q) && !strings.Contains(memNorm(lp.Title), memNorm(f.Q)):
+		default:
+			out = append(out, p)
+		}
+	}
+	slices.SortFunc(out, func(a, b Payee) int { return cmp.Compare(b.ID.String(), a.ID.String()) }) // newest first
+	if len(out) > limit {
+		out = out[:limit]
+	}
 	return out, nil
 }
 

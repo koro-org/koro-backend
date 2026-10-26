@@ -84,14 +84,19 @@ func TestPayee_AdminLifecycle(t *testing.T) {
 		t.Fatal("a draft payee is nobody's default")
 	}
 	// The party is pending verification: the payee cannot be activated.
-	_, err = e.svc.AdminVerifyPayee(ctxP, pad, v.Payee.ID)
+	_, err = e.svc.AdminVerifyPayee(ctxP, pad, v.Payee.ID, v.ETag)
 	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "parties.verification_incomplete")
 	e.verify(t, party.Party.ID)
-	if v, err = e.svc.AdminVerifyPayee(ctxP, pad, v.Payee.ID); err != nil || v.Payee.Status != parties.PayeeActive ||
+	// BE-129: If-Match as adminUpdatePayee's (428 missing, 412 stale).
+	_, err = e.svc.AdminVerifyPayee(ctxP, pad, v.Payee.ID, "")
+	problemtest.WantProblem(t, err, http.StatusPreconditionRequired, "precondition_required")
+	_, err = e.svc.AdminVerifyPayee(ctxP, pad, v.Payee.ID, `"stale"`)
+	problemtest.WantProblem(t, err, http.StatusPreconditionFailed, "precondition_failed")
+	if v, err = e.svc.AdminVerifyPayee(ctxP, pad, v.Payee.ID, v.ETag); err != nil || v.Payee.Status != parties.PayeeActive ||
 		*v.Payee.VerifiedBy != pad.UserID {
 		t.Fatalf("verify = %+v, %v", v.Payee, err)
 	}
-	_, err = e.svc.AdminVerifyPayee(ctxP, pad, v.Payee.ID)
+	_, err = e.svc.AdminVerifyPayee(ctxP, pad, v.Payee.ID, v.ETag) // the state comes before If-Match
 	problemtest.WantProblem(t, err, http.StatusConflict, "parties.invalid_state")
 	if def, ok, err := e.payees().DefaultFor(t.Context(), org("club_a")); err != nil || !ok || def.ID != v.Payee.ID {
 		t.Fatalf("DefaultFor = %+v %v %v", def, ok, err)
@@ -141,7 +146,7 @@ func TestPayee_AdminLifecycle(t *testing.T) {
 	active := parties.PayeeActive
 	_, err = e.svc.AdminUpdatePayee(ctxP, pad, first.ID, upd.ETag, parties.PayeePatch{Status: &active})
 	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
-	if upd, err = e.svc.AdminVerifyPayee(ctxP, pad, first.ID); err != nil || upd.Payee.Status != parties.PayeeActive {
+	if upd, err = e.svc.AdminVerifyPayee(ctxP, pad, first.ID, upd.ETag); err != nil || upd.Payee.Status != parties.PayeeActive {
 		t.Fatalf("reactivate = %+v, %v", upd.Payee, err)
 	}
 	// Close: the end of its validity; nothing changes it afterwards.
@@ -153,7 +158,7 @@ func TestPayee_AdminLifecycle(t *testing.T) {
 	}
 	_, err = e.svc.AdminUpdatePayee(ctxP, pad, first.ID, upd.ETag, parties.PayeePatch{IsDefault: new(false)})
 	problemtest.WantProblem(t, err, http.StatusConflict, "parties.invalid_state")
-	_, err = e.svc.AdminVerifyPayee(ctxP, pad, first.ID)
+	_, err = e.svc.AdminVerifyPayee(ctxP, pad, first.ID, "")
 	problemtest.WantProblem(t, err, http.StatusConflict, "parties.invalid_state")
 	// A closed payee frees its (org, party) pair for a new one.
 	if _, err := e.svc.AdminCreatePayee(ctxF, fin, in); err != nil {
@@ -229,6 +234,61 @@ func TestPayee_OrgSurface(t *testing.T) {
 		out["legal_party"].(map[string]any)["title"] != "Örnek Eğitim Vakfı" {
 		t.Fatalf("getOrgPayee:\n%s", rec.Body.String())
 	}
+}
+
+// TestAdminQueryPayees_EveryOrg (BE-129): finance and platform admins
+// find any club's payee by org, status, title or VKN — the criteria in a
+// POST body —, each with its org's name and kind and the IBAN masked; an
+// org role gets 403 before anything is read; the cursor pages the list.
+func TestAdminQueryPayees_EveryOrg(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	first := e.payee(t, vknC)
+	e.approved(t, first.Payee.ID, ibanA)
+	second := e.payee(t, vknD)
+	fin := actor(t, "finance_admin")
+	p, err := e.svc.AdminQueryPayees(ctxOf(t, fin), fin, parties.PayeeQuery{})
+	if err != nil || len(p.Items) != 2 || p.Items[0].Payee.ID != second.Payee.ID || p.Items[1].Org.Name != "club_a" ||
+		p.Items[1].Approved == nil || p.Next != nil {
+		t.Fatalf("every payee = %+v, %v", p, err)
+	}
+	p, err = e.svc.AdminQueryPayees(ctxOf(t, fin), fin, parties.PayeeQuery{Q: vknC})
+	if err != nil || len(p.Items) != 1 || p.Items[0].Payee.ID != first.Payee.ID {
+		t.Fatalf("by VKN = %+v, %v", p, err)
+	}
+	_, err = e.svc.AdminQueryPayees(ctxOf(t, fin), fin, parties.PayeeQuery{Q: "x"})
+	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
+	cla := actor(t, "club_admin")
+	_, err = e.svc.AdminQueryPayees(ctxOf(t, cla), cla, parties.PayeeQuery{})
+	problemtest.WantErr(t, err, authz.ErrForbidden)
+
+	app := newHTTP(t, e, nil)
+	rec, out := call(t, app, "platform_admin", http.MethodPost, "/api/v1/admin/payees/search",
+		map[string]any{"org_id": org("club_a").String(), "q": "örnek eğitim", "limit": 1}, nil)
+	wantStatus(t, rec, http.StatusOK)
+	items, _ := out["items"].([]any)
+	if len(items) != 1 || out["next_cursor"] == nil || strings.Contains(rec.Body.String(), ibanA) {
+		t.Fatalf("search page 1:\n%s", rec.Body.String())
+	}
+	item := items[0].(map[string]any)
+	if item["payee_id"] != second.Payee.ID.String() || item["org_name"] != "club_a" || item["org_kind"] != "club" {
+		t.Fatalf("search item:\n%s", rec.Body.String())
+	}
+	cursor := out["next_cursor"]
+	rec, out = call(t, app, "platform_admin", http.MethodPost, "/api/v1/admin/payees/search",
+		map[string]any{"org_id": org("club_a").String(), "q": "örnek eğitim", "limit": 1, "cursor": cursor}, nil)
+	wantStatus(t, rec, http.StatusOK)
+	if items, _ := out["items"].([]any); len(items) != 1 || items[0].(map[string]any)["payee_id"] != first.Payee.ID.String() ||
+		items[0].(map[string]any)["approved_account"].(map[string]any)["iban_masked"] != "TR33 **** **** **** **** 8413 26" ||
+		out["next_cursor"] != nil {
+		t.Fatalf("search page 2:\n%s", rec.Body.String())
+	}
+	// The cursor is bound to the criteria.
+	rec, _ = call(t, app, "platform_admin", http.MethodPost, "/api/v1/admin/payees/search",
+		map[string]any{"q": "başka vakıf", "cursor": cursor}, nil)
+	wantStatus(t, rec, http.StatusUnprocessableEntity)
+	rec, _ = call(t, app, "club_admin", http.MethodPost, "/api/v1/admin/payees/search", map[string]any{}, nil)
+	wantStatus(t, rec, http.StatusForbidden)
 }
 
 // TestOwnershipCorrection_H60: a party holds a VKN it does not own; a

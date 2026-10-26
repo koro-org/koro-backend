@@ -11,6 +11,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/consent"
 	"koro/internal/identity"
+	"koro/internal/parties"
 	"koro/internal/platform/db"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
@@ -67,9 +68,26 @@ func registerPayouts(api huma.API, h handler) {
 
 	op.Register(api, "ledger", huma.Operation{
 		OperationID: "adminGetPayout", Method: http.MethodGet, Path: "/admin/payouts/{payout_id}",
-		Summary:     "Get a payout",
-		Description: "The payout with the full IBAN snapshot, its eyes, its items and, once paid, the receipt URL.",
+		Summary: "Get a payout",
+		Description: "The payout with its eyes, its items and, once paid, the receipt URL. The IBAN snapshot is masked " +
+			"(BE-129): the finance admin who types the EFT reveals it with adminRevealPayoutIban.",
 	}, op.Meta{Action: string(authz.LedgerPayoutRead), Surface: op.SurfaceAdmin}, h.adminGet)
+
+	op.Register(api, "ledger", huma.Operation{
+		OperationID: "adminRevealPayoutIban", Method: http.MethodGet, Path: "/admin/payouts/{payout_id}/iban",
+		Summary: "Reveal the full IBAN of a payout",
+		Description: "The IBAN frozen on the payout at creation (iban_masked's full form), for the EFT at the bank. " +
+			parties.RevealNote,
+	}, op.Meta{Action: string(authz.LedgerIbanReveal), Surface: op.SurfaceAdmin, RateLimit: op.RateBreakGlass}, h.adminRevealIBAN)
+
+	op.Register(api, "ledger", huma.Operation{
+		OperationID: "adminListPayeeReceivables", Method: http.MethodGet, Path: "/admin/payees/{payee_id}/receivables",
+		Summary: "List the open receivable lines of a payee",
+		Description: "BE-129, 06 H-59: the paid-out order lines whose refund claimed the seller share back and that the " +
+			"payee still owes (amount: the open part, kuruş), in line order. A receivable collection " +
+			"(adminCreateReceivableCollection) claims one of them by its line_id; a requested collection does not " +
+			"close it until approved. getPayeeBalance's receivable_amount is their sum. An unknown payee is 404.",
+	}, op.Meta{Action: string(authz.LedgerBalanceRead), Surface: op.SurfaceAdmin}, h.adminReceivables)
 
 	op.Register(api, "ledger", huma.Operation{
 		OperationID: "adminCreatePayout", Method: http.MethodPost, Path: "/admin/payouts", DefaultStatus: http.StatusCreated,
@@ -154,10 +172,10 @@ type PayoutDTO struct {
 	ReceiptURLExpiresAt *time.Time      `json:"receipt_url_expires_at,omitempty" deprecated:"true"`
 }
 
-// PayoutAdminDTO is a payout as finance sees it (04 §C.5).
+// PayoutAdminDTO is a payout as finance sees it (04 §C.5). The IBAN
+// snapshot is masked like everywhere (BE-129: adminRevealPayoutIban).
 type PayoutAdminDTO struct {
 	PayoutDTO
-	IBANSnapshot  string `json:"iban_snapshot" doc:"The full IBAN frozen at creation"`
 	BankAccountID string `json:"bank_account_id" format:"uuid"`
 	CreatedBy     string `json:"created_by" format:"uuid"`
 	ApprovedBy    string `json:"approved_by,omitempty" format:"uuid"`
@@ -187,7 +205,7 @@ func payoutDTO(v PayoutView) PayoutDTO {
 func payoutAdminDTO(v PayoutView) PayoutAdminDTO {
 	p := v.Payout
 	return PayoutAdminDTO{
-		PayoutDTO: payoutDTO(v), IBANSnapshot: p.IBANSnapshot, BankAccountID: p.BankAccountID.String(),
+		PayoutDTO: payoutDTO(v), BankAccountID: p.BankAccountID.String(),
 		CreatedBy: p.CreatedBy.String(), ApprovedBy: httpx.IDStr(p.ApprovedBy), PaidBy: httpx.IDStr(p.PaidBy),
 		ReceiptFileID: httpx.IDStr(p.ReceiptFileID),
 	}
@@ -380,6 +398,66 @@ func (h handler) adminGet(ctx context.Context, in *adminGetInput) (*payoutAdminO
 		return nil, err
 	}
 	return adminOut(v), nil
+}
+
+type adminRevealInput struct {
+	PayoutPath
+	httpx.AccessReasonHeader
+}
+
+func (h handler) adminRevealIBAN(ctx context.Context, in *adminRevealInput) (*parties.RevealOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	n, err := h.svc.AdminRevealPayoutIBAN(ctx, a, httpx.ParseID(in.PayoutID), in.AccessReason.String())
+	if err != nil {
+		return nil, err
+	}
+	return parties.RevealOut(n), nil
+}
+
+// ---- adminListPayeeReceivables
+
+// ReceivableLineDTO is one open receivable line of a payee.
+type ReceivableLineDTO struct {
+	LineID   string `json:"line_id" format:"uuid" doc:"The order_line_id of adminCreateReceivableCollection"`
+	OrderID  string `json:"order_id" format:"uuid"`
+	OrderNo  string `json:"order_no" doc:"The order's bank transfer reference code"`
+	PayoutID string `json:"payout_id" format:"uuid" doc:"The payout that paid the line out"`
+	Amount   int64  `json:"amount" doc:"Kuruş the payee still owes for the line"`
+	Currency string `json:"currency" enum:"TRY"`
+}
+
+// ReceivableLineList is the body of adminListPayeeReceivables.
+type ReceivableLineList struct {
+	Items       []ReceivableLineDTO `json:"items"`
+	TotalAmount int64               `json:"total_amount" doc:"Kuruş: getPayeeBalance's receivable_amount"`
+	Currency    string              `json:"currency" enum:"TRY"`
+}
+
+type receivablesInput struct {
+	PayeeID string `path:"payee_id" format:"uuid"`
+}
+
+type receivablesOutput struct{ Body ReceivableLineList }
+
+func (h handler) adminReceivables(ctx context.Context, in *receivablesInput) (*receivablesOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ls, err := h.svc.AdminListPayeeReceivables(ctx, a, httpx.ParseID(in.PayeeID))
+	if err != nil {
+		return nil, err
+	}
+	out := &receivablesOutput{Body: ReceivableLineList{Items: make([]ReceivableLineDTO, len(ls)), Currency: Currency}}
+	for i, l := range ls {
+		out.Body.Items[i] = ReceivableLineDTO{LineID: l.OrderLineID.String(), OrderID: l.OrderID.String(), OrderNo: l.OrderNo,
+			PayoutID: l.PayoutID.String(), Amount: l.Amount, Currency: Currency}
+		out.Body.TotalAmount += l.Amount
+	}
+	return out, nil
 }
 
 // ---- adminListPayables

@@ -189,6 +189,29 @@ func (s *memStore) LockCurrent(_ context.Context, key NoticeKey) (Notice, bool, 
 	return Notice{}, false, nil
 }
 
+func (s *memStore) ListNotices(_ context.Context, f NoticeListFilter, after *uuid.UUID, limit int) ([]Notice, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []Notice
+	for _, n := range s.notices {
+		switch {
+		case f.Kind != nil && n.Kind != *f.Kind,
+			f.Purpose != nil && (n.PurposeCode == nil || *n.PurposeCode != *f.Purpose),
+			f.Audience != nil && n.Audience != *f.Audience,
+			f.Locale != nil && n.Locale != *f.Locale,
+			f.Status != nil && n.Status() != *f.Status,
+			after != nil && n.ID.String() >= after.String():
+			continue
+		}
+		out = append(out, n.clone())
+	}
+	slices.SortFunc(out, func(a, b Notice) int { return cmp.Compare(b.ID.String(), a.ID.String()) }) // newest first
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
 func (s *memStore) CurrentNotices(_ context.Context, q CurrentQuery) ([]Notice, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

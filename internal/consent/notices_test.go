@@ -1,6 +1,9 @@
 package consent_test
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -8,7 +11,10 @@ import (
 
 	"koro/internal/audit"
 	"koro/internal/authz"
+	"koro/internal/authz/authztest"
 	"koro/internal/consent"
+	"koro/internal/platform/httpx"
+	"koro/internal/platform/obs"
 	"koro/internal/platform/problem/problemtest"
 )
 
@@ -302,5 +308,76 @@ func TestUpdatePurpose(t *testing.T) {
 	evs := e.audit.of(string(authz.ConsentPurposeManage))
 	if len(evs) != 1 || evs[0].Metadata["active"] != false || evs[0].Metadata["description_changed"] != true {
 		t.Fatalf("audit = %+v", evs)
+	}
+}
+
+// TestAdminListNotices_DraftsAndHistory (BE-129): the DPO lists every
+// version — the draft that only its ID used to open, the current and the
+// retired ones — newest first, filtered and paged, without the texts;
+// anyone else gets 403 before anything is read.
+func TestAdminListNotices_DraftsAndHistory(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := t.Context()
+	dpo := actor(t, "dpo")
+	v1 := e.publish(t, privacyDraft(consent.AudienceStudent, consent.LocaleTR, "2026.10.01"))
+	v2 := e.publish(t, privacyDraft(consent.AudienceStudent, consent.LocaleTR, "2026.10.02")) // retires v1
+	draft, err := e.svc.CreateNotice(ctx, dpo, privacyDraft(consent.AudienceStudent, consent.LocaleTR, "2026.10.03"), proof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := e.svc.AdminListNotices(ctx, dpo, consent.NoticeListQuery{})
+	if err != nil || len(p.Items) != 3 || p.Items[0].ID != draft.ID || p.Items[1].ID != v2.ID || p.Items[2].ID != v1.ID || p.Next != nil {
+		t.Fatalf("every version = %+v, %v", p, err)
+	}
+	st := consent.StatusRetired
+	if p, err = e.svc.AdminListNotices(ctx, dpo, consent.NoticeListQuery{Filter: consent.NoticeListFilter{Status: &st}}); err != nil ||
+		len(p.Items) != 1 || p.Items[0].ID != v1.ID {
+		t.Fatalf("retired = %+v, %v", p, err)
+	}
+	if p, err = e.svc.AdminListNotices(ctx, dpo, consent.NoticeListQuery{Limit: 2}); err != nil || len(p.Items) != 2 ||
+		p.Next == nil || *p.Next != v2.ID {
+		t.Fatalf("page 1 = %+v, %v", p, err)
+	}
+	for _, name := range []string{"platform_admin", "support", "student"} {
+		_, err := e.svc.AdminListNotices(ctx, actor(t, name), consent.NoticeListQuery{})
+		problemtest.WantErr(t, err, authz.ErrForbidden)
+	}
+
+	app, err := httpx.New(httpx.Deps{Log: obs.Discard(), Actors: authztest.NewResolver(authztest.Personas()...)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	consent.Register(app.V1, e.svc)
+	list := func(persona, query string) (int, map[string]any, string) {
+		t.Helper()
+		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/admin/notices"+query, nil)
+		pp, _ := authztest.Get(persona)
+		req.Header.Set("Authorization", "Bearer "+pp.Token)
+		rec := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rec, req)
+		var out map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec.Code, out, rec.Body.String()
+	}
+	code, out, body := list("dpo", "?status=draft&kind=privacy_notice&audience=student&locale=tr-TR")
+	items, _ := out["items"].([]any)
+	if code != http.StatusOK || len(items) != 1 || strings.Contains(body, "body_md") {
+		t.Fatalf("drafts = %d %s", code, body)
+	}
+	if it := items[0].(map[string]any); it["notice_version_id"] != draft.ID.String() || it["status"] != "draft" ||
+		it["version"] != "2026.10.03" || it["created_at"] == nil || it["body_sha256"] == "" {
+		t.Fatalf("draft item = %v", it)
+	}
+	code, out, body = list("dpo", "?limit=2")
+	if items, _ := out["items"].([]any); code != http.StatusOK || len(items) != 2 || out["next_cursor"] == nil {
+		t.Fatalf("page 1 = %d %s", code, body)
+	}
+	code, out, body = list("dpo", "?limit=2&cursor="+out["next_cursor"].(string))
+	if items, _ := out["items"].([]any); code != http.StatusOK || len(items) != 1 || items[0].(map[string]any)["notice_version_id"] != v1.ID.String() {
+		t.Fatalf("page 2 = %d %s", code, body)
+	}
+	if code, _, _ := list("platform_admin", ""); code != http.StatusForbidden {
+		t.Fatalf("platform_admin = %d", code)
 	}
 }

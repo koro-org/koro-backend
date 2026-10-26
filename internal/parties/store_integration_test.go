@@ -264,7 +264,7 @@ func TestBankAccount_Gorm_ApproveRollsBackTogether(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.AdminVerifyPayee(ctxOf(t, pad), pad, py.Payee.ID); err != nil {
+	if _, err := svc.AdminVerifyPayee(ctxOf(t, pad), pad, py.Payee.ID, py.ETag); err != nil {
 		t.Fatal(err)
 	}
 	evidence := func(by authz.Actor) uuid.UUID {

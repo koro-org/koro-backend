@@ -12,6 +12,7 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/page"
 	"koro/internal/platform/problem"
 	"koro/internal/platform/textx"
 )
@@ -213,6 +214,42 @@ func (s *service) withCollectable(ctx context.Context, ns []Notice) ([]CurrentNo
 			st := def.ScopeType
 			out[i].ScopeType = &st
 		}
+	}
+	return out, nil
+}
+
+// NoticeListQuery is one page of adminListNotices.
+type NoticeListQuery struct {
+	Filter NoticeListFilter
+	Limit  int
+	After  *uuid.UUID
+}
+
+// NoticePage is a page of notices, newest first; Next is the keyset
+// position of the next page (nil: the last page).
+type NoticePage struct {
+	Items []Notice
+	Next  *uuid.UUID
+}
+
+// AdminListNotices implements Service (adminListNotices; BE-129): authz
+// (consent.notice.manage: the DPO; 403 before reading) → every version —
+// drafts, the current ones, the retired — newest first, without their
+// texts (getNoticeVersion reads one).
+func (s *service) AdminListNotices(ctx context.Context, a authz.Actor, q NoticeListQuery) (NoticePage, error) {
+	if err := authz.Can(ctx, a, authz.ConsentNoticeManage, authz.Resource{Type: authz.TypeNoticeVersion}); err != nil {
+		return NoticePage{}, err
+	}
+	limit := page.ClampLimit(q.Limit)
+	rows, err := s.d.Store.ListNotices(ctx, q.Filter, q.After, limit+1)
+	if err != nil {
+		return NoticePage{}, err
+	}
+	rows, more := page.Cut(rows, limit)
+	out := NoticePage{Items: rows}
+	if more {
+		next := rows[len(rows)-1].ID
+		out.Next = &next
 	}
 	return out, nil
 }

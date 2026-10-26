@@ -163,10 +163,10 @@ func recordsContract(t *testing.T, newWorld func(t *testing.T) recordsWorld) {
 		}
 		closed := kvkk.BreachClosed
 		open := kvkk.BreachOpen
-		if cs, _ := w.s.Breaches(ctx, &closed); len(cs) != 1 || cs[0].ClosedAt == nil || len(cs[0].DataCategories) != 2 {
+		if cs, _ := w.s.Breaches(ctx, &closed, nil, 0); len(cs) != 1 || cs[0].ClosedAt == nil || len(cs[0].DataCategories) != 2 {
 			t.Fatalf("closed breaches = %+v", cs)
 		}
-		if os, _ := w.s.Breaches(ctx, &open); len(os) != 0 {
+		if os, _ := w.s.Breaches(ctx, &open, nil, 0); len(os) != 0 {
 			t.Fatalf("open breaches = %+v", os)
 		}
 		if _, err := w.s.Breach(ctx, uuid.NewV7()); !errors.Is(err, problem.ErrNotFound) {
@@ -193,6 +193,48 @@ func recordsContract(t *testing.T, newWorld func(t *testing.T) recordsWorld) {
 		}
 		if _, err := w.s.Breach(ctx, second.ID); err != nil {
 			t.Fatalf("the open breach was purged: %v", err)
+		}
+	})
+
+	// BE-129: adminListBreaches pages on (detected_at DESC, id DESC); two
+	// breaches detected at the same instant are ordered by id.
+	t.Run("breach_pages", func(t *testing.T) {
+		t.Parallel()
+		w := newWorld(t)
+		ctx := t.Context()
+		owner := w.user(t)
+		at := []time.Time{base.Add(2 * time.Hour), base.Add(time.Hour), base.Add(time.Hour), base}
+		want := make([]uuid.UUID, len(at))
+		for i, d := range at {
+			b := kvkk.Breach{ID: uuid.NewV7(), Title: "Sayfa", DetectedAt: d, AuthorityDeadlineAt: d.Add(kvkk.AuthorityPeriod),
+				DataCategories: []string{"contact"}, Description: "Açıklama", Status: kvkk.BreachOpen, OwnerUserID: owner}
+			if err := w.s.InsertBreach(ctx, b); err != nil {
+				t.Fatal(err)
+			}
+			want[i] = b.ID
+		}
+		want[1], want[2] = want[2], want[1] // same instant: the later ID first
+		var got []uuid.UUID
+		var after *kvkk.After
+		for range 5 {
+			p, err := w.s.Breaches(ctx, nil, after, 2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, b := range p {
+				got = append(got, b.ID)
+			}
+			if len(p) < 2 {
+				break
+			}
+			last := p[len(p)-1]
+			after = &kvkk.After{At: last.DetectedAt, ID: last.ID}
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("pages = %v, want %v", got, want)
+		}
+		if all, _ := w.s.Breaches(ctx, nil, nil, 0); len(all) != len(at) {
+			t.Fatalf("every breach = %d, want %d", len(all), len(at))
 		}
 	})
 

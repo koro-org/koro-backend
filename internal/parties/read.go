@@ -106,15 +106,9 @@ func (s *service) AdminListParties(ctx context.Context, a authz.Actor, q AdminQu
 	if q.Status != "" && !q.Status.Valid() {
 		return PartyPage{}, problem.Field("query.status", "is not a legal party status")
 	}
-	if q.Q != "" {
-		n, err := textx.NormalizeText(q.Q)
-		if err != nil {
-			return PartyPage{}, problem.Field("body.q", "contains control or bidi characters")
-		}
-		if c := utf8.RuneCountInString(n); c < 2 || c > 100 {
-			return PartyPage{}, problem.Field("body.q", "must be 2-100 characters")
-		}
-		f.Q = n
+	var err error
+	if f.Q, err = searchText(q.Q); err != nil {
+		return PartyPage{}, err
 	}
 	limit := page.ClampLimit(q.Limit)
 	rows, err := s.d.Store.ListParties(ctx, f, q.After, limit+1)
@@ -173,6 +167,22 @@ func (s *service) reload(ctx context.Context, id uuid.UUID, full bool) (PartyVie
 		return PartyView{}, err
 	}
 	return s.view(ctx, p, full)
+}
+
+// searchText normalises the q of a legal party search (body.q: 2–100
+// characters, no control or bidi character; "" stays empty).
+func searchText(q string) (string, error) {
+	if q == "" {
+		return "", nil
+	}
+	n, err := textx.NormalizeText(q)
+	if err != nil {
+		return "", problem.Field("body.q", "contains control or bidi characters")
+	}
+	if c := utf8.RuneCountInString(n); c < 2 || c > 100 {
+		return "", problem.Field("body.q", "must be 2-100 characters")
+	}
+	return n, nil
 }
 
 // isVKNQuery reports a 10-digit query (matched against the VKN exactly).

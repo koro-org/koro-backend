@@ -43,8 +43,10 @@ func registerRecords(api huma.API, h handler) {
 
 	op.Register(api, "kvkk", huma.Operation{
 		OperationID: "adminListBreaches", Method: http.MethodGet, Path: "/admin/breaches",
-		Summary:     "List the personal data breaches",
-		Description: "With the 72-hour deadline of the Board notification and the 24-hour notice to the data controller.",
+		Summary: "List the personal data breaches",
+		Description: "With the 72-hour deadline of the Board notification and the 24-hour notice to the data controller, " +
+			"and the whole hours left to each while it is open (as of the read). The most recently detected first, a page " +
+			"at a time (BE-129: limit, cursor).",
 	}, op.Meta{Action: string(authz.KvkkBreachList), Surface: op.SurfaceAdmin}, h.listBreaches)
 
 	op.Register(api, "kvkk", huma.Operation{
@@ -140,6 +142,7 @@ type BreachDTO struct {
 	AuthorityDeadlineAt  time.Time  `json:"authority_deadline_at" doc:"detected_at + 72 hours (Board notification)"`
 	ControllerDeadlineAt time.Time  `json:"controller_deadline_at" doc:"detected_at + 24 hours (notice to the data controller)"`
 	AuthorityHoursLeft   *int       `json:"authority_hours_left,omitempty" doc:"Whole hours to the Board deadline while it is open (negative: overdue)"`
+	ControllerHoursLeft  *int       `json:"controller_hours_left,omitempty" doc:"Whole hours to the data controller notice while it is due (negative: overdue; BE-129)"`
 	ControllerNotifiedAt *time.Time `json:"controller_notified_at,omitempty"`
 	AuthorityNotifiedAt  *time.Time `json:"authority_notified_at,omitempty"`
 	DataCategories       []string   `json:"data_categories"`
@@ -162,11 +165,21 @@ func toBreachDTO(b Breach, now time.Time) BreachDTO {
 	if d.DataCategories == nil {
 		d.DataCategories = []string{}
 	}
-	if b.AuthorityNotifiedAt == nil && b.Status != BreachClosed {
-		h := int(b.AuthorityDeadlineAt.Sub(now).Truncate(time.Hour) / time.Hour)
-		d.AuthorityHoursLeft = &h
+	if b.Status != BreachClosed {
+		d.AuthorityHoursLeft = hoursLeft(b.AuthorityNotifiedAt, b.AuthorityDeadlineAt, now)
+		d.ControllerHoursLeft = hoursLeft(b.ControllerNotifiedAt, b.ControllerDeadlineAt(), now)
 	}
 	return d
+}
+
+// hoursLeft is the whole hours from now to the deadline of a notification
+// not made yet (negative: overdue), nil once it is made.
+func hoursLeft(notifiedAt *time.Time, deadline, now time.Time) *int {
+	if notifiedAt != nil {
+		return nil
+	}
+	h := int(deadline.Sub(now).Truncate(time.Hour) / time.Hour)
+	return &h
 }
 
 // SubprocessorDTO is a sub-processor (02 §16.5).
@@ -334,15 +347,19 @@ func (h handler) listLogs(ctx context.Context, in *listLogsInput) (*logListOutpu
 // ---- breaches
 
 type listBreachesInput struct {
+	page.Params
 	Status string `query:"status" enum:"open,contained,notified,closed"`
 }
 
 type breachListOutput struct {
 	CacheControl string `header:"Cache-Control"`
 	Body         struct {
-		Items []BreachDTO `json:"items"`
+		Items      []BreachDTO `json:"items"`
+		NextCursor string      `json:"next_cursor,omitempty"`
 	}
 }
+
+const sortBreaches = "detected_at_desc"
 
 func (h handler) listBreaches(ctx context.Context, in *listBreachesInput) (*breachListOutput, error) {
 	a, err := authz.ActorFrom(ctx)
@@ -354,16 +371,22 @@ func (h handler) listBreaches(ctx context.Context, in *listBreachesInput) (*brea
 		s := BreachStatus(in.Status)
 		st = &s
 	}
-	bs, err := h.svc.ListBreaches(ctx, a, st)
+	fp := page.Fingerprint("adminListBreaches", in.Status)
+	after, err := afterOf(in.Cursor, sortBreaches, fp)
+	if err != nil {
+		return nil, err
+	}
+	p, err := h.svc.ListBreaches(ctx, a, st, after, in.Limit)
 	if err != nil {
 		return nil, err
 	}
 	now := h.clk.Now()
 	out := &breachListOutput{CacheControl: "no-store"}
-	out.Body.Items = make([]BreachDTO, len(bs))
-	for i, b := range bs {
+	out.Body.Items = make([]BreachDTO, len(p.Items))
+	for i, b := range p.Items {
 		out.Body.Items[i] = toBreachDTO(b, now)
 	}
+	out.Body.NextCursor = cursorOf(sortBreaches, fp, p.Next)
 	return out, nil
 }
 

@@ -62,6 +62,7 @@ func TestPaymentsPolicy_Matrix(t *testing.T) {
 		{authz.PaymentsRefundApprove, paymentsRefund(authztest.ID("finance_admin_2")), finOnly},
 		{authz.PaymentsRefundReject, adminSurface, finOnly},
 		{authz.PaymentsRefundComplete, adminSurface, finOnly},
+		{authz.PaymentsIbanReveal, adminSurface, staff}, // BE-129
 	}
 	for _, c := range cases {
 		for _, p := range authztest.Personas() {

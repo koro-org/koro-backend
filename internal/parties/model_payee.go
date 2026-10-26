@@ -177,15 +177,14 @@ type PayeeView struct {
 	ETag     string
 }
 
-// BankAccountView is a bank account as the HTTP operations return it.
-// FullIBAN is true for finance and platform admins only (the read is
-// audited); PartyTitle and HolderMatchesTitle are the first eye's check
-// (T-19): the legal party's invoice title and whether the holder name
-// equals it after Turkish-insensitive normalisation (advisory: the eye
-// decides).
+// BankAccountView is a bank account as the HTTP operations return it:
+// the IBAN masked for everyone (BE-129: the full number only through the
+// audited adminRevealBankAccountIban). PartyTitle and HolderMatchesTitle
+// are the first eye's check (T-19): the legal party's invoice title and
+// whether the holder name equals it after Turkish-insensitive
+// normalisation (advisory: the eye decides).
 type BankAccountView struct {
 	Account            BankAccount
-	FullIBAN           bool
 	PartyTitle         string
 	HolderMatchesTitle bool
 }

@@ -13,6 +13,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/identity"
 	"koro/internal/platform/db"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/problem"
 )
 
@@ -64,6 +65,11 @@ type Admin interface {
 	// force from now (the next nightly run scores with it; every ledger
 	// row written from now on is frozen with it).
 	CreateConfigVersion(ctx context.Context, a authz.Actor, in ConfigInput, proof identity.ReauthProof) (ConfigView, error)
+	// Status is getTalentStatus (talent.config.read; BE-129): whether the
+	// auditor API is open. The one exception to steps 1, 3 and 4 above: it
+	// answers with the flag off too, needs no access reason and writes no
+	// record (it reads no talent data).
+	Status(ctx context.Context, a authz.Actor) (bool, error)
 }
 
 // DistributionQuery is the input of getTalentDistribution: the access
@@ -131,12 +137,10 @@ const (
 	resourceConfig       = "talent_config_version"
 )
 
-// Limits of the auditor's texts (03 §5.12; 02 §15.8 note ≤ 500).
-const (
-	minAccessReason = 10
-	maxAccessReason = 500
-	maxNote         = 500
-)
+// maxNote bounds the auditor's texts (02 §15.8 note ≤ 500): the
+// neutralisation note, the reversal reason and the config version notes
+// (noteText in the contract). The access reason is httpx's (10–500).
+const maxNote = 500
 
 // adminSurface is the authz view of /admin/talent/** without a subject.
 var adminSurface = authz.Resource{Type: authz.TypeAdminSurface}
@@ -155,12 +159,7 @@ func (s *service) gate(ctx context.Context, a authz.Actor, act authz.Action, r a
 	if err := authz.Can(ctx, a, act, r); err != nil {
 		return "", err
 	}
-	reason = strings.TrimSpace(reason)
-	if n := utf8.RuneCountInString(reason); n < minAccessReason || n > maxAccessReason {
-		return "", problem.ErrValidation.WithFields(problem.FieldError{Location: "header.X-Koro-Access-Reason",
-			Message: fmt.Sprintf("the access reason (%d–%d characters) is required", minAccessReason, maxAccessReason)})
-	}
-	return reason, nil
+	return httpx.RequireAccessReason(reason)
 }
 
 // text trims v and checks its length (min 0: optional).
@@ -392,6 +391,15 @@ func (s *service) ReversePoint(ctx context.Context, a authz.Actor, pointID uuid.
 		return PointEvent{}, err
 	}
 	return out, nil
+}
+
+// Status implements Admin: authz (talent_auditor; 403 for everyone else,
+// before anything) → the flag. Side-effect free: no reason, no audit.
+func (s *service) Status(ctx context.Context, a authz.Actor) (bool, error) {
+	if err := authz.Can(ctx, a, authz.TalentConfigRead, adminSurface); err != nil {
+		return false, err
+	}
+	return s.d.AuditorAPIEnabled, nil
 }
 
 // Config implements Admin.

@@ -29,6 +29,9 @@ const (
 	PaymentsReceivableCreate         Action = "payments.receivable.create"
 	PaymentsReceivableApprove        Action = "payments.receivable.approve"
 	PaymentsReceivableReject         Action = "payments.receivable.reject"
+	// PaymentsIbanReveal is the audited read of one full IBAN of a
+	// collection account, an incoming transfer or a refund (BE-129).
+	PaymentsIbanReveal Action = "payments.iban.reveal"
 )
 
 // paymentsActions lists the HTTP actions of payments in 03 §5.16 order.
@@ -56,4 +59,5 @@ var paymentsActions = []Action{
 	PaymentsReceivableCreate,
 	PaymentsReceivableApprove,
 	PaymentsReceivableReject,
+	PaymentsIbanReveal,
 }

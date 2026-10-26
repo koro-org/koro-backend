@@ -16,6 +16,9 @@ const (
 	LedgerPayoutMarkPaid   Action = "ledger.payout.mark_paid"
 	LedgerPayoutMarkFailed Action = "ledger.payout.mark_failed"
 	LedgerPayoutCancel     Action = "ledger.payout.cancel"
+	// LedgerIbanReveal is adminRevealPayoutIban (BE-129): the audited read
+	// of a payout's full IBAN snapshot (the EFT is typed with it).
+	LedgerIbanReveal Action = "ledger.iban.reveal"
 )
 
 // ledgerActions lists the HTTP actions of ledger in 03 §5.17 order.
@@ -30,4 +33,5 @@ var ledgerActions = []Action{
 	LedgerPayoutMarkPaid,
 	LedgerPayoutMarkFailed,
 	LedgerPayoutCancel,
+	LedgerIbanReveal,
 }

@@ -118,6 +118,23 @@ type PayoutAmounts struct {
 	PaidOut int64 // Σ amount of paid payouts
 }
 
+// ReceivableLine is one paid-out order line a payee still owes Koro money
+// for (06 H-59: a refund after the payout claimed the seller share back):
+// Amount is the open payee_receivable balance of the line, in kuruş.
+type ReceivableLine struct {
+	OrderLineID uuid.UUID `gorm:"type:uuid;column:order_line_id"`
+	PayoutID    uuid.UUID `gorm:"type:uuid;column:payout_id"`
+	Amount      int64     `gorm:"column:amount"`
+}
+
+// ReceivableLineView is a ReceivableLine with its order's reference
+// (adminListPayeeReceivables).
+type ReceivableLineView struct {
+	ReceivableLine
+	OrderID uuid.UUID
+	OrderNo string
+}
+
 // PayoutItemView is one item of a payout as the operations return it.
 type PayoutItemView struct {
 	OrderLineID uuid.UUID

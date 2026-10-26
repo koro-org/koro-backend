@@ -35,6 +35,13 @@ package authz
 //	payments.refund.reject               admin surface: fin (the requester may withdraw it)
 //	payments.refund.complete             admin surface: fin (any finance admin, with the receipt)
 //
+// BE-129 (no full IBAN in a list or detail response):
+//
+//	payments.iban.reveal                 admin surface: pad, fin (one full IBAN of a collection
+//	                                     account, an incoming transfer or a refund; the access reason
+//	                                     and the audit record are the service's)
+//	payments.transfer.read               also the download of a transfer's bank receipt
+//
 // Visibility: the admin surface, a collection account, a transfer and a
 // refund are visible to every signed-in user with a platform role path
 // (03 §7.2-3: 403 for an actor without the role, never 404). MFA follows
@@ -63,7 +70,8 @@ func paymentsPolicy() Policy {
 			case TypeAdminSurface:
 				switch act {
 				case PaymentsCollectionAccountList, PaymentsCollectionAccountRetire, PaymentsTransferList, PaymentsTransferRead,
-					PaymentsPaymentList, PaymentsPaymentRead, PaymentsRefundList, PaymentsRefundCreate, PaymentsReceivableList:
+					PaymentsPaymentList, PaymentsPaymentRead, PaymentsRefundList, PaymentsRefundCreate, PaymentsReceivableList,
+					PaymentsIbanReveal:
 					return []Grant{pad, fin}
 				case PaymentsCollectionAccountCreate, PaymentsTransferCreate, PaymentsTransferMatch, PaymentsTransferIgnore,
 					PaymentsRefundReject, PaymentsRefundComplete, PaymentsReceivableCreate, PaymentsReceivableReject:

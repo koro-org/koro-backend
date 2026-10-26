@@ -44,9 +44,10 @@ const (
 //	parties.document.verify      admin surface: pad, fin; then on the document:
 //	                             pad, fin, never its uploader (four eyes, like 06 H-19)
 //	parties.payee.list / read    org surface (payee): cla S, uni S; pad, fin
+//	                             (payee.list on the admin surface: pad, fin; adminQueryPayees, BE-129)
 //	parties.payee.manage/verify  admin surface: pad, fin
-//	parties.bank_account.list    org surface (payee): cla S, uni S (masked IBAN); pad, fin
-//	                             (admin surface: pad, fin; full IBAN, audited)
+//	parties.bank_account.list    org surface (payee): cla S, uni S; pad, fin
+//	                             (admin surface: pad, fin); the IBAN masked for everyone (BE-129)
 //	parties.bank_account.submit  org surface (payee): cla S·R, uni S·R; pad, fin
 //	                             (admin surface: pad·R, fin·R); R is the service's (03 §6.2)
 //	parties.bank_account.verify  on the account: pad·4, fin·4 (never the submitter: the core
@@ -58,6 +59,8 @@ const (
 //	                             the admin surface (the same pad, fin cells).
 //	parties.bank_account.reject  admin surface: pad, fin
 //	parties.bank_account.revoke  admin surface: pad·R, fin·R
+//	parties.iban.reveal          admin surface: pad, fin (BE-129: one full IBAN of a bank account;
+//	                             the access reason and the audit record are the service's)
 //
 // Resources: legal_party (03 §3.5: OrgID = the org of the path; Attrs kind
 // and scope), legal_party_document (Attrs uploaded_by), legal_party_ownership,
@@ -109,8 +112,8 @@ func partiesPolicy() Policy {
 				switch act {
 				case PartiesLegalPartyRead, PartiesLegalPartyCreate, PartiesLegalPartyUpdate, PartiesLegalPartyVerify,
 					PartiesDocumentUpload, PartiesDocumentRead, PartiesDocumentVerify,
-					PartiesPayeeManage, PartiesPayeeVerify, PartiesBankAccountList, PartiesBankAccountSubmit,
-					PartiesBankAccountReject, PartiesBankAccountRevoke:
+					PartiesPayeeList, PartiesPayeeManage, PartiesPayeeVerify, PartiesBankAccountList, PartiesBankAccountSubmit,
+					PartiesBankAccountReject, PartiesBankAccountRevoke, PartiesIbanReveal:
 					return staff
 				}
 				return nil

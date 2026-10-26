@@ -6,6 +6,7 @@ package authz
 //
 //	ledger.journal.list        admin surface: pad, fin
 //	ledger.balance.read        org surface (payee): cla S, uni S; pad, fin
+//	                           (admin surface: pad, fin; a payee's open receivable lines, BE-129)
 //	ledger.payable.list        admin surface: fin
 //	ledger.payout.list / read  org surface (payout): cla S, uni S; pad, fin
 //	                           (admin surface: pad, fin)
@@ -18,6 +19,8 @@ package authz
 //	ledger.payout.mark_paid    admin surface: fin (any finance admin; the receipt and the bank
 //	ledger.payout.mark_failed  reference are the service's)
 //	ledger.payout.cancel       admin surface: fin
+//	ledger.iban.reveal         admin surface: pad, fin (BE-129: a payout's full IBAN snapshot;
+//	                           the access reason and the audit record are the service's)
 //
 // Resources: admin_surface (the /admin operations: 403 without a platform
 // role before anything is read; 03 §3.2, §7.2-3), payee (OrgID = the org
@@ -35,8 +38,8 @@ func ledgerPolicy() Policy {
 			switch r.Type {
 			case TypeAdminSurface:
 				switch act {
-				case LedgerJournalList, LedgerPayableList, LedgerPayoutList, LedgerPayoutRead, LedgerPayoutCreate,
-					LedgerPayoutMarkPaid, LedgerPayoutMarkFailed, LedgerPayoutCancel:
+				case LedgerBalanceRead, LedgerJournalList, LedgerPayableList, LedgerPayoutList, LedgerPayoutRead, LedgerPayoutCreate,
+					LedgerPayoutMarkPaid, LedgerPayoutMarkFailed, LedgerPayoutCancel, LedgerIbanReveal:
 					return AdminSurfaceVisible(a)
 				}
 			case TypePayee:
@@ -57,7 +60,7 @@ func ledgerPolicy() Policy {
 			switch r.Type {
 			case TypeAdminSurface:
 				switch act {
-				case LedgerJournalList, LedgerPayoutList, LedgerPayoutRead:
+				case LedgerBalanceRead, LedgerJournalList, LedgerPayoutList, LedgerPayoutRead, LedgerIbanReveal:
 					return staff
 				case LedgerPayableList, LedgerPayoutCreate, LedgerPayoutMarkPaid, LedgerPayoutMarkFailed, LedgerPayoutCancel:
 					return fin

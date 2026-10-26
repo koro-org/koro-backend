@@ -2,6 +2,7 @@ package payments
 
 import (
 	"context"
+	"time"
 	"uuid"
 
 	"koro/internal/audit"
@@ -108,6 +109,9 @@ type Parties interface {
 type Files interface {
 	// Get returns the file's metadata or files.ErrNotFound.
 	Get(ctx context.Context, fileID uuid.UUID) (files.FileMeta, error)
+	// PresignGet returns a short-lived download URL of a clean file
+	// (files.ErrNotClean otherwise): a transfer's receipt (BE-129).
+	PresignGet(ctx context.Context, fileID uuid.UUID, ttl time.Duration) (files.Download, error)
 	// Attach binds the file to its transfer or payment row in the caller's
 	// transaction.
 	//

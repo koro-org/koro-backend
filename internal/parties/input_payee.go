@@ -56,6 +56,31 @@ type VerifyInput struct {
 	Note               string
 }
 
+// PayeeQuery narrows adminQueryPayees (BE-129). Zero fields do not filter.
+type PayeeQuery struct {
+	OrgID  *uuid.UUID
+	Status PayeeStatus
+	// Q is part of the legal party's title, or its VKN (10 digits): it may
+	// name a sole proprietor, so it travels in the body.
+	Q     string
+	Limit int
+	After *uuid.UUID
+}
+
+// PayeePage is a page of adminQueryPayees; Next is the keyset position of
+// the next page (nil: last page).
+type PayeePage struct {
+	Items []AdminPayeeView
+	Next  *uuid.UUID
+}
+
+// AdminPayeeView is a payee of the staff search with the org it is paid
+// for (finance finds the club or university by the payee).
+type AdminPayeeView struct {
+	PayeeView
+	Org orgs.OrgSummary
+}
+
 // BankAccountQuery narrows adminListBankAccounts. No status: both pending
 // statuses (the four-eyes queue).
 type BankAccountQuery struct {

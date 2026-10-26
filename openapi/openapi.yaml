@@ -767,6 +767,93 @@ components:
       required:
         - items
       type: object
+    AdminPayeeDTO:
+      additionalProperties: false
+      properties:
+        approved_account:
+          $ref: "#/components/schemas/AccountSummaryDTO"
+        created_at:
+          format: date-time
+          type: string
+        invoicing_capability:
+          enum:
+            - can_issue
+            - cannot_issue
+            - unknown
+          type: string
+        is_default:
+          type: boolean
+        legal_party:
+          $ref: "#/components/schemas/PartySummaryDTO"
+        org_id:
+          description: The club or university paid on behalf of
+          format: uuid
+          type: string
+        org_kind:
+          enum:
+            - club
+            - university
+          type: string
+        org_name:
+          description: The club or university the payee is paid for
+          type: string
+        payee_id:
+          format: uuid
+          type: string
+        payout_method:
+          enum:
+            - bank_eft
+            - iyzico
+            - none
+          type: string
+        status:
+          enum:
+            - draft
+            - pending_verification
+            - active
+            - suspended
+            - closed
+          type: string
+        university_protocol_ref:
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+        valid_from:
+          format: date-time
+          type: string
+        valid_to:
+          format: date-time
+          type: string
+        verified_at:
+          format: date-time
+          type: string
+      required:
+        - org_name
+        - org_kind
+        - payee_id
+        - org_id
+        - legal_party
+        - status
+        - is_default
+        - payout_method
+        - invoicing_capability
+        - valid_from
+        - created_at
+        - updated_at
+      type: object
+    AdminPayeeList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/AdminPayeeDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
     AdminPutDomainInputBody:
       additionalProperties: false
       properties:
@@ -866,6 +953,37 @@ components:
             - verified
             - rejected
             - inactive
+          type: string
+      type: object
+    AdminQueryPayeesInputBody:
+      additionalProperties: false
+      properties:
+        cursor:
+          description: Opaque cursor from next_cursor
+          maxLength: 512
+          type: string
+        limit:
+          default: 25
+          description: Page size
+          format: int64
+          maximum: 100
+          minimum: 1
+          type: integer
+        org_id:
+          description: Only the payees of this club or university
+          format: uuid
+          type: string
+        q:
+          description: Part of the legal party's title (2-100 characters), or a 10-digit tax number
+          maxLength: 100
+          type: string
+        status:
+          enum:
+            - draft
+            - pending_verification
+            - active
+            - suspended
+            - closed
           type: string
       type: object
     AdminQuerySuppressionsInputBody:
@@ -2018,9 +2136,6 @@ components:
           type: boolean
         holder_name:
           type: string
-        iban:
-          description: Finance and platform admins only (the read is audited)
-          type: string
         iban_masked:
           description: TR12 **** **** **** **** 1234 56
           type: string
@@ -2110,9 +2225,6 @@ components:
           type: string
         holder_name:
           type: string
-        iban:
-          description: Finance and platform admins only (the read is audited)
-          type: string
         iban_masked:
           description: TR12 **** **** **** **** 1234 56
           type: string
@@ -2183,6 +2295,10 @@ components:
           description: detected_at + 24 hours (notice to the data controller)
           format: date-time
           type: string
+        controller_hours_left:
+          description: "Whole hours to the data controller notice while it is due (negative: overdue; BE-129)"
+          format: int64
+          type: integer
         controller_notified_at:
           format: date-time
           type: string
@@ -2237,6 +2353,8 @@ components:
           items:
             $ref: "#/components/schemas/BreachDTO"
           type: array
+        next_cursor:
+          type: string
       required:
         - items
       type: object
@@ -3069,7 +3187,8 @@ components:
           type: string
         holder_name:
           type: string
-        iban:
+        iban_masked:
+          description: TR12 **** **** **** **** 1234 56 (adminRevealCollectionAccountIban)
           type: string
         is_default:
           description: The account of every new payment instruction
@@ -3093,7 +3212,7 @@ components:
         - account_id
         - label
         - legal_party_id
-        - iban
+        - iban_masked
         - holder_name
         - bank_name
         - status
@@ -3406,7 +3525,8 @@ components:
             - rejected
             - cancelled
           type: string
-        target_iban:
+        target_iban_masked:
+          description: Where the EFT goes, masked
           type: string
         unallocated_amount:
           description: Kuruş back from buyer_advances (overpayment, unpaid order)
@@ -4073,6 +4193,7 @@ components:
       properties:
         notes:
           description: Why the version changes (≤ 500 characters)
+          maxLength: 500
           type: string
         params:
           $ref: "#/components/schemas/TalentParamsInputDTO"
@@ -6533,6 +6654,19 @@ components:
         - role
         - reason
       type: object
+    IBANRevealDTO:
+      additionalProperties: false
+      properties:
+        iban:
+          description: The full IBAN, without spaces (TR + 24 digits)
+          type: string
+        iban_masked:
+          description: TR12 **** **** **** **** 1234 56
+          type: string
+      required:
+        - iban
+        - iban_masked
+      type: object
     IgnoreInputBody:
       additionalProperties: false
       properties:
@@ -6653,7 +6787,8 @@ components:
           type: string
         return:
           $ref: "#/components/schemas/TransferReturnDTO"
-        sender_iban:
+        sender_iban_masked:
+          description: Masked (adminRevealIncomingTransferIban field sender)
           type: string
         sender_name:
           type: string
@@ -6736,7 +6871,8 @@ components:
           type: string
         return:
           $ref: "#/components/schemas/TransferReturnDTO"
-        sender_iban:
+        sender_iban_masked:
+          description: Masked (adminRevealIncomingTransferIban field sender)
           type: string
         sender_name:
           type: string
@@ -8376,6 +8512,7 @@ components:
       properties:
         note:
           description: "Create: required (1–500 characters), stored with the neutralisation. Lift: optional, audited"
+          maxLength: 500
           type: string
         reauth:
           $ref: "#/components/schemas/ReauthDTO"
@@ -8461,6 +8598,81 @@ components:
           items:
             $ref: "#/components/schemas/NoticeDTO"
           type: array
+      required:
+        - items
+      type: object
+    NoticeSummaryDTO:
+      additionalProperties: false
+      properties:
+        audience:
+          enum:
+            - all
+            - student
+            - company
+            - club
+            - university
+          type: string
+        body_sha256:
+          description: Lower-case hex SHA-256 of body_md
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        kind:
+          enum:
+            - privacy_notice
+            - consent_text
+            - terms_of_use
+            - cookie_notice
+          type: string
+        locale:
+          enum:
+            - tr-TR
+            - en-US
+          type: string
+        notice_version_id:
+          format: uuid
+          type: string
+        published_at:
+          format: date-time
+          type: string
+        purpose_code:
+          description: Consent purpose of a consent_text
+          type: string
+        retired_at:
+          format: date-time
+          type: string
+        status:
+          enum:
+            - draft
+            - published
+            - retired
+          type: string
+        title:
+          type: string
+        version:
+          description: YYYY.MM.DD or YYYY.MM.DD-N
+          type: string
+      required:
+        - notice_version_id
+        - kind
+        - audience
+        - locale
+        - version
+        - title
+        - body_sha256
+        - status
+        - created_at
+      type: object
+    NoticeSummaryList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/NoticeSummaryDTO"
+          type: array
+        next_cursor:
+          type: string
       required:
         - items
       type: object
@@ -10089,9 +10301,6 @@ components:
         iban_masked:
           description: The IBAN the payout goes to, masked
           type: string
-        iban_snapshot:
-          description: The full IBAN frozen at creation
-          type: string
         items:
           description: The order lines paid (getOrgPayout; none once failed or cancelled)
           items:
@@ -10132,7 +10341,6 @@ components:
             - cancelled
           type: string
       required:
-        - iban_snapshot
         - bank_account_id
         - created_by
         - payout_id
@@ -11061,6 +11269,19 @@ components:
           $ref: "#/components/schemas/ReauthDTO"
           description: "Re-authentication proof (03 §6.2): totp_code on an MFA account"
       type: object
+    ReceiptLinkDTO:
+      additionalProperties: false
+      properties:
+        expires_at:
+          format: date-time
+          type: string
+        url:
+          description: Valid for at most 5 minutes
+          type: string
+      required:
+        - url
+        - expires_at
+      type: object
     ReceivableCollectionDTO:
       additionalProperties: false
       properties:
@@ -11142,6 +11363,59 @@ components:
         - status
         - requested_by
         - created_at
+      type: object
+    ReceivableLineDTO:
+      additionalProperties: false
+      properties:
+        amount:
+          description: Kuruş the payee still owes for the line
+          format: int64
+          type: integer
+        currency:
+          enum:
+            - TRY
+          type: string
+        line_id:
+          description: The order_line_id of adminCreateReceivableCollection
+          format: uuid
+          type: string
+        order_id:
+          format: uuid
+          type: string
+        order_no:
+          description: The order's bank transfer reference code
+          type: string
+        payout_id:
+          description: The payout that paid the line out
+          format: uuid
+          type: string
+      required:
+        - line_id
+        - order_id
+        - order_no
+        - payout_id
+        - amount
+        - currency
+      type: object
+    ReceivableLineList:
+      additionalProperties: false
+      properties:
+        currency:
+          enum:
+            - TRY
+          type: string
+        items:
+          items:
+            $ref: "#/components/schemas/ReceivableLineDTO"
+          type: array
+        total_amount:
+          description: "Kuruş: getPayeeBalance's receivable_amount"
+          format: int64
+          type: integer
+      required:
+        - items
+        - total_amount
+        - currency
       type: object
     RecordMineInputBody:
       additionalProperties: false
@@ -11269,7 +11543,8 @@ components:
             - rejected
             - cancelled
           type: string
-        target_iban:
+        target_iban_masked:
+          description: Where the EFT goes, masked
           type: string
       required:
         - refund_id
@@ -11290,6 +11565,10 @@ components:
           description: Kuruş still to request
           format: int64
           type: integer
+        currency:
+          enum:
+            - TRY
+          type: string
         order_id:
           format: uuid
           type: string
@@ -11315,6 +11594,7 @@ components:
         - order_no
         - org_id
         - amount
+        - currency
         - since
         - payments
       type: object
@@ -12006,6 +12286,7 @@ components:
       properties:
         reason:
           description: "Required: why the row is wrong (1–500 characters; audited)"
+          maxLength: 500
           type: string
         reauth:
           $ref: "#/components/schemas/ReauthDTO"
@@ -13421,7 +13702,9 @@ components:
         - params
         - created_by
         - created_at
-      type: object
+      type:
+        - object
+        - "null"
     TalentContributionDTO:
       additionalProperties: false
       properties:
@@ -13801,6 +14084,15 @@ components:
         - type
         - id
       type: object
+    TalentStatusDTO:
+      additionalProperties: false
+      properties:
+        auditor_api_enabled:
+          description: "false: every other talent operation answers 404"
+          type: boolean
+      required:
+        - auditor_api_enabled
+      type: object
     TargetedAudienceBody:
       additionalProperties: false
       properties:
@@ -14056,7 +14348,8 @@ components:
         returned_at:
           format: date-time
           type: string
-        target_iban:
+        target_iban_masked:
+          description: Where the return EFT goes, masked (adminRevealIncomingTransferIban field return_target)
           type: string
       type: object
     UniversityCardDTO:
@@ -15062,7 +15355,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/admin/bank-accounts:
     get:
-      description: "Oldest first; without status the accounts waiting for an eye. Full IBANs: the read is audited. holder_matches_title compares the holder with the legal party's title (advisory; the first eye decides)."
+      description: "Oldest first; without status the accounts waiting for an eye. The IBAN is masked: an eye that needs the full number reveals it with adminRevealBankAccountIban (audited, BE-129). holder_matches_title compares the holder with the legal party's title (advisory; the first eye decides)."
       operationId: adminListBankAccounts
       parameters:
         - description: Page size
@@ -15217,6 +15510,51 @@ paths:
         - parties
       x-koro-action: parties.bank_account.list
       x-koro-rate-limit: read_default
+      x-koro-surface: admin
+  /api/v1/admin/bank-accounts/{bank_account_id}/iban:
+    get:
+      description: "For the eye that checks the number against the evidence (every list and detail shows it masked). X-Koro-Access-Reason (10–500 characters) is mandatory (422 without it) and every call is audited with it like a break-glass read (BE-129); the rate class is break_glass. The answer is never cached: keep the number in the component's memory only, for the time it is typed."
+      operationId: adminRevealBankAccountIban
+      parameters:
+        - description: Bank account ID (an unknown or malformed ID is 404)
+          in: path
+          name: bank_account_id
+          required: true
+          schema:
+            description: Bank account ID (an unknown or malformed ID is 404)
+            type: string
+        - description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
+          in: header
+          name: X-Koro-Access-Reason
+          schema:
+            description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
+            maxLength: 6007
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IBANRevealDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Reveal the full IBAN of a bank account
+      tags:
+        - parties
+      x-koro-action: parties.iban.reveal
+      x-koro-rate-limit: break_glass
       x-koro-surface: admin
   /api/v1/admin/bank-accounts/{bank_account_id}/reject:
     post:
@@ -15386,9 +15724,28 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/admin/breaches:
     get:
-      description: With the 72-hour deadline of the Board notification and the 24-hour notice to the data controller.
+      description: "With the 72-hour deadline of the Board notification and the 24-hour notice to the data controller, and the whole hours left to each while it is open (as of the read). The most recently detected first, a page at a time (BE-129: limit, cursor)."
       operationId: adminListBreaches
       parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
         - explode: false
           in: query
           name: status
@@ -15759,7 +16116,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/admin/collection-accounts:
     get:
-      description: Every account, newest first. The default active account is the IBAN of every payment instruction.
+      description: "Every account, newest first. The default active account is the IBAN of every payment instruction. The IBAN is masked (BE-129): the second eye who checks it against the bank reveals it with adminRevealCollectionAccountIban."
       operationId: adminListCollectionAccounts
       responses:
         "200":
@@ -15879,6 +16236,51 @@ paths:
       x-koro-reauth: true
       x-koro-surface: admin
       x-koro-terms-gate: enforced
+  /api/v1/admin/collection-accounts/{account_id}/iban:
+    get:
+      description: "Koro's own account (iban_masked's full form), for the check against the bank before an approval. X-Koro-Access-Reason (10–500 characters) is mandatory (422 without it) and every call is audited with it like a break-glass read (BE-129); the rate class is break_glass. The answer is never cached: keep the number in the component's memory only, for the time it is typed."
+      operationId: adminRevealCollectionAccountIban
+      parameters:
+        - description: Collection account ID (an unknown or malformed ID is 404)
+          in: path
+          name: account_id
+          required: true
+          schema:
+            description: Collection account ID (an unknown or malformed ID is 404)
+            type: string
+        - description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
+          in: header
+          name: X-Koro-Access-Reason
+          schema:
+            description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
+            maxLength: 6007
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IBANRevealDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Reveal the full IBAN of a collection account
+      tags:
+        - payments
+      x-koro-action: payments.iban.reveal
+      x-koro-rate-limit: break_glass
+      x-koro-surface: admin
   /api/v1/admin/collection-accounts/{account_id}/make-default:
     post:
       description: Requires re-authentication. Only an active account (409 payments.invalid_state). New payment instructions show its IBAN; the previous default stays active.
@@ -17438,6 +17840,62 @@ paths:
       x-koro-reauth: true
       x-koro-surface: admin
       x-koro-terms-gate: enforced
+  /api/v1/admin/incoming-transfers/{transfer_id}/iban:
+    get:
+      description: "field sender is sender_iban_masked's full form (the sender's account, maybe a natural person's), return_target the return's target (return.target_iban_masked), for the return EFT. An IBAN the transfer does not hold is 404. X-Koro-Access-Reason (10–500 characters) is mandatory (422 without it) and every call is audited with it like a break-glass read (BE-129); the rate class is break_glass. The answer is never cached: keep the number in the component's memory only, for the time it is typed."
+      operationId: adminRevealIncomingTransferIban
+      parameters:
+        - description: Incoming transfer ID (an unknown or malformed ID is 404)
+          in: path
+          name: transfer_id
+          required: true
+          schema:
+            description: Incoming transfer ID (an unknown or malformed ID is 404)
+            type: string
+        - description: sender or return_target
+          explode: false
+          in: query
+          name: field
+          required: true
+          schema:
+            description: sender or return_target
+            enum:
+              - sender
+              - return_target
+            type: string
+        - description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
+          in: header
+          name: X-Koro-Access-Reason
+          schema:
+            description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
+            maxLength: 6007
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IBANRevealDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Reveal a full IBAN of an incoming transfer
+      tags:
+        - payments
+      x-koro-action: payments.iban.reveal
+      x-koro-rate-limit: break_glass
+      x-koro-surface: admin
   /api/v1/admin/incoming-transfers/{transfer_id}/ignore:
     post:
       description: Only an unmatched transfer (409). The reason is audited.
@@ -17593,6 +18051,44 @@ paths:
       x-koro-rate-limit: write_default
       x-koro-surface: admin
       x-koro-terms-gate: enforced
+  /api/v1/admin/incoming-transfers/{transfer_id}/receipt:
+    get:
+      description: "BE-129: the receipt recorded with the transfer (receipt_file_id; a transfer_receipt upload), for the check of a receivable collection or a refund: a URL valid for 5 minutes, every download audited. A transfer without a receipt is 404; 409 files.not_clean until the virus scan clears the file."
+      operationId: adminDownloadIncomingTransferReceipt
+      parameters:
+        - description: Incoming transfer ID (an unknown or malformed ID is 404)
+          in: path
+          name: transfer_id
+          required: true
+          schema:
+            description: Incoming transfer ID (an unknown or malformed ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReceiptLinkDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a download URL of a transfer's bank receipt
+      tags:
+        - payments
+      x-koro-action: payments.transfer.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
   /api/v1/admin/incoming-transfers/{transfer_id}/request-return:
     post:
       description: "Requires re-authentication. Step 1 of 3 (06 H-56): an unmatched or ignored transfer waits for another finance admin's approval (return_requested). target_iban defaults to the sender's IBAN."
@@ -18533,6 +19029,97 @@ paths:
       x-koro-rate-limit: read_default
       x-koro-surface: admin
   /api/v1/admin/notices:
+    get:
+      description: "BE-129: drafts, the versions in force and the retired ones, newest first, without their texts (getNoticeVersion reads one, a draft too). status draft is the DPO's work in progress; published is in force; retired stays as the proof of what earlier consents agreed to."
+      operationId: adminListNotices
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+        - explode: false
+          in: query
+          name: kind
+          schema:
+            enum:
+              - privacy_notice
+              - consent_text
+              - terms_of_use
+              - cookie_notice
+            type: string
+        - description: Only the consent texts of this purpose
+          explode: false
+          in: query
+          name: purpose_code
+          schema:
+            description: Only the consent texts of this purpose
+            pattern: ^[a-z][a-z0-9_]{2,40}$
+            type: string
+        - explode: false
+          in: query
+          name: audience
+          schema:
+            enum:
+              - all
+              - student
+              - company
+              - club
+              - university
+            type: string
+        - explode: false
+          in: query
+          name: locale
+          schema:
+            enum:
+              - tr-TR
+              - en-US
+            type: string
+        - explode: false
+          in: query
+          name: status
+          schema:
+            enum:
+              - draft
+              - published
+              - retired
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NoticeSummaryList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List every notice version (drafts and history)
+      tags:
+        - consent
+      x-koro-action: consent.notice.manage
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
     post:
       description: A consent_text belongs to exactly one explicit-consent purpose; other kinds carry none.
       operationId: adminCreateNotice
@@ -19331,6 +19918,40 @@ paths:
       x-koro-rate-limit: write_default
       x-koro-surface: admin
       x-koro-terms-gate: enforced
+  /api/v1/admin/payees/search:
+    post:
+      description: "Read-only (BE-129): the criteria are in the body, since a legal party's title or tax number may name a sole proprietor (BE-128). Newest first; org_id narrows it to one club or university (find the org by name with searchOrgs), q matches part of the legal party's title or a 10-digit tax number exactly. Each payee comes with its org's name and kind; the IBAN is masked. next_cursor goes back in the body."
+      operationId: adminQueryPayees
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminQueryPayeesInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminPayeeList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Search the payees of every organization (finance and platform admins)
+      tags:
+        - parties
+      x-koro-action: parties.payee.list
+      x-koro-idempotency: optional
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
+      x-koro-terms-gate: exempt
   /api/v1/admin/payees/{payee_id}:
     patch:
       description: If-Match is required (428/412). status suspended stops payouts, closed ends the payee (kept for the financial records). Making an active payee the default moves the organization's default to it.
@@ -19438,9 +20059,42 @@ paths:
       x-koro-reauth: true
       x-koro-surface: admin
       x-koro-terms-gate: enforced
+  /api/v1/admin/payees/{payee_id}/receivables:
+    get:
+      description: "BE-129, 06 H-59: the paid-out order lines whose refund claimed the seller share back and that the payee still owes (amount: the open part, kuruş), in line order. A receivable collection (adminCreateReceivableCollection) claims one of them by its line_id; a requested collection does not close it until approved. getPayeeBalance's receivable_amount is their sum. An unknown payee is 404."
+      operationId: adminListPayeeReceivables
+      parameters:
+        - in: path
+          name: payee_id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReceivableLineList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the open receivable lines of a payee
+      tags:
+        - ledger
+      x-koro-action: ledger.balance.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
   /api/v1/admin/payees/{payee_id}/verify:
     post:
-      description: draft, pending_verification or suspended → active. The legal party must be verified (422 parties.verification_incomplete); an active or closed payee is 409 parties.invalid_state.
+      description: "draft, pending_verification or suspended → active. If-Match is required as for adminUpdatePayee (the payee's ETag: missing → 428, stale → 412, checked after the state; BE-129). The legal party must be verified (422 parties.verification_incomplete); an active or closed payee is 409 parties.invalid_state."
       operationId: adminVerifyPayee
       parameters:
         - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
@@ -19458,6 +20112,12 @@ paths:
           required: true
           schema:
             description: Payee ID (an unknown, malformed or other organization's ID is 404)
+            type: string
+        - description: "ETag of the payee (required: missing → 428, stale → 412)"
+          in: header
+          name: If-Match
+          schema:
+            description: "ETag of the payee (required: missing → 428, stale → 412)"
             type: string
       responses:
         "200":
@@ -19735,7 +20395,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/admin/payouts/{payout_id}:
     get:
-      description: The payout with the full IBAN snapshot, its eyes, its items and, once paid, the receipt URL.
+      description: "The payout with its eyes, its items and, once paid, the receipt URL. The IBAN snapshot is masked (BE-129): the finance admin who types the EFT reveals it with adminRevealPayoutIban."
       operationId: adminGetPayout
       parameters:
         - in: path
@@ -19867,6 +20527,50 @@ paths:
       x-koro-rate-limit: write_default
       x-koro-surface: admin
       x-koro-terms-gate: enforced
+  /api/v1/admin/payouts/{payout_id}/iban:
+    get:
+      description: "The IBAN frozen on the payout at creation (iban_masked's full form), for the EFT at the bank. X-Koro-Access-Reason (10–500 characters) is mandatory (422 without it) and every call is audited with it like a break-glass read (BE-129); the rate class is break_glass. The answer is never cached: keep the number in the component's memory only, for the time it is typed."
+      operationId: adminRevealPayoutIban
+      parameters:
+        - in: path
+          name: payout_id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
+          in: header
+          name: X-Koro-Access-Reason
+          schema:
+            description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
+            maxLength: 6007
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IBANRevealDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Reveal the full IBAN of a payout
+      tags:
+        - ledger
+      x-koro-action: ledger.iban.reveal
+      x-koro-rate-limit: break_glass
+      x-koro-surface: admin
   /api/v1/admin/payouts/{payout_id}/mark-failed:
     post:
       description: Only an approved payout (409 ledger.invalid_state); its lines are payable again.
@@ -20713,6 +21417,51 @@ paths:
       x-koro-rate-limit: write_default
       x-koro-surface: admin
       x-koro-terms-gate: enforced
+  /api/v1/admin/refunds/{refund_id}/iban:
+    get:
+      description: "The target IBAN (target_iban_masked's full form; maybe a natural person's), for the refund EFT. X-Koro-Access-Reason (10–500 characters) is mandatory (422 without it) and every call is audited with it like a break-glass read (BE-129); the rate class is break_glass. The answer is never cached: keep the number in the component's memory only, for the time it is typed."
+      operationId: adminRevealRefundIban
+      parameters:
+        - description: Refund ID (an unknown or malformed ID is 404)
+          in: path
+          name: refund_id
+          required: true
+          schema:
+            description: Refund ID (an unknown or malformed ID is 404)
+            type: string
+        - description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
+          in: header
+          name: X-Koro-Access-Reason
+          schema:
+            description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
+            maxLength: 6007
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IBANRevealDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Reveal the full IBAN of a refund
+      tags:
+        - payments
+      x-koro-action: payments.iban.reveal
+      x-koro-rate-limit: break_glass
+      x-koro-surface: admin
   /api/v1/admin/refunds/{refund_id}/mark-failed:
     post:
       description: Requires another finance admin and re-authentication. Only approved refunds; completed refunds cannot be reversed here.
@@ -21711,6 +22460,32 @@ paths:
       x-koro-reauth: true
       x-koro-surface: admin
       x-koro-terms-gate: enforced
+  /api/v1/admin/talent/status:
+    get:
+      description: "BE-129: talent_auditor only (MFA; every other signed-in user, platform_admin included, gets 403), answered whether talent.auditor_api_enabled is true or false, so a client tells a closed API from a refused call without probing another operation. No access reason, no audit record: it reads no talent data."
+      operationId: getTalentStatus
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TalentStatusDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get whether the talent auditor API is open
+      tags:
+        - talent
+      x-koro-action: talent.config.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
   /api/v1/admin/talent/subjects/{user_id}/neutralizations:
     post:
       description: "An auditor neutralisation (reason admin): the band is 0 while it is active. Re-authentication required; one active auditor neutralisation per user (409 talent.already_neutralized). Closed (404 for every signed-in user) while talent.auditor_api_enabled is false; open, talent_auditor only (MFA; never platform_admin). X-Koro-Access-Reason (10–500 characters) is mandatory and the call is audited under its action with that reason. No name or e-mail is ever returned."
@@ -31411,7 +32186,7 @@ paths:
       x-koro-surface: org
   /api/v1/orgs/{org_id}/payees/{payee_id}/bank-accounts:
     get:
-      description: Newest first. Organization roles see the IBAN masked; finance and platform admins see it in full and the read is audited.
+      description: "Newest first, the IBAN masked for everyone (BE-129: finance and platform admins reveal a full IBAN with adminRevealBankAccountIban, audited)."
       operationId: listPayeeBankAccounts
       parameters:
         - description: Organization ID (an unknown or malformed ID is 404)

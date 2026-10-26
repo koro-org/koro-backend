@@ -157,8 +157,17 @@ func TestLedgerPolicy_EdgeCases(t *testing.T) {
 	// The journal is bound to the admin surface only.
 	wantErr(t, authz.Can(ctx, persona(t, "finance_admin"), authz.LedgerJournalList,
 		authz.Resource{Type: authz.TypeLedger}), authz.ErrNotFound, false)
-	// The balance is an org-surface read; the payout writes are admin-surface only.
-	wantErr(t, authz.Can(ctx, persona(t, "finance_admin"), authz.LedgerBalanceRead, adminSurface), authz.ErrNotFound, false)
+	// The balance is also a staff read on the admin surface (a payee's open receivable lines, BE-129),
+	// like the IBAN reveal (pad, fin); the payout writes are admin-surface only.
+	for _, act := range []authz.Action{authz.LedgerBalanceRead, authz.LedgerIbanReveal} {
+		for _, name := range []string{"platform_admin", "finance_admin"} {
+			wantErr(t, authz.Can(ctx, persona(t, name), act, adminSurface), nil, false)
+		}
+		for _, name := range []string{"club_admin", "support", "dpo"} {
+			wantErr(t, authz.Can(ctx, persona(t, name), act, adminSurface), authz.ErrForbidden, false)
+		}
+	}
+	wantErr(t, authz.Can(ctx, persona(t, "finance_admin"), authz.LedgerIbanReveal, payoutsOf("club_a")), authz.ErrNotFound, false)
 	for _, act := range []authz.Action{authz.LedgerPayoutCreate, authz.LedgerPayoutMarkPaid, authz.LedgerPayoutCancel} {
 		wantErr(t, authz.Can(ctx, persona(t, "finance_admin"), act, payoutsOf("club_a")), authz.ErrNotFound, false)
 	}

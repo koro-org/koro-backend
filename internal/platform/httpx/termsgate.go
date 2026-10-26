@@ -123,6 +123,9 @@ var termsExemptOperations = map[string]string{
 	"queryCompanyGrantedStudents": "POST " + APIPrefix + "/orgs/{org_id}/students/search",
 	"adminQueryIncomingTransfers": "POST " + APIPrefix + "/admin/incoming-transfers/search",
 	"adminQueryLegalParties":      "POST " + APIPrefix + "/admin/legal-parties/search",
+	// BE-129: the staff's payee search (a legal party's title may name a
+	// sole proprietor); it has no GET twin, the read is its own.
+	"adminQueryPayees": "POST " + APIPrefix + "/admin/payees/search",
 }
 
 // TermsExemptOperations returns a copy of the exemption table (the spec

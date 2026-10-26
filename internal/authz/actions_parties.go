@@ -23,6 +23,9 @@ const (
 	PartiesBankAccountApprove Action = "parties.bank_account.approve"
 	PartiesBankAccountReject  Action = "parties.bank_account.reject"
 	PartiesBankAccountRevoke  Action = "parties.bank_account.revoke"
+	// PartiesIbanReveal is adminRevealBankAccountIban (BE-129): the audited
+	// read of one full IBAN; every list and detail shows it masked.
+	PartiesIbanReveal Action = "parties.iban.reveal"
 )
 
 // partiesActions lists the HTTP actions of parties in 03 §5.13 order.
@@ -44,4 +47,5 @@ var partiesActions = []Action{
 	PartiesBankAccountApprove,
 	PartiesBankAccountReject,
 	PartiesBankAccountRevoke,
+	PartiesIbanReveal,
 }

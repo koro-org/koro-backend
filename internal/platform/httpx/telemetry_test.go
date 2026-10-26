@@ -84,6 +84,10 @@ func TestHTTPX_Telemetry_RouteTemplateLabelsAndSpans(t *testing.T) {
 	}
 }
 
+// errTestGone is registered once per test binary: problem.New panics on a
+// duplicate code, so registering it inside the test broke -count>1 (BE-130).
+var errTestGone = problem.New(problem.NotFound, "testonly.gone", "Gone")
+
 // TestHTTPX_AuthzDenial_LoggedAndCountedWithoutPII: a denial is logged once
 // with action, module and reason (no personal data) and counted in
 // koro_authz_denied_total{module,action,reason} with bounded labels.
@@ -99,7 +103,7 @@ func TestHTTPX_AuthzDenial_LoggedAndCountedWithoutPII(t *testing.T) {
 		"four_eyes":   authz.ErrFourEyes.Wrap(&authz.Denial{Action: act, Reason: "four eyes"}),
 		"internal":    authz.ErrForbidden.Wrap(&authz.Denial{Action: act, Reason: "unknown resource type", Internal: true}),
 		"unknown":     authz.ErrForbidden.Wrap(&authz.Denial{Action: "x.ayse@ogrenci.edu.tr.read", Reason: "unknown action", Internal: true}),
-		"rewrapped":   problem.New(problem.NotFound, "testonly.gone", "Gone").Wrap(authz.ErrNotFound.Wrap(&authz.Denial{Action: act, Reason: "nv"})),
+		"rewrapped":   errTestGone.Wrap(authz.ErrNotFound.Wrap(&authz.Denial{Action: act, Reason: "nv"})),
 		"plain":       problem.ErrForbidden, // not an authz denial: neither logged nor counted
 	}
 	for name, err := range errs {

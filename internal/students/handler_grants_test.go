@@ -70,8 +70,22 @@ func TestHTTP_AccessGrants(t *testing.T) {
 	if r = e.send(t, app, rec, http.MethodGet, base+"/cv", ""); r.Code != http.StatusOK || !strings.Contains(r.Body.String(), `"url"`) {
 		t.Fatalf("company CV = %d %s", r.Code, r.Body)
 	}
-	r = e.send(t, app, rec, http.MethodGet, "/api/v1/orgs/"+org.String()+"/students?q=ada", "")
+	// BE-128: the name filter travels in the body; the deprecated GET
+	// refuses it in the URL and still lists without it.
+	r = e.send(t, app, rec, http.MethodPost, "/api/v1/orgs/"+org.String()+"/students/search", `{"q":"ada"}`)
 	var cards students.StudentL3CardList
+	if r.Code != http.StatusOK || json.Unmarshal(r.Body.Bytes(), &cards) != nil || len(cards.Items) != 1 {
+		t.Fatalf("company search = %d %s", r.Code, r.Body)
+	}
+	if r = e.send(t, app, rec, http.MethodPost, "/api/v1/orgs/"+org.String()+"/students/search", `{"q":"zeynep"}`); r.Code != http.StatusOK ||
+		!strings.Contains(r.Body.String(), `"items":[]`) {
+		t.Fatalf("company search without a match = %d %s", r.Code, r.Body)
+	}
+	if r = e.send(t, app, rec, http.MethodGet, "/api/v1/orgs/"+org.String()+"/students?q=ada", ""); r.Code != http.StatusUnprocessableEntity ||
+		!strings.Contains(r.Body.String(), `"location":"query.q"`) || !strings.Contains(r.Body.String(), "queryCompanyGrantedStudents") {
+		t.Fatalf("company list with q in the URL = %d %s", r.Code, r.Body)
+	}
+	r = e.send(t, app, rec, http.MethodGet, "/api/v1/orgs/"+org.String()+"/students", "")
 	if r.Code != http.StatusOK || json.Unmarshal(r.Body.Bytes(), &cards) != nil || len(cards.Items) != 1 {
 		t.Fatalf("company list = %d %s", r.Code, r.Body)
 	}

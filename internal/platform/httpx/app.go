@@ -171,15 +171,18 @@ func New(d Deps) (*App, error) {
 		"A signed-in user who has not accepted the terms of use in force for them (getMe terms.acceptance_required) gets " +
 		"403 consent.terms_acceptance_required from every operation marked " + ExtTermsGate + ": " + TermsGateEnforced +
 		" until acceptTerms records the current version; reads and the operations marked " + TermsGateExempt +
-		" (the acceptance, logout, account security, KVKK rights and consent acts) stay open."
+		" (the acceptance, logout, account security, KVKK rights, consent acts and searches sent as POST) stay open. " +
+		"Search criteria that name a person (an e-mail address, a name, a user ID) are never taken in a query string: " +
+		"the POST …/search operations take them in the body (the GET lists they replace are deprecated)."
 	cfg.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
 		SchemeSessionCookie: {Type: "apiKey", In: "cookie", Name: SessionCookieName},
 		SchemeBearer:        {Type: "http", Scheme: "bearer", BearerFormat: "opaque"},
 	}
 
 	api := humagin.New(r, cfg)
-	installTalentFieldGuard(api.OpenAPI()) // no talent*/band/score*/point* member outside the talent operations (BE-047)
-	installTermsGate(api.OpenAPI())        // x-koro-terms-gate on every protected write operation (BE-124)
+	installTalentFieldGuard(api.OpenAPI())   // no talent*/band/score*/point* member outside the talent operations (BE-047)
+	installTermsGate(api.OpenAPI())          // x-koro-terms-gate on every protected write operation (BE-124)
+	installPersonalQueryGuard(api.OpenAPI()) // no personal search criterion in a query string (BE-128)
 	// The Problem schema and a reusable "Problem" response are always part
 	// of the spec, even before the first operation references them (huma
 	// prunes unreferenced schemas, the response keeps it referenced).

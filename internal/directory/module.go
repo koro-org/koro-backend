@@ -129,6 +129,17 @@ type Service interface {
 	AdminPutUniversityEmailDomain(ctx context.Context, a authz.Actor, universityID uuid.UUID, domain string, in DomainInput) (EmailDomain, bool, error)
 	// AdminCreateDepartment is adminCreateDepartment (directory.university.manage).
 	AdminCreateDepartment(ctx context.Context, a authz.Actor, universityID uuid.UUID, in DepartmentInput) (Department, error)
+	// AdminListUniversities is adminListUniversities
+	// (directory.university.manage; BE-128).
+	AdminListUniversities(ctx context.Context, a authz.Actor, q UniversityQuery) (UniversityPage, error)
+	// AdminListUniversityEmailDomains is adminListUniversityEmailDomains
+	// (directory.university.manage; BE-128).
+	AdminListUniversityEmailDomains(ctx context.Context, a authz.Actor, universityID uuid.UUID) ([]EmailDomain, error)
+	// AdminCreateFaculty is adminCreateFaculty (directory.university.manage;
+	// BE-128).
+	AdminCreateFaculty(ctx context.Context, a authz.Actor, universityID uuid.UUID, in FacultyInput) (Faculty, error)
+	// AdminListSkills is adminListSkills (directory.skill.manage; BE-128).
+	AdminListSkills(ctx context.Context, a authz.Actor, q SkillQuery) (SkillPage, error)
 	// AdminCreateSkill is adminCreateSkill (directory.skill.manage).
 	AdminCreateSkill(ctx context.Context, a authz.Actor, in SkillInput) (Skill, error)
 	// AdminUpdateSkill is adminUpdateSkill (directory.skill.manage).

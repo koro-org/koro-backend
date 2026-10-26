@@ -11,6 +11,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/platform/db"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
@@ -77,10 +78,22 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.NotifyPushTokenManage), Surface: op.SurfaceSelf}), h.deletePush)
 
 	huma.Register(api, op.Koro(huma.Operation{
+		OperationID: "adminQueryEmailSuppressions", Method: http.MethodPost, Path: "/admin/email-suppressions/search", Tags: tags,
+		Summary: "Search e-mail suppressions",
+		Description: "Read-only: the address is in the body so that it never reaches a URL or an access log (BE-128). " +
+			"Addresses are kept as blind indexes only: email finds one address by exact match; without it every " +
+			"suppression, newest first (next_cursor goes back in the body). Break-glass: X-Koro-Access-Reason is " +
+			"mandatory and every read is audited (the address is neither stored nor audited).",
+	}, op.Meta{Action: string(authz.NotifySuppressionManage), Surface: op.SurfaceAdmin, BreakGlass: true,
+		RateLimit: op.RateReadDefault, Idempotency: op.IdempotencyOptional}), h.adminQuerySuppressions)
+
+	huma.Register(api, op.Koro(huma.Operation{
 		OperationID: "adminListEmailSuppressions", Method: http.MethodGet, Path: "/admin/email-suppressions", Tags: tags,
-		Summary: "List e-mail suppressions",
-		Description: "Addresses are kept as blind indexes only: email finds one address by exact match. " +
-			"Break-glass: X-Koro-Access-Reason is mandatory and every read is audited.",
+		Deprecated: true, Summary: "List e-mail suppressions (deprecated: adminQueryEmailSuppressions)",
+		Description: "Deprecated (BE-128): adminQueryEmailSuppressions (POST /admin/email-suppressions/search) takes " +
+			"the address in the body. This list pages every suppression, newest first; an email in the query string " +
+			"is 422 (personal data stays out of URLs). Break-glass: X-Koro-Access-Reason is mandatory and every read " +
+			"is audited.",
 	}, op.Meta{Action: string(authz.NotifySuppressionManage), Surface: op.SurfaceAdmin, BreakGlass: true}), h.adminListSuppressions)
 
 	huma.Register(api, op.Koro(huma.Operation{
@@ -273,37 +286,64 @@ func (h handler) deletePush(ctx context.Context, in *deletePushInput) (*struct{}
 
 // ---- admin: suppressions
 
-// AccessHeaders are the break-glass headers of the B operations (03 §6.3).
+// AccessHeaders are the break-glass headers of the B operations (03 §6.3):
+// the justification (plain ASCII or RFC 8187 UTF-8, httpx.AccessReason)
+// and an optional ticket reference.
 type AccessHeaders struct {
-	AccessReason string `header:"X-Koro-Access-Reason" maxLength:"500" doc:"Break-glass justification (10–500 characters, mandatory)"`
-	TicketRef    string `header:"X-Koro-Ticket-Ref" maxLength:"100" doc:"Support ticket reference (optional)"`
+	httpx.AccessReasonHeader
+	TicketRef string `header:"X-Koro-Ticket-Ref" maxLength:"100" doc:"Support ticket reference (optional)"`
 }
 
-func (a AccessHeaders) access() Access { return Access{Reason: a.AccessReason, TicketRef: a.TicketRef} }
+func (a AccessHeaders) access() Access {
+	return Access{Reason: a.AccessReason.String(), TicketRef: a.TicketRef}
+}
 
 type adminListSuppressionsInput struct {
 	AccessHeaders
 	page.Params
-	Email string `query:"email" maxLength:"254" doc:"Exact address (matched by its blind index; never stored)"`
+	Email string `query:"email" hidden:"true" doc:"Moved to adminQueryEmailSuppressions (BE-128): 422 when set"`
+}
+
+type adminQuerySuppressionsInput struct {
+	AccessHeaders
+	Body struct {
+		Email string `json:"email,omitempty" maxLength:"254" doc:"Exact address (matched by its blind index; never stored)"`
+		page.BodyParams
+	}
 }
 
 type suppressionListOutput struct {
 	Body SuppressionList
 }
 
+// adminListSuppressions is the deprecated GET twin of
+// adminQuerySuppressions (no address).
 func (h handler) adminListSuppressions(ctx context.Context, in *adminListSuppressionsInput) (*suppressionListOutput, error) {
+	if in.Email != "" {
+		return nil, httpx.QueryMoved("email", "adminQueryEmailSuppressions")
+	}
+	return h.suppressionPage(ctx, "adminListEmailSuppressions", in.access(), "", in.Cursor, in.Limit)
+}
+
+func (h handler) adminQuerySuppressions(ctx context.Context, in *adminQuerySuppressionsInput) (*suppressionListOutput, error) {
+	return h.suppressionPage(ctx, "adminQueryEmailSuppressions", in.access(), in.Body.Email, in.Body.Cursor, in.Body.Limit)
+}
+
+// suppressionPage runs one page of the suppression list; the cursor is
+// bound to the operation and the address.
+func (h handler) suppressionPage(ctx context.Context, opID string, access Access, rawEmail, cursor string, limit int) (*suppressionListOutput, error) {
 	a, err := authz.ActorFrom(ctx)
 	if err != nil {
 		return nil, err
 	}
-	email := strings.TrimSpace(in.Email)
+	email := strings.TrimSpace(rawEmail)
 	// The fingerprint must not carry the address: hash it with the filter.
-	fp := page.Fingerprint("adminListEmailSuppressions", email)
-	after, err := suppressionPositionOf(in.Cursor, fp)
+	fp := page.Fingerprint(opID, email)
+	after, err := suppressionPositionOf(cursor, fp)
 	if err != nil {
 		return nil, err
 	}
-	p, err := h.svc.AdminListSuppressions(ctx, a, in.access(), SuppressionQuery{Email: email, Limit: in.Limit, After: after})
+	p, err := h.svc.AdminListSuppressions(ctx, a, access, SuppressionQuery{Email: email, Limit: limit, After: after})
 	if err != nil {
 		return nil, err
 	}

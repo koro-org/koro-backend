@@ -29,7 +29,7 @@ const (
 	companyCVTTL = time.Minute
 	// maxRevokeReason is profile_access_grants.revoke_reason's limit.
 	maxRevokeReason = 300
-	// maxStudentQuery is the longest name filter of listCompanyGrantedStudents.
+	// maxStudentQuery is the longest name filter of queryCompanyGrantedStudents.
 	maxStudentQuery = 100
 	// companyScanLimit is the most grants one company list request
 	// inspects; a sparse name filter answers a short page with a cursor.
@@ -63,7 +63,7 @@ type GrantPage struct {
 	Next  *GrantKey
 }
 
-// CompanyStudentQuery narrows listCompanyGrantedStudents: Q filters by the
+// CompanyStudentQuery narrows queryCompanyGrantedStudents: Q filters by the
 // student's name (case and Turkish letters folded), After is the keyset
 // position (granted_at DESC, id DESC), Limit the page size (1–100).
 type CompanyStudentQuery struct {
@@ -480,7 +480,7 @@ func (s *service) ListCompanyStudents(ctx context.Context, a authz.Actor, orgID 
 		authz.Resource{Type: authz.TypeAccessGrant, OrgID: &org}); err != nil {
 		return CompanyStudentPage{}, err
 	}
-	needle, err := cleanLine("query.q", q.Q, maxStudentQuery)
+	needle, err := cleanLine("body.q", q.Q, maxStudentQuery)
 	if err != nil {
 		return CompanyStudentPage{}, err
 	}

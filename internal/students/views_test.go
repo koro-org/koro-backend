@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"reflect"
 	"slices"
 	"testing"
@@ -306,6 +307,34 @@ func TestAdminDTO_Fields(t *testing.T) {
 		}
 		if forbiddenRe.MatchString(f) || f == "cvs" || f == "email_normalized" || f == "password_hash" {
 			t.Fatalf("AdminStudentViewDTO member %q", f)
+		}
+	}
+}
+
+// TestAdminView_UTF8AccessReason (BE-128): a Turkish break-glass
+// justification sent as an RFC 8187 ext-value (koro-web: the UTF-8
+// prefix + encodeURIComponent) is audited as typed, letters intact; the plain ASCII
+// header of older clients works as before.
+func TestAdminView_UTF8AccessReason(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	st := e.student(t, e.uniA, false)
+	e.basics(t, st, e.deptA, 2, t0.AddDate(2, 0, 0))
+	app := newHTTP(t, e)
+	path := "/api/v1/admin/users/" + st.UserID.String() + "/student-profile"
+	typed := "Destek kaydı 4711: öğrenci şifre sıfırlama e-postası almıyor (İzmir)"
+	for header, want := range map[string]string{
+		"UTF-8''" + url.PathEscape(typed):       typed,
+		"Ticket 4712: user cannot see the card": "Ticket 4712: user cannot see the card",
+	} {
+		e.audit.Reset()
+		rec := e.callAs(t, app, staff(authz.PlatformSupport), http.MethodGet, path, "X-Koro-Access-Reason", header)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%q: %d %s", header, rec.Code, rec.Body)
+		}
+		ev := e.audit.Of(authz.StudentsProfileReadAdmin)
+		if len(ev) != 1 || ev[0].Reason != want {
+			t.Fatalf("audit reason = %+v, want %q", ev, want)
 		}
 	}
 }

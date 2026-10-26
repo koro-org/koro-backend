@@ -26,7 +26,21 @@ import (
 // Club claims are personal records of their claimant, addressed by ID or
 // by the claimant; the club's org (club_org_id) is their parent. The
 // service reads a claim, then decides with authz (owner or platform staff).
+//
+// The methods are grouped by aggregate (05 §2.2, DoD: a Store of 40+
+// methods is split; BE-128): the university reference data, the clubs,
+// the club claims and the skills. The store contract test checks each
+// group in its own subtests.
 type Store interface {
+	UniversityStore
+	ClubStore
+	ClaimStore
+	SkillStore
+}
+
+// UniversityStore is the university reference data (02 §8.1–8.4):
+// universities, their e-mail domains, faculties and departments.
+type UniversityStore interface {
 	// InsertUniversity writes a university and returns it as stored;
 	// ErrYokCodeTaken when the YÖK code is taken.
 	InsertUniversity(ctx context.Context, u University) (University, error)
@@ -42,8 +56,9 @@ type Store interface {
 	// UpdateUniversity writes the mutable columns (YÖK code, name, short
 	// name, city, type, website, is_active) and returns the stored row.
 	UpdateUniversity(ctx context.Context, u University) (University, error)
-	// ListUniversities returns up to limit active universities matching f
-	// after the position after, in f.Sort order.
+	// ListUniversities returns up to limit universities matching f (the
+	// active ones unless f.State says otherwise) after the position after,
+	// in f.Sort order.
 	ListUniversities(ctx context.Context, f UniversityFilter, after *After, limit int) ([]University, error)
 
 	// GetDomain returns the row of a domain (lower case) or ErrNotFound.
@@ -55,6 +70,9 @@ type Store interface {
 	// MatchDomain returns the longest active domain among candidates whose
 	// university is active, or ErrNotFound.
 	MatchDomain(ctx context.Context, candidates []string) (EmailDomain, error)
+	// DomainsOf returns every domain row of a university, active or not,
+	// by domain (adminListUniversityEmailDomains, BE-128).
+	DomainsOf(ctx context.Context, universityID uuid.UUID) ([]EmailDomain, error)
 
 	// InsertFaculty writes a faculty; 409 when the university has one of
 	// that name.
@@ -81,7 +99,10 @@ type Store interface {
 	// ListDepartments returns up to limit active departments of
 	// f.UniversityID matching f, newest first.
 	ListDepartments(ctx context.Context, f DepartmentFilter, after *After, limit int) ([]Department, error)
+}
 
+// ClubStore is the club catalog (02 §8.5).
+type ClubStore interface {
 	// InsertClub writes a club row and returns it as stored. 422 for a
 	// CHECK (sensitive category without the flag:
 	// ErrSensitivityRequired), 409 for a missing org or university.
@@ -101,7 +122,10 @@ type Store interface {
 	SensitiveAmong(ctx context.Context, orgIDs []uuid.UUID) ([]uuid.UUID, error)
 	// ClubOrgsOf returns the org IDs of a university's clubs.
 	ClubOrgsOf(ctx context.Context, universityID uuid.UUID) ([]uuid.UUID, error)
+}
 
+// ClaimStore is the club claims (02 §8.6).
+type ClaimStore interface {
 	// InsertClaim writes a claim and returns it as stored: ErrClaimPending
 	// when the claimant has a pending claim for the club
 	// (club_claims_pending_uq), 422 for a CHECK.
@@ -132,7 +156,10 @@ type Store interface {
 	ClaimsDecidedBefore(ctx context.Context, cutoff time.Time, limit int) ([]ClubClaim, error)
 	// CountClaimsDecidedBefore counts them without a limit (dry run).
 	CountClaimsDecidedBefore(ctx context.Context, cutoff time.Time) (int, error)
+}
 
+// SkillStore is the skill taxonomy (02 §8.7).
+type SkillStore interface {
 	// InsertSkill writes a skill; ErrSkillSlugTaken when the slug is taken.
 	InsertSkill(ctx context.Context, s Skill) (Skill, error)
 	// UpdateSkill writes name_tr, name_en, category and is_active.
@@ -141,7 +168,8 @@ type Store interface {
 	GetSkill(ctx context.Context, id uuid.UUID) (Skill, error)
 	// SkillBySlug returns the skill of a slug or ErrNotFound.
 	SkillBySlug(ctx context.Context, slug string) (Skill, error)
-	// ListSkills returns up to limit active skills matching f, newest first.
+	// ListSkills returns up to limit skills matching f (the active ones
+	// unless f.State says otherwise), newest first.
 	ListSkills(ctx context.Context, f SkillFilter, after *After, limit int) ([]Skill, error)
 	// CountActiveSkills returns how many of ids are active skills.
 	CountActiveSkills(ctx context.Context, ids []uuid.UUID) (int, error)
@@ -162,6 +190,28 @@ type After struct {
 	ID   uuid.UUID
 }
 
+// ActiveState selects rows by is_active. The zero value is the public
+// catalog's rule: active rows only.
+type ActiveState string
+
+// Active states (admin lists, BE-128).
+const (
+	StateActive   ActiveState = ""         // active rows only
+	StateInactive ActiveState = "inactive" // inactive rows only
+	StateAll      ActiveState = "all"      // every row
+)
+
+// keeps reports whether a row with is_active = active is selected.
+func (s ActiveState) keeps(active bool) bool {
+	switch s {
+	case StateAll:
+		return true
+	case StateInactive:
+		return !active
+	}
+	return active
+}
+
 // UniversityFilter narrows ListUniversities. Zero fields do not filter.
 type UniversityFilter struct {
 	// Q is free text (2–100 characters): full-text match on name, short
@@ -174,6 +224,8 @@ type UniversityFilter struct {
 	// unique; BE-127).
 	OrgID *uuid.UUID
 	Sort  string
+	// State: active universities only unless an admin list asks (BE-128).
+	State ActiveState
 }
 
 // DepartmentFilter narrows ListDepartments.
@@ -210,4 +262,6 @@ type ClubFilter struct {
 type SkillFilter struct {
 	Q        string // substring or trigram match on koro_norm(name_tr) / name_en
 	Category SkillCategory
+	// State: active skills only unless an admin list asks (BE-128).
+	State ActiveState
 }

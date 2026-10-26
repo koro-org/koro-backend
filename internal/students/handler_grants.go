@@ -8,6 +8,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
@@ -56,10 +57,22 @@ func registerGrants(api huma.API, h handler) {
 	}, self(authz.StudentsAccessGrantResume, op.IdempotencyOptional), h.resumeMyGrant)
 
 	op.Register(api, "students", huma.Operation{
-		OperationID: "listCompanyGrantedStudents", Method: http.MethodGet, Path: "/orgs/{org_id}/students",
-		Summary: "List the students who granted the company access",
-		Description: "Students with an active level 3 grant of this company (they accepted its contact request) and " +
-			"an active student verification, newest grant first; q filters by name. Minors never appear.",
+		OperationID: "queryCompanyGrantedStudents", Method: http.MethodPost, Path: "/orgs/{org_id}/students/search",
+		Summary: "Search the students who granted the company access",
+		Description: "Read-only: the name filter is in the body so that it never reaches a URL or an access log " +
+			"(BE-128). Students with an active level 3 grant of this company (they accepted its contact request) and " +
+			"an active student verification, newest grant first; q filters by name. Minors never appear. next_cursor " +
+			"goes back in the body.",
+	}, op.Meta{Action: string(authz.StudentsAccessGrantListCompany), Surface: op.SurfaceOrg, RateLimit: op.RateReadDefault,
+		Idempotency: op.IdempotencyOptional}, h.queryCompanyStudents)
+
+	op.Register(api, "students", huma.Operation{
+		OperationID: "listCompanyGrantedStudents", Method: http.MethodGet, Path: "/orgs/{org_id}/students", Deprecated: true,
+		Summary: "List the students who granted the company access (deprecated: queryCompanyGrantedStudents)",
+		Description: "Deprecated (BE-128): queryCompanyGrantedStudents (POST /orgs/{org_id}/students/search) takes the " +
+			"name filter in the body; a q in the query string is 422 (personal data stays out of URLs). Students with " +
+			"an active level 3 grant of this company and an active student verification, newest grant first. Minors " +
+			"never appear.",
 	}, org(authz.StudentsAccessGrantListCompany, ""), h.listCompanyStudents)
 
 	op.Register(api, "students", huma.Operation{
@@ -222,29 +235,52 @@ func (p CompanyStudentPath) ids() (org, user uuid.UUID, err error) {
 
 type companyStudentsInput struct {
 	CompanyPath
-	Q string `query:"q" maxLength:"100" doc:"Name filter (case-insensitive)"`
+	Q string `query:"q" hidden:"true" doc:"Moved to queryCompanyGrantedStudents (BE-128): 422 when set"`
 	page.Params
+}
+
+type queryCompanyStudentsInput struct {
+	CompanyPath
+	Body struct {
+		Q string `json:"q,omitempty" maxLength:"100" doc:"Name filter (case-insensitive)"`
+		page.BodyParams
+	}
 }
 
 type companyStudentsOutput struct {
 	Body StudentL3CardList
 }
 
+// listCompanyStudents is the deprecated GET twin of queryCompanyStudents
+// (no name filter).
 func (h handler) listCompanyStudents(ctx context.Context, in *companyStudentsInput) (*companyStudentsOutput, error) {
+	if in.Q != "" {
+		return nil, httpx.QueryMoved("q", "queryCompanyGrantedStudents")
+	}
+	return h.companyStudentPage(ctx, "listCompanyGrantedStudents", in.OrgID, "", in.Cursor, in.Limit)
+}
+
+func (h handler) queryCompanyStudents(ctx context.Context, in *queryCompanyStudentsInput) (*companyStudentsOutput, error) {
+	return h.companyStudentPage(ctx, "queryCompanyGrantedStudents", in.OrgID, in.Body.Q, in.Body.Cursor, in.Body.Limit)
+}
+
+// companyStudentPage runs one page of a company's granted students; the
+// cursor is bound to the operation, the company and the name filter.
+func (h handler) companyStudentPage(ctx context.Context, opID, rawOrg, q, cursor string, limit int) (*companyStudentsOutput, error) {
 	a, err := authz.ActorFrom(ctx)
 	if err != nil {
 		return nil, err
 	}
-	org, err := pathID(in.OrgID)
+	org, err := pathID(rawOrg)
 	if err != nil {
 		return nil, err
 	}
-	fp := page.Fingerprint("listCompanyGrantedStudents", org.String(), in.Q)
-	after, err := grantAfter(in.Cursor, fp)
+	fp := page.Fingerprint(opID, org.String(), q)
+	after, err := grantAfter(cursor, fp)
 	if err != nil {
 		return nil, err
 	}
-	p, err := h.svc.ListCompanyStudents(ctx, a, org, CompanyStudentQuery{Q: in.Q, After: after, Limit: in.Limit})
+	p, err := h.svc.ListCompanyStudents(ctx, a, org, CompanyStudentQuery{Q: q, After: after, Limit: limit})
 	if err != nil {
 		return nil, err
 	}

@@ -1,5 +1,5 @@
 # Authz matrix of the notify module (03 §5.19, 04 §2.19 + §2.0 receiveEmailWebhook; BE-015).
-# 11 operations × 18 personas. The /me operations are O cells (every signed-in user, own rows only:
+# 12 operations × 18 personas. The /me operations are O cells (every signed-in user, own rows only:
 # another user's notification or token is 404); suppressions and delivery logs are support B and
 # platform_admin B (403 without X-Koro-Access-Reason; admin surface: everyone else 403). The webhook
 # is public: its identity is the svix signature (bodies/notify/resend_bounce.json is signed with the
@@ -105,6 +105,25 @@ operations:
     variants:
       - name: break_glass
         headers: { X-Koro-Access-Reason: "Ticket 4711: user reports missing e-mails" }
+        expect: { anonymous: 401, "@no_platform_role": 403, moderator: 403, support: 200, dpo: 403,
+                  platform_admin: 200, finance_admin: 403, talent_auditor: 403 }
+
+  adminQueryEmailSuppressions:
+    method: POST
+    path: /api/v1/admin/email-suppressions/search
+    action: notify.suppression.manage
+    body: bodies/notify/query_suppressions.json
+    note: BE-128 read sent as POST (the address stays out of the URL); B cells as adminListEmailSuppressions
+    expect: { anonymous: 401, "@no_platform_role": 403, moderator: 403, support: 403, dpo: 403,
+              platform_admin: 403, finance_admin: 403, talent_auditor: 403 }
+    variants:
+      - name: break_glass
+        headers: { X-Koro-Access-Reason: "Ticket 4711: user reports missing e-mails" }
+        expect: { anonymous: 401, "@no_platform_role": 403, moderator: 403, support: 200, dpo: 403,
+                  platform_admin: 200, finance_admin: 403, talent_auditor: 403 }
+      - name: break_glass_utf8
+        headers: { X-Koro-Access-Reason: "UTF-8''Destek%20kayd%C4%B1%204711%3A%20%C3%B6%C4%9Frenci%20e-posta%20alam%C4%B1yor" }
+        note: BE-128 RFC 8187 UTF-8 justification (Turkish text), decoded before authz counts its characters
         expect: { anonymous: 401, "@no_platform_role": 403, moderator: 403, support: 200, dpo: 403,
                   platform_admin: 200, finance_admin: 403, talent_auditor: 403 }
 

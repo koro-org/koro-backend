@@ -20,6 +20,9 @@ var (
 	// ErrDepartmentExists: the university already has a department with
 	// this YÖK program code.
 	ErrDepartmentExists = problem.New(problem.Conflict, "directory.department_exists", "Department already exists")
+	// ErrFacultyExists: the university already has a faculty of this name
+	// (faculties_university_name_uq; BE-128).
+	ErrFacultyExists = problem.New(problem.Conflict, "directory.faculty_exists", "Faculty already exists")
 	// ErrSkillSlugTaken: another skill has this slug.
 	ErrSkillSlugTaken = problem.New(problem.Conflict, "directory.skill_slug_taken", "Skill slug is already in use")
 	// ErrUnknownSkill: SkillsExist found an unknown or inactive skill.

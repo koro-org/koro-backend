@@ -221,3 +221,53 @@ func TestSuspend_LastActivePrivilegedHolder_409(t *testing.T) {
 	_, err = s.svc.RevokeUserSessions(ctx, s.a, s.a.UserID, "my own sessions")
 	problemtest.WantErr(t, err, identity.ErrUserInvalidState)
 }
+
+// TestAdminGetUser_ListsOpenFourEyesRequests (BE-128): the account summary
+// shows the requests that wait for a second platform_admin (action,
+// requester, reason, expiry), so the second eye can find them; an approved
+// or expired request is gone, and a plain account has none.
+func TestAdminGetUser_ListsOpenFourEyesRequests(t *testing.T) {
+	t.Parallel()
+	s := newStaffEnv(t)
+	ctx := t.Context()
+	s.privilegedTarget(t)
+
+	none, err := s.svc.AdminUser(ctx, s.b, s.target.ID)
+	if err != nil || len(none.PendingActions) != 0 {
+		t.Fatalf("before: %+v %v", none.PendingActions, err)
+	}
+	if _, err := s.svc.SuspendUser(ctx, s.a, s.target.ID, "suspicious payouts"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.svc.RevokeUserSessions(ctx, s.a, s.target.ID, "takeover suspected"); err != nil {
+		t.Fatal(err)
+	}
+	v, err := s.svc.AdminUser(ctx, s.b, s.target.ID)
+	if err != nil || len(v.PendingActions) != 2 {
+		t.Fatalf("open requests: %+v %v", v.PendingActions, err)
+	}
+	first := v.PendingActions[0]
+	if first.Action != identity.AccountSuspend || first.RequestedBy != s.a.UserID || first.Reason != "suspicious payouts" ||
+		first.Status != identity.AccountActionPending || !first.ExpiresAt.After(s.clk.Now()) {
+		t.Fatalf("first request %+v", first)
+	}
+	if v.PendingActions[1].Action != identity.AccountRevokeSessions {
+		t.Fatalf("second request %+v", v.PendingActions[1])
+	}
+	// The second eye approves the suspension: only the session request
+	// stays open; after its 24 hours it is gone too.
+	if _, err := s.svc.SuspendUser(ctx, s.b, s.target.ID, "confirmed, suspend now"); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ = s.svc.AdminUser(ctx, s.b, s.target.ID); len(v.PendingActions) != 1 || v.PendingActions[0].Action != identity.AccountRevokeSessions {
+		t.Fatalf("after approval: %+v", v.PendingActions)
+	}
+	s.clk.Advance(25 * time.Hour)
+	if v, _ = s.svc.AdminUser(ctx, s.b, s.target.ID); len(v.PendingActions) != 0 {
+		t.Fatalf("after expiry: %+v", v.PendingActions)
+	}
+	plain := s.activeUser(t, "plain@example.com")
+	if v, _ = s.svc.AdminUser(ctx, s.b, plain.ID); len(v.PendingActions) != 0 {
+		t.Fatalf("plain account: %+v", v.PendingActions)
+	}
+}

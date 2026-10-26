@@ -20,7 +20,7 @@ type RecoveryCodesDTO struct {
 	RecoveryCodes []string `json:"recovery_codes" doc:"Ten single-use recovery codes; store them now, they are not shown again"`
 }
 
-// AdminUserSummaryDTO is one row of adminSearchUsers (04 §V.5 subset).
+// AdminUserSummaryDTO is one row of adminQueryUsers and adminSearchUsers (04 §V.5 subset).
 type AdminUserSummaryDTO struct {
 	UserID      string     `json:"user_id" format:"uuid"`
 	Email       string     `json:"email,omitempty"`
@@ -32,7 +32,7 @@ type AdminUserSummaryDTO struct {
 	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
 }
 
-// AdminUserList is the body of adminSearchUsers.
+// AdminUserList is the body of adminQueryUsers and adminSearchUsers.
 type AdminUserList struct {
 	Items      []AdminUserSummaryDTO `json:"items"`
 	NextCursor string                `json:"next_cursor,omitempty"`
@@ -49,22 +49,23 @@ type AdminStudentDTO struct {
 // AdminUserDTO is adminGetUser (04 §V.5): no profile content, no club
 // membership (a sensitive one must never show), birth date for dpo only.
 type AdminUserDTO struct {
-	UserID           string            `json:"user_id" format:"uuid"`
-	Email            string            `json:"email,omitempty"`
-	FirstName        string            `json:"first_name,omitempty"`
-	LastName         string            `json:"last_name,omitempty"`
-	Status           string            `json:"status" enum:"pending_email,active,suspended,erased"`
-	Locale           string            `json:"locale" enum:"tr-TR,en-US"`
-	MFAEnabled       bool              `json:"mfa_enabled"`
-	CreatedAt        time.Time         `json:"created_at"`
-	LastLoginAt      *time.Time        `json:"last_login_at,omitempty"`
-	SuspendedAt      *time.Time        `json:"suspended_at,omitempty"`
-	SuspensionReason string            `json:"suspension_reason,omitempty"`
-	BirthDate        string            `json:"birth_date,omitempty" format:"date" doc:"dpo only"`
-	Student          AdminStudentDTO   `json:"student"`
-	PlatformRoles    []string          `json:"platform_roles"`
-	Memberships      []MembershipDTO   `json:"memberships" doc:"Non-club memberships only"`
-	PendingAction    *AccountActionDTO `json:"pending_action,omitempty" doc:"Set when this call opened (or kept) a four-eyes request instead of acting (06 H-47)"`
+	UserID           string             `json:"user_id" format:"uuid"`
+	Email            string             `json:"email,omitempty"`
+	FirstName        string             `json:"first_name,omitempty"`
+	LastName         string             `json:"last_name,omitempty"`
+	Status           string             `json:"status" enum:"pending_email,active,suspended,erased"`
+	Locale           string             `json:"locale" enum:"tr-TR,en-US"`
+	MFAEnabled       bool               `json:"mfa_enabled"`
+	CreatedAt        time.Time          `json:"created_at"`
+	LastLoginAt      *time.Time         `json:"last_login_at,omitempty"`
+	SuspendedAt      *time.Time         `json:"suspended_at,omitempty"`
+	SuspensionReason string             `json:"suspension_reason,omitempty"`
+	BirthDate        string             `json:"birth_date,omitempty" format:"date" doc:"dpo only"`
+	Student          AdminStudentDTO    `json:"student"`
+	PlatformRoles    []string           `json:"platform_roles"`
+	Memberships      []MembershipDTO    `json:"memberships" doc:"Non-club memberships only"`
+	PendingAction    *AccountActionDTO  `json:"pending_action,omitempty" doc:"Set when this call opened (or kept) a four-eyes request instead of acting (06 H-47)"`
+	PendingActions   []AccountActionDTO `json:"pending_actions" doc:"Open four-eyes requests against this account (06 H-47): pending and not expired, oldest first. A second platform_admin approves one by repeating its action (adminSuspendUser, adminRevokeUserSessions, adminResetUserMfa); the requester cannot"`
 }
 
 // AccountActionDTO is a four-eyes account action request (06 H-47): an
@@ -75,6 +76,7 @@ type AccountActionDTO struct {
 	UserID      string    `json:"user_id" format:"uuid"`
 	Action      string    `json:"action" enum:"suspend,revoke_sessions,reset_mfa"`
 	Status      string    `json:"status" enum:"pending,approved,expired"`
+	Reason      string    `json:"reason" doc:"The requester's reason (audited)"`
 	RequestedBy string    `json:"requested_by" format:"uuid"`
 	RequestedAt time.Time `json:"requested_at"`
 	ExpiresAt   time.Time `json:"expires_at"`
@@ -85,7 +87,7 @@ func toAccountActionDTO(r *AccountActionRequest) *AccountActionDTO {
 		return nil
 	}
 	return &AccountActionDTO{RequestID: r.ID.String(), UserID: r.TargetUserID.String(), Action: string(r.Action), Status: string(r.Status),
-		RequestedBy: r.RequestedBy.String(), RequestedAt: r.RequestedAt, ExpiresAt: r.ExpiresAt}
+		Reason: r.Reason, RequestedBy: r.RequestedBy.String(), RequestedAt: r.RequestedAt, ExpiresAt: r.ExpiresAt}
 }
 
 // UserRefDTO names a user in an admin list (no e-mail).
@@ -155,6 +157,10 @@ func toAdminUserDTO(v AdminUser) AdminUserDTO {
 		Locale: u.Locale, MFAEnabled: u.MFAEnabled, CreatedAt: u.CreatedAt, LastLoginAt: u.LastLoginAt,
 		SuspendedAt: u.SuspendedAt, SuspensionReason: u.SuspensionReason, Student: AdminStudentDTO{Status: "none"},
 		PlatformRoles: make([]string, 0, len(v.PlatformRoles)), Memberships: make([]MembershipDTO, 0, len(v.Memberships)),
+		PendingActions: make([]AccountActionDTO, len(v.PendingActions)),
+	}
+	for i := range v.PendingActions {
+		d.PendingActions[i] = *toAccountActionDTO(&v.PendingActions[i])
 	}
 	if v.ShowBirthDate && u.BirthDate != nil {
 		d.BirthDate = u.BirthDate.String()

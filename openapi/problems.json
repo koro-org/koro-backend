@@ -318,6 +318,12 @@
     "type": "urn:koro:problem:directory.empty_patch"
   },
   {
+    "code": "directory.faculty_exists",
+    "status": 409,
+    "title": "Faculty already exists",
+    "type": "urn:koro:problem:directory.faculty_exists"
+  },
+  {
     "code": "directory.invalid_state",
     "status": 409,
     "title": "Club state does not allow this change",

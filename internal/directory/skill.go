@@ -10,12 +10,16 @@ import (
 	"koro/internal/platform/problem"
 )
 
-// SkillQuery narrows listSkills (04 §2.3: q, category).
+// SkillQuery narrows listSkills (04 §2.3: q, category) and adminListSkills
+// (+ state).
 type SkillQuery struct {
 	Q        string
 	Category SkillCategory
-	Limit    int
-	After    *After
+	// State is adminListSkills' choice (StateAll by default there); the
+	// public listSkills always lists the active skills.
+	State ActiveState
+	Limit int
+	After *After
 }
 
 // SkillPage is a page of skills.
@@ -50,6 +54,21 @@ func (s *service) ListSkills(ctx context.Context, a authz.Actor, q SkillQuery) (
 	if err := authz.Can(ctx, a, authz.DirectorySkillList, catalogResource); err != nil {
 		return SkillPage{}, err
 	}
+	q.State = StateActive
+	return s.listSkills(ctx, q)
+}
+
+// AdminListSkills implements Service (BE-128): the skills of q.State,
+// both names, for the taxonomy's managers.
+func (s *service) AdminListSkills(ctx context.Context, a authz.Actor, q SkillQuery) (SkillPage, error) {
+	if err := authz.Can(ctx, a, authz.DirectorySkillManage, adminSurface); err != nil {
+		return SkillPage{}, err
+	}
+	return s.listSkills(ctx, q)
+}
+
+// listSkills is one page of skills after the caller's authz.
+func (s *service) listSkills(ctx context.Context, q SkillQuery) (SkillPage, error) {
 	text, err := cleanQuery("query.q", q.Q)
 	if err != nil {
 		return SkillPage{}, err
@@ -58,7 +77,7 @@ func (s *service) ListSkills(ctx context.Context, a authz.Actor, q SkillQuery) (
 		return SkillPage{}, problem.Field("query.category", "unknown category")
 	}
 	limit := page.ClampLimit(q.Limit)
-	rows, err := s.d.Store.ListSkills(ctx, SkillFilter{Q: text, Category: q.Category}, q.After, limit+1)
+	rows, err := s.d.Store.ListSkills(ctx, SkillFilter{Q: text, Category: q.Category, State: q.State}, q.After, limit+1)
 	if err != nil {
 		return SkillPage{}, err
 	}

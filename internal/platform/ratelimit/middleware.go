@@ -19,7 +19,7 @@ import (
 
 // AccessReasonHeader carries the justification of a break-glass request
 // (03 §6.3); with it, B operations also count against break_glass.
-const AccessReasonHeader = "X-Koro-Access-Reason"
+const AccessReasonHeader = httpx.HeaderAccessReason
 
 // Middleware applies the operation's x-koro-rate-limit class (op.Koro
 // always writes one). Register it on the root API after authentication,

@@ -160,12 +160,12 @@ func (s *service) ListTransfers(ctx context.Context, a authz.Actor, q TransferQu
 	f := q.Filter
 	switch {
 	case f.Status != "" && !f.Status.Valid():
-		return TransferPage{}, problem.Field("query.status", "is not a transfer status")
+		return TransferPage{}, problem.Field(q.loc("status"), "is not a transfer status")
 	case f.ValueFrom != nil && f.ValueTo != nil && f.ValueTo.Before(*f.ValueFrom):
-		return TransferPage{}, problem.Field("query.value_date_to", "must not be before value_date_from")
+		return TransferPage{}, problem.Field(q.loc("value_date_to"), "must not be before value_date_from")
 	}
 	if f.Q != "" {
-		v, err := cleanText("query.q", f.Q, 0, 100)
+		v, err := cleanText(q.loc("q"), f.Q, 0, 100)
 		if err != nil {
 			return TransferPage{}, err
 		}

@@ -116,7 +116,7 @@ type Service interface {
 	// a 5-minute URL, audited.
 	DownloadDocument(ctx context.Context, a authz.Actor, orgID, partyID, documentID uuid.UUID) (DocumentLink, error)
 
-	// AdminListParties is adminListLegalParties (parties.legal_party.read).
+	// AdminListParties is adminQueryLegalParties and adminListLegalParties (parties.legal_party.read).
 	AdminListParties(ctx context.Context, a authz.Actor, q AdminQuery) (PartyPage, error)
 	// AdminCreateParty is adminCreateLegalParty (parties.legal_party.create):
 	// a payee or platform party, pending_verification.

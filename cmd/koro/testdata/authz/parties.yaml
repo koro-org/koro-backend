@@ -1,4 +1,4 @@
-# Authz matrix of the parties module (03 §5.13, 04 §2.13; BE-036, BE-037). 29 operations × 18 personas.
+# Authz matrix of the parties module (03 §5.13, 04 §2.13; BE-036, BE-037, BE-128). 30 operations × 18 personas.
 # Org surface (03 §3.6, §7.6): members of the org without the role → 403 before any row is read
 # (no ID probing), non-members → 404, every platform role sees the surface (403 unless
 # platform_admin/finance_admin); the org is looked up first, so an unknown org is 404 for everyone.
@@ -281,13 +281,26 @@ operations:
       finance_admin: 200
     variants:
       - name: filtered
-        query: { kind: payee, status: verified, q: matris }
+        query: { kind: payee, status: verified }
         expect:
           anonymous: 401
           "@no_platform_role": 403
           "@other_staff": 403
           platform_admin: 200
           finance_admin: 200
+
+  adminQueryLegalParties:
+    method: POST
+    path: /api/v1/admin/legal-parties/search
+    action: parties.legal_party.read
+    body: bodies/parties/query_parties.json
+    note: BE-128 read sent as POST (a title or tax number stays out of the URL); the cells of adminListLegalParties
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
 
   adminCreateLegalParty:
     method: POST

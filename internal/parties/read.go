@@ -109,10 +109,10 @@ func (s *service) AdminListParties(ctx context.Context, a authz.Actor, q AdminQu
 	if q.Q != "" {
 		n, err := textx.NormalizeText(q.Q)
 		if err != nil {
-			return PartyPage{}, problem.Field("query.q", "contains control or bidi characters")
+			return PartyPage{}, problem.Field("body.q", "contains control or bidi characters")
 		}
 		if c := utf8.RuneCountInString(n); c < 2 || c > 100 {
-			return PartyPage{}, problem.Field("query.q", "must be 2-100 characters")
+			return PartyPage{}, problem.Field("body.q", "must be 2-100 characters")
 		}
 		f.Q = n
 	}

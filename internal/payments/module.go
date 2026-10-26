@@ -116,7 +116,7 @@ type Service interface {
 	// MakeDefaultCollectionAccount is adminMakeDefaultCollectionAccount (R).
 	MakeDefaultCollectionAccount(ctx context.Context, a authz.Actor, id uuid.UUID, proof identity.ReauthProof) (CollectionAccount, error)
 
-	// ListTransfers is adminListIncomingTransfers.
+	// ListTransfers is adminQueryIncomingTransfers and adminListIncomingTransfers.
 	ListTransfers(ctx context.Context, a authz.Actor, q TransferQuery) (TransferPage, error)
 	// GetTransfer is adminGetIncomingTransfer: the transfer and the orders it
 	// may pay (its reference code and amount).

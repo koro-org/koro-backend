@@ -29,7 +29,7 @@ const (
 	maxQueryLen  = 100
 )
 
-// AdminUserQuery is one page of adminSearchUsers.
+// AdminUserQuery is one page of adminQueryUsers (adminSearchUsers: status only).
 type AdminUserQuery struct {
 	Q      string // an exact e-mail address or a name fragment (2–100 characters); "" = all
 	Status Status // "" = every status
@@ -57,6 +57,10 @@ type AdminUser struct {
 	StudentStatus authz.StudentStatus
 	// ShowBirthDate: only the dpo column of 04 §V.5 sees the birth date.
 	ShowBirthDate bool
+	// PendingActions are the open four-eyes requests against the account
+	// (06 H-47): pending and not expired, oldest first. A second
+	// platform_admin sees what waits for them (BE-128).
+	PendingActions []AccountActionRequest
 }
 
 // targetUser is the authz view of an account an admin acts on (03 §3.5:
@@ -80,7 +84,7 @@ func cleanReason(raw, location string) (string, error) {
 	return r, nil
 }
 
-// SearchUsers implements Service (adminSearchUsers): rate class search,
+// SearchUsers implements Service (adminQueryUsers, adminSearchUsers): rate class search,
 // every search audited with what kind of query it was and whom it found
 // (never the query itself: it may be an e-mail address).
 func (s *service) SearchUsers(ctx context.Context, a authz.Actor, q AdminUserQuery) (AdminUserPage, error) {
@@ -91,7 +95,7 @@ func (s *service) SearchUsers(ctx context.Context, a authz.Actor, q AdminUserQue
 	kind := "all"
 	if raw := strings.TrimSpace(q.Q); raw != "" {
 		if strings.Contains(raw, "@") {
-			_, normalized, err := parseEmail(raw, "query.q")
+			_, normalized, err := parseEmail(raw, "body.q")
 			if err != nil {
 				return AdminUserPage{}, err
 			}
@@ -99,7 +103,7 @@ func (s *service) SearchUsers(ctx context.Context, a authz.Actor, q AdminUserQue
 		} else {
 			name, err := textx.NormalizeText(raw)
 			if n := utf8.RuneCountInString(name); err != nil || n < minQueryLen || n > maxQueryLen {
-				return AdminUserPage{}, invalid(problem.ErrValidation, "query.q", "must be an e-mail address or 2-100 characters of a name")
+				return AdminUserPage{}, invalid(problem.ErrValidation, "body.q", "must be an e-mail address or 2-100 characters of a name")
 			}
 			search.Name, kind = name, "name"
 		}
@@ -163,7 +167,25 @@ func (s *service) adminView(ctx context.Context, a authz.Actor, u User) (AdminUs
 		return AdminUser{}, err
 	}
 	out.Student, out.StudentStatus = st.Active, st.Status
+	if out.PendingActions, err = s.openAccountActions(ctx, u.ID); err != nil {
+		return AdminUser{}, err
+	}
 	return out, nil
+}
+
+// openAccountActions returns the four-eyes requests against userID that
+// still wait for the second platform_admin: pending and not expired at
+// now (an expired one is closed by the next call of its action), oldest
+// first.
+func (s *service) openAccountActions(ctx context.Context, userID uuid.UUID) ([]AccountActionRequest, error) {
+	all, err := s.d.Store.AccountActionsOf(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	now := s.now()
+	return slices.DeleteFunc(all, func(r AccountActionRequest) bool {
+		return r.Status != AccountActionPending || !now.Before(r.ExpiresAt)
+	}), nil
 }
 
 // AdminActionResult is the outcome of an account action that may need a

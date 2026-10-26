@@ -230,7 +230,7 @@ type Service interface {
 	// RegenerateRecoveryCodes is regenerateRecoveryCodes (R).
 	RegenerateRecoveryCodes(ctx context.Context, a authz.Actor, proof ReauthProof) (RecoveryCodes, error)
 
-	// SearchUsers is adminSearchUsers (audited).
+	// SearchUsers is adminQueryUsers and adminSearchUsers (audited).
 	SearchUsers(ctx context.Context, a authz.Actor, q AdminUserQuery) (AdminUserPage, error)
 	// AdminUser is adminGetUser (no sensitive club membership).
 	AdminUser(ctx context.Context, a authz.Actor, id uuid.UUID) (AdminUser, error)

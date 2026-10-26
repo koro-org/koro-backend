@@ -106,8 +106,9 @@ func Register(api huma.API, svc Service) {
 
 	op.Register(api, "catalog", huma.Operation{
 		OperationID: "adminListOfferingReviewQueue", Method: http.MethodGet, Path: "/admin/offerings",
-		Summary:     "List the offerings waiting for the platform decision",
-		Description: "Oldest submission first.",
+		Summary: "List the offerings waiting for the platform decision",
+		Description: "Oldest submission first. approval.created_by is the offering's creator, who never decides it " +
+			"(adminDecideOffering: 403 authz.four_eyes_violation).",
 	}, op.Meta{Action: string(authz.CatalogOfferingReviewQueue), Surface: op.SurfaceAdmin}, h.adminQueue)
 
 	op.Register(api, "catalog", huma.Operation{
@@ -383,6 +384,7 @@ type OfferingCardDTO struct {
 // OfferingApprovalDTO is the management block of an offering (its seller's
 // managers and platform staff only: the buyer never sees the payee).
 type OfferingApprovalDTO struct {
+	CreatedBy                  string        `json:"created_by" format:"uuid" doc:"The member who created the offering: never its platform decider (four eyes)"`
 	DefaultPayeeID             string        `json:"default_payee_id,omitempty" format:"uuid"`
 	QuantityTotal              *int          `json:"quantity_total" doc:"null: unlimited"`
 	QuantitySold               int           `json:"quantity_sold"`
@@ -443,7 +445,7 @@ func offeringDTO(v OfferingView) OfferingDTO {
 			flags[i] = SponsorFlag(f)
 		}
 		out.Approval = &OfferingApprovalDTO{
-			DefaultPayeeID: httpx.IDStr(o.DefaultPayeeID), QuantityTotal: o.QuantityTotal, QuantitySold: o.QuantitySold,
+			CreatedBy: o.CreatedBy.String(), DefaultPayeeID: httpx.IDStr(o.DefaultPayeeID), QuantityTotal: o.QuantityTotal, QuantitySold: o.QuantitySold,
 			InvoiceTrigger: string(o.InvoiceTrigger), BlockedSponsorFlags: flags,
 			RequiresUniversityApproval: o.RequiresUniversityApproval, UniversityApprovalStatus: string(o.UniversityApprovalStatus),
 			UniversityDecidedAt: db.UTCPtr(o.UniversityApprovedAt), SubmittedAt: db.UTCPtr(o.SubmittedAt), ApprovedAt: db.UTCPtr(o.ApprovedAt),

@@ -1,4 +1,4 @@
-# Authz matrix of the audit module (03 §5.21, 04 §2.21; BE-007). 4 operations × 18 personas.
+# Authz matrix of the audit module (03 §5.21, 04 §2.21; BE-007, BE-128). 6 operations × 18 personas.
 # Org surface (03 §3.6): members of the org without the role → 403, non-members → 404, every
 # platform role sees the surface (403 unless dpo/platform_admin). Admin surface (03 §7.2-3):
 # everyone without the role → 403. dpo, platform_admin, university_rep and company_admin
@@ -78,6 +78,40 @@ operations:
           finance_admin: 403
           talent_auditor: 403
 
+  queryOrgAuditEvents:
+    method: POST
+    path: /api/v1/orgs/{org_id}/audit-events/search
+    action: audit.event.list_org
+    path_params: { org_id: club_a }
+    body: bodies/audit/query_events_actor.json
+    note: BE-128 read sent as POST (the actor's user ID stays out of the URL); the cells of listOrgAuditEvents
+    expect:
+      anonymous: 401
+      "@outsiders_a": 404
+      club_member: 403
+      club_admin: 200
+      moderator: 403
+      support: 403
+      dpo: 200
+      platform_admin: 200
+      finance_admin: 403
+      talent_auditor: 403
+    variants:
+      - name: company_org
+        path_params: { org_id: company_a }
+        body: bodies/audit/query_events.json
+        expect:
+          anonymous: 401
+          "@outsiders_company_a": 404
+          company_member: 403
+          company_admin: 200
+          moderator: 403
+          support: 403
+          dpo: 200
+          platform_admin: 200
+          finance_admin: 403
+          talent_auditor: 403
+
   adminListAuditEvents:
     method: GET
     path: /api/v1/admin/audit-events
@@ -102,6 +136,34 @@ operations:
           moderator: 403
           support: 403
           dpo: 200               # 03 §6.3: weekly break-glass review
+          platform_admin: 200
+          finance_admin: 403
+          talent_auditor: 403
+
+  adminQueryAuditEvents:
+    method: POST
+    path: /api/v1/admin/audit-events/search
+    action: audit.event.list
+    body: bodies/audit/query_events_actor.json
+    note: BE-128 read sent as POST (the actor's user ID stays out of the URL); the cells of adminListAuditEvents
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      moderator: 403
+      support: 403
+      dpo: 200
+      platform_admin: 200
+      finance_admin: 403
+      talent_auditor: 403
+    variants:
+      - name: break_glass_review
+        body: bodies/audit/query_events_break_glass.json
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          moderator: 403
+          support: 403
+          dpo: 200
           platform_admin: 200
           finance_admin: 403
           talent_auditor: 403

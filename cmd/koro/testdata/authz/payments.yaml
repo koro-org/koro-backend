@@ -1,4 +1,4 @@
-# Authz matrix of the payments module (03 §5.16, 04 §2.16; BE-041, BE-043). 23 operations × 18 personas: 04 §2.16's
+# Authz matrix of the payments module (03 §5.16, 04 §2.16; BE-041, BE-043, BE-128). 30 operations × 18 personas: 04 §2.16's
 # 19, the return's request and second eye (06 H-56, T-79, T-228), the model C direct confirmation (T-18) and the
 # refunds due (BE-043). Everything is the admin surface (03 §7.2-3): an actor without the role gets 403 before
 # anything is read. Cells: collection accounts list pad, fin; create fin·R; approve pad·4·R, fin·4·R; retire /
@@ -156,13 +156,26 @@ operations:
       finance_admin: 200
     variants:
       - name: filters
-        query: { status: unmatched, value_date_from: "2026-10-01", value_date_to: "2026-10-02", q: KRA3CMA4HG }
+        query: { status: unmatched, value_date_from: "2026-10-01", value_date_to: "2026-10-02" }
         expect:
           anonymous: 401
           "@no_platform_role": 403
           "@other_staff": 403
           platform_admin: 200
           finance_admin: 200
+
+  adminQueryIncomingTransfers:
+    method: POST
+    path: /api/v1/admin/incoming-transfers/search
+    action: payments.transfer.list
+    body: bodies/payments/query_transfers.json
+    note: BE-128 read sent as POST (a sender's name stays out of the URL); the cells of adminListIncomingTransfers
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
 
   adminGetIncomingTransfer:
     method: GET

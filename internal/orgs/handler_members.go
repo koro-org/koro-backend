@@ -114,9 +114,9 @@ type MemberPath struct {
 }
 
 // AccessHeader is the break-glass header of listOrgMembers and
-// getOrgMember (03 §6.3).
+// getOrgMember (03 §6.3; support and platform_admin).
 type AccessHeader struct {
-	AccessReason string `header:"X-Koro-Access-Reason" maxLength:"500" doc:"Break-glass justification (support, platform_admin: 10–500 characters)"`
+	httpx.AccessReasonHeader
 }
 
 type listMembersInput struct {
@@ -170,7 +170,7 @@ func (h handler) listMembers(ctx context.Context, in *listMembersInput) (*member
 			}
 		}
 	}
-	p, err := h.svc.ListMembers(ctx, a, in.id(), q, Access{Reason: in.AccessReason})
+	p, err := h.svc.ListMembers(ctx, a, in.id(), q, Access{Reason: in.AccessReason.String()})
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +202,7 @@ func (h handler) getMember(ctx context.Context, in *getMemberInput) (*memberOutp
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.GetMember(ctx, a, in.id(), httpx.ParseID(in.MembershipID), Access{Reason: in.AccessReason})
+	v, err := h.svc.GetMember(ctx, a, in.id(), httpx.ParseID(in.MembershipID), Access{Reason: in.AccessReason.String()})
 	if err != nil {
 		return nil, err
 	}

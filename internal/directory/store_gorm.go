@@ -208,7 +208,7 @@ func (s gormStore) UpdateUniversity(ctx context.Context, u University) (Universi
 //
 // cross-org: the public university catalog.
 func (s gormStore) ListUniversities(ctx context.Context, f UniversityFilter, after *After, limit int) ([]University, error) {
-	q := db.Conn(ctx, s.orm).Model(&University{}).Select(uniCols).Where("is_active")
+	q := activeState(db.Conn(ctx, s.orm).Model(&University{}).Select(uniCols), f.State)
 	if f.City != "" {
 		q = q.Where("public.koro_norm(city) = public.koro_norm( ?)", f.City)
 	}
@@ -283,6 +283,29 @@ func (s gormStore) MatchDomain(ctx context.Context, candidates []string) (EmailD
 		return EmailDomain{}, ErrNotFound
 	}
 	return out[0], nil
+}
+
+// DomainsOf implements Store.
+//
+// cross-org: public reference data of one university.
+func (s gormStore) DomainsOf(ctx context.Context, universityID uuid.UUID) ([]EmailDomain, error) {
+	var out []EmailDomain
+	if err := db.Conn(ctx, s.orm).Model(&EmailDomain{}).Select(domainCols).Where("university_id = ?", universityID).
+		Order("domain").Find(&out).Error; err != nil {
+		return nil, wrap("domains of university", err)
+	}
+	return out, nil
+}
+
+// activeState narrows a list by is_active (ActiveState).
+func activeState(q *gorm.DB, st ActiveState) *gorm.DB {
+	switch st {
+	case StateAll:
+		return q
+	case StateInactive:
+		return q.Where("NOT is_active")
+	}
+	return q.Where("is_active")
 }
 
 // ---- faculties
@@ -585,7 +608,7 @@ func (s gormStore) SkillBySlug(ctx context.Context, slug string) (Skill, error) 
 //
 // cross-org: the public skill taxonomy.
 func (s gormStore) ListSkills(ctx context.Context, f SkillFilter, after *After, limit int) ([]Skill, error) {
-	q := db.Conn(ctx, s.orm).Model(&Skill{}).Select(skillCols).Where("is_active")
+	q := activeState(db.Conn(ctx, s.orm).Model(&Skill{}).Select(skillCols), f.State)
 	if f.Category != "" {
 		q = q.Where("category = ?", string(f.Category))
 	}

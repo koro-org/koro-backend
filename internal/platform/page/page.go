@@ -48,6 +48,14 @@ type Params struct {
 	Cursor string `query:"cursor" maxLength:"512" doc:"Opaque cursor from next_cursor"`
 }
 
+// BodyParams are Params in the request body of a search sent as POST
+// (BE-128): the cursor carries a fingerprint of the criteria, so it stays
+// out of the URL with them. Embed it in the body struct.
+type BodyParams struct {
+	Limit  int    `json:"limit,omitempty" minimum:"1" maximum:"100" default:"25" doc:"Page size"`
+	Cursor string `json:"cursor,omitempty" maxLength:"512" doc:"Opaque cursor from next_cursor"`
+}
+
 // Cursor is the decoded position after the last row of a page.
 type Cursor struct {
 	V    int      `json:"v"`

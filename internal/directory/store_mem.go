@@ -243,7 +243,7 @@ func (s *MemStore) ListUniversities(_ context.Context, f UniversityFilter, after
 			short = *u.ShortName
 		}
 		switch {
-		case !u.IsActive:
+		case !f.State.keeps(u.IsActive):
 		case f.City != "" && memNorm(u.City) != memNorm(f.City):
 		case f.Type != "" && u.Type != f.Type:
 		case f.OrgID != nil && u.OrgID != *f.OrgID:
@@ -331,6 +331,20 @@ func (s *MemStore) MatchDomain(_ context.Context, candidates []string) (EmailDom
 		return EmailDomain{}, ErrNotFound
 	}
 	return best, nil
+}
+
+// DomainsOf implements Store.
+func (s *MemStore) DomainsOf(_ context.Context, universityID uuid.UUID) ([]EmailDomain, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []EmailDomain
+	for _, d := range s.domains {
+		if d.UniversityID == universityID {
+			out = append(out, d)
+		}
+	}
+	slices.SortFunc(out, func(a, b EmailDomain) int { return strings.Compare(a.Domain, b.Domain) })
+	return out, nil
 }
 
 // ---- faculties
@@ -749,7 +763,7 @@ func (s *MemStore) ListSkills(_ context.Context, f SkillFilter, after *After, li
 			en = *k.NameEN
 		}
 		switch {
-		case !k.IsActive:
+		case !f.State.keeps(k.IsActive):
 		case f.Category != "" && k.Category != f.Category:
 		case f.Q != "" && !memMatch(k.NameTR, f.Q) && !memMatch(en, f.Q):
 		case !s.after(SortNewest, k.NameTR, k.ID, after):

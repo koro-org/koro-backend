@@ -132,10 +132,16 @@ func TestLegalParty_VKNMaskedForOrgRoles(t *testing.T) {
 		if out["tax_no"] != vknA || out["mersis_no"] != mersisA || out["tax_ids_masked"] != false {
 			t.Fatalf("%s on the org surface: %v", p, out)
 		}
-		rec, _ = call(t, app, p, http.MethodGet, "/api/v1/admin/legal-parties?q="+vknA, nil, nil)
+		rec, _ = call(t, app, p, http.MethodPost, "/api/v1/admin/legal-parties/search", map[string]any{"q": vknA}, nil)
 		wantStatus(t, rec, http.StatusOK)
 		if !strings.Contains(rec.Body.String(), `"tax_no":"`+vknA+`"`) {
-			t.Fatalf("%s admin list by VKN: %s", p, rec.Body.String())
+			t.Fatalf("%s admin search by VKN: %s", p, rec.Body.String())
+		}
+		// BE-128: never in the URL; the deprecated list refuses it.
+		rec, _ = call(t, app, p, http.MethodGet, "/api/v1/admin/legal-parties?q="+vknA, nil, nil)
+		wantStatus(t, rec, http.StatusUnprocessableEntity)
+		if !strings.Contains(rec.Body.String(), `"location":"query.q"`) {
+			t.Fatalf("%s admin list with q in the URL: %s", p, rec.Body.String())
 		}
 	}
 }
@@ -544,7 +550,7 @@ func TestLogs_NoTaxIDs(t *testing.T) {
 	do("finance_admin", http.MethodPost, "/api/v1/admin/legal-parties", ind, nil, 409)
 	ind["tckn"] = badTCKN
 	do("finance_admin", http.MethodPost, "/api/v1/admin/legal-parties", ind, nil, 422)
-	do("finance_admin", http.MethodGet, "/api/v1/admin/legal-parties?q="+vknC, nil, nil, 200)
+	do("finance_admin", http.MethodPost, "/api/v1/admin/legal-parties/search", map[string]any{"q": vknC}, nil, 200)
 	do("platform_admin", http.MethodPost, "/api/v1/admin/legal-parties/"+id+"/verification", map[string]any{"decision": "verified"}, nil, 200)
 	sd, err := parties.NewSeeder(parties.SeederDeps{Store: e.store, Tx: db.NopTx{}, Audit: e.audit, Clock: e.clk, Log: slog.New(slog.NewJSONHandler(e.logs, nil))})
 	if err != nil {

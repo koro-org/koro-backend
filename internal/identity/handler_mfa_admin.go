@@ -9,6 +9,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/consent"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/page"
 	"koro/internal/platform/problem"
@@ -66,17 +67,29 @@ func registerMFAAndAdmin(api huma.API, h handler) {
 		Idempotency: op.IdempotencyOptional}, h.regenerateRecoveryCodes)
 
 	op.Register(api, "identity", huma.Operation{
-		OperationID: "adminSearchUsers", Method: http.MethodGet, Path: "/admin/users",
+		OperationID: "adminQueryUsers", Method: http.MethodPost, Path: "/admin/users/search",
 		Summary: "Search users",
-		Description: "q is an exact e-mail address or a fragment of the name (2-100 characters). Every search is " +
-			"audited (query kind and the users found, not the query).",
+		Description: "Read-only: the criteria are in the body so that an e-mail address or a name never reaches a URL " +
+			"or an access log (BE-128). q is an exact e-mail address or a fragment of the name (2-100 characters); " +
+			"without q every account, newest first. Every search is audited (query kind and the users found, not the " +
+			"query). next_cursor goes back in the body.",
+	}, op.Meta{Action: string(authz.IdentityUserSearch), Surface: op.SurfaceAdmin, RateLimit: op.RateSearch,
+		Idempotency: op.IdempotencyOptional}, h.queryUsers)
+
+	op.Register(api, "identity", huma.Operation{
+		OperationID: "adminSearchUsers", Method: http.MethodGet, Path: "/admin/users", Deprecated: true,
+		Summary: "List users (deprecated: adminQueryUsers)",
+		Description: "Deprecated (BE-128): adminQueryUsers (POST /admin/users/search) takes the search criteria in " +
+			"the body. This list filters by status only, newest first; a q in the query string is 422 (personal data " +
+			"stays out of URLs). Audited like the search.",
 	}, op.Meta{Action: string(authz.IdentityUserSearch), Surface: op.SurfaceAdmin, RateLimit: op.RateSearch}, h.searchUsers)
 
 	op.Register(api, "identity", huma.Operation{
 		OperationID: "adminGetUser", Method: http.MethodGet, Path: "/admin/users/{user_id}",
 		Summary: "Account summary for platform staff",
 		Description: "Status, roles, student verification and non-club memberships; no profile content and never a " +
-			"club membership (a sensitive one must not show).",
+			"club membership (a sensitive one must not show). pending_actions lists the open four-eyes requests " +
+			"against the account (06 H-47: action, requester, reason, expiry), so the second platform_admin sees them.",
 	}, op.Meta{Action: string(authz.IdentityUserRead), Surface: op.SurfaceAdmin}, h.getUser)
 
 	op.Register(api, "identity", huma.Operation{
@@ -84,7 +97,10 @@ func registerMFAAndAdmin(api huma.API, h handler) {
 		Summary: "Suspend an account",
 		Description: "Every session closes (revoke_reason suspended). " + fourEyesAccountDoc + " The last active " +
 			"holder of a privileged role cannot be suspended (409 identity.last_privileged_holder).",
-	}, op.Meta{Action: string(authz.IdentityUserSuspend), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.suspendUser)
+	}, op.Meta{Action: string(authz.IdentityUserSuspend), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional,
+		Responses: []op.Response{{Status: http.StatusAccepted, Body: AdminUserDTO{},
+			Description: "A four-eyes request is open (pending_action); the account is unchanged until a second platform_admin repeats the call"}}},
+		h.suspendUser)
 
 	op.Register(api, "identity", huma.Operation{
 		OperationID: "adminUnsuspendUser", Method: http.MethodPost, Path: "/admin/users/{user_id}/unsuspend",
@@ -95,7 +111,8 @@ func registerMFAAndAdmin(api huma.API, h handler) {
 		OperationID: "adminRevokeUserSessions", Method: http.MethodPost, Path: "/admin/users/{user_id}/sessions/revoke",
 		DefaultStatus: http.StatusNoContent, Summary: "Close every session of a user",
 		Description: "204 when done. " + fourEyesAccountDoc + " Only a platform_admin can be the second eye.",
-	}, op.Meta{Action: string(authz.IdentityUserRevokeSessions), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.revokeUserSessions)
+	}, op.Meta{Action: string(authz.IdentityUserRevokeSessions), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional,
+		Responses: fourEyesAccepted}, h.revokeUserSessions)
 
 	op.Register(api, "identity", huma.Operation{
 		OperationID: "adminResetUserMfa", Method: http.MethodPost, Path: "/admin/users/{user_id}/mfa/reset",
@@ -103,7 +120,7 @@ func registerMFAAndAdmin(api huma.API, h handler) {
 		Description: "Deletes the TOTP secret and recovery codes, closes every session and notifies the user (204). Not " +
 			"for the own account (403). " + fourEyesAccountDoc,
 	}, op.Meta{Action: string(authz.IdentityUserResetMfa), Surface: op.SurfaceAdmin, Reauth: true, RateLimit: op.RateReauth,
-		Idempotency: op.IdempotencyOptional}, h.resetUserMFA)
+		Idempotency: op.IdempotencyOptional, Responses: fourEyesAccepted}, h.resetUserMFA)
 
 	op.Register(api, "identity", huma.Operation{
 		OperationID: "adminListPlatformRoles", Method: http.MethodGet, Path: "/admin/platform-roles",
@@ -137,6 +154,11 @@ func registerMFAAndAdmin(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.IdentityPlatformRoleRevoke), Surface: op.SurfaceAdmin, Reauth: true, RateLimit: op.RateReauth,
 		Idempotency: op.IdempotencyOptional}, h.revokePlatformRole)
 }
+
+// fourEyesAccepted is the 202 of the admin account operations that answer
+// 204 when done (06 H-47).
+var fourEyesAccepted = []op.Response{{Status: http.StatusAccepted, Body: AccountActionDTO{},
+	Description: "A four-eyes request is open; nothing changed until a second platform_admin repeats the call"}}
 
 // fourEyesAccountDoc describes 06 H-47 in the admin account operations.
 const fourEyesAccountDoc = "Against a holder of platform_admin, finance_admin or talent_auditor the first call only " +
@@ -266,9 +288,17 @@ func (h handler) regenerateRecoveryCodes(ctx context.Context, in *reauthOnlyInpu
 // ---- admin users
 
 type searchUsersInput struct {
-	Q      string `query:"q" maxLength:"254" doc:"An exact e-mail address or a fragment of the name (2-100 characters)"`
+	Q      string `query:"q" hidden:"true" doc:"Moved to adminQueryUsers (BE-128): 422 when set"`
 	Status string `query:"status" enum:"pending_email,active,suspended,erased"`
 	page.Params
+}
+
+type queryUsersInput struct {
+	Body struct {
+		Q      string `json:"q,omitempty" maxLength:"254" doc:"An exact e-mail address or a fragment of the name (2-100 characters)"`
+		Status string `json:"status,omitempty" enum:"pending_email,active,suspended,erased"`
+		page.BodyParams
+	}
 }
 
 type searchUsersOutput struct {
@@ -277,17 +307,32 @@ type searchUsersOutput struct {
 
 const userSort = "id_desc"
 
+// searchUsers is the deprecated GET twin of queryUsers (status only).
 func (h handler) searchUsers(ctx context.Context, in *searchUsersInput) (*searchUsersOutput, error) {
+	if in.Q != "" {
+		return nil, httpx.QueryMoved("q", "adminQueryUsers")
+	}
+	return h.userPage(ctx, "adminSearchUsers", "", in.Status, in.Cursor, in.Limit)
+}
+
+func (h handler) queryUsers(ctx context.Context, in *queryUsersInput) (*searchUsersOutput, error) {
+	b := in.Body
+	return h.userPage(ctx, "adminQueryUsers", b.Q, b.Status, b.Cursor, b.Limit)
+}
+
+// userPage runs one page of the admin user search; the cursor is bound to
+// the operation and its criteria.
+func (h handler) userPage(ctx context.Context, opID, query, status, cursor string, limit int) (*searchUsersOutput, error) {
 	a, err := authz.ActorFrom(ctx)
 	if err != nil {
 		return nil, err
 	}
-	fp := page.Fingerprint("adminSearchUsers", in.Q, in.Status)
-	c, err := page.Decode(in.Cursor, userSort, fp, 1)
+	fp := page.Fingerprint(opID, query, status)
+	c, err := page.Decode(cursor, userSort, fp, 1)
 	if err != nil {
 		return nil, err
 	}
-	q := AdminUserQuery{Q: in.Q, Status: Status(in.Status), Limit: in.Limit}
+	q := AdminUserQuery{Q: query, Status: Status(status), Limit: limit}
 	if c != nil {
 		id, err := c.UUID(0)
 		if err != nil {

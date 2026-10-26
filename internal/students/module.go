@@ -245,7 +245,7 @@ type Service interface {
 	// active again within the suspension window; an active student
 	// verification is required (403 students.verification_required).
 	ResumeMyAccessGrant(ctx context.Context, a authz.Actor, grantID uuid.UUID) (GrantView, error)
-	// ListCompanyStudents is listCompanyGrantedStudents
+	// ListCompanyStudents is queryCompanyGrantedStudents and listCompanyGrantedStudents
 	// (students.access_grant.list_company).
 	ListCompanyStudents(ctx context.Context, a authz.Actor, orgID uuid.UUID, q CompanyStudentQuery) (CompanyStudentPage, error)
 	// GetCompanyStudentProfile is getCompanyStudentProfile

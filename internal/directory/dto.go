@@ -23,10 +23,25 @@ type UniversityList struct {
 	NextCursor string              `json:"next_cursor,omitempty"`
 }
 
-// FacultyDTO is a faculty of getUniversity.
+// AdminUniversityCardDTO is a university in adminListUniversities: the
+// card, its YÖK code and whether it is active (BE-128).
+type AdminUniversityCardDTO struct {
+	UniversityCardDTO
+	YokCode  string `json:"yok_code"`
+	IsActive bool   `json:"is_active"`
+}
+
+// AdminUniversityList is a page of AdminUniversityCardDTO.
+type AdminUniversityList struct {
+	Items      []AdminUniversityCardDTO `json:"items"`
+	NextCursor string                   `json:"next_cursor,omitempty"`
+}
+
+// FacultyDTO is a faculty of getUniversity and adminCreateFaculty.
 type FacultyDTO struct {
 	FacultyID string `json:"faculty_id"`
 	Name      string `json:"name"`
+	YokCode   string `json:"yok_code,omitempty"`
 }
 
 // UniversityDTO is getUniversity and the admin university operations.
@@ -43,7 +58,14 @@ type UniversityDTO struct {
 	Faculties    []FacultyDTO `json:"faculties"`
 }
 
-// EmailDomainDTO is adminPutUniversityEmailDomain.
+// EmailDomainList is adminListUniversityEmailDomains (every domain of a
+// university, by domain).
+type EmailDomainList struct {
+	Items []EmailDomainDTO `json:"items"`
+}
+
+// EmailDomainDTO is adminPutUniversityEmailDomain and an item of
+// adminListUniversityEmailDomains.
 type EmailDomainDTO struct {
 	Domain       string `json:"domain"`
 	UniversityID string `json:"university_id"`
@@ -79,6 +101,12 @@ type SkillDTO struct {
 type SkillList struct {
 	Items      []SkillDTO `json:"items"`
 	NextCursor string     `json:"next_cursor,omitempty"`
+}
+
+// AdminSkillList is a page of adminListSkills.
+type AdminSkillList struct {
+	Items      []AdminSkillDTO `json:"items"`
+	NextCursor string          `json:"next_cursor,omitempty"`
 }
 
 // AdminSkillDTO is a skill as the admin operations return it.
@@ -156,9 +184,13 @@ func toUniversityDTO(u University, facs []Faculty) UniversityDTO {
 		Faculties: make([]FacultyDTO, len(facs)),
 	}
 	for i, f := range facs {
-		d.Faculties[i] = FacultyDTO{FacultyID: f.ID.String(), Name: f.Name}
+		d.Faculties[i] = toFacultyDTO(f)
 	}
 	return d
+}
+
+func toFacultyDTO(f Faculty) FacultyDTO {
+	return FacultyDTO{FacultyID: f.ID.String(), Name: f.Name, YokCode: str(f.YokCode)}
 }
 
 func toDomainDTO(d EmailDomain) EmailDomainDTO {

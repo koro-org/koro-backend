@@ -89,12 +89,8 @@ func installTalentFieldGuard(oapi *huma.OpenAPI) {
 // oapi outside the talent_auditor operations, sorted.
 func TalentFieldViolations(oapi *huma.OpenAPI) []string {
 	var v []string
-	for _, item := range oapi.Paths {
-		for _, op := range []*huma.Operation{item.Get, item.Put, item.Post, item.Delete, item.Options, item.Head, item.Patch, item.Trace} {
-			if op != nil {
-				v = append(v, operationTalentFields(oapi, op)...)
-			}
-		}
+	for _, op := range operationsOf(oapi) {
+		v = append(v, operationTalentFields(oapi, op)...)
 	}
 	slices.Sort(v)
 	return slices.Compact(v)

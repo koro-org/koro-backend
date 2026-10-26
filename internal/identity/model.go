@@ -295,7 +295,7 @@ func (t TOTP) clone() TOTP {
 	return c
 }
 
-// UserSearch is one page of adminSearchUsers, newest first. Exactly one of
+// UserSearch is one page of adminQueryUsers, newest first. Exactly one of
 // Email (normalized, exact) and Name (a fragment of "first last") may be
 // set; neither lists every account (Status still applies).
 type UserSearch struct {

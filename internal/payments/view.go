@@ -75,7 +75,7 @@ type ImportResult struct {
 	Rows       []ImportRow `json:"rows"`
 }
 
-// TransferQuery narrows adminListIncomingTransfers.
+// TransferQuery narrows adminQueryIncomingTransfers (adminListIncomingTransfers: no q).
 type TransferQuery struct {
 	Filter TransferFilter
 	Limit  int
@@ -84,6 +84,17 @@ type TransferQuery struct {
 	// invalid is a malformed query parameter or cursor found by the
 	// handler; it is reported after authorisation (03 §7.2: 403 first).
 	invalid error
+	// in is where the criteria came from, the prefix of the 422 locations:
+	// "body" (adminQueryIncomingTransfers) or "query" (the default).
+	in string
+}
+
+// loc returns the 422 location of a criterion.
+func (q TransferQuery) loc(field string) string {
+	if q.in == "" {
+		return "query." + field
+	}
+	return q.in + "." + field
 }
 
 // TransferPage is a page of transfers, newest value date first.

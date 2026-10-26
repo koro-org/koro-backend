@@ -1,4 +1,4 @@
-# Authz matrix of the directory module (03 §5.3, 04 §2.3; BE-020, club claims BE-022). 22 operations × 18
+# Authz matrix of the directory module (03 §5.3, 04 §2.3; BE-020, club claims BE-022, BE-128). 26 operations × 18
 # personas.
 # The catalog (universities, departments, skills, clubs) is public (P); an inactive university is
 # visible to platform_admin only (others 404). /clubs/{club_id}/... is a resource surface (03 §7.6):
@@ -273,6 +273,51 @@ operations:
       "@other_staff_dir": 403
       platform_admin: 201
 
+  adminListUniversities:
+    method: GET
+    path: /api/v1/admin/universities
+    action: directory.university.manage
+    query: { state: all }
+    note: BE-128 managers' list, inactive universities included
+    expect:
+      anonymous: 401
+      "@no_platform_role_dir": 403
+      "@other_staff_dir": 403
+      platform_admin: 200
+
+  adminListUniversityEmailDomains:
+    method: GET
+    path: /api/v1/admin/universities/{university_id}/email-domains
+    action: directory.university.manage
+    path_params: { university_id: uni_a_university }
+    note: BE-128 every e-mail domain of a university
+    expect:
+      anonymous: 401
+      "@no_platform_role_dir": 403
+      "@other_staff_dir": 403
+      platform_admin: 200
+    variants:
+      - name: unknown_university
+        path_params: { university_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect:
+          anonymous: 401
+          "@no_platform_role_dir": 403
+          "@other_staff_dir": 403
+          platform_admin: 404
+
+  adminCreateFaculty:
+    method: POST
+    path: /api/v1/admin/universities/{university_id}/faculties
+    action: directory.university.manage
+    path_params: { university_id: uni_a_university }
+    body: bodies/directory/create_faculty.json
+    note: BE-128 a faculty for adminCreateDepartment's faculty_id
+    expect:
+      anonymous: 401
+      "@no_platform_role_dir": 403
+      "@other_staff_dir": 403
+      platform_admin: 201
+
   adminCreateSkill:
     method: POST
     path: /api/v1/admin/skills
@@ -290,6 +335,18 @@ operations:
     action: directory.skill.manage
     path_params: { skill_id: skill_a }
     body: bodies/directory/update_skill.json
+    expect:
+      anonymous: 401
+      "@no_platform_role_dir": 403
+      "@other_staff_dir": 403
+      platform_admin: 200
+
+  adminListSkills:
+    method: GET
+    path: /api/v1/admin/skills
+    action: directory.skill.manage
+    query: { state: inactive }
+    note: BE-128 managers' list, both names, inactive skills included
     expect:
       anonymous: 401
       "@no_platform_role_dir": 403

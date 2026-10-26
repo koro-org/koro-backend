@@ -255,12 +255,12 @@ func (p EventRegistrationPath) regID() uuid.UUID { return httpx.ParseID(p.Regist
 
 // AccessHeaders are the break-glass headers of the organiser's reads (03 §6.3).
 type AccessHeaders struct {
-	AccessReason string `header:"X-Koro-Access-Reason" maxLength:"500" doc:"Break-glass justification (support, platform_admin: 10–500 characters)"`
-	TicketRef    string `header:"X-Koro-Ticket-Ref" maxLength:"100" doc:"Support ticket reference (optional)"`
+	httpx.AccessReasonHeader
+	TicketRef string `header:"X-Koro-Ticket-Ref" maxLength:"100" doc:"Support ticket reference (optional)"`
 }
 
 func (a AccessHeaders) access() Access {
-	return Access{Reason: strings.TrimSpace(a.AccessReason), TicketRef: strings.TrimSpace(a.TicketRef)}
+	return Access{Reason: a.AccessReason.String(), TicketRef: strings.TrimSpace(a.TicketRef)}
 }
 
 // ---- createRegistration

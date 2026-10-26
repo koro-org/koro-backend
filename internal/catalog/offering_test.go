@@ -540,6 +540,13 @@ func TestHTTP_OfferingFlow(t *testing.T) {
 	if code, _, _ := req("club_admin", http.MethodPost, "/api/v1/offerings/"+id+"/submit", nil, nil); code != http.StatusOK {
 		t.Fatalf("submit: %d", code)
 	}
+	// BE-128: the review queue names the creator, who never decides it.
+	code, body, _ = req("platform_admin", http.MethodGet, "/api/v1/admin/offerings", nil, nil)
+	items, _ := body["items"].([]any)
+	if code != http.StatusOK || len(items) != 1 ||
+		items[0].(map[string]any)["approval"].(map[string]any)["created_by"] != actor(t, "club_admin").UserID.String() {
+		t.Fatalf("review queue: %d %v", code, body)
+	}
 	if code, _, _ := req("platform_admin", http.MethodPost, "/api/v1/admin/offerings/"+id+"/decision",
 		map[string]any{"decision": "approved"}, nil); code != http.StatusOK {
 		t.Fatalf("decide: %d", code)

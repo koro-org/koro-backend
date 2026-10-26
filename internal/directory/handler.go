@@ -111,6 +111,35 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.DirectoryUniversityManage), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.adminCreateDepartment)
 
 	op.Register(api, "directory", huma.Operation{
+		OperationID: "adminListUniversities", Method: http.MethodGet, Path: "/admin/universities",
+		Summary: "List universities, inactive ones included",
+		Description: "The catalog's managers' list (BE-128): state active, inactive or all (default all); q, city, " +
+			"type and sort as in listUniversities.",
+	}, op.Meta{Action: string(authz.DirectoryUniversityManage), Surface: op.SurfaceAdmin}, h.adminListUniversities)
+
+	op.Register(api, "directory", huma.Operation{
+		OperationID: "adminListUniversityEmailDomains", Method: http.MethodGet,
+		Path:        "/admin/universities/{university_id}/email-domains",
+		Summary:     "List a university's e-mail domains",
+		Description: "Every domain, active or not, by domain (BE-128). An unknown university is 404.",
+	}, op.Meta{Action: string(authz.DirectoryUniversityManage), Surface: op.SurfaceAdmin}, h.adminListDomains)
+
+	op.Register(api, "directory", huma.Operation{
+		OperationID: "adminCreateFaculty", Method: http.MethodPost, Path: "/admin/universities/{university_id}/faculties",
+		DefaultStatus: http.StatusCreated,
+		Summary:       "Add a faculty",
+		Description: "Active at once; adminCreateDepartment can name it as faculty_id (BE-128). Another faculty of the " +
+			"university with that name is 409 directory.faculty_exists. Bulk import is the `koro seed reference` command.",
+	}, op.Meta{Action: string(authz.DirectoryUniversityManage), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.adminCreateFaculty)
+
+	op.Register(api, "directory", huma.Operation{
+		OperationID: "adminListSkills", Method: http.MethodGet, Path: "/admin/skills",
+		Summary: "List the skill taxonomy, inactive skills included",
+		Description: "The taxonomy's managers' list (BE-128): both names (name_tr, name_en) and is_active; state " +
+			"active, inactive or all (default all); q and category as in listSkills. Newest first.",
+	}, op.Meta{Action: string(authz.DirectorySkillManage), Surface: op.SurfaceAdmin}, h.adminListSkills)
+
+	op.Register(api, "directory", huma.Operation{
 		OperationID: "adminCreateSkill", Method: http.MethodPost, Path: "/admin/skills", DefaultStatus: http.StatusCreated,
 		Summary: "Add a skill",
 	}, op.Meta{Action: string(authz.DirectorySkillManage), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.adminCreateSkill)
@@ -605,7 +634,128 @@ func (h handler) adminCreateDepartment(ctx context.Context, in *adminCreateDepar
 	return &departmentOutput{Body: toDepartmentDTO(d)}, nil
 }
 
+// adminState maps the state query parameter of the admin lists (default
+// all).
+func adminState(s string) ActiveState {
+	switch s {
+	case "active":
+		return StateActive
+	case "inactive":
+		return StateInactive
+	}
+	return StateAll
+}
+
+type adminListUniversitiesInput struct {
+	page.Params
+	Q     string `query:"q" maxLength:"100" doc:"Free text, 2-100 characters"`
+	City  string `query:"city" maxLength:"60"`
+	Type  string `query:"type" enum:"state,foundation,other"`
+	Sort  string `query:"sort" enum:"name" doc:"name (A-Z, Turkish order); default newest first"`
+	State string `query:"state" enum:"active,inactive,all" doc:"is_active filter; default all"`
+}
+
+type adminUniversityListOutput struct{ Body AdminUniversityList }
+
+func (h handler) adminListUniversities(ctx context.Context, in *adminListUniversitiesInput) (*adminUniversityListOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sort := sortParam(in.Sort)
+	fp := page.Fingerprint("adminListUniversities", in.Q, in.City, in.Type, in.State)
+	after, err := cursorOf(in.Cursor, sort, fp)
+	if err != nil {
+		return nil, err
+	}
+	p, err := h.svc.AdminListUniversities(ctx, a, UniversityQuery{
+		Q: in.Q, City: in.City, Type: UniversityType(in.Type), Sort: sort, State: adminState(in.State), Limit: in.Limit, After: after,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := &adminUniversityListOutput{Body: AdminUniversityList{Items: make([]AdminUniversityCardDTO, len(p.Items))}}
+	for i, u := range p.Items {
+		out.Body.Items[i] = AdminUniversityCardDTO{UniversityCardDTO: toUniversityCard(u), YokCode: u.YokCode, IsActive: u.IsActive}
+	}
+	out.Body.NextCursor = nextCursor(p.Next, p.Sort, fp)
+	return out, nil
+}
+
+type domainListOutput struct{ Body EmailDomainList }
+
+func (h handler) adminListDomains(ctx context.Context, in *UniversityPath) (*domainListOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ds, err := h.svc.AdminListUniversityEmailDomains(ctx, a, httpx.ParseID(in.UniversityID))
+	if err != nil {
+		return nil, err
+	}
+	out := &domainListOutput{Body: EmailDomainList{Items: make([]EmailDomainDTO, len(ds))}}
+	for i, d := range ds {
+		out.Body.Items[i] = toDomainDTO(d)
+	}
+	return out, nil
+}
+
+type adminCreateFacultyInput struct {
+	UniversityPath
+	Body struct {
+		Name    string `json:"name" minLength:"2" maxLength:"200"`
+		YokCode string `json:"yok_code,omitempty" maxLength:"40"`
+	}
+}
+
+type facultyOutput struct{ Body FacultyDTO }
+
+func (h handler) adminCreateFaculty(ctx context.Context, in *adminCreateFacultyInput) (*facultyOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	f, err := h.svc.AdminCreateFaculty(ctx, a, httpx.ParseID(in.UniversityID), FacultyInput{Name: in.Body.Name, YokCode: in.Body.YokCode})
+	if err != nil {
+		return nil, err
+	}
+	return &facultyOutput{Body: toFacultyDTO(f)}, nil
+}
+
 // ---- admin skills
+
+type adminListSkillsInput struct {
+	page.Params
+	Q        string `query:"q" maxLength:"100" doc:"Free text, 2-100 characters"`
+	Category string `query:"category" enum:"technical,tool,soft,domain,language_tool,other"`
+	State    string `query:"state" enum:"active,inactive,all" doc:"is_active filter; default all"`
+}
+
+type adminSkillListOutput struct{ Body AdminSkillList }
+
+func (h handler) adminListSkills(ctx context.Context, in *adminListSkillsInput) (*adminSkillListOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	fp := page.Fingerprint("adminListSkills", in.Q, in.Category, in.State)
+	after, err := cursorOf(in.Cursor, SortNewest, fp)
+	if err != nil {
+		return nil, err
+	}
+	p, err := h.svc.AdminListSkills(ctx, a, SkillQuery{
+		Q: in.Q, Category: SkillCategory(in.Category), State: adminState(in.State), Limit: in.Limit, After: after,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := &adminSkillListOutput{Body: AdminSkillList{Items: make([]AdminSkillDTO, len(p.Items))}}
+	for i, k := range p.Items {
+		out.Body.Items[i] = toAdminSkillDTO(k)
+	}
+	out.Body.NextCursor = nextCursor(p.Next, SortNewest, fp)
+	return out, nil
+}
 
 type adminCreateSkillInput struct {
 	Body struct {

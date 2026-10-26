@@ -141,6 +141,13 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (directory.Store, w
 		if got := list(directory.UniversityFilter{}); len(got) != 2 {
 			t.Fatalf("active universities = %v", got)
 		}
+		// BE-128: the admin list's states.
+		if got := list(directory.UniversityFilter{State: directory.StateAll}); len(got) != 3 {
+			t.Fatalf("every university = %v", got)
+		}
+		if got := list(directory.UniversityFilter{State: directory.StateInactive}); !slices.Equal(got, []string{"Ege Üniversitesi"}) {
+			t.Fatalf("inactive universities = %v", got)
+		}
 		// org_id (BE-127): the university of a university org, an inactive one never.
 		if got := list(directory.UniversityFilter{OrgID: &kent.OrgID}); !slices.Equal(got, []string{"İstanbul Kent Üniversitesi"}) {
 			t.Fatalf("org_id: %v", got)
@@ -214,6 +221,34 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (directory.Store, w
 		}
 		if _, err := s.MatchDomain(ctx, []string{"a.edu.tr"}); !errors.Is(err, directory.ErrNotFound) {
 			t.Fatalf("inactive university's domain: %v", err)
+		}
+		// BE-128: every domain of a university, active or not, by domain.
+		if _, err := s.InsertDomain(ctx, directory.EmailDomain{Domain: "b.edu.tr", UniversityID: b.ID, DomainKind: directory.DomainStaff,
+			IsActive: true}); err != nil {
+			t.Fatal(err)
+		}
+		domains := func(id uuid.UUID) []string {
+			rows, err := s.DomainsOf(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out []string
+			for _, r := range rows {
+				if r.UniversityID != id {
+					t.Fatalf("DomainsOf(%s) returned %+v", id, r)
+				}
+				out = append(out, r.Domain)
+			}
+			return out
+		}
+		if got := domains(b.ID); !slices.Equal(got, []string{"b.edu.tr", "ogr.a.edu.tr"}) {
+			t.Fatalf("DomainsOf(b) = %v", got)
+		}
+		if got := domains(a.ID); !slices.Equal(got, []string{"a.edu.tr"}) {
+			t.Fatalf("DomainsOf(a, inactive) = %v", got)
+		}
+		if got := domains(uuid.NewV7()); len(got) != 0 {
+			t.Fatalf("DomainsOf(unknown) = %v", got)
 		}
 	})
 
@@ -474,6 +509,19 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (directory.Store, w
 		rows, err := s.ListSkills(ctx, directory.SkillFilter{Q: "GO"}, nil, 10)
 		if err != nil || len(rows) != 1 || rows[0].ID != other.ID {
 			t.Fatalf("ListSkills = %+v, %v", rows, err)
+		}
+		// BE-128: the admin list's states (newest first).
+		for st, want := range map[directory.ActiveState][]uuid.UUID{
+			directory.StateActive: {other.ID}, directory.StateInactive: {k.ID}, directory.StateAll: {other.ID, k.ID},
+		} {
+			rows, err := s.ListSkills(ctx, directory.SkillFilter{State: st}, nil, 10)
+			var got []uuid.UUID
+			for _, r := range rows {
+				got = append(got, r.ID)
+			}
+			if err != nil || !slices.Equal(got, want) {
+				t.Fatalf("ListSkills(state %q) = %v, %v", st, got, err)
+			}
 		}
 		if g, err := s.SkillBySlug(ctx, other.Slug); err != nil || g.ID != other.ID {
 			t.Fatalf("SkillBySlug = %+v, %v", g, err)

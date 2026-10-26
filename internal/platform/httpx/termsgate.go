@@ -64,8 +64,9 @@ const (
 // without having accepted the current terms of use (operationId →
 // "METHOD /api/v1/path"; the row must match its operation exactly, or
 // registration panics). Each group says why; a new row needs a reason of
-// the same kind: the way out of the gate, leaving, account security or a
-// KVKK right. Everything else a user writes rests on the contract.
+// the same kind: the way out of the gate, leaving, account security, a
+// KVKK right or a read sent as POST. Everything else a user writes rests on
+// the contract.
 var termsExemptOperations = map[string]string{
 	// The way out of the gate: accepting the current version.
 	"acceptTerms": "POST " + APIPrefix + "/me/terms-acceptances",
@@ -108,6 +109,20 @@ var termsExemptOperations = map[string]string{
 	"updateMyPrivacy":             "PATCH " + APIPrefix + "/me/privacy",
 	"revokeMyAccessGrant":         "POST " + APIPrefix + "/me/access-grants/{grant_id}/revoke",
 	"unshareMyAccessGrantContact": "DELETE " + APIPrefix + "/me/access-grants/{grant_id}/contact",
+
+	// Reads sent as POST (BE-128): a search whose criteria name a person
+	// (an e-mail address, a name, a user ID) takes them in the body so they
+	// stay out of URLs and access logs (httpx personal query guard). The
+	// operation is the read of its deprecated GET twin, under the same
+	// action: it changes nothing (the audit row of the read aside), and a
+	// read is never behind the gate.
+	"adminQueryUsers":             "POST " + APIPrefix + "/admin/users/search",
+	"adminQueryEmailSuppressions": "POST " + APIPrefix + "/admin/email-suppressions/search",
+	"adminQueryAuditEvents":       "POST " + APIPrefix + "/admin/audit-events/search",
+	"queryOrgAuditEvents":         "POST " + APIPrefix + "/orgs/{org_id}/audit-events/search",
+	"queryCompanyGrantedStudents": "POST " + APIPrefix + "/orgs/{org_id}/students/search",
+	"adminQueryIncomingTransfers": "POST " + APIPrefix + "/admin/incoming-transfers/search",
+	"adminQueryLegalParties":      "POST " + APIPrefix + "/admin/legal-parties/search",
 }
 
 // TermsExemptOperations returns a copy of the exemption table (the spec
@@ -174,11 +189,9 @@ func installTermsGate(oapi *huma.OpenAPI) {
 // behind; the spec test fails on it).
 func TermsExemptionsUnregistered(oapi *huma.OpenAPI) []string {
 	seen := map[string]bool{}
-	for _, item := range oapi.Paths {
-		for _, op := range []*huma.Operation{item.Get, item.Put, item.Post, item.Delete, item.Options, item.Head, item.Patch, item.Trace} {
-			if op != nil && termsExempt(op) {
-				seen[op.OperationID] = true
-			}
+	for _, op := range operationsOf(oapi) {
+		if termsExempt(op) {
+			seen[op.OperationID] = true
 		}
 	}
 	var out []string

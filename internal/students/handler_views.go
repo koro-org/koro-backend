@@ -8,6 +8,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/problem"
@@ -220,9 +221,12 @@ func (h handler) getMemberCard(ctx context.Context, in *memberCardInput) (*membe
 
 // ---- admin view
 
+// adminProfileInput: X-Koro-Access-Reason is the break-glass justification
+// of support and platform_admin, or the ID of an open data subject request
+// of this student for dpo (the operation's description says so).
 type adminProfileInput struct {
-	UserID       string `path:"user_id" doc:"User ID"`
-	AccessReason string `header:"X-Koro-Access-Reason" maxLength:"500" doc:"support, platform_admin: break-glass justification (10–500 characters); dpo: the ID of an open data subject request of this student"`
+	UserID string `path:"user_id" doc:"User ID"`
+	httpx.AccessReasonHeader
 }
 
 type adminProfileOutput struct {
@@ -238,7 +242,7 @@ func (h handler) adminGetProfile(ctx context.Context, in *adminProfileInput) (*a
 	if err != nil {
 		id = uuid.Nil() // the admin surface decides first: a non-staff caller gets 403, staff 404
 	}
-	v, err := h.svc.AdminGetStudentProfile(ctx, a, id, AdminAccess{Reason: in.AccessReason})
+	v, err := h.svc.AdminGetStudentProfile(ctx, a, id, AdminAccess{Reason: in.AccessReason.String()})
 	if err != nil {
 		return nil, err
 	}

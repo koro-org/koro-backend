@@ -13,13 +13,17 @@ import (
 	"koro/internal/platform/problem"
 )
 
-// UniversityQuery narrows listUniversities (04 §2.3: q, city, type, sort name).
+// UniversityQuery narrows listUniversities (04 §2.3: q, city, type, sort
+// name) and adminListUniversities (+ state).
 type UniversityQuery struct {
 	Q     string
 	City  string
 	Type  UniversityType
 	OrgID *uuid.UUID // only the university of this org (BE-127)
 	Sort  string     // SortNewest (default) or SortName
+	// State is adminListUniversities' choice (StateAll by default there);
+	// the public listUniversities always lists the active universities.
+	State ActiveState
 	Limit int
 	After *After
 }
@@ -83,6 +87,12 @@ type DomainInput struct {
 	IsActive   bool
 }
 
+// FacultyInput is the body of adminCreateFaculty (BE-128).
+type FacultyInput struct {
+	Name    string
+	YokCode string
+}
+
 // DepartmentInput is the body of adminCreateDepartment.
 type DepartmentInput struct {
 	FacultyID      *uuid.UUID
@@ -104,6 +114,21 @@ func (s *service) ListUniversities(ctx context.Context, a authz.Actor, q Univers
 	if err := authz.Can(ctx, a, authz.DirectoryUniversityList, catalogResource); err != nil {
 		return UniversityPage{}, err
 	}
+	q.State = StateActive
+	return s.listUniversities(ctx, q)
+}
+
+// AdminListUniversities implements Service (BE-128): the universities of
+// q.State, inactive ones included, for their managers.
+func (s *service) AdminListUniversities(ctx context.Context, a authz.Actor, q UniversityQuery) (UniversityPage, error) {
+	if err := authz.Can(ctx, a, authz.DirectoryUniversityManage, adminSurface); err != nil {
+		return UniversityPage{}, err
+	}
+	return s.listUniversities(ctx, q)
+}
+
+// listUniversities is one page of universities after the caller's authz.
+func (s *service) listUniversities(ctx context.Context, q UniversityQuery) (UniversityPage, error) {
 	text, err := cleanQuery("query.q", q.Q)
 	if err != nil {
 		return UniversityPage{}, err
@@ -112,7 +137,7 @@ func (s *service) ListUniversities(ctx context.Context, a authz.Actor, q Univers
 	if err != nil {
 		return UniversityPage{}, err
 	}
-	f := UniversityFilter{Q: text, City: deref(city), Type: q.Type, OrgID: q.OrgID, Sort: sortOf(q.Sort)}
+	f := UniversityFilter{Q: text, City: deref(city), Type: q.Type, OrgID: q.OrgID, Sort: sortOf(q.Sort), State: q.State}
 	limit := page.ClampLimit(q.Limit)
 	rows, err := s.d.Store.ListUniversities(ctx, f, q.After, limit+1)
 	if err != nil {
@@ -373,6 +398,75 @@ func (s *service) AdminPutUniversityEmailDomain(ctx context.Context, a authz.Act
 		return EmailDomain{}, false, err
 	}
 	return out, created, nil
+}
+
+// AdminListUniversityEmailDomains implements Service (BE-128): every
+// e-mail domain of a university, active or not, by domain.
+func (s *service) AdminListUniversityEmailDomains(ctx context.Context, a authz.Actor, universityID uuid.UUID) ([]EmailDomain, error) {
+	if err := authz.Can(ctx, a, authz.DirectoryUniversityManage, adminSurface); err != nil {
+		return nil, err
+	}
+	u, err := s.d.Store.GetUniversity(ctx, universityID)
+	if err != nil {
+		return nil, err
+	}
+	return s.d.Store.DomainsOf(ctx, u.ID)
+}
+
+// AdminCreateFaculty implements Service (BE-128): a faculty of the
+// university of the path (06 H-38), active at once, so that departments
+// can name it. Another faculty of that name is 409
+// directory.faculty_exists.
+func (s *service) AdminCreateFaculty(ctx context.Context, a authz.Actor, universityID uuid.UUID, in FacultyInput) (Faculty, error) {
+	if err := authz.Can(ctx, a, authz.DirectoryUniversityManage, adminSurface); err != nil {
+		return Faculty{}, err
+	}
+	name, err := cleanText("body.name", in.Name, 2, maxName)
+	if err != nil {
+		return Faculty{}, err
+	}
+	f := Faculty{UniversityID: universityID, Name: name, IsActive: true}
+	if in.YokCode != "" {
+		code, err := cleanYokCode("body.yok_code", in.YokCode)
+		if err != nil {
+			return Faculty{}, err
+		}
+		f.YokCode = &code
+	}
+	hash, err := idempotency.Hash(struct {
+		Op string
+		F  Faculty
+	}{"create_faculty", f})
+	if err != nil {
+		return Faculty{}, err
+	}
+	id, _, err := idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (uuid.UUID, error) {
+		u, err := s.d.Store.LockUniversity(ctx, universityID)
+		if err != nil {
+			return uuid.Nil(), err
+		}
+		switch _, err := s.d.Store.FacultyByName(ctx, u.ID, name); {
+		case err == nil:
+			return uuid.Nil(), ErrFacultyExists
+		case !errors.Is(err, ErrNotFound):
+			return uuid.Nil(), err
+		}
+		f.ID, f.UniversityID = uuid.NewV7(), u.ID
+		created, err := s.d.Store.InsertFaculty(ctx, f)
+		if errors.Is(err, problem.ErrConflict) {
+			return uuid.Nil(), ErrFacultyExists // faculties_university_name_uq: a concurrent create
+		}
+		if err != nil {
+			return uuid.Nil(), err
+		}
+		org := u.OrgID
+		return created.ID, s.d.Audit.Log(ctx, auditEvent(a, authz.DirectoryUniversityManage, "faculty", created.ID, &org, "",
+			map[string]any{"operation": "create_faculty", "university_id": u.ID.String()}))
+	})
+	if err != nil {
+		return Faculty{}, err
+	}
+	return s.d.Store.GetFaculty(ctx, id)
 }
 
 // AdminCreateDepartment implements Service. A faculty must belong to the

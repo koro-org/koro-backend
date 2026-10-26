@@ -307,9 +307,9 @@ func (h handler) listMine(ctx context.Context, in *listMineInput) (*listMineOutp
 type adminListUserInput struct {
 	UserID string `path:"user_id" doc:"User ID (a malformed ID is 404)"`
 	page.Params
-	PurposeCode  string `query:"purpose_code" pattern:"^[a-z][a-z0-9_]{2,40}$"`
-	AccessReason string `header:"X-Koro-Access-Reason" maxLength:"500" doc:"Break-glass justification (support: 10–500 characters, mandatory)"`
-	TicketRef    string `header:"X-Koro-Ticket-Ref" maxLength:"100" doc:"Support ticket reference (optional)"`
+	PurposeCode string `query:"purpose_code" pattern:"^[a-z][a-z0-9_]{2,40}$"`
+	httpx.AccessReasonHeader
+	TicketRef string `header:"X-Koro-Ticket-Ref" maxLength:"100" doc:"Support ticket reference (optional)"`
 }
 
 type proofListOutput struct {
@@ -330,7 +330,7 @@ func (h handler) adminListUser(ctx context.Context, in *adminListUserInput) (*pr
 	if err != nil {
 		return nil, err
 	}
-	p, err := h.svc.AdminListUser(ctx, a, userID, Access{Reason: in.AccessReason, TicketRef: in.TicketRef}, q)
+	p, err := h.svc.AdminListUser(ctx, a, userID, Access{Reason: in.AccessReason.String(), TicketRef: in.TicketRef}, q)
 	if err != nil {
 		return nil, err
 	}

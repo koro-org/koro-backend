@@ -11,7 +11,7 @@ import (
 	"koro/internal/platform/page"
 )
 
-// SuppressionQuery is adminListEmailSuppressions: one address (exact match
+// SuppressionQuery is adminQueryEmailSuppressions: one address (exact match
 // on its blind index) or a page of the whole list.
 type SuppressionQuery struct {
 	Email string // "" → every suppression, newest first

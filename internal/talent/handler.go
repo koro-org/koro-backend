@@ -94,9 +94,9 @@ func proofOf(r *consent.ReauthDTO) identity.ReauthProof {
 }
 
 // AccessReason is the mandatory justification header of every talent
-// operation (03 §5.12).
+// operation (03 §5.12; plain ASCII or RFC 8187 UTF-8, httpx.AccessReason).
 type AccessReason struct {
-	AccessReason string `header:"X-Koro-Access-Reason" doc:"Mandatory justification (10–500 characters); audited"`
+	httpx.AccessReasonHeader
 }
 
 // SubjectPath is the subject of a talent operation.
@@ -116,7 +116,7 @@ func (h handler) report(ctx context.Context, in *reportInput) (*reportOutput, er
 	if err != nil {
 		return nil, err
 	}
-	r, err := h.svc.Report(ctx, a, httpx.ParseID(in.UserID), in.AccessReason.AccessReason)
+	r, err := h.svc.Report(ctx, a, httpx.ParseID(in.UserID), in.AccessReason.AccessReason.String())
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +135,7 @@ func (h handler) distribution(ctx context.Context, in *distributionInput) (*dist
 	if err != nil {
 		return nil, err
 	}
-	d, err := h.svc.Distribution(ctx, a, DistributionQuery{Reason: in.AccessReason.AccessReason, UniversityID: in.UniversityID})
+	d, err := h.svc.Distribution(ctx, a, DistributionQuery{Reason: in.AccessReason.AccessReason.String(), UniversityID: in.UniversityID})
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +162,7 @@ func (h handler) createNeutralization(ctx context.Context, in *createNeutralizat
 		return nil, err
 	}
 	n, err := h.svc.CreateNeutralization(ctx, a, httpx.ParseID(in.UserID),
-		NeutralizationInput{Reason: in.AccessReason.AccessReason, Note: in.Body.Note}, proofOf(in.Body.Reauth))
+		NeutralizationInput{Reason: in.AccessReason.AccessReason.String(), Note: in.Body.Note}, proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +181,7 @@ func (h handler) liftNeutralization(ctx context.Context, in *liftNeutralizationI
 		return nil, err
 	}
 	n, err := h.svc.LiftNeutralization(ctx, a, httpx.ParseID(in.NeutralizationID),
-		NeutralizationInput{Reason: in.AccessReason.AccessReason, Note: in.Body.Note}, proofOf(in.Body.Reauth))
+		NeutralizationInput{Reason: in.AccessReason.AccessReason.String(), Note: in.Body.Note}, proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +205,7 @@ func (h handler) reversePoint(ctx context.Context, in *reversalInput) (*pointOut
 		return nil, err
 	}
 	p, err := h.svc.ReversePoint(ctx, a, httpx.ParseID(in.PointEventID),
-		ReversalInput{Reason: in.AccessReason.AccessReason, Why: in.Body.Reason}, proofOf(in.Body.Reauth))
+		ReversalInput{Reason: in.AccessReason.AccessReason.String(), Why: in.Body.Reason}, proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +223,7 @@ func (h handler) config(ctx context.Context, in *configInput) (*configOutput, er
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.Config(ctx, a, in.AccessReason.AccessReason)
+	v, err := h.svc.Config(ctx, a, in.AccessReason.AccessReason.String())
 	if err != nil {
 		return nil, err
 	}
@@ -246,7 +246,7 @@ func (h handler) createConfigVersion(ctx context.Context, in *createConfigVersio
 		return nil, err
 	}
 	b := in.Body
-	v, err := h.svc.CreateConfigVersion(ctx, a, ConfigInput{Reason: in.AccessReason.AccessReason, Params: paramsOf(b.Params),
+	v, err := h.svc.CreateConfigVersion(ctx, a, ConfigInput{Reason: in.AccessReason.AccessReason.String(), Params: paramsOf(b.Params),
 		Signals: signalUpdatesOf(b.SignalDefs), Notes: b.Notes}, proofOf(b.Reauth))
 	if err != nil {
 		return nil, err

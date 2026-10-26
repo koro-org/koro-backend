@@ -110,6 +110,20 @@ type Meta struct {
 	Reauth bool
 	// BreakGlass marks "B" operations (X-Koro-Access-Reason; 03 §6.3).
 	BreakGlass bool
+	// Responses documents the success answers the operation gives besides
+	// its DefaultStatus (its output sets Status at run time; huma documents
+	// the default status only). Register writes them (it holds the schema
+	// registry); Koro alone refuses them.
+	Responses []Response
+}
+
+// Response is a success answer of an operation besides its DefaultStatus,
+// e.g. 202 with the open four-eyes request instead of the action (BE-128).
+// Body is a value of the body type (nil: no body).
+type Response struct {
+	Status      int
+	Description string
+	Body        any
 }
 
 var (
@@ -119,7 +133,16 @@ var (
 
 // Koro validates o against m, sets Security and writes the x-koro-*
 // extensions. It returns the updated operation for huma.Register.
+// Meta.Responses needs Register.
 func Koro(o huma.Operation, m Meta) huma.Operation {
+	if len(m.Responses) > 0 {
+		panic(fmt.Sprintf("op.Koro(%s %s %q): Meta.Responses needs op.Register", o.Method, o.Path, o.OperationID))
+	}
+	return koro(o, m)
+}
+
+// koro is Koro without the Register-only check.
+func koro(o huma.Operation, m Meta) huma.Operation {
 	fail := func(format string, args ...any) {
 		panic(fmt.Sprintf("op.Koro(%s %s %q): ", o.Method, o.Path, o.OperationID) + fmt.Sprintf(format, args...))
 	}
@@ -161,6 +184,18 @@ func Koro(o huma.Operation, m Meta) huma.Operation {
 		fail("POST operations must declare idempotency optional|required")
 	case o.Method != http.MethodPost && m.Idempotency != "":
 		fail("idempotency applies to POST only")
+	}
+
+	def := o.DefaultStatus
+	if def == 0 {
+		def = http.StatusOK
+	}
+	seen := map[int]bool{def: true}
+	for _, r := range m.Responses {
+		if r.Status < 200 || r.Status > 299 || seen[r.Status] || r.Description == "" {
+			fail("Meta.Responses: %d must be a described 2xx status other than %d and the others", r.Status, def)
+		}
+		seen[r.Status] = true
 	}
 
 	ext := make(map[string]any, len(o.Extensions)+6)

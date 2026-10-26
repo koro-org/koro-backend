@@ -601,12 +601,15 @@ func checkMatrix(in checkInput) (probs, notes []string) {
 			bad("operation %q: matrix idempotency may only be \"required\"", s.ID)
 		}
 		// compare: status (BE-061): reads only; required on audit lists.
+		// A search sent as POST (BE-128) is a write to the harness: its
+		// 2xx cases run on fresh applications and are never compared.
+		read := s.Method == http.MethodGet || s.Method == http.MethodHead
 		switch {
 		case e.Compare != "" && e.Compare != compareStatus:
 			bad("operation %q: matrix compare may only be %q", s.ID, compareStatus)
-		case e.Compare == compareStatus && s.Method != http.MethodGet && s.Method != http.MethodHead:
+		case e.Compare == compareStatus && !read:
 			bad("operation %q: compare: status applies to reads (GET/HEAD) only", s.ID)
-		case s.AuditList != "" && e.Compare != compareStatus:
+		case read && s.AuditList != "" && e.Compare != compareStatus:
 			bad("operation %q lists audit events (%s): declare compare: status, audited reads append to the trail "+
 				"it returns on the shared application (BE-061)", s.ID, s.AuditList)
 		}

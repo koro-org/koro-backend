@@ -68,9 +68,20 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.PartiesDocumentRead), Surface: op.SurfaceOrg}, h.download)
 
 	op.Register(api, "parties", huma.Operation{
-		OperationID: "adminListLegalParties", Method: http.MethodGet, Path: "/admin/legal-parties",
-		Summary:     "List legal parties (finance and platform admins)",
-		Description: "Newest first. q matches part of the title, or a 10-digit tax number exactly. Tax numbers are not masked here.",
+		OperationID: "adminQueryLegalParties", Method: http.MethodPost, Path: "/admin/legal-parties/search",
+		Summary: "Search legal parties (finance and platform admins)",
+		Description: "Read-only: the criteria are in the body so that a title (a sole proprietor's name) or a tax " +
+			"number never reaches a URL or an access log (BE-128). Newest first. q matches part of the title, or a " +
+			"10-digit tax number exactly. Tax numbers are not masked here. next_cursor goes back in the body.",
+	}, op.Meta{Action: string(authz.PartiesLegalPartyRead), Surface: op.SurfaceAdmin, RateLimit: op.RateReadDefault,
+		Idempotency: op.IdempotencyOptional}, h.adminQuery)
+
+	op.Register(api, "parties", huma.Operation{
+		OperationID: "adminListLegalParties", Method: http.MethodGet, Path: "/admin/legal-parties", Deprecated: true,
+		Summary: "List legal parties (deprecated: adminQueryLegalParties)",
+		Description: "Deprecated (BE-128): adminQueryLegalParties (POST /admin/legal-parties/search) takes the criteria " +
+			"in the body; a q in the query string is 422 (personal data stays out of URLs). Newest first. Tax numbers " +
+			"are not masked here.",
 	}, op.Meta{Action: string(authz.PartiesLegalPartyRead), Surface: op.SurfaceAdmin}, h.adminList)
 
 	op.Register(api, "parties", huma.Operation{
@@ -418,17 +429,41 @@ type adminListInput struct {
 	page.Params
 	Kind   string `query:"kind" enum:"platform,buyer_company,payee"`
 	Status string `query:"status" enum:"draft,pending_verification,verified,rejected,inactive"`
-	Q      string `query:"q" maxLength:"100" doc:"Part of the title (2-100 characters), or a 10-digit tax number"`
+	Q      string `query:"q" hidden:"true" doc:"Moved to adminQueryLegalParties (BE-128): 422 when set"`
 }
 
+type adminQueryInput struct {
+	Body struct {
+		Kind   string `json:"kind,omitempty" enum:"platform,buyer_company,payee"`
+		Status string `json:"status,omitempty" enum:"draft,pending_verification,verified,rejected,inactive"`
+		Q      string `json:"q,omitempty" maxLength:"100" doc:"Part of the title (2-100 characters), or a 10-digit tax number"`
+		page.BodyParams
+	}
+}
+
+// adminList is the deprecated GET twin of adminQuery (no q).
 func (h handler) adminList(ctx context.Context, in *adminListInput) (*listOutput, error) {
+	if in.Q != "" {
+		return nil, httpx.QueryMoved("q", "adminQueryLegalParties")
+	}
+	return h.adminPage(ctx, "adminListLegalParties", in.Kind, in.Status, "", in.Cursor, in.Limit)
+}
+
+func (h handler) adminQuery(ctx context.Context, in *adminQueryInput) (*listOutput, error) {
+	b := in.Body
+	return h.adminPage(ctx, "adminQueryLegalParties", b.Kind, b.Status, b.Q, b.Cursor, b.Limit)
+}
+
+// adminPage runs one page of the admin party list; the cursor is bound to
+// the operation and the criteria.
+func (h handler) adminPage(ctx context.Context, opID, kind, status, q, cursor string, limit int) (*listOutput, error) {
 	a, err := authz.ActorFrom(ctx)
 	if err != nil {
 		return nil, err
 	}
-	fp := page.Fingerprint("adminListLegalParties", in.Kind, in.Status, in.Q)
+	fp := page.Fingerprint(opID, kind, status, q)
 	var after *uuid.UUID
-	c, err := page.Decode(in.Cursor, sortNewest, fp, 1)
+	c, err := page.Decode(cursor, sortNewest, fp, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -439,7 +474,7 @@ func (h handler) adminList(ctx context.Context, in *adminListInput) (*listOutput
 		}
 		after = &id
 	}
-	p, err := h.svc.AdminListParties(ctx, a, AdminQuery{Kind: Kind(in.Kind), Status: Status(in.Status), Q: in.Q, Limit: in.Limit, After: after})
+	p, err := h.svc.AdminListParties(ctx, a, AdminQuery{Kind: Kind(kind), Status: Status(status), Q: q, Limit: limit, After: after})
 	if err != nil {
 		return nil, err
 	}

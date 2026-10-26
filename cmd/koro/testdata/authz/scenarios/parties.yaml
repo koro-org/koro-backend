@@ -38,7 +38,7 @@ scenarios:
       - { persona: company_admin, mfa: false, operation: createBuyerLegalParty, expect: 403, code: authz.mfa_required }
       - { persona: university_rep, mfa: false, operation: listOrgLegalParties, path_params: { org_id: uni_a }, expect: 403,
           code: authz.mfa_required }
-      - { persona: finance_admin, mfa: false, operation: adminListLegalParties, expect: 403, code: authz.mfa_required }
+      - { persona: finance_admin, mfa: false, operation: adminQueryLegalParties, expect: 403, code: authz.mfa_required }
       - { persona: company_admin, operation: createBuyerLegalParty, expect: 201 }
   iban_four_eyes_org_submission:
     note: >-

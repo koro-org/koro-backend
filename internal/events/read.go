@@ -63,8 +63,13 @@ type EventView struct {
 	// sensitive category, of an active organiser that is not a sensitive
 	// club, once files has made the public copy; empty otherwise.
 	CoverPublicURL string
-	Manager        bool
-	MyRegistration *Registration
+	// ShareableByOthers reports whether an organisation other than the
+	// organiser may share the event in an event_share post (BE-133): the
+	// feed's rule (EventSummary.ShareableBy); false when the organiser's
+	// sensitivity could not be read (fail closed).
+	ShareableByOthers bool
+	Manager           bool
+	MyRegistration    *Registration
 }
 
 // Attendee reports whether the caller holds a seat of the event.
@@ -282,28 +287,39 @@ func (s *service) view(ctx context.Context, e Event, o orgs.OrgSummary, manager 
 }
 
 // buildView is view with the sensitive organisers of a page read at once
-// (nil: read for e alone when its cover may be public).
+// (nil: read for e alone when its view depends on it).
 func (s *service) buildView(ctx context.Context, e Event, o orgs.OrgSummary, manager bool, sensitive map[uuid.UUID]bool) EventView {
 	v := EventView{Event: e, Org: o, ETag: httpx.ETag(e.UpdatedAt), Manager: manager}
+	if sensitive == nil && organiserMatters(e) {
+		sensitive = s.sensitiveOrganisers(ctx, []Event{e})
+	}
+	// A sensitive organiser, or one whose flag could not be read, keeps the
+	// event from other organisations and its cover private.
+	sens, known := sensitive[e.OrgID]
+	open := known && !sens
+	v.ShareableByOthers = open && shareable(e.Status, e.Visibility, e.IsSensitiveCategory, false)
 	if e.CoverFileID == nil || s.d.Files == nil {
 		return v
 	}
 	if dl, err := s.d.Files.PresignGet(ctx, *e.CoverFileID, coverTTL); err == nil {
 		v.CoverURL = dl.URL
 	}
-	if !publicCover(e, o) {
+	if !open || !publicCover(e, o) {
 		return v
-	}
-	if sensitive == nil {
-		sensitive = s.sensitiveOrganisers(ctx, []Event{e})
-	}
-	if sens, known := sensitive[e.OrgID]; !known || sens {
-		return v // a sensitive organiser, or its flag could not be read
 	}
 	if u, err := s.d.Files.PublicURL(ctx, *e.CoverFileID); err == nil {
 		v.CoverPublicURL = u
 	}
 	return v
+}
+
+// organiserMatters reports whether the view of e depends on its
+// organiser's sensitivity: a public event, not of a sensitive category,
+// published (it may be shared, BE-133) or completed (its cover may be
+// public, BE-120).
+func organiserMatters(e Event) bool {
+	return (e.Status == StatusPublished || e.Status == StatusCompleted) && e.Visibility == VisibilityPublic &&
+		!e.IsSensitiveCategory
 }
 
 // publicCover reports whether e may show a permanent cover URL (BE-120),
@@ -315,25 +331,35 @@ func publicCover(e Event, o orgs.OrgSummary) bool {
 		!e.IsSensitiveCategory && o.Status == orgs.StatusActive
 }
 
-// sensitiveOrganisers maps the organiser of every event of rows whose cover
-// may be public to its sensitivity (directory catalog); on a read error the
-// map stays empty and no cover is public (fail closed).
+// sensitiveOrganisers maps the organiser of every event of rows whose view
+// depends on it (organiserMatters) to its sensitivity (directory catalog,
+// one read); on a read error the map stays empty: no cover is public and
+// no event is shareable by others (fail closed).
 func (s *service) sensitiveOrganisers(ctx context.Context, rows []Event) map[uuid.UUID]bool {
 	out := map[uuid.UUID]bool{}
 	var ids []uuid.UUID
 	for _, e := range rows {
-		if e.CoverFileID != nil && !slices.Contains(ids, e.OrgID) {
+		if organiserMatters(e) && !slices.Contains(ids, e.OrgID) {
 			ids = append(ids, e.OrgID)
 		}
 	}
-	if len(ids) == 0 || s.d.Files == nil {
+	if len(ids) == 0 {
 		return out
 	}
 	m, err := s.d.Catalog.SensitiveOrgIDs(ctx, ids)
 	if err != nil {
-		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "organiser sensitivity not read: no public cover", slog.String("err", err.Error()))
+		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "organiser sensitivity not read: no public cover, not shareable",
+			slog.String("err", err.Error()))
 		return out
 	}
+	return knownSensitivity(ids, m)
+}
+
+// knownSensitivity maps each of ids to its flag in m (SensitiveOrgIDs
+// lists the sensitive ones only): a missing id is a known non-sensitive
+// organiser, not an unknown one.
+func knownSensitivity(ids []uuid.UUID, m map[uuid.UUID]bool) map[uuid.UUID]bool {
+	out := make(map[uuid.UUID]bool, len(ids))
 	for _, id := range ids {
 		out[id] = m[id]
 	}

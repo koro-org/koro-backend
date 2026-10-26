@@ -10,8 +10,8 @@ scenarios:
   notify_support_needs_mfa:
     note: support is an MFA role (k-mfa, 03 §6.4)
     steps:
-      - { persona: support, mfa: false, operation: adminListEmailSuppressions, headers: { X-Koro-Access-Reason: "Ticket 4711: missing e-mails" }, expect: 403, code: authz.mfa_required }
-      - { persona: support, operation: adminListEmailSuppressions, headers: { X-Koro-Access-Reason: "Ticket 4711: missing e-mails" }, expect: 200 }
+      - { persona: support, mfa: false, operation: adminQueryEmailSuppressions, headers: { X-Koro-Access-Reason: "Ticket 4711: missing e-mails" }, expect: 403, code: authz.mfa_required }
+      - { persona: support, operation: adminQueryEmailSuppressions, headers: { X-Koro-Access-Reason: "Ticket 4711: missing e-mails" }, expect: 200 }
   notify_security_stays_on:
     note: switching security off is refused; other categories change (02 §6.5)
     steps:

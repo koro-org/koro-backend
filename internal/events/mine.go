@@ -100,6 +100,7 @@ func (s *service) ListMyStaffEvents(ctx context.Context, a authz.Actor, q MyEven
 	if err != nil {
 		return StaffEventPage{}, err
 	}
+	known := knownSensitivity(orgIDs, sens)
 	os, err := s.d.Orgs.GetMany(ctx, orgIDs)
 	if err != nil {
 		return StaffEventPage{}, err
@@ -114,7 +115,7 @@ func (s *service) ListMyStaffEvents(ctx context.Context, a authz.Actor, q MyEven
 			continue
 		}
 		out.Items = append(out.Items, StaffEventView{
-			EventView: s.view(ctx, e, o, false), StaffRole: roles[e.ID],
+			EventView: s.buildView(ctx, e, o, false, known), StaffRole: roles[e.ID],
 			Manage: authz.Can(ctx, a, authz.EventsCheckinVoid, res) == nil,
 		})
 	}

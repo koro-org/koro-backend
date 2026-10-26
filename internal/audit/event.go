@@ -66,7 +66,7 @@ func (e Event) By(a authz.Actor) Event {
 // Conventional metadata keys (03 §6.2, §6.3; 03 k4).
 const (
 	// MetaBreakGlass (bool): a break-glass access (03 §6.3); the reason is
-	// Event.Reason. Filterable with adminListAuditEvents?break_glass=true.
+	// Event.Reason. Filterable with adminQueryAuditEvents {break_glass: true}.
 	MetaBreakGlass = "break_glass"
 	// MetaSensitive (bool): a sensitive club record; audit.event.list_org
 	// returns it only to that club's club_admin (03 §5.21).

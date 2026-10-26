@@ -59,7 +59,7 @@ func TestLegalParty_TCKNNeverInDTO(t *testing.T) {
 	// The admin list, the org surface (the club the person is paid for)
 	// and a verification answer: no national ID.
 	e.store.LinkPayee(uuid.NewV7(), org("club_a"), id, "active")
-	rec, _ = call(t, app, "platform_admin", http.MethodGet, "/api/v1/admin/legal-parties?kind=payee", nil, nil)
+	rec, _ = call(t, app, "platform_admin", http.MethodPost, "/api/v1/admin/legal-parties/search", map[string]any{"kind": "payee"}, nil)
 	wantStatus(t, rec, http.StatusOK)
 	noDigits(t, "admin list", rec.Body.String(), tcknA)
 	rec, out = call(t, app, "club_admin", http.MethodGet, orgPath("club_a", idPath(id)), nil, nil)
@@ -137,11 +137,10 @@ func TestLegalParty_VKNMaskedForOrgRoles(t *testing.T) {
 		if !strings.Contains(rec.Body.String(), `"tax_no":"`+vknA+`"`) {
 			t.Fatalf("%s admin search by VKN: %s", p, rec.Body.String())
 		}
-		// BE-128: never in the URL; the deprecated list refuses it.
-		rec, _ = call(t, app, p, http.MethodGet, "/api/v1/admin/legal-parties?q="+vknA, nil, nil)
-		wantStatus(t, rec, http.StatusUnprocessableEntity)
-		if !strings.Contains(rec.Body.String(), `"location":"query.q"`) {
-			t.Fatalf("%s admin list with q in the URL: %s", p, rec.Body.String())
+		// BE-128, BE-133: never in the URL; the GET list is gone.
+		if rec, _ = call(t, app, p, http.MethodGet, "/api/v1/admin/legal-parties?q="+vknA, nil, nil); rec.Code != http.StatusNotFound &&
+			rec.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("%s removed admin GET list = %d %s", p, rec.Code, rec.Body.String())
 		}
 	}
 }

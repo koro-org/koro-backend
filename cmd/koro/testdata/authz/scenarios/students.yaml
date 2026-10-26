@@ -89,7 +89,7 @@ scenarios:
       - { persona: student_granted, operation: revokeMyAccessGrant, path_params: { grant_id: grant_granted_a }, expect: 204 }
       - { persona: company_member, operation: getCompanyStudentProfile, path_params: { org_id: company_a, user_id: student_granted },
           expect: 404, code: not_found }
-      - { persona: company_admin, operation: listCompanyGrantedStudents, path_params: { org_id: company_a }, expect: 200 }
+      - { persona: company_admin, operation: queryCompanyGrantedStudents, path_params: { org_id: company_a }, expect: 200 }
       - { persona: company_admin, operation: revokeCompanyAccessGrant, path_params: { org_id: company_a, user_id: student_granted },
           expect: 404, code: not_found }
   access_grant_company_revokes:

@@ -5,6 +5,7 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/events"
 	"koro/internal/platform/httpx"
 )
 
@@ -28,14 +29,17 @@ type MediaDTO struct {
 	Height  *int   `json:"height,omitempty"`
 }
 
-// EventRefDTO is the shared event of an event_share post.
+// EventRefDTO is the shared event of an event_share post. Org is its
+// organiser (public org data, as on the event cards; BE-133), which may be
+// another org than the post's author.
 type EventRefDTO struct {
-	EventID  string    `json:"event_id"`
-	Title    string    `json:"title"`
-	Slug     string    `json:"slug" doc:"The event's public URL identifier (web: /etkinlikler/<event_id>-<slug>; BE-122)"`
-	StartsAt time.Time `json:"starts_at"`
-	EndsAt   time.Time `json:"ends_at"`
-	Status   string    `json:"status" enum:"draft,published,cancelled,completed"`
+	EventID  string              `json:"event_id"`
+	Org      *events.EventOrgDTO `json:"org,omitempty" doc:"The organiser of the event (absent only if its org cannot be read)"`
+	Title    string              `json:"title"`
+	Slug     string              `json:"slug" doc:"The event's public URL identifier (web: /etkinlikler/<event_id>-<slug>; BE-122)"`
+	StartsAt time.Time           `json:"starts_at"`
+	EndsAt   time.Time           `json:"ends_at"`
+	Status   string              `json:"status" enum:"draft,published,cancelled,completed"`
 }
 
 // OpportunityDTO is the opportunity of an opportunity_call post.
@@ -164,6 +168,9 @@ func toPostDTO(v PostView) PostDTO {
 	if e := v.Event; e != nil {
 		d.Event = &EventRefDTO{EventID: e.ID.String(), Title: e.Title, Slug: e.Slug, StartsAt: e.StartsAt, EndsAt: e.EndsAt,
 			Status: string(e.Status)}
+		if o := v.EventOrg; o != nil {
+			d.Event.Org = &events.EventOrgDTO{OrgID: o.ID.String(), Kind: string(o.Kind), Name: o.Name, Slug: o.Slug}
+		}
 	}
 	if o := decodeOpportunity(p.Opportunity); o != nil {
 		d.Opportunity = &OpportunityDTO{Type: o.Type, ApplyVia: o.ApplyVia, ExternalURL: o.ExternalURL,

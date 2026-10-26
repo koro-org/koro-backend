@@ -87,9 +87,12 @@ type PostView struct {
 	LogoURL string
 	Media   []MediaView
 	Event   *events.EventSummary
-	ETag    string
-	Viewer  *ViewerFlags
-	Manage  bool
+	// EventOrg is the organiser of Event (nil without an event or when its
+	// org cannot be read; BE-133).
+	EventOrg *orgs.OrgSummary
+	ETag     string
+	Viewer   *ViewerFlags
+	Manage   bool
 	// DispatchID is the notification dispatch of a targeted post in the
 	// management view (BE-127; nil: none, or not the management view).
 	DispatchID *uuid.UUID
@@ -430,6 +433,9 @@ func (s *service) views(ctx context.Context, a authz.Actor, rows []Post, manage 
 			evs[id] = e
 		}
 	}
+	if err := s.addEventOrgs(ctx, os, evs); err != nil {
+		return nil, err
+	}
 	for _, p := range rows {
 		o, ok := os[p.OrgID]
 		if !ok {
@@ -463,6 +469,9 @@ func (s *service) views(ctx context.Context, a authz.Actor, rows []Post, manage 
 			// the author org's view always carries it.
 			if e, ok := evs[*p.EventID]; ok && (manage || e.Visibility == events.VisibilityPublic && e.Status != events.StatusDraft) {
 				v.Event = &e
+				if eo, ok := os[e.OrgID]; ok {
+					v.EventOrg = &eo
+				}
 			}
 		}
 		if state != nil {
@@ -473,6 +482,27 @@ func (s *service) views(ctx context.Context, a authz.Actor, rows []Post, manage 
 		out = append(out, v)
 	}
 	return out, nil
+}
+
+// addEventOrgs adds the organisers of evs that are not author orgs of the
+// page to os (one more GetMany, only when a post shares another org's
+// event; BE-133).
+func (s *service) addEventOrgs(ctx context.Context, os map[uuid.UUID]orgs.OrgSummary, evs map[uuid.UUID]events.EventSummary) error {
+	var missing []uuid.UUID
+	for _, e := range evs {
+		if _, ok := os[e.OrgID]; !ok && !slices.Contains(missing, e.OrgID) {
+			missing = append(missing, e.OrgID)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	more, err := s.d.Orgs.GetMany(ctx, missing)
+	if err != nil {
+		return err
+	}
+	maps.Copy(os, more)
+	return nil
 }
 
 // dispatchIDs returns the dispatch of each targeted post of rows in the

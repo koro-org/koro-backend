@@ -255,21 +255,12 @@ operations:
     body: bodies/identity/mfa_reauth_totp.json
     expect: { anonymous: 401, "@signed_in": 200 }
 
-  adminSearchUsers:
-    method: GET
-    path: /api/v1/admin/users
-    action: identity.user.search
-    query: { status: active }
-    note: deprecated (BE-128); status only, q is in adminQueryUsers' body
-    expect: { anonymous: 401, "@not_staff": 403, moderator: 403, support: 200, dpo: 200, platform_admin: 200,
-              finance_admin: 403, talent_auditor: 403 }
-
   adminQueryUsers:
     method: POST
     path: /api/v1/admin/users/search
     action: identity.user.search
     body: bodies/identity/query_users.json
-    note: BE-128 read sent as POST (the e-mail address stays out of the URL); the cells of adminSearchUsers
+    note: BE-128 read sent as POST (the e-mail address stays out of the URL); the GET list is gone (BE-133)
     expect: { anonymous: 401, "@not_staff": 403, moderator: 403, support: 200, dpo: 200, platform_admin: 200,
               finance_admin: 403, talent_auditor: 403 }
 

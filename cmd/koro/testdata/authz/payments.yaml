@@ -167,10 +167,12 @@ operations:
       platform_admin: 200
       finance_admin: 200
 
-  adminListIncomingTransfers:
-    method: GET
-    path: /api/v1/admin/incoming-transfers
+  adminQueryIncomingTransfers:
+    method: POST
+    path: /api/v1/admin/incoming-transfers/search
     action: payments.transfer.list
+    body: bodies/payments/query_transfers.json
+    note: BE-128 read sent as POST (a sender's name stays out of the URL); the GET list is gone (BE-133)
     expect:
       anonymous: 401
       "@no_platform_role": 403
@@ -178,27 +180,14 @@ operations:
       platform_admin: 200
       finance_admin: 200
     variants:
-      - name: filters
-        query: { status: unmatched, value_date_from: "2026-10-01", value_date_to: "2026-10-02" }
+      - name: unfiltered
+        body: bodies/payments/query_transfers_all.json
         expect:
           anonymous: 401
           "@no_platform_role": 403
           "@other_staff": 403
           platform_admin: 200
           finance_admin: 200
-
-  adminQueryIncomingTransfers:
-    method: POST
-    path: /api/v1/admin/incoming-transfers/search
-    action: payments.transfer.list
-    body: bodies/payments/query_transfers.json
-    note: BE-128 read sent as POST (a sender's name stays out of the URL); the cells of adminListIncomingTransfers
-    expect:
-      anonymous: 401
-      "@no_platform_role": 403
-      "@other_staff": 403
-      platform_admin: 200
-      finance_admin: 200
 
   adminGetIncomingTransfer:
     method: GET

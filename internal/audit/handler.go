@@ -44,14 +44,6 @@ func Register(api huma.API, svc Service) {
 		Idempotency: op.IdempotencyOptional}), h.queryOrg)
 
 	huma.Register(api, op.Koro(huma.Operation{
-		OperationID: "listOrgAuditEvents", Method: http.MethodGet, Path: "/orgs/{org_id}/audit-events", Tags: tags,
-		Deprecated: true, Summary: "List the audit events of an organisation (deprecated: queryOrgAuditEvents)",
-		Description: "Deprecated (BE-128): queryOrgAuditEvents (POST …/audit-events/search) takes the criteria in " +
-			"the body. An actor_user_id in the query string is 422 (personal data stays out of URLs). ip and " +
-			"user_agent are returned to dpo and platform_admin only.",
-	}, op.Meta{Action: string(authz.AuditEventListOrg), Surface: op.SurfaceOrg}), h.listOrg)
-
-	huma.Register(api, op.Koro(huma.Operation{
 		OperationID: "adminQueryAuditEvents", Method: http.MethodPost, Path: "/admin/audit-events/search", Tags: tags,
 		Summary: "Search all audit events",
 		Description: "Read-only: the criteria are in the body so that a person's user ID never reaches a URL or an " +
@@ -61,14 +53,6 @@ func Register(api huma.API, svc Service) {
 		Idempotency: op.IdempotencyOptional}), h.adminQuery)
 
 	huma.Register(api, op.Koro(huma.Operation{
-		OperationID: "adminListAuditEvents", Method: http.MethodGet, Path: "/admin/audit-events", Tags: tags,
-		Deprecated: true, Summary: "Search all audit events (deprecated: adminQueryAuditEvents)",
-		Description: "Deprecated (BE-128): adminQueryAuditEvents (POST /admin/audit-events/search) takes the " +
-			"criteria in the body. An actor_user_id in the query string is 422 (personal data stays out of URLs). " +
-			"The search itself is recorded in the audit log.",
-	}, op.Meta{Action: string(authz.AuditEventList), Surface: op.SurfaceAdmin, RateLimit: op.RateSearch}), h.adminList)
-
-	huma.Register(api, op.Koro(huma.Operation{
 		OperationID: "adminVerifyAuditChain", Method: http.MethodPost, Path: "/admin/audit/verify", Tags: tags,
 		Summary: "Verify the audit hash chain and its signed daily roots",
 	}, op.Meta{Action: string(authz.AuditChainVerify), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}), h.verify)
@@ -76,37 +60,26 @@ func Register(api huma.API, svc Service) {
 
 type handler struct{ svc Service }
 
-// Range is the occurred_from/occurred_to window of a list (04 §1.7:
-// RFC 3339, or a date meaning the start/end of that Europe/Istanbul day).
-type Range struct {
-	OccurredFrom string `query:"occurred_from" required:"true" maxLength:"40" doc:"RFC 3339 time or YYYY-MM-DD (start of that day, Europe/Istanbul)"`
-	OccurredTo   string `query:"occurred_to" required:"true" maxLength:"40" doc:"RFC 3339 time or YYYY-MM-DD (end of that day, Europe/Istanbul); inclusive"`
-}
-
-// BodyRange is Range in the body of a search sent as POST (BE-128).
+// BodyRange is the occurred_from/occurred_to window of a search, in its
+// body (04 §1.7: RFC 3339, or a date meaning the start/end of that
+// Europe/Istanbul day; BE-128).
 type BodyRange struct {
 	OccurredFrom string `json:"occurred_from" required:"true" maxLength:"40" doc:"RFC 3339 time or YYYY-MM-DD (start of that day, Europe/Istanbul)"`
 	OccurredTo   string `json:"occurred_to" required:"true" maxLength:"40" doc:"RFC 3339 time or YYYY-MM-DD (end of that day, Europe/Istanbul); inclusive"`
 }
 
-// window parses the range into [from, to).
-func (r Range) window() (from, to time.Time, err error) {
-	return window(r.OccurredFrom, r.OccurredTo, "query.")
-}
-
 // window parses the body range into [from, to).
 func (r BodyRange) window() (from, to time.Time, err error) {
-	return window(r.OccurredFrom, r.OccurredTo, "body.")
+	return window(r.OccurredFrom, r.OccurredTo)
 }
 
-// window parses raw bounds into [from, to); loc prefixes the field names
-// of the errors ("query." or "body.").
-func window(rawFrom, rawTo, loc string) (from, to time.Time, err error) {
+// window parses raw bounds into [from, to).
+func window(rawFrom, rawTo string) (from, to time.Time, err error) {
 	if from, err = parseBound(rawFrom, false); err != nil {
-		return from, to, problem.Field(loc+"occurred_from", "must be an RFC 3339 time or a YYYY-MM-DD date")
+		return from, to, problem.Field("body.occurred_from", "must be an RFC 3339 time or a YYYY-MM-DD date")
 	}
 	if to, err = parseBound(rawTo, true); err != nil {
-		return from, to, problem.Field(loc+"occurred_to", "must be an RFC 3339 time or a YYYY-MM-DD date")
+		return from, to, problem.Field("body.occurred_to", "must be an RFC 3339 time or a YYYY-MM-DD date")
 	}
 	return from, to, nil
 }
@@ -131,14 +104,6 @@ func parseBound(s string, end bool) (time.Time, error) {
 		t = t.Add(time.Microsecond) // inclusive at the database's precision
 	}
 	return t.UTC(), nil
-}
-
-// nonZeroID maps the zero UUID of an omitted query parameter to nil.
-func nonZeroID(id uuid.UUID) *uuid.UUID {
-	if id == (uuid.UUID{}) {
-		return nil
-	}
-	return &id
 }
 
 type listOwnInput struct {
@@ -168,14 +133,6 @@ func (h handler) listOwn(ctx context.Context, in *listOwnInput) (*listOwnOutput,
 	return out, nil
 }
 
-type listOrgInput struct {
-	OrgID uuid.UUID `path:"org_id" format:"uuid"`
-	page.Params
-	Range
-	Action      string `query:"action" maxLength:"100" pattern:"^[a-z_]+(\\.[a-z_]+)+$" doc:"Exact action name"`
-	ActorUserID string `query:"actor_user_id" hidden:"true" doc:"Moved to queryOrgAuditEvents (BE-128): 422 when set"`
-}
-
 type queryOrgInput struct {
 	OrgID uuid.UUID `path:"org_id" format:"uuid"`
 	Body  struct {
@@ -187,19 +144,6 @@ type queryOrgInput struct {
 }
 
 type eventListOutput struct{ Body AuditEventList }
-
-// listOrg is the deprecated GET twin of queryOrg (no actor).
-func (h handler) listOrg(ctx context.Context, in *listOrgInput) (*eventListOutput, error) {
-	if in.ActorUserID != "" {
-		return nil, httpx.QueryMoved("actor_user_id", "queryOrgAuditEvents")
-	}
-	from, to, err := in.window()
-	if err != nil {
-		return nil, err
-	}
-	return h.orgPage(ctx, "listOrgAuditEvents", in.OrgID, OrgQuery{PageQuery: PageQuery{Limit: in.Limit}, From: from, To: to,
-		Action: in.Action}, in.OccurredFrom, in.OccurredTo, in.Cursor)
-}
 
 func (h handler) queryOrg(ctx context.Context, in *queryOrgInput) (*eventListOutput, error) {
 	b := in.Body
@@ -233,18 +177,6 @@ func (h handler) orgPage(ctx context.Context, opID string, orgID uuid.UUID, q Or
 	return &eventListOutput{Body: toAuditEventList(p, fp)}, nil
 }
 
-type adminListInput struct {
-	page.Params
-	Range
-	ActorUserID  string    `query:"actor_user_id" hidden:"true" doc:"Moved to adminQueryAuditEvents (BE-128): 422 when set"`
-	OrgID        uuid.UUID `query:"org_id" format:"uuid"`
-	ResourceType string    `query:"resource_type" maxLength:"64" pattern:"^[a-z_]+$"`
-	ResourceID   uuid.UUID `query:"resource_id" format:"uuid"`
-	Action       string    `query:"action" maxLength:"100" pattern:"^[a-z_]+(\\.[a-z_]+)+$" doc:"Exact action name"`
-	Outcome      string    `query:"outcome" enum:"success,denied,failure"`
-	BreakGlass   string    `query:"break_glass" enum:"true,false" doc:"Only break-glass accesses (true) or none of them (false)"`
-}
-
 type adminQueryInput struct {
 	Body struct {
 		BodyRange
@@ -257,26 +189,6 @@ type adminQueryInput struct {
 		BreakGlass   *bool  `json:"break_glass,omitempty" doc:"Only break-glass accesses (true) or none of them (false)"`
 		page.BodyParams
 	}
-}
-
-// adminList is the deprecated GET twin of adminQuery (no actor).
-func (h handler) adminList(ctx context.Context, in *adminListInput) (*eventListOutput, error) {
-	if in.ActorUserID != "" {
-		return nil, httpx.QueryMoved("actor_user_id", "adminQueryAuditEvents")
-	}
-	from, to, err := in.window()
-	if err != nil {
-		return nil, err
-	}
-	q := AdminQuery{
-		PageQuery: PageQuery{Limit: in.Limit}, From: from, To: to, OrgID: nonZeroID(in.OrgID),
-		ResourceType: in.ResourceType, ResourceID: nonZeroID(in.ResourceID), Action: in.Action, Outcome: Outcome(in.Outcome),
-	}
-	if in.BreakGlass != "" {
-		bg := in.BreakGlass == "true"
-		q.BreakGlass = &bg
-	}
-	return h.adminPage(ctx, "adminListAuditEvents", q, in.OccurredFrom, in.OccurredTo, in.Cursor)
 }
 
 func (h handler) adminQuery(ctx context.Context, in *adminQueryInput) (*eventListOutput, error) {

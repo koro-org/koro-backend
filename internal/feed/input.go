@@ -364,9 +364,11 @@ func clean(f files.FileMeta) bool {
 	return f.Status == files.StatusActive && (f.ScanStatus == files.ScanClean || f.ScanStatus == files.ScanSkipped)
 }
 
-// checkEvent is the event of an event_share post (events.Get): a
-// published public event; a sensitive event (02 §11.1) only by its own
-// org, so a sensitive club's event is never spread by others.
+// checkEvent is the event of an event_share post (events.Get): one the
+// author org may share (events.EventSummary.ShareableBy: a published
+// public event; a sensitive event, 02 §11.1, only by its own org, so a
+// sensitive club's event is never spread by others). The event cards say
+// the same for other orgs (shareable_by_others, BE-133).
 func (s *service) checkEvent(ctx context.Context, o orgs.OrgSummary, id uuid.UUID) error {
 	if s.d.Events == nil {
 		return problem.ErrUnavailable
@@ -378,10 +380,7 @@ func (s *service) checkEvent(ctx context.Context, o orgs.OrgSummary, id uuid.UUI
 	case err != nil:
 		return err
 	}
-	if e.Status != events.StatusPublished || e.Visibility != events.VisibilityPublic {
-		return problem.Field("body.event_id", "must be a published public event")
-	}
-	if e.Sensitive && e.OrgID != o.ID {
+	if !e.ShareableBy(o.ID) {
 		return problem.Field("body.event_id", "must be a published public event")
 	}
 	return nil

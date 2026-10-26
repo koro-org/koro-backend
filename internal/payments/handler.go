@@ -85,14 +85,6 @@ func Register(api huma.API, svc Service) {
 		Idempotency: op.IdempotencyOptional}, h.queryTransfers)
 
 	op.Register(api, "payments", huma.Operation{
-		OperationID: "adminListIncomingTransfers", Method: http.MethodGet, Path: "/admin/incoming-transfers", Deprecated: true,
-		Summary: "List incoming bank transfers (deprecated: adminQueryIncomingTransfers)",
-		Description: "Deprecated (BE-128): adminQueryIncomingTransfers (POST /admin/incoming-transfers/search) takes " +
-			"the criteria in the body; a q in the query string is 422 (personal data stays out of URLs). Newest value " +
-			"date first.",
-	}, op.Meta{Action: string(authz.PaymentsTransferList), Surface: op.SurfaceAdmin}, h.listTransfers)
-
-	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminGetIncomingTransfer", Method: http.MethodGet, Path: "/admin/incoming-transfers/{transfer_id}",
 		Summary: "Get an incoming bank transfer with match suggestions",
 		Description: "An unmatched transfer suggests the order of the reference code in its description, rated by its " +
@@ -449,7 +441,7 @@ type IncomingTransferDetailDTO struct {
 	Suggestions []SuggestionDTO `json:"suggestions"`
 }
 
-// IncomingTransferList is the body of adminQueryIncomingTransfers and adminListIncomingTransfers.
+// IncomingTransferList is the body of adminQueryIncomingTransfers.
 type IncomingTransferList struct {
 	Items      []IncomingTransferDTO `json:"items"`
 	NextCursor string                `json:"next_cursor,omitempty"`
@@ -457,14 +449,6 @@ type IncomingTransferList struct {
 
 // sortTransfers is the only order of the transfer list (cursor fingerprint).
 const sortTransfers = "-value_date"
-
-type listTransfersInput struct {
-	page.Params
-	Status        string `query:"status" enum:"unmatched,matched,ignored,return_requested,return_approved,returned,collection_requested,collected"`
-	ValueDateFrom string `query:"value_date_from" maxLength:"10" doc:"YYYY-MM-DD (inclusive)"`
-	ValueDateTo   string `query:"value_date_to" maxLength:"10" doc:"YYYY-MM-DD (inclusive)"`
-	Q             string `query:"q" hidden:"true" doc:"Moved to adminQueryIncomingTransfers (BE-128): 422 when set"`
-}
 
 type queryTransfersInput struct {
 	Body struct {
@@ -478,29 +462,17 @@ type queryTransfersInput struct {
 
 type transferListOutput struct{ Body IncomingTransferList }
 
-// listTransfers is the deprecated GET twin of queryTransfers (no q).
-func (h handler) listTransfers(ctx context.Context, in *listTransfersInput) (*transferListOutput, error) {
-	args := transferArgs{opID: "adminListIncomingTransfers", in: "query", status: in.Status, from: in.ValueDateFrom,
-		to: in.ValueDateTo, cursor: in.Cursor, limit: in.Limit}
-	if in.Q != "" {
-		args.invalid = httpx.QueryMoved("q", "adminQueryIncomingTransfers")
-	}
-	return h.transferPage(ctx, args)
-}
-
 func (h handler) queryTransfers(ctx context.Context, in *queryTransfersInput) (*transferListOutput, error) {
 	b := in.Body
-	return h.transferPage(ctx, transferArgs{opID: "adminQueryIncomingTransfers", in: "body", status: b.Status,
+	return h.transferPage(ctx, transferArgs{opID: "adminQueryIncomingTransfers", status: b.Status,
 		from: b.ValueDateFrom, to: b.ValueDateTo, q: b.Q, cursor: b.Cursor, limit: b.Limit})
 }
 
 // transferArgs are the criteria of one page of the transfer list as the
-// client sent them, with where they came from (in: "query" or "body", the
-// prefix of the 422 locations) and an error found before parsing.
+// client sent them in the body.
 type transferArgs struct {
-	opID, in, status, from, to, q, cursor string
-	limit                                 int
-	invalid                               error
+	opID, status, from, to, q, cursor string
+	limit                             int
 }
 
 func (h handler) transferPage(ctx context.Context, args transferArgs) (*transferListOutput, error) {
@@ -526,15 +498,11 @@ func (h handler) transferPage(ctx context.Context, args transferArgs) (*transfer
 // query parses the criteria; a malformed one is reported by the service
 // after authorisation (TransferQuery.invalid).
 func (args transferArgs) query(fp string) TransferQuery {
-	q := TransferQuery{Filter: TransferFilter{Status: TransferStatus(args.status), Q: args.q}, Limit: args.limit, in: args.in,
-		invalid: args.invalid}
-	if q.invalid != nil {
-		return q
-	}
+	q := TransferQuery{Filter: TransferFilter{Status: TransferStatus(args.status), Q: args.q}, Limit: args.limit}
 	for _, b := range []struct {
 		raw, loc string
 		dst      **civil.Date
-	}{{args.from, args.in + ".value_date_from", &q.Filter.ValueFrom}, {args.to, args.in + ".value_date_to", &q.Filter.ValueTo}} {
+	}{{args.from, "body.value_date_from", &q.Filter.ValueFrom}, {args.to, "body.value_date_to", &q.Filter.ValueTo}} {
 		if b.raw == "" {
 			continue
 		}

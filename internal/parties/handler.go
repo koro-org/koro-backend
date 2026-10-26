@@ -77,14 +77,6 @@ func Register(api huma.API, svc Service) {
 		Idempotency: op.IdempotencyOptional}, h.adminQuery)
 
 	op.Register(api, "parties", huma.Operation{
-		OperationID: "adminListLegalParties", Method: http.MethodGet, Path: "/admin/legal-parties", Deprecated: true,
-		Summary: "List legal parties (deprecated: adminQueryLegalParties)",
-		Description: "Deprecated (BE-128): adminQueryLegalParties (POST /admin/legal-parties/search) takes the criteria " +
-			"in the body; a q in the query string is 422 (personal data stays out of URLs). Newest first. Tax numbers " +
-			"are not masked here.",
-	}, op.Meta{Action: string(authz.PartiesLegalPartyRead), Surface: op.SurfaceAdmin}, h.adminList)
-
-	op.Register(api, "parties", huma.Operation{
 		OperationID: "adminCreateLegalParty", Method: http.MethodPost, Path: "/admin/legal-parties",
 		Summary: "Create a payee or platform legal party", DefaultStatus: http.StatusCreated,
 		Description: "kind payee: the legal side of a payee (foundation, university, association, institution). In the " +
@@ -425,13 +417,6 @@ func (h handler) download(ctx context.Context, in *downloadInput) (*downloadOutp
 
 const sortNewest = "-id"
 
-type adminListInput struct {
-	page.Params
-	Kind   string `query:"kind" enum:"platform,buyer_company,payee"`
-	Status string `query:"status" enum:"draft,pending_verification,verified,rejected,inactive"`
-	Q      string `query:"q" hidden:"true" doc:"Moved to adminQueryLegalParties (BE-128): 422 when set"`
-}
-
 type adminQueryInput struct {
 	Body struct {
 		Kind   string `json:"kind,omitempty" enum:"platform,buyer_company,payee"`
@@ -439,14 +424,6 @@ type adminQueryInput struct {
 		Q      string `json:"q,omitempty" maxLength:"100" doc:"Part of the title (2-100 characters), or a 10-digit tax number"`
 		page.BodyParams
 	}
-}
-
-// adminList is the deprecated GET twin of adminQuery (no q).
-func (h handler) adminList(ctx context.Context, in *adminListInput) (*listOutput, error) {
-	if in.Q != "" {
-		return nil, httpx.QueryMoved("q", "adminQueryLegalParties")
-	}
-	return h.adminPage(ctx, "adminListLegalParties", in.Kind, in.Status, "", in.Cursor, in.Limit)
 }
 
 func (h handler) adminQuery(ctx context.Context, in *adminQueryInput) (*listOutput, error) {

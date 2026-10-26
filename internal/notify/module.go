@@ -116,7 +116,7 @@ type Service interface {
 	RegisterPushToken(ctx context.Context, a authz.Actor, in PushTokenInput) (uuid.UUID, error)
 	// DeletePushToken is deleteMyPushToken (notify.push_token.manage).
 	DeletePushToken(ctx context.Context, a authz.Actor, id uuid.UUID) error
-	// AdminListSuppressions is adminQueryEmailSuppressions and adminListEmailSuppressions
+	// AdminListSuppressions is adminQueryEmailSuppressions
 	// (notify.suppression.manage, B).
 	AdminListSuppressions(ctx context.Context, a authz.Actor, access Access, q SuppressionQuery) (SuppressionPage, error)
 	// AdminDeleteSuppression is adminDeleteEmailSuppression

@@ -57,7 +57,7 @@ type Store interface {
 	ListOwn(ctx context.Context, user uuid.UUID, after *After, limit int) ([]Record, error)
 	// ListOrg lists the events of org orgID matching f (f.OrgID ignored).
 	ListOrg(ctx context.Context, orgID uuid.UUID, f Filter, after *After, limit int) ([]Record, error)
-	// List lists every event matching f (adminListAuditEvents).
+	// List lists every event matching f (adminQueryAuditEvents).
 	List(ctx context.Context, f Filter, after *After, limit int) ([]Record, error)
 
 	// Retention (BE-057; 02 §2.1 "İmha", §24.2 audit_events, audit_roots).

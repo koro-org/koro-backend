@@ -5574,6 +5574,9 @@ components:
           type: string
         requires_registration:
           type: boolean
+        shareable_by_others:
+          description: "Whether an organisation other than the organiser may share the event in an event_share post (createPost): a published public event that is neither of a sensitive category nor organised by a sensitive club; false also while the organiser's sensitivity cannot be read. The organiser shares its own published public events whatever this says. Same rule as the 422 body.event_id of createPost (BE-133)."
+          type: boolean
         slug:
           type: string
         starts_at:
@@ -5610,6 +5613,7 @@ components:
         - status
         - requires_registration
         - registration_mode
+        - shareable_by_others
       type: object
     EventCardList:
       additionalProperties: false
@@ -5708,6 +5712,9 @@ components:
           type: string
         requires_registration:
           type: boolean
+        shareable_by_others:
+          description: "Whether an organisation other than the organiser may share the event in an event_share post (createPost): a published public event that is neither of a sensitive category nor organised by a sensitive club; false also while the organiser's sensitivity cannot be read. The organiser shares its own published public events whatever this says. Same rule as the 422 body.event_id of createPost (BE-133)."
+          type: boolean
         slug:
           type: string
         starts_at:
@@ -5756,6 +5763,7 @@ components:
         - status
         - requires_registration
         - registration_mode
+        - shareable_by_others
       type: object
     EventFormDTO:
       additionalProperties: false
@@ -5967,6 +5975,9 @@ components:
           type: string
         event_id:
           type: string
+        org:
+          $ref: "#/components/schemas/EventOrgDTO"
+          description: The organiser of the event (absent only if its org cannot be read)
         slug:
           description: "The event's public URL identifier (web: /etkinlikler/<event_id>-<slug>; BE-122)"
           type: string
@@ -12795,6 +12806,9 @@ components:
           type: string
         requires_registration:
           type: boolean
+        shareable_by_others:
+          description: "Whether an organisation other than the organiser may share the event in an event_share post (createPost): a published public event that is neither of a sensitive category nor organised by a sensitive club; false also while the organiser's sensitivity cannot be read. The organiser shares its own published public events whatever this says. Same rule as the 422 body.event_id of createPost (BE-133)."
+          type: boolean
         slug:
           type: string
         staff_role:
@@ -12839,6 +12853,7 @@ components:
         - status
         - requires_registration
         - registration_mode
+        - shareable_by_others
       type: object
     StaffEventList:
       additionalProperties: false
@@ -15159,123 +15174,11 @@ components:
       name: __Host-koro_session
       type: apiKey
 info:
-  description: "Koro backend API. Errors are RFC 9457 application/problem+json with a stable `code`. A signed-in user who has not accepted the terms of use in force for them (getMe terms.acceptance_required) gets 403 consent.terms_acceptance_required from every operation marked x-koro-terms-gate: enforced until acceptTerms records the current version; reads and the operations marked exempt (the acceptance, logout, account security, KVKK rights, consent acts and searches sent as POST) stay open. Search criteria that name a person (an e-mail address, a name, a user ID) are never taken in a query string: the POST …/search operations take them in the body (the GET lists they replace are deprecated)."
+  description: "Koro backend API. Errors are RFC 9457 application/problem+json with a stable `code`. A signed-in user who has not accepted the terms of use in force for them (getMe terms.acceptance_required) gets 403 consent.terms_acceptance_required from every operation marked x-koro-terms-gate: enforced until acceptTerms records the current version; reads and the operations marked exempt (the acceptance, logout, account security, KVKK rights, consent acts and searches sent as POST) stay open. Search criteria that name a person (an e-mail address, a name, a user ID) are never taken in a query string: the POST …/search operations take them in the body."
   title: Koro API
   version: 1.0.0
 openapi: 3.1.0
 paths:
-  /api/v1/admin/audit-events:
-    get:
-      deprecated: true
-      description: "Deprecated (BE-128): adminQueryAuditEvents (POST /admin/audit-events/search) takes the criteria in the body. An actor_user_id in the query string is 422 (personal data stays out of URLs). The search itself is recorded in the audit log."
-      operationId: adminListAuditEvents
-      parameters:
-        - description: Page size
-          explode: false
-          in: query
-          name: limit
-          schema:
-            default: 25
-            description: Page size
-            format: int64
-            maximum: 100
-            minimum: 1
-            type: integer
-        - description: Opaque cursor from next_cursor
-          explode: false
-          in: query
-          name: cursor
-          schema:
-            description: Opaque cursor from next_cursor
-            maxLength: 512
-            type: string
-        - description: RFC 3339 time or YYYY-MM-DD (start of that day, Europe/Istanbul)
-          explode: false
-          in: query
-          name: occurred_from
-          required: true
-          schema:
-            description: RFC 3339 time or YYYY-MM-DD (start of that day, Europe/Istanbul)
-            maxLength: 40
-            type: string
-        - description: RFC 3339 time or YYYY-MM-DD (end of that day, Europe/Istanbul); inclusive
-          explode: false
-          in: query
-          name: occurred_to
-          required: true
-          schema:
-            description: RFC 3339 time or YYYY-MM-DD (end of that day, Europe/Istanbul); inclusive
-            maxLength: 40
-            type: string
-        - explode: false
-          in: query
-          name: org_id
-          schema:
-            format: uuid
-            type: string
-        - explode: false
-          in: query
-          name: resource_type
-          schema:
-            maxLength: 64
-            pattern: ^[a-z_]+$
-            type: string
-        - explode: false
-          in: query
-          name: resource_id
-          schema:
-            format: uuid
-            type: string
-        - description: Exact action name
-          explode: false
-          in: query
-          name: action
-          schema:
-            description: Exact action name
-            maxLength: 100
-            pattern: ^[a-z_]+(\.[a-z_]+)+$
-            type: string
-        - explode: false
-          in: query
-          name: outcome
-          schema:
-            enum:
-              - success
-              - denied
-              - failure
-            type: string
-        - description: Only break-glass accesses (true) or none of them (false)
-          explode: false
-          in: query
-          name: break_glass
-          schema:
-            description: Only break-glass accesses (true) or none of them (false)
-            enum:
-              - "true"
-              - "false"
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AuditEventList"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
-          description: Error
-      security:
-        - sessionCookie: []
-        - bearerAuth: []
-      summary: "Search all audit events (deprecated: adminQueryAuditEvents)"
-      tags:
-        - audit
-      x-koro-action: audit.event.list
-      x-koro-rate-limit: search
-      x-koro-surface: admin
   /api/v1/admin/audit-events/search:
     post:
       description: "Read-only: the criteria are in the body so that a person's user ID never reaches a URL or an access log (BE-128). occurred_from and occurred_to are required; next_cursor goes back in the body. The search itself is recorded in the audit log."
@@ -17245,68 +17148,6 @@ paths:
       x-koro-action: identity.edu_verification.review
       x-koro-rate-limit: read_default
       x-koro-surface: admin
-  /api/v1/admin/email-suppressions:
-    get:
-      deprecated: true
-      description: "Deprecated (BE-128): adminQueryEmailSuppressions (POST /admin/email-suppressions/search) takes the address in the body. This list pages every suppression, newest first; an email in the query string is 422 (personal data stays out of URLs). Break-glass: X-Koro-Access-Reason is mandatory and every read is audited. When the read concerns one user, the X-Koro-Access-Reason justification is shown to that user (support access notification; reason of the break_glass item of listMySecurityEvents): write no other person's data in it."
-      operationId: adminListEmailSuppressions
-      parameters:
-        - description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
-          in: header
-          name: X-Koro-Access-Reason
-          schema:
-            description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
-            maxLength: 6007
-            type: string
-        - description: Support ticket reference (optional)
-          in: header
-          name: X-Koro-Ticket-Ref
-          schema:
-            description: Support ticket reference (optional)
-            maxLength: 100
-            type: string
-        - description: Page size
-          explode: false
-          in: query
-          name: limit
-          schema:
-            default: 25
-            description: Page size
-            format: int64
-            maximum: 100
-            minimum: 1
-            type: integer
-        - description: Opaque cursor from next_cursor
-          explode: false
-          in: query
-          name: cursor
-          schema:
-            description: Opaque cursor from next_cursor
-            maxLength: 512
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SuppressionList"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
-          description: Error
-      security:
-        - sessionCookie: []
-        - bearerAuth: []
-      summary: "List e-mail suppressions (deprecated: adminQueryEmailSuppressions)"
-      tags:
-        - notify
-      x-koro-action: notify.suppression.manage
-      x-koro-break-glass: true
-      x-koro-rate-limit: read_default
-      x-koro-surface: admin
   /api/v1/admin/email-suppressions/search:
     post:
       description: "Read-only: the address is in the body so that it never reaches a URL or an access log (BE-128). Addresses are kept as blind indexes only: email finds one address by exact match; without it every suppression, newest first (next_cursor goes back in the body). Break-glass: X-Koro-Access-Reason is mandatory and every read is audited (the address is neither stored nor audited). When the read concerns one user, the X-Koro-Access-Reason justification is shown to that user (support access notification; reason of the break_glass item of listMySecurityEvents): write no other person's data in it."
@@ -17556,82 +17397,6 @@ paths:
       x-koro-surface: admin
       x-koro-terms-gate: enforced
   /api/v1/admin/incoming-transfers:
-    get:
-      deprecated: true
-      description: "Deprecated (BE-128): adminQueryIncomingTransfers (POST /admin/incoming-transfers/search) takes the criteria in the body; a q in the query string is 422 (personal data stays out of URLs). Newest value date first."
-      operationId: adminListIncomingTransfers
-      parameters:
-        - description: Page size
-          explode: false
-          in: query
-          name: limit
-          schema:
-            default: 25
-            description: Page size
-            format: int64
-            maximum: 100
-            minimum: 1
-            type: integer
-        - description: Opaque cursor from next_cursor
-          explode: false
-          in: query
-          name: cursor
-          schema:
-            description: Opaque cursor from next_cursor
-            maxLength: 512
-            type: string
-        - explode: false
-          in: query
-          name: status
-          schema:
-            enum:
-              - unmatched
-              - matched
-              - ignored
-              - return_requested
-              - return_approved
-              - returned
-              - collection_requested
-              - collected
-            type: string
-        - description: YYYY-MM-DD (inclusive)
-          explode: false
-          in: query
-          name: value_date_from
-          schema:
-            description: YYYY-MM-DD (inclusive)
-            maxLength: 10
-            type: string
-        - description: YYYY-MM-DD (inclusive)
-          explode: false
-          in: query
-          name: value_date_to
-          schema:
-            description: YYYY-MM-DD (inclusive)
-            maxLength: 10
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/IncomingTransferList"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
-          description: Error
-      security:
-        - sessionCookie: []
-        - bearerAuth: []
-      summary: "List incoming bank transfers (deprecated: adminQueryIncomingTransfers)"
-      tags:
-        - payments
-      x-koro-action: payments.transfer.list
-      x-koro-rate-limit: read_default
-      x-koro-surface: admin
     post:
       description: The transfer is recorded unmatched on an approved collection account; the reference code of its description is extracted for the suggestions. A bank reference the account already has is 409 payments.duplicate_bank_reference.
       operationId: adminCreateIncomingTransfer
@@ -18488,72 +18253,6 @@ paths:
       x-koro-rate-limit: read_default
       x-koro-surface: admin
   /api/v1/admin/legal-parties:
-    get:
-      deprecated: true
-      description: "Deprecated (BE-128): adminQueryLegalParties (POST /admin/legal-parties/search) takes the criteria in the body; a q in the query string is 422 (personal data stays out of URLs). Newest first. Tax numbers are not masked here."
-      operationId: adminListLegalParties
-      parameters:
-        - description: Page size
-          explode: false
-          in: query
-          name: limit
-          schema:
-            default: 25
-            description: Page size
-            format: int64
-            maximum: 100
-            minimum: 1
-            type: integer
-        - description: Opaque cursor from next_cursor
-          explode: false
-          in: query
-          name: cursor
-          schema:
-            description: Opaque cursor from next_cursor
-            maxLength: 512
-            type: string
-        - explode: false
-          in: query
-          name: kind
-          schema:
-            enum:
-              - platform
-              - buyer_company
-              - payee
-            type: string
-        - explode: false
-          in: query
-          name: status
-          schema:
-            enum:
-              - draft
-              - pending_verification
-              - verified
-              - rejected
-              - inactive
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/LegalPartyList"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
-          description: Error
-      security:
-        - sessionCookie: []
-        - bearerAuth: []
-      summary: "List legal parties (deprecated: adminQueryLegalParties)"
-      tags:
-        - parties
-      x-koro-action: parties.legal_party.read
-      x-koro-rate-limit: read_default
-      x-koro-surface: admin
     post:
       description: "kind payee: the legal side of a payee (foundation, university, association, institution). In the MVP a payee is a legal entity: an individual or a sole proprietorship is 422 parties.natural_person_payee (06 H-54). kind platform: Koro's own party (one row; 409 parties.platform_exists). The national ID (tckn, individuals only) is stored envelope-encrypted with a blind index and never returned."
       operationId: adminCreateLegalParty
@@ -22906,63 +22605,6 @@ paths:
       x-koro-rate-limit: write_default
       x-koro-surface: admin
       x-koro-terms-gate: enforced
-  /api/v1/admin/users:
-    get:
-      deprecated: true
-      description: "Deprecated (BE-128): adminQueryUsers (POST /admin/users/search) takes the search criteria in the body. This list filters by status only, newest first; a q in the query string is 422 (personal data stays out of URLs). Audited like the search."
-      operationId: adminSearchUsers
-      parameters:
-        - explode: false
-          in: query
-          name: status
-          schema:
-            enum:
-              - pending_email
-              - active
-              - suspended
-              - erased
-            type: string
-        - description: Page size
-          explode: false
-          in: query
-          name: limit
-          schema:
-            default: 25
-            description: Page size
-            format: int64
-            maximum: 100
-            minimum: 1
-            type: integer
-        - description: Opaque cursor from next_cursor
-          explode: false
-          in: query
-          name: cursor
-          schema:
-            description: Opaque cursor from next_cursor
-            maxLength: 512
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AdminUserList"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
-          description: Error
-      security:
-        - sessionCookie: []
-        - bearerAuth: []
-      summary: "List users (deprecated: adminQueryUsers)"
-      tags:
-        - identity
-      x-koro-action: identity.user.search
-      x-koro-rate-limit: search
-      x-koro-surface: admin
   /api/v1/admin/users/search:
     post:
       description: "Read-only: the criteria are in the body so that an e-mail address or a name never reaches a URL or an access log (BE-128). q is an exact e-mail address or a fragment of the name (2-100 characters); without q every account, newest first. Every search is audited (query kind and the users found, not the query). next_cursor goes back in the body."
@@ -29793,86 +29435,6 @@ paths:
       x-koro-rate-limit: audience_count
       x-koro-surface: org
       x-koro-terms-gate: enforced
-  /api/v1/orgs/{org_id}/audit-events:
-    get:
-      deprecated: true
-      description: "Deprecated (BE-128): queryOrgAuditEvents (POST …/audit-events/search) takes the criteria in the body. An actor_user_id in the query string is 422 (personal data stays out of URLs). ip and user_agent are returned to dpo and platform_admin only."
-      operationId: listOrgAuditEvents
-      parameters:
-        - in: path
-          name: org_id
-          required: true
-          schema:
-            format: uuid
-            type: string
-        - description: Page size
-          explode: false
-          in: query
-          name: limit
-          schema:
-            default: 25
-            description: Page size
-            format: int64
-            maximum: 100
-            minimum: 1
-            type: integer
-        - description: Opaque cursor from next_cursor
-          explode: false
-          in: query
-          name: cursor
-          schema:
-            description: Opaque cursor from next_cursor
-            maxLength: 512
-            type: string
-        - description: RFC 3339 time or YYYY-MM-DD (start of that day, Europe/Istanbul)
-          explode: false
-          in: query
-          name: occurred_from
-          required: true
-          schema:
-            description: RFC 3339 time or YYYY-MM-DD (start of that day, Europe/Istanbul)
-            maxLength: 40
-            type: string
-        - description: RFC 3339 time or YYYY-MM-DD (end of that day, Europe/Istanbul); inclusive
-          explode: false
-          in: query
-          name: occurred_to
-          required: true
-          schema:
-            description: RFC 3339 time or YYYY-MM-DD (end of that day, Europe/Istanbul); inclusive
-            maxLength: 40
-            type: string
-        - description: Exact action name
-          explode: false
-          in: query
-          name: action
-          schema:
-            description: Exact action name
-            maxLength: 100
-            pattern: ^[a-z_]+(\.[a-z_]+)+$
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AuditEventList"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
-          description: Error
-      security:
-        - sessionCookie: []
-        - bearerAuth: []
-      summary: "List the audit events of an organisation (deprecated: queryOrgAuditEvents)"
-      tags:
-        - audit
-      x-koro-action: audit.event.list_org
-      x-koro-rate-limit: read_default
-      x-koro-surface: org
   /api/v1/orgs/{org_id}/audit-events/search:
     post:
       description: "Read-only: the criteria are in the body so that a person's user ID never reaches a URL or an access log (BE-128). occurred_from and occurred_to are required; next_cursor goes back in the body. ip and user_agent are returned to dpo and platform_admin only."
@@ -32929,60 +32491,6 @@ paths:
       x-koro-rate-limit: write_default
       x-koro-surface: org
       x-koro-terms-gate: enforced
-  /api/v1/orgs/{org_id}/students:
-    get:
-      deprecated: true
-      description: "Deprecated (BE-128): queryCompanyGrantedStudents (POST /orgs/{org_id}/students/search) takes the name filter in the body; a q in the query string is 422 (personal data stays out of URLs). Students with an active level 3 grant of this company and an active student verification, newest grant first. Minors never appear."
-      operationId: listCompanyGrantedStudents
-      parameters:
-        - description: Company org ID
-          in: path
-          name: org_id
-          required: true
-          schema:
-            description: Company org ID
-            type: string
-        - description: Page size
-          explode: false
-          in: query
-          name: limit
-          schema:
-            default: 25
-            description: Page size
-            format: int64
-            maximum: 100
-            minimum: 1
-            type: integer
-        - description: Opaque cursor from next_cursor
-          explode: false
-          in: query
-          name: cursor
-          schema:
-            description: Opaque cursor from next_cursor
-            maxLength: 512
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/StudentL3CardList"
-          description: OK
-        default:
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
-          description: Error
-      security:
-        - sessionCookie: []
-        - bearerAuth: []
-      summary: "List the students who granted the company access (deprecated: queryCompanyGrantedStudents)"
-      tags:
-        - students
-      x-koro-action: students.access_grant.list_company
-      x-koro-rate-limit: read_default
-      x-koro-surface: org
   /api/v1/orgs/{org_id}/students/search:
     post:
       description: "Read-only: the name filter is in the body so that it never reaches a URL or an access log (BE-128). Students with an active level 3 grant of this company (they accepted its contact request) and an active student verification, newest grant first; q filters by name. Minors never appear. next_cursor goes back in the body."

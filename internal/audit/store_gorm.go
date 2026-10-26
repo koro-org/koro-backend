@@ -383,7 +383,7 @@ func (s gormStore) ListOrg(ctx context.Context, orgID uuid.UUID, f Filter, after
 
 // List implements Store.
 //
-// cross-org: adminListAuditEvents searches every org (dpo, platform_admin).
+// cross-org: adminQueryAuditEvents searches every org (dpo, platform_admin).
 func (s gormStore) List(ctx context.Context, f Filter, after *After, limit int) ([]Record, error) {
 	q := db.Conn(ctx, s.orm).Table("audit_events").Select(eventCols)
 	return s.find(keyset(applyFilter(q, f), after, limit))

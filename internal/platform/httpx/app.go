@@ -173,7 +173,7 @@ func New(d Deps) (*App, error) {
 		" until acceptTerms records the current version; reads and the operations marked " + TermsGateExempt +
 		" (the acceptance, logout, account security, KVKK rights, consent acts and searches sent as POST) stay open. " +
 		"Search criteria that name a person (an e-mail address, a name, a user ID) are never taken in a query string: " +
-		"the POST …/search operations take them in the body (the GET lists they replace are deprecated)."
+		"the POST …/search operations take them in the body."
 	cfg.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
 		SchemeSessionCookie: {Type: "apiKey", In: "cookie", Name: SessionCookieName},
 		SchemeBearer:        {Type: "http", Scheme: "bearer", BearerFormat: "opaque"},

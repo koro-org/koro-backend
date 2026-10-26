@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
-
-	"koro/internal/platform/problem"
 )
 
 // The personal query guard (BE-128, KVKK): a URL travels further than the
@@ -170,14 +168,4 @@ func operationsOf(oapi *huma.OpenAPI) []*huma.Operation {
 		}
 	}
 	return out
-}
-
-// QueryMoved is the answer of a deprecated list operation to a request
-// that still sends a personal criterion in its query string (BE-128): the
-// parameter is no longer documented (hidden) and the criterion goes to the
-// body of the operation named by to. It is checked with the request's
-// syntax, before the operation runs, like a schema rule: a client is told
-// to move instead of silently getting an unfiltered list.
-func QueryMoved(param, to string) error {
-	return problem.Field("query."+param, "personal search criteria are not taken in the URL: send "+param+" in the body of "+to)
 }

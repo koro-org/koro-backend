@@ -22,13 +22,13 @@ operations:
     compare: status            # audited reads append to this list (BE-061)
     expect: { anonymous: 401, "@signed_in": 200 }
 
-  listOrgAuditEvents:
-    method: GET
-    path: /api/v1/orgs/{org_id}/audit-events
+  queryOrgAuditEvents:
+    method: POST
+    path: /api/v1/orgs/{org_id}/audit-events/search
     action: audit.event.list_org
-    compare: status            # audited reads append to this list (BE-061)
     path_params: { org_id: club_a }
-    query: { occurred_from: "2026-09-01", occurred_to: "2026-10-03" }
+    body: bodies/audit/query_events_actor.json
+    note: BE-128 read sent as POST (the actor's user ID stays out of the URL); the GET list is gone (BE-133)
     expect:
       anonymous: 401
       "@outsiders_a": 404        # not a member of club_a
@@ -43,6 +43,7 @@ operations:
     variants:
       - name: company_org
         path_params: { org_id: company_a }
+        body: bodies/audit/query_events.json
         expect:
           anonymous: 401
           "@outsiders_company_a": 404
@@ -55,6 +56,7 @@ operations:
           finance_admin: 403
           talent_auditor: 403
       - name: university_org
+        body: bodies/audit/query_events.json
         path_params: { org_id: uni_a }
         expect:
           anonymous: 401
@@ -67,6 +69,7 @@ operations:
           finance_admin: 403
           talent_auditor: 403
       - name: unknown_org
+        body: bodies/audit/query_events.json
         path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000aa" }
         expect:
           anonymous: 401
@@ -78,74 +81,12 @@ operations:
           finance_admin: 403
           talent_auditor: 403
 
-  queryOrgAuditEvents:
-    method: POST
-    path: /api/v1/orgs/{org_id}/audit-events/search
-    action: audit.event.list_org
-    path_params: { org_id: club_a }
-    body: bodies/audit/query_events_actor.json
-    note: BE-128 read sent as POST (the actor's user ID stays out of the URL); the cells of listOrgAuditEvents
-    expect:
-      anonymous: 401
-      "@outsiders_a": 404
-      club_member: 403
-      club_admin: 200
-      moderator: 403
-      support: 403
-      dpo: 200
-      platform_admin: 200
-      finance_admin: 403
-      talent_auditor: 403
-    variants:
-      - name: company_org
-        path_params: { org_id: company_a }
-        body: bodies/audit/query_events.json
-        expect:
-          anonymous: 401
-          "@outsiders_company_a": 404
-          company_member: 403
-          company_admin: 200
-          moderator: 403
-          support: 403
-          dpo: 200
-          platform_admin: 200
-          finance_admin: 403
-          talent_auditor: 403
-
-  adminListAuditEvents:
-    method: GET
-    path: /api/v1/admin/audit-events
-    action: audit.event.list
-    compare: status            # audited reads append to this list (BE-061)
-    query: { occurred_from: "2026-09-01", occurred_to: "2026-10-03" }
-    expect:
-      anonymous: 401
-      "@no_platform_role": 403   # admin surface: 403 before reading (03 §7.2-3)
-      moderator: 403
-      support: 403
-      dpo: 200
-      platform_admin: 200
-      finance_admin: 403
-      talent_auditor: 403
-    variants:
-      - name: break_glass_review
-        query: { break_glass: "true", org_id: "{{fixture:club_a}}" }
-        expect:
-          anonymous: 401
-          "@no_platform_role": 403
-          moderator: 403
-          support: 403
-          dpo: 200               # 03 §6.3: weekly break-glass review
-          platform_admin: 200
-          finance_admin: 403
-          talent_auditor: 403
-
   adminQueryAuditEvents:
     method: POST
     path: /api/v1/admin/audit-events/search
     action: audit.event.list
     body: bodies/audit/query_events_actor.json
-    note: BE-128 read sent as POST (the actor's user ID stays out of the URL); the cells of adminListAuditEvents
+    note: BE-128 read sent as POST (the actor's user ID stays out of the URL); the GET list is gone (BE-133)
     expect:
       anonymous: 401
       "@no_platform_role": 403

@@ -1,7 +1,6 @@
 package httpx_test
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -9,8 +8,6 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/platform/httpx"
-	"koro/internal/platform/problem"
-	"koro/internal/platform/problem/problemtest"
 )
 
 type queryEmail struct {
@@ -35,11 +32,6 @@ type queryHarmless struct {
 	Limit  int    `query:"limit"`
 }
 
-// queryHiddenQ is a deprecated list that rejects q (httpx.QueryMoved).
-type queryHiddenQ struct {
-	Q string `query:"q" hidden:"true"`
-}
-
 type pathUser struct {
 	UserID string `path:"user_id"`
 }
@@ -47,9 +39,8 @@ type pathUser struct {
 // TestPersonalQueryGuard_RejectsPersonalCriteria (BE-128): a documented
 // query parameter that names a person — an e-mail address, free text, a
 // user ID, a "<who>_name" — stops the registration, whatever the method,
-// unless the allowlist covers that operation and parameter. A hidden
-// parameter (the deprecated twin that only rejects it) and a path
-// parameter pass, and so do non-personal filters.
+// unless the allowlist covers that operation and parameter. A path
+// parameter passes, and so do non-personal filters.
 func TestPersonalQueryGuard_RejectsPersonalCriteria(t *testing.T) {
 	t.Parallel()
 	for name, reg := range map[string]func(huma.API) string{
@@ -75,7 +66,6 @@ func TestPersonalQueryGuard_RejectsPersonalCriteria(t *testing.T) {
 	for name, msg := range map[string]string{
 		"allowlisted q": register[queryFreeText, guardEmpty](api, guardOp("listClubs", "directory")),
 		"harmless":      register[queryHarmless, guardEmpty](api, guardOp("listThings", "orgs")),
-		"hidden q":      register[queryHiddenQ, guardEmpty](api, guardOp("listOldPeople", "identity")),
 		"path user_id":  register[pathUser, guardEmpty](api, huma.Operation{OperationID: "getPerson", Method: http.MethodGet, Path: "/people/{user_id}", Tags: []string{"identity"}}),
 	} {
 		if msg != "" {
@@ -129,17 +119,5 @@ func TestPersonalQueryName(t *testing.T) {
 				t.Errorf("allowlist row %s.%s: reason %q (the parameter must be one the rule catches)", id, p, why)
 			}
 		}
-	}
-}
-
-// TestQueryMoved: the deprecated twin's answer names the parameter and
-// the operation that takes it.
-func TestQueryMoved(t *testing.T) {
-	t.Parallel()
-	err := httpx.QueryMoved("q", "adminQueryUsers")
-	problemtest.WantProblem(t, err, http.StatusUnprocessableEntity, "validation_failed")
-	p, _ := errors.AsType[*problem.Error](err)
-	if f := p.Fields(); len(f) != 1 || f[0].Location != "query.q" || !strings.Contains(f[0].Message, "adminQueryUsers") {
-		t.Fatalf("fields = %+v", f)
 	}
 }

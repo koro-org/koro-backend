@@ -522,9 +522,10 @@ func TestAuthzMatrix_StatusOnlyDeclaration(t *testing.T) {
 		}
 	}
 
-	// The real matrix declares every audit list and the event export list
+	// The real matrix declares the GET audit list and the event export list
 	// (its download_count grows with every download read; BE-082), and only
-	// them so far.
+	// them so far; the org and admin audit searches are POST reads (BE-128)
+	// whose GET lists are gone (BE-133).
 	m, probs := loadMatrix(os.DirFS("testdata/authz"), realMatrixOptions().modules)
 	if len(probs) > 0 {
 		t.Fatal(probs)
@@ -536,7 +537,7 @@ func TestAuthzMatrix_StatusOnlyDeclaration(t *testing.T) {
 		}
 	}
 	slices.Sort(got)
-	if want := []string{"adminListAuditEvents", "listEventExports", "listMySecurityEvents", "listOrgAuditEvents"}; !slices.Equal(got, want) {
+	if want := []string{"listEventExports", "listMySecurityEvents"}; !slices.Equal(got, want) {
 		t.Errorf("operations with compare: status = %v, want %v", got, want)
 	}
 	env := &matrixEnv{opts: realMatrixOptions(), m: m}

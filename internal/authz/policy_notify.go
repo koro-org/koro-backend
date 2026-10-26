@@ -7,7 +7,7 @@ const (
 	// Attrs access_reason (break-glass).
 	TypeNotificationDelivery = "notification_delivery"
 	// TypeEmailSuppression is the e-mail suppression list
-	// (adminListEmailSuppressions, adminDeleteEmailSuppression): Attrs
+	// (adminQueryEmailSuppressions, adminDeleteEmailSuppression): Attrs
 	// access_reason (break-glass).
 	TypeEmailSuppression = "email_suppression"
 	// TypeEmailWebhook is a provider webhook delivery (receiveEmailWebhook).

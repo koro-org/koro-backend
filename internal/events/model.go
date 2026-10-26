@@ -270,6 +270,23 @@ type EventSummary struct {
 	Sensitive  bool
 }
 
+// ShareableBy reports whether orgID may share the event in an event_share
+// post (feed's 422 body.event_id rule): a published event everyone sees; a
+// sensitive one (02 §11.1) only by its organiser, so a sensitive club's or
+// a sensitive category's event is never spread by others. The event cards
+// carry the same answer for the other organisations (shareable_by_others,
+// BE-133).
+func (e EventSummary) ShareableBy(orgID uuid.UUID) bool {
+	return shareable(e.Status, e.Visibility, e.Sensitive, e.OrgID == orgID)
+}
+
+// shareable is the one rule behind ShareableBy and EventView's
+// ShareableByOthers: sensitive is the category flag OR the organiser being
+// a sensitive club; own is the sharer being the organiser.
+func shareable(status Status, visibility Visibility, sensitive, own bool) bool {
+	return status == StatusPublished && visibility == VisibilityPublic && (!sensitive || own)
+}
+
 // JSON is a jsonb column; nil is SQL NULL. Scan copies the driver's bytes.
 type JSON []byte
 

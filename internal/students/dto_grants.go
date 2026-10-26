@@ -36,7 +36,7 @@ type StudentAccessGrantList struct {
 	NextCursor string                  `json:"next_cursor,omitempty"`
 }
 
-// StudentL3CardList is a page of queryCompanyGrantedStudents (listCompanyGrantedStudents).
+// StudentL3CardList is a page of queryCompanyGrantedStudents.
 type StudentL3CardList struct {
 	Items      []StudentL3CardDTO `json:"items"`
 	NextCursor string             `json:"next_cursor,omitempty"`

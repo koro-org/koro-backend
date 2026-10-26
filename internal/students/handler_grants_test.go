@@ -70,8 +70,8 @@ func TestHTTP_AccessGrants(t *testing.T) {
 	if r = e.send(t, app, rec, http.MethodGet, base+"/cv", ""); r.Code != http.StatusOK || !strings.Contains(r.Body.String(), `"url"`) {
 		t.Fatalf("company CV = %d %s", r.Code, r.Body)
 	}
-	// BE-128: the name filter travels in the body; the deprecated GET
-	// refuses it in the URL and still lists without it.
+	// BE-128: the name filter travels in the body; BE-133 removed the
+	// deprecated GET list, so the URL takes no criterion at all.
 	r = e.send(t, app, rec, http.MethodPost, "/api/v1/orgs/"+org.String()+"/students/search", `{"q":"ada"}`)
 	var cards students.StudentL3CardList
 	if r.Code != http.StatusOK || json.Unmarshal(r.Body.Bytes(), &cards) != nil || len(cards.Items) != 1 {
@@ -81,13 +81,13 @@ func TestHTTP_AccessGrants(t *testing.T) {
 		!strings.Contains(r.Body.String(), `"items":[]`) {
 		t.Fatalf("company search without a match = %d %s", r.Code, r.Body)
 	}
-	if r = e.send(t, app, rec, http.MethodGet, "/api/v1/orgs/"+org.String()+"/students?q=ada", ""); r.Code != http.StatusUnprocessableEntity ||
-		!strings.Contains(r.Body.String(), `"location":"query.q"`) || !strings.Contains(r.Body.String(), "queryCompanyGrantedStudents") {
-		t.Fatalf("company list with q in the URL = %d %s", r.Code, r.Body)
-	}
-	r = e.send(t, app, rec, http.MethodGet, "/api/v1/orgs/"+org.String()+"/students", "")
+	r = e.send(t, app, rec, http.MethodPost, "/api/v1/orgs/"+org.String()+"/students/search", `{}`)
 	if r.Code != http.StatusOK || json.Unmarshal(r.Body.Bytes(), &cards) != nil || len(cards.Items) != 1 {
 		t.Fatalf("company list = %d %s", r.Code, r.Body)
+	}
+	if r = e.send(t, app, rec, http.MethodGet, "/api/v1/orgs/"+org.String()+"/students?q=ada", ""); r.Code != http.StatusNotFound &&
+		r.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("removed GET list = %d %s", r.Code, r.Body)
 	}
 	for _, path := range []string{"/api/v1/orgs/" + org.String() + "/students/nope", "/api/v1/orgs/nope/students/" + s.UserID.String()} {
 		if r = e.send(t, app, rec, http.MethodGet, path, ""); r.Code != http.StatusNotFound {

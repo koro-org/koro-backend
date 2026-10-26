@@ -35,7 +35,7 @@ type AuditActorDTO struct {
 }
 
 // AuditEventDTO is one audit event (04 §2.21). ip and user_agent appear
-// only for dpo and platform_admin, metadata only in adminListAuditEvents;
+// only for dpo and platform_admin, metadata only in adminQueryAuditEvents;
 // talent.* events show only that they happened (actor, time, reason).
 type AuditEventDTO struct {
 	EventID      uuid.UUID       `json:"event_id" format:"uuid" doc:"Stable ID of the record (list key, deep links)"`

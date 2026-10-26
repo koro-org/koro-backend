@@ -36,10 +36,18 @@ func newHTTP(t *testing.T, e *env) *httpx.App {
 	return app
 }
 
-// get calls GET path as persona with the headers hdr.
+// get calls GET path as persona with the headers hdr; a path of the form
+// "POST <path>" is a read sent as POST (a …/search list, BE-128) with an
+// empty JSON body.
 func get(t *testing.T, app *httpx.App, persona, path string, hdr map[string]string) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+	var req *http.Request
+	if target, ok := strings.CutPrefix(path, http.MethodPost+" "); ok {
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, target, strings.NewReader("{}"))
+		req.Header.Set("Content-Type", "application/json")
+	} else {
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+	}
 	for k, v := range hdr {
 		req.Header.Set(k, v)
 	}
@@ -172,7 +180,7 @@ func TestHTTP_FinanceResponsesMaskIBAN(t *testing.T) {
 	full := []string{ibanKoro, ibanSender, ibanOther}
 	for _, path := range []string{
 		"/api/v1/admin/collection-accounts",
-		"/api/v1/admin/incoming-transfers",
+		"POST /api/v1/admin/incoming-transfers/search",
 		"/api/v1/admin/incoming-transfers/" + fx.tr.ID.String(),
 		"/api/v1/admin/refunds",
 		"/api/v1/admin/payments/" + fx.refund.PaymentID.String(),

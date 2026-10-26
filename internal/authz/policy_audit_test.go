@@ -8,7 +8,7 @@ import (
 	"koro/internal/authz/authztest"
 )
 
-// auditOrgLog is the audit_log resource of listOrgAuditEvents for org.
+// auditOrgLog is the audit_log resource of queryOrgAuditEvents for org.
 func auditOrgLog(org string) authz.Resource {
 	id := authztest.ID(org)
 	return authz.Resource{Type: authz.TypeAuditLog, ID: id, OrgID: &id}

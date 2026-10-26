@@ -1,6 +1,7 @@
 package audit_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -30,7 +31,28 @@ func newHTTP(t *testing.T, e *env) *httpx.App {
 
 func get(t *testing.T, app *httpx.App, persona, path string, q url.Values) (int, map[string]any) {
 	t.Helper()
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path+"?"+q.Encode(), nil)
+	return serve(t, app, persona, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path+"?"+q.Encode(), nil))
+}
+
+// search posts the criteria q to the POST …/search operation at path
+// (BE-128: criteria travel in the body; BE-133 removed the GET lists).
+func search(t *testing.T, app *httpx.App, persona, path string, q url.Values) (int, map[string]any) {
+	t.Helper()
+	criteria := make(map[string]string, len(q))
+	for k := range q {
+		criteria[k] = q.Get(k)
+	}
+	raw, err := json.Marshal(criteria)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path+"/search", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	return serve(t, app, persona, req)
+}
+
+func serve(t *testing.T, app *httpx.App, persona string, req *http.Request) (int, map[string]any) {
+	t.Helper()
 	if p, _ := authztest.Get(persona); p.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+p.Token)
 	}
@@ -51,7 +73,7 @@ func items(t *testing.T, body map[string]any) []map[string]any {
 	return out
 }
 
-// listOrgAuditEvents returns ip and user_agent to dpo and platform_admin
+// queryOrgAuditEvents returns ip and user_agent to dpo and platform_admin
 // only (04 §2.21); club_admin sees the same events without them.
 func TestListOrgAuditEvents_IPOnlyForDPOAndPAD(t *testing.T) {
 	t.Parallel()
@@ -63,7 +85,7 @@ func TestListOrgAuditEvents_IPOnlyForDPOAndPAD(t *testing.T) {
 	q := url.Values{"occurred_from": {"2026-10-01"}, "occurred_to": {"2026-10-03"}}
 
 	for persona, wantNetwork := range map[string]bool{"club_admin": false, "dpo": true, "platform_admin": true} {
-		code, body := get(t, app, persona, "/api/v1/orgs/"+org.String()+"/audit-events", q)
+		code, body := search(t, app, persona, "/api/v1/orgs/"+org.String()+"/audit-events", q)
 		if code != http.StatusOK {
 			t.Fatalf("%s: status %d (%v)", persona, code, body)
 		}
@@ -81,7 +103,7 @@ func TestListOrgAuditEvents_IPOnlyForDPOAndPAD(t *testing.T) {
 				t.Fatalf("%s: ip %v, user_agent %v", persona, ip, ua)
 			}
 			if _, has := it["metadata"]; has {
-				t.Fatalf("%s: metadata belongs to adminListAuditEvents only", persona)
+				t.Fatalf("%s: metadata belongs to adminQueryAuditEvents only", persona)
 			}
 			actor, _ := it["actor"].(map[string]any)
 			if it["action"] != "events.event.create" || actor["user_id"] != authztest.ID("club_admin").String() {
@@ -90,13 +112,13 @@ func TestListOrgAuditEvents_IPOnlyForDPOAndPAD(t *testing.T) {
 		}
 	}
 	// The other club's admin does not see the org at all; a member gets 403.
-	if code, _ := get(t, app, "other_club_admin", "/api/v1/orgs/"+org.String()+"/audit-events", q); code != http.StatusNotFound {
+	if code, _ := search(t, app, "other_club_admin", "/api/v1/orgs/"+org.String()+"/audit-events", q); code != http.StatusNotFound {
 		t.Fatalf("other_club_admin: %d, want 404", code)
 	}
-	if code, _ := get(t, app, "club_member", "/api/v1/orgs/"+org.String()+"/audit-events", q); code != http.StatusForbidden {
+	if code, _ := search(t, app, "club_member", "/api/v1/orgs/"+org.String()+"/audit-events", q); code != http.StatusForbidden {
 		t.Fatalf("club_member: %d, want 403", code)
 	}
-	if code, _ := get(t, app, "dpo", "/api/v1/orgs/"+org.String()+"/audit-events", url.Values{"occurred_from": {"x"}, "occurred_to": {"2026-10-03"}}); code != http.StatusUnprocessableEntity {
+	if code, _ := search(t, app, "dpo", "/api/v1/orgs/"+org.String()+"/audit-events", url.Values{"occurred_from": {"x"}, "occurred_to": {"2026-10-03"}}); code != http.StatusUnprocessableEntity {
 		t.Fatalf("bad occurred_from: %d, want 422", code)
 	}
 }
@@ -187,7 +209,7 @@ func TestListMySecurityEvents_OwnSecurityEventsOnly(t *testing.T) {
 	}
 }
 
-// listOrgAuditEvents: sensitive club records go to that club's club_admin
+// queryOrgAuditEvents: sensitive club records go to that club's club_admin
 // only; talent.* events show only that they happened (03 §5.21).
 func TestListOrgAuditEvents_SensitiveAndTalentRules(t *testing.T) {
 	t.Parallel()
@@ -234,7 +256,7 @@ func TestLists_KeysetPages(t *testing.T) {
 	seen := map[string]bool{}
 	pages := 0
 	for {
-		code, body := get(t, app, "club_admin", "/api/v1/orgs/"+org.String()+"/audit-events", q)
+		code, body := search(t, app, "club_admin", "/api/v1/orgs/"+org.String()+"/audit-events", q)
 		if code != http.StatusOK {
 			t.Fatalf("status %d: %v", code, body)
 		}
@@ -257,7 +279,7 @@ func TestLists_KeysetPages(t *testing.T) {
 	}
 	// A cursor of one filter set is no good for another.
 	q.Set("occurred_from", "2026-10-02")
-	if code, body := get(t, app, "club_admin", "/api/v1/orgs/"+org.String()+"/audit-events", q); code != http.StatusUnprocessableEntity || body["code"] != "page.invalid_cursor" {
+	if code, body := search(t, app, "club_admin", "/api/v1/orgs/"+org.String()+"/audit-events", q); code != http.StatusUnprocessableEntity || body["code"] != "page.invalid_cursor" {
 		t.Fatalf("foreign cursor: %d %v", code, body)
 	}
 }

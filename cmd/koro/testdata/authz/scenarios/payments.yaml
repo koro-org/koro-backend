@@ -27,7 +27,7 @@ scenarios:
   payments_mfa_required:
     note: platform_admin and finance_admin reach payments only on k-mfa role paths (03 §6.4)
     steps:
-      - { persona: finance_admin, mfa: false, operation: adminListIncomingTransfers, expect: 403, code: authz.mfa_required }
+      - { persona: finance_admin, mfa: false, operation: adminQueryIncomingTransfers, expect: 403, code: authz.mfa_required }
       - { persona: platform_admin, mfa: false, operation: adminListCollectionAccounts, expect: 403, code: authz.mfa_required }
       - { persona: finance_admin, mfa: false, operation: adminCreateIncomingTransfer, expect: 403, code: authz.mfa_required }
       - { persona: finance_admin, operation: adminCreateIncomingTransfer, expect: 201 }

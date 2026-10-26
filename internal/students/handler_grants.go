@@ -8,7 +8,6 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
-	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
@@ -65,15 +64,6 @@ func registerGrants(api huma.API, h handler) {
 			"goes back in the body.",
 	}, op.Meta{Action: string(authz.StudentsAccessGrantListCompany), Surface: op.SurfaceOrg, RateLimit: op.RateReadDefault,
 		Idempotency: op.IdempotencyOptional}, h.queryCompanyStudents)
-
-	op.Register(api, "students", huma.Operation{
-		OperationID: "listCompanyGrantedStudents", Method: http.MethodGet, Path: "/orgs/{org_id}/students", Deprecated: true,
-		Summary: "List the students who granted the company access (deprecated: queryCompanyGrantedStudents)",
-		Description: "Deprecated (BE-128): queryCompanyGrantedStudents (POST /orgs/{org_id}/students/search) takes the " +
-			"name filter in the body; a q in the query string is 422 (personal data stays out of URLs). Students with " +
-			"an active level 3 grant of this company and an active student verification, newest grant first. Minors " +
-			"never appear.",
-	}, org(authz.StudentsAccessGrantListCompany, ""), h.listCompanyStudents)
 
 	op.Register(api, "students", huma.Operation{
 		OperationID: "getCompanyStudentProfile", Method: http.MethodGet, Path: "/orgs/{org_id}/students/{user_id}",
@@ -233,12 +223,6 @@ func (p CompanyStudentPath) ids() (org, user uuid.UUID, err error) {
 	return org, user, err
 }
 
-type companyStudentsInput struct {
-	CompanyPath
-	Q string `query:"q" hidden:"true" doc:"Moved to queryCompanyGrantedStudents (BE-128): 422 when set"`
-	page.Params
-}
-
 type queryCompanyStudentsInput struct {
 	CompanyPath
 	Body struct {
@@ -249,15 +233,6 @@ type queryCompanyStudentsInput struct {
 
 type companyStudentsOutput struct {
 	Body StudentL3CardList
-}
-
-// listCompanyStudents is the deprecated GET twin of queryCompanyStudents
-// (no name filter).
-func (h handler) listCompanyStudents(ctx context.Context, in *companyStudentsInput) (*companyStudentsOutput, error) {
-	if in.Q != "" {
-		return nil, httpx.QueryMoved("q", "queryCompanyGrantedStudents")
-	}
-	return h.companyStudentPage(ctx, "listCompanyGrantedStudents", in.OrgID, "", in.Cursor, in.Limit)
 }
 
 func (h handler) queryCompanyStudents(ctx context.Context, in *queryCompanyStudentsInput) (*companyStudentsOutput, error) {

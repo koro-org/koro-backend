@@ -39,7 +39,7 @@ type After struct {
 type Filter struct {
 	From, To     time.Time
 	ActorUserID  *uuid.UUID
-	OrgID        *uuid.UUID // adminListAuditEvents only; listOrg scopes by its org
+	OrgID        *uuid.UUID // adminQueryAuditEvents only; listOrg scopes by its org
 	ResourceType string
 	ResourceID   *uuid.UUID
 	Action       string
@@ -66,7 +66,7 @@ type PageQuery struct {
 // OwnQuery is listMySecurityEvents.
 type OwnQuery struct{ PageQuery }
 
-// OrgQuery is listOrgAuditEvents (04 §2.21).
+// OrgQuery is queryOrgAuditEvents (04 §2.21).
 type OrgQuery struct {
 	PageQuery
 	From, To    time.Time // required, To exclusive
@@ -74,7 +74,7 @@ type OrgQuery struct {
 	ActorUserID *uuid.UUID
 }
 
-// AdminQuery is adminListAuditEvents (04 §2.21).
+// AdminQuery is adminQueryAuditEvents (04 §2.21).
 type AdminQuery struct {
 	PageQuery
 	From, To     time.Time // required, To exclusive
@@ -89,7 +89,7 @@ type AdminQuery struct {
 
 // View is an event as a reader may see it (AuditEventDTO). Fields the
 // reader may not see are empty: IP/User-Agent outside dpo/platform_admin,
-// metadata outside adminListAuditEvents, and everything but the existence
+// metadata outside adminQueryAuditEvents, and everything but the existence
 // (action, outcome, actor, time, reason) of talent.* events (03 §5.21).
 type View struct {
 	ID           uuid.UUID

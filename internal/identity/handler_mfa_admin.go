@@ -9,7 +9,6 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/consent"
-	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/page"
 	"koro/internal/platform/problem"
@@ -75,14 +74,6 @@ func registerMFAAndAdmin(api huma.API, h handler) {
 			"query). next_cursor goes back in the body.",
 	}, op.Meta{Action: string(authz.IdentityUserSearch), Surface: op.SurfaceAdmin, RateLimit: op.RateSearch,
 		Idempotency: op.IdempotencyOptional}, h.queryUsers)
-
-	op.Register(api, "identity", huma.Operation{
-		OperationID: "adminSearchUsers", Method: http.MethodGet, Path: "/admin/users", Deprecated: true,
-		Summary: "List users (deprecated: adminQueryUsers)",
-		Description: "Deprecated (BE-128): adminQueryUsers (POST /admin/users/search) takes the search criteria in " +
-			"the body. This list filters by status only, newest first; a q in the query string is 422 (personal data " +
-			"stays out of URLs). Audited like the search.",
-	}, op.Meta{Action: string(authz.IdentityUserSearch), Surface: op.SurfaceAdmin, RateLimit: op.RateSearch}, h.searchUsers)
 
 	op.Register(api, "identity", huma.Operation{
 		OperationID: "adminGetUser", Method: http.MethodGet, Path: "/admin/users/{user_id}",
@@ -287,12 +278,6 @@ func (h handler) regenerateRecoveryCodes(ctx context.Context, in *reauthOnlyInpu
 
 // ---- admin users
 
-type searchUsersInput struct {
-	Q      string `query:"q" hidden:"true" doc:"Moved to adminQueryUsers (BE-128): 422 when set"`
-	Status string `query:"status" enum:"pending_email,active,suspended,erased"`
-	page.Params
-}
-
 type queryUsersInput struct {
 	Body struct {
 		Q      string `json:"q,omitempty" maxLength:"254" doc:"An exact e-mail address or a fragment of the name (2-100 characters)"`
@@ -306,14 +291,6 @@ type searchUsersOutput struct {
 }
 
 const userSort = "id_desc"
-
-// searchUsers is the deprecated GET twin of queryUsers (status only).
-func (h handler) searchUsers(ctx context.Context, in *searchUsersInput) (*searchUsersOutput, error) {
-	if in.Q != "" {
-		return nil, httpx.QueryMoved("q", "adminQueryUsers")
-	}
-	return h.userPage(ctx, "adminSearchUsers", "", in.Status, in.Cursor, in.Limit)
-}
 
 func (h handler) queryUsers(ctx context.Context, in *queryUsersInput) (*searchUsersOutput, error) {
 	b := in.Body

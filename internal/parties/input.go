@@ -77,7 +77,7 @@ type Decision struct {
 	Note     string // optional, audited
 }
 
-// AdminQuery narrows adminQueryLegalParties (04 §2.13: kind, status, q; adminListLegalParties: no q).
+// AdminQuery narrows adminQueryLegalParties (04 §2.13: kind, status, q).
 type AdminQuery struct {
 	Kind   Kind
 	Status Status

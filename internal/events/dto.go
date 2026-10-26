@@ -39,6 +39,7 @@ type EventCardDTO struct {
 	RequiresRegistration bool        `json:"requires_registration"`
 	RegistrationMode     string      `json:"registration_mode" enum:"auto,manual"`
 	Capacity             *int        `json:"capacity,omitempty"`
+	ShareableByOthers    bool        `json:"shareable_by_others" doc:"Whether an organisation other than the organiser may share the event in an event_share post (createPost): a published public event that is neither of a sensitive category nor organised by a sensitive club; false also while the organiser's sensitivity cannot be read. The organiser shares its own published public events whatever this says. Same rule as the 422 body.event_id of createPost (BE-133)."`
 }
 
 // EventCardList is a page of event cards.
@@ -107,6 +108,7 @@ func toCardDTO(v EventView) EventCardDTO {
 		LocationName: str(e.LocationName), City: str(e.City), StartsAt: e.StartsAt, EndsAt: e.EndsAt,
 		DisplayTimezone: displayTimezone, CoverURL: v.CoverURL, CoverPublicURL: v.CoverPublicURL, Visibility: string(e.Visibility), Status: string(e.Status),
 		RequiresRegistration: e.RequiresRegistration, RegistrationMode: string(e.RegistrationMode), Capacity: e.Capacity,
+		ShareableByOthers: v.ShareableByOthers,
 	}
 }
 

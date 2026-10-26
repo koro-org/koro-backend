@@ -113,9 +113,9 @@ var termsExemptOperations = map[string]string{
 	// Reads sent as POST (BE-128): a search whose criteria name a person
 	// (an e-mail address, a name, a user ID) takes them in the body so they
 	// stay out of URLs and access logs (httpx personal query guard). The
-	// operation is the read of its deprecated GET twin, under the same
-	// action: it changes nothing (the audit row of the read aside), and a
-	// read is never behind the gate.
+	// operation is a list read under its read action (the GET lists it
+	// replaced are gone, BE-133): it changes nothing (the audit row of the
+	// read aside), and a read is never behind the gate.
 	"adminQueryUsers":             "POST " + APIPrefix + "/admin/users/search",
 	"adminQueryEmailSuppressions": "POST " + APIPrefix + "/admin/email-suppressions/search",
 	"adminQueryAuditEvents":       "POST " + APIPrefix + "/admin/audit-events/search",

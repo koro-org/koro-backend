@@ -29,7 +29,7 @@ const (
 	maxQueryLen  = 100
 )
 
-// AdminUserQuery is one page of adminQueryUsers (adminSearchUsers: status only).
+// AdminUserQuery is one page of adminQueryUsers.
 type AdminUserQuery struct {
 	Q      string // an exact e-mail address or a name fragment (2–100 characters); "" = all
 	Status Status // "" = every status
@@ -84,7 +84,7 @@ func cleanReason(raw, location string) (string, error) {
 	return r, nil
 }
 
-// SearchUsers implements Service (adminQueryUsers, adminSearchUsers): rate class search,
+// SearchUsers implements Service (adminQueryUsers): rate class search,
 // every search audited with what kind of query it was and whom it found
 // (never the query itself: it may be an e-mail address).
 func (s *service) SearchUsers(ctx context.Context, a authz.Actor, q AdminUserQuery) (AdminUserPage, error) {

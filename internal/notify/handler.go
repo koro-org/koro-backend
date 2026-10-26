@@ -88,15 +88,6 @@ func Register(api huma.API, svc Service) {
 		RateLimit: op.RateReadDefault, Idempotency: op.IdempotencyOptional}), h.adminQuerySuppressions)
 
 	huma.Register(api, op.Koro(huma.Operation{
-		OperationID: "adminListEmailSuppressions", Method: http.MethodGet, Path: "/admin/email-suppressions", Tags: tags,
-		Deprecated: true, Summary: "List e-mail suppressions (deprecated: adminQueryEmailSuppressions)",
-		Description: "Deprecated (BE-128): adminQueryEmailSuppressions (POST /admin/email-suppressions/search) takes " +
-			"the address in the body. This list pages every suppression, newest first; an email in the query string " +
-			"is 422 (personal data stays out of URLs). Break-glass: X-Koro-Access-Reason is mandatory and every read " +
-			"is audited.",
-	}, op.Meta{Action: string(authz.NotifySuppressionManage), Surface: op.SurfaceAdmin, BreakGlass: true}), h.adminListSuppressions)
-
-	huma.Register(api, op.Koro(huma.Operation{
 		OperationID: "adminDeleteEmailSuppression", Method: http.MethodDelete, Path: "/admin/email-suppressions/{suppression_id}",
 		Tags: tags, Summary: "Remove an e-mail suppression", DefaultStatus: http.StatusNoContent,
 		Description: "The address may receive e-mail again. Break-glass: X-Koro-Access-Reason is mandatory; audited.",
@@ -298,12 +289,6 @@ func (a AccessHeaders) access() Access {
 	return Access{Reason: a.AccessReason.String(), TicketRef: a.TicketRef}
 }
 
-type adminListSuppressionsInput struct {
-	AccessHeaders
-	page.Params
-	Email string `query:"email" hidden:"true" doc:"Moved to adminQueryEmailSuppressions (BE-128): 422 when set"`
-}
-
 type adminQuerySuppressionsInput struct {
 	AccessHeaders
 	Body struct {
@@ -314,15 +299,6 @@ type adminQuerySuppressionsInput struct {
 
 type suppressionListOutput struct {
 	Body SuppressionList
-}
-
-// adminListSuppressions is the deprecated GET twin of
-// adminQuerySuppressions (no address).
-func (h handler) adminListSuppressions(ctx context.Context, in *adminListSuppressionsInput) (*suppressionListOutput, error) {
-	if in.Email != "" {
-		return nil, httpx.QueryMoved("email", "adminQueryEmailSuppressions")
-	}
-	return h.suppressionPage(ctx, "adminListEmailSuppressions", in.access(), "", in.Cursor, in.Limit)
 }
 
 func (h handler) adminQuerySuppressions(ctx context.Context, in *adminQuerySuppressionsInput) (*suppressionListOutput, error) {

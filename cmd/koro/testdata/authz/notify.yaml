@@ -95,25 +95,12 @@ operations:
     path_params: { push_token_id: push_token_student }
     expect: { anonymous: 401, student: 204, "@not_owner": 404 }
 
-  adminListEmailSuppressions:
-    method: GET
-    path: /api/v1/admin/email-suppressions
-    action: notify.suppression.manage
-    note: without X-Koro-Access-Reason even support and platform_admin are refused (B cells)
-    expect: { anonymous: 401, "@no_platform_role": 403, moderator: 403, support: 403, dpo: 403,
-              platform_admin: 403, finance_admin: 403, talent_auditor: 403 }
-    variants:
-      - name: break_glass
-        headers: { X-Koro-Access-Reason: "Ticket 4711: user reports missing e-mails" }
-        expect: { anonymous: 401, "@no_platform_role": 403, moderator: 403, support: 200, dpo: 403,
-                  platform_admin: 200, finance_admin: 403, talent_auditor: 403 }
-
   adminQueryEmailSuppressions:
     method: POST
     path: /api/v1/admin/email-suppressions/search
     action: notify.suppression.manage
     body: bodies/notify/query_suppressions.json
-    note: BE-128 read sent as POST (the address stays out of the URL); B cells as adminListEmailSuppressions
+    note: BE-128 read sent as POST (the address stays out of the URL); without X-Koro-Access-Reason even support and platform_admin are refused (B cells); the GET list is gone (BE-133)
     expect: { anonymous: 401, "@no_platform_role": 403, moderator: 403, support: 403, dpo: 403,
               platform_admin: 403, finance_admin: 403, talent_auditor: 403 }
     variants:

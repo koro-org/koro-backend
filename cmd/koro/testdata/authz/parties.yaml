@@ -269,10 +269,12 @@ operations:
           platform_admin: 404
           finance_admin: 404
 
-  adminListLegalParties:
-    method: GET
-    path: /api/v1/admin/legal-parties
+  adminQueryLegalParties:
+    method: POST
+    path: /api/v1/admin/legal-parties/search
     action: parties.legal_party.read
+    body: bodies/parties/query_parties.json
+    note: BE-128 read sent as POST (a title or tax number stays out of the URL); the GET list is gone (BE-133)
     expect:
       anonymous: 401
       "@no_platform_role": 403   # admin surface: 403 before reading (03 §7.2-3)
@@ -280,27 +282,14 @@ operations:
       platform_admin: 200
       finance_admin: 200
     variants:
-      - name: filtered
-        query: { kind: payee, status: verified }
+      - name: unfiltered
+        body: bodies/parties/query_parties_all.json
         expect:
           anonymous: 401
           "@no_platform_role": 403
           "@other_staff": 403
           platform_admin: 200
           finance_admin: 200
-
-  adminQueryLegalParties:
-    method: POST
-    path: /api/v1/admin/legal-parties/search
-    action: parties.legal_party.read
-    body: bodies/parties/query_parties.json
-    note: BE-128 read sent as POST (a title or tax number stays out of the URL); the cells of adminListLegalParties
-    expect:
-      anonymous: 401
-      "@no_platform_role": 403
-      "@other_staff": 403
-      platform_admin: 200
-      finance_admin: 200
 
   adminCreateLegalParty:
     method: POST

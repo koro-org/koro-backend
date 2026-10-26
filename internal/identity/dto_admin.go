@@ -20,7 +20,7 @@ type RecoveryCodesDTO struct {
 	RecoveryCodes []string `json:"recovery_codes" doc:"Ten single-use recovery codes; store them now, they are not shown again"`
 }
 
-// AdminUserSummaryDTO is one row of adminQueryUsers and adminSearchUsers (04 §V.5 subset).
+// AdminUserSummaryDTO is one row of adminQueryUsers (04 §V.5 subset).
 type AdminUserSummaryDTO struct {
 	UserID      string     `json:"user_id" format:"uuid"`
 	Email       string     `json:"email,omitempty"`
@@ -32,7 +32,7 @@ type AdminUserSummaryDTO struct {
 	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
 }
 
-// AdminUserList is the body of adminQueryUsers and adminSearchUsers.
+// AdminUserList is the body of adminQueryUsers.
 type AdminUserList struct {
 	Items      []AdminUserSummaryDTO `json:"items"`
 	NextCursor string                `json:"next_cursor,omitempty"`

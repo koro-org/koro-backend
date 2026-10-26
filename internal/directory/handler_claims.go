@@ -43,7 +43,8 @@ func registerClaims(api huma.API, h handler) {
 		Summary: "List club claims",
 		Description: "The review queue: pending claims oldest first (default), other statuses newest first. Support and " +
 			"platform admins see every claim; a university representative the claims of their universities' " +
-			"non-sensitive clubs (the claims they decide). Audited.",
+			"non-sensitive clubs (the claims they decide). university_org_id narrows the queue to one university " +
+			"(a university panel: a representative of several universities sees only that panel's claims). Audited.",
 	}, op.Meta{Action: string(authz.DirectoryClubClaimList), Surface: op.SurfaceAdmin}, h.adminListClaims)
 
 	op.Register(api, "directory", huma.Operation{
@@ -166,7 +167,8 @@ func (h handler) withdrawClaim(ctx context.Context, in *ClaimPath) (*claimOutput
 
 type adminListClaimsInput struct {
 	page.Params
-	Status string `query:"status" enum:"pending,approved,rejected,withdrawn" doc:"Default pending"`
+	Status        string `query:"status" enum:"pending,approved,rejected,withdrawn" doc:"Default pending"`
+	UniversityOrg string `query:"university_org_id" format:"uuid" doc:"Only the claims of this university's clubs (its org ID): a university panel's queue. A representative asks only for a university they represent (another: 404)"`
 }
 
 type adminClaimListOutput struct{ Body AdminClubClaimList }
@@ -184,12 +186,16 @@ func (h handler) adminListClaims(ctx context.Context, in *adminListClaimsInput) 
 	if status == ClaimPending {
 		sort = claimSortOldest
 	}
-	fp := page.Fingerprint("adminListClubClaims", string(status))
+	fp := page.Fingerprint("adminListClubClaims", string(status), in.UniversityOrg)
 	after, err := claimCursor(in.Cursor, sort, fp)
 	if err != nil {
 		return nil, err
 	}
-	p, err := h.svc.AdminListClubClaims(ctx, a, AdminClaimQuery{Status: status, After: after, Limit: in.Limit})
+	uni, err := httpx.OptID("query.university_org_id", in.UniversityOrg)
+	if err != nil {
+		return nil, err
+	}
+	p, err := h.svc.AdminListClubClaims(ctx, a, AdminClaimQuery{Status: status, UniversityOrg: uni, After: after, Limit: in.Limit})
 	if err != nil {
 		return nil, err
 	}

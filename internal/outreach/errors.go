@@ -41,6 +41,13 @@ var (
 	// post, outreach_dispatches_post_id_uq).
 	ErrDispatchExists = problem.New(problem.Conflict, "outreach.dispatch_exists",
 		"The post already has a dispatch")
+	// ErrPostGone: a dispatch's post was deleted or removed before the run
+	// (DispatchDTO failure_reason only; no request answers it).
+	ErrPostGone = problem.New(problem.Gone, "outreach.post_gone", "The post of the dispatch is gone")
+	// ErrPostNotPublished: a dispatch's post is not published (any more) at
+	// the run (DispatchDTO failure_reason only).
+	ErrPostNotPublished = problem.New(problem.Conflict, "outreach.post_not_published",
+		"The post of the dispatch is not published")
 
 	// ErrNotFound: the segment (or org) does not exist or is not the
 	// caller's org's (IDOR: another org's segment is 404).

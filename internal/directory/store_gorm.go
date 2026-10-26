@@ -215,6 +215,9 @@ func (s gormStore) ListUniversities(ctx context.Context, f UniversityFilter, aft
 	if f.Type != "" {
 		q = q.Where("type = ?", string(f.Type))
 	}
+	if f.OrgID != nil {
+		q = q.Where("org_id = ?", *f.OrgID)
+	}
 	if f.Q != "" {
 		q = q.Where(`(search_vector @@ plainto_tsquery('public.koro_tr', ?) OR `+nameMatch("name")+`
 			OR public.koro_norm(coalesce(short_name, '')) LIKE '%' || public.koro_norm( ?) || '%')`,

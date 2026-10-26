@@ -159,7 +159,7 @@ type FormField struct {
 	Required       bool                 `json:"required"`
 	Validation     *FormFieldValidation `json:"validation,omitempty"`
 	Options        []FormFieldOption    `json:"options,omitempty" maxItems:"50" doc:"single_select, multi_select"`
-	ConsentPurpose string               `json:"consent_purpose,omitempty" doc:"consent: the consent purpose (event_sponsor_share)"`
+	ConsentPurpose string               `json:"consent_purpose,omitempty" doc:"consent: the per-registration consent purpose"`
 }
 
 // FormSchema is a registration form (R-003 §2.5.1).

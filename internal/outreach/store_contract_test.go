@@ -282,6 +282,17 @@ func dispatchContract(t *testing.T, newStore func(t *testing.T) (outreach.Store,
 				t.Fatalf("DispatchOfPost under another org: %v", err)
 			}
 		}
+		// BE-127: the dispatch IDs of a page of posts, the org scope kept.
+		ids, err := s.DispatchIDsOfPosts(ctx, org, []uuid.UUID{in.PostID, uuid.NewV7()})
+		if err != nil || len(ids) != 1 || ids[in.PostID] != in.ID {
+			t.Fatalf("DispatchIDsOfPosts = %v, %v", ids, err)
+		}
+		if ids, err := s.DispatchIDsOfPosts(ctx, other, []uuid.UUID{in.PostID}); err != nil || len(ids) != 0 {
+			t.Fatalf("DispatchIDsOfPosts under another org = %v, %v", ids, err)
+		}
+		if ids, err := s.DispatchIDsOfPosts(ctx, org, nil); err != nil || len(ids) != 0 {
+			t.Fatalf("DispatchIDsOfPosts of no post = %v, %v", ids, err)
+		}
 		if _, err := s.GetDispatch(ctx, other, in.ID); !errors.Is(err, outreach.ErrNotFound) {
 			t.Fatalf("GetDispatch under another org: %v", err)
 		}

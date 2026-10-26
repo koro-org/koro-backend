@@ -1242,6 +1242,18 @@
     "type": "urn:koro:problem:outreach.invalid_state"
   },
   {
+    "code": "outreach.post_gone",
+    "status": 410,
+    "title": "The post of the dispatch is gone",
+    "type": "urn:koro:problem:outreach.post_gone"
+  },
+  {
+    "code": "outreach.post_not_published",
+    "status": 409,
+    "title": "The post of the dispatch is not published",
+    "type": "urn:koro:problem:outreach.post_not_published"
+  },
+  {
     "code": "outreach.post_not_targeted",
     "status": 422,
     "title": "Only a targeted post can be dispatched",

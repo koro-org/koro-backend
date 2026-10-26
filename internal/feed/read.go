@@ -15,6 +15,7 @@ import (
 	"koro/internal/outreach"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/page"
+	"koro/internal/platform/problem"
 )
 
 // Page sizes of the feed (04 §2.7: limit ≤ 50; ticket: LIMIT 21 = 20 + 1).
@@ -47,6 +48,7 @@ type PageQuery struct {
 // ManageQuery narrows listOrgPostsManage (statuses; newest first by id).
 type ManageQuery struct {
 	Statuses []Status
+	Kind     Kind // "" every kind (BE-127)
 	Limit    int
 	After    *uuid.UUID
 }
@@ -88,6 +90,9 @@ type PostView struct {
 	ETag    string
 	Viewer  *ViewerFlags
 	Manage  bool
+	// DispatchID is the notification dispatch of a targeted post in the
+	// management view (BE-127; nil: none, or not the management view).
+	DispatchID *uuid.UUID
 	// ReasonCode is the moderation reason of a hidden or removed post in
 	// the management view (04 §2.7 "durum + reason_code"; BE-032): the
 	// moderator's reason_code, reported_by_users for a post hidden by the
@@ -276,7 +281,10 @@ func (s *service) ListOrgPosts(ctx context.Context, a authz.Actor, orgID uuid.UU
 		return PostPage{}, err
 	}
 	limit := page.ClampLimit(q.Limit)
-	rows, err := s.d.Store.ListOrgManage(ctx, o.ID, q.Statuses, q.After, limit+1)
+	if q.Kind != "" && !q.Kind.Valid() {
+		return PostPage{}, problem.Field("query.kind", "is not a post kind")
+	}
+	rows, err := s.d.Store.ListOrgManage(ctx, o.ID, ManageFilter{Statuses: q.Statuses, Kind: q.Kind}, q.After, limit+1)
 	if err != nil {
 		return PostPage{}, err
 	}
@@ -292,6 +300,35 @@ func (s *service) ListOrgPosts(ctx context.Context, a authz.Actor, orgID uuid.UU
 	}
 	out.Items = vs
 	return out, nil
+}
+
+// GetOrgPost implements Service (getPostManage, feed.post.list_org_manage):
+// one post of the org in the management view, with the ETag of updatePost.
+// A post of another org is 404 (the org comes from the path and the post
+// must be its own, 06 H-38).
+func (s *service) GetOrgPost(ctx context.Context, a authz.Actor, orgID, postID uuid.UUID) (PostView, error) {
+	o, err := s.org(ctx, orgID)
+	if err != nil {
+		return PostView{}, err
+	}
+	if err := authz.Can(ctx, a, authz.FeedPostListOrgManage, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
+		return PostView{}, err
+	}
+	p, err := s.d.Store.GetPost(ctx, postID)
+	if err != nil {
+		return PostView{}, err
+	}
+	if p.OrgID != o.ID {
+		return PostView{}, ErrNotFound
+	}
+	vs, err := s.views(ctx, a, []Post{p}, true)
+	if err != nil {
+		return PostView{}, err
+	}
+	if len(vs) == 0 {
+		return PostView{}, ErrNotFound
+	}
+	return vs[0], nil
 }
 
 // PostStats implements Service (feed.post.stats): the author org's
@@ -376,6 +413,10 @@ func (s *service) views(ctx context.Context, a authz.Actor, rows []Post, manage 
 		state = &st
 	}
 	logos := s.logoURLs(ctx, os)
+	dispatches, err := s.dispatchIDs(ctx, rows, manage)
+	if err != nil {
+		return nil, err
+	}
 	evs := map[uuid.UUID]events.EventSummary{}
 	if s.d.Events != nil {
 		for _, id := range eventIDs {
@@ -404,6 +445,9 @@ func (s *service) views(ctx context.Context, a authz.Actor, rows []Post, manage 
 			out = append(out, v)
 			continue
 		}
+		if d, ok := dispatches[p.ID]; ok {
+			v.DispatchID = &d
+		}
 		for _, m := range media[p.ID] {
 			mv := MediaView{Media: m}
 			if s.d.Files != nil {
@@ -427,6 +471,29 @@ func (s *service) views(ctx context.Context, a authz.Actor, rows []Post, manage 
 			}
 		}
 		out = append(out, v)
+	}
+	return out, nil
+}
+
+// dispatchIDs returns the dispatch of each targeted post of rows in the
+// management view (one outreach read per org of the page; BE-127).
+func (s *service) dispatchIDs(ctx context.Context, rows []Post, manage bool) (map[uuid.UUID]uuid.UUID, error) {
+	out := map[uuid.UUID]uuid.UUID{}
+	if !manage || s.d.Targeting == nil {
+		return out, nil
+	}
+	byOrg := map[uuid.UUID][]uuid.UUID{}
+	for _, p := range rows {
+		if p.AudienceKind == AudienceSegment && p.Status != StatusRemoved {
+			byOrg[p.OrgID] = append(byOrg[p.OrgID], p.ID)
+		}
+	}
+	for org, ids := range byOrg {
+		m, err := s.d.Targeting.DispatchIDsOfPosts(ctx, org, ids)
+		if err != nil {
+			return nil, err
+		}
+		maps.Copy(out, m)
 	}
 	return out, nil
 }

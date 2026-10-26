@@ -82,19 +82,19 @@ func (b DispatchBody) Request() DispatchRequest {
 
 // DispatchDTO is 04 §2.8 DispatchDTO.
 type DispatchDTO struct {
-	DispatchID     string     `json:"dispatch_id" format:"uuid"`
-	PostID         string     `json:"post_id" format:"uuid"`
-	SegmentID      string     `json:"segment_id,omitempty" format:"uuid" doc:"The saved segment the post's audience came from"`
-	Status         string     `json:"status" enum:"scheduled,running,completed,cancelled,failed"`
-	Channels       []string   `json:"channels"`
-	Commercial     bool       `json:"commercial" doc:"true: consenting students only (6563); false: an informational notice"`
-	EligibleCount  *int       `json:"eligible_count" doc:"Reached students (published estimate); null below 10 or before the run"`
-	ConsentedCount *int       `json:"consented_count" doc:"Of them, reachable on a channel (commercial: consenting); null below 10"`
-	SentCount      *int       `json:"sent_count" doc:"Of them, notified; null below 10"`
-	FailureReason  string     `json:"failure_reason,omitempty" doc:"Why a cancelled or failed dispatch did not send (a problem code)"`
-	CreatedAt      time.Time  `json:"created_at"`
-	StartedAt      *time.Time `json:"started_at,omitempty"`
-	CompletedAt    *time.Time `json:"completed_at,omitempty"`
+	DispatchID     string        `json:"dispatch_id" format:"uuid"`
+	PostID         string        `json:"post_id" format:"uuid"`
+	SegmentID      string        `json:"segment_id,omitempty" format:"uuid" doc:"The saved segment the post's audience came from"`
+	Status         string        `json:"status" enum:"scheduled,running,completed,cancelled,failed"`
+	Channels       []string      `json:"channels"`
+	Commercial     bool          `json:"commercial" doc:"true: consenting students only (6563); false: an informational notice"`
+	EligibleCount  *int          `json:"eligible_count" doc:"Reached students (published estimate); null below 10 or before the run"`
+	ConsentedCount *int          `json:"consented_count" doc:"Of them, reachable on a channel (commercial: consenting); null below 10"`
+	SentCount      *int          `json:"sent_count" doc:"Of them, notified; null below 10"`
+	FailureReason  failureReason `json:"failure_reason,omitempty" doc:"Why a cancelled or failed dispatch did not send: a problem code of problems.json (x-koro-failure-reasons lists them)"`
+	CreatedAt      time.Time     `json:"created_at"`
+	StartedAt      *time.Time    `json:"started_at,omitempty"`
+	CompletedAt    *time.Time    `json:"completed_at,omitempty"`
 }
 
 // DispatchList is the body of listDispatches.
@@ -115,7 +115,7 @@ func ToDispatchDTO(v DispatchView) DispatchDTO {
 		out.SegmentID = v.SegmentID.String()
 	}
 	if v.LastError != nil && v.Status != DispatchCompleted {
-		out.FailureReason = *v.LastError
+		out.FailureReason = failureReason(*v.LastError)
 	}
 	return out
 }
@@ -219,4 +219,21 @@ func (h handler) cancelDispatch(ctx context.Context, in *cancelDispatchInput) (*
 		return nil, err
 	}
 	return &dispatchOutput{Body: ToDispatchDTO(v)}, nil
+}
+
+// ExtFailureReasons is the DispatchDTO.failure_reason extension listing the
+// codes a dispatch may end with (DispatchFailureReasons; BE-127). It is not
+// an enum: a client shows a code it does not know as a generic failure.
+const ExtFailureReasons = "x-koro-failure-reasons"
+
+// failureReason is DispatchDTO.failure_reason.
+type failureReason string
+
+// TransformSchema implements huma.SchemaTransformer.
+func (failureReason) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
+	if s.Extensions == nil {
+		s.Extensions = map[string]any{}
+	}
+	s.Extensions[ExtFailureReasons] = DispatchFailureReasons()
+	return s
 }

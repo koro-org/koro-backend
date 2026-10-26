@@ -383,21 +383,21 @@ type OfferingCardDTO struct {
 // OfferingApprovalDTO is the management block of an offering (its seller's
 // managers and platform staff only: the buyer never sees the payee).
 type OfferingApprovalDTO struct {
-	DefaultPayeeID             string     `json:"default_payee_id,omitempty" format:"uuid"`
-	QuantityTotal              *int       `json:"quantity_total" doc:"null: unlimited"`
-	QuantitySold               int        `json:"quantity_sold"`
-	InvoiceTrigger             string     `json:"invoice_trigger" enum:"on_payment,on_fulfillment"`
-	BlockedSponsorFlags        []string   `json:"blocked_sponsor_flags"`
-	RequiresUniversityApproval bool       `json:"requires_university_approval"`
-	UniversityApprovalStatus   string     `json:"university_approval_status" enum:"not_required,pending,approved,rejected"`
-	UniversityDecidedAt        *time.Time `json:"university_decided_at,omitempty"`
-	SubmittedAt                *time.Time `json:"submitted_at,omitempty"`
-	ApprovedAt                 *time.Time `json:"approved_at,omitempty"`
-	RejectionReason            string     `json:"rejection_reason,omitempty"`
-	CancelledAt                *time.Time `json:"cancelled_at,omitempty"`
-	CancelReason               string     `json:"cancel_reason,omitempty"`
-	CreatedAt                  time.Time  `json:"created_at"`
-	UpdatedAt                  time.Time  `json:"updated_at"`
+	DefaultPayeeID             string        `json:"default_payee_id,omitempty" format:"uuid"`
+	QuantityTotal              *int          `json:"quantity_total" doc:"null: unlimited"`
+	QuantitySold               int           `json:"quantity_sold"`
+	InvoiceTrigger             string        `json:"invoice_trigger" enum:"on_payment,on_fulfillment"`
+	BlockedSponsorFlags        []SponsorFlag `json:"blocked_sponsor_flags"`
+	RequiresUniversityApproval bool          `json:"requires_university_approval"`
+	UniversityApprovalStatus   string        `json:"university_approval_status" enum:"not_required,pending,approved,rejected"`
+	UniversityDecidedAt        *time.Time    `json:"university_decided_at,omitempty"`
+	SubmittedAt                *time.Time    `json:"submitted_at,omitempty"`
+	ApprovedAt                 *time.Time    `json:"approved_at,omitempty"`
+	RejectionReason            string        `json:"rejection_reason,omitempty"`
+	CancelledAt                *time.Time    `json:"cancelled_at,omitempty"`
+	CancelReason               string        `json:"cancel_reason,omitempty"`
+	CreatedAt                  time.Time     `json:"created_at"`
+	UpdatedAt                  time.Time     `json:"updated_at"`
 }
 
 // OfferingDTO is 04 §2.14 OfferingDTO (+ approval for the seller and staff).
@@ -438,9 +438,9 @@ func offeringDTO(v OfferingView) OfferingDTO {
 		_ = json.Unmarshal(o.DescriptionJSON, &out.DescriptionJSON)
 	}
 	if v.Management {
-		flags := []string(o.BlockedSponsorFlags)
-		if flags == nil {
-			flags = []string{}
+		flags := make([]SponsorFlag, len(o.BlockedSponsorFlags))
+		for i, f := range o.BlockedSponsorFlags {
+			flags[i] = SponsorFlag(f)
 		}
 		out.Approval = &OfferingApprovalDTO{
 			DefaultPayeeID: httpx.IDStr(o.DefaultPayeeID), QuantityTotal: o.QuantityTotal, QuantitySold: o.QuantitySold,
@@ -652,7 +652,7 @@ type OfferingBody struct {
 	SalesEndAt                 *time.Time               `json:"sales_end_at,omitempty"`
 	FulfilBy                   *time.Time               `json:"fulfil_by,omitempty"`
 	InvoiceTrigger             string                   `json:"invoice_trigger,omitempty" enum:"on_payment,on_fulfillment" doc:"on_fulfillment when omitted"`
-	BlockedSponsorFlags        []string                 `json:"blocked_sponsor_flags,omitempty" maxItems:"4" doc:"Sponsor categories the seller refuses: alcohol, tobacco, gambling, political"`
+	BlockedSponsorFlags        []SponsorFlag            `json:"blocked_sponsor_flags,omitempty" maxItems:"4" uniqueItems:"true" doc:"Sponsor categories the seller refuses"`
 	RequiresUniversityApproval bool                     `json:"requires_university_approval,omitempty" doc:"A club's offering its university must approve too (T-21)"`
 }
 
@@ -660,14 +660,6 @@ func deliverablesOf(in []OfferingDeliverableDTO) []Deliverable {
 	out := make([]Deliverable, len(in))
 	for i, d := range in {
 		out[i] = Deliverable(d)
-	}
-	return out
-}
-
-func flagsOf(in []string) []SponsorFlag {
-	out := make([]SponsorFlag, len(in))
-	for i, f := range in {
-		out[i] = SponsorFlag(f)
 	}
 	return out
 }
@@ -692,7 +684,7 @@ func (h handler) create(ctx context.Context, in *createInput) (*offeringOutput, 
 		ServiceID: svc, Title: b.Title, DescriptionJSON: b.DescriptionJSON, Deliverables: deliverablesOf(b.Deliverables),
 		UnitPriceAmount: b.UnitPriceAmount, QuantityTotal: b.QuantityTotal, PerBuyerLimit: b.PerBuyerLimit,
 		SalesStartAt: b.SalesStartAt, SalesEndAt: b.SalesEndAt, FulfilBy: b.FulfilBy, InvoiceTrigger: InvoiceTrigger(b.InvoiceTrigger),
-		BlockedSponsorFlags: flagsOf(b.BlockedSponsorFlags), RequiresUniversityApproval: b.RequiresUniversityApproval,
+		BlockedSponsorFlags: b.BlockedSponsorFlags, RequiresUniversityApproval: b.RequiresUniversityApproval,
 	}
 	if oi.EventID, err = httpx.OptID("body.event_id", b.EventID); err != nil {
 		return nil, err
@@ -724,7 +716,7 @@ type updateOfferingInput struct {
 		SalesEndAt                 *time.Time                `json:"sales_end_at,omitempty"`
 		FulfilBy                   *time.Time                `json:"fulfil_by,omitempty"`
 		InvoiceTrigger             *string                   `json:"invoice_trigger,omitempty" enum:"on_payment,on_fulfillment"`
-		BlockedSponsorFlags        *[]string                 `json:"blocked_sponsor_flags,omitempty" maxItems:"4"`
+		BlockedSponsorFlags        *[]SponsorFlag            `json:"blocked_sponsor_flags,omitempty" maxItems:"4" uniqueItems:"true"`
 		RequiresUniversityApproval *bool                     `json:"requires_university_approval,omitempty"`
 		Clear                      []string                  `json:"clear,omitempty" maxItems:"8" enum:"event_id,default_payee_id,description_json,quantity_total,per_buyer_limit,sales_start_at,sales_end_at,fulfil_by" doc:"Optional fields to empty"`
 	}
@@ -764,8 +756,7 @@ func (h handler) update(ctx context.Context, in *updateOfferingInput) (*offering
 		p.InvoiceTrigger = ptr(InvoiceTrigger(*b.InvoiceTrigger))
 	}
 	if b.BlockedSponsorFlags != nil {
-		fs := flagsOf(*b.BlockedSponsorFlags)
-		p.BlockedSponsorFlags = &fs
+		p.BlockedSponsorFlags = b.BlockedSponsorFlags
 	}
 	v, err := h.svc.UpdateOffering(ctx, a, httpx.ParseID(in.OfferingID), in.IfMatch, p)
 	if err != nil {

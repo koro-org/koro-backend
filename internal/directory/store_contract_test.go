@@ -124,7 +124,7 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (directory.Store, w
 			t.Fatalf("UpdateUniversity = %+v, %v", g, err)
 		}
 		// Inactive universities are not listed; filters and Turkish search.
-		uni(t, s, w, "İstanbul Kent Üniversitesi", "İstanbul")
+		kent := uni(t, s, w, "İstanbul Kent Üniversitesi", "İstanbul")
 		uni(t, s, w, "Işıklı Üniversitesi", "Ankara")
 		list := func(f directory.UniversityFilter) []string {
 			rows, err := s.ListUniversities(ctx, f, nil, 100)
@@ -140,6 +140,13 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (directory.Store, w
 		}
 		if got := list(directory.UniversityFilter{}); len(got) != 2 {
 			t.Fatalf("active universities = %v", got)
+		}
+		// org_id (BE-127): the university of a university org, an inactive one never.
+		if got := list(directory.UniversityFilter{OrgID: &kent.OrgID}); !slices.Equal(got, []string{"İstanbul Kent Üniversitesi"}) {
+			t.Fatalf("org_id: %v", got)
+		}
+		if got := list(directory.UniversityFilter{OrgID: &u.OrgID}); len(got) != 0 {
+			t.Fatalf("org_id of an inactive university: %v", got)
 		}
 		if got := list(directory.UniversityFilter{Q: "ISTANBUL"}); !slices.Equal(got, []string{"İstanbul Kent Üniversitesi"}) {
 			t.Fatalf("q=ISTANBUL: %v", got)
@@ -575,6 +582,11 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (directory.Store, w
 		rep := directory.ClaimFilter{Status: directory.ClaimPending, RepUniversityOrgs: []uuid.UUID{u.OrgID}}
 		if q, _ = s.ListClaims(ctx, rep, nil, 10); !slices.Equal(ids(q), []uuid.UUID{b1.ID, a2.ID}) {
 			t.Fatalf("rep queue = %v", ids(q))
+		}
+		// BE-127: one university's clubs, sensitive ones included.
+		one := directory.ClaimFilter{Status: directory.ClaimPending, UniversityOrg: &u.OrgID}
+		if q, _ = s.ListClaims(ctx, one, nil, 10); !slices.Equal(ids(q), []uuid.UUID{b1.ID, bs.ID, a2.ID}) {
+			t.Fatalf("university queue = %v", ids(q))
 		}
 		// 06 H-58: a rep's pending queue drops claims created at or before
 		// RepPendingSince; CreatedBefore keeps those created at or before it.

@@ -501,7 +501,7 @@ func (h handler) decideRegistration(ctx context.Context, in *decideRegistrationI
 type cancelEventRegistrationInput struct {
 	EventRegistrationPath
 	Body struct {
-		CancelReason string `json:"cancel_reason" maxLength:"300" doc:"3-300 characters"`
+		CancelReason orgCancelReason `json:"cancel_reason" doc:"Shown to the registrant"`
 	}
 }
 
@@ -510,7 +510,7 @@ func (h handler) cancelEventRegistration(ctx context.Context, in *cancelEventReg
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.CancelEventRegistration(ctx, a, in.id(), in.regID(), in.Body.CancelReason)
+	v, err := h.svc.CancelEventRegistration(ctx, a, in.id(), in.regID(), string(in.Body.CancelReason))
 	if err != nil {
 		return nil, err
 	}

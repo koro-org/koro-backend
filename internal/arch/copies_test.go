@@ -24,6 +24,8 @@ var platformHelpers = map[string]string{
 	"nullable":     "db.Nullable",
 	"orgResource":  "authz.OrgResource",
 	"trimSlug":     "textx.TrimSlug",
+	"lengthBounds": "op.LengthBounds",
+	"enumOf":       "op.Enum",
 }
 
 // testHelpers is the same list for the test doubles and assertions of

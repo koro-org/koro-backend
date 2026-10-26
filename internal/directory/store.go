@@ -170,7 +170,10 @@ type UniversityFilter struct {
 	Q    string
 	City string
 	Type UniversityType
-	Sort string
+	// OrgID keeps only the university of this org (universities.org_id is
+	// unique; BE-127).
+	OrgID *uuid.UUID
+	Sort  string
 }
 
 // DepartmentFilter narrows ListDepartments.

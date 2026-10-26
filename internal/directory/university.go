@@ -18,7 +18,8 @@ type UniversityQuery struct {
 	Q     string
 	City  string
 	Type  UniversityType
-	Sort  string // SortNewest (default) or SortName
+	OrgID *uuid.UUID // only the university of this org (BE-127)
+	Sort  string     // SortNewest (default) or SortName
 	Limit int
 	After *After
 }
@@ -111,7 +112,7 @@ func (s *service) ListUniversities(ctx context.Context, a authz.Actor, q Univers
 	if err != nil {
 		return UniversityPage{}, err
 	}
-	f := UniversityFilter{Q: text, City: deref(city), Type: q.Type, Sort: sortOf(q.Sort)}
+	f := UniversityFilter{Q: text, City: deref(city), Type: q.Type, OrgID: q.OrgID, Sort: sortOf(q.Sort)}
 	limit := page.ClampLimit(q.Limit)
 	rows, err := s.d.Store.ListUniversities(ctx, f, q.After, limit+1)
 	if err != nil {

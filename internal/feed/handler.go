@@ -59,6 +59,14 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.FeedPostListOrgManage), Surface: op.SurfaceOrg}, h.listOrgPosts)
 
 	op.Register(api, "feed", huma.Operation{
+		OperationID: "getPostManage", Method: http.MethodGet, Path: "/orgs/{org_id}/posts/{post_id}",
+		Summary: "Get an organization's post for management",
+		Description: "One post of the organization as listOrgPostsManage shows it (status, audience, commercial " +
+			"label, dispatch_id; a removed post: status only), for the same people. The ETag is the If-Match value " +
+			"of updatePost. A post of another organization is 404.",
+	}, op.Meta{Action: string(authz.FeedPostListOrgManage), Surface: op.SurfaceOrg}, h.getOrgPost)
+
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "createPost", Method: http.MethodPost, Path: "/orgs/{org_id}/posts", DefaultStatus: http.StatusCreated,
 		Summary: "Create a post (draft)",
 		Description: "A public or followers post starts as a draft. A company post is always commercial. The body " +
@@ -240,6 +248,7 @@ type listOrgPostsInput struct {
 	OrgPath
 	page.Params
 	Status []string `query:"status,explode" maxItems:"5" enum:"draft,pending_review,published,hidden,removed" doc:"Statuses (repeat the parameter)"`
+	Kind   string   `query:"kind" enum:"text,image,event_share,opportunity_call" doc:"Only this kind: status=published&kind=opportunity_call lists the calls createContactRequest's opportunity_post_id may name"`
 }
 
 type manageListOutput struct {
@@ -251,11 +260,11 @@ func (h handler) listOrgPosts(ctx context.Context, in *listOrgPostsInput) (*mana
 	if err != nil {
 		return nil, err
 	}
-	q := ManageQuery{Limit: in.Limit}
+	q := ManageQuery{Limit: in.Limit, Kind: Kind(in.Kind)}
 	for _, s := range in.Status {
 		q.Statuses = append(q.Statuses, Status(s))
 	}
-	fp := page.Fingerprint("listOrgPostsManage", in.OrgID, strings.Join(in.Status, ","))
+	fp := page.Fingerprint("listOrgPostsManage", in.OrgID, strings.Join(in.Status, ","), in.Kind)
 	c, err := page.Decode(in.Cursor, sortID, fp, 1)
 	if err != nil {
 		return nil, err
@@ -279,6 +288,25 @@ func (h handler) listOrgPosts(ctx context.Context, in *listOrgPostsInput) (*mana
 		out.Body.NextCursor = page.Next(sortID, fp, page.UUIDVal(*p.NextID))
 	}
 	return out, nil
+}
+
+// ---- getPostManage
+
+type orgPostInput struct {
+	OrgPath
+	PostPath
+}
+
+func (h handler) getOrgPost(ctx context.Context, in *orgPostInput) (*manageOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	v, err := h.svc.GetOrgPost(ctx, a, in.OrgPath.id(), in.PostPath.id())
+	if err != nil {
+		return nil, err
+	}
+	return manageOut(v), nil
 }
 
 // ---- createPost / updatePost

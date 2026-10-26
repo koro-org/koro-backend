@@ -272,6 +272,11 @@ func (s *service) DispatchOfPost(ctx context.Context, orgID, postID uuid.UUID) (
 	return viewOf(d), true, nil
 }
 
+// DispatchIDsOfPosts implements Targeting.
+func (s *service) DispatchIDsOfPosts(ctx context.Context, orgID uuid.UUID, postIDs []uuid.UUID) (map[uuid.UUID]uuid.UUID, error) {
+	return s.d.Store.DispatchIDsOfPosts(ctx, orgID, postIDs)
+}
+
 // releaseUnit gives a dispatch's targeted_dispatch unit back (a ref that
 // consumed nothing, or was released already, is a no-op), in the
 // transaction carried by ctx.

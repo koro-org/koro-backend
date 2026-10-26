@@ -106,9 +106,13 @@ func TestGetOrder_ModelC_RevokedAccount_Postgres(t *testing.T) {
 	}
 	o := vs[0].Order
 	v, err := p.mod.Service.GetOrder(ctx, buyer, o.ID)
-	if err != nil || v.DirectStatus != orders.DirectAvailable || len(v.DirectPayments) != 1 ||
-		v.DirectPayments[0].IBAN != iban || v.DirectPayments[0].Amount != o.DirectToPayeeAmount {
-		t.Fatalf("approved account: status=%q direct=%d err=%v", v.DirectStatus, len(v.DirectPayments), err)
+	if err != nil || v.DirectStatus != orders.DirectAvailable {
+		t.Fatalf("approved account: status=%q err=%v", v.DirectStatus, err)
+	}
+	// BE-127: the account itself is only in the payment instructions.
+	ins, err := p.mod.Service.PaymentInstructions(ctx, buyer, o.ID)
+	if err != nil || len(ins.DirectPayments) != 1 || ins.DirectPayments[0].IBAN != iban || ins.DirectPayments[0].Amount != o.DirectToPayeeAmount {
+		t.Fatalf("approved account instructions: direct=%d err=%v", len(ins.DirectPayments), err)
 	}
 
 	fin := actor(t, "finance_admin")
@@ -120,8 +124,8 @@ func TestGetOrder_ModelC_RevokedAccount_Postgres(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetOrder after the revocation: %v", err)
 	}
-	if v.DirectStatus != orders.DirectUnavailable || len(v.DirectPayments) != 0 || v.Order.ID != o.ID || len(v.Lines) != 1 {
-		t.Fatalf("revoked: status=%q direct=%d order=%+v", v.DirectStatus, len(v.DirectPayments), v.Order)
+	if v.DirectStatus != orders.DirectUnavailable || v.Order.ID != o.ID || len(v.Lines) != 1 {
+		t.Fatalf("revoked: status=%q order=%+v", v.DirectStatus, v.Order)
 	}
 	_, err = p.mod.Service.PaymentInstructions(ctx, buyer, o.ID)
 	problemtest.WantProblem(t, err, http.StatusConflict, "parties.no_approved_account")

@@ -332,11 +332,11 @@ type updateOrgInput struct {
 		Description *string `json:"description,omitempty" maxLength:"5000" doc:"Empty string clears it"`
 		LogoFileID  *string `json:"logo_file_id,omitempty" doc:"An org_logo upload (createUpload); empty string removes the logo"`
 		WebsiteURL  *string `json:"website_url,omitempty" maxLength:"2048" doc:"https:// only; empty string clears it"`
-		City        *string `json:"city,omitempty" maxLength:"60"`
+		City        *string `json:"city,omitempty" maxLength:"60" doc:"Empty string clears it"`
 		SectorCode  *string `json:"sector_code,omitempty" maxLength:"40" doc:"Companies only"`
 		SizeBand    *string `json:"size_band,omitempty" maxLength:"10" doc:"Companies only: 1-10, 11-50, 51-200, 201-1000, 1000+"`
 		EmailDomain *string `json:"email_domain,omitempty" maxLength:"253" doc:"Companies only; a change resets its verification"`
-		HQCity      *string `json:"hq_city,omitempty" maxLength:"60" doc:"Companies only"`
+		HQCity      *string `json:"hq_city,omitempty" maxLength:"60" doc:"Companies only; empty string clears it"`
 	}
 }
 

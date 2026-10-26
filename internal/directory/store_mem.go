@@ -246,6 +246,7 @@ func (s *MemStore) ListUniversities(_ context.Context, f UniversityFilter, after
 		case !u.IsActive:
 		case f.City != "" && memNorm(u.City) != memNorm(f.City):
 		case f.Type != "" && u.Type != f.Type:
+		case f.OrgID != nil && u.OrgID != *f.OrgID:
 		case f.Q != "" && !memMatch(u.Name, f.Q) && !memMatch(short, f.Q) && !memMatch(u.City, f.Q):
 		case !s.after(f.Sort, u.Name, u.ID, after):
 		default:

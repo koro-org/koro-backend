@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"time"
 	"uuid"
+
+	"koro/internal/platform/httpx"
 )
 
 // AuthorDTO is the author org of a post (public org data only; the person
@@ -92,6 +94,7 @@ type PostManageDTO struct {
 	SaveCount            int        `json:"save_count"`
 	RemovedAt            *time.Time `json:"removed_at,omitempty"`
 	ReasonCode           string     `json:"reason_code,omitempty" doc:"Moderation reason of a hidden or removed post (reported_by_users: hidden by user reports until a moderator decides)"`
+	DispatchID           string     `json:"dispatch_id,omitempty" format:"uuid" doc:"A targeted post's notification dispatch (getDispatch); absent when it has none: createDispatch is then possible"`
 	CreatedAt            time.Time  `json:"created_at"`
 	UpdatedAt            time.Time  `json:"updated_at"`
 }
@@ -186,6 +189,7 @@ func toManageDTO(v PostView) PostManageDTO {
 	if p.AuthorUserID != uuid.Nil() {
 		d.AuthorUserID = p.AuthorUserID.String()
 	}
+	d.DispatchID = httpx.IDStr(v.DispatchID)
 	return d
 }
 

@@ -318,15 +318,22 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (feed.Store, world)
 		b := insert(t, s, publishedAt(post(org, feed.AuthorClub, by), pub0))
 		c := insert(t, s, post(org, feed.AuthorClub, by))
 		insert(t, s, post(other, feed.AuthorClub, by))
-		all, err := s.ListOrgManage(ctx, org, nil, nil, 10)
+		all, err := s.ListOrgManage(ctx, org, feed.ManageFilter{}, nil, 10)
 		if err != nil || !slices.Equal(ids(all), []uuid.UUID{c.ID, b.ID, a.ID}) {
 			t.Fatalf("ListOrgManage = %v, %v", ids(all), err)
 		}
-		drafts, _ := s.ListOrgManage(ctx, org, []feed.Status{feed.StatusDraft}, nil, 10)
+		drafts, _ := s.ListOrgManage(ctx, org, feed.ManageFilter{Statuses: []feed.Status{feed.StatusDraft}}, nil, 10)
 		if !slices.Equal(ids(drafts), []uuid.UUID{c.ID, a.ID}) {
 			t.Fatalf("drafts = %v", ids(drafts))
 		}
-		after, _ := s.ListOrgManage(ctx, org, nil, &c.ID, 1)
+		// BE-127: a kind narrows the list (with the statuses).
+		if got, _ := s.ListOrgManage(ctx, org, feed.ManageFilter{Kind: a.Kind}, nil, 10); !slices.Equal(ids(got), []uuid.UUID{c.ID, b.ID, a.ID}) {
+			t.Fatalf("kind %s = %v", a.Kind, ids(got))
+		}
+		if got, _ := s.ListOrgManage(ctx, org, feed.ManageFilter{Statuses: []feed.Status{feed.StatusPublished}, Kind: feed.KindOpportunityCall}, nil, 10); len(got) != 0 {
+			t.Fatalf("published opportunity calls = %v", ids(got))
+		}
+		after, _ := s.ListOrgManage(ctx, org, feed.ManageFilter{}, &c.ID, 1)
 		if !slices.Equal(ids(after), []uuid.UUID{b.ID}) {
 			t.Fatalf("after = %v", ids(after))
 		}

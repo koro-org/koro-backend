@@ -1,6 +1,10 @@
 package identity
 
-import "github.com/danielgtaylor/huma/v2"
+import (
+	"github.com/danielgtaylor/huma/v2"
+
+	"koro/internal/platform/httpx/op"
+)
 
 // Request field types whose OpenAPI length bounds come from the constants
 // the service checks with (BE-117): a struct tag cannot name a constant, so
@@ -26,42 +30,32 @@ type (
 	reviewNoteText string
 )
 
-// lengthBounds sets the character bounds of a string schema; minLen 0
-// leaves the minimum unset.
-func lengthBounds(s *huma.Schema, minLen, maxLen int) *huma.Schema {
-	if minLen > 0 {
-		s.MinLength = &minLen
-	}
-	s.MaxLength = &maxLen
-	return s
-}
-
 // TransformSchema implements huma.SchemaTransformer.
 func (nameText) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
-	return lengthBounds(s, 1, maxNameLen)
+	return op.LengthBounds(s, 1, maxNameLen)
 }
 
 // TransformSchema implements huma.SchemaTransformer.
 func (emailText) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
-	return lengthBounds(s, 0, maxEmailLen)
+	return op.LengthBounds(s, 0, maxEmailLen)
 }
 
 // TransformSchema implements huma.SchemaTransformer.
 func (signupPassword) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
-	return lengthBounds(s, minPasswordLen, maxPasswordLen)
+	return op.LengthBounds(s, minPasswordLen, maxPasswordLen)
 }
 
 // TransformSchema implements huma.SchemaTransformer.
 func (newPassword) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
-	return lengthBounds(s, minPasswordLenMFA, maxPasswordLen)
+	return op.LengthBounds(s, minPasswordLenMFA, maxPasswordLen)
 }
 
 // TransformSchema implements huma.SchemaTransformer.
 func (reasonText) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
-	return lengthBounds(s, minReasonLen, maxReasonLen)
+	return op.LengthBounds(s, minReasonLen, maxReasonLen)
 }
 
 // TransformSchema implements huma.SchemaTransformer.
 func (reviewNoteText) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
-	return lengthBounds(s, 0, maxReviewNote)
+	return op.LengthBounds(s, 0, maxReviewNote)
 }

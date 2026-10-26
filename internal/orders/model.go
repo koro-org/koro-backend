@@ -249,6 +249,14 @@ const (
 	ViaAutoPlatform   FulfilledVia = "auto_platform"
 )
 
+// FulfilledVias lists every order_lines.fulfilled_via value.
+func FulfilledVias() []FulfilledVia {
+	return []FulfilledVia{ViaBuyerConfirmed, ViaWindowElapsed, ViaAdmin, ViaAutoPlatform}
+}
+
+// ModelCodes lists every orders.model_code value (02 §18.3).
+func ModelCodes() []string { return []string{ModelA, ModelA2, ModelB, ModelC} }
+
 // Line is one order_lines row: an offering bought in a quantity, with the
 // payee, the commerce policy (its copy) and every amount frozen at
 // placement (order_lines_frozen). The running columns are the fulfilment

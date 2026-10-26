@@ -65,6 +65,9 @@ type DispatchStore interface {
 	// DispatchOfPost returns the dispatch of postID in orgID or ErrNotFound;
 	// lock locks the row for the transaction.
 	DispatchOfPost(ctx context.Context, orgID, postID uuid.UUID, lock bool) (Dispatch, error)
+	// DispatchIDsOfPosts returns the dispatch ID of each of postIDs in orgID
+	// that has one (post ID → dispatch ID; a post has at most one).
+	DispatchIDsOfPosts(ctx context.Context, orgID uuid.UUID, postIDs []uuid.UUID) (map[uuid.UUID]uuid.UUID, error)
 	// ListDispatches returns up to limit dispatches of orgID, newest first
 	// (id DESC), after the position after (nil: the first page).
 	ListDispatches(ctx context.Context, orgID uuid.UUID, after *uuid.UUID, limit int) ([]Dispatch, error)

@@ -52,12 +52,21 @@ const (
 	templateCommercial = "outreach.commercial"
 )
 
-// Reasons a dispatch ends without sending (last_error: problem codes and
-// fixed words, never personal data).
-const (
-	reasonPostGone        = "outreach.post_gone"
-	reasonPostUnpublished = "outreach.post_not_published"
+// Reasons a dispatch ends without sending (last_error, DispatchDTO
+// failure_reason): problem codes of the catalog only, never personal data
+// (DispatchFailureReasons).
+var (
+	reasonPostGone        = ErrPostGone.Code()
+	reasonPostUnpublished = ErrPostNotPublished.Code()
 )
+
+// DispatchFailureReasons lists every failure_reason a dispatch may end
+// with: each is a code of problems.json, so clients translate it from the
+// contract (BE-127).
+func DispatchFailureReasons() []string {
+	return []string{reasonPostGone, reasonPostUnpublished, orgs.ErrOrgSuspended.Code(), orgs.ErrInvalidState.Code(),
+		ErrAudienceTooSmall.Code(), problem.ErrValidation.Code(), notify.ErrInvalidMessage.Code()}
+}
 
 // errPermanentSend marks a notify error that no retry fixes (an invalid
 // message or template, commercial messages switched off): the dispatch

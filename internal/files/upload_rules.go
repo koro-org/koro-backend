@@ -1,6 +1,10 @@
 package files
 
-import "github.com/danielgtaylor/huma/v2"
+import (
+	"github.com/danielgtaylor/huma/v2"
+
+	"koro/internal/platform/httpx/op"
+)
 
 // ExtUploadRules is the createUpload extension that publishes the browser
 // allow-list of every uploadable purpose (BE-123): clients pre-check the
@@ -70,19 +74,13 @@ type (
 
 // TransformSchema implements huma.SchemaTransformer.
 func (uploadPurpose) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
-	s.Enum = nil
-	for _, p := range UploadPurposes() {
-		s.Enum = append(s.Enum, string(p))
-	}
+	s.Enum = op.Enum(UploadPurposes())
 	return s
 }
 
 // TransformSchema implements huma.SchemaTransformer.
 func (uploadMIME) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
-	s.Enum = nil
-	for _, m := range UploadMIMEs() {
-		s.Enum = append(s.Enum, m)
-	}
+	s.Enum = op.Enum(UploadMIMEs())
 	return s
 }
 

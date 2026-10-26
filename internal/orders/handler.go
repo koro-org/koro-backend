@@ -42,10 +42,10 @@ func Register(api huma.API, svc Service) {
 		OperationID: "getOrder", Method: http.MethodGet, Path: "/orders/{order_id}",
 		Summary: "Get an order",
 		Description: "The buyer's members and platform staff get the whole order (view buyer: totals, payment, every " +
-			"line; never the commission). Only MFA-verified buyer administrators see approved payee bank instructions " +
-			"on an unpaid, unconfirmed model C order; bank access is audited. When a payee has no approved bank account " +
-			"(direct_payments_status unavailable) the order still reads in full without any payee account; only the " +
-			"payment instructions answer 409. A seller's club admin or university representative gets only its " +
+			"line; never the commission, never a payee bank account: the direct transfers of an unpaid model C order " +
+			"are in getOrderPaymentInstructions). MFA-verified buyer administrators get direct_payments_status; when a " +
+			"payee has no approved bank account (unavailable) the order still reads in full and only the payment " +
+			"instructions answer 409. A seller's club admin or university representative gets only its " +
 			"own lines with its net share and the commission, and the buyer's title (view seller). Anyone else: 404.",
 	}, op.Meta{Action: string(authz.OrdersOrderRead), Surface: op.SurfaceResource}, h.get)
 
@@ -169,45 +169,45 @@ type OrderLineDTO struct {
 	SellerNetAmount     *int64           `json:"seller_net_amount,omitempty" doc:"Seller view only: the payee's share"`
 	CommissionAmount    *int64           `json:"commission_amount,omitempty" doc:"Seller view only"`
 	CommissionVATAmount *int64           `json:"commission_vat_amount,omitempty" doc:"Seller view only"`
-	FulfillmentStatus   string           `json:"fulfillment_status" enum:"not_applicable,pending,marked,fulfilled,disputed,cancelled"`
+	FulfillmentStatus   string           `json:"fulfillment_status"`
 	DisputeWindowEndsAt *time.Time       `json:"dispute_window_ends_at,omitempty"`
 	FulfilledAt         *time.Time       `json:"fulfilled_at,omitempty"`
-	FulfilledVia        string           `json:"fulfilled_via,omitempty" enum:"buyer_confirmed,window_elapsed,admin,auto_platform"`
+	FulfilledVia        string           `json:"fulfilled_via,omitempty"`
 	HasEvidence         bool             `json:"has_fulfillment_evidence" doc:"The seller attached a delivery evidence file (getOrderLineEvidence)"`
 	Seller              SellerRefDTO     `json:"seller"`
 }
 
 // OrderDTO is 04 §C.2 OrderDTO (view buyer: the buyer's members and staff)
 // or SellerOrderView (view seller, 03 k26: order_no, buyer_title,
-// placed_at, status and the seller's own lines only).
+// placed_at, status, model_code, paid_at and the seller's own lines only;
+// model_code and paid_at since BE-127).
 type OrderDTO struct {
-	OrderID             string             `json:"order_id" format:"uuid"`
-	OrderNo             string             `json:"order_no" doc:"The bank transfer reference code"`
-	View                string             `json:"view" enum:"buyer,seller"`
-	Status              string             `json:"status" enum:"awaiting_payment,paid,in_fulfilment,completed,cancelled,expired,partially_refunded,refunded,disputed"`
-	Currency            string             `json:"currency"`
-	PlacedAt            time.Time          `json:"placed_at"`
-	BuyerTitle          string             `json:"buyer_title,omitempty" doc:"Seller view: the billed company's title"`
-	OrgID               string             `json:"org_id,omitempty" format:"uuid" doc:"Buyer view: the buying company"`
-	ModelCode           string             `json:"model_code,omitempty"`
-	SubtotalAmount      *int64             `json:"subtotal_amount,omitempty"`
-	VATAmount           *int64             `json:"vat_amount,omitempty"`
-	VATWithheldAmount   *int64             `json:"vat_withheld_amount,omitempty"`
-	BuyerFeeAmount      *int64             `json:"buyer_fee_amount,omitempty"`
-	TotalAmount         *int64             `json:"total_amount,omitempty"`
-	PayableAmount       *int64             `json:"payable_amount,omitempty"`
-	PaidAmount          *int64             `json:"paid_amount,omitempty"`
-	RefundedAmount      *int64             `json:"refunded_amount,omitempty"`
-	ExpiresAt           *time.Time         `json:"expires_at,omitempty"`
-	PaidAt              *time.Time         `json:"paid_at,omitempty"`
-	CompletedAt         *time.Time         `json:"completed_at,omitempty"`
-	CancelledAt         *time.Time         `json:"cancelled_at,omitempty"`
-	BuyerSnapshot       *BuyerSnapshotDTO  `json:"buyer_snapshot,omitempty"`
-	DirectPayments      []DirectPaymentDTO `json:"direct_payments,omitempty" doc:"Unpaid model C: approved payee accounts, visible only to the buying company administrators"`
-	DirectStatus        string             `json:"direct_payments_status,omitempty" enum:"available,unavailable" doc:"Present only when direct_payments may be shown: an MFA-verified buyer administrator reading an unpaid, unconfirmed model C order. available: direct_payments lists every payee transfer. unavailable: a payee has no approved bank account now (revoked or not yet approved; getOrderPaymentInstructions answers 409 parties.no_approved_account) or cannot be paid directly (409 orders.invalid_state); direct_payments is then absent, no payee account is disclosed (not even an approved one) and the rest of the order reads as usual"`
-	KoroCollectAmount   *int64             `json:"koro_collect_amount,omitempty"`
-	DirectToPayeeAmount *int64             `json:"direct_to_payee_amount,omitempty"`
-	Lines               []OrderLineDTO     `json:"lines"`
+	OrderID             string            `json:"order_id" format:"uuid"`
+	OrderNo             string            `json:"order_no" doc:"The bank transfer reference code"`
+	View                string            `json:"view" enum:"buyer,seller"`
+	Status              string            `json:"status"`
+	Currency            string            `json:"currency"`
+	PlacedAt            time.Time         `json:"placed_at"`
+	BuyerTitle          string            `json:"buyer_title,omitempty" doc:"Seller view: the billed company's title"`
+	OrgID               string            `json:"org_id,omitempty" format:"uuid" doc:"Buyer view: the buying company"`
+	ModelCode           string            `json:"model_code,omitempty" doc:"Both views. C: the buyer pays each payee directly (the seller's payee receives its share from the buyer, not in a Koro payout)"`
+	SubtotalAmount      *int64            `json:"subtotal_amount,omitempty"`
+	VATAmount           *int64            `json:"vat_amount,omitempty"`
+	VATWithheldAmount   *int64            `json:"vat_withheld_amount,omitempty"`
+	BuyerFeeAmount      *int64            `json:"buyer_fee_amount,omitempty"`
+	TotalAmount         *int64            `json:"total_amount,omitempty"`
+	PayableAmount       *int64            `json:"payable_amount,omitempty"`
+	PaidAmount          *int64            `json:"paid_amount,omitempty"`
+	RefundedAmount      *int64            `json:"refunded_amount,omitempty"`
+	ExpiresAt           *time.Time        `json:"expires_at,omitempty"`
+	PaidAt              *time.Time        `json:"paid_at,omitempty" doc:"Both views: when the order was paid in full"`
+	CompletedAt         *time.Time        `json:"completed_at,omitempty"`
+	CancelledAt         *time.Time        `json:"cancelled_at,omitempty"`
+	BuyerSnapshot       *BuyerSnapshotDTO `json:"buyer_snapshot,omitempty"`
+	DirectStatus        string            `json:"direct_payments_status,omitempty" enum:"available,unavailable" doc:"Present only for a reader who may see the direct transfers: an MFA-verified buyer administrator reading an unpaid, unconfirmed model C order. The order never carries a payee bank account (BE-127): the transfers are in getOrderPaymentInstructions. available: the instructions list every payee transfer. unavailable: a payee has no approved bank account now (revoked or not yet approved; the instructions answer 409 parties.no_approved_account) or cannot be paid directly (409 orders.invalid_state); the rest of the order reads as usual"`
+	KoroCollectAmount   *int64            `json:"koro_collect_amount,omitempty"`
+	DirectToPayeeAmount *int64            `json:"direct_to_payee_amount,omitempty"`
+	Lines               []OrderLineDTO    `json:"lines"`
 }
 
 func addressText(a SnapshotAddress) string {
@@ -228,18 +228,21 @@ func orderDTO(v OrderView) OrderDTO {
 	o := v.Order
 	out := OrderDTO{OrderID: o.ID.String(), OrderNo: o.OrderNo, View: "buyer", Status: string(o.Status), Currency: o.Currency,
 		PlacedAt: o.PlacedAt.UTC(), Lines: make([]OrderLineDTO, 0, len(v.Lines))}
+	out.ModelCode, out.PaidAt = o.ModelCode, db.UTCPtr(o.PaidAt)
 	if v.SellerView {
+		// 03 k26 (BE-127): how and when the order was paid, never the
+		// amounts or the buyer's payment details.
 		out.View, out.BuyerTitle = "seller", o.BuyerSnapshot.Title
 	} else {
 		b := o.BuyerSnapshot
-		out.OrgID, out.ModelCode = o.OrgID.String(), o.ModelCode
+		out.OrgID = o.OrgID.String()
 		out.SubtotalAmount, out.VATAmount, out.VATWithheldAmount = i64(o.SubtotalAmount), i64(o.VATAmount), i64(o.VATWithheldAmount)
 		out.BuyerFeeAmount, out.TotalAmount, out.PayableAmount = i64(o.BuyerFeeAmount), i64(o.TotalAmount), i64(o.PayableAmount)
-		out.DirectPayments, out.DirectStatus = directPaymentDTOs(v.DirectPayments), string(v.DirectStatus)
+		out.DirectStatus = string(v.DirectStatus)
 		out.KoroCollectAmount, out.DirectToPayeeAmount = i64(o.KoroCollectAmount), i64(o.DirectToPayeeAmount)
 		out.PaidAmount, out.RefundedAmount = i64(o.PaidAmount), i64(o.RefundedAmount)
 		exp := o.ExpiresAt.UTC()
-		out.ExpiresAt, out.PaidAt, out.CompletedAt, out.CancelledAt = &exp, db.UTCPtr(o.PaidAt), db.UTCPtr(o.CompletedAt), db.UTCPtr(o.CancelledAt)
+		out.ExpiresAt, out.CompletedAt, out.CancelledAt = &exp, db.UTCPtr(o.CompletedAt), db.UTCPtr(o.CancelledAt)
 		out.BuyerSnapshot = &BuyerSnapshotDTO{Title: b.Title, TaxOffice: b.TaxOffice, TaxNo: b.TaxNo, Address: addressText(b.Address), Email: b.Email}
 	}
 	for _, l := range v.Lines {
@@ -565,6 +568,7 @@ type SellerLineDTO struct {
 	OrderID             string     `json:"order_id" format:"uuid"`
 	OrderNo             string     `json:"order_no"`
 	OrderStatus         string     `json:"order_status" doc:"A line is delivered only once its order is paid"`
+	Currency            string     `json:"currency" doc:"The order's currency (ISO 4217) of the amounts"`
 	BuyerTitle          string     `json:"buyer_title"`
 	TitleSnapshot       string     `json:"title_snapshot"`
 	Quantity            int        `json:"quantity"`
@@ -610,7 +614,7 @@ func (h handler) sales(ctx context.Context, in *salesInput) (*salesOutput, error
 	for i, it := range p.Items {
 		l := it.Line
 		out.Body.Items[i] = SellerLineDTO{LineID: l.ID.String(), OrderID: l.OrderID.String(), OrderNo: it.OrderNo,
-			OrderStatus: string(it.OrderStatus), BuyerTitle: it.BuyerTitle, TitleSnapshot: l.TitleSnapshot, Quantity: l.Quantity,
+			OrderStatus: string(it.OrderStatus), Currency: it.Currency, BuyerTitle: it.BuyerTitle, TitleSnapshot: l.TitleSnapshot, Quantity: l.Quantity,
 			GrossAmount: l.GrossAmount, SellerNetAmount: l.SellerNetAmount, FulfillmentStatus: string(l.FulfillmentStatus),
 			DisputeWindowEndsAt: db.UTCPtr(l.DisputeWindowEndsAt), PaidOutAt: db.UTCPtr(l.PaidOutAt),
 			HasEvidence: l.FulfillmentEvidenceFileID != nil}

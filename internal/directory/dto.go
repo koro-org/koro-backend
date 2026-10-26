@@ -131,7 +131,7 @@ type ClubDTO struct {
 	ClaimStatus       string            `json:"claim_status" enum:"unclaimed,claimed"`
 	MembershipPrivate bool              `json:"membership_private" doc:"true for a sensitive club: its membership is never shown"`
 	MemberCount       *int              `json:"member_count" doc:"null below 10 members or for a sensitive club (k-anonymity)"`
-	SocialLinks       map[string]string `json:"social_links" doc:"Network name → https URL"`
+	SocialLinks       socialLinksMap    `json:"social_links" doc:"Network name → https URL"`
 	FoundedYear       *int16            `json:"founded_year,omitempty"`
 }
 
@@ -215,7 +215,7 @@ func toClubDTO(v ClubView) ClubDTO {
 			UniversityID: u.ID.String(), OrgID: u.OrgID.String(), Name: u.Name, ShortName: str(u.ShortName), City: u.City,
 		},
 		Category: string(c.Category), JoinPolicy: string(c.JoinPolicy), ClaimStatus: string(c.ClaimStatus),
-		MembershipPrivate: c.IsSensitive, MemberCount: v.MemberCount, SocialLinks: map[string]string(c.SocialLinks.Clone()),
+		MembershipPrivate: c.IsSensitive, MemberCount: v.MemberCount, SocialLinks: socialLinksMap(c.SocialLinks.Clone()),
 		FoundedYear: c.FoundedYear,
 	}
 }

@@ -25,8 +25,9 @@ func Register(api huma.API, svc Service) {
 
 	op.Register(api, "directory", huma.Operation{
 		OperationID: "listUniversities", Method: http.MethodGet, Path: "/universities",
-		Summary:     "List universities",
-		Description: "Active universities. q matches name, short name and city (Turkish full text) or part of the name.",
+		Summary: "List universities",
+		Description: "Active universities. q matches name, short name and city (Turkish full text) or part of the name. " +
+			"org_id finds the university of a university organization (getOrg has no university_id).",
 	}, op.Meta{Action: string(authz.DirectoryUniversityList), Surface: op.SurfacePublic}, h.listUniversities)
 
 	op.Register(api, "directory", huma.Operation{
@@ -194,19 +195,26 @@ type listUniversitiesInput struct {
 	City string `query:"city" maxLength:"60"`
 	Type string `query:"type" enum:"state,foundation,other"`
 	Sort string `query:"sort" enum:"name" doc:"name (A-Z, Turkish order); default newest first"`
+	// OrgID resolves a university panel's own university (getOrg carries
+	// no university_id; BE-127).
+	OrgID string `query:"org_id" format:"uuid" doc:"Only the university of this organization (its org_id): at most one item"`
 }
 
 type listUniversitiesOutput struct{ Body UniversityList }
 
 func (h handler) listUniversities(ctx context.Context, in *listUniversitiesInput) (*listUniversitiesOutput, error) {
 	sort := sortParam(in.Sort)
-	fp := page.Fingerprint("listUniversities", in.Q, in.City, in.Type)
+	fp := page.Fingerprint("listUniversities", in.Q, in.City, in.Type, in.OrgID)
 	after, err := cursorOf(in.Cursor, sort, fp)
 	if err != nil {
 		return nil, err
 	}
+	org, err := httpx.OptID("query.org_id", in.OrgID)
+	if err != nil {
+		return nil, err
+	}
 	p, err := h.svc.ListUniversities(ctx, authz.ActorOrAnonymous(ctx), UniversityQuery{
-		Q: in.Q, City: in.City, Type: UniversityType(in.Type), Sort: sort, Limit: in.Limit, After: after,
+		Q: in.Q, City: in.City, Type: UniversityType(in.Type), OrgID: org, Sort: sort, Limit: in.Limit, After: after,
 	})
 	if err != nil {
 		return nil, err
@@ -370,10 +378,10 @@ type updateClubInput struct {
 	ClubPath
 	IfMatch string `header:"If-Match" doc:"ETag of getClub (required: missing → 428, stale → 412)"`
 	Body    struct {
-		Category    *string            `json:"category,omitempty" enum:"academic,technology,career,entrepreneurship,arts,culture,sports,social_responsibility,hobby,religious,political,identity,other"`
-		JoinPolicy  *string            `json:"join_policy,omitempty" enum:"open,approval"`
-		SocialLinks *map[string]string `json:"social_links,omitempty" doc:"Replaces every link; network name → https URL (at most 10); {} clears them"`
-		FoundedYear *int16             `json:"founded_year,omitempty" minimum:"0" maximum:"2100" doc:"0 clears it"`
+		Category    *string         `json:"category,omitempty" enum:"academic,technology,career,entrepreneurship,arts,culture,sports,social_responsibility,hobby,religious,political,identity,other"`
+		JoinPolicy  *string         `json:"join_policy,omitempty" enum:"open,approval"`
+		SocialLinks *socialLinksMap `json:"social_links,omitempty" doc:"Replaces every link; network name → https URL; {} clears them"`
+		FoundedYear *int16          `json:"founded_year,omitempty" minimum:"0" maximum:"2100" doc:"0 clears it"`
 	}
 }
 
@@ -391,7 +399,7 @@ func (h handler) updateClub(ctx context.Context, in *updateClubInput) (*clubOutp
 		p.JoinPolicy = ptr(JoinPolicy(*b.JoinPolicy))
 	}
 	if b.SocialLinks != nil {
-		p.SetSocialLinks, p.SocialLinks = true, *b.SocialLinks
+		p.SetSocialLinks, p.SocialLinks = true, map[string]string(*b.SocialLinks)
 	}
 	if b.FoundedYear != nil {
 		if *b.FoundedYear == 0 {

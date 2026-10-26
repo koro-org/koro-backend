@@ -109,6 +109,27 @@ func (s gormStore) DispatchOfPost(ctx context.Context, orgID, postID uuid.UUID, 
 	return takeDispatch("dispatch of post", q)
 }
 
+// DispatchIDsOfPosts implements Store.
+func (s gormStore) DispatchIDsOfPosts(ctx context.Context, orgID uuid.UUID, postIDs []uuid.UUID) (map[uuid.UUID]uuid.UUID, error) {
+	out := map[uuid.UUID]uuid.UUID{}
+	if len(postIDs) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		ID     uuid.UUID `gorm:"column:id"`
+		PostID uuid.UUID `gorm:"column:post_id"`
+	}
+	err := db.Conn(ctx, s.orm).Model(&Dispatch{}).Scopes(db.ScopeOrg(orgID)).Select("id, post_id").
+		Where("post_id = ANY( ?)", db.UUIDArray(postIDs)).Find(&rows).Error
+	if err != nil {
+		return nil, wrapDispatch("dispatch ids of posts", err)
+	}
+	for _, r := range rows {
+		out[r.PostID] = r.ID
+	}
+	return out, nil
+}
+
 // ListDispatches implements Store.
 func (s gormStore) ListDispatches(ctx context.Context, orgID uuid.UUID, after *uuid.UUID, limit int) ([]Dispatch, error) {
 	q := db.Conn(ctx, s.orm).Scopes(db.ScopeOrg(orgID))

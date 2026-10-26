@@ -65,8 +65,12 @@ type ClaimDecision struct {
 // AdminClaimQuery narrows adminListClubClaims.
 type AdminClaimQuery struct {
 	Status ClaimState // "" → pending
-	After  *uuid.UUID
-	Limit  int
+	// UniversityOrg narrows the queue to the clubs of one university (by
+	// its org ID): a university panel's own queue (BE-127). A
+	// representative may ask only for a university they represent.
+	UniversityOrg *uuid.UUID
+	After         *uuid.UUID
+	Limit         int
 }
 
 // ClaimView is a claim as its reader sees it. The claimant's views carry
@@ -478,13 +482,18 @@ func (s *service) adminViews(ctx context.Context, cs []ClubClaim) ([]ClaimView, 
 
 // AdminListClubClaims implements Service: authz (403 before reading;
 // support and platform_admin see every claim, a university_rep the claims
-// they approve: their universities' non-sensitive clubs) → status → the
+// they approve: their universities' non-sensitive clubs; university_org_id
+// narrows either to one university, and a rep's scope is checked on that
+// university only: not theirs → 404 as an invisible claim) → status → the
 // page → one audit record of the read (claims are personal data; a
 // sensitive club's claims are special category data).
 func (s *service) AdminListClubClaims(ctx context.Context, a authz.Actor, q AdminClaimQuery) (ClaimPage, error) {
 	f := ClaimFilter{Status: q.Status}
 	if err := authz.Can(ctx, a, authz.DirectoryClubClaimList, adminSurface); err != nil {
 		reps := repUniversities(a)
+		if uni := q.UniversityOrg; uni != nil && len(reps) > 0 {
+			reps = []uuid.UUID{*uni} // authz below checks the rep's role on it
+		}
 		if !errors.Is(err, authz.ErrForbidden) || len(reps) == 0 {
 			return ClaimPage{}, err
 		}
@@ -500,6 +509,8 @@ func (s *service) AdminListClubClaims(ctx context.Context, a authz.Actor, q Admi
 		// A pending claim older than ClaimEscalateAfter is platform staff's
 		// (06 H-58); decided claims stay in the rep's history.
 		f.RepPendingSince = new(s.now().Add(-ClaimEscalateAfter))
+	} else {
+		f.UniversityOrg = q.UniversityOrg // platform staff: every club of it, sensitive ones included
 	}
 	if f.Status == "" {
 		f.Status = ClaimPending
@@ -526,6 +537,9 @@ func (s *service) AdminListClubClaims(ctx context.Context, a authz.Actor, q Admi
 	meta := map[string]any{"operation": "queue", authz.AttrStatus: string(f.Status), "claim_ids": ids}
 	if f.RepUniversityOrgs != nil {
 		meta["scope"] = authz.ClaimApproverRep
+	}
+	if q.UniversityOrg != nil {
+		meta[authz.AttrClaimUniversityOrg] = q.UniversityOrg.String()
 	}
 	if sensitive {
 		meta[audit.MetaSensitive] = true

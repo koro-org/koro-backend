@@ -185,6 +185,46 @@ operations:
           "@fd_outsiders_uni_a": 404
           university_rep: 200
           "@platform_staff": 403
+      - name: published_opportunity_calls
+        query: { status: published, kind: opportunity_call }
+        note: BE-127 — the calls createContactRequest's opportunity_post_id may name
+        expect:
+          anonymous: 401
+          "@fd_outsiders_club_a": 404
+          club_member: 403
+          club_admin: 200
+          "@platform_staff": 403
+
+  getPostManage:
+    method: GET
+    path: /api/v1/orgs/{org_id}/posts/{post_id}
+    action: feed.post.list_org_manage
+    path_params: { org_id: club_a, post_id: post_a_draft }
+    note: BE-127 — one post of listOrgPostsManage, for the same people
+    expect:
+      anonymous: 401
+      "@fd_outsiders_club_a": 404
+      club_member: 403
+      club_admin: 200
+      "@platform_staff": 403
+    variants:
+      - name: removed_post
+        path_params: { org_id: club_a, post_id: post_a_removed }
+        expect:
+          anonymous: 401
+          "@fd_outsiders_club_a": 404
+          club_member: 403
+          club_admin: 200
+          "@platform_staff": 403
+      - name: post_of_other_org
+        path_params: { org_id: club_a, post_id: post_b_draft }
+        note: club_b's draft through club_a's path — 404 after authz (06 H-38)
+        expect:
+          anonymous: 401
+          "@fd_outsiders_club_a": 404
+          club_member: 403
+          club_admin: 404
+          "@platform_staff": 403
 
   createPost:
     method: POST

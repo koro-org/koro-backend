@@ -309,14 +309,17 @@ func scoped(orgID uuid.UUID) func(*gorm.DB) *gorm.DB {
 }
 
 // ListOrgManage implements Store.
-func (s gormStore) ListOrgManage(ctx context.Context, orgID uuid.UUID, statuses []Status, after *uuid.UUID, limit int) ([]Post, error) {
+func (s gormStore) ListOrgManage(ctx context.Context, orgID uuid.UUID, f ManageFilter, after *uuid.UUID, limit int) ([]Post, error) {
 	q := db.Conn(ctx, s.orm).Table("posts AS p").Select(prefixed).Scopes(scoped(orgID))
-	if len(statuses) > 0 {
-		ss := make([]string, len(statuses))
-		for i, st := range statuses {
+	if len(f.Statuses) > 0 {
+		ss := make([]string, len(f.Statuses))
+		for i, st := range f.Statuses {
 			ss[i] = string(st)
 		}
 		q = q.Where("p.status IN ?", ss)
+	}
+	if f.Kind != "" {
+		q = q.Where("p.kind = ?", string(f.Kind))
 	}
 	if after != nil {
 		q = q.Where("p.id < ?", *after)

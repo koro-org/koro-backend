@@ -239,6 +239,10 @@ type OrgView struct {
 	// only for an active org that is not a sensitive club, once files has
 	// made the public copy; empty otherwise.
 	LogoPublicURL string
+	// Manage is true when the reader may update the org (getOrg of a
+	// company for its admins and platform admins, BE-127): the public
+	// profile then carries the company's e-mail domain for the edit form.
+	Manage bool
 }
 
 // reauthProof is the re-authentication proof of an R operation (03 §6.2).

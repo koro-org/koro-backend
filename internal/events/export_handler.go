@@ -96,8 +96,8 @@ type createExportInput struct {
 	EventPath
 	idempotency.OptionalHeader
 	Body struct {
-		Reason           string             `json:"reason" maxLength:"500" doc:"Why the data is needed (10–500 characters)"`
-		Fields           []string           `json:"fields" maxItems:"40" doc:"Columns of the file (see the description)"`
+		Reason           exportReasonText   `json:"reason" doc:"Why the data is needed"`
+		Fields           exportFieldList    `json:"fields" doc:"Columns of the file (see the description)"`
 		Format           string             `json:"format,omitempty" enum:"csv,xlsx" doc:"File type (default xlsx)"`
 		IncludeSensitive bool               `json:"include_sensitive,omitempty" doc:"Not accepted in v1: true is 422 (special-category answers are never exported)"`
 		Reauth           *consent.ReauthDTO `json:"reauth,omitempty" doc:"Re-authentication proof (03 §6.2)"`
@@ -117,7 +117,7 @@ func (h handler) createExport(ctx context.Context, in *createExportInput) (*expo
 	if r := in.Body.Reauth; r != nil {
 		proof = identity.ReauthProof{Password: r.Password, TOTPCode: r.TOTPCode}
 	}
-	x, err := h.svc.CreateExport(ctx, a, in.id(), ExportInput{Reason: in.Body.Reason, Fields: in.Body.Fields,
+	x, err := h.svc.CreateExport(ctx, a, in.id(), ExportInput{Reason: string(in.Body.Reason), Fields: exportFields(in.Body.Fields),
 		Format: ExportFormat(in.Body.Format), IncludeSensitive: in.Body.IncludeSensitive}, proof)
 	if err != nil {
 		return nil, err
@@ -188,4 +188,12 @@ func (h handler) downloadExport(ctx context.Context, in *ExportPath) (*exportURL
 		return nil, err
 	}
 	return &exportURLOutput{CacheControl: "no-store", Body: ExportURLDTO(dl)}, nil
+}
+
+func exportFields(in exportFieldList) []string {
+	out := make([]string, len(in))
+	for i, f := range in {
+		out[i] = string(f)
+	}
+	return out
 }

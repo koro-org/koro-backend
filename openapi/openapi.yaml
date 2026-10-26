@@ -1713,6 +1713,10 @@ components:
           type: string
         actor:
           $ref: "#/components/schemas/AuditActorDTO"
+        event_id:
+          description: Stable ID of the record (list key, deep links)
+          format: uuid
+          type: string
         ip:
           type: string
         metadata:
@@ -1736,6 +1740,7 @@ components:
         user_agent:
           type: string
       required:
+        - event_id
         - action
         - outcome
         - actor
@@ -2094,8 +2099,9 @@ components:
       additionalProperties: false
       properties:
         cancel_reason:
-          description: 3-300 characters
+          description: Shown to the registrant
           maxLength: 300
+          minLength: 3
           type: string
       required:
         - cancel_reason
@@ -2809,6 +2815,9 @@ components:
           additionalProperties:
             type: string
           description: Network name → https URL
+          maxProperties: 10
+          propertyNames:
+            pattern: ^[a-z][a-z0-9_]{1,29}$
           type: object
         university:
           $ref: "#/components/schemas/ClubUniversityDTO"
@@ -3063,6 +3072,13 @@ components:
     CompanyPublicDTO:
       additionalProperties: false
       properties:
+        domain_verified_at:
+          description: Only for the company's editors
+          format: date-time
+          type: string
+        email_domain:
+          description: Only for the company's editors (updateOrg)
+          type: string
         hq_city:
           type: string
         sector_code:
@@ -3952,9 +3968,26 @@ components:
         fields:
           description: Columns of the file (see the description)
           items:
+            description: A base field (x-koro-export-base-fields) or answers.<form field key> of a non-sensitive, non-consent field of the published form; anything else is 422 after authz
             type: string
+            x-koro-export-base-fields:
+              - registration_id
+              - status
+              - source
+              - created_at
+              - confirmed_at
+              - waitlisted_at
+              - checked_in_at
+              - cancelled_at
+              - first_name
+              - last_name
+              - university
+              - department
+              - class_year
           maxItems: 40
+          minItems: 1
           type: array
+          uniqueItems: true
         format:
           description: File type (default xlsx)
           enum:
@@ -3965,8 +3998,9 @@ components:
           description: "Not accepted in v1: true is 422 (special-category answers are never exported)"
           type: boolean
         reason:
-          description: Why the data is needed (10–500 characters)
+          description: Why the data is needed
           maxLength: 500
+          minLength: 10
           type: string
         reauth:
           $ref: "#/components/schemas/ReauthDTO"
@@ -4664,8 +4698,16 @@ components:
             - integer
             - "null"
         failure_reason:
-          description: Why a cancelled or failed dispatch did not send (a problem code)
+          description: "Why a cancelled or failed dispatch did not send: a problem code of problems.json (x-koro-failure-reasons lists them)"
           type: string
+          x-koro-failure-reasons:
+            - outreach.post_gone
+            - outreach.post_not_published
+            - orgs.org_suspended
+            - orgs.invalid_state
+            - outreach.audience_too_small
+            - validation_failed
+            - notify.invalid_message
         post_id:
           format: uuid
           type: string
@@ -6027,7 +6069,9 @@ components:
       additionalProperties: false
       properties:
         consent_purpose:
-          description: "consent: the consent purpose (event_sponsor_share)"
+          description: "consent: the per-registration consent purpose"
+          enum:
+            - event_sponsor_share
           type: string
         help:
           additionalProperties:
@@ -7394,8 +7438,20 @@ components:
           format: date-time
           type: string
         fulfilled_via:
+          enum:
+            - buyer_confirmed
+            - window_elapsed
+            - admin
+            - auto_platform
           type: string
         fulfillment_status:
+          enum:
+            - not_applicable
+            - pending
+            - marked
+            - fulfilled
+            - disputed
+            - cancelled
           type: string
         has_fulfillment_evidence:
           description: A delivery evidence file is attached (getOrderLineEvidence)
@@ -7409,6 +7465,16 @@ components:
         order_no:
           type: string
         order_status:
+          enum:
+            - awaiting_payment
+            - paid
+            - in_fulfilment
+            - completed
+            - cancelled
+            - expired
+            - partially_refunded
+            - refunded
+            - disputed
           type: string
       required:
         - line_id
@@ -8226,7 +8292,7 @@ components:
           description: The notification kind (template ID)
           type: string
         link_path:
-          description: "Client-independent in-app path (web and mobile map it to their own routes; a form a client does not know is shown without a link). One of: `/me/access-grants`; `/me/club-claims`; `/me/contact-requests/{contact_request_id}`; `/me/registrations/{registration_id}`; `/me/security-events`; `/me/terms`; `/me/student-verification`; `/orders/{order_id}`; `/orders/{order_id}/payment-instructions`; `/invoices/{invoice_id}`; `/posts/{post_id}`; `/clubs/by-slug/{club_slug}`; `/events/{event_id}/registrations/{registration_id}`; `/orgs/{org_id}/sales`; `/orgs/{org_id}/payouts/{payout_id}`; `/orgs/{org_id}/offerings`; `/orgs/{org_id}/offering-approvals`; `/orgs/{org_id}/posts`; `/orgs/{org_id}/payees/{payee_id}`; `/orgs/{org_id}/contact-requests/{contact_request_id}`; `/admin/audit-events`; `/admin/bank-accounts`; `/admin/breaches`; `/admin/clubs/{club_org_id}`; `/admin/club-claims/{claim_id}`; `/admin/collection-accounts`; `/admin/commerce-policies`; `/admin/offerings`; `/admin/orders?order_no={order_no}`; `/admin/platform-roles`; `/admin/payouts/{payout_id}`; `/admin/refunds/{refund_id}`; `/admin/reports/{report_id}`; `/admin/review-queue`; `/admin/incoming-transfers?status=unmatched`; `/clubs/{club_org_id}` (legacy). {<name>_id} is a UUID, {club_slug} an organization slug (getOrgBySlug), {order_no} an order number. Legacy forms are no longer produced but older notifications may carry them."
+          description: "Client-independent in-app path (web and mobile map it to their own routes; a form a client does not know is shown without a link). One of: `/me/access-grants`; `/me/club-claims`; `/me/contact-requests/{contact_request_id}`; `/me/registrations/{registration_id}`; `/me/security-events`; `/me/terms`; `/me/student-verification`; `/orders/{order_id}`; `/orders/{order_id}/payment-instructions`; `/invoices/{invoice_id}`; `/posts/{post_id}`; `/clubs/by-slug/{club_slug}`; `/orgs/{org_id}/events/{event_id}/registrations/{registration_id}`; `/orgs/{org_id}/sales`; `/orgs/{org_id}/payouts/{payout_id}`; `/orgs/{org_id}/offerings`; `/orgs/{org_id}/offering-approvals`; `/orgs/{org_id}/posts`; `/orgs/{org_id}/payees/{payee_id}`; `/orgs/{org_id}/contact-requests/{contact_request_id}`; `/admin/audit-events`; `/admin/bank-accounts`; `/admin/breaches`; `/admin/clubs/{club_org_id}`; `/admin/club-claims/{claim_id}`; `/admin/collection-accounts`; `/admin/commerce-policies`; `/admin/offerings`; `/admin/orders?order_no={order_no}`; `/admin/platform-roles`; `/admin/payouts/{payout_id}`; `/admin/refunds/{refund_id}`; `/admin/reports/{report_id}`; `/admin/review-queue`; `/admin/incoming-transfers?status=unmatched`; `/clubs/{club_org_id}` (legacy); `/events/{event_id}/registrations/{registration_id}` (legacy). {<name>_id} is a UUID, {club_slug} an organization slug (getOrgBySlug), {order_no} an order number. Every current org form starts with /orgs/{org_id}/: the client opens it in the panel of that org's kind (getMe memberships[].org_kind). Legacy forms are no longer produced but older notifications may carry them."
           type: string
           x-koro-link-paths:
             - pattern: /me/access-grants
@@ -8253,7 +8319,7 @@ components:
               audience: user
             - pattern: /clubs/by-slug/{club_slug}
               audience: user
-            - pattern: /events/{event_id}/registrations/{registration_id}
+            - pattern: /orgs/{org_id}/events/{event_id}/registrations/{registration_id}
               audience: org
             - pattern: /orgs/{org_id}/sales
               audience: org
@@ -8302,6 +8368,9 @@ components:
             - pattern: /clubs/{club_org_id}
               audience: user
               legacy: true
+            - pattern: /events/{event_id}/registrations/{registration_id}
+              audience: org
+              legacy: true
         notification_id:
           format: uuid
           type: string
@@ -8338,6 +8407,11 @@ components:
           type: string
         blocked_sponsor_flags:
           items:
+            enum:
+              - alcohol
+              - tobacco
+              - gambling
+              - political
             type: string
           type: array
         cancel_reason:
@@ -8399,11 +8473,17 @@ components:
       additionalProperties: false
       properties:
         blocked_sponsor_flags:
-          description: "Sponsor categories the seller refuses: alcohol, tobacco, gambling, political"
+          description: Sponsor categories the seller refuses
           items:
+            enum:
+              - alcohol
+              - tobacco
+              - gambling
+              - political
             type: string
           maxItems: 4
           type: array
+          uniqueItems: true
         default_payee_id:
           description: A payee of the organization; its default payee when omitted
           format: uuid
@@ -8798,6 +8878,11 @@ components:
           format: date-time
           type: string
         model_code:
+          enum:
+            - A
+            - A2
+            - B
+            - C
           type: string
         order_id:
           format: uuid
@@ -8817,6 +8902,16 @@ components:
           format: date-time
           type: string
         status:
+          enum:
+            - awaiting_payment
+            - paid
+            - in_fulfilment
+            - completed
+            - cancelled
+            - expired
+            - partially_refunded
+            - refunded
+            - disputed
           type: string
       required:
         - order_id
@@ -8850,13 +8945,8 @@ components:
           type: string
         currency:
           type: string
-        direct_payments:
-          description: "Unpaid model C: approved payee accounts, visible only to the buying company administrators"
-          items:
-            $ref: "#/components/schemas/DirectPaymentDTO"
-          type: array
         direct_payments_status:
-          description: "Present only when direct_payments may be shown: an MFA-verified buyer administrator reading an unpaid, unconfirmed model C order. available: direct_payments lists every payee transfer. unavailable: a payee has no approved bank account now (revoked or not yet approved; getOrderPaymentInstructions answers 409 parties.no_approved_account) or cannot be paid directly (409 orders.invalid_state); direct_payments is then absent, no payee account is disclosed (not even an approved one) and the rest of the order reads as usual"
+          description: "Present only for a reader who may see the direct transfers: an MFA-verified buyer administrator reading an unpaid, unconfirmed model C order. The order never carries a payee bank account (BE-127): the transfers are in getOrderPaymentInstructions. available: the instructions list every payee transfer. unavailable: a payee has no approved bank account now (revoked or not yet approved; the instructions answer 409 parties.no_approved_account) or cannot be paid directly (409 orders.invalid_state); the rest of the order reads as usual"
           enum:
             - available
             - unavailable
@@ -8875,6 +8965,12 @@ components:
             $ref: "#/components/schemas/OrderLineDTO"
           type: array
         model_code:
+          description: "Both views. C: the buyer pays each payee directly (the seller's payee receives its share from the buyer, not in a Koro payout)"
+          enum:
+            - A
+            - A2
+            - B
+            - C
           type: string
         order_id:
           format: uuid
@@ -8890,6 +8986,7 @@ components:
           format: int64
           type: integer
         paid_at:
+          description: "Both views: when the order was paid in full"
           format: date-time
           type: string
         payable_amount:
@@ -9818,9 +9915,11 @@ components:
           format: uuid
           type: string
         receipt_url:
-          description: "Paid payouts: a download URL of the bank receipt"
+          deprecated: true
+          description: "Paid payouts: a download URL of the bank receipt. Deprecated (BE-127): use downloadOrgPayoutReceipt, which audits each download; this field will be removed"
           type: string
         receipt_url_expires_at:
+          deprecated: true
           format: date-time
           type: string
         status:
@@ -9907,9 +10006,11 @@ components:
           format: uuid
           type: string
         receipt_url:
-          description: "Paid payouts: a download URL of the bank receipt"
+          deprecated: true
+          description: "Paid payouts: a download URL of the bank receipt. Deprecated (BE-127): use downloadOrgPayoutReceipt, which audits each download; this field will be removed"
           type: string
         receipt_url_expires_at:
+          deprecated: true
           format: date-time
           type: string
         status:
@@ -9964,6 +10065,19 @@ components:
           type: string
       required:
         - items
+      type: object
+    PayoutReceiptDTO:
+      additionalProperties: false
+      properties:
+        expires_at:
+          format: date-time
+          type: string
+        url:
+          description: Valid for at most 5 minutes
+          type: string
+      required:
+        - url
+        - expires_at
       type: object
     PlatformRoleAssignmentDTO:
       additionalProperties: false
@@ -10154,6 +10268,10 @@ components:
           type: boolean
         created_at:
           format: date-time
+          type: string
+        dispatch_id:
+          description: "A targeted post's notification dispatch (getDispatch); absent when it has none: createDispatch is then possible"
+          format: uuid
           type: string
         edited_at:
           format: date-time
@@ -10437,8 +10555,9 @@ components:
       additionalProperties: false
       properties:
         lint_override_reason:
-          description: 10-500 characters; required when the lint finds warn_special or review_identifier fields
+          description: Required when the lint finds warn_special or review_identifier fields; omit it otherwise
           maxLength: 500
+          minLength: 10
           type: string
       type: object
     PublishResult:
@@ -11812,10 +11931,20 @@ components:
       properties:
         buyer_title:
           type: string
+        currency:
+          description: The order's currency (ISO 4217) of the amounts
+          type: string
         dispute_window_ends_at:
           format: date-time
           type: string
         fulfillment_status:
+          enum:
+            - not_applicable
+            - pending
+            - marked
+            - fulfilled
+            - disputed
+            - cancelled
           type: string
         gross_amount:
           format: int64
@@ -11833,6 +11962,16 @@ components:
           type: string
         order_status:
           description: A line is delivered only once its order is paid
+          enum:
+            - awaiting_payment
+            - paid
+            - in_fulfilment
+            - completed
+            - cancelled
+            - expired
+            - partially_refunded
+            - refunded
+            - disputed
           type: string
         paid_out_at:
           format: date-time
@@ -11850,6 +11989,7 @@ components:
         - order_id
         - order_no
         - order_status
+        - currency
         - buyer_title
         - title_snapshot
         - quantity
@@ -13791,7 +13931,10 @@ components:
         social_links:
           additionalProperties:
             type: string
-          description: Replaces every link; network name → https URL (at most 10); {} clears them
+          description: Replaces every link; network name → https URL; {} clears them
+          maxProperties: 10
+          propertyNames:
+            pattern: ^[a-z][a-z0-9_]{1,29}$
           type: object
       type: object
     UpdateExperienceInputBody:
@@ -13848,9 +13991,15 @@ components:
       properties:
         blocked_sponsor_flags:
           items:
+            enum:
+              - alcohol
+              - tobacco
+              - gambling
+              - political
             type: string
           maxItems: 4
           type: array
+          uniqueItems: true
         clear:
           description: Optional fields to empty
           items:
@@ -13924,6 +14073,7 @@ components:
       additionalProperties: false
       properties:
         city:
+          description: Empty string clears it
           maxLength: 60
           type: string
         description:
@@ -13935,7 +14085,7 @@ components:
           maxLength: 253
           type: string
         hq_city:
-          description: Companies only
+          description: Companies only; empty string clears it
           maxLength: 60
           type: string
         logo_file_id:
@@ -14382,8 +14532,8 @@ components:
       additionalProperties: false
       properties:
         void_reason:
-          description: 5-300 characters
           maxLength: 300
+          minLength: 5
           type: string
       required:
         - void_reason
@@ -15035,7 +15185,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/admin/club-claims:
     get:
-      description: "The review queue: pending claims oldest first (default), other statuses newest first. Support and platform admins see every claim; a university representative the claims of their universities' non-sensitive clubs (the claims they decide). Audited."
+      description: "The review queue: pending claims oldest first (default), other statuses newest first. Support and platform admins see every claim; a university representative the claims of their universities' non-sensitive clubs (the claims they decide). university_org_id narrows the queue to one university (a university panel: a representative of several universities sees only that panel's claims). Audited."
       operationId: adminListClubClaims
       parameters:
         - description: Page size
@@ -15068,6 +15218,14 @@ paths:
               - approved
               - rejected
               - withdrawn
+            type: string
+        - description: "Only the claims of this university's clubs (its org ID): a university panel's queue. A representative asks only for a university they represent (another: 404)"
+          explode: false
+          in: query
+          name: university_org_id
+          schema:
+            description: "Only the claims of this university's clubs (its org ID): a university panel's queue. A representative asks only for a university they represent (another: 404)"
+            format: uuid
             type: string
       responses:
         "200":
@@ -27752,7 +27910,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/orders/{order_id}:
     get:
-      description: "The buyer's members and platform staff get the whole order (view buyer: totals, payment, every line; never the commission). Only MFA-verified buyer administrators see approved payee bank instructions on an unpaid, unconfirmed model C order; bank access is audited. When a payee has no approved bank account (direct_payments_status unavailable) the order still reads in full without any payee account; only the payment instructions answer 409. A seller's club admin or university representative gets only its own lines with its net share and the commission, and the buyer's title (view seller). Anyone else: 404."
+      description: "The buyer's members and platform staff get the whole order (view buyer: totals, payment, every line; never the commission, never a payee bank account: the direct transfers of an unpaid model C order are in getOrderPaymentInstructions). MFA-verified buyer administrators get direct_payments_status; when a payee has no approved bank account (unavailable) the order still reads in full and only the payment instructions answer 409. A seller's club admin or university representative gets only its own lines with its net share and the commission, and the buyer's title (view seller). Anyone else: 404."
       operationId: getOrder
       parameters:
         - description: Order ID (an unknown or malformed ID is 404)
@@ -30677,6 +30835,45 @@ paths:
       x-koro-action: ledger.payout.read
       x-koro-rate-limit: read_default
       x-koro-surface: org
+  /api/v1/orgs/{org_id}/payouts/{payout_id}/receipt:
+    get:
+      description: "For the same people as getOrgPayout: a URL of the bank receipt (dekont) valid for 5 minutes. Only a paid payout has one (409 ledger.invalid_state); 409 files.not_clean until the virus scan clears the file. A payout of another organization is 404. Every download is audited."
+      operationId: downloadOrgPayoutReceipt
+      parameters:
+        - in: path
+          name: org_id
+          required: true
+          schema:
+            format: uuid
+            type: string
+        - in: path
+          name: payout_id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayoutReceiptDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a download URL of a payout's bank receipt
+      tags:
+        - ledger
+      x-koro-action: ledger.payout.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
   /api/v1/orgs/{org_id}/posts:
     get:
       description: "Every post of the organization, newest first: drafts, posts in review, hidden and removed posts (removed: status only)."
@@ -30724,6 +30921,18 @@ paths:
               type: string
             maxItems: 5
             type: array
+        - description: "Only this kind: status=published&kind=opportunity_call lists the calls createContactRequest's opportunity_post_id may name"
+          explode: false
+          in: query
+          name: kind
+          schema:
+            description: "Only this kind: status=published&kind=opportunity_call lists the calls createContactRequest's opportunity_post_id may name"
+            enum:
+              - text
+              - image
+              - event_share
+              - opportunity_call
+            type: string
       responses:
         "200":
           content:
@@ -30791,6 +31000,51 @@ paths:
       x-koro-rate-limit: write_default
       x-koro-surface: org
       x-koro-terms-gate: enforced
+  /api/v1/orgs/{org_id}/posts/{post_id}:
+    get:
+      description: "One post of the organization as listOrgPostsManage shows it (status, audience, commercial label, dispatch_id; a removed post: status only), for the same people. The ETag is the If-Match value of updatePost. A post of another organization is 404."
+      operationId: getPostManage
+      parameters:
+        - description: Organization ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID
+            type: string
+        - description: Post ID
+          in: path
+          name: post_id
+          required: true
+          schema:
+            description: Post ID
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostManageDTO"
+          description: OK
+          headers:
+            ETag:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get an organization's post for management
+      tags:
+        - feed
+      x-koro-action: feed.post.list_org_manage
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
   /api/v1/orgs/{org_id}/sales:
     get:
       description: The seller's lines, newest first, with the order's reference and status and the buyer's title.
@@ -31965,7 +32219,7 @@ paths:
       x-koro-surface: public
   /api/v1/universities:
     get:
-      description: Active universities. q matches name, short name and city (Turkish full text) or part of the name.
+      description: Active universities. q matches name, short name and city (Turkish full text) or part of the name. org_id finds the university of a university organization (getOrg has no university_id).
       operationId: listUniversities
       parameters:
         - description: Page size
@@ -32018,6 +32272,14 @@ paths:
             description: name (A-Z, Turkish order); default newest first
             enum:
               - name
+            type: string
+        - description: "Only the university of this organization (its org_id): at most one item"
+          explode: false
+          in: query
+          name: org_id
+          schema:
+            description: "Only the university of this organization (its org_id): at most one item"
+            format: uuid
             type: string
       responses:
         "200":

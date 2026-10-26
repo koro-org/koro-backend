@@ -32,7 +32,7 @@ type LinkAudience string
 // Link audiences.
 const (
 	LinkForUser  LinkAudience = "user"  // the recipient's own screens (/me/..., an order or invoice of their org)
-	LinkForOrg   LinkAudience = "org"   // an organization's management screens (/orgs/{org_id}/..., an event's registrations)
+	LinkForOrg   LinkAudience = "org"   // an organization's management screens: always /orgs/{org_id}/...
 	LinkForAdmin LinkAudience = "admin" // platform staff screens (/admin/...)
 )
 
@@ -164,13 +164,13 @@ var (
 	routeClub              = route("/clubs/by-slug/{club_slug}", LinkForUser)                // directory (claim approved)
 
 	// An organization's management screens.
-	routeEventRegistration  = route("/events/{event_id}/registrations/{registration_id}", LinkForOrg) // events
-	routeOrgSales           = route("/orgs/{org_id}/sales", LinkForOrg)                               // orders, payments
-	routeOrgPayout          = route("/orgs/{org_id}/payouts/{payout_id}", LinkForOrg)                 // ledger
-	routeOrgOfferings       = route("/orgs/{org_id}/offerings", LinkForOrg)                           // catalog
-	routeOrgOfferingReviews = route("/orgs/{org_id}/offering-approvals", LinkForOrg)                  // catalog
-	routeOrgPosts           = route("/orgs/{org_id}/posts", LinkForOrg)                               // feed
-	routeOrgPayee           = route("/orgs/{org_id}/payees/{payee_id}", LinkForOrg)                   // parties
+	routeEventRegistration  = route("/orgs/{org_id}/events/{event_id}/registrations/{registration_id}", LinkForOrg) // events
+	routeOrgSales           = route("/orgs/{org_id}/sales", LinkForOrg)                                             // orders, payments
+	routeOrgPayout          = route("/orgs/{org_id}/payouts/{payout_id}", LinkForOrg)                               // ledger
+	routeOrgOfferings       = route("/orgs/{org_id}/offerings", LinkForOrg)                                         // catalog
+	routeOrgOfferingReviews = route("/orgs/{org_id}/offering-approvals", LinkForOrg)                                // catalog
+	routeOrgPosts           = route("/orgs/{org_id}/posts", LinkForOrg)                                             // feed
+	routeOrgPayee           = route("/orgs/{org_id}/payees/{payee_id}", LinkForOrg)                                 // parties
 	routeOrgContactRequest  = route("/orgs/{org_id}/contact-requests/{contact_request_id}", LinkForOrg)
 
 	// Platform staff screens.
@@ -195,6 +195,10 @@ func init() {
 	// Before BE-122 the claim approval linked the club by ID; web and
 	// mobile resolve it with getClub.
 	legacy("/clubs/{club_org_id}", LinkForUser)
+	// Before BE-127 a new application linked the event's registration
+	// without its org: a client could not tell which panel (club,
+	// university, company) opens it.
+	legacy("/events/{event_id}/registrations/{registration_id}", LinkForOrg)
 }
 
 // Builders of the recipient's own screens.
@@ -219,8 +223,10 @@ func ClubLink(slug string) Link { return routeClub.link(slug) }
 
 // Builders of an organization's management screens.
 
-func EventRegistrationLink(event, reg uuid.UUID) Link {
-	return routeEventRegistration.link(event.String(), reg.String())
+// EventRegistrationLink is a registration of an event of org (the
+// organiser; org-audience links always name the org, BE-127).
+func EventRegistrationLink(org, event, reg uuid.UUID) Link {
+	return routeEventRegistration.link(org.String(), event.String(), reg.String())
 }
 func OrgSalesLink(org uuid.UUID) Link { return routeOrgSales.link(org.String()) }
 func OrgPayoutLink(org, payout uuid.UUID) Link {
@@ -276,7 +282,8 @@ func (linkPathText) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schem
 		}
 	}
 	b.WriteString(". {<name>_id} is a UUID, {club_slug} an organization slug (getOrgBySlug), {order_no} an order " +
-		"number. Legacy forms are no longer produced but older notifications may carry them.")
+		"number. Every current org form starts with /orgs/{org_id}/: the client opens it in the panel of that org's " +
+		"kind (getMe memberships[].org_kind). Legacy forms are no longer produced but older notifications may carry them.")
 	s.Description = b.String()
 	if s.Extensions == nil {
 		s.Extensions = map[string]any{}

@@ -81,6 +81,10 @@ func (s gormStore) ListClaims(ctx context.Context, f ClaimFilter, after *uuid.UU
 		q = q.Where(`club_org_id IN (SELECT c.org_id FROM clubs c JOIN universities u ON u.id = c.university_id
 			WHERE NOT c.is_sensitive AND u.org_id = ANY( ?))`, db.UUIDArray(f.RepUniversityOrgs))
 	}
+	if f.UniversityOrg != nil {
+		q = q.Where(`club_org_id IN (SELECT c.org_id FROM clubs c JOIN universities u ON u.id = c.university_id
+			WHERE u.org_id = ?)`, *f.UniversityOrg)
+	}
 	if f.RepUniversityOrgs != nil && f.RepPendingSince != nil && status == ClaimPending {
 		q = q.Where("created_at > ?", *f.RepPendingSince)
 	}

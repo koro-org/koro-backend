@@ -38,6 +38,7 @@ type AuditActorDTO struct {
 // only for dpo and platform_admin, metadata only in adminListAuditEvents;
 // talent.* events show only that they happened (actor, time, reason).
 type AuditEventDTO struct {
+	EventID      uuid.UUID       `json:"event_id" format:"uuid" doc:"Stable ID of the record (list key, deep links)"`
 	Action       string          `json:"action" doc:"Audit action (authz action name)"`
 	Outcome      string          `json:"outcome" enum:"success,denied,failure"`
 	Actor        AuditActorDTO   `json:"actor"`
@@ -108,7 +109,7 @@ func toSecurityEventDTO(e SecurityEvent) SecurityEventDTO {
 
 func toAuditEventDTO(v View) AuditEventDTO {
 	return AuditEventDTO{
-		Action: v.Action, Outcome: string(v.Outcome), Actor: AuditActorDTO{UserID: v.ActorUserID, Display: v.ActorDisplay},
+		EventID: v.ID, Action: v.Action, Outcome: string(v.Outcome), Actor: AuditActorDTO{UserID: v.ActorUserID, Display: v.ActorDisplay},
 		ResourceType: v.ResourceType, ResourceID: v.ResourceID, Reason: v.Reason, OccurredAt: v.OccurredAt,
 		IP: v.IP, UserAgent: v.UserAgent, Metadata: v.Metadata,
 	}

@@ -39,6 +39,10 @@ type PayoutService interface {
 	// GetOrgPayout is getOrgPayout (ledger.payout.read): a payout of the org
 	// with its items and, once paid, a download URL of its receipt.
 	GetOrgPayout(ctx context.Context, a authz.Actor, orgID, payoutID uuid.UUID) (PayoutView, error)
+	// OrgPayoutReceipt is downloadOrgPayoutReceipt (ledger.payout.read,
+	// BE-127): a 5-minute download of a paid payout's bank receipt, each
+	// one audited.
+	OrgPayoutReceipt(ctx context.Context, a authz.Actor, orgID, payoutID uuid.UUID) (files.Download, error)
 	// AdminListPayables is adminListPayables (ledger.payable.list).
 	AdminListPayables(ctx context.Context, a authz.Actor, q PayablesQuery) ([]PayableGroup, error)
 	// AdminListPayouts is adminListPayouts (ledger.payout.list).
@@ -210,6 +214,39 @@ func (s *service) GetOrgPayout(ctx context.Context, a authz.Actor, orgID, payout
 		return PayoutView{}, ErrNotFound // another org's payout (06 H-38)
 	}
 	return s.view(ctx, p)
+}
+
+// OrgPayoutReceipt implements PayoutService: the same people and the same
+// org check as getOrgPayout → only a paid payout has a receipt (409
+// ledger.invalid_state) → a clean file (409 files.not_clean) → the audit
+// record of the download (IDs only) before the URL is handed out.
+func (s *service) OrgPayoutReceipt(ctx context.Context, a authz.Actor, orgID, payoutID uuid.UUID) (files.Download, error) {
+	if err := s.orgSurface(ctx, a, authz.LedgerPayoutRead, orgID, orgPayouts(orgID)); err != nil {
+		return files.Download{}, err
+	}
+	p, err := s.d.Payouts.GetPayout(ctx, payoutID, false)
+	if err != nil {
+		return files.Download{}, err
+	}
+	if p.OrgID != orgID {
+		return files.Download{}, ErrNotFound // another org's payout (06 H-38)
+	}
+	if p.Status != StatusPaid {
+		return files.Download{}, ErrInvalidState
+	}
+	if p.ReceiptFileID == nil {
+		return files.Download{}, ErrNotFound
+	}
+	d, err := s.d.Files.PresignGet(ctx, *p.ReceiptFileID, receiptURLTTL)
+	if err != nil {
+		return files.Download{}, err
+	}
+	meta := map[string]any{"operation": "download_receipt", "receipt_file_id": p.ReceiptFileID.String(),
+		"ttl_seconds": int(receiptURLTTL.Seconds())}
+	if err := s.d.Audit.Log(ctx, payoutEvent(a, authz.LedgerPayoutRead, p, "", meta)); err != nil {
+		return files.Download{}, err
+	}
+	return d, nil
 }
 
 // ---- admin surface

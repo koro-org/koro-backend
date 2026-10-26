@@ -50,6 +50,10 @@ operations:
       - name: search_by_name
         query: { q: matris, sort: name, type: state }
         expect: { "@all": 200 }
+      - name: of_university_org
+        query: { org_id: "{{fixture:uni_a}}" }
+        note: BE-127 — a university panel finds its own university
+        expect: { "@all": 200 }
 
   getUniversity:
     method: GET
@@ -386,6 +390,26 @@ operations:
           "@no_staff_no_rep": 403
           "@no_claim_queue": 403
           university_rep: 200
+          support: 200
+          platform_admin: 200
+      - name: own_university_panel
+        query: { university_org_id: "{{fixture:uni_a}}" }
+        note: BE-127 — the university panel's queue
+        expect:
+          anonymous: 401
+          "@no_staff_no_rep": 403
+          "@no_claim_queue": 403
+          university_rep: 200
+          support: 200
+          platform_admin: 200
+      - name: other_university_panel
+        query: { university_org_id: "{{fixture:uni_b}}" }
+        note: BE-127 — a university the rep does not represent is 404 (invisible claims); staff read it
+        expect:
+          anonymous: 401
+          "@no_staff_no_rep": 403
+          "@no_claim_queue": 403
+          university_rep: 404
           support: 200
           platform_admin: 200
 

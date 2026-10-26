@@ -311,7 +311,7 @@ type voidCheckinInput struct {
 	CheckinPath
 	idempotency.OptionalHeader
 	Body struct {
-		VoidReason string `json:"void_reason" maxLength:"300" doc:"5-300 characters"`
+		VoidReason voidReasonText `json:"void_reason"`
 	}
 }
 
@@ -324,7 +324,7 @@ func (h handler) voidCheckin(ctx context.Context, in *voidCheckinInput) (*voidOu
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.VoidCheckin(ctx, a, in.id(), in.checkinID(), in.Body.VoidReason)
+	v, err := h.svc.VoidCheckin(ctx, a, in.id(), in.checkinID(), string(in.Body.VoidReason))
 	if err != nil {
 		return nil, err
 	}

@@ -19,7 +19,7 @@ func builderCases() map[string]struct {
 	got     Link
 	pattern string
 } {
-	a, b := uuid.NewV7(), uuid.NewV7()
+	a, b, d := uuid.NewV7(), uuid.NewV7(), uuid.NewV7()
 	type c = struct {
 		got     Link
 		pattern string
@@ -37,7 +37,7 @@ func builderCases() map[string]struct {
 		"InvoiceLink":                  {InvoiceLink(a), "/invoices/{invoice_id}"},
 		"PostLink":                     {PostLink(a), "/posts/{post_id}"},
 		"ClubLink":                     {ClubLink("bilisim-kulubu-2"), "/clubs/by-slug/{club_slug}"},
-		"EventRegistrationLink":        {EventRegistrationLink(a, b), "/events/{event_id}/registrations/{registration_id}"},
+		"EventRegistrationLink":        {EventRegistrationLink(a, b, d), "/orgs/{org_id}/events/{event_id}/registrations/{registration_id}"},
 		"OrgSalesLink":                 {OrgSalesLink(a), "/orgs/{org_id}/sales"},
 		"OrgPayoutLink":                {OrgPayoutLink(a, b), "/orgs/{org_id}/payouts/{payout_id}"},
 		"OrgOfferingsLink":             {OrgOfferingsLink(a), "/orgs/{org_id}/offerings"},
@@ -205,5 +205,24 @@ func TestLinkProducers_AllInCatalog(t *testing.T) {
 		if !used[name] {
 			t.Errorf("builder %s has no producer", name)
 		}
+	}
+}
+
+// TestLinkRoutes_OrgFormsNameTheOrg (BE-127): every current org-audience
+// form starts with /orgs/{org_id}/, so a client opens it in the panel of
+// that org's kind; the old registration form is legacy only.
+func TestLinkRoutes_OrgFormsNameTheOrg(t *testing.T) {
+	t.Parallel()
+	for _, r := range LinkRoutes() {
+		if r.Audience == LinkForOrg && !r.Legacy && !strings.HasPrefix(r.Pattern, "/orgs/{org_id}/") {
+			t.Errorf("org link %s does not name its org", r.Pattern)
+		}
+	}
+	old := "/events/" + uuid.NewV7().String() + "/registrations/" + uuid.NewV7().String()
+	if r, ok := MatchLinkRoute(old); !ok || !r.Legacy {
+		t.Fatalf("old registration form = %+v, %v; want legacy", r, ok)
+	}
+	if _, ok := ParseLink(old); ok {
+		t.Fatal("ParseLink accepts the legacy registration form")
 	}
 }

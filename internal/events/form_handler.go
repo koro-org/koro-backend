@@ -262,7 +262,7 @@ func (h handler) putFormDraft(ctx context.Context, in *putFormDraftInput) (*draf
 type publishFormInput struct {
 	EventPath
 	Body *struct {
-		LintOverrideReason string `json:"lint_override_reason,omitempty" maxLength:"500" doc:"10-500 characters; required when the lint finds warn_special or review_identifier fields"`
+		LintOverrideReason overrideReasonText `json:"lint_override_reason,omitempty" doc:"Required when the lint finds warn_special or review_identifier fields; omit it otherwise"`
 	}
 }
 
@@ -277,7 +277,7 @@ func (h handler) publishForm(ctx context.Context, in *publishFormInput) (*versio
 	}
 	var reason string
 	if in.Body != nil {
-		reason = in.Body.LintOverrideReason
+		reason = string(in.Body.LintOverrideReason)
 	}
 	v, err := h.svc.PublishForm(ctx, a, in.id(), reason)
 	if err != nil {

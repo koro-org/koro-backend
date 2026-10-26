@@ -65,14 +65,15 @@ type ResolveInput struct {
 // only that seller's lines and the DTO shows the buyer's title, never the
 // order totals or the payment.
 type OrderView struct {
-	Order          Order
-	Lines          []Line
-	Sellers        map[uuid.UUID]string // seller org → name
-	SellerView     bool
-	DirectPayments []DirectInstruction
-	// DirectStatus is set only where DirectPayments may be shown (getOrder,
-	// BE-109): an unpaid, unconfirmed model C order read by an MFA-verified
-	// buyer administrator. Empty for every other reader and order.
+	Order      Order
+	Lines      []Line
+	Sellers    map[uuid.UUID]string // seller org → name
+	SellerView bool
+	// DirectStatus is set only for a reader who may see the direct
+	// transfers (getOrder, BE-109): an unpaid, unconfirmed model C order
+	// read by an MFA-verified buyer administrator. Empty for every other
+	// reader and order. The transfers themselves are only in the payment
+	// instructions (BE-127).
 	DirectStatus DirectStatus
 }
 
@@ -83,11 +84,11 @@ type OrderView struct {
 type DirectStatus string
 
 const (
-	// DirectAvailable: DirectPayments lists every transfer of the order.
+	// DirectAvailable: the payment instructions list every transfer.
 	DirectAvailable DirectStatus = "available"
 	// DirectUnavailable: a payee of the order has no approved bank account
 	// now (revoked or never approved; parties.no_approved_account), or may
-	// not be paid directly (06 H-54). DirectPayments is empty: no payee
+	// not be paid directly (06 H-54). The instructions answer 409: no payee
 	// account is disclosed, not even the ones that are approved, so the
 	// buyer never pays a part of the direct amount on partial instructions.
 	DirectUnavailable DirectStatus = "unavailable"
@@ -129,6 +130,7 @@ type SalesItem struct {
 	OrderNo     string
 	BuyerTitle  string
 	OrderStatus Status
+	Currency    string
 }
 
 // SalesPage is a page of sold lines.

@@ -468,7 +468,7 @@ func (h handler) publishEvent(ctx context.Context, in *EventPath) (*eventOutput,
 type cancelEventInput struct {
 	EventPath
 	Body struct {
-		CancelReason string `json:"cancel_reason" minLength:"3" maxLength:"500" doc:"Shown to the attendees"`
+		CancelReason eventCancelReason `json:"cancel_reason" doc:"Shown to the attendees"`
 	}
 }
 
@@ -477,7 +477,7 @@ func (h handler) cancelEvent(ctx context.Context, in *cancelEventInput) (*eventO
 	if err != nil {
 		return nil, err
 	}
-	v, err := h.svc.CancelEvent(ctx, a, in.id(), in.Body.CancelReason)
+	v, err := h.svc.CancelEvent(ctx, a, in.id(), string(in.Body.CancelReason))
 	if err != nil {
 		return nil, err
 	}

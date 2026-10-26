@@ -118,10 +118,21 @@ func (s *service) GetOrgBySlug(ctx context.Context, a authz.Actor, slug string) 
 // readable authorises the public profile read (03 §3.6: pending_review
 // and closed orgs only for members and staff) and builds the view.
 func (s *service) readable(ctx context.Context, a authz.Actor, o Org) (OrgView, error) {
-	if err := authz.Can(ctx, a, authz.OrgsOrgRead, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
+	r := authz.OrgResource(o.ID, string(o.Kind), string(o.Status))
+	if err := authz.Can(ctx, a, authz.OrgsOrgRead, r); err != nil {
 		return OrgView{}, err
 	}
-	return s.view(ctx, o)
+	v, err := s.view(ctx, o)
+	if err != nil {
+		return OrgView{}, err
+	}
+	// A company's editors also read its e-mail domain (the updateOrg form,
+	// BE-127). Only a member or a platform admin is asked, so a public read
+	// never takes the deny path.
+	if o.Kind == KindCompany && (a.MemberOf(o.ID) || a.HasPlatformRole(authz.PlatformAdmin)) {
+		v.Manage = authz.Can(ctx, a, authz.OrgsOrgUpdate, r) == nil
+	}
+	return v, nil
 }
 
 // view loads the company profile and the logo URLs of o.

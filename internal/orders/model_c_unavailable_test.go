@@ -2,6 +2,7 @@ package orders_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 	"uuid"
 
@@ -43,23 +44,23 @@ func (e *env) directOrder(t *testing.T) (orders.Order, uuid.UUID) {
 	return e.place(t, line(aOff, 2), line(bOff, 1))[0].Order, b
 }
 
-// TestGetOrder_ModelC_PayeeAccountRevoked (BE-109): a payee's approved
-// account is revoked while a model C order waits for payment. getOrder
-// still answers the whole order to the buyer administrator, with
-// direct_payments_status unavailable and no payee account at all (not even
-// payee A's approved one) and no access audit; the payment instructions
-// keep their 409. A newly approved account shows again (and is audited).
+// TestGetOrder_ModelC_PayeeAccountRevoked (BE-109, BE-127): a payee's
+// approved account is revoked while a model C order waits for payment.
+// getOrder still answers the whole order to the buyer administrator, with
+// direct_payments_status unavailable; it never carries a payee account and
+// never audits an access; the payment instructions keep their 409. A newly
+// approved account shows again in the instructions (and is audited).
 func TestGetOrder_ModelC_PayeeAccountRevoked(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	o, b := e.directOrder(t)
 	buyer := actor(t, "company_admin")
 	v, err := e.svc.GetOrder(ctxOf(t, buyer), buyer, o.ID)
-	if err != nil || v.DirectStatus != orders.DirectAvailable || len(v.DirectPayments) != 2 {
-		t.Fatalf("approved accounts: status=%q direct=%d err=%v", v.DirectStatus, len(v.DirectPayments), err)
+	if err != nil || v.DirectStatus != orders.DirectAvailable {
+		t.Fatalf("approved accounts: status=%q err=%v", v.DirectStatus, err)
 	}
-	if n := len(e.audit.Of(authz.OrdersOrderPaymentInstructions)); n != 1 {
-		t.Fatalf("access audit=%d, want 1", n)
+	if n := len(e.audit.Of(authz.OrdersOrderPaymentInstructions)); n != 0 {
+		t.Fatalf("getOrder audited an account access: %d", n)
 	}
 
 	delete(e.payees.accounts, b) // revoked (or superseded and never re-approved)
@@ -67,13 +68,13 @@ func TestGetOrder_ModelC_PayeeAccountRevoked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetOrder without B's account: %v", err)
 	}
-	if v.DirectStatus != orders.DirectUnavailable || len(v.DirectPayments) != 0 {
-		t.Fatalf("revoked: status=%q direct=%+v", v.DirectStatus, v.DirectPayments)
+	if v.DirectStatus != orders.DirectUnavailable {
+		t.Fatalf("revoked: status=%q", v.DirectStatus)
 	}
 	if v.Order.ID != o.ID || v.Order.DirectToPayeeAmount != 3_600_000 || len(v.Lines) != 2 || v.SellerView {
 		t.Fatalf("the rest of the order: %+v lines=%d", v.Order, len(v.Lines))
 	}
-	if n := len(e.audit.Of(authz.OrdersOrderPaymentInstructions)); n != 1 {
+	if n := len(e.audit.Of(authz.OrdersOrderPaymentInstructions)); n != 0 {
 		t.Fatalf("an unavailable read was audited as an account access: %d", n)
 	}
 	_, err = e.svc.PaymentInstructions(ctxOf(t, buyer), buyer, o.ID)
@@ -83,8 +84,8 @@ func TestGetOrder_ModelC_PayeeAccountRevoked(t *testing.T) {
 	for _, name := range []string{"company_member", "finance_admin", "platform_admin", "support"} {
 		a := actor(t, name)
 		v, err := e.svc.GetOrder(ctxOf(t, a), a, o.ID)
-		if err != nil || v.DirectStatus != "" || len(v.DirectPayments) != 0 {
-			t.Fatalf("%s: status=%q direct=%d err=%v", name, v.DirectStatus, len(v.DirectPayments), err)
+		if err != nil || v.DirectStatus != "" {
+			t.Fatalf("%s: status=%q err=%v", name, v.DirectStatus, err)
 		}
 	}
 	// A buyer member who also holds an admin role on an MFA-less session
@@ -101,16 +102,20 @@ func TestGetOrder_ModelC_PayeeAccountRevoked(t *testing.T) {
 	e.payees.accounts[b] = parties.BankAccount{ID: uuid.NewV7(), PayeeID: b, IBAN: payeeIBAN2,
 		HolderName: "Synthetic Foundation", Status: parties.AccountApproved}
 	v, err = e.svc.GetOrder(ctxOf(t, buyer), buyer, o.ID)
-	if err != nil || v.DirectStatus != orders.DirectAvailable || len(v.DirectPayments) != 2 {
-		t.Fatalf("re-approved: status=%q direct=%d err=%v", v.DirectStatus, len(v.DirectPayments), err)
+	if err != nil || v.DirectStatus != orders.DirectAvailable {
+		t.Fatalf("re-approved: status=%q err=%v", v.DirectStatus, err)
 	}
-	for _, p := range v.DirectPayments {
+	ins, err := e.svc.PaymentInstructions(ctxOf(t, buyer), buyer, o.ID)
+	if err != nil || len(ins.DirectPayments) != 2 {
+		t.Fatalf("re-approved instructions: direct=%d err=%v", len(ins.DirectPayments), err)
+	}
+	for _, p := range ins.DirectPayments {
 		if p.PayeeID == b && p.IBAN != payeeIBAN2 {
 			t.Fatalf("payee B shows %q, want its current approved account", p.IBAN)
 		}
 	}
-	if n := len(e.audit.Of(authz.OrdersOrderPaymentInstructions)); n != 2 {
-		t.Fatalf("access audit=%d, want 2", n)
+	if n := len(e.audit.Of(authz.OrdersOrderPaymentInstructions)); n != 1 {
+		t.Fatalf("access audit=%d, want 1 (the instructions only)", n)
 	}
 }
 
@@ -130,7 +135,7 @@ func TestGetOrder_ModelC_UnavailableStillCancellable(t *testing.T) {
 		t.Fatalf("CancelOrder: %v", err)
 	}
 	v, err := e.svc.GetOrder(ctxOf(t, buyer), buyer, o.ID)
-	if err != nil || v.Order.Status != orders.StatusCancelled || v.DirectStatus != "" || len(v.DirectPayments) != 0 {
+	if err != nil || v.Order.Status != orders.StatusCancelled || v.DirectStatus != "" {
 		t.Fatalf("cancelled: status=%s direct=%q err=%v", v.Order.Status, v.DirectStatus, err)
 	}
 }
@@ -149,8 +154,8 @@ func TestGetOrder_ModelC_NaturalPersonPayeeUnavailable(t *testing.T) {
 	e.payees.m[b] = py
 	buyer := actor(t, "company_admin")
 	v, err := e.svc.GetOrder(ctxOf(t, buyer), buyer, o.ID)
-	if err != nil || v.DirectStatus != orders.DirectUnavailable || len(v.DirectPayments) != 0 {
-		t.Fatalf("natural person payee: status=%q direct=%+v err=%v", v.DirectStatus, v.DirectPayments, err)
+	if err != nil || v.DirectStatus != orders.DirectUnavailable {
+		t.Fatalf("natural person payee: status=%q err=%v", v.DirectStatus, err)
 	}
 	if n := len(e.audit.Of(authz.OrdersOrderPaymentInstructions)); n != 0 {
 		t.Fatalf("access audit=%d, want 0", n)
@@ -183,8 +188,11 @@ func TestGetOrder_ModelC_DirectStatusHTTP(t *testing.T) {
 	app := newHTTP(t, e)
 	path := "/api/v1/orders/" + o.ID.String()
 	rec, body := call(t, app, "company_admin", http.MethodGet, path, nil, nil)
-	if rec.Code != http.StatusOK || body["direct_payments_status"] != "available" || len(body["direct_payments"].([]any)) != 2 {
+	if rec.Code != http.StatusOK || body["direct_payments_status"] != "available" {
 		t.Fatalf("available: %d %s", rec.Code, rec.Body)
+	}
+	if _, exists := body["direct_payments"]; exists || strings.Contains(rec.Body.String(), `"iban"`) {
+		t.Fatalf("getOrder discloses payee accounts (BE-127): %s", rec.Body)
 	}
 	delete(e.payees.accounts, b)
 	rec, body = call(t, app, "company_admin", http.MethodGet, path, nil, nil)

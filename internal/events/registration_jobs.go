@@ -163,7 +163,7 @@ func (s *service) handleSubmitted(ctx context.Context, env domainevent.Envelope)
 	if err != nil {
 		return err
 	}
-	link := notify.EventRegistrationLink(p.EventID, p.RegistrationID)
+	link := notify.EventRegistrationLink(p.OrgID, p.EventID, p.RegistrationID)
 	for _, m := range members {
 		ok, err := s.d.Orgs.HasRole(ctx, p.OrgID, m, managerRoles...)
 		if err != nil {

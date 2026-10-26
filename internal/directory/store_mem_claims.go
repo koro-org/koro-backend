@@ -140,12 +140,17 @@ func (s *MemStore) ClaimsOf(_ context.Context, userID uuid.UUID, after *uuid.UUI
 
 // ListClaims implements Store.
 func (s *MemStore) ListClaims(_ context.Context, f ClaimFilter, after *uuid.UUID, limit int) ([]ClubClaim, error) {
-	var keep map[uuid.UUID]bool // club org IDs of a rep's scope
-	if f.RepUniversityOrgs != nil {
+	var keep map[uuid.UUID]bool // club org IDs of a rep's scope or of one university
+	if f.RepUniversityOrgs != nil || f.UniversityOrg != nil {
 		s.mu.Lock()
 		keep = map[uuid.UUID]bool{}
 		for _, c := range s.clubs {
-			if u, ok := s.unis[c.UniversityID]; ok && !c.IsSensitive && slices.Contains(f.RepUniversityOrgs, u.OrgID) {
+			u, ok := s.unis[c.UniversityID]
+			switch {
+			case !ok:
+			case f.RepUniversityOrgs != nil && (c.IsSensitive || !slices.Contains(f.RepUniversityOrgs, u.OrgID)):
+			case f.UniversityOrg != nil && u.OrgID != *f.UniversityOrg:
+			default:
 				keep[c.OrgID] = true
 			}
 		}

@@ -113,6 +113,9 @@ type Targeting interface {
 	// DispatchOfPost returns a post's dispatch, if any (its counts as
 	// published estimates only: getPostStats).
 	DispatchOfPost(ctx context.Context, orgID, postID uuid.UUID) (outreach.DispatchView, bool, error)
+	// DispatchIDsOfPosts returns the dispatch ID of each of the org's posts
+	// that has one (the management view's dispatch_id, BE-127).
+	DispatchIDsOfPosts(ctx context.Context, orgID uuid.UUID, postIDs []uuid.UUID) (map[uuid.UUID]uuid.UUID, error)
 }
 
 // Entitlements is what feed needs from entitlements (L2; 01 §4.4): the

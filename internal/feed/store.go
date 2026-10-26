@@ -54,9 +54,9 @@ type Store interface {
 	// f may see (the org page), newest first by (published_at, id). Mutes
 	// and hidden posts are feed-only: they do not apply here.
 	ListOrgPosts(ctx context.Context, orgID uuid.UUID, f Reader, after *After, limit int) ([]Post, error)
-	// ListOrgManage returns up to limit posts of orgID in every status (or
-	// in statuses when non-empty), newest first by id.
-	ListOrgManage(ctx context.Context, orgID uuid.UUID, statuses []Status, after *uuid.UUID, limit int) ([]Post, error)
+	// ListOrgManage returns up to limit posts of orgID matching f, newest
+	// first by id.
+	ListOrgManage(ctx context.Context, orgID uuid.UUID, f ManageFilter, after *uuid.UUID, limit int) ([]Post, error)
 
 	// OrgSettings returns the feed settings of orgID; ok=false without a
 	// row (the org is new, 02 §12.1).
@@ -265,4 +265,12 @@ func newViewerState() ViewerState {
 type After struct {
 	At time.Time
 	ID uuid.UUID
+}
+
+// ManageFilter narrows ListOrgManage: every status (or Statuses when
+// non-empty) and every kind (or Kind when set; BE-127: a company's
+// published opportunity calls for createContactRequest).
+type ManageFilter struct {
+	Statuses []Status
+	Kind     Kind
 }

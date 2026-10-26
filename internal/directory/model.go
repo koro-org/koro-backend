@@ -359,4 +359,8 @@ type ClaimFilter struct {
 	// CreatedBefore keeps only the claims created at or before it (the
 	// reminder job, 06 H-58).
 	CreatedBefore *time.Time
+	// UniversityOrg, when not nil, keeps only the claims of the clubs of
+	// this university (by its org ID), sensitive ones included: platform
+	// staff narrowing the queue to one university (BE-127).
+	UniversityOrg *uuid.UUID
 }

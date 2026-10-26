@@ -194,3 +194,52 @@ func TestPostStats_DispatchCounts(t *testing.T) {
 		t.Fatalf("stats without a dispatch = %+v, %v", st.Dispatch, err)
 	}
 }
+
+// TestGetPostManage_DispatchIDAndScope (BE-127): the management view (one
+// post and the list) carries a targeted post's dispatch_id; a post without
+// a dispatch has none; another org's post is 404 under this org's path; a
+// reader who is not the org's writer is refused.
+func TestGetPostManage_DispatchIDAndScope(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := t.Context()
+	e.audience.add(30, uniKey)
+	e.grantPosts(t, "company_a", 2)
+	e.grantDispatches(t, "company_a", 1)
+	cm := persona(t, "company_member")
+	with, err := e.svc.CreateTargetedPost(ctx, cm, orgID("company_a"), withDispatch(uniTargeted("Staj"), outreach.ChannelPush))
+	if err != nil {
+		t.Fatal(err)
+	}
+	without, err := e.svc.CreateTargetedPost(ctx, cm, orgID("company_a"), uniTargeted("Burs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.svc.GetOrgPost(ctx, cm, orgID("company_a"), with.Post.ID)
+	if err != nil || got.DispatchID == nil || *got.DispatchID != *with.DispatchID || got.ETag == "" || !got.Manage {
+		t.Fatalf("GetOrgPost = %+v, %v", got, err)
+	}
+	if d := feed.ToManageDTO(got); d.DispatchID != with.DispatchID.String() || d.Status != "draft" {
+		t.Fatalf("dto = %+v", d)
+	}
+	if got, err := e.svc.GetOrgPost(ctx, cm, orgID("company_a"), without.Post.ID); err != nil || got.DispatchID != nil {
+		t.Fatalf("post without a dispatch = %v, %v", got.DispatchID, err)
+	}
+	p, err := e.svc.ListOrgPosts(ctx, cm, orgID("company_a"), feed.ManageQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]string{}
+	for _, v := range p.Items {
+		ids[v.Post.ID.String()] = feed.ToManageDTO(v).DispatchID
+	}
+	if ids[with.Post.ID.String()] != with.DispatchID.String() || ids[without.Post.ID.String()] != "" {
+		t.Fatalf("list dispatch ids = %v", ids)
+	}
+	_, err = e.svc.GetOrgPost(ctx, persona(t, "club_admin"), orgID("club_a"), with.Post.ID)
+	problemtest.WantErr(t, err, feed.ErrNotFound)
+	_, err = e.svc.GetOrgPost(ctx, persona(t, "student"), orgID("company_a"), with.Post.ID)
+	if err == nil {
+		t.Fatal("a student read the management view")
+	}
+}

@@ -63,7 +63,7 @@ func (s *service) GetOrder(ctx context.Context, a authz.Actor, id uuid.UUID) (Or
 	if a.HasOrgRole(o.OrgID, authz.MemberRecruiter, authz.MemberCompanyAdmin, authz.MemberCompanyOwner) || staff(a) {
 		v, err := s.viewOf(ctx, o, lines, false)
 		if err == nil {
-			v.DirectPayments, v.DirectStatus, err = s.orderDirect(ctx, a, o, lines)
+			v.DirectStatus, err = s.orderDirect(ctx, a, o, lines)
 		}
 		return v, err
 	}
@@ -121,36 +121,59 @@ func directVisible(a authz.Actor, o Order) bool {
 		a.MFAVerified && a.HasOrgRole(o.OrgID, authz.MemberCompanyAdmin, authz.MemberCompanyOwner)
 }
 
-// orderDirect is the direct part of getOrder (BE-109). Unlike the payment
-// instructions, a payee that cannot be paid directly now (no approved bank
-// account: revoked or never approved; a natural person, 06 H-54) does not
-// hide the order: the buyer still reads it and may cancel it. The status
-// says the transfers are unavailable, and no account is disclosed — not
-// even an approved one of another payee, so the direct amount is never
-// paid in part. Nothing was opened, so nothing is audited. Any other
-// failure (a missing payee, a total that does not match) stays an error.
-func (s *service) orderDirect(ctx context.Context, a authz.Actor, o Order, lines []Line) ([]DirectInstruction, DirectStatus, error) {
+// orderDirect is the direct status of getOrder (BE-109). getOrder never
+// carries a payee's bank account (BE-127, data minimisation: the order
+// page needs no IBAN, and every account disclosure is an audited access);
+// getOrderPaymentInstructions does. A payee that cannot be paid directly
+// now (no approved bank account: revoked or never approved; a natural
+// person, 06 H-54) does not hide the order: the buyer still reads it and
+// may cancel it, the status says the transfers are unavailable. Nothing is
+// disclosed, so nothing is audited. Any other failure (a missing payee, a
+// total that does not match) stays an error.
+func (s *service) orderDirect(ctx context.Context, a authz.Actor, o Order, lines []Line) (DirectStatus, error) {
 	if !directVisible(a, o) {
-		return nil, "", nil
+		return "", nil
 	}
-	out, err := s.directInstructions(ctx, a, o, lines)
+	_, err := s.directPlan(ctx, o, lines)
 	switch {
 	case errors.Is(err, parties.ErrNoApprovedAccount) || errors.Is(err, errNaturalPersonPayee):
-		return nil, DirectUnavailable, nil
+		return DirectUnavailable, nil
 	case err != nil:
-		return nil, "", err
+		return "", err
 	}
-	return out, DirectAvailable, nil
+	return DirectAvailable, nil
 }
 
-// directInstructions groups the frozen direct amount by payee (nothing
-// unless directVisible). Every payee needs its current approved account
-// (409 parties.no_approved_account otherwise): the instructions are all or
-// nothing. The audit contains identifiers and amounts, never the IBAN.
+// directInstructions is the direct part of the payment instructions
+// (nothing unless directVisible): the plan, and the audit of the account
+// access with identifiers and amounts, never the IBAN.
 func (s *service) directInstructions(ctx context.Context, a authz.Actor, o Order, lines []Line) ([]DirectInstruction, error) {
 	if !directVisible(a, o) {
 		return nil, nil
 	}
+	out, err := s.directPlan(ctx, o, lines)
+	if err != nil {
+		return nil, err
+	}
+	if len(out) != 0 {
+		var total int64
+		for _, p := range out {
+			total += p.Amount
+		}
+		if err := s.d.Audit.Log(ctx, audit.Event{Action: string(authz.OrdersOrderPaymentInstructions), Outcome: audit.Success,
+			ResourceType: authz.TypeOrder, ResourceID: &o.ID,
+			Metadata: map[string]any{"via": "direct_payment_instructions", "payee_count": len(out), "direct_amount": total}}.By(a)); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// directPlan groups the frozen direct amount of o by payee with each
+// payee's current approved account (409 parties.no_approved_account
+// otherwise): the transfers are all or nothing. The caller decides what is
+// disclosed.
+func (s *service) directPlan(ctx context.Context, o Order, lines []Line) ([]DirectInstruction, error) {
 	amounts := make(map[uuid.UUID]int64)
 	var ids []uuid.UUID
 	for _, l := range lines {
@@ -194,13 +217,6 @@ func (s *service) directInstructions(ctx context.Context, a authz.Actor, o Order
 	}
 	if total != o.DirectToPayeeAmount {
 		return nil, errors.New("orders: direct payment instructions do not match the frozen total")
-	}
-	if len(out) != 0 {
-		if err := s.d.Audit.Log(ctx, audit.Event{Action: string(authz.OrdersOrderPaymentInstructions), Outcome: audit.Success,
-			ResourceType: authz.TypeOrder, ResourceID: &o.ID,
-			Metadata: map[string]any{"via": "direct_payment_instructions", "payee_count": len(out), "direct_amount": total}}.By(a)); err != nil {
-			return nil, err
-		}
 	}
 	return out, nil
 }
@@ -310,7 +326,8 @@ func (s *service) ListOrgSales(ctx context.Context, a authz.Actor, orgID uuid.UU
 	out := SalesPage{Items: make([]SalesItem, 0, len(rows))}
 	for _, l := range rows {
 		ord := orders[l.OrderID]
-		out.Items = append(out.Items, SalesItem{Line: l, OrderNo: ord.OrderNo, BuyerTitle: ord.BuyerSnapshot.Title, OrderStatus: ord.Status})
+		out.Items = append(out.Items, SalesItem{Line: l, OrderNo: ord.OrderNo, BuyerTitle: ord.BuyerSnapshot.Title, OrderStatus: ord.Status,
+			Currency: ord.Currency})
 	}
 	if more {
 		last := rows[len(rows)-1]

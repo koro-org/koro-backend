@@ -25,11 +25,19 @@ var (
 	installedBase string
 )
 
+// init sets the globals that do not depend on the configuration before any
+// code of the process runs: huma reads DefaultArrayNullable whenever it
+// derives a schema (huma.SchemaFromType in schema tests, BE-127) without
+// going through installOnce, so setting it there raced with a concurrent
+// reader (go test -race).
+func init() {
+	gin.SetMode(gin.ReleaseMode)
+	huma.DefaultArrayNullable = false
+}
+
 func installProblemFactory(base string) error {
 	installOnce.Do(func() {
 		installedBase = base
-		gin.SetMode(gin.ReleaseMode)
-		huma.DefaultArrayNullable = false
 		// NewError has no request context (OpenAPI schema derivation, huma
 		// helpers); nothing is logged there.
 		huma.NewError = func(status int, msg string, errs ...error) huma.StatusError {

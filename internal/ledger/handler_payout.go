@@ -45,6 +45,14 @@ func registerPayouts(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.LedgerPayoutRead), Surface: op.SurfaceOrg}, h.getOrg)
 
 	op.Register(api, "ledger", huma.Operation{
+		OperationID: "downloadOrgPayoutReceipt", Method: http.MethodGet, Path: "/orgs/{org_id}/payouts/{payout_id}/receipt",
+		Summary: "Get a download URL of a payout's bank receipt",
+		Description: "For the same people as getOrgPayout: a URL of the bank receipt (dekont) valid for 5 minutes. " +
+			"Only a paid payout has one (409 ledger.invalid_state); 409 files.not_clean until the virus scan clears " +
+			"the file. A payout of another organization is 404. Every download is audited.",
+	}, op.Meta{Action: string(authz.LedgerPayoutRead), Surface: op.SurfaceOrg}, h.orgReceipt)
+
+	op.Register(api, "ledger", huma.Operation{
 		OperationID: "adminListPayables", Method: http.MethodGet, Path: "/admin/payables",
 		Summary: "List the order lines a payout may take",
 		Description: "Per payee (the one asked for, or every payee the ledger owes money to): the paid, fulfilled lines " +
@@ -142,8 +150,8 @@ type PayoutDTO struct {
 	CancelledAt         *time.Time      `json:"cancelled_at,omitempty"`
 	CancelReason        string          `json:"cancel_reason,omitempty"`
 	Items               []PayoutItemDTO `json:"items,omitempty" doc:"The order lines paid (getOrgPayout; none once failed or cancelled)"`
-	ReceiptURL          string          `json:"receipt_url,omitempty" doc:"Paid payouts: a download URL of the bank receipt"`
-	ReceiptURLExpiresAt *time.Time      `json:"receipt_url_expires_at,omitempty"`
+	ReceiptURL          string          `json:"receipt_url,omitempty" deprecated:"true" doc:"Paid payouts: a download URL of the bank receipt. Deprecated (BE-127): use downloadOrgPayoutReceipt, which audits each download; this field will be removed"`
+	ReceiptURLExpiresAt *time.Time      `json:"receipt_url_expires_at,omitempty" deprecated:"true"`
 }
 
 // PayoutAdminDTO is a payout as finance sees it (04 §C.5).
@@ -328,6 +336,27 @@ func (h handler) getOrg(ctx context.Context, in *orgPayoutInput) (*payoutOutput,
 		return nil, err
 	}
 	return &payoutOutput{Body: payoutDTO(v)}, nil
+}
+
+// PayoutReceiptDTO is the body of downloadOrgPayoutReceipt (04 §1.14
+// signed URL).
+type PayoutReceiptDTO struct {
+	URL       string    `json:"url" doc:"Valid for at most 5 minutes"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+type payoutReceiptOutput struct{ Body PayoutReceiptDTO }
+
+func (h handler) orgReceipt(ctx context.Context, in *orgPayoutInput) (*payoutReceiptOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	d, err := h.svc.OrgPayoutReceipt(ctx, a, httpx.ParseID(in.OrgID), httpx.ParseID(in.PayoutID))
+	if err != nil {
+		return nil, err
+	}
+	return &payoutReceiptOutput{Body: PayoutReceiptDTO{URL: d.URL, ExpiresAt: d.ExpiresAt.UTC()}}, nil
 }
 
 // PayoutPath is the path of the /admin/payouts/{payout_id} operations.

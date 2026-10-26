@@ -119,6 +119,10 @@ type Targeting interface {
 	// as published estimates only (getPostStats' dispatch; 06 H-61). The
 	// caller has authorised its own read of the post.
 	DispatchOfPost(ctx context.Context, orgID, postID uuid.UUID) (DispatchView, bool, error)
+	// DispatchIDsOfPosts returns the dispatch ID of each of the org's posts
+	// that has one (the management list's dispatch_id, BE-127). The caller
+	// has authorised its read of the org's posts.
+	DispatchIDsOfPosts(ctx context.Context, orgID uuid.UUID, postIDs []uuid.UUID) (map[uuid.UUID]uuid.UUID, error)
 }
 
 // Service is the outreach service: the cross-module contract plus the

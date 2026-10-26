@@ -60,7 +60,7 @@ func TestModelC_DirectInstructionsMultiplePayees(t *testing.T) {
 	mixed := actor(t, "company_member")
 	mixed.MFAVerified = false
 	mixed.Memberships = append(append([]authz.Membership{}, mixed.Memberships...), authz.Membership{OrgID: o.OrgID, OrgKind: authz.OrgCompany, Role: authz.MemberCompanyAdmin})
-	if v, err := e.svc.GetOrder(ctxOf(t, mixed), mixed, o.ID); err != nil || len(v.DirectPayments) != 0 {
+	if v, err := e.svc.GetOrder(ctxOf(t, mixed), mixed, o.ID); err != nil || v.DirectStatus != "" {
 		t.Fatalf("mixed MFA bypass=%+v,%v", v, err)
 	}
 	delete(e.payees.accounts, b)

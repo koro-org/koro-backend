@@ -333,12 +333,12 @@ func pagePublished(ps []Post, after *After, limit int) []Post {
 }
 
 // ListOrgManage implements Store.
-func (s *MemStore) ListOrgManage(_ context.Context, orgID uuid.UUID, statuses []Status, after *uuid.UUID, limit int) ([]Post, error) {
+func (s *MemStore) ListOrgManage(_ context.Context, orgID uuid.UUID, f ManageFilter, after *uuid.UUID, limit int) ([]Post, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := []Post{}
 	for _, p := range s.posts {
-		if p.OrgID != orgID || len(statuses) > 0 && !slices.Contains(statuses, p.Status) {
+		if p.OrgID != orgID || len(f.Statuses) > 0 && !slices.Contains(f.Statuses, p.Status) || f.Kind != "" && p.Kind != f.Kind {
 			continue
 		}
 		if after != nil && p.ID.Compare(*after) >= 0 {

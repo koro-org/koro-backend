@@ -118,6 +118,22 @@ func (m *MemStore) DispatchOfPost(_ context.Context, orgID, postID uuid.UUID, _ 
 	return Dispatch{}, ErrNotFound
 }
 
+// DispatchIDsOfPosts implements Store.
+func (m *MemStore) DispatchIDsOfPosts(_ context.Context, orgID uuid.UUID, postIDs []uuid.UUID) (map[uuid.UUID]uuid.UUID, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if orgID == uuid.Nil() {
+		return nil, db.ErrMissingOrgScope
+	}
+	out := map[uuid.UUID]uuid.UUID{}
+	for _, d := range m.dispatches {
+		if d.OrgID == orgID && slices.Contains(postIDs, d.PostID) {
+			out[d.PostID] = d.ID
+		}
+	}
+	return out, nil
+}
+
 // ListDispatches implements Store.
 func (m *MemStore) ListDispatches(_ context.Context, orgID uuid.UUID, after *uuid.UUID, limit int) ([]Dispatch, error) {
 	m.mu.Lock()

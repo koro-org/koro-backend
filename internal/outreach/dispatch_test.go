@@ -20,6 +20,7 @@ import (
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/privacy"
+	"koro/internal/platform/problem"
 	"koro/internal/platform/problem/problemtest"
 )
 
@@ -971,5 +972,25 @@ func TestDispatchHTTP_CreateGetListCancel(t *testing.T) {
 	}
 	if rec, _ := call(t, app, "other_company_member", "GET", orgPath+"/"+id, nil, nil); rec.Code != 404 {
 		t.Fatalf("another org's member = %d", rec.Code)
+	}
+}
+
+// TestDispatchFailureReasons_InProblemCatalog (BE-127): every reason a
+// dispatch may end with is a code of problems.json, so a client translates
+// failure_reason from the contract.
+func TestDispatchFailureReasons_InProblemCatalog(t *testing.T) {
+	t.Parallel()
+	codes := map[string]bool{}
+	for _, e := range problem.Catalog("") {
+		codes[e.Code] = true
+	}
+	for _, r := range outreach.DispatchFailureReasons() {
+		if !codes[r] {
+			t.Errorf("failure reason %s is not in the problem catalog", r)
+		}
+	}
+	if !slices.Contains(outreach.DispatchFailureReasons(), "outreach.post_gone") ||
+		!slices.Contains(outreach.DispatchFailureReasons(), "outreach.post_not_published") {
+		t.Fatalf("reasons = %v", outreach.DispatchFailureReasons())
 	}
 }

@@ -152,6 +152,9 @@ type Service interface {
 	// ListOrgPosts is listOrgPostsManage (feed.post.list_org_manage): every
 	// post of the org, drafts included.
 	ListOrgPosts(ctx context.Context, a authz.Actor, orgID uuid.UUID, q ManageQuery) (PostPage, error)
+	// GetOrgPost is getPostManage (feed.post.list_org_manage): one post of
+	// the org in the management view (BE-127).
+	GetOrgPost(ctx context.Context, a authz.Actor, orgID, postID uuid.UUID) (PostView, error)
 	// CreatePost is createPost (feed.post.create): a public or followers
 	// draft.
 	CreatePost(ctx context.Context, a authz.Actor, orgID uuid.UUID, in PostInput) (PostView, error)

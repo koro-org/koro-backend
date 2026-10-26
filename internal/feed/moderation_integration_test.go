@@ -44,6 +44,9 @@ func (fixedTargeting) DiscardDispatch(context.Context, authz.Actor, uuid.UUID, u
 func (fixedTargeting) DispatchOfPost(context.Context, uuid.UUID, uuid.UUID) (outreach.DispatchView, bool, error) {
 	return outreach.DispatchView{}, false, nil
 }
+func (fixedTargeting) DispatchIDsOfPosts(context.Context, uuid.UUID, []uuid.UUID) (map[uuid.UUID]uuid.UUID, error) {
+	return map[uuid.UUID]uuid.UUID{}, nil
+}
 
 // failingAudit fails the audit record of one action (the last write of the
 // targeted post's transaction).

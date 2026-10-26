@@ -9,6 +9,10 @@ type CompanyPublicDTO struct {
 	SectorCode string `json:"sector_code,omitempty"`
 	SizeBand   string `json:"size_band,omitempty"`
 	HQCity     string `json:"hq_city,omitempty"`
+	// The edit form's fields (BE-127): only for a reader who may update
+	// the org (its company admins and owner, platform admins).
+	EmailDomain      string     `json:"email_domain,omitempty" doc:"Only for the company's editors (updateOrg)"`
+	DomainVerifiedAt *time.Time `json:"domain_verified_at,omitempty" doc:"Only for the company's editors"`
 }
 
 // OrgPublicDTO is the public profile of an org (04 §2.2 getOrg). club and
@@ -116,6 +120,9 @@ func toPublicDTO(v OrgView) OrgPublicDTO {
 	}
 	if c := v.Company; c != nil {
 		d.Company = &CompanyPublicDTO{SectorCode: str(c.SectorCode), SizeBand: str(c.SizeBand), HQCity: str(c.HQCity)}
+		if v.Manage {
+			d.Company.EmailDomain, d.Company.DomainVerifiedAt = str(c.EmailDomain), utc(c.DomainVerifiedAt)
+		}
 	}
 	return d
 }

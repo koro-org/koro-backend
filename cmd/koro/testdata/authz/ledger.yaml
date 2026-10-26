@@ -142,6 +142,44 @@ operations:
           platform_admin: 404
           finance_admin: 404
 
+  downloadOrgPayoutReceipt:
+    method: GET
+    path: /api/v1/orgs/{org_id}/payouts/{payout_id}/receipt
+    action: ledger.payout.read
+    config: { ledger_seed: true }
+    path_params: { org_id: club_a, payout_id: po_paid }
+    note: BE-127 — the paid payout's receipt URL, audited per download
+    expect:
+      anonymous: 401
+      "@outsiders_club_a": 404
+      club_member: 403
+      club_admin: 200
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: unpaid_payout
+        path_params: { org_id: club_a, payout_id: po_approved }
+        note: an approved payout has no receipt yet — 409 after authz
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403
+          club_admin: 409
+          "@other_staff": 403
+          platform_admin: 409
+          finance_admin: 409
+      - name: payout_of_other_org
+        path_params: { org_id: club_a, payout_id: po_uni }
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403
+          club_admin: 404
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404
+
   adminListPayables:
     method: GET
     path: /api/v1/admin/payables

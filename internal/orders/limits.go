@@ -40,3 +40,8 @@ func (OrderLineDTO) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schem
 	op.SetEnum(s, "fulfillment_status", Fulfillments())
 	return op.SetEnum(s, "fulfilled_via", FulfilledVias())
 }
+
+// TransformSchema implements huma.SchemaTransformer.
+func (OrderQuoteDTO) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
+	return op.SetEnum(s, "model_code", ModelCodes())
+}

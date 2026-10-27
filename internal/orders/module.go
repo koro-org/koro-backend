@@ -42,6 +42,14 @@
 //     and the problem names the line (errors[].location
 //     body.lines[i].offering_id). Delivery, refunds, invoices and payouts
 //     are per line.
+//   - The price preview (BE-136, quote.go): quoteOrder takes createOrder's
+//     body and runs createOrder's own checkout, pricing, split and totals
+//     (cart, orderOf) without writing anything: no stock is taken, no
+//     order, right, audit record, event or Idempotency-Key is stored. Its
+//     refusals are createOrder's (errors[].location body.lines[i].offering_id);
+//     the stock is only read (units left, the per-buyer limit), so a
+//     placement in between may still refuse the cart. Same cell as
+//     createOrder (cma S·k25), its own action orders.order.quote.
 //   - A cancelled offering in an unpaid cart (Q-28c, BE-134; drop.go): an
 //     order awaiting payment that took no money (nothing paid, no transfer
 //     matched even in part, no direct payment confirmed) drops only that
@@ -177,6 +185,10 @@ type Service interface {
 	// CreateOrder is createOrder (orders.order.create; Idempotency-Key):
 	// one order per model of the lines (T-12).
 	CreateOrder(ctx context.Context, a authz.Actor, orgID uuid.UUID, in CreateInput) ([]OrderView, error)
+	// QuoteOrder is quoteOrder (orders.order.quote, BE-136): the unsaved
+	// orders CreateOrder would place now for in, by the same code, with
+	// nothing written and the stock only read.
+	QuoteOrder(ctx context.Context, a authz.Actor, orgID uuid.UUID, in CreateInput) ([]OrderView, error)
 	// ListOrgOrders is listOrgOrders (orders.order.list).
 	ListOrgOrders(ctx context.Context, a authz.Actor, orgID uuid.UUID, q ListQuery) (OrderPage, error)
 	// GetOrder is getOrder (orders.order.read): the buyer's and staff's

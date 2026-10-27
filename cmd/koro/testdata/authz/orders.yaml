@@ -1,9 +1,9 @@
-# Authz matrix of the orders module (03 §5.15, 04 §2.15; BE-040, BE-093). 12 operations × 18 personas.
+# Authz matrix of the orders module (03 §5.15, 04 §2.15; BE-040, BE-093, BE-136). 13 operations × 18 personas.
 # /orgs/{org_id}/orders and /orgs/{org_id}/sales are the org's management surface (03 §3.6, §7.6): non-members 404,
 # members without the cell and every platform role 403. /orders/{order_id} and /order-lines/{line_id} are resource
 # surfaces: an order (a line) is visible to its buyer's members, to the members of a seller org of its lines and to
 # every platform role; anyone else gets 404 (03 k26). Cells: create cma S·k25 (company_admin; the recruiter has no
-# purchase); list cmm S, cma S; read the buyer's cmm, cma, the seller's club_admin (k26 view), sup, pad, fin;
+# purchase); quote (BE-136, the read-only price preview of createOrder's body) the cell of create; list cmm S, cma S; read the buyer's cmm, cma, the seller's club_admin (k26 view), sup, pad, fin;
 # payment instructions cmm, cma, fin; cancel cma, pad, fin; sales cla S, uni S, pad, fin; mark cla S, uni S·k-cs,
 # pad; read the delivery evidence (BE-093) the buyer's cma S, the seller's cla S, uni S·k-cs, pad, fin; confirm and
 # dispute cma S; resolve pad, fin (admin surface: 403 before reading); admin list sup, pad, fin.
@@ -60,6 +60,30 @@ operations:
         path_params: { org_id: company_b }
         body: bodies/orders/create_order_b.json
         note: IDOR — company_a's admin does not see company_b; company_b's admin is refused by k25 (party_buyer_b is not verified, 422 orders.buyer_party_required)
+        expect:
+          anonymous: 401
+          "@outsiders_company_b": 404
+          other_company_member: 422
+          "@staff": 403
+
+  quoteOrder:
+    method: POST
+    path: /api/v1/orgs/{org_id}/orders/quote
+    action: orders.order.quote
+    path_params: { org_id: company_a }
+    body: bodies/orders/create_order.json
+    note: BE-136 the price preview of createOrder's body (a read sent as POST, nothing written; the cell of create)
+    expect:
+      anonymous: 401
+      "@outsiders_company_a": 404
+      company_member: 403
+      company_admin: 200
+      "@staff": 403
+    variants:
+      - name: other_company
+        path_params: { org_id: company_b }
+        body: bodies/orders/create_order_b.json
+        note: IDOR — as createOrder; company_b's admin is refused by k25 (party_buyer_b is not verified)
         expect:
           anonymous: 401
           "@outsiders_company_b": 404

@@ -94,10 +94,14 @@ func TestCommerce_Cart_TwoPayeesMixedVAT_LineRefund_PayoutInvoices(t *testing.T)
 	booth := e.cartOffering("Synthetic booth", 2000, e.payee, "on_fulfillment")
 	workshop := e.cartOffering("Synthetic workshop", 1000, payee2, "on_payment")
 	native := e.offering(true)
-	out := e.post("/orgs/"+e.company+"/orders", e.buyer, map[string]any{"buyer_party_id": e.party, "lines": []any{
+	cart := map[string]any{"buyer_party_id": e.party, "lines": []any{
 		map[string]any{"offering_id": booth, "quantity": 2}, map[string]any{"offering_id": workshop, "quantity": 1},
 		map[string]any{"offering_id": native, "quantity": 1},
-	}}, http.StatusCreated)
+	}}
+	// BE-136: the cart's price preview writes nothing and is what createOrder places.
+	quote := e.quote(cart, booth, workshop, native)
+	out := e.post("/orgs/"+e.company+"/orders", e.buyer, cart, http.StatusCreated)
+	e.quoteMatches(quote, out)
 	if n := len(out["orders"].([]any)); n != 1 {
 		t.Fatalf("cart split into %d orders, want one (all model A)", n)
 	}

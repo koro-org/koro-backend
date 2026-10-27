@@ -36,22 +36,10 @@ const (
 // the payee, the stock, the server-side amounts, one order per model
 // (T-12), the pending rights of platform-native lines and order.placed (O).
 // The lines are the buyer's cart (Q-25, BE-131): every line is placed, or
-// none, and a refused line is named in the problem (atLine).
+// none, and a refused line is named in the problem (atLine). checkout,
+// cart and orderOf are QuoteOrder's too (BE-136).
 func (s *service) CreateOrder(ctx context.Context, a authz.Actor, orgID uuid.UUID, in CreateInput) ([]OrderView, error) {
-	org, err := s.org(ctx, orgID)
-	if err != nil {
-		return nil, err
-	}
-	if err := authz.Can(ctx, a, authz.OrdersOrderCreate, authz.OrgResource(org.ID, string(org.Kind), string(org.Status))); err != nil {
-		return nil, err
-	}
-	if err := buyerOrgUsable(org); err != nil {
-		return nil, err
-	}
-	if err := checkCreate(in); err != nil {
-		return nil, err
-	}
-	party, err := s.buyerParty(ctx, org.ID, in.BuyerPartyID)
+	org, party, err := s.checkout(ctx, a, authz.OrdersOrderCreate, orgID, in)
 	if err != nil {
 		return nil, err
 	}
@@ -79,6 +67,31 @@ func (s *service) CreateOrder(ctx context.Context, a authz.Actor, orgID uuid.UUI
 		out = append(out, v)
 	}
 	return out, nil
+}
+
+// checkout is what createOrder and quoteOrder (act) check before any
+// offering is read, in this order: the buying company (404), authz (cma
+// S), the company's state and the shape of the body, the billed party
+// (k25). quoteOrder refuses a cart exactly as createOrder does.
+func (s *service) checkout(ctx context.Context, a authz.Actor, act authz.Action, orgID uuid.UUID, in CreateInput) (orgs.OrgSummary, parties.LegalParty, error) {
+	org, err := s.org(ctx, orgID)
+	if err != nil {
+		return orgs.OrgSummary{}, parties.LegalParty{}, err
+	}
+	if err := authz.Can(ctx, a, act, authz.OrgResource(org.ID, string(org.Kind), string(org.Status))); err != nil {
+		return orgs.OrgSummary{}, parties.LegalParty{}, err
+	}
+	if err := buyerOrgUsable(org); err != nil {
+		return orgs.OrgSummary{}, parties.LegalParty{}, err
+	}
+	if err := checkCreate(in); err != nil {
+		return orgs.OrgSummary{}, parties.LegalParty{}, err
+	}
+	party, err := s.buyerParty(ctx, org.ID, in.BuyerPartyID)
+	if err != nil {
+		return orgs.OrgSummary{}, parties.LegalParty{}, err
+	}
+	return org, party, nil
 }
 
 // buyerOrgUsable is 03 §2.3 for the buying company: only an active company
@@ -178,9 +191,47 @@ type rightTemplate struct {
 }
 
 // place runs in the idempotent transaction: it returns the IDs of the
-// orders it wrote, in the order of their first line.
+// orders it wrote, in the order of their first line. The stock of every
+// line is reserved under each offering's row lock (the per-buyer limit
+// reads the buyer's committed lines through BuyerHeld); a refusal of any
+// line rolls the whole placement back: no line of the cart stays reserved
+// (BE-131).
 func (s *service) place(ctx context.Context, a authz.Actor, org orgs.OrgSummary, party parties.LegalParty, in []LineInput) ([]uuid.UUID, error) {
 	now := s.now()
+	drafts, err := s.cart(ctx, in, now, func(ctx context.Context, p pricedLine) error {
+		return s.d.Offerings.Reserve(ctx, p.offer.ID, p.in.Quantity, org.ID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	used := map[string]bool{}
+	ids := make([]uuid.UUID, 0, len(drafts))
+	for _, d := range drafts {
+		id, err := s.writeOrder(ctx, a, org, party, d, now, used)
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+// orderDraft is one order of a priced cart: the lines of one money model
+// and collection method (T-12), in request order, and their totals.
+type orderDraft struct {
+	model, method string
+	lines         []pricedLine
+	totals        orderTotals
+}
+
+// cart is the one code path of createOrder and quoteOrder (BE-136): every
+// line is checked out and priced in request order (priceRequestLine), then
+// stock takes or checks each line's units in offering ID order (lockOrder:
+// the order catalog locks offering rows in), then the lines are grouped
+// one order per model in the order of their first line and each order is
+// summed (totalsOf). A refused line is named in the problem (atLine). Only
+// stock differs between the two: createOrder reserves, quoteOrder reads.
+func (s *service) cart(ctx context.Context, in []LineInput, now time.Time, stock func(context.Context, pricedLine) error) ([]orderDraft, error) {
 	priced := make([]pricedLine, 0, len(in))
 	for i, li := range in {
 		p, err := s.priceRequestLine(ctx, i, li, now)
@@ -189,45 +240,40 @@ func (s *service) place(ctx context.Context, a authz.Actor, org orgs.OrgSummary,
 		}
 		priced = append(priced, p)
 	}
-	// The stock of every line, under each offering's row lock (the per-buyer
-	// limit reads the buyer's committed lines through BuyerHeld), in offering
-	// ID order (lockOrder). A refusal of any line rolls the whole placement
-	// back: no line of the cart stays reserved (BE-131).
 	for _, i := range lockOrder(len(priced), func(i int) uuid.UUID { return priced[i].offer.ID }) {
-		p := priced[i]
-		if err := s.d.Offerings.Reserve(ctx, p.offer.ID, p.in.Quantity, org.ID); err != nil {
+		if err := stock(ctx, priced[i]); err != nil {
 			return nil, atLine(i, err)
 		}
 	}
-	type group struct {
-		model, method string
-		lines         []pricedLine
-	}
-	var groups []*group
+	var drafts []*orderDraft
 	for _, p := range priced {
 		model, method := string(p.policy.ModelCode), string(p.policy.CollectionMethod)
-		var g *group
-		for _, x := range groups {
+		var d *orderDraft
+		for _, x := range drafts {
 			if x.model == model && x.method == method {
-				g = x
+				d = x
 			}
 		}
-		if g == nil {
-			g = &group{model: model, method: method}
-			groups = append(groups, g)
+		if d == nil {
+			d = &orderDraft{model: model, method: method}
+			drafts = append(drafts, d)
 		}
-		g.lines = append(g.lines, p)
+		d.lines = append(d.lines, p)
 	}
-	used := map[string]bool{}
-	ids := make([]uuid.UUID, 0, len(groups))
-	for _, g := range groups {
-		id, err := s.writeOrder(ctx, a, org, party, g.model, g.method, g.lines, now, used)
+	out := make([]orderDraft, len(drafts))
+	for i, d := range drafts {
+		amounts := make([]lineAmounts, len(d.lines))
+		for j, p := range d.lines {
+			amounts[j] = p.amount
+		}
+		t, err := totalsOf(d.model, amounts)
 		if err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
+		d.totals = t
+		out[i] = *d
 	}
-	return ids, nil
+	return out, nil
 }
 
 // priceRequestLine checks out one offering and prices its line.
@@ -314,35 +360,36 @@ func templateOf(co catalog.CheckoutOffering) (*rightTemplate, error) {
 	return &t, nil
 }
 
+// orderOf is the order of a draft with its lines, as placed at now by a
+// for org, billed to party: createOrder writes it (with a reference code),
+// quoteOrder shows its amounts.
+func (s *service) orderOf(a authz.Actor, org orgs.OrgSummary, party parties.LegalParty, d orderDraft, now time.Time) (Order, []Line) {
+	o := Order{
+		ID: uuid.NewV7(), OrgID: org.ID, OrgKind: orgKindBuyer, PlacedByUserID: a.UserID, BuyerPartyID: party.ID,
+		BuyerSnapshot: snapshotOf(party), ModelCode: d.model, CollectionMethod: d.method, Status: StatusAwaitingPayment,
+		Currency: currencyTRY, ExpiresAt: now.Add(s.d.Config.PaymentWindow), PlacedAt: now,
+	}.withTotals(d.totals)
+	lines := make([]Line, len(d.lines))
+	for i, p := range d.lines {
+		lines[i] = lineOf(o, p, now)
+	}
+	return o, lines
+}
+
 // writeOrder writes one order of one model with its lines, the pending
 // rights of its platform-native lines, its audit record and order.placed.
-func (s *service) writeOrder(ctx context.Context, a authz.Actor, org orgs.OrgSummary, party parties.LegalParty, model, method string,
-	priced []pricedLine, now time.Time, used map[string]bool) (uuid.UUID, error) {
-	amounts := make([]lineAmounts, len(priced))
-	for i, p := range priced {
-		amounts[i] = p.amount
-	}
-	t, err := totalsOf(model, amounts)
-	if err != nil {
-		return uuid.Nil(), err
-	}
+func (s *service) writeOrder(ctx context.Context, a authz.Actor, org orgs.OrgSummary, party parties.LegalParty, d orderDraft,
+	now time.Time, used map[string]bool) (uuid.UUID, error) {
 	no, err := s.newOrderNo(ctx, used)
 	if err != nil {
 		return uuid.Nil(), err
 	}
-	o := Order{
-		ID: uuid.NewV7(), OrderNo: no, OrgID: org.ID, OrgKind: orgKindBuyer, PlacedByUserID: a.UserID, BuyerPartyID: party.ID,
-		BuyerSnapshot: snapshotOf(party), ModelCode: model, CollectionMethod: method, Status: StatusAwaitingPayment,
-		Currency: currencyTRY, ExpiresAt: now.Add(s.d.Config.PaymentWindow), PlacedAt: now,
-	}.withTotals(t)
-	lines := make([]Line, len(priced))
-	for i, p := range priced {
-		lines[i] = lineOf(o, p, now)
-	}
+	o, lines := s.orderOf(a, org, party, d, now)
+	o.OrderNo = no
 	if err := s.d.Store.InsertOrder(ctx, o, lines); err != nil {
 		return uuid.Nil(), err
 	}
-	for i, p := range priced {
+	for i, p := range d.lines {
 		if p.grant == nil {
 			continue
 		}

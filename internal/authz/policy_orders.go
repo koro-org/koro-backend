@@ -22,6 +22,10 @@ const (
 //	orders.order.create              org (the buyer): cma S·k25 (a company org; the
 //	                                   active org and the verified buyer party of k25
 //	                                   are the service's: 422 orders.buyer_party_required)
+//	orders.order.quote               org (the buyer): the cell of create (BE-136: the
+//	                                   price preview of the same cart, written nowhere;
+//	                                   its own action so the preview's cell can change
+//	                                   without the purchase's, and its denials are told apart)
 //	orders.order.list                org (the buyer): cmm S, cma S
 //	orders.order.read                order: the buyer's cmm S, cma S; the sellers'
 //	                                   club_admin, university_rep and career_staff (k26:
@@ -58,7 +62,7 @@ func ordersPolicy() Policy {
 			switch r.Type {
 			case TypeOrg:
 				switch act {
-				case OrdersOrderCreate, OrdersOrderList, OrdersLineListSales:
+				case OrdersOrderCreate, OrdersOrderQuote, OrdersOrderList, OrdersLineListSales:
 					return OrgSurfaceVisible(a, r.OrgID)
 				}
 			case TypeAdminSurface:
@@ -116,7 +120,7 @@ func ordersOrgGrants(a Actor, act Action, r Resource, pad, fin Grant) []Grant {
 	}
 	company := r.Attr("org_kind") == string(OrgCompany)
 	switch act {
-	case OrdersOrderCreate:
+	case OrdersOrderCreate, OrdersOrderQuote:
 		add(company && a.HasOrgRole(org, MemberCompanyAdmin, MemberCompanyOwner), Grant{Role: RoleCompanyAdmin}) // k25
 	case OrdersOrderList:
 		add(company && a.HasOrgRole(org, MemberRecruiter), Grant{Role: RoleCompanyMember})

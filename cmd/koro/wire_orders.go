@@ -149,6 +149,6 @@ func (w *ordersWiring) tasks(c *container) {
 	}
 }
 
-// routes: the 12 orders operations (04 §2.15; getOrderLineEvidence BE-093); w.svc is nil under `koro
+// routes: the 13 orders operations (04 §2.15; getOrderLineEvidence BE-093, quoteOrder BE-136); w.svc is nil under `koro
 // openapi`, which Register tolerates.
 func (w *ordersWiring) routes(c *container, api huma.API) { orders.Register(api, w.svc) }

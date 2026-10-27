@@ -60,7 +60,8 @@ type ResolveInput struct {
 
 // ---- views
 
-// OrderView is one order with its lines for getOrder and createOrder.
+// OrderView is one order with its lines for getOrder and createOrder (and
+// the unsaved order of quoteOrder: throwaway IDs, no reference code).
 // SellerView is 03 k26: the caller acts for a seller org, so Lines holds
 // only that seller's lines and the DTO shows the buyer's title, never the
 // order totals or the payment.

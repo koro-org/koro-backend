@@ -35,8 +35,25 @@ func Register(api huma.API, svc Service) {
 			"problem's errors[].location names the line (body.lines[i].offering_id). An unpaid order expires after the " +
 			"payment window and releases its stock. When an offering of an unpaid order is cancelled before any money " +
 			"arrived, only its line leaves the order (lines[].dropped_at): the reference code stays, the amounts become " +
-			"the sums of the other lines and the buyer is told; the last line, or money already paid, cancels the order.",
+			"the sums of the other lines and the buyer is told; the last line, or money already paid, cancels the order. " +
+			"quoteOrder previews the same body without writing anything (BE-136).",
 	}, op.Meta{Action: string(authz.OrdersOrderCreate), Surface: op.SurfaceOrg, Idempotency: op.IdempotencyRequired}, h.create)
+
+	op.Register(api, "orders", huma.Operation{
+		OperationID: "quoteOrder", Method: http.MethodPost, Path: "/orgs/{org_id}/orders/quote",
+		Summary: "Preview the orders of a cart",
+		Description: "Read-only (BE-136): the orders createOrder would place now for the same body, computed by " +
+			"createOrder's own code — the same checks, the same per-line prices, VAT, withholding and buyer fee, the " +
+			"same split into one order per money model and the same totals (payable_amount, koro_collect_amount, " +
+			"direct_to_payee_amount) — and written nowhere: no stock is reserved, no order or reference code, and no " +
+			"Idempotency-Key (it writes nothing to replay). Each line carries what the cart shows of its offering " +
+			"(title, seller, deliverables, unit price excluding VAT, VAT rate), so the cart needs no getOffering per " +
+			"line. A refused cart is refused as createOrder refuses it: the same status and code, errors[].location " +
+			"naming the line (body.lines[i].offering_id). The stock is only read: another buyer may still take the " +
+			"last units, or a policy change the prices, before createOrder, whose answer is final. The buyer never " +
+			"sees the commission.",
+	}, op.Meta{Action: string(authz.OrdersOrderQuote), Surface: op.SurfaceOrg, RateLimit: op.RateSearch,
+		Idempotency: op.IdempotencyOptional}, h.quote)
 
 	op.Register(api, "orders", huma.Operation{
 		OperationID: "listOrgOrders", Method: http.MethodGet, Path: "/orgs/{org_id}/orders",
@@ -327,13 +344,34 @@ type OrderLineBody struct {
 	Quantity   int    `json:"quantity" minimum:"1" maximum:"1000"`
 }
 
+// CreateOrderInputBody is the cart: the body of createOrder and of its
+// preview quoteOrder (named so that both share the published schema).
+type CreateOrderInputBody struct {
+	BuyerPartyID string          `json:"buyer_party_id" format:"uuid" doc:"A verified buyer legal party of the company"`
+	Lines        []OrderLineBody `json:"lines" minItems:"1" maxItems:"20" doc:"One line per offering"`
+}
+
+// input is the service's CreateInput of the cart (UUIDs parsed).
+func (b CreateOrderInputBody) input() (CreateInput, error) {
+	party, err := uuid.Parse(b.BuyerPartyID)
+	if err != nil {
+		return CreateInput{}, problem.Field("body.buyer_party_id", "must be a UUID")
+	}
+	lines := make([]LineInput, len(b.Lines))
+	for i, l := range b.Lines {
+		id, err := uuid.Parse(l.OfferingID)
+		if err != nil {
+			return CreateInput{}, problem.Field("body.lines.offering_id", "must be a UUID")
+		}
+		lines[i] = LineInput{OfferingID: id, Quantity: l.Quantity}
+	}
+	return CreateInput{BuyerPartyID: party, Lines: lines}, nil
+}
+
 type createOrderInput struct {
 	idempotency.RequiredHeader
 	OrgPath
-	Body struct {
-		BuyerPartyID string          `json:"buyer_party_id" format:"uuid" doc:"A verified buyer legal party of the company"`
-		Lines        []OrderLineBody `json:"lines" minItems:"1" maxItems:"20" doc:"One line per offering"`
-	}
+	Body CreateOrderInputBody
 }
 
 type createOrderOutput struct {
@@ -347,19 +385,11 @@ func (h handler) create(ctx context.Context, in *createOrderInput) (*createOrder
 	if err != nil {
 		return nil, err
 	}
-	party, err := uuid.Parse(in.Body.BuyerPartyID)
+	ci, err := in.Body.input()
 	if err != nil {
-		return nil, problem.Field("body.buyer_party_id", "must be a UUID")
+		return nil, err
 	}
-	lines := make([]LineInput, len(in.Body.Lines))
-	for i, l := range in.Body.Lines {
-		id, err := uuid.Parse(l.OfferingID)
-		if err != nil {
-			return nil, problem.Field("body.lines.offering_id", "must be a UUID")
-		}
-		lines[i] = LineInput{OfferingID: id, Quantity: l.Quantity}
-	}
-	vs, err := h.svc.CreateOrder(ctx, a, httpx.ParseID(in.OrgID), CreateInput{BuyerPartyID: party, Lines: lines})
+	vs, err := h.svc.CreateOrder(ctx, a, httpx.ParseID(in.OrgID), ci)
 	if err != nil {
 		return nil, err
 	}
@@ -367,6 +397,99 @@ func (h handler) create(ctx context.Context, in *createOrderInput) (*createOrder
 	out.Body.Orders = make([]OrderDTO, len(vs))
 	for i, v := range vs {
 		out.Body.Orders[i] = orderDTO(v)
+	}
+	return out, nil
+}
+
+// ---- quoteOrder
+
+// OrderQuoteLineDTO is one line of OrderQuoteDTO: the line createOrder
+// would freeze, with the fields of OrderLineDTO that exist before
+// placement (no line ID, delivery or evidence). Never the commission.
+type OrderQuoteLineDTO struct {
+	OfferingID        string           `json:"offering_id" format:"uuid"`
+	EventID           string           `json:"event_id,omitempty" format:"uuid"`
+	TitleSnapshot     string           `json:"title_snapshot" doc:"The offering's title, as createOrder would freeze it on the line"`
+	Deliverables      []DeliverableDTO `json:"deliverables"`
+	Seller            SellerRefDTO     `json:"seller"`
+	Quantity          int              `json:"quantity"`
+	UnitPriceAmount   int64            `json:"unit_price_amount" doc:"Kuruş, excluding VAT"`
+	NetAmount         int64            `json:"net_amount"`
+	VATRateBP         int              `json:"vat_rate_bp" doc:"The rate the line is taxed at: 0 for an exempt or out-of-scope service"`
+	VATAmount         int64            `json:"vat_amount"`
+	VATWithheldAmount int64            `json:"vat_withheld_amount" doc:"The VAT the buyer withholds (tevkifat) and does not transfer"`
+	GrossAmount       int64            `json:"gross_amount"`
+	BuyerFeeAmount    int64            `json:"buyer_fee_amount" doc:"The commission and its VAT when the policy charges the buyer, else 0"`
+	PayableAmount     int64            `json:"payable_amount"`
+}
+
+// OrderQuoteDTO is one order createOrder would place now: its money model,
+// totals and lines, with the names and meanings of OrderDTO's buyer view.
+type OrderQuoteDTO struct {
+	ModelCode           string              `json:"model_code" doc:"C: the buyer pays each payee directly and Koro its fee (koro_collect_amount)"`
+	Currency            string              `json:"currency"`
+	SubtotalAmount      int64               `json:"subtotal_amount"`
+	VATAmount           int64               `json:"vat_amount"`
+	VATWithheldAmount   int64               `json:"vat_withheld_amount"`
+	BuyerFeeAmount      int64               `json:"buyer_fee_amount"`
+	TotalAmount         int64               `json:"total_amount"`
+	PayableAmount       int64               `json:"payable_amount"`
+	KoroCollectAmount   int64               `json:"koro_collect_amount" doc:"What one transfer to Koro's account would carry"`
+	DirectToPayeeAmount int64               `json:"direct_to_payee_amount" doc:"Model C: what the buyer would pay the payees directly"`
+	Lines               []OrderQuoteLineDTO `json:"lines" doc:"In request order"`
+}
+
+func quoteDTO(v OrderView) OrderQuoteDTO {
+	o := v.Order
+	out := OrderQuoteDTO{ModelCode: o.ModelCode, Currency: o.Currency, SubtotalAmount: o.SubtotalAmount, VATAmount: o.VATAmount,
+		VATWithheldAmount: o.VATWithheldAmount, BuyerFeeAmount: o.BuyerFeeAmount, TotalAmount: o.TotalAmount,
+		PayableAmount: o.PayableAmount, KoroCollectAmount: o.KoroCollectAmount, DirectToPayeeAmount: o.DirectToPayeeAmount,
+		Lines: make([]OrderQuoteLineDTO, len(v.Lines))}
+	for i, l := range v.Lines {
+		d := OrderQuoteLineDTO{
+			OfferingID: l.OfferingID.String(), EventID: httpx.IDStr(l.EventID), TitleSnapshot: l.TitleSnapshot,
+			Deliverables: make([]DeliverableDTO, len(l.DeliverablesSnapshot)),
+			Seller:       SellerRefDTO{OrgID: l.SellerOrgID.String(), Name: v.Sellers[l.SellerOrgID]},
+			Quantity:     l.Quantity, UnitPriceAmount: l.UnitPriceAmount, NetAmount: l.NetAmount, VATRateBP: l.VATRateBP,
+			VATAmount: l.VATAmount, VATWithheldAmount: l.VATWithheldAmount, GrossAmount: l.GrossAmount,
+			BuyerFeeAmount: l.BuyerFeeAmount, PayableAmount: l.PayableAmount,
+		}
+		for j, x := range l.DeliverablesSnapshot {
+			d.Deliverables[j] = DeliverableDTO(x)
+		}
+		out.Lines[i] = d
+	}
+	return out
+}
+
+type quoteOrderInput struct {
+	OrgPath
+	Body CreateOrderInputBody
+}
+
+type quoteOrderOutput struct {
+	Body struct {
+		Orders []OrderQuoteDTO `json:"orders" doc:"One order per money model of the lines (T-12), as createOrder would place them now"`
+	}
+}
+
+func (h handler) quote(ctx context.Context, in *quoteOrderInput) (*quoteOrderOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ci, err := in.Body.input()
+	if err != nil {
+		return nil, err
+	}
+	vs, err := h.svc.QuoteOrder(ctx, a, httpx.ParseID(in.OrgID), ci)
+	if err != nil {
+		return nil, err
+	}
+	out := &quoteOrderOutput{}
+	out.Body.Orders = make([]OrderQuoteDTO, len(vs))
+	for i, v := range vs {
+		out.Body.Orders[i] = quoteDTO(v)
 	}
 	return out, nil
 }

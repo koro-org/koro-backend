@@ -9668,6 +9668,127 @@ components:
       required:
         - items
       type: object
+    OrderQuoteDTO:
+      additionalProperties: false
+      properties:
+        buyer_fee_amount:
+          format: int64
+          type: integer
+        currency:
+          type: string
+        direct_to_payee_amount:
+          description: "Model C: what the buyer would pay the payees directly"
+          format: int64
+          type: integer
+        koro_collect_amount:
+          description: What one transfer to Koro's account would carry
+          format: int64
+          type: integer
+        lines:
+          description: In request order
+          items:
+            $ref: "#/components/schemas/OrderQuoteLineDTO"
+          type: array
+        model_code:
+          description: "C: the buyer pays each payee directly and Koro its fee (koro_collect_amount)"
+          enum:
+            - A
+            - A2
+            - B
+            - C
+          type: string
+        payable_amount:
+          format: int64
+          type: integer
+        subtotal_amount:
+          format: int64
+          type: integer
+        total_amount:
+          format: int64
+          type: integer
+        vat_amount:
+          format: int64
+          type: integer
+        vat_withheld_amount:
+          format: int64
+          type: integer
+      required:
+        - model_code
+        - currency
+        - subtotal_amount
+        - vat_amount
+        - vat_withheld_amount
+        - buyer_fee_amount
+        - total_amount
+        - payable_amount
+        - koro_collect_amount
+        - direct_to_payee_amount
+        - lines
+      type: object
+    OrderQuoteLineDTO:
+      additionalProperties: false
+      properties:
+        buyer_fee_amount:
+          description: The commission and its VAT when the policy charges the buyer, else 0
+          format: int64
+          type: integer
+        deliverables:
+          items:
+            $ref: "#/components/schemas/DeliverableDTO"
+          type: array
+        event_id:
+          format: uuid
+          type: string
+        gross_amount:
+          format: int64
+          type: integer
+        net_amount:
+          format: int64
+          type: integer
+        offering_id:
+          format: uuid
+          type: string
+        payable_amount:
+          format: int64
+          type: integer
+        quantity:
+          format: int64
+          type: integer
+        seller:
+          $ref: "#/components/schemas/SellerRefDTO"
+        title_snapshot:
+          description: The offering's title, as createOrder would freeze it on the line
+          type: string
+        unit_price_amount:
+          description: Kuruş, excluding VAT
+          format: int64
+          type: integer
+        vat_amount:
+          format: int64
+          type: integer
+        vat_rate_bp:
+          description: "The rate the line is taxed at: 0 for an exempt or out-of-scope service"
+          format: int64
+          type: integer
+        vat_withheld_amount:
+          description: The VAT the buyer withholds (tevkifat) and does not transfer
+          format: int64
+          type: integer
+      required:
+        - offering_id
+        - title_snapshot
+        - deliverables
+        - seller
+        - quantity
+        - unit_price_amount
+        - net_amount
+        - vat_rate_bp
+        - vat_amount
+        - vat_withheld_amount
+        - gross_amount
+        - buyer_fee_amount
+        - payable_amount
+      type: object
     OrderSummaryDTO:
       additionalProperties: false
       properties:
@@ -11306,6 +11427,17 @@ components:
             - suspended
             - erased
           type: string
+      type: object
+    QuoteOrderOutputBody:
+      additionalProperties: false
+      properties:
+        orders:
+          description: One order per money model of the lines (T-12), as createOrder would place them now
+          items:
+            $ref: "#/components/schemas/OrderQuoteDTO"
+          type: array
+      required:
+        - orders
       type: object
     ReasonInputBody:
       additionalProperties: false
@@ -32222,7 +32354,7 @@ paths:
       x-koro-rate-limit: read_default
       x-koro-surface: org
     post:
-      description: "A company admin buys offerings for the company, billed to a verified buyer party of the company (422 orders.buyer_party_required). The lines are the cart: 1-20 offerings of any sellers, one line each. Prices, VAT, withholding and commission are computed per line on the server from the offering and the commerce policy in effect (none: 409 catalog.no_commerce_policy); lines under different money models become separate orders, each with its own reference code, while the lines of several sellers under one model share one order and one transfer. The stock of every line is reserved in the same transaction: when one line is refused (sold out, not on sale, the per-buyer limit, no policy, an inactive payee) nothing is placed and the problem's errors[].location names the line (body.lines[i].offering_id). An unpaid order expires after the payment window and releases its stock. When an offering of an unpaid order is cancelled before any money arrived, only its line leaves the order (lines[].dropped_at): the reference code stays, the amounts become the sums of the other lines and the buyer is told; the last line, or money already paid, cancels the order."
+      description: "A company admin buys offerings for the company, billed to a verified buyer party of the company (422 orders.buyer_party_required). The lines are the cart: 1-20 offerings of any sellers, one line each. Prices, VAT, withholding and commission are computed per line on the server from the offering and the commerce policy in effect (none: 409 catalog.no_commerce_policy); lines under different money models become separate orders, each with its own reference code, while the lines of several sellers under one model share one order and one transfer. The stock of every line is reserved in the same transaction: when one line is refused (sold out, not on sale, the per-buyer limit, no policy, an inactive payee) nothing is placed and the problem's errors[].location names the line (body.lines[i].offering_id). An unpaid order expires after the payment window and releases its stock. When an offering of an unpaid order is cancelled before any money arrived, only its line leaves the order (lines[].dropped_at): the reference code stays, the amounts become the sums of the other lines and the buyer is told; the last line, or money already paid, cancels the order. quoteOrder previews the same body without writing anything (BE-136)."
       operationId: createOrder
       parameters:
         - description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
@@ -32272,6 +32404,48 @@ paths:
       x-koro-rate-limit: write_default
       x-koro-surface: org
       x-koro-terms-gate: enforced
+  /api/v1/orgs/{org_id}/orders/quote:
+    post:
+      description: "Read-only (BE-136): the orders createOrder would place now for the same body, computed by createOrder's own code — the same checks, the same per-line prices, VAT, withholding and buyer fee, the same split into one order per money model and the same totals (payable_amount, koro_collect_amount, direct_to_payee_amount) — and written nowhere: no stock is reserved, no order or reference code, and no Idempotency-Key (it writes nothing to replay). Each line carries what the cart shows of its offering (title, seller, deliverables, unit price excluding VAT, VAT rate), so the cart needs no getOffering per line. A refused cart is refused as createOrder refuses it: the same status and code, errors[].location naming the line (body.lines[i].offering_id). The stock is only read: another buyer may still take the last units, or a policy change the prices, before createOrder, whose answer is final. The buyer never sees the commission."
+      operationId: quoteOrder
+      parameters:
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrderInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuoteOrderOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Preview the orders of a cart
+      tags:
+        - orders
+      x-koro-action: orders.order.quote
+      x-koro-idempotency: optional
+      x-koro-rate-limit: search
+      x-koro-surface: org
+      x-koro-terms-gate: exempt
   /api/v1/orgs/{org_id}/orders/{order_id}/refund-requests:
     get:
       description: "The buying company's members: every line of the order with what a refund request may still ask of it (refundable_amount, kuruş: what Koro holds of the line — its buyer fee only in model C — less the refunds, the open refunds and, within the order, the other lines' waiting requests), the request deadline (the line's delivery + the refund request window; none while undelivered) and why a line cannot be asked (blocked_reason), and the order's requests, newest first. Another org's order is 404."

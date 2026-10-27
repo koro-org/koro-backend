@@ -126,6 +126,10 @@ var termsExemptOperations = map[string]string{
 	// BE-129: the staff's payee search (a legal party's title may name a
 	// sole proprietor); it has no GET twin, the read is its own.
 	"adminQueryPayees": "POST " + APIPrefix + "/admin/payees/search",
+	// BE-136: the price preview of a cart takes createOrder's body (the cart:
+	// up to 20 structured lines, no query string) and writes nothing — no
+	// stock, no order, no Idempotency-Key. Placing the order stays gated.
+	"quoteOrder": "POST " + APIPrefix + "/orgs/{org_id}/orders/quote",
 }
 
 // TermsExemptOperations returns a copy of the exemption table (the spec

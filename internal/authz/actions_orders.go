@@ -7,6 +7,7 @@ package authz
 // HTTP actions of the orders module (03 §5.15), in table order.
 const (
 	OrdersOrderCreate              Action = "orders.order.create"
+	OrdersOrderQuote               Action = "orders.order.quote"
 	OrdersOrderList                Action = "orders.order.list"
 	OrdersOrderRead                Action = "orders.order.read"
 	OrdersOrderPaymentInstructions Action = "orders.order.payment_instructions"
@@ -29,6 +30,7 @@ const (
 // ordersActions lists the HTTP actions of orders in 03 §5.15 order.
 var ordersActions = []Action{
 	OrdersOrderCreate,
+	OrdersOrderQuote,
 	OrdersOrderList,
 	OrdersOrderRead,
 	OrdersOrderPaymentInstructions,

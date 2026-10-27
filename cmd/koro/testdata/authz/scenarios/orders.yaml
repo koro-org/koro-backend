@@ -9,6 +9,7 @@ scenarios:
       admin need none.
     steps:
       - { persona: company_admin, mfa: false, operation: createOrder, expect: 403, code: authz.mfa_required }
+      - { persona: company_admin, mfa: false, operation: quoteOrder, expect: 403, code: authz.mfa_required }
       - { persona: company_admin, mfa: false, operation: listOrgOrders, expect: 403, code: authz.mfa_required }
       - { persona: support, mfa: false, operation: getOrder, expect: 403, code: authz.mfa_required }
       - { persona: finance_admin, mfa: false, operation: adminListOrders, expect: 403, code: authz.mfa_required }
@@ -24,6 +25,19 @@ scenarios:
       middleware.)
     steps:
       - { persona: company_admin, operation: createOrder, expect: 201 }
+      - { persona: company_owner_a, operation: createOrder, expect: 409, code: catalog.per_buyer_limit }
+  order_quote_takes_no_stock:
+    note: >-
+      BE-136: quoteOrder reserves nothing — off_a_active sells one unit per buyer, and after two quotes company_a
+      still places its order; once it holds the unit, the quote refuses the cart as createOrder does (409
+      catalog.per_buyer_limit), even for its owner. k25 refuses a quote billed to company_b's party.
+    steps:
+      - { persona: company_admin, operation: quoteOrder, expect: 200 }
+      - { persona: company_owner_a, operation: quoteOrder, expect: 200 }
+      - { persona: company_admin, operation: quoteOrder, body: bodies/orders/create_order_b.json, expect: 422,
+          code: orders.buyer_party_required }
+      - { persona: company_admin, operation: createOrder, expect: 201 }
+      - { persona: company_owner_a, operation: quoteOrder, expect: 409, code: catalog.per_buyer_limit }
       - { persona: company_owner_a, operation: createOrder, expect: 409, code: catalog.per_buyer_limit }
   order_k25_buyer_party:
     note: >-

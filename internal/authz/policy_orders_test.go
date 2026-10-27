@@ -72,6 +72,10 @@ func TestOrdersPolicy_Matrix(t *testing.T) {
 		{"create (k25)", authz.OrdersOrderCreate, orgOf("company_a", "company"), surface(companyA, map[string]error{"company_admin": nil})},
 		{"create for another company (IDOR)", authz.OrdersOrderCreate, orgOf("company_b", "company"),
 			surface([]string{"other_company_member"}, map[string]error{"other_company_member": nil})},
+		{"quote (BE-136: the cell of create)", authz.OrdersOrderQuote, orgOf("company_a", "company"),
+			surface(companyA, map[string]error{"company_admin": nil})},
+		{"quote for another company (IDOR)", authz.OrdersOrderQuote, orgOf("company_b", "company"),
+			surface([]string{"other_company_member"}, map[string]error{"other_company_member": nil})},
 		{"list a company's orders", authz.OrdersOrderList, orgOf("company_a", "company"),
 			surface(companyA, map[string]error{"company_member": nil, "company_admin": nil})},
 		{"read an order (k26: the seller's club_admin)", authz.OrdersOrderRead, order, surface(both, map[string]error{
@@ -146,6 +150,7 @@ func TestOrdersPolicy_EdgeCases(t *testing.T) {
 	cma := persona(t, "company_admin")
 	cma.MFAVerified = false
 	wantErr(t, authz.Can(ctx, cma, authz.OrdersOrderCreate, company), authz.ErrMFARequired, false)
+	wantErr(t, authz.Can(ctx, cma, authz.OrdersOrderQuote, company), authz.ErrMFARequired, false) // BE-136: k-mfa as create
 	cmm := persona(t, "company_member")
 	cmm.MFAVerified = false // recruiters need no MFA
 	wantErr(t, authz.Can(ctx, cmm, authz.OrdersOrderList, company), nil, false)
@@ -155,6 +160,10 @@ func TestOrdersPolicy_EdgeCases(t *testing.T) {
 	wantErr(t, authz.Can(ctx, persona(t, "company_owner_a"), authz.OrdersOrderCreate, company), nil, false)
 	// A company admin is no buyer on an org that is not a company.
 	wantErr(t, authz.Can(ctx, persona(t, "company_admin"), authz.OrdersOrderCreate, orgOf("company_a", "club")), authz.ErrForbidden, false)
+	wantErr(t, authz.Can(ctx, persona(t, "company_owner_a"), authz.OrdersOrderQuote, company), nil, false)
+	wantErr(t, authz.Can(ctx, persona(t, "company_admin"), authz.OrdersOrderQuote, orgOf("company_a", "club")), authz.ErrForbidden, false)
+	// A recruiter neither buys nor previews the price of a purchase (BE-136).
+	wantErr(t, authz.Can(ctx, cmm, authz.OrdersOrderQuote, company), authz.ErrForbidden, false)
 
 	// k26 (no k-cs): career_staff of a seller university reads the order; k-cs:
 	// it does not mark a line delivered.

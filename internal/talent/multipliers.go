@@ -43,7 +43,7 @@ func (s *service) BandMultipliers(ctx context.Context) (BandMultipliers, bool, e
 	var cfg ConfigVersion
 	err := s.inTx(ctx, func(ctx context.Context) error {
 		var err error
-		cfg, err = s.d.Store.CurrentConfig(ctx, s.now())
+		cfg, err = s.configs().CurrentConfig(ctx, s.now())
 		return err
 	})
 	switch {

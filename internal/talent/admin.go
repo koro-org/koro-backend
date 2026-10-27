@@ -208,7 +208,7 @@ func (s *service) Distribution(ctx context.Context, a authz.Actor, in Distributi
 		out.UniversityID, prefix = &id, "uni:"+id.String()
 	}
 	err = s.inTx(ctx, func(ctx context.Context) error {
-		counts, err := s.d.Store.BandCounts(ctx, prefix)
+		counts, err := s.scores().BandCounts(ctx, prefix)
 		if err != nil {
 			return err
 		}
@@ -224,7 +224,7 @@ func (s *service) Distribution(ctx context.Context, a authz.Actor, in Distributi
 		if out.UniversityID != nil {
 			meta["university_id"] = out.UniversityID.String()
 		}
-		return s.d.Store.AsApp(ctx, func(ctx context.Context) error {
+		return s.roles().AsApp(ctx, func(ctx context.Context) error {
 			return s.d.Audit.Log(ctx, audit.Event{Action: string(authz.TalentDistributionRead), Outcome: audit.Success,
 				ResourceType: resourceDistribution, Reason: reason, Metadata: meta}.By(a))
 		})
@@ -263,7 +263,7 @@ func (s *service) CreateNeutralization(ctx context.Context, a authz.Actor, userI
 	by := a.UserID
 	var out Neutralization
 	err = s.inTx(ctx, func(ctx context.Context) error {
-		row, inserted, err := s.d.Store.InsertNeutralization(ctx, Neutralization{ID: uuid.NewV7(), UserID: userID,
+		row, inserted, err := s.neutralizations().InsertNeutralization(ctx, Neutralization{ID: uuid.NewV7(), UserID: userID,
 			Reason: NeutralizeAdmin, Note: note, CreatedBy: &by})
 		switch {
 		case db.ConstraintName(err) == "neutralizations_user_id_fkey":
@@ -306,7 +306,7 @@ func (s *service) LiftNeutralization(ctx context.Context, a authz.Actor, id uuid
 	}
 	var out Neutralization
 	err = s.inTx(ctx, func(ctx context.Context) error {
-		n, err := s.d.Store.GetNeutralization(ctx, id)
+		n, err := s.neutralizations().GetNeutralization(ctx, id)
 		if err != nil {
 			return err
 		}
@@ -314,7 +314,7 @@ func (s *service) LiftNeutralization(ctx context.Context, a authz.Actor, id uuid
 			return err
 		}
 		by := a.UserID
-		row, lifted, err := s.d.Store.LiftNeutralization(ctx, id, &by, s.now())
+		row, lifted, err := s.neutralizations().LiftNeutralization(ctx, id, &by, s.now())
 		switch {
 		case err != nil:
 			return err
@@ -360,7 +360,7 @@ func (s *service) ReversePoint(ctx context.Context, a authz.Actor, pointID uuid.
 	}
 	var out PointEvent
 	err = s.inTx(ctx, func(ctx context.Context) error {
-		orig, err := s.d.Store.GetPoint(ctx, pointID)
+		orig, err := s.ledger().GetPoint(ctx, pointID)
 		if err != nil {
 			return err
 		}
@@ -368,7 +368,7 @@ func (s *service) ReversePoint(ctx context.Context, a authz.Actor, pointID uuid.
 			return ErrNotReversible
 		}
 		id, of := uuid.NewV7(), orig.ID
-		row, inserted, err := s.d.Store.InsertPoint(ctx, PointEvent{ID: id, UserID: orig.UserID, Signal: orig.Signal,
+		row, inserted, err := s.ledger().InsertPoint(ctx, PointEvent{ID: id, UserID: orig.UserID, Signal: orig.Signal,
 			SourceType: SourceReversal, SourceID: orig.ID, OccurredAt: orig.OccurredAt, RawPointsCP: -orig.RawPointsCP,
 			PointsCP: -orig.PointsCP, ReasonCode: ReasonAuditorReversal, ConfigVersionID: orig.ConfigVersionID,
 			ReversalOf: &of, SourceEventID: id})
@@ -380,7 +380,7 @@ func (s *service) ReversePoint(ctx context.Context, a authz.Actor, pointID uuid.
 		}
 		out = row
 		uid := orig.UserID
-		return s.d.Store.AsApp(ctx, func(ctx context.Context) error {
+		return s.roles().AsApp(ctx, func(ctx context.Context) error {
 			return s.d.Audit.Log(ctx, audit.Event{Action: string(authz.TalentReversalCreate), Outcome: audit.Success,
 				ResourceType: authz.TypeTalentSubject, ResourceID: &uid, Reason: reason,
 				Metadata: map[string]any{"point_event_id": orig.ID.String(), "reversal_id": row.ID.String(),
@@ -419,7 +419,7 @@ func (s *service) Config(ctx context.Context, a authz.Actor, reason string) (Con
 			id := out.Active.ID
 			res = &id
 		}
-		return s.d.Store.AsApp(ctx, func(ctx context.Context) error {
+		return s.roles().AsApp(ctx, func(ctx context.Context) error {
 			return s.d.Audit.Log(ctx, audit.Event{Action: string(authz.TalentConfigRead), Outcome: audit.Success,
 				ResourceType: resourceConfig, ResourceID: res, Reason: reason}.By(a))
 		})
@@ -434,13 +434,13 @@ func (s *service) Config(ctx context.Context, a authz.Actor, reason string) (Con
 // transaction of ctx.
 func (s *service) configView(ctx context.Context) (ConfigView, error) {
 	var out ConfigView
-	switch v, err := s.d.Store.CurrentConfig(ctx, s.now()); {
+	switch v, err := s.configs().CurrentConfig(ctx, s.now()); {
 	case err == nil:
 		out.Active = &v
 	case !errors.Is(err, ErrNotFound):
 		return ConfigView{}, err
 	}
-	defs, err := s.d.Store.SignalDefs(ctx)
+	defs, err := s.configs().SignalDefs(ctx)
 	if err != nil {
 		return ConfigView{}, err
 	}
@@ -477,7 +477,7 @@ func (s *service) CreateConfigVersion(ctx context.Context, a authz.Actor, in Con
 	}
 	var out ConfigView
 	err = s.inTx(ctx, func(ctx context.Context) error {
-		st := s.d.Store
+		st := s.configs()
 		for i, u := range in.Signals {
 			cur, err := st.SignalDef(ctx, u.Code)
 			switch {
@@ -511,7 +511,7 @@ func (s *service) CreateConfigVersion(ctx context.Context, a authz.Actor, in Con
 		}
 		out = ConfigView{Active: &v, Signals: defs}
 		vid := v.ID
-		return st.AsApp(ctx, func(ctx context.Context) error {
+		return s.roles().AsApp(ctx, func(ctx context.Context) error {
 			return s.d.Audit.Log(ctx, audit.Event{Action: string(authz.TalentConfigManage), Outcome: audit.Success,
 				ResourceType: resourceConfig, ResourceID: &vid, Reason: reason,
 				Metadata: map[string]any{"signals_changed": len(in.Signals), audit.MetaReauth: kind}}.By(a))

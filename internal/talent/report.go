@@ -150,21 +150,20 @@ func (s *service) report(ctx context.Context, by authz.Actor, userID uuid.UUID, 
 	r := Report{UserID: userID, CollectionEnabled: s.d.CollectionEnabled, RankingChoice: choice, GeneratedAt: s.now(),
 		signalCategory: map[string]string{}}
 	err = s.inTx(ctx, func(ctx context.Context) error {
-		st := s.d.Store
-		defs, err := st.SignalDefs(ctx)
+		defs, err := s.configs().SignalDefs(ctx)
 		if err != nil {
 			return err
 		}
 		for _, d := range defs {
 			r.signalCategory[d.Code] = d.Category
 		}
-		if r.Signals, err = st.Points(ctx, userID); err != nil {
+		if r.Signals, err = s.ledger().Points(ctx, userID); err != nil {
 			return err
 		}
-		if r.Neutralizations, err = st.Neutralizations(ctx, userID); err != nil {
+		if r.Neutralizations, err = s.neutralizations().Neutralizations(ctx, userID); err != nil {
 			return err
 		}
-		sc, found, err := st.Score(ctx, userID)
+		sc, found, err := s.scores().Score(ctx, userID)
 		if err != nil {
 			return err
 		}
@@ -177,7 +176,7 @@ func (s *service) report(ctx context.Context, by authz.Actor, userID uuid.UUID, 
 			}
 		}
 		r.Categories = categories(r.Signals, r.signalCategory)
-		return st.AsApp(ctx, func(ctx context.Context) error {
+		return s.roles().AsApp(ctx, func(ctx context.Context) error {
 			uid := userID
 			return s.d.Audit.Log(ctx, audit.Event{Action: string(authz.TalentReportRead), Outcome: audit.Success,
 				ResourceType: authz.TypeTalentSubject, ResourceID: &uid, Reason: cut(reason, maxReason)}.By(by))
@@ -221,7 +220,7 @@ func (s *service) Bands(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID
 	var out map[uuid.UUID]Band
 	err := s.inTx(ctx, func(ctx context.Context) error {
 		var err error
-		out, err = s.d.Store.Bands(ctx, userIDs)
+		out, err = s.scores().Bands(ctx, userIDs)
 		return err
 	})
 	if err != nil {

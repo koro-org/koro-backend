@@ -47,11 +47,11 @@ func (s *service) purgeScores(ctx context.Context) (scores, cohorts int, err err
 	// Fewer rows than users asked for: fewer users were left.
 	_, err = db.Batches(ctx, db.TxFunc(s.inTx), purgeBatch, func(ctx context.Context) (int, error) {
 		started := s.now()
-		ns, nc, err := s.d.Store.PurgeScores(ctx, purgeBatch)
+		ns, nc, err := s.scoring().PurgeScores(ctx, purgeBatch)
 		if err != nil || ns+nc == 0 {
 			return 0, err
 		}
-		if err := s.d.Store.AsApp(ctx, func(ctx context.Context) error {
+		if err := s.roles().AsApp(ctx, func(ctx context.Context) error {
 			return s.d.Destructions.Record(ctx, privacy.Destruction{PolicyCode: PolicyCollectionOff, RunID: runID,
 				Module: providerName, Method: privacy.MethodHardDelete, Count: ns + nc, PeriodCutoff: started,
 				StartedAt: started, FinishedAt: s.now(),

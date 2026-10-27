@@ -1,10 +1,9 @@
 package feed_test
 
 import (
-	"os"
-	"regexp"
-	"strings"
 	"testing"
+
+	"koro/internal/platform/db/dbtest"
 )
 
 // TestStore_ReachedThroughNarrowViews keeps the BE-143 split (05 §2.2): a
@@ -16,29 +15,5 @@ import (
 // whole Store.
 func TestStore_ReachedThroughNarrowViews(t *testing.T) {
 	t.Parallel()
-	allowed := map[string]bool{"store.go": true, "privacy.go": true}
-	whole := regexp.MustCompile(`\bd\.Store\.[A-Z]|=\s*[\w.]*\bd\.Store\s*$`)
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range entries {
-		name := e.Name()
-		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") || allowed[name] {
-			continue
-		}
-		src, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for i, line := range strings.Split(string(src), "\n") {
-			if strings.HasPrefix(strings.TrimSpace(line), "//") {
-				continue
-			}
-			if whole.MatchString(line) {
-				t.Errorf("%s:%d reaches the whole Store; use the view of its aggregate (store.go): %s",
-					name, i+1, strings.TrimSpace(line))
-			}
-		}
-	}
+	dbtest.CheckStoreViews(t, "store.go", "privacy.go")
 }

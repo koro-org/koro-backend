@@ -45,7 +45,7 @@ func (s *service) handleRankingChoice(ctx context.Context, e domainevent.Envelop
 		return s.neutralize(ctx, ApplyRankingChoiceTaskName, p.UserID, NeutralizeOptOut, nil)
 	}
 	return s.inTx(ctx, func(ctx context.Context) error {
-		ns, err := s.d.Store.Neutralizations(ctx, p.UserID)
+		ns, err := s.neutralizations().Neutralizations(ctx, p.UserID)
 		if err != nil {
 			return err
 		}
@@ -53,7 +53,7 @@ func (s *service) handleRankingChoice(ctx context.Context, e domainevent.Envelop
 			if n.Reason != NeutralizeOptOut || !n.Active() {
 				continue
 			}
-			row, lifted, err := s.d.Store.LiftNeutralization(ctx, n.ID, nil, s.now())
+			row, lifted, err := s.neutralizations().LiftNeutralization(ctx, n.ID, nil, s.now())
 			if err != nil {
 				return err
 			}
@@ -96,7 +96,7 @@ func (s *service) neutralize(ctx context.Context, job string, userID uuid.UUID, 
 		return queue.Permanent(err)
 	}
 	return s.inTx(ctx, func(ctx context.Context) error {
-		row, inserted, err := s.d.Store.InsertNeutralization(ctx, Neutralization{ID: uuid.NewV7(), UserID: userID, Reason: reason, DSRID: dsrID})
+		row, inserted, err := s.neutralizations().InsertNeutralization(ctx, Neutralization{ID: uuid.NewV7(), UserID: userID, Reason: reason, DSRID: dsrID})
 		if err != nil || !inserted {
 			return err
 		}
@@ -121,7 +121,7 @@ func (s *service) auditNeutralizationBy(ctx context.Context, a authz.Actor, n Ne
 	}
 	maps.Copy(meta, extra)
 	uid := n.UserID
-	return s.d.Store.AsApp(ctx, func(ctx context.Context) error {
+	return s.roles().AsApp(ctx, func(ctx context.Context) error {
 		return s.d.Audit.Log(ctx, audit.Event{Action: string(authz.TalentNeutralizationManage), Outcome: audit.Success,
 			ResourceType: authz.TypeTalentSubject, ResourceID: &uid, Reason: reason, Metadata: meta}.By(a))
 	})

@@ -56,8 +56,13 @@ const (
 	RetentionBatch = 1000
 )
 
-// sweeper is talent's privacy.RetentionSweeper.
-type sweeper struct{ s *service }
+// sweeper is talent's privacy.RetentionSweeper: it needs the purges of
+// the store and the talent transaction (the transaction manager and the
+// role switches) only.
+type sweeper struct {
+	retention retentionStore
+	tx        talentTx
+}
 
 var _ privacy.RetentionSweeper = sweeper{}
 
@@ -77,7 +82,7 @@ type purge struct {
 
 // Sweep implements privacy.RetentionSweeper.
 func (w sweeper) Sweep(ctx context.Context, p privacy.RetentionPolicy, now time.Time) (privacy.SweepResult, error) {
-	st := w.s.d.Store
+	st := w.retention
 	cutoff := now.Add(-p.Retention)
 	res := privacy.SweepResult{PolicyCode: p.Code, Method: privacy.MethodHardDelete}
 	var purges []purge
@@ -112,7 +117,7 @@ func (w sweeper) Sweep(ctx context.Context, p privacy.RetentionPolicy, now time.
 		return privacy.SweepResult{}, fmt.Errorf("talent: no retention sweep for policy %q", p.Code)
 	}
 	if !p.LegalApproved {
-		err := w.s.dryTx(ctx, func(ctx context.Context) error {
+		err := w.tx.dryTx(ctx, func(ctx context.Context) error {
 			for _, pg := range purges {
 				n, err := pg.run(ctx, RetentionBatch, true)
 				if err != nil {
@@ -129,7 +134,7 @@ func (w sweeper) Sweep(ctx context.Context, p privacy.RetentionPolicy, now time.
 		if pg.phased {
 			size = db.UntilEmpty
 		}
-		n, err := db.Batches(ctx, db.TxFunc(w.s.inTx), size, func(ctx context.Context) (int, error) {
+		n, err := db.Batches(ctx, w.tx, size, func(ctx context.Context) (int, error) {
 			return pg.run(ctx, RetentionBatch, false)
 		})
 		res.Count += n
@@ -146,17 +151,17 @@ func (w sweeper) Sweep(ctx context.Context, p privacy.RetentionPolicy, now time.
 // app_talent for fn and back to the session role afterwards (Store.Leave),
 // so the role never outlives the count. Outside a transaction (a direct
 // call) fn gets a talent transaction of its own.
-func (s *service) dryTx(ctx context.Context, fn func(ctx context.Context) error) error {
+func (t talentTx) dryTx(ctx context.Context, fn func(ctx context.Context) error) error {
 	if !db.InTx(ctx) {
-		return s.inTx(ctx, fn)
+		return t.WithTx(ctx, fn)
 	}
-	tctx, err := s.d.Store.Enter(ctx)
+	tctx, err := t.roles.Enter(ctx)
 	if err != nil {
 		return err
 	}
 	if err := fn(tctx); err != nil {
 		return err // the statement aborted the caller's transaction; its rollback ends the role
 	}
-	_, err = s.d.Store.Leave(tctx)
+	_, err = t.roles.Leave(tctx)
 	return err
 }

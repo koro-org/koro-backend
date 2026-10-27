@@ -402,17 +402,16 @@ func (s *service) studentOutcome(ctx context.Context, userID uuid.UUID) (string,
 // write appends the ledger row of c in the talent transaction of ctx and
 // returns its outcome.
 func (s *service) write(ctx context.Context, c credit) (string, error) {
-	st := s.d.Store
 	if stop, err := s.collectionStopped(ctx, c.key.UserID); err != nil || stop {
 		return OutcomeNeutralized, err
 	}
-	switch _, err := st.FindPoint(ctx, c.key); {
+	switch _, err := s.ledger().FindPoint(ctx, c.key); {
 	case err == nil:
 		return OutcomeDuplicate, nil
 	case !errors.Is(err, ErrNotFound):
 		return "", err
 	}
-	def, err := st.SignalDef(ctx, c.signal)
+	def, err := s.configs().SignalDef(ctx, c.signal)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return OutcomeSignalDisabled, nil
@@ -421,7 +420,7 @@ func (s *service) write(ctx context.Context, c credit) (string, error) {
 	case !def.Enabled:
 		return OutcomeSignalDisabled, nil
 	}
-	cfg, err := st.CurrentConfig(ctx, s.now())
+	cfg, err := s.configs().CurrentConfig(ctx, s.now())
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return OutcomeNoConfig, nil
@@ -449,11 +448,11 @@ func (s *service) write(ctx context.Context, c credit) (string, error) {
 	row := PointEvent{ID: uuid.NewV7(), UserID: c.key.UserID, Signal: c.signal, SourceType: c.key.SourceType, SourceID: c.key.SourceID,
 		OccurredAt: c.at, RawPointsCP: def.BasePointsCP, PointsCP: points, Capped: capReason != "", CapReason: capReason,
 		ReasonCode: c.signal, ConfigVersionID: cfg.ID, SourceEventID: c.eventID}
-	if _, inserted, err := st.InsertPoint(ctx, row); err != nil || !inserted {
+	if _, inserted, err := s.ledger().InsertPoint(ctx, row); err != nil || !inserted {
 		return OutcomeDuplicate, err
 	}
 	if counted && applied > 0 {
-		if err := st.AddCounter(ctx, c.key.UserID, c.day, c.signal, applied); err != nil {
+		if err := s.dailyCounters().AddCounter(ctx, c.key.UserID, c.day, c.signal, applied); err != nil {
 			return "", err
 		}
 	}
@@ -467,13 +466,12 @@ func (s *service) write(ctx context.Context, c credit) (string, error) {
 // comes from the definition), the binding cap and whether the daily
 // counter row was locked (and must be advanced).
 func (s *service) applyCaps(ctx context.Context, c credit, def SignalDef) (applied int, capReason string, counted bool, err error) {
-	st := s.d.Store
 	applied = abs(def.BasePointsCP)
 	switch {
 	case c.zero:
 		return 0, CapPerSource, false, nil
 	case c.maxActive > 0:
-		n, err := st.CountCredited(ctx, c.key.UserID, c.signal)
+		n, err := s.ledger().CountCredited(ctx, c.key.UserID, c.signal)
 		if err != nil {
 			return 0, "", false, err
 		}
@@ -484,7 +482,7 @@ func (s *service) applyCaps(ctx context.Context, c credit, def SignalDef) (appli
 	if applied == 0 || (def.DailyCapCP == nil && def.WeeklyCapCP == nil) {
 		return applied, "", false, nil
 	}
-	today, err := st.LockCounter(ctx, c.key.UserID, c.day, c.signal)
+	today, err := s.dailyCounters().LockCounter(ctx, c.key.UserID, c.day, c.signal)
 	if err != nil {
 		return 0, "", false, err
 	}
@@ -494,7 +492,7 @@ func (s *service) applyCaps(ctx context.Context, c credit, def SignalDef) (appli
 		}
 	}
 	if w := def.WeeklyCapCP; w != nil {
-		week, err := st.AppliedBetween(ctx, c.key.UserID, c.signal, c.day.AddDays(-6), c.day)
+		week, err := s.dailyCounters().AppliedBetween(ctx, c.key.UserID, c.signal, c.day.AddDays(-6), c.day)
 		if err != nil {
 			return 0, "", false, err
 		}
@@ -507,7 +505,7 @@ func (s *service) applyCaps(ctx context.Context, c credit, def SignalDef) (appli
 
 // collectionStopped reports an active opt-out or objection of the user.
 func (s *service) collectionStopped(ctx context.Context, userID uuid.UUID) (bool, error) {
-	ns, err := s.d.Store.Neutralizations(ctx, userID)
+	ns, err := s.neutralizations().Neutralizations(ctx, userID)
 	if err != nil {
 		return false, err
 	}
@@ -542,7 +540,7 @@ func (s *service) reverse(ctx context.Context, r reversal) error {
 		return queue.Permanent(err)
 	}
 	if !s.d.CollectionEnabled {
-		if err := s.inTx(ctx, func(ctx context.Context) error { return s.d.Store.StampReversalDropped(ctx, s.now()) }); err != nil {
+		if err := s.inTx(ctx, func(ctx context.Context) error { return s.reconciliation().StampReversalDropped(ctx, s.now()) }); err != nil {
 			return fmt.Errorf("talent: %s: count the dropped reversal: %w", r.task, err)
 		}
 		s.counts.inc(r.key.Signal, OutcomeFlagOff)
@@ -550,7 +548,7 @@ func (s *service) reverse(ctx context.Context, r reversal) error {
 	}
 	var outcome string
 	err := s.inTx(ctx, func(ctx context.Context) error {
-		orig, err := s.d.Store.FindPoint(ctx, r.key)
+		orig, err := s.ledger().FindPoint(ctx, r.key)
 		switch {
 		case errors.Is(err, ErrNotFound):
 			outcome = OutcomeNoOriginal
@@ -558,7 +556,7 @@ func (s *service) reverse(ctx context.Context, r reversal) error {
 		case err != nil:
 			return err
 		}
-		_, inserted, err := s.d.Store.InsertPoint(ctx, reversalOf(orig, r.reason, r.eventID))
+		_, inserted, err := s.ledger().InsertPoint(ctx, reversalOf(orig, r.reason, r.eventID))
 		outcome = OutcomeReversed
 		if !inserted {
 			outcome = OutcomeDuplicate

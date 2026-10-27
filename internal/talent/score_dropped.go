@@ -48,10 +48,10 @@ func (s *service) dropScores(ctx context.Context, runID uuid.UUID, cutoff time.T
 		var ns, nc int
 		err := s.inTx(ctx, func(ctx context.Context) error {
 			var err error
-			if ns, nc, err = s.d.Store.DeleteScores(ctx, batch); err != nil || ns+nc == 0 {
+			if ns, nc, err = s.scoring().DeleteScores(ctx, batch); err != nil || ns+nc == 0 {
 				return err
 			}
-			return s.d.Store.AsApp(ctx, func(ctx context.Context) error {
+			return s.roles().AsApp(ctx, func(ctx context.Context) error {
 				return s.d.Destructions.Record(ctx, privacy.Destruction{PolicyCode: PolicyScoreDropped, RunID: runID,
 					Module: providerName, Method: privacy.MethodHardDelete, Count: ns + nc, PeriodCutoff: cutoff,
 					StartedAt: started, FinishedAt: s.now(),

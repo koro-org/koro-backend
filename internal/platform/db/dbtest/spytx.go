@@ -1,5 +1,6 @@
 // Package dbtest holds db test doubles for service tests with in-memory
-// stores (05 §13.2). It is imported only by tests.
+// stores (05 §13.2) and the guard of a split Store (CheckStoreViews, 05
+// §2.2). It is imported only by tests.
 package dbtest
 
 import (

@@ -68,7 +68,7 @@ func (s *service) reconcile(ctx context.Context) (int, error) {
 	var st CollectionState
 	if err := s.inTx(ctx, func(ctx context.Context) error {
 		var err error
-		st, err = s.d.Store.CollectionState(ctx)
+		st, err = s.reconciliation().CollectionState(ctx)
 		return err
 	}); err != nil {
 		return 0, err
@@ -86,7 +86,7 @@ func (s *service) reconcile(ctx context.Context) (int, error) {
 		var rows []PointEvent
 		if err := s.inTx(ctx, func(ctx context.Context) error {
 			var err error
-			rows, err = s.d.Store.Unreversed(ctx, signals, after, reconcileBatch)
+			rows, err = s.reconciliation().Unreversed(ctx, signals, after, reconcileBatch)
 			return err
 		}); err != nil {
 			return written, err
@@ -109,7 +109,7 @@ func (s *service) reconcile(ctx context.Context) (int, error) {
 		}
 	}
 	if err := s.inTx(ctx, func(ctx context.Context) error {
-		return s.d.Store.FinishReconcile(ctx, st.ReversalsDropped, s.now())
+		return s.reconciliation().FinishReconcile(ctx, st.ReversalsDropped, s.now())
 	}); err != nil {
 		return written, err
 	}
@@ -180,7 +180,7 @@ func (s *service) writeReversals(ctx context.Context, rows []PointEvent, run uui
 	err := s.inTx(ctx, func(ctx context.Context) error {
 		outcomes = outcomes[:0]
 		for _, r := range rows {
-			_, inserted, err := s.d.Store.InsertPoint(ctx, reversalOf(r, reconciledSignals[r.Signal], run))
+			_, inserted, err := s.ledger().InsertPoint(ctx, reversalOf(r, reconciledSignals[r.Signal], run))
 			if err != nil {
 				return err
 			}

@@ -242,7 +242,8 @@ func New(d Deps) (Module, error) {
 		return Module{}, err
 	}
 	s := &service{d: d, counts: newCounters()}
-	return Module{Ranking: s, Auditor: s, Admin: s, Privacy: privacyProvider{s: s}, Sweeper: sweeper{s: s}, svc: s}, nil
+	w := sweeper{retention: d.Store, tx: s.talentTx()}
+	return Module{Ranking: s, Auditor: s, Admin: s, Privacy: privacyProvider{s: s}, Sweeper: w, svc: s}, nil
 }
 
 // CollectionEnabled reports talent.default_enabled.
@@ -265,14 +266,33 @@ var (
 // now is the service clock in the database's precision (microseconds).
 func (s *service) now() time.Time { return s.d.Clock.Now().UTC().Truncate(time.Microsecond) }
 
-// inTx runs fn in a talent transaction: a new transaction switched to
-// app_talent. It refuses to run inside another transaction (errForeignTx).
+// inTx runs fn in a talent transaction (talentTx).
 func (s *service) inTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	return s.talentTx().WithTx(ctx, fn)
+}
+
+// talentTx is the talent transaction of the service: its TxManager and
+// the role view of its store.
+func (s *service) talentTx() talentTx { return talentTx{tx: s.d.Tx, roles: s.roles()} }
+
+// talentTx opens talent transactions: it needs the transaction manager
+// and the role switches of the store only (the service and the retention
+// sweeper share it).
+type talentTx struct {
+	tx    db.TxManager
+	roles roleStore
+}
+
+var _ db.Transactor = talentTx{}
+
+// WithTx runs fn in a talent transaction: a new transaction switched to
+// app_talent. It refuses to run inside another transaction (errForeignTx).
+func (t talentTx) WithTx(ctx context.Context, fn func(ctx context.Context) error) error {
 	if db.InTx(ctx) {
 		return errForeignTx
 	}
-	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		ctx, err := s.d.Store.Enter(ctx)
+	return t.tx.WithTx(ctx, func(ctx context.Context) error {
+		ctx, err := t.roles.Enter(ctx)
 		if err != nil {
 			return err
 		}

@@ -70,7 +70,7 @@ func (s *service) recompute(ctx context.Context) error {
 	var cfg ConfigVersion
 	err := s.inTx(ctx, func(ctx context.Context) error {
 		var err error
-		cfg, err = s.d.Store.CurrentConfig(ctx, now)
+		cfg, err = s.configs().CurrentConfig(ctx, now)
 		return err
 	})
 	switch {
@@ -81,7 +81,7 @@ func (s *service) recompute(ctx context.Context) error {
 		return fmt.Errorf("%s: %w", RecomputeJobName, err)
 	}
 	run := ScoreRun{ID: uuid.NewV7(), ConfigVersionID: cfg.ID, StartedAt: now, Status: RunRunning}
-	if err := s.inTx(ctx, func(ctx context.Context) error { return s.d.Store.InsertRun(ctx, run) }); err != nil {
+	if err := s.inTx(ctx, func(ctx context.Context) error { return s.scoring().InsertRun(ctx, run) }); err != nil {
 		return fmt.Errorf("%s: %w", RecomputeJobName, err)
 	}
 	n, scoreErr := s.score(ctx, cfg, run.ID, now)
@@ -93,7 +93,7 @@ func (s *service) recompute(ctx context.Context) error {
 	// The outcome is recorded even when the job's context ended.
 	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
-	if err := s.inTx(fctx, func(ctx context.Context) error { return s.d.Store.FinishRun(ctx, run) }); err != nil {
+	if err := s.inTx(fctx, func(ctx context.Context) error { return s.scoring().FinishRun(ctx, run) }); err != nil {
 		return fmt.Errorf("%s: finish run: %w", RecomputeJobName, errors.Join(scoreErr, err))
 	}
 	if scoreErr != nil {
@@ -138,10 +138,10 @@ func (s *service) score(ctx context.Context, cfg ConfigVersion, runID uuid.UUID,
 	var users []uuid.UUID
 	err = s.inTx(ctx, func(ctx context.Context) error {
 		var err error
-		if users, err = s.d.Store.ScoringUsers(ctx, since); err != nil {
+		if users, err = s.scoring().ScoringUsers(ctx, since); err != nil {
 			return err
 		}
-		defs, err := s.d.Store.SignalDefs(ctx)
+		defs, err := s.configs().SignalDefs(ctx)
 		for _, d := range defs {
 			sc.defs[d.Code] = d
 		}
@@ -168,10 +168,10 @@ func (s *service) score(ctx context.Context, cfg ConfigVersion, runID uuid.UUID,
 		var neutral map[uuid.UUID]bool
 		err = s.inTx(ctx, func(ctx context.Context) error {
 			var err error
-			if rows, err = s.d.Store.PointsSince(ctx, batch, since); err != nil {
+			if rows, err = s.scoring().PointsSince(ctx, batch, since); err != nil {
 				return err
 			}
-			neutral, err = s.d.Store.ActiveNeutralized(ctx, batch)
+			neutral, err = s.scoring().ActiveNeutralized(ctx, batch)
 			return err
 		})
 		if err != nil {
@@ -206,7 +206,7 @@ func (s *service) score(ctx context.Context, cfg ConfigVersion, runID uuid.UUID,
 
 	scores := sc.rank(kept)
 	for batch := range slices.Chunk(scores, recomputeBatch) {
-		if err := s.inTx(ctx, func(ctx context.Context) error { return s.d.Store.PutScores(ctx, batch) }); err != nil {
+		if err := s.inTx(ctx, func(ctx context.Context) error { return s.scoring().PutScores(ctx, batch) }); err != nil {
 			return 0, err
 		}
 	}

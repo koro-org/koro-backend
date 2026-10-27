@@ -119,15 +119,35 @@ func (s *MemStore) AddHide(_ context.Context, userID, postID uuid.UUID) (bool, e
 	return s.add(s.hides, userID, postID)
 }
 
-// ListSaved implements Store.
-func (s *MemStore) ListSaved(_ context.Context, r Reader, after *After, limit int) ([]SavedPost, error) {
+// RemoveHide implements Store.
+func (s *MemStore) RemoveHide(_ context.Context, userID, postID uuid.UUID) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := []SavedPost{}
+	return remove(s.hides, userID, postID), nil
+}
+
+// ListSaved implements Store.
+func (s *MemStore) ListSaved(_ context.Context, r Reader, after *After, limit int) ([]MarkedPost, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.listMarked(s.saves, r, after, limit), nil
+}
+
+// ListHidden implements Store.
+func (s *MemStore) ListHidden(_ context.Context, r Reader, after *After, limit int) ([]MarkedPost, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.listMarked(s.hides, r, after, limit), nil
+}
+
+// listMarked is the GORM listMarked over m: the reader's published posts
+// they may see, newest row first by (created_at, post_id). s.mu is held.
+func (s *MemStore) listMarked(m map[[2]uuid.UUID]time.Time, r Reader, after *After, limit int) []MarkedPost {
+	out := []MarkedPost{}
 	if r.UserID == nil {
-		return out, nil
+		return out
 	}
-	for k, at := range s.saves {
+	for k, at := range m {
 		if k[0] != *r.UserID {
 			continue
 		}
@@ -138,15 +158,15 @@ func (s *MemStore) ListSaved(_ context.Context, r Reader, after *After, limit in
 		if after != nil && cmp.Or(at.Compare(after.At), p.ID.Compare(after.ID)) >= 0 {
 			continue
 		}
-		out = append(out, SavedPost{Post: p.clone(), SavedAt: at})
+		out = append(out, MarkedPost{Post: p.clone(), MarkedAt: at})
 	}
-	slices.SortFunc(out, func(a, b SavedPost) int {
-		return -cmp.Or(a.SavedAt.Compare(b.SavedAt), a.Post.ID.Compare(b.Post.ID))
+	slices.SortFunc(out, func(a, b MarkedPost) int {
+		return -cmp.Or(a.MarkedAt.Compare(b.MarkedAt), a.Post.ID.Compare(b.Post.ID))
 	})
 	if len(out) > limit {
 		out = out[:limit]
 	}
-	return out, nil
+	return out
 }
 
 // FollowManual implements Store.

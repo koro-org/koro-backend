@@ -37,7 +37,7 @@ func othersFeed(authztest.Persona) authz.Resource {
 	return authz.Resource{Type: authz.TypeFeed, OwnerUserID: &other}
 }
 
-// TestFeedPolicy_Matrix pins 03 §5.7 (BE-027's 9 and BE-029's 8 actions) for the 18
+// TestFeedPolicy_Matrix pins 03 §5.7 (BE-027's 9, BE-029's 8 and BE-145's 2 actions) for the 18
 // personas; testdata/authz/feed.yaml checks the same through the API.
 func TestFeedPolicy_Matrix(t *testing.T) {
 	t.Parallel()
@@ -123,6 +123,10 @@ func TestFeedPolicy_Matrix(t *testing.T) {
 		{"save commercial (k15)", authz.FeedSaveManage, ad, with(all(nil), map[string]error{"anonymous": fb, "student_minor": nf})},
 		{"hide followers", authz.FeedHideCreate, followers, with(hidden(), map[string]error{
 			"club_member": nil, "club_admin": nil, "moderator": nil, "platform_admin": nil})},
+		// BE-145: undoing a hide follows the post's visibility like the hide.
+		{"unhide followers", authz.FeedHideDelete, followers, with(hidden(), map[string]error{
+			"club_member": nil, "club_admin": nil, "moderator": nil, "platform_admin": nil})},
+		{"unhide commercial (k15)", authz.FeedHideDelete, ad, with(all(nil), map[string]error{"anonymous": fb, "student_minor": nf})},
 		{"like draft (the service refuses: 409)", authz.FeedReactionManage, draft, with(hidden(), map[string]error{
 			"club_admin": nil, "moderator": nil, "platform_admin": nil})},
 		{"like removed", authz.FeedReactionManage, removed, with(hidden(), map[string]error{"moderator": nil, "platform_admin": nil})},
@@ -133,6 +137,8 @@ func TestFeedPolicy_Matrix(t *testing.T) {
 			with(hidden(), map[string]error{"company_member": nil, "company_admin": nil, "moderator": nil, "support": nil,
 				"platform_admin": nil})},
 		{"list own saves", authz.FeedSaveListOwn, ownFeed, with(all(nil), map[string]error{"anonymous": fb})},
+		{"list own hides", authz.FeedHideListOwn, ownFeed, with(all(nil), map[string]error{"anonymous": fb})},
+		{"list another user's hides", authz.FeedHideListOwn, othersFeed, hidden()},
 		{"list own follows", authz.FeedFollowListOwn, ownFeed, with(all(nil), map[string]error{"anonymous": fb})},
 		{"list own mutes", authz.FeedMuteListOwn, ownFeed, with(all(nil), map[string]error{"anonymous": fb})},
 		{"list another user's mutes", authz.FeedMuteListOwn, othersFeed, hidden()},

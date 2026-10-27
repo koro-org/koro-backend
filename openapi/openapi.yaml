@@ -27837,6 +27837,52 @@ paths:
       x-koro-rate-limit: write_default
       x-koro-surface: self
       x-koro-terms-gate: enforced
+  /api/v1/me/hidden-posts:
+    get:
+      description: "Newest hide first; unhidePost brings one back. A hidden post the reader may no longer see (removed, hidden by a moderator, out of the audience) is skipped, as in listMySavedPosts: it would not reach the feed anyway. Posts of a muted organization are listed (a mute is separate)."
+      operationId: listMyHiddenPosts
+      parameters:
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 20
+            description: Page size
+            format: int64
+            maximum: 50
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the posts I hid from my feed
+      tags:
+        - feed
+      x-koro-action: feed.hide.list_own
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
   /api/v1/me/memberships:
     get:
       description: "Sensitive club memberships included (only for their owner). Default: pending and active."
@@ -34119,6 +34165,36 @@ paths:
       x-koro-surface: resource
       x-koro-terms-gate: enforced
   /api/v1/posts/{post_id}/hide:
+    delete:
+      description: "Undoes hidePost. Idempotent: 204 whether or not the reader had hidden the post. On a post the reader no longer sees only their own hide goes (no hide: 404, as for a missing post)."
+      operationId: unhidePost
+      parameters:
+        - description: Post ID
+          in: path
+          name: post_id
+          required: true
+          schema:
+            description: Post ID
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Show a hidden post in my feed again
+      tags:
+        - feed
+      x-koro-action: feed.hide.delete
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+      x-koro-terms-gate: enforced
     post:
       description: The post leaves the reader's feed (it stays on the organization page). Idempotent. The post must be a published post the reader may see (404 otherwise).
       operationId: hidePost

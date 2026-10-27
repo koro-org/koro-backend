@@ -30,6 +30,12 @@ const TypeFeed = "feed"
 //	feed.follow.list_own      O
 //	feed.mute.list_own        O
 //
+// by BE-145 for undoing a hide (Q-35):
+//
+//	feed.hide.delete          as reaction.manage (unhidePost: on a post the reader no longer sees
+//	                          the service still removes their own row, as unlike/unsave)
+//	feed.hide.list_own        O
+//
 // and by BE-032 for the targeted post, the reports and moderation:
 //
 //	feed.post.create_targeted   S: as feed.post.create (k16, the targeting scope, is outreach.Compile's: 422)
@@ -96,11 +102,11 @@ func feedPolicy() Policy {
 			case FeedPostListOrgManage, FeedPostCreate:
 				return r.Type == TypeOrg && OrgSurfaceVisible(a, r.OrgID)
 			case FeedPostRead, FeedPostUpdate, FeedPostPublish, FeedPostDelete, FeedPostStats,
-				FeedReactionManage, FeedSaveManage, FeedHideCreate:
+				FeedReactionManage, FeedSaveManage, FeedHideCreate, FeedHideDelete:
 				return r.Type == TypePost && postVisible(a, r)
 			case FeedFollowManage, FeedMuteManage:
 				return r.Type == TypeOrg && orgProfileVisible(a, r)
-			case FeedSaveListOwn, FeedFollowListOwn, FeedMuteListOwn:
+			case FeedSaveListOwn, FeedHideListOwn, FeedFollowListOwn, FeedMuteListOwn:
 				return r.Type == TypeFeed && a.Owns(r)
 			case FeedPostCreateTargeted:
 				return r.Type == TypeOrg && OrgSurfaceVisible(a, r.OrgID)
@@ -125,11 +131,12 @@ func feedPolicy() Policy {
 		},
 		Grants: func(a Actor, act Action, r Resource) []Grant {
 			switch act {
-			case FeedFeedRead, FeedReactionManage, FeedSaveManage, FeedHideCreate, FeedFollowManage, FeedMuteManage:
+			case FeedFeedRead, FeedReactionManage, FeedSaveManage, FeedHideCreate, FeedHideDelete, FeedFollowManage,
+				FeedMuteManage:
 				// Every user is either a verified student (minor or not) or
 				// not: the three paths cover every signed-in actor.
 				return []Grant{{Role: RoleUserUnverified}, {Role: RoleStudent}, {Role: RoleStudentMinor}}
-			case FeedSaveListOwn, FeedFollowListOwn, FeedMuteListOwn:
+			case FeedSaveListOwn, FeedHideListOwn, FeedFollowListOwn, FeedMuteListOwn:
 				return []Grant{{Role: RoleSelf}}
 			case FeedPostRead, FeedPostListByOrg:
 				return []Grant{{Role: RolePublic}}

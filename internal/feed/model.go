@@ -265,11 +265,12 @@ type Interaction struct {
 	CreatedAt time.Time `gorm:"column:created_at"`
 }
 
-// SavedPost is a post of the reader's saved list with the time it was saved
-// (the keyset of listMySavedPosts).
-type SavedPost struct {
-	Post    Post      `gorm:"embedded"`
-	SavedAt time.Time `gorm:"column:saved_at"`
+// MarkedPost is a post of one of the reader's own lists (saved or hidden)
+// with the time of the reader's row (the keyset of listMySavedPosts and
+// listMyHiddenPosts).
+type MarkedPost struct {
+	Post     Post      `gorm:"embedded"`
+	MarkedAt time.Time `gorm:"column:marked_at"`
 }
 
 // Interactions is everything feed holds about a reader (KVKK export).

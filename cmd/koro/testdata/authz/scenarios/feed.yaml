@@ -74,6 +74,18 @@ scenarios:
       - { persona: club_member, operation: unlikePost, expect: 404, code: not_found }
       - { persona: student, operation: unlikePost, expect: 204 }
       - { persona: student, operation: unlikePost, expect: 404, code: not_found }
+  feed_hide_unhide_cycle:
+    note: BE-145 (Q-35) — a hide is listed and undone; unhide is idempotent; after removal only the hider's row goes
+    steps:
+      - { persona: student, operation: hidePost, expect: 204 }
+      - { persona: student, operation: listMyHiddenPosts, expect: 200 }
+      - { persona: student, operation: unhidePost, expect: 204 }
+      - { persona: student, operation: unhidePost, expect: 204 }
+      - { persona: student, operation: hidePost, expect: 204 }
+      - { persona: club_admin, operation: deletePost, path_params: { post_id: post_a }, expect: 204 }
+      - { persona: club_member, operation: unhidePost, expect: 404, code: not_found }
+      - { persona: student, operation: unhidePost, expect: 204 }
+      - { persona: student, operation: unhidePost, expect: 404, code: not_found }
   feed_follow_mute_cycle:
     note: follow, mute and their reversals are idempotent PUT/DELETE pairs (04 §F.5)
     steps:

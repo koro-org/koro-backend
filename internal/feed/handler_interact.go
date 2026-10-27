@@ -14,8 +14,9 @@ import (
 	"koro/internal/platform/problem"
 )
 
-// registerInteractions adds the 12 operations of BE-029 (04 §2.7, §F.3,
-// §F.5): likes, saves, hides, follows and mutes of the signed-in reader.
+// registerInteractions adds the operations of BE-029 (04 §2.7, §F.3,
+// §F.5), BE-122 and BE-145: likes, saves, hides, follows and mutes of the
+// signed-in reader.
 func registerInteractions(api huma.API, h handler) {
 	op.Register(api, "feed", huma.Operation{
 		OperationID: "likePost", Method: http.MethodPut, Path: "/posts/{post_id}/like", DefaultStatus: http.StatusNoContent,
@@ -51,11 +52,26 @@ func registerInteractions(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.FeedHideCreate), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional}, h.hidePost)
 
 	op.Register(api, "feed", huma.Operation{
+		OperationID: "unhidePost", Method: http.MethodDelete, Path: "/posts/{post_id}/hide", DefaultStatus: http.StatusNoContent,
+		Summary: "Show a hidden post in my feed again",
+		Description: "Undoes hidePost. Idempotent: 204 whether or not the reader had hidden the post. On a post the " +
+			"reader no longer sees only their own hide goes (no hide: 404, as for a missing post).",
+	}, op.Meta{Action: string(authz.FeedHideDelete), Surface: op.SurfaceResource}, h.unhidePost)
+
+	op.Register(api, "feed", huma.Operation{
 		OperationID: "listMySavedPosts", Method: http.MethodGet, Path: "/me/saved-posts",
 		Summary: "List my saved posts",
 		Description: "Newest save first. A saved post the reader may no longer see (removed, hidden by a moderator, " +
 			"out of the audience) is skipped.",
 	}, op.Meta{Action: string(authz.FeedSaveListOwn), Surface: op.SurfaceSelf}, h.listSaved)
+
+	op.Register(api, "feed", huma.Operation{
+		OperationID: "listMyHiddenPosts", Method: http.MethodGet, Path: "/me/hidden-posts",
+		Summary: "List the posts I hid from my feed",
+		Description: "Newest hide first; unhidePost brings one back. A hidden post the reader may no longer see " +
+			"(removed, hidden by a moderator, out of the audience) is skipped, as in listMySavedPosts: it would not " +
+			"reach the feed anyway. Posts of a muted organization are listed (a mute is separate).",
+	}, op.Meta{Action: string(authz.FeedHideListOwn), Surface: op.SurfaceSelf}, h.listHidden)
 
 	op.Register(api, "feed", huma.Operation{
 		OperationID: "followOrg", Method: http.MethodPut, Path: "/me/follows/{org_id}", DefaultStatus: http.StatusNoContent,
@@ -136,19 +152,39 @@ func (h handler) hidePost(ctx context.Context, in *PostPath) (*struct{}, error) 
 	return h.postAction(ctx, in, h.svc.HidePost)
 }
 
-const sortSaved = "-saved_at"
+func (h handler) unhidePost(ctx context.Context, in *PostPath) (*struct{}, error) {
+	return h.postAction(ctx, in, h.svc.UnhidePost)
+}
+
+// The cursor sorts of the reader's own post lists; the fingerprint is the
+// operationId, so a cursor of one list is refused by the other.
+const (
+	sortSaved  = "-saved_at"
+	sortHidden = "-hidden_at"
+)
 
 func (h handler) listSaved(ctx context.Context, in *FeedPage) (*listOutput, error) {
+	return h.listMarked(ctx, in, "listMySavedPosts", sortSaved, h.svc.ListSavedPosts)
+}
+
+func (h handler) listHidden(ctx context.Context, in *FeedPage) (*listOutput, error) {
+	return h.listMarked(ctx, in, "listMyHiddenPosts", sortHidden, h.svc.ListHiddenPosts)
+}
+
+// listMarked answers one of the reader's own post lists.
+func (h handler) listMarked(ctx context.Context, in *FeedPage, opID, sort string,
+	list func(context.Context, authz.Actor, PageQuery) (PostPage, error),
+) (*listOutput, error) {
 	a, err := authz.ActorFrom(ctx)
 	if err != nil {
 		return nil, err
 	}
-	fp := page.Fingerprint("listMySavedPosts")
+	fp := page.Fingerprint(opID)
 	q := PageQuery{Limit: in.Limit}
-	if q.After, err = keysetOf(in.Cursor, sortSaved, fp); err != nil {
+	if q.After, err = keysetOf(in.Cursor, sort, fp); err != nil {
 		return nil, err
 	}
-	p, err := h.svc.ListSavedPosts(ctx, a, q)
+	p, err := list(ctx, a, q)
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +193,7 @@ func (h handler) listSaved(ctx context.Context, in *FeedPage) (*listOutput, erro
 		out.Body.Items[i] = toPostDTO(v)
 	}
 	if p.Next != nil {
-		out.Body.NextCursor = page.Next(sortSaved, fp, page.TimeVal(p.Next.At), page.UUIDVal(p.Next.ID))
+		out.Body.NextCursor = page.Next(sort, fp, page.TimeVal(p.Next.At), page.UUIDVal(p.Next.ID))
 	}
 	return out, nil
 }

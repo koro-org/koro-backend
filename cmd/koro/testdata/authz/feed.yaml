@@ -1,4 +1,4 @@
-# Authz matrix of the feed module (03 §5.7, 04 §2.7; BE-027, BE-029). 21 operations × 18 personas.
+# Authz matrix of the feed module (03 §5.7, 04 §2.7; BE-027, BE-029, BE-032, BE-145). 34 operations × 18 personas.
 # Post visibility (03 §3.6): a published public post is everyone's; a commercial post is not a minor's nor an
 # anonymous reader's (k15, T-57); a followers post is its followers' and the author org's members' (persona
 # student follows club_a); drafts and posts in review are the author org's writers', moderators' and platform
@@ -11,6 +11,8 @@
 # and moderators see 409 feed.invalid_state); unlike/unsave are 204 without a row on a visible post and 404 on
 # an invisible one (no existence leak); follows and mutes address an org whose profile the reader sees; the
 # lists are the caller's own (anonymous 401).
+# BE-145: unhidePost is unsavePost's rule for a hide (204 without a row on a visible post, 404 on an invisible one);
+# listMyHiddenPosts is the caller's own list.
 # BE-032: a targeted post is created on the org management surface like a post (k16 — the targeting scope, k ≥ 10,
 # the sensitive club ban — is outreach.Compile's: 422, scenarios); a company spends a targeted_post unit (company_a
 # holds 4; the "Hak yok" scenario empties company_b). Reports are every signed-in user's on what they see. The
@@ -482,11 +484,38 @@ operations:
           club_admin: 409
           "@fd_post_staff": 409
 
+  unhidePost:
+    method: DELETE
+    path: /api/v1/posts/{post_id}/hide
+    action: feed.hide.delete
+    path_params: { post_id: post_a }
+    note: BE-145 undoes hidePost; 204 without a hide on a visible post, as unsavePost
+    expect:
+      anonymous: 401
+      "@signed_in": 204
+    variants:
+      - name: followers_post
+        path_params: { post_id: post_a_followers }
+        expect:
+          anonymous: 401
+          "@fd_followers_a": 204
+          "@fd_not_followers_a": 404
+
   listMySavedPosts:
     method: GET
     path: /api/v1/me/saved-posts
     action: feed.save.list_own
     query: { limit: "10" }
+    expect:
+      anonymous: 401
+      "@signed_in": 200
+
+  listMyHiddenPosts:
+    method: GET
+    path: /api/v1/me/hidden-posts
+    action: feed.hide.list_own
+    query: { limit: "10" }
+    note: BE-145 the caller's own hides (O)
     expect:
       anonymous: 401
       "@signed_in": 200

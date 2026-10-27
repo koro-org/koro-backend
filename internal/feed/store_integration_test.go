@@ -245,7 +245,7 @@ func TestLike_Concurrent_CountsConsistent(t *testing.T) {
 
 // TestLike_Service_Postgres: the service on PostgreSQL — two likes are one
 // row and one count, the ETag of the post stays, unlike without a like is
-// a no-op.
+// a no-op; a hide is listed and undone (BE-145).
 func TestLike_Service_Postgres(t *testing.T) {
 	t.Parallel()
 	d := testutil.NewDB(t)
@@ -298,6 +298,22 @@ func TestLike_Service_Postgres(t *testing.T) {
 	}
 	if page, err := mod.Service.GetFeed(ctx, a, feed.FeedQuery{}); err != nil || len(page.Items) != 0 {
 		t.Fatalf("feed after hide = %d, %v", len(page.Items), err)
+	}
+	// BE-145: the hide is listed, then undone (twice is once).
+	if page, err := mod.Service.ListHiddenPosts(ctx, a, feed.PageQuery{}); err != nil || len(page.Items) != 1 ||
+		page.Items[0].Post.ID != p.ID {
+		t.Fatalf("hidden = %+v, %v", page.Items, err)
+	}
+	for range 2 {
+		if err := mod.Service.UnhidePost(ctx, a, p.ID); err != nil {
+			t.Fatalf("UnhidePost = %v", err)
+		}
+	}
+	if page, err := mod.Service.GetFeed(ctx, a, feed.FeedQuery{}); err != nil || len(page.Items) != 1 {
+		t.Fatalf("feed after unhide = %d, %v", len(page.Items), err)
+	}
+	if page, err := mod.Service.ListHiddenPosts(ctx, a, feed.PageQuery{}); err != nil || len(page.Items) != 0 {
+		t.Fatalf("hidden after unhide = %d, %v", len(page.Items), err)
 	}
 }
 

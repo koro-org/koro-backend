@@ -20,6 +20,8 @@ const (
 	FeedSaveManage           Action = "feed.save.manage"
 	FeedSaveListOwn          Action = "feed.save.list_own"
 	FeedHideCreate           Action = "feed.hide.create"
+	FeedHideDelete           Action = "feed.hide.delete"
+	FeedHideListOwn          Action = "feed.hide.list_own"
 	FeedFollowManage         Action = "feed.follow.manage"
 	FeedFollowListOwn        Action = "feed.follow.list_own"
 	FeedMuteManage           Action = "feed.mute.manage"
@@ -55,6 +57,8 @@ var feedActions = []Action{
 	FeedSaveManage,
 	FeedSaveListOwn,
 	FeedHideCreate,
+	FeedHideDelete,
+	FeedHideListOwn,
 	FeedFollowManage,
 	FeedFollowListOwn,
 	FeedMuteManage,

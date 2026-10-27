@@ -127,31 +127,60 @@ func (s gormStore) AddHide(ctx context.Context, userID, postID uuid.UUID) (bool,
 	return res.RowsAffected > 0, nil
 }
 
-// ListSaved implements Store: the visibility of the feed (readerConds) on
-// the saved posts, so a post that was removed, hidden by a moderator or
-// moved out of the reader's audience is skipped and the page stays full.
+// RemoveHide implements Store.
 //
-// cross-org: the reader's own saves, filtered by 03 §3.6.
-func (s gormStore) ListSaved(ctx context.Context, r Reader, after *After, limit int) ([]SavedPost, error) {
-	if r.UserID == nil {
-		return []SavedPost{}, nil
+// cross-org: the reader's own row.
+func (s gormStore) RemoveHide(ctx context.Context, userID, postID uuid.UUID) (bool, error) {
+	res := db.Conn(ctx, s.orm).Exec(`DELETE FROM post_hides WHERE user_id = @user AND post_id = @post`, pair(userID, postID))
+	if res.Error != nil {
+		return false, wrap("remove hide", res.Error)
 	}
-	q := db.Conn(ctx, s.orm).Table("post_saves AS s").Joins("JOIN posts AS p ON p.id = s.post_id").
-		Select(prefixed+", s.created_at AS saved_at").
-		Where("s.user_id = ?", *r.UserID).Where("p.status = 'published'")
+	return res.RowsAffected > 0, nil
+}
+
+// listMarked lists the posts of the reader's rows in table (post_saves or
+// post_hides: a constant of the caller, never a request value)
+// with the visibility of the feed (readerConds), so a post that was
+// removed, hidden by a moderator or moved out of the reader's audience is
+// skipped and the page stays full. The (user_id, post_id) primary key
+// finds the reader's rows; a reader holds few, so they are sorted in
+// place (no extra index).
+//
+// cross-org: the reader's own rows, filtered by 03 §3.6.
+func (s gormStore) listMarked(ctx context.Context, table string, r Reader, after *After, limit int) ([]MarkedPost, error) {
+	if r.UserID == nil {
+		return []MarkedPost{}, nil
+	}
+	q := db.Conn(ctx, s.orm).Table(table+" AS m").Joins("JOIN posts AS p ON p.id = m.post_id").
+		Select(prefixed+", m.created_at AS marked_at").
+		Where("m.user_id = ?", *r.UserID).Where("p.status = 'published'")
 	cond, args := readerConds(r)
 	q = q.Where(cond, args...)
 	if after != nil {
-		q = q.Where("(s.created_at, s.post_id) < ( ?, ?)", after.At, after.ID)
+		q = q.Where("(m.created_at, m.post_id) < ( ?, ?)", after.At, after.ID)
 	}
-	var out []SavedPost
-	if err := q.Order("s.created_at DESC, s.post_id DESC").Limit(limit).Scan(&out).Error; err != nil {
-		return nil, wrap("list saved", err)
+	var out []MarkedPost
+	if err := q.Order("m.created_at DESC, m.post_id DESC").Limit(limit).Scan(&out).Error; err != nil {
+		return nil, wrap("list "+table, err)
 	}
 	if out == nil {
-		out = []SavedPost{}
+		out = []MarkedPost{}
 	}
 	return out, nil
+}
+
+// ListSaved implements Store (listMarked over post_saves).
+//
+// cross-org: the reader's own saves, filtered by 03 §3.6 (listMarked).
+func (s gormStore) ListSaved(ctx context.Context, r Reader, after *After, limit int) ([]MarkedPost, error) {
+	return s.listMarked(ctx, "post_saves", r, after, limit)
+}
+
+// ListHidden implements Store (listMarked over post_hides).
+//
+// cross-org: the reader's own hides, filtered by 03 §3.6 (listMarked).
+func (s gormStore) ListHidden(ctx context.Context, r Reader, after *After, limit int) ([]MarkedPost, error) {
+	return s.listMarked(ctx, "post_hides", r, after, limit)
 }
 
 // FollowManual implements Store. xmax = 0 marks a row the statement

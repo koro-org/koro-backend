@@ -59,7 +59,8 @@
 //     repeated or concurrent like counts once. Likes, saves, hides,
 //     follows and mutes are the reader's personal data: the author org
 //     sees the counters only, never who (03 Y7). A mute and a hide take
-//     posts out of the feed, not out of the org page. A membership follows
+//     posts out of the feed, not out of the org page; the reader lists and
+//     undoes their hides like their saves (BE-145). A membership follows
 //     its org automatically (auto_membership) except in a sensitive club,
 //     whose follow would reveal the membership (02 §12.7); the end of the
 //     membership removes the automatic follow only.
@@ -178,9 +179,14 @@ type Service interface {
 	UnsavePost(ctx context.Context, a authz.Actor, postID uuid.UUID) error
 	// HidePost is hidePost (feed.hide.create).
 	HidePost(ctx context.Context, a authz.Actor, postID uuid.UUID) error
+	// UnhidePost is unhidePost (feed.hide.delete; BE-145).
+	UnhidePost(ctx context.Context, a authz.Actor, postID uuid.UUID) error
 	// ListSavedPosts is listMySavedPosts (feed.save.list_own): Next is the
 	// position (saved_at, post_id) of the next page.
 	ListSavedPosts(ctx context.Context, a authz.Actor, q PageQuery) (PostPage, error)
+	// ListHiddenPosts is listMyHiddenPosts (feed.hide.list_own; BE-145):
+	// Next is the position (hidden_at, post_id) of the next page.
+	ListHiddenPosts(ctx context.Context, a authz.Actor, q PageQuery) (PostPage, error)
 	// FollowOrg / UnfollowOrg are followOrg / unfollowOrg
 	// (feed.follow.manage); notify nil keeps the current setting.
 	FollowOrg(ctx context.Context, a authz.Actor, orgID uuid.UUID, notify *bool) error

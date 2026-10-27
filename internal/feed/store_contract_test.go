@@ -2,6 +2,7 @@ package feed_test
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"slices"
 	"strconv"
@@ -438,6 +439,22 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (feed.Store, world)
 		if _, err := s.AddHide(ctx, u1, uuid.NewV7()); !errors.Is(err, problem.ErrNotFound) {
 			t.Fatalf("AddHide(missing) = %v", err)
 		}
+		// BE-145: a hide is undone once; another reader's hide stays.
+		if _, err := s.AddHide(ctx, u2, p.ID); err != nil {
+			t.Fatal(err)
+		}
+		if ok, err := s.RemoveHide(ctx, u1, p.ID); err != nil || !ok {
+			t.Fatalf("RemoveHide = %v, %v", ok, err)
+		}
+		if ok, err := s.RemoveHide(ctx, u1, p.ID); err != nil || ok {
+			t.Fatalf("RemoveHide twice = %v, %v", ok, err)
+		}
+		if ok, err := s.RemoveHide(ctx, u1, uuid.NewV7()); err != nil || ok {
+			t.Fatalf("RemoveHide(missing) = %v, %v", ok, err)
+		}
+		if in, _ := s.InteractionsOf(ctx, u2); len(in.Hides) != 1 {
+			t.Fatalf("another reader's hides = %d", len(in.Hides))
+		}
 	})
 
 	t.Run("withdrawn likes: the post exists and holds no like of the user (BE-090)", func(t *testing.T) {
@@ -476,74 +493,102 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (feed.Store, world)
 		}
 	})
 
-	t.Run("saved list: visible posts only, keyset by save time", func(t *testing.T) {
-		t.Parallel()
-		s, w := newStore(t)
-		ctx := t.Context()
-		club, company, by, reader := w.org(t, feed.AuthorClub), w.org(t, feed.AuthorCompany), w.user(t), w.user(t)
-		var posts []feed.Post
-		for i := range 4 {
-			posts = append(posts, insert(t, s, publishedAt(post(club, feed.AuthorClub, by), pub0.Add(time.Duration(i)*time.Minute))))
-		}
-		draft := insert(t, s, post(club, feed.AuthorClub, by))
-		ad := insert(t, s, publishedAt(post(company, feed.AuthorCompany, by), pub0))
-		fol := post(club, feed.AuthorClub, by)
-		fol.AudienceKind = feed.AudienceFollowers
-		fol = insert(t, s, publishedAt(fol, pub0))
-		for _, p := range append(posts, draft, ad, fol) {
-			if _, err := s.AddSave(ctx, reader, p.ID); err != nil {
-				t.Fatal(err)
+	// The reader's own post lists (saved; hidden, BE-145) read the same way.
+	for _, l := range []struct {
+		name string
+		add  func(feed.Store, context.Context, uuid.UUID, uuid.UUID) (bool, error)
+		list func(feed.Store, context.Context, feed.Reader, *feed.After, int) ([]feed.MarkedPost, error)
+	}{
+		{"saved", feed.Store.AddSave, feed.Store.ListSaved},
+		{"hidden", feed.Store.AddHide, feed.Store.ListHidden},
+	} {
+		t.Run(l.name+" list: visible posts only, keyset by row time", func(t *testing.T) {
+			t.Parallel()
+			s, w := newStore(t)
+			ctx := t.Context()
+			add := func(ctx context.Context, u, p uuid.UUID) (bool, error) { return l.add(s, ctx, u, p) }
+			list := func(ctx context.Context, r feed.Reader, after *feed.After, n int) ([]feed.MarkedPost, error) {
+				return l.list(s, ctx, r, after, n)
 			}
-		}
-		r := feed.Reader{UserID: &reader, Keys: []string{"all"}}
-		read := func(rd feed.Reader, limit int) []feed.SavedPost {
-			t.Helper()
-			var out []feed.SavedPost
-			var after *feed.After
-			for range 20 {
-				page, err := s.ListSaved(ctx, rd, after, limit)
-				if err != nil {
+			club, company, by, reader, other := w.org(t, feed.AuthorClub), w.org(t, feed.AuthorCompany), w.user(t), w.user(t), w.user(t)
+			var posts []feed.Post
+			for i := range 4 {
+				posts = append(posts, insert(t, s, publishedAt(post(club, feed.AuthorClub, by), pub0.Add(time.Duration(i)*time.Minute))))
+			}
+			draft := insert(t, s, post(club, feed.AuthorClub, by))
+			ad := insert(t, s, publishedAt(post(company, feed.AuthorCompany, by), pub0))
+			fol := post(club, feed.AuthorClub, by)
+			fol.AudienceKind = feed.AudienceFollowers
+			fol = insert(t, s, publishedAt(fol, pub0))
+			for _, p := range append(posts, draft, ad, fol) {
+				if _, err := add(ctx, reader, p.ID); err != nil {
 					t.Fatal(err)
 				}
-				out = append(out, page...)
-				if len(page) < limit {
-					return out
+			}
+			// Another reader's row is not the reader's.
+			if _, err := add(ctx, other, posts[0].ID); err != nil {
+				t.Fatal(err)
+			}
+			r := feed.Reader{UserID: &reader, Keys: []string{"all"}}
+			read := func(rd feed.Reader, limit int) []feed.MarkedPost {
+				t.Helper()
+				var out []feed.MarkedPost
+				var after *feed.After
+				for range 20 {
+					page, err := list(ctx, rd, after, limit)
+					if err != nil {
+						t.Fatal(err)
+					}
+					out = append(out, page...)
+					if len(page) < limit {
+						return out
+					}
+					last := page[len(page)-1]
+					after = &feed.After{At: last.MarkedAt, ID: last.Post.ID}
 				}
-				last := page[len(page)-1]
-				after = &feed.After{At: last.SavedAt, ID: last.Post.ID}
+				t.Fatal("list did not end")
+				return nil
 			}
-			t.Fatal("saved list did not end")
-			return nil
-		}
-		got := read(r, 2)
-		gotIDs := []uuid.UUID{}
-		for i, sp := range got {
-			gotIDs = append(gotIDs, sp.Post.ID)
-			if i > 0 && cmp.Or(sp.SavedAt.Compare(got[i-1].SavedAt), sp.Post.ID.Compare(got[i-1].Post.ID)) >= 0 {
-				t.Fatalf("not newest first at %d", i)
+			got := read(r, 2)
+			gotIDs := []uuid.UUID{}
+			for i, sp := range got {
+				gotIDs = append(gotIDs, sp.Post.ID)
+				if i > 0 && cmp.Or(sp.MarkedAt.Compare(got[i-1].MarkedAt), sp.Post.ID.Compare(got[i-1].Post.ID)) >= 0 {
+					t.Fatalf("not newest first at %d", i)
+				}
 			}
-		}
-		// The draft and the followers post (no follow) are skipped; the
-		// commercial post is an adult's.
-		want := []uuid.UUID{posts[0].ID, posts[1].ID, posts[2].ID, posts[3].ID, ad.ID}
-		slices.SortFunc(want, func(a, b uuid.UUID) int { return a.Compare(b) })
-		sorted := slices.SortedFunc(slices.Values(gotIDs), func(a, b uuid.UUID) int { return a.Compare(b) })
-		if !slices.Equal(sorted, want) {
-			t.Fatalf("saved = %v, want %v", sorted, want)
-		}
-		minor := r
-		minor.Minor = true
-		if got := read(minor, 10); len(got) != 4 {
-			t.Fatalf("minor saved = %d", len(got))
-		}
-		w.follow(t, reader, club)
-		if got := read(r, 10); len(got) != 6 {
-			t.Fatalf("follower saved = %d", len(got))
-		}
-		if got, _ := s.ListSaved(ctx, feed.Reader{Keys: []string{"all"}}, nil, 10); len(got) != 0 {
-			t.Fatalf("anonymous saved = %v", got)
-		}
-	})
+			// The draft and the followers post (no follow) are skipped; the
+			// commercial post is an adult's.
+			want := []uuid.UUID{posts[0].ID, posts[1].ID, posts[2].ID, posts[3].ID, ad.ID}
+			slices.SortFunc(want, func(a, b uuid.UUID) int { return a.Compare(b) })
+			sorted := slices.SortedFunc(slices.Values(gotIDs), func(a, b uuid.UUID) int { return a.Compare(b) })
+			if !slices.Equal(sorted, want) {
+				t.Fatalf("%s = %v, want %v", l.name, sorted, want)
+			}
+			minor := r
+			minor.Minor = true
+			if got := read(minor, 10); len(got) != 4 {
+				t.Fatalf("minor %s = %d", l.name, len(got))
+			}
+			w.follow(t, reader, club)
+			if got := read(r, 10); len(got) != 6 {
+				t.Fatalf("follower %s = %d", l.name, len(got))
+			}
+			// A removed post leaves the list (its row stays until the post goes).
+			gone := posts[1]
+			at := pub0.Add(time.Hour)
+			gone.Status, gone.RemovedAt = feed.StatusRemoved, &at
+			if _, err := s.UpdatePost(ctx, gone); err != nil {
+				t.Fatal(err)
+			}
+			if got := read(r, 10); len(got) != 5 || slices.ContainsFunc(got, func(m feed.MarkedPost) bool { return m.Post.ID == gone.ID }) {
+				t.Fatalf("%s after removal = %d", l.name, len(got))
+			}
+			if got, _ := list(ctx, feed.Reader{Keys: []string{"all"}}, nil, 10); len(got) != 0 {
+				t.Fatalf("anonymous %s = %v", l.name, got)
+			}
+		})
+	}
 
 	t.Run("follows and mutes", func(t *testing.T) {
 		t.Parallel()

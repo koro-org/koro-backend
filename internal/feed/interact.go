@@ -156,10 +156,37 @@ func (s *service) HidePost(ctx context.Context, a authz.Actor, id uuid.UUID) err
 	return err
 }
 
+// UnhidePost implements Service (BE-145, Q-35): the post comes back to the
+// reader's feed. Like unsave it is 204 whether or not there was a hide; on
+// a post the reader no longer sees only their own row goes, and no row is
+// 404 like a missing post (withdraw).
+func (s *service) UnhidePost(ctx context.Context, a authz.Actor, id uuid.UUID) error {
+	return s.withdraw(ctx, a, authz.FeedHideDelete, id, s.interactions().RemoveHide, nil)
+}
+
 // ListSavedPosts implements Service: the reader's saved posts they may
 // still see, newest save first (04 §F.3: "artık görünmeyenler atlanır").
 func (s *service) ListSavedPosts(ctx context.Context, a authz.Actor, q PageQuery) (PostPage, error) {
-	if err := authz.Can(ctx, a, authz.FeedSaveListOwn, ownList(a)); err != nil {
+	return s.listMarked(ctx, a, authz.FeedSaveListOwn, s.interactions().ListSaved, q)
+}
+
+// ListHiddenPosts implements Service (BE-145): the posts the reader hid
+// that they may still see, newest hide first. A hidden post they no longer
+// see is skipped like a saved one: it would not reach their feed anyway,
+// an item without the post would say whether it was removed or moved out
+// of their audience, and the row still goes with unhidePost, the post's
+// deletion (ON DELETE CASCADE) or the KVKK erase.
+func (s *service) ListHiddenPosts(ctx context.Context, a authz.Actor, q PageQuery) (PostPage, error) {
+	return s.listMarked(ctx, a, authz.FeedHideListOwn, s.interactions().ListHidden, q)
+}
+
+// listMarked pages one of the reader's own post lists (act on their own
+// feed resource): the posts they may see, newest row first; Next is the
+// position (row time, post_id) of the next page.
+func (s *service) listMarked(ctx context.Context, a authz.Actor, act authz.Action,
+	list func(context.Context, Reader, *After, int) ([]MarkedPost, error), q PageQuery,
+) (PostPage, error) {
+	if err := authz.Can(ctx, a, act, ownList(a)); err != nil {
 		return PostPage{}, err
 	}
 	r, err := s.readerOf(ctx, a)
@@ -169,7 +196,7 @@ func (s *service) ListSavedPosts(ctx context.Context, a authz.Actor, q PageQuery
 	// Moderators and platform admins see every published post (03 §3.6).
 	r.All = a.HasPlatformRole(authz.PlatformModerator) || a.HasPlatformRole(authz.PlatformAdmin)
 	limit := clampFeed(q.Limit)
-	rows, err := s.interactions().ListSaved(ctx, r, q.After, limit+1)
+	rows, err := list(ctx, r, q.After, limit+1)
 	if err != nil {
 		return PostPage{}, err
 	}
@@ -177,7 +204,7 @@ func (s *service) ListSavedPosts(ctx context.Context, a authz.Actor, q PageQuery
 	if len(rows) > limit {
 		rows = rows[:limit]
 		last := rows[len(rows)-1]
-		out.Next = &After{At: last.SavedAt, ID: last.Post.ID}
+		out.Next = &After{At: last.MarkedAt, ID: last.Post.ID}
 	}
 	posts := make([]Post, len(rows))
 	for i, r := range rows {

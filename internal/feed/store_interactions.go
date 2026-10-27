@@ -30,12 +30,16 @@ type interactionStore interface {
 	// AddSave / RemoveSave write post_saves and posts.save_count.
 	AddSave(ctx context.Context, userID, postID uuid.UUID) (bool, error)
 	RemoveSave(ctx context.Context, userID, postID uuid.UUID) (bool, error)
-	// AddHide writes post_hides (there is no unhide in v1).
+	// AddHide / RemoveHide write post_hides (BE-145: a hide can be undone).
 	AddHide(ctx context.Context, userID, postID uuid.UUID) (bool, error)
+	RemoveHide(ctx context.Context, userID, postID uuid.UUID) (bool, error)
 	// ListSaved returns up to limit published posts saved by r.UserID that r
 	// may still see (a post no longer visible is skipped), newest save
-	// first by (saved_at, post_id), after the position after.
-	ListSaved(ctx context.Context, r Reader, after *After, limit int) ([]SavedPost, error)
+	// first by (created_at of the save, post_id), after the position after.
+	ListSaved(ctx context.Context, r Reader, after *After, limit int) ([]MarkedPost, error)
+	// ListHidden is ListSaved over the posts r.UserID hid (post_hides;
+	// BE-145): a hidden post r may no longer see is skipped as well.
+	ListHidden(ctx context.Context, r Reader, after *After, limit int) ([]MarkedPost, error)
 
 	// FollowManual writes the user's own follow: a new row is manual, an
 	// automatic one becomes manual (the user chose it); notify nil keeps

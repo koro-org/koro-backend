@@ -233,6 +233,56 @@ func TestCreateOrder_Cart_RefusedLineIsNamed(t *testing.T) {
 	}
 }
 
+// TestCreateOrder_Cart_EveryRefusedLineIsNamed (BE-139): a cart with
+// several refused lines is answered once, with every one in errors[]
+// (body.lines[i].offering_id, the refusal's title as message): first the
+// lines that cannot be priced, in request order, then the stock refusals
+// in offering ID order. status, code and errors[0] are the first refusal's
+// — what createOrder answered alone before — and no order is placed.
+func TestCreateOrder_Cart_EveryRefusedLineIsNamed(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	app := newHTTP(t, e)
+	open := e.offering(t, func(o *catalog.Offering) { o.QuantityTotal = nil })
+	payeeB := e.payees.add("club_b", parties.PayeeSuspended)
+	inactive := e.offering(t, func(o *catalog.Offering) { o.OrgID, o.DefaultPayeeID = org("club_b"), &payeeB })
+	small := e.offering(t, func(o *catalog.Offering) { o.QuantityTotal = ptr(1) }) // small < limited (UUIDv7)
+	limited := e.offering(t, func(o *catalog.Offering) { o.PerBuyerLimit = ptr(1) })
+	lines := []map[string]any{
+		{"offering_id": open.String(), "quantity": 1},
+		{"offering_id": limited.String(), "quantity": 2},
+		{"offering_id": inactive.String(), "quantity": 1},
+		{"offering_id": small.String(), "quantity": 2},
+		{"offering_id": uuid.NewV7().String(), "quantity": 1},
+	}
+	rec, body := call(t, app, "company_admin", http.MethodPost, "/api/v1/orgs/"+org("company_a").String()+"/orders",
+		map[string]any{"buyer_party_id": e.partyA.String(), "lines": lines}, map[string]string{"Idempotency-Key": "cart-every-refusal"})
+	want := []struct{ at, msg string }{
+		{"body.lines[2].offering_id", catalog.ErrPayeeNotActive.Title()},
+		{"body.lines[4].offering_id", "is not an offering"},
+		{"body.lines[3].offering_id", catalog.ErrSoldOut.Title()},
+		{"body.lines[1].offering_id", catalog.ErrPerBuyerLimit.Title()},
+	}
+	errs, _ := body["errors"].([]any)
+	if rec.Code != 409 || body["code"] != "catalog.payee_not_active" || len(errs) != len(want) {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	for i, w := range want {
+		got, _ := errs[i].(map[string]any)
+		if got["location"] != w.at || got["message"] != w.msg {
+			t.Errorf("errors[%d] = %v, want %s %q", i, got, w.at, w.msg)
+		}
+	}
+	if page, err := e.store.ListOrgOrders(t.Context(), org("company_a"), orders.OrderFilter{}, nil, 10); err != nil || len(page) != 0 {
+		t.Fatalf("the refused cart placed %d orders (%v)", len(page), err)
+	}
+	// The same cart corrected line by line is placed.
+	v := e.place(t, line(open, 1), line(limited, 1), line(small, 1))
+	if len(v) != 1 || len(v[0].Lines) != 3 {
+		t.Fatalf("corrected cart = %d orders", len(v))
+	}
+}
+
 // problemFields returns the locations of the problem's field errors.
 func problemFields(t *testing.T, err error) []string {
 	t.Helper()

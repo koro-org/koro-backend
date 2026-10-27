@@ -36,7 +36,8 @@ const (
 // the payee, the stock, the server-side amounts, one order per model
 // (T-12), the pending rights of platform-native lines and order.placed (O).
 // The lines are the buyer's cart (Q-25, BE-131): every line is placed, or
-// none, and a refused line is named in the problem (atLine). checkout,
+// none, and every refused line is named in the problem (atLine,
+// refusedCart; BE-139). checkout,
 // cart and orderOf are QuoteOrder's too (BE-136).
 func (s *service) CreateOrder(ctx context.Context, a authz.Actor, orgID uuid.UUID, in CreateInput) ([]OrderView, error) {
 	org, party, err := s.checkout(ctx, a, authz.OrdersOrderCreate, orgID, in)
@@ -173,6 +174,7 @@ func snapshotOf(p parties.LegalParty) BuyerSnapshot {
 
 // pricedLine is one request line after checkout and pricing.
 type pricedLine struct {
+	at     int // the line's index in the request
 	in     LineInput
 	offer  catalog.CheckoutOffering
 	policy catalog.CommercePolicy
@@ -195,7 +197,8 @@ type rightTemplate struct {
 // line is reserved under each offering's row lock (the per-buyer limit
 // reads the buyer's committed lines through BuyerHeld); a refusal of any
 // line rolls the whole placement back: no line of the cart stays reserved
-// (BE-131).
+// (BE-131), the other lines' reservations included (cart goes on past a
+// refused line to name every refusal, BE-139).
 func (s *service) place(ctx context.Context, a authz.Actor, org orgs.OrgSummary, party parties.LegalParty, in []LineInput) ([]uuid.UUID, error) {
 	now := s.now()
 	drafts, err := s.cart(ctx, in, now, func(ctx context.Context, p pricedLine) error {
@@ -226,24 +229,45 @@ type orderDraft struct {
 
 // cart is the one code path of createOrder and quoteOrder (BE-136): every
 // line is checked out and priced in request order (priceRequestLine), then
-// stock takes or checks each line's units in offering ID order (lockOrder:
-// the order catalog locks offering rows in), then the lines are grouped
-// one order per model in the order of their first line and each order is
-// summed (totalsOf). A refused line is named in the problem (atLine). Only
-// stock differs between the two: createOrder reserves, quoteOrder reads.
+// stock takes or checks each priced line's units in offering ID order
+// (lockOrder: the order catalog locks offering rows in), then the lines are
+// grouped one order per model in the order of their first line and each
+// order is summed (totalsOf). Only stock differs between the two:
+// createOrder reserves, quoteOrder reads. A refused line does not stop the
+// cart: every line is checked and every refusal is returned at once
+// (refusedCart, BE-139), so the buyer fixes the cart in one go; a server
+// error stops at once. createOrder's transaction then rolls back whatever
+// the other lines reserved.
 func (s *service) cart(ctx context.Context, in []LineInput, now time.Time, stock func(context.Context, pricedLine) error) ([]orderDraft, error) {
 	priced := make([]pricedLine, 0, len(in))
+	var refused []*problem.Error
+	refuse := func(i int, err error) error {
+		pe, ok := errors.AsType[*problem.Error](atLine(i, err))
+		if !ok || !problem.IsClientError(pe) {
+			return err
+		}
+		refused = append(refused, pe)
+		return nil
+	}
 	for i, li := range in {
 		p, err := s.priceRequestLine(ctx, i, li, now)
 		if err != nil {
-			return nil, atLine(i, err)
+			if err := refuse(i, err); err != nil {
+				return nil, err
+			}
+			continue
 		}
 		priced = append(priced, p)
 	}
-	for _, i := range lockOrder(len(priced), func(i int) uuid.UUID { return priced[i].offer.ID }) {
-		if err := stock(ctx, priced[i]); err != nil {
-			return nil, atLine(i, err)
+	for _, k := range lockOrder(len(priced), func(k int) uuid.UUID { return priced[k].offer.ID }) {
+		if err := stock(ctx, priced[k]); err != nil {
+			if err := refuse(priced[k].at, err); err != nil {
+				return nil, err
+			}
 		}
+	}
+	if len(refused) > 0 {
+		return nil, refusedCart(refused)
 	}
 	var drafts []*orderDraft
 	for _, p := range priced {
@@ -305,7 +329,7 @@ func (s *service) priceRequestLine(ctx context.Context, i int, li LineInput, now
 	if err != nil {
 		return pricedLine{}, err
 	}
-	p := pricedLine{in: li, offer: co, policy: pol, payee: payee, amount: amt}
+	p := pricedLine{at: i, in: li, offer: co, policy: pol, payee: payee, amount: amt}
 	if co.FulfillmentType == catalog.FulfillPlatformNative {
 		if p.grant, err = templateOf(co); err != nil {
 			return pricedLine{}, err

@@ -5,7 +5,6 @@ import (
 	"uuid"
 
 	"koro/internal/authz"
-	"koro/internal/catalog"
 )
 
 // QuoteOrder implements Service (quoteOrder, BE-136): the orders createOrder
@@ -42,27 +41,16 @@ func (s *service) QuoteOrder(ctx context.Context, a authz.Actor, orgID uuid.UUID
 
 // stockLeft is quoteOrder's read of what catalog.Reserve (02 §18.2) would
 // refuse a line for buyer, without the row lock and without taking the
-// units. ForCheckout has already refused an offering that is sold out or
-// not on sale; what is left of Reserve's checks is the units left against
-// the line's quantity (catalog.sold_out) and the per-buyer limit against
-// the units the buyer holds on its open orders (catalog.per_buyer_limit;
-// BuyerHeld, the count catalog reads under the lock).
+// units: catalog's one stock rule (Stock.Refusal, BE-139) applied to the
+// checkout read. ForCheckout has already refused an offering that is sold
+// out or not on sale; the rule checks the units left against the line's
+// quantity (catalog.sold_out) and the per-buyer limit against the units
+// the buyer holds on its open orders (catalog.per_buyer_limit; BuyerHeld,
+// the count catalog reads under the lock).
 func (s *service) stockLeft(buyer uuid.UUID) func(context.Context, pricedLine) error {
 	return func(ctx context.Context, p pricedLine) error {
-		co, qty := p.offer, p.in.Quantity
-		if r := co.QuantityRemaining; r != nil && *r < qty {
-			return catalog.ErrSoldOut
-		}
-		if co.PerBuyerLimit == nil {
-			return nil
-		}
-		held, err := s.d.Store.BuyerHeld(ctx, co.ID, buyer)
-		if err != nil {
-			return err
-		}
-		if held+qty > *co.PerBuyerLimit {
-			return catalog.ErrPerBuyerLimit
-		}
-		return nil
+		return p.offer.Stock().Refusal(p.in.Quantity, func() (int, error) {
+			return s.d.Store.BuyerHeld(ctx, p.offer.ID, buyer)
+		})
 	}
 }

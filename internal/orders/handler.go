@@ -30,9 +30,12 @@ func Register(api huma.API, svc Service) {
 			"Prices, VAT, withholding and commission are computed per line on the server from the offering and the " +
 			"commerce policy in effect (none: 409 catalog.no_commerce_policy); lines under different money models become " +
 			"separate orders, each with its own reference code, while the lines of several sellers under one model share " +
-			"one order and one transfer. The stock of every line is reserved in the same transaction: when one line is " +
+			"one order and one transfer. The stock of every line is reserved in the same transaction: when a line is " +
 			"refused (sold out, not on sale, the per-buyer limit, no policy, an inactive payee) nothing is placed and the " +
-			"problem's errors[].location names the line (body.lines[i].offering_id). An unpaid order expires after the " +
+			"problem names every refused line of the cart, one errors[] entry each (location body.lines[i].offering_id, " +
+			"message the refusal's title; BE-139): first the lines that cannot be priced, in request order, then the " +
+			"stock refusals in offering ID order. status and code are the first refusal's, which is also errors[0]. " +
+			"An unpaid order expires after the " +
 			"payment window and releases its stock. When an offering of an unpaid order is cancelled before any money " +
 			"arrived, only its line leaves the order (lines[].dropped_at): the reference code stays, the amounts become " +
 			"the sums of the other lines and the buyer is told; the last line, or money already paid, cancels the order. " +
@@ -48,8 +51,8 @@ func Register(api huma.API, svc Service) {
 			"direct_to_payee_amount) — and written nowhere: no stock is reserved, no order or reference code, and no " +
 			"Idempotency-Key (it writes nothing to replay). Each line carries what the cart shows of its offering " +
 			"(title, seller, deliverables, unit price excluding VAT, VAT rate), so the cart needs no getOffering per " +
-			"line. A refused cart is refused as createOrder refuses it: the same status and code, errors[].location " +
-			"naming the line (body.lines[i].offering_id). The stock is only read: another buyer may still take the " +
+			"line. A refused cart is refused as createOrder refuses it: the same status and code, and the same errors[] " +
+			"naming every refused line (body.lines[i].offering_id). The stock is only read: another buyer may still take the " +
 			"last units, or a policy change the prices, before createOrder, whose answer is final. The buyer never " +
 			"sees the commission.",
 	}, op.Meta{Action: string(authz.OrdersOrderQuote), Surface: op.SurfaceOrg, RateLimit: op.RateSearch,

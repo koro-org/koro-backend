@@ -136,6 +136,22 @@ func atLine(i int, err error) error {
 	return pe.WithFields(problem.FieldError{Location: lineLoc(i), Message: pe.Title()})
 }
 
+// refusedCart is the one problem of a cart with refused lines (BE-139):
+// the status, code and title of the first refusal met (the one createOrder
+// returned alone before BE-139: lines that cannot be priced in request
+// order, then stock in offering ID order), so a client reading code or
+// errors[0] sees what it saw; errors[] carries every refused line's
+// entries in that same order (body.lines[i].offering_id, the message is
+// the refusal's title). A cart of one refused line is exactly atLine's
+// problem.
+func refusedCart(refused []*problem.Error) error {
+	var fields []problem.FieldError
+	for _, pe := range refused {
+		fields = append(fields, pe.Fields()...)
+	}
+	return refused[0].WithFields(fields...)
+}
+
 // lockOrder returns 0…n-1 sorted by the offering of each (offering(i)):
 // every path that locks several offering rows in one transaction — the
 // reservations of a placement, the release of an unpaid order's units —

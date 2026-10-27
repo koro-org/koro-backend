@@ -3,10 +3,12 @@
 package orders_test
 
 import (
+	"slices"
 	"sync"
 	"testing"
 	"uuid"
 
+	"koro/internal/authz"
 	"koro/internal/orders"
 	"koro/internal/parties"
 	"koro/internal/platform/idempotency"
@@ -186,6 +188,45 @@ func TestCreateOrder_Cart_OneLineSoldOut_ReservesNothing_Postgres(t *testing.T) 
 	}
 	if p.sold(t, first) != 2 || p.sold(t, last) != 1 {
 		t.Fatalf("units after the corrected cart = %d / %d", p.sold(t, first), p.sold(t, last))
+	}
+}
+
+// TestCreateOrder_Cart_SeveralRefusedLines_ReservesNothing_Postgres
+// (BE-139): a cart whose second and fourth lines are sold out goes on
+// reserving past the first refusal in the same transaction (a refusal is
+// no SQL error), names both lines in offering ID order under 409
+// catalog.sold_out, keeps none of the units its other lines took, writes
+// no order, and quoteOrder answers the same problem.
+func TestCreateOrder_Cart_SeveralRefusedLines_ReservesNothing_Postgres(t *testing.T) {
+	t.Parallel()
+	p, _ := pgCart(t)
+	first := p.cartOffering(t, p.seller, cartVAT{rate: 2000, class: "standard"}, 1_000_000, ptr(5))
+	mid := p.cartOffering(t, p.seller, cartVAT{rate: 2000, class: "standard"}, 1_000_000, ptr(1))
+	quota := p.platformOffering(t)
+	last := p.cartOffering(t, p.seller, cartVAT{rate: 2000, class: "standard"}, 1_000_000, ptr(1))
+	cart := []orders.LineInput{line(last, 2), line(first, 2), line(mid, 2), line(quota, 1)}
+	want := []string{"body.lines[2].offering_id", "body.lines[0].offering_id"} // mid < last (UUIDv7)
+	ctx := idempotency.WithKey(p.buyerActor(t), idempotency.Key{Scope: p.buyer.user.String() + ":POST /orgs/{org_id}/orders",
+		Value: "pg-cart-several-refused", Status: 201})
+	_, err := p.create(ctx, cart...)
+	problemtest.WantProblem(t, err, 409, "catalog.sold_out")
+	if f := problemFields(t, err); !slices.Equal(f, want) {
+		t.Fatalf("fields = %v, want %v", f, want)
+	}
+	if p.sold(t, first) != 0 || p.sold(t, mid) != 0 || p.sold(t, last) != 0 {
+		t.Fatalf("the refused cart kept units: %d / %d / %d", p.sold(t, first), p.sold(t, mid), p.sold(t, last))
+	}
+	if n := p.count(t, `SELECT count(*) FROM orders WHERE org_id = $1`, p.buyer.org); n != 0 {
+		t.Fatalf("the refused cart wrote %d orders", n)
+	}
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, qErr := p.mod.Service.QuoteOrder(ctx, a, p.buyer.org, orders.CreateInput{BuyerPartyID: p.buyer.party, Lines: cart})
+	problemtest.WantProblem(t, qErr, 409, "catalog.sold_out")
+	if f := problemFields(t, qErr); !slices.Equal(f, want) {
+		t.Fatalf("quote fields = %v, want %v", f, want)
 	}
 }
 

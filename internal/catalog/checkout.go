@@ -33,10 +33,11 @@ func (s *service) ForCheckout(ctx context.Context, offeringID uuid.UUID) (Checko
 }
 
 // Reserve implements Offerings (02 §18.2): in the caller's transaction
-// (its own without one) the offering row is locked, the per-buyer limit is
-// checked against the buyer's open orders (BuyerHeld, read under the lock,
-// so two orders of one buyer cannot both pass), then one conditional
-// UPDATE takes the units; the last one turns the offering sold_out.
+// (its own without one) the offering row is locked, the stock rule is
+// applied to the locked row (Stock.Refusal: the per-buyer limit against
+// the buyer's open orders, BuyerHeld, read under the lock, so two orders
+// of one buyer cannot both pass), then one conditional UPDATE takes the
+// units; the last one turns the offering sold_out.
 func (s *service) Reserve(ctx context.Context, offeringID uuid.UUID, qty int, buyerOrgID uuid.UUID) error {
 	if qty <= 0 || qty > maxQuantity {
 		return problem.Field("quantity", "must be 1-100000")
@@ -47,19 +48,21 @@ func (s *service) Reserve(ctx context.Context, offeringID uuid.UUID, qty int, bu
 			return err
 		}
 		now := s.now()
-		if err := reserveRefusal(cur, qty, now); err != nil {
+		if err := saleRefusal(cur, now); err != nil {
 			return err
 		}
-		if cur.PerBuyerLimit != nil {
-			held := 0
-			if s.d.BuyerHeld != nil {
-				if held, err = s.d.BuyerHeld(ctx, cur.ID, buyerOrgID); err != nil {
-					return fmt.Errorf("catalog: buyer's units: %w", err)
-				}
+		held := func() (int, error) {
+			if s.d.BuyerHeld == nil {
+				return 0, nil
 			}
-			if held+qty > *cur.PerBuyerLimit {
-				return ErrPerBuyerLimit
+			n, err := s.d.BuyerHeld(ctx, cur.ID, buyerOrgID)
+			if err != nil {
+				return 0, fmt.Errorf("catalog: buyer's units: %w", err)
 			}
+			return n, nil
+		}
+		if err := cur.Stock().Refusal(qty, held); err != nil {
+			return err
 		}
 		_, ok, err := s.d.Store.Reserve(ctx, cur.ID, qty, now)
 		if err != nil {
@@ -72,7 +75,7 @@ func (s *service) Reserve(ctx context.Context, offeringID uuid.UUID, qty int, bu
 			if err != nil {
 				return err
 			}
-			if err := reserveRefusal(again, qty, now); err != nil {
+			if err := saleRefusal(again, now); err != nil {
 				return err
 			}
 			return ErrSoldOut
@@ -81,17 +84,59 @@ func (s *service) Reserve(ctx context.Context, offeringID uuid.UUID, qty int, bu
 	})
 }
 
-// reserveRefusal is why qty units of o cannot be reserved at now (nil when
-// they can, as far as the row tells).
-func reserveRefusal(o Offering, qty int, now time.Time) error {
+// saleRefusal is why o cannot be reserved at all at now (nil when it is on
+// sale, as far as the row tells): sold out, or not on sale.
+func saleRefusal(o Offering, now time.Time) error {
 	if o.Status == OfferingSoldOut {
 		return ErrSoldOut
 	}
 	if !o.OnSaleAt(now) {
 		return ErrNotOnSale
 	}
-	if r := o.Remaining(); r != nil && *r < qty {
+	return nil
+}
+
+// Stock is what the stock rule of an offering reads (02 §18.2): the units
+// left (nil: unlimited) and the per-buyer limit (nil: none).
+type Stock struct {
+	Remaining     *int
+	PerBuyerLimit *int
+}
+
+// Stock is the offering's stock as the row tells it now.
+func (o Offering) Stock() Stock {
+	return Stock{Remaining: o.Remaining(), PerBuyerLimit: o.PerBuyerLimit}
+}
+
+// Stock is the stock of the offering as ForCheckout read it.
+func (c CheckoutOffering) Stock() Stock {
+	return Stock{Remaining: c.QuantityRemaining, PerBuyerLimit: c.PerBuyerLimit}
+}
+
+// Refusal is the stock rule of an offering on sale (02 §18.2), the one
+// place it is written (BE-139): qty more units for a buyer are refused
+// with ErrSoldOut when fewer than qty units are left, and with
+// ErrPerBuyerLimit when the units the buyer already holds on its open
+// orders (held; read only when the offering has a limit, nil → 0) plus qty
+// exceed per_buyer_limit. nil: the units can be taken. Reserve applies it
+// to the locked row before it takes the units; orders' quoteOrder applies
+// it to the checkout read, taking nothing.
+func (st Stock) Refusal(qty int, held func() (int, error)) error {
+	if r := st.Remaining; r != nil && *r < qty {
 		return ErrSoldOut
+	}
+	if st.PerBuyerLimit == nil {
+		return nil
+	}
+	n := 0
+	if held != nil {
+		var err error
+		if n, err = held(); err != nil {
+			return err
+		}
+	}
+	if n+qty > *st.PerBuyerLimit {
+		return ErrPerBuyerLimit
 	}
 	return nil
 }

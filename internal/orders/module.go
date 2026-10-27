@@ -39,8 +39,9 @@
 //     transaction in offering ID order (no deadlock between carts); one
 //     refused line (sold out, not on sale, the per-buyer limit, no
 //     policy, an inactive payee) refuses the cart, nothing stays reserved,
-//     and the problem names the line (errors[].location
-//     body.lines[i].offering_id). Delivery, refunds, invoices and payouts
+//     and the problem names every refused line, one errors[] entry each
+//     (body.lines[i].offering_id), under the first refusal's status and
+//     code (BE-139). Delivery, refunds, invoices and payouts
 //     are per line.
 //   - The price preview (BE-136, quote.go): quoteOrder takes createOrder's
 //     body and runs createOrder's own checkout, pricing, split and totals

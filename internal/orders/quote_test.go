@@ -113,8 +113,9 @@ func TestQuoteOrder_SameCart_EqualsPlacement(t *testing.T) {
 // errors[] (body.lines[i].offering_id) — including the stock the quote only
 // reads: more units than are left (catalog.sold_out) and the per-buyer
 // limit counting the buyer's open orders (catalog.per_buyer_limit), with
-// the first line in offering ID order named as the placement names it, and
-// no policy in effect. A refused quote writes nothing either.
+// the lines named in the order the placement names them, and no policy in
+// effect. A cart of several refused lines names every one, under the first
+// refusal's status and code (BE-139). A refused quote writes nothing either.
 func TestQuoteOrder_RefusalsMatchCreateOrder(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -129,6 +130,7 @@ func TestQuoteOrder_RefusalsMatchCreateOrder(t *testing.T) {
 	small := e.offering(t, func(o *catalog.Offering) { o.QuantityTotal = ptr(1) })
 	tiny := e.offering(t, func(o *catalog.Offering) { o.QuantityTotal = ptr(1) })
 	limited := e.offering(t, func(o *catalog.Offering) { o.PerBuyerLimit = ptr(2) })
+	unknown := uuid.NewV7()
 	a := actor(t, "company_admin")
 	ctx := ctxOf(t, a)
 	cases := []struct {
@@ -140,9 +142,13 @@ func TestQuoteOrder_RefusalsMatchCreateOrder(t *testing.T) {
 		{"one line per offering", []orders.LineInput{line(open, 1), line(open, 1)}, []string{"body.lines[1].offering_id"}},
 		{"inactive payee", []orders.LineInput{line(open, 1), line(inactive, 1)}, []string{"body.lines[1].offering_id"}},
 		{"more units than are left", []orders.LineInput{line(open, 1), line(small, 2)}, []string{"body.lines[1].offering_id"}},
-		{"two lines sold out", []orders.LineInput{line(tiny, 2), line(open, 1), line(small, 2)}, []string{"body.lines[2].offering_id"}},
+		{"two lines sold out", []orders.LineInput{line(tiny, 2), line(open, 1), line(small, 2)}, []string{"body.lines[2].offering_id", "body.lines[0].offering_id"}},
 		{"over the per-buyer limit", []orders.LineInput{line(limited, 3)}, []string{"body.lines[0].offering_id"}},
 		{"unknown offering", []orders.LineInput{line(open, 1), line(uuid.NewV7(), 1)}, []string{"body.lines[1].offering_id"}},
+		// BE-139: every refused line is named — the lines that cannot be
+		// priced in request order, then stock in offering ID order.
+		{"every refused line", []orders.LineInput{line(draft, 1), line(open, 1), line(inactive, 1), line(limited, 3), line(small, 2), line(unknown, 1)},
+			[]string{"body.lines[0].offering_id", "body.lines[2].offering_id", "body.lines[5].offering_id", "body.lines[4].offering_id", "body.lines[3].offering_id"}},
 		{"quantity out of range", []orders.LineInput{line(open, 1001)}, []string{"body.lines[0].quantity"}},
 		{"no line", nil, []string{"body.lines"}},
 	}
@@ -157,6 +163,8 @@ func TestQuoteOrder_RefusalsMatchCreateOrder(t *testing.T) {
 		}
 	}
 	e.wroteNothing(t, open, small, tiny, limited)
+	// The cart's problem is its first refusal's (status, code, errors[0]).
+	problemtest.WantProblem(t, quoted[len(cases)-3], 409, "catalog.not_on_sale")
 	for i, tc := range cases {
 		_, err := e.svc.CreateOrder(ctx, a, org("company_a"), orders.CreateInput{BuyerPartyID: e.partyA, Lines: tc.lines})
 		if err == nil {

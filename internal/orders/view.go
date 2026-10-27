@@ -70,6 +70,11 @@ type OrderView struct {
 	Lines      []Line
 	Sellers    map[uuid.UUID]string // seller org → name
 	SellerView bool
+	// SellerStatus is set in the seller view only: the order's status from
+	// the seller's own lines (sellerStatus; Q-31, BE-141). The seller DTO
+	// shows it in place of Order.Status, which may come from another
+	// seller's dispute or refund.
+	SellerStatus Status
 	// DirectStatus is set only for a reader who may see the direct
 	// transfers (getOrder, BE-109): an unpaid, unconfirmed model C order
 	// read by an MFA-verified buyer administrator. Empty for every other
@@ -125,13 +130,15 @@ type Instructions struct {
 }
 
 // SalesItem is one sold line of listOrgSales with its order's reference
-// and the buyer's title.
+// and the buyer's title. SellerStatus is the order's status from the
+// selling org's own lines of it (sellerStatus; Q-31, BE-141), never the
+// order's status, which may come from another seller's lines.
 type SalesItem struct {
-	Line        Line
-	OrderNo     string
-	BuyerTitle  string
-	OrderStatus Status
-	Currency    string
+	Line         Line
+	OrderNo      string
+	BuyerTitle   string
+	SellerStatus Status
+	Currency     string
 }
 
 // SalesPage is a page of sold lines.
@@ -140,11 +147,15 @@ type SalesPage struct {
 	Next  *TimeKey
 }
 
-// LineView is one line after a delivery action.
+// LineView is one line after a delivery action. OrderStatus is the
+// order's status for the buyer and staff; when a seller acts on its line
+// (SellerView: markOrderLineFulfilled by the seller's admin) it is the
+// status of that seller's lines only (sellerStatus; Q-31, BE-141).
 type LineView struct {
 	Line        Line
 	OrderNo     string
 	OrderStatus Status
+	SellerView  bool
 }
 
 // ---- the contract of payments, ledger and billing

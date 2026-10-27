@@ -73,7 +73,8 @@ func Register(api huma.API, svc Service) {
 			"are in getOrderPaymentInstructions). MFA-verified buyer administrators get direct_payments_status; when a " +
 			"payee has no approved bank account (unavailable) the order still reads in full and only the payment " +
 			"instructions answer 409. A seller's club admin or university representative gets only its " +
-			"own lines with its net share and the commission, and the buyer's title (view seller). Anyone else: 404. " +
+			"own lines with its net share and the commission, the buyer's title, and status = seller_status: the " +
+			"status of its own lines only, never another seller's dispute or refund (view seller; Q-31). Anyone else: 404. " +
 			"A line with dropped_at left the unpaid order when its offering was cancelled: the order's amounts are the " +
 			"sums of the other lines.",
 	}, op.Meta{Action: string(authz.OrdersOrderRead), Surface: op.SurfaceResource}, h.get)
@@ -100,7 +101,9 @@ func Register(api huma.API, svc Service) {
 	op.Register(api, "orders", huma.Operation{
 		OperationID: "listOrgSales", Method: http.MethodGet, Path: "/orgs/{org_id}/sales",
 		Summary: "List the sold order lines of an organization",
-		Description: "The seller's lines, newest first, with the order's reference and status and the buyer's title. " +
+		Description: "The seller's lines, newest first, with the order's reference, the buyer's title and seller_status: " +
+			"the order's status from this organization's own lines of it alone (Q-31, BE-141), so another seller's " +
+			"dispute, refund or delivery never shows (order_status, deprecated, carries the same value). " +
 			"A line with dropped_at left its unpaid order when the offering was cancelled.",
 	}, op.Meta{Action: string(authz.OrdersLineListSales), Surface: op.SurfaceOrg}, h.sales)
 
@@ -112,7 +115,8 @@ func Register(api huma.API, svc Service) {
 			"evidence_file_id, optional, is a completed delivery_evidence upload (a photo or a PDF) of the selling " +
 			"organization (422 otherwise; 409 files.rejected or files.not_clean when the upload was rejected or found " +
 			"infected, 409 files.already_attached when another record uses it): it is attached to the line for good and " +
-			"the buyer's administrators, finance and platform admins see it (getOrderLineEvidence).",
+			"the buyer's administrators, finance and platform admins see it (getOrderLineEvidence). The seller's admin " +
+			"reads back order_status = seller_status, the status of its own lines (Q-31, BE-141).",
 	}, op.Meta{Action: string(authz.OrdersLineMarkFulfilled), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional},
 		h.mark)
 
@@ -213,12 +217,14 @@ type OrderLineDTO struct {
 // OrderDTO is 04 §C.2 OrderDTO (view buyer: the buyer's members and staff)
 // or SellerOrderView (view seller, 03 k26: order_no, buyer_title,
 // placed_at, status, model_code, paid_at and the seller's own lines only;
-// model_code and paid_at since BE-127).
+// model_code and paid_at since BE-127; in the seller view status is
+// seller_status, the status of the seller's own lines, Q-31, BE-141).
 type OrderDTO struct {
 	OrderID             string            `json:"order_id" format:"uuid"`
 	OrderNo             string            `json:"order_no" doc:"The bank transfer reference code"`
 	View                string            `json:"view" enum:"buyer,seller"`
-	Status              string            `json:"status" doc:"completed: every line is final (fulfilled, cancelled, or its service refunded in full); a completed order may have been refunded in part (refunded_amount, the lines' refunded_amount). partially_refunded: part of the money went back while a line is still to deliver; the order completes once every line is final. refunded: all of the money went back"`
+	Status              string            `json:"status" doc:"completed: every line is final (fulfilled, cancelled, or its service refunded in full); a completed order may have been refunded in part (refunded_amount, the lines' refunded_amount). partially_refunded: part of the money went back while a line is still to deliver; the order completes once every line is final. refunded: all of the money went back. Seller view: the same value as seller_status (the seller's own lines only, never another seller's dispute or refund; Q-31)"`
+	SellerStatus        string            `json:"seller_status,omitempty" doc:"Seller view only (Q-31, BE-141): the order's status computed from the reader's own lines alone, by the rule of status. awaiting_payment, expired, cancelled and refunded (all of the order's money went back) are the whole order's; cancelled also when every one of the seller's lines dropped out of the unpaid order. Otherwise from the seller's lines: completed (each final, one fulfilled), partially_refunded (one of them refunded in part), refunded (all of what Koro holds of them went back), disputed, in_fulfilment, paid. Another seller's lines, amounts, disputes and refunds never show"`
 	Currency            string            `json:"currency"`
 	PlacedAt            time.Time         `json:"placed_at"`
 	BuyerTitle          string            `json:"buyer_title,omitempty" doc:"Seller view: the billed company's title"`
@@ -264,8 +270,10 @@ func orderDTO(v OrderView) OrderDTO {
 	out.ModelCode, out.PaidAt = o.ModelCode, db.UTCPtr(o.PaidAt)
 	if v.SellerView {
 		// 03 k26 (BE-127): how and when the order was paid, never the
-		// amounts or the buyer's payment details.
+		// amounts or the buyer's payment details; the status of the seller's
+		// own lines, never the order's (Q-31, BE-141).
 		out.View, out.BuyerTitle = "seller", o.BuyerSnapshot.Title
+		out.Status, out.SellerStatus = string(v.SellerStatus), string(v.SellerStatus)
 	} else {
 		b := o.BuyerSnapshot
 		out.OrgID = o.OrgID.String()
@@ -701,12 +709,15 @@ func (h handler) cancel(ctx context.Context, in *cancelOrderInput) (*orderOutput
 
 // ---- sales
 
-// SellerLineDTO is 04 §2.15 SellerLineDTO (+ the order's status).
+// SellerLineDTO is 04 §2.15 SellerLineDTO (+ the order's status as the
+// seller sees it: seller_status, Q-31, BE-141; order_status is the same
+// value, deprecated).
 type SellerLineDTO struct {
 	LineID              string     `json:"line_id" format:"uuid"`
 	OrderID             string     `json:"order_id" format:"uuid"`
 	OrderNo             string     `json:"order_no"`
-	OrderStatus         string     `json:"order_status" doc:"A line is delivered only once its order is paid"`
+	SellerStatus        string     `json:"seller_status" doc:"The order's status as this organization sees it (Q-31, BE-141): from all of its own lines of the order, never another seller's (OrderDTO.seller_status has the rule). A line is delivered only once its order is paid (not awaiting_payment)"`
+	OrderStatus         string     `json:"order_status" deprecated:"true" doc:"Deprecated (BE-141): the same value as seller_status, the status of this organization's own lines of the order, not the order's own status (a seller never sees another seller's dispute or refund, Q-31); read seller_status. Kept for existing clients"`
 	Currency            string     `json:"currency" doc:"The order's currency (ISO 4217) of the amounts"`
 	BuyerTitle          string     `json:"buyer_title"`
 	TitleSnapshot       string     `json:"title_snapshot"`
@@ -754,7 +765,8 @@ func (h handler) sales(ctx context.Context, in *salesInput) (*salesOutput, error
 	for i, it := range p.Items {
 		l := it.Line
 		out.Body.Items[i] = SellerLineDTO{LineID: l.ID.String(), OrderID: l.OrderID.String(), OrderNo: it.OrderNo,
-			OrderStatus: string(it.OrderStatus), Currency: it.Currency, BuyerTitle: it.BuyerTitle, TitleSnapshot: l.TitleSnapshot, Quantity: l.Quantity,
+			SellerStatus: string(it.SellerStatus), OrderStatus: string(it.SellerStatus), Currency: it.Currency, BuyerTitle: it.BuyerTitle,
+			TitleSnapshot: l.TitleSnapshot, Quantity: l.Quantity,
 			GrossAmount: l.GrossAmount, SellerNetAmount: l.SellerNetAmount, FulfillmentStatus: string(l.FulfillmentStatus),
 			DisputeWindowEndsAt: db.UTCPtr(l.DisputeWindowEndsAt), PaidOutAt: db.UTCPtr(l.PaidOutAt),
 			HasEvidence: l.FulfillmentEvidenceFileID != nil, DroppedAt: db.UTCPtr(l.DroppedAt)}
@@ -772,7 +784,8 @@ type LineStateDTO struct {
 	LineID              string     `json:"line_id" format:"uuid"`
 	OrderID             string     `json:"order_id" format:"uuid"`
 	OrderNo             string     `json:"order_no"`
-	OrderStatus         string     `json:"order_status"`
+	OrderStatus         string     `json:"order_status" doc:"The order's status; when the seller's admin marks its line (markOrderLineFulfilled), the same value as seller_status: the seller's own lines only (Q-31, BE-141)"`
+	SellerStatus        string     `json:"seller_status,omitempty" doc:"Set when the seller's admin marks its line: the order's status from that seller's own lines (OrderDTO.seller_status has the rule)"`
 	FulfillmentStatus   string     `json:"fulfillment_status"`
 	DisputeWindowEndsAt *time.Time `json:"dispute_window_ends_at,omitempty"`
 	FulfilledAt         *time.Time `json:"fulfilled_at,omitempty"`
@@ -787,6 +800,9 @@ func lineOut(v LineView) *lineOutput {
 	d := LineStateDTO{LineID: l.ID.String(), OrderID: l.OrderID.String(), OrderNo: v.OrderNo, OrderStatus: string(v.OrderStatus),
 		FulfillmentStatus: string(l.FulfillmentStatus), DisputeWindowEndsAt: db.UTCPtr(l.DisputeWindowEndsAt), FulfilledAt: db.UTCPtr(l.FulfilledAt),
 		HasEvidence: l.FulfillmentEvidenceFileID != nil}
+	if v.SellerView {
+		d.SellerStatus = string(v.OrderStatus)
+	}
 	if l.FulfilledVia != nil {
 		d.FulfilledVia = string(*l.FulfilledVia)
 	}

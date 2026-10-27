@@ -159,6 +159,17 @@ func koroHeld(direct bool, l Line) int64 {
 	return l.PayableAmount
 }
 
+// directAmount is what the buyer pays line l's payee directly on model C
+// order o (the line's payable amount without Koro's buyer fee: the direct
+// transfers of directPlan, the warning of a dropped line, Q-32a); 0 on
+// any other order.
+func directAmount(o Order, l Line) int64 {
+	if !o.DirectToPayee() {
+		return 0
+	}
+	return l.PayableAmount - l.BuyerFeeAmount
+}
+
 // LinesDroppable reports whether a line may still drop out of o (Q-28c,
 // BE-134): the order awaits payment and took no money — no transfer was
 // matched to it, not even in part, and no direct payment was confirmed

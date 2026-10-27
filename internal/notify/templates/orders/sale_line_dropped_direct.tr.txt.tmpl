@@ -1,0 +1,9 @@
+Merhaba {{index .Data "name"}},
+
+Teklifiniz sipariş ödenmeden önce iptal edildi; bu nedenle kalemi ({{index .Data "line_title"}}) siparişten çıkarıldı ve ayrılan paketler serbest kaldı.
+
+Sipariş referansı: {{index .Data "reference_code"}}
+Alıcı: {{index .Data "buyer_title"}}
+Kalemin doğrudan ödeme tutarı: {{index .Data "direct_amount"}} {{index .Data "currency"}}
+
+Bu kalem için alıcıdan doğrudan ödeme aldıysanız iade edin. Bu ödeme Koro hesabından geçmediği için iadeyi alıcıya siz yaparsınız.

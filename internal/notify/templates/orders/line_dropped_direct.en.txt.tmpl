@@ -1,0 +1,11 @@
+Hello {{index .Data "name"}},
+
+An offering of your order was cancelled before payment, so its line ({{index .Data "line_title"}}) was removed and the order amounts were recalculated. The other lines stay in the order.
+
+Reference code: {{index .Data "reference_code"}} (unchanged)
+{{if index .Data "koro_due"}}New amount to pay Koro: {{index .Data "amount"}} {{index .Data "currency"}}
+{{end}}Pay by: {{index .Data "expires_at"}} (Türkiye time)
+
+If you already paid the seller directly for this line, ask the seller for the refund. Seller: {{index .Data "seller_name"}}; the line's direct payment amount: {{index .Data "direct_amount"}} {{index .Data "currency"}}. This payment does not go through Koro's account, so the seller refunds it.
+
+The amounts to pay the sellers directly are updated on the payment instructions page; pay only those amounts. If you already sent Koro the previous amount, the difference is refunded to you.

@@ -1,0 +1,9 @@
+Hello {{index .Data "name"}},
+
+Your offering was cancelled before the order was paid, so its line ({{index .Data "line_title"}}) was removed from the order and its reserved packages were released.
+
+Order reference: {{index .Data "reference_code"}}
+Buyer: {{index .Data "buyer_title"}}
+The line's direct payment amount: {{index .Data "direct_amount"}} {{index .Data "currency"}}
+
+If you received a direct payment from the buyer for this line, refund it. This payment does not go through Koro's account, so you refund it to the buyer.

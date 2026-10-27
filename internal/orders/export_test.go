@@ -1,7 +1,8 @@
 package orders
 
 // Test-only access to the pure money, reference code and status helpers
-// (pricing_test.go and partial_refund_test.go are package orders_test).
+// (pricing_test.go, partial_refund_test.go and seller_status_test.go are
+// package orders_test).
 type (
 	PriceInput  = priceInput
 	LineAmounts = lineAmounts
@@ -10,6 +11,7 @@ type (
 
 var (
 	ProgressStatus = progressStatus
+	SellerStatus   = sellerStatus
 	PriceLine      = priceLine
 	TotalsOf       = totalsOf
 	NewReference   = newReference

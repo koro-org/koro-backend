@@ -12,6 +12,7 @@ import (
 
 // TransformSchema implements huma.SchemaTransformer.
 func (SellerLineDTO) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
+	op.SetEnum(s, "seller_status", Statuses())
 	op.SetEnum(s, "order_status", Statuses())
 	return op.SetEnum(s, "fulfillment_status", Fulfillments())
 }
@@ -19,6 +20,7 @@ func (SellerLineDTO) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Sche
 // TransformSchema implements huma.SchemaTransformer.
 func (LineStateDTO) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
 	op.SetEnum(s, "order_status", Statuses())
+	op.SetEnum(s, "seller_status", Statuses())
 	op.SetEnum(s, "fulfillment_status", Fulfillments())
 	return op.SetEnum(s, "fulfilled_via", FulfilledVias())
 }
@@ -32,6 +34,7 @@ func (OrderCardDTO) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schem
 // TransformSchema implements huma.SchemaTransformer.
 func (OrderDTO) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
 	op.SetEnum(s, "status", Statuses())
+	op.SetEnum(s, "seller_status", Statuses())
 	return op.SetEnum(s, "model_code", ModelCodes())
 }
 

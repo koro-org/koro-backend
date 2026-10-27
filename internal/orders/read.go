@@ -35,7 +35,9 @@ func (s *service) fullView(ctx context.Context, id uuid.UUID) (OrderView, error)
 	return s.viewOf(ctx, o, lines, false)
 }
 
-// viewOf adds the seller names to an order and its (visible) lines.
+// viewOf adds the seller names to an order and its (visible) lines; the
+// seller view (lines: the seller's own) carries the seller's status of
+// the order (Q-31, BE-141).
 func (s *service) viewOf(ctx context.Context, o Order, lines []Line, seller bool) (OrderView, error) {
 	names, err := s.d.Orgs.GetMany(ctx, sellersOf(lines))
 	if err != nil {
@@ -45,13 +47,24 @@ func (s *service) viewOf(ctx context.Context, o Order, lines []Line, seller bool
 	for id, n := range names {
 		v.Sellers[id] = n.Name
 	}
+	if seller {
+		v.SellerStatus = sellerStatus(o, lines)
+	}
 	return v, nil
+}
+
+// fullReader reports whether a reads the whole of an order of buyer (the
+// buyer's members and platform staff); anyone else authorised on it acts
+// for a seller and sees only its own lines and their status (03 k26, Q-31).
+func fullReader(a authz.Actor, buyer uuid.UUID) bool {
+	return a.HasOrgRole(buyer, authz.MemberRecruiter, authz.MemberCompanyAdmin, authz.MemberCompanyOwner) || staff(a)
 }
 
 // GetOrder implements Service (orders.order.read): the buyer's members and
 // platform staff see the whole order; a seller's club_admin,
-// university_rep or career_staff sees only its own lines and the buyer's
-// title (03 k26: no totals, no payment, no other seller).
+// university_rep or career_staff sees only its own lines, their status
+// (sellerStatus: never another seller's dispute or refund; Q-31) and the
+// buyer's title (03 k26: no totals, no payment, no other seller).
 func (s *service) GetOrder(ctx context.Context, a authz.Actor, id uuid.UUID) (OrderView, error) {
 	o, lines, err := s.loadOrder(ctx, id)
 	if err != nil {
@@ -60,7 +73,7 @@ func (s *service) GetOrder(ctx context.Context, a authz.Actor, id uuid.UUID) (Or
 	if err := authz.Can(ctx, a, authz.OrdersOrderRead, orderResource(o, lines)); err != nil {
 		return OrderView{}, err
 	}
-	if a.HasOrgRole(o.OrgID, authz.MemberRecruiter, authz.MemberCompanyAdmin, authz.MemberCompanyOwner) || staff(a) {
+	if fullReader(a, o.OrgID) {
 		v, err := s.viewOf(ctx, o, lines, false)
 		if err == nil {
 			v.DirectStatus, err = s.orderDirect(ctx, a, o, lines)
@@ -177,7 +190,7 @@ func (s *service) directPlan(ctx context.Context, o Order, lines []Line) ([]Dire
 	amounts := make(map[uuid.UUID]int64)
 	var ids []uuid.UUID
 	for _, l := range liveLines(lines) { // a dropped line is not paid (BE-134): its payee gets no transfer
-		amount := l.PayableAmount - l.BuyerFeeAmount
+		amount := directAmount(o, l)
 		if amount == 0 {
 			continue
 		}
@@ -296,8 +309,10 @@ func orderPage(rows []Order, limit int) OrderPage {
 }
 
 // ListOrgSales implements Service (orders.line.list_sales): the lines the
-// org sold, newest first, with the order's reference, status and the
-// buyer's title.
+// org sold, newest first, with the order's reference, the buyer's title
+// and the order's status as the org sees it: from all of the org's lines
+// of the order, not only those on the page, and none of another seller's
+// (sellerStatus; Q-31, BE-141).
 func (s *service) ListOrgSales(ctx context.Context, a authz.Actor, orgID uuid.UUID, q SalesQuery) (SalesPage, error) {
 	o, err := s.org(ctx, orgID)
 	if err != nil {
@@ -317,17 +332,27 @@ func (s *service) ListOrgSales(ctx context.Context, a authz.Actor, orgID uuid.UU
 	rows, more := page.Cut(rows, limit)
 	ids := make([]uuid.UUID, 0, len(rows))
 	for _, l := range rows {
-		ids = append(ids, l.OrderID)
+		if !slices.Contains(ids, l.OrderID) {
+			ids = append(ids, l.OrderID)
+		}
 	}
 	orders, err := s.d.Store.OrdersByID(ctx, ids)
 	if err != nil {
 		return SalesPage{}, err
 	}
+	byOrder, err := s.d.Store.LinesOf(ctx, ids)
+	if err != nil {
+		return SalesPage{}, err
+	}
+	status := make(map[uuid.UUID]Status, len(orders))
+	for id, ord := range orders {
+		status[id] = sellerStatus(ord, sellerLines(byOrder[id], o.ID))
+	}
 	out := SalesPage{Items: make([]SalesItem, 0, len(rows))}
 	for _, l := range rows {
 		ord := orders[l.OrderID]
-		out.Items = append(out.Items, SalesItem{Line: l, OrderNo: ord.OrderNo, BuyerTitle: ord.BuyerSnapshot.Title, OrderStatus: ord.Status,
-			Currency: ord.Currency})
+		out.Items = append(out.Items, SalesItem{Line: l, OrderNo: ord.OrderNo, BuyerTitle: ord.BuyerSnapshot.Title,
+			SellerStatus: status[l.OrderID], Currency: ord.Currency})
 	}
 	if more {
 		last := rows[len(rows)-1]

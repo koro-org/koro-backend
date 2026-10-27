@@ -203,31 +203,93 @@ func progressStatus(o Order, lines []Line) Status {
 	default:
 		return o.Status
 	}
-	disputed, allDone, fulfilled, started := false, true, false, false
+	return progressOf(o, lines).status(o.Status == StatusPartiallyRefunded)
+}
+
+// lineProgress is what some lines of a paid order say about its running
+// status: the one rule of progressStatus (every line of the order) and
+// sellerStatus (one seller's lines, Q-31).
+type lineProgress struct {
+	disputed, allDone, fulfilled, started bool
+}
+
+// progressOf reads lines of o: a line is final when it is fulfilled,
+// cancelled (dropped lines included) or its service was refunded in full
+// through Koro (fullyRefundedService); disputed and marked lines started
+// the delivery and are not final, a pending one is neither.
+func progressOf(o Order, lines []Line) lineProgress {
+	p := lineProgress{allDone: true}
 	for _, l := range lines {
 		switch {
 		case l.FulfillmentStatus == FulfillFulfilled:
-			fulfilled, started = true, true
+			p.fulfilled, p.started = true, true
 		case l.FulfillmentStatus == FulfillCancelled, fullyRefundedService(o, l):
 		case l.FulfillmentStatus == FulfillDisputed:
-			disputed, allDone, started = true, false, true
+			p.disputed, p.allDone, p.started = true, false, true
 		case l.FulfillmentStatus == FulfillMarked:
-			allDone, started = false, true
+			p.allDone, p.started = false, true
 		default:
-			allDone = false
+			p.allDone = false
 		}
 	}
+	return p
+}
+
+// status is the running status of a paid order from its lines' progress:
+// completed once every line is final and one was fulfilled; until then
+// partially_refunded when part of the money went back (refunded), disputed
+// while a line is disputed, in_fulfilment once a line is marked or
+// fulfilled, paid before.
+func (p lineProgress) status(refunded bool) Status {
 	switch {
-	case allDone && fulfilled:
+	case p.allDone && p.fulfilled:
 		return StatusCompleted
-	case o.Status == StatusPartiallyRefunded:
+	case refunded:
 		return StatusPartiallyRefunded
-	case disputed:
+	case p.disputed:
 		return StatusDisputed
-	case started:
+	case p.started:
 		return StatusInFulfilment
 	}
 	return StatusPaid
+}
+
+// sellerStatus is the status of order o as a seller sees it (Q-31, user
+// decision 2026-10-27; BE-141, T-383): computed from that seller's own
+// lines (own), never from another seller's. The states of the order as a
+// whole are every seller's: awaiting_payment, cancelled and expired (before
+// payment) and refunded (all of the order's money went back, so nothing of
+// any line is left). Otherwise it is progressStatus's rule (progressOf,
+// lineProgress.status: the same final lines, BE-135) over the seller's
+// lines, partially_refunded only when one of them was refunded in part and
+// refunded when all of the money Koro holds of them went back. A seller
+// whose every line dropped out of the unpaid order (BE-134) sees it
+// cancelled. So another seller's dispute, refund, delivery or completion
+// never shows; for an order of one seller whose refunds name its lines the
+// result is the order's status.
+func sellerStatus(o Order, own []Line) Status {
+	live := liveLines(own)
+	if len(live) == 0 {
+		return StatusCancelled
+	}
+	switch o.Status {
+	case StatusAwaitingPayment, StatusCancelled, StatusExpired, StatusRefunded:
+		return o.Status
+	}
+	var held, refunded int64
+	for _, l := range live {
+		held, refunded = held+o.KoroHeld(l), refunded+l.RefundedAmount
+	}
+	if held > 0 && refunded >= held {
+		return StatusRefunded
+	}
+	return progressOf(o, live).status(refunded > 0)
+}
+
+// sellerLines are the lines of the sellers in sellers (03 k26: what a
+// seller org may see of an order).
+func sellerLines(lines []Line, sellers ...uuid.UUID) []Line {
+	return slices.DeleteFunc(slices.Clone(lines), func(l Line) bool { return !slices.Contains(sellers, l.SellerOrgID) })
 }
 
 // moveTo is o in status st: an order that completes for the first time

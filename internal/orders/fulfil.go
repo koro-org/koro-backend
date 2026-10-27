@@ -58,7 +58,10 @@ func (s *service) MarkLineFulfilled(ctx context.Context, a authz.Actor, lineID u
 	if err != nil {
 		return LineView{}, err
 	}
-	return s.lineChange(ctx, hash, lineID, func(ctx context.Context, o Order, cur Line, now time.Time) (Line, error) {
+	// The seller's admin reads its own lines' status back, never the order's
+	// (Q-31, BE-141); a platform admin marking for the seller reads the order's.
+	seller := !fullReader(a, l.OrgID)
+	return s.lineChange(ctx, hash, lineID, seller, func(ctx context.Context, o Order, cur Line, now time.Time) (Line, error) {
 		switch {
 		case o.Status == StatusAwaitingPayment:
 			return Line{}, ErrOrderNotPaid
@@ -124,7 +127,7 @@ func (s *service) ConfirmLine(ctx context.Context, a authz.Actor, lineID uuid.UU
 	if err != nil {
 		return LineView{}, err
 	}
-	return s.lineChange(ctx, hash, lineID, func(ctx context.Context, o Order, cur Line, now time.Time) (Line, error) {
+	return s.lineChange(ctx, hash, lineID, false, func(ctx context.Context, o Order, cur Line, now time.Time) (Line, error) {
 		if !deliverable(o.Status) || fullyRefundedService(o, cur) || cur.FulfillmentStatus != FulfillMarked {
 			return Line{}, ErrInvalidState
 		}
@@ -173,7 +176,7 @@ func (s *service) DisputeLine(ctx context.Context, a authz.Actor, lineID uuid.UU
 	if err != nil {
 		return LineView{}, err
 	}
-	return s.lineChange(ctx, hash, lineID, func(ctx context.Context, o Order, cur Line, now time.Time) (Line, error) {
+	return s.lineChange(ctx, hash, lineID, false, func(ctx context.Context, o Order, cur Line, now time.Time) (Line, error) {
 		switch {
 		case cur.FulfillmentStatus == FulfillFulfilled,
 			cur.FulfillmentStatus == FulfillMarked && (cur.DisputeWindowEndsAt == nil || !now.Before(*cur.DisputeWindowEndsAt)):
@@ -237,7 +240,7 @@ func (s *service) AdminResolveDispute(ctx context.Context, a authz.Actor, lineID
 	if err != nil {
 		return LineView{}, err
 	}
-	return s.lineChange(ctx, hash, lineID, func(ctx context.Context, o Order, cur Line, now time.Time) (Line, error) {
+	return s.lineChange(ctx, hash, lineID, false, func(ctx context.Context, o Order, cur Line, now time.Time) (Line, error) {
 		if cur.FulfillmentStatus != FulfillDisputed {
 			return Line{}, ErrInvalidState
 		}
@@ -271,8 +274,10 @@ func (s *service) AdminResolveDispute(ctx context.Context, a authz.Actor, lineID
 }
 
 // lineChange runs change in the idempotent transaction with the order and
-// then the line locked, moves the order on and returns the line's view.
-func (s *service) lineChange(ctx context.Context, hash []byte, lineID uuid.UUID,
+// then the line locked, moves the order on and returns the line's view:
+// with the order's status, or for a seller (seller) the status of the
+// line's seller's lines (sellerStatus; Q-31, BE-141).
+func (s *service) lineChange(ctx context.Context, hash []byte, lineID uuid.UUID, seller bool,
 	change func(ctx context.Context, o Order, cur Line, now time.Time) (Line, error)) (LineView, error) {
 	v, _, err := idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (LineView, error) {
 		l, err := s.d.Store.GetLine(ctx, lineID, false)
@@ -295,7 +300,15 @@ func (s *service) lineChange(ctx context.Context, hash []byte, lineID uuid.UUID,
 		if o, err = s.advance(ctx, o.ID, now); err != nil {
 			return LineView{}, err
 		}
-		return LineView{Line: stored, OrderNo: o.OrderNo, OrderStatus: o.Status}, nil
+		if !seller {
+			return LineView{Line: stored, OrderNo: o.OrderNo, OrderStatus: o.Status}, nil
+		}
+		byOrder, err := s.d.Store.LinesOf(ctx, []uuid.UUID{o.ID})
+		if err != nil {
+			return LineView{}, err
+		}
+		return LineView{Line: stored, OrderNo: o.OrderNo, OrderStatus: sellerStatus(o, sellerLines(byOrder[o.ID], stored.SellerOrgID)),
+			SellerView: true}, nil
 	})
 	return v, err
 }

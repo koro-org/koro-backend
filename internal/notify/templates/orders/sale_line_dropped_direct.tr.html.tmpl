@@ -1,0 +1,4 @@
+<p style="margin:0 0 12px 0;">Merhaba {{index .Data "name"}},</p>
+<p style="margin:0 0 12px 0;">Teklifiniz sipariş ödenmeden önce iptal edildi; bu nedenle kalemi ({{index .Data "line_title"}}) siparişten çıkarıldı ve ayrılan paketler serbest kaldı.</p>
+<p style="margin:0 0 12px 0;">Sipariş referansı: <strong>{{index .Data "reference_code"}}</strong><br>Alıcı: {{index .Data "buyer_title"}}<br>Kalemin doğrudan ödeme tutarı: {{index .Data "direct_amount"}} {{index .Data "currency"}}</p>
+<p style="margin:0;"><strong>Bu kalem için alıcıdan doğrudan ödeme aldıysanız iade edin.</strong> Bu ödeme Koro hesabından geçmediği için iadeyi alıcıya siz yaparsınız.</p>

@@ -12,7 +12,9 @@
 //   - Org isolation (03 §3.6, §7.6, 06 H-38): /orgs/{org_id}/orders and
 //     /orgs/{org_id}/sales are the org's management surface (non-members
 //     404). An order is the buyer's; a seller org sees only its own lines
-//     and the buyer's title (03 k26, SellerOrderView); anyone else gets 404.
+//     and the buyer's title (03 k26, SellerOrderView), and the order's
+//     status from its own lines alone (sellerStatus, Q-31, BE-141: never
+//     another seller's dispute, refund or delivery); anyone else gets 404.
 //     The scope columns of a line (buyer, seller, payee, event) come from
 //     the order and the offering, never from the request.
 //   - 03 k25: only a company admin of an active company orders, billed to a
@@ -58,7 +60,9 @@
 //     revoked — and keeps its other lines and its reference code; its
 //     amounts become the sums of the lines left (totalsOf of their frozen
 //     per-line amounts, kuruş), the buyer (e-mail + in-app) and the seller
-//     are told. Dropping the last line, or a line of an order that already
+//     are told; on a model C order both are warned about a payment made
+//     directly to the seller's payee, which the seller refunds (Q-32a,
+//     BE-141; the seller's admins by e-mail too). Dropping the last line, or a line of an order that already
 //     took money, cancels the order whole (paid money waits for a refund).
 //     A transfer of the old amount that arrives later is applied up to the
 //     new amount and payments refunds the rest as an overpayment. A dropped

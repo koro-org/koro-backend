@@ -1,0 +1,4 @@
+<p style="margin:0 0 12px 0;">Hello {{index .Data "name"}},</p>
+<p style="margin:0 0 12px 0;">Your offering was cancelled before the order was paid, so its line ({{index .Data "line_title"}}) was removed from the order and its reserved packages were released.</p>
+<p style="margin:0 0 12px 0;">Order reference: <strong>{{index .Data "reference_code"}}</strong><br>Buyer: {{index .Data "buyer_title"}}<br>The line's direct payment amount: {{index .Data "direct_amount"}} {{index .Data "currency"}}</p>
+<p style="margin:0;"><strong>If you received a direct payment from the buyer for this line, refund it.</strong> This payment does not go through Koro's account, so you refund it to the buyer.</p>

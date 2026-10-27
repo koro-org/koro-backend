@@ -1,0 +1,5 @@
+<p style="margin:0 0 12px 0;">Merhaba {{index .Data "name"}},</p>
+<p style="margin:0 0 12px 0;">Siparişinizdeki bir teklif ödemeden önce iptal edildi; bu nedenle kalemi ({{index .Data "line_title"}}) çıkarıldı ve sipariş tutarları yeniden hesaplandı. Diğer kalemler siparişte kalır.</p>
+<p style="margin:0 0 12px 0;">Referans kodu: <strong>{{index .Data "reference_code"}}</strong> (değişmedi)<br>{{if index .Data "koro_due"}}Koro'ya ödenecek yeni tutar: {{index .Data "amount"}} {{index .Data "currency"}}<br>{{end}}Son ödeme: {{index .Data "expires_at"}} (Türkiye saati)</p>
+<p style="margin:0 0 12px 0;"><strong>Bu kalem için satıcıya doğrudan ödeme yaptıysanız iadeyi satıcıdan isteyin.</strong> Satıcı: {{index .Data "seller_name"}}; kalemin doğrudan ödeme tutarı: {{index .Data "direct_amount"}} {{index .Data "currency"}}. Bu ödeme Koro hesabından geçmediği için iadeyi satıcı yapar.</p>
+<p style="margin:0;">Satıcılara doğrudan ödenecek tutarlar ödeme talimatı sayfasında güncellendi; yalnız oradaki tutarları ödeyin. Koro'ya önceki tutarı gönderdiyseniz fark size iade edilir.</p>

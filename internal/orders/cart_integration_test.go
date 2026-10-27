@@ -213,6 +213,9 @@ func TestCreateOrder_Cart_SeveralRefusedLines_ReservesNothing_Postgres(t *testin
 	if f := problemFields(t, err); !slices.Equal(f, want) {
 		t.Fatalf("fields = %v, want %v", f, want)
 	}
+	if c := problemCodes(t, err); !slices.Equal(c, []string{"catalog.sold_out", "catalog.sold_out"}) {
+		t.Fatalf("codes = %v", c)
+	}
 	if p.sold(t, first) != 0 || p.sold(t, mid) != 0 || p.sold(t, last) != 0 {
 		t.Fatalf("the refused cart kept units: %d / %d / %d", p.sold(t, first), p.sold(t, mid), p.sold(t, last))
 	}
@@ -227,6 +230,41 @@ func TestCreateOrder_Cart_SeveralRefusedLines_ReservesNothing_Postgres(t *testin
 	problemtest.WantProblem(t, qErr, 409, "catalog.sold_out")
 	if f := problemFields(t, qErr); !slices.Equal(f, want) {
 		t.Fatalf("quote fields = %v, want %v", f, want)
+	}
+}
+
+// TestCreateOrder_Cart_RefusalsOfTwoReasons_CarryTheirCodes_Postgres
+// (BE-140): a cart refused for two different reasons — one line sold out,
+// another over its per-buyer limit — names both lines in offering ID
+// order, each entry with its own refusal's code; the problem's code is
+// errors[0]'s; quoteOrder answers the same entries and codes.
+func TestCreateOrder_Cart_RefusalsOfTwoReasons_CarryTheirCodes_Postgres(t *testing.T) {
+	t.Parallel()
+	p, _ := pgCart(t)
+	scarce := p.cartOffering(t, p.seller, cartVAT{rate: 2000, class: "standard"}, 1_000_000, ptr(1))
+	limited := p.cartOffering(t, p.seller, cartVAT{rate: 2000, class: "standard"}, 1_000_000, nil) // scarce < limited (UUIDv7)
+	pgExec(t, p.d, `UPDATE offerings SET per_buyer_limit = 1 WHERE id = $1`, limited)
+	cart := []orders.LineInput{line(limited, 2), line(scarce, 2)}
+	wantAt := []string{"body.lines[1].offering_id", "body.lines[0].offering_id"}
+	wantCodes := []string{"catalog.sold_out", "catalog.per_buyer_limit"}
+	ctx := idempotency.WithKey(p.buyerActor(t), idempotency.Key{Scope: p.buyer.user.String() + ":POST /orgs/{org_id}/orders",
+		Value: "pg-cart-two-reasons", Status: 201})
+	_, err := p.create(ctx, cart...)
+	problemtest.WantProblem(t, err, 409, wantCodes[0])
+	if f, c := problemFields(t, err), problemCodes(t, err); !slices.Equal(f, wantAt) || !slices.Equal(c, wantCodes) {
+		t.Fatalf("errors = %v %v, want %v %v", f, c, wantAt, wantCodes)
+	}
+	if p.sold(t, scarce) != 0 || p.sold(t, limited) != 0 {
+		t.Fatalf("the refused cart kept units: %d / %d", p.sold(t, scarce), p.sold(t, limited))
+	}
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, qErr := p.mod.Service.QuoteOrder(ctx, a, p.buyer.org, orders.CreateInput{BuyerPartyID: p.buyer.party, Lines: cart})
+	problemtest.WantProblem(t, qErr, 409, wantCodes[0])
+	if f, c := problemFields(t, qErr), problemCodes(t, qErr); !slices.Equal(f, wantAt) || !slices.Equal(c, wantCodes) {
+		t.Fatalf("quote errors = %v %v, want %v %v", f, c, wantAt, wantCodes)
 	}
 }
 

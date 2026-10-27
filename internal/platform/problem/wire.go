@@ -43,6 +43,13 @@ func FromError(e *Error, typeBase string) *Problem {
 	}
 	if e.kind != Internal && len(e.fields) > 0 {
 		p.Errors = e.Fields()
+		for i := range p.Errors {
+			if c := p.Errors[i].Code; c != "" {
+				if _, ok := lookup(c); !ok {
+					p.Errors[i].Code = "" // only catalogued codes reach the client (BE-140)
+				}
+			}
+		}
 	}
 	return p
 }

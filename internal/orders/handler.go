@@ -33,8 +33,9 @@ func Register(api huma.API, svc Service) {
 			"one order and one transfer. The stock of every line is reserved in the same transaction: when a line is " +
 			"refused (sold out, not on sale, the per-buyer limit, no policy, an inactive payee) nothing is placed and the " +
 			"problem names every refused line of the cart, one errors[] entry each (location body.lines[i].offering_id, " +
-			"message the refusal's title; BE-139): first the lines that cannot be priced, in request order, then the " +
-			"stock refusals in offering ID order. status and code are the first refusal's, which is also errors[0]. " +
+			"message the refusal's title, code the refusal's own code from problems.json; BE-139, BE-140): first the lines that cannot be priced, in request order, then the " +
+			"stock refusals in offering ID order. status and code are the first refusal's, which is also errors[0] " +
+			"(errors[0].code is the problem's code). " +
 			"An unpaid order expires after the " +
 			"payment window and releases its stock. When an offering of an unpaid order is cancelled before any money " +
 			"arrived, only its line leaves the order (lines[].dropped_at): the reference code stays, the amounts become " +

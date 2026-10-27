@@ -72,9 +72,15 @@ func (k Kind) Status() int {
 
 // FieldError points at an invalid input location. It deliberately has no
 // value member: input values (passwords included) are never echoed back.
+// Code is optional (BE-140): an entry that is a refusal of its own — one
+// line of a cart refused for another reason than the problem's — carries
+// that refusal's catalogued code, so a client translates each entry. An
+// entry without one is read under the problem's code; a code that is not in
+// the catalog (problems.json) never reaches the client (FromError).
 type FieldError struct {
 	Location string `json:"location,omitempty" doc:"Where the error occurred, e.g. 'body.email' or 'path.org_id'"`
 	Message  string `json:"message" doc:"Error message text"`
+	Code     string `json:"code,omitempty" doc:"Stable code of this entry's own refusal, always one of problems.json (BE-140); absent: read the problem's code" example:"catalog.sold_out"`
 }
 
 // Error is a typed application error with a stable machine-readable code.
@@ -124,6 +130,27 @@ func (e *Error) Status() int { return e.kind.Status() }
 
 // Fields returns a copy of the field errors.
 func (e *Error) Fields() []FieldError { return slices.Clone(e.fields) }
+
+// At is a field error at location that is e itself (BE-140): e's title as
+// the message and e's code, so the entry keeps its own code when it is
+// merged into another problem's errors[] (a cart of several refusals).
+func (e *Error) At(location string) FieldError {
+	return FieldError{Location: location, Message: e.title, Code: e.code}
+}
+
+// CodedFields returns a copy of the field errors in which every entry that
+// carries no code of its own carries e's (BE-140): the entries of e, ready
+// to be merged with another problem's under that problem's code without
+// losing why each was refused.
+func (e *Error) CodedFields() []FieldError {
+	f := e.Fields()
+	for i := range f {
+		if f[i].Code == "" {
+			f[i].Code = e.code
+		}
+	}
+	return f
+}
 
 // Wrap returns a copy of e carrying cause for logs.
 func (e *Error) Wrap(cause error) *Error {

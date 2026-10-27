@@ -172,7 +172,8 @@ func TestQuoteOrder_RefusalsMatchCreateOrder(t *testing.T) {
 		}
 		qs, qc := problemtest.StatusCode(quoted[i])
 		ps, pc := problemtest.StatusCode(err)
-		if qs != ps || qc != pc || !slices.Equal(problemFields(t, quoted[i]), problemFields(t, err)) {
+		if qs != ps || qc != pc || !slices.Equal(problemFields(t, quoted[i]), problemFields(t, err)) ||
+			!slices.Equal(problemCodes(t, quoted[i]), problemCodes(t, err)) { // BE-140: and each entry's code
 			t.Errorf("%s: quote %d %s %v, placement %d %s %v", tc.name, qs, qc, problemFields(t, quoted[i]), ps, pc, problemFields(t, err))
 		}
 	}

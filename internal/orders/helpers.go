@@ -133,7 +133,7 @@ func atLine(i int, err error) error {
 	if !ok || !problem.IsClientError(err) || len(pe.Fields()) > 0 {
 		return err
 	}
-	return pe.WithFields(problem.FieldError{Location: lineLoc(i), Message: pe.Title()})
+	return pe.WithFields(pe.At(lineLoc(i)))
 }
 
 // refusedCart is the one problem of a cart with refused lines (BE-139):
@@ -142,12 +142,13 @@ func atLine(i int, err error) error {
 // order, then stock in offering ID order), so a client reading code or
 // errors[0] sees what it saw; errors[] carries every refused line's
 // entries in that same order (body.lines[i].offering_id, the message is
-// the refusal's title). A cart of one refused line is exactly atLine's
-// problem.
+// the refusal's title, the code the refusal's own, BE-140 — so a client
+// translates each line, and errors[0].code is the problem's code). A cart
+// of one refused line is exactly atLine's problem.
 func refusedCart(refused []*problem.Error) error {
 	var fields []problem.FieldError
 	for _, pe := range refused {
-		fields = append(fields, pe.Fields()...)
+		fields = append(fields, pe.CodedFields()...)
 	}
 	return refused[0].WithFields(fields...)
 }

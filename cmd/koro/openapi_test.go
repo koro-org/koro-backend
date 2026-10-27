@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -82,6 +83,23 @@ func TestOpenAPI_Command_WritesValidSpec(t *testing.T) {
 	for code, status := range map[string]int{"validation_failed": 422, "internal_error": 500, "unauthenticated": 401, "csrf_rejected": 403} {
 		if codes[code] != status {
 			t.Errorf("problems.json %s = %d, want %d", code, codes[code], status)
+		}
+	}
+	// FieldError.code (BE-140): an optional string whose values are
+	// problems.json codes (FromError drops any other).
+	fe, _ := schemas["FieldError"].(map[string]any)
+	fp, _ := fe["properties"].(map[string]any)
+	fc, _ := fp["code"].(map[string]any)
+	if fc == nil || fc["type"] != "string" {
+		t.Fatalf("FieldError.code = %v, want an optional string", fp["code"])
+	}
+	if req, _ := fe["required"].([]any); slices.Contains(req, any("code")) {
+		t.Error("FieldError.code must be optional: entries without their own code have none")
+	}
+	examples, _ := fc["examples"].([]any)
+	for _, ex := range examples {
+		if c, _ := ex.(string); codes[c] == 0 {
+			t.Errorf("FieldError.code example %v is not in problems.json", ex)
 		}
 	}
 	for code := range codes {

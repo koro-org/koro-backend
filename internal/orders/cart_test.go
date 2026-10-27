@@ -257,11 +257,13 @@ func TestCreateOrder_Cart_EveryRefusedLineIsNamed(t *testing.T) {
 	}
 	rec, body := call(t, app, "company_admin", http.MethodPost, "/api/v1/orgs/"+org("company_a").String()+"/orders",
 		map[string]any{"buyer_party_id": e.partyA.String(), "lines": lines}, map[string]string{"Idempotency-Key": "cart-every-refusal"})
-	want := []struct{ at, msg string }{
-		{"body.lines[2].offering_id", catalog.ErrPayeeNotActive.Title()},
-		{"body.lines[4].offering_id", "is not an offering"},
-		{"body.lines[3].offering_id", catalog.ErrSoldOut.Title()},
-		{"body.lines[1].offering_id", catalog.ErrPerBuyerLimit.Title()},
+	// BE-140: each entry carries its own refusal's code; errors[0].code is
+	// the problem's code.
+	want := []struct{ at, msg, code string }{
+		{"body.lines[2].offering_id", catalog.ErrPayeeNotActive.Title(), catalog.ErrPayeeNotActive.Code()},
+		{"body.lines[4].offering_id", "is not an offering", problem.ErrValidation.Code()},
+		{"body.lines[3].offering_id", catalog.ErrSoldOut.Title(), catalog.ErrSoldOut.Code()},
+		{"body.lines[1].offering_id", catalog.ErrPerBuyerLimit.Title(), catalog.ErrPerBuyerLimit.Code()},
 	}
 	errs, _ := body["errors"].([]any)
 	if rec.Code != 409 || body["code"] != "catalog.payee_not_active" || len(errs) != len(want) {
@@ -269,9 +271,12 @@ func TestCreateOrder_Cart_EveryRefusedLineIsNamed(t *testing.T) {
 	}
 	for i, w := range want {
 		got, _ := errs[i].(map[string]any)
-		if got["location"] != w.at || got["message"] != w.msg {
-			t.Errorf("errors[%d] = %v, want %s %q", i, got, w.at, w.msg)
+		if got["location"] != w.at || got["message"] != w.msg || got["code"] != w.code {
+			t.Errorf("errors[%d] = %v, want %s %q %s", i, got, w.at, w.msg, w.code)
 		}
+	}
+	if first, _ := errs[0].(map[string]any); first["code"] != body["code"] {
+		t.Errorf("errors[0].code = %v, problem code %v", first["code"], body["code"])
 	}
 	if page, err := e.store.ListOrgOrders(t.Context(), org("company_a"), orders.OrderFilter{}, nil, 10); err != nil || len(page) != 0 {
 		t.Fatalf("the refused cart placed %d orders (%v)", len(page), err)
@@ -281,6 +286,20 @@ func TestCreateOrder_Cart_EveryRefusedLineIsNamed(t *testing.T) {
 	if len(v) != 1 || len(v[0].Lines) != 3 {
 		t.Fatalf("corrected cart = %d orders", len(v))
 	}
+}
+
+// problemCodes returns the codes of the problem's field errors (BE-140).
+func problemCodes(t *testing.T, err error) []string {
+	t.Helper()
+	pe, ok := errors.AsType[*problem.Error](err)
+	if !ok {
+		t.Fatalf("not a problem: %v", err)
+	}
+	var out []string
+	for _, f := range pe.Fields() {
+		out = append(out, f.Code)
+	}
+	return out
 }
 
 // problemFields returns the locations of the problem's field errors.

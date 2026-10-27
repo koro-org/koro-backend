@@ -6356,6 +6356,11 @@ components:
     FieldError:
       additionalProperties: false
       properties:
+        code:
+          description: "Stable code of this entry's own refusal, always one of problems.json (BE-140); absent: read the problem's code"
+          examples:
+            - catalog.sold_out
+          type: string
         location:
           description: Where the error occurred, e.g. 'body.email' or 'path.org_id'
           type: string
@@ -32356,7 +32361,7 @@ paths:
       x-koro-rate-limit: read_default
       x-koro-surface: org
     post:
-      description: "A company admin buys offerings for the company, billed to a verified buyer party of the company (422 orders.buyer_party_required). The lines are the cart: 1-20 offerings of any sellers, one line each. Prices, VAT, withholding and commission are computed per line on the server from the offering and the commerce policy in effect (none: 409 catalog.no_commerce_policy); lines under different money models become separate orders, each with its own reference code, while the lines of several sellers under one model share one order and one transfer. The stock of every line is reserved in the same transaction: when a line is refused (sold out, not on sale, the per-buyer limit, no policy, an inactive payee) nothing is placed and the problem names every refused line of the cart, one errors[] entry each (location body.lines[i].offering_id, message the refusal's title; BE-139): first the lines that cannot be priced, in request order, then the stock refusals in offering ID order. status and code are the first refusal's, which is also errors[0]. An unpaid order expires after the payment window and releases its stock. When an offering of an unpaid order is cancelled before any money arrived, only its line leaves the order (lines[].dropped_at): the reference code stays, the amounts become the sums of the other lines and the buyer is told; the last line, or money already paid, cancels the order. quoteOrder previews the same body without writing anything (BE-136)."
+      description: "A company admin buys offerings for the company, billed to a verified buyer party of the company (422 orders.buyer_party_required). The lines are the cart: 1-20 offerings of any sellers, one line each. Prices, VAT, withholding and commission are computed per line on the server from the offering and the commerce policy in effect (none: 409 catalog.no_commerce_policy); lines under different money models become separate orders, each with its own reference code, while the lines of several sellers under one model share one order and one transfer. The stock of every line is reserved in the same transaction: when a line is refused (sold out, not on sale, the per-buyer limit, no policy, an inactive payee) nothing is placed and the problem names every refused line of the cart, one errors[] entry each (location body.lines[i].offering_id, message the refusal's title, code the refusal's own code from problems.json; BE-139, BE-140): first the lines that cannot be priced, in request order, then the stock refusals in offering ID order. status and code are the first refusal's, which is also errors[0] (errors[0].code is the problem's code). An unpaid order expires after the payment window and releases its stock. When an offering of an unpaid order is cancelled before any money arrived, only its line leaves the order (lines[].dropped_at): the reference code stays, the amounts become the sums of the other lines and the buyer is told; the last line, or money already paid, cancels the order. quoteOrder previews the same body without writing anything (BE-136)."
       operationId: createOrder
       parameters:
         - description: "Client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"

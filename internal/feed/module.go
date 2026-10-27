@@ -326,7 +326,8 @@ func New(d Deps) (Module, error) {
 		d.ReportHideThreshold = DefaultReportHideThreshold
 	}
 	s := &service{d: d}
-	return Module{Service: s, Privacy: privacyProvider{s: s}, Sweeper: sweeper{s: s}, svc: s}, nil
+	w := sweeper{retention: d.Store, media: s.media(), files: d.Files, tx: d.Tx}
+	return Module{Service: s, Privacy: privacyProvider{s: s}, Sweeper: w, svc: s}, nil
 }
 
 type service struct{ d Deps }

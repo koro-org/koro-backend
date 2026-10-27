@@ -61,7 +61,7 @@ func (s *service) CreatePost(ctx context.Context, a authz.Actor, orgID uuid.UUID
 	id, _, err := idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (uuid.UUID, error) {
 		p := ap.next
 		p.ID = uuid.NewV7()
-		p, err := s.d.Store.InsertPost(ctx, p)
+		p, err := s.posts().InsertPost(ctx, p)
 		if err != nil {
 			return uuid.Nil(), err
 		}
@@ -90,14 +90,14 @@ func (s *service) writeMedia(ctx context.Context, a authz.Actor, p Post, media [
 			return err
 		}
 	}
-	return s.d.Store.ReplaceMedia(ctx, p.OrgID, p.ID, mediaRows(media))
+	return s.media().ReplaceMedia(ctx, p.OrgID, p.ID, mediaRows(media))
 }
 
 // locked reads the post for a change in the transaction carried by ctx:
 // the row (locked; 404) → authz (404 invisible, 403 without the role) →
 // the author org's status (403). org_id comes from the row (06 H-38).
 func (s *service) locked(ctx context.Context, a authz.Actor, act authz.Action, id uuid.UUID) (Post, orgs.OrgSummary, error) {
-	p, err := s.d.Store.LockPost(ctx, id)
+	p, err := s.posts().LockPost(ctx, id)
 	if err != nil {
 		return Post{}, orgs.OrgSummary{}, err
 	}
@@ -136,7 +136,7 @@ func (s *service) UpdatePost(ctx context.Context, a authz.Actor, id uuid.UUID, i
 		if p.empty() {
 			return ErrEmptyPatch
 		}
-		media, err := s.d.Store.MediaOf(ctx, []uuid.UUID{cur.ID})
+		media, err := s.media().MediaOf(ctx, []uuid.UUID{cur.ID})
 		if err != nil {
 			return err
 		}
@@ -149,7 +149,7 @@ func (s *service) UpdatePost(ctx context.Context, a authz.Actor, id uuid.UUID, i
 			now := s.now()
 			next.EditedAt = &now
 		}
-		if next, err = s.d.Store.UpdatePost(ctx, next); err != nil {
+		if next, err = s.posts().UpdatePost(ctx, next); err != nil {
 			return err
 		}
 		if err := s.writeMedia(ctx, a, next, ap.media); err != nil {
@@ -187,7 +187,7 @@ func (s *service) needsReview(ctx context.Context, o orgs.OrgSummary, now time.T
 	if o.Kind == orgs.KindPlatform {
 		return false, nil
 	}
-	st, ok, err := s.d.Store.OrgSettings(ctx, o.ID)
+	st, ok, err := s.settings().OrgSettings(ctx, o.ID)
 	if err != nil {
 		return false, err
 	}
@@ -242,7 +242,7 @@ func (s *service) PublishPost(ctx context.Context, a authz.Actor, id uuid.UUID) 
 		} else {
 			next.Status, next.PublishedAt = StatusPublished, &now
 		}
-		if next, err = s.d.Store.UpdatePost(ctx, next); err != nil {
+		if next, err = s.posts().UpdatePost(ctx, next); err != nil {
 			return uuid.Nil(), err
 		}
 		if review {
@@ -264,7 +264,7 @@ func (s *service) PublishPost(ctx context.Context, a authz.Actor, id uuid.UUID) 
 // publishable checks what publication needs besides the draft status: the
 // shape of the kind, clean images and a shareable event.
 func (s *service) publishable(ctx context.Context, o orgs.OrgSummary, p Post) error {
-	media, err := s.d.Store.MediaOf(ctx, []uuid.UUID{p.ID})
+	media, err := s.media().MediaOf(ctx, []uuid.UUID{p.ID})
 	if err != nil {
 		return err
 	}
@@ -314,14 +314,14 @@ func (s *service) DeletePost(ctx context.Context, a authz.Actor, id uuid.UUID) e
 			if err := s.discardDispatch(ctx, a, p); err != nil { // BE-035: before the post (FK)
 				return err
 			}
-			if err := s.d.Store.DeletePost(ctx, p.OrgID, p.ID); err != nil {
+			if err := s.posts().DeletePost(ctx, p.OrgID, p.ID); err != nil {
 				return err
 			}
 		case StatusPublished, StatusHidden:
 			now := s.now()
 			next := p
 			next.Status, next.RemovedAt = StatusRemoved, &now
-			if _, err := s.d.Store.UpdatePost(ctx, next); err != nil {
+			if _, err := s.posts().UpdatePost(ctx, next); err != nil {
 				return err
 			}
 		default:

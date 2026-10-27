@@ -48,7 +48,7 @@ func (s *service) OrgRelations(ctx context.Context, a authz.Actor, orgIDs []uuid
 	if len(ids) == 0 || len(ids) > MaxRelationOrgs {
 		return nil, problem.Field("query.org_id", fmt.Sprintf("must hold 1 to %d organization IDs", MaxRelationOrgs))
 	}
-	vs, err := s.d.Store.ViewerState(ctx, a.UserID, nil, ids)
+	vs, err := s.interactions().ViewerState(ctx, a.UserID, nil, ids)
 	if err != nil {
 		return nil, err
 	}

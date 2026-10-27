@@ -116,7 +116,7 @@ type Stats struct {
 
 // Get implements Posts.
 func (s *service) Get(ctx context.Context, postID uuid.UUID) (PostSummary, error) {
-	p, err := s.d.Store.GetPost(ctx, postID)
+	p, err := s.posts().GetPost(ctx, postID)
 	if err != nil {
 		return PostSummary{}, err
 	}
@@ -163,7 +163,7 @@ func (s *service) resource(ctx context.Context, a authz.Actor, p Post) (authz.Re
 		if a.MemberOf(p.OrgID) {
 			follows = true
 		} else {
-			f, err := s.d.Store.Follows(ctx, a.UserID, p.OrgID)
+			f, err := s.interactions().Follows(ctx, a.UserID, p.OrgID)
 			if err != nil {
 				return authz.Resource{}, err
 			}
@@ -186,7 +186,7 @@ func (s *service) authorize(ctx context.Context, a authz.Actor, act authz.Action
 // 03 §3.6) in the reader view; its writers manage it through
 // listOrgPostsManage and the writes.
 func (s *service) GetPost(ctx context.Context, a authz.Actor, id uuid.UUID) (PostView, error) {
-	p, err := s.d.Store.GetPost(ctx, id)
+	p, err := s.posts().GetPost(ctx, id)
 	if err != nil {
 		return PostView{}, err
 	}
@@ -217,7 +217,7 @@ func (s *service) GetFeed(ctx context.Context, a authz.Actor, q FeedQuery) (Post
 	}
 	f := FeedFilter{Reader: r, Following: q.Tab == TabFollowing, Kind: q.Kind}
 	limit := clampFeed(q.Limit)
-	rows, err := s.d.Store.ListFeed(ctx, f, q.After, limit+1)
+	rows, err := s.posts().ListFeed(ctx, f, q.After, limit+1)
 	if err != nil {
 		return PostPage{}, err
 	}
@@ -250,7 +250,7 @@ func (s *service) ListPosts(ctx context.Context, a authz.Actor, orgID uuid.UUID,
 	}
 	r.All = a.IsUser() && staffReader(a, o.ID)
 	limit := page.ClampLimit(q.Limit)
-	rows, err := s.d.Store.ListOrgPosts(ctx, o.ID, r, q.After, limit+1)
+	rows, err := s.posts().ListOrgPosts(ctx, o.ID, r, q.After, limit+1)
 	if err != nil {
 		return PostPage{}, err
 	}
@@ -287,7 +287,7 @@ func (s *service) ListOrgPosts(ctx context.Context, a authz.Actor, orgID uuid.UU
 	if q.Kind != "" && !q.Kind.Valid() {
 		return PostPage{}, problem.Field("query.kind", "is not a post kind")
 	}
-	rows, err := s.d.Store.ListOrgManage(ctx, o.ID, ManageFilter{Statuses: q.Statuses, Kind: q.Kind}, q.After, limit+1)
+	rows, err := s.posts().ListOrgManage(ctx, o.ID, ManageFilter{Statuses: q.Statuses, Kind: q.Kind}, q.After, limit+1)
 	if err != nil {
 		return PostPage{}, err
 	}
@@ -317,7 +317,7 @@ func (s *service) GetOrgPost(ctx context.Context, a authz.Actor, orgID, postID u
 	if err := authz.Can(ctx, a, authz.FeedPostListOrgManage, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
 		return PostView{}, err
 	}
-	p, err := s.d.Store.GetPost(ctx, postID)
+	p, err := s.posts().GetPost(ctx, postID)
 	if err != nil {
 		return PostView{}, err
 	}
@@ -337,7 +337,7 @@ func (s *service) GetOrgPost(ctx context.Context, a authz.Actor, orgID, postID u
 // PostStats implements Service (feed.post.stats): the author org's
 // writers read the counters of their posts.
 func (s *service) PostStats(ctx context.Context, a authz.Actor, id uuid.UUID) (Stats, error) {
-	p, err := s.d.Store.GetPost(ctx, id)
+	p, err := s.posts().GetPost(ctx, id)
 	if err != nil {
 		return Stats{}, err
 	}
@@ -360,7 +360,7 @@ func (s *service) PostStats(ctx context.Context, a authz.Actor, id uuid.UUID) (S
 
 // managedView reads the post after a write by one of its writers.
 func (s *service) managedView(ctx context.Context, a authz.Actor, id uuid.UUID) (PostView, error) {
-	p, err := s.d.Store.GetPost(ctx, id)
+	p, err := s.posts().GetPost(ctx, id)
 	if err != nil {
 		return PostView{}, err
 	}
@@ -399,7 +399,7 @@ func (s *service) views(ctx context.Context, a authz.Actor, rows []Post, manage 
 	if err != nil {
 		return nil, err
 	}
-	media, err := s.d.Store.MediaOf(ctx, ids)
+	media, err := s.media().MediaOf(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -409,7 +409,7 @@ func (s *service) views(ctx context.Context, a authz.Actor, rows []Post, manage 
 	}
 	var state *ViewerState
 	if a.IsUser() && !manage {
-		st, err := s.d.Store.ViewerState(ctx, a.UserID, ids, orgIDs)
+		st, err := s.interactions().ViewerState(ctx, a.UserID, ids, orgIDs)
 		if err != nil {
 			return nil, err
 		}
@@ -565,7 +565,7 @@ func (s *service) reasons(ctx context.Context, rows []Post, manage bool) (map[uu
 	if len(ids) == 0 {
 		return out, nil
 	}
-	last, err := s.d.Store.LatestActions(ctx, TargetPost, ids)
+	last, err := s.moderation().LatestActions(ctx, TargetPost, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -588,7 +588,7 @@ const likesBatch = 1000
 func (s *service) WithdrawnLikes(ctx context.Context, likes []LikeKey) (map[LikeKey]bool, error) {
 	out := make(map[LikeKey]bool)
 	for batch := range slices.Chunk(likes, likesBatch) {
-		got, err := s.d.Store.WithdrawnLikes(ctx, batch)
+		got, err := s.interactions().WithdrawnLikes(ctx, batch)
 		if err != nil {
 			return nil, err
 		}

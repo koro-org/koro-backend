@@ -107,7 +107,7 @@ func (s *service) handleSensitivityChanged(ctx context.Context, e domainevent.En
 	if !p.Sensitive {
 		return nil
 	}
-	_, err = s.d.Store.RemoveAutoFollowsOf(ctx, p.ClubOrgID)
+	_, err = s.interactions().RemoveAutoFollowsOf(ctx, p.ClubOrgID)
 	return err
 }
 
@@ -115,7 +115,7 @@ func (s *service) handleSensitivityChanged(ctx context.Context, e domainevent.En
 // back to the number of their rows (a drift is a bug or a crash between
 // statements; it is logged with the count only).
 func (s *service) reconcileCounters(ctx context.Context) error {
-	n, err := s.d.Store.ReconcileCounters(ctx)
+	n, err := s.interactions().ReconcileCounters(ctx)
 	if err != nil {
 		return err
 	}

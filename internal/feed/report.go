@@ -107,7 +107,7 @@ func cleanText(loc, s string, maxRunes int) (*string, error) {
 func (s *service) reportTarget(ctx context.Context, a authz.Actor, t TargetType, id uuid.UUID) (*Post, error) {
 	switch t {
 	case TargetPost:
-		p, err := s.d.Store.GetPost(ctx, id)
+		p, err := s.posts().GetPost(ctx, id)
 		if err != nil {
 			return nil, err
 		}
@@ -156,7 +156,7 @@ func (s *service) CreateReport(ctx context.Context, a authz.Actor, in ReportInpu
 		return ReportResult{}, err
 	}
 	res, _, err := idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (ReportResult, error) {
-		r, created, err := s.d.Store.InsertReport(ctx, Report{
+		r, created, err := s.reports().InsertReport(ctx, Report{
 			ID: uuid.NewV7(), ReporterUserID: a.UserID, TargetType: in.TargetType, TargetID: in.TargetID,
 			Reason: in.Reason, Details: details,
 		})
@@ -187,17 +187,17 @@ func (s *service) CreateReport(ctx context.Context, a authz.Actor, in ReportInpu
 // (R-003 §1.5.3): it waits hidden for a moderator, who restores or
 // removes it. The author org is told (post.moderated, action hide).
 func (s *service) autoHide(ctx context.Context, postID uuid.UUID) error {
-	n, err := s.d.Store.OpenReporters(ctx, TargetPost, postID)
+	n, err := s.reports().OpenReporters(ctx, TargetPost, postID)
 	if err != nil || n < s.d.ReportHideThreshold {
 		return err
 	}
-	p, err := s.d.Store.LockPost(ctx, postID)
+	p, err := s.posts().LockPost(ctx, postID)
 	if err != nil || p.Status != StatusPublished {
 		return err
 	}
 	next := p
 	next.Status = StatusHidden
-	if _, err := s.d.Store.UpdatePost(ctx, next); err != nil {
+	if _, err := s.posts().UpdatePost(ctx, next); err != nil {
 		return err
 	}
 	id := p.ID
@@ -220,7 +220,7 @@ func (s *service) ListReports(ctx context.Context, a authz.Actor, q ReportQuery)
 		return ReportPage{}, err
 	}
 	limit := page.ClampLimit(q.Limit)
-	rows, err := s.d.Store.ListReports(ctx, q.Filter, q.After, limit+1)
+	rows, err := s.reports().ListReports(ctx, q.Filter, q.After, limit+1)
 	if err != nil {
 		return ReportPage{}, err
 	}
@@ -241,7 +241,7 @@ func (s *service) GetReport(ctx context.Context, a authz.Actor, id uuid.UUID) (R
 	if err := authz.Can(ctx, a, authz.FeedReportRead, adminSurface); err != nil {
 		return ReportView{}, err
 	}
-	r, err := s.d.Store.GetReport(ctx, id)
+	r, err := s.reports().GetReport(ctx, id)
 	if err != nil {
 		return ReportView{}, err
 	}
@@ -253,7 +253,7 @@ func (s *service) reportView(ctx context.Context, r Report) (ReportView, error) 
 	t := &TargetSummary{Type: r.TargetType}
 	orgID := r.TargetID
 	if r.TargetType == TargetPost {
-		p, err := s.d.Store.GetPost(ctx, r.TargetID)
+		p, err := s.posts().GetPost(ctx, r.TargetID)
 		switch {
 		case errors.Is(err, ErrNotFound):
 			return ReportView{Report: r}, nil // a draft deleted since: nothing to show
@@ -272,12 +272,12 @@ func (s *service) reportView(ctx context.Context, r Report) (ReportView, error) 
 	t.Org, t.TrustLevel = o, TrustNew
 	if o.Kind == orgs.KindPlatform {
 		t.TrustLevel = TrustTrusted
-	} else if st, ok, err := s.d.Store.OrgSettings(ctx, o.ID); err != nil {
+	} else if st, ok, err := s.settings().OrgSettings(ctx, o.ID); err != nil {
 		return ReportView{}, err
 	} else if ok {
 		t.TrustLevel = st.TrustLevel
 	}
-	if t.OpenReports, err = s.d.Store.OpenReporters(ctx, r.TargetType, r.TargetID); err != nil {
+	if t.OpenReports, err = s.reports().OpenReporters(ctx, r.TargetType, r.TargetID); err != nil {
 		return ReportView{}, err
 	}
 	return ReportView{Report: r, Target: t}, nil
@@ -311,7 +311,7 @@ func (s *service) ResolveReport(ctx context.Context, a authz.Actor, id uuid.UUID
 		return ReportView{}, err
 	}
 	_, _, err = idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (uuid.UUID, error) {
-		cur, err := s.d.Store.LockReport(ctx, id)
+		cur, err := s.reports().LockReport(ctx, id)
 		if err != nil {
 			return uuid.Nil(), err
 		}
@@ -322,7 +322,7 @@ func (s *service) ResolveReport(ctx context.Context, a authz.Actor, id uuid.UUID
 		if err != nil || !changed {
 			return cur.ID, err
 		}
-		if next, err = s.d.Store.UpdateReport(ctx, next); err != nil {
+		if next, err = s.reports().UpdateReport(ctx, next); err != nil {
 			return uuid.Nil(), err
 		}
 		rid := next.ID
@@ -343,7 +343,7 @@ func (s *service) ResolveReport(ctx context.Context, a authz.Actor, id uuid.UUID
 	if err != nil {
 		return ReportView{}, err
 	}
-	r, err := s.d.Store.GetReport(ctx, id)
+	r, err := s.reports().GetReport(ctx, id)
 	if err != nil {
 		return ReportView{}, err
 	}
@@ -370,7 +370,7 @@ func (s *service) resolved(ctx context.Context, a authz.Actor, cur Report, in Re
 	case ReportInReview:
 		next.Status = ReportInReview
 	case ReportActioned:
-		n, err := s.d.Store.ReportActions(ctx, cur.ID)
+		n, err := s.moderation().ReportActions(ctx, cur.ID)
 		if err != nil {
 			return Report{}, false, err
 		}

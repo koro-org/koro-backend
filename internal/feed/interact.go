@@ -47,7 +47,7 @@ func ownList(a authz.Actor) authz.Resource {
 // when it is visible but not published (its writers and moderators see
 // drafts, which take no interaction).
 func (s *service) interactable(ctx context.Context, a authz.Actor, act authz.Action, id uuid.UUID) (Post, error) {
-	p, err := s.d.Store.GetPost(ctx, id)
+	p, err := s.posts().GetPost(ctx, id)
 	if err != nil {
 		return Post{}, err
 	}
@@ -68,7 +68,7 @@ func (s *service) interactable(ctx context.Context, a authz.Actor, act authz.Act
 func (s *service) withdraw(ctx context.Context, a authz.Actor, act authz.Action, id uuid.UUID,
 	remove func(context.Context, uuid.UUID, uuid.UUID) (bool, error), after func(context.Context, Post),
 ) error {
-	p, err := s.d.Store.GetPost(ctx, id)
+	p, err := s.posts().GetPost(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -98,7 +98,7 @@ func (s *service) LikePost(ctx context.Context, a authz.Actor, id uuid.UUID) err
 		return err
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		added, err := s.d.Store.AddLike(ctx, a.UserID, p.ID)
+		added, err := s.interactions().AddLike(ctx, a.UserID, p.ID)
 		if err != nil || !added {
 			return err
 		}
@@ -110,7 +110,7 @@ func (s *service) LikePost(ctx context.Context, a authz.Actor, id uuid.UUID) err
 // UnlikePost implements Service: 204 whether or not there was a like;
 // post.unliked (A) only when one was removed.
 func (s *service) UnlikePost(ctx context.Context, a authz.Actor, id uuid.UUID) error {
-	return s.withdraw(ctx, a, authz.FeedReactionManage, id, s.d.Store.RemoveLike, func(ctx context.Context, p Post) {
+	return s.withdraw(ctx, a, authz.FeedReactionManage, id, s.interactions().RemoveLike, func(ctx context.Context, p Post) {
 		s.emit(ctx, domainevent.PostUnliked{PostID: p.ID, UserID: a.UserID, AuthorOrgID: p.OrgID}, p.ID)
 	})
 }
@@ -122,7 +122,7 @@ func (s *service) SavePost(ctx context.Context, a authz.Actor, id uuid.UUID) err
 		return err
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		added, err := s.d.Store.AddSave(ctx, a.UserID, p.ID)
+		added, err := s.interactions().AddSave(ctx, a.UserID, p.ID)
 		if err != nil || !added {
 			return err
 		}
@@ -133,7 +133,7 @@ func (s *service) SavePost(ctx context.Context, a authz.Actor, id uuid.UUID) err
 
 // UnsavePost implements Service (01 §6.2 has no post.unsaved).
 func (s *service) UnsavePost(ctx context.Context, a authz.Actor, id uuid.UUID) error {
-	return s.withdraw(ctx, a, authz.FeedSaveManage, id, s.d.Store.RemoveSave, nil)
+	return s.withdraw(ctx, a, authz.FeedSaveManage, id, s.interactions().RemoveSave, nil)
 }
 
 // HidePost implements Service: the post leaves the reader's feed (not the
@@ -151,7 +151,7 @@ func (s *service) HidePost(ctx context.Context, a authz.Actor, id uuid.UUID) err
 		if err != nil {
 			return false, err
 		}
-		return s.d.Store.AddHide(ctx, a.UserID, p.ID)
+		return s.interactions().AddHide(ctx, a.UserID, p.ID)
 	})
 	return err
 }
@@ -169,7 +169,7 @@ func (s *service) ListSavedPosts(ctx context.Context, a authz.Actor, q PageQuery
 	// Moderators and platform admins see every published post (03 §3.6).
 	r.All = a.HasPlatformRole(authz.PlatformModerator) || a.HasPlatformRole(authz.PlatformAdmin)
 	limit := clampFeed(q.Limit)
-	rows, err := s.d.Store.ListSaved(ctx, r, q.After, limit+1)
+	rows, err := s.interactions().ListSaved(ctx, r, q.After, limit+1)
 	if err != nil {
 		return PostPage{}, err
 	}
@@ -239,14 +239,14 @@ func (s *service) FollowOrg(ctx context.Context, a authz.Actor, orgID uuid.UUID,
 	if err != nil {
 		return err
 	}
-	_, err = s.d.Store.FollowManual(ctx, a.UserID, o.ID, notify)
+	_, err = s.interactions().FollowManual(ctx, a.UserID, o.ID, notify)
 	return err
 }
 
 // UnfollowOrg implements Service: any source goes (an automatic follow
 // comes back only with a new membership).
 func (s *service) UnfollowOrg(ctx context.Context, a authz.Actor, orgID uuid.UUID) error {
-	return s.unfollowable(ctx, a, authz.FeedFollowManage, orgID, s.d.Store.RemoveFollow)
+	return s.unfollowable(ctx, a, authz.FeedFollowManage, orgID, s.interactions().RemoveFollow)
 }
 
 // MuteOrg implements Service: the org's posts leave the reader's feed (04
@@ -256,13 +256,13 @@ func (s *service) MuteOrg(ctx context.Context, a authz.Actor, orgID uuid.UUID) e
 	if err != nil {
 		return err
 	}
-	_, err = s.d.Store.AddMute(ctx, a.UserID, o.ID)
+	_, err = s.interactions().AddMute(ctx, a.UserID, o.ID)
 	return err
 }
 
 // UnmuteOrg implements Service.
 func (s *service) UnmuteOrg(ctx context.Context, a authz.Actor, orgID uuid.UUID) error {
-	return s.unfollowable(ctx, a, authz.FeedMuteManage, orgID, s.d.Store.RemoveMute)
+	return s.unfollowable(ctx, a, authz.FeedMuteManage, orgID, s.interactions().RemoveMute)
 }
 
 // ListFollows implements Service.
@@ -271,7 +271,7 @@ func (s *service) ListFollows(ctx context.Context, a authz.Actor, q PageQuery) (
 		return OrgPage{}, err
 	}
 	limit := page.ClampLimit(q.Limit)
-	rows, err := s.d.Store.ListFollows(ctx, a.UserID, q.After, limit+1)
+	rows, err := s.interactions().ListFollows(ctx, a.UserID, q.After, limit+1)
 	if err != nil {
 		return OrgPage{}, err
 	}
@@ -304,7 +304,7 @@ func (s *service) ListMutes(ctx context.Context, a authz.Actor, q PageQuery) (Or
 		return OrgPage{}, err
 	}
 	limit := page.ClampLimit(q.Limit)
-	rows, err := s.d.Store.ListMutes(ctx, a.UserID, q.After, limit+1)
+	rows, err := s.interactions().ListMutes(ctx, a.UserID, q.After, limit+1)
 	if err != nil {
 		return OrgPage{}, err
 	}
@@ -355,9 +355,9 @@ func (s *service) syncAutoFollow(ctx context.Context, userID, orgID uuid.UUID, k
 		active = !sensitive
 	}
 	if active {
-		_, err = s.d.Store.AddAutoFollow(ctx, userID, orgID)
+		_, err = s.interactions().AddAutoFollow(ctx, userID, orgID)
 		return err
 	}
-	_, err = s.d.Store.RemoveAutoFollow(ctx, userID, orgID)
+	_, err = s.interactions().RemoveAutoFollow(ctx, userID, orgID)
 	return err
 }

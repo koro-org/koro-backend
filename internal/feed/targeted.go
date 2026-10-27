@@ -160,7 +160,7 @@ func (s *service) CreateTargetedPost(ctx context.Context, a authz.Actor, orgID u
 			}
 			p.EntitlementUsageID = &usage
 		}
-		if p, err = s.d.Store.InsertPost(ctx, p); err != nil {
+		if p, err = s.posts().InsertPost(ctx, p); err != nil {
 			return uuid.Nil(), err
 		}
 		if err := s.writeMedia(ctx, a, p, ap.media); err != nil {
@@ -259,7 +259,7 @@ func (s *service) notSuspended(ctx context.Context, o orgs.OrgSummary) error {
 	if o.Kind == orgs.KindPlatform {
 		return nil
 	}
-	st, ok, err := s.d.Store.OrgSettings(ctx, o.ID)
+	st, ok, err := s.settings().OrgSettings(ctx, o.ID)
 	switch {
 	case err != nil:
 		return err

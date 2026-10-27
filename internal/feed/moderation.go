@@ -90,7 +90,7 @@ func (s *service) linkedReport(ctx context.Context, id *uuid.UUID, t TargetType,
 	if id == nil {
 		return nil
 	}
-	r, err := s.d.Store.GetReport(ctx, *id)
+	r, err := s.reports().GetReport(ctx, *id)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return problem.Field("body.report_id", "must be a report of this target")
@@ -154,7 +154,7 @@ func (s *service) ModeratePost(ctx context.Context, a authz.Actor, postID uuid.U
 		return PostModeration{}, err
 	}
 	actionID, _, err := idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (uuid.UUID, error) {
-		p, err := s.d.Store.LockPost(ctx, postID)
+		p, err := s.posts().LockPost(ctx, postID)
 		if err != nil {
 			return uuid.Nil(), err
 		}
@@ -168,7 +168,7 @@ func (s *service) ModeratePost(ctx context.Context, a authz.Actor, postID uuid.U
 		if err != nil {
 			return uuid.Nil(), err
 		}
-		if next, err = s.d.Store.UpdatePost(ctx, next); err != nil {
+		if next, err = s.posts().UpdatePost(ctx, next); err != nil {
 			return uuid.Nil(), err
 		}
 		if in.Action == ModApprove {
@@ -176,7 +176,7 @@ func (s *service) ModeratePost(ctx context.Context, a authz.Actor, postID uuid.U
 				return uuid.Nil(), err
 			}
 		}
-		m, err := s.d.Store.InsertModerationAction(ctx, ModerationAction{
+		m, err := s.moderation().InsertModerationAction(ctx, ModerationAction{
 			ID: uuid.NewV7(), ReportID: in.ReportID, TargetType: TargetPost, TargetID: p.ID, Action: in.Action,
 			ReasonCode: in.ReasonCode, ActorUserID: a.UserID, Note: note,
 		})
@@ -199,11 +199,11 @@ func (s *service) ModeratePost(ctx context.Context, a authz.Actor, postID uuid.U
 	if err != nil {
 		return PostModeration{}, err
 	}
-	p, err := s.d.Store.GetPost(ctx, postID)
+	p, err := s.posts().GetPost(ctx, postID)
 	if err != nil {
 		return PostModeration{}, err
 	}
-	m, err := s.d.Store.GetModerationAction(ctx, actionID)
+	m, err := s.moderation().GetModerationAction(ctx, actionID)
 	if err != nil {
 		return PostModeration{}, err
 	}
@@ -246,7 +246,7 @@ func (s *service) transition(ctx context.Context, a authz.Actor, p Post, act Mod
 	case act == ModRestore && p.Status == StatusRemoved && p.PublishedAt != nil:
 		// Only a moderator's removal is undone (an appeal); the author
 		// org's own removal stays.
-		last, err := s.d.Store.LatestActions(ctx, TargetPost, []uuid.UUID{p.ID})
+		last, err := s.moderation().LatestActions(ctx, TargetPost, []uuid.UUID{p.ID})
 		if err != nil {
 			return Post{}, err
 		}
@@ -265,7 +265,7 @@ func (s *service) transition(ctx context.Context, a authz.Actor, p Post, act Mod
 // (feed.org_settings.auto_trust, a system action of 03 §3.7, audited as
 // such).
 func (s *service) countApproval(ctx context.Context, orgID uuid.UUID) error {
-	st, err := s.d.Store.AddApprovedPost(ctx, orgID)
+	st, err := s.settings().AddApprovedPost(ctx, orgID)
 	if err != nil || st.TrustLevel != TrustNew || st.ApprovedPostsCount < s.d.ReviewThreshold {
 		return err
 	}
@@ -273,7 +273,7 @@ func (s *service) countApproval(ctx context.Context, orgID uuid.UUID) error {
 	if err := authz.Can(ctx, sys, authz.FeedOrgSettingsAutoTrust, authz.Resource{}); err != nil {
 		return err
 	}
-	promoted, err := s.d.Store.PromoteTrusted(ctx, orgID, s.d.ReviewThreshold)
+	promoted, err := s.settings().PromoteTrusted(ctx, orgID, s.d.ReviewThreshold)
 	if err != nil || !promoted {
 		return err
 	}
@@ -318,7 +318,7 @@ func (s *service) ModerateOrg(ctx context.Context, a authz.Actor, orgID uuid.UUI
 	if err != nil {
 		return OrgModeration{}, err
 	}
-	cur, _, err := s.d.Store.OrgSettings(ctx, o.ID)
+	cur, _, err := s.settings().OrgSettings(ctx, o.ID)
 	if err != nil {
 		return OrgModeration{}, err
 	}
@@ -348,17 +348,17 @@ func (s *service) ModerateOrg(ctx context.Context, a authz.Actor, orgID uuid.UUI
 		switch in.Action {
 		case ModRestrictOrg:
 			until := in.RestrictedUntil.UTC().Truncate(time.Microsecond)
-			if next, err = s.d.Store.SetTrust(ctx, OrgSettings{OrgID: o.ID, TrustLevel: TrustRestricted,
+			if next, err = s.settings().SetTrust(ctx, OrgSettings{OrgID: o.ID, TrustLevel: TrustRestricted,
 				RestrictedUntil: &until, Reason: &reason, UpdatedBy: &me}); err != nil {
 				return uuid.Nil(), err
 			}
 		case ModSuspendOrg:
-			if next, err = s.d.Store.SetTrust(ctx, OrgSettings{OrgID: o.ID, TrustLevel: TrustSuspended,
+			if next, err = s.settings().SetTrust(ctx, OrgSettings{OrgID: o.ID, TrustLevel: TrustSuspended,
 				Reason: &reason, UpdatedBy: &me}); err != nil {
 				return uuid.Nil(), err
 			}
 		}
-		m, err := s.d.Store.InsertModerationAction(ctx, ModerationAction{
+		m, err := s.moderation().InsertModerationAction(ctx, ModerationAction{
 			ID: uuid.NewV7(), ReportID: in.ReportID, TargetType: TargetOrg, TargetID: o.ID, Action: in.Action,
 			ReasonCode: in.ReasonCode, ActorUserID: a.UserID, Note: note,
 		})
@@ -379,11 +379,11 @@ func (s *service) ModerateOrg(ctx context.Context, a authz.Actor, orgID uuid.UUI
 	if err != nil {
 		return OrgModeration{}, err
 	}
-	m, err := s.d.Store.GetModerationAction(ctx, actionID)
+	m, err := s.moderation().GetModerationAction(ctx, actionID)
 	if err != nil {
 		return OrgModeration{}, err
 	}
-	st, ok, err := s.d.Store.OrgSettings(ctx, o.ID)
+	st, ok, err := s.settings().OrgSettings(ctx, o.ID)
 	if err != nil {
 		return OrgModeration{}, err
 	}
@@ -400,7 +400,7 @@ func (s *service) ListReviewQueue(ctx context.Context, a authz.Actor, q PageQuer
 		return PostPage{}, err
 	}
 	limit := page.ClampLimit(q.Limit)
-	rows, err := s.d.Store.ListReview(ctx, q.After, limit+1)
+	rows, err := s.moderation().ListReview(ctx, q.After, limit+1)
 	if err != nil {
 		return PostPage{}, err
 	}
@@ -422,7 +422,7 @@ func (s *service) ListModerationActions(ctx context.Context, a authz.Actor, q Ac
 		return ActionPage{}, err
 	}
 	limit := page.ClampLimit(q.Limit)
-	rows, err := s.d.Store.ListModerationActions(ctx, q.Filter, q.After, limit+1)
+	rows, err := s.moderation().ListModerationActions(ctx, q.Filter, q.After, limit+1)
 	if err != nil {
 		return ActionPage{}, err
 	}

@@ -75,8 +75,15 @@ type RetentionStore interface {
 // errNoFiles: removed posts with images cannot go without the files module.
 var errNoFiles = errors.New("feed: removed posts with images cannot be purged: files not wired")
 
-// sweeper is feed's privacy.RetentionSweeper.
-type sweeper struct{ s *service }
+// sweeper is feed's privacy.RetentionSweeper: it needs the purges of the
+// store, the media of the removed posts (their image files go too), the
+// files module and the transaction manager only.
+type sweeper struct {
+	retention RetentionStore
+	media     mediaStore
+	files     Files
+	tx        db.TxManager
+}
 
 var _ privacy.RetentionSweeper = sweeper{}
 
@@ -101,15 +108,15 @@ func (w sweeper) Sweep(ctx context.Context, p privacy.RetentionPolicy, now time.
 	switch p.Code {
 	case PolicyPostRemoved:
 		purge = func(ctx context.Context, limit int, dry bool) (int, error) {
-			return w.s.purgeRemovedPosts(ctx, cutoff, limit, dry)
+			return w.purgeRemovedPosts(ctx, cutoff, limit, dry)
 		}
 	case PolicyContentReport:
 		purge = func(ctx context.Context, limit int, dry bool) (int, error) {
-			return w.s.d.Store.PurgeResolvedReports(ctx, cutoff, limit, dry)
+			return w.retention.PurgeResolvedReports(ctx, cutoff, limit, dry)
 		}
 	default:
 		purge = func(ctx context.Context, limit int, dry bool) (int, error) {
-			return w.s.d.Store.PurgeModerationActions(ctx, cutoff, limit, dry)
+			return w.retention.PurgeModerationActions(ctx, cutoff, limit, dry)
 		}
 	}
 	res := privacy.SweepResult{PolicyCode: p.Code, Table: table, Method: privacy.MethodHardDelete}
@@ -118,7 +125,7 @@ func (w sweeper) Sweep(ctx context.Context, p privacy.RetentionPolicy, now time.
 		res.Count = n
 		return res, err
 	}
-	n, err := db.Batches(ctx, w.s.d.Tx, RetentionBatch, func(ctx context.Context) (int, error) {
+	n, err := db.Batches(ctx, w.tx, RetentionBatch, func(ctx context.Context) (int, error) {
 		return purge(ctx, RetentionBatch, false)
 	})
 	res.Count = n
@@ -128,11 +135,11 @@ func (w sweeper) Sweep(ctx context.Context, p privacy.RetentionPolicy, now time.
 // purgeRemovedPosts handles one batch of post_removed: the posts go, then
 // their image files (the media rows that referenced them went with the
 // posts), in the transaction carried by ctx.
-func (s *service) purgeRemovedPosts(ctx context.Context, cutoff time.Time, limit int, dry bool) (int, error) {
+func (w sweeper) purgeRemovedPosts(ctx context.Context, cutoff time.Time, limit int, dry bool) (int, error) {
 	if dry {
-		return s.d.Store.CountRemovedPostsDue(ctx, cutoff)
+		return w.retention.CountRemovedPostsDue(ctx, cutoff)
 	}
-	posts, err := s.d.Store.RemovedPostsDue(ctx, cutoff, limit)
+	posts, err := w.retention.RemovedPostsDue(ctx, cutoff, limit)
 	if err != nil || len(posts) == 0 {
 		return 0, err
 	}
@@ -140,21 +147,21 @@ func (s *service) purgeRemovedPosts(ctx context.Context, cutoff time.Time, limit
 	for i, p := range posts {
 		ids[i] = p.ID
 	}
-	media, err := s.d.Store.MediaOf(ctx, ids)
+	media, err := w.media.MediaOf(ctx, ids)
 	if err != nil {
 		return 0, err
 	}
-	n, err := s.d.Store.PurgePosts(ctx, ids)
+	n, err := w.retention.PurgePosts(ctx, ids)
 	if err != nil {
 		return 0, err
 	}
 	sys := authz.SystemActor(retentionJob)
 	for _, id := range ids {
 		for _, m := range media[id] {
-			if s.d.Files == nil {
+			if w.files == nil {
 				return 0, errNoFiles
 			}
-			if err := s.d.Files.Delete(ctx, sys, m.FileID); err != nil {
+			if err := w.files.Delete(ctx, sys, m.FileID); err != nil {
 				return 0, err
 			}
 		}

@@ -92,7 +92,7 @@ func (s *service) DiscoveryMatches(ctx context.Context, q DiscoveryQuery, most i
 	truncated := false
 walk:
 	for after := uuid.Nil(); ; {
-		batch, err := s.d.Store.DiscoveryCandidates(ctx, q, after, discoveryMatchBatch)
+		batch, err := s.matches().DiscoveryCandidates(ctx, q, after, discoveryMatchBatch)
 		if err != nil {
 			return DiscoveryMatchSet{}, err
 		}
@@ -161,7 +161,7 @@ walk:
 // language) up to last and calls hit for every one of them in at.
 func (s *service) hitWalk(ctx context.Context, q DiscoveryQuery, last uuid.UUID, hit func(int), at map[uuid.UUID]int) error {
 	for after := uuid.Nil(); ; {
-		batch, err := s.d.Store.DiscoveryCandidates(ctx, q, after, discoveryIDBatch)
+		batch, err := s.matches().DiscoveryCandidates(ctx, q, after, discoveryIDBatch)
 		if err != nil {
 			return err
 		}
@@ -230,7 +230,7 @@ func (s *service) AnonProfiles(ctx context.Context, ids []uuid.UUID) (map[uuid.U
 // levelTwoOn reports the module's own part of IsDiscoverable: an active
 // profile whose settings have level 2 on.
 func (s *service) levelTwoOn(ctx context.Context, userID uuid.UUID) (bool, error) {
-	p, err := s.d.Store.GetProfile(ctx, userID)
+	p, err := s.profiles().GetProfile(ctx, userID)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return false, nil
@@ -239,7 +239,7 @@ func (s *service) levelTwoOn(ctx context.Context, userID uuid.UUID) (bool, error
 	case p.Status != ProfileActive:
 		return false, nil
 	}
-	pr, err := s.d.Store.GetPrivacy(ctx, userID)
+	pr, err := s.privacy().GetPrivacy(ctx, userID)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return false, nil
@@ -254,5 +254,5 @@ func (s *service) DiscoveryCandidatesAfter(ctx context.Context, after uuid.UUID,
 	if limit <= 0 || limit > discoveryIDBatch {
 		limit = discoveryIDBatch
 	}
-	return s.d.Store.DiscoveryCandidates(ctx, DiscoveryQuery{}, after, limit)
+	return s.matches().DiscoveryCandidates(ctx, DiscoveryQuery{}, after, limit)
 }

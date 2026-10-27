@@ -45,7 +45,7 @@ func (s *service) GetMyPrivacy(ctx context.Context, a authz.Actor) (Privacy, err
 	if err := s.can(ctx, a, authz.StudentsPrivacyReadOwn); err != nil {
 		return Privacy{}, err
 	}
-	p, err := s.d.Store.GetPrivacy(ctx, a.UserID)
+	p, err := s.privacy().GetPrivacy(ctx, a.UserID)
 	if errors.Is(err, ErrNotFound) {
 		return defaultPrivacy(a.UserID), nil
 	}
@@ -79,7 +79,7 @@ func (s *service) UpdateMyPrivacy(ctx context.Context, a authz.Actor, patch Priv
 	}
 	var out Privacy
 	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		cur, err := s.d.Store.LockPrivacy(ctx, a.UserID)
+		cur, err := s.privacy().LockPrivacy(ctx, a.UserID)
 		if err != nil {
 			return err
 		}
@@ -116,7 +116,7 @@ func (s *service) UpdateMyPrivacy(ctx context.Context, a authz.Actor, patch Priv
 				return consent.ErrProofRequired.WithFields(fieldError(m.field, "the consent text shown is required to turn this on"))
 			}
 		}
-		if out, err = s.d.Store.UpdatePrivacy(ctx, next); err != nil {
+		if out, err = s.privacy().UpdatePrivacy(ctx, next); err != nil {
 			return err
 		}
 		for _, m := range mirrors {

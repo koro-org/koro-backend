@@ -90,7 +90,7 @@ func (s *service) ListMyCVs(ctx context.Context, a authz.Actor) ([]CVView, error
 	if err := s.canCV(ctx, a, authz.StudentsCvReadOwn, uuid.Nil()); err != nil {
 		return nil, err
 	}
-	cvs, err := s.d.Store.CVs(ctx, a.UserID)
+	cvs, err := s.cvs().CVs(ctx, a.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -139,14 +139,14 @@ func (s *service) CreateMyCV(ctx context.Context, a authz.Actor, fileID uuid.UUI
 			if err != nil {
 				return err
 			}
-			cur, err := s.d.Store.CVs(ctx, a.UserID)
+			cur, err := s.cvs().CVs(ctx, a.UserID)
 			if err != nil {
 				return err
 			}
 			if len(cur) >= MaxCVs {
 				return ErrCVLimit
 			}
-			if out, err = s.d.Store.InsertCV(ctx, CV{ID: uuid.NewV7(), UserID: a.UserID, FileID: fileID}); err != nil {
+			if out, err = s.cvs().InsertCV(ctx, CV{ID: uuid.NewV7(), UserID: a.UserID, FileID: fileID}); err != nil {
 				return err
 			}
 			if err := s.d.Files.Attach(ctx, a, fileID, files.Owner{Module: studentsModule, EntityID: out.ID,
@@ -158,7 +158,7 @@ func (s *service) CreateMyCV(ctx context.Context, a authz.Actor, fileID uuid.UUI
 				hasCurrent = hasCurrent || c.IsCurrent
 			}
 			if makeCurrent || !hasCurrent {
-				if out, err = s.d.Store.SetCurrentCV(ctx, a.UserID, out.ID); err != nil {
+				if out, err = s.cvs().SetCurrentCV(ctx, a.UserID, out.ID); err != nil {
 					return err
 				}
 			}
@@ -185,7 +185,7 @@ func (s *service) SetMyCurrentCV(ctx context.Context, a authz.Actor, id uuid.UUI
 	}
 	var out CV
 	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		c, err := s.d.Store.GetCV(ctx, a.UserID, id)
+		c, err := s.cvs().GetCV(ctx, a.UserID, id)
 		if err != nil {
 			return err
 		}
@@ -193,7 +193,7 @@ func (s *service) SetMyCurrentCV(ctx context.Context, a authz.Actor, id uuid.UUI
 			out = c
 			return nil
 		}
-		if out, err = s.d.Store.SetCurrentCV(ctx, a.UserID, id); err != nil {
+		if out, err = s.cvs().SetCurrentCV(ctx, a.UserID, id); err != nil {
 			return err
 		}
 		return s.d.Audit.Log(ctx, cvEvent(a, authz.StudentsCvManage, out, map[string]any{"op": "set_current"}))
@@ -218,11 +218,11 @@ func (s *service) DeleteMyCV(ctx context.Context, a authz.Actor, id uuid.UUID) e
 		return err
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		p, err := s.d.Store.LockProfile(ctx, a.UserID) // no profile: no CV either (404)
+		p, err := s.profiles().LockProfile(ctx, a.UserID) // no profile: no CV either (404)
 		if err != nil {
 			return err
 		}
-		c, err := s.d.Store.GetCV(ctx, a.UserID, id)
+		c, err := s.cvs().GetCV(ctx, a.UserID, id)
 		if err != nil {
 			return err
 		}
@@ -235,7 +235,7 @@ func (s *service) DeleteMyCV(ctx context.Context, a authz.Actor, id uuid.UUID) e
 // the owner's locked profile, or the zero profile without one), updates
 // the cv section and writes ev.
 func (s *service) removeCV(ctx context.Context, a authz.Actor, p Profile, c CV, ev audit.Event) error {
-	ok, err := s.d.Store.DeleteCV(ctx, c.UserID, c.ID)
+	ok, err := s.cvs().DeleteCV(ctx, c.UserID, c.ID)
 	if err != nil {
 		return err
 	}
@@ -246,7 +246,7 @@ func (s *service) removeCV(ctx context.Context, a authz.Actor, p Profile, c CV, 
 		return err
 	}
 	if p.UserID != uuid.Nil() {
-		rest, err := s.d.Store.CVs(ctx, c.UserID)
+		rest, err := s.cvs().CVs(ctx, c.UserID)
 		if err != nil {
 			return err
 		}
@@ -268,7 +268,7 @@ func (s *service) DownloadMyCV(ctx context.Context, a authz.Actor, id uuid.UUID)
 	if s.d.Files == nil {
 		return files.Download{}, errUnavailable
 	}
-	c, err := s.d.Store.GetCV(ctx, a.UserID, id)
+	c, err := s.cvs().GetCV(ctx, a.UserID, id)
 	if err != nil {
 		return files.Download{}, err
 	}
@@ -313,14 +313,14 @@ func (s *service) handleFileRejected(ctx context.Context, e domainevent.Envelope
 
 func (s *service) dropRejectedCV(ctx context.Context, sys authz.Actor, p domainevent.FileRejected) error {
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		c, err := s.d.Store.CVByFile(ctx, p.FileID)
+		c, err := s.cvs().CVByFile(ctx, p.FileID)
 		switch {
 		case errors.Is(err, ErrNotFound): // the student deleted it meanwhile: only the file may remain
 			return s.removeFile(ctx, sys, p.FileID)
 		case err != nil:
 			return err
 		}
-		prof, err := s.d.Store.LockProfile(ctx, c.UserID)
+		prof, err := s.profiles().LockProfile(ctx, c.UserID)
 		switch {
 		case errors.Is(err, ErrNotFound):
 			prof = Profile{}
@@ -338,7 +338,7 @@ func (s *service) dropRejectedAvatar(ctx context.Context, sys authz.Actor, p dom
 		return s.removeFile(ctx, sys, p.FileID)
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		prof, err := s.d.Store.LockProfile(ctx, *p.AttachedEntityID)
+		prof, err := s.profiles().LockProfile(ctx, *p.AttachedEntityID)
 		switch {
 		case errors.Is(err, ErrNotFound):
 			return s.removeFile(ctx, sys, p.FileID)
@@ -349,7 +349,7 @@ func (s *service) dropRejectedAvatar(ctx context.Context, sys authz.Actor, p dom
 			return s.removeFile(ctx, sys, p.FileID) // replaced meanwhile
 		}
 		prof.AvatarFileID = nil
-		if _, err := s.d.Store.UpdateProfile(ctx, prof); err != nil {
+		if _, err := s.profiles().UpdateProfile(ctx, prof); err != nil {
 			return err
 		}
 		if err := s.removeFile(ctx, sys, p.FileID); err != nil {

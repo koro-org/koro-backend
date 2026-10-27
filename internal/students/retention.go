@@ -24,8 +24,12 @@ const (
 	RetentionBatch = 1000
 )
 
-// sweeper is students' privacy.RetentionSweeper.
-type sweeper struct{ s *service }
+// sweeper is students' privacy.RetentionSweeper: it needs the grants of
+// the store and the transaction manager only.
+type sweeper struct {
+	grants grantStore
+	tx     db.TxManager
+}
 
 var _ privacy.RetentionSweeper = sweeper{}
 
@@ -40,12 +44,12 @@ func (w sweeper) Sweep(ctx context.Context, p privacy.RetentionPolicy, now time.
 	cutoff := now.Add(-p.Retention)
 	res := privacy.SweepResult{PolicyCode: p.Code, Table: "profile_access_grants", Method: privacy.MethodHardDelete}
 	if !p.LegalApproved {
-		n, err := w.s.d.Store.CountRevokedGrantsBefore(ctx, cutoff)
+		n, err := w.grants.CountRevokedGrantsBefore(ctx, cutoff)
 		res.Count = n
 		return res, err
 	}
-	n, err := db.Batches(ctx, w.s.d.Tx, RetentionBatch, func(ctx context.Context) (int, error) {
-		return w.s.d.Store.PurgeRevokedGrants(ctx, cutoff, RetentionBatch)
+	n, err := db.Batches(ctx, w.tx, RetentionBatch, func(ctx context.Context) (int, error) {
+		return w.grants.PurgeRevokedGrants(ctx, cutoff, RetentionBatch)
 	})
 	res.Count = n
 	return res, err

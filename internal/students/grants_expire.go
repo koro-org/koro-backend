@@ -48,7 +48,7 @@ func (s *service) expireSuspendedGrants(ctx context.Context) error {
 	cutoff := now.Add(-s.suspensionWindow())
 	after, revoked := uuid.Nil(), 0
 	for ctx.Err() == nil {
-		ids, err := s.d.Store.SuspendedStudentsBefore(ctx, cutoff, after, batchSize)
+		ids, err := s.grants().SuspendedStudentsBefore(ctx, cutoff, after, batchSize)
 		if err != nil {
 			return fmt.Errorf("%s: %w", ExpireSuspendedGrantsJobName, err)
 		}
@@ -82,10 +82,10 @@ func (s *service) expireStudent(ctx context.Context, studentID uuid.UUID, cutoff
 	sys := authz.SystemActor(ExpireSuspendedGrantsJobName)
 	n := 0
 	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		if err := s.d.Store.LockGrants(ctx, studentID); err != nil {
+		if err := s.grants().LockGrants(ctx, studentID); err != nil {
 			return err
 		}
-		gone, err := s.d.Store.ExpireSuspendedGrants(ctx, studentID, cutoff, at)
+		gone, err := s.grants().ExpireSuspendedGrants(ctx, studentID, cutoff, at)
 		if err != nil {
 			return err
 		}
@@ -110,7 +110,7 @@ func (s *service) noticeExpiries(ctx context.Context, since time.Time) error {
 	var errs []error
 	var after *ExpiryKey
 	for ctx.Err() == nil {
-		rows, err := s.d.Store.ExpiredRevocations(ctx, since, after, batchSize)
+		rows, err := s.grants().ExpiredRevocations(ctx, since, after, batchSize)
 		if err != nil {
 			return err
 		}

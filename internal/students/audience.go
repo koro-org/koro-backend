@@ -207,7 +207,7 @@ func (s *service) withAudience(ctx context.Context, p Profile) (Profile, error) 
 // transaction; a user without a profile is nobody's audience yet.
 func (s *service) refreshUser(ctx context.Context, userID uuid.UUID, job string) error {
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		p, err := s.d.Store.LockProfile(ctx, userID)
+		p, err := s.profiles().LockProfile(ctx, userID)
 		switch {
 		case errors.Is(err, ErrNotFound):
 			return nil
@@ -228,7 +228,7 @@ func (s *service) applyReconcile(ctx context.Context, p Profile, job string) err
 	if !changed(p, next) {
 		return nil
 	}
-	if _, err := s.d.Store.UpdateProfile(ctx, next); err != nil {
+	if _, err := s.profiles().UpdateProfile(ctx, next); err != nil {
 		return err
 	}
 	if next.UniversityID != p.UniversityID {
@@ -255,7 +255,7 @@ func systemEvent(job, action string, userID uuid.UUID, meta map[string]any) audi
 // AudienceProfile implements Profiles. An unknown account counts as a
 // minor (fail closed).
 func (s *service) AudienceProfile(ctx context.Context, userID uuid.UUID) (AudienceProfile, error) {
-	p, err := s.d.Store.GetProfile(ctx, userID)
+	p, err := s.profiles().GetProfile(ctx, userID)
 	if err != nil {
 		return AudienceProfile{}, err
 	}
@@ -276,7 +276,7 @@ func (s *service) AudienceProfile(ctx context.Context, userID uuid.UUID) (Audien
 // posts reach its members; 02 §17). Computed at read time, never stored.
 func (s *service) ViewerKeys(ctx context.Context, userID uuid.UUID) (ViewerKeys, error) {
 	keys := []string{KeyAll}
-	switch p, err := s.d.Store.GetProfile(ctx, userID); {
+	switch p, err := s.profiles().GetProfile(ctx, userID); {
 	case err == nil:
 		keys = profileKeys(p)
 	case !errors.Is(err, ErrNotFound):
@@ -295,7 +295,7 @@ func (s *service) ViewerKeys(ctx context.Context, userID uuid.UUID) (ViewerKeys,
 // Cohorts implements Profiles.
 func (s *service) Cohorts(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]Cohort, error) {
 	out := map[uuid.UUID]Cohort{}
-	rows, err := s.d.Store.Profiles(ctx, userIDs)
+	rows, err := s.profiles().Profiles(ctx, userIDs)
 	if err != nil || len(rows) == 0 {
 		return out, err
 	}
@@ -316,7 +316,7 @@ func (s *service) Cohorts(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UU
 
 // RankingChoice implements Profiles.
 func (s *service) RankingChoice(ctx context.Context, userID uuid.UUID) (RankingChoice, error) {
-	p, err := s.d.Store.GetPrivacy(ctx, userID)
+	p, err := s.privacy().GetPrivacy(ctx, userID)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return RankingDefault, nil
@@ -328,7 +328,7 @@ func (s *service) RankingChoice(ctx context.Context, userID uuid.UUID) (RankingC
 
 // GraduatedAmong implements Service.
 func (s *service) GraduatedAmong(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]bool, error) {
-	ids, err := s.d.Store.GraduatedAmong(ctx, userIDs)
+	ids, err := s.profiles().GraduatedAmong(ctx, userIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -406,14 +406,14 @@ func (s *service) handleEduVerified(ctx context.Context, e domainevent.Envelope)
 		return queue.Permanent(err)
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		cur, err := s.d.Store.LockProfile(ctx, p.UserID)
+		cur, err := s.profiles().LockProfile(ctx, p.UserID)
 		switch {
 		case errors.Is(err, ErrNotFound):
 			fresh := Profile{UserID: p.UserID, UniversityID: p.UniversityID, DegreeLevel: DegreeBachelor, Status: ProfileActive}
-			if _, _, err := s.d.Store.InsertProfile(ctx, fresh); err != nil {
+			if _, _, err := s.profiles().InsertProfile(ctx, fresh); err != nil {
 				return err
 			}
-			if cur, err = s.d.Store.LockProfile(ctx, p.UserID); err != nil {
+			if cur, err = s.profiles().LockProfile(ctx, p.UserID); err != nil {
 				return err
 			}
 		case err != nil:
@@ -421,7 +421,7 @@ func (s *service) handleEduVerified(ctx context.Context, e domainevent.Envelope)
 		}
 		if cur.Status == ProfileGraduated {
 			cur.Status, cur.GraduatedAt = ProfileActive, nil
-			if cur, err = s.d.Store.UpdateProfile(ctx, cur); err != nil {
+			if cur, err = s.profiles().UpdateProfile(ctx, cur); err != nil {
 				return err
 			}
 			if err := s.d.Audit.Log(ctx, systemEvent(ApplyEduVerifiedTaskName, auditProfileGraduate, p.UserID,
@@ -457,7 +457,7 @@ func (s *service) handleSensitivityChanged(ctx context.Context, e domainevent.En
 	if p.Sensitive {
 		key := ClubKey(p.ClubOrgID)
 		total, err := db.Drain(ctx, batchSize, func(ctx context.Context) (int, error) {
-			return s.d.Store.RemoveAudienceKey(ctx, key, s.now(), batchSize)
+			return s.profiles().RemoveAudienceKey(ctx, key, s.now(), batchSize)
 		})
 		if err != nil {
 			return fmt.Errorf("%s: %w", DropSensitiveClubKeyTaskName, err)
@@ -489,7 +489,7 @@ func (s *service) handleSensitivityChanged(ctx context.Context, e domainevent.En
 func (s *service) audienceRefresh(ctx context.Context) error {
 	after, fixed := uuid.Nil(), 0
 	for ctx.Err() == nil {
-		rows, err := s.d.Store.ProfilesAfter(ctx, after, batchSize)
+		rows, err := s.profiles().ProfilesAfter(ctx, after, batchSize)
 		if err != nil {
 			return fmt.Errorf("%s: %w", AudienceRefreshJobName, err)
 		}
@@ -528,7 +528,7 @@ func (s *service) refreshBatch(ctx context.Context, rows []Profile) (int, error)
 	err = s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		now := s.now()
 		for _, id := range ids {
-			cur, err := s.d.Store.LockProfile(ctx, id)
+			cur, err := s.profiles().LockProfile(ctx, id)
 			switch {
 			case errors.Is(err, ErrNotFound):
 				continue // erased meanwhile
@@ -539,7 +539,7 @@ func (s *service) refreshBatch(ctx context.Context, rows []Profile) (int, error)
 			if !changed(cur, next) {
 				continue
 			}
-			if _, err := s.d.Store.UpdateProfile(ctx, next); err != nil {
+			if _, err := s.profiles().UpdateProfile(ctx, next); err != nil {
 				return err
 			}
 			if next.UniversityID != cur.UniversityID {
@@ -570,7 +570,7 @@ func (s *service) reconcilePrivacy(ctx context.Context) error {
 	}
 	after, fixed := uuid.Nil(), 0
 	for ctx.Err() == nil {
-		rows, err := s.d.Store.PrivacyFlagged(ctx, after, batchSize)
+		rows, err := s.privacy().PrivacyFlagged(ctx, after, batchSize)
 		if err != nil {
 			return fmt.Errorf("%s: %w", AudienceRefreshJobName, err)
 		}
@@ -612,7 +612,7 @@ func (s *service) reconcilePrivacyBatch(ctx context.Context, rows []Privacy) (in
 		for _, id := range ids {
 			u, known := users[id]
 			minor := !known || u.IsMinor
-			cur, err := s.d.Store.LockPrivacy(ctx, id)
+			cur, err := s.privacy().LockPrivacy(ctx, id)
 			if err != nil {
 				return err
 			}
@@ -622,7 +622,7 @@ func (s *service) reconcilePrivacyBatch(ctx context.Context, rows []Privacy) (in
 			if next == cur {
 				continue
 			}
-			if _, err := s.d.Store.UpdatePrivacy(ctx, next); err != nil {
+			if _, err := s.privacy().UpdatePrivacy(ctx, next); err != nil {
 				return err
 			}
 			reason := "consent_not_in_force"
@@ -642,7 +642,7 @@ func (s *service) reconcilePrivacyBatch(ctx context.Context, rows []Privacy) (in
 			if next.ShowContactOnGrant != cur.ShowContactOnGrant {
 				// Like the student turning it off: no share outlives the
 				// consent (the backstop of students.clear_contact_shares; BE-104).
-				gs, err := s.d.Store.ClearGrantContacts(ctx, id, nil)
+				gs, err := s.grants().ClearGrantContacts(ctx, id, nil)
 				if err != nil {
 					return err
 				}
@@ -672,7 +672,7 @@ func (s *service) graduationCheck(ctx context.Context) error {
 	}
 	after, graduated := uuid.Nil(), 0
 	for ctx.Err() == nil {
-		rows, err := s.d.Store.GraduationCandidates(ctx, cutoff, after, batchSize)
+		rows, err := s.profiles().GraduationCandidates(ctx, cutoff, after, batchSize)
 		if err != nil {
 			return fmt.Errorf("%s: %w", GraduationCheckJobName, err)
 		}
@@ -713,7 +713,7 @@ func (s *service) graduateBatch(ctx context.Context, rows []Profile, cutoff civi
 	n := 0
 	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		for _, id := range ids {
-			cur, err := s.d.Store.LockProfile(ctx, id)
+			cur, err := s.profiles().LockProfile(ctx, id)
 			switch {
 			case errors.Is(err, ErrNotFound):
 				continue
@@ -729,7 +729,7 @@ func (s *service) graduateBatch(ctx context.Context, rows []Profile, cutoff civi
 			at := now
 			cur.Status, cur.GraduatedAt = ProfileGraduated, &at
 			cur.AudienceEligible, cur.AudienceRefreshedAt = false, &at
-			if _, err := s.d.Store.UpdateProfile(ctx, cur); err != nil {
+			if _, err := s.profiles().UpdateProfile(ctx, cur); err != nil {
 				return err
 			}
 			if err := s.emitOutbox(ctx, domainevent.StudentGraduated{UserID: id}, "student_profile", id); err != nil {

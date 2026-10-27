@@ -98,14 +98,14 @@ func (s *service) ShareContactWithCompany(ctx context.Context, a authz.Actor, co
 		channel = consent.ChannelWeb
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		if err := s.d.Store.LockGrants(ctx, a.UserID); err != nil {
+		if err := s.grants().LockGrants(ctx, a.UserID); err != nil {
 			return err
 		}
-		g, err := s.d.Store.ActiveGrant(ctx, a.UserID, companyOrgID)
+		g, err := s.grants().ActiveGrant(ctx, a.UserID, companyOrgID)
 		if err != nil {
 			return err
 		}
-		pv, err := s.d.Store.LockPrivacy(ctx, a.UserID)
+		pv, err := s.privacy().LockPrivacy(ctx, a.UserID)
 		if err != nil {
 			return err
 		}
@@ -115,7 +115,7 @@ func (s *service) ShareContactWithCompany(ctx context.Context, a authz.Actor, co
 			return err
 		}
 		if !on {
-			stale, err := s.d.Store.ClearGrantContacts(ctx, a.UserID, nil)
+			stale, err := s.grants().ClearGrantContacts(ctx, a.UserID, nil)
 			if err != nil {
 				return err
 			}
@@ -132,12 +132,12 @@ func (s *service) ShareContactWithCompany(ctx context.Context, a authz.Actor, co
 		if !pv.ShowContactOnGrant {
 			next := pv
 			next.ShowContactOnGrant = true
-			if _, err := s.d.Store.UpdatePrivacy(ctx, next); err != nil {
+			if _, err := s.privacy().UpdatePrivacy(ctx, next); err != nil {
 				return err
 			}
 			meta["show_contact_on_grant"] = true
 		}
-		shared, err := s.d.Store.ShareGrantContact(ctx, g.ID, s.now())
+		shared, err := s.grants().ShareGrantContact(ctx, g.ID, s.now())
 		if err != nil || (!shared && len(meta) == 1) {
 			return err // already shared under the consent in force: nothing to record
 		}
@@ -155,14 +155,14 @@ func (s *service) UnshareMyAccessGrantContact(ctx context.Context, a authz.Actor
 		return err
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		if err := s.d.Store.LockGrants(ctx, a.UserID); err != nil {
+		if err := s.grants().LockGrants(ctx, a.UserID); err != nil {
 			return err
 		}
-		g, err := s.d.Store.GetGrant(ctx, a.UserID, grantID)
+		g, err := s.grants().GetGrant(ctx, a.UserID, grantID)
 		if err != nil {
 			return err
 		}
-		ok, err := s.d.Store.UnshareGrantContact(ctx, a.UserID, g.ID)
+		ok, err := s.grants().UnshareGrantContact(ctx, a.UserID, g.ID)
 		if err != nil || !ok {
 			return err
 		}
@@ -174,7 +174,7 @@ func (s *service) UnshareMyAccessGrantContact(ctx context.Context, a authz.Actor
 // transaction (show_contact_on_grant turned off: the consent is withdrawn
 // in the same transaction).
 func (s *service) clearContactShares(ctx context.Context, a authz.Actor) error {
-	gs, err := s.d.Store.ClearGrantContacts(ctx, a.UserID, nil)
+	gs, err := s.grants().ClearGrantContacts(ctx, a.UserID, nil)
 	if err != nil {
 		return err
 	}
@@ -204,7 +204,7 @@ func (s *service) handleConsentRecorded(ctx context.Context, e domainevent.Envel
 		return nil
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		if err := s.d.Store.LockGrants(ctx, p.UserID); err != nil {
+		if err := s.grants().LockGrants(ctx, p.UserID); err != nil {
 			return err
 		}
 		on, err := s.consentActive(ctx, p.UserID, consent.PurposeContactInfoShare)
@@ -216,7 +216,7 @@ func (s *service) handleConsentRecorded(ctx context.Context, e domainevent.Envel
 			at := e.OccurredAt
 			before = &at
 		}
-		gs, err := s.d.Store.ClearGrantContacts(ctx, p.UserID, before)
+		gs, err := s.grants().ClearGrantContacts(ctx, p.UserID, before)
 		if err != nil {
 			return err
 		}

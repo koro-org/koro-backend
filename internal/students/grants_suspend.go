@@ -93,10 +93,10 @@ func (s *service) eventTime(e domainevent.Envelope) time.Time {
 func (s *service) suspendGrants(ctx context.Context, studentID uuid.UUID, at time.Time, job, reason string, eventID uuid.UUID) error {
 	sys := authz.SystemActor(job)
 	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		if err := s.d.Store.LockGrants(ctx, studentID); err != nil {
+		if err := s.grants().LockGrants(ctx, studentID); err != nil {
 			return err
 		}
-		suspended, err := s.d.Store.SuspendGrants(ctx, studentID, at)
+		suspended, err := s.grants().SuspendGrants(ctx, studentID, at)
 		if err != nil {
 			return err
 		}
@@ -111,7 +111,7 @@ func (s *service) suspendGrants(ctx context.Context, studentID uuid.UUID, at tim
 	if err != nil {
 		return err
 	}
-	n, err := s.d.Store.CountSuspendedAt(ctx, studentID, at)
+	n, err := s.grants().CountSuspendedAt(ctx, studentID, at)
 	if err != nil || n == 0 {
 		return err
 	}

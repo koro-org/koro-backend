@@ -88,7 +88,7 @@ func (s *service) GetMyProfile(ctx context.Context, a authz.Actor) (ProfileView,
 	if err := s.can(ctx, a, authz.StudentsProfileReadOwn); err != nil {
 		return ProfileView{}, err
 	}
-	p, err := s.d.Store.GetProfile(ctx, a.UserID)
+	p, err := s.profiles().GetProfile(ctx, a.UserID)
 	stored := err == nil
 	switch {
 	case errors.Is(err, ErrNotFound):
@@ -129,25 +129,25 @@ func (s *service) view(ctx context.Context, p Profile, stored bool) (ProfileView
 		}
 	}
 	v.AvatarURL = s.avatarURL(ctx, p.UserID, p.AvatarFileID)
-	if v.Skills, err = s.d.Store.Skills(ctx, p.UserID); err != nil {
+	if v.Skills, err = s.sections().Skills(ctx, p.UserID); err != nil {
 		return ProfileView{}, err
 	}
 	if v.SkillNames, err = s.skillNames(ctx, v.Skills); err != nil {
 		return ProfileView{}, err
 	}
-	if v.Experiences, err = s.d.Store.Experiences(ctx, p.UserID); err != nil {
+	if v.Experiences, err = s.sections().Experiences(ctx, p.UserID); err != nil {
 		return ProfileView{}, err
 	}
-	if v.Languages, err = s.d.Store.Languages(ctx, p.UserID); err != nil {
+	if v.Languages, err = s.sections().Languages(ctx, p.UserID); err != nil {
 		return ProfileView{}, err
 	}
-	switch pr, err := s.d.Store.GetPrivacy(ctx, p.UserID); {
+	switch pr, err := s.privacy().GetPrivacy(ctx, p.UserID); {
 	case err == nil:
 		v.Privacy = pr
 	case !errors.Is(err, ErrNotFound):
 		return ProfileView{}, err
 	}
-	cvs, err := s.d.Store.CVs(ctx, p.UserID)
+	cvs, err := s.cvs().CVs(ctx, p.UserID)
 	if err != nil {
 		return ProfileView{}, err
 	}
@@ -180,7 +180,7 @@ func (s *service) AvatarURLs(ctx context.Context, userIDs []uuid.UUID) (map[uuid
 	if s.d.Files == nil || len(userIDs) == 0 {
 		return out, nil
 	}
-	ids, err := s.d.Store.AvatarIDs(ctx, userIDs)
+	ids, err := s.profiles().AvatarIDs(ctx, userIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -204,16 +204,16 @@ func (s *service) ensureProfile(ctx context.Context, a authz.Actor) (Profile, er
 	if err != nil {
 		return Profile{}, err
 	}
-	p, err := s.d.Store.LockProfile(ctx, a.UserID)
+	p, err := s.profiles().LockProfile(ctx, a.UserID)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		if fresh, err = s.withAudience(ctx, fresh); err != nil {
 			return Profile{}, err
 		}
-		if _, _, err := s.d.Store.InsertProfile(ctx, fresh); err != nil {
+		if _, _, err := s.profiles().InsertProfile(ctx, fresh); err != nil {
 			return Profile{}, err
 		}
-		return s.d.Store.LockProfile(ctx, a.UserID) // ours, or a concurrent first write's
+		return s.profiles().LockProfile(ctx, a.UserID) // ours, or a concurrent first write's
 	case err != nil:
 		return Profile{}, err
 	}
@@ -224,7 +224,7 @@ func (s *service) ensureProfile(ctx context.Context, a authz.Actor) (Profile, er
 		if next, err = s.withAudience(ctx, next); err != nil {
 			return Profile{}, err
 		}
-		if p, err = s.d.Store.UpdateProfile(ctx, next); err != nil {
+		if p, err = s.profiles().UpdateProfile(ctx, next); err != nil {
 			return Profile{}, err
 		}
 		if err := s.d.Audit.Log(ctx, writeEvent(a, authz.StudentsProfileUpdateOwn,
@@ -266,7 +266,7 @@ func (s *service) UpdateMyProfile(ctx context.Context, a authz.Actor, patch Prof
 		if next, err = s.withAudience(ctx, next); err != nil {
 			return err
 		}
-		if out, err = s.d.Store.UpdateProfile(ctx, next); err != nil {
+		if out, err = s.profiles().UpdateProfile(ctx, next); err != nil {
 			return err
 		}
 		if basics && !p.Completed(SectionBasics) {
@@ -438,7 +438,7 @@ func (s *service) markSection(ctx context.Context, p Profile, sec Section, done 
 		return nil
 	}
 	p.CompletedSections = p.withSection(sec, done)
-	if _, err := s.d.Store.UpdateProfile(ctx, p); err != nil {
+	if _, err := s.profiles().UpdateProfile(ctx, p); err != nil {
 		return err
 	}
 	if done {
@@ -485,7 +485,7 @@ func (s *service) PutMySkills(ctx context.Context, a authz.Actor, items []SkillI
 		if err != nil {
 			return err
 		}
-		if out, err = s.d.Store.ReplaceSkills(ctx, a.UserID, rows); err != nil {
+		if out, err = s.sections().ReplaceSkills(ctx, a.UserID, rows); err != nil {
 			return err
 		}
 		if err := s.markSection(ctx, p, SectionSkills, len(out) > 0); err != nil {
@@ -527,7 +527,7 @@ func (s *service) PutMyLanguages(ctx context.Context, a authz.Actor, items []Lan
 		if err != nil {
 			return err
 		}
-		if out, err = s.d.Store.ReplaceLanguages(ctx, a.UserID, rows); err != nil {
+		if out, err = s.sections().ReplaceLanguages(ctx, a.UserID, rows); err != nil {
 			return err
 		}
 		if err := s.markSection(ctx, p, SectionLanguages, len(out) > 0); err != nil {
@@ -595,7 +595,7 @@ func (s *service) CreateMyExperience(ctx context.Context, a authz.Actor, in Expe
 			if err != nil {
 				return err
 			}
-			cur, err := s.d.Store.Experiences(ctx, a.UserID)
+			cur, err := s.sections().Experiences(ctx, a.UserID)
 			if err != nil {
 				return err
 			}
@@ -603,7 +603,7 @@ func (s *service) CreateMyExperience(ctx context.Context, a authz.Actor, in Expe
 				return problem.Field("body", "at most 50 experiences")
 			}
 			e.ID = uuid.NewV7()
-			if out, err = s.d.Store.InsertExperience(ctx, e); err != nil {
+			if out, err = s.sections().InsertExperience(ctx, e); err != nil {
 				return err
 			}
 			if err := s.markSection(ctx, p, SectionExperience, true); err != nil {
@@ -624,7 +624,7 @@ func (s *service) UpdateMyExperience(ctx context.Context, a authz.Actor, id uuid
 	}
 	var out Experience
 	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		e, err := s.d.Store.GetExperience(ctx, a.UserID, id) // another user's ID: 404
+		e, err := s.sections().GetExperience(ctx, a.UserID, id) // another user's ID: 404
 		if err != nil {
 			return err
 		}
@@ -655,7 +655,7 @@ func (s *service) UpdateMyExperience(ctx context.Context, a authz.Actor, id uuid
 		if e, err = cleanExperience(e); err != nil {
 			return err
 		}
-		if out, err = s.d.Store.UpdateExperience(ctx, e); err != nil {
+		if out, err = s.sections().UpdateExperience(ctx, e); err != nil {
 			return err
 		}
 		return s.d.Audit.Log(ctx, writeEvent(a, authz.StudentsProfileSectionManage,
@@ -670,18 +670,18 @@ func (s *service) DeleteMyExperience(ctx context.Context, a authz.Actor, id uuid
 		return err
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		p, err := s.d.Store.LockProfile(ctx, a.UserID) // no profile: no experience either (404)
+		p, err := s.profiles().LockProfile(ctx, a.UserID) // no profile: no experience either (404)
 		if err != nil {
 			return err
 		}
-		ok, err := s.d.Store.DeleteExperience(ctx, a.UserID, id) // another user's ID: 404
+		ok, err := s.sections().DeleteExperience(ctx, a.UserID, id) // another user's ID: 404
 		if err != nil {
 			return err
 		}
 		if !ok {
 			return ErrNotFound
 		}
-		rest, err := s.d.Store.Experiences(ctx, a.UserID)
+		rest, err := s.sections().Experiences(ctx, a.UserID)
 		if err != nil {
 			return err
 		}

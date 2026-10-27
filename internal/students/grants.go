@@ -105,7 +105,7 @@ func (s *service) companyTarget(ctx context.Context, orgID, userID uuid.UUID) (c
 	if orgID == uuid.Nil() || userID == uuid.Nil() {
 		return t, nil
 	}
-	g, err := s.d.Store.ActiveGrant(ctx, userID, orgID)
+	g, err := s.grants().ActiveGrant(ctx, userID, orgID)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return t, nil
@@ -126,7 +126,7 @@ func (s *service) companyTarget(ctx context.Context, orgID, userID uuid.UUID) (c
 	case !verified[userID]:
 		return t, nil
 	}
-	p, err := s.d.Store.GetProfile(ctx, userID)
+	p, err := s.profiles().GetProfile(ctx, userID)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return t, nil
@@ -238,10 +238,10 @@ func (s *service) Grant(ctx context.Context, studentID, companyOrgID uuid.UUID, 
 		return ErrVerificationRequired
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		if err := s.d.Store.LockGrants(ctx, studentID); err != nil {
+		if err := s.grants().LockGrants(ctx, studentID); err != nil {
 			return err
 		}
-		switch g, err := s.d.Store.GrantBySource(ctx, src, srcID); {
+		switch g, err := s.grants().GrantBySource(ctx, src, srcID); {
 		case err == nil:
 			if g.StudentUserID != studentID || g.CompanyOrgID != companyOrgID {
 				return problem.ErrConflict
@@ -250,21 +250,21 @@ func (s *service) Grant(ctx context.Context, studentID, companyOrgID uuid.UUID, 
 		case !errors.Is(err, ErrNotFound):
 			return err
 		}
-		switch _, err := s.d.Store.ActiveGrant(ctx, studentID, companyOrgID); {
+		switch _, err := s.grants().ActiveGrant(ctx, studentID, companyOrgID); {
 		case err == nil:
 			return nil
 		case !errors.Is(err, ErrNotFound):
 			return err
 		}
 		// No active grant: what is still open of the company is suspended.
-		replaced, err := s.d.Store.RevokeGrants(ctx, studentID, companyOrgID, RevokedBySystem, nil, s.now())
+		replaced, err := s.grants().RevokeGrants(ctx, studentID, companyOrgID, RevokedBySystem, nil, s.now())
 		if err != nil {
 			return err
 		}
 		if err := s.auditRevocations(ctx, authz.SystemActor(grantJob), replaced, RevokedBySystem); err != nil {
 			return err
 		}
-		g, ok, err := s.d.Store.InsertGrant(ctx, AccessGrant{
+		g, ok, err := s.grants().InsertGrant(ctx, AccessGrant{
 			ID: uuid.NewV7(), StudentUserID: studentID, CompanyOrgID: companyOrgID, Source: src, SourceID: srcID,
 			GrantedAt: s.now(),
 		})
@@ -292,10 +292,10 @@ func (s *service) Revoke(ctx context.Context, studentID, companyOrgID uuid.UUID,
 		return err
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		if err := s.d.Store.LockGrants(ctx, studentID); err != nil {
+		if err := s.grants().LockGrants(ctx, studentID); err != nil {
 			return err
 		}
-		g, err := s.d.Store.GrantBySource(ctx, src, srcID)
+		g, err := s.grants().GrantBySource(ctx, src, srcID)
 		switch {
 		case errors.Is(err, ErrNotFound):
 			return nil
@@ -305,7 +305,7 @@ func (s *service) Revoke(ctx context.Context, studentID, companyOrgID uuid.UUID,
 		if g.StudentUserID != studentID || g.CompanyOrgID != companyOrgID || !g.Open() {
 			return nil
 		}
-		revoked, err := s.d.Store.RevokeGrants(ctx, studentID, companyOrgID, RevokedBySystem, why, s.now())
+		revoked, err := s.grants().RevokeGrants(ctx, studentID, companyOrgID, RevokedBySystem, why, s.now())
 		if err != nil {
 			return err
 		}
@@ -317,7 +317,7 @@ func (s *service) Revoke(ctx context.Context, studentID, companyOrgID uuid.UUID,
 // company and an active student verification now (a lapsed verification
 // ends the access at once, before its grants are suspended; BE-077).
 func (s *service) Has(ctx context.Context, studentID, companyOrgID uuid.UUID) (bool, error) {
-	_, err := s.d.Store.ActiveGrant(ctx, studentID, companyOrgID)
+	_, err := s.grants().ActiveGrant(ctx, studentID, companyOrgID)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return false, nil
@@ -357,7 +357,7 @@ func (s *service) ListMyAccessGrants(ctx context.Context, a authz.Actor, after *
 		return GrantPage{}, err
 	}
 	limit = page.ClampLimit(limit)
-	rows, err := s.d.Store.StudentGrants(ctx, a.UserID, after, limit+1)
+	rows, err := s.grants().StudentGrants(ctx, a.UserID, after, limit+1)
 	if err != nil {
 		return GrantPage{}, err
 	}
@@ -418,17 +418,17 @@ func (s *service) RevokeMyAccessGrant(ctx context.Context, a authz.Actor, grantI
 		return err
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		if err := s.d.Store.LockGrants(ctx, a.UserID); err != nil {
+		if err := s.grants().LockGrants(ctx, a.UserID); err != nil {
 			return err
 		}
-		g, err := s.d.Store.GetGrant(ctx, a.UserID, grantID)
+		g, err := s.grants().GetGrant(ctx, a.UserID, grantID)
 		if err != nil {
 			return err
 		}
 		if !g.Open() {
 			return nil
 		}
-		revoked, err := s.d.Store.RevokeGrants(ctx, a.UserID, g.CompanyOrgID, RevokedByStudent, why, s.now())
+		revoked, err := s.grants().RevokeGrants(ctx, a.UserID, g.CompanyOrgID, RevokedByStudent, why, s.now())
 		if err != nil {
 			return err
 		}
@@ -454,13 +454,13 @@ func (s *service) RevokeCompanyAccessGrant(ctx context.Context, a authz.Actor, o
 		return err
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		if err := s.d.Store.LockGrants(ctx, userID); err != nil {
+		if err := s.grants().LockGrants(ctx, userID); err != nil {
 			return err
 		}
-		if _, err := s.d.Store.ActiveGrant(ctx, userID, orgID); err != nil {
+		if _, err := s.grants().ActiveGrant(ctx, userID, orgID); err != nil {
 			return err
 		}
-		revoked, err := s.d.Store.RevokeGrants(ctx, userID, orgID, RevokedByCompany, why, s.now())
+		revoked, err := s.grants().RevokeGrants(ctx, userID, orgID, RevokedByCompany, why, s.now())
 		if err != nil {
 			return err
 		}
@@ -495,7 +495,7 @@ func (s *service) ListCompanyStudents(ctx context.Context, a authz.Actor, orgID 
 	var cards []card
 	pos, scanned, exhausted := q.After, 0, false
 	for len(cards) <= limit && scanned < companyScanLimit {
-		rows, err := s.d.Store.CompanyGrants(ctx, orgID, pos, grantBatch)
+		rows, err := s.grants().CompanyGrants(ctx, orgID, pos, grantBatch)
 		if err != nil {
 			return CompanyStudentPage{}, err
 		}
@@ -559,7 +559,7 @@ func (s *service) cardSources(ctx context.Context, rows []AccessGrant) (map[uuid
 	if err != nil {
 		return nil, err
 	}
-	profiles, err := s.d.Store.Profiles(ctx, ids)
+	profiles, err := s.profiles().Profiles(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -752,7 +752,7 @@ func (s *service) DownloadCompanyStudentCV(ctx context.Context, a authz.Actor, o
 	if s.d.Files == nil {
 		return files.Download{}, errUnavailable
 	}
-	cvs, err := s.d.Store.CVs(ctx, userID)
+	cvs, err := s.cvs().CVs(ctx, userID)
 	if err != nil {
 		return files.Download{}, err
 	}

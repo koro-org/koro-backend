@@ -120,7 +120,7 @@ func (s *service) GetMemberCard(ctx context.Context, a authz.Actor, orgID, membe
 	}
 	member := mv.Membership.UserID
 	card := MemberCard{Member: mv}
-	switch p, err := s.d.Store.GetProfile(ctx, member); {
+	switch p, err := s.profiles().GetProfile(ctx, member); {
 	case err == nil:
 		card.Profile = &p
 		if card.University, card.Department, err = s.names(ctx, p); err != nil {
@@ -229,7 +229,7 @@ func (s *service) AdminGetStudentProfile(ctx context.Context, a authz.Actor, use
 	if err != nil {
 		return AdminView{}, err
 	}
-	p, err := s.d.Store.GetProfile(ctx, userID)
+	p, err := s.profiles().GetProfile(ctx, userID)
 	if err != nil {
 		return AdminView{}, err
 	}

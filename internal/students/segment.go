@@ -116,7 +116,7 @@ func (s *service) size(ctx context.Context, seg segment) (int, error) {
 	if len(seg.keys) == 0 {
 		return 0, ErrAudienceTooSmall
 	}
-	n, ok, err := s.d.Store.CountSegment(ctx, seg.keys, seg.dims)
+	n, ok, err := s.matches().CountSegment(ctx, seg.keys, seg.dims)
 	switch {
 	case err != nil:
 		return 0, err
@@ -152,7 +152,7 @@ func (s *service) Stream(ctx context.Context, spec AudienceSpec, fn func(userID 
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		ids, err := s.d.Store.AudienceAfter(ctx, seg.keys, seg.dims, after, streamBatch)
+		ids, err := s.matches().AudienceAfter(ctx, seg.keys, seg.dims, after, streamBatch)
 		if err != nil {
 			return err
 		}

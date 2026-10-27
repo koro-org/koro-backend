@@ -139,7 +139,7 @@ func (s *service) discoverableAmong(ctx context.Context, ids []uuid.UUID) (map[u
 
 // IsDiscoverable implements Discoverable.
 func (s *service) IsDiscoverable(ctx context.Context, userID uuid.UUID) (bool, error) {
-	p, err := s.d.Store.GetProfile(ctx, userID)
+	p, err := s.profiles().GetProfile(ctx, userID)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return false, nil
@@ -149,7 +149,7 @@ func (s *service) IsDiscoverable(ctx context.Context, userID uuid.UUID) (bool, e
 	if p.Status != ProfileActive {
 		return false, nil
 	}
-	switch pr, err := s.d.Store.GetPrivacy(ctx, userID); {
+	switch pr, err := s.privacy().GetPrivacy(ctx, userID); {
 	case errors.Is(err, ErrNotFound):
 		return false, nil // the defaults: level 2 off
 	case err != nil:
@@ -179,7 +179,7 @@ func (s *service) Search(ctx context.Context, q DiscoveryQuery) (DiscoveryPage, 
 	total := 0
 	var page []uuid.UUID
 	for after := uuid.Nil(); ; {
-		ids, err := s.d.Store.DiscoveryCandidates(ctx, q, after, discoveryBatch)
+		ids, err := s.matches().DiscoveryCandidates(ctx, q, after, discoveryBatch)
 		if err != nil {
 			return DiscoveryPage{}, err
 		}
@@ -252,7 +252,7 @@ func (s *service) nameSkills(ctx context.Context, srcs []CompanySource) error {
 // names (nameSkills names a whole page at once); ok=false when the profile
 // went meanwhile.
 func (s *service) anonSource(ctx context.Context, userID uuid.UUID) (CompanySource, bool, error) {
-	p, err := s.d.Store.GetProfile(ctx, userID)
+	p, err := s.profiles().GetProfile(ctx, userID)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return CompanySource{}, false, nil
@@ -268,13 +268,13 @@ func (s *service) anonSource(ctx context.Context, userID uuid.UUID) (CompanySour
 			return CompanySource{}, false, err
 		}
 	}
-	if v.Skills, err = s.d.Store.Skills(ctx, userID); err != nil {
+	if v.Skills, err = s.sections().Skills(ctx, userID); err != nil {
 		return CompanySource{}, false, err
 	}
-	if v.Languages, err = s.d.Store.Languages(ctx, userID); err != nil {
+	if v.Languages, err = s.sections().Languages(ctx, userID); err != nil {
 		return CompanySource{}, false, err
 	}
-	if v.Experiences, err = s.d.Store.Experiences(ctx, userID); err != nil {
+	if v.Experiences, err = s.sections().Experiences(ctx, userID); err != nil {
 		return CompanySource{}, false, err
 	}
 	return CompanySource{View: v, Verified: true, DiscoveryConsent: true}, true, nil

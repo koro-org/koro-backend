@@ -79,10 +79,10 @@ func (s *service) ResumeMyAccessGrant(ctx context.Context, a authz.Actor, grantI
 	g, _, err := idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (AccessGrant, error) {
 		var out AccessGrant
 		err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-			if err := s.d.Store.LockGrants(ctx, a.UserID); err != nil {
+			if err := s.grants().LockGrants(ctx, a.UserID); err != nil {
 				return err
 			}
-			g, err := s.d.Store.GetGrant(ctx, a.UserID, grantID)
+			g, err := s.grants().GetGrant(ctx, a.UserID, grantID)
 			if err != nil {
 				return err
 			}
@@ -96,14 +96,14 @@ func (s *service) ResumeMyAccessGrant(ctx context.Context, a authz.Actor, grantI
 			// Grant ends the suspended grants of a company before it gives a
 			// new one, so an active grant of the same company next to this
 			// one is a broken invariant: refuse rather than hold two.
-			switch _, err := s.d.Store.ActiveGrant(ctx, a.UserID, g.CompanyOrgID); {
+			switch _, err := s.grants().ActiveGrant(ctx, a.UserID, g.CompanyOrgID); {
 			case err == nil:
 				return ErrInvalidState
 			case !errors.Is(err, ErrNotFound):
 				return err
 			}
 			suspendedAt := *g.SuspendedAt
-			if out, err = s.d.Store.ResumeGrant(ctx, a.UserID, grantID, now); err != nil {
+			if out, err = s.grants().ResumeGrant(ctx, a.UserID, grantID, now); err != nil {
 				return err
 			}
 			ev := grantEvent(string(authz.StudentsAccessGrantResume), out, map[string]any{

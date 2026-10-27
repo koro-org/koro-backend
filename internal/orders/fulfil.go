@@ -360,6 +360,8 @@ func (s *service) closeWindows(ctx context.Context) error {
 // fullyRefundedService only identifies money Koro collected for the service.
 // Model C's fee refund does not establish that the directly paid service was
 // refunded; its existing order status and rights rules remain unchanged.
+// Such a line is final: its order may complete (progressStatus) and its
+// seller has nothing left on it (BE-135; fullyRefundedSQL says the same).
 func fullyRefundedService(o Order, l Line) bool {
 	return !o.DirectToPayee() && l.RefundedAmount > 0 && l.RefundedAmount >= l.PayableAmount
 }

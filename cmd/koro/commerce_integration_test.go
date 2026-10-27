@@ -47,7 +47,7 @@ type commerceEnv struct {
 	club, company, platform, party, payee, account, segment string
 	adminID, finAID, finBID                                 string
 	clubToken, buyer, admin, finA, finB                     string
-	finATOTP, finBTOTP                                      *authenticator
+	finATOTP, finBTOTP, buyerTOTP                           *authenticator
 	checkpoints                                             int
 }
 
@@ -110,7 +110,7 @@ func newCommerce(t *testing.T, overrides ...map[string]string) *commerceEnv {
 	e.finB, e.finBTOTP = e.privileged(seed.FinanceEmail2)
 	e.admin, _ = e.privileged(seed.AdminEmail1)
 	e.buyer = e.c.login(seed.CompanyEmail, demoPassword)
-	e.c.enrolTOTP(e.buyer, demoPassword)
+	e.buyerTOTP = e.c.enrolTOTP(e.buyer, demoPassword)
 	e.clubToken = e.c.login(seed.ClubAdminEmail, demoPassword)
 	// H-39: a platform admin's global role is distinct from membership of
 	// Koro's seller organization. Native offerings require both.

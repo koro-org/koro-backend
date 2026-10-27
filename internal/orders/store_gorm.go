@@ -327,7 +327,7 @@ func (s gormStore) WindowsElapsed(ctx context.Context, now time.Time, limit int)
 	var rows []Line
 	err := db.Conn(ctx, s.orm).Raw(`SELECT l.* FROM order_lines l JOIN orders o ON o.id = l.order_id
         WHERE l.fulfillment_status = 'marked' AND l.dispute_window_ends_at <= ?
-        AND (o.collection_method = 'direct_to_payee' OR l.refunded_amount = 0 OR l.refunded_amount < l.payable_amount)
+        AND NOT `+fullyRefundedSQL+`
         ORDER BY l.dispute_window_ends_at, l.id LIMIT ?`, now, limit).Scan(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("orders: elapsed dispute windows: %w", err)
@@ -340,6 +340,12 @@ func (s gormStore) WindowsElapsed(ctx context.Context, now time.Time, limit int)
 // line dropped before payment nothing (BE-134).
 const koroHeldSQL = `(CASE WHEN l.dropped_at IS NOT NULL THEN 0 WHEN o.collection_method = 'direct_to_payee' THEN l.buyer_fee_amount
 	ELSE l.payable_amount END)`
+
+// fullyRefundedSQL is fullyRefundedService of line l of order o: Koro gave
+// back all it collected for the service (never on a model C order, where
+// Koro held only its fee): the line is final, never delivered (T-309) and
+// nothing is left of it for the seller (BE-135).
+const fullyRefundedSQL = `(o.collection_method <> 'direct_to_payee' AND l.refunded_amount > 0 AND l.refunded_amount >= l.payable_amount)`
 
 // refundDueLineSQL is a cancelled line of a paid order whose money Koro
 // still holds (o: the order, l: the line; the in-memory refundDueLine):
@@ -380,7 +386,8 @@ func (s gormStore) BuyerHeld(ctx context.Context, offeringID, buyerOrgID uuid.UU
 // HasOpenCommerce implements Store (the same rule as the in-memory
 // sellerOpen, refundDueOrder and refundDueLine). The buyer's side also
 // counts a completed order with a cancelled line whose money Koro still
-// holds (a cart whose other lines were delivered, BE-131).
+// holds (a cart whose other lines were delivered, BE-131). A line refunded
+// in full is final on the seller's side too (BE-135).
 //
 // cross-org: the org is the buyer (org_id) or a seller (seller_org_id).
 func (s gormStore) HasOpenCommerce(ctx context.Context, orgID uuid.UUID) (bool, error) {
@@ -395,7 +402,7 @@ func (s gormStore) HasOpenCommerce(ctx context.Context, orgID uuid.UUID) (bool, 
 		OR EXISTS (
 		  SELECT 1 FROM order_lines l JOIN orders o ON o.id = l.order_id
 		   WHERE l.seller_org_id = @org AND o.status NOT IN ('cancelled', 'expired', 'refunded')
-		     AND (l.fulfillment_status IN ('pending', 'marked', 'disputed', 'not_applicable')
+		     AND ((l.fulfillment_status IN ('pending', 'marked', 'disputed', 'not_applicable') AND NOT `+fullyRefundedSQL+`)
 		          OR (l.fulfillment_status = 'fulfilled' AND l.payee_id IS NOT NULL AND l.payout_id IS NULL AND l.refunded_amount < l.payable_amount
 		              AND o.collection_method <> 'direct_to_payee')
 		          OR (l.fulfillment_status = 'cancelled' AND o.paid_at IS NOT NULL AND l.refunded_amount < `+koroHeldSQL+`)))`,

@@ -624,6 +624,30 @@ func checkRefund(r Refund) error {
 	return nil
 }
 
+// RefundsInFlightOf implements Store.
+func (m *MemStore) RefundsInFlightOf(_ context.Context, buyerOrgID uuid.UUID) ([]uuid.UUID, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []uuid.UUID
+	add := func(id uuid.UUID) {
+		if !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+	}
+	for _, r := range m.refunds {
+		if p, ok := m.payments[r.PaymentID]; ok && p.OrgID == buyerOrgID && r.Status.Open() {
+			add(r.OrderID)
+		}
+	}
+	for _, q := range m.requests {
+		if q.OrgID == buyerOrgID && q.Status.Pending() {
+			add(q.OrderID)
+		}
+	}
+	slices.SortFunc(out, compareUUID)
+	return out, nil
+}
+
 // RefundsOfUser implements Store.
 func (m *MemStore) RefundsOfUser(_ context.Context, userID uuid.UUID) ([]Refund, error) {
 	m.mu.Lock()

@@ -438,7 +438,9 @@ func (m *MemStore) BuyerHeld(_ context.Context, offeringID, buyerOrgID uuid.UUID
 }
 
 // sellerOpen is the seller half of HasOpenCommerce for line l of order o
-// (the GORM store's SQL says the same): a model C line is never paid out.
+// (the GORM store's SQL says the same): a model C line is never paid out; a
+// line refunded in full is final, nothing is left to deliver or pay out of
+// it (BE-135).
 func sellerOpen(o Order, l Line) bool {
 	switch o.Status {
 	case StatusCancelled, StatusExpired, StatusRefunded:
@@ -446,7 +448,7 @@ func sellerOpen(o Order, l Line) bool {
 	}
 	switch l.FulfillmentStatus {
 	case FulfillPending, FulfillMarked, FulfillDisputed, FulfillNotApplicable:
-		return true
+		return !fullyRefundedService(o, l)
 	case FulfillFulfilled:
 		return l.PayeeID != nil && l.PayoutID == nil && l.RefundedAmount < l.PayableAmount && !o.DirectToPayee()
 	case FulfillCancelled:

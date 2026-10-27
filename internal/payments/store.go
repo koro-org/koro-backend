@@ -92,6 +92,11 @@ type Store interface {
 	// RefundsOfUser returns the refunds a user requested, approved or
 	// rejected (KVKK export of the staff references).
 	RefundsOfUser(ctx context.Context, userID uuid.UUID) ([]Refund, error)
+	// RefundsInFlightOf returns the orders of a buyer org with refund money
+	// in flight (closeOrg, BE-135): an open refund (RefundStatus.Open) of one
+	// of its payments or a waiting refund request (RefundRequestStatus.Pending)
+	// of its own; each order once, in ID order.
+	RefundsInFlightOf(ctx context.Context, buyerOrgID uuid.UUID) ([]uuid.UUID, error)
 }
 
 // TimeCursor is the last row of a payments or refunds page (created_at

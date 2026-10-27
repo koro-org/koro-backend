@@ -389,7 +389,11 @@ func TestMigrations_EachStepRestoresThePreviousSchema(t *testing.T) {
 			t.Fatal(err)
 		}
 		forward[n] = fingerprint(t, conn)
-		if seeds, _ := fs.Glob(migrations.FS, fmt.Sprintf("%06d_seed_*.up.sql", n)); len(seeds) == 0 && forward[n] == forward[below(i)] {
+		// Seeds and data corrections (NNNNNN_data_*, e.g. 000158, BE-135)
+		// change rows only.
+		seeds, _ := fs.Glob(migrations.FS, fmt.Sprintf("%06d_seed_*.up.sql", n))
+		fixes, _ := fs.Glob(migrations.FS, fmt.Sprintf("%06d_data_*.up.sql", n))
+		if len(seeds)+len(fixes) == 0 && forward[n] == forward[below(i)] {
 			t.Errorf("migration %06d changed nothing in the schema fingerprint", n)
 		}
 	}

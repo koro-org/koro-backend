@@ -54,8 +54,9 @@ type Orders interface {
 	// lineID is set) in the completion transaction (BE-043): the order's
 	// and the line's refunded amounts grow (422 orders.refund_exceeds_paid
 	// beyond what was paid or what Koro holds of the line), a paid order
-	// becomes partially_refunded or refunded, a fully refunded line loses
-	// its rights.
+	// becomes refunded, or partially_refunded while a line is still to
+	// deliver (completed once every line is final, BE-135), a fully
+	// refunded line loses its rights.
 	//
 	// sync-write: orders.Orders.ApplyRefund
 	ApplyRefund(ctx context.Context, orderID uuid.UUID, lineID *uuid.UUID, amount int64) error

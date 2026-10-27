@@ -100,6 +100,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/files"
 	"koro/internal/identity"
+	"koro/internal/orders"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
 	"koro/internal/platform/idempotency"
@@ -280,6 +281,33 @@ func New(d Deps) (Module, error) {
 // Koro's active default collection account; found is false when none is.
 func (m Module) DefaultAccount(ctx context.Context) (CollectionAccount, bool, error) {
 	return m.svc.d.Store.DefaultAccount(ctx)
+}
+
+// OpenCommerce is the closeOrg check of hooks.openCommerce (BE-135, T-382):
+// a buyer org with refund money in flight on one of its orders — a refund
+// requested, approved or being transferred, or a refund request waiting for
+// finance — cannot be closed, whatever the order's status (a completed
+// order may still be refunded in part; orders' own check covers its open
+// orders and the money it still owes on cancelled lines). The buyer is read
+// from the order itself (orders.ForPayment; 06 H-38: the org_id copies on
+// payments and requests are not the scope), so an order orders does not
+// hold blocks nothing.
+func (m Module) OpenCommerce(ctx context.Context, orgID uuid.UUID) (bool, error) {
+	ids, err := m.svc.d.Store.RefundsInFlightOf(ctx, orgID)
+	if err != nil {
+		return false, err
+	}
+	for _, id := range ids {
+		o, err := m.svc.d.Orders.ForPayment(ctx, id)
+		switch {
+		case errors.Is(err, orders.ErrNotFound):
+		case err != nil:
+			return false, err
+		case o.OrgID == orgID:
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // Jobs returns the scheduled jobs of payments (01 §7): payments.unmatched_digest.

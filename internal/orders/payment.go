@@ -132,10 +132,7 @@ func (s *service) settle(ctx context.Context, o, next Order, paid bool) (Payment
 		if lines, err = s.payLines(ctx, o, now); err != nil {
 			return PaymentEffect{}, err
 		}
-		next.Status = progressStatus(next, lines)
-		if next.Status == StatusCompleted {
-			next.CompletedAt = &now
-		}
+		next = next.moveTo(progressStatus(next, lines), now)
 	}
 	stored, err := s.d.Store.UpdateOrder(ctx, next, StatusAwaitingPayment)
 	if err != nil {
@@ -191,39 +188,57 @@ func (s *service) emitFulfilled(ctx context.Context, l Line) error {
 }
 
 // progressStatus is the running status of a paid order from its lines:
-// disputed while a line is disputed; completed once every line is done
-// (fulfilled or cancelled) and one was fulfilled; in_fulfilment once a line
-// is marked or fulfilled; paid otherwise. Any other status (unpaid,
-// cancelled, expired, refunds) is kept.
+// completed once every line is final and one was fulfilled. A line is final
+// when it is fulfilled, cancelled (dropped lines included) or its service
+// was refunded in full through Koro (fullyRefundedService: such a line is
+// never delivered, T-309). Until then a partially refunded order stays
+// partially_refunded, and any other one is disputed while a line is
+// disputed, in_fulfilment once a line is marked or fulfilled, paid before.
+// A partial refund does not hold a finished order open (T-382, BE-135): a
+// completed order keeps its refunds in refunded_amount (the order's and its
+// lines'). Any other status (unpaid, cancelled, expired, refunded) is kept.
 func progressStatus(o Order, lines []Line) Status {
 	switch o.Status {
-	case StatusPaid, StatusInFulfilment, StatusDisputed, StatusCompleted:
+	case StatusPaid, StatusInFulfilment, StatusDisputed, StatusCompleted, StatusPartiallyRefunded:
 	default:
 		return o.Status
 	}
 	disputed, allDone, fulfilled, started := false, true, false, false
 	for _, l := range lines {
-		switch l.FulfillmentStatus {
-		case FulfillDisputed:
-			disputed, allDone, started = true, false, true
-		case FulfillFulfilled:
+		switch {
+		case l.FulfillmentStatus == FulfillFulfilled:
 			fulfilled, started = true, true
-		case FulfillMarked:
+		case l.FulfillmentStatus == FulfillCancelled, fullyRefundedService(o, l):
+		case l.FulfillmentStatus == FulfillDisputed:
+			disputed, allDone, started = true, false, true
+		case l.FulfillmentStatus == FulfillMarked:
 			allDone, started = false, true
-		case FulfillCancelled:
 		default:
 			allDone = false
 		}
 	}
 	switch {
-	case disputed:
-		return StatusDisputed
 	case allDone && fulfilled:
 		return StatusCompleted
+	case o.Status == StatusPartiallyRefunded:
+		return StatusPartiallyRefunded
+	case disputed:
+		return StatusDisputed
 	case started:
 		return StatusInFulfilment
 	}
 	return StatusPaid
+}
+
+// moveTo is o in status st: an order that completes for the first time
+// takes now as completed_at; one that completed before keeps it (a refund
+// of a completed order leaves it completed, BE-135).
+func (o Order) moveTo(st Status, now time.Time) Order {
+	o.Status = st
+	if st == StatusCompleted && o.CompletedAt == nil {
+		o.CompletedAt = &now
+	}
+	return o
 }
 
 // advance writes the running status of a paid order after a change of one
@@ -237,13 +252,9 @@ func (s *service) advance(ctx context.Context, orderID uuid.UUID, now time.Time)
 	if err != nil {
 		return Order{}, err
 	}
-	next := o
-	next.Status = progressStatus(o, byOrder[o.ID])
+	next := o.moveTo(progressStatus(o, byOrder[o.ID]), now)
 	if next.Status == o.Status {
 		return o, nil
-	}
-	if next.Status == StatusCompleted {
-		next.CompletedAt = &now
 	}
 	return s.d.Store.UpdateOrder(ctx, next, o.Status)
 }
@@ -251,9 +262,11 @@ func (s *service) advance(ctx context.Context, orderID uuid.UUID, now time.Time)
 // ApplyRefund implements Orders (BE-043, in its transaction): the refunded
 // amount of the order (and of the line) grows, never beyond what was paid
 // nor beyond what Koro holds of the line (its buyer fee on a model C order;
-// 422 orders.refund_exceeds_paid); a paid order becomes partially_refunded
-// or refunded; a fully refunded line, or every line of a fully refunded
-// order, loses its rights.
+// 422 orders.refund_exceeds_paid); a paid order becomes refunded once all
+// its money went back, otherwise partially_refunded while it still runs and
+// completed once every line is final (progressStatus; a completed order
+// stays completed, BE-135); a fully refunded line, or every line of a fully
+// refunded order, loses its rights.
 func (s *service) ApplyRefund(ctx context.Context, orderID uuid.UUID, lineID *uuid.UUID, amount int64) error {
 	if amount <= 0 {
 		return problem.Field("amount", "must be positive")
@@ -289,18 +302,20 @@ func (s *service) ApplyRefund(ctx context.Context, orderID uuid.UUID, lineID *uu
 		next := o
 		next.RefundedAmount += amount
 		if o.Status.PaidState() {
-			next.Status = StatusPartiallyRefunded
+			byOrder, err := s.d.Store.LinesOf(ctx, []uuid.UUID{o.ID})
+			if err != nil {
+				return err
+			}
 			if next.RefundedAmount == next.PaidAmount {
 				next.Status = StatusRefunded
-				byOrder, err := s.d.Store.LinesOf(ctx, []uuid.UUID{o.ID})
-				if err != nil {
-					return err
-				}
 				for _, l := range byOrder[o.ID] {
 					if !slices.Contains(revoke, l.ID) {
 						revoke = append(revoke, l.ID)
 					}
 				}
+			} else {
+				next.Status = StatusPartiallyRefunded
+				next = next.moveTo(progressStatus(next, byOrder[o.ID]), s.now())
 			}
 		}
 		if _, err := s.d.Store.UpdateOrder(ctx, next, o.Status); err != nil {

@@ -169,7 +169,10 @@ func TestCommerce_Cart_TwoPayeesMixedVAT_LineRefund_PayoutInvoices(t *testing.T)
 	e.post("/order-lines/"+p.booth+"/mark-fulfilled", e.clubToken, map[string]any{"note": "Synthetic delivery"}, http.StatusOK)
 	e.post("/order-lines/"+p.booth+"/confirm", e.buyer, nil, http.StatusOK)
 	e.event("order_line.fulfilled", p.booth)
-	e.orderState(p, "partially_refunded", 38000, 11000)
+	// Every line is final (the booth delivered, the workshop cancelled and
+	// refunded, the quota fulfilled at payment): the order completes with its
+	// refund kept (T-382, BE-135).
+	e.orderState(p, "completed", 38000, 11000)
 	waitUntil(t, "the booth's 20 % invoice", func() bool {
 		return e.count(`SELECT count(*) FROM invoices i JOIN invoice_lines il ON il.invoice_id=i.id
  WHERE il.order_line_id=$1 AND i.kind='service_sale' AND i.status='planned' AND il.vat_rate_bp=2000 AND i.net_amount=20000 AND i.vat_amount=4000`, p.booth) == 1

@@ -214,7 +214,7 @@ type OrderDTO struct {
 	OrderID             string            `json:"order_id" format:"uuid"`
 	OrderNo             string            `json:"order_no" doc:"The bank transfer reference code"`
 	View                string            `json:"view" enum:"buyer,seller"`
-	Status              string            `json:"status"`
+	Status              string            `json:"status" doc:"completed: every line is final (fulfilled, cancelled, or its service refunded in full); a completed order may have been refunded in part (refunded_amount, the lines' refunded_amount). partially_refunded: part of the money went back while a line is still to deliver; the order completes once every line is final. refunded: all of the money went back"`
 	Currency            string            `json:"currency"`
 	PlacedAt            time.Time         `json:"placed_at"`
 	BuyerTitle          string            `json:"buyer_title,omitempty" doc:"Seller view: the billed company's title"`
@@ -305,7 +305,7 @@ type OrderCardDTO struct {
 	OrderNo       string    `json:"order_no"`
 	OrgID         string    `json:"org_id" format:"uuid"`
 	BuyerTitle    string    `json:"buyer_title"`
-	Status        string    `json:"status"`
+	Status        string    `json:"status" doc:"As OrderDTO.status: a completed order may have been refunded in part"`
 	ModelCode     string    `json:"model_code"`
 	Currency      string    `json:"currency"`
 	PayableAmount int64     `json:"payable_amount"`

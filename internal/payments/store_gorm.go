@@ -436,6 +436,35 @@ func (s gormStore) UpdateRefund(ctx context.Context, next Refund, from RefundSta
 	return rows[0], nil
 }
 
+// RefundsInFlightOf implements Store (refunds_open_idx, refund_requests_org_idx).
+//
+// cross-org: closeOrg's check of one buyer org; its refunds are found
+// through its payments (payments.org_id, the order's buyer by the composite
+// FK) and its requests by their org_id.
+func (s gormStore) RefundsInFlightOf(ctx context.Context, buyerOrgID uuid.UUID) ([]uuid.UUID, error) {
+	var refunds, requests []string
+	for _, st := range RefundStatuses() {
+		if st.Open() {
+			refunds = append(refunds, string(st))
+		}
+	}
+	for _, st := range RefundRequestStatuses() {
+		if st.Pending() {
+			requests = append(requests, string(st))
+		}
+	}
+	var ids []uuid.UUID
+	err := db.Conn(ctx, s.orm).Raw(`SELECT r.order_id FROM refunds r JOIN payments p ON p.id = r.payment_id
+		WHERE p.org_id = @org AND r.status IN @refunds
+		UNION
+		SELECT q.order_id FROM refund_requests q WHERE q.org_id = @org AND q.status IN @requests
+		ORDER BY 1`, map[string]any{"org": buyerOrgID, "refunds": refunds, "requests": requests}).Scan(&ids).Error
+	if err != nil {
+		return nil, fmt.Errorf("payments: refunds in flight: %w", err)
+	}
+	return ids, nil
+}
+
 // RefundsOfUser implements Store.
 //
 // cross-org: a user's staff references (KVKK export).

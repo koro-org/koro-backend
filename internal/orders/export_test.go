@@ -1,7 +1,7 @@
 package orders
 
-// Test-only access to the pure money and reference code helpers
-// (pricing_test.go is package orders_test).
+// Test-only access to the pure money, reference code and status helpers
+// (pricing_test.go and partial_refund_test.go are package orders_test).
 type (
 	PriceInput  = priceInput
 	LineAmounts = lineAmounts
@@ -9,8 +9,9 @@ type (
 )
 
 var (
-	PriceLine    = priceLine
-	TotalsOf     = totalsOf
-	NewReference = newReference
-	RefRe        = refRe
+	ProgressStatus = progressStatus
+	PriceLine      = priceLine
+	TotalsOf       = totalsOf
+	NewReference   = newReference
+	RefRe          = refRe
 )

@@ -396,7 +396,9 @@ func TestOfferingCancelled_UnpaidCancelled_PaidQueuedForRefund(t *testing.T) {
 }
 
 // TestApplyRefund_Limits: refunds never exceed what was paid (422
-// orders.refund_exceeds_paid) nor a line's payable amount; a full refund
+// orders.refund_exceeds_paid) nor a line's payable amount; a partial refund
+// of the completed order (its platform line was fulfilled at payment) keeps
+// it completed with the refund in refunded_amount (BE-135); a full refund
 // makes the order refunded and revokes its rights.
 func TestApplyRefund_Limits(t *testing.T) {
 	t.Parallel()
@@ -410,8 +412,8 @@ func TestApplyRefund_Limits(t *testing.T) {
 	if err := ord.ApplyRefund(t.Context(), v.Order.ID, nil, 100); err != nil {
 		t.Fatal(err)
 	}
-	if o := e.order(t, v.Order.ID); o.Status != orders.StatusPartiallyRefunded {
-		t.Fatalf("status = %s", o.Status)
+	if o := e.order(t, v.Order.ID); o.Status != orders.StatusCompleted || o.RefundedAmount != 100 || o.CompletedAt == nil {
+		t.Fatalf("partly refunded completed order = %+v", o)
 	}
 	if err := ord.ApplyRefund(t.Context(), v.Order.ID, nil, v.Order.PayableAmount-100); err != nil {
 		t.Fatal(err)

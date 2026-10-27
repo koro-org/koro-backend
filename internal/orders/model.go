@@ -17,10 +17,13 @@ type Status string
 
 // Order statuses (02 §19.1). awaiting_payment → paid (the transfer is
 // matched in full, payments BE-041) → in_fulfilment (a line is marked or
-// delivered) → completed (every line is fulfilled or cancelled); side
-// states: cancelled (before payment), expired (the payment window ended),
-// disputed (a line is disputed), partially_refunded / refunded (refunds,
-// BE-043).
+// delivered) → completed (every line is final: fulfilled, cancelled or its
+// service refunded in full; progressStatus); side states: cancelled
+// (before payment), expired (the payment window ended), disputed (a line is
+// disputed), partially_refunded (part of the money went back while the
+// order still runs; it completes the same way, BE-135) and refunded (all of
+// it went back; BE-043). A completed order may carry refunds: its
+// refunded_amount (and its lines') says how much.
 const (
 	StatusAwaitingPayment   Status = "awaiting_payment"
 	StatusPaid              Status = "paid"
@@ -61,7 +64,11 @@ func (s Status) PaidState() bool {
 
 // Open reports whether the order is still running (not cancelled,
 // expired, completed or fully refunded): it blocks closing its buyer org
-// (hooks.openCommerce) and holds its units (catalog per_buyer_limit).
+// (hooks.openCommerce) and holds its units (catalog per_buyer_limit). A
+// completed order is not open even when it was refunded in part; money it
+// still owes its buyer keeps the buyer open on its own (HasOpenCommerce:
+// a cancelled line not refunded yet; payments: a refund or refund request
+// in flight, BE-135).
 func (s Status) Open() bool {
 	switch s {
 	case StatusAwaitingPayment, StatusPaid, StatusInFulfilment, StatusDisputed, StatusPartiallyRefunded:

@@ -441,6 +441,52 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (orders.Store, worl
 		}
 	})
 
+	t.Run("a completed order refunded in part holds nobody; a line refunded in full is final (BE-135)", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		b, s1, s2 := w.buyer(t), w.seller(t), w.seller(t)
+		offs := []offeringRef{w.offering(t, s1), w.offering(t, s2)}
+		f := newFixture(b, t0, offs, []sellerRef{s1, s2})
+		insert(t, s, f)
+		paid := pay(t, s, f.o)
+		fulfil(t, s, f.lines[0], t0.Add(2*time.Hour))
+		r := f.lines[1] // still pending, its service refunded in full (T-309: never delivered)
+		r.RefundedAmount = r.PayableAmount
+		if _, err := s.UpdateLine(ctx, r, orders.FulfillPending); err != nil {
+			t.Fatal(err)
+		}
+		part := paid
+		part.Status, part.RefundedAmount = orders.StatusPartiallyRefunded, r.PayableAmount
+		part, err := s.UpdateOrder(ctx, part, orders.StatusPaid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok, err := s.HasOpenCommerce(ctx, b.org); err != nil || !ok {
+			t.Fatalf("HasOpenCommerce(buyer of a running order) = %v, %v", ok, err)
+		}
+		if n, err := s.BuyerHeld(ctx, offs[0].id, b.org); err != nil || n != f.lines[0].Quantity {
+			t.Fatalf("BuyerHeld(running order) = %d, %v", n, err)
+		}
+		done := part
+		at := t0.Add(3 * time.Hour)
+		done.Status, done.CompletedAt = orders.StatusCompleted, &at
+		if _, err := s.UpdateOrder(ctx, done, orders.StatusPartiallyRefunded); err != nil {
+			t.Fatal(err)
+		}
+		if ok, err := s.HasOpenCommerce(ctx, b.org); err != nil || ok {
+			t.Fatalf("HasOpenCommerce(buyer of a completed, partly refunded order) = %v, %v", ok, err)
+		}
+		if n, err := s.BuyerHeld(ctx, offs[0].id, b.org); err != nil || n != 0 {
+			t.Fatalf("BuyerHeld(completed order) = %d, %v", n, err)
+		}
+		if ok, err := s.HasOpenCommerce(ctx, s2.org); err != nil || ok {
+			t.Fatalf("HasOpenCommerce(seller of the line refunded in full) = %v, %v", ok, err)
+		}
+		if ok, err := s.HasOpenCommerce(ctx, s1.org); err != nil || !ok {
+			t.Fatalf("HasOpenCommerce(seller with a line to pay out) = %v, %v", ok, err)
+		}
+	})
+
 	t.Run("dropping a line of an unpaid order (BE-134)", func(t *testing.T) {
 		t.Parallel()
 		s, w := newStore(t)

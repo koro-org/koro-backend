@@ -358,6 +358,10 @@ func storeContract(t *testing.T, mk func(t *testing.T) (payments.Store, contract
 		t.Parallel()
 		refundRequestContract(t, mk)
 	})
+	t.Run("refunds in flight (BE-135)", func(t *testing.T) {
+		t.Parallel()
+		refundsInFlightContract(t, mk)
+	})
 	t.Run("refunds", func(t *testing.T) {
 		t.Parallel()
 		s, w := mk(t)
@@ -686,4 +690,78 @@ func refundRequestContract(t *testing.T, mk func(t *testing.T) (payments.Store, 
 	if got := ids(s.RefundRequestsOfUser(ctx, fin)); len(got) != 2 {
 		t.Fatalf("the finance admin's = %v", got)
 	}
+}
+
+// refundsInFlightContract pins RefundsInFlightOf on both stores (BE-135): an
+// open refund of one of the buyer's payments (requested, approved) and a
+// waiting request of its own (open, in review) name their order, once; a
+// rejected refund and a withdrawn request do not; another org has none.
+func refundsInFlightContract(t *testing.T, mk func(t *testing.T) (payments.Store, contractWorld)) {
+	s, w := mk(t)
+	ctx := t.Context()
+	o := w.order(t)
+	fin, fin2, buyer := w.user(t), w.user(t), w.user(t)
+	at := t0
+	inFlight := func(step string, org uuid.UUID, want ...uuid.UUID) {
+		t.Helper()
+		got, err := s.RefundsInFlightOf(ctx, org)
+		if err != nil {
+			t.Fatalf("%s: %v", step, err)
+		}
+		if len(got) != len(want) {
+			t.Fatalf("%s: in flight %v, want %v", step, got, want)
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				t.Fatalf("%s: in flight %v, want %v", step, got, want)
+			}
+		}
+	}
+	inFlight("nothing asked", o.org)
+	pay := contractPayment(t, s, contractAccount(t, s, w, ibanKoro2), o, fin, 1_200_000, "F-1")
+	r := payments.Refund{ID: uuid.NewV7(), PaymentID: pay.ID, OrderID: o.id, OrderLineID: &o.line, Amount: 10_000,
+		Reason: payments.RefundReasonGoodwill, Status: payments.RefundStatusRequested, RequestedBy: fin,
+		Method: payments.RefundMethodBankEFT, TargetIBAN: ptr(ibanSender)}
+	if err := s.InsertRefund(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	inFlight("a requested refund", o.org, o.id)
+	q := payments.RefundRequest{ID: uuid.NewV7(), OrderID: o.id, OrderLineID: o.line, OrgID: o.org, SellerOrgID: o.seller,
+		OrderNo: o.no, LineTitle: "Stant", Amount: 5_000, Reason: payments.RefundReasonNotFulfilled,
+		Explanation: "Stant kurulmadı, alan boştu.", TargetIBAN: ibanSender, Status: payments.RequestOpen, RequestedBy: buyer}
+	if err := s.InsertRefundRequest(ctx, q); err != nil {
+		t.Fatal(err)
+	}
+	inFlight("a refund and a request of one order", o.org, o.id)
+	inFlight("another org", uuid.NewV7())
+	rej := r
+	why := "Hatalı"
+	rej.Status, rej.RejectedBy, rej.RejectedAt, rej.RejectionReason = payments.RefundStatusRejected, &fin2, &at, &why
+	if _, err := s.UpdateRefund(ctx, rej, payments.RefundStatusRequested); err != nil {
+		t.Fatal(err)
+	}
+	inFlight("the request alone", o.org, o.id)
+	rev := q
+	rev.Status, rev.ReviewedBy, rev.ReviewedAt = payments.RequestInReview, &fin, &at
+	rev, err := s.UpdateRefundRequest(ctx, rev, payments.RequestOpen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inFlight("a request in review", o.org, o.id)
+	wd := rev
+	wd.Status, wd.WithdrawnBy, wd.WithdrawnAt = payments.RequestWithdrawn, &buyer, &at
+	if _, err := s.UpdateRefundRequest(ctx, wd, payments.RequestInReview); err != nil {
+		t.Fatal(err)
+	}
+	inFlight("rejected and withdrawn", o.org)
+	a := r
+	a.ID = uuid.NewV7()
+	if err := s.InsertRefund(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	a.Status, a.ApprovedBy, a.ApprovedAt = payments.RefundStatusApproved, &fin2, &at
+	if _, err := s.UpdateRefund(ctx, a, payments.RefundStatusRequested); err != nil {
+		t.Fatal(err)
+	}
+	inFlight("an approved refund", o.org, o.id)
 }

@@ -174,7 +174,7 @@ func TestCommerce_RefundFollowups_PartialPayoutLaterClawback(t *testing.T) {
 	}
 	e.c.do(http.MethodPost, "/api/v1/admin/refunds/"+rid+"/complete", e.finA, body, key, http.StatusOK)
 	pid := payout.body["payout_id"].(string)
-	e.orderState(p, "partially_refunded", 12000, 6000)
+	e.orderState(p, "completed", 12000, 6000) // its only line delivered: a partial refund keeps it completed (BE-135)
 	e.balances(6000, 0, 5400, 500, 0)
 	if n := e.count(`SELECT amount FROM payout_items WHERE payout_id=$1 AND order_line_id=$2`, pid, p.booth); n != 5400 {
 		t.Fatalf("payout item: %d", n)
@@ -259,8 +259,10 @@ func TestCommerce_RefundFollowups_PartialPayoutLaterClawback(t *testing.T) {
 
 }
 
-// T-309: both HTTP delivery transitions reject a fully refunded line while
-// another live line keeps the order partially refunded and otherwise deliverable.
+// T-309: both HTTP delivery transitions reject a fully refunded line. Koro's
+// line was fulfilled at payment and the other two are refunded in full, so
+// every line is final and the order completes with the refunds kept
+// (T-382, BE-135); the refunded lines stay undelivered.
 func TestCommerce_RefundFollowups_FullyRefundedDeliveryHTTP(t *testing.T) {
 	t.Parallel()
 	e := newCommerce(t)
@@ -289,7 +291,7 @@ func TestCommerce_RefundFollowups_FullyRefundedDeliveryHTTP(t *testing.T) {
 			"reason": "other", "reason_note": "Synthetic full line refund", "target_iban": commerceIBAN}, http.StatusCreated)
 		e.refund(r["refund_id"].(string))
 	}
-	e.orderState(p, "partially_refunded", 27000, 24000)
+	e.orderState(p, "completed", 27000, 24000)
 	for _, attempt := range []struct {
 		path, actor string
 		body        any
@@ -305,6 +307,6 @@ func TestCommerce_RefundFollowups_FullyRefundedDeliveryHTTP(t *testing.T) {
 	if n := e.count(`SELECT count(*) FROM order_lines WHERE (id=$1 AND fulfillment_status='pending' OR id=$2 AND fulfillment_status='marked') AND fulfilled_at IS NULL AND refunded_amount=payable_amount`, pending, marked); n != 2 {
 		t.Fatalf("denied delivery changed refunded lines: %d", n)
 	}
-	e.orderState(p, "partially_refunded", 27000, 24000)
+	e.orderState(p, "completed", 27000, 24000)
 	e.balanced("fully refunded delivery denials")
 }

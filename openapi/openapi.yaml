@@ -9399,6 +9399,7 @@ components:
           format: date-time
           type: string
         status:
+          description: "As OrderDTO.status: a completed order may have been refunded in part"
           enum:
             - awaiting_payment
             - paid
@@ -9496,6 +9497,7 @@ components:
           format: int64
           type: integer
         status:
+          description: "completed: every line is final (fulfilled, cancelled, or its service refunded in full); a completed order may have been refunded in part (refunded_amount, the lines' refunded_amount). partially_refunded: part of the money went back while a line is still to deliver; the order completes once every line is final. refunded: all of the money went back"
           enum:
             - awaiting_payment
             - paid

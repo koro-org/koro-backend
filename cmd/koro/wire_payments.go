@@ -40,8 +40,9 @@ import (
 //
 // Provided, set in build: svc (payments.Service), payments (payments.Payments
 // for billing and BE-043), hooks.collectionAccount (orders' payment
-// instructions: Koro's active default account) and the payments KVKK
-// provider.
+// instructions: Koro's active default account), the "refunds in flight"
+// closeOrg check (hooks.openCommerce, after orders' and ledger's; BE-135)
+// and the payments KVKK provider.
 type paymentsWiring struct {
 	store    payments.Store
 	newStore func(c *container) payments.Store
@@ -107,6 +108,7 @@ func (w *paymentsWiring) build(c *container) error {
 		}
 		return hookCollectionAccount{ID: a.ID, IBAN: a.IBAN, HolderName: a.HolderName, BankName: a.BankName}, true, nil
 	}
+	c.hooks.openCommerce = append(c.hooks.openCommerce, mod.OpenCommerce)
 	c.privacy = append(c.privacy, mod.Privacy)
 	return nil
 }

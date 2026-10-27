@@ -92,10 +92,16 @@ type Students interface {
 	ActiveMany(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]identity.EduVerification, error)
 }
 
-// Mailer sends the invitation e-mail from the worker (notify, L3).
-type Mailer interface {
+// Sender delivers the notifications of the orgs workers (notify, L3): the
+// invitation e-mail and the review notices (BE-144: in-app and e-mail).
+type Sender interface {
 	Send(ctx context.Context, m notify.Message) (uuid.UUID, error)
 }
+
+// PlatformAdmins returns the users holding platform_admin in effect (06
+// H-33): the ones who may verify an org (orgs.org.verify). identity, bound
+// in cmd/koro.
+type PlatformAdmins func(ctx context.Context) ([]uuid.UUID, error)
 
 // ClubInfo returns the join-relevant facts of a club org (T-77): its
 // university, join policy and sensitivity live in directory (L6), above

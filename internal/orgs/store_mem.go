@@ -83,6 +83,8 @@ func checkOrg(o Org) error {
 		return errCheck
 	case (o.Status == StatusClosed) != (o.ClosedAt != nil): // organizations_closed_chk
 		return errCheck
+	case o.RejectionReason != nil && (o.Status != StatusClosed || runes(o.RejectionReason) < 3 || runes(o.RejectionReason) > 500):
+		return errCheck // organizations_rejection_reason_chk
 	}
 	return nil
 }
@@ -91,6 +93,7 @@ func checkOrg(o Org) error {
 func (s *MemStore) InsertOrg(_ context.Context, o Org) (Org, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	o.RejectionReason = nil // not an insert column: a rejection is a closing update
 	if err := checkOrg(o); err != nil {
 		return Org{}, false, err
 	}
@@ -166,6 +169,7 @@ func (s *MemStore) UpdateOrg(_ context.Context, o Org) (Org, error) {
 	next := cur
 	next.Name, next.Status, next.Description, next.LogoFileID = o.Name, o.Status, o.Description, o.LogoFileID
 	next.WebsiteURL, next.City, next.VerifiedAt, next.VerifiedBy, next.ClosedAt = o.WebsiteURL, o.City, o.VerifiedAt, o.VerifiedBy, o.ClosedAt
+	next.RejectionReason = o.RejectionReason
 	if err := checkOrg(next); err != nil {
 		return Org{}, err
 	}

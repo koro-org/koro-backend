@@ -94,6 +94,24 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (orgs.Store, world)
 		if err != nil || after.Name != "Acme Yazılım" || after.VerifiedBy == nil || !after.UpdatedAt.After(got.UpdatedAt) {
 			t.Fatalf("UpdateOrg = %+v (before %s), %v", after, got.UpdatedAt, err)
 		}
+		// A rejection reason (BE-144) belongs to a closed org only.
+		open := after
+		open.RejectionReason = new("Belgeler eksik")
+		if _, err := s.UpdateOrg(ctx, open); !errors.Is(err, problem.ErrValidation) {
+			t.Fatalf("rejection reason on an open org: %v", err)
+		}
+		rej := after
+		rej.Status, rej.ClosedAt, rej.RejectionReason = orgs.StatusClosed, &now, new("x")
+		if _, err := s.UpdateOrg(ctx, rej); !errors.Is(err, problem.ErrValidation) {
+			t.Fatalf("a 1-character rejection reason: %v", err)
+		}
+		rej.RejectionReason = new("Vergi levhası doğrulanamadı")
+		if r, err := s.UpdateOrg(ctx, rej); err != nil || r.RejectionReason == nil || *r.RejectionReason != "Vergi levhası doğrulanamadı" {
+			t.Fatalf("UpdateOrg with a rejection reason = %+v, %v", r, err)
+		}
+		if g, err := s.GetOrg(ctx, o.ID); err != nil || g.RejectionReason == nil || *g.RejectionReason != "Vergi levhası doğrulanamadı" {
+			t.Fatalf("GetOrg rejection reason = %+v, %v", g.RejectionReason, err)
+		}
 		gone := newOrg(orgs.KindClub, "Yok")
 		if _, err := s.UpdateOrg(ctx, gone); !errors.Is(err, orgs.ErrNotFound) {
 			t.Fatalf("UpdateOrg missing: %v", err)

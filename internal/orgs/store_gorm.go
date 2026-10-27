@@ -23,7 +23,7 @@ type gormStore struct{ orm *gorm.DB }
 // Column lists (search_vector is never read).
 const (
 	orgCols = `id, kind, name, slug, status, description, logo_file_id, website_url, city,
-		verified_at, verified_by, closed_at, created_by, created_at, updated_at`
+		verified_at, verified_by, closed_at, rejection_reason, created_by, created_at, updated_at`
 	memberCols = `id, org_id, org_kind, user_id, role, status, source, requested_at, joined_at, ended_at,
 		end_reason, invited_by, approved_by, created_at, updated_at`
 )
@@ -124,12 +124,13 @@ func (s gormStore) UpdateOrg(ctx context.Context, o Org) (Org, error) {
 	var rows []Org
 	err := db.Conn(ctx, s.orm).Raw(`UPDATE organizations SET
 		name = @name, status = @status, description = @description, logo_file_id = @logo, website_url = @website,
-		city = @city, verified_at = @verified_at, verified_by = @verified_by, closed_at = @closed_at
+		city = @city, verified_at = @verified_at, verified_by = @verified_by, closed_at = @closed_at,
+		rejection_reason = @rejection_reason
 		WHERE id = @id
 		RETURNING `+orgCols, map[string]any{
 		"id": o.ID, "name": o.Name, "status": string(o.Status), "description": o.Description, "logo": o.LogoFileID,
 		"website": o.WebsiteURL, "city": o.City, "verified_at": o.VerifiedAt, "verified_by": o.VerifiedBy,
-		"closed_at": o.ClosedAt,
+		"closed_at": o.ClosedAt, "rejection_reason": o.RejectionReason,
 	}).Scan(&rows).Error
 	if err != nil {
 		return Org{}, wrap("update org", err)

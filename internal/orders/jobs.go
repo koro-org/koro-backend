@@ -94,7 +94,7 @@ func (s *service) handlePlaced(ctx context.Context, e domainevent.Envelope) erro
 // sendInstructions sends the payment instructions to the placer.
 func (s *service) sendInstructions(ctx context.Context, o Order, key string) error {
 	u := o.PlacedByUserID
-	link := notify.OrderPaymentInstructionsLink(o.ID)
+	link := notify.OrgOrderPaymentInstructionsLink(o.OrgID, o.ID)
 	errs := []error{s.notifyInApp(ctx, o, o.OrgID, tmplPaymentInstructions, key, []uuid.UUID{u}, link)}
 	c, ok, err := s.contact(ctx, u)
 	if err != nil || !ok {
@@ -136,7 +136,7 @@ func (s *service) handleCancelled(ctx context.Context, e domainevent.Envelope) e
 		return err
 	}
 	key := e.ID.String()
-	errs := []error{s.notifyInApp(ctx, o, o.OrgID, tmplOrderCancelled, key, []uuid.UUID{o.PlacedByUserID}, notify.OrderLink(o.ID))}
+	errs := []error{s.notifyInApp(ctx, o, o.OrgID, tmplOrderCancelled, key, []uuid.UUID{o.PlacedByUserID}, notify.OrgOrderLink(o.OrgID, o.ID))}
 	for _, seller := range sellersOf(liveLines(lines)) { // a dropped line's seller was told when it dropped (BE-134)
 		admins, err := s.membersWith(ctx, seller, authz.MemberClubAdmin, authz.MemberUniversityRep)
 		if err != nil {
@@ -157,7 +157,7 @@ func (s *service) handleExpired(ctx context.Context, e domainevent.Envelope) err
 	if err != nil || !ok {
 		return err
 	}
-	return s.notifyInApp(ctx, o, o.OrgID, tmplOrderExpired, e.ID.String(), []uuid.UUID{o.PlacedByUserID}, notify.OrderLink(o.ID))
+	return s.notifyInApp(ctx, o, o.OrgID, tmplOrderExpired, e.ID.String(), []uuid.UUID{o.PlacedByUserID}, notify.OrgOrderLink(o.OrgID, o.ID))
 }
 
 // handleMarked asks the buyer company's admins to confirm the delivery (or
@@ -175,7 +175,7 @@ func (s *service) handleMarked(ctx context.Context, e domainevent.Envelope) erro
 	if err != nil {
 		return err
 	}
-	return s.notifyInApp(ctx, o, o.OrgID, tmplDeliveryMarked, e.ID.String(), admins, notify.OrderLink(o.ID))
+	return s.notifyInApp(ctx, o, o.OrgID, tmplDeliveryMarked, e.ID.String(), admins, notify.OrgOrderLink(o.OrgID, o.ID))
 }
 
 // handleFulfilled tells the seller's admins that a line is fulfilled

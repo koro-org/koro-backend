@@ -42,8 +42,10 @@ func TestCreateCompany_CreatorBecomesOwner_SessionsRevoked(t *testing.T) {
 	if e.revoker.inTx {
 		t.Fatal("sessions were revoked inside the business transaction")
 	}
-	if got := e.topics(); !slices.Equal(got, []string{domainevent.TopicMembershipStarted}) {
-		t.Fatalf("events %v, want membership.started", got)
+	// org.review_requested is written in the transaction (O, BE-144),
+	// membership.started after the commit (A).
+	if got := e.topics(); !slices.Equal(got, []string{domainevent.TopicOrgReviewRequested, domainevent.TopicMembershipStarted}) {
+		t.Fatalf("events %v, want org.review_requested, membership.started", got)
 	}
 	if ev := e.audit.Of(authz.OrgsCompanyCreate); len(ev) != 1 || *ev[0].OrgID != v.Org.ID || *ev[0].ActorUserID != founder.UserID {
 		t.Fatalf("audit = %+v", ev)

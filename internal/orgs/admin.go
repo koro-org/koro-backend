@@ -7,12 +7,14 @@ import (
 	"uuid"
 
 	"koro/internal/authz"
+	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/problem"
 )
 
 // AdminVerifyOrg implements Service: pending_review → active, verified_at
-// and verified_by set (04 §2.2). Another status is 409 orgs.invalid_state.
+// and verified_by set (04 §2.2); org.review_decided (verified) tells the
+// org's admins (BE-144). Another status is 409 orgs.invalid_state.
 func (s *service) AdminVerifyOrg(ctx context.Context, a authz.Actor, id uuid.UUID, note string) (OrgView, error) {
 	if err := authz.Can(ctx, a, authz.OrgsOrgVerify, adminSurface); err != nil {
 		return OrgView{}, err
@@ -92,6 +94,11 @@ func (s *service) transition(ctx context.Context, a authz.Actor, id uuid.UUID, t
 		}
 		if err := s.emitOrgUpdated(ctx, o, []string{"status"}); err != nil {
 			return uuid.Nil(), err
+		}
+		if t.from == StatusPendingReview && t.to == StatusActive {
+			if err := s.emitReviewDecided(ctx, o, domainevent.OrgReviewVerified); err != nil {
+				return uuid.Nil(), err
+			}
 		}
 		meta := map[string]any{"transition": t.op, "from": string(prev), "to": string(t.to), "org_kind": string(o.Kind)}
 		if t.reauth != "" {

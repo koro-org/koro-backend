@@ -37,7 +37,8 @@ type Store interface {
 	// (SELECT … FOR UPDATE) or ErrNotFound.
 	LockOrg(ctx context.Context, id uuid.UUID) (Org, error)
 	// UpdateOrg writes the mutable columns of o (name, status, description,
-	// logo, website, city, verified_*, closed_at) and returns the stored row:
+	// logo, website, city, verified_*, closed_at, rejection_reason) and
+	// returns the stored row:
 	// updated_at changes on every call, so the ETag does too (04 §1.13).
 	// ErrNotFound when the org is gone.
 	UpdateOrg(ctx context.Context, o Org) (Org, error)

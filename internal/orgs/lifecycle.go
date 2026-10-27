@@ -60,6 +60,10 @@ func (m Module) Subscribe(r *outbox.Registry) {
 		outbox.Queue(queue.Default))
 	r.Subscribe(domainevent.TopicClubSensitivityChanged, PurgeSensitiveMembershipsTaskName, m.svc.handleSensitivityChanged,
 		outbox.Queue(queue.Default))
+	r.Subscribe(domainevent.TopicOrgReviewRequested, NotifyReviewRequestedTaskName, m.svc.handleReviewRequested,
+		outbox.Queue(queue.Default))
+	r.Subscribe(domainevent.TopicOrgReviewDecided, NotifyReviewDecidedTaskName, m.svc.handleReviewDecided,
+		outbox.Queue(queue.Default))
 }
 
 // Jobs returns the scheduled jobs of 01 §7. The 6-month purge of ended

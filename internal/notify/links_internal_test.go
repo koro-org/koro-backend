@@ -25,44 +25,47 @@ func builderCases() map[string]struct {
 		pattern string
 	}
 	return map[string]c{
-		"MyAccessGrantsLink":           {MyAccessGrantsLink(), "/me/access-grants"},
-		"MyClubClaimsLink":             {MyClubClaimsLink(), "/me/club-claims"},
-		"MyContactRequestLink":         {MyContactRequestLink(a), "/me/contact-requests/{contact_request_id}"},
-		"MyRegistrationLink":           {MyRegistrationLink(a), "/me/registrations/{registration_id}"},
-		"MySecurityEventsLink":         {MySecurityEventsLink(), "/me/security-events"},
-		"MyTermsLink":                  {MyTermsLink(), "/me/terms"},
-		"MyStudentVerificationLink":    {MyStudentVerificationLink(), "/me/student-verification"},
-		"OrderLink":                    {OrderLink(a), "/orders/{order_id}"},
-		"OrderPaymentInstructionsLink": {OrderPaymentInstructionsLink(a), "/orders/{order_id}/payment-instructions"},
-		"InvoiceLink":                  {InvoiceLink(a), "/invoices/{invoice_id}"},
-		"PostLink":                     {PostLink(a), "/posts/{post_id}"},
-		"ClubLink":                     {ClubLink("bilisim-kulubu-2"), "/clubs/by-slug/{club_slug}"},
-		"EventRegistrationLink":        {EventRegistrationLink(a, b, d), "/orgs/{org_id}/events/{event_id}/registrations/{registration_id}"},
-		"OrgSalesLink":                 {OrgSalesLink(a), "/orgs/{org_id}/sales"},
-		"OrgPayoutLink":                {OrgPayoutLink(a, b), "/orgs/{org_id}/payouts/{payout_id}"},
-		"OrgOfferingsLink":             {OrgOfferingsLink(a), "/orgs/{org_id}/offerings"},
-		"OrgOfferingApprovalsLink":     {OrgOfferingApprovalsLink(a), "/orgs/{org_id}/offering-approvals"},
-		"OrgPostsLink":                 {OrgPostsLink(a), "/orgs/{org_id}/posts"},
-		"OrgPayeeLink":                 {OrgPayeeLink(a, b), "/orgs/{org_id}/payees/{payee_id}"},
-		"OrgContactRequestLink":        {OrgContactRequestLink(a, b), "/orgs/{org_id}/contact-requests/{contact_request_id}"},
-		"OrgRefundRequestLink":         {OrgRefundRequestLink(a, b), "/orgs/{org_id}/refund-requests/{refund_request_id}"},
-		"OrgSalesRefundRequestLink":    {OrgSalesRefundRequestLink(a, b), "/orgs/{org_id}/sales/refund-requests/{refund_request_id}"},
-		"AdminAuditEventsLink":         {AdminAuditEventsLink(), "/admin/audit-events"},
-		"AdminBankAccountsLink":        {AdminBankAccountsLink(), "/admin/bank-accounts"},
-		"AdminBreachesLink":            {AdminBreachesLink(), "/admin/breaches"},
-		"AdminClubLink":                {AdminClubLink(a), "/admin/clubs/{club_org_id}"},
-		"AdminClubClaimLink":           {AdminClubClaimLink(a), "/admin/club-claims/{claim_id}"},
-		"AdminCollectionAccountsLink":  {AdminCollectionAccountsLink(), "/admin/collection-accounts"},
-		"AdminCommercePoliciesLink":    {AdminCommercePoliciesLink(), "/admin/commerce-policies"},
-		"AdminOfferingsLink":           {AdminOfferingsLink(), "/admin/offerings"},
-		"AdminOrderLink":               {AdminOrderLink("KR7K3M9Q2X"), "/admin/orders?order_no={order_no}"},
-		"AdminPlatformRolesLink":       {AdminPlatformRolesLink(), "/admin/platform-roles"},
-		"AdminPayoutLink":              {AdminPayoutLink(a), "/admin/payouts/{payout_id}"},
-		"AdminRefundLink":              {AdminRefundLink(a), "/admin/refunds/{refund_id}"},
-		"AdminRefundRequestLink":       {AdminRefundRequestLink(a), "/admin/refund-requests/{refund_request_id}"},
-		"AdminReportLink":              {AdminReportLink(a), "/admin/reports/{report_id}"},
-		"AdminReviewQueueLink":         {AdminReviewQueueLink(), "/admin/review-queue"},
-		"AdminUnmatchedTransfersLink":  {AdminUnmatchedTransfersLink(), "/admin/incoming-transfers?status=unmatched"},
+		"MyAccessGrantsLink":              {MyAccessGrantsLink(), "/me/access-grants"},
+		"MyClubClaimsLink":                {MyClubClaimsLink(), "/me/club-claims"},
+		"MyContactRequestLink":            {MyContactRequestLink(a), "/me/contact-requests/{contact_request_id}"},
+		"MyRegistrationLink":              {MyRegistrationLink(a), "/me/registrations/{registration_id}"},
+		"MySecurityEventsLink":            {MySecurityEventsLink(), "/me/security-events"},
+		"MyTermsLink":                     {MyTermsLink(), "/me/terms"},
+		"MyStudentVerificationLink":       {MyStudentVerificationLink(), "/me/student-verification"},
+		"PostLink":                        {PostLink(a), "/posts/{post_id}"},
+		"ClubLink":                        {ClubLink("bilisim-kulubu-2"), "/clubs/by-slug/{club_slug}"},
+		"OrgLink":                         {OrgLink(a), "/orgs/{org_id}"},
+		"OrgOrderLink":                    {OrgOrderLink(a, b), "/orgs/{org_id}/orders/{order_id}"},
+		"OrgOrderPaymentInstructionsLink": {OrgOrderPaymentInstructionsLink(a, b), "/orgs/{org_id}/orders/{order_id}/payment-instructions"},
+		"OrgInvoiceLink":                  {OrgInvoiceLink(a, b), "/orgs/{org_id}/invoices/{invoice_id}"},
+		"EventRegistrationLink":           {EventRegistrationLink(a, b, d), "/orgs/{org_id}/events/{event_id}/registrations/{registration_id}"},
+		"OrgSalesLink":                    {OrgSalesLink(a), "/orgs/{org_id}/sales"},
+		"OrgPayoutLink":                   {OrgPayoutLink(a, b), "/orgs/{org_id}/payouts/{payout_id}"},
+		"OrgOfferingsLink":                {OrgOfferingsLink(a), "/orgs/{org_id}/offerings"},
+		"OrgOfferingApprovalsLink":        {OrgOfferingApprovalsLink(a), "/orgs/{org_id}/offering-approvals"},
+		"OrgPostsLink":                    {OrgPostsLink(a), "/orgs/{org_id}/posts"},
+		"OrgPayeeLink":                    {OrgPayeeLink(a, b), "/orgs/{org_id}/payees/{payee_id}"},
+		"OrgContactRequestLink":           {OrgContactRequestLink(a, b), "/orgs/{org_id}/contact-requests/{contact_request_id}"},
+		"OrgRefundRequestLink":            {OrgRefundRequestLink(a, b), "/orgs/{org_id}/refund-requests/{refund_request_id}"},
+		"OrgSalesRefundRequestLink":       {OrgSalesRefundRequestLink(a, b), "/orgs/{org_id}/sales/refund-requests/{refund_request_id}"},
+		"AdminAuditEventsLink":            {AdminAuditEventsLink(), "/admin/audit-events"},
+		"AdminBankAccountsLink":           {AdminBankAccountsLink(), "/admin/bank-accounts"},
+		"AdminBreachesLink":               {AdminBreachesLink(), "/admin/breaches"},
+		"AdminClubLink":                   {AdminClubLink(a), "/admin/clubs/{club_org_id}"},
+		"AdminClubClaimLink":              {AdminClubClaimLink(a), "/admin/club-claims/{claim_id}"},
+		"AdminCollectionAccountsLink":     {AdminCollectionAccountsLink(), "/admin/collection-accounts"},
+		"AdminCommercePoliciesLink":       {AdminCommercePoliciesLink(), "/admin/commerce-policies"},
+		"AdminOfferingsLink":              {AdminOfferingsLink(), "/admin/offerings"},
+		"AdminInvoiceLink":                {AdminInvoiceLink(a), "/admin/invoices/{invoice_id}"},
+		"AdminPendingOrgsLink":            {AdminPendingOrgsLink(), "/admin/orgs?status=pending_review"},
+		"AdminOrderLink":                  {AdminOrderLink("KR7K3M9Q2X"), "/admin/orders?order_no={order_no}"},
+		"AdminPlatformRolesLink":          {AdminPlatformRolesLink(), "/admin/platform-roles"},
+		"AdminPayoutLink":                 {AdminPayoutLink(a), "/admin/payouts/{payout_id}"},
+		"AdminRefundLink":                 {AdminRefundLink(a), "/admin/refunds/{refund_id}"},
+		"AdminRefundRequestLink":          {AdminRefundRequestLink(a), "/admin/refund-requests/{refund_request_id}"},
+		"AdminReportLink":                 {AdminReportLink(a), "/admin/reports/{report_id}"},
+		"AdminReviewQueueLink":            {AdminReviewQueueLink(), "/admin/review-queue"},
+		"AdminUnmatchedTransfersLink":     {AdminUnmatchedTransfersLink(), "/admin/incoming-transfers?status=unmatched"},
 	}
 }
 
@@ -130,7 +133,7 @@ func TestLinkCatalog_Unambiguous(t *testing.T) {
 	if r, ok := MatchLinkRoute(legacy); !ok || !r.Legacy {
 		t.Errorf("legacy club link = %+v, %v", r, ok)
 	}
-	for _, p := range []string{legacy, "/clubs/by-slug/A_B", "/admin/orders?order_no=KR1&x=//e", "/orders/not-a-uuid",
+	for _, p := range []string{legacy, "/clubs/by-slug/A_B", "/admin/orders?order_no=KR1&x=//e", "/orgs/not-a-uuid/orders/x", "/orgs/" + uuid.NewV7().String() + "/",
 		"//evil.example/x", "/me/access-grants/x", "/posts/" + uuid.NewV7().String() + "?x=1", ""} {
 		if l, ok := ParseLink(p); ok {
 			t.Errorf("ParseLink(%q) = %v, want refused", p, l)
@@ -211,21 +214,29 @@ func TestLinkProducers_AllInCatalog(t *testing.T) {
 	}
 }
 
-// TestLinkRoutes_OrgFormsNameTheOrg (BE-127): every current org-audience
-// form starts with /orgs/{org_id}/, so a client opens it in the panel of
-// that org's kind; the old registration form is legacy only.
+// TestLinkRoutes_OrgFormsNameTheOrg (BE-127, BE-144): every current
+// org-audience form is /orgs/{org_id} or starts with /orgs/{org_id}/, so a
+// client opens it in the panel of that org's kind; no current form outside
+// /orgs/ links an order or an invoice (they belong to an org's panel); the
+// old registration, order and invoice forms are legacy only.
 func TestLinkRoutes_OrgFormsNameTheOrg(t *testing.T) {
 	t.Parallel()
 	for _, r := range LinkRoutes() {
-		if r.Audience == LinkForOrg && !r.Legacy && !strings.HasPrefix(r.Pattern, "/orgs/{org_id}/") {
+		if r.Audience == LinkForOrg && !r.Legacy && r.Pattern != "/orgs/{org_id}" && !strings.HasPrefix(r.Pattern, "/orgs/{org_id}/") {
 			t.Errorf("org link %s does not name its org", r.Pattern)
 		}
+		if r.Audience == LinkForUser && !r.Legacy && (strings.Contains(r.Pattern, "{order_id}") || strings.Contains(r.Pattern, "{invoice_id}")) {
+			t.Errorf("user link %s opens an org's order or invoice without the org", r.Pattern)
+		}
 	}
-	old := "/events/" + uuid.NewV7().String() + "/registrations/" + uuid.NewV7().String()
-	if r, ok := MatchLinkRoute(old); !ok || !r.Legacy {
-		t.Fatalf("old registration form = %+v, %v; want legacy", r, ok)
-	}
-	if _, ok := ParseLink(old); ok {
-		t.Fatal("ParseLink accepts the legacy registration form")
+	id, id2 := uuid.NewV7().String(), uuid.NewV7().String()
+	for _, old := range []string{"/events/" + id + "/registrations/" + id2, "/orders/" + id, "/orders/" + id + "/payment-instructions",
+		"/invoices/" + id} {
+		if r, ok := MatchLinkRoute(old); !ok || !r.Legacy {
+			t.Fatalf("old form %s = %+v, %v; want legacy", old, r, ok)
+		}
+		if _, ok := ParseLink(old); ok {
+			t.Fatalf("ParseLink accepts the legacy form %s", old)
+		}
 	}
 }

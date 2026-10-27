@@ -247,8 +247,12 @@ type Deps struct {
 	// verified student (club_admin is refused) and the admin sweep does
 	// nothing.
 	Students Students
-	// Mailer sends the invitation e-mail (worker). nil → the task retries.
-	Mailer Mailer
+	// Sender delivers the invitation e-mail and the review notices
+	// (worker). nil → those tasks retry.
+	Sender Sender
+	// PlatformAdmins lists the recipients of a new org's review request
+	// (BE-144). nil → that task retries.
+	PlatformAdmins PlatformAdmins
 	// Clubs returns a club's join facts (hooks.clubInfo, directory). nil →
 	// joinClub 404 and every club counts as sensitive (no logo_public_url
 	// for any club, BE-120).

@@ -89,8 +89,9 @@ func cleanCompany(sector, size, domain, hq string, requireProfile bool) (company
 }
 
 // CreateCompany implements Service. The org, its company profile, the
-// founder's company_owner membership and the audit record share one
-// transaction (with the Idempotency-Key when one is sent, 06 H-5);
+// founder's company_owner membership, the audit record and
+// org.review_requested (BE-144) share one transaction (with the
+// Idempotency-Key when one is sent, 06 H-5);
 // membership.started and the session revocation follow the commit.
 func (s *service) CreateCompany(ctx context.Context, a authz.Actor, in CompanyInput) (OrgView, error) {
 	if err := authz.Can(ctx, a, authz.OrgsCompanyCreate, newCompanyResource); err != nil {
@@ -145,6 +146,10 @@ func (s *service) CreateCompany(ctx context.Context, a authz.Actor, in CompanyIn
 		}
 		meta := map[string]any{"org_kind": string(KindCompany), "slug": o.Slug, "membership_id": m.ID.String()}
 		if err := s.d.Audit.Log(ctx, auditEvent(a, authz.OrgsCompanyCreate, o.ID, "", meta)); err != nil {
+			return uuid.Nil(), err
+		}
+		// Q-33: anyone may register a company; a platform admin verifies it.
+		if err := s.emitReviewRequested(ctx, o); err != nil {
 			return uuid.Nil(), err
 		}
 		s.emitStarted(ctx, m)

@@ -108,7 +108,7 @@ func newEnv(t *testing.T, opts ...func(*orgs.Deps)) *env {
 		Reauth:         e.late,
 		RevokeSessions: e.revoker.revoke,
 		OpenCommerce:   func() []orgs.OpenCommerceCheck { return e.open },
-		Users:          e.users, Students: e.students, Clubs: e.clubs.info, Mailer: e.mailer, Avatars: e.avatars.of,
+		Users:          e.users, Students: e.students, Clubs: e.clubs.info, Sender: e.mailer, Avatars: e.avatars.of,
 		Deriver: testDeriver(t), LinkBaseURL: "https://app.koro.test",
 	}
 	for _, o := range opts {

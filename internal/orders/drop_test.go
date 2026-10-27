@@ -137,7 +137,7 @@ func TestOfferingCancelled_UnpaidCart_DropsOnlyThatLine(t *testing.T) {
 			}
 		case m.Template == "orders.line_dropped" && m.Channel == notify.ChannelInApp && *m.UserID == buyer:
 			buyerInApp++
-			if m.LinkPath != notify.OrderLink(v.Order.ID) {
+			if m.LinkPath != notify.OrgOrderLink(v.Order.OrgID, v.Order.ID) {
 				t.Errorf("buyer link = %v", m.LinkPath)
 			}
 		case m.Template == "orders.sale_line_dropped" && *m.UserID == seller:

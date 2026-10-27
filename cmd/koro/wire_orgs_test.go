@@ -191,6 +191,8 @@ func TestWire_OrgsTasksAndInvitationEmail(t *testing.T) {
 		domainevent.TopicUserEduVerificationLapsed: orgs.EndLapsedAdminRolesTaskName,
 		domainevent.TopicStudentGraduated:          orgs.EndGraduatedAdminRolesTaskName,
 		domainevent.TopicClubSensitivityChanged:    orgs.PurgeSensitiveMembershipsTaskName,
+		domainevent.TopicOrgReviewRequested:        orgs.NotifyReviewRequestedTaskName,
+		domainevent.TopicOrgReviewDecided:          orgs.NotifyReviewDecidedTaskName,
 	} {
 		if !slices.ContainsFunc(c.infra.subs.For(topic), func(s outbox.Subscription) bool { return s.Name == name }) {
 			t.Errorf("%s is not subscribed to %s", name, topic)
@@ -227,5 +229,56 @@ func TestWire_OrgsTasksAndInvitationEmail(t *testing.T) {
 		!strings.Contains(sent[0].Text, "https://app.koro.test/invitations/accept#token=") ||
 		!strings.Contains(sent[0].Text, "E-posta Şirketi") {
 		t.Fatalf("sent %d e-mails", len(sent))
+	}
+}
+
+// TestWire_OrgsVerifiedNoticeEmail (BE-144): the verification notice runs
+// through the wired notify service and the embedded orgs.org_verified
+// template: the founder's e-mail names the company and links its panel.
+func TestWire_OrgsVerifiedNoticeEmail(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	now := c.infra.clock.Now().UTC().Truncate(time.Microsecond)
+	founder := authz.Actor{Kind: authz.KindUser, UserID: uuid.NewV7(), SessionID: uuid.NewV7(), StudentStatus: authz.StudentNone}
+	if err := c.identity.store.InsertUser(ctx, identity.User{
+		ID: founder.UserID, Status: identity.StatusActive, Email: "kurucu@sirket.example.test",
+		EmailNormalized: "kurucu@sirket.example.test", EmailVerifiedAt: &now, PasswordHash: testPasswordHash(),
+		FirstName: "Deniz", LastName: "Kurucu", Persona: identity.PersonaCompany, Locale: identity.LocaleTR, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	v, err := c.orgs.svc.CreateCompany(ctx, founder, orgs.CompanyInput{Name: "Bildirim Şirketi", SectorCode: "software", SizeBand: "1-10"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, _ := authztest.Get("platform_admin")
+	if _, err := c.orgs.svc.AdminVerifyOrg(ctx, admin.Actor, v.Org.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	env, err := domainevent.New(domainevent.OrgReviewDecided{OrgID: v.Org.ID, OrgKind: "company", Outcome: domainevent.OrgReviewVerified},
+		"org", v.Org.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.ID, env.OccurredAt = uuid.NewV7(), c.infra.clock.Now()
+	payload, err := json.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub := c.infra.subs.For(domainevent.TopicOrgReviewDecided)[0]
+	for range 2 { // at-least-once: notify deduplicates
+		if err := sub.HandleTask(workerContext(t), payload); err != nil {
+			t.Fatalf("%s: %v", sub.Name, err)
+		}
+	}
+	sent := c.notify.transport.(*notify.MemTransport).Sent()
+	if len(sent) != 1 || sent[0].To != "kurucu@sirket.example.test" ||
+		!strings.Contains(sent[0].Text, "https://app.koro.test/orgs/"+v.Org.ID.String()) ||
+		!strings.Contains(sent[0].Text, "Bildirim Şirketi") || !strings.Contains(sent[0].Text, "Deniz") {
+		t.Fatalf("sent %+v", sent)
 	}
 }

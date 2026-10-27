@@ -100,10 +100,14 @@ func (p privacyProvider) Export(ctx context.Context, userID uuid.UUID) (privacy.
 		out.Items = append(out.Items, item)
 	}
 	for _, o := range created {
-		out.Items = append(out.Items, map[string]any{
+		item := map[string]any{
 			"record": "registered_org", "org_id": o.ID.String(), "org_kind": string(o.Kind), "name": o.Name,
 			"created_at": o.CreatedAt.UTC().Format(time.RFC3339),
-		})
+		}
+		if o.RejectionReason != nil { // the reason the registration was rejected, told to the founder (BE-144)
+			item["rejection_reason"] = *o.RejectionReason
+		}
+		out.Items = append(out.Items, item)
 	}
 	return out, nil
 }

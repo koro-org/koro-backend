@@ -394,7 +394,7 @@ func (s *service) handleInvitationCreated(ctx context.Context, e domainevent.Env
 	if !inv.Open() || inv.Expired(s.now()) {
 		return nil
 	}
-	if s.d.Mailer == nil || s.d.Deriver == nil {
+	if s.d.Sender == nil || s.d.Deriver == nil {
 		return problem.ErrUnavailable // retried once the worker is configured
 	}
 	raw, err := s.deriveToken(inv.KeyID, inv.ID)
@@ -433,7 +433,7 @@ func (s *service) handleInvitationCreated(ctx context.Context, e domainevent.Env
 			}
 		}
 	}
-	if _, err := s.d.Mailer.Send(ctx, msg); err != nil {
+	if _, err := s.d.Sender.Send(ctx, msg); err != nil {
 		if notify.IsPermanent(err) {
 			return queue.Permanent(err)
 		}

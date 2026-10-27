@@ -66,9 +66,12 @@ type Org struct {
 	VerifiedAt  *time.Time `gorm:"column:verified_at" json:"verified_at,omitempty"`
 	VerifiedBy  *uuid.UUID `gorm:"type:uuid;column:verified_by" json:"verified_by,omitempty"`
 	ClosedAt    *time.Time `gorm:"column:closed_at" json:"closed_at,omitempty"`
-	CreatedBy   *uuid.UUID `gorm:"type:uuid;column:created_by" json:"created_by,omitempty"`
-	CreatedAt   time.Time  `gorm:"column:created_at;->" json:"created_at"`
-	UpdatedAt   time.Time  `gorm:"column:updated_at;->" json:"updated_at"`
+	// RejectionReason is the platform staff's reason for closing the org
+	// while it was pending_review (the founder's notice reads it; BE-144).
+	RejectionReason *string    `gorm:"column:rejection_reason" json:"rejection_reason,omitempty"`
+	CreatedBy       *uuid.UUID `gorm:"type:uuid;column:created_by" json:"created_by,omitempty"`
+	CreatedAt       time.Time  `gorm:"column:created_at;->" json:"created_at"`
+	UpdatedAt       time.Time  `gorm:"column:updated_at;->" json:"updated_at"`
 }
 
 // TableName implements gorm's Tabler.

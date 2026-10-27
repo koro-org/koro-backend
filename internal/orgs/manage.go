@@ -241,7 +241,10 @@ func (s *service) openCommerce() []OpenCommerceCheck {
 
 // CloseOrg implements Service: authz (404/403) → reason → re-authentication
 // → in one transaction: status rules, the open-commerce checks, closed +
-// closed_at, every open membership ended (org_closed), audit.
+// closed_at, every open membership ended (org_closed), audit. Closing a
+// pending_review org as platform staff rejects its registration (BE-144):
+// the reason is kept (rejection_reason) and org.review_decided (rejected)
+// tells the founder.
 func (s *service) CloseOrg(ctx context.Context, a authz.Actor, id uuid.UUID, reason string, proof reauthProof) (OrgView, error) {
 	o, err := s.d.Store.GetOrg(ctx, id)
 	if err != nil {
@@ -287,12 +290,21 @@ func (s *service) CloseOrg(ctx context.Context, a authz.Actor, id uuid.UUID, rea
 			}
 		}
 		now := s.now()
+		rejected := rejection(a, o)
 		o.Status, o.ClosedAt = StatusClosed, &now
+		if rejected {
+			o.RejectionReason = &reason // the founder's notice reads it (BE-144)
+		}
 		if _, err := s.d.Store.UpdateOrg(ctx, o); err != nil {
 			return uuid.Nil(), err
 		}
 		if err := s.emitOrgUpdated(ctx, o, []string{"status"}); err != nil {
 			return uuid.Nil(), err
+		}
+		if rejected {
+			if err := s.emitReviewDecided(ctx, o, domainevent.OrgReviewRejected); err != nil {
+				return uuid.Nil(), err
+			}
 		}
 		gone, err := s.d.Store.EndOpenMembers(ctx, o.ID, now, EndOrgClosed)
 		if err != nil {
@@ -309,6 +321,9 @@ func (s *service) CloseOrg(ctx context.Context, a authz.Actor, id uuid.UUID, rea
 			}
 		}
 		meta := map[string]any{"reauth": kind, "ended_memberships": len(gone)}
+		if rejected {
+			meta["review_outcome"] = domainevent.OrgReviewRejected
+		}
 		if err := s.d.Audit.Log(ctx, auditEvent(a, authz.OrgsOrgClose, o.ID, reason, meta)); err != nil {
 			return uuid.Nil(), err
 		}

@@ -275,7 +275,7 @@ func TestInvoiceIssued_EmailsPDF(t *testing.T) {
 		case "in_app":
 			inApp[m.DedupeKey] = true
 			if m.UserID == nil || (*m.UserID != authztest.ID("company_admin") && *m.UserID != authztest.ID("company_owner_a")) ||
-				m.LinkPath.String() != "/invoices/"+inv.ID.String() {
+				m.LinkPath != notify.OrgInvoiceLink(authztest.ID("company_a"), inv.ID) {
 				t.Fatalf("in-app notice = %+v", m)
 			}
 		}
@@ -314,6 +314,15 @@ func TestNotices_UploadAndMismatch(t *testing.T) {
 	got := map[string][]uuid.UUID{}
 	for _, m := range e.sender.all() {
 		got[m.Template] = append(got[m.Template], *m.UserID)
+		// BE-144: finance opens the invoice in the admin panel, the issuer
+		// org's admins in their org's panel.
+		want := notify.AdminInvoiceLink(inv.ID)
+		if m.Template == "billing.invoice_mismatch" || m.Template == "billing.invoice_planned" && *m.UserID == authztest.ID("club_admin") {
+			want = notify.OrgInvoiceLink(authztest.ID("club_a"), inv.ID)
+		}
+		if m.LinkPath != want {
+			t.Errorf("%s to %s links %q, want %q", m.Template, *m.UserID, m.LinkPath, want)
+		}
 	}
 	if u := got["billing.invoice_uploaded"]; len(u) != 2 {
 		t.Fatalf("uploaded notices to %v, want both finance admins", u)

@@ -78,7 +78,8 @@ func (s *service) handleInvoiceIssued(ctx context.Context, e domainevent.Envelop
 		if err != nil {
 			return err
 		}
-		errs = append(errs, s.notifyInApp(ctx, inv, tmplInvoiceIssued, e.ID.String(), admins))
+		errs = append(errs, s.notifyInApp(ctx, inv, tmplInvoiceIssued, e.ID.String(), admins,
+			notify.OrgInvoiceLink(*inv.RecipientOrgID, inv.ID)))
 	}
 	return errors.Join(errs...)
 }
@@ -157,6 +158,9 @@ func (s *service) handleNotice(ctx context.Context, payload []byte) error {
 	}
 	var to []uuid.UUID
 	tmpl := ""
+	// Finance opens the invoice in the admin panel; an org's admins in their
+	// org's panel (BE-144: the link names the org).
+	link := notify.AdminInvoiceLink(inv.ID)
 	switch n.Kind {
 	case noticePlanned:
 		if inv.Status != StatusPlanned {
@@ -165,6 +169,7 @@ func (s *service) handleNotice(ctx context.Context, payload []byte) error {
 		tmpl = tmplInvoicePlanned
 		if inv.IssuingMode == ModeSellerUploaded && inv.IssuerOrgID != nil {
 			to, err = s.orgAdmins(ctx, *inv.IssuerOrgID)
+			link = notify.OrgInvoiceLink(*inv.IssuerOrgID, inv.ID)
 		} else {
 			to, err = s.d.Staff.FinanceAdmins(ctx)
 		}
@@ -182,6 +187,7 @@ func (s *service) handleNotice(ctx context.Context, payload []byte) error {
 		tmpl = tmplInvoiceMismatch
 		if inv.IssuerOrgID != nil {
 			to, err = s.orgAdmins(ctx, *inv.IssuerOrgID)
+			link = notify.OrgInvoiceLink(*inv.IssuerOrgID, inv.ID)
 		}
 		if inv.UploadedBy != nil && !slices.Contains(to, *inv.UploadedBy) {
 			to = append(to, *inv.UploadedBy)
@@ -192,7 +198,7 @@ func (s *service) handleNotice(ctx context.Context, payload []byte) error {
 	if err != nil {
 		return fmt.Errorf("billing: notice recipients: %w", err)
 	}
-	return s.notifyInApp(ctx, inv, tmpl, key, to)
+	return s.notifyInApp(ctx, inv, tmpl, key, to, link)
 }
 
 // orgAdmins returns an org's active admins (orgAdminRoles).
@@ -214,9 +220,10 @@ func (s *service) orgAdmins(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, 
 	return out, nil
 }
 
-// notifyInApp sends an in-app notice (IDs only) to every recipient; the
-// dedupe key (the event and the recipient) makes a repeated task a no-op.
-func (s *service) notifyInApp(ctx context.Context, inv Invoice, tmpl, key string, to []uuid.UUID) error {
+// notifyInApp sends an in-app notice (IDs only) linking link to every
+// recipient; the dedupe key (the event and the recipient) makes a repeated
+// task a no-op.
+func (s *service) notifyInApp(ctx context.Context, inv Invoice, tmpl, key string, to []uuid.UUID, link notify.Link) error {
 	if len(to) == 0 {
 		return nil
 	}
@@ -229,7 +236,7 @@ func (s *service) notifyInApp(ctx context.Context, inv Invoice, tmpl, key string
 		u := uid
 		_, err := s.d.Sender.Send(ctx, notify.Message{
 			UserID: &u, Channel: notify.ChannelInApp, Category: notify.CategoryTransactional, Template: tmpl,
-			SourceOrgID: org, LinkPath: notify.InvoiceLink(inv.ID), DedupeKey: tmpl + ":" + key + ":" + u.String(),
+			SourceOrgID: org, LinkPath: link, DedupeKey: tmpl + ":" + key + ":" + u.String(),
 			Data: map[string]any{"invoice_id": inv.ID.String()},
 		})
 		errs = append(errs, s.sendErr(ctx, tmpl, inv.ID, err))

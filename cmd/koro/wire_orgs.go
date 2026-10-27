@@ -43,7 +43,9 @@ import (
 // (re-authentication of the R operations; Sessions.RevokeAll after a role
 // change, called after the commit; the user directory: member names, the
 // e-mail match of an invitation, the age of a club_admin), the identity
-// module's student verification, c.notify.svc (invitation e-mails),
+// module's student verification, c.notify.svc (invitation e-mails and the
+// review notices of BE-144), c.notify.platformAdmins (the recipients of a
+// new org's review request),
 // hooks.clubInfo (joinClub, club sensitivity; read at call time: directory
 // builds later) and hooks.openCommerce (read at call time: orders BE-040
 // and ledger BE-044 append to it in their build).
@@ -142,7 +144,15 @@ func (w *orgsWiring) build(c *container) error {
 		d.Students = studentsSeam{w: w, fallback: c.identity.mod.Students}
 	}
 	if c.notify.svc != nil {
-		d.Mailer = c.notify.svc
+		d.Sender = c.notify.svc
+	}
+	// The platform admins (identity binds c.notify.platformAdmins in its
+	// build, before orgs; read at call time all the same).
+	d.PlatformAdmins = func(ctx context.Context) ([]uuid.UUID, error) {
+		if h := c.notify.platformAdmins; h != nil {
+			return h(ctx)
+		}
+		return nil, errors.New("orgs: platform admin lookup is not wired")
 	}
 	if c.files.svc != nil {
 		d.Files = c.files.svc

@@ -208,7 +208,7 @@ func (s *service) handlePaymentCaptured(ctx context.Context, e domainevent.Envel
 		return err
 	}
 	key := e.ID.String()
-	errs := []error{s.notifyInApp(ctx, tmplPaymentReceived, key, buyers, notify.OrderLink(o.ID), ids, nil)}
+	errs := []error{s.notifyInApp(ctx, tmplPaymentReceived, key, buyers, notify.OrgOrderLink(o.OrgID, o.ID), ids, nil)}
 	if !p.OrderPaid {
 		return errors.Join(errs...)
 	}
@@ -262,7 +262,7 @@ func (s *service) handlePaymentRefunded(ctx context.Context, e domainevent.Envel
 		return err
 	}
 	key := e.ID.String()
-	errs := []error{s.notifyInApp(ctx, tmplRefundCompleted, key, buyers, notify.OrderLink(o.ID), ids, nil)}
+	errs := []error{s.notifyInApp(ctx, tmplRefundCompleted, key, buyers, notify.OrgOrderLink(o.OrgID, o.ID), ids, nil)}
 	if p.OrderLineID == uuid.Nil() {
 		return errors.Join(errs...)
 	}

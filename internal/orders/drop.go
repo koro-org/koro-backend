@@ -212,7 +212,7 @@ func (s *service) handleLineDropped(ctx context.Context, payload []byte) error {
 	l := lines[i]
 	key := "line:" + l.ID.String()
 	buyerTmpl, sellerTmpl := dropTemplates(o)
-	errs := []error{s.notifyInApp(ctx, o, o.OrgID, buyerTmpl, key, []uuid.UUID{o.PlacedByUserID}, notify.OrderLink(o.ID))}
+	errs := []error{s.notifyInApp(ctx, o, o.OrgID, buyerTmpl, key, []uuid.UUID{o.PlacedByUserID}, notify.OrgOrderLink(o.OrgID, o.ID))}
 	if o.Status == StatusAwaitingPayment {
 		errs = append(errs, s.mailLineDropped(ctx, o, l, buyerTmpl, key))
 	}

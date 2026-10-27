@@ -252,7 +252,7 @@ func TestLineDroppedNotice_ModelC_DirectPaymentWarning(t *testing.T) {
 			buyerMail = m
 		case m.Template == "orders.line_dropped_direct" && m.Channel == notify.ChannelInApp && *m.UserID == buyer:
 			buyerInApp++
-			if m.LinkPath != notify.OrderLink(o.ID) {
+			if m.LinkPath != notify.OrgOrderLink(o.OrgID, o.ID) {
 				t.Errorf("buyer link = %v", m.LinkPath)
 			}
 		case m.Template == "orders.sale_line_dropped_direct" && m.Channel == notify.ChannelEmail && *m.UserID == seller:

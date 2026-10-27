@@ -31,7 +31,7 @@ type LinkAudience string
 
 // Link audiences.
 const (
-	LinkForUser  LinkAudience = "user"  // the recipient's own screens (/me/..., an order or invoice of their org)
+	LinkForUser  LinkAudience = "user"  // the recipient's own screens (/me/..., a post, a club page)
 	LinkForOrg   LinkAudience = "org"   // an organization's management screens: always /orgs/{org_id}/...
 	LinkForAdmin LinkAudience = "admin" // platform staff screens (/admin/...)
 )
@@ -150,20 +150,21 @@ func MatchLinkRoute(path string) (LinkRoute, bool) {
 // The catalog. Producers in brackets.
 var (
 	// The recipient's own screens.
-	routeMyAccessGrants    = route("/me/access-grants", LinkForUser)                         // students
-	routeMyClubClaims      = route("/me/club-claims", LinkForUser)                           // directory
-	routeMyContactRequest  = route("/me/contact-requests/{contact_request_id}", LinkForUser) // messaging
-	routeMyRegistration    = route("/me/registrations/{registration_id}", LinkForUser)       // events
-	routeMySecurityEvents  = route("/me/security-events", LinkForUser)                       // notify (audit alerts)
-	routeMyTerms           = route("/me/terms", LinkForUser)                                 // identity (a new terms of use version, BE-124)
-	routeMyStudentVerif    = route("/me/student-verification", LinkForUser)                  // identity (e-mail)
-	routeOrder             = route("/orders/{order_id}", LinkForUser)                        // orders, payments
-	routeOrderInstructions = route("/orders/{order_id}/payment-instructions", LinkForUser)   // orders
-	routeInvoice           = route("/invoices/{invoice_id}", LinkForUser)                    // billing
-	routePost              = route("/posts/{post_id}", LinkForUser)                          // outreach (feed dispatch)
-	routeClub              = route("/clubs/by-slug/{club_slug}", LinkForUser)                // directory (claim approved)
+	routeMyAccessGrants   = route("/me/access-grants", LinkForUser)                         // students
+	routeMyClubClaims     = route("/me/club-claims", LinkForUser)                           // directory
+	routeMyContactRequest = route("/me/contact-requests/{contact_request_id}", LinkForUser) // messaging
+	routeMyRegistration   = route("/me/registrations/{registration_id}", LinkForUser)       // events
+	routeMySecurityEvents = route("/me/security-events", LinkForUser)                       // notify (audit alerts)
+	routeMyTerms          = route("/me/terms", LinkForUser)                                 // identity (a new terms of use version, BE-124)
+	routeMyStudentVerif   = route("/me/student-verification", LinkForUser)                  // identity (e-mail)
+	routePost             = route("/posts/{post_id}", LinkForUser)                          // outreach (feed dispatch)
+	routeClub             = route("/clubs/by-slug/{club_slug}", LinkForUser)                // directory (claim approved)
 
 	// An organization's management screens.
+	routeOrg                = route("/orgs/{org_id}", LinkForOrg)                                                   // orgs (verified, BE-144)
+	routeOrgOrder           = route("/orgs/{org_id}/orders/{order_id}", LinkForOrg)                                 // orders, payments (the buyer, BE-144)
+	routeOrgOrderInstr      = route("/orgs/{org_id}/orders/{order_id}/payment-instructions", LinkForOrg)            // orders (the buyer, BE-144)
+	routeOrgInvoice         = route("/orgs/{org_id}/invoices/{invoice_id}", LinkForOrg)                             // billing (issuer or recipient org, BE-144)
 	routeEventRegistration  = route("/orgs/{org_id}/events/{event_id}/registrations/{registration_id}", LinkForOrg) // events
 	routeOrgSales           = route("/orgs/{org_id}/sales", LinkForOrg)                                             // orders, payments
 	routeOrgPayout          = route("/orgs/{org_id}/payouts/{payout_id}", LinkForOrg)                               // ledger
@@ -184,6 +185,8 @@ var (
 	routeAdminCollectionAccounts = route("/admin/collection-accounts", LinkForAdmin)                 // payments
 	routeAdminCommercePolicies   = route("/admin/commerce-policies", LinkForAdmin)                   // catalog
 	routeAdminOfferings          = route("/admin/offerings", LinkForAdmin)                           // catalog
+	routeAdminInvoice            = route("/admin/invoices/{invoice_id}", LinkForAdmin)               // billing (finance, BE-144)
+	routeAdminPendingOrgs        = route("/admin/orgs?status=pending_review", LinkForAdmin)          // orgs (BE-144)
 	routeAdminOrder              = route("/admin/orders?order_no={order_no}", LinkForAdmin)          // orders
 	routeAdminPlatformRoles      = route("/admin/platform-roles", LinkForAdmin)                      // identity (e-mail)
 	routeAdminPayout             = route("/admin/payouts/{payout_id}", LinkForAdmin)                 // ledger
@@ -202,6 +205,12 @@ func init() {
 	// without its org: a client could not tell which panel (club,
 	// university, company) opens it.
 	legacy("/events/{event_id}/registrations/{registration_id}", LinkForOrg)
+	// Before BE-144 the order and invoice notices linked them without the
+	// org: a client could not tell which panel (company, club, university)
+	// opens them. Finance's invoice notices link /admin/invoices/{id} now.
+	legacy("/orders/{order_id}", LinkForUser)
+	legacy("/orders/{order_id}/payment-instructions", LinkForUser)
+	legacy("/invoices/{invoice_id}", LinkForUser)
 }
 
 // Builders of the recipient's own screens.
@@ -213,18 +222,31 @@ func MyRegistrationLink(reg uuid.UUID) Link   { return routeMyRegistration.link(
 func MySecurityEventsLink() Link              { return routeMySecurityEvents.link() }
 func MyTermsLink() Link                       { return routeMyTerms.link() }
 func MyStudentVerificationLink() Link         { return routeMyStudentVerif.link() }
-func OrderLink(order uuid.UUID) Link          { return routeOrder.link(order.String()) }
-func OrderPaymentInstructionsLink(order uuid.UUID) Link {
-	return routeOrderInstructions.link(order.String())
-}
-func InvoiceLink(invoice uuid.UUID) Link { return routeInvoice.link(invoice.String()) }
-func PostLink(post uuid.UUID) Link       { return routePost.link(post.String()) }
+func PostLink(post uuid.UUID) Link            { return routePost.link(post.String()) }
 
 // ClubLink is the public page of a club by its slug (organizations.slug
 // never changes once set).
 func ClubLink(slug string) Link { return routeClub.link(slug) }
 
 // Builders of an organization's management screens.
+
+// OrgLink is the panel of org (its management home).
+func OrgLink(org uuid.UUID) Link { return routeOrg.link(org.String()) }
+
+// OrgOrderLink is an order in the buying org's panel.
+func OrgOrderLink(org, order uuid.UUID) Link { return routeOrgOrder.link(org.String(), order.String()) }
+
+// OrgOrderPaymentInstructionsLink is the payment instructions of an order
+// in the buying org's panel.
+func OrgOrderPaymentInstructionsLink(org, order uuid.UUID) Link {
+	return routeOrgOrderInstr.link(org.String(), order.String())
+}
+
+// OrgInvoiceLink is an invoice in the panel of org (its issuer or its
+// recipient).
+func OrgInvoiceLink(org, invoice uuid.UUID) Link {
+	return routeOrgInvoice.link(org.String(), invoice.String())
+}
 
 // EventRegistrationLink is a registration of an event of org (the
 // organiser; org-audience links always name the org, BE-127).
@@ -263,6 +285,8 @@ func AdminClubClaimLink(claim uuid.UUID) Link { return routeAdminClubClaim.link(
 func AdminCollectionAccountsLink() Link       { return routeAdminCollectionAccounts.link() }
 func AdminCommercePoliciesLink() Link         { return routeAdminCommercePolicies.link() }
 func AdminOfferingsLink() Link                { return routeAdminOfferings.link() }
+func AdminInvoiceLink(invoice uuid.UUID) Link { return routeAdminInvoice.link(invoice.String()) }
+func AdminPendingOrgsLink() Link              { return routeAdminPendingOrgs.link() }
 func AdminOrderLink(orderNo string) Link      { return routeAdminOrder.link(orderNo) }
 func AdminPlatformRolesLink() Link            { return routeAdminPlatformRoles.link() }
 func AdminPayoutLink(payout uuid.UUID) Link   { return routeAdminPayout.link(payout.String()) }
@@ -298,8 +322,8 @@ func (linkPathText) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schem
 		}
 	}
 	b.WriteString(". {<name>_id} is a UUID, {club_slug} an organization slug (getOrgBySlug), {order_no} an order " +
-		"number. Every current org form starts with /orgs/{org_id}/: the client opens it in the panel of that org's " +
-		"kind (getMe memberships[].org_kind). Legacy forms are no longer produced but older notifications may carry them.")
+		"number. Every current org form is /orgs/{org_id} or starts with /orgs/{org_id}/: the client opens it in the panel of " +
+		"that org's kind (getMe memberships[].org_kind). Legacy forms are no longer produced but older notifications may carry them.")
 	s.Description = b.String()
 	if s.Extensions == nil {
 		s.Extensions = map[string]any{}

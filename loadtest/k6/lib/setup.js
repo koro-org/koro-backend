@@ -4,7 +4,10 @@
 //
 //   - sessions: the demo students (STUDENTS_FILE), the club admin, the
 //     company owner (TOTP enrolled: orders need an MFA-verified
-//     company_admin) and the recruiter (discovery, no MFA needed);
+//     company_admin) and the recruiter (discovery, no MFA needed); each
+//     with the current terms of use accepted (api.js acceptTerms; the
+//     BE-124 terms gate refuses writes until then), here and not in the
+//     scenarios, so the acceptance is never measured;
 //   - events of the main club: registration events with a large capacity
 //     (enough distinct student × event pairs for the whole run) and one
 //     check-in event with scanner staff and pre-issued tickets;
@@ -15,7 +18,7 @@ import http from 'k6/http';
 import { sleep } from 'k6';
 import { SharedArray } from 'k6/data';
 import { env, profile, enabledScenarios, totalSeconds } from './config.js';
-import { call, clientIP, idemKey, json, login, must } from './api.js';
+import { acceptTerms, call, clientIP, idemKey, json, login, must } from './api.js';
 import { totp } from './totp.js';
 
 // Demo accounts of db/seed/seed.go (synthetic, @example.test).
@@ -80,7 +83,7 @@ function signInStudents(emails) {
   res.forEach((r, i) => {
     const b = json(r);
     if (r.status === 200 && b && b.token) {
-      out.push({ email: emails[i], token: b.token });
+      out.push({ email: emails[i], token: b.token, ip: SETUP_IP + i });
     } else {
       console.warn(`sign-in of a demo student failed: HTTP ${r.status}`);
     }
@@ -144,12 +147,16 @@ export function setup() {
   const unis = must(call('GET', '/api/v1/universities?limit=10', { name: 'setup_unis' }), 200, 'list universities');
   data.universities = (unis.items || []).map((u) => u.university_id);
 
-  // --- sign-up needs the current privacy notice ---
+  // --- sign-up needs the current privacy notice and terms of use ---
   if (want.has('signup')) {
     const n = must(call('GET', '/api/v1/notices/current?audience=student&kind=privacy_notice', { name: 'setup_notice' }),
       200, 'current privacy notice');
     if (!n.items || n.items.length === 0) throw new Error('no current privacy notice (the demo seed publishes one)');
     data.privacyNotice = n.items[0].notice_version_id;
+    const t = must(call('GET', '/api/v1/notices/current?audience=student&kind=terms_of_use', { name: 'setup_notice' }),
+      200, 'current terms of use');
+    if (!t.items || t.items.length === 0) throw new Error('no current terms of use (the demo seed publishes them)');
+    data.termsNotice = t.items[0].notice_version_id;
   }
 
   // --- students ---
@@ -160,6 +167,8 @@ export function setup() {
     }
     data.students = signInStudents(Array.from(students));
     if (data.students.length < SCANNERS + 10) throw new Error(`only ${data.students.length} demo students signed in`);
+    acceptTerms(data.students);
+    for (const s of data.students) delete s.ip;
   }
 
   // --- club events ---

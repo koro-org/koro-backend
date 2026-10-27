@@ -21,7 +21,10 @@ export const options = {
 };
 
 export function handleSummary(data) {
-  const md = markdown(data, { profile: env.profile, scenarios: enabledScenarios(), rateLimits: env.rateLimits });
+  const md = markdown(data, {
+    profile: env.profile, scenarios: enabledScenarios(), rateLimits: env.rateLimits,
+    setupFailed: data.setup_data === undefined || data.setup_data === null,
+  });
   // setup_data holds session tokens of the throwaway environment: keep it
   // out of the uploaded summary anyway.
   const clean = Object.assign({}, data);

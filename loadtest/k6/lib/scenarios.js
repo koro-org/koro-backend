@@ -118,6 +118,7 @@ export function signup(data) {
     ip, name: 'register_account', expect: [202], body: {
       email, password, first_name: pick(FIRST), last_name: pick(LAST), birth_date: '2004-05-20', locale: 'tr-TR',
       signup_persona: 'student', privacy_notice_version_id: data.privacyNotice,
+      terms_notice_version_id: data.termsNotice,
     },
   });
   if (!check(reg, { 'register 202': (r) => r.status === 202 })) return;

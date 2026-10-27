@@ -42,9 +42,15 @@ export function markdown(data, meta) {
   const reqs = val(m.http_reqs, 'count') || 0;
   const lines = [];
   const failed = thresholdRows(m).filter((r) => r.includes('KALDI')).length;
+  // k6 hands handleSummary no setup_data when setup threw (exit 107): no
+  // scenario ran, so a threshold "passing" measured nothing (BE-138).
+  const setupFailed = meta.setupFailed;
+  const verdict = setupFailed
+    ? '**HAZIRLIK (setup) DÜŞTÜ — eşikler ölçülmedi** (setup failed; k6 çıkış kodu 107, hata k6 logunda)'
+    : failed === 0 ? '**tüm eşikler geçti**' : `**${failed} eşik kaldı**`;
   lines.push(`## Koro yük testi — ${meta.profile} (${meta.scenarios.join(', ')})`);
   lines.push('');
-  lines.push(`Sonuç: ${failed === 0 ? '**tüm eşikler geçti**' : `**${failed} eşik kaldı**`} · süre ${Math.round(durS)} s · ` +
+  lines.push(`Sonuç: ${verdict} · süre ${Math.round(durS)} s · ` +
     `${reqs} istek (${durS > 0 ? (reqs / durS).toFixed(1) : '–'} istek/s) · beklenmeyen yanıt ${pct(val(m.http_req_failed, 'rate'))} · ` +
     `check ${pct(val(m.checks, 'rate'))} · en çok ${val(m.vus_max, 'max') || val(m.vus_max, 'value') || '–'} VU` +
     `${meta.rateLimits ? ' · rate limit **açık**' : ' · rate limit kapalı'}`);
@@ -53,7 +59,7 @@ export function markdown(data, meta) {
   lines.push('');
   lines.push('| durum | metrik | eşik |');
   lines.push('|---|---|---|');
-  lines.push(...thresholdRows(m));
+  lines.push(...(setupFailed ? thresholdRows(m).map((r) => r.replace(/^\| (geçti|\*\*KALDI\*\*) \|/, '| ölçülmedi |')) : thresholdRows(m)));
   lines.push('');
   lines.push('### Uçlar');
   lines.push('');

@@ -111,13 +111,55 @@ export function must(res, want, what) {
   return json(res);
 }
 
-// login signs in as a mobile client and returns the bearer token. Setup
-// passes another name, so its sign-ins stay out of the auth thresholds.
+// login signs in as a mobile client and returns the bearer token, with the
+// current terms of use accepted (acceptTerms). Setup passes another name,
+// so its sign-ins stay out of the auth thresholds.
 export function login(email, password, ip, name) {
   const res = call('POST', '/api/v1/auth/sessions', { body: { email, password }, ip, name: name || 'login' });
   const b = must(res, 200, `sign-in of ${email}`);
   if (!b || !b.token) throw new Error(`sign-in of ${email}: no token`);
+  acceptTerms([{ token: b.token, ip }]);
   return b.token;
+}
+
+// acceptTerms accepts the current terms of use for every session
+// ({token, ip}) whose GET /me answers terms.acceptance_required, as the
+// clients do (koro-web's TermsGate; cmd/koro smokeClient.acceptTerms): the
+// demo accounts predate the seeded terms (BE-118) and the terms gate
+// refuses every write until then with 403 consent.terms_acceptance_required
+// (BE-124). The acceptance is per account, so setup does it once for every
+// session it hands to the scenarios; its requests are named setup_terms
+// (kind setup), so they stay out of the measured thresholds. Requests go
+// out in parallel groups of `width` (default 8). Throws when an accepted
+// session still asks for the terms.
+export function acceptTerms(sessions, width) {
+  const w = width || 8;
+  const req = (method, path, s, body) => {
+    const headers = { 'X-Koro-Client': 'mobile', Accept: 'application/json', Authorization: `Bearer ${s.token}` };
+    if (s.ip !== undefined && s.ip !== null) headers['X-Forwarded-For'] = typeof s.ip === 'string' ? s.ip : clientIP(s.ip);
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    return {
+      method, url: env.baseURL + path, body: body === undefined ? null : JSON.stringify(body),
+      params: { headers, tags: { name: 'setup_terms', kind: 'setup' }, timeout: '60s' },
+    };
+  };
+  const pending = [];
+  for (let i = 0; i < sessions.length; i += w) {
+    const group = sessions.slice(i, i + w);
+    http.batch(group.map((s) => req('GET', '/api/v1/me', s))).forEach((r, j) => {
+      const me = must(r, 200, 'GET /me (terms)');
+      const t = me && me.terms;
+      if (t && t.acceptance_required) pending.push([group[j], t.current_notice_version_id]);
+    });
+  }
+  for (let i = 0; i < pending.length; i += w) {
+    const group = pending.slice(i, i + w);
+    http.batch(group.map(([s, id]) => req('POST', '/api/v1/me/terms-acceptances', s, { notice_version_id: id }))).forEach((r) => {
+      const t = must(r, 200, 'accept the terms of use');
+      if (!t || t.acceptance_required) throw new Error(`accept the terms of use: still required: ${String(r.body).slice(0, 300)}`);
+    });
+  }
+  return pending.length;
 }
 
 // pick returns a uniformly random element of list.

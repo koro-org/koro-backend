@@ -141,7 +141,7 @@ jobs:
             loadtest/k6/main.js 2>&1 | tee "$OUT/OPS-005-k6.log"
           status=${PIPESTATUS[0]}
           echo "exit=$status" >>"$GITHUB_OUTPUT"
-          echo "k6 exit code: $status (99 = a threshold failed)"
+          echo "k6 exit code: $status (99 = a threshold failed; 107 = setup failed, nothing measured)"
 
       - name: Collect diagnostics
         if: always()
@@ -196,6 +196,6 @@ jobs:
           K6_EXIT: ${{ steps.k6.outputs.exit }}
         run: |
           if [ "${K6_EXIT:-1}" != 0 ]; then
-            echo "::error::k6 exited with ${K6_EXIT:-no code} (99: a threshold failed; see the job summary)"
+            echo "::error::k6 exited with ${K6_EXIT:-no code} (99: a threshold failed; 107: setup failed, thresholds not measured; see the job summary)"
             exit 1
           fi

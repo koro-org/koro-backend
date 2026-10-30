@@ -127,12 +127,12 @@ func (s *service) sensitive(ctx context.Context, orgID uuid.UUID, kind Kind) (bo
 // deferred sweepers). membership.ended follows the commit for a membership
 // that was active (a pending request never started one).
 func (s *service) endMember(ctx context.Context, m Membership, reason EndReason, sensitive bool, now time.Time) (Membership, error) {
-	e, err := s.d.Store.EndMember(ctx, m.OrgID, m.ID, now, reason)
+	e, err := s.members().EndMember(ctx, m.OrgID, m.ID, now, reason)
 	if err != nil {
 		return Membership{}, err
 	}
 	if sensitive {
-		if err := s.d.Store.DeleteMember(ctx, m.OrgID, m.ID); err != nil {
+		if err := s.members().DeleteMember(ctx, m.OrgID, m.ID); err != nil {
 			return Membership{}, err
 		}
 	}
@@ -154,7 +154,7 @@ func (s *service) keepsAdmin(ctx context.Context, m Membership) error {
 	if m.Role == authz.MemberCompanyOwner {
 		return ErrLastAdmin
 	}
-	admins, err := s.d.Store.LockActiveByRoles(ctx, m.OrgID, []authz.MemberRole{m.Role})
+	admins, err := s.members().LockActiveByRoles(ctx, m.OrgID, []authz.MemberRole{m.Role})
 	if err != nil {
 		return err
 	}
@@ -267,7 +267,7 @@ func (s *service) logRead(ctx context.Context, e audit.Event) error {
 // break-glass reason) → the page → the audit record (sensitive club or
 // break-glass) → names.
 func (s *service) ListMembers(ctx context.Context, a authz.Actor, orgID uuid.UUID, q MemberQuery, access Access) (MemberPage, error) {
-	o, err := s.d.Store.GetOrg(ctx, orgID)
+	o, err := s.orgs().GetOrg(ctx, orgID)
 	if err != nil {
 		return MemberPage{}, err
 	}
@@ -291,7 +291,7 @@ func (s *service) ListMembers(ctx context.Context, a authz.Actor, orgID uuid.UUI
 		sort = SortMemberJoined
 	}
 	limit := page.ClampLimit(q.Limit)
-	rows, err := s.d.Store.ListMembers(ctx, o.ID, MemberFilter{Statuses: q.Statuses, Role: q.Role, Sort: sort}, q.After, limit+1)
+	rows, err := s.members().ListMembers(ctx, o.ID, MemberFilter{Statuses: q.Statuses, Role: q.Role, Sort: sort}, q.After, limit+1)
 	if err != nil {
 		return MemberPage{}, err
 	}
@@ -327,10 +327,10 @@ func (s *service) ListMembers(ctx context.Context, a authz.Actor, orgID uuid.UUI
 // openMember loads an open membership of orgID (an ended or missing one,
 // or one of another org, is 404: 06 H-38) with its org and sensitivity.
 func (s *service) openMember(ctx context.Context, orgID, id uuid.UUID, lock bool) (Org, Membership, bool, error) {
-	get := s.d.Store.GetOrg
-	member := s.d.Store.GetMember
+	get := s.orgs().GetOrg
+	member := s.members().GetMember
 	if lock {
-		get, member = s.d.Store.LockOrg, s.d.Store.LockMember
+		get, member = s.orgs().LockOrg, s.members().LockMember
 	}
 	o, err := get(ctx, orgID)
 	if err != nil {
@@ -422,7 +422,7 @@ func (s *service) decide(ctx context.Context, a authz.Actor, orgID, id uuid.UUID
 // ApproveJoinRequest implements Service.
 func (s *service) ApproveJoinRequest(ctx context.Context, a authz.Actor, orgID, id uuid.UUID) (MemberView, error) {
 	return s.decide(ctx, a, orgID, id, "approve", func(ctx context.Context, o Org, m Membership, sens bool) (Membership, error) {
-		act, err := s.d.Store.ActivateMember(ctx, o.ID, m.ID, s.now(), a.UserID)
+		act, err := s.members().ActivateMember(ctx, o.ID, m.ID, s.now(), a.UserID)
 		if err != nil {
 			return Membership{}, err
 		}
@@ -552,7 +552,7 @@ func (s *service) ChangeMemberRole(ctx context.Context, a authz.Actor, orgID, id
 		if err != nil {
 			return Membership{}, err
 		}
-		next, err := s.d.Store.InsertMember(ctx, Membership{
+		next, err := s.members().InsertMember(ctx, Membership{
 			ID: uuid.NewV7(), OrgID: o.ID, UserID: m.UserID, Role: role, Status: MemberActive, Source: SourceAdmin,
 			JoinedAt: &now, ApprovedBy: &by,
 		})
@@ -589,7 +589,7 @@ func (s *service) ListMyMemberships(ctx context.Context, a authz.Actor, q MyMemb
 		return MyMembershipPage{}, err
 	}
 	limit := page.ClampLimit(q.Limit)
-	rows, err := s.d.Store.ListUserMemberships(ctx, a.UserID, q.Statuses, q.After, limit+1)
+	rows, err := s.members().ListUserMemberships(ctx, a.UserID, q.Statuses, q.After, limit+1)
 	if err != nil {
 		return MyMembershipPage{}, err
 	}
@@ -598,7 +598,7 @@ func (s *service) ListMyMemberships(ctx context.Context, a authz.Actor, q MyMemb
 	for _, m := range rows {
 		ids = append(ids, m.OrgID)
 	}
-	orgs, err := s.d.Store.GetOrgs(ctx, ids)
+	orgs, err := s.orgs().GetOrgs(ctx, ids)
 	if err != nil {
 		return MyMembershipPage{}, err
 	}
@@ -631,7 +631,7 @@ func (s *service) LeaveMembership(ctx context.Context, a authz.Actor, id uuid.UU
 		return err
 	}
 	_, _, err = idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (uuid.UUID, error) {
-		m, err := s.d.Store.LockMemberOfUser(ctx, a.UserID, id)
+		m, err := s.members().LockMemberOfUser(ctx, a.UserID, id)
 		if err != nil {
 			return uuid.Nil(), err
 		}
@@ -677,7 +677,7 @@ func clubResource(o Org, f ClubFacts) authz.Resource {
 // approval: pending. The universities of the club and the student need not
 // match (T-64). A minor may join (role member).
 func (s *service) JoinClub(ctx context.Context, a authz.Actor, clubID uuid.UUID, message string) (Membership, error) {
-	o, err := s.d.Store.GetOrg(ctx, clubID)
+	o, err := s.orgs().GetOrg(ctx, clubID)
 	if err != nil {
 		return Membership{}, err
 	}
@@ -713,10 +713,10 @@ func (s *service) JoinClub(ctx context.Context, a authz.Actor, clubID uuid.UUID,
 		return Membership{}, err
 	}
 	out, _, err := idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (Membership, error) {
-		if _, err := s.d.Store.LockOrg(ctx, o.ID); err != nil {
+		if _, err := s.orgs().LockOrg(ctx, o.ID); err != nil {
 			return Membership{}, err
 		}
-		switch _, err := s.d.Store.LockOpenMember(ctx, o.ID, a.UserID); {
+		switch _, err := s.members().LockOpenMember(ctx, o.ID, a.UserID); {
 		case err == nil:
 			return Membership{}, ErrAlreadyMember
 		case !errors.Is(err, ErrNotFound):
@@ -730,7 +730,7 @@ func (s *service) JoinClub(ctx context.Context, a authz.Actor, clubID uuid.UUID,
 		} else {
 			m.Status = MemberPending
 		}
-		m, err := s.d.Store.InsertMember(ctx, m)
+		m, err := s.members().InsertMember(ctx, m)
 		if err != nil {
 			return Membership{}, err
 		}

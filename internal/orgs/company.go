@@ -31,7 +31,7 @@ const slugAttempts = 20
 func (s *service) insertOrg(ctx context.Context, o Org, requested string) (Org, error) {
 	if requested != "" {
 		o.Slug = requested
-		stored, ok, err := s.d.Store.InsertOrg(ctx, o)
+		stored, ok, err := s.orgs().InsertOrg(ctx, o)
 		if err != nil {
 			return Org{}, err
 		}
@@ -47,7 +47,7 @@ func (s *service) insertOrg(ctx context.Context, o Org, requested string) (Org, 
 	var stored Org
 	ok, err := textx.FreeSlug(base, maxSlug, slugAttempts, func(slug string) (inserted bool, err error) {
 		o.Slug = slug
-		stored, inserted, err = s.d.Store.InsertOrg(ctx, o)
+		stored, inserted, err = s.orgs().InsertOrg(ctx, o)
 		return inserted, err
 	})
 	switch {
@@ -132,12 +132,12 @@ func (s *service) CreateCompany(ctx context.Context, a authz.Actor, in CompanyIn
 		if err != nil {
 			return uuid.Nil(), err
 		}
-		if err := s.d.Store.InsertCompany(ctx, Company{
+		if err := s.companies().InsertCompany(ctx, Company{
 			OrgID: o.ID, SectorCode: cf.sector, SizeBand: cf.size, EmailDomain: cf.domain, HQCity: cf.hq,
 		}); err != nil {
 			return uuid.Nil(), err
 		}
-		m, err := s.d.Store.InsertMember(ctx, Membership{
+		m, err := s.members().InsertMember(ctx, Membership{
 			ID: uuid.NewV7(), OrgID: o.ID, UserID: founder, Role: ownerRole, Status: MemberActive, Source: SourceAdmin,
 			JoinedAt: &now,
 		})
@@ -161,7 +161,7 @@ func (s *service) CreateCompany(ctx context.Context, a authz.Actor, in CompanyIn
 	if err != nil {
 		return OrgView{}, err
 	}
-	o, err := s.d.Store.GetOrg(ctx, id)
+	o, err := s.orgs().GetOrg(ctx, id)
 	if err != nil {
 		return OrgView{}, err
 	}
@@ -219,7 +219,7 @@ func (s *service) Create(ctx context.Context, in CreateOrg) (uuid.UUID, error) {
 			return err
 		}
 		if in.Kind == KindCompany {
-			if err := s.d.Store.InsertCompany(ctx, Company{OrgID: o.ID}); err != nil {
+			if err := s.companies().InsertCompany(ctx, Company{OrgID: o.ID}); err != nil {
 				return err
 			}
 		}

@@ -60,7 +60,7 @@ func writable(a authz.Actor, o Org) error {
 func (s *service) UpdateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, ifMatch string, p OrgPatch) (OrgView, error) {
 	var out Org
 	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		o, err := s.d.Store.LockOrg(ctx, id)
+		o, err := s.orgs().LockOrg(ctx, id)
 		if err != nil {
 			return err
 		}
@@ -80,7 +80,7 @@ func (s *service) UpdateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, if
 		if err != nil {
 			return err
 		}
-		if out, err = s.d.Store.UpdateOrg(ctx, next); err != nil {
+		if out, err = s.orgs().UpdateOrg(ctx, next); err != nil {
 			return err
 		}
 		if p.companyFields() {
@@ -151,12 +151,12 @@ func (s *service) applyPatch(ctx context.Context, a authz.Actor, o Org, p OrgPat
 
 // patchCompany writes the company fields of p.
 func (s *service) patchCompany(ctx context.Context, o Org, p OrgPatch) ([]string, error) {
-	c, err := s.d.Store.GetCompany(ctx, o.ID)
+	c, err := s.companies().GetCompany(ctx, o.ID)
 	if errors.Is(err, ErrNotFound) {
-		if err := s.d.Store.InsertCompany(ctx, Company{OrgID: o.ID}); err != nil {
+		if err := s.companies().InsertCompany(ctx, Company{OrgID: o.ID}); err != nil {
 			return nil, err
 		}
-		c, err = s.d.Store.GetCompany(ctx, o.ID)
+		c, err = s.companies().GetCompany(ctx, o.ID)
 	}
 	if err != nil {
 		return nil, err
@@ -187,7 +187,7 @@ func (s *service) patchCompany(ctx context.Context, o Org, p OrgPatch) ([]string
 	if p.HQCity != nil {
 		c.HQCity, changed = cf.hq, append(changed, "hq_city")
 	}
-	if _, err := s.d.Store.UpdateCompany(ctx, c); err != nil {
+	if _, err := s.companies().UpdateCompany(ctx, c); err != nil {
 		return nil, err
 	}
 	return changed, nil
@@ -246,7 +246,7 @@ func (s *service) openCommerce() []OpenCommerceCheck {
 // the reason is kept (rejection_reason) and org.review_decided (rejected)
 // tells the founder.
 func (s *service) CloseOrg(ctx context.Context, a authz.Actor, id uuid.UUID, reason string, proof reauthProof) (OrgView, error) {
-	o, err := s.d.Store.GetOrg(ctx, id)
+	o, err := s.orgs().GetOrg(ctx, id)
 	if err != nil {
 		return OrgView{}, err
 	}
@@ -270,7 +270,7 @@ func (s *service) CloseOrg(ctx context.Context, a authz.Actor, id uuid.UUID, rea
 		return OrgView{}, err
 	}
 	_, _, err = idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (uuid.UUID, error) {
-		o, err := s.d.Store.LockOrg(ctx, id)
+		o, err := s.orgs().LockOrg(ctx, id)
 		if err != nil {
 			return uuid.Nil(), err
 		}
@@ -295,7 +295,7 @@ func (s *service) CloseOrg(ctx context.Context, a authz.Actor, id uuid.UUID, rea
 		if rejected {
 			o.RejectionReason = &reason // the founder's notice reads it (BE-144)
 		}
-		if _, err := s.d.Store.UpdateOrg(ctx, o); err != nil {
+		if _, err := s.orgs().UpdateOrg(ctx, o); err != nil {
 			return uuid.Nil(), err
 		}
 		if err := s.emitOrgUpdated(ctx, o, []string{"status"}); err != nil {
@@ -306,7 +306,7 @@ func (s *service) CloseOrg(ctx context.Context, a authz.Actor, id uuid.UUID, rea
 				return uuid.Nil(), err
 			}
 		}
-		gone, err := s.d.Store.EndOpenMembers(ctx, o.ID, now, EndOrgClosed)
+		gone, err := s.members().EndOpenMembers(ctx, o.ID, now, EndOrgClosed)
 		if err != nil {
 			return uuid.Nil(), err
 		}
@@ -316,7 +316,7 @@ func (s *service) CloseOrg(ctx context.Context, a authz.Actor, id uuid.UUID, rea
 			return uuid.Nil(), err
 		}
 		for i := 0; sens && i < len(gone); i++ {
-			if err := s.d.Store.DeleteMember(ctx, o.ID, gone[i].ID); err != nil {
+			if err := s.members().DeleteMember(ctx, o.ID, gone[i].ID); err != nil {
 				return uuid.Nil(), err
 			}
 		}
@@ -346,7 +346,7 @@ func (s *service) CloseOrg(ctx context.Context, a authz.Actor, id uuid.UUID, rea
 // owner a company_admin row (02 §7.3: a role change keeps the history).
 // Both users' sessions are closed after the commit (03 §2.2-6).
 func (s *service) TransferOwnership(ctx context.Context, a authz.Actor, id, newOwner uuid.UUID, proof reauthProof) (OrgView, error) {
-	o, err := s.d.Store.GetOrg(ctx, id)
+	o, err := s.orgs().GetOrg(ctx, id)
 	if err != nil {
 		return OrgView{}, err
 	}
@@ -368,7 +368,7 @@ func (s *service) TransferOwnership(ctx context.Context, a authz.Actor, id, newO
 		return OrgView{}, err
 	}
 	_, _, err = idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (uuid.UUID, error) {
-		o, err := s.d.Store.LockOrg(ctx, id)
+		o, err := s.orgs().LockOrg(ctx, id)
 		if err != nil {
 			return uuid.Nil(), err
 		}
@@ -378,7 +378,7 @@ func (s *service) TransferOwnership(ctx context.Context, a authz.Actor, id, newO
 		if err := writable(a, o); err != nil {
 			return uuid.Nil(), err
 		}
-		owner, err := s.d.Store.LockOwner(ctx, o.ID)
+		owner, err := s.members().LockOwner(ctx, o.ID)
 		if errors.Is(err, ErrNotFound) {
 			return uuid.Nil(), ErrNoOwner
 		}
@@ -388,7 +388,7 @@ func (s *service) TransferOwnership(ctx context.Context, a authz.Actor, id, newO
 		if owner.UserID == newOwner {
 			return uuid.Nil(), ErrTransferTarget
 		}
-		target, err := s.d.Store.LockActiveMember(ctx, o.ID, newOwner)
+		target, err := s.members().LockActiveMember(ctx, o.ID, newOwner)
 		if errors.Is(err, ErrNotFound) || err == nil && target.Role != authz.MemberCompanyAdmin {
 			return uuid.Nil(), ErrTransferTarget
 		}
@@ -398,7 +398,7 @@ func (s *service) TransferOwnership(ctx context.Context, a authz.Actor, id, newO
 		now, by := s.now(), a.UserID
 		var ended, started []Membership
 		for _, m := range []Membership{owner, target} {
-			e, err := s.d.Store.EndMember(ctx, o.ID, m.ID, now, EndRoleChanged)
+			e, err := s.members().EndMember(ctx, o.ID, m.ID, now, EndRoleChanged)
 			if err != nil {
 				return uuid.Nil(), err
 			}
@@ -408,7 +408,7 @@ func (s *service) TransferOwnership(ctx context.Context, a authz.Actor, id, newO
 			user uuid.UUID
 			role authz.MemberRole
 		}{{newOwner, ownerRole}, {owner.UserID, authz.MemberCompanyAdmin}} {
-			m, err := s.d.Store.InsertMember(ctx, Membership{
+			m, err := s.members().InsertMember(ctx, Membership{
 				ID: uuid.NewV7(), OrgID: o.ID, UserID: r.user, Role: r.role, Status: MemberActive, Source: SourceAdmin,
 				JoinedAt: &now, ApprovedBy: &by,
 			})
@@ -441,7 +441,7 @@ func (s *service) TransferOwnership(ctx context.Context, a authz.Actor, id, newO
 
 // reload reads the org after a write and builds its view.
 func (s *service) reload(ctx context.Context, id uuid.UUID) (OrgView, error) {
-	o, err := s.d.Store.GetOrg(ctx, id)
+	o, err := s.orgs().GetOrg(ctx, id)
 	if err != nil {
 		return OrgView{}, err
 	}

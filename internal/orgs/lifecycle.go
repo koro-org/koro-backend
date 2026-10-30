@@ -82,7 +82,7 @@ func (m Module) Jobs() []queue.Job {
 
 // MembershipsOf implements OrgDirectory (hooks.memberships).
 func (s *service) MembershipsOf(ctx context.Context, userID uuid.UUID) ([]authz.Membership, error) {
-	rows, err := s.d.Store.ActiveMembershipsOfUser(ctx, userID)
+	rows, err := s.directory().ActiveMembershipsOfUser(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +100,7 @@ func (s *service) OpenMembershipsOf(ctx context.Context, userID uuid.UUID) (map[
 	out := make(map[uuid.UUID]MemberStatus)
 	var after *uuid.UUID
 	for {
-		rows, err := s.d.Store.ListUserMemberships(ctx, userID, []MemberStatus{MemberPending, MemberActive}, after, page.MaxLimit)
+		rows, err := s.members().ListUserMemberships(ctx, userID, []MemberStatus{MemberPending, MemberActive}, after, page.MaxLimit)
 		if err != nil {
 			return nil, err
 		}
@@ -124,7 +124,7 @@ const endedBatch = 1000
 func (s *service) EndedMemberships(ctx context.Context, membershipIDs []uuid.UUID) (map[uuid.UUID]bool, error) {
 	out := make(map[uuid.UUID]bool)
 	for batch := range slices.Chunk(membershipIDs, endedBatch) {
-		ids, err := s.d.Store.EndedMemberships(ctx, batch)
+		ids, err := s.directory().EndedMemberships(ctx, batch)
 		if err != nil {
 			return nil, err
 		}
@@ -148,7 +148,7 @@ func (s *service) HasRole(ctx context.Context, orgID, userID uuid.UUID, roles ..
 
 // ActiveMemberIDs implements OrgDirectory.
 func (s *service) ActiveMemberIDs(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error) {
-	return s.d.Store.ActiveMemberIDs(ctx, orgID)
+	return s.directory().ActiveMemberIDs(ctx, orgID)
 }
 
 // GrantRole implements OrgAdmin. It joins the caller's transaction.
@@ -163,7 +163,7 @@ func (s *service) GrantRole(ctx context.Context, orgID, userID uuid.UUID, role a
 		}
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		o, err := s.d.Store.LockOrg(ctx, orgID)
+		o, err := s.orgs().LockOrg(ctx, orgID)
 		if err != nil {
 			return err
 		}
@@ -178,7 +178,7 @@ func (s *service) GrantRole(ctx context.Context, orgID, userID uuid.UUID, role a
 			return err
 		}
 		now := s.now()
-		switch cur, err := s.d.Store.LockOpenMember(ctx, o.ID, userID); {
+		switch cur, err := s.members().LockOpenMember(ctx, o.ID, userID); {
 		case errors.Is(err, ErrNotFound):
 		case err != nil:
 			return err
@@ -189,7 +189,7 @@ func (s *service) GrantRole(ctx context.Context, orgID, userID uuid.UUID, role a
 				return err
 			}
 		}
-		m, err := s.d.Store.InsertMember(ctx, Membership{
+		m, err := s.members().InsertMember(ctx, Membership{
 			ID: uuid.NewV7(), OrgID: o.ID, UserID: userID, Role: role, Status: MemberActive, Source: SourceClaim, JoinedAt: &now,
 		})
 		if err != nil {
@@ -218,7 +218,7 @@ func (s *service) endRoles(ctx context.Context, a authz.Actor, userID uuid.UUID,
 	}
 	n := 0
 	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		rows, err := s.d.Store.LockUserActiveByRoles(ctx, userID, roles)
+		rows, err := s.members().LockUserActiveByRoles(ctx, userID, roles)
 		if err != nil {
 			return err
 		}
@@ -297,7 +297,7 @@ func (s *service) handleSensitivityChanged(ctx context.Context, e domainevent.En
 		return nil
 	}
 	n, err := db.Batches(ctx, s.d.Tx, sweepBatch, func(ctx context.Context) (int, error) {
-		return s.d.Store.DeleteEndedMembers(ctx, p.ClubOrgID, sweepBatch)
+		return s.sweeps().DeleteEndedMembers(ctx, p.ClubOrgID, sweepBatch)
 	})
 	if err != nil {
 		return fmt.Errorf("%s: %w", PurgeSensitiveMembershipsTaskName, err)
@@ -322,7 +322,7 @@ func (s *service) adminSweep(ctx context.Context) error {
 	sys := authz.SystemActor(AdminSweepJobName)
 	after, ended := uuid.Nil(), 0
 	for ctx.Err() == nil {
-		rows, err := s.d.Store.ActiveByRole(ctx, authz.MemberClubAdmin, after, sweepBatch)
+		rows, err := s.sweeps().ActiveByRole(ctx, authz.MemberClubAdmin, after, sweepBatch)
 		if err != nil {
 			return fmt.Errorf("%s: %w", AdminSweepJobName, err)
 		}
@@ -377,7 +377,7 @@ func (s *service) adminSweep(ctx context.Context) error {
 func (s *service) expireInvitations(ctx context.Context) error {
 	now := s.now()
 	closed, err := db.Batches(ctx, s.d.Tx, sweepBatch, func(ctx context.Context) (int, error) {
-		return s.d.Store.CloseExpiredInvitations(ctx, now, sweepBatch)
+		return s.sweeps().CloseExpiredInvitations(ctx, now, sweepBatch)
 	})
 	if err != nil {
 		return fmt.Errorf("%s: close: %w", InvitationsExpireJobName, err)

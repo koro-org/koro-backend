@@ -151,7 +151,7 @@ func (s *service) handleReviewDecided(ctx context.Context, e domainevent.Envelop
 // reviewedOrg reads the org of a review event; a missing one is logged and
 // skipped (orgs are never deleted: a foreign or test ID).
 func (s *service) reviewedOrg(ctx context.Context, id uuid.UUID) (Org, bool, error) {
-	o, err := s.d.Store.GetOrg(ctx, id)
+	o, err := s.orgs().GetOrg(ctx, id)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "review notice: org not found", slog.String("org_id", id.String()))
@@ -169,7 +169,7 @@ func (s *service) activeAdmins(ctx context.Context, o Org) ([]uuid.UUID, error) 
 	for _, role := range adminRoles(o.Kind) {
 		var after *MemberAfter
 		for {
-			rows, err := s.d.Store.ListMembers(ctx, o.ID, MemberFilter{Statuses: []MemberStatus{MemberActive}, Role: role},
+			rows, err := s.members().ListMembers(ctx, o.ID, MemberFilter{Statuses: []MemberStatus{MemberActive}, Role: role},
 				after, page.MaxLimit)
 			if err != nil {
 				return nil, fmt.Errorf("orgs: admins of %s: %w", o.ID, err)

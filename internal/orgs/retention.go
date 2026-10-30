@@ -35,8 +35,12 @@ var retentionTables = map[string]string{
 	PolicyOrgInvitation:   "org_invitations",
 }
 
-// sweeper is orgs' privacy.RetentionSweeper.
-type sweeper struct{ s *service }
+// sweeper is orgs' privacy.RetentionSweeper: it needs the purge of the
+// store and the transaction manager only.
+type sweeper struct {
+	retention retentionStore
+	tx        db.TxManager
+}
 
 var _ privacy.RetentionSweeper = sweeper{}
 
@@ -50,8 +54,8 @@ func (w sweeper) Sweep(ctx context.Context, p privacy.RetentionPolicy, now time.
 		return privacy.SweepResult{}, fmt.Errorf("orgs: no retention sweep for policy %q", p.Code)
 	}
 	cutoff := now.Add(-p.Retention)
-	n, err := w.s.purgeBatches(ctx, p.LegalApproved, func(ctx context.Context, limit int, dry bool) (int, error) {
-		return w.s.d.Store.PurgeExpired(ctx, p.Code, cutoff, limit, dry)
+	n, err := w.purgeBatches(ctx, p.LegalApproved, func(ctx context.Context, limit int, dry bool) (int, error) {
+		return w.retention.PurgeExpired(ctx, p.Code, cutoff, limit, dry)
 	})
 	return privacy.SweepResult{PolicyCode: p.Code, Table: table, Method: privacy.MethodHardDelete, Count: n}, err
 }
@@ -59,11 +63,11 @@ func (w sweeper) Sweep(ctx context.Context, p privacy.RetentionPolicy, now time.
 // purgeBatches runs purge: unapproved, one counting call; approved, one
 // transaction per batch of RetentionBatch rows until a batch comes back
 // short (or ctx ends). It returns the rows counted or deleted.
-func (s *service) purgeBatches(ctx context.Context, approved bool, purge func(ctx context.Context, limit int, dry bool) (int, error)) (int, error) {
+func (w sweeper) purgeBatches(ctx context.Context, approved bool, purge func(ctx context.Context, limit int, dry bool) (int, error)) (int, error) {
 	if !approved {
 		return purge(ctx, 0, true)
 	}
-	return db.Batches(ctx, s.d.Tx, RetentionBatch, func(ctx context.Context) (int, error) {
+	return db.Batches(ctx, w.tx, RetentionBatch, func(ctx context.Context) (int, error) {
 		return purge(ctx, RetentionBatch, false)
 	})
 }

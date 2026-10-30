@@ -122,7 +122,7 @@ func invitationAudit(a authz.Actor, act authz.Action, inv Invitation, meta map[s
 // hash only) and org_invitation.created (O). The address is never audited or
 // logged.
 func (s *service) CreateInvitation(ctx context.Context, a authz.Actor, orgID uuid.UUID, email string, role authz.MemberRole) (Invitation, error) {
-	o, err := s.d.Store.GetOrg(ctx, orgID)
+	o, err := s.orgs().GetOrg(ctx, orgID)
 	if err != nil {
 		return Invitation{}, err
 	}
@@ -151,18 +151,18 @@ func (s *service) CreateInvitation(ctx context.Context, a authz.Actor, orgID uui
 		return Invitation{}, err
 	}
 	out, _, err := idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (Invitation, error) {
-		if _, err := s.d.Store.LockOrg(ctx, o.ID); err != nil {
+		if _, err := s.orgs().LockOrg(ctx, o.ID); err != nil {
 			return Invitation{}, err
 		}
 		now := s.now()
-		switch cur, err := s.d.Store.LockOpenInvitationTo(ctx, o.ID, norm); {
+		switch cur, err := s.invitations().LockOpenInvitationTo(ctx, o.ID, norm); {
 		case errors.Is(err, ErrNotFound):
 		case err != nil:
 			return Invitation{}, err
 		case !cur.Expired(now):
 			return Invitation{}, ErrInvitationExists
 		default: // expired but not closed by the hourly job yet
-			if _, err := s.d.Store.CloseInvitation(ctx, o.ID, cur.ID, cur.ExpiresAt); err != nil {
+			if _, err := s.invitations().CloseInvitation(ctx, o.ID, cur.ID, cur.ExpiresAt); err != nil {
 				return Invitation{}, err
 			}
 		}
@@ -178,7 +178,7 @@ func (s *service) CreateInvitation(ctx context.Context, a authz.Actor, orgID uui
 			return Invitation{}, err
 		}
 		inv.TokenHash = token.Hash(raw)
-		inv, err = s.d.Store.InsertInvitation(ctx, inv)
+		inv, err = s.invitations().InsertInvitation(ctx, inv)
 		if err != nil {
 			return Invitation{}, err
 		}
@@ -205,7 +205,7 @@ func (s *service) notMember(ctx context.Context, orgID uuid.UUID, addr string, r
 	if err != nil || !found {
 		return err
 	}
-	switch cur, err := s.d.Store.LockOpenMember(ctx, orgID, uid); {
+	switch cur, err := s.members().LockOpenMember(ctx, orgID, uid); {
 	case err == nil && cur.Status == MemberActive && cur.Role == role:
 		return ErrAlreadyMember
 	case err == nil, errors.Is(err, ErrNotFound):
@@ -218,7 +218,7 @@ func (s *service) notMember(ctx context.Context, orgID uuid.UUID, addr string, r
 // ListInvitations implements Service: open, unexpired invitations, newest
 // first.
 func (s *service) ListInvitations(ctx context.Context, a authz.Actor, orgID uuid.UUID, q InvitationQuery) (InvitationPage, error) {
-	o, err := s.d.Store.GetOrg(ctx, orgID)
+	o, err := s.orgs().GetOrg(ctx, orgID)
 	if err != nil {
 		return InvitationPage{}, err
 	}
@@ -226,7 +226,7 @@ func (s *service) ListInvitations(ctx context.Context, a authz.Actor, orgID uuid
 		return InvitationPage{}, err
 	}
 	limit := page.ClampLimit(q.Limit)
-	rows, err := s.d.Store.ListOpenInvitations(ctx, o.ID, s.now(), q.After, limit+1)
+	rows, err := s.invitations().ListOpenInvitations(ctx, o.ID, s.now(), q.After, limit+1)
 	if err != nil {
 		return InvitationPage{}, err
 	}
@@ -242,11 +242,11 @@ func (s *service) ListInvitations(ctx context.Context, a authz.Actor, orgID uuid
 // RevokeInvitation implements Service: an open invitation of the org is
 // revoked (another org's ID, or a closed one, is 404).
 func (s *service) RevokeInvitation(ctx context.Context, a authz.Actor, orgID, id uuid.UUID) error {
-	o, err := s.d.Store.GetOrg(ctx, orgID)
+	o, err := s.orgs().GetOrg(ctx, orgID)
 	if err != nil {
 		return err
 	}
-	inv, err := s.d.Store.GetInvitation(ctx, o.ID, id)
+	inv, err := s.invitations().GetInvitation(ctx, o.ID, id)
 	if err != nil {
 		return err
 	}
@@ -257,7 +257,7 @@ func (s *service) RevokeInvitation(ctx context.Context, a authz.Actor, orgID, id
 		return err
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		closed, err := s.d.Store.CloseInvitation(ctx, o.ID, inv.ID, s.now())
+		closed, err := s.invitations().CloseInvitation(ctx, o.ID, inv.ID, s.now())
 		if err != nil {
 			return err
 		}
@@ -279,7 +279,7 @@ func (s *service) AcceptInvitation(ctx context.Context, a authz.Actor, raw strin
 	if !ok || s.d.Users == nil {
 		return Membership{}, ErrNotFound
 	}
-	inv, err := s.d.Store.LockInvitationByTokenHash(ctx, h)
+	inv, err := s.invitations().LockInvitationByTokenHash(ctx, h)
 	if err != nil {
 		return Membership{}, err
 	}
@@ -308,7 +308,7 @@ func (s *service) AcceptInvitation(ctx context.Context, a authz.Actor, raw strin
 		return Membership{}, err
 	}
 	out, _, err := idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (Membership, error) {
-		inv, err := s.d.Store.LockInvitationByTokenHash(ctx, h)
+		inv, err := s.invitations().LockInvitationByTokenHash(ctx, h)
 		if err != nil {
 			return Membership{}, err
 		}
@@ -319,7 +319,7 @@ func (s *service) AcceptInvitation(ctx context.Context, a authz.Actor, raw strin
 		case inv.Expired(now):
 			return Membership{}, ErrInvitationExpired
 		}
-		o, err := s.d.Store.LockOrg(ctx, inv.OrgID)
+		o, err := s.orgs().LockOrg(ctx, inv.OrgID)
 		if err != nil {
 			return Membership{}, err
 		}
@@ -336,7 +336,7 @@ func (s *service) AcceptInvitation(ctx context.Context, a authz.Actor, raw strin
 		if err != nil {
 			return Membership{}, err
 		}
-		switch cur, err := s.d.Store.LockOpenMember(ctx, o.ID, a.UserID); {
+		switch cur, err := s.members().LockOpenMember(ctx, o.ID, a.UserID); {
 		case errors.Is(err, ErrNotFound):
 		case err != nil:
 			return Membership{}, err
@@ -351,14 +351,14 @@ func (s *service) AcceptInvitation(ctx context.Context, a authz.Actor, raw strin
 			}
 		}
 		by := inv.InvitedBy
-		m, err := s.d.Store.InsertMember(ctx, Membership{
+		m, err := s.members().InsertMember(ctx, Membership{
 			ID: uuid.NewV7(), OrgID: o.ID, UserID: a.UserID, Role: inv.Role, Status: MemberActive, Source: SourceInvitation,
 			JoinedAt: &now, InvitedBy: &by,
 		})
 		if err != nil {
 			return Membership{}, err
 		}
-		if _, err := s.d.Store.AcceptInvitation(ctx, o.ID, inv.ID, a.UserID, now); err != nil {
+		if _, err := s.invitations().AcceptInvitation(ctx, o.ID, inv.ID, a.UserID, now); err != nil {
 			return Membership{}, err
 		}
 		if err := s.d.Audit.Log(ctx, memberAudit(a, authz.OrgsInvitationAccept, m, sens, "",
@@ -384,7 +384,7 @@ func (s *service) handleInvitationCreated(ctx context.Context, e domainevent.Env
 	if err != nil {
 		return queue.Permanent(err)
 	}
-	inv, err := s.d.Store.GetInvitation(ctx, p.OrgID, p.InvitationID)
+	inv, err := s.invitations().GetInvitation(ctx, p.OrgID, p.InvitationID)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return nil
@@ -404,7 +404,7 @@ func (s *service) handleInvitationCreated(ctx context.Context, e domainevent.Env
 	if !token.Verify(raw, inv.TokenHash) {
 		return queue.Permanent(errors.New("orgs: derived invitation token does not match the stored hash (token keys changed)"))
 	}
-	o, err := s.d.Store.GetOrg(ctx, inv.OrgID)
+	o, err := s.orgs().GetOrg(ctx, inv.OrgID)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return nil

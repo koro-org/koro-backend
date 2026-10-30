@@ -58,7 +58,7 @@ type OrgPage struct {
 
 // Get implements OrgDirectory.
 func (s *service) Get(ctx context.Context, orgID uuid.UUID) (OrgSummary, error) {
-	o, err := s.d.Store.GetOrg(ctx, orgID)
+	o, err := s.orgs().GetOrg(ctx, orgID)
 	if err != nil {
 		return OrgSummary{}, err
 	}
@@ -67,7 +67,7 @@ func (s *service) Get(ctx context.Context, orgID uuid.UUID) (OrgSummary, error) 
 
 // GetMany implements OrgDirectory.
 func (s *service) GetMany(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]OrgSummary, error) {
-	rows, err := s.d.Store.GetOrgs(ctx, ids)
+	rows, err := s.orgs().GetOrgs(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +85,7 @@ func (s *service) PublicLogoURLs(ctx context.Context, ids []uuid.UUID) (map[uuid
 	if len(ids) == 0 || s.d.Files == nil {
 		return out, nil
 	}
-	rows, err := s.d.Store.GetOrgs(ctx, ids)
+	rows, err := s.orgs().GetOrgs(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +99,7 @@ func (s *service) PublicLogoURLs(ctx context.Context, ids []uuid.UUID) (map[uuid
 
 // GetOrg implements Service.
 func (s *service) GetOrg(ctx context.Context, a authz.Actor, id uuid.UUID) (OrgView, error) {
-	o, err := s.d.Store.GetOrg(ctx, id)
+	o, err := s.orgs().GetOrg(ctx, id)
 	if err != nil {
 		return OrgView{}, err
 	}
@@ -108,7 +108,7 @@ func (s *service) GetOrg(ctx context.Context, a authz.Actor, id uuid.UUID) (OrgV
 
 // GetOrgBySlug implements Service.
 func (s *service) GetOrgBySlug(ctx context.Context, a authz.Actor, slug string) (OrgView, error) {
-	o, err := s.d.Store.GetOrgBySlug(ctx, slug)
+	o, err := s.orgs().GetOrgBySlug(ctx, slug)
 	if err != nil {
 		return OrgView{}, err
 	}
@@ -139,7 +139,7 @@ func (s *service) readable(ctx context.Context, a authz.Actor, o Org) (OrgView, 
 func (s *service) view(ctx context.Context, o Org) (OrgView, error) {
 	v := OrgView{Org: o, ETag: httpx.ETag(o.UpdatedAt), LogoURL: s.logoURL(ctx, o), LogoPublicURL: s.logoPublicURL(ctx, o)}
 	if o.Kind == KindCompany {
-		c, err := s.d.Store.GetCompany(ctx, o.ID)
+		c, err := s.companies().GetCompany(ctx, o.ID)
 		switch {
 		case err == nil:
 			v.Company = &c
@@ -277,7 +277,7 @@ func sortOf(s string) string {
 // list reads one page (limit+1 rows, 05 §10.3) and builds card views.
 func (s *service) list(ctx context.Context, f ListFilter, limit int, after *ListAfter) (OrgPage, error) {
 	limit = page.ClampLimit(limit)
-	rows, err := s.d.Store.ListOrgs(ctx, f, after, limit+1)
+	rows, err := s.orgs().ListOrgs(ctx, f, after, limit+1)
 	if err != nil {
 		return OrgPage{}, err
 	}

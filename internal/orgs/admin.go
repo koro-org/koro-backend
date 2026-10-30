@@ -76,7 +76,7 @@ func (s *service) transition(ctx context.Context, a authz.Actor, id uuid.UUID, t
 		return OrgView{}, err
 	}
 	_, _, err = idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (uuid.UUID, error) {
-		o, err := s.d.Store.LockOrg(ctx, id)
+		o, err := s.orgs().LockOrg(ctx, id)
 		if err != nil {
 			return uuid.Nil(), err
 		}
@@ -89,7 +89,7 @@ func (s *service) transition(ctx context.Context, a authz.Actor, id uuid.UUID, t
 			now, by := s.now(), a.UserID
 			o.VerifiedAt, o.VerifiedBy = &now, &by
 		}
-		if _, err := s.d.Store.UpdateOrg(ctx, o); err != nil {
+		if _, err := s.orgs().UpdateOrg(ctx, o); err != nil {
 			return uuid.Nil(), err
 		}
 		if err := s.emitOrgUpdated(ctx, o, []string{"status"}); err != nil {

@@ -1,7 +1,6 @@
 package orgs
 
 import (
-	"context"
 	"time"
 	"uuid"
 
@@ -21,152 +20,41 @@ import (
 // come from the parent organizations row, never from the caller (06 H-38):
 // InsertCompany, InsertMember and InsertInvitation copy org_kind from the
 // org they belong to.
+//
+// Store is split by aggregate into embedded interfaces (05 §2.2, BE-147);
+// a service file reaches the store only through the narrow view of the
+// aggregate it works on (the accessors below), the retention sweeper
+// through the purge it holds (retention.go), the KVKK provider
+// (privacy.go), which covers every table of a data subject, through the
+// whole Store.
 type Store interface {
-	// InsertOrg writes a new org and returns it as stored (created_at and
-	// updated_at from the database). It reports false and writes nothing
-	// when the slug is taken (ON CONFLICT DO NOTHING: the transaction stays
-	// usable, so the caller can try another slug).
-	InsertOrg(ctx context.Context, o Org) (Org, bool, error)
-	// GetOrg returns the org or ErrNotFound.
-	GetOrg(ctx context.Context, id uuid.UUID) (Org, error)
-	// GetOrgBySlug returns the org of a slug or ErrNotFound.
-	GetOrgBySlug(ctx context.Context, slug string) (Org, error)
-	// GetOrgs returns the orgs of ids that exist (any order).
-	GetOrgs(ctx context.Context, ids []uuid.UUID) ([]Org, error)
-	// LockOrg returns the org locked for the rest of the transaction
-	// (SELECT … FOR UPDATE) or ErrNotFound.
-	LockOrg(ctx context.Context, id uuid.UUID) (Org, error)
-	// UpdateOrg writes the mutable columns of o (name, status, description,
-	// logo, website, city, verified_*, closed_at, rejection_reason) and
-	// returns the stored row:
-	// updated_at changes on every call, so the ETag does too (04 §1.13).
-	// ErrNotFound when the org is gone.
-	UpdateOrg(ctx context.Context, o Org) (Org, error)
-	// ListOrgs returns up to limit orgs matching f after the position
-	// after (nil: the first page), in f.Sort order.
-	ListOrgs(ctx context.Context, f ListFilter, after *ListAfter, limit int) ([]Org, error)
-
-	// InsertCompany writes the company profile of an org; org_kind is the
-	// parent org's kind (a non-company org fails the CHECK: 422).
-	InsertCompany(ctx context.Context, c Company) error
-	// GetCompany returns the company profile of orgID or ErrNotFound.
-	GetCompany(ctx context.Context, orgID uuid.UUID) (Company, error)
-	// UpdateCompany writes the profile columns (sector, size band, e-mail
-	// domain, HQ city) of orgID's company and returns the stored row.
-	UpdateCompany(ctx context.Context, c Company) (Company, error)
-
-	// InsertMember writes a membership of m.OrgID and returns it as stored;
-	// org_kind is the parent org's kind (06 H-38). ErrNotFound when the org
-	// does not exist; 409 when the user already has an open membership of
-	// the org or the company already has an active owner.
-	InsertMember(ctx context.Context, m Membership) (Membership, error)
-	// LockActiveMember returns the active membership of userID in orgID,
-	// locked, or ErrNotFound.
-	LockActiveMember(ctx context.Context, orgID, userID uuid.UUID) (Membership, error)
-	// LockOwner returns the active company_owner membership of orgID,
-	// locked, or ErrNotFound.
-	LockOwner(ctx context.Context, orgID uuid.UUID) (Membership, error)
-	// EndMember ends one open membership of orgID with reason and returns
-	// it; ErrNotFound when it is not open (or not orgID's).
-	EndMember(ctx context.Context, orgID, id uuid.UUID, now time.Time, reason EndReason) (Membership, error)
-	// EndOpenMembers ends every pending or active membership of orgID with
-	// reason and returns them as they were before (their status tells
-	// which were active).
-	EndOpenMembers(ctx context.Context, orgID uuid.UUID, now time.Time, reason EndReason) ([]Membership, error)
-	// MembershipsOfUser returns every membership row of a user, oldest first
-	// (KVKK export).
-	MembershipsOfUser(ctx context.Context, userID uuid.UUID) ([]Membership, error)
-
-	// GetMember returns membership id of orgID (any status) or ErrNotFound.
-	GetMember(ctx context.Context, orgID, id uuid.UUID) (Membership, error)
-	// LockMember is GetMember with the row locked for the transaction.
-	LockMember(ctx context.Context, orgID, id uuid.UUID) (Membership, error)
-	// LockMemberOfUser returns membership id of userID (any org), locked, or
-	// ErrNotFound: /me/memberships/{id} addresses the caller's own row.
-	LockMemberOfUser(ctx context.Context, userID, id uuid.UUID) (Membership, error)
-	// LockOpenMember returns the pending or active membership of userID in
-	// orgID, locked, or ErrNotFound.
-	LockOpenMember(ctx context.Context, orgID, userID uuid.UUID) (Membership, error)
-	// LockActiveByRoles returns the active memberships of orgID holding one
-	// of roles, locked (the last-admin guard serialises on them).
-	LockActiveByRoles(ctx context.Context, orgID uuid.UUID, roles []authz.MemberRole) ([]Membership, error)
-	// LockUserActiveByRoles returns the active memberships of userID (any
-	// org) holding one of roles, locked, oldest first.
-	LockUserActiveByRoles(ctx context.Context, userID uuid.UUID, roles []authz.MemberRole) ([]Membership, error)
-	// ActivateMember turns a pending membership of orgID active (joined_at,
-	// approved_by) and returns it; ErrNotFound when it is not pending.
-	ActivateMember(ctx context.Context, orgID, id uuid.UUID, now time.Time, approvedBy uuid.UUID) (Membership, error)
-	// DeleteEndedMembers hard-deletes up to limit ended memberships of
-	// orgID (a club that became sensitive, 02 §7.3) and reports how many.
-	DeleteEndedMembers(ctx context.Context, orgID uuid.UUID, limit int) (int, error)
-	// DeleteMember hard-deletes one membership of orgID (a sensitive club's
-	// membership is deleted when it ends, 02 §7.3). Deleting a missing row
-	// is not an error (idempotent).
-	DeleteMember(ctx context.Context, orgID, id uuid.UUID) error
-	// ListMembers returns up to limit memberships of orgID matching f after
-	// the position after (nil: first page), in f.Sort order.
-	ListMembers(ctx context.Context, orgID uuid.UUID, f MemberFilter, after *MemberAfter, limit int) ([]Membership, error)
-	// ActiveMembershipsOfUser returns the active memberships of a user in
-	// every org, oldest first (Actor resolution, 03 §2.1).
-	ActiveMembershipsOfUser(ctx context.Context, userID uuid.UUID) ([]Membership, error)
-	// EndedMemberships returns the IDs among ids of the memberships that
-	// ended (talent's reconciliation, BE-090).
-	EndedMemberships(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error)
-	// ListUserMemberships returns up to limit memberships of a user with one
-	// of statuses (empty: pending and active), newest first, after the
-	// membership ID after (nil: first page).
-	ListUserMemberships(ctx context.Context, userID uuid.UUID, statuses []MemberStatus, after *uuid.UUID, limit int) ([]Membership, error)
-	// ActiveMemberIDs returns the user IDs of the active members of orgID.
-	ActiveMemberIDs(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error)
-	// ActiveByRole returns up to limit active memberships holding role in
-	// any org, by ID ascending after the ID after (uuid.Nil(): from the
-	// start): the admin sweep walks them in batches.
-	ActiveByRole(ctx context.Context, role authz.MemberRole, after uuid.UUID, limit int) ([]Membership, error)
-
-	// InsertInvitation writes an invitation of inv.OrgID and returns it as
-	// stored; org_kind is the parent org's kind (06 H-38). ErrNotFound when
-	// the org does not exist; ErrInvitationExists when an open invitation to
-	// the same address exists (org_invitations_open_uq).
-	InsertInvitation(ctx context.Context, inv Invitation) (Invitation, error)
-	// GetInvitation returns invitation id of orgID or ErrNotFound.
-	GetInvitation(ctx context.Context, orgID, id uuid.UUID) (Invitation, error)
-	// LockInvitationByTokenHash returns the invitation of a token hash,
-	// locked, or ErrNotFound (the token is the credential: any org).
-	LockInvitationByTokenHash(ctx context.Context, hash []byte) (Invitation, error)
-	// LockOpenInvitationTo returns the open (neither accepted nor revoked)
-	// invitation of orgID to emailNormalized, locked, or ErrNotFound.
-	LockOpenInvitationTo(ctx context.Context, orgID uuid.UUID, emailNormalized string) (Invitation, error)
-	// CloseInvitation sets revoked_at = at on an open invitation of orgID and
-	// returns it; ErrNotFound when it is not open.
-	CloseInvitation(ctx context.Context, orgID, id uuid.UUID, at time.Time) (Invitation, error)
-	// AcceptInvitation marks an open invitation of orgID accepted by userID
-	// and returns it; ErrNotFound when it is not open.
-	AcceptInvitation(ctx context.Context, orgID, id, userID uuid.UUID, now time.Time) (Invitation, error)
-	// ListOpenInvitations returns up to limit open, unexpired invitations of
-	// orgID, newest first, after the invitation ID after (nil: first page).
-	ListOpenInvitations(ctx context.Context, orgID uuid.UUID, now time.Time, after *uuid.UUID, limit int) ([]Invitation, error)
-	// CloseExpiredInvitations closes up to limit open invitations whose
-	// expires_at ≤ now (revoked_at = expires_at: the schema has no separate
-	// expired column, T-206) and returns how many it closed.
-	CloseExpiredInvitations(ctx context.Context, now time.Time, limit int) (int, error)
-	// PurgeExpired deletes up to limit rows of the retention policy whose
-	// anchor is before cutoff, oldest first, and returns how many it
-	// deleted; with dryRun it counts every such row and deletes nothing
-	// (BE-057). PolicyMembershipEnded: ended memberships by ended_at;
-	// PolicyOrgInvitation: invitations accepted, revoked or expired, by
-	// COALESCE(accepted_at, revoked_at, expires_at). Unknown policy: error.
-	PurgeExpired(ctx context.Context, policy string, cutoff time.Time, limit int, dryRun bool) (int, error)
-	// InvitationsOfUser returns the invitations accepted by userID or (when
-	// emailNormalized is not empty) addressed to emailNormalized, oldest
-	// first (KVKK).
-	InvitationsOfUser(ctx context.Context, userID uuid.UUID, emailNormalized string) ([]Invitation, error)
-	// DeleteInvitationsOfUser deletes the invitations InvitationsOfUser
-	// returns and reports how many it deleted.
-	DeleteInvitationsOfUser(ctx context.Context, userID uuid.UUID, emailNormalized string) (int, error)
-	// OrgsCreatedBy returns the orgs a user registered, oldest first (KVKK
-	// export).
-	OrgsCreatedBy(ctx context.Context, userID uuid.UUID) ([]Org, error)
+	orgStore        // organizations, the org root (store_org.go)
+	companyStore    // the company profile (store_company.go)
+	memberStore     // org_members, the membership lifecycle (store_members.go)
+	directoryStore  // the membership reads of other modules (store_directory.go)
+	sweepStore      // the batch work of the jobs and event handlers (store_sweeps.go)
+	invitationStore // org_invitations (store_invitations.go)
+	retentionStore  // the purge of the retention sweeper (store_retention.go)
+	subjectStore    // every row of a data subject, KVKK (store_subject.go)
 }
+
+// orgs is the organizations view of the store.
+func (s *service) orgs() orgStore { return s.d.Store }
+
+// companies is the company profile view of the store.
+func (s *service) companies() companyStore { return s.d.Store }
+
+// members is the membership lifecycle view of the store.
+func (s *service) members() memberStore { return s.d.Store }
+
+// directory is the view of the membership reads other modules make.
+func (s *service) directory() directoryStore { return s.d.Store }
+
+// sweeps is the batch work view of the jobs and event handlers.
+func (s *service) sweeps() sweepStore { return s.d.Store }
+
+// invitations is the org_invitations view of the store.
+func (s *service) invitations() invitationStore { return s.d.Store }
 
 // Sort orders of ListOrgs.
 const (

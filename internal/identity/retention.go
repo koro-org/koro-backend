@@ -75,8 +75,15 @@ var retentionTables = map[string]string{
 // errNoFiles: a document cannot be deleted without the files module.
 var errNoFiles = errors.New("identity: student documents cannot be purged: files not wired")
 
-// sweeper is identity's privacy.RetentionSweeper.
-type sweeper struct{ s *service }
+// sweeper is identity's privacy.RetentionSweeper. It holds the purges of
+// the store, the student verification view, the files of the documents
+// and the transactions, not the service (BE-148).
+type sweeper struct {
+	retention RetentionStore
+	edu       EduStore
+	files     Files
+	tx        db.TxManager
+}
 
 var _ privacy.RetentionSweeper = sweeper{}
 
@@ -100,14 +107,14 @@ func (w sweeper) Sweep(ctx context.Context, p privacy.RetentionPolicy, now time.
 			res.Method = privacy.MethodFileDelete
 		}
 		purge = func(ctx context.Context, limit int, dry bool) (int, error) {
-			return w.s.purgeEdu(ctx, p.Code, cutoff, limit, dry)
+			return w.purgeEdu(ctx, p.Code, cutoff, limit, dry)
 		}
 	default:
 		purge = func(ctx context.Context, limit int, dry bool) (int, error) {
-			return w.s.d.Store.PurgeExpired(ctx, p.Code, cutoff, limit, dry)
+			return w.retention.PurgeExpired(ctx, p.Code, cutoff, limit, dry)
 		}
 	}
-	n, err := w.s.purgeBatches(ctx, p.LegalApproved, purge)
+	n, err := w.purgeBatches(ctx, p.LegalApproved, purge)
 	res.Count = n
 	return res, err
 }
@@ -117,30 +124,30 @@ func (w sweeper) Sweep(ctx context.Context, p privacy.RetentionPolicy, now time.
 // deleted (history), and the document file is deleted in the same
 // transaction (01 §6.3 identity → files.Files.Delete; the objects go after
 // the commit).
-func (s *service) purgeEdu(ctx context.Context, policy string, cutoff time.Time, limit int, dry bool) (int, error) {
+func (w sweeper) purgeEdu(ctx context.Context, policy string, cutoff time.Time, limit int, dry bool) (int, error) {
 	if dry {
-		return s.d.Store.CountEduRetentionDue(ctx, policy, cutoff)
+		return w.retention.CountEduRetentionDue(ctx, policy, cutoff)
 	}
-	rows, err := s.d.Store.EduRetentionDue(ctx, policy, cutoff, limit)
+	rows, err := w.retention.EduRetentionDue(ctx, policy, cutoff, limit)
 	if err != nil {
 		return 0, err
 	}
 	sys := authz.SystemActor(retentionJob)
 	for _, v := range rows {
 		file := v.DocumentFileID
-		if file != nil && s.d.Files == nil {
+		if file != nil && w.files == nil {
 			return 0, errNoFiles
 		}
 		if policy == PolicyEduDocument {
 			v.DocumentFileID = nil
-			if err := s.d.Store.UpdateEduVerification(ctx, v); err != nil {
+			if err := w.edu.UpdateEduVerification(ctx, v); err != nil {
 				return 0, err
 			}
-		} else if _, err := s.d.Store.DeleteEduVerification(ctx, v.ID); err != nil {
+		} else if _, err := w.edu.DeleteEduVerification(ctx, v.ID); err != nil {
 			return 0, err
 		}
 		if file != nil {
-			if err := s.d.Files.Delete(ctx, sys, *file); err != nil {
+			if err := w.files.Delete(ctx, sys, *file); err != nil {
 				return 0, err
 			}
 		}
@@ -151,11 +158,11 @@ func (s *service) purgeEdu(ctx context.Context, policy string, cutoff time.Time,
 // purgeBatches runs purge: unapproved, one counting call; approved, one
 // transaction per batch of RetentionBatch rows until a batch comes back
 // short (or ctx ends). It returns the rows counted or handled.
-func (s *service) purgeBatches(ctx context.Context, approved bool, purge func(ctx context.Context, limit int, dry bool) (int, error)) (int, error) {
+func (w sweeper) purgeBatches(ctx context.Context, approved bool, purge func(ctx context.Context, limit int, dry bool) (int, error)) (int, error) {
 	if !approved {
 		return purge(ctx, 0, true)
 	}
-	return db.Batches(ctx, s.d.Tx, RetentionBatch, func(ctx context.Context) (int, error) {
+	return db.Batches(ctx, w.tx, RetentionBatch, func(ctx context.Context) (int, error) {
 		return purge(ctx, RetentionBatch, false)
 	})
 }

@@ -94,7 +94,7 @@ func (s *service) AcceptTerms(ctx context.Context, a authz.Actor, in TermsAccept
 	var u User
 	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		var err error
-		if u, err = s.d.Store.LockUser(ctx, a.UserID); err != nil {
+		if u, err = s.users().LockUser(ctx, a.UserID); err != nil {
 			return err
 		}
 		_, err = s.d.Terms.RecordTerms(ctx, consent.TermsInput{

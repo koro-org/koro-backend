@@ -25,7 +25,7 @@ var _ AccountAges = (*service)(nil)
 func (s *service) AccountAge(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]time.Time, error) {
 	out := make(map[uuid.UUID]time.Time, len(userIDs))
 	for batch := range slices.Chunk(userIDs, accountAgeBatch) {
-		us, err := s.d.Store.Users(ctx, batch)
+		us, err := s.users().Users(ctx, batch)
 		if err != nil {
 			return nil, err
 		}

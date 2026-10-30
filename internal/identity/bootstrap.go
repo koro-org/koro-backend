@@ -101,7 +101,7 @@ func (b *Bootstrapper) Run(ctx context.Context, admins []AdminSeed) ([]Bootstrap
 		found := make([]*User, len(seeds))
 		var known []uuid.UUID
 		for i, sd := range seeds {
-			u, ok, err := b.d.Store.UserByEmail(ctx, sd.normalized)
+			u, ok, err := b.users().UserByEmail(ctx, sd.normalized)
 			if err != nil {
 				return err
 			}
@@ -112,7 +112,7 @@ func (b *Bootstrapper) Run(ctx context.Context, admins []AdminSeed) ([]Bootstrap
 				found[i], known = &u, append(known, u.ID)
 			}
 		}
-		holders, err := b.d.Store.UsersWithRole(ctx, authz.PlatformAdmin)
+		holders, err := b.roles().UsersWithRole(ctx, authz.PlatformAdmin)
 		if err != nil {
 			return err
 		}
@@ -129,7 +129,7 @@ func (b *Bootstrapper) Run(ctx context.Context, admins []AdminSeed) ([]Bootstrap
 					ID: uuid.NewV7(), Status: StatusActive, Email: sd.email, EmailNormalized: sd.normalized, EmailVerifiedAt: &now,
 					FirstName: sd.first, LastName: sd.last, Persona: PersonaPlatform, Locale: LocaleTR,
 				}
-				if err := b.d.Store.InsertUser(ctx, nu); err != nil {
+				if err := b.users().InsertUser(ctx, nu); err != nil {
 					return err
 				}
 				o.UserID, o.UserCreated = nu.ID, true
@@ -141,7 +141,7 @@ func (b *Bootstrapper) Run(ctx context.Context, admins []AdminSeed) ([]Bootstrap
 			case u.Status == StatusPendingEmail:
 				// The operator vouches for the address.
 				u.Status, u.EmailVerifiedAt = StatusActive, &now
-				if err := b.d.Store.UpdateUser(ctx, *u); err != nil {
+				if err := b.users().UpdateUser(ctx, *u); err != nil {
 					return err
 				}
 				o.UserID = u.ID
@@ -151,7 +151,7 @@ func (b *Bootstrapper) Run(ctx context.Context, admins []AdminSeed) ([]Bootstrap
 			out = append(out, o)
 		}
 		for i := range out {
-			as, err := b.d.Store.RoleAssignmentsOf(ctx, out[i].UserID)
+			as, err := b.roles().RoleAssignmentsOf(ctx, out[i].UserID)
 			if err != nil {
 				return err
 			}
@@ -168,11 +168,11 @@ func (b *Bootstrapper) Run(ctx context.Context, admins []AdminSeed) ([]Bootstrap
 				ID: uuid.NewV7(), UserID: out[i].UserID, Role: authz.PlatformAdmin, Reason: bootstrapReason,
 				Status: RoleActive, RequestedAt: now, GrantedAt: &now,
 			}
-			if err := b.d.Store.InsertRoleAssignment(ctx, ra); err != nil {
+			if err := b.roles().InsertRoleAssignment(ctx, ra); err != nil {
 				return err
 			}
 			// 03 §2.2-6: a role change closes the user's sessions.
-			if _, err := b.d.Store.RevokeUserSessions(ctx, out[i].UserID, nil, now, RevokeRoleChange); err != nil {
+			if _, err := b.sessions().RevokeUserSessions(ctx, out[i].UserID, nil, now, RevokeRoleChange); err != nil {
 				return err
 			}
 			uid := out[i].UserID

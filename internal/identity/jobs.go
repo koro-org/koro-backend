@@ -63,11 +63,11 @@ func (m Module) Jobs(sessions, tokens Retention) []queue.Job {
 	return append([]queue.Job{
 		{Name: SessionsCleanupJobName, Cron: "30 3 * * *", Queue: queue.Low, Unique: 23 * time.Hour,
 			Handle: func(ctx context.Context) error {
-				return m.svc.cleanup(ctx, SessionsCleanupJobName, sessions, m.svc.d.Store.DeleteEndedSessions)
+				return m.svc.cleanup(ctx, SessionsCleanupJobName, sessions, m.svc.sessions().DeleteEndedSessions)
 			}},
 		{Name: EmailTokensCleanupJobName, Cron: "35 3 * * *", Queue: queue.Low, Unique: 23 * time.Hour,
 			Handle: func(ctx context.Context) error {
-				return m.svc.cleanup(ctx, EmailTokensCleanupJobName, tokens, m.svc.d.Store.DeleteEndedEmailTokens)
+				return m.svc.cleanup(ctx, EmailTokensCleanupJobName, tokens, m.svc.emailTokens().DeleteEndedEmailTokens)
 			}},
 	}, m.svc.eduJobs()...)
 }

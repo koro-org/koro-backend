@@ -81,7 +81,7 @@ func (s *service) PlatformRoleAssignments(ctx context.Context, a authz.Actor, q 
 	}
 	limit := page.ClampLimit(q.Limit)
 	q.Limit = limit + 1
-	rows, err := s.d.Store.RoleAssignments(ctx, q)
+	rows, err := s.roles().RoleAssignments(ctx, q)
 	if err != nil {
 		return RolePage{}, err
 	}
@@ -115,7 +115,7 @@ func (s *service) GrantPlatformRole(ctx context.Context, a authz.Actor, in RoleG
 	}
 	var out RoleAssignment
 	err = s.d.Tx.WithSerializableTx(ctx, func(ctx context.Context) error {
-		u, err := s.d.Store.User(ctx, in.UserID)
+		u, err := s.users().User(ctx, in.UserID)
 		switch {
 		case isNotFound(err):
 			return invalid(problem.ErrValidation, "body.user_id", "unknown user")
@@ -126,7 +126,7 @@ func (s *service) GrantPlatformRole(ctx context.Context, a authz.Actor, in RoleG
 			return ErrUserInvalidState
 		}
 		if in.Role == authz.PlatformTalentAuditor {
-			eff, pend, _, err := s.d.Store.CountRoleAssignments(ctx, in.Role)
+			eff, pend, _, err := s.roles().CountRoleAssignments(ctx, in.Role)
 			if err != nil {
 				return err
 			}
@@ -141,12 +141,12 @@ func (s *service) GrantPlatformRole(ctx context.Context, a authz.Actor, in RoleG
 		if !privilegedRole(in.Role) { // moderator, support, dpo: one admin is enough (02 §5.7)
 			ra.Status, ra.GrantedAt, alert = RoleActive, &now, AlertRoleGranted
 		}
-		if err := s.d.Store.InsertRoleAssignment(ctx, ra); err != nil {
+		if err := s.roles().InsertRoleAssignment(ctx, ra); err != nil {
 			return err
 		}
 		n := 0
 		if ra.Status == RoleActive {
-			if n, err = s.d.Store.RevokeUserSessions(ctx, u.ID, nil, now, RevokeRoleChange); err != nil {
+			if n, err = s.sessions().RevokeUserSessions(ctx, u.ID, nil, now, RevokeRoleChange); err != nil {
 				return err
 			}
 		}
@@ -175,7 +175,7 @@ func (s *service) ApprovePlatformRole(ctx context.Context, a authz.Actor, id uui
 	}
 	var out RoleAssignment
 	err = s.d.Tx.WithSerializableTx(ctx, func(ctx context.Context) error {
-		ra, err := s.d.Store.LockRoleAssignment(ctx, id)
+		ra, err := s.roles().LockRoleAssignment(ctx, id)
 		if err != nil {
 			return err
 		}
@@ -185,7 +185,7 @@ func (s *service) ApprovePlatformRole(ctx context.Context, a authz.Actor, id uui
 		if ra.Status != RolePending {
 			return ErrRoleInvalidState
 		}
-		u, err := s.d.Store.User(ctx, ra.UserID)
+		u, err := s.users().User(ctx, ra.UserID)
 		if err != nil {
 			return err
 		}
@@ -193,7 +193,7 @@ func (s *service) ApprovePlatformRole(ctx context.Context, a authz.Actor, id uui
 			return ErrUserInvalidState
 		}
 		if ra.Role == authz.PlatformTalentAuditor {
-			eff, _, _, err := s.d.Store.CountRoleAssignments(ctx, ra.Role)
+			eff, _, _, err := s.roles().CountRoleAssignments(ctx, ra.Role)
 			if err != nil {
 				return err
 			}
@@ -203,10 +203,10 @@ func (s *service) ApprovePlatformRole(ctx context.Context, a authz.Actor, id uui
 		}
 		now, me := s.now(), a.UserID
 		ra.Status, ra.ApprovedBy, ra.ApprovedAt, ra.GrantedAt = RoleActive, &me, &now, &now
-		if err := s.d.Store.UpdateRoleAssignment(ctx, ra); err != nil {
+		if err := s.roles().UpdateRoleAssignment(ctx, ra); err != nil {
 			return err
 		}
-		n, err := s.d.Store.RevokeUserSessions(ctx, ra.UserID, nil, now, RevokeRoleChange)
+		n, err := s.sessions().RevokeUserSessions(ctx, ra.UserID, nil, now, RevokeRoleChange)
 		if err != nil {
 			return err
 		}
@@ -241,7 +241,7 @@ func (s *service) RevokePlatformRole(ctx context.Context, a authz.Actor, id uuid
 	}
 	var out RoleAssignment
 	err = s.d.Tx.WithSerializableTx(ctx, func(ctx context.Context) error {
-		ra, err := s.d.Store.LockRoleAssignment(ctx, id)
+		ra, err := s.roles().LockRoleAssignment(ctx, id)
 		if err != nil {
 			return err
 		}
@@ -276,11 +276,11 @@ func (s *service) RevokePlatformRole(ctx context.Context, a authz.Actor, id uuid
 		default:
 			return ErrRoleInvalidState
 		}
-		if err := s.d.Store.UpdateRoleAssignment(ctx, ra); err != nil {
+		if err := s.roles().UpdateRoleAssignment(ctx, ra); err != nil {
 			return err
 		}
 		if ra.Status == RoleRevoked {
-			if n, err = s.d.Store.RevokeUserSessions(ctx, ra.UserID, nil, now, RevokeRoleChange); err != nil {
+			if n, err = s.sessions().RevokeUserSessions(ctx, ra.UserID, nil, now, RevokeRoleChange); err != nil {
 				return err
 			}
 		}
@@ -309,7 +309,7 @@ func (s *service) keepOneAdmin(ctx context.Context, ra RoleAssignment, leaving i
 	if ra.Role != authz.PlatformAdmin {
 		return nil
 	}
-	eff, _, revokePending, err := s.d.Store.CountRoleAssignments(ctx, authz.PlatformAdmin)
+	eff, _, revokePending, err := s.roles().CountRoleAssignments(ctx, authz.PlatformAdmin)
 	if err != nil {
 		return err
 	}

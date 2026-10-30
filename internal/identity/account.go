@@ -48,7 +48,7 @@ func (s *service) Verify(ctx context.Context, userID uuid.UUID, proof ReauthProo
 // to audit.ReauthFailed (reauth, ChangePassword), the other modules do the
 // same with Verify's (BE-075).
 func (s *service) verify(ctx context.Context, userID uuid.UUID, proof ReauthProof, withPassword bool) (string, error) {
-	u, err := s.d.Store.User(ctx, userID)
+	u, err := s.users().User(ctx, userID)
 	switch {
 	case isNotFound(err):
 		return "", ErrReauthFailed
@@ -187,7 +187,7 @@ func (s *service) ChangePassword(ctx context.Context, a authz.Actor, in Password
 		denied := reauthDenied(authz.IdentityPasswordChange, resourceUser, &a.UserID, nil).By(a)
 		return audit.ReauthFailed(ctx, s.d.Audit, s.d.Log, denied, err)
 	}
-	u, err := s.d.Store.User(ctx, a.UserID)
+	u, err := s.users().User(ctx, a.UserID)
 	if err != nil {
 		return err
 	}
@@ -203,15 +203,15 @@ func (s *service) ChangePassword(ctx context.Context, a authz.Actor, in Password
 	}
 	keep := a.SessionID
 	err = s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		cur, err := s.d.Store.LockUser(ctx, u.ID)
+		cur, err := s.users().LockUser(ctx, u.ID)
 		if err != nil {
 			return err
 		}
 		cur.PasswordHash, cur.FailedLogins, cur.LockedUntil = hash, 0, nil
-		if err := s.d.Store.UpdateUser(ctx, cur); err != nil {
+		if err := s.users().UpdateUser(ctx, cur); err != nil {
 			return err
 		}
-		n, err := s.d.Store.RevokeUserSessions(ctx, u.ID, &keep, s.now(), RevokePasswordChange)
+		n, err := s.sessions().RevokeUserSessions(ctx, u.ID, &keep, s.now(), RevokePasswordChange)
 		if err != nil {
 			return err
 		}
@@ -241,7 +241,7 @@ func (s *service) RequestPasswordReset(ctx context.Context, a authz.Actor, email
 		return err
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		u, found, err := s.d.Store.UserByEmail(ctx, normalized)
+		u, found, err := s.users().UserByEmail(ctx, normalized)
 		if err != nil || !found || (u.Status != StatusActive && u.Status != StatusPendingEmail) {
 			return err
 		}
@@ -283,10 +283,10 @@ func (s *service) ConfirmPasswordReset(ctx context.Context, a authz.Actor, raw, 
 		if cur.Status == StatusPendingEmail {
 			cur.Status, cur.EmailVerifiedAt = StatusActive, &now
 		}
-		if err := s.d.Store.UpdateUser(ctx, cur); err != nil {
+		if err := s.users().UpdateUser(ctx, cur); err != nil {
 			return err
 		}
-		n, err := s.d.Store.RevokeUserSessions(ctx, cur.ID, nil, now, RevokePasswordChange)
+		n, err := s.sessions().RevokeUserSessions(ctx, cur.ID, nil, now, RevokePasswordChange)
 		if err != nil {
 			return err
 		}
@@ -346,7 +346,7 @@ func (s *service) confirmEmailTx(ctx context.Context, t EmailToken, edu signupEd
 		if u.Status == StatusPendingEmail {
 			now := s.now()
 			u.Status, u.EmailVerifiedAt = StatusActive, &now
-			if err := s.d.Store.UpdateUser(ctx, u); err != nil {
+			if err := s.users().UpdateUser(ctx, u); err != nil {
 				return err
 			}
 			result, v, err := s.completeSignupEdu(ctx, u, t.ID, edu)
@@ -381,7 +381,7 @@ func (s *service) ResendVerification(ctx context.Context, a authz.Actor, email s
 		return err
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		u, found, err := s.d.Store.UserByEmail(ctx, normalized)
+		u, found, err := s.users().UserByEmail(ctx, normalized)
 		if err != nil || !found || u.Status != StatusPendingEmail {
 			return err
 		}
@@ -409,7 +409,7 @@ func (s *service) RequestEmailChange(ctx context.Context, a authz.Actor, newEmai
 		return err
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		u, err := s.d.Store.User(ctx, a.UserID)
+		u, err := s.users().User(ctx, a.UserID)
 		if err != nil {
 			return err
 		}
@@ -417,7 +417,7 @@ func (s *service) RequestEmailChange(ctx context.Context, a authz.Actor, newEmai
 			return invalid(ErrInvalidEmail, "body.new_email", "is the current address")
 		}
 		meta := map[string]any{audit.MetaReauth: kind}
-		other, taken, err := s.d.Store.UserByEmail(ctx, normalized)
+		other, taken, err := s.users().UserByEmail(ctx, normalized)
 		if err != nil {
 			return err
 		}
@@ -453,17 +453,17 @@ func (s *service) ConfirmEmailChange(ctx context.Context, a authz.Actor, raw str
 		if err != nil {
 			return err
 		}
-		if other, taken, err := s.d.Store.UserByEmail(ctx, normalized); err != nil {
+		if other, taken, err := s.users().UserByEmail(ctx, normalized); err != nil {
 			return err
 		} else if taken && other.ID != u.ID {
 			return ErrEmailTaken
 		}
 		now := s.now()
 		u.Email, u.EmailNormalized, u.EmailVerifiedAt = t.TargetEmail, normalized, &now
-		if err := s.d.Store.UpdateUser(ctx, u); err != nil {
+		if err := s.users().UpdateUser(ctx, u); err != nil {
 			return err
 		}
-		if err := s.d.Store.CloseOpenTokens(ctx, u.ID, PurposeEmailChange, now); err != nil {
+		if err := s.emailTokens().CloseOpenTokens(ctx, u.ID, PurposeEmailChange, now); err != nil {
 			return err
 		}
 		s.notifyUser(ctx, u.ID, NoticeEmailChanged)
@@ -485,14 +485,14 @@ func (s *service) findToken(ctx context.Context, raw string, purpose TokenPurpos
 	if !ok {
 		return EmailToken{}, User{}, ErrInvalidToken
 	}
-	t, found, err := s.d.Store.EmailTokenByHash(ctx, hash)
+	t, found, err := s.emailTokens().EmailTokenByHash(ctx, hash)
 	switch {
 	case err != nil:
 		return EmailToken{}, User{}, err
 	case !found || !token.Equal(t.TokenHash, hash) || t.Purpose != purpose || t.ConsumedAt != nil || !s.now().Before(t.ExpiresAt):
 		return EmailToken{}, User{}, ErrInvalidToken
 	}
-	u, err := s.d.Store.User(ctx, t.UserID)
+	u, err := s.users().User(ctx, t.UserID)
 	switch {
 	case isNotFound(err):
 		return EmailToken{}, User{}, ErrInvalidToken
@@ -509,7 +509,7 @@ func (s *service) findToken(ctx context.Context, raw string, purpose TokenPurpos
 // carried by ctx, re-checks them and marks the token used (single use: a
 // concurrent second confirmation finds it consumed).
 func (s *service) consumeToken(ctx context.Context, id uuid.UUID, purpose TokenPurpose) (User, error) {
-	t, err := s.d.Store.LockEmailToken(ctx, id)
+	t, err := s.emailTokens().LockEmailToken(ctx, id)
 	switch {
 	case isNotFound(err):
 		return User{}, ErrInvalidToken
@@ -520,14 +520,14 @@ func (s *service) consumeToken(ctx context.Context, id uuid.UUID, purpose TokenP
 	if t.Purpose != purpose || t.ConsumedAt != nil || !now.Before(t.ExpiresAt) {
 		return User{}, ErrInvalidToken
 	}
-	consumed, err := s.d.Store.ConsumeEmailToken(ctx, id, now)
+	consumed, err := s.emailTokens().ConsumeEmailToken(ctx, id, now)
 	if err != nil {
 		return User{}, err
 	}
 	if !consumed {
 		return User{}, ErrInvalidToken
 	}
-	u, err := s.d.Store.LockUser(ctx, t.UserID)
+	u, err := s.users().LockUser(ctx, t.UserID)
 	if err != nil {
 		return User{}, err
 	}

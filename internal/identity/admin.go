@@ -113,7 +113,7 @@ func (s *service) SearchUsers(ctx context.Context, a authz.Actor, q AdminUserQue
 	default:
 		return AdminUserPage{}, invalid(problem.ErrValidation, "query.status", "must be pending_email, active, suspended or erased")
 	}
-	rows, err := s.d.Store.SearchUsers(ctx, search)
+	rows, err := s.users().SearchUsers(ctx, search)
 	if err != nil {
 		return AdminUserPage{}, err
 	}
@@ -142,7 +142,7 @@ func (s *service) AdminUser(ctx context.Context, a authz.Actor, id uuid.UUID) (A
 	if err := authz.Can(ctx, a, authz.IdentityUserRead, targetUser(id)); err != nil {
 		return AdminUser{}, err
 	}
-	u, err := s.d.Store.User(ctx, id)
+	u, err := s.users().User(ctx, id)
 	if err != nil {
 		return AdminUser{}, err
 	}
@@ -152,7 +152,7 @@ func (s *service) AdminUser(ctx context.Context, a authz.Actor, id uuid.UUID) (A
 // adminView completes an account with its roles, its non-club
 // memberships and its student verification.
 func (s *service) adminView(ctx context.Context, a authz.Actor, u User) (AdminUser, error) {
-	roles, err := s.d.Store.PlatformRoles(ctx, u.ID)
+	roles, err := s.roles().PlatformRoles(ctx, u.ID)
 	if err != nil {
 		return AdminUser{}, err
 	}
@@ -178,7 +178,7 @@ func (s *service) adminView(ctx context.Context, a authz.Actor, u User) (AdminUs
 // now (an expired one is closed by the next call of its action), oldest
 // first.
 func (s *service) openAccountActions(ctx context.Context, userID uuid.UUID) ([]AccountActionRequest, error) {
-	all, err := s.d.Store.AccountActionsOf(ctx, userID)
+	all, err := s.accountActions().AccountActionsOf(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +216,7 @@ func accountResource(id uuid.UUID, requestedBy *uuid.UUID) authz.Resource {
 // holdsPrivileged reports whether userID holds a four-eyes role in effect
 // (06 H-17 set: platform_admin, finance_admin, talent_auditor).
 func (s *service) holdsPrivileged(ctx context.Context, userID uuid.UUID) ([]authz.PlatformRole, bool, error) {
-	roles, err := s.d.Store.PlatformRoles(ctx, userID)
+	roles, err := s.roles().PlatformRoles(ctx, userID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -239,13 +239,13 @@ func (s *service) accountFourEyes(ctx context.Context, a authz.Actor, act authz.
 		return nil, false, ErrUserInvalidState.Wrap(errors.New("an admin cannot act on their own privileged account"))
 	}
 	now := s.now()
-	open, found, err := s.d.Store.LockOpenAccountAction(ctx, target, kind)
+	open, found, err := s.accountActions().LockOpenAccountAction(ctx, target, kind)
 	if err != nil {
 		return nil, false, err
 	}
 	if found && !now.Before(open.ExpiresAt) {
 		open.Status = AccountActionExpired
-		if err := s.d.Store.UpdateAccountAction(ctx, open); err != nil {
+		if err := s.accountActions().UpdateAccountAction(ctx, open); err != nil {
 			return nil, false, err
 		}
 		found = false
@@ -253,7 +253,7 @@ func (s *service) accountFourEyes(ctx context.Context, a authz.Actor, act authz.
 	if !found {
 		r := AccountActionRequest{ID: uuid.NewV7(), TargetUserID: target, Action: kind, Reason: reason, Status: AccountActionPending,
 			RequestedBy: a.UserID, RequestedAt: now, ExpiresAt: now.Add(accountActionTTL)}
-		if err := s.d.Store.InsertAccountAction(ctx, r); err != nil {
+		if err := s.accountActions().InsertAccountAction(ctx, r); err != nil {
 			return nil, false, err
 		}
 		err := s.d.Audit.Log(ctx, audit.Event{Action: string(act), Outcome: audit.Success, ResourceType: resourceUser, ResourceID: &r.TargetUserID,
@@ -271,7 +271,7 @@ func (s *service) accountFourEyes(ctx context.Context, a authz.Actor, act authz.
 	}
 	me := a.UserID
 	open.Status, open.ApprovedBy, open.ApprovedAt = AccountActionApproved, &me, &now
-	if err := s.d.Store.UpdateAccountAction(ctx, open); err != nil {
+	if err := s.accountActions().UpdateAccountAction(ctx, open); err != nil {
 		return nil, false, err
 	}
 	return &open, true, nil
@@ -291,7 +291,7 @@ func fourEyesMeta(meta map[string]any, req *AccountActionRequest) map[string]any
 // platform_admin the four-eyes flow already implies two other active
 // admins (the requester and the approver); the check is the safety net.
 func (s *service) keepActiveHolders(ctx context.Context, target uuid.UUID) error {
-	roles, err := s.d.Store.PlatformRoles(ctx, target)
+	roles, err := s.roles().PlatformRoles(ctx, target)
 	if err != nil {
 		return err
 	}
@@ -299,11 +299,11 @@ func (s *service) keepActiveHolders(ctx context.Context, target uuid.UUID) error
 		if !privilegedRole(r) {
 			continue
 		}
-		ids, err := s.d.Store.UsersWithRole(ctx, r)
+		ids, err := s.roles().UsersWithRole(ctx, r)
 		if err != nil {
 			return err
 		}
-		users, err := s.d.Store.Users(ctx, ids)
+		users, err := s.users().Users(ctx, ids)
 		if err != nil {
 			return err
 		}
@@ -333,7 +333,7 @@ func (s *service) SuspendUser(ctx context.Context, a authz.Actor, id uuid.UUID, 
 	var pending *AccountActionRequest
 	err = s.d.Tx.WithSerializableTx(ctx, func(ctx context.Context) error {
 		pending = nil
-		u, err := s.d.Store.LockUser(ctx, id)
+		u, err := s.users().LockUser(ctx, id)
 		if err != nil {
 			return err
 		}
@@ -354,10 +354,10 @@ func (s *service) SuspendUser(ctx context.Context, a authz.Actor, id uuid.UUID, 
 		}
 		now := s.now()
 		u.Status, u.SuspendedAt, u.SuspensionReason = StatusSuspended, &now, reason
-		if err := s.d.Store.UpdateUser(ctx, u); err != nil {
+		if err := s.users().UpdateUser(ctx, u); err != nil {
 			return err
 		}
-		n, err := s.d.Store.RevokeUserSessions(ctx, u.ID, nil, now, RevokeSuspended)
+		n, err := s.sessions().RevokeUserSessions(ctx, u.ID, nil, now, RevokeSuspended)
 		if err != nil {
 			return err
 		}
@@ -392,7 +392,7 @@ func (s *service) UnsuspendUser(ctx context.Context, a authz.Actor, id uuid.UUID
 	}
 	var out User
 	err = s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		u, err := s.d.Store.LockUser(ctx, id)
+		u, err := s.users().LockUser(ctx, id)
 		if err != nil {
 			return err
 		}
@@ -403,7 +403,7 @@ func (s *service) UnsuspendUser(ctx context.Context, a authz.Actor, id uuid.UUID
 		if u.EmailVerifiedAt == nil {
 			u.Status = StatusPendingEmail
 		}
-		if err := s.d.Store.UpdateUser(ctx, u); err != nil {
+		if err := s.users().UpdateUser(ctx, u); err != nil {
 			return err
 		}
 		out = u
@@ -431,7 +431,7 @@ func (s *service) RevokeUserSessions(ctx context.Context, a authz.Actor, id uuid
 	var pending *AccountActionRequest
 	err = s.d.Tx.WithSerializableTx(ctx, func(ctx context.Context) error {
 		pending = nil
-		u, err := s.d.Store.LockUser(ctx, id)
+		u, err := s.users().LockUser(ctx, id)
 		if err != nil {
 			return err
 		}
@@ -443,7 +443,7 @@ func (s *service) RevokeUserSessions(ctx context.Context, a authz.Actor, id uuid
 			pending = req
 			return nil
 		}
-		n, err := s.d.Store.RevokeUserSessions(ctx, u.ID, nil, s.now(), RevokeAdmin)
+		n, err := s.sessions().RevokeUserSessions(ctx, u.ID, nil, s.now(), RevokeAdmin)
 		if err != nil {
 			return err
 		}
@@ -477,7 +477,7 @@ func (s *service) ResetUserMFA(ctx context.Context, a authz.Actor, id uuid.UUID,
 	var pending *AccountActionRequest
 	err = s.d.Tx.WithSerializableTx(ctx, func(ctx context.Context) error {
 		pending = nil
-		u, err := s.d.Store.LockUser(ctx, id)
+		u, err := s.users().LockUser(ctx, id)
 		if err != nil {
 			return err
 		}
@@ -493,7 +493,7 @@ func (s *service) ResetUserMFA(ctx context.Context, a authz.Actor, id uuid.UUID,
 		if err := s.dropMFA(ctx, u.ID); err != nil {
 			return err
 		}
-		n, err := s.d.Store.RevokeUserSessions(ctx, u.ID, nil, s.now(), RevokeMFAReset)
+		n, err := s.sessions().RevokeUserSessions(ctx, u.ID, nil, s.now(), RevokeMFAReset)
 		if err != nil {
 			return err
 		}

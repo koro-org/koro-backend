@@ -121,7 +121,7 @@ func (s *service) handleTermsPublished(ctx context.Context, payload []byte) erro
 	if len(readers) > 0 {
 		var after *uuid.UUID
 		if _, err := db.Drain(ctx, termsBatch, func(ctx context.Context) (int, error) {
-			users, err := s.d.Store.SearchUsers(ctx, UserSearch{Status: StatusActive, After: after, Limit: termsBatch})
+			users, err := s.users().SearchUsers(ctx, UserSearch{Status: StatusActive, After: after, Limit: termsBatch})
 			if err != nil {
 				return 0, err
 			}
@@ -156,7 +156,7 @@ func (s *service) handleTermsNotice(ctx context.Context, payload []byte) error {
 	if err := json.Unmarshal(payload, &n); err != nil || n.UserID == uuid.Nil() || n.NoticeID == uuid.Nil() {
 		return queue.Permanent(fmt.Errorf("identity: terms notice payload: %w", errors.Join(err, errors.New("missing ids"))))
 	}
-	u, err := s.d.Store.User(ctx, n.UserID)
+	u, err := s.users().User(ctx, n.UserID)
 	switch {
 	case isNotFound(err):
 		return nil

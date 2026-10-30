@@ -72,7 +72,7 @@ func (s *service) CreateSession(ctx context.Context, a authz.Actor, in Login) (L
 		return LoginResult{}, err
 	}
 	now := s.now()
-	u, found, err := s.d.Store.UserByEmail(ctx, textx.NormalizeEmail(in.Email))
+	u, found, err := s.users().UserByEmail(ctx, textx.NormalizeEmail(in.Email))
 	if err != nil {
 		return LoginResult{}, err
 	}
@@ -137,7 +137,7 @@ func (s *service) CreateSession(ctx context.Context, a authz.Actor, in Login) (L
 // parameters changed (05 §14.1 needsRehash).
 func (s *service) openSession(ctx context.Context, u User, client ClientKind, label, newHash string, mfa map[string]any) (LoginResult, error) {
 	now := s.now()
-	roles, err := s.d.Store.PlatformRoles(ctx, u.ID)
+	roles, err := s.roles().PlatformRoles(ctx, u.ID)
 	if err != nil {
 		return LoginResult{}, err
 	}
@@ -162,7 +162,7 @@ func (s *service) openSession(ctx context.Context, u User, client ClientKind, la
 	}
 	prevLogin := time.Time{}
 	err = s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		cur, err := s.d.Store.LockUser(ctx, u.ID)
+		cur, err := s.users().LockUser(ctx, u.ID)
 		if err != nil {
 			return err
 		}
@@ -173,10 +173,10 @@ func (s *service) openSession(ctx context.Context, u User, client ClientKind, la
 		if newHash != "" && cur.PasswordHash == u.PasswordHash {
 			cur.PasswordHash = newHash // parameters changed (05 §14.1 needsRehash)
 		}
-		if err := s.d.Store.UpdateUser(ctx, cur); err != nil {
+		if err := s.users().UpdateUser(ctx, cur); err != nil {
 			return err
 		}
-		if err := s.d.Store.InsertSession(ctx, sess); err != nil {
+		if err := s.sessions().InsertSession(ctx, sess); err != nil {
 			return err
 		}
 		return s.d.Audit.Log(ctx, byUser(event(authz.IdentitySessionCreate, audit.Success, resourceSession, sess.ID, meta), u.ID))
@@ -213,7 +213,7 @@ func deviceLabel(raw string) (string, error) {
 // (audit.ReauthFailed).
 func (s *service) recordFailure(ctx context.Context, userID uuid.UUID, denied audit.Event) error {
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		u, err := s.d.Store.LockUser(ctx, userID)
+		u, err := s.users().LockUser(ctx, userID)
 		if err != nil {
 			return err
 		}
@@ -223,7 +223,7 @@ func (s *service) recordFailure(ctx context.Context, userID uuid.UUID, denied au
 			until := now.Add(d)
 			u.LockedUntil = &until
 		}
-		if err := s.d.Store.UpdateUser(ctx, u); err != nil {
+		if err := s.users().UpdateUser(ctx, u); err != nil {
 			return err
 		}
 		if u.LockedUntil != nil && u.FailedLogins == lockoutThreshold {
@@ -264,12 +264,12 @@ func (s *service) resetFailures(ctx context.Context, u User) error {
 		return nil
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		cur, err := s.d.Store.LockUser(ctx, u.ID)
+		cur, err := s.users().LockUser(ctx, u.ID)
 		if err != nil {
 			return err
 		}
 		cur.FailedLogins, cur.LockedUntil = 0, nil
-		return s.d.Store.UpdateUser(ctx, cur)
+		return s.users().UpdateUser(ctx, cur)
 	})
 }
 
@@ -292,7 +292,7 @@ func (s *service) Authenticate(ctx context.Context, cred httpx.Credential) (Prin
 	if cred.TokenHash == zero || (cred.Transport != httpx.TransportCookie && cred.Transport != httpx.TransportBearer) {
 		return Principal{}, ErrUnauthenticated
 	}
-	sess, found, err := s.d.Store.SessionByTokenHash(ctx, cred.TokenHash[:])
+	sess, found, err := s.sessions().SessionByTokenHash(ctx, cred.TokenHash[:])
 	if err != nil {
 		return Principal{}, err
 	}
@@ -309,7 +309,7 @@ func (s *service) Authenticate(ctx context.Context, cred httpx.Credential) (Prin
 	if !sess.live(now) {
 		return Principal{}, ErrUnauthenticated
 	}
-	u, err := s.d.Store.User(ctx, sess.UserID)
+	u, err := s.users().User(ctx, sess.UserID)
 	switch {
 	case isNotFound(err):
 		return Principal{}, ErrUnauthenticated
@@ -319,7 +319,7 @@ func (s *service) Authenticate(ctx context.Context, cred httpx.Credential) (Prin
 	if u.Status != StatusActive {
 		return Principal{}, ErrUnauthenticated
 	}
-	roles, err := s.d.Store.PlatformRoles(ctx, u.ID)
+	roles, err := s.roles().PlatformRoles(ctx, u.ID)
 	if err != nil {
 		return Principal{}, err
 	}
@@ -339,7 +339,7 @@ func (s *service) Authenticate(ctx context.Context, cred httpx.Credential) (Prin
 		if abs := sess.AbsoluteExpiresAt; idle.After(abs) {
 			idle = abs
 		}
-		if err := s.d.Store.TouchSession(ctx, sess.ID, now, idle); err != nil {
+		if err := s.sessions().TouchSession(ctx, sess.ID, now, idle); err != nil {
 			return Principal{}, err
 		}
 		s.markActiveDay(ctx, u.ID, sess.LastSeenAt, now)
@@ -358,7 +358,7 @@ func (s *service) DeleteCurrentSession(ctx context.Context, a authz.Actor) error
 		return err
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		revoked, err := s.d.Store.RevokeSession(ctx, a.UserID, a.SessionID, s.now(), RevokeLogout)
+		revoked, err := s.sessions().RevokeSession(ctx, a.UserID, a.SessionID, s.now(), RevokeLogout)
 		if err != nil || !revoked {
 			return err
 		}
@@ -374,7 +374,7 @@ func (s *service) ListMySessions(ctx context.Context, a authz.Actor, q SessionQu
 		return SessionPage{}, err
 	}
 	limit := page.ClampLimit(q.Limit)
-	rows, err := s.d.Store.ActiveSessions(ctx, a.UserID, s.now(), q.After, limit+1)
+	rows, err := s.sessions().ActiveSessions(ctx, a.UserID, s.now(), q.After, limit+1)
 	if err != nil {
 		return SessionPage{}, err
 	}
@@ -385,7 +385,7 @@ func (s *service) ListMySessions(ctx context.Context, a authz.Actor, q SessionQu
 // RevokeMySession implements Service (revokeMySession). Another user's
 // session is 404 (O cell, 03 §5.0); revoking the current one is a logout.
 func (s *service) RevokeMySession(ctx context.Context, a authz.Actor, id uuid.UUID) error {
-	sess, err := s.d.Store.Session(ctx, id)
+	sess, err := s.sessions().Session(ctx, id)
 	switch {
 	case isNotFound(err):
 		if err := authz.Can(ctx, a, authz.IdentitySessionRevokeOwn, authz.Resource{Type: authz.TypeSession, ID: id}); err != nil {
@@ -399,7 +399,7 @@ func (s *service) RevokeMySession(ctx context.Context, a authz.Actor, id uuid.UU
 		return err
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		revoked, err := s.d.Store.RevokeSession(ctx, a.UserID, id, s.now(), RevokeLogout)
+		revoked, err := s.sessions().RevokeSession(ctx, a.UserID, id, s.now(), RevokeLogout)
 		if err != nil || !revoked {
 			return err
 		}
@@ -415,7 +415,7 @@ func (s *service) RevokeAll(ctx context.Context, userID uuid.UUID, reason Revoke
 	var n int
 	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		var err error
-		n, err = s.d.Store.RevokeUserSessions(ctx, userID, nil, s.now(), reason)
+		n, err = s.sessions().RevokeUserSessions(ctx, userID, nil, s.now(), reason)
 		return err
 	})
 	return n, err

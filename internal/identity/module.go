@@ -381,7 +381,7 @@ type Module struct {
 // (06 H-33: active or revoke_pending; a pending request does not count).
 // notify's admin alerts (06 H-40) read it through cmd/koro.
 func (m Module) PlatformAdmins(ctx context.Context) ([]uuid.UUID, error) {
-	return m.svc.d.Store.UsersWithRole(ctx, authz.PlatformAdmin)
+	return m.svc.roles().UsersWithRole(ctx, authz.PlatformAdmin)
 }
 
 // New builds the identity module.
@@ -392,7 +392,7 @@ func New(d Deps) (Module, error) {
 	s := &service{d: d}
 	s.students = eduStudents{s: s}
 	s.gate = newTermsGate(s)
-	return Module{Service: s, Students: s.students, Privacy: privacyProvider{s: s}, Sweeper: sweeper{s: s}, TermsGate: s.gate, svc: s}, nil
+	return Module{Service: s, Students: s.students, Privacy: privacyProvider{s: s}, Sweeper: sweeper{retention: d.Store, edu: s.edu(), files: d.Files, tx: d.Tx}, TermsGate: s.gate, svc: s}, nil
 }
 
 type service struct {

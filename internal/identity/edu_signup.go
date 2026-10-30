@@ -111,7 +111,7 @@ func (s *service) completeSignupEdu(ctx context.Context, cur User, tokenID uuid.
 	if cur.Persona != PersonaStudent || cur.EmailNormalized != e.addr.normalized {
 		return signupEduIneligible, nil, nil
 	}
-	holder, taken, err := s.d.Store.OpenEduVerificationOfEmail(ctx, e.addr.normalized)
+	holder, taken, err := s.edu().OpenEduVerificationOfEmail(ctx, e.addr.normalized)
 	switch {
 	case err != nil:
 		return "", nil, err

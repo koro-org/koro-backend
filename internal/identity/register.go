@@ -130,7 +130,7 @@ func (s *service) Register(ctx context.Context, a authz.Actor, in Registration) 
 
 	var created *User
 	err = s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		existing, found, err := s.d.Store.UserByEmail(ctx, normalized)
+		existing, found, err := s.users().UserByEmail(ctx, normalized)
 		if err != nil {
 			return err
 		}
@@ -142,7 +142,7 @@ func (s *service) Register(ctx context.Context, a authz.Actor, in Registration) 
 			PasswordHash: hash, FirstName: first, LastName: last, BirthDate: in.BirthDate,
 			Persona: in.Persona, Locale: in.Locale,
 		}
-		if err := s.d.Store.InsertUser(ctx, u); err != nil {
+		if err := s.users().InsertUser(ctx, u); err != nil {
 			if errors.Is(err, ErrEmailTaken) {
 				return errRegistrationRace
 			}

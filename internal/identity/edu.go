@@ -170,12 +170,12 @@ func (s *service) StartEduVerification(ctx context.Context, a authz.Actor, raw s
 		return err
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		u, err := s.d.Store.User(ctx, a.UserID)
+		u, err := s.users().User(ctx, a.UserID)
 		if err != nil {
 			return err
 		}
 		meta := map[string]any{"university_id": uni.String()}
-		holder, taken, err := s.d.Store.OpenEduVerificationOfEmail(ctx, normalized)
+		holder, taken, err := s.edu().OpenEduVerificationOfEmail(ctx, normalized)
 		if err != nil {
 			return err
 		}
@@ -256,7 +256,7 @@ func (s *service) completeEduEmail(ctx context.Context, cur User, tokenID uuid.U
 		ID: uuid.NewV7(), UserID: cur.ID, Method: EduMethodEmail, EduEmail: addr.email, EduEmailNormalized: addr.normalized,
 		EmailDomain: addr.domain, UniversityID: &uni, Status: EduVerified, VerifiedAt: &now, ExpiresAt: &exp,
 	}
-	if err := s.d.Store.InsertEduVerification(ctx, v); err != nil {
+	if err := s.edu().InsertEduVerification(ctx, v); err != nil {
 		return EduRecord{}, err
 	}
 	if err := s.emitVerified(ctx, v, renewal); err != nil {
@@ -281,7 +281,7 @@ func (s *service) logVerified(ctx context.Context, v EduRecord) {
 // row and a pending document become superseded. renewal reports whether
 // a verification still in effect was replaced.
 func (s *service) supersedeOpen(ctx context.Context, userID, keep uuid.UUID, now time.Time) (renewal bool, ids []string, err error) {
-	open, err := s.d.Store.LockOpenEduVerifications(ctx, userID)
+	open, err := s.edu().LockOpenEduVerifications(ctx, userID)
 	if err != nil {
 		return false, nil, err
 	}
@@ -292,7 +292,7 @@ func (s *service) supersedeOpen(ctx context.Context, userID, keep uuid.UUID, now
 		}
 		renewal = renewal || o.activeAt(now)
 		o.Status = EduSuperseded
-		if err := s.d.Store.UpdateEduVerification(ctx, o); err != nil {
+		if err := s.edu().UpdateEduVerification(ctx, o); err != nil {
 			return false, nil, err
 		}
 		ids = append(ids, o.ID.String())
@@ -340,10 +340,10 @@ func (s *service) SubmitEduDocument(ctx context.Context, a authz.Actor, in EduDo
 	}
 	var v EduRecord
 	err = s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		if _, err := s.d.Store.LockUser(ctx, a.UserID); err != nil {
+		if _, err := s.users().LockUser(ctx, a.UserID); err != nil {
 			return err
 		}
-		open, err := s.d.Store.LockOpenEduVerifications(ctx, a.UserID)
+		open, err := s.edu().LockOpenEduVerifications(ctx, a.UserID)
 		if err != nil {
 			return err
 		}
@@ -355,7 +355,7 @@ func (s *service) SubmitEduDocument(ctx context.Context, a authz.Actor, in EduDo
 		uni, file := in.UniversityID, in.FileID
 		v = EduRecord{ID: uuid.NewV7(), UserID: a.UserID, Method: EduMethodDocument, UniversityID: &uni,
 			DocumentFileID: &file, Status: EduPending}
-		if err := s.d.Store.InsertEduVerification(ctx, v); err != nil {
+		if err := s.edu().InsertEduVerification(ctx, v); err != nil {
 			return err
 		}
 		err = s.d.Files.Attach(ctx, a, file, files.Owner{Module: eduOwner, EntityID: v.ID, Purpose: files.PurposeEduDocument})
@@ -372,7 +372,7 @@ func (s *service) SubmitEduDocument(ctx context.Context, a authz.Actor, in EduDo
 	if err != nil {
 		return EduView{}, err
 	}
-	if v, err = s.d.Store.EduVerification(ctx, v.ID); err != nil { // created_at as stored (BE-069)
+	if v, err = s.edu().EduVerification(ctx, v.ID); err != nil { // created_at as stored (BE-069)
 		return EduView{}, err
 	}
 	return s.eduView(ctx, v, false)
@@ -383,7 +383,7 @@ func (s *service) MyEduVerification(ctx context.Context, a authz.Actor) (MyEdu, 
 	if err := authz.Can(ctx, a, authz.IdentityEduVerificationReadOwn, ownUser(a)); err != nil {
 		return MyEdu{}, err
 	}
-	rows, err := s.d.Store.EduVerificationsOf(ctx, a.UserID)
+	rows, err := s.edu().EduVerificationsOf(ctx, a.UserID)
 	if err != nil {
 		return MyEdu{}, err
 	}
@@ -493,7 +493,7 @@ func toEduVerification(v EduRecord) EduVerification {
 
 // Active implements StudentVerification.
 func (e eduStudents) Active(ctx context.Context, userID uuid.UUID) (EduVerification, bool, error) {
-	rows, err := e.s.d.Store.ActiveEduVerifications(ctx, []uuid.UUID{userID}, e.s.now())
+	rows, err := e.s.edu().ActiveEduVerifications(ctx, []uuid.UUID{userID}, e.s.now())
 	if err != nil || len(rows) == 0 {
 		return EduVerification{}, false, err
 	}
@@ -502,7 +502,7 @@ func (e eduStudents) Active(ctx context.Context, userID uuid.UUID) (EduVerificat
 
 // ActiveMany implements StudentVerification.
 func (e eduStudents) ActiveMany(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]EduVerification, error) {
-	rows, err := e.s.d.Store.ActiveEduVerifications(ctx, userIDs, e.s.now())
+	rows, err := e.s.edu().ActiveEduVerifications(ctx, userIDs, e.s.now())
 	if err != nil {
 		return nil, err
 	}
@@ -517,7 +517,7 @@ func (e eduStudents) ActiveMany(ctx context.Context, userIDs []uuid.UUID) (map[u
 // verified row is in its year, lapsed once it ran out (before or after
 // identity.edu_expire marked it) or was revoked, none otherwise.
 func (e eduStudents) StudentStatus(ctx context.Context, userID uuid.UUID) (StudentState, error) {
-	v, found, err := e.s.d.Store.LatestEduOutcome(ctx, userID)
+	v, found, err := e.s.edu().LatestEduOutcome(ctx, userID)
 	switch {
 	case err != nil:
 		return StudentState{}, err

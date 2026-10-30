@@ -76,12 +76,12 @@ func (s *service) beginMFA(ctx context.Context, u User, client ClientKind, label
 	}
 	if newHash != "" {
 		err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-			cur, err := s.d.Store.LockUser(ctx, u.ID)
+			cur, err := s.users().LockUser(ctx, u.ID)
 			if err != nil || cur.PasswordHash != u.PasswordHash {
 				return err
 			}
 			cur.PasswordHash = newHash
-			return s.d.Store.UpdateUser(ctx, cur)
+			return s.users().UpdateUser(ctx, cur)
 		})
 		if err != nil {
 			return LoginResult{}, err
@@ -135,7 +135,7 @@ func (s *service) CompleteMFALogin(ctx context.Context, a authz.Actor, in MFALog
 	if !now.Before(c.ExpiresAt) {
 		return LoginResult{}, ErrMFALoginFailed
 	}
-	u, err := s.d.Store.User(ctx, c.UserID)
+	u, err := s.users().User(ctx, c.UserID)
 	switch {
 	case isNotFound(err):
 		return LoginResult{}, ErrMFALoginFailed
@@ -165,7 +165,7 @@ func (s *service) CompleteMFALogin(ctx context.Context, a authz.Actor, in MFALog
 		return LoginResult{}, err
 	}
 	if kind == "recovery_code" {
-		left, err := s.d.Store.RecoveryCodesLeft(ctx, u.ID)
+		left, err := s.mfa().RecoveryCodesLeft(ctx, u.ID)
 		if err != nil {
 			s.d.Log.LogAttrs(ctx, slog.LevelWarn, "recovery codes not counted", slog.String("err", err.Error()))
 		}

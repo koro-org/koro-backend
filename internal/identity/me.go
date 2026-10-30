@@ -48,7 +48,7 @@ func (s *service) Me(ctx context.Context, a authz.Actor) (Me, error) {
 	if err := authz.Can(ctx, a, authz.IdentityAccountReadOwn, ownUser(a)); err != nil {
 		return Me{}, err
 	}
-	u, err := s.d.Store.User(ctx, a.UserID)
+	u, err := s.users().User(ctx, a.UserID)
 	if err != nil {
 		return Me{}, err
 	}
@@ -97,7 +97,7 @@ func (s *service) UpdateMe(ctx context.Context, a authz.Actor, p MePatch) (Me, e
 	var out User
 	var localeChanged bool
 	err = s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		u, err := s.d.Store.LockUser(ctx, a.UserID)
+		u, err := s.users().LockUser(ctx, a.UserID)
 		if err != nil {
 			return err
 		}
@@ -115,7 +115,7 @@ func (s *service) UpdateMe(ctx context.Context, a authz.Actor, p MePatch) (Me, e
 		if len(fields) == 0 {
 			return nil
 		}
-		if err := s.d.Store.UpdateUser(ctx, u); err != nil {
+		if err := s.users().UpdateUser(ctx, u); err != nil {
 			return err
 		}
 		return s.d.Audit.Log(ctx, event(authz.IdentityAccountUpdateOwn, audit.Success, resourceUser, u.ID,
@@ -138,7 +138,7 @@ func (s *service) summary(u User) UserSummary {
 
 // Get implements Users.
 func (s *service) Get(ctx context.Context, id uuid.UUID) (UserSummary, error) {
-	u, err := s.d.Store.User(ctx, id)
+	u, err := s.users().User(ctx, id)
 	if err != nil {
 		return UserSummary{}, err
 	}
@@ -151,7 +151,7 @@ func (s *service) GetMany(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]U
 	if len(ids) == 0 {
 		return out, nil
 	}
-	us, err := s.d.Store.Users(ctx, ids)
+	us, err := s.users().Users(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +163,7 @@ func (s *service) GetMany(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]U
 
 // Contact implements Users (worker/notification path only).
 func (s *service) Contact(ctx context.Context, id uuid.UUID) (UserContact, error) {
-	u, err := s.d.Store.User(ctx, id)
+	u, err := s.users().User(ctx, id)
 	if err != nil {
 		return UserContact{}, err
 	}
@@ -179,7 +179,7 @@ func (s *service) FindByEmail(ctx context.Context, email string) (uuid.UUID, boo
 	if n == "" {
 		return uuid.Nil(), false, nil
 	}
-	u, found, err := s.d.Store.UserByEmail(ctx, n)
+	u, found, err := s.users().UserByEmail(ctx, n)
 	if err != nil || !found {
 		return uuid.Nil(), false, err
 	}

@@ -91,7 +91,7 @@ func (s *service) handleEduNotice(ctx context.Context, payload []byte) error {
 	default:
 		return queue.Permanent(fmt.Errorf("identity: unknown edu notice %q", n.Kind))
 	}
-	u, err := s.d.Store.User(ctx, n.UserID)
+	u, err := s.users().User(ctx, n.UserID)
 	switch {
 	case isNotFound(err):
 		return nil
@@ -102,7 +102,7 @@ func (s *service) handleEduNotice(ctx context.Context, payload []byte) error {
 		return nil
 	}
 	if n.Kind == eduNoticeReminder { // renewed or gone meanwhile: nothing to remind
-		v, err := s.d.Store.EduVerification(ctx, n.VerificationID)
+		v, err := s.edu().EduVerification(ctx, n.VerificationID)
 		if isNotFound(err) || err == nil && !v.activeAt(s.now()) {
 			return nil
 		} else if err != nil {
@@ -137,7 +137,7 @@ func (s *service) expireEdu(ctx context.Context) error {
 		return err
 	}
 	total, err := db.Batches(ctx, s.d.Tx, eduBatch, func(ctx context.Context) (int, error) {
-		rows, err := s.d.Store.ExpireEduVerifications(ctx, s.now(), eduBatch)
+		rows, err := s.edu().ExpireEduVerifications(ctx, s.now(), eduBatch)
 		if err != nil {
 			return 0, err
 		}
@@ -176,7 +176,7 @@ func (s *service) remindEdu(ctx context.Context) error {
 		to := today.AddDays(d + 1).In(clock.Istanbul()).UTC()
 		var after *uuid.UUID
 		for {
-			rows, err := s.d.Store.EduExpiringBetween(ctx, from, to, after, eduBatch)
+			rows, err := s.edu().EduExpiringBetween(ctx, from, to, after, eduBatch)
 			if err != nil {
 				return fmt.Errorf("%s: %w", EduRenewalRemindersJobName, err)
 			}
@@ -227,24 +227,24 @@ func (s *service) handleFileRejected(ctx context.Context, e domainevent.Envelope
 	}
 	sys := authz.SystemActor(rejectedDocumentJob)
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		v, found, err := s.d.Store.EduVerificationOfFile(ctx, p.FileID)
+		v, found, err := s.edu().EduVerificationOfFile(ctx, p.FileID)
 		if err != nil || !found {
 			return err
 		}
-		v, err = s.d.Store.LockEduVerification(ctx, v.ID)
+		v, err = s.edu().LockEduVerification(ctx, v.ID)
 		if err != nil {
 			return err
 		}
 		meta := map[string]any{"subject_user_id": v.UserID.String(), "file_id": p.FileID.String(), "reason": p.Reason,
 			"operation": "document_rejected_by_scan"}
 		if v.Status == EduPending {
-			if _, err := s.d.Store.DeleteEduVerification(ctx, v.ID); err != nil {
+			if _, err := s.edu().DeleteEduVerification(ctx, v.ID); err != nil {
 				return err
 			}
 			meta["withdrawn"] = true
 		} else {
 			v.DocumentFileID = nil
-			if err := s.d.Store.UpdateEduVerification(ctx, v); err != nil {
+			if err := s.edu().UpdateEduVerification(ctx, v); err != nil {
 				return err
 			}
 		}

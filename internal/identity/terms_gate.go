@@ -89,7 +89,7 @@ func (g *termsGate) CheckTerms(ctx context.Context, userID uuid.UUID) error {
 			return nil
 		}
 	}
-	u, err := g.s.d.Store.User(ctx, userID)
+	u, err := g.s.users().User(ctx, userID)
 	switch {
 	case isNotFound(err):
 		return ErrUnauthenticated // erased after the session was resolved

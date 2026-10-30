@@ -58,18 +58,18 @@ func (s *service) handleRoleAlert(ctx context.Context, payload []byte) error {
 	default:
 		return queue.Permanent(fmt.Errorf("identity: unknown role alert %q", n.Kind))
 	}
-	ra, err := s.d.Store.RoleAssignment(ctx, n.AssignmentID)
+	ra, err := s.roles().RoleAssignment(ctx, n.AssignmentID)
 	switch {
 	case isNotFound(err):
 		return nil
 	case err != nil:
 		return err
 	}
-	admins, err := s.d.Store.UsersWithRole(ctx, authz.PlatformAdmin)
+	admins, err := s.roles().UsersWithRole(ctx, authz.PlatformAdmin)
 	if err != nil {
 		return err
 	}
-	users, err := s.d.Store.Users(ctx, admins)
+	users, err := s.users().Users(ctx, admins)
 	if err != nil {
 		return err
 	}

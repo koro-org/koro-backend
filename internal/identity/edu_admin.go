@@ -30,7 +30,7 @@ func (s *service) EduQueue(ctx context.Context, a authz.Actor, q EduQuery) (EduP
 	}
 	limit := page.ClampLimit(q.Limit)
 	q.Limit = limit + 1
-	rows, err := s.d.Store.EduQueue(ctx, q)
+	rows, err := s.edu().EduQueue(ctx, q)
 	if err != nil {
 		return EduPage{}, err
 	}
@@ -47,9 +47,9 @@ func (s *service) EduQueue(ctx context.Context, a authz.Actor, q EduQuery) (EduP
 // verification has no document: 404), then the decision on the real
 // applicant (03 Y6: nobody reviews their own document).
 func (s *service) reviewable(ctx context.Context, a authz.Actor, id uuid.UUID, lock bool) (EduRecord, error) {
-	load := s.d.Store.EduVerification
+	load := s.edu().EduVerification
 	if lock {
-		load = s.d.Store.LockEduVerification
+		load = s.edu().LockEduVerification
 	}
 	v, err := load(ctx, id)
 	if err != nil {
@@ -148,7 +148,7 @@ func (s *service) DecideEduVerification(ctx context.Context, a authz.Actor, id u
 		} else {
 			v.Status = EduRejected
 		}
-		if err := s.d.Store.UpdateEduVerification(ctx, v); err != nil {
+		if err := s.edu().UpdateEduVerification(ctx, v); err != nil {
 			return err
 		}
 		if approve {
@@ -172,7 +172,7 @@ func (s *service) DecideEduVerification(ctx context.Context, a authz.Actor, id u
 // document the reviewer could see (clean, or skipped without a scanner;
 // files.ErrNotClean otherwise).
 func (s *service) approvable(ctx context.Context, v EduRecord) error {
-	u, err := s.d.Store.User(ctx, v.UserID)
+	u, err := s.users().User(ctx, v.UserID)
 	if err != nil {
 		return err
 	}

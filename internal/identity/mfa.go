@@ -147,7 +147,7 @@ func (s *service) verifyTOTP(ctx context.Context, userID uuid.UUID, raw string) 
 	if !ok {
 		return false, nil
 	}
-	t, found, err := s.d.Store.TOTP(ctx, userID)
+	t, found, err := s.mfa().TOTP(ctx, userID)
 	if err != nil || !found || t.ConfirmedAt == nil {
 		return false, err
 	}
@@ -159,7 +159,7 @@ func (s *service) verifyTOTP(ctx context.Context, userID uuid.UUID, raw string) 
 	if err != nil || !ok {
 		return false, err
 	}
-	used, err := s.d.Store.UseTOTPStep(ctx, userID, step)
+	used, err := s.mfa().UseTOTPStep(ctx, userID, step)
 	if err != nil {
 		return false, err
 	}
@@ -243,7 +243,7 @@ func (s *service) useRecoveryCode(ctx context.Context, userID uuid.UUID, raw str
 	if !ok {
 		return false, nil
 	}
-	return s.d.Store.UseRecoveryCode(ctx, userID, recoveryHash(userID, code), s.now())
+	return s.mfa().UseRecoveryCode(ctx, userID, recoveryHash(userID, code), s.now())
 }
 
 // requiresMFA reports whether the user holds an MFA role (03 §6.4, k1):
@@ -253,7 +253,7 @@ func (s *service) requiresMFA(ctx context.Context, a authz.Actor) (bool, error) 
 	if privileged(a.PlatformRoles, a.Memberships) {
 		return true, nil
 	}
-	roles, err := s.d.Store.PlatformRoles(ctx, a.UserID)
+	roles, err := s.roles().PlatformRoles(ctx, a.UserID)
 	if err != nil {
 		return false, err
 	}
@@ -276,7 +276,7 @@ func (s *service) EnrollTOTP(ctx context.Context, a authz.Actor, proof ReauthPro
 	if err := s.mfaReady(); err != nil {
 		return TOTPEnrollment{}, err
 	}
-	u, err := s.d.Store.User(ctx, a.UserID)
+	u, err := s.users().User(ctx, a.UserID)
 	if err != nil {
 		return TOTPEnrollment{}, err
 	}
@@ -299,7 +299,7 @@ func (s *service) EnrollTOTP(ctx context.Context, a authz.Actor, proof ReauthPro
 		return TOTPEnrollment{}, fmt.Errorf("identity: seal totp secret: %w", err)
 	}
 	err = s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		if err := s.d.Store.PutTOTP(ctx, TOTP{UserID: u.ID, SecretEnc: sealed}); err != nil {
+		if err := s.mfa().PutTOTP(ctx, TOTP{UserID: u.ID, SecretEnc: sealed}); err != nil {
 			return err
 		}
 		return s.d.Audit.Log(ctx, event(authz.IdentityMfaEnroll, audit.Success, resourceUser, u.ID,
@@ -322,14 +322,14 @@ func (s *service) ConfirmTOTP(ctx context.Context, a authz.Actor, raw string, pr
 	if err := s.mfaReady(); err != nil {
 		return nil, err
 	}
-	u, err := s.d.Store.User(ctx, a.UserID)
+	u, err := s.users().User(ctx, a.UserID)
 	if err != nil {
 		return nil, err
 	}
 	if u.MFAEnabled {
 		return nil, ErrMFAAlreadyEnabled
 	}
-	t, found, err := s.d.Store.TOTP(ctx, u.ID)
+	t, found, err := s.mfa().TOTP(ctx, u.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -366,25 +366,25 @@ func (s *service) ConfirmTOTP(ctx context.Context, a authz.Actor, raw string, pr
 	}
 	err = s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		now := s.now()
-		confirmed, err := s.d.Store.ConfirmTOTP(ctx, u.ID, step, now)
+		confirmed, err := s.mfa().ConfirmTOTP(ctx, u.ID, step, now)
 		if err != nil {
 			return err
 		}
 		if !confirmed {
 			return ErrMFANotEnrolled // a concurrent confirmation won
 		}
-		cur, err := s.d.Store.LockUser(ctx, u.ID)
+		cur, err := s.users().LockUser(ctx, u.ID)
 		if err != nil {
 			return err
 		}
 		cur.MFAEnabled, cur.FailedLogins, cur.LockedUntil = true, 0, nil
-		if err := s.d.Store.UpdateUser(ctx, cur); err != nil {
+		if err := s.users().UpdateUser(ctx, cur); err != nil {
 			return err
 		}
-		if err := s.d.Store.ReplaceRecoveryCodes(ctx, u.ID, hashes, now); err != nil {
+		if err := s.mfa().ReplaceRecoveryCodes(ctx, u.ID, hashes, now); err != nil {
 			return err
 		}
-		if _, err := s.d.Store.MarkSessionMFA(ctx, u.ID, a.SessionID, now); err != nil {
+		if _, err := s.sessions().MarkSessionMFA(ctx, u.ID, a.SessionID, now); err != nil {
 			return err
 		}
 		s.notifyUser(ctx, u.ID, NoticeMFAEnabled)
@@ -407,7 +407,7 @@ func (s *service) VerifyMFA(ctx context.Context, a authz.Actor, raw string) erro
 	if err := s.mfaReady(); err != nil {
 		return err
 	}
-	u, err := s.d.Store.User(ctx, a.UserID)
+	u, err := s.users().User(ctx, a.UserID)
 	if err != nil {
 		return err
 	}
@@ -428,7 +428,7 @@ func (s *service) VerifyMFA(ctx context.Context, a authz.Actor, raw string) erro
 		return err
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		marked, err := s.d.Store.MarkSessionMFA(ctx, u.ID, a.SessionID, s.now())
+		marked, err := s.sessions().MarkSessionMFA(ctx, u.ID, a.SessionID, s.now())
 		if err != nil {
 			return err
 		}
@@ -445,7 +445,7 @@ func (s *service) DisableTOTP(ctx context.Context, a authz.Actor, proof ReauthPr
 	if err := authz.Can(ctx, a, authz.IdentityMfaDisable, ownUser(a)); err != nil {
 		return err
 	}
-	u, err := s.d.Store.User(ctx, a.UserID)
+	u, err := s.users().User(ctx, a.UserID)
 	if err != nil {
 		return err
 	}
@@ -483,18 +483,18 @@ func (s *service) DisableTOTP(ctx context.Context, a authz.Actor, proof ReauthPr
 // dropMFA deletes the TOTP secret and recovery codes of userID and turns
 // mfa_enabled off, in the transaction carried by ctx.
 func (s *service) dropMFA(ctx context.Context, userID uuid.UUID) error {
-	if _, err := s.d.Store.DeleteTOTP(ctx, userID); err != nil {
+	if _, err := s.mfa().DeleteTOTP(ctx, userID); err != nil {
 		return err
 	}
-	if _, err := s.d.Store.DeleteRecoveryCodes(ctx, userID); err != nil {
+	if _, err := s.mfa().DeleteRecoveryCodes(ctx, userID); err != nil {
 		return err
 	}
-	cur, err := s.d.Store.LockUser(ctx, userID)
+	cur, err := s.users().LockUser(ctx, userID)
 	if err != nil {
 		return err
 	}
 	cur.MFAEnabled = false
-	return s.d.Store.UpdateUser(ctx, cur)
+	return s.users().UpdateUser(ctx, cur)
 }
 
 // RegenerateRecoveryCodes implements Service (regenerateRecoveryCodes, R):
@@ -503,7 +503,7 @@ func (s *service) RegenerateRecoveryCodes(ctx context.Context, a authz.Actor, pr
 	if err := authz.Can(ctx, a, authz.IdentityMfaRecoveryRegenerate, ownUser(a)); err != nil {
 		return nil, err
 	}
-	u, err := s.d.Store.User(ctx, a.UserID)
+	u, err := s.users().User(ctx, a.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -519,7 +519,7 @@ func (s *service) RegenerateRecoveryCodes(ctx context.Context, a authz.Actor, pr
 		return nil, err
 	}
 	err = s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		if err := s.d.Store.ReplaceRecoveryCodes(ctx, u.ID, hashes, s.now()); err != nil {
+		if err := s.mfa().ReplaceRecoveryCodes(ctx, u.ID, hashes, s.now()); err != nil {
 			return err
 		}
 		s.notifyUser(ctx, u.ID, NoticeRecoveryCodesRegenerated)

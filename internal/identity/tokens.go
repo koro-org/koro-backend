@@ -85,10 +85,10 @@ func (s *service) issueToken(ctx context.Context, u User, purpose TokenPurpose, 
 		return EmailToken{}, err
 	}
 	t.TokenHash = token.Hash(raw)
-	if err := s.d.Store.CloseOpenTokens(ctx, u.ID, purpose, now); err != nil {
+	if err := s.emailTokens().CloseOpenTokens(ctx, u.ID, purpose, now); err != nil {
 		return EmailToken{}, err
 	}
-	if err := s.d.Store.InsertEmailToken(ctx, t); err != nil {
+	if err := s.emailTokens().InsertEmailToken(ctx, t); err != nil {
 		return EmailToken{}, err
 	}
 	env, err := domainevent.New(domainevent.IdentityEmailTokenIssued{TokenID: t.ID, UserID: u.ID, Purpose: string(purpose)}, emailTokenAggType, t.ID)
@@ -124,7 +124,7 @@ func (s *service) handleEmailTokenIssued(ctx context.Context, e domainevent.Enve
 	if err != nil {
 		return queue.Permanent(err)
 	}
-	t, err := s.d.Store.EmailToken(ctx, p.TokenID)
+	t, err := s.emailTokens().EmailToken(ctx, p.TokenID)
 	switch {
 	case isNotFound(err):
 		return nil // cleaned up meanwhile
@@ -138,7 +138,7 @@ func (s *service) handleEmailTokenIssued(ctx context.Context, e domainevent.Enve
 	if !ok {
 		return queue.Permanent(fmt.Errorf("identity: no e-mail for token purpose %q", t.Purpose))
 	}
-	u, err := s.d.Store.User(ctx, t.UserID)
+	u, err := s.users().User(ctx, t.UserID)
 	switch {
 	case isNotFound(err):
 		return nil
@@ -192,7 +192,7 @@ func (s *service) handleSecurityNotice(ctx context.Context, payload []byte) erro
 	if !ok {
 		return queue.Permanent(fmt.Errorf("identity: unknown security notice %q", n.Kind))
 	}
-	u, err := s.d.Store.User(ctx, n.UserID)
+	u, err := s.users().User(ctx, n.UserID)
 	switch {
 	case isNotFound(err):
 		return nil

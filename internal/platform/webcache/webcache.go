@@ -5,7 +5,9 @@
 // Flow (01 §6.1 mechanism O): the producing module writes event.published,
 // event.updated, event.cancelled, org.updated, club.updated,
 // club.sensitivity_changed, club_claim.decided, file.published or
-// file.rejected (an org logo / event cover, BE-120) into the outbox in its
+// file.rejected (an org logo / event cover, BE-120) or post.changed (a post
+// readers see was published, edited, hidden, removed or restored, BE-149)
+// into the outbox in its
 // business transaction → the relay enqueues one asynq task per
 // subscription (webcache.revalidate_*) → the handler resolves the current
 // slugs (Resolver), builds the tags and POSTs them, signed, to
@@ -17,7 +19,7 @@
 //	POST /api/revalidate
 //	X-Koro-Timestamp: <unix seconds>              (koro-web accepts ±300 s)
 //	X-Koro-Signature: sha256=<hex(HMAC-SHA256(KORO_REVALIDATE_SECRET, "<timestamp>.<raw body>"))>
-//	{"tags":["club:<slug>","company:<slug>","event:<slug>","sitemap"]}
+//	{"tags":["club:<slug>","company:<slug>","event:<slug>","post:<post_id>","sitemap"]}
 //
 // At most 64 tags per request, each matching ^[a-z0-9][a-z0-9:_./-]{0,127}$,
 // body at most 16 KiB. The body carries public slugs and fixed tag names
@@ -36,6 +38,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"regexp"
+	"uuid"
 )
 
 // Wire contract (koro-web src/lib/revalidate.ts).
@@ -53,6 +56,7 @@ const (
 	clubPrefix    = "club:"
 	companyPrefix = "company:"
 	eventPrefix   = "event:"
+	postPrefix    = "post:"
 )
 
 // Org kinds with a public page on the web (orgs.Kind values).
@@ -68,6 +72,11 @@ func ValidTag(tag string) bool { return tagRe.MatchString(tag) }
 
 // EventTag is the cache tag of an event's public page.
 func EventTag(slug string) string { return eventPrefix + slug }
+
+// PostTag is the cache tag of a post's public page (/gonderiler/<id>):
+// post:<post_id>, the UUID in its canonical lower-case form (RFC 9562;
+// BE-149, WEB-040). Posts have no slug: the page is addressed by the id.
+func PostTag(id uuid.UUID) string { return postPrefix + id.String() }
 
 // OrgTag is the cache tag of an org's public page: club:<slug> or
 // company:<slug>; "" for a kind without a public page (university,

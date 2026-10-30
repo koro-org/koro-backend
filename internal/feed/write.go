@@ -155,6 +155,9 @@ func (s *service) UpdatePost(ctx context.Context, a authz.Actor, id uuid.UUID, i
 		if err := s.writeMedia(ctx, a, next, ap.media); err != nil {
 			return err
 		}
+		if err := s.changed(ctx, cur, next); err != nil {
+			return err
+		}
 		return s.d.Audit.Log(ctx, auditEvent(a, authz.FeedPostUpdate, next, map[string]any{
 			"status": string(next.Status), "media_replaced": ap.media != nil,
 		}))
@@ -177,6 +180,51 @@ func (s *service) emitFor(ctx context.Context, p domainevent.Payload, aggType st
 		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "feed event not emitted",
 			slog.String("topic", p.Topic()), slog.String("aggregate_id", id.String()), slog.String("err", err.Error()))
 	}
+}
+
+// Changes of post.changed (BE-149).
+const (
+	changePublished = "published"
+	changeEdited    = "edited"
+	changeHidden    = "hidden"
+	changeRemoved   = "removed"
+	changeRestored  = "restored"
+)
+
+// changed writes post.changed (O, in the caller's transaction) when the
+// write from prev to next touches what readers see: the post is or becomes
+// published. Public is the anonymous read rule itself (authz, 03 §3.6) on
+// the published post: the page koro-web caches (webcache, BE-149).
+func (s *service) changed(ctx context.Context, prev, next Post) error {
+	change := readerChange(prev.Status, next.Status)
+	if change == "" {
+		return nil
+	}
+	published := next
+	published.Status = StatusPublished
+	public := authz.Can(ctx, authz.Anonymous(), authz.FeedPostRead, postResource(published, true, false)) == nil
+	return outbox.Emit(ctx, s.d.Outbox, domainevent.PostChanged{
+		PostID: next.ID, OrgID: next.OrgID, Public: public, Change: change,
+	}, postAggType, next.ID)
+}
+
+// readerChange names the change of a post's status for its readers; ""
+// when it was and stays out of their sight (a draft, a post in review, a
+// hidden post removed).
+func readerChange(prev, next Status) string {
+	switch {
+	case prev == StatusPublished && next == StatusPublished:
+		return changeEdited
+	case next == StatusPublished && (prev == StatusHidden || prev == StatusRemoved):
+		return changeRestored
+	case next == StatusPublished:
+		return changePublished
+	case prev == StatusPublished && next == StatusHidden:
+		return changeHidden
+	case prev == StatusPublished:
+		return changeRemoved
+	}
+	return ""
 }
 
 // needsReview is the pre-moderation rule of 02 §12.1 and T-15: a new org
@@ -243,6 +291,9 @@ func (s *service) PublishPost(ctx context.Context, a authz.Actor, id uuid.UUID) 
 			next.Status, next.PublishedAt = StatusPublished, &now
 		}
 		if next, err = s.posts().UpdatePost(ctx, next); err != nil {
+			return uuid.Nil(), err
+		}
+		if err := s.changed(ctx, p, next); err != nil {
 			return uuid.Nil(), err
 		}
 		if review {
@@ -322,6 +373,9 @@ func (s *service) DeletePost(ctx context.Context, a authz.Actor, id uuid.UUID) e
 			next := p
 			next.Status, next.RemovedAt = StatusRemoved, &now
 			if _, err := s.posts().UpdatePost(ctx, next); err != nil {
+				return err
+			}
+			if err := s.changed(ctx, p, next); err != nil {
 				return err
 			}
 		default:

@@ -236,7 +236,7 @@ type Service interface {
 type Deps struct {
 	Store       Store
 	Tx          db.TxManager
-	Outbox      outbox.Writer       // post.published, post.submitted_for_review, post.moderated, content_report.created (A)
+	Outbox      outbox.Writer       // post.published, post.submitted_for_review, post.moderated, content_report.created (A); post.changed (O, BE-149)
 	Queue       queue.Enqueuer      // the org moderation and report outcome notices (A, BE-032)
 	Audit       AuditLogger         // every write, same transaction
 	Orgs        Orgs                // the author org's kind, status and name

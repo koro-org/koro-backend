@@ -46,6 +46,7 @@ const (
 	SubClubClaimDecided = "webcache.revalidate_claimed_club"
 	SubFilePublished    = "webcache.revalidate_published_file"
 	SubFileRejected     = "webcache.revalidate_rejected_file"
+	SubPostChanged      = "webcache.revalidate_post"
 )
 
 // Publishable file purposes and their owners (files: org_logo attached by
@@ -99,6 +100,7 @@ func (v *Revalidator) Subscribe(r *outbox.Registry) {
 	r.Subscribe(domainevent.TopicClubClaimDecided, SubClubClaimDecided, handle(v, v.claimDecided), opts...)
 	r.Subscribe(domainevent.TopicFilePublished, SubFilePublished, handle(v, v.filePublished), opts...)
 	r.Subscribe(domainevent.TopicFileRejected, SubFileRejected, handle(v, v.fileRejected), opts...)
+	r.Subscribe(domainevent.TopicPostChanged, SubPostChanged, handle(v, v.postChanged), opts...)
 }
 
 // handle decodes the payload, builds the tags and sends them. A payload
@@ -236,6 +238,22 @@ func (v *Revalidator) fileOwnerTags(ctx context.Context, purpose, module string,
 		return v.eventTags(ctx, entityID, ev.OrgID, "", false)
 	}
 	return nil, nil
+}
+
+// postChanged: a post on the public web (Public: an anonymous reader
+// opens it) changed: its page and its author org's page (the org page
+// lists its posts; university and platform authors have none). Posts are
+// not in the sitemap. A post off the public web (followers, segment,
+// commercial) has no cached page: nothing is sent.
+func (v *Revalidator) postChanged(ctx context.Context, p domainevent.PostChanged) ([]string, error) {
+	if !p.Public {
+		return nil, nil
+	}
+	org, err := v.orgTag(ctx, p.OrgID)
+	if err != nil {
+		return nil, err
+	}
+	return []string{PostTag(p.PostID), org}, nil
 }
 
 // orgTags: the org's page and optionally the sitemap; an org without a

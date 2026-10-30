@@ -30,9 +30,10 @@ func webcacheSubs(c *container) map[string]outbox.Subscription {
 	return out
 }
 
-// TestWire_WebcacheSubscriptionsRegistered: the seven
+// TestWire_WebcacheSubscriptionsRegistered: the
 // webcache.revalidate_* subscriptions exist in every process; without the
-// worker's configuration (api, seed, these tests) they skip (BE-106).
+// worker's configuration (api, seed, these tests) they skip (BE-106,
+// BE-120, BE-149).
 func TestWire_WebcacheSubscriptionsRegistered(t *testing.T) {
 	t.Parallel()
 	c := newTestContainer(t)
@@ -50,6 +51,7 @@ func TestWire_WebcacheSubscriptionsRegistered(t *testing.T) {
 		webcache.SubClubClaimDecided: domainevent.TopicClubClaimDecided,
 		webcache.SubFilePublished:    domainevent.TopicFilePublished,
 		webcache.SubFileRejected:     domainevent.TopicFileRejected,
+		webcache.SubPostChanged:      domainevent.TopicPostChanged,
 	}
 	for name, topic := range want {
 		if s, ok := subs[name]; !ok || s.Topic != topic {

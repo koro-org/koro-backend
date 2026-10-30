@@ -17,7 +17,7 @@ import (
 // event.published / event.updated / event.cancelled (events), org.updated
 // (orgs), club.updated / club.sensitivity_changed / club_claim.decided
 // (directory), file.published / file.rejected (files: org logos and event
-// covers, BE-120). It is platform, not a feature module: wire.go registers it
+// covers, BE-120), post.changed (feed: public posts, BE-149). It is platform, not a feature module: wire.go registers it
 // with the platform's tasks (c.web.tasks), after every module is built,
 // because the resolver reads events and orgs.
 //

@@ -67,6 +67,12 @@ func TestTags_FollowTheWebContract(t *testing.T) {
 	if got := webcache.EventTag("go-atolyesi-2"); got != "event:go-atolyesi-2" {
 		t.Fatalf("EventTag = %q", got)
 	}
+	// post:<uuid> (BE-149, WEB-040): the canonical lower-case UUID, inside
+	// the generic tag pattern of koro-web.
+	post := uuid.MustParse("0192F3A4-5B6C-7D8E-9FA0-B1C2D3E4F506")
+	if got := webcache.PostTag(post); got != "post:0192f3a4-5b6c-7d8e-9fa0-b1c2d3e4f506" || !webcache.ValidTag(got) {
+		t.Fatalf("PostTag = %q", got)
+	}
 	for _, ok := range []string{"sitemap", "club:a", "event:go-atolyesi", "company:x_y.z/1"} {
 		if !webcache.ValidTag(ok) {
 			t.Errorf("ValidTag(%q) = false", ok)
@@ -253,6 +259,7 @@ func (r fakeResolver) Org(_ context.Context, id uuid.UUID) (webcache.OrgRef, boo
 var (
 	clubID, companyID, uniID = uuid.NewV7(), uuid.NewV7(), uuid.NewV7()
 	eventID, uniEventID      = uuid.NewV7(), uuid.NewV7()
+	postID                   = uuid.NewV7()
 )
 
 func resolver() fakeResolver {
@@ -344,6 +351,20 @@ func TestRevalidator_TopicsToTags(t *testing.T) {
 			domainevent.FileRejected{FileID: uuid.NewV7(), Purpose: "cv", Reason: "infected", AttachedModule: "students", AttachedEntityID: &clubID}, nil},
 		{"rejected unattached logo", webcache.SubFileRejected,
 			domainevent.FileRejected{FileID: uuid.NewV7(), Purpose: "org_logo", Reason: "unprocessable"}, nil},
+		{"public club post published", webcache.SubPostChanged,
+			domainevent.PostChanged{PostID: postID, OrgID: clubID, Public: true, Change: "published"},
+			[]string{webcache.PostTag(postID), "club:odtu-robotik"}},
+		{"public club post removed", webcache.SubPostChanged,
+			domainevent.PostChanged{PostID: postID, OrgID: clubID, Public: true, Change: "removed"},
+			[]string{webcache.PostTag(postID), "club:odtu-robotik"}},
+		{"public university post", webcache.SubPostChanged,
+			domainevent.PostChanged{PostID: postID, OrgID: uniID, Public: true, Change: "edited"},
+			[]string{webcache.PostTag(postID)}},
+		{"post of a missing org", webcache.SubPostChanged,
+			domainevent.PostChanged{PostID: postID, OrgID: uuid.NewV7(), Public: true, Change: "hidden"},
+			[]string{webcache.PostTag(postID)}},
+		{"followers or commercial post", webcache.SubPostChanged,
+			domainevent.PostChanged{PostID: postID, OrgID: companyID, Public: false, Change: "published"}, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -145,8 +145,8 @@ func TestPublish_EmitsPostPublished(t *testing.T) {
 	if err != nil || p.Post.Status != feed.StatusPublished || p.Post.PublishedAt == nil || !p.Post.PublishedAt.Equal(t0) {
 		t.Fatalf("PublishPost = %+v, %v", p.Post, err)
 	}
-	evs := e.out.Events()
-	if len(evs) != 1 || evs[0].Topic != domainevent.TopicPostPublished {
+	evs := slices.DeleteFunc(e.out.Events(), func(env domainevent.Envelope) bool { return env.Topic != domainevent.TopicPostPublished })
+	if len(evs) != 1 {
 		t.Fatalf("events = %v", e.out.Topics())
 	}
 	got, err := domainevent.Decode[domainevent.PostPublished](evs[0])

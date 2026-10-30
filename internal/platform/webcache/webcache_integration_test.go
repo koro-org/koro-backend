@@ -91,6 +91,62 @@ func TestRevalidate_OutboxRelayWorker_PostsSignedTags(t *testing.T) {
 	}
 }
 
+// TestRevalidate_PostChanged_OutboxRelayWorker (BE-149): a post.changed row
+// of a public post, written in a PostgreSQL transaction, reaches the web
+// through the relay and the asynq worker as post:<id> + the author org's
+// tag; one of a post off the public web sends nothing.
+func TestRevalidate_PostChanged_OutboxRelayWorker(t *testing.T) {
+	t.Parallel()
+	d := testutil.NewDB(t)
+	rdb := testutil.NewRedis(t)
+	ctx := t.Context()
+	log := obs.Discard()
+	web := newFakeWeb(t)
+
+	subs := outbox.NewRegistry()
+	webcache.New(webcache.Deps{Resolver: resolver(), Sender: newSender(t, web), Log: log}).Subscribe(subs)
+	client := queue.NewClient(rdb, log)
+	t.Cleanup(func() { _ = client.Close() })
+	ob := outbox.New(outbox.Deps{Store: outbox.NewGormStore(d.ORM), Tx: d.Tx, Subs: subs, Queue: client, Clock: clock.NewFake(t0), Log: log})
+	for _, p := range []domainevent.PostChanged{
+		{PostID: postID, OrgID: companyID, Public: false, Change: "published"},
+		{PostID: postID, OrgID: clubID, Public: true, Change: "edited"},
+	} {
+		env, err := domainevent.New(p, "post", p.PostID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := d.Tx.WithTx(ctx, func(ctx context.Context) error { return ob.Add(ctx, env) }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err := ob.NewRelay(outbox.RelayConfig{}).Once(ctx); err != nil || n != 2 {
+		t.Fatalf("relay = %d, %v", n, err)
+	}
+
+	mux := queue.NewMux(log)
+	for _, s := range subs.All() {
+		if err := mux.Handle(s.Name, s.HandleTask); err != nil {
+			t.Fatal(err)
+		}
+	}
+	srv := queue.NewServer(ctx, rdb, mux, queue.ServerConfig{Concurrency: 1, ShutdownTimeout: time.Second, Log: log})
+	if err := srv.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Shutdown)
+	// Both tasks done (the queue is drained, nothing retried or archived):
+	// only the public post reached the web.
+	insp := asynq.NewInspectorFromRedisClient(rdb)
+	waitUntil(t, func() bool {
+		q, err := insp.GetQueueInfo(queue.Default)
+		return err == nil && len(web.got(t)) == 1 && q.Pending == 0 && q.Active == 0 && q.Retry == 0 && q.Archived == 0
+	})
+	if got := web.got(t); len(got) != 1 || !slices.Equal(got[0], []string{webcache.PostTag(postID), "club:odtu-robotik"}) {
+		t.Fatalf("calls = %v, want one [post tag, club tag]", got)
+	}
+}
+
 func waitUntil(t *testing.T, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)

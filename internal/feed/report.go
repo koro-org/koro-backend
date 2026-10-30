@@ -200,6 +200,9 @@ func (s *service) autoHide(ctx context.Context, postID uuid.UUID) error {
 	if _, err := s.posts().UpdatePost(ctx, next); err != nil {
 		return err
 	}
+	if err := s.changed(ctx, p, next); err != nil {
+		return err
+	}
 	id := p.ID
 	sys := authz.SystemActor(autoHideJob)
 	if err := s.d.Audit.Log(ctx, audit.Event{

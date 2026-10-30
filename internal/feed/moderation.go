@@ -125,7 +125,8 @@ func moderationAudit(a authz.Actor, act authz.Action, m ModerationAction, orgID 
 // a platform role) → the input (422) → in one transaction: the post (404,
 // locked) → the moderator is not its author nor a writer of its org (403)
 // → the cited report (422/409) → the transition (409 outside the state
-// machine) → the moderation action, the audit record, post.moderated (A).
+// machine) → the moderation action, the audit record, post.moderated (A)
+// and, for a change readers see, post.changed (O, BE-149).
 //
 //	approve  pending_review → published (counts towards the org's trust; auto_trust)
 //	hide     published → hidden
@@ -169,6 +170,9 @@ func (s *service) ModeratePost(ctx context.Context, a authz.Actor, postID uuid.U
 			return uuid.Nil(), err
 		}
 		if next, err = s.posts().UpdatePost(ctx, next); err != nil {
+			return uuid.Nil(), err
+		}
+		if err := s.changed(ctx, p, next); err != nil {
 			return uuid.Nil(), err
 		}
 		if in.Action == ModApprove {

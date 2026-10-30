@@ -202,9 +202,8 @@ func (s *service) changed(ctx context.Context, prev, next Post) error {
 	}
 	published := next
 	published.Status = StatusPublished
-	public := authz.Can(ctx, authz.Anonymous(), authz.FeedPostRead, postResource(published, true, false)) == nil
 	return outbox.Emit(ctx, s.d.Outbox, domainevent.PostChanged{
-		PostID: next.ID, OrgID: next.OrgID, Public: public, Change: change,
+		PostID: next.ID, OrgID: next.OrgID, Public: anonymousReads(ctx, published), Change: change,
 	}, postAggType, next.ID)
 }
 

@@ -73,6 +73,16 @@ func pgWorld(d *db.DB) world {
 		trust: func(t *testing.T, o uuid.UUID, l feed.TrustLevel, n int) {
 			exec(t, `INSERT INTO feed_org_settings (org_id, trust_level, approved_posts_count) VALUES ($1, $2, $3)`, o, string(l), n)
 		},
+		event: func(t *testing.T, org uuid.UUID) uuid.UUID {
+			id, by := uuid.NewV7(), uuid.NewV7()
+			email := "e" + strconv.FormatInt(seq.Add(1), 10) + "@example.test"
+			exec(t, `INSERT INTO users (id, status, email, email_normalized, first_name, last_name, signup_persona)
+				VALUES ($1, 'active', $2, $2, 'Ada', 'Yılmaz', 'company')`, by, email)
+			exec(t, `INSERT INTO events (id, org_id, created_by, title, slug, category, format, starts_at, ends_at, status, published_at)
+				VALUES ($1, $2, $3, 'Bahar Şenliği', $4, 'social', 'in_person', now() + interval '30 days', now() + interval '31 days',
+				'published', now())`, id, org, by, "e-"+strconv.FormatInt(seq.Add(1), 10))
+			return id
+		},
 	}
 }
 

@@ -303,6 +303,22 @@ func (s gormStore) ListOrgPosts(ctx context.Context, orgID uuid.UUID, r Reader, 
 	return out, nil
 }
 
+// ListEventShares implements Store over posts_event_idx.
+//
+// cross-org: the posts of every org that share one event (the web's post
+// pages showing its summary, BE-150); the reader's visibility (03 §3.6) is
+// applied in the query.
+func (s gormStore) ListEventShares(ctx context.Context, eventID uuid.UUID, r Reader, limit int) ([]Post, error) {
+	q := db.Conn(ctx, s.orm).Table("posts AS p").Select(prefixed).
+		Where("p.status = 'published' AND p.event_id = ?", eventID)
+	cond, args := readerConds(r)
+	var out []Post
+	if err := q.Where(cond, args...).Order("p.published_at DESC, p.id DESC").Limit(limit).Scan(&out).Error; err != nil {
+		return nil, wrap("list event shares", err)
+	}
+	return out, nil
+}
+
 // scoped is the org scope of the aliased posts queries (05 §5.5).
 func scoped(orgID uuid.UUID) func(*gorm.DB) *gorm.DB {
 	return func(q *gorm.DB) *gorm.DB { return q.Where("p.org_id = ?", orgID) }

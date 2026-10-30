@@ -28,11 +28,25 @@ type OrgRef struct {
 	Slug string
 }
 
-// Resolver reads the current slugs (system reads, any status). found is
-// false for a missing row; err is retried.
+// PostRef is a post on the public web (BE-150): its page is post:<ID>,
+// its author org's page lists it.
+type PostRef struct {
+	ID    uuid.UUID
+	OrgID uuid.UUID
+}
+
+// Resolver reads the current slugs (system reads, any status) and the
+// posts on the public web (feed's anonymous read rule). found is false for
+// a missing row; err is retried.
 type Resolver interface {
 	Event(ctx context.Context, id uuid.UUID) (ref EventRef, found bool, err error)
 	Org(ctx context.Context, id uuid.UUID) (ref OrgRef, found bool, err error)
+	// Post: found is false for a missing post and for one off the public
+	// web (not published, followers, segment, commercial).
+	Post(ctx context.Context, id uuid.UUID) (ref PostRef, found bool, err error)
+	// EventShares returns up to limit posts on the public web that share
+	// the event (event_share), newest first.
+	EventShares(ctx context.Context, eventID uuid.UUID, limit int) ([]PostRef, error)
 }
 
 // Subscription names (asynq task types, "<module>.<verb>_<object>").
@@ -54,9 +68,17 @@ const (
 const (
 	purposeOrgLogo    = "org_logo"
 	purposeEventCover = "event_cover"
+	purposePostMedia  = "post_media"
 	ownerOrgs         = "orgs"
 	ownerEvents       = "events"
+	ownerFeed         = "feed"
 )
+
+// MaxEventShares bounds the post pages one event change revalidates
+// (BE-150): at most 2×MaxEventShares post and author org tags, a few
+// requests of MaxTags. Older shares beyond it refresh at the end of their
+// cache life (koro-web cacheLife('minutes')).
+const MaxEventShares = 2 * MaxTags
 
 // attemptTimeout bounds one task attempt (resolution + POST).
 const attemptTimeout = 30 * time.Second
@@ -68,6 +90,11 @@ const claimApproved = "approved"
 // sitemapFields are the event.updated fields that move a page in or out of
 // the sitemap (its URL or its public visibility).
 var sitemapFields = []string{"slug", "visibility", "visibility_university_id"}
+
+// shareFields are the event.updated fields the post pages sharing the event
+// show (feed's event summary: title, slug, schedule) or that take the
+// summary off them (visibility; BE-150).
+var shareFields = []string{"title", "slug", "starts_at", "ends_at", "visibility"}
 
 // Deps are the dependencies of the Revalidator.
 type Deps struct {
@@ -151,11 +178,50 @@ func (v *Revalidator) eventPublished(ctx context.Context, p domainevent.EventPub
 
 func (v *Revalidator) eventUpdated(ctx context.Context, p domainevent.EventUpdated) ([]string, error) {
 	sitemap := p.PreviousSlug != "" || slices.ContainsFunc(p.Fields, func(f string) bool { return slices.Contains(sitemapFields, f) })
-	return v.eventTags(ctx, p.EventID, p.OrgID, p.PreviousSlug, sitemap)
+	tags, err := v.eventTags(ctx, p.EventID, p.OrgID, p.PreviousSlug, sitemap)
+	if err != nil || !slices.ContainsFunc(p.Fields, func(f string) bool { return slices.Contains(shareFields, f) }) {
+		return tags, err
+	}
+	return v.withShares(ctx, tags, p.EventID)
 }
 
+// eventCancelled: the post pages sharing it show its status (BE-150).
 func (v *Revalidator) eventCancelled(ctx context.Context, p domainevent.EventCancelled) ([]string, error) {
-	return v.eventTags(ctx, p.EventID, p.OrgID, "", true)
+	tags, err := v.eventTags(ctx, p.EventID, p.OrgID, "", true)
+	if err != nil {
+		return nil, err
+	}
+	return v.withShares(ctx, tags, p.EventID)
+}
+
+// withShares appends the pages of the public posts sharing the event
+// (BE-150): each post's page and its author org's page (it lists the
+// post with the event's summary), at most MaxEventShares posts, newest
+// first; each org is resolved once.
+func (v *Revalidator) withShares(ctx context.Context, tags []string, eventID uuid.UUID) ([]string, error) {
+	shares, err := v.d.Resolver.EventShares(ctx, eventID, MaxEventShares+1)
+	if err != nil {
+		return nil, fmt.Errorf("webcache: resolve event shares: %w", err)
+	}
+	if len(shares) > MaxEventShares {
+		shares = shares[:MaxEventShares]
+		v.d.Log.LogAttrs(ctx, slog.LevelWarn, "web revalidation: event shares above the cap, the older pages wait for their cache life",
+			slog.Int("cap", MaxEventShares))
+	}
+	orgs := map[uuid.UUID]bool{}
+	for _, s := range shares {
+		tags = append(tags, PostTag(s.ID))
+		if orgs[s.OrgID] {
+			continue
+		}
+		orgs[s.OrgID] = true
+		org, err := v.orgTag(ctx, s.OrgID)
+		if err != nil {
+			return nil, err
+		}
+		tags = append(tags, org)
+	}
+	return tags, nil
 }
 
 // eventTags: the event's page (and its old page after a slug change), the
@@ -211,8 +277,9 @@ func (v *Revalidator) filePublished(ctx context.Context, p domainevent.FilePubli
 	return v.fileOwnerTags(ctx, p.Purpose, p.AttachedModule, p.AttachedEntityID)
 }
 
-// fileRejected: an attached org logo or event cover was taken out of use
-// (infected, unprocessable): its page must stop showing it.
+// fileRejected: an attached org logo, event cover or post image (BE-150)
+// was taken out of use (infected, unprocessable): its page must stop
+// showing it.
 func (v *Revalidator) fileRejected(ctx context.Context, p domainevent.FileRejected) ([]string, error) {
 	if p.AttachedEntityID == nil {
 		return nil, nil
@@ -220,9 +287,10 @@ func (v *Revalidator) fileRejected(ctx context.Context, p domainevent.FileReject
 	return v.fileOwnerTags(ctx, p.Purpose, p.AttachedModule, *p.AttachedEntityID)
 }
 
-// fileOwnerTags: the page of the record that shows a publishable file
-// (the org's page; the event's page and its organiser's), nothing for any
-// other purpose or owner.
+// fileOwnerTags: the page of the record that shows a file on the public
+// web (the org's page; the event's page and its organiser's; a public
+// post's page and its author org's), nothing for any other purpose or
+// owner.
 func (v *Revalidator) fileOwnerTags(ctx context.Context, purpose, module string, entityID uuid.UUID) ([]string, error) {
 	switch {
 	case purpose == purposeOrgLogo && module == ownerOrgs:
@@ -236,6 +304,15 @@ func (v *Revalidator) fileOwnerTags(ctx context.Context, purpose, module string,
 			return nil, nil
 		}
 		return v.eventTags(ctx, entityID, ev.OrgID, "", false)
+	case purpose == purposePostMedia && module == ownerFeed:
+		post, found, err := v.d.Resolver.Post(ctx, entityID)
+		if err != nil {
+			return nil, fmt.Errorf("webcache: resolve post: %w", err)
+		}
+		if !found {
+			return nil, nil // not on the public web: no cached page
+		}
+		return v.postTags(ctx, post.ID, post.OrgID)
 	}
 	return nil, nil
 }
@@ -249,11 +326,16 @@ func (v *Revalidator) postChanged(ctx context.Context, p domainevent.PostChanged
 	if !p.Public {
 		return nil, nil
 	}
-	org, err := v.orgTag(ctx, p.OrgID)
+	return v.postTags(ctx, p.PostID, p.OrgID)
+}
+
+// postTags: a public post's page and its author org's page.
+func (v *Revalidator) postTags(ctx context.Context, postID, orgID uuid.UUID) ([]string, error) {
+	org, err := v.orgTag(ctx, orgID)
 	if err != nil {
 		return nil, err
 	}
-	return []string{PostTag(p.PostID), org}, nil
+	return []string{PostTag(postID), org}, nil
 }
 
 // orgTags: the org's page and optionally the sitemap; an org without a

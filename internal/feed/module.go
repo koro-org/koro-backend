@@ -119,6 +119,18 @@ type Posts interface {
 	Get(ctx context.Context, postID uuid.UUID) (PostSummary, error)
 }
 
+// PublicPosts is the public web's read of posts (webcache, BE-150): a
+// system read of what an anonymous reader opens — published, public, not
+// commercial (03 §3.6, T-57) — the rule of getPost and listPosts itself.
+type PublicPosts interface {
+	// PublicPost returns the summary of a post an anonymous reader opens;
+	// found is false for a missing post and for any other.
+	PublicPost(ctx context.Context, postID uuid.UUID) (s PostSummary, found bool, err error)
+	// PublicEventShares returns up to limit posts an anonymous reader opens
+	// that share eventID (event_share), newest first.
+	PublicEventShares(ctx context.Context, eventID uuid.UUID, limit int) ([]PostSummary, error)
+}
+
 // Likes is the like read of other modules (BE-090): talent's
 // reconciliation of a closed period (00 T-321) asks which likes its ledger
 // credited were withdrawn. A system read without authorisation; only the
@@ -142,6 +154,7 @@ type LikeKey struct {
 // authz.Can first (05 §5.3).
 type Service interface {
 	Posts
+	PublicPosts
 	Likes
 
 	// GetFeed is getFeed (feed.feed.read): the reader's feed.

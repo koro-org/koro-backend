@@ -5,13 +5,15 @@
 // Flow (01 §6.1 mechanism O): the producing module writes event.published,
 // event.updated, event.cancelled, org.updated, club.updated,
 // club.sensitivity_changed, club_claim.decided, file.published or
-// file.rejected (an org logo / event cover, BE-120) or post.changed (a post
-// readers see was published, edited, hidden, removed or restored, BE-149)
-// into the outbox in its
+// file.rejected (an org logo / event cover, BE-120; a post image, BE-150)
+// or post.changed (a post readers see was published, edited, hidden,
+// removed or restored, BE-149) into the outbox in its
 // business transaction → the relay enqueues one asynq task per
 // subscription (webcache.revalidate_*) → the handler resolves the current
 // slugs (Resolver), builds the tags and POSTs them, signed, to
-// {KORO_WEB_INTERNAL_URL}/api/revalidate.
+// {KORO_WEB_INTERNAL_URL}/api/revalidate. An event change its shares show
+// (cancellation; title, slug, schedule, visibility) also revalidates the
+// public posts sharing it, at most MaxEventShares (BE-150).
 //
 // Contract (koro-web src/lib/revalidate.ts, README "Yayın webhook'u"; the
 // two sides must change together):

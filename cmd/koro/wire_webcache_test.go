@@ -9,8 +9,11 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 	"uuid"
 
+	"koro/internal/authz/authztest"
+	"koro/internal/feed"
 	"koro/internal/orgs"
 	"koro/internal/platform/config"
 	"koro/internal/platform/db"
@@ -125,5 +128,43 @@ func TestWire_WebcacheResolvesSlugsAndPosts(t *testing.T) {
 	defer mu.Unlock()
 	if len(bad) > 0 || seen != 1 || !slices.Equal(got[0], []string{"club:robotik-kulubu", "sitemap"}) {
 		t.Fatalf("requests = %v (bad %v)", got, bad)
+	}
+}
+
+// TestWire_WebcacheResolvesPublicPosts (BE-150): the resolver reads the
+// public posts through feed.PublicPosts: a public share of an event is
+// found and listed, a followers share is neither.
+func TestWire_WebcacheResolvesPublicPosts(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	at := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	eventID := uuid.NewV7()
+	share := func(audience feed.AudienceKind) uuid.UUID {
+		t.Helper()
+		p := feed.Post{
+			ID: uuid.NewV7(), OrgID: authztest.ID("club_a"), AuthorOrgKind: feed.AuthorClub, AuthorUserID: authztest.ID("club_admin"),
+			Kind: feed.KindEventShare, EventID: &eventID, AudienceKind: audience, AudienceKeys: []string{feed.KeyAll},
+			AudienceDimCount: 1, Status: feed.StatusPublished, PublishedAt: &at, CreatedAt: at, UpdatedAt: at,
+		}
+		if err := c.feed.built.(*feed.MemStore).PutPost(p); err != nil {
+			t.Fatal(err)
+		}
+		return p.ID
+	}
+	public, followers := share(feed.AudiencePublic), share(feed.AudienceFollowers)
+	r := webResolver{c: c}
+	if ref, found, err := r.Post(ctx, public); err != nil || !found || ref != (webcache.PostRef{ID: public, OrgID: authztest.ID("club_a")}) {
+		t.Fatalf("Post(public) = %+v, %v, %v", ref, found, err)
+	}
+	if ref, found, err := r.Post(ctx, followers); err != nil || found {
+		t.Fatalf("Post(followers) = %+v, %v, %v", ref, found, err)
+	}
+	refs, err := r.EventShares(ctx, eventID, 10)
+	if err != nil || len(refs) != 1 || refs[0].ID != public {
+		t.Fatalf("EventShares = %+v, %v", refs, err)
 	}
 }

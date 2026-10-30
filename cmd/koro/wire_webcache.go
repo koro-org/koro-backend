@@ -17,9 +17,10 @@ import (
 // event.published / event.updated / event.cancelled (events), org.updated
 // (orgs), club.updated / club.sensitivity_changed / club_claim.decided
 // (directory), file.published / file.rejected (files: org logos and event
-// covers, BE-120), post.changed (feed: public posts, BE-149). It is platform, not a feature module: wire.go registers it
-// with the platform's tasks (c.web.tasks), after every module is built,
-// because the resolver reads events and orgs.
+// covers, BE-120; post images, BE-150), post.changed (feed: public posts,
+// BE-149). It is platform, not a feature module: wire.go registers it with
+// the platform's tasks (c.web.tasks), after every module is built, because
+// the resolver reads events, orgs and feed.
 //
 // Configuration: config.Worker.Webcache (c.infra.webcache), the worker's
 // alone. Outside `koro worker` (api, seed, wiring tests) it is empty: the
@@ -51,7 +52,8 @@ func (w *webRevalidation) tasks(c *container) {
 }
 
 // webResolver reads the current slugs through the modules' system reads
-// (events.Events.Get, orgs.OrgDirectory.Get; any status).
+// (events.Events.Get, orgs.OrgDirectory.Get; any status) and the public
+// posts through feed.PublicPosts (BE-150).
 type webResolver struct{ c *container }
 
 func (r webResolver) Event(ctx context.Context, id uuid.UUID) (webcache.EventRef, bool, error) {
@@ -82,4 +84,32 @@ func (r webResolver) Org(ctx context.Context, id uuid.UUID) (webcache.OrgRef, bo
 		return webcache.OrgRef{}, false, err
 	}
 	return webcache.OrgRef{Kind: string(o.Kind), Slug: o.Slug}, true, nil
+}
+
+func (r webResolver) Post(ctx context.Context, id uuid.UUID) (webcache.PostRef, bool, error) {
+	svc := r.c.feed.svc
+	if svc == nil {
+		return webcache.PostRef{}, false, errors.New("webcache: feed is not wired")
+	}
+	p, found, err := svc.PublicPost(ctx, id)
+	if err != nil || !found {
+		return webcache.PostRef{}, false, err
+	}
+	return webcache.PostRef{ID: p.ID, OrgID: p.OrgID}, true, nil
+}
+
+func (r webResolver) EventShares(ctx context.Context, eventID uuid.UUID, limit int) ([]webcache.PostRef, error) {
+	svc := r.c.feed.svc
+	if svc == nil {
+		return nil, errors.New("webcache: feed is not wired")
+	}
+	ps, err := svc.PublicEventShares(ctx, eventID, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]webcache.PostRef, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, webcache.PostRef{ID: p.ID, OrgID: p.OrgID})
+	}
+	return out, nil
 }

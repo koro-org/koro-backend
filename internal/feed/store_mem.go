@@ -312,6 +312,19 @@ func (s *MemStore) ListOrgPosts(_ context.Context, orgID uuid.UUID, r Reader, af
 	return pagePublished(out, after, limit), nil
 }
 
+// ListEventShares implements Store.
+func (s *MemStore) ListEventShares(_ context.Context, eventID uuid.UUID, r Reader, limit int) ([]Post, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []Post
+	for _, p := range s.posts {
+		if p.EventID != nil && *p.EventID == eventID && p.Status == StatusPublished && s.visible(r, p) {
+			out = append(out, p.clone())
+		}
+	}
+	return pagePublished(out, nil, limit), nil
+}
+
 // pagePublished sorts newest first by (published_at, id) and cuts the
 // page after the keyset position.
 func pagePublished(ps []Post, after *After, limit int) []Post {

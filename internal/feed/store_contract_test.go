@@ -27,6 +27,7 @@ type world struct {
 	like   func(t *testing.T, user, post uuid.UUID)
 	save   func(t *testing.T, user, post uuid.UUID)
 	trust  func(t *testing.T, org uuid.UUID, level feed.TrustLevel, approved int)
+	event  func(t *testing.T, org uuid.UUID) uuid.UUID // a published event of org (event_share)
 }
 
 func memWorld(s *feed.MemStore) world {
@@ -43,6 +44,7 @@ func memWorld(s *feed.MemStore) world {
 		trust: func(_ *testing.T, o uuid.UUID, l feed.TrustLevel, n int) {
 			s.PutSettings(feed.OrgSettings{OrgID: o, TrustLevel: l, ApprovedPostsCount: n})
 		},
+		event: func(*testing.T, uuid.UUID) uuid.UUID { return uuid.NewV7() },
 	}
 }
 
@@ -307,6 +309,57 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (feed.Store, world)
 		// Anonymous following tab is empty.
 		if got := list(feed.FeedFilter{Reader: feed.Reader{Keys: []string{"all"}}, Following: true}, nil, 10); len(got) != 0 {
 			t.Fatalf("anonymous following = %v", got)
+		}
+	})
+
+	t.Run("event shares: published, the reader's visibility, every org, newest first (BE-150)", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		club, company, by := w.org(t, feed.AuthorClub), w.org(t, feed.AuthorCompany), w.user(t)
+		ev, other := w.event(t, club), w.event(t, club)
+		at := func(i int) time.Time { return pub0.Add(time.Duration(i) * time.Minute) }
+		share := func(org uuid.UUID, kind feed.AuthorKind, event uuid.UUID, edit func(*feed.Post)) feed.Post {
+			p := post(org, kind, by)
+			p.Kind, p.EventID, p.BodyJSON, p.BodyText = feed.KindEventShare, &event, nil, nil
+			if edit != nil {
+				edit(&p)
+			}
+			return insert(t, s, p)
+		}
+		published := func(i int) func(*feed.Post) {
+			return func(p *feed.Post) { *p = publishedAt(*p, at(i)) }
+		}
+		older := share(club, feed.AuthorClub, ev, published(1))
+		newer := share(club, feed.AuthorClub, ev, published(3))
+		ad := share(company, feed.AuthorCompany, ev, published(2)) // commercial: not anonymous
+		followers := share(club, feed.AuthorClub, ev, func(p *feed.Post) {
+			*p = publishedAt(*p, at(4))
+			p.AudienceKind = feed.AudienceFollowers
+		})
+		share(club, feed.AuthorClub, ev, nil)                             // a draft
+		share(club, feed.AuthorClub, other, published(5))                 // another event
+		insert(t, s, publishedAt(post(club, feed.AuthorClub, by), at(6))) // not a share
+		list := func(r feed.Reader, limit int) []uuid.UUID {
+			t.Helper()
+			ps, err := s.ListEventShares(ctx, ev, r, limit)
+			if err != nil {
+				t.Fatalf("ListEventShares: %v", err)
+			}
+			return ids(ps)
+		}
+		anon := feed.Reader{Keys: []string{feed.KeyAll}}
+		if got := list(anon, 10); !slices.Equal(got, []uuid.UUID{newer.ID, older.ID}) {
+			t.Fatalf("anonymous shares = %v, want %v", got, []uuid.UUID{newer.ID, older.ID})
+		}
+		if got := list(anon, 1); !slices.Equal(got, []uuid.UUID{newer.ID}) {
+			t.Fatalf("limit 1 = %v", got)
+		}
+		if got := list(feed.Reader{All: true}, 10); !slices.Equal(got, []uuid.UUID{followers.ID, newer.ID, ad.ID, older.ID}) {
+			t.Fatalf("all shares = %v", got)
+		}
+		if ps, err := s.ListEventShares(ctx, uuid.NewV7(), anon, 10); err != nil || len(ps) != 0 {
+			t.Fatalf("unknown event = %v, %v", ps, err)
 		}
 	})
 

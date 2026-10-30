@@ -239,11 +239,15 @@ func TestSender_RetryableAndPermanentFailures(t *testing.T) {
 	})
 }
 
-// fakeResolver serves fixed slugs.
+// fakeResolver serves fixed slugs, public posts and event shares.
 type fakeResolver struct {
-	events map[uuid.UUID]webcache.EventRef
-	orgs   map[uuid.UUID]webcache.OrgRef
-	err    error
+	events    map[uuid.UUID]webcache.EventRef
+	orgs      map[uuid.UUID]webcache.OrgRef
+	posts     map[uuid.UUID]webcache.PostRef   // the posts on the public web
+	shares    map[uuid.UUID][]webcache.PostRef // by event, newest first
+	err       error
+	sharesErr error
+	limits    *[]int // the limits EventShares was asked for
 }
 
 func (r fakeResolver) Event(_ context.Context, id uuid.UUID) (webcache.EventRef, bool, error) {
@@ -256,17 +260,36 @@ func (r fakeResolver) Org(_ context.Context, id uuid.UUID) (webcache.OrgRef, boo
 	return o, ok, r.err
 }
 
+func (r fakeResolver) Post(_ context.Context, id uuid.UUID) (webcache.PostRef, bool, error) {
+	p, ok := r.posts[id]
+	return p, ok, r.err
+}
+
+func (r fakeResolver) EventShares(_ context.Context, eventID uuid.UUID, limit int) ([]webcache.PostRef, error) {
+	if r.limits != nil {
+		*r.limits = append(*r.limits, limit)
+	}
+	ps := r.shares[eventID]
+	return ps[:min(limit, len(ps))], r.sharesErr
+}
+
 var (
-	clubID, companyID, uniID = uuid.NewV7(), uuid.NewV7(), uuid.NewV7()
-	eventID, uniEventID      = uuid.NewV7(), uuid.NewV7()
-	postID                   = uuid.NewV7()
+	clubID, companyID, uniID        = uuid.NewV7(), uuid.NewV7(), uuid.NewV7()
+	eventID, uniEventID, sharedEvID = uuid.NewV7(), uuid.NewV7(), uuid.NewV7()
+	postID, share1, share2, share3  = uuid.NewV7(), uuid.NewV7(), uuid.NewV7(), uuid.NewV7()
 )
 
 func resolver() fakeResolver {
 	return fakeResolver{
-		events: map[uuid.UUID]webcache.EventRef{eventID: {Slug: "go-atolyesi", OrgID: clubID}, uniEventID: {Slug: "kariyer-gunu"}},
+		events: map[uuid.UUID]webcache.EventRef{
+			eventID: {Slug: "go-atolyesi", OrgID: clubID}, uniEventID: {Slug: "kariyer-gunu"}, sharedEvID: {Slug: "bahar-senligi", OrgID: clubID},
+		},
 		orgs: map[uuid.UUID]webcache.OrgRef{
 			clubID: {Kind: "club", Slug: "odtu-robotik"}, companyID: {Kind: "company", Slug: "acme"}, uniID: {Kind: "university", Slug: "odtu"},
+		},
+		posts: map[uuid.UUID]webcache.PostRef{postID: {ID: postID, OrgID: clubID}},
+		shares: map[uuid.UUID][]webcache.PostRef{
+			sharedEvID: {{ID: share1, OrgID: clubID}, {ID: share2, OrgID: companyID}, {ID: share3, OrgID: clubID}},
 		},
 	}
 }
@@ -365,6 +388,25 @@ func TestRevalidator_TopicsToTags(t *testing.T) {
 			[]string{webcache.PostTag(postID)}},
 		{"followers or commercial post", webcache.SubPostChanged,
 			domainevent.PostChanged{PostID: postID, OrgID: companyID, Public: false, Change: "published"}, nil},
+		// BE-150: a rejected image of a public post; the pages sharing an
+		// event whose summary changes (each author org once, after the
+		// event's own tags).
+		{"rejected image of a public post", webcache.SubFileRejected,
+			domainevent.FileRejected{FileID: uuid.NewV7(), Purpose: "post_media", Reason: "infected", AttachedModule: "feed", AttachedEntityID: &postID},
+			[]string{webcache.PostTag(postID), "club:odtu-robotik"}},
+		{"rejected image of a post off the public web", webcache.SubFileRejected,
+			domainevent.FileRejected{FileID: uuid.NewV7(), Purpose: "post_media", Reason: "infected", AttachedModule: "feed", AttachedEntityID: &share1}, nil},
+		{"shared event retitled", webcache.SubEventUpdated,
+			domainevent.EventUpdated{EventID: sharedEvID, OrgID: clubID, Fields: []string{"capacity", "title"}},
+			[]string{"event:bahar-senligi", "club:odtu-robotik", webcache.PostTag(share1), webcache.PostTag(share2), "company:acme", webcache.PostTag(share3)}},
+		{"shared event off the public web", webcache.SubEventUpdated,
+			domainevent.EventUpdated{EventID: sharedEvID, OrgID: clubID, Fields: []string{"visibility"}},
+			[]string{"event:bahar-senligi", "club:odtu-robotik", "sitemap", webcache.PostTag(share1), webcache.PostTag(share2), "company:acme", webcache.PostTag(share3)}},
+		{"shared event capacity", webcache.SubEventUpdated,
+			domainevent.EventUpdated{EventID: sharedEvID, OrgID: clubID, Fields: []string{"capacity"}},
+			[]string{"event:bahar-senligi", "club:odtu-robotik"}},
+		{"shared event cancelled", webcache.SubEventCancelled, domainevent.EventCancelled{EventID: sharedEvID, OrgID: clubID},
+			[]string{"event:bahar-senligi", "club:odtu-robotik", "sitemap", webcache.PostTag(share1), webcache.PostTag(share2), "company:acme", webcache.PostTag(share3)}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -428,6 +470,50 @@ func TestRevalidator_FailuresAndDisabled(t *testing.T) {
 		if err := sub.Handle(t.Context(), envelope(t, pub)); err != nil {
 			t.Fatalf("%s without a sender = %v", sub.Name, err)
 		}
+	}
+}
+
+// TestRevalidator_EventSharesCapped (BE-150): an event shared by more
+// public posts than MaxEventShares revalidates the newest MaxEventShares
+// pages in requests of at most MaxTags; a failing share read retries.
+func TestRevalidator_EventSharesCapped(t *testing.T) {
+	t.Parallel()
+	r := resolver()
+	var limits []int
+	r.limits = &limits
+	many := make([]webcache.PostRef, webcache.MaxEventShares+20)
+	for i := range many {
+		many[i] = webcache.PostRef{ID: uuid.NewV7(), OrgID: clubID}
+	}
+	r.shares = map[uuid.UUID][]webcache.PostRef{sharedEvID: many}
+	web := newFakeWeb(t)
+	cancelled := domainevent.EventCancelled{EventID: sharedEvID, OrgID: clubID}
+	if err := subscriptions(t, r, newSender(t, web))[webcache.SubEventCancelled].Handle(t.Context(), envelope(t, cancelled)); err != nil {
+		t.Fatal(err)
+	}
+	var all []string
+	for _, call := range web.got(t) {
+		if len(call) > webcache.MaxTags {
+			t.Fatalf("request of %d tags", len(call))
+		}
+		all = append(all, call...)
+	}
+	want := []string{"event:bahar-senligi", "club:odtu-robotik", "sitemap"}
+	for _, p := range many[:webcache.MaxEventShares] {
+		want = append(want, webcache.PostTag(p.ID))
+	}
+	if !slices.Equal(all, want) {
+		t.Fatalf("tags = %d %v, want the event's and the newest %d post pages", len(all), all, webcache.MaxEventShares)
+	}
+	if len(web.got(t)) != 3 || !slices.Equal(limits, []int{webcache.MaxEventShares + 1}) {
+		t.Fatalf("%d requests, limits %v", len(web.got(t)), limits)
+	}
+
+	r.sharesErr = errors.New("db down")
+	web2 := newFakeWeb(t)
+	err := subscriptions(t, r, newSender(t, web2))[webcache.SubEventCancelled].Handle(t.Context(), envelope(t, cancelled))
+	if err == nil || queue.IsPermanent(err) || len(web2.got(t)) != 0 {
+		t.Fatalf("share read failure = %v", err)
 	}
 }
 

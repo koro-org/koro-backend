@@ -9,6 +9,7 @@ import (
 	"slices"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/hibiken/asynq"
 
@@ -144,6 +145,68 @@ func TestRevalidate_PostChanged_OutboxRelayWorker(t *testing.T) {
 	})
 	if got := web.got(t); len(got) != 1 || !slices.Equal(got[0], []string{webcache.PostTag(postID), "club:odtu-robotik"}) {
 		t.Fatalf("calls = %v, want one [post tag, club tag]", got)
+	}
+}
+
+// TestRevalidate_EventSharesAndRejectedMedia_OutboxRelayWorker (BE-150):
+// an event.updated row of a shared event leaving the public web and a
+// file.rejected row of a public post's image, written in PostgreSQL
+// transactions, reach the web through the relay and the asynq worker: the
+// event's pages with every public post sharing it (each author org once),
+// and the post's page with its author org's.
+func TestRevalidate_EventSharesAndRejectedMedia_OutboxRelayWorker(t *testing.T) {
+	t.Parallel()
+	d := testutil.NewDB(t)
+	rdb := testutil.NewRedis(t)
+	ctx := t.Context()
+	log := obs.Discard()
+	web := newFakeWeb(t)
+
+	subs := outbox.NewRegistry()
+	webcache.New(webcache.Deps{Resolver: resolver(), Sender: newSender(t, web), Log: log}).Subscribe(subs)
+	client := queue.NewClient(rdb, log)
+	t.Cleanup(func() { _ = client.Close() })
+	ob := outbox.New(outbox.Deps{Store: outbox.NewGormStore(d.ORM), Tx: d.Tx, Subs: subs, Queue: client, Clock: clock.NewFake(t0), Log: log})
+	for _, p := range []domainevent.Payload{
+		domainevent.EventUpdated{EventID: sharedEvID, OrgID: clubID, Fields: []string{"visibility"}},
+		domainevent.FileRejected{FileID: uuid.NewV7(), Purpose: "post_media", Reason: "infected", AttachedModule: "feed", AttachedEntityID: &postID},
+	} {
+		env, err := domainevent.New(p, "test", uuid.NewV7())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := d.Tx.WithTx(ctx, func(ctx context.Context) error { return ob.Add(ctx, env) }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// file.rejected also feeds the modules' own subscriptions; here only
+	// the webcache ones are registered: one task per row.
+	if n, err := ob.NewRelay(outbox.RelayConfig{}).Once(ctx); err != nil || n != 2 {
+		t.Fatalf("relay = %d, %v", n, err)
+	}
+
+	mux := queue.NewMux(log)
+	for _, s := range subs.All() {
+		if err := mux.Handle(s.Name, s.HandleTask); err != nil {
+			t.Fatal(err)
+		}
+	}
+	srv := queue.NewServer(ctx, rdb, mux, queue.ServerConfig{Concurrency: 1, ShutdownTimeout: time.Second, Log: log})
+	if err := srv.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Shutdown)
+	insp := asynq.NewInspectorFromRedisClient(rdb)
+	waitUntil(t, func() bool {
+		q, err := insp.GetQueueInfo(queue.Default)
+		return err == nil && len(web.got(t)) == 2 && q.Pending == 0 && q.Active == 0 && q.Retry == 0 && q.Archived == 0
+	})
+	got := web.got(t)
+	slices.SortFunc(got, func(a, b []string) int { return len(a) - len(b) })
+	shares := []string{"event:bahar-senligi", "club:odtu-robotik", "sitemap",
+		webcache.PostTag(share1), webcache.PostTag(share2), "company:acme", webcache.PostTag(share3)}
+	if !slices.Equal(got[0], []string{webcache.PostTag(postID), "club:odtu-robotik"}) || !slices.Equal(got[1], shares) {
+		t.Fatalf("calls = %v, want [post image page] and [%v]", got, shares)
 	}
 }
 

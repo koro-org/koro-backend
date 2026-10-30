@@ -296,6 +296,7 @@ func TestSchema_P1Schema3QueryIndexes(t *testing.T) {
 		"posts_feed_idx":                 {"(published_at DESC, id DESC)", "status = 'published'"},
 		"posts_audience_idx":             {"USING gin (audience_keys)", "status = 'published'"},
 		"posts_author_idx":               {"(org_id, published_at DESC, id DESC)", "status = 'published'"},
+		"posts_event_idx":                {"(event_id, published_at DESC, id DESC)", "status = 'published'", "event_id IS NOT NULL"},
 		"posts_review_idx":               {"(created_at)", "status = 'pending_review'"},
 		"posts_removed_idx":              {"(removed_at)", "status = 'removed'"},
 		"posts_fts_idx":                  {"USING gin (search_vector)", "status = 'published'"},

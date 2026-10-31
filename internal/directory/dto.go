@@ -73,14 +73,17 @@ type EmailDomainDTO struct {
 	IsActive     bool   `json:"is_active"`
 }
 
-// DepartmentDTO is a department (listDepartments, adminCreateDepartment).
+// DepartmentDTO is a department (listDepartments, getDepartment,
+// adminCreateDepartment).
 type DepartmentDTO struct {
-	DepartmentID   string `json:"department_id"`
-	Name           string `json:"name"`
-	FacultyID      string `json:"faculty_id,omitempty"`
-	DegreeLevel    string `json:"degree_level" enum:"associate,bachelor,master,doctorate"`
-	DurationYears  *int16 `json:"duration_years,omitempty"`
-	YokProgramCode string `json:"yok_program_code,omitempty"`
+	DepartmentID   string            `json:"department_id"`
+	Name           string            `json:"name"`
+	University     ClubUniversityDTO `json:"university" doc:"The university of the department (BE-166)"`
+	IsActive       bool              `json:"is_active" doc:"false only from getDepartment: a closed department is still named"`
+	FacultyID      string            `json:"faculty_id,omitempty"`
+	DegreeLevel    string            `json:"degree_level" enum:"associate,bachelor,master,doctorate"`
+	DurationYears  *int16            `json:"duration_years,omitempty"`
+	YokProgramCode string            `json:"yok_program_code,omitempty"`
 }
 
 // DepartmentList is a page of DepartmentDTO.
@@ -139,7 +142,9 @@ type ClubCardList struct {
 	NextCursor string        `json:"next_cursor,omitempty"`
 }
 
-// ClubUniversityDTO is the university of a club.
+// ClubUniversityDTO is the university of a club or of a department
+// (DepartmentDTO.university; BE-166). The name is kept for the published
+// schema.
 type ClubUniversityDTO struct {
 	UniversityID string `json:"university_id"`
 	OrgID        string `json:"org_id"`
@@ -197,9 +202,15 @@ func toDomainDTO(d EmailDomain) EmailDomainDTO {
 	return EmailDomainDTO{Domain: d.Domain, UniversityID: d.UniversityID.String(), DomainKind: string(d.DomainKind), IsActive: d.IsActive}
 }
 
-func toDepartmentDTO(d Department) DepartmentDTO {
+func toUniversityRef(u University) ClubUniversityDTO {
+	return ClubUniversityDTO{
+		UniversityID: u.ID.String(), OrgID: u.OrgID.String(), Name: u.Name, ShortName: str(u.ShortName), City: u.City,
+	}
+}
+
+func toDepartmentDTO(d Department, u University) DepartmentDTO {
 	out := DepartmentDTO{
-		DepartmentID: d.ID.String(), Name: d.Name, DegreeLevel: string(d.DegreeLevel), DurationYears: d.DurationYears,
+		DepartmentID: d.ID.String(), Name: d.Name, University: toUniversityRef(u), IsActive: d.IsActive, DegreeLevel: string(d.DegreeLevel), DurationYears: d.DurationYears,
 		YokProgramCode: str(d.YokProgramCode),
 	}
 	if d.FacultyID != nil {
@@ -243,10 +254,8 @@ func toClubDTO(v ClubView) ClubDTO {
 	c, u := v.Club, v.University
 	return ClubDTO{
 		ClubID: c.OrgID.String(), Org: toOrgPublic(v.Org),
-		University: ClubUniversityDTO{
-			UniversityID: u.ID.String(), OrgID: u.OrgID.String(), Name: u.Name, ShortName: str(u.ShortName), City: u.City,
-		},
-		Category: string(c.Category), JoinPolicy: string(c.JoinPolicy), ClaimStatus: string(c.ClaimStatus),
+		University: toUniversityRef(u),
+		Category:   string(c.Category), JoinPolicy: string(c.JoinPolicy), ClaimStatus: string(c.ClaimStatus),
 		MembershipPrivate: c.IsSensitive, MemberCount: v.MemberCount, SocialLinks: socialLinksMap(c.SocialLinks.Clone()),
 		FoundedYear: c.FoundedYear,
 	}

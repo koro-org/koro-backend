@@ -51,7 +51,9 @@ func Register(api huma.API, svc Service) {
 		Summary: "Register a company",
 		Description: "The company starts pending_review until a platform admin verifies it. The caller becomes its " +
 			"company_owner; all of the caller's sessions are closed (role_change) so that the MFA policy of the role " +
-			"applies at the next sign-in. Tax number and MERSİS are given later with the legal party (parties).",
+			"applies at the next sign-in. The tax identity is required at registration: tax_no (VKN) or tckn (a sole " +
+			"trader's, checked but never stored) with tax_office; missing → 422 orgs.tax_id_required (BE-165). The billing " +
+			"party (title, address, MERSİS) is given later with the legal party (parties).",
 	}, op.Meta{Action: string(authz.OrgsCompanyCreate), Surface: op.SurfaceSelf, Idempotency: op.IdempotencyOptional}, h.createCompany)
 
 	op.Register(api, "orgs", huma.Operation{

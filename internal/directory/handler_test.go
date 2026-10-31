@@ -198,8 +198,25 @@ func TestHTTP_AdminCatalogLists(t *testing.T) {
 		t.Fatalf("duplicate faculty = %d %s", rec.Code, rec.Body)
 	}
 	dep := `{"faculty_id":"` + fac["faculty_id"].(string) + `","name":"Bilgisayar Mühendisliği","degree_level":"bachelor"}`
-	if rec := call(t, app, "platform_admin", http.MethodPost, "/api/v1/admin/universities/"+ege.ID.String()+"/departments", dep, nil); rec.Code != http.StatusCreated {
+	rec = call(t, app, "platform_admin", http.MethodPost, "/api/v1/admin/universities/"+ege.ID.String()+"/departments", dep, nil)
+	var created struct {
+		DepartmentID string `json:"department_id"`
+		University   struct {
+			UniversityID string `json:"university_id"`
+			Name         string `json:"name"`
+		} `json:"university"`
+	}
+	if rec.Code != http.StatusCreated || json.Unmarshal(rec.Body.Bytes(), &created) != nil || created.University.UniversityID != ege.ID.String() {
 		t.Fatalf("department in the new faculty = %d %s", rec.Code, rec.Body)
+	}
+	// getDepartment (BE-166): a stored department_id gets its name and its university's.
+	rec = call(t, app, "anonymous", http.MethodGet, "/api/v1/departments/"+created.DepartmentID, "", nil)
+	if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte(`"name":"Bilgisayar Mühendisliği"`)) ||
+		!bytes.Contains(rec.Body.Bytes(), []byte(`"name":"`+ege.Name+`"`)) || !bytes.Contains(rec.Body.Bytes(), []byte(`"is_active":true`)) {
+		t.Fatalf("getDepartment = %d %s", rec.Code, rec.Body)
+	}
+	if code, _ := get("anonymous", "/api/v1/departments/00000000-0000-7000-8000-0000000000aa"); code != http.StatusNotFound {
+		t.Fatalf("unknown department = %d", code)
 	}
 	if rec := call(t, app, "anonymous", http.MethodGet, "/api/v1/universities/"+ege.ID.String(), "", nil); !bytes.Contains(rec.Body.Bytes(), []byte(`"Mühendislik Fakültesi"`)) {
 		t.Fatalf("getUniversity faculties = %s", rec.Body)

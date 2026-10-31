@@ -681,12 +681,28 @@ func TestCatalog_SkillsAndDepartments(t *testing.T) {
 	if err != nil || d.UniversityID != itu.ID {
 		t.Fatalf("department = %+v, %v", d, err)
 	}
+	if deps.University.ID != itu.ID {
+		t.Fatalf("departments university = %v, want %v", deps.University.ID, itu.ID)
+	}
+	// getDepartment (BE-166): the department with its university's name.
+	dv, err := e.svc.GetDepartmentView(ctx, authz.Anonymous(), d.ID)
+	if err != nil || dv.Department.ID != d.ID || dv.University.Name != itu.Name {
+		t.Fatalf("department view = %+v, %v", dv, err)
+	}
+	_, err = e.svc.GetDepartmentView(ctx, authz.Anonymous(), uuid.NewV7())
+	problemtest.WantErr(t, err, directory.ErrNotFound)
 	// A department under a faculty of another university is refused (H-38).
 	other := e.university(t, "U-9", "Başka Üniversite", "Bursa")
 	_, err = e.svc.AdminCreateDepartment(ctx, pad(t), other.ID, directory.DepartmentInput{
 		FacultyID: &view.Faculties[0].ID, Name: "Yanlış Bölüm", DegreeLevel: directory.DegreeBachelor,
 	})
 	problemtest.WantProblem(t, err, 422, "validation_failed")
+	created, err := e.svc.AdminCreateDepartment(ctx, pad(t), other.ID, directory.DepartmentInput{
+		Name: "Doğru Bölüm", DegreeLevel: directory.DegreeBachelor,
+	})
+	if err != nil || created.University.ID != other.ID || created.Department.Name != "Doğru Bölüm" {
+		t.Fatalf("created department = %+v, %v", created, err)
+	}
 	// An inactive university is hidden from the public, not from the admin.
 	if _, err := e.svc.AdminUpdateUniversity(ctx, pad(t), itu.ID, directory.UniversityPatch{IsActive: new(false)}); err != nil {
 		t.Fatal(err)
@@ -694,6 +710,12 @@ func TestCatalog_SkillsAndDepartments(t *testing.T) {
 	_, err = e.svc.GetUniversityView(ctx, authz.Anonymous(), itu.ID)
 	problemtest.WantErr(t, err, authz.ErrNotFound)
 	if _, err := e.svc.GetUniversityView(ctx, pad(t), itu.ID); err != nil {
+		t.Fatal(err)
+	}
+	// ...and so are its departments (BE-166).
+	_, err = e.svc.GetDepartmentView(ctx, authz.Anonymous(), d.ID)
+	problemtest.WantErr(t, err, authz.ErrNotFound)
+	if _, err := e.svc.GetDepartmentView(ctx, pad(t), d.ID); err != nil {
 		t.Fatal(err)
 	}
 	// UniversityOrgs: the university's org and its clubs' orgs.

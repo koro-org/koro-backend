@@ -54,6 +54,16 @@ type DepartmentQuery struct {
 type DepartmentPage struct {
 	Items []Department
 	Next  *After
+	// University is the university of every item (BE-166:
+	// DepartmentDTO.university).
+	University University
+}
+
+// DepartmentView is getDepartment and adminCreateDepartment: the
+// department with its university (BE-166).
+type DepartmentView struct {
+	Department Department
+	University University
 }
 
 // UniversityInput is the body of adminCreateUniversity.
@@ -197,11 +207,28 @@ func (s *service) ListDepartments(ctx context.Context, a authz.Actor, university
 		return DepartmentPage{}, err
 	}
 	rows, more := page.Cut(rows, limit)
-	out := DepartmentPage{Items: rows}
+	out := DepartmentPage{Items: rows, University: u}
 	if more {
 		out.Next = &After{ID: rows[len(rows)-1].ID}
 	}
 	return out, nil
+}
+
+// GetDepartmentView implements Service (BE-166): a department by ID, with
+// its university, under the visibility of listDepartments (an inactive
+// university is 404 except for platform admins). A closed department
+// (is_active false) is still returned so that a stored department_id (a
+// student profile, a segment) keeps its name.
+func (s *service) GetDepartmentView(ctx context.Context, a authz.Actor, id uuid.UUID) (DepartmentView, error) {
+	d, err := s.d.Store.GetDepartment(ctx, id)
+	if err != nil {
+		return DepartmentView{}, err
+	}
+	u, err := s.visibleUniversity(ctx, a, authz.DirectoryDepartmentList, d.UniversityID)
+	if err != nil {
+		return DepartmentView{}, err
+	}
+	return DepartmentView{Department: d, University: u}, nil
 }
 
 // cleanUniversity validates the fields of a new university.
@@ -471,13 +498,13 @@ func (s *service) AdminCreateFaculty(ctx context.Context, a authz.Actor, univers
 
 // AdminCreateDepartment implements Service. A faculty must belong to the
 // university of the path (06 H-38: the scope comes from the parent row).
-func (s *service) AdminCreateDepartment(ctx context.Context, a authz.Actor, universityID uuid.UUID, in DepartmentInput) (Department, error) {
+func (s *service) AdminCreateDepartment(ctx context.Context, a authz.Actor, universityID uuid.UUID, in DepartmentInput) (DepartmentView, error) {
 	if err := authz.Can(ctx, a, authz.DirectoryUniversityManage, adminSurface); err != nil {
-		return Department{}, err
+		return DepartmentView{}, err
 	}
 	d, err := cleanDepartment(in, "body.")
 	if err != nil {
-		return Department{}, err
+		return DepartmentView{}, err
 	}
 	hash, err := idempotency.Hash(struct {
 		Op  string
@@ -485,7 +512,7 @@ func (s *service) AdminCreateDepartment(ctx context.Context, a authz.Actor, univ
 		D   Department
 	}{"create_department", universityID, d})
 	if err != nil {
-		return Department{}, err
+		return DepartmentView{}, err
 	}
 	id, _, err := idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (uuid.UUID, error) {
 		u, err := s.d.Store.LockUniversity(ctx, universityID)
@@ -511,9 +538,17 @@ func (s *service) AdminCreateDepartment(ctx context.Context, a authz.Actor, univ
 			map[string]any{"operation": "create_department", "university_id": u.ID.String()}))
 	})
 	if err != nil {
-		return Department{}, err
+		return DepartmentView{}, err
 	}
-	return s.d.Store.GetDepartment(ctx, id)
+	d, err = s.d.Store.GetDepartment(ctx, id)
+	if err != nil {
+		return DepartmentView{}, err
+	}
+	u, err := s.d.Store.GetUniversity(ctx, d.UniversityID)
+	if err != nil {
+		return DepartmentView{}, err
+	}
+	return DepartmentView{Department: d, University: u}, nil
 }
 
 // cleanDepartment validates the fields of a new department.

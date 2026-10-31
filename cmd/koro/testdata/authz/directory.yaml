@@ -1,4 +1,4 @@
-# Authz matrix of the directory module (03 §5.3, 04 §2.3; BE-020, club claims BE-022, BE-128). 26 operations × 18
+# Authz matrix of the directory module (03 §5.3, 04 §2.3; BE-020, club claims BE-022, BE-128). 27 operations × 18
 # personas.
 # The catalog (universities, departments, skills, clubs) is public (P); an inactive university is
 # visible to platform_admin only (others 404). /clubs/{club_id}/... is a resource surface (03 §7.6):
@@ -93,6 +93,26 @@ operations:
           "@no_platform_role_dir": 404
           "@other_staff_dir": 404
           platform_admin: 200
+
+  getDepartment:
+    method: GET
+    path: /api/v1/departments/{department_id}
+    action: directory.department.list
+    public: true
+    path_params: { department_id: department_a }
+    note: BE-166 — names a stored department_id; visibility follows its university (listDepartments)
+    expect: { "@all": 200 }
+    variants:
+      - name: inactive_university
+        path_params: { department_id: department_inactive_uni }
+        expect:
+          anonymous: 404
+          "@no_platform_role_dir": 404
+          "@other_staff_dir": 404
+          platform_admin: 200
+      - name: unknown_department
+        path_params: { department_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect: { "@all": 404 }
 
   listSkills:
     method: GET

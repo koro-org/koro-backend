@@ -100,6 +100,9 @@ type Service interface {
 	GetUniversityView(ctx context.Context, a authz.Actor, id uuid.UUID) (UniversityView, error)
 	// ListDepartments is listDepartments (directory.department.list, P).
 	ListDepartments(ctx context.Context, a authz.Actor, universityID uuid.UUID, q DepartmentQuery) (DepartmentPage, error)
+	// GetDepartmentView is getDepartment (directory.department.list, P;
+	// BE-166): the department with its university.
+	GetDepartmentView(ctx context.Context, a authz.Actor, id uuid.UUID) (DepartmentView, error)
 	// ListSkills is listSkills (directory.skill.list, P).
 	ListSkills(ctx context.Context, a authz.Actor, q SkillQuery) (SkillPage, error)
 	// ListClubs is listClubs (directory.club.list, P).
@@ -128,7 +131,7 @@ type Service interface {
 	// (directory.university.manage); created reports a new domain.
 	AdminPutUniversityEmailDomain(ctx context.Context, a authz.Actor, universityID uuid.UUID, domain string, in DomainInput) (EmailDomain, bool, error)
 	// AdminCreateDepartment is adminCreateDepartment (directory.university.manage).
-	AdminCreateDepartment(ctx context.Context, a authz.Actor, universityID uuid.UUID, in DepartmentInput) (Department, error)
+	AdminCreateDepartment(ctx context.Context, a authz.Actor, universityID uuid.UUID, in DepartmentInput) (DepartmentView, error)
 	// AdminListUniversities is adminListUniversities
 	// (directory.university.manage; BE-128).
 	AdminListUniversities(ctx context.Context, a authz.Actor, q UniversityQuery) (UniversityPage, error)

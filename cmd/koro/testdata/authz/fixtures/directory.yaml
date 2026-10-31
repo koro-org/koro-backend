@@ -8,6 +8,9 @@ fixtures:
   uni_inactive: { kind: university, active: false }
   faculty_a: { kind: faculty, university: uni_a_university }
   department_a: { kind: department, university: uni_a_university, faculty: faculty_a }
+  # BE-166: getDepartment of a department whose university is inactive (404 but for platform_admin).
+  faculty_inactive_uni: { kind: faculty, university: uni_inactive }
+  department_inactive_uni: { kind: department, university: uni_inactive, faculty: faculty_inactive_uni }
   skill_a: { kind: skill }
   # BE-022: student's pending claim for club_unclaimed (03 §7.3 claim_pending), with evidence text.
   claim_pending: { kind: claim, claimant: student, club: club_unclaimed }

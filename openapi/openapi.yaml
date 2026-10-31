@@ -5319,13 +5319,21 @@ components:
           type: integer
         faculty_id:
           type: string
+        is_active:
+          description: "false only from getDepartment: a closed department is still named"
+          type: boolean
         name:
           type: string
+        university:
+          $ref: "#/components/schemas/ClubUniversityDTO"
+          description: The university of the department (BE-166)
         yok_program_code:
           type: string
       required:
         - department_id
         - name
+        - university
+        - is_active
         - degree_level
       type: object
     DepartmentList:
@@ -26337,7 +26345,7 @@ paths:
       x-koro-rate-limit: read_default
       x-koro-surface: public
     post:
-      description: The company starts pending_review until a platform admin verifies it. The caller becomes its company_owner; all of the caller's sessions are closed (role_change) so that the MFA policy of the role applies at the next sign-in. Tax number and MERSİS are given later with the legal party (parties).
+      description: "The company starts pending_review until a platform admin verifies it. The caller becomes its company_owner; all of the caller's sessions are closed (role_change) so that the MFA policy of the role applies at the next sign-in. The tax identity is required at registration: tax_no (VKN) or tckn (a sole trader's, checked but never stored) with tax_office; missing → 422 orgs.tax_id_required (BE-165). The billing party (title, address, MERSİS) is given later with the legal party (parties)."
       operationId: createCompany
       requestBody:
         content:
@@ -26373,6 +26381,37 @@ paths:
       x-koro-rate-limit: write_default
       x-koro-surface: self
       x-koro-terms-gate: enforced
+  /api/v1/departments/{department_id}:
+    get:
+      description: Names a stored department_id (a student profile, a segment; BE-166). A closed department is returned with is_active false; a department of an inactive university is 404 except for platform admins.
+      operationId: getDepartment
+      parameters:
+        - description: Department ID
+          in: path
+          name: department_id
+          required: true
+          schema:
+            description: Department ID
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DepartmentDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: Get a department with its university
+      tags:
+        - directory
+      x-koro-action: directory.department.list
+      x-koro-rate-limit: read_default
+      x-koro-surface: public
   /api/v1/events:
     get:
       description: "Published events the caller may see (anonymous: public events only). Without a date range, events that have ended are left out. q matches title, summary and description (full text) or part of the title. Repeated org_id / university_id values are ORed; the two filters together intersect. A date-only starts_from / starts_to is the start / end of that day in Europe/Istanbul."

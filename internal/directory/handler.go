@@ -41,6 +41,13 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.DirectoryDepartmentList), Surface: op.SurfacePublic}, h.listDepartments)
 
 	op.Register(api, "directory", huma.Operation{
+		OperationID: "getDepartment", Method: http.MethodGet, Path: "/departments/{department_id}",
+		Summary: "Get a department with its university",
+		Description: "Names a stored department_id (a student profile, a segment; BE-166). A closed department is " +
+			"returned with is_active false; a department of an inactive university is 404 except for platform admins.",
+	}, op.Meta{Action: string(authz.DirectoryDepartmentList), Surface: op.SurfacePublic}, h.getDepartment)
+
+	op.Register(api, "directory", huma.Operation{
 		OperationID: "listSkills", Method: http.MethodGet, Path: "/skills",
 		Summary: "List the skill taxonomy", Description: "name follows Accept-Language (tr or en).",
 	}, op.Meta{Action: string(authz.DirectorySkillList), Surface: op.SurfacePublic}, h.listSkills)
@@ -300,10 +307,24 @@ func (h handler) listDepartments(ctx context.Context, in *listDepartmentsInput) 
 	}
 	out := &listDepartmentsOutput{Body: DepartmentList{Items: make([]DepartmentDTO, len(p.Items))}}
 	for i, d := range p.Items {
-		out.Body.Items[i] = toDepartmentDTO(d)
+		out.Body.Items[i] = toDepartmentDTO(d, p.University)
 	}
 	out.Body.NextCursor = nextCursor(p.Next, SortNewest, fp)
 	return out, nil
+}
+
+// DepartmentPath is the department_id path parameter (exported: huma reads
+// the fields of an embedded struct only when its type is exported).
+type DepartmentPath struct {
+	DepartmentID string `path:"department_id" doc:"Department ID"`
+}
+
+func (h handler) getDepartment(ctx context.Context, in *DepartmentPath) (*departmentOutput, error) {
+	v, err := h.svc.GetDepartmentView(ctx, authz.ActorOrAnonymous(ctx), httpx.ParseID(in.DepartmentID))
+	if err != nil {
+		return nil, err
+	}
+	return &departmentOutput{Body: toDepartmentDTO(v.Department, v.University)}, nil
 }
 
 // ---- skills
@@ -624,14 +645,14 @@ func (h handler) adminCreateDepartment(ctx context.Context, in *adminCreateDepar
 	if err != nil {
 		return nil, err
 	}
-	d, err := h.svc.AdminCreateDepartment(ctx, a, httpx.ParseID(in.UniversityID), DepartmentInput{
+	v, err := h.svc.AdminCreateDepartment(ctx, a, httpx.ParseID(in.UniversityID), DepartmentInput{
 		FacultyID: faculty, Name: b.Name, DegreeLevel: DegreeLevel(b.DegreeLevel), DurationYears: b.DurationYears,
 		YokProgramCode: b.YokProgramCode,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &departmentOutput{Body: toDepartmentDTO(d)}, nil
+	return &departmentOutput{Body: toDepartmentDTO(v.Department, v.University)}, nil
 }
 
 // adminState maps the state query parameter of the admin lists (default

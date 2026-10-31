@@ -135,7 +135,7 @@ func (s *service) recordWith(ctx context.Context, in RecordInput, by authz.Actor
 	}
 	var out Consent
 	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		p, err := s.d.Store.Purpose(ctx, in.Purpose)
+		p, err := s.purposes().Purpose(ctx, in.Purpose)
 		if errors.Is(err, ErrUnknownPurpose) {
 			return invalid(ErrUnknownPurpose, "body.purpose_code", "is not a consent purpose")
 		}
@@ -151,7 +151,7 @@ func (s *service) recordWith(ctx context.Context, in RecordInput, by authz.Actor
 			Channel: in.Channel, IP: canonicalIP(httpx.ClientIPFrom(ctx)), UserAgent: cut(httpx.UserAgentFrom(ctx), maxUserAgent),
 			OccurredAt: s.now(),
 		}
-		if err := s.d.Store.InsertConsent(ctx, c); err != nil {
+		if err := s.consents().InsertConsent(ctx, c); err != nil {
 			return err
 		}
 		ev := recordEvent(c, by)
@@ -251,7 +251,7 @@ func (s *service) collectable(p PurposeDef) bool {
 // checkText verifies that noticeID is the consent text of purpose p and
 // that sum is the digest of its body; a grant needs the current version.
 func (s *service) checkText(ctx context.Context, p PurposeDef, noticeID uuid.UUID, sum []byte, current bool) error {
-	n, err := s.d.Store.Notice(ctx, noticeID)
+	n, err := s.notices().Notice(ctx, noticeID)
 	if errors.Is(err, ErrNotFound) {
 		return invalid(ErrNoticeMismatch, "body.notice_version_id", "unknown notice")
 	}
@@ -305,7 +305,7 @@ func (s *service) emitRecorded(ctx context.Context, p PurposeDef, c Consent) err
 			return fmt.Errorf("consent: purpose %s requires İYS without a channel", p.Code)
 		}
 		sub := Submission{ID: uuid.NewV7(), ConsentID: c.ID, Channel: *p.IYSChannel, Status: SubmissionPending}
-		if err := s.d.Store.InsertSubmission(ctx, sub); err != nil {
+		if err := s.submissions().InsertSubmission(ctx, sub); err != nil {
 			return err
 		}
 	}
@@ -316,7 +316,7 @@ func (s *service) emitRecorded(ctx context.Context, p PurposeDef, c Consent) err
 
 // HasActive implements Checker.
 func (s *service) HasActive(ctx context.Context, userID uuid.UUID, purpose Purpose, scopeID *uuid.UUID) (bool, error) {
-	p, err := s.d.Store.Purpose(ctx, purpose)
+	p, err := s.purposes().Purpose(ctx, purpose)
 	if err != nil {
 		return false, err
 	}
@@ -328,7 +328,7 @@ func (s *service) HasActive(ctx context.Context, userID uuid.UUID, purpose Purpo
 	case !p.Active:
 		return false, nil
 	}
-	c, ok, err := s.d.Store.Latest(ctx, userID, purpose, scopeID)
+	c, ok, err := s.consents().Latest(ctx, userID, purpose, scopeID)
 	if err != nil {
 		return false, err
 	}
@@ -340,7 +340,7 @@ func (s *service) HasActive(ctx context.Context, userID uuid.UUID, purpose Purpo
 // channel's last complete İYS reconciliation is older (or never ran), it
 // fails with ErrIYSSyncStale instead of answering.
 func (s *service) FilterActive(ctx context.Context, userIDs []uuid.UUID, purpose Purpose) ([]uuid.UUID, error) {
-	p, err := s.d.Store.Purpose(ctx, purpose)
+	p, err := s.purposes().Purpose(ctx, purpose)
 	if err != nil {
 		return nil, err
 	}
@@ -353,7 +353,7 @@ func (s *service) FilterActive(ctx context.Context, userIDs []uuid.UUID, purpose
 	if err := s.iysFresh(ctx, p); err != nil {
 		return nil, err
 	}
-	return s.d.Store.GrantedAmong(ctx, purpose, userIDs)
+	return s.consents().GrantedAmong(ctx, purpose, userIDs)
 }
 
 // ListMine implements Service (listMyConsents).
@@ -362,7 +362,7 @@ func (s *service) ListMine(ctx context.Context, a authz.Actor, q PageQuery) (MyC
 	if err := authz.Can(ctx, a, authz.ConsentRecordListOwn, authz.Resource{Type: authz.TypeConsentRecord, OwnerUserID: &me}); err != nil {
 		return MyConsents{}, err
 	}
-	cur, err := s.d.Store.CurrentOf(ctx, me)
+	cur, err := s.consents().CurrentOf(ctx, me)
 	if err != nil {
 		return MyConsents{}, err
 	}
@@ -385,7 +385,7 @@ func (s *service) ListMine(ctx context.Context, a authz.Actor, q PageQuery) (MyC
 // page reads one page of a user's consents (limit+1 rows decide Next).
 func (s *service) page(ctx context.Context, userID uuid.UUID, q PageQuery) (Page, error) {
 	limit := page.ClampLimit(q.Limit)
-	rows, err := s.d.Store.ListConsents(ctx, ListQuery{UserID: userID, Purpose: q.Purpose, After: q.After, Limit: limit + 1})
+	rows, err := s.consents().ListConsents(ctx, ListQuery{UserID: userID, Purpose: q.Purpose, After: q.After, Limit: limit + 1})
 	if err != nil {
 		return Page{}, err
 	}

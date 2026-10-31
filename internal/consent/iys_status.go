@@ -141,7 +141,7 @@ func (s *service) syncIYSStatus(ctx context.Context) error {
 	}
 	run := &syncRun{s: s, feed: s.d.IYSFeed, states: s.d.IYSStates, started: s.now(),
 		channels: map[IYSChannel][]Purpose{}, tally: map[IYSChannel]*syncTally{}, failed: map[IYSChannel]error{}}
-	purposes, err := s.d.Store.Purposes(ctx)
+	purposes, err := s.purposes().Purposes(ctx)
 	if err != nil {
 		return err
 	}
@@ -172,7 +172,7 @@ func (s *service) syncIYSStatus(ctx context.Context) error {
 			}
 		}
 		if run.feed != nil && len(run.failed) == 0 {
-			if err := s.d.Store.ClearIYSSweep(ctx, run.feed.Feed().Name, run.started); err != nil {
+			if err := s.iysState().ClearIYSSweep(ctx, run.feed.Feed().Name, run.started); err != nil {
 				run.failAll(err)
 			}
 		}
@@ -196,7 +196,7 @@ func (s *service) syncIYSStatus(ctx context.Context) error {
 		}
 		err := run.failed[ch]
 		if err == nil {
-			err = s.d.Store.SaveIYSSync(ctx, IYSSync{Channel: ch, SyncedAt: syncedAt, Checked: t.checked, Withdrawn: t.withdrawn})
+			err = s.iysState().SaveIYSSync(ctx, IYSSync{Channel: ch, SyncedAt: syncedAt, Checked: t.checked, Withdrawn: t.withdrawn})
 		}
 		if err != nil {
 			level := slog.LevelWarn
@@ -247,7 +247,7 @@ func (run *syncRun) pull(ctx context.Context) (time.Time, bool, error) {
 	if !iys.ValidFeed(feed) {
 		return time.Time{}, true, fmt.Errorf("consent: İYS adapter %s names no valid change feed", s.d.IYS.Name())
 	}
-	st, found, err := s.d.Store.IYSFeed(ctx, feed)
+	st, found, err := s.iysState().IYSFeed(ctx, feed)
 	if err != nil {
 		return time.Time{}, true, err
 	}
@@ -258,7 +258,7 @@ func (run *syncRun) pull(ctx context.Context) (time.Time, bool, error) {
 	cursor := st.Cursor
 	gap := !found || st.Horizon == nil || (info.Window > 0 && horizon.Before(run.started.Add(-info.Window)))
 	if gap {
-		if err := s.d.Store.MarkIYSSweep(ctx, feed, run.started); err != nil {
+		if err := s.iysState().MarkIYSSweep(ctx, feed, run.started); err != nil {
 			return horizon, true, err
 		}
 		if st.Horizon != nil {
@@ -298,7 +298,7 @@ func (run *syncRun) pull(ctx context.Context) (time.Time, bool, error) {
 			if through.After(h) {
 				h = through
 			}
-			if err := s.d.Store.AdvanceIYSFeed(ctx, feed, next, h); err != nil {
+			if err := s.iysState().AdvanceIYSFeed(ctx, feed, next, h); err != nil {
 				return horizon, due, err
 			}
 			horizon = h
@@ -321,7 +321,7 @@ func (run *syncRun) applyChange(ctx context.Context, c iys.Change) error {
 	}
 	t := run.tally[ch]
 	for _, p := range purposes {
-		g, found, err := run.s.d.Store.Latest(ctx, c.UserID, p, nil)
+		g, found, err := run.s.consents().Latest(ctx, c.UserID, p, nil)
 		if err != nil {
 			return err
 		}
@@ -350,7 +350,7 @@ func (run *syncRun) applyChange(ctx context.Context, c iys.Change) error {
 func (run *syncRun) sweepChannel(ctx context.Context, ch IYSChannel) error {
 	if run.states == nil {
 		for _, purpose := range run.channels[ch] {
-			grants, err := run.s.d.Store.GrantedChains(ctx, purpose, uuid.Nil(), 1)
+			grants, err := run.s.consents().GrantedChains(ctx, purpose, uuid.Nil(), 1)
 			if err != nil {
 				return err
 			}
@@ -363,7 +363,7 @@ func (run *syncRun) sweepChannel(ctx context.Context, ch IYSChannel) error {
 	for _, purpose := range run.channels[ch] {
 		after := uuid.Nil()
 		for {
-			grants, err := run.s.d.Store.GrantedChains(ctx, purpose, after, IYSStatusBatch)
+			grants, err := run.s.consents().GrantedChains(ctx, purpose, after, IYSStatusBatch)
 			if err != nil {
 				return err
 			}
@@ -390,7 +390,7 @@ func (run *syncRun) checkUnconfirmed(ctx context.Context) {
 	grants := map[IYSChannel][]Consent{}
 	after := uuid.Nil()
 	for {
-		subs, err := s.d.Store.DueSubmissions(ctx, run.started, after, dueSubmissionBatch)
+		subs, err := s.submissions().DueSubmissions(ctx, run.started, after, dueSubmissionBatch)
 		if err != nil {
 			run.failAll(err)
 			return
@@ -400,7 +400,7 @@ func (run *syncRun) checkUnconfirmed(ctx context.Context) {
 			if _, ok := run.channels[sub.Channel]; !ok {
 				continue
 			}
-			c, err := s.d.Store.ConsentByID(ctx, sub.ConsentID)
+			c, err := s.consents().ConsentByID(ctx, sub.ConsentID)
 			switch {
 			case errors.Is(err, ErrNotFound):
 				continue
@@ -410,7 +410,7 @@ func (run *syncRun) checkUnconfirmed(ctx context.Context) {
 			case c.Action != Granted || c.ScopeID != nil || c.OccurredAt.After(cutoff):
 				continue
 			}
-			cur, found, err := s.d.Store.Latest(ctx, c.UserID, c.PurposeCode, nil)
+			cur, found, err := s.consents().Latest(ctx, c.UserID, c.PurposeCode, nil)
 			if err != nil {
 				run.failAll(err)
 				return
@@ -495,10 +495,10 @@ func judgeIYS(g Consent, st IYSState, found bool, now time.Time) string {
 func (s *service) withdrawFromIYS(ctx context.Context, g Consent, st IYSState, reason string) (bool, error) {
 	var out Consent
 	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		if err := s.d.Store.LockSubject(ctx, g.UserID, g.PurposeCode); err != nil {
+		if err := s.consents().LockSubject(ctx, g.UserID, g.PurposeCode); err != nil {
 			return err
 		}
-		cur, found, err := s.d.Store.Latest(ctx, g.UserID, g.PurposeCode, nil)
+		cur, found, err := s.consents().Latest(ctx, g.UserID, g.PurposeCode, nil)
 		if err != nil || !found || cur.ID != g.ID {
 			return err // changed meanwhile: the next run judges the new state
 		}
@@ -531,7 +531,7 @@ func (s *service) iysFresh(ctx context.Context, p PurposeDef) error {
 	if s.d.IYSSyncMaxAge <= 0 || !p.RequiresIYS || p.IYSChannel == nil {
 		return nil
 	}
-	st, found, err := s.d.Store.IYSSync(ctx, *p.IYSChannel)
+	st, found, err := s.iysState().IYSSync(ctx, *p.IYSChannel)
 	switch {
 	case err != nil:
 		return err

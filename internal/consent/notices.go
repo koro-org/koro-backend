@@ -141,7 +141,7 @@ func (s *service) Current(ctx context.Context, key NoticeKey) (Notice, error) {
 	}
 	auds, locs := candidates(key.Audience, key.Locale)
 	kind := key.Kind
-	rows, err := s.d.Store.CurrentNotices(ctx, CurrentQuery{Kind: &kind, Purpose: key.Purpose, Audiences: auds, Locales: locs})
+	rows, err := s.notices().CurrentNotices(ctx, CurrentQuery{Kind: &kind, Purpose: key.Purpose, Audiences: auds, Locales: locs})
 	if err != nil {
 		return Notice{}, err
 	}
@@ -179,7 +179,7 @@ func (s *service) ListCurrentNotices(ctx context.Context, a authz.Actor, q Notic
 		return nil, problem.ErrValidation
 	}
 	auds, locs := candidates(q.Audience, q.Locale)
-	rows, err := s.d.Store.CurrentNotices(ctx, CurrentQuery{Kind: q.Kind, Purpose: q.Purpose, Audiences: auds, Locales: locs})
+	rows, err := s.notices().CurrentNotices(ctx, CurrentQuery{Kind: q.Kind, Purpose: q.Purpose, Audiences: auds, Locales: locs})
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +198,7 @@ func (s *service) withCollectable(ctx context.Context, ns []Notice) ([]CurrentNo
 			continue
 		}
 		if defs == nil {
-			ps, err := s.d.Store.Purposes(ctx)
+			ps, err := s.purposes().Purposes(ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -241,7 +241,7 @@ func (s *service) AdminListNotices(ctx context.Context, a authz.Actor, q NoticeL
 		return NoticePage{}, err
 	}
 	limit := page.ClampLimit(q.Limit)
-	rows, err := s.d.Store.ListNotices(ctx, q.Filter, q.After, limit+1)
+	rows, err := s.notices().ListNotices(ctx, q.Filter, q.After, limit+1)
 	if err != nil {
 		return NoticePage{}, err
 	}
@@ -257,7 +257,7 @@ func (s *service) AdminListNotices(ctx context.Context, a authz.Actor, q NoticeL
 // GetNotice implements Service (getNoticeVersion). Retired versions stay
 // readable: they are the proof of what earlier consents agreed to.
 func (s *service) GetNotice(ctx context.Context, a authz.Actor, id uuid.UUID) (Notice, error) {
-	n, err := s.d.Store.Notice(ctx, id)
+	n, err := s.notices().Notice(ctx, id)
 	if err != nil {
 		return Notice{}, err
 	}
@@ -341,7 +341,7 @@ func (s *service) checkDraft(ctx context.Context, in NoticeDraft) (NoticeDraft, 
 		return in, err
 	}
 	if in.Purpose != nil {
-		p, err := s.d.Store.Purpose(ctx, *in.Purpose)
+		p, err := s.purposes().Purpose(ctx, *in.Purpose)
 		switch {
 		case errors.Is(err, ErrUnknownPurpose):
 			return in, invalid(ErrUnknownPurpose, "body.purpose_code", "is not a consent purpose")
@@ -392,7 +392,7 @@ func (s *service) CreateNotice(ctx context.Context, a authz.Actor, in NoticeDraf
 			Version: in.Version, Title: in.Title, BodyMD: in.BodyMD, BodySHA256: BodyDigest(in.BodyMD),
 			CreatedBy: &creator, CreatedAt: s.now(),
 		}
-		if err := s.d.Store.InsertNotice(ctx, n); err != nil {
+		if err := s.notices().InsertNotice(ctx, n); err != nil {
 			return Notice{}, err
 		}
 		if err := s.d.Audit.Log(ctx, noticeEvent(a, n, map[string]any{"step": "create", audit.MetaReauth: kind})); err != nil {
@@ -420,17 +420,17 @@ func (s *service) PublishNotice(ctx context.Context, a authz.Actor, id uuid.UUID
 		}
 		now := s.now()
 		meta := map[string]any{}
-		cur, found, err := s.d.Store.LockCurrent(ctx, n.Key())
+		cur, found, err := s.notices().LockCurrent(ctx, n.Key())
 		if err != nil {
 			return nil, err
 		}
 		if found {
-			if err := s.d.Store.Retire(ctx, cur.ID, now); err != nil {
+			if err := s.notices().Retire(ctx, cur.ID, now); err != nil {
 				return nil, err
 			}
 			meta["retired_notice_id"] = cur.ID.String()
 		}
-		if err := s.d.Store.Publish(ctx, n.ID, now); err != nil {
+		if err := s.notices().Publish(ctx, n.ID, now); err != nil {
 			return nil, err
 		}
 		if n.Kind == KindTermsOfUse && s.d.TermsWatch != nil {
@@ -446,7 +446,7 @@ func (s *service) RetireNotice(ctx context.Context, a authz.Actor, id uuid.UUID,
 		if n.Status() != StatusPublished {
 			return nil, ErrNoticeState
 		}
-		return nil, s.d.Store.Retire(ctx, n.ID, s.now())
+		return nil, s.notices().Retire(ctx, n.ID, s.now())
 	})
 }
 
@@ -459,7 +459,7 @@ func (s *service) transition(ctx context.Context, a authz.Actor, id uuid.UUID, p
 	if err := authz.Can(ctx, a, authz.ConsentNoticeManage, authz.Resource{Type: authz.TypeNoticeVersion, ID: id}); err != nil {
 		return Notice{}, err
 	}
-	if _, err := s.d.Store.Notice(ctx, id); err != nil {
+	if _, err := s.notices().Notice(ctx, id); err != nil {
 		return Notice{}, err
 	}
 	kind, err := s.reauth(ctx, a, authz.ConsentNoticeManage, authz.TypeNoticeVersion, &id, proof)
@@ -474,7 +474,7 @@ func (s *service) transition(ctx context.Context, a authz.Actor, id uuid.UUID, p
 		return Notice{}, err
 	}
 	out, _, err := idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (Notice, error) {
-		cur, err := s.d.Store.LockNotice(ctx, id)
+		cur, err := s.notices().LockNotice(ctx, id)
 		if err != nil {
 			return Notice{}, err
 		}
@@ -489,7 +489,7 @@ func (s *service) transition(ctx context.Context, a authz.Actor, id uuid.UUID, p
 		if err := s.d.Audit.Log(ctx, noticeEvent(a, cur, meta)); err != nil {
 			return Notice{}, err
 		}
-		return s.d.Store.Notice(ctx, id)
+		return s.notices().Notice(ctx, id)
 	})
 	if err != nil {
 		return Notice{}, err
@@ -504,7 +504,7 @@ func (s *service) ListPurposes(ctx context.Context, a authz.Actor) ([]PurposeDef
 	if err := authz.Can(ctx, a, authz.ConsentPurposeManage, adminSurface); err != nil {
 		return nil, err
 	}
-	return s.d.Store.Purposes(ctx)
+	return s.purposes().Purposes(ctx)
 }
 
 // UpdatePurpose implements Service (adminUpdateConsentPurpose). Switching a
@@ -536,7 +536,7 @@ func (s *service) UpdatePurpose(ctx context.Context, a authz.Actor, code Purpose
 	}
 	var out PurposeDef
 	err = s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		cur, err := s.d.Store.LockPurpose(ctx, code)
+		cur, err := s.purposes().LockPurpose(ctx, code)
 		if errors.Is(err, ErrUnknownPurpose) {
 			return ErrNotFound // a path parameter: an unknown code is simply not found
 		}
@@ -552,7 +552,7 @@ func (s *service) UpdatePurpose(ctx context.Context, a authz.Actor, code Purpose
 			cur.DescriptionTR = desc
 			meta["description_changed"] = true
 		}
-		if err := s.d.Store.UpdatePurpose(ctx, cur); err != nil {
+		if err := s.purposes().UpdatePurpose(ctx, cur); err != nil {
 			return err
 		}
 		ev := audit.Event{Action: string(authz.ConsentPurposeManage), Outcome: audit.Success,

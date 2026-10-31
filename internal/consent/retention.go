@@ -31,8 +31,13 @@ const (
 	RetentionBatch = 1000
 )
 
-// sweeper is consent's privacy.RetentionSweeper.
-type sweeper struct{ s *service }
+// sweeper is consent's privacy.RetentionSweeper: it needs the two purges
+// of the store and the transaction manager only.
+type sweeper struct {
+	retention retentionStore
+	terms     TermsStore
+	tx        db.TxManager
+}
 
 var _ privacy.RetentionSweeper = sweeper{}
 
@@ -47,9 +52,9 @@ func (w sweeper) Sweep(ctx context.Context, p privacy.RetentionPolicy, now time.
 	)
 	switch p.Code {
 	case PolicyConsentProof:
-		table, purge = "consents", w.s.d.Store.PurgeProof
+		table, purge = "consents", w.retention.PurgeProof
 	case PolicyTermsAcceptance:
-		table, purge = "terms_acceptances", w.s.d.Store.PurgeTerms
+		table, purge = "terms_acceptances", w.terms.PurgeTerms
 	default:
 		return privacy.SweepResult{}, fmt.Errorf("consent: no retention sweep for policy %q", p.Code)
 	}
@@ -60,7 +65,7 @@ func (w sweeper) Sweep(ctx context.Context, p privacy.RetentionPolicy, now time.
 		res.Count = n
 		return res, err
 	}
-	n, err := db.Batches(ctx, w.s.d.Tx, RetentionBatch, func(ctx context.Context) (int, error) {
+	n, err := db.Batches(ctx, w.tx, RetentionBatch, func(ctx context.Context) (int, error) {
 		return purge(ctx, cutoff, RetentionBatch, false)
 	})
 	res.Count = n

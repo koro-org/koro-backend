@@ -264,7 +264,7 @@ func New(d Deps) (Module, error) {
 		d.Log.Warn("iys status reconciliation unavailable: refusals given in İYS do not reach the ledger (T-312)",
 			slog.String("client", d.IYS.Name()))
 	}
-	m := Module{Service: s, Privacy: privacyProvider{s: s}, Sweeper: sweeper{s: s}, svc: s}
+	m := Module{Service: s, Privacy: privacyProvider{s: s}, Sweeper: sweeper{retention: d.Store, terms: d.Store, tx: d.Tx}, svc: s}
 	if d.Unsubscribe.enabled() {
 		m.Links = s
 	}

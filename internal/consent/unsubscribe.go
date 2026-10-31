@@ -142,9 +142,6 @@ type UnsubscribeToken struct {
 	ExpiresAt time.Time
 }
 
-// unsubscribeLinks is the store view of the opaque links.
-func (s *service) unsubscribeLinks() UnsubscribeLinkStore { return s.d.Store }
-
 // UnsubscribeURL implements UnsubscribeLinks.
 func (s *service) UnsubscribeURL(ctx context.Context, userID uuid.UUID, purpose Purpose) (string, error) {
 	u := s.d.Unsubscribe
@@ -257,10 +254,10 @@ func (s *service) Unsubscribe(ctx context.Context, raw string) error {
 	}
 	withdrawn := false
 	err = s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		if err := s.d.Store.LockSubject(ctx, c.UserID, c.Purpose); err != nil {
+		if err := s.consents().LockSubject(ctx, c.UserID, c.Purpose); err != nil {
 			return err
 		}
-		cur, found, err := s.d.Store.Latest(ctx, c.UserID, c.Purpose, nil)
+		cur, found, err := s.consents().Latest(ctx, c.UserID, c.Purpose, nil)
 		if err != nil || !found || cur.Action != Granted {
 			return err // nothing in force: idempotent no-op
 		}

@@ -123,11 +123,11 @@ func (s *service) RecordTerms(ctx context.Context, in TermsInput) (TermsAcceptan
 			ID: uuid.NewV7(), UserID: in.UserID, NoticeVersionID: n.ID, TextSHA256: n.BodySHA256,
 			Channel: in.Channel, RequestID: cut(obs.RequestID(ctx), maxRequestID), AcceptedAt: s.now(),
 		}
-		if inserted, err = s.d.Store.InsertTermsAcceptance(ctx, t); err != nil {
+		if inserted, err = s.terms().InsertTermsAcceptance(ctx, t); err != nil {
 			return err
 		}
 		if !inserted { // the version was accepted before: that acceptance stands
-			prev, err := s.d.Store.TermsAcceptancesOf(ctx, in.UserID)
+			prev, err := s.terms().TermsAcceptancesOf(ctx, in.UserID)
 			if err != nil {
 				return err
 			}
@@ -180,7 +180,7 @@ func (s *service) currentTerms(ctx context.Context, id uuid.UUID, aud Audience) 
 	if id == uuid.Nil() || !validAudience(aud) {
 		return Notice{}, ErrTermsNotCurrent
 	}
-	n, err := s.d.Store.Notice(ctx, id)
+	n, err := s.notices().Notice(ctx, id)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return Notice{}, ErrTermsNotCurrent
@@ -215,7 +215,7 @@ func (s *service) TermsStatus(ctx context.Context, userID uuid.UUID, aud Audienc
 	default:
 		st.Current = &cur
 	}
-	all, err := s.d.Store.TermsAcceptancesOf(ctx, userID)
+	all, err := s.terms().TermsAcceptancesOf(ctx, userID)
 	if err != nil {
 		return TermsStatus{}, err
 	}

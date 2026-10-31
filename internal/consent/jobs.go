@@ -44,7 +44,7 @@ func (s *service) handleRecorded(ctx context.Context, e domainevent.Envelope) er
 	if err != nil {
 		return queue.Permanent(err)
 	}
-	sub, err := s.d.Store.SubmissionOf(ctx, p.ConsentID)
+	sub, err := s.submissions().SubmissionOf(ctx, p.ConsentID)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return s.noSubmission(ctx, p)
@@ -59,7 +59,7 @@ func (s *service) handleRecorded(ctx context.Context, e domainevent.Envelope) er
 // written with the event in one transaction) or an unknown one it is a
 // bug, not something a retry fixes.
 func (s *service) noSubmission(ctx context.Context, p domainevent.ConsentRecorded) error {
-	def, err := s.d.Store.Purpose(ctx, Purpose(p.Purpose))
+	def, err := s.purposes().Purpose(ctx, Purpose(p.Purpose))
 	switch {
 	case errors.Is(err, ErrUnknownPurpose):
 		return queue.Permanent(fmt.Errorf("consent: event of consent %s names unknown purpose %q", p.ConsentID, p.Purpose))
@@ -97,7 +97,7 @@ func (s *service) deliver(ctx context.Context, sub Submission) error {
 	}
 	var final Submission
 	err = s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		cur, err := s.d.Store.LockSubmission(ctx, sub.ID)
+		cur, err := s.submissions().LockSubmission(ctx, sub.ID)
 		if err != nil {
 			return err
 		}
@@ -121,7 +121,7 @@ func (s *service) deliver(ctx context.Context, sub Submission) error {
 			cur.Attempts++
 		}
 		final = cur
-		return s.d.Store.UpdateSubmission(ctx, cur)
+		return s.submissions().UpdateSubmission(ctx, cur)
 	})
 	if err != nil {
 		return err
@@ -152,7 +152,7 @@ func (s *service) deliver(ctx context.Context, sub Submission) error {
 
 // consentOf reads the consent row of a submission.
 func (s *service) consentOf(ctx context.Context, id uuid.UUID) (Consent, error) {
-	c, err := s.d.Store.ConsentByID(ctx, id)
+	c, err := s.consents().ConsentByID(ctx, id)
 	if errors.Is(err, ErrNotFound) {
 		return Consent{}, queue.Permanent(fmt.Errorf("consent: submission of missing consent %s", id))
 	}
@@ -172,7 +172,7 @@ func (s *service) reconcile(ctx context.Context) error {
 	cutoff := s.now().Add(-ReconcileGrace)
 	sent, failed, after := 0, 0, uuid.Nil()
 	for {
-		batch, err := s.d.Store.DueSubmissions(ctx, cutoff, after, batchSize)
+		batch, err := s.submissions().DueSubmissions(ctx, cutoff, after, batchSize)
 		if err != nil {
 			return err
 		}

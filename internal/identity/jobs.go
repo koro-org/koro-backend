@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"koro/internal/files"
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/outbox"
@@ -28,21 +29,13 @@ const (
 // the default).
 type Retention func(ctx context.Context) (time.Duration, error)
 
-// Subscribe registers the outbox subscription of identity (01 §6.2):
-// identity.email_token_issued → identity.send_email_token.
+// Subscribe registers the outbox subscriptions of identity (01 §6.2):
+// identity.email_token_issued → identity.send_email_token; file.rejected →
+// identity.remove_rejected_document (T-176, T-222: a student document the
+// scan rejected leaves its pending verification; files.SubscribeRejected).
 func (m Module) Subscribe(r *outbox.Registry) {
 	r.Subscribe(domainevent.TopicIdentityEmailTokenIssued, SendEmailTokenTaskName, m.svc.handleEmailTokenIssued, outbox.Queue(queue.Default))
-}
-
-// SubscribeFileRejected registers file.rejected →
-// identity.remove_rejected_document (01 §6.2: the owning module of a file
-// the scan rejected drops its reference; BE-018 student documents). It is
-// not wired yet: files' wiring test pins file.rejected to its own single
-// subscriber (T-222). Until then a document the
-// scan rejects stays in the queue, cannot be downloaded or approved
-// (files.not_clean) and is rejected by the reviewer.
-func (m Module) SubscribeFileRejected(r *outbox.Registry) {
-	r.Subscribe(domainevent.TopicFileRejected, RemoveRejectedDocumentTaskName, m.svc.handleFileRejected, outbox.Queue(queue.Default))
+	files.SubscribeRejected(r, eduOwner, RemoveRejectedDocumentTaskName, m.svc.removeRejectedDocument)
 }
 
 // Tasks returns the task handlers identity enqueues itself (mechanism A).

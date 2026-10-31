@@ -13,6 +13,7 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/consent"
+	"koro/internal/files"
 	"koro/internal/identity"
 	"koro/internal/platform/civil"
 	"koro/internal/platform/db"
@@ -349,7 +350,7 @@ func (m Module) Subscribe(r *outbox.Registry) {
 	r.Subscribe(domainevent.TopicUserEduVerified, ApplyEduVerifiedTaskName, m.svc.handleEduVerified, q)
 	r.Subscribe(domainevent.TopicUserEduVerificationLapsed, ApplyEduLapsedTaskName, m.svc.handleEduLapsed, q)
 	r.Subscribe(domainevent.TopicClubSensitivityChanged, DropSensitiveClubKeyTaskName, m.svc.handleSensitivityChanged, q)
-	r.Subscribe(domainevent.TopicFileRejected, DropRejectedFileTaskName, m.svc.handleFileRejected, q)
+	files.SubscribeRejected(r, studentsModule, DropRejectedFileTaskName, m.svc.dropRejectedFile)
 	r.Subscribe(domainevent.TopicUserEduVerificationLapsed, SuspendLapsedGrantsTaskName, m.svc.handleLapsedGrants, q)
 	r.Subscribe(domainevent.TopicUserEduVerified, SuspendGapGrantsTaskName, m.svc.handleGapGrants, q)
 	r.Subscribe(domainevent.TopicConsentRecorded, ClearContactSharesTaskName, m.svc.handleConsentRecorded, q)

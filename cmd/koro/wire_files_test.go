@@ -14,9 +14,14 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
+	"koro/internal/directory"
+	"koro/internal/events"
+	"koro/internal/feed"
 	"koro/internal/files"
 	"koro/internal/files/clamavtest"
+	"koro/internal/identity"
 	"koro/internal/notify"
+	"koro/internal/orgs"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/config"
 	"koro/internal/platform/db"
@@ -26,6 +31,8 @@ import (
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/privacy"
 	"koro/internal/platform/storage"
+	"koro/internal/platform/webcache"
+	"koro/internal/students"
 )
 
 // testBuckets are the buckets of the in-memory object store of wiring and
@@ -86,6 +93,60 @@ func TestWire_FilesTasksAndPrivacy(t *testing.T) {
 	}
 	if !slices.ContainsFunc(c.privacy, func(p privacy.Provider) bool { return p.Name() == "files" }) {
 		t.Fatal("files privacy provider not registered")
+	}
+}
+
+// TestWire_FileRejectedOwners (T-176, BE-151): every browser upload purpose
+// is classified for file.rejected. The owning module of a personal or
+// public content file drops its reference and deletes the file (one
+// subscription each); a financial or legal record keeps its reference (no
+// subscriber: the row is the record and its audit trail, the file answers
+// 409 and the uploader re-uploads through the record's own flow, T-393).
+// files notifies the uploader and webcache revalidates a public page. A new
+// purpose fails here until it is classified; server-generated purposes
+// (event_export, dsr_export) are never scanned, so never rejected.
+func TestWire_FileRejectedOwners(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	const keeps = "" // a financial or legal record: the reference stays
+	owner := map[files.Purpose]string{
+		files.PurposeAvatar:                students.DropRejectedFileTaskName,
+		files.PurposeCV:                    students.DropRejectedFileTaskName,
+		files.PurposeEduDocument:           identity.RemoveRejectedDocumentTaskName,
+		files.PurposeOrgLogo:               orgs.DropRejectedLogoTaskName,
+		files.PurposeEventCover:            events.DropRejectedCoverTaskName,
+		files.PurposePostMedia:             feed.DropRejectedMediaTaskName,
+		files.PurposeClubClaimEvidence:     directory.RemoveRejectedEvidenceTaskName,
+		files.PurposePartyDocument:         keeps,
+		files.PurposeBankAccountEvidence:   keeps,
+		files.PurposeTransferReceipt:       keeps,
+		files.PurposePayoutReceipt:         keeps,
+		files.PurposeRefundReceipt:         keeps,
+		files.PurposeInvoicePDF:            keeps,
+		files.PurposeDeliveryEvidence:      keeps,
+		files.PurposeRefundRequestEvidence: keeps,
+	}
+	want := []string{files.NotifyRejectedTaskName, webcache.SubFileRejected}
+	for _, p := range files.UploadPurposes() {
+		name, ok := owner[p]
+		switch {
+		case !ok:
+			t.Errorf("purpose %s is not classified for file.rejected (T-176)", p)
+		case name != keeps && !slices.Contains(want, name):
+			want = append(want, name)
+		}
+	}
+	var got []string
+	for _, s := range c.infra.subs.For(domainevent.TopicFileRejected) {
+		got = append(got, s.Name)
+	}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("file.rejected subscriptions %q, want %q", got, want)
 	}
 }
 

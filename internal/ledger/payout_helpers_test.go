@@ -302,7 +302,30 @@ func (f *fakeFiles) Attach(_ context.Context, _ authz.Actor, id uuid.UUID, owner
 }
 
 func (f *fakeFiles) PresignGet(_ context.Context, id uuid.UUID, ttl time.Duration) (files.Download, error) {
+	f.mu.Lock()
+	m := f.meta[id]
+	f.mu.Unlock()
+	switch { // files' servable rule
+	case m.Status == files.StatusRejected:
+		return files.Download{}, files.ErrRejected
+	case m.ScanStatus == files.ScanInfected:
+		return files.Download{}, files.ErrNotClean
+	}
 	return files.Download{URL: "https://files.test/" + id.String(), ExpiresAt: t0.Add(ttl)}, nil
+}
+
+// reject takes a file out of use as files' scan does (file.rejected):
+// infected or, when the metadata could not be removed, rejected.
+func (f *fakeFiles) reject(id uuid.UUID, reason files.RejectReason) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	m := f.meta[id]
+	if reason == files.RejectInfected {
+		m.ScanStatus = files.ScanInfected
+	} else {
+		m.Status = files.StatusRejected
+	}
+	f.meta[id] = m
 }
 
 var errAuditDown = errors.New("audit is down")

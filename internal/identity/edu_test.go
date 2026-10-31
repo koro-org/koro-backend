@@ -779,8 +779,7 @@ func TestEduFileRejected_WithdrawsPendingDocument(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.mod.SubscribeFileRejected(e.subs)
-	subs := e.subs.For(domainevent.TopicFileRejected)
+	subs := e.subs.For(domainevent.TopicFileRejected) // Subscribe registers it (T-176)
 	if len(subs) != 1 || subs[0].Name != identity.RemoveRejectedDocumentTaskName {
 		t.Fatalf("file.rejected subscriptions %+v", subs)
 	}
@@ -800,5 +799,68 @@ func TestEduFileRejected_WithdrawsPendingDocument(t *testing.T) {
 	if _, err := e.svc.SubmitEduDocument(ctx, a, identity.EduDocumentSubmission{UniversityID: eduUni,
 		FileID: e.files.add(u.ID, files.PurposeEduDocument, files.ScanClean)}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestIdentity_FileRejected_DropsReference (T-176): file.rejected for the
+// document of a decided verification keeps the row (the decision stands)
+// but drops its file reference and deletes the file in one transaction;
+// the system job audits a failed submission. A second delivery changes
+// nothing more; another module's file is not identity's.
+func TestIdentity_FileRejected_DropsReference(t *testing.T) {
+	t.Parallel()
+	e := newEduEnv(t)
+	u, a := e.student(t, "ada@example.com")
+	ctx := t.Context()
+	doc := e.files.add(u.ID, files.PurposeEduDocument, files.ScanSkipped)
+	v, err := e.svc.SubmitEduDocument(ctx, a, identity.EduDocumentSubmission{UniversityID: eduUni, FileID: doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pad := e.staff(t, "admin@example.com", authz.PlatformAdmin)
+	if _, err := e.svc.DecideEduVerification(ctx, pad, v.Record.ID, identity.EduDecision{Decision: identity.EduRejected,
+		ReviewNote: "Okunamıyor"}); err != nil {
+		t.Fatal(err)
+	}
+	subs := e.subs.For(domainevent.TopicFileRejected)
+	if len(subs) != 1 || subs[0].Name != identity.RemoveRejectedDocumentTaskName {
+		t.Fatalf("file.rejected subscriptions %+v", subs)
+	}
+	deliver := func(id uuid.UUID, module string) {
+		t.Helper()
+		entity := v.Record.ID
+		env, err := domainevent.New(domainevent.FileRejected{FileID: id, UploaderID: &u.ID, Purpose: "edu_document",
+			Reason: "infected", AttachedModule: module, AttachedEntityID: &entity}, "file", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := subs[0].Handle(workerCtx(t), env); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 2 { // at-least-once delivery
+		deliver(doc, "identity")
+	}
+	rows := e.eduRows(t, u.ID)
+	if len(rows) != 1 || rows[0].Status != identity.EduRejected || rows[0].DocumentFileID != nil {
+		t.Fatalf("decided verification after the rejection = %+v", rows)
+	}
+	if !slices.Contains(e.files.removed, doc) {
+		t.Fatal("the rejected document was not deleted")
+	}
+	var got []audit.Event
+	for _, ev := range e.audit.of(string(authz.IdentityEduVerificationSubmitDocument)) {
+		if ev.Metadata["operation"] == "document_rejected_by_scan" {
+			got = append(got, ev)
+		}
+	}
+	if len(got) != 1 || got[0].Outcome != audit.Failure || got[0].SystemJob != identity.RemoveRejectedDocumentTaskName ||
+		got[0].Metadata["file_id"] != doc.String() || got[0].Metadata["withdrawn"] != nil {
+		t.Fatalf("system audit = %+v", got)
+	}
+	other := e.files.add(u.ID, files.PurposeEduDocument, files.ScanClean)
+	deliver(other, "students")
+	if slices.Contains(e.files.removed, other) {
+		t.Fatal("another module's file was deleted")
 	}
 }

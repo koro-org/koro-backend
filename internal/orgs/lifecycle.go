@@ -10,6 +10,7 @@ import (
 	"uuid"
 
 	"koro/internal/authz"
+	"koro/internal/files"
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/outbox"
@@ -64,6 +65,7 @@ func (m Module) Subscribe(r *outbox.Registry) {
 		outbox.Queue(queue.Default))
 	r.Subscribe(domainevent.TopicOrgReviewDecided, NotifyReviewDecidedTaskName, m.svc.handleReviewDecided,
 		outbox.Queue(queue.Default))
+	files.SubscribeRejected(r, logoOwner, DropRejectedLogoTaskName, m.svc.dropRejectedLogo) // T-176, rejected.go
 }
 
 // Jobs returns the scheduled jobs of 01 §7. The 6-month purge of ended

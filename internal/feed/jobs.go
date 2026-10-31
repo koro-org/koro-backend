@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"koro/internal/authz"
+	"koro/internal/files"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/queue"
@@ -36,8 +37,8 @@ const (
 // automatic follow; club.sensitivity_changed → the automatic follows of a
 // club that became sensitive; post.submitted_for_review,
 // content_report.created and post.moderated → the moderation notices
-// (BE-032, notices.go). post.liked/unliked and post.saved are talent's
-// (P3).
+// (BE-032, notices.go); file.rejected → feed.drop_rejected_media (T-176,
+// rejected.go). post.liked/unliked and post.saved are talent's (P3).
 func (m Module) Subscribe(r *outbox.Registry) {
 	r.Subscribe(domainevent.TopicPostPublished, NotifyFollowersTaskName, m.svc.handlePostPublished,
 		outbox.Queue(queue.Low))
@@ -49,6 +50,7 @@ func (m Module) Subscribe(r *outbox.Registry) {
 	r.Subscribe(domainevent.TopicMembershipEnded, RemoveAutoFollowTaskName, m.svc.handleMembershipEnded, q)
 	r.Subscribe(domainevent.TopicClubSensitivityChanged, DropSensitiveAutoFollowsTaskName,
 		m.svc.handleSensitivityChanged, q)
+	files.SubscribeRejected(r, mediaOwner, DropRejectedMediaTaskName, m.svc.dropRejectedMedia)
 }
 
 // Jobs returns the scheduled jobs of feed (01 §7).

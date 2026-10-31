@@ -5,6 +5,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
+	"koro/internal/files"
 	"koro/internal/ledger"
 	"koro/internal/platform/problem/problemtest"
 )
@@ -41,4 +42,34 @@ func TestOrgPayoutReceipt_PaidOnlyAudited(t *testing.T) {
 	member := actor(t, "club_member")
 	_, err = e.svc.OrgPayoutReceipt(ctxOf(t, member), member, org, p.ID)
 	problemtest.WantErr(t, err, authz.ErrForbidden)
+}
+
+// TestLedger_FileRejected_KeepsReceipt (T-176, BE-151): a paid payout's
+// receipt the scan rejected afterwards (infected, or unprocessable) stays
+// referenced: the payout is a financial record and ledger does not consume
+// file.rejected. The payout still reads (org and admin surfaces) with its
+// receipt_file_id and without a link; the receipt download answers 409.
+func TestLedger_FileRejected_KeepsReceipt(t *testing.T) {
+	t.Parallel()
+	for _, reason := range []files.RejectReason{files.RejectInfected, files.RejectUnprocessable} {
+		e := newPayoutEnv(t)
+		p, _, _ := e.approved(t)
+		paid := e.markPaid(t, "finance_admin_2", p.ID)
+		e.files.reject(*paid.ReceiptFileID, reason)
+		club, fin := actor(t, "club_admin"), actor(t, "finance_admin")
+		org := authztest.ID("club_a")
+		v, err := e.svc.GetOrgPayout(ctxOf(t, club), club, org, p.ID)
+		if err != nil || v.ReceiptFileID == nil || *v.ReceiptFileID != *paid.ReceiptFileID || v.ReceiptURL != "" {
+			t.Fatalf("%s: org payout = %+v, %v", reason, v, err)
+		}
+		if v, err := e.svc.AdminGetPayout(ctxOf(t, fin), fin, p.ID); err != nil || v.ReceiptFileID == nil || v.ReceiptURL != "" {
+			t.Fatalf("%s: admin payout = %+v, %v", reason, v, err)
+		}
+		_, err = e.svc.OrgPayoutReceipt(ctxOf(t, club), club, org, p.ID)
+		want := files.ErrNotClean
+		if reason == files.RejectUnprocessable {
+			want = files.ErrRejected
+		}
+		problemtest.WantErr(t, err, want)
+	}
 }

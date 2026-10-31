@@ -10,10 +10,8 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/files"
-	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/problem"
-	"koro/internal/platform/queue"
 )
 
 // CV rules (02 §3.1, §9.6; 04 §1.14).
@@ -285,38 +283,31 @@ func (s *service) DownloadMyCV(ctx context.Context, a authz.Actor, id uuid.UUID)
 	return dl, nil
 }
 
-// handleFileRejected is students.drop_rejected_file (file.rejected, T-176):
-// a file attached to students that the scan rejected (malware, or content
-// that could not be cleaned) loses its reference and is deleted through
-// files. A CV row goes with its file (the cv section follows); an avatar
-// is cleared from the profile. Idempotent: a second delivery finds nothing
-// and files.Delete of a missing file is no error.
-func (s *service) handleFileRejected(ctx context.Context, e domainevent.Envelope) error {
-	p, err := domainevent.Decode[domainevent.FileRejected](e)
-	if err != nil {
-		return queue.Permanent(err)
-	}
-	if p.AttachedModule != studentsModule {
-		return nil
-	}
-	sys := authz.SystemActor(DropRejectedFileTaskName)
-	switch files.Purpose(p.Purpose) {
+// dropRejectedFile is students.drop_rejected_file (file.rejected, T-176;
+// files.SubscribeRejected): a file attached to students that the scan
+// rejected (malware, or content that could not be cleaned) loses its
+// reference and is deleted through files. A CV row goes with its file (the
+// cv section follows); an avatar is cleared from the profile. Idempotent: a
+// second delivery finds nothing and files.Delete of a missing file is no
+// error.
+func (s *service) dropRejectedFile(ctx context.Context, r files.Rejection) error {
+	switch r.Purpose {
 	case files.PurposeCV:
-		return s.dropRejectedCV(ctx, sys, p)
+		return s.dropRejectedCV(ctx, r)
 	case files.PurposeAvatar:
-		return s.dropRejectedAvatar(ctx, sys, p)
+		return s.dropRejectedAvatar(ctx, r)
 	}
 	s.d.Log.LogAttrs(ctx, slog.LevelWarn, "rejected students file of an unknown purpose kept",
-		slog.String("file_id", p.FileID.String()), slog.String("purpose", p.Purpose))
+		slog.String("file_id", r.FileID.String()), slog.String("purpose", string(r.Purpose)))
 	return nil
 }
 
-func (s *service) dropRejectedCV(ctx context.Context, sys authz.Actor, p domainevent.FileRejected) error {
+func (s *service) dropRejectedCV(ctx context.Context, r files.Rejection) error {
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		c, err := s.cvs().CVByFile(ctx, p.FileID)
+		c, err := s.cvs().CVByFile(ctx, r.FileID)
 		switch {
 		case errors.Is(err, ErrNotFound): // the student deleted it meanwhile: only the file may remain
-			return s.removeFile(ctx, sys, p.FileID)
+			return s.removeFile(ctx, r.Actor, r.FileID)
 		case err != nil:
 			return err
 		}
@@ -327,35 +318,31 @@ func (s *service) dropRejectedCV(ctx context.Context, sys authz.Actor, p domaine
 		case err != nil:
 			return err
 		}
-		return s.removeCV(ctx, sys, prof, c, systemEvent(DropRejectedFileTaskName, auditCVRejected, c.UserID, map[string]any{
-			"cv_id": c.ID.String(), "file_id": p.FileID.String(), "reason": p.Reason, "was_current": c.IsCurrent,
-		}))
+		meta := r.Meta()
+		meta["cv_id"], meta["was_current"] = c.ID.String(), c.IsCurrent
+		return s.removeCV(ctx, r.Actor, prof, c, systemEvent(DropRejectedFileTaskName, auditCVRejected, c.UserID, meta))
 	})
 }
 
-func (s *service) dropRejectedAvatar(ctx context.Context, sys authz.Actor, p domainevent.FileRejected) error {
-	if p.AttachedEntityID == nil {
-		return s.removeFile(ctx, sys, p.FileID)
-	}
+func (s *service) dropRejectedAvatar(ctx context.Context, r files.Rejection) error {
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		prof, err := s.profiles().LockProfile(ctx, *p.AttachedEntityID)
+		prof, err := s.profiles().LockProfile(ctx, r.EntityID)
 		switch {
 		case errors.Is(err, ErrNotFound):
-			return s.removeFile(ctx, sys, p.FileID)
+			return s.removeFile(ctx, r.Actor, r.FileID)
 		case err != nil:
 			return err
 		}
-		if prof.AvatarFileID == nil || *prof.AvatarFileID != p.FileID {
-			return s.removeFile(ctx, sys, p.FileID) // replaced meanwhile
+		if prof.AvatarFileID == nil || *prof.AvatarFileID != r.FileID {
+			return s.removeFile(ctx, r.Actor, r.FileID) // replaced meanwhile
 		}
 		prof.AvatarFileID = nil
 		if _, err := s.profiles().UpdateProfile(ctx, prof); err != nil {
 			return err
 		}
-		if err := s.removeFile(ctx, sys, p.FileID); err != nil {
+		if err := s.removeFile(ctx, r.Actor, r.FileID); err != nil {
 			return err
 		}
-		return s.d.Audit.Log(ctx, systemEvent(DropRejectedFileTaskName, auditAvatarRejected, prof.UserID,
-			map[string]any{"file_id": p.FileID.String(), "reason": p.Reason}))
+		return s.d.Audit.Log(ctx, systemEvent(DropRejectedFileTaskName, auditAvatarRejected, prof.UserID, r.Meta()))
 	})
 }

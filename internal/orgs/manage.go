@@ -215,7 +215,7 @@ func (s *service) attachLogo(ctx context.Context, a authz.Actor, o Org, fileID u
 	if f.Purpose != files.PurposeOrgLogo || !ownOrg && !ownUpload {
 		return bad
 	}
-	return s.d.Files.Attach(ctx, a, fileID, files.Owner{Module: "orgs", EntityID: o.ID, Purpose: files.PurposeOrgLogo})
+	return s.d.Files.Attach(ctx, a, fileID, files.Owner{Module: logoOwner, EntityID: o.ID, Purpose: files.PurposeOrgLogo})
 }
 
 // orgAggType is the aggregate type of org.updated.

@@ -12,6 +12,7 @@ import (
 
 	"koro/internal/audit"
 	"koro/internal/authz"
+	"koro/internal/files"
 	"koro/internal/notify"
 	"koro/internal/platform/applink"
 	"koro/internal/platform/civil"
@@ -207,27 +208,16 @@ func (s *service) eduJobs() []queue.Job {
 	}
 }
 
-// rejectedDocumentJob is the system actor of the clean-up after a virus
-// finding.
-const rejectedDocumentJob = "identity.remove_rejected_document"
-
-// handleFileRejected consumes file.rejected (01 §6.2). A student document
+// removeRejectedDocument is identity.remove_rejected_document
+// (file.rejected, 01 §6.2; files.SubscribeRejected). A student document
 // still in review is withdrawn: its pending verification is deleted (it was
 // never decided, so no reviewer can be named) and the file is removed; the
 // uploader already got files' notice. A decided verification keeps its row
 // (an approval needs a clean file, so this is a document that was rejected
-// or superseded); its file goes too.
-func (s *service) handleFileRejected(ctx context.Context, e domainevent.Envelope) error {
-	p, err := domainevent.Decode[domainevent.FileRejected](e)
-	if err != nil {
-		return queue.Permanent(err)
-	}
-	if p.AttachedModule != eduOwner {
-		return nil
-	}
-	sys := authz.SystemActor(rejectedDocumentJob)
+// or superseded); its file goes too. A second delivery finds nothing.
+func (s *service) removeRejectedDocument(ctx context.Context, r files.Rejection) error {
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		v, found, err := s.edu().EduVerificationOfFile(ctx, p.FileID)
+		v, found, err := s.edu().EduVerificationOfFile(ctx, r.FileID)
 		if err != nil || !found {
 			return err
 		}
@@ -235,8 +225,8 @@ func (s *service) handleFileRejected(ctx context.Context, e domainevent.Envelope
 		if err != nil {
 			return err
 		}
-		meta := map[string]any{"subject_user_id": v.UserID.String(), "file_id": p.FileID.String(), "reason": p.Reason,
-			"operation": "document_rejected_by_scan"}
+		meta := r.Meta()
+		meta["subject_user_id"], meta["operation"] = v.UserID.String(), "document_rejected_by_scan"
 		if v.Status == EduPending {
 			if _, err := s.edu().DeleteEduVerification(ctx, v.ID); err != nil {
 				return err
@@ -248,10 +238,10 @@ func (s *service) handleFileRejected(ctx context.Context, e domainevent.Envelope
 				return err
 			}
 		}
-		if err := s.removeFile(ctx, sys, p.FileID); err != nil {
+		if err := s.removeFile(ctx, r.Actor, r.FileID); err != nil {
 			return err
 		}
-		return s.d.Audit.Log(ctx, event(authz.IdentityEduVerificationSubmitDocument, audit.Failure, resourceEdu, v.ID, meta).By(sys))
+		return s.d.Audit.Log(ctx, event(authz.IdentityEduVerificationSubmitDocument, audit.Failure, resourceEdu, v.ID, meta).By(r.Actor))
 	})
 }
 

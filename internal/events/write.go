@@ -115,7 +115,7 @@ func (s *service) attachCover(ctx context.Context, a authz.Actor, e Event, cover
 	if cover == nil {
 		return nil
 	}
-	return s.d.Files.Attach(ctx, a, *cover, files.Owner{Module: "events", EntityID: e.ID, Purpose: files.PurposeEventCover})
+	return s.d.Files.Attach(ctx, a, *cover, files.Owner{Module: coverOwner, EntityID: e.ID, Purpose: files.PurposeEventCover})
 }
 
 // locked reads the event for a change in the transaction carried by ctx:

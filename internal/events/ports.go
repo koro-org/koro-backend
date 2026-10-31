@@ -91,10 +91,11 @@ type Files interface {
 	// PutGenerated stores a server-generated file (the export; outside a
 	// transaction: object storage I/O).
 	PutGenerated(ctx context.Context, in files.GeneratedFile) (uuid.UUID, error)
-	// Delete removes an export file in the transaction that clears its
-	// reference (events.purge_exports after 7 days; a build that lost its
-	// row), so the file never outlives its reference nor the reference its
-	// file (01 §6.3, T-193, 06 H-49; the objects go after the commit).
+	// Delete removes an export file (events.purge_exports after 7 days; a
+	// build that lost its row) or a cover the scan rejected (file.rejected,
+	// T-176) in the transaction that clears its reference, so the file never
+	// outlives its reference nor the reference its file (01 §6.3, T-193,
+	// 06 H-49; the objects go after the commit).
 	//
 	// sync-write: files.Files.Delete
 	Delete(ctx context.Context, a authz.Actor, fileID uuid.UUID) error

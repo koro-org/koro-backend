@@ -29,6 +29,7 @@ func (logoFiles) PresignGet(_ context.Context, id uuid.UUID, _ time.Duration) (f
 func (logoFiles) PublicURL(_ context.Context, id uuid.UUID) (string, error) {
 	return publicLogo(id), nil
 }
+func (logoFiles) Delete(context.Context, authz.Actor, uuid.UUID) error { return nil }
 
 func publicLogo(id uuid.UUID) string { return "https://media.test/org_logo/" + id.String() + ".png" }
 

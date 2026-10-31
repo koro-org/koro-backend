@@ -94,6 +94,12 @@ feed      -> files.Files.Delete
 # reference nor the reference its file (the objects go after the commit).
 events    -> files.Files.Delete
 
+# BE-151 (T-176; rationale for 01 §6.3 in the BE-151 ticket's doc patch, the BE-057 pattern above): orgs
+# deletes an org logo the scan rejected (file.rejected) in the transaction that clears logo_file_id, so
+# the file never outlives its reference nor the reference its file (the objects go after the commit).
+# events (cover) and feed (post image) do the same under their lines above.
+orgs      -> files.Files.Delete
+
 # BE-041 (06 H-56, T-18, T-227; BE-040's doc patch, rationale for 01 §6.3 in the BE-041 ticket's doc
 # patch): the model C twin of "Havale eşleştirme". A finance admin's confirmation that the buyer paid the
 # payees directly records the direct_confirmed payment and pays the order (its rights active, its splits

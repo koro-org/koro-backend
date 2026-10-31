@@ -401,9 +401,12 @@ func (s *service) view(ctx context.Context, p Payout) (PayoutView, error) {
 	if p.Status == StatusPaid && p.ReceiptFileID != nil {
 		d, err := s.d.Files.PresignGet(ctx, *p.ReceiptFileID, receiptURLTTL)
 		switch {
-		case errors.Is(err, files.ErrNotClean):
-			// Not scanned clean (yet): the payout is shown without the link.
-			s.d.Log.LogAttrs(ctx, slog.LevelWarn, "payout receipt not served: file not clean",
+		case errors.Is(err, files.ErrNotClean), errors.Is(err, files.ErrRejected):
+			// Not scanned clean (yet), or taken out of use after its upload
+			// (file.rejected: the payout keeps its receipt reference as a
+			// financial record, T-176, BE-151): the payout is shown without
+			// the link; the receipt download answers 409.
+			s.d.Log.LogAttrs(ctx, slog.LevelWarn, "payout receipt not served: file not clean or rejected",
 				slog.String("payout_id", p.ID.String()))
 		case err != nil:
 			return PayoutView{}, err

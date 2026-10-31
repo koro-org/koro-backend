@@ -593,7 +593,9 @@ func (s *service) AdminGetClubClaim(ctx context.Context, a authz.Actor, id uuid.
 		}
 		dl, err := s.d.Files.PresignGet(ctx, *f, evidenceTTL)
 		switch {
-		case errors.Is(err, files.ErrNotClean), errors.Is(err, problem.ErrNotFound):
+		case errors.Is(err, files.ErrNotClean), errors.Is(err, files.ErrRejected), errors.Is(err, problem.ErrNotFound):
+			// ErrRejected: taken out of use; directory.remove_rejected_evidence
+			// drops the reference (T-176), the view never fails meanwhile.
 			v.EvidenceState = EvidenceNotClean
 		case err != nil:
 			return ClaimView{}, err

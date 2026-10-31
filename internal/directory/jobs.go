@@ -10,6 +10,7 @@ import (
 
 	"koro/internal/audit"
 	"koro/internal/authz"
+	"koro/internal/files"
 	"koro/internal/notify"
 	"koro/internal/orgs"
 	"koro/internal/platform/domainevent"
@@ -34,9 +35,6 @@ const NotifyClaimDecidedTaskName = "directory.notify_claim_decided"
 // (01 §6.2, T-176): the claim drops the file and the file is deleted.
 const RemoveRejectedEvidenceTaskName = "directory.remove_rejected_evidence"
 
-// rejectedEvidenceJob is the system actor of RemoveRejectedEvidenceTaskName.
-const rejectedEvidenceJob = "directory.remove_rejected_evidence"
-
 // Templates of the claimant's in-app notice (fixed texts; the data holds
 // the claim and club IDs only). The decision note is never sent: it is for
 // platform staff (BE-022).
@@ -59,22 +57,14 @@ func (m Module) Tasks() []queue.Task {
 	}
 }
 
-// Subscribe registers the outbox subscription of directory (01 §6.2):
-// club_claim.decided → directory.notify_claim_decided.
+// Subscribe registers the outbox subscriptions of directory (01 §6.2):
+// club_claim.decided → directory.notify_claim_decided; file.rejected →
+// directory.remove_rejected_evidence (T-176, T-222: the claim drops the
+// evidence the scan rejected; files.SubscribeRejected).
 func (m Module) Subscribe(r *outbox.Registry) {
 	r.Subscribe(domainevent.TopicClubClaimDecided, NotifyClaimDecidedTaskName, m.svc.handleClaimDecided,
 		outbox.Queue(queue.Default))
-}
-
-// SubscribeFileRejected registers file.rejected →
-// directory.remove_rejected_evidence (01 §6.2, T-176: the owning module of
-// a file the scan rejected drops its reference). Like identity's (BE-018,
-// T-222) it is not wired yet: files' wiring test pins file.rejected to its
-// single subscriber. Until then a rejected evidence file stays referenced;
-// it cannot be downloaded (the admin view says not_clean).
-func (m Module) SubscribeFileRejected(r *outbox.Registry) {
-	r.Subscribe(domainevent.TopicFileRejected, RemoveRejectedEvidenceTaskName, m.svc.handleFileRejected,
-		outbox.Queue(queue.Default))
+	files.SubscribeRejected(r, claimOwner, RemoveRejectedEvidenceTaskName, m.svc.removeRejectedEvidence)
 }
 
 // handleClaimDecided sends the claimant one in-app notice per decision
@@ -119,22 +109,15 @@ func (s *service) handleClaimDecided(ctx context.Context, e domainevent.Envelope
 	return err
 }
 
-// handleFileRejected consumes file.rejected (01 §6.2, T-176): the claim
-// whose evidence the scan rejected drops the file reference and the file
-// is deleted; the claim itself stays (a pending one may still have its
+// removeRejectedEvidence is directory.remove_rejected_evidence
+// (file.rejected, 01 §6.2, T-176; files.SubscribeRejected): the claim whose
+// evidence the scan rejected drops the file reference and the file is
+// deleted; the claim itself stays (a pending one may still have its
 // evidence text; the reviewer decides). The uploader already got files'
-// notice.
-func (s *service) handleFileRejected(ctx context.Context, e domainevent.Envelope) error {
-	p, err := domainevent.Decode[domainevent.FileRejected](e)
-	if err != nil {
-		return queue.Permanent(err)
-	}
-	if p.AttachedModule != claimOwner {
-		return nil
-	}
-	sys := authz.SystemActor(rejectedEvidenceJob)
+// notice. A second delivery finds no claim of the file.
+func (s *service) removeRejectedEvidence(ctx context.Context, r files.Rejection) error {
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		c, err := s.d.Store.ClaimOfFile(ctx, p.FileID)
+		c, err := s.d.Store.ClaimOfFile(ctx, r.FileID)
 		switch {
 		case errors.Is(err, ErrNotFound):
 			return nil // already dropped (a repeated task) or erased
@@ -148,13 +131,12 @@ func (s *service) handleFileRejected(ctx context.Context, e domainevent.Envelope
 		if _, err := s.d.Store.UpdateClaim(ctx, c); err != nil {
 			return err
 		}
-		if err := s.removeFile(ctx, sys, p.FileID); err != nil {
+		if err := s.removeFile(ctx, r.Actor, r.FileID); err != nil {
 			return err
 		}
-		ev := auditEvent(sys, authz.DirectoryClubClaimCreate, authz.TypeClubClaim, c.ID, nil, "", map[string]any{
-			"operation": "evidence_rejected_by_scan", "file_id": p.FileID.String(), "reason": p.Reason,
-			audit.MetaSubjectUserID: c.ClaimantUserID.String(),
-		})
+		meta := r.Meta()
+		meta["operation"], meta[audit.MetaSubjectUserID] = "evidence_rejected_by_scan", c.ClaimantUserID.String()
+		ev := auditEvent(r.Actor, authz.DirectoryClubClaimCreate, authz.TypeClubClaim, c.ID, nil, "", meta)
 		ev.Outcome = audit.Failure
 		return s.d.Audit.Log(ctx, ev)
 	})

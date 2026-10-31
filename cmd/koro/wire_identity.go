@@ -208,7 +208,8 @@ func (w *identityWiring) build(c *container) error {
 	return nil
 }
 
-// tasks: identity.email_token_issued → identity.send_email_token; the
+// tasks: identity.email_token_issued → identity.send_email_token,
+// file.rejected → identity.remove_rejected_document (T-176); the
 // identity.send_security_notice, identity.send_role_alert and
 // identity.send_edu_notice tasks; identity.sessions_cleanup (03:30) and
 // identity.email_tokens_cleanup (03:35) on the low queue,

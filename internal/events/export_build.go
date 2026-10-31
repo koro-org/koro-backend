@@ -112,7 +112,7 @@ func (s *service) handleBuildExport(ctx context.Context, payload []byte) error {
 		if cur.Status != ExportQueued { // a concurrent run won
 			return s.d.Files.Delete(ctx, sys, fileID)
 		}
-		if err := s.d.Files.Attach(ctx, sys, fileID, files.Owner{Module: "events", EntityID: x.ID, Purpose: files.PurposeEventExport}); err != nil {
+		if err := s.d.Files.Attach(ctx, sys, fileID, files.Owner{Module: coverOwner, EntityID: x.ID, Purpose: files.PurposeEventExport}); err != nil {
 			return err
 		}
 		n := rows

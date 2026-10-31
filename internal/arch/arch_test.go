@@ -474,15 +474,17 @@ func TestSyncWritesAreAllowed(t *testing.T) {
 	// students.ContactSharing.ShareContactWithCompany (BE-089: share_contact
 	// with the request's company in the acceptance's transaction, T-335), +
 	// identity → consent.TermsLedger.RecordTerms (BE-118: the accepted terms
-	// of use in the registration transaction, Q-17).
-	if len(allow) != 36 {
-		t.Fatalf("sync_writes.txt has %d lines, want 36", len(allow))
+	// of use in the registration transaction, Q-17), + orgs →
+	// files.Files.Delete (BE-151: an org logo the scan rejected goes in the
+	// transaction that clears logo_file_id, T-176).
+	if len(allow) != 37 {
+		t.Fatalf("sync_writes.txt has %d lines, want 37", len(allow))
 	}
 	for _, must := range []string{"kvkk files.Files.Delete", "feed entitlements.Entitlements.Release",
 		"outreach entitlements.Entitlements.Release", "feed outreach.Targeting.DiscardDispatch",
 		"feed outreach.Targeting.ScheduleDispatch", "outreach entitlements.Entitlements.Consume",
 		"identity files.Files.Delete", "directory files.Files.Delete", "students files.Files.Delete", "feed files.Files.Delete",
-		"events files.Files.Delete", "events kvkk.DestructionRecorder.Record", "talent kvkk.DestructionRecorder.Record",
+		"events files.Files.Delete", "orgs files.Files.Delete", "events kvkk.DestructionRecorder.Record", "talent kvkk.DestructionRecorder.Record",
 		"* audit.Logger.Log", "* files.Files.Attach", "payments orders.Orders.ApplyPayment", "payments ledger.Poster.Post",
 		"payments orders.Orders.ConfirmDirectPayment", "identity consent.TermsLedger.RecordTerms", "payments orders.Orders.ApplyRefund", "payments ledger.LedgerLines.LockPayees",
 		"directory orgs.OrgAdmin.GrantRole", "directory orgs.OrgAdmin.Create", "orders catalog.Offerings.Release",

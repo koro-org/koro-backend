@@ -86,7 +86,7 @@ func (s *service) writeMedia(ctx context.Context, a authz.Actor, p Post, media [
 		return nil
 	}
 	for _, m := range media {
-		if err := s.d.Files.Attach(ctx, a, m.FileID, files.Owner{Module: "feed", EntityID: p.ID, Purpose: files.PurposePostMedia}); err != nil {
+		if err := s.d.Files.Attach(ctx, a, m.FileID, files.Owner{Module: mediaOwner, EntityID: p.ID, Purpose: files.PurposePostMedia}); err != nil {
 			return err
 		}
 	}

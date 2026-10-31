@@ -8,6 +8,7 @@ import (
 	"uuid"
 
 	"koro/internal/authz"
+	"koro/internal/files"
 	"koro/internal/notify"
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
@@ -79,6 +80,8 @@ func (m Module) Subscribe(r *outbox.Registry) {
 		outbox.Queue(queue.Default))
 	r.Subscribe(domainevent.TopicAttendanceFinalized, MarkNoShowsTaskName, m.svc.handleAttendanceFinalized,
 		outbox.Queue(queue.Default))
+	// T-176: a cover the scan rejected leaves its event (rejected.go).
+	files.SubscribeRejected(r, coverOwner, DropRejectedCoverTaskName, m.svc.dropRejectedCover)
 }
 
 // Tasks returns the task handlers events enqueues itself (mechanism A):

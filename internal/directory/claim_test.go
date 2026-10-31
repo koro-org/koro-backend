@@ -158,6 +158,8 @@ func (f *fakeFiles) PresignGet(_ context.Context, id uuid.UUID, ttl time.Duratio
 	switch {
 	case !ok:
 		return files.Download{}, problem.ErrNotFound
+	case m.Status == files.StatusRejected:
+		return files.Download{}, files.ErrRejected
 	case m.ScanStatus != files.ScanClean:
 		return files.Download{}, files.ErrNotClean
 	}

@@ -29,6 +29,7 @@ func (logoFiles) PresignGet(_ context.Context, id uuid.UUID, _ time.Duration) (f
 func (logoFiles) PublicURL(_ context.Context, id uuid.UUID) (string, error) {
 	return "https://media.test/org_logo/" + id.String() + ".png", nil
 }
+func (logoFiles) Delete(context.Context, authz.Actor, uuid.UUID) error { return nil }
 
 // withOrgLogos wires orgs' logo files and its late club facts hook (the
 // cmd/koro hooks.clubInfo: directory's GetClub).

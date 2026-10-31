@@ -225,8 +225,9 @@ type Deps struct {
 	// Reauth verifies the proof of the R operations (identity). nil →
 	// they fail closed with 503 (problem.ErrUnavailable).
 	Reauth Reauthenticator
-	// Files attaches and serves the org logo. nil → logo_file_id is
-	// refused (503) and no logo_url / logo_public_url is returned.
+	// Files attaches, serves and (file.rejected, T-176) deletes the org
+	// logo. nil → logo_file_id is refused (503), no logo_url /
+	// logo_public_url is returned and orgs.drop_rejected_logo fails (retried).
 	Files Files
 	// RevokeSessions closes a user's sessions after a role change
 	// (role_change). nil → nothing is revoked (logged).

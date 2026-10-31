@@ -349,8 +349,9 @@ type Deps struct {
 	// Users is identity's user directory (staff e-mail lookup, names). nil
 	// → addEventStaff finds nobody (404) and staff names are empty.
 	Users Users
-	// Files attaches and serves the event cover. nil → cover_file_id is
-	// refused (503) and no cover_url is returned.
+	// Files attaches, serves and (file.rejected, T-176) deletes the event
+	// cover. nil → cover_file_id is refused (503), no cover_url is returned
+	// and events.drop_rejected_cover fails (retried).
 	Files Files
 	// Notices is consent's current consent texts. nil → a form with a
 	// consent field cannot be published (503) and getEventForm lists no

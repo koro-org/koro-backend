@@ -27,5 +27,6 @@ func modulePolicies() map[string]Policy {
 		"files":        filesPolicy(),
 		"audit":        auditPolicy(),
 		"kvkk":         kvkkPolicy(),
+		"stats":        statsPolicy(),
 	}
 }

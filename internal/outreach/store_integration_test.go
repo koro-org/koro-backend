@@ -123,3 +123,11 @@ func TestSegment_Postgres_LifecycleAndRecount(t *testing.T) {
 		t.Fatalf("after recount %+v, %v", got, err)
 	}
 }
+
+func TestStatsStore_Contract_Gorm(t *testing.T) {
+	t.Parallel()
+	statsContract(t, func(t *testing.T) (outreach.Store, world) {
+		d := testutil.NewDB(t)
+		return outreach.NewGormStore(d.ORM), pgWorld(d)
+	})
+}

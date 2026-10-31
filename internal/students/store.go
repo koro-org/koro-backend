@@ -25,7 +25,11 @@ type Store interface {
 	cvStore      // student_cvs (store_cv.go)
 	matchStore   // count_segment and the discovery candidates (store_match.go)
 	grantStore   // profile_access_grants and their contact sharing (store_grants.go)
+	statsStore   // the counts of a university's panel (stats.go, BE-163)
 }
+
+// stats is the university panel count view of the store (BE-163).
+func (s *service) stats() statsStore { return s.d.Store }
 
 // profiles is the profile view of the store.
 func (s *service) profiles() profileStore { return s.d.Store }

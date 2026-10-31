@@ -313,8 +313,23 @@ func (s gormStore) ReviewQueue(ctx context.Context, after *TimeKey, limit int) (
 // cross-org: every university's pending decisions; the service keeps the
 // clubs of one university (directory has no university-by-org lookup).
 func (s gormStore) UniversityQueue(ctx context.Context, after *TimeKey, limit int) ([]Offering, error) {
-	return s.queue(ctx, "status = 'pending_approval' AND requires_university_approval AND university_approval_status = 'pending'",
-		after, limit)
+	return s.queue(ctx, universityQueueWhere, after, limit)
+}
+
+// universityQueueWhere is UniversityQueue's and CountUniversityQueue's filter.
+const universityQueueWhere = "status = 'pending_approval' AND requires_university_approval AND university_approval_status = 'pending'"
+
+// CountUniversityQueue implements Store (BE-163).
+//
+// cross-org: the offerings of a university's clubs (several sellers), like
+// UniversityQueue.
+func (s gormStore) CountUniversityQueue(ctx context.Context, sellerOrgIDs []uuid.UUID) (int, error) {
+	var n int64
+	err := db.Conn(ctx, s.orm).Model(&Offering{}).Where(universityQueueWhere).Where("org_id IN ?", sellerOrgIDs).Count(&n).Error
+	if err != nil {
+		return 0, fmt.Errorf("catalog: count university queue: %w", err)
+	}
+	return int(n), nil
 }
 
 // LiveEventOfferings implements Store.

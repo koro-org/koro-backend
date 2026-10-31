@@ -104,6 +104,7 @@ type Modules struct {
 	Billing      Billing
 	Payments     Payments
 	Kvkk         Kvkk
+	Stats        Stats
 }
 
 // API is the configuration of `koro api`.

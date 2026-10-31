@@ -372,10 +372,27 @@ func (s *MemStore) UniversityQueue(_ context.Context, after *TimeKey, limit int)
 	defer s.mu.Unlock()
 	rows := s.sorted(func(o Offering) bool {
 		k := submittedKey(o)
-		return o.Status == OfferingPendingApproval && o.RequiresUniversityApproval && o.UniversityApprovalStatus == UniPending &&
-			afterTime(after, k.At, k.ID, false)
+		return inUniversityQueue(o) && afterTime(after, k.At, k.ID, false)
 	}, submittedFirst)
 	return limitOf(rows, limit), nil
+}
+
+// inUniversityQueue is UniversityQueue's and CountUniversityQueue's filter.
+func inUniversityQueue(o Offering) bool {
+	return o.Status == OfferingPendingApproval && o.RequiresUniversityApproval && o.UniversityApprovalStatus == UniPending
+}
+
+// CountUniversityQueue implements Store (BE-163).
+func (s *MemStore) CountUniversityQueue(_ context.Context, sellerOrgIDs []uuid.UUID) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, o := range s.offerings {
+		if inUniversityQueue(o) && slices.Contains(sellerOrgIDs, o.OrgID) {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // LiveEventOfferings implements Store.

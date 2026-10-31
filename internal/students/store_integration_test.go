@@ -598,3 +598,11 @@ func TestGrants_Postgres_ConcurrentAndScoped(t *testing.T) {
 		t.Fatalf("Has = %v, %v", ok, err)
 	}
 }
+
+func TestStatsStore_Contract_Gorm(t *testing.T) {
+	t.Parallel()
+	statsContract(t, func(t *testing.T) (students.Store, world) {
+		d := testutil.NewDB(t)
+		return students.NewGormStore(d.ORM), pgWorld(d)
+	})
+}

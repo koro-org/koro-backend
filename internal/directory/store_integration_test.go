@@ -296,3 +296,11 @@ func TestListClubs_TurkishSearch_IstanbulVariants_Gorm(t *testing.T) {
 		t.Fatalf("name order = %v, want %v", order, wantOrder)
 	}
 }
+
+func TestStatsStore_Contract_Gorm(t *testing.T) {
+	t.Parallel()
+	statsContract(t, func(t *testing.T) (directory.Store, world) {
+		d := testutil.NewDB(t)
+		return directory.NewGormStore(d.ORM), orgWorld(orgs.NewGormStore(d.ORM), pgUser(d))
+	})
+}

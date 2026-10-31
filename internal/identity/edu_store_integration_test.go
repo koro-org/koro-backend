@@ -79,3 +79,8 @@ func gormEduWorld(t *testing.T) eduWorld {
 		},
 	}
 }
+
+func TestStatsStore_Contract_Gorm(t *testing.T) {
+	t.Parallel()
+	statsContract(t, gormEduWorld)
+}

@@ -29,7 +29,11 @@ type Store interface {
 	interactionStore // likes, saves, hides, follows and mutes (store_interactions.go)
 	reportStore      // content_reports (store_reports.go)
 	moderationStore  // moderation_actions and the review queue (store_moderation.go)
+	statsStore       // the counts of the panels (stats.go, BE-163)
 }
+
+// stats is the panel count view of the store (BE-163).
+func (s *service) stats() statsStore { return s.d.Store }
 
 // posts is the posts view of the store.
 func (s *service) posts() postStore { return s.d.Store }

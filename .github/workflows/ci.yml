@@ -1,6 +1,7 @@
 # CI (docs/design/05 §15.5, OPS-001): fmt → lint → tidy → OpenAPI diff
 # (check) → unit + integration tests under -race (test-integration) →
-# govulncheck/gosec + gitleaks (security) → image build + Trivy + SBOM
+# govulncheck/gosec + gitleaks + OSV-Scanner + hadolint (security) → image
+# build + Trivy + SBOM
 # (image, pull requests) or, on main, the same plus GHCR push, cosign
 # signature and SBOM attestation (publish; OPS-008). Every action is pinned
 # to a commit SHA (tag in the comment); GITHUB_TOKEN is read-only except in
@@ -238,6 +239,34 @@ jobs:
       - name: govulncheck (source + binary) and gosec
         if: success() || failure() # reported even when gitleaks fails
         run: make sec
+      # OPS-013: two more scanners in the same job, a few seconds each. The
+      # release binaries are pinned by their SHA-256 like gitleaks. Reasoned
+      # exceptions live next to the code: osv-scanner.toml (every entry has a
+      # reason and an ignoreUntil date) and .hadolint.yaml; a finding is
+      # fixed or excepted within the closing deadlines of the vulnerability
+      # policy (DOC-001). ZAP baseline runs weekly in zap.yml, not here.
+      - name: OSV-Scanner (go.mod)
+        if: success() || failure()
+        env:
+          OSV_SCANNER_VERSION: 2.7.0
+          OSV_SCANNER_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
+        run: |
+          bin="$RUNNER_TEMP/osv-scanner"
+          curl -fsSL --retry 3 -o "$bin" "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+          echo "${OSV_SCANNER_SHA256}  $bin" | sha256sum -c -
+          chmod +x "$bin"
+          "$bin" scan source --config osv-scanner.toml --lockfile go.mod
+      - name: hadolint (deploy/Dockerfile)
+        if: success() || failure()
+        env:
+          HADOLINT_VERSION: 2.15.1
+          HADOLINT_SHA256: c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507
+        run: |
+          bin="$RUNNER_TEMP/hadolint"
+          curl -fsSL --retry 3 -o "$bin" "https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-linux-x86_64"
+          echo "${HADOLINT_SHA256}  $bin" | sha256sum -c -
+          chmod +x "$bin"
+          "$bin" --config .hadolint.yaml deploy/Dockerfile
       - name: Save Go caches
         if: github.event_name == 'push' || steps.go-cache.outputs.cache-matched-key == ''
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

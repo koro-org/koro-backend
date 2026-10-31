@@ -1,0 +1,17 @@
+# ZAP passive rule thresholds (OPS-013; .github/workflows/zap.yml).
+# Format (zap-*-scan.py -c): <rule id> TAB <IGNORE|INFO|WARN|FAIL> TAB <note>.
+# Rules not listed are WARN: reported in the artifact, the run stays green
+# (-I). Only FAIL rules break the run. FAIL = a header or disclosure the API
+# guarantees on every response (05 §10.8), so a hit is a regression.
+# IGNORE needs a reason in the note column; a real finding is fixed within
+# the closing deadlines of the vulnerability policy (DOC-001).
+10020	FAIL	Anti-clickjacking header (CSP frame-ancestors none)
+10021	FAIL	X-Content-Type-Options header missing
+10023	FAIL	Information disclosure: debug error messages
+10036	FAIL	Server header leaks version information
+10037	FAIL	X-Powered-By header leaks information
+10038	FAIL	Content-Security-Policy header not set
+10062	FAIL	PII disclosure
+10098	FAIL	Cross-domain misconfiguration (CORS)
+10096	IGNORE	Timestamp disclosure: JSON bodies carry Unix and RFC 3339 times by design (OPS-013)
+10049	IGNORE	Storable/cacheable content: informational; every API response is no-store (05 §10.8) (OPS-013)

@@ -1,0 +1,15 @@
+# OSV-Scanner exceptions (OPS-013; .github/workflows/ci.yml, security job).
+# The scan reads go.mod (modules + the Go standard library of the go
+# directive) and fails on any known vulnerability.
+#
+# An exception is allowed only for a false positive or a vulnerability that
+# cannot be reached from Koro, never to postpone a fix. Every entry has a
+# reason (why it does not apply, who decided, which ticket) and an
+# ignoreUntil date no later than the closing deadline of its severity in the
+# vulnerability policy (DOC-001); after that date the scan fails again and
+# the entry is reviewed. Prefer upgrading the module.
+#
+# [[IgnoredVulns]]
+# id = "GO-YYYY-NNNN"        # OSV id or one of its aliases (CVE/GHSA)
+# ignoreUntil = 2027-01-31
+# reason = "Unreachable: ... (BE-NNN)"

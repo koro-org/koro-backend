@@ -1,0 +1,9 @@
+# hadolint (OPS-013; .github/workflows/ci.yml, security job) for
+# deploy/Dockerfile. Warnings and errors fail the job; info and style
+# findings are only printed.
+#
+# An ignored rule needs a reason on its line (why it does not apply here)
+# and the ticket that decided it; prefer an inline
+# `# hadolint ignore=DLxxxx` above the one instruction it concerns.
+failure-threshold: warning
+ignored: []

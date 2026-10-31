@@ -25,7 +25,8 @@ x-koro-env: &koro-env
   # benchmarking range 198.18.0.0/15): with rate limits on, each simulated
   # client has its own per-IP budget, as behind Traefik in production.
   TRUSTED_PROXIES: 172.29.80.0/24
-  EXPOSE_OPENAPI: "false"
+  # true only for the ZAP API scan (.github/workflows/zap.yml), which imports the spec.
+  EXPOSE_OPENAPI: ${KORO_EXPOSE_OPENAPI:-false}
   METRICS_ADDR: ":9090"
   DATABASE_URL: postgres://app_rw:dev-only-change-me@postgres:5432/koro?sslmode=disable
   MIGRATE_DATABASE_URL: postgres://app_owner:dev-only-change-me@postgres:5432/koro?sslmode=disable

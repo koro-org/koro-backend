@@ -1,0 +1,120 @@
+# ZAP baseline of the API (OPS-013): the real `koro api` over PostgreSQL,
+# Redis, Mailpit and SeaweedFS in docker compose (the load test stack,
+# loadtest/compose.yaml) with the synthetic demo seed, then a passive-only
+# ZAP scan of every operation of the served OpenAPI spec (zap-api-scan.py
+# -S: safe mode, no active attack). Weekly and by hand only; never on pull
+# requests or pushes (runner minutes). The web front end is scanned the
+# same way from koro-web (zap.yml there).
+#
+# Thresholds: .zap/rules.tsv. Only FAIL rules break the run (-I: warnings
+# are reported, not fatal); the HTML/JSON/Markdown report is the artifact
+# zap-api-<run>. Every action and the ZAP image are pinned (SHA / digest);
+# no secret is used and GITHUB_TOKEN is read-only.
+name: zap
+
+on:
+  schedule:
+    - cron: "23 4 * * 1" # Mondays 04:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zap
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash # -eo pipefail
+
+jobs:
+  api:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      COMPOSE_FILE: loadtest/compose.yaml
+      COMPOSE_PROFILES: setup
+      GIT_SHA: ${{ github.sha }}
+      KORO_EXPOSE_OPENAPI: "true"
+      # Synthetic password of the demo accounts of this throwaway
+      # environment (koro seed demo -password); not a secret.
+      KORO_DEMO_PASSWORD: demo-demo-demo-demo-2026
+      ZAP_IMAGE: ghcr.io/zaproxy/zaproxy:2.17.0@sha256:030d3df57735dacbb83464854758e674dd9ad01d79d12a129a8e58b1fd384238
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build the koro image (deploy/Dockerfile)
+        run: docker compose build migrate
+
+      - name: Start PostgreSQL, Redis, Mailpit, SeaweedFS
+        run: docker compose up -d --wait --wait-timeout 300 postgres redis mailpit seaweedfs
+
+      - name: Buckets, migrations, reference + demo seed
+        run: |
+          docker compose run --rm seaweedfs-buckets
+          docker compose run --rm migrate
+          docker compose run --rm seed-reference
+          docker compose run --rm seed-demo | tail -n 5
+
+      - name: Start api
+        run: |
+          docker compose up -d --wait --wait-timeout 180 api
+          curl -fsS http://127.0.0.1:8080/readyz
+
+      # ZAP runs on the host network and reaches the published port. The
+      # OpenAPI 3.0 rendering is preferred (ZAP's importer); 3.1 otherwise.
+      - name: ZAP API scan (passive)
+        id: zap
+        run: |
+          wrk="$RUNNER_TEMP/zap"
+          mkdir -p "$wrk"
+          cp .zap/rules.tsv "$wrk/"
+          chmod -R a+rwX "$wrk" # the image runs as uid 1000
+          spec=http://127.0.0.1:8080/api/v1/openapi-3.0.json
+          curl -fsS -o /dev/null "$spec" || spec=http://127.0.0.1:8080/api/v1/openapi.json
+          set +e
+          docker run --rm --network host -v "$wrk:/zap/wrk:rw" "$ZAP_IMAGE" \
+            zap-api-scan.py -t "$spec" -f openapi -S -I -T 20 -c rules.tsv \
+            -r zap-api.html -J zap-api.json -w zap-api.md
+          status=$?
+          echo "exit=$status" >>"$GITHUB_OUTPUT"
+          echo "ZAP exit code: $status (0 = pass, 1 = a FAIL rule was hit, 3 = scan error)"
+
+      - name: Job summary
+        if: always()
+        env:
+          ZAP_EXIT: ${{ steps.zap.outputs.exit }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/zap"
+          {
+            echo "## ZAP API scan (passive): exit code ${ZAP_EXIT:-none}"
+            echo
+            if [ -s "$RUNNER_TEMP/zap/zap-api.md" ]; then head -c 60000 "$RUNNER_TEMP/zap/zap-api.md"; else echo "No report."; fi
+            echo
+            echo "Full report: artifact \`zap-api-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}\`."
+          } >>"$GITHUB_STEP_SUMMARY"
+          docker compose logs --no-color --timestamps api 2>&1 | gzip >"$RUNNER_TEMP/zap/api.log.gz" || true
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: zap-api-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/zap/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose down -v --remove-orphans
+
+      - name: Result
+        env:
+          ZAP_EXIT: ${{ steps.zap.outputs.exit }}
+        run: |
+          if [ "${ZAP_EXIT:-3}" != 0 ]; then
+            echo "::error::ZAP exited with ${ZAP_EXIT:-no code} (1: a FAIL rule of .zap/rules.tsv was hit; 3: the scan itself failed). See the job summary and the artifact."
+            exit 1
+          fi

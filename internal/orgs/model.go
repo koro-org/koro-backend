@@ -6,6 +6,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/identity"
+	"koro/internal/platform/taxid"
 )
 
 // Kind is organizations.kind (02 §7.1). ngo is phase 2: the v1 API never
@@ -87,9 +88,12 @@ func (o Org) Summary() OrgSummary {
 }
 
 // Company is one companies row (02 §7.2): the company profile of an org of
-// kind company. Invoice title, tax number (VKN) and MERSİS number are not
-// here but in parties.legal_parties (02 §7.2); none of these columns is
-// personal data.
+// kind company. The invoice title, address and MERSİS number are not here
+// but in parties.legal_parties (02 §7.2). The tax identity of the
+// application (BE-165, migration 000173) is: the kind of identifier given,
+// the VKN (kind vkn only) and the tax office. A TCKN is never stored (06
+// H-60 data minimisation): kind tckn records that a valid one was given.
+// None of these columns is personal data.
 type Company struct {
 	OrgID            uuid.UUID  `gorm:"type:uuid;column:org_id;primaryKey" json:"org_id"`
 	OrgKind          Kind       `gorm:"column:org_kind" json:"org_kind"`
@@ -98,12 +102,42 @@ type Company struct {
 	EmailDomain      *string    `gorm:"column:email_domain" json:"email_domain,omitempty"`
 	DomainVerifiedAt *time.Time `gorm:"column:domain_verified_at" json:"domain_verified_at,omitempty"`
 	HQCity           *string    `gorm:"column:hq_city" json:"hq_city,omitempty"`
+	TaxIDKind        *TaxIDKind `gorm:"column:tax_id_kind" json:"tax_id_kind,omitempty"`
+	TaxNo            *string    `gorm:"column:tax_no" json:"-"` // VKN: never logged (05 §11.2)
+	TaxOffice        *string    `gorm:"column:tax_office" json:"tax_office,omitempty"`
 	CreatedAt        time.Time  `gorm:"column:created_at;->" json:"created_at"`
 	UpdatedAt        time.Time  `gorm:"column:updated_at;->" json:"updated_at"`
 }
 
 // TableName implements gorm's Tabler.
 func (Company) TableName() string { return "companies" }
+
+// TaxIDKind is companies.tax_id_kind: which tax identifier a company gave.
+type TaxIDKind string
+
+// Tax identifier kinds (BE-165).
+const (
+	TaxIDVKN  TaxIDKind = "vkn"  // vergi kimlik numarası, stored in tax_no
+	TaxIDTCKN TaxIDKind = "tckn" // a sole trader's national ID, not stored
+)
+
+// TaxIDValid reports whether the company gave a tax identifier that passes
+// its check digits (the admin review's tax_id_valid). Writes accept only
+// valid ones; the VKN is checked again so that a row written around the
+// service never reads as valid.
+func (c Company) TaxIDValid() bool {
+	switch {
+	case c.TaxIDKind == nil:
+		return false
+	case *c.TaxIDKind == TaxIDVKN:
+		return c.TaxNo != nil && taxid.ValidVKN(*c.TaxNo)
+	}
+	return *c.TaxIDKind == TaxIDTCKN
+}
+
+// DomainVerified reports whether the e-mail domain is verified (the admin
+// review's domain_verified).
+func (c Company) DomainVerified() bool { return c.EmailDomain != nil && c.DomainVerifiedAt != nil }
 
 // Size bands of companies.size_band.
 var sizeBands = []string{"1-10", "11-50", "51-200", "201-1000", "1000+"}
@@ -246,6 +280,9 @@ type OrgView struct {
 	// company for its admins and platform admins, BE-127): the public
 	// profile then carries the company's e-mail domain for the edit form.
 	Manage bool
+	// FullTaxNo shows the company's VKN unmasked (platform admins, the
+	// application review; BE-165, 06 H-60).
+	FullTaxNo bool
 }
 
 // reauthProof is the re-authentication proof of an R operation (03 §6.2).

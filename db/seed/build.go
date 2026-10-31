@@ -360,7 +360,8 @@ func (b *builder) companyOrgs() {
 			"https://"+spec.Slug+"."+fake.EmailDomain)
 		created := b.now.AddDate(0, 0, -80)
 		b.p.add("companies", "org_id", c.orgID, "org_kind", "company", "sector_code", spec.Sector, "size_band", spec.Size,
-			"hq_city", spec.City, "created_at", created, "updated_at", created)
+			"hq_city", spec.City, "tax_id_kind", "vkn", "tax_no", spec.TaxNo, "tax_office", "Örnek Vergi Dairesi",
+			"created_at", created, "updated_at", created)
 		email := CompanyEmail
 		if k > 0 {
 			email = fmt.Sprintf("demo.sirket%d@%s", k+1, fake.EmailDomain)

@@ -43,13 +43,16 @@ var sensitiveClubs = []struct {
 type companySpec struct {
 	Name, Slug, Sector, Size, City string
 	Pending                        bool // pending_review (not verified yet)
+	// TaxNo is a synthetic VKN that passes the check digit (BE-165, Q-45:
+	// a company applies with its tax identity); never a real one.
+	TaxNo string
 }
 
 var companyCatalog = []companySpec{
-	{"Demo Yazılım A.Ş.", "demo-yazilim", "software", "51-200", "İstanbul", false},
-	{"Örnek Enerji Ltd. Şti.", "ornek-enerji", "energy", "201-1000", "Ankara", false},
-	{"Deneme Lojistik A.Ş.", "deneme-lojistik", "logistics", "1000+", "İzmir", false},
-	{"Taslak Danışmanlık Ltd. Şti.", "taslak-danismanlik", "consulting", "11-50", "Bursa", true},
+	{"Demo Yazılım A.Ş.", "demo-yazilim", "software", "51-200", "İstanbul", false, demoBuyerTaxNo},
+	{"Örnek Enerji Ltd. Şti.", "ornek-enerji", "energy", "201-1000", "Ankara", false, "9000000017"},
+	{"Deneme Lojistik A.Ş.", "deneme-lojistik", "logistics", "1000+", "İzmir", false, "9000000025"},
+	{"Taslak Danışmanlık Ltd. Şti.", "taslak-danismanlik", "consulting", "11-50", "Bursa", true, "9000000033"},
 }
 
 // eventTitles by club category (the first matching entry is used, the

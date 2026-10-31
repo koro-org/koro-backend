@@ -18,8 +18,11 @@ type CompanyInput struct {
 	SectorCode  string
 	SizeBand    string
 	WebsiteURL  string // optional
-	EmailDomain string // optional
+	EmailDomain string // optional; verified at once when the founder's address is there (BE-165)
 	HQCity      string // optional
+	TaxNo       string // the VKN, or …
+	TCKN        string // … a sole trader's national ID instead (checked, never stored); one is required (Q-45)
+	TaxOffice   string // required (Q-45)
 }
 
 // slugAttempts bounds the numbered slug candidates ("acme", "acme-2", …)
@@ -61,7 +64,8 @@ func (s *service) insertOrg(ctx context.Context, o Org, requested string) (Org, 
 
 // companyFields validates the company profile fields of a request.
 type companyFields struct {
-	sector, size, domain, hq *string
+	sector, size, domain, hq, taxOffice *string
+	tax                                 taxIdentity
 }
 
 func cleanCompany(sector, size, domain, hq string, requireProfile bool) (companyFields, error) {
@@ -115,14 +119,33 @@ func (s *service) CreateCompany(ctx context.Context, a authz.Actor, in CompanyIn
 	if err != nil {
 		return OrgView{}, err
 	}
+	if cf.tax, err = cleanTaxID(in.TaxNo, in.TCKN); err != nil {
+		return OrgView{}, err
+	}
+	if cf.taxOffice, err = cleanTaxOffice(in.TaxOffice); err != nil {
+		return OrgView{}, err
+	}
+	// Q-45: the application carries its tax identity.
+	if cf.tax.kind == nil || cf.taxOffice == nil {
+		return OrgView{}, taxIDRequired(cf.tax.kind == nil, cf.taxOffice == nil)
+	}
+	// The request hash carries the kind of a TCKN, never the number: a
+	// hash of an 11-digit ID is reversible by brute force (05 §11.2).
 	hash, err := idempotency.Hash(struct {
-		Name, Slug                     string
-		Sector, Size, Domain, HQ, Site *string
-	}{name, slug, cf.sector, cf.size, cf.domain, cf.hq, site})
+		Name, Slug                                       string
+		Sector, Size, Domain, HQ, Site, TaxNo, TaxOffice *string
+		TaxKind                                          *TaxIDKind
+	}{name, slug, cf.sector, cf.size, cf.domain, cf.hq, site, cf.tax.no, cf.taxOffice, cf.tax.kind})
 	if err != nil {
 		return OrgView{}, err
 	}
 	founder := a.UserID
+	var domainVerified bool
+	if cf.domain != nil {
+		if domainVerified, err = s.holdsAddressAt(ctx, founder, *cf.domain); err != nil {
+			return OrgView{}, err
+		}
+	}
 	id, _, err := idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (uuid.UUID, error) {
 		now := s.now()
 		o, err := s.insertOrg(ctx, Org{
@@ -132,9 +155,14 @@ func (s *service) CreateCompany(ctx context.Context, a authz.Actor, in CompanyIn
 		if err != nil {
 			return uuid.Nil(), err
 		}
-		if err := s.companies().InsertCompany(ctx, Company{
+		c := Company{
 			OrgID: o.ID, SectorCode: cf.sector, SizeBand: cf.size, EmailDomain: cf.domain, HQCity: cf.hq,
-		}); err != nil {
+			TaxIDKind: cf.tax.kind, TaxNo: cf.tax.no, TaxOffice: cf.taxOffice,
+		}
+		if domainVerified {
+			c.DomainVerifiedAt = &now
+		}
+		if err := s.companies().InsertCompany(ctx, c); err != nil {
 			return uuid.Nil(), err
 		}
 		m, err := s.members().InsertMember(ctx, Membership{
@@ -144,7 +172,8 @@ func (s *service) CreateCompany(ctx context.Context, a authz.Actor, in CompanyIn
 		if err != nil {
 			return uuid.Nil(), err
 		}
-		meta := map[string]any{"org_kind": string(KindCompany), "slug": o.Slug, "membership_id": m.ID.String()}
+		meta := map[string]any{"org_kind": string(KindCompany), "slug": o.Slug, "membership_id": m.ID.String(),
+			"tax_id_valid": c.TaxIDValid(), "domain_verified": c.DomainVerified()}
 		if err := s.d.Audit.Log(ctx, auditEvent(a, authz.OrgsCompanyCreate, o.ID, "", meta)); err != nil {
 			return uuid.Nil(), err
 		}

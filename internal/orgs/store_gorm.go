@@ -200,10 +200,10 @@ func (s gormStore) ListOrgs(ctx context.Context, f ListFilter, after *ListAfter,
 // InsertCompany implements Store: org_id and org_kind come from the parent
 // organizations row (06 H-38).
 func (s gormStore) InsertCompany(ctx context.Context, c Company) error {
-	res := db.Conn(ctx, s.orm).Exec(`INSERT INTO companies (org_id, org_kind, sector_code, size_band, email_domain, hq_city)
-		SELECT p.org_id, p.kind, @sector, @size, @domain, @hq
-		FROM (SELECT id AS org_id, kind FROM organizations) p WHERE p.org_id = @org_id`,
-		map[string]any{"org_id": c.OrgID, "sector": c.SectorCode, "size": c.SizeBand, "domain": c.EmailDomain, "hq": c.HQCity})
+	res := db.Conn(ctx, s.orm).Exec(`INSERT INTO companies (org_id, org_kind, sector_code, size_band, email_domain,
+		domain_verified_at, hq_city, tax_id_kind, tax_no, tax_office)
+		SELECT p.org_id, p.kind, @sector, @size, @domain, @verified, @hq, @tax_kind, @tax_no, @tax_office
+		FROM (SELECT id AS org_id, kind FROM organizations) p WHERE p.org_id = @org_id`, companyArgs(c))
 	if res.Error != nil {
 		return wrap("insert company", res.Error)
 	}
@@ -211,6 +211,15 @@ func (s gormStore) InsertCompany(ctx context.Context, c Company) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// companyArgs are the named parameters of the company profile writes.
+func companyArgs(c Company) map[string]any {
+	return map[string]any{
+		"org_id": c.OrgID, "sector": c.SectorCode, "size": c.SizeBand, "domain": c.EmailDomain,
+		"verified": db.UTCPtr(c.DomainVerifiedAt), "hq": c.HQCity, "tax_kind": c.TaxIDKind, "tax_no": c.TaxNo,
+		"tax_office": c.TaxOffice,
+	}
 }
 
 // GetCompany implements Store.
@@ -226,13 +235,33 @@ func (s gormStore) GetCompany(ctx context.Context, orgID uuid.UUID) (Company, er
 	return c, nil
 }
 
+// CompaniesOf implements Store.
+//
+// cross-org: adminListOrgs shows the review facts of every company on its
+// page (BE-165); the IDs come from that page.
+func (s gormStore) CompaniesOf(ctx context.Context, orgIDs []uuid.UUID) (map[uuid.UUID]Company, error) {
+	out := make(map[uuid.UUID]Company, len(orgIDs))
+	if len(orgIDs) == 0 {
+		return out, nil
+	}
+	var rows []Company
+	if err := db.Conn(ctx, s.orm).Raw(`SELECT * FROM companies WHERE org_id = ANY( ?)`, db.UUIDArray(orgIDs)).
+		Scan(&rows).Error; err != nil {
+		return nil, wrap("companies of", err)
+	}
+	for _, c := range rows {
+		out[c.OrgID] = c
+	}
+	return out, nil
+}
+
 // UpdateCompany implements Store.
 func (s gormStore) UpdateCompany(ctx context.Context, c Company) (Company, error) {
 	var rows []Company
 	err := db.Conn(ctx, s.orm).Raw(`UPDATE companies SET sector_code = @sector, size_band = @size,
-		email_domain = @domain, hq_city = @hq
-		WHERE org_id = @org_id RETURNING *`,
-		map[string]any{"org_id": c.OrgID, "sector": c.SectorCode, "size": c.SizeBand, "domain": c.EmailDomain, "hq": c.HQCity}).
+		email_domain = @domain, domain_verified_at = @verified, hq_city = @hq, tax_id_kind = @tax_kind, tax_no = @tax_no,
+		tax_office = @tax_office
+		WHERE org_id = @org_id RETURNING *`, companyArgs(c)).
 		Scan(&rows).Error
 	if err != nil {
 		return Company{}, wrap("update company", err)

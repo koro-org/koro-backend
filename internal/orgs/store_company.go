@@ -13,7 +13,11 @@ type companyStore interface {
 	InsertCompany(ctx context.Context, c Company) error
 	// GetCompany returns the company profile of orgID or ErrNotFound.
 	GetCompany(ctx context.Context, orgID uuid.UUID) (Company, error)
+	// CompaniesOf returns the company profiles of the orgs among orgIDs that
+	// have one (adminListOrgs' review facts, BE-165; cross-org).
+	CompaniesOf(ctx context.Context, orgIDs []uuid.UUID) (map[uuid.UUID]Company, error)
 	// UpdateCompany writes the profile columns (sector, size band, e-mail
-	// domain, HQ city) of orgID's company and returns the stored row.
+	// domain and its verification, HQ city, tax identity) of orgID's
+	// company and returns the stored row.
 	UpdateCompany(ctx context.Context, c Company) (Company, error)
 }

@@ -357,8 +357,11 @@ func as(a authz.Actor, org uuid.UUID, kind orgs.Kind, role authz.MemberRole) aut
 
 func pad(t *testing.T) authz.Actor { return persona(t, "platform_admin") }
 
+// companyInput is a complete application: a synthetic VKN and its tax
+// office are required (Q-45).
 func companyInput(name string) orgs.CompanyInput {
-	return orgs.CompanyInput{Name: name, SectorCode: "software", SizeBand: "11-50", HQCity: "İstanbul"}
+	return orgs.CompanyInput{Name: name, SectorCode: "software", SizeBand: "11-50", HQCity: "İstanbul", TaxNo: testVKN,
+		TaxOffice: "Kadıköy"}
 }
 
 // company registers a company founded by a fresh user and returns it with

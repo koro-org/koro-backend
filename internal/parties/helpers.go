@@ -16,6 +16,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/orgs"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/taxid"
 	"koro/internal/platform/textx"
 )
 
@@ -23,7 +24,7 @@ import (
 const (
 	minTitle      = 2
 	maxTitle      = 300
-	maxTaxOffice  = 100
+	maxTaxOffice  = taxid.MaxTaxOffice
 	maxEmail      = 254
 	maxEInvoice   = 200
 	maxLine1      = 200
@@ -31,7 +32,6 @@ const (
 	maxCity       = 60
 	maxNote       = 500
 	docTTL        = 5 * time.Minute // 04 §1.14: download URLs live at most 5 minutes
-	maskedDigits  = 4               // VKN / MERSİS digits the org roles see
 	auditResource = authz.TypeLegalParty
 	auditDocument = authz.TypeLegalPartyDocument
 )
@@ -172,8 +172,8 @@ func cleanVKN(loc, s string) (*string, error) {
 	if strings.TrimSpace(s) == "" {
 		return nil, nil
 	}
-	d, ok := digitsOnly(s)
-	if !ok || !ValidVKN(d) {
+	d, ok := taxid.VKN(s)
+	if !ok {
 		return nil, problem.Field(loc, "must be a valid 10-digit tax number (VKN)")
 	}
 	return &d, nil
@@ -181,8 +181,8 @@ func cleanVKN(loc, s string) (*string, error) {
 
 // cleanTCKN checks a TCKN (11 digits with its two check digits).
 func cleanTCKN(loc, s string) (string, error) {
-	d, ok := digitsOnly(s)
-	if !ok || !ValidTCKN(d) {
+	d, ok := taxid.TCKN(s)
+	if !ok {
 		return "", problem.Field(loc, "must be a valid 11-digit national ID (TCKN)")
 	}
 	return d, nil
@@ -193,8 +193,8 @@ func cleanMERSIS(loc, s string) (*string, error) {
 	if strings.TrimSpace(s) == "" {
 		return nil, nil
 	}
-	d, ok := digitsOnly(s)
-	if !ok || !ValidMERSIS(d) {
+	d, ok := taxid.MERSIS(s)
+	if !ok {
 		return nil, problem.Field(loc, "must be a 16-digit MERSİS number")
 	}
 	return &d, nil

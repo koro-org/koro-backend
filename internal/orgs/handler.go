@@ -301,8 +301,11 @@ type createCompanyInput struct {
 		SectorCode  string `json:"sector_code" pattern:"^[a-z_]{2,40}$"`
 		SizeBand    string `json:"size_band" enum:"1-10,11-50,51-200,201-1000,1000+"`
 		WebsiteURL  string `json:"website_url,omitempty" maxLength:"2048" doc:"https:// only"`
-		EmailDomain string `json:"email_domain,omitempty" maxLength:"253" doc:"The company's e-mail domain (not verified yet)"`
+		EmailDomain string `json:"email_domain,omitempty" maxLength:"253" doc:"The company's own e-mail domain (no free e-mail provider); verified at once when the caller's account address is at it, otherwise the reviewer is warned"`
 		HQCity      string `json:"hq_city,omitempty" maxLength:"60"`
+		TaxNo       string `json:"tax_no,omitempty" maxLength:"20" doc:"Vergi kimlik numarası (10 digits with its check digit; spaces, dots and hyphens are ignored). This or tckn is required (422 orgs.tax_id_required)."`
+		TCKN        string `json:"tckn,omitempty" maxLength:"20" doc:"A sole trader's T.C. kimlik numarası instead of tax_no (11 digits with its check digits). Checked, never stored or returned."`
+		TaxOffice   string `json:"tax_office,omitempty" maxLength:"100" doc:"Vergi dairesi; required, checked by the service so the error is coded (422 orgs.tax_id_required)"`
 	}
 }
 
@@ -314,7 +317,7 @@ func (h handler) createCompany(ctx context.Context, in *createCompanyInput) (*or
 	b := in.Body
 	v, err := h.svc.CreateCompany(ctx, a, CompanyInput{
 		Name: b.Name, Slug: b.Slug, SectorCode: b.SectorCode, SizeBand: b.SizeBand, WebsiteURL: b.WebsiteURL,
-		EmailDomain: b.EmailDomain, HQCity: b.HQCity,
+		EmailDomain: b.EmailDomain, HQCity: b.HQCity, TaxNo: b.TaxNo, TCKN: b.TCKN, TaxOffice: b.TaxOffice,
 	})
 	if err != nil {
 		return nil, err
@@ -335,8 +338,11 @@ type updateOrgInput struct {
 		City        *string `json:"city,omitempty" maxLength:"60" doc:"Empty string clears it"`
 		SectorCode  *string `json:"sector_code,omitempty" maxLength:"40" doc:"Companies only"`
 		SizeBand    *string `json:"size_band,omitempty" maxLength:"10" doc:"Companies only: 1-10, 11-50, 51-200, 201-1000, 1000+"`
-		EmailDomain *string `json:"email_domain,omitempty" maxLength:"253" doc:"Companies only; a change resets its verification"`
+		EmailDomain *string `json:"email_domain,omitempty" maxLength:"253" doc:"Companies only; no free e-mail provider. A change resets its verification; a member whose account address is at the domain verifies it."`
 		HQCity      *string `json:"hq_city,omitempty" maxLength:"60" doc:"Companies only; empty string clears it"`
+		TaxNo       *string `json:"tax_no,omitempty" maxLength:"20" doc:"Companies only: a VKN replaces the tax identifier on file; it cannot be cleared (empty string: 422 orgs.tax_id_required)"`
+		TCKN        *string `json:"tckn,omitempty" maxLength:"20" doc:"Companies only: a sole trader's TCKN replaces the tax identifier on file (checked, never stored or returned)"`
+		TaxOffice   *string `json:"tax_office,omitempty" maxLength:"100" doc:"Companies only; cannot be cleared (422 orgs.tax_id_required)"`
 	}
 }
 
@@ -350,6 +356,7 @@ func (h handler) updateOrg(ctx context.Context, in *updateOrgInput) (*orgOutput,
 	p := OrgPatch{
 		Name: b.Name, Description: b.Description, WebsiteURL: b.WebsiteURL, City: b.City,
 		SectorCode: b.SectorCode, SizeBand: b.SizeBand, EmailDomain: b.EmailDomain, HQCity: b.HQCity,
+		TaxNo: b.TaxNo, TCKN: b.TCKN, TaxOffice: b.TaxOffice,
 	}
 	if b.LogoFileID != nil {
 		if *b.LogoFileID == "" {

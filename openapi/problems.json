@@ -1230,6 +1230,12 @@
     "type": "urn:koro:problem:orgs.slug_taken"
   },
   {
+    "code": "orgs.tax_id_required",
+    "status": 422,
+    "title": "A tax number (VKN) or a sole trader's national ID (TCKN) and the tax office are required",
+    "type": "urn:koro:problem:orgs.tax_id_required"
+  },
+  {
     "code": "orgs.transfer_target_invalid",
     "status": 422,
     "title": "New owner must be an active company admin",

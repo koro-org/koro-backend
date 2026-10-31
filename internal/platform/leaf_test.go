@@ -19,6 +19,7 @@ import (
 var leafPackages = map[string][]string{
 	"money":         nil,
 	"iban":          nil,
+	"taxid":         nil,
 	"iban/ibantest": nil,
 	"civil":         nil,
 	"textx":         nil,

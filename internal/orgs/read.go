@@ -131,9 +131,15 @@ func (s *service) readable(ctx context.Context, a authz.Actor, o Org) (OrgView, 
 	// never takes the deny path.
 	if o.Kind == KindCompany && (a.MemberOf(o.ID) || a.HasPlatformRole(authz.PlatformAdmin)) {
 		v.Manage = authz.Can(ctx, a, authz.OrgsOrgUpdate, r) == nil
+		v.FullTaxNo = v.Manage && fullTaxNo(a)
 	}
 	return v, nil
 }
+
+// fullTaxNo reports whether a reads a company's VKN unmasked: platform
+// admins, who verify the application (BE-165; 06 H-60 masks it for the
+// org roles).
+func fullTaxNo(a authz.Actor) bool { return a.HasPlatformRole(authz.PlatformAdmin) }
 
 // view loads the company profile and the logo URLs of o.
 func (s *service) view(ctx context.Context, o Org) (OrgView, error) {
@@ -310,5 +316,36 @@ func (s *service) AdminListOrgs(ctx context.Context, a authz.Actor, q AdminQuery
 	if q.Status != "" {
 		f.Statuses = []Status{q.Status}
 	}
-	return s.list(ctx, f, q.Limit, q.After)
+	p, err := s.list(ctx, f, q.Limit, q.After)
+	if err != nil {
+		return OrgPage{}, err
+	}
+	if err := s.withCompanies(ctx, p.Items); err != nil {
+		return OrgPage{}, err
+	}
+	return p, nil
+}
+
+// withCompanies adds the company profiles to the company views of items
+// (the review facts of the admin list, BE-165): one read for the page.
+func (s *service) withCompanies(ctx context.Context, items []OrgView) error {
+	var ids []uuid.UUID
+	for _, v := range items {
+		if v.Org.Kind == KindCompany {
+			ids = append(ids, v.Org.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	cs, err := s.companies().CompaniesOf(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for i := range items {
+		if c, ok := cs[items[i].Org.ID]; ok {
+			items[i].Company = &c
+		}
+	}
+	return nil
 }

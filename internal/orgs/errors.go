@@ -32,6 +32,11 @@ var (
 	// ErrCompanyFieldOnly: a company field sent for an org that is not a
 	// company.
 	ErrCompanyFieldOnly = problem.New(problem.Invalid, "orgs.company_field", "Company fields apply to companies only")
+	// ErrTaxIDRequired: a company application without a VKN or TCKN and
+	// its tax office, or an updateOrg that would clear them (BE-165, Q-45).
+	// Its field errors carry the code too (FieldError.code).
+	ErrTaxIDRequired = problem.New(problem.Invalid, "orgs.tax_id_required",
+		"A tax number (VKN) or a sole trader's national ID (TCKN) and the tax office are required")
 
 	// ErrLastAdmin: the last club_admin of a club or the company_owner would
 	// leave, be removed or be demoted (03 k6; 04 §1.10). An org never stays

@@ -279,6 +279,26 @@ components:
       required:
         - items
       type: object
+    AdminCompanyReviewDTO:
+      additionalProperties: false
+      properties:
+        domain_verified:
+          description: "false: no e-mail domain, or no applicant address at it (warn the reviewer)"
+          type: boolean
+        email_domain:
+          type: string
+        tax_id_kind:
+          enum:
+            - vkn
+            - tckn
+          type: string
+        tax_id_valid:
+          description: A VKN or TCKN that passes its check digits was given
+          type: boolean
+      required:
+        - tax_id_valid
+        - domain_verified
+      type: object
     AdminCorrectOwnershipInputBody:
       additionalProperties: false
       properties:
@@ -740,6 +760,8 @@ components:
         closed_at:
           format: date-time
           type: string
+        company:
+          $ref: "#/components/schemas/AdminCompanyReviewDTO"
         created_at:
           format: date-time
           type: string
@@ -3416,6 +3438,9 @@ components:
     CompanyDTO:
       additionalProperties: false
       properties:
+        domain_verified:
+          description: "email_domain is verified: the founder's or an editor's verified address is at it"
+          type: boolean
         domain_verified_at:
           format: date-time
           type: string
@@ -3427,10 +3452,33 @@ components:
           type: string
         size_band:
           type: string
+        tax_id_kind:
+          description: Which tax identifier the company gave
+          enum:
+            - vkn
+            - tckn
+          type: string
+        tax_id_valid:
+          description: A VKN or TCKN that passes its check digits was given
+          type: boolean
+        tax_no:
+          description: The VKN; masked to its last 4 digits unless tax_no_masked is false (platform admins)
+          type: string
+        tax_no_masked:
+          description: tax_no shows only its last 4 digits
+          type: boolean
+        tax_office:
+          type: string
+      required:
+        - tax_id_valid
+        - domain_verified
       type: object
     CompanyPublicDTO:
       additionalProperties: false
       properties:
+        domain_verified:
+          description: "email_domain is verified: the founder's or an editor's verified address is at it"
+          type: boolean
         domain_verified_at:
           description: Only for the company's editors
           format: date-time
@@ -3444,6 +3492,26 @@ components:
           type: string
         size_band:
           type: string
+        tax_id_kind:
+          description: Which tax identifier the company gave
+          enum:
+            - vkn
+            - tckn
+          type: string
+        tax_id_valid:
+          description: A VKN or TCKN that passes its check digits was given
+          type: boolean
+        tax_no:
+          description: The VKN; masked to its last 4 digits unless tax_no_masked is false (platform admins)
+          type: string
+        tax_no_masked:
+          description: tax_no shows only its last 4 digits
+          type: boolean
+        tax_office:
+          type: string
+      required:
+        - tax_id_valid
+        - domain_verified
       type: object
     CompleteInputBody:
       additionalProperties: false
@@ -4217,7 +4285,7 @@ components:
       additionalProperties: false
       properties:
         email_domain:
-          description: The company's e-mail domain (not verified yet)
+          description: The company's own e-mail domain (no free e-mail provider); verified at once when the caller's account address is at it, otherwise the reviewer is warned
           maxLength: 253
           type: string
         hq_city:
@@ -4241,6 +4309,18 @@ components:
         slug:
           description: Derived from the name when omitted
           maxLength: 80
+          type: string
+        tax_no:
+          description: Vergi kimlik numarası (10 digits with its check digit; spaces, dots and hyphens are ignored). This or tckn is required (422 orgs.tax_id_required).
+          maxLength: 20
+          type: string
+        tax_office:
+          description: Vergi dairesi; required, checked by the service so the error is coded (422 orgs.tax_id_required)
+          maxLength: 100
+          type: string
+        tckn:
+          description: A sole trader's T.C. kimlik numarası instead of tax_no (11 digits with its check digits). Checked, never stored or returned.
+          maxLength: 20
           type: string
         website_url:
           description: https:// only
@@ -15761,7 +15841,7 @@ components:
           maxLength: 5000
           type: string
         email_domain:
-          description: Companies only; a change resets its verification
+          description: Companies only; no free e-mail provider. A change resets its verification; a member whose account address is at the domain verifies it.
           maxLength: 253
           type: string
         hq_city:
@@ -15782,6 +15862,18 @@ components:
         size_band:
           description: "Companies only: 1-10, 11-50, 51-200, 201-1000, 1000+"
           maxLength: 10
+          type: string
+        tax_no:
+          description: "Companies only: a VKN replaces the tax identifier on file; it cannot be cleared (empty string: 422 orgs.tax_id_required)"
+          maxLength: 20
+          type: string
+        tax_office:
+          description: Companies only; cannot be cleared (422 orgs.tax_id_required)
+          maxLength: 100
+          type: string
+        tckn:
+          description: "Companies only: a sole trader's TCKN replaces the tax identifier on file (checked, never stored or returned)"
+          maxLength: 20
           type: string
         website_url:
           description: https:// only; empty string clears it

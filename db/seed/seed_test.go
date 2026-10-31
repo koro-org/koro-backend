@@ -14,6 +14,7 @@ import (
 	"koro/db/seed"
 	"koro/internal/platform/crypto"
 	"koro/internal/platform/iban"
+	"koro/internal/platform/taxid"
 	"koro/internal/platform/testutil/fake"
 )
 
@@ -179,6 +180,14 @@ func TestBuild_SizesAndConsistency(t *testing.T) {
 	}
 	is := func(col string, v any) func(map[string]any) bool {
 		return func(r map[string]any) bool { return r[col] == v }
+	}
+	// BE-165, Q-45: every company carries a synthetic VKN that passes the
+	// check digit, and its tax office.
+	if all, valid := count("companies", nil), count("companies", func(r map[string]any) bool {
+		no, _ := r["tax_no"].(string)
+		return r["tax_id_kind"] == "vkn" && taxid.ValidVKN(no) && r["tax_office"] != nil
+	}); valid != all {
+		t.Errorf("companies with a valid VKN and tax office = %d of %d", valid, all)
 	}
 	students := count("users", is("signup_persona", "student"))
 	minors := count("student_profiles", is("audience_eligible", false))

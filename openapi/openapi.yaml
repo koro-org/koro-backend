@@ -12962,6 +12962,10 @@ components:
           description: Last edit after the publication
           format: date-time
           type: string
+        event_id:
+          description: The event an event_share post shares now
+          format: uuid
+          type: string
         kind:
           enum:
             - text
@@ -12974,11 +12978,17 @@ components:
           items:
             $ref: "#/components/schemas/MediaDTO"
           type: array
+        opportunity:
+          $ref: "#/components/schemas/OpportunityDTO"
+          description: The opportunity of an opportunity_call post now
         post_id:
           type: string
         published_at:
           format: date-time
           type: string
+        reported_snapshot:
+          $ref: "#/components/schemas/ReportedSnapshotDTO"
+          description: The post's text as it stood when this report was filed (BE-160); absent for a report filed before the snapshots were kept. An edited_at later than taken_at means the post changed since
         status:
           enum:
             - draft
@@ -12997,6 +13007,27 @@ components:
         - commercial_flag
         - media
         - dropped_media
+      type: object
+    ReportedSnapshotDTO:
+      additionalProperties: false
+      properties:
+        body_text:
+          description: Plain text of the body
+          type: string
+        event_id:
+          description: The event the post shared
+          format: uuid
+          type: string
+        opportunity:
+          $ref: "#/components/schemas/OpportunityDTO"
+        taken_at:
+          description: When the report was filed
+          format: date-time
+          type: string
+        title:
+          type: string
+      required:
+        - taken_at
       type: object
     RequestReturnInputBody:
       additionalProperties: false

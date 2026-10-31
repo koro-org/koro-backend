@@ -47,19 +47,43 @@ type ReportCreatedDTO struct {
 	ReportID string `json:"report_id"`
 }
 
-// ReportedPostDTO is the reported post as a moderator sees it.
+// ReportedPostDTO is the reported post as a moderator sees it: as it is
+// now, and as it was when the report was filed (ReportedSnapshot, BE-160).
 type ReportedPostDTO struct {
-	PostID         string            `json:"post_id"`
-	Kind           string            `json:"kind" enum:"text,image,event_share,opportunity_call"`
-	Status         string            `json:"status" enum:"draft,pending_review,published,hidden,removed"`
-	Title          string            `json:"title,omitempty"`
-	BodyText       string            `json:"body_text,omitempty" doc:"Plain-text preview of the body"`
-	AudienceKind   string            `json:"audience_kind" enum:"public,followers,segment"`
-	CommercialFlag bool              `json:"commercial_flag"`
-	PublishedAt    *time.Time        `json:"published_at,omitempty"`
-	EditedAt       *time.Time        `json:"edited_at,omitempty" doc:"Last edit after the publication"`
-	Media          []MediaDTO        `json:"media" doc:"The images the post shows now"`
-	DroppedMedia   []DroppedMediaDTO `json:"dropped_media" doc:"Images edits took off the post after its publication (BE-158), newest last: kept for the moderators until 12 months after the edit, and while a report on the post is open; readers and the author organization no longer see them"`
+	PostID           string               `json:"post_id"`
+	Kind             string               `json:"kind" enum:"text,image,event_share,opportunity_call"`
+	Status           string               `json:"status" enum:"draft,pending_review,published,hidden,removed"`
+	Title            string               `json:"title,omitempty"`
+	BodyText         string               `json:"body_text,omitempty" doc:"Plain-text preview of the body"`
+	EventID          string               `json:"event_id,omitempty" format:"uuid" doc:"The event an event_share post shares now"`
+	Opportunity      *OpportunityDTO      `json:"opportunity,omitempty" doc:"The opportunity of an opportunity_call post now"`
+	AudienceKind     string               `json:"audience_kind" enum:"public,followers,segment"`
+	CommercialFlag   bool                 `json:"commercial_flag"`
+	PublishedAt      *time.Time           `json:"published_at,omitempty"`
+	EditedAt         *time.Time           `json:"edited_at,omitempty" doc:"Last edit after the publication"`
+	Media            []MediaDTO           `json:"media" doc:"The images the post shows now"`
+	DroppedMedia     []DroppedMediaDTO    `json:"dropped_media" doc:"Images edits took off the post after its publication (BE-158), newest last: kept for the moderators until 12 months after the edit, and while a report on the post is open; readers and the author organization no longer see them"`
+	ReportedSnapshot *ReportedSnapshotDTO `json:"reported_snapshot,omitempty" doc:"The post's text as it stood when this report was filed (BE-160); absent for a report filed before the snapshots were kept. An edited_at later than taken_at means the post changed since"`
+}
+
+// ReportedSnapshotDTO is the reported post's text when the report was
+// filed (BE-160): written once with the report, never changed. An empty
+// field means the post had none then.
+type ReportedSnapshotDTO struct {
+	Title       string          `json:"title,omitempty"`
+	BodyText    string          `json:"body_text,omitempty" doc:"Plain text of the body"`
+	EventID     string          `json:"event_id,omitempty" format:"uuid" doc:"The event the post shared"`
+	Opportunity *OpportunityDTO `json:"opportunity,omitempty"`
+	TakenAt     time.Time       `json:"taken_at" doc:"When the report was filed"`
+}
+
+// toSnapshotDTO is the DTO of r's snapshot; nil without one.
+func toSnapshotDTO(r Report) *ReportedSnapshotDTO {
+	if r.SnapshotAt == nil {
+		return nil
+	}
+	return &ReportedSnapshotDTO{Title: optString(r.SnapshotTitle), BodyText: optString(r.SnapshotBodyText),
+		EventID: idText(r.SnapshotEventID), Opportunity: toOpportunityDTO(r.SnapshotOpportunity), TakenAt: *r.SnapshotAt}
 }
 
 // DroppedMediaDTO is an image an edit took off a published post (BE-158).
@@ -137,8 +161,9 @@ func toReportDTO(v ReportView) AdminReportDTO {
 		if p := t.Post; p != nil {
 			td.Post = &ReportedPostDTO{
 				PostID: p.ID.String(), Kind: string(p.Kind), Status: string(p.Status), Title: optString(p.Title),
-				BodyText: optString(p.BodyText), AudienceKind: string(p.AudienceKind), CommercialFlag: p.CommercialFlag,
-				PublishedAt: p.PublishedAt, EditedAt: p.EditedAt, Media: []MediaDTO{}, DroppedMedia: []DroppedMediaDTO{},
+				BodyText: optString(p.BodyText), EventID: idText(p.EventID), Opportunity: toOpportunityDTO(p.Opportunity),
+				AudienceKind: string(p.AudienceKind), CommercialFlag: p.CommercialFlag, PublishedAt: p.PublishedAt,
+				EditedAt: p.EditedAt, Media: []MediaDTO{}, DroppedMedia: []DroppedMediaDTO{}, ReportedSnapshot: toSnapshotDTO(r),
 			}
 			for _, m := range t.Media {
 				td.Post.Media = append(td.Post.Media, toMediaDTO(m))

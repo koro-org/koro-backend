@@ -32,7 +32,8 @@ import (
 //	                   evidence waits). A removed post's purge takes its
 //	                   dropped images too.
 //	content_report     a resolved report (actioned / dismissed) goes 12
-//	                   months after resolved_at; its moderation actions keep
+//	                   months after resolved_at with its snapshot of the
+//	                   reported post (BE-160); its moderation actions keep
 //	                   their decision, report_id becomes NULL.
 //	moderation_action  a decision goes 2 years after it was taken, through
 //	                   000121's moderation_actions_purge (append-only table).

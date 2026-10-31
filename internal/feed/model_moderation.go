@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"bytes"
 	"time"
 	"uuid"
 )
@@ -79,12 +80,49 @@ type Report struct {
 	AssignedTo     *uuid.UUID   `gorm:"type:uuid;column:assigned_to"`
 	ResolutionNote *string      `gorm:"column:resolution_note"`
 	ResolvedAt     *time.Time   `gorm:"column:resolved_at"`
-	CreatedAt      time.Time    `gorm:"column:created_at;->"`
-	UpdatedAt      time.Time    `gorm:"column:updated_at;->"`
+	PostSnapshot
+	CreatedAt time.Time `gorm:"column:created_at;->"`
+	UpdatedAt time.Time `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
 func (Report) TableName() string { return "content_reports" }
+
+// PostSnapshot is the reported post as it stood when its report was filed
+// (BE-160, 000168): written once with a post report, never changed
+// (content_reports_snapshot_guard), so an edit of the post leaves the
+// moderators what was reported. SnapshotAt nil means no snapshot (an org
+// report, or a post report filed before BE-160); with it, a nil field means
+// the post had none. The copy is the reported org's content: it goes with
+// its report (the reporter's erasure, content_report retention) and is
+// shown on the moderators' report view only (adminGetReport,
+// adminResolveReport), never in the reporter's export.
+type PostSnapshot struct {
+	SnapshotTitle       *string    `gorm:"column:snapshot_title"`
+	SnapshotBodyText    *string    `gorm:"column:snapshot_body_text"`
+	SnapshotOpportunity JSON       `gorm:"column:snapshot_opportunity;type:jsonb"`
+	SnapshotEventID     *uuid.UUID `gorm:"type:uuid;column:snapshot_event_id"`
+	SnapshotAt          *time.Time `gorm:"column:snapshot_at"`
+}
+
+// snapshotOf is p's snapshot taken at at.
+func snapshotOf(p Post, at time.Time) PostSnapshot {
+	return PostSnapshot{SnapshotTitle: p.Title, SnapshotBodyText: p.BodyText, SnapshotOpportunity: bytes.Clone(p.Opportunity),
+		SnapshotEventID: p.EventID, SnapshotAt: &at}
+}
+
+// clone deep-copies the snapshot's JSON (the in-memory store keeps rows
+// apart from their callers).
+func (s PostSnapshot) clone() PostSnapshot {
+	s.SnapshotOpportunity = bytes.Clone(s.SnapshotOpportunity)
+	return s
+}
+
+// clone deep-copies the report's snapshot.
+func (r Report) clone() Report {
+	r.PostSnapshot = r.PostSnapshot.clone()
+	return r
+}
 
 // ModAction is moderation_actions.action (02 §12.10).
 type ModAction string

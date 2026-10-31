@@ -3,6 +3,7 @@ package feed
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"regexp"
 	"slices"
 	"time"
@@ -17,16 +18,32 @@ import (
 // reasonCodeRe is moderation_actions_reason_code_chk.
 var reasonCodeRe = regexp.MustCompile(`^[a-z_]{2,40}$`)
 
-// checkReport applies the CHECK constraints of content_reports.
+// checkReport applies the CHECK constraints of content_reports (the
+// snapshot ones: 000168).
 func checkReport(r Report) error {
+	snap := r.PostSnapshot
 	switch {
 	case !r.TargetType.Valid(), !r.Reason.Valid(), !r.Status.Valid(), runes(r.Details) > 1000,
 		runes(r.ResolutionNote) > 1000:
 		return errCheck
 	case (r.Status == ReportActioned || r.Status == ReportDismissed) != (r.ResolvedAt != nil):
 		return errCheck
+	case runes(snap.SnapshotTitle) > 140, runes(snap.SnapshotBodyText) > 5000,
+		snap.SnapshotOpportunity != nil && !jsonObject(snap.SnapshotOpportunity):
+		return errCheck
+	case snap.SnapshotAt != nil && r.TargetType != TargetPost: // content_reports_snapshot_target_chk
+		return errCheck
+	case snap.SnapshotAt == nil && (snap.SnapshotTitle != nil || snap.SnapshotBodyText != nil ||
+		snap.SnapshotOpportunity != nil || snap.SnapshotEventID != nil): // content_reports_snapshot_at_chk
+		return errCheck
 	}
 	return nil
+}
+
+// jsonObject reports whether j is a JSON object (jsonb_typeof = 'object').
+func jsonObject(j JSON) bool {
+	var m map[string]json.RawMessage
+	return json.Unmarshal(j, &m) == nil && m != nil
 }
 
 // PutReport stores r as it is (fixtures).
@@ -36,7 +53,7 @@ func (s *MemStore) PutReport(r Report) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.reports[r.ID] = r
+	s.reports[r.ID] = r.clone()
 	return nil
 }
 
@@ -57,13 +74,14 @@ func (s *MemStore) InsertReport(_ context.Context, r Report) (Report, bool, erro
 		return Report{}, false, problem.ErrInternal
 	}
 	r.Status, r.AssignedTo, r.ResolutionNote, r.ResolvedAt = ReportOpen, nil, nil, nil
+	r.PostSnapshot = r.PostSnapshot.clone()
 	if err := checkReport(r); err != nil {
 		return Report{}, false, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if open, ok := s.openReportOf(r); ok {
-		return open, false, nil
+		return open.clone(), false, nil // the first snapshot stays
 	}
 	if _, dup := s.reports[r.ID]; dup {
 		return Report{}, false, problem.ErrConflict
@@ -71,7 +89,7 @@ func (s *MemStore) InsertReport(_ context.Context, r Report) (Report, bool, erro
 	r.CreatedAt = s.stamp(time.Time{})
 	r.UpdatedAt = r.CreatedAt
 	s.reports[r.ID] = r
-	return r, true, nil
+	return r.clone(), true, nil
 }
 
 // GetReport implements Store.
@@ -82,7 +100,7 @@ func (s *MemStore) GetReport(_ context.Context, id uuid.UUID) (Report, error) {
 	if !ok {
 		return Report{}, ErrNotFound
 	}
-	return r, nil
+	return r.clone(), nil
 }
 
 // LockReport implements Store.
@@ -109,8 +127,8 @@ func (s *MemStore) UpdateReport(_ context.Context, r Report) (Report, error) {
 		}
 	}
 	next.UpdatedAt = s.stamp(cur.UpdatedAt)
-	s.reports[r.ID] = next
-	return next, nil
+	s.reports[r.ID] = next // the snapshot is cur's (content_reports_snapshot_guard)
+	return next.clone(), nil
 }
 
 // ListReports implements Store.
@@ -129,7 +147,7 @@ func (s *MemStore) ListReports(_ context.Context, f ReportFilter, after *After, 
 				continue
 			}
 		}
-		out = append(out, r)
+		out = append(out, r.clone())
 	}
 	slices.SortFunc(out, func(a, b Report) int {
 		c := cmp.Or(a.CreatedAt.Compare(b.CreatedAt), a.ID.Compare(b.ID))
@@ -164,7 +182,7 @@ func (s *MemStore) ReportsOf(_ context.Context, userID uuid.UUID) ([]Report, err
 	out := []Report{}
 	for _, r := range s.reports {
 		if r.ReporterUserID == userID {
-			out = append(out, r)
+			out = append(out, r.clone())
 		}
 	}
 	slices.SortFunc(out, func(a, b Report) int { return a.ID.Compare(b.ID) })

@@ -144,7 +144,10 @@ func (s *service) reportTarget(ctx context.Context, a authz.Actor, t TargetType,
 // (404/403/409) → in one transaction: the report or the reporter's open
 // one (content_reports_open_uq), and for a new one its audit record,
 // content_report.created (A) and the automatic hide of a post reported by
-// enough distinct users.
+// enough distinct users. A new post report carries the snapshot of the
+// post read for the target (BE-160): what the reporter reported stays for
+// the moderators when the author edits the post; the reporter's open
+// report returned again keeps its first snapshot.
 func (s *service) CreateReport(ctx context.Context, a authz.Actor, in ReportInput) (ReportResult, error) {
 	if !a.IsUser() {
 		return ReportResult{}, authz.ErrForbidden
@@ -167,10 +170,14 @@ func (s *service) CreateReport(ctx context.Context, a authz.Actor, in ReportInpu
 	if err != nil {
 		return ReportResult{}, err
 	}
+	var snap PostSnapshot
+	if post != nil {
+		snap = snapshotOf(*post, s.now())
+	}
 	res, _, err := idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (ReportResult, error) {
 		r, created, err := s.reports().InsertReport(ctx, Report{
 			ID: uuid.NewV7(), ReporterUserID: a.UserID, TargetType: in.TargetType, TargetID: in.TargetID,
-			Reason: in.Reason, Details: details,
+			Reason: in.Reason, Details: details, PostSnapshot: snap,
 		})
 		if err != nil || !created {
 			return ReportResult{ID: r.ID}, err

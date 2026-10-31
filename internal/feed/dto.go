@@ -62,6 +62,17 @@ type OpportunityDTO struct {
 	EligibleYears []int  `json:"eligible_years,omitempty"`
 }
 
+// toOpportunityDTO is the DTO of a stored opportunity (posts.opportunity,
+// content_reports.snapshot_opportunity); nil without one.
+func toOpportunityDTO(j JSON) *OpportunityDTO {
+	o := decodeOpportunity(j)
+	if o == nil {
+		return nil
+	}
+	return &OpportunityDTO{Type: o.Type, ApplyVia: o.ApplyVia, ExternalURL: o.ExternalURL, Deadline: o.Deadline, City: o.City,
+		WorkMode: o.WorkMode, EligibleYears: o.EligibleYears}
+}
+
 // ViewerDTO is what the signed-in reader did on the post.
 type ViewerDTO struct {
 	Liked           bool `json:"liked"`
@@ -177,10 +188,7 @@ func toPostDTO(v PostView) PostDTO {
 			d.Event.Org = &events.EventOrgDTO{OrgID: o.ID.String(), Kind: string(o.Kind), Name: o.Name, Slug: o.Slug}
 		}
 	}
-	if o := decodeOpportunity(p.Opportunity); o != nil {
-		d.Opportunity = &OpportunityDTO{Type: o.Type, ApplyVia: o.ApplyVia, ExternalURL: o.ExternalURL,
-			Deadline: o.Deadline, City: o.City, WorkMode: o.WorkMode, EligibleYears: o.EligibleYears}
-	}
+	d.Opportunity = toOpportunityDTO(p.Opportunity)
 	if f := v.Viewer; f != nil {
 		d.Viewer = &ViewerDTO{Liked: f.Liked, Saved: f.Saved, FollowingAuthor: f.FollowingAuthor}
 	}

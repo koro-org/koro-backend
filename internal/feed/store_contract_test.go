@@ -3,9 +3,11 @@ package feed_test
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1005,6 +1007,101 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (feed.Store, world)
 		}
 		if _, err := s.GetReport(ctx, r2.ID); err != nil {
 			t.Fatal("another reporter's report was erased")
+		}
+	})
+
+	t.Run("report snapshot: written once with a post report, kept by the duplicate and the updates (BE-160)", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		org, by := w.org(t, feed.AuthorClub), w.user(t)
+		p := insert(t, s, publishedAt(post(org, feed.AuthorClub, by), pub0))
+		u1, u2, mod := w.user(t), w.user(t), w.user(t)
+		title, body, ev := "Staj ilanı", "Başvuru ücreti 500 TL", uuid.NewV7()
+		at := pub0.Add(time.Hour)
+		opportunity := feed.JSON(`{"type": "internship", "apply_via": "external_url", "external_url": "https://a.koro.test"}`)
+		snap := feed.PostSnapshot{SnapshotTitle: &title, SnapshotBodyText: &body, SnapshotOpportunity: opportunity,
+			SnapshotEventID: &ev, SnapshotAt: &at}
+		rep := func(u uuid.UUID, tt feed.TargetType, target uuid.UUID, snap feed.PostSnapshot) (feed.Report, bool, error) {
+			t.Helper()
+			return s.InsertReport(ctx, feed.Report{ID: uuid.NewV7(), ReporterUserID: u, TargetType: tt, TargetID: target,
+				Reason: feed.ReasonScamOrMisleading, PostSnapshot: snap})
+		}
+		same := func(t *testing.T, r feed.Report) {
+			t.Helper()
+			var o map[string]any
+			if r.SnapshotTitle == nil || *r.SnapshotTitle != title || r.SnapshotBodyText == nil || *r.SnapshotBodyText != body ||
+				r.SnapshotEventID == nil || *r.SnapshotEventID != ev || r.SnapshotAt == nil || !r.SnapshotAt.Equal(at) ||
+				json.Unmarshal(r.SnapshotOpportunity, &o) != nil || o["external_url"] != "https://a.koro.test" {
+				t.Fatalf("snapshot = %+v (opportunity %s)", r.PostSnapshot, r.SnapshotOpportunity)
+			}
+		}
+		r1, created, err := rep(u1, feed.TargetPost, p.ID, snap)
+		if err != nil || !created {
+			t.Fatalf("InsertReport = %v, %v", created, err)
+		}
+		same(t, r1)
+		got, err := s.GetReport(ctx, r1.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		same(t, got)
+		// The open report returned again keeps its first snapshot.
+		edited, later := "Staj", pub0.Add(2*time.Hour)
+		again, created, err := rep(u1, feed.TargetPost, p.ID, feed.PostSnapshot{SnapshotTitle: &edited, SnapshotAt: &later})
+		if err != nil || created || again.ID != r1.ID {
+			t.Fatalf("duplicate = %+v, %v, %v", again, created, err)
+		}
+		same(t, again)
+		// An update never rewrites it.
+		next := got
+		next.Status, next.AssignedTo = feed.ReportInReview, &mod
+		next.SnapshotTitle, next.SnapshotBodyText, next.SnapshotOpportunity, next.SnapshotEventID, next.SnapshotAt = &edited, nil, nil, nil, &later
+		upd, err := s.UpdateReport(ctx, next)
+		if err != nil || upd.Status != feed.ReportInReview {
+			t.Fatalf("UpdateReport = %+v, %v", upd, err)
+		}
+		same(t, upd)
+		if got, _ := s.GetReport(ctx, r1.ID); got.Status != feed.ReportInReview {
+			t.Fatalf("after the update = %+v", got)
+		} else {
+			same(t, got)
+		}
+		if mine, err := s.ReportsOf(ctx, u1); err != nil || len(mine) != 1 {
+			t.Fatalf("ReportsOf = %d, %v", len(mine), err)
+		} else {
+			same(t, mine[0])
+		}
+		// A post with nothing to copy: only the time; no snapshot at all (an
+		// org report, a report filed before BE-160).
+		bare, _, err := rep(u2, feed.TargetPost, p.ID, feed.PostSnapshot{SnapshotAt: &at})
+		if err != nil || bare.SnapshotAt == nil || bare.SnapshotTitle != nil || bare.SnapshotOpportunity != nil || bare.SnapshotEventID != nil {
+			t.Fatalf("bare snapshot = %+v, %v", bare.PostSnapshot, err)
+		}
+		if none, _, err := rep(u2, feed.TargetOrg, org, feed.PostSnapshot{}); err != nil || none.SnapshotAt != nil {
+			t.Fatalf("org report = %+v, %v", none.PostSnapshot, err)
+		}
+		// The CHECKs of 000168.
+		long := strings.Repeat("ş", 141)
+		longBody := strings.Repeat("ş", 5001)
+		for name, bad := range map[string]struct {
+			tt   feed.TargetType
+			snap feed.PostSnapshot
+		}{
+			"an org report with a snapshot":    {feed.TargetOrg, feed.PostSnapshot{SnapshotAt: &at}},
+			"a copy without its time":          {feed.TargetPost, feed.PostSnapshot{SnapshotTitle: &title}},
+			"an event without its time":        {feed.TargetPost, feed.PostSnapshot{SnapshotEventID: &ev}},
+			"a title of 141 characters":        {feed.TargetPost, feed.PostSnapshot{SnapshotTitle: &long, SnapshotAt: &at}},
+			"a text of 5001 characters":        {feed.TargetPost, feed.PostSnapshot{SnapshotBodyText: &longBody, SnapshotAt: &at}},
+			"an opportunity that is no object": {feed.TargetPost, feed.PostSnapshot{SnapshotOpportunity: feed.JSON(`[1]`), SnapshotAt: &at}},
+		} {
+			target := p.ID
+			if bad.tt == feed.TargetOrg {
+				target = w.org(t, feed.AuthorClub)
+			}
+			if _, _, err := rep(w.user(t), bad.tt, target, bad.snap); !errors.Is(err, problem.ErrValidation) {
+				t.Errorf("%s: InsertReport = %v, want ErrValidation", name, err)
+			}
 		}
 	})
 

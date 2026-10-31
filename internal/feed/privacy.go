@@ -31,7 +31,12 @@ const privacyRetainedReason = "posts are the author org's content (02 §12.2); a
 //     them with their own details text; Erase deletes them, open ones too
 //     (the user's erasure prevails; the moderation decisions taken stay
 //     and lose their report_id). Reports others filed about the user's
-//     org are the org's matter, not the user's data.
+//     org are the org's matter, not the user's data. A post report's
+//     snapshot of the reported post (BE-160) is the reported org's content,
+//     not the reporter's data: Export leaves it out (it may hold text the
+//     author has since withdrawn, about third parties too), Erase deletes it
+//     with its report. Its author's erasure leaves it, as it leaves the
+//     post (the snapshot names no user).
 //   - for a moderator, the decisions they took (02 §12.10, staff data:
 //     actor_user_id). Export lists them; Erase keeps them (append-only,
 //     retained with the reason above).

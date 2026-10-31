@@ -252,6 +252,7 @@ func TestSchema_P1Schema3IDColumnsAndTriggers(t *testing.T) {
 	wantOthers := []string{
 		"config_versions.config_versions_immutable koro_forbid_mutation",
 		"config_versions.config_versions_no_truncate koro_forbid_mutation",
+		"content_reports.content_reports_snapshot_guard content_reports_snapshot_guard", // 000168 (BE-160)
 		"destruction_logs.destruction_logs_immutable koro_forbid_mutation",
 		"destruction_logs.destruction_logs_no_truncate koro_forbid_mutation",
 		"moderation_actions.moderation_actions_immutable moderation_actions_forbid_mutation",

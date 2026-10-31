@@ -8,9 +8,31 @@ import (
 
 // Store is the persistence of messaging (02 §14): the GORM store over
 // PostgreSQL and the in-memory store of the tests (05 §13.2) pass the same
-// contract (store_contract_test.go). Writes join the transaction carried
-// by ctx.
+// contract (store_contract_test.go, store_conversations_contract_test.go).
+// Writes join the transaction carried by ctx.
+//
+// Store is split by aggregate into embedded interfaces (05 §2.2; BE-162): a
+// service file reaches the store only through the narrow view of the
+// aggregate it works on (the accessors below); only the KVKK provider
+// (privacy.go), which covers every row of a data subject, holds the whole
+// Store (store_views_test.go).
 type Store interface {
+	requestStore      // contact_requests
+	blockStore        // contact_blocks
+	conversationStore // conversations, conversation_messages, conversation_user_states (store_conversations.go)
+}
+
+// requests is the contact_requests view of the store.
+func (s *service) requests() requestStore { return s.d.Store }
+
+// blocks is the contact_blocks view of the store.
+func (s *service) blocks() blockStore { return s.d.Store }
+
+// conversations is the conversations view of the store.
+func (s *service) conversations() conversationStore { return s.d.Store }
+
+// requestStore is the contact_requests part of Store (02 §14.1).
+type requestStore interface {
 	// Insert writes a new request. A pending request of the same company
 	// and student is ErrRequestPending (contact_requests_pending_uq).
 	Insert(ctx context.Context, r ContactRequest) (ContactRequest, error)
@@ -44,6 +66,24 @@ type Store interface {
 	// expiry first.
 	DueForExpiry(ctx context.Context, now time.Time, limit int) ([]ContactRequest, error)
 
+	// ReceivedBy returns every request addressed to the user (KVKK export).
+	ReceivedBy(ctx context.Context, studentID uuid.UUID) ([]ContactRequest, error)
+	// SentBy returns every request the user sent for a company (KVKK
+	// export; kept on erasure: the company's record).
+	SentBy(ctx context.Context, senderID uuid.UUID) ([]ContactRequest, error)
+	// DeleteReceived hard deletes every request addressed to the user
+	// (account erasure) and returns how many went.
+	DeleteReceived(ctx context.Context, studentID uuid.UUID) (int, error)
+
+	// CountClosedBefore counts the closed requests whose closing moment
+	// (updated_at) is before cutoff (contact_request_closed, dry run).
+	CountClosedBefore(ctx context.Context, cutoff time.Time) (int, error)
+	// PurgeClosed hard deletes up to limit of them, oldest first.
+	PurgeClosed(ctx context.Context, cutoff time.Time, limit int) (int, error)
+}
+
+// blockStore is the contact_blocks part of Store (02 §14.2).
+type blockStore interface {
 	// InsertBlock records the student's block of the company; ok=false
 	// when it already existed.
 	InsertBlock(ctx context.Context, studentID, orgID uuid.UUID) (ok bool, err error)
@@ -53,21 +93,6 @@ type Store interface {
 	Blocked(ctx context.Context, studentID, orgID uuid.UUID) (bool, error)
 	// Blocks returns a page of the student's blocks, newest first.
 	Blocks(ctx context.Context, studentID uuid.UUID, after *BlockKey, limit int) ([]Block, error)
-
-	// ReceivedBy returns every request addressed to the user (KVKK export).
-	ReceivedBy(ctx context.Context, studentID uuid.UUID) ([]ContactRequest, error)
-	// SentBy returns every request the user sent for a company (KVKK
-	// export; kept on erasure: the company's record).
-	SentBy(ctx context.Context, senderID uuid.UUID) ([]ContactRequest, error)
-	// DeleteReceived hard deletes every request addressed to the user
-	// (account erasure) and returns how many went.
-	DeleteReceived(ctx context.Context, studentID uuid.UUID) (int, error)
 	// DeleteBlocks hard deletes the user's blocks (account erasure).
 	DeleteBlocks(ctx context.Context, studentID uuid.UUID) (int, error)
-
-	// CountClosedBefore counts the closed requests whose closing moment
-	// (updated_at) is before cutoff (contact_request_closed, dry run).
-	CountClosedBefore(ctx context.Context, cutoff time.Time) (int, error)
-	// PurgeClosed hard deletes up to limit of them, oldest first.
-	PurgeClosed(ctx context.Context, cutoff time.Time, limit int) (int, error)
 }

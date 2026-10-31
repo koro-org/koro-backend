@@ -30,7 +30,7 @@ func (s *service) ListMine(ctx context.Context, a authz.Actor, q ListQuery) (Stu
 	}
 	limit := page.ClampLimit(q.Limit)
 	q.Now, q.Limit = s.now(), limit+1
-	rows, err := s.d.Store.ListByStudent(ctx, a.UserID, q)
+	rows, err := s.requests().ListByStudent(ctx, a.UserID, q)
 	if err != nil {
 		return StudentPage{}, err
 	}
@@ -99,7 +99,7 @@ func (s *service) mine(ctx context.Context, a authz.Actor, act authz.Action, id 
 	if err := authz.Can(ctx, a, act, ownSurface(a)); err != nil {
 		return ContactRequest{}, err
 	}
-	r, err := s.d.Store.GetForStudent(ctx, a.UserID, id)
+	r, err := s.requests().GetForStudent(ctx, a.UserID, id)
 	if err != nil {
 		return ContactRequest{}, err
 	}
@@ -131,7 +131,9 @@ func (s *service) GetMine(ctx context.Context, a authz.Actor, id uuid.UUID) (Stu
 // 14 days) is 409 messaging.invalid_state → the status → on acceptance
 // students.AccessGrants.Grant (level 3) and, with share_contact,
 // students.ContactSharing.ShareContactWithCompany (the e-mail to this
-// company alone; both the same transaction: 01 §6.3) → contact_request.closed (O) → the audit record. The decline
+// company alone; both the same transaction: 01 §6.3) and the conversation
+// of the acceptance (BE-162) → contact_request.closed (O) → the audit
+// record. The decline
 // has no reason field at all: there is nothing the company could be shown.
 func (s *service) Respond(ctx context.Context, a authz.Actor, id uuid.UUID, in RespondInput) (StudentView, error) {
 	if _, err := s.mine(ctx, a, authz.MessagingContactRequestRespond, id); err != nil {
@@ -210,7 +212,7 @@ func shareChannel(in RespondInput) consent.Channel {
 }
 
 func (s *service) respond(ctx context.Context, a authz.Actor, id uuid.UUID, to Status, in RespondInput) (uuid.UUID, error) {
-	cur, err := s.d.Store.Lock(ctx, id)
+	cur, err := s.requests().Lock(ctx, id)
 	switch {
 	case err != nil:
 		return uuid.Nil(), err
@@ -224,13 +226,14 @@ func (s *service) respond(ctx context.Context, a authz.Actor, id uuid.UUID, to S
 		return uuid.Nil(), ErrInvalidState
 	}
 	at := s.now()
-	next, ok, err := s.d.Store.Transition(ctx, id, StatusPending, to, &at)
+	next, ok, err := s.requests().Transition(ctx, id, StatusPending, to, &at)
 	switch {
 	case err != nil:
 		return uuid.Nil(), err
 	case !ok:
 		return uuid.Nil(), ErrInvalidState
 	}
+	meta := map[string]any{"decision": string(to), "share_contact": in.ShareContact}
 	if to == StatusAccepted {
 		if err := s.d.Grants.Grant(ctx, a.UserID, next.OrgID, students.SourceContactRequest, next.ID); err != nil {
 			return uuid.Nil(), err
@@ -240,14 +243,19 @@ func (s *service) respond(ctx context.Context, a authz.Actor, id uuid.UUID, to S
 				return uuid.Nil(), err
 			}
 		}
+		// The conversation of the acceptance (BE-162, Q-40), same transaction.
+		c, err := s.openConversation(ctx, next)
+		if err != nil {
+			return uuid.Nil(), err
+		}
+		meta["conversation_id"] = c.ID.String()
 	}
 	if err := s.emit(ctx, domainevent.ContactRequestClosed{
 		ContactRequestID: next.ID, OrgID: next.OrgID, Outcome: string(to),
 	}, next.ID); err != nil {
 		return uuid.Nil(), err
 	}
-	ev := requestEvent(authz.MessagingContactRequestRespond, next, nil,
-		map[string]any{"decision": string(to), "share_contact": in.ShareContact})
+	ev := requestEvent(authz.MessagingContactRequestRespond, next, nil, meta)
 	return next.ID, s.d.Audit.Log(ctx, ev.By(a))
 }
 
@@ -272,8 +280,9 @@ func (s *service) blockable(ctx context.Context, orgID uuid.UUID) error {
 // Block implements Service. In one transaction: the block (once), then the
 // company's pending requests to the caller are declined (contact_request.closed
 // "declined" each: the company cannot tell a block from an ordinary
-// decline) and a request past its 14 days expires. A repeated block with
-// nothing pending writes nothing.
+// decline), a request past its 14 days expires and the open conversations
+// with the company close (closed_by student; BE-162). A repeated block with
+// nothing pending or open writes nothing.
 func (s *service) Block(ctx context.Context, a authz.Actor, orgID uuid.UUID) error {
 	if err := authz.Can(ctx, a, authz.MessagingBlockManage, ownBlocks(a)); err != nil {
 		return err
@@ -282,11 +291,11 @@ func (s *service) Block(ctx context.Context, a authz.Actor, orgID uuid.UUID) err
 		return err
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		added, err := s.d.Store.InsertBlock(ctx, a.UserID, orgID)
+		added, err := s.blocks().InsertBlock(ctx, a.UserID, orgID)
 		if err != nil {
 			return err
 		}
-		pending, err := s.d.Store.PendingOfCompany(ctx, orgID, a.UserID)
+		pending, err := s.requests().PendingOfCompany(ctx, orgID, a.UserID)
 		if err != nil {
 			return err
 		}
@@ -299,7 +308,7 @@ func (s *service) Block(ctx context.Context, a authz.Actor, orgID uuid.UUID) err
 				continue
 			}
 			at := s.now()
-			next, ok, err := s.d.Store.Transition(ctx, r.ID, StatusPending, StatusDeclined, &at)
+			next, ok, err := s.requests().Transition(ctx, r.ID, StatusPending, StatusDeclined, &at)
 			if err != nil {
 				return err
 			}
@@ -313,10 +322,16 @@ func (s *service) Block(ctx context.Context, a authz.Actor, orgID uuid.UUID) err
 			}
 			declined++
 		}
-		if !added && declined == 0 {
+		closed, err := s.closeOnBlock(ctx, orgID, a.UserID)
+		if err != nil {
+			return err
+		}
+		if !added && declined == 0 && closed == 0 {
 			return nil
 		}
-		return s.d.Audit.Log(ctx, blockEvent(a, orgID, true, declined))
+		ev := blockEvent(a, orgID, true, declined)
+		ev.Metadata["closed_conversations"] = closed
+		return s.d.Audit.Log(ctx, ev)
 	})
 }
 
@@ -329,7 +344,7 @@ func (s *service) Unblock(ctx context.Context, a authz.Actor, orgID uuid.UUID) e
 		return err
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		removed, err := s.d.Store.DeleteBlock(ctx, a.UserID, orgID)
+		removed, err := s.blocks().DeleteBlock(ctx, a.UserID, orgID)
 		if err != nil || !removed {
 			return err
 		}
@@ -350,7 +365,7 @@ func (s *service) ListBlocks(ctx context.Context, a authz.Actor, after *BlockKey
 		return BlockPage{}, err
 	}
 	limit = page.ClampLimit(limit)
-	rows, err := s.d.Store.Blocks(ctx, a.UserID, after, limit+1)
+	rows, err := s.blocks().Blocks(ctx, a.UserID, after, limit+1)
 	if err != nil {
 		return BlockPage{}, err
 	}

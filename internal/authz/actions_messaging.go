@@ -14,6 +14,14 @@ const (
 	MessagingContactRequestRespond      Action = "messaging.contact_request.respond"
 	MessagingBlockManage                Action = "messaging.block.manage"
 	MessagingBlockListOwn               Action = "messaging.block.list_own"
+	// Conversations of an accepted contact request (BE-162, Q-40; 03 §5.9 doc patch).
+	MessagingConversationListOrg  Action = "messaging.conversation.list_org"
+	MessagingConversationListOwn  Action = "messaging.conversation.list_own"
+	MessagingConversationRead     Action = "messaging.conversation.read"
+	MessagingConversationMarkRead Action = "messaging.conversation.mark_read"
+	MessagingConversationClose    Action = "messaging.conversation.close"
+	MessagingConversationMute     Action = "messaging.conversation.mute"
+	MessagingMessageSend          Action = "messaging.message.send"
 )
 
 // System-only actions of the messaging module (03 §3.7): only SystemActor may perform them.
@@ -31,4 +39,11 @@ var messagingActions = []Action{
 	MessagingContactRequestRespond,
 	MessagingBlockManage,
 	MessagingBlockListOwn,
+	MessagingConversationListOrg,
+	MessagingConversationListOwn,
+	MessagingConversationRead,
+	MessagingConversationMarkRead,
+	MessagingConversationClose,
+	MessagingConversationMute,
+	MessagingMessageSend,
 }

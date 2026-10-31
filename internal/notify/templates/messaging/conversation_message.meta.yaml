@@ -1,0 +1,11 @@
+version: 1
+category: transactional
+# BE-162 (Q-40): a new message in a conversation of an accepted contact
+# request, to the other side. In-app and push only (no e-mail: the app is
+# where the conversation lives); one notice per unread run of messages, none
+# while the recipient muted the conversation. The texts are fixed: the
+# message itself never enters a notification (the data carries the
+# conversation's ID only). The user switches each channel off separately
+# under contact_requests (02 §6.5).
+preference: contact_requests
+channels: [in_app, push]

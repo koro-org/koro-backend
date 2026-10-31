@@ -44,3 +44,37 @@ scenarios:
     steps:
       - { persona: company_admin, mfa: false, operation: createContactRequest, expect: 403, code: authz.mfa_required }
       - { persona: company_member, mfa: false, operation: createContactRequest, expect: 201 }
+  conversation_company_awaits_reply:
+    note: >-
+      BE-162: company_a may send 5 messages in a row in the conversation before the student answers (409
+      messaging.awaiting_reply); the student's reply opens it again.
+    steps:
+      - { persona: company_member, operation: sendOrgConversationMessage, expect: 201 }
+      - { persona: company_admin, operation: sendOrgConversationMessage, expect: 201 }
+      - { persona: company_member, operation: sendOrgConversationMessage, expect: 201 }
+      - { persona: company_admin, operation: sendOrgConversationMessage, expect: 201 }
+      - { persona: company_member, operation: sendOrgConversationMessage, expect: 201 }
+      - { persona: company_admin, operation: sendOrgConversationMessage, expect: 409, code: messaging.awaiting_reply }
+      - { persona: student, operation: sendMyConversationMessage, expect: 201 }
+      - { persona: company_admin, operation: sendOrgConversationMessage, expect: 201 }
+  conversation_closed_takes_no_message:
+    note: BE-162 — once the student closes the conversation nobody writes in it (409); both sides still read it.
+    steps:
+      - { persona: student, operation: closeMyConversation, expect: 200 }
+      - { persona: company_member, operation: sendOrgConversationMessage, expect: 409, code: messaging.conversation_closed }
+      - { persona: student, operation: sendMyConversationMessage, expect: 409, code: messaging.conversation_closed }
+      - { persona: company_admin, operation: getOrgConversation, expect: 200 }
+  conversation_block_closes:
+    note: >-
+      BE-056 + BE-162: the student's block of company_a closes their open conversation in the same transaction (the
+      company sees closed_by student, never the block); unblocking does not reopen it.
+    steps:
+      - { persona: student, operation: blockCompany, path_params: { org_id: company_a }, expect: 204 }
+      - { persona: company_member, operation: sendOrgConversationMessage, expect: 409, code: messaging.conversation_closed }
+      - { persona: student, operation: unblockCompany, path_params: { org_id: company_a }, expect: 204 }
+      - { persona: student, operation: sendMyConversationMessage, expect: 409, code: messaging.conversation_closed }
+  conversation_needs_mfa:
+    note: BE-162 — company_admin's path is k-mfa (03 §6.4); the recruiter's is not
+    steps:
+      - { persona: company_admin, mfa: false, operation: sendOrgConversationMessage, expect: 403, code: authz.mfa_required }
+      - { persona: company_member, mfa: false, operation: sendOrgConversationMessage, expect: 201 }

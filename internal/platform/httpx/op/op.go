@@ -82,6 +82,7 @@ const (
 	RateBreakGlass        RateLimit = "break_glass"
 	RateUpload            RateLimit = "upload"
 	RateWebhook           RateLimit = "webhook"
+	RateMessageSend       RateLimit = "message_send" // BE-162: a message of a conversation
 )
 
 // RateLimits lists every class of 04 §1.9 in table order.
@@ -90,7 +91,7 @@ func RateLimits() []RateLimit {
 		RateGlobalIP, RateAuthLogin, RateAuthRegister, RateAuthPasswordReset, RateAuthEmail,
 		RateTokenConfirm, RateReauth, RateReadDefault, RateWriteDefault, RateSearch,
 		RateAudienceCount, RateContactRequest, RateQRScan, RateTicketResend, RateExport,
-		RateBreakGlass, RateUpload, RateWebhook,
+		RateBreakGlass, RateUpload, RateWebhook, RateMessageSend,
 	}
 }
 

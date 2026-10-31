@@ -1,6 +1,7 @@
 package authz_test
 
 import (
+	"slices"
 	"testing"
 	"uuid"
 
@@ -149,4 +150,79 @@ func TestMessagingPolicy_EdgeCases(t *testing.T) {
 		companyRequest("company_a", student)), authz.ErrForbidden, false)
 	wantErr(t, authz.Can(ctx, authz.SystemActor("messaging.expire_requests"), authz.MessagingContactRequestRespond,
 		ownRequest(student)), authz.ErrForbidden, false)
+}
+
+// conversation is the Resource of a conversation (BE-162): the student as
+// owner; on the company path the company's org.
+func conversation(org string, student uuid.UUID) authz.Resource {
+	r := authz.Resource{Type: authz.TypeConversation, ID: uuid.NewV7(), OwnerUserID: &student,
+		Attrs: map[string]string{authz.AttrStatus: "open"}}
+	if org != "" {
+		id := authztest.ID(org)
+		r.OrgID = &id
+	}
+	return r
+}
+
+// TestMessagingPolicy_Conversations pins the conversation cells (BE-162):
+// on the company path cmm S and cma S of the path's company (platform staff
+// and the club's members 403, everyone else 404); on /me O for every
+// signed-in user on their own conversation (another one's 404, anonymous
+// 403); list_org only on the company path, list_own only on /me; cma needs
+// MFA, the recruiter does not.
+func TestMessagingPolicy_Conversations(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	forbidden, notFound := authz.ErrForbidden, authz.ErrNotFound
+	student, other := authztest.ID("student"), authztest.ID("student_granted")
+	acts := []authz.Action{authz.MessagingConversationRead, authz.MessagingConversationMarkRead, authz.MessagingConversationClose,
+		authz.MessagingConversationMute, authz.MessagingMessageSend}
+	staff := []string{"anonymous", "moderator", "support", "dpo", "platform_admin", "finance_admin", "talent_auditor"}
+	for _, tc := range []struct {
+		org   string
+		allow []string
+		see   []string
+	}{
+		{"company_a", []string{"company_member", "company_admin"}, staff},
+		{"company_b", []string{"other_company_member"}, staff},
+		{"club_a", nil, append([]string{"club_member", "club_admin"}, staff...)},
+	} {
+		for _, act := range append(acts, authz.MessagingConversationListOrg) {
+			for _, p := range authztest.Personas() {
+				var want error = notFound
+				switch {
+				case slices.Contains(tc.allow, p.Name):
+					want = nil
+				case slices.Contains(tc.see, p.Name):
+					want = forbidden
+				}
+				wantErr(t, authz.Can(ctx, p.Actor, act, conversation(tc.org, student)), want, false)
+			}
+		}
+	}
+	for _, p := range authztest.Personas() {
+		me := p.Actor.UserID
+		for _, act := range append(acts, authz.MessagingConversationListOwn) {
+			if p.Name == "anonymous" {
+				wantErr(t, authz.Can(ctx, p.Actor, act, conversation("", other)), forbidden, false)
+				continue
+			}
+			wantErr(t, authz.Can(ctx, p.Actor, act, conversation("", me)), nil, false)
+			if me != other {
+				wantErr(t, authz.Can(ctx, p.Actor, act, conversation("", other)), notFound, false)
+			}
+		}
+	}
+	// list_own is the /me list, list_org the company's: never the other path.
+	wantErr(t, authz.Can(ctx, persona(t, "company_member"), authz.MessagingConversationListOwn, conversation("company_a", student)),
+		notFound, false)
+	wantErr(t, authz.Can(ctx, persona(t, "student"), authz.MessagingConversationListOrg, conversation("", student)), notFound, false)
+	// k-mfa on the admin's path only.
+	cma, cmm := persona(t, "company_admin"), persona(t, "company_member")
+	cma.MFAVerified, cmm.MFAVerified = false, false
+	wantErr(t, authz.Can(ctx, cma, authz.MessagingMessageSend, conversation("company_a", student)), authz.ErrMFARequired, false)
+	wantErr(t, authz.Can(ctx, cmm, authz.MessagingMessageSend, conversation("company_a", student)), nil, false)
+	// The mandatory status attribute (03 §3.5).
+	wantErr(t, authz.Can(ctx, persona(t, "student"), authz.MessagingConversationRead,
+		authz.Resource{Type: authz.TypeConversation, OwnerUserID: &student}), forbidden, true)
 }

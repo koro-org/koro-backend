@@ -33,10 +33,12 @@ import (
 // e-mail address; BE-089) and IDENTITY_LINK_BASE_URL (the e-mail's link).
 //
 // Provided, set in build: svc (messaging.Service), the KVKK provider
-// (contact_requests, contact_blocks) and the retention sweeper of
-// contact_request_closed. tasks: messaging.expire_requests (01 §7, :40
-// hourly) and the two notice subscriptions (contact_request.created,
-// contact_request.closed).
+// (contact_requests, contact_blocks and, BE-162, conversations,
+// conversation_messages, conversation_user_states) and the retention
+// sweeper of contact_request_closed and conversation_closed. tasks:
+// messaging.expire_requests (01 §7, :40 hourly) and the three notice
+// subscriptions (contact_request.created, contact_request.closed,
+// conversation.message_sent).
 type messagingWiring struct {
 	store messaging.Store
 	tx    db.TxManager
@@ -119,6 +121,7 @@ func (w *messagingWiring) tasks(c *container) {
 	}
 }
 
-// routes: the 10 operations of 04 §2.9; w.svc is nil under `koro openapi`,
+// routes: the 26 operations of 04 §2.9 (10 contact request, 16
+// conversation operations; BE-162); w.svc is nil under `koro openapi`,
 // which Register tolerates.
 func (w *messagingWiring) routes(c *container, api huma.API) { messaging.Register(api, w.svc) }

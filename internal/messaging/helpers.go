@@ -40,20 +40,27 @@ func cleanSubject(s string) (string, error) {
 	return n, nil
 }
 
-// cleanMessage normalises a multi-line message: line breaks and tabs stay,
-// other control and bidi characters are refused.
+// cleanMessage normalises the message of a contact request.
 func cleanMessage(s string) (string, error) {
+	return cleanText("body.message", s, minMessage, maxMessage)
+}
+
+// cleanText normalises a multi-line free text (a request's message, a
+// conversation message): line breaks and tabs stay, other control and bidi
+// characters are refused; NFC, trimmed, min to max characters (the
+// char_length CHECK of its column).
+func cleanText(field, s string, minLen, maxLen int) (string, error) {
 	if !utf8.ValidString(s) {
-		return "", problem.Field("body.message", "must be UTF-8")
+		return "", problem.Field(field, "must be UTF-8")
 	}
 	for _, r := range s {
 		if (unicode.IsControl(r) && r != '\n' && r != '\t' && r != '\r') || bidi(r) {
-			return "", problem.Field("body.message", "contains control or bidi characters")
+			return "", problem.Field(field, "contains control or bidi characters")
 		}
 	}
 	n := norm.NFC.String(strings.TrimSpace(strings.ReplaceAll(s, "\r", "")))
-	if c := utf8.RuneCountInString(n); c < minMessage || c > maxMessage {
-		return "", problem.Field("body.message", "must be "+strconv.Itoa(minMessage)+" to "+strconv.Itoa(maxMessage)+" characters")
+	if c := utf8.RuneCountInString(n); c < minLen || c > maxLen {
+		return "", problem.Field(field, "must be "+strconv.Itoa(minLen)+" to "+strconv.Itoa(maxLen)+" characters")
 	}
 	return n, nil
 }

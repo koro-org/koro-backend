@@ -50,6 +50,7 @@ func (w *kvkkWiring) useMemStore() {
 	records := kvkk.NewMemRecords(clock.Real().Now)
 	memPolicies(records)
 	w.records = records
+	w.metrics = kvkk.NewMemMetrics()
 	w.tx = db.NopTx{}
 	w.cfg = &config.Kvkk{DPOEmail: testDPOEmail, ExportRetention: config.MaxExportRetention}
 	w.reauth = testReauth
@@ -92,7 +93,8 @@ func TestWire_KvkkTasksAndPrivacy(t *testing.T) {
 		}
 	}
 	if want := []string{"kvkk.dsr_deadlines 0 9 * * * default", "kvkk.purge_exports 27 * * * * low",
-		"kvkk.retention_sweep 30 2 * * * low", "kvkk.breach_timer 0 * * * * critical"}; !slices.Equal(jobs, want) {
+		"kvkk.retention_sweep 30 2 * * * low", "kvkk.breach_timer 0 * * * * critical",
+		"kvkk.metrics_snapshot 40 3 * * * low"}; !slices.Equal(jobs, want) {
 		t.Fatalf("kvkk jobs %q, want %q", jobs, want)
 	}
 	for topic, name := range map[string]string{

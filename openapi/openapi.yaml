@@ -8450,6 +8450,49 @@ components:
         - kind
         - name
       type: object
+    MetricDTO:
+      additionalProperties: false
+      properties:
+        denominator:
+          description: null when not applicable or suppressed
+          format: int64
+          type:
+            - integer
+            - "null"
+        metric:
+          description: Metric code; see the description of adminGetProductMetrics
+          type: string
+        numerator:
+          description: null when suppressed (1..9 people)
+          format: int64
+          type:
+            - integer
+            - "null"
+        suppressed:
+          description: A count of people was below 10 and is not shown (k ≥ 10)
+          type: boolean
+        unit:
+          description: "count: value = numerator; ratio: 0..1; average: numerator ÷ denominator; kurus: numerator ÷ denominator in kuruş"
+          enum:
+            - count
+            - ratio
+            - average
+            - kurus
+          type: string
+        value:
+          description: null when an operand is null or the denominator is 0
+          format: double
+          type:
+            - number
+            - "null"
+      required:
+        - metric
+        - unit
+        - numerator
+        - denominator
+        - value
+        - suppressed
+      type: object
     MfaLoginInputBody:
       additionalProperties: false
       properties:
@@ -11394,6 +11437,36 @@ components:
         - title
         - status
         - code
+      type: object
+    ProductMetricsDTO:
+      additionalProperties: false
+      properties:
+        as_of:
+          format: date-time
+          type: string
+        current:
+          description: "Stock metrics as of as_of: verified_active_students (30 days), data_freshness_rate (12 months), verified_clubs, active_members_per_verified_club, discoverability_rate"
+          items:
+            $ref: "#/components/schemas/MetricDTO"
+          type: array
+        from:
+          format: date
+          type: string
+        period:
+          description: "Flow metrics of [from, to]: engaged_verified_students (north star), event_attendance_rate, contact_request_acceptance_rate, targeted_post_engagement_rate, paying_companies, revenue_per_paying_company, package_renewal_rate"
+          items:
+            $ref: "#/components/schemas/MetricDTO"
+          type: array
+        to:
+          description: Inclusive
+          format: date
+          type: string
+      required:
+        - from
+        - to
+        - period
+        - as_of
+        - current
       type: object
     PublishFormInputBody:
       additionalProperties: false
@@ -19801,6 +19874,53 @@ paths:
       x-koro-rate-limit: write_default
       x-koro-surface: admin
       x-koro-terms-gate: enforced
+  /api/v1/admin/metrics:
+    get:
+      description: "Flow metrics of the period [from, to] (Europe/Istanbul days, both inclusive; default the last 30 days up to today; at most 366 days, not after today) and stock metrics as of the read. Aggregates only: a count of people between 1 and 9 is null with suppressed = true (k ≥ 10), and a value built from it is null. The same SQL definitions feed the Metabase views analytics.product_metrics_monthly, _current and _daily. Operational counts (users, organisations, content) are not here."
+      operationId: adminGetProductMetrics
+      parameters:
+        - description: "First day (Europe/Istanbul); default: to minus 29 days"
+          explode: false
+          in: query
+          name: from
+          schema:
+            description: "First day (Europe/Istanbul); default: to minus 29 days"
+            format: date
+            type: string
+        - description: "Last day, inclusive (Europe/Istanbul); default: today"
+          explode: false
+          in: query
+          name: to
+          schema:
+            description: "Last day, inclusive (Europe/Istanbul); default: today"
+            format: date
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductMetricsDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Read the product KPIs (north star and SR §6 metrics)
+      tags:
+        - kvkk
+      x-koro-action: kvkk.metrics.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
   /api/v1/admin/moderation-actions:
     get:
       description: Newest first; narrowed by target_type and target_id.

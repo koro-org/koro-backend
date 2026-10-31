@@ -23,6 +23,7 @@ import (
 //
 //	store   nil → kvkk.NewGormStore over the app_rw pool
 //	records nil → kvkk.NewGormRecords over the app_rw pool (BE-049)
+//	metrics nil → kvkk.NewGormMetrics over the app_rw pool (BE-164)
 //	tx      nil → the app_rw pool's TxManager; tests preset db.NopTx
 //	cfg     tests only; nil → the kvkk section of the loaded configuration
 //	reauth  the re-authentication verifier of the R steps; nil →
@@ -48,6 +49,7 @@ import (
 type kvkkWiring struct {
 	store   kvkk.Store
 	records kvkk.RecordStore
+	metrics kvkk.MetricsStore
 	tx      db.TxManager
 	cfg     *config.Kvkk
 	reauth  func(ctx context.Context, userID uuid.UUID, password, totpCode string) (kind string, err error)
@@ -76,6 +78,13 @@ func (w *kvkkWiring) build(c *container) error {
 		}
 		records = kvkk.NewGormRecords(c.infra.db.ORM)
 	}
+	metrics := w.metrics
+	if metrics == nil {
+		if c.infra.db == nil {
+			return errors.New("kvkk: no metrics store (database not opened)")
+		}
+		metrics = kvkk.NewGormMetrics(c.infra.db.ORM)
+	}
 	if tx == nil {
 		tx = c.infra.db.Tx
 	}
@@ -88,7 +97,7 @@ func (w *kvkkWiring) build(c *container) error {
 	fs := c.files.svc
 	w.files = fs
 	d := kvkk.Deps{
-		Store: store, Records: records, Tx: tx, Outbox: c.infra.outbox, Audit: c.audit.svc, Idempotency: c.infra.idempotency,
+		Store: store, Records: records, Metrics: metrics, Tx: tx, Outbox: c.infra.outbox, Audit: c.audit.svc, Idempotency: c.infra.idempotency,
 		Clock: c.infra.clock, Log: c.infra.log.With("module", "kvkk"),
 		Reauth: kvkkReauth{w: w}, Users: kvkkUsers{svc: c.identity.svc}, Files: fs,
 		Mailer:    c.notify.svc,

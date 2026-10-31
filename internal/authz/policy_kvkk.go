@@ -22,6 +22,8 @@ package authz
 //	kvkk.breach.list, manage      dpo ✓, platform_admin ✓
 //	kvkk.subprocessor.list        dpo ✓, platform_admin ✓
 //	kvkk.subprocessor.manage      dpo ✓
+//	kvkk.metrics.read             platform_admin ✓ (BE-164: product KPIs of
+//	                              SR §6, aggregates only, k ≥ 10)
 //
 // The kvkk-2 records have no owner and no org: the resource is always the
 // admin surface (visible to every user, 403 without the role).
@@ -56,7 +58,7 @@ func kvkkPolicy() Policy {
 				KvkkDsrComplete, KvkkDsrReject:
 				return kvkkAdminVisible(a, r)
 			case KvkkRetentionPolicyList, KvkkRetentionPolicyUpdate, KvkkDestructionLogList, KvkkBreachList,
-				KvkkBreachManage, KvkkSubprocessorList, KvkkSubprocessorManage:
+				KvkkBreachManage, KvkkSubprocessorList, KvkkSubprocessorManage, KvkkMetricsRead:
 				return r.Type == TypeAdminSurface && AdminSurfaceVisible(a)
 			}
 			return false
@@ -74,6 +76,8 @@ func kvkkPolicy() Policy {
 				return []Grant{{Role: RoleDPO}}
 			case KvkkRetentionPolicyList, KvkkDestructionLogList, KvkkBreachList, KvkkBreachManage, KvkkSubprocessorList:
 				return []Grant{{Role: RoleDPO}, {Role: RolePlatformAdmin}}
+			case KvkkMetricsRead:
+				return []Grant{{Role: RolePlatformAdmin}}
 			case KvkkDsrApprove:
 				gs := []Grant{{Role: RoleDPO}}
 				// k32: platform_admin gives the second approval only. The

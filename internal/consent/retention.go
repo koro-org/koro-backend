@@ -18,8 +18,8 @@ import (
 // policy is a dry run (count only, inside a transaction kvkk rolls back),
 // an approved one deletes in batches of RetentionBatch consents, one
 // transaction each, oldest first. The terms of use acceptances of an
-// account go 3 years after its erasure (terms_acceptance, BE-118), the
-// same way: never while the account lives.
+// account go 10 years after its erasure (terms_acceptance, BE-118; TBK
+// m.146, Q-18, BE-152), the same way: never while the account lives.
 
 const (
 	// PolicyConsentProof is the retention policy of the consent ledger.

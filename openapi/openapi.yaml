@@ -15799,7 +15799,7 @@ components:
       name: __Host-koro_session
       type: apiKey
 info:
-  description: "Koro backend API. Errors are RFC 9457 application/problem+json with a stable `code`. A signed-in user who has not accepted the terms of use in force for them (getMe terms.acceptance_required) gets 403 consent.terms_acceptance_required from every operation marked x-koro-terms-gate: enforced until acceptTerms records the current version; reads and the operations marked exempt (the acceptance, logout, account security, KVKK rights, consent acts and searches sent as POST) stay open. Search criteria that name a person (an e-mail address, a name, a user ID) are never taken in a query string: the POST …/search operations take them in the body."
+  description: "Koro backend API. Errors are RFC 9457 application/problem+json with a stable `code`. A signed-in user who has not accepted the terms of use in force for them (getMe terms.acceptance_required) gets 403 consent.terms_acceptance_required from every operation marked x-koro-terms-gate: enforced until acceptTerms records the current version; reads and the operations marked exempt (the acceptance, logout, account security, KVKK rights, consent acts, notification preferences, company blocks and searches sent as POST) stay open. Search criteria that name a person (an e-mail address, a name, a user ID) are never taken in a query string: the POST …/search operations take them in the body."
   title: Koro API
   version: 1.0.0
 openapi: 3.1.0
@@ -26912,7 +26912,7 @@ paths:
       x-koro-action: messaging.block.manage
       x-koro-rate-limit: write_default
       x-koro-surface: self
-      x-koro-terms-gate: enforced
+      x-koro-terms-gate: exempt
     put:
       description: The company can no longer send you contact requests and its pending requests are declined. The company is not told that you blocked it. Blocking twice changes nothing.
       operationId: blockCompany
@@ -26942,7 +26942,7 @@ paths:
       x-koro-action: messaging.block.manage
       x-koro-rate-limit: write_default
       x-koro-surface: self
-      x-koro-terms-gate: enforced
+      x-koro-terms-gate: exempt
   /api/v1/me/consents:
     get:
       operationId: listMyConsents
@@ -28302,7 +28302,7 @@ paths:
       x-koro-action: notify.preference.update_own
       x-koro-rate-limit: write_default
       x-koro-surface: self
-      x-koro-terms-gate: enforced
+      x-koro-terms-gate: exempt
   /api/v1/me/notifications:
     get:
       description: Newest first. Texts are fixed per notification kind and carry no personal data; data holds opaque IDs only.

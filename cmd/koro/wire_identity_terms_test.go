@@ -18,6 +18,7 @@ import (
 	"koro/internal/consent"
 	"koro/internal/identity"
 	"koro/internal/notify"
+	"koro/internal/orgs"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/queue"
@@ -32,7 +33,8 @@ func (r *refuseTerms) CheckTerms(context.Context, uuid.UUID) error {
 }
 
 // termsAlwaysOpen are the actions of the KVKK and account security
-// operations (BE-124): a self-surface write operation of one of them (the
+// operations (BE-124) and of the communication preferences and company
+// blocks (BE-152, Q-20): a self-surface write operation of one of them (the
 // user acting on their own account and data) must be on the terms gate's
 // exemption table, so a new operation of the family (another MFA method, a
 // new DSR entry point, a new consent page) cannot end up behind the gate
@@ -48,6 +50,7 @@ var termsAlwaysOpen = []string{
 	"identity.password.change", "identity.email_change.request",
 	"kvkk.dsr.create", "kvkk.dsr.cancel_own",
 	"consent.record.create", "students.privacy.update_own", "students.access_grant.revoke",
+	"notify.preference.update_own", "messaging.block.manage", // BE-152, Q-20: refusing messages, blocking a company
 }
 
 var pathParam = regexp.MustCompile(`\{[a-z_]+\}`)
@@ -150,7 +153,8 @@ func TestTermsGate_EveryProtectedWriteIsGatedOrExempt(t *testing.T) {
 // TestWire_TermsGateOverHTTP (BE-124, Q-17): end to end over the wired
 // modules. An account older than the terms is refused every write
 // (403 consent.terms_acceptance_required) but reads its terms state and
-// accepts them; then it writes. A new version published by the DPO through
+// accepts them; then it writes. Before accepting it may still change its
+// notification preferences and block a company (BE-152, Q-20). A new version published by the DPO through
 // consent is enforced at once by this process (identity's watcher drops
 // the cached version) and announced in the worker: the account gets the
 // in-app notification (link /me/terms) and the e-mail; after accepting it
@@ -215,6 +219,32 @@ func TestWire_TermsGateOverHTTP(t *testing.T) {
 	rename(http.StatusOK) // no terms published: nothing to accept
 	v1 := publish("2026.10.01")
 	rename(http.StatusForbidden) // the account predates the terms
+	// Q-20 (BE-152): before accepting, the account still turns messages off
+	// (security stays locked: notify's 422, not the gate's 403) and blocks a
+	// company; answering a contact request stays behind the gate.
+	if code, body := do(http.MethodPut, "/api/v1/me/notification-preferences",
+		`{"items":[{"category":"event_updates","channel":"email","enabled":false}]}`); code != http.StatusOK {
+		t.Fatalf("putMyNotificationPreferences before accepting = %d %v", code, body)
+	}
+	if code, body := do(http.MethodPut, "/api/v1/me/notification-preferences",
+		`{"items":[{"category":"security","channel":"email","enabled":false}]}`); code != http.StatusUnprocessableEntity ||
+		body["code"] != "notify.security_preference_locked" {
+		t.Fatalf("security preference off before accepting = %d %v", code, body)
+	}
+	company, err := e.c.orgs.svc.Create(ctx, orgs.CreateOrg{Kind: orgs.KindCompany, Name: "Engellenen Şirket"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks := "/api/v1/me/company-blocks/" + company.String()
+	for _, m := range []string{http.MethodPut, http.MethodDelete, http.MethodPut} {
+		if code, body := do(m, blocks, ""); code != http.StatusNoContent {
+			t.Fatalf("%s %s before accepting = %d %v", m, blocks, code, body)
+		}
+	}
+	if code, body := do(http.MethodPost, "/api/v1/me/contact-requests/"+uuid.NewV7().String()+"/respond", `{"answer":"decline"}`); code != http.StatusForbidden ||
+		body["code"] != "consent.terms_acceptance_required" {
+		t.Fatalf("respondMyContactRequest before accepting = %d %v", code, body)
+	}
 	if code, body := do(http.MethodGet, "/api/v1/me", ""); code != http.StatusOK ||
 		body["terms"].(map[string]any)["acceptance_required"] != true {
 		t.Fatalf("getMe = %d %v", code, body["terms"])

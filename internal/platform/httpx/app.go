@@ -171,7 +171,8 @@ func New(d Deps) (*App, error) {
 		"A signed-in user who has not accepted the terms of use in force for them (getMe terms.acceptance_required) gets " +
 		"403 consent.terms_acceptance_required from every operation marked " + ExtTermsGate + ": " + TermsGateEnforced +
 		" until acceptTerms records the current version; reads and the operations marked " + TermsGateExempt +
-		" (the acceptance, logout, account security, KVKK rights, consent acts and searches sent as POST) stay open. " +
+		" (the acceptance, logout, account security, KVKK rights, consent acts, notification preferences, company blocks " +
+		"and searches sent as POST) stay open. " +
 		"Search criteria that name a person (an e-mail address, a name, a user ID) are never taken in a query string: " +
 		"the POST …/search operations take them in the body."
 	cfg.Components.SecuritySchemes = map[string]*huma.SecurityScheme{

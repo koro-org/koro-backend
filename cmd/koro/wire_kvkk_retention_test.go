@@ -40,15 +40,16 @@ var (
 )
 
 // seedPolicies reads the retention_policies seed of the migrations
-// (000090 and the 000121/000123/000134/000142/000147/000148 additions and updates) as kvkk.Policy rows, none
+// (000090 and the 000121/000123/000134/000142/000147/000148/000161 additions and updates) as kvkk.Policy rows, none
 // legally approved (T-35).
 func seedPolicies(t *testing.T) map[string]kvkk.Policy {
 	t.Helper()
 	out := map[string]kvkk.Policy{}
 	for _, name := range []string{"000090_seed_retention_policies.up.sql", "000121_create_retention_purge_and_analytics_views.up.sql", "000123_refund_followups.up.sql",
 		"000134_seed_talent_collection_off_policy.up.sql", "000142_seed_talent_score_dropped_policy.up.sql",
-		"000147_iys_netgsm_events.up.sql",          // BE-110: the table and its policy
-		"000148_create_terms_acceptances.up.sql"} { // BE-118: the terms ledger and its policy
+		"000147_iys_netgsm_events.up.sql",                          // BE-110: the table and its policy
+		"000148_create_terms_acceptances.up.sql",                   // BE-118: the terms ledger and its policy
+		"000161_data_terms_acceptance_retention_10_years.up.sql"} { // BE-152 (Q-18): terms_acceptance 3 → 10 years
 		b, err := fs.ReadFile(migrations.FS, name)
 		if err != nil {
 			t.Fatal(err)
@@ -80,6 +81,22 @@ func seedPolicies(t *testing.T) map[string]kvkk.Policy {
 		t.Fatalf("read %d seeded retention policies, want 49", len(out))
 	}
 	return out
+}
+
+// TestTermsAcceptanceRetention_TenYears (BE-152, Q-18): the seeded period
+// of the terms of use acceptances is 10 years after the account erasure
+// (TBK m.146), hard delete, owned by consent — the value kvkk's sweep and
+// the KVKK inventory read.
+func TestTermsAcceptanceRetention_TenYears(t *testing.T) {
+	t.Parallel()
+	p, ok := seedPolicies(t)[consent.PolicyTermsAcceptance]
+	if !ok {
+		t.Fatal("no terms_acceptance policy in the seed")
+	}
+	if p.Period != (kvkk.Period{Years: 10}) || p.Anchor != "withdrawn_or_erased" || p.Method != "hard_delete" ||
+		p.OwnerModule != "consent" || p.Target != "terms_acceptances" || p.LegalApproved {
+		t.Fatalf("terms_acceptance = %+v, want 10 years after the erasure, hard delete, unapproved", p)
+	}
 }
 
 // parseInterval reads the interval literals of the seed ("7 days", "0").

@@ -18,7 +18,7 @@ const ErasureJob = "kvkk.erasure"
 // consent_proof, 6563 burden of proof; swept by BE-057; terms_acceptance,
 // the proof of the service contract, BE-118).
 const retainedReason = "consent proof (6563, KVKK): kept until 3 years after the last withdrawal or the account erasure (consent_proof); " +
-	"terms of use acceptances (contract proof): kept until 3 years after the account erasure (terms_acceptance)"
+	"terms of use acceptances (contract proof, TBK m.146): kept until 10 years after the account erasure (terms_acceptance)"
 
 // privacyProvider is the KVKK provider of consent (01 §3.3). The ledger is
 // proof the platform must keep: it is exported in full and never deleted

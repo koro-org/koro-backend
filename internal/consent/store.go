@@ -149,7 +149,7 @@ type TermsStore interface {
 	// (accepted_at, id): the status read and the KVKK export.
 	TermsAcceptancesOf(ctx context.Context, userID uuid.UUID) ([]TermsAcceptance, error)
 	// PurgeTerms deletes up to limit acceptances of the accounts erased
-	// before cutoff, oldest first (terms_acceptance, 3 years). dryRun
+	// before cutoff, oldest first (terms_acceptance, 10 years). dryRun
 	// counts every such row and deletes nothing. The GORM store goes
 	// through 000148's terms_acceptances_purge (the table is append-only):
 	// it never passes now − the policy's period and refuses a real purge of

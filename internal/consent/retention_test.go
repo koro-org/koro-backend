@@ -86,8 +86,8 @@ func TestSweeper_TermsAcceptance(t *testing.T) {
 		Channel: consent.ChannelWeb}); err != nil {
 		t.Fatal(err)
 	}
-	p := privacy.RetentionPolicy{Code: consent.PolicyTermsAcceptance, Retention: now.Sub(now.AddDate(-3, 0, 0)), LegalApproved: true}
-	if res, err := e.mod.Sweeper.Sweep(ctx, p, now.AddDate(10, 0, 0)); err != nil || res.Count != 0 || res.Table != "terms_acceptances" ||
+	p := privacy.RetentionPolicy{Code: consent.PolicyTermsAcceptance, Retention: now.Sub(now.AddDate(-10, 0, 0)), LegalApproved: true}
+	if res, err := e.mod.Sweeper.Sweep(ctx, p, now.AddDate(20, 0, 0)); err != nil || res.Count != 0 || res.Table != "terms_acceptances" ||
 		res.Method != privacy.MethodHardDelete {
 		t.Fatalf("sweep = %+v, %v", res, err)
 	}

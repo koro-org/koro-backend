@@ -26,7 +26,7 @@ var retentionSeedCodes = []string{
 	"talent_collection_off",     // 000134 (BE-087, T-324): scores and cohorts deleted while talent collection is off
 	"talent_score_dropped",      // 000142 (BE-101, T-342): scores and cohorts of the users the nightly run no longer scores
 	"iys_netgsm_event",          // 000147 (BE-110): the Netgsm İYS webhook items, 7 days
-	"terms_acceptance",          // 000148 (BE-118, Q-17): terms of use acceptances, 3 years after the erasure
+	"terms_acceptance",          // 000148 (BE-118, Q-17): terms of use acceptances, 10 years after the erasure (000161, BE-152, Q-18)
 }
 
 // TestSchema_RetentionSeedComplete (02 §24.2, T-35): exactly the 44 policies
@@ -72,7 +72,7 @@ func TestSchema_RetentionSeedComplete(t *testing.T) {
 		"talent_collection_off":        "00:00:00 created_at hard_delete talent.scores, talent.cohorts talent",
 		"talent_score_dropped":         "00:00:00 created_at hard_delete talent.scores, talent.cohorts talent",
 		"iys_netgsm_event":             "7 days created_at hard_delete iys_netgsm_events consent",
-		"terms_acceptance":             "3 years withdrawn_or_erased hard_delete terms_acceptances consent",
+		"terms_acceptance":             "10 years withdrawn_or_erased hard_delete terms_acceptances consent", // 000161 (Q-18)
 		"financial_records":            "10 years created_at hard_delete",
 		"dsr_record":                   "3 years closed_at hard_delete data_subject_requests kvkk",
 		"breach_record":                "5 years closed_at hard_delete breach_incidents kvkk",

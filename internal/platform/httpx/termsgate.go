@@ -65,8 +65,10 @@ const (
 // "METHOD /api/v1/path"; the row must match its operation exactly, or
 // registration panics). Each group says why; a new row needs a reason of
 // the same kind: the way out of the gate, leaving, account security, a
-// KVKK right or a read sent as POST. Everything else a user writes rests on
-// the contract.
+// KVKK right, a consent act, a communication preference or the user's own
+// protection (BE-152, Q-20) or a read sent as POST. Everything else a user
+// writes rests on the contract — staff, admin and DPO writes included
+// (Q-20: no separate exemption for staff).
 var termsExemptOperations = map[string]string{
 	// The way out of the gate: accepting the current version.
 	"acceptTerms": "POST " + APIPrefix + "/me/terms-acceptances",
@@ -109,6 +111,21 @@ var termsExemptOperations = map[string]string{
 	"updateMyPrivacy":             "PATCH " + APIPrefix + "/me/privacy",
 	"revokeMyAccessGrant":         "POST " + APIPrefix + "/me/access-grants/{grant_id}/revoke",
 	"unshareMyAccessGrantContact": "DELETE " + APIPrefix + "/me/access-grants/{grant_id}/contact",
+
+	// Communication preferences (BE-152, Q-20; Law 6563 m.8, Ticari
+	// İletişim Yön.): refusing a message is always possible, so the
+	// notification preferences (every category × channel; the security
+	// category stays locked on by notify, 422
+	// notify.security_preference_locked) never wait for a contract.
+	"putMyNotificationPreferences": "PUT " + APIPrefix + "/me/notification-preferences",
+
+	// Trust and safety (BE-152, Q-20): blocking a company's contact
+	// requests is the user protecting themselves; the block list (and
+	// undoing a mistaken block) is the user's own setting, like the
+	// preferences above. Answering a request or cancelling a registration
+	// stays gated: it is using the service, not refusing it.
+	"blockCompany":   "PUT " + APIPrefix + "/me/company-blocks/{org_id}",
+	"unblockCompany": "DELETE " + APIPrefix + "/me/company-blocks/{org_id}",
 
 	// Reads sent as POST (BE-128): a search whose criteria name a person
 	// (an e-mail address, a name, a user ID) takes them in the body so they

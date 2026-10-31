@@ -60,8 +60,8 @@ func TestSchema_TermsAcceptances(t *testing.T) {
 	}
 }
 
-// TestSchema_TermsAcceptancesPurge (terms_acceptance, 3 years after the
-// erasure): only the acceptances of accounts erased before the cut-off go,
+// TestSchema_TermsAcceptancesPurge (terms_acceptance, 10 years after the
+// erasure; 000161, BE-152, Q-18): only the acceptances of accounts erased before the cut-off go,
 // oldest first; a live account keeps every version; unapproved, only the
 // dry run works. The function is SECURITY DEFINER, owned by app_owner and
 // executable by app_rw only.
@@ -77,7 +77,7 @@ func TestSchema_TermsAcceptancesPurge(t *testing.T) {
 		sum    []byte
 	}{{live, v1, s1}, {live, v2, s2}, {gone, v1, s1}, {gone, v2, s2}, {recent, v1, s1}} {
 		w.exec(`INSERT INTO terms_acceptances (user_id, notice_version_id, text_sha256, channel, accepted_at)
-			VALUES ($1, $2, $3, 'web', now() - $4::interval)`, r.user, r.notice, r.sum, strconv.Itoa(10-i)+" years")
+			VALUES ($1, $2, $3, 'web', now() - $4::interval)`, r.user, r.notice, r.sum, strconv.Itoa(20-i)+" years")
 	}
 	owner := testutil.OwnerConn(t, w.d)
 	erase := func(id uuid.UUID, ago string) {
@@ -87,11 +87,11 @@ func TestSchema_TermsAcceptancesPurge(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	erase(gone, "4 years")
-	erase(recent, "1 year")
+	erase(gone, "11 years")
+	erase(recent, "9 years") // past the old 3 years, inside the 10
 
 	if n, state := w.purge("terms_acceptances_purge", 1000, true); state != "" || n != 2 {
-		t.Fatalf("dry run = %d, %q; want the 2 rows of the account erased 4 years ago", n, state)
+		t.Fatalf("dry run = %d, %q; want the 2 rows of the account erased 11 years ago", n, state)
 	}
 	if _, state := w.purge("terms_acceptances_purge", 1000, false); state != "55000" {
 		t.Fatalf("purge before the legal approval: SQLSTATE %q, want 55000", state)

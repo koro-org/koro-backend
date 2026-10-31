@@ -27,9 +27,14 @@ var errTestTermsRequired = problem.New(problem.Forbidden, "testonly.terms_requir
 type actorResolver struct{}
 
 func (actorResolver) Resolve(ctx context.Context, cred httpx.Credential) (context.Context, error) {
-	for _, u := range []uuid.UUID{pendingUser, acceptedUser, brokenUser} {
+	for _, u := range []uuid.UUID{pendingUser, acceptedUser, brokenUser, pendingStaff} {
 		if cred.TokenHash == sha256.Sum256([]byte(u.String())) {
-			return authz.WithActor(ctx, authz.Actor{Kind: authz.KindUser, UserID: u}), nil
+			a := authz.Actor{Kind: authz.KindUser, UserID: u}
+			if u == pendingStaff {
+				a.PlatformRoles = []authz.PlatformRole{authz.PlatformAdmin, authz.PlatformDPO, authz.PlatformFinanceAdmin}
+				a.MFAVerified = true
+			}
+			return authz.WithActor(ctx, a), nil
 		}
 	}
 	return nil, problem.ErrUnauthenticated
@@ -39,6 +44,7 @@ var (
 	pendingUser  = uuid.NewV7() // has not accepted the current terms
 	acceptedUser = uuid.NewV7()
 	brokenUser   = uuid.NewV7() // the checker fails for this one
+	pendingStaff = uuid.NewV7() // platform admin, DPO and finance admin who has not accepted the current terms
 )
 
 // termsChecker refuses pendingUser and counts its calls.
@@ -52,7 +58,7 @@ func (c *termsChecker) CheckTerms(_ context.Context, userID uuid.UUID) error {
 	c.calls = append(c.calls, userID)
 	c.mu.Unlock()
 	switch userID {
-	case pendingUser:
+	case pendingUser, pendingStaff:
 		return errTestTermsRequired
 	case brokenUser:
 		return errors.New("terms store unreachable")
@@ -154,6 +160,53 @@ func TestTermsGate_RefusesWritesUntilAccepted(t *testing.T) {
 	plain := newTermsApp(t, nil)
 	if rec := plain.do(t, http.MethodPost, "/api/v1/things", nil, bearer(pendingUser)); rec.Code != http.StatusOK {
 		t.Fatalf("write without the gate = %d", rec.Code)
+	}
+}
+
+// TestTermsGate_StaffIsNotExempt (BE-152, Q-20): staff are users too — a
+// platform admin, DPO or finance admin who has not accepted the current
+// terms is refused every protected write (their own and the org or admin
+// surfaces alike) and keeps only the exempt rows; no role opens the gate.
+func TestTermsGate_StaffIsNotExempt(t *testing.T) {
+	t.Parallel()
+	terms := &termsChecker{}
+	app := newTermsApp(t, terms)
+	org := "/api/v1/orgs/" + uuid.NewV7().String() + "/things"
+	for _, c := range []struct{ method, path string }{{http.MethodPost, "/api/v1/things"}, {http.MethodPatch, org}} {
+		m := problemBody(t, app.do(t, c.method, c.path, nil, bearer(pendingStaff)), http.StatusForbidden)
+		if m["code"] != "testonly.terms_required" {
+			t.Fatalf("%s %s by staff: code = %v", c.method, c.path, m["code"])
+		}
+	}
+	if rec := app.do(t, http.MethodPost, "/api/v1/me/terms-acceptances", nil, bearer(pendingStaff)); rec.Code != http.StatusOK {
+		t.Fatalf("acceptTerms by staff = %d %s", rec.Code, rec.Body)
+	}
+	if n := terms.count(); n != 2 {
+		t.Fatalf("checker asked %d times, want the two gated writes", n)
+	}
+}
+
+// TestTermsGate_Q20Exemptions (BE-152, Q-20): the notification preferences
+// (refusing a message is always possible, Law 6563 m.8) and the company
+// block list (the user's own protection) are on the exemption table with
+// their operations; answering a contact request and cancelling a
+// registration are not (using the service rests on the contract).
+func TestTermsGate_Q20Exemptions(t *testing.T) {
+	t.Parallel()
+	exempt := httpx.TermsExemptOperations()
+	for id, want := range map[string]string{
+		"putMyNotificationPreferences": "PUT /api/v1/me/notification-preferences",
+		"blockCompany":                 "PUT /api/v1/me/company-blocks/{org_id}",
+		"unblockCompany":               "DELETE /api/v1/me/company-blocks/{org_id}",
+	} {
+		if exempt[id] != want {
+			t.Errorf("exemption %s = %q, want %q", id, exempt[id], want)
+		}
+	}
+	for _, id := range []string{"respondMyContactRequest", "cancelMyRegistration", "registerMyPushToken", "muteOrg", "markMyNotificationRead"} {
+		if row, ok := exempt[id]; ok {
+			t.Errorf("%s is exempt (%s); it rests on the contract", id, row)
+		}
 	}
 }
 

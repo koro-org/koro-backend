@@ -16,6 +16,7 @@ import (
 
 	"koro/internal/platform/clock"
 	"koro/internal/platform/config"
+	"koro/internal/platform/errtrack"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/outbox"
@@ -42,6 +43,12 @@ func runWorker(ctx context.Context, stop context.CancelFunc, environ map[string]
 	log := obs.NewLogger(stdout, obs.LoggerOptions{
 		Level: cfg.LogLevel, Format: cfg.LogFormat, Service: "koro-worker", Env: cfg.Env, Version: version,
 	})
+	log, errs, err := setupErrorTracking(ctx, cfg.ErrTrack, cfg.Common, "koro-worker", log)
+	if err != nil {
+		return err
+	}
+	defer errs.Flush(errorFlushTimeout)
+	defer errtrack.ReportPanic(errs, errorFlushTimeout)
 	tel, err := setupTelemetry(ctx, cfg.Obs, "koro-worker", cfg.Env, log)
 	if err != nil {
 		return err

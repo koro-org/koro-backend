@@ -16,7 +16,10 @@ import (
 // the account identity anonymises last, so they no longer name their sender.
 const privacyRetainedReason = "contact_requests sent and conversation_messages written for a company are the company's " +
 	"record (02 §14.1, §14.4); sender_user_id references the anonymised account; deleted with their retention " +
-	"(contact_request_closed: 12 months after closing; conversation_closed: 12 months after the conversation closed or went quiet)"
+	"(contact_request_closed: 12 months after closing; conversation_closed: 12 months after the conversation closed or went quiet). " +
+	"Messages kept with a content report (message_report_messages, BE-162b) are the moderation evidence of that report " +
+	"(Q-43; KVKK m.5/2-e): they go with the report (content_report: 12 months after its resolution), or with the " +
+	"reporter's own erasure"
 
 // privacyProvider is the KVKK provider of messaging (01 §3.3): the requests
 // a user received (02 §14.1: hard delete with the account), the requests a
@@ -24,6 +27,17 @@ const privacyRetainedReason = "contact_requests sent and conversation_messages w
 // hard delete), the student's conversations with every message (hard
 // delete), the messages a company member wrote (exported, kept) and the
 // user's read/mute states (hard delete; BE-162).
+//
+// Message reports (BE-162b, Q-43): message_reports and
+// message_report_messages are the evidence of a content report; they go
+// with it (the feed's provider erases the reporter's reports, CASCADE; the
+// content_report retention) and are kept otherwise (counted as retained:
+// the messages the user wrote). They are not exported: to the reporter they
+// are copies of messages the conversation's export already holds while it
+// lasts; to the reported party they would reveal the report and, in a
+// conversation of two, its reporter (03 Y7: the reported side never learns
+// who reported; the feed keeps a reported post's copy out of every export
+// for the same reason, BE-160).
 type privacyProvider struct{ s *service }
 
 var _ privacy.Provider = privacyProvider{}
@@ -194,7 +208,11 @@ func (p privacyProvider) Erase(ctx context.Context, userID uuid.UUID) (privacy.E
 		if err != nil {
 			return err
 		}
-		res.Deleted, res.Retained = c+n+b+u, len(sent)+len(written)
+		kept, err := st.CountReportedMessagesBy(ctx, userID)
+		if err != nil {
+			return err
+		}
+		res.Deleted, res.Retained = c+n+b+u, len(sent)+len(written)+kept
 		return nil
 	})
 	if err != nil {

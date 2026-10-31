@@ -15,11 +15,15 @@ type world struct {
 	org   func(t *testing.T) uuid.UUID
 	user  func(t *testing.T) uuid.UUID
 	usage func(t *testing.T, org uuid.UUID) uuid.UUID
+	// report files reporter's content report of a conversation message (the
+	// feed's row a message report's copy points at; BE-162b).
+	report func(t *testing.T, reporter, message uuid.UUID) uuid.UUID
 }
 
 func memWorld() world {
 	id := func(*testing.T) uuid.UUID { return uuid.NewV7() }
-	return world{org: id, user: id, usage: func(*testing.T, uuid.UUID) uuid.UUID { return uuid.NewV7() }}
+	return world{org: id, user: id, usage: func(*testing.T, uuid.UUID) uuid.UUID { return uuid.NewV7() },
+		report: func(*testing.T, uuid.UUID, uuid.UUID) uuid.UUID { return uuid.NewV7() }}
 }
 
 func TestStore_Contract_Mem(t *testing.T) {

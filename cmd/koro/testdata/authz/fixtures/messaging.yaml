@@ -4,8 +4,15 @@
 # (the in-memory store has no FK). The persona student is verified, adult and has a profile (students'
 # experience_student), so accepting it gives company_a level 3 access for real. conversation_student_a (BE-162) is
 # the open conversation of company_a's accepted request to the persona student (an accepted request of its own,
-# authztest.ID("conversation_student_a_request"), sent by company_member).
+# authztest.ID("conversation_student_a_request"), sent by company_member). BE-162b: msg_company_a and
+# msg_student_a are a message of each side in it (the other side reports them: reportMy… / reportOrg…);
+# msg_reported_a is a company message the student already reported: reported_msg_a is that open report in the
+# feed's queue (target_type message) with its kept copy (adminGetReportedMessages). Fixtures run in name order.
 version: 1
 fixtures:
   request_student_a: { kind: request, company: company_a, sender: company_member, student: student }
   conversation_student_a: { kind: conversation, company: company_a, sender: company_member, student: student }
+  msg_company_a: { kind: message, conversation: conversation_student_a, side: company, sender: company_member }
+  msg_reported_a: { kind: message, conversation: conversation_student_a, side: company, sender: company_admin }
+  msg_student_a: { kind: message, conversation: conversation_student_a, side: student, sender: student }
+  reported_msg_a: { kind: message_report, conversation: conversation_student_a, message: msg_reported_a, reporter: student }

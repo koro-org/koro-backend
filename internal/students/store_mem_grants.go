@@ -93,6 +93,20 @@ func (s *MemStore) ActiveGrant(_ context.Context, studentID, companyOrgID uuid.U
 	})
 }
 
+// ActiveGrantsAmong implements Store.
+func (s *MemStore) ActiveGrantsAmong(_ context.Context, companyOrgID uuid.UUID, studentIDs []uuid.UUID) ([]AccessGrant, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []AccessGrant
+	for _, g := range s.grants {
+		if g.CompanyOrgID == companyOrgID && g.Active() && slices.Contains(studentIDs, g.StudentUserID) {
+			out = append(out, g)
+		}
+	}
+	slices.SortFunc(out, func(a, b AccessGrant) int { return newestFirst(b, a) })
+	return out, nil
+}
+
 // GetGrant implements Store.
 func (s *MemStore) GetGrant(_ context.Context, studentID, id uuid.UUID) (AccessGrant, error) {
 	return s.findGrant(func(g AccessGrant) bool { return g.ID == id && g.StudentUserID == studentID })

@@ -27,6 +27,10 @@ type grantStore interface {
 	// ActiveGrant returns the oldest active (open, not suspended) grant of
 	// companyOrgID on studentID or ErrNotFound.
 	ActiveGrant(ctx context.Context, studentID, companyOrgID uuid.UUID) (AccessGrant, error)
+	// ActiveGrantsAmong returns the active (open, not suspended) grants of
+	// companyOrgID on the students among studentIDs (BE-162b: the names of
+	// a company's conversation list).
+	ActiveGrantsAmong(ctx context.Context, companyOrgID uuid.UUID, studentIDs []uuid.UUID) ([]AccessGrant, error)
 	// GetGrant returns studentID's grant id (whatever its state) or
 	// ErrNotFound (also when id belongs to another student).
 	GetGrant(ctx context.Context, studentID, id uuid.UUID) (AccessGrant, error)

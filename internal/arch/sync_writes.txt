@@ -147,3 +147,10 @@ talent    -> kvkk.DestructionRecorder.Record
 # that accepts the request and gives the grant, so a sharing that cannot be recorded (a text that is not the current
 # one) never leaves an acceptance the student did not choose, nor a share without its consent record.
 messaging -> students.ContactSharing.ShareContactWithCompany
+
+# BE-162b (user decision Q-43, T-405; rationale for 01 §6.3 in the BE-162b ticket's doc patch): "Mesaj şikâyeti".
+# A party's report of a conversation message is a content report of the feed's moderation queue
+# (target_type message), written in the messaging transaction that keeps the reported message and the
+# messages before it (message_reports, message_report_messages; FK to the report, ON DELETE CASCADE), so a
+# report never exists without the messages it is about nor the copy without its report.
+messaging -> feed.MessageReports.FileMessageReport

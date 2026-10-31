@@ -117,6 +117,7 @@ type conversationRowScan struct {
 	LmSenderUserID    *uuid.UUID `gorm:"type:uuid;column:lm_sender_user_id"`
 	LmBody            *string    `gorm:"column:lm_body"`
 	LmCreatedAt       *time.Time `gorm:"column:lm_created_at"`
+	Subject           *string    `gorm:"column:subject"`
 }
 
 // ConversationRows implements Store: unread counts the other side's
@@ -161,8 +162,9 @@ func (s gormStore) ConversationRows(ctx context.Context, q ConversationQuery) ([
 		(SELECT count(*) FROM conversation_messages m WHERE m.conversation_id = c.id AND m.sender_side <> @side
 		   AND (st.last_read_message_id IS NULL OR m.id > st.last_read_message_id)) AS unread,
 		lm.id AS lm_id, lm.sender_side AS lm_sender_side, lm.sender_user_id AS lm_sender_user_id, lm.body AS lm_body,
-		lm.created_at AS lm_created_at
+		lm.created_at AS lm_created_at, cr.subject
 		FROM conversations c
+		LEFT JOIN contact_requests cr ON cr.id = c.contact_request_id
 		LEFT JOIN conversation_user_states st ON st.conversation_id = c.id AND st.user_id = @viewer
 		LEFT JOIN LATERAL (SELECT id, sender_side, sender_user_id, body, created_at FROM conversation_messages
 		  WHERE conversation_id = c.id ORDER BY id DESC LIMIT 1) lm ON true
@@ -172,11 +174,35 @@ func (s gormStore) ConversationRows(ctx context.Context, q ConversationQuery) ([
 	}
 	out := make([]ConversationRow, len(scan))
 	for i, r := range scan {
-		out[i] = ConversationRow{Conversation: r.Conversation, Muted: r.Muted, LastReadMessageID: r.LastReadMessageID, Unread: r.Unread}
+		out[i] = ConversationRow{Conversation: r.Conversation, Muted: r.Muted, LastReadMessageID: r.LastReadMessageID, Unread: r.Unread,
+			Subject: r.Subject}
 		if r.LmID != nil && r.LmSenderSide != nil && r.LmSenderUserID != nil && r.LmBody != nil && r.LmCreatedAt != nil {
 			out[i].Last = &Message{ID: *r.LmID, ConversationID: r.ID, SenderSide: Side(*r.LmSenderSide),
 				SenderUserID: *r.LmSenderUserID, Body: *r.LmBody, CreatedAt: *r.LmCreatedAt}
 		}
+	}
+	return out, nil
+}
+
+// ConversationsOfRequests implements Store.
+//
+// cross-org: the caller read the requests through its org or its student
+// first; the conversations are those requests' own.
+func (s gormStore) ConversationsOfRequests(ctx context.Context, requestIDs []uuid.UUID) (map[uuid.UUID]uuid.UUID, error) {
+	out := map[uuid.UUID]uuid.UUID{}
+	if len(requestIDs) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		ID               uuid.UUID `gorm:"type:uuid;column:id"`
+		ContactRequestID uuid.UUID `gorm:"type:uuid;column:contact_request_id"`
+	}
+	if err := db.Conn(ctx, s.orm).Raw(`SELECT id, contact_request_id FROM conversations WHERE contact_request_id = ANY( @ids)`,
+		map[string]any{"ids": db.UUIDArray(requestIDs)}).Scan(&rows).Error; err != nil {
+		return nil, wrap("conversations of requests", err)
+	}
+	for _, r := range rows {
+		out[r.ContactRequestID] = r.ID
 	}
 	return out, nil
 }

@@ -132,6 +132,12 @@ func (m *MemStore) ConversationRows(_ context.Context, q ConversationQuery) ([]C
 	out := make([]ConversationRow, len(rows))
 	for i, c := range rows {
 		r := ConversationRow{Conversation: cloneConversation(c)}
+		if c.ContactRequestID != nil {
+			if req, ok := m.requests[*c.ContactRequestID]; ok {
+				subject := req.Subject
+				r.Subject = &subject
+			}
+		}
 		if st, ok := m.states[[2]uuid.UUID{c.ID, q.Viewer}]; ok {
 			st = cloneState(st)
 			r.Muted, r.LastReadMessageID = st.MutedAt != nil, st.LastReadMessageID
@@ -149,6 +155,19 @@ func (m *MemStore) ConversationRows(_ context.Context, q ConversationQuery) ([]C
 			}
 		}
 		out[i] = r
+	}
+	return out, nil
+}
+
+// ConversationsOfRequests implements Store.
+func (m *MemStore) ConversationsOfRequests(_ context.Context, requestIDs []uuid.UUID) (map[uuid.UUID]uuid.UUID, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := map[uuid.UUID]uuid.UUID{}
+	for _, c := range m.convs {
+		if c.ContactRequestID != nil && slices.Contains(requestIDs, *c.ContactRequestID) {
+			out[*c.ContactRequestID] = c.ID
+		}
 	}
 	return out, nil
 }

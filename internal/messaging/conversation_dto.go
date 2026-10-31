@@ -28,6 +28,8 @@ type ConversationDTO struct {
 	ContactRequestID string             `json:"contact_request_id,omitempty" format:"uuid" doc:"The accepted contact request it started from (absent once that request's retention deleted it)"`
 	Company          *ContactCompanyDTO `json:"company,omitempty" doc:"The student's view: the company"`
 	StudentUserID    string             `json:"student_user_id,omitempty" format:"uuid" doc:"The company's view: the student (getCompanyStudentProfile while the level 3 grant lasts)"`
+	StudentName      *StudentNameDTO    `json:"student_name,omitempty" doc:"The company's view (BE-162b): the student's name while the company sees the student at level 3 (the accepted request's grant, not revoked or suspended); absent otherwise"`
+	Subject          string             `json:"subject,omitempty" doc:"The subject of the contact request it started from (absent once that request's retention deleted it)"`
 	Status           string             `json:"status" enum:"open,closed"`
 	ClosedBy         string             `json:"closed_by,omitempty" enum:"student,company" doc:"Who closed it"`
 	ClosedAt         *time.Time         `json:"closed_at,omitempty"`
@@ -38,6 +40,13 @@ type ConversationDTO struct {
 	LastMessage      *MessageDTO        `json:"last_message,omitempty"`
 	LastActivityAt   time.Time          `json:"last_activity_at" doc:"The last message or the closing moment"`
 	CreatedAt        time.Time          `json:"created_at"`
+}
+
+// StudentNameDTO is a student's name as a company sees it at level 3
+// (StudentL3CardDTO's first_name and last_name; BE-162b).
+type StudentNameDTO struct {
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
 }
 
 // ConversationList is a page of a conversation list, last activity first.
@@ -71,8 +80,14 @@ func ToConversationDTO(v ConversationView, callerID string) ConversationDTO {
 	if c.ClosedBy != nil {
 		d.ClosedBy = string(*c.ClosedBy)
 	}
+	if v.Subject != nil {
+		d.Subject = *v.Subject
+	}
 	if v.Side == SideCompany {
 		d.StudentUserID = c.StudentUserID.String()
+		if n := v.StudentName; n != nil {
+			d.StudentName = &StudentNameDTO{FirstName: n.FirstName, LastName: n.LastName}
+		}
 	} else {
 		card := companyCard(v.Company, c.OrgID.String())
 		d.Company = &card

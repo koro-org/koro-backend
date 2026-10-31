@@ -106,11 +106,14 @@ type ConversationQuery struct {
 }
 
 // ConversationRow is a conversation as one viewer sees it in the store:
-// the row, the viewer's state and the newest message.
+// the row, the viewer's state, the newest message and the subject of the
+// contact request it started from (nil once the request's retention
+// deleted it; BE-162b).
 type ConversationRow struct {
 	Conversation      Conversation
 	Muted             bool
 	LastReadMessageID *uuid.UUID
 	Unread            int
 	Last              *Message
+	Subject           *string
 }

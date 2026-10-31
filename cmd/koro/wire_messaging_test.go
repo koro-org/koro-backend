@@ -2,8 +2,12 @@ package main
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
+	"uuid"
 
 	"koro/internal/messaging"
 	"koro/internal/platform/clock"
@@ -105,6 +109,10 @@ func TestWire_MessagingProvidesServiceTasksAndPrivacy(t *testing.T) {
 		{"POST", "/api/v1/me/conversations/{conversation_id}/close", "closeMyConversation", "self"},
 		{"PUT", "/api/v1/me/conversations/{conversation_id}/mute", "muteMyConversation", "self"},
 		{"DELETE", "/api/v1/me/conversations/{conversation_id}/mute", "unmuteMyConversation", "self"},
+		// BE-162b: the message reports.
+		{"POST", "/api/v1/orgs/{org_id}/conversations/{conversation_id}/messages/{message_id}/report", "reportOrgConversationMessage", "org"},
+		{"POST", "/api/v1/me/conversations/{conversation_id}/messages/{message_id}/report", "reportMyConversationMessage", "self"},
+		{"GET", "/api/v1/admin/reports/{report_id}/messages", "adminGetReportedMessages", "admin"},
 	} {
 		p := paths[tc.path]
 		if p == nil {
@@ -138,5 +146,45 @@ func TestWire_MessagingProvidesServiceTasksAndPrivacy(t *testing.T) {
 		if rl := fmt.Sprint(paths[path].Post.Extensions["x-koro-rate-limit"]); rl != "message_send" {
 			t.Fatalf("%s rate class = %s, want message_send (BE-162)", path, rl)
 		}
+	}
+}
+
+// TestWire_MessagingLiveAndReports (BE-162b): the conversations' two
+// WebSockets are gin routes on the events hub (outside OpenAPI; an
+// anonymous handshake is 401 problem+json, a malformed org of the company
+// route too), and the moderators' read takes the break_glass rate class.
+func TestWire_MessagingLiveAndReports(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	if c.events.hub == nil {
+		t.Fatal("no realtime hub")
+	}
+	app, err := httpx.New(httpx.Deps{Log: obs.Discard(), Actors: c.actors})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.registerRoutes(app.V1)
+	paths := app.API.OpenAPI().Paths
+	for _, p := range []string{"/api/v1/me/conversations/live", "/api/v1/orgs/{org_id}/conversations/live"} {
+		if _, ok := paths[p]; ok {
+			t.Fatalf("the WebSocket %s must stay out of OpenAPI", p)
+		}
+	}
+	for _, path := range []string{"/api/v1/me/conversations/live", "/api/v1/orgs/" + uuid.NewV7().String() + "/conversations/live"} {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+		req.Header.Set("Connection", "Upgrade")
+		req.Header.Set("Upgrade", "websocket")
+		rec := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized || !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/problem+json") {
+			t.Fatalf("anonymous handshake %s: %d %s", path, rec.Code, rec.Header().Get("Content-Type"))
+		}
+	}
+	read := paths["/api/v1/admin/reports/{report_id}/messages"].Get
+	if rl := fmt.Sprint(read.Extensions["x-koro-rate-limit"]); rl != "break_glass" {
+		t.Fatalf("adminGetReportedMessages rate class = %s, want break_glass", rl)
 	}
 }

@@ -29,6 +29,10 @@ type conversationStore interface {
 	// ConversationRows returns the conversations of q's scope as q.Viewer
 	// sees them, last activity first.
 	ConversationRows(ctx context.Context, q ConversationQuery) ([]ConversationRow, error)
+	// ConversationsOfRequests maps the requests among requestIDs that
+	// started a conversation to it (BE-162b: the request DTOs'
+	// conversation_id); the others are absent.
+	ConversationsOfRequests(ctx context.Context, requestIDs []uuid.UUID) (map[uuid.UUID]uuid.UUID, error)
 	// OpenConversationsOf row-locks the open conversations of the company
 	// with the student (a block closes them).
 	OpenConversationsOf(ctx context.Context, orgID, studentID uuid.UUID) ([]Conversation, error)

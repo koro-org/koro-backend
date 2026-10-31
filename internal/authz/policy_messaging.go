@@ -29,7 +29,9 @@ const (
 //	messaging.conversation.list_org          cmm S, cma S (BE-162)
 //	messaging.conversation.list_own          O
 //	messaging.conversation.read, .mark_read, company path: cmm S, cma S;
-//	.close, .mute, messaging.message.send    student path: O
+//	.close, .mute, messaging.message.send,   student path: O
+//	messaging.message.report (BE-162b)
+//	messaging.message_report.read            mod, pad on the admin surface (BE-162b, Q-43)
 //
 // The company path is the org management surface (03 §3.6, §7.6): the
 // recruiter (cmm) and the company_admin/owner (cma, k-mfa) of the company
@@ -58,6 +60,13 @@ const (
 // exactly those of the accepted request; whether a message may go (an open
 // conversation, an active company, the company's unanswered limit) is the
 // service's.
+//
+// Message reports (BE-162b, Q-43): a party reports a message of the other
+// side on its own path (messaging.message.report, the cells of
+// messaging.message.send; which message may be reported is the
+// service's); the moderators (mod, pad: the feed's report readers, k-mfa)
+// read the reported messages on the admin surface, each read with a
+// justification (the service's 422 and audit record, as the IBAN reveals).
 func messagingPolicy() Policy {
 	return Policy{
 		Types: map[string][]string{TypeContactBlock: nil, TypeConversation: {AttrStatus}},
@@ -82,7 +91,7 @@ func messagingPolicy() Policy {
 			case MessagingConversationListOwn:
 				return r.Type == TypeConversation && r.OrgID == nil && a.Owns(r)
 			case MessagingConversationRead, MessagingConversationMarkRead, MessagingConversationClose,
-				MessagingConversationMute, MessagingMessageSend:
+				MessagingConversationMute, MessagingMessageSend, MessagingMessageReport:
 				if r.Type != TypeConversation {
 					return false
 				}
@@ -90,6 +99,8 @@ func messagingPolicy() Policy {
 					return OrgSurfaceVisible(a, r.OrgID)
 				}
 				return a.Owns(r)
+			case MessagingMessageReportRead:
+				return r.Type == TypeAdminSurface && AdminSurfaceVisible(a)
 			}
 			return false
 		},
@@ -108,11 +119,13 @@ func messagingPolicy() Policy {
 			case MessagingConversationListOrg:
 				return messagingCompanyGrants(a, r.OrgID)
 			case MessagingConversationRead, MessagingConversationMarkRead, MessagingConversationClose,
-				MessagingConversationMute, MessagingMessageSend:
+				MessagingConversationMute, MessagingMessageSend, MessagingMessageReport:
 				if r.OrgID != nil {
 					return messagingCompanyGrants(a, r.OrgID)
 				}
 				return []Grant{{Role: RoleSelf}}
+			case MessagingMessageReportRead:
+				return moderators
 			}
 			return nil
 		},

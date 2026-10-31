@@ -54,14 +54,18 @@ func registerModeration(api huma.API, h handler) {
 		Summary: "Get a content report",
 		Description: "The report with a summary of its target (the post or organization, its trust level, its open reports). " +
 			"A post target carries its images (media) and the images edits took off it after its publication " +
-			"(dropped_media, BE-158), each with a 5-minute URL.",
+			"(dropped_media, BE-158), each with a 5-minute URL. A message report (target_type message, BE-162b) has no " +
+			"target here: its conversation's messages are read one report at a time with a justification " +
+			"(adminGetReportedMessages).",
 	}, op.Meta{Action: string(authz.FeedReportRead), Surface: op.SurfaceAdmin}, h.getReport)
 
 	op.Register(api, "feed", huma.Operation{
 		OperationID: "adminResolveReport", Method: http.MethodPost, Path: "/admin/reports/{report_id}/resolve",
 		Summary: "Take, action or dismiss a report",
 		Description: "in_review takes the report (assign_to_me assigns it to the caller); actioned needs a moderation " +
-			"action taken with the report (409 feed.moderation_action_required); dismissed closes it. A resolved " +
+			"action taken with the report (409 feed.moderation_action_required) or, for a message report (BE-162b: " +
+			"the measure is the company's or the user's suspension, or the conversation closed), a resolution_note " +
+			"saying what was done (422); dismissed closes it. A resolved " +
 			"report takes no other change (409 feed.invalid_state). Nobody resolves their own report. The reporter " +
 			"is told the report was handled.",
 	}, op.Meta{Action: string(authz.FeedReportResolve), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional},
@@ -177,8 +181,15 @@ func (h handler) createTargetedPost(ctx context.Context, in *createTargetedInput
 type ReportBody struct {
 	TargetType string `json:"target_type" enum:"post,org"`
 	TargetID   string `json:"target_id" doc:"A post or organization ID"`
-	Reason     string `json:"reason" enum:"spam,harassment,hate,sexual,scam_or_misleading_job,copyright,privacy,other"`
-	Details    string `json:"details,omitempty" maxLength:"1000"`
+	ReportReasonBody
+}
+
+// ReportReasonBody is why a user reports: the reason and the optional
+// details, the same for every report (createContentReport; messaging's
+// report{Org,My}ConversationMessage, BE-162b).
+type ReportReasonBody struct {
+	Reason  string `json:"reason" enum:"spam,harassment,hate,sexual,scam_or_misleading_job,copyright,privacy,other"`
+	Details string `json:"details,omitempty" maxLength:"1000"`
 }
 
 type createReportInput struct {
@@ -225,7 +236,7 @@ type listReportsInput struct {
 	page.Params
 	Status     []string `query:"status,explode" maxItems:"4" enum:"open,in_review,actioned,dismissed" doc:"Statuses (repeat the parameter)"`
 	Reason     string   `query:"reason" enum:"spam,harassment,hate,sexual,scam_or_misleading_job,copyright,privacy,other"`
-	TargetType string   `query:"target_type" enum:"post,org"`
+	TargetType string   `query:"target_type" enum:"post,org,message"`
 	Sort       string   `query:"sort" enum:"created_at,-created_at" doc:"created_at (default, oldest first) or -created_at"`
 }
 

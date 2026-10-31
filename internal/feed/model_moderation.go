@@ -7,17 +7,29 @@ import (
 )
 
 // TargetType is content_reports.target_type and moderation_actions.target_type
-// (02 §12.9–12.10): a post or an org.
+// (02 §12.9–12.10): a post or an org; a report also targets a conversation
+// message (BE-162b, 000174), never a moderation action.
 type TargetType string
 
-// Report and moderation targets.
+// Report and moderation targets. TargetMessage is a report's only: a party
+// of a conversation reports a message of the other side through messaging
+// (FileMessageReport), which keeps the reported messages; the measure a
+// moderator takes is another module's (the company's or the user's
+// suspension, the conversation's closing), so a message report is actioned
+// with a resolution note instead of a moderation action.
 const (
-	TargetPost TargetType = "post"
-	TargetOrg  TargetType = "org"
+	TargetPost    TargetType = "post"
+	TargetOrg     TargetType = "org"
+	TargetMessage TargetType = "message"
 )
 
-// Valid reports whether t is a target type of the CHECK constraints.
+// Valid reports whether t is a target type of moderation_actions (post,
+// org).
 func (t TargetType) Valid() bool { return t == TargetPost || t == TargetOrg }
+
+// ReportValid reports whether t is a target type of content_reports (post,
+// org, message; content_reports_target_type_chk).
+func (t TargetType) ReportValid() bool { return t.Valid() || t == TargetMessage }
 
 // ReportReason is content_reports.reason (02 §12.9; R-003 §1.5.3).
 type ReportReason string

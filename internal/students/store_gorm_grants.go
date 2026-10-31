@@ -95,6 +95,21 @@ func (s gormStore) ActiveGrant(ctx context.Context, studentID, companyOrgID uuid
 	return rows[0], nil
 }
 
+// ActiveGrantsAmong implements Store.
+func (s gormStore) ActiveGrantsAmong(ctx context.Context, companyOrgID uuid.UUID, studentIDs []uuid.UUID) ([]AccessGrant, error) {
+	if len(studentIDs) == 0 {
+		return nil, nil
+	}
+	var rows []AccessGrant
+	err := db.Conn(ctx, s.orm).Raw(`SELECT `+grantCols+` FROM profile_access_grants
+		WHERE company_org_id = @org_id AND student_user_id = ANY( @students) AND revoked_at IS NULL AND suspended_at IS NULL
+		ORDER BY granted_at, id`, map[string]any{"org_id": companyOrgID, "students": db.UUIDArray(studentIDs)}).Scan(&rows).Error
+	if err != nil {
+		return nil, wrap("active grants among", err)
+	}
+	return rows, nil
+}
+
 // GetGrant implements Store.
 //
 // cross-org: the student's own grant, addressed by its student (IDOR).

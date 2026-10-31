@@ -128,6 +128,9 @@ type CompanyView struct {
 	Request ContactRequest
 	AnonID  string
 	Status  Status
+	// ConversationID is the conversation the acceptance opened (BE-162b);
+	// nil for a request that was not accepted.
+	ConversationID *uuid.UUID
 }
 
 // CompanyPage is a page of listSentContactRequests.
@@ -145,10 +148,11 @@ type PostRef struct {
 
 // StudentView is a request as its student sees it (ContactRequestStudentDTO).
 type StudentView struct {
-	Request ContactRequest
-	Company orgs.OrgSummary // zero when the org is gone
-	Post    *PostRef
-	Status  Status
+	Request        ContactRequest
+	Company        orgs.OrgSummary // zero when the org is gone
+	Post           *PostRef
+	Status         Status
+	ConversationID *uuid.UUID // the conversation the acceptance opened (BE-162b)
 }
 
 // StudentPage is a page of listMyContactRequests.
@@ -215,11 +219,14 @@ type Service interface {
 
 	// Conversations are the conversations of accepted requests (BE-162).
 	Conversations
+	// MessageReporting is the report of a conversation message and the
+	// moderators' read of it (BE-162b, Q-43).
+	MessageReporting
 }
 
 // Deps are the dependencies of the messaging module. Resolve, Posts,
-// Sender, Users and LinkBaseURL are optional (see their fields); the others
-// are required.
+// Sender, Users, LinkBaseURL, Reports, Names and Live are optional (see
+// their fields); the others are required.
 type Deps struct {
 	Store       Store
 	Tx          db.TxManager
@@ -252,6 +259,15 @@ type Deps struct {
 	// LinkBaseURL is the web origin of the e-mail's link to the request
 	// (IDENTITY_LINK_BASE_URL); required with Users.
 	LinkBaseURL string
+	// Reports is the feed's moderation queue (BE-162b). nil → a message
+	// report is 503.
+	Reports Reports
+	// Names are students' level 3 names (BE-162b). nil → the company's
+	// conversation list names no student.
+	Names StudentNames
+	// Live publishes the conversations' realtime signal (the WebSocket hub;
+	// BE-162b). nil → no signal (clients reload on their own).
+	Live LivePublisher
 }
 
 func (d Deps) validate() error {

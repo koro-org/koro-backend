@@ -331,6 +331,31 @@ func (s *service) Has(ctx context.Context, studentID, companyOrgID uuid.UUID) (b
 	return verified[studentID], nil
 }
 
+// LevelThreeNames implements AccessGrants: the company's active grants on
+// the students, then the level 3 sources (cardSources: an active, adult,
+// verified account with a profile), as queryCompanyGrantedStudents builds
+// its cards.
+func (s *service) LevelThreeNames(ctx context.Context, companyOrgID uuid.UUID, studentIDs []uuid.UUID) (map[uuid.UUID]GrantedName, error) {
+	out := map[uuid.UUID]GrantedName{}
+	if len(studentIDs) == 0 {
+		return out, nil
+	}
+	rows, err := s.grants().ActiveGrantsAmong(ctx, companyOrgID, studentIDs)
+	if err != nil {
+		return nil, err
+	}
+	srcs, err := s.cardSources(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
+	for _, g := range rows {
+		if src, ok := srcs[g.StudentUserID]; ok && src.grantFor(companyOrgID, g.view()) {
+			out[g.StudentUserID] = GrantedName{FirstName: src.FirstName, LastName: src.LastName}
+		}
+	}
+	return out, nil
+}
+
 // auditRevocations writes one record per revoked grant (no free text: the
 // reason stays in the row).
 func (s *service) auditRevocations(ctx context.Context, by authz.Actor, revoked []AccessGrant, kind RevokedBy) error {

@@ -23,6 +23,7 @@ type ContactRequestCompanyDTO struct {
 	ExpiresAt         time.Time  `json:"expires_at"`
 	RespondedAt       *time.Time `json:"responded_at,omitempty" doc:"When the student accepted or declined"`
 	CreatedAt         time.Time  `json:"created_at"`
+	ConversationID    string     `json:"conversation_id,omitempty" format:"uuid" doc:"Only once accepted: the conversation the acceptance opened (getOrgConversation; BE-162b)"`
 }
 
 // ContactRequestCompanyList is a page of listSentContactRequests.
@@ -58,6 +59,7 @@ type ContactRequestStudentDTO struct {
 	RespondedAt     *time.Time                 `json:"responded_at,omitempty"`
 	CreatedAt       time.Time                  `json:"created_at"`
 	OpportunityPost *ContactOpportunityPostDTO `json:"opportunity_post,omitempty"`
+	ConversationID  string                     `json:"conversation_id,omitempty" format:"uuid" doc:"Only once accepted: the conversation the acceptance opened (getMyConversation; BE-162b)"`
 }
 
 // ContactRequestStudentList is a page of listMyContactRequests.
@@ -91,6 +93,9 @@ func ToCompanyDTO(v CompanyView) ContactRequestCompanyDTO {
 	if v.Status == StatusAccepted {
 		d.StudentUserID = r.StudentUserID.String()
 	}
+	if v.ConversationID != nil {
+		d.ConversationID = v.ConversationID.String()
+	}
 	if r.OpportunityPostID != nil {
 		d.OpportunityPostID = r.OpportunityPostID.String()
 	}
@@ -116,6 +121,9 @@ func ToStudentDTO(v StudentView) ContactRequestStudentDTO {
 	}
 	if v.Post != nil {
 		d.OpportunityPost = &ContactOpportunityPostDTO{PostID: v.Post.ID.String(), Title: v.Post.Title}
+	}
+	if v.ConversationID != nil {
+		d.ConversationID = v.ConversationID.String()
 	}
 	return d
 }

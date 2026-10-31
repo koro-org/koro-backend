@@ -30,11 +30,17 @@ import (
 // status and name, notice recipients), c.feed.svc (an opportunity call),
 // c.audit.svc, c.infra.outbox, c.infra.idempotency, c.notify.svc (the
 // notices: in-app, push, e-mail; read at call time), c.identity.svc (the
-// e-mail address; BE-089) and IDENTITY_LINK_BASE_URL (the e-mail's link).
+// e-mail address; BE-089) and IDENTITY_LINK_BASE_URL (the e-mail's link);
+// BE-162b: c.feed.svc (MessageReports: a message report in the moderation
+// queue, same transaction), c.students.svc (LevelThreeNames: the company's
+// conversation list) and c.events.hub (the realtime hub BE-054 built: the
+// conversations' signal and their two WebSockets; one hub per process).
 //
 // Provided, set in build: svc (messaging.Service), the KVKK provider
 // (contact_requests, contact_blocks and, BE-162, conversations,
-// conversation_messages, conversation_user_states) and the retention
+// conversation_messages, conversation_user_states; BE-162b:
+// message_reports, message_report_messages, retained and never exported,
+// gone with their content report) and the retention
 // sweeper of contact_request_closed and conversation_closed. tasks:
 // messaging.expire_requests (01 §7, :40 hourly) and the three notice
 // subscriptions (contact_request.created, contact_request.closed,
@@ -81,7 +87,11 @@ func (w *messagingWiring) build(c *container) error {
 		d.Outbox = c.infra.outbox
 	}
 	if svc := c.feed.svc; svc != nil {
-		d.Posts = svc
+		d.Posts, d.Reports = svc, svc
+	}
+	d.Names = c.students.svc
+	if hub := c.events.hub; hub != nil {
+		d.Live = hub
 	}
 	// The e-mail of the notices needs the address (identity) and the link
 	// origin; config makes IDENTITY_LINK_BASE_URL an absolute URL, test
@@ -121,7 +131,12 @@ func (w *messagingWiring) tasks(c *container) {
 	}
 }
 
-// routes: the 26 operations of 04 §2.9 (10 contact request, 16
-// conversation operations; BE-162); w.svc is nil under `koro openapi`,
-// which Register tolerates.
-func (w *messagingWiring) routes(c *container, api huma.API) { messaging.Register(api, w.svc) }
+// routes: the 29 operations of 04 §2.9 (10 contact request, 16
+// conversation operations, BE-162; 3 message report operations, BE-162b)
+// and the conversations' two WebSockets (gin routes, not operations;
+// BE-162b); w.svc and c.events.hub are nil under `koro openapi`, which
+// both tolerate.
+func (w *messagingWiring) routes(c *container, api huma.API) {
+	messaging.Register(api, w.svc)
+	messaging.RegisterLive(api, w.svc, c.events.hub, c.actors)
+}

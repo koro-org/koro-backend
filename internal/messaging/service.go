@@ -196,11 +196,16 @@ func (s *service) ListSent(ctx context.Context, a authz.Actor, orgID uuid.UUID, 
 		return CompanyPage{}, err
 	}
 	rows, more := page.Cut(rows, limit)
+	convs, err := s.conversationsOf(ctx, rows)
+	if err != nil {
+		return CompanyPage{}, err
+	}
 	out := CompanyPage{Items: make([]CompanyView, len(rows))}
 	for i, r := range rows {
 		if out.Items[i], err = s.companyView(r); err != nil {
 			return CompanyPage{}, err
 		}
+		out.Items[i].ConversationID = convs.of(r.ID)
 	}
 	if more {
 		last := rows[len(rows)-1].ID
@@ -233,7 +238,43 @@ func (s *service) GetSent(ctx context.Context, a authz.Actor, orgID, id uuid.UUI
 	if err != nil {
 		return CompanyView{}, err
 	}
-	return s.companyView(r)
+	v, err := s.companyView(r)
+	if err != nil {
+		return CompanyView{}, err
+	}
+	convs, err := s.conversationsOf(ctx, []ContactRequest{r})
+	if err != nil {
+		return CompanyView{}, err
+	}
+	v.ConversationID = convs.of(r.ID)
+	return v, nil
+}
+
+// requestConversations maps accepted requests to the conversations their
+// acceptance opened (BE-162b).
+type requestConversations map[uuid.UUID]uuid.UUID
+
+// of is the conversation of request id; nil without one.
+func (m requestConversations) of(id uuid.UUID) *uuid.UUID {
+	if c, ok := m[id]; ok {
+		return &c
+	}
+	return nil
+}
+
+// conversationsOf reads the conversations of the accepted requests among
+// rows (only an acceptance opens one).
+func (s *service) conversationsOf(ctx context.Context, rows []ContactRequest) (requestConversations, error) {
+	var ids []uuid.UUID
+	for _, r := range rows {
+		if r.Status == StatusAccepted {
+			ids = append(ids, r.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	return s.conversations().ConversationsOfRequests(ctx, ids)
 }
 
 // Withdraw implements Service: a pending request becomes withdrawn (the

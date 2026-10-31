@@ -24,9 +24,10 @@ const (
 	sortBlockNewest = "-created_at"
 )
 
-// Register adds the 26 messaging operations (04 §2.9: the 10 of the contact
-// requests, the 16 of the conversations, BE-162) to api. svc may be nil
-// (`koro openapi`): handlers only touch it when called.
+// Register adds the 29 messaging operations (04 §2.9: the 10 of the contact
+// requests, the 16 of the conversations, BE-162, and the 3 of the message
+// reports, BE-162b) to api. svc may be nil (`koro openapi`): handlers only
+// touch it when called. The conversations' WebSockets are RegisterLive's.
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
 	op.Register(api, "messaging", huma.Operation{
@@ -115,6 +116,7 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.MessagingBlockListOwn), Surface: op.SurfaceSelf}, h.listBlocks)
 
 	registerConversations(api, h)
+	registerMessageReports(api, h)
 }
 
 type handler struct {

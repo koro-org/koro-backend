@@ -23,7 +23,7 @@ var reasonCodeRe = regexp.MustCompile(`^[a-z_]{2,40}$`)
 func checkReport(r Report) error {
 	snap := r.PostSnapshot
 	switch {
-	case !r.TargetType.Valid(), !r.Reason.Valid(), !r.Status.Valid(), runes(r.Details) > 1000,
+	case !r.TargetType.ReportValid(), !r.Reason.Valid(), !r.Status.Valid(), runes(r.Details) > 1000,
 		runes(r.ResolutionNote) > 1000:
 		return errCheck
 	case (r.Status == ReportActioned || r.Status == ReportDismissed) != (r.ResolvedAt != nil):

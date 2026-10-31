@@ -111,7 +111,7 @@ type ReportTargetDTO struct {
 type AdminReportDTO struct {
 	ReportID       string           `json:"report_id"`
 	ReporterUserID string           `json:"reporter_user_id" doc:"Shown on the admin report endpoints only, never to the reported organization"`
-	TargetType     string           `json:"target_type" enum:"post,org"`
+	TargetType     string           `json:"target_type" enum:"post,org,message" doc:"message: a conversation message (BE-162b), reported by a party of its conversation; its messages are read with adminGetReportedMessages"`
 	TargetID       string           `json:"target_id"`
 	Reason         string           `json:"reason" enum:"spam,harassment,hate,sexual,scam_or_misleading_job,copyright,privacy,other"`
 	Details        string           `json:"details,omitempty"`
@@ -121,7 +121,7 @@ type AdminReportDTO struct {
 	ResolvedAt     *time.Time       `json:"resolved_at,omitempty"`
 	CreatedAt      time.Time        `json:"created_at"`
 	UpdatedAt      time.Time        `json:"updated_at"`
-	Target         *ReportTargetDTO `json:"target,omitempty" doc:"adminGetReport and adminResolveReport only"`
+	Target         *ReportTargetDTO `json:"target,omitempty" doc:"adminGetReport and adminResolveReport only; absent for a message report (adminGetReportedMessages, with a justification)"`
 }
 
 // AdminReportList is a page of adminListReports.

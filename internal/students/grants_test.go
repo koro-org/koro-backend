@@ -582,3 +582,42 @@ func TestDTO_NoTalentFields(t *testing.T) {
 		t.Fatal("a DiscoveryPage marshalled")
 	}
 }
+
+// TestLevelThreeNames_OnlyWhileTheCompanySeesTheStudent (BE-162b): the
+// names a company's conversation list shows are those of the students it
+// sees at level 3 now: another company, a student without a grant and a
+// revoked grant name nobody.
+func TestLevelThreeNames_OnlyWhileTheCompanySeesTheStudent(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := t.Context()
+	org, _, _ := e.company("Acme")
+	other, _, _ := e.company("Beta")
+	s, _ := e.granted(t, org)
+	stranger := e.profiled(t)
+	e.users.mu.Lock()
+	sum := e.users.sum[s.UserID]
+	sum.FirstName, sum.LastName = "Işık", "Çelik"
+	e.users.sum[s.UserID] = sum
+	e.users.mu.Unlock()
+	names, err := e.svc.LevelThreeNames(ctx, org, []uuid.UUID{s.UserID, stranger.UserID})
+	if err != nil || len(names) != 1 || names[s.UserID] != (students.GrantedName{FirstName: "Işık", LastName: "Çelik"}) {
+		t.Fatalf("names = %+v, %v", names, err)
+	}
+	if names, err := e.svc.LevelThreeNames(ctx, other, []uuid.UUID{s.UserID}); err != nil || len(names) != 0 {
+		t.Fatalf("another company's names = %+v, %v", names, err)
+	}
+	if names, err := e.svc.LevelThreeNames(ctx, org, nil); err != nil || len(names) != 0 {
+		t.Fatalf("no students = %+v, %v", names, err)
+	}
+	mine, err := e.svc.ListMyAccessGrants(ctx, s, nil, 0)
+	if err != nil || len(mine.Items) != 1 {
+		t.Fatalf("my grants = %+v, %v", mine, err)
+	}
+	if err := e.svc.RevokeMyAccessGrant(ctx, s, mine.Items[0].Grant.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if names, err := e.svc.LevelThreeNames(ctx, org, []uuid.UUID{s.UserID}); err != nil || len(names) != 0 {
+		t.Fatalf("names after the revocation = %+v, %v", names, err)
+	}
+}

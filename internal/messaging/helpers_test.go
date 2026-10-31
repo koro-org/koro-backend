@@ -461,6 +461,102 @@ func (u *usersFake) erase(id uuid.UUID) {
 	u.erased[id] = true
 }
 
+// reportsFake is the feed's message report queue: one open report per
+// reporter and message (content_reports_open_uq); a report's records go
+// with its transaction's rollback.
+type reportsFake struct {
+	mu      sync.Mutex
+	reports []filed
+	fail    error
+}
+
+type filed struct {
+	tx       int
+	id       uuid.UUID
+	reporter uuid.UUID
+	in       feed.MessageReportInput
+}
+
+func (r *reportsFake) FileMessageReport(ctx context.Context, a authz.Actor, in feed.MessageReportInput) (feed.ReportResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if fakeTxOf(ctx) == 0 {
+		return feed.ReportResult{}, errors.New("FileMessageReport outside a transaction")
+	}
+	if r.fail != nil {
+		return feed.ReportResult{}, r.fail
+	}
+	for _, f := range r.reports {
+		if f.reporter == a.UserID && f.in.MessageID == in.MessageID {
+			return feed.ReportResult{ID: f.id}, nil
+		}
+	}
+	f := filed{tx: fakeTxOf(ctx), id: uuid.NewV7(), reporter: a.UserID, in: in}
+	r.reports = append(r.reports, f)
+	return feed.ReportResult{ID: f.id, Created: true}, nil
+}
+
+func (r *reportsFake) rollback(tx int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.reports = slices.DeleteFunc(r.reports, func(f filed) bool { return f.tx == tx })
+}
+
+func (r *reportsFake) all() []filed {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.reports)
+}
+
+// namesFake is students' level 3 names: the companies' visible students.
+type namesFake struct {
+	mu    sync.Mutex
+	names map[[2]uuid.UUID]students.GrantedName // (company, student)
+	asked [][]uuid.UUID
+}
+
+func (n *namesFake) LevelThreeNames(_ context.Context, company uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]students.GrantedName, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.asked = append(n.asked, slices.Clone(ids))
+	out := map[uuid.UUID]students.GrantedName{}
+	for _, id := range ids {
+		if name, ok := n.names[[2]uuid.UUID{company, id}]; ok {
+			out[id] = name
+		}
+	}
+	return out, nil
+}
+
+func (n *namesFake) set(company, student uuid.UUID, name *students.GrantedName) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if name == nil {
+		delete(n.names, [2]uuid.UUID{company, student})
+		return
+	}
+	n.names[[2]uuid.UUID{company, student}] = *name
+}
+
+// liveFake is the realtime hub: the signals published per topic.
+type liveFake struct {
+	mu   sync.Mutex
+	sent map[string][]string
+}
+
+func (l *liveFake) Publish(_ context.Context, topic string, msg []byte) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.sent[topic] = append(l.sent[topic], string(msg))
+	return nil
+}
+
+func (l *liveFake) of(topic string) []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Clone(l.sent[topic])
+}
+
 // linkBase is the e-mail link origin of the tests.
 const linkBase = "https://koro.example.test"
 
@@ -479,6 +575,9 @@ type env struct {
 	sender   *senderFake
 	users    *usersFake
 	resolver *resolver
+	reports  *reportsFake
+	names    *namesFake
+	live     *liveFake
 	mod      messaging.Module
 	svc      messaging.Service
 
@@ -519,13 +618,15 @@ func newEnv(t *testing.T, opts ...func(*messaging.Deps)) *env {
 	e.resolver = &resolver{students: e.students, known: []uuid.UUID{
 		authztest.ID("student"), authztest.ID("student_granted"), authztest.ID("student_minor"), authztest.ID("student_b"),
 	}}
-	e.tx = &txFake{store: e.store, fakes: []rollbacker{e.ent, e.students, e.outbox, e.audit}}
+	e.reports, e.live = &reportsFake{}, &liveFake{sent: map[string][]string{}}
+	e.names = &namesFake{names: map[[2]uuid.UUID]students.GrantedName{}}
+	e.tx = &txFake{store: e.store, fakes: []rollbacker{e.ent, e.students, e.outbox, e.audit, e.reports}}
 	keeper := idempotency.New(idempotency.Deps{Tx: e.tx, Store: idempotency.NewMemStore(), Clock: e.clk, Log: obs.Discard()})
 	d := messaging.Deps{
 		Store: e.store, Tx: e.tx, Outbox: e.outbox, Audit: e.audit, Idempotency: keeper, Clock: e.clk, Log: obs.Discard(),
 		Entitlements: e.ent, Grants: e.students, Contacts: e.students, Students: e.students, Orgs: e.orgs,
 		Pseudonyms: pseudonymsFake{}, Resolve: e.resolver.resolve, Posts: e.posts, Sender: e.sender,
-		Users: e.users, LinkBaseURL: linkBase,
+		Users: e.users, LinkBaseURL: linkBase, Reports: e.reports, Names: e.names, Live: e.live,
 	}
 	for _, o := range opts {
 		o(&d)

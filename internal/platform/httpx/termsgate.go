@@ -66,7 +66,8 @@ const (
 // registration panics). Each group says why; a new row needs a reason of
 // the same kind: the way out of the gate, leaving, account security, a
 // KVKK right, a consent act, a communication preference or the user's own
-// protection (BE-152, Q-20) or a read sent as POST. Everything else a user
+// protection (BE-152, Q-20; leaving or muting a conversation, BE-162b,
+// T-404) or a read sent as POST. Everything else a user
 // writes rests on the contract — staff, admin and DPO writes included
 // (Q-20: no separate exemption for staff).
 var termsExemptOperations = map[string]string{
@@ -126,6 +127,20 @@ var termsExemptOperations = map[string]string{
 	// stays gated: it is using the service, not refusing it.
 	"blockCompany":   "PUT " + APIPrefix + "/me/company-blocks/{org_id}",
 	"unblockCompany": "DELETE " + APIPrefix + "/me/company-blocks/{org_id}",
+	// Leaving a conversation and silencing it (BE-162b, T-404, the Q-20
+	// principle): closing a conversation for good refuses its messages, as
+	// a block does; muting is the person's own notice setting (unmuting its
+	// undo, as unblockCompany). Both sides: the student on /me and the
+	// company's member on /orgs/{org_id} (a recruiter refusing a
+	// conversation, muting their own notices). Sending, marking read and
+	// reporting a message stay gated: they use the service (as
+	// createContentReport does).
+	"closeMyConversation":   "POST " + APIPrefix + "/me/conversations/{conversation_id}/close",
+	"closeOrgConversation":  "POST " + APIPrefix + "/orgs/{org_id}/conversations/{conversation_id}/close",
+	"muteMyConversation":    "PUT " + APIPrefix + "/me/conversations/{conversation_id}/mute",
+	"muteOrgConversation":   "PUT " + APIPrefix + "/orgs/{org_id}/conversations/{conversation_id}/mute",
+	"unmuteMyConversation":  "DELETE " + APIPrefix + "/me/conversations/{conversation_id}/mute",
+	"unmuteOrgConversation": "DELETE " + APIPrefix + "/orgs/{org_id}/conversations/{conversation_id}/mute",
 
 	// Reads sent as POST (BE-128): a search whose criteria name a person
 	// (an e-mail address, a name, a user ID) takes them in the body so they

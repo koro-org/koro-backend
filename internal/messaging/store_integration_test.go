@@ -82,12 +82,26 @@ func pgWorld(d *db.DB) world {
 				VALUES ($1, $2, $3, 1, 'contact_request', $4)`, id, ent, org, uuid.NewV7())
 			return id
 		},
+		report: func(t *testing.T, reporter, message uuid.UUID) uuid.UUID {
+			id := uuid.NewV7()
+			pgExec(t, d, `INSERT INTO content_reports (id, reporter_user_id, target_type, target_id, reason)
+				VALUES ($1, $2, 'message', $3, 'harassment')`, id, reporter, message)
+			return id
+		},
 	}
 }
 
 func TestStore_Contract_Gorm(t *testing.T) {
 	t.Parallel()
 	storeContract(t, func(t *testing.T) (messaging.Store, world) {
+		d := testutil.NewDB(t)
+		return messaging.NewGormStore(d.ORM), pgWorld(d)
+	})
+}
+
+func TestMessageReportStore_Contract_Gorm(t *testing.T) {
+	t.Parallel()
+	messageReportContract(t, func(t *testing.T) (messaging.Store, world) {
 		d := testutil.NewDB(t)
 		return messaging.NewGormStore(d.ORM), pgWorld(d)
 	})

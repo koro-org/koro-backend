@@ -3,6 +3,7 @@ package messaging
 import (
 	"context"
 	"errors"
+	"slices"
 	"uuid"
 
 	"koro/internal/audit"
@@ -13,6 +14,7 @@ import (
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/page"
 	"koro/internal/platform/problem"
+	"koro/internal/students"
 )
 
 // ---- conversations (BE-162, Q-40)
@@ -49,17 +51,25 @@ type ConversationListQuery struct {
 }
 
 // ConversationView is a conversation as its viewer sees it: the company's
-// card on the student's side, the viewer's unread count, mute and read
-// marker, the newest message and whether the viewer may write now.
+// card on the student's side, the student's name on the company's side
+// while the company sees the student at level 3 (BE-162b), the subject of
+// the contact request it started from, the viewer's unread count, mute and
+// read marker, the newest message and whether the viewer may write now.
 type ConversationView struct {
 	Conversation Conversation
 	Side         Side            // the viewer's side
 	Company      orgs.OrgSummary // the student's view; zero when the org is gone
-	Muted        bool
-	Unread       int
-	LastRead     *uuid.UUID
-	Last         *Message
-	CanSend      bool
+	// StudentName is the company's view only, nil unless the company holds
+	// level 3 access to the student now (an accepted request whose grant
+	// the student has not revoked, an active verification: the name
+	// getCompanyStudentProfile shows).
+	StudentName *students.GrantedName
+	Subject     *string // the request's subject; nil once the request's retention deleted it
+	Muted       bool
+	Unread      int
+	LastRead    *uuid.UUID
+	Last        *Message
+	CanSend     bool
 }
 
 // ConversationPage is a page of a conversation list.
@@ -100,6 +110,9 @@ type Conversations interface {
 	// SetMuted is mute/unmute{Org,My}Conversation
 	// (messaging.conversation.mute): idempotent.
 	SetMuted(ctx context.Context, a authz.Actor, p Party, id uuid.UUID, muted bool) error
+	// OpenLive authorises the realtime signal of p's conversations (the
+	// WebSockets of live.go; BE-162b) and returns its topic.
+	OpenLive(ctx context.Context, a authz.Actor, p Party) (string, error)
 }
 
 // surface is the authz view of p's path before a conversation is read:
@@ -205,7 +218,8 @@ func (s *service) ListConversations(ctx context.Context, a authz.Actor, p Party,
 }
 
 // conversationViews adds the company (its card on the student's side, its
-// status for CanSend) to rows.
+// status for CanSend) and, on the company's side, the students' level 3
+// names to rows.
 func (s *service) conversationViews(ctx context.Context, p Party, rows []ConversationRow) ([]ConversationView, error) {
 	ids := make([]uuid.UUID, 0, len(rows))
 	for _, r := range rows {
@@ -215,19 +229,40 @@ func (s *service) conversationViews(ctx context.Context, p Party, rows []Convers
 	if err != nil {
 		return nil, err
 	}
+	names, err := s.studentNames(ctx, p, rows)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]ConversationView, len(rows))
 	for i, r := range rows {
 		c := r.Conversation
-		v := ConversationView{Conversation: c, Side: p.Side, Muted: r.Muted, Unread: r.Unread, LastRead: r.LastReadMessageID,
-			Last: r.Last}
+		v := ConversationView{Conversation: c, Side: p.Side, Subject: r.Subject, Muted: r.Muted, Unread: r.Unread,
+			LastRead: r.LastReadMessageID, Last: r.Last}
 		company, found := companies[c.OrgID]
 		if p.Side == SideStudent {
 			v.Company = company
+		} else if n, ok := names[c.StudentUserID]; ok {
+			v.StudentName = &n
 		}
 		v.CanSend = canSend(c, p.Side, company, found) == nil
 		out[i] = v
 	}
 	return out, nil
+}
+
+// studentNames are the level 3 names the company of p sees of the rows'
+// students (the company's path only; none without the students port).
+func (s *service) studentNames(ctx context.Context, p Party, rows []ConversationRow) (map[uuid.UUID]students.GrantedName, error) {
+	if p.Side != SideCompany || s.d.Names == nil || len(rows) == 0 {
+		return nil, nil
+	}
+	ids := make([]uuid.UUID, 0, len(rows))
+	for _, r := range rows {
+		if !slices.Contains(ids, r.Conversation.StudentUserID) {
+			ids = append(ids, r.Conversation.StudentUserID)
+		}
+	}
+	return s.d.Names.LevelThreeNames(ctx, p.OrgID, ids)
 }
 
 // canSend is why p's side may not write in c now (nil: it may): a closed
@@ -369,6 +404,7 @@ func (s *service) send(ctx context.Context, a authz.Actor, p Party, id uuid.UUID
 	if _, err := s.conversations().MarkRead(ctx, cur.ID, a.UserID, m.ID, now); err != nil {
 		return uuid.Nil(), err
 	}
+	s.signal(ctx, cur, liveMessage, now)
 	// The event carries IDs only: the text never leaves the conversation.
 	if err := outbox.Emit(ctx, s.d.Outbox, domainevent.ConversationMessageSent{
 		ConversationID: cur.ID, MessageID: m.ID, OrgID: cur.OrgID, SenderSide: string(p.Side),
@@ -443,6 +479,7 @@ func (s *service) CloseConversation(ctx context.Context, a authz.Actor, p Party,
 		if err != nil || !ok {
 			return c.ID, err
 		}
+		s.signal(ctx, next, liveClosed, *next.ClosedAt)
 		return next.ID, s.d.Audit.Log(ctx, conversationEvent(authz.MessagingConversationClose, next, p, nil).By(a))
 	}); err != nil {
 		return ConversationView{}, err
@@ -488,11 +525,12 @@ func (s *service) closeOnBlock(ctx context.Context, orgID, studentID uuid.UUID) 
 	}
 	n := 0
 	for _, c := range open {
-		_, ok, err := s.conversations().CloseConversation(ctx, c.ID, SideStudent, s.now())
+		next, ok, err := s.conversations().CloseConversation(ctx, c.ID, SideStudent, s.now())
 		if err != nil {
 			return 0, err
 		}
 		if ok {
+			s.signal(ctx, next, liveClosed, *next.ClosedAt)
 			n++
 		}
 	}

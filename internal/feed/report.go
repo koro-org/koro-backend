@@ -152,10 +152,7 @@ func (s *service) CreateReport(ctx context.Context, a authz.Actor, in ReportInpu
 	if !a.IsUser() {
 		return ReportResult{}, authz.ErrForbidden
 	}
-	if !in.Reason.Valid() {
-		return ReportResult{}, problem.Field("body.reason", "is not a report reason")
-	}
-	details, err := cleanText("body.details", in.Details, maxReportText)
+	details, err := reportText(in.Reason, in.Details)
 	if err != nil {
 		return ReportResult{}, err
 	}
@@ -175,22 +172,13 @@ func (s *service) CreateReport(ctx context.Context, a authz.Actor, in ReportInpu
 		snap = snapshotOf(*post, s.now())
 	}
 	res, _, err := idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (ReportResult, error) {
-		r, created, err := s.reports().InsertReport(ctx, Report{
+		r, created, err := s.fileReport(ctx, a, Report{
 			ID: uuid.NewV7(), ReporterUserID: a.UserID, TargetType: in.TargetType, TargetID: in.TargetID,
 			Reason: in.Reason, Details: details, PostSnapshot: snap,
 		})
 		if err != nil || !created {
 			return ReportResult{ID: r.ID}, err
 		}
-		id := r.ID
-		if err := s.d.Audit.Log(ctx, audit.Event{
-			Action: string(authz.FeedReportCreate), Outcome: audit.Success, ResourceType: reportAggType, ResourceID: &id,
-			Metadata: map[string]any{"target_type": string(r.TargetType), "target_id": r.TargetID.String(),
-				"reason": string(r.Reason)},
-		}.By(a)); err != nil {
-			return ReportResult{}, err
-		}
-		s.emitFor(ctx, domainevent.ContentReportCreated{ReportID: r.ID, TargetType: string(r.TargetType)}, reportAggType, r.ID)
 		if post != nil {
 			if err := s.autoHide(ctx, post.ID); err != nil {
 				return ReportResult{}, err
@@ -199,6 +187,82 @@ func (s *service) CreateReport(ctx context.Context, a authz.Actor, in ReportInpu
 		return ReportResult{ID: r.ID, Created: true}, nil
 	})
 	return res, err
+}
+
+// reportText checks a report's reason and cleans its details (422).
+func reportText(reason ReportReason, details string) (*string, error) {
+	if !reason.Valid() {
+		return nil, problem.Field("body.reason", "is not a report reason")
+	}
+	return cleanText("body.details", details, maxReportText)
+}
+
+// fileReport writes r in the transaction carried by ctx: the new report or
+// the reporter's open one on the target (content_reports_open_uq;
+// created=false, nothing else written), and for a new one its audit record
+// (no org scope: the reported side never sees who reported) and
+// content_report.created (A: the moderators' notice).
+func (s *service) fileReport(ctx context.Context, a authz.Actor, r Report) (Report, bool, error) {
+	r, created, err := s.reports().InsertReport(ctx, r)
+	if err != nil || !created {
+		return r, created, err
+	}
+	id := r.ID
+	if err := s.d.Audit.Log(ctx, audit.Event{
+		Action: string(authz.FeedReportCreate), Outcome: audit.Success, ResourceType: reportAggType, ResourceID: &id,
+		Metadata: map[string]any{"target_type": string(r.TargetType), "target_id": r.TargetID.String(),
+			"reason": string(r.Reason)},
+	}.By(a)); err != nil {
+		return Report{}, false, err
+	}
+	s.emitFor(ctx, domainevent.ContentReportCreated{ReportID: r.ID, TargetType: string(r.TargetType)}, reportAggType, r.ID)
+	return r, true, nil
+}
+
+// MessageReportInput is a report on a conversation message (BE-162b, Q-43):
+// messaging files it for a party of the conversation (reportMyConversationMessage,
+// reportOrgConversationMessage).
+type MessageReportInput struct {
+	MessageID uuid.UUID
+	Reason    ReportReason
+	Details   string
+}
+
+// MessageReports is the moderation queue's entry for conversation messages
+// (BE-162b, Q-43; 01 §6.3 "Mesaj şikâyeti" doc patch): messaging authorises
+// the reporter on the message's conversation (messaging.message.report) and
+// keeps the reported messages in its own tables in the same transaction;
+// feed keeps the report itself, so a message report is worked like any
+// other (adminListReports, adminResolveReport) and goes like any other (the
+// reporter's erasure, content_report retention).
+type MessageReports interface {
+	// FileMessageReport writes a's report of the message in the transaction
+	// carried by ctx (no Idempotency-Key of its own: the caller's). A user
+	// has one open report per message: their open report is returned again
+	// with Created false, and nothing else is written. The reason and the
+	// details are checked here (422 body.reason, body.details). The caller
+	// authorised a on the message: the actor only signs the audit record.
+	FileMessageReport(ctx context.Context, a authz.Actor, in MessageReportInput) (ReportResult, error)
+}
+
+// FileMessageReport implements MessageReports. A message report is never
+// hidden automatically (a message is no feed content).
+func (s *service) FileMessageReport(ctx context.Context, a authz.Actor, in MessageReportInput) (ReportResult, error) {
+	if !a.IsUser() {
+		return ReportResult{}, authz.ErrForbidden
+	}
+	details, err := reportText(in.Reason, in.Details)
+	if err != nil {
+		return ReportResult{}, err
+	}
+	r, created, err := s.fileReport(ctx, a, Report{
+		ID: uuid.NewV7(), ReporterUserID: a.UserID, TargetType: TargetMessage, TargetID: in.MessageID,
+		Reason: in.Reason, Details: details,
+	})
+	if err != nil {
+		return ReportResult{}, err
+	}
+	return ReportResult{ID: r.ID, Created: created}, nil
 }
 
 // autoHide hides a published post once DefaultReportHideThreshold (or
@@ -270,8 +334,13 @@ func (s *service) GetReport(ctx context.Context, a authz.Actor, id uuid.UUID) (R
 	return s.reportView(ctx, r)
 }
 
-// reportView adds the summary of the report's target.
+// reportView adds the summary of the report's target. A message report has
+// none here: its conversation, company and messages are messaging's
+// (adminGetReportedMessages, each read with a justification; Q-43).
 func (s *service) reportView(ctx context.Context, r Report) (ReportView, error) {
+	if r.TargetType == TargetMessage {
+		return ReportView{Report: r}, nil
+	}
 	t := &TargetSummary{Type: r.TargetType}
 	orgID := r.TargetID
 	if r.TargetType == TargetPost {
@@ -417,12 +486,8 @@ func (s *service) resolved(ctx context.Context, a authz.Actor, cur Report, in Re
 	case ReportInReview:
 		next.Status = ReportInReview
 	case ReportActioned:
-		n, err := s.moderation().ReportActions(ctx, cur.ID)
-		if err != nil {
+		if err := s.actionedProof(ctx, cur, next.ResolutionNote); err != nil {
 			return Report{}, false, err
-		}
-		if n == 0 {
-			return Report{}, false, ErrModerationActionRequired
 		}
 		now := s.now()
 		next.Status, next.ResolvedAt = ReportActioned, &now
@@ -433,6 +498,28 @@ func (s *service) resolved(ctx context.Context, a authz.Actor, cur Report, in Re
 	changed := next.Status != cur.Status || !samePtr(next.AssignedTo, cur.AssignedTo) ||
 		!sameStr(next.ResolutionNote, cur.ResolutionNote)
 	return next, changed, nil
+}
+
+// actionedProof is what an actioned report needs: a moderation action
+// taken with it (409 feed.moderation_action_required), or for a message
+// report, whose measure is another module's (the company's or the user's
+// suspension, the conversation closed; BE-162b), a resolution note saying
+// what was done (422).
+func (s *service) actionedProof(ctx context.Context, cur Report, note *string) error {
+	if cur.TargetType == TargetMessage {
+		if note == nil {
+			return problem.Field("body.resolution_note", "is required to action a message report: say what was done")
+		}
+		return nil
+	}
+	n, err := s.moderation().ReportActions(ctx, cur.ID)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrModerationActionRequired
+	}
+	return nil
 }
 
 func samePtr(a, b *uuid.UUID) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }

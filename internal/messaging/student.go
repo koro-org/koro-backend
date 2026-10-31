@@ -47,8 +47,8 @@ func (s *service) ListMine(ctx context.Context, a authz.Actor, q ListQuery) (Stu
 	return out, nil
 }
 
-// studentViews adds the company cards (orgs) and the opportunity calls
-// (feed) to rows.
+// studentViews adds the company cards (orgs), the opportunity calls (feed)
+// and the conversations of the accepted requests (BE-162b) to rows.
 func (s *service) studentViews(ctx context.Context, rows []ContactRequest) ([]StudentView, error) {
 	ids := make([]uuid.UUID, 0, len(rows))
 	for _, r := range rows {
@@ -58,10 +58,14 @@ func (s *service) studentViews(ctx context.Context, rows []ContactRequest) ([]St
 	if err != nil {
 		return nil, err
 	}
+	convs, err := s.conversationsOf(ctx, rows)
+	if err != nil {
+		return nil, err
+	}
 	now := s.now()
 	out := make([]StudentView, len(rows))
 	for i, r := range rows {
-		v := StudentView{Request: r, Company: names[r.OrgID], Status: r.Effective(now)}
+		v := StudentView{Request: r, Company: names[r.OrgID], Status: r.Effective(now), ConversationID: convs.of(r.ID)}
 		if r.OpportunityPostID != nil {
 			if v.Post, err = s.postRef(ctx, *r.OpportunityPostID); err != nil {
 				return nil, err

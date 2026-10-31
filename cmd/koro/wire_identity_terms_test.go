@@ -34,7 +34,8 @@ func (r *refuseTerms) CheckTerms(context.Context, uuid.UUID) error {
 
 // termsAlwaysOpen are the actions of the KVKK and account security
 // operations (BE-124) and of the communication preferences and company
-// blocks (BE-152, Q-20): a self-surface write operation of one of them (the
+// blocks (BE-152, Q-20) and of leaving or muting a conversation (BE-162b,
+// T-404): a self-surface write operation of one of them (the
 // user acting on their own account and data) must be on the terms gate's
 // exemption table, so a new operation of the family (another MFA method, a
 // new DSR entry point, a new consent page) cannot end up behind the gate
@@ -51,6 +52,7 @@ var termsAlwaysOpen = []string{
 	"kvkk.dsr.create", "kvkk.dsr.cancel_own",
 	"consent.record.create", "students.privacy.update_own", "students.access_grant.revoke",
 	"notify.preference.update_own", "messaging.block.manage", // BE-152, Q-20: refusing messages, blocking a company
+	"messaging.conversation.close", "messaging.conversation.mute", // BE-162b, T-404: leaving or muting a conversation
 }
 
 var pathParam = regexp.MustCompile(`\{[a-z_]+\}`)

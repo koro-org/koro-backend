@@ -97,6 +97,35 @@ type Posts interface {
 	Get(ctx context.Context, postID uuid.UUID) (feed.PostSummary, error)
 }
 
+// Reports is the feed's moderation queue (L9; 01 §6.3 "Mesaj şikâyeti",
+// BE-162b, Q-43): a report on a conversation message is a content report
+// (target_type message) written in the transaction that keeps the reported
+// messages, so a report never exists without its messages nor the messages
+// without their report.
+type Reports interface {
+	// FileMessageReport writes a's report of the message in the transaction
+	// carried by ctx, or returns a's open report on it (Created false).
+	//
+	// sync-write: feed.MessageReports.FileMessageReport
+	FileMessageReport(ctx context.Context, a authz.Actor, in feed.MessageReportInput) (feed.ReportResult, error)
+}
+
+// StudentNames is students' level 3 name lookup (L7; BE-162b): the names a
+// company sees of the students it holds an active level 3 grant on (an
+// accepted contact request, not revoked or suspended, the student verified,
+// adult and active), as getCompanyStudentProfile shows them.
+type StudentNames interface {
+	// LevelThreeNames returns the names of the students among studentIDs that
+	// companyOrgID sees at level 3 now; the others are absent.
+	LevelThreeNames(ctx context.Context, companyOrgID uuid.UUID, studentIDs []uuid.UUID) (map[uuid.UUID]students.GrantedName, error)
+}
+
+// LivePublisher sends a signal to every WebSocket viewer of a topic
+// (platform/realtime Hub over Redis pub/sub; BE-162b).
+type LivePublisher interface {
+	Publish(ctx context.Context, topic string, msg []byte) error
+}
+
 // Orgs is orgs' org directory (L5; 01 §4.7 OrgDirectory): the company's
 // kind and status (03 k19, §2.3), the company names of the student's views
 // and the recipients of the company's notices.

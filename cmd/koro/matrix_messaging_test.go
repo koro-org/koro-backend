@@ -15,6 +15,7 @@ import (
 	"koro/internal/authz/authztest"
 	"koro/internal/consent"
 	"koro/internal/discovery"
+	"koro/internal/feed"
 	"koro/internal/messaging"
 )
 
@@ -22,7 +23,11 @@ import (
 // pending contact request of a company to a student, sent by one of its
 // members via discovery, expiring 14 days after the container clock; a
 // "conversation" (BE-162) is the open conversation of such a request,
-// accepted.
+// accepted; a "message" (BE-162b) is a message of a conversation fixture
+// on one side, by a sender; a "message_report" (BE-162b) is the student
+// reporter's open content report of a message fixture of their
+// conversation in the feed's queue, with its kept copy (the message alone). Fixtures run in name order: a message's
+// name sorts after its conversation's, a report's after its message's.
 func (w *messagingWiring) matrixFixtures(fx *matrixFixtures) error {
 	ctx := context.Background()
 	for _, f := range fx.Of("messaging") {
@@ -33,6 +38,14 @@ func (w *messagingWiring) matrixFixtures(fx *matrixFixtures) error {
 			}
 		case "conversation":
 			if err := w.matrixConversation(ctx, fx, f); err != nil {
+				return fmt.Errorf("fixture %s: %w", f.Name, err)
+			}
+		case "message":
+			if err := w.matrixMessage(ctx, fx, f); err != nil {
+				return fmt.Errorf("fixture %s: %w", f.Name, err)
+			}
+		case "message_report":
+			if err := w.matrixMessageReport(ctx, fx, f); err != nil {
 				return fmt.Errorf("fixture %s: %w", f.Name, err)
 			}
 		default:
@@ -100,6 +113,67 @@ func (w *messagingWiring) matrixConversation(ctx context.Context, fx *matrixFixt
 		Status: messaging.ConversationOpen, LastActivityAt: w.late.infra.clock.Now().UTC(),
 	})
 	return err
+}
+
+// matrixMessage writes a message of the fixture's conversation (BE-162b).
+func (w *messagingWiring) matrixMessage(ctx context.Context, fx *matrixFixtures, f fixture) error {
+	id, err := fx.ID(f.Name)
+	if err != nil {
+		return err
+	}
+	conv, err := fx.Ref(f, "conversation")
+	if err != nil {
+		return err
+	}
+	sender, err := fx.Ref(f, "sender")
+	if err != nil {
+		return err
+	}
+	side, _ := f.Fields["side"].(string)
+	_, err = w.store.InsertMessage(ctx, messaging.Message{ID: id, ConversationID: conv, SenderSide: messaging.Side(side),
+		SenderUserID: sender, Body: "Matris mesajı (" + f.Name + ")", CreatedAt: w.late.infra.clock.Now().UTC()})
+	return err
+}
+
+// matrixMessageReport writes the reporter's open report of the fixture's
+// message in the feed's in-memory queue and its kept copy (BE-162b).
+func (w *messagingWiring) matrixMessageReport(ctx context.Context, fx *matrixFixtures, f fixture) error {
+	id, err := fx.ID(f.Name)
+	if err != nil {
+		return err
+	}
+	mid, err := fx.Ref(f, "message")
+	if err != nil {
+		return err
+	}
+	reporter, err := fx.Ref(f, "reporter")
+	if err != nil {
+		return err
+	}
+	queue, ok := w.late.feed.built.(*feed.MemStore)
+	if !ok {
+		return fmt.Errorf("the matrix needs the feed's in-memory store, got %T", w.late.feed.built)
+	}
+	if err := queue.PutReport(feed.Report{ID: id, ReporterUserID: reporter, TargetType: feed.TargetMessage, TargetID: mid,
+		Reason: feed.ReasonHarassment, Status: feed.ReportOpen, CreatedAt: matrixOrgTime, UpdatedAt: matrixOrgTime}); err != nil {
+		return err
+	}
+	conv, err := fx.Ref(f, "conversation")
+	if err != nil {
+		return err
+	}
+	m, err := w.store.MessageIn(ctx, conv, mid)
+	if err != nil {
+		return err
+	}
+	c, err := w.store.ConversationOfStudent(ctx, reporter, conv)
+	if err != nil {
+		return err
+	}
+	return w.store.InsertMessageReport(ctx, messaging.MessageReport{ReportID: id, MessageID: m.ID, ConversationID: c.ID,
+		OrgID: c.OrgID, StudentUserID: c.StudentUserID, ReportedSide: m.SenderSide, TakenAt: matrixOrgTime},
+		[]messaging.ReportedMessage{{ReportID: id, MessageID: m.ID, SenderSide: m.SenderSide, SenderUserID: m.SenderUserID,
+			Body: m.Body, SentAt: m.CreatedAt}})
 }
 
 // TestMatrixMessaging_PseudonymLiterals: every anon_id of the messaging

@@ -104,6 +104,8 @@ contact_blocks              personal  messaging     provider:messaging
 conversations               personal  messaging     provider:messaging
 conversation_messages       personal  messaging     provider:messaging
 conversation_user_states    personal  messaging     provider:messaging
+message_reports             personal  messaging     provider:messaging
+message_report_messages     personal  messaging     provider:messaging
 # talent (profiling data)
 talent.config_versions      staff     talent        -
 talent.signal_defs          staff     talent        -

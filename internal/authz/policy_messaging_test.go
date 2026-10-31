@@ -176,7 +176,7 @@ func TestMessagingPolicy_Conversations(t *testing.T) {
 	forbidden, notFound := authz.ErrForbidden, authz.ErrNotFound
 	student, other := authztest.ID("student"), authztest.ID("student_granted")
 	acts := []authz.Action{authz.MessagingConversationRead, authz.MessagingConversationMarkRead, authz.MessagingConversationClose,
-		authz.MessagingConversationMute, authz.MessagingMessageSend}
+		authz.MessagingConversationMute, authz.MessagingMessageSend, authz.MessagingMessageReport}
 	staff := []string{"anonymous", "moderator", "support", "dpo", "platform_admin", "finance_admin", "talent_auditor"}
 	for _, tc := range []struct {
 		org   string
@@ -225,4 +225,33 @@ func TestMessagingPolicy_Conversations(t *testing.T) {
 	// The mandatory status attribute (03 §3.5).
 	wantErr(t, authz.Can(ctx, persona(t, "student"), authz.MessagingConversationRead,
 		authz.Resource{Type: authz.TypeConversation, OwnerUserID: &student}), forbidden, true)
+}
+
+// TestMessagingPolicy_MessageReportRead (BE-162b, Q-43): the kept messages
+// of a message report are the moderators' and the platform admins' (k-mfa)
+// on the admin surface; every other signed-in user sees the surface (403),
+// anonymous is refused; the conversation resource never grants it.
+func TestMessagingPolicy_MessageReportRead(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	admin := authz.Resource{Type: authz.TypeAdminSurface}
+	for _, p := range authztest.Personas() {
+		err := authz.Can(ctx, p.Actor, authz.MessagingMessageReportRead, admin)
+		switch p.Name {
+		case "anonymous":
+			if err == nil {
+				t.Fatal("anonymous reads a message report")
+			}
+		case "moderator", "platform_admin":
+			wantErr(t, err, nil, false)
+		default:
+			wantErr(t, err, authz.ErrForbidden, false)
+		}
+	}
+	mod := persona(t, "moderator")
+	mod.MFAVerified = false
+	wantErr(t, authz.Can(ctx, mod, authz.MessagingMessageReportRead, admin), authz.ErrMFARequired, false)
+	student := authztest.ID("student")
+	wantErr(t, authz.Can(ctx, persona(t, "moderator"), authz.MessagingMessageReportRead, conversation("", student)),
+		authz.ErrNotFound, false)
 }

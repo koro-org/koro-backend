@@ -159,6 +159,20 @@ type AccessGrants interface {
 	// Has reports whether companyOrgID holds an active (not suspended)
 	// grant on studentID whose verification is active now (BE-077).
 	Has(ctx context.Context, studentID, companyOrgID uuid.UUID) (bool, error)
+	// LevelThreeNames returns the names companyOrgID sees of the students
+	// among studentIDs: those it holds an active grant on whose student is
+	// verified, adult and active now, exactly where getCompanyStudentProfile
+	// answers (BE-162b: the company's conversation list). The others are
+	// absent. Not audited: the names only, of students who accepted the
+	// company's request; the profile read stays getCompanyStudentProfile's.
+	LevelThreeNames(ctx context.Context, companyOrgID uuid.UUID, studentIDs []uuid.UUID) (map[uuid.UUID]GrantedName, error)
+}
+
+// GrantedName is a student's name as a company with level 3 access sees it
+// (StudentL3CardDTO first_name, last_name).
+type GrantedName struct {
+	FirstName string
+	LastName  string
 }
 
 // Discoverable is the level 2 contract of discovery and messaging (01

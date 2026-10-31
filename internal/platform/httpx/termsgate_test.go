@@ -210,6 +210,32 @@ func TestTermsGate_Q20Exemptions(t *testing.T) {
 	}
 }
 
+// TestTermsGate_T404ConversationExemptions (BE-162b, T-404): closing and
+// muting a conversation are exempt on both paths; sending, marking read
+// and reporting a message stay behind the gate.
+func TestTermsGate_T404ConversationExemptions(t *testing.T) {
+	t.Parallel()
+	exempt := httpx.TermsExemptOperations()
+	for id, want := range map[string]string{
+		"closeMyConversation":   "POST /api/v1/me/conversations/{conversation_id}/close",
+		"closeOrgConversation":  "POST /api/v1/orgs/{org_id}/conversations/{conversation_id}/close",
+		"muteMyConversation":    "PUT /api/v1/me/conversations/{conversation_id}/mute",
+		"muteOrgConversation":   "PUT /api/v1/orgs/{org_id}/conversations/{conversation_id}/mute",
+		"unmuteMyConversation":  "DELETE /api/v1/me/conversations/{conversation_id}/mute",
+		"unmuteOrgConversation": "DELETE /api/v1/orgs/{org_id}/conversations/{conversation_id}/mute",
+	} {
+		if exempt[id] != want {
+			t.Errorf("exemption %s = %q, want %q", id, exempt[id], want)
+		}
+	}
+	for _, id := range []string{"sendMyConversationMessage", "sendOrgConversationMessage", "markMyConversationRead",
+		"reportMyConversationMessage", "reportOrgConversationMessage"} {
+		if row, ok := exempt[id]; ok {
+			t.Errorf("%s is exempt (%s); it rests on the contract", id, row)
+		}
+	}
+}
+
 // TestTermsGate_MarksProtectedWrites (BE-124): the spec carries
 // x-koro-terms-gate on every protected write operation, exempt on the
 // listed ones; reads and public operations carry none.

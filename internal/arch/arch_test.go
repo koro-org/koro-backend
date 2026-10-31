@@ -476,9 +476,11 @@ func TestSyncWritesAreAllowed(t *testing.T) {
 	// identity → consent.TermsLedger.RecordTerms (BE-118: the accepted terms
 	// of use in the registration transaction, Q-17), + orgs →
 	// files.Files.Delete (BE-151: an org logo the scan rejected goes in the
-	// transaction that clears logo_file_id, T-176).
-	if len(allow) != 37 {
-		t.Fatalf("sync_writes.txt has %d lines, want 37", len(allow))
+	// transaction that clears logo_file_id, T-176), + messaging →
+	// feed.MessageReports.FileMessageReport (BE-162b: a message report and
+	// the reported messages it keeps in one transaction, Q-43).
+	if len(allow) != 38 {
+		t.Fatalf("sync_writes.txt has %d lines, want 38", len(allow))
 	}
 	for _, must := range []string{"kvkk files.Files.Delete", "feed entitlements.Entitlements.Release",
 		"outreach entitlements.Entitlements.Release", "feed outreach.Targeting.DiscardDispatch",
@@ -488,7 +490,7 @@ func TestSyncWritesAreAllowed(t *testing.T) {
 		"* audit.Logger.Log", "* files.Files.Attach", "payments orders.Orders.ApplyPayment", "payments ledger.Poster.Post",
 		"payments orders.Orders.ConfirmDirectPayment", "identity consent.TermsLedger.RecordTerms", "payments orders.Orders.ApplyRefund", "payments ledger.LedgerLines.LockPayees",
 		"directory orgs.OrgAdmin.GrantRole", "directory orgs.OrgAdmin.Create", "orders catalog.Offerings.Release",
-		"messaging students.ContactSharing.ShareContactWithCompany",
+		"messaging students.ContactSharing.ShareContactWithCompany", "messaging feed.MessageReports.FileMessageReport",
 	} {
 		if !allow[must] {
 			t.Errorf("sync_writes.txt lacks %q", must)

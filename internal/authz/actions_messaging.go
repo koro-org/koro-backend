@@ -22,6 +22,9 @@ const (
 	MessagingConversationClose    Action = "messaging.conversation.close"
 	MessagingConversationMute     Action = "messaging.conversation.mute"
 	MessagingMessageSend          Action = "messaging.message.send"
+	// Message reports (BE-162b, Q-43; 03 §5.9 doc patch).
+	MessagingMessageReport     Action = "messaging.message.report"
+	MessagingMessageReportRead Action = "messaging.message_report.read"
 )
 
 // System-only actions of the messaging module (03 §3.7): only SystemActor may perform them.
@@ -46,4 +49,6 @@ var messagingActions = []Action{
 	MessagingConversationClose,
 	MessagingConversationMute,
 	MessagingMessageSend,
+	MessagingMessageReport,
+	MessagingMessageReportRead,
 }

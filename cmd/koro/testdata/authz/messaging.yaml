@@ -1,4 +1,5 @@
-# Authz matrix of the messaging module (03 §5.9, 04 §2.9; BE-056, BE-162). 26 operations × 18 personas + variants.
+# Authz matrix of the messaging module (03 §5.9, 04 §2.9; BE-056, BE-162, BE-162b). 29 operations × 18 personas +
+# variants, and the conversations' two WebSockets (non_api_routes, BE-162b).
 # Company surface (/orgs/{org_id}/contact-requests…): cmm S, cma S of the path's company (company_a:
 # company_member, company_admin; company_b: other_company_member); members of another org and everyone else
 # 404; platform staff and the members of a club see the surface and get 403 (03 §7.6). k19 (an active company,
@@ -12,6 +13,10 @@
 # 20 contact_request units each (fixtures/entitlements.yaml). Conversations (BE-162): conversation_student_a is the
 # open conversation of company_a's accepted request to the persona student (requester company_member); its parties
 # are the student (/me/conversations…: O) and company_a's recruiter and admin (/orgs/{org_id}/conversations…: S).
+# Message reports (BE-162b, Q-43): a party reports the other side's message (msg_company_a on /me, msg_student_a on
+# the company's path; one's own side's message is 422, the service's); the moderators and platform admins read a
+# report's kept messages (reported_msg_a) with X-Koro-Access-Reason, every other signed-in user sees the admin
+# surface (403).
 version: 1
 groups:
   # signed-in users who are neither members of company_a nor platform staff (company_a's surface: 404).
@@ -27,6 +32,8 @@ groups:
   msg_not_student: [user_unverified, student_minor, club_member, club_admin, other_club_admin, event_staff,
                     university_rep, company_member, company_admin, other_company_member, moderator, support, dpo,
                     platform_admin, finance_admin, talent_auditor]
+  # platform staff who do not moderate (adminGetReportedMessages: 403, BE-162b).
+  msg_other_staff: [support, dpo, finance_admin, talent_auditor]
 
 operations:
   createContactRequest:
@@ -345,3 +352,64 @@ operations:
     action: messaging.conversation.mute
     path_params: { conversation_id: conversation_student_a }
     expect: { anonymous: 401, student: 204, "@msg_not_student": 404 }
+
+  # ---- message reports (BE-162b, Q-43)
+  reportOrgConversationMessage:
+    method: POST
+    path: /api/v1/orgs/{org_id}/conversations/{conversation_id}/messages/{message_id}/report
+    action: messaging.message.report
+    path_params: { org_id: company_a, conversation_id: conversation_student_a, message_id: msg_student_a }
+    body: bodies/messaging/report.json
+    note: the student's message; the report joins the moderation queue with the message and the 5 before it
+    expect: { anonymous: 401, company_member: 201, company_admin: 201, "@msg_not_company_a": 404, "@platform_staff": 403 }
+    variants:
+      - name: other_company
+        path_params: { org_id: company_b }
+        expect: { anonymous: 401, other_company_member: 404, "@msg_not_company_b": 404, "@platform_staff": 403 }
+      - name: own_side
+        path_params: { message_id: msg_company_a }
+        note: the company's own message (422, the service's)
+        expect: { anonymous: 401, company_member: 422, company_admin: 422, "@msg_not_company_a": 404, "@platform_staff": 403 }
+      - name: unknown_message
+        path_params: { message_id: "literal:00000000-0000-7000-8000-0000000000e4" }
+        expect: { anonymous: 401, company_member: 404, company_admin: 404, "@msg_not_company_a": 404, "@platform_staff": 403 }
+
+  reportMyConversationMessage:
+    method: POST
+    path: /api/v1/me/conversations/{conversation_id}/messages/{message_id}/report
+    action: messaging.message.report
+    path_params: { conversation_id: conversation_student_a, message_id: msg_company_a }
+    body: bodies/messaging/report.json
+    note: the company's message; the company never learns who reported
+    expect: { anonymous: 401, student: 201, "@msg_not_student": 404 }
+    variants:
+      - name: own_side
+        path_params: { message_id: msg_student_a }
+        note: the student's own message (422, the service's)
+        expect: { anonymous: 401, student: 422, "@msg_not_student": 404 }
+
+  adminGetReportedMessages:
+    method: GET
+    path: /api/v1/admin/reports/{report_id}/messages
+    action: messaging.message_report.read
+    path_params: { report_id: reported_msg_a }
+    headers: { X-Koro-Access-Reason: "Matris: taciz şikâyeti incelemesi" }
+    note: the kept copy only (the message and at most 5 before it); every read audited with the reason
+    expect: { anonymous: 401, moderator: 200, platform_admin: 200, "@msg_no_platform_role": 403, "@msg_other_staff": 403 }
+    variants:
+      - name: unknown_report
+        path_params: { report_id: "literal:00000000-0000-7000-8000-0000000000e5" }
+        expect: { anonymous: 401, moderator: 404, platform_admin: 404, "@msg_no_platform_role": 403, "@msg_other_staff": 403 }
+
+# The conversations' realtime signal (BE-162b): 101 = upgraded; otherwise the handshake is answered like the lists
+# (listMyConversations, listOrgConversations) and nothing is upgraded.
+non_api_routes:
+  - method: GET
+    path: /api/v1/me/conversations/live
+    websocket: true
+    expect: { anonymous: 401, "@signed_in": 101 }
+  - method: GET
+    path: /api/v1/orgs/{org_id}/conversations/live
+    websocket: true
+    path_params: { org_id: company_a }
+    expect: { anonymous: 401, company_member: 101, company_admin: 101, "@msg_not_company_a": 404, "@platform_staff": 403 }

@@ -17,10 +17,11 @@ import (
 // (privacy.go), which covers every row of a data subject, holds the whole
 // Store (store_views_test.go).
 type Store interface {
-	requestStore      // contact_requests
-	blockStore        // contact_blocks
-	conversationStore // conversations, conversation_messages, conversation_user_states (store_conversations.go)
-	StatsStore        // the counts of a company's panel (stats.go, BE-163)
+	requestStore       // contact_requests
+	blockStore         // contact_blocks
+	conversationStore  // conversations, conversation_messages, conversation_user_states (store_conversations.go)
+	messageReportStore // message_reports, message_report_messages (store_message_reports.go, BE-162b)
+	StatsStore         // the counts of a company's panel (stats.go, BE-163)
 }
 
 // requests is the contact_requests view of the store.
@@ -34,6 +35,9 @@ func (s *service) stats() StatsStore { return s.d.Store }
 
 // conversations is the conversations view of the store.
 func (s *service) conversations() conversationStore { return s.d.Store }
+
+// messageReports is the message report view of the store (BE-162b).
+func (s *service) messageReports() messageReportStore { return s.d.Store }
 
 // requestStore is the contact_requests part of Store (02 §14.1).
 type requestStore interface {

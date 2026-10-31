@@ -84,6 +84,8 @@ contact_blocks              account:the user's blocks of companies; the messagin
 conversations               policy:conversation_closed
 conversation_messages       parent:conversations
 conversation_user_states    parent:conversations
+message_reports             parent:content_reports
+message_report_messages     parent:content_reports
 # talent (P3, profiling data)
 talent.point_events         policy:talent_ledger
 talent.daily_counters       policy:talent_counters

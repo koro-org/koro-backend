@@ -156,6 +156,7 @@ type Service interface {
 	Posts
 	PublicPosts
 	Likes
+	MessageReports // the reports of conversation messages, filed by messaging (BE-162b)
 
 	// GetFeed is getFeed (feed.feed.read): the reader's feed.
 	GetFeed(ctx context.Context, a authz.Actor, q FeedQuery) (PostPage, error)

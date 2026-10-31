@@ -527,6 +527,14 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (students.Store, wo
 		if _, err := s.ActiveGrant(ctx, v, c2); !errors.Is(err, students.ErrNotFound) {
 			t.Fatalf("ActiveGrant without a grant: %v", err)
 		}
+		// BE-162b: the company's active grants among some students.
+		if among, err := s.ActiveGrantsAmong(ctx, c1, []uuid.UUID{u, v, uuid.NewV7()}); err != nil || len(among) != 2 ||
+			among[0].ID != g1.ID || among[1].StudentUserID != v {
+			t.Fatalf("ActiveGrantsAmong = %+v, %v", among, err)
+		}
+		if among, err := s.ActiveGrantsAmong(ctx, c2, []uuid.UUID{v}); err != nil || len(among) != 0 {
+			t.Fatalf("ActiveGrantsAmong of another company = %+v, %v", among, err)
+		}
 
 		// Pages: newest first, keyset.
 		page, err := s.StudentGrants(ctx, u, nil, 2)
@@ -565,6 +573,9 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (students.Store, wo
 		}
 		if page, _ = s.CompanyGrants(ctx, c1, nil, 10); len(page) != 1 || page[0].StudentUserID != v {
 			t.Fatalf("CompanyGrants after the revocation = %+v", page)
+		}
+		if among, _ := s.ActiveGrantsAmong(ctx, c1, []uuid.UUID{u, v}); len(among) != 1 || among[0].StudentUserID != v {
+			t.Fatalf("ActiveGrantsAmong after the revocation = %+v", among)
 		}
 		if all, err := s.AllGrants(ctx, u); err != nil || len(all) != 3 || all[0].ID != g1.ID {
 			t.Fatalf("AllGrants = %+v, %v", all, err)

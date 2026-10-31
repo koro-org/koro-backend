@@ -15,7 +15,8 @@ import (
 // touch trigger do in PostgreSQL.
 func NewMemStore(now func() time.Time) *MemStore {
 	return &MemStore{now: now, requests: map[uuid.UUID]ContactRequest{}, blocks: map[[2]uuid.UUID]Block{},
-		convs: map[uuid.UUID]Conversation{}, msgs: map[uuid.UUID]Message{}, states: map[[2]uuid.UUID]UserState{}}
+		convs: map[uuid.UUID]Conversation{}, msgs: map[uuid.UUID]Message{}, states: map[[2]uuid.UUID]UserState{},
+		reports: map[uuid.UUID]MessageReport{}, reported: map[uuid.UUID][]ReportedMessage{}}
 }
 
 // MemStore is the in-memory Store. Every method is atomic under one mutex.
@@ -24,9 +25,11 @@ type MemStore struct {
 	now      func() time.Time
 	requests map[uuid.UUID]ContactRequest
 	blocks   map[[2]uuid.UUID]Block
-	convs    map[uuid.UUID]Conversation // conversations (store_mem_conversations.go)
-	msgs     map[uuid.UUID]Message      // conversation_messages
-	states   map[[2]uuid.UUID]UserState // conversation_user_states: (conversation, user)
+	convs    map[uuid.UUID]Conversation      // conversations (store_mem_conversations.go)
+	msgs     map[uuid.UUID]Message           // conversation_messages
+	states   map[[2]uuid.UUID]UserState      // conversation_user_states: (conversation, user)
+	reports  map[uuid.UUID]MessageReport     // message_reports (store_mem_message_reports.go, BE-162b)
+	reported map[uuid.UUID][]ReportedMessage // message_report_messages by report, oldest first
 }
 
 var _ Store = (*MemStore)(nil)
@@ -39,6 +42,8 @@ type MemSnapshot struct {
 	convs    map[uuid.UUID]Conversation
 	msgs     map[uuid.UUID]Message
 	states   map[[2]uuid.UUID]UserState
+	reports  map[uuid.UUID]MessageReport
+	reported map[uuid.UUID][]ReportedMessage
 }
 
 // Snapshot copies the rows.
@@ -46,7 +51,7 @@ func (m *MemStore) Snapshot() MemSnapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return MemSnapshot{requests: maps.Clone(m.requests), blocks: maps.Clone(m.blocks), convs: maps.Clone(m.convs),
-		msgs: maps.Clone(m.msgs), states: maps.Clone(m.states)}
+		msgs: maps.Clone(m.msgs), states: maps.Clone(m.states), reports: maps.Clone(m.reports), reported: maps.Clone(m.reported)}
 }
 
 // Restore puts a snapshot back.
@@ -55,6 +60,7 @@ func (m *MemStore) Restore(s MemSnapshot) {
 	defer m.mu.Unlock()
 	m.requests, m.blocks = maps.Clone(s.requests), maps.Clone(s.blocks)
 	m.convs, m.msgs, m.states = maps.Clone(s.convs), maps.Clone(s.msgs), maps.Clone(s.states)
+	m.reports, m.reported = maps.Clone(s.reports), maps.Clone(s.reported)
 }
 
 // Age moves the updated_at of a request back by d (tests of the retention

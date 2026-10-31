@@ -39,6 +39,11 @@ import (
 // tests: the API's own endpoint (BE-062).
 const testUnsubscribeBase = "https://api.koro.test/api/v1/unsubscribe-links"
 
+// matrixSignedUnsubscribe is the authz matrix's signed unsubscribe link of
+// the BE-062 format (testdata/authz/consent.yaml: user student, purpose
+// commercial_email, valid until 2100-01-01, shared test key "test1").
+const matrixSignedUnsubscribe = "AQFHZwkCPPlZ-LRuER97ECn1AAAAAPSGVwAFdGVzdDHSlz3r8ur9IOaZz6XQc57A00szcsl3aqr3nOZZWSdung"
+
 // matrixReauthPassword is the password the test re-authentication verifier
 // accepts (bodies/consent/*.json carry it in "reauth").
 const matrixReauthPassword = "matrix-reauth-password"
@@ -94,8 +99,8 @@ func (noIYSRecipients) User(context.Context, iys.Type, string) (uuid.UUID, error
 // TestWire_ConsentTasksAndPrivacy pins what consent registers (01 §6.2,
 // §7): the İYS subscription on the critical queue, the reconcile job, the
 // İYS status reconciliation (BE-103; the test client reads İYS states), the
-// retention of the Netgsm webhook items (BE-110) and
-// the KVKK provider.
+// retention of the Netgsm webhook items (BE-110) and of the opaque
+// unsubscribe links (BE-153) and the KVKK provider.
 func TestWire_ConsentTasksAndPrivacy(t *testing.T) {
 	t.Parallel()
 	c := newTestContainer(t)
@@ -109,7 +114,7 @@ func TestWire_ConsentTasksAndPrivacy(t *testing.T) {
 		}
 	}
 	if want := []string{"consent.iys_reconcile 30 5 * * * default", "consent.iys_status_sync 20 * * * * default",
-		"consent.iys_netgsm_purge 40 4 * * * low"}; !slices.Equal(jobs, want) {
+		"consent.iys_netgsm_purge 40 4 * * * low", "consent.unsubscribe_links_cleanup 50 3 * * * low"}; !slices.Equal(jobs, want) {
 		t.Fatalf("consent jobs %q, want %q", jobs, want)
 	}
 	// consent's own subscription; other modules may consume the topic too
@@ -124,7 +129,8 @@ func TestWire_ConsentTasksAndPrivacy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{consent.SubmitIYSTaskName, consent.ReconcileJobName, consent.StatusSyncJobName, netgsm.PurgeJobName} {
+	for _, name := range []string{consent.SubmitIYSTaskName, consent.ReconcileJobName, consent.StatusSyncJobName, netgsm.PurgeJobName,
+		consent.UnsubscribeCleanupJobName} {
 		if !slices.Contains(mux.Types(), name) {
 			t.Errorf("worker does not route %s", name)
 		}
@@ -173,13 +179,16 @@ func TestWire_ConsentReauthIsLateBound(t *testing.T) {
 	}
 }
 
-// TestWire_ConsentOneClickUnsubscribe (BE-062, RFC 8058) end to end on the
-// wired application: consent mints the recipient's own link, notify puts
-// it in the commercial e-mail (List-Unsubscribe headers and footer), and
-// the mailbox provider's one-click POST — form body, no cookie, no Origin —
-// withdraws the consent; repeating it changes nothing. A tampered link is
-// 422; a cross-site browser form post is stopped by CrossOriginProtection
-// (the web page posts from a trusted origin instead).
+// TestWire_ConsentOneClickUnsubscribe (BE-062, BE-153, RFC 8058) end to
+// end on the wired application: consent mints the recipient's own opaque
+// link, notify puts it in the commercial e-mail (List-Unsubscribe headers
+// and footer), and the mailbox provider's one-click POST — form body, no
+// cookie, no Origin — withdraws the consent; repeating it changes nothing.
+// A tampered link is 422 consent.invalid_unsubscribe_link, a token of
+// neither spelling 422 validation_failed; a signed link of the BE-062
+// format (the matrix's, shared test key) still works; a cross-site browser
+// form post is stopped by CrossOriginProtection (the web page posts from a
+// trusted origin instead); the account's erasure retires its links.
 func TestWire_ConsentOneClickUnsubscribe(t *testing.T) {
 	t.Parallel()
 	c := newTestContainer(t)
@@ -206,9 +215,10 @@ func TestWire_ConsentOneClickUnsubscribe(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	link, err := c.consent.links.UnsubscribeURL(uid, purpose)
-	if err != nil || !strings.HasPrefix(link, testUnsubscribeBase+"/") {
-		t.Fatalf("UnsubscribeURL = %q, %v", link, err)
+	link, err := c.consent.links.UnsubscribeURL(ctx, uid, purpose)
+	if err != nil || !strings.HasPrefix(link, testUnsubscribeBase+"/") || len(link) != len(testUnsubscribeBase)+1+43 ||
+		strings.Contains(link, uid.String()) {
+		t.Fatalf("UnsubscribeURL = %q, %v; want <base>/<43 opaque characters>", link, err)
 	}
 	m := notify.Message{UserID: &uid, ToEmail: "alici@example.test", Channel: notify.ChannelEmail, Category: notify.CategoryCommercial,
 		Template: "outreach.commercial", Locale: "tr", DedupeKey: "be062:" + uid.String(), UnsubscribeURL: link,
@@ -270,7 +280,7 @@ func TestWire_ConsentOneClickUnsubscribe(t *testing.T) {
 		t.Fatalf("multipart one-click = %d %s", rec.Code, rec.Body)
 	}
 
-	i, swap := len(path)-10, byte('A') // a character of the MAC
+	i, swap := len(path)-10, byte('A') // a character of the token
 	if path[i] == 'A' {
 		swap = 'B'
 	}
@@ -280,11 +290,29 @@ func TestWire_ConsentOneClickUnsubscribe(t *testing.T) {
 		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"code":"consent.invalid_unsubscribe_link"`) {
 			t.Fatalf("%s tampered link = %d %s", method, rec.Code, rec.Body)
 		}
+		rec = do(method, path+"x", oneClick, "List-Unsubscribe=One-Click") // 44 characters: neither spelling
+		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"code":"validation_failed"`) {
+			t.Fatalf("%s misspelt link = %d %s", method, rec.Code, rec.Body)
+		}
+	}
+	// The matrix's signed link (BE-062 format; user student, valid until
+	// 2100) is still accepted: the links already in the mailboxes work.
+	if rec := do(http.MethodGet, "/api/v1/unsubscribe-links/"+matrixSignedUnsubscribe, nil, ""); rec.Code != http.StatusOK {
+		t.Fatalf("GET signed link = %d %s", rec.Code, rec.Body)
 	}
 	crossSite := map[string]string{"Content-Type": "application/x-www-form-urlencoded", "Sec-Fetch-Site": "cross-site",
 		"Origin": "https://mail.example.test"}
 	if rec := do(http.MethodPost, path, crossSite, "List-Unsubscribe=One-Click"); rec.Code != http.StatusForbidden {
 		t.Fatalf("cross-site browser POST = %d %s, want 403 (CrossOriginProtection)", rec.Code, rec.Body)
+	}
+	// The erasure of the account (consent's KVKK provider) deletes its
+	// links: the link is then refused like an unknown one.
+	if res, err := c.consent.mod.Privacy.Erase(ctx, uid); err != nil || res.Deleted != 1 {
+		t.Fatalf("Erase = %+v, %v; want the one link deleted", res, err)
+	}
+	if rec := do(http.MethodGet, path, nil, ""); rec.Code != http.StatusUnprocessableEntity ||
+		!strings.Contains(rec.Body.String(), `"code":"consent.invalid_unsubscribe_link"`) {
+		t.Fatalf("GET after the erasure = %d %s", rec.Code, rec.Body)
 	}
 
 	// Without CONSENT_UNSUBSCRIBE_BASE_URL no link is minted.

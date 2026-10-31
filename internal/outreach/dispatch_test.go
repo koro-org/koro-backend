@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"uuid"
@@ -625,6 +626,46 @@ func TestRunDispatch_CommercialEmail_LinkRefusedFailsPermanently(t *testing.T) {
 		e.sender.attempts != 0 {
 		t.Fatalf("dispatch %s (%v), sends %d", got.Status, got.LastError, e.sender.attempts)
 	}
+}
+
+// TestRunDispatch_CommercialEmail_LinkStoreFailureRetries (BE-153): an
+// opaque link is stored before the mail goes; a failing link store is no
+// verdict on the dispatch — the run gives its claim back, no mail leaves
+// without a link, and the retry notifies everybody once.
+func TestRunDispatch_CommercialEmail_LinkStoreFailureRetries(t *testing.T) {
+	t.Parallel()
+	links := &flakyLinks{}
+	links.fail.Store(true)
+	e := newEnv(t, func(_ *env, d *outreach.Deps) { d.Unsubscribe = links })
+	e.grantDispatches(t, companyA, 1)
+	ids := e.audience.add(12, true, uniKey(uniA))
+	e.users.add(false, ids...)
+	e.consents.grant(consent.PurposeCommercialEmail, ids...)
+	d := e.schedule(t, "company_admin", e.targetedPost(companyA, outreach.AuthorCompany, uniKey(uniA)), outreach.ChannelEmail)
+	if err := e.deliver(t); err == nil {
+		t.Fatal("a run without links reported success")
+	}
+	if got := e.dispatch(t, d); got.Status != outreach.DispatchScheduled || e.sender.attempts != 0 {
+		t.Fatalf("after the store failure: %s, %d sends", got.Status, e.sender.attempts)
+	}
+	links.fail.Store(false)
+	if err := e.deliver(t); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.dispatch(t, d); got.Status != outreach.DispatchCompleted || len(e.sender.to(notify.ChannelEmail)) != 12 {
+		t.Fatalf("after the retry: %s, %d e-mails", got.Status, len(e.sender.to(notify.ChannelEmail)))
+	}
+}
+
+// flakyLinks is fakeLinks whose store fails (a transient error) while fail
+// is set.
+type flakyLinks struct{ fail atomic.Bool }
+
+func (f *flakyLinks) UnsubscribeURL(ctx context.Context, userID uuid.UUID, purpose consent.Purpose) (string, error) {
+	if f.fail.Load() {
+		return "", errors.New("consent: store unsubscribe link: connection refused")
+	}
+	return fakeLinks{}.UnsubscribeURL(ctx, userID, purpose)
 }
 
 // TestScheduleDispatch_Rules: what a dispatch refuses before any unit is

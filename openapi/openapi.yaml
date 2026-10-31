@@ -34874,15 +34874,16 @@ paths:
       x-koro-surface: public
   /api/v1/unsubscribe-links/{token}:
     get:
-      description: "The data of the unsubscribe confirmation page: the consent purpose of the link (commercial_email). Nothing about the recipient or the current consent state; no side effect (mail scanners open links). A malformed, tampered or expired link is 422 consent.invalid_unsubscribe_link, the same answer for every reason."
+      description: "The data of the unsubscribe confirmation page: the consent purpose of the link (commercial_email). Nothing about the recipient or the current consent state; no side effect (mail scanners open links). A link that is unknown, tampered, expired or of an erased account is 422 consent.invalid_unsubscribe_link, the same answer for every reason; a token of neither spelling is 422 validation_failed."
       operationId: getUnsubscribeLink
       parameters:
-        - description: The signed token of the unsubscribe link (base64url, at most 200 characters)
+        - description: "The token of the unsubscribe link: opaque, 43 base64url characters; links minted before BE-153 carry a signed token of 80 to 200 base64url characters, accepted until they expire"
           in: path
           name: token
           required: true
           schema:
-            description: The signed token of the unsubscribe link (base64url, at most 200 characters)
+            description: "The token of the unsubscribe link: opaque, 43 base64url characters; links minted before BE-153 carry a signed token of 80 to 200 base64url characters, accepted until they expire"
+            pattern: ^(?:[A-Za-z0-9_-]{43}|[A-Za-z0-9_-]{80,200})$
             type: string
       responses:
         "200":
@@ -34904,15 +34905,16 @@ paths:
       x-koro-rate-limit: read_default
       x-koro-surface: public
     post:
-      description: "The List-Unsubscribe-Post target of commercial e-mail: the request body (List-Unsubscribe=One-Click, form or multipart) and its content type are ignored. Withdraws the recipient's consent to the link's purpose through the email_link channel and queues the İYS refusal (RET). Idempotent: 204 whether a consent was withdrawn or none was in force. A malformed, tampered or expired link is 422 consent.invalid_unsubscribe_link."
+      description: "The List-Unsubscribe-Post target of commercial e-mail: the request body (List-Unsubscribe=One-Click, form or multipart) and its content type are ignored. Withdraws the recipient's consent to the link's purpose through the email_link channel and queues the İYS refusal (RET). Idempotent: 204 whether a consent was withdrawn or none was in force, also for a link used before. A link that is unknown, tampered, expired or of an erased account is 422 consent.invalid_unsubscribe_link; a token of neither spelling is 422 validation_failed."
       operationId: confirmUnsubscribe
       parameters:
-        - description: The signed token of the unsubscribe link (base64url, at most 200 characters)
+        - description: "The token of the unsubscribe link: opaque, 43 base64url characters; links minted before BE-153 carry a signed token of 80 to 200 base64url characters, accepted until they expire"
           in: path
           name: token
           required: true
           schema:
-            description: The signed token of the unsubscribe link (base64url, at most 200 characters)
+            description: "The token of the unsubscribe link: opaque, 43 base64url characters; links minted before BE-153 carry a signed token of 80 to 200 base64url characters, accepted until they expire"
+            pattern: ^(?:[A-Za-z0-9_-]{43}|[A-Za-z0-9_-]{80,200})$
             type: string
       responses:
         "204":

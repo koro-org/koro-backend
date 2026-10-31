@@ -28,6 +28,7 @@ consents                    policy:consent_proof
 iys_submissions             policy:consent_proof
 terms_acceptances           policy:terms_acceptance
 iys_netgsm_events           policy:iys_netgsm_event
+unsubscribe_links           policy:unsubscribe_link
 # identity
 users                       policy:dsr_erasure,dormant_account
 sessions                    policy:session_expired

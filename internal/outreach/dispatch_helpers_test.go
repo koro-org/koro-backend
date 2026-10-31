@@ -213,11 +213,12 @@ func (f *fakePosts) DispatchPost(_ context.Context, id uuid.UUID) (outreach.Post
 
 const testUnsubscribe = "https://koro.example.test/unsubscribe"
 
-// fakeLinks mints one link per recipient and purpose, as consent does
-// (BE-062): the base, the purpose and the user ID; fail makes it refuse.
+// fakeLinks mints one link per recipient and purpose (BE-062; consent's
+// are opaque and new per e-mail, BE-153): the base, the purpose and the
+// user ID; fail makes it refuse.
 type fakeLinks struct{ fail error }
 
-func (f fakeLinks) UnsubscribeURL(userID uuid.UUID, purpose consent.Purpose) (string, error) {
+func (f fakeLinks) UnsubscribeURL(_ context.Context, userID uuid.UUID, purpose consent.Purpose) (string, error) {
 	if f.fail != nil {
 		return "", f.fail
 	}

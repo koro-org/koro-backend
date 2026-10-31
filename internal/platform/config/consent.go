@@ -67,12 +67,15 @@ type Consent struct {
 
 	// UnsubscribeBaseURL is where the one-click unsubscribe links of
 	// commercial e-mail point (BE-062; 6563 ret, RFC 8058): the link is
-	// <base>/<token>. The API's own endpoint
+	// <base>/<token>, an opaque token per e-mail (BE-153). The API's own
+	// endpoint
 	// (https://<api>/api/v1/unsubscribe-links) or a web page that renders
 	// GET and forwards POST to it. Empty: no link is minted, so commercial
 	// dispatches cannot use e-mail (push only).
 	UnsubscribeBaseURL string `env:"CONSENT_UNSUBSCRIBE_BASE_URL"`
-	// UnsubscribeTTL is how long an unsubscribe link stays valid.
+	// UnsubscribeTTL is how long an unsubscribe link stays valid (also the
+	// longest a signed link of the BE-062 format minted before BE-153 can
+	// still be accepted).
 	UnsubscribeTTL time.Duration `env:"CONSENT_UNSUBSCRIBE_TTL" envDefault:"8760h"`
 }
 

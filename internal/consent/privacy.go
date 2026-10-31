@@ -22,7 +22,11 @@ const retainedReason = "consent proof (6563, KVKK): kept until 3 years after the
 
 // privacyProvider is the KVKK provider of consent (01 §3.3). The ledger is
 // proof the platform must keep: it is exported in full and never deleted
-// on erasure (02 §4.3; the retention sweeper is BE-057).
+// on erasure (02 §4.3; the retention sweeper is BE-057). The unsubscribe
+// links (unsubscribe_links, BE-153) are not exported — a token digest, the
+// purpose and two dates: no information for the subject, like identity's
+// e-mail tokens, and the e-mails themselves are in notify's export — and
+// are deleted on erasure.
 type privacyProvider struct{ s *service }
 
 var _ privacy.Provider = privacyProvider{}
@@ -81,15 +85,23 @@ func (p privacyProvider) Export(ctx context.Context, userID uuid.UUID) (privacy.
 // every consent still granted is withdrawn by appending a row (channel
 // admin), so that İYS learns of the withdrawal of commercial consents and
 // the consent_proof period starts. The terms of use acceptances stay too:
-// the account's erasure starts their terms_acceptance period (BE-118). It
-// is idempotent: a second run finds nothing granted.
+// the account's erasure starts their terms_acceptance period (BE-118). The
+// opaque unsubscribe links of the account are deleted in the same
+// transaction: they are no proof, and a link of an erased account is then
+// refused like an unknown one (BE-153). It is idempotent: a second run
+// finds nothing granted and no link.
 func (p privacyProvider) Erase(ctx context.Context, userID uuid.UUID) (privacy.EraseResult, error) {
 	cur, err := p.s.d.Store.CurrentOf(ctx, userID)
 	if err != nil {
 		return privacy.EraseResult{}, err
 	}
 	by := authz.SystemActor(ErasureJob)
+	links := 0
 	err = p.s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
+		var err error
+		if links, err = p.s.d.Store.DeleteUnsubscribeLinksOf(ctx, userID); err != nil {
+			return err
+		}
 		for _, c := range cur {
 			if c.Action != Granted {
 				continue
@@ -114,7 +126,7 @@ func (p privacyProvider) Erase(ctx context.Context, userID uuid.UUID) (privacy.E
 	if err != nil {
 		return privacy.EraseResult{}, err
 	}
-	res := privacy.EraseResult{Module: "consent", Retained: len(all) + len(terms)}
+	res := privacy.EraseResult{Module: "consent", Deleted: links, Retained: len(all) + len(terms)}
 	if res.Retained > 0 {
 		res.RetainedReason = retainedReason
 	}

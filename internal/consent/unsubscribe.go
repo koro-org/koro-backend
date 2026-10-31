@@ -2,13 +2,9 @@ package consent
 
 import (
 	"context"
-	"crypto/subtle"
-	"encoding/base64"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"net/url"
 	"strings"
 	"time"
@@ -16,76 +12,80 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/platform/crypto"
+	"koro/internal/platform/db"
+	"koro/internal/platform/queue"
+	"koro/internal/platform/token"
 )
 
-// One-click unsubscribe (BE-062; 6563 and the commercial communication
-// regulation: an easy, free way to refuse in every commercial message;
-// RFC 8058 List-Unsubscribe-Post, which Gmail and Yahoo require of bulk
-// senders).
+// One-click unsubscribe (BE-062, BE-153; 6563 and the commercial
+// communication regulation: an easy, free way to refuse in every commercial
+// message; RFC 8058 List-Unsubscribe-Post, which Gmail and Yahoo require of
+// bulk senders).
 //
-// A link is <CONSENT_UNSUBSCRIBE_BASE_URL>/<token>. The token is stateless:
-// no row is written per message. It is an HMAC (crypto.Deriver over
-// CRYPTO_TOKEN_KEYS, subkey of the purpose consent.unsubscribe, so it never
-// verifies as another kind of derived token) over
+// A link is <CONSENT_UNSUBSCRIBE_BASE_URL>/<token>. Since BE-153 (user
+// decision Q-36: the mailbox industry's practice) the token is opaque: 32
+// bytes from crypto/rand in base64url (platform/token, 43 characters),
+// minted for every commercial e-mail. unsubscribe_links (000162) keeps its
+// SHA-256 with the recipient, the purpose and the expiry; the token itself
+// is nowhere but in that e-mail. Nothing about the recipient can be read
+// from the URL (an access log, the browser history, a forwarded mail), a
+// leaked link is one message's, and the erasure of the account retires
+// every link at once (privacy.go).
 //
-//	version (1) | purpose tag (1) | user ID (16) | expiry, Unix seconds (8) | key ID length (1) | key ID
+// Signed links of the BE-062 format, which carry the user ID in clear, are
+// still in the mailboxes: they are accepted until their own expiry
+// (unsubscribe_legacy.go). The two never collide: an opaque token is
+// exactly 43 characters, a signed one at least 80.
 //
-// followed by the 32-byte MAC, base64url without padding. The token proves
-// who the subject is and which purpose it withdraws; it carries no address
-// and grants nothing else. Rotating CRYPTO_TOKEN_KEYS keeps older links
-// valid while their key stays in the keyring.
-//
-// The endpoints answer every unusable token — malformed, tampered, signed by
-// an unknown key, of an unknown purpose, expired — with the same
+// The endpoints answer every unusable token — malformed, unknown, tampered,
+// signed by an unknown key, expired, of an erased account — with the same
 // ErrInvalidUnsubscribeLink, and a valid one never reveals the subject or
 // the consent state: getUnsubscribeLink shows the purpose only and
 // confirmUnsubscribe is 204 whether a consent was withdrawn or nothing was
-// in force (idempotent).
+// in force (idempotent). A link is not single use: until it expires every
+// click withdraws the consent in force (a mailbox provider retries; a user
+// who granted again since must still be able to refuse from the older
+// mail).
 
 // DefaultUnsubscribeTTL is the lifetime of a link when UnsubscribeConfig
 // sets none (CONSENT_UNSUBSCRIBE_TTL).
 const DefaultUnsubscribeTTL = 365 * 24 * time.Hour
 
 const (
-	// unsubscribeDerive is the crypto.Deriver purpose of the MAC subkey.
-	unsubscribeDerive = "consent.unsubscribe"
-	// unsubscribeVersion is the token layout.
-	unsubscribeVersion byte = 1
-	// unsubscribeFixed is the fixed head: version, tag, user ID, expiry.
-	unsubscribeFixed = 1 + 1 + 16 + 8
-	unsubscribeMAC   = 32
-	maxKeyID         = 64 // crypto.ParseKeyring IDs
-	// MaxUnsubscribeToken bounds the token text (the path parameter).
+	// MaxUnsubscribeToken bounds the token text (the path parameter): the
+	// longest signed token is 164 characters.
 	MaxUnsubscribeToken = 200
+
+	// PolicyUnsubscribeLink is the retention policy of unsubscribe_links
+	// (000162): a job policy, applied by consent.unsubscribe_links_cleanup.
+	PolicyUnsubscribeLink = "unsubscribe_link"
+	// UnsubscribeLinkRetention is how long an expired link is kept when the
+	// policy gives no period (000162's seed: 7 days).
+	UnsubscribeLinkRetention = 7 * 24 * time.Hour
+	// UnsubscribeCleanupJobName deletes the expired links (01 §7: daily
+	// 03:50, low).
+	UnsubscribeCleanupJobName = "consent.unsubscribe_links_cleanup"
+
+	unsubscribeCleanupCron = "50 3 * * *"
 )
 
-// unsubscribeTags are the purposes a link can withdraw. Only commercial
-// e-mail has a link: push is refused in the app, SMS is not used.
-var unsubscribeTags = map[Purpose]byte{PurposeCommercialEmail: 1}
-
-func purposeOfTag(tag byte) (Purpose, bool) {
-	for p, t := range unsubscribeTags {
-		if t == tag {
-			return p, true
-		}
-	}
-	return "", false
-}
-
-// ErrUnsubscribeUnavailable is UnsubscribeURL's answer while no link can be
-// minted (CONSENT_UNSUBSCRIBE_BASE_URL unset): commercial e-mail cannot be
-// sent (outreach refuses it at createDispatch).
-var ErrUnsubscribeUnavailable = errors.New("consent: unsubscribe links are not configured (CONSENT_UNSUBSCRIBE_BASE_URL)")
+// ErrUnsubscribeUnavailable is UnsubscribeURL's answer when no link can be
+// minted, whatever a retry does: CONSENT_UNSUBSCRIBE_BASE_URL is unset
+// (commercial e-mail cannot be sent; outreach refuses it at
+// createDispatch), or the purpose or recipient has no link.
+var ErrUnsubscribeUnavailable = errors.New("consent: no unsubscribe link can be minted")
 
 // UnsubscribeConfig configures the one-click unsubscribe links.
 type UnsubscribeConfig struct {
 	// BaseURL is CONSENT_UNSUBSCRIBE_BASE_URL (https, no query or fragment).
-	// "" → no link is minted (Module.Links is nil).
+	// "" → no link is minted (Module.Links is nil); links minted earlier
+	// still work.
 	BaseURL string
 	// TTL is CONSENT_UNSUBSCRIBE_TTL; 0 → DefaultUnsubscribeTTL.
 	TTL time.Duration
-	// Deriver signs and verifies the tokens (CRYPTO_TOKEN_KEYS). nil → no
-	// link is minted and every link is refused (fail closed).
+	// Deriver verifies the signed links of the BE-062 format still in the
+	// mailboxes (CRYPTO_TOKEN_KEYS). nil → they are refused (fail closed).
+	// Opaque links need no key.
 	Deriver *crypto.Deriver
 }
 
@@ -96,20 +96,14 @@ func (c UnsubscribeConfig) validate() error {
 	if c.BaseURL == "" {
 		return nil
 	}
-	if c.Deriver == nil {
-		return errors.New("consent.Deps.Unsubscribe.BaseURL needs a Deriver (CRYPTO_TOKEN_KEYS)")
-	}
 	u, err := url.Parse(c.BaseURL)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
 		return errors.New("consent.Deps.Unsubscribe.BaseURL must be an absolute https URL without query or fragment")
 	}
-	if n := len(c.Deriver.ActiveKeyID()); n == 0 || n > maxKeyID {
-		return fmt.Errorf("consent: unsubscribe key ID must be 1 to %d characters", maxKeyID)
-	}
 	return nil
 }
 
-func (c UnsubscribeConfig) enabled() bool { return c.BaseURL != "" && c.Deriver != nil }
+func (c UnsubscribeConfig) enabled() bool { return c.BaseURL != "" }
 
 func (c UnsubscribeConfig) ttl() time.Duration {
 	if c.TTL == 0 {
@@ -119,14 +113,16 @@ func (c UnsubscribeConfig) ttl() time.Duration {
 }
 
 // UnsubscribeLinks mints the one-click unsubscribe links of commercial
-// e-mail (BE-062). outreach puts one per recipient in notify.Message
-// (List-Unsubscribe, List-Unsubscribe-Post and the footer).
+// e-mail (BE-062, BE-153). outreach puts one per recipient in
+// notify.Message (List-Unsubscribe, List-Unsubscribe-Post and the footer).
 type UnsubscribeLinks interface {
-	// UnsubscribeURL returns the https link that withdraws userID's consent
-	// to purpose: the base URL, "/" and a signed token that expires after
-	// the configured TTL. ErrUnsubscribeUnavailable without a base URL; an
-	// error for a purpose that has no link (only commercial_email has).
-	UnsubscribeURL(userID uuid.UUID, purpose Purpose) (string, error)
+	// UnsubscribeURL mints a new https link that withdraws userID's
+	// consent to purpose: the base URL, "/" and a fresh opaque token whose
+	// digest it stores with the recipient, expiring after the configured
+	// TTL. One call per e-mail. ErrUnsubscribeUnavailable (wrapped) without
+	// a base URL or for a purpose that has no link (only commercial_email
+	// has); any other error is the store's (transient).
+	UnsubscribeURL(ctx context.Context, userID uuid.UUID, purpose Purpose) (string, error)
 }
 
 // UnsubscribeLink is what getUnsubscribeLink shows: the purpose the link
@@ -135,115 +131,101 @@ type UnsubscribeLink struct {
 	Purpose Purpose
 }
 
+// UnsubscribeToken is one opaque link of unsubscribe_links (000162): the
+// digest of its token, never the token.
+type UnsubscribeToken struct {
+	ID        uuid.UUID
+	TokenHash []byte // SHA-256 of the token (token.Hash)
+	UserID    uuid.UUID
+	Purpose   Purpose
+	CreatedAt time.Time
+	ExpiresAt time.Time
+}
+
+// unsubscribeLinks is the store view of the opaque links.
+func (s *service) unsubscribeLinks() UnsubscribeLinkStore { return s.d.Store }
+
 // UnsubscribeURL implements UnsubscribeLinks.
-func (s *service) UnsubscribeURL(userID uuid.UUID, purpose Purpose) (string, error) {
+func (s *service) UnsubscribeURL(ctx context.Context, userID uuid.UUID, purpose Purpose) (string, error) {
 	u := s.d.Unsubscribe
-	if !u.enabled() {
-		return "", ErrUnsubscribeUnavailable
+	switch {
+	case !u.enabled():
+		return "", fmt.Errorf("%w (CONSENT_UNSUBSCRIBE_BASE_URL is not set)", ErrUnsubscribeUnavailable)
+	case purpose != PurposeCommercialEmail:
+		return "", fmt.Errorf("%w: purpose %s has no unsubscribe link", ErrUnsubscribeUnavailable, purpose)
+	case userID == uuid.Nil():
+		return "", fmt.Errorf("%w: a link needs a user", ErrUnsubscribeUnavailable)
 	}
-	tok, err := mintUnsubscribe(u.Deriver, userID, purpose, s.now().Add(u.ttl()))
+	raw, hash, err := token.New()
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimRight(u.BaseURL, "/") + "/" + tok, nil
+	now := s.now()
+	l := UnsubscribeToken{ID: uuid.NewV7(), TokenHash: hash, UserID: userID, Purpose: purpose, CreatedAt: now, ExpiresAt: now.Add(u.ttl())}
+	if err := s.unsubscribeLinks().InsertUnsubscribeLink(ctx, l); err != nil {
+		return "", fmt.Errorf("consent: store unsubscribe link: %w", err)
+	}
+	return strings.TrimRight(u.BaseURL, "/") + "/" + raw, nil
 }
 
-// mintUnsubscribe signs the token of (userID, purpose) expiring at exp with
-// the active key.
-func mintUnsubscribe(d *crypto.Deriver, userID uuid.UUID, purpose Purpose, exp time.Time) (string, error) {
-	tag, ok := unsubscribeTags[purpose]
-	switch {
-	case !ok:
-		return "", fmt.Errorf("consent: purpose %s has no unsubscribe link", purpose)
-	case userID == uuid.Nil():
-		return "", errors.New("consent: unsubscribe link without a user")
-	case exp.Unix() <= 0:
-		return "", errors.New("consent: unsubscribe link expiry before the epoch")
-	}
-	kid := d.ActiveKeyID()
-	if len(kid) == 0 || len(kid) > maxKeyID {
-		return "", fmt.Errorf("consent: unsubscribe key ID must be 1 to %d characters", maxKeyID)
-	}
-	head := make([]byte, 0, unsubscribeFixed+1+len(kid)+unsubscribeMAC)
-	head = append(head, unsubscribeVersion, tag)
-	head = append(head, userID[:]...)
-	head = binary.BigEndian.AppendUint64(head, uint64(exp.Unix())) //nolint:gosec // G115: positive, checked above
-	head = append(head, byte(len(kid)))                            //nolint:gosec // G115: 1..64, checked above
-	head = append(head, kid...)
-	mac, err := d.DerivedToken(unsubscribeDerive, kid, head)
-	if err != nil {
-		return "", fmt.Errorf("consent: unsubscribe link: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(append(head, mac...)), nil
-}
-
-// unsubscribeClaim is what a verified token says.
+// unsubscribeClaim is what a usable link says.
 type unsubscribeClaim struct {
 	UserID  uuid.UUID
 	Purpose Purpose
+	signed  bool // the BE-062 format
 }
 
-// verifyUnsubscribe checks raw and returns its claim, or the reason it is
-// refused ("" on success). The reason is for the log only: every refusal
-// is the same error to the caller. The MAC is checked before anything in
-// the token is trusted, in constant time.
-func verifyUnsubscribe(d *crypto.Deriver, raw string, now time.Time) (unsubscribeClaim, string) {
-	if d == nil {
-		return unsubscribeClaim{}, "not_configured"
-	}
+// resolveUnsubscribe returns the claim of raw, or the reason it is refused
+// ("" on success). The reason is for the log only: every refusal is the
+// same error to the caller. err is a store failure, not a verdict.
+func (s *service) resolveUnsubscribe(ctx context.Context, raw string) (unsubscribeClaim, string, error) {
 	// Even Strict base64 decoding ignores CR/LF. A path credential must
 	// use the minted base64url spelling, without embedded line breaks.
 	if raw == "" || len(raw) > MaxUnsubscribeToken || strings.ContainsAny(raw, "\r\n") {
-		return unsubscribeClaim{}, "malformed"
+		return unsubscribeClaim{}, "malformed", nil
 	}
-	b, err := base64.RawURLEncoding.Strict().DecodeString(raw)
-	if err != nil || len(b) < unsubscribeFixed+2+unsubscribeMAC {
-		return unsubscribeClaim{}, "malformed"
+	if len(raw) != token.EncodedLen {
+		c, reason := verifySigned(s.d.Unsubscribe.Deriver, raw, s.now())
+		return c, reason, nil
 	}
-	n := int(b[unsubscribeFixed])
-	if n == 0 || n > maxKeyID || len(b) != unsubscribeFixed+1+n+unsubscribeMAC {
-		return unsubscribeClaim{}, "malformed"
+	if !token.WellFormed(raw) {
+		return unsubscribeClaim{}, "malformed", nil
 	}
-	head, mac := b[:unsubscribeFixed+1+n], b[unsubscribeFixed+1+n:]
-	want, err := d.DerivedToken(unsubscribeDerive, string(head[unsubscribeFixed+1:]), head)
-	if err != nil {
-		return unsubscribeClaim{}, "unknown_key"
-	}
-	if subtle.ConstantTimeCompare(mac, want) != 1 {
-		return unsubscribeClaim{}, "bad_mac"
-	}
-	// Signed by us from here on.
-	if head[0] != unsubscribeVersion {
-		return unsubscribeClaim{}, "version"
-	}
-	purpose, ok := purposeOfTag(head[1])
-	if !ok {
-		return unsubscribeClaim{}, "purpose"
-	}
-	var uid uuid.UUID
-	copy(uid[:], head[2:18])
-	exp := binary.BigEndian.Uint64(head[18:unsubscribeFixed])
+	l, err := s.unsubscribeLinks().UnsubscribeLinkByHash(ctx, token.Hash(raw))
 	switch {
-	case uid == uuid.Nil():
-		return unsubscribeClaim{}, "malformed"
-	case exp > math.MaxInt64 || !now.Before(time.Unix(int64(exp), 0)):
-		return unsubscribeClaim{}, "expired"
+	case errors.Is(err, ErrNotFound):
+		return unsubscribeClaim{}, "unknown", nil
+	case err != nil:
+		return unsubscribeClaim{}, "", err
+	case !token.Verify(raw, l.TokenHash):
+		// The store looked the digest up; it is compared again in
+		// constant time, whatever the store's comparison was.
+		return unsubscribeClaim{}, "unknown", nil
+	case !s.now().Before(l.ExpiresAt):
+		return unsubscribeClaim{}, "expired", nil
 	}
-	return unsubscribeClaim{UserID: uid, Purpose: purpose}, ""
+	return unsubscribeClaim{UserID: l.UserID, Purpose: l.Purpose}, "", nil
 }
 
-// unsubscribeSubject verifies raw and authorises its subject: the token is
+// unsubscribeSubject resolves raw and authorises its subject: the link is
 // the subject's proof of identity for the withdrawal of its own consent
 // (consent.record.create, O cell; the HTTP caller — anonymous, a mailbox
 // provider or another signed-in user — is not the actor).
 func (s *service) unsubscribeSubject(ctx context.Context, raw string) (unsubscribeClaim, authz.Actor, error) {
-	c, reason := verifyUnsubscribe(s.d.Unsubscribe.Deriver, raw, s.now())
-	if reason != "" {
+	c, reason, err := s.resolveUnsubscribe(ctx, raw)
+	switch {
+	case err != nil:
+		return unsubscribeClaim{}, authz.Actor{}, err
+	case reason != "":
 		s.d.Log.LogAttrs(ctx, slog.LevelInfo, "unsubscribe link refused", slog.String("reason", reason))
 		return unsubscribeClaim{}, authz.Actor{}, ErrInvalidUnsubscribeLink
+	case c.signed:
+		// How long the signed format is still used (00 T-395: its code
+		// goes once no such link can be valid).
+		s.d.Log.LogAttrs(ctx, slog.LevelInfo, "unsubscribe link of the signed format accepted")
 	}
 	subject, uid := authz.Actor{Kind: authz.KindUser, UserID: c.UserID}, c.UserID
-	err := authz.Can(ctx, subject, authz.ConsentRecordCreate, authz.Resource{Type: authz.TypeConsentRecord, OwnerUserID: &uid})
+	err = authz.Can(ctx, subject, authz.ConsentRecordCreate, authz.Resource{Type: authz.TypeConsentRecord, OwnerUserID: &uid})
 	if err != nil {
 		return unsubscribeClaim{}, authz.Actor{}, err
 	}
@@ -295,5 +277,40 @@ func (s *service) Unsubscribe(ctx context.Context, raw string) error {
 		s.d.Log.LogAttrs(ctx, slog.LevelInfo, "unsubscribe: no consent in force", slog.String("user_id", c.UserID.String()),
 			slog.String("purpose", string(c.Purpose)))
 	}
+	return nil
+}
+
+// UnsubscribeCleanupJob is consent.unsubscribe_links_cleanup (01 §7; daily
+// 03:50, low): the links that expired before now − the period go, at most
+// batchSize per statement (idempotent). period gives the unsubscribe_link
+// policy's period at run time (hooks.retention); nil or a period ≤ 0 →
+// UnsubscribeLinkRetention. The job runs whether links are minted or not:
+// the links of an earlier configuration expire too.
+func (m Module) UnsubscribeCleanupJob(period func(context.Context) (time.Duration, error)) queue.Job {
+	return queue.Job{
+		Name: UnsubscribeCleanupJobName, Cron: unsubscribeCleanupCron, Queue: queue.Low, Unique: 23 * time.Hour,
+		Handle: func(ctx context.Context) error { return m.svc.cleanupUnsubscribeLinks(ctx, period) },
+	}
+}
+
+func (s *service) cleanupUnsubscribeLinks(ctx context.Context, period func(context.Context) (time.Duration, error)) error {
+	keep := UnsubscribeLinkRetention
+	if period != nil {
+		d, err := period(ctx)
+		if err != nil {
+			return fmt.Errorf("%s: %w", UnsubscribeCleanupJobName, err)
+		}
+		if d > 0 {
+			keep = d
+		}
+	}
+	cutoff, links := s.now().Add(-keep), s.unsubscribeLinks()
+	n, err := db.Drain(ctx, batchSize, func(ctx context.Context) (int, error) {
+		return links.DeleteExpiredUnsubscribeLinks(ctx, cutoff, batchSize)
+	})
+	if err != nil {
+		return fmt.Errorf("%s: %w", UnsubscribeCleanupJobName, err)
+	}
+	s.d.Log.LogAttrs(ctx, slog.LevelInfo, "cleanup done", slog.String("job", UnsubscribeCleanupJobName), slog.Int("deleted", n))
 	return nil
 }

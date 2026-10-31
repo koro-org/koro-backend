@@ -49,8 +49,10 @@ import (
 //	        webhook items, 000147; purged daily whatever the adapter);
 //	        tests preset netgsm.NewMemStore
 //	cfg     tests only; nil → the consent section of the loaded configuration
-//	deriver nil → crypto.Deriver over CRYPTO_TOKEN_KEYS (the one-click
-//	        unsubscribe tokens, BE-062); tests preset the shared test deriver
+//	deriver nil → crypto.Deriver over CRYPTO_TOKEN_KEYS (verifies the signed
+//	        one-click unsubscribe links of the BE-062 format still in the
+//	        mailboxes; BE-153 mints opaque ones); tests preset the shared
+//	        test deriver
 //	reauth  the re-authentication verifier of the R operations (03 §6.2:
 //	        identity.Reauth.Verify). identity is L4 and builds after
 //	        consent, so the binding is late: BE-014 sets c.consent.reauth
@@ -74,9 +76,9 @@ import (
 // "// sync-write: consent.Recorder.Record", 01 §6.3), consent.Checker
 // (notify's commercial message port, BE-015; outreach dispatch) and
 // consent.Notices (identity registration shows the current privacy notice).
-// links (consent.UnsubscribeLinks, BE-062) is set only with
-// CONSENT_UNSUBSCRIBE_BASE_URL: outreach mints each commercial e-mail
-// recipient's link with it and refuses commercial e-mail while it is nil.
+// links (consent.UnsubscribeLinks, BE-062, BE-153) is set only with
+// CONSENT_UNSUBSCRIBE_BASE_URL: outreach mints each commercial e-mail's
+// opaque link with it and refuses commercial e-mail while it is nil.
 type consentWiring struct {
 	store       consent.Store
 	tx          db.TxManager
@@ -357,6 +359,10 @@ func (w *consentWiring) build(c *container) error {
 		return err
 	}
 	w.mod, w.svc, w.links = mod, mod.Service, mod.Links
+	// The opaque unsubscribe links go 7 days after their expiry
+	// (unsubscribe_link, a job policy like email_token; BE-153), whatever
+	// the base URL: the links of an earlier configuration expire too.
+	w.jobs = append(w.jobs, mod.UnsubscribeCleanupJob(c.retention(consent.PolicyUnsubscribeLink, 0, consent.UnsubscribeLinkRetention)))
 	c.privacy = append(c.privacy, mod.Privacy)
 	c.sweepers = append(c.sweepers, mod.Sweeper)
 	return nil
@@ -367,7 +373,8 @@ func (w *consentWiring) build(c *container) error {
 // reads İYS consent.iys_status_sync (hourly :20, default; BE-103, BE-105),
 // with the Netgsm adapter its backup check consent.iys_netgsm_recheck
 // (every 10 minutes, default) and always consent.iys_netgsm_purge (04:40,
-// low: the retention of the webhook items; BE-110).
+// low: the retention of the webhook items; BE-110) and
+// consent.unsubscribe_links_cleanup (03:50, low; BE-153).
 func (w *consentWiring) tasks(c *container) {
 	w.mod.Subscribe(c.infra.subs)
 	for _, j := range append(w.mod.Jobs(), w.jobs...) {

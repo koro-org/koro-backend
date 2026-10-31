@@ -27,9 +27,10 @@
 //     consent.submit_iys task delivers it (a no-op for other purposes) and
 //     consent.iys_reconcile (05:30) retries what is still open.
 //   - Every commercial e-mail carries a one-click unsubscribe link
-//     (unsubscribe.go, BE-062): a signed, expiring token bound to the user
-//     and the purpose; following it withdraws through the email_link
-//     channel, idempotently, without revealing the subject or its state.
+//     (unsubscribe.go, BE-062, BE-153): an opaque, expiring token per
+//     e-mail whose digest maps to the user and the purpose; following it
+//     withdraws through the email_link channel, idempotently, without
+//     revealing the subject or its state.
 //   - A refusal given in İYS itself reaches the ledger through
 //     consent.iys_status_sync (iys_status.go, BE-103, BE-105) as a
 //     withdrawal of channel iys; optionally (CONSENT_IYS_SYNC_MAX_AGE)
@@ -187,8 +188,9 @@ type Deps struct {
 	// ran. It needs an İYS reader (IYSFeed or IYSStates). 0 → no hold.
 	IYSSyncMaxAge time.Duration
 	// Unsubscribe configures the one-click unsubscribe links of commercial
-	// e-mail (BE-062). Zero → no link is minted (commercial e-mail is
-	// refused upstream) and every link is refused.
+	// e-mail (BE-062, BE-153). Zero → no link is minted (commercial e-mail
+	// is refused upstream); opaque links minted earlier still work, signed
+	// ones need the Deriver.
 	Unsubscribe UnsubscribeConfig
 	// TermsWatch hears of every published terms of use version (identity,
 	// late bound; BE-124). nil → nobody is told (no notice to the readers;

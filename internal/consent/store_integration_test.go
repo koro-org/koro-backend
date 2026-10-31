@@ -295,7 +295,7 @@ func TestUnsubscribe_Gorm_ConcurrentClicksWithdrawOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.clk.Advance(time.Second)
-	link, err := e.mod.Links.UnsubscribeURL(uid, consent.PurposeCommercialEmail)
+	link, err := e.mod.Links.UnsubscribeURL(t.Context(), uid, consent.PurposeCommercialEmail)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +350,7 @@ func TestUnsubscribe_Gorm_OutboxFailureRollsBackWithdrawal(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.clk.Advance(time.Second)
-	link, err := e.mod.Links.UnsubscribeURL(uid, purpose)
+	link, err := e.mod.Links.UnsubscribeURL(t.Context(), uid, purpose)
 	if err != nil {
 		t.Fatal(err)
 	}

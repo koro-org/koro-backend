@@ -28,6 +28,7 @@ type memStore struct {
 	notices  map[uuid.UUID]Notice
 	consents []Consent // insertion order
 	terms    []TermsAcceptance
+	links    []UnsubscribeToken // unsubscribe_links (BE-153)
 	subs     map[uuid.UUID]Submission
 	syncs    map[IYSChannel]IYSSync
 	feeds    map[string]IYSFeedState

@@ -435,6 +435,9 @@ func TestMigrations_EachStepRestoresThePreviousSchema(t *testing.T) {
 		if latest >= 148 {
 			wantPolicies = 49 // + terms_acceptance (000148, BE-118)
 		}
+		if latest >= 162 {
+			wantPolicies = 50 // + unsubscribe_link (000162, BE-153)
+		}
 		if defs, policies := rowCount(seedRows[81]), rowCount(seedRows[90]); defs != 10 || policies != wantPolicies {
 			t.Fatalf("seed rows after the last up: signal defs %d, retention policies %d; want 10 and %d", defs, policies, wantPolicies)
 		}

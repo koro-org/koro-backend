@@ -395,14 +395,17 @@ func (s *service) send(ctx context.Context, d Dispatch, org orgs.OrgSummary, u i
 		}
 		m.Data = map[string]any{"title": title, "org_name": org.Name, "url": s.d.LinkBaseURL + link.String()}
 		if d.Commercial {
-			// The recipient's own link (BE-062). Without one the mail
-			// cannot go out lawfully; nothing a retry can fix.
+			// The recipient's own link of this e-mail (BE-062, BE-153).
+			// Without one the mail cannot go out lawfully.
 			if s.d.Unsubscribe == nil {
 				return sendFailed, fmt.Errorf("%w: commercial e-mail without unsubscribe links", errPermanentSend)
 			}
-			link, err := s.d.Unsubscribe.UnsubscribeURL(u.ID, consent.PurposeCommercialEmail)
-			if err != nil {
+			link, err := s.d.Unsubscribe.UnsubscribeURL(ctx, u.ID, consent.PurposeCommercialEmail)
+			switch {
+			case errors.Is(err, consent.ErrUnsubscribeUnavailable):
 				return sendFailed, fmt.Errorf("%w: unsubscribe link: %w", errPermanentSend, err)
+			case err != nil:
+				return sendFailed, err // the link store; the run is retried (BE-153)
 			}
 			m.UnsubscribeURL = link
 		}

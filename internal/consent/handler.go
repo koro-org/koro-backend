@@ -95,7 +95,7 @@ func Register(api huma.API, svc Service) {
 		Description: "An inactive purpose is never in force for anyone; the ledger keeps its rows.",
 	}, op.Meta{Action: string(authz.ConsentPurposeManage), Surface: op.SurfaceAdmin, Reauth: true, RateLimit: op.RateReauth}), h.updatePurpose)
 
-	// One-click unsubscribe (BE-062): the token in the path is the
+	// One-click unsubscribe (BE-062, BE-153): the token in the path is the
 	// subject's credential (consent.record.create, O); cookies and bearer
 	// tokens play no part. read_default/write_default (anonymous: per IP,
 	// fail open), not token_confirm: mailbox providers post one-click
@@ -106,7 +106,8 @@ func Register(api huma.API, svc Service) {
 		Summary: "Show what an unsubscribe link withdraws",
 		Description: "The data of the unsubscribe confirmation page: the consent purpose of the link (commercial_email). " +
 			"Nothing about the recipient or the current consent state; no side effect (mail scanners open links). " +
-			"A malformed, tampered or expired link is 422 consent.invalid_unsubscribe_link, the same answer for every reason.",
+			"A link that is unknown, tampered, expired or of an erased account is 422 consent.invalid_unsubscribe_link, the same answer " +
+			"for every reason; a token of neither spelling is 422 validation_failed.",
 	}, op.Meta{Action: string(authz.ConsentRecordCreate), Surface: op.SurfacePublic}), h.getUnsubscribe)
 
 	huma.Register(api, op.Koro(huma.Operation{
@@ -115,7 +116,8 @@ func Register(api huma.API, svc Service) {
 		Description: "The List-Unsubscribe-Post target of commercial e-mail: the request body (List-Unsubscribe=One-Click, " +
 			"form or multipart) and its content type are ignored. Withdraws the recipient's consent to the link's purpose " +
 			"through the email_link channel and queues the İYS refusal (RET). Idempotent: 204 whether a consent was " +
-			"withdrawn or none was in force. A malformed, tampered or expired link is 422 consent.invalid_unsubscribe_link.",
+			"withdrawn or none was in force, also for a link used before. A link that is unknown, tampered, expired or of an erased " +
+			"account is 422 consent.invalid_unsubscribe_link; a token of neither spelling is 422 validation_failed.",
 	}, op.Meta{Action: string(authz.ConsentRecordCreate), Surface: op.SurfacePublic, Idempotency: op.IdempotencyOptional}), h.confirmUnsubscribe)
 
 	huma.Register(api, op.Koro(huma.Operation{
@@ -566,9 +568,13 @@ func (h handler) updatePurpose(ctx context.Context, in *updatePurposeInput) (*pu
 // ---- getUnsubscribeLink, confirmUnsubscribe
 
 type unsubscribeInput struct {
-	// No schema bounds: a token of the wrong length gets the same
-	// consent.invalid_unsubscribe_link as every other unusable token.
-	Token string `path:"token" doc:"The signed token of the unsubscribe link (base64url, at most 200 characters)"`
+	// The pattern is the spelling of both formats (BE-153): an opaque token
+	// (43 characters) and a signed one of the BE-062 format (80 to 164,
+	// bounded at MaxUnsubscribeToken). Another spelling is 422
+	// validation_failed before any lookup: it reveals nothing the
+	// specification does not. Every well-spelt unusable token gets the one
+	// consent.invalid_unsubscribe_link.
+	Token string `path:"token" pattern:"^(?:[A-Za-z0-9_-]{43}|[A-Za-z0-9_-]{80,200})$" doc:"The token of the unsubscribe link: opaque, 43 base64url characters; links minted before BE-153 carry a signed token of 80 to 200 base64url characters, accepted until they expire"`
 }
 
 type unsubscribeOutput struct {

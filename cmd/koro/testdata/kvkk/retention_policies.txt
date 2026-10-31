@@ -36,6 +36,7 @@ dormant_account               none:disabled until the lawyer decides a period (T
 consent_proof                 sweeper:consent
 terms_acceptance              sweeper:consent
 iys_netgsm_event              job:consent.iys_netgsm_purge
+unsubscribe_link              job:consent.unsubscribe_links_cleanup
 # notify (01 §7 notify.purge)
 notification_delivery         sweeper:notify
 email_suppression             sweeper:notify

@@ -166,6 +166,59 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (orgs.Store, world)
 		}
 	})
 
+	t.Run("companies: tax identity, domain verification, CompaniesOf (BE-165)", func(t *testing.T) {
+		t.Parallel()
+		s, _ := newStore(t)
+		ctx := t.Context()
+		co := insert(t, s, newOrg(orgs.KindCompany, "Vergili Şirket"))
+		other := insert(t, s, newOrg(orgs.KindCompany, "Profilsiz Şirket"))
+		club := insert(t, s, newOrg(orgs.KindClub, "Vergisiz Kulüp"))
+		vkn, tckn := orgs.TaxIDVKN, orgs.TaxIDTCKN
+		no, office, domain := "1234567890", "Kadıköy", "vergili.example.test"
+		verified := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+		if err := s.InsertCompany(ctx, orgs.Company{OrgID: co.ID, TaxIDKind: &vkn, TaxNo: &no, TaxOffice: &office,
+			EmailDomain: &domain, DomainVerifiedAt: &verified}); err != nil {
+			t.Fatalf("InsertCompany: %v", err)
+		}
+		c, err := s.GetCompany(ctx, co.ID)
+		if err != nil || *c.TaxIDKind != vkn || *c.TaxNo != no || *c.TaxOffice != office || !c.DomainVerifiedAt.Equal(verified) ||
+			!c.TaxIDValid() || !c.DomainVerified() {
+			t.Fatalf("GetCompany = %+v, %v", c, err)
+		}
+		// The CHECKs: a number belongs to kind vkn, kind vkn has one, the office is trimmed.
+		for name, bad := range map[string]func(c orgs.Company) orgs.Company{
+			"kind tckn with a number": func(c orgs.Company) orgs.Company { c.TaxIDKind = &tckn; return c },
+			"kind vkn without one":    func(c orgs.Company) orgs.Company { c.TaxNo = nil; return c },
+			"an 11-digit number":      func(c orgs.Company) orgs.Company { n := "10000000146"; c.TaxNo = &n; return c },
+			"an untrimmed office":     func(c orgs.Company) orgs.Company { o := " Kadıköy"; c.TaxOffice = &o; return c },
+			"an unknown kind": func(c orgs.Company) orgs.Company {
+				k := orgs.TaxIDKind("mersis")
+				c.TaxIDKind, c.TaxNo = &k, nil
+				return c
+			},
+		} {
+			if _, err := s.UpdateCompany(ctx, bad(c)); !errors.Is(err, problem.ErrValidation) {
+				t.Errorf("UpdateCompany with %s: %v", name, err)
+			}
+		}
+		// A TCKN is kept as its kind only; the verification is cleared.
+		c.TaxIDKind, c.TaxNo, c.DomainVerifiedAt = &tckn, nil, nil
+		got, err := s.UpdateCompany(ctx, c)
+		if err != nil || *got.TaxIDKind != tckn || got.TaxNo != nil || got.DomainVerifiedAt != nil || got.DomainVerified() {
+			t.Fatalf("UpdateCompany = %+v, %v", got, err)
+		}
+		if err := s.InsertCompany(ctx, orgs.Company{OrgID: other.ID}); err != nil {
+			t.Fatal(err)
+		}
+		all, err := s.CompaniesOf(ctx, []uuid.UUID{co.ID, other.ID, club.ID, uuid.NewV7()})
+		if err != nil || len(all) != 2 || all[co.ID].TaxIDKind == nil || all[other.ID].TaxIDKind != nil {
+			t.Fatalf("CompaniesOf = %+v, %v", all, err)
+		}
+		if none, err := s.CompaniesOf(ctx, nil); err != nil || len(none) != 0 {
+			t.Fatalf("CompaniesOf(nil) = %v, %v", none, err)
+		}
+	})
+
 	t.Run("members: parent kind, uniqueness, end", func(t *testing.T) {
 		t.Parallel()
 		s, w := newStore(t)

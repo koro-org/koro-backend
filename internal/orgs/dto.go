@@ -2,6 +2,8 @@ package orgs
 
 import (
 	"time"
+
+	"koro/internal/platform/taxid"
 )
 
 // CompanyPublicDTO is the public company profile (04 §2.2 OrgPublicDTO.company).
@@ -13,6 +15,21 @@ type CompanyPublicDTO struct {
 	// the org (its company admins and owner, platform admins).
 	EmailDomain      string     `json:"email_domain,omitempty" doc:"Only for the company's editors (updateOrg)"`
 	DomainVerifiedAt *time.Time `json:"domain_verified_at,omitempty" doc:"Only for the company's editors"`
+	// The tax identity and review facts (BE-165): only for the company's
+	// editors (owner, company admins, platform admins).
+	*CompanyTaxDTO
+}
+
+// CompanyTaxDTO is the tax identity and the review facts of a company
+// (BE-165) for its editors and platform staff. A TCKN is never returned
+// (06 H-60): tax_id_kind tckn only says a valid one was given.
+type CompanyTaxDTO struct {
+	TaxIDKind      string `json:"tax_id_kind,omitempty" enum:"vkn,tckn" doc:"Which tax identifier the company gave"`
+	TaxNo          string `json:"tax_no,omitempty" doc:"The VKN; masked to its last 4 digits unless tax_no_masked is false (platform admins)"`
+	TaxNoMasked    bool   `json:"tax_no_masked,omitempty" doc:"tax_no shows only its last 4 digits"`
+	TaxOffice      string `json:"tax_office,omitempty"`
+	TaxIDValid     bool   `json:"tax_id_valid" doc:"A VKN or TCKN that passes its check digits was given"`
+	DomainVerified bool   `json:"domain_verified" doc:"email_domain is verified: the founder's or an editor's verified address is at it"`
 }
 
 // OrgPublicDTO is the public profile of an org (04 §2.2 getOrg). club and
@@ -41,6 +58,7 @@ type CompanyDTO struct {
 	EmailDomain      string     `json:"email_domain,omitempty"`
 	DomainVerifiedAt *time.Time `json:"domain_verified_at,omitempty"`
 	HQCity           string     `json:"hq_city,omitempty"`
+	CompanyTaxDTO
 }
 
 // OrgDTO is an org as its admins and platform staff see it (createCompany,
@@ -96,6 +114,19 @@ type AdminOrgDTO struct {
 	ClosedAt   *time.Time `json:"closed_at,omitempty"`
 	CreatedBy  string     `json:"created_by,omitempty" doc:"User who registered the org"`
 	CreatedAt  time.Time  `json:"created_at"`
+	// Company is the review facts of a company (BE-165): the approval list
+	// warns about a missing or invalid tax identifier and an unverified
+	// e-mail domain.
+	Company *AdminCompanyReviewDTO `json:"company,omitempty"`
+}
+
+// AdminCompanyReviewDTO is what the admin list shows of a company's
+// application (BE-165); the numbers are on getOrg.
+type AdminCompanyReviewDTO struct {
+	TaxIDKind      string `json:"tax_id_kind,omitempty" enum:"vkn,tckn"`
+	TaxIDValid     bool   `json:"tax_id_valid" doc:"A VKN or TCKN that passes its check digits was given"`
+	EmailDomain    string `json:"email_domain,omitempty"`
+	DomainVerified bool   `json:"domain_verified" doc:"false: no e-mail domain, or no applicant address at it (warn the reviewer)"`
 }
 
 // AdminOrgList is a page of AdminOrgDTO.
@@ -122,6 +153,8 @@ func toPublicDTO(v OrgView) OrgPublicDTO {
 		d.Company = &CompanyPublicDTO{SectorCode: str(c.SectorCode), SizeBand: str(c.SizeBand), HQCity: str(c.HQCity)}
 		if v.Manage {
 			d.Company.EmailDomain, d.Company.DomainVerifiedAt = str(c.EmailDomain), utc(c.DomainVerifiedAt)
+			t := toTaxDTO(*c, v.FullTaxNo)
+			d.Company.CompanyTaxDTO = &t
 		}
 	}
 	return d
@@ -141,7 +174,7 @@ func toOrgDTO(v OrgView) OrgDTO {
 	if c := v.Company; c != nil {
 		d.Company = &CompanyDTO{
 			SectorCode: str(c.SectorCode), SizeBand: str(c.SizeBand), EmailDomain: str(c.EmailDomain),
-			DomainVerifiedAt: utc(c.DomainVerifiedAt), HQCity: str(c.HQCity),
+			DomainVerifiedAt: utc(c.DomainVerifiedAt), HQCity: str(c.HQCity), CompanyTaxDTO: toTaxDTO(*c, v.FullTaxNo),
 		}
 	}
 	return d
@@ -165,7 +198,32 @@ func toAdminDTO(v OrgView) AdminOrgDTO {
 	if o.CreatedBy != nil {
 		d.CreatedBy = o.CreatedBy.String()
 	}
+	if c := v.Company; c != nil {
+		d.Company = &AdminCompanyReviewDTO{
+			TaxIDKind: kindStr(c.TaxIDKind), TaxIDValid: c.TaxIDValid(), EmailDomain: str(c.EmailDomain),
+			DomainVerified: c.DomainVerified(),
+		}
+	}
 	return d
+}
+
+// toTaxDTO maps the tax identity of c: the VKN masked unless full.
+func toTaxDTO(c Company, full bool) CompanyTaxDTO {
+	d := CompanyTaxDTO{
+		TaxIDKind: kindStr(c.TaxIDKind), TaxNo: str(c.TaxNo), TaxOffice: str(c.TaxOffice), TaxIDValid: c.TaxIDValid(),
+		DomainVerified: c.DomainVerified(),
+	}
+	if d.TaxNo != "" && !full {
+		d.TaxNo, d.TaxNoMasked = taxid.Mask(d.TaxNo, taxid.MaskedDigits), true
+	}
+	return d
+}
+
+func kindStr(k *TaxIDKind) string {
+	if k == nil {
+		return ""
+	}
+	return string(*k)
 }
 
 func utc(t *time.Time) *time.Time {

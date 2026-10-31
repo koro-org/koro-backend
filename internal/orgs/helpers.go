@@ -160,6 +160,9 @@ func cleanEmailDomain(loc, s string) (*string, error) {
 	if !emailDomainRe.MatchString(d) || len(d) > 253 {
 		return nil, problem.Field(loc, "must be a domain name such as example.com")
 	}
+	if freeMailDomain(d) { // BE-165: not a company's own domain
+		return nil, problem.Field(loc, "must be the company's own domain, not a free e-mail provider")
+	}
 	return &d, nil
 }
 

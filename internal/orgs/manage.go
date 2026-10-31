@@ -3,6 +3,7 @@ package orgs
 import (
 	"context"
 	"errors"
+	"strings"
 	"uuid"
 
 	"koro/internal/authz"
@@ -29,11 +30,20 @@ type OrgPatch struct {
 	SizeBand    *string
 	EmailDomain *string
 	HQCity      *string
+	// The tax identity (BE-165): a VKN or a TCKN replaces the identifier on
+	// file; empty values are refused (Q-45: it is never cleared).
+	TaxNo     *string
+	TCKN      *string
+	TaxOffice *string
 }
 
 func (p OrgPatch) companyFields() bool {
-	return p.SectorCode != nil || p.SizeBand != nil || p.EmailDomain != nil || p.HQCity != nil
+	return p.SectorCode != nil || p.SizeBand != nil || p.EmailDomain != nil || p.HQCity != nil || p.taxID() ||
+		p.TaxOffice != nil
 }
+
+// taxID reports whether p touches the tax identifier.
+func (p OrgPatch) taxID() bool { return p.TaxNo != nil || p.TCKN != nil }
 
 func (p OrgPatch) empty() bool {
 	return p.Name == nil && p.Description == nil && p.Logo == nil && !p.ClearLogo && p.WebsiteURL == nil &&
@@ -91,7 +101,7 @@ func (s *service) UpdateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, if
 			return err
 		}
 		if p.companyFields() {
-			cc, err := s.patchCompany(ctx, o, p)
+			cc, err := s.patchCompany(ctx, a, o, p)
 			if err != nil {
 				return err
 			}
@@ -105,12 +115,21 @@ func (s *service) UpdateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, if
 	if err != nil {
 		return OrgView{}, err
 	}
-	return s.view(ctx, out)
+	v, err := s.view(ctx, out)
+	v.FullTaxNo = fullTaxNo(a)
+	return v, err
 }
 
 // applyPatch validates the org fields of p and returns the new row and the
 // names of the changed fields (audit metadata: names only, no values).
 func (s *service) applyPatch(ctx context.Context, a authz.Actor, o Org, p OrgPatch) (Org, []string, error) {
+	// The patch-wide refusals come before any write (the logo attach).
+	if p.companyFields() && o.Kind != KindCompany {
+		return Org{}, nil, ErrCompanyFieldOnly
+	}
+	if err := p.keepsTaxIdentity(); err != nil {
+		return Org{}, nil, err
+	}
 	next, changed := o, []string{}
 	if p.Name != nil {
 		n, err := cleanName("body.name", *p.Name)
@@ -150,14 +169,35 @@ func (s *service) applyPatch(ctx context.Context, a authz.Actor, o Org, p OrgPat
 	case p.ClearLogo:
 		next.LogoFileID, changed = nil, append(changed, "logo_file_id")
 	}
-	if p.companyFields() && o.Kind != KindCompany {
-		return Org{}, nil, ErrCompanyFieldOnly
-	}
 	return next, changed, nil
 }
 
-// patchCompany writes the company fields of p.
-func (s *service) patchCompany(ctx context.Context, o Org, p OrgPatch) ([]string, error) {
+// keepsTaxIdentity refuses a patch that would clear the tax identifier or
+// the tax office (Q-45: they are replaced, never cleared; a company from
+// before BE-165 may lack them until it gives them). It runs before any
+// write; patchCompany checks the values themselves.
+func (p OrgPatch) keepsTaxIdentity() error {
+	blank := func(s *string) bool { return s == nil || strings.TrimSpace(*s) == "" }
+	clearID := p.taxID() && blank(p.TaxNo) && blank(p.TCKN)
+	clearOffice := false
+	if p.TaxOffice != nil {
+		office, err := cleanTaxOffice(*p.TaxOffice)
+		if err != nil {
+			return err
+		}
+		clearOffice = office == nil
+	}
+	if clearID || clearOffice {
+		return taxIDRequired(clearID, clearOffice)
+	}
+	return nil
+}
+
+// patchCompany writes the company fields of p. A new e-mail domain loses
+// its verification; an editor who is a member of the company and whose
+// account address is at the domain verifies it (BE-165: a platform
+// admin's own address never does).
+func (s *service) patchCompany(ctx context.Context, a authz.Actor, o Org, p OrgPatch) ([]string, error) {
 	c, err := s.companies().GetCompany(ctx, o.ID)
 	if errors.Is(err, ErrNotFound) {
 		if err := s.companies().InsertCompany(ctx, Company{OrgID: o.ID}); err != nil {
@@ -178,6 +218,12 @@ func (s *service) patchCompany(ctx context.Context, o Org, p OrgPatch) ([]string
 	if err != nil {
 		return nil, err
 	}
+	if cf.tax, err = cleanTaxID(val(p.TaxNo), val(p.TCKN)); err != nil {
+		return nil, err
+	}
+	if cf.taxOffice, err = cleanTaxOffice(val(p.TaxOffice)); err != nil {
+		return nil, err
+	}
 	var changed []string
 	if p.SectorCode != nil {
 		c.SectorCode, changed = cf.sector, append(changed, "sector_code")
@@ -190,9 +236,25 @@ func (s *service) patchCompany(ctx context.Context, o Org, p OrgPatch) ([]string
 			c.DomainVerifiedAt = nil // a new domain is not verified
 		}
 		c.EmailDomain, changed = cf.domain, append(changed, "email_domain")
+		if c.EmailDomain != nil && c.DomainVerifiedAt == nil && a.MemberOf(o.ID) {
+			ok, err := s.holdsAddressAt(ctx, a.UserID, *c.EmailDomain)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				now := s.now()
+				c.DomainVerifiedAt, changed = &now, append(changed, "domain_verified_at")
+			}
+		}
 	}
 	if p.HQCity != nil {
 		c.HQCity, changed = cf.hq, append(changed, "hq_city")
+	}
+	if p.taxID() {
+		c.TaxIDKind, c.TaxNo, changed = cf.tax.kind, cf.tax.no, append(changed, "tax_id")
+	}
+	if p.TaxOffice != nil {
+		c.TaxOffice, changed = cf.taxOffice, append(changed, "tax_office")
 	}
 	if _, err := s.companies().UpdateCompany(ctx, c); err != nil {
 		return nil, err

@@ -15,6 +15,7 @@ import (
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/page"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/taxid"
 )
 
 // Register adds the parties operations (04 §2.13) to api: legal parties
@@ -225,10 +226,10 @@ func toDTO(v PartyView) LegalPartyDTO {
 	}
 	if !v.FullTaxIDs {
 		if out.TaxNo != "" {
-			out.TaxNo = maskTail(out.TaxNo, maskedDigits)
+			out.TaxNo = taxid.Mask(out.TaxNo, taxid.MaskedDigits)
 		}
 		if out.MersisNo != "" {
-			out.MersisNo = maskTail(out.MersisNo, maskedDigits)
+			out.MersisNo = taxid.Mask(out.MersisNo, taxid.MaskedDigits)
 		}
 	} else {
 		out.TCKNOnFile = v.TCKNOnFile

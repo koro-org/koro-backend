@@ -17,6 +17,7 @@ import (
 
 	"koro/internal/platform/db"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/taxid"
 	"koro/internal/platform/textx"
 )
 
@@ -245,8 +246,22 @@ func (s *MemStore) InsertCompany(_ context.Context, c Company) error {
 	}
 	now := s.stamp(time.Time{})
 	c.CreatedAt, c.UpdatedAt = now, now
+	c.DomainVerifiedAt = db.UTCPtr(c.DomainVerifiedAt)
 	s.companies[c.OrgID] = c
 	return nil
+}
+
+// CompaniesOf implements Store.
+func (s *MemStore) CompaniesOf(_ context.Context, orgIDs []uuid.UUID) (map[uuid.UUID]Company, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[uuid.UUID]Company, len(orgIDs))
+	for _, id := range orgIDs {
+		if c, ok := s.companies[id]; ok {
+			out[id] = c
+		}
+	}
+	return out, nil
 }
 
 func checkCompany(c Company) error {
@@ -259,9 +274,23 @@ func checkCompany(c Company) error {
 		return errCheck
 	case c.EmailDomain != nil && !emailDomainRe.MatchString(*c.EmailDomain):
 		return errCheck
+	case c.TaxIDKind != nil && *c.TaxIDKind != TaxIDVKN && *c.TaxIDKind != TaxIDTCKN: // companies_tax_id_kind_chk
+		return errCheck
+	case c.TaxNo != nil && !taxNoRe.MatchString(*c.TaxNo): // companies_tax_no_chk
+		return errCheck
+	case c.TaxIDKind != nil && *c.TaxIDKind == TaxIDVKN && c.TaxNo == nil: // companies_tax_vkn_chk
+		return errCheck
+	case c.TaxNo != nil && (c.TaxIDKind == nil || *c.TaxIDKind != TaxIDVKN): // companies_tax_no_kind_chk
+		return errCheck
+	case c.TaxOffice != nil && (*c.TaxOffice == "" || strings.TrimSpace(*c.TaxOffice) != *c.TaxOffice ||
+		utf8.RuneCountInString(*c.TaxOffice) > taxid.MaxTaxOffice): // companies_tax_office_chk
+		return errCheck
 	}
 	return nil
 }
+
+// taxNoRe is companies_tax_no_chk.
+var taxNoRe = regexp.MustCompile(`^[0-9]{10}$`)
 
 // GetCompany implements Store.
 func (s *MemStore) GetCompany(_ context.Context, orgID uuid.UUID) (Company, error) {
@@ -289,6 +318,7 @@ func (s *MemStore) UpdateCompany(_ context.Context, c Company) (Company, error) 
 		return Company{}, ErrNotFound
 	}
 	cur.SectorCode, cur.SizeBand, cur.EmailDomain, cur.HQCity = c.SectorCode, c.SizeBand, c.EmailDomain, c.HQCity
+	cur.DomainVerifiedAt, cur.TaxIDKind, cur.TaxNo, cur.TaxOffice = db.UTCPtr(c.DomainVerifiedAt), c.TaxIDKind, c.TaxNo, c.TaxOffice
 	if err := checkCompany(cur); err != nil {
 		return Company{}, err
 	}

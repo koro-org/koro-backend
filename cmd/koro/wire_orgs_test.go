@@ -125,7 +125,8 @@ func TestActor_MembershipsFromHook(t *testing.T) {
 		t.Fatalf("before: %+v, %v", a.Memberships, err)
 	}
 	founder := authz.Actor{Kind: authz.KindUser, UserID: u.ID, SessionID: a.SessionID, StudentStatus: authz.StudentNone}
-	v, err := e.c.orgs.svc.CreateCompany(ctx, founder, orgs.CompanyInput{Name: "Kanca Şirketi", SectorCode: "software", SizeBand: "1-10"})
+	v, err := e.c.orgs.svc.CreateCompany(ctx, founder, orgs.CompanyInput{Name: "Kanca Şirketi", SectorCode: "software", SizeBand: "1-10",
+		TaxNo: "1234567890", TaxOffice: "Kadıköy"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +252,8 @@ func TestWire_OrgsVerifiedNoticeEmail(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	v, err := c.orgs.svc.CreateCompany(ctx, founder, orgs.CompanyInput{Name: "Bildirim Şirketi", SectorCode: "software", SizeBand: "1-10"})
+	v, err := c.orgs.svc.CreateCompany(ctx, founder, orgs.CompanyInput{Name: "Bildirim Şirketi", SectorCode: "software", SizeBand: "1-10",
+		TaxNo: "1234567890", TaxOffice: "Kadıköy"})
 	if err != nil {
 		t.Fatal(err)
 	}

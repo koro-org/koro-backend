@@ -1,16 +1,31 @@
-package parties
+// Package taxid checks Turkish tax identifiers: the vergi kimlik numarası
+// (VKN), the T.C. kimlik numarası (TCKN) and the MERSİS number. parties
+// (the legal party of money, 02 §17.1) and orgs (the company application,
+// BE-165) share it (BE-111: one owner per helper).
+//
+// Tax identifiers are never logged, not even masked (05 §11.2), and a TCKN
+// is in no response (06 H-60); VKN and MERSİS are shown masked to all but
+// the staff that needs them (Mask). Callers translate a false result into
+// their own field error.
+//
+// The package is a leaf: it imports only the standard library.
+package taxid
 
 import (
 	"strings"
 )
 
-// Tax identifiers (05 §11.2: never logged, not even masked; TCKN never in a
-// response). The format checks below run before anything is stored; the
-// database repeats the digit-count CHECKs (02 §17.1).
+const (
+	// MaskedDigits is the number of trailing digits Mask keeps (06 H-60).
+	MaskedDigits = 4
+	// MaxTaxOffice is the longest vergi dairesi name, in runes (02 §17.1
+	// legal_parties.tax_office; companies.tax_office follows it).
+	MaxTaxOffice = 100
+)
 
-// digitsOnly removes the spaces, dots and hyphens people type into numbers
-// and reports whether only ASCII digits remain.
-func digitsOnly(s string) (string, bool) {
+// Digits removes the spaces, dots and hyphens people type into numbers and
+// reports whether only ASCII digits remain (an empty result is false).
+func Digits(s string) (string, bool) {
 	s = strings.Map(func(r rune) rune {
 		switch r {
 		case ' ', '.', '-', '\t':
@@ -27,6 +42,24 @@ func digitsOnly(s string) (string, bool) {
 		}
 	}
 	return s, true
+}
+
+// VKN normalizes s (Digits) and reports whether it is a valid VKN.
+func VKN(s string) (string, bool) {
+	d, ok := Digits(s)
+	return d, ok && ValidVKN(d)
+}
+
+// TCKN normalizes s (Digits) and reports whether it is a valid TCKN.
+func TCKN(s string) (string, bool) {
+	d, ok := Digits(s)
+	return d, ok && ValidTCKN(d)
+}
+
+// MERSIS normalizes s (Digits) and reports whether it is a MERSİS number.
+func MERSIS(s string) (string, bool) {
+	d, ok := Digits(s)
+	return d, ok && ValidMERSIS(d)
 }
 
 // ValidVKN reports a vergi kimlik numarası: 10 digits whose last digit is
@@ -87,14 +120,14 @@ func ValidMERSIS(s string) bool {
 	if len(s) != 16 {
 		return false
 	}
-	_, ok := digitsOnly(s)
+	_, ok := Digits(s)
 	return ok
 }
 
-// maskTail keeps the last n digits of an identifier for the org roles
-// (BE-036: VKN and MERSİS are masked outside finance and platform admins):
-// "1234567890" → "******7890".
-func maskTail(s string, n int) string {
+// Mask keeps the last n characters of an identifier and stars the rest
+// (BE-036, 06 H-60): Mask("1234567890", 4) = "******7890". A value of at
+// most n characters is starred whole.
+func Mask(s string, n int) string {
 	if len(s) <= n {
 		return strings.Repeat("*", len(s))
 	}

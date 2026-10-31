@@ -128,6 +128,30 @@ type Registrations interface {
 	SummaryOf(ctx context.Context, userID uuid.UUID) ([]RegistrationSummary, error)
 }
 
+// EventParticipation is one participation of a student a company may
+// target (BE-161, Q-39): the event and whether the student was checked in.
+type EventParticipation struct {
+	EventID  uuid.UUID
+	Attended bool
+}
+
+// Participations is what students needs from events (L8, built after
+// students: bound at call time; nil until events provides it) for the event
+// keys of the audience (BE-161, Q-39). Which event is targetable — a
+// published or completed public event, neither of a sensitive category nor
+// organised by a sensitive club, that started within the last year or has
+// yet to start — is events' rule (events.Targeting).
+type Participations interface {
+	// TargetableParticipations returns, per user among userIDs, the
+	// participations of targetable events (a confirmed, checked-in or
+	// no-show registration; Attended: checked in). A user without one is
+	// missing.
+	TargetableParticipations(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID][]EventParticipation, error)
+	// TargetableEvents reports which of eventIDs are targetable now; an
+	// unknown event is missing (false).
+	TargetableEvents(ctx context.Context, eventIDs []uuid.UUID) (map[uuid.UUID]bool, error)
+}
+
 // Files is what students needs from files (L2) for the avatar and the CVs
 // (purposes avatar and cv; 04 §1.14).
 type Files interface {

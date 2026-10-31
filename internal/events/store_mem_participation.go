@@ -2,6 +2,8 @@ package events
 
 import (
 	"context"
+	"slices"
+	"time"
 	"uuid"
 )
 
@@ -72,5 +74,31 @@ func (s *MemStore) Undone(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]boo
 			out[c.ID] = true
 		}
 	}
+	return out, nil
+}
+
+// TargetableParticipations implements Store.
+func (s *MemStore) TargetableParticipations(_ context.Context, userIDs []uuid.UUID, since time.Time) ([]TargetableRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []TargetableRow{}
+	for _, r := range s.regs {
+		e, ok := s.events[r.EventID]
+		if !ok || e.OrgID != r.OrgID || !slices.Contains(userIDs, r.UserID) || !heldPlace(r.Status) ||
+			(e.Status != StatusPublished && e.Status != StatusCompleted) || e.Visibility != VisibilityPublic ||
+			e.IsSensitiveCategory || e.StartsAt.Before(since) {
+			continue
+		}
+		out = append(out, TargetableRow{UserID: r.UserID, EventID: e.ID, OrgID: e.OrgID, Attended: r.Status == RegCheckedIn})
+	}
+	slices.SortFunc(out, func(a, b TargetableRow) int {
+		if c := a.UserID.Compare(b.UserID); c != 0 {
+			return c
+		}
+		if c := s.events[b.EventID].StartsAt.Compare(s.events[a.EventID].StartsAt); c != 0 {
+			return c
+		}
+		return a.EventID.Compare(b.EventID)
+	})
 	return out, nil
 }

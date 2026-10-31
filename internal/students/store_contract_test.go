@@ -440,6 +440,46 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (students.Store, wo
 		}
 	})
 
+	// BE-161: the event keys are a dimension of count_segment like any
+	// other — one event narrowed by a class year to 9 students has no
+	// number, the database applies k ≥ 10 too.
+	t.Run("segment: event keys under count_segment's threshold", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		uni := w.university(t)
+		put := func(keys ...string) {
+			p := newProfile(t, s, w, uni)
+			p.AudienceKeys, p.AudienceEligible = append([]string{"all", "uni:a"}, keys...), true
+			if _, err := s.UpdateProfile(ctx, p); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for range 9 {
+			put("year:3", "event:e1", "attended:e1")
+		}
+		for range 4 {
+			put("year:2", "event:e1")
+		}
+		for _, c := range []struct {
+			keys []string
+			dims int16
+			want int // -1: below 10 (no number)
+		}{
+			{[]string{"event:e1"}, 1, 13},
+			{[]string{"event:e1", "year:3"}, 2, -1},      // 9
+			{[]string{"attended:e1"}, 1, -1},             // 9
+			{[]string{"attended:e1", "uni:a"}, 2, -1},    // 9
+			{[]string{"event:e1", "event:e2"}, 1, 13},    // OR inside the dimension
+			{[]string{"event:e1", "attended:e1"}, 2, -1}, // AND across: the 9 attendees
+		} {
+			n, ok, err := s.CountSegment(ctx, c.keys, c.dims)
+			if err != nil || (c.want < 0) == ok || (ok && n != c.want) || (!ok && n != 0) {
+				t.Errorf("CountSegment(%v, %d) = %d, %v, %v; want %d", c.keys, c.dims, n, ok, err, c.want)
+			}
+		}
+	})
+
 	t.Run("grants: insert once per source, owner scoping, revoke, pages, export, purge", func(t *testing.T) {
 		t.Parallel()
 		s, w := newStore(t)

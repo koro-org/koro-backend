@@ -13,11 +13,13 @@ import (
 
 // AudienceSpec is a targeting (02 §9.1, §13.1): audience keys, OR inside a
 // dimension and AND across dimensions. The dimensions are 'all', 'uni',
-// 'dept', 'year' and 'club'. Their number is derived from the keys
+// 'dept', 'year', 'club', 'event' and 'attended' (BE-161: the
+// registrants and the attendees of targetable events). Their number is
+// derived from the keys
 // (T-132), never taken from the caller: a wrong count would size another
 // set than the one targeted.
 type AudienceSpec struct {
-	Keys []string // 'all', 'uni:<uuid>', 'dept:<uuid>', 'year:<1-8>', 'club:<uuid>'
+	Keys []string // 'all', 'uni:<uuid>', 'dept:<uuid>', 'year:<1-8>', 'club:<uuid>', 'event:<uuid>', 'attended:<uuid>'
 }
 
 // Audience is the segment contract of outreach (01 §4.9): sizes with
@@ -57,7 +59,7 @@ func dimensionOf(k string) (string, bool) {
 		return "", false
 	}
 	switch dim + ":" {
-	case keyUni, keyDept, keyClub:
+	case keyUni, keyDept, keyClub, keyEvent, keyAttended:
 		id, err := uuid.Parse(val)
 		return dim, err == nil && id != uuid.Nil() && id.String() == val
 	case keyYear:
@@ -69,10 +71,11 @@ func dimensionOf(k string) (string, bool) {
 
 // compile validates spec, derives its dimensions and removes the keys of
 // sensitive clubs (03 Y2: special-category data never targets; the stored
-// keys hold none either, this guards a stale key and a sloppy caller). A
-// club dimension left without a key matches nobody: the dimension count
-// stays what the spec asked for, so removing a key never widens the
-// audience.
+// keys hold none either, this guards a stale key and a sloppy caller) and
+// of events that are not targetable now (BE-161: members-only, sensitive,
+// cancelled or too old; the same guard). A dimension left without a key
+// matches nobody: the dimension count stays what the spec asked for, so
+// removing a key never widens the audience.
 func (s *service) compile(ctx context.Context, spec AudienceSpec) (segment, error) {
 	if len(spec.Keys) == 0 || len(spec.Keys) > maxAudienceKeys {
 		return segment{}, ErrInvalidAudience.Wrap(fmt.Errorf("students: %d audience keys", len(spec.Keys)))
@@ -104,7 +107,11 @@ func (s *service) compile(ctx context.Context, spec AudienceSpec) (segment, erro
 			return found && sensitive[uuid.MustParse(id)]
 		})
 	}
-	var n int16 // at most 4: uni, dept, year, club ('all' alone is 1)
+	keys, err := s.dropUntargetable(ctx, keys)
+	if err != nil {
+		return segment{}, err
+	}
+	var n int16 // at most 6: uni, dept, year, club, event, attended ('all' alone is 1)
 	for range dims {
 		n++
 	}

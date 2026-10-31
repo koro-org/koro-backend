@@ -195,7 +195,8 @@ func (w *eventsWiring) build(c *container) error {
 	w.mod, w.svc, w.built, w.keys, w.files, w.hub = mod, mod.Service, store, d.Tickets, d.Files, hub
 	c.shutdownHooks = append(c.shutdownHooks, hub.CloseAll)
 	c.privacy = append(c.privacy, mod.Privacy)
-	c.students.registrations = eventsRegistrations{svc: mod.Service} // T-241
+	c.students.registrations = eventsRegistrations{svc: mod.Service}   // T-241
+	c.students.participations = eventsParticipations{svc: mod.Service} // BE-161
 	c.sweepers = append(c.sweepers, mod.Sweeper)
 	return nil
 }
@@ -239,6 +240,29 @@ func (r eventsRegistrations) SummaryOf(ctx context.Context, userID uuid.UUID) ([
 			RegisteredAt: x.RegisteredAt}
 	}
 	return out, nil
+}
+
+// eventsParticipations adapts events.Targeting to students.Participations
+// (BE-161, Q-39: the event keys of the audience; events applies the
+// targetable rule, students the commercial consent).
+type eventsParticipations struct{ svc events.Targeting }
+
+func (p eventsParticipations) TargetableParticipations(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID][]students.EventParticipation, error) {
+	rows, err := p.svc.TargetableParticipations(ctx, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID][]students.EventParticipation, len(rows))
+	for u, xs := range rows {
+		for _, x := range xs {
+			out[u] = append(out[u], students.EventParticipation{EventID: x.EventID, Attended: x.Attended})
+		}
+	}
+	return out, nil
+}
+
+func (p eventsParticipations) TargetableEvents(ctx context.Context, eventIDs []uuid.UUID) (map[uuid.UUID]bool, error) {
+	return p.svc.TargetableEvents(ctx, eventIDs)
 }
 
 // tasks: event.cancelled → events.cancel_registrations, the

@@ -18,6 +18,13 @@ var (
 	// address its members.
 	ErrSensitiveTarget = problem.New(problem.Invalid, "outreach.sensitive_target",
 		"Sensitive clubs cannot be targeted")
+	// ErrEventNotTargetable: a company (or the platform) names an event
+	// that is not targetable (BE-161, Q-39): unknown, a draft, cancelled,
+	// members-only or university-only, of a sensitive category or a
+	// sensitive club's, or started more than a year ago. One answer for
+	// every reason, so it reveals nothing about a non-public event.
+	ErrEventNotTargetable = problem.New(problem.Invalid, "outreach.event_not_targetable",
+		"The event cannot be targeted")
 	// ErrTargetOutOfScope: a key outside the actor's targeting scope (03
 	// k16): a club_admin beyond club:<own club>, a university_rep without
 	// uni:<own university> or with a club, an actor without a targeting

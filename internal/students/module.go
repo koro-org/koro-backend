@@ -281,7 +281,9 @@ type Deps struct {
 	// graduation check treats every candidate as not renewed.
 	Verifications Verifications
 	// Consents checks consents in force for the nightly reconciliation of
-	// the mirrored flags. nil → the reconciliation is skipped.
+	// the mirrored flags and the commercial consent behind the event keys
+	// (BE-161). nil → the reconciliation is skipped and no profile holds
+	// an event key.
 	Consents ConsentChecker
 	// Files attaches, serves and deletes the avatar and the CVs. nil →
 	// avatar_file_id and createMyCv/downloadMyCv are refused (503), no
@@ -301,6 +303,11 @@ type Deps struct {
 	// builds later). nil, or a nil reader → the member card's count and
 	// the admin view's registrations are absent.
 	Registrations func() Registrations
+	// Participations returns the events reader of the event keys (BE-161),
+	// read at call time (events builds later). nil, or a nil reader → no
+	// profile holds an event key and a spec naming events matches nobody
+	// (fail closed).
+	Participations func() Participations
 
 	// Contacts is identity's address lookup of level 3 contact sharing.
 	// nil → no level 3 view carries an e-mail.

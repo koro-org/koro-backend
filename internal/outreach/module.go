@@ -8,16 +8,19 @@
 //
 //   - Targeting (02 §9.1, §13.1; DECISIONS-LOG 2026-10-02): OR inside a
 //     dimension, AND across dimensions. The dimensions are the university,
-//     the department, the class year and the club; a definition without
-//     any is refused. The audience keys and the dimension count are always
+//     the department, the class year, the club and the event (BE-161:
+//     the registrants or the attendees of targetable events, only students
+//     whose commercial consent is in force); a definition without any, or
+//     with more than four at once, is refused. The audience keys and the dimension count are always
 //     derived from the definition, never taken from a caller (T-132).
 //   - Scope (03 k16): a club_admin targets only club:<own club> (a
 //     sensitive club too, without k ≥ 10: the club addresses its own
 //     members); a university_rep or career_staff targets uni:<own
-//     university>, narrowed by department or year, never a club; a
-//     company (and platform_admin) targets every dimension but never a
-//     sensitive club (03 Y2: 422 outreach.sensitive_target) and needs
-//     k ≥ 10. Anything else is 422 outreach.target_out_of_scope.
+//     university>, narrowed by department or year, never a club or an
+//     event; a company (and platform_admin) targets every dimension but
+//     never a sensitive club (03 Y2: 422 outreach.sensitive_target) nor an
+//     event that is not targetable (422 outreach.event_not_targetable)
+//     and needs k ≥ 10. Anything else is 422 outreach.target_out_of_scope.
 //   - k-anonymity (04 §V.2): counts come from students.Audience.Count
 //     (count_segment), which sees only audience eligible students: verified,
 //     adult, active. Below 10 there is no number at all — the count is
@@ -221,6 +224,11 @@ type Deps struct {
 	Consents     Consents      // consent: the commercial filter
 	Sender       Sender        // notify
 	Posts        Posts         // feed (bound late by cmd/koro)
+
+	// Events reports the targetable events of the event dimension
+	// (BE-161). nil → no event is targetable (422
+	// outreach.event_not_targetable: fail closed).
+	Events Events
 
 	// Unsubscribe mints each recipient's one-click unsubscribe link of
 	// commercial e-mail (consent, BE-062; notify puts it in the footer and

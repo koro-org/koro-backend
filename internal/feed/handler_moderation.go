@@ -3,7 +3,6 @@ package feed
 import (
 	"context"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 	"uuid"
@@ -159,7 +158,7 @@ func (h handler) createTargetedPost(ctx context.Context, in *createTargetedInput
 		return nil, err
 	}
 	if d := b.Audience.Definition; d != nil {
-		def, err := definitionOf("body.audience.definition", *d)
+		def, err := d.Definition("body.audience.definition") // outreach parses its own DTO (BE-161: every dimension)
 		if err != nil {
 			return nil, err
 		}
@@ -170,42 +169,6 @@ func (h handler) createTargetedPost(ctx context.Context, in *createTargetedInput
 		return nil, err
 	}
 	return &targetedOutput{ETag: v.ETag, Body: toTargetedDTO(v)}, nil
-}
-
-// definitionOf parses the inline definition of a targeted post; outreach
-// validates its content (Compile).
-func definitionOf(loc string, in outreach.SegmentDefinitionDTO) (outreach.Definition, error) {
-	parse := func(dim string, raw []string) ([]uuid.UUID, error) {
-		var out []uuid.UUID
-		for i, s := range raw {
-			id, err := uuid.Parse(s)
-			if err != nil {
-				return nil, problem.Field(loc+"."+dim+"["+strconv.Itoa(i)+"]", "must be a UUID")
-			}
-			out = append(out, id)
-		}
-		return out, nil
-	}
-	var (
-		d   outreach.Definition
-		err error
-	)
-	if d.Uni, err = parse("uni", in.Uni); err != nil {
-		return outreach.Definition{}, err
-	}
-	if d.Dept, err = parse("dept", in.Dept); err != nil {
-		return outreach.Definition{}, err
-	}
-	if d.Club, err = parse("club", in.Club); err != nil {
-		return outreach.Definition{}, err
-	}
-	for i, y := range in.Year {
-		if y < 1 || y > 8 {
-			return outreach.Definition{}, problem.Field(loc+".year["+strconv.Itoa(i)+"]", "class years are 1-8")
-		}
-		d.Year = append(d.Year, int16(y))
-	}
-	return d, nil
 }
 
 // ---- createContentReport

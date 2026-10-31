@@ -3,6 +3,7 @@ package directory
 import (
 	"cmp"
 	"context"
+	"math"
 	"slices"
 	"time"
 	"unicode/utf8"
@@ -164,6 +165,12 @@ func (s *MemStore) ListClaims(_ context.Context, f ClaimFilter, after *uuid.UUID
 		}
 		return c.Status == f.Status && (keep == nil || keep[c.ClubOrgID])
 	}, after, f.Status != ClaimPending, limit), nil
+}
+
+// CountClaims implements Store: ListClaims' filter, unpaged.
+func (s *MemStore) CountClaims(ctx context.Context, f ClaimFilter) (int, error) {
+	rows, err := s.ListClaims(ctx, f, nil, math.MaxInt)
+	return len(rows), err
 }
 
 // ClaimOfFile implements Store.

@@ -103,3 +103,11 @@ func TestOrgAdminCreate_JoinsCallerTx_Rollback(t *testing.T) {
 		t.Fatalf("same name twice in one transaction: %v", err)
 	}
 }
+
+func TestStatsStore_Contract_Gorm(t *testing.T) {
+	t.Parallel()
+	statsContract(t, func(t *testing.T) (orgs.Store, world) {
+		d := testutil.NewDB(t)
+		return orgs.NewGormStore(d.ORM), pgWorld(d)
+	})
+}

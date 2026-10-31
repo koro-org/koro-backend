@@ -255,3 +255,11 @@ func TestService_Postgres_CreateAcceptAndExpire(t *testing.T) {
 		t.Fatalf("sweep after 12 months = %+v, %v", r, err)
 	}
 }
+
+func TestStatsStore_Contract_Gorm(t *testing.T) {
+	t.Parallel()
+	statsContract(t, func(t *testing.T) (messaging.Store, world) {
+		d := testutil.NewDB(t)
+		return messaging.NewGormStore(d.ORM), pgWorld(d)
+	})
+}

@@ -492,3 +492,11 @@ func TestExpireUnpaid_Postgres(t *testing.T) {
 		t.Fatalf("units sold after expiry = %d, %v", got.QuantitySold, err)
 	}
 }
+
+func TestStatsStore_Contract_Gorm(t *testing.T) {
+	t.Parallel()
+	statsContract(t, func(t *testing.T) (orders.Store, world) {
+		d := testutil.NewDB(t)
+		return orders.NewGormStore(d.ORM), pgWorld(d)
+	})
+}

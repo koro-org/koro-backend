@@ -11,6 +11,8 @@ import (
 // contract (store_contract_test.go). Writes join the transaction carried
 // by ctx.
 type Store interface {
+	StatsStore // the counts of a company's panel (stats.go, BE-163)
+
 	// Insert writes a new request. A pending request of the same company
 	// and student is ErrRequestPending (contact_requests_pending_uq).
 	Insert(ctx context.Context, r ContactRequest) (ContactRequest, error)

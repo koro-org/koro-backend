@@ -1,0 +1,112 @@
+# Authz matrix of the stats module (03 §5.23, 04 §2.23; BE-163). 4 read operations × 18 personas + variants.
+# getAdminStats is the admin surface: platform_admin 200, everyone else 403 (03 §7.2-3), anonymous 401.
+# The org panels are the org's management surface (03 §3.6): the panel's role on the org 200 (club_admin;
+# recruiter and company_admin; university_rep) and platform_admin 200; members of the org without the role and
+# the other platform roles 403; everyone else 404. A sensitive club's panel is visible to its members only (Y2:
+# every platform role 404; club_admin_sensitive, a helper, reads it). The panel of another org kind is 404 for
+# whoever may read the panels there (platform_admin), 403 for its members. An unknown org is 404 for everyone
+# (the org is read first). No fixture: the panels read the orgs, directory and module rows the other modules seed.
+version: 1
+groups:
+  # signed-in users who are neither members of company_a nor platform staff (company_a's surface: 404).
+  not_company_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin, event_staff,
+                  university_rep, other_company_member]
+  # signed-in users who are neither members of uni_a nor platform staff (uni_a's surface: 404).
+  not_uni_a: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin, event_staff,
+              company_member, company_admin, other_company_member]
+  # signed-in users who are not members of club_sensitive (club_member is).
+  not_club_sensitive: [user_unverified, student, student_minor, club_admin, other_club_admin, event_staff,
+                       university_rep, company_member, company_admin, other_company_member]
+  # platform roles without a stats cell.
+  other_staff: [moderator, support, dpo, finance_admin, talent_auditor]
+  # signed-in users without a platform role.
+  no_platform_role: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                     event_staff, university_rep, company_member, company_admin, other_company_member]
+
+operations:
+  getAdminStats:
+    method: GET
+    path: /api/v1/admin/stats
+    action: stats.platform.read
+    expect: { anonymous: 401, platform_admin: 200, "@no_platform_role": 403, "@other_staff": 403 }
+    variants:
+      - name: with_range
+        query: { from: "2026-01-01", to: "2026-06-30" }
+        expect: { anonymous: 401, platform_admin: 200, "@no_platform_role": 403, "@other_staff": 403 }
+      - name: bad_range
+        query: { from: "2026-06-30", to: "2026-01-01" }
+        note: from after to is 422 after the authorisation
+        expect: { anonymous: 401, platform_admin: 422, "@no_platform_role": 403, "@other_staff": 403 }
+
+  getClubStats:
+    method: GET
+    path: /api/v1/orgs/{org_id}/stats/club
+    action: stats.club.read
+    path_params: { org_id: club_a }
+    expect: { anonymous: 401, club_admin: 200, platform_admin: 200, club_member: 403, "@outsiders_a": 404, "@other_staff": 403 }
+    variants:
+      - name: club_b
+        path_params: { org_id: club_b }
+        expect: { anonymous: 401, other_club_admin: 200, platform_admin: 200, "@other_staff": 403,
+                  user_unverified: 404, student: 404, student_minor: 404, club_member: 404, club_admin: 404,
+                  event_staff: 404, university_rep: 404, company_member: 404, company_admin: 404,
+                  other_company_member: 404 }
+      - name: sensitive_club
+        path_params: { org_id: club_sensitive }
+        note: Y2, the member figures of a sensitive club are its members' only (club_admin_sensitive reads it)
+        expect: { anonymous: 401, club_member: 403, "@not_club_sensitive": 404, "@platform_staff": 404 }
+      - name: company_org
+        path_params: { org_id: company_a }
+        note: not a club; its members hold no club role (403), platform_admin may read panels there (404)
+        expect: { anonymous: 401, company_member: 403, company_admin: 403, "@not_company_a": 404, "@other_staff": 403,
+                  platform_admin: 404 }
+      - name: bad_range
+        query: { from: "not-a-date" }
+        note: a malformed date is 422 after the authorisation
+        expect: { anonymous: 401, club_admin: 422, platform_admin: 422, club_member: 403, "@outsiders_a": 404,
+                  "@other_staff": 403 }
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000e1" }
+        expect: { anonymous: 401, "@signed_in": 404 }
+
+  getCompanyStats:
+    method: GET
+    path: /api/v1/orgs/{org_id}/stats/company
+    action: stats.company.read
+    path_params: { org_id: company_a }
+    expect: { anonymous: 401, company_member: 200, company_admin: 200, platform_admin: 200, "@not_company_a": 404,
+              "@other_staff": 403 }
+    variants:
+      - name: company_b
+        path_params: { org_id: company_b }
+        expect: { anonymous: 401, other_company_member: 200, platform_admin: 200, "@other_staff": 403,
+                  user_unverified: 404, student: 404, student_minor: 404, club_member: 404, club_admin: 404,
+                  other_club_admin: 404, event_staff: 404, university_rep: 404, company_member: 404, company_admin: 404 }
+      - name: club_org
+        path_params: { org_id: club_a }
+        note: not a company; its members hold no company role (403), platform_admin may read panels there (404)
+        expect: { anonymous: 401, club_member: 403, club_admin: 403, "@outsiders_a": 404, "@other_staff": 403,
+                  platform_admin: 404 }
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000e2" }
+        expect: { anonymous: 401, "@signed_in": 404 }
+
+  getUniversityStats:
+    method: GET
+    path: /api/v1/orgs/{org_id}/stats/university
+    action: stats.university.read
+    path_params: { org_id: uni_a }
+    expect: { anonymous: 401, university_rep: 200, platform_admin: 200, "@not_uni_a": 404, "@other_staff": 403 }
+    variants:
+      - name: uni_b
+        path_params: { org_id: uni_b }
+        note: nobody of the personas represents uni_b
+        expect: { anonymous: 401, platform_admin: 200, "@no_platform_role": 404, "@other_staff": 403 }
+      - name: club_org
+        path_params: { org_id: club_a }
+        note: not a university; its members hold no university role (403), platform_admin may read panels there (404)
+        expect: { anonymous: 401, club_member: 403, club_admin: 403, "@outsiders_a": 404, "@other_staff": 403,
+                  platform_admin: 404 }
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000e3" }
+        expect: { anonymous: 401, "@signed_in": 404 }

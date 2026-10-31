@@ -376,3 +376,11 @@ func TestRemovedPostsDue_SkipsReferencedPosts_Gorm(t *testing.T) {
 		t.Fatalf("the referenced post was purged: %v", err)
 	}
 }
+
+func TestStatsStore_Contract_Gorm(t *testing.T) {
+	t.Parallel()
+	statsContract(t, func(t *testing.T) (feed.Store, world) {
+		d := testutil.NewDB(t)
+		return feed.NewGormStore(d.ORM), pgWorld(d)
+	})
+}

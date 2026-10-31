@@ -36,7 +36,11 @@ type Store interface {
 	invitationStore // org_invitations (store_invitations.go)
 	retentionStore  // the purge of the retention sweeper (store_retention.go)
 	subjectStore    // every row of a data subject, KVKK (store_subject.go)
+	statsStore      // the counts of the panels (stats.go, BE-163)
 }
+
+// stats is the panel count view of the store (BE-163).
+func (s *service) stats() statsStore { return s.d.Store }
 
 // orgs is the organizations view of the store.
 func (s *service) orgs() orgStore { return s.d.Store }

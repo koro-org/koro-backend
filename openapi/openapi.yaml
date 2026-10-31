@@ -3030,6 +3030,25 @@ components:
           format: date-time
           type: string
       type: object
+    ClubActivityDTO:
+      additionalProperties: false
+      properties:
+        events:
+          format: int64
+          type: integer
+        name:
+          type: string
+        org_id:
+          format: uuid
+          type: string
+        participants:
+          $ref: "#/components/schemas/AudienceCountDTO"
+      required:
+        - org_id
+        - name
+        - events
+        - participants
+      type: object
     ClubCardDTO:
       additionalProperties: false
       properties:
@@ -3189,6 +3208,164 @@ components:
         - membership_private
         - member_count
         - social_links
+      type: object
+    ClubEventDTO:
+      additionalProperties: false
+      properties:
+        attendance_rate:
+          description: checked_in / registered once held; null before or without a registration
+          format: double
+          type:
+            - number
+            - "null"
+        checked_in:
+          format: int64
+          type: integer
+        event_id:
+          format: uuid
+          type: string
+        held:
+          description: The event started by now and was not cancelled
+          type: boolean
+        no_show:
+          format: int64
+          type: integer
+        registered:
+          format: int64
+          type: integer
+        starts_at:
+          format: date-time
+          type: string
+        status:
+          enum:
+            - published
+            - cancelled
+            - completed
+          type: string
+        title:
+          type: string
+      required:
+        - event_id
+        - title
+        - status
+        - starts_at
+        - held
+        - registered
+        - checked_in
+        - no_show
+        - attendance_rate
+      type: object
+    ClubEventsDTO:
+      additionalProperties: false
+      properties:
+        attendance_rate:
+          description: checked_in / registered over the events held by now (0–1); null without a registration
+          format: double
+          type:
+            - number
+            - "null"
+        cancelled:
+          format: int64
+          type: integer
+        checked_in:
+          format: int64
+          type: integer
+        count:
+          description: Events that start in the range and were published (cancelled ones excluded)
+          format: int64
+          type: integer
+        items:
+          description: The latest events of the range first, at most 50
+          items:
+            $ref: "#/components/schemas/ClubEventDTO"
+          type: array
+        no_show:
+          format: int64
+          type: integer
+        partial:
+          description: "The range holds more than 500 events: the figures cover the latest 500"
+          type: boolean
+        registered:
+          description: Places kept (confirmed, checked in, no-show) in the events held by now
+          format: int64
+          type: integer
+      required:
+        - count
+        - cancelled
+        - registered
+        - checked_in
+        - no_show
+        - attendance_rate
+        - items
+        - partial
+      type: object
+    ClubMembersDTO:
+      additionalProperties: false
+      properties:
+        active:
+          description: Active members now (every role)
+          format: int64
+          type: integer
+        joined_in_range:
+          description: Memberships that started in the range (a role change is not a join)
+          format: int64
+          type: integer
+        left_in_range:
+          description: Memberships that ended in the range (a role change is not a departure)
+          format: int64
+          type: integer
+        monthly:
+          description: Every calendar month of the range (Europe/Istanbul), oldest first
+          items:
+            $ref: "#/components/schemas/MonthDTO"
+          type: array
+        net_growth:
+          description: joined_in_range − left_in_range
+          format: int64
+          type: integer
+        pending_requests:
+          description: Join requests awaiting a decision now
+          format: int64
+          type: integer
+      required:
+        - active
+        - pending_requests
+        - joined_in_range
+        - left_in_range
+        - net_growth
+        - monthly
+      type: object
+    ClubSponsorshipDTO:
+      additionalProperties: false
+      properties:
+        by_status:
+          description: "Order status now: awaiting_payment, paid, in_fulfilment, completed, cancelled, expired, partially_refunded, refunded, disputed"
+          items:
+            $ref: "#/components/schemas/KeyCount"
+          type: array
+        orders:
+          format: int64
+          type: integer
+      required:
+        - orders
+        - by_status
+      type: object
+    ClubStats:
+      additionalProperties: false
+      properties:
+        events:
+          $ref: "#/components/schemas/ClubEventsDTO"
+        members:
+          $ref: "#/components/schemas/ClubMembersDTO"
+        range:
+          $ref: "#/components/schemas/RangeDTO"
+        sponsorship:
+          $ref: "#/components/schemas/ClubSponsorshipDTO"
+      required:
+        - range
+        - members
+        - events
+        - sponsorship
       type: object
     ClubUniversityDTO:
       additionalProperties: false
@@ -3401,6 +3578,21 @@ components:
       required:
         - items
       type: object
+    CompanyAudienceDTO:
+      additionalProperties: false
+      properties:
+        active_segments:
+          format: int64
+          type: integer
+        segments:
+          description: Largest estimate first, at most 20
+          items:
+            $ref: "#/components/schemas/SegmentEstimateDTO"
+          type: array
+      required:
+        - active_segments
+        - segments
+      type: object
     CompanyBlockList:
       additionalProperties: false
       properties:
@@ -3412,6 +3604,28 @@ components:
           type: string
       required:
         - items
+      type: object
+    CompanyContactsDTO:
+      additionalProperties: false
+      properties:
+        acceptance_rate:
+          description: accepted / (accepted + declined + expired) (0–1); null before any answer
+          format: double
+          type:
+            - number
+            - "null"
+        by_status:
+          description: "Effective status: pending, accepted, declined, expired, withdrawn"
+          items:
+            $ref: "#/components/schemas/KeyCount"
+          type: array
+        sent:
+          format: int64
+          type: integer
+      required:
+        - sent
+        - by_status
+        - acceptance_rate
       type: object
     CompanyDTO:
       additionalProperties: false
@@ -3427,6 +3641,53 @@ components:
           type: string
         size_band:
           type: string
+      type: object
+    CompanyDispatchesDTO:
+      additionalProperties: false
+      properties:
+        by_status:
+          description: scheduled, running, completed, cancelled, failed
+          items:
+            $ref: "#/components/schemas/KeyCount"
+          type: array
+        count:
+          format: int64
+          type: integer
+        eligible:
+          $ref: "#/components/schemas/AudienceCountDTO"
+          description: Students the dispatches addressed, as one estimate
+        sent:
+          $ref: "#/components/schemas/AudienceCountDTO"
+          description: Students notified, as one estimate
+      required:
+        - count
+        - by_status
+        - eligible
+        - sent
+      type: object
+    CompanyPostsDTO:
+      additionalProperties: false
+      properties:
+        likes:
+          description: Likes the posts hold now
+          format: int64
+          type: integer
+        published:
+          format: int64
+          type: integer
+        saves:
+          description: Saves the posts hold now
+          format: int64
+          type: integer
+        targeted:
+          description: Of which targeted (segment audience)
+          format: int64
+          type: integer
+      required:
+        - published
+        - targeted
+        - likes
+        - saves
       type: object
     CompanyPublicDTO:
       additionalProperties: false
@@ -3444,6 +3705,31 @@ components:
           type: string
         size_band:
           type: string
+      type: object
+    CompanyStats:
+      additionalProperties: false
+      properties:
+        audience:
+          $ref: "#/components/schemas/CompanyAudienceDTO"
+        contact_requests:
+          $ref: "#/components/schemas/CompanyContactsDTO"
+        dispatches:
+          $ref: "#/components/schemas/CompanyDispatchesDTO"
+        package:
+          items:
+            $ref: "#/components/schemas/FeatureUsageDTO"
+          type: array
+        posts:
+          $ref: "#/components/schemas/CompanyPostsDTO"
+        range:
+          $ref: "#/components/schemas/RangeDTO"
+      required:
+        - range
+        - audience
+        - posts
+        - dispatches
+        - contact_requests
+        - package
       type: object
     CompleteInputBody:
       additionalProperties: false
@@ -6379,6 +6665,36 @@ components:
       required:
         - failure_reason
       type: object
+    FeatureUsageDTO:
+      additionalProperties: false
+      properties:
+        access_until:
+          description: "discovery_access: end of the running right"
+          format: date-time
+          type: string
+        feature:
+          enum:
+            - targeted_post
+            - targeted_dispatch
+            - contact_request
+            - discovery_access
+          type: string
+        remaining:
+          format: int64
+          type: integer
+        total:
+          description: Units of the usable rights (quota features)
+          format: int64
+          type: integer
+        used:
+          format: int64
+          type: integer
+      required:
+        - feature
+        - total
+        - used
+        - remaining
+      type: object
     FeedOrgDTO:
       additionalProperties: false
       properties:
@@ -7694,6 +8010,31 @@ components:
         - membership_id
         - status
       type: object
+    KeyCount:
+      additionalProperties: false
+      properties:
+        count:
+          format: int64
+          type: integer
+        key:
+          type: string
+      required:
+        - key
+        - count
+      type: object
+    KeyEstimate:
+      additionalProperties: false
+      properties:
+        count:
+          description: Rounded down to its bucket (10 below 100, 50 below 1000, 100 below 10000, then 1000)
+          format: int64
+          type: integer
+        key:
+          type: string
+      required:
+        - key
+        - count
+      type: object
     L3CVDTO:
       additionalProperties: false
       properties:
@@ -8572,6 +8913,23 @@ components:
           type: string
       required:
         - items
+      type: object
+    MonthDTO:
+      additionalProperties: false
+      properties:
+        joined:
+          format: int64
+          type: integer
+        left:
+          format: int64
+          type: integer
+        month:
+          description: YYYY-MM
+          type: string
+      required:
+        - month
+        - joined
+        - left
       type: object
     MyConsentsDTO:
       additionalProperties: false
@@ -10122,6 +10480,34 @@ components:
         - created_at
         - updated_at
       type: object
+    OrgKindDTO:
+      additionalProperties: false
+      properties:
+        by_status:
+          description: pending_review, active, suspended, closed
+          items:
+            $ref: "#/components/schemas/KeyCount"
+          type: array
+        kind:
+          enum:
+            - platform
+            - university
+            - club
+            - company
+            - ngo
+          type: string
+        new_in_range:
+          format: int64
+          type: integer
+        total:
+          format: int64
+          type: integer
+      required:
+        - kind
+        - total
+        - by_status
+        - new_in_range
+      type: object
     OrgModerationDTO:
       additionalProperties: false
       properties:
@@ -10923,6 +11309,105 @@ components:
         - url
         - expires_at
       type: object
+    PlatformContentDTO:
+      additionalProperties: false
+      properties:
+        posts_by_status:
+          description: draft, pending_review, published, hidden, removed
+          items:
+            $ref: "#/components/schemas/KeyCount"
+          type: array
+        published_in_range:
+          description: Posts first published in the range, whatever their status now
+          format: int64
+          type: integer
+        reports_by_status:
+          description: open, in_review, actioned, dismissed
+          items:
+            $ref: "#/components/schemas/KeyCount"
+          type: array
+        reports_in_range:
+          description: Content reports filed in the range
+          format: int64
+          type: integer
+      required:
+        - posts_by_status
+        - published_in_range
+        - reports_by_status
+        - reports_in_range
+      type: object
+    PlatformEventsDTO:
+      additionalProperties: false
+      properties:
+        attendance_rate:
+          description: checked_in / registered (0–1); null without a registration
+          format: double
+          type:
+            - number
+            - "null"
+        cancelled_in_range:
+          description: Cancelled events that were to start in the range
+          format: int64
+          type: integer
+        checked_in:
+          description: Check-ins of those places
+          format: int64
+          type: integer
+        held_in_range:
+          description: Published or completed events that started in the range by now
+          format: int64
+          type: integer
+        registered:
+          description: Places kept (confirmed, checked in, no-show) in the events held in the range
+          format: int64
+          type: integer
+        upcoming:
+          description: Published events that start after now
+          format: int64
+          type: integer
+      required:
+        - upcoming
+        - held_in_range
+        - cancelled_in_range
+        - registered
+        - checked_in
+        - attendance_rate
+      type: object
+    PlatformOrgsDTO:
+      additionalProperties: false
+      properties:
+        by_kind:
+          items:
+            $ref: "#/components/schemas/OrgKindDTO"
+          type: array
+        new_in_range:
+          description: Orgs created in the range
+          format: int64
+          type: integer
+      required:
+        - by_kind
+        - new_in_range
+      type: object
+    PlatformQueuesDTO:
+      additionalProperties: false
+      properties:
+        club_claims:
+          description: Pending club claims, every university
+          format: int64
+          type: integer
+        content_reports:
+          description: Content reports open or in review
+          format: int64
+          type: integer
+        org_reviews:
+          description: Orgs awaiting verification (pending_review)
+          format: int64
+          type: integer
+      required:
+        - org_reviews
+        - club_claims
+        - content_reports
+      type: object
     PlatformRoleAssignmentDTO:
       additionalProperties: false
       properties:
@@ -11007,6 +11492,66 @@ components:
           type: string
       required:
         - items
+      type: object
+    PlatformStats:
+      additionalProperties: false
+      properties:
+        content:
+          $ref: "#/components/schemas/PlatformContentDTO"
+        events:
+          $ref: "#/components/schemas/PlatformEventsDTO"
+        orgs:
+          $ref: "#/components/schemas/PlatformOrgsDTO"
+        queues:
+          $ref: "#/components/schemas/PlatformQueuesDTO"
+        range:
+          $ref: "#/components/schemas/RangeDTO"
+        users:
+          $ref: "#/components/schemas/PlatformUsersDTO"
+      required:
+        - range
+        - users
+        - orgs
+        - content
+        - events
+        - queues
+      type: object
+    PlatformUsersDTO:
+      additionalProperties: false
+      properties:
+        by_persona:
+          description: Accounts that are not erased, by the role chosen at sign-up
+          items:
+            $ref: "#/components/schemas/KeyCount"
+          type: array
+        by_status:
+          description: pending_email, active, suspended, erased
+          items:
+            $ref: "#/components/schemas/KeyCount"
+          type: array
+        email_verified:
+          description: Accounts that are not erased with a verified e-mail address
+          format: int64
+          type: integer
+        new_in_range:
+          description: Accounts created in the range
+          format: int64
+          type: integer
+        total:
+          description: Every account, tombstones (erased) included
+          format: int64
+          type: integer
+        verified_students:
+          description: Users with a student verification in effect now
+          format: int64
+          type: integer
+      required:
+        - total
+        - by_status
+        - by_persona
+        - email_verified
+        - verified_students
+        - new_in_range
       type: object
     PolicyListOutputBody:
       additionalProperties: false
@@ -11664,6 +12209,21 @@ components:
           type: array
       required:
         - orders
+      type: object
+    RangeDTO:
+      additionalProperties: false
+      properties:
+        from:
+          description: First day (Europe/Istanbul), inclusive
+          format: date
+          type: string
+        to:
+          description: Last day (Europe/Istanbul), inclusive
+          format: date
+          type: string
+      required:
+        - from
+        - to
       type: object
     ReasonInputBody:
       additionalProperties: false
@@ -13467,6 +14027,24 @@ components:
             type: integer
           maxItems: 8
           type: array
+      type: object
+    SegmentEstimateDTO:
+      additionalProperties: false
+      properties:
+        counted_at:
+          format: date-time
+          type: string
+        estimate:
+          $ref: "#/components/schemas/AudienceCountDTO"
+        name:
+          type: string
+        segment_id:
+          format: uuid
+          type: string
+      required:
+        - segment_id
+        - name
+        - estimate
       type: object
     SegmentList:
       additionalProperties: false
@@ -15374,6 +15952,40 @@ components:
         - city
         - type
       type: object
+    UniversityClubsDTO:
+      additionalProperties: false
+      properties:
+        active_in_range:
+          description: Clubs with at least one event in the range
+          format: int64
+          type: integer
+        claimed:
+          description: Clubs with a club_admin
+          format: int64
+          type: integer
+        events_in_range:
+          format: int64
+          type: integer
+        items:
+          description: The most active clubs first, at most 50
+          items:
+            $ref: "#/components/schemas/ClubActivityDTO"
+          type: array
+        participants:
+          $ref: "#/components/schemas/AudienceCountDTO"
+          description: Places kept in the clubs' events held by now
+        total:
+          description: Clubs of the university in the catalog
+          format: int64
+          type: integer
+      required:
+        - total
+        - claimed
+        - active_in_range
+        - events_in_range
+        - participants
+        - items
+      type: object
     UniversityDTO:
       additionalProperties: false
       properties:
@@ -15440,6 +16052,21 @@ components:
       required:
         - items
       type: object
+    UniversityPendingDTO:
+      additionalProperties: false
+      properties:
+        club_claims:
+          description: Pending claims of its non-sensitive clubs, not yet escalated to the platform
+          format: int64
+          type: integer
+        offering_approvals:
+          description: Offerings of its clubs that wait for its decision
+          format: int64
+          type: integer
+      required:
+        - club_claims
+        - offering_approvals
+      type: object
     UniversityRefDTO:
       additionalProperties: false
       properties:
@@ -15450,6 +16077,53 @@ components:
           type: string
       required:
         - id
+      type: object
+    UniversityStats:
+      additionalProperties: false
+      properties:
+        clubs:
+          $ref: "#/components/schemas/UniversityClubsDTO"
+        pending:
+          $ref: "#/components/schemas/UniversityPendingDTO"
+        range:
+          $ref: "#/components/schemas/RangeDTO"
+        students:
+          $ref: "#/components/schemas/UniversityStudentsDTO"
+      required:
+        - range
+        - students
+        - clubs
+        - pending
+      type: object
+    UniversityStudentsDTO:
+      additionalProperties: false
+      properties:
+        by_class_year:
+          description: 1–8
+          items:
+            $ref: "#/components/schemas/KeyEstimate"
+          type: array
+        by_degree_level:
+          description: associate, bachelor, master, doctorate
+          items:
+            $ref: "#/components/schemas/KeyEstimate"
+          type: array
+        by_department:
+          description: "Department IDs (names: the directory's departments)"
+          items:
+            $ref: "#/components/schemas/KeyEstimate"
+          type: array
+        new_in_range:
+          $ref: "#/components/schemas/AudienceCountDTO"
+          description: Student profiles created in the range
+        total:
+          $ref: "#/components/schemas/AudienceCountDTO"
+      required:
+        - total
+        - new_in_range
+        - by_degree_level
+        - by_class_year
+        - by_department
       type: object
     UnsubscribeLinkDTO:
       additionalProperties: false
@@ -23341,6 +24015,47 @@ paths:
       x-koro-rate-limit: write_default
       x-koro-surface: admin
       x-koro-terms-gate: enforced
+  /api/v1/admin/stats:
+    get:
+      description: "Operational counts of the platform (SR §8 Admin): accounts by status, sign-up role and verification, orgs by kind and status, posts and content reports, events and their participation, and the review queues. The *_in_range figures cover the range (default: the last 30 days). The range is whole days in Europe/Istanbul (from and to inclusive, at most 366 days)."
+      operationId: getAdminStats
+      parameters:
+        - description: "First day (YYYY-MM-DD, Europe/Istanbul), inclusive; default: the panel's"
+          explode: false
+          in: query
+          name: from
+          schema:
+            description: "First day (YYYY-MM-DD, Europe/Istanbul), inclusive; default: the panel's"
+            type: string
+        - description: "Last day (YYYY-MM-DD, Europe/Istanbul), inclusive; default: today"
+          explode: false
+          in: query
+          name: to
+          schema:
+            description: "Last day (YYYY-MM-DD, Europe/Istanbul), inclusive; default: today"
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformStats"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get the platform summary
+      tags:
+        - stats
+      x-koro-action: stats.platform.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
   /api/v1/admin/subprocessors:
     get:
       operationId: adminListSubprocessors
@@ -34621,6 +35336,150 @@ paths:
       x-koro-rate-limit: write_default
       x-koro-surface: org
       x-koro-terms-gate: enforced
+  /api/v1/orgs/{org_id}/stats/club:
+    get:
+      description: "The club's members and their monthly growth, the registration and attendance of its events and the orders companies placed on its offerings (SR §8 Kulüp). Default range: the last 12 calendar months. Another kind of org is not found. The range is whole days in Europe/Istanbul (from and to inclusive, at most 366 days)."
+      operationId: getClubStats
+      parameters:
+        - description: Org ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Org ID
+            type: string
+        - description: "First day (YYYY-MM-DD, Europe/Istanbul), inclusive; default: the panel's"
+          explode: false
+          in: query
+          name: from
+          schema:
+            description: "First day (YYYY-MM-DD, Europe/Istanbul), inclusive; default: the panel's"
+            type: string
+        - description: "Last day (YYYY-MM-DD, Europe/Istanbul), inclusive; default: today"
+          explode: false
+          in: query
+          name: to
+          schema:
+            description: "Last day (YYYY-MM-DD, Europe/Istanbul), inclusive; default: today"
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClubStats"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a club's panel figures
+      tags:
+        - stats
+      x-koro-action: stats.club.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/stats/company:
+    get:
+      description: "The company's saved audiences with their stored estimates, the reach of its posts and dispatches, its contact requests with their acceptance rate and its package usage (SR §8 Şirket). Numbers about students are estimates: null below 10, rounded down to their bucket. Default range: the last 30 days. Another kind of org is not found. The range is whole days in Europe/Istanbul (from and to inclusive, at most 366 days)."
+      operationId: getCompanyStats
+      parameters:
+        - description: Org ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Org ID
+            type: string
+        - description: "First day (YYYY-MM-DD, Europe/Istanbul), inclusive; default: the panel's"
+          explode: false
+          in: query
+          name: from
+          schema:
+            description: "First day (YYYY-MM-DD, Europe/Istanbul), inclusive; default: the panel's"
+            type: string
+        - description: "Last day (YYYY-MM-DD, Europe/Istanbul), inclusive; default: today"
+          explode: false
+          in: query
+          name: to
+          schema:
+            description: "Last day (YYYY-MM-DD, Europe/Istanbul), inclusive; default: today"
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyStats"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a company's panel figures
+      tags:
+        - stats
+      x-koro-action: stats.company.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/stats/university:
+    get:
+      description: "The university's active students by degree level, class year and department (groups below 10 left out, the others rounded down to their bucket), the event density of its clubs (sensitive clubs and events of a sensitive category left out) and what waits for its decision (SR §8 Kurum). Default range: the last 12 calendar months. Another kind of org is not found. The range is whole days in Europe/Istanbul (from and to inclusive, at most 366 days)."
+      operationId: getUniversityStats
+      parameters:
+        - description: Org ID
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Org ID
+            type: string
+        - description: "First day (YYYY-MM-DD, Europe/Istanbul), inclusive; default: the panel's"
+          explode: false
+          in: query
+          name: from
+          schema:
+            description: "First day (YYYY-MM-DD, Europe/Istanbul), inclusive; default: the panel's"
+            type: string
+        - description: "Last day (YYYY-MM-DD, Europe/Istanbul), inclusive; default: today"
+          explode: false
+          in: query
+          name: to
+          schema:
+            description: "Last day (YYYY-MM-DD, Europe/Istanbul), inclusive; default: today"
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UniversityStats"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a university's panel figures
+      tags:
+        - stats
+      x-koro-action: stats.university.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
   /api/v1/orgs/{org_id}/students/search:
     post:
       description: "Read-only: the name filter is in the body so that it never reaches a URL or an access log (BE-128). Students with an active level 3 grant of this company (they accepted its contact request) and an active student verification, newest grant first; q filters by name. Minors never appear. next_cursor goes back in the body."

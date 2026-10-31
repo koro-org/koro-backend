@@ -20,7 +20,7 @@ var designCounts = map[string]int{
 	"identity": 33, "orgs": 21, "directory": 17, "students": 15, "consent": 7, "events": 35,
 	"feed": 28, "outreach": 8, "messaging": 8, "discovery": 2, "entitlements": 5, "talent": 6,
 	"parties": 18, "catalog": 14, "orders": 13, "payments": 34, "ledger": 11, "billing": 7,
-	"notify": 8, "files": 3, "audit": 4, "kvkk": 19,
+	"notify": 8, "files": 3, "audit": 4, "kvkk": 19, "stats": 4,
 }
 
 var actionRe = regexp.MustCompile(`^[a-z_]+\.[a-z_]+\.[a-z_]+$`)
@@ -28,15 +28,15 @@ var actionRe = regexp.MustCompile(`^[a-z_]+\.[a-z_]+\.[a-z_]+$`)
 func TestActions_CountMatchesDesign(t *testing.T) {
 	t.Parallel()
 	httpActions := authz.HTTPActions()
-	if len(httpActions) != 316 {
-		t.Fatalf("HTTP actions = %d, want 316 (03 §8)", len(httpActions))
+	if len(httpActions) != 320 {
+		t.Fatalf("HTTP actions = %d, want 320 (03 §8)", len(httpActions))
 	}
 	if n := len(authz.SystemActions()); n != 21 {
 		t.Fatalf("system actions = %d, want 21 (03 §3.7)", n)
 	}
 	// events.attendance.finalize is both an HTTP and a system action.
-	if n := len(authz.Actions()); n != 316+21-1 {
-		t.Fatalf("Actions() = %d unique, want 336", n)
+	if n := len(authz.Actions()); n != 320+21-1 {
+		t.Fatalf("Actions() = %d unique, want 340", n)
 	}
 	if !slices.IsSorted(authz.Actions()) {
 		t.Fatal("Actions() must be sorted")

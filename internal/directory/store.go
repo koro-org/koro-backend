@@ -36,6 +36,7 @@ type Store interface {
 	ClubStore
 	ClaimStore
 	SkillStore
+	StatsStore // the reads of the panels (stats.go, BE-163)
 }
 
 // UniversityStore is the university reference data (02 §8.1–8.4):

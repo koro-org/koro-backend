@@ -27,6 +27,7 @@ type Store interface {
 
 	EduStore       // edu_verifications (store_edu.go)
 	RetentionStore // the purges of the retention sweeper (retention.go)
+	StatsStore     // the account counts of the platform panel (stats.go, BE-163)
 }
 
 // users is the account view of the store.
@@ -49,6 +50,9 @@ func (s *service) accountActions() accountActionStore { return s.d.Store }
 
 // edu is the student verification view of the store.
 func (s *service) edu() EduStore { return s.d.Store }
+
+// stats is the account count view of the store (BE-163).
+func (s *service) stats() StatsStore { return s.d.Store }
 
 // users is the account view of the bootstrap's store.
 func (b *Bootstrapper) users() userStore { return b.d.Store }

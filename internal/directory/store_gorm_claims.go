@@ -76,7 +76,37 @@ func (s gormStore) ClaimsOf(ctx context.Context, userID uuid.UUID, after *uuid.U
 // (directory's own clubs and universities rows).
 func (s gormStore) ListClaims(ctx context.Context, f ClaimFilter, after *uuid.UUID, limit int) ([]ClubClaim, error) {
 	status := f.Status
-	q := db.Conn(ctx, s.orm).Model(&ClubClaim{}).Select(claimCols).Where("status = ?", string(status))
+	q := s.claimScope(ctx, f).Select(claimCols)
+	switch {
+	case status == ClaimPending && after != nil:
+		q = q.Where("id > ?", *after)
+	case after != nil:
+		q = q.Where("id < ?", *after)
+	}
+	order := "id DESC"
+	if status == ClaimPending {
+		order = "id" // oldest first: club_claims_queue_idx orders by created_at, UUIDv7 ids follow it
+	}
+	return claimRows("list claims", q.Order(order).Limit(limit))
+}
+
+// CountClaims implements Store (ListClaims' filter, unpaged; BE-163).
+//
+// cross-org: like ListClaims.
+func (s gormStore) CountClaims(ctx context.Context, f ClaimFilter) (int, error) {
+	var n int64
+	if err := s.claimScope(ctx, f).Count(&n).Error; err != nil {
+		return 0, wrap("count claims", err)
+	}
+	return int(n), nil
+}
+
+// claimScope is the claims of f: ListClaims' and CountClaims' filter.
+//
+// cross-org: like ListClaims (the queues span the clubs of universities).
+func (s gormStore) claimScope(ctx context.Context, f ClaimFilter) *gorm.DB {
+	status := f.Status
+	q := db.Conn(ctx, s.orm).Model(&ClubClaim{}).Where("status = ?", string(status))
 	if f.RepUniversityOrgs != nil {
 		q = q.Where(`club_org_id IN (SELECT c.org_id FROM clubs c JOIN universities u ON u.id = c.university_id
 			WHERE NOT c.is_sensitive AND u.org_id = ANY( ?))`, db.UUIDArray(f.RepUniversityOrgs))
@@ -91,17 +121,7 @@ func (s gormStore) ListClaims(ctx context.Context, f ClaimFilter, after *uuid.UU
 	if f.CreatedBefore != nil {
 		q = q.Where("created_at <= ?", *f.CreatedBefore)
 	}
-	switch {
-	case status == ClaimPending && after != nil:
-		q = q.Where("id > ?", *after)
-	case after != nil:
-		q = q.Where("id < ?", *after)
-	}
-	order := "id DESC"
-	if status == ClaimPending {
-		order = "id" // oldest first: club_claims_queue_idx orders by created_at, UUIDv7 ids follow it
-	}
-	return claimRows("list claims", q.Order(order).Limit(limit))
+	return q
 }
 
 // ClaimOfFile implements Store.

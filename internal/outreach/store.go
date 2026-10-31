@@ -45,6 +45,7 @@ type Store interface {
 	SetCount(ctx context.Context, orgID, id uuid.UUID, count *int, at time.Time) (bool, error)
 
 	DispatchStore
+	statsStore // the figures of an org's panel (stats.go, BE-163)
 }
 
 // DispatchStore is the outreach_dispatches part of Store (02 §13.2;

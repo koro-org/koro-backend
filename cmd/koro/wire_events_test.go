@@ -15,6 +15,7 @@ import (
 	"koro/internal/feed"
 	"koro/internal/kvkk"
 	"koro/internal/orgs"
+	"koro/internal/outreach"
 	"koro/internal/platform/crypto/rewrap"
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
@@ -155,6 +156,27 @@ func TestWire_EventsCheckinTasks(t *testing.T) {
 	if rows, err := c.students.registrations.SummaryOf(t.Context(), uuid.NewV7()); err != nil || len(rows) != 0 {
 		t.Fatalf("SummaryOf = %+v, %v", rows, err)
 	}
+}
+
+// TestWire_EventsTargetingHooks (BE-161): events binds the students reader
+// of the event keys (targetable participations and events), answering
+// from the events store; outreach consumes events.Targeting directly.
+func TestWire_EventsTargetingHooks(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	if c.students.participations == nil {
+		t.Fatal("c.students.participations is not bound")
+	}
+	if got, err := c.students.participations.TargetableParticipations(t.Context(), []uuid.UUID{uuid.NewV7()}); err != nil || len(got) != 0 {
+		t.Fatalf("TargetableParticipations = %+v, %v", got, err)
+	}
+	if got, err := c.students.participations.TargetableEvents(t.Context(), []uuid.UUID{uuid.NewV7()}); err != nil || len(got) != 0 {
+		t.Fatalf("TargetableEvents = %+v, %v", got, err)
+	}
+	var _ outreach.Events = c.events.svc // the port outreach is built with
 }
 
 // TestWire_EventsExports pins what BE-050 adds: the build task, the purge

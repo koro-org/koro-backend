@@ -1,6 +1,7 @@
 package events_test
 
 import (
+	"fmt"
 	"testing"
 	"time"
 	"uuid"
@@ -21,7 +22,8 @@ func TestStore_ParticipationContract_Mem(t *testing.T) {
 // the distinct users with a valid check-in (a voided one does not count;
 // cancelled and waitlisted registrations do not count); only a cancelled
 // registration and a voided check-in are undone (BE-090); unknown IDs are
-// missing.
+// missing. The targetable participations (BE-161) are the held places of
+// public, non-sensitive-category events in the window.
 func participationContract(t *testing.T, newStore func(t *testing.T) (events.Store, world)) {
 	t.Helper()
 	t.Run("participation: events of sources, confirmed and distinct check-ins", func(t *testing.T) {
@@ -139,6 +141,117 @@ func participationContract(t *testing.T, newStore func(t *testing.T) (events.Sto
 		}
 		if got, err := s.Undone(ctx, nil); err != nil || len(got) != 0 {
 			t.Fatalf("Undone(nil) = %v, %v", got, err)
+		}
+	})
+
+	// BE-161: the held places of the asked users in published or
+	// completed public events, not of a sensitive category, started at or
+	// after since; ordered by user, newest start first. The organiser's
+	// sensitivity is the service's (directory).
+	t.Run("targetable participations: held places of public events since", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		org, by := w.org(t), w.user(t)
+		since := t0
+		insert := func(title string, at time.Time, edit func(*events.Event)) events.Event {
+			t.Helper()
+			ev := row(org, by, title, at)
+			edit(&ev)
+			return insertEvent(t, s, ev)
+		}
+		// reg writes a registration the way the service does: inserted
+		// confirmed (or waitlisted), then checked in through a ticket and
+		// CheckIn, or moved to no_show / cancelled by UpdateRegistration
+		// (InsertRegistration writes neither checked_in_at nor the
+		// cancellation columns).
+		codes := 0
+		reg := func(ev events.Event, user uuid.UUID, st events.RegStatus) {
+			t.Helper()
+			first := events.RegConfirmed
+			if st == events.RegWaitlisted {
+				first = st
+			}
+			r, err := s.InsertRegistration(ctx, newReg(ev, user, first))
+			if err != nil {
+				t.Fatalf("InsertRegistration(%s, %s): %v", ev.Title, first, err)
+			}
+			switch st {
+			case events.RegCheckedIn:
+				codes++
+				tk, ok, err := s.InsertTicket(ctx, ev.OrgID, newTicket(r, 1, fmt.Sprintf("TGT%05d", codes)))
+				if err != nil || !ok {
+					t.Fatalf("InsertTicket: %v %v", ok, err)
+				}
+				if _, ok, err := s.CheckIn(ctx, ev.OrgID, events.Checkin{ID: uuid.NewV7(), EventID: ev.ID, OrgID: ev.OrgID,
+					RegistrationID: r.ID, TicketID: tk.ID, StaffUserID: by, Method: events.MethodQR, ClientScanID: uuid.NewV7(),
+					ScannedAt: t0, ReceivedAt: t0}); err != nil || !ok {
+					t.Fatalf("CheckIn: %v %v", ok, err)
+				}
+			case events.RegNoShow:
+				r.Status = events.RegNoShow
+				if _, err := s.UpdateRegistration(ctx, r); err != nil {
+					t.Fatal(err)
+				}
+			case events.RegCancelled:
+				kind := events.ByUser
+				r.Status, r.CancelledAt, r.CancelledByKind = events.RegCancelled, new(t0), &kind
+				if _, err := s.UpdateRegistration(ctx, r); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		u1, u2, u3 := w.user(t), w.user(t), w.user(t)
+		later := insert("Sonraki", start, func(*events.Event) {})
+		earlier := insert("Önceki", t0.Add(24*time.Hour), func(ev *events.Event) { ev.Status, ev.CheckinEnabled = events.StatusCompleted, true })
+		reg(later, u1, events.RegConfirmed)
+		reg(earlier, u1, events.RegCheckedIn)
+		reg(later, u2, events.RegNoShow)
+		reg(earlier, u2, events.RegCancelled)
+		reg(later, u3, events.RegConfirmed) // not asked for
+		for _, ev := range []events.Event{
+			insert("Üyelere Özel", start, func(ev *events.Event) { ev.Visibility = events.VisibilityMembers }),
+			insert("Hassas Kategori", start, func(ev *events.Event) { ev.IsSensitiveCategory = true }),
+			insert("İptal", start, func(ev *events.Event) { ev.Status, ev.CancelledAt = events.StatusCancelled, new(t0) }),
+			insert("Eski", since.Add(-time.Hour), func(*events.Event) {}),
+		} {
+			reg(ev, u1, events.RegConfirmed)
+		}
+		waiting := insert("Bekleme", start, func(*events.Event) {})
+		reg(waiting, u2, events.RegWaitlisted)
+
+		got, err := s.TargetableParticipations(ctx, []uuid.UUID{u1, u2, uuid.NewV7()}, since)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := map[uuid.UUID][]events.TargetableRow{
+			u1: {{UserID: u1, EventID: later.ID, OrgID: org}, {UserID: u1, EventID: earlier.ID, OrgID: org, Attended: true}},
+			u2: {{UserID: u2, EventID: later.ID, OrgID: org}},
+		}
+		if len(got) != 3 {
+			t.Fatalf("TargetableParticipations = %+v, want %+v", got, want)
+		}
+		for i := 1; i < len(got); i++ {
+			if got[i-1].UserID.Compare(got[i].UserID) > 0 {
+				t.Fatalf("rows not ordered by user: %+v", got)
+			}
+		}
+		by2 := map[uuid.UUID][]events.TargetableRow{}
+		for _, r := range got {
+			by2[r.UserID] = append(by2[r.UserID], r)
+		}
+		for u, rows := range want {
+			if len(by2[u]) != len(rows) {
+				t.Fatalf("rows of %s = %+v, want %+v", u, by2[u], rows)
+			}
+			for i := range rows {
+				if by2[u][i] != rows[i] {
+					t.Errorf("row %d of %s = %+v, want %+v", i, u, by2[u][i], rows[i])
+				}
+			}
+		}
+		if got, err := s.TargetableParticipations(ctx, nil, since); err != nil || len(got) != 0 {
+			t.Fatalf("TargetableParticipations(nil) = %v, %v", got, err)
 		}
 	})
 }

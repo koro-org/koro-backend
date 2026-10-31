@@ -34,6 +34,8 @@ import (
 // BE-062: c.consent.links (each recipient's one-click unsubscribe link of
 // commercial e-mail; nil without CONSENT_UNSUBSCRIBE_BASE_URL, which keeps
 // commercial dispatches off e-mail). It replaced OUTREACH_UNSUBSCRIBE_URL.
+// BE-161: c.events.svc (L8, built before outreach: events.Targeting's
+// TargetableEvents, the event dimension; nil → no event is targetable).
 //
 // Provided, set in build: svc (outreach.Service: Targeting.Compile,
 // ScheduleDispatch, DiscardDispatch and DispatchOfPost for feed's targeted
@@ -91,6 +93,9 @@ func (w *outreachWiring) build(c *container) error {
 	}
 	if l := c.consent.links; l != nil {
 		d.Unsubscribe = l
+	}
+	if svc := c.events.svc; svc != nil {
+		d.Events = svc
 	}
 	mod, err := outreach.New(d)
 	if err != nil {

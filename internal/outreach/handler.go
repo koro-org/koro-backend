@@ -34,11 +34,13 @@ func Register(api huma.API, svc Service) {
 	op.Register(api, "outreach", huma.Operation{
 		OperationID: "createSegment", Method: http.MethodPost, Path: "/orgs/{org_id}/segments", DefaultStatus: http.StatusCreated,
 		Summary: "Create a segment",
-		Description: "OR inside a dimension, AND across dimensions; at least one dimension. Scope (03 k16): a club " +
-			"targets only its own members (club = [the club]); a university its own university (uni = [it]), " +
-			"narrowed by dept or year; a company every dimension but never a sensitive club (422 " +
-			"outreach.sensitive_target). Out of scope → 422 outreach.target_out_of_scope. The estimate is null below " +
-			"10 students and rounded down otherwise; counting spends the org's audience count budget.",
+		Description: "OR inside a dimension, AND across dimensions; one to four dimensions (a department already " +
+			"implies its university). Scope (03 k16): a club targets only its own members (club = [the club]); a " +
+			"university its own university (uni = [it]), narrowed by dept or year; a company every dimension but " +
+			"never a sensitive club (422 outreach.sensitive_target) nor an event that is not targetable (422 " +
+			"outreach.event_not_targetable; BE-161: the event dimension counts only students whose commercial " +
+			"message consent is in force). Out of scope → 422 outreach.target_out_of_scope. The estimate is null " +
+			"below 10 students and rounded down otherwise; counting spends the org's audience count budget.",
 	}, op.Meta{
 		Action: string(authz.OutreachSegmentManage), Surface: op.SurfaceOrg, RateLimit: op.RateAudienceCount,
 		Idempotency: op.IdempotencyOptional,
@@ -97,12 +99,14 @@ type SegmentPath struct {
 // ---- DTOs
 
 // SegmentDefinitionDTO is a targeting (04 §2.8): OR inside a dimension, AND across
-// dimensions; at least one dimension.
+// dimensions; one to four dimensions.
 type SegmentDefinitionDTO struct {
-	Uni  []string `json:"uni,omitempty" maxItems:"100" doc:"University IDs (universities)"`
-	Dept []string `json:"dept,omitempty" maxItems:"100" doc:"Department IDs"`
-	Year []int    `json:"year,omitempty" maxItems:"8" doc:"Class years (1-8)"`
-	Club []string `json:"club,omitempty" maxItems:"100" doc:"Club org IDs (never a sensitive club, except a club's own members)"`
+	Uni           []string `json:"uni,omitempty" maxItems:"100" doc:"University IDs (universities)"`
+	Dept          []string `json:"dept,omitempty" maxItems:"100" doc:"Department IDs"`
+	Year          []int    `json:"year,omitempty" maxItems:"8" doc:"Class years (1-8)"`
+	Club          []string `json:"club,omitempty" maxItems:"100" doc:"Club org IDs (never a sensitive club, except a club's own members)"`
+	Event         []string `json:"event,omitempty" maxItems:"100" doc:"Event IDs (BE-161; companies and the platform only): the students who registered for one of the events (a confirmed, checked-in or no-show registration). Only events whose targetable flag is true (listEvents, getEvent: a published or completed public event, neither of a sensitive category nor organised by a sensitive club, that started at most 365 days ago or has yet to start); any other is 422 outreach.event_not_targetable. Only students whose commercial message consent is in force are counted or reached through this dimension."`
+	EventAttended bool     `json:"event_attended,omitempty" doc:"With event: only the students checked in at one of the events (an event without check-in has none)"`
 }
 
 // SegmentDTO is 04 §2.8 SegmentDTO.
@@ -143,7 +147,8 @@ func ids(in []uuid.UUID) []string {
 }
 
 func toSegmentDefinitionDTO(d Definition) SegmentDefinitionDTO {
-	out := SegmentDefinitionDTO{Uni: ids(d.Uni), Dept: ids(d.Dept), Club: ids(d.Club)}
+	out := SegmentDefinitionDTO{Uni: ids(d.Uni), Dept: ids(d.Dept), Club: ids(d.Club), Event: ids(d.Event),
+		EventAttended: d.EventAttended}
 	for _, y := range d.Year {
 		out.Year = append(out.Year, int(y))
 	}
@@ -172,9 +177,10 @@ func utc(t *time.Time) *time.Time {
 	return &u
 }
 
-// definitionOf parses a SegmentDefinitionDTO; a malformed ID or year is 422 at
-// its location (the service checks the rest).
-func definitionOf(loc string, in SegmentDefinitionDTO) (Definition, error) {
+// Definition parses in at loc (the segment operations here, the inline
+// audience of the feed's createTargetedPost): a malformed ID or year is 422
+// at its location; the service checks the rest (normalize, scope).
+func (in SegmentDefinitionDTO) Definition(loc string) (Definition, error) {
 	parse := func(dim string, raw []string) ([]uuid.UUID, error) {
 		if len(raw) == 0 {
 			return nil, nil
@@ -202,6 +208,10 @@ func definitionOf(loc string, in SegmentDefinitionDTO) (Definition, error) {
 	if d.Club, err = parse("club", in.Club); err != nil {
 		return Definition{}, err
 	}
+	if d.Event, err = parse("event", in.Event); err != nil {
+		return Definition{}, err
+	}
+	d.EventAttended = in.EventAttended
 	for i, y := range in.Year {
 		if y < minYear || y > maxYear {
 			return Definition{}, problem.Field(loc+".year["+strconv.Itoa(i)+"]", "class years are 1-8")
@@ -279,7 +289,7 @@ func (h handler) create(ctx context.Context, in *createSegmentInput) (*segmentOu
 	if err != nil {
 		return nil, err
 	}
-	def, err := definitionOf("body.definition", in.Body.Definition)
+	def, err := in.Body.Definition.Definition("body.definition")
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +336,7 @@ func (h handler) update(ctx context.Context, in *updateSegmentInput) (*segmentOu
 	}
 	p := SegmentPatch{Name: in.Body.Name}
 	if in.Body.Definition != nil {
-		def, err := definitionOf("body.definition", *in.Body.Definition)
+		def, err := in.Body.Definition.Definition("body.definition")
 		if err != nil {
 			return nil, err
 		}
@@ -375,7 +385,7 @@ func (h handler) count(ctx context.Context, in *countAudienceInput) (*countOutpu
 	if err != nil {
 		return nil, err
 	}
-	def, err := definitionOf("body.definition", in.Body.Definition)
+	def, err := in.Body.Definition.Definition("body.definition")
 	if err != nil {
 		return nil, err
 	}

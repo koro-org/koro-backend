@@ -75,6 +75,12 @@ func TestWire_StudentsProvidesProviderHooksAndTasks(t *testing.T) {
 		{domainevent.TopicFileRejected, students.DropRejectedFileTaskName},
 		{domainevent.TopicUserEduVerificationLapsed, students.SuspendLapsedGrantsTaskName},
 		{domainevent.TopicUserEduVerified, students.SuspendGapGrantsTaskName},
+		{domainevent.TopicRegistrationConfirmed, students.AddEventKeyTaskName}, // BE-161
+		{domainevent.TopicRegistrationCancelled, students.RemoveEventKeyTaskName},
+		{domainevent.TopicCheckinRecorded, students.AddAttendedKeyTaskName},
+		{domainevent.TopicCheckinVoided, students.RemoveAttendedKeyTaskName},
+		{domainevent.TopicConsentRecorded, students.ApplyMarketingConsentTaskName},
+		{domainevent.TopicEventUpdated, students.DropEventKeysTaskName},
 	} {
 		topic, name := sub[0], sub[1]
 		if !slices.ContainsFunc(c.infra.subs.For(topic), func(s outbox.Subscription) bool { return s.Name == name }) {
@@ -353,7 +359,7 @@ func TestWire_StudentsExpiryJobUsesConfiguredWindow(t *testing.T) {
 // error (drain fails on a task error). The share is gone, a consent given
 // again revives nothing, and only a new acceptance shares again (and
 // survives the redelivered withdrawal). The topic's consumers are exactly
-// the two that filter by purpose.
+// the three that filter by purpose.
 func TestWire_ConsentWithdrawalClearsContactShares(t *testing.T) {
 	t.Parallel()
 	c := newTestContainer(t)
@@ -366,7 +372,9 @@ func TestWire_ConsentWithdrawalClearsContactShares(t *testing.T) {
 	}
 	slices.Sort(names)
 	// A new consumer must filter by purpose (every consent act is an event).
-	if want := []string{consent.SubmitIYSTaskName, students.ClearContactSharesTaskName}; !slices.Equal(names, want) {
+	// BE-161: students.apply_marketing_consent (commercial purposes only).
+	if want := []string{consent.SubmitIYSTaskName, students.ApplyMarketingConsentTaskName,
+		students.ClearContactSharesTaskName}; !slices.Equal(names, want) {
 		t.Fatalf("consent.recorded consumers %q, want %q", names, want)
 	}
 	ctx := t.Context()

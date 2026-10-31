@@ -73,6 +73,9 @@ type facts struct {
 	verification *identity.EduVerification // active one; nil: none
 	user         *identity.UserSummary     // nil: unknown account
 	clubs        []uuid.UUID               // active club memberships, sensitive clubs included
+	// events are the targetable participations of a student whose
+	// commercial consent is in force (BE-161; none otherwise).
+	events []EventParticipation
 }
 
 // adult reports a known account that is not a minor (an unknown account
@@ -99,8 +102,10 @@ func sortKeys(keys []string) []string {
 }
 
 // audienceOf returns the stored audience of p (02 §9.1): the profile keys
-// plus the keys of its NON-sensitive clubs (03 Y2), and eligibility =
-// active verification ∧ adult ∧ profile active ∧ account active.
+// plus the keys of its NON-sensitive clubs (03 Y2) and of its targetable
+// event participations (BE-161: consenting students only), and
+// eligibility = active verification ∧ adult ∧ profile active ∧ account
+// active.
 func audienceOf(p Profile, f facts, sensitive map[uuid.UUID]bool) ([]string, bool) {
 	keys := profileKeys(p)
 	for _, c := range f.clubs {
@@ -108,6 +113,7 @@ func audienceOf(p Profile, f facts, sensitive map[uuid.UUID]bool) ([]string, boo
 			keys = append(keys, ClubKey(c))
 		}
 	}
+	keys = append(keys, eventKeys(f.events)...)
 	eligible := f.verification != nil && f.adult() && f.user.Status == identity.StatusActive &&
 		p.Status == ProfileActive
 	return sortKeys(keys), eligible
@@ -138,8 +144,9 @@ func changed(old, next Profile) bool {
 
 func equalID(a, b *uuid.UUID) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }
 
-// loadFacts reads the facts of ids from identity and orgs and the
-// sensitive flag of their clubs from directory.
+// loadFacts reads the facts of ids from identity, orgs and events (the
+// targetable participations of the students whose commercial consent is in
+// force, BE-161) and the sensitive flag of their clubs from directory.
 func (s *service) loadFacts(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]facts, map[uuid.UUID]bool, error) {
 	out := make(map[uuid.UUID]facts, len(ids))
 	if len(ids) == 0 {
@@ -155,9 +162,13 @@ func (s *service) loadFacts(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID
 			return nil, nil, fmt.Errorf("students: verifications: %w", err)
 		}
 	}
+	events, err := s.eventFacts(ctx, ids)
+	if err != nil {
+		return nil, nil, err
+	}
 	var clubs []uuid.UUID
 	for _, id := range ids {
-		f := facts{}
+		f := facts{events: events[id]}
 		if u, ok := users[id]; ok {
 			f.user = &u
 		}
@@ -272,14 +283,22 @@ func (s *service) AudienceProfile(ctx context.Context, userID uuid.UUID) (Audien
 }
 
 // ViewerKeys implements Profiles: 'all', the profile keys of a student
-// (whatever the eligibility: reading is not targeting) and the keys of
-// every active club membership, sensitive clubs included (a club's own
-// posts reach its members; 02 §17). Computed at read time, never stored.
+// (whatever the eligibility: reading is not targeting), the keys of every
+// active club membership, sensitive clubs included (a club's own posts
+// reach its members; 02 §17), computed at read time and never stored, and
+// the stored event keys (BE-161: only a consenting student's targetable
+// participations, so a post targeting an event's attendees reaches the
+// students its count counted).
 func (s *service) ViewerKeys(ctx context.Context, userID uuid.UUID) (ViewerKeys, error) {
 	keys := []string{KeyAll}
 	switch p, err := s.profiles().GetProfile(ctx, userID); {
 	case err == nil:
 		keys = profileKeys(p)
+		for _, k := range p.AudienceKeys {
+			if isEventKey(k) {
+				keys = append(keys, k)
+			}
+		}
 	case !errors.Is(err, ErrNotFound):
 		return ViewerKeys{}, err
 	}
@@ -354,6 +373,7 @@ func (m Module) Subscribe(r *outbox.Registry) {
 	r.Subscribe(domainevent.TopicUserEduVerificationLapsed, SuspendLapsedGrantsTaskName, m.svc.handleLapsedGrants, q)
 	r.Subscribe(domainevent.TopicUserEduVerified, SuspendGapGrantsTaskName, m.svc.handleGapGrants, q)
 	r.Subscribe(domainevent.TopicConsentRecorded, ClearContactSharesTaskName, m.svc.handleConsentRecorded, q)
+	m.subscribeEventKeys(r, q) // BE-161
 }
 
 // Jobs returns the scheduled jobs of 01 §7.

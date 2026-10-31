@@ -1260,6 +1260,12 @@
     "type": "urn:koro:problem:outreach.empty_patch"
   },
   {
+    "code": "outreach.event_not_targetable",
+    "status": 422,
+    "title": "The event cannot be targeted",
+    "type": "urn:koro:problem:outreach.event_not_targetable"
+  },
+  {
     "code": "outreach.invalid_state",
     "status": 409,
     "title": "The current status does not allow this change",

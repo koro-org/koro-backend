@@ -30,6 +30,10 @@ import (
 //	       club_event_registrations_count and the admin view's
 //	       registrations[] (04 §V.4, §V.5). events (L8) sets it in
 //	       wire_events.go (BE-025 follow-up). nil → both are absent.
+//	participations  the events reader of the event keys of the audience
+//	       (BE-161, Q-39: targetable participations and events). events
+//	       sets it in wire_events.go. nil → no event key, a spec naming
+//	       events matches nobody (fail closed).
 //
 // Consumed (built in lower layers): c.audit.svc, c.consent.svc (Recorder
 // in the privacy transaction, Checker for the nightly reconciliation and
@@ -60,6 +64,9 @@ type studentsWiring struct {
 
 	// registrations is the events reader (late binding, see above).
 	registrations students.Registrations
+	// participations is the events reader of the event keys (late
+	// binding, see above; BE-161).
+	participations students.Participations
 
 	// late is the container, kept for the matrix fixtures (the consent
 	// text of the discoverable variant lives in the consent store).
@@ -108,6 +115,7 @@ func (w *studentsWiring) build(c *container) error {
 	}
 	d.DSRs = studentsDSRs{c: c}
 	d.Registrations = func() students.Registrations { return w.registrations }
+	d.Participations = func() students.Participations { return w.participations }
 	if v := c.identity.mod.Students; v != nil {
 		d.Verifications = v
 	}
@@ -133,6 +141,10 @@ func (w *studentsWiring) build(c *container) error {
 // students.remove_club_key, user.edu_verified → students.apply_edu_verified,
 // user.edu_verification_lapsed → students.apply_edu_lapsed,
 // club.sensitivity_changed → students.drop_sensitive_club_key (T-80),
+// registration.confirmed/cancelled → students.add_event_key/remove_event_key,
+// checkin.recorded/voided → students.add_attended_key/remove_attended_key,
+// consent.recorded → students.apply_marketing_consent, event.updated →
+// students.drop_event_keys (BE-161, the event keys of the audience),
 // file.rejected → students.drop_rejected_file (T-176: a rejected CV or
 // avatar loses its reference and its file), user.edu_verification_lapsed →
 // students.suspend_lapsed_grants and user.edu_verified →

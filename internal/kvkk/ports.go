@@ -10,6 +10,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/files"
 	"koro/internal/notify"
+	"koro/internal/platform/civil"
 )
 
 // AuditLogger is what kvkk needs from audit (L1): every step of a request
@@ -110,4 +111,18 @@ type TalentAuditor interface {
 	// late bound by talent).
 	Available() bool
 	Report(ctx context.Context, requestedBy, userID uuid.UUID, reason string) (json.RawMessage, error)
+}
+
+// MetricsStore reads the product metrics of SR §6 (BE-164): the SQL
+// functions of 000172 compute and suppress them (k ≥ 10), so the store
+// returns aggregates only, in the order of PeriodMetrics/CurrentMetrics.
+type MetricsStore interface {
+	// Period returns the flow metrics of [from, to).
+	Period(ctx context.Context, from, to time.Time) ([]Metric, error)
+	// Current returns the stock metrics at at.
+	Current(ctx context.Context, at time.Time) ([]Metric, error)
+	// Snapshot stores the stock metrics at at as the row of day in
+	// product_metrics_daily (overwriting a previous run of the day) and
+	// returns the number of metrics written.
+	Snapshot(ctx context.Context, day civil.Date, at time.Time) (int, error)
 }

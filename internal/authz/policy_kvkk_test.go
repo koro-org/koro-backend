@@ -147,6 +147,7 @@ func TestKvkkPolicy_RecordsMatrix(t *testing.T) {
 		authz.KvkkBreachManage:          dpoAndAdmin,
 		authz.KvkkSubprocessorList:      dpoAndAdmin,
 		authz.KvkkSubprocessorManage:    dpoOnly,
+		authz.KvkkMetricsRead:           {"platform_admin": nil}, // BE-164: product KPIs
 	} {
 		for _, p := range authztest.Personas() {
 			exp, ok := want[p.Name]
@@ -163,4 +164,5 @@ func TestKvkkPolicy_RecordsMatrix(t *testing.T) {
 	sys := authz.SystemActor("kvkk.retention_sweep")
 	wantErr(t, authz.Can(ctx, sys, authz.KvkkRetentionSweep, authz.Resource{}), nil, false)
 	wantErr(t, authz.Can(ctx, sys, authz.KvkkBreachManage, dsrSurface), authz.ErrForbidden, false)
+	wantErr(t, authz.Can(ctx, sys, authz.KvkkMetricsRead, dsrSurface), authz.ErrForbidden, false)
 }

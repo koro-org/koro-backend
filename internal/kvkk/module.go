@@ -117,13 +117,17 @@ type Service interface {
 	// UpdateSubprocessor is adminUpdateSubprocessor (kvkk.subprocessor.manage;
 	// If-Match).
 	UpdateSubprocessor(ctx context.Context, a authz.Actor, id uuid.UUID, ifMatch string, p SubprocessorPatch) (Subprocessor, error)
+
+	// ProductMetrics is adminGetProductMetrics (kvkk.metrics.read; BE-164).
+	ProductMetrics(ctx context.Context, a authz.Actor, q MetricsQuery) (MetricsReport, error)
 }
 
 // Deps are the dependencies of the kvkk module. Everything but Talent and
 // DPOEmail is required (New returns an error otherwise, 05 §3).
 type Deps struct {
 	Store       Store
-	Records     RecordStore // retention policies, destruction log, breaches, sub-processors
+	Records     RecordStore  // retention policies, destruction log, breaches, sub-processors
+	Metrics     MetricsStore // product metrics of SR §6 (BE-164)
 	Tx          db.TxManager
 	Outbox      outbox.Writer // dsr.* events (mechanism O)
 	Audit       AuditLogger
@@ -167,7 +171,8 @@ func (d *Deps) validate() error {
 		name string
 		ok   bool
 	}{
-		{"Store", d.Store != nil}, {"Records", d.Records != nil}, {"Tx", d.Tx != nil}, {"Outbox", d.Outbox != nil}, {"Audit", d.Audit != nil},
+		{"Store", d.Store != nil}, {"Records", d.Records != nil}, {"Metrics", d.Metrics != nil}, {"Tx", d.Tx != nil},
+		{"Outbox", d.Outbox != nil}, {"Audit", d.Audit != nil},
 		{"Idempotency", d.Idempotency != nil}, {"Clock", d.Clock != nil}, {"Log", d.Log != nil},
 		{"Users", d.Users != nil}, {"Files", d.Files != nil},
 		{"Mailer", d.Mailer != nil}, {"Providers", d.Providers != nil},
@@ -236,9 +241,11 @@ func (m Module) Subscribe(r *outbox.Registry) {
 }
 
 // Jobs returns the scheduled jobs of kvkk (01 §7): kvkk.dsr_deadlines,
-// kvkk.purge_exports, kvkk.retention_sweep and kvkk.breach_timer.
+// kvkk.purge_exports, kvkk.retention_sweep, kvkk.breach_timer and
+// kvkk.metrics_snapshot (BE-164).
 func (m Module) Jobs() []queue.Job {
-	return []queue.Job{m.svc.deadlinesJob(), m.svc.purgeExportsJob(), m.svc.retentionSweepJob(), m.svc.breachTimerJob()}
+	return []queue.Job{m.svc.deadlinesJob(), m.svc.purgeExportsJob(), m.svc.retentionSweepJob(), m.svc.breachTimerJob(),
+		m.svc.metricsSnapshotJob()}
 }
 
 // RetentionPeriod is hooks.retention (01 §7: the platform cleanup jobs read

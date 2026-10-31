@@ -225,6 +225,7 @@ type env struct {
 	clk       *clock.Fake
 	store     *kvkk.MemStore
 	records   *kvkk.MemRecords
+	metrics   *kvkk.MemMetrics
 	sweepers  []privacy.RetentionSweeper
 	revoked   *callLog // RevokeSessions calls ("revoke:<user>")
 	admins    []uuid.UUID
@@ -245,8 +246,9 @@ type env struct {
 func newEnv(t *testing.T, opts ...func(*kvkk.Deps)) *env {
 	t.Helper()
 	clk := clock.NewFake(time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC))
-	e := &env{clk: clk, store: kvkk.NewMemStore(clk.Now), records: kvkk.NewMemRecords(clk.Now), revoked: &callLog{},
-		admins: []uuid.UUID{authztest.ID("platform_admin")}, out: outbox.NewMem(clk), subs: outbox.NewRegistry(),
+	e := &env{clk: clk, store: kvkk.NewMemStore(clk.Now), records: kvkk.NewMemRecords(clk.Now), metrics: kvkk.NewMemMetrics(),
+		revoked: &callLog{},
+		admins:  []uuid.UUID{authztest.ID("platform_admin")}, out: outbox.NewMem(clk), subs: outbox.NewRegistry(),
 		users: &fakeUsers{live: map[uuid.UUID]kvkk.Contact{}, erased: map[uuid.UUID]bool{}},
 		mail:  &fakeMailer{keys: map[string]bool{}}, log: &callLog{}, filesMem: storage.NewMem(clk)}
 	auditSvc := audit.New(audit.Deps{Store: audit.NewMemStore(), Tx: db.NopTx{}, Clock: clk, Log: obs.Discard()}).Service
@@ -279,7 +281,7 @@ func newEnv(t *testing.T, opts ...func(*kvkk.Deps)) *env {
 	}
 	seedPolicies(e.records, clk.Now())
 	d := kvkk.Deps{
-		Store: e.store, Records: e.records, Tx: db.NopTx{}, Outbox: e.out, Audit: e.audit, Idempotency: keeper(), Clock: clk,
+		Store: e.store, Records: e.records, Metrics: e.metrics, Tx: db.NopTx{}, Outbox: e.out, Audit: e.audit, Idempotency: keeper(), Clock: clk,
 		Log: obs.Discard(), Reauth: fakeReauth{}, Users: e.users, Files: e.zips,
 		Mailer: e.mail, Providers: func() []privacy.Provider { return e.providers }, DPOEmail: dpoMailbox,
 		Sweepers: func() []privacy.RetentionSweeper { return e.sweepers },

@@ -900,6 +900,12 @@
     "type": "urn:koro:problem:kvkk.identity_not_verified"
   },
   {
+    "code": "kvkk.invalid_period",
+    "status": 422,
+    "title": "Invalid metrics period",
+    "type": "urn:koro:problem:kvkk.invalid_period"
+  },
+  {
     "code": "kvkk.invalid_request",
     "status": 422,
     "title": "Request is invalid",

@@ -36,6 +36,10 @@ var (
 	// period (T-83: 7 days).
 	ErrExportExpired = problem.New(problem.Gone, "kvkk.export_expired", "The export file has expired")
 
+	// ErrInvalidPeriod: a metrics period whose from is after its to, that
+	// is longer than 366 days or that ends after today (BE-164).
+	ErrInvalidPeriod = problem.New(problem.Invalid, "kvkk.invalid_period", "Invalid metrics period")
+
 	// ErrDuplicateSubprocessor: another sub-processor has this name.
 	ErrDuplicateSubprocessor = problem.New(problem.Conflict, "kvkk.duplicate_subprocessor", "A sub-processor with this name exists")
 

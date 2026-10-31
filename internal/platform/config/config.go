@@ -111,6 +111,7 @@ type API struct {
 	Common
 	HTTP      HTTP
 	Obs       Obs
+	ErrTrack  ErrTrack
 	RateLimit RateLimit
 	Passwd    Passwd
 	Platform  Platform
@@ -124,6 +125,7 @@ type API struct {
 type Worker struct {
 	Common
 	Obs       Obs
+	ErrTrack  ErrTrack
 	AuditRoot AuditRoot
 	Platform  Platform
 	Modules   Modules

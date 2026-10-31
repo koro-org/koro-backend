@@ -12,6 +12,7 @@ import (
 
 	"koro/internal/platform/clock"
 	"koro/internal/platform/config"
+	"koro/internal/platform/errtrack"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/queue"
@@ -35,6 +36,12 @@ func runAPI(ctx context.Context, stop context.CancelFunc, environ map[string]str
 		Level: cfg.LogLevel, Format: cfg.LogFormat, Service: "koro-api", Env: cfg.Env, Version: version,
 	})
 	warnIgnoredAPIVars(ctx, log, cfg.Common, environ)
+	log, errs, err := setupErrorTracking(ctx, cfg.ErrTrack, cfg.Common, "koro-api", log)
+	if err != nil {
+		return err
+	}
+	defer errs.Flush(errorFlushTimeout)
+	defer errtrack.ReportPanic(errs, errorFlushTimeout)
 	tel, err := setupTelemetry(ctx, cfg.Obs, "koro-api", cfg.Env, log)
 	if err != nil {
 		return err

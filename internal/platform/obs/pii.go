@@ -200,6 +200,12 @@ func redactKey(k string) bool {
 
 func keyIs(k, name string) bool { return k == name || strings.HasSuffix(k, "_"+name) }
 
+// RedactAttr applies the key and value rules of the log handler (layers 2
+// and 3) to one attribute whose value is already resolved. Other sinks of
+// log records (internal/platform/errtrack, OPS-014) use it so that they
+// never carry more than the log line does.
+func RedactAttr(a slog.Attr) slog.Attr { return redactAttr(nil, a) }
+
 // redactAttr is the slog ReplaceAttr hook (layers 2 and 3). LogValuer values
 // are already resolved when it runs.
 func redactAttr(_ []string, a slog.Attr) slog.Attr {

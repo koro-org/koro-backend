@@ -1,0 +1,150 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "OPS-014 (uyum denetimi #118): haftalık, gruplu bağımlılık PR'ları. Otomatik merge YOK: her PR CI'dan geçer ve orkestratörün verify-merge akışıyla birleşir.",
+    "GitHub Actions commit SHA'ya, Docker imajları sürüm + @sha256 digest'e sabitlenir; Go modülleri go.sum ile kilitli (gomodTidy).",
+    "Renovate GitHub App kurulumu repo sahibinin işi (koro-org ayarları)."
+  ],
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests",
+    "docker:pinDigests",
+    ":dependencyDashboard",
+    ":timezone(Europe/Istanbul)"
+  ],
+  "schedule": [
+    "before 9am on monday"
+  ],
+  "automerge": false,
+  "platformAutomerge": false,
+  "prConcurrentLimit": 6,
+  "prHourlyLimit": 3,
+  "minimumReleaseAge": "7 days",
+  "labels": [
+    "dependencies"
+  ],
+  "ignoreDeps": [
+    "koro-loadtest"
+  ],
+  "commitMessagePrefix": "deps:",
+  "postUpdateOptions": [
+    "gomodTidy"
+  ],
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "description": "Güvenlik düzeltmeleri takvim ve bekleme süresi beklemez; yine de otomatik merge yok.",
+    "schedule": [
+      "at any time"
+    ],
+    "minimumReleaseAge": null,
+    "labels": [
+      "dependencies",
+      "security"
+    ]
+  },
+  "lockFileMaintenance": {
+    "enabled": false
+  },
+  "packageRules": [
+    {
+      "description": "Go modülleri: küçük ve yama sürümleri tek PR.",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ],
+      "groupName": "Go modülleri (minor/patch)"
+    },
+    {
+      "description": "Major sürümler ayrı PR ve panodan onayla açılır (API kırılması: import yolu değişir).",
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "dependencyDashboardApproval": true,
+      "labels": [
+        "dependencies",
+        "major"
+      ]
+    },
+    {
+      "description": "Go araç zinciri tek PR: go.mod go/toolchain, Makefile GO_TOOLCHAIN ve derleme imajı golang aynı sürümde kalır (OPS-001/002/003).",
+      "matchDepNames": [
+        "go",
+        "golang"
+      ],
+      "groupName": "Go araç zinciri",
+      "rangeStrategy": "bump"
+    },
+    {
+      "description": "Geliştirme araçları (Makefile): golangci-lint ve govulncheck.",
+      "matchDepNames": [
+        "github.com/golangci/golangci-lint/v2",
+        "golang.org/x/vuln"
+      ],
+      "matchManagers": [
+        "custom.regex"
+      ],
+      "groupName": "Geliştirme araçları"
+    },
+    {
+      "description": "GitHub Actions: SHA sabit, sürüm yorumda; tek PR.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "groupName": "GitHub Actions"
+    },
+    {
+      "description": "Docker imajları (deploy/Dockerfile, compose.dev.yaml): sürüm + digest; digest tazelemeleri tek PR.",
+      "matchManagers": [
+        "dockerfile",
+        "docker-compose"
+      ],
+      "matchUpdateTypes": [
+        "digest",
+        "pinDigest"
+      ],
+      "groupName": "Docker imaj digest'leri"
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Makefile GOLANGCI_LINT_VERSION (bin/ altına kurulan lint aracı).",
+      "managerFilePatterns": [
+        "/^Makefile$/"
+      ],
+      "matchStrings": [
+        "GOLANGCI_LINT_VERSION\\s*:=\\s*(?<currentValue>v\\S+)"
+      ],
+      "datasourceTemplate": "go",
+      "depNameTemplate": "github.com/golangci/golangci-lint/v2"
+    },
+    {
+      "customType": "regex",
+      "description": "Makefile GOVULNCHECK_VERSION.",
+      "managerFilePatterns": [
+        "/^Makefile$/"
+      ],
+      "matchStrings": [
+        "GOVULNCHECK_VERSION\\s*:=\\s*(?<currentValue>v\\S+)"
+      ],
+      "datasourceTemplate": "go",
+      "depNameTemplate": "golang.org/x/vuln"
+    },
+    {
+      "customType": "regex",
+      "description": "Makefile GO_TOOLCHAIN := go1.x.y (go.mod ile aynı tutulur).",
+      "managerFilePatterns": [
+        "/^Makefile$/"
+      ],
+      "matchStrings": [
+        "GO_TOOLCHAIN\\s*:=\\s*go(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "datasourceTemplate": "golang-version",
+      "depNameTemplate": "go"
+    }
+  ]
+}

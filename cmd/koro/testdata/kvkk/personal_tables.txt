@@ -87,6 +87,7 @@ event_data_exports          personal  events        provider:events
 feed_org_settings           staff     feed          -
 posts                       personal  feed          provider:feed
 post_media                  none      feed          -
+post_dropped_media          none      feed          -
 post_reactions              personal  feed          provider:feed
 post_saves                  personal  feed          provider:feed
 post_hides                  personal  feed          provider:feed

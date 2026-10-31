@@ -29,6 +29,15 @@ type MediaDTO struct {
 	Height  *int   `json:"height,omitempty"`
 }
 
+// toMediaDTO is the DTO of an image of a post.
+func toMediaDTO(m MediaView) MediaDTO {
+	d := MediaDTO{FileID: m.FileID.String(), URL: m.URL, Width: m.Width, Height: m.Height}
+	if m.AltText != nil {
+		d.AltText = *m.AltText
+	}
+	return d
+}
+
 // EventRefDTO is the shared event of an event_share post. Org is its
 // organiser (public org data, as on the event cards; BE-133), which may be
 // another org than the post's author.
@@ -159,11 +168,7 @@ func toPostDTO(v PostView) PostDTO {
 		}
 	}
 	for _, m := range v.Media {
-		md := MediaDTO{FileID: m.FileID.String(), URL: m.URL, Width: m.Width, Height: m.Height}
-		if m.AltText != nil {
-			md.AltText = *m.AltText
-		}
-		d.Media = append(d.Media, md)
+		d.Media = append(d.Media, toMediaDTO(m))
 	}
 	if e := v.Event; e != nil {
 		d.Event = &EventRefDTO{EventID: e.ID.String(), Title: e.Title, Slug: e.Slug, StartsAt: e.StartsAt, EndsAt: e.EndsAt,

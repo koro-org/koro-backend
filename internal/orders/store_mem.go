@@ -235,7 +235,9 @@ func (m *MemStore) UpdateLine(_ context.Context, l Line, from Fulfillment) (Line
 }
 
 // ReplaceLineEvidence implements Store.
-func (m *MemStore) ReplaceLineEvidence(_ context.Context, lineID, cur, next uuid.UUID) (Line, error) {
+// It applies order_lines_evidence_open_guard (000166): only an open line
+// (marked or disputed, not paid out) takes another evidence.
+func (m *MemStore) ReplaceLineEvidence(_ context.Context, lineID, cur, next uuid.UUID, at time.Time) (Line, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	l, ok := m.lines[lineID]
@@ -244,8 +246,11 @@ func (m *MemStore) ReplaceLineEvidence(_ context.Context, lineID, cur, next uuid
 		return Line{}, ErrNotFound
 	case l.FulfillmentEvidenceFileID == nil || *l.FulfillmentEvidenceFileID != cur:
 		return Line{}, ErrInvalidState
+	case l.FulfillmentStatus != FulfillMarked && l.FulfillmentStatus != FulfillDisputed, l.PayoutID != nil, l.PaidOutAt != nil:
+		return Line{}, ErrInvalidState
 	}
-	l.FulfillmentEvidenceFileID = &next
+	replaced := at.UTC().Truncate(time.Microsecond)
+	l.FulfillmentEvidenceFileID, l.EvidenceReplacedAt = &next, &replaced
 	l.UpdatedAt = m.touch(l.UpdatedAt)
 	m.lines[lineID] = l
 	return cloneLine(l), nil

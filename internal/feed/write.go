@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"time"
 	"uuid"
 
@@ -65,7 +66,7 @@ func (s *service) CreatePost(ctx context.Context, a authz.Actor, orgID uuid.UUID
 		if err != nil {
 			return uuid.Nil(), err
 		}
-		if err := s.writeMedia(ctx, a, p, nil, ap.media); err != nil {
+		if _, err := s.writeMedia(ctx, a, p, nil, ap.media); err != nil {
 			return uuid.Nil(), err
 		}
 		return p.ID, s.d.Audit.Log(ctx, auditEvent(a, authz.FeedPostCreate, p, map[string]any{
@@ -80,30 +81,74 @@ func (s *service) CreatePost(ctx context.Context, a authz.Actor, orgID uuid.UUID
 
 // writeMedia replaces the media of p (before) by media and attaches every
 // image to the post in the transaction (files k30: the upload was
-// authorised for post_media; checkMedia checked its owner); an image of
-// before that media no longer lists is deleted after its row (BE-155). nil
-// media leaves them as they are.
-func (s *service) writeMedia(ctx context.Context, a authz.Actor, p Post, before []Media, media []MediaInput) error {
+// authorised for post_media; checkMedia checked its owner). nil media
+// leaves them as they are. It returns the files of before that media no
+// longer lists:
+//
+//   - a draft or a post in review (never seen by readers nor reported)
+//     loses them for good: they are deleted after its rows (BE-155);
+//   - a published post keeps them for the moderators (BE-158, the security
+//     review's G-1): they leave post_media (no reader nor the author org
+//     sees them again; post_media has no public copy, a signed URL lives
+//     5 minutes) and stay attached to the post in post_dropped_media until
+//     the post is purged or post_media_dropped takes them, so an edit
+//     cannot destroy what was reported. An image listed again comes back
+//     from there.
+func (s *service) writeMedia(ctx context.Context, a authz.Actor, p Post, before []Media, media []MediaInput) ([]uuid.UUID, error) {
 	if media == nil {
-		return nil
+		return nil, nil
 	}
 	kept := make([]uuid.UUID, 0, len(media))
 	for _, m := range media {
-		if err := s.d.Files.Attach(ctx, a, m.FileID, files.Owner{Module: mediaOwner, EntityID: p.ID, Purpose: files.PurposePostMedia}); err != nil {
-			return err
-		}
 		kept = append(kept, m.FileID)
 	}
-	if err := s.media().ReplaceMedia(ctx, p.OrgID, p.ID, mediaRows(media)); err != nil {
-		return err
+	if p.Status == StatusPublished {
+		// An image dropped by an earlier edit and listed again leaves the
+		// dropped rows first (the retention sweep locks them in the same
+		// order: the row, then the file).
+		if _, err := s.media().ForgetDroppedMedia(ctx, kept); err != nil {
+			return nil, err
+		}
 	}
-	return files.DeleteDropped(ctx, s.d.Files, a, mediaFiles(before), kept)
+	for _, id := range kept {
+		if err := s.d.Files.Attach(ctx, a, id, files.Owner{Module: mediaOwner, EntityID: p.ID, Purpose: files.PurposePostMedia}); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.media().ReplaceMedia(ctx, p.OrgID, p.ID, mediaRows(media)); err != nil {
+		return nil, err
+	}
+	gone := files.Dropped(mediaFiles(before), kept)
+	if p.Status != StatusPublished {
+		return gone, files.DeleteDropped(ctx, s.d.Files, a, gone, nil)
+	}
+	if len(gone) == 0 {
+		return nil, nil
+	}
+	now := s.now()
+	dropped := make([]DroppedMedia, 0, len(gone))
+	for _, m := range before {
+		if slices.Contains(gone, m.FileID) {
+			dropped = append(dropped, DroppedMedia{FileID: m.FileID, AltText: m.AltText, Width: m.Width, Height: m.Height, DroppedAt: now})
+		}
+	}
+	// org_id from the locked posts row (06 H-38).
+	return gone, s.media().DropMedia(ctx, p.OrgID, p.ID, dropped)
 }
 
 // mediaFiles returns the files of media in order.
 func mediaFiles(media []Media) []uuid.UUID {
 	out := make([]uuid.UUID, len(media))
 	for i, m := range media {
+		out[i] = m.FileID
+	}
+	return out
+}
+
+// droppedFiles returns the files of dropped images in order.
+func droppedFiles(dropped []DroppedMedia) []uuid.UUID {
+	out := make([]uuid.UUID, len(dropped))
+	for i, m := range dropped {
 		out[i] = m.FileID
 	}
 	return out
@@ -168,15 +213,21 @@ func (s *service) UpdatePost(ctx context.Context, a authz.Actor, id uuid.UUID, i
 		if next, err = s.posts().UpdatePost(ctx, next); err != nil {
 			return err
 		}
-		if err := s.writeMedia(ctx, a, next, media[cur.ID], ap.media); err != nil {
+		gone, err := s.writeMedia(ctx, a, next, media[cur.ID], ap.media)
+		if err != nil {
 			return err
 		}
 		if err := s.changed(ctx, cur, next); err != nil {
 			return err
 		}
-		return s.d.Audit.Log(ctx, auditEvent(a, authz.FeedPostUpdate, next, map[string]any{
-			"status": string(next.Status), "media_replaced": ap.media != nil,
-		}))
+		meta := map[string]any{"status": string(next.Status), "media_replaced": ap.media != nil}
+		if len(gone) > 0 {
+			// The dropped images (IDs only): deleted for a draft, kept
+			// for the moderators for a published post (BE-158).
+			meta["dropped_file_ids"] = idStrings(gone)
+			meta["dropped_kept"] = next.Status == StatusPublished
+		}
+		return s.d.Audit.Log(ctx, auditEvent(a, authz.FeedPostUpdate, next, meta))
 	})
 	if err != nil {
 		return PostView{}, err

@@ -5223,6 +5223,30 @@ components:
         - url
         - expires_at
       type: object
+    DroppedMediaDTO:
+      additionalProperties: false
+      properties:
+        alt_text:
+          type: string
+        dropped_at:
+          description: When the edit took it off the post
+          format: date-time
+          type: string
+        file_id:
+          type: string
+        height:
+          format: int64
+          type: integer
+        url:
+          description: Short-lived download URL (at most 5 minutes); absent when the file is not served
+          type: string
+        width:
+          format: int64
+          type: integer
+      required:
+        - file_id
+        - dropped_at
+      type: object
     DsrAdminDTO:
       additionalProperties: false
       properties:
@@ -7945,11 +7969,15 @@ components:
             - auto_platform
           type: string
         fulfillment_evidence_file_state:
-          description: "The state of the delivery evidence file (BE-154). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the seller uploads it again (replaceOrderLineEvidence). pending: not scanned yet"
+          description: "The state of the delivery evidence file (BE-154). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the seller uploads it again while the line is open (replaceOrderLineEvidence; BE-158). pending: not scanned yet"
           enum:
             - clean
             - pending
             - rejected
+          type: string
+        fulfillment_evidence_replaced_at:
+          description: "When the seller last replaced a rejected delivery evidence (replaceOrderLineEvidence, BE-158): the evidence shown is not the one of the marking; the buyer's admins were told"
+          format: date-time
           type: string
         fulfillment_status:
           enum:
@@ -9729,11 +9757,15 @@ components:
             - auto_platform
           type: string
         fulfillment_evidence_file_state:
-          description: "The state of the delivery evidence file (BE-154). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the seller uploads it again (replaceOrderLineEvidence). pending: not scanned yet"
+          description: "The state of the delivery evidence file (BE-154). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the seller uploads it again while the line is open (replaceOrderLineEvidence; BE-158). pending: not scanned yet"
           enum:
             - clean
             - pending
             - rejected
+          type: string
+        fulfillment_evidence_replaced_at:
+          description: "When the seller last replaced a rejected delivery evidence (replaceOrderLineEvidence, BE-158): the evidence shown is not the one of the marking; the buyer's admins were told"
+          format: date-time
           type: string
         fulfillment_status:
           enum:
@@ -12921,6 +12953,15 @@ components:
           type: string
         commercial_flag:
           type: boolean
+        dropped_media:
+          description: "Images edits took off the post after its publication (BE-158), newest last: kept for the moderators until 12 months after the edit, and while a report on the post is open; readers and the author organization no longer see them"
+          items:
+            $ref: "#/components/schemas/DroppedMediaDTO"
+          type: array
+        edited_at:
+          description: Last edit after the publication
+          format: date-time
+          type: string
         kind:
           enum:
             - text
@@ -12928,6 +12969,11 @@ components:
             - event_share
             - opportunity_call
           type: string
+        media:
+          description: The images the post shows now
+          items:
+            $ref: "#/components/schemas/MediaDTO"
+          type: array
         post_id:
           type: string
         published_at:
@@ -12949,6 +12995,8 @@ components:
         - status
         - audience_kind
         - commercial_flag
+        - media
+        - dropped_media
       type: object
     RequestReturnInputBody:
       additionalProperties: false
@@ -13399,11 +13447,15 @@ components:
           format: date-time
           type: string
         fulfillment_evidence_file_state:
-          description: "The state of the delivery evidence file (BE-154). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the seller uploads it again (replaceOrderLineEvidence). pending: not scanned yet"
+          description: "The state of the delivery evidence file (BE-154). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the seller uploads it again while the line is open (replaceOrderLineEvidence; BE-158). pending: not scanned yet"
           enum:
             - clean
             - pending
             - rejected
+          type: string
+        fulfillment_evidence_replaced_at:
+          description: "When the seller last replaced a rejected delivery evidence (replaceOrderLineEvidence, BE-158): the evidence shown is not the one of the marking; the buyer's admins were told"
+          format: date-time
           type: string
         fulfillment_status:
           enum:
@@ -22799,7 +22851,7 @@ paths:
       x-koro-surface: admin
   /api/v1/admin/reports/{report_id}:
     get:
-      description: The report with a summary of its target (the post or organization, its trust level, its open reports).
+      description: The report with a summary of its target (the post or organization, its trust level, its open reports). A post target carries its images (media) and the images edits took off it after its publication (dropped_media, BE-158), each with a 5-minute URL.
       operationId: adminGetReport
       parameters:
         - description: Report ID
@@ -30607,7 +30659,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/order-lines/{line_id}/replace-evidence:
     post:
-      description: "Only when the line's evidence was rejected after its upload (found infected or not processable: fulfillment_evidence_file_state = rejected; 409 files.not_rejected otherwise; a line without evidence is 409 orders.invalid_state). evidence_file_id is a new completed delivery_evidence upload of the selling organization (422 otherwise; 409 files.rejected, files.not_clean or files.already_attached). The delivery and its dispute window do not change; the rejected file stays on record (audit). The same people as markOrderLineFulfilled (BE-154)."
+      description: "Only when the line's evidence was rejected after its upload (found infected or not processable: fulfillment_evidence_file_state = rejected; 409 files.not_rejected otherwise) and only while the line is open: marked inside its dispute window or disputed and unresolved, of an order that still delivers, nothing paid out (409 orders.invalid_state otherwise, and for a line without evidence; BE-158). evidence_file_id is a new completed delivery_evidence upload of the selling organization (422 otherwise) that the virus scan has already cleared (409 files.not_clean while it is pending; 409 files.rejected or files.already_attached). The delivery and its dispute window do not change; the rejected file stays on record (audit), the line shows fulfillment_evidence_replaced_at, and the buying company's administrators (and finance while the line is disputed) are notified. The same people as markOrderLineFulfilled (BE-154)."
       operationId: replaceOrderLineEvidence
       parameters:
         - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
@@ -34860,7 +34912,7 @@ paths:
       x-koro-rate-limit: read_default
       x-koro-surface: public
     patch:
-      description: "If-Match with the ETag of getPost is required: missing → 428, stale → 412. A published post keeps its kind, audience and commercial label (409 feed.published_immutable); an edit stamps edited_at. media replaces every image."
+      description: "If-Match with the ETag of getPost is required: missing → 428, stale → 412. A published post keeps its kind, audience and commercial label (409 feed.published_immutable); an edit stamps edited_at. media replaces every image: on a draft or a post in review an image it no longer lists is deleted (its file ID cannot be used again); on a published post it leaves the post at once but is kept for the moderators (adminGetReport dropped_media) until 12 months after the edit, and listing it again brings it back (BE-158)."
       operationId: updatePost
       parameters:
         - description: Post ID

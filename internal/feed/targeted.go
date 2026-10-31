@@ -163,7 +163,7 @@ func (s *service) CreateTargetedPost(ctx context.Context, a authz.Actor, orgID u
 		if p, err = s.posts().InsertPost(ctx, p); err != nil {
 			return uuid.Nil(), err
 		}
-		if err := s.writeMedia(ctx, a, p, nil, ap.media); err != nil {
+		if _, err := s.writeMedia(ctx, a, p, nil, ap.media); err != nil {
 			return uuid.Nil(), err
 		}
 		meta := map[string]any{

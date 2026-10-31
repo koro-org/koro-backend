@@ -25,7 +25,8 @@ var errCheck = problem.ErrValidation.Wrap(errors.New("feed: check constraint vio
 type MemStore struct {
 	mu       sync.Mutex
 	posts    map[uuid.UUID]Post
-	media    map[uuid.UUID][]Media // by post id
+	media    map[uuid.UUID][]Media      // by post id
+	dropped  map[uuid.UUID]DroppedMedia // post_dropped_media by file id (BE-158)
 	settings map[uuid.UUID]OrgSettings
 	follows  map[[2]uuid.UUID]Follow    // {user, org}
 	mutes    map[[2]uuid.UUID]time.Time // {user, org} → created_at
@@ -44,7 +45,7 @@ var _ Store = (*MemStore)(nil)
 // NewMemStore returns an empty in-memory Store; now stamps the rows.
 func NewMemStore(now func() time.Time) *MemStore {
 	return &MemStore{
-		posts: map[uuid.UUID]Post{}, media: map[uuid.UUID][]Media{}, settings: map[uuid.UUID]OrgSettings{},
+		posts: map[uuid.UUID]Post{}, media: map[uuid.UUID][]Media{}, dropped: map[uuid.UUID]DroppedMedia{}, settings: map[uuid.UUID]OrgSettings{},
 		follows: map[[2]uuid.UUID]Follow{}, mutes: map[[2]uuid.UUID]time.Time{}, hides: map[[2]uuid.UUID]time.Time{},
 		likes: map[[2]uuid.UUID]time.Time{}, saves: map[[2]uuid.UUID]time.Time{}, reports: map[uuid.UUID]Report{},
 		now: now,
@@ -210,6 +211,7 @@ func (s *MemStore) DeletePost(_ context.Context, orgID, id uuid.UUID) error {
 	}
 	delete(s.posts, id)
 	delete(s.media, id)
+	s.dropPostRows(id)
 	for _, m := range []map[[2]uuid.UUID]time.Time{s.hides, s.likes, s.saves} {
 		for k := range m {
 			if k[1] == id {
@@ -259,6 +261,75 @@ func (s *MemStore) MediaOf(_ context.Context, postIDs []uuid.UUID) (map[uuid.UUI
 		}
 	}
 	return out, nil
+}
+
+// DropMedia implements Store (the CHECKs and the file_id key of
+// post_dropped_media).
+func (s *MemStore) DropMedia(_ context.Context, orgID, id uuid.UUID, dropped []DroppedMedia) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.posts[id]
+	if !ok || p.OrgID != orgID {
+		return ErrNotFound
+	}
+	for _, m := range dropped {
+		if runes(m.AltText) > 300 || m.Width != nil && *m.Width <= 0 || m.Height != nil && *m.Height <= 0 {
+			return errCheck
+		}
+		if _, taken := s.dropped[m.FileID]; taken {
+			return problem.ErrConflict
+		}
+	}
+	for _, m := range dropped {
+		m.PostID, m.DroppedAt = id, m.DroppedAt.UTC().Truncate(time.Microsecond)
+		s.dropped[m.FileID] = m
+	}
+	return nil
+}
+
+// DroppedMediaOf implements Store.
+func (s *MemStore) DroppedMediaOf(_ context.Context, postIDs []uuid.UUID) (map[uuid.UUID][]DroppedMedia, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[uuid.UUID][]DroppedMedia{}
+	for _, m := range s.dropped {
+		if slices.Contains(postIDs, m.PostID) {
+			out[m.PostID] = append(out[m.PostID], m)
+		}
+	}
+	for _, ms := range out {
+		slices.SortFunc(ms, compareDropped)
+	}
+	return out, nil
+}
+
+// ForgetDroppedMedia implements Store.
+func (s *MemStore) ForgetDroppedMedia(_ context.Context, fileIDs []uuid.UUID) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, id := range fileIDs {
+		if _, ok := s.dropped[id]; ok {
+			delete(s.dropped, id)
+			n++
+		}
+	}
+	return n, nil
+}
+
+// dropPostRows is the ON DELETE CASCADE of post_dropped_media; the caller
+// holds the lock.
+func (s *MemStore) dropPostRows(postID uuid.UUID) {
+	for id, m := range s.dropped {
+		if m.PostID == postID {
+			delete(s.dropped, id)
+		}
+	}
+}
+
+// compareDropped orders dropped images oldest first.
+func compareDropped(a, b DroppedMedia) int {
+	return cmp.Or(a.DroppedAt.Compare(b.DroppedAt), a.FileID.Compare(b.FileID))
 }
 
 // visible is readerConds of the GORM store.

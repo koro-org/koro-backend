@@ -38,10 +38,11 @@ type Store interface {
 	// when its fulfilment is still from; ErrInvalidState otherwise.
 	UpdateLine(ctx context.Context, l Line, from Fulfillment) (Line, error)
 	// ReplaceLineEvidence writes next as the delivery evidence of a line
-	// whose evidence is still cur (BE-154; order_lines_evidence_frozen lets
-	// only a rejected file go); ErrInvalidState when the line holds another
-	// evidence now (or none).
-	ReplaceLineEvidence(ctx context.Context, lineID, cur, next uuid.UUID) (Line, error)
+	// whose evidence is still cur, replaced at at (BE-154, BE-158;
+	// order_lines_evidence_frozen lets only a rejected file go,
+	// order_lines_evidence_open_guard only on an open line);
+	// ErrInvalidState when the line holds another evidence now (or none).
+	ReplaceLineEvidence(ctx context.Context, lineID, cur, next uuid.UUID, at time.Time) (Line, error)
 	// DropLines takes the lines out of their unpaid order (Q-28c, BE-134):
 	// each is cancelled with dropped_at = at, then the order's amounts
 	// become o's (the service's totals of the lines left). Only while the

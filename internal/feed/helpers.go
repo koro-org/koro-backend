@@ -188,3 +188,12 @@ func auditEvent(a authz.Actor, act authz.Action, p Post, meta map[string]any) au
 		Metadata: meta,
 	}.By(a)
 }
+
+// idStrings returns ids as text (audit metadata: IDs only).
+func idStrings(ids []uuid.UUID) []string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = id.String()
+	}
+	return out
+}

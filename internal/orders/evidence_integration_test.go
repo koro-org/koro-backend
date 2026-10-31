@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 	"uuid"
 
 	"koro/internal/audit"
@@ -168,7 +169,7 @@ func TestReplaceLineEvidence_Postgres(t *testing.T) {
 	pgExec(t, p.d, `UPDATE files SET scan_status = 'infected' WHERE id = $1`, old) // BE-048
 	state(files.StateRejected)
 	v, err := p.mod.Service.ReplaceLineEvidence(sctx, sa, l.ID, fresh)
-	if err != nil || v.EvidenceState != files.StateClean {
+	if err != nil || v.EvidenceState != files.StateClean || v.Line.EvidenceReplacedAt == nil {
 		t.Fatalf("ReplaceLineEvidence = %+v, %v", v, err)
 	}
 	if ev, mod, ent := p.evidenceOf(t, l.ID, fresh); ev == nil || *ev != fresh || mod == nil || *mod != "orders" || ent == nil || *ent != l.ID {
@@ -179,5 +180,42 @@ func TestReplaceLineEvidence_Postgres(t *testing.T) {
 	}
 	if dl, err := p.mod.Service.LineEvidence(ctx, ba, l.ID); err != nil || dl.URL == "" {
 		t.Fatalf("LineEvidence = %+v, %v", dl, err)
+	}
+}
+
+// TestReplaceLineEvidence_ClosedLine_Postgres (BE-158, G-2): once the
+// buyer confirmed the line, its rejected evidence stays — the service
+// refuses (409 orders.invalid_state) and so does the database when the
+// store is called directly (order_lines_evidence_open, 000166) — and the
+// line keeps no replacement time.
+func TestReplaceLineEvidence_ClosedLine_Postgres(t *testing.T) {
+	t.Parallel()
+	p := newPGEnv(t)
+	l := p.paidPGLine(t)
+	sa, sctx := p.sellerActor(t)
+	old := p.pgEvidence(t, p.seller.org)
+	if _, err := p.mod.Service.MarkLineFulfilled(sctx, sa, l.ID, orders.MarkInput{Note: "Stant kuruldu", EvidenceFileID: &old}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := p.buyerActor(t)
+	ba, err := authz.ActorFrom(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.mod.Service.ConfirmLine(ctx, ba, l.ID); err != nil {
+		t.Fatal(err)
+	}
+	pgExec(t, p.d, `UPDATE files SET scan_status = 'infected' WHERE id = $1`, old) // BE-048
+	fresh := p.pgEvidence(t, p.seller.org)
+	_, err = p.mod.Service.ReplaceLineEvidence(sctx, sa, l.ID, fresh)
+	problemtest.WantErr(t, err, orders.ErrInvalidState)
+	_, err = orders.NewGormStore(p.d.ORM).ReplaceLineEvidence(t.Context(), l.ID, old, fresh, p.clk.Now())
+	problemtest.WantErr(t, err, orders.ErrInvalidState)
+	if ev, _, _ := p.evidenceOf(t, l.ID, old); ev == nil || *ev != old {
+		t.Fatalf("the confirmed line's evidence is %v", ev)
+	}
+	var replaced *time.Time
+	if err := p.d.Pool.QueryRow(t.Context(), `SELECT fulfillment_evidence_replaced_at FROM order_lines WHERE id = $1`, l.ID).Scan(&replaced); err != nil || replaced != nil {
+		t.Fatalf("fulfillment_evidence_replaced_at = %v, %v", replaced, err)
 	}
 }

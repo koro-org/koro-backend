@@ -47,7 +47,8 @@ func TestSchema_ReplaceRejectedEvidence(t *testing.T) {
 		ev := w.file("delivery_evidence")
 		w.exec(`UPDATE order_lines SET fulfillment_status = 'marked', fulfillment_marked_at = now(),
 			dispute_window_ends_at = now() + interval '7 days', fulfillment_evidence_file_id = $2 WHERE id = $1`, line, ev)
-		const lineEv = `UPDATE order_lines SET fulfillment_evidence_file_id = $2 WHERE id = $1`
+		// 000166 (BE-158): a replacement stamps fulfillment_evidence_replaced_at.
+		const lineEv = `UPDATE order_lines SET fulfillment_evidence_file_id = $2, fulfillment_evidence_replaced_at = clock_timestamp() WHERE id = $1`
 		expectFail(t, w.d.Pool, []p1aCase{frozen("a served delivery evidence is replaced", lineEv, line, w.file("delivery_evidence"))})
 		reject(ev, true)
 		expectFail(t, w.d.Pool, []p1aCase{frozen("a rejected delivery evidence is dropped", lineEv, line, nil)})

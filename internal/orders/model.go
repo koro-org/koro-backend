@@ -357,8 +357,13 @@ type Line struct {
 
 	// FulfillmentEvidenceFileID is the seller's delivery evidence (a
 	// delivery_evidence file of the seller org, attached when the line is
-	// marked; BE-093). Once set it never changes (order_lines_evidence_frozen).
+	// marked; BE-093). Once set it changes only away from a file the scan
+	// rejected, while the line is open (000163, 000166; BE-154, BE-158).
 	FulfillmentEvidenceFileID *uuid.UUID `gorm:"type:uuid;column:fulfillment_evidence_file_id"`
+	// EvidenceReplacedAt is when the seller last replaced a rejected
+	// evidence (BE-158); nil while the line holds the evidence of its
+	// marking.
+	EvidenceReplacedAt *time.Time `gorm:"column:fulfillment_evidence_replaced_at"`
 
 	// DroppedAt is when the line left its unpaid order (its offering was
 	// cancelled; Q-28c, BE-134): the line is cancelled, its amounts stay as

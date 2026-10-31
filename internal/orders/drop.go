@@ -88,7 +88,10 @@ type lineDroppedNotice struct {
 
 // Tasks returns the plain task handlers of orders for the worker.
 func (m Module) Tasks() []queue.Task {
-	return []queue.Task{{Name: NotifyLineDroppedTaskName, Handle: m.svc.handleLineDropped}}
+	return []queue.Task{
+		{Name: NotifyLineDroppedTaskName, Handle: m.svc.handleLineDropped},
+		{Name: NotifyEvidenceReplacedTaskName, Handle: m.svc.handleEvidenceReplaced}, // BE-158
+	}
 }
 
 // cancelUnpaidLines lets the lines of a cancelled offering go on an order

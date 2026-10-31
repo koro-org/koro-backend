@@ -269,9 +269,10 @@ type Deps struct {
 	// evidence and the evidence download fail closed (503); a mark
 	// without evidence works.
 	Files Files
-	// Queue queues the notices of a line dropped from an unpaid order after
-	// the commit (orders.notify_line_dropped, BE-134). nil → the notices are
-	// left out (logged); the drop itself works.
+	// Queue queues the notices of a line dropped from an unpaid order
+	// (orders.notify_line_dropped, BE-134) and of a replaced delivery
+	// evidence (orders.notify_evidence_replaced, BE-158) after the commit.
+	// nil → the notices are left out (logged); the write itself works.
 	Queue queue.Enqueuer
 }
 

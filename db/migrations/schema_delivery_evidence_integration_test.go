@@ -64,6 +64,15 @@ func TestSchema_OrderLineDeliveryEvidence(t *testing.T) {
 		t.Fatalf("order_lines_evidence_idx = %s", def)
 	}
 	owner := testutil.OwnerConn(t, w.d)
+	// The migrations whose objects depend on the evidence column go down
+	// before 000137 and up after it, in the migrate order (000166:
+	// order_lines_evidence_open_guard fires on UPDATE OF the column, BE-158).
+	later := []string{"000166_keep_dropped_post_media_and_open_evidence"}
+	for i := len(later) - 1; i >= 0; i-- {
+		if _, err := owner.Exec(t.Context(), mustRead(t, later[i]+".down.sql")); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if _, err := owner.Exec(t.Context(), mustRead(t, "000137_add_delivery_evidence.down.sql")); err != nil {
 		t.Fatal(err)
 	}
@@ -76,6 +85,11 @@ func TestSchema_OrderLineDeliveryEvidence(t *testing.T) {
 	}
 	if _, err := owner.Exec(t.Context(), mustRead(t, "000137_add_delivery_evidence.up.sql")); err != nil {
 		t.Fatal(err)
+	}
+	for _, m := range later {
+		if _, err := owner.Exec(t.Context(), mustRead(t, m+".up.sql")); err != nil {
+			t.Fatal(err)
+		}
 	}
 	check(t)
 }

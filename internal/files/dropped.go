@@ -26,10 +26,7 @@ type Deleter interface {
 // error. A nil del with something to delete is ErrUnavailable (503): the
 // write is refused rather than leaving the file behind.
 func DeleteDropped(ctx context.Context, del Deleter, a authz.Actor, before, after []uuid.UUID) error {
-	for _, id := range before {
-		if slices.Contains(after, id) {
-			continue
-		}
+	for _, id := range Dropped(before, after) {
 		if del == nil {
 			return problem.ErrUnavailable
 		}
@@ -38,6 +35,20 @@ func DeleteDropped(ctx context.Context, del Deleter, a authz.Actor, before, afte
 		}
 	}
 	return nil
+}
+
+// Dropped returns the files of before that after no longer lists, in the
+// order of before: what DeleteDropped deletes, or what an owner keeps
+// elsewhere instead (feed keeps the images dropped off a published post for
+// the moderators, BE-158).
+func Dropped(before, after []uuid.UUID) []uuid.UUID {
+	var out []uuid.UUID
+	for _, id := range before {
+		if !slices.Contains(after, id) {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // DeleteReplaced is DeleteDropped for a single file reference (an org logo,

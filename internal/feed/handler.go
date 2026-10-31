@@ -79,7 +79,10 @@ func Register(api huma.API, svc Service) {
 		Summary: "Update a post",
 		Description: "If-Match with the ETag of getPost is required: missing → 428, stale → 412. A published post " +
 			"keeps its kind, audience and commercial label (409 feed.published_immutable); an edit stamps " +
-			"edited_at. media replaces every image.",
+			"edited_at. media replaces every image: on a draft or a post in review an image it no longer lists is " +
+			"deleted (its file ID cannot be used again); on a published post it leaves the post at once but is kept " +
+			"for the moderators (adminGetReport dropped_media) until 12 months after the edit, and listing it again " +
+			"brings it back (BE-158).",
 	}, op.Meta{Action: string(authz.FeedPostUpdate), Surface: op.SurfaceResource}, h.updatePost)
 
 	op.Register(api, "feed", huma.Operation{

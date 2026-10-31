@@ -134,11 +134,14 @@ func Register(api huma.API, svc Service) {
 		OperationID: "replaceOrderLineEvidence", Method: http.MethodPost, Path: "/order-lines/{line_id}/replace-evidence",
 		Summary: "Upload the delivery evidence of an order line again",
 		Description: "Only when the line's evidence was rejected after its upload (found infected or not processable: " +
-			"fulfillment_evidence_file_state = rejected; 409 files.not_rejected otherwise; a line without evidence is " +
-			"409 orders.invalid_state). evidence_file_id is a new completed delivery_evidence upload of the selling " +
-			"organization (422 otherwise; 409 files.rejected, files.not_clean or files.already_attached). The delivery " +
-			"and its dispute window do not change; the rejected file stays on record (audit). The same people as " +
-			"markOrderLineFulfilled (BE-154).",
+			"fulfillment_evidence_file_state = rejected; 409 files.not_rejected otherwise) and only while the line is " +
+			"open: marked inside its dispute window or disputed and unresolved, of an order that still delivers, " +
+			"nothing paid out (409 orders.invalid_state otherwise, and for a line without evidence; BE-158). " +
+			"evidence_file_id is a new completed delivery_evidence upload of the selling organization (422 otherwise) " +
+			"that the virus scan has already cleared (409 files.not_clean while it is pending; 409 files.rejected or " +
+			"files.already_attached). The delivery and its dispute window do not change; the rejected file stays on " +
+			"record (audit), the line shows fulfillment_evidence_replaced_at, and the buying company's administrators " +
+			"(and finance while the line is disputed) are notified. The same people as markOrderLineFulfilled (BE-154).",
 	}, op.Meta{Action: string(authz.OrdersLineMarkFulfilled), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional},
 		h.replaceEvidence)
 
@@ -223,7 +226,8 @@ type OrderLineDTO struct {
 	FulfilledAt         *time.Time       `json:"fulfilled_at,omitempty"`
 	FulfilledVia        string           `json:"fulfilled_via,omitempty"`
 	HasEvidence         bool             `json:"has_fulfillment_evidence" doc:"The seller attached a delivery evidence file (getOrderLineEvidence)"`
-	EvidenceFileState   string           `json:"fulfillment_evidence_file_state,omitempty" doc:"The state of the delivery evidence file (BE-154). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the seller uploads it again (replaceOrderLineEvidence). pending: not scanned yet"`
+	EvidenceFileState   string           `json:"fulfillment_evidence_file_state,omitempty" doc:"The state of the delivery evidence file (BE-154). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the seller uploads it again while the line is open (replaceOrderLineEvidence; BE-158). pending: not scanned yet"`
+	EvidenceReplacedAt  *time.Time       `json:"fulfillment_evidence_replaced_at,omitempty" doc:"When the seller last replaced a rejected delivery evidence (replaceOrderLineEvidence, BE-158): the evidence shown is not the one of the marking; the buyer's admins were told"`
 	DroppedAt           *time.Time       `json:"dropped_at,omitempty" doc:"Set when the line left the order before payment because its offering was cancelled (fulfillment_status cancelled): its amounts stay as they were, but the order's amounts no longer include them and nothing is paid, refunded or delivered for it"`
 	Seller              SellerRefDTO     `json:"seller"`
 }
@@ -309,8 +313,9 @@ func orderDTO(v OrderView) OrderDTO {
 			PayableAmount: l.PayableAmount, FulfillmentStatus: string(l.FulfillmentStatus),
 			DisputeWindowEndsAt: db.UTCPtr(l.DisputeWindowEndsAt), FulfilledAt: db.UTCPtr(l.FulfilledAt),
 			HasEvidence: l.FulfillmentEvidenceFileID != nil, DroppedAt: db.UTCPtr(l.DroppedAt),
-			EvidenceFileState: string(files.StateOf(v.EvidenceStates, l.FulfillmentEvidenceFileID)),
-			Seller:            SellerRefDTO{OrgID: l.SellerOrgID.String(), Name: v.Sellers[l.SellerOrgID]},
+			EvidenceFileState:  string(files.StateOf(v.EvidenceStates, l.FulfillmentEvidenceFileID)),
+			EvidenceReplacedAt: db.UTCPtr(l.EvidenceReplacedAt),
+			Seller:             SellerRefDTO{OrgID: l.SellerOrgID.String(), Name: v.Sellers[l.SellerOrgID]},
 		}
 		for i, x := range l.DeliverablesSnapshot {
 			d.Deliverables[i] = DeliverableDTO(x)
@@ -743,7 +748,8 @@ type SellerLineDTO struct {
 	DisputeWindowEndsAt *time.Time `json:"dispute_window_ends_at,omitempty"`
 	PaidOutAt           *time.Time `json:"paid_out_at,omitempty"`
 	HasEvidence         bool       `json:"has_fulfillment_evidence" doc:"A delivery evidence file is attached (getOrderLineEvidence)"`
-	EvidenceFileState   string     `json:"fulfillment_evidence_file_state,omitempty" doc:"The state of the delivery evidence file (BE-154). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the seller uploads it again (replaceOrderLineEvidence). pending: not scanned yet"`
+	EvidenceFileState   string     `json:"fulfillment_evidence_file_state,omitempty" doc:"The state of the delivery evidence file (BE-154). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the seller uploads it again while the line is open (replaceOrderLineEvidence; BE-158). pending: not scanned yet"`
+	EvidenceReplacedAt  *time.Time `json:"fulfillment_evidence_replaced_at,omitempty" doc:"When the seller last replaced a rejected delivery evidence (replaceOrderLineEvidence, BE-158): the evidence shown is not the one of the marking; the buyer's admins were told"`
 	DroppedAt           *time.Time `json:"dropped_at,omitempty" doc:"Set when the line left its order before payment because the offering was cancelled (fulfillment_status cancelled): nothing is paid for it"`
 }
 
@@ -786,7 +792,8 @@ func (h handler) sales(ctx context.Context, in *salesInput) (*salesOutput, error
 			GrossAmount: l.GrossAmount, SellerNetAmount: l.SellerNetAmount, FulfillmentStatus: string(l.FulfillmentStatus),
 			DisputeWindowEndsAt: db.UTCPtr(l.DisputeWindowEndsAt), PaidOutAt: db.UTCPtr(l.PaidOutAt),
 			HasEvidence: l.FulfillmentEvidenceFileID != nil, DroppedAt: db.UTCPtr(l.DroppedAt),
-			EvidenceFileState: string(files.StateOf(p.EvidenceStates, l.FulfillmentEvidenceFileID))}
+			EvidenceFileState:  string(files.StateOf(p.EvidenceStates, l.FulfillmentEvidenceFileID)),
+			EvidenceReplacedAt: db.UTCPtr(l.EvidenceReplacedAt)}
 	}
 	if k := p.Next; k != nil {
 		out.Body.NextCursor = page.Next(sortCreated, fp, page.TimeVal(k.At), page.UUIDVal(k.ID))
@@ -808,7 +815,8 @@ type LineStateDTO struct {
 	FulfilledAt         *time.Time `json:"fulfilled_at,omitempty"`
 	FulfilledVia        string     `json:"fulfilled_via,omitempty"`
 	HasEvidence         bool       `json:"has_fulfillment_evidence" doc:"A delivery evidence file is attached (getOrderLineEvidence)"`
-	EvidenceFileState   string     `json:"fulfillment_evidence_file_state,omitempty" doc:"The state of the delivery evidence file (BE-154). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the seller uploads it again (replaceOrderLineEvidence). pending: not scanned yet"`
+	EvidenceFileState   string     `json:"fulfillment_evidence_file_state,omitempty" doc:"The state of the delivery evidence file (BE-154). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the seller uploads it again while the line is open (replaceOrderLineEvidence; BE-158). pending: not scanned yet"`
+	EvidenceReplacedAt  *time.Time `json:"fulfillment_evidence_replaced_at,omitempty" doc:"When the seller last replaced a rejected delivery evidence (replaceOrderLineEvidence, BE-158): the evidence shown is not the one of the marking; the buyer's admins were told"`
 }
 
 type lineOutput struct{ Body LineStateDTO }
@@ -817,7 +825,8 @@ func lineOut(v LineView) *lineOutput {
 	l := v.Line
 	d := LineStateDTO{LineID: l.ID.String(), OrderID: l.OrderID.String(), OrderNo: v.OrderNo, OrderStatus: string(v.OrderStatus),
 		FulfillmentStatus: string(l.FulfillmentStatus), DisputeWindowEndsAt: db.UTCPtr(l.DisputeWindowEndsAt), FulfilledAt: db.UTCPtr(l.FulfilledAt),
-		HasEvidence: l.FulfillmentEvidenceFileID != nil, EvidenceFileState: string(v.EvidenceState)}
+		HasEvidence: l.FulfillmentEvidenceFileID != nil, EvidenceFileState: string(v.EvidenceState),
+		EvidenceReplacedAt: db.UTCPtr(l.EvidenceReplacedAt)}
 	if v.SellerView {
 		d.SellerStatus = string(v.OrderStatus)
 	}

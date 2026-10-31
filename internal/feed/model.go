@@ -144,6 +144,23 @@ type Media struct {
 // TableName implements gorm's Tabler.
 func (Media) TableName() string { return "post_media" }
 
+// DroppedMedia is one post_dropped_media row (BE-158): an image an edit
+// took off a published post. Its file stays attached to the post and is
+// shown to the moderators only (adminGetReport), so an edit never destroys
+// the evidence of a report; it goes with the post or 12 months after it was
+// dropped (post_media_dropped), never while a report on the post is open.
+type DroppedMedia struct {
+	FileID    uuid.UUID `gorm:"type:uuid;column:file_id;primaryKey"`
+	PostID    uuid.UUID `gorm:"type:uuid;column:post_id"`
+	AltText   *string   `gorm:"column:alt_text"`
+	Width     *int      `gorm:"column:width"`
+	Height    *int      `gorm:"column:height"`
+	DroppedAt time.Time `gorm:"column:dropped_at"`
+}
+
+// TableName implements gorm's Tabler.
+func (DroppedMedia) TableName() string { return "post_dropped_media" }
+
 // TrustLevel is feed_org_settings.trust_level (02 §12.1).
 type TrustLevel string
 

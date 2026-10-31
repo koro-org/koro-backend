@@ -208,6 +208,78 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (feed.Store, world)
 		}
 	})
 
+	t.Run("dropped media: scoped drop, read, due unless reported, forget, cascade (BE-158)", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		org, other, by, reader := w.org(t, feed.AuthorClub), w.org(t, feed.AuthorClub), w.user(t), w.user(t)
+		p := insert(t, s, publishedAt(post(org, feed.AuthorClub, by), pub0))
+		q := insert(t, s, publishedAt(post(org, feed.AuthorClub, by), pub0))
+		f1, f2, f3 := w.file(t, org), w.file(t, org), w.file(t, org)
+		alt, width := "afiş", 1080
+		old, young := pub0.AddDate(0, -13, 0), pub0.AddDate(0, -1, 0)
+		drop := []feed.DroppedMedia{{FileID: f1, AltText: &alt, Width: &width, Height: &width, DroppedAt: old}, {FileID: f2, DroppedAt: young}}
+		if err := s.DropMedia(ctx, other, p.ID, drop); !errors.Is(err, feed.ErrNotFound) {
+			t.Fatalf("DropMedia(other org) = %v", err)
+		}
+		if err := s.DropMedia(ctx, org, p.ID, drop); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.DropMedia(ctx, org, q.ID, []feed.DroppedMedia{{FileID: f3, DroppedAt: old}}); err != nil {
+			t.Fatal(err)
+		}
+		// A file is dropped once (post_dropped_media_pkey).
+		if err := s.DropMedia(ctx, org, q.ID, []feed.DroppedMedia{{FileID: f1, DroppedAt: old}}); err == nil {
+			t.Fatal("a file was dropped twice")
+		}
+		got, err := s.DroppedMediaOf(ctx, []uuid.UUID{p.ID, uuid.NewV7()})
+		if err != nil || len(got) != 1 || len(got[p.ID]) != 2 {
+			t.Fatalf("DroppedMediaOf = %+v, %v", got, err)
+		}
+		if d := got[p.ID][0]; d.FileID != f1 || d.PostID != p.ID || d.AltText == nil || *d.AltText != alt || d.Width == nil ||
+			*d.Width != width || !d.DroppedAt.Equal(old) || got[p.ID][1].FileID != f2 {
+			t.Fatalf("DroppedMediaOf(p) = %+v", got[p.ID])
+		}
+
+		// Due after 12 months, unless a report on the post is unresolved.
+		cutoff := pub0.AddDate(0, -12, 0)
+		r, _, err := s.InsertReport(ctx, feed.Report{ID: uuid.NewV7(), ReporterUserID: reader, TargetType: feed.TargetPost,
+			TargetID: p.ID, Reason: feed.ReasonSpam})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n, err := s.CountDroppedMediaDue(ctx, cutoff); err != nil || n != 1 {
+			t.Fatalf("CountDroppedMediaDue with an open report = %d, %v; want 1", n, err)
+		}
+		if due, err := s.DroppedMediaDue(ctx, cutoff, 10); err != nil || len(due) != 1 || due[0].FileID != f3 || due[0].PostID != q.ID {
+			t.Fatalf("DroppedMediaDue with an open report = %+v, %v", due, err)
+		}
+		resolved := pub0
+		r.Status, r.ResolvedAt = feed.ReportDismissed, &resolved
+		if _, err := s.UpdateReport(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+		if n, err := s.CountDroppedMediaDue(ctx, cutoff); err != nil || n != 2 {
+			t.Fatalf("CountDroppedMediaDue = %d, %v; want 2", n, err)
+		}
+		if due, err := s.DroppedMediaDue(ctx, cutoff, 1); err != nil || len(due) != 1 {
+			t.Fatalf("DroppedMediaDue(limit 1) = %+v, %v", due, err)
+		}
+		if n, err := s.ForgetDroppedMedia(ctx, []uuid.UUID{f1, f3, uuid.NewV7()}); err != nil || n != 2 {
+			t.Fatalf("ForgetDroppedMedia = %d, %v; want 2", n, err)
+		}
+		if got, _ := s.DroppedMediaOf(ctx, []uuid.UUID{p.ID, q.ID}); len(got) != 1 || len(got[p.ID]) != 1 || got[p.ID][0].FileID != f2 {
+			t.Fatalf("after ForgetDroppedMedia = %+v", got)
+		}
+		// The rows go with their post.
+		if n, err := s.PurgePosts(ctx, []uuid.UUID{p.ID}); err != nil || n != 1 {
+			t.Fatalf("PurgePosts = %d, %v", n, err)
+		}
+		if got, _ := s.DroppedMediaOf(ctx, []uuid.UUID{p.ID}); len(got) != 0 {
+			t.Fatalf("dropped media outlived their post: %+v", got)
+		}
+	})
+
 	t.Run("feed: audience, minor, followers, mutes, hides, tabs, keyset", func(t *testing.T) {
 		t.Parallel()
 		s, w := newStore(t)

@@ -58,6 +58,7 @@ event_export_log              sweeper:events
 event_export_file             job:events.purge_exports
 # feed (01 §7 feed.purge_removed)
 post_removed                  sweeper:feed
+post_media_dropped            sweeper:feed
 content_report                sweeper:feed
 moderation_action             sweeper:feed
 # outreach: the dispatch rows (BE-035): finished dispatches 2 years after created_at

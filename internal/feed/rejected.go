@@ -32,7 +32,8 @@ const auditMediaRejected = "feed.post.drop_rejected_media"
 // edited_at stays (the author did not edit) and no post.changed is written:
 // webcache's own file.rejected subscription already revalidates a public
 // post's page (BE-150), one request per rejection. A post that is gone or
-// no longer shows the image (purged, replaced) only loses the file; a
+// no longer shows the image (purged, replaced) only loses the file — and
+// its dropped row, when an edit kept it for the moderators (BE-158); a
 // second delivery finds no file and deletes nothing.
 func (s *service) dropRejectedMedia(ctx context.Context, r files.Rejection) error {
 	if r.Purpose != files.PurposePostMedia {
@@ -58,6 +59,12 @@ func (s *service) dropRejectedMedia(ctx context.Context, r files.Rejection) erro
 		shown := media[p.ID]
 		rest := slices.DeleteFunc(slices.Clone(shown), func(m Media) bool { return m.FileID == r.FileID })
 		if len(rest) == len(shown) {
+			// Not shown: maybe an image an edit dropped off the published
+			// post and kept for the moderators (BE-158); its row goes first
+			// (post_dropped_media_file_id_fkey).
+			if _, err := s.media().ForgetDroppedMedia(ctx, []uuid.UUID{r.FileID}); err != nil {
+				return err
+			}
 			return s.d.Files.Delete(ctx, r.Actor, r.FileID)
 		}
 		// org_id from the locked posts row (06 H-38).

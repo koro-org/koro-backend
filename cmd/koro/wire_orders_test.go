@@ -56,8 +56,10 @@ func TestWire_Orders(t *testing.T) {
 			t.Errorf("%s has no %s subscription", topic, name)
 		}
 	}
-	if !slices.ContainsFunc(c.infra.jobs.Tasks(), func(task queue.Task) bool { return task.Name == orders.NotifyLineDroppedTaskName }) {
-		t.Errorf("task %s is not handled", orders.NotifyLineDroppedTaskName)
+	for _, name := range []string{orders.NotifyLineDroppedTaskName, orders.NotifyEvidenceReplacedTaskName} {
+		if !slices.ContainsFunc(c.infra.jobs.Tasks(), func(task queue.Task) bool { return task.Name == name }) {
+			t.Errorf("task %s is not handled", name)
+		}
 	}
 	for name, cron := range map[string]string{orders.ExpireJobName: "50 * * * *", orders.CloseWindowsJobName: "55 * * * *"} {
 		i := slices.IndexFunc(c.infra.jobs.Jobs(), func(j queue.Job) bool { return j.Name == name })

@@ -224,6 +224,67 @@ func (s gormStore) MediaOf(ctx context.Context, postIDs []uuid.UUID) (map[uuid.U
 	return out, nil
 }
 
+// droppedCols are the columns of post_dropped_media (BE-158).
+const droppedCols = `file_id, post_id, alt_text, width, height, dropped_at`
+
+// DropMedia implements Store: the rows are written only through a posts
+// row of orgID (06 H-38: post_dropped_media has no org_id of its own).
+func (s gormStore) DropMedia(ctx context.Context, orgID, id uuid.UUID, dropped []DroppedMedia) error {
+	conn := db.Conn(ctx, s.orm)
+	for _, m := range dropped {
+		res := conn.Exec(`INSERT INTO post_dropped_media (file_id, post_id, alt_text, width, height, dropped_at)
+			SELECT @file_id, p.id, @alt_text, @width, @height, @dropped_at FROM posts p
+			WHERE p.id = @post_id AND p.org_id = @org_id`, map[string]any{
+			"file_id": m.FileID, "post_id": id, "org_id": orgID, "alt_text": m.AltText, "width": m.Width, "height": m.Height,
+			"dropped_at": m.DroppedAt,
+		})
+		switch {
+		case res.Error != nil:
+			return wrap("drop media", res.Error)
+		case res.RowsAffected == 0:
+			return ErrNotFound
+		}
+	}
+	return nil
+}
+
+// DroppedMediaOf implements Store.
+//
+// cross-org: the dropped images of posts the service has already
+// authorised (a report's post for a moderator, the posts of a purge).
+func (s gormStore) DroppedMediaOf(ctx context.Context, postIDs []uuid.UUID) (map[uuid.UUID][]DroppedMedia, error) {
+	out := map[uuid.UUID][]DroppedMedia{}
+	if len(postIDs) == 0 {
+		return out, nil
+	}
+	var rows []DroppedMedia
+	if err := db.Conn(ctx, s.orm).Select(droppedCols).Where("post_id IN ?", postIDs).
+		Order("post_id, dropped_at, file_id").Find(&rows).Error; err != nil {
+		return nil, wrap("dropped media of", err)
+	}
+	for _, m := range rows {
+		out[m.PostID] = append(out[m.PostID], m)
+	}
+	return out, nil
+}
+
+// ForgetDroppedMedia implements Store.
+//
+// cross-org: a file belongs to one post (files.attached_*); the service
+// passes the files of a post it locked, or the rows the retention sweep
+// locked.
+func (s gormStore) ForgetDroppedMedia(ctx context.Context, fileIDs []uuid.UUID) (int, error) {
+	if len(fileIDs) == 0 {
+		return 0, nil
+	}
+	res := db.Conn(ctx, s.orm).Exec(`DELETE FROM post_dropped_media WHERE file_id = ANY ( @ids)`,
+		map[string]any{"ids": db.UUIDArray(fileIDs)})
+	if res.Error != nil {
+		return 0, wrap("forget dropped media", res.Error)
+	}
+	return int(res.RowsAffected), nil
+}
+
 // readerConds are the visibility conditions of 03 §3.6 on published posts
 // (alias p): the audience keys (02 §9.1: the GIN overlap pre-filter, then
 // every dimension of the post matched), no commercial post for a minor,

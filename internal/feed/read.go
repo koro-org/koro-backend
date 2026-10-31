@@ -68,6 +68,19 @@ type MediaView struct {
 	URL string
 }
 
+// mediaURL is the short-lived download URL of an image; "" while the scan
+// has not cleared it, when it is gone, or without the files module.
+func (s *service) mediaURL(ctx context.Context, fileID uuid.UUID) string {
+	if s.d.Files == nil {
+		return ""
+	}
+	dl, err := s.d.Files.PresignGet(ctx, fileID, mediaTTL)
+	if err != nil {
+		return ""
+	}
+	return dl.URL
+}
+
 // ViewerFlags is what the reader did on a post (04 §F.2 "viewer").
 type ViewerFlags struct {
 	Liked           bool
@@ -455,13 +468,7 @@ func (s *service) views(ctx context.Context, a authz.Actor, rows []Post, manage 
 			v.DispatchID = &d
 		}
 		for _, m := range media[p.ID] {
-			mv := MediaView{Media: m}
-			if s.d.Files != nil {
-				if dl, err := s.d.Files.PresignGet(ctx, m.FileID, mediaTTL); err == nil {
-					mv.URL = dl.URL
-				}
-			}
-			v.Media = append(v.Media, mv)
+			v.Media = append(v.Media, MediaView{Media: m, URL: s.mediaURL(ctx, m.FileID)})
 		}
 		if p.EventID != nil {
 			// The summary is shown while the event stays public (an event

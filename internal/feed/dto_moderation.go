@@ -49,14 +49,27 @@ type ReportCreatedDTO struct {
 
 // ReportedPostDTO is the reported post as a moderator sees it.
 type ReportedPostDTO struct {
-	PostID         string     `json:"post_id"`
-	Kind           string     `json:"kind" enum:"text,image,event_share,opportunity_call"`
-	Status         string     `json:"status" enum:"draft,pending_review,published,hidden,removed"`
-	Title          string     `json:"title,omitempty"`
-	BodyText       string     `json:"body_text,omitempty" doc:"Plain-text preview of the body"`
-	AudienceKind   string     `json:"audience_kind" enum:"public,followers,segment"`
-	CommercialFlag bool       `json:"commercial_flag"`
-	PublishedAt    *time.Time `json:"published_at,omitempty"`
+	PostID         string            `json:"post_id"`
+	Kind           string            `json:"kind" enum:"text,image,event_share,opportunity_call"`
+	Status         string            `json:"status" enum:"draft,pending_review,published,hidden,removed"`
+	Title          string            `json:"title,omitempty"`
+	BodyText       string            `json:"body_text,omitempty" doc:"Plain-text preview of the body"`
+	AudienceKind   string            `json:"audience_kind" enum:"public,followers,segment"`
+	CommercialFlag bool              `json:"commercial_flag"`
+	PublishedAt    *time.Time        `json:"published_at,omitempty"`
+	EditedAt       *time.Time        `json:"edited_at,omitempty" doc:"Last edit after the publication"`
+	Media          []MediaDTO        `json:"media" doc:"The images the post shows now"`
+	DroppedMedia   []DroppedMediaDTO `json:"dropped_media" doc:"Images edits took off the post after its publication (BE-158), newest last: kept for the moderators until 12 months after the edit, and while a report on the post is open; readers and the author organization no longer see them"`
+}
+
+// DroppedMediaDTO is an image an edit took off a published post (BE-158).
+type DroppedMediaDTO struct {
+	FileID    string    `json:"file_id"`
+	URL       string    `json:"url,omitempty" doc:"Short-lived download URL (at most 5 minutes); absent when the file is not served"`
+	AltText   string    `json:"alt_text,omitempty"`
+	Width     *int      `json:"width,omitempty"`
+	Height    *int      `json:"height,omitempty"`
+	DroppedAt time.Time `json:"dropped_at" doc:"When the edit took it off the post"`
 }
 
 // ReportTargetDTO summarises the target of a report (adminGetReport).
@@ -125,7 +138,14 @@ func toReportDTO(v ReportView) AdminReportDTO {
 			td.Post = &ReportedPostDTO{
 				PostID: p.ID.String(), Kind: string(p.Kind), Status: string(p.Status), Title: optString(p.Title),
 				BodyText: optString(p.BodyText), AudienceKind: string(p.AudienceKind), CommercialFlag: p.CommercialFlag,
-				PublishedAt: p.PublishedAt,
+				PublishedAt: p.PublishedAt, EditedAt: p.EditedAt, Media: []MediaDTO{}, DroppedMedia: []DroppedMediaDTO{},
+			}
+			for _, m := range t.Media {
+				td.Post.Media = append(td.Post.Media, toMediaDTO(m))
+			}
+			for _, m := range t.DroppedMedia {
+				td.Post.DroppedMedia = append(td.Post.DroppedMedia, DroppedMediaDTO{FileID: m.FileID.String(), URL: m.URL,
+					AltText: optString(m.AltText), Width: m.Width, Height: m.Height, DroppedAt: m.DroppedAt})
 			}
 		}
 		d.Target = td

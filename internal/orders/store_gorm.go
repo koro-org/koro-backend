@@ -26,6 +26,8 @@ var constraints = db.Constraints{
 	"order_lines_drop_unpaid":           ErrInvalidState, // 000157: the order took money (BE-134)
 	"orders_amounts_frozen":             ErrInvalidState, // 000157: the totals are not the live lines'
 	"order_lines_dropped_chk":           ErrInvalidState,
+	"order_lines_evidence_open":         ErrInvalidState, // 000166: the line is closed (BE-158)
+	"order_lines_evidence_replaced_chk": ErrInvalidState, // 000166
 }
 
 type gormStore struct{ orm *gorm.DB }
@@ -192,11 +194,12 @@ func (s gormStore) UpdateLine(ctx context.Context, l Line, from Fulfillment) (Li
 // evidence alone.
 //
 // cross-org: addressed by ID after the service's authorisation.
-func (s gormStore) ReplaceLineEvidence(ctx context.Context, lineID, cur, next uuid.UUID) (Line, error) {
+func (s gormStore) ReplaceLineEvidence(ctx context.Context, lineID, cur, next uuid.UUID, at time.Time) (Line, error) {
 	var rows []Line
-	err := db.Conn(ctx, s.orm).Raw(`UPDATE order_lines SET fulfillment_evidence_file_id = @next
+	err := db.Conn(ctx, s.orm).Raw(`UPDATE order_lines SET fulfillment_evidence_file_id = @next,
+		fulfillment_evidence_replaced_at = @at
 		WHERE id = @id AND fulfillment_evidence_file_id = @cur RETURNING *`,
-		map[string]any{"id": lineID, "cur": cur, "next": next}).Scan(&rows).Error
+		map[string]any{"id": lineID, "cur": cur, "next": next, "at": at}).Scan(&rows).Error
 	if err != nil {
 		return Line{}, fmt.Errorf("orders: replace line evidence: %w", constraints.Translate(err))
 	}

@@ -70,13 +70,25 @@ type ReportView struct {
 	Target *TargetSummary
 }
 
-// TargetSummary is the reported post or org as a moderator sees it.
+// TargetSummary is the reported post or org as a moderator sees it. A
+// post target carries its images and the ones edits took off it since it
+// was published (BE-158: what was reported stays in view), each with a
+// 5-minute URL while the scan clears it.
 type TargetSummary struct {
-	Type        TargetType
-	Org         orgs.OrgSummary
-	Post        *Post      // a post target
-	TrustLevel  TrustLevel // the author org's (or the org's) feed trust level
-	OpenReports int        // distinct users with an open report on the target
+	Type         TargetType
+	Org          orgs.OrgSummary
+	Post         *Post              // a post target
+	Media        []MediaView        // the post's images
+	DroppedMedia []DroppedMediaView // the images edits took off the post (BE-158)
+	TrustLevel   TrustLevel         // the author org's (or the org's) feed trust level
+	OpenReports  int                // distinct users with an open report on the target
+}
+
+// DroppedMediaView is an image an edit took off a published post, for the
+// moderators (BE-158).
+type DroppedMediaView struct {
+	DroppedMedia
+	URL string
 }
 
 // ResolveInput is adminResolveReport's body (04 §2.7).
@@ -264,6 +276,9 @@ func (s *service) reportView(ctx context.Context, r Report) (ReportView, error) 
 			return ReportView{}, err
 		}
 		t.Post, orgID = &p, p.OrgID
+		if err := s.reportedMedia(ctx, t); err != nil {
+			return ReportView{}, err
+		}
 	}
 	o, err := s.d.Orgs.Get(ctx, orgID)
 	switch {
@@ -284,6 +299,28 @@ func (s *service) reportView(ctx context.Context, r Report) (ReportView, error) 
 		return ReportView{}, err
 	}
 	return ReportView{Report: r, Target: t}, nil
+}
+
+// reportedMedia adds the images of the reported post t.Post: the ones it
+// shows and the ones edits dropped (BE-158), with their URLs (a file the
+// scan has not cleared, or none without the files module, has none).
+func (s *service) reportedMedia(ctx context.Context, t *TargetSummary) error {
+	ids := []uuid.UUID{t.Post.ID}
+	media, err := s.media().MediaOf(ctx, ids)
+	if err != nil {
+		return err
+	}
+	dropped, err := s.media().DroppedMediaOf(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for _, m := range media[t.Post.ID] {
+		t.Media = append(t.Media, MediaView{Media: m, URL: s.mediaURL(ctx, m.FileID)})
+	}
+	for _, m := range dropped[t.Post.ID] {
+		t.DroppedMedia = append(t.DroppedMedia, DroppedMediaView{DroppedMedia: m, URL: s.mediaURL(ctx, m.FileID)})
+	}
+	return nil
 }
 
 // ResolveReport implements Service (feed.report.resolve): open → in_review

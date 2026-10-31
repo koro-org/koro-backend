@@ -10,6 +10,7 @@ import (
 
 // The in-memory store knows no dispatches or contact requests: every
 // removed post counts as unreferenced here (the GORM store checks both).
+// Its reports are the GORM store's content_reports (droppedDue).
 
 func (s *MemStore) removedDue(cutoff time.Time) []Post {
 	var out []Post
@@ -48,6 +49,7 @@ func (s *MemStore) PurgePosts(_ context.Context, ids []uuid.UUID) (int, error) {
 		}
 		delete(s.posts, id)
 		delete(s.media, id)
+		s.dropPostRows(id)
 		for _, m := range []map[[2]uuid.UUID]time.Time{s.hides, s.likes, s.saves} {
 			for k := range m {
 				if k[1] == id {
@@ -58,6 +60,40 @@ func (s *MemStore) PurgePosts(_ context.Context, ids []uuid.UUID) (int, error) {
 		n++
 	}
 	return n, nil
+}
+
+// droppedDue is droppedDueSQL of the GORM store: dropped before cutoff,
+// no report on the post open or in review.
+func (s *MemStore) droppedDue(cutoff time.Time) []DroppedMedia {
+	open := map[uuid.UUID]bool{}
+	for _, r := range s.reports {
+		if r.TargetType == TargetPost && r.Status.Unresolved() {
+			open[r.TargetID] = true
+		}
+	}
+	var out []DroppedMedia
+	for _, m := range s.dropped {
+		if m.DroppedAt.Before(cutoff) && !open[m.PostID] {
+			out = append(out, m)
+		}
+	}
+	slices.SortFunc(out, compareDropped)
+	return out
+}
+
+// DroppedMediaDue implements Store.
+func (s *MemStore) DroppedMediaDue(_ context.Context, cutoff time.Time, limit int) ([]DroppedMedia, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := s.droppedDue(cutoff)
+	return out[:min(len(out), max(limit, 0))], nil
+}
+
+// CountDroppedMediaDue implements Store.
+func (s *MemStore) CountDroppedMediaDue(_ context.Context, cutoff time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.droppedDue(cutoff)), nil
 }
 
 // PurgeResolvedReports implements Store.

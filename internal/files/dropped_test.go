@@ -68,3 +68,16 @@ func TestDeleteDropped(t *testing.T) {
 		t.Fatalf("failing Delete = %v, deleted %v", err, d.deleted)
 	}
 }
+
+// TestDropped (BE-158): the files of before that after no longer lists, in
+// the order of before; nothing when every file stays.
+func TestDropped(t *testing.T) {
+	t.Parallel()
+	x, y, z := uuid.NewV7(), uuid.NewV7(), uuid.NewV7()
+	if got := files.Dropped([]uuid.UUID{x, y, z}, []uuid.UUID{z, uuid.NewV7()}); !slices.Equal(got, []uuid.UUID{x, y}) {
+		t.Fatalf("Dropped = %v, want %v", got, []uuid.UUID{x, y})
+	}
+	if got := files.Dropped([]uuid.UUID{x}, []uuid.UUID{x}); len(got) != 0 {
+		t.Fatalf("Dropped of a kept file = %v", got)
+	}
+}

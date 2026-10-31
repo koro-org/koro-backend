@@ -25,6 +25,12 @@ import (
 //	                   files.Files.Delete, same transaction; T-247). A post a
 //	                   dispatch or a contact request still refers to waits
 //	                   until that record is gone (T-152 option a).
+//	post_media_dropped an image an edit took off a published post
+//	                   (post_dropped_media, BE-158) goes 12 months after it
+//	                   was dropped with its file, unless a report on the
+//	                   post is still open or in review (the moderators'
+//	                   evidence waits). A removed post's purge takes its
+//	                   dropped images too.
 //	content_report     a resolved report (actioned / dismissed) goes 12
 //	                   months after resolved_at; its moderation actions keep
 //	                   their decision, report_id becomes NULL.
@@ -34,6 +40,7 @@ import (
 // Retention policy codes feed sweeps.
 const (
 	PolicyPostRemoved      = "post_removed"
+	PolicyMediaDropped     = "post_media_dropped"
 	PolicyContentReport    = "content_report"
 	PolicyModerationAction = "moderation_action"
 
@@ -46,6 +53,7 @@ const (
 
 var retentionTables = map[string]string{
 	PolicyPostRemoved:      "posts",
+	PolicyMediaDropped:     "post_dropped_media",
 	PolicyContentReport:    "content_reports",
 	PolicyModerationAction: "moderation_actions",
 }
@@ -58,9 +66,15 @@ type RetentionStore interface {
 	// skipped). CountRemovedPostsDue counts them without a limit.
 	RemovedPostsDue(ctx context.Context, cutoff time.Time, limit int) ([]Post, error)
 	CountRemovedPostsDue(ctx context.Context, cutoff time.Time) (int, error)
-	// PurgePosts hard-deletes the posts (their media rows and reader rows
-	// go by ON DELETE CASCADE) and returns how many.
+	// PurgePosts hard-deletes the posts (their media rows, dropped image
+	// rows and reader rows go by ON DELETE CASCADE) and returns how many.
 	PurgePosts(ctx context.Context, ids []uuid.UUID) (int, error)
+	// DroppedMediaDue returns up to limit images dropped off a post before
+	// cutoff whose post has no report open or in review, oldest first,
+	// locked for the transaction (rows locked elsewhere are skipped).
+	// CountDroppedMediaDue counts them without a limit (BE-158).
+	DroppedMediaDue(ctx context.Context, cutoff time.Time, limit int) ([]DroppedMedia, error)
+	CountDroppedMediaDue(ctx context.Context, cutoff time.Time) (int, error)
 	// PurgeResolvedReports deletes up to limit reports resolved before
 	// cutoff, oldest first (their actions' report_id becomes NULL); dryRun
 	// counts them and deletes nothing.
@@ -72,8 +86,9 @@ type RetentionStore interface {
 	PurgeModerationActions(ctx context.Context, cutoff time.Time, limit int, dryRun bool) (int, error)
 }
 
-// errNoFiles: removed posts with images cannot go without the files module.
-var errNoFiles = errors.New("feed: removed posts with images cannot be purged: files not wired")
+// errNoFiles: removed posts and dropped images cannot go without the files
+// module.
+var errNoFiles = errors.New("feed: post images cannot be purged: files not wired")
 
 // sweeper is feed's privacy.RetentionSweeper: it needs the purges of the
 // store, the media of the removed posts (their image files go too), the
@@ -110,6 +125,10 @@ func (w sweeper) Sweep(ctx context.Context, p privacy.RetentionPolicy, now time.
 		purge = func(ctx context.Context, limit int, dry bool) (int, error) {
 			return w.purgeRemovedPosts(ctx, cutoff, limit, dry)
 		}
+	case PolicyMediaDropped:
+		purge = func(ctx context.Context, limit int, dry bool) (int, error) {
+			return w.purgeDroppedMedia(ctx, cutoff, limit, dry)
+		}
 	case PolicyContentReport:
 		purge = func(ctx context.Context, limit int, dry bool) (int, error) {
 			return w.retention.PurgeResolvedReports(ctx, cutoff, limit, dry)
@@ -133,8 +152,8 @@ func (w sweeper) Sweep(ctx context.Context, p privacy.RetentionPolicy, now time.
 }
 
 // purgeRemovedPosts handles one batch of post_removed: the posts go, then
-// their image files (the media rows that referenced them went with the
-// posts), in the transaction carried by ctx.
+// their image files, shown and dropped (the rows that referenced them went
+// with the posts), in the transaction carried by ctx.
 func (w sweeper) purgeRemovedPosts(ctx context.Context, cutoff time.Time, limit int, dry bool) (int, error) {
 	if dry {
 		return w.retention.CountRemovedPostsDue(ctx, cutoff)
@@ -151,20 +170,53 @@ func (w sweeper) purgeRemovedPosts(ctx context.Context, cutoff time.Time, limit 
 	if err != nil {
 		return 0, err
 	}
+	dropped, err := w.media.DroppedMediaOf(ctx, ids)
+	if err != nil {
+		return 0, err
+	}
 	n, err := w.retention.PurgePosts(ctx, ids)
 	if err != nil {
 		return 0, err
 	}
+	var gone []uuid.UUID
+	for _, id := range ids {
+		gone = append(gone, mediaFiles(media[id])...)
+		gone = append(gone, droppedFiles(dropped[id])...)
+	}
+	return n, w.deleteFiles(ctx, gone)
+}
+
+// purgeDroppedMedia handles one batch of post_media_dropped (BE-158): the
+// dropped rows go, then their files, in the transaction carried by ctx.
+func (w sweeper) purgeDroppedMedia(ctx context.Context, cutoff time.Time, limit int, dry bool) (int, error) {
+	if dry {
+		return w.retention.CountDroppedMediaDue(ctx, cutoff)
+	}
+	due, err := w.retention.DroppedMediaDue(ctx, cutoff, limit)
+	if err != nil || len(due) == 0 {
+		return 0, err
+	}
+	ids := droppedFiles(due)
+	n, err := w.media.ForgetDroppedMedia(ctx, ids)
+	if err != nil {
+		return 0, err
+	}
+	return n, w.deleteFiles(ctx, ids)
+}
+
+// deleteFiles deletes the image files of the purge as the retention job.
+func (w sweeper) deleteFiles(ctx context.Context, ids []uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if w.files == nil {
+		return errNoFiles
+	}
 	sys := authz.SystemActor(retentionJob)
 	for _, id := range ids {
-		for _, m := range media[id] {
-			if w.files == nil {
-				return 0, errNoFiles
-			}
-			if err := w.files.Delete(ctx, sys, m.FileID); err != nil {
-				return 0, err
-			}
+		if err := w.files.Delete(ctx, sys, id); err != nil {
+			return err
 		}
 	}
-	return n, nil
+	return nil
 }

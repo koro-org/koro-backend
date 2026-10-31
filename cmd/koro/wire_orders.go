@@ -136,8 +136,9 @@ func (s ordersStaff) FinanceAdmins(ctx context.Context) ([]uuid.UUID, error) {
 
 // tasks: offering.cancelled → orders.cancel_offering_orders (critical);
 // order.placed, .cancelled, .expired, order_line.fulfillment_marked and
-// .fulfilled → the notices (01 §6.2); the task without a topic
-// orders.notify_line_dropped (BE-134); the jobs orders.expire_unpaid (:50)
+// .fulfilled → the notices (01 §6.2); the tasks without a topic
+// orders.notify_line_dropped (BE-134) and orders.notify_evidence_replaced
+// (BE-158); the jobs orders.expire_unpaid (:50)
 // and orders.close_dispute_windows (:55) (01 §7).
 func (w *ordersWiring) tasks(c *container) {
 	w.mod.Subscribe(c.infra.subs)

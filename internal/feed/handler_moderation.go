@@ -52,8 +52,10 @@ func registerModeration(api huma.API, h handler) {
 
 	op.Register(api, "feed", huma.Operation{
 		OperationID: "adminGetReport", Method: http.MethodGet, Path: "/admin/reports/{report_id}",
-		Summary:     "Get a content report",
-		Description: "The report with a summary of its target (the post or organization, its trust level, its open reports).",
+		Summary: "Get a content report",
+		Description: "The report with a summary of its target (the post or organization, its trust level, its open reports). " +
+			"A post target carries its images (media) and the images edits took off it after its publication " +
+			"(dropped_media, BE-158), each with a 5-minute URL.",
 	}, op.Meta{Action: string(authz.FeedReportRead), Surface: op.SurfaceAdmin}, h.getReport)
 
 	op.Register(api, "feed", huma.Operation{

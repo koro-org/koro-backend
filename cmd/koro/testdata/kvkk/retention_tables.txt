@@ -68,6 +68,7 @@ event_checkins              parent:event_registrations
 event_data_exports          policy:event_export_log
 # feed
 posts                       policy:post_removed
+post_dropped_media          policy:post_media_dropped
 post_reactions              account:the user's likes; feed's provider deletes them on erasure
 post_saves                  account:the user's saved posts; feed's provider deletes them on erasure
 post_hides                  account:the user's hidden posts; feed's provider deletes them on erasure

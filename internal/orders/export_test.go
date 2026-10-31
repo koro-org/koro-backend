@@ -17,3 +17,6 @@ var (
 	NewReference   = newReference
 	RefRe          = refRe
 )
+
+// LineStateOf is the LineStateDTO of a delivery action's answer (BE-158).
+func LineStateOf(v LineView) LineStateDTO { return lineOut(v).Body }

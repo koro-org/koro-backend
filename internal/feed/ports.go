@@ -84,9 +84,12 @@ type Files interface {
 	PresignGet(ctx context.Context, fileID uuid.UUID, ttl time.Duration) (files.Download, error)
 	// Delete removes an image in the caller's transaction once feed has
 	// dropped its media row: the end of a removed post's retention
-	// (post_removed; BE-057, T-247), an image the scan rejected
-	// (file.rejected, T-176), and one updatePost replaced or removed or of
-	// a deleted draft (BE-155). The objects go after the commit.
+	// (post_removed; BE-057, T-247) or of a dropped image's
+	// (post_media_dropped, BE-158), an image the scan rejected
+	// (file.rejected, T-176), and one updatePost replaced or removed on a
+	// draft or a post in review, or of a deleted draft (BE-155; a published
+	// post keeps what an edit drops, BE-158). The objects go after the
+	// commit.
 	// sync-write: files.Files.Delete
 	Delete(ctx context.Context, a authz.Actor, fileID uuid.UUID) error
 }

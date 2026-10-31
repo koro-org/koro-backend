@@ -43,10 +43,11 @@ type Files interface {
 	// PublicURL returns the permanent public media URL of the logo ("" while
 	// there is none; BE-120). orgs shows it on public orgs only.
 	PublicURL(ctx context.Context, fileID uuid.UUID) (string, error)
-	// Delete removes a logo the scan rejected in the transaction that
-	// clears logo_file_id (file.rejected, T-176), so the file never outlives
-	// its reference nor the reference its file (01 §6.3; the objects go
-	// after the commit).
+	// Delete removes a logo the scan rejected (file.rejected, T-176) or one
+	// updateOrg replaced or removed (BE-155) in the transaction that changes
+	// logo_file_id, so the file never outlives its reference nor the
+	// reference its file (01 §6.3; the objects and the public copy go after
+	// the commit).
 	//
 	// sync-write: files.Files.Delete
 	Delete(ctx context.Context, a authz.Actor, fileID uuid.UUID) error

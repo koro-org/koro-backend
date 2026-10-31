@@ -145,7 +145,8 @@ func (s *service) locked(ctx context.Context, a authz.Actor, act authz.Action, i
 // events are final) → If-Match (428/412) → the patch (422). A changed
 // schedule or venue of a published event emits event.schedule_changed (O)
 // in the same transaction, and any change of a published event
-// event.updated (O; BE-106).
+// event.updated (O; BE-106). A replaced or removed cover file is deleted
+// in the transaction once the row no longer names it (BE-155).
 func (s *service) UpdateEvent(ctx context.Context, a authz.Actor, id uuid.UUID, ifMatch string, p EventPatch) (EventView, error) {
 	var (
 		out Event
@@ -174,6 +175,10 @@ func (s *service) UpdateEvent(ctx context.Context, a authz.Actor, id uuid.UUID, 
 			return err
 		}
 		if err := s.attachCover(ctx, a, out, ap.cover); err != nil {
+			return err
+		}
+		// The replaced or removed cover goes with its public copy (BE-155).
+		if err := files.DeleteReplaced(ctx, s.d.Files, a, e.CoverFileID, out.CoverFileID); err != nil {
 			return err
 		}
 		if moved := scheduleChanges(ap.changed); e.Status == StatusPublished && len(moved) > 0 {
@@ -349,7 +354,8 @@ func (s *service) CancelEvent(ctx context.Context, a authz.Actor, id uuid.UUID, 
 }
 
 // DeleteEventDraft implements Service: only a draft may be deleted (409
-// otherwise); its form draft and staff rows go with it.
+// otherwise); its form draft and staff rows go with it, and its cover file
+// after the row (BE-155).
 func (s *service) DeleteEventDraft(ctx context.Context, a authz.Actor, id uuid.UUID) error {
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		e, _, err := s.locked(ctx, a, authz.EventsEventDelete, id)
@@ -360,6 +366,9 @@ func (s *service) DeleteEventDraft(ctx context.Context, a authz.Actor, id uuid.U
 			return ErrInvalidState
 		}
 		if err := s.d.Store.DeleteDraft(ctx, e.OrgID, e.ID); err != nil {
+			return err
+		}
+		if err := files.DeleteReplaced(ctx, s.d.Files, a, e.CoverFileID, nil); err != nil {
 			return err
 		}
 		return s.d.Audit.Log(ctx, auditEvent(a, authz.EventsEventDelete, eventAggType, e.ID, e.OrgID, "", nil))

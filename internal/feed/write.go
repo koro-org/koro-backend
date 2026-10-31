@@ -65,7 +65,7 @@ func (s *service) CreatePost(ctx context.Context, a authz.Actor, orgID uuid.UUID
 		if err != nil {
 			return uuid.Nil(), err
 		}
-		if err := s.writeMedia(ctx, a, p, ap.media); err != nil {
+		if err := s.writeMedia(ctx, a, p, nil, ap.media); err != nil {
 			return uuid.Nil(), err
 		}
 		return p.ID, s.d.Audit.Log(ctx, auditEvent(a, authz.FeedPostCreate, p, map[string]any{
@@ -78,19 +78,35 @@ func (s *service) CreatePost(ctx context.Context, a authz.Actor, orgID uuid.UUID
 	return s.managedView(ctx, a, id)
 }
 
-// writeMedia replaces the media of p and attaches every image to the post
-// in the transaction (files k30: the upload was authorised for post_media;
-// checkMedia checked its owner). nil media leaves them as they are.
-func (s *service) writeMedia(ctx context.Context, a authz.Actor, p Post, media []MediaInput) error {
+// writeMedia replaces the media of p (before) by media and attaches every
+// image to the post in the transaction (files k30: the upload was
+// authorised for post_media; checkMedia checked its owner); an image of
+// before that media no longer lists is deleted after its row (BE-155). nil
+// media leaves them as they are.
+func (s *service) writeMedia(ctx context.Context, a authz.Actor, p Post, before []Media, media []MediaInput) error {
 	if media == nil {
 		return nil
 	}
+	kept := make([]uuid.UUID, 0, len(media))
 	for _, m := range media {
 		if err := s.d.Files.Attach(ctx, a, m.FileID, files.Owner{Module: mediaOwner, EntityID: p.ID, Purpose: files.PurposePostMedia}); err != nil {
 			return err
 		}
+		kept = append(kept, m.FileID)
 	}
-	return s.media().ReplaceMedia(ctx, p.OrgID, p.ID, mediaRows(media))
+	if err := s.media().ReplaceMedia(ctx, p.OrgID, p.ID, mediaRows(media)); err != nil {
+		return err
+	}
+	return files.DeleteDropped(ctx, s.d.Files, a, mediaFiles(before), kept)
+}
+
+// mediaFiles returns the files of media in order.
+func mediaFiles(media []Media) []uuid.UUID {
+	out := make([]uuid.UUID, len(media))
+	for i, m := range media {
+		out[i] = m.FileID
+	}
+	return out
 }
 
 // locked reads the post for a change in the transaction carried by ctx:
@@ -152,7 +168,7 @@ func (s *service) UpdatePost(ctx context.Context, a authz.Actor, id uuid.UUID, i
 		if next, err = s.posts().UpdatePost(ctx, next); err != nil {
 			return err
 		}
-		if err := s.writeMedia(ctx, a, next, ap.media); err != nil {
+		if err := s.writeMedia(ctx, a, next, media[cur.ID], ap.media); err != nil {
 			return err
 		}
 		if err := s.changed(ctx, cur, next); err != nil {
@@ -349,7 +365,9 @@ func (s *service) publishable(ctx context.Context, o orgs.OrgSummary, p Post) er
 // transaction); a published or hidden one becomes removed (04 §2.7; kept
 // 12 months, then purged: BE-057) and keeps its unit, which was used. A
 // removed post is 404 for the author org (it sees it in its management
-// list only).
+// list only). The deleted draft's image files go after its media rows, in
+// the transaction (BE-155, T-247); a removed post keeps them until the
+// purge.
 func (s *service) DeletePost(ctx context.Context, a authz.Actor, id uuid.UUID) error {
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		p, _, err := s.locked(ctx, a, authz.FeedPostDelete, id)
@@ -364,7 +382,14 @@ func (s *service) DeletePost(ctx context.Context, a authz.Actor, id uuid.UUID) e
 			if err := s.discardDispatch(ctx, a, p); err != nil { // BE-035: before the post (FK)
 				return err
 			}
-			if err := s.posts().DeletePost(ctx, p.OrgID, p.ID); err != nil {
+			media, err := s.media().MediaOf(ctx, []uuid.UUID{p.ID})
+			if err != nil {
+				return err
+			}
+			if err := s.posts().DeletePost(ctx, p.OrgID, p.ID); err != nil { // media rows cascade
+				return err
+			}
+			if err := files.DeleteDropped(ctx, s.d.Files, a, mediaFiles(media[p.ID]), nil); err != nil {
 				return err
 			}
 		case StatusPublished, StatusHidden:

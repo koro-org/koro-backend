@@ -56,7 +56,10 @@ func writable(a authz.Actor, o Org) error {
 
 // UpdateOrg implements Service. Order: the org (404) → authz (404/403) →
 // status (403 orgs.org_suspended, 409) → If-Match (428/412) → the patch;
-// a real change writes org.updated (O) in the transaction (BE-106).
+// a real change writes org.updated (O) in the transaction (BE-106). A
+// replaced or removed logo file is deleted in the transaction, after the
+// row stops naming it (files.DeleteReplaced, BE-155); org.updated then
+// revalidates the public page.
 func (s *service) UpdateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, ifMatch string, p OrgPatch) (OrgView, error) {
 	var out Org
 	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
@@ -81,6 +84,10 @@ func (s *service) UpdateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, if
 			return err
 		}
 		if out, err = s.orgs().UpdateOrg(ctx, next); err != nil {
+			return err
+		}
+		// The replaced or removed logo goes with its public copy (BE-155).
+		if err := files.DeleteReplaced(ctx, s.d.Files, a, o.LogoFileID, next.LogoFileID); err != nil {
 			return err
 		}
 		if p.companyFields() {

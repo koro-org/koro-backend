@@ -92,8 +92,9 @@ type Files interface {
 	// transaction: object storage I/O).
 	PutGenerated(ctx context.Context, in files.GeneratedFile) (uuid.UUID, error)
 	// Delete removes an export file (events.purge_exports after 7 days; a
-	// build that lost its row) or a cover the scan rejected (file.rejected,
-	// T-176) in the transaction that clears its reference, so the file never
+	// build that lost its row), a cover the scan rejected (file.rejected,
+	// T-176) or one updateEvent replaced or removed, or of a deleted draft
+	// (BE-155), in the transaction that clears its reference, so the file never
 	// outlives its reference nor the reference its file (01 §6.3, T-193,
 	// 06 H-49; the objects go after the commit).
 	//

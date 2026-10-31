@@ -12,6 +12,8 @@ import (
 // in-memory store of service, wiring and matrix tests (05 §13.2).
 // Writes join the transaction carried by ctx (db.Conn).
 type Store interface {
+	StatsStore // the queue count of a university's panel (stats.go, BE-163)
+
 	// InsertService writes a new service; services_code_uq → ErrServiceCodeTaken.
 	InsertService(ctx context.Context, s ServiceItem) (ServiceItem, error)
 	// GetService returns a service (any status) or ErrNotFound; lock takes

@@ -314,6 +314,13 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (catalog.Store, wor
 		if err != nil || !slices.Contains(ids(uq), p1.ID) || slices.Contains(ids(uq), p2.ID) {
 			t.Fatalf("university queue = %v %v", ids(uq), err)
 		}
+		// BE-163: the university panel counts its clubs' share of that queue.
+		if n, err := s.CountUniversityQueue(ctx, []uuid.UUID{p1.OrgID, p2.OrgID}); err != nil || n != 1 {
+			t.Fatalf("CountUniversityQueue = %d, %v", n, err)
+		}
+		if n, err := s.CountUniversityQueue(ctx, []uuid.UUID{p2.OrgID}); err != nil || n != 0 {
+			t.Fatalf("CountUniversityQueue of a seller without one = %d, %v", n, err)
+		}
 		approved := p1
 		approved.ApprovedBy, approved.ApprovedAt = &approver, &now
 		if _, err := s.UpdateOffering(ctx, approved, catalog.OfferingPendingApproval); err != nil {

@@ -13,6 +13,8 @@ import (
 // (db.Conn). Frozen columns are never written again (06 H-56: targeted
 // UPDATEs, never Save).
 type Store interface {
+	StatsStore // the sales counts of a seller's panel (stats.go, BE-163)
+
 	// InsertOrder writes a new order with its lines (the database checks the
 	// totals at commit: orders_totals_match_lines). The store stamps their
 	// created_at and updated_at; the callers' are ignored (BE-069).

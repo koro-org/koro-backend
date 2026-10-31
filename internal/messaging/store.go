@@ -20,6 +20,7 @@ type Store interface {
 	requestStore      // contact_requests
 	blockStore        // contact_blocks
 	conversationStore // conversations, conversation_messages, conversation_user_states (store_conversations.go)
+	StatsStore        // the counts of a company's panel (stats.go, BE-163)
 }
 
 // requests is the contact_requests view of the store.
@@ -27,6 +28,9 @@ func (s *service) requests() requestStore { return s.d.Store }
 
 // blocks is the contact_blocks view of the store.
 func (s *service) blocks() blockStore { return s.d.Store }
+
+// stats is the panel count view of the store (BE-163).
+func (s *service) stats() StatsStore { return s.d.Store }
 
 // conversations is the conversations view of the store.
 func (s *service) conversations() conversationStore { return s.d.Store }

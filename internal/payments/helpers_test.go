@@ -279,6 +279,33 @@ func (f *fakeSender) to(tmpl string, ch notify.Channel) []uuid.UUID {
 	return out
 }
 
+// links returns the link paths of the in-app notices of tmpl, in order.
+func (f *fakeSender) links(tmpl string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for _, m := range f.sent {
+		if m.Template == tmpl && m.Channel == notify.ChannelInApp {
+			out = append(out, m.LinkPath.String())
+		}
+	}
+	return out
+}
+
+// wantLinks fails unless every in-app notice of tmpl links want (BE-159).
+func wantLinks(t *testing.T, f *fakeSender, tmpl, want string) {
+	t.Helper()
+	got := f.links(tmpl)
+	if len(got) == 0 {
+		t.Fatalf("no %s notice", tmpl)
+	}
+	for _, l := range got {
+		if l != want {
+			t.Fatalf("%s links %v, want %s", tmpl, got, want)
+		}
+	}
+}
+
 // ---- orders stubs (the capture path never reaches them)
 
 type noOrgs struct{}

@@ -2164,6 +2164,10 @@ components:
             - pending
             - rejected
           type: string
+        evidence_uploaded_by:
+          description: "Who uploaded the evidence: the submitter, or whoever replaced a rejected one (replacePayeeBankAccountEvidence). That user is no eye of the account (verify/approve 403 authz.four_eyes_violation, BE-154b). Finance and platform admins only (BE-159)"
+          format: uuid
+          type: string
         holder_matches_title:
           description: Holder equals the title after Turkish-insensitive folding (advisory)
           type: boolean
@@ -2661,6 +2665,7 @@ components:
           format: int64
           type: integer
         verified_at:
+          description: When finance verified the uploaded document (manual_upload, seller_uploaded). An issued invoice with pdf_replaced_at and no verified_at waits for the re-verification of its new PDF (BE-154b, BE-159); who verified is in finance's view only
           format: date-time
           type: string
         verified_by:
@@ -7363,6 +7368,7 @@ components:
           format: int64
           type: integer
         verified_at:
+          description: When finance verified the uploaded document (manual_upload, seller_uploaded). An issued invoice with pdf_replaced_at and no verified_at waits for the re-verification of its new PDF (BE-154b, BE-159); who verified is in finance's view only
           format: date-time
           type: string
         verified_by:
@@ -7538,6 +7544,10 @@ components:
           description: Kuruş (tevkifat)
           format: int64
           type: integer
+        verified_at:
+          description: When finance verified the uploaded document (manual_upload, seller_uploaded). An issued invoice with pdf_replaced_at and no verified_at waits for the re-verification of its new PDF (BE-154b, BE-159); who verified is in finance's view only
+          format: date-time
+          type: string
       required:
         - invoice_id
         - kind
@@ -8917,7 +8927,7 @@ components:
           description: The notification kind (template ID)
           type: string
         link_path:
-          description: "Client-independent in-app path (web and mobile map it to their own routes; a form a client does not know is shown without a link). One of: `/me/access-grants`; `/me/club-claims`; `/me/contact-requests/{contact_request_id}`; `/me/registrations/{registration_id}`; `/me/security-events`; `/me/terms`; `/me/student-verification`; `/posts/{post_id}`; `/clubs/by-slug/{club_slug}`; `/orgs/{org_id}`; `/orgs/{org_id}/orders/{order_id}`; `/orgs/{org_id}/orders/{order_id}/payment-instructions`; `/orgs/{org_id}/invoices/{invoice_id}`; `/orgs/{org_id}/events/{event_id}/registrations/{registration_id}`; `/orgs/{org_id}/sales`; `/orgs/{org_id}/payouts/{payout_id}`; `/orgs/{org_id}/offerings`; `/orgs/{org_id}/offering-approvals`; `/orgs/{org_id}/posts`; `/orgs/{org_id}/payees/{payee_id}`; `/orgs/{org_id}/contact-requests/{contact_request_id}`; `/orgs/{org_id}/refund-requests/{refund_request_id}`; `/orgs/{org_id}/sales/refund-requests/{refund_request_id}`; `/admin/audit-events`; `/admin/bank-accounts`; `/admin/breaches`; `/admin/clubs/{club_org_id}`; `/admin/club-claims/{claim_id}`; `/admin/collection-accounts`; `/admin/commerce-policies`; `/admin/offerings`; `/admin/invoices/{invoice_id}`; `/admin/orgs?status=pending_review`; `/admin/orders?order_no={order_no}`; `/admin/platform-roles`; `/admin/payouts/{payout_id}`; `/admin/refunds/{refund_id}`; `/admin/refund-requests/{refund_request_id}`; `/admin/reports/{report_id}`; `/admin/review-queue`; `/admin/incoming-transfers?status=unmatched`; `/clubs/{club_org_id}` (legacy); `/events/{event_id}/registrations/{registration_id}` (legacy); `/orders/{order_id}` (legacy); `/orders/{order_id}/payment-instructions` (legacy); `/invoices/{invoice_id}` (legacy). {<name>_id} is a UUID, {club_slug} an organization slug (getOrgBySlug), {order_no} an order number. Every current org form is /orgs/{org_id} or starts with /orgs/{org_id}/: the client opens it in the panel of that org's kind (getMe memberships[].org_kind). Legacy forms are no longer produced but older notifications may carry them."
+          description: "Client-independent in-app path (web and mobile map it to their own routes; a form a client does not know is shown without a link). One of: `/me/access-grants`; `/me/club-claims`; `/me/contact-requests/{contact_request_id}`; `/me/registrations/{registration_id}`; `/me/security-events`; `/me/terms`; `/me/student-verification`; `/posts/{post_id}`; `/clubs/by-slug/{club_slug}`; `/orgs/{org_id}`; `/orgs/{org_id}/orders/{order_id}`; `/orgs/{org_id}/orders/{order_id}/payment-instructions`; `/orgs/{org_id}/invoices/{invoice_id}`; `/orgs/{org_id}/events/{event_id}/registrations/{registration_id}`; `/orgs/{org_id}/sales`; `/orgs/{org_id}/payouts/{payout_id}`; `/orgs/{org_id}/offerings`; `/orgs/{org_id}/offering-approvals`; `/orgs/{org_id}/posts`; `/orgs/{org_id}/payees/{payee_id}`; `/orgs/{org_id}/contact-requests/{contact_request_id}`; `/orgs/{org_id}/refund-requests/{refund_request_id}`; `/orgs/{org_id}/sales/refund-requests/{refund_request_id}`; `/orgs/{org_id}/legal-parties/{party_id}`; `/admin/audit-events`; `/admin/bank-accounts`; `/admin/breaches`; `/admin/clubs/{club_org_id}`; `/admin/club-claims/{claim_id}`; `/admin/collection-accounts`; `/admin/commerce-policies`; `/admin/offerings`; `/admin/incoming-transfers/{transfer_id}`; `/admin/invoices/{invoice_id}`; `/admin/legal-parties/{party_id}`; `/admin/orgs?status=pending_review`; `/admin/orders?order_no={order_no}`; `/admin/platform-roles`; `/admin/payments/{payment_id}`; `/admin/payouts/{payout_id}`; `/admin/refunds/{refund_id}`; `/admin/refund-requests/{refund_request_id}`; `/admin/reports/{report_id}`; `/admin/review-queue`; `/admin/incoming-transfers?status=unmatched`; `/clubs/{club_org_id}` (legacy); `/events/{event_id}/registrations/{registration_id}` (legacy); `/orders/{order_id}` (legacy); `/orders/{order_id}/payment-instructions` (legacy); `/invoices/{invoice_id}` (legacy). {<name>_id} is a UUID, {club_slug} an organization slug (getOrgBySlug), {order_no} an order number. Every current org form is /orgs/{org_id} or starts with /orgs/{org_id}/: the client opens it in the panel of that org's kind (getMe memberships[].org_kind). Legacy forms are no longer produced but older notifications may carry them."
           type: string
           x-koro-link-paths:
             - pattern: /me/access-grants
@@ -8966,6 +8976,8 @@ components:
               audience: org
             - pattern: /orgs/{org_id}/sales/refund-requests/{refund_request_id}
               audience: org
+            - pattern: /orgs/{org_id}/legal-parties/{party_id}
+              audience: org
             - pattern: /admin/audit-events
               audience: admin
             - pattern: /admin/bank-accounts
@@ -8982,13 +8994,19 @@ components:
               audience: admin
             - pattern: /admin/offerings
               audience: admin
+            - pattern: /admin/incoming-transfers/{transfer_id}
+              audience: admin
             - pattern: /admin/invoices/{invoice_id}
+              audience: admin
+            - pattern: /admin/legal-parties/{party_id}
               audience: admin
             - pattern: /admin/orgs?status=pending_review
               audience: admin
             - pattern: /admin/orders?order_no={order_no}
               audience: admin
             - pattern: /admin/platform-roles
+              audience: admin
+            - pattern: /admin/payments/{payment_id}
               audience: admin
             - pattern: /admin/payouts/{payout_id}
               audience: admin

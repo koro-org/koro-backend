@@ -190,4 +190,8 @@ type BankAccountView struct {
 	HolderMatchesTitle bool
 	// EvidenceState is the state of the evidence file (BE-154b).
 	EvidenceState files.State
+	// EvidenceUploadedBy is who uploaded the evidence file (the submitter,
+	// or whoever replaced a rejected one; nil when unknown): no eye of the
+	// account (BE-154b). Finance's view only (BE-159).
+	EvidenceUploadedBy *uuid.UUID
 }

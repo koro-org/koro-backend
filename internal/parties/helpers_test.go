@@ -243,6 +243,19 @@ func (f *fakeFiles) States(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]fi
 	return out, nil
 }
 
+// Evidence answers the state and the uploader of each known file (BE-159).
+func (f *fakeFiles) Evidence(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]files.Evidence, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[uuid.UUID]files.Evidence{}
+	for _, id := range ids {
+		if m, ok := f.meta[id]; ok {
+			out[id] = files.Evidence{State: m.State(false), UploadedBy: m.UploadedBy}
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeFiles) PresignGet(_ context.Context, id uuid.UUID, ttl time.Duration) (files.Download, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

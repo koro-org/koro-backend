@@ -96,6 +96,7 @@ func TestReplaceEvidence_TransferReceipt(t *testing.T) {
 		id("finance_admin_2")) || len(got) != 2 {
 		t.Fatalf("notice to %v, want the finance admins", got)
 	}
+	wantLinks(t, e.sender, "payments.transfer_receipt_rejected", "/admin/incoming-transfers/"+tr.ID.String())
 	pad := actor(t, "platform_admin")
 	if _, err := replace(pad, tr.ID, next); !errors.Is(err, authz.ErrForbidden) {
 		t.Fatalf("platform admin: %v, want 403", err)
@@ -165,6 +166,7 @@ func TestReplaceEvidence_ReturnReceipt(t *testing.T) {
 	if got := e.sender.to("payments.refund_receipt_rejected", notify.ChannelInApp); len(got) != 2 {
 		t.Fatalf("notice to %v, want the two finance admins", got)
 	}
+	wantLinks(t, e.sender, "payments.refund_receipt_rejected", "/admin/incoming-transfers/"+tr.ID.String())
 	next := e.files.add(files.PurposeRefundReceipt)
 	if _, err := replace(fin, next, identity.ReauthProof{}); !errors.Is(err, identity.ErrReauthRequired) {
 		t.Fatalf("no proof: %v, want 403 identity.reauth_required", err)
@@ -207,6 +209,7 @@ func TestReplaceEvidence_PaymentEvidence(t *testing.T) {
 	if got := e.sender.to("payments.transfer_receipt_rejected", notify.ChannelInApp); len(got) != 2 {
 		t.Fatalf("notice to %v, want the two finance admins", got)
 	}
+	wantLinks(t, e.sender, "payments.transfer_receipt_rejected", "/admin/payments/"+pay.String())
 	next := e.files.add(files.PurposeTransferReceipt)
 	cma := actor(t, "company_admin")
 	if _, err := e.svc.AdminReplacePaymentEvidence(ctxOf(t, cma), cma, pay, next); !errors.Is(err, authz.ErrForbidden) {

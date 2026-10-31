@@ -293,6 +293,7 @@ type BankAccountAdminDTO struct {
 	RejectedBy         string `json:"rejected_by,omitempty" format:"uuid"`
 	RevokedBy          string `json:"revoked_by,omitempty" format:"uuid"`
 	SupersededByID     string `json:"superseded_by_id,omitempty" format:"uuid"`
+	EvidenceUploadedBy string `json:"evidence_uploaded_by,omitempty" format:"uuid" doc:"Who uploaded the evidence: the submitter, or whoever replaced a rejected one (replacePayeeBankAccountEvidence). That user is no eye of the account (verify/approve 403 authz.four_eyes_violation, BE-154b). Finance and platform admins only (BE-159)"`
 	PartyTitle         string `json:"party_title" doc:"The legal party's invoice title the holder is checked against"`
 	HolderMatchesTitle bool   `json:"holder_matches_title" doc:"Holder equals the title after Turkish-insensitive folding (advisory)"`
 }
@@ -303,7 +304,8 @@ func accountAdminDTO(v BankAccountView) BankAccountAdminDTO {
 		BankAccountDTO: accountDTO(v), OrgID: b.OrgID.String(), EvidenceFileID: b.EvidenceFileID.String(),
 		SubmittedBy: b.SubmittedBy.String(), SubmittedByAdmin: b.SubmittedByAdmin, VerifiedBy: httpx.IDStr(b.VerifiedBy),
 		ApprovedBy: httpx.IDStr(b.ApprovedBy), RejectedBy: httpx.IDStr(b.RejectedBy), RevokedBy: httpx.IDStr(b.RevokedBy),
-		SupersededByID: httpx.IDStr(b.SupersededByID), PartyTitle: v.PartyTitle, HolderMatchesTitle: v.HolderMatchesTitle,
+		SupersededByID: httpx.IDStr(b.SupersededByID), EvidenceUploadedBy: httpx.IDStr(v.EvidenceUploadedBy),
+		PartyTitle: v.PartyTitle, HolderMatchesTitle: v.HolderMatchesTitle,
 	}
 }
 

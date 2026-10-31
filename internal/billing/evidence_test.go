@@ -1,6 +1,7 @@
 package billing_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"slices"
 	"testing"
@@ -102,6 +103,21 @@ func TestReplaceInvoicePDF_IssuedResetsVerification(t *testing.T) {
 	if err := pdf("finance_admin"); err != nil {
 		t.Fatalf("finance reads the replaced PDF: %v", err)
 	}
+	// The org view tells the pending re-verification apart (pdf_replaced_at
+	// without verified_at); who verifies is finance's view only (BE-159).
+	app := newHTTP(t, e)
+	orgView := func() map[string]any {
+		t.Helper()
+		code, body := call(t, app, "club_admin", http.MethodGet, "/invoices/"+inv.ID.String(), "")
+		var out map[string]any
+		if err := json.Unmarshal([]byte(body), &out); code != http.StatusOK || err != nil {
+			t.Fatalf("getInvoice = %d, %v:\n%s", code, err, body)
+		}
+		return out
+	}
+	if out := orgView(); out["pdf_replaced_at"] == nil || out["verified_at"] != nil || out["verified_by"] != nil {
+		t.Fatalf("org view of the replaced PDF = %v", out)
+	}
 
 	issued := len(e.outbox.Topics())
 	_, err = e.verify(t, "finance_admin", inv.ID, billing.StatusMismatch, "Tutar tutmuyor")
@@ -118,6 +134,9 @@ func TestReplaceInvoicePDF_IssuedResetsVerification(t *testing.T) {
 	}
 	if err := pdf("company_admin"); err != nil {
 		t.Fatalf("the recipient reads the verified PDF: %v", err)
+	}
+	if out := orgView(); out["pdf_replaced_at"] == nil || out["verified_at"] == nil || out["verified_by"] != nil {
+		t.Fatalf("org view of the re-verified PDF = %v", out)
 	}
 	_, err = e.verify(t, "finance_admin", inv.ID, billing.StatusIssued, "")
 	problemtest.WantErr(t, err, billing.ErrInvalidState)

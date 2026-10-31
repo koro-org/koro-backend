@@ -83,6 +83,18 @@ func TestReplaceEvidence_DocumentFile(t *testing.T) {
 		!slices.Contains(got, fin.UserID) || !slices.Contains(got, fin2.UserID) || slices.Contains(got, actor(t, "company_member").UserID) {
 		t.Fatalf("notice to %v, want the company's admins and the finance admins", got)
 	}
+	for _, m := range e.sender.all() {
+		if m.Template != "parties.document_rejected" {
+			continue
+		}
+		want := "/orgs/" + company.String() + "/legal-parties/" + party.ID.String() // the company's panel (BE-159)
+		if *m.UserID == fin.UserID || *m.UserID == fin2.UserID {
+			want = "/admin/legal-parties/" + party.ID.String() // finance's party screen
+		}
+		if m.LinkPath.String() != want {
+			t.Errorf("notice to %s links %q, want %q", m.UserID, m.LinkPath, want)
+		}
+	}
 	for persona, want := range map[string]error{"company_member": authz.ErrForbidden, "club_admin": authz.ErrNotFound,
 		"support": authz.ErrForbidden} {
 		if _, err := replace(actor(t, persona), next); !errors.Is(err, want) {
@@ -151,6 +163,11 @@ func TestReplaceEvidence_AdminDocumentFile(t *testing.T) {
 	if got := recipients(e.sender.all(), "parties.document_rejected", notify.ChannelInApp); len(got) != 2 {
 		t.Fatalf("notice to %v, want the two finance admins", got)
 	}
+	for _, m := range e.sender.all() {
+		if m.Template == "parties.document_rejected" && m.LinkPath.String() != "/admin/legal-parties/"+party.ID.String() {
+			t.Errorf("notice links %q, want finance's party screen", m.LinkPath)
+		}
+	}
 }
 
 // TestReplaceEvidence_BankAccountEvidence: an org submission waiting for
@@ -164,8 +181,8 @@ func TestReplaceEvidence_BankAccountEvidence(t *testing.T) {
 	e := newEnv(t)
 	py := e.payee(t, "1111111114")
 	b := e.orgSubmit(t, py.Payee.ID, ibanA)
-	if b.EvidenceState != files.StateClean {
-		t.Fatalf("view state = %q, want clean", b.EvidenceState)
+	if b.EvidenceState != files.StateClean || b.EvidenceUploadedBy == nil || *b.EvidenceUploadedBy != b.Account.SubmittedBy {
+		t.Fatalf("view state = %q, uploader %v; want clean, the submitter", b.EvidenceState, b.EvidenceUploadedBy)
 	}
 	if _, err := e.verifyAccount(t, "finance_admin", b.Account.ID); err != nil {
 		t.Fatal(err)
@@ -199,6 +216,9 @@ func TestReplaceEvidence_BankAccountEvidence(t *testing.T) {
 	if err != nil || v.Account.EvidenceFileID != next || v.Account.Status != parties.AccountPendingVerification ||
 		v.Account.VerifiedBy != nil || v.Account.IBAN != b.Account.IBAN || v.Account.SubmittedBy != b.Account.SubmittedBy {
 		t.Fatalf("replace = %+v, %v", v.Account, err)
+	}
+	if v.EvidenceUploadedBy == nil || *v.EvidenceUploadedBy != actor(t, "finance_admin_2").UserID {
+		t.Fatalf("view uploader = %v, want the new evidence's uploader (BE-159)", v.EvidenceUploadedBy)
 	}
 	e.replacedRecord(t, authz.PartiesBankAccountSubmit, old, next)
 	// finance_admin_2 uploaded the new evidence: no eye of this account.
@@ -288,6 +308,22 @@ func TestReplaceEvidence_HTTPPathParameters(t *testing.T) {
 	}
 	if got, err := e.store.GetBankAccount(t.Context(), b.Account.ID, false); err != nil || got.EvidenceFileID != next {
 		t.Fatalf("account = %+v, %v", got, err)
+	}
+	// The evidence's uploader is in finance's view only (BE-159).
+	if _, ok := out["evidence_uploaded_by"]; ok {
+		t.Fatalf("the org view names the evidence's uploader:\n%s", rec.Body.String())
+	}
+	rec, out = call(t, app, "finance_admin", http.MethodGet, "/api/v1/admin/bank-accounts", nil, nil)
+	wantStatus(t, rec, http.StatusOK)
+	items, _ := out["items"].([]any)
+	found := false
+	for _, it := range items {
+		if m, _ := it.(map[string]any); m["bank_account_id"] == b.Account.ID.String() {
+			found = m["evidence_uploaded_by"] == actor(t, "club_admin").UserID.String()
+		}
+	}
+	if !found {
+		t.Fatalf("admin queue lacks the evidence's uploader:\n%s", rec.Body.String())
 	}
 
 	party := e.buyer(t, "1234567890").Party

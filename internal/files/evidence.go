@@ -155,9 +155,18 @@ func (s *service) state(f File) State {
 	return st
 }
 
-// States implements Files.
-func (s *service) States(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]State, error) {
-	out := make(map[uuid.UUID]State, len(ids))
+// Evidence is what an owning module shows of an attached file: its State
+// and its uploader (nil for a generated file). The uploader is for the
+// views that need it (the four-eyes screens: whoever uploaded an evidence
+// does not check it, BE-159); the module decides who sees it.
+type Evidence struct {
+	State      State
+	UploadedBy *uuid.UUID
+}
+
+// Evidence implements Files.
+func (s *service) Evidence(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]Evidence, error) {
+	out := make(map[uuid.UUID]Evidence, len(ids))
 	if len(ids) == 0 {
 		return out, nil
 	}
@@ -166,7 +175,20 @@ func (s *service) States(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]St
 		return nil, err
 	}
 	for _, f := range rows {
-		out[f.ID] = s.state(f)
+		out[f.ID] = Evidence{State: s.state(f), UploadedBy: f.UploadedBy}
+	}
+	return out, nil
+}
+
+// States implements Files.
+func (s *service) States(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]State, error) {
+	ev, err := s.Evidence(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID]State, len(ev))
+	for id, e := range ev {
+		out[id] = e.State
 	}
 	return out, nil
 }

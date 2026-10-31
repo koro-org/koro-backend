@@ -182,6 +182,7 @@ type InvoiceDTO struct {
 	PDFFileState      string           `json:"pdf_file_state,omitempty" doc:"The state of the PDF (BE-154b). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the uploader side uploads it again (replaceInvoicePdf). pending: not scanned yet"`
 	PDFReplacedAt     *time.Time       `json:"pdf_replaced_at,omitempty" doc:"An issued invoice whose rejected PDF was replaced (BE-154b): until verified_at is set again the new PDF waits for finance's verification and only the uploader side and finance read it"`
 	UploadedBy        string           `json:"uploaded_by,omitempty" format:"uuid"`
+	VerifiedAt        *time.Time       `json:"verified_at,omitempty" doc:"When finance verified the uploaded document (manual_upload, seller_uploaded). An issued invoice with pdf_replaced_at and no verified_at waits for the re-verification of its new PDF (BE-154b, BE-159); who verified is in finance's view only"`
 	MismatchNote      string           `json:"mismatch_note,omitempty" doc:"Why the upload did not match (status mismatch)"`
 	IssuedAt          *time.Time       `json:"issued_at,omitempty"`
 	CreatedAt         time.Time        `json:"created_at"`
@@ -192,11 +193,10 @@ type InvoiceDTO struct {
 // InvoiceAdminDTO is an invoice as finance sees it.
 type InvoiceAdminDTO struct {
 	InvoiceDTO
-	PDFFileID      string     `json:"pdf_file_id,omitempty" format:"uuid"`
-	VerifiedBy     string     `json:"verified_by,omitempty" format:"uuid"`
-	VerifiedAt     *time.Time `json:"verified_at,omitempty"`
-	LastError      string     `json:"last_error,omitempty" doc:"The mismatch note or the provider's last error"`
-	IdempotencyKey string     `json:"idempotency_key" doc:"The planned document's key (kind:source:line:seq)"`
+	PDFFileID      string `json:"pdf_file_id,omitempty" format:"uuid"`
+	VerifiedBy     string `json:"verified_by,omitempty" format:"uuid"`
+	LastError      string `json:"last_error,omitempty" doc:"The mismatch note or the provider's last error"`
+	IdempotencyKey string `json:"idempotency_key" doc:"The planned document's key (kind:source:line:seq)"`
 }
 
 func snapshotDTO(s Snapshot) InvoicePartyDTO {
@@ -226,7 +226,8 @@ func invoiceDTO(inv Invoice, lines []Line, st map[uuid.UUID]files.State) Invoice
 		VATWithheldAmount: inv.VATWithheldAmount, TotalAmount: inv.TotalAmount, PayableAmount: inv.PayableAmount,
 		RefersToInvoiceID: httpx.IDStr(inv.RefersToInvoiceID), HasPDF: inv.PDFFileID != nil, UploadedBy: httpx.IDStr(inv.UploadedBy),
 		PDFFileState: string(files.StateOf(st, inv.PDFFileID)), PDFReplacedAt: db.UTCPtr(inv.PDFReplacedAt),
-		IssuedAt: db.UTCPtr(inv.IssuedAt), CreatedAt: inv.CreatedAt.UTC(), UpdatedAt: inv.UpdatedAt.UTC(),
+		VerifiedAt: db.UTCPtr(inv.VerifiedAt),
+		IssuedAt:   db.UTCPtr(inv.IssuedAt), CreatedAt: inv.CreatedAt.UTC(), UpdatedAt: inv.UpdatedAt.UTC(),
 	}
 	if d.Currency == "" {
 		d.Currency = Currency
@@ -259,7 +260,7 @@ func invoiceDTO(inv Invoice, lines []Line, st map[uuid.UUID]files.State) Invoice
 
 func invoiceAdminDTO(inv Invoice, lines []Line, st map[uuid.UUID]files.State) InvoiceAdminDTO {
 	d := InvoiceAdminDTO{InvoiceDTO: invoiceDTO(inv, lines, st), PDFFileID: httpx.IDStr(inv.PDFFileID), VerifiedBy: httpx.IDStr(inv.VerifiedBy),
-		VerifiedAt: db.UTCPtr(inv.VerifiedAt), IdempotencyKey: inv.IdempotencyKey}
+		IdempotencyKey: inv.IdempotencyKey}
 	if inv.LastError != nil {
 		d.LastError = *inv.LastError
 	}

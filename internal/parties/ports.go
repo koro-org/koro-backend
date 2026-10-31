@@ -38,6 +38,10 @@ type Files interface {
 	// States returns the states of the documents' and the accounts'
 	// evidence files of a response (one read; BE-154b).
 	States(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]files.State, error)
+	// Evidence returns the states and the uploaders of the accounts'
+	// evidence files (one read; finance's view hides the eyes from the
+	// uploader, BE-159).
+	Evidence(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]files.Evidence, error)
 }
 
 // Orgs is what parties needs from orgs (L5): the org of an org-surface

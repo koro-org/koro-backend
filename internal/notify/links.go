@@ -175,6 +175,7 @@ var (
 	routeOrgContactRequest  = route("/orgs/{org_id}/contact-requests/{contact_request_id}", LinkForOrg)
 	routeOrgRefundRequest   = route("/orgs/{org_id}/refund-requests/{refund_request_id}", LinkForOrg)       // payments (the buyer, BE-132)
 	routeOrgSalesRefundReq  = route("/orgs/{org_id}/sales/refund-requests/{refund_request_id}", LinkForOrg) // payments (the seller, BE-132)
+	routeOrgLegalParty      = route("/orgs/{org_id}/legal-parties/{party_id}", LinkForOrg)                  // parties (the party's org, BE-159)
 
 	// Platform staff screens.
 	routeAdminAuditEvents        = route("/admin/audit-events", LinkForAdmin)                        // notify (audit alerts)
@@ -185,10 +186,13 @@ var (
 	routeAdminCollectionAccounts = route("/admin/collection-accounts", LinkForAdmin)                 // payments
 	routeAdminCommercePolicies   = route("/admin/commerce-policies", LinkForAdmin)                   // catalog
 	routeAdminOfferings          = route("/admin/offerings", LinkForAdmin)                           // catalog
+	routeAdminIncomingTransfer   = route("/admin/incoming-transfers/{transfer_id}", LinkForAdmin)    // payments (BE-159)
 	routeAdminInvoice            = route("/admin/invoices/{invoice_id}", LinkForAdmin)               // billing (finance, BE-144)
+	routeAdminLegalParty         = route("/admin/legal-parties/{party_id}", LinkForAdmin)            // parties (BE-159)
 	routeAdminPendingOrgs        = route("/admin/orgs?status=pending_review", LinkForAdmin)          // orgs (BE-144)
 	routeAdminOrder              = route("/admin/orders?order_no={order_no}", LinkForAdmin)          // orders
 	routeAdminPlatformRoles      = route("/admin/platform-roles", LinkForAdmin)                      // identity (e-mail)
+	routeAdminPayment            = route("/admin/payments/{payment_id}", LinkForAdmin)               // payments (BE-159)
 	routeAdminPayout             = route("/admin/payouts/{payout_id}", LinkForAdmin)                 // ledger
 	routeAdminRefund             = route("/admin/refunds/{refund_id}", LinkForAdmin)                 // payments
 	routeAdminRefundRequest      = route("/admin/refund-requests/{refund_request_id}", LinkForAdmin) // payments (BE-132)
@@ -275,6 +279,12 @@ func OrgSalesRefundRequestLink(org, req uuid.UUID) Link {
 	return routeOrgSalesRefundReq.link(org.String(), req.String())
 }
 
+// OrgLegalPartyLink is a legal party in the panel of its org (a buyer
+// company, a university's own party; BE-159).
+func OrgLegalPartyLink(org, party uuid.UUID) Link {
+	return routeOrgLegalParty.link(org.String(), party.String())
+}
+
 // Builders of the platform staff screens.
 
 func AdminAuditEventsLink() Link              { return routeAdminAuditEvents.link() }
@@ -286,6 +296,17 @@ func AdminCollectionAccountsLink() Link       { return routeAdminCollectionAccou
 func AdminCommercePoliciesLink() Link         { return routeAdminCommercePolicies.link() }
 func AdminOfferingsLink() Link                { return routeAdminOfferings.link() }
 func AdminInvoiceLink(invoice uuid.UUID) Link { return routeAdminInvoice.link(invoice.String()) }
+
+// AdminIncomingTransferLink is an incoming bank transfer (BE-159).
+func AdminIncomingTransferLink(transfer uuid.UUID) Link {
+	return routeAdminIncomingTransfer.link(transfer.String())
+}
+
+// AdminLegalPartyLink is a legal party in finance's screens (BE-159).
+func AdminLegalPartyLink(party uuid.UUID) Link { return routeAdminLegalParty.link(party.String()) }
+
+// AdminPaymentLink is a payment of an order (BE-159).
+func AdminPaymentLink(payment uuid.UUID) Link { return routeAdminPayment.link(payment.String()) }
 func AdminPendingOrgsLink() Link              { return routeAdminPendingOrgs.link() }
 func AdminOrderLink(orderNo string) Link      { return routeAdminOrder.link(orderNo) }
 func AdminPlatformRolesLink() Link            { return routeAdminPlatformRoles.link() }

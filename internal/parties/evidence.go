@@ -326,7 +326,8 @@ const (
 // or bank account evidence again (the row keeps the reference): for an
 // account that waits for an eye or is approved, the payee org's admins
 // (their payee) and the finance admins (the four-eyes queue); for a
-// document, the finance admins and the admins of the party's org. A row
+// document, the finance admins (finance's party screen) and the admins of
+// the party's org (the party in their panel; BE-159). A row
 // that holds another file by now (replaced) and a closed account are
 // silent; the dedupe keys (the file and the recipient) make a repeated
 // delivery one notice. The uploader hears from files as before.
@@ -369,27 +370,33 @@ func (s *service) notifyRejectedEvidence(ctx context.Context, r files.Rejection)
 		if err != nil {
 			return err
 		}
-		to, err := s.financeAdmins(ctx)
+		fin, err := s.financeAdmins(ctx)
 		if err != nil {
 			return err
 		}
+		data := map[string]any{"document_id": d.ID.String(), "legal_party_id": p.ID.String()}
+		var admins []uuid.UUID
 		if p.OrgID != nil {
 			roles := []authz.MemberRole{authz.MemberClubAdmin, authz.MemberUniversityRep}
 			if p.Kind == KindBuyerCompany {
 				roles = []authz.MemberRole{authz.MemberCompanyAdmin, authz.MemberCompanyOwner}
 			}
-			admins, err := s.membersWith(ctx, *p.OrgID, roles...)
+			members, err := s.membersWith(ctx, *p.OrgID, roles...)
 			if err != nil {
 				return err
 			}
-			for _, id := range admins {
-				if !slices.Contains(to, id) {
-					to = append(to, id)
+			for _, id := range members {
+				if !slices.Contains(fin, id) { // finance's own screen wins
+					admins = append(admins, id)
 				}
 			}
 		}
-		data := map[string]any{"document_id": d.ID.String(), "legal_party_id": p.ID.String()}
-		return s.notifyInApp(ctx, tmplDocumentRejected, key, to, notify.Link{}, p.OrgID, data)
+		err = s.notifyInApp(ctx, tmplDocumentRejected, key, fin, notify.AdminLegalPartyLink(p.ID), p.OrgID, data)
+		if len(admins) > 0 {
+			err = errors.Join(err, s.notifyInApp(ctx, tmplDocumentRejected, key, admins,
+				notify.OrgLegalPartyLink(*p.OrgID, p.ID), p.OrgID, data))
+		}
+		return err
 	}
 	return nil
 }

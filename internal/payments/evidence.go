@@ -384,7 +384,8 @@ func (s *service) notifyRejectedEvidence(ctx context.Context, r files.Rejection)
 		t, err := s.d.Store.GetTransfer(ctx, r.EntityID, false)
 		switch {
 		case err == nil && holds(t.ReceiptFileID, r.FileID):
-			return finance(tmplTransferReceiptRejected, notify.Link{}, map[string]any{"incoming_transfer_id": t.ID.String()})
+			return finance(tmplTransferReceiptRejected, notify.AdminIncomingTransferLink(t.ID),
+				map[string]any{"incoming_transfer_id": t.ID.String()})
 		case err != nil && !isNotFound(err):
 			return err
 		}
@@ -395,7 +396,7 @@ func (s *service) notifyRejectedEvidence(ctx context.Context, r files.Rejection)
 		case err != nil:
 			return err
 		case holds(p.EvidenceFileID, r.FileID):
-			return finance(tmplTransferReceiptRejected, notify.Link{},
+			return finance(tmplTransferReceiptRejected, notify.AdminPaymentLink(p.ID),
 				map[string]any{"payment_id": p.ID.String(), "order_id": p.OrderID.String()})
 		}
 	case files.PurposeRefundReceipt:
@@ -413,7 +414,8 @@ func (s *service) notifyRejectedEvidence(ctx context.Context, r files.Rejection)
 		case err != nil:
 			return err
 		case holds(t.ReturnReceiptFileID, r.FileID):
-			return finance(tmplRefundReceiptRejected, notify.Link{}, map[string]any{"incoming_transfer_id": t.ID.String()})
+			return finance(tmplRefundReceiptRejected, notify.AdminIncomingTransferLink(t.ID),
+				map[string]any{"incoming_transfer_id": t.ID.String()})
 		}
 	case files.PurposeRefundRequestEvidence:
 		req, err := s.d.Store.GetRefundRequest(ctx, r.EntityID, false)

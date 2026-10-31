@@ -82,17 +82,20 @@ func reauthDenied(act authz.Action, accountID *uuid.UUID, payeeID, orgID uuid.UU
 }
 
 // accountViews builds the views of bs: the party title for the first
-// eye's check and the states of the evidence files (one files read;
-// BE-154b).
+// eye's check and the states and the uploaders of the evidence files (one
+// files read; BE-154b, BE-159).
 func (s *service) accountViews(ctx context.Context, bs []BankAccount) ([]BankAccountView, error) {
 	out := make([]BankAccountView, len(bs))
 	fids := make([]*uuid.UUID, len(bs))
 	for i := range bs {
 		fids[i] = &bs[i].EvidenceFileID
 	}
-	states, err := s.fileStates(ctx, fids...)
-	if err != nil {
-		return nil, err
+	evidence := map[uuid.UUID]files.Evidence{}
+	if s.d.Files != nil {
+		var err error
+		if evidence, err = s.d.Files.Evidence(ctx, files.IDs(fids...)); err != nil {
+			return nil, err
+		}
 	}
 	titles := map[uuid.UUID]string{} // payee → party title
 	for i, b := range bs {
@@ -109,8 +112,9 @@ func (s *service) accountViews(ctx context.Context, bs []BankAccount) ([]BankAcc
 			title = lp.Title
 			titles[b.PayeeID] = title
 		}
+		ev := evidence[b.EvidenceFileID]
 		out[i] = BankAccountView{Account: b, PartyTitle: title, HolderMatchesTitle: holderMatchesTitle(b.HolderName, title),
-			EvidenceState: files.StateOf(states, &b.EvidenceFileID)}
+			EvidenceState: ev.State, EvidenceUploadedBy: ev.UploadedBy}
 	}
 	return out, nil
 }

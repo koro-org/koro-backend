@@ -91,6 +91,44 @@ func TestFiles_States_OneRead(t *testing.T) {
 	}
 }
 
+// TestFiles_Evidence_StateAndUploader (BE-159): Evidence is States with
+// the uploader of each file (nil for a generated one), in the same read; a
+// missing file has no entry.
+func TestFiles_Evidence_StateAndUploader(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	user, size := actor(t, "club_admin").UserID, int64(42)
+	insert := func(by *uuid.UUID, scan files.ScanStatus) uuid.UUID {
+		t.Helper()
+		id := uuid.NewV7()
+		if err := e.store.Insert(t.Context(), files.File{ID: id, Purpose: files.PurposeDeliveryEvidence, UploadedBy: by,
+			OwnerUserID: by, Bucket: buckets.Files, StorageKey: "k/" + id.String(), DeclaredMIME: files.MIMEPDF, SizeBytes: &size,
+			SHA256: make([]byte, 32), Status: files.StatusActive, ScanStatus: scan}); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	uploaded, generated, missing := insert(&user, files.ScanInfected), insert(nil, files.ScanSkipped), uuid.NewV7()
+	ids := []uuid.UUID{uploaded, generated, missing}
+	got, err := e.svc.Evidence(t.Context(), ids)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("Evidence = %v, %v; want two entries", got, err)
+	}
+	if u := got[uploaded]; u.State != files.StateRejected || u.UploadedBy == nil || *u.UploadedBy != user {
+		t.Fatalf("uploaded = %+v", u)
+	}
+	if g := got[generated]; g.State != files.StateClean || g.UploadedBy != nil {
+		t.Fatalf("generated = %+v", g)
+	}
+	states, err := e.svc.States(t.Context(), ids)
+	if err != nil || len(states) != 2 || states[uploaded] != got[uploaded].State || states[generated] != got[generated].State {
+		t.Fatalf("States = %v, %v; want the states of Evidence", states, err)
+	}
+	if got, err := e.svc.Evidence(t.Context(), nil); err != nil || len(got) != 0 {
+		t.Fatalf("Evidence(nil) = %v, %v", got, err)
+	}
+}
+
 // fakeReplacer records Attach; get answers Get.
 type fakeReplacer struct {
 	get      map[uuid.UUID]files.FileMeta

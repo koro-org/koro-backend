@@ -1,6 +1,7 @@
 package messaging_test
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -106,7 +107,8 @@ func TestSweep_ClosedAfter12Months(t *testing.T) {
 	if _, err := e.mod.Sweeper.Sweep(ctx, privacy.RetentionPolicy{Code: "other"}, now); err == nil {
 		t.Fatal("an unknown policy was swept")
 	}
-	if got := e.mod.Sweeper.PolicyCodes(); len(got) != 1 || got[0] != messaging.PolicyContactRequestClosed {
+	if got := e.mod.Sweeper.PolicyCodes(); !slices.Equal(got, []string{messaging.PolicyContactRequestClosed,
+		messaging.PolicyConversationClosed}) {
 		t.Fatalf("policy codes = %v", got)
 	}
 }

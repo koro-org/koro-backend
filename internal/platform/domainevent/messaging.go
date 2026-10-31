@@ -6,11 +6,15 @@ import "uuid"
 const (
 	TopicContactRequestCreated = "contact_request.created"
 	TopicContactRequestClosed  = "contact_request.closed"
+	// TopicConversationMessageSent: a message in the conversation of an
+	// accepted contact request (BE-162).
+	TopicConversationMessageSent = "conversation.message_sent"
 )
 
 var _ = register(
 	spec("messaging", Outbox, ContactRequestCreated{}),
 	spec("messaging", Outbox, ContactRequestClosed{}),
+	spec("messaging", Outbox, ConversationMessageSent{}),
 )
 
 // ContactRequestCreated: the student is notified (the message body never
@@ -34,3 +38,16 @@ type ContactRequestClosed struct {
 
 // Topic implements Payload.
 func (ContactRequestClosed) Topic() string { return TopicContactRequestClosed }
+
+// ConversationMessageSent: the other side of the conversation is notified
+// (BE-162). SenderSide is student | company; the message text never enters
+// the event or the notification.
+type ConversationMessageSent struct {
+	ConversationID uuid.UUID `json:"conversation_id"`
+	MessageID      uuid.UUID `json:"message_id"`
+	OrgID          uuid.UUID `json:"org_id"`
+	SenderSide     string    `json:"sender_side"`
+}
+
+// Topic implements Payload.
+func (ConversationMessageSent) Topic() string { return TopicConversationMessageSent }

@@ -81,6 +81,9 @@ outreach_dispatches         policy:outreach_dispatch
 # messaging (P3)
 contact_requests            policy:contact_request_closed
 contact_blocks              account:the user's blocks of companies; the messaging provider deletes them (BE-056)
+conversations               policy:conversation_closed
+conversation_messages       parent:conversations
+conversation_user_states    parent:conversations
 # talent (P3, profiling data)
 talent.point_events         policy:talent_ledger
 talent.daily_counters       policy:talent_counters

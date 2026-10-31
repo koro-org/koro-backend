@@ -153,6 +153,7 @@ var (
 	routeMyAccessGrants   = route("/me/access-grants", LinkForUser)                         // students
 	routeMyClubClaims     = route("/me/club-claims", LinkForUser)                           // directory
 	routeMyContactRequest = route("/me/contact-requests/{contact_request_id}", LinkForUser) // messaging
+	routeMyConversation   = route("/me/conversations/{conversation_id}", LinkForUser)       // messaging (BE-162)
 	routeMyRegistration   = route("/me/registrations/{registration_id}", LinkForUser)       // events
 	routeMySecurityEvents = route("/me/security-events", LinkForUser)                       // notify (audit alerts)
 	routeMyTerms          = route("/me/terms", LinkForUser)                                 // identity (a new terms of use version, BE-124)
@@ -173,6 +174,7 @@ var (
 	routeOrgPosts           = route("/orgs/{org_id}/posts", LinkForOrg)                                             // feed
 	routeOrgPayee           = route("/orgs/{org_id}/payees/{payee_id}", LinkForOrg)                                 // parties
 	routeOrgContactRequest  = route("/orgs/{org_id}/contact-requests/{contact_request_id}", LinkForOrg)
+	routeOrgConversation    = route("/orgs/{org_id}/conversations/{conversation_id}", LinkForOrg)           // messaging (BE-162)
 	routeOrgRefundRequest   = route("/orgs/{org_id}/refund-requests/{refund_request_id}", LinkForOrg)       // payments (the buyer, BE-132)
 	routeOrgSalesRefundReq  = route("/orgs/{org_id}/sales/refund-requests/{refund_request_id}", LinkForOrg) // payments (the seller, BE-132)
 	routeOrgLegalParty      = route("/orgs/{org_id}/legal-parties/{party_id}", LinkForOrg)                  // parties (the party's org, BE-159)
@@ -222,6 +224,7 @@ func init() {
 func MyAccessGrantsLink() Link                { return routeMyAccessGrants.link() }
 func MyClubClaimsLink() Link                  { return routeMyClubClaims.link() }
 func MyContactRequestLink(req uuid.UUID) Link { return routeMyContactRequest.link(req.String()) }
+func MyConversationLink(conv uuid.UUID) Link  { return routeMyConversation.link(conv.String()) }
 func MyRegistrationLink(reg uuid.UUID) Link   { return routeMyRegistration.link(reg.String()) }
 func MySecurityEventsLink() Link              { return routeMySecurityEvents.link() }
 func MyTermsLink() Link                       { return routeMyTerms.link() }
@@ -267,6 +270,11 @@ func OrgPostsLink(org uuid.UUID) Link             { return routeOrgPosts.link(or
 func OrgPayeeLink(org, payee uuid.UUID) Link      { return routeOrgPayee.link(org.String(), payee.String()) }
 func OrgContactRequestLink(org, req uuid.UUID) Link {
 	return routeOrgContactRequest.link(org.String(), req.String())
+}
+
+// OrgConversationLink is a conversation in the company's panel (BE-162).
+func OrgConversationLink(org, conv uuid.UUID) Link {
+	return routeOrgConversation.link(org.String(), conv.String())
 }
 
 // OrgRefundRequestLink is a refund request in the buying company's panel.

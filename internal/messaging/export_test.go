@@ -18,3 +18,8 @@ func (m Module) HandleClosed(ctx context.Context, e domainevent.Envelope) error 
 
 // ExpireDue runs messaging.expire_requests (tests).
 func (m Module) ExpireDue(ctx context.Context) error { return m.svc.ExpireDue(ctx) }
+
+// HandleMessageSent runs the conversation.message_sent subscription (tests).
+func (m Module) HandleMessageSent(ctx context.Context, e domainevent.Envelope) error {
+	return m.svc.handleMessageSent(ctx, e)
+}

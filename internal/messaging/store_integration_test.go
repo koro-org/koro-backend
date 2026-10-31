@@ -93,6 +93,14 @@ func TestStore_Contract_Gorm(t *testing.T) {
 	})
 }
 
+func TestConversationStore_Contract_Gorm(t *testing.T) {
+	t.Parallel()
+	conversationContract(t, func(t *testing.T) (messaging.Store, world) {
+		d := testutil.NewDB(t)
+		return messaging.NewGormStore(d.ORM), pgWorld(d)
+	})
+}
+
 // pgEntitlements consumes a unit as entitlements does (a usage row and the
 // counter in the caller's transaction), so the request's FK holds and a
 // rollback takes the unit back.
@@ -219,7 +227,8 @@ func TestService_Postgres_CreateAcceptAndExpire(t *testing.T) {
 	problemtest.WantErr(t, err, students.ErrMinorRestricted)
 	if st := count(`SELECT count(*) FROM contact_requests WHERE id = $1 AND status = 'pending' AND responded_at IS NULL`, v.Request.ID); st != 1 ||
 		count(`SELECT count(*) FROM profile_access_grants WHERE source_id = $1`, v.Request.ID) != 0 ||
-		count(`SELECT count(*) FROM outbox WHERE topic = 'contact_request.closed'`) != 0 {
+		count(`SELECT count(*) FROM outbox WHERE topic = 'contact_request.closed'`) != 0 ||
+		count(`SELECT count(*) FROM conversations WHERE contact_request_id = $1`, v.Request.ID) != 0 {
 		t.Fatal("a failed grant did not roll the acceptance back")
 	}
 	fail.Store(false)
@@ -230,6 +239,32 @@ func TestService_Postgres_CreateAcceptAndExpire(t *testing.T) {
 		count(`SELECT count(*) FROM profile_access_grants WHERE source_id = $1 AND student_user_id = $2`, v.Request.ID, stu.UserID) != 1 ||
 		count(`SELECT count(*) FROM outbox WHERE topic = 'contact_request.closed'`) != 1 {
 		t.Fatal("the acceptance did not commit with its grant and event")
+	}
+	// BE-162: the conversation of the acceptance, the company's from the
+	// request; a message, its event (IDs only) and the activity commit
+	// together.
+	var conv uuid.UUID
+	if err := d.Pool.QueryRow(ctx, `SELECT id FROM conversations WHERE contact_request_id = $1 AND org_id = $2
+		AND student_user_id = $3 AND company_user_id = $4 AND status = 'open'`, v.Request.ID, companyA, stu.UserID, cmm.UserID).
+		Scan(&conv); err != nil {
+		t.Fatalf("the acceptance opened no conversation: %v", err)
+	}
+	if _, err := mod.Service.SendMessage(ctx, cmm, messaging.CompanyParty(companyA), conv, "PostgreSQL üzerinden merhaba"); err != nil {
+		t.Fatal(err)
+	}
+	reply, err := mod.Service.SendMessage(ctx, stu, messaging.StudentParty(), conv, "Merhaba, teşekkürler")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count(`SELECT count(*) FROM outbox WHERE topic = 'conversation.message_sent'`) != 2 ||
+		count(`SELECT count(*) FROM outbox WHERE topic = 'conversation.message_sent' AND payload::text LIKE '%merhaba%'`) != 0 ||
+		count(`SELECT company_unanswered FROM conversations WHERE id = $1`, conv) != 0 ||
+		count(`SELECT count(*) FROM conversation_user_states WHERE conversation_id = $1 AND last_read_message_id = $2`, conv, reply.ID) != 1 {
+		t.Fatal("the messages did not commit with their events, counter and the sender's read marker")
+	}
+	cv, err := mod.Service.GetConversation(ctx, cmm, messaging.CompanyParty(companyA), conv)
+	if err != nil || cv.Unread != 1 || cv.Last == nil || cv.Last.ID != reply.ID || !cv.CanSend {
+		t.Fatalf("company view = %+v, %v", cv, err)
 	}
 
 	due, err := mod.Service.Create(ctx, cmm, companyA, request(companyA, "student_granted"))
@@ -253,5 +288,13 @@ func TestService_Postgres_CreateAcceptAndExpire(t *testing.T) {
 	r, err = mod.Sweeper.Sweep(ctx, p, time.Now().Add(366*24*time.Hour))
 	if err != nil || r.Count != 2 || count(`SELECT count(*) FROM contact_requests`) != 0 {
 		t.Fatalf("sweep after 12 months = %+v, %v", r, err)
+	}
+	if count(`SELECT count(*) FROM conversations WHERE id = $1 AND contact_request_id IS NULL`, conv) != 1 {
+		t.Fatal("the conversation did not outlive its request (ON DELETE SET NULL)")
+	}
+	p = privacy.RetentionPolicy{Code: messaging.PolicyConversationClosed, Retention: 365 * 24 * time.Hour, LegalApproved: true}
+	if r, err = mod.Sweeper.Sweep(ctx, p, time.Now().Add(366*24*time.Hour)); err != nil || r.Count != 1 ||
+		count(`SELECT count(*) FROM conversation_messages`) != 0 || count(`SELECT count(*) FROM conversation_user_states`) != 0 {
+		t.Fatalf("conversation sweep = %+v, %v", r, err)
 	}
 }

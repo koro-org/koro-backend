@@ -14,7 +14,8 @@ import (
 // stamps created_at and updated_at the way the column defaults and the
 // touch trigger do in PostgreSQL.
 func NewMemStore(now func() time.Time) *MemStore {
-	return &MemStore{now: now, requests: map[uuid.UUID]ContactRequest{}, blocks: map[[2]uuid.UUID]Block{}}
+	return &MemStore{now: now, requests: map[uuid.UUID]ContactRequest{}, blocks: map[[2]uuid.UUID]Block{},
+		convs: map[uuid.UUID]Conversation{}, msgs: map[uuid.UUID]Message{}, states: map[[2]uuid.UUID]UserState{}}
 }
 
 // MemStore is the in-memory Store. Every method is atomic under one mutex.
@@ -23,6 +24,9 @@ type MemStore struct {
 	now      func() time.Time
 	requests map[uuid.UUID]ContactRequest
 	blocks   map[[2]uuid.UUID]Block
+	convs    map[uuid.UUID]Conversation // conversations (store_mem_conversations.go)
+	msgs     map[uuid.UUID]Message      // conversation_messages
+	states   map[[2]uuid.UUID]UserState // conversation_user_states: (conversation, user)
 }
 
 var _ Store = (*MemStore)(nil)
@@ -32,13 +36,17 @@ var _ Store = (*MemStore)(nil)
 type MemSnapshot struct {
 	requests map[uuid.UUID]ContactRequest
 	blocks   map[[2]uuid.UUID]Block
+	convs    map[uuid.UUID]Conversation
+	msgs     map[uuid.UUID]Message
+	states   map[[2]uuid.UUID]UserState
 }
 
 // Snapshot copies the rows.
 func (m *MemStore) Snapshot() MemSnapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return MemSnapshot{requests: maps.Clone(m.requests), blocks: maps.Clone(m.blocks)}
+	return MemSnapshot{requests: maps.Clone(m.requests), blocks: maps.Clone(m.blocks), convs: maps.Clone(m.convs),
+		msgs: maps.Clone(m.msgs), states: maps.Clone(m.states)}
 }
 
 // Restore puts a snapshot back.
@@ -46,6 +54,7 @@ func (m *MemStore) Restore(s MemSnapshot) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.requests, m.blocks = maps.Clone(s.requests), maps.Clone(s.blocks)
+	m.convs, m.msgs, m.states = maps.Clone(s.convs), maps.Clone(s.msgs), maps.Clone(s.states)
 }
 
 // Age moves the updated_at of a request back by d (tests of the retention
@@ -341,11 +350,23 @@ func (m *MemStore) DeleteReceived(_ context.Context, studentID uuid.UUID) (int, 
 	n := 0
 	for id, r := range m.requests {
 		if r.StudentUserID == studentID {
-			delete(m.requests, id)
+			m.deleteRequest(id)
 			n++
 		}
 	}
 	return n, nil
+}
+
+// deleteRequest removes a request; its conversation stays without it
+// (conversations_contact_request_id_fkey ON DELETE SET NULL).
+func (m *MemStore) deleteRequest(id uuid.UUID) {
+	delete(m.requests, id)
+	for cid, c := range m.convs {
+		if c.ContactRequestID != nil && *c.ContactRequestID == id {
+			c.ContactRequestID = nil
+			m.convs[cid] = c
+		}
+	}
 }
 
 // DeleteBlocks implements Store.
@@ -386,7 +407,7 @@ func (m *MemStore) PurgeClosed(_ context.Context, cutoff time.Time, limit int) (
 		rows = rows[:limit]
 	}
 	for _, r := range rows {
-		delete(m.requests, r.ID)
+		m.deleteRequest(r.ID)
 	}
 	return len(rows), nil
 }

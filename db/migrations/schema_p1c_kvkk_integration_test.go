@@ -29,6 +29,7 @@ var retentionSeedCodes = []string{
 	"terms_acceptance",          // 000148 (BE-118, Q-17): terms of use acceptances, 10 years after the erasure (000161, BE-152, Q-18)
 	"unsubscribe_link",          // 000162 (BE-153, Q-36): opaque unsubscribe links, 7 days after their expiry
 	"post_media_dropped",        // 000166 (BE-158): images an edit took off a published post, 12 months after the edit
+	"conversation_closed",       // 000169 (BE-162, Q-40): conversations 12 months after their last activity
 }
 
 // TestSchema_RetentionSeedComplete (02 §24.2, T-35): exactly the 44 policies
@@ -38,8 +39,8 @@ var retentionSeedCodes = []string{
 func TestSchema_RetentionSeedComplete(t *testing.T) {
 	t.Parallel()
 	w := newP1aWorld(t)
-	if len(retentionSeedCodes) != 51 {
-		t.Fatalf("the §24.2 list has %d codes, want 51", len(retentionSeedCodes))
+	if len(retentionSeedCodes) != 52 {
+		t.Fatalf("the §24.2 list has %d codes, want 52", len(retentionSeedCodes))
 	}
 	got := queryStrings(t, w, `SELECT code FROM retention_policies ORDER BY code`)
 	want := slices.Sorted(slices.Values(retentionSeedCodes))
@@ -77,6 +78,7 @@ func TestSchema_RetentionSeedComplete(t *testing.T) {
 		"terms_acceptance":             "10 years withdrawn_or_erased hard_delete terms_acceptances consent", // 000161 (Q-18)
 		"unsubscribe_link":             "7 days expires_at hard_delete unsubscribe_links consent",
 		"post_media_dropped":           "1 year closed_at hard_delete post_dropped_media feed", // 000166 (BE-158)
+		"conversation_closed":          "1 year closed_at hard_delete conversations messaging", // 000169 (BE-162)
 		"financial_records":            "10 years created_at hard_delete",
 		"dsr_record":                   "3 years closed_at hard_delete data_subject_requests kvkk",
 		"breach_record":                "5 years closed_at hard_delete breach_incidents kvkk",

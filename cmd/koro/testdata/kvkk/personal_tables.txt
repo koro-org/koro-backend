@@ -101,6 +101,9 @@ outreach_dispatches         staff     outreach      -
 # messaging
 contact_requests            personal  messaging     provider:messaging
 contact_blocks              personal  messaging     provider:messaging
+conversations               personal  messaging     provider:messaging
+conversation_messages       personal  messaging     provider:messaging
+conversation_user_states    personal  messaging     provider:messaging
 # talent (profiling data)
 talent.config_versions      staff     talent        -
 talent.signal_defs          staff     talent        -

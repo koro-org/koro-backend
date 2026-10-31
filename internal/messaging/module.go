@@ -3,7 +3,8 @@
 // (under its pseudonym, anon_id) asks to get in touch; the student accepts
 // (the company gets level 3 access in the same transaction) or declines
 // without a reason; an unanswered request expires after 14 days; the
-// student may block a company. Conversations are phase 2.
+// student may block a company. An accepted request opens a conversation of
+// the student and the company (BE-162, Q-40).
 //
 // Rules the package enforces:
 //
@@ -56,10 +57,32 @@
 //     expired and cannot be answered. Closed requests are hard deleted 12
 //     months after they closed (contact_request_closed; updated_at of a
 //     closed row is the moment it closed).
+//   - Conversations (BE-162): the acceptance opens the conversation in its
+//     transaction (the company, the student and the requester copied from
+//     the request, 06 H-38). The student (/me/conversations…) and the
+//     company's recruiters and admins (/orgs/{org_id}/conversations…) read
+//     it, write 1–2000 characters of text (rate class message_send), mark
+//     it read (per person, never shown to the other side), mute it (per
+//     person) and close it for good (closed_by). A block closes the open
+//     conversations with the company in the block's transaction (the
+//     company sees closed_by student, never the block). The company may
+//     send MaxCompanyUnanswered messages in a row before the student
+//     answers (409 messaging.awaiting_reply); a suspended company writes
+//     nothing and receives nothing (403 orgs.org_suspended); a closed
+//     conversation or company is 409 messaging.conversation_closed. Each
+//     message emits conversation.message_sent (O): the other side gets an
+//     in-app and push notice (fixed text, the conversation's ID only;
+//     contact_requests preference), at most one per unread run, none while
+//     muted. A conversation goes 12 months after it closed or, while open,
+//     after its last message (conversation_closed).
 //   - Personal data: logs carry IDs only; the KVKK provider exports the
-//     requests a user received or sent and the blocks, and erases the
-//     received requests and the blocks (sent requests are the company's
-//     record and point at the anonymised account).
+//     requests a user received or sent, the blocks, the student's
+//     conversations (the company's messages without their senders), the
+//     messages a company member sent (without the student) and the user's
+//     read/mute states, and erases the received requests, the blocks, the
+//     student's conversations and the user's states (sent requests and a
+//     company member's messages are the company's record and point at the
+//     anonymised account).
 package messaging
 
 import (
@@ -161,8 +184,9 @@ type BlockPage struct {
 	Next  *BlockKey
 }
 
-// Service is the messaging service: the 10 HTTP use cases of 04 §2.9.
-// Every method calls authz.Can first (05 §5.3).
+// Service is the messaging service: the 10 HTTP use cases of 04 §2.9 and
+// the conversation use cases (BE-162). Every method calls authz.Can first
+// (05 §5.3).
 type Service interface {
 	// Create is createContactRequest (messaging.contact_request.create).
 	Create(ctx context.Context, a authz.Actor, orgID uuid.UUID, in CreateInput) (CompanyView, error)
@@ -188,6 +212,9 @@ type Service interface {
 	Unblock(ctx context.Context, a authz.Actor, orgID uuid.UUID) error
 	// ListBlocks is listMyCompanyBlocks (messaging.block.list_own).
 	ListBlocks(ctx context.Context, a authz.Actor, after *BlockKey, limit int) (BlockPage, error)
+
+	// Conversations are the conversations of accepted requests (BE-162).
+	Conversations
 }
 
 // Deps are the dependencies of the messaging module. Resolve, Posts,
@@ -196,7 +223,7 @@ type Service interface {
 type Deps struct {
 	Store       Store
 	Tx          db.TxManager
-	Outbox      outbox.Writer       // contact_request.created, contact_request.closed (O)
+	Outbox      outbox.Writer       // contact_request.created, contact_request.closed, conversation.message_sent (O)
 	Audit       AuditLogger         // every write, same transaction
 	Idempotency *idempotency.Keeper // Idempotency-Key of createContactRequest (required) and the others (optional)
 	Clock       clock.Clock
@@ -249,10 +276,12 @@ func (d Deps) validate() error {
 // Module is what messaging hands to the composition root.
 type Module struct {
 	Service Service
-	// Privacy is the KVKK provider (contact_requests, contact_blocks).
+	// Privacy is the KVKK provider (contact_requests, contact_blocks,
+	// conversations, conversation_messages, conversation_user_states).
 	Privacy privacy.Provider
-	// Sweeper deletes closed requests after their retention
-	// (contact_request_closed; kvkk.retention_sweep runs it).
+	// Sweeper deletes closed requests and inactive conversations after
+	// their retention (contact_request_closed, conversation_closed;
+	// kvkk.retention_sweep runs it).
 	Sweeper privacy.RetentionSweeper
 
 	svc *service
@@ -282,11 +311,13 @@ func (s *service) emit(ctx context.Context, p domainevent.Payload, id uuid.UUID)
 
 // Subscribe registers the outbox subscriptions of messaging (01 §6.2):
 // contact_request.created → the student's notice, contact_request.closed →
-// the company's notice.
+// the company's notice, conversation.message_sent → the other side's
+// notice (BE-162).
 func (m Module) Subscribe(r *outbox.Registry) {
 	q := outbox.Queue(queue.Default)
 	r.Subscribe(domainevent.TopicContactRequestCreated, NotifyReceivedTaskName, m.svc.handleCreated, q)
 	r.Subscribe(domainevent.TopicContactRequestClosed, NotifyClosedTaskName, m.svc.handleClosed, q)
+	r.Subscribe(domainevent.TopicConversationMessageSent, NotifyMessageTaskName, m.svc.handleMessageSent, q)
 }
 
 // Jobs returns the scheduled jobs of messaging (01 §7): expire_requests.

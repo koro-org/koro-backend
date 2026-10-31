@@ -47,6 +47,18 @@ func (s gormStore) Get(ctx context.Context, id uuid.UUID) (File, error) {
 }
 
 // cross-org: see Insert.
+func (s gormStore) GetMany(ctx context.Context, ids []uuid.UUID) ([]File, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var out []File
+	if err := db.Conn(ctx, s.orm).Where("id IN ?", ids).Find(&out).Error; err != nil {
+		return nil, fmt.Errorf("files: get many: %w", err)
+	}
+	return out, nil
+}
+
+// cross-org: see Insert.
 func (s gormStore) Lock(ctx context.Context, id uuid.UUID) (File, error) {
 	var f File
 	err := db.Conn(ctx, s.orm).Clauses(clause.Locking{Strength: clause.LockingStrengthUpdate}).

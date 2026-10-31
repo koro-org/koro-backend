@@ -11,6 +11,7 @@ import (
 	"koro/internal/audit"
 	"koro/internal/audit/audittest"
 	"koro/internal/authz"
+	"koro/internal/files"
 	"koro/internal/orders"
 	"koro/internal/platform/problem/problemtest"
 )
@@ -126,5 +127,57 @@ func TestMarkWithEvidence_Postgres_OneTransaction(t *testing.T) {
 	var status string
 	if err := p.d.Pool.QueryRow(t.Context(), `SELECT fulfillment_status FROM order_lines WHERE id = $1`, l.ID).Scan(&status); err != nil || status != "pending" {
 		t.Fatalf("line status = %q, %v", status, err)
+	}
+}
+
+// TestReplaceLineEvidence_Postgres (BE-154, T-393): on PostgreSQL the
+// replacement of a rejected delivery evidence passes the guard of 000163
+// (order_lines_evidence_frozen: only a rejected file goes) and attaches
+// the new file to the line in the same transaction; the old row stays
+// attached to the line; the views read the file states from files (clean,
+// then rejected); a served evidence stays (409 files.not_rejected, the
+// column unchanged).
+func TestReplaceLineEvidence_Postgres(t *testing.T) {
+	t.Parallel()
+	p := newPGEnv(t)
+	l := p.paidPGLine(t)
+	sa, sctx := p.sellerActor(t)
+	old := p.pgEvidence(t, p.seller.org)
+	if _, err := p.mod.Service.MarkLineFulfilled(sctx, sa, l.ID, orders.MarkInput{Note: "Stant kuruldu", EvidenceFileID: &old}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := p.buyerActor(t)
+	ba, err := authz.ActorFrom(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := func(want files.State) {
+		t.Helper()
+		v, err := p.mod.Service.GetOrder(ctx, ba, l.OrderID)
+		if err != nil || files.StateOf(v.EvidenceStates, &old) != want {
+			t.Fatalf("evidence states = %v, %v; want %s", v.EvidenceStates, err, want)
+		}
+	}
+	state(files.StateClean)
+	fresh := p.pgEvidence(t, p.seller.org)
+	_, err = p.mod.Service.ReplaceLineEvidence(sctx, sa, l.ID, fresh)
+	problemtest.WantErr(t, err, files.ErrNotRejected)
+	if ev, _, _ := p.evidenceOf(t, l.ID, old); ev == nil || *ev != old {
+		t.Fatalf("after the refusal the evidence is %v", ev)
+	}
+	pgExec(t, p.d, `UPDATE files SET scan_status = 'infected' WHERE id = $1`, old) // BE-048
+	state(files.StateRejected)
+	v, err := p.mod.Service.ReplaceLineEvidence(sctx, sa, l.ID, fresh)
+	if err != nil || v.EvidenceState != files.StateClean {
+		t.Fatalf("ReplaceLineEvidence = %+v, %v", v, err)
+	}
+	if ev, mod, ent := p.evidenceOf(t, l.ID, fresh); ev == nil || *ev != fresh || mod == nil || *mod != "orders" || ent == nil || *ent != l.ID {
+		t.Fatalf("evidence %v, the new file attached to %v/%v", ev, mod, ent)
+	}
+	if _, mod, ent := p.evidenceOf(t, l.ID, old); mod == nil || *mod != "orders" || ent == nil || *ent != l.ID {
+		t.Fatalf("the old file is attached to %v/%v; it stays the line's", mod, ent)
+	}
+	if dl, err := p.mod.Service.LineEvidence(ctx, ba, l.ID); err != nil || dl.URL == "" {
+		t.Fatalf("LineEvidence = %+v, %v", dl, err)
 	}
 }

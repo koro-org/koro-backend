@@ -89,6 +89,8 @@ type Files interface {
 	Attach(ctx context.Context, a authz.Actor, fileID uuid.UUID, owner files.Owner) error
 	// PresignGet returns a short-lived download URL of a clean file.
 	PresignGet(ctx context.Context, fileID uuid.UUID, ttl time.Duration) (files.Download, error)
+	// States returns the states of the receipts of a list (BE-154).
+	States(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]files.State, error)
 }
 
 // AuditLogger is what the payouts need from audit (L1): every payout write

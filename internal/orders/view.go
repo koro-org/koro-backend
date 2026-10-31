@@ -3,6 +3,8 @@ package orders
 import (
 	"time"
 	"uuid"
+
+	"koro/internal/files"
 )
 
 // ---- inputs of the HTTP use cases
@@ -81,6 +83,9 @@ type OrderView struct {
 	// reader and order. The transfers themselves are only in the payment
 	// instructions (BE-127).
 	DirectStatus DirectStatus
+	// EvidenceStates are the states of the lines' delivery evidence files
+	// (by file ID; BE-154).
+	EvidenceStates map[uuid.UUID]files.State
 }
 
 // DirectStatus tells the buyer's administrators whether getOrder could
@@ -141,10 +146,12 @@ type SalesItem struct {
 	Currency     string
 }
 
-// SalesPage is a page of sold lines.
+// SalesPage is a page of sold lines, with the states of their delivery
+// evidence files (by file ID; BE-154).
 type SalesPage struct {
-	Items []SalesItem
-	Next  *TimeKey
+	Items          []SalesItem
+	Next           *TimeKey
+	EvidenceStates map[uuid.UUID]files.State
 }
 
 // LineView is one line after a delivery action. OrderStatus is the
@@ -156,6 +163,9 @@ type LineView struct {
 	OrderNo     string
 	OrderStatus Status
 	SellerView  bool
+	// EvidenceState is the state of the line's delivery evidence file
+	// ("" without one; BE-154).
+	EvidenceState files.State
 }
 
 // ---- the contract of payments, ledger and billing

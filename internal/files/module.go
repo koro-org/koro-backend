@@ -91,6 +91,10 @@ type Files interface {
 	Attach(ctx context.Context, a authz.Actor, fileID uuid.UUID, owner Owner) error
 	// Get returns the file's metadata or ErrNotFound.
 	Get(ctx context.Context, fileID uuid.UUID) (FileMeta, error)
+	// States returns the State of every file of ids that exists (one read
+	// for a whole list; a missing file has no entry): what an owning module
+	// shows of its records' evidence (BE-154, T-393).
+	States(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]State, error)
 	// PresignGet returns a download URL valid for ttl (0 → 5 minutes, at
 	// most storage.MaxGetTTL) with Content-Disposition: attachment. Only an
 	// active file whose scan is clean, or skipped while FILES_SCAN_REQUIRED

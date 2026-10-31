@@ -1,11 +1,11 @@
-# Authz matrix of the orders module (03 §5.15, 04 §2.15; BE-040, BE-093, BE-136). 13 operations × 18 personas.
+# Authz matrix of the orders module (03 §5.15, 04 §2.15; BE-040, BE-093, BE-136, BE-154). 14 operations × 18 personas.
 # /orgs/{org_id}/orders and /orgs/{org_id}/sales are the org's management surface (03 §3.6, §7.6): non-members 404,
 # members without the cell and every platform role 403. /orders/{order_id} and /order-lines/{line_id} are resource
 # surfaces: an order (a line) is visible to its buyer's members, to the members of a seller org of its lines and to
 # every platform role; anyone else gets 404 (03 k26). Cells: create cma S·k25 (company_admin; the recruiter has no
 # purchase); quote (BE-136, the read-only price preview of createOrder's body) the cell of create; list cmm S, cma S; read the buyer's cmm, cma, the seller's club_admin (k26 view), sup, pad, fin;
 # payment instructions cmm, cma, fin; cancel cma, pad, fin; sales cla S, uni S, pad, fin; mark cla S, uni S·k-cs,
-# pad; read the delivery evidence (BE-093) the buyer's cma S, the seller's cla S, uni S·k-cs, pad, fin; confirm and
+# pad (and replacing a rejected delivery evidence, BE-154: the cell of mark); read the delivery evidence (BE-093) the buyer's cma S, the seller's cla S, uni S·k-cs, pad, fin; confirm and
 # dispute cma S; resolve pad, fin (admin surface: 403 before reading); admin list sup, pad, fin.
 # MFA (cma, uni, sup, pad, fin), the delivery states, k25 and idempotency are scenarios (scenarios/orders.yaml).
 # Fixtures: fixtures/orders.yaml (the orders of company_a sold by club_a), catalog's off_a_active, parties'
@@ -350,6 +350,39 @@ operations:
           "@non_evidence_staff": 403
           platform_admin: 404
           finance_admin: 404
+
+  replaceOrderLineEvidence:
+    method: POST
+    path: /api/v1/order-lines/{line_id}/replace-evidence
+    action: orders.line.mark_fulfilled
+    config: { orders_seed: true }
+    path_params: { line_id: ln_a_rejected_ev }
+    body: bodies/orders/replace_evidence.json
+    note: >-
+      BE-154 (T-393): the delivery evidence the scan rejected after its upload (file_delivery_rejected) is replaced by a
+      new upload of club_a (file_delivery_new) — the people who mark the line delivered
+    expect:
+      anonymous: 401
+      "@outsiders_order_a": 404
+      company_member: 403
+      company_admin: 403
+      club_member: 403
+      club_admin: 200
+      "@non_delivery_staff": 403
+      platform_admin: 200
+    variants:
+      - name: evidence_not_rejected
+        path_params: { line_id: ln_a_evidence }
+        note: a served evidence (file_delivery_a) stays — 409 files.not_rejected for whoever holds the cell
+        expect:
+          anonymous: 401
+          "@outsiders_order_a": 404
+          company_member: 403
+          company_admin: 403
+          club_member: 403
+          club_admin: 409
+          "@non_delivery_staff": 403
+          platform_admin: 409
 
   confirmOrderLine:
     method: POST

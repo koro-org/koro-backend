@@ -150,16 +150,21 @@ func TestSchema_P2SchemaExplicitConstraintAndIndexNames(t *testing.T) {
 }
 
 // TestSchema_P2SchemaForeignKeys (02 §0.1, 06 H-38): every FK is NO ACTION
-// (nothing cascades in money tables), and the composite FKs that bind a
-// child to its parent's org / order / payee are exactly these.
+// (nothing cascades in money tables) but one: a receivable collection's
+// receipt is its transfer's, so replacing the transfer's rejected receipt
+// replaces the collection's (ON UPDATE CASCADE; 000163, BE-154); the
+// composite FKs that bind a child to its parent's org / order / payee are
+// exactly these.
 func TestSchema_P2SchemaForeignKeys(t *testing.T) {
 	t.Parallel()
 	w := newP1aWorld(t)
 	tables := p2TableNames()
-	if got := queryStrings(t, w, `
-		SELECT conrelid::regclass::text || '.' || conname FROM pg_constraint
-		 WHERE contype = 'f' AND (confdeltype <> 'a' OR confupdtype <> 'a') AND conrelid IN `+p2TableOIDs+` ORDER BY 1`, tables); len(got) > 0 {
-		t.Errorf("foreign keys with an action other than NO ACTION: %v", got)
+	got := queryStrings(t, w, `
+		SELECT conrelid::regclass::text || '.' || conname || ' delete=' || confdeltype::text || ' update=' || confupdtype::text
+		  FROM pg_constraint
+		 WHERE contype = 'f' AND (confdeltype <> 'a' OR confupdtype <> 'a') AND conrelid IN `+p2TableOIDs+` ORDER BY 1`, tables)
+	if want := []string{"receivable_collections.receivable_collections_source_fkey delete=a update=c"}; !slices.Equal(got, want) {
+		t.Errorf("foreign keys with an action other than NO ACTION:\n got %v\nwant %v", got, want)
 	}
 	composite := queryStrings(t, w, `
 		SELECT conname || ' ' || pg_get_constraintdef(oid) FROM pg_constraint
@@ -250,7 +255,9 @@ func TestSchema_P2SchemaIDColumnsAndTriggers(t *testing.T) {
 		"incoming_bank_transfers.incoming_bank_transfers_collection_consistent incoming_transfer_check_collection" + deferred,
 		"incoming_bank_transfers.incoming_bank_transfers_frozen koro_freeze_columns",
 		"incoming_bank_transfers.incoming_bank_transfers_initial_status koro_initial_status",
+		"incoming_bank_transfers.incoming_bank_transfers_receipt_guard koro_evidence_file_guard", // 000163 (BE-154)
 		"incoming_bank_transfers.incoming_bank_transfers_return_frozen koro_freeze_columns",
+		"incoming_bank_transfers.incoming_bank_transfers_return_receipt_guard koro_evidence_file_guard", // 000163 (BE-154)
 		"incoming_bank_transfers.incoming_bank_transfers_returned_frozen koro_freeze_columns",
 		"invoices.invoices_frozen koro_freeze_columns",
 		"ledger_entries.ledger_entries_immutable koro_forbid_mutation",
@@ -259,10 +266,11 @@ func TestSchema_P2SchemaIDColumnsAndTriggers(t *testing.T) {
 		"ledger_transactions.ledger_transactions_immutable koro_forbid_mutation",
 		"ledger_transactions.ledger_transactions_no_truncate koro_forbid_mutation",
 		"ledger_transactions.ledger_txn_balanced ledger_check_balanced" + deferred,
+		"legal_party_documents.legal_party_documents_file_guard koro_evidence_file_guard", // 000163 (BE-154)
 		"offerings.offerings_draft_delete_only offerings_forbid_nondraft_delete",
-		"order_lines.order_lines_drop_guard order_lines_drop_guard",   // 000157 (BE-134)
-		"order_lines.order_lines_dropped_frozen koro_freeze_columns",  // 000157 (BE-134)
-		"order_lines.order_lines_evidence_frozen koro_freeze_columns", // 000137 (BE-093)
+		"order_lines.order_lines_drop_guard order_lines_drop_guard",        // 000157 (BE-134)
+		"order_lines.order_lines_dropped_frozen koro_freeze_columns",       // 000157 (BE-134)
+		"order_lines.order_lines_evidence_frozen koro_evidence_file_guard", // 000137 (BE-093), 000163 (BE-154)
 		"order_lines.order_lines_frozen koro_freeze_columns",
 		"order_lines.order_lines_paid_out_frozen koro_freeze_columns",
 		"order_lines.orders_totals_match_lines orders_check_lines_total" + deferred,
@@ -270,9 +278,11 @@ func TestSchema_P2SchemaIDColumnsAndTriggers(t *testing.T) {
 		"orders.orders_direct_confirmation_guard koro_orders_direct_confirmation_guard",
 		"orders.orders_frozen koro_freeze_columns",
 		"orders.orders_totals_match_lines orders_check_lines_total" + deferred,
+		"payee_bank_accounts.payee_bank_accounts_evidence_guard koro_evidence_file_guard", // 000163 (BE-154)
 		"payee_bank_accounts.payee_bank_accounts_frozen koro_freeze_columns",
 		"payee_bank_accounts.payee_bank_accounts_initial_status koro_initial_status",
 		"payment_splits.payment_splits_frozen koro_freeze_columns",
+		"payments.payments_evidence_guard koro_evidence_file_guard", // 000163 (BE-154)
 		"payments.payments_frozen koro_freeze_columns",
 		"payout_items.payout_items_guard payout_items_check",
 		"payout_items.payout_items_sum payouts_check_items" + deferred,
@@ -282,10 +292,12 @@ func TestSchema_P2SchemaIDColumnsAndTriggers(t *testing.T) {
 		"payouts.payouts_frozen koro_freeze_columns",
 		"payouts.payouts_initial_status koro_initial_status",
 		"payouts.payouts_paid_frozen koro_freeze_columns",
+		"payouts.payouts_receipt_guard koro_evidence_file_guard", // 000163 (BE-154)
 		"receivable_collections.receivable_collections_approved_frozen koro_freeze_columns",
 		"receivable_collections.receivable_collections_consistent receivable_collections_check" + deferred,
 		"receivable_collections.receivable_collections_frozen koro_freeze_columns",
 		"receivable_collections.receivable_collections_initial_status koro_initial_status",
+		"receivable_collections.receivable_collections_receipt_guard koro_evidence_file_guard", // 000163 (BE-154)
 		"receivable_collections.receivable_collections_rejected_frozen koro_freeze_columns",
 		"refunds.refunds_approval_frozen koro_freeze_columns",
 		"refunds.refunds_closure_frozen koro_freeze_columns",
@@ -293,6 +305,7 @@ func TestSchema_P2SchemaIDColumnsAndTriggers(t *testing.T) {
 		"refunds.refunds_completed_frozen koro_freeze_columns",
 		"refunds.refunds_frozen koro_freeze_columns",
 		"refunds.refunds_initial_status koro_initial_status",
+		"refunds.refunds_receipt_guard koro_evidence_file_guard", // 000163 (BE-154)
 	}
 	if !slices.Equal(others, wantOthers) {
 		t.Errorf("triggers besides touch_updated_at:\n got %v\nwant %v", others, wantOthers)

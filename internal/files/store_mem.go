@@ -104,6 +104,18 @@ func (s *memStore) Get(_ context.Context, id uuid.UUID) (File, error) {
 	return f.clone(), nil
 }
 
+func (s *memStore) GetMany(_ context.Context, ids []uuid.UUID) ([]File, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []File
+	for _, id := range ids {
+		if f, ok := s.rows[id]; ok {
+			out = append(out, f.clone())
+		}
+	}
+	return out, nil
+}
+
 func (s *memStore) Lock(ctx context.Context, id uuid.UUID) (File, error) { return s.Get(ctx, id) }
 
 func (s *memStore) Update(_ context.Context, f File) error {

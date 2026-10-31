@@ -10,6 +10,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/consent"
+	"koro/internal/files"
 	"koro/internal/identity"
 	"koro/internal/parties"
 	"koro/internal/platform/db"
@@ -116,6 +117,17 @@ func registerPayouts(api huma.API, h handler) {
 	}, op.Meta{Action: string(authz.LedgerPayoutMarkPaid), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.markPaid)
 
 	op.Register(api, "ledger", huma.Operation{
+		OperationID: "adminReplacePayoutReceipt", Method: http.MethodPost, Path: "/admin/payouts/{payout_id}/replace-receipt",
+		Summary: "Upload the bank receipt of a paid payout again",
+		Description: "Only when the receipt was rejected after its upload (found infected or not processable: " +
+			"receipt_file_state = rejected; 409 files.not_rejected otherwise) and only for a paid payout (409 " +
+			"ledger.invalid_state). receipt_file_id is a new payout_receipt upload (422 otherwise; 409 files.rejected, " +
+			"files.not_clean or files.already_attached). The payout, its ledger entries and its bank reference do not " +
+			"change; the rejected file stays on record (audit). The same people as adminMarkPayoutPaid.",
+	}, op.Meta{Action: string(authz.LedgerPayoutMarkPaid), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional},
+		h.replaceReceipt)
+
+	op.Register(api, "ledger", huma.Operation{
 		OperationID: "adminMarkPayoutFailed", Method: http.MethodPost, Path: "/admin/payouts/{payout_id}/mark-failed",
 		Summary:     "Record that the transfer of an approved payout failed",
 		Description: "Only an approved payout (409 ledger.invalid_state); its lines are payable again.",
@@ -170,6 +182,7 @@ type PayoutDTO struct {
 	Items               []PayoutItemDTO `json:"items,omitempty" doc:"The order lines paid (getOrgPayout; none once failed or cancelled)"`
 	ReceiptURL          string          `json:"receipt_url,omitempty" deprecated:"true" doc:"Paid payouts: a download URL of the bank receipt. Deprecated (BE-127): use downloadOrgPayoutReceipt, which audits each download; this field will be removed"`
 	ReceiptURLExpiresAt *time.Time      `json:"receipt_url_expires_at,omitempty" deprecated:"true"`
+	ReceiptFileState    string          `json:"receipt_file_state,omitempty" enum:"clean,pending,rejected" doc:"Paid payouts: the state of the bank receipt file. rejected: it was found infected or could not be processed after its upload and cannot be downloaded (409); finance uploads it again (adminReplacePayoutReceipt). pending: not scanned yet"`
 }
 
 // PayoutAdminDTO is a payout as finance sees it (04 §C.5). The IBAN
@@ -191,6 +204,7 @@ func payoutDTO(v PayoutView) PayoutDTO {
 		CreatedAt: p.CreatedAt.UTC(), ApprovedAt: db.UTCPtr(p.ApprovedAt), PaidAt: db.UTCPtr(p.PaidAt),
 		BankReference: strVal(p.BankReference), FailureReason: strVal(p.FailureReason), CancelledAt: db.UTCPtr(p.CancelledAt),
 		CancelReason: strVal(p.CancelReason), ReceiptURL: v.ReceiptURL, ReceiptURLExpiresAt: db.UTCPtr(v.ReceiptExp),
+		ReceiptFileState: string(v.ReceiptState),
 	}
 	if d.Currency == "" {
 		d.Currency = Currency
@@ -272,7 +286,7 @@ func (h handler) listOrg(ctx context.Context, in *listOrgPayoutsInput) (*payoutL
 	}
 	out := &payoutListOutput{Body: PayoutList{Items: make([]PayoutDTO, len(p.Items))}}
 	for i, po := range p.Items {
-		out.Body.Items[i] = payoutDTO(PayoutView{Payout: po})
+		out.Body.Items[i] = payoutDTO(PayoutView{Payout: po, ReceiptState: files.StateOf(p.ReceiptStates, po.ReceiptFileID)})
 	}
 	out.Body.NextCursor = payoutNext(p.Next, fp)
 	return out, nil
@@ -305,7 +319,7 @@ func (h handler) adminList(ctx context.Context, in *adminListPayoutsInput) (*pay
 	}
 	out := &payoutAdminListOutput{Body: PayoutAdminList{Items: make([]PayoutAdminDTO, len(p.Items))}}
 	for i, po := range p.Items {
-		out.Body.Items[i] = payoutAdminDTO(PayoutView{Payout: po})
+		out.Body.Items[i] = payoutAdminDTO(PayoutView{Payout: po, ReceiptState: files.StateOf(p.ReceiptStates, po.ReceiptFileID)})
 	}
 	out.Body.NextCursor = payoutNext(p.Next, fp)
 	return out, nil
@@ -606,6 +620,28 @@ func (h handler) markPaid(ctx context.Context, in *markPaidInput) (*payoutAdminO
 		mi.ReceiptFileID = &id
 	}
 	v, err := h.svc.AdminMarkPayoutPaid(ctx, a, httpx.ParseID(in.PayoutID), mi)
+	if err != nil {
+		return nil, err
+	}
+	return adminOut(v), nil
+}
+
+// ---- adminReplacePayoutReceipt
+
+type replaceReceiptInput struct {
+	idempotency.OptionalHeader
+	PayoutPath
+	Body struct {
+		ReceiptFileID string `json:"receipt_file_id" format:"uuid" doc:"The new bank receipt (dekont): a payout_receipt upload"`
+	}
+}
+
+func (h handler) replaceReceipt(ctx context.Context, in *replaceReceiptInput) (*payoutAdminOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	v, err := h.svc.AdminReplacePayoutReceipt(ctx, a, httpx.ParseID(in.PayoutID), httpx.ParseID(in.Body.ReceiptFileID))
 	if err != nil {
 		return nil, err
 	}

@@ -95,6 +95,30 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (files.Store, db.Tx
 		}
 	})
 
+	t.Run("get many", func(t *testing.T) {
+		t.Parallel()
+		s, _ := newStore(t)
+		ctx := t.Context()
+		a, b := row(files.PurposePayoutReceipt), row(files.PurposeDeliveryEvidence)
+		for _, f := range []files.File{a, b} {
+			if err := s.Insert(ctx, f); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got, err := s.GetMany(ctx, []uuid.UUID{b.ID, uuid.NewV7(), a.ID})
+		if err != nil || len(got) != 2 {
+			t.Fatalf("GetMany = %+v, %v; want the two rows that exist (BE-154)", got, err)
+		}
+		byID := map[uuid.UUID]files.File{got[0].ID: got[0], got[1].ID: got[1]}
+		if byID[a.ID].Purpose != files.PurposePayoutReceipt || byID[b.ID].Purpose != files.PurposeDeliveryEvidence ||
+			byID[a.ID].Status != files.StatusUploading {
+			t.Fatalf("GetMany rows = %+v", got)
+		}
+		if got, err := s.GetMany(ctx, nil); err != nil || len(got) != 0 {
+			t.Fatalf("GetMany(nil) = %+v, %v", got, err)
+		}
+	})
+
 	t.Run("constraints", func(t *testing.T) {
 		t.Parallel()
 		s, _ := newStore(t)

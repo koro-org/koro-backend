@@ -7859,6 +7859,13 @@ components:
             - admin
             - auto_platform
           type: string
+        fulfillment_evidence_file_state:
+          description: "The state of the delivery evidence file (BE-154). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the seller uploads it again (replaceOrderLineEvidence). pending: not scanned yet"
+          enum:
+            - clean
+            - pending
+            - rejected
+          type: string
         fulfillment_status:
           enum:
             - not_applicable
@@ -9636,6 +9643,13 @@ components:
             - admin
             - auto_platform
           type: string
+        fulfillment_evidence_file_state:
+          description: "The state of the delivery evidence file (BE-154). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the seller uploads it again (replaceOrderLineEvidence). pending: not scanned yet"
+          enum:
+            - clean
+            - pending
+            - rejected
+          type: string
         fulfillment_status:
           enum:
             - not_applicable
@@ -10582,6 +10596,13 @@ components:
         receipt_file_id:
           format: uuid
           type: string
+        receipt_file_state:
+          description: "Paid payouts: the state of the bank receipt file. rejected: it was found infected or could not be processed after its upload and cannot be downloaded (409); finance uploads it again (adminReplacePayoutReceipt). pending: not scanned yet"
+          enum:
+            - clean
+            - pending
+            - rejected
+          type: string
         receipt_url:
           deprecated: true
           description: "Paid payouts: a download URL of the bank receipt. Deprecated (BE-127): use downloadOrgPayoutReceipt, which audits each download; this field will be removed"
@@ -10671,6 +10692,13 @@ components:
           type: string
         payout_id:
           format: uuid
+          type: string
+        receipt_file_state:
+          description: "Paid payouts: the state of the bank receipt file. rejected: it was found infected or could not be processed after its upload and cannot be downloaded (409); finance uploads it again (adminReplacePayoutReceipt). pending: not scanned yet"
+          enum:
+            - clean
+            - pending
+            - rejected
           type: string
         receipt_url:
           deprecated: true
@@ -12589,6 +12617,26 @@ components:
           maxLength: 500
           type: string
       type: object
+    ReplaceEvidenceInputBody:
+      additionalProperties: false
+      properties:
+        evidence_file_id:
+          description: A new completed delivery_evidence upload (photo or PDF) of the selling organization
+          format: uuid
+          type: string
+      required:
+        - evidence_file_id
+      type: object
+    ReplaceReceiptInputBody:
+      additionalProperties: false
+      properties:
+        receipt_file_id:
+          description: "The new bank receipt (dekont): a payout_receipt upload"
+          format: uuid
+          type: string
+      required:
+        - receipt_file_id
+      type: object
     ReportBody:
       additionalProperties: false
       properties:
@@ -13156,6 +13204,13 @@ components:
         dropped_at:
           description: "Set when the line left its order before payment because the offering was cancelled (fulfillment_status cancelled): nothing is paid for it"
           format: date-time
+          type: string
+        fulfillment_evidence_file_state:
+          description: "The state of the delivery evidence file (BE-154). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the seller uploads it again (replaceOrderLineEvidence). pending: not scanned yet"
+          enum:
+            - clean
+            - pending
+            - rejected
           type: string
         fulfillment_status:
           enum:
@@ -20988,6 +21043,56 @@ paths:
         - sessionCookie: []
         - bearerAuth: []
       summary: Record the transfer of an approved payout
+      tags:
+        - ledger
+      x-koro-action: ledger.payout.mark_paid
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+      x-koro-terms-gate: enforced
+  /api/v1/admin/payouts/{payout_id}/replace-receipt:
+    post:
+      description: "Only when the receipt was rejected after its upload (found infected or not processable: receipt_file_state = rejected; 409 files.not_rejected otherwise) and only for a paid payout (409 ledger.invalid_state). receipt_file_id is a new payout_receipt upload (422 otherwise; 409 files.rejected, files.not_clean or files.already_attached). The payout, its ledger entries and its bank reference do not change; the rejected file stays on record (audit). The same people as adminMarkPayoutPaid."
+      operationId: adminReplacePayoutReceipt
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - in: path
+          name: payout_id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplaceReceiptInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayoutAdminDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Upload the bank receipt of a paid payout again
       tags:
         - ledger
       x-koro-action: ledger.payout.mark_paid
@@ -29987,6 +30092,57 @@ paths:
         - sessionCookie: []
         - bearerAuth: []
       summary: Mark an order line delivered
+      tags:
+        - orders
+      x-koro-action: orders.line.mark_fulfilled
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+      x-koro-terms-gate: enforced
+  /api/v1/order-lines/{line_id}/replace-evidence:
+    post:
+      description: "Only when the line's evidence was rejected after its upload (found infected or not processable: fulfillment_evidence_file_state = rejected; 409 files.not_rejected otherwise; a line without evidence is 409 orders.invalid_state). evidence_file_id is a new completed delivery_evidence upload of the selling organization (422 otherwise; 409 files.rejected, files.not_clean or files.already_attached). The delivery and its dispute window do not change; the rejected file stays on record (audit). The same people as markOrderLineFulfilled (BE-154)."
+      operationId: replaceOrderLineEvidence
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Order line ID (an unknown or malformed ID is 404)
+          in: path
+          name: line_id
+          required: true
+          schema:
+            description: Order line ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplaceEvidenceInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LineStateDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Upload the delivery evidence of an order line again
       tags:
         - orders
       x-koro-action: orders.line.mark_fulfilled

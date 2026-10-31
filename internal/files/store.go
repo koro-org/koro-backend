@@ -19,6 +19,9 @@ type Store interface {
 	Insert(ctx context.Context, f File) error
 	// Get returns the row or ErrNotFound.
 	Get(ctx context.Context, id uuid.UUID) (File, error)
+	// GetMany returns the rows of ids that exist, in no particular order
+	// (the file states of an owning module's list, BE-154).
+	GetMany(ctx context.Context, ids []uuid.UUID) ([]File, error)
 	// Lock returns the row locked for the rest of the transaction
 	// (SELECT … FOR UPDATE), or ErrNotFound.
 	Lock(ctx context.Context, id uuid.UUID) (File, error)

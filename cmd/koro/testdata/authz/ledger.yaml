@@ -1,4 +1,4 @@
-# Authz matrix of the ledger module (03 §5.17, 04 §2.17; BE-039, BE-044, BE-129). 14 operations × 18 personas.
+# Authz matrix of the ledger module (03 §5.17, 04 §2.17; BE-039, BE-044, BE-129, BE-154). 15 operations × 18 personas.
 # Admin surface (03 §7.2-3): everyone without the role → 403, nothing is read first. Org surface
 # (/orgs/{org_id}/payees/.../balance, /orgs/{org_id}/payouts; 03 §3.6 "Payee, banka hesabı, payout,
 # hakediş bakiyesi"): members of the org without the role → 403, non-members → 404, every platform
@@ -359,6 +359,31 @@ operations:
       - name: not_approved
         path_params: { payout_id: po_pending }
         note: only an approved payout is paid — 409 ledger.invalid_state
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 409
+
+  adminReplacePayoutReceipt:
+    method: POST
+    path: /api/v1/admin/payouts/{payout_id}/replace-receipt
+    action: ledger.payout.mark_paid
+    config: { ledger_seed: true }
+    path_params: { payout_id: po_rejected }
+    body: bodies/ledger/replace_receipt.json
+    note: a paid payout whose receipt the scan rejected gets a new one (receipt_a); the same people as mark-paid (BE-154)
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 200
+    variants:
+      - name: receipt_not_rejected
+        path_params: { payout_id: po_paid }
+        note: a receipt that was not rejected stays — 409 files.not_rejected
         expect:
           anonymous: 401
           "@no_platform_role": 403

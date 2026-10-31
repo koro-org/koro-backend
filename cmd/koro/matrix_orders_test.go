@@ -121,7 +121,8 @@ func (w *ordersWiring) matrixFixtures(fx *matrixFixtures) error {
 	return nil
 }
 
-// matrixEvidence seeds a delivery_evidence upload (kind file; BE-093).
+// matrixEvidence seeds a delivery_evidence upload (kind file; BE-093;
+// scan: infected seeds one the scan rejected after the upload, BE-154).
 func (w *ordersWiring) matrixEvidence(ctx context.Context, fx *matrixFixtures, f fixture) error {
 	id, err := fx.ID(f.Name)
 	if err != nil {
@@ -148,6 +149,9 @@ func (w *ordersWiring) matrixEvidence(ctx context.Context, fx *matrixFixtures, f
 		ID: id, Purpose: files.PurposeDeliveryEvidence, OrgID: &org, UploadedBy: &by, Bucket: testBuckets.Files,
 		StorageKey: "matrix/" + f.Name, DeclaredMIME: mime, DetectedMIME: &mime, SizeBytes: &size, SHA256: make([]byte, 32),
 		Status: files.StatusActive, ScanStatus: files.ScanSkipped,
+	}
+	if scan, ok := f.Fields["scan"].(string); ok {
+		row.ScanStatus = files.ScanStatus(scan)
 	}
 	if line != nil {
 		module, at := "orders", matrixOrgTime.Add(24*time.Hour)

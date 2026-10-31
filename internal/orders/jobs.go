@@ -9,6 +9,7 @@ import (
 	"uuid"
 
 	"koro/internal/authz"
+	"koro/internal/files"
 	"koro/internal/identity"
 	"koro/internal/notify"
 	"koro/internal/platform/clock"
@@ -25,6 +26,9 @@ const (
 	NotifyOrderExpiredTaskName   = "orders.notify_order_expired"
 	NotifyDeliveryMarkedTaskName = "orders.notify_delivery_marked"
 	NotifyLineFulfilledTaskName  = "orders.notify_line_fulfilled"
+	// NotifyRejectedEvidenceTaskName is the file.rejected subscription of
+	// the delivery evidence (BE-154, T-393).
+	NotifyRejectedEvidenceTaskName = "orders.notify_rejected_evidence"
 )
 
 // Notice templates (internal/notify/templates/orders). In-app texts are
@@ -36,12 +40,17 @@ const (
 	tmplOrderExpired        = "orders.order_expired"        // the buyer
 	tmplDeliveryMarked      = "orders.delivery_marked"      // the buyer's admins: confirm or dispute
 	tmplLineFulfilled       = "orders.line_fulfilled"       // the seller's admins
+	// tmplEvidenceRejected: the seller's markers (and finance while the line
+	// is disputed): the delivery evidence was rejected after its upload.
+	tmplEvidenceRejected = "orders.delivery_evidence_rejected"
 )
 
 // Subscribe registers the outbox subscriptions of orders (01 §6.2):
 // offering.cancelled → the open orders of the offering (critical, money retries);
 // order.placed, .cancelled, .expired, order_line.fulfillment_marked and
-// .fulfilled → the notices.
+// .fulfilled → the notices; file.rejected of a delivery evidence → the
+// seller's markers (and finance while the line is disputed; BE-154, T-393:
+// the line keeps the reference, the seller uploads it again).
 func (m Module) Subscribe(r *outbox.Registry) {
 	r.Subscribe(domainevent.TopicOfferingCancelled, CancelOfferingOrdersTaskName, m.svc.handleOfferingCancelled,
 		outbox.Queue(queue.Critical), outbox.MaxRetry(queue.MoneyMaxRetry))
@@ -51,6 +60,7 @@ func (m Module) Subscribe(r *outbox.Registry) {
 	r.Subscribe(domainevent.TopicOrderExpired, NotifyOrderExpiredTaskName, m.svc.handleExpired, q)
 	r.Subscribe(domainevent.TopicOrderLineFulfillmentMarked, NotifyDeliveryMarkedTaskName, m.svc.handleMarked, q)
 	r.Subscribe(domainevent.TopicOrderLineFulfilled, NotifyLineFulfilledTaskName, m.svc.handleFulfilled, q)
+	files.SubscribeRejected(r, evidenceModule, NotifyRejectedEvidenceTaskName, m.svc.notifyRejectedEvidence)
 }
 
 // handlePlaced sends the payment instructions to the buyer who placed the

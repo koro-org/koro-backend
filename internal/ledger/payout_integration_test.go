@@ -43,6 +43,9 @@ func pgPayoutWorld(t *testing.T) (ledger.PayoutStore, payoutWorld) {
 			return l
 		},
 		receipt: func(*testing.T) uuid.UUID { return w.file("payout_receipt") },
+		rejectFile: func(_ *testing.T, id uuid.UUID) {
+			w.exec(`UPDATE files SET scan_status = 'infected' WHERE id = $1`, id) // BE-048: the scan found malware
+		},
 		markPaidOut: func(ctx context.Context, payout uuid.UUID, lines []uuid.UUID) error {
 			return db.Conn(ctx, d.ORM).Exec(`UPDATE order_lines SET payout_id = ?, paid_out_at = now() WHERE id IN ?`,
 				payout, lines).Error

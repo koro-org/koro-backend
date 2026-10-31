@@ -98,6 +98,27 @@ func (s gormStore) TransitionPayout(ctx context.Context, next Payout, from Payou
 	return rows[0], nil
 }
 
+// ReplaceReceipt implements PayoutStore with a targeted UPDATE of the
+// receipt alone.
+//
+// cross-org: addressed by ID; the service authorised the payout.
+func (s gormStore) ReplaceReceipt(ctx context.Context, id, cur, next uuid.UUID) (Payout, error) {
+	var rows []Payout
+	err := db.Conn(ctx, s.orm).Raw(`UPDATE payouts SET receipt_file_id = @next
+		WHERE id = @id AND status = 'paid' AND receipt_file_id = @cur RETURNING *`,
+		map[string]any{"id": id, "cur": cur, "next": next}).Scan(&rows).Error
+	if err != nil {
+		return Payout{}, fmt.Errorf("ledger: replace payout receipt: %w", translatePayout(err))
+	}
+	if len(rows) == 0 {
+		if _, err := s.GetPayout(ctx, id, false); err != nil {
+			return Payout{}, err
+		}
+		return Payout{}, ErrInvalidState
+	}
+	return rows[0], nil
+}
+
 // DeleteItems implements PayoutStore (payout_items_guard allows it for a
 // failed or cancelled payout only).
 //

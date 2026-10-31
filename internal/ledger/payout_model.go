@@ -4,6 +4,7 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/files"
 	"koro/internal/platform/iban"
 )
 
@@ -144,18 +145,23 @@ type PayoutItemView struct {
 }
 
 // PayoutView is a payout with its items. ReceiptURL is set on the org
-// surface for a paid payout (a 5-minute download URL of the receipt).
+// surface for a paid payout (a 5-minute download URL of the receipt);
+// ReceiptState is the state of its receipt file (BE-154: rejected → the
+// receipt is uploaded again, adminReplacePayoutReceipt).
 type PayoutView struct {
 	Payout
-	Items      []PayoutItemView
-	ReceiptURL string
-	ReceiptExp *time.Time
+	Items        []PayoutItemView
+	ReceiptURL   string
+	ReceiptExp   *time.Time
+	ReceiptState files.State
 }
 
-// PayoutPage is a page of payouts, newest first.
+// PayoutPage is a page of payouts, newest first, with the states of their
+// receipt files (by file ID).
 type PayoutPage struct {
-	Items []Payout
-	Next  *PayoutCursor // nil on the last page
+	Items         []Payout
+	Next          *PayoutCursor // nil on the last page
+	ReceiptStates map[uuid.UUID]files.State
 }
 
 // PayoutQuery narrows listOrgPayouts and adminListPayouts.

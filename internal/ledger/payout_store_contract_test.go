@@ -21,12 +21,15 @@ type payoutSeller struct {
 // payoutWorld creates what a payout store needs: users, sellers with an
 // approved account, fulfilled lines of a payee (seller net 1,080,000),
 // receipts; markPaidOut sets order_lines.payout_id in ctx's transaction
-// (orders' part of the mark-paid chain; nothing in memory).
+// (orders' part of the mark-paid chain; nothing in memory); rejectFile
+// takes a receipt out of use as the scan does (nothing in memory: the
+// service checks the file).
 type payoutWorld struct {
 	user        func(t *testing.T) uuid.UUID
 	seller      func(t *testing.T) payoutSeller
 	line        func(t *testing.T, payee uuid.UUID) uuid.UUID
 	receipt     func(t *testing.T) uuid.UUID
+	rejectFile  func(t *testing.T, id uuid.UUID)
 	markPaidOut func(ctx context.Context, payout uuid.UUID, lines []uuid.UUID) error
 	tx          db.TxManager
 }
@@ -42,6 +45,7 @@ func memPayoutWorld() payoutWorld {
 		},
 		line:        func(*testing.T, uuid.UUID) uuid.UUID { return uuid.NewV7() },
 		receipt:     func(*testing.T) uuid.UUID { return uuid.NewV7() },
+		rejectFile:  func(*testing.T, uuid.UUID) {},
 		markPaidOut: func(context.Context, uuid.UUID, []uuid.UUID) error { return nil },
 		tx:          db.NopTx{},
 	}
@@ -168,6 +172,33 @@ func payoutStoreContract(t *testing.T, newStores func(t *testing.T) (ledger.Payo
 		cancel.Status, cancel.CancelledAt, cancel.CancelReason = ledger.StatusCancelled, &cancelledAt, &why
 		if _, err := transition(t, s, w, cancel, ledger.StatusPaid); err == nil {
 			t.Fatal("a paid payout was cancelled")
+		}
+		// The receipt of a paid payout is replaced only from the receipt it
+		// holds (BE-154), once the scan rejected it.
+		replace := func(cur, next uuid.UUID) (ledger.Payout, error) {
+			var out ledger.Payout
+			err := in(t, w, func(ctx context.Context) error {
+				var err error
+				out, err = s.ReplaceReceipt(ctx, p.ID, cur, next)
+				return err
+			})
+			return out, err
+		}
+		fresh := w.receipt(t)
+		if _, err := replace(uuid.NewV7(), fresh); !errors.Is(err, ledger.ErrInvalidState) {
+			t.Fatalf("replace from another receipt: %v", err)
+		}
+		w.rejectFile(t, receipt)
+		got, err = replace(receipt, fresh)
+		if err != nil || got.ReceiptFileID == nil || *got.ReceiptFileID != fresh || got.Status != ledger.StatusPaid ||
+			*got.BankReference != ref {
+			t.Fatalf("replace %+v, %v", got, err)
+		}
+		if _, err := replace(receipt, w.receipt(t)); !errors.Is(err, ledger.ErrInvalidState) {
+			t.Fatalf("replace of the replaced receipt: %v", err)
+		}
+		if _, err := s.ReplaceReceipt(t.Context(), uuid.NewV7(), receipt, fresh); !errors.Is(err, ledger.ErrNotFound) {
+			t.Fatalf("replace on a missing payout: %v", err)
 		}
 	})
 

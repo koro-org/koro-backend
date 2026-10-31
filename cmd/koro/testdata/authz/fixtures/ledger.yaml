@@ -7,7 +7,8 @@
 #   payable_line  a completed order of company_b with one fulfilled line of payee (seller net
 #                 1,080,000, fulfilled 2026-10-02, no hold) in orders' store, its payment and
 #                 allocation in the ledger
-#   receipt       a payout_receipt upload of uploaded_by, attached to payout when given
+#   receipt       a payout_receipt upload of uploaded_by, attached to payout when given; scan: infected is
+#                 one the scan rejected after the upload (BE-154)
 #   payout        a payout of line (its only item) frozen on the payee's approved account (parties
 #                 fixtures: acct_club_a), created_by; approved_by / receipt as status says
 # payee_club_a's open payouts (po_pending, po_own, po_approved: 3,240,000) plus ln_po_free stay within
@@ -21,10 +22,12 @@ fixtures:
   ln_po_own: { kind: payable_line, payee: payee_club_a }
   ln_po_approved: { kind: payable_line, payee: payee_club_a }
   ln_po_paid: { kind: payable_line, payee: payee_club_a }
+  ln_po_rejected: { kind: payable_line, payee: payee_club_a }
   # IDOR: a line and a payout of uni_a's payee (another seller org than club_a).
   ln_po_uni: { kind: payable_line, payee: payee_uni_a }
   receipt_a: { kind: receipt, uploaded_by: finance_admin }
   receipt_paid: { kind: receipt, uploaded_by: finance_admin, payout: po_paid }
+  receipt_rejected: { kind: receipt, uploaded_by: finance_admin, payout: po_rejected, scan: infected }
   # po_pending: created by finance_admin_2, so finance_admin is the second eye.
   po_pending: { kind: payout, line: ln_po_pending, status: pending_approval, created_by: finance_admin_2 }
   # po_own: created by finance_admin (four eyes: finance_admin may not approve it).
@@ -32,4 +35,7 @@ fixtures:
   po_approved: { kind: payout, line: ln_po_approved, status: approved, created_by: finance_admin_2, approved_by: finance_admin }
   po_paid: { kind: payout, line: ln_po_paid, status: paid, created_by: finance_admin_2, approved_by: finance_admin,
              receipt: receipt_paid }
+  # po_rejected: paid, its receipt rejected by the scan afterwards (BE-154: finance uploads it again).
+  po_rejected: { kind: payout, line: ln_po_rejected, status: paid, created_by: finance_admin_2, approved_by: finance_admin,
+                 receipt: receipt_rejected }
   po_uni: { kind: payout, line: ln_po_uni, status: pending_approval, created_by: finance_admin_2 }

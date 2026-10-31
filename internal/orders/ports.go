@@ -117,6 +117,9 @@ type Files interface {
 	// PresignGet returns a short-lived download URL of a clean file
 	// (getOrderLineEvidence).
 	PresignGet(ctx context.Context, fileID uuid.UUID, ttl time.Duration) (files.Download, error)
+	// States returns the states of the evidence files of the lines shown
+	// (BE-154).
+	States(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]files.State, error)
 }
 
 // CollectionAccount is Koro's active default collection account (payments,

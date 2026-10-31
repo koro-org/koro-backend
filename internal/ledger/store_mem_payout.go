@@ -140,6 +140,26 @@ func (s *MemStore) TransitionPayout(_ context.Context, next Payout, from PayoutS
 	return cur, nil
 }
 
+// ReplaceReceipt implements PayoutStore.
+func (s *MemStore) ReplaceReceipt(_ context.Context, id, cur, next uuid.UUID) (Payout, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	po := s.payoutRows()
+	row, ok := po.rows[id]
+	if !ok {
+		return Payout{}, ErrNotFound
+	}
+	if row.Status != StatusPaid || row.ReceiptFileID == nil || *row.ReceiptFileID != cur {
+		return Payout{}, ErrInvalidState
+	}
+	row.ReceiptFileID = &next
+	if now := s.now().UTC().Truncate(time.Microsecond); now.After(row.UpdatedAt) {
+		row.UpdatedAt = now
+	}
+	po.rows[id] = row
+	return row, nil
+}
+
 // checkPayoutRow emulates the CHECKs and freezes of 000113 for a transition
 // of cur to next.
 func checkPayoutRow(cur, next Payout) error {

@@ -47,6 +47,9 @@ func (s *service) viewOf(ctx context.Context, o Order, lines []Line, seller bool
 	for id, n := range names {
 		v.Sellers[id] = n.Name
 	}
+	if v.EvidenceStates, err = s.evidenceStates(ctx, lines...); err != nil {
+		return OrderView{}, err
+	}
 	if seller {
 		v.SellerStatus = sellerStatus(o, lines)
 	}
@@ -349,6 +352,9 @@ func (s *service) ListOrgSales(ctx context.Context, a authz.Actor, orgID uuid.UU
 		status[id] = sellerStatus(ord, sellerLines(byOrder[id], o.ID))
 	}
 	out := SalesPage{Items: make([]SalesItem, 0, len(rows))}
+	if out.EvidenceStates, err = s.evidenceStates(ctx, rows...); err != nil {
+		return SalesPage{}, err
+	}
 	for _, l := range rows {
 		ord := orders[l.OrderID]
 		out.Items = append(out.Items, SalesItem{Line: l, OrderNo: ord.OrderNo, BuyerTitle: ord.BuyerSnapshot.Title,

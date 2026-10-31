@@ -234,6 +234,23 @@ func (m *MemStore) UpdateLine(_ context.Context, l Line, from Fulfillment) (Line
 	return cloneLine(cur), nil
 }
 
+// ReplaceLineEvidence implements Store.
+func (m *MemStore) ReplaceLineEvidence(_ context.Context, lineID, cur, next uuid.UUID) (Line, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	l, ok := m.lines[lineID]
+	switch {
+	case !ok:
+		return Line{}, ErrNotFound
+	case l.FulfillmentEvidenceFileID == nil || *l.FulfillmentEvidenceFileID != cur:
+		return Line{}, ErrInvalidState
+	}
+	l.FulfillmentEvidenceFileID = &next
+	l.UpdatedAt = m.touch(l.UpdatedAt)
+	m.lines[lineID] = l
+	return cloneLine(l), nil
+}
+
 // DropLines implements Store (BE-134) with the rules of 000157: the order
 // takes no more money, the lines are pending or not yet active lines of it,
 // at least one line stays, and the new amounts are the sums of the lines

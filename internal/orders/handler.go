@@ -9,6 +9,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
+	"koro/internal/files"
 	"koro/internal/platform/db"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
@@ -130,6 +131,18 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.OrdersLineReadEvidence), Surface: op.SurfaceResource}, h.evidence)
 
 	op.Register(api, "orders", huma.Operation{
+		OperationID: "replaceOrderLineEvidence", Method: http.MethodPost, Path: "/order-lines/{line_id}/replace-evidence",
+		Summary: "Upload the delivery evidence of an order line again",
+		Description: "Only when the line's evidence was rejected after its upload (found infected or not processable: " +
+			"fulfillment_evidence_file_state = rejected; 409 files.not_rejected otherwise; a line without evidence is " +
+			"409 orders.invalid_state). evidence_file_id is a new completed delivery_evidence upload of the selling " +
+			"organization (422 otherwise; 409 files.rejected, files.not_clean or files.already_attached). The delivery " +
+			"and its dispute window do not change; the rejected file stays on record (audit). The same people as " +
+			"markOrderLineFulfilled (BE-154).",
+	}, op.Meta{Action: string(authz.OrdersLineMarkFulfilled), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional},
+		h.replaceEvidence)
+
+	op.Register(api, "orders", huma.Operation{
 		OperationID: "confirmOrderLine", Method: http.MethodPost, Path: "/order-lines/{line_id}/confirm",
 		Summary:     "Confirm the delivery of an order line",
 		Description: "The buyer confirms a marked line: it is fulfilled (buyer_confirmed).",
@@ -210,6 +223,7 @@ type OrderLineDTO struct {
 	FulfilledAt         *time.Time       `json:"fulfilled_at,omitempty"`
 	FulfilledVia        string           `json:"fulfilled_via,omitempty"`
 	HasEvidence         bool             `json:"has_fulfillment_evidence" doc:"The seller attached a delivery evidence file (getOrderLineEvidence)"`
+	EvidenceFileState   string           `json:"fulfillment_evidence_file_state,omitempty" doc:"The state of the delivery evidence file (BE-154). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the seller uploads it again (replaceOrderLineEvidence). pending: not scanned yet"`
 	DroppedAt           *time.Time       `json:"dropped_at,omitempty" doc:"Set when the line left the order before payment because its offering was cancelled (fulfillment_status cancelled): its amounts stay as they were, but the order's amounts no longer include them and nothing is paid, refunded or delivered for it"`
 	Seller              SellerRefDTO     `json:"seller"`
 }
@@ -295,7 +309,8 @@ func orderDTO(v OrderView) OrderDTO {
 			PayableAmount: l.PayableAmount, FulfillmentStatus: string(l.FulfillmentStatus),
 			DisputeWindowEndsAt: db.UTCPtr(l.DisputeWindowEndsAt), FulfilledAt: db.UTCPtr(l.FulfilledAt),
 			HasEvidence: l.FulfillmentEvidenceFileID != nil, DroppedAt: db.UTCPtr(l.DroppedAt),
-			Seller: SellerRefDTO{OrgID: l.SellerOrgID.String(), Name: v.Sellers[l.SellerOrgID]},
+			EvidenceFileState: string(files.StateOf(v.EvidenceStates, l.FulfillmentEvidenceFileID)),
+			Seller:            SellerRefDTO{OrgID: l.SellerOrgID.String(), Name: v.Sellers[l.SellerOrgID]},
 		}
 		for i, x := range l.DeliverablesSnapshot {
 			d.Deliverables[i] = DeliverableDTO(x)
@@ -728,6 +743,7 @@ type SellerLineDTO struct {
 	DisputeWindowEndsAt *time.Time `json:"dispute_window_ends_at,omitempty"`
 	PaidOutAt           *time.Time `json:"paid_out_at,omitempty"`
 	HasEvidence         bool       `json:"has_fulfillment_evidence" doc:"A delivery evidence file is attached (getOrderLineEvidence)"`
+	EvidenceFileState   string     `json:"fulfillment_evidence_file_state,omitempty" doc:"The state of the delivery evidence file (BE-154). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the seller uploads it again (replaceOrderLineEvidence). pending: not scanned yet"`
 	DroppedAt           *time.Time `json:"dropped_at,omitempty" doc:"Set when the line left its order before payment because the offering was cancelled (fulfillment_status cancelled): nothing is paid for it"`
 }
 
@@ -769,7 +785,8 @@ func (h handler) sales(ctx context.Context, in *salesInput) (*salesOutput, error
 			TitleSnapshot: l.TitleSnapshot, Quantity: l.Quantity,
 			GrossAmount: l.GrossAmount, SellerNetAmount: l.SellerNetAmount, FulfillmentStatus: string(l.FulfillmentStatus),
 			DisputeWindowEndsAt: db.UTCPtr(l.DisputeWindowEndsAt), PaidOutAt: db.UTCPtr(l.PaidOutAt),
-			HasEvidence: l.FulfillmentEvidenceFileID != nil, DroppedAt: db.UTCPtr(l.DroppedAt)}
+			HasEvidence: l.FulfillmentEvidenceFileID != nil, DroppedAt: db.UTCPtr(l.DroppedAt),
+			EvidenceFileState: string(files.StateOf(p.EvidenceStates, l.FulfillmentEvidenceFileID))}
 	}
 	if k := p.Next; k != nil {
 		out.Body.NextCursor = page.Next(sortCreated, fp, page.TimeVal(k.At), page.UUIDVal(k.ID))
@@ -791,6 +808,7 @@ type LineStateDTO struct {
 	FulfilledAt         *time.Time `json:"fulfilled_at,omitempty"`
 	FulfilledVia        string     `json:"fulfilled_via,omitempty"`
 	HasEvidence         bool       `json:"has_fulfillment_evidence" doc:"A delivery evidence file is attached (getOrderLineEvidence)"`
+	EvidenceFileState   string     `json:"fulfillment_evidence_file_state,omitempty" doc:"The state of the delivery evidence file (BE-154). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the seller uploads it again (replaceOrderLineEvidence). pending: not scanned yet"`
 }
 
 type lineOutput struct{ Body LineStateDTO }
@@ -799,7 +817,7 @@ func lineOut(v LineView) *lineOutput {
 	l := v.Line
 	d := LineStateDTO{LineID: l.ID.String(), OrderID: l.OrderID.String(), OrderNo: v.OrderNo, OrderStatus: string(v.OrderStatus),
 		FulfillmentStatus: string(l.FulfillmentStatus), DisputeWindowEndsAt: db.UTCPtr(l.DisputeWindowEndsAt), FulfilledAt: db.UTCPtr(l.FulfilledAt),
-		HasEvidence: l.FulfillmentEvidenceFileID != nil}
+		HasEvidence: l.FulfillmentEvidenceFileID != nil, EvidenceFileState: string(v.EvidenceState)}
 	if v.SellerView {
 		d.SellerStatus = string(v.OrderStatus)
 	}
@@ -857,6 +875,26 @@ func (h handler) evidence(ctx context.Context, in *evidenceInput) (*evidenceOutp
 		return nil, err
 	}
 	return &evidenceOutput{Body: EvidenceLinkDTO{URL: dl.URL, ExpiresAt: dl.ExpiresAt.UTC()}}, nil
+}
+
+type replaceEvidenceInput struct {
+	idempotency.OptionalHeader
+	LinePath
+	Body struct {
+		EvidenceFileID string `json:"evidence_file_id" format:"uuid" doc:"A new completed delivery_evidence upload (photo or PDF) of the selling organization"`
+	}
+}
+
+func (h handler) replaceEvidence(ctx context.Context, in *replaceEvidenceInput) (*lineOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	v, err := h.svc.ReplaceLineEvidence(ctx, a, httpx.ParseID(in.LineID), httpx.ParseID(in.Body.EvidenceFileID))
+	if err != nil {
+		return nil, err
+	}
+	return lineOut(v), nil
 }
 
 type confirmInput struct {

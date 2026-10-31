@@ -188,6 +188,27 @@ func (s gormStore) UpdateLine(ctx context.Context, l Line, from Fulfillment) (Li
 	return rows[0], nil
 }
 
+// ReplaceLineEvidence implements Store with a targeted UPDATE of the
+// evidence alone.
+//
+// cross-org: addressed by ID after the service's authorisation.
+func (s gormStore) ReplaceLineEvidence(ctx context.Context, lineID, cur, next uuid.UUID) (Line, error) {
+	var rows []Line
+	err := db.Conn(ctx, s.orm).Raw(`UPDATE order_lines SET fulfillment_evidence_file_id = @next
+		WHERE id = @id AND fulfillment_evidence_file_id = @cur RETURNING *`,
+		map[string]any{"id": lineID, "cur": cur, "next": next}).Scan(&rows).Error
+	if err != nil {
+		return Line{}, fmt.Errorf("orders: replace line evidence: %w", constraints.Translate(err))
+	}
+	if len(rows) == 0 {
+		if _, err := s.GetLine(ctx, lineID, false); err != nil {
+			return Line{}, err
+		}
+		return Line{}, ErrInvalidState
+	}
+	return rows[0], nil
+}
+
 // DropLines implements Store (BE-134): the lines first, then the order's
 // amounts — written only when they are the sums of the live lines (the
 // in-memory store's rule; orders_amounts_guard and, at commit,

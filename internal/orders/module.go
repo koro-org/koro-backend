@@ -212,6 +212,10 @@ type Service interface {
 	// LineEvidence is getOrderLineEvidence (orders.line.read_evidence): a
 	// short-lived download URL of the line's delivery evidence.
 	LineEvidence(ctx context.Context, a authz.Actor, lineID uuid.UUID) (files.Download, error)
+	// ReplaceLineEvidence is replaceOrderLineEvidence (orders.line.mark_fulfilled;
+	// BE-154): the delivery evidence the scan rejected after its upload is
+	// replaced by a new upload of the seller org.
+	ReplaceLineEvidence(ctx context.Context, a authz.Actor, lineID, fileID uuid.UUID) (LineView, error)
 	// ConfirmLine is confirmOrderLine (orders.line.confirm).
 	ConfirmLine(ctx context.Context, a authz.Actor, lineID uuid.UUID) (LineView, error)
 	// DisputeLine is disputeOrderLine (orders.line.dispute).

@@ -6,7 +6,8 @@
 # per-buyer limit that the orders code seeds into catalog's store, so the fixture orders never count against
 # off_a_active's per-buyer limit (createOrder buys off_a_active). The orders code also installs Koro's
 # collection account (hooks.collectionAccount, payments BE-041) unless payments did. A file is a completed
-# delivery_evidence upload (BE-093) in the files store, attached to the line fixture of its line field.
+# delivery_evidence upload (BE-093) in the files store, attached to the line fixture of its line field; scan: infected
+# is one the scan rejected after the upload (BE-154).
 version: 1
 fixtures:
   off_a_sold: { kind: offering, org: club_a, service: svc_booth, payee: payee_club_a }
@@ -25,6 +26,12 @@ fixtures:
   ord_a_evidence: { kind: order, org: company_a, party: party_buyer_a, placed_by: company_admin, status: in_fulfilment }
   ln_a_evidence: { kind: line, order: ord_a_evidence, offering: off_a_sold, fulfillment: marked, marked_by: club_admin,
                    evidence: file_delivery_a }
+  # BE-154: a line club_a marked with an evidence the scan rejected afterwards (file_delivery_rejected): replaced by
+  # file_delivery_new.
+  file_delivery_rejected: { kind: file, org: club_a, uploaded_by: club_admin, line: ln_a_rejected_ev, scan: infected }
+  ord_a_rejected_ev: { kind: order, org: company_a, party: party_buyer_a, placed_by: company_admin, status: in_fulfilment }
+  ln_a_rejected_ev: { kind: line, order: ord_a_rejected_ev, offering: off_a_sold, fulfillment: marked, marked_by: club_admin,
+                      evidence: file_delivery_rejected }
   # IDOR: company_b's order (sold by club_a too: club_a's admin sees it as the seller).
   ord_b_unpaid: { kind: order, org: company_b, party: party_buyer_b, placed_by: other_company_member, status: awaiting_payment }
   ln_b_unpaid: { kind: line, order: ord_b_unpaid, offering: off_a_sold, fulfillment: pending }

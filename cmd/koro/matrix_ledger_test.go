@@ -161,7 +161,8 @@ func (w *ledgerWiring) matrixPayableLine(ctx context.Context, fx *matrixFixtures
 }
 
 // matrixReceipt seeds an active payout_receipt upload (skipped by the
-// no-op scanner, served while FILES_SCAN_REQUIRED=false), attached to the
+// no-op scanner, served while FILES_SCAN_REQUIRED=false; scan: infected
+// seeds one the scan rejected after the upload, BE-154), attached to the
 // fixture's payout when it names one.
 func (w *ledgerWiring) matrixReceipt(ctx context.Context, fx *matrixFixtures, f fixture) error {
 	id, err := fx.ID(f.Name)
@@ -190,6 +191,9 @@ func (w *ledgerWiring) matrixReceipt(ctx context.Context, fx *matrixFixtures, f 
 		ID: id, Purpose: files.PurposePayoutReceipt, UploadedBy: &by, Bucket: testBuckets.Files,
 		StorageKey: "matrix/" + f.Name, DeclaredMIME: files.MIMEPDF, SizeBytes: &size, SHA256: make([]byte, 32),
 		Status: files.StatusActive, ScanStatus: files.ScanSkipped,
+	}
+	if scan, ok := f.Fields["scan"].(string); ok {
+		row.ScanStatus = files.ScanStatus(scan)
 	}
 	if owner != nil {
 		module := "ledger"

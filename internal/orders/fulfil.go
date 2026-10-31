@@ -7,6 +7,7 @@ import (
 	"uuid"
 
 	"koro/internal/authz"
+	"koro/internal/files"
 	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
@@ -310,7 +311,16 @@ func (s *service) lineChange(ctx context.Context, hash []byte, lineID uuid.UUID,
 		return LineView{Line: stored, OrderNo: o.OrderNo, OrderStatus: sellerStatus(o, sellerLines(byOrder[o.ID], stored.SellerOrgID)),
 			SellerView: true}, nil
 	})
-	return v, err
+	if err != nil {
+		return LineView{}, err
+	}
+	// The state of the evidence is read now, never replayed (BE-154).
+	states, err := s.evidenceStates(ctx, v.Line)
+	if err != nil {
+		return LineView{}, err
+	}
+	v.EvidenceState = files.StateOf(states, v.Line.FulfillmentEvidenceFileID)
+	return v, nil
 }
 
 // closeWindowsJob is orders.close_dispute_windows (01 §7).

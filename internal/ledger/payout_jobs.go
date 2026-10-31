@@ -12,6 +12,7 @@ import (
 	"uuid"
 
 	"koro/internal/authz"
+	"koro/internal/files"
 	"koro/internal/identity"
 	"koro/internal/notify"
 	"koro/internal/platform/clock"
@@ -30,6 +31,9 @@ const (
 	// transfer dated before its approval (00 T-298, BE-092): a second
 	// subscription of payout.paid, on the critical queue.
 	NotifyPayoutPaidBeforeApprovalTaskName = "ledger.notify_payout_paid_before_approval"
+	// NotifyRejectedReceiptTaskName is the file.rejected subscription of
+	// the payout receipts (BE-154, T-393).
+	NotifyRejectedReceiptTaskName = "ledger.notify_rejected_receipt"
 )
 
 // Templates of the payout notices (internal/notify/templates/ledger).
@@ -40,6 +44,8 @@ const (
 	// tmplPayoutPaidEarly: preference category security (it cannot be
 	// switched off), in-app and e-mail (BE-092).
 	tmplPayoutPaidEarly = "ledger.payout_paid_before_approval"
+	// tmplReceiptRejected: in-app; the receipt of a paid payout was rejected.
+	tmplReceiptRejected = "ledger.payout_receipt_rejected"
 )
 
 // Subscribe registers the payout notices (01 §6.2): payout.created (A) →
@@ -49,8 +55,10 @@ const (
 // with the link to the payout and its receipt); payout.paid of a transfer
 // dated before its approval → the security notice to the other finance and
 // platform admins (00 T-298, BE-092; critical queue: the payout.paid outbox
-// row written in the mark-paid transaction carries it). billing consumes
-// payout.paid itself (BE-042). Nothing without the payout flow.
+// row written in the mark-paid transaction carries it); file.rejected of a
+// payout receipt → the seller org's admins and every finance admin (BE-154,
+// T-393: the payout keeps the reference, finance uploads it again). billing
+// consumes payout.paid itself (BE-042). Nothing without the payout flow.
 func (m Module) Subscribe(r *outbox.Registry) {
 	if m.svc.d.Payouts == nil {
 		return
@@ -61,6 +69,37 @@ func (m Module) Subscribe(r *outbox.Registry) {
 	r.Subscribe(domainevent.TopicPayoutPaid, NotifyPayoutPaidTaskName, m.svc.handlePayoutPaid, q)
 	r.Subscribe(domainevent.TopicPayoutPaid, NotifyPayoutPaidBeforeApprovalTaskName, m.svc.handlePayoutPaidBeforeApproval,
 		outbox.Queue(queue.Critical))
+	files.SubscribeRejected(r, "ledger", NotifyRejectedReceiptTaskName, m.svc.notifyRejectedReceipt)
+}
+
+// notifyRejectedReceipt tells the seller org's club admins and university
+// representatives (the payout in their panel) and every finance admin (the
+// payout on the admin surface) that the receipt of a payout was rejected
+// after its upload: the payout keeps the reference (a financial record,
+// BE-151) and finance uploads the receipt again (adminReplacePayoutReceipt).
+// A payout that holds another receipt by now (replaced) is a no-op; the
+// dedupe keys (the file and the recipient) make a repeated delivery one
+// notice, also for an org admin who is a finance admin too.
+func (s *service) notifyRejectedReceipt(ctx context.Context, r files.Rejection) error {
+	p, ok, err := s.noticePayout(ctx, r.EntityID)
+	if err != nil || !ok || p.ReceiptFileID == nil || *p.ReceiptFileID != r.FileID {
+		return err
+	}
+	if s.d.Staff == nil {
+		return errors.New("ledger: the finance admin lookup is not wired")
+	}
+	fins, err := s.d.Staff.FinanceAdmins(ctx)
+	if err != nil {
+		return fmt.Errorf("ledger: finance admins: %w", err)
+	}
+	admins, err := s.orgAdmins(ctx, p.OrgID)
+	if err != nil {
+		return err
+	}
+	key := r.FileID.String()
+	return errors.Join(
+		s.notifyInApp(ctx, p, tmplReceiptRejected, key, fins, notify.AdminPayoutLink(p.ID)),
+		s.notifyInApp(ctx, p, tmplReceiptRejected, key, admins, notify.OrgPayoutLink(p.OrgID, p.ID)))
 }
 
 // handlePayoutCreated asks the other finance admins to approve.

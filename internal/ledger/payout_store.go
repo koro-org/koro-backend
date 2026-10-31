@@ -30,6 +30,11 @@ type PayoutStore interface {
 	// state from; ErrInvalidState otherwise. The frozen columns are never
 	// written (06 H-56).
 	TransitionPayout(ctx context.Context, next Payout, from PayoutStatus) (Payout, error)
+	// ReplaceReceipt writes next as the receipt of a paid payout whose
+	// receipt is still cur (BE-154; payouts_receipt_guard lets only a
+	// rejected file go); ErrInvalidState when the payout is not paid or
+	// holds another receipt now.
+	ReplaceReceipt(ctx context.Context, id, cur, next uuid.UUID) (Payout, error)
 	// DeleteItems removes the items of a failed or cancelled payout (its
 	// lines are payable again) and returns how many it removed.
 	DeleteItems(ctx context.Context, payoutID uuid.UUID) (int, error)

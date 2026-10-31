@@ -558,6 +558,12 @@
     "type": "urn:koro:problem:files.not_clean"
   },
   {
+    "code": "files.not_rejected",
+    "status": 409,
+    "title": "Only a rejected file can be replaced",
+    "type": "urn:koro:problem:files.not_rejected"
+  },
+  {
     "code": "files.not_uploading",
     "status": 409,
     "title": "File upload is already completed",

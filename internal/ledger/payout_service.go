@@ -66,6 +66,10 @@ type PayoutService interface {
 	// AdminMarkPayoutPaid is adminMarkPayoutPaid (ledger.payout.mark_paid):
 	// receipt and bank reference required.
 	AdminMarkPayoutPaid(ctx context.Context, a authz.Actor, payoutID uuid.UUID, in MarkPaidInput) (PayoutView, error)
+	// AdminReplacePayoutReceipt is adminReplacePayoutReceipt
+	// (ledger.payout.mark_paid; BE-154, T-393): a paid payout whose receipt
+	// was rejected after its upload gets a new receipt.
+	AdminReplacePayoutReceipt(ctx context.Context, a authz.Actor, payoutID, fileID uuid.UUID) (PayoutView, error)
 	// AdminMarkPayoutFailed is adminMarkPayoutFailed
 	// (ledger.payout.mark_failed): the lines are payable again.
 	AdminMarkPayoutFailed(ctx context.Context, a authz.Actor, payoutID uuid.UUID, reason string) (PayoutView, error)
@@ -366,6 +370,13 @@ func (s *service) listPayouts(ctx context.Context, f PayoutFilter, q PayoutQuery
 		last := rows[len(rows)-1]
 		out.Next = &PayoutCursor{CreatedAt: last.CreatedAt, ID: last.ID}
 	}
+	ids := make([]*uuid.UUID, len(rows))
+	for i := range rows {
+		ids[i] = rows[i].ReceiptFileID
+	}
+	if out.ReceiptStates, err = s.d.Files.States(ctx, files.IDs(ids...)); err != nil {
+		return PayoutPage{}, err
+	}
 	return out, nil
 }
 
@@ -397,6 +408,13 @@ func (s *service) view(ctx context.Context, p Payout) (PayoutView, error) {
 			return PayoutView{}, fmt.Errorf("ledger: payout %s: %w", p.ID, err)
 		}
 		v.Items[i] = PayoutItemView{OrderLineID: it.OrderLineID, OrderID: orderID, OrderNo: no, Amount: it.Amount}
+	}
+	if p.ReceiptFileID != nil {
+		states, err := s.d.Files.States(ctx, files.IDs(p.ReceiptFileID))
+		if err != nil {
+			return PayoutView{}, err
+		}
+		v.ReceiptState = files.StateOf(states, p.ReceiptFileID)
 	}
 	if p.Status == StatusPaid && p.ReceiptFileID != nil {
 		d, err := s.d.Files.PresignGet(ctx, *p.ReceiptFileID, receiptURLTTL)
@@ -735,14 +753,8 @@ func (s *service) AdminMarkPayoutPaid(ctx context.Context, a authz.Actor, payout
 	if in.PaidAt != nil {
 		givenPaidAt = &paidAt
 	}
-	f, err := s.d.Files.Get(ctx, receipt)
-	switch {
-	case errors.Is(err, files.ErrNotFound):
-		return PayoutView{}, problem.Field("body.receipt_file_id", "must be a payout_receipt upload")
-	case err != nil:
+	if err := s.checkReceipt(ctx, receipt); err != nil {
 		return PayoutView{}, err
-	case f.Purpose != files.PurposePayoutReceipt:
-		return PayoutView{}, problem.Field("body.receipt_file_id", "must be a payout_receipt upload")
 	}
 	hash, err := idempotency.Hash(struct {
 		Op      string
@@ -761,6 +773,18 @@ func (s *service) AdminMarkPayoutPaid(ctx context.Context, a authz.Actor, payout
 		return PayoutView{}, translatePayout(err)
 	}
 	return s.reload(ctx, payoutID)
+}
+
+// checkReceipt checks the receipt of mark-paid and of its replacement
+// before the transaction: a payout_receipt upload (422 otherwise; Attach
+// repeats the status and attachment checks under the file's lock).
+func (s *service) checkReceipt(ctx context.Context, id uuid.UUID) error {
+	f, err := s.d.Files.Get(ctx, id)
+	switch {
+	case errors.Is(err, files.ErrNotFound), err == nil && f.Purpose != files.PurposePayoutReceipt:
+		return problem.Field("body.receipt_file_id", "must be a payout_receipt upload")
+	}
+	return err
 }
 
 func (s *service) markPaid(ctx context.Context, a authz.Actor, payoutID uuid.UUID, ref string, receipt uuid.UUID, paidAt time.Time) (uuid.UUID, error) {
@@ -823,6 +847,59 @@ func (s *service) markPaid(ctx context.Context, a authz.Actor, payoutID uuid.UUI
 		return uuid.Nil(), err
 	}
 	return stored.ID, nil
+}
+
+// AdminReplacePayoutReceipt implements PayoutService (BE-154, T-393): the
+// role that records the transfer (authz, 403 before reading) → the new
+// receipt a payout_receipt upload (422) → in one transaction: the payout
+// locked (404), paid with a receipt (409 ledger.invalid_state) → its
+// receipt rejected after the upload (409 files.not_rejected) and the new
+// one attached (409 files.rejected, files.not_clean, files.already_attached)
+// → the receipt replaced → audit (the old and the new file; the old row
+// stays attached to the payout). Nothing else of the paid payout changes:
+// no ledger entry, no notice (finance and the seller org were told of the
+// rejection).
+func (s *service) AdminReplacePayoutReceipt(ctx context.Context, a authz.Actor, payoutID, fileID uuid.UUID) (PayoutView, error) {
+	if err := s.adminGate(ctx, a, authz.LedgerPayoutMarkPaid); err != nil {
+		return PayoutView{}, err
+	}
+	if fileID == uuid.Nil() {
+		return PayoutView{}, problem.Field("body.receipt_file_id", "is required: the new bank receipt (dekont) of the transfer")
+	}
+	if err := s.checkReceipt(ctx, fileID); err != nil {
+		return PayoutView{}, err
+	}
+	hash, err := idempotency.Hash(struct {
+		Op      string
+		Payout  uuid.UUID
+		Receipt uuid.UUID
+	}{"replace_payout_receipt", payoutID, fileID})
+	if err != nil {
+		return PayoutView{}, err
+	}
+	_, _, err = idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (uuid.UUID, error) {
+		cur, err := s.d.Payouts.GetPayout(ctx, payoutID, true)
+		if err != nil {
+			return uuid.Nil(), err
+		}
+		if cur.Status != StatusPaid || cur.ReceiptFileID == nil {
+			return uuid.Nil(), ErrInvalidState
+		}
+		owner := files.Owner{Module: "ledger", EntityID: cur.ID, Purpose: files.PurposePayoutReceipt}
+		meta, err := files.Replace(ctx, s.d.Files, a, *cur.ReceiptFileID, fileID, owner)
+		if err != nil {
+			return uuid.Nil(), err
+		}
+		stored, err := s.d.Payouts.ReplaceReceipt(ctx, cur.ID, *cur.ReceiptFileID, fileID)
+		if err != nil {
+			return uuid.Nil(), err
+		}
+		return stored.ID, s.d.Audit.Log(ctx, payoutEvent(a, authz.LedgerPayoutMarkPaid, stored, "", meta))
+	})
+	if err != nil {
+		return PayoutView{}, translatePayout(err)
+	}
+	return s.reload(ctx, payoutID)
 }
 
 // AdminMarkPayoutFailed implements PayoutService: authz (403) → the reason

@@ -8,7 +8,9 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
+	"koro/internal/platform/obs"
 	"koro/internal/platform/page"
 	"koro/internal/platform/problem"
 	"koro/internal/students"
@@ -94,6 +96,7 @@ func (h handler) search(ctx context.Context, in *searchInput) (*searchOutput, er
 	if err != nil {
 		return nil, err
 	}
+	httpx.MetricsFrom(ctx).ProfileReads(obs.ReadDiscoverySearch, org, len(p.Items))
 	return &searchOutput{Body: DiscoveryProfileList(p)}, nil
 }
 
@@ -119,6 +122,7 @@ func (h handler) get(ctx context.Context, in *getInput) (*getOutput, error) {
 	if err != nil {
 		return nil, err
 	}
+	httpx.MetricsFrom(ctx).ProfileReads(obs.ReadDiscoveryProfile, org, 1)
 	return &getOutput{Body: d}, nil
 }
 

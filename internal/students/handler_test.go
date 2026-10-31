@@ -24,10 +24,13 @@ import (
 
 // newHTTP serves the students operations of e with the persona resolver,
 // the rate limit and Idempotency-Key middlewares (as cmd/koro does).
-func newHTTP(t *testing.T, e *env) *httpx.App {
+func newHTTP(t *testing.T, e *env) *httpx.App { return newHTTPMetrics(t, e, nil) }
+
+// newHTTPMetrics is newHTTP with the Prometheus registry m (nil: off).
+func newHTTPMetrics(t *testing.T, e *env, m *obs.Metrics) *httpx.App {
 	t.Helper()
 	e.resolver = authztest.NewResolver(append(authztest.Personas(), authztest.Helpers()...)...)
-	app, err := httpx.New(httpx.Deps{Log: obs.Discard(), Actors: e.resolver})
+	app, err := httpx.New(httpx.Deps{Log: obs.Discard(), Metrics: m, Actors: e.resolver})
 	if err != nil {
 		t.Fatal(err)
 	}

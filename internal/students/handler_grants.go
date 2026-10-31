@@ -8,8 +8,10 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/obs"
 	"koro/internal/platform/page"
 )
 
@@ -259,6 +261,7 @@ func (h handler) companyStudentPage(ctx context.Context, opID, rawOrg, q, cursor
 	if err != nil {
 		return nil, err
 	}
+	httpx.MetricsFrom(ctx).ProfileReads(obs.ReadCompanySearch, org, len(p.Items))
 	return &companyStudentsOutput{Body: StudentL3CardList{Items: p.Items, NextCursor: grantNext(p.Next, fp)}}, nil
 }
 
@@ -279,6 +282,7 @@ func (h handler) getCompanyStudent(ctx context.Context, in *CompanyStudentPath) 
 	if err != nil {
 		return nil, err
 	}
+	httpx.MetricsFrom(ctx).ProfileReads(obs.ReadCompanyProfile, org, 1)
 	return &companyStudentOutput{Body: d}, nil
 }
 
@@ -295,6 +299,7 @@ func (h handler) downloadCompanyCV(ctx context.Context, in *CompanyStudentPath) 
 	if err != nil {
 		return nil, err
 	}
+	httpx.MetricsFrom(ctx).ProfileReads(obs.ReadCompanyCV, org, 1)
 	return &cvDownloadOutput{Body: toDownloadDTO(dl)}, nil
 }
 

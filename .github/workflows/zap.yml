@@ -10,6 +10,14 @@
 # are reported, not fatal); the HTML/JSON/Markdown report is the artifact
 # zap-api-<run>. Every action and the ZAP image are pinned (SHA / digest);
 # no secret is used and GITHUB_TOKEN is read-only.
+#
+# Schemathesis (BE-167, uyum #115) runs on the same stack after ZAP: the
+# served OpenAPI spec drives generated requests, first anonymous over every
+# operation, then signed in as the demo company owner over GET operations
+# only (the fuzzer never writes, signs out or deletes the account). Both
+# passes break the run on a 5xx (not_a_server_error) or a response body
+# that does not match the spec (response_schema_conformance); the JUnit and
+# NDJSON reports are in the same artifact (schemathesis/).
 name: zap
 
 on:
@@ -31,7 +39,7 @@ defaults:
 jobs:
   api:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 75
     env:
       COMPOSE_FILE: loadtest/compose.yaml
       COMPOSE_PROFILES: setup
@@ -41,6 +49,8 @@ jobs:
       # environment (koro seed demo -password); not a secret.
       KORO_DEMO_PASSWORD: demo-demo-demo-demo-2026
       ZAP_IMAGE: ghcr.io/zaproxy/zaproxy:2.17.0@sha256:030d3df57735dacbb83464854758e674dd9ad01d79d12a129a8e58b1fd384238
+      # v4.31.1 (2026-10-14), multi-arch index digest.
+      SCHEMATHESIS_IMAGE: schemathesis/schemathesis:v4.31.1@sha256:e6d34d7defc8c8a5c7a684255648a43b169cfe0c1e51b2bae7c68c310f3b0ab7
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -83,16 +93,60 @@ jobs:
           echo "exit=$status" >>"$GITHUB_OUTPUT"
           echo "ZAP exit code: $status (0 = pass, 1 = a FAIL rule was hit, 3 = scan error)"
 
+      # Anonymous: every operation, examples + coverage + fuzzing (no
+      # stateful phase: links are not declared). Signed in: the bearer token
+      # of a mobile sign-in of the demo company owner (no cookie, so no
+      # CSRF check), GET operations only. Each pass has a 10-minute budget.
+      - name: Schemathesis (anonymous, then signed-in GET)
+        id: st
+        if: success() || failure()
+        run: |
+          out="$RUNNER_TEMP/zap/schemathesis"
+          mkdir -p "$out/anonymous" "$out/company-get"
+          chmod -R a+rwX "$out"
+          spec=http://127.0.0.1:8080/api/v1/openapi.json
+          st() {
+            docker run --rm --network host -v "$out:/out:rw" "$SCHEMATHESIS_IMAGE" run "$spec" \
+              --url http://127.0.0.1:8080 --phases examples,coverage,fuzzing \
+              --checks not_a_server_error,response_schema_conformance \
+              --max-examples 20 --max-time 600 --workers 4 --request-timeout 15 --seed "$GITHUB_RUN_ID" \
+              --report junit,ndjson "$@"
+          }
+          set +e
+          st --report-dir /out/anonymous
+          anon=$?
+          body=$(jq -n --arg e demo.sirket@example.test --arg p "$KORO_DEMO_PASSWORD" '{email: $e, password: $p}')
+          token=$(curl -fsS -H 'X-Koro-Client: mobile' -H 'Content-Type: application/json' -d "$body" \
+            http://127.0.0.1:8080/api/v1/auth/sessions | jq -r '.token // empty')
+          if [ -n "$token" ]; then
+            echo "::add-mask::$token"
+            st --report-dir /out/company-get --include-method GET \
+              -H "Authorization: Bearer $token" -H 'X-Koro-Client: mobile'
+            signed=$?
+          else
+            echo "::error::sign-in of the demo company owner failed; the signed-in pass did not run"
+            signed=3
+          fi
+          echo "anonymous=$anon" >>"$GITHUB_OUTPUT"
+          echo "signed=$signed" >>"$GITHUB_OUTPUT"
+          echo "Schemathesis exit codes: anonymous $anon, signed-in GET $signed (0 = pass, 1 = a check failed, 2 = could not run)"
+
       - name: Job summary
         if: always()
         env:
           ZAP_EXIT: ${{ steps.zap.outputs.exit }}
+          ST_ANON: ${{ steps.st.outputs.anonymous }}
+          ST_SIGNED: ${{ steps.st.outputs.signed }}
         run: |
           mkdir -p "$RUNNER_TEMP/zap"
           {
             echo "## ZAP API scan (passive): exit code ${ZAP_EXIT:-none}"
             echo
             if [ -s "$RUNNER_TEMP/zap/zap-api.md" ]; then head -c 60000 "$RUNNER_TEMP/zap/zap-api.md"; else echo "No report."; fi
+            echo
+            echo "## Schemathesis: anonymous ${ST_ANON:-none}, signed-in GET ${ST_SIGNED:-none}"
+            echo
+            echo "JUnit and NDJSON reports: \`schemathesis/\` in the artifact."
             echo
             echo "Full report: artifact \`zap-api-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}\`."
           } >>"$GITHUB_STEP_SUMMARY"
@@ -111,10 +165,19 @@ jobs:
         run: docker compose down -v --remove-orphans
 
       - name: Result
+        if: always()
         env:
           ZAP_EXIT: ${{ steps.zap.outputs.exit }}
+          ST_ANON: ${{ steps.st.outputs.anonymous }}
+          ST_SIGNED: ${{ steps.st.outputs.signed }}
         run: |
+          fail=0
           if [ "${ZAP_EXIT:-3}" != 0 ]; then
             echo "::error::ZAP exited with ${ZAP_EXIT:-no code} (1: a FAIL rule of .zap/rules.tsv was hit; 3: the scan itself failed). See the job summary and the artifact."
-            exit 1
+            fail=1
           fi
+          if [ "${ST_ANON:-2}" != 0 ] || [ "${ST_SIGNED:-2}" != 0 ]; then
+            echo "::error::Schemathesis exited with anonymous ${ST_ANON:-no code}, signed-in GET ${ST_SIGNED:-no code} (1: a 5xx or a response outside the spec; 2/3: the run itself failed). See schemathesis/ in the artifact."
+            fail=1
+          fi
+          exit "$fail"

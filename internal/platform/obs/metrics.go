@@ -3,9 +3,11 @@ package obs
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"net/http"
 	"strconv"
 	"time"
+	"uuid"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -34,6 +36,7 @@ type Metrics struct {
 	taskDuration *prometheus.HistogramVec
 	authzDenied  *prometheus.CounterVec
 	rlRejected   *prometheus.CounterVec
+	profileReads *prometheus.CounterVec
 }
 
 // NewMetrics returns a registry with the koro_* metrics registered.
@@ -63,11 +66,16 @@ func NewMetrics() *Metrics {
 		rlRejected: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "koro_ratelimit_rejected_total", Help: "Requests refused with 429 by their operation's rate limit rule, by rule and action (05 §11.4, BE-078).",
 		}, []string{"rule", "action"}),
+		profileReads: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "koro_profile_reads_total",
+			Help: "Student profiles, CVs and search rows returned to a reader, by kind and reader bucket (BE-167; scraping alarm).",
+		}, []string{"kind", "bucket"}),
 	}
 	m.reg.MustRegister(
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 		m.httpRequests, m.httpDuration, m.httpInFlight, m.tasks, m.taskDuration, m.authzDenied, m.rlRejected,
+		m.profileReads,
 	)
 	return m
 }
@@ -126,6 +134,53 @@ func (m *Metrics) RateLimitRejected(rule, action string) {
 		return
 	}
 	m.rlRejected.WithLabelValues(rule, action).Inc()
+}
+
+// Profile read kinds: the kind label of koro_profile_reads_total (BE-167,
+// uyum #39). A search kind counts the rows of a returned page, the others
+// one read each. The scraping alarms (koro-infra vmalert koro.yml) watch
+// the hourly increase of one kind in one reader bucket.
+const (
+	ReadDiscoverySearch  = "discovery_search"  // rows of a searchDiscovery page
+	ReadDiscoveryProfile = "discovery_profile" // getDiscoveryProfile
+	ReadCompanySearch    = "company_search"    // rows of a queryCompanyGrantedStudents page
+	ReadCompanyProfile   = "company_profile"   // getCompanyStudentProfile
+	ReadCompanyCV        = "company_cv"        // downloadCompanyStudentCv
+	ReadMemberCard       = "member_card"       // getMemberCard
+	ReadAdminProfile     = "admin_profile"     // adminGetStudentProfile (break-glass)
+	readOther            = "other"
+)
+
+// ReadBuckets is the number of reader buckets of koro_profile_reads_total.
+const ReadBuckets = 16
+
+// ProfileReads counts n student profiles, CVs or search rows returned to
+// one reader: the reading org (company, club) or, on the admin surface, the
+// staff user. The reader never becomes a label: it is hashed into one of
+// ReadBuckets buckets, so the series stay kinds × 16 however many orgs
+// there are, and an alarm names a bucket and a kind; the audit log names
+// the reader (docs/runbook.md of koro-infra, §9). kind must be one of the
+// Read* constants; anything else is counted as "other".
+func (m *Metrics) ProfileReads(kind string, reader uuid.UUID, n int) {
+	if m == nil || n <= 0 {
+		return
+	}
+	switch kind {
+	case ReadDiscoverySearch, ReadDiscoveryProfile, ReadCompanySearch, ReadCompanyProfile, ReadCompanyCV,
+		ReadMemberCard, ReadAdminProfile:
+	default:
+		kind = readOther
+	}
+	m.profileReads.WithLabelValues(kind, ReadBucket(reader)).Add(float64(n))
+}
+
+// ReadBucket is the bucket label of reader: FNV-1a of its 16 bytes modulo
+// ReadBuckets, as one hexadecimal digit ("0".."f"). It is the same in every
+// process, so the replicas of the API add up in a query.
+func ReadBucket(reader uuid.UUID) string {
+	h := fnv.New32a()
+	_, _ = h.Write(reader[:]) // hash.Hash never fails
+	return strconv.FormatUint(uint64(h.Sum32()%ReadBuckets), 16)
 }
 
 // Sample is one gauge value with its label values (in label order).

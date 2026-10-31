@@ -11,6 +11,7 @@ import (
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/obs"
 	"koro/internal/platform/problem"
 )
 
@@ -216,6 +217,7 @@ func (h handler) getMemberCard(ctx context.Context, in *memberCardInput) (*membe
 	if err != nil {
 		return nil, err
 	}
+	httpx.MetricsFrom(ctx).ProfileReads(obs.ReadMemberCard, org, 1)
 	return &memberCardOutput{Body: toMemberCardDTO(c)}, nil
 }
 
@@ -246,5 +248,6 @@ func (h handler) adminGetProfile(ctx context.Context, in *adminProfileInput) (*a
 	if err != nil {
 		return nil, err
 	}
+	httpx.MetricsFrom(ctx).ProfileReads(obs.ReadAdminProfile, a.UserID, 1)
 	return &adminProfileOutput{Body: toAdminStudentViewDTO(v)}, nil
 }

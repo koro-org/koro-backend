@@ -1,0 +1,22 @@
+# Koro's own Opengrep rules (BE-167, uyum #115), run by the security job of
+# .github/workflows/ci.yml next to the pinned opengrep-rules subset. A rule
+# here covers what gosec, golangci-lint and internal/arch do not. An
+# exception is a `// nosemgrep: <rule id>` comment with its reason on the
+# same line, fixed within the closing deadlines of the vulnerability policy.
+rules:
+  - id: koro-gorm-query-sprintf
+    languages: [go]
+    severity: ERROR
+    message: >-
+      SQL text built with fmt.Sprintf reaches a GORM query method. Values go in as placeholders (?, @name);
+      a column or a sort direction chosen by input comes from a fixed allow-list (switch or map) and is
+      joined to constant SQL with +.
+    patterns:
+      - pattern: $DB.$METHOD(fmt.Sprintf(...), ...)
+      - metavariable-regex:
+          metavariable: $METHOD
+          regex: ^(Raw|Exec|Where|Or|Not|Order|Select|Joins|Group|Having|Distinct|Table)$
+    metadata:
+      category: security
+      cwe:
+        - "CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')"

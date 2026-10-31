@@ -363,9 +363,12 @@ func persona(t *testing.T, name string) authz.Actor {
 }
 
 // newHTTP serves the discovery operations of e with the persona resolver.
-func newHTTP(t *testing.T, e *env) *httpx.App {
+func newHTTP(t *testing.T, e *env) *httpx.App { return newHTTPMetrics(t, e, nil) }
+
+// newHTTPMetrics is newHTTP with the Prometheus registry m (nil: off).
+func newHTTPMetrics(t *testing.T, e *env, m *obs.Metrics) *httpx.App {
 	t.Helper()
-	app, err := httpx.New(httpx.Deps{Log: obs.Discard(), Actors: authztest.NewResolver(authztest.Personas()...)})
+	app, err := httpx.New(httpx.Deps{Log: obs.Discard(), Metrics: m, Actors: authztest.NewResolver(authztest.Personas()...)})
 	if err != nil {
 		t.Fatal(err)
 	}

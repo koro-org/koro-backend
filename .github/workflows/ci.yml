@@ -267,6 +267,47 @@ jobs:
           echo "${HADOLINT_SHA256}  $bin" | sha256sum -c -
           chmod +x "$bin"
           "$bin" --config .hadolint.yaml deploy/Dockerfile
+      # BE-167 (uyum #115): Opengrep, the open-source Semgrep fork, over
+      # the Go code (tests and test helpers excluded, as for gosec). Rules:
+      # Koro's own (.opengrep/koro.yml) and the security rules of
+      # opengrep-rules outside every audit/ directory, checked out at a
+      # pinned commit (audit rules are advisory: math-random-used flags the
+      # retry jitter of math/rand/v2; gosec covers weak crypto, TLS, pprof
+      # and math/rand with G401/G402/G108/G404). The binary is pinned
+      # by its SHA-256 like the others; a finding breaks the job. Exception:
+      # a `// nosemgrep: <rule id>` comment with its reason on the line.
+      - name: Check out opengrep-rules
+        if: success() || failure()
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: opengrep/opengrep-rules
+          ref: f1d2b562b414783763fd02a6ed2736eaed622efa # main, 2025-01-26
+          path: .opengrep-rules
+          persist-credentials: false
+          sparse-checkout: go
+      - name: Opengrep (Go)
+        if: success() || failure()
+        env:
+          OPENGREP_VERSION: 1.31.0
+          OPENGREP_SHA256: dbbe3c2058dbe600c449a8ba22ea79a1643a6660658400090d0323a8d0d31147
+        run: |
+          bin="$RUNNER_TEMP/opengrep"
+          curl -fsSL --retry 3 -o "$bin" "https://github.com/opengrep/opengrep/releases/download/v${OPENGREP_VERSION}/opengrep_manylinux_x86"
+          echo "${OPENGREP_SHA256}  $bin" | sha256sum -c -
+          chmod +x "$bin"
+          r=.opengrep-rules/go
+          rules=(
+            .opengrep/koro.yml
+            "$r/lang/security/injection"
+            "$r/lang/security/bad_tmp.yaml" "$r/lang/security/decompression_bomb.yaml"
+            "$r/lang/security/filepath-clean-misuse.yaml" "$r/lang/security/reverseproxy-director.yaml"
+            "$r/lang/security/shared-url-struct-mutation.yaml" "$r/lang/security/zip.yaml"
+            "$r/template/security"
+          )
+          args=()
+          for c in "${rules[@]}"; do args+=(--config "$c"); done
+          "$bin" scan "${args[@]}" --error --exclude '*_test.go' --exclude '*test' --exclude testdata cmd internal
+
       - name: Save Go caches
         if: github.event_name == 'push' || steps.go-cache.outputs.cache-matched-key == ''
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

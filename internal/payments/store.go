@@ -97,6 +97,14 @@ type Store interface {
 	// of its payments or a waiting refund request (RefundRequestStatus.Pending)
 	// of its own; each order once, in ID order.
 	RefundsInFlightOf(ctx context.Context, buyerOrgID uuid.UUID) ([]uuid.UUID, error)
+	// ReplaceEvidence writes next in place of cur, the rejected file of
+	// slot of row id (BE-154b; a targeted UPDATE of that column alone,
+	// koro_evidence_file_guard lets only a rejected file go). ErrNotFound
+	// without the row; ErrInvalidState when it holds another file or is not
+	// in the slot's state (a returned transfer, a completed refund, a
+	// waiting refund request). A transfer's receivable collections take the
+	// new receipt with it (ON UPDATE CASCADE).
+	ReplaceEvidence(ctx context.Context, slot EvidenceSlot, id, cur, next uuid.UUID) error
 }
 
 // TimeCursor is the last row of a payments or refunds page (created_at

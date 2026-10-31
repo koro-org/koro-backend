@@ -4,6 +4,7 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/files"
 	"koro/internal/platform/iban"
 )
 
@@ -187,4 +188,6 @@ type BankAccountView struct {
 	Account            BankAccount
 	PartyTitle         string
 	HolderMatchesTitle bool
+	// EvidenceState is the state of the evidence file (BE-154b).
+	EvidenceState files.State
 }

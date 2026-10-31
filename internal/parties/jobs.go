@@ -6,10 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"uuid"
 
 	"koro/internal/authz"
+	"koro/internal/files"
 	"koro/internal/identity"
 	"koro/internal/notify"
 	"koro/internal/platform/domainevent"
@@ -47,7 +47,9 @@ type accountNotice struct {
 }
 
 // Subscribe registers the outbox subscriptions of parties (01 §6.2):
-// payee_bank_account.submitted, .approved and .rejected → the notices.
+// payee_bank_account.submitted, .approved and .rejected → the notices;
+// file.rejected of a document or a bank account's evidence → the people
+// who upload it again (BE-154b).
 func (m Module) Subscribe(r *outbox.Registry) {
 	r.Subscribe(domainevent.TopicPayeeBankAccountSubmitted, NotifySubmittedTaskName, m.svc.handleSubmitted,
 		outbox.Queue(queue.Critical))
@@ -55,6 +57,7 @@ func (m Module) Subscribe(r *outbox.Registry) {
 		outbox.Queue(queue.Critical))
 	r.Subscribe(domainevent.TopicPayeeBankAccountRejected, NotifyRejectedTaskName, m.svc.handleRejected,
 		outbox.Queue(queue.Default))
+	files.SubscribeRejected(r, documentModule, NotifyRejectedEvidenceTaskName, m.svc.notifyRejectedEvidence)
 }
 
 // Tasks returns the plain task handlers of parties for the worker.
@@ -188,21 +191,7 @@ func (s *service) financeAdmins(ctx context.Context) ([]uuid.UUID, error) {
 // orgAdmins returns the active club_admin and university_rep members of a
 // payee's seller org (career_staff is not a rep, k-cs).
 func (s *service) orgAdmins(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error) {
-	ids, err := s.d.Orgs.ActiveMemberIDs(ctx, orgID)
-	if err != nil {
-		return nil, fmt.Errorf("parties: org members: %w", err)
-	}
-	var out []uuid.UUID
-	for _, id := range ids {
-		ok, err := s.d.Orgs.HasRole(ctx, orgID, id, authz.MemberClubAdmin, authz.MemberUniversityRep)
-		if err != nil {
-			return nil, fmt.Errorf("parties: org admin role: %w", err)
-		}
-		if ok && !slices.Contains(out, id) {
-			out = append(out, id)
-		}
-	}
-	return out, nil
+	return s.membersWith(ctx, orgID, authz.MemberClubAdmin, authz.MemberUniversityRep)
 }
 
 // notifyAll sends tmpl to every recipient: in-app (IDs only) and, when the

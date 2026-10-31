@@ -4,11 +4,13 @@ import (
 	"context"
 	"net/http"
 	"time"
+	"uuid"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
 	"koro/internal/consent"
+	"koro/internal/files"
 	"koro/internal/identity"
 	"koro/internal/parties"
 	"koro/internal/platform/civil"
@@ -180,6 +182,7 @@ func Register(api huma.API, svc Service) {
 	registerRefunds(api, h)
 	registerCollections(api, h)
 	registerRefundRequests(api, h)
+	registerEvidence(api, h)
 }
 
 type handler struct{ svc Service }
@@ -380,6 +383,7 @@ type TransferReturnDTO struct {
 	ReturnedAt       *time.Time `json:"returned_at,omitempty"`
 	BankReference    string     `json:"bank_reference,omitempty"`
 	ReceiptFileID    string     `json:"receipt_file_id,omitempty" format:"uuid"`
+	ReceiptFileState string     `json:"receipt_file_state,omitempty" doc:"The state of the return's receipt (BE-154b). rejected: found infected or not processable after its upload, it cannot be downloaded; finance uploads it again (adminReplaceIncomingTransferReturnReceipt)"`
 }
 
 // IncomingTransferDTO is 04 §2.16 IncomingTransferDTO. The sender's name and
@@ -402,19 +406,33 @@ type IncomingTransferDTO struct {
 	MatchedAt           *time.Time         `json:"matched_at,omitempty"`
 	IgnoreReason        string             `json:"ignore_reason,omitempty"`
 	ReceiptFileID       string             `json:"receipt_file_id,omitempty" format:"uuid"`
+	ReceiptFileState    string             `json:"receipt_file_state,omitempty" doc:"The state of the receipt (BE-154b). rejected: found infected or not processable after its upload, it cannot be downloaded (409); finance uploads it again (adminReplaceIncomingTransferReceipt). pending: not scanned yet"`
 	EntryMethod         string             `json:"entry_method" enum:"manual,csv_import,bank_api"`
 	EnteredBy           string             `json:"entered_by" format:"uuid"`
 	Return              *TransferReturnDTO `json:"return,omitempty"`
 	CreatedAt           time.Time          `json:"created_at"`
 }
 
-func transferDTO(t IncomingTransfer) IncomingTransferDTO {
+// TransformSchema implements huma.SchemaTransformer: the file state's enum
+// comes from files (BE-154b).
+func (IncomingTransferDTO) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
+	return op.SetEnum(s, "receipt_file_state", files.StateValues())
+}
+
+// TransformSchema implements huma.SchemaTransformer (BE-154b).
+func (TransferReturnDTO) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
+	return op.SetEnum(s, "receipt_file_state", files.StateValues())
+}
+
+// transferDTO maps a transfer with the states of its receipts (st).
+func transferDTO(t IncomingTransfer, st map[uuid.UUID]files.State) IncomingTransferDTO {
 	d := IncomingTransferDTO{
 		TransferID: t.ID.String(), CollectionAccountID: t.CollectionAccountID.String(), ValueDate: t.ValueDate.String(),
 		Amount: t.Amount, Currency: t.Currency, SenderName: str(t.SenderName), SenderIBANMasked: masked(t.SenderIBAN),
 		Description: t.Description, BankReference: t.BankReference, ExtractedOrderNo: str(t.ExtractedOrderNo),
 		Status: string(t.Status), MatchedOrderID: httpx.IDStr(t.MatchedOrderID), MatchedBy: httpx.IDStr(t.MatchedBy), MatchedAt: utc(t.MatchedAt),
-		IgnoreReason: str(t.IgnoreReason), ReceiptFileID: httpx.IDStr(t.ReceiptFileID), EntryMethod: string(t.EntryMethod),
+		IgnoreReason: str(t.IgnoreReason), ReceiptFileID: httpx.IDStr(t.ReceiptFileID),
+		ReceiptFileState: string(files.StateOf(st, t.ReceiptFileID)), EntryMethod: string(t.EntryMethod),
 		EnteredBy: t.EnteredBy.String(), CreatedAt: t.CreatedAt.UTC(),
 	}
 	if t.ReturnRequestedBy != nil {
@@ -422,6 +440,7 @@ func transferDTO(t IncomingTransfer) IncomingTransferDTO {
 			RequestedBy: httpx.IDStr(t.ReturnRequestedBy), RequestedAt: utc(t.ReturnRequestedAt), Reason: str(t.ReturnReason),
 			TargetIBANMasked: masked(t.ReturnTargetIBAN), ApprovedBy: httpx.IDStr(t.ReturnApprovedBy), ApprovedAt: utc(t.ReturnApprovedAt),
 			ReturnedAt: utc(t.ReturnedAt), BankReference: str(t.ReturnBankReference), ReceiptFileID: httpx.IDStr(t.ReturnReceiptFileID),
+			ReceiptFileState: string(files.StateOf(st, t.ReturnReceiptFileID)),
 		}
 	}
 	return d
@@ -486,9 +505,13 @@ func (h handler) transferPage(ctx context.Context, args transferArgs) (*transfer
 	if err != nil {
 		return nil, err
 	}
+	st, err := statesOf(ctx, h, p.Items, transferFiles)
+	if err != nil {
+		return nil, err
+	}
 	out := &transferListOutput{Body: IncomingTransferList{Items: make([]IncomingTransferDTO, len(p.Items))}}
 	for i, t := range p.Items {
-		out.Body.Items[i] = transferDTO(t)
+		out.Body.Items[i] = transferDTO(t, st)
 	}
 	if p.Next != nil {
 		out.Body.NextCursor = page.Next(sortTransfers, fp, p.Next.ValueDate.String(), page.UUIDVal(p.Next.ID))
@@ -546,7 +569,11 @@ func (h handler) getTransfer(ctx context.Context, in *TransferPath) (*transferDe
 	if err != nil {
 		return nil, err
 	}
-	out := &transferDetailOutput{Body: IncomingTransferDetailDTO{IncomingTransferDTO: transferDTO(v.Transfer),
+	st, err := statesOf(ctx, h, []IncomingTransfer{v.Transfer}, transferFiles)
+	if err != nil {
+		return nil, err
+	}
+	out := &transferDetailOutput{Body: IncomingTransferDetailDTO{IncomingTransferDTO: transferDTO(v.Transfer, st),
 		Suggestions: make([]SuggestionDTO, len(v.Suggestions))}}
 	for i, s := range v.Suggestions {
 		out.Body.Suggestions[i] = SuggestionDTO{OrderID: s.OrderID.String(), OrderNo: s.OrderNo, AmountDueAmount: s.AmountDue,
@@ -642,7 +669,7 @@ func (h handler) createTransfer(ctx context.Context, in *createTransferInput) (*
 	if err != nil {
 		return nil, err
 	}
-	return &transferOutput{Body: transferDTO(t)}, nil
+	return h.transferOut(ctx, t)
 }
 
 // ImportResultDTO is the body of adminImportIncomingTransfers (04 §2.16).
@@ -775,7 +802,7 @@ func (h handler) ignore(ctx context.Context, in *ignoreInput) (*transferOutput, 
 	if err != nil {
 		return nil, err
 	}
-	return &transferOutput{Body: transferDTO(t)}, nil
+	return h.transferOut(ctx, t)
 }
 
 type requestReturnInput struct {
@@ -798,7 +825,7 @@ func (h handler) requestReturn(ctx context.Context, in *requestReturnInput) (*tr
 	if err != nil {
 		return nil, err
 	}
-	return &transferOutput{Body: transferDTO(t)}, nil
+	return h.transferOut(ctx, t)
 }
 
 type approveReturnInput struct {
@@ -819,7 +846,7 @@ func (h handler) approveReturn(ctx context.Context, in *approveReturnInput) (*tr
 	if err != nil {
 		return nil, err
 	}
-	return &transferOutput{Body: transferDTO(t)}, nil
+	return h.transferOut(ctx, t)
 }
 
 type markReturnedInput struct {
@@ -842,7 +869,7 @@ func (h handler) markReturned(ctx context.Context, in *markReturnedInput) (*tran
 	if err != nil {
 		return nil, err
 	}
-	return &transferOutput{Body: transferDTO(t)}, nil
+	return h.transferOut(ctx, t)
 }
 
 // DirectResultDTO is the body of adminConfirmDirectPayment.

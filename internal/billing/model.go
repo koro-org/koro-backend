@@ -207,8 +207,12 @@ type Invoice struct {
 	VerifiedBy        *uuid.UUID   `gorm:"type:uuid;column:verified_by"`
 	VerifiedAt        *time.Time   `gorm:"column:verified_at"`
 	IssuedAt          *time.Time   `gorm:"column:issued_at"`
-	CreatedAt         time.Time    `gorm:"column:created_at;->"`
-	UpdatedAt         time.Time    `gorm:"column:updated_at;->"`
+	// PDFReplacedAt is when the rejected PDF of the issued invoice was
+	// replaced (BE-154b; its verification is reset until another person
+	// than its uploader verifies it again).
+	PDFReplacedAt *time.Time `gorm:"column:pdf_replaced_at"`
+	CreatedAt     time.Time  `gorm:"column:created_at;->"`
+	UpdatedAt     time.Time  `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -219,8 +223,18 @@ func (Invoice) TableName() string { return "invoices" }
 func (i Invoice) Uploaded() bool { return i.UploadedBy != nil && i.PDFFileID != nil }
 
 // AwaitsVerification reports whether finance may verify the invoice now:
-// a planned invoice with an uploaded document.
-func (i Invoice) AwaitsVerification() bool { return i.Status == StatusPlanned && i.Uploaded() }
+// a planned invoice with an uploaded document, or an issued one whose
+// replaced PDF waits for its re-verification (BE-154b).
+func (i Invoice) AwaitsVerification() bool {
+	return i.Status == StatusPlanned && i.Uploaded() || i.AwaitsReverification()
+}
+
+// AwaitsReverification reports an issued invoice whose rejected PDF was
+// replaced and is not verified yet (BE-154b): it stays issued, its new PDF
+// is served to the uploader side and finance only.
+func (i Invoice) AwaitsReverification() bool {
+	return i.Status == StatusIssued && i.PDFReplacedAt != nil && i.VerifiedBy == nil
+}
 
 // Uploadable reports whether a document may be uploaded now: a planned
 // invoice without one, or one whose upload was found not to match.

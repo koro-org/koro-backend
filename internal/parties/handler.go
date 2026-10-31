@@ -9,6 +9,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
+	"koro/internal/files"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
@@ -107,6 +108,7 @@ func Register(api huma.API, svc Service) {
 	}, op.Meta{Action: string(authz.PartiesDocumentVerify), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.adminVerifyDocument)
 
 	registerPayees(api, h)
+	registerEvidence(api, h)
 }
 
 type handler struct{ svc Service }
@@ -144,10 +146,19 @@ type DocumentDTO struct {
 	VerifiedAt *time.Time `json:"verified_at,omitempty"`
 	UploadedBy string     `json:"uploaded_by,omitempty" format:"uuid" doc:"Finance and platform admins only"`
 	VerifiedBy string     `json:"verified_by,omitempty" format:"uuid" doc:"Finance and platform admins only"`
+	FileState  string     `json:"file_state,omitempty" doc:"The state of the document's file (BE-154b). rejected: found infected or not processable after its upload, it cannot be downloaded or verified (409); its uploader side uploads it again (replaceLegalPartyDocumentFile, adminReplaceLegalPartyDocumentFile). pending: not scanned yet"`
 }
 
-func documentDTO(d Document, staff bool) DocumentDTO {
-	out := DocumentDTO{DocumentID: d.ID.String(), Kind: string(d.Kind), UploadedAt: d.CreatedAt.UTC(), VerifiedAt: utc(d.VerifiedAt)}
+// TransformSchema implements huma.SchemaTransformer: the file state's enum
+// comes from files (BE-154b).
+func (DocumentDTO) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
+	return op.SetEnum(s, "file_state", files.StateValues())
+}
+
+// documentDTO maps a document with the state of its file.
+func documentDTO(d Document, state files.State, staff bool) DocumentDTO {
+	out := DocumentDTO{DocumentID: d.ID.String(), Kind: string(d.Kind), UploadedAt: d.CreatedAt.UTC(), VerifiedAt: utc(d.VerifiedAt),
+		FileState: string(state)}
 	if staff {
 		out.UploadedBy = d.UploadedBy.String()
 		if d.VerifiedBy != nil {
@@ -224,7 +235,7 @@ func toDTO(v PartyView) LegalPartyDTO {
 		out.EInvoiceAlias = str(p.EInvoiceAlias)
 	}
 	for i, d := range v.Documents {
-		out.Documents[i] = documentDTO(d, v.FullTaxIDs)
+		out.Documents[i] = documentDTO(d, files.StateOf(v.FileStates, &d.FileID), v.FullTaxIDs)
 	}
 	return out
 }
@@ -387,7 +398,7 @@ func (h handler) upload(ctx context.Context, in *uploadDocumentInput) (*document
 	if err != nil {
 		return nil, err
 	}
-	return &documentOutput{Body: documentDTO(d, fullTaxIDs(a))}, nil
+	return h.documentOut(ctx, d, fullTaxIDs(a))
 }
 
 type downloadInput struct {
@@ -592,5 +603,5 @@ func (h handler) adminVerifyDocument(ctx context.Context, in *adminVerifyDocumen
 	if err != nil {
 		return nil, err
 	}
-	return &documentOutput{Body: documentDTO(d, true)}, nil
+	return h.documentOut(ctx, d, true)
 }

@@ -192,20 +192,26 @@ func (s *service) AdminVerifyDocument(ctx context.Context, a authz.Actor, docume
 // active and scanned clean (or skipped while no scanner is wired, the
 // files rule of PresignGet).
 func (s *service) checkReviewable(ctx context.Context, fileID uuid.UUID) error {
+	_, err := s.reviewable(ctx, fileID)
+	return err
+}
+
+// reviewable is checkReviewable returning the file's metadata.
+func (s *service) reviewable(ctx context.Context, fileID uuid.UUID) (files.FileMeta, error) {
 	if s.d.Files == nil {
-		return problem.ErrUnavailable
+		return files.FileMeta{}, problem.ErrUnavailable
 	}
 	f, err := s.d.Files.Get(ctx, fileID)
 	if err != nil {
-		return err
+		return files.FileMeta{}, err
 	}
 	switch {
 	case f.Status == files.StatusRejected:
-		return files.ErrRejected
+		return files.FileMeta{}, files.ErrRejected
 	case f.Status != files.StatusActive || f.ScanStatus != files.ScanClean && f.ScanStatus != files.ScanSkipped:
-		return files.ErrNotClean
+		return files.FileMeta{}, files.ErrNotClean
 	}
-	return nil
+	return f, nil
 }
 
 // documentEvent is the audit record of a document action: the document is

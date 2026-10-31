@@ -196,6 +196,8 @@ func TestPaymentsPolicy_RefundRequests(t *testing.T) {
 			surface([]string{"other_company_member", "other_club_admin"}, map[string]error{"other_company_member": nil,
 				"other_club_admin": nil, "support": nil, "platform_admin": nil, "finance_admin": nil})},
 		{"withdraw", authz.PaymentsRefundRequestWithdraw, req, surface(both, map[string]error{"company_admin": nil})},
+		{"replace the evidence (create on the request, BE-154b)", authz.PaymentsRefundRequestCreate, req,
+			surface(both, map[string]error{"company_admin": nil})},
 		{"read the evidence", authz.PaymentsRefundRequestReadEvidence, req, surface(both, map[string]error{"company_admin": nil,
 			"club_admin": nil, "platform_admin": nil, "finance_admin": nil})},
 		{"read a university's evidence (k-cs)", authz.PaymentsRefundRequestReadEvidence, refundRequestOf("company_a", "uni_a", authztest.ID("company_admin")),

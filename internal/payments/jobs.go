@@ -11,6 +11,7 @@ import (
 	"uuid"
 
 	"koro/internal/authz"
+	"koro/internal/files"
 	"koro/internal/identity"
 	"koro/internal/notify"
 	"koro/internal/platform/domainevent"
@@ -58,7 +59,9 @@ const (
 // collection_account.approved → the security notice (critical);
 // payment.captured → the buyer's and the sellers' notices;
 // payment.refunded → the buyer's and the seller's notices (BE-043);
-// incoming_transfer.unmatched → the finance digest.
+// incoming_transfer.unmatched → the finance digest; file.rejected of a
+// receipt or evidence a payments record keeps → the people who upload it
+// again (BE-154b).
 func (m Module) Subscribe(r *outbox.Registry) {
 	r.Subscribe(domainevent.TopicCollectionAccountApproved, NotifyAccountApprovedTaskName, m.svc.handleAccountApproved,
 		outbox.Queue(queue.Critical))
@@ -68,6 +71,7 @@ func (m Module) Subscribe(r *outbox.Registry) {
 		outbox.Queue(queue.Default))
 	r.Subscribe(domainevent.TopicIncomingTransferUnmatched, NotifyUnmatchedTaskName, m.svc.handleUnmatched,
 		outbox.Queue(queue.Default))
+	files.SubscribeRejected(r, moduleName, NotifyRejectedEvidenceTaskName, m.svc.notifyRejectedEvidence)
 }
 
 // Tasks returns the plain task handlers of payments for the worker.

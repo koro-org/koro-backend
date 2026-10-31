@@ -260,6 +260,20 @@ func (f *fakeFiles) Attach(_ context.Context, _ authz.Actor, id uuid.UUID, owner
 	return nil
 }
 
+// States answers the state of each known file (BE-154b; the rule of
+// files.FileMeta.State with no scanner required).
+func (f *fakeFiles) States(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]files.State, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[uuid.UUID]files.State{}
+	for _, id := range ids {
+		if m, ok := f.meta[id]; ok {
+			out[id] = m.State(false)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeFiles) PresignGet(_ context.Context, id uuid.UUID, ttl time.Duration) (files.Download, error) {
 	return files.Download{URL: "https://files.test/" + id.String(), ExpiresAt: t0.Add(ttl)}, nil
 }

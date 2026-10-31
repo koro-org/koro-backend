@@ -4,11 +4,13 @@ import (
 	"context"
 	"net/http"
 	"time"
+	"uuid"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
 	"koro/internal/consent"
+	"koro/internal/files"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
@@ -42,6 +44,7 @@ type ReceivableCollectionDTO struct {
 	Currency            string     `json:"currency" enum:"TRY"`
 	BankReference       string     `json:"bank_reference"`
 	ReceiptFileID       string     `json:"receipt_file_id" format:"uuid"`
+	ReceiptFileState    string     `json:"receipt_file_state,omitempty" doc:"The state of the source transfer's receipt (BE-154b). rejected: finance uploads it again on the transfer (adminReplaceIncomingTransferReceipt); the collection follows"`
 	Status              string     `json:"status" enum:"requested,collected,rejected"`
 	RequestedBy         string     `json:"requested_by" format:"uuid"`
 	ApprovedBy          string     `json:"approved_by,omitempty" format:"uuid"`
@@ -53,11 +56,18 @@ type ReceivableCollectionDTO struct {
 	CreatedAt           time.Time  `json:"created_at"`
 }
 
-func collectionDTO(c ReceivableCollection) ReceivableCollectionDTO {
+// TransformSchema implements huma.SchemaTransformer (BE-154b).
+func (ReceivableCollectionDTO) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
+	return op.SetEnum(s, "receipt_file_state", files.StateValues())
+}
+
+// collectionDTO maps a collection with the state of its receipt (st).
+func collectionDTO(c ReceivableCollection, st map[uuid.UUID]files.State) ReceivableCollectionDTO {
 	return ReceivableCollectionDTO{
 		CollectionID: c.ID.String(), IncomingTransferID: c.IncomingTransferID.String(), OrderLineID: c.OrderLineID.String(), OrderID: c.OrderID.String(),
 		PayeeID: c.PayeeID.String(), OrgID: c.OrgID.String(), CollectionAccountID: c.CollectionAccountID.String(), Amount: c.Amount, Currency: Currency,
-		BankReference: c.BankReference, ReceiptFileID: c.ReceiptFileID.String(), Status: string(c.Status), RequestedBy: c.RequestedBy.String(),
+		BankReference: c.BankReference, ReceiptFileID: c.ReceiptFileID.String(),
+		ReceiptFileState: string(files.StateOf(st, &c.ReceiptFileID)), Status: string(c.Status), RequestedBy: c.RequestedBy.String(),
 		ApprovedBy: httpx.IDStr(c.ApprovedBy), ApprovedAt: utc(c.ApprovedAt), RejectedBy: httpx.IDStr(c.RejectedBy), RejectedAt: utc(c.RejectedAt),
 		RejectionReason: str(c.RejectionReason), LedgerTransactionID: httpx.IDStr(c.LedgerTransactionID), CreatedAt: c.CreatedAt.UTC(),
 	}
@@ -91,10 +101,14 @@ func (h handler) listCollections(ctx context.Context, in *listCollectionsInput) 
 	if err != nil {
 		return nil, err
 	}
+	st, err := statesOf(ctx, h, p.Items, collectionFiles)
+	if err != nil {
+		return nil, err
+	}
 	out := &collectionListOutput{}
 	out.Body.Items = make([]ReceivableCollectionDTO, len(p.Items))
 	for i, c := range p.Items {
-		out.Body.Items[i] = collectionDTO(c)
+		out.Body.Items[i] = collectionDTO(c, st)
 	}
 	out.Body.NextCursor = encodeTimeCursor(p.Next, fp)
 	return out, nil
@@ -117,7 +131,7 @@ func (h handler) createCollection(ctx context.Context, in *createCollectionInput
 	if err != nil {
 		return nil, err
 	}
-	return &collectionOutput{Body: collectionDTO(c)}, nil
+	return h.collectionOut(ctx, c)
 }
 
 // CollectionPath identifies one manual receivable collection.
@@ -141,7 +155,7 @@ func (h handler) approveCollection(ctx context.Context, in *approveCollectionInp
 	if err != nil {
 		return nil, err
 	}
-	return &collectionOutput{Body: collectionDTO(c)}, nil
+	return h.collectionOut(ctx, c)
 }
 
 type rejectCollectionInput struct {
@@ -161,5 +175,5 @@ func (h handler) rejectCollection(ctx context.Context, in *rejectCollectionInput
 	if err != nil {
 		return nil, err
 	}
-	return &collectionOutput{Body: collectionDTO(c)}, nil
+	return h.collectionOut(ctx, c)
 }

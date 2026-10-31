@@ -1,4 +1,4 @@
-# Authz matrix of the payments module (03 §5.16, 04 §2.16; BE-041, BE-043, BE-128, BE-129, BE-132). 46 operations × 18 personas: 04 §2.16's
+# Authz matrix of the payments module (03 §5.16, 04 §2.16; BE-041, BE-043, BE-128, BE-129, BE-132, BE-154b). 51 operations × 18 personas: 04 §2.16's
 # 19, the return's request and second eye (06 H-56, T-79, T-228), the model C direct confirmation (T-18) and the
 # refunds due (BE-043). Everything is the admin surface (03 §7.2-3): an actor without the role gets 403 before
 # anything is read. Cells: collection accounts list pad, fin; create fin·R; approve pad·4·R, fin·4·R; retire /
@@ -13,6 +13,9 @@
 # (club admin, university rep, career staff, pad, fin list), one request (the buyer's members, the seller's staff, sup,
 # pad, fin read; cma withdraws; the evidence: cma, the seller's markers, pad, fin) and finance's queue and decisions
 # (admin surface pad, fin; never the requester).
+# BE-154b adds the replacement of a rejected receipt or evidence with the cell of its first upload: a transfer's
+# receipt (create, fin), a return's receipt (mark_returned, fin·R), a direct payment's evidence (match, fin), a
+# completed refund's receipt (complete, fin) and a waiting request's evidence (create on the request: the buyer's cma).
 version: 1
 groups:
   # signed-in users without a platform role.
@@ -1136,3 +1139,128 @@ operations:
           "@other_staff": 403
           platform_admin: 409
           finance_admin: 409
+
+  # BE-154b (T-397): a rejected receipt or evidence is uploaded again with the cell of its first upload.
+  adminReplaceIncomingTransferReceipt:
+    method: POST
+    path: /api/v1/admin/incoming-transfers/{transfer_id}/replace-receipt
+    action: payments.transfer.create
+    path_params: { transfer_id: tr_receipt_rejected }
+    body: bodies/payments/replace_transfer_receipt.json
+    note: the transfer's receipt was rejected by the scan; the people who record transfers upload it again
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403     # 03 §5.16: create is fin only
+      finance_admin: 200
+    variants:
+      - name: receipt_not_rejected
+        path_params: { transfer_id: tr_collect_free }
+        note: a receipt that was not rejected stays — 409 files.not_rejected
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 409
+
+  adminReplaceIncomingTransferReturnReceipt:
+    method: POST
+    path: /api/v1/admin/incoming-transfers/{transfer_id}/replace-return-receipt
+    action: payments.transfer.mark_returned
+    path_params: { transfer_id: tr_returned }
+    body: bodies/payments/replace_return_receipt.json
+    note: R, the people of the return's receipt step (k28); the return's eyes and bank reference stay
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 200
+    variants:
+      - name: not_returned
+        path_params: { transfer_id: tr_return_approved }
+        note: only a returned transfer has a receipt to replace — 409 payments.invalid_state
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 409
+
+  adminReplacePaymentEvidence:
+    method: POST
+    path: /api/v1/admin/payments/{payment_id}/replace-evidence
+    action: payments.transfer.match
+    path_params: { payment_id: pay_direct }
+    body: bodies/payments/replace_payment_evidence.json
+    note: a direct payment's rejected evidence; the people who confirm direct payments (k27)
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 200
+    variants:
+      - name: no_evidence
+        path_params: { payment_id: pay_a }
+        note: a matched transfer's payment has no evidence — 409 payments.invalid_state
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 409
+
+  adminReplaceRefundReceipt:
+    method: POST
+    path: /api/v1/admin/refunds/{refund_id}/replace-receipt
+    action: payments.refund.complete
+    path_params: { refund_id: ref_completed }
+    body: bodies/payments/replace_refund_receipt.json
+    note: a completed refund's rejected EFT receipt; the refund, the ledger and the order stay
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 403     # 03 §5.16: complete is fin only
+      finance_admin: 200
+    variants:
+      - name: not_completed
+        path_params: { refund_id: ref_approved }
+        note: only a completed refund has a receipt — 409 payments.invalid_state
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 409
+
+  replaceRefundRequestEvidence:
+    method: POST
+    path: /api/v1/refund-requests/{refund_request_id}/replace-evidence
+    action: payments.refund_request.create
+    path_params: { refund_request_id: rr_ev_rejected }
+    body: bodies/payments/replace_rr_evidence.json
+    note: the buyer's admin uploads a waiting request's rejected evidence again (the create cell, on the request)
+    expect:
+      anonymous: 401
+      "@rr_outsiders_request_a": 404
+      company_member: 403
+      company_admin: 200
+      club_member: 403
+      club_admin: 403
+      "@platform_staff": 403
+    variants:
+      - name: evidence_not_rejected
+        path_params: { refund_request_id: rr_open }
+        note: evidence that was not rejected stays — 409 files.not_rejected
+        expect:
+          anonymous: 401
+          "@rr_outsiders_request_a": 404
+          company_member: 403
+          company_admin: 409
+          club_member: 403
+          club_admin: 403
+          "@platform_staff": 403

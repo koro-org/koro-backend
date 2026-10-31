@@ -75,6 +75,9 @@ type Files interface {
 	PresignGet(ctx context.Context, fileID uuid.UUID, ttl time.Duration) (files.Download, error)
 	// Read returns the PDF for the invoice e-mail (worker).
 	Read(ctx context.Context, fileID uuid.UUID, maxBytes int64) ([]byte, files.FileMeta, error)
+	// States returns the states of the PDFs of a response (one read;
+	// BE-154b).
+	States(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]files.State, error)
 }
 
 // AuditLogger is audit's logger (L1): every invoice write is logged in its

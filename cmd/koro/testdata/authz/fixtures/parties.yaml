@@ -45,3 +45,12 @@ fixtures:
                   submitted_by: club_admin, verified_by: finance_admin_2 }
   acct_admin: { kind: account, payee: payee_draft, iban: TR039999901234567890123456, status: pending_approval,
                 submitted_by: platform_admin, admin: true }
+  # BE-154b: rows whose file the scan rejected after the upload (scan: infected). doc_buyer_rejected is company_a's;
+  # doc_payee_rejected a payee party's (the admin surface); acct_club_rejected an org submission of club_admin waiting
+  # for the first eye on payee_club_a3 (club_a's third payee, its own party: one pending account per payee).
+  party_foundation_d: { kind: party, party_kind: payee, legal_type: foundation, status: verified, tax_no: "8642097532" }
+  payee_club_a3: { kind: payee, org: club_a, party: party_foundation_d, status: active }
+  doc_buyer_rejected: { kind: document, party: party_buyer_a, uploaded_by: company_admin, scan: infected }
+  doc_payee_rejected: { kind: document, party: party_foundation_free, uploaded_by: platform_admin, scan: infected }
+  acct_club_rejected: { kind: account, payee: payee_club_a3, iban: TR680006400000000009876543, status: pending_verification,
+                        submitted_by: club_admin, scan: infected }

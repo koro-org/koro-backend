@@ -14,6 +14,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/authz/authztest"
+	"koro/internal/billing"
 	"koro/internal/directory"
 	"koro/internal/events"
 	"koro/internal/feed"
@@ -24,6 +25,8 @@ import (
 	"koro/internal/notify"
 	"koro/internal/orders"
 	"koro/internal/orgs"
+	"koro/internal/parties"
+	"koro/internal/payments"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/config"
 	"koro/internal/platform/db"
@@ -98,25 +101,23 @@ func TestWire_FilesTasksAndPrivacy(t *testing.T) {
 	}
 }
 
-// TestWire_FileRejectedOwners (T-176, BE-151, BE-154): every browser upload
-// purpose is classified for file.rejected. The owning module of a personal
-// or public content file drops its reference and deletes the file (one
-// subscription each); a financial or legal record keeps its reference (the
-// row is the record and its audit trail, the file answers 409): its module
-// shows the file state and tells the people who upload it again (one
-// notice subscription each; T-393, BE-154 for the payout receipt and the
-// delivery evidence) or, until its replacement flow exists (BE-154b), has
-// no subscriber. files notifies the uploader and webcache revalidates a
-// public page. A new purpose fails here until it is classified;
-// server-generated purposes (event_export, dsr_export) are never scanned,
-// so never rejected.
+// TestWire_FileRejectedOwners (T-176, BE-151, BE-154, BE-154b): every
+// browser upload purpose is classified for file.rejected. The owning module
+// of a personal or public content file drops its reference and deletes the
+// file (one subscription each); a financial or legal record keeps its
+// reference (the row is the record and its audit trail, the file answers
+// 409): its module shows the file state and tells the people who upload it
+// again with the cell of the first upload (one notice subscription each:
+// ledger, orders (BE-154), payments, parties, billing (BE-154b; T-393,
+// T-397)). files notifies the uploader and webcache revalidates a public
+// page. A new purpose fails here until it is classified; server-generated
+// purposes (event_export, dsr_export) are never scanned, so never rejected.
 func TestWire_FileRejectedOwners(t *testing.T) {
 	t.Parallel()
 	c := newTestContainer(t)
 	if err := c.build(); err != nil {
 		t.Fatal(err)
 	}
-	const keeps = "" // a financial or legal record: the reference stays, no notice yet (BE-154b)
 	owner := map[files.Purpose]string{
 		files.PurposeAvatar:                students.DropRejectedFileTaskName,
 		files.PurposeCV:                    students.DropRejectedFileTaskName,
@@ -125,14 +126,14 @@ func TestWire_FileRejectedOwners(t *testing.T) {
 		files.PurposeEventCover:            events.DropRejectedCoverTaskName,
 		files.PurposePostMedia:             feed.DropRejectedMediaTaskName,
 		files.PurposeClubClaimEvidence:     directory.RemoveRejectedEvidenceTaskName,
-		files.PurposePartyDocument:         keeps,
-		files.PurposeBankAccountEvidence:   keeps,
-		files.PurposeTransferReceipt:       keeps,
-		files.PurposePayoutReceipt:         ledger.NotifyRejectedReceiptTaskName, // the reference stays (BE-154)
-		files.PurposeRefundReceipt:         keeps,
-		files.PurposeInvoicePDF:            keeps,
-		files.PurposeDeliveryEvidence:      orders.NotifyRejectedEvidenceTaskName, // the reference stays (BE-154)
-		files.PurposeRefundRequestEvidence: keeps,
+		files.PurposePartyDocument:         parties.NotifyRejectedEvidenceTaskName, // the references stay (BE-154b)
+		files.PurposeBankAccountEvidence:   parties.NotifyRejectedEvidenceTaskName,
+		files.PurposeTransferReceipt:       payments.NotifyRejectedEvidenceTaskName,
+		files.PurposePayoutReceipt:         ledger.NotifyRejectedReceiptTaskName, // BE-154
+		files.PurposeRefundReceipt:         payments.NotifyRejectedEvidenceTaskName,
+		files.PurposeInvoicePDF:            billing.NotifyRejectedPDFTaskName,
+		files.PurposeDeliveryEvidence:      orders.NotifyRejectedEvidenceTaskName, // BE-154
+		files.PurposeRefundRequestEvidence: payments.NotifyRejectedEvidenceTaskName,
 	}
 	want := []string{files.NotifyRejectedTaskName, webcache.SubFileRejected}
 	for _, p := range files.UploadPurposes() {
@@ -140,7 +141,7 @@ func TestWire_FileRejectedOwners(t *testing.T) {
 		switch {
 		case !ok:
 			t.Errorf("purpose %s is not classified for file.rejected (T-176)", p)
-		case name != keeps && !slices.Contains(want, name):
+		case !slices.Contains(want, name):
 			want = append(want, name)
 		}
 	}

@@ -60,3 +60,23 @@ fixtures:
             requested_by: finance_admin }
   rr_b: { kind: refund_request, order: ord_b_unpaid, line: ln_b_unpaid, org: company_b, seller: club_a, amount: 1000,
           requested_by: other_company_member }
+
+  # BE-154b: records whose receipt or evidence the scan rejected after the upload (scan: infected); the replacements of
+  # the matrix are file_transfer_receipt, file_return_receipt, file_direct_evidence, file_refund_receipt and file_rr_new.
+  # tr_returned's return went through both eyes and its receipt; pay_direct is a model C direct payment (of
+  # ord_a_rejected_ev, no other payment) with its evidence; ref_completed is a completed goodwill refund of pay_a (no
+  # line, no money held); rr_ev_rejected waits on ln_a_rejected_ev (orders' fixture) with its rejected evidence.
+  file_receipt_rejected: { kind: file, purpose: transfer_receipt, uploaded_by: finance_admin, scan: infected }
+  tr_receipt_rejected: { kind: transfer, account: coll_default, amount: 6000, receipt: file_receipt_rejected, entered_by: finance_admin_2 }
+  file_return_rejected: { kind: file, purpose: refund_receipt, uploaded_by: finance_admin, scan: infected }
+  tr_returned: { kind: transfer, account: coll_default, amount: 9500, status: returned, requested_by: finance_admin_2,
+                 approved_by: finance_admin, return_receipt: file_return_rejected, entered_by: finance_admin_2,
+                 sender_iban: TR100006200000000006295938 }
+  file_direct_rejected: { kind: file, purpose: transfer_receipt, uploaded_by: finance_admin, scan: infected }
+  pay_direct: { kind: payment, order: ord_a_rejected_ev, org: company_a, captured_by: finance_admin, evidence: file_direct_rejected }
+  file_refund_rejected: { kind: file, purpose: refund_receipt, uploaded_by: finance_admin, scan: infected }
+  ref_completed: { kind: refund, payment: pay_a, order: ord_a_paid, amount: 10000, reason: goodwill, status: completed,
+                   requested_by: finance_admin_2, approved_by: finance_admin, receipt: file_refund_rejected }
+  file_rr_rejected: { kind: rr_file, org: company_a, uploaded_by: company_admin, attached: rr_ev_rejected, scan: infected }
+  rr_ev_rejected: { kind: refund_request, order: ord_a_rejected_ev, line: ln_a_rejected_ev, org: company_a, seller: club_a,
+                    amount: 1000, requested_by: company_admin, evidence: file_rr_rejected }

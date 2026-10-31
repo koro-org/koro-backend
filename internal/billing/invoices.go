@@ -64,12 +64,16 @@ type ListQuery struct {
 type InvoicePage struct {
 	Items []Invoice
 	Next  *Cursor
+	// PDFStates are the states of the PDFs (by file ID; BE-154b).
+	PDFStates map[uuid.UUID]files.State
 }
 
-// InvoiceView is an invoice with its lines.
+// InvoiceView is an invoice with its lines and the state of its PDF (by
+// file ID; BE-154b).
 type InvoiceView struct {
-	Invoice Invoice
-	Lines   []Line
+	Invoice   Invoice
+	Lines     []Line
+	PDFStates map[uuid.UUID]files.State
 }
 
 // UploadInput is the body of uploadInvoice (04 §2.18).
@@ -92,6 +96,7 @@ type VerifyInput struct {
 type CancelResult struct {
 	Invoice    Invoice
 	CreditNote *Invoice
+	PDFStates  map[uuid.UUID]files.State // BE-154b
 }
 
 // now is the service clock in the database's precision.
@@ -132,7 +137,20 @@ func (s *service) view(ctx context.Context, inv Invoice) (InvoiceView, error) {
 	if err != nil {
 		return InvoiceView{}, err
 	}
-	return InvoiceView{Invoice: inv, Lines: lines}, nil
+	st, err := s.pdfStates(ctx, inv)
+	if err != nil {
+		return InvoiceView{}, err
+	}
+	return InvoiceView{Invoice: inv, Lines: lines, PDFStates: st}, nil
+}
+
+// pdfStates reads the states of the invoices' PDFs (one files read).
+func (s *service) pdfStates(ctx context.Context, invs ...Invoice) (map[uuid.UUID]files.State, error) {
+	ids := make([]*uuid.UUID, len(invs))
+	for i := range invs {
+		ids[i] = invs[i].PDFFileID
+	}
+	return s.d.Files.States(ctx, files.IDs(ids...))
 }
 
 func (s *service) reload(ctx context.Context, id uuid.UUID) (InvoiceView, error) {
@@ -183,7 +201,11 @@ func (s *service) list(ctx context.Context, f Filter, q ListQuery) (InvoicePage,
 		return InvoicePage{}, err
 	}
 	rows, more := page.Cut(rows, limit)
-	out := InvoicePage{Items: rows}
+	st, err := s.pdfStates(ctx, rows...)
+	if err != nil {
+		return InvoicePage{}, err
+	}
+	out := InvoicePage{Items: rows, PDFStates: st}
 	if more {
 		last := rows[len(rows)-1]
 		out.Next = &Cursor{CreatedAt: last.CreatedAt, ID: last.ID}
@@ -212,7 +234,7 @@ func (s *service) InvoicePDF(ctx context.Context, a authz.Actor, id uuid.UUID) (
 	if inv.PDFFileID == nil {
 		return files.Download{}, ErrInvalidState
 	}
-	if !inv.WasIssued() {
+	if !inv.WasIssued() || inv.AwaitsReverification() {
 		if err := authz.Can(ctx, a, authz.BillingInvoiceUpload, invoiceResource(inv)); err != nil {
 			return files.Download{}, ErrInvalidState
 		}
@@ -345,6 +367,10 @@ func (s *service) uploadable(ctx context.Context, a authz.Actor, inv Invoice, fi
 // the locked row → verified by, at; issued (issued_at, invoice.issued: the
 // PDF e-mail) or mismatch (the note; the uploader side is told) → audit.
 // The database refuses the uploader too (invoices_verifier_chk, 06 H-19).
+// An issued invoice whose rejected PDF was replaced (BE-154b) is verified
+// again: result issued only (a document that does not match is corrected
+// with a credit note: 422), the verification is written and nothing else
+// (still issued; no invoice.issued, the PDF e-mail went at the issue).
 func (s *service) AdminVerifyInvoice(ctx context.Context, a authz.Actor, id uuid.UUID, in VerifyInput) (InvoiceView, error) {
 	if err := authz.Can(ctx, a, authz.BillingInvoiceListAdmin, adminSurface); err != nil {
 		return InvoiceView{}, err
@@ -363,6 +389,9 @@ func (s *service) AdminVerifyInvoice(ctx context.Context, a authz.Actor, id uuid
 	switch {
 	case in.Result != StatusIssued && in.Result != StatusMismatch:
 		return InvoiceView{}, problem.Field("body.result", "must be issued or mismatch")
+	case inv.AwaitsReverification() && in.Result != StatusIssued:
+		return InvoiceView{}, problem.Field("body.result",
+			"must be issued: the replaced PDF of an issued invoice is verified again; a wrong document is cancelled (credit note)")
 	case utf8.RuneCountInString(note) > maxNoteRunes:
 		return InvoiceView{}, problem.Field("body.note", "must be at most 500 characters")
 	case in.Result == StatusMismatch && note == "":
@@ -397,23 +426,35 @@ func (s *service) AdminVerifyInvoice(ctx context.Context, a authz.Actor, id uuid
 		if err := authz.Can(ctx, a, authz.BillingInvoiceVerify, invoiceResource(cur)); err != nil {
 			return uuid.Nil(), err
 		}
+		reverify := cur.AwaitsReverification()
+		if reverify && in.Result != StatusIssued {
+			return uuid.Nil(), ErrInvalidState
+		}
 		now, by := s.now(), a.UserID
 		next := cur
-		next.Status, next.VerifiedBy, next.VerifiedAt = in.Result, &by, &now
-		if in.Result == StatusIssued {
-			next.IssuedAt, next.LastError = &now, nil
-		} else {
-			next.LastError = &note
+		next.VerifiedBy, next.VerifiedAt = &by, &now
+		switch {
+		case reverify: // still issued: the status and the issue stay (BE-154b)
+		case in.Result == StatusIssued:
+			next.Status, next.IssuedAt, next.LastError = in.Result, &now, nil
+		default:
+			next.Status, next.LastError = in.Result, &note
 		}
 		stored, err := s.d.Store.UpdateInvoice(ctx, next, cur.Status)
 		if err != nil {
 			return uuid.Nil(), err
 		}
-		if err := s.d.Audit.Log(ctx, invoiceEvent(a, authz.BillingInvoiceVerify, stored, note,
-			map[string]any{"from": string(cur.Status), "result": string(in.Result)})); err != nil {
+		meta := map[string]any{"from": string(cur.Status), "result": string(in.Result)}
+		if reverify {
+			meta["reverification"], meta["pdf_file_id"] = true, cur.PDFFileID.String()
+		}
+		if err := s.d.Audit.Log(ctx, invoiceEvent(a, authz.BillingInvoiceVerify, stored, note, meta)); err != nil {
 			return uuid.Nil(), err
 		}
-		if in.Result == StatusIssued {
+		switch {
+		case reverify:
+			return stored.ID, nil
+		case in.Result == StatusIssued:
 			return stored.ID, s.emitIssued(ctx, stored)
 		}
 		s.notice(ctx, stored, noticeMismatch)
@@ -483,12 +524,16 @@ func (s *service) AdminCancelInvoice(ctx context.Context, a authz.Actor, id uuid
 		return CancelResult{}, err
 	}
 	res := CancelResult{Invoice: inv}
+	invs := []Invoice{inv}
 	if got.CreditNote != nil {
 		cn, err := s.d.Store.GetInvoice(ctx, *got.CreditNote, false)
 		if err != nil {
 			return CancelResult{}, err
 		}
-		res.CreditNote = &cn
+		res.CreditNote, invs = &cn, append(invs, cn)
+	}
+	if res.PDFStates, err = s.pdfStates(ctx, invs...); err != nil {
+		return CancelResult{}, err
 	}
 	return res, nil
 }

@@ -4,11 +4,13 @@ import (
 	"context"
 	"net/http"
 	"time"
+	"uuid"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
 	"koro/internal/consent"
+	"koro/internal/files"
 	"koro/internal/parties"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
@@ -122,15 +124,23 @@ type PaymentDTO struct {
 	CapturedAt         *time.Time `json:"captured_at,omitempty"`
 	CapturedBy         string     `json:"captured_by,omitempty" format:"uuid" doc:"The finance admin who captured it by hand"`
 	EvidenceFileID     string     `json:"evidence_file_id,omitempty" format:"uuid"`
+	EvidenceFileState  string     `json:"evidence_file_state,omitempty" doc:"A direct payment: the state of its evidence (BE-154b). rejected: found infected or not processable after its upload; finance uploads it again (adminReplacePaymentEvidence)"`
 	CreatedAt          time.Time  `json:"created_at"`
 }
 
-func paymentRowDTO(p Payment) PaymentDTO {
+// TransformSchema implements huma.SchemaTransformer (BE-154b).
+func (PaymentDTO) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
+	return op.SetEnum(s, "evidence_file_state", files.StateValues())
+}
+
+// paymentRowDTO maps a payment with the state of its evidence (st).
+func paymentRowDTO(p Payment, st map[uuid.UUID]files.State) PaymentDTO {
 	return PaymentDTO{
 		PaymentID: p.ID.String(), OrderID: p.OrderID.String(), OrgID: p.OrgID.String(), Provider: string(p.Provider),
 		IncomingTransferID: httpx.IDStr(p.IncomingTransferID), Amount: p.Amount, Currency: p.Currency, Status: string(p.Status),
 		RefundedAmount: p.RefundedAmount, CapturedAt: utc(p.CapturedAt), CapturedBy: httpx.IDStr(p.CapturedBy),
-		EvidenceFileID: httpx.IDStr(p.EvidenceFileID), CreatedAt: p.CreatedAt.UTC(),
+		EvidenceFileID: httpx.IDStr(p.EvidenceFileID), EvidenceFileState: string(files.StateOf(st, p.EvidenceFileID)),
+		CreatedAt: p.CreatedAt.UTC(),
 	}
 }
 
@@ -184,9 +194,13 @@ func (h handler) listPayments(ctx context.Context, in *listPaymentsInput) (*paym
 	if err != nil {
 		return nil, err
 	}
+	st, err := statesOf(ctx, h, p.Items, paymentFiles)
+	if err != nil {
+		return nil, err
+	}
 	out := &paymentListOutput{Body: PaymentList{Items: make([]PaymentDTO, len(p.Items))}}
 	for i, x := range p.Items {
-		out.Body.Items[i] = paymentRowDTO(x)
+		out.Body.Items[i] = paymentRowDTO(x, st)
 	}
 	out.Body.NextCursor = encodeTimeCursor(p.Next, fp)
 	return out, nil
@@ -203,14 +217,18 @@ func (h handler) getPayment(ctx context.Context, in *PaymentPath) (*paymentDetai
 	if err != nil {
 		return nil, err
 	}
-	d := PaymentDetailDTO{PaymentDTO: paymentRowDTO(v.Payment), OrderNo: v.OrderNo, Splits: make([]SplitDTO, len(v.Splits)),
+	st, err := h.svc.EvidenceStates(ctx, append(refundFiles(v.Refunds...), v.Payment.EvidenceFileID)...)
+	if err != nil {
+		return nil, err
+	}
+	d := PaymentDetailDTO{PaymentDTO: paymentRowDTO(v.Payment, st), OrderNo: v.OrderNo, Splits: make([]SplitDTO, len(v.Splits)),
 		Refunds: make([]RefundDTO, len(v.Refunds))}
 	for i, s := range v.Splits {
 		d.Splits[i] = SplitDTO{SplitID: s.ID.String(), OrderLineID: s.OrderLineID.String(), SellerAmount: s.SellerAmount,
 			PlatformAmount: s.PlatformAmount, Status: s.Status}
 	}
 	for i, r := range v.Refunds {
-		d.Refunds[i] = refundDTO(r)
+		d.Refunds[i] = refundDTO(r, st)
 	}
 	return &paymentDetailOutput{Body: d}, nil
 }
@@ -247,6 +265,7 @@ type RefundDTO struct {
 	RejectionReason  string     `json:"rejection_reason,omitempty"`
 	BankReference    string     `json:"bank_reference,omitempty"`
 	ReceiptFileID    string     `json:"receipt_file_id,omitempty" format:"uuid"`
+	ReceiptFileState string     `json:"receipt_file_state,omitempty" doc:"A completed refund: the state of its receipt (BE-154b). rejected: found infected or not processable after its upload; finance uploads it again (adminReplaceRefundReceipt)"`
 	CompletedAt      *time.Time `json:"completed_at,omitempty"`
 	ClosedBy         string     `json:"closed_by,omitempty" format:"uuid"`
 	ClosedAt         *time.Time `json:"closed_at,omitempty"`
@@ -254,14 +273,20 @@ type RefundDTO struct {
 	FailureReason    string     `json:"failure_reason,omitempty"`
 }
 
-func refundDTO(r Refund) RefundDTO {
+// TransformSchema implements huma.SchemaTransformer (BE-154b).
+func (RefundDTO) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
+	return op.SetEnum(s, "receipt_file_state", files.StateValues())
+}
+
+// refundDTO maps a refund with the state of its receipt (st).
+func refundDTO(r Refund, st map[uuid.UUID]files.State) RefundDTO {
 	return RefundDTO{
 		RefundID: r.ID.String(), PaymentID: r.PaymentID.String(), OrderID: r.OrderID.String(), OrderLineID: httpx.IDStr(r.OrderLineID),
 		Amount: r.Amount, Currency: Currency, Reason: r.Reason, ReasonNote: str(r.ReasonNote), Status: string(r.Status),
 		Method: r.Method, TargetIBANMasked: r.MaskedIBAN(), RequestedBy: r.RequestedBy.String(), RequestedAt: r.CreatedAt.UTC(),
 		ApprovedBy: httpx.IDStr(r.ApprovedBy), ApprovedAt: utc(r.ApprovedAt), RejectedBy: httpx.IDStr(r.RejectedBy), RejectedAt: utc(r.RejectedAt),
 		RejectionReason: str(r.RejectionReason), BankReference: str(r.BankReference), ReceiptFileID: httpx.IDStr(r.ReceiptFileID),
-		CompletedAt: utc(r.CompletedAt), ClosedBy: httpx.IDStr(r.ClosedBy), ClosedAt: utc(r.ClosedAt),
+		ReceiptFileState: string(files.StateOf(st, r.ReceiptFileID)), CompletedAt: utc(r.CompletedAt), ClosedBy: httpx.IDStr(r.ClosedBy), ClosedAt: utc(r.ClosedAt),
 		CancelReason: str(r.CancelReason), FailureReason: str(r.FailureReason),
 	}
 }
@@ -316,9 +341,13 @@ func (h handler) listRefunds(ctx context.Context, in *listRefundsInput) (*refund
 	if err != nil {
 		return nil, err
 	}
+	st, err := h.svc.EvidenceStates(ctx, refundFiles(p.Items...)...)
+	if err != nil {
+		return nil, err
+	}
 	out := &refundListOutput{Body: RefundList{Items: make([]RefundDTO, len(p.Items))}}
 	for i, r := range p.Items {
-		out.Body.Items[i] = refundDTO(r)
+		out.Body.Items[i] = refundDTO(r, st)
 	}
 	out.Body.NextCursor = encodeTimeCursor(p.Next, fp)
 	return out, nil
@@ -405,7 +434,7 @@ func (h handler) createRefund(ctx context.Context, in *createRefundInput) (*refu
 	if err != nil {
 		return nil, err
 	}
-	return &refundOutput{Body: refundDTO(r)}, nil
+	return h.refundOut(ctx, r)
 }
 
 type approveRefundInput struct {
@@ -425,7 +454,7 @@ func (h handler) approveRefund(ctx context.Context, in *approveRefundInput) (*re
 	if err != nil {
 		return nil, err
 	}
-	return &refundOutput{Body: refundDTO(r)}, nil
+	return h.refundOut(ctx, r)
 }
 
 type rejectRefundInput struct {
@@ -445,7 +474,7 @@ func (h handler) rejectRefund(ctx context.Context, in *rejectRefundInput) (*refu
 	if err != nil {
 		return nil, err
 	}
-	return &refundOutput{Body: refundDTO(r)}, nil
+	return h.refundOut(ctx, r)
 }
 
 // CompletedRefundDTO is the body of adminCompleteRefund: the refund and how
@@ -478,7 +507,11 @@ func (h handler) completeRefund(ctx context.Context, in *completeRefundInput) (*
 	if err != nil {
 		return nil, err
 	}
-	return &completedRefundOutput{Body: CompletedRefundDTO{RefundDTO: refundDTO(r.Refund), LedgerTransactionID: r.TransactionID.String(),
+	st, err := h.svc.EvidenceStates(ctx, refundFiles(r.Refund)...)
+	if err != nil {
+		return nil, err
+	}
+	return &completedRefundOutput{Body: CompletedRefundDTO{RefundDTO: refundDTO(r.Refund, st), LedgerTransactionID: r.TransactionID.String(),
 		UnallocatedAmount: r.Unallocated, ClawbackAmount: r.Clawback}}, nil
 }
 
@@ -538,7 +571,7 @@ func (h handler) cancelRefund(ctx context.Context, in *cancelRefundInput) (*refu
 	if err != nil {
 		return nil, err
 	}
-	return &refundOutput{Body: refundDTO(r)}, nil
+	return h.refundOut(ctx, r)
 }
 
 type failRefundInput struct {
@@ -559,5 +592,5 @@ func (h handler) markRefundFailed(ctx context.Context, in *failRefundInput) (*re
 	if err != nil {
 		return nil, err
 	}
-	return &refundOutput{Body: refundDTO(r)}, nil
+	return h.refundOut(ctx, r)
 }

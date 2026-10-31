@@ -151,10 +151,19 @@ func (s *service) views(ctx context.Context, ps []LegalParty, full bool) ([]Part
 	if err != nil {
 		return nil, err
 	}
+	fids := make([]*uuid.UUID, len(docs))
+	for i := range docs {
+		fids[i] = &docs[i].FileID
+	}
+	states, err := s.fileStates(ctx, fids...)
+	if err != nil {
+		return nil, err
+	}
 	for i, p := range ps {
 		out[i] = PartyView{
 			Party: p.withoutSecrets(), ETag: httpx.ETag(p.UpdatedAt), FullTaxIDs: full, TCKNOnFile: p.HasTCKN(),
-			Documents: slices.DeleteFunc(slices.Clone(docs), func(d Document) bool { return d.LegalPartyID != p.ID }),
+			Documents:  slices.DeleteFunc(slices.Clone(docs), func(d Document) bool { return d.LegalPartyID != p.ID }),
+			FileStates: states,
 		}
 	}
 	return out, nil

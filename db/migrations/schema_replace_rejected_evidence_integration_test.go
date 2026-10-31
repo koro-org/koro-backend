@@ -101,6 +101,14 @@ func TestSchema_ReplaceRejectedEvidence(t *testing.T) {
 	check(t)
 
 	owner := testutil.OwnerConn(t, w.d)
+	// The migrations built on 000163's guard go down before it and up after
+	// it, in the migrate order (000164: invoices_pdf_guard, BE-154b).
+	later := []string{"000164_replace_rejected_invoice_pdf"}
+	for i := len(later) - 1; i >= 0; i-- {
+		if _, err := owner.Exec(t.Context(), mustRead(t, later[i]+".down.sql")); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if _, err := owner.Exec(t.Context(), mustRead(t, "000163_replace_rejected_evidence.down.sql")); err != nil {
 		t.Fatal(err)
 	}
@@ -127,6 +135,11 @@ func TestSchema_ReplaceRejectedEvidence(t *testing.T) {
 	}
 	if _, err := owner.Exec(t.Context(), mustRead(t, "000163_replace_rejected_evidence.up.sql")); err != nil {
 		t.Fatal(err)
+	}
+	for _, m := range later {
+		if _, err := owner.Exec(t.Context(), mustRead(t, m+".up.sql")); err != nil {
+			t.Fatal(err)
+		}
 	}
 	check(t)
 }

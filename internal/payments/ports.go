@@ -122,6 +122,9 @@ type Files interface {
 	//
 	// sync-write: files.Files.Attach
 	Attach(ctx context.Context, a authz.Actor, fileID uuid.UUID, owner files.Owner) error
+	// States returns the states of the receipts and evidence of a response
+	// (one read; BE-154b).
+	States(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]files.State, error)
 }
 
 // Reauthenticator verifies the re-authentication proof of the R operations

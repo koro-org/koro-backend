@@ -10,6 +10,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/consent"
+	"koro/internal/files"
 	"koro/internal/identity"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
@@ -258,6 +259,14 @@ type BankAccountDTO struct {
 	SupersededAt    *time.Time `json:"superseded_at,omitempty"`
 	RevokedAt       *time.Time `json:"revoked_at,omitempty"`
 	RevokeReason    string     `json:"revoke_reason,omitempty"`
+	// EvidenceFileState is the state of the evidence file (BE-154b).
+	EvidenceFileState string `json:"evidence_file_state,omitempty" doc:"The state of the evidence (BE-154b). rejected: found infected or not processable after its upload, it cannot be downloaded or checked (409); while the account waits for an eye its submitter side uploads it again (replacePayeeBankAccountEvidence), an approved account is submitted again. pending: not scanned yet"`
+}
+
+// TransformSchema implements huma.SchemaTransformer: the file state's enum
+// comes from files (BE-154b).
+func (BankAccountDTO) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
+	return op.SetEnum(s, "evidence_file_state", files.StateValues())
 }
 
 func accountDTO(v BankAccountView) BankAccountDTO {
@@ -267,7 +276,7 @@ func accountDTO(v BankAccountView) BankAccountDTO {
 		BankCode: b.BankCode, BankName: str(b.BankName), Status: string(b.Status), SubmittedAt: b.SubmittedAt.UTC(),
 		VerifiedAt: utc(b.VerifiedAt), ApprovedAt: utc(b.ApprovedAt), RejectedAt: utc(b.RejectedAt),
 		RejectionReason: str(b.RejectionReason), SupersededAt: utc(b.SupersededAt), RevokedAt: utc(b.RevokedAt),
-		RevokeReason: str(b.RevokeReason),
+		RevokeReason: str(b.RevokeReason), EvidenceFileState: string(v.EvidenceState),
 	}
 }
 
@@ -820,7 +829,7 @@ func (h handler) adminUploadDocument(ctx context.Context, in *adminUploadDocumen
 	if err != nil {
 		return nil, err
 	}
-	return &documentOutput{Body: documentDTO(d, true)}, nil
+	return h.documentOut(ctx, d, true)
 }
 
 type adminDocumentPath struct {

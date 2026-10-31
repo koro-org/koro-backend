@@ -48,7 +48,9 @@ package authz
 //
 //	payments.refund_request.create        org (the buyer): cma S (company admin or owner
 //	                                      of a company org; the order, its state, the line,
-//	                                      the window and the amount are the service's)
+//	                                      the window and the amount are the service's);
+//	                                      refund_request: the buyer's cma S (its rejected
+//	                                      evidence uploaded again, BE-154b)
 //	payments.refund_request.list          org (the buyer): cmm S, cma S (the org's requests
 //	                                      and one order's refund options)
 //	payments.refund_request.list_sales    org (the seller): cla S, uni S, career_staff (no
@@ -94,7 +96,8 @@ func paymentsPolicy() Policy {
 				}
 			case TypeRefundRequest:
 				switch act {
-				case PaymentsRefundRequestRead, PaymentsRefundRequestWithdraw, PaymentsRefundRequestReadEvidence:
+				case PaymentsRefundRequestRead, PaymentsRefundRequestWithdraw, PaymentsRefundRequestReadEvidence,
+					PaymentsRefundRequestCreate:
 					return orderVisible(a, r.OrgID, lineSeller(r))
 				case PaymentsRefundRequestReview, PaymentsRefundRequestAccept, PaymentsRefundRequestReject:
 					return AdminSurfaceVisible(a)
@@ -207,7 +210,7 @@ func refundRequestGrants(a Actor, act Action, r Resource, pad, fin Grant) []Gran
 			add(a.HasOrgRole(s, MemberCareerStaff), Grant{Role: RoleCareerStaff})
 		}
 		gs = append(gs, Grant{Role: RoleSupport}, pad, fin)
-	case PaymentsRefundRequestWithdraw:
+	case PaymentsRefundRequestWithdraw, PaymentsRefundRequestCreate:
 		add(admin, Grant{Role: RoleCompanyAdmin})
 	case PaymentsRefundRequestReadEvidence:
 		add(admin, Grant{Role: RoleCompanyAdmin})

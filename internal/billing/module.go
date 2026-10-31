@@ -81,6 +81,9 @@ type Service interface {
 	UploadInvoice(ctx context.Context, a authz.Actor, id uuid.UUID, in UploadInput) (InvoiceView, error)
 	// AdminListInvoices is adminListInvoices (billing.invoice.list_admin).
 	AdminListInvoices(ctx context.Context, a authz.Actor, q ListQuery) (InvoicePage, error)
+	// ReplaceInvoicePDF is replaceInvoicePdf (billing.invoice.upload): a
+	// rejected PDF uploaded again (BE-154b).
+	ReplaceInvoicePDF(ctx context.Context, a authz.Actor, id, fileID uuid.UUID) (InvoiceView, error)
 	// AdminVerifyInvoice is adminVerifyInvoice (billing.invoice.verify: four eyes).
 	AdminVerifyInvoice(ctx context.Context, a authz.Actor, id uuid.UUID, in VerifyInput) (InvoiceView, error)
 	// AdminCancelInvoice is adminCancelInvoice (billing.invoice.cancel); the

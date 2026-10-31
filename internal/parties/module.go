@@ -99,6 +99,7 @@ type Parties interface {
 // first (05 §5.3).
 type Service interface {
 	Parties
+	EvidenceService
 
 	// ListOrgParties is listOrgLegalParties (parties.legal_party.read).
 	ListOrgParties(ctx context.Context, a authz.Actor, orgID uuid.UUID) ([]PartyView, error)

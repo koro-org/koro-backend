@@ -2157,6 +2157,13 @@ components:
           description: adminDownloadBankAccountEvidence
           format: uuid
           type: string
+        evidence_file_state:
+          description: "The state of the evidence (BE-154b). rejected: found infected or not processable after its upload, it cannot be downloaded or checked (409); while the account waits for an eye its submitter side uploads it again (replacePayeeBankAccountEvidence), an approved account is submitted again. pending: not scanned yet"
+          enum:
+            - clean
+            - pending
+            - rejected
+          type: string
         holder_matches_title:
           description: Holder equals the title after Turkish-insensitive folding (advisory)
           type: boolean
@@ -2248,6 +2255,13 @@ components:
           description: Characters 5-9 of the IBAN
           type: string
         bank_name:
+          type: string
+        evidence_file_state:
+          description: "The state of the evidence (BE-154b). rejected: found infected or not processable after its upload, it cannot be downloaded or checked (409); while the account waits for an eye its submitter side uploads it again (replacePayeeBankAccountEvidence), an approved account is submitted again. pending: not scanned yet"
+          enum:
+            - clean
+            - pending
+            - rejected
           type: string
         holder_name:
           type: string
@@ -2587,6 +2601,17 @@ components:
           type: string
         pdf_file_id:
           format: uuid
+          type: string
+        pdf_file_state:
+          description: "The state of the PDF (BE-154b). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the uploader side uploads it again (replaceInvoicePdf). pending: not scanned yet"
+          enum:
+            - clean
+            - pending
+            - rejected
+          type: string
+        pdf_replaced_at:
+          description: "An issued invoice whose rejected PDF was replaced (BE-154b): until verified_at is set again the new PDF waits for finance's verification and only the uploader side and finance read it"
+          format: date-time
           type: string
         recipient_org_id:
           format: uuid
@@ -3523,6 +3548,13 @@ components:
           type: string
         receipt_file_id:
           format: uuid
+          type: string
+        receipt_file_state:
+          description: "A completed refund: the state of its receipt (BE-154b). rejected: found infected or not processable after its upload; finance uploads it again (adminReplaceRefundReceipt)"
+          enum:
+            - clean
+            - pending
+            - rejected
           type: string
         refund_id:
           format: uuid
@@ -5143,6 +5175,13 @@ components:
         document_id:
           format: uuid
           type: string
+        file_state:
+          description: "The state of the document's file (BE-154b). rejected: found infected or not processable after its upload, it cannot be downloaded or verified (409); its uploader side uploads it again (replaceLegalPartyDocumentFile, adminReplaceLegalPartyDocumentFile). pending: not scanned yet"
+          enum:
+            - clean
+            - pending
+            - rejected
+          type: string
         kind:
           enum:
             - tax_certificate
@@ -6370,6 +6409,16 @@ components:
       required:
         - message
       type: object
+    FileBody:
+      additionalProperties: false
+      properties:
+        file_id:
+          description: "The new file: a party_document upload (createUpload, completeUpload)"
+          format: uuid
+          type: string
+      required:
+        - file_id
+      type: object
     FileState:
       additionalProperties: false
       properties:
@@ -6868,6 +6917,13 @@ components:
         receipt_file_id:
           format: uuid
           type: string
+        receipt_file_state:
+          description: "The state of the receipt (BE-154b). rejected: found infected or not processable after its upload, it cannot be downloaded (409); finance uploads it again (adminReplaceIncomingTransferReceipt). pending: not scanned yet"
+          enum:
+            - clean
+            - pending
+            - rejected
+          type: string
         return:
           $ref: "#/components/schemas/TransferReturnDTO"
         sender_iban_masked:
@@ -6951,6 +7007,13 @@ components:
           type: string
         receipt_file_id:
           format: uuid
+          type: string
+        receipt_file_state:
+          description: "The state of the receipt (BE-154b). rejected: found infected or not processable after its upload, it cannot be downloaded (409); finance uploads it again (adminReplaceIncomingTransferReceipt). pending: not scanned yet"
+          enum:
+            - clean
+            - pending
+            - rejected
           type: string
         return:
           $ref: "#/components/schemas/TransferReturnDTO"
@@ -7217,6 +7280,17 @@ components:
         pdf_file_id:
           format: uuid
           type: string
+        pdf_file_state:
+          description: "The state of the PDF (BE-154b). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the uploader side uploads it again (replaceInvoicePdf). pending: not scanned yet"
+          enum:
+            - clean
+            - pending
+            - rejected
+          type: string
+        pdf_replaced_at:
+          description: "An issued invoice whose rejected PDF was replaced (BE-154b): until verified_at is set again the new PDF waits for finance's verification and only the uploader side and finance read it"
+          format: date-time
+          type: string
         recipient_org_id:
           format: uuid
           type: string
@@ -7381,6 +7455,17 @@ components:
           type: integer
         payout_id:
           format: uuid
+          type: string
+        pdf_file_state:
+          description: "The state of the PDF (BE-154b). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the uploader side uploads it again (replaceInvoicePdf). pending: not scanned yet"
+          enum:
+            - clean
+            - pending
+            - rejected
+          type: string
+        pdf_replaced_at:
+          description: "An issued invoice whose rejected PDF was replaced (BE-154b): until verified_at is set again the new PDF waits for finance's verification and only the uploader side and finance read it"
+          format: date-time
           type: string
         recipient_org_id:
           format: uuid
@@ -10329,6 +10414,13 @@ components:
         evidence_file_id:
           format: uuid
           type: string
+        evidence_file_state:
+          description: "A direct payment: the state of its evidence (BE-154b). rejected: found infected or not processable after its upload; finance uploads it again (adminReplacePaymentEvidence)"
+          enum:
+            - clean
+            - pending
+            - rejected
+          type: string
         incoming_transfer_id:
           format: uuid
           type: string
@@ -10396,6 +10488,13 @@ components:
           type: string
         evidence_file_id:
           format: uuid
+          type: string
+        evidence_file_state:
+          description: "A direct payment: the state of its evidence (BE-154b). rejected: found infected or not processable after its upload; finance uploads it again (adminReplacePaymentEvidence)"
+          enum:
+            - clean
+            - pending
+            - rejected
           type: string
         incoming_transfer_id:
           format: uuid
@@ -11628,6 +11727,13 @@ components:
         receipt_file_id:
           format: uuid
           type: string
+        receipt_file_state:
+          description: "The state of the source transfer's receipt (BE-154b). rejected: finance uploads it again on the transfer (adminReplaceIncomingTransferReceipt); the collection follows"
+          enum:
+            - clean
+            - pending
+            - rejected
+          type: string
         rejected_at:
           format: date-time
           type: string
@@ -11812,6 +11918,13 @@ components:
           type: string
         receipt_file_id:
           format: uuid
+          type: string
+        receipt_file_state:
+          description: "A completed refund: the state of its receipt (BE-154b). rejected: found infected or not processable after its upload; finance uploads it again (adminReplaceRefundReceipt)"
+          enum:
+            - clean
+            - pending
+            - rejected
           type: string
         refund_id:
           format: uuid
@@ -12010,6 +12123,13 @@ components:
           description: Staff view
           format: uuid
           type: string
+        evidence_file_state:
+          description: "The state of the evidence (BE-154b). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the buying company uploads it again while the request waits (replaceRefundRequestEvidence)"
+          enum:
+            - clean
+            - pending
+            - rejected
+          type: string
         explanation:
           type: string
         has_evidence:
@@ -12128,6 +12248,13 @@ components:
         decided_by:
           description: Staff view
           format: uuid
+          type: string
+        evidence_file_state:
+          description: "The state of the evidence (BE-154b). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the buying company uploads it again while the request waits (replaceRefundRequestEvidence)"
+          enum:
+            - clean
+            - pending
+            - rejected
           type: string
         explanation:
           type: string
@@ -12617,6 +12744,19 @@ components:
           maxLength: 500
           type: string
       type: object
+    ReplaceAccountEvidenceInputBody:
+      additionalProperties: false
+      properties:
+        evidence_file_id:
+          description: "The new evidence: a bank_account_evidence upload"
+          format: uuid
+          type: string
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof (03 §6.2)
+      required:
+        - evidence_file_id
+      type: object
     ReplaceEvidenceInputBody:
       additionalProperties: false
       properties:
@@ -12627,11 +12767,64 @@ components:
       required:
         - evidence_file_id
       type: object
+    ReplacePDFInputBody:
+      additionalProperties: false
+      properties:
+        pdf_file_id:
+          description: "The new PDF: an invoice_pdf upload (application/pdf)"
+          format: uuid
+          type: string
+      required:
+        - pdf_file_id
+      type: object
+    ReplacePaymentEvidenceInputBody:
+      additionalProperties: false
+      properties:
+        evidence_file_id:
+          description: "The new evidence: a transfer_receipt upload"
+          format: uuid
+          type: string
+      required:
+        - evidence_file_id
+      type: object
+    ReplaceReceiptBody:
+      additionalProperties: false
+      properties:
+        receipt_file_id:
+          description: "The new receipt: an upload of the record's purpose"
+          format: uuid
+          type: string
+      required:
+        - receipt_file_id
+      type: object
     ReplaceReceiptInputBody:
       additionalProperties: false
       properties:
         receipt_file_id:
           description: "The new bank receipt (dekont): a payout_receipt upload"
+          format: uuid
+          type: string
+      required:
+        - receipt_file_id
+      type: object
+    ReplaceRequestEvidenceInputBody:
+      additionalProperties: false
+      properties:
+        evidence_file_id:
+          description: "The new evidence: a refund_request_evidence upload of the buying company"
+          format: uuid
+          type: string
+      required:
+        - evidence_file_id
+      type: object
+    ReplaceReturnReceiptInputBody:
+      additionalProperties: false
+      properties:
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: Re-authentication proof (03 §6.2)
+        receipt_file_id:
+          description: "The new EFT receipt: a refund_receipt upload"
           format: uuid
           type: string
       required:
@@ -15033,6 +15226,13 @@ components:
           type: string
         receipt_file_id:
           format: uuid
+          type: string
+        receipt_file_state:
+          description: "The state of the return's receipt (BE-154b). rejected: found infected or not processable after its upload, it cannot be downloaded; finance uploads it again (adminReplaceIncomingTransferReturnReceipt)"
+          enum:
+            - clean
+            - pending
+            - rejected
           type: string
         requested_at:
           format: date-time
@@ -18534,6 +18734,109 @@ paths:
       x-koro-action: payments.transfer.read
       x-koro-rate-limit: read_default
       x-koro-surface: admin
+  /api/v1/admin/incoming-transfers/{transfer_id}/replace-receipt:
+    post:
+      description: "The people who record a transfer (adminCreateIncomingTransfer). receipt_file_id is a new transfer_receipt upload; a transfer without a receipt is 409 payments.invalid_state. Its receivable collections take the new receipt with it. Only when the file was rejected after its upload (found infected or not processable: its *_file_state is rejected; 409 files.not_rejected otherwise). The new file is a completed upload of the same purpose (422 otherwise; 409 files.rejected, files.not_clean or files.already_attached). Nothing else of the record changes; the rejected file stays on record (audit operation replace_rejected_file with both file IDs). Idempotency-Key optional."
+      operationId: adminReplaceIncomingTransferReceipt
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Incoming transfer ID (an unknown or malformed ID is 404)
+          in: path
+          name: transfer_id
+          required: true
+          schema:
+            description: Incoming transfer ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplaceReceiptBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncomingTransferDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Upload a transfer's bank receipt again
+      tags:
+        - payments
+      x-koro-action: payments.transfer.create
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+      x-koro-terms-gate: enforced
+  /api/v1/admin/incoming-transfers/{transfer_id}/replace-return-receipt:
+    post:
+      description: "Requires re-authentication, as the return's receipt step (adminMarkIncomingTransferReturned). Only a returned transfer (409 payments.invalid_state); receipt_file_id is a new refund_receipt upload. The return's four eyes and bank reference do not change. Only when the file was rejected after its upload (found infected or not processable: its *_file_state is rejected; 409 files.not_rejected otherwise). The new file is a completed upload of the same purpose (422 otherwise; 409 files.rejected, files.not_clean or files.already_attached). Nothing else of the record changes; the rejected file stays on record (audit operation replace_rejected_file with both file IDs). Idempotency-Key optional."
+      operationId: adminReplaceIncomingTransferReturnReceipt
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Incoming transfer ID (an unknown or malformed ID is 404)
+          in: path
+          name: transfer_id
+          required: true
+          schema:
+            description: Incoming transfer ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplaceReturnReceiptInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncomingTransferDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Upload a return's EFT receipt again
+      tags:
+        - payments
+      x-koro-action: payments.transfer.mark_returned
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/incoming-transfers/{transfer_id}/request-return:
     post:
       description: "Requires re-authentication. Step 1 of 3 (06 H-56): an unmatched or ignored transfer waits for another finance admin's approval (return_requested). target_iban defaults to the sender's IBAN."
@@ -18791,7 +19094,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/admin/invoices/{invoice_id}/verify:
     post:
-      description: "The number, date and amounts of the uploaded document match the planned invoice (issued: the PDF is e-mailed to the recipient) or not (mismatch with a note: the uploader side may upload again). The uploader cannot verify (403 authz.four_eyes_violation). Only an upload waiting for verification (409 billing.invalid_state)."
+      description: "The number, date and amounts of the uploaded document match the planned invoice (issued: the PDF is e-mailed to the recipient) or not (mismatch with a note: the uploader side may upload again). The uploader cannot verify (403 authz.four_eyes_violation). Only an upload waiting for verification (409 billing.invalid_state). An issued invoice whose rejected PDF was replaced (pdf_replaced_at, no verified_at; BE-154b) is verified again: result issued only (422 otherwise; a wrong document is cancelled with a credit note), it stays issued and is not e-mailed again until verified."
       operationId: adminVerifyInvoice
       parameters:
         - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
@@ -19301,6 +19604,57 @@ paths:
       x-koro-action: parties.document.read
       x-koro-rate-limit: read_default
       x-koro-surface: admin
+  /api/v1/admin/legal-party-documents/{document_id}/replace-file:
+    post:
+      description: "The people and checks of adminUploadLegalPartyDocument; file_id is a party_document upload of the caller (422 otherwise). The caller becomes the document's uploader and a verification is reset. Only when the file was rejected after its upload (found infected or not processable: its state is rejected; 409 files.not_rejected otherwise); 409 files.rejected, files.not_clean or files.already_attached for the new file. The rejected file stays on record (audit operation replace_rejected_file with both file IDs). Idempotency-Key optional."
+      operationId: adminReplaceLegalPartyDocumentFile
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Document ID (an unknown or malformed ID is 404)
+          in: path
+          name: document_id
+          required: true
+          schema:
+            description: Document ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FileBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Upload a legal party document's file again (finance and platform admins)
+      tags:
+        - parties
+      x-koro-action: parties.document.upload
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/legal-party-documents/{document_id}/verify:
     post:
       description: Never by the document's uploader (403 authz.four_eyes_violation). A verified document is 409 parties.invalid_state; a file that is not scanned clean is 409 files.not_clean.
@@ -20671,6 +21025,57 @@ paths:
       x-koro-action: payments.payment.read
       x-koro-rate-limit: read_default
       x-koro-surface: admin
+  /api/v1/admin/payments/{payment_id}/replace-evidence:
+    post:
+      description: "The people who confirm a direct payment (adminConfirmDirectPayment). Only a payment with evidence (a model C direct payment; 409 payments.invalid_state otherwise); evidence_file_id is a new transfer_receipt upload. Only when the file was rejected after its upload (found infected or not processable: its *_file_state is rejected; 409 files.not_rejected otherwise). The new file is a completed upload of the same purpose (422 otherwise; 409 files.rejected, files.not_clean or files.already_attached). Nothing else of the record changes; the rejected file stays on record (audit operation replace_rejected_file with both file IDs). Idempotency-Key optional."
+      operationId: adminReplacePaymentEvidence
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Payment ID (an unknown or malformed ID is 404)
+          in: path
+          name: payment_id
+          required: true
+          schema:
+            description: Payment ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplacePaymentEvidenceInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Upload a direct payment's evidence again
+      tags:
+        - payments
+      x-koro-action: payments.transfer.match
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+      x-koro-terms-gate: enforced
   /api/v1/admin/payouts:
     get:
       description: "Newest first; status narrows the list (e.g. the approval queue: pending_approval)."
@@ -22244,6 +22649,57 @@ paths:
       tags:
         - payments
       x-koro-action: payments.refund.reject
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: admin
+      x-koro-terms-gate: enforced
+  /api/v1/admin/refunds/{refund_id}/replace-receipt:
+    post:
+      description: "The people who complete a refund (adminCompleteRefund). Only a completed refund (409 payments.invalid_state); receipt_file_id is a new refund_receipt upload. The refund, its bank reference, the ledger and the order do not change. Only when the file was rejected after its upload (found infected or not processable: its *_file_state is rejected; 409 files.not_rejected otherwise). The new file is a completed upload of the same purpose (422 otherwise; 409 files.rejected, files.not_clean or files.already_attached). Nothing else of the record changes; the rejected file stays on record (audit operation replace_rejected_file with both file IDs). Idempotency-Key optional."
+      operationId: adminReplaceRefundReceipt
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Refund ID (an unknown or malformed ID is 404)
+          in: path
+          name: refund_id
+          required: true
+          schema:
+            description: Refund ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplaceReceiptBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Upload a completed refund's EFT receipt again
+      tags:
+        - payments
+      x-koro-action: payments.refund.complete
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: admin
@@ -26538,6 +26994,56 @@ paths:
       x-koro-action: billing.invoice.read
       x-koro-rate-limit: read_default
       x-koro-surface: resource
+  /api/v1/invoices/{invoice_id}/replace-pdf:
+    post:
+      description: "BE-154b: only when the PDF was rejected after its upload (found infected or not processable: pdf_file_state = rejected; 409 files.not_rejected otherwise), of an uploaded invoice that waits for its verification or is issued (409 billing.invalid_state; a mismatch is uploaded again with uploadInvoice). pdf_file_id is an invoice_pdf PDF of the caller or of the issuing organization (422; 409 files.rejected, files.not_clean or files.already_attached). The people of uploadInvoice. The caller becomes the uploader and another finance admin verifies the new PDF (adminVerifyInvoice); an issued invoice stays issued with its number, ETTN, date and amounts, pdf_replaced_at is set and its verification is reset (until then only the uploader side and finance read the PDF). The rejected file stays on record (audit operation replace_rejected_file). Idempotency-Key optional."
+      operationId: replaceInvoicePdf
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - in: path
+          name: invoice_id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplacePDFInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Upload an invoice's PDF again
+      tags:
+        - billing
+      x-koro-action: billing.invoice.upload
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/invoices/{invoice_id}/upload:
     post:
       description: The PDF (an invoice_pdf upload of the caller or of the issuing organization), the invoice number, the issue date and the document type of a planned invoice without a document, or of one whose upload was found not to match (409 billing.invalid_state otherwise). The issuing organization's admins upload its own service invoices (03 k29); finance uploads any. Another finance admin verifies it.
@@ -31936,6 +32442,71 @@ paths:
       x-koro-action: parties.document.read
       x-koro-rate-limit: read_default
       x-koro-surface: org
+  /api/v1/orgs/{org_id}/legal-parties/{party_id}/documents/{document_id}/replace-file:
+    post:
+      description: "The people and checks of uploadLegalPartyDocument; file_id is a party_document upload of the caller or of this organization (422 otherwise). The caller becomes the document's uploader and a verification is reset (another finance admin verifies the new file; 06 H-60). A document of another party is 404. Only when the file was rejected after its upload (found infected or not processable: its state is rejected; 409 files.not_rejected otherwise); 409 files.rejected, files.not_clean or files.already_attached for the new file. The rejected file stays on record (audit operation replace_rejected_file with both file IDs). Idempotency-Key optional."
+      operationId: replaceLegalPartyDocumentFile
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Legal party ID (an unknown, malformed or other organization's ID is 404)
+          in: path
+          name: party_id
+          required: true
+          schema:
+            description: Legal party ID (an unknown, malformed or other organization's ID is 404)
+            type: string
+        - description: Document ID (an unknown, malformed or other party's ID is 404)
+          in: path
+          name: document_id
+          required: true
+          schema:
+            description: Document ID (an unknown, malformed or other party's ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FileBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Upload a legal party document's file again
+      tags:
+        - parties
+      x-koro-action: parties.document.upload
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/members:
     get:
       description: "The org's admins (club_admin, university_rep, company roles) see the list; members do not see each other. support and platform_admin need X-Koro-Access-Reason (break-glass, audited). A sensitive club's list is its club_admin's only, every read is audited, and platform staff get 404. When the read concerns one user, the X-Koro-Access-Reason justification is shown to that user (support access notification; reason of the break_glass item of listMySecurityEvents): write no other person's data in it."
@@ -33075,6 +33646,76 @@ paths:
         - sessionCookie: []
         - bearerAuth: []
       summary: Submit a bank account (IBAN) of a payee
+      tags:
+        - parties
+      x-koro-action: parties.bank_account.submit
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: org
+      x-koro-terms-gate: enforced
+  /api/v1/orgs/{org_id}/payees/{payee_id}/bank-accounts/{bank_account_id}/replace-evidence:
+    post:
+      description: "Requires re-authentication; the people of submitPayeeBankAccount. Only while the account waits for an eye (409 parties.invalid_state; an approved account is submitted again), and an admin submission only by finance or platform admins (409). evidence_file_id is a bank_account_evidence upload of this organization or of the caller (422). An org submission waiting for the second eye goes back to pending_verification; the IBAN, the holder and the submitter do not change, and whoever uploaded the evidence may not verify or approve the account (403 authz.four_eyes_violation). An account of another payee is 404. Only when the file was rejected after its upload (found infected or not processable: its state is rejected; 409 files.not_rejected otherwise); 409 files.rejected, files.not_clean or files.already_attached for the new file. The rejected file stays on record (audit operation replace_rejected_file with both file IDs). Idempotency-Key optional."
+      operationId: replacePayeeBankAccountEvidence
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Organization ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Organization ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Payee ID (an unknown, malformed or other organization's ID is 404)
+          in: path
+          name: payee_id
+          required: true
+          schema:
+            description: Payee ID (an unknown, malformed or other organization's ID is 404)
+            type: string
+        - description: Bank account ID (an unknown, malformed or other payee's ID is 404)
+          in: path
+          name: bank_account_id
+          required: true
+          schema:
+            description: Bank account ID (an unknown, malformed or other payee's ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplaceAccountEvidenceInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankAccountDTO"
+          description: OK
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Upload a bank account's evidence again
       tags:
         - parties
       x-koro-action: parties.bank_account.submit
@@ -34646,6 +35287,57 @@ paths:
       x-koro-action: payments.refund_request.read_evidence
       x-koro-rate-limit: read_default
       x-koro-surface: resource
+  /api/v1/refund-requests/{refund_request_id}/replace-evidence:
+    post:
+      description: "The buying company's admins (createOrderRefundRequest's cell, on the request; anyone who does not see the request gets 404). Only while the request waits for finance (open or in_review) and holds evidence (409 payments.invalid_state); evidence_file_id is a new refund_request_evidence upload of the buying company. Only when the file was rejected after its upload (found infected or not processable: its *_file_state is rejected; 409 files.not_rejected otherwise). The new file is a completed upload of the same purpose (422 otherwise; 409 files.rejected, files.not_clean or files.already_attached). Nothing else of the record changes; the rejected file stays on record (audit operation replace_rejected_file with both file IDs). Idempotency-Key optional."
+      operationId: replaceRefundRequestEvidence
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Refund request ID (an unknown or malformed ID is 404)
+          in: path
+          name: refund_request_id
+          required: true
+          schema:
+            description: Refund request ID (an unknown or malformed ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplaceRequestEvidenceInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundRequestDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Upload a refund request's evidence again
+      tags:
+        - payments
+      x-koro-action: payments.refund_request.create
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: resource
+      x-koro-terms-gate: enforced
   /api/v1/refund-requests/{refund_request_id}/withdraw:
     post:
       description: The buying company's admin, while it waits (open or in_review; 409 payments.invalid_state once decided).

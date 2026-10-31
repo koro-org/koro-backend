@@ -49,8 +49,10 @@ func checkRow(i Invoice) error {
 		return ErrInvalidState // invoices_issued_chk
 	case i.IssuedAt != nil && i.Status != StatusIssued && i.Status != StatusCancelled:
 		return ErrInvalidState // invoices_issued_at_chk
-	case i.IssuingMode.Uploaded() && i.Status == StatusIssued && (i.UploadedBy == nil || i.VerifiedBy == nil):
-		return ErrInvalidState // invoices_uploaded_chk, invoices_manual_verified_chk
+	case i.IssuingMode.Uploaded() && i.Status == StatusIssued && (i.UploadedBy == nil || i.VerifiedBy == nil && i.PDFReplacedAt == nil):
+		return ErrInvalidState // invoices_uploaded_chk, invoices_manual_verified_chk (000164)
+	case i.PDFReplacedAt != nil && (i.IssuedAt == nil || i.PDFReplacedAt.Before(*i.IssuedAt)):
+		return ErrInvalidState // invoices_pdf_replaced_chk (000164)
 	case (i.Kind == KindCreditNote) != (i.RefersToInvoiceID != nil):
 		return ErrInvalidState // invoices_credit_note_chk
 	case i.IssuerPartyID == i.RecipientPartyID:
@@ -61,20 +63,38 @@ func checkRow(i Invoice) error {
 	return nil
 }
 
-// frozen is invoices_frozen: once issued_at is set the document stays.
+// frozen is invoices_frozen with 000164's PDF rules: once issued_at is set
+// the invoice stays; its PDF changes only by a replacement (a new uploader,
+// a later pdf_replaced_at, the verification reset; invoices_pdf_guard's
+// "only a rejected file" is the service's) and the verification is written
+// only to complete a pending re-verification (invoices_pdf_reverify).
 func frozen(old, next Invoice) error {
 	if old.IssuedAt == nil {
+		if next.PDFReplacedAt != nil {
+			return ErrInvalidState // invoices_pdf_replaced_chk: before the issue
+		}
 		return nil
 	}
 	same := func(a, b *uuid.UUID) bool { return (a == nil) == (b == nil) && (a == nil || *a == *b) }
 	sameStr := func(a, b *string) bool { return (a == nil) == (b == nil) && (a == nil || *a == *b) }
 	sameTime := func(a, b *time.Time) bool { return (a == nil) == (b == nil) && (a == nil || a.Equal(*b)) }
-	if !sameStr(old.InvoiceNo, next.InvoiceNo) || !same(old.ETTN, next.ETTN) || !same(old.PDFFileID, next.PDFFileID) ||
-		!bytes.Equal(old.PDFSHA256, next.PDFSHA256) || !same(old.UploadedBy, next.UploadedBy) ||
-		!same(old.VerifiedBy, next.VerifiedBy) || !sameTime(old.VerifiedAt, next.VerifiedAt) ||
+	bad := errors.New("billing: UPDATE of invoices is not allowed: the document is frozen once issued_at is set")
+	if !sameStr(old.InvoiceNo, next.InvoiceNo) || !same(old.ETTN, next.ETTN) ||
 		!sameTime(old.IssuedAt, next.IssuedAt) || (old.IssueDate == nil) != (next.IssueDate == nil) ||
 		(old.IssueDate != nil && *old.IssueDate != *next.IssueDate) {
-		return errors.New("billing: UPDATE of invoices is not allowed: the document is frozen once issued_at is set")
+		return bad
+	}
+	if !same(old.PDFFileID, next.PDFFileID) {
+		if next.PDFFileID == nil || next.UploadedBy == nil || next.VerifiedBy != nil || next.VerifiedAt != nil ||
+			next.PDFReplacedAt == nil || old.PDFReplacedAt != nil && next.PDFReplacedAt.Before(*old.PDFReplacedAt) {
+			return bad
+		}
+		return nil
+	}
+	verification := !same(old.VerifiedBy, next.VerifiedBy) || !sameTime(old.VerifiedAt, next.VerifiedAt)
+	if !bytes.Equal(old.PDFSHA256, next.PDFSHA256) || !same(old.UploadedBy, next.UploadedBy) ||
+		!sameTime(old.PDFReplacedAt, next.PDFReplacedAt) || verification && (old.VerifiedBy != nil || old.PDFReplacedAt == nil) {
+		return bad
 	}
 	return nil
 }
@@ -152,7 +172,7 @@ func (m *MemStore) UpdateInvoice(_ context.Context, next Invoice, from Status) (
 		next.ETTN, next.IssueDate
 	upd.PDFFileID, upd.PDFSHA256, upd.UploadedBy, upd.VerifiedBy, upd.VerifiedAt = next.PDFFileID, bytes.Clone(next.PDFSHA256),
 		next.UploadedBy, next.VerifiedBy, next.VerifiedAt
-	upd.IssuedAt, upd.LastError = next.IssuedAt, next.LastError
+	upd.IssuedAt, upd.LastError, upd.PDFReplacedAt = next.IssuedAt, next.LastError, next.PDFReplacedAt
 	if err := frozen(cur, upd); err != nil {
 		return Invoice{}, err
 	}

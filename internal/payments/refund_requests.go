@@ -196,7 +196,8 @@ func audienceOf(a authz.Actor, r RefundRequest) RequestAudience {
 	return AudienceSeller
 }
 
-// views adds the org names to rows (one directory read for the page).
+// views adds the org names (one directory read for the page) and the
+// states of the evidence files (one files read; BE-154b) to rows.
 func (s *service) views(ctx context.Context, rows []RefundRequest, aud RequestAudience) ([]RefundRequestView, error) {
 	if s.d.Orgs == nil {
 		return nil, ErrUnavailable
@@ -210,9 +211,18 @@ func (s *service) views(ctx context.Context, rows []RefundRequest, aud RequestAu
 	if err != nil {
 		return nil, err
 	}
+	evidence := make([]*uuid.UUID, len(rows))
+	for i := range rows {
+		evidence[i] = rows[i].EvidenceFileID
+	}
+	states, err := s.EvidenceStates(ctx, evidence...)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]RefundRequestView, len(rows))
 	for i, r := range rows {
-		out[i] = RefundRequestView{Request: r, BuyerName: names[r.OrgID].Name, SellerName: names[r.SellerOrgID].Name, Audience: aud}
+		out[i] = RefundRequestView{Request: r, BuyerName: names[r.OrgID].Name, SellerName: names[r.SellerOrgID].Name, Audience: aud,
+			EvidenceState: files.StateOf(states, r.EvidenceFileID)}
 	}
 	return out, nil
 }

@@ -8,12 +8,13 @@ import (
 	"koro/internal/audit"
 	"koro/internal/audit/audittest"
 	"koro/internal/authz"
+	"koro/internal/files"
 	"koro/internal/identity"
 )
 
 // TestReauthDenied_EveryROperation (03 §6.2, BE-074): every parties R
-// operation (parties.bank_account.submit by the org and by an admin,
-// approve, revoke) audits a refused proof — wrong (403
+// operation (parties.bank_account.submit by the org and by an admin, and
+// the org's evidence replacement (BE-154b), approve, revoke) audits a refused proof — wrong (403
 // identity.reauth_failed) or missing (403 identity.reauth_required) — as
 // one denied reauth_failed record of the bank account (none yet for a
 // submission), scoped to the payee's org like the account's own records
@@ -57,6 +58,17 @@ func TestReauthDenied_EveryROperation(t *testing.T) {
 				}
 				return op{persona: "platform_admin", account: &id, call: func(ctx context.Context, a authz.Actor, p identity.ReauthProof) error {
 					_, err := e.svc.AdminApproveBankAccount(ctx, a, id, p)
+					return err
+				}}
+			}},
+		{name: "replacePayeeBankAccountEvidence", action: authz.PartiesBankAccountSubmit,
+			setup: func(t *testing.T, e *env, payee uuid.UUID) op {
+				b := e.orgSubmit(t, payee, ibanA).Account
+				e.infected(b.EvidenceFileID)
+				club := org("club_a")
+				next := e.files.addPurpose(files.PurposeBankAccountEvidence, actor(t, "club_admin").UserID, &club)
+				return op{persona: "club_admin", account: &b.ID, call: func(ctx context.Context, a authz.Actor, p identity.ReauthProof) error {
+					_, err := e.svc.ReplaceBankAccountEvidence(ctx, a, club, payee, b.ID, next, p)
 					return err
 				}}
 			}},

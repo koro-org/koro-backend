@@ -72,6 +72,12 @@ type Store interface {
 	// SetDocumentVerified marks a document verified by and at the given
 	// values and returns it; ErrNotFound when it is gone.
 	SetDocumentVerified(ctx context.Context, id, by uuid.UUID, at time.Time) (Document, error)
+	// ReplaceDocumentFile writes next in place of cur, the document's
+	// rejected file (BE-154b): by is its uploader now and the verification
+	// is reset. ErrNotFound without the row, ErrInvalidState when it holds
+	// another file (legal_party_documents_file_guard lets only a rejected
+	// file go).
+	ReplaceDocumentFile(ctx context.Context, id, cur, next, by uuid.UUID) (Document, error)
 	// DocumentsUploadedBy returns the documents a user uploaded, oldest
 	// first (KVKK export).
 	DocumentsUploadedBy(ctx context.Context, userID uuid.UUID) ([]Document, error)
@@ -143,6 +149,12 @@ type BankAccountStore interface {
 	// ErrInvalidState when the status is no longer from (a concurrent
 	// decision); the four-eyes CHECKs answer 403 authz.four_eyes_violation.
 	TransitionBankAccount(ctx context.Context, b BankAccount, from BankAccountStatus) (BankAccount, error)
+	// ReplaceAccountEvidence writes b's evidence and first eye (status,
+	// verified_by/at) when the stored row is in status from and holds the
+	// evidence cur (BE-154b); ErrInvalidState otherwise. The IBAN, the
+	// holder and the submitter are never written
+	// (payee_bank_accounts_evidence_guard lets only a rejected file go).
+	ReplaceAccountEvidence(ctx context.Context, b BankAccount, cur uuid.UUID, from BankAccountStatus) (BankAccount, error)
 	// BankAccountsSubmittedBy returns the accounts a user submitted, oldest
 	// first (KVKK export).
 	BankAccountsSubmittedBy(ctx context.Context, userID uuid.UUID) ([]BankAccount, error)

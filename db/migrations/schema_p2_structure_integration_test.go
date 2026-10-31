@@ -260,6 +260,8 @@ func TestSchema_P2SchemaIDColumnsAndTriggers(t *testing.T) {
 		"incoming_bank_transfers.incoming_bank_transfers_return_receipt_guard koro_evidence_file_guard", // 000163 (BE-154)
 		"incoming_bank_transfers.incoming_bank_transfers_returned_frozen koro_freeze_columns",
 		"invoices.invoices_frozen koro_freeze_columns",
+		"invoices.invoices_pdf_guard koro_evidence_file_guard",     // 000164 (BE-154b)
+		"invoices.invoices_pdf_reverify koro_invoice_pdf_reverify", // 000164 (BE-154b)
 		"ledger_entries.ledger_entries_immutable koro_forbid_mutation",
 		"ledger_entries.ledger_entries_no_truncate koro_forbid_mutation",
 		"ledger_entries.ledger_txn_balanced ledger_check_balanced" + deferred,

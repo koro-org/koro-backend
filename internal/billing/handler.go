@@ -4,11 +4,13 @@ import (
 	"context"
 	"net/http"
 	"time"
+	"uuid"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
 	"koro/internal/consent"
+	"koro/internal/files"
 	"koro/internal/identity"
 	"koro/internal/platform/db"
 	"koro/internal/platform/httpx"
@@ -54,6 +56,21 @@ func Register(api huma.API, svc Service) {
 		h.upload)
 
 	op.Register(api, "billing", huma.Operation{
+		OperationID: "replaceInvoicePdf", Method: http.MethodPost, Path: "/invoices/{invoice_id}/replace-pdf",
+		Summary: "Upload an invoice's PDF again",
+		Description: "BE-154b: only when the PDF was rejected after its upload (found infected or not processable: " +
+			"pdf_file_state = rejected; 409 files.not_rejected otherwise), of an uploaded invoice that waits for its " +
+			"verification or is issued (409 billing.invalid_state; a mismatch is uploaded again with uploadInvoice). " +
+			"pdf_file_id is an invoice_pdf PDF of the caller or of the issuing organization (422; 409 files.rejected, " +
+			"files.not_clean or files.already_attached). The people of uploadInvoice. The caller becomes the uploader and " +
+			"another finance admin verifies the new PDF (adminVerifyInvoice); an issued invoice stays issued with its " +
+			"number, ETTN, date and amounts, pdf_replaced_at is set and its verification is reset (until then only the " +
+			"uploader side and finance read the PDF). The rejected file stays on record (audit operation " +
+			"replace_rejected_file). Idempotency-Key optional.",
+	}, op.Meta{Action: string(authz.BillingInvoiceUpload), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional},
+		h.replacePDF)
+
+	op.Register(api, "billing", huma.Operation{
 		OperationID: "adminListInvoices", Method: http.MethodGet, Path: "/admin/invoices",
 		Summary:     "List every invoice",
 		Description: "Newest first; status narrows the queue (planned: to upload or verify, mismatch).",
@@ -65,7 +82,9 @@ func Register(api huma.API, svc Service) {
 		Description: "The number, date and amounts of the uploaded document match the planned invoice (issued: the PDF " +
 			"is e-mailed to the recipient) or not (mismatch with a note: the uploader side may upload again). The " +
 			"uploader cannot verify (403 authz.four_eyes_violation). Only an upload waiting for verification (409 " +
-			"billing.invalid_state).",
+			"billing.invalid_state). An issued invoice whose rejected PDF was replaced (pdf_replaced_at, no verified_at; " +
+			"BE-154b) is verified again: result issued only (422 otherwise; a wrong document is cancelled with a credit " +
+			"note), it stays issued and is not e-mailed again until verified.",
 	}, op.Meta{Action: string(authz.BillingInvoiceVerify), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional},
 		h.verify)
 
@@ -160,6 +179,8 @@ type InvoiceDTO struct {
 	PayableAmount     int64            `json:"payable_amount" doc:"Kuruş: total − withheld VAT"`
 	RefersToInvoiceID string           `json:"refers_to_invoice_id,omitempty" format:"uuid" doc:"A credit note's invoice"`
 	HasPDF            bool             `json:"has_pdf"`
+	PDFFileState      string           `json:"pdf_file_state,omitempty" doc:"The state of the PDF (BE-154b). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the uploader side uploads it again (replaceInvoicePdf). pending: not scanned yet"`
+	PDFReplacedAt     *time.Time       `json:"pdf_replaced_at,omitempty" doc:"An issued invoice whose rejected PDF was replaced (BE-154b): until verified_at is set again the new PDF waits for finance's verification and only the uploader side and finance read it"`
 	UploadedBy        string           `json:"uploaded_by,omitempty" format:"uuid"`
 	MismatchNote      string           `json:"mismatch_note,omitempty" doc:"Why the upload did not match (status mismatch)"`
 	IssuedAt          *time.Time       `json:"issued_at,omitempty"`
@@ -187,7 +208,14 @@ func snapshotDTO(s Snapshot) InvoicePartyDTO {
 	return d
 }
 
-func invoiceDTO(inv Invoice, lines []Line) InvoiceDTO {
+// TransformSchema implements huma.SchemaTransformer: the file state's enum
+// comes from files (BE-154b).
+func (InvoiceDTO) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
+	return op.SetEnum(s, "pdf_file_state", files.StateValues())
+}
+
+// invoiceDTO maps an invoice with the states of the PDFs (st).
+func invoiceDTO(inv Invoice, lines []Line, st map[uuid.UUID]files.State) InvoiceDTO {
 	d := InvoiceDTO{
 		InvoiceID: inv.ID.String(), Kind: string(inv.Kind), Status: string(inv.Status), IssuingMode: string(inv.IssuingMode),
 		DocumentType: string(inv.DocumentType), Trigger: string(inv.Trigger), OrderID: httpx.IDStr(inv.OrderID),
@@ -197,6 +225,7 @@ func invoiceDTO(inv Invoice, lines []Line) InvoiceDTO {
 		ETTN: httpx.IDStr(inv.ETTN), Currency: inv.Currency, NetAmount: inv.NetAmount, VATAmount: inv.VATAmount,
 		VATWithheldAmount: inv.VATWithheldAmount, TotalAmount: inv.TotalAmount, PayableAmount: inv.PayableAmount,
 		RefersToInvoiceID: httpx.IDStr(inv.RefersToInvoiceID), HasPDF: inv.PDFFileID != nil, UploadedBy: httpx.IDStr(inv.UploadedBy),
+		PDFFileState: string(files.StateOf(st, inv.PDFFileID)), PDFReplacedAt: db.UTCPtr(inv.PDFReplacedAt),
 		IssuedAt: db.UTCPtr(inv.IssuedAt), CreatedAt: inv.CreatedAt.UTC(), UpdatedAt: inv.UpdatedAt.UTC(),
 	}
 	if d.Currency == "" {
@@ -228,8 +257,8 @@ func invoiceDTO(inv Invoice, lines []Line) InvoiceDTO {
 	return d
 }
 
-func invoiceAdminDTO(inv Invoice, lines []Line) InvoiceAdminDTO {
-	d := InvoiceAdminDTO{InvoiceDTO: invoiceDTO(inv, lines), PDFFileID: httpx.IDStr(inv.PDFFileID), VerifiedBy: httpx.IDStr(inv.VerifiedBy),
+func invoiceAdminDTO(inv Invoice, lines []Line, st map[uuid.UUID]files.State) InvoiceAdminDTO {
+	d := InvoiceAdminDTO{InvoiceDTO: invoiceDTO(inv, lines, st), PDFFileID: httpx.IDStr(inv.PDFFileID), VerifiedBy: httpx.IDStr(inv.VerifiedBy),
 		VerifiedAt: db.UTCPtr(inv.VerifiedAt), IdempotencyKey: inv.IdempotencyKey}
 	if inv.LastError != nil {
 		d.LastError = *inv.LastError
@@ -269,7 +298,7 @@ func (h handler) listOrg(ctx context.Context, in *listOrgInput) (*invoiceListOut
 	}
 	out := &invoiceListOutput{Body: InvoiceList{Items: make([]InvoiceDTO, len(p.Items))}}
 	for i, inv := range p.Items {
-		out.Body.Items[i] = invoiceDTO(inv, nil)
+		out.Body.Items[i] = invoiceDTO(inv, nil, p.PDFStates)
 	}
 	out.Body.NextCursor = invoiceNext(p.Next, fp)
 	return out, nil
@@ -311,7 +340,7 @@ func (h handler) adminList(ctx context.Context, in *adminListInput) (*invoiceAdm
 	}
 	out := &invoiceAdminListOutput{Body: InvoiceAdminList{Items: make([]InvoiceAdminDTO, len(p.Items))}}
 	for i, inv := range p.Items {
-		out.Body.Items[i] = invoiceAdminDTO(inv, nil)
+		out.Body.Items[i] = invoiceAdminDTO(inv, nil, p.PDFStates)
 	}
 	out.Body.NextCursor = invoiceNext(p.Next, fp)
 	return out, nil
@@ -361,7 +390,7 @@ func (h handler) get(ctx context.Context, in *getInput) (*invoiceOutput, error) 
 	if err != nil {
 		return nil, err
 	}
-	return &invoiceOutput{Body: invoiceDTO(v.Invoice, v.Lines)}, nil
+	return &invoiceOutput{Body: invoiceDTO(v.Invoice, v.Lines, v.PDFStates)}, nil
 }
 
 // InvoicePDFLinkDTO is the body of downloadInvoicePdf (04 §1.11 signed URL).
@@ -411,7 +440,7 @@ func (h handler) upload(ctx context.Context, in *uploadInput) (*invoiceOutput, e
 	if err != nil {
 		return nil, err
 	}
-	return &invoiceOutput{Body: invoiceDTO(v.Invoice, v.Lines)}, nil
+	return &invoiceOutput{Body: invoiceDTO(v.Invoice, v.Lines, v.PDFStates)}, nil
 }
 
 type invoiceAdminOutput struct{ Body InvoiceAdminDTO }
@@ -434,7 +463,27 @@ func (h handler) verify(ctx context.Context, in *verifyInput) (*invoiceAdminOutp
 	if err != nil {
 		return nil, err
 	}
-	return &invoiceAdminOutput{Body: invoiceAdminDTO(v.Invoice, v.Lines)}, nil
+	return &invoiceAdminOutput{Body: invoiceAdminDTO(v.Invoice, v.Lines, v.PDFStates)}, nil
+}
+
+type replacePDFInput struct {
+	idempotency.OptionalHeader
+	InvoicePath
+	Body struct {
+		PDFFileID string `json:"pdf_file_id" format:"uuid" doc:"The new PDF: an invoice_pdf upload (application/pdf)"`
+	}
+}
+
+func (h handler) replacePDF(ctx context.Context, in *replacePDFInput) (*invoiceOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	v, err := h.svc.ReplaceInvoicePDF(ctx, a, httpx.ParseID(in.InvoiceID), httpx.ParseID(in.Body.PDFFileID))
+	if err != nil {
+		return nil, err
+	}
+	return &invoiceOutput{Body: invoiceDTO(v.Invoice, v.Lines, v.PDFStates)}, nil
 }
 
 // CancelledInvoiceDTO is the body of adminCancelInvoice.
@@ -462,9 +511,9 @@ func (h handler) cancel(ctx context.Context, in *cancelInput) (*cancelOutput, er
 	if err != nil {
 		return nil, err
 	}
-	out := &cancelOutput{Body: CancelledInvoiceDTO{InvoiceAdminDTO: invoiceAdminDTO(r.Invoice, nil)}}
+	out := &cancelOutput{Body: CancelledInvoiceDTO{InvoiceAdminDTO: invoiceAdminDTO(r.Invoice, nil, r.PDFStates)}}
 	if r.CreditNote != nil {
-		cn := invoiceAdminDTO(*r.CreditNote, nil)
+		cn := invoiceAdminDTO(*r.CreditNote, nil, r.PDFStates)
 		out.Body.CreditNote = &cn
 	}
 	return out, nil

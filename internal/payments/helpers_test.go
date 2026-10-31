@@ -152,6 +152,20 @@ func (f *fakeFiles) PresignGet(_ context.Context, fid uuid.UUID, ttl time.Durati
 	return files.Download{URL: "https://files.example.test/" + fid.String(), ExpiresAt: time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC).Add(ttl)}, nil
 }
 
+// States answers the state of each known file (BE-154b; the rule of
+// files.FileMeta.State with no scanner required).
+func (f *fakeFiles) States(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]files.State, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[uuid.UUID]files.State{}
+	for _, fid := range ids {
+		if m, ok := f.m[fid]; ok {
+			out[fid] = m.State(false)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeFiles) Attach(_ context.Context, _ authz.Actor, fid uuid.UUID, o files.Owner) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

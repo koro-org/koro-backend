@@ -8,6 +8,8 @@ import (
 	"slices"
 	"time"
 	"uuid"
+
+	"koro/internal/files"
 )
 
 // Kind is legal_parties.kind (02 §17.1).
@@ -244,6 +246,9 @@ type PartyView struct {
 	// TCKNOnFile reports an individual's stored national ID (shown to
 	// finance and platform admins as a flag; the value never leaves).
 	TCKNOnFile bool
+	// FileStates are the states of the documents' files (by file ID;
+	// BE-154b).
+	FileStates map[uuid.UUID]files.State
 }
 
 // DocumentLink is a short-lived download URL of a document (04 §1.14).

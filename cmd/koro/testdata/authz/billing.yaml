@@ -1,4 +1,4 @@
-# Authz matrix of the billing module (03 §5.18, 04 §2.18; BE-042). 9 operations × 18 personas.
+# Authz matrix of the billing module (03 §5.18, 04 §2.18; BE-042, BE-154b). 10 operations × 18 personas.
 # Admin surface (03 §7.2-3): everyone without the role → 403, nothing is read first. Org and invoice
 # surface (03 §3.6): an invoice is visible to the active members of its issuing and receiving orgs and to
 # every platform role (403 without a cell); anyone else gets 404. k29: the issuer's club admin uploads only
@@ -293,3 +293,50 @@ operations:
       "@other_staff": 403
       platform_admin: 200
       finance_admin: 200
+
+  # BE-154b (T-397): an issued invoice's PDF that the scan rejected is uploaded again by the people of uploadInvoice
+  # (k29); the invoice stays issued, its verification is reset.
+  replaceInvoicePdf:
+    method: POST
+    path: /api/v1/invoices/{invoice_id}/replace-pdf
+    action: billing.invoice.upload
+    path_params: { invoice_id: inv_issued_rejected }
+    body: bodies/billing/replace_pdf.json
+    note: club_a's admin replaces the payee's rejected PDF with the club's PDF; finance may too
+    expect:
+      anonymous: 401
+      "@outsiders_invoice_a": 404
+      club_member: 403
+      club_admin: 200
+      company_member: 403
+      company_admin: 403
+      "@other_staff": 403
+      platform_admin: 403
+      finance_admin: 200
+    variants:
+      - name: pdf_not_rejected
+        path_params: { invoice_id: inv_issued }
+        note: a PDF that was not rejected stays — 409 files.not_rejected
+        expect:
+          anonymous: 401
+          "@outsiders_invoice_a": 404
+          club_member: 403
+          club_admin: 409
+          company_member: 403
+          company_admin: 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 409
+      - name: planned
+        path_params: { invoice_id: inv_planned }
+        note: a planned invoice without a document has no PDF to replace — 409 billing.invalid_state
+        expect:
+          anonymous: 401
+          "@outsiders_invoice_a": 404
+          club_member: 403
+          club_admin: 409
+          company_member: 403
+          company_admin: 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 409

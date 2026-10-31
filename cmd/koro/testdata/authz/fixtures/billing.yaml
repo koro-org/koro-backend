@@ -2,7 +2,8 @@
 # A pdf is an active invoice_pdf upload (scan skipped) of uploaded_by, for org when given, attached to
 # invoice when given. An invoice is a planned document (02 §22.1) of invoice_kind from issuer (a parties
 # fixture) of issuer_org (none: Koro's own invoice) to recipient of recipient_org; status uploaded adds
-# the upload (uploaded_by, pdf), issued and mismatch the verification (verified_by) too.
+# the upload (uploaded_by, pdf), issued and mismatch the verification (verified_by) too. A pdf with scan: infected
+# was rejected by the scan after its upload (BE-154b).
 version: 1
 fixtures:
   # the club's PDF for the uploads of the matrix (club_admin's, for club_a: finance may use it too).
@@ -36,3 +37,9 @@ fixtures:
   # payout IDs of the commission invoices (no payout row in memory).
   po_matrix_a: { kind: payout_ref }
   po_matrix_b: { kind: payout_ref }
+  # BE-154b: club_a's issued service invoice (of ord_a_rejected_ev) whose PDF the scan rejected afterwards; the issuer's
+  # admin or finance uploads it again (pdf_club).
+  pdf_issued_rejected: { kind: pdf, uploaded_by: club_admin, org: club_a, invoice: inv_issued_rejected, scan: infected }
+  inv_issued_rejected: { kind: invoice, invoice_kind: service_sale, issuer: party_foundation_a, issuer_org: club_a,
+                         recipient: party_buyer_a, recipient_org: company_a, mode: seller_uploaded, order: ord_a_rejected_ev,
+                         status: issued, uploaded_by: club_admin, pdf: pdf_issued_rejected, verified_by: finance_admin_2 }

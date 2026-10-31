@@ -182,6 +182,27 @@ func TestReauthDenied_EveryROperation(t *testing.T) {
 					denied: audit.Event{ResourceType: authz.TypeIncomingTransfer, ResourceID: ref(tr.ID),
 						Metadata: map[string]any{"step": "receipt"}}}
 			}},
+		{name: "replaceTransferReturnReceipt", action: authz.PaymentsTransferMarkReturned,
+			setup: func(t *testing.T, e *env, _ *collectionLine) reauthOp {
+				tr := e.requestedReturn(t)
+				fin, fin2 := actor(t, "finance_admin"), actor(t, "finance_admin_2")
+				if _, err := e.svc.DecideReturn(ctxOf(t, fin2), fin2, tr.ID, payments.DecisionApproved, good); err != nil {
+					t.Fatal(err)
+				}
+				old := e.files.add(files.PurposeRefundReceipt)
+				if _, err := e.svc.MarkReturned(ctxOf(t, fin), fin, tr.ID, payments.ReturnReceipt{BankReference: "EFT-1", ReceiptFileID: old}, good); err != nil {
+					t.Fatal(err)
+				}
+				e.reject(old)
+				receipt := e.files.add(files.PurposeRefundReceipt)
+				return reauthOp{persona: "finance_admin",
+					call: func(ctx context.Context, a authz.Actor, p identity.ReauthProof) error {
+						_, err := e.svc.AdminReplaceReturnReceipt(ctx, a, tr.ID, receipt, p)
+						return err
+					},
+					denied: audit.Event{ResourceType: authz.TypeIncomingTransfer, ResourceID: ref(tr.ID),
+						Metadata: map[string]any{"step": "replace_receipt"}}}
+			}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

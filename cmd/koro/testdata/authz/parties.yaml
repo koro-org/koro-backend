@@ -1,4 +1,4 @@
-# Authz matrix of the parties module (03 §5.13, 04 §2.13; BE-036, BE-037, BE-128, BE-129). 32 operations × 18 personas.
+# Authz matrix of the parties module (03 §5.13, 04 §2.13; BE-036, BE-037, BE-128, BE-129, BE-154b). 35 operations × 18 personas.
 # Org surface (03 §3.6, §7.6): members of the org without the role → 403 before any row is read
 # (no ID probing), non-members → 404, every platform role sees the surface (403 unless
 # platform_admin/finance_admin); the org is looked up first, so an unknown org is 404 for everyone.
@@ -924,3 +924,108 @@ operations:
       "@other_staff": 403
       platform_admin: 200
       finance_admin: 403
+
+  # ---- BE-154b (T-397): a rejected document file or bank account evidence is uploaded again (the cell of the
+  # first upload; the replacer becomes the document's uploader, a verification is reset)
+
+  replaceLegalPartyDocumentFile:
+    method: POST
+    path: /api/v1/orgs/{org_id}/legal-parties/{party_id}/documents/{document_id}/replace-file
+    action: parties.document.upload
+    path_params: { org_id: company_a, party_id: party_buyer_a, document_id: doc_buyer_rejected }
+    body: bodies/parties/replace_document_company_a.json
+    note: the people of uploadLegalPartyDocument replace a file the scan rejected with an upload of the company
+    expect:
+      anonymous: 401
+      "@outsiders_company_a": 404
+      company_member: 403
+      company_admin: 200
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: file_not_rejected
+        path_params: { org_id: company_a, party_id: party_buyer_a, document_id: doc_buyer_a }
+        note: a file that was not rejected stays — 409 files.not_rejected
+        expect:
+          anonymous: 401
+          "@outsiders_company_a": 404
+          company_member: 403
+          company_admin: 409
+          "@other_staff": 403
+          platform_admin: 409
+          finance_admin: 409
+      - name: other_partys_document
+        path_params: { org_id: company_a, party_id: party_buyer_a, document_id: doc_payee_rejected }
+        note: IDOR — a document of another party under this party's path (06 H-38)
+        expect:
+          anonymous: 401
+          "@outsiders_company_a": 404
+          company_member: 403
+          company_admin: 404
+          "@other_staff": 403
+          platform_admin: 404
+          finance_admin: 404
+
+  adminReplaceLegalPartyDocumentFile:
+    method: POST
+    path: /api/v1/admin/legal-party-documents/{document_id}/replace-file
+    action: parties.document.upload
+    path_params: { document_id: doc_payee_rejected }
+    body: bodies/parties/replace_document_pad.json
+    note: the new file must be the caller's own upload — platform_admin's file is 422 for finance_admin
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 422
+    variants:
+      - name: finance_upload
+        body: bodies/parties/replace_document_fin.json
+        note: finance_admin's file is 422 for platform_admin
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          "@other_staff": 403
+          platform_admin: 422
+          finance_admin: 200
+
+  replacePayeeBankAccountEvidence:
+    method: POST
+    path: /api/v1/orgs/{org_id}/payees/{payee_id}/bank-accounts/{bank_account_id}/replace-evidence
+    action: parties.bank_account.submit
+    path_params: { org_id: club_a, payee_id: payee_club_a3, bank_account_id: acct_club_rejected }
+    body: bodies/parties/replace_account_evidence.json
+    note: S·R as the submission; an org submission waiting for an eye whose evidence the scan rejected
+    expect:
+      anonymous: 401
+      "@outsiders_club_a": 404
+      club_member: 403
+      club_admin: 200
+      "@other_staff": 403
+      platform_admin: 200
+      finance_admin: 200
+    variants:
+      - name: approved_account
+        path_params: { org_id: club_a, payee_id: payee_club_a, bank_account_id: acct_club_a }
+        note: an approved account is submitted again — 409 parties.invalid_state
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403
+          club_admin: 409
+          "@other_staff": 403
+          platform_admin: 409
+          finance_admin: 409
+      - name: no_reauth
+        body: bodies/parties/replace_account_evidence_no_reauth.json
+        note: R — without the proof 403 identity.reauth_required (03 §6.2)
+        expect:
+          anonymous: 401
+          "@outsiders_club_a": 404
+          club_member: 403
+          club_admin: 403
+          "@other_staff": 403
+          platform_admin: 403
+          finance_admin: 403

@@ -82,9 +82,18 @@ func reauthDenied(act authz.Action, accountID *uuid.UUID, payeeID, orgID uuid.UU
 }
 
 // accountViews builds the views of bs: the party title for the first
-// eye's check.
+// eye's check and the states of the evidence files (one files read;
+// BE-154b).
 func (s *service) accountViews(ctx context.Context, bs []BankAccount) ([]BankAccountView, error) {
 	out := make([]BankAccountView, len(bs))
+	fids := make([]*uuid.UUID, len(bs))
+	for i := range bs {
+		fids[i] = &bs[i].EvidenceFileID
+	}
+	states, err := s.fileStates(ctx, fids...)
+	if err != nil {
+		return nil, err
+	}
 	titles := map[uuid.UUID]string{} // payee → party title
 	for i, b := range bs {
 		title, ok := titles[b.PayeeID]
@@ -100,7 +109,8 @@ func (s *service) accountViews(ctx context.Context, bs []BankAccount) ([]BankAcc
 			title = lp.Title
 			titles[b.PayeeID] = title
 		}
-		out[i] = BankAccountView{Account: b, PartyTitle: title, HolderMatchesTitle: holderMatchesTitle(b.HolderName, title)}
+		out[i] = BankAccountView{Account: b, PartyTitle: title, HolderMatchesTitle: holderMatchesTitle(b.HolderName, title),
+			EvidenceState: files.StateOf(states, &b.EvidenceFileID)}
 	}
 	return out, nil
 }
@@ -403,7 +413,11 @@ func (s *service) AdminVerifyBankAccount(ctx context.Context, a authz.Actor, id 
 			return uuid.Nil(), problem.Field("body.note",
 				"is required when the account holder is not the legal party's title (T-19)")
 		}
-		if err := s.checkReviewable(ctx, cur.EvidenceFileID); err != nil {
+		f, err := s.reviewable(ctx, cur.EvidenceFileID)
+		if err != nil {
+			return uuid.Nil(), err
+		}
+		if err := notAnEvidenceUploader(a, f); err != nil {
 			return uuid.Nil(), err
 		}
 		now, by := s.now(), a.UserID
@@ -467,7 +481,11 @@ func (s *service) AdminApproveBankAccount(ctx context.Context, a authz.Actor, id
 		}
 		// The second eye looks at the evidence too (an admin submission has no
 		// first eye that did): it must be viewable.
-		if err := s.checkReviewable(ctx, cur.EvidenceFileID); err != nil {
+		f, err := s.reviewable(ctx, cur.EvidenceFileID)
+		if err != nil {
+			return uuid.Nil(), err
+		}
+		if err := notAnEvidenceUploader(a, f); err != nil {
 			return uuid.Nil(), err
 		}
 		now, by := s.now(), a.UserID

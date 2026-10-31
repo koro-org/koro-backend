@@ -101,8 +101,18 @@ func (w *paymentsWiring) matrixFile(ctx context.Context, fx *matrixFixtures, f f
 	return w.late.files.store.Insert(ctx, files.File{
 		ID: id, Purpose: files.Purpose(purpose), UploadedBy: &by, Bucket: testBuckets.Files, StorageKey: "matrix/" + f.Name,
 		DeclaredMIME: files.MIMEPDF, SizeBytes: &size, SHA256: make([]byte, 32), Status: files.StatusActive,
-		ScanStatus: files.ScanSkipped,
+		ScanStatus: matrixScan(f),
 	})
+}
+
+// matrixScan is a file fixture's scan status: skipped (served while
+// FILES_SCAN_REQUIRED=false), or scan: infected for one the scan rejected
+// after its upload (BE-154b).
+func matrixScan(f fixture) files.ScanStatus {
+	if scan, ok := f.Fields["scan"].(string); ok {
+		return files.ScanStatus(scan)
+	}
+	return files.ScanSkipped
 }
 
 func matrixAccount(ctx context.Context, fx *matrixFixtures, mem *payments.MemStore, f fixture, id uuid.UUID) error {
@@ -207,6 +217,34 @@ func matrixTransfer(ctx context.Context, fx *matrixFixtures, mem *payments.MemSt
 		next = tr
 		next.Status, next.ReturnApprovedBy, next.ReturnApprovedAt = payments.TransferReturnApproved, &a, &t
 		return step(next)
+	case payments.TransferReturned:
+		r, err := fx.Ref(f, "requested_by")
+		if err != nil {
+			return err
+		}
+		a, err := fx.Ref(f, "approved_by")
+		if err != nil {
+			return err
+		}
+		receipt, err := fx.Ref(f, "return_receipt")
+		if err != nil {
+			return err
+		}
+		why, ref := "Matris iadesi", "MATRIX-EFT-"+f.Name
+		next := tr
+		next.Status, next.ReturnRequestedBy, next.ReturnRequestedAt, next.ReturnReason, next.ReturnTargetIBAN =
+			payments.TransferReturnRequested, &r, &t, &why, tr.SenderIBAN
+		if err := step(next); err != nil {
+			return err
+		}
+		next = tr
+		next.Status, next.ReturnApprovedBy, next.ReturnApprovedAt = payments.TransferReturnApproved, &a, &t
+		if err := step(next); err != nil {
+			return err
+		}
+		next = tr
+		next.Status, next.ReturnedAt, next.ReturnBankReference, next.ReturnReceiptFileID = payments.TransferReturned, &t, &ref, &receipt
+		return step(next)
 	}
 	return fmt.Errorf("unknown transfer status %q", status)
 }
@@ -248,6 +286,9 @@ func (w *paymentsWiring) matrixOrderC(ctx context.Context, fx *matrixFixtures, f
 }
 
 func matrixPayment(ctx context.Context, fx *matrixFixtures, mem *payments.MemStore, f fixture, id uuid.UUID) error {
+	if _, ok := f.Fields["evidence"]; ok {
+		return matrixDirectPayment(ctx, fx, mem, f, id)
+	}
 	trID, err := fx.Ref(f, "transfer")
 	if err != nil {
 		return err
@@ -271,6 +312,25 @@ func matrixPayment(ctx context.Context, fx *matrixFixtures, mem *payments.MemSto
 	return mem.InsertPayment(ctx, payments.Payment{ID: id, OrderID: *tr.MatchedOrderID, OrgID: org, Provider: payments.ProviderBankTransfer,
 		IncomingTransferID: &tr.ID, Amount: tr.Amount, Currency: payments.Currency, Status: payments.PaymentCaptured, CapturedAt: &t,
 		CapturedBy: &by})
+}
+
+// matrixDirectPayment seeds a model C direct payment of order with its
+// evidence (a transfer_receipt upload; BE-154b).
+func matrixDirectPayment(ctx context.Context, fx *matrixFixtures, mem *payments.MemStore, f fixture, id uuid.UUID) error {
+	var errs []error
+	ref := func(field string) uuid.UUID {
+		v, err := fx.Ref(f, field)
+		errs = append(errs, err)
+		return v
+	}
+	order, org, by, evidence := ref("order"), ref("org"), ref("captured_by"), ref("evidence")
+	if err := errors.Join(errs...); err != nil {
+		return err
+	}
+	t := matrixOrgTime.Add(24 * time.Hour)
+	return mem.InsertPayment(ctx, payments.Payment{ID: id, OrderID: order, OrgID: org, Provider: payments.ProviderDirectConfirmed,
+		Amount: 1_200_000, Currency: payments.Currency, Status: payments.PaymentCaptured, CapturedAt: &t, CapturedBy: &by,
+		EvidenceFileID: &evidence})
 }
 
 func matrixRefund(fx *matrixFixtures, mem *payments.MemStore, f fixture, id uuid.UUID) error {
@@ -299,12 +359,21 @@ func matrixRefund(fx *matrixFixtures, mem *payments.MemStore, f fixture, id uuid
 		}
 		r.OrderLineID = &l
 	}
-	if status, _ := f.Fields["status"].(string); payments.RefundStatus(status) == payments.RefundStatusApproved {
+	status, _ := f.Fields["status"].(string)
+	if s := payments.RefundStatus(status); s == payments.RefundStatusApproved || s == payments.RefundStatusCompleted {
 		a, err := fx.Ref(f, "approved_by")
 		if err != nil {
 			return err
 		}
 		r.Status, r.ApprovedBy, r.ApprovedAt = payments.RefundStatusApproved, &a, &t
+	}
+	if payments.RefundStatus(status) == payments.RefundStatusCompleted {
+		receipt, err := fx.Ref(f, "receipt")
+		if err != nil {
+			return err
+		}
+		ref, done := "MATRIX-EFT-"+f.Name, t.Add(time.Hour)
+		r.Status, r.ReceiptFileID, r.BankReference, r.CompletedAt = payments.RefundStatusCompleted, &receipt, &ref, &done
 	}
 	return mem.SeedRefund(r)
 }
@@ -389,7 +458,7 @@ func (w *paymentsWiring) matrixRequestFile(ctx context.Context, fx *matrixFixtur
 	row := files.File{
 		ID: id, Purpose: files.PurposeRefundRequestEvidence, OrgID: &org, UploadedBy: &by, Bucket: testBuckets.Files,
 		StorageKey: "matrix/" + f.Name, DeclaredMIME: mime, DetectedMIME: &mime, SizeBytes: &size, SHA256: make([]byte, 32),
-		Status: files.StatusActive, ScanStatus: files.ScanSkipped,
+		Status: files.StatusActive, ScanStatus: matrixScan(f),
 	}
 	if owner != nil {
 		module, at := "payments", matrixOrgTime.Add(48*time.Hour)

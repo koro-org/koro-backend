@@ -92,6 +92,9 @@ func (w *billingWiring) matrixPDF(ctx context.Context, fx *matrixFixtures, f fix
 		StorageKey: "matrix/" + f.Name, DeclaredMIME: files.MIMEPDF, SizeBytes: &size, SHA256: make([]byte, 32),
 		Status: files.StatusActive, ScanStatus: files.ScanSkipped,
 	}
+	if scan, ok := f.Fields["scan"].(string); ok { // scan: infected, rejected after the upload (BE-154b)
+		row.ScanStatus = files.ScanStatus(scan)
+	}
 	if invoice != nil {
 		module := "billing"
 		row.AttachedModule, row.AttachedEntityID, row.AttachedAt = &module, invoice, &now

@@ -9,6 +9,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
+	"koro/internal/files"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
@@ -192,32 +193,33 @@ type RefundRequestPath struct {
 // the seller's view has no target_iban_masked and no requested_by; the
 // staff fields (reviewed_by, decided_by, refund_id) are staff only.
 type RefundRequestDTO struct {
-	RefundRequestID  string     `json:"refund_request_id" format:"uuid"`
-	OrderID          string     `json:"order_id" format:"uuid"`
-	OrderNo          string     `json:"order_no"`
-	OrderLineID      string     `json:"order_line_id" format:"uuid"`
-	LineTitle        string     `json:"line_title"`
-	OrgID            string     `json:"org_id" format:"uuid" doc:"The buying company"`
-	BuyerName        string     `json:"buyer_name"`
-	SellerOrgID      string     `json:"seller_org_id" format:"uuid" doc:"The line's seller"`
-	SellerName       string     `json:"seller_name"`
-	Amount           int64      `json:"amount" doc:"Kuruş"`
-	Currency         string     `json:"currency" enum:"TRY"`
-	Reason           string     `json:"reason"`
-	Explanation      string     `json:"explanation"`
-	HasEvidence      bool       `json:"has_evidence" doc:"downloadRefundRequestEvidence serves it to the parties"`
-	TargetIBANMasked string     `json:"target_iban_masked,omitempty" doc:"Where the money goes back, masked (the buyer's and staff's view)"`
-	Status           string     `json:"status"`
-	RequestedBy      string     `json:"requested_by,omitempty" format:"uuid" doc:"The buyer's admin who asked (the buyer's and staff's view)"`
-	RequestedAt      time.Time  `json:"requested_at"`
-	ReviewedBy       string     `json:"reviewed_by,omitempty" format:"uuid" doc:"Staff view"`
-	ReviewedAt       *time.Time `json:"reviewed_at,omitempty"`
-	DecidedBy        string     `json:"decided_by,omitempty" format:"uuid" doc:"Staff view"`
-	DecidedAt        *time.Time `json:"decided_at,omitempty"`
-	RejectionReason  string     `json:"rejection_reason,omitempty"`
-	WithdrawnAt      *time.Time `json:"withdrawn_at,omitempty"`
-	RefundID         string     `json:"refund_id,omitempty" format:"uuid" doc:"Staff view: the refund an acceptance opened"`
-	RefundStatus     string     `json:"refund_status,omitempty" doc:"The status of that refund (one request's reads)"`
+	RefundRequestID   string     `json:"refund_request_id" format:"uuid"`
+	OrderID           string     `json:"order_id" format:"uuid"`
+	OrderNo           string     `json:"order_no"`
+	OrderLineID       string     `json:"order_line_id" format:"uuid"`
+	LineTitle         string     `json:"line_title"`
+	OrgID             string     `json:"org_id" format:"uuid" doc:"The buying company"`
+	BuyerName         string     `json:"buyer_name"`
+	SellerOrgID       string     `json:"seller_org_id" format:"uuid" doc:"The line's seller"`
+	SellerName        string     `json:"seller_name"`
+	Amount            int64      `json:"amount" doc:"Kuruş"`
+	Currency          string     `json:"currency" enum:"TRY"`
+	Reason            string     `json:"reason"`
+	Explanation       string     `json:"explanation"`
+	HasEvidence       bool       `json:"has_evidence" doc:"downloadRefundRequestEvidence serves it to the parties"`
+	EvidenceFileState string     `json:"evidence_file_state,omitempty" doc:"The state of the evidence (BE-154b). rejected: found infected or not processable after its upload, it cannot be downloaded (409); the buying company uploads it again while the request waits (replaceRefundRequestEvidence)"`
+	TargetIBANMasked  string     `json:"target_iban_masked,omitempty" doc:"Where the money goes back, masked (the buyer's and staff's view)"`
+	Status            string     `json:"status"`
+	RequestedBy       string     `json:"requested_by,omitempty" format:"uuid" doc:"The buyer's admin who asked (the buyer's and staff's view)"`
+	RequestedAt       time.Time  `json:"requested_at"`
+	ReviewedBy        string     `json:"reviewed_by,omitempty" format:"uuid" doc:"Staff view"`
+	ReviewedAt        *time.Time `json:"reviewed_at,omitempty"`
+	DecidedBy         string     `json:"decided_by,omitempty" format:"uuid" doc:"Staff view"`
+	DecidedAt         *time.Time `json:"decided_at,omitempty"`
+	RejectionReason   string     `json:"rejection_reason,omitempty"`
+	WithdrawnAt       *time.Time `json:"withdrawn_at,omitempty"`
+	RefundID          string     `json:"refund_id,omitempty" format:"uuid" doc:"Staff view: the refund an acceptance opened"`
+	RefundStatus      string     `json:"refund_status,omitempty" doc:"The status of that refund (one request's reads)"`
 }
 
 // TransformSchema implements huma.SchemaTransformer: the enums come from
@@ -225,6 +227,7 @@ type RefundRequestDTO struct {
 func (RefundRequestDTO) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
 	op.SetEnum(s, "reason", RequestReasons())
 	op.SetEnum(s, "status", RefundRequestStatuses())
+	op.SetEnum(s, "evidence_file_state", files.StateValues())
 	return op.SetEnum(s, "refund_status", RefundStatuses())
 }
 
@@ -234,7 +237,7 @@ func refundRequestDTO(v RefundRequestView) RefundRequestDTO {
 		RefundRequestID: r.ID.String(), OrderID: r.OrderID.String(), OrderNo: r.OrderNo, OrderLineID: r.OrderLineID.String(),
 		LineTitle: r.LineTitle, OrgID: r.OrgID.String(), BuyerName: v.BuyerName, SellerOrgID: r.SellerOrgID.String(),
 		SellerName: v.SellerName, Amount: r.Amount, Currency: r.Currency, Reason: r.Reason, Explanation: r.Explanation,
-		HasEvidence: r.EvidenceFileID != nil, Status: string(r.Status), RequestedAt: r.CreatedAt.UTC(),
+		HasEvidence: r.EvidenceFileID != nil, EvidenceFileState: string(v.EvidenceState), Status: string(r.Status), RequestedAt: r.CreatedAt.UTC(),
 		ReviewedAt: utc(r.ReviewedAt), DecidedAt: utc(r.DecidedAt), RejectionReason: str(r.RejectionReason),
 		WithdrawnAt: utc(r.WithdrawnAt),
 	}
@@ -508,7 +511,11 @@ func (h handler) adminGetRefundRequest(ctx context.Context, in *RefundRequestPat
 		out.Payments[i] = FundingPaymentDTO{PaymentID: p.PaymentID.String(), AvailableAmount: p.Available}
 	}
 	if d.Refund != nil {
-		r := refundDTO(*d.Refund)
+		st, err := h.svc.EvidenceStates(ctx, refundFiles(*d.Refund)...)
+		if err != nil {
+			return nil, err
+		}
+		r := refundDTO(*d.Refund, st)
 		out.Refund = &r
 	}
 	return &refundRequestDetailOutput{Body: out}, nil

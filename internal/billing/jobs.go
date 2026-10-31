@@ -11,6 +11,7 @@ import (
 	"uuid"
 
 	"koro/internal/authz"
+	"koro/internal/files"
 	"koro/internal/notify"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/money"
@@ -44,6 +45,7 @@ func (m Module) Subscribe(r *outbox.Registry) {
 	r.Subscribe(domainevent.TopicPayoutPaid, PlanOnPayoutTaskName, m.svc.handlePayoutPaid, opts...)
 	r.Subscribe(domainevent.TopicPaymentRefunded, PlanOnRefundTaskName, m.svc.handlePaymentRefunded, opts...)
 	r.Subscribe(domainevent.TopicInvoiceIssued, SendInvoiceTaskName, m.svc.handleInvoiceIssued, opts...)
+	files.SubscribeRejected(r, "billing", NotifyRejectedPDFTaskName, m.svc.notifyRejectedPDF)
 }
 
 // Tasks returns the plain task handlers of billing: the A notices.
@@ -68,6 +70,9 @@ func (s *service) handleInvoiceIssued(ctx context.Context, e domainevent.Envelop
 		return err
 	case inv.Status != StatusIssued || inv.PDFFileID == nil:
 		return nil // cancelled before the e-mail: nothing to send
+	case inv.AwaitsReverification():
+		// A replaced PDF is mailed once verified again (BE-154b): retried.
+		return fmt.Errorf("billing: the replaced PDF of invoice %s waits for its verification", inv.ID)
 	}
 	if s.d.Sender == nil {
 		return errors.New("billing: notify is not wired")

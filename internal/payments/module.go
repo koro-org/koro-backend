@@ -121,6 +121,7 @@ type Payments interface {
 type Service interface {
 	ReceivableService
 	RefundRequestService
+	EvidenceService
 	Payments
 
 	// ListCollectionAccounts is adminListCollectionAccounts.

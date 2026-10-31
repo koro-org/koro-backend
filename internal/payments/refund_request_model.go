@@ -177,6 +177,9 @@ type RefundRequestView struct {
 	Audience   RequestAudience
 	// Refund is the refund an accepted request opened (the detail reads).
 	Refund *Refund
+	// EvidenceState is the state of the evidence file ("" without one;
+	// BE-154b), read with the view.
+	EvidenceState files.State
 }
 
 // RefundRequestPage is a page of requests.

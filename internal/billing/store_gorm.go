@@ -86,13 +86,13 @@ func (s gormStore) UpdateInvoice(ctx context.Context, next Invoice, from Status)
 	err := db.Conn(ctx, s.orm).Raw(`UPDATE invoices SET
 		status = @status, document_type = @document_type, invoice_no = @invoice_no, ettn = @ettn, issue_date = @issue_date,
 		pdf_file_id = @pdf_file_id, pdf_sha256 = @pdf_sha256, uploaded_by = @uploaded_by, verified_by = @verified_by,
-		verified_at = @verified_at, issued_at = @issued_at, last_error = @last_error
+		verified_at = @verified_at, issued_at = @issued_at, last_error = @last_error, pdf_replaced_at = @pdf_replaced_at
 		WHERE id = @id AND status = @from
 		RETURNING *`, map[string]any{
 		"id": next.ID, "from": from, "status": next.Status, "document_type": next.DocumentType, "invoice_no": next.InvoiceNo,
 		"ettn": next.ETTN, "issue_date": next.IssueDate, "pdf_file_id": next.PDFFileID, "pdf_sha256": next.PDFSHA256,
 		"uploaded_by": next.UploadedBy, "verified_by": next.VerifiedBy, "verified_at": next.VerifiedAt,
-		"issued_at": next.IssuedAt, "last_error": next.LastError,
+		"issued_at": next.IssuedAt, "last_error": next.LastError, "pdf_replaced_at": next.PDFReplacedAt,
 	}).Scan(&rows).Error
 	if err != nil {
 		return Invoice{}, fmt.Errorf("billing: update invoice: %w", translate(err))

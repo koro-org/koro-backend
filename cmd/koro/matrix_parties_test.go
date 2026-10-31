@@ -28,10 +28,10 @@ import (
 //	kind file      an unattached, active file of uploaded_by for org (purpose party_document, or
 //	               the purpose field: bank_account_evidence)
 //	kind document  a legal_party_documents row of party uploaded by uploaded_by, with its
-//	               attached file "<name>_file"
+//	               attached file "<name>_file" (scan: infected, rejected by the scan; BE-154b)
 //	kind account   a payee_bank_accounts row of payee (iban, status, submitted_by, admin: an
 //	               admin submission, verified_by, approved_by); the holder is the payee party's
-//	               title; its evidence "<name>_file" is attached
+//	               title; its evidence "<name>_file" is attached (scan: infected, BE-154b)
 func (w *partiesWiring) matrixFixtures(fx *matrixFixtures) error {
 	ctx := context.Background()
 	mem, ok := w.store.(*parties.MemStore)
@@ -101,7 +101,7 @@ func (w *partiesWiring) seedFixtures(ctx context.Context, fx *matrixFixtures, me
 			if p := str("purpose"); p != "" {
 				purpose = files.Purpose(p)
 			}
-			if err := w.matrixFile(ctx, f.Name, id, purpose, by, &org, nil); err != nil {
+			if err := w.matrixFile(ctx, f.Name, id, purpose, by, &org, nil, ""); err != nil {
 				return err
 			}
 		case "document":
@@ -114,7 +114,7 @@ func (w *partiesWiring) seedFixtures(ctx context.Context, fx *matrixFixtures, me
 				return err
 			}
 			fileID := authztest.ID(f.Name + "_file")
-			if err := w.matrixFile(ctx, f.Name+"_file", fileID, files.PurposePartyDocument, by, nil, &id); err != nil {
+			if err := w.matrixFile(ctx, f.Name+"_file", fileID, files.PurposePartyDocument, by, nil, &id, str("scan")); err != nil {
 				return err
 			}
 			if _, err := mem.InsertDocument(ctx, parties.Document{ID: id, LegalPartyID: party, Kind: parties.DocTaxCertificate,
@@ -181,7 +181,8 @@ func (w *partiesWiring) matrixAccount(ctx context.Context, fx *matrixFixtures, m
 	}
 	fileID := authztest.ID(f.Name + "_file")
 	org := py.OrgID
-	if err := w.matrixFile(ctx, f.Name+"_file", fileID, files.PurposeBankAccountEvidence, by, &org, &id); err != nil {
+	scan, _ := f.Fields["scan"].(string)
+	if err := w.matrixFile(ctx, f.Name+"_file", fileID, files.PurposeBankAccountEvidence, by, &org, &id, scan); err != nil {
 		return err
 	}
 	admin, _ := f.Fields["admin"].(bool)
@@ -236,9 +237,11 @@ func (w *partiesWiring) matrixAccount(ctx context.Context, fx *matrixFixtures, m
 
 // matrixFile seeds an active file of purpose uploaded by by (for org) into
 // the files store and object storage: skipped by the no-op scanner, so it
-// is served while FILES_SCAN_REQUIRED=false; attached to its document or
-// bank account (owner) when given.
-func (w *partiesWiring) matrixFile(ctx context.Context, name string, id uuid.UUID, purpose files.Purpose, by uuid.UUID, org, owner *uuid.UUID) error {
+// is served while FILES_SCAN_REQUIRED=false (scan "infected": one the scan
+// rejected after its upload, BE-154b); attached to its document or bank
+// account (owner) when given.
+func (w *partiesWiring) matrixFile(ctx context.Context, name string, id uuid.UUID, purpose files.Purpose, by uuid.UUID, org, owner *uuid.UUID,
+	scan string) error {
 	objects, err := w.late.files.memObjects()
 	if err != nil {
 		return err
@@ -249,6 +252,9 @@ func (w *partiesWiring) matrixFile(ctx context.Context, name string, id uuid.UUI
 		ID: id, Purpose: purpose, OrgID: org, UploadedBy: &by, Bucket: testBuckets.Files,
 		StorageKey: "matrix/" + name, DeclaredMIME: files.MIMEPDF, SizeBytes: &size, SHA256: make([]byte, 32),
 		Status: files.StatusActive, ScanStatus: files.ScanSkipped, CreatedAt: now, UpdatedAt: now,
+	}
+	if scan != "" {
+		row.ScanStatus = files.ScanStatus(scan)
 	}
 	if owner != nil {
 		module := "parties"

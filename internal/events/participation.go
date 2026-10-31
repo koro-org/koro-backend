@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"slices"
+	"time"
 	"uuid"
 )
 
@@ -46,12 +47,14 @@ type ParticipationFacts struct {
 	DistinctCheckins int
 }
 
-// ParticipationStore is the persistence of Participation, part of Store.
+// ParticipationStore is the persistence of Participation and Targeting,
+// part of Store.
 //
 // cross-org: the reads are keyed by IDs another module holds (talent's
-// ledger rows name a registration or a check-in, and their events); no
-// row content but the event, the organiser org, the counts and whether a
-// row was undone leaves.
+// ledger rows name a registration or a check-in, and their events;
+// students' profiles name the users, BE-161); no row content but the
+// event, the organiser org, the counts, whether a row was undone and
+// whether a registration is checked in leaves.
 type ParticipationStore interface {
 	// EventsOf returns the event of every registration or check-in among
 	// ids that exists.
@@ -62,6 +65,13 @@ type ParticipationStore interface {
 	// Undone returns the cancelled registrations and the voided check-ins
 	// among ids.
 	Undone(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]bool, error)
+	// TargetableParticipations returns the registrations of the users
+	// among userIDs that held their place (confirmed, checked_in, no_show)
+	// in a published or completed public event, not of a sensitive
+	// category, that started at or after since (BE-161; Targeting applies
+	// the organiser's sensitivity). Attended is checked_in. Ordered by
+	// user, then the event's start (newest first), then the event.
+	TargetableParticipations(ctx context.Context, userIDs []uuid.UUID, since time.Time) ([]TargetableRow, error)
 }
 
 // participationBatch bounds the IDs of one store read.

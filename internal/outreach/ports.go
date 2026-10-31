@@ -52,6 +52,17 @@ type Orgs interface {
 	Get(ctx context.Context, orgID uuid.UUID) (orgs.OrgSummary, error)
 }
 
+// Events is what outreach needs from events (L8, the same layer: cmd/koro
+// binds events.Service) for the event dimension (BE-161, Q-39): which
+// events an audience may name. Targetable is events' rule: a published or
+// completed public event, neither of a sensitive category nor organised by
+// a sensitive club, that started within the last year or has yet to start.
+type Events interface {
+	// TargetableEvents reports which of eventIDs are targetable now; an
+	// unknown event is missing (false).
+	TargetableEvents(ctx context.Context, eventIDs []uuid.UUID) (map[uuid.UUID]bool, error)
+}
+
 // Limiter counts the audience counts of an org (the daily budget,
 // Targeting). It is the platform's rate limiter (Redis in production).
 type Limiter interface {

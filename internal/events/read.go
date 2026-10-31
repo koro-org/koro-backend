@@ -68,8 +68,12 @@ type EventView struct {
 	// feed's rule (EventSummary.ShareableBy); false when the organiser's
 	// sensitivity could not be read (fail closed).
 	ShareableByOthers bool
-	Manager           bool
-	MyRegistration    *Registration
+	// Targetable reports whether a company may name the event in an
+	// audience definition (BE-161, Q-39: targetable); false when the
+	// organiser's sensitivity could not be read (fail closed).
+	Targetable     bool
+	Manager        bool
+	MyRegistration *Registration
 }
 
 // Attendee reports whether the caller holds a seat of the event.
@@ -298,6 +302,7 @@ func (s *service) buildView(ctx context.Context, e Event, o orgs.OrgSummary, man
 	sens, known := sensitive[e.OrgID]
 	open := known && !sens
 	v.ShareableByOthers = open && shareable(e.Status, e.Visibility, e.IsSensitiveCategory, false)
+	v.Targetable = open && targetable(e, false, s.now())
 	if e.CoverFileID == nil || s.d.Files == nil {
 		return v
 	}

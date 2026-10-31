@@ -159,19 +159,29 @@ func (s *service) planDispatch(ctx context.Context, a authz.Actor, p PostInfo, c
 
 // checkDispatchScope applies a's targeting scope to the keys p was
 // compiled with (03 k16, k18): a club_admin notifies its own members only
-// (club:<own club>, the member list); a university never names a club; a
-// company or the platform never a club that is sensitive now (03 Y2: it
-// may have become sensitive since the post was compiled).
+// (club:<own club>, the member list); a university never names a club or
+// an event; a company or the platform never a club that is sensitive now
+// (03 Y2: it may have become sensitive since the post was compiled) nor
+// an event that is no longer targetable (BE-161).
 func (s *service) checkDispatchScope(ctx context.Context, sc Scope, p PostInfo) error {
-	var clubs []uuid.UUID
+	var clubs, events []uuid.UUID
 	for _, k := range p.Keys {
-		if id, ok := strings.CutPrefix(k, keyClub); ok {
-			cid, err := uuid.Parse(id)
-			if err != nil {
-				return ErrTargetOutOfScope
+		raw, isClub := strings.CutPrefix(k, keyClub)
+		if !isClub {
+			if raw, ok := eventOfKey(k); ok {
+				id, err := uuid.Parse(raw)
+				if err != nil {
+					return ErrTargetOutOfScope
+				}
+				events = append(events, id)
 			}
-			clubs = append(clubs, cid)
+			continue
 		}
+		cid, err := uuid.Parse(raw)
+		if err != nil {
+			return ErrTargetOutOfScope
+		}
+		clubs = append(clubs, cid)
 	}
 	switch sc {
 	case ScopeClub:
@@ -180,24 +190,15 @@ func (s *service) checkDispatchScope(ctx context.Context, sc Scope, p PostInfo) 
 		}
 		return nil
 	case ScopeUniversity:
-		if len(clubs) > 0 {
+		if len(clubs)+len(events) > 0 {
 			return ErrTargetOutOfScope
 		}
 		return nil
 	case ScopeCompany, ScopePlatform:
-		if len(clubs) == 0 {
-			return nil
-		}
-		sensitive, err := s.d.Catalog.SensitiveOrgIDs(ctx, clubs)
-		if err != nil {
+		if err := s.checkClubs(ctx, clubs); err != nil {
 			return err
 		}
-		for _, id := range clubs {
-			if sensitive[id] {
-				return ErrSensitiveTarget
-			}
-		}
-		return nil
+		return s.checkEvents(ctx, events)
 	}
 	return ErrTargetOutOfScope
 }

@@ -55,13 +55,14 @@ func (s *service) checkScope(ctx context.Context, sc Scope, orgID uuid.UUID, def
 	case ScopeClub:
 		// club:<own club> and nothing else: the club's members, sensitive
 		// club or not (its admin already sees them).
-		if len(def.Uni)+len(def.Dept)+len(def.Year) > 0 || len(def.Club) != 1 || def.Club[0] != orgID {
+		if len(def.Uni)+len(def.Dept)+len(def.Year)+len(def.Event) > 0 || len(def.Club) != 1 || def.Club[0] != orgID {
 			return ErrTargetOutOfScope
 		}
 		return nil
 	case ScopeUniversity:
-		// uni:<own university>, narrowed by department or year; never a club.
-		if len(def.Club) > 0 || len(def.Uni) != 1 {
+		// uni:<own university>, narrowed by department or year; never a
+		// club or an event.
+		if len(def.Club)+len(def.Event) > 0 || len(def.Uni) != 1 {
 			return ErrTargetOutOfScope
 		}
 		u, err := s.d.Catalog.GetUniversity(ctx, def.Uni[0])
@@ -75,21 +76,52 @@ func (s *service) checkScope(ctx context.Context, sc Scope, orgID uuid.UUID, def
 		}
 		return nil
 	case ScopeCompany, ScopePlatform:
-		if len(def.Club) == 0 {
-			return nil
-		}
-		sensitive, err := s.d.Catalog.SensitiveOrgIDs(ctx, def.Club)
-		if err != nil {
+		if err := s.checkClubs(ctx, def.Club); err != nil {
 			return err
 		}
-		for _, id := range def.Club {
-			if sensitive[id] {
-				return ErrSensitiveTarget
-			}
-		}
-		return nil
+		return s.checkEvents(ctx, def.Event)
 	}
 	return ErrTargetOutOfScope
+}
+
+// checkClubs refuses a sensitive club (03 Y2) of a company's or the
+// platform's targeting.
+func (s *service) checkClubs(ctx context.Context, clubs []uuid.UUID) error {
+	if len(clubs) == 0 {
+		return nil
+	}
+	sensitive, err := s.d.Catalog.SensitiveOrgIDs(ctx, clubs)
+	if err != nil {
+		return err
+	}
+	for _, id := range clubs {
+		if sensitive[id] {
+			return ErrSensitiveTarget
+		}
+	}
+	return nil
+}
+
+// checkEvents refuses an event that is not targetable now (BE-161, Q-39;
+// events' rule). Every reason is the same 422; without the events reader
+// nothing is targetable (fail closed).
+func (s *service) checkEvents(ctx context.Context, events []uuid.UUID) error {
+	if len(events) == 0 {
+		return nil
+	}
+	if s.d.Events == nil {
+		return ErrEventNotTargetable
+	}
+	ok, err := s.d.Events.TargetableEvents(ctx, events)
+	if err != nil {
+		return err
+	}
+	for _, id := range events {
+		if !ok[id] {
+			return ErrEventNotTargetable
+		}
+	}
+	return nil
 }
 
 // count sizes a normalized definition of orgID: one unit of the org's

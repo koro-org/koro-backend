@@ -21,7 +21,8 @@ func TestStore_ParticipationContract_Mem(t *testing.T) {
 // the distinct users with a valid check-in (a voided one does not count;
 // cancelled and waitlisted registrations do not count); only a cancelled
 // registration and a voided check-in are undone (BE-090); unknown IDs are
-// missing.
+// missing. The targetable participations (BE-161) are the held places of
+// public, non-sensitive-category events in the window.
 func participationContract(t *testing.T, newStore func(t *testing.T) (events.Store, world)) {
 	t.Helper()
 	t.Run("participation: events of sources, confirmed and distinct check-ins", func(t *testing.T) {
@@ -139,6 +140,93 @@ func participationContract(t *testing.T, newStore func(t *testing.T) (events.Sto
 		}
 		if got, err := s.Undone(ctx, nil); err != nil || len(got) != 0 {
 			t.Fatalf("Undone(nil) = %v, %v", got, err)
+		}
+	})
+
+	// BE-161: the held places of the asked users in published or
+	// completed public events, not of a sensitive category, started at or
+	// after since; ordered by user, newest start first. The organiser's
+	// sensitivity is the service's (directory).
+	t.Run("targetable participations: held places of public events since", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		org, by := w.org(t), w.user(t)
+		since := t0
+		insert := func(title string, at time.Time, edit func(*events.Event)) events.Event {
+			t.Helper()
+			ev := row(org, by, title, at)
+			edit(&ev)
+			return insertEvent(t, s, ev)
+		}
+		reg := func(ev events.Event, user uuid.UUID, st events.RegStatus) {
+			t.Helper()
+			r := newReg(ev, user, st)
+			switch st {
+			case events.RegCheckedIn, events.RegNoShow:
+				r.ConfirmedAt = new(t0)
+				if st == events.RegCheckedIn {
+					r.CheckedInAt = new(t0)
+				}
+			case events.RegCancelled:
+				by := events.ByUser
+				r.CancelledAt, r.CancelledByKind = new(t0), &by
+			}
+			if _, err := s.InsertRegistration(ctx, r); err != nil {
+				t.Fatalf("InsertRegistration(%s, %s): %v", ev.Title, st, err)
+			}
+		}
+		u1, u2, u3 := w.user(t), w.user(t), w.user(t)
+		later := insert("Sonraki", start, func(*events.Event) {})
+		earlier := insert("Önceki", t0.Add(24*time.Hour), func(ev *events.Event) { ev.Status = events.StatusCompleted })
+		reg(later, u1, events.RegConfirmed)
+		reg(earlier, u1, events.RegCheckedIn)
+		reg(later, u2, events.RegNoShow)
+		reg(earlier, u2, events.RegCancelled)
+		reg(later, u3, events.RegConfirmed) // not asked for
+		for _, ev := range []events.Event{
+			insert("Üyelere Özel", start, func(ev *events.Event) { ev.Visibility = events.VisibilityMembers }),
+			insert("Hassas Kategori", start, func(ev *events.Event) { ev.IsSensitiveCategory = true }),
+			insert("İptal", start, func(ev *events.Event) { ev.Status, ev.CancelledAt = events.StatusCancelled, new(t0) }),
+			insert("Eski", since.Add(-time.Hour), func(*events.Event) {}),
+		} {
+			reg(ev, u1, events.RegConfirmed)
+		}
+		waiting := insert("Bekleme", start, func(*events.Event) {})
+		reg(waiting, u2, events.RegWaitlisted)
+
+		got, err := s.TargetableParticipations(ctx, []uuid.UUID{u1, u2, uuid.NewV7()}, since)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := map[uuid.UUID][]events.TargetableRow{
+			u1: {{UserID: u1, EventID: later.ID, OrgID: org}, {UserID: u1, EventID: earlier.ID, OrgID: org, Attended: true}},
+			u2: {{UserID: u2, EventID: later.ID, OrgID: org}},
+		}
+		if len(got) != 3 {
+			t.Fatalf("TargetableParticipations = %+v, want %+v", got, want)
+		}
+		for i := 1; i < len(got); i++ {
+			if got[i-1].UserID.Compare(got[i].UserID) > 0 {
+				t.Fatalf("rows not ordered by user: %+v", got)
+			}
+		}
+		by2 := map[uuid.UUID][]events.TargetableRow{}
+		for _, r := range got {
+			by2[r.UserID] = append(by2[r.UserID], r)
+		}
+		for u, rows := range want {
+			if len(by2[u]) != len(rows) {
+				t.Fatalf("rows of %s = %+v, want %+v", u, by2[u], rows)
+			}
+			for i := range rows {
+				if by2[u][i] != rows[i] {
+					t.Errorf("row %d of %s = %+v, want %+v", i, u, by2[u][i], rows[i])
+				}
+			}
+		}
+		if got, err := s.TargetableParticipations(ctx, nil, since); err != nil || len(got) != 0 {
+			t.Fatalf("TargetableParticipations(nil) = %v, %v", got, err)
 		}
 	})
 }

@@ -245,9 +245,11 @@ type fakeResolver struct {
 	orgs      map[uuid.UUID]webcache.OrgRef
 	posts     map[uuid.UUID]webcache.PostRef   // the posts on the public web
 	shares    map[uuid.UUID][]webcache.PostRef // by event, newest first
+	orgEvents map[uuid.UUID][]uuid.UUID        // by organiser, newest published first
 	err       error
 	sharesErr error
-	limits    *[]int // the limits EventShares was asked for
+	limits    *[]int         // the limits EventShares was asked for
+	asked     *[][]uuid.UUID // the events EventShares was asked for
 }
 
 func (r fakeResolver) Event(_ context.Context, id uuid.UUID) (webcache.EventRef, bool, error) {
@@ -265,18 +267,32 @@ func (r fakeResolver) Post(_ context.Context, id uuid.UUID) (webcache.PostRef, b
 	return p, ok, r.err
 }
 
-func (r fakeResolver) EventShares(_ context.Context, eventID uuid.UUID, limit int) ([]webcache.PostRef, error) {
+// EventShares merges the shares of the events (each list newest first;
+// the fixtures' event order is their recency).
+func (r fakeResolver) EventShares(_ context.Context, eventIDs []uuid.UUID, limit int) ([]webcache.PostRef, error) {
 	if r.limits != nil {
 		*r.limits = append(*r.limits, limit)
 	}
-	ps := r.shares[eventID]
+	if r.asked != nil {
+		*r.asked = append(*r.asked, slices.Clone(eventIDs))
+	}
+	var ps []webcache.PostRef
+	for _, id := range eventIDs {
+		ps = append(ps, r.shares[id]...)
+	}
 	return ps[:min(limit, len(ps))], r.sharesErr
+}
+
+func (r fakeResolver) OrgEvents(_ context.Context, orgID uuid.UUID, limit int) ([]uuid.UUID, error) {
+	evs := r.orgEvents[orgID]
+	return evs[:min(limit, len(evs))], r.sharesErr
 }
 
 var (
 	clubID, companyID, uniID        = uuid.NewV7(), uuid.NewV7(), uuid.NewV7()
 	eventID, uniEventID, sharedEvID = uuid.NewV7(), uuid.NewV7(), uuid.NewV7()
 	postID, share1, share2, share3  = uuid.NewV7(), uuid.NewV7(), uuid.NewV7(), uuid.NewV7()
+	uniShare                        = uuid.NewV7()
 )
 
 func resolver() fakeResolver {
@@ -290,7 +306,9 @@ func resolver() fakeResolver {
 		posts: map[uuid.UUID]webcache.PostRef{postID: {ID: postID, OrgID: clubID}},
 		shares: map[uuid.UUID][]webcache.PostRef{
 			sharedEvID: {{ID: share1, OrgID: clubID}, {ID: share2, OrgID: companyID}, {ID: share3, OrgID: clubID}},
+			uniEventID: {{ID: uniShare, OrgID: clubID}},
 		},
+		orgEvents: map[uuid.UUID][]uuid.UUID{clubID: {sharedEvID, eventID}, uniID: {uniEventID}},
 	}
 }
 
@@ -344,7 +362,7 @@ func TestRevalidator_TopicsToTags(t *testing.T) {
 			[]string{"company:acme"}},
 		{"org status", webcache.SubOrgUpdated, domainevent.OrgUpdated{OrgID: clubID, OrgKind: "club", Fields: []string{"status"}},
 			[]string{"club:odtu-robotik", "sitemap"}},
-		{"university profile", webcache.SubOrgUpdated, domainevent.OrgUpdated{OrgID: uniID, OrgKind: "university", Fields: []string{"name"}}, nil},
+		{"university profile", webcache.SubOrgUpdated, domainevent.OrgUpdated{OrgID: uniID, OrgKind: "university", Fields: []string{"description"}}, nil},
 		{"missing org", webcache.SubOrgUpdated, domainevent.OrgUpdated{OrgID: uuid.NewV7(), Fields: []string{"name"}}, nil},
 		{"club profile", webcache.SubClubUpdated, domainevent.ClubUpdated{ClubOrgID: clubID, Fields: []string{"join_policy"}},
 			[]string{"club:odtu-robotik"}},
@@ -407,6 +425,19 @@ func TestRevalidator_TopicsToTags(t *testing.T) {
 			[]string{"event:bahar-senligi", "club:odtu-robotik"}},
 		{"shared event cancelled", webcache.SubEventCancelled, domainevent.EventCancelled{EventID: sharedEvID, OrgID: clubID},
 			[]string{"event:bahar-senligi", "club:odtu-robotik", "sitemap", webcache.PostTag(share1), webcache.PostTag(share2), "company:acme", webcache.PostTag(share3)}},
+		// BE-157: an organiser's new name or slug shows on the cards of
+		// its events shared by public posts (other orgs' too); a logo,
+		// description or status change does not (the card has neither).
+		{"organiser renamed", webcache.SubOrgUpdated, domainevent.OrgUpdated{OrgID: clubID, OrgKind: "club", Fields: []string{"description", "name"}},
+			[]string{"club:odtu-robotik", webcache.PostTag(share1), webcache.PostTag(share2), "company:acme", webcache.PostTag(share3)}},
+		{"organiser slug", webcache.SubOrgUpdated, domainevent.OrgUpdated{OrgID: clubID, OrgKind: "club", Fields: []string{"slug"}},
+			[]string{"club:odtu-robotik", webcache.PostTag(share1), webcache.PostTag(share2), "company:acme", webcache.PostTag(share3)}},
+		{"organiser logo", webcache.SubOrgUpdated, domainevent.OrgUpdated{OrgID: clubID, OrgKind: "club", Fields: []string{"logo_file_id", "website_url"}},
+			[]string{"club:odtu-robotik"}},
+		{"university renamed", webcache.SubOrgUpdated, domainevent.OrgUpdated{OrgID: uniID, OrgKind: "university", Fields: []string{"name"}},
+			[]string{webcache.PostTag(uniShare), "club:odtu-robotik"}},
+		{"renamed org without public events", webcache.SubOrgUpdated, domainevent.OrgUpdated{OrgID: companyID, OrgKind: "company", Fields: []string{"name"}},
+			[]string{"company:acme"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -514,6 +545,55 @@ func TestRevalidator_EventSharesCapped(t *testing.T) {
 	err := subscriptions(t, r, newSender(t, web2))[webcache.SubEventCancelled].Handle(t.Context(), envelope(t, cancelled))
 	if err == nil || queue.IsPermanent(err) || len(web2.got(t)) != 0 {
 		t.Fatalf("share read failure = %v", err)
+	}
+}
+
+// TestRevalidator_OrgEventsCapped (BE-157): a renamed organiser reads the
+// shares of its newest MaxOrgEvents public events in one read (bound by
+// MaxEventShares like an event change); a change the cards do not show
+// reads nothing; a failing read retries.
+func TestRevalidator_OrgEventsCapped(t *testing.T) {
+	t.Parallel()
+	r := resolver()
+	var (
+		limits []int
+		asked  [][]uuid.UUID
+	)
+	r.limits, r.asked = &limits, &asked
+	many := make([]uuid.UUID, webcache.MaxOrgEvents+5)
+	for i := range many {
+		many[i] = uuid.NewV7()
+	}
+	many[0] = sharedEvID
+	r.orgEvents = map[uuid.UUID][]uuid.UUID{clubID: many}
+	renamed := domainevent.OrgUpdated{OrgID: clubID, OrgKind: "club", Fields: []string{"name"}}
+	web := newFakeWeb(t)
+	if err := subscriptions(t, r, newSender(t, web))[webcache.SubOrgUpdated].Handle(t.Context(), envelope(t, renamed)); err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 1 || !slices.Equal(asked[0], many[:webcache.MaxOrgEvents]) || !slices.Equal(limits, []int{webcache.MaxEventShares + 1}) {
+		t.Fatalf("EventShares asked for %d events (%d reads), limits %v; want the newest %d in one read",
+			len(slices.Concat(asked...)), len(asked), limits, webcache.MaxOrgEvents)
+	}
+	want := []string{"club:odtu-robotik", webcache.PostTag(share1), webcache.PostTag(share2), "company:acme", webcache.PostTag(share3)}
+	if got := web.got(t); len(got) != 1 || !slices.Equal(got[0], want) {
+		t.Fatalf("calls = %v, want [%v]", got, want)
+	}
+
+	asked, limits = nil, nil
+	described := domainevent.OrgUpdated{OrgID: clubID, OrgKind: "club", Fields: []string{"description", "logo_file_id", "status"}}
+	if err := subscriptions(t, r, newSender(t, newFakeWeb(t)))[webcache.SubOrgUpdated].Handle(t.Context(), envelope(t, described)); err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 0 {
+		t.Fatalf("a change the cards do not show read the shares: %v", asked)
+	}
+
+	r.sharesErr = errors.New("db down")
+	web2 := newFakeWeb(t)
+	err := subscriptions(t, r, newSender(t, web2))[webcache.SubOrgUpdated].Handle(t.Context(), envelope(t, renamed))
+	if err == nil || queue.IsPermanent(err) || len(web2.got(t)) != 0 {
+		t.Fatalf("org events read failure = %v", err)
 	}
 }
 

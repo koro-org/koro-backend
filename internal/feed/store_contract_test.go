@@ -312,7 +312,7 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (feed.Store, world)
 		}
 	})
 
-	t.Run("event shares: published, the reader's visibility, every org, newest first (BE-150)", func(t *testing.T) {
+	t.Run("event shares: published, the reader's visibility, every org, newest first, several events (BE-150, BE-157)", func(t *testing.T) {
 		t.Parallel()
 		s, w := newStore(t)
 		ctx := t.Context()
@@ -338,11 +338,14 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (feed.Store, world)
 			p.AudienceKind = feed.AudienceFollowers
 		})
 		share(club, feed.AuthorClub, ev, nil)                             // a draft
-		share(club, feed.AuthorClub, other, published(5))                 // another event
+		otherShare := share(club, feed.AuthorClub, other, published(5))   // another event
 		insert(t, s, publishedAt(post(club, feed.AuthorClub, by), at(6))) // not a share
-		list := func(r feed.Reader, limit int) []uuid.UUID {
+		list := func(r feed.Reader, limit int, evs ...uuid.UUID) []uuid.UUID {
 			t.Helper()
-			ps, err := s.ListEventShares(ctx, ev, r, limit)
+			if evs == nil {
+				evs = []uuid.UUID{ev}
+			}
+			ps, err := s.ListEventShares(ctx, evs, r, limit)
 			if err != nil {
 				t.Fatalf("ListEventShares: %v", err)
 			}
@@ -358,8 +361,17 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (feed.Store, world)
 		if got := list(feed.Reader{All: true}, 10); !slices.Equal(got, []uuid.UUID{followers.ID, newer.ID, ad.ID, older.ID}) {
 			t.Fatalf("all shares = %v", got)
 		}
-		if ps, err := s.ListEventShares(ctx, uuid.NewV7(), anon, 10); err != nil || len(ps) != 0 {
-			t.Fatalf("unknown event = %v, %v", ps, err)
+		// Several events (an organiser's, BE-157): one newest-first list.
+		if got := list(anon, 10, ev, other); !slices.Equal(got, []uuid.UUID{otherShare.ID, newer.ID, older.ID}) {
+			t.Fatalf("shares of two events = %v", got)
+		}
+		if got := list(anon, 2, other, ev); !slices.Equal(got, []uuid.UUID{otherShare.ID, newer.ID}) {
+			t.Fatalf("shares of two events, limit 2 = %v", got)
+		}
+		for name, evs := range map[string][]uuid.UUID{"unknown event": {uuid.NewV7()}, "no event": {}} {
+			if ps, err := s.ListEventShares(ctx, evs, anon, 10); err != nil || len(ps) != 0 {
+				t.Fatalf("%s = %v, %v", name, ps, err)
+			}
 		}
 	})
 

@@ -13,7 +13,8 @@
 // slugs (Resolver), builds the tags and POSTs them, signed, to
 // {KORO_WEB_INTERNAL_URL}/api/revalidate. An event change its shares show
 // (cancellation; title, slug, schedule, visibility) also revalidates the
-// public posts sharing it, at most MaxEventShares (BE-150).
+// public posts sharing it, at most MaxEventShares (BE-150); an org's new
+// name or slug those of its newest MaxOrgEvents public events (BE-157).
 //
 // Contract (koro-web src/lib/revalidate.ts, README "Yayın webhook'u"; the
 // two sides must change together):

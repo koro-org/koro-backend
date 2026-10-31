@@ -45,8 +45,13 @@ type Resolver interface {
 	// web (not published, followers, segment, commercial).
 	Post(ctx context.Context, id uuid.UUID) (ref PostRef, found bool, err error)
 	// EventShares returns up to limit posts on the public web that share
-	// the event (event_share), newest first.
-	EventShares(ctx context.Context, eventID uuid.UUID, limit int) ([]PostRef, error)
+	// one of the events (event_share), newest first.
+	EventShares(ctx context.Context, eventIDs []uuid.UUID, limit int) ([]PostRef, error)
+	// OrgEvents returns up to limit events of the org on the public web
+	// (the anonymous catalogue: public, published or completed, any date),
+	// newest published first: the events whose cards on shared posts name
+	// the org as organiser (BE-157).
+	OrgEvents(ctx context.Context, orgID uuid.UUID, limit int) ([]uuid.UUID, error)
 }
 
 // Subscription names (asynq task types, "<module>.<verb>_<object>").
@@ -80,6 +85,12 @@ const (
 // cache life (koro-web cacheLife('minutes')).
 const MaxEventShares = 2 * MaxTags
 
+// MaxOrgEvents bounds the events of one org change whose shares are
+// revalidated (BE-157): the newest published ones; the shares of older
+// events refresh at the end of their cache life. One catalogue page
+// (page.MaxLimit is 100); the shares stay bound by MaxEventShares.
+const MaxOrgEvents = MaxTags
+
 // attemptTimeout bounds one task attempt (resolution + POST).
 const attemptTimeout = 30 * time.Second
 
@@ -95,6 +106,16 @@ var sitemapFields = []string{"slug", "visibility", "visibility_university_id"}
 // show (feed's event summary: title, slug, schedule) or that take the
 // summary off them (visibility; BE-150).
 var shareFields = []string{"title", "slug", "starts_at", "ends_at", "visibility"}
+
+// organiserFields are the org.updated fields the cards of shared events
+// show of their organiser (events.EventOrgDTO: name, slug; BE-157). The
+// card carries no logo: a logo change refreshes the org's own pages only.
+var organiserFields = []string{"name", "slug"}
+
+// touches reports whether a changed field list names one of set.
+func touches(fields, set []string) bool {
+	return slices.ContainsFunc(fields, func(f string) bool { return slices.Contains(set, f) })
+}
 
 // Deps are the dependencies of the Revalidator.
 type Deps struct {
@@ -177,9 +198,9 @@ func (v *Revalidator) eventPublished(ctx context.Context, p domainevent.EventPub
 }
 
 func (v *Revalidator) eventUpdated(ctx context.Context, p domainevent.EventUpdated) ([]string, error) {
-	sitemap := p.PreviousSlug != "" || slices.ContainsFunc(p.Fields, func(f string) bool { return slices.Contains(sitemapFields, f) })
+	sitemap := p.PreviousSlug != "" || touches(p.Fields, sitemapFields)
 	tags, err := v.eventTags(ctx, p.EventID, p.OrgID, p.PreviousSlug, sitemap)
-	if err != nil || !slices.ContainsFunc(p.Fields, func(f string) bool { return slices.Contains(shareFields, f) }) {
+	if err != nil || !touches(p.Fields, shareFields) {
 		return tags, err
 	}
 	return v.withShares(ctx, tags, p.EventID)
@@ -194,12 +215,16 @@ func (v *Revalidator) eventCancelled(ctx context.Context, p domainevent.EventCan
 	return v.withShares(ctx, tags, p.EventID)
 }
 
-// withShares appends the pages of the public posts sharing the event
-// (BE-150): each post's page and its author org's page (it lists the
-// post with the event's summary), at most MaxEventShares posts, newest
-// first; each org is resolved once.
-func (v *Revalidator) withShares(ctx context.Context, tags []string, eventID uuid.UUID) ([]string, error) {
-	shares, err := v.d.Resolver.EventShares(ctx, eventID, MaxEventShares+1)
+// withShares appends the pages of the public posts sharing the events
+// (BE-150; an organiser's events, BE-157): each post's page and its author
+// org's page (it lists the post with the event's summary), at most
+// MaxEventShares posts, newest first; each org is resolved once. No event
+// → no read.
+func (v *Revalidator) withShares(ctx context.Context, tags []string, eventIDs ...uuid.UUID) ([]string, error) {
+	if len(eventIDs) == 0 {
+		return tags, nil
+	}
+	shares, err := v.d.Resolver.EventShares(ctx, eventIDs, MaxEventShares+1)
 	if err != nil {
 		return nil, fmt.Errorf("webcache: resolve event shares: %w", err)
 	}
@@ -252,8 +277,25 @@ func (v *Revalidator) eventTags(ctx context.Context, eventID, orgID uuid.UUID, p
 	return tags, nil
 }
 
+// orgUpdated: the org's page; a changed name or slug also shows on the
+// cards of its events that other orgs' public posts share (BE-157): those
+// pages too, through its newest MaxOrgEvents events on the public web.
+// An org without a page of its own (a university) still organises events.
 func (v *Revalidator) orgUpdated(ctx context.Context, p domainevent.OrgUpdated) ([]string, error) {
-	return v.orgTags(ctx, p.OrgID, slices.Contains(p.Fields, "status"))
+	tags, err := v.orgTags(ctx, p.OrgID, slices.Contains(p.Fields, "status"))
+	if err != nil || !touches(p.Fields, organiserFields) {
+		return tags, err
+	}
+	evs, err := v.d.Resolver.OrgEvents(ctx, p.OrgID, MaxOrgEvents+1)
+	if err != nil {
+		return nil, fmt.Errorf("webcache: resolve org events: %w", err)
+	}
+	if len(evs) > MaxOrgEvents {
+		evs = evs[:MaxOrgEvents]
+		v.d.Log.LogAttrs(ctx, slog.LevelWarn, "web revalidation: org events above the cap, the shares of the older ones wait for their cache life",
+			slog.Int("cap", MaxOrgEvents))
+	}
+	return v.withShares(ctx, tags, evs...)
 }
 
 func (v *Revalidator) clubUpdated(ctx context.Context, p domainevent.ClubUpdated) ([]string, error) {

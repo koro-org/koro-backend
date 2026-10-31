@@ -210,6 +210,64 @@ func TestRevalidate_EventSharesAndRejectedMedia_OutboxRelayWorker(t *testing.T) 
 	}
 }
 
+// TestRevalidate_OrganiserRenamed_OutboxRelayWorker (BE-157): an
+// org.updated row of a renamed organiser and one of a changed description,
+// written in PostgreSQL transactions, reach the web through the relay and
+// the asynq worker: the rename also refreshes the public posts sharing its
+// events (each author org once), the description the org's page alone.
+func TestRevalidate_OrganiserRenamed_OutboxRelayWorker(t *testing.T) {
+	t.Parallel()
+	d := testutil.NewDB(t)
+	rdb := testutil.NewRedis(t)
+	ctx := t.Context()
+	log := obs.Discard()
+	web := newFakeWeb(t)
+
+	subs := outbox.NewRegistry()
+	webcache.New(webcache.Deps{Resolver: resolver(), Sender: newSender(t, web), Log: log}).Subscribe(subs)
+	client := queue.NewClient(rdb, log)
+	t.Cleanup(func() { _ = client.Close() })
+	ob := outbox.New(outbox.Deps{Store: outbox.NewGormStore(d.ORM), Tx: d.Tx, Subs: subs, Queue: client, Clock: clock.NewFake(t0), Log: log})
+	for _, p := range []domainevent.OrgUpdated{
+		{OrgID: clubID, OrgKind: "club", Fields: []string{"name"}},
+		{OrgID: companyID, OrgKind: "company", Fields: []string{"description"}},
+	} {
+		env, err := domainevent.New(p, "org", p.OrgID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := d.Tx.WithTx(ctx, func(ctx context.Context) error { return ob.Add(ctx, env) }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err := ob.NewRelay(outbox.RelayConfig{}).Once(ctx); err != nil || n != 2 {
+		t.Fatalf("relay = %d, %v", n, err)
+	}
+
+	mux := queue.NewMux(log)
+	for _, s := range subs.All() {
+		if err := mux.Handle(s.Name, s.HandleTask); err != nil {
+			t.Fatal(err)
+		}
+	}
+	srv := queue.NewServer(ctx, rdb, mux, queue.ServerConfig{Concurrency: 1, ShutdownTimeout: time.Second, Log: log})
+	if err := srv.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Shutdown)
+	insp := asynq.NewInspectorFromRedisClient(rdb)
+	waitUntil(t, func() bool {
+		q, err := insp.GetQueueInfo(queue.Default)
+		return err == nil && len(web.got(t)) == 2 && q.Pending == 0 && q.Active == 0 && q.Retry == 0 && q.Archived == 0
+	})
+	got := web.got(t)
+	slices.SortFunc(got, func(a, b []string) int { return len(a) - len(b) })
+	renamed := []string{"club:odtu-robotik", webcache.PostTag(share1), webcache.PostTag(share2), "company:acme", webcache.PostTag(share3)}
+	if !slices.Equal(got[0], []string{"company:acme"}) || !slices.Equal(got[1], renamed) {
+		t.Fatalf("calls = %v, want [company page] and [%v]", got, renamed)
+	}
+}
+
 func waitUntil(t *testing.T, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)

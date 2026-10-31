@@ -30,18 +30,19 @@ func (s *service) PublicPost(ctx context.Context, postID uuid.UUID) (PostSummary
 	return summaryOf(p), true, nil
 }
 
-// PublicEventShares implements PublicPosts (webcache, BE-150): the
-// anonymous reader's filter of the org pages (readerOf, readerConds).
-func (s *service) PublicEventShares(ctx context.Context, eventID uuid.UUID, limit int) ([]PostSummary, error) {
+// PublicEventShares implements PublicPosts (webcache: one event, BE-150;
+// an organiser's events, BE-157): the anonymous reader's filter of the org
+// pages (readerOf, readerConds).
+func (s *service) PublicEventShares(ctx context.Context, eventIDs []uuid.UUID, limit int) ([]PostSummary, error) {
 	out := []PostSummary{}
-	if limit <= 0 {
+	if limit <= 0 || len(eventIDs) == 0 {
 		return out, nil
 	}
 	r, err := s.readerOf(ctx, authz.Anonymous())
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.posts().ListEventShares(ctx, eventID, r, limit)
+	rows, err := s.posts().ListEventShares(ctx, eventIDs, r, limit)
 	if err != nil {
 		return nil, err
 	}

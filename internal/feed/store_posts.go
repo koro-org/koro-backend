@@ -34,10 +34,12 @@ type postStore interface {
 	// f may see (the org page), newest first by (published_at, id). Mutes
 	// and hidden posts are feed-only: they do not apply here.
 	ListOrgPosts(ctx context.Context, orgID uuid.UUID, f Reader, after *After, limit int) ([]Post, error)
-	// ListEventShares returns up to limit published posts sharing eventID
-	// (event_share) the reader r may see, newest first by (published_at,
-	// id): the post pages that show the event's summary (webcache, BE-150).
-	ListEventShares(ctx context.Context, eventID uuid.UUID, r Reader, limit int) ([]Post, error)
+	// ListEventShares returns up to limit published posts sharing one of
+	// eventIDs (event_share) the reader r may see, newest first by
+	// (published_at, id): the post pages that show the events' summaries
+	// (webcache: one event, BE-150; an organiser's events, BE-157). No
+	// event → no post.
+	ListEventShares(ctx context.Context, eventIDs []uuid.UUID, r Reader, limit int) ([]Post, error)
 	// ListOrgManage returns up to limit posts of orgID matching f, newest
 	// first by id.
 	ListOrgManage(ctx context.Context, orgID uuid.UUID, f ManageFilter, after *uuid.UUID, limit int) ([]Post, error)

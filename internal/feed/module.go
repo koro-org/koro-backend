@@ -127,8 +127,8 @@ type PublicPosts interface {
 	// found is false for a missing post and for any other.
 	PublicPost(ctx context.Context, postID uuid.UUID) (s PostSummary, found bool, err error)
 	// PublicEventShares returns up to limit posts an anonymous reader opens
-	// that share eventID (event_share), newest first.
-	PublicEventShares(ctx context.Context, eventID uuid.UUID, limit int) ([]PostSummary, error)
+	// that share one of eventIDs (event_share), newest first.
+	PublicEventShares(ctx context.Context, eventIDs []uuid.UUID, limit int) ([]PostSummary, error)
 }
 
 // Likes is the like read of other modules (BE-090): talent's

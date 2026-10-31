@@ -13,6 +13,7 @@ import (
 	"uuid"
 
 	"koro/internal/authz/authztest"
+	"koro/internal/events"
 	"koro/internal/feed"
 	"koro/internal/orgs"
 	"koro/internal/platform/config"
@@ -163,8 +164,70 @@ func TestWire_WebcacheResolvesPublicPosts(t *testing.T) {
 	if ref, found, err := r.Post(ctx, followers); err != nil || found {
 		t.Fatalf("Post(followers) = %+v, %v, %v", ref, found, err)
 	}
-	refs, err := r.EventShares(ctx, eventID, 10)
+	refs, err := r.EventShares(ctx, []uuid.UUID{eventID}, 10)
 	if err != nil || len(refs) != 1 || refs[0].ID != public {
 		t.Fatalf("EventShares = %+v, %v", refs, err)
+	}
+}
+
+// TestWire_WebcacheResolvesOrgEvents (BE-157): the resolver reads an
+// organiser's events through the anonymous events catalogue — public,
+// published, past ones too — newest published first; drafts, events of a
+// university's audience and other orgs' events are not among them.
+func TestWire_WebcacheResolvesOrgEvents(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	var club, other uuid.UUID
+	err := (db.NopTx{}).WithTx(ctx, func(ctx context.Context) error {
+		var err error
+		if club, err = c.orgs.svc.Create(ctx, orgs.CreateOrg{Kind: orgs.KindClub, Name: "Robotik Kulübü", Slug: "robotik-kulubu"}); err != nil {
+			return err
+		}
+		other, err = c.orgs.svc.Create(ctx, orgs.CreateOrg{Kind: orgs.KindClub, Name: "Satranç Kulübü", Slug: "satranc-kulubu"})
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mem := c.events.built.(*events.MemStore)
+	at := time.Date(2026, 9, 1, 9, 0, 0, 0, time.UTC) // before the container clock (2026-10-03)
+	put := func(org uuid.UUID, status events.Status, vis events.Visibility, starts time.Time, published int) uuid.UUID {
+		t.Helper()
+		id := uuid.NewV7()
+		e := events.Event{
+			ID: id, OrgID: org, CreatedBy: authztest.ID("club_admin"), Title: "Etkinlik", Slug: "etkinlik-" + id.String()[:8],
+			Category: events.CategoryWorkshop, Format: events.FormatInPerson, City: new("İstanbul"),
+			StartsAt: starts, EndsAt: starts.Add(2 * time.Hour), Visibility: vis, Status: status,
+			RequiresRegistration: true, RegistrationMode: events.ModeAuto, CreatedAt: at, UpdatedAt: at,
+		}
+		if vis == events.VisibilityUniversity {
+			u := authztest.ID("uni_a")
+			e.VisibilityUniversityID = &u
+		}
+		if status != events.StatusDraft {
+			p := at.Add(time.Duration(published) * time.Hour)
+			e.PublishedAt = &p
+		}
+		if err := mem.PutEvent(e); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	past := put(club, events.StatusPublished, events.VisibilityPublic, at.Add(24*time.Hour), 1)
+	upcoming := put(club, events.StatusPublished, events.VisibilityPublic, at.AddDate(0, 3, 0), 2)
+	put(club, events.StatusDraft, events.VisibilityPublic, at.AddDate(0, 3, 0), 0)
+	put(club, events.StatusPublished, events.VisibilityUniversity, at.AddDate(0, 3, 0), 3)
+	put(other, events.StatusPublished, events.VisibilityPublic, at.AddDate(0, 3, 0), 4)
+
+	r := webResolver{c: c}
+	if got, err := r.OrgEvents(ctx, club, 10); err != nil || !slices.Equal(got, []uuid.UUID{upcoming, past}) {
+		t.Fatalf("OrgEvents = %v, %v; want %v", got, err, []uuid.UUID{upcoming, past})
+	}
+	if got, err := r.OrgEvents(ctx, club, 1); err != nil || !slices.Equal(got, []uuid.UUID{upcoming}) {
+		t.Fatalf("OrgEvents(limit 1) = %v, %v", got, err)
 	}
 }

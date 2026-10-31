@@ -303,14 +303,18 @@ func (s gormStore) ListOrgPosts(ctx context.Context, orgID uuid.UUID, r Reader, 
 	return out, nil
 }
 
-// ListEventShares implements Store over posts_event_idx.
+// ListEventShares implements Store over posts_event_idx (one index range
+// per event).
 //
-// cross-org: the posts of every org that share one event (the web's post
-// pages showing its summary, BE-150); the reader's visibility (03 §3.6) is
-// applied in the query.
-func (s gormStore) ListEventShares(ctx context.Context, eventID uuid.UUID, r Reader, limit int) ([]Post, error) {
+// cross-org: the posts of every org that share the events (the web's post
+// pages showing their summaries, BE-150, BE-157); the reader's visibility
+// (03 §3.6) is applied in the query.
+func (s gormStore) ListEventShares(ctx context.Context, eventIDs []uuid.UUID, r Reader, limit int) ([]Post, error) {
+	if len(eventIDs) == 0 || limit <= 0 {
+		return []Post{}, nil
+	}
 	q := db.Conn(ctx, s.orm).Table("posts AS p").Select(prefixed).
-		Where("p.status = 'published' AND p.event_id = ?", eventID)
+		Where("p.status = 'published' AND p.event_id IN ?", eventIDs)
 	cond, args := readerConds(r)
 	var out []Post
 	if err := q.Where(cond, args...).Order("p.published_at DESC, p.id DESC").Limit(limit).Scan(&out).Error; err != nil {

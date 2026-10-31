@@ -51,7 +51,7 @@ func TestPublicPosts_AnonymousReadRule(t *testing.T) {
 	e.create(t, "club_admin", "club_a", shareOf(feed.AudiencePublic))
 	shares := func(limit int) []uuid.UUID {
 		t.Helper()
-		ps, err := e.svc.PublicEventShares(ctx, ev.ID, limit)
+		ps, err := e.svc.PublicEventShares(ctx, []uuid.UUID{ev.ID}, limit)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -72,5 +72,18 @@ func TestPublicPosts_AnonymousReadRule(t *testing.T) {
 	}
 	if got := shares(0); len(got) != 0 {
 		t.Fatalf("PublicEventShares(limit 0) = %v", got)
+	}
+	// An organiser's events at once (BE-157): one newest-first list; no
+	// event, no post.
+	ev2 := events.EventSummary{ID: uuid.NewV7(), OrgID: orgID("club_a"), Title: "Yaz Kampı", Slug: "yaz-kampi",
+		Status: events.StatusPublished, StartsAt: start, EndsAt: start.Add(time.Hour), Visibility: events.VisibilityPublic}
+	e.events.put(ev2)
+	newest := e.published(t, "club_admin", "club_a", feed.PostInput{Kind: feed.KindEventShare, EventID: &ev2.ID, AudienceKind: feed.AudiencePublic}).Post.ID
+	ps, err := e.svc.PublicEventShares(ctx, []uuid.UUID{ev.ID, ev2.ID}, 10)
+	if err != nil || len(ps) != 3 || ps[0].ID != newest || ps[1].ID != newer || ps[2].ID != older {
+		t.Fatalf("PublicEventShares(two events) = %+v, %v; want %v", ps, err, []uuid.UUID{newest, newer, older})
+	}
+	if ps, err := e.svc.PublicEventShares(ctx, nil, 10); err != nil || len(ps) != 0 {
+		t.Fatalf("PublicEventShares(no event) = %+v, %v", ps, err)
 	}
 }

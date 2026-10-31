@@ -1,4 +1,4 @@
-# Authz matrix of the messaging module (03 §5.9, 04 §2.9; BE-056). 10 operations × 18 personas + variants.
+# Authz matrix of the messaging module (03 §5.9, 04 §2.9; BE-056, BE-162). 26 operations × 18 personas + variants.
 # Company surface (/orgs/{org_id}/contact-requests…): cmm S, cma S of the path's company (company_a:
 # company_member, company_admin; company_b: other_company_member); members of another org and everyone else
 # 404; platform staff and the members of a club see the surface and get 403 (03 §7.6). k19 (an active company,
@@ -9,7 +9,9 @@
 # company_a's pseudonym of the discoverable helper student_granted, ael3ea4fuqkpycbd company_b's,
 # mjh6rq23ztj3hxgo company_a's of the persona student (not discoverable). Fixture request_student_a is
 # company_a's pending request to the persona student (fixtures/messaging.yaml); company_a and company_b hold
-# 20 contact_request units each (fixtures/entitlements.yaml).
+# 20 contact_request units each (fixtures/entitlements.yaml). Conversations (BE-162): conversation_student_a is the
+# open conversation of company_a's accepted request to the persona student (requester company_member); its parties
+# are the student (/me/conversations…: O) and company_a's recruiter and admin (/orgs/{org_id}/conversations…: S).
 version: 1
 groups:
   # signed-in users who are neither members of company_a nor platform staff (company_a's surface: 404).
@@ -174,3 +176,172 @@ operations:
     path: /api/v1/me/company-blocks
     action: messaging.block.list_own
     expect: { anonymous: 401, "@signed_in": 200 }
+
+  # ---- conversations (BE-162): the company's path
+  listOrgConversations:
+    method: GET
+    path: /api/v1/orgs/{org_id}/conversations
+    action: messaging.conversation.list_org
+    path_params: { org_id: company_a }
+    expect: { anonymous: 401, company_member: 200, company_admin: 200, "@msg_not_company_a": 404, "@platform_staff": 403 }
+    variants:
+      - name: company_b
+        path_params: { org_id: company_b }
+        expect: { anonymous: 401, other_company_member: 200, "@msg_not_company_b": 404, "@platform_staff": 403 }
+      - name: open_only
+        query: { status: open }
+        expect: { anonymous: 401, company_member: 200, company_admin: 200, "@msg_not_company_a": 404, "@platform_staff": 403 }
+      - name: club_org
+        path_params: { org_id: club_a }
+        expect: { anonymous: 401, "@outsiders_a": 404, club_member: 403, club_admin: 403, "@platform_staff": 403 }
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000e1" }
+        expect: { anonymous: 401, "@msg_no_platform_role": 404, "@platform_staff": 403 }
+
+  getOrgConversation:
+    method: GET
+    path: /api/v1/orgs/{org_id}/conversations/{conversation_id}
+    action: messaging.conversation.read
+    path_params: { org_id: company_a, conversation_id: conversation_student_a }
+    expect: { anonymous: 401, company_member: 200, company_admin: 200, "@msg_not_company_a": 404, "@platform_staff": 403 }
+    variants:
+      - name: other_company
+        path_params: { org_id: company_b }
+        note: company_a's conversation is not found on company_b's surface (IDOR)
+        expect: { anonymous: 401, other_company_member: 404, "@msg_not_company_b": 404, "@platform_staff": 403 }
+      - name: unknown_conversation
+        path_params: { conversation_id: "literal:00000000-0000-7000-8000-0000000000e3" }
+        expect: { anonymous: 401, company_member: 404, company_admin: 404, "@msg_not_company_a": 404, "@platform_staff": 403 }
+
+  listOrgConversationMessages:
+    method: GET
+    path: /api/v1/orgs/{org_id}/conversations/{conversation_id}/messages
+    action: messaging.conversation.read
+    path_params: { org_id: company_a, conversation_id: conversation_student_a }
+    expect: { anonymous: 401, company_member: 200, company_admin: 200, "@msg_not_company_a": 404, "@platform_staff": 403 }
+    variants:
+      - name: other_company
+        path_params: { org_id: company_b }
+        expect: { anonymous: 401, other_company_member: 404, "@msg_not_company_b": 404, "@platform_staff": 403 }
+
+  sendOrgConversationMessage:
+    method: POST
+    path: /api/v1/orgs/{org_id}/conversations/{conversation_id}/messages
+    action: messaging.message.send
+    path_params: { org_id: company_a, conversation_id: conversation_student_a }
+    body: bodies/messaging/message.json
+    note: text only; the student is notified in-app and by push (never the text)
+    expect: { anonymous: 401, company_member: 201, company_admin: 201, "@msg_not_company_a": 404, "@platform_staff": 403 }
+    variants:
+      - name: other_company
+        path_params: { org_id: company_b }
+        expect: { anonymous: 401, other_company_member: 404, "@msg_not_company_b": 404, "@platform_staff": 403 }
+
+  markOrgConversationRead:
+    method: POST
+    path: /api/v1/orgs/{org_id}/conversations/{conversation_id}/read
+    action: messaging.conversation.mark_read
+    path_params: { org_id: company_a, conversation_id: conversation_student_a }
+    body: bodies/messaging/mark_read.json
+    note: the caller's own read marker (never shown to the student)
+    expect: { anonymous: 401, company_member: 204, company_admin: 204, "@msg_not_company_a": 404, "@platform_staff": 403 }
+    variants:
+      - name: other_company
+        path_params: { org_id: company_b }
+        expect: { anonymous: 401, other_company_member: 404, "@msg_not_company_b": 404, "@platform_staff": 403 }
+
+  closeOrgConversation:
+    method: POST
+    path: /api/v1/orgs/{org_id}/conversations/{conversation_id}/close
+    action: messaging.conversation.close
+    path_params: { org_id: company_a, conversation_id: conversation_student_a }
+    note: for good (closed_by company)
+    expect: { anonymous: 401, company_member: 200, company_admin: 200, "@msg_not_company_a": 404, "@platform_staff": 403 }
+    variants:
+      - name: other_company
+        path_params: { org_id: company_b }
+        expect: { anonymous: 401, other_company_member: 404, "@msg_not_company_b": 404, "@platform_staff": 403 }
+
+  muteOrgConversation:
+    method: PUT
+    path: /api/v1/orgs/{org_id}/conversations/{conversation_id}/mute
+    action: messaging.conversation.mute
+    path_params: { org_id: company_a, conversation_id: conversation_student_a }
+    note: for the caller only
+    expect: { anonymous: 401, company_member: 204, company_admin: 204, "@msg_not_company_a": 404, "@platform_staff": 403 }
+    variants:
+      - name: other_company
+        path_params: { org_id: company_b }
+        expect: { anonymous: 401, other_company_member: 404, "@msg_not_company_b": 404, "@platform_staff": 403 }
+
+  unmuteOrgConversation:
+    method: DELETE
+    path: /api/v1/orgs/{org_id}/conversations/{conversation_id}/mute
+    action: messaging.conversation.mute
+    path_params: { org_id: company_a, conversation_id: conversation_student_a }
+    note: idempotent
+    expect: { anonymous: 401, company_member: 204, company_admin: 204, "@msg_not_company_a": 404, "@platform_staff": 403 }
+
+  # ---- conversations (BE-162): the student's path
+  listMyConversations:
+    method: GET
+    path: /api/v1/me/conversations
+    action: messaging.conversation.list_own
+    note: every account lists its own (O; empty for most personas)
+    expect: { anonymous: 401, "@signed_in": 200 }
+
+  getMyConversation:
+    method: GET
+    path: /api/v1/me/conversations/{conversation_id}
+    action: messaging.conversation.read
+    path_params: { conversation_id: conversation_student_a }
+    expect: { anonymous: 401, student: 200, "@msg_not_student": 404 }
+    variants:
+      - name: unknown_conversation
+        path_params: { conversation_id: "literal:00000000-0000-7000-8000-0000000000e3" }
+        expect: { anonymous: 401, "@signed_in": 404 }
+
+  listMyConversationMessages:
+    method: GET
+    path: /api/v1/me/conversations/{conversation_id}/messages
+    action: messaging.conversation.read
+    path_params: { conversation_id: conversation_student_a }
+    expect: { anonymous: 401, student: 200, "@msg_not_student": 404 }
+
+  sendMyConversationMessage:
+    method: POST
+    path: /api/v1/me/conversations/{conversation_id}/messages
+    action: messaging.message.send
+    path_params: { conversation_id: conversation_student_a }
+    body: bodies/messaging/message.json
+    expect: { anonymous: 401, student: 201, "@msg_not_student": 404 }
+
+  markMyConversationRead:
+    method: POST
+    path: /api/v1/me/conversations/{conversation_id}/read
+    action: messaging.conversation.mark_read
+    path_params: { conversation_id: conversation_student_a }
+    body: bodies/messaging/mark_read.json
+    expect: { anonymous: 401, student: 204, "@msg_not_student": 404 }
+
+  closeMyConversation:
+    method: POST
+    path: /api/v1/me/conversations/{conversation_id}/close
+    action: messaging.conversation.close
+    path_params: { conversation_id: conversation_student_a }
+    note: for good (closed_by student)
+    expect: { anonymous: 401, student: 200, "@msg_not_student": 404 }
+
+  muteMyConversation:
+    method: PUT
+    path: /api/v1/me/conversations/{conversation_id}/mute
+    action: messaging.conversation.mute
+    path_params: { conversation_id: conversation_student_a }
+    expect: { anonymous: 401, student: 204, "@msg_not_student": 404 }
+
+  unmuteMyConversation:
+    method: DELETE
+    path: /api/v1/me/conversations/{conversation_id}/mute
+    action: messaging.conversation.mute
+    path_params: { conversation_id: conversation_student_a }
+    expect: { anonymous: 401, student: 204, "@msg_not_student": 404 }

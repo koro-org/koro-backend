@@ -57,7 +57,7 @@ func (s *service) Create(ctx context.Context, a authz.Actor, orgID uuid.UUID, in
 	if err != nil {
 		return CompanyView{}, err
 	}
-	r, err := s.d.Store.Get(ctx, orgID, id)
+	r, err := s.requests().Get(ctx, orgID, id)
 	if err != nil {
 		return CompanyView{}, err
 	}
@@ -71,7 +71,7 @@ func (s *service) create(ctx context.Context, a authz.Actor, orgID uuid.UUID, vi
 		return uuid.Nil(), err
 	}
 	now := s.now()
-	switch cur, err := s.d.Store.Pending(ctx, orgID, student); {
+	switch cur, err := s.requests().Pending(ctx, orgID, student); {
 	case errors.Is(err, ErrNotFound):
 	case err != nil:
 		return uuid.Nil(), err
@@ -88,7 +88,7 @@ func (s *service) create(ctx context.Context, a authz.Actor, orgID uuid.UUID, vi
 	if err != nil {
 		return uuid.Nil(), err
 	}
-	r, err := s.d.Store.Insert(ctx, ContactRequest{
+	r, err := s.requests().Insert(ctx, ContactRequest{
 		ID: id, OrgID: orgID, SenderUserID: a.UserID, StudentUserID: student, Via: via,
 		OpportunityPostID: in.OpportunityPostID, Subject: in.Subject, Message: in.Message, Status: StatusPending,
 		ExpiresAt: now.Add(RequestTTL), EntitlementUsageID: usage,
@@ -133,13 +133,13 @@ func (s *service) target(ctx context.Context, orgID uuid.UUID, anonID string) (u
 	case !ok:
 		return uuid.Nil(), ErrNotFound
 	}
-	switch blocked, err := s.d.Store.Blocked(ctx, student, orgID); {
+	switch blocked, err := s.blocks().Blocked(ctx, student, orgID); {
 	case err != nil:
 		return uuid.Nil(), err
 	case blocked:
 		return uuid.Nil(), ErrNotFound
 	}
-	switch declined, err := s.d.Store.DeclinedSince(ctx, orgID, student, s.now().Add(-DeclineCooldown)); {
+	switch declined, err := s.requests().DeclinedSince(ctx, orgID, student, s.now().Add(-DeclineCooldown)); {
 	case err != nil:
 		return uuid.Nil(), err
 	case declined:
@@ -191,7 +191,7 @@ func (s *service) ListSent(ctx context.Context, a authz.Actor, orgID uuid.UUID, 
 	}
 	limit := page.ClampLimit(q.Limit)
 	q.Now, q.Limit = s.now(), limit+1
-	rows, err := s.d.Store.ListByOrg(ctx, orgID, q)
+	rows, err := s.requests().ListByOrg(ctx, orgID, q)
 	if err != nil {
 		return CompanyPage{}, err
 	}
@@ -217,7 +217,7 @@ func (s *service) sent(ctx context.Context, a authz.Actor, act authz.Action, org
 	if err := authz.Can(ctx, a, act, companySurface(orgID)); err != nil {
 		return ContactRequest{}, err
 	}
-	r, err := s.d.Store.Get(ctx, orgID, id)
+	r, err := s.requests().Get(ctx, orgID, id)
 	if err != nil {
 		return ContactRequest{}, err
 	}
@@ -256,7 +256,7 @@ func (s *service) Withdraw(ctx context.Context, a authz.Actor, orgID, id uuid.UU
 		return CompanyView{}, err
 	}
 	if _, _, err := idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (uuid.UUID, error) {
-		cur, err := s.d.Store.Lock(ctx, id)
+		cur, err := s.requests().Lock(ctx, id)
 		switch {
 		case err != nil:
 			return uuid.Nil(), err
@@ -267,7 +267,7 @@ func (s *service) Withdraw(ctx context.Context, a authz.Actor, orgID, id uuid.UU
 		case !cur.Open(s.now()):
 			return uuid.Nil(), ErrInvalidState
 		}
-		next, ok, err := s.d.Store.Transition(ctx, id, StatusPending, StatusWithdrawn, nil)
+		next, ok, err := s.requests().Transition(ctx, id, StatusPending, StatusWithdrawn, nil)
 		switch {
 		case err != nil:
 			return uuid.Nil(), err
@@ -281,7 +281,7 @@ func (s *service) Withdraw(ctx context.Context, a authz.Actor, orgID, id uuid.UU
 	}); err != nil {
 		return CompanyView{}, err
 	}
-	r, err := s.d.Store.Get(ctx, orgID, id)
+	r, err := s.requests().Get(ctx, orgID, id)
 	if err != nil {
 		return CompanyView{}, err
 	}

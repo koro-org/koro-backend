@@ -102,6 +102,7 @@ func Rules() map[op.RateLimit]Rule {
 		{op.RateBreakGlass, 30, hour, KeyActor, true},
 		{op.RateUpload, 60, hour, KeyActor, false},
 		{op.RateWebhook, 600, minute, KeyProvider, false},
+		{op.RateMessageSend, 30, minute, KeyActor, false}, // BE-162: sendMyConversationMessage, sendOrgConversationMessage
 	}
 	out := make(map[op.RateLimit]Rule, len(rs))
 	for _, r := range rs {

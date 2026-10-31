@@ -23,6 +23,7 @@ const (
 	ExpireJobName          = "messaging.expire_requests"
 	NotifyReceivedTaskName = "messaging.notify_request_received"
 	NotifyClosedTaskName   = "messaging.notify_request_closed"
+	NotifyMessageTaskName  = "messaging.notify_message" // conversation.message_sent (BE-162)
 	// ExpireBatch is how many requests one expiry transaction closes.
 	ExpireBatch = 200
 )
@@ -45,7 +46,7 @@ const (
 // company's notice (O) and the audit record of the system. The unit is not
 // given back (01 §7). ok=false when it is no longer pending.
 func (s *service) expire(ctx context.Context, r ContactRequest) (bool, error) {
-	next, ok, err := s.d.Store.Transition(ctx, r.ID, StatusPending, StatusExpired, nil)
+	next, ok, err := s.requests().Transition(ctx, r.ID, StatusPending, StatusExpired, nil)
 	if err != nil || !ok {
 		return false, err
 	}
@@ -77,7 +78,7 @@ func (s *service) ExpireDue(ctx context.Context) error {
 	// log counts the requests closed (read only when every batch committed).
 	total := 0
 	_, err := db.Batches(ctx, s.d.Tx, ExpireBatch, func(ctx context.Context) (int, error) {
-		rows, err := s.d.Store.DueForExpiry(ctx, s.now(), ExpireBatch)
+		rows, err := s.requests().DueForExpiry(ctx, s.now(), ExpireBatch)
 		if err != nil {
 			return 0, err
 		}
@@ -109,7 +110,7 @@ func (s *service) handleCreated(ctx context.Context, e domainevent.Envelope) err
 	if err != nil {
 		return queue.Permanent(err)
 	}
-	r, err := s.d.Store.GetForStudent(ctx, p.StudentUserID, p.ContactRequestID)
+	r, err := s.requests().GetForStudent(ctx, p.StudentUserID, p.ContactRequestID)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return nil
@@ -161,7 +162,7 @@ func (s *service) handleClosed(ctx context.Context, e domainevent.Envelope) erro
 	default:
 		return queue.Permanent(fmt.Errorf("messaging: closed notice: unknown outcome %q", p.Outcome))
 	}
-	r, err := s.d.Store.Get(ctx, p.OrgID, p.ContactRequestID)
+	r, err := s.requests().Get(ctx, p.OrgID, p.ContactRequestID)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return nil // erased with the student's account
@@ -185,9 +186,15 @@ func (s *service) companyRecipients(ctx context.Context, r ContactRequest) ([]uu
 	if slices.Contains(ids, r.SenderUserID) {
 		return []uuid.UUID{r.SenderUserID}, nil
 	}
+	return s.withRole(ctx, r.OrgID, ids, authz.MemberCompanyOwner, authz.MemberCompanyAdmin)
+}
+
+// withRole keeps the users of ids who hold one of roles in orgID (active),
+// in order, once each.
+func (s *service) withRole(ctx context.Context, orgID uuid.UUID, ids []uuid.UUID, roles ...authz.MemberRole) ([]uuid.UUID, error) {
 	var out []uuid.UUID
 	for _, id := range ids {
-		ok, err := s.d.Orgs.HasRole(ctx, r.OrgID, id, authz.MemberCompanyOwner, authz.MemberCompanyAdmin)
+		ok, err := s.d.Orgs.HasRole(ctx, orgID, id, roles...)
 		if err != nil {
 			return nil, fmt.Errorf("messaging: org member role: %w", err)
 		}
@@ -202,34 +209,56 @@ func (s *service) companyRecipients(ctx context.Context, r ContactRequest) ([]uu
 // notify drops the ones a recipient switched off (contact_requests).
 var noticeChannels = []notify.Channel{notify.ChannelInApp, notify.ChannelPush, notify.ChannelEmail}
 
-// notify sends tmpl to every recipient on each channel: in-app (the source
-// org, the deep link), push (the deep link) and e-mail (the address and
-// language from identity; mail plus the link to the request). The dedupe
-// key per recipient and channel makes a repeated task a no-op where it
-// already went (the in-app key is BE-056's). A recipient without an
-// address (erased meanwhile) gets no e-mail; a permanent refusal is
-// logged, a transient one retries the task.
+// notify sends a contact request notice (tmpl) to every recipient on
+// in-app, push and e-mail (T-336).
 func (s *service) notify(ctx context.Context, tmpl string, r ContactRequest, to []uuid.UUID, link notify.Link, source *uuid.UUID,
 	mail map[string]any,
 ) error {
+	return s.deliver(ctx, notice{tmpl: tmpl, ref: r.ID, data: map[string]any{"contact_request_id": r.ID.String()}, link: link,
+		source: source, channels: noticeChannels, mail: mail}, to)
+}
+
+// notice is one notice of messaging to deliver: its template, the record
+// it is about (ref: the dedupe key), the in-app/push data (opaque IDs
+// only), the deep link, the in-app source org, the channels and the
+// e-mail's extra data.
+type notice struct {
+	tmpl     string
+	ref      uuid.UUID
+	data     map[string]any
+	link     notify.Link
+	source   *uuid.UUID
+	channels []notify.Channel
+	mail     map[string]any
+}
+
+// deliver sends n to every recipient on each of its channels: in-app (the
+// source org, the deep link), push (the deep link) and e-mail (the address
+// and language from identity; mail plus the link). The dedupe key per
+// recipient and channel (tmpl:ref:user, BE-056's in-app key) makes a
+// repeated task a no-op where it already went. A recipient without an
+// address (erased meanwhile) gets no e-mail; a permanent refusal is
+// logged, a transient one retries the task.
+func (s *service) deliver(ctx context.Context, n notice, to []uuid.UUID) error {
 	if len(to) == 0 {
 		return nil
 	}
 	if s.d.Sender == nil {
 		return errors.New("messaging: notify is not wired")
 	}
+	tmpl, link := n.tmpl, n.link
 	var errs []error
 	for _, uid := range to {
 		u := uid
-		key := tmpl + ":" + r.ID.String() + ":" + u.String()
-		for _, ch := range noticeChannels {
+		key := tmpl + ":" + n.ref.String() + ":" + u.String()
+		for _, ch := range n.channels {
 			m := notify.Message{
 				UserID: &u, Channel: ch, Category: notify.CategoryTransactional, Template: tmpl, LinkPath: link,
-				DedupeKey: key, Data: map[string]any{"contact_request_id": r.ID.String()},
+				DedupeKey: key, Data: n.data,
 			}
 			switch ch {
 			case notify.ChannelInApp:
-				m.SourceOrgID = source
+				m.SourceOrgID = n.source
 			case notify.ChannelPush:
 				m.DedupeKey = key + ":push"
 			case notify.ChannelEmail:
@@ -242,7 +271,7 @@ func (s *service) notify(ctx context.Context, tmpl string, r ContactRequest, to 
 				}
 				m.ToEmail, m.Locale, m.LinkPath, m.DedupeKey = c.Email, c.Locale, notify.Link{}, key+":email"
 				m.Data = map[string]any{"url": s.d.LinkBaseURL + link.String()}
-				for k, v := range mail {
+				for k, v := range n.mail {
 					m.Data[k] = v
 				}
 			}
@@ -251,8 +280,8 @@ func (s *service) notify(ctx context.Context, tmpl string, r ContactRequest, to 
 					errs = append(errs, err)
 					continue
 				}
-				s.d.Log.LogAttrs(ctx, slog.LevelError, "contact request notice not deliverable", slog.String("template", tmpl),
-					slog.String("channel", string(ch)), slog.String("contact_request_id", r.ID.String()),
+				s.d.Log.LogAttrs(ctx, slog.LevelError, "messaging notice not deliverable", slog.String("template", tmpl),
+					slog.String("channel", string(ch)), slog.String("ref_id", n.ref.String()),
 					slog.String("user_id", u.String()), slog.String("err", err.Error()))
 			}
 		}

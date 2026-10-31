@@ -84,8 +84,8 @@ func TestKoro_InconsistentOperation_Panics(t *testing.T) {
 
 func TestRateLimits_MatchDesignTable(t *testing.T) {
 	t.Parallel()
-	if n := len(op.RateLimits()); n != 18 {
-		t.Fatalf("04 §1.9 defines 18 classes, got %d", n)
+	if n := len(op.RateLimits()); n != 19 {
+		t.Fatalf("04 §1.9 defines 19 classes, got %d", n)
 	}
 }
 

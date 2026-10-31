@@ -22,4 +22,13 @@ var (
 	// withdrawn or expires first.
 	ErrRequestPending = problem.New(problem.Conflict, "messaging.request_pending",
 		"A pending contact request to this student exists")
+	// ErrConversationClosed: the conversation is closed (by either side,
+	// or because the student blocked the company) or its company is gone;
+	// it takes no message (BE-162).
+	ErrConversationClosed = problem.New(problem.Conflict, "messaging.conversation_closed",
+		"The conversation is closed")
+	// ErrAwaitingReply: the company sent MaxCompanyUnanswered messages
+	// since the student's last one and waits for the reply (BE-162).
+	ErrAwaitingReply = problem.New(problem.Conflict, "messaging.awaiting_reply",
+		"Wait for the student's reply before sending more messages")
 )

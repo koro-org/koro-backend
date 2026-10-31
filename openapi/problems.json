@@ -990,6 +990,18 @@
     "type": "urn:koro:problem:ledger.unbalanced"
   },
   {
+    "code": "messaging.awaiting_reply",
+    "status": 409,
+    "title": "Wait for the student's reply before sending more messages",
+    "type": "urn:koro:problem:messaging.awaiting_reply"
+  },
+  {
+    "code": "messaging.conversation_closed",
+    "status": 409,
+    "title": "The conversation is closed",
+    "type": "urn:koro:problem:messaging.conversation_closed"
+  },
+  {
     "code": "messaging.invalid_state",
     "status": 409,
     "title": "The current status does not allow this change",

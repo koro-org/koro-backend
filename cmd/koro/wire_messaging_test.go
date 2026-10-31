@@ -44,10 +44,10 @@ func TestWire_MessagingProvidesServiceTasksAndPrivacy(t *testing.T) {
 	}
 	claimed := false
 	for _, s := range c.sweepers {
-		claimed = claimed || slices.Contains(s.PolicyCodes(), messaging.PolicyContactRequestClosed)
+		claimed = claimed || slices.Equal(s.PolicyCodes(), []string{messaging.PolicyContactRequestClosed, messaging.PolicyConversationClosed})
 	}
 	if !claimed {
-		t.Fatal("contact_request_closed has no sweeper")
+		t.Fatal("contact_request_closed and conversation_closed have no sweeper")
 	}
 	var jobs []string
 	for _, j := range c.infra.jobs.Jobs() {
@@ -60,12 +60,14 @@ func TestWire_MessagingProvidesServiceTasksAndPrivacy(t *testing.T) {
 	}
 	subs := map[string]string{}
 	for _, s := range c.infra.subs.All() {
-		if s.Name == messaging.NotifyReceivedTaskName || s.Name == messaging.NotifyClosedTaskName {
+		if s.Name == messaging.NotifyReceivedTaskName || s.Name == messaging.NotifyClosedTaskName ||
+			s.Name == messaging.NotifyMessageTaskName {
 			subs[s.Name] = s.Topic
 		}
 	}
 	if subs[messaging.NotifyReceivedTaskName] != domainevent.TopicContactRequestCreated ||
-		subs[messaging.NotifyClosedTaskName] != domainevent.TopicContactRequestClosed {
+		subs[messaging.NotifyClosedTaskName] != domainevent.TopicContactRequestClosed ||
+		subs[messaging.NotifyMessageTaskName] != domainevent.TopicConversationMessageSent {
 		t.Fatalf("messaging subscriptions %v", subs)
 	}
 
@@ -86,6 +88,23 @@ func TestWire_MessagingProvidesServiceTasksAndPrivacy(t *testing.T) {
 		{"PUT", "/api/v1/me/company-blocks/{org_id}", "blockCompany", "self"},
 		{"DELETE", "/api/v1/me/company-blocks/{org_id}", "unblockCompany", "self"},
 		{"GET", "/api/v1/me/company-blocks", "listMyCompanyBlocks", "self"},
+		// BE-162: the conversations, on both paths.
+		{"GET", "/api/v1/orgs/{org_id}/conversations", "listOrgConversations", "org"},
+		{"GET", "/api/v1/orgs/{org_id}/conversations/{conversation_id}", "getOrgConversation", "org"},
+		{"GET", "/api/v1/orgs/{org_id}/conversations/{conversation_id}/messages", "listOrgConversationMessages", "org"},
+		{"POST", "/api/v1/orgs/{org_id}/conversations/{conversation_id}/messages", "sendOrgConversationMessage", "org"},
+		{"POST", "/api/v1/orgs/{org_id}/conversations/{conversation_id}/read", "markOrgConversationRead", "org"},
+		{"POST", "/api/v1/orgs/{org_id}/conversations/{conversation_id}/close", "closeOrgConversation", "org"},
+		{"PUT", "/api/v1/orgs/{org_id}/conversations/{conversation_id}/mute", "muteOrgConversation", "org"},
+		{"DELETE", "/api/v1/orgs/{org_id}/conversations/{conversation_id}/mute", "unmuteOrgConversation", "org"},
+		{"GET", "/api/v1/me/conversations", "listMyConversations", "self"},
+		{"GET", "/api/v1/me/conversations/{conversation_id}", "getMyConversation", "self"},
+		{"GET", "/api/v1/me/conversations/{conversation_id}/messages", "listMyConversationMessages", "self"},
+		{"POST", "/api/v1/me/conversations/{conversation_id}/messages", "sendMyConversationMessage", "self"},
+		{"POST", "/api/v1/me/conversations/{conversation_id}/read", "markMyConversationRead", "self"},
+		{"POST", "/api/v1/me/conversations/{conversation_id}/close", "closeMyConversation", "self"},
+		{"PUT", "/api/v1/me/conversations/{conversation_id}/mute", "muteMyConversation", "self"},
+		{"DELETE", "/api/v1/me/conversations/{conversation_id}/mute", "unmuteMyConversation", "self"},
 	} {
 		p := paths[tc.path]
 		if p == nil {
@@ -113,5 +132,11 @@ func TestWire_MessagingProvidesServiceTasksAndPrivacy(t *testing.T) {
 	}
 	if idem := fmt.Sprint(create.Extensions["x-koro-idempotency"]); idem != "required" {
 		t.Fatalf("createContactRequest idempotency = %s, want required (04 §1.8)", idem)
+	}
+	for _, path := range []string{"/api/v1/orgs/{org_id}/conversations/{conversation_id}/messages",
+		"/api/v1/me/conversations/{conversation_id}/messages"} {
+		if rl := fmt.Sprint(paths[path].Post.Extensions["x-koro-rate-limit"]); rl != "message_send" {
+			t.Fatalf("%s rate class = %s, want message_send (BE-162)", path, rl)
+		}
 	}
 }

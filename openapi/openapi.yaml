@@ -3958,6 +3958,81 @@ components:
         - notice_version_id
         - text_sha256
       type: object
+    ConversationDTO:
+      additionalProperties: false
+      properties:
+        can_send:
+          description: The caller may write now (an open conversation, an active company; on the company's side fewer than 5 messages since the student's last one)
+          type: boolean
+        closed_at:
+          format: date-time
+          type: string
+        closed_by:
+          description: Who closed it
+          enum:
+            - student
+            - company
+          type: string
+        company:
+          $ref: "#/components/schemas/ContactCompanyDTO"
+          description: "The student's view: the company"
+        contact_request_id:
+          description: The accepted contact request it started from (absent once that request's retention deleted it)
+          format: uuid
+          type: string
+        conversation_id:
+          format: uuid
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        last_activity_at:
+          description: The last message or the closing moment
+          format: date-time
+          type: string
+        last_message:
+          $ref: "#/components/schemas/MessageDTO"
+        last_read_message_id:
+          description: The caller's read marker (never shown to the other side)
+          format: uuid
+          type: string
+        muted:
+          description: The caller muted its notices
+          type: boolean
+        status:
+          enum:
+            - open
+            - closed
+          type: string
+        student_user_id:
+          description: "The company's view: the student (getCompanyStudentProfile while the level 3 grant lasts)"
+          format: uuid
+          type: string
+        unread_count:
+          description: The other side's messages after the caller's read marker
+          format: int64
+          type: integer
+      required:
+        - conversation_id
+        - status
+        - can_send
+        - muted
+        - unread_count
+        - last_activity_at
+        - created_at
+      type: object
+    ConversationList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/ConversationDTO"
+          type: array
+        next_cursor:
+          type: string
+      required:
+        - items
+      type: object
     CountAudienceInputBody:
       additionalProperties: false
       properties:
@@ -8115,6 +8190,14 @@ components:
         - bank_reference
         - receipt_file_id
       type: object
+    MarkReadBody:
+      additionalProperties: false
+      properties:
+        message_id:
+          description: "The newest message the caller saw (default: the newest message)"
+          format: uuid
+          type: string
+      type: object
     MarkReturnedInputBody:
       additionalProperties: false
       properties:
@@ -8449,6 +8532,53 @@ components:
         - org_id
         - kind
         - name
+      type: object
+    MessageDTO:
+      additionalProperties: false
+      properties:
+        conversation_id:
+          format: uuid
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        message_id:
+          format: uuid
+          type: string
+        mine:
+          description: The caller wrote it
+          type: boolean
+        sender_side:
+          enum:
+            - student
+            - company
+          type: string
+        sender_user_id:
+          description: "The company's view only: who wrote it"
+          format: uuid
+          type: string
+        text:
+          type: string
+      required:
+        - message_id
+        - conversation_id
+        - sender_side
+        - mine
+        - text
+        - created_at
+      type: object
+    MessageList:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/MessageDTO"
+          type: array
+        next_cursor:
+          description: Older messages
+          type: string
+      required:
+        - items
       type: object
     MfaLoginInputBody:
       additionalProperties: false
@@ -8927,7 +9057,7 @@ components:
           description: The notification kind (template ID)
           type: string
         link_path:
-          description: "Client-independent in-app path (web and mobile map it to their own routes; a form a client does not know is shown without a link). One of: `/me/access-grants`; `/me/club-claims`; `/me/contact-requests/{contact_request_id}`; `/me/registrations/{registration_id}`; `/me/security-events`; `/me/terms`; `/me/student-verification`; `/posts/{post_id}`; `/clubs/by-slug/{club_slug}`; `/orgs/{org_id}`; `/orgs/{org_id}/orders/{order_id}`; `/orgs/{org_id}/orders/{order_id}/payment-instructions`; `/orgs/{org_id}/invoices/{invoice_id}`; `/orgs/{org_id}/events/{event_id}/registrations/{registration_id}`; `/orgs/{org_id}/sales`; `/orgs/{org_id}/payouts/{payout_id}`; `/orgs/{org_id}/offerings`; `/orgs/{org_id}/offering-approvals`; `/orgs/{org_id}/posts`; `/orgs/{org_id}/payees/{payee_id}`; `/orgs/{org_id}/contact-requests/{contact_request_id}`; `/orgs/{org_id}/refund-requests/{refund_request_id}`; `/orgs/{org_id}/sales/refund-requests/{refund_request_id}`; `/orgs/{org_id}/legal-parties/{party_id}`; `/admin/audit-events`; `/admin/bank-accounts`; `/admin/breaches`; `/admin/clubs/{club_org_id}`; `/admin/club-claims/{claim_id}`; `/admin/collection-accounts`; `/admin/commerce-policies`; `/admin/offerings`; `/admin/incoming-transfers/{transfer_id}`; `/admin/invoices/{invoice_id}`; `/admin/legal-parties/{party_id}`; `/admin/orgs?status=pending_review`; `/admin/orders?order_no={order_no}`; `/admin/platform-roles`; `/admin/payments/{payment_id}`; `/admin/payouts/{payout_id}`; `/admin/refunds/{refund_id}`; `/admin/refund-requests/{refund_request_id}`; `/admin/reports/{report_id}`; `/admin/review-queue`; `/admin/incoming-transfers?status=unmatched`; `/clubs/{club_org_id}` (legacy); `/events/{event_id}/registrations/{registration_id}` (legacy); `/orders/{order_id}` (legacy); `/orders/{order_id}/payment-instructions` (legacy); `/invoices/{invoice_id}` (legacy). {<name>_id} is a UUID, {club_slug} an organization slug (getOrgBySlug), {order_no} an order number. Every current org form is /orgs/{org_id} or starts with /orgs/{org_id}/: the client opens it in the panel of that org's kind (getMe memberships[].org_kind). Legacy forms are no longer produced but older notifications may carry them."
+          description: "Client-independent in-app path (web and mobile map it to their own routes; a form a client does not know is shown without a link). One of: `/me/access-grants`; `/me/club-claims`; `/me/contact-requests/{contact_request_id}`; `/me/conversations/{conversation_id}`; `/me/registrations/{registration_id}`; `/me/security-events`; `/me/terms`; `/me/student-verification`; `/posts/{post_id}`; `/clubs/by-slug/{club_slug}`; `/orgs/{org_id}`; `/orgs/{org_id}/orders/{order_id}`; `/orgs/{org_id}/orders/{order_id}/payment-instructions`; `/orgs/{org_id}/invoices/{invoice_id}`; `/orgs/{org_id}/events/{event_id}/registrations/{registration_id}`; `/orgs/{org_id}/sales`; `/orgs/{org_id}/payouts/{payout_id}`; `/orgs/{org_id}/offerings`; `/orgs/{org_id}/offering-approvals`; `/orgs/{org_id}/posts`; `/orgs/{org_id}/payees/{payee_id}`; `/orgs/{org_id}/contact-requests/{contact_request_id}`; `/orgs/{org_id}/conversations/{conversation_id}`; `/orgs/{org_id}/refund-requests/{refund_request_id}`; `/orgs/{org_id}/sales/refund-requests/{refund_request_id}`; `/orgs/{org_id}/legal-parties/{party_id}`; `/admin/audit-events`; `/admin/bank-accounts`; `/admin/breaches`; `/admin/clubs/{club_org_id}`; `/admin/club-claims/{claim_id}`; `/admin/collection-accounts`; `/admin/commerce-policies`; `/admin/offerings`; `/admin/incoming-transfers/{transfer_id}`; `/admin/invoices/{invoice_id}`; `/admin/legal-parties/{party_id}`; `/admin/orgs?status=pending_review`; `/admin/orders?order_no={order_no}`; `/admin/platform-roles`; `/admin/payments/{payment_id}`; `/admin/payouts/{payout_id}`; `/admin/refunds/{refund_id}`; `/admin/refund-requests/{refund_request_id}`; `/admin/reports/{report_id}`; `/admin/review-queue`; `/admin/incoming-transfers?status=unmatched`; `/clubs/{club_org_id}` (legacy); `/events/{event_id}/registrations/{registration_id}` (legacy); `/orders/{order_id}` (legacy); `/orders/{order_id}/payment-instructions` (legacy); `/invoices/{invoice_id}` (legacy). {<name>_id} is a UUID, {club_slug} an organization slug (getOrgBySlug), {order_no} an order number. Every current org form is /orgs/{org_id} or starts with /orgs/{org_id}/: the client opens it in the panel of that org's kind (getMe memberships[].org_kind). Legacy forms are no longer produced but older notifications may carry them."
           type: string
           x-koro-link-paths:
             - pattern: /me/access-grants
@@ -8935,6 +9065,8 @@ components:
             - pattern: /me/club-claims
               audience: user
             - pattern: /me/contact-requests/{contact_request_id}
+              audience: user
+            - pattern: /me/conversations/{conversation_id}
               audience: user
             - pattern: /me/registrations/{registration_id}
               audience: user
@@ -8971,6 +9103,8 @@ components:
             - pattern: /orgs/{org_id}/payees/{payee_id}
               audience: org
             - pattern: /orgs/{org_id}/contact-requests/{contact_request_id}
+              audience: org
+            - pattern: /orgs/{org_id}/conversations/{conversation_id}
               audience: org
             - pattern: /orgs/{org_id}/refund-requests/{refund_request_id}
               audience: org
@@ -13593,6 +13727,17 @@ components:
       required:
         - org_id
         - name
+      type: object
+    SendMessageBody:
+      additionalProperties: false
+      properties:
+        text:
+          description: The message; shown to the conversation's parties only, never in a notification
+          maxLength: 2000
+          minLength: 1
+          type: string
+      required:
+        - text
       type: object
     SessionDTO:
       additionalProperties: false
@@ -27908,6 +28053,339 @@ paths:
       x-koro-rate-limit: write_default
       x-koro-surface: self
       x-koro-terms-gate: enforced
+  /api/v1/me/conversations:
+    get:
+      description: The conversations of accepted contact requests, last activity first, with the caller's unread count and the newest message.
+      operationId: listMyConversations
+      parameters:
+        - explode: false
+          in: query
+          name: status
+          schema:
+            enum:
+              - open
+              - closed
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List my conversations
+      tags:
+        - messaging
+      x-koro-action: messaging.conversation.list_own
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
+  /api/v1/me/conversations/{conversation_id}:
+    get:
+      operationId: getMyConversation
+      parameters:
+        - description: Conversation ID (an unknown, malformed or another user's ID is 404)
+          in: path
+          name: conversation_id
+          required: true
+          schema:
+            description: Conversation ID (an unknown, malformed or another user's ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a conversation
+      tags:
+        - messaging
+      x-koro-action: messaging.conversation.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
+  /api/v1/me/conversations/{conversation_id}/close:
+    post:
+      description: "For good: nobody can write in it any more (a new accepted contact request starts a new conversation). Both sides keep reading it until its retention ends. Closing a closed conversation changes nothing."
+      operationId: closeMyConversation
+      parameters:
+        - description: Conversation ID (an unknown, malformed or another user's ID is 404)
+          in: path
+          name: conversation_id
+          required: true
+          schema:
+            description: Conversation ID (an unknown, malformed or another user's ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Close a conversation
+      tags:
+        - messaging
+      x-koro-action: messaging.conversation.close
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+      x-koro-terms-gate: enforced
+  /api/v1/me/conversations/{conversation_id}/messages:
+    get:
+      description: Newest first; next_cursor pages back to older messages.
+      operationId: listMyConversationMessages
+      parameters:
+        - description: Conversation ID (an unknown, malformed or another user's ID is 404)
+          in: path
+          name: conversation_id
+          required: true
+          schema:
+            description: Conversation ID (an unknown, malformed or another user's ID is 404)
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the messages of a conversation
+      tags:
+        - messaging
+      x-koro-action: messaging.conversation.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
+    post:
+      description: "Text only, 1–2000 characters (line breaks kept; control and bidi characters refused). A closed conversation, or one whose company is closed, is 409 messaging.conversation_closed; a suspended company is 403 orgs.org_suspended. The company may send 5 messages in a row before the student answers (409 messaging.awaiting_reply). The other side is notified in the app and by push (never the text: at most one notice per unread run, none while muted). Sending marks the conversation read for the sender."
+      operationId: sendMyConversationMessage
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Conversation ID (an unknown, malformed or another user's ID is 404)
+          in: path
+          name: conversation_id
+          required: true
+          schema:
+            description: Conversation ID (an unknown, malformed or another user's ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendMessageBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Send a message
+      tags:
+        - messaging
+      x-koro-action: messaging.message.send
+      x-koro-idempotency: optional
+      x-koro-rate-limit: message_send
+      x-koro-surface: self
+      x-koro-terms-gate: enforced
+  /api/v1/me/conversations/{conversation_id}/mute:
+    delete:
+      description: For the caller only; idempotent.
+      operationId: unmuteMyConversation
+      parameters:
+        - description: Conversation ID (an unknown, malformed or another user's ID is 404)
+          in: path
+          name: conversation_id
+          required: true
+          schema:
+            description: Conversation ID (an unknown, malformed or another user's ID is 404)
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Unmute a conversation's notices
+      tags:
+        - messaging
+      x-koro-action: messaging.conversation.mute
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+      x-koro-terms-gate: enforced
+    put:
+      description: For the caller only; idempotent.
+      operationId: muteMyConversation
+      parameters:
+        - description: Conversation ID (an unknown, malformed or another user's ID is 404)
+          in: path
+          name: conversation_id
+          required: true
+          schema:
+            description: Conversation ID (an unknown, malformed or another user's ID is 404)
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Mute a conversation's notices
+      tags:
+        - messaging
+      x-koro-action: messaging.conversation.mute
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+      x-koro-terms-gate: enforced
+  /api/v1/me/conversations/{conversation_id}/read:
+    post:
+      description: Moves the caller's read marker to message_id (a message of this conversation; 422 otherwise) or, without it, to the newest message; it never moves back. The other side is not told.
+      operationId: markMyConversationRead
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Conversation ID (an unknown, malformed or another user's ID is 404)
+          in: path
+          name: conversation_id
+          required: true
+          schema:
+            description: Conversation ID (an unknown, malformed or another user's ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarkReadBody"
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Mark a conversation read
+      tags:
+        - messaging
+      x-koro-action: messaging.conversation.mark_read
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/cvs:
     get:
       description: "At most 3, oldest first. The current CV is the one a company with level 3 access may download. Without an active student verification (never verified, or lapsed): 403 students.verification_required, also for CVs stored while verified; they stay stored and are part of the KVKK data export (createMyDataRequest)."
@@ -31423,6 +31901,395 @@ paths:
       tags:
         - messaging
       x-koro-action: messaging.contact_request.withdraw
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: org
+      x-koro-terms-gate: enforced
+  /api/v1/orgs/{org_id}/conversations:
+    get:
+      description: The conversations of accepted contact requests, last activity first, with the caller's unread count and the newest message.
+      operationId: listOrgConversations
+      parameters:
+        - description: Company org ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Company org ID (an unknown or malformed ID is 404)
+            type: string
+        - explode: false
+          in: query
+          name: status
+          schema:
+            enum:
+              - open
+              - closed
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the company's conversations
+      tags:
+        - messaging
+      x-koro-action: messaging.conversation.list_org
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/conversations/{conversation_id}:
+    get:
+      operationId: getOrgConversation
+      parameters:
+        - description: Company org ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Company org ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Conversation ID (an unknown, malformed or other org's ID is 404)
+          in: path
+          name: conversation_id
+          required: true
+          schema:
+            description: Conversation ID (an unknown, malformed or other org's ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get a conversation
+      tags:
+        - messaging
+      x-koro-action: messaging.conversation.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+  /api/v1/orgs/{org_id}/conversations/{conversation_id}/close:
+    post:
+      description: "For good: nobody can write in it any more (a new accepted contact request starts a new conversation). Both sides keep reading it until its retention ends. Closing a closed conversation changes nothing."
+      operationId: closeOrgConversation
+      parameters:
+        - description: Company org ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Company org ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Conversation ID (an unknown, malformed or other org's ID is 404)
+          in: path
+          name: conversation_id
+          required: true
+          schema:
+            description: Conversation ID (an unknown, malformed or other org's ID is 404)
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Close a conversation
+      tags:
+        - messaging
+      x-koro-action: messaging.conversation.close
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: org
+      x-koro-terms-gate: enforced
+  /api/v1/orgs/{org_id}/conversations/{conversation_id}/messages:
+    get:
+      description: Newest first; next_cursor pages back to older messages.
+      operationId: listOrgConversationMessages
+      parameters:
+        - description: Company org ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Company org ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Conversation ID (an unknown, malformed or other org's ID is 404)
+          in: path
+          name: conversation_id
+          required: true
+          schema:
+            description: Conversation ID (an unknown, malformed or other org's ID is 404)
+            type: string
+        - description: Page size
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 25
+            description: Page size
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
+        - description: Opaque cursor from next_cursor
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: Opaque cursor from next_cursor
+            maxLength: 512
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List the messages of a conversation
+      tags:
+        - messaging
+      x-koro-action: messaging.conversation.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: org
+    post:
+      description: "Text only, 1–2000 characters (line breaks kept; control and bidi characters refused). A closed conversation, or one whose company is closed, is 409 messaging.conversation_closed; a suspended company is 403 orgs.org_suspended. The company may send 5 messages in a row before the student answers (409 messaging.awaiting_reply). The other side is notified in the app and by push (never the text: at most one notice per unread run, none while muted). Sending marks the conversation read for the sender."
+      operationId: sendOrgConversationMessage
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Company org ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Company org ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Conversation ID (an unknown, malformed or other org's ID is 404)
+          in: path
+          name: conversation_id
+          required: true
+          schema:
+            description: Conversation ID (an unknown, malformed or other org's ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendMessageBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Send a message
+      tags:
+        - messaging
+      x-koro-action: messaging.message.send
+      x-koro-idempotency: optional
+      x-koro-rate-limit: message_send
+      x-koro-surface: org
+      x-koro-terms-gate: enforced
+  /api/v1/orgs/{org_id}/conversations/{conversation_id}/mute:
+    delete:
+      description: For the caller only; idempotent.
+      operationId: unmuteOrgConversation
+      parameters:
+        - description: Company org ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Company org ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Conversation ID (an unknown, malformed or other org's ID is 404)
+          in: path
+          name: conversation_id
+          required: true
+          schema:
+            description: Conversation ID (an unknown, malformed or other org's ID is 404)
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Unmute a conversation's notices
+      tags:
+        - messaging
+      x-koro-action: messaging.conversation.mute
+      x-koro-rate-limit: write_default
+      x-koro-surface: org
+      x-koro-terms-gate: enforced
+    put:
+      description: For the caller only; idempotent.
+      operationId: muteOrgConversation
+      parameters:
+        - description: Company org ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Company org ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Conversation ID (an unknown, malformed or other org's ID is 404)
+          in: path
+          name: conversation_id
+          required: true
+          schema:
+            description: Conversation ID (an unknown, malformed or other org's ID is 404)
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Mute a conversation's notices
+      tags:
+        - messaging
+      x-koro-action: messaging.conversation.mute
+      x-koro-rate-limit: write_default
+      x-koro-surface: org
+      x-koro-terms-gate: enforced
+  /api/v1/orgs/{org_id}/conversations/{conversation_id}/read:
+    post:
+      description: Moves the caller's read marker to message_id (a message of this conversation; 422 otherwise) or, without it, to the newest message; it never moves back. The other side is not told.
+      operationId: markOrgConversationRead
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+        - description: Company org ID (an unknown or malformed ID is 404)
+          in: path
+          name: org_id
+          required: true
+          schema:
+            description: Company org ID (an unknown or malformed ID is 404)
+            type: string
+        - description: Conversation ID (an unknown, malformed or other org's ID is 404)
+          in: path
+          name: conversation_id
+          required: true
+          schema:
+            description: Conversation ID (an unknown, malformed or other org's ID is 404)
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarkReadBody"
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Mark a conversation read
+      tags:
+        - messaging
+      x-koro-action: messaging.conversation.mark_read
       x-koro-idempotency: optional
       x-koro-rate-limit: write_default
       x-koro-surface: org

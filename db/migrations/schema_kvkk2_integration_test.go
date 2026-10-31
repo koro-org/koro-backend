@@ -476,7 +476,8 @@ func TestAnalyticsViews_AppRwNoAccess_AppRoOnly(t *testing.T) {
 		}
 	}
 	rows.Close()
-	want := []string{"event_participation_monthly", "signups_monthly", "students_by_university", "talent_distribution"}
+	want := []string{"event_participation_monthly", "product_metrics_current", "product_metrics_daily", "product_metrics_monthly",
+		"signups_monthly", "students_by_university", "talent_distribution"} // product_metrics_*: BE-164 (000172)
 	if !slices.Equal(names, want) {
 		t.Fatalf("analytics relations = %v, want %v", names, want)
 	}

@@ -25,6 +25,7 @@ const (
 	KvkkBreachManage          Action = "kvkk.breach.manage"
 	KvkkSubprocessorList      Action = "kvkk.subprocessor.list"
 	KvkkSubprocessorManage    Action = "kvkk.subprocessor.manage"
+	KvkkMetricsRead           Action = "kvkk.metrics.read"
 )
 
 // System-only actions of the kvkk module (03 §3.7): only SystemActor may perform them.
@@ -53,4 +54,5 @@ var kvkkActions = []Action{
 	KvkkBreachManage,
 	KvkkSubprocessorList,
 	KvkkSubprocessorManage,
+	KvkkMetricsRead,
 }

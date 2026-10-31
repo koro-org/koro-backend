@@ -1,6 +1,6 @@
 # Authz matrix of the kvkk module (03 §5.22, 04 §2.22): data subject requests (BE-021) and
 # the kvkk-2 records (BE-049): retention policies, destruction log, breaches, sub-processors.
-# 22 operations × 18 personas. /me operations are O cells for every signed-in user:
+# 23 operations × 18 personas. /me operations are O cells for every signed-in user:
 # the requests of fixtures/kvkk.yaml belong to student, so everyone else gets 404 on
 # them (IDOR). The /admin surface answers 403 before reading (03 §7.2-3); dpo ✓,
 # platform_admin only on list/read of requests awaiting the second approval and on
@@ -217,3 +217,10 @@ operations:
     headers: { If-Match: "\"DDNFR4TI7YAAA\"" }
     body: bodies/kvkk/subprocessor_retire.json
     expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 200, platform_admin: 403 }
+
+  # BE-164: product KPIs of SR §6 (aggregates only, k ≥ 10): platform_admin only.
+  adminGetProductMetrics:
+    method: GET
+    path: /api/v1/admin/metrics
+    action: kvkk.metrics.read
+    expect: { anonymous: 401, "@no_platform_role": 403, "@staff_without_dsr": 403, dpo: 403, platform_admin: 200 }

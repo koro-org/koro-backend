@@ -154,3 +154,5 @@ integration_credentials     none      billing       -
 receivable_collections     staff     payments      -
 # BE-132: a buying company's refund request names the admin who asked (and their explanation) and the staff who decided it
 refund_requests             personal  payments      provider:payments
+# BE-164: the nightly snapshot of the product KPIs (aggregates per day and metric, k ≥ 10; no user column)
+product_metrics_daily       none      kvkk          -

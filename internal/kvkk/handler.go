@@ -16,8 +16,9 @@ import (
 	"koro/internal/platform/problem"
 )
 
-// Register adds the 22 kvkk operations (04 §2.22) to api: the 13 data
-// subject request operations and the 9 records operations of kvkk-2.
+// Register adds the 23 kvkk operations (04 §2.22) to api: the 13 data
+// subject request operations, the 9 records operations of kvkk-2 and the
+// product metrics (BE-164).
 // svc may be nil (`koro openapi`): handlers only touch it when called. clk
 // computes days_left (nil → real clock).
 func Register(api huma.API, svc Service, clk clock.Clock) {
@@ -107,6 +108,7 @@ func Register(api huma.API, svc Service, clk clock.Clock) {
 	}, op.Meta{Action: string(authz.KvkkDsrExportDownload), Surface: op.SurfaceAdmin}, h.adminDownload)
 
 	registerRecords(api, h)
+	registerMetrics(api, h)
 }
 
 type handler struct {

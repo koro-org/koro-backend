@@ -3738,7 +3738,7 @@ components:
       additionalProperties: false
       properties:
         domain_verified:
-          description: "email_domain is verified: the founder's or an editor's verified address is at it"
+          description: "Only for the company's editors. email_domain is verified: the founder's or an editor's verified address is at it"
           type: boolean
         domain_verified_at:
           description: Only for the company's editors
@@ -3754,25 +3754,23 @@ components:
         size_band:
           type: string
         tax_id_kind:
-          description: Which tax identifier the company gave
+          description: Only for the company's editors. Which tax identifier the company gave
           enum:
             - vkn
             - tckn
           type: string
         tax_id_valid:
-          description: A VKN or TCKN that passes its check digits was given
+          description: Only for the company's editors. A VKN or TCKN that passes its check digits was given
           type: boolean
         tax_no:
-          description: The VKN; masked to its last 4 digits unless tax_no_masked is false (platform admins)
+          description: Only for the company's editors. The VKN; masked to its last 4 digits unless tax_no_masked is false (platform admins)
           type: string
         tax_no_masked:
-          description: tax_no shows only its last 4 digits
+          description: Only for the company's editors. tax_no shows only its last 4 digits
           type: boolean
         tax_office:
+          description: Only for the company's editors.
           type: string
-      required:
-        - tax_id_valid
-        - domain_verified
       type: object
     CompanyStats:
       additionalProperties: false

@@ -84,6 +84,11 @@ func recoverProblem(log *slog.Logger, base string) gin.HandlerFunc {
 
 // securityHeaders sets the response headers of 05 §10.8. Every response is
 // no-store: v1 has no cacheable API responses (04 §1.13: no conditional GET).
+// Cross-Origin-Resource-Policy same-origin (BE-168, ZAP 90004): the API
+// serves only JSON, never a resource another site embeds (public media and
+// signed downloads are on the storage host), and the policy binds only
+// no-cors loads: the web's CORS fetches, the mobile app and server-side
+// calls are unaffected.
 func securityHeaders() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		h := c.Writer.Header()
@@ -92,6 +97,7 @@ func securityHeaders() gin.HandlerFunc {
 		h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("Cache-Control", "no-store")
+		h.Set("Cross-Origin-Resource-Policy", "same-origin")
 		c.Next()
 	}
 }

@@ -1,7 +1,11 @@
 package orgs
 
 import (
+	"slices"
+	"strings"
 	"time"
+
+	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/platform/taxid"
 )
@@ -18,6 +22,25 @@ type CompanyPublicDTO struct {
 	// The tax identity and review facts (BE-165): only for the company's
 	// editors (owner, company admins, platform admins).
 	*CompanyTaxDTO
+}
+
+// TransformSchema implements huma.SchemaTransformer (BE-168): the embedded
+// CompanyTaxDTO is nil for a reader who is not an editor, so none of its
+// fields is required here (huma would require tax_id_valid and
+// domain_verified, which have no omitempty: an anonymous getOrg of a
+// company broke the contract). CompanyDTO keeps them required.
+func (CompanyPublicDTO) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
+	s.Required = slices.DeleteFunc(s.Required, func(name string) bool {
+		return name == "tax_id_valid" || name == "domain_verified"
+	})
+	for _, name := range []string{"tax_id_kind", "tax_no", "tax_no_masked", "tax_office", "tax_id_valid", "domain_verified"} {
+		if p := s.Properties[name]; p != nil {
+			cp := *p
+			cp.Description = strings.TrimSpace("Only for the company's editors. " + p.Description)
+			s.Properties[name] = &cp
+		}
+	}
+	return s
 }
 
 // CompanyTaxDTO is the tax identity and the review facts of a company

@@ -13,5 +13,6 @@
 10038	FAIL	Content-Security-Policy header not set
 10062	FAIL	PII disclosure
 10098	FAIL	Cross-domain misconfiguration (CORS)
+90004	FAIL	Cross-Origin-Resource-Policy header (same-origin on every response since BE-168)
 10096	IGNORE	Timestamp disclosure: JSON bodies carry Unix and RFC 3339 times by design (OPS-013)
 10049	IGNORE	Storable/cacheable content: informational; every API response is no-store (05 §10.8) (OPS-013)

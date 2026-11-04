@@ -137,11 +137,12 @@ func TestHTTP_SecurityHeaders(t *testing.T) {
 	app := newTestApp(t, nil)
 	rec := app.do(t, http.MethodGet, "/api/v1/missing", nil, nil)
 	want := map[string]string{
-		"Strict-Transport-Security": "max-age=63072000; includeSubDomains",
-		"X-Content-Type-Options":    "nosniff",
-		"Content-Security-Policy":   "default-src 'none'; frame-ancestors 'none'",
-		"Referrer-Policy":           "no-referrer",
-		"Cache-Control":             "no-store",
+		"Strict-Transport-Security":    "max-age=63072000; includeSubDomains",
+		"X-Content-Type-Options":       "nosniff",
+		"Content-Security-Policy":      "default-src 'none'; frame-ancestors 'none'",
+		"Referrer-Policy":              "no-referrer",
+		"Cache-Control":                "no-store",
+		"Cross-Origin-Resource-Policy": "same-origin",
 	}
 	for k, v := range want {
 		if got := rec.Header().Get(k); got != v {

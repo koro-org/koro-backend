@@ -3,12 +3,14 @@ package op_test
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/humatest"
 
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 )
 
@@ -116,4 +118,46 @@ func TestRegister_ExtraResponsesValidated(t *testing.T) {
 			op.Register(api, "identity", o, mm, func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
 		}()
 	}
+}
+
+// TestRegister_AccessReasonRequired (BE-169): the flag documents the
+// X-Koro-Access-Reason header as required, while the run-time check stays
+// the service's (a call without it reaches the handler); an operation
+// without the header panics.
+func TestRegister_AccessReasonRequired(t *testing.T) {
+	t.Parallel()
+	_, api := humatest.New(t)
+	reached := false
+	op.Register(api, "talent", huma.Operation{
+		OperationID: "getThing", Method: http.MethodGet, Path: "/admin/things",
+	}, op.Meta{Action: "talent.thing.read", Surface: op.SurfaceAdmin, AccessReasonRequired: true},
+		func(context.Context, *struct{ httpx.AccessReasonHeader }) (*struct{}, error) {
+			reached = true
+			return nil, nil
+		})
+	var p *huma.Param
+	for _, q := range api.OpenAPI().Paths["/admin/things"].Get.Parameters {
+		if q.Name == httpx.HeaderAccessReason {
+			p = q
+		}
+	}
+	if p == nil || p.In != "header" || !p.Required {
+		t.Fatalf("access reason parameter = %+v, want a required header", p)
+	}
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/things", nil)
+	rec := httptest.NewRecorder()
+	api.Adapter().ServeHTTP(rec, req)
+	if !reached {
+		t.Fatalf("a call without the header did not reach the handler: %d %s", rec.Code, rec.Body)
+	}
+
+	defer func() {
+		if r := recover(); r == nil || !strings.Contains(r.(string), "AccessReasonRequired") {
+			t.Fatalf("recover() = %v, want the AccessReasonRequired panic", r)
+		}
+	}()
+	op.Register(api, "talent", huma.Operation{
+		OperationID: "getOther", Method: http.MethodGet, Path: "/admin/others",
+	}, op.Meta{Action: "talent.thing.read", Surface: op.SurfaceAdmin, AccessReasonRequired: true},
+		func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
 }

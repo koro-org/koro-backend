@@ -41,7 +41,7 @@ func Register(api huma.API, svc Service) {
 		OperationID: "adminRevealCollectionAccountIban", Method: http.MethodGet, Path: "/admin/collection-accounts/{account_id}/iban",
 		Summary:     "Reveal the full IBAN of a collection account",
 		Description: "Koro's own account (iban_masked's full form), for the check against the bank before an approval. " + parties.RevealNote,
-	}, op.Meta{Action: string(authz.PaymentsIbanReveal), Surface: op.SurfaceAdmin, RateLimit: op.RateBreakGlass}, h.revealAccount)
+	}, op.Meta{Action: string(authz.PaymentsIbanReveal), Surface: op.SurfaceAdmin, RateLimit: op.RateBreakGlass, AccessReasonRequired: true}, h.revealAccount)
 
 	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminCreateCollectionAccount", Method: http.MethodPost, Path: "/admin/collection-accounts",
@@ -100,7 +100,7 @@ func Register(api huma.API, svc Service) {
 		Description: "field sender is sender_iban_masked's full form (the sender's account, maybe a natural person's), " +
 			"return_target the return's target (return.target_iban_masked), for the return EFT. An IBAN the transfer " +
 			"does not hold is 404. " + parties.RevealNote,
-	}, op.Meta{Action: string(authz.PaymentsIbanReveal), Surface: op.SurfaceAdmin, RateLimit: op.RateBreakGlass}, h.revealTransfer)
+	}, op.Meta{Action: string(authz.PaymentsIbanReveal), Surface: op.SurfaceAdmin, RateLimit: op.RateBreakGlass, AccessReasonRequired: true}, h.revealTransfer)
 
 	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminDownloadIncomingTransferReceipt", Method: http.MethodGet,

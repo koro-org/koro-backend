@@ -111,6 +111,13 @@ type Meta struct {
 	Reauth bool
 	// BreakGlass marks "B" operations (X-Koro-Access-Reason; 03 §6.3).
 	BreakGlass bool
+	// AccessReasonRequired documents the X-Koro-Access-Reason header of
+	// the input (httpx.AccessReasonHeader) as required: every successful
+	// call needs it (httpx.RequireAccessReason, or a break-glass grant for
+	// every role; BE-169). Only the document changes: the service still
+	// checks it after authz, so a caller without the right gets 403/404
+	// before 422. Register writes it; Koro alone refuses it.
+	AccessReasonRequired bool
 	// Responses documents the success answers the operation gives besides
 	// its DefaultStatus (its output sets Status at run time; huma documents
 	// the default status only). Register writes them (it holds the schema
@@ -136,8 +143,8 @@ var (
 // extensions. It returns the updated operation for huma.Register.
 // Meta.Responses needs Register.
 func Koro(o huma.Operation, m Meta) huma.Operation {
-	if len(m.Responses) > 0 {
-		panic(fmt.Sprintf("op.Koro(%s %s %q): Meta.Responses needs op.Register", o.Method, o.Path, o.OperationID))
+	if len(m.Responses) > 0 || m.AccessReasonRequired {
+		panic(fmt.Sprintf("op.Koro(%s %s %q): Meta.Responses or Meta.AccessReasonRequired needs op.Register", o.Method, o.Path, o.OperationID))
 	}
 	return koro(o, m)
 }

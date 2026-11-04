@@ -44,7 +44,7 @@ func registerRefunds(api huma.API, h handler) {
 		OperationID: "adminRevealRefundIban", Method: http.MethodGet, Path: "/admin/refunds/{refund_id}/iban",
 		Summary:     "Reveal the full IBAN of a refund",
 		Description: "The target IBAN (target_iban_masked's full form; maybe a natural person's), for the refund EFT. " + parties.RevealNote,
-	}, op.Meta{Action: string(authz.PaymentsIbanReveal), Surface: op.SurfaceAdmin, RateLimit: op.RateBreakGlass}, h.revealRefund)
+	}, op.Meta{Action: string(authz.PaymentsIbanReveal), Surface: op.SurfaceAdmin, RateLimit: op.RateBreakGlass, AccessReasonRequired: true}, h.revealRefund)
 
 	op.Register(api, "payments", huma.Operation{
 		OperationID: "adminListRefundsDue", Method: http.MethodGet, Path: "/admin/refunds/due",

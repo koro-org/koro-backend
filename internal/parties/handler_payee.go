@@ -146,7 +146,7 @@ func registerPayees(api huma.API, h handler) {
 		Summary: "Reveal the full IBAN of a bank account",
 		Description: "For the eye that checks the number against the evidence (every list and detail shows it masked). " +
 			RevealNote,
-	}, op.Meta{Action: string(authz.PartiesIbanReveal), Surface: op.SurfaceAdmin, RateLimit: op.RateBreakGlass}, h.adminRevealIBAN)
+	}, op.Meta{Action: string(authz.PartiesIbanReveal), Surface: op.SurfaceAdmin, RateLimit: op.RateBreakGlass, AccessReasonRequired: true}, h.adminRevealIBAN)
 
 	op.Register(api, "parties", huma.Operation{
 		OperationID: "adminGetLegalParty", Method: http.MethodGet, Path: "/admin/legal-parties/{party_id}",

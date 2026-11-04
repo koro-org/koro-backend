@@ -31,14 +31,14 @@ func Register(api huma.API, svc Admin) {
 		Summary: "Get the talent report of a user",
 		Description: "The ledger (with each row's point_event_id for a reversal), the category totals, the last nightly " +
 			"score (band, raw score, cohort percentile, cohort, config version) and the neutralisations. " + closedNote,
-	}, op.Meta{Action: string(authz.TalentReportRead), Surface: op.SurfaceAdmin}, h.report)
+	}, op.Meta{Action: string(authz.TalentReportRead), Surface: op.SurfaceAdmin, AccessReasonRequired: true}, h.report)
 
 	op.Register(api, "talent", huma.Operation{
 		OperationID: "getTalentDistribution", Method: http.MethodGet, Path: "/admin/talent/distribution",
 		Summary: "Get the band distribution",
 		Description: "Users by band 0..3 (neutralised users excluded); a count below 10 is null. university_id narrows it to " +
 			"the cohorts of one university (a university below cohort_min is in the global cohort). " + closedNote,
-	}, op.Meta{Action: string(authz.TalentDistributionRead), Surface: op.SurfaceAdmin}, h.distribution)
+	}, op.Meta{Action: string(authz.TalentDistributionRead), Surface: op.SurfaceAdmin, AccessReasonRequired: true}, h.distribution)
 
 	op.Register(api, "talent", huma.Operation{
 		OperationID: "createTalentNeutralization", Method: http.MethodPost, Path: "/admin/talent/subjects/{user_id}/neutralizations",
@@ -46,7 +46,7 @@ func Register(api huma.API, svc Admin) {
 		Summary:       "Neutralise a user's talent band",
 		Description: "An auditor neutralisation (reason admin): the band is 0 while it is active. Re-authentication " +
 			"required; one active auditor neutralisation per user (409 talent.already_neutralized). " + closedNote,
-	}, op.Meta{Action: string(authz.TalentNeutralizationManage), Surface: op.SurfaceAdmin, Reauth: true,
+	}, op.Meta{Action: string(authz.TalentNeutralizationManage), Surface: op.SurfaceAdmin, Reauth: true, AccessReasonRequired: true,
 		RateLimit: op.RateReauth, Idempotency: op.IdempotencyOptional}, h.createNeutralization)
 
 	op.Register(api, "talent", huma.Operation{
@@ -54,7 +54,7 @@ func Register(api huma.API, svc Admin) {
 		Summary: "Lift an auditor neutralisation",
 		Description: "Re-authentication required. An objection neutralisation is permanent (409 talent.objection_permanent), " +
 			"an opt-out is lifted by the student's privacy setting only (409 talent.opt_out_student_owned). " + closedNote,
-	}, op.Meta{Action: string(authz.TalentNeutralizationManage), Surface: op.SurfaceAdmin, Reauth: true,
+	}, op.Meta{Action: string(authz.TalentNeutralizationManage), Surface: op.SurfaceAdmin, Reauth: true, AccessReasonRequired: true,
 		RateLimit: op.RateReauth, Idempotency: op.IdempotencyOptional}, h.liftNeutralization)
 
 	op.Register(api, "talent", huma.Operation{
@@ -64,7 +64,7 @@ func Register(api huma.API, svc Admin) {
 		Description: "Appends the reversal row (points negated, the original's occurred_at and config version); the " +
 			"original never changes. One reversal per row (409 talent.already_reversed); a reversal is not reversed " +
 			"(409 talent.not_reversible). Re-authentication required. " + closedNote,
-	}, op.Meta{Action: string(authz.TalentReversalCreate), Surface: op.SurfaceAdmin, Reauth: true,
+	}, op.Meta{Action: string(authz.TalentReversalCreate), Surface: op.SurfaceAdmin, Reauth: true, AccessReasonRequired: true,
 		RateLimit: op.RateReauth, Idempotency: op.IdempotencyOptional}, h.reversePoint)
 
 	op.Register(api, "talent", huma.Operation{
@@ -79,7 +79,7 @@ func Register(api huma.API, svc Admin) {
 		OperationID: "getTalentConfig", Method: http.MethodGet, Path: "/admin/talent/config",
 		Summary:     "Get the talent configuration",
 		Description: "The config version in force (null before the first one) and the signal catalogue. " + closedNote,
-	}, op.Meta{Action: string(authz.TalentConfigRead), Surface: op.SurfaceAdmin}, h.config)
+	}, op.Meta{Action: string(authz.TalentConfigRead), Surface: op.SurfaceAdmin, AccessReasonRequired: true}, h.config)
 
 	op.Register(api, "talent", huma.Operation{
 		OperationID: "createTalentConfigVersion", Method: http.MethodPost, Path: "/admin/talent/config/versions",
@@ -88,7 +88,7 @@ func Register(api huma.API, svc Admin) {
 		Description: "Replaces the listed signal definitions and opens a new version in force from now: every ledger row " +
 			"written from now on is frozen with it and the next nightly run scores with it. created_by is the auditor. " +
 			"Re-authentication required. " + closedNote,
-	}, op.Meta{Action: string(authz.TalentConfigManage), Surface: op.SurfaceAdmin, Reauth: true,
+	}, op.Meta{Action: string(authz.TalentConfigManage), Surface: op.SurfaceAdmin, Reauth: true, AccessReasonRequired: true,
 		RateLimit: op.RateReauth, Idempotency: op.IdempotencyOptional}, h.createConfigVersion)
 }
 

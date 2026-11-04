@@ -28,7 +28,8 @@ func registerMessageReports(api huma.API, h handler) {
 				"never told who reported. A user has one open report per message: reporting it again returns that report " +
 				"(200) and its first copy. A closed conversation's messages can be reported too."}
 	}
-	rep := op.Meta{Action: string(authz.MessagingMessageReport), Idempotency: op.IdempotencyOptional}
+	rep := op.Meta{Action: string(authz.MessagingMessageReport), Idempotency: op.IdempotencyOptional,
+		Responses: []op.Response{feed.ReportRepeatedResponse}}
 	ro, rm := rep, rep
 	ro.Surface, rm.Surface = orgConversations.surface, myConversations.surface
 	op.Register(api, "messaging", reportOp(orgConversations), ro, reportMessage[orgReportInput](h))
@@ -42,7 +43,7 @@ func registerMessageReports(api huma.API, h handler) {
 			"needs X-Koro-Access-Reason and is recorded with it (audit, messaging.message_report.read); the " +
 			"conversation's parties are not notified (that would reveal the report). A report that is not a message " +
 			"report, or is gone, is 404. Work the report itself with adminGetReport / adminResolveReport.",
-	}, op.Meta{Action: string(authz.MessagingMessageReportRead), Surface: op.SurfaceAdmin, RateLimit: op.RateBreakGlass},
+	}, op.Meta{Action: string(authz.MessagingMessageReportRead), Surface: op.SurfaceAdmin, RateLimit: op.RateBreakGlass, AccessReasonRequired: true},
 		h.reportedMessages)
 }
 

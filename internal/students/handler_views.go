@@ -72,7 +72,7 @@ func registerViews(api huma.API, h handler) {
 		Description: "support and platform_admin: break-glass (X-Koro-Access-Reason, 10–500 characters; audited, the " +
 			"student is told). dpo: X-Koro-Access-Reason is the ID of an open data subject request of this student " +
 			"(the birth date is shown only then). Never CV files, sensitive clubs, form answers or talent values.",
-	}, op.Meta{Action: string(authz.StudentsProfileReadAdmin), Surface: op.SurfaceAdmin, BreakGlass: true}, h.adminGetProfile)
+	}, op.Meta{Action: string(authz.StudentsProfileReadAdmin), Surface: op.SurfaceAdmin, BreakGlass: true, AccessReasonRequired: true}, h.adminGetProfile)
 }
 
 // pathID parses a path UUID; a malformed ID is simply not found (IDOR rule).

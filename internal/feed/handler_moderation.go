@@ -40,8 +40,8 @@ func registerModeration(api huma.API, h handler) {
 		Description: "The target must be a published post or an organization the caller may see (404 otherwise). " +
 			"A user has one open report per target: reporting it again returns that report (200). The reported " +
 			"organization never learns who reported.",
-	}, op.Meta{Action: string(authz.FeedReportCreate), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional},
-		h.createReport)
+	}, op.Meta{Action: string(authz.FeedReportCreate), Surface: op.SurfaceResource, Idempotency: op.IdempotencyOptional,
+		Responses: []op.Response{ReportRepeatedResponse}}, h.createReport)
 
 	op.Register(api, "feed", huma.Operation{
 		OperationID: "adminListReports", Method: http.MethodGet, Path: "/admin/reports",
@@ -191,6 +191,12 @@ type ReportReasonBody struct {
 	Reason  string `json:"reason" enum:"spam,harassment,hate,sexual,scam_or_misleading_job,copyright,privacy,other"`
 	Details string `json:"details,omitempty" maxLength:"1000"`
 }
+
+// ReportRepeatedResponse documents the 200 of a report the caller already
+// has open on the target: the open report again, not a new one
+// (createContentReport; messaging's report{Org,My}ConversationMessage).
+var ReportRepeatedResponse = op.Response{Status: http.StatusOK,
+	Description: "The caller's open report on this target (reported again: no new report)", Body: ReportCreatedDTO{}}
 
 type createReportInput struct {
 	Body ReportBody

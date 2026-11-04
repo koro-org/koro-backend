@@ -17552,6 +17552,7 @@ paths:
         - description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
           in: header
           name: X-Koro-Access-Reason
+          required: true
           schema:
             description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
             maxLength: 6007
@@ -18277,6 +18278,7 @@ paths:
         - description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
           in: header
           name: X-Koro-Access-Reason
+          required: true
           schema:
             description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
             maxLength: 6007
@@ -19279,6 +19281,7 @@ paths:
         - description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
           in: header
           name: X-Koro-Access-Reason
+          required: true
           schema:
             description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
             maxLength: 6007
@@ -19329,6 +19332,7 @@ paths:
         - description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
           in: header
           name: X-Koro-Access-Reason
+          required: true
           schema:
             description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
             maxLength: 6007
@@ -19754,6 +19758,7 @@ paths:
         - description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
           in: header
           name: X-Koro-Access-Reason
+          required: true
           schema:
             description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
             maxLength: 6007
@@ -22615,6 +22620,7 @@ paths:
         - description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
           in: header
           name: X-Koro-Access-Reason
+          required: true
           schema:
             description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
             maxLength: 6007
@@ -23810,6 +23816,7 @@ paths:
         - description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
           in: header
           name: X-Koro-Access-Reason
+          required: true
           schema:
             description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
             maxLength: 6007
@@ -24137,6 +24144,7 @@ paths:
         - description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
           in: header
           name: X-Koro-Access-Reason
+          required: true
           schema:
             description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
             maxLength: 6007
@@ -24766,6 +24774,7 @@ paths:
         - description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
           in: header
           name: X-Koro-Access-Reason
+          required: true
           schema:
             description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
             maxLength: 6007
@@ -24800,6 +24809,7 @@ paths:
         - description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
           in: header
           name: X-Koro-Access-Reason
+          required: true
           schema:
             description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
             maxLength: 6007
@@ -24843,6 +24853,7 @@ paths:
         - description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
           in: header
           name: X-Koro-Access-Reason
+          required: true
           schema:
             description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
             maxLength: 6007
@@ -24889,6 +24900,7 @@ paths:
         - description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
           in: header
           name: X-Koro-Access-Reason
+          required: true
           schema:
             description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
             maxLength: 6007
@@ -24937,6 +24949,7 @@ paths:
         - description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
           in: header
           name: X-Koro-Access-Reason
+          required: true
           schema:
             description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
             maxLength: 6007
@@ -25013,6 +25026,7 @@ paths:
         - description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
           in: header
           name: X-Koro-Access-Reason
+          required: true
           schema:
             description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
             maxLength: 6007
@@ -25063,6 +25077,7 @@ paths:
         - description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
           in: header
           name: X-Koro-Access-Reason
+          required: true
           schema:
             description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
             maxLength: 6007
@@ -25617,6 +25632,7 @@ paths:
         - description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
           in: header
           name: X-Koro-Access-Reason
+          required: true
           schema:
             description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
             maxLength: 6007
@@ -25740,6 +25756,7 @@ paths:
         - description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
           in: header
           name: X-Koro-Access-Reason
+          required: true
           schema:
             description: "Break-glass justification (03 §6.3; 10–500 characters, audited): plain ASCII text, or UTF-8'' followed by the percent-encoded UTF-8 text (RFC 8187 ext-value, e.g. \"UTF-8''\" + encodeURIComponent(reason)) for any other text"
             maxLength: 6007
@@ -29472,6 +29489,12 @@ paths:
               $ref: "#/components/schemas/ReportReasonBody"
         required: true
       responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportCreatedDTO"
+          description: "The caller's open report on this target (reported again: no new report)"
         "201":
           content:
             application/json:
@@ -33424,6 +33447,12 @@ paths:
               $ref: "#/components/schemas/ReportReasonBody"
         required: true
       responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportCreatedDTO"
+          description: "The caller's open report on this target (reported again: no new report)"
         "201":
           content:
             application/json:
@@ -37787,6 +37816,12 @@ paths:
               $ref: "#/components/schemas/ReportBody"
         required: true
       responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportCreatedDTO"
+          description: "The caller's open report on this target (reported again: no new report)"
         "201":
           content:
             application/json:

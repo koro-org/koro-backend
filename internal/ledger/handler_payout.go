@@ -79,7 +79,7 @@ func registerPayouts(api huma.API, h handler) {
 		Summary: "Reveal the full IBAN of a payout",
 		Description: "The IBAN frozen on the payout at creation (iban_masked's full form), for the EFT at the bank. " +
 			parties.RevealNote,
-	}, op.Meta{Action: string(authz.LedgerIbanReveal), Surface: op.SurfaceAdmin, RateLimit: op.RateBreakGlass}, h.adminRevealIBAN)
+	}, op.Meta{Action: string(authz.LedgerIbanReveal), Surface: op.SurfaceAdmin, RateLimit: op.RateBreakGlass, AccessReasonRequired: true}, h.adminRevealIBAN)
 
 	op.Register(api, "ledger", huma.Operation{
 		OperationID: "adminListPayeeReceivables", Method: http.MethodGet, Path: "/admin/payees/{payee_id}/receivables",

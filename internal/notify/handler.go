@@ -77,7 +77,7 @@ func Register(api huma.API, svc Service) {
 		Summary: "Delete a push token", DefaultStatus: http.StatusNoContent,
 	}, op.Meta{Action: string(authz.NotifyPushTokenManage), Surface: op.SurfaceSelf}), h.deletePush)
 
-	huma.Register(api, op.Koro(huma.Operation{
+	op.Register(api, "notify", huma.Operation{
 		OperationID: "adminQueryEmailSuppressions", Method: http.MethodPost, Path: "/admin/email-suppressions/search", Tags: tags,
 		Summary: "Search e-mail suppressions",
 		Description: "Read-only: the address is in the body so that it never reaches a URL or an access log (BE-128). " +
@@ -85,20 +85,22 @@ func Register(api huma.API, svc Service) {
 			"suppression, newest first (next_cursor goes back in the body). Break-glass: X-Koro-Access-Reason is " +
 			"mandatory and every read is audited (the address is neither stored nor audited).",
 	}, op.Meta{Action: string(authz.NotifySuppressionManage), Surface: op.SurfaceAdmin, BreakGlass: true,
-		RateLimit: op.RateReadDefault, Idempotency: op.IdempotencyOptional}), h.adminQuerySuppressions)
+		AccessReasonRequired: true, RateLimit: op.RateReadDefault, Idempotency: op.IdempotencyOptional}, h.adminQuerySuppressions)
 
-	huma.Register(api, op.Koro(huma.Operation{
+	op.Register(api, "notify", huma.Operation{
 		OperationID: "adminDeleteEmailSuppression", Method: http.MethodDelete, Path: "/admin/email-suppressions/{suppression_id}",
 		Tags: tags, Summary: "Remove an e-mail suppression", DefaultStatus: http.StatusNoContent,
 		Description: "The address may receive e-mail again. Break-glass: X-Koro-Access-Reason is mandatory; audited.",
-	}, op.Meta{Action: string(authz.NotifySuppressionManage), Surface: op.SurfaceAdmin, BreakGlass: true}), h.adminDeleteSuppression)
+	}, op.Meta{Action: string(authz.NotifySuppressionManage), Surface: op.SurfaceAdmin, BreakGlass: true,
+		AccessReasonRequired: true}, h.adminDeleteSuppression)
 
-	huma.Register(api, op.Koro(huma.Operation{
+	op.Register(api, "notify", huma.Operation{
 		OperationID: "adminListUserDeliveries", Method: http.MethodGet, Path: "/admin/users/{user_id}/notification-deliveries",
 		Tags: tags, Summary: "List a user's notification deliveries",
 		Description: "IDs, channel, template, status and time only: never the content, the data or the address. " +
 			"Break-glass: X-Koro-Access-Reason is mandatory; the read is audited and the user is notified.",
-	}, op.Meta{Action: string(authz.NotifyDeliveryList), Surface: op.SurfaceAdmin, BreakGlass: true}), h.adminListDeliveries)
+	}, op.Meta{Action: string(authz.NotifyDeliveryList), Surface: op.SurfaceAdmin, BreakGlass: true,
+		AccessReasonRequired: true}, h.adminListDeliveries)
 }
 
 type handler struct{ svc Service }

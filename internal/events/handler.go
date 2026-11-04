@@ -33,7 +33,8 @@ func Register(api huma.API, svc Service) {
 			"that have ended are left out. q matches title, summary and description (full text) or part of the title. " +
 			"Repeated org_id / university_id values are ORed; the two filters together intersect. A date-only " +
 			"starts_from / starts_to is the start / end of that day in Europe/Istanbul.",
-	}, op.Meta{Action: string(authz.EventsEventList), Surface: op.SurfacePublic}, h.listEvents)
+	}, op.Meta{Action: string(authz.EventsEventList), Surface: op.SurfacePublic,
+		QuerySyntax: map[string]op.ParamSyntax{"starts_from": op.DayOrTime, "starts_to": op.DayOrTime}}, h.listEvents)
 
 	op.Register(api, "events", huma.Operation{
 		OperationID: "getEvent", Method: http.MethodGet, Path: "/events/{event_id}",

@@ -2,10 +2,13 @@ package op_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/humatest"
@@ -160,4 +163,96 @@ func TestRegister_AccessReasonRequired(t *testing.T) {
 		OperationID: "getOther", Method: http.MethodGet, Path: "/admin/others",
 	}, op.Meta{Action: "talent.thing.read", Surface: op.SurfaceAdmin, AccessReasonRequired: true},
 		func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
+}
+
+// TestRegister_QuerySyntax (BE-170): Meta.QuerySyntax documents the format
+// or pattern of a query parameter while the run-time check stays the
+// operation's (a malformed value reaches the handler); a missing parameter
+// or one huma already checks panics.
+func TestRegister_QuerySyntax(t *testing.T) {
+	t.Parallel()
+	_, api := humatest.New(t)
+	var got string
+	op.Register(api, "ledger", huma.Operation{
+		OperationID: "listBounds", Method: http.MethodGet, Path: "/admin/bounds",
+	}, op.Meta{Action: "ledger.thing.list", Surface: op.SurfacePublic,
+		QuerySyntax: map[string]op.ParamSyntax{"from": op.DayOrTime, "day": op.Day}},
+		func(_ context.Context, in *struct {
+			From string `query:"from" maxLength:"40"`
+			Day  string `query:"day"`
+		}) (*struct{}, error) {
+			got = in.From
+			return nil, nil
+		})
+	for _, p := range api.OpenAPI().Paths["/admin/bounds"].Get.Parameters {
+		switch p.Name {
+		case "from":
+			if p.Schema.Pattern != op.DayOrTimePattern || p.Schema.MaxLength == nil || *p.Schema.MaxLength != 40 {
+				t.Errorf("from schema = %+v, want the DayOrTime pattern and maxLength 40", p.Schema)
+			}
+		case "day":
+			if p.Schema.Format != "date" {
+				t.Errorf("day format = %q, want date", p.Schema.Format)
+			}
+		}
+	}
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/admin/bounds?from=yesterday", nil)
+	rec := httptest.NewRecorder()
+	api.Adapter().ServeHTTP(rec, req)
+	if got != "yesterday" {
+		t.Fatalf("a malformed bound did not reach the handler: %d %s", rec.Code, rec.Body)
+	}
+
+	for name, in := range map[string]func(){
+		"missing": func() {
+			op.Register(api, "ledger", huma.Operation{OperationID: "listMissing", Method: http.MethodGet, Path: "/missing"},
+				op.Meta{Action: "ledger.thing.list", Surface: op.SurfacePublic, QuerySyntax: map[string]op.ParamSyntax{"from": op.Day}},
+				func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
+		},
+		"tagged": func() {
+			op.Register(api, "ledger", huma.Operation{OperationID: "listTagged", Method: http.MethodGet, Path: "/tagged"},
+				op.Meta{Action: "ledger.thing.list", Surface: op.SurfacePublic, QuerySyntax: map[string]op.ParamSyntax{"from": op.Day}},
+				func(context.Context, *struct {
+					From string `query:"from" format:"date"`
+				}) (*struct{}, error) {
+					return nil, nil
+				})
+		},
+		"through Koro": func() {
+			_ = op.Koro(huma.Operation{OperationID: "listKoro", Method: http.MethodGet, Path: "/koro", Tags: []string{"ledger"}},
+				op.Meta{Action: "ledger.thing.list", Surface: op.SurfacePublic, QuerySyntax: map[string]op.ParamSyntax{"from": op.Day}})
+		},
+	} {
+		func() {
+			defer func() {
+				if r := recover(); r == nil || !strings.Contains(fmt.Sprint(r), "QuerySyntax") {
+					t.Errorf("%s: recover() = %v, want a QuerySyntax panic", name, r)
+				}
+			}()
+			in()
+		}()
+	}
+}
+
+// TestDayOrTimePattern (BE-170): the documented pattern takes what the
+// bound parsers take (RFC 3339 with or without fractions, a YYYY-MM-DD
+// day) and refuses what they refuse.
+func TestDayOrTimePattern(t *testing.T) {
+	t.Parallel()
+	re := regexp.MustCompile(op.DayOrTimePattern)
+	for _, s := range []string{"2026-11-04", "2026-11-04T10:00:00Z", "2026-11-04T10:00:00.123456789+03:00", "2026-01-31T23:59:59-05:30"} {
+		if !re.MatchString(s) {
+			t.Errorf("%q does not match", s)
+		}
+		if _, err := time.Parse(time.RFC3339Nano, s); err != nil {
+			if _, err := time.Parse(time.DateOnly, s); err != nil {
+				t.Errorf("%q matches but no parser takes it", s)
+			}
+		}
+	}
+	for _, s := range []string{"", "2026-13-01", "2026-11-4", "04.11.2026", "2026-11-04T10:00", "2026-11-04T10:00:00", "2026-11-04 10:00:00Z", "yesterday", "2026-11-04T25:00:00Z"} {
+		if re.MatchString(s) {
+			t.Errorf("%q matches", s)
+		}
+	}
 }

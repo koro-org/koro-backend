@@ -26,6 +26,49 @@ func Register[I, O any](api huma.API, tag string, o huma.Operation, m Meta, fn f
 	if m.AccessReasonRequired {
 		requireAccessReasonDoc(api.OpenAPI(), o)
 	}
+	if len(m.QuerySyntax) > 0 {
+		documentQuerySyntax(api.OpenAPI(), o, m.QuerySyntax)
+	}
+}
+
+// registered returns the operation of oapi with o's ID. The document's
+// path carries the group prefix (/api/v1), o.Path not: the operation is
+// found by its ID.
+func registered(oapi *huma.OpenAPI, o huma.Operation) *huma.Operation {
+	for _, item := range oapi.Paths {
+		for _, reg := range []*huma.Operation{item.Get, item.Put, item.Post, item.Delete, item.Options, item.Head, item.Patch} {
+			if reg != nil && reg.OperationID == o.OperationID {
+				return reg
+			}
+		}
+	}
+	panic(fmt.Sprintf("op.Register(%s %s %q): not in the document", o.Method, o.Path, o.OperationID))
+}
+
+// documentQuerySyntax writes the syntaxes of Meta.QuerySyntax into copies
+// of the parameter schemas of the registered o: huma validates against the
+// schema it built at registration, which stays as it was, so the
+// operation's own check (and its order) is unchanged. A parameter that is
+// not a string query parameter, or that huma already checks (a format or
+// pattern tag), panics.
+func documentQuerySyntax(oapi *huma.OpenAPI, o huma.Operation, syntax map[string]ParamSyntax) {
+	reg := registered(oapi, o)
+	for name, sx := range syntax {
+		var p *huma.Param
+		for _, q := range reg.Parameters {
+			if q.In == "query" && q.Name == name {
+				p = q
+			}
+		}
+		if p == nil || p.Schema == nil || p.Schema.Type != huma.TypeString || p.Schema.Format != "" || p.Schema.Pattern != "" ||
+			(sx.Format == "" && sx.Pattern == "") {
+			panic(fmt.Sprintf("op.Register(%s %s %q): Meta.QuerySyntax[%q] needs a string query parameter without a format or pattern tag",
+				o.Method, o.Path, o.OperationID, name))
+		}
+		c := *p.Schema
+		c.Format, c.Pattern = sx.Format, sx.Pattern
+		p.Schema = &c
+	}
 }
 
 // requireAccessReasonDoc marks the X-Koro-Access-Reason parameter of the
@@ -34,19 +77,10 @@ func Register[I, O any](api huma.API, tag string, o huma.Operation, m Meta, fn f
 // run-time order (authz, then the service's 422) is unchanged. An
 // operation without the header panics: the flag would document nothing.
 func requireAccessReasonDoc(oapi *huma.OpenAPI, o huma.Operation) {
-	// The document's path carries the group prefix (/api/v1), o.Path not:
-	// the operation is found by its ID.
-	for _, item := range oapi.Paths {
-		for _, reg := range []*huma.Operation{item.Get, item.Put, item.Post, item.Delete, item.Options, item.Head, item.Patch} {
-			if reg == nil || reg.OperationID != o.OperationID {
-				continue
-			}
-			for _, p := range reg.Parameters {
-				if p.In == "header" && p.Name == httpx.HeaderAccessReason {
-					p.Required = true
-					return
-				}
-			}
+	for _, p := range registered(oapi, o).Parameters {
+		if p.In == "header" && p.Name == httpx.HeaderAccessReason {
+			p.Required = true
+			return
 		}
 	}
 	panic(fmt.Sprintf("op.Register(%s %s %q): Meta.AccessReasonRequired without an %s header (embed httpx.AccessReasonHeader)",

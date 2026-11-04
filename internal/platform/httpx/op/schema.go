@@ -44,3 +44,25 @@ func SetEnum[T ~string](s *huma.Schema, prop string, vals []T) *huma.Schema {
 	p.Enum = Enum(vals)
 	return s
 }
+
+// ParamSyntax is the documented syntax of a query parameter
+// (Meta.QuerySyntax): a format, a pattern or both.
+type ParamSyntax struct {
+	Format  string
+	Pattern string
+}
+
+// DayOrTimePattern matches an RFC 3339 time or a YYYY-MM-DD day, the
+// bounds that events, ledger and payables take (04 §1.7). It is not
+// stricter about the calendar than the parsers (31 February passes it and
+// gets their 422).
+const DayOrTimePattern = `^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])` +
+	`(T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\.[0-9]{1,9})?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9]))?$`
+
+// Syntaxes of Meta.QuerySyntax.
+var (
+	// Day is a YYYY-MM-DD day.
+	Day = ParamSyntax{Format: "date"}
+	// DayOrTime is an RFC 3339 time or a YYYY-MM-DD day.
+	DayOrTime = ParamSyntax{Pattern: DayOrTimePattern}
+)

@@ -22,14 +22,14 @@ import (
 // when called.
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
-	tags := []string{"ledger"}
-	huma.Register(api, op.Koro(huma.Operation{
-		OperationID: "adminListLedgerTransactions", Method: http.MethodGet, Path: "/admin/ledger/transactions", Tags: tags,
+	op.Register(api, "ledger", huma.Operation{
+		OperationID: "adminListLedgerTransactions", Method: http.MethodGet, Path: "/admin/ledger/transactions",
 		Summary: "List ledger transactions with their entries",
 		Description: "The double-entry journal, newest occurred_at first. Amounts are kuruş; debit is positive, " +
 			"credit negative; the entries of a transaction sum to zero. Filters: kind, ref_type, ref_id and an " +
 			"occurred_at window.",
-	}, op.Meta{Action: string(authz.LedgerJournalList), Surface: op.SurfaceAdmin}), h.list)
+	}, op.Meta{Action: string(authz.LedgerJournalList), Surface: op.SurfaceAdmin,
+		QuerySyntax: map[string]op.ParamSyntax{"occurred_from": op.DayOrTime, "occurred_to": op.DayOrTime}}, h.list)
 	registerPayouts(api, h)
 }
 

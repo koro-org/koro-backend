@@ -118,6 +118,12 @@ type Meta struct {
 	// checks it after authz, so a caller without the right gets 403/404
 	// before 422. Register writes it; Koro alone refuses it.
 	AccessReasonRequired bool
+	// QuerySyntax documents the syntax of query parameters (name → syntax)
+	// that the operation checks itself, e.g. a date bound parsed after the
+	// authorisation (03 §7.2: 404/403 before 422), so they carry no huma
+	// format/pattern tag (huma would answer 422 first). Only the document
+	// changes (BE-170). Register writes it; Koro alone refuses it.
+	QuerySyntax map[string]ParamSyntax
 	// Responses documents the success answers the operation gives besides
 	// its DefaultStatus (its output sets Status at run time; huma documents
 	// the default status only). Register writes them (it holds the schema
@@ -143,8 +149,9 @@ var (
 // extensions. It returns the updated operation for huma.Register.
 // Meta.Responses needs Register.
 func Koro(o huma.Operation, m Meta) huma.Operation {
-	if len(m.Responses) > 0 || m.AccessReasonRequired {
-		panic(fmt.Sprintf("op.Koro(%s %s %q): Meta.Responses or Meta.AccessReasonRequired needs op.Register", o.Method, o.Path, o.OperationID))
+	if len(m.Responses) > 0 || m.AccessReasonRequired || len(m.QuerySyntax) > 0 {
+		panic(fmt.Sprintf("op.Koro(%s %s %q): Meta.Responses, Meta.AccessReasonRequired or Meta.QuerySyntax needs op.Register",
+			o.Method, o.Path, o.OperationID))
 	}
 	return koro(o, m)
 }

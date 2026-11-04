@@ -22,7 +22,7 @@ func Register(api huma.API, svc Service) {
 		Description: "Operational counts of the platform (SR §8 Admin): accounts by status, sign-up role and " +
 			"verification, orgs by kind and status, posts and content reports, events and their participation, and " +
 			"the review queues. The *_in_range figures cover the range (default: the last 30 days)." + rangeNote,
-	}, op.Meta{Action: string(authz.StatsPlatformRead), Surface: op.SurfaceAdmin}, h.platform)
+	}, op.Meta{Action: string(authz.StatsPlatformRead), Surface: op.SurfaceAdmin, QuerySyntax: rangeSyntax}, h.platform)
 
 	op.Register(api, "stats", huma.Operation{
 		OperationID: "getClubStats", Method: http.MethodGet, Path: "/orgs/{org_id}/stats/club",
@@ -30,7 +30,7 @@ func Register(api huma.API, svc Service) {
 		Description: "The club's members and their monthly growth, the registration and attendance of its events " +
 			"and the orders companies placed on its offerings (SR §8 Kulüp). Default range: the last 12 calendar " +
 			"months. Another kind of org is not found." + rangeNote,
-	}, op.Meta{Action: string(authz.StatsClubRead), Surface: op.SurfaceOrg}, h.club)
+	}, op.Meta{Action: string(authz.StatsClubRead), Surface: op.SurfaceOrg, QuerySyntax: rangeSyntax}, h.club)
 
 	op.Register(api, "stats", huma.Operation{
 		OperationID: "getCompanyStats", Method: http.MethodGet, Path: "/orgs/{org_id}/stats/company",
@@ -39,7 +39,7 @@ func Register(api huma.API, svc Service) {
 			"dispatches, its contact requests with their acceptance rate and its package usage (SR §8 Şirket). " +
 			"Numbers about students are estimates: null below 10, rounded down to their bucket. Default range: the " +
 			"last 30 days. Another kind of org is not found." + rangeNote,
-	}, op.Meta{Action: string(authz.StatsCompanyRead), Surface: op.SurfaceOrg}, h.company)
+	}, op.Meta{Action: string(authz.StatsCompanyRead), Surface: op.SurfaceOrg, QuerySyntax: rangeSyntax}, h.company)
 
 	op.Register(api, "stats", huma.Operation{
 		OperationID: "getUniversityStats", Method: http.MethodGet, Path: "/orgs/{org_id}/stats/university",
@@ -48,7 +48,7 @@ func Register(api huma.API, svc Service) {
 			"left out, the others rounded down to their bucket), the event density of its clubs (sensitive clubs and " +
 			"events of a sensitive category left out) and what waits for its decision (SR §8 Kurum). Default range: " +
 			"the last 12 calendar months. Another kind of org is not found." + rangeNote,
-	}, op.Meta{Action: string(authz.StatsUniversityRead), Surface: op.SurfaceOrg}, h.university)
+	}, op.Meta{Action: string(authz.StatsUniversityRead), Surface: op.SurfaceOrg, QuerySyntax: rangeSyntax}, h.university)
 }
 
 type handler struct {
@@ -63,6 +63,10 @@ type RangeParams struct {
 }
 
 func (p RangeParams) query() RangeQuery { return RangeQuery(p) }
+
+// rangeSyntax documents RangeParams as days; the service checks them after
+// the authorisation (RangeQuery.resolve), so they carry no format tag.
+var rangeSyntax = map[string]op.ParamSyntax{"from": op.Day, "to": op.Day}
 
 type platformInput struct {
 	RangeParams

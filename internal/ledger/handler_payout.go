@@ -59,7 +59,8 @@ func registerPayouts(api huma.API, h handler) {
 		Summary: "List the order lines a payout may take",
 		Description: "Per payee (the one asked for, or every payee the ledger owes money to): the paid, fulfilled lines " +
 			"whose payout hold has elapsed as of as_of (default now), with a positive seller share after refunds, not paid out and in no payout yet.",
-	}, op.Meta{Action: string(authz.LedgerPayableList), Surface: op.SurfaceAdmin}, h.payables)
+	}, op.Meta{Action: string(authz.LedgerPayableList), Surface: op.SurfaceAdmin,
+		QuerySyntax: map[string]op.ParamSyntax{"as_of": op.DayOrTime}}, h.payables)
 
 	op.Register(api, "ledger", huma.Operation{
 		OperationID: "adminListPayouts", Method: http.MethodGet, Path: "/admin/payouts",

@@ -184,6 +184,7 @@ func New(d Deps) (*App, error) {
 	installTalentFieldGuard(api.OpenAPI())   // no talent*/band/score*/point* member outside the talent operations (BE-047)
 	installTermsGate(api.OpenAPI())          // x-koro-terms-gate on every protected write operation (BE-124)
 	installPersonalQueryGuard(api.OpenAPI()) // no personal search criterion in a query string (BE-128)
+	installParamDocs(api.OpenAPI())          // uuid format of ID query parameters, minLength 1 of required strings (BE-170)
 	// The Problem schema and a reusable "Problem" response are always part
 	// of the spec, even before the first operation references them (huma
 	// prunes unreferenced schemas, the response keeps it referenced).

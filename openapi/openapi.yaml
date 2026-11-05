@@ -12766,6 +12766,75 @@ components:
         - total_amount
         - currency
       type: object
+    RecommendationsDTO:
+      additionalProperties: false
+      properties:
+        choice:
+          description: Your recommendation_choice of the privacy settings (getMyPrivacy, updateMyPrivacy)
+          enum:
+            - default
+            - enabled
+            - disabled
+          type: string
+        clubs:
+          description: Clubs you neither follow nor belong to, the best match first
+          items:
+            $ref: "#/components/schemas/RecommendedClubDTO"
+          type: array
+        enabled:
+          description: "Whether your recommendations are on (choice; default: on for an adult, off for a minor). Off: both lists are empty and nothing of yours was read"
+          type: boolean
+        events:
+          description: Upcoming events (next 30 days) you have not registered for, the best match first
+          items:
+            $ref: "#/components/schemas/RecommendedEventDTO"
+          type: array
+      required:
+        - enabled
+        - choice
+        - events
+        - clubs
+      type: object
+    RecommendedClubDTO:
+      additionalProperties: false
+      properties:
+        club:
+          $ref: "#/components/schemas/ClubCardDTO"
+        reasons:
+          description: "The rules that picked the club, the strongest first (show the first): attended_organiser — it organised an event you attended; popular_in_department — at least 10 students of your department are members; popular_in_university — at least 10 students of your university are members"
+          items:
+            enum:
+              - attended_organiser
+              - popular_in_department
+              - popular_in_university
+            type: string
+          minItems: 1
+          type: array
+      required:
+        - club
+        - reasons
+      type: object
+    RecommendedEventDTO:
+      additionalProperties: false
+      properties:
+        event:
+          $ref: "#/components/schemas/EventCardDTO"
+        reasons:
+          description: "The rules that picked the event, the strongest first (show the first; starting_soon never comes alone): followed_org — a club or org you follow or belong to; attended_category — like the events you attended in the last year; same_university — your university or one of its clubs; popular — at least 10 registrations; starting_soon — starts within 72 hours"
+          items:
+            enum:
+              - followed_org
+              - attended_category
+              - same_university
+              - popular
+              - starting_soon
+            type: string
+          minItems: 1
+          type: array
+      required:
+        - event
+        - reasons
+      type: object
     RecordMineInputBody:
       additionalProperties: false
       properties:
@@ -15223,6 +15292,13 @@ components:
         discoverable:
           description: "Level 2: companies may find the anonymous profile (default off)"
           type: boolean
+        recommendation_choice:
+          description: "Rule-based event and club recommendations (GET /me/recommendations) from your own data, shown to you only: default follows the product setting (on for an adult, off for a minor); disabled turns them off"
+          enum:
+            - default
+            - enabled
+            - disabled
+          type: string
         show_clubs_on_grant:
           description: "Level 3: non-sensitive club memberships (default off)"
           type: boolean
@@ -15234,6 +15310,7 @@ components:
         - show_contact_on_grant
         - show_clubs_on_grant
         - activity_ranking_choice
+        - recommendation_choice
       type: object
     StudentProfileL3DTO:
       additionalProperties: false
@@ -16969,6 +17046,12 @@ components:
           description: The consent text shown for every consent turned on
         discoverable:
           type: boolean
+        recommendation_choice:
+          enum:
+            - default
+            - enabled
+            - disabled
+          type: string
         show_clubs_on_grant:
           type: boolean
         show_contact_on_grant:
@@ -31170,7 +31253,7 @@ paths:
       x-koro-terms-gate: exempt
   /api/v1/me/privacy:
     get:
-      description: "Everything is off until the student turns it on; the activity ranking choice starts at default. Without an active student verification (never verified, or lapsed): 403 students.verification_required; the stored settings are kept, but no company search or level 3 view shows the account meanwhile."
+      description: "Everything is off until the student turns it on; the activity ranking choice and the recommendation choice start at default. Without an active student verification (never verified, or lapsed): 403 students.verification_required; the stored settings are kept, but no company search or level 3 view shows the account meanwhile."
       operationId: getMyPrivacy
       responses:
         "200":
@@ -31195,7 +31278,7 @@ paths:
       x-koro-rate-limit: read_default
       x-koro-surface: self
     patch:
-      description: "discoverable (level 2) and show_contact_on_grant (the contact_info_share consent) mirror explicit consents: turning one on needs the consent text shown (consent.discovery_profile / consent.contact_info_share: notice_version_id and text_sha256), turning it off withdraws the consent; the setting and the consent record change in one transaction. The e-mail goes only to the companies you share it with when you accept their contact requests (share_contact; show_contact_on_grant is the default of that box); turning show_contact_on_grant off stops every share at once. Users under 18 cannot turn either on (422 students.minor_restricted). Every change is audited."
+      description: "discoverable (level 2) and show_contact_on_grant (the contact_info_share consent) mirror explicit consents: turning one on needs the consent text shown (consent.discovery_profile / consent.contact_info_share: notice_version_id and text_sha256), turning it off withdraws the consent; the setting and the consent record change in one transaction. The e-mail goes only to the companies you share it with when you accept their contact requests (share_contact; show_contact_on_grant is the default of that box); turning show_contact_on_grant off stops every share at once. Users under 18 cannot turn either on (422 students.minor_restricted). recommendation_choice turns the rule-based recommendations of GET /me/recommendations on or off (no consent: your own data, shown to you only; minors may turn them on). Every change is audited."
       operationId: updateMyPrivacy
       parameters:
         - description: Client kind; recorded as the consent channel (default web)
@@ -31311,6 +31394,44 @@ paths:
       x-koro-rate-limit: write_default
       x-koro-surface: self
       x-koro-terms-gate: exempt
+  /api/v1/me/recommendations:
+    get:
+      description: "Rule-based recommendations from your own data, shown to you only: upcoming events (next 30 days) you have not registered for, of the clubs and orgs you follow or belong to, like the events you attended in the last year, of your university or popular (at least 10 registrations); clubs that organised your events or have at least 10 members in your department or university. Every item carries the reason codes of the rules that picked it; no score or count. Sensitive clubs and events of a sensitive category are never a signal nor a recommendation. Turn them off with updateMyPrivacy recommendation_choice: disabled (enabled=false, empty lists; default: on for an adult, off for a minor). Verified students only (403 otherwise)."
+      operationId: listMyRecommendations
+      parameters:
+        - description: Items per list (events and clubs each)
+          explode: false
+          in: query
+          name: limit
+          schema:
+            default: 10
+            description: Items per list (events and clubs each)
+            format: int64
+            maximum: 20
+            minimum: 1
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecommendationsDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: List my recommended events and clubs
+      tags:
+        - recommend
+      x-koro-action: recommend.recommendation.list_own
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
   /api/v1/me/registrations:
     get:
       description: The caller's registrations by the event's start (no answers); upcoming=true keeps events that have not ended.

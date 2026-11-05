@@ -122,11 +122,11 @@ func TestDTO_SelfProfileHasNoTalentField(t *testing.T) {
 		"experiences[].experience_id", "experiences[].kind", "experiences[].title", "experiences[].organization_name",
 		"experiences[].start_month", "experiences[].end_month", "experiences[].description", "languages",
 		"languages[].language_code", "languages[].level", "privacy", "privacy.discoverable", "privacy.show_contact_on_grant",
-		"privacy.show_clubs_on_grant", "privacy.activity_ranking_choice",
+		"privacy.show_clubs_on_grant", "privacy.activity_ranking_choice", "privacy.recommendation_choice", // BE-174
 		"cvs", "cvs[].cv_id", "cvs[].file_name", "cvs[].is_current", "cvs[].created_at", // BE-025 (04 §V.1)
 	})
 	wantFields(t, "StudentPrivacyDTO", jsonFields(reflect.TypeFor[students.StudentPrivacyDTO]()),
-		[]string{"discoverable", "show_contact_on_grant", "show_clubs_on_grant", "activity_ranking_choice"})
+		[]string{"discoverable", "show_contact_on_grant", "show_clubs_on_grant", "activity_ranking_choice", "recommendation_choice"})
 }
 
 // TestDTO_NoLevelCarriesTalentField: no visibility type of any level

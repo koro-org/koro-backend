@@ -119,6 +119,7 @@ type StudentPrivacyDTO struct {
 	ShowContactOnGrant    bool   `json:"show_contact_on_grant" doc:"Your contact_info_share consent and the default of \"share my e-mail\" when you accept a contact request (default off). The e-mail goes only to the companies you share it with (per grant); turning this off stops every share"`
 	ShowClubsOnGrant      bool   `json:"show_clubs_on_grant" doc:"Level 3: non-sensitive club memberships (default off)"`
 	ActivityRankingChoice string `json:"activity_ranking_choice" enum:"default,enabled,disabled"`
+	RecommendationChoice  string `json:"recommendation_choice" enum:"default,enabled,disabled" doc:"Rule-based event and club recommendations (GET /me/recommendations) from your own data, shown to you only: default follows the product setting (on for an adult, off for a minor); disabled turns them off"`
 }
 
 // StudentProfileSelfDTO is the student's own profile (04 §V.1): every
@@ -167,7 +168,7 @@ func toExperienceDTO(e Experience) StudentExperienceDTO {
 func toPrivacyDTO(p Privacy) StudentPrivacyDTO {
 	return StudentPrivacyDTO{
 		Discoverable: p.Discoverable, ShowContactOnGrant: p.ShowContactOnGrant, ShowClubsOnGrant: p.ShowClubsOnGrant,
-		ActivityRankingChoice: string(p.ActivityRankingChoice),
+		ActivityRankingChoice: string(p.ActivityRankingChoice), RecommendationChoice: string(p.RecommendationChoice),
 	}
 }
 

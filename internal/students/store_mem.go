@@ -291,7 +291,7 @@ func (s *MemStore) UpdatePrivacy(_ context.Context, p Privacy) (Privacy, error) 
 	if !ok {
 		return Privacy{}, ErrNotFound
 	}
-	if !p.ActivityRankingChoice.Valid() {
+	if !p.ActivityRankingChoice.Valid() || !p.RecommendationChoice.Valid() {
 		return Privacy{}, errCheck
 	}
 	p.CreatedAt, p.UpdatedAt = cur.CreatedAt, s.stamp()

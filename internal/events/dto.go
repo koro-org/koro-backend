@@ -100,6 +100,10 @@ func str(p *string) string {
 	return *p
 }
 
+// CardOf is the list card of v (listEvents' EventCardDTO), for a module
+// that lists events it read from events (recommend, BE-174).
+func CardOf(v EventView) EventCardDTO { return toCardDTO(v) }
+
 func toCardDTO(v EventView) EventCardDTO {
 	e := v.Event
 	return EventCardDTO{

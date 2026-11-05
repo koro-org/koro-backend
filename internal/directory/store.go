@@ -257,6 +257,9 @@ type ClubFilter struct {
 	Category     Category
 	Claimed      *bool
 	Sort         string
+	// OrgIDs restricts the clubs to these orgs when non-empty (the
+	// recommendations' cards, BE-174).
+	OrgIDs []uuid.UUID
 }
 
 // SkillFilter narrows ListSkills.

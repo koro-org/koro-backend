@@ -79,7 +79,7 @@ type Platform struct {
 	Realtime    Realtime
 }
 
-// Modules groups the sections of the 22 feature modules (01 §2), in layer
+// Modules groups the sections of the 24 feature modules (01 §2), in layer
 // order (01 §5.1). Modules run in both the API and the worker.
 type Modules struct {
 	Audit        Audit
@@ -105,6 +105,7 @@ type Modules struct {
 	Payments     Payments
 	Kvkk         Kvkk
 	Stats        Stats
+	Recommend    Recommend
 }
 
 // API is the configuration of `koro api`.

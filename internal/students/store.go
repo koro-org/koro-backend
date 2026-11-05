@@ -19,14 +19,18 @@ package students
 // aggregate it works on (the accessors below), the KVKK provider
 // (privacy.go), which covers every table, through the whole Store.
 type Store interface {
-	profileStore // student_profiles and the audience columns (store_profile.go)
-	privacyStore // student_privacy_settings (store_privacy.go)
-	sectionStore // skills, languages and experiences (store_sections.go)
-	cvStore      // student_cvs (store_cv.go)
-	matchStore   // count_segment and the discovery candidates (store_match.go)
-	grantStore   // profile_access_grants and their contact sharing (store_grants.go)
-	statsStore   // the counts of a university's panel (stats.go, BE-163)
+	profileStore   // student_profiles and the audience columns (store_profile.go)
+	privacyStore   // student_privacy_settings (store_privacy.go)
+	sectionStore   // skills, languages and experiences (store_sections.go)
+	cvStore        // student_cvs (store_cv.go)
+	matchStore     // count_segment and the discovery candidates (store_match.go)
+	grantStore     // profile_access_grants and their contact sharing (store_grants.go)
+	statsStore     // the counts of a university's panel (stats.go, BE-163)
+	recommendStore // the popular clubs of the recommendations (recommend.go, BE-174)
 }
+
+// recommendations is the recommendations' view of the store (BE-174).
+func (s *service) recommendations() recommendStore { return s.d.Store }
 
 // stats is the university panel count view of the store (BE-163).
 func (s *service) stats() statsStore { return s.d.Store }

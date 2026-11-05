@@ -259,6 +259,7 @@ type container struct {
 	payments     paymentsWiring     // L12
 	kvkk         kvkkWiring         // L13
 	stats        statsWiring        // L13 (BE-163: reads every lower layer)
+	recommend    recommendWiring    // L13 (BE-174: reads students, events, directory and feed)
 }
 
 func newContainer(in infra) *container {
@@ -325,7 +326,7 @@ type moduleEntry struct {
 	w     moduleWiring
 }
 
-// modules returns the 23 feature modules in the layer order of 01 §5.1
+// modules returns the 24 feature modules in the layer order of 01 §5.1
 // (lower layers first). The order is the build, task and route order.
 func (c *container) modules() []moduleEntry {
 	return []moduleEntry{
@@ -352,6 +353,7 @@ func (c *container) modules() []moduleEntry {
 		{"payments", 12, &c.payments},
 		{"kvkk", 13, &c.kvkk},
 		{"stats", 13, &c.stats},
+		{"recommend", 13, &c.recommend},
 	}
 }
 

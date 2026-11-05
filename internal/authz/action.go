@@ -19,13 +19,14 @@ func (a Action) Module() string {
 // String returns the action name.
 func (a Action) String() string { return string(a) }
 
-// Modules returns the 23 feature modules in 03 §5 table order; every one has
-// an actions_<module>.go and a policy_<module>.go (stats: BE-163, 03 §5.23).
+// Modules returns the 24 feature modules in 03 §5 table order; every one has
+// an actions_<module>.go and a policy_<module>.go (stats: BE-163, 03 §5.23;
+// recommend: BE-174, 03 §5.24).
 func Modules() []string {
 	return []string{
 		"identity", "orgs", "directory", "students", "consent", "events", "feed", "outreach",
 		"messaging", "discovery", "entitlements", "talent", "parties", "catalog", "orders",
-		"payments", "ledger", "billing", "notify", "files", "audit", "kvkk", "stats",
+		"payments", "ledger", "billing", "notify", "files", "audit", "kvkk", "stats", "recommend",
 	}
 }
 
@@ -55,6 +56,7 @@ var httpActionsByModule = map[string][]Action{
 	"audit":        auditActions,
 	"kvkk":         kvkkActions,
 	"stats":        statsActions,
+	"recommend":    recommendActions,
 }
 
 // systemActions is the 03 §3.7 allow-list of SystemActor, in document order.

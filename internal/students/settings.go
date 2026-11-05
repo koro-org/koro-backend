@@ -25,6 +25,9 @@ type PrivacyPatch struct {
 	ShowContactOnGrant    *bool
 	ShowClubsOnGrant      *bool
 	ActivityRankingChoice *RankingChoice
+	// RecommendationChoice turns the rule-based recommendations on or off
+	// (BE-174; no consent: the student's own data for the student only).
+	RecommendationChoice *RecommendationChoice
 	// DiscoveryConsent proves the discovery_profile text when Discoverable
 	// turns on; ContactConsent the contact_info_share text when
 	// ShowContactOnGrant turns on.
@@ -36,7 +39,7 @@ type PrivacyPatch struct {
 
 func (p PrivacyPatch) empty() bool {
 	return p.Discoverable == nil && p.ShowContactOnGrant == nil && p.ShowClubsOnGrant == nil &&
-		p.ActivityRankingChoice == nil
+		p.ActivityRankingChoice == nil && p.RecommendationChoice == nil
 }
 
 // GetMyPrivacy implements Service: the defaults (everything off, ranking
@@ -70,6 +73,9 @@ func (s *service) UpdateMyPrivacy(ctx context.Context, a authz.Actor, patch Priv
 	if patch.ActivityRankingChoice != nil && !patch.ActivityRankingChoice.Valid() {
 		return Privacy{}, problem.Field("body.activity_ranking_choice", "must be default, enabled or disabled")
 	}
+	if patch.RecommendationChoice != nil && !patch.RecommendationChoice.Valid() {
+		return Privacy{}, problem.Field("body.recommendation_choice", "must be default, enabled or disabled")
+	}
 	if a.IsMinor && (isTrue(patch.Discoverable) || isTrue(patch.ShowContactOnGrant)) {
 		return Privacy{}, ErrMinorRestricted
 	}
@@ -95,6 +101,9 @@ func (s *service) UpdateMyPrivacy(ctx context.Context, a authz.Actor, patch Priv
 		}
 		if v := patch.ActivityRankingChoice; v != nil && *v != cur.ActivityRankingChoice {
 			next.ActivityRankingChoice, changed["activity_ranking_choice"] = *v, string(*v)
+		}
+		if v := patch.RecommendationChoice; v != nil && *v != cur.RecommendationChoice {
+			next.RecommendationChoice, changed["recommendation_choice"] = *v, string(*v)
 		}
 		if len(changed) == 0 {
 			out = cur

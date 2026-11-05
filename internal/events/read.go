@@ -214,7 +214,20 @@ func viewerOf(a authz.Actor) Viewer {
 	if a.HasAnyPlatformRole() {
 		return Viewer{All: true}
 	}
-	v := Viewer{UserID: &a.UserID}
+	v := memberViewer(a)
+	v.UserID = &a.UserID
+	return v
+}
+
+// memberViewer is what makes a non-public event visible to a as a student
+// and member (03 §3.6): its verified university and its active memberships,
+// without the platform roles and the staff path (the recommendations,
+// BE-174, never recommend an event for a platform role or a staff seat).
+func memberViewer(a authz.Actor) Viewer {
+	v := Viewer{}
+	if !a.IsUser() {
+		return v
+	}
 	if a.IsVerifiedStudent() && a.UniversityID != nil {
 		u := *a.UniversityID
 		v.UniversityID = &u

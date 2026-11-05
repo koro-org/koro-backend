@@ -28,7 +28,8 @@ type Store interface {
 	RetentionStore
 	ExportStore
 	ParticipationStore
-	StatsStore // the counts of the panels (stats.go, BE-163)
+	StatsStore     // the counts of the panels (stats.go, BE-163)
+	RecommendStore // the reads of the recommendations (recommend.go, BE-174)
 
 	// InsertEvent writes a new event and returns it as stored (created_at
 	// and updated_at from the database). It reports false and writes

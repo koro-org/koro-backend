@@ -643,6 +643,7 @@ func (s *MemStore) ListClubs(ctx context.Context, f ClubFilter, after *After, li
 		switch {
 		case !ok || o.Status != "active" && o.Status != "suspended":
 		case f.UniversityID != nil && c.UniversityID != *f.UniversityID:
+		case len(f.OrgIDs) > 0 && !slices.Contains(f.OrgIDs, c.OrgID):
 		case f.Category != "" && c.Category != f.Category:
 		case f.Claimed != nil && (c.ClaimStatus == ClaimClaimed) != *f.Claimed:
 		case f.Q != "" && !memMatch(o.Name, f.Q):

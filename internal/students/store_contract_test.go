@@ -210,11 +210,13 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (students.Store, wo
 			t.Fatalf("GetPrivacy before = %v", err)
 		}
 		p, err := s.LockPrivacy(ctx, u)
-		if err != nil || p.Discoverable || p.ShowContactOnGrant || p.ShowClubsOnGrant || p.ActivityRankingChoice != students.RankingDefault {
+		if err != nil || p.Discoverable || p.ShowContactOnGrant || p.ShowClubsOnGrant || p.ActivityRankingChoice != students.RankingDefault ||
+			p.RecommendationChoice != students.RankingDefault {
 			t.Fatalf("defaults = %+v, %v", p, err)
 		}
-		p.Discoverable, p.ActivityRankingChoice = true, students.RankingDisabled
-		if got, err := s.UpdatePrivacy(ctx, p); err != nil || !got.Discoverable || got.ActivityRankingChoice != students.RankingDisabled {
+		p.Discoverable, p.ActivityRankingChoice, p.RecommendationChoice = true, students.RankingDisabled, students.RankingEnabled
+		if got, err := s.UpdatePrivacy(ctx, p); err != nil || !got.Discoverable || got.ActivityRankingChoice != students.RankingDisabled ||
+			got.RecommendationChoice != students.RankingEnabled {
 			t.Fatalf("UpdatePrivacy = %+v, %v", got, err)
 		}
 		q, _ := s.LockPrivacy(ctx, v)
@@ -229,6 +231,10 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (students.Store, wo
 		p.ActivityRankingChoice = "maybe"
 		if _, err := s.UpdatePrivacy(ctx, p); !isInvalid(err) {
 			t.Fatalf("bad ranking choice: %v", err)
+		}
+		p.ActivityRankingChoice, p.RecommendationChoice = students.RankingDefault, "maybe"
+		if _, err := s.UpdatePrivacy(ctx, p); !isInvalid(err) {
+			t.Fatalf("bad recommendation choice: %v", err)
 		}
 		if ok, err := s.DeletePrivacy(ctx, u); err != nil || !ok {
 			t.Fatalf("DeletePrivacy = %v, %v", ok, err)

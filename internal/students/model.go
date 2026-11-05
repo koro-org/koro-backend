@@ -72,6 +72,13 @@ func (c RankingChoice) Valid() bool {
 	return c == RankingDefault || c == RankingEnabled || c == RankingDisabled
 }
 
+// RecommendationChoice is student_privacy_settings.recommendation_choice
+// (BE-174, 000176): the same three values as RankingChoice. "default"
+// follows the product setting of the recommendations (recommend: on for an
+// adult, off for a minor); "enabled" and "disabled" are the student's own
+// answer.
+type RecommendationChoice = RankingChoice
+
 // ExperienceKind is student_experiences.kind (02 §9.4).
 type ExperienceKind string
 
@@ -175,8 +182,11 @@ type Privacy struct {
 	ShowContactOnGrant    bool          `gorm:"column:show_contact_on_grant"`
 	ShowClubsOnGrant      bool          `gorm:"column:show_clubs_on_grant"`
 	ActivityRankingChoice RankingChoice `gorm:"column:activity_ranking_choice"`
-	CreatedAt             time.Time     `gorm:"column:created_at;->"`
-	UpdatedAt             time.Time     `gorm:"column:updated_at;->"`
+	// RecommendationChoice is the rule-based recommendations' choice
+	// (BE-174): "default" until the student answers.
+	RecommendationChoice RecommendationChoice `gorm:"column:recommendation_choice"`
+	CreatedAt            time.Time            `gorm:"column:created_at;->"`
+	UpdatedAt            time.Time            `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -184,7 +194,7 @@ func (Privacy) TableName() string { return "student_privacy_settings" }
 
 // defaultPrivacy is the settings of a user without a row (02 §9.2 defaults).
 func defaultPrivacy(userID uuid.UUID) Privacy {
-	return Privacy{UserID: userID, ActivityRankingChoice: RankingDefault}
+	return Privacy{UserID: userID, ActivityRankingChoice: RankingDefault, RecommendationChoice: RankingDefault}
 }
 
 // Skill is a student_skills row (02 §9.3).

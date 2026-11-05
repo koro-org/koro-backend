@@ -202,20 +202,7 @@ func (s gormStore) DeleteDraft(ctx context.Context, orgID, id uuid.UUID) error {
 func (s gormStore) ListEvents(ctx context.Context, f ListFilter, after *After, limit int) ([]Event, error) {
 	// A completed event is a published one that has ended (T-264).
 	q := db.Conn(ctx, s.orm).Model(&Event{}).Select(eventCols).Where("status IN ?", []string{string(StatusPublished), string(StatusCompleted)})
-	if !f.Viewer.All {
-		conds, args := []string{"visibility = 'public'"}, []any{}
-		if v := f.Viewer.UniversityID; v != nil {
-			conds, args = append(conds, "(visibility = 'university' AND visibility_university_id = ?)"), append(args, *v)
-		}
-		if len(f.Viewer.MemberOrgs) > 0 {
-			conds, args = append(conds, "org_id IN ?"), append(args, f.Viewer.MemberOrgs)
-		}
-		if v := f.Viewer.UserID; v != nil {
-			conds = append(conds, "EXISTS (SELECT 1 FROM event_staff s WHERE s.event_id = events.id AND s.user_id = ?)")
-			args = append(args, *v)
-		}
-		q = q.Where("("+strings.Join(conds, " OR ")+")", args...)
-	}
+	q = visibleTo(q, f.Viewer)
 	if f.OrgIDs != nil {
 		if len(f.OrgIDs) == 0 {
 			return []Event{}, nil
@@ -264,6 +251,27 @@ func (s gormStore) ListEvents(ctx context.Context, f ListFilter, after *After, l
 		return nil, wrap("list events", err)
 	}
 	return out, nil
+}
+
+// visibleTo narrows q (over events) to what v may see (03 §3.6): public
+// events, university events of v's university, every event of v's
+// member orgs and the events v is staff of; everything for v.All.
+func visibleTo(q *gorm.DB, v Viewer) *gorm.DB {
+	if v.All {
+		return q
+	}
+	conds, args := []string{"visibility = 'public'"}, []any{}
+	if u := v.UniversityID; u != nil {
+		conds, args = append(conds, "(visibility = 'university' AND visibility_university_id = ?)"), append(args, *u)
+	}
+	if len(v.MemberOrgs) > 0 {
+		conds, args = append(conds, "org_id IN ?"), append(args, v.MemberOrgs)
+	}
+	if u := v.UserID; u != nil {
+		conds = append(conds, "EXISTS (SELECT 1 FROM event_staff s WHERE s.event_id = events.id AND s.user_id = ?)")
+		args = append(args, *u)
+	}
+	return q.Where("("+strings.Join(conds, " OR ")+")", args...)
 }
 
 // ListOrgEvents implements Store.

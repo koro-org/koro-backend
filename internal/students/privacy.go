@@ -42,7 +42,7 @@ func (p privacyProvider) Export(ctx context.Context, userID uuid.UUID) (privacy.
 		out.Items = append(out.Items, map[string]any{
 			"record": "privacy_settings", "discoverable": pv.Discoverable, "show_contact_on_grant": pv.ShowContactOnGrant,
 			"show_clubs_on_grant": pv.ShowClubsOnGrant, "activity_ranking_choice": string(pv.ActivityRankingChoice),
-			"updated_at": pv.UpdatedAt.UTC().Format(time.RFC3339),
+			"recommendation_choice": string(pv.RecommendationChoice), "updated_at": pv.UpdatedAt.UTC().Format(time.RFC3339),
 		})
 	case !errors.Is(err, ErrNotFound):
 		return privacy.ExportSection{}, err

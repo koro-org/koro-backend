@@ -1,0 +1,22 @@
+# Authz matrix of the recommend module (03 §5.24, 04 §2.24; BE-174). 1 read operation × 18 personas + variants.
+# listMyRecommendations is the O cell of the caller's own recommendations for verified students (stu, min, clm,
+# cla, stf: the club and staff personas are verified students); every account without an active student
+# verification (usr k-uv, uni, the companies, platform staff) is 403, anonymous 401. A minor gets 200 with the
+# recommendations off by default (enabled=false). The limit is a huma bound (1–20): out of range is 422 before
+# the cell. No fixture: the lists read the rows the other modules seed.
+version: 1
+groups:
+  # accounts without an active student verification (03 §1.1 usr; uni, companies and staff too).
+  non_students: [user_unverified, university_rep, company_member, company_admin, other_company_member,
+                 moderator, support, dpo, platform_admin, finance_admin, talent_auditor]
+
+operations:
+  listMyRecommendations:
+    method: GET
+    path: /api/v1/me/recommendations
+    action: recommend.recommendation.list_own
+    expect: { anonymous: 401, "@verified_students": 200, "@non_students": 403 }
+    variants:
+      - name: with_limit
+        query: { limit: "5" }
+        expect: { anonymous: 401, "@verified_students": 200, "@non_students": 403 }

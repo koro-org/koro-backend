@@ -80,7 +80,8 @@ func Register(api huma.API, svc Service) {
 	huma.Register(api, self(huma.Operation{
 		OperationID: "getMyPrivacy", Method: http.MethodGet, Path: "/me/privacy",
 		Summary: "Get my privacy settings",
-		Description: "Everything is off until the student turns it on; the activity ranking choice starts at default. " +
+		Description: "Everything is off until the student turns it on; the activity ranking choice and the " +
+			"recommendation choice start at default. " +
 			"Without an active student verification (never verified, or lapsed): 403 students.verification_required; " +
 			"the stored settings are kept, but no company search or level 3 view shows the account meanwhile.",
 	}, authz.StudentsPrivacyReadOwn, ""), h.getPrivacy)
@@ -94,7 +95,9 @@ func Register(api huma.API, svc Service) {
 			"setting and the consent record change in one transaction. The e-mail goes only to the companies you share " +
 			"it with when you accept their contact requests (share_contact; show_contact_on_grant is the default of " +
 			"that box); turning show_contact_on_grant off stops every share at once. Users under 18 cannot turn either " +
-			"on (422 students.minor_restricted). Every change is audited.",
+			"on (422 students.minor_restricted). recommendation_choice turns the rule-based recommendations of " +
+			"GET /me/recommendations on or off (no consent: your own data, shown to you only; minors may turn them " +
+			"on). Every change is audited.",
 	}, authz.StudentsPrivacyUpdateOwn, ""), h.updatePrivacy)
 
 	registerViews(api, h)
@@ -405,6 +408,7 @@ type updatePrivacyInput struct {
 		ShowContactOnGrant    *bool   `json:"show_contact_on_grant,omitempty"`
 		ShowClubsOnGrant      *bool   `json:"show_clubs_on_grant,omitempty"`
 		ActivityRankingChoice *string `json:"activity_ranking_choice,omitempty" enum:"default,enabled,disabled"`
+		RecommendationChoice  *string `json:"recommendation_choice,omitempty" enum:"default,enabled,disabled"`
 		Consent               *struct {
 			DiscoveryProfile *studentConsentProof `json:"discovery_profile,omitempty" doc:"Required to turn discoverable on"`
 			ContactInfoShare *studentConsentProof `json:"contact_info_share,omitempty" doc:"Required to turn show_contact_on_grant on"`
@@ -443,6 +447,10 @@ func (h handler) updatePrivacy(ctx context.Context, in *updatePrivacyInput) (*pr
 	if b.ActivityRankingChoice != nil {
 		c := RankingChoice(*b.ActivityRankingChoice)
 		p.ActivityRankingChoice = &c
+	}
+	if b.RecommendationChoice != nil {
+		c := RecommendationChoice(*b.RecommendationChoice)
+		p.RecommendationChoice = &c
 	}
 	if c := b.Consent; c != nil {
 		if p.DiscoveryConsent, err = proofOf("body.consent.discovery_profile", c.DiscoveryProfile); err != nil {

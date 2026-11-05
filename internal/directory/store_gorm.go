@@ -514,6 +514,9 @@ func (s gormStore) ListClubs(ctx context.Context, f ClubFilter, after *After, li
 	if f.UniversityID != nil {
 		q = q.Where("c.university_id = ?", *f.UniversityID)
 	}
+	if len(f.OrgIDs) > 0 {
+		q = q.Where("c.org_id IN ?", f.OrgIDs)
+	}
 	if f.Category != "" {
 		q = q.Where("c.category = ?", string(f.Category))
 	}

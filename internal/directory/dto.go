@@ -230,6 +230,10 @@ func toAdminSkillDTO(k Skill) AdminSkillDTO {
 	}
 }
 
+// ClubCardOf is the list card of c (listClubs' ClubCardDTO), for a module
+// that lists clubs it read from directory (recommend, BE-174).
+func ClubCardOf(c ClubCard) ClubCardDTO { return toClubCard(c) }
+
 func toClubCard(c ClubCard) ClubCardDTO {
 	r := c.Row
 	return ClubCardDTO{

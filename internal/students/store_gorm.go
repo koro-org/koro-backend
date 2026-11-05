@@ -25,7 +25,7 @@ const (
 	profileCols = `user_id, university_id, department_id, degree_level, class_year, expected_graduation, status,
 		graduated_at, headline, about, city, avatar_file_id, completed_sections, audience_keys, audience_eligible,
 		audience_refreshed_at, created_at, updated_at`
-	privacyCols    = `user_id, discoverable, show_contact_on_grant, show_clubs_on_grant, activity_ranking_choice, created_at, updated_at`
+	privacyCols    = `user_id, discoverable, show_contact_on_grant, show_clubs_on_grant, activity_ranking_choice, recommendation_choice, created_at, updated_at`
 	experienceCols = `id, user_id, kind, title, organization_name, start_month, end_month, description, created_at, updated_at`
 )
 
@@ -306,11 +306,11 @@ func (s gormStore) UpdatePrivacy(ctx context.Context, p Privacy) (Privacy, error
 	var rows []Privacy
 	err := db.Conn(ctx, s.orm).Raw(`UPDATE student_privacy_settings SET
 		discoverable = @discoverable, show_contact_on_grant = @contact, show_clubs_on_grant = @clubs,
-		activity_ranking_choice = @ranking
+		activity_ranking_choice = @ranking, recommendation_choice = @recommendation
 		WHERE user_id = @user_id
 		RETURNING `+privacyCols, map[string]any{
 		"discoverable": p.Discoverable, "contact": p.ShowContactOnGrant, "clubs": p.ShowClubsOnGrant,
-		"ranking": string(p.ActivityRankingChoice), "user_id": p.UserID,
+		"ranking": string(p.ActivityRankingChoice), "recommendation": string(p.RecommendationChoice), "user_id": p.UserID,
 	}).Scan(&rows).Error
 	if err != nil {
 		return Privacy{}, wrap("update privacy", err)

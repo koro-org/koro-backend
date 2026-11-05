@@ -20,10 +20,11 @@ import (
 // first two platform admins, reference (BE-020) loads the public reference
 // data and bootstrap-commerce (BE-036) writes Koro's draft legal party; all
 // may run in every environment. Synthetic demo data (BE-033) is
-// dev/staging only (05 §13.7).
+// dev/staging only (05 §13.7); demo-params (BE-171) prints its IDs for
+// Schemathesis.
 func runSeed(ctx context.Context, args []string, environ map[string]string, stdout io.Writer) error {
 	if len(args) == 0 {
-		return fmt.Errorf("%w: missing seed command (bootstrap-admin, reference, bootstrap-commerce, demo)", errUsage)
+		return fmt.Errorf("%w: missing seed command (bootstrap-admin, reference, bootstrap-commerce, demo, demo-params)", errUsage)
 	}
 	switch args[0] {
 	case "bootstrap-admin":
@@ -34,8 +35,10 @@ func runSeed(ctx context.Context, args []string, environ map[string]string, stdo
 		return runSeedBootstrapCommerce(ctx, args[1:], environ, stdout)
 	case "demo":
 		return runSeedDemo(ctx, args[1:], environ, stdout)
+	case "demo-params":
+		return runSeedDemoParams(ctx, args[1:], environ, stdout)
 	default:
-		return fmt.Errorf("%w: unknown seed command %q (bootstrap-admin, reference, bootstrap-commerce, demo)", errUsage, args[0])
+		return fmt.Errorf("%w: unknown seed command %q (bootstrap-admin, reference, bootstrap-commerce, demo, demo-params)", errUsage, args[0])
 	}
 }
 

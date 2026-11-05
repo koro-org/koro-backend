@@ -70,6 +70,9 @@ func (b *builder) eventRows() error {
 		e.ends, e.slug = e.starts.Add(6*time.Hour), "demo-"+uniSlug(u, k)+"-"+strconv.Itoa(n)
 		e.capacity = new(200)
 		e.published = new(b.now.AddDate(0, 0, -10))
+		if k == 0 {
+			b.p.Demo.PublicEventID = e.id
+		}
 		n++
 		if err := b.eventWithRegs(e, shapeOpen); err != nil {
 			return err
@@ -382,7 +385,7 @@ func (b *builder) postRows() {
 			post(u.OrgID, "university", b.reps[k], universityPosts[j%len(universityPosts)], "public", false, adults)
 		}
 	}
-	for _, c := range b.companies {
+	for ci, c := range b.companies {
 		if c.spec.Pending {
 			continue
 		}
@@ -391,7 +394,10 @@ func (b *builder) postRows() {
 			if containsVerb(text) {
 				text = fmt.Sprintf(text, c.spec.Name)
 			}
-			post(c.orgID, "company", c.owner, text, "public", true, adults)
+			id := post(c.orgID, "company", c.owner, text, "public", true, adults)
+			if ci == 0 && j == 0 {
+				b.p.Demo.PublicPostID = id
+			}
 		}
 	}
 	for _, text := range platformPosts {

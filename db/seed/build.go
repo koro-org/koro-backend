@@ -356,7 +356,8 @@ func (b *builder) companyOrgs() {
 		if spec.Pending {
 			status = "pending_review"
 		}
-		c.orgID = b.org(1000+k, "company", spec.Name, "demo-"+spec.Slug, status, spec.City, !spec.Pending,
+		slug := "demo-" + spec.Slug
+		c.orgID = b.org(1000+k, "company", spec.Name, slug, status, spec.City, !spec.Pending,
 			"https://"+spec.Slug+"."+fake.EmailDomain)
 		created := b.now.AddDate(0, 0, -80)
 		b.p.add("companies", "org_id", c.orgID, "org_kind", "company", "sector_code", spec.Sector, "size_band", spec.Size,
@@ -370,6 +371,7 @@ func (b *builder) companyOrgs() {
 		b.member(c.orgID, "company", c.owner, "company_owner", "admin", nil)
 		b.p.Accounts = append(b.p.Accounts, Account{Email: email, Role: "company_owner (" + spec.Name + ", " + status + ")"})
 		if k == 0 {
+			b.p.Demo.CompanySlug = slug
 			hr := b.user(2100, "demo.ik@"+fake.EmailDomain, b.f.FirstName(), b.f.LastName(), "company", nil)
 			b.member(c.orgID, "company", hr, "recruiter", "invitation", &c.owner)
 			b.p.Accounts = append(b.p.Accounts, Account{Email: "demo.ik@" + fake.EmailDomain, Role: "recruiter (" + spec.Name + ")"})
@@ -616,6 +618,9 @@ func (b *builder) notice() {
 		{"terms_of_use", "Kullanım Koşulları (demo)", termsBody},
 	} {
 		sum := sha256.Sum256([]byte(n.body))
+		if i == 0 {
+			b.p.Demo.NoticeVersionID = b.id("notice", i)
+		}
 		b.p.add("notice_versions", "id", b.id("notice", i), "kind", n.kind, "audience", "all", "locale", "tr-TR",
 			"version", "2026.10.01", "title", n.title, "body_md", n.body, "body_sha256", sum[:],
 			"published_at", at, "created_by", b.admin1, "created_at", at)

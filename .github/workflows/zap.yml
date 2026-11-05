@@ -62,12 +62,18 @@ jobs:
       - name: Start PostgreSQL, Redis, Mailpit, SeaweedFS
         run: docker compose up -d --wait --wait-timeout 300 postgres redis mailpit seaweedfs
 
+      # demo-params (BE-171): the IDs of the demo rows just seeded, as the
+      # [parameters] table of a schemathesis.toml (db/seed PathParameters,
+      # the one source; no copy here). Read-only: it builds the same plan.
       - name: Buckets, migrations, reference + demo seed
         run: |
           docker compose run --rm seaweedfs-buckets
           docker compose run --rm migrate
           docker compose run --rm seed-reference
           docker compose run --rm seed-demo | tail -n 5
+          mkdir -p "$RUNNER_TEMP/zap/schemathesis"
+          docker compose run --rm -T seed-demo seed demo-params >"$RUNNER_TEMP/zap/schemathesis/schemathesis.toml"
+          cat "$RUNNER_TEMP/zap/schemathesis/schemathesis.toml"
 
       - name: Start api
         run: |
@@ -97,6 +103,10 @@ jobs:
       # stateful phase: links are not declared). Signed in: the bearer token
       # of a mobile sign-in of the demo company owner (no cookie, so no
       # CSRF check), GET operations only. Each pass has a 10-minute budget.
+      # Both passes read schemathesis.toml (BE-171, Schemathesis v4
+      # [parameters]): path parameters are the demo IDs, so the public reads
+      # and the company owner's /orgs/{org_id}/... reads answer 200 and their
+      # bodies are checked against the spec instead of ending in a 404.
       # --request-retries (BE-168): the first weekly run had 2+2 transient
       # client-side connect failures on the runner ([Errno 11] EAGAIN, two
       # workers at the same instant; the api logged no gap and no 5xx), not
@@ -110,10 +120,12 @@ jobs:
         run: |
           out="$RUNNER_TEMP/zap/schemathesis"
           mkdir -p "$out/anonymous" "$out/company-get"
+          test -s "$out/schemathesis.toml" || { echo "::error::schemathesis.toml (seed demo-params) is missing"; echo "anonymous=2" >>"$GITHUB_OUTPUT"; echo "signed=2" >>"$GITHUB_OUTPUT"; exit 1; }
           chmod -R a+rwX "$out"
           spec=http://127.0.0.1:8080/api/v1/openapi.json
           st() {
-            docker run --rm --network host -v "$out:/out:rw" "$SCHEMATHESIS_IMAGE" run "$spec" \
+            docker run --rm --network host -v "$out:/out:rw" "$SCHEMATHESIS_IMAGE" \
+              --config-file /out/schemathesis.toml run "$spec" \
               --url http://127.0.0.1:8080 --phases examples,coverage,fuzzing \
               --checks not_a_server_error,response_schema_conformance \
               --max-examples 20 --max-time 600 --workers 4 --request-timeout 15 --request-retries 2 --seed "$GITHUB_RUN_ID" \

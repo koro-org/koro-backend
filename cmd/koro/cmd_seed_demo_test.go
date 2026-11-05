@@ -51,3 +51,20 @@ func TestSeedReference_RefusesPlaceholdersInProd(t *testing.T) {
 		t.Fatalf("dev: exit %d, %s (want the configuration error, not the placeholder refusal)", code, stderr.String())
 	}
 }
+
+// TestSeedDemoParams_RefusesInProd (BE-171): `koro seed demo-params` reads
+// the demo plan, so it is dev/staging only like `seed demo`, and prints
+// nothing but the file on stdout.
+func TestSeedDemoParams_RefusesInProd(t *testing.T) {
+	t.Parallel()
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"seed", "demo-params"}, map[string]string{"APP_ENV": "prod"}, &stdout, &stderr); code != 1 ||
+		!strings.Contains(stderr.String(), "dev or staging only") || stdout.Len() != 0 {
+		t.Fatalf("prod: exit %d, stderr %q stdout %q", code, stderr.String(), stdout.String())
+	}
+	stderr.Reset()
+	if code := run([]string{"seed", "demo-params", "extra"}, map[string]string{"APP_ENV": "dev"}, &bytes.Buffer{}, &stderr); code != 2 ||
+		!strings.Contains(stderr.String(), "takes only -seed") {
+		t.Fatalf("extra argument: exit %d, %s", code, stderr.String())
+	}
+}

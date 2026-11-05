@@ -105,7 +105,11 @@ type Demo struct {
 	CompanyOrgID        uuid.UUID // active company with the targeted_post grant, owned by CompanyEmail
 	EntitlementID       uuid.UUID // CompanyOrgID's targeted_post grant
 	SegmentID           uuid.UUID // CompanyOrgID's segment of the main university
+	CompanySlug         string    // CompanyOrgID's slug (orgs/by-slug)
 	PendingCompanyOrgID uuid.UUID // a company in pending_review
+	PublicEventID       uuid.UUID // published public event of the main university
+	PublicPostID        uuid.UUID // CompanyOrgID's first public post
+	NoticeVersionID     uuid.UUID // the published privacy notice
 	SensitiveClubOrgIDs []uuid.UUID
 	Commerce            CommerceDemo
 }

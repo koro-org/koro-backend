@@ -90,8 +90,7 @@ jobs:
       - name: Install k6 (official release, SHA-256 pinned)
         run: |
           tgz="$RUNNER_TEMP/k6.tar.gz"
-          curl -fsSL -o "$tgz" "https://github.com/grafana/k6/releases/download/v${K6_VERSION}/k6-v${K6_VERSION}-linux-amd64.tar.gz"
-          echo "${K6_SHA256}  $tgz" | sha256sum -c -
+          .github/scripts/fetch-tool.sh "https://github.com/grafana/k6/releases/download/v${K6_VERSION}/k6-v${K6_VERSION}-linux-amd64.tar.gz" "$K6_SHA256" "$tgz"
           tar -xzf "$tgz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/k6-v${K6_VERSION}-linux-amd64" >>"$GITHUB_PATH"
           "$RUNNER_TEMP/k6-v${K6_VERSION}-linux-amd64/k6" version

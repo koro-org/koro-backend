@@ -208,6 +208,17 @@ jobs:
     if: needs.check.outputs.merged != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    # OPS-019: the pinned release binaries; job-level so the cache key below
+    # is made of their SHA-256s.
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+      OSV_SCANNER_VERSION: 2.7.0
+      OSV_SCANNER_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
+      HADOLINT_VERSION: 2.15.1
+      HADOLINT_SHA256: c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507
+      OPENGREP_VERSION: 1.31.0
+      OPENGREP_SHA256: dbbe3c2058dbe600c449a8ba22ea79a1643a6660658400090d0323a8d0d31147
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -236,18 +247,23 @@ jobs:
         with:
           path: bin
           key: tools-${{ runner.os }}-${{ hashFiles('Makefile', 'go.mod') }}
+      # OPS-019: release downloads go through .github/scripts/fetch-tool.sh
+      # (SHA-256 checked, retried for about two minutes on any error, 504
+      # included) and are kept here by SHA-256, so most runs do not reach
+      # the GitHub release servers at all.
+      - name: Cache release tools
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/koro-release-tools
+          key: release-tools-${{ runner.os }}-${{ env.GITLEAKS_SHA256 }}-${{ env.OSV_SCANNER_SHA256 }}-${{ env.HADOLINT_SHA256 }}-${{ env.OPENGREP_SHA256 }}
       # The gitleaks CLI (MIT, no license key) instead of gitleaks-action,
       # which needs a GITLEAKS_LICENSE secret on organisation repositories.
       # The release archive is pinned by its SHA-256; the whole history is
       # scanned (fetch-depth 0), findings are redacted in the log.
       - name: gitleaks
-        env:
-          GITLEAKS_VERSION: 8.30.1
-          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
         run: |
           tgz="$RUNNER_TEMP/gitleaks.tar.gz"
-          curl -fsSL -o "$tgz" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          echo "${GITLEAKS_SHA256}  $tgz" | sha256sum -c -
+          .github/scripts/fetch-tool.sh "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" "$GITLEAKS_SHA256" "$tgz"
           tar -xzf "$tgz" -C "$RUNNER_TEMP" gitleaks
           "$RUNNER_TEMP/gitleaks" git --config .gitleaks.toml --redact --no-banner --exit-code 1 \
             --report-format json --report-path "$RUNNER_TEMP/gitleaks.json" . || {
@@ -265,24 +281,16 @@ jobs:
       # policy (DOC-001). ZAP baseline runs weekly in zap.yml, not here.
       - name: OSV-Scanner (go.mod)
         if: success() || failure()
-        env:
-          OSV_SCANNER_VERSION: 2.7.0
-          OSV_SCANNER_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
         run: |
           bin="$RUNNER_TEMP/osv-scanner"
-          curl -fsSL --retry 3 -o "$bin" "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
-          echo "${OSV_SCANNER_SHA256}  $bin" | sha256sum -c -
+          .github/scripts/fetch-tool.sh "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64" "$OSV_SCANNER_SHA256" "$bin"
           chmod +x "$bin"
           "$bin" scan source --config osv-scanner.toml --lockfile go.mod
       - name: hadolint (deploy/Dockerfile)
         if: success() || failure()
-        env:
-          HADOLINT_VERSION: 2.15.1
-          HADOLINT_SHA256: c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507
         run: |
           bin="$RUNNER_TEMP/hadolint"
-          curl -fsSL --retry 3 -o "$bin" "https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-linux-x86_64"
-          echo "${HADOLINT_SHA256}  $bin" | sha256sum -c -
+          .github/scripts/fetch-tool.sh "https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-linux-x86_64" "$HADOLINT_SHA256" "$bin"
           chmod +x "$bin"
           "$bin" --config .hadolint.yaml deploy/Dockerfile
       # BE-167 (uyum #115): Opengrep, the open-source Semgrep fork, over
@@ -305,13 +313,9 @@ jobs:
           sparse-checkout: go
       - name: Opengrep (Go)
         if: success() || failure()
-        env:
-          OPENGREP_VERSION: 1.31.0
-          OPENGREP_SHA256: dbbe3c2058dbe600c449a8ba22ea79a1643a6660658400090d0323a8d0d31147
         run: |
           bin="$RUNNER_TEMP/opengrep"
-          curl -fsSL --retry 3 -o "$bin" "https://github.com/opengrep/opengrep/releases/download/v${OPENGREP_VERSION}/opengrep_manylinux_x86"
-          echo "${OPENGREP_SHA256}  $bin" | sha256sum -c -
+          .github/scripts/fetch-tool.sh "https://github.com/opengrep/opengrep/releases/download/v${OPENGREP_VERSION}/opengrep_manylinux_x86" "$OPENGREP_SHA256" "$bin"
           chmod +x "$bin"
           r=.opengrep-rules/go
           rules=(
@@ -345,6 +349,9 @@ jobs:
     if: github.event_name == 'pull_request' && needs.check.outputs.image == 'true' && needs.check.outputs.merged != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      SYFT_VERSION: 1.54.0 # the version anchore/sbom-action v0.24.3 pins
+      SYFT_SHA256: 54a87372498168b2d033e876fd41fa4e8035b872699e525a57046e1f2f09c860
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -367,9 +374,30 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
+      # OPS-019: anchore/sbom-action downloads Syft from the GitHub releases
+      # with no retry (504 in run 42053879312). Syft is fetched here like
+      # the scanners (SHA-256 pinned, retried, cached) and put where the
+      # action's tool-cache lookup finds it (<tool cache>/syft/<version>/x64
+      # + .complete), so the action does not download it; should that
+      # lookup ever change, the action falls back to its own download.
+      - name: Cache release tools
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/koro-release-tools
+          key: release-tools-syft-${{ runner.os }}-${{ env.SYFT_SHA256 }}
+      - name: Syft (pinned, for the SBOM step)
+        run: |
+          tgz="$RUNNER_TEMP/syft.tar.gz"
+          .github/scripts/fetch-tool.sh "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz" "$SYFT_SHA256" "$tgz"
+          dir="$RUNNER_TOOL_CACHE/syft/$SYFT_VERSION/x64"
+          mkdir -p "$dir"
+          tar -xzf "$tgz" -C "$dir" syft
+          touch "$dir.complete"
+          "$dir/syft" version
       - name: SBOM
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
+          syft-version: v${{ env.SYFT_VERSION }}
           image: koro:${{ github.sha }}
           format: spdx-json
 
@@ -392,6 +420,8 @@ jobs:
     env:
       IMAGE: ghcr.io/koro-org/koro-backend
       COSIGN_YES: "true"
+      SYFT_VERSION: 1.54.0 # the version anchore/sbom-action v0.24.3 pins
+      SYFT_SHA256: 54a87372498168b2d033e876fd41fa4e8035b872699e525a57046e1f2f09c860
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -417,9 +447,30 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
+      # OPS-019: anchore/sbom-action downloads Syft from the GitHub releases
+      # with no retry (504 in run 42053879312). Syft is fetched here like
+      # the scanners (SHA-256 pinned, retried, cached) and put where the
+      # action's tool-cache lookup finds it (<tool cache>/syft/<version>/x64
+      # + .complete), so the action does not download it; should that
+      # lookup ever change, the action falls back to its own download.
+      - name: Cache release tools
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/koro-release-tools
+          key: release-tools-syft-${{ runner.os }}-${{ env.SYFT_SHA256 }}
+      - name: Syft (pinned, for the SBOM step)
+        run: |
+          tgz="$RUNNER_TEMP/syft.tar.gz"
+          .github/scripts/fetch-tool.sh "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz" "$SYFT_SHA256" "$tgz"
+          dir="$RUNNER_TOOL_CACHE/syft/$SYFT_VERSION/x64"
+          mkdir -p "$dir"
+          tar -xzf "$tgz" -C "$dir" syft
+          touch "$dir.complete"
+          "$dir/syft" version
       - name: SBOM
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
+          syft-version: v${{ env.SYFT_VERSION }}
           image: ${{ env.IMAGE }}:${{ github.sha }}
           format: spdx-json
           output-file: ${{ runner.temp }}/sbom.spdx.json

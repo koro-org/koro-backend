@@ -20,7 +20,8 @@ import (
 // kinds are the ID spaces of the plan, in insertion order; an ID's time
 // part is the kind's base plus the row's ordinal (demoID).
 var kinds = []string{"user", "role", "edu", "org", "member", "ent", "usage", "segment", "event", "form", "formver",
-	"reg", "ticket", "checkin", "post", "notice", "party", "payee", "service", "offering", "policy", "order", "line", "commerce_ent", "collection"}
+	"reg", "ticket", "checkin", "post", "notice", "party", "payee", "service", "offering", "policy", "order", "line", "commerce_ent", "collection",
+	"contact", "conversation", "message", "dispatch"}
 
 // istanbul is the zone of the demo's local times (events at 18:00).
 var istanbul = func() *time.Location {
@@ -60,6 +61,9 @@ type company struct {
 	ent     uuid.UUID // targeted_post grant (active companies)
 	used    int
 	segment uuid.UUID
+	// targeted is the targeted post of the main company (BE-179: its
+	// dispatch); zero for the others.
+	targeted uuid.UUID
 }
 
 type event struct {
@@ -157,7 +161,11 @@ func (b *builder) build() error {
 	b.notice()
 	u := b.ref.Universities[0]
 	b.p.Demo.MainUniversity = u
-	return b.commerce()
+	if err := b.commerce(); err != nil {
+		return err
+	}
+	b.companyActivity()
+	return nil
 }
 
 // user adds an active, verified account with the demo password (if any).
@@ -373,7 +381,7 @@ func (b *builder) companyOrgs() {
 		if k == 0 {
 			b.p.Demo.CompanySlug = slug
 			hr := b.user(2100, "demo.ik@"+fake.EmailDomain, b.f.FirstName(), b.f.LastName(), "company", nil)
-			b.member(c.orgID, "company", hr, "recruiter", "invitation", &c.owner)
+			b.p.Demo.MembershipID = b.member(c.orgID, "company", hr, "recruiter", "invitation", &c.owner)
 			b.p.Accounts = append(b.p.Accounts, Account{Email: "demo.ik@" + fake.EmailDomain, Role: "recruiter (" + spec.Name + ")"})
 		}
 		b.companies = append(b.companies, c)
@@ -384,16 +392,18 @@ func (b *builder) companyOrgs() {
 	b.p.Demo.CompanyOrgID = b.companies[0].orgID
 }
 
-// member adds an active membership.
-func (b *builder) member(orgID uuid.UUID, kind string, userID uuid.UUID, role, source string, approvedBy *uuid.UUID) {
+// member adds an active membership and returns its ID.
+func (b *builder) member(orgID uuid.UUID, kind string, userID uuid.UUID, role, source string, approvedBy *uuid.UUID) uuid.UUID {
 	joined := b.now.AddDate(0, 0, -(30 + b.intn(40)))
 	var requested any
 	if source == "join_request" {
 		requested = joined.Add(-time.Duration(1+b.intn(48)) * time.Hour)
 	}
-	b.p.add("org_members", "id", b.id("member", b.next("member")), "org_id", orgID, "org_kind", kind, "user_id", userID,
+	id := b.id("member", b.next("member"))
+	b.p.add("org_members", "id", id, "org_id", orgID, "org_kind", kind, "user_id", userID,
 		"role", role, "status", "active", "source", source, "requested_at", requested, "joined_at", joined,
 		"approved_by", approvedBy, "created_at", joined, "updated_at", joined)
+	return id
 }
 
 // memberships: club admins, university reps, and every student in one to

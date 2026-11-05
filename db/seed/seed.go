@@ -110,6 +110,10 @@ type Demo struct {
 	PublicEventID       uuid.UUID // published public event of the main university
 	PublicPostID        uuid.UUID // CompanyOrgID's first public post
 	NoticeVersionID     uuid.UUID // the published privacy notice
+	MembershipID        uuid.UUID // the recruiter's membership of CompanyOrgID (BE-179)
+	ContactRequestID    uuid.UUID // CompanyOrgID's accepted contact request to StudentEmail (BE-179)
+	ConversationID      uuid.UUID // the open conversation that acceptance started (BE-179)
+	DispatchID          uuid.UUID // the completed dispatch of CompanyOrgID's targeted post (BE-179)
 	SensitiveClubOrgIDs []uuid.UUID
 	Commerce            CommerceDemo
 }

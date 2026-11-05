@@ -413,6 +413,10 @@ func (b *builder) postRows() {
 		"audience_keys", []string{"all"}, "audience_dim_count", 1, "status", "draft", "created_at", b.now, "updated_at", b.now)
 }
 
+// targetedPostTitle is the title of the main company's targeted post (and
+// the title snapshot of its dispatch, BE-179).
+const targetedPostTitle = "Staj bilgilendirme toplantısı"
+
 // targetedPost is the main company's segment post to the main university's
 // students: one unit of its grant spent (entitlement_usages), the audience
 // fixed at creation with its rounded estimate (k ≥ 10).
@@ -421,6 +425,7 @@ func (b *builder) targetedPost(n *int) {
 	u := b.ref.Universities[0]
 	*n++
 	id := b.id("post", *n)
+	c.targeted = id
 	usage := b.id("usage", 0)
 	published := b.now.AddDate(0, 0, -3)
 	b.p.add("entitlement_usages", "id", usage, "entitlement_id", c.ent, "org_id", c.orgID, "quantity", 1, "ref_type", "post",
@@ -437,7 +442,7 @@ func (b *builder) targetedPost(n *int) {
 	likes, addLikes := b.likes(id, likers, published)
 	defer addLikes()
 	b.p.add("posts", "id", id, "org_id", c.orgID, "author_org_kind", "company", "author_user_id", c.owner, "kind", "text",
-		"title", "Staj bilgilendirme toplantısı", "body_json", body, "body_text", plain, "audience_kind", "segment",
+		"title", targetedPostTitle, "body_json", body, "body_text", plain, "audience_kind", "segment",
 		"audience_keys", keys, "audience_dim_count", 1,
 		"audience_snapshot", jsonb(map[string]any{"uni": []string{u.ID.String()}, "segment_id": c.segment.String()}),
 		"audience_size_estimate", outreach.Bucket(len(likers)), "commercial_flag", true, "status", "published", "published_at", published,

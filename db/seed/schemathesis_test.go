@@ -48,6 +48,20 @@ func TestDemoPathParameters_PointAtReadableRows(t *testing.T) {
 		"party_id":          {"legal_parties", "id", func(r map[string]any) bool { return fmt.Sprint(r["org_id"]) == params["org_id"] }},
 		"offering_id":       {"offerings", "id", nil},
 		"order_id":          {"orders", "id", func(r map[string]any) bool { return fmt.Sprint(r["org_id"]) == params["org_id"] }},
+		// BE-179: child records of the company.
+		"membership_id": {"org_members", "id", func(r map[string]any) bool {
+			return fmt.Sprint(r["org_id"]) == params["org_id"] && r["status"] == "active"
+		}},
+		"request_id": {"contact_requests", "id", func(r map[string]any) bool {
+			return fmt.Sprint(r["org_id"]) == params["org_id"] && r["status"] == "accepted"
+		}},
+		"conversation_id": {"conversations", "id", func(r map[string]any) bool {
+			return fmt.Sprint(r["org_id"]) == params["org_id"] && fmt.Sprint(r["contact_request_id"]) == params["request_id"] &&
+				r["status"] == "open"
+		}},
+		"dispatch_id": {"outreach_dispatches", "id", func(r map[string]any) bool {
+			return fmt.Sprint(r["org_id"]) == params["org_id"] && r["status"] == "completed"
+		}},
 	}
 	for name, w := range want {
 		r := find(w.table, w.col, params[name])

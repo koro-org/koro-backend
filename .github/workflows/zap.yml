@@ -62,9 +62,12 @@ jobs:
       - name: Start PostgreSQL, Redis, Mailpit, SeaweedFS
         run: docker compose up -d --wait --wait-timeout 300 postgres redis mailpit seaweedfs
 
-      # demo-params (BE-171): the IDs of the demo rows just seeded, as the
-      # [parameters] table of a schemathesis.toml (db/seed PathParameters,
-      # the one source; no copy here). Read-only: it builds the same plan.
+      # demo-params (BE-171, BE-179): the IDs of the demo rows just seeded
+      # (the company and its child records: membership, contact request,
+      # conversation, dispatch), as the [parameters] table of a
+      # schemathesis.toml (db/seed PathParameters, the one source; no copy
+      # here).
+      # Read-only: it builds the same plan.
       - name: Buckets, migrations, reference + demo seed
         run: |
           docker compose run --rm seaweedfs-buckets
@@ -103,10 +106,12 @@ jobs:
       # stateful phase: links are not declared). Signed in: the bearer token
       # of a mobile sign-in of the demo company owner (no cookie, so no
       # CSRF check), GET operations only. Each pass has a 10-minute budget.
-      # Both passes read schemathesis.toml (BE-171, Schemathesis v4
+      # Both passes read schemathesis.toml (BE-171, BE-179; Schemathesis v4
       # [parameters]): path parameters are the demo IDs, so the public reads
-      # and the company owner's /orgs/{org_id}/... reads answer 200 and their
-      # bodies are checked against the spec instead of ending in a 404.
+      # and the company owner's /orgs/{org_id}/... reads, child records
+      # included, answer 200 and their bodies are checked against the spec
+      # instead of ending in a 404. (Fixed values: a [dictionaries] mix with
+      # a probability raised the 404 warnings, BE-179.)
       # --request-retries (BE-168): the first weekly run had 2+2 transient
       # client-side connect failures on the runner ([Errno 11] EAGAIN, two
       # workers at the same instant; the api logged no gap and no 5xx), not

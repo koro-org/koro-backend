@@ -568,6 +568,10 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 			t.Fatalf("mfa_verified_at %v", x.MFAVerifiedAt)
 		}
 	})
+	t.Run("phones and SMS codes", func(t *testing.T) {
+		t.Parallel()
+		phoneContract(t, newWorld(t).s)
+	})
 }
 
 func ids(ss []identity.Session) []uuid.UUID {

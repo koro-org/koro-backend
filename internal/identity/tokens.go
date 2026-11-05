@@ -60,6 +60,7 @@ var tokenTemplates = map[TokenPurpose]struct {
 const (
 	securityNoticeTemplate = "identity.security_notice"
 	mfaNoticeTemplate      = "identity.mfa_notice"
+	phoneNoticeTemplate    = "identity.phone_notice" // BE-172
 )
 
 // noticeTemplates maps every security notice kind to its template.
@@ -68,6 +69,8 @@ var noticeTemplates = map[string]string{
 	NoticeEmailChangeRequested: securityNoticeTemplate, NoticeEmailChanged: securityNoticeTemplate,
 	NoticeMFAEnabled: mfaNoticeTemplate, NoticeMFADisabled: mfaNoticeTemplate, NoticeRecoveryCodeUsed: mfaNoticeTemplate,
 	NoticeRecoveryCodesRegenerated: mfaNoticeTemplate, NoticeMFAReset: mfaNoticeTemplate,
+	NoticePhoneVerified: phoneNoticeTemplate, NoticePhoneRemoved: phoneNoticeTemplate, NoticeSMSMFAEnabled: phoneNoticeTemplate,
+	NoticeSMSMFADisabled: phoneNoticeTemplate,
 }
 
 // issueToken opens a new e-mail token of purpose for u in the transaction
@@ -107,6 +110,8 @@ type securityNotice struct {
 	UserID uuid.UUID `json:"user_id"`
 	Kind   string    `json:"kind"`
 	Ref    uuid.UUID `json:"ref"` // deduplication key of the e-mail
+	// PhoneHint is the masked number of a phone notice (BE-172).
+	PhoneHint string `json:"phone_hint,omitempty"`
 }
 
 // notifyUser enqueues a security notice after the transaction commits
@@ -207,6 +212,9 @@ func (s *service) handleSecurityNotice(ctx context.Context, payload []byte) erro
 		Template: tpl, Locale: u.Locale,
 		Data:      map[string]any{"name": u.FirstName, "kind": n.Kind, "link": applink.Page(s.d.LinkBaseURL, string(applink.ResetPassword))},
 		DedupeKey: "identity.security:" + n.Ref.String(),
+	}
+	if tpl == phoneNoticeTemplate {
+		msg.Data["phone_hint"] = n.PhoneHint
 	}
 	if _, err := s.d.Mailer.Send(ctx, msg); err != nil {
 		if notify.IsPermanent(err) {

@@ -77,6 +77,7 @@ type Platform struct {
 	Storage     Storage
 	Crypto      Crypto
 	Realtime    Realtime
+	SMS         SMS // BE-172: the SMS port (identity's one-time codes)
 }
 
 // Modules groups the sections of the 24 feature modules (01 §2), in layer

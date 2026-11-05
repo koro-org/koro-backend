@@ -738,10 +738,22 @@
     "type": "urn:koro:problem:identity.invalid_name"
   },
   {
+    "code": "identity.invalid_phone",
+    "status": 422,
+    "title": "Invalid mobile phone number",
+    "type": "urn:koro:problem:identity.invalid_phone"
+  },
+  {
     "code": "identity.invalid_reason",
     "status": 422,
     "title": "Invalid reason",
     "type": "urn:koro:problem:identity.invalid_reason"
+  },
+  {
+    "code": "identity.invalid_sms_code",
+    "status": 422,
+    "title": "Invalid or expired code",
+    "type": "urn:koro:problem:identity.invalid_sms_code"
   },
   {
     "code": "identity.invalid_state",
@@ -810,6 +822,18 @@
     "type": "urn:koro:problem:identity.password_unchanged"
   },
   {
+    "code": "identity.phone_not_verified",
+    "status": 409,
+    "title": "No verified phone number",
+    "type": "urn:koro:problem:identity.phone_not_verified"
+  },
+  {
+    "code": "identity.phone_taken",
+    "status": 409,
+    "title": "This phone number already belongs to another account",
+    "type": "urn:koro:problem:identity.phone_taken"
+  },
+  {
     "code": "identity.platform_role_open",
     "status": 409,
     "title": "The user already has this role or a pending request for it",
@@ -832,6 +856,18 @@
     "status": 403,
     "title": "Re-authentication required",
     "type": "urn:koro:problem:identity.reauth_required"
+  },
+  {
+    "code": "identity.sms_mfa_not_allowed",
+    "status": 409,
+    "title": "Your role requires an authenticator app; SMS is not allowed as a second step",
+    "type": "urn:koro:problem:identity.sms_mfa_not_allowed"
+  },
+  {
+    "code": "identity.sms_unavailable",
+    "status": 503,
+    "title": "SMS is not available",
+    "type": "urn:koro:problem:identity.sms_unavailable"
   },
   {
     "code": "identity.talent_auditor_limit",

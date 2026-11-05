@@ -35,6 +35,8 @@ type MemStore struct {
 	recovery map[uuid.UUID]memRecovery
 	actions  map[uuid.UUID]AccountActionRequest
 	edu      map[uuid.UUID]EduRecord
+	phones   map[uuid.UUID]Phone   // user_phones (BE-172)
+	smsCodes map[uuid.UUID]SMSCode // sms_codes (BE-172)
 }
 
 type memRecovery struct {
@@ -51,7 +53,7 @@ func NewMemStore(now func() time.Time) *MemStore {
 		users: map[uuid.UUID]User{}, sessions: map[uuid.UUID]Session{},
 		tokens: map[uuid.UUID]EmailToken{}, roles: map[uuid.UUID]RoleAssignment{},
 		totp: map[uuid.UUID]TOTP{}, recovery: map[uuid.UUID]memRecovery{}, actions: map[uuid.UUID]AccountActionRequest{},
-		edu: map[uuid.UUID]EduRecord{},
+		edu: map[uuid.UUID]EduRecord{}, phones: map[uuid.UUID]Phone{}, smsCodes: map[uuid.UUID]SMSCode{},
 	}
 }
 

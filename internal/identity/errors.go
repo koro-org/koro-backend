@@ -115,6 +115,28 @@ var (
 	// (edu_verifications_university_id_fkey).
 	ErrUniversityUnknown = problem.New(problem.Invalid, "identity.university_unknown", "Unknown university")
 
+	// SMS and phone numbers (BE-172).
+	//
+	// ErrSMSUnavailable: no SMS adapter is configured (SMS_PROVIDER=none):
+	// phone verification and the SMS second step are off. Fail closed.
+	ErrSMSUnavailable = problem.New(problem.Unavailable, "identity.sms_unavailable", "SMS is not available")
+	// ErrInvalidPhone: not a Turkish mobile number (+90 5XX XXX XX XX).
+	ErrInvalidPhone = problem.New(problem.Invalid, "identity.invalid_phone", "Invalid mobile phone number")
+	// ErrInvalidSMSCode: an SMS code that is wrong, expired, used, or tried
+	// too often (one answer for all; no oracle). A password reset by SMS
+	// for an unknown address answers the same.
+	ErrInvalidSMSCode = problem.New(problem.Invalid, "identity.invalid_sms_code", "Invalid or expired code")
+	// ErrPhoneTaken: the number verifies another account
+	// (user_phones_phone_uq). Only the holder of the number learns it, at
+	// confirmation: the start answers 202 either way.
+	ErrPhoneTaken = problem.New(problem.Conflict, "identity.phone_taken", "This phone number already belongs to another account")
+	// ErrPhoneNotVerified: the account has no verified number (SMS second
+	// step, removing the number).
+	ErrPhoneNotVerified = problem.New(problem.Conflict, "identity.phone_not_verified", "No verified phone number")
+	// ErrSMSMFANotAllowed: the caller holds a role that requires MFA: its
+	// second factor is TOTP alone (SIM swap risk; BE-172, 03 §6.4).
+	ErrSMSMFANotAllowed = problem.New(problem.Conflict, "identity.sms_mfa_not_allowed", "Your role requires an authenticator app; SMS is not allowed as a second step")
+
 	// ErrBootstrap: `koro seed bootstrap-admin` refuses (wrong admin count,
 	// another admin already exists, unusable account).
 	ErrBootstrap = problem.New(problem.Conflict, "identity.bootstrap_refused", "Bootstrap refused")

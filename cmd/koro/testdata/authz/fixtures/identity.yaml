@@ -26,3 +26,13 @@ fixtures:
   edu_file_pad: { kind: edu_document_file, user: platform_admin, attached_to: edu_pending_pad }
   edu_pending_b: { kind: edu_verification, user: student_b, file: edu_file_b }
   edu_pending_pad: { kind: edu_verification, user: platform_admin, file: edu_file_pad }
+  # BE-172: an account with the SMS second step (its sign-in challenge and an open sign-in code) and an
+  # account that may reset its password by SMS (an open reset code). Codes are seeded with a chosen value
+  # (the bodies hold it); numbers are of the example range +90 555 000 00 9N.
+  user_phone_mfa: { kind: user, email: phone.mfa@matrix.koro.test, status: active }
+  phone_mfa: { kind: phone, user: user_phone_mfa, number: "+905550000091", sms_mfa: true }
+  mfa_challenge_phone: { kind: mfa_challenge, user: user_phone_mfa }
+  sms_login_phone: { kind: sms_code, user: user_phone_mfa, purpose: login, number: "+905550000091", code: "246810" }
+  user_phone_reset: { kind: user, email: phone.reset@matrix.koro.test, status: active }
+  phone_reset: { kind: phone, user: user_phone_reset, number: "+905550000092", sms_mfa: false }
+  sms_reset_phone: { kind: sms_code, user: user_phone_reset, purpose: password_reset, number: "+905550000092", code: "357913" }

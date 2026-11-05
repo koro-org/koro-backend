@@ -36,6 +36,7 @@ import (
 	"koro/internal/platform/passwd"
 	"koro/internal/platform/privacy"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/sms/smsfake"
 	"koro/internal/platform/token"
 )
 
@@ -84,6 +85,7 @@ func (w *identityWiring) useMemStore() {
 	w.cfg = &config.Identity{LinkBaseURL: "https://app.koro.test"}
 	w.secrets = testEnvelope()
 	w.memChallenges = true
+	w.sms = smsfake.New() // BE-172: SMS in memory (matrix 202s, wiring)
 }
 
 // testEnvelope seals TOTP secrets in tests (fixed local KEK).
@@ -116,7 +118,8 @@ func TestWire_IdentityTasksAndPrivacy(t *testing.T) {
 		}
 	}
 	want := []string{"identity.sessions_cleanup 30 3 * * * low", "identity.email_tokens_cleanup 35 3 * * * low",
-		"identity.edu_expire 30 0 * * * default", "identity.edu_renewal_reminders 0 10 * * * default"}
+		"identity.edu_expire 30 0 * * * default", "identity.edu_renewal_reminders 0 10 * * * default",
+		"identity.sms_codes_cleanup 40 3 * * * low"}
 	if !slices.Equal(jobs, want) {
 		t.Fatalf("identity jobs %q, want %q", jobs, want)
 	}
@@ -131,7 +134,8 @@ func TestWire_IdentityTasksAndPrivacy(t *testing.T) {
 	for _, name := range []string{identity.SendEmailTokenTaskName, identity.SendSecurityNoticeTaskName, identity.SendRoleAlertTaskName,
 		identity.SessionsCleanupJobName, identity.EmailTokensCleanupJobName, identity.SendEduNoticeTaskName,
 		identity.EduExpireJobName, identity.EduRenewalRemindersJobName,
-		identity.NotifyTermsPublishedTaskName, identity.SendTermsNoticeTaskName} {
+		identity.NotifyTermsPublishedTaskName, identity.SendTermsNoticeTaskName,
+		identity.SendSMSCodeTaskName, identity.SMSCodesCleanupJobName} {
 		if !slices.Contains(mux.Types(), name) {
 			t.Errorf("worker does not route %s", name)
 		}

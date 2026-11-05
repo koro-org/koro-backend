@@ -125,17 +125,24 @@ func (s *service) CreateSession(ctx context.Context, a authz.Actor, in Login) (L
 			return LoginResult{}, err
 		}
 	}
-	if u.MFAEnabled {
-		return s.beginMFA(ctx, u, in.Client, label, newHash)
+	f, err := s.secondFactors(ctx, u)
+	if err != nil {
+		return LoginResult{}, err
 	}
-	return s.openSession(ctx, u, in.Client, label, newHash, nil)
+	if f.any() {
+		return s.beginMFA(ctx, u, f, in.Client, label, newHash)
+	}
+	return s.openSession(ctx, u, in.Client, label, newHash, "")
 }
 
 // openSession opens a session of u after the last factor (password, or
-// the second factor of an MFA account: mfa holds its audit metadata) and
-// resets the lockout counter. newHash replaces the password hash when the
-// parameters changed (05 §14.1 needsRehash).
-func (s *service) openSession(ctx context.Context, u User, client ClientKind, label, newHash string, mfa map[string]any) (LoginResult, error) {
+// the second factor: factor is totp, recovery_code or sms, audited as
+// metadata.mfa) and resets the lockout counter. Only TOTP and a recovery
+// code make the session MFA-verified: an SMS sign-in never does, so it can
+// never open a role path that requires MFA (03 §6.4; BE-172, SIM swap).
+// newHash replaces the password hash when the parameters changed (05 §14.1
+// needsRehash).
+func (s *service) openSession(ctx context.Context, u User, client ClientKind, label, newHash, factor string) (LoginResult, error) {
 	now := s.now()
 	roles, err := s.roles().PlatformRoles(ctx, u.ID)
 	if err != nil {
@@ -156,9 +163,11 @@ func (s *service) openSession(ctx context.Context, u User, client ClientKind, la
 		IP: canonicalIP(httpx.ClientIPFrom(ctx)), UserAgent: cut(httpx.UserAgentFrom(ctx), maxUserAgent), DeviceLabel: label,
 	}
 	meta := map[string]any{"client_kind": string(sess.ClientKind)}
-	if mfa != nil {
+	if factor != "" {
+		meta["mfa"] = factor
+	}
+	if factor == proofTOTP || factor == factorRecoveryCode {
 		sess.MFAVerifiedAt = &now
-		maps.Copy(meta, mfa)
 	}
 	prevLogin := time.Time{}
 	err = s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
@@ -186,7 +195,7 @@ func (s *service) openSession(ctx context.Context, u User, client ClientKind, la
 	}
 	s.markActiveDay(ctx, u.ID, prevLogin, now)
 	s.d.Log.LogAttrs(ctx, slog.LevelInfo, "session created", slog.String("user_id", u.ID.String()),
-		slog.String("client_kind", string(sess.ClientKind)), slog.Bool("mfa", mfa != nil))
+		slog.String("client_kind", string(sess.ClientKind)), slog.String("mfa", factor))
 	return LoginResult{Session: sess, Token: raw}, nil
 }
 

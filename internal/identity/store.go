@@ -24,6 +24,7 @@ type Store interface {
 	mfaStore           // mfa_totp and mfa_recovery_codes (store_mfa.go)
 	accountActionStore // privileged_account_actions, four eyes (store_account_actions.go)
 	subjectStore       // what only the KVKK provider does to a data subject's rows (store_subject.go)
+	phoneStore         // user_phones and sms_codes (store_phones.go, BE-172)
 
 	EduStore       // edu_verifications (store_edu.go)
 	RetentionStore // the purges of the retention sweeper (retention.go)
@@ -47,6 +48,9 @@ func (s *service) mfa() mfaStore { return s.d.Store }
 
 // accountActions is the four-eyes account action view of the store.
 func (s *service) accountActions() accountActionStore { return s.d.Store }
+
+// phones is the phone number and SMS code view of the store (BE-172).
+func (s *service) phones() phoneStore { return s.d.Store }
 
 // edu is the student verification view of the store.
 func (s *service) edu() EduStore { return s.d.Store }

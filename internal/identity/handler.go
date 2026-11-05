@@ -39,8 +39,9 @@ func Register(api huma.API, svc Service) {
 		Summary: "Sign in",
 		Description: "Web clients (X-Koro-Client: web, the default) get the __Host-koro_session cookie and no token; " +
 			"mobile clients get the bearer token once in the body. Wrong credentials, unknown or locked accounts all " +
-			"answer 401 identity.invalid_credentials; an unverified account 403 identity.email_not_verified. An MFA " +
-			"account gets mfa_required with a challenge (5 minutes) instead of a session: completeMfaLogin opens it.",
+			"answer 401 identity.invalid_credentials; an unverified account 403 identity.email_not_verified. An account " +
+			"with TOTP or the SMS second step gets mfa_required with a challenge (5 minutes) and its mfa_methods instead " +
+			"of a session: completeMfaLogin opens it (sms: sendMfaLoginSms first).",
 	}, op.Meta{Action: string(authz.IdentitySessionCreate), Surface: op.SurfacePublic, RateLimit: op.RateAuthLogin,
 		Idempotency: op.IdempotencyOptional}, h.login)
 
@@ -73,7 +74,10 @@ func Register(api huma.API, svc Service) {
 
 	op.Register(api, "identity", huma.Operation{
 		OperationID: "requestPasswordReset", Method: http.MethodPost, Path: "/auth/password-resets", DefaultStatus: http.StatusAccepted,
-		Summary: "Request a password reset e-mail", Description: "Always 202 (no account enumeration). The link is valid for 30 minutes.",
+		Summary: "Request a password reset",
+		Description: "Always 202 (no account enumeration). channel email (default): a link valid for 30 minutes. channel sms " +
+			"(BE-172): a 6-digit code by SMS (10 minutes; confirmPasswordResetSms) when the account has a verified number, " +
+			"its SMS second step is off and it holds no role that requires MFA; otherwise the e-mail link, with the same answer.",
 	}, op.Meta{Action: string(authz.IdentityPasswordResetRequest), Surface: op.SurfacePublic, RateLimit: op.RateAuthPasswordReset,
 		Idempotency: op.IdempotencyOptional}, h.resetRequest)
 
@@ -124,6 +128,7 @@ func Register(api huma.API, svc Service) {
 
 	registerMFAAndAdmin(api, h)
 	registerEdu(api, h)
+	registerPhone(api, h)
 }
 
 type handler struct{ svc Service }
@@ -236,8 +241,10 @@ func (h handler) login(ctx context.Context, in *loginInput) (*loginOutput, error
 		return nil, err
 	}
 	if res.MFARequired {
-		exp := res.Challenge.ExpiresAt
-		return &loginOutput{Body: SessionDTO{MFARequired: true, ChallengeID: res.Challenge.ID.String(), ExpiresAt: &exp}}, nil
+		ch := res.Challenge
+		exp := ch.ExpiresAt
+		return &loginOutput{Body: SessionDTO{MFARequired: true, ChallengeID: ch.ID.String(), ExpiresAt: &exp,
+			MFAMethods: ch.Methods, PhoneHint: ch.PhoneHint}}, nil
 	}
 	return sessionOutput(res), nil
 }
@@ -353,8 +360,22 @@ func (h handler) resend(ctx context.Context, in *emailInput) (*acceptedOutput, e
 	return &acceptedOutput{}, nil
 }
 
-func (h handler) resetRequest(ctx context.Context, in *emailInput) (*acceptedOutput, error) {
-	if err := h.svc.RequestPasswordReset(ctx, authz.ActorOrAnonymous(ctx), string(in.Body.Email)); err != nil {
+type resetRequestInput struct {
+	Body struct {
+		Email   emailText `json:"email"`
+		Channel string    `json:"channel,omitempty" enum:"email,sms" default:"email" doc:"sms: a code by SMS when the account may reset by SMS (BE-172)"`
+	}
+}
+
+func (h handler) resetRequest(ctx context.Context, in *resetRequestInput) (*acceptedOutput, error) {
+	a := authz.ActorOrAnonymous(ctx)
+	var err error
+	if in.Body.Channel == "sms" {
+		err = h.svc.RequestPasswordResetSMS(ctx, a, string(in.Body.Email))
+	} else {
+		err = h.svc.RequestPasswordReset(ctx, a, string(in.Body.Email))
+	}
+	if err != nil {
 		return nil, err
 	}
 	return &acceptedOutput{}, nil

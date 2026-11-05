@@ -31,16 +31,28 @@ const (
 	challengeKeyPrefix   = "identity:mfa_challenge:"
 )
 
-// MFALogin is the body of completeMfaLogin: exactly one of TOTPCode and
-// RecoveryCode.
+// MFALogin is the body of completeMfaLogin: exactly one of TOTPCode,
+// RecoveryCode and SMSCode (BE-172).
 type MFALogin struct {
 	ChallengeID  uuid.UUID
 	TOTPCode     string
 	RecoveryCode string
+	SMSCode      string
 }
 
 // String keeps the codes out of %v.
 func (MFALogin) String() string { return "identity.MFALogin([REDACTED])" }
+
+// factor is the second factor the body carries (totp, recovery_code, sms).
+func (in MFALogin) factor() string {
+	switch {
+	case in.SMSCode != "":
+		return factorSMS
+	case in.RecoveryCode != "":
+		return factorRecoveryCode
+	}
+	return proofTOTP
+}
 
 // challenge is what the store keeps for a challenge (no secret: the user,
 // the client of the password step and the attempt count).
@@ -50,6 +62,7 @@ type challenge struct {
 	DeviceLabel string     `json:"device_label,omitempty"`
 	ExpiresAt   time.Time  `json:"expires_at"`
 	Attempts    int        `json:"attempts"`
+	SMSSent     int        `json:"sms_sent,omitempty"` // codes sent by SMS for this challenge (BE-172)
 }
 
 // challengeKey is the store key of a challenge ID: its SHA-256, so the
@@ -70,7 +83,7 @@ func (s *service) challengesReady() error {
 // session (03 §6.4-1). The lockout counter is NOT reset here: only a
 // completed second factor resets it, so a password holder cannot guess
 // codes without the account locking up (05 §14.1).
-func (s *service) beginMFA(ctx context.Context, u User, client ClientKind, label, newHash string) (LoginResult, error) {
+func (s *service) beginMFA(ctx context.Context, u User, f loginFactors, client ClientKind, label, newHash string) (LoginResult, error) {
 	if err := s.challengesReady(); err != nil {
 		return LoginResult{}, err
 	}
@@ -98,7 +111,11 @@ func (s *service) beginMFA(ctx context.Context, u User, client ClientKind, label
 	if err := s.d.Challenges.Put(ctx, challengeKey(id), b, ChallengeTTL); err != nil {
 		return LoginResult{}, fmt.Errorf("identity: store challenge: %w", err)
 	}
-	return LoginResult{MFARequired: true, Challenge: MFAChallenge{ID: id, ExpiresAt: c.ExpiresAt}}, nil
+	ch := MFAChallenge{ID: id, ExpiresAt: c.ExpiresAt, Methods: f.methods()}
+	if f.SMS {
+		ch.PhoneHint = MaskPhone(f.Phone)
+	}
+	return LoginResult{MFARequired: true, Challenge: ch}, nil
 }
 
 // CompleteMFALogin implements Service (completeMfaLogin). An unknown,
@@ -115,9 +132,9 @@ func (s *service) CompleteMFALogin(ctx context.Context, a authz.Actor, in MFALog
 	if err := s.challengesReady(); err != nil {
 		return LoginResult{}, err
 	}
-	if (in.TOTPCode == "") == (in.RecoveryCode == "") {
+	if given := btoi(in.TOTPCode != "") + btoi(in.RecoveryCode != "") + btoi(in.SMSCode != ""); given != 1 {
 		return LoginResult{}, problem.ErrValidation.WithFields(problem.FieldError{
-			Location: "body", Message: "exactly one of totp_code and recovery_code is required"})
+			Location: "body", Message: "exactly one of totp_code, recovery_code and sms_code is required"})
 	}
 	key := challengeKey(in.ChallengeID)
 	raw, found, err := s.d.Challenges.Take(ctx, key)
@@ -142,16 +159,25 @@ func (s *service) CompleteMFALogin(ctx context.Context, a authz.Actor, in MFALog
 	case err != nil:
 		return LoginResult{}, err
 	}
-	if u.Status != StatusActive || !u.MFAEnabled || u.locked(now) {
+	if u.Status != StatusActive || u.locked(now) {
 		return LoginResult{}, ErrMFALoginFailed
 	}
-	kind := proofTOTP
-	var ok bool
-	if in.TOTPCode != "" {
+	f, err := s.secondFactors(ctx, u)
+	if err != nil {
+		return LoginResult{}, err
+	}
+	if !f.any() {
+		return LoginResult{}, ErrMFALoginFailed // the second step went off meanwhile
+	}
+	kind, ok := in.factor(), false
+	switch {
+	case kind == proofTOTP && f.TOTP:
 		ok, err = s.verifyTOTP(ctx, u.ID, in.TOTPCode)
-	} else {
-		kind = "recovery_code"
+	case kind == factorRecoveryCode && f.TOTP:
 		ok, err = s.useRecoveryCode(ctx, u.ID, in.RecoveryCode)
+	case kind == factorSMS && f.SMS:
+		ok, err = s.useLoginSMSCode(ctx, u.ID, in.SMSCode)
+	default: // a factor the account does not have counts as a wrong code
 	}
 	if err != nil {
 		return LoginResult{}, err
@@ -160,11 +186,11 @@ func (s *service) CompleteMFALogin(ctx context.Context, a authz.Actor, in MFALog
 		return LoginResult{}, s.mfaLoginFailed(ctx, codeDenied(authz.IdentitySessionCreate, resourceUser, u.ID, a,
 			map[string]any{"mfa": kind}), u, key, c)
 	}
-	res, err := s.openSession(ctx, u, c.Client, c.DeviceLabel, "", map[string]any{"mfa": kind})
+	res, err := s.openSession(ctx, u, c.Client, c.DeviceLabel, "", kind)
 	if err != nil {
 		return LoginResult{}, err
 	}
-	if kind == "recovery_code" {
+	if kind == factorRecoveryCode {
 		left, err := s.mfa().RecoveryCodesLeft(ctx, u.ID)
 		if err != nil {
 			s.d.Log.LogAttrs(ctx, slog.LevelWarn, "recovery codes not counted", slog.String("err", err.Error()))

@@ -29,6 +29,7 @@ func TestWire_EveryConfiguredAdapterIsWired(t *testing.T) {
 		{"STORAGE_PROVIDER", objectStores(config.Storage{}, c).names(), config.StorageProviders()},
 		{"FILES_SCANNER", scanners(config.Files{}, c).names(), config.Scanners()},
 		{"CONSENT_IYS_PROVIDER", iysAdapters(c, config.Consent{}).names(), config.IYSProviders()},
+		{"SMS_PROVIDER", smsSenders(c, config.SMS{}).names(), config.SMSProviders()}, // BE-172
 		{"ERRORS_PROVIDER", errorReporters(config.ErrTrack{}, "koro-api", config.EnvDev).names(), config.ErrorsProviders()},
 	} {
 		if !slices.Equal(p.wired, sorted(p.want)) {

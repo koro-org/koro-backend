@@ -18,6 +18,8 @@ type SessionDTO struct {
 	Token         string     `json:"token,omitempty" doc:"Opaque bearer token (mobile clients only; shown once)"`
 	MFARequired   bool       `json:"mfa_required,omitempty" doc:"true: complete the login with completeMfaLogin"`
 	ChallengeID   string     `json:"challenge_id,omitempty" format:"uuid"`
+	MFAMethods    []string   `json:"mfa_methods,omitempty" enum:"totp,recovery_code,sms" doc:"The second factors the challenge accepts (BE-172)"`
+	PhoneHint     string     `json:"phone_hint,omitempty" doc:"sms: the masked number the code goes to"`
 }
 
 // MySessionDTO is one live session of the caller (IP and user agent are
@@ -90,6 +92,8 @@ type MeDTO struct {
 	PlatformRoles   []string        `json:"platform_roles"`
 	Capabilities    []string        `json:"capabilities" doc:"Menu hints only; every request is authorized on its own"`
 	Terms           TermsDTO        `json:"terms" doc:"Terms of use acceptance (BE-118)"`
+	Phone           *PhoneDTO       `json:"phone,omitempty" doc:"The verified mobile number, masked (BE-172); absent without one"`
+	SMSAvailable    bool            `json:"sms_available" doc:"The SMS features (phone number, SMS second step, SMS reset) are available"`
 }
 
 func toMeDTO(m Me) MeDTO {
@@ -98,7 +102,11 @@ func toMeDTO(m Me) MeDTO {
 		SignupPersona: string(m.Persona), MFAEnabled: m.MFAEnabled, EmailVerifiedAt: m.EmailVerifiedAt, IsMinor: m.IsMinor,
 		Student:     StudentDTO{Status: string(m.StudentStatus)},
 		Memberships: make([]MembershipDTO, 0, len(m.Memberships)), PlatformRoles: make([]string, 0, len(m.PlatformRoles)),
-		Capabilities: make([]string, 0, len(m.Capabilities)), Terms: toTermsDTO(m.Terms),
+		Capabilities: make([]string, 0, len(m.Capabilities)), Terms: toTermsDTO(m.Terms), SMSAvailable: m.SMSAvailable,
+	}
+	if m.Phone != nil {
+		p := toPhoneDTO(*m.Phone)
+		d.Phone = &p
 	}
 	if d.Student.Status == "" {
 		d.Student.Status = "none"

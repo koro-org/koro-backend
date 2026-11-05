@@ -17,8 +17,11 @@ import (
 	"koro/internal/platform/crypto"
 	"koro/internal/platform/crypto/rewrap"
 	"koro/internal/platform/db"
+	"koro/internal/platform/netgsmapi"
 	"koro/internal/platform/passwd"
 	"koro/internal/platform/problem"
+	smsnetgsm "koro/internal/platform/sms/netgsm"
+	"koro/internal/platform/sms/smsfake"
 )
 
 // identityWiring wires the identity module (L4; 01 §4.6). First owner: BE-014.
@@ -46,6 +49,9 @@ import (
 //	         (BE-018 safe default: nobody becomes a student by e-mail)
 //	universityNames late-bound university names (directory has no hook
 //	         for them yet, T-223; nil → answers carry the university ID only)
+//	sms      nil → the adapter SMS_PROVIDER names (smsSenders; BE-172):
+//	         none leaves it nil (every SMS operation answers 503), mem is
+//	         smsfake, netgsm Netgsm's OTP route. Tests preset smsfake.
 //
 // What identity provides to others, all set in build:
 //
@@ -85,6 +91,7 @@ type identityWiring struct {
 
 	domains         identity.DomainResolver
 	universityNames identity.UniversityNames
+	sms             identity.SMSSender
 
 	// late is the container, kept for the late-bound reads above and for
 	// the matrix fixtures (student documents live in the files store).
@@ -141,6 +148,18 @@ func (w *identityWiring) build(c *container) error {
 		Column: "secret_enc", PurposePrefix: identity.TOTPSecretPurposePrefix, PurposeColumn: "user_id"}); err != nil {
 		return fmt.Errorf("identity: %w", err)
 	}
+	sender := w.sms
+	if sender == nil {
+		name := c.infra.platform.SMS.Provider
+		if name == "" { // a container built without the configuration loader
+			name = config.SMSProviderNone
+		}
+		s, err := smsSenders(c, c.infra.platform.SMS).pick("SMS_PROVIDER", name)
+		if err != nil {
+			return fmt.Errorf("identity: %w", err)
+		}
+		sender = s
+	}
 	challenges := w.challenges
 	switch {
 	case challenges != nil:
@@ -160,7 +179,7 @@ func (w *identityWiring) build(c *container) error {
 			}
 			return nil, nil
 		},
-		Hasher: hasher, Secrets: secrets, Challenges: challenges,
+		Hasher: hasher, Secrets: secrets, Challenges: challenges, SMS: sender,
 		Domains: func(ctx context.Context, domain string) (uuid.UUID, bool, error) {
 			if w.domains != nil {
 				return w.domains(ctx, domain)
@@ -184,7 +203,7 @@ func (w *identityWiring) build(c *container) error {
 	if err != nil {
 		return err
 	}
-	w.mod, w.svc, w.secrets, w.challenges, w.late = mod, mod.Service, secrets, challenges, c
+	w.mod, w.svc, w.secrets, w.challenges, w.sms, w.late = mod, mod.Service, secrets, challenges, sender, c
 	c.privacy = append(c.privacy, mod.Privacy)
 	c.sweepers = append(c.sweepers, mod.Sweeper)
 	if c.actors == nil {
@@ -209,6 +228,7 @@ func (w *identityWiring) build(c *container) error {
 }
 
 // tasks: identity.email_token_issued → identity.send_email_token,
+// identity.send_sms_code and identity.sms_codes_cleanup (BE-172),
 // file.rejected → identity.remove_rejected_document (T-176); the
 // identity.send_security_notice, identity.send_role_alert and
 // identity.send_edu_notice tasks; identity.sessions_cleanup (03:30) and
@@ -224,6 +244,35 @@ func (w *identityWiring) tasks(c *container) {
 	tokens := c.retention("email_token", 0, identity.DefaultRetention)
 	for _, j := range w.mod.Jobs(identity.Retention(sessions), identity.Retention(tokens)) {
 		c.infra.jobs.Schedule(j)
+	}
+	// BE-172: identity.sms_codes_cleanup (03:40, low; retention sms_code).
+	for _, j := range w.mod.SMSCodeJobs(identity.Retention(c.retention("sms_code", 0, identity.SMSCodeRetention))) {
+		c.infra.jobs.Schedule(j)
+	}
+}
+
+// smsSenders is the selection map of the SMS port (SMS_PROVIDER; BE-172,
+// config.SMSProviders): none has no adapter (nil: identity's SMS
+// operations answer 503 identity.sms_unavailable), mem keeps the messages
+// in process memory (development; refused in staging and prod by the
+// configuration), netgsm sends by Netgsm's OTP route over the account
+// pattern shared with the İYS adapter (netgsmapi). Every adapter passes
+// internal/platform/sms/smscontract.
+func smsSenders(c *container, cfg config.SMS) adapters[identity.SMSSender] {
+	return adapters[identity.SMSSender]{
+		config.SMSProviderNone: func() (identity.SMSSender, error) { return nil, nil },
+		config.SMSProviderMem:  func() (identity.SMSSender, error) { return smsfake.New(), nil },
+		config.SMSProviderNetgsm: func() (identity.SMSSender, error) {
+			n := cfg.Netgsm
+			a, err := smsnetgsm.New(smsnetgsm.Config{
+				Account: netgsmapi.Account{BaseURL: n.BaseURL, Username: n.Username, Password: n.Password.Reveal(), Timeout: cfg.Timeout},
+				Header:  n.Header, Clock: c.infra.clock, Log: c.infra.log.With("module", "identity", "sms", "netgsm"),
+			})
+			if err != nil {
+				return nil, err
+			}
+			return a, nil
+		},
 	}
 }
 

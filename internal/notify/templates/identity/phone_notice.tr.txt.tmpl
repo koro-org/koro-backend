@@ -1,0 +1,5 @@
+Merhaba {{.Data.name}},
+
+{{with index .Data "kind"}}{{if eq . "phone_verified"}}Koro hesabınıza {{index $.Data "phone_hint"}} ile biten cep telefonu numarası doğrulanarak eklendi.{{else if eq . "phone_removed"}}{{index $.Data "phone_hint"}} ile biten cep telefonu numarası Koro hesabınızdan kaldırıldı; SMS ile giriş adımı da kapandı.{{else if eq . "sms_mfa_enabled"}}Koro hesabınızda SMS ile iki adımlı giriş açıldı: girişte {{index $.Data "phone_hint"}} ile biten numaraya kod gönderilecek.{{else if eq . "sms_mfa_disabled"}}Koro hesabınızda SMS ile iki adımlı giriş kapatıldı.{{else}}Koro hesabınızın telefon numarası ayarları değişti.{{end}}{{end}}
+
+Bu işlemi siz yapmadıysanız parolanızı hemen sıfırlayın: {{index .Data "link"}}

@@ -21,9 +21,11 @@ func registerMFAAndAdmin(api huma.API, h handler) {
 		OperationID: "completeMfaLogin", Method: http.MethodPost, Path: "/auth/sessions/mfa",
 		Summary: "Complete an MFA sign-in",
 		Description: "Second step of an MFA account's login: the challenge of createSession (valid 5 minutes, single " +
-			"use) with a TOTP code or a recovery code (exactly one). The session opens MFA-verified; web clients get " +
-			"the cookie, mobile clients the token (the client kind of the password step). Any failure is 401 " +
-			"identity.mfa_login_failed. A recovery code sign-in sends a security notice.",
+			"use) with exactly one of a TOTP code, a recovery code or the SMS code of sendMfaLoginSms (one of the " +
+			"challenge's mfa_methods). TOTP and recovery codes open the session MFA-verified; an SMS code never does " +
+			"(roles that require MFA need TOTP: verifyMfa). Web clients get the cookie, mobile clients the token (the " +
+			"client kind of the password step). Any failure is 401 identity.mfa_login_failed. A recovery code sign-in " +
+			"sends a security notice.",
 	}, op.Meta{Action: string(authz.IdentitySessionCreate), Surface: op.SurfacePublic, RateLimit: op.RateAuthLogin,
 		Idempotency: op.IdempotencyOptional}, h.completeMFALogin)
 
@@ -163,6 +165,7 @@ type mfaLoginInput struct {
 		ChallengeID  string `json:"challenge_id" format:"uuid"`
 		TOTPCode     string `json:"totp_code,omitempty" maxLength:"16"`
 		RecoveryCode string `json:"recovery_code,omitempty" maxLength:"32"`
+		SMSCode      string `json:"sms_code,omitempty" maxLength:"16" doc:"The code of sendMfaLoginSms (BE-172)"`
 	}
 }
 
@@ -172,7 +175,7 @@ func (h handler) completeMFALogin(ctx context.Context, in *mfaLoginInput) (*logi
 		return nil, problem.Field("body.challenge_id", "must be a UUID")
 	}
 	res, err := h.svc.CompleteMFALogin(ctx, authz.ActorOrAnonymous(ctx), MFALogin{
-		ChallengeID: id, TOTPCode: in.Body.TOTPCode, RecoveryCode: in.Body.RecoveryCode,
+		ChallengeID: id, TOTPCode: in.Body.TOTPCode, RecoveryCode: in.Body.RecoveryCode, SMSCode: in.Body.SMSCode,
 	})
 	if err != nil {
 		return nil, err

@@ -24,6 +24,10 @@ package authz
 //	identity.mfa.verify                    O (step-up of the current session)
 //	identity.mfa.disable                   O · R; k1 (MFA role → 409 in the service)
 //	identity.mfa_recovery.regenerate       O · R
+//	identity.phone.change                  O · R (BE-172: add, change or remove the number)
+//	identity.phone.verify                  O (the SMS code proves the number)
+//	identity.sms_mfa.enable                O · R; k-sms (MFA role → 409 in the service: TOTP only)
+//	identity.sms_mfa.disable               O · R
 //	identity.user.search                   sup, dpo, pad
 //	identity.user.read                     sup, dpo, pad
 //	identity.user.suspend                  pad              ┐ 06 H-47: against a privileged
@@ -68,7 +72,8 @@ func identityPolicy() Policy {
 			case IdentitySessionDeleteCurrent, IdentitySessionListOwn, IdentitySessionRevokeOwn:
 				return r.Type == TypeSession && a.Owns(r)
 			case IdentityAccountReadOwn, IdentityAccountUpdateOwn, IdentityPasswordChange, IdentityEmailChangeRequest,
-				IdentityMfaEnroll, IdentityMfaConfirm, IdentityMfaVerify, IdentityMfaDisable, IdentityMfaRecoveryRegenerate:
+				IdentityMfaEnroll, IdentityMfaConfirm, IdentityMfaVerify, IdentityMfaDisable, IdentityMfaRecoveryRegenerate,
+				IdentityPhoneChange, IdentityPhoneVerify, IdentitySmsMfaEnable, IdentitySmsMfaDisable:
 				return r.Type == TypeUser && a.Owns(r)
 			case IdentityUserSearch, IdentityPlatformRoleList:
 				return r.Type == TypeAdminSurface && AdminSurfaceVisible(a)
@@ -96,6 +101,7 @@ func identityPolicy() Policy {
 			case IdentitySessionDeleteCurrent, IdentitySessionListOwn, IdentitySessionRevokeOwn,
 				IdentityAccountReadOwn, IdentityAccountUpdateOwn, IdentityPasswordChange, IdentityEmailChangeRequest,
 				IdentityMfaEnroll, IdentityMfaConfirm, IdentityMfaVerify, IdentityMfaDisable, IdentityMfaRecoveryRegenerate,
+				IdentityPhoneChange, IdentityPhoneVerify, IdentitySmsMfaEnable, IdentitySmsMfaDisable,
 				IdentityEduVerificationStart, IdentityEduVerificationSubmitDocument, IdentityEduVerificationReadOwn:
 				return []Grant{{Role: RoleSelf}}
 			case IdentityEduVerificationList, IdentityEduVerificationReview:

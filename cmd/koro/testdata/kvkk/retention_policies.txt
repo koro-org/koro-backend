@@ -28,6 +28,7 @@ files_orphan                  job:files.orphan_cleanup
 edu_document                  sweeper:identity
 session_expired               job:identity.sessions_cleanup
 email_token                   job:identity.email_tokens_cleanup
+sms_code                      job:identity.sms_codes_cleanup
 edu_verification_history      sweeper:identity
 role_history                  sweeper:identity
 privileged_action_history     sweeper:identity

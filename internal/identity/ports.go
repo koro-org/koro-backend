@@ -11,6 +11,7 @@ import (
 	"koro/internal/files"
 	"koro/internal/notify"
 	"koro/internal/platform/ratelimit"
+	"koro/internal/platform/sms"
 )
 
 // AuditLogger is what identity needs from audit (L1): every write, failed
@@ -79,6 +80,15 @@ type Mailer interface {
 	Send(ctx context.Context, m notify.Message) (uuid.UUID, error)
 }
 
+// SMSSender sends one SMS (internal/platform/sms; BE-172): the adapter
+// SMS_PROVIDER names (cmd/koro/wire_identity.go smsSenders). Only the worker
+// sends (identity.send_sms_code); the API holds it to know whether SMS is
+// available. The adapter maps its provider's answers to sms.ErrRejected,
+// sms.ErrInvalidNumber and sms.ErrThrottled (smscontract).
+type SMSSender interface {
+	Send(ctx context.Context, m sms.Message) (sms.Receipt, error)
+}
+
 // Limiter is the rate limiter of the classes the middleware cannot key
 // (04 §1.9: auth_email's e-mail digest, reauth's failed attempts; 06 H-6).
 type Limiter interface {
@@ -90,6 +100,11 @@ type Limiter interface {
 type MFAChallenge struct {
 	ID        uuid.UUID
 	ExpiresAt time.Time
+	// Methods are the second factors the account may complete with:
+	// "totp", "recovery_code", "sms" (BE-172).
+	Methods []string
+	// PhoneHint is the masked number an SMS code goes to ("" without sms).
+	PhoneHint string
 }
 
 // SecretBox seals and opens secrets at rest (crypto.Envelope).

@@ -159,7 +159,6 @@ var (
 
 func (n *IYSNetgsm) validate(c Common, active bool) []error {
 	var errs []error
-	n.BaseURL = strings.TrimRight(strings.TrimSpace(n.BaseURL), "/")
 	if active {
 		if n.Username == "" || n.Password.IsZero() || n.IYSCode == "" || n.BrandCode == "" || n.WebhookToken.IsZero() {
 			errs = append(errs, errors.New("CONSENT_IYS_PROVIDER=netgsm needs CONSENT_IYS_NETGSM_USERNAME, "+
@@ -169,12 +168,8 @@ func (n *IYSNetgsm) validate(c Common, active bool) []error {
 	} else if n.enabled() {
 		errs = append(errs, errors.New("the CONSENT_IYS_NETGSM_* settings need CONSENT_IYS_PROVIDER=netgsm"))
 	}
-	u, err := url.Parse(n.BaseURL)
-	switch {
-	case err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.RawQuery != "":
-		errs = append(errs, errors.New("CONSENT_IYS_NETGSM_BASE_URL must be an http(s) URL without credentials or query"))
-	case active && c.ProdLike() && u.Scheme != "https":
-		errs = append(errs, fmt.Errorf("CONSENT_IYS_NETGSM_BASE_URL must use https in %s", c.Env))
+	if err := checkAPIBaseURL(c, "CONSENT_IYS_NETGSM_BASE_URL", &n.BaseURL, active); err != nil {
+		errs = append(errs, err)
 	}
 	if (n.IYSCode != "" && !reIYSNumber.MatchString(n.IYSCode)) || (n.BrandCode != "" && !reIYSNumber.MatchString(n.BrandCode)) {
 		errs = append(errs, errors.New("CONSENT_IYS_NETGSM_IYS_CODE and CONSENT_IYS_NETGSM_BRAND_CODE must be İYS numbers"))

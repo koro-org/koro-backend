@@ -493,6 +493,18 @@ func (s *service) ResetUserMFA(ctx context.Context, a authz.Actor, id uuid.UUID,
 		if err := s.dropMFA(ctx, u.ID); err != nil {
 			return err
 		}
+		// The SMS second step goes too (BE-172): a user who lost the
+		// phone is let in again by the same reset; the number stays.
+		ph, hasPhone, err := s.phones().Phone(ctx, u.ID)
+		if err != nil {
+			return err
+		}
+		smsWasOn := hasPhone && ph.SMSMFAEnabledAt != nil
+		if smsWasOn {
+			if _, err := s.phones().SetSMSMFA(ctx, u.ID, nil); err != nil {
+				return err
+			}
+		}
 		n, err := s.sessions().RevokeUserSessions(ctx, u.ID, nil, s.now(), RevokeMFAReset)
 		if err != nil {
 			return err
@@ -502,7 +514,7 @@ func (s *service) ResetUserMFA(ctx context.Context, a authz.Actor, id uuid.UUID,
 		}
 		return s.d.Audit.Log(ctx, audit.Event{Action: string(authz.IdentityUserResetMfa), Outcome: audit.Success,
 			ResourceType: resourceUser, ResourceID: &u.ID, Reason: reason,
-			Metadata: fourEyesMeta(map[string]any{audit.MetaReauth: kind, "mfa_was_enabled": had, "sessions_revoked": n,
+			Metadata: fourEyesMeta(map[string]any{audit.MetaReauth: kind, "mfa_was_enabled": had, "sms_mfa_reset": smsWasOn, "sessions_revoked": n,
 				audit.MetaSubjectUserID: u.ID.String()}, req)}.By(a))
 	})
 	if err != nil {

@@ -1,4 +1,4 @@
-# Authz matrix of the identity module (03 §5.1, 04 §2.1; BE-014, BE-016, BE-018, BE-118, BE-128). 39 operations × 18 personas.
+# Authz matrix of the identity module (03 §5.1, 04 §2.1; BE-014, BE-016, BE-018, BE-118, BE-128, BE-172). 45 operations × 18 personas.
 # Public (P) operations are the same for every persona, a signed-in caller included (the
 # operation ignores the session; 06 H-25). O cells: /me/... and /auth/sessions/current act on
 # the caller's own account and sessions only; another user's session is 404. password.change
@@ -9,10 +9,15 @@
 # Staff cells need an MFA-verified session (k-mfa); the personas' sessions are (03 §7.3).
 # BE-018: every verified student persona has a verified .edu.tr row (<name>@matrix.edu.tr, its
 # university); the matrix domain resolver knows matrix.edu.tr and its subdomains (uni_a).
+# BE-172: identity_phone (none | pending | verified | sms_mfa) gives every matrix account an open phone
+# verification code (135790) to +9055500000NN, that number verified, or verified with the SMS second step
+# on. The test container sends SMS in memory (smsfake). An SMS sign-in is never MFA-verified; the SMS second
+# step is refused to MFA roles (k-sms: 409 identity.sms_mfa_not_allowed).
 # Student documents are edu_document files in the files store (matrix_identity_test.go).
 version: 1
 config:
   identity_mfa: none
+  identity_phone: none
 groups:
   mfa_roles: [university_rep, company_admin, other_company_member, moderator, support, dpo, platform_admin,
               finance_admin, talent_auditor]
@@ -68,6 +73,10 @@ operations:
         body: bodies/identity/login_pending.json
         note: right password, unverified address → identity.email_not_verified (03 §2.2-3)
         expect: { "@all": 403 }
+      - name: sms_mfa_account
+        body: bodies/identity/login_sms_mfa.json
+        note: BE-172 - the SMS second step gives a challenge too (mfa_methods [sms]), no session
+        expect: { "@all": 200 }
 
   deleteCurrentSession:
     method: DELETE
@@ -137,6 +146,11 @@ operations:
     body: bodies/identity/reset_request.json
     note: anonymous by design (P); always 202 (no enumeration)
     expect: { "@all": 202 }
+    variants:
+      - name: sms_channel
+        body: bodies/identity/reset_request_sms.json
+        note: BE-172 - channel sms; an account that may reset by SMS gets a code, any other the e-mail link (same 202)
+        expect: { "@all": 202 }
 
   confirmPasswordReset:
     method: POST
@@ -207,6 +221,10 @@ operations:
         body: bodies/identity/mfa_login_unknown.json
         note: identity.mfa_login_failed, the same answer as a wrong code or an expired challenge
         expect: { "@all": 401 }
+      - name: sms_code
+        body: bodies/identity/mfa_login_sms.json
+        note: BE-172 - the open sign-in code of user_phone_mfa's challenge (the session is not MFA-verified)
+        expect: { "@all": 200 }
 
   enrollTotp:
     method: POST
@@ -454,3 +472,96 @@ operations:
       - name: missing
         path_params: { verification_id: "literal:00000000-0000-7000-8000-0000000000e6" }
         expect: { anonymous: 401, "@not_staff": 403, "@edu_bystanders": 403, support: 404, platform_admin: 404 }
+
+  # ---- BE-172: phone number, SMS second step, password reset by SMS
+  startPhoneVerification:
+    method: POST
+    path: /api/v1/me/phone
+    action: identity.phone.change
+    body: bodies/identity/phone_start.json
+    note: O · R - reauth.password; a code by SMS (in memory); 202 whether or not another account holds the number
+    expect: { anonymous: 401, "@signed_in": 202 }
+    variants:
+      - name: landline
+        body: bodies/identity/phone_start_landline.json
+        note: Turkish mobile numbers only - identity.invalid_phone
+        expect: { anonymous: 401, "@signed_in": 422 }
+
+  confirmPhoneVerification:
+    method: POST
+    path: /api/v1/me/phone/confirm
+    action: identity.phone.verify
+    config: { identity_phone: pending }
+    body: bodies/identity/phone_confirm.json
+    note: O - the open code of the caller's own verification (each account has its own number)
+    expect: { anonymous: 401, "@signed_in": 200 }
+    variants:
+      - name: wrong_code
+        body: bodies/identity/phone_confirm_wrong.json
+        note: identity.invalid_sms_code (wrong, used and expired codes answer alike)
+        expect: { anonymous: 401, "@signed_in": 422 }
+
+  removeMyPhone:
+    method: POST
+    path: /api/v1/me/phone/remove
+    action: identity.phone.change
+    config: { identity_phone: verified }
+    body: bodies/identity/role_reauth.json
+    note: O · R - the number and the SMS second step go
+    expect: { anonymous: 401, "@signed_in": 204 }
+    variants:
+      - name: no_phone
+        config: { identity_phone: none }
+        note: identity.phone_not_verified
+        expect: { anonymous: 401, "@signed_in": 409 }
+
+  enableSmsMfa:
+    method: POST
+    path: /api/v1/me/mfa/sms
+    action: identity.sms_mfa.enable
+    config: { identity_phone: verified }
+    body: bodies/identity/role_reauth.json
+    note: O · R; k-sms - a holder of an MFA role gets 409 identity.sms_mfa_not_allowed (TOTP only, SIM swap)
+    expect: { anonymous: 401, "@no_mfa_role": 204, "@mfa_roles": 409 }
+    variants:
+      - name: no_phone
+        config: { identity_phone: none }
+        note: identity.phone_not_verified (before k-sms)
+        expect: { anonymous: 401, "@signed_in": 409 }
+
+  disableSmsMfa:
+    method: POST
+    path: /api/v1/me/mfa/sms/disable
+    action: identity.sms_mfa.disable
+    config: { identity_phone: sms_mfa }
+    body: bodies/identity/role_reauth.json
+    note: O · R - every role may turn its SMS second step off
+    expect: { anonymous: 401, "@signed_in": 204 }
+
+  sendMfaLoginSms:
+    method: POST
+    path: /api/v1/auth/sessions/mfa/sms
+    action: identity.session.create
+    public: true
+    body: bodies/identity/mfa_login_sms_send.json
+    note: the challenge of user_phone_mfa's password step is the credential (P); a code by SMS (in memory)
+    expect: { "@all": 202 }
+    variants:
+      - name: unknown_challenge
+        body: bodies/identity/mfa_login_sms_unknown.json
+        note: identity.mfa_login_failed, as completeMfaLogin
+        expect: { "@all": 401 }
+
+  confirmPasswordResetSms:
+    method: POST
+    path: /api/v1/auth/password-resets/sms/confirm
+    action: identity.password.reset
+    public: true
+    body: bodies/identity/reset_confirm_sms.json
+    note: the SMS code of user_phone_reset is the credential (P); every session of the account closes
+    expect: { "@all": 204 }
+    variants:
+      - name: wrong_code
+        body: bodies/identity/reset_confirm_sms_wrong.json
+        note: identity.invalid_sms_code (an unknown address answers alike)
+        expect: { "@all": 422 }

@@ -34,6 +34,11 @@ type Me struct {
 	Capabilities []authz.Action
 	// Terms is the caller's position towards the terms of use (BE-118).
 	Terms TermsState
+	// Phone is the caller's verified number, masked (BE-172); nil: none.
+	Phone *PhoneView
+	// SMSAvailable: an SMS adapter is configured (the phone and SMS
+	// operations answer 503 otherwise).
+	SMSAvailable bool
 }
 
 // MePatch is the body of updateMe; nil fields stay.
@@ -60,12 +65,16 @@ func (s *service) me(ctx context.Context, u User, a authz.Actor) (Me, error) {
 	if err != nil {
 		return Me{}, err
 	}
+	phone, err := s.myPhone(ctx, u.ID)
+	if err != nil {
+		return Me{}, err
+	}
 	return Me{
 		UserID: u.ID, Email: u.Email, FirstName: u.FirstName, LastName: u.LastName, Locale: u.Locale,
 		Persona: u.Persona, MFAEnabled: u.MFAEnabled, EmailVerifiedAt: u.EmailVerifiedAt, BirthDate: u.clone().BirthDate,
 		IsMinor: u.IsMinor(s.now()), StudentStatus: a.StudentStatus, UniversityID: a.UniversityID,
 		Memberships: slices.Clone(a.Memberships), PlatformRoles: slices.Clone(a.PlatformRoles),
-		Capabilities: Capabilities(a), Terms: terms,
+		Capabilities: Capabilities(a), Terms: terms, Phone: phone, SMSAvailable: s.d.SMS != nil,
 	}, nil
 }
 

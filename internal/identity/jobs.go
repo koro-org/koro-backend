@@ -46,6 +46,7 @@ func (m Module) Tasks() []queue.Task {
 		{Name: SendEduNoticeTaskName, Handle: m.svc.handleEduNotice},
 		{Name: NotifyTermsPublishedTaskName, Handle: m.svc.handleTermsPublished},
 		{Name: SendTermsNoticeTaskName, Handle: m.svc.handleTermsNotice},
+		{Name: SendSMSCodeTaskName, Handle: m.svc.handleSendSMSCode},
 	}
 }
 
@@ -65,10 +66,26 @@ func (m Module) Jobs(sessions, tokens Retention) []queue.Job {
 	}, m.svc.eduJobs()...)
 }
 
+// SMSCodeJobs returns identity.sms_codes_cleanup (03:40, low; BE-172): the
+// codes that expired more than the retention sms_code ago (7 days by
+// default) go.
+func (m Module) SMSCodeJobs(retention Retention) []queue.Job {
+	return []queue.Job{{Name: SMSCodesCleanupJobName, Cron: "40 3 * * *", Queue: queue.Low, Unique: 23 * time.Hour,
+		Handle: func(ctx context.Context) error {
+			return m.svc.cleanupWith(ctx, SMSCodesCleanupJobName, retention, SMSCodeRetention, m.svc.phones().DeleteEndedSMSCodes)
+		}}}
+}
+
 // cleanup deletes rows that ended before now − retention, in batches of
 // cleanupBatch rows per transaction (idempotent).
 func (s *service) cleanup(ctx context.Context, job string, retention Retention, del func(context.Context, time.Time, int) (int, error)) error {
-	period := DefaultRetention
+	return s.cleanupWith(ctx, job, retention, DefaultRetention, del)
+}
+
+// cleanupWith is cleanup with def as the period when retention gives none.
+func (s *service) cleanupWith(ctx context.Context, job string, retention Retention, def time.Duration,
+	del func(context.Context, time.Time, int) (int, error)) error {
+	period := def
 	if retention != nil {
 		d, err := retention(ctx)
 		if err != nil {

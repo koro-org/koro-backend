@@ -230,6 +230,27 @@ type Service interface {
 	// RegenerateRecoveryCodes is regenerateRecoveryCodes (R).
 	RegenerateRecoveryCodes(ctx context.Context, a authz.Actor, proof ReauthProof) (RecoveryCodes, error)
 
+	// StartPhoneVerification is startPhoneVerification (R; BE-172): a code
+	// by SMS to the number (202 whether or not another account holds it).
+	StartPhoneVerification(ctx context.Context, a authz.Actor, phone string, proof ReauthProof) (SMSCodeSent, error)
+	// ConfirmPhoneVerification is confirmPhoneVerification: the code makes
+	// its number the caller's.
+	ConfirmPhoneVerification(ctx context.Context, a authz.Actor, code string) (PhoneView, error)
+	// RemovePhone is removeMyPhone (R): the number and the SMS second step go.
+	RemovePhone(ctx context.Context, a authz.Actor, proof ReauthProof) error
+	// EnableSMSMFA is enableSmsMfa (R; 409 for MFA roles, k-sms).
+	EnableSMSMFA(ctx context.Context, a authz.Actor, proof ReauthProof) error
+	// DisableSMSMFA is disableSmsMfa (R).
+	DisableSMSMFA(ctx context.Context, a authz.Actor, proof ReauthProof) error
+	// SendMFALoginSMS is sendMfaLoginSms: the SMS code of a sign-in
+	// challenge.
+	SendMFALoginSMS(ctx context.Context, a authz.Actor, challengeID uuid.UUID) (SMSCodeSent, error)
+	// RequestPasswordResetSMS is requestPasswordReset with channel sms (202,
+	// no enumeration; the e-mail link when the account may not reset by SMS).
+	RequestPasswordResetSMS(ctx context.Context, a authz.Actor, email string) error
+	// ConfirmPasswordResetSMS is confirmPasswordResetSms.
+	ConfirmPasswordResetSMS(ctx context.Context, a authz.Actor, in PasswordResetSMS) error
+
 	// SearchUsers is adminQueryUsers (audited).
 	SearchUsers(ctx context.Context, a authz.Actor, q AdminUserQuery) (AdminUserPage, error)
 	// AdminUser is adminGetUser (no sensitive club membership).
@@ -337,6 +358,12 @@ type Deps struct {
 	Domains         DomainResolver
 	Files           Files
 	UniversityNames UniversityNames
+
+	// SMS sends the one-time codes of phone verification, the SMS second
+	// step and the SMS password reset (BE-172; SMS_PROVIDER). nil → every
+	// SMS operation answers 503 identity.sms_unavailable and a password
+	// reset asked by SMS goes by e-mail.
+	SMS SMSSender
 }
 
 func (d *Deps) validate() error {

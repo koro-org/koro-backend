@@ -84,7 +84,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
-	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -94,12 +93,13 @@ import (
 
 	"koro/internal/platform/clock"
 	"koro/internal/platform/iys"
+	"koro/internal/platform/netgsmapi"
 	"koro/internal/platform/obs"
 )
 
 // Defaults and bounds.
 const (
-	DefaultBaseURL              = "https://api.netgsm.com.tr"
+	DefaultBaseURL              = netgsmapi.DefaultBaseURL
 	DefaultRequestsPerMinute    = 8   // of Netgsm's 10 per minute
 	DefaultStatusQueriesPerHour = 240 // single queries: Statuses and Recheck
 	DefaultResultWait           = 15 * time.Second
@@ -141,7 +141,6 @@ var (
 	reID       = regexp.MustCompile(`^[0-9A-Za-z-]{1,128}$`)
 	reToken    = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 	reRef      = regexp.MustCompile(`^[\x21-\x7e]{1,64}$`)
-	reNumCode  = regexp.MustCompile(`^-?[0-9]{1,6}$`)
 	transientH = map[string]bool{"H103": true, "H470": true, "H412": true, "H015": true, "H124": true, "H084": true, "H086": true}
 )
 
@@ -217,24 +216,21 @@ type Client struct {
 	token  [sha256.Size]byte
 	client *http.Client
 
-	mu      sync.Mutex
-	calls   []time.Time // the last minute's calls
-	queries []time.Time // the last hour's single queries
-	sent    map[string]time.Time
+	calls   *netgsmapi.Budget // every call (per minute)
+	queries *netgsmapi.Budget // the single queries (per hour)
+
+	mu   sync.Mutex
+	sent map[string]time.Time
 }
 
 // New validates c.
 func New(c Config) (*Client, error) {
-	if strings.TrimSpace(c.BaseURL) == "" {
-		c.BaseURL = DefaultBaseURL
-	}
-	base := strings.TrimRight(strings.TrimSpace(c.BaseURL), "/")
-	if u, err := url.Parse(base); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil ||
-		u.RawQuery != "" || u.Fragment != "" {
-		return nil, errors.New("iys netgsm: CONSENT_IYS_NETGSM_BASE_URL must be an http(s) URL without credentials or query")
-	}
+	acct := netgsmapi.Account{BaseURL: c.BaseURL, Username: c.Username, Password: c.Password, Timeout: c.Timeout, HTTPClient: c.HTTPClient}
+	base, err := acct.Base()
 	switch {
-	case c.Username == "" || c.Password == "":
+	case errors.Is(err, netgsmapi.ErrBaseURL):
+		return nil, fmt.Errorf("iys netgsm: CONSENT_IYS_NETGSM_BASE_URL %w", err)
+	case err != nil:
 		return nil, errors.New("iys netgsm: CONSENT_IYS_NETGSM_USERNAME and CONSENT_IYS_NETGSM_PASSWORD are required")
 	case !reCode.MatchString(c.IYSCode) || !reCode.MatchString(c.BrandCode):
 		return nil, errors.New("iys netgsm: CONSENT_IYS_NETGSM_IYS_CODE and CONSENT_IYS_NETGSM_BRAND_CODE must be İYS numbers")
@@ -279,19 +275,9 @@ func New(c Config) (*Client, error) {
 	if c.Log == nil {
 		c.Log = obs.Discard()
 	}
-	client := c.HTTPClient
-	if client == nil {
-		timeout := c.Timeout
-		if timeout <= 0 {
-			timeout = 10 * time.Second
-		}
-		client = &http.Client{
-			Timeout:       timeout,
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		}
-	}
 	return &Client{c: c, base: base, feed: "netgsm:" + c.IYSCode + "/" + c.BrandCode, token: sha256.Sum256([]byte(c.WebhookToken)),
-		client: client, sent: map[string]time.Time{}}, nil
+		client: acct.Client(), calls: &netgsmapi.Budget{N: c.RequestsPerMinute, Per: time.Minute},
+		queries: &netgsmapi.Budget{N: c.StatusQueriesPerHour, Per: time.Hour}, sent: map[string]time.Time{}}, nil
 }
 
 // Name names the adapter in logs (and the webhook path, consent's
@@ -534,7 +520,7 @@ func (c *Client) add(ctx context.Context, con iys.Consent, recipient string, at 
 	// address: never read); the code is 0 or 70.
 	if e := bytes.TrimSpace(out.ErrorItem); len(e) > 0 && !slices.Contains([]string{"null", "{}", "[]"}, string(e)) {
 		return "", fmt.Errorf("%w: iys netgsm: add: code %s (Netgsm refused the address form: erroritem)", iys.ErrRejected,
-			safeCode(out.code()))
+			netgsmapi.SafeCode(out.code()))
 	}
 	if err := out.check("add"); err != nil {
 		return "", err
@@ -695,16 +681,7 @@ func (a answer) check(op string) error {
 	case "100", "101":
 		return &apiError{op: op, code: code, text: "Netgsm system error or rate limit (10 requests per minute)", class: []error{iys.ErrThrottled}}
 	}
-	return &apiError{op: op, code: safeCode(code), text: "unknown Netgsm code"}
-}
-
-// safeCode is code when it is a plain number ("?" otherwise: an answer's
-// text is never repeated).
-func safeCode(code string) string {
-	if !reNumCode.MatchString(code) {
-		return "?"
-	}
-	return code
+	return &apiError{op: op, code: netgsmapi.SafeCode(code), text: "unknown Netgsm code"}
 }
 
 // apiError is a refused call: Netgsm's code (or the HTTP status) and a
@@ -751,11 +728,7 @@ func (c *Client) call(ctx context.Context, op, path string, body any, out *answe
 	req.Header.Set("Accept", "application/json")
 	resp, err := c.client.Do(req)
 	if err != nil {
-		var ue *url.Error
-		if errors.As(err, &ue) {
-			err = ue.Err
-		}
-		return fmt.Errorf("iys netgsm: %s: %s", op, scrub(err.Error()))
+		return fmt.Errorf("iys netgsm: %s: %s", op, netgsmapi.TransportError(err))
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxBody))
@@ -770,7 +743,7 @@ func (c *Client) call(ctx context.Context, op, path string, body any, out *answe
 		return &apiError{op: op, status: resp.StatusCode, class: []error{iys.ErrRejected}}
 	}
 	trimmed := bytes.TrimSpace(data)
-	if reNumCode.Match(trimmed) {
+	if netgsmapi.IsNumCode(trimmed) {
 		*out = answer{Code: flex(trimmed)}
 		return nil
 	}
@@ -782,78 +755,29 @@ func (c *Client) call(ctx context.Context, op, path string, body any, out *answe
 
 // takeCall spends one call of the per-minute budget.
 func (c *Client) takeCall() error {
-	now := c.c.Clock.Now()
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.calls = within(c.calls, now, time.Minute)
-	if len(c.calls) >= c.c.RequestsPerMinute {
+	if !c.calls.Take(c.c.Clock.Now()) {
 		return fmt.Errorf("%w: Netgsm call budget of %d per minute spent", iys.ErrThrottled, c.c.RequestsPerMinute)
 	}
-	c.calls = append(c.calls, now)
 	return nil
 }
 
 // takeQuery spends one single query of the hourly budget.
 func (c *Client) takeQuery() error {
-	now := c.c.Clock.Now()
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.queries = within(c.queries, now, time.Hour)
-	if len(c.queries) >= c.c.StatusQueriesPerHour {
+	if !c.queries.Take(c.c.Clock.Now()) {
 		return fmt.Errorf("%w: Netgsm single query budget of %d per hour spent", iys.ErrThrottled, c.c.StatusQueriesPerHour)
 	}
-	c.queries = append(c.queries, now)
 	return nil
 }
 
-func within(ts []time.Time, now time.Time, d time.Duration) []time.Time {
-	out := ts[:0]
-	for _, t := range ts {
-		if now.Sub(t) < d {
-			out = append(out, t)
-		}
-	}
-	return out
-}
-
-// flex is a JSON scalar read as text: Netgsm sends codes and IDs as
-// strings or numbers, flags as strings or booleans.
-type flex string
-
-func (f *flex) UnmarshalJSON(b []byte) error {
-	b = bytes.TrimSpace(b)
-	switch {
-	case len(b) == 0 || bytes.Equal(b, []byte("null")):
-		*f = ""
-	case b[0] == '"':
-		var s string
-		if err := json.Unmarshal(b, &s); err != nil {
-			return err
-		}
-		*f = flex(s)
-	case b[0] == '{' || b[0] == '[':
-		*f = "" // not a scalar: ignored
-	default:
-		*f = flex(b)
-	}
-	return nil
-}
+// flex is a JSON scalar read as text (netgsmapi.Flex, shared with the SMS
+// adapter).
+type flex = netgsmapi.Flex
 
 func parseDate(s string) (time.Time, error) {
 	t, err := time.ParseInLocation(dateLayout, strings.TrimSpace(s), clock.Istanbul())
 	return t.UTC(), err
 }
 
-// scrub removes addresses and control characters from a transport error.
-func scrub(s string) string {
-	s = strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
-			return ' '
-		}
-		return r
-	}, obs.Scrub(s))
-	if r := []rune(s); len(r) > 300 {
-		s = string(r[:300])
-	}
-	return s
-}
+// scrub removes addresses and control characters from a transport error
+// (netgsmapi.Scrub).
+func scrub(s string) string { return netgsmapi.Scrub(s) }

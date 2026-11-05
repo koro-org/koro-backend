@@ -1,0 +1,5 @@
+Hello {{.Data.name}},
+
+{{with index .Data "kind"}}{{if eq . "phone_verified"}}The mobile number ending in {{index $.Data "phone_hint"}} was verified and added to your Koro account.{{else if eq . "phone_removed"}}The mobile number ending in {{index $.Data "phone_hint"}} was removed from your Koro account; the SMS sign-in step is off too.{{else if eq . "sms_mfa_enabled"}}Two-step sign-in by SMS was turned on for your Koro account: sign-ins will send a code to the number ending in {{index $.Data "phone_hint"}}.{{else if eq . "sms_mfa_disabled"}}Two-step sign-in by SMS was turned off for your Koro account.{{else}}The phone number settings of your Koro account changed.{{end}}{{end}}
+
+If this was not you, reset your password now: {{index .Data "link"}}

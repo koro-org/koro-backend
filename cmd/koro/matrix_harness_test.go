@@ -1083,8 +1083,9 @@ func (env *matrixEnv) newMatrixApp(t *testing.T, cfg map[string]any) *matrixApp 
 
 // releaseMatrixApp drops what the package-level maps of the module matrix
 // files hold for c once its test is over: matrixConfig keys them by wiring
-// pointer (matrixMFAModes, matrixLedgerSeeds, matrixOrderSeeds), so each
-// entry kept the whole container reachable until the process ended. The
+// pointer (matrixMFAModes, matrixPhoneModes, matrixLedgerSeeds,
+// matrixOrderSeeds), so each entry kept the whole container reachable
+// until the process ended. The
 // real matrix built ≈ 1700 applications and kept every one of them (heap
 // pinned above GOMEMLIMIT under -race; BE-073). An entry is deleted only
 // after every request of its application is done, and a container whose
@@ -1094,6 +1095,7 @@ func (env *matrixEnv) newMatrixApp(t *testing.T, cfg map[string]any) *matrixApp 
 // a container alive: release it here.
 func releaseMatrixApp(c *container) {
 	matrixMFAModes.Delete(&c.identity)
+	matrixPhoneModes.Delete(&c.identity) // BE-172: identity_phone
 	matrixLedgerSeeds.Delete(&c.ledger)
 	matrixOrderSeeds.Delete(&c.orders)
 }

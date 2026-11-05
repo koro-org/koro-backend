@@ -38,6 +38,8 @@ privileged_account_actions  policy:privileged_action_history
 edu_verifications           policy:edu_verification_history
 mfa_totp                    account:the second factor of the account; identity's provider deletes it on erasure
 mfa_recovery_codes          account:the recovery codes of the account; identity's provider deletes them on erasure
+user_phones                 account:the verified mobile number of the account; identity's provider deletes it on erasure
+sms_codes                   policy:sms_code
 # notify
 notification_deliveries     policy:notification_delivery
 email_suppressions          policy:email_suppression

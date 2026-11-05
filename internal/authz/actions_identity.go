@@ -25,6 +25,10 @@ const (
 	IdentityMfaVerify                     Action = "identity.mfa.verify"
 	IdentityMfaDisable                    Action = "identity.mfa.disable"
 	IdentityMfaRecoveryRegenerate         Action = "identity.mfa_recovery.regenerate"
+	IdentityPhoneChange                   Action = "identity.phone.change"
+	IdentityPhoneVerify                   Action = "identity.phone.verify"
+	IdentitySmsMfaEnable                  Action = "identity.sms_mfa.enable"
+	IdentitySmsMfaDisable                 Action = "identity.sms_mfa.disable"
 	IdentityEduVerificationStart          Action = "identity.edu_verification.start"
 	IdentityEduVerificationConfirm        Action = "identity.edu_verification.confirm"
 	IdentityEduVerificationSubmitDocument Action = "identity.edu_verification.submit_document"
@@ -67,6 +71,10 @@ var identityActions = []Action{
 	IdentityMfaVerify,
 	IdentityMfaDisable,
 	IdentityMfaRecoveryRegenerate,
+	IdentityPhoneChange,
+	IdentityPhoneVerify,
+	IdentitySmsMfaEnable,
+	IdentitySmsMfaDisable,
 	IdentityEduVerificationStart,
 	IdentityEduVerificationConfirm,
 	IdentityEduVerificationSubmitDocument,

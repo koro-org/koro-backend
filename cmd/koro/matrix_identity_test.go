@@ -40,7 +40,7 @@ func (w *identityWiring) matrixFixtures(fx *matrixFixtures) error {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	adult, _ := civil.New(2000, time.March, 14)
 	minor := civil.Today(now).AddDays(-17 * 365)
-	for _, p := range append(authztest.Personas(), authztest.Helpers()...) {
+	for i, p := range append(authztest.Personas(), authztest.Helpers()...) {
 		if !p.Actor.IsUser() {
 			continue
 		}
@@ -75,6 +75,9 @@ func (w *identityWiring) matrixFixtures(fx *matrixFixtures) error {
 		}
 		if err := w.matrixTOTP(ctx, u); err != nil {
 			return fmt.Errorf("totp %s: %w", p.Name, err)
+		}
+		if err := w.matrixPhone(ctx, u, fmt.Sprintf("+9055500000%02d", i)); err != nil {
+			return fmt.Errorf("phone %s: %w", p.Name, err)
 		}
 		// BE-018: a verified student persona has its verification in the store
 		// too (getMyEduVerification, renewals), at the persona's university.
@@ -150,6 +153,30 @@ func (w *identityWiring) matrixFixtures(fx *matrixFixtures) error {
 			}
 		case "role_assignment":
 			if err := w.matrixRole(ctx, fx, f, id, now); err != nil {
+				return fmt.Errorf("fixture %s: %w", f.Name, err)
+			}
+		case "phone":
+			owner, err := fx.Ref(f, "user")
+			if err != nil {
+				return err
+			}
+			number, _ := f.Fields["number"].(string)
+			p := identity.Phone{UserID: owner, Number: number, VerifiedAt: matrixClock}
+			if on, _ := f.Fields["sms_mfa"].(bool); on {
+				p.SMSMFAEnabledAt = &matrixClock
+			}
+			if err := w.store.PutPhone(ctx, p); err != nil {
+				return fmt.Errorf("fixture %s: %w", f.Name, err)
+			}
+		case "sms_code":
+			owner, err := fx.Ref(f, "user")
+			if err != nil {
+				return err
+			}
+			number, _ := f.Fields["number"].(string)
+			purpose, _ := f.Fields["purpose"].(string)
+			code, _ := f.Fields["code"].(string)
+			if err := w.matrixSMSCode(ctx, id, owner, identity.SMSPurpose(purpose), number, code); err != nil {
 				return fmt.Errorf("fixture %s: %w", f.Name, err)
 			}
 		case "edu_document_file":
@@ -252,8 +279,19 @@ const (
 //	          proofs are TOTP codes; MFA logins answer a challenge)
 var matrixMFAModes sync.Map
 
-// matrixConfig implements matrixConfigurer: identity_mfa.
+// matrixConfig implements matrixConfigurer: identity_mfa and
+// identity_phone (BE-172).
 func (w *identityWiring) matrixConfig(_ *config.Modules, key string, v any) (bool, error) {
+	if key == "identity_phone" {
+		mode, _ := v.(string)
+		switch mode {
+		case "none", "pending", "verified", "sms_mfa":
+		default:
+			return true, fmt.Errorf("identity_phone %v: want none, pending, verified or sms_mfa", v)
+		}
+		matrixPhoneModes.Store(w, mode)
+		return true, nil
+	}
 	if key != "identity_mfa" {
 		return false, nil
 	}
@@ -294,6 +332,51 @@ func (w *identityWiring) matrixTOTP(ctx context.Context, u identity.User) error 
 	}
 	cur.MFAEnabled = true
 	return w.store.UpdateUser(ctx, cur)
+}
+
+// matrixPhoneCode is the code of the open phone verification of every
+// matrix account under identity_phone: pending (the bodies hold it).
+const matrixPhoneCode = "135790"
+
+// matrixPhoneModes is the identity_phone config of each matrix application
+// (BE-172; keyed by its wiring):
+//
+//	none      no account has a phone number (default)
+//	pending   every account has an open phone verification code
+//	          (matrixPhoneCode) to its number +9055500000NN
+//	verified  every account has that number verified
+//	sms_mfa   verified, with the SMS second step on
+//
+// releaseMatrixApp deletes the entry once the application's test is over
+// (the key holds the whole container; BE-073).
+var matrixPhoneModes sync.Map
+
+// matrixPhone gives u the phone state of the identity_phone config.
+func (w *identityWiring) matrixPhone(ctx context.Context, u identity.User, number string) error {
+	mode, _ := matrixPhoneModes.Load(w)
+	switch mode {
+	case "pending":
+		return w.matrixSMSCode(ctx, uuid.NewV7(), u.ID, identity.SMSPhoneVerify, number, matrixPhoneCode)
+	case "verified", "sms_mfa":
+		p := identity.Phone{UserID: u.ID, Number: number, VerifiedAt: matrixClock}
+		if mode == "sms_mfa" {
+			p.SMSMFAEnabledAt = &matrixClock
+		}
+		return w.store.PutPhone(ctx, p)
+	}
+	return nil
+}
+
+// matrixSMSCode seeds an open SMS code with a chosen value (the bodies hold
+// it): its MAC under the test token key, valid for a year of wall time
+// (beyond the container clock).
+func (w *identityWiring) matrixSMSCode(ctx context.Context, id, userID uuid.UUID, purpose identity.SMSPurpose, number, code string) error {
+	mac, err := identity.SMSCodeMAC(testDeriver(), "test1", id, code)
+	if err != nil {
+		return err
+	}
+	return w.store.InsertSMSCode(ctx, identity.SMSCode{ID: id, UserID: userID, Purpose: purpose, Number: number, KeyID: "test1",
+		CodeHash: mac, ExpiresAt: time.Now().Add(365 * 24 * time.Hour), CreatedAt: matrixClock})
 }
 
 // matrixClock is the fake clock of newTestContainer.

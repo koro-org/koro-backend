@@ -16,7 +16,8 @@ const privacyEraseJob = "identity.privacy_erase"
 // Erase last (01 §6.3 "en son identity anonimleştirme"): the account
 // becomes a tombstone that stays the FK target of financial and audit rows
 // (02 §0.6); sessions, e-mail tokens, TOTP, recovery codes and student
-// verifications (with their documents) are deleted.
+// verifications (with their documents), the phone number and the SMS codes
+// are deleted.
 type privacyProvider struct{ s *service }
 
 var _ privacy.Provider = privacyProvider{}
@@ -25,8 +26,9 @@ var _ privacy.Provider = privacyProvider{}
 func (privacyProvider) Name() string { return "identity" }
 
 // Export implements privacy.Provider: the account, its sessions (device,
-// IP, user agent), its TOTP enrollment (dates only) and its platform role
-// history. Hashes, secrets and tokens are never exported.
+// IP, user agent), its TOTP enrollment (dates only), its verified phone
+// number (BE-172) and its platform role history. Hashes, secrets, tokens
+// and SMS codes are never exported.
 func (p privacyProvider) Export(ctx context.Context, userID uuid.UUID) (privacy.ExportSection, error) {
 	s := p.s
 	out := privacy.ExportSection{Module: "identity"}
@@ -67,6 +69,13 @@ func (p privacyProvider) Export(ctx context.Context, userID uuid.UUID) (privacy.
 		}
 		out.Items = append(out.Items, map[string]any{
 			"type": "mfa_totp", "enrolled_at": t.CreatedAt, "confirmed_at": t.ConfirmedAt, "recovery_codes_left": left,
+		})
+	}
+	if p, found, err := s.d.Store.Phone(ctx, userID); err != nil {
+		return out, err
+	} else if found { // the subject's own number in full
+		out.Items = append(out.Items, map[string]any{
+			"type": "phone", "phone": p.Number, "verified_at": p.VerifiedAt, "sms_mfa_enabled_at": p.SMSMFAEnabledAt,
 		})
 	}
 	actions, err := s.d.Store.AccountActionsOf(ctx, userID)
@@ -130,6 +139,16 @@ func (p privacyProvider) Erase(ctx context.Context, userID uuid.UUID) (privacy.E
 		if err != nil {
 			return err
 		}
+		// The number and the SMS codes (BE-172: hard delete with the account).
+		np, err := s.d.Store.DeletePhone(ctx, userID)
+		if err != nil {
+			return err
+		}
+		nc, err := s.d.Store.DeleteUserSMSCodes(ctx, userID)
+		if err != nil {
+			return err
+		}
+		nr += np + nc
 		// Student verifications go with their documents (02 §5.4: hard
 		// delete); the files are deleted after the rows released them.
 		edu, err := s.d.Store.DeleteUserEduVerifications(ctx, userID)

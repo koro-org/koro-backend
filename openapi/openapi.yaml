@@ -2875,6 +2875,15 @@ components:
       required:
         - items
       type: object
+    ChallengeInputBody:
+      additionalProperties: false
+      properties:
+        challenge_id:
+          format: uuid
+          type: string
+      required:
+        - challenge_id
+      type: object
     ChangePasswordInputBody:
       additionalProperties: false
       properties:
@@ -8767,6 +8776,9 @@ components:
           type: array
         mfa_enabled:
           type: boolean
+        phone:
+          $ref: "#/components/schemas/PhoneDTO"
+          description: The verified mobile number, masked (BE-172); absent without one
         platform_roles:
           items:
             type: string
@@ -8779,6 +8791,9 @@ components:
             - club
             - platform
           type: string
+        sms_available:
+          description: The SMS features (phone number, SMS second step, SMS reset) are available
+          type: boolean
         student:
           $ref: "#/components/schemas/StudentDTO"
         terms:
@@ -8801,6 +8816,7 @@ components:
         - platform_roles
         - capabilities
         - terms
+        - sms_available
       type: object
     MediaBody:
       additionalProperties: false
@@ -9099,6 +9115,10 @@ components:
           type: string
         recovery_code:
           maxLength: 32
+          type: string
+        sms_code:
+          description: The code of sendMfaLoginSms (BE-172)
+          maxLength: 16
           type: string
         totp_code:
           maxLength: 16
@@ -11612,6 +11632,23 @@ components:
       required:
         - url
         - expires_at
+      type: object
+    PhoneDTO:
+      additionalProperties: false
+      properties:
+        number_hint:
+          description: The number, masked (last two digits); the full number is never returned
+          type: string
+        sms_mfa_enabled:
+          description: The SMS second step of sign-in is on
+          type: boolean
+        verified_at:
+          format: date-time
+          type: string
+      required:
+        - number_hint
+        - verified_at
+        - sms_mfa_enabled
       type: object
     PlatformContentDTO:
       additionalProperties: false
@@ -14184,6 +14221,26 @@ components:
         - token
         - new_password
       type: object
+    ResetConfirmSMSInputBody:
+      additionalProperties: false
+      properties:
+        code:
+          description: The 6-digit code of the SMS
+          maxLength: 16
+          minLength: 1
+          type: string
+        email:
+          maxLength: 254
+          type: string
+        new_password:
+          maxLength: 128
+          minLength: 8
+          type: string
+      required:
+        - email
+        - code
+        - new_password
+      type: object
     ResetMFAInputBody:
       additionalProperties: false
       properties:
@@ -14197,6 +14254,22 @@ components:
           description: Re-authentication proof of the admin (03 §6.2)
       required:
         - reason
+      type: object
+    ResetRequestInputBody:
+      additionalProperties: false
+      properties:
+        channel:
+          default: email
+          description: "sms: a code by SMS when the account may reset by SMS (BE-172)"
+          enum:
+            - email
+            - sms
+          type: string
+        email:
+          maxLength: 254
+          type: string
+      required:
+        - email
       type: object
     ResolveBody:
       additionalProperties: false
@@ -14418,6 +14491,20 @@ components:
           type: string
       required:
         - role
+      type: object
+    SMSCodeSentDTO:
+      additionalProperties: false
+      properties:
+        expires_at:
+          description: When the code stops working
+          format: date-time
+          type: string
+        phone_hint:
+          description: The number the code went to, masked (last two digits)
+          type: string
+      required:
+        - expires_at
+        - phone_hint
       type: object
     SalesOutputBody:
       additionalProperties: false
@@ -14729,9 +14816,21 @@ components:
           description: Expiry if the session stays idle; slides with use
           format: date-time
           type: string
+        mfa_methods:
+          description: The second factors the challenge accepts (BE-172)
+          items:
+            enum:
+              - totp
+              - recovery_code
+              - sms
+            type: string
+          type: array
         mfa_required:
           description: "true: complete the login with completeMfaLogin"
           type: boolean
+        phone_hint:
+          description: "sms: the masked number the code goes to"
+          type: string
         token:
           description: Opaque bearer token (mobile clients only; shown once)
           type: string
@@ -14787,6 +14886,17 @@ components:
           type: string
       required:
         - items
+      type: object
+    SmsCodeInputBody:
+      additionalProperties: false
+      properties:
+        code:
+          description: The 6-digit code of the SMS
+          maxLength: 16
+          minLength: 1
+          type: string
+      required:
+        - code
       type: object
     SourceOrgDTO:
       additionalProperties: false
@@ -14986,6 +15096,20 @@ components:
           type: string
       required:
         - edu_email
+      type: object
+    StartPhoneInputBody:
+      additionalProperties: false
+      properties:
+        phone:
+          description: A Turkish mobile number, e.g. +90 5XX XXX XX XX or 05XX XXX XX XX
+          maxLength: 30
+          minLength: 10
+          type: string
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: "Re-authentication proof (03 §6.2): password, or totp_code on a TOTP account"
+      required:
+        - phone
       type: object
     StatsDTO:
       additionalProperties: false
@@ -26228,13 +26352,13 @@ paths:
       x-koro-surface: public
   /api/v1/auth/password-resets:
     post:
-      description: Always 202 (no account enumeration). The link is valid for 30 minutes.
+      description: "Always 202 (no account enumeration). channel email (default): a link valid for 30 minutes. channel sms (BE-172): a 6-digit code by SMS (10 minutes; confirmPasswordResetSms) when the account has a verified number, its SMS second step is off and it holds no role that requires MFA; otherwise the e-mail link, with the same answer."
       operationId: requestPasswordReset
       requestBody:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/EmailInputBody"
+              $ref: "#/components/schemas/ResetRequestInputBody"
         required: true
       responses:
         "202":
@@ -26249,7 +26373,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
           description: Error
-      summary: Request a password reset e-mail
+      summary: Request a password reset
       tags:
         - identity
       x-koro-action: identity.password.reset_request
@@ -26276,6 +26400,32 @@ paths:
                 $ref: "#/components/schemas/Problem"
           description: Error
       summary: Set a new password with a reset token
+      tags:
+        - identity
+      x-koro-action: identity.password.reset
+      x-koro-idempotency: optional
+      x-koro-rate-limit: auth_password_reset
+      x-koro-surface: public
+  /api/v1/auth/password-resets/sms/confirm:
+    post:
+      description: The code of requestPasswordReset with channel sms. A wrong, used or expired code, an unknown address and an account that may no longer reset by SMS all answer 422 identity.invalid_sms_code. Every session of the account is closed.
+      operationId: confirmPasswordResetSms
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetConfirmSMSInputBody"
+        required: true
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: Set a new password with an SMS code
       tags:
         - identity
       x-koro-action: identity.password.reset
@@ -26324,7 +26474,7 @@ paths:
       x-koro-surface: public
   /api/v1/auth/sessions:
     post:
-      description: "Web clients (X-Koro-Client: web, the default) get the __Host-koro_session cookie and no token; mobile clients get the bearer token once in the body. Wrong credentials, unknown or locked accounts all answer 401 identity.invalid_credentials; an unverified account 403 identity.email_not_verified. An MFA account gets mfa_required with a challenge (5 minutes) instead of a session: completeMfaLogin opens it."
+      description: "Web clients (X-Koro-Client: web, the default) get the __Host-koro_session cookie and no token; mobile clients get the bearer token once in the body. Wrong credentials, unknown or locked accounts all answer 401 identity.invalid_credentials; an unverified account 403 identity.email_not_verified. An account with TOTP or the SMS second step gets mfa_required with a challenge (5 minutes) and its mfa_methods instead of a session: completeMfaLogin opens it (sms: sendMfaLoginSms first)."
       operationId: createSession
       parameters:
         - description: "web (default): cookie; mobile: bearer token in the body"
@@ -26395,7 +26545,7 @@ paths:
       x-koro-terms-gate: exempt
   /api/v1/auth/sessions/mfa:
     post:
-      description: "Second step of an MFA account's login: the challenge of createSession (valid 5 minutes, single use) with a TOTP code or a recovery code (exactly one). The session opens MFA-verified; web clients get the cookie, mobile clients the token (the client kind of the password step). Any failure is 401 identity.mfa_login_failed. A recovery code sign-in sends a security notice."
+      description: "Second step of an MFA account's login: the challenge of createSession (valid 5 minutes, single use) with exactly one of a TOTP code, a recovery code or the SMS code of sendMfaLoginSms (one of the challenge's mfa_methods). TOTP and recovery codes open the session MFA-verified; an SMS code never does (roles that require MFA need TOTP: verifyMfa). Web clients get the cookie, mobile clients the token (the client kind of the password step). Any failure is 401 identity.mfa_login_failed. A recovery code sign-in sends a security notice."
       operationId: completeMfaLogin
       requestBody:
         content:
@@ -26421,6 +26571,36 @@ paths:
                 $ref: "#/components/schemas/Problem"
           description: Error
       summary: Complete an MFA sign-in
+      tags:
+        - identity
+      x-koro-action: identity.session.create
+      x-koro-idempotency: optional
+      x-koro-rate-limit: auth_login
+      x-koro-surface: public
+  /api/v1/auth/sessions/mfa/sms:
+    post:
+      description: "For a challenge of createSession whose mfa_methods include sms: a 6-digit code goes to the account's number (valid 5 minutes, never past the challenge); completeMfaLogin takes it as sms_code. An unknown or expired challenge, or an account without the SMS second step, is 401 identity.mfa_login_failed (the challenge stays usable). At most three codes per challenge, within the SMS send limits (429)."
+      operationId: sendMfaLoginSms
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChallengeInputBody"
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SMSCodeSentDTO"
+          description: Accepted
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      summary: Send the SMS code of an MFA sign-in
       tags:
         - identity
       x-koro-action: identity.session.create
@@ -30755,6 +30935,68 @@ paths:
       x-koro-reauth: true
       x-koro-surface: self
       x-koro-terms-gate: exempt
+  /api/v1/me/mfa/sms:
+    post:
+      description: "reauth is the proof. Sign-ins then ask for a code sent by SMS to the verified number (next to TOTP when that is on too). An SMS sign-in never makes the session MFA-verified. Holders of a role that requires MFA (platform roles, university_rep, company_admin/owner) get 409 identity.sms_mfa_not_allowed: TOTP only. 409 identity.phone_not_verified without a number. Already on: 204, nothing changes."
+      operationId: enableSmsMfa
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReauthOnlyInputBody"
+        required: true
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Turn the SMS second step on
+      tags:
+        - identity
+      x-koro-action: identity.sms_mfa.enable
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: self
+      x-koro-terms-gate: enforced
+  /api/v1/me/mfa/sms/disable:
+    post:
+      description: "reauth is the proof. The number stays. Already off: 204, nothing changes."
+      operationId: disableSmsMfa
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReauthOnlyInputBody"
+        required: true
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Turn the SMS second step off
+      tags:
+        - identity
+      x-koro-action: identity.sms_mfa.disable
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/mfa/totp:
     post:
       description: reauth.password is the proof (06 H-46). Returns a new TOTP secret (only in this response; stored encrypted). An earlier unconfirmed enrollment is replaced. 409 identity.mfa_already_enabled when TOTP is on.
@@ -31251,6 +31493,106 @@ paths:
       x-koro-reauth: true
       x-koro-surface: self
       x-koro-terms-gate: exempt
+  /api/v1/me/phone:
+    post:
+      description: reauth is the proof (password, or totp_code on a TOTP account). A 6-digit code goes by SMS to the Turkish mobile number (valid 10 minutes); confirmPhoneVerification makes it the account's. The answer is the same whether or not another account holds the number (only its holder learns that, at confirmation). 422 identity.invalid_phone for anything but +90 5XX XXX XX XX; 503 identity.sms_unavailable without an SMS provider. Sends are limited per number, account and address (429).
+      operationId: startPhoneVerification
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartPhoneInputBody"
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SMSCodeSentDTO"
+          description: Accepted
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Add or change my mobile number
+      tags:
+        - identity
+      x-koro-action: identity.phone.change
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: self
+      x-koro-terms-gate: enforced
+  /api/v1/me/phone/confirm:
+    post:
+      description: The code of startPhoneVerification (single use, five tries). A wrong, used or expired code is 422 identity.invalid_sms_code; a number another account verified meanwhile is 409 identity.phone_taken. The number replaces an earlier one; the SMS second step stays as it was. A security notice goes by e-mail.
+      operationId: confirmPhoneVerification
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SmsCodeInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhoneDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Confirm my mobile number with the SMS code
+      tags:
+        - identity
+      x-koro-action: identity.phone.verify
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-surface: self
+      x-koro-terms-gate: enforced
+  /api/v1/me/phone/remove:
+    post:
+      description: reauth is the proof. The number goes, and with it the SMS second step. 409 identity.phone_not_verified without a number.
+      operationId: removeMyPhone
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReauthOnlyInputBody"
+        required: true
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Remove my mobile number
+      tags:
+        - identity
+      x-koro-action: identity.phone.change
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/me/privacy:
     get:
       description: "Everything is off until the student turns it on; the activity ranking choice and the recommendation choice start at default. Without an active student verification (never verified, or lapsed): 403 students.verification_required; the stored settings are kept, but no company search or level 3 view shows the account meanwhile."

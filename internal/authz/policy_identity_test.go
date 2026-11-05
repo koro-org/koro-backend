@@ -236,3 +236,30 @@ func TestIdentityPolicy_EduVerificationEdgeCases(t *testing.T) {
 	wantErr(t, authz.Can(ctx, sys, authz.IdentityEduVerificationExpire, authz.Resource{Type: authz.TypeEduVerification}), nil, false)
 	wantErr(t, authz.Can(ctx, sys, authz.IdentityEduVerificationReview, eduVerification("student_b")), authz.ErrForbidden, false)
 }
+
+// TestIdentityPolicy_PhoneAndSMSMFA pins the BE-172 rows of 03 §5.1: the
+// phone number and SMS second step actions are O for every signed-in
+// persona (anonymous 403), another user's account is invisible (404), and
+// no MFA session is needed (k-sms, the MFA role refusal, is the service's
+// 409; an admin without TOTP may still remove a number).
+func TestIdentityPolicy_PhoneAndSMSMFA(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	acts := []authz.Action{authz.IdentityPhoneChange, authz.IdentityPhoneVerify, authz.IdentitySmsMfaEnable, authz.IdentitySmsMfaDisable}
+	for _, p := range authztest.Personas() {
+		for _, act := range acts {
+			want := error(nil)
+			if p.Name == "anonymous" {
+				want = authz.ErrForbidden
+			}
+			wantErr(t, authz.Can(ctx, p.Actor, act, ownAccount(p)), want, false)
+		}
+	}
+	pad := persona(t, "platform_admin")
+	noMFA := pad
+	noMFA.MFAVerified = false
+	for _, act := range acts {
+		wantErr(t, authz.Can(ctx, pad, act, targetUser("student")), authz.ErrNotFound, false)
+		wantErr(t, authz.Can(ctx, noMFA, act, ownAccount(authztest.Persona{Actor: noMFA})), nil, false)
+	}
+}

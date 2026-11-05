@@ -45,8 +45,8 @@ func SetEnum[T ~string](s *huma.Schema, prop string, vals []T) *huma.Schema {
 	return s
 }
 
-// ParamSyntax is the documented syntax of a query parameter
-// (Meta.QuerySyntax): a format, a pattern or both.
+// ParamSyntax is the documented syntax of a query or path parameter
+// (Meta.QuerySyntax, Meta.PathSyntax): a format, a pattern or both.
 type ParamSyntax struct {
 	Format  string
 	Pattern string

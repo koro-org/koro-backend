@@ -35,7 +35,8 @@ func Register(api huma.API, svc Service) {
 		Summary: "Get an anonymous student profile",
 		Description: "The level 2 profile behind one of this company's pseudonyms. Another company's pseudonym, or a " +
 			"student who is no longer discoverable, is not found. Needs the discovery_access right; every read is audited.",
-	}, op.Meta{Action: string(authz.DiscoveryProfileRead), Surface: op.SurfaceOrg}, h.get)
+	}, op.Meta{Action: string(authz.DiscoveryProfileRead), Surface: op.SurfaceOrg,
+		PathSyntax: map[string]op.ParamSyntax{"anon_id": {Pattern: AnonIDPattern}}}, h.get)
 }
 
 type handler struct {

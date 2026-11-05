@@ -2,6 +2,7 @@ package discovery_test
 
 import (
 	"errors"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -163,5 +164,22 @@ func TestPseudonyms_RenewalWindow(t *testing.T) {
 	s3, _ := after.Seed(session, e.companyA)
 	if string(s1) == string(s2) || string(s2) != string(s3) {
 		t.Fatal("the session seed does not follow the active key")
+	}
+}
+
+// TestAnonIDPattern (BE-175): the documented syntax of the anon_id path
+// parameter takes exactly what ValidAnonID takes.
+func TestAnonIDPattern(t *testing.T) {
+	t.Parallel()
+	re := regexp.MustCompile(discovery.AnonIDPattern)
+	a, err := testPseudonyms(t).AnonID(uuid.NewV7(), uuid.NewV7())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{a, "abcdefghijklmnop", "2345672345672345", "", "abcdefghijklmno", "abcdefghijklmnopq",
+		"ABCDEFGHIJKLMNOP", "abcdefghijklmno1", "abcdefghijklmno8", "abcdefghijklmno="} {
+		if re.MatchString(s) != discovery.ValidAnonID(s) {
+			t.Errorf("%q: pattern %v, ValidAnonID %v", s, re.MatchString(s), discovery.ValidAnonID(s))
+		}
 	}
 }

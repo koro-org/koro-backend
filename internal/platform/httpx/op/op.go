@@ -124,6 +124,14 @@ type Meta struct {
 	// format/pattern tag (huma would answer 422 first). Only the document
 	// changes (BE-170). Register writes it; Koro alone refuses it.
 	QuerySyntax map[string]ParamSyntax
+	// PathSyntax documents the syntax of path parameters (name → syntax)
+	// that the operation checks itself. An "<x>_id" path parameter is
+	// documented as a UUID without it (httpx.DocumentParams); an ID that
+	// is not a UUID (a pseudonym, a digest) names its syntax here, so the
+	// document is right and a malformed value still gets the operation's
+	// own answer (often 404) after the authorisation (BE-175). Register
+	// writes it; Koro alone refuses it.
+	PathSyntax map[string]ParamSyntax
 	// Responses documents the success answers the operation gives besides
 	// its DefaultStatus (its output sets Status at run time; huma documents
 	// the default status only). Register writes them (it holds the schema
@@ -149,8 +157,8 @@ var (
 // extensions. It returns the updated operation for huma.Register.
 // Meta.Responses needs Register.
 func Koro(o huma.Operation, m Meta) huma.Operation {
-	if len(m.Responses) > 0 || m.AccessReasonRequired || len(m.QuerySyntax) > 0 {
-		panic(fmt.Sprintf("op.Koro(%s %s %q): Meta.Responses, Meta.AccessReasonRequired or Meta.QuerySyntax needs op.Register",
+	if len(m.Responses) > 0 || m.AccessReasonRequired || len(m.QuerySyntax) > 0 || len(m.PathSyntax) > 0 {
+		panic(fmt.Sprintf("op.Koro(%s %s %q): Meta.Responses, Meta.AccessReasonRequired, Meta.QuerySyntax or Meta.PathSyntax needs op.Register",
 			o.Method, o.Path, o.OperationID))
 	}
 	return koro(o, m)

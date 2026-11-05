@@ -117,7 +117,8 @@ func Register(api huma.API, svc Service) {
 		Tags: tags, Summary: "Remove an e-mail suppression", DefaultStatus: http.StatusNoContent,
 		Description: "The address may receive e-mail again. Break-glass: X-Koro-Access-Reason is mandatory; audited.",
 	}, op.Meta{Action: string(authz.NotifySuppressionManage), Surface: op.SurfaceAdmin, BreakGlass: true,
-		AccessReasonRequired: true}, h.adminDeleteSuppression)
+		AccessReasonRequired: true, PathSyntax: map[string]op.ParamSyntax{"suppression_id": {Pattern: suppressionIDPattern}}},
+		h.adminDeleteSuppression)
 
 	op.Register(api, "notify", huma.Operation{
 		OperationID: "adminListUserDeliveries", Method: http.MethodGet, Path: "/admin/users/{user_id}/notification-deliveries",

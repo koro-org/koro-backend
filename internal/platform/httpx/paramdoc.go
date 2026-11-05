@@ -6,17 +6,19 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 )
 
-// Parameter document rules (BE-170). Client types (Orval/Zod) and the
-// contract tests (Schemathesis) read the syntax of a parameter from the
+// Parameter document rules (BE-170, BE-175). Client types (Orval/Zod) and
+// the contract tests (Schemathesis) read the syntax of a parameter from the
 // document, so the document states it even where huma does not check it:
 //
-//   - An ID query parameter ("id" or "<x>_id", a string or a list of
-//     strings) without a format or pattern is documented as format uuid.
-//     Every module parses it with uuid.Parse and answers 422
-//     validation_failed "must be a UUID" itself — some before the
-//     authorisation, some after it (03 §7.2: 404/403 first; discovery,
-//     payments, talent) — so only the document changes and both orders
-//     stay. An ID that is not a UUID declares its own pattern.
+//   - An ID query or path parameter ("id" or "<x>_id", a string or a list
+//     of strings) without a format or pattern is documented as format
+//     uuid. Every module parses it itself: a malformed query ID is 422
+//     validation_failed "must be a UUID", a malformed path ID mostly 404
+//     (an unknown ID) — some before the authorisation, some after it
+//     (03 §7.2: 404/403 first) — so only the document changes and every
+//     status and order stays. An ID that is not a UUID declares its own
+//     syntax (op.Meta.QuerySyntax/PathSyntax, which name it in
+//     MetaOwnSyntax) or a huma format/pattern tag; the rule leaves it.
 //   - A required string parameter (query, header, cookie) that may be
 //     empty in the schema is documented with minLength 1: huma treats an
 //     empty value as a missing one ("required … parameter is missing",
@@ -27,6 +29,11 @@ import (
 // leaves as it was. A tag (format:"uuid", minLength:"1") on the field is
 // the way to have huma check it as well.
 
+// MetaOwnSyntax is the huma.Operation.Metadata key of the parameters whose
+// syntax the operation documents itself (a map[string]bool of parameter
+// names, written by op.Register): the rules leave them alone.
+const MetaOwnSyntax = "koro.own_param_syntax"
+
 // installParamDocs adds the rules to oapi's OnAddOperation hooks.
 func installParamDocs(oapi *huma.OpenAPI) {
 	oapi.OnAddOperation = append(oapi.OnAddOperation, func(_ *huma.OpenAPI, op *huma.Operation) {
@@ -36,11 +43,12 @@ func installParamDocs(oapi *huma.OpenAPI) {
 
 // DocumentParams applies the parameter document rules to op.
 func DocumentParams(op *huma.Operation) {
+	own, _ := op.Metadata[MetaOwnSyntax].(map[string]bool)
 	for _, p := range op.Parameters {
-		if p == nil || p.Schema == nil {
+		if p == nil || p.Schema == nil || own[p.Name] {
 			continue
 		}
-		if p.In == "query" && IDParamName(p.Name) {
+		if (p.In == "query" || p.In == "path") && IDParamName(p.Name) {
 			if s := stringTarget(p.Schema); s != nil && s.Format == "" && s.Pattern == "" {
 				p.Schema = withString(p.Schema, func(s *huma.Schema) { s.Format = "uuid" })
 			}

@@ -42,6 +42,12 @@ type DeliveryPage struct {
 // the key).
 func SuppressionID(emailIndex []byte) string { return hex.EncodeToString(emailIndex) }
 
+// suppressionIDPattern is the documented syntax of a suppression ID (the
+// lower-case hex of the 32-byte blind index parseSuppressionID takes), the
+// suppression_id path parameter (BE-175). Only the document carries it: a
+// malformed ID is still an unknown one (404 after the authorisation).
+const suppressionIDPattern = "^[0-9a-f]{64}$"
+
 // parseSuppressionID decodes an API suppression ID; anything malformed is
 // simply not found.
 func parseSuppressionID(id string) ([]byte, error) {

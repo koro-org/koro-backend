@@ -96,6 +96,12 @@ func (p *Pseudonyms) Seed(sessionID, companyOrgID uuid.UUID) ([]byte, error) {
 	return p.d.DerivedToken(seedPurpose, p.keys[0], sessionID[:], companyOrgID[:])
 }
 
+// AnonIDPattern is the documented syntax of a pseudonym (ValidAnonID), the
+// anon_id path parameter of getDiscoveryProfile (BE-175). Only the
+// document carries it: a malformed pseudonym is still an unknown one (404
+// after the authorisation).
+const AnonIDPattern = "^[a-z2-7]{16}$"
+
 // ValidAnonID reports whether s has the form of a pseudonym (16
 // characters of the base32 alphabet); anything else is never found.
 func ValidAnonID(s string) bool {

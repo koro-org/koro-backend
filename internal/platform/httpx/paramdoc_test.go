@@ -93,3 +93,41 @@ func TestIDParamName(t *testing.T) {
 		}
 	}
 }
+
+type pathDocInput struct {
+	OrgID string `path:"org_id"`
+	RefID string `path:"ref_id" pattern:"^[a-z]+$"`
+	Slug  string `path:"slug"`
+}
+
+// TestParamDocs_DocumentsPathIDs (BE-175): an ID path parameter without a
+// format or pattern is documented as a UUID; one with its own pattern and a
+// non-ID one (slug) keep their schema, and no path parameter gets a
+// minLength. Only the document changes: a malformed path ID still reaches
+// the handler, which answers it itself (mostly 404, after authz).
+func TestParamDocs_DocumentsPathIDs(t *testing.T) {
+	t.Parallel()
+	app, err := httpx.New(httpx.Deps{Log: obs.Discard()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got pathDocInput
+	op.Register(app.V1, "testonly", huma.Operation{OperationID: "getPathDocs", Method: http.MethodGet,
+		Path: "/path-docs/{org_id}/{ref_id}/{slug}"},
+		op.Meta{Action: "testonly.thing.read", Surface: op.SurfacePublic},
+		func(_ context.Context, in *pathDocInput) (*struct{}, error) { got = *in; return nil, nil })
+
+	for _, p := range app.API.OpenAPI().Paths["/api/v1/path-docs/{org_id}/{ref_id}/{slug}"].Get.Parameters {
+		want := map[string][2]string{"org_id": {"uuid", ""}, "ref_id": {"", "^[a-z]+$"}, "slug": {"", ""}}[p.Name]
+		if p.Schema.Format != want[0] || p.Schema.Pattern != want[1] || p.Schema.MinLength != nil {
+			t.Errorf("%s: format %q pattern %q minLength %v, want %q", p.Name, p.Schema.Format, p.Schema.Pattern, p.Schema.MinLength, want)
+		}
+	}
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/path-docs/not-a-uuid/abc/my-club", nil)
+	rec := httptest.NewRecorder()
+	app.Engine.ServeHTTP(rec, req)
+	if got.OrgID != "not-a-uuid" {
+		t.Fatalf("a malformed path ID did not reach the handler: %d %s", rec.Code, rec.Body)
+	}
+}

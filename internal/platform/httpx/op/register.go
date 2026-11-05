@@ -19,6 +19,7 @@ import (
 func Register[I, O any](api huma.API, tag string, o huma.Operation, m Meta, fn func(context.Context, *I) (*O, error)) {
 	o.Tags = []string{tag}
 	o = koro(o, m)
+	markOwnSyntax(&o, m.QuerySyntax, m.PathSyntax)
 	if len(m.Responses) > 0 {
 		documentResponses(api.OpenAPI().Components.Schemas, &o, m.Responses)
 	}
@@ -27,8 +28,31 @@ func Register[I, O any](api huma.API, tag string, o huma.Operation, m Meta, fn f
 		requireAccessReasonDoc(api.OpenAPI(), o)
 	}
 	if len(m.QuerySyntax) > 0 {
-		documentQuerySyntax(api.OpenAPI(), o, m.QuerySyntax)
+		documentParamSyntax(api.OpenAPI(), o, "query", "QuerySyntax", m.QuerySyntax)
 	}
+	if len(m.PathSyntax) > 0 {
+		documentParamSyntax(api.OpenAPI(), o, "path", "PathSyntax", m.PathSyntax)
+	}
+}
+
+// markOwnSyntax names the parameters of the syntax maps in o's metadata
+// (httpx.MetaOwnSyntax), so the document rules run by huma.Register
+// (httpx.DocumentParams: an "<x>_id" parameter is a UUID) leave them to
+// documentParamSyntax.
+func markOwnSyntax(o *huma.Operation, maps ...map[string]ParamSyntax) {
+	own := map[string]bool{}
+	for _, m := range maps {
+		for name := range m {
+			own[name] = true
+		}
+	}
+	if len(own) == 0 {
+		return
+	}
+	if o.Metadata == nil {
+		o.Metadata = map[string]any{}
+	}
+	o.Metadata[httpx.MetaOwnSyntax] = own
 }
 
 // registered returns the operation of oapi with o's ID. The document's
@@ -45,25 +69,26 @@ func registered(oapi *huma.OpenAPI, o huma.Operation) *huma.Operation {
 	panic(fmt.Sprintf("op.Register(%s %s %q): not in the document", o.Method, o.Path, o.OperationID))
 }
 
-// documentQuerySyntax writes the syntaxes of Meta.QuerySyntax into copies
-// of the parameter schemas of the registered o: huma validates against the
-// schema it built at registration, which stays as it was, so the
-// operation's own check (and its order) is unchanged. A parameter that is
-// not a string query parameter, or that huma already checks (a format or
-// pattern tag), panics.
-func documentQuerySyntax(oapi *huma.OpenAPI, o huma.Operation, syntax map[string]ParamSyntax) {
+// documentParamSyntax writes the syntaxes of Meta.QuerySyntax (in
+// "query") or Meta.PathSyntax (in "path") into copies of the parameter
+// schemas of the registered o: huma validates against the schema it built
+// at registration, which stays as it was, so the operation's own check
+// (and its order) is unchanged. A parameter that is not a string parameter
+// of that location, or that huma already checks (a format or pattern tag),
+// panics.
+func documentParamSyntax(oapi *huma.OpenAPI, o huma.Operation, in, field string, syntax map[string]ParamSyntax) {
 	reg := registered(oapi, o)
 	for name, sx := range syntax {
 		var p *huma.Param
 		for _, q := range reg.Parameters {
-			if q.In == "query" && q.Name == name {
+			if q.In == in && q.Name == name {
 				p = q
 			}
 		}
 		if p == nil || p.Schema == nil || p.Schema.Type != huma.TypeString || p.Schema.Format != "" || p.Schema.Pattern != "" ||
 			(sx.Format == "" && sx.Pattern == "") {
-			panic(fmt.Sprintf("op.Register(%s %s %q): Meta.QuerySyntax[%q] needs a string query parameter without a format or pattern tag",
-				o.Method, o.Path, o.OperationID, name))
+			panic(fmt.Sprintf("op.Register(%s %s %q): Meta.%s[%q] needs a string %s parameter without a format or pattern tag",
+				o.Method, o.Path, o.OperationID, field, name, in))
 		}
 		c := *p.Schema
 		c.Format, c.Pattern = sx.Format, sx.Pattern

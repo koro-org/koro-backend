@@ -234,6 +234,82 @@ func TestRegister_QuerySyntax(t *testing.T) {
 	}
 }
 
+// TestRegister_PathSyntax (BE-175): Meta.PathSyntax documents the syntax
+// of an ID path parameter that is not a UUID instead of the httpx rule's
+// format uuid, while a malformed value still reaches the handler; another
+// ID path parameter keeps the rule. A missing parameter, one huma already
+// checks, or Koro alone panics.
+func TestRegister_PathSyntax(t *testing.T) {
+	t.Parallel()
+	// humatest, not httpx.New: httpx.New installs huma.NewError (a package
+	// global) once, which races with the parallel tests that read it in
+	// huma.Register. The document rule is hooked in the way httpx.New does.
+	_, api := humatest.New(t)
+	api.OpenAPI().OnAddOperation = append(api.OpenAPI().OnAddOperation,
+		func(_ *huma.OpenAPI, o *huma.Operation) { httpx.DocumentParams(o) })
+	var got string
+	op.Register(api, "discovery", huma.Operation{
+		OperationID: "getAnon", Method: http.MethodGet, Path: "/orgs/{org_id}/anons/{anon_id}",
+	}, op.Meta{Action: "discovery.thing.read", Surface: op.SurfacePublic,
+		PathSyntax: map[string]op.ParamSyntax{"anon_id": {Pattern: "^[a-z2-7]{16}$"}}},
+		func(_ context.Context, in *struct {
+			OrgID  string `path:"org_id"`
+			AnonID string `path:"anon_id"`
+		}) (*struct{}, error) {
+			got = in.AnonID
+			return nil, nil
+		})
+	for _, p := range api.OpenAPI().Paths["/orgs/{org_id}/anons/{anon_id}"].Get.Parameters {
+		switch p.Name {
+		case "anon_id":
+			if p.Schema.Format != "" || p.Schema.Pattern != "^[a-z2-7]{16}$" {
+				t.Errorf("anon_id schema = %+v, want only the declared pattern", p.Schema)
+			}
+		case "org_id":
+			if p.Schema.Format != "uuid" {
+				t.Errorf("org_id format = %q, want uuid (the httpx rule)", p.Schema.Format)
+			}
+		}
+	}
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+		"/orgs/019a0000-0000-7000-8000-000000000001/anons/NOT-A-PSEUDONYM", nil)
+	rec := httptest.NewRecorder()
+	api.Adapter().ServeHTTP(rec, req)
+	if got != "NOT-A-PSEUDONYM" {
+		t.Fatalf("a malformed path value did not reach the handler: %d %s", rec.Code, rec.Body)
+	}
+
+	for name, in := range map[string]func(){
+		"missing": func() {
+			op.Register(api, "discovery", huma.Operation{OperationID: "getMissing", Method: http.MethodGet, Path: "/missing"},
+				op.Meta{Action: "discovery.thing.read", Surface: op.SurfacePublic, PathSyntax: map[string]op.ParamSyntax{"anon_id": op.Day}},
+				func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
+		},
+		"tagged": func() {
+			op.Register(api, "discovery", huma.Operation{OperationID: "getTagged", Method: http.MethodGet, Path: "/tagged/{anon_id}"},
+				op.Meta{Action: "discovery.thing.read", Surface: op.SurfacePublic, PathSyntax: map[string]op.ParamSyntax{"anon_id": op.Day}},
+				func(context.Context, *struct {
+					AnonID string `path:"anon_id" format:"date"`
+				}) (*struct{}, error) {
+					return nil, nil
+				})
+		},
+		"through Koro": func() {
+			_ = op.Koro(huma.Operation{OperationID: "getKoro", Method: http.MethodGet, Path: "/koro/{anon_id}", Tags: []string{"discovery"}},
+				op.Meta{Action: "discovery.thing.read", Surface: op.SurfacePublic, PathSyntax: map[string]op.ParamSyntax{"anon_id": op.Day}})
+		},
+	} {
+		func() {
+			defer func() {
+				if r := recover(); r == nil || !strings.Contains(fmt.Sprint(r), "PathSyntax") {
+					t.Errorf("%s: recover() = %v, want a PathSyntax panic", name, r)
+				}
+			}()
+			in()
+		}()
+	}
+}
+
 // TestDayOrTimePattern (BE-170): the documented pattern takes what the
 // bound parsers take (RFC 3339 with or without fractions, a YYYY-MM-DD
 // day) and refuses what they refuse.

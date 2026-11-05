@@ -68,7 +68,7 @@ func check(api huma.API, ctx huma.Context, l Limiter, log *slog.Logger, rule Rul
 	case !res.Allowed:
 		action, _ := ctx.Operation().Extensions[op.ExtAction].(string)
 		refused(c, log, rule, action)
-		ctx.SetHeader("Retry-After", retryAfter(res.RetryAfter))
+		ctx.SetHeader("Retry-After", problem.RetryAfterSeconds(res.RetryAfter))
 		_ = huma.WriteErr(api, ctx, http.StatusTooManyRequests, "", problem.ErrRateLimited)
 		return false
 	}
@@ -161,7 +161,7 @@ func GlobalIP(l Limiter, log *slog.Logger, typeBase string, web WebKeys) gin.Han
 				p.Instance = "urn:koro:request:" + rid
 			}
 			b, _ := json.Marshal(p)
-			c.Header("Retry-After", retryAfter(res.RetryAfter))
+			c.Header("Retry-After", problem.RetryAfterSeconds(res.RetryAfter))
 			c.Data(p.Status, problem.ContentType, b)
 			c.Abort()
 			return

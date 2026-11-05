@@ -14,12 +14,15 @@ import (
 // wire_<module>.go). A new adapter is a new file next to the port, its name
 // here and one line in that map; it must pass the port's contract suite.
 //
-// ProviderMem and ProviderNoop are the development and test adapters. They
-// never run in staging or prod: there, choosing one stops the process at
-// start (05 §12.2: no silent in-memory substitute).
+// ProviderMem and ProviderNoop are the development and test adapters, and
+// ProviderMailpit the development adapters that hand what they would send
+// to the local Mailpit (the SMS box, BE-178). They never run in staging or
+// prod: there, choosing one stops the process at start (05 §12.2: no
+// silent in-memory substitute).
 const (
-	ProviderMem  = "mem"
-	ProviderNoop = "noop"
+	ProviderMem     = "mem"
+	ProviderNoop    = "noop"
+	ProviderMailpit = "mailpit"
 )
 
 // checkProvider normalises *v (trimmed, lower case) and checks that it is
@@ -35,7 +38,9 @@ func checkProvider(c Common, key string, v *string, allowed []string) error {
 	return nil
 }
 
-func isDevAdapter(name string) bool { return name == ProviderMem || name == ProviderNoop }
+func isDevAdapter(name string) bool {
+	return name == ProviderMem || name == ProviderNoop || name == ProviderMailpit
+}
 
 // orList renders "a", "a or b", "a, b or c".
 func orList(names []string) string {

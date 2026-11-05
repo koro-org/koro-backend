@@ -10,6 +10,9 @@
 //     internal/platform/netgsmapi).
 //   - mem: the in-memory adapter of tests and development
 //     (internal/platform/sms/smsfake); refused in staging and prod.
+//   - mailpit: the development SMS box (internal/platform/sms/mailpit,
+//     BE-178): every SMS becomes an e-mail in the local Mailpit; refused
+//     in staging and prod.
 //
 // There is no adapter interface here: the consumer declares the small one
 // it needs (identity.SMSSender: Send). Rules for every adapter (pinned by

@@ -3,8 +3,10 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -23,11 +25,18 @@ type SMS struct {
 	//           refused in staging and prod).
 	//   netgsm  Netgsm's OTP SMS API with the SMS_NETGSM_* settings below
 	//           (the same account pattern as the Netgsm İYS adapter).
+	//   mailpit the development SMS box (BE-178): every SMS becomes a
+	//           plain-text e-mail to the local Mailpit at SMS_MAILPIT_ADDR,
+	//           so a developer reads the code in Mailpit's inbox; refused in
+	//           staging and prod like mem.
 	Provider string `env:"SMS_PROVIDER" envDefault:"none"`
 	// Timeout bounds one provider request.
 	Timeout time.Duration `env:"SMS_TIMEOUT" envDefault:"10s"`
 
 	Netgsm SMSNetgsm
+	// MailpitAddr is the SMTP address (host:port, no TLS, no login) of the
+	// local Mailpit (SMS_PROVIDER=mailpit; deploy/compose.dev.yaml).
+	MailpitAddr string `env:"SMS_MAILPIT_ADDR" envDefault:"localhost:1025"`
 }
 
 // SMSNetgsm configures the Netgsm SMS adapter (SMS_PROVIDER=netgsm):
@@ -49,11 +58,15 @@ const (
 	SMSProviderNone   = "none"
 	SMSProviderMem    = ProviderMem
 	SMSProviderNetgsm = "netgsm"
+	// SMSProviderMailpit is the development SMS box (BE-178).
+	SMSProviderMailpit = ProviderMailpit
 )
 
 // SMSProviders returns the accepted values of SMS_PROVIDER (none has no
 // adapter; cmd/koro wires every one).
-func SMSProviders() []string { return []string{SMSProviderNone, SMSProviderMem, SMSProviderNetgsm} }
+func SMSProviders() []string {
+	return []string{SMSProviderNone, SMSProviderMem, SMSProviderNetgsm, SMSProviderMailpit}
+}
 
 // Enabled reports whether an adapter sends SMS.
 func (s SMS) Enabled() bool { return s.Provider != SMSProviderNone }
@@ -84,6 +97,13 @@ func (s *SMS) validate(c Common) error {
 	}
 	if err := checkAPIBaseURL(c, "SMS_NETGSM_BASE_URL", &n.BaseURL, active); err != nil {
 		errs = append(errs, err)
+	}
+	s.MailpitAddr = strings.TrimSpace(s.MailpitAddr)
+	if s.Provider == SMSProviderMailpit {
+		host, port, err := net.SplitHostPort(s.MailpitAddr)
+		if p, perr := strconv.Atoi(port); err != nil || host == "" || perr != nil || p < 1 || p > 65535 {
+			errs = append(errs, errors.New("SMS_MAILPIT_ADDR must be host:port (Mailpit's SMTP, e.g. localhost:1025)"))
+		}
 	}
 	return errors.Join(errs...)
 }

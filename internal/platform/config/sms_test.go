@@ -36,10 +36,10 @@ func TestSMS_Defaults(t *testing.T) {
 	}
 	s := cfg.SMS
 	if s.Provider != config.SMSProviderNone || s.Enabled() || s.Timeout != 10*time.Second ||
-		s.Netgsm.BaseURL != "https://api.netgsm.com.tr" {
+		s.Netgsm.BaseURL != "https://api.netgsm.com.tr" || s.MailpitAddr != "localhost:1025" {
 		t.Fatalf("defaults = %+v", s)
 	}
-	if got := config.SMSProviders(); strings.Join(got, ",") != "none,mem,netgsm" {
+	if got := config.SMSProviders(); strings.Join(got, ",") != "none,mem,netgsm,mailpit" {
 		t.Fatalf("SMSProviders = %v", got)
 	}
 }
@@ -83,6 +83,35 @@ func TestSMS_Validation(t *testing.T) {
 		}
 		if strings.Contains(err.Error(), "test-api-user-password") {
 			t.Errorf("%s: the error repeats the password", name)
+		}
+	}
+}
+
+// TestSMS_MailpitDevOnly (BE-178): the development SMS box runs in dev
+// only — staging and prod refuse it at start — and needs a host:port.
+func TestSMS_MailpitDevOnly(t *testing.T) {
+	t.Parallel()
+	for _, env := range []map[string]string{
+		{"APP_ENV": "dev", "SMS_PROVIDER": "mailpit"},
+		{"APP_ENV": "dev", "SMS_PROVIDER": " Mailpit ", "SMS_MAILPIT_ADDR": " mailpit:1025 "},
+		{"APP_ENV": "prod", "SMS_MAILPIT_ADDR": "not an address"}, // ignored without the adapter
+	} {
+		if _, err := config.Load[smsOnly](env); err != nil {
+			t.Errorf("%v: %v", env, err)
+		}
+	}
+	for _, c := range []struct {
+		env  map[string]string
+		want string
+	}{
+		{map[string]string{"APP_ENV": "prod", "SMS_PROVIDER": "mailpit"}, "SMS_PROVIDER=mailpit is a development adapter, which is not allowed in prod"},
+		{map[string]string{"APP_ENV": "staging", "SMS_PROVIDER": "mailpit"}, "SMS_PROVIDER=mailpit is a development adapter, which is not allowed in staging"},
+		{map[string]string{"APP_ENV": "dev", "SMS_PROVIDER": "mailpit", "SMS_MAILPIT_ADDR": "localhost"}, "SMS_MAILPIT_ADDR must be host:port"},
+		{map[string]string{"APP_ENV": "dev", "SMS_PROVIDER": "mailpit", "SMS_MAILPIT_ADDR": "localhost:0"}, "SMS_MAILPIT_ADDR must be host:port"},
+	} {
+		_, err := config.Load[smsOnly](c.env)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%v: err = %v, want %q", c.env, err, c.want)
 		}
 	}
 }

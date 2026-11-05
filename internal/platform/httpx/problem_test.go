@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/problem"
 )
@@ -176,5 +178,41 @@ func TestProblem_UnknownField_Returns422(t *testing.T) {
 		strings.NewReader(`{"email":"zeynep@example.test","password":"long-enough-password"}`), nil)
 	if okRec.Code != http.StatusOK {
 		t.Fatalf("valid body status = %d; %s", okRec.Code, okRec.Body.String())
+	}
+}
+
+// TestProblem_RetryAfterHeader (BE-178): a problem a handler returns with a
+// wait (a service's own rate limit) is answered with Retry-After in
+// seconds next to the unchanged problem body; the document gives every
+// operation the reusable 429 response with the header.
+func TestProblem_RetryAfterHeader(t *testing.T) {
+	t.Parallel()
+	app := newTestApp(t, nil)
+	registerGET(app.V1, "getLimited", "/limited", func(context.Context, *emptyInput) (*okOutput, error) {
+		return nil, fmt.Errorf("svc: %w", problem.ErrRateLimited.WithRetryAfter(90*time.Second+time.Millisecond))
+	})
+	registerGET(app.V1, "getPlain", "/plain", func(context.Context, *emptyInput) (*okOutput, error) {
+		return nil, problem.ErrRateLimited
+	})
+	rec := app.do(t, http.MethodGet, "/api/v1/limited", nil, nil)
+	if m := problemBody(t, rec, http.StatusTooManyRequests); m["code"] != "rate_limited" {
+		t.Fatalf("code = %v", m["code"])
+	}
+	if got := rec.Header().Get("Retry-After"); got != "91" {
+		t.Fatalf("Retry-After = %q, want 91", got)
+	}
+	if rec := app.do(t, http.MethodGet, "/api/v1/plain", nil, nil); rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") != "" {
+		t.Fatalf("plain 429: %d, Retry-After %q", rec.Code, rec.Header().Get("Retry-After"))
+	}
+
+	oapi := app.API.OpenAPI()
+	r := oapi.Paths["/api/v1/limited"].Get.Responses["429"]
+	if r == nil || r.Ref != "#/components/responses/"+httpx.ResponseRateLimited {
+		t.Fatalf("429 response = %+v", r)
+	}
+	c := oapi.Components.Responses[httpx.ResponseRateLimited]
+	if c == nil || c.Headers[httpx.HeaderRetryAfter] == nil || c.Headers[httpx.HeaderRetryAfter].Required ||
+		c.Content[problem.ContentType] == nil || oapi.Paths["/api/v1/limited"].Get.Responses["default"] == nil {
+		t.Fatalf("components 429 = %+v", c)
 	}
 }

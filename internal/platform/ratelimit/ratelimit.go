@@ -20,8 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
-	"strconv"
 	"sync"
 	"time"
 
@@ -180,8 +178,3 @@ func (m *Mem) Allow(_ context.Context, rule Rule, key string) (Result, error) {
 
 // ErrUnavailable is what a test limiter returns to simulate a Redis outage.
 var ErrUnavailable = errors.New("ratelimit: limiter unavailable")
-
-// retryAfter formats Retry-After in whole seconds (at least 1).
-func retryAfter(d time.Duration) string {
-	return strconv.Itoa(max(1, int(math.Ceil(d.Seconds()))))
-}

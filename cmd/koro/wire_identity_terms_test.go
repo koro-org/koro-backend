@@ -33,7 +33,8 @@ func (r *refuseTerms) CheckTerms(context.Context, uuid.UUID) error {
 }
 
 // termsAlwaysOpen are the actions of the KVKK and account security
-// operations (BE-124) and of the communication preferences and company
+// operations (BE-124; the phone number and the SMS second step, BE-178)
+// and of the communication preferences and company
 // blocks (BE-152, Q-20) and of leaving or muting a conversation (BE-162b,
 // T-404): a self-surface write operation of one of them (the
 // user acting on their own account and data) must be on the terms gate's
@@ -49,6 +50,7 @@ var termsAlwaysOpen = []string{
 	"identity.session.delete_current", "identity.session.revoke_own",
 	"identity.mfa.enroll", "identity.mfa.confirm", "identity.mfa.disable", "identity.mfa.verify", "identity.mfa_recovery.regenerate",
 	"identity.password.change", "identity.email_change.request",
+	"identity.phone.change", "identity.phone.verify", "identity.sms_mfa.enable", "identity.sms_mfa.disable", // BE-178
 	"kvkk.dsr.create", "kvkk.dsr.cancel_own",
 	"consent.record.create", "students.privacy.update_own", "students.access_grant.revoke",
 	"notify.preference.update_own", "messaging.block.manage", // BE-152, Q-20: refusing messages, blocking a company

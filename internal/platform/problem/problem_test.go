@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"koro/internal/platform/problem"
 )
@@ -169,5 +170,31 @@ func TestIsClientError(t *testing.T) {
 				t.Fatalf("IsClientError(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestError_WithRetryAfter (BE-178): the wait is a copy's (the sentinel
+// keeps none), survives Wrap, keeps the code (errors.Is) and becomes the
+// Retry-After header in whole seconds, rounded up, at least 1; no wait, no
+// header.
+func TestError_WithRetryAfter(t *testing.T) {
+	t.Parallel()
+	e := problem.ErrRateLimited.WithRetryAfter(1500 * time.Millisecond)
+	if problem.ErrRateLimited.RetryAfter() != 0 || problem.ErrRateLimited.GetHeaders() != nil {
+		t.Fatal("WithRetryAfter mutated the sentinel")
+	}
+	if !errors.Is(e, problem.ErrRateLimited) || e.RetryAfter() != 1500*time.Millisecond {
+		t.Fatalf("e = %v (%v)", e, e.RetryAfter())
+	}
+	if got := e.Wrap(errors.New("cause")).GetHeaders().Get("Retry-After"); got != "2" {
+		t.Fatalf("Retry-After = %q, want 2", got)
+	}
+	if h := problem.ErrRateLimited.WithRetryAfter(-time.Second).GetHeaders(); h != nil {
+		t.Fatalf("a negative wait gave headers %v", h)
+	}
+	for d, want := range map[time.Duration]string{time.Millisecond: "1", time.Second: "1", 59*time.Minute + 1: "3541"} {
+		if got := problem.RetryAfterSeconds(d); got != want {
+			t.Errorf("RetryAfterSeconds(%v) = %q, want %q", d, got, want)
+		}
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"koro/internal/platform/netgsmapi"
 	"koro/internal/platform/passwd"
 	"koro/internal/platform/problem"
+	smsmailpit "koro/internal/platform/sms/mailpit"
 	smsnetgsm "koro/internal/platform/sms/netgsm"
 	"koro/internal/platform/sms/smsfake"
 )
@@ -51,7 +52,8 @@ import (
 //	         for them yet, T-223; nil → answers carry the university ID only)
 //	sms      nil → the adapter SMS_PROVIDER names (smsSenders; BE-172):
 //	         none leaves it nil (every SMS operation answers 503), mem is
-//	         smsfake, netgsm Netgsm's OTP route. Tests preset smsfake.
+//	         smsfake, mailpit the dev SMS box (BE-178), netgsm Netgsm's
+//	         OTP route. Tests preset smsfake.
 //
 // What identity provides to others, all set in build:
 //
@@ -254,14 +256,22 @@ func (w *identityWiring) tasks(c *container) {
 // smsSenders is the selection map of the SMS port (SMS_PROVIDER; BE-172,
 // config.SMSProviders): none has no adapter (nil: identity's SMS
 // operations answer 503 identity.sms_unavailable), mem keeps the messages
-// in process memory (development; refused in staging and prod by the
-// configuration), netgsm sends by Netgsm's OTP route over the account
+// in process memory and mailpit hands every SMS to the local Mailpit as an
+// e-mail (development; both refused in staging and prod by the
+// configuration, BE-178), netgsm sends by Netgsm's OTP route over the account
 // pattern shared with the İYS adapter (netgsmapi). Every adapter passes
 // internal/platform/sms/smscontract.
 func smsSenders(c *container, cfg config.SMS) adapters[identity.SMSSender] {
 	return adapters[identity.SMSSender]{
 		config.SMSProviderNone: func() (identity.SMSSender, error) { return nil, nil },
 		config.SMSProviderMem:  func() (identity.SMSSender, error) { return smsfake.New(), nil },
+		config.SMSProviderMailpit: func() (identity.SMSSender, error) {
+			a, err := smsmailpit.New(smsmailpit.Config{Addr: cfg.MailpitAddr, Timeout: cfg.Timeout})
+			if err != nil {
+				return nil, err
+			}
+			return a, nil
+		},
 		config.SMSProviderNetgsm: func() (identity.SMSSender, error) {
 			n := cfg.Netgsm
 			a, err := smsnetgsm.New(smsnetgsm.Config{

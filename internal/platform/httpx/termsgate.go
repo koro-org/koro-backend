@@ -92,6 +92,17 @@ var termsExemptOperations = map[string]string{
 	"regenerateRecoveryCodes": "POST " + APIPrefix + "/me/mfa/recovery-codes",
 	"changeMyPassword":        "POST " + APIPrefix + "/me/password",
 	"requestEmailChange":      "POST " + APIPrefix + "/me/email-change",
+	// The phone number and the SMS second step (BE-172, user decision
+	// 2026-11-05, BE-178): the number is a recovery channel (the SMS
+	// password reset) and the SMS code a second factor, so adding,
+	// confirming or removing the number and turning the SMS step on or off
+	// are account security like TOTP above. The SMS sign-in and reset
+	// operations are public: the gate never covers them.
+	"startPhoneVerification":   "POST " + APIPrefix + "/me/phone",
+	"confirmPhoneVerification": "POST " + APIPrefix + "/me/phone/confirm",
+	"removeMyPhone":            "POST " + APIPrefix + "/me/phone/remove",
+	"enableSmsMfa":             "POST " + APIPrefix + "/me/mfa/sms",
+	"disableSmsMfa":            "POST " + APIPrefix + "/me/mfa/sms/disable",
 
 	// KVKK rights of the data subject (Law 6698 m.11, m.13): an
 	// application — access, rectification, erasure (the account's

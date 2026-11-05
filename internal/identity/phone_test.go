@@ -200,6 +200,11 @@ func TestPhone_StartRules(t *testing.T) {
 	}
 	_, err = e.svc.StartPhoneVerification(ctx, a, testPhone, pwProof)
 	problemtest.WantErr(t, err, problem.ErrRateLimited)
+	// BE-178: the 429 carries the limiter's remaining wait (Retry-After).
+	if pe, ok := errors.AsType[*problem.Error](err); !ok || pe.RetryAfter() <= 0 || pe.RetryAfter() > time.Hour ||
+		pe.GetHeaders().Get("Retry-After") == "" {
+		t.Fatalf("the SMS limit's 429 has no wait: %v", err)
+	}
 
 	off := newEnv(t)
 	off.activeUser(t, "off@example.com")
@@ -376,6 +381,11 @@ func TestSMSMFA_ChallengeSendLimit(t *testing.T) {
 	}
 	_, err := e.svc.SendMFALoginSMS(ctx, authz.Anonymous(), ch.ID)
 	problemtest.WantErr(t, err, problem.ErrRateLimited)
+	// BE-178: waiting never reopens a spent challenge (a new sign-in does):
+	// no Retry-After.
+	if pe, _ := errors.AsType[*problem.Error](err); pe == nil || pe.RetryAfter() != 0 {
+		t.Fatalf("the challenge cap's 429 carries a wait: %v", err)
+	}
 	_, err = e.svc.SendMFALoginSMS(ctx, authz.Anonymous(), uuid.NewV4())
 	problemtest.WantErr(t, err, identity.ErrMFALoginFailed)
 

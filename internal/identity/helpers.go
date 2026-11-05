@@ -181,7 +181,9 @@ func (s *service) emailDigest(normalized string) (string, error) {
 }
 
 // allow applies a strict rate limit rule in the service (06 H-6): an
-// unavailable limiter fails closed (503), an exhausted one is 429.
+// unavailable limiter fails closed (503), an exhausted one is 429 with the
+// limiter's remaining wait as Retry-After (BE-178: the SMS send limits, the
+// e-mail and reauth limits alike), as the operation's middleware answers.
 func (s *service) allow(ctx context.Context, rule ratelimit.Rule, key string) error {
 	res, err := s.d.Limiter.Allow(ctx, rule, key)
 	switch {
@@ -190,7 +192,7 @@ func (s *service) allow(ctx context.Context, rule ratelimit.Rule, key string) er
 			slog.String("rule", rule.Name), slog.String("err", err.Error()))
 		return problem.ErrUnavailable.Wrap(err)
 	case !res.Allowed:
-		return problem.ErrRateLimited
+		return problem.ErrRateLimited.WithRetryAfter(res.RetryAfter)
 	}
 	return nil
 }

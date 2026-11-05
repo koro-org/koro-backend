@@ -6,6 +6,18 @@ components:
           schema:
             $ref: "#/components/schemas/Problem"
       description: RFC 9457 problem details
+    RateLimited:
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+      description: Rate limit exceeded (429 rate_limited)
+      headers:
+        Retry-After:
+          description: Seconds to wait before trying again (the limiter's remaining wait, rounded up). Absent when waiting does not help (a locked account, the SMS code cap of a sign-in challenge).
+          schema:
+            minimum: 1
+            type: integer
   schemas:
     AcceptInputBody:
       additionalProperties: false
@@ -17558,7 +17570,7 @@ components:
       name: __Host-koro_session
       type: apiKey
 info:
-  description: "Koro backend API. Errors are RFC 9457 application/problem+json with a stable `code`. A signed-in user who has not accepted the terms of use in force for them (getMe terms.acceptance_required) gets 403 consent.terms_acceptance_required from every operation marked x-koro-terms-gate: enforced until acceptTerms records the current version; reads and the operations marked exempt (the acceptance, logout, account security, KVKK rights, consent acts, notification preferences, company blocks, closing and muting a conversation, and searches sent as POST) stay open. Search criteria that name a person (an e-mail address, a name, a user ID) are never taken in a query string: the POST …/search operations take them in the body."
+  description: "Koro backend API. Errors are RFC 9457 application/problem+json with a stable `code`. A signed-in user who has not accepted the terms of use in force for them (getMe terms.acceptance_required) gets 403 consent.terms_acceptance_required from every operation marked x-koro-terms-gate: enforced until acceptTerms records the current version; reads and the operations marked exempt (the acceptance, logout, account security, KVKK rights, consent acts, notification preferences, company blocks, closing and muting a conversation, and searches sent as POST) stay open. Search criteria that name a person (an e-mail address, a name, a user ID) are never taken in a query string: the POST …/search operations take them in the body. A 429 rate_limited carries Retry-After (seconds to wait) whenever waiting helps."
   title: Koro API
   version: 1.0.0
 openapi: 3.1.0
@@ -17580,6 +17592,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AuditEventList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -17623,6 +17637,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/VerifyDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -17689,6 +17705,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -17743,6 +17761,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -17785,6 +17805,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -17832,6 +17854,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -17886,6 +17910,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -17942,6 +17968,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -17999,6 +18027,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -18061,6 +18091,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -18109,6 +18141,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -18166,6 +18200,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -18233,6 +18269,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminClubClaimList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -18268,6 +18306,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminClubClaimDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -18309,6 +18349,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminClubClaimDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -18347,6 +18389,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -18394,6 +18438,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -18423,6 +18469,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/CollectionAccountList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -18464,6 +18512,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/CollectionAccountDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -18517,6 +18567,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/CollectionAccountDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -18567,6 +18619,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -18617,6 +18671,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/CollectionAccountDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -18670,6 +18726,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/CollectionAccountDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -18718,6 +18776,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/CommercePolicyListOutputBody"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -18759,6 +18819,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/CommercePolicyDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -18812,6 +18874,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/CommercePolicyDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -18840,6 +18904,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PurposeList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -18880,6 +18946,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PurposeDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -18968,6 +19036,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -19016,6 +19086,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -19060,6 +19132,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -19113,6 +19187,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -19171,6 +19247,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -19230,6 +19308,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -19272,6 +19352,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -19328,6 +19410,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -19404,6 +19488,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -19464,6 +19550,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminEduVerificationList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -19505,6 +19593,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminEduVerificationDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -19542,6 +19632,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/EduDocumentDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -19590,6 +19682,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/SuppressionList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -19640,6 +19734,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -19692,6 +19788,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RevokedEntitlementDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -19720,6 +19818,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/FormLintRuleList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -19751,6 +19851,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/FormLintRuleDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -19794,6 +19896,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/FormLintRuleDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -19837,6 +19941,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/IncomingTransferDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -19882,6 +19988,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ImportResultDTO"
           description: Accepted
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -19916,6 +20024,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/IncomingTransferList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -19953,6 +20063,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/IncomingTransferDetailDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -20003,6 +20115,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/IncomingTransferDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -20064,6 +20178,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -20114,6 +20230,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/IncomingTransferDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -20166,6 +20284,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/IncomingTransferDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -20220,6 +20340,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/MatchResultDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -20261,6 +20383,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -20311,6 +20435,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/IncomingTransferDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -20363,6 +20489,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/IncomingTransferDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -20416,6 +20544,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/IncomingTransferDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -20445,6 +20575,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/IntegrationList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -20488,6 +20620,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/IntegrationDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -20572,6 +20706,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/InvoiceAdminList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -20620,6 +20756,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/CancelledInvoiceDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -20670,6 +20808,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/InvoiceAdminDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -20767,6 +20907,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/LedgerTransactionList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -20813,6 +20955,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -20847,6 +20991,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/LegalPartyList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -20888,6 +21034,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -20938,6 +21086,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -20989,6 +21139,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/DocumentDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -21045,6 +21197,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -21101,6 +21255,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -21142,6 +21298,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -21192,6 +21350,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/DocumentDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -21238,6 +21398,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/DocumentDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -21287,6 +21449,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -21349,6 +21513,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ModerationActionList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -21441,6 +21607,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/NoticeSummaryList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -21482,6 +21650,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/NoticeDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -21535,6 +21705,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/NoticeDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -21587,6 +21759,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/NoticeDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -21646,6 +21820,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/OfferingListOutputBody"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -21700,6 +21876,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -21752,6 +21930,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/LineStateDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -21847,6 +22027,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/OrderListOutputBody"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -21919,6 +22101,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminOrgList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -21970,6 +22154,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/EntitlementDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -22013,6 +22199,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/OrgModerationDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -22060,6 +22248,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -22108,6 +22298,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -22155,6 +22347,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -22201,6 +22395,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PayableList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -22247,6 +22443,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -22281,6 +22479,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminPayeeList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -22334,6 +22534,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -22389,6 +22591,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -22425,6 +22629,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReceivableLineList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -22479,6 +22685,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -22548,6 +22756,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PaymentList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -22591,6 +22801,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/DirectResultDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -22628,6 +22840,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PaymentDetailDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -22678,6 +22892,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PaymentDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -22737,6 +22953,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PayoutAdminList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -22779,6 +22997,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PayoutAdminDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -22814,6 +23034,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PayoutAdminDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -22862,6 +23084,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PayoutAdminDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -22913,6 +23137,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PayoutAdminDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -22960,6 +23186,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -23008,6 +23236,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PayoutAdminDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -23058,6 +23288,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PayoutAdminDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -23108,6 +23340,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PayoutAdminDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -23175,6 +23409,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PlatformRoleList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -23206,6 +23442,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PlatformRoleAssignmentDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -23250,6 +23488,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PlatformRoleAssignmentDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -23294,6 +23534,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PlatformRoleAssignmentDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -23338,6 +23580,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PostModerationDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -23401,6 +23645,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/CollectionListOutputBody"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -23443,6 +23689,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReceivableCollectionDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -23495,6 +23743,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReceivableCollectionDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -23548,6 +23798,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReceivableCollectionDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -23623,6 +23875,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RefundRequestList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -23658,6 +23912,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RefundRequestDetailDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -23709,6 +23965,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RefundRequestDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -23761,6 +24019,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RefundRequestDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -23807,6 +24067,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RefundRequestDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -23886,6 +24148,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RefundList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -23928,6 +24192,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RefundDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -23968,6 +24234,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RefundDueList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -24018,6 +24286,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RefundDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -24071,6 +24341,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RefundDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -24124,6 +24396,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/CompletedRefundDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -24173,6 +24447,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -24223,6 +24499,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RefundDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -24276,6 +24554,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RefundDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -24328,6 +24608,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RefundDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -24424,6 +24706,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminReportList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -24459,6 +24743,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminReportDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -24502,6 +24788,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReportedMessagesDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -24543,6 +24831,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminReportDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -24575,6 +24865,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -24630,6 +24922,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -24678,6 +24972,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PostManageList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -24720,6 +25016,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/CatalogServiceDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -24763,6 +25061,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/CatalogServiceDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -24841,6 +25141,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminSkillList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -24871,6 +25173,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminSkillDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -24913,6 +25217,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminSkillDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -24957,6 +25263,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PlatformStats"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -24997,6 +25305,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -25045,6 +25355,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -25102,6 +25414,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -25138,6 +25452,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/TalentConfigDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -25179,6 +25495,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/TalentConfigDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -25225,6 +25543,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/TalentDistributionDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -25272,6 +25592,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/TalentNeutralizationDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -25322,6 +25644,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/TalentSignalDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -25351,6 +25675,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/TalentStatusDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -25400,6 +25726,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/TalentNeutralizationDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -25446,6 +25774,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/TalentReportDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -25535,6 +25865,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminUniversityList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -25566,6 +25898,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/UniversityDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -25609,6 +25943,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/UniversityDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -25650,6 +25986,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/DepartmentDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -25687,6 +26025,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/EmailDomainList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -25736,6 +26076,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/EmailDomainDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -25778,6 +26120,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/FacultyDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -25812,6 +26156,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminUserList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -25849,6 +26195,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminUserDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -25923,6 +26271,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ConsentProofList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -25971,6 +26321,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AccountActionDTO"
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26043,6 +26395,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/DeliveryList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26091,6 +26445,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AccountActionDTO"
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26136,6 +26492,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminStudentViewDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26184,6 +26542,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminUserDTO"
           description: A four-eyes request is open (pending_action); the account is unchanged until a second platform_admin repeats the call
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26226,6 +26586,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AdminUserDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26256,6 +26618,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26281,6 +26645,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26307,6 +26673,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26337,6 +26705,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AcceptedOutputBody"
           description: Accepted
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26367,6 +26737,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AcceptedOutputBody"
           description: Accepted
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26393,6 +26765,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26419,6 +26793,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26459,6 +26835,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AcceptedOutputBody"
           description: Accepted
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26503,6 +26881,8 @@ paths:
             Set-Cookie:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26527,6 +26907,8 @@ paths:
             Set-Cookie:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26564,6 +26946,8 @@ paths:
             Set-Cookie:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26594,6 +26978,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/SMSCodeSentDTO"
           description: Accepted
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26688,6 +27074,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ClubCardList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26724,6 +27112,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26771,6 +27161,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26813,6 +27205,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ClubClaimDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26855,6 +27249,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/JoinRequestDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26894,6 +27290,8 @@ paths:
       responses:
         "202":
           description: Accepted
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26951,6 +27349,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/OrgCardList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -26983,6 +27383,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -27020,6 +27422,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/DepartmentDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -27152,6 +27556,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/EventCardList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -27180,6 +27586,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -27219,6 +27627,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -27266,6 +27676,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -27311,6 +27723,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/FinalizeOutputBody"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -27358,6 +27772,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -27423,6 +27839,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/CheckinList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -27473,6 +27891,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/CheckinResultDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -27510,6 +27930,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/CheckinStatsDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -27568,6 +27990,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/CheckinVoidDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -27624,6 +28048,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ExportList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -27673,6 +28099,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ExportDTO"
           description: Accepted
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -27723,6 +28151,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -27765,6 +28195,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/EventFormDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -27801,6 +28233,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -27851,6 +28285,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -27892,6 +28328,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/EventFormVersionDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -27933,6 +28371,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -28033,6 +28473,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RegistrationOrgList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -28093,6 +28535,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RegistrationSelfDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -28152,6 +28596,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RegistrationOrgDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -28202,6 +28648,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RegistrationOrgDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -28253,6 +28701,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RegistrationOrgDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -28307,6 +28757,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReissuedOutputBody"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -28344,6 +28796,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/StaffList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -28384,6 +28838,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/StaffDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -28424,6 +28880,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -28472,6 +28930,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/StaffDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -28539,6 +28999,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PostList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -28581,6 +29043,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/FileUpload"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -28720,6 +29184,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -28771,6 +29237,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/FileState"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -28805,6 +29273,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AcceptedInvitationDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -28840,6 +29310,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/InvoiceDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -28873,6 +29345,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/InvoicePDFLinkDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -28921,6 +29395,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/InvoiceDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -28971,6 +29447,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/InvoiceDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -28999,6 +29477,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/MeDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -29029,6 +29509,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/MeDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -29076,6 +29558,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/StudentAccessGrantList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -29107,6 +29591,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -29152,6 +29638,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/StudentAccessGrantDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -29199,6 +29687,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -29247,6 +29737,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ClubClaimList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -29282,6 +29774,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ClubClaimDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -29330,6 +29824,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/EventCardList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -29376,6 +29872,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/CompanyBlockList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -29407,6 +29905,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -29438,6 +29938,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -29490,6 +29992,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/MyConsentsDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -29540,6 +30044,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ConsentDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -29599,6 +30105,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ContactRequestStudentList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -29633,6 +30141,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ContactRequestStudentDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -29692,6 +30202,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ContactRequestStudentDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -29748,6 +30260,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ConversationList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -29782,6 +30296,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ConversationDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -29817,6 +30333,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ConversationDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -29873,6 +30391,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/MessageList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -29922,6 +30442,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/MessageDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -29988,6 +30510,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReportCreatedDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30021,6 +30545,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30052,6 +30578,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30098,6 +30626,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30126,6 +30656,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/StudentCVList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30167,6 +30699,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/StudentCVDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30200,6 +30734,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30245,6 +30781,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/StudentCVDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30282,6 +30820,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/StudentCVDownloadDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30331,6 +30871,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30376,6 +30918,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30417,6 +30961,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30465,6 +31011,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30506,6 +31054,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30532,6 +31082,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/MyEduVerificationDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30564,6 +31116,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AcceptedOutputBody"
           description: Accepted
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30598,6 +31152,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/EduVerificationDTO"
           description: Accepted
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30632,6 +31188,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AcceptedOutputBody"
           description: Accepted
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30681,6 +31239,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/FollowList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30712,6 +31272,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30748,6 +31310,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30795,6 +31359,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PostList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30852,6 +31418,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/MyMembershipList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30883,6 +31451,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30917,6 +31487,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RecoveryCodesDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30948,6 +31520,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30965,7 +31539,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: self
-      x-koro-terms-gate: enforced
+      x-koro-terms-gate: exempt
   /api/v1/me/mfa/sms/disable:
     post:
       description: "reauth is the proof. The number stays. Already off: 204, nothing changes."
@@ -30979,6 +31553,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -30996,7 +31572,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: self
-      x-koro-terms-gate: enforced
+      x-koro-terms-gate: exempt
   /api/v1/me/mfa/totp:
     post:
       description: reauth.password is the proof (06 H-46). Returns a new TOTP secret (only in this response; stored encrypted). An earlier unconfirmed enrollment is replaced. 409 identity.mfa_already_enabled when TOTP is on.
@@ -31014,6 +31590,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/TOTPEnrollmentDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31049,6 +31627,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RecoveryCodesDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31080,6 +31660,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31111,6 +31693,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31159,6 +31743,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/FeedOrgList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31190,6 +31776,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31221,6 +31809,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31248,6 +31838,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PreferenceList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31279,6 +31871,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PreferenceList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31333,6 +31927,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/NotificationList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31364,6 +31960,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31405,6 +32003,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31447,6 +32047,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/OrgRelationList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31475,6 +32077,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31510,6 +32114,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/SMSCodeSentDTO"
           description: Accepted
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31527,7 +32133,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: self
-      x-koro-terms-gate: enforced
+      x-koro-terms-gate: exempt
   /api/v1/me/phone/confirm:
     post:
       description: The code of startPhoneVerification (single use, five tries). A wrong, used or expired code is 422 identity.invalid_sms_code; a number another account verified meanwhile is 409 identity.phone_taken. The number replaces an earlier one; the SMS second step stays as it was. A security notice goes by e-mail.
@@ -31545,6 +32151,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PhoneDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31561,7 +32169,7 @@ paths:
       x-koro-idempotency: optional
       x-koro-rate-limit: reauth
       x-koro-surface: self
-      x-koro-terms-gate: enforced
+      x-koro-terms-gate: exempt
   /api/v1/me/phone/remove:
     post:
       description: reauth is the proof. The number goes, and with it the SMS second step. 409 identity.phone_not_verified without a number.
@@ -31575,6 +32183,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31592,7 +32202,7 @@ paths:
       x-koro-rate-limit: reauth
       x-koro-reauth: true
       x-koro-surface: self
-      x-koro-terms-gate: enforced
+      x-koro-terms-gate: exempt
   /api/v1/me/privacy:
     get:
       description: "Everything is off until the student turns it on; the activity ranking choice and the recommendation choice start at default. Without an active student verification (never verified, or lapsed): 403 students.verification_required; the stored settings are kept, but no company search or level 3 view shows the account meanwhile."
@@ -31604,6 +32214,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/StudentPrivacyDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31645,6 +32257,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/StudentPrivacyDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31688,6 +32302,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PushTokenCreatedDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31720,6 +32336,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31759,6 +32377,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RecommendationsDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31841,6 +32461,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RegistrationSelfList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31876,6 +32498,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RegistrationSelfDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31916,6 +32540,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RegistrationSelfDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31953,6 +32579,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/TicketDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -31997,6 +32625,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/TicketDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -32039,6 +32669,8 @@ paths:
       responses:
         "202":
           description: Accepted
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -32087,6 +32719,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PostList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -32133,6 +32767,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/SecurityEventList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -32179,6 +32815,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/MySessionList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -32210,6 +32848,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -32257,6 +32897,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/StaffEventList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -32283,6 +32925,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/StudentProfileSelfDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -32314,6 +32958,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/StudentProfileSelfDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -32357,6 +33003,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/StudentExperienceDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -32390,6 +33038,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -32431,6 +33081,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/StudentExperienceDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -32464,6 +33116,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/StudentLanguageList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -32497,6 +33151,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/StudentSkillList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -32540,6 +33196,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/TermsDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -32568,6 +33226,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/WebPushConfigDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -32610,6 +33270,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/WebPushSubscriptionCreatedDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -32643,6 +33305,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -32714,6 +33378,8 @@ paths:
             Content-Language:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -32746,6 +33412,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/NoticeDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -32854,6 +33522,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/BrowseOfferingsOutputBody"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -32893,6 +33563,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -32943,6 +33615,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -32998,6 +33672,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -33048,6 +33724,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -33094,6 +33772,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/LineStateDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -33146,6 +33826,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/LineStateDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -33183,6 +33865,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/EvidenceLinkDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -33232,6 +33916,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/LineStateDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -33284,6 +33970,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/LineStateDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -33321,6 +34009,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/OrderDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -33371,6 +34061,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/OrderDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -33408,6 +34100,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PaymentInstructionsDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -33495,6 +34189,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/OrgCardList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -33530,6 +34226,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -33566,6 +34264,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -33613,6 +34313,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -33664,6 +34366,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AudienceCountResultDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -33705,6 +34409,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AuditEventList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -33752,6 +34458,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -33820,6 +34528,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ContactRequestCompanyList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -33870,6 +34580,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ContactRequestCompanyDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -33915,6 +34627,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ContactRequestCompanyDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -33967,6 +34681,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ContactRequestCompanyDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -34031,6 +34747,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ConversationList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -34073,6 +34791,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ConversationDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -34116,6 +34836,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ConversationDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -34180,6 +34902,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/MessageList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -34237,6 +34961,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/MessageDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -34311,6 +35037,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReportCreatedDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -34352,6 +35080,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -34391,6 +35121,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -34445,6 +35177,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -34565,6 +35299,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/DiscoveryProfileList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -34608,6 +35344,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/AnonProfileDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -34662,6 +35400,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/DispatchList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -34705,6 +35445,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/DispatchDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -34757,6 +35499,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/DispatchDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -34823,6 +35567,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/UsageList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -34898,6 +35644,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/EntitlementList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -34940,6 +35688,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/EntitlementDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -35018,6 +35768,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/EventCardList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -35062,6 +35814,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -35117,6 +35871,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/InvitationList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -35157,6 +35913,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/InvitationDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -35197,6 +35955,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -35284,6 +36044,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/InvoiceList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -35319,6 +36081,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/LegalPartyList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -35372,6 +36136,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -35421,6 +36187,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -35479,6 +36247,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -35538,6 +36308,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/DocumentDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -35595,6 +36367,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -35661,6 +36435,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/DocumentDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -35756,6 +36532,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/MemberList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -35807,6 +36585,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/MemberDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -35851,6 +36631,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/MemberDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -35896,6 +36678,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/MemberCardDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -35939,6 +36723,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/MemberDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -35985,6 +36771,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -36036,6 +36824,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/MemberDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -36102,6 +36892,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/OfferingListOutputBody"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -36164,6 +36956,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -36232,6 +37026,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/OfferingListOutputBody"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -36285,6 +37081,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -36365,6 +37163,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/OrderListOutputBody"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -36415,6 +37215,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/CreateOrderOutputBody"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -36458,6 +37260,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/QuoteOrderOutputBody"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -36503,6 +37307,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RefundOptionsDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -36561,6 +37367,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RefundRequestDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -36608,6 +37416,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -36646,6 +37456,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PayeeListOutputBody"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -36693,6 +37505,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -36732,6 +37546,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PayeeBalanceDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -36779,6 +37595,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -36840,6 +37658,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -36913,6 +37733,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -36968,6 +37790,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PayoutList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -37007,6 +37831,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PayoutDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -37046,6 +37872,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PayoutReceiptDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -37128,6 +37956,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PostManageList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -37172,6 +38002,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -37221,6 +38053,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -37302,6 +38136,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RefundRequestList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -37368,6 +38204,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/SalesOutputBody"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -37449,6 +38287,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RefundRequestList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -37510,6 +38350,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/SegmentList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -37563,6 +38405,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -37612,6 +38456,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -37670,6 +38516,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -37727,6 +38575,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -37780,6 +38630,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ClubStats"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -37831,6 +38683,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/CompanyStats"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -37882,6 +38736,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/UniversityStats"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -37923,6 +38779,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/StudentL3CardList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -37968,6 +38826,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/StudentProfileL3DTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -38021,6 +38881,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -38066,6 +38928,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/StudentCVDownloadDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -38111,6 +38975,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -38169,6 +39035,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PostList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -38197,6 +39065,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -38236,6 +39106,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -38283,6 +39155,8 @@ paths:
             ETag:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -38335,6 +39209,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/DispatchDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -38368,6 +39244,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -38399,6 +39277,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -38432,6 +39312,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -38463,6 +39345,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -38499,6 +39383,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/PublishResult"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -38532,6 +39418,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -38563,6 +39451,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -38599,6 +39489,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/StatsDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -38634,6 +39526,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RefundRequestDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -38673,6 +39567,8 @@ paths:
             Cache-Control:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -38723,6 +39619,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RefundRequestDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -38769,6 +39667,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/RefundRequestDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -38809,6 +39709,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReportCreatedDTO"
           description: Created
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -38854,6 +39756,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/CatalogServiceListOutputBody"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -38931,6 +39835,8 @@ paths:
             Content-Language:
               schema:
                 type: string
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -39014,6 +39920,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/UniversityList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -39045,6 +39953,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/UniversityDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -39119,6 +40029,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/DepartmentList"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -39151,6 +40063,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/UnsubscribeLinkDTO"
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -39178,6 +40092,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -39237,6 +40153,8 @@ paths:
       responses:
         "204":
           description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:
@@ -39281,6 +40199,8 @@ paths:
       responses:
         "200":
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
         default:
           content:
             application/problem+json:

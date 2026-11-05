@@ -13,11 +13,14 @@ package problem
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // DefaultTypeBase is the default prefix of the RFC 9457 "type" member
@@ -87,11 +90,12 @@ type FieldError struct {
 // Declare sentinels once at package level with New; derive variants with
 // Wrap and WithFields (both return copies and never mutate the sentinel).
 type Error struct {
-	kind   Kind
-	code   string
-	title  string
-	fields []FieldError
-	cause  error
+	kind       Kind
+	code       string
+	title      string
+	fields     []FieldError
+	cause      error
+	retryAfter time.Duration
 }
 
 // Error returns the title and, for logs, the wrapped cause. Clients never
@@ -164,6 +168,37 @@ func (e *Error) WithFields(f ...FieldError) *Error {
 	c := *e
 	c.fields = slices.Clone(f)
 	return &c
+}
+
+// WithRetryAfter returns a copy of e that tells the client to wait d before
+// trying again (BE-178): the HTTP layer sends it as the Retry-After header
+// in whole seconds (RetryAfterSeconds). For a 429 that comes from a
+// limiter, d is the limiter's own remaining wait. d <= 0 removes it.
+func (e *Error) WithRetryAfter(d time.Duration) *Error {
+	c := *e
+	c.retryAfter = max(d, 0)
+	return &c
+}
+
+// RetryAfter returns the wait set with WithRetryAfter (0: none).
+func (e *Error) RetryAfter() time.Duration { return e.retryAfter }
+
+// GetHeaders returns the response headers e carries: Retry-After when
+// WithRetryAfter set a wait, nil otherwise. huma's handler path sets the
+// headers of a returned error that has this method (huma.HeadersError,
+// matched structurally: this package does not import huma).
+func (e *Error) GetHeaders() http.Header {
+	if e.retryAfter <= 0 {
+		return nil
+	}
+	return http.Header{"Retry-After": {RetryAfterSeconds(e.retryAfter)}}
+}
+
+// RetryAfterSeconds formats a wait as the delay-seconds form of
+// Retry-After (RFC 9110 §10.2.3): whole seconds, rounded up, at least 1.
+// The rate limit middlewares and WithRetryAfter share it.
+func RetryAfterSeconds(d time.Duration) string {
+	return strconv.Itoa(max(1, int(math.Ceil(d.Seconds()))))
 }
 
 // IsClientError reports whether the HTTP layer answers err with a 4xx

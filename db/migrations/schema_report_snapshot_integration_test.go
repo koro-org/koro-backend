@@ -84,6 +84,10 @@ func TestSchema_ReportSnapshot(t *testing.T) {
 	check(t)
 
 	owner := testutil.OwnerConn(t, w.d)
+	// 000178 (BE-176) rewrote the text after 000168: down in order.
+	if _, err := owner.Exec(t.Context(), mustRead(t, "000178_data_retention_policy_descriptions.down.sql")); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := owner.Exec(t.Context(), mustRead(t, "000168_snapshot_reported_posts.down.sql")); err != nil {
 		t.Fatal(err)
 	}
@@ -96,6 +100,9 @@ func TestSchema_ReportSnapshot(t *testing.T) {
 		t.Fatal("down did not restore the content_report policy text")
 	}
 	if _, err := owner.Exec(t.Context(), mustRead(t, "000168_snapshot_reported_posts.up.sql")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(t.Context(), mustRead(t, "000178_data_retention_policy_descriptions.up.sql")); err != nil {
 		t.Fatal(err)
 	}
 	check(t)

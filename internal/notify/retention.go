@@ -23,6 +23,9 @@ const (
 	PolicyEmailSuppression     = "email_suppression"     // 3 years after created_at
 	PolicyPushToken            = "push_token"            // 90 days after last_seen_at
 	PolicyInAppNotification    = "in_app_notification"   // 6 months after created_at
+	// PolicyWebPushSubscription: a browser subscription the browser has not
+	// registered again for 90 days (BE-177, T-409; the push_token pattern).
+	PolicyWebPushSubscription = "web_push_subscription" // 90 days after last_seen_at
 
 	// RetentionBatch is the most rows one purge transaction deletes (01 §7).
 	RetentionBatch = 1000
@@ -34,6 +37,7 @@ var retentionTables = map[string]string{
 	PolicyEmailSuppression:     "email_suppressions",
 	PolicyPushToken:            "push_tokens",
 	PolicyInAppNotification:    "in_app_notifications",
+	PolicyWebPushSubscription:  "web_push_subscriptions",
 }
 
 // RetentionStore purges the rows whose retention period ended (BE-057).

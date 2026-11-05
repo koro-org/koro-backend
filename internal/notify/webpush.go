@@ -274,7 +274,7 @@ func (w *WebPush) send(ctx context.Context, s WebPushSubscription, m PushMessage
 	topic := m.DeliveryID // collapse key (RFC 8030 §5.4: at most 32 base64url characters)
 	req.Header.Set("Authorization", auth)
 	req.Header.Set("TTL", strconv.FormatInt(int64(w.ttl/time.Second), 10))
-	req.Header.Set("Urgency", "normal")
+	req.Header.Set("Urgency", m.Priority.webPushUrgency())
 	req.Header.Set("Topic", base64.RawURLEncoding.EncodeToString(topic[:]))
 	req.Header.Set("Content-Encoding", "aes128gcm")
 	req.Header.Set("Content-Type", "application/octet-stream")

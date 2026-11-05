@@ -33,6 +33,11 @@ var purgeSQL = map[string]struct{ count, del string }{
 		`DELETE FROM in_app_notifications WHERE id IN (SELECT id FROM in_app_notifications
 			WHERE created_at < @cutoff ORDER BY created_at, id LIMIT @limit FOR UPDATE SKIP LOCKED)`,
 	},
+	PolicyWebPushSubscription: {
+		`SELECT count(*) FROM web_push_subscriptions WHERE last_seen_at < @cutoff`,
+		`DELETE FROM web_push_subscriptions WHERE id IN (SELECT id FROM web_push_subscriptions
+			WHERE last_seen_at < @cutoff ORDER BY last_seen_at, id LIMIT @limit FOR UPDATE SKIP LOCKED)`,
+	},
 }
 
 // PurgeExpired implements Store.

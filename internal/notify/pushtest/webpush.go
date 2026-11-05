@@ -22,6 +22,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -177,7 +178,8 @@ func (w *WebPush) serve(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	k, ok := checkVAPID(r.Header.Get("Authorization"))
-	if !ok || r.Header.Get("TTL") == "" || r.Header.Get("Content-Encoding") != "aes128gcm" || len(r.Header.Get("Topic")) > 32 {
+	if !ok || r.Header.Get("TTL") == "" || r.Header.Get("Content-Encoding") != "aes128gcm" || len(r.Header.Get("Topic")) > 32 ||
+		!slices.Contains([]string{"very-low", "low", "normal", "high"}, r.Header.Get("Urgency")) {
 		w.refused++
 		rw.WriteHeader(http.StatusForbidden)
 		return
@@ -196,7 +198,7 @@ func (w *WebPush) serve(rw http.ResponseWriter, r *http.Request) {
 	}
 	w.vapid = append(w.vapid, k)
 	w.messages = append(w.messages, Message{DeviceToken: id, Title: in.Title, Body: in.Body, Data: in.Data,
-		CollapseID: r.Header.Get("Topic")})
+		CollapseID: r.Header.Get("Topic"), Priority: r.Header.Get("Urgency")})
 	rw.Header().Set("Location", fmt.Sprintf("https://fcm.googleapis.com/0:msg-%d", len(w.messages)))
 	rw.WriteHeader(http.StatusCreated)
 }

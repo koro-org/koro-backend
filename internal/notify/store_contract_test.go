@@ -596,6 +596,15 @@ func runRetentionContract(t *testing.T, newWorld func(t *testing.T) storeWorld) 
 				t.Fatal(err)
 			}
 		},
+		notify.PolicyWebPushSubscription: func(t *testing.T, w storeWorld, uid uuid.UUID, i int, at time.Time) {
+			endpoint := "https://fcm.googleapis.com/fcm/send/retention-" + strconv.Itoa(i)
+			sum := sha256.Sum256([]byte(endpoint))
+			if _, err := w.s.UpsertWebPushSubscription(t.Context(), notify.WebPushSubscription{ID: newID(), UserID: uid,
+				Endpoint: endpoint, EndpointSHA256: sum[:], P256DH: make([]byte, notify.WebPushP256DHLen),
+				Auth: make([]byte, notify.WebPushAuthLen), CreatedAt: at, LastSeenAt: at}, notify.MaxWebPushSubscriptions); err != nil {
+				t.Fatal(err)
+			}
+		},
 		notify.PolicyInAppNotification: func(t *testing.T, w storeWorld, uid uuid.UUID, _ int, at time.Time) {
 			if _, err := w.s.InsertInApp(t.Context(), notify.InAppNotification{ID: newID(), UserID: uid, Kind: "notify.test_message",
 				Title: "Başlık", CreatedAt: at}); err != nil {

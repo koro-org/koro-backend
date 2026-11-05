@@ -40,6 +40,9 @@ type PushMessage struct {
 	// message (BE-173): ChannelPush reaches mobile devices, ChannelWebPush
 	// browsers (web push subscriptions and FCM web tokens). nil = both.
 	Channels []Channel
+	// Priority is the template's web push urgency (BE-177); "" = normal.
+	// Mobile pushes are always high (priority.go).
+	Priority Priority
 }
 
 // allows reports whether the message may reach a surface of preference

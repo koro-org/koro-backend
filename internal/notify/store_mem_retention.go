@@ -45,6 +45,10 @@ func (s *memStore) PurgeExpired(_ context.Context, policy string, cutoff time.Ti
 		for id, n := range s.inApp {
 			add(n.CreatedAt, idKey(id), func() { delete(s.inApp, id) })
 		}
+	case PolicyWebPushSubscription:
+		for id, w := range s.webSubs {
+			add(w.LastSeenAt, idKey(id), func() { delete(s.webSubs, id) })
+		}
 	default:
 		return 0, fmt.Errorf("notify: no retention purge for policy %q", policy)
 	}

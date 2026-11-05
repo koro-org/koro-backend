@@ -29,7 +29,8 @@ func (c *countingTx) WithTx(ctx context.Context, fn func(ctx context.Context) er
 func TestSweeper_PolicyCodes(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	want := []string{notify.PolicyEmailSuppression, notify.PolicyInAppNotification, notify.PolicyNotificationDelivery, notify.PolicyPushToken}
+	want := []string{notify.PolicyEmailSuppression, notify.PolicyInAppNotification, notify.PolicyNotificationDelivery, notify.PolicyPushToken,
+		notify.PolicyWebPushSubscription}
 	if got := f.mod.Sweeper.PolicyCodes(); !slices.Equal(got, want) {
 		t.Fatalf("PolicyCodes() = %v, want %v", got, want)
 	}

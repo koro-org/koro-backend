@@ -234,6 +234,7 @@ type fcmBody struct {
 	Data         map[string]string `json:"data,omitempty"`
 	Android      fcmAndroid        `json:"android"`
 	APNs         *fcmAPNs          `json:"apns,omitempty"`
+	Webpush      *fcmWebpush       `json:"webpush,omitempty"`
 }
 
 type fcmNotification struct {
@@ -251,14 +252,21 @@ type fcmAPNs struct {
 	Headers map[string]string `json:"headers"`
 }
 
+// fcmWebpush is the web push block of an FCM web token (BE-177: Urgency).
+type fcmWebpush struct {
+	Headers map[string]string `json:"headers"`
+}
+
 // send implements pushProvider.
 func (f *FCM) send(ctx context.Context, deviceToken string, m PushMessage) (string, error) {
 	body, err := json.Marshal(fcmMessage{Message: fcmBody{
 		Token:        deviceToken,
 		Notification: fcmNotification{Title: m.Title, Body: m.Body},
 		Data:         pushData(m),
-		Android:      fcmAndroid{CollapseKey: m.DeliveryID.String(), Priority: "high", TTL: "86400s"},
-		APNs:         &fcmAPNs{Headers: map[string]string{"apns-collapse-id": m.DeliveryID.String()}},
+		Android:      fcmAndroid{CollapseKey: m.DeliveryID.String(), Priority: androidPriority, TTL: "86400s"},
+		APNs: &fcmAPNs{Headers: map[string]string{"apns-collapse-id": m.DeliveryID.String(),
+			"apns-priority": apnsPriority}},
+		Webpush: &fcmWebpush{Headers: map[string]string{"Urgency": m.Priority.webPushUrgency()}},
 	}})
 	if err != nil {
 		return "", fmt.Errorf("fcm: encode: %w", err)

@@ -9,3 +9,4 @@ category: transactional
 # under contact_requests (02 §6.5).
 preference: contact_requests
 channels: [in_app, push]
+priority: high

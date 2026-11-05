@@ -32,6 +32,10 @@ type Message struct {
 	Title, Body string
 	Data        map[string]string
 	CollapseID  string
+	// Priority is the delivery priority as the provider got it (BE-177):
+	// FCM android.priority (high | normal), APNs apns-priority (10 | 5),
+	// web push Urgency (high | normal).
+	Priority string
 }
 
 // ---------------------------------------------------------------- FCM
@@ -163,10 +167,11 @@ func (f *FCM) send(w http.ResponseWriter, r *http.Request) {
 			Data         map[string]string `json:"data"`
 			Android      struct {
 				CollapseKey string `json:"collapse_key"`
+				Priority    string `json:"priority"`
 			} `json:"android"`
 		} `json:"message"`
 	}
-	if json.NewDecoder(r.Body).Decode(&in) != nil {
+	if json.NewDecoder(r.Body).Decode(&in) != nil || (in.Message.Android.Priority != "high" && in.Message.Android.Priority != "normal") {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": map[string]any{"status": "INVALID_ARGUMENT", "message": "bad json"}})
 		return
 	}
@@ -183,7 +188,8 @@ func (f *FCM) send(w http.ResponseWriter, r *http.Request) {
 		}})
 	default:
 		f.messages = append(f.messages, Message{DeviceToken: in.Message.Token, Title: in.Message.Notification["title"],
-			Body: in.Message.Notification["body"], Data: in.Message.Data, CollapseID: in.Message.Android.CollapseKey})
+			Body: in.Message.Notification["body"], Data: in.Message.Data, CollapseID: in.Message.Android.CollapseKey,
+			Priority: in.Message.Android.Priority})
 		writeJSON(w, http.StatusOK, map[string]string{"name": fmt.Sprintf("projects/%s/messages/%d", f.ProjectID, len(f.messages))})
 	}
 }
@@ -307,6 +313,9 @@ func (a *APNs) serve(w http.ResponseWriter, r *http.Request) {
 	case r.Header.Get("apns-topic") != a.Topic:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"reason": "BadTopic"})
 		return
+	case r.Header.Get("apns-priority") != "10" && r.Header.Get("apns-priority") != "5":
+		writeJSON(w, http.StatusBadRequest, map[string]string{"reason": "BadPriority"})
+		return
 	case a.dead[device]:
 		writeJSON(w, http.StatusGone, map[string]any{"reason": "Unregistered", "timestamp": 1791000000000})
 		return
@@ -322,7 +331,7 @@ func (a *APNs) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.messages = append(a.messages, Message{DeviceToken: device, Title: in.APS.Alert["title"], Body: in.APS.Alert["body"],
-		Data: in.Data, CollapseID: r.Header.Get("apns-collapse-id")})
+		Data: in.Data, CollapseID: r.Header.Get("apns-collapse-id"), Priority: r.Header.Get("apns-priority")})
 	w.Header().Set("apns-id", fmt.Sprintf("00000000-0000-4000-8000-%012d", len(a.messages)))
 	w.WriteHeader(http.StatusOK)
 }

@@ -2,6 +2,7 @@ package notify
 
 import (
 	"bytes"
+	"cmp"
 	"embed"
 	"errors"
 	"fmt"
@@ -41,6 +42,9 @@ import (
 //	preference: event_updates     # transactional only: the preference category (02 §6.5)
 //	channels: [email, in_app]     # default [email]; email needs subject/txt/html,
 //	                              # in_app and push need title/body
+//	priority: high                # web push Urgency, normal (default) | high;
+//	                              # high: security templates and conversation
+//	                              # messages only (BE-177); mobile is always high
 //
 // in_app and push texts are fixed: they are rendered once at load time with
 // {{.AppName}} and {{.Locale}} only. Data never reaches them, so no personal
@@ -96,6 +100,7 @@ type templateSet struct {
 	category   Category
 	preference PrefCategory // "" for commercial templates
 	channels   []Channel
+	priority   Priority
 	locales    map[string]*localized
 	notices    map[string]Notice // locale → fixed in_app/push text
 }
@@ -112,6 +117,7 @@ type TemplateMeta struct {
 	Category   Category
 	Preference PrefCategory // "" for commercial templates
 	Channels   []Channel
+	Priority   Priority // push priority (BE-177)
 }
 
 // Supports reports whether the template serves channel ch.
@@ -222,7 +228,7 @@ func (t *Templates) Meta(id string) (TemplateMeta, bool) {
 		return TemplateMeta{}, false
 	}
 	return TemplateMeta{Version: set.version, Category: set.category, Preference: set.preference,
-		Channels: slices.Clone(set.channels)}, true
+		Channels: slices.Clone(set.channels), Priority: set.priority}, true
 }
 
 // Notice returns the fixed in_app/push text of template id in the requested
@@ -447,6 +453,7 @@ type metaFile struct {
 	Category   string   `yaml:"category"`
 	Preference string   `yaml:"preference"`
 	Channels   []string `yaml:"channels"`
+	Priority   string   `yaml:"priority"`
 }
 
 func (r *rawSet) build(id string, layouts map[string]map[string]string) (*templateSet, error) {
@@ -496,6 +503,13 @@ func (r *rawSet) build(id string, layouts map[string]map[string]string) (*templa
 			if len(set.channels) == 0 {
 				fail("meta channels must not be empty")
 			}
+		}
+		set.priority = Priority(cmp.Or(m.Priority, string(PriorityNormal)))
+		switch {
+		case !set.priority.valid():
+			fail("meta priority must be normal or high")
+		case set.priority == PriorityHigh && set.preference != PrefSecurity && !highPriorityTemplates[id]:
+			fail("meta priority high is for security templates and conversation messages only")
 		}
 		if set.category == CategoryCommercial && slices.Contains(set.channels, ChannelInApp) {
 			fail("commercial templates cannot serve in_app")

@@ -204,7 +204,7 @@ func (a *APNs) post(ctx context.Context, providerToken, deviceToken string, m Pu
 	req.Header.Set("Authorization", "bearer "+providerToken)
 	req.Header.Set("apns-topic", a.topic)
 	req.Header.Set("apns-push-type", "alert")
-	req.Header.Set("apns-priority", "10")
+	req.Header.Set("apns-priority", apnsPriority)
 	req.Header.Set("apns-collapse-id", m.DeliveryID.String())
 	req.Header.Set("apns-expiration", strconv.FormatInt(a.clk.Now().Add(apnsExpiry).Unix(), 10))
 	req.Header.Set("Content-Type", "application/json")

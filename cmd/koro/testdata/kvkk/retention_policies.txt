@@ -42,6 +42,7 @@ unsubscribe_link              job:consent.unsubscribe_links_cleanup
 notification_delivery         sweeper:notify
 email_suppression             sweeper:notify
 push_token                    sweeper:notify
+web_push_subscription         sweeper:notify
 in_app_notification           sweeper:notify
 # orgs
 membership_ended              sweeper:orgs

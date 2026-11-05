@@ -40,7 +40,7 @@ var (
 )
 
 // seedPolicies reads the retention_policies seed of the migrations
-// (000090 and the 000121/000123/000134/000142/000147/000148/000161/000162/000166/000169/000177 additions and updates) as kvkk.Policy rows, none
+// (000090 and the 000121/000123/000134/000142/000147/000148/000161/000162/000166/000169/000177/000179 additions and updates) as kvkk.Policy rows, none
 // legally approved (T-35).
 func seedPolicies(t *testing.T) map[string]kvkk.Policy {
 	t.Helper()
@@ -53,7 +53,8 @@ func seedPolicies(t *testing.T) map[string]kvkk.Policy {
 		"000162_create_unsubscribe_links.up.sql",                  // BE-153: the opaque unsubscribe links and their policy
 		"000166_keep_dropped_post_media_and_open_evidence.up.sql", // BE-158: the images dropped off published posts
 		"000169_create_conversations.up.sql",                      // BE-162: the conversations and their policy
-		"000177_create_user_phones.up.sql"} {                      // BE-172: phone numbers, SMS codes and their policy
+		"000177_create_user_phones.up.sql",                        // BE-172: phone numbers, SMS codes and their policy
+		"000179_seed_web_push_subscription_policy.up.sql"} {       // BE-177 (T-409): unused browser subscriptions, 90 days
 		b, err := fs.ReadFile(migrations.FS, name)
 		if err != nil {
 			t.Fatal(err)
@@ -81,8 +82,8 @@ func seedPolicies(t *testing.T) map[string]kvkk.Policy {
 			out[m[3]] = p
 		}
 	}
-	if len(out) != 53 { // 02 §24.2 (44) + privileged_action_history (000121) + talent_collection_off (000134) + talent_score_dropped (000142) + iys_netgsm_event (000147) + terms_acceptance (000148) + unsubscribe_link (000162) + post_media_dropped (000166) + conversation_closed (000169) + sms_code (000177); TestSchema_RetentionSeedComplete
-		t.Fatalf("read %d seeded retention policies, want 53", len(out))
+	if len(out) != 54 { // 02 §24.2 (44) + privileged_action_history (000121) + talent_collection_off (000134) + talent_score_dropped (000142) + iys_netgsm_event (000147) + terms_acceptance (000148) + unsubscribe_link (000162) + post_media_dropped (000166) + conversation_closed (000169) + sms_code (000177) + web_push_subscription (000179); TestSchema_RetentionSeedComplete
+		t.Fatalf("read %d seeded retention policies, want 54", len(out))
 	}
 	return out
 }

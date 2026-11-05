@@ -143,7 +143,7 @@ func (s *service) deliver(ctx context.Context, m Message, c content, d Delivery)
 		provider = s.d.Push.Name()
 		providerID, err = s.d.Push.SendPush(ctx, PushMessage{
 			DeliveryID: d.ID, UserID: *m.UserID, Kind: m.Template, Title: c.notice.Title, Body: c.notice.Body,
-			LinkPath: m.LinkPath.String(), Data: opaqueData(m.Data), Channels: pushChannels,
+			LinkPath: m.LinkPath.String(), Data: opaqueData(m.Data), Channels: pushChannels, Priority: c.meta.Priority,
 		})
 	case ChannelInApp:
 		provider, providerID = inAppProvider, d.ID.String()

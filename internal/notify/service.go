@@ -126,7 +126,7 @@ func (s *service) prepare(m Message) (content, error) {
 // deliver performs one attempt for a claimed delivery and returns the result
 // to record plus the error for the caller.
 func (s *service) deliver(ctx context.Context, m Message, c content, d Delivery) (Result, error) {
-	skip, err := s.gate(ctx, m, c.meta, d)
+	skip, pushChannels, err := s.gate(ctx, m, c.meta, d)
 	if err != nil {
 		return failure("", err)
 	}
@@ -143,7 +143,7 @@ func (s *service) deliver(ctx context.Context, m Message, c content, d Delivery)
 		provider = s.d.Push.Name()
 		providerID, err = s.d.Push.SendPush(ctx, PushMessage{
 			DeliveryID: d.ID, UserID: *m.UserID, Kind: m.Template, Title: c.notice.Title, Body: c.notice.Body,
-			LinkPath: m.LinkPath.String(), Data: opaqueData(m.Data),
+			LinkPath: m.LinkPath.String(), Data: opaqueData(m.Data), Channels: pushChannels,
 		})
 	case ChannelInApp:
 		provider, providerID = inAppProvider, d.ID.String()
@@ -169,18 +169,21 @@ const inAppProvider = "in_app"
 //   - commercial without a consent in force → skipped_no_consent (6563;
 //     consent.Checker.FilterActive);
 //   - transactional message to a user who switched its preference category
-//     off on this channel → skipped_preference (security never).
+//     off on this channel → skipped_preference (security never). A push
+//     reaches mobile devices (preference channel push) and browsers
+//     (web_push, BE-173): it is skipped only when both are off, and the
+//     channels still on are returned for the push transport (nil = all).
 //
 // Consent and preferences are disjoint: commercial messages ignore the
 // preferences, transactional ones never ask for consent.
-func (s *service) gate(ctx context.Context, m Message, meta TemplateMeta, d Delivery) (Status, error) {
+func (s *service) gate(ctx context.Context, m Message, meta TemplateMeta, d Delivery) (Status, []Channel, error) {
 	if m.Channel == ChannelEmail {
 		suppressed, err := s.d.Store.IsSuppressed(ctx, d.RecipientIndex)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		if suppressed {
-			return StatusSuppressed, nil
+			return StatusSuppressed, nil, nil
 		}
 	}
 	switch {
@@ -191,21 +194,34 @@ func (s *service) gate(ctx context.Context, m Message, meta TemplateMeta, d Deli
 		}
 		ok, err := s.consented(ctx, *m.UserID, purpose)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		if !ok {
-			return StatusSkippedNoConsent, nil
+			return StatusSkippedNoConsent, nil, nil
 		}
 	case m.UserID != nil:
-		ok, err := s.Allowed(ctx, *m.UserID, meta.Preference, m.Channel)
-		if err != nil {
-			return "", err
+		prefChannels := []Channel{m.Channel}
+		if m.Channel == ChannelPush {
+			prefChannels = append(prefChannels, ChannelWebPush)
 		}
-		if !ok {
-			return StatusSkippedPreference, nil
+		var allowed []Channel
+		for _, ch := range prefChannels {
+			ok, err := s.Allowed(ctx, *m.UserID, meta.Preference, ch)
+			if err != nil {
+				return "", nil, err
+			}
+			if ok {
+				allowed = append(allowed, ch)
+			}
+		}
+		if len(allowed) == 0 {
+			return StatusSkippedPreference, nil, nil
+		}
+		if m.Channel == ChannelPush {
+			return "", allowed, nil
 		}
 	}
-	return "", nil
+	return "", nil, nil
 }
 
 // consented asks the consent port for one user.

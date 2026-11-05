@@ -1104,6 +1104,18 @@
     "type": "urn:koro:problem:notify.suppression_not_found"
   },
   {
+    "code": "notify.web_push_subscription_not_found",
+    "status": 404,
+    "title": "Web push subscription not found",
+    "type": "urn:koro:problem:notify.web_push_subscription_not_found"
+  },
+  {
+    "code": "notify.web_push_unavailable",
+    "status": 503,
+    "title": "Web push is not available",
+    "type": "urn:koro:problem:notify.web_push_unavailable"
+  },
+  {
     "code": "orders.amount_exceeds_due",
     "status": 409,
     "title": "The amount exceeds what the order still waits for",

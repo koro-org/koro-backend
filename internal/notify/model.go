@@ -19,6 +19,16 @@ func (c Channel) valid() bool {
 	return c == ChannelEmail || c == ChannelPush || c == ChannelInApp
 }
 
+// ChannelWebPush is a preference channel only (BE-173): the push channel
+// reaches mobile devices (governed by ChannelPush) and browsers (web push
+// subscriptions and FCM web tokens, governed by ChannelWebPush). Messages
+// are never sent on it: a caller sends ChannelPush and the user's two
+// switches decide which surfaces get it.
+const ChannelWebPush Channel = "web_push"
+
+// prefValid reports whether c is a channel of the preferences.
+func (c Channel) prefValid() bool { return c.valid() || c == ChannelWebPush }
+
 // Category separates informational from commercial messages
 // (notification_deliveries.category). The separation is a legal one (Law
 // 6563): a transactional message must not promote goods or services, and a

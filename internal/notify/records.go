@@ -41,6 +41,10 @@ func (c PrefCategory) valid() bool {
 // Channels returns every delivery channel in 02 §6.1 order.
 func Channels() []Channel { return []Channel{ChannelEmail, ChannelPush, ChannelInApp} }
 
+// PrefChannels returns every channel of the preferences: the delivery
+// channels, then ChannelWebPush (BE-173).
+func PrefChannels() []Channel { return append(Channels(), ChannelWebPush) }
+
 // Preference is one (category, channel) switch of a user. A missing row
 // means DefaultEnabled.
 type Preference struct {
@@ -98,6 +102,23 @@ type PushToken struct {
 	CreatedAt   time.Time
 	LastSeenAt  time.Time
 	RevokedAt   *time.Time
+}
+
+// WebPushSubscription is one web_push_subscriptions row (BE-173): a browser
+// subscribed over the Push API (RFC 8030) with Koro's VAPID key. Endpoint
+// is a capability URL (whoever knows it can push to the browser) and P256DH
+// and Auth encrypt the payload (RFC 8291): none of them is ever returned by
+// the API, logged, audited or exported.
+type WebPushSubscription struct {
+	ID             uuid.UUID
+	UserID         uuid.UUID
+	SessionID      *uuid.UUID
+	Endpoint       string
+	EndpointSHA256 []byte // unique: one row per browser subscription
+	P256DH         []byte // the browser's P-256 public key, 65 bytes uncompressed
+	Auth           []byte // the authentication secret, 16 bytes
+	CreatedAt      time.Time
+	LastSeenAt     time.Time
 }
 
 // SuppressionReason is email_suppressions.reason.

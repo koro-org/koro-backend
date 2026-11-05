@@ -44,6 +44,7 @@ email_suppressions          policy:email_suppression
 push_tokens                 policy:push_token
 in_app_notifications        policy:in_app_notification
 notification_preferences    account:the user's notification settings; notify's provider deletes them on erasure
+web_push_subscriptions      account:the user's browsers (BE-173); deleted when the push service answers 404/410 or on erasure
 # orgs
 org_members                 policy:membership_ended,membership_ended_sensitive
 org_invitations             policy:org_invitation

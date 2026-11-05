@@ -506,6 +506,63 @@ func runStoreContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 			t.Fatalf("DeletePushTokensOf() = (%d, %v)", n, err)
 		}
 	})
+
+	t.Run("web push subscriptions", func(t *testing.T) {
+		t.Parallel()
+		w := newWorld(t)
+		uid, other := w.user(t), w.user(t)
+		key := append([]byte{4}, bytes.Repeat([]byte{1}, 64)...)
+		sub := func(user uuid.UUID, endpoint string, seen time.Time) notify.WebPushSubscription {
+			sum := sha256.Sum256([]byte(endpoint))
+			return notify.WebPushSubscription{ID: newID(), UserID: user, Endpoint: endpoint, EndpointSHA256: sum[:],
+				P256DH: key, Auth: bytes.Repeat([]byte{2}, 16), CreatedAt: t0, LastSeenAt: seen}
+		}
+		const ep = "https://fcm.googleapis.com/fcm/send/"
+		first, err := w.s.UpsertWebPushSubscription(t.Context(), sub(uid, ep+"a", t0), 3)
+		if err != nil || first.UserID != uid || first.Endpoint != ep+"a" || len(first.P256DH) != 65 || len(first.Auth) != 16 {
+			t.Fatalf("UpsertWebPushSubscription() = (%+v, %v)", first, err)
+		}
+		moved := sub(other, ep+"a", t0.Add(time.Hour))
+		moved.Auth = bytes.Repeat([]byte{3}, 16)
+		got, err := w.s.UpsertWebPushSubscription(t.Context(), moved, 3)
+		if err != nil || got.ID != first.ID || got.UserID != other || !bytes.Equal(got.Auth, moved.Auth) || !got.LastSeenAt.Equal(t0.Add(time.Hour)) {
+			t.Fatalf("re-register = (%+v, %v), want the same row moved to the other user", got, err)
+		}
+		if mine, _ := w.s.WebPushSubscriptionsOf(t.Context(), uid); len(mine) != 0 {
+			t.Fatalf("the first user still has %d subscriptions", len(mine))
+		}
+		// The cap: keep 3; the least recently seen others go, the new row stays.
+		b, _ := w.s.UpsertWebPushSubscription(t.Context(), sub(uid, ep+"b", t0.Add(2*time.Hour)), 3)
+		c, _ := w.s.UpsertWebPushSubscription(t.Context(), sub(uid, ep+"c", t0.Add(time.Hour)), 3)
+		d, _ := w.s.UpsertWebPushSubscription(t.Context(), sub(uid, ep+"d", t0), 3)
+		e, _ := w.s.UpsertWebPushSubscription(t.Context(), sub(uid, ep+"e", t0), 3)
+		left, _ := w.s.WebPushSubscriptionsOf(t.Context(), uid)
+		ids := map[uuid.UUID]bool{}
+		for _, l := range left {
+			ids[l.ID] = true
+		}
+		if len(left) != 3 || !ids[b.ID] || !ids[c.ID] || !ids[e.ID] || ids[d.ID] {
+			t.Fatalf("after the cap: %+v, want b, c and the new e", left)
+		}
+		if err := w.s.DeleteWebPushSubscription(t.Context(), uid, got.ID); !errors.Is(err, notify.ErrWebPushSubscriptionNotFound) {
+			t.Fatalf("deleting another user's subscription = %v, want not found", err)
+		}
+		if err := w.s.DeleteWebPushSubscription(t.Context(), uid, b.ID); err != nil {
+			t.Fatal(err)
+		}
+		if ok, err := w.s.DropWebPushSubscription(t.Context(), c.ID); err != nil || !ok {
+			t.Fatalf("DropWebPushSubscription() = (%v, %v)", ok, err)
+		}
+		if ok, _ := w.s.DropWebPushSubscription(t.Context(), c.ID); ok {
+			t.Fatal("a dropped subscription was dropped again")
+		}
+		if n, err := w.s.DeleteWebPushSubscriptionsOf(t.Context(), uid); err != nil || n != 1 {
+			t.Fatalf("DeleteWebPushSubscriptionsOf() = (%d, %v), want 1", n, err)
+		}
+		if rest, _ := w.s.WebPushSubscriptionsOf(t.Context(), other); len(rest) != 1 {
+			t.Fatal("another user's subscription was erased")
+		}
+	})
 }
 
 // runRetentionContract checks PurgeExpired (BE-057) on every notify table:

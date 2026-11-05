@@ -8220,6 +8220,23 @@ components:
         - key
         - count
       type: object
+    KeysStruct:
+      additionalProperties: false
+      properties:
+        auth:
+          description: The authentication secret (base64url)
+          maxLength: 24
+          minLength: 22
+          type: string
+        p256dh:
+          description: The browser's P-256 key (base64url)
+          maxLength: 88
+          minLength: 87
+          type: string
+      required:
+        - p256dh
+        - auth
+      type: object
     L3CVDTO:
       additionalProperties: false
       properties:
@@ -12145,10 +12162,12 @@ components:
             - moderation
           type: string
         channel:
+          description: "push: mobile devices; web_push: browsers (BE-173)"
           enum:
             - email
             - push
             - in_app
+            - web_push
           type: string
         enabled:
           type: boolean
@@ -12382,7 +12401,7 @@ components:
         items:
           items:
             $ref: "#/components/schemas/PreferenceDTO"
-          maxItems: 21
+          maxItems: 28
           minItems: 1
           type: array
       required:
@@ -13386,6 +13405,20 @@ components:
       required:
         - platform
         - token
+      type: object
+    RegisterWebPushInputBody:
+      additionalProperties: false
+      properties:
+        endpoint:
+          description: PushSubscription.endpoint (https)
+          maxLength: 2048
+          minLength: 1
+          type: string
+        keys:
+          $ref: "#/components/schemas/KeysStruct"
+      required:
+        - endpoint
+        - keys
       type: object
     RegistrantDTO:
       additionalProperties: false
@@ -17286,6 +17319,27 @@ components:
           type: string
       required:
         - void_reason
+      type: object
+    WebPushConfigDTO:
+      additionalProperties: false
+      properties:
+        enabled:
+          description: "false: web push is off on this server; do not offer it"
+          type: boolean
+        vapid_public_key:
+          description: applicationServerKey for PushManager.subscribe (base64url, uncompressed P-256 point)
+          type: string
+      required:
+        - enabled
+      type: object
+    WebPushSubscriptionCreatedDTO:
+      additionalProperties: false
+      properties:
+        web_push_subscription_id:
+          format: uuid
+          type: string
+      required:
+        - web_push_subscription_id
       type: object
   securitySchemes:
     bearerAuth:
@@ -31862,6 +31916,107 @@ paths:
       x-koro-rate-limit: write_default
       x-koro-surface: self
       x-koro-terms-gate: exempt
+  /api/v1/me/web-push-config:
+    get:
+      description: Whether web push is on and the VAPID public key to pass as applicationServerKey to PushManager.subscribe. A browser subscribed with another key must subscribe again (key rotation).
+      operationId: getMyWebPushConfig
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebPushConfigDTO"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get the web push settings
+      tags:
+        - notify
+      x-koro-action: notify.push_token.manage
+      x-koro-rate-limit: read_default
+      x-koro-surface: self
+  /api/v1/me/web-push-subscriptions:
+    post:
+      description: "The PushSubscription of the browser: its endpoint and keys (PushSubscription.toJSON().keys). The endpoint must belong to a known push service (FCM, Mozilla, Apple, Microsoft). Bound to the current session; registering a known endpoint again moves it to this account and session and returns the same ID. At most 10 browsers per user: a new one replaces the least recently registered. 503 notify.web_push_unavailable when web push is off."
+      operationId: registerMyWebPushSubscription
+      parameters:
+        - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+          in: header
+          name: Idempotency-Key
+          schema:
+            description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
+            maxLength: 255
+            minLength: 8
+            pattern: ^[A-Za-z0-9_-]+$
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterWebPushInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebPushSubscriptionCreatedDTO"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Register a browser's web push subscription
+      tags:
+        - notify
+      x-koro-action: notify.push_token.manage
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+      x-koro-terms-gate: enforced
+  /api/v1/me/web-push-subscriptions/{web_push_subscription_id}:
+    delete:
+      description: Call it before signing out of a shared browser and when the user turns web push off.
+      operationId: deleteMyWebPushSubscription
+      parameters:
+        - description: Web push subscription ID (an unknown or malformed ID is 404)
+          in: path
+          name: web_push_subscription_id
+          required: true
+          schema:
+            description: Web push subscription ID (an unknown or malformed ID is 404)
+            type: string
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Delete a browser's web push subscription
+      tags:
+        - notify
+      x-koro-action: notify.push_token.manage
+      x-koro-rate-limit: write_default
+      x-koro-surface: self
+      x-koro-terms-gate: enforced
   /api/v1/notices/current:
     get:
       description: The published version of every notice for the audience (falling back to audience all) in the Accept-Language locale (falling back to tr-TR). Privacy notices are shown, never consented to.

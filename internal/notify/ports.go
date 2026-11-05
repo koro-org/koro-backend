@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"slices"
 	"time"
 	"uuid"
 
@@ -35,11 +36,21 @@ type PushMessage struct {
 	Body       string
 	LinkPath   string
 	Data       map[string]string // opaque IDs
+	// Channels are the preference channels the user allows for this
+	// message (BE-173): ChannelPush reaches mobile devices, ChannelWebPush
+	// browsers (web push subscriptions and FCM web tokens). nil = both.
+	Channels []Channel
+}
+
+// allows reports whether the message may reach a surface of preference
+// channel ch.
+func (m PushMessage) allows(ch Channel) bool {
+	return m.Channels == nil || slices.Contains(m.Channels, ch)
 }
 
 // PushSender delivers push notifications: PushTransport (FCM/APNs over
-// Store.ActivePushTokens, BE-055), or NoopPush when no provider is
-// configured.
+// Store.ActivePushTokens, BE-055; web push over the browsers' subscriptions,
+// BE-173), or NoopPush when no provider is configured.
 type PushSender interface {
 	// Name is stored as the delivery's provider.
 	Name() string

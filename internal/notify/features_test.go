@@ -211,8 +211,8 @@ func TestPreferences_SecurityCannotBeDisabled_422(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(prefs) != 21 {
-		t.Fatalf("MyPreferences() = %d pairs, want 21 (defaults included)", len(prefs))
+	if len(prefs) != 28 {
+		t.Fatalf("MyPreferences() = %d pairs, want 28 (defaults included)", len(prefs))
 	}
 	for _, p := range prefs {
 		want := notify.DefaultEnabled(p.Category, p.Channel)

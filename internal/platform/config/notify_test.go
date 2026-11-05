@@ -143,6 +143,13 @@ func TestNotify_PushValidation(t *testing.T) {
 		{"apns half", notifyDevEnv("PUSH_APNS_KEY_ID", "ABC123DEFG"), "must be set together"},
 		{"timeout", notifyDevEnv("PUSH_TIMEOUT", "0s"), "PUSH_TIMEOUT"},
 		{"sandbox in prod", map[string]string{"APP_ENV": "prod", "PUSH_APNS_SANDBOX": "true"}, "PUSH_APNS_SANDBOX=true is not allowed"},
+		// Web push (BE-173): key and subject together; the subject is a contact URI.
+		{"webpush", notifyDevEnv("PUSH_VAPID_PRIVATE_KEY", "test-only-vapid-key", "PUSH_VAPID_SUBJECT", "mailto:push@koro.test"), ""},
+		{"required with webpush", notifyDevEnv("PUSH_REQUIRED", "true", "PUSH_VAPID_PRIVATE_KEY", "test-only-vapid-key",
+			"PUSH_VAPID_SUBJECT", "https://koro.test/contact"), ""},
+		{"webpush half", notifyDevEnv("PUSH_VAPID_SUBJECT", "mailto:push@koro.test"), "PUSH_VAPID_PRIVATE_KEY and PUSH_VAPID_SUBJECT must be set together"},
+		{"webpush bad subject", notifyDevEnv("PUSH_VAPID_PRIVATE_KEY", "test-only-vapid-key", "PUSH_VAPID_SUBJECT", "push@koro.test"),
+			"PUSH_VAPID_SUBJECT must be a mailto: address or an https URL"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

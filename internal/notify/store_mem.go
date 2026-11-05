@@ -23,6 +23,7 @@ type memStore struct {
 	prefs        map[prefKey]bool
 	inApp        map[uuid.UUID]InAppNotification
 	tokens       map[uuid.UUID]PushToken
+	webSubs      map[uuid.UUID]WebPushSubscription
 }
 
 type prefKey struct {
@@ -37,6 +38,7 @@ func NewMemStore() Store {
 		rows: map[uuid.UUID]Delivery{}, byKey: map[string]uuid.UUID{},
 		suppressions: map[string]Suppression{}, prefs: map[prefKey]bool{},
 		inApp: map[uuid.UUID]InAppNotification{}, tokens: map[uuid.UUID]PushToken{},
+		webSubs: map[uuid.UUID]WebPushSubscription{},
 	}
 }
 

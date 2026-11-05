@@ -51,6 +51,15 @@ var (
 	// another user.
 	ErrPushTokenNotFound = problem.New(problem.NotFound, "notify.push_token_not_found", "Push token not found")
 
+	// ErrWebPushSubscriptionNotFound: the web push subscription does not
+	// exist or belongs to another user (BE-173).
+	ErrWebPushSubscriptionNotFound = problem.New(problem.NotFound, "notify.web_push_subscription_not_found",
+		"Web push subscription not found")
+
+	// ErrWebPushUnavailable: no VAPID key is configured, so browsers cannot
+	// subscribe (BE-173: the web push channel is off).
+	ErrWebPushUnavailable = problem.New(problem.Unavailable, "notify.web_push_unavailable", "Web push is not available")
+
 	// ErrSuppressionNotFound: no suppression with this ID.
 	ErrSuppressionNotFound = problem.New(problem.NotFound, "notify.suppression_not_found", "E-mail suppression not found")
 

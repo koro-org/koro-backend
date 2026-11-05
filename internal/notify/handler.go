@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"encoding/base64"
 	"net/http"
 	"strings"
 	"time"
@@ -76,6 +77,30 @@ func Register(api huma.API, svc Service) {
 		OperationID: "deleteMyPushToken", Method: http.MethodDelete, Path: "/me/push-tokens/{push_token_id}", Tags: tags,
 		Summary: "Delete a push token", DefaultStatus: http.StatusNoContent,
 	}, op.Meta{Action: string(authz.NotifyPushTokenManage), Surface: op.SurfaceSelf}), h.deletePush)
+
+	huma.Register(api, op.Koro(huma.Operation{
+		OperationID: "getMyWebPushConfig", Method: http.MethodGet, Path: "/me/web-push-config", Tags: tags,
+		Summary: "Get the web push settings",
+		Description: "Whether web push is on and the VAPID public key to pass as applicationServerKey to " +
+			"PushManager.subscribe. A browser subscribed with another key must subscribe again (key rotation).",
+	}, op.Meta{Action: string(authz.NotifyPushTokenManage), Surface: op.SurfaceSelf}), h.webPushConfig)
+
+	huma.Register(api, op.Koro(huma.Operation{
+		OperationID: "registerMyWebPushSubscription", Method: http.MethodPost, Path: "/me/web-push-subscriptions", Tags: tags,
+		Summary: "Register a browser's web push subscription", DefaultStatus: http.StatusCreated,
+		Description: "The PushSubscription of the browser: its endpoint and keys (PushSubscription.toJSON().keys). " +
+			"The endpoint must belong to a known push service (FCM, Mozilla, Apple, Microsoft). Bound to the current " +
+			"session; registering a known endpoint again moves it to this account and session and returns the same ID. " +
+			"At most 10 browsers per user: a new one replaces the least recently registered. 503 " +
+			"notify.web_push_unavailable when web push is off.",
+	}, op.Meta{Action: string(authz.NotifyPushTokenManage), Surface: op.SurfaceSelf, Idempotency: op.IdempotencyOptional}), h.registerWebPush)
+
+	huma.Register(api, op.Koro(huma.Operation{
+		OperationID: "deleteMyWebPushSubscription", Method: http.MethodDelete,
+		Path: "/me/web-push-subscriptions/{web_push_subscription_id}", Tags: tags,
+		Summary: "Delete a browser's web push subscription", DefaultStatus: http.StatusNoContent,
+		Description: "Call it before signing out of a shared browser and when the user turns web push off.",
+	}, op.Meta{Action: string(authz.NotifyPushTokenManage), Surface: op.SurfaceSelf}), h.deleteWebPush)
 
 	op.Register(api, "notify", huma.Operation{
 		OperationID: "adminQueryEmailSuppressions", Method: http.MethodPost, Path: "/admin/email-suppressions/search", Tags: tags,
@@ -212,7 +237,7 @@ func (h handler) getPreferences(ctx context.Context, _ *struct{}) (*preferencesO
 
 type putPreferencesInput struct {
 	Body struct {
-		Items []PreferenceDTO `json:"items" minItems:"1" maxItems:"21"`
+		Items []PreferenceDTO `json:"items" minItems:"1" maxItems:"28"`
 	}
 }
 
@@ -275,6 +300,79 @@ func (h handler) deletePush(ctx context.Context, in *deletePushInput) (*struct{}
 		return nil, ErrPushTokenNotFound
 	}
 	return nil, h.svc.DeletePushToken(ctx, a, id)
+}
+
+// ---- web push (BE-173)
+
+type webPushConfigOutput struct {
+	Body WebPushConfigDTO
+}
+
+func (h handler) webPushConfig(ctx context.Context, _ *struct{}) (*webPushConfigOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	st, err := h.svc.MyWebPushSettings(ctx, a)
+	if err != nil {
+		return nil, err
+	}
+	return &webPushConfigOutput{Body: WebPushConfigDTO(st)}, nil
+}
+
+type registerWebPushInput struct {
+	idempotency.OptionalHeader
+	Body struct {
+		Endpoint string `json:"endpoint" minLength:"1" maxLength:"2048" doc:"PushSubscription.endpoint (https)"`
+		Keys     struct {
+			P256DH string `json:"p256dh" minLength:"87" maxLength:"88" doc:"The browser's P-256 key (base64url)"`
+			Auth   string `json:"auth" minLength:"22" maxLength:"24" doc:"The authentication secret (base64url)"`
+		} `json:"keys"`
+	}
+}
+
+type registerWebPushOutput struct {
+	Body WebPushSubscriptionCreatedDTO
+}
+
+// b64url decodes a base64url key with or without padding; nil when it is
+// not base64url (the service reports the field).
+func b64url(s string) []byte {
+	b, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(s, "="))
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+func (h handler) registerWebPush(ctx context.Context, in *registerWebPushInput) (*registerWebPushOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	id, err := h.svc.RegisterWebPushSubscription(ctx, a, WebPushSubscriptionInput{
+		Endpoint: in.Body.Endpoint, P256DH: b64url(in.Body.Keys.P256DH), Auth: b64url(in.Body.Keys.Auth),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &registerWebPushOutput{Body: WebPushSubscriptionCreatedDTO{WebPushSubscriptionID: id.String()}}, nil
+}
+
+type deleteWebPushInput struct {
+	WebPushSubscriptionID string `path:"web_push_subscription_id" doc:"Web push subscription ID (an unknown or malformed ID is 404)"`
+}
+
+func (h handler) deleteWebPush(ctx context.Context, in *deleteWebPushInput) (*struct{}, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	id, err := uuid.Parse(in.WebPushSubscriptionID)
+	if err != nil {
+		return nil, ErrWebPushSubscriptionNotFound
+	}
+	return nil, h.svc.DeleteWebPushSubscription(ctx, a, id)
 }
 
 // ---- admin: suppressions

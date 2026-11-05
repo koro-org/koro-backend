@@ -18,6 +18,7 @@ type Store interface {
 	PreferenceStore
 	InAppStore
 	PushTokenStore
+	WebPushStore
 	RetentionStore
 }
 
@@ -153,6 +154,29 @@ type PushTokenStore interface {
 	PushTokensOf(ctx context.Context, userID uuid.UUID) ([]PushToken, error)
 	// DeletePushTokensOf deletes every token of userID (KVKK erasure).
 	DeletePushTokensOf(ctx context.Context, userID uuid.UUID) (int, error)
+}
+
+// WebPushStore persists web_push_subscriptions (BE-173).
+type WebPushStore interface {
+	// UpsertWebPushSubscription stores s, or, when a row with
+	// s.EndpointSHA256 exists (the browser subscribes again, possibly for
+	// another account), moves it to s's user and session and refreshes its
+	// keys and last_seen_at. It then deletes the user's other subscriptions
+	// beyond the keep-1 most recently seen ones (the per-user cap: the
+	// stored row always survives) and returns the stored row.
+	UpsertWebPushSubscription(ctx context.Context, s WebPushSubscription, keep int) (WebPushSubscription, error)
+	// DeleteWebPushSubscription deletes the subscription id of userID;
+	// ErrWebPushSubscriptionNotFound when userID has no such subscription.
+	DeleteWebPushSubscription(ctx context.Context, userID, id uuid.UUID) error
+	// WebPushSubscriptionsOf returns every subscription of userID in id
+	// order (the push transport, the KVKK export).
+	WebPushSubscriptionsOf(ctx context.Context, userID uuid.UUID) ([]WebPushSubscription, error)
+	// DropWebPushSubscription deletes subscription id when the push service
+	// reports it gone (404/410); false when it is unknown.
+	DropWebPushSubscription(ctx context.Context, id uuid.UUID) (bool, error)
+	// DeleteWebPushSubscriptionsOf deletes every subscription of userID
+	// (KVKK erasure).
+	DeleteWebPushSubscriptionsOf(ctx context.Context, userID uuid.UUID) (int, error)
 }
 
 // ClaimState is the outcome of Store.Claim.

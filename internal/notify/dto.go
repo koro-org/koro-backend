@@ -45,7 +45,7 @@ func toNotificationDTO(n InAppNotification) NotificationDTO {
 // PreferenceDTO is one (category, channel) switch.
 type PreferenceDTO struct {
 	Category string `json:"category" enum:"security,registration_updates,event_updates,contact_requests,feed_follows,orders_payments,moderation"`
-	Channel  string `json:"channel" enum:"email,push,in_app"`
+	Channel  string `json:"channel" enum:"email,push,in_app,web_push" doc:"push: mobile devices; web_push: browsers (BE-173)"`
 	Enabled  bool   `json:"enabled"`
 }
 
@@ -65,6 +65,17 @@ func toPreferenceList(prefs []Preference) PreferenceList {
 // PushTokenCreatedDTO answers registerMyPushToken.
 type PushTokenCreatedDTO struct {
 	PushTokenID string `json:"push_token_id" format:"uuid"`
+}
+
+// WebPushConfigDTO answers getMyWebPushConfig (BE-173).
+type WebPushConfigDTO struct {
+	Enabled        bool   `json:"enabled" doc:"false: web push is off on this server; do not offer it"`
+	VAPIDPublicKey string `json:"vapid_public_key,omitempty" doc:"applicationServerKey for PushManager.subscribe (base64url, uncompressed P-256 point)"`
+}
+
+// WebPushSubscriptionCreatedDTO answers registerMyWebPushSubscription.
+type WebPushSubscriptionCreatedDTO struct {
+	WebPushSubscriptionID string `json:"web_push_subscription_id" format:"uuid"`
 }
 
 // SuppressionDTO is one suppressed address (no address: only its ID).

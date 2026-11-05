@@ -115,6 +115,7 @@ func TestProviders_PushSelection(t *testing.T) {
 	apns := []string{"PUSH_APNS_KEY", "test-only-apns-key", "PUSH_APNS_KEY_ID", "ABC123DEFG",
 		"PUSH_APNS_TEAM_ID", "TEAM123456", "PUSH_APNS_TOPIC", "app.koro.mobile"}
 	both := append(append([]string{}, fcm...), apns...)
+	vapid := []string{"PUSH_VAPID_PRIVATE_KEY", "test-only-vapid-key", "PUSH_VAPID_SUBJECT", "mailto:push@koro.test"} // BE-173
 	with := func(provider string, kv []string) map[string]string {
 		return storageEnv(append([]string{"NOTIFY_PUSH_PROVIDER", provider}, kv...)...)
 	}
@@ -126,11 +127,14 @@ func TestProviders_PushSelection(t *testing.T) {
 	}{
 		{"auto, both configured", with("auto", both), []string{"fcm", "apns"}, ""},
 		{"auto, fcm configured", with("auto", fcm), []string{"fcm"}, ""},
+		{"auto, every provider configured", with("auto", append(append([]string{}, both...), vapid...)), []string{"fcm", "apns", "webpush"}, ""},
+		{"webpush only although fcm is configured", with("webpush", append(append([]string{}, fcm...), vapid...)), []string{"webpush"}, ""},
+		{"webpush listed but not configured", with("fcm,webpush", fcm), nil, "NOTIFY_PUSH_PROVIDER lists webpush"},
 		{"fcm only although apns is configured", with("fcm", both), []string{"fcm"}, ""},
 		{"list in any order and case", with(" APNS , fcm ", both), []string{"fcm", "apns"}, ""},
 		{"noop although configured", with("noop", both), nil, ""},
 		{"listed but not configured", with("apns", fcm), nil, "NOTIFY_PUSH_PROVIDER lists apns"},
-		{"unknown provider", with("fcm,hms", both), nil, "NOTIFY_PUSH_PROVIDER must be auto, noop or a list of fcm or apns"},
+		{"unknown provider", with("fcm,hms", both), nil, "NOTIFY_PUSH_PROVIDER must be auto, noop or a list of fcm, apns or webpush"},
 		{"repeated provider", with("fcm,fcm", fcm), nil, "without repeats"},
 		{"auto in a list", with("auto,fcm", fcm), nil, "NOTIFY_PUSH_PROVIDER must be"},
 		{"required with noop", with("noop", append([]string{"PUSH_REQUIRED", "true"}, fcm...)), nil, "PUSH_REQUIRED=true needs"},

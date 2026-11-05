@@ -12,6 +12,10 @@ const (
 	TypeEmailSuppression = "email_suppression"
 	// TypeEmailWebhook is a provider webhook delivery (receiveEmailWebhook).
 	TypeEmailWebhook = "email_webhook"
+	// TypeWebPushSubscription is a browser's web push subscription
+	// (BE-173): managed with notify.push_token.manage like a device token,
+	// OwnerUserID = the subscriber.
+	TypeWebPushSubscription = "web_push_subscription"
 )
 
 // notifyPolicy is the policy of the notify module (03 §5.19). Only tickets of
@@ -21,7 +25,7 @@ const (
 //	notify.in_app.mark_read          O
 //	notify.preference.read_own       O
 //	notify.preference.update_own     O (security cannot be switched off: service, 422)
-//	notify.push_token.manage         O
+//	notify.push_token.manage         O (device tokens and, BE-173, web push subscriptions)
 //	notify.suppression.manage        support B, platform_admin B
 //	notify.delivery.list             support B, platform_admin B
 //	notify.provider_webhook.receive  P (identity = the provider signature, checked by the service)
@@ -31,7 +35,7 @@ const (
 // allow-list only.
 //
 // Resources (03 §3.5; 06 H-27): the O actions pass notification,
-// notification_pref or push_token with OwnerUserID = the owner (the actor
+// notification_pref, push_token or web_push_subscription with OwnerUserID = the owner (the actor
 // on /me; another user's row is not found, 03 §7.2); the B actions pass
 // notification_delivery (OwnerUserID = the user whose log is read) or
 // email_suppression, both with Attrs access_reason. The /admin operations
@@ -43,6 +47,7 @@ func notifyPolicy() Policy {
 			TypeNotificationDelivery: {AttrAccessReason},
 			TypeEmailSuppression:     {AttrAccessReason},
 			TypeEmailWebhook:         nil,
+			TypeWebPushSubscription:  nil,
 		},
 		Visible: func(a Actor, act Action, r Resource) bool {
 			switch act {
@@ -51,7 +56,7 @@ func notifyPolicy() Policy {
 			case NotifyPreferenceReadOwn, NotifyPreferenceUpdateOwn:
 				return r.Type == TypeNotificationPref && a.Owns(r)
 			case NotifyPushTokenManage:
-				return r.Type == TypePushToken && a.Owns(r)
+				return (r.Type == TypePushToken || r.Type == TypeWebPushSubscription) && a.Owns(r)
 			case NotifySuppressionManage:
 				return r.Type == TypeEmailSuppression && AdminSurfaceVisible(a)
 			case NotifyDeliveryList:

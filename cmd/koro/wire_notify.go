@@ -21,7 +21,7 @@ import (
 )
 
 // notifyWiring wires the notify module (L3; 01 §4.5). Owner: BE-005, then
-// BE-015, BE-055 (push), BE-113 (adapter selection). Only tickets of the notify
+// BE-015, BE-055 (push), BE-113 (adapter selection), BE-173 (web push). Only tickets of the notify
 // module edit this file (BE-001 R4).
 //
 // Seams (all nil in production unless noted):
@@ -41,8 +41,8 @@ import (
 //	           in-memory audit store of the tests
 //	cursor     nil → Redis (the audit alert job position), in-memory without Redis
 //	push       nil → the NOTIFY_PUSH_PROVIDER adapter (newPushSender:
-//	           notify.PushTransport over FCM/APNs from PUSH_*, BE-055, or the
-//	           no-op adapter)
+//	           notify.PushTransport over FCM/APNs/web push from PUSH_*,
+//	           BE-055, BE-173, or the no-op adapter)
 //	cfg        tests only; nil → the notify section of the loaded configuration
 //
 // Late binding (R4; filled by a higher layer, read at call time):
@@ -63,6 +63,10 @@ type notifyWiring struct {
 	cursor    notify.CursorStore
 	push      notify.PushSender
 	cfg       *config.Notify
+	// webPushKey: tests only; announces web push (the VAPID public key of
+	// getMyWebPushConfig) without a web push sender. "" → the key of the
+	// built transport's web push adapter, if any.
+	webPushKey string
 
 	platformAdmins func(ctx context.Context) ([]uuid.UUID, error)
 
@@ -227,6 +231,10 @@ func (w *notifyWiring) build(c *container) error {
 			return err
 		}
 	}
+	webPushKey := w.webPushKey
+	if pt, ok := push.(*notify.PushTransport); ok && webPushKey == "" {
+		webPushKey = pt.WebPushKey()
+	}
 
 	d := notify.Deps{
 		Store:       store,
@@ -241,6 +249,7 @@ func (w *notifyWiring) build(c *container) error {
 		Audit:       c.audit.svc,
 		Consent:     consentChecker,
 		Push:        push,
+		WebPushKey:  webPushKey,
 		Webhooks:    notify.WebhookConfig{ResendSecret: resendSecret, SESTopicARNs: cfg.SESTopicARNs(), SNSCerts: certs},
 		AuditFeed:   feed,
 		Cursor:      cursor,
@@ -283,9 +292,17 @@ func emailTransports(cfg config.Notify) adapters[notify.EmailTransport] {
 // pushOption installs one push provider into the push transport.
 type pushOption func(*notify.PushTransportConfig)
 
+// pushStore is what the push transport reads: device tokens and web push
+// subscriptions (notify.Store has both).
+type pushStore interface {
+	notify.PushTokens
+	notify.WebPushSubscriptions
+}
+
 // pushProviders is the selection point of NOTIFY_PUSH_PROVIDER (BE-113): one
-// line per push provider of notify.PushTransport (BE-055). The transport
-// routes each device to the provider of its platform.
+// line per push provider of notify.PushTransport (BE-055; webpush BE-173).
+// The transport routes each device to the provider of its platform and each
+// browser subscription to web push.
 func pushProviders(cfg config.Notify, c *container) adapters[pushOption] {
 	return adapters[pushOption]{
 		config.PushProviderFCM: func() (pushOption, error) {
@@ -305,6 +322,14 @@ func pushProviders(cfg config.Notify, c *container) adapters[pushOption] {
 			}
 			return func(p *notify.PushTransportConfig) { p.APNs = a }, nil
 		},
+		config.PushProviderWebPush: func() (pushOption, error) {
+			wp, err := notify.NewWebPush(notify.WebPushConfig{PrivateKey: cfg.PushVAPIDPrivateKey.Reveal(),
+				Subject: cfg.PushVAPIDSubject, Timeout: cfg.PushTimeout, Clock: c.infra.clock})
+			if err != nil {
+				return nil, err
+			}
+			return func(p *notify.PushTransportConfig) { p.WebPush = wp }, nil
+		},
 	}
 }
 
@@ -312,15 +337,15 @@ func pushProviders(cfg config.Notify, c *container) adapters[pushOption] {
 // the FCM/APNs transport over the resolved providers, or the no-op adapter
 // when none is (an error when PUSH_REQUIRED, also caught by config
 // validation). A credential that does not parse stops the process.
-func newPushSender(cfg config.Notify, tokens notify.PushTokens, c *container) (notify.PushSender, error) {
+func newPushSender(cfg config.Notify, store pushStore, c *container) (notify.PushSender, error) {
 	names := cfg.ActivePushProviders()
 	if len(names) == 0 {
 		if cfg.PushRequired {
-			return nil, errors.New("notify: PUSH_REQUIRED=true but neither FCM nor APNs is configured")
+			return nil, errors.New("notify: PUSH_REQUIRED=true but no push provider (FCM, APNs, web push) is configured")
 		}
 		return notify.NoopPush{}, nil
 	}
-	tc := notify.PushTransportConfig{Tokens: tokens, Clock: c.infra.clock,
+	tc := notify.PushTransportConfig{Tokens: store, Subscriptions: store, Clock: c.infra.clock,
 		Log: c.infra.log.With("module", "notify", "component", "push")}
 	options := pushProviders(cfg, c)
 	for _, name := range names {
@@ -342,6 +367,6 @@ func (w *notifyWiring) tasks(c *container) {
 	}
 }
 
-// routes: the 11 notify operations (04 §2.19, §2.0); w.svc is nil under
+// routes: the 14 notify operations (04 §2.19, §2.0; BE-173 web push); w.svc is nil under
 // `koro openapi`, which Register tolerates.
 func (w *notifyWiring) routes(c *container, api huma.API) { notify.Register(api, w.svc) }

@@ -9,6 +9,11 @@
 // Push (BE-055): PushTransport sends over FCM HTTP v1 (Android, web) and
 // APNs (iOS, token-based) and revokes the device tokens the providers
 // report invalid; without provider settings NoopPush records the delivery.
+// Web push (BE-173): browsers subscribe with the VAPID key
+// (/me/web-push-subscriptions) and PushTransport reaches them over the Web
+// Push protocol (WebPush: RFC 8030, 8291, 8292), deleting a subscription
+// the push service reports gone. The user switches mobile push (push) and
+// browser push (web_push) separately per category.
 //
 // What lives elsewhere: the retention job notify.purge (BE-057); the ticket
 // e-mail itself (BE-031).
@@ -116,6 +121,15 @@ type Service interface {
 	RegisterPushToken(ctx context.Context, a authz.Actor, in PushTokenInput) (uuid.UUID, error)
 	// DeletePushToken is deleteMyPushToken (notify.push_token.manage).
 	DeletePushToken(ctx context.Context, a authz.Actor, id uuid.UUID) error
+	// MyWebPushSettings is getMyWebPushConfig (notify.push_token.manage):
+	// whether web push is on and the VAPID public key (BE-173).
+	MyWebPushSettings(ctx context.Context, a authz.Actor) (WebPushSettings, error)
+	// RegisterWebPushSubscription is registerMyWebPushSubscription
+	// (notify.push_token.manage); 503 when web push is off.
+	RegisterWebPushSubscription(ctx context.Context, a authz.Actor, in WebPushSubscriptionInput) (uuid.UUID, error)
+	// DeleteWebPushSubscription is deleteMyWebPushSubscription
+	// (notify.push_token.manage).
+	DeleteWebPushSubscription(ctx context.Context, a authz.Actor, id uuid.UUID) error
 	// AdminListSuppressions is adminQueryEmailSuppressions
 	// (notify.suppression.manage, B).
 	AdminListSuppressions(ctx context.Context, a authz.Actor, access Access, q SuppressionQuery) (SuppressionPage, error)
@@ -158,6 +172,10 @@ type Deps struct {
 	Consent ConsentChecker
 	// Push delivers the push channel (PushTransport). nil → NoopPush.
 	Push PushSender
+	// WebPushKey is the VAPID public key of the web push adapter Push uses
+	// (WebPush.PublicKey; BE-173). "" → web push is off: browsers cannot
+	// subscribe (503).
+	WebPushKey string
 
 	// Inbox stores provider webhooks. nil → receiveEmailWebhook answers 503.
 	Inbox WebhookInbox

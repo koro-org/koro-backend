@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"net/url"
 	"time"
 	"uuid"
 
@@ -10,8 +11,9 @@ import (
 
 // privacyProvider is the KVKK provider of notify (01 §3.3). Export lists the
 // user's deliveries (IDs, channel, template, status; never content),
-// preferences, push tokens (never the token) and in-app notifications.
-// Erase deletes all four. The suppression list is not linked to a user
+// preferences, push tokens (never the token), web push subscriptions (never
+// the endpoint or the keys; BE-173) and in-app notifications. Erase deletes
+// all five. The suppression list is not linked to a user
 // (blind index only) and stays: it honours a complaint or a dead mailbox
 // (02 §6.2, retention email_suppression).
 type privacyProvider struct{ s *service }
@@ -74,6 +76,16 @@ func (p privacyProvider) Export(ctx context.Context, userID uuid.UUID) (privacy.
 		out.Items = append(out.Items, item)
 	}
 
+	subs, err := st.WebPushSubscriptionsOf(ctx, userID)
+	if err != nil {
+		return privacy.ExportSection{}, err
+	}
+	for _, w := range subs {
+		out.Items = append(out.Items, map[string]any{"kind": "web_push_subscription", "web_push_subscription_id": w.ID.String(),
+			"push_service": webPushService(w.Endpoint), "created_at": w.CreatedAt.UTC().Format(time.RFC3339),
+			"last_seen_at": w.LastSeenAt.UTC().Format(time.RFC3339)})
+	}
+
 	after = nil
 	for {
 		rows, err := st.ListInApp(ctx, userID, false, after, exportPage)
@@ -104,7 +116,7 @@ func (p privacyProvider) Erase(ctx context.Context, userID uuid.UUID) (privacy.E
 	err := p.s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		st := p.s.d.Store
 		for _, del := range []func(context.Context, uuid.UUID) (int, error){
-			st.DeleteInAppOf, st.DeletePushTokensOf, st.DeletePreferencesOf, st.DeleteDeliveriesOf,
+			st.DeleteInAppOf, st.DeletePushTokensOf, st.DeleteWebPushSubscriptionsOf, st.DeletePreferencesOf, st.DeleteDeliveriesOf,
 		} {
 			n, err := del(ctx, userID)
 			if err != nil {
@@ -118,4 +130,15 @@ func (p privacyProvider) Erase(ctx context.Context, userID uuid.UUID) (privacy.E
 		return privacy.EraseResult{}, err
 	}
 	return res, nil
+}
+
+// webPushService is the host of a subscription endpoint (which browser
+// vendor's push service holds it): the export names it, never the
+// endpoint, a capability URL.
+func webPushService(endpoint string) string {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
 }

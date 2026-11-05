@@ -47,6 +47,9 @@ func TestNotifyPolicy_Matrix(t *testing.T) {
 			map[string]error{"anonymous": forbidden}, nil},
 		{"push_token.manage", authz.NotifyPushTokenManage, func(p authztest.Persona) authz.Resource { return ownedBy(authz.TypePushToken, p.Name) },
 			map[string]error{"anonymous": forbidden}, nil},
+		{"push_token.manage web push subscription", authz.NotifyPushTokenManage, func(p authztest.Persona) authz.Resource {
+			return ownedBy(authz.TypeWebPushSubscription, p.Name)
+		}, map[string]error{"anonymous": forbidden}, nil},
 		{"suppression.manage no reason", authz.NotifySuppressionManage, func(authztest.Persona) authz.Resource { return suppressionList("") },
 			map[string]error{"anonymous": forbidden, "support": authz.ErrBreakGlassReason, "platform_admin": authz.ErrBreakGlassReason}, forbidden},
 		{"suppression.manage with reason", authz.NotifySuppressionManage, func(authztest.Persona) authz.Resource { return suppressionList(reason) },
@@ -85,6 +88,7 @@ func TestNotifyPolicy_EdgeCases(t *testing.T) {
 		}{
 			{authz.NotifyInAppListOwn, authz.TypeNotification}, {authz.NotifyInAppMarkRead, authz.TypeNotification},
 			{authz.NotifyPreferenceUpdateOwn, authz.TypeNotificationPref}, {authz.NotifyPushTokenManage, authz.TypePushToken},
+			{authz.NotifyPushTokenManage, authz.TypeWebPushSubscription},
 		} {
 			wantErr(t, authz.Can(ctx, persona(t, name), c.act, ownedBy(c.typ, "student")), authz.ErrNotFound, false)
 		}

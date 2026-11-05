@@ -132,20 +132,31 @@ func (a *APNs) providerToken(force bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256([]byte(input))
-	der, err := ecdsa.SignASN1(rand.Reader, a.key, sum[:])
+	tok, err := signES256(a.key, input)
 	if err != nil {
-		return "", fmt.Errorf("apns: sign: %w", err)
+		return "", fmt.Errorf("apns: %w", err)
+	}
+	a.token, a.issuedAt = tok, now
+	return a.token, nil
+}
+
+// signES256 returns the JWS compact serialisation of input (header.claims)
+// signed with ES256 (RFC 7518 §3.4: R ‖ S, 32 bytes each). APNs provider
+// tokens and VAPID tokens (RFC 8292) use it.
+func signES256(key *ecdsa.PrivateKey, input string) (string, error) {
+	sum := sha256.Sum256([]byte(input))
+	der, err := ecdsa.SignASN1(rand.Reader, key, sum[:])
+	if err != nil {
+		return "", fmt.Errorf("sign: %w", err)
 	}
 	var sig struct{ R, S *big.Int }
 	if _, err := asn1.Unmarshal(der, &sig); err != nil {
-		return "", fmt.Errorf("apns: sign: %w", err)
+		return "", fmt.Errorf("sign: %w", err)
 	}
-	raw := make([]byte, 64) // JWS ES256: R ‖ S, 32 bytes each
+	raw := make([]byte, 64)
 	sig.R.FillBytes(raw[:32])
 	sig.S.FillBytes(raw[32:])
-	a.token, a.issuedAt = input+"."+base64.RawURLEncoding.EncodeToString(raw), now
-	return a.token, nil
+	return input + "." + base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
 type apnsPayload struct {

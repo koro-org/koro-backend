@@ -55,8 +55,8 @@ type Notify struct {
 
 	// Push (BE-055). PushProvider selects the notify.PushSender adapter
 	// (NOTIFY_PUSH_PROVIDER, BE-113): "auto" (default: every provider whose
-	// settings are complete; neither → the no-op adapter, the behaviour
-	// before BE-113), a comma-separated list of "fcm" and "apns" (each
+	// settings are complete; none → the no-op adapter, the behaviour
+	// before BE-113), a comma-separated list of "fcm", "apns" and "webpush" (each
 	// listed provider must be configured; an unlisted one stays off), or
 	// "noop" (development only, refused in staging and prod). PushRequired
 	// refuses to start without at least one provider.
@@ -74,6 +74,12 @@ type Notify struct {
 	PushAPNsTeamID  string `env:"PUSH_APNS_TEAM_ID"`
 	PushAPNsTopic   string `env:"PUSH_APNS_TOPIC"`
 	PushAPNsSandbox bool   `env:"PUSH_APNS_SANDBOX" envDefault:"false"`
+	// PushVAPIDPrivateKey (the P-256 private scalar, base64url;
+	// PUSH_VAPID_PRIVATE_KEY_FILE) and PushVAPIDSubject (mailto: or https:
+	// contact, RFC 8292) enable web push to browsers (BE-173). Without them
+	// the web push channel is off.
+	PushVAPIDPrivateKey Secret `env:"PUSH_VAPID_PRIVATE_KEY"`
+	PushVAPIDSubject    string `env:"PUSH_VAPID_SUBJECT"`
 	// PushTimeout bounds one provider request.
 	PushTimeout time.Duration `env:"PUSH_TIMEOUT" envDefault:"10s"`
 }
@@ -95,11 +101,15 @@ const (
 	PushProviderNoop = ProviderNoop
 	PushProviderFCM  = "fcm"
 	PushProviderAPNs = "apns"
+	// PushProviderWebPush is web push to browsers with the VAPID key (BE-173).
+	PushProviderWebPush = "webpush"
 )
 
 // PushProviders lists the push providers a NOTIFY_PUSH_PROVIDER list may
 // name; cmd/koro has one constructor per name (wire_notify.go).
-func PushProviders() []string { return []string{PushProviderFCM, PushProviderAPNs} }
+func PushProviders() []string {
+	return []string{PushProviderFCM, PushProviderAPNs, PushProviderWebPush}
+}
 
 // ActivePushProviders resolves NOTIFY_PUSH_PROVIDER (validated) to the push
 // providers to build, in PushProviders order; empty means the no-op adapter.
@@ -108,7 +118,8 @@ func (n Notify) ActivePushProviders() []string {
 	for _, p := range PushProviders() {
 		switch {
 		case n.PushProvider == PushProviderAuto:
-			if (p == PushProviderFCM && n.FCMEnabled()) || (p == PushProviderAPNs && n.APNsEnabled()) {
+			if (p == PushProviderFCM && n.FCMEnabled()) || (p == PushProviderAPNs && n.APNsEnabled()) ||
+				(p == PushProviderWebPush && n.WebPushEnabled()) {
 				out = append(out, p)
 			}
 		case slices.Contains(splitList(n.PushProvider), p):
@@ -135,6 +146,11 @@ func (n Notify) FCMEnabled() bool { return n.PushFCMProjectID != "" || !n.PushFC
 // APNsEnabled reports whether APNs settings are present.
 func (n Notify) APNsEnabled() bool {
 	return !n.PushAPNsKey.IsZero() || n.PushAPNsKeyID != "" || n.PushAPNsTeamID != "" || n.PushAPNsTopic != ""
+}
+
+// WebPushEnabled reports whether VAPID settings are present (BE-173).
+func (n Notify) WebPushEnabled() bool {
+	return !n.PushVAPIDPrivateKey.IsZero() || n.PushVAPIDSubject != ""
 }
 
 // svixSecretPrefix starts every svix signing secret.
@@ -256,6 +272,15 @@ func (n *Notify) validatePush(c Common) []error {
 	if n.APNsEnabled() && (n.PushAPNsKey.IsZero() || n.PushAPNsKeyID == "" || n.PushAPNsTeamID == "" || n.PushAPNsTopic == "") {
 		errs = append(errs, errors.New("PUSH_APNS_KEY, PUSH_APNS_KEY_ID, PUSH_APNS_TEAM_ID and PUSH_APNS_TOPIC must be set together"))
 	}
+	n.PushVAPIDSubject = strings.TrimSpace(n.PushVAPIDSubject)
+	if n.WebPushEnabled() {
+		switch {
+		case n.PushVAPIDPrivateKey.IsZero() || n.PushVAPIDSubject == "":
+			errs = append(errs, errors.New("PUSH_VAPID_PRIVATE_KEY and PUSH_VAPID_SUBJECT must be set together"))
+		case !strings.HasPrefix(n.PushVAPIDSubject, "mailto:") && !strings.HasPrefix(n.PushVAPIDSubject, "https://"):
+			errs = append(errs, errors.New("PUSH_VAPID_SUBJECT must be a mailto: address or an https URL"))
+		}
+	}
 	errs = append(errs, n.validatePushProvider(c)...)
 	if c.Env == EnvProd && n.PushAPNsSandbox {
 		errs = append(errs, errors.New("PUSH_APNS_SANDBOX=true is not allowed in prod"))
@@ -291,9 +316,12 @@ func (n *Notify) validatePushProvider(c Common) []error {
 		if seen[PushProviderAPNs] && !n.APNsEnabled() {
 			return []error{errors.New("NOTIFY_PUSH_PROVIDER lists apns: PUSH_APNS_KEY, PUSH_APNS_KEY_ID, PUSH_APNS_TEAM_ID and PUSH_APNS_TOPIC are required")}
 		}
+		if seen[PushProviderWebPush] && !n.WebPushEnabled() {
+			return []error{errors.New("NOTIFY_PUSH_PROVIDER lists webpush: PUSH_VAPID_PRIVATE_KEY and PUSH_VAPID_SUBJECT are required")}
+		}
 	}
 	if n.PushRequired && len(n.ActivePushProviders()) == 0 {
-		return []error{errors.New("PUSH_REQUIRED=true needs FCM (PUSH_FCM_*) or APNs (PUSH_APNS_*) settings and NOTIFY_PUSH_PROVIDER other than noop")}
+		return []error{errors.New("PUSH_REQUIRED=true needs FCM (PUSH_FCM_*), APNs (PUSH_APNS_*) or web push (PUSH_VAPID_*) settings and NOTIFY_PUSH_PROVIDER other than noop")}
 	}
 	return nil
 }

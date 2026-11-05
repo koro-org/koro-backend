@@ -1,5 +1,6 @@
 # Authz matrix of the notify module (03 §5.19, 04 §2.19 + §2.0 receiveEmailWebhook; BE-015).
-# 12 operations × 18 personas. The /me operations are O cells (every signed-in user, own rows only:
+# 14 operations × 18 personas (BE-173: getMyWebPushConfig, registerMyWebPushSubscription,
+# deleteMyWebPushSubscription under notify.push_token.manage). The /me operations are O cells (every signed-in user, own rows only:
 # another user's notification or token is 404); suppressions and delivery logs are support B and
 # platform_admin B (403 without X-Koro-Access-Reason; admin surface: everyone else 403). The webhook
 # is public: its identity is the svix signature (bodies/notify/resend_bounce.json is signed with the
@@ -93,6 +94,34 @@ operations:
     path: /api/v1/me/push-tokens/{push_token_id}
     action: notify.push_token.manage
     path_params: { push_token_id: push_token_student }
+    expect: { anonymous: 401, student: 204, "@not_owner": 404 }
+
+  getMyWebPushConfig:
+    method: GET
+    path: /api/v1/me/web-push-config
+    action: notify.push_token.manage
+    note: BE-173 the VAPID public key of the browsers' subscriptions (the test container announces one)
+    expect: { anonymous: 401, "@signed_in": 200 }
+
+  registerMyWebPushSubscription:
+    method: POST
+    path: /api/v1/me/web-push-subscriptions
+    action: notify.push_token.manage
+    body: bodies/notify/register_web_push_subscription.json
+    note: BE-173 the same endpoint registered by each persona in turn moves the one row (201 every time)
+    expect: { anonymous: 401, "@signed_in": 201 }
+    variants:
+      - name: unknown_push_service
+        body: bodies/notify/register_web_push_subscription_ssrf.json
+        note: BE-173 SSRF guard; only the push services of FCM, Mozilla, Apple and Microsoft are accepted
+        expect: { anonymous: 401, "@signed_in": 422 }
+
+  deleteMyWebPushSubscription:
+    method: DELETE
+    path: /api/v1/me/web-push-subscriptions/{web_push_subscription_id}
+    action: notify.push_token.manage
+    path_params: { web_push_subscription_id: web_push_subscription_student }
+    note: BE-173 only the subscriber finds the subscription (IDOR, 03 §7.2)
     expect: { anonymous: 401, student: 204, "@not_owner": 404 }
 
   adminQueryEmailSuppressions:

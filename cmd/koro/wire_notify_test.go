@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ecdh"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +19,7 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/notify"
+	"koro/internal/notify/pushtest"
 	"koro/internal/platform/config"
 	"koro/internal/platform/crypto"
 	"koro/internal/platform/db"
@@ -42,6 +46,13 @@ func (w *notifyWiring) useMemStore() {
 	}
 	w.indexer = blindIndexer{x: x}
 	w.cursor = &memCursor{}
+	// Web push is announced (BE-173: the matrix subscribes browsers) with a
+	// VAPID public key made at run time; no web push sender is built.
+	vapid, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	w.webPushKey = base64.RawURLEncoding.EncodeToString(vapid.PublicKey().Bytes())
 	// Test containers carry no loaded configuration: give the sender identity
 	// and the webhook secret.
 	w.cfg = &config.Notify{EmailProvider: config.EmailProviderMem, PushProvider: config.PushProviderAuto,
@@ -289,5 +300,37 @@ func TestWire_Notify_WebhookAcceptsAnyContentType(t *testing.T) {
 	app.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), `"code":"unauthenticated"`) {
 		t.Fatalf("forged delivery: status %d (%s), want 401 unauthenticated", rec.Code, rec.Body)
+	}
+}
+
+// TestWire_Notify_WebPushFromConfig (BE-173): PUSH_VAPID_* turn the
+// webpush adapter on under NOTIFY_PUSH_PROVIDER=auto; the push transport
+// serves its public key, which getMyWebPushConfig announces. A broken key
+// stops the build without repeating it.
+func TestWire_Notify_WebPushFromConfig(t *testing.T) {
+	t.Parallel()
+	key := pushtest.NewVAPIDKey(t)
+	c, _ := buildNotify(t, func(w *notifyWiring) {
+		cfg := *w.cfg
+		cfg.PushVAPIDPrivateKey, cfg.PushVAPIDSubject = config.NewSecret(key), "mailto:push@koro.test"
+		w.cfg, w.webPushKey = &cfg, ""
+	})
+	pt, ok := c.notify.deps.Push.(*notify.PushTransport)
+	if !ok || pt.WebPushKey() == "" || c.notify.deps.WebPushKey != pt.WebPushKey() {
+		t.Fatalf("push = %T, deps key %q", c.notify.deps.Push, c.notify.deps.WebPushKey)
+	}
+	st, err := c.notify.svc.MyWebPushSettings(t.Context(), authz.Actor{Kind: authz.KindUser, UserID: uuid.NewV7(),
+		StudentStatus: authz.StudentNone})
+	if err != nil || !st.Enabled || st.VAPIDPublicKey != pt.WebPushKey() {
+		t.Fatalf("settings = %+v, %v", st, err)
+	}
+
+	broken := newTestContainer(t)
+	cfg := *broken.notify.cfg
+	cfg.PushVAPIDPrivateKey, cfg.PushVAPIDSubject = config.NewSecret("not-a-vapid-key"), "mailto:push@koro.test"
+	broken.notify.cfg = &cfg
+	if err := broken.build(); err == nil || !strings.Contains(err.Error(), "PUSH_VAPID_PRIVATE_KEY") ||
+		strings.Contains(err.Error(), "not-a-vapid-key") {
+		t.Fatalf("build() with a broken key = %v", err)
 	}
 }

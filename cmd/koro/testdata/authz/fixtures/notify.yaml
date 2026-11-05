@@ -5,4 +5,5 @@ version: 1
 fixtures:
   notification_student: { kind: in_app, owner: student }
   push_token_student: { kind: push_token, owner: student }
+  web_push_subscription_student: { kind: web_push_subscription, owner: student }
   suppression_matrix: { kind: suppression }

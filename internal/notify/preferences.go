@@ -19,7 +19,7 @@ func prefResource(owner uuid.UUID) authz.Resource {
 // default. An unknown category (a programmer error) is allowed: preferences
 // only ever suppress what the user explicitly switched off.
 func (s *service) Allowed(ctx context.Context, userID uuid.UUID, category PrefCategory, ch Channel) (bool, error) {
-	if category == PrefSecurity || !category.valid() || !ch.valid() {
+	if category == PrefSecurity || !category.valid() || !ch.prefValid() {
 		return true, nil
 	}
 	enabled, ok, err := s.d.Store.Preference(ctx, userID, category, ch)
@@ -32,8 +32,8 @@ func (s *service) Allowed(ctx context.Context, userID uuid.UUID, category PrefCa
 	return enabled, nil
 }
 
-// MyPreferences implements Service: all 21 (category, channel) pairs in
-// 02 §6.5 × 02 §6.1 order, the stored choice or the default.
+// MyPreferences implements Service: all 28 (category, channel) pairs in
+// 02 §6.5 × PrefChannels order, the stored choice or the default.
 func (s *service) MyPreferences(ctx context.Context, a authz.Actor) ([]Preference, error) {
 	if err := authz.Can(ctx, a, authz.NotifyPreferenceReadOwn, prefResource(a.UserID)); err != nil {
 		return nil, err
@@ -50,9 +50,9 @@ func (s *service) preferencesOf(ctx context.Context, userID uuid.UUID) ([]Prefer
 	for _, p := range stored {
 		set[[2]string{string(p.Category), string(p.Channel)}] = p.Enabled
 	}
-	out := make([]Preference, 0, len(PrefCategories())*len(Channels()))
+	out := make([]Preference, 0, len(PrefCategories())*len(PrefChannels()))
 	for _, c := range PrefCategories() {
-		for _, ch := range Channels() {
+		for _, ch := range PrefChannels() {
 			enabled, ok := set[[2]string{string(c), string(ch)}]
 			switch {
 			case c == PrefSecurity:
@@ -78,7 +78,7 @@ func (s *service) PutMyPreferences(ctx context.Context, a authz.Actor, items []P
 	for _, p := range items {
 		k := [2]string{string(p.Category), string(p.Channel)}
 		switch {
-		case !p.Category.valid() || !p.Channel.valid():
+		case !p.Category.valid() || !p.Channel.prefValid():
 			return nil, problem.ErrValidation.WithFields(problem.FieldError{Location: "body.items", Message: "unknown category or channel"})
 		case seen[k]:
 			return nil, problem.ErrValidation.WithFields(problem.FieldError{Location: "body.items", Message: "each (category, channel) pair may appear once"})

@@ -48,6 +48,7 @@ email_suppressions          personal  notify        provider:notify
 push_tokens                 personal  notify        provider:notify
 in_app_notifications        personal  notify        provider:notify
 notification_preferences    personal  notify        provider:notify
+web_push_subscriptions      personal  notify        provider:notify
 # orgs
 organizations               staff     orgs          -
 companies                   none      orgs          -

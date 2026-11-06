@@ -43,7 +43,8 @@ func Register(api huma.API, svc Service) {
 		OperationID: "listCompanies", Method: http.MethodGet, Path: "/companies",
 		Summary: "List companies",
 		Description: "The public company list (BE-120): active companies only — pending_review, suspended and closed " +
-			"ones are left out (searchOrgs?kind=company also lists suspended ones). sort=name for A-Z; default newest first.",
+			"ones are left out, with q and city too (searchOrgs?kind=company also lists suspended ones). q matches name and " +
+			"description (full text) or part of the name. sort=name for A-Z; default newest first.",
 	}, op.Meta{Action: string(authz.OrgsOrgSearch), Surface: op.SurfacePublic}, h.listCompanies)
 
 	op.Register(api, "orgs", huma.Operation{
@@ -238,12 +239,14 @@ func (h handler) searchOrgs(ctx context.Context, in *searchInput) (*searchOutput
 
 type listCompaniesInput struct {
 	page.Params
+	Q    string `query:"q" maxLength:"100" doc:"Free text, 2-100 characters"`
+	City string `query:"city" maxLength:"60"`
 	Sort string `query:"sort" enum:"name" doc:"name (A-Z); default newest first"`
 }
 
 func (h handler) listCompanies(ctx context.Context, in *listCompaniesInput) (*searchOutput, error) {
-	q := CompanyListQuery{Sort: sortOf(in.Sort), Limit: in.Limit}
-	fp := page.Fingerprint("listCompanies")
+	q := CompanyListQuery{Q: in.Q, City: in.City, Sort: sortOf(in.Sort), Limit: in.Limit}
+	fp := page.Fingerprint("listCompanies", in.Q, in.City)
 	after, err := cursorOf(in.Cursor, q.Sort, fp)
 	if err != nil {
 		return nil, err

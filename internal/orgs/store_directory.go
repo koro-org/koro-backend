@@ -3,6 +3,8 @@ package orgs
 import (
 	"context"
 	"uuid"
+
+	"koro/internal/authz"
 )
 
 // directoryStore is the membership reads other modules make through
@@ -17,4 +19,7 @@ type directoryStore interface {
 	EndedMemberships(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error)
 	// ActiveMemberIDs returns the user IDs of the active members of orgID.
 	ActiveMemberIDs(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error)
+	// ActiveRoleHolders returns the active memberships with role in orgIDs,
+	// by org and user (directory's claim approvers, BE-184).
+	ActiveRoleHolders(ctx context.Context, orgIDs []uuid.UUID, role authz.MemberRole) ([]Membership, error)
 }

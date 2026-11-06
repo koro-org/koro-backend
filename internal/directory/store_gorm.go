@@ -170,6 +170,20 @@ func (s gormStore) GetUniversity(ctx context.Context, id uuid.UUID) (University,
 	return take[University]("get university", uniCols, db.Conn(ctx, s.orm).Where("id = ?", id))
 }
 
+// GetUniversities implements Store.
+//
+// cross-org: reference data, as GetUniversity.
+func (s gormStore) GetUniversities(ctx context.Context, ids []uuid.UUID) ([]University, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var out []University
+	if err := db.Conn(ctx, s.orm).Model(&University{}).Select(uniCols).Where("id IN ?", ids).Order("id").Find(&out).Error; err != nil {
+		return nil, wrap("get universities", err)
+	}
+	return out, nil
+}
+
 // UniversityByYokCode implements Store.
 //
 // cross-org: public reference data addressed by its YÖK code.

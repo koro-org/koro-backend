@@ -1,6 +1,7 @@
 package orgs_test
 
 import (
+	"cmp"
 	"errors"
 	"slices"
 	"strconv"
@@ -495,6 +496,53 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (orgs.Store, world)
 		}
 		if m, err := s.GetMember(ctx, club.ID, pending.ID); err != nil || m.Status != orgs.MemberActive {
 			t.Fatalf("an open row was deleted: %+v, %v", m, err)
+		}
+	})
+
+	t.Run("members: active role holders of many orgs (BE-184)", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		add := func(org orgs.Org, role authz.MemberRole) orgs.Membership {
+			t.Helper()
+			m, err := s.InsertMember(ctx, member(org.ID, w.user(t), role))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return m
+		}
+		a, b, unasked := insert(t, s, newOrg(orgs.KindClub, "Rol A")), insert(t, s, newOrg(orgs.KindClub, "Rol B")), insert(t, s, newOrg(orgs.KindClub, "Rol C"))
+		want := []orgs.Membership{add(a, authz.MemberClubAdmin), add(a, authz.MemberClubAdmin), add(b, authz.MemberClubAdmin)}
+		add(a, authz.MemberMember)
+		add(unasked, authz.MemberClubAdmin)
+		pending := member(b.ID, w.user(t), authz.MemberClubAdmin)
+		pending.Status, pending.Source, pending.JoinedAt, pending.RequestedAt = orgs.MemberPending, orgs.SourceJoinRequest, nil, &now
+		if _, err := s.InsertMember(ctx, pending); err != nil {
+			t.Fatal(err)
+		}
+		// By org and user, with the columns the callers read.
+		slices.SortFunc(want, func(x, y orgs.Membership) int {
+			return cmp.Or(strings.Compare(x.OrgID.String(), y.OrgID.String()), strings.Compare(x.UserID.String(), y.UserID.String()))
+		})
+		rows, err := s.ActiveRoleHolders(ctx, []uuid.UUID{a.ID, b.ID}, authz.MemberClubAdmin)
+		if err != nil || len(rows) != len(want) {
+			t.Fatalf("ActiveRoleHolders = %+v, %v; want %d rows", rows, err, len(want))
+		}
+		for i, m := range rows {
+			if m.ID != want[i].ID || m.OrgID != want[i].OrgID || m.UserID != want[i].UserID ||
+				m.Role != authz.MemberClubAdmin || m.Status != orgs.MemberActive {
+				t.Fatalf("ActiveRoleHolders[%d] = %+v, want %+v", i, m, want[i])
+			}
+		}
+		if rows, err := s.ActiveRoleHolders(ctx, nil, authz.MemberClubAdmin); err != nil || len(rows) != 0 {
+			t.Fatalf("ActiveRoleHolders of no org = %+v, %v", rows, err)
+		}
+		ended := want[slices.IndexFunc(want, func(m orgs.Membership) bool { return m.OrgID == b.ID })]
+		if _, err := s.EndMember(ctx, b.ID, ended.ID, now, orgs.EndLeft); err != nil {
+			t.Fatal(err)
+		}
+		if rows, err := s.ActiveRoleHolders(ctx, []uuid.UUID{b.ID}, authz.MemberClubAdmin); err != nil || len(rows) != 0 {
+			t.Fatalf("ActiveRoleHolders after the end = %+v, %v", rows, err)
 		}
 	})
 

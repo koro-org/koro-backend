@@ -25,7 +25,7 @@ import (
 //
 // Consumed: c.orgs.svc (orgs.OrgAdmin.Create in directory's transaction,
 // 01 §6.3 T-78; orgs.OrgAdmin.GrantRole of a claim approval, 01 §6.3;
-// ActiveMemberIDs/HasRole: the university_rep who approves a claim, E-21;
+// ActiveRoleHolders: the university_rep who approves a claim, E-21;
 // public org profiles), c.audit.svc, c.identity.svc (re-authentication of
 // adminSetClubSensitivity; claimant names), the identity module's student
 // verification (the claimant's university at approval), c.files.svc (claim

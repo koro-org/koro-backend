@@ -320,7 +320,7 @@ type AdminClubClaimDTO struct {
 	EvidenceFileID string               `json:"evidence_file_id,omitempty"`
 	EvidenceState  string               `json:"evidence_state" enum:"none,available,not_clean" doc:"available: evidence holds a 5-minute download (adminGetClubClaim only); not_clean: the virus scan has not cleared the file"`
 	Evidence       *EvidenceDownloadDTO `json:"evidence,omitempty"`
-	Approver       string               `json:"approver,omitempty" enum:"university_rep,platform_admin" doc:"Who decides the claim (detail and decision only): the university's representative when it has one and the club is not sensitive, a platform admin otherwise"`
+	Approver       string               `json:"approver,omitempty" enum:"university_rep,platform_admin" doc:"Who decides the claim (detail, decision and, for platform staff, each row of the list): the university's representative when it has one and the club is not sensitive, a platform admin otherwise"`
 	CreatedAt      time.Time            `json:"created_at"`
 	ReviewedBy     string               `json:"reviewed_by,omitempty"`
 	ReviewedAt     *time.Time           `json:"reviewed_at,omitempty"`

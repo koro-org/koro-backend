@@ -57,6 +57,7 @@ var personalQueryAllowed = map[string]map[string]string{
 	"listEvents":       {"q": publicCatalog},
 	"browseOfferings":  {"q": publicCatalog},
 	"searchOrgs":       {"q": publicCatalog},
+	"listCompanies":    {"q": publicCatalog},
 	"listSkills":       {"q": publicCatalog},
 	"listUniversities": {"q": publicCatalog},
 	"listDepartments":  {"q": publicCatalog},

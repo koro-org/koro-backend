@@ -153,6 +153,19 @@ func (s *service) ActiveMemberIDs(ctx context.Context, orgID uuid.UUID) ([]uuid.
 	return s.directory().ActiveMemberIDs(ctx, orgID)
 }
 
+// ActiveRoleHolders implements OrgDirectory.
+func (s *service) ActiveRoleHolders(ctx context.Context, orgIDs []uuid.UUID, role authz.MemberRole) (map[uuid.UUID][]uuid.UUID, error) {
+	rows, err := s.directory().ActiveRoleHolders(ctx, orgIDs, role)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID][]uuid.UUID, len(orgIDs))
+	for _, m := range rows {
+		out[m.OrgID] = append(out[m.OrgID], m.UserID)
+	}
+	return out, nil
+}
+
 // GrantRole implements OrgAdmin. It joins the caller's transaction.
 func (s *service) GrantRole(ctx context.Context, orgID, userID uuid.UUID, role authz.MemberRole, _ string) error {
 	if role == authz.MemberClubAdmin {

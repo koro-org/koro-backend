@@ -87,9 +87,10 @@ type ClaimView struct {
 	// (adminGetClubClaim, when EvidenceState is available).
 	Evidence      *files.Download
 	EvidenceState string
-	// Approver is who decides the claim (adminGetClubClaim, decision):
-	// authz.ClaimApproverRep or authz.ClaimApproverPlatformAdmin; "" in
-	// lists.
+	// Approver is who decides the claim (adminGetClubClaim, decision, and
+	// the rows of adminListClubClaims for platform staff, BE-184):
+	// authz.ClaimApproverRep or authz.ClaimApproverPlatformAdmin; "" in a
+	// representative's list and the claimant's views.
 	Approver string
 }
 
@@ -151,10 +152,33 @@ func (s *service) approvalOf(ctx context.Context, club Club, claimant uuid.UUID,
 	if err != nil {
 		return approval{}, err
 	}
-	if len(reps) > 0 && !escalated(createdAt, s.now()) {
-		ap.Approver = authz.ClaimApproverRep
-	}
+	ap.Approver = s.approverOf(reps, createdAt)
 	return ap, nil
+}
+
+// approverOf is who decides a claim created at createdAt that reps would
+// decide: they do until the escalation, platform staff otherwise.
+func (s *service) approverOf(reps []uuid.UUID, createdAt time.Time) string {
+	if len(reps) > 0 && !escalated(createdAt, s.now()) {
+		return authz.ClaimApproverRep
+	}
+	return authz.ClaimApproverPlatformAdmin
+}
+
+// claimDeciders is who among holders, the active university_reps of club's
+// university, would decide a claim of claimant: never the claimant, and
+// nobody for a sensitive club.
+func claimDeciders(club Club, holders []uuid.UUID, claimant uuid.UUID) []uuid.UUID {
+	if club.IsSensitive {
+		return nil
+	}
+	var reps []uuid.UUID
+	for _, id := range holders {
+		if id != claimant {
+			reps = append(reps, id)
+		}
+	}
+	return reps
 }
 
 // repApproval returns the platform-staff approval of a claim on club and
@@ -169,24 +193,46 @@ func (s *service) repApproval(ctx context.Context, club Club, claimant uuid.UUID
 	if club.IsSensitive {
 		return ap, nil, nil
 	}
-	ids, err := s.d.Orgs.ActiveMemberIDs(ctx, u.OrgID)
+	holders, err := s.d.Orgs.ActiveRoleHolders(ctx, []uuid.UUID{u.OrgID}, authz.MemberUniversityRep)
 	if err != nil {
 		return approval{}, nil, err
 	}
-	var reps []uuid.UUID
-	for _, id := range ids {
-		if id == claimant {
-			continue
-		}
-		ok, err := s.d.Orgs.HasRole(ctx, u.OrgID, id, authz.MemberUniversityRep)
-		if err != nil {
-			return approval{}, nil, err
-		}
-		if ok {
-			reps = append(reps, id)
-		}
+	return ap, claimDeciders(club, holders[u.OrgID], claimant), nil
+}
+
+// withApprovers sets the approver of each view by the rule of approvalOf,
+// with one read of the universities and one of their reps for the page
+// (BE-184: the platform queue's rows, up to the page limit).
+func (s *service) withApprovers(ctx context.Context, views []ClaimView) error {
+	if len(views) == 0 {
+		return nil
 	}
-	return ap, reps, nil
+	ids := make([]uuid.UUID, len(views))
+	for i, v := range views {
+		ids[i] = v.Club.UniversityID
+	}
+	unis, err := s.d.Store.GetUniversities(ctx, ids)
+	if err != nil {
+		return err
+	}
+	orgOf := make(map[uuid.UUID]uuid.UUID, len(unis))
+	orgIDs := make([]uuid.UUID, len(unis))
+	for i, u := range unis {
+		orgOf[u.ID], orgIDs[i] = u.OrgID, u.OrgID
+	}
+	holders, err := s.d.Orgs.ActiveRoleHolders(ctx, orgIDs, authz.MemberUniversityRep)
+	if err != nil {
+		return err
+	}
+	for i := range views {
+		v := &views[i]
+		org, ok := orgOf[v.Club.UniversityID]
+		if !ok {
+			return ErrNotFound
+		}
+		v.Approver = s.approverOf(claimDeciders(v.Club, holders[org], v.Claim.ClaimantUserID), v.Claim.CreatedAt)
+	}
+	return nil
 }
 
 // repUniversities returns the university orgs where a is a
@@ -485,8 +531,9 @@ func (s *service) adminViews(ctx context.Context, cs []ClubClaim) ([]ClaimView, 
 // they approve: their universities' non-sensitive clubs; university_org_id
 // narrows either to one university, and a rep's scope is checked on that
 // university only: not theirs → 404 as an invisible claim) → status → the
-// page → one audit record of the read (claims are personal data; a
-// sensitive club's claims are special category data).
+// page (platform staff also see each row's approver: the rep's queue is
+// theirs by definition, BE-184) → one audit record of the read (claims are
+// personal data; a sensitive club's claims are special category data).
 func (s *service) AdminListClubClaims(ctx context.Context, a authz.Actor, q AdminClaimQuery) (ClaimPage, error) {
 	f := ClaimFilter{Status: q.Status}
 	if err := authz.Can(ctx, a, authz.DirectoryClubClaimList, adminSurface); err != nil {
@@ -527,6 +574,11 @@ func (s *service) AdminListClubClaims(ctx context.Context, a authz.Actor, q Admi
 	views, err := s.adminViews(ctx, rows)
 	if err != nil {
 		return ClaimPage{}, err
+	}
+	if f.RepUniversityOrgs == nil {
+		if err := s.withApprovers(ctx, views); err != nil {
+			return ClaimPage{}, err
+		}
 	}
 	sensitive := false
 	ids := make([]string, len(views))

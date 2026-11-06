@@ -103,6 +103,13 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (directory.Store, w
 		if g, err := s.GetUniversity(ctx, u.ID); err != nil || g.Name != u.Name {
 			t.Fatalf("GetUniversity = %+v, %v", g, err)
 		}
+		// GetUniversities: the ones that exist, each once.
+		if rows, err := s.GetUniversities(ctx, []uuid.UUID{u.ID, uuid.NewV7(), u.ID}); err != nil || len(rows) != 1 || rows[0].OrgID != u.OrgID || rows[0].Name != u.Name {
+			t.Fatalf("GetUniversities = %+v, %v", rows, err)
+		}
+		if rows, err := s.GetUniversities(ctx, nil); err != nil || len(rows) != 0 {
+			t.Fatalf("GetUniversities(nil) = %+v, %v", rows, err)
+		}
 		if g, err := s.UniversityByYokCode(ctx, u.YokCode); err != nil || g.ID != u.ID {
 			t.Fatalf("UniversityByYokCode = %+v, %v", g, err)
 		}

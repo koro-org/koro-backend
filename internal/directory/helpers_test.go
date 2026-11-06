@@ -52,6 +52,14 @@ type spyOrgs struct {
 	creates   []int
 	grants    []int // transaction of each GrantRole (BE-022)
 	failGrant error
+	roleReads int // ActiveRoleHolders calls (BE-184)
+}
+
+func (s *spyOrgs) ActiveRoleHolders(ctx context.Context, ids []uuid.UUID, role authz.MemberRole) (map[uuid.UUID][]uuid.UUID, error) {
+	s.mu.Lock()
+	s.roleReads++
+	s.mu.Unlock()
+	return s.Service.ActiveRoleHolders(ctx, ids, role)
 }
 
 func (s *spyOrgs) Create(ctx context.Context, in orgs.CreateOrg) (uuid.UUID, error) {
@@ -68,6 +76,21 @@ type spyStore struct {
 	clubInserts  []int
 	failClub     error
 	claimUpdates []int // transaction of each UpdateClaim (BE-022)
+	uniReads     int   // GetUniversity and GetUniversities calls (BE-184)
+}
+
+func (s *spyStore) GetUniversity(ctx context.Context, id uuid.UUID) (directory.University, error) {
+	s.mu.Lock()
+	s.uniReads++
+	s.mu.Unlock()
+	return s.Store.GetUniversity(ctx, id)
+}
+
+func (s *spyStore) GetUniversities(ctx context.Context, ids []uuid.UUID) ([]directory.University, error) {
+	s.mu.Lock()
+	s.uniReads++
+	s.mu.Unlock()
+	return s.Store.GetUniversities(ctx, ids)
 }
 
 func (s *spyStore) InsertClub(ctx context.Context, c directory.Club) (directory.Club, error) {

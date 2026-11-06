@@ -47,6 +47,9 @@ type UniversityStore interface {
 	InsertUniversity(ctx context.Context, u University) (University, error)
 	// GetUniversity returns a university (any is_active) or ErrNotFound.
 	GetUniversity(ctx context.Context, id uuid.UUID) (University, error)
+	// GetUniversities returns the universities (any is_active) among ids
+	// that exist, by ID.
+	GetUniversities(ctx context.Context, ids []uuid.UUID) ([]University, error)
 	// UniversityByYokCode returns the university of a YÖK code or ErrNotFound.
 	UniversityByYokCode(ctx context.Context, code string) (University, error)
 	// UniversityByName returns the university of an exact name (the oldest

@@ -81,6 +81,9 @@ type OrgDirectory interface {
 	// ActiveMemberIDs returns the user IDs of an org's active members (a
 	// club notifying its own members).
 	ActiveMemberIDs(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error)
+	// ActiveRoleHolders returns the users who actively hold role in each of
+	// orgIDs, in one read (an org without one has no key; BE-184).
+	ActiveRoleHolders(ctx context.Context, orgIDs []uuid.UUID, role authz.MemberRole) (map[uuid.UUID][]uuid.UUID, error)
 }
 
 // MembershipHistory is the membership history read of other modules

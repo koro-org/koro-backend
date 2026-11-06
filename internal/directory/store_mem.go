@@ -163,6 +163,20 @@ func (s *MemStore) InsertUniversity(_ context.Context, u University) (University
 	return u, nil
 }
 
+// GetUniversities implements Store.
+func (s *MemStore) GetUniversities(_ context.Context, ids []uuid.UUID) ([]University, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]University, 0, len(ids))
+	for _, id := range ids {
+		if u, ok := s.unis[id]; ok {
+			out = append(out, u)
+		}
+	}
+	slices.SortFunc(out, func(a, b University) int { return a.ID.Compare(b.ID) })
+	return slices.CompactFunc(out, func(a, b University) bool { return a.ID == b.ID }), nil
+}
+
 // GetUniversity implements Store.
 func (s *MemStore) GetUniversity(_ context.Context, id uuid.UUID) (University, error) {
 	s.mu.Lock()

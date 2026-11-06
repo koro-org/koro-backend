@@ -227,7 +227,7 @@ components:
       additionalProperties: false
       properties:
         approver:
-          description: "Who decides the claim (detail and decision only): the university's representative when it has one and the club is not sensitive, a platform admin otherwise"
+          description: "Who decides the claim (detail, decision and, for platform staff, each row of the list): the university's representative when it has one and the club is not sensitive, a platform admin otherwise"
           enum:
             - university_rep
             - platform_admin
@@ -27410,7 +27410,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/companies:
     get:
-      description: "The public company list (BE-120): active companies only — pending_review, suspended and closed ones are left out (searchOrgs?kind=company also lists suspended ones). sort=name for A-Z; default newest first."
+      description: "The public company list (BE-120): active companies only — pending_review, suspended and closed ones are left out, with q and city too (searchOrgs?kind=company also lists suspended ones). q matches name and description (full text) or part of the name. sort=name for A-Z; default newest first."
       operationId: listCompanies
       parameters:
         - description: Page size
@@ -27431,6 +27431,20 @@ paths:
           schema:
             description: Opaque cursor from next_cursor
             maxLength: 512
+            type: string
+        - description: Free text, 2-100 characters
+          explode: false
+          in: query
+          name: q
+          schema:
+            description: Free text, 2-100 characters
+            maxLength: 100
+            type: string
+        - explode: false
+          in: query
+          name: city
+          schema:
+            maxLength: 60
             type: string
         - description: name (A-Z); default newest first
           explode: false

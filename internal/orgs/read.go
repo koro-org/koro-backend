@@ -19,9 +19,11 @@ import (
 // logoTTL is the lifetime of a logo_url (04 §1.11: signed URLs ≤ 5 min).
 const logoTTL = 5 * time.Minute
 
-// CompanyListQuery narrows listCompanies (BE-120): sort name or newest
-// first, keyset pages.
+// CompanyListQuery narrows listCompanies (BE-120, BE-184): free text and
+// city as searchOrgs, sort name or newest first, keyset pages.
 type CompanyListQuery struct {
+	Q     string
+	City  string
 	Sort  string // SortNewest (default) or SortName
 	Limit int
 	After *ListAfter
@@ -231,6 +233,20 @@ func cleanQuery(loc, q string) (string, error) {
 	return n, nil
 }
 
+// cleanSearch normalises the free text and the city of a public org list;
+// an absent city is "".
+func cleanSearch(q, city string) (string, string, error) {
+	text, err := cleanQuery("query.q", q)
+	if err != nil {
+		return "", "", err
+	}
+	c, err := cleanLine("query.city", city, maxCity)
+	if err != nil || c == nil {
+		return text, "", err
+	}
+	return text, *c, nil
+}
+
 // publicKinds are the kinds the public directory lists (ngo is phase 2).
 var publicKinds = []Kind{KindPlatform, KindUniversity, KindClub, KindCompany}
 
@@ -240,20 +256,13 @@ func (s *service) SearchOrgs(ctx context.Context, a authz.Actor, q SearchQuery) 
 	if err := authz.Can(ctx, a, authz.OrgsOrgSearch, catalogResource); err != nil {
 		return OrgPage{}, err
 	}
-	text, err := cleanQuery("query.q", q.Q)
+	text, city, err := cleanSearch(q.Q, q.City)
 	if err != nil {
 		return OrgPage{}, err
 	}
-	city, err := cleanLine("query.city", q.City, maxCity)
-	if err != nil {
-		return OrgPage{}, err
-	}
-	f := ListFilter{Statuses: []Status{StatusActive, StatusSuspended}, Kinds: publicKinds, Q: text, Sort: sortOf(q.Sort)}
+	f := ListFilter{Statuses: []Status{StatusActive, StatusSuspended}, Kinds: publicKinds, Q: text, City: city, Sort: sortOf(q.Sort)}
 	if q.Kind != "" {
 		f.Kinds = []Kind{q.Kind}
-	}
-	if city != nil {
-		f.City = *city
 	}
 	if q.UniversityID != nil {
 		f.OrgIDs = []uuid.UUID{}
@@ -270,12 +279,17 @@ func (s *service) SearchOrgs(ctx context.Context, a authz.Actor, q SearchQuery) 
 
 // ListCompanies implements Service (BE-120): the public company list of
 // the web — active companies only (pending_review, suspended and closed
-// are left out), name or newest order, read rate class.
+// are left out, with q and city too: BE-184), name or newest order, read
+// rate class.
 func (s *service) ListCompanies(ctx context.Context, a authz.Actor, q CompanyListQuery) (OrgPage, error) {
 	if err := authz.Can(ctx, a, authz.OrgsOrgSearch, catalogResource); err != nil {
 		return OrgPage{}, err
 	}
-	f := ListFilter{Statuses: []Status{StatusActive}, Kinds: []Kind{KindCompany}, Sort: sortOf(q.Sort)}
+	text, city, err := cleanSearch(q.Q, q.City)
+	if err != nil {
+		return OrgPage{}, err
+	}
+	f := ListFilter{Statuses: []Status{StatusActive}, Kinds: []Kind{KindCompany}, Q: text, City: city, Sort: sortOf(q.Sort)}
 	return s.list(ctx, f, q.Limit, q.After)
 }
 

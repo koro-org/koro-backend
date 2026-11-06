@@ -221,6 +221,17 @@ func (s *MemStore) ActiveMemberIDs(_ context.Context, orgID uuid.UUID) ([]uuid.U
 	return out, nil
 }
 
+// ActiveRoleHolders implements Store.
+func (s *MemStore) ActiveRoleHolders(_ context.Context, orgIDs []uuid.UUID, role authz.MemberRole) ([]Membership, error) {
+	out := s.collect(func(m Membership) bool {
+		return m.Status == MemberActive && m.Role == role && slices.Contains(orgIDs, m.OrgID)
+	})
+	slices.SortFunc(out, func(a, b Membership) int {
+		return cmp.Or(idLess(a.OrgID, b.OrgID), idLess(a.UserID, b.UserID))
+	})
+	return out, nil
+}
+
 // ActiveByRole implements Store.
 func (s *MemStore) ActiveByRole(_ context.Context, role authz.MemberRole, after uuid.UUID, limit int) ([]Membership, error) {
 	out := s.collect(func(m Membership) bool {

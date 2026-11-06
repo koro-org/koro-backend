@@ -43,10 +43,9 @@ type Orgs interface {
 	// GetMany returns the summaries of the ids that exist (club names of
 	// the claim lists).
 	GetMany(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]orgs.OrgSummary, error)
-	// ActiveMemberIDs and HasRole find the university_rep of a club's
-	// university: the approver of its claims (E-21).
-	ActiveMemberIDs(ctx context.Context, orgID uuid.UUID) ([]uuid.UUID, error)
-	HasRole(ctx context.Context, orgID, userID uuid.UUID, roles ...authz.MemberRole) (bool, error)
+	// ActiveRoleHolders finds the university_reps of clubs' universities:
+	// the approvers of their claims (E-21), in one read for a page (BE-184).
+	ActiveRoleHolders(ctx context.Context, orgIDs []uuid.UUID, role authz.MemberRole) (map[uuid.UUID][]uuid.UUID, error)
 	// GetOrg returns the public profile of an org as a sees it (404 for a
 	// pending_review or closed org a may not see).
 	GetOrg(ctx context.Context, a authz.Actor, orgID uuid.UUID) (orgs.OrgView, error)

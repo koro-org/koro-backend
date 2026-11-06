@@ -219,6 +219,23 @@ func (s gormStore) ActiveMemberIDs(ctx context.Context, orgID uuid.UUID) ([]uuid
 	return out, nil
 }
 
+// ActiveRoleHolders implements Store.
+//
+// cross-org: the university_reps of the universities on one page of club
+// claims; the org IDs come from the clubs of those claims, never a request.
+func (s gormStore) ActiveRoleHolders(ctx context.Context, orgIDs []uuid.UUID, role authz.MemberRole) ([]Membership, error) {
+	if len(orgIDs) == 0 {
+		return nil, nil
+	}
+	var out []Membership
+	err := db.Conn(ctx, s.orm).Select(memberCols).Where("org_id IN ? AND role = ? AND status = 'active'", orgIDs, string(role)).
+		Order("org_id, user_id").Find(&out).Error
+	if err != nil {
+		return nil, wrap("active role holders", err)
+	}
+	return out, nil
+}
+
 // ActiveByRole implements Store.
 //
 // cross-org: the admin sweep (01 §7 orgs.admin_sweep) checks every

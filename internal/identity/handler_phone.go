@@ -24,7 +24,8 @@ func registerPhone(api huma.API, h handler) {
 			"Turkish mobile number (valid 10 minutes); confirmPhoneVerification makes it the account's. The answer is the " +
 			"same whether or not another account holds the number (only its holder learns that, at confirmation). " +
 			"422 identity.invalid_phone for anything but +90 5XX XXX XX XX; 503 identity.sms_unavailable without an SMS " +
-			"provider. Sends are limited per number, account and address (429).",
+			"provider or while the platform's SMS budget is spent (with Retry-After). Sends are limited per number and " +
+			"purpose, account and address, and per day to a number the account does not hold (429).",
 	}, op.Meta{Action: string(authz.IdentityPhoneChange), Surface: op.SurfaceSelf, Reauth: true, RateLimit: op.RateReauth,
 		Idempotency: op.IdempotencyOptional}, h.startPhone)
 
@@ -68,7 +69,8 @@ func registerPhone(api huma.API, h handler) {
 		Description: "For a challenge of createSession whose mfa_methods include sms: a 6-digit code goes to the " +
 			"account's number (valid 5 minutes, never past the challenge); completeMfaLogin takes it as sms_code. An " +
 			"unknown or expired challenge, or an account without the SMS second step, is 401 identity.mfa_login_failed " +
-			"(the challenge stays usable). At most three codes per challenge, within the SMS send limits (429).",
+			"(the challenge stays usable). At most three codes per challenge, within the SMS send limits (429). 503 " +
+			"identity.sms_unavailable without an SMS provider or while the platform's SMS budget is spent (with Retry-After).",
 	}, op.Meta{Action: string(authz.IdentitySessionCreate), Surface: op.SurfacePublic, RateLimit: op.RateAuthLogin,
 		Idempotency: op.IdempotencyOptional}, h.sendMFALoginSMS)
 
@@ -77,8 +79,8 @@ func registerPhone(api huma.API, h handler) {
 		DefaultStatus: http.StatusNoContent,
 		Summary:       "Set a new password with an SMS code",
 		Description: "The code of requestPasswordReset with channel sms. A wrong, used or expired code, an unknown " +
-			"address and an account that may no longer reset by SMS all answer 422 identity.invalid_sms_code. Every " +
-			"session of the account is closed.",
+			"address, an account that may no longer reset by SMS and one above the daily ceiling of tries all answer 422 " +
+			"identity.invalid_sms_code. Every session of the account is closed.",
 	}, op.Meta{Action: string(authz.IdentityPasswordReset), Surface: op.SurfacePublic, RateLimit: op.RateAuthPasswordReset,
 		Idempotency: op.IdempotencyOptional}, h.resetConfirmSMS)
 }

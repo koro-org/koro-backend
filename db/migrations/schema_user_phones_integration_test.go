@@ -3,6 +3,7 @@
 package migrations_test
 
 import (
+	"strings"
 	"testing"
 	"uuid"
 
@@ -83,6 +84,18 @@ func TestSchema_UserPhones(t *testing.T) {
 		t.Fatalf("sms_code policy rows after up = %d", n)
 	}
 	check(t)
+}
+
+// TestSchema_SMSCodesUserCreatedIndex (BE-181, migration 000181): the usage
+// of an account's SMS codes in a window reads a full index, consumed codes
+// included.
+func TestSchema_SMSCodesUserCreatedIndex(t *testing.T) {
+	t.Parallel()
+	w := newP1aWorld(t)
+	def := queryString(t, w.d, `SELECT indexdef FROM pg_indexes WHERE indexname = 'sms_codes_user_created_idx'`)
+	if !strings.Contains(def, "(user_id, purpose, created_at)") || strings.Contains(def, "WHERE") {
+		t.Fatalf("indexdef = %q", def)
+	}
 }
 
 // digits7 is seven digits of a counter value (unique numbers per run).

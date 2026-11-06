@@ -112,6 +112,25 @@ func phoneContract(t *testing.T, s identity.Store) {
 	if _, found, _ := s.OpenSMSCode(ctx, u.ID, identity.SMSPasswordReset); !found {
 		t.Fatal("CloseOpenSMSCodes closed another purpose")
 	}
+	// Usage in a window: consumed codes count, the start is inclusive, the
+	// other purposes and accounts do not.
+	for _, c := range []struct {
+		user    uuid.UUID
+		purpose identity.SMSPurpose
+		since   time.Time
+		want    identity.SMSCodeUse
+	}{
+		{u.ID, identity.SMSLogin, at, identity.SMSCodeUse{Codes: 2, Attempts: 10}},
+		{u.ID, identity.SMSLogin, at.Add(time.Minute), identity.SMSCodeUse{Codes: 1, Attempts: 10}},
+		{u.ID, identity.SMSLogin, at.Add(2 * time.Minute), identity.SMSCodeUse{}},
+		{u.ID, identity.SMSPasswordReset, at, identity.SMSCodeUse{Codes: 1}},
+		{u.ID, identity.SMSPhoneVerify, at, identity.SMSCodeUse{}},
+		{v.ID, identity.SMSLogin, at, identity.SMSCodeUse{}},
+	} {
+		if got, err := s.SMSCodeUsage(ctx, c.user, c.purpose, c.since); err != nil || got != c.want {
+			t.Fatalf("SMSCodeUsage(%s, %s) = %+v, %v, want %+v", c.purpose, c.since, got, err, c.want)
+		}
+	}
 	if ok, err := s.MarkSMSCodeSent(ctx, reset.ID, at); err != nil || !ok {
 		t.Fatalf("MarkSMSCodeSent = %v, %v", ok, err)
 	}

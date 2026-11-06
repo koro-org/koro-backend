@@ -36,7 +36,8 @@ func TestSMS_Defaults(t *testing.T) {
 	}
 	s := cfg.SMS
 	if s.Provider != config.SMSProviderNone || s.Enabled() || s.Timeout != 10*time.Second ||
-		s.Netgsm.BaseURL != "https://api.netgsm.com.tr" || s.MailpitAddr != "localhost:1025" {
+		s.Netgsm.BaseURL != "https://api.netgsm.com.tr" || s.MailpitAddr != "localhost:1025" ||
+		s.BudgetPerHour != 200 || s.BudgetPerDay != 1000 {
 		t.Fatalf("defaults = %+v", s)
 	}
 	if got := config.SMSProviders(); strings.Join(got, ",") != "none,mem,netgsm,mailpit" {
@@ -74,6 +75,10 @@ func TestSMS_Validation(t *testing.T) {
 		"credentials in url":       smsNetgsm("dev", "SMS_NETGSM_BASE_URL", "https://u:p@api.netgsm.com.tr"),
 		"settings without adapter": {"APP_ENV": "dev", "SMS_PROVIDER": "none", "SMS_NETGSM_USERNAME": "8500000000"},
 		"timeout":                  {"APP_ENV": "dev", "SMS_TIMEOUT": "2m"},
+		"no hourly budget":         {"APP_ENV": "dev", "SMS_BUDGET_PER_HOUR": "0"},
+		"no daily budget":          {"APP_ENV": "dev", "SMS_BUDGET_PER_DAY": "0"},
+		"huge daily budget":        {"APP_ENV": "dev", "SMS_BUDGET_PER_DAY": "1000001"},
+		"hour above the day":       {"APP_ENV": "dev", "SMS_BUDGET_PER_HOUR": "11", "SMS_BUDGET_PER_DAY": "10"},
 	}
 	for name, env := range bad {
 		_, err := config.Load[smsOnly](env)

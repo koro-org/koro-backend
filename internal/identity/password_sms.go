@@ -18,12 +18,14 @@ import (
 //   - it is active and has a verified number;
 //   - its SMS second step is off (the phone must not be both the reset
 //     channel and the second factor: one SIM swap would open the account);
-//   - it holds no role that requires MFA (k-sms: SIM swap).
+//   - it holds no role that requires MFA (k-sms: SIM swap);
+//   - it is below the daily ceiling of the SMS reset (BE-181: codes and tries
+//     per account in a rolling day, sms_limits.go).
 //
 // The confirmation takes the address, the code and the new password; a
-// wrong code, an unknown address or an account that lost its eligibility
-// give the same 422 identity.invalid_sms_code. Every session closes, as
-// with the e-mail link.
+// wrong code, an unknown address, an account that lost its eligibility or
+// one above the ceiling of tries give the same 422
+// identity.invalid_sms_code. Every session closes, as with the e-mail link.
 
 // smsResetNumber returns the number a password reset of u goes to by SMS,
 // "" when u must reset by e-mail.
@@ -69,8 +71,14 @@ func (s *service) RequestPasswordResetSMS(ctx context.Context, a authz.Actor, em
 	if err != nil {
 		return err
 	}
-	if number != "" && s.limitSMS(ctx, u.ID, number) != nil {
-		number = "" // the SMS limits (or the limiter) refuse: the e-mail link instead, same answer
+	if number != "" {
+		ok, err := s.mayOpenSMSReset(ctx, u.ID, number)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			number = "" // the e-mail link instead, same answer
+		}
 	}
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		meta := map[string]any{"channel": "email"}
@@ -121,6 +129,18 @@ func (s *service) ConfirmPasswordResetSMS(ctx context.Context, a authz.Actor, in
 	if !found || u.Status != StatusActive {
 		return bad
 	}
+	use, err := s.smsResetUse(ctx, u.ID)
+	if err != nil {
+		return err
+	}
+	if use.Attempts >= maxSMSResetAttempts {
+		s.smsCounts.inc(SMSPasswordReset, SMSOutcomeResetClosed)
+		s.warnSMSResetLimit(ctx, u.ID)
+		if err := s.smsDenied(ctx, authz.IdentityPasswordReset, u.ID, a, SMSPasswordReset, reasonSMSResetLimit); err != nil {
+			return err
+		}
+		return bad
+	}
 	c, ok, err := s.matchSMSCode(ctx, u.ID, SMSPasswordReset, in.Code)
 	if err != nil {
 		return err
@@ -135,6 +155,9 @@ func (s *service) ConfirmPasswordResetSMS(ctx context.Context, a authz.Actor, in
 		ok = number != "" && number == c.Number
 	}
 	if !ok {
+		if use.Attempts+1 >= maxSMSResetAttempts {
+			s.warnSMSResetLimit(ctx, u.ID)
+		}
 		if err := s.smsCodeDenied(ctx, authz.IdentityPasswordReset, u.ID, a, SMSPasswordReset); err != nil {
 			return err
 		}

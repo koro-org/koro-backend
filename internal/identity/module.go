@@ -364,6 +364,10 @@ type Deps struct {
 	// SMS operation answers 503 identity.sms_unavailable and a password
 	// reset asked by SMS goes by e-mail.
 	SMS SMSSender
+	// SMSBudget is the ceiling of the SMS codes of the platform (BE-181;
+	// SMS_BUDGET_PER_HOUR, SMS_BUDGET_PER_DAY); a value left at zero takes
+	// DefaultSMSBudget's.
+	SMSBudget SMSBudget
 }
 
 func (d *Deps) validate() error {
@@ -424,7 +428,7 @@ func New(d Deps) (Module, error) {
 	if err := d.validate(); err != nil {
 		return Module{}, err
 	}
-	s := &service{d: d}
+	s := &service{d: d, smsBudget: newSMSBudgetRules(d.SMSBudget), smsCounts: newSMSCounters()}
 	s.students = eduStudents{s: s}
 	s.gate = newTermsGate(s)
 	return Module{Service: s, Students: s.students, Privacy: privacyProvider{s: s}, Sweeper: sweeper{retention: d.Store, edu: s.edu(), files: d.Files, tx: d.Tx}, TermsGate: s.gate, svc: s}, nil
@@ -434,6 +438,9 @@ type service struct {
 	d        Deps
 	students Students
 	gate     *termsGate // the terms gate's passes and versions in force (BE-124)
+
+	smsBudget smsBudgetRules // the SMS budget's limiter rules (BE-181)
+	smsCounts *smsCounters   // koro_sms_codes_total (BE-181)
 }
 
 var _ Service = (*service)(nil)

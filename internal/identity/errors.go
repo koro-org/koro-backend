@@ -118,7 +118,8 @@ var (
 	// SMS and phone numbers (BE-172).
 	//
 	// ErrSMSUnavailable: no SMS adapter is configured (SMS_PROVIDER=none):
-	// phone verification and the SMS second step are off. Fail closed.
+	// phone verification and the SMS second step are off, or the SMS budget
+	// of the platform is spent (BE-181; with Retry-After). Fail closed.
 	ErrSMSUnavailable = problem.New(problem.Unavailable, "identity.sms_unavailable", "SMS is not available")
 	// ErrInvalidPhone: not a Turkish mobile number (+90 5XX XXX XX XX).
 	ErrInvalidPhone = problem.New(problem.Invalid, "identity.invalid_phone", "Invalid mobile phone number")

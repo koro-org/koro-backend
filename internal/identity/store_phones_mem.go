@@ -190,6 +190,20 @@ func (m *MemStore) MarkSMSCodeSent(_ context.Context, id uuid.UUID, at time.Time
 	return true, nil
 }
 
+// SMSCodeUsage implements Store.
+func (m *MemStore) SMSCodeUsage(_ context.Context, userID uuid.UUID, purpose SMSPurpose, since time.Time) (SMSCodeUse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var use SMSCodeUse
+	for _, c := range m.smsCodes {
+		if c.UserID == userID && c.Purpose == purpose && !c.CreatedAt.Before(since) {
+			use.Codes++
+			use.Attempts += c.Attempts
+		}
+	}
+	return use, nil
+}
+
 // DeleteEndedSMSCodes implements Store.
 func (m *MemStore) DeleteEndedSMSCodes(_ context.Context, cutoff time.Time, limit int) (int, error) {
 	m.mu.Lock()

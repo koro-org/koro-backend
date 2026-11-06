@@ -47,6 +47,9 @@ const (
 	NoticePhoneRemoved   = "phone_removed"
 	NoticeSMSMFAEnabled  = "sms_mfa_enabled"
 	NoticeSMSMFADisabled = "sms_mfa_disabled"
+	// NoticeSMSResetLimit: the SMS password reset of the account reached its
+	// daily ceiling and goes by e-mail for now (BE-181).
+	NoticeSMSResetLimit = "sms_reset_limit"
 )
 
 // StartPhoneVerification implements Service (startPhoneVerification, R): a
@@ -67,7 +70,7 @@ func (s *service) StartPhoneVerification(ctx context.Context, a authz.Actor, raw
 	if err != nil {
 		return SMSCodeSent{}, err
 	}
-	if err := s.limitSMS(ctx, a.UserID, number); err != nil {
+	if err := s.limitSMS(ctx, a.UserID, SMSPhoneVerify, number); err != nil {
 		return SMSCodeSent{}, err
 	}
 	var sent SMSCodeSent

@@ -32,6 +32,11 @@ type SMS struct {
 	Provider string `env:"SMS_PROVIDER" envDefault:"none"`
 	// Timeout bounds one provider request.
 	Timeout time.Duration `env:"SMS_TIMEOUT" envDefault:"10s"`
+	// BudgetPerHour and BudgetPerDay are the ceiling of the SMS codes of the
+	// whole platform (BE-181; identity.SMSBudget): the same for every
+	// adapter, counted across processes by the shared rate limiter.
+	BudgetPerHour int `env:"SMS_BUDGET_PER_HOUR" envDefault:"200"`
+	BudgetPerDay  int `env:"SMS_BUDGET_PER_DAY" envDefault:"1000"`
 
 	Netgsm SMSNetgsm
 	// MailpitAddr is the SMTP address (host:port, no TLS, no login) of the
@@ -74,6 +79,9 @@ func (s SMS) Enabled() bool { return s.Provider != SMSProviderNone }
 // enabled reports whether any account setting of Netgsm is present.
 func (n SMSNetgsm) enabled() bool { return n.Username != "" || !n.Password.IsZero() || n.Header != "" }
 
+// maxSMSBudget bounds SMS_BUDGET_PER_HOUR and SMS_BUDGET_PER_DAY.
+const maxSMSBudget = 1_000_000
+
 var reSMSHeader = regexp.MustCompile(`^[A-Za-z0-9 .\-]{2,11}$`)
 
 func (s *SMS) validate(c Common) error {
@@ -83,6 +91,14 @@ func (s *SMS) validate(c Common) error {
 	}
 	if s.Timeout <= 0 || s.Timeout > time.Minute {
 		errs = append(errs, errors.New("SMS_TIMEOUT must be positive and at most 1m"))
+	}
+	switch {
+	case s.BudgetPerHour < 1 || s.BudgetPerHour > maxSMSBudget:
+		errs = append(errs, fmt.Errorf("SMS_BUDGET_PER_HOUR must be between 1 and %d", maxSMSBudget))
+	case s.BudgetPerDay < 1 || s.BudgetPerDay > maxSMSBudget:
+		errs = append(errs, fmt.Errorf("SMS_BUDGET_PER_DAY must be between 1 and %d", maxSMSBudget))
+	case s.BudgetPerHour > s.BudgetPerDay:
+		errs = append(errs, errors.New("SMS_BUDGET_PER_HOUR must not exceed SMS_BUDGET_PER_DAY"))
 	}
 	n := &s.Netgsm
 	active := s.Provider == SMSProviderNetgsm

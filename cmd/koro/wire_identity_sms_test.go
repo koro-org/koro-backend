@@ -4,7 +4,9 @@ import (
 	"testing"
 	"time"
 
+	"koro/internal/identity"
 	"koro/internal/platform/config"
+	"koro/internal/platform/obs"
 	smsmailpit "koro/internal/platform/sms/mailpit"
 )
 
@@ -27,5 +29,37 @@ func TestWire_SMSMailpitBox(t *testing.T) {
 	cfg.MailpitAddr = "localhost"
 	if _, err := smsSenders(c, cfg).pick("SMS_PROVIDER", config.SMSProviderMailpit); err == nil {
 		t.Fatal("an address without a port was wired")
+	}
+}
+
+// TestWire_SMSBudgetDefaults (BE-181): the configuration's budget and the
+// value identity falls back to are the same.
+func TestWire_SMSBudgetDefaults(t *testing.T) {
+	t.Parallel()
+	cfg, err := config.Load[struct {
+		config.Common
+		SMS config.SMS
+	}](map[string]string{"APP_ENV": "dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := (identity.SMSBudget{PerHour: cfg.SMS.BudgetPerHour, PerDay: cfg.SMS.BudgetPerDay}); got != identity.DefaultSMSBudget {
+		t.Fatalf("configuration %+v, identity %+v", got, identity.DefaultSMSBudget)
+	}
+}
+
+// TestWire_SMSMetrics (BE-181): the API and the worker each register
+// koro_sms_codes_total on their own registry.
+func TestWire_SMSMetrics(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.identity.metrics(obs.NewMetrics()); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.identity.metrics(nil); err != nil {
+		t.Fatalf("metrics off: %v", err)
 	}
 }

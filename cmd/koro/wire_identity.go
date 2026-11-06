@@ -18,6 +18,7 @@ import (
 	"koro/internal/platform/crypto/rewrap"
 	"koro/internal/platform/db"
 	"koro/internal/platform/netgsmapi"
+	"koro/internal/platform/obs"
 	"koro/internal/platform/passwd"
 	"koro/internal/platform/problem"
 	smsmailpit "koro/internal/platform/sms/mailpit"
@@ -182,6 +183,7 @@ func (w *identityWiring) build(c *container) error {
 			return nil, nil
 		},
 		Hasher: hasher, Secrets: secrets, Challenges: challenges, SMS: sender,
+		SMSBudget: identity.SMSBudget{PerHour: c.infra.platform.SMS.BudgetPerHour, PerDay: c.infra.platform.SMS.BudgetPerDay},
 		Domains: func(ctx context.Context, domain string) (uuid.UUID, bool, error) {
 			if w.domains != nil {
 				return w.domains(ctx, domain)
@@ -254,6 +256,22 @@ func (w *identityWiring) tasks(c *container) {
 	for _, j := range w.mod.SMSCodeJobs(identity.Retention(c.retention("sms_code", 0, identity.SMSCodeRetention))) {
 		c.infra.jobs.Schedule(j)
 	}
+}
+
+// metrics registers koro_sms_codes_total{purpose, outcome} (BE-181) on the
+// process's registry: the API counts the codes the budget and the reset
+// ceiling refuse, the worker the sends; nil m → metrics off.
+func (w *identityWiring) metrics(m *obs.Metrics) error {
+	return m.CounterFunc("koro_sms_codes_total",
+		"SMS codes by purpose and outcome (sent, rejected, retried: the worker's sends; budget_refused, reset_closed: refused by the API).",
+		[]string{"purpose", "outcome"}, func() []obs.Sample {
+			cs := w.mod.SMSCounters()
+			out := make([]obs.Sample, len(cs))
+			for i, s := range cs {
+				out[i] = obs.Sample{Labels: []string{s.Purpose, s.Outcome}, Value: float64(s.Value)}
+			}
+			return out
+		})
 }
 
 // smsSenders is the selection map of the SMS port (SMS_PROVIDER; BE-172,

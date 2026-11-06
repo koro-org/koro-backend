@@ -77,7 +77,8 @@ func Register(api huma.API, svc Service) {
 		Summary: "Request a password reset",
 		Description: "Always 202 (no account enumeration). channel email (default): a link valid for 30 minutes. channel sms " +
 			"(BE-172): a 6-digit code by SMS (10 minutes; confirmPasswordResetSms) when the account has a verified number, " +
-			"its SMS second step is off and it holds no role that requires MFA; otherwise the e-mail link, with the same answer.",
+			"its SMS second step is off, it holds no role that requires MFA and the SMS limits, the platform's SMS budget and " +
+			"the account's daily ceiling allow it; otherwise the e-mail link, with the same answer.",
 	}, op.Meta{Action: string(authz.IdentityPasswordResetRequest), Surface: op.SurfacePublic, RateLimit: op.RateAuthPasswordReset,
 		Idempotency: op.IdempotencyOptional}, h.resetRequest)
 

@@ -215,6 +215,22 @@ func (s gormStore) MarkSMSCodeSent(ctx context.Context, id uuid.UUID, at time.Ti
 	return res.RowsAffected == 1, nil
 }
 
+// SMSCodeUsage implements Store (sms_codes_user_created_idx).
+//
+// cross-org: SMS codes belong to a user, not an org.
+func (s gormStore) SMSCodeUsage(ctx context.Context, userID uuid.UUID, purpose SMSPurpose, since time.Time) (SMSCodeUse, error) {
+	var r struct {
+		Codes    int `gorm:"column:codes"`
+		Attempts int `gorm:"column:attempts"`
+	}
+	err := db.Conn(ctx, s.orm).Raw(`SELECT count(*) AS codes, coalesce(sum(attempts), 0) AS attempts FROM sms_codes
+		WHERE user_id = ? AND purpose = ? AND created_at >= ?`, userID, string(purpose), since).Scan(&r).Error
+	if err != nil {
+		return SMSCodeUse{}, fmt.Errorf("identity: SMS code usage: %w", db.Translate(err))
+	}
+	return SMSCodeUse(r), nil
+}
+
 // DeleteEndedSMSCodes implements Store (retention sms_code; sms_codes_expires_at_idx).
 //
 // cross-org: retention sweep over every user's codes.

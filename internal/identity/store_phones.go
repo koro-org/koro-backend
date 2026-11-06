@@ -46,6 +46,13 @@ type SMSCode struct {
 	CreatedAt  time.Time
 }
 
+// SMSCodeUse is how much a purpose of an account was used in a window: the
+// codes opened and the verification attempts they took.
+type SMSCodeUse struct {
+	Codes    int
+	Attempts int
+}
+
 func (c SMSCode) clone() SMSCode {
 	out := c
 	out.CodeHash = bytes.Clone(c.CodeHash)
@@ -94,6 +101,10 @@ type phoneStore interface {
 	// MarkSMSCodeSent sets sent_at of a code not sent yet; marked=false
 	// when it already was.
 	MarkSMSCodeSent(ctx context.Context, id uuid.UUID, at time.Time) (marked bool, err error)
+	// SMSCodeUsage counts the codes of (userID, purpose) created at since or
+	// later, consumed or not, and the attempts they took
+	// (sms_codes_user_created_idx).
+	SMSCodeUsage(ctx context.Context, userID uuid.UUID, purpose SMSPurpose, since time.Time) (SMSCodeUse, error)
 	// DeleteEndedSMSCodes deletes up to limit codes that expired before
 	// cutoff (retention sms_code) and returns how many.
 	DeleteEndedSMSCodes(ctx context.Context, cutoff time.Time, limit int) (int, error)

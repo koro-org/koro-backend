@@ -16,10 +16,8 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/platform/crypto"
-	"koro/internal/platform/httpx"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/queue"
-	"koro/internal/platform/ratelimit"
 	"koro/internal/platform/sms"
 )
 
@@ -48,6 +46,7 @@ const (
 	maxSMSAttempts       = 5  // verifications of one code
 	maxSMSAttemptsStored = 10 // sms_codes_attempts_chk
 	reasonInvalidSMSCode = "invalid_sms_code"
+	reasonSMSResetLimit  = "sms_reset_limit"
 )
 
 // smsCodeTTL is the lifetime of a code of purpose (a sign-in code also ends
@@ -58,16 +57,6 @@ func smsCodeTTL(p SMSPurpose) time.Duration {
 	}
 	return 10 * time.Minute // phone_verify, password_reset
 }
-
-// Rate limits of the SMS sends (BE-172), applied by the service on top of
-// the operation's middleware class: per number (an SMS bomb against a
-// victim's phone), per account and per client IP (cost). Strict: an
-// unavailable limiter refuses (503), nothing is sent.
-var (
-	ruleSMSNumber = ratelimit.Rule{Name: "sms_number", Rate: 5, Per: time.Hour, Strict: true}
-	ruleSMSUser   = ratelimit.Rule{Name: "sms_user", Rate: 5, Per: time.Hour, Strict: true}
-	ruleSMSIP     = ratelimit.Rule{Name: "sms_ip", Rate: 30, Per: time.Hour, Strict: true}
-)
 
 // smsTexts are the messages (plain ASCII: Netgsm's OTP route takes no
 // Turkish characters), Turkish and English: code and validity in minutes.
@@ -200,8 +189,13 @@ func (s *service) matchSMSCode(ctx context.Context, userID uuid.UUID, purpose SM
 // the account userID by a (anonymous on the public operations): the reason
 // is invalid_sms_code; the code and the number are never in it.
 func (s *service) smsCodeDenied(ctx context.Context, act authz.Action, userID uuid.UUID, a authz.Actor, purpose SMSPurpose) error {
+	return s.smsDenied(ctx, act, userID, a, purpose, reasonInvalidSMSCode)
+}
+
+// smsDenied writes a denied record of an SMS code with reason.
+func (s *service) smsDenied(ctx context.Context, act authz.Action, userID uuid.UUID, a authz.Actor, purpose SMSPurpose, reason string) error {
 	e := event(act, audit.Denied, resourceUser, userID, map[string]any{"sms_purpose": string(purpose)}).By(a)
-	e.Reason = reasonInvalidSMSCode
+	e.Reason = reason
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error { return s.d.Audit.Log(ctx, e) })
 }
 
@@ -213,26 +207,6 @@ func (s *service) phoneDigest(number string) (string, error) {
 		return "", fmt.Errorf("identity: phone digest: %w", err)
 	}
 	return hex.EncodeToString(b[:12]), nil
-}
-
-// limitSMS applies the SMS send limits: per number, per account and per
-// client IP.
-func (s *service) limitSMS(ctx context.Context, userID uuid.UUID, number string) error {
-	digest, err := s.phoneDigest(number)
-	if err != nil {
-		return err
-	}
-	if err := s.allow(ctx, ruleSMSNumber, "phone:"+digest); err != nil {
-		return err
-	}
-	if err := s.allow(ctx, ruleSMSUser, "user:"+userID.String()); err != nil {
-		return err
-	}
-	ip := canonicalIP(httpx.ClientIPFrom(ctx))
-	if ip == "" {
-		ip = "unknown"
-	}
-	return s.allow(ctx, ruleSMSIP, "ip:"+ip)
 }
 
 // smsCodeTask is the payload of identity.send_sms_code: the row ID only
@@ -287,13 +261,16 @@ func (s *service) handleSendSMSCode(ctx context.Context, payload []byte) error {
 	msg := sms.Message{To: c.Number, Text: smsText(c.Purpose, u.Locale, code), Ref: "sms_code:" + c.ID.String()}
 	if _, err := s.d.SMS.Send(ctx, msg); err != nil {
 		if errors.Is(err, sms.ErrRejected) {
+			s.smsCounts.inc(c.Purpose, SMSOutcomeRejected)
 			s.d.Log.LogAttrs(ctx, slog.LevelWarn, "SMS code refused by the provider", slog.String("sms_code_id", c.ID.String()),
 				slog.String("purpose", string(c.Purpose)), slog.Bool("invalid_number", errors.Is(err, sms.ErrInvalidNumber)),
 				slog.String("err", err.Error()))
 			return queue.Permanent(err)
 		}
+		s.smsCounts.inc(c.Purpose, SMSOutcomeRetried)
 		return err
 	}
+	s.smsCounts.inc(c.Purpose, SMSOutcomeSent)
 	if _, err := s.phones().MarkSMSCodeSent(ctx, c.ID, s.now()); err != nil {
 		// Sent already: a retry would send the same code again; log only.
 		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "SMS code sent but not marked", slog.String("sms_code_id", c.ID.String()),

@@ -185,16 +185,26 @@ func (s *service) emailDigest(normalized string) (string, error) {
 // limiter's remaining wait as Retry-After (BE-178: the SMS send limits, the
 // e-mail and reauth limits alike), as the operation's middleware answers.
 func (s *service) allow(ctx context.Context, rule ratelimit.Rule, key string) error {
-	res, err := s.d.Limiter.Allow(ctx, rule, key)
-	switch {
-	case err != nil:
-		s.d.Log.LogAttrs(ctx, slog.LevelError, "rate limiter unavailable (fail closed)",
-			slog.String("rule", rule.Name), slog.String("err", err.Error()))
-		return problem.ErrUnavailable.Wrap(err)
-	case !res.Allowed:
+	res, err := s.limiterAllow(ctx, rule, key)
+	if err != nil {
+		return err
+	}
+	if !res.Allowed {
 		return problem.ErrRateLimited.WithRetryAfter(res.RetryAfter)
 	}
 	return nil
+}
+
+// limiterAllow counts one request of key under rule; an unavailable limiter
+// fails closed (503). The caller answers a refusal.
+func (s *service) limiterAllow(ctx context.Context, rule ratelimit.Rule, key string) (ratelimit.Result, error) {
+	res, err := s.d.Limiter.Allow(ctx, rule, key)
+	if err != nil {
+		s.d.Log.LogAttrs(ctx, slog.LevelError, "rate limiter unavailable (fail closed)",
+			slog.String("rule", rule.Name), slog.String("err", err.Error()))
+		return ratelimit.Result{}, problem.ErrUnavailable.Wrap(err)
+	}
+	return res, nil
 }
 
 // hasherBusy reports whether the password hasher gave no answer because

@@ -182,7 +182,8 @@ func mustAtoi(t *testing.T, s string) int {
 }
 
 // TestPhone_StartRules: the proof is required (R), only Turkish mobile
-// numbers, 503 without an SMS adapter, and the send limits per number.
+// numbers, 503 without an SMS adapter, and the daily limit of a number the
+// account does not hold.
 func TestPhone_StartRules(t *testing.T) {
 	t.Parallel()
 	e, _ := smsEnv(t)
@@ -193,7 +194,7 @@ func TestPhone_StartRules(t *testing.T) {
 	problemtest.WantErr(t, err, identity.ErrReauthRequired)
 	_, err = e.svc.StartPhoneVerification(ctx, a, "+90 212 000 00 01", pwProof)
 	problemtest.WantErr(t, err, identity.ErrInvalidPhone)
-	for i := range 5 {
+	for i := range 3 {
 		if _, err := e.svc.StartPhoneVerification(ctx, a, testPhone, pwProof); err != nil {
 			t.Fatalf("send %d: %v", i+1, err)
 		}
@@ -201,7 +202,7 @@ func TestPhone_StartRules(t *testing.T) {
 	_, err = e.svc.StartPhoneVerification(ctx, a, testPhone, pwProof)
 	problemtest.WantErr(t, err, problem.ErrRateLimited)
 	// BE-178: the 429 carries the limiter's remaining wait (Retry-After).
-	if pe, ok := errors.AsType[*problem.Error](err); !ok || pe.RetryAfter() <= 0 || pe.RetryAfter() > time.Hour ||
+	if pe, ok := errors.AsType[*problem.Error](err); !ok || pe.RetryAfter() <= 0 || pe.RetryAfter() > 24*time.Hour ||
 		pe.GetHeaders().Get("Retry-After") == "" {
 		t.Fatalf("the SMS limit's 429 has no wait: %v", err)
 	}
@@ -269,6 +270,7 @@ func TestSMSCode_AttemptsAndExpiry(t *testing.T) {
 	e.clk.Advance(10 * time.Minute)
 	_, err := e.svc.ConfirmPhoneVerification(ctx, a, code)
 	problemtest.WantErr(t, err, identity.ErrInvalidSMSCode)
+	e.clk.Advance(24 * time.Hour) // the daily limit of a new number
 	code = start()
 	if _, err := e.svc.ConfirmPhoneVerification(ctx, a, code[:3]+" "+code[3:]); err != nil {
 		t.Fatalf("a spaced code: %v", err)

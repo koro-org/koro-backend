@@ -146,7 +146,7 @@ func (s *service) sendLoginCode(ctx context.Context, c *challenge, now time.Time
 	if c.SMSSent >= maxChallengeSMS {
 		return SMSCodeSent{}, problem.ErrRateLimited
 	}
-	if err := s.limitSMS(ctx, u.ID, f.Phone); err != nil {
+	if err := s.limitSMS(ctx, u.ID, SMSLogin, f.Phone); err != nil {
 		return SMSCodeSent{}, err
 	}
 	var code SMSCode

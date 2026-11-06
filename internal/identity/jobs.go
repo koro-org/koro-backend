@@ -72,8 +72,26 @@ func (m Module) Jobs(sessions, tokens Retention) []queue.Job {
 func (m Module) SMSCodeJobs(retention Retention) []queue.Job {
 	return []queue.Job{{Name: SMSCodesCleanupJobName, Cron: "40 3 * * *", Queue: queue.Low, Unique: 23 * time.Hour,
 		Handle: func(ctx context.Context) error {
-			return m.svc.cleanupWith(ctx, SMSCodesCleanupJobName, retention, SMSCodeRetention, m.svc.phones().DeleteEndedSMSCodes)
+			return m.svc.cleanupWith(ctx, SMSCodesCleanupJobName, retentionAtLeast(retention, smsResetWindow), SMSCodeRetention, m.svc.phones().DeleteEndedSMSCodes)
 		}}}
+}
+
+// retentionAtLeast keeps r's period from going below floor: a code row counts
+// towards the SMS reset ceiling for the whole of its window (BE-181).
+func retentionAtLeast(r Retention, floor time.Duration) Retention {
+	if r == nil {
+		return nil
+	}
+	return func(ctx context.Context) (time.Duration, error) {
+		d, err := r(ctx)
+		if err != nil {
+			return 0, err
+		}
+		if d > 0 && d < floor {
+			return floor, nil
+		}
+		return d, nil
+	}
 }
 
 // cleanup deletes rows that ended before now − retention, in batches of

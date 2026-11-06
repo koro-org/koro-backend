@@ -17,6 +17,40 @@ import (
 	"koro/internal/platform/problem/problemtest"
 )
 
+// TestUniversityNames_Catalog (BE-185, T-223): duplicates collapse, an
+// unknown ID has no key, a deactivated university keeps its name.
+func TestUniversityNames_Catalog(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := t.Context()
+	if _, err := e.svc.ImportReference(ctx, directory.ReferenceData{
+		Universities: []directory.RefUniversity{
+			{YokCode: "U-1", Name: "Birinci Üniversitesi", City: "İstanbul", Type: directory.UniversityState},
+			{YokCode: "U-2", Name: "Kapalı Üniversite", City: "İzmir", Type: directory.UniversityState},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	u1, err := e.mem.UniversityByYokCode(ctx, "U-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u2, err := e.mem.UniversityByYokCode(ctx, "U-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.AdminUpdateUniversity(ctx, pad(t), u2.ID, directory.UniversityPatch{IsActive: new(false)}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.svc.UniversityNames(ctx, []uuid.UUID{u1.ID, u2.ID, u1.ID, uuid.NewV7()})
+	if err != nil || len(got) != 2 || got[u1.ID] != "Birinci Üniversitesi" || got[u2.ID] != "Kapalı Üniversite" {
+		t.Fatalf("UniversityNames = %v, %v", got, err)
+	}
+	if got, err := e.svc.UniversityNames(ctx, nil); err != nil || got == nil || len(got) != 0 {
+		t.Fatalf("UniversityNames(nil) = %v, %v", got, err)
+	}
+}
+
 func TestUniversityByEmailDomain_SubdomainMatch(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)

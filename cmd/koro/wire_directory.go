@@ -37,8 +37,9 @@ import (
 // Provided, all set in build: svc (directory.Catalog for later layers), the
 // directory KVKK provider (club claims and their evidence),
 // hooks.domainResolver (identity .edu.tr resolution, BE-018),
-// hooks.clubInfo (orgs joinClub, BE-019) and c.orgs.universityOrgs
-// (searchOrgs?university_id, T-180).
+// hooks.clubInfo (orgs joinClub, BE-019), c.orgs.universityOrgs
+// (searchOrgs?university_id, T-180) and c.identity.universityNames (the
+// university of student verification answers, T-223).
 type directoryWiring struct {
 	store    directory.Store
 	newStore func(c *container) directory.Store
@@ -122,6 +123,7 @@ func (w *directoryWiring) build(c *container) error {
 		return hookClub{UniversityID: club.UniversityID, JoinPolicy: string(club.JoinPolicy), Sensitive: club.IsSensitive}, true, nil
 	}
 	c.orgs.universityOrgs = svc.UniversityOrgs
+	c.identity.universityNames = svc.UniversityNames
 	return nil
 }
 

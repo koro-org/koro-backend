@@ -49,8 +49,8 @@ import (
 //	         BE-020); both nil → every domain is unknown: 422
 //	         identity.edu_domain_unknown, the document path stays open
 //	         (BE-018 safe default: nobody becomes a student by e-mail)
-//	universityNames late-bound university names (directory has no hook
-//	         for them yet, T-223; nil → answers carry the university ID only)
+//	universityNames set by directory's build, read at call time (T-223,
+//	         BE-185); nil → answers carry the university ID only
 //	sms      nil → the adapter SMS_PROVIDER names (smsSenders; BE-172):
 //	         none leaves it nil (every SMS operation answers 503), mem is
 //	         smsfake, mailpit the dev SMS box (BE-178), netgsm Netgsm's

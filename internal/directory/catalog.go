@@ -33,6 +33,23 @@ func (s *service) GetUniversity(ctx context.Context, id uuid.UUID) (University, 
 	return s.d.Store.GetUniversity(ctx, id)
 }
 
+// UniversityNames implements Catalog. An inactive university keeps its name:
+// verifications made under it still show it.
+func (s *service) UniversityNames(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error) {
+	out := make(map[uuid.UUID]string, len(ids))
+	for _, id := range uniqueIDs(ids) {
+		u, err := s.d.Store.GetUniversity(ctx, id)
+		switch {
+		case errors.Is(err, ErrNotFound):
+		case err != nil:
+			return nil, err
+		default:
+			out[id] = u.Name
+		}
+	}
+	return out, nil
+}
+
 // UniversityByEmailDomain implements Catalog. The domain is a machine
 // identifier: it is lower-cased without Turkish rules (05 §9.5).
 func (s *service) UniversityByEmailDomain(ctx context.Context, domain string) (uuid.UUID, bool, error) {
@@ -60,9 +77,7 @@ func (s *service) SkillsExist(ctx context.Context, ids []uuid.UUID) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	uniq := slices.Clone(ids)
-	slices.SortFunc(uniq, func(a, b uuid.UUID) int { return compareUUID(a, b) })
-	uniq = slices.Compact(uniq)
+	uniq := uniqueIDs(ids)
 	n, err := s.d.Store.CountActiveSkills(ctx, uniq)
 	if err != nil {
 		return err
@@ -79,9 +94,14 @@ func (s *service) SkillNames(ctx context.Context, ids []uuid.UUID) (map[uuid.UUI
 	if len(ids) == 0 {
 		return map[uuid.UUID]string{}, nil
 	}
+	return s.d.Store.SkillNamesTR(ctx, uniqueIDs(ids))
+}
+
+// uniqueIDs returns ids sorted, without duplicates (ids is not changed).
+func uniqueIDs(ids []uuid.UUID) []uuid.UUID {
 	uniq := slices.Clone(ids)
 	slices.SortFunc(uniq, func(a, b uuid.UUID) int { return compareUUID(a, b) })
-	return s.d.Store.SkillNamesTR(ctx, slices.Compact(uniq))
+	return slices.Compact(uniq)
 }
 
 func compareUUID(a, b uuid.UUID) int {

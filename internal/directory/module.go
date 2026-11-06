@@ -69,6 +69,9 @@ type Catalog interface {
 	SensitiveOrgIDs(ctx context.Context, orgIDs []uuid.UUID) (map[uuid.UUID]bool, error)
 	// GetUniversity returns a university (any is_active) or ErrNotFound.
 	GetUniversity(ctx context.Context, id uuid.UUID) (University, error)
+	// UniversityNames names the universities (any is_active) among ids, each
+	// read once; an unknown ID has no key (identity.UniversityNames, T-223).
+	UniversityNames(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error)
 	// UniversityByEmailDomain maps an e-mail domain to its university: the
 	// domain equals a registered one or ends with "." + it; the longest
 	// active match of an active university wins (02 §8.2).

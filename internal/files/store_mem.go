@@ -62,6 +62,8 @@ func (s *memStore) check(f File) error {
 		return errCheck // files_public_key_chk
 	case f.PublicKey != nil && !publicKeyRe.MatchString(*f.PublicKey):
 		return errCheck // files_public_key_format_chk
+	case f.RetiredAt != nil && f.PublicKey != nil:
+		return errCheck // files_retired_public_chk
 	}
 	switch f.ScanStatus {
 	case ScanPending, ScanClean, ScanInfected, ScanSkipped:
@@ -180,7 +182,8 @@ func (s *memStore) SkippedScans(_ context.Context, after uuid.UUID, limit int) (
 
 func (s *memStore) Unpublished(_ context.Context, scans []ScanStatus, after uuid.UUID, limit int) ([]File, error) {
 	return s.list(func(f File) bool {
-		return f.PublicKey == nil && f.Status == StatusActive && f.Purpose.Publishable() && slices.Contains(scans, f.ScanStatus)
+		return f.PublicKey == nil && f.RetiredAt == nil && f.Status == StatusActive && f.Purpose.Publishable() &&
+			slices.Contains(scans, f.ScanStatus)
 	}, after, limit), nil
 }
 

@@ -68,7 +68,8 @@ func writable(a authz.Actor, o Org) error {
 // status (403 orgs.org_suspended, 409) → If-Match (428/412) → the patch;
 // a real change writes org.updated (O) in the transaction (BE-106). A
 // replaced or removed logo file is deleted in the transaction, after the
-// row stops naming it (files.DeleteReplaced, BE-155); org.updated then
+// row stops naming it (files.DeleteReplaced, BE-155), unless the moderators
+// keep it for a report on the org (dropLogo, BE-180); org.updated then
 // revalidates the public page.
 func (s *service) UpdateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, ifMatch string, p OrgPatch) (OrgView, error) {
 	var out Org
@@ -96,8 +97,7 @@ func (s *service) UpdateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, if
 		if out, err = s.orgs().UpdateOrg(ctx, next); err != nil {
 			return err
 		}
-		// The replaced or removed logo goes with its public copy (BE-155).
-		if err := files.DeleteReplaced(ctx, s.d.Files, a, o.LogoFileID, next.LogoFileID); err != nil {
+		if err := s.dropLogo(ctx, a, o, next); err != nil {
 			return err
 		}
 		if p.companyFields() {
@@ -118,6 +118,20 @@ func (s *service) UpdateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, if
 	v, err := s.view(ctx, out)
 	v.FullTaxNo = fullTaxNo(a)
 	return v, err
+}
+
+// dropLogo ends the logo o named and next no longer does: it goes with its
+// public copy (BE-155) unless the moderators keep it for a report on the org
+// (BE-180). The audit record of the update says nothing either way: the org
+// must not learn from its own trail that it was reported.
+func (s *service) dropLogo(ctx context.Context, a authz.Actor, o, next Org) error {
+	if s.d.LogoKeeper != nil && o.LogoFileID != nil && (next.LogoFileID == nil || *next.LogoFileID != *o.LogoFileID) {
+		kept, err := s.d.LogoKeeper.KeepReplacedLogo(ctx, a, o.ID, *o.LogoFileID)
+		if err != nil || kept {
+			return err
+		}
+	}
+	return files.DeleteReplaced(ctx, s.d.Files, a, o.LogoFileID, next.LogoFileID)
 }
 
 // applyPatch validates the org fields of p and returns the new row and the
@@ -266,7 +280,8 @@ func equalPtr(a, b *string) bool { return a == nil && b == nil || a != nil && b 
 
 // attachLogo checks that fileID is an org_logo upload of this org (or of
 // the caller) and attaches it to the org in the transaction (files k30:
-// the upload was authorised for org_logo already).
+// the upload was authorised for org_logo already). A logo kept for the
+// moderators (BE-180) answers like a deleted one: to the org it is gone.
 func (s *service) attachLogo(ctx context.Context, a authz.Actor, o Org, fileID uuid.UUID) error {
 	if s.d.Files == nil {
 		return problem.ErrUnavailable
@@ -281,7 +296,7 @@ func (s *service) attachLogo(ctx context.Context, a authz.Actor, o Org, fileID u
 	}
 	ownOrg := f.OrgID != nil && *f.OrgID == o.ID
 	ownUpload := f.UploadedBy != nil && *f.UploadedBy == a.UserID
-	if f.Purpose != files.PurposeOrgLogo || !ownOrg && !ownUpload {
+	if f.Purpose != files.PurposeOrgLogo || f.Retired || !ownOrg && !ownUpload {
 		return bad
 	}
 	return s.d.Files.Attach(ctx, a, fileID, files.Owner{Module: logoOwner, EntityID: o.ID, Purpose: files.PurposeOrgLogo})

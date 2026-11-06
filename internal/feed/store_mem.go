@@ -27,6 +27,7 @@ type MemStore struct {
 	posts    map[uuid.UUID]Post
 	media    map[uuid.UUID][]Media      // by post id
 	dropped  map[uuid.UUID]DroppedMedia // post_dropped_media by file id (BE-158)
+	logos    map[uuid.UUID]DroppedLogo  // org_dropped_logos by file id (BE-180)
 	settings map[uuid.UUID]OrgSettings
 	follows  map[[2]uuid.UUID]Follow    // {user, org}
 	mutes    map[[2]uuid.UUID]time.Time // {user, org} → created_at
@@ -45,8 +46,9 @@ var _ Store = (*MemStore)(nil)
 // NewMemStore returns an empty in-memory Store; now stamps the rows.
 func NewMemStore(now func() time.Time) *MemStore {
 	return &MemStore{
-		posts: map[uuid.UUID]Post{}, media: map[uuid.UUID][]Media{}, dropped: map[uuid.UUID]DroppedMedia{}, settings: map[uuid.UUID]OrgSettings{},
-		follows: map[[2]uuid.UUID]Follow{}, mutes: map[[2]uuid.UUID]time.Time{}, hides: map[[2]uuid.UUID]time.Time{},
+		posts: map[uuid.UUID]Post{}, media: map[uuid.UUID][]Media{}, dropped: map[uuid.UUID]DroppedMedia{}, logos: map[uuid.UUID]DroppedLogo{},
+		settings: map[uuid.UUID]OrgSettings{},
+		follows:  map[[2]uuid.UUID]Follow{}, mutes: map[[2]uuid.UUID]time.Time{}, hides: map[[2]uuid.UUID]time.Time{},
 		likes: map[[2]uuid.UUID]time.Time{}, saves: map[[2]uuid.UUID]time.Time{}, reports: map[uuid.UUID]Report{},
 		now: now,
 	}

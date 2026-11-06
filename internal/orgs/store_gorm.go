@@ -117,6 +117,14 @@ func (s gormStore) LockOrg(ctx context.Context, id uuid.UUID) (Org, error) {
 	return takeOrg("lock org", q)
 }
 
+// ShareLockOrg implements Store.
+//
+// cross-org: organizations is the org root, addressed by its own id.
+func (s gormStore) ShareLockOrg(ctx context.Context, id uuid.UUID) (Org, error) {
+	q := db.Conn(ctx, s.orm).Clauses(clause.Locking{Strength: clause.LockingStrengthShare}).Where("id = ?", id)
+	return takeOrg("share lock org", q)
+}
+
 // UpdateOrg implements Store.
 //
 // cross-org: organizations is the org root, addressed by its own id.

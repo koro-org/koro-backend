@@ -40,7 +40,7 @@ func TestPurgeRemovedPosts_CascadesMedia(t *testing.T) {
 	now := e.clk.Now()
 	p := privacy.RetentionPolicy{Code: feed.PolicyPostRemoved, Retention: now.Sub(now.AddDate(0, -12, 0))}
 	if got := e.mod.Sweeper.PolicyCodes(); !slices.Equal(got, []string{feed.PolicyContentReport, feed.PolicyModerationAction,
-		feed.PolicyMediaDropped, feed.PolicyPostRemoved}) {
+		feed.PolicyLogoDropped, feed.PolicyMediaDropped, feed.PolicyPostRemoved}) {
 		t.Fatalf("PolicyCodes() = %v", got)
 	}
 	if res, err := e.mod.Sweeper.Sweep(ctx, p, now); err != nil || res.Count != 1 {

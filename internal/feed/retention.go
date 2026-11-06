@@ -31,10 +31,15 @@ import (
 //	                   post is still open or in review (the moderators'
 //	                   evidence waits). A removed post's purge takes its
 //	                   dropped images too.
+//	org_logo_dropped   a logo an org replaced while reported (org_dropped_logos,
+//	                   BE-180) goes 12 months after it was dropped with its
+//	                   file, unless a report filed before that is still open
+//	                   or in review, or was resolved within the period: the
+//	                   logo lasts as long as the report it may be evidence for.
 //	content_report     a resolved report (actioned / dismissed) goes 12
 //	                   months after resolved_at with its snapshot of the
-//	                   reported post (BE-160); its moderation actions keep
-//	                   their decision, report_id becomes NULL.
+//	                   reported post or org (BE-160, BE-180); its moderation
+//	                   actions keep their decision, report_id becomes NULL.
 //	moderation_action  a decision goes 2 years after it was taken, through
 //	                   000121's moderation_actions_purge (append-only table).
 
@@ -42,6 +47,7 @@ import (
 const (
 	PolicyPostRemoved      = "post_removed"
 	PolicyMediaDropped     = "post_media_dropped"
+	PolicyLogoDropped      = "org_logo_dropped"
 	PolicyContentReport    = "content_report"
 	PolicyModerationAction = "moderation_action"
 
@@ -55,6 +61,7 @@ const (
 var retentionTables = map[string]string{
 	PolicyPostRemoved:      "posts",
 	PolicyMediaDropped:     "post_dropped_media",
+	PolicyLogoDropped:      "org_dropped_logos",
 	PolicyContentReport:    "content_reports",
 	PolicyModerationAction: "moderation_actions",
 }
@@ -76,6 +83,13 @@ type RetentionStore interface {
 	// CountDroppedMediaDue counts them without a limit (BE-158).
 	DroppedMediaDue(ctx context.Context, cutoff time.Time, limit int) ([]DroppedMedia, error)
 	CountDroppedMediaDue(ctx context.Context, cutoff time.Time) (int, error)
+	// DroppedLogosDue returns up to limit logos dropped before cutoff that no
+	// report filed before the drop still holds (open, in review, or resolved
+	// at or after cutoff), oldest first, locked for the transaction (rows
+	// locked elsewhere are skipped). CountDroppedLogosDue counts them without
+	// a limit (BE-180).
+	DroppedLogosDue(ctx context.Context, cutoff time.Time, limit int) ([]DroppedLogo, error)
+	CountDroppedLogosDue(ctx context.Context, cutoff time.Time) (int, error)
 	// PurgeResolvedReports deletes up to limit reports resolved before
 	// cutoff, oldest first (their actions' report_id becomes NULL); dryRun
 	// counts them and deletes nothing.
@@ -93,10 +107,11 @@ var errNoFiles = errors.New("feed: post images cannot be purged: files not wired
 
 // sweeper is feed's privacy.RetentionSweeper: it needs the purges of the
 // store, the media of the removed posts (their image files go too), the
-// files module and the transaction manager only.
+// kept logos, the files module and the transaction manager only.
 type sweeper struct {
 	retention RetentionStore
 	media     mediaStore
+	logos     logoStore
 	files     Files
 	tx        db.TxManager
 }
@@ -129,6 +144,10 @@ func (w sweeper) Sweep(ctx context.Context, p privacy.RetentionPolicy, now time.
 	case PolicyMediaDropped:
 		purge = func(ctx context.Context, limit int, dry bool) (int, error) {
 			return w.purgeDroppedMedia(ctx, cutoff, limit, dry)
+		}
+	case PolicyLogoDropped:
+		purge = func(ctx context.Context, limit int, dry bool) (int, error) {
+			return w.purgeDroppedLogos(ctx, cutoff, limit, dry)
 		}
 	case PolicyContentReport:
 		purge = func(ctx context.Context, limit int, dry bool) (int, error) {
@@ -199,6 +218,27 @@ func (w sweeper) purgeDroppedMedia(ctx context.Context, cutoff time.Time, limit 
 	}
 	ids := droppedFiles(due)
 	n, err := w.media.ForgetDroppedMedia(ctx, ids)
+	if err != nil {
+		return 0, err
+	}
+	return n, w.deleteFiles(ctx, ids)
+}
+
+// purgeDroppedLogos handles one batch of org_logo_dropped (BE-180): the rows
+// go, then their files, in the transaction carried by ctx.
+func (w sweeper) purgeDroppedLogos(ctx context.Context, cutoff time.Time, limit int, dry bool) (int, error) {
+	if dry {
+		return w.retention.CountDroppedLogosDue(ctx, cutoff)
+	}
+	due, err := w.retention.DroppedLogosDue(ctx, cutoff, limit)
+	if err != nil || len(due) == 0 {
+		return 0, err
+	}
+	ids := make([]uuid.UUID, len(due))
+	for i, l := range due {
+		ids[i] = l.FileID
+	}
+	n, err := w.logos.ForgetDroppedLogos(ctx, ids)
 	if err != nil {
 		return 0, err
 	}

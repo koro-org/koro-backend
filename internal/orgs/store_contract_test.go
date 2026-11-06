@@ -71,6 +71,12 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (orgs.Store, world)
 		if _, err := s.LockOrg(ctx, uuid.NewV7()); !errors.Is(err, orgs.ErrNotFound) {
 			t.Fatalf("LockOrg missing: %v", err)
 		}
+		if g, err := s.ShareLockOrg(ctx, o.ID); err != nil || g.ID != o.ID || *g.City != "İstanbul" {
+			t.Fatalf("ShareLockOrg = %+v, %v", g, err)
+		}
+		if _, err := s.ShareLockOrg(ctx, uuid.NewV7()); !errors.Is(err, orgs.ErrNotFound) {
+			t.Fatalf("ShareLockOrg missing: %v", err)
+		}
 		// A taken slug writes nothing and reports false.
 		dup := newOrg(orgs.KindClub, "Başka")
 		dup.Slug = o.Slug

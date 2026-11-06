@@ -17,8 +17,9 @@ import (
 // moderator sees, not the snapshot; the reporter's open report returned
 // again keeps its first snapshot; another user's report after the edit
 // holds the edited text; resolving the report keeps it; an org report has
-// none. It is shown on the moderators' report view only: not in the queue
-// list nor in the reporter's KVKK export.
+// none of a post's columns (its own: report_org_test.go). It is shown on the
+// moderators' report view only: not in the queue list nor in the reporter's
+// KVKK export.
 func TestReport_SnapshotKeepsReportedText(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -100,13 +101,14 @@ func TestReport_SnapshotKeepsReportedText(t *testing.T) {
 		t.Fatalf("export = %s", out)
 	}
 
-	// An org report has no snapshot.
+	// An org report has none of a post's columns.
 	ro, err := e.svc.CreateReport(ctx, persona(t, "student"), feed.ReportInput{TargetType: feed.TargetOrg, TargetID: orgID("club_a"),
 		Reason: feed.ReasonSpam})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r, err := e.mem.GetReport(ctx, ro.ID); err != nil || r.SnapshotAt != nil {
+	if r, err := e.mem.GetReport(ctx, ro.ID); err != nil || r.SnapshotTitle != nil || r.SnapshotBodyText != nil ||
+		r.SnapshotOpportunity != nil || r.SnapshotEventID != nil {
 		t.Fatalf("org report = %+v, %v", r.PostSnapshot, err)
 	}
 }

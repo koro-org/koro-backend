@@ -69,6 +69,113 @@ func (e *env) publicObject(t *testing.T, url string) (data []byte, cacheControl 
 	return data, info.CacheControl, ok
 }
 
+// TestFiles_Retire (BE-180): a file kept as evidence only leaves public media
+// and never comes back: the copy goes, files.publish_public does not make
+// another, PublicURL has none and it can no longer be attached, while the
+// owning module may still sign it. The audit record has no org scope. A second
+// call and a missing file are no errors; an anonymous actor is refused.
+func TestFiles_Retire(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, withPublic, func(d *files.Deps) { d.Scanner = &fakeScanner{verdict: files.ScanVerdict{Status: files.ScanClean}} })
+	ctx := t.Context()
+	admin := actor(t, "club_admin")
+	id := e.logo(t, pngWithText(t, 4, 3))
+	if err := e.scan(t, id); err != nil {
+		t.Fatal(err)
+	}
+	u, err := e.svc.PublicURL(ctx, id)
+	if err != nil || u == "" {
+		t.Fatalf("PublicURL = %q, %v", u, err)
+	}
+	if _, _, ok := e.publicObject(t, u); !ok {
+		t.Fatal("no public copy before Retire")
+	}
+	org := authztest.ID("club_a")
+	if err := e.svc.Attach(ctx, admin, id, files.Owner{Module: "orgs", EntityID: org, Purpose: files.PurposeOrgLogo}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := e.svc.Retire(ctx, admin, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := e.publicObject(t, u); ok {
+		t.Fatal("the public copy outlived Retire")
+	}
+	if f := e.row(t, id); f.PublicKey != nil || f.RetiredAt == nil || f.AttachedModule == nil {
+		t.Fatalf("row after Retire: key %v, retired %v, attached %v", f.PublicKey, f.RetiredAt, f.AttachedModule)
+	}
+	recs := e.events(t)
+	last := recs[len(recs)-1]
+	if last.Action != "files.file.retire" || last.OrgID != nil || !bytes.Contains(last.Metadata, []byte(`"org_id":"`+org.String()+`"`)) ||
+		!bytes.Contains(last.Metadata, []byte(`"public_copy":true`)) {
+		t.Fatalf("audit = %+v (%s)", last, last.Metadata)
+	}
+	if got, err := e.svc.PublicURL(ctx, id); err != nil || got != "" {
+		t.Fatalf("PublicURL after Retire = %q, %v", got, err)
+	}
+	if m, err := e.svc.Get(ctx, id); err != nil || !m.Retired {
+		t.Fatalf("Get after Retire = %+v, %v", m, err)
+	}
+	if d, err := e.svc.PresignGet(ctx, id, 0); err != nil || d.URL == "" {
+		t.Fatalf("PresignGet after Retire = %+v, %v", d, err)
+	}
+	if err := e.svc.Attach(ctx, admin, id, files.Owner{Module: "orgs", EntityID: org, Purpose: files.PurposeOrgLogo}); !errors.Is(err, files.ErrNotActive) {
+		t.Fatalf("Attach after Retire = %v, want ErrNotActive", err)
+	}
+
+	// The backfill leaves it alone.
+	if err := e.job(t, files.PublishPublicJobName).Handle(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if f := e.row(t, id); f.PublicKey != nil {
+		t.Fatalf("the backfill published a retired file: %v", *f.PublicKey)
+	}
+
+	// Again, and a missing file: nothing happens.
+	n := len(e.events(t))
+	if err := e.svc.Retire(ctx, admin, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Retire(ctx, admin, uuid.NewV7()); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(e.events(t)); got != n {
+		t.Fatalf("a no-op Retire wrote %d audit records", got-n)
+	}
+	if err := e.svc.Retire(ctx, authz.Actor{}, id); err == nil {
+		t.Fatal("Retire without an actor")
+	}
+
+	// Delete ends it.
+	if err := e.svc.Delete(ctx, admin, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.Get(ctx, id); !errors.Is(err, files.ErrNotFound) {
+		t.Fatalf("Get after Delete = %v", err)
+	}
+}
+
+// TestFiles_Retire_WithoutPublicMedia (BE-180): public media off, or a file
+// never copied: Retire has no copy to take down, the rest holds.
+func TestFiles_Retire_WithoutPublicMedia(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, func(d *files.Deps) { d.Scanner = &fakeScanner{verdict: files.ScanVerdict{Status: files.ScanClean}} })
+	id := e.logo(t, pngWithText(t, 4, 3))
+	if err := e.scan(t, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Retire(t.Context(), actor(t, "club_admin"), id); err != nil {
+		t.Fatal(err)
+	}
+	if f := e.row(t, id); f.RetiredAt == nil || f.PublicKey != nil {
+		t.Fatalf("row = retired %v, key %v", f.RetiredAt, f.PublicKey)
+	}
+	recs := e.events(t)
+	if last := recs[len(recs)-1]; !bytes.Contains(last.Metadata, []byte(`"public_copy":false`)) {
+		t.Fatalf("audit = %+v (%s)", last, last.Metadata)
+	}
+}
+
 // TestPublicMedia_CopiedAfterCleanScan: a cleared org logo gets one public
 // copy — the rewritten bytes, immutable Cache-Control, a content-addressed
 // URL — audited as the publish job; an unattached file writes no event.

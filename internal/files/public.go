@@ -13,6 +13,7 @@ import (
 
 	"koro/internal/audit"
 	"koro/internal/authz"
+	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/queue"
@@ -47,6 +48,10 @@ import (
 // files.publish_public job (files cleared before BE-120, or while public
 // media was off, or whose copy failed). The first copy of an attached file
 // writes file.published (O) for the web's revalidation (webcache).
+//
+// A file its owning module keeps as evidence only (Retire, BE-180: a logo
+// replaced while its org has an open report) loses the copy and never gets
+// another; the signed URL stays for whoever the owner lets read it.
 const (
 	// PublishPublicJobName is the public media backfill (every 10 minutes,
 	// minute 2, 12, …; low).
@@ -60,6 +65,9 @@ const (
 	// auditPublish is the audit action of the public copy (system actor
 	// files.publish_public; T-161 lists the module-call actions for 03 §3.7).
 	auditPublish = "files.file.publish"
+
+	// auditRetire is the audit action of Retire (a module call, BE-180).
+	auditRetire = "files.file.retire"
 )
 
 // publicKeyRe is files_public_key_format_chk (000149).
@@ -104,8 +112,47 @@ func (s *service) PublicURL(ctx context.Context, fileID uuid.UUID) (string, erro
 
 // needsCopy reports whether f is due for a public copy.
 func (s *service) needsCopy(f File) bool {
-	return s.d.Public.Enabled() && f.Purpose.Publishable() && f.PublicKey == nil && len(f.SHA256) == 32 &&
+	return s.d.Public.Enabled() && f.Purpose.Publishable() && f.PublicKey == nil && f.RetiredAt == nil && len(f.SHA256) == 32 &&
 		s.servable(f) == nil
+}
+
+// Retire implements Files. The audit record has no org scope: the file's
+// org must not read from its own trail why its old logo was kept (a report
+// on it is the moderators' matter, 03 Y7); the metadata names the org.
+func (s *service) Retire(ctx context.Context, a authz.Actor, fileID uuid.UUID) error {
+	if err := checkActor(a); err != nil {
+		return err
+	}
+	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
+		f, err := s.d.Store.Lock(ctx, fileID)
+		switch {
+		case errors.Is(err, ErrNotFound):
+			return nil
+		case err != nil:
+			return err
+		case f.RetiredAt != nil:
+			return nil
+		}
+		key := f.PublicKey
+		now := s.d.Clock.Now()
+		f.RetiredAt, f.PublicKey = &now, nil
+		if err := s.d.Store.Update(ctx, f); err != nil {
+			return err
+		}
+		meta := map[string]any{"public_copy": key != nil}
+		if f.OrgID != nil {
+			meta["org_id"] = f.OrgID.String()
+		}
+		ev := fileEvent(auditRetire, audit.Success, a, f, meta)
+		ev.OrgID = nil
+		if err := s.d.Audit.Log(ctx, ev); err != nil {
+			return err
+		}
+		if key != nil && s.d.Public.Enabled() {
+			db.AfterCommit(ctx, func(ctx context.Context) { s.deletePublic(ctx, f.ID, *key) })
+		}
+		return nil
+	})
 }
 
 // publish makes the public copy of the file id when it is due (idempotent):

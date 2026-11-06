@@ -11,11 +11,13 @@ import (
 // before it reads them.
 type reportStore interface {
 	// InsertReport writes r as an open report, with its snapshot of the
-	// reported post (BE-160), unless the reporter already has an open (open
-	// or in_review) report on the target (content_reports_open_uq): then it
-	// returns that report, its first snapshot unchanged, and created=false.
-	// Concurrent duplicates end with one row. A snapshot is a post report's
-	// only (content_reports_snapshot_target_chk, ErrValidation).
+	// reported post (BE-160) or org (BE-180), unless the reporter already has
+	// an open (open or in_review) report on the target
+	// (content_reports_open_uq): then it returns that report, its first
+	// snapshot unchanged, and created=false. Concurrent duplicates end with
+	// one row. A snapshot fits its target only: a post's columns on a post
+	// report, an org's on an org report with the name, none on a message
+	// report (content_reports_snapshot_*_chk, ErrValidation).
 	InsertReport(ctx context.Context, r Report) (Report, bool, error)
 	// GetReport returns the report or ErrNotFound.
 	GetReport(ctx context.Context, id uuid.UUID) (Report, error)

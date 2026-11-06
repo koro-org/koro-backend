@@ -76,7 +76,10 @@
 //     repeated report returns the open one. The reporter's identity leaves
 //     the module only through the admin report endpoints (03 Y7), never in
 //     an org's audit trail. A published post reported by enough distinct
-//     users is hidden until a moderator decides (R-003 §1.5.3).
+//     users is hidden until a moderator decides (R-003 §1.5.3). A report
+//     keeps what it reported, for the moderators only: a copy of the post
+//     (BE-160) or the org's profile, and a logo the org replaces while
+//     reported stays out of public media behind org_dropped_logos (BE-180).
 //   - Moderation (02 §12.10, 03 §5.7): moderators and platform admins work
 //     the review queue and the reports; every decision is an append-only
 //     moderation_actions row and an audit record, and the author org is
@@ -157,6 +160,7 @@ type Service interface {
 	PublicPosts
 	Likes
 	MessageReports // the reports of conversation messages, filed by messaging (BE-162b)
+	LogoKeeper     // the logos an org replaced while reported, asked by orgs (BE-180)
 
 	// GetFeed is getFeed (feed.feed.read): the reader's feed.
 	GetFeed(ctx context.Context, a authz.Actor, q FeedQuery) (PostPage, error)
@@ -346,7 +350,7 @@ func New(d Deps) (Module, error) {
 		d.ReportHideThreshold = DefaultReportHideThreshold
 	}
 	s := &service{d: d}
-	w := sweeper{retention: d.Store, media: s.media(), files: d.Files, tx: d.Tx}
+	w := sweeper{retention: d.Store, media: s.media(), logos: s.logos(), files: d.Files, tx: d.Tx}
 	return Module{Service: s, Privacy: privacyProvider{s: s}, Sweeper: w, svc: s}, nil
 }
 

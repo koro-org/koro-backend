@@ -15,7 +15,7 @@ import (
 // 02 §12.1, §12.9–12.10).
 
 const (
-	reportCols   = `id, reporter_user_id, target_type, target_id, reason, details, status, assigned_to, resolution_note, resolved_at, snapshot_title, snapshot_body_text, snapshot_opportunity, snapshot_event_id, snapshot_at, created_at, updated_at`
+	reportCols   = `id, reporter_user_id, target_type, target_id, reason, details, status, assigned_to, resolution_note, resolved_at, snapshot_title, snapshot_body_text, snapshot_opportunity, snapshot_event_id, snapshot_org_name, snapshot_org_description, snapshot_org_website_url, snapshot_org_social_links, snapshot_org_logo_file_id, snapshot_at, created_at, updated_at`
 	actionCols   = `id, report_id, target_type, target_id, action, reason_code, actor_user_id, note, created_at`
 	settingsCols = `org_id, trust_level, approved_posts_count, restricted_until, reason, updated_by, created_at, updated_at`
 )
@@ -27,8 +27,9 @@ const insertReportTries = 3
 // InsertReport implements Store: INSERT … ON CONFLICT DO NOTHING on the
 // partial unique index content_reports_open_uq (a concurrent duplicate
 // waits for the first and finds its row), then the open report. The
-// snapshot of a post report is written here only (BE-160; UpdateReport
-// never sets it, content_reports_snapshot_guard refuses a change).
+// snapshot of a post or org report is written here only (BE-160, BE-180;
+// UpdateReport never sets it, content_reports_snapshot_guard refuses a
+// change).
 //
 // cross-org: reports have no org scope (moderation is the platform's, 02
 // §12.9); the reporter is the caller.
@@ -41,13 +42,19 @@ func (s gormStore) InsertReport(ctx context.Context, r Report) (Report, bool, er
 		"id": r.ID, "reporter": r.ReporterUserID, "target_type": string(r.TargetType), "target_id": r.TargetID,
 		"reason": string(r.Reason), "details": r.Details, "snap_title": r.SnapshotTitle, "snap_body": r.SnapshotBodyText,
 		"snap_opportunity": r.SnapshotOpportunity, "snap_event": r.SnapshotEventID, "snap_at": r.SnapshotAt,
+		"snap_org_name": r.SnapshotOrgName, "snap_org_description": r.SnapshotOrgDescription, "snap_org_website": r.SnapshotOrgWebsiteURL,
+		"snap_org_links": r.SnapshotOrgSocialLinks, "snap_org_logo": r.SnapshotOrgLogoFileID,
 	}
 	for range insertReportTries {
 		var rows []Report
 		if err := conn.Raw(`INSERT INTO content_reports (id, reporter_user_id, target_type, target_id, reason, details,
-				snapshot_title, snapshot_body_text, snapshot_opportunity, snapshot_event_id, snapshot_at)
+				snapshot_title, snapshot_body_text, snapshot_opportunity, snapshot_event_id,
+				snapshot_org_name, snapshot_org_description, snapshot_org_website_url, snapshot_org_social_links, snapshot_org_logo_file_id,
+				snapshot_at)
 			VALUES ( @id, @reporter, @target_type, @target_id, @reason, @details,
-				@snap_title, @snap_body, @snap_opportunity, @snap_event, @snap_at)
+				@snap_title, @snap_body, @snap_opportunity, @snap_event,
+				@snap_org_name, @snap_org_description, @snap_org_website, @snap_org_links, @snap_org_logo,
+				@snap_at)
 			ON CONFLICT (reporter_user_id, target_type, target_id) WHERE status IN ('open', 'in_review') DO NOTHING
 			RETURNING `+reportCols, args).Scan(&rows).Error; err != nil {
 			return Report{}, false, wrap("insert report", err)

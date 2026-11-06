@@ -159,6 +159,11 @@ func (s *MemStore) GetOrgs(_ context.Context, ids []uuid.UUID) ([]Org, error) {
 // LockOrg implements Store (a plain read: the mutex serialises writes).
 func (s *MemStore) LockOrg(ctx context.Context, id uuid.UUID) (Org, error) { return s.GetOrg(ctx, id) }
 
+// ShareLockOrg implements Store (a plain read: the mutex serialises writes).
+func (s *MemStore) ShareLockOrg(ctx context.Context, id uuid.UUID) (Org, error) {
+	return s.GetOrg(ctx, id)
+}
+
 // UpdateOrg implements Store.
 func (s *MemStore) UpdateOrg(_ context.Context, o Org) (Org, error) {
 	s.mu.Lock()

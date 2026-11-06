@@ -22,7 +22,7 @@ type gormStore struct{ orm *gorm.DB }
 var mutableColumns = []string{
 	"purpose", "owner_user_id", "org_id", "attached_module", "attached_entity_id", "attached_at",
 	"bucket", "storage_key", "original_name", "declared_mime", "detected_mime", "size_bytes", "sha256",
-	"status", "scan_status", "scanned_at", "uploaded_by", "public_key",
+	"status", "scan_status", "scanned_at", "uploaded_by", "public_key", "retired_at",
 }
 
 // cross-org: files rows are addressed by ID; org_id is optional metadata and
@@ -136,7 +136,7 @@ func (s gormStore) SkippedScans(ctx context.Context, after uuid.UUID, limit int)
 func (s gormStore) Unpublished(ctx context.Context, scans []ScanStatus, after uuid.UUID, limit int) ([]File, error) {
 	var out []File
 	err := db.Conn(ctx, s.orm).
-		Where("public_key IS NULL AND status = 'active' AND purpose IN ? AND scan_status IN ? AND id > ?",
+		Where("public_key IS NULL AND retired_at IS NULL AND status = 'active' AND purpose IN ? AND scan_status IN ? AND id > ?",
 			publishablePurposes(), scans, after).
 		Order("id").Limit(limit).Find(&out).Error
 	if err != nil {

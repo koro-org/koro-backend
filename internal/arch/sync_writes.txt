@@ -154,3 +154,11 @@ messaging -> students.ContactSharing.ShareContactWithCompany
 # messages before it (message_reports, message_report_messages; FK to the report, ON DELETE CASCADE), so a
 # report never exists without the messages it is about nor the copy without its report.
 messaging -> feed.MessageReports.FileMessageReport
+
+# BE-180 (T-401; rationale for 01 §6.3 in the BE-180 ticket's doc patch): "Şikâyet edilen kuruluşun logosu". updateOrg
+# no longer deletes a logo it replaces while a report on the org is open or in review: feed, which knows the reports,
+# keeps it (org_dropped_logos, late bound through orgs.LogoKeeper) in the transaction that moves logo_file_id, and
+# retires its file there, so the public copy goes with the change (BE-155) while the moderators keep the evidence, and a
+# logo is never both deleted and named by a kept row.
+orgs      -> feed.LogoKeeper.KeepReplacedLogo
+feed      -> files.Files.Retire

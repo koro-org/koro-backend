@@ -35,6 +35,9 @@ import (
 //	avatarURLs  member avatars of the member list. students (L7) sets it
 //	       in wire_students.go (BE-023). Read at call time; nil → no
 //	       avatar_url.
+//	logoKeeper  the moderators' claim on a replaced logo. feed (L9) sets it
+//	       in wire_feed.go (BE-180). Read at call time; nil → a replaced
+//	       logo is always deleted.
 //	students  tests only (the authz matrix): the student verification
 //	       used instead of identity's (its stub verifies nobody until
 //	       BE-018). nil in production.
@@ -62,11 +65,23 @@ type orgsWiring struct {
 	universityOrgs func(ctx context.Context, universityID uuid.UUID) ([]uuid.UUID, error)
 	graduatedUsers func(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]bool, error)
 	avatarURLs     func(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]string, error)
+	logoKeeper     orgs.LogoKeeper
 
 	students orgs.Students
 
 	mod orgs.Module
 	svc orgs.Service // set by build
+}
+
+// lateLogoKeeper reads the keeper at call time: feed (L9) builds after orgs.
+// Without it a replaced logo is deleted (BE-155).
+type lateLogoKeeper struct{ w *orgsWiring }
+
+func (k lateLogoKeeper) KeepReplacedLogo(ctx context.Context, a authz.Actor, orgID, fileID uuid.UUID) (bool, error) {
+	if k.w.logoKeeper == nil {
+		return false, nil
+	}
+	return k.w.logoKeeper.KeepReplacedLogo(ctx, a, orgID, fileID)
 }
 
 func (w *orgsWiring) build(c *container) error {
@@ -135,6 +150,7 @@ func (w *orgsWiring) build(c *container) error {
 			}
 			return orgs.ClubFacts{UniversityID: h.UniversityID, JoinPolicy: h.JoinPolicy, Sensitive: h.Sensitive}, true, nil
 		},
+		LogoKeeper: lateLogoKeeper{w: w},
 	}
 	if svc := c.identity.svc; svc != nil {
 		d.Reauth, d.Users = svc, svc

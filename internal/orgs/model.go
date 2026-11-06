@@ -250,6 +250,17 @@ type OrgSummary struct {
 	Verified   bool       // a platform admin verified the org (verified_at set)
 }
 
+// Profile is what an org says about itself, as a moderator weighs a report
+// on it (OrgProfiles, BE-180): it changes with updateOrg, so feed copies it
+// into the report. A club's social links are directory's.
+type Profile struct {
+	Kind        Kind
+	Name        string
+	Description *string
+	WebsiteURL  *string
+	LogoFileID  *uuid.UUID
+}
+
 // CreateOrg is the input of OrgAdmin.Create (directory: imported or
 // claimed clubs and universities; 01 §4.7).
 type CreateOrg struct {

@@ -130,3 +130,16 @@ type GraduatedUsers func(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUI
 // shows them (04 §2.2 MemberDTO.user.avatar_url). nil, or an error (logged:
 // an avatar never fails a read) → no avatar.
 type AvatarURLs func(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]string, error)
+
+// LogoKeeper is the moderators' claim on a logo updateOrg replaced or
+// removed (BE-180, T-401): feed, L9, knows the reports on an org and binds
+// it late. nil, or kept=false → the file is deleted as usual (BE-155).
+type LogoKeeper interface {
+	// KeepReplacedLogo keeps fileID, which org orgID no longer names, in the
+	// caller's transaction when a report on the org is open or in review, and
+	// reports whether it did: the caller then leaves the file alone. To the
+	// org a kept file is gone (no public copy, FileMeta.Retired).
+	//
+	// sync-write: feed.LogoKeeper.KeepReplacedLogo
+	KeepReplacedLogo(ctx context.Context, a authz.Actor, orgID, fileID uuid.UUID) (kept bool, err error)
+}

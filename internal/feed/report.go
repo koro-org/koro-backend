@@ -73,15 +73,19 @@ type ReportView struct {
 // TargetSummary is the reported post or org as a moderator sees it. A
 // post target carries its images and the ones edits took off it since it
 // was published (BE-158: what was reported stays in view), each with a
-// 5-minute URL while the scan clears it.
+// 5-minute URL while the scan clears it. An org target carries its profile
+// and the logos it replaced while reported (BE-180), the same way.
 type TargetSummary struct {
-	Type         TargetType
-	Org          orgs.OrgSummary
-	Post         *Post              // a post target
-	Media        []MediaView        // the post's images
-	DroppedMedia []DroppedMediaView // the images edits took off the post (BE-158)
-	TrustLevel   TrustLevel         // the author org's (or the org's) feed trust level
-	OpenReports  int                // distinct users with an open report on the target
+	Type            TargetType
+	Org             orgs.OrgSummary
+	Post            *Post              // a post target
+	Media           []MediaView        // the post's images
+	DroppedMedia    []DroppedMediaView // the images edits took off the post (BE-158)
+	Profile         *OrgProfileView    // an org target: its profile now (BE-180)
+	DroppedLogos    []DroppedLogoView  // an org target: the logos kept for the moderators (BE-180)
+	SnapshotLogoURL string             // an org target: the URL of the logo the report's snapshot names, if still stored
+	TrustLevel      TrustLevel         // the author org's (or the org's) feed trust level
+	OpenReports     int                // distinct users with an open report on the target
 }
 
 // DroppedMediaView is an image an edit took off a published post, for the
@@ -147,7 +151,9 @@ func (s *service) reportTarget(ctx context.Context, a authz.Actor, t TargetType,
 // enough distinct users. A new post report carries the snapshot of the
 // post read for the target (BE-160): what the reporter reported stays for
 // the moderators when the author edits the post; the reporter's open
-// report returned again keeps its first snapshot.
+// report returned again keeps its first snapshot. A new org report does the
+// same with the org's profile, read in the transaction under a share lock
+// (BE-180): updateOrg sees the report before it deletes a logo it names.
 func (s *service) CreateReport(ctx context.Context, a authz.Actor, in ReportInput) (ReportResult, error) {
 	if !a.IsUser() {
 		return ReportResult{}, authz.ErrForbidden
@@ -172,10 +178,16 @@ func (s *service) CreateReport(ctx context.Context, a authz.Actor, in ReportInpu
 		snap = snapshotOf(*post, s.now())
 	}
 	res, _, err := idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (ReportResult, error) {
-		r, created, err := s.fileReport(ctx, a, Report{
+		report := Report{
 			ID: uuid.NewV7(), ReporterUserID: a.UserID, TargetType: in.TargetType, TargetID: in.TargetID,
 			Reason: in.Reason, Details: details, PostSnapshot: snap,
-		})
+		}
+		if in.TargetType == TargetOrg {
+			if err := s.takeOrgSnapshot(ctx, &report); err != nil {
+				return ReportResult{}, err
+			}
+		}
+		r, created, err := s.fileReport(ctx, a, report)
 		if err != nil || !created {
 			return ReportResult{ID: r.ID}, err
 		}
@@ -373,6 +385,11 @@ func (s *service) reportView(ctx context.Context, r Report) (ReportView, error) 
 	}
 	if t.OpenReports, err = s.reports().OpenReporters(ctx, r.TargetType, r.TargetID); err != nil {
 		return ReportView{}, err
+	}
+	if r.TargetType == TargetOrg {
+		if err := s.reportedOrg(ctx, t, r); err != nil {
+			return ReportView{}, err
+		}
 	}
 	return ReportView{Report: r, Target: t}, nil
 }

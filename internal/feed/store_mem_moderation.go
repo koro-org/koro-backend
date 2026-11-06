@@ -19,9 +19,12 @@ import (
 var reasonCodeRe = regexp.MustCompile(`^[a-z_]{2,40}$`)
 
 // checkReport applies the CHECK constraints of content_reports (the
-// snapshot ones: 000168).
+// snapshot ones: 000168, 000180).
 func checkReport(r Report) error {
-	snap := r.PostSnapshot
+	snap, org := r.PostSnapshot, r.OrgSnapshot
+	postCols := snap.SnapshotTitle != nil || snap.SnapshotBodyText != nil || snap.SnapshotOpportunity != nil || snap.SnapshotEventID != nil
+	orgCols := org.SnapshotOrgName != nil || org.SnapshotOrgDescription != nil || org.SnapshotOrgWebsiteURL != nil ||
+		org.SnapshotOrgSocialLinks != nil || org.SnapshotOrgLogoFileID != nil
 	switch {
 	case !r.TargetType.ReportValid(), !r.Reason.Valid(), !r.Status.Valid(), runes(r.Details) > 1000,
 		runes(r.ResolutionNote) > 1000:
@@ -31,10 +34,18 @@ func checkReport(r Report) error {
 	case runes(snap.SnapshotTitle) > 140, runes(snap.SnapshotBodyText) > 5000,
 		snap.SnapshotOpportunity != nil && !jsonObject(snap.SnapshotOpportunity):
 		return errCheck
-	case snap.SnapshotAt != nil && r.TargetType != TargetPost: // content_reports_snapshot_target_chk
+	case runes(org.SnapshotOrgName) > 200, runes(org.SnapshotOrgDescription) > 5000, runes(org.SnapshotOrgWebsiteURL) > 2048,
+		org.SnapshotOrgSocialLinks != nil && !jsonObject(org.SnapshotOrgSocialLinks):
 		return errCheck
-	case snap.SnapshotAt == nil && (snap.SnapshotTitle != nil || snap.SnapshotBodyText != nil ||
-		snap.SnapshotOpportunity != nil || snap.SnapshotEventID != nil): // content_reports_snapshot_at_chk
+	case snap.SnapshotAt != nil && r.TargetType != TargetPost && r.TargetType != TargetOrg: // content_reports_snapshot_target_chk
+		return errCheck
+	case snap.SnapshotAt == nil && (postCols || orgCols): // content_reports_snapshot_at_chk
+		return errCheck
+	case r.TargetType != TargetPost && postCols: // content_reports_snapshot_post_columns_chk
+		return errCheck
+	case r.TargetType != TargetOrg && orgCols: // content_reports_snapshot_org_columns_chk
+		return errCheck
+	case r.TargetType == TargetOrg && snap.SnapshotAt != nil && org.SnapshotOrgName == nil: // content_reports_snapshot_org_name_required_chk
 		return errCheck
 	}
 	return nil
@@ -74,7 +85,7 @@ func (s *MemStore) InsertReport(_ context.Context, r Report) (Report, bool, erro
 		return Report{}, false, problem.ErrInternal
 	}
 	r.Status, r.AssignedTo, r.ResolutionNote, r.ResolvedAt = ReportOpen, nil, nil, nil
-	r.PostSnapshot = r.PostSnapshot.clone()
+	r = r.clone()
 	if err := checkReport(r); err != nil {
 		return Report{}, false, err
 	}

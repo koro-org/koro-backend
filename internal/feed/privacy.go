@@ -36,7 +36,10 @@ const privacyRetainedReason = "posts are the author org's content (02 §12.2); a
 //     not the reporter's data: Export leaves it out (it may hold text the
 //     author has since withdrawn, about third parties too), Erase deletes it
 //     with its report. Its author's erasure leaves it, as it leaves the
-//     post (the snapshot names no user).
+//     post (the snapshot names no user). An org report's snapshot of the
+//     org's profile (BE-180) follows the same rules, and so do the logos kept
+//     for the moderators (org_dropped_logos): the org's content, with no user
+//     column, gone by their own retention (org_logo_dropped).
 //   - for a moderator, the decisions they took (02 §12.10, staff data:
 //     actor_user_id). Export lists them; Erase keeps them (append-only,
 //     retained with the reason above).

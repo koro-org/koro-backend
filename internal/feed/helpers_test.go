@@ -45,11 +45,14 @@ type fakeOrgs struct {
 	members map[uuid.UUID][]authz.Membership
 	pending map[uuid.UUID][]uuid.UUID // user → orgs with a join request
 	getMany int                       // GetMany calls (one per page, BE-094)
+	// profiles overrides the profile of ReportedProfile (BE-180); without one
+	// an org has its summary's kind and name only.
+	profiles map[uuid.UUID]orgs.Profile
 }
 
 func newFakeOrgs() *fakeOrgs {
 	f := &fakeOrgs{orgs: map[uuid.UUID]orgs.OrgSummary{}, members: map[uuid.UUID][]authz.Membership{},
-		pending: map[uuid.UUID][]uuid.UUID{}}
+		pending: map[uuid.UUID][]uuid.UUID{}, profiles: map[uuid.UUID]orgs.Profile{}}
 	for _, o := range authztest.Orgs() {
 		id := authztest.ID(o.Name)
 		f.orgs[id] = orgs.OrgSummary{ID: id, Kind: orgs.Kind(o.Kind), Name: "Org " + o.Name,
@@ -66,6 +69,26 @@ func (f *fakeOrgs) Get(_ context.Context, id uuid.UUID) (orgs.OrgSummary, error)
 		return orgs.OrgSummary{}, orgs.ErrNotFound
 	}
 	return o, nil
+}
+
+func (f *fakeOrgs) ReportedProfile(_ context.Context, id uuid.UUID) (orgs.Profile, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	o, ok := f.orgs[id]
+	if !ok {
+		return orgs.Profile{}, orgs.ErrNotFound
+	}
+	if p, ok := f.profiles[id]; ok {
+		return p, nil
+	}
+	return orgs.Profile{Kind: o.Kind, Name: o.Name, LogoFileID: o.LogoFileID}, nil
+}
+
+// setProfile is what updateOrg leaves.
+func (f *fakeOrgs) setProfile(id uuid.UUID, p orgs.Profile) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.profiles[id] = p
 }
 
 func (f *fakeOrgs) GetMany(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]orgs.OrgSummary, error) {
@@ -183,7 +206,15 @@ type fakeFiles struct {
 	files    map[uuid.UUID]files.FileMeta
 	attached map[uuid.UUID]uuid.UUID // file → post
 	deleted  []uuid.UUID
+	retired  []uuid.UUID       // Retire calls (BE-180)
 	signed   map[uuid.UUID]int // PresignGet calls per file
+}
+
+func (f *fakeFiles) Retire(_ context.Context, _ authz.Actor, id uuid.UUID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.retired = append(f.retired, id)
+	return nil
 }
 
 func (f *fakeFiles) Delete(_ context.Context, _ authz.Actor, id uuid.UUID) error {
@@ -259,6 +290,26 @@ type fakeClubs struct {
 	mu        sync.Mutex
 	sensitive map[uuid.UUID]bool
 	unis      map[uuid.UUID]directory.University
+	links     map[uuid.UUID]directory.SocialLinks // the clubs directory knows (BE-180)
+}
+
+func (f *fakeClubs) GetClub(_ context.Context, id uuid.UUID) (directory.Club, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	l, ok := f.links[id]
+	if !ok {
+		return directory.Club{}, directory.ErrNotFound
+	}
+	return directory.Club{OrgID: id, SocialLinks: l}, nil
+}
+
+func (f *fakeClubs) setLinks(id uuid.UUID, l directory.SocialLinks) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.links == nil {
+		f.links = map[uuid.UUID]directory.SocialLinks{}
+	}
+	f.links[id] = l
 }
 
 func (f *fakeClubs) GetUniversity(_ context.Context, id uuid.UUID) (directory.University, error) {

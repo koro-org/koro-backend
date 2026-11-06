@@ -27,8 +27,9 @@ const auditLogoRejected = "orgs.org.drop_rejected_logo"
 // deleted through files, in one transaction. updated_at moves (the ETag
 // with it). No org.updated is written: webcache's own file.rejected
 // subscription already revalidates the org's page (BE-120), one request
-// per rejection. A logo replaced or cleared meanwhile only loses its file;
-// a second delivery deletes nothing.
+// per rejection. A logo replaced or cleared meanwhile only loses its file
+// (one the moderators kept loses their row with it: ON DELETE CASCADE of
+// org_dropped_logos, BE-180); a second delivery deletes nothing.
 func (s *service) dropRejectedLogo(ctx context.Context, r files.Rejection) error {
 	if r.Purpose != files.PurposeOrgLogo {
 		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "rejected orgs file of an unknown purpose kept",

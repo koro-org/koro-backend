@@ -1072,8 +1072,8 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (feed.Store, world)
 		} else {
 			same(t, mine[0])
 		}
-		// A post with nothing to copy: only the time; no snapshot at all (an
-		// org report, a report filed before BE-160).
+		// A post with nothing to copy: only the time; no snapshot at all (a
+		// report filed before BE-160, or before BE-180 on an org).
 		bare, _, err := rep(u2, feed.TargetPost, p.ID, feed.PostSnapshot{SnapshotAt: &at})
 		if err != nil || bare.SnapshotAt == nil || bare.SnapshotTitle != nil || bare.SnapshotOpportunity != nil || bare.SnapshotEventID != nil {
 			t.Fatalf("bare snapshot = %+v, %v", bare.PostSnapshot, err)
@@ -1081,14 +1081,16 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (feed.Store, world)
 		if none, _, err := rep(u2, feed.TargetOrg, org, feed.PostSnapshot{}); err != nil || none.SnapshotAt != nil {
 			t.Fatalf("org report = %+v, %v", none.PostSnapshot, err)
 		}
-		// The CHECKs of 000168.
+		// The CHECKs of 000168 and 000180.
 		long := strings.Repeat("ş", 141)
 		longBody := strings.Repeat("ş", 5001)
 		for name, bad := range map[string]struct {
 			tt   feed.TargetType
 			snap feed.PostSnapshot
 		}{
-			"an org report with a snapshot":    {feed.TargetOrg, feed.PostSnapshot{SnapshotAt: &at}},
+			"an org snapshot without the name": {feed.TargetOrg, feed.PostSnapshot{SnapshotAt: &at}},
+			"a post's title on an org report":  {feed.TargetOrg, feed.PostSnapshot{SnapshotTitle: &title, SnapshotAt: &at}},
+			"a message report with a snapshot": {feed.TargetMessage, feed.PostSnapshot{SnapshotAt: &at}},
 			"a copy without its time":          {feed.TargetPost, feed.PostSnapshot{SnapshotTitle: &title}},
 			"an event without its time":        {feed.TargetPost, feed.PostSnapshot{SnapshotEventID: &ev}},
 			"a title of 141 characters":        {feed.TargetPost, feed.PostSnapshot{SnapshotTitle: &long, SnapshotAt: &at}},
@@ -1102,6 +1104,185 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (feed.Store, world)
 			if _, _, err := rep(w.user(t), bad.tt, target, bad.snap); !errors.Is(err, problem.ErrValidation) {
 				t.Errorf("%s: InsertReport = %v, want ErrValidation", name, err)
 			}
+		}
+	})
+
+	t.Run("org report snapshot: written once with an org report, kept by the duplicate and the updates (BE-180)", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		org := w.org(t, feed.AuthorClub)
+		u1, u2, mod := w.user(t), w.user(t), w.user(t)
+		name, description, website, logo := "Kulüp", "Açıklama", "https://a.koro.test", uuid.NewV7()
+		at := pub0.Add(time.Hour)
+		links := feed.JSON(`{"instagram": "https://i.koro.test/a"}`)
+		snap := feed.OrgSnapshot{SnapshotOrgName: &name, SnapshotOrgDescription: &description, SnapshotOrgWebsiteURL: &website,
+			SnapshotOrgSocialLinks: links, SnapshotOrgLogoFileID: &logo}
+		rep := func(u uuid.UUID, tt feed.TargetType, target uuid.UUID, snap feed.OrgSnapshot, at *time.Time) (feed.Report, bool, error) {
+			t.Helper()
+			return s.InsertReport(ctx, feed.Report{ID: uuid.NewV7(), ReporterUserID: u, TargetType: tt, TargetID: target,
+				Reason: feed.ReasonSpam, OrgSnapshot: snap, PostSnapshot: feed.PostSnapshot{SnapshotAt: at}})
+		}
+		same := func(t *testing.T, r feed.Report) {
+			t.Helper()
+			var l map[string]string
+			if r.SnapshotOrgName == nil || *r.SnapshotOrgName != name || r.SnapshotOrgDescription == nil || *r.SnapshotOrgDescription != description ||
+				r.SnapshotOrgWebsiteURL == nil || *r.SnapshotOrgWebsiteURL != website || r.SnapshotOrgLogoFileID == nil || *r.SnapshotOrgLogoFileID != logo ||
+				r.SnapshotAt == nil || !r.SnapshotAt.Equal(at) || json.Unmarshal(r.SnapshotOrgSocialLinks, &l) != nil ||
+				l["instagram"] != "https://i.koro.test/a" {
+				t.Fatalf("org snapshot = %+v at %v (links %s)", r.OrgSnapshot, r.SnapshotAt, r.SnapshotOrgSocialLinks)
+			}
+		}
+		r1, created, err := rep(u1, feed.TargetOrg, org, snap, &at)
+		if err != nil || !created {
+			t.Fatalf("InsertReport = %v, %v", created, err)
+		}
+		same(t, r1)
+		got, err := s.GetReport(ctx, r1.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		same(t, got)
+		// The open report returned again keeps its first snapshot.
+		edited, later := "Yeni ad", pub0.Add(2*time.Hour)
+		again, created, err := rep(u1, feed.TargetOrg, org, feed.OrgSnapshot{SnapshotOrgName: &edited}, &later)
+		if err != nil || created || again.ID != r1.ID {
+			t.Fatalf("duplicate = %+v, %v, %v", again, created, err)
+		}
+		same(t, again)
+		// An update never rewrites it.
+		next := got
+		next.Status, next.AssignedTo = feed.ReportInReview, &mod
+		next.SnapshotOrgName, next.SnapshotOrgDescription, next.SnapshotOrgSocialLinks, next.SnapshotOrgLogoFileID = &edited, nil, nil, nil
+		upd, err := s.UpdateReport(ctx, next)
+		if err != nil || upd.Status != feed.ReportInReview {
+			t.Fatalf("UpdateReport = %+v, %v", upd, err)
+		}
+		same(t, upd)
+		// The name and the time only: an org without the rest. No snapshot: a
+		// report filed before BE-180.
+		bare, _, err := rep(u2, feed.TargetOrg, org, feed.OrgSnapshot{SnapshotOrgName: &name}, &at)
+		if err != nil || bare.SnapshotAt == nil || bare.SnapshotOrgDescription != nil || bare.SnapshotOrgSocialLinks != nil || bare.SnapshotOrgLogoFileID != nil {
+			t.Fatalf("bare org snapshot = %+v, %v", bare.OrgSnapshot, err)
+		}
+		other := w.org(t, feed.AuthorClub)
+		if none, _, err := rep(u2, feed.TargetOrg, other, feed.OrgSnapshot{}, nil); err != nil || none.SnapshotAt != nil || none.SnapshotOrgName != nil {
+			t.Fatalf("report without a snapshot = %+v, %v", none.OrgSnapshot, err)
+		}
+		// The CHECKs of 000180.
+		longName, longText, longURL := strings.Repeat("ş", 201), strings.Repeat("ş", 5001), strings.Repeat("a", 2049)
+		by := w.user(t)
+		p := insert(t, s, publishedAt(post(org, feed.AuthorClub, by), pub0))
+		for label, bad := range map[string]struct {
+			tt   feed.TargetType
+			snap feed.OrgSnapshot
+			at   *time.Time
+		}{
+			"an org column on a post report":   {feed.TargetPost, feed.OrgSnapshot{SnapshotOrgName: &name}, &at},
+			"an org column on a message":       {feed.TargetMessage, feed.OrgSnapshot{SnapshotOrgLogoFileID: &logo}, &at},
+			"a name without its time":          {feed.TargetOrg, feed.OrgSnapshot{SnapshotOrgName: &name}, nil},
+			"a logo without its time":          {feed.TargetOrg, feed.OrgSnapshot{SnapshotOrgLogoFileID: &logo}, nil},
+			"a snapshot without the name":      {feed.TargetOrg, feed.OrgSnapshot{SnapshotOrgDescription: &description}, &at},
+			"a name of 201 characters":         {feed.TargetOrg, feed.OrgSnapshot{SnapshotOrgName: &longName}, &at},
+			"a description of 5001 characters": {feed.TargetOrg, feed.OrgSnapshot{SnapshotOrgName: &name, SnapshotOrgDescription: &longText}, &at},
+			"a website of 2049 characters":     {feed.TargetOrg, feed.OrgSnapshot{SnapshotOrgName: &name, SnapshotOrgWebsiteURL: &longURL}, &at},
+			"links that are no object":         {feed.TargetOrg, feed.OrgSnapshot{SnapshotOrgName: &name, SnapshotOrgSocialLinks: feed.JSON(`[1]`)}, &at},
+		} {
+			target := w.org(t, feed.AuthorClub)
+			if bad.tt == feed.TargetPost {
+				target = p.ID
+			}
+			if _, _, err := rep(w.user(t), bad.tt, target, bad.snap, bad.at); !errors.Is(err, problem.ErrValidation) {
+				t.Errorf("%s: InsertReport = %v, want ErrValidation", label, err)
+			}
+		}
+	})
+
+	t.Run("dropped logos: kept once, read by org, due unless a report holds them, forget (BE-180)", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		org, other, reporter := w.org(t, feed.AuthorClub), w.org(t, feed.AuthorClub), w.user(t)
+		f1, f2, f3, f4 := w.file(t, org), w.file(t, org), w.file(t, other), w.file(t, org)
+		// created_at is the store's clock (PostgreSQL's, or the fixed one of
+		// the in-memory store): a logo dropped long before any report, and
+		// logos dropped after every report of this test.
+		before := pub0.AddDate(-2, 0, 0)
+		after := time.Now().AddDate(1, 0, 0).UTC().Truncate(time.Microsecond)
+		cutoff := after.AddDate(0, 0, 1)
+		young := cutoff.AddDate(0, 0, 1)
+		for _, l := range []feed.DroppedLogo{{FileID: f1, OrgID: org, DroppedAt: before}, {FileID: f2, OrgID: org, DroppedAt: after},
+			{FileID: f3, OrgID: other, DroppedAt: after}, {FileID: f4, OrgID: org, DroppedAt: young}} {
+			if err := s.DropLogo(ctx, l); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// A file is kept once (org_dropped_logos_pkey).
+		if err := s.DropLogo(ctx, feed.DroppedLogo{FileID: f1, OrgID: other, DroppedAt: after}); err == nil {
+			t.Fatal("a logo was kept twice")
+		}
+		got, err := s.DroppedLogosOf(ctx, org)
+		if err != nil || len(got) != 3 || got[0].FileID != f1 || got[1].FileID != f2 || got[2].FileID != f4 ||
+			got[0].OrgID != org || !got[0].DroppedAt.Equal(before) || !got[1].DroppedAt.Equal(after) {
+			t.Fatalf("DroppedLogosOf(org) = %+v, %v", got, err)
+		}
+		if got, err := s.DroppedLogosOf(ctx, other); err != nil || len(got) != 1 || got[0].FileID != f3 {
+			t.Fatalf("DroppedLogosOf(other) = %+v, %v", got, err)
+		}
+		if got, err := s.DroppedLogosOf(ctx, uuid.NewV7()); err != nil || len(got) != 0 {
+			t.Fatalf("DroppedLogosOf(unknown) = %+v, %v", got, err)
+		}
+		due := func(want ...uuid.UUID) {
+			t.Helper()
+			n, err := s.CountDroppedLogosDue(ctx, cutoff)
+			if err != nil || n != len(want) {
+				t.Fatalf("CountDroppedLogosDue = %d, %v; want %d", n, err, len(want))
+			}
+			rows, err := s.DroppedLogosDue(ctx, cutoff, 10)
+			if err != nil || len(rows) != len(want) {
+				t.Fatalf("DroppedLogosDue = %+v, %v; want %v", rows, err, want)
+			}
+			for i, id := range want {
+				if rows[i].FileID != id {
+					t.Fatalf("DroppedLogosDue = %+v; want %v", rows, want)
+				}
+			}
+		}
+		due(f1, f2, f3) // no report yet; f4 is too young
+
+		// An open report holds what left after it was filed, not what left
+		// before (it cannot be about that logo), nor another org's.
+		r, _, err := s.InsertReport(ctx, feed.Report{ID: uuid.NewV7(), ReporterUserID: reporter, TargetType: feed.TargetOrg,
+			TargetID: org, Reason: feed.ReasonSpam})
+		if err != nil {
+			t.Fatal(err)
+		}
+		due(f1, f3)
+		if rows, err := s.DroppedLogosDue(ctx, cutoff, 1); err != nil || len(rows) != 1 || rows[0].FileID != f1 {
+			t.Fatalf("DroppedLogosDue(limit 1) = %+v, %v", rows, err)
+		}
+		// Resolved within the period it still holds; resolved before, it does not.
+		resolved := cutoff
+		r.Status, r.ResolvedAt = feed.ReportDismissed, &resolved
+		if _, err := s.UpdateReport(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+		due(f1, f3)
+		early := cutoff.Add(-time.Hour)
+		r.ResolvedAt = &early
+		if _, err := s.UpdateReport(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+		due(f1, f2, f3)
+
+		if n, err := s.ForgetDroppedLogos(ctx, []uuid.UUID{f1, f3, uuid.NewV7()}); err != nil || n != 2 {
+			t.Fatalf("ForgetDroppedLogos = %d, %v; want 2", n, err)
+		}
+		if n, err := s.ForgetDroppedLogos(ctx, nil); err != nil || n != 0 {
+			t.Fatalf("ForgetDroppedLogos(nil) = %d, %v", n, err)
+		}
+		if got, _ := s.DroppedLogosOf(ctx, org); len(got) != 2 || got[0].FileID != f2 || got[1].FileID != f4 {
+			t.Fatalf("after ForgetDroppedLogos = %+v", got)
 		}
 	})
 

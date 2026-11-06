@@ -3,6 +3,7 @@
 package orgs_test
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -104,5 +105,63 @@ func TestOrgs_ReplacedLogo_Gorm(t *testing.T) {
 	update(orgs.OrgPatch{ClearLogo: true})
 	if after, err := store.GetOrg(ctx, id); err != nil || after.LogoFileID != nil || !gone(l2, k2) {
 		t.Fatalf("after the removal: logo %v, %v, file gone %v", after.LogoFileID, err, gone(l2, k2))
+	}
+}
+
+// TestOrgs_ReportedProfile_HoldsTheRow_Gorm (BE-180): in a transaction the
+// read of a report's snapshot holds the org's row against updateOrg's
+// FOR UPDATE until the end, so a report in flight is seen before a logo it
+// names is deleted. Outside one it holds nothing.
+func TestOrgs_ReportedProfile_HoldsTheRow_Gorm(t *testing.T) {
+	t.Parallel()
+	d := testutil.NewDB(t)
+	ctx := t.Context()
+	clk := clock.NewFake(t0)
+	idem := idempotency.New(idempotency.Deps{Tx: d.Tx, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()})
+	mod, err := orgs.New(orgs.Deps{
+		Store: orgs.NewGormStore(d.ORM), Tx: d.Tx, Outbox: outbox.NewMem(clk), Audit: &audittest.Recorder{}, Clock: clk, Log: obs.Discard(),
+		Idempotency: idem,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := mod.Service.Create(ctx, orgs.CreateOrg{Kind: orgs.KindClub, Name: "Şikâyet Edilen Kulüp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// lockable reports whether another transaction gets the row FOR UPDATE at once.
+	lockable := func() bool {
+		t.Helper()
+		tx, err := d.Pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '200ms'`); err != nil {
+			t.Fatal(err)
+		}
+		_, err = tx.Exec(ctx, `SELECT id FROM organizations WHERE id = $1 FOR UPDATE`, id)
+		return err == nil
+	}
+	if p, err := mod.Service.ReportedProfile(ctx, id); err != nil || p.Name != "Şikâyet Edilen Kulüp" {
+		t.Fatalf("ReportedProfile = %+v, %v", p, err)
+	}
+	if !lockable() {
+		t.Fatal("a read outside a transaction left the row held")
+	}
+	err = d.Tx.WithTx(ctx, func(ctx context.Context) error {
+		if _, err := mod.Service.ReportedProfile(ctx, id); err != nil {
+			return err
+		}
+		if lockable() {
+			t.Error("updateOrg's lock got through the report's transaction")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !lockable() {
+		t.Fatal("the row stayed held after the commit")
 	}
 }

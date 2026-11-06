@@ -42,8 +42,8 @@
 //
 // Every write of a file row is audited in its transaction (audit.Logger):
 // files.upload.create, files.upload.complete (also failed verifications),
-// files.file.attach, files.file.publish, files.file.delete_own,
-// files.file.delete and files.orphan.purge.
+// files.file.attach, files.file.publish, files.file.retire,
+// files.file.delete_own, files.file.delete and files.orphan.purge.
 //
 // What files does not do: decide who may read or attach a file (the owning
 // module does, 01 §4.2, 03 §3.6).
@@ -126,6 +126,14 @@ type Files interface {
 	// commit; an object that cannot be removed then is retried by the
 	// files.delete_object task. A missing file is not an error.
 	Delete(ctx context.Context, a authz.Actor, fileID uuid.UUID) error
+	// Retire keeps a file as evidence only (BE-180): its owning module no
+	// longer shows it, a moderator may still have to see it. The public media
+	// copy goes after the commit and is never made again, the file can no
+	// longer be attached (ErrNotActive; FileMeta.Retired tells an owner to
+	// treat it as gone), and PresignGet still serves it to the module that
+	// authorises the reader. Delete ends it. Retiring twice, or a missing
+	// file, is no error. Written to the audit log without an org scope.
+	Retire(ctx context.Context, a authz.Actor, fileID uuid.UUID) error
 }
 
 // Service is the files service: the contract plus the HTTP-only operations.

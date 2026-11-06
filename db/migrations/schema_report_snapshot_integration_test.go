@@ -13,10 +13,11 @@ import (
 // TestSchema_ReportSnapshot (BE-160, migration 000168): content_reports
 // keeps the reported post's title, plain text, opportunity and event with
 // a post report:
-//   - the CHECKs: a snapshot is a post report's only, its columns need
+//   - the CHECKs: no snapshot on a message report (000180 lets an org report
+//     have its own: TestSchema_OrgReportSnapshot), its columns need
 //     snapshot_at, and the limits are the posts' (title 140, text 5000
 //     characters, the opportunity an object); a post report without a
-//     snapshot (filed before BE-160) and an org report stay valid;
+//     snapshot (filed before BE-160) and an org report without one stay valid;
 //   - content_reports_snapshot_guard: the snapshot is written with the row
 //     only — any later change is refused (restrict_violation), an UPDATE
 //     of the status or one that sets a column to its own value passes;
@@ -51,7 +52,7 @@ func TestSchema_ReportSnapshot(t *testing.T) {
 		}
 		const at = "2026-10-31T12:00:00Z"
 		expectFail(t, w.d.Pool, []p1aCase{
-			bad("an org report with a snapshot", "org", nil, nil, nil, nil, at, "content_reports_snapshot_target_chk"),
+			bad("a message report with a snapshot", "message", nil, nil, nil, nil, at, "content_reports_snapshot_target_chk"),
 			bad("a title without its time", "post", "Başlık", nil, nil, nil, nil, "content_reports_snapshot_at_chk"),
 			bad("a text without its time", "post", nil, "Metin", nil, nil, nil, "content_reports_snapshot_at_chk"),
 			bad("an opportunity without its time", "post", nil, nil, `{"type": "job"}`, nil, nil, "content_reports_snapshot_at_chk"),
@@ -84,7 +85,11 @@ func TestSchema_ReportSnapshot(t *testing.T) {
 	check(t)
 
 	owner := testutil.OwnerConn(t, w.d)
-	// 000178 (BE-176) rewrote the text after 000168: down in order.
+	// 000178 (BE-176) and 000180 (BE-180) rewrote the text, 000180 the guard
+	// and the CHECKs too, after 000168: down in order.
+	if _, err := owner.Exec(t.Context(), mustRead(t, "000180_snapshot_reported_orgs.down.sql")); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := owner.Exec(t.Context(), mustRead(t, "000178_data_retention_policy_descriptions.down.sql")); err != nil {
 		t.Fatal(err)
 	}
@@ -103,6 +108,9 @@ func TestSchema_ReportSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := owner.Exec(t.Context(), mustRead(t, "000178_data_retention_policy_descriptions.up.sql")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(t.Context(), mustRead(t, "000180_snapshot_reported_orgs.up.sql")); err != nil {
 		t.Fatal(err)
 	}
 	check(t)

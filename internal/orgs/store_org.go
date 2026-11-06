@@ -23,6 +23,9 @@ type orgStore interface {
 	// LockOrg returns the org locked for the rest of the transaction
 	// (SELECT … FOR UPDATE) or ErrNotFound.
 	LockOrg(ctx context.Context, id uuid.UUID) (Org, error)
+	// ShareLockOrg returns the org with the row held against LockOrg for the
+	// rest of the transaction (SELECT … FOR SHARE) or ErrNotFound (BE-180).
+	ShareLockOrg(ctx context.Context, id uuid.UUID) (Org, error)
 	// UpdateOrg writes the mutable columns of o (name, status, description,
 	// logo, website, city, verified_*, closed_at, rejection_reason) and
 	// returns the stored row:

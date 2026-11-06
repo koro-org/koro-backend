@@ -71,9 +71,12 @@ type File struct {
 	// PublicKey is the key of the public media copy (BE-120,
 	// public.go): set once a publishable file is cleared and copied to the
 	// public bucket, nil otherwise.
-	PublicKey *string   `gorm:"column:public_key"`
-	CreatedAt time.Time `gorm:"column:created_at;->"`
-	UpdatedAt time.Time `gorm:"column:updated_at;->"`
+	PublicKey *string `gorm:"column:public_key"`
+	// RetiredAt is when the owning module kept the file as evidence only
+	// (Files.Retire, BE-180): no public copy again, no new attachment.
+	RetiredAt *time.Time `gorm:"column:retired_at"`
+	CreatedAt time.Time  `gorm:"column:created_at;->"`
+	UpdatedAt time.Time  `gorm:"column:updated_at;->"`
 }
 
 // TableName implements gorm's Tabler.
@@ -108,6 +111,7 @@ type FileMeta struct {
 	SHA256           []byte
 	Status           Status
 	ScanStatus       ScanStatus
+	Retired          bool // kept as evidence only (Files.Retire): to its owner the file is gone
 	CreatedAt        time.Time
 }
 
@@ -115,7 +119,7 @@ func (f File) meta() FileMeta {
 	m := FileMeta{
 		ID: f.ID, Purpose: f.Purpose, OwnerUserID: f.OwnerUserID, OrgID: f.OrgID, UploadedBy: f.UploadedBy,
 		MIME: f.DeclaredMIME, SHA256: bytes.Clone(f.SHA256), Status: f.Status, ScanStatus: f.ScanStatus,
-		CreatedAt: f.CreatedAt, AttachedEntityID: uuid.Nil(),
+		CreatedAt: f.CreatedAt, AttachedEntityID: uuid.Nil(), Retired: f.RetiredAt != nil,
 	}
 	if f.AttachedModule != nil && f.AttachedEntityID != nil {
 		m.AttachedModule, m.AttachedEntityID = *f.AttachedModule, *f.AttachedEntityID

@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"encoding/json"
 	"time"
 	"uuid"
 
@@ -96,10 +97,66 @@ type DroppedMediaDTO struct {
 	DroppedAt time.Time `json:"dropped_at" doc:"When the edit took it off the post"`
 }
 
+// ReportedOrgDTO is the reported org, or a reported post's author org, as a
+// moderator sees it. The profile, the kept logos and the snapshot are an org
+// target's only (BE-180).
+type ReportedOrgDTO struct {
+	FeedOrgDTO
+	Description      string                  `json:"description,omitempty" doc:"An org target's description now"`
+	WebsiteURL       string                  `json:"website_url,omitempty" doc:"An org target's website now"`
+	SocialLinks      map[string]string       `json:"social_links,omitempty" doc:"A club target's social links now"`
+	LogoFileID       string                  `json:"logo_file_id,omitempty" format:"uuid" doc:"An org target's logo file now"`
+	DroppedLogos     []DroppedLogoDTO        `json:"dropped_logos,omitempty" doc:"Logos an org target replaced or removed while a report on it was open or in review, oldest first: kept for the moderators until 12 months after the change, and as long as a report filed before it is held; the organization and the public no longer see them"`
+	ReportedSnapshot *ReportedOrgSnapshotDTO `json:"reported_snapshot,omitempty" doc:"An org target's profile as it stood when this report was filed; absent for a report filed before the snapshots were kept"`
+}
+
+// ReportedOrgSnapshotDTO is the reported org's profile when the report was
+// filed (BE-180): written once with the report, never changed. An empty field
+// means the org had none then.
+type ReportedOrgSnapshotDTO struct {
+	Name        string            `json:"name"`
+	Description string            `json:"description,omitempty"`
+	WebsiteURL  string            `json:"website_url,omitempty"`
+	SocialLinks map[string]string `json:"social_links,omitempty" doc:"A club's social links"`
+	LogoFileID  string            `json:"logo_file_id,omitempty" format:"uuid" doc:"The logo file the org showed"`
+	LogoURL     string            `json:"logo_url,omitempty" doc:"Short-lived download URL of that logo (at most 5 minutes); absent when the file is not served or is gone: a logo replaced after every report on the org was resolved is deleted"`
+	TakenAt     time.Time         `json:"taken_at" doc:"When the report was filed"`
+}
+
+// toOrgSnapshotDTO is the DTO of r's org snapshot; nil without one. logoURL
+// is the signed URL of the logo it names.
+func toOrgSnapshotDTO(r Report, logoURL string) *ReportedOrgSnapshotDTO {
+	if r.SnapshotAt == nil || r.SnapshotOrgName == nil {
+		return nil
+	}
+	return &ReportedOrgSnapshotDTO{Name: *r.SnapshotOrgName, Description: optString(r.SnapshotOrgDescription),
+		WebsiteURL: optString(r.SnapshotOrgWebsiteURL), SocialLinks: decodeLinks(r.SnapshotOrgSocialLinks),
+		LogoFileID: idText(r.SnapshotOrgLogoFileID), LogoURL: logoURL, TakenAt: *r.SnapshotAt}
+}
+
+// decodeLinks reads the social links of an org snapshot; nil without any.
+func decodeLinks(j JSON) map[string]string {
+	if j == nil {
+		return nil
+	}
+	var m map[string]string
+	if json.Unmarshal(j, &m) != nil {
+		return nil
+	}
+	return m
+}
+
+// DroppedLogoDTO is a logo an org replaced or removed while reported (BE-180).
+type DroppedLogoDTO struct {
+	FileID    string    `json:"file_id" format:"uuid"`
+	URL       string    `json:"url,omitempty" doc:"Short-lived download URL (at most 5 minutes); absent when the file is not served"`
+	DroppedAt time.Time `json:"dropped_at" doc:"When the organization replaced or removed it"`
+}
+
 // ReportTargetDTO summarises the target of a report (adminGetReport).
 type ReportTargetDTO struct {
 	Type        string           `json:"type" enum:"post,org"`
-	Org         FeedOrgDTO       `json:"org" doc:"The reported organization, or the post's author organization"`
+	Org         ReportedOrgDTO   `json:"org" doc:"The reported organization, or the post's author organization"`
 	OrgStatus   string           `json:"org_status" enum:"pending_review,active,suspended,closed"`
 	TrustLevel  string           `json:"trust_level" enum:"new,trusted,restricted,suspended" doc:"Feed trust level"`
 	Post        *ReportedPostDTO `json:"post,omitempty"`
@@ -155,8 +212,18 @@ func toReportDTO(v ReportView) AdminReportDTO {
 	if t := v.Target; t != nil {
 		o := t.Org
 		td := &ReportTargetDTO{
-			Type: string(t.Type), Org: FeedOrgDTO{OrgID: o.ID.String(), Kind: string(o.Kind), Name: o.Name, Slug: o.Slug, Verified: o.Verified},
+			Type: string(t.Type), Org: ReportedOrgDTO{FeedOrgDTO: FeedOrgDTO{OrgID: o.ID.String(), Kind: string(o.Kind), Name: o.Name, Slug: o.Slug, Verified: o.Verified}},
 			OrgStatus: string(o.Status), TrustLevel: string(t.TrustLevel), OpenReports: t.OpenReports,
+		}
+		if t.Type == TargetOrg {
+			td.Org.ReportedSnapshot = toOrgSnapshotDTO(r, t.SnapshotLogoURL)
+			for _, l := range t.DroppedLogos {
+				td.Org.DroppedLogos = append(td.Org.DroppedLogos, DroppedLogoDTO{FileID: l.FileID.String(), URL: l.URL, DroppedAt: l.DroppedAt})
+			}
+			if p := t.Profile; p != nil {
+				td.Org.LogoURL, td.Org.Description, td.Org.WebsiteURL = p.LogoURL, optString(p.Description), optString(p.WebsiteURL)
+				td.Org.SocialLinks, td.Org.LogoFileID = p.SocialLinks, idText(p.LogoFileID)
+			}
 		}
 		if p := t.Post; p != nil {
 			td.Post = &ReportedPostDTO{

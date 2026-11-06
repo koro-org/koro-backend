@@ -107,6 +107,18 @@ type OrgLogos interface {
 	PublicLogoURLs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error)
 }
 
+// OrgProfiles is the profile read of the moderators' evidence (BE-180,
+// T-401): feed keeps what a report on an org reported. A system read
+// without authorisation: the caller decides who sees it.
+type OrgProfiles interface {
+	// ReportedProfile returns the org's profile or ErrNotFound. In a
+	// transaction it holds the row FOR SHARE until the end: updateOrg waits,
+	// so a report filed in that transaction is seen before a logo it names is
+	// deleted, and a report never names a logo that an update in flight is
+	// deleting.
+	ReportedProfile(ctx context.Context, orgID uuid.UUID) (Profile, error)
+}
+
 // OrgAdmin is the write contract of other modules (01 §4.7).
 type OrgAdmin interface {
 	// Create writes a new org (and the company profile of a company) in
@@ -137,6 +149,7 @@ type Service interface {
 	OrgAdmin
 	MembershipHistory
 	OrgLogos
+	OrgProfiles
 
 	// GetOrg is getOrg (orgs.org.read, P).
 	GetOrg(ctx context.Context, a authz.Actor, id uuid.UUID) (OrgView, error)
@@ -264,6 +277,9 @@ type Deps struct {
 	// Avatars returns the member avatars of the member list (students,
 	// late bound; BE-023). nil → no avatar_url.
 	Avatars AvatarURLs
+	// LogoKeeper may keep a replaced logo for the moderators (feed, late
+	// bound; BE-180). nil → a replaced logo is always deleted.
+	LogoKeeper LogoKeeper
 	// Deriver derives invitation tokens (CRYPTO_TOKEN_KEYS). nil →
 	// createOrgInvitation answers 503 and acceptOrgInvitation finds nothing.
 	Deriver *crypto.Deriver

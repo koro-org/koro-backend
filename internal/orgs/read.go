@@ -65,6 +65,15 @@ func (s *service) Get(ctx context.Context, orgID uuid.UUID) (OrgSummary, error) 
 	return o.Summary(), nil
 }
 
+// ReportedProfile implements OrgProfiles.
+func (s *service) ReportedProfile(ctx context.Context, orgID uuid.UUID) (Profile, error) {
+	o, err := s.orgs().ShareLockOrg(ctx, orgID)
+	if err != nil {
+		return Profile{}, err
+	}
+	return Profile{Kind: o.Kind, Name: o.Name, Description: o.Description, WebsiteURL: o.WebsiteURL, LogoFileID: o.LogoFileID}, nil
+}
+
 // GetMany implements OrgDirectory.
 func (s *service) GetMany(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]OrgSummary, error) {
 	rows, err := s.orgs().GetOrgs(ctx, ids)

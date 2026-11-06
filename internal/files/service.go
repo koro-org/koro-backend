@@ -460,6 +460,8 @@ func (s *service) Attach(ctx context.Context, a authz.Actor, fileID uuid.UUID, o
 			return ErrNotActive
 		case f.ScanStatus == ScanInfected:
 			return ErrNotClean
+		case f.RetiredAt != nil: // kept as evidence only (Retire, BE-180)
+			return ErrNotActive
 		case f.Attached() && *f.AttachedModule == owner.Module && *f.AttachedEntityID == owner.EntityID:
 			return nil
 		case f.Attached():

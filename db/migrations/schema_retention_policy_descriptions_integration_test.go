@@ -40,6 +40,8 @@ func TestSchema_RetentionPolicyDescriptions(t *testing.T) {
 			FROM retention_policies WHERE code IN ('content_report', 'dsr_export_file')`)
 	}
 	const wantRest = "content_report 1 year closed_at hard_delete, dsr_export_file 7 days created_at file_delete"
+	// 000180 (BE-180) rewrote the content_report text after 000178: down in order.
+	exec("000180_snapshot_reported_orgs.down.sql")
 	if got, got2 := text("content_report"), text("dsr_export_file"); got != reportNew || got2 != exportNew {
 		t.Fatalf("after up: %q, %q", got, got2)
 	}

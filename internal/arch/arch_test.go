@@ -478,9 +478,12 @@ func TestSyncWritesAreAllowed(t *testing.T) {
 	// files.Files.Delete (BE-151: an org logo the scan rejected goes in the
 	// transaction that clears logo_file_id, T-176), + messaging →
 	// feed.MessageReports.FileMessageReport (BE-162b: a message report and
-	// the reported messages it keeps in one transaction, Q-43).
-	if len(allow) != 38 {
-		t.Fatalf("sync_writes.txt has %d lines, want 38", len(allow))
+	// the reported messages it keeps in one transaction, Q-43), + orgs →
+	// feed.LogoKeeper.KeepReplacedLogo and feed → files.Files.Retire (BE-180:
+	// a logo replaced while reported is kept and leaves public media in the
+	// transaction that moves logo_file_id, T-401).
+	if len(allow) != 40 {
+		t.Fatalf("sync_writes.txt has %d lines, want 40", len(allow))
 	}
 	for _, must := range []string{"kvkk files.Files.Delete", "feed entitlements.Entitlements.Release",
 		"outreach entitlements.Entitlements.Release", "feed outreach.Targeting.DiscardDispatch",
@@ -491,6 +494,7 @@ func TestSyncWritesAreAllowed(t *testing.T) {
 		"payments orders.Orders.ConfirmDirectPayment", "identity consent.TermsLedger.RecordTerms", "payments orders.Orders.ApplyRefund", "payments ledger.LedgerLines.LockPayees",
 		"directory orgs.OrgAdmin.GrantRole", "directory orgs.OrgAdmin.Create", "orders catalog.Offerings.Release",
 		"messaging students.ContactSharing.ShareContactWithCompany", "messaging feed.MessageReports.FileMessageReport",
+		"orgs feed.LogoKeeper.KeepReplacedLogo", "feed files.Files.Retire",
 	} {
 		if !allow[must] {
 			t.Errorf("sync_writes.txt lacks %q", must)

@@ -5712,6 +5712,23 @@ components:
         - url
         - expires_at
       type: object
+    DroppedLogoDTO:
+      additionalProperties: false
+      properties:
+        dropped_at:
+          description: When the organization replaced or removed it
+          format: date-time
+          type: string
+        file_id:
+          format: uuid
+          type: string
+        url:
+          description: Short-lived download URL (at most 5 minutes); absent when the file is not served
+          type: string
+      required:
+        - file_id
+        - dropped_at
+      type: object
     DroppedMediaDTO:
       additionalProperties: false
       properties:
@@ -6913,7 +6930,7 @@ components:
             - ngo
           type: string
         logo_url:
-          description: Short-lived download URL of the org's logo (at most 5 minutes); absent when the org has no logo or the scan has not cleared it. Do not cache past its expiry; refetch the list. Carried by listMyFollows and listMyMutes; absent in admin report targets.
+          description: Short-lived download URL of the org's logo (at most 5 minutes); absent when the org has no logo or the scan has not cleared it. Do not cache past its expiry; refetch the list. Carried by listMyFollows and listMyMutes; in admin report targets, by an org target only.
           type: string
         name:
           type: string
@@ -13974,7 +13991,7 @@ components:
           format: int64
           type: integer
         org:
-          $ref: "#/components/schemas/FeedOrgDTO"
+          $ref: "#/components/schemas/ReportedOrgDTO"
           description: The reported organization, or the post's author organization
         org_status:
           enum:
@@ -14088,6 +14105,88 @@ components:
         - student_user_id
         - taken_at
         - messages
+      type: object
+    ReportedOrgDTO:
+      additionalProperties: false
+      properties:
+        description:
+          description: An org target's description now
+          type: string
+        dropped_logos:
+          description: "Logos an org target replaced or removed while a report on it was open or in review, oldest first: kept for the moderators until 12 months after the change, and as long as a report filed before it is held; the organization and the public no longer see them"
+          items:
+            $ref: "#/components/schemas/DroppedLogoDTO"
+          type: array
+        kind:
+          enum:
+            - platform
+            - university
+            - club
+            - company
+            - ngo
+          type: string
+        logo_file_id:
+          description: An org target's logo file now
+          format: uuid
+          type: string
+        logo_url:
+          description: Short-lived download URL of the org's logo (at most 5 minutes); absent when the org has no logo or the scan has not cleared it. Do not cache past its expiry; refetch the list. Carried by listMyFollows and listMyMutes; in admin report targets, by an org target only.
+          type: string
+        name:
+          type: string
+        org_id:
+          type: string
+        reported_snapshot:
+          $ref: "#/components/schemas/ReportedOrgSnapshotDTO"
+          description: An org target's profile as it stood when this report was filed; absent for a report filed before the snapshots were kept
+        slug:
+          type: string
+        social_links:
+          additionalProperties:
+            type: string
+          description: A club target's social links now
+          type: object
+        verified:
+          description: True when a platform admin has verified the org (the verification badge)
+          type: boolean
+        website_url:
+          description: An org target's website now
+          type: string
+      required:
+        - org_id
+        - kind
+        - name
+        - slug
+        - verified
+      type: object
+    ReportedOrgSnapshotDTO:
+      additionalProperties: false
+      properties:
+        description:
+          type: string
+        logo_file_id:
+          description: The logo file the org showed
+          format: uuid
+          type: string
+        logo_url:
+          description: "Short-lived download URL of that logo (at most 5 minutes); absent when the file is not served or is gone: a logo replaced after every report on the org was resolved is deleted"
+          type: string
+        name:
+          type: string
+        social_links:
+          additionalProperties:
+            type: string
+          description: A club's social links
+          type: object
+        taken_at:
+          description: When the report was filed
+          format: date-time
+          type: string
+        website_url:
+          type: string
+      required:
+        - name
+        - taken_at
       type: object
     ReportedPostDTO:
       additionalProperties: false

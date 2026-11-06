@@ -221,7 +221,7 @@ type FeedOrgDTO struct {
 	Kind     string `json:"kind" enum:"platform,university,club,company,ngo"`
 	Name     string `json:"name"`
 	Slug     string `json:"slug"`
-	LogoURL  string `json:"logo_url,omitempty" doc:"Short-lived download URL of the org's logo (at most 5 minutes); absent when the org has no logo or the scan has not cleared it. Do not cache past its expiry; refetch the list. Carried by listMyFollows and listMyMutes; absent in admin report targets."`
+	LogoURL  string `json:"logo_url,omitempty" doc:"Short-lived download URL of the org's logo (at most 5 minutes); absent when the org has no logo or the scan has not cleared it. Do not cache past its expiry; refetch the list. Carried by listMyFollows and listMyMutes; in admin report targets, by an org target only."`
 	Verified bool   `json:"verified" doc:"True when a platform admin has verified the org (the verification badge)"`
 }
 

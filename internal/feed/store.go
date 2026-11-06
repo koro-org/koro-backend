@@ -28,6 +28,7 @@ type Store interface {
 	settingsStore    // feed_org_settings (store_settings.go)
 	interactionStore // likes, saves, hides, follows and mutes (store_interactions.go)
 	reportStore      // content_reports (store_reports.go)
+	logoStore        // org_dropped_logos (store_logos.go, BE-180)
 	moderationStore  // moderation_actions and the review queue (store_moderation.go)
 	statsStore       // the counts of the panels (stats.go, BE-163)
 }
@@ -49,6 +50,9 @@ func (s *service) interactions() interactionStore { return s.d.Store }
 
 // reports is the content reports view of the store.
 func (s *service) reports() reportStore { return s.d.Store }
+
+// logos is the kept org logos view of the store (BE-180).
+func (s *service) logos() logoStore { return s.d.Store }
 
 // moderation is the moderation actions and review queue view of the store.
 func (s *service) moderation() moderationStore { return s.d.Store }

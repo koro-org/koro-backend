@@ -7,6 +7,7 @@ import (
 
 	"koro/internal/audit"
 	"koro/internal/authz"
+	"koro/internal/directory"
 	"koro/internal/entitlements"
 	"koro/internal/events"
 	"koro/internal/files"
@@ -44,15 +45,22 @@ type Orgs interface {
 	// OpenMembershipsOf returns the pending or active membership of a user
 	// by org (the reader's own relations, listMyOrgRelations).
 	OpenMembershipsOf(ctx context.Context, userID uuid.UUID) (map[uuid.UUID]orgs.MemberStatus, error)
+	// ReportedProfile returns the profile of a reported org or
+	// orgs.ErrNotFound; in a transaction the row stays held against updateOrg
+	// (the snapshot of an org report, BE-180).
+	ReportedProfile(ctx context.Context, orgID uuid.UUID) (orgs.Profile, error)
 }
 
 // Clubs is what feed needs from directory (L6; 01 §4.6 Catalog): which
 // clubs are sensitive. A sensitive club membership never creates an
-// automatic follow (02 §12.7: the follow list must not reveal it).
+// automatic follow (02 §12.7: the follow list must not reveal it). A
+// reported club's social links are part of its profile (BE-180).
 type Clubs interface {
 	// SensitiveOrgIDs reports which of orgIDs are sensitive clubs (only
 	// those keys are present, with true).
 	SensitiveOrgIDs(ctx context.Context, orgIDs []uuid.UUID) (map[uuid.UUID]bool, error)
+	// GetClub returns the catalog data of a club org or directory.ErrNotFound.
+	GetClub(ctx context.Context, orgID uuid.UUID) (directory.Club, error)
 }
 
 // Viewers is what feed needs from students (L7; 01 §4.9 Profiles): the
@@ -92,6 +100,12 @@ type Files interface {
 	// commit.
 	// sync-write: files.Files.Delete
 	Delete(ctx context.Context, a authz.Actor, fileID uuid.UUID) error
+	// Retire keeps a logo for the moderators in the caller's transaction
+	// (org_dropped_logos, BE-180): its public copy goes after the commit and
+	// to the org the file is gone. Delete ends it (org_logo_dropped).
+	//
+	// sync-write: files.Files.Retire
+	Retire(ctx context.Context, a authz.Actor, fileID uuid.UUID) error
 }
 
 // Targeting is what feed needs from outreach (L8; 01 §4.13): the audience

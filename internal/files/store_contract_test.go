@@ -287,6 +287,37 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (files.Store, db.Tx
 		}
 	})
 
+	t.Run("retired: stored, out of the backfill, no public key (BE-180)", func(t *testing.T) {
+		t.Parallel()
+		s, _ := newStore(t)
+		ctx := t.Context()
+		f := activate(row(files.PurposeOrgLogo))
+		png := files.MIMEPNG
+		f.DeclaredMIME, f.DetectedMIME, f.ScanStatus, f.OwnerUserID = png, &png, files.ScanClean, nil
+		if err := s.Insert(ctx, f); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := s.Unpublished(ctx, []files.ScanStatus{files.ScanClean}, uuid.Nil(), 10); err != nil || len(got) != 1 {
+			t.Fatalf("Unpublished before = %+v, %v", got, err)
+		}
+		at := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+		f.RetiredAt = &at
+		if err := s.Update(ctx, f); err != nil {
+			t.Fatalf("Update(retired): %v", err)
+		}
+		if again := stored(t, s, f.ID)[0]; again.RetiredAt == nil || !again.RetiredAt.Equal(at) {
+			t.Fatalf("retired_at after Update = %v", again.RetiredAt)
+		}
+		if got, err := s.Unpublished(ctx, []files.ScanStatus{files.ScanClean}, uuid.Nil(), 10); err != nil || len(got) != 0 {
+			t.Fatalf("Unpublished after = %+v, %v", got, err)
+		}
+		k := string(f.Purpose) + "/" + f.ID.String() + "-0123456789abcdef0123456789abcdef.png"
+		f.PublicKey = &k
+		if err := s.Update(ctx, f); !errors.Is(err, problem.ErrValidation) {
+			t.Fatalf("Update(retired with a public key) = %v, want 422 (files_retired_public_chk)", err)
+		}
+	})
+
 	t.Run("lock in a transaction", func(t *testing.T) {
 		t.Parallel()
 		s, tx := newStore(t)

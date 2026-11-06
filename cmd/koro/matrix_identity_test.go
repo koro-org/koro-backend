@@ -165,6 +165,10 @@ func (w *identityWiring) matrixFixtures(fx *matrixFixtures) error {
 			if on, _ := f.Fields["sms_mfa"].(bool); on {
 				p.SMSMFAEnabledAt = &matrixClock
 			}
+			if on, _ := f.Fields["sms_reset"].(bool); on { // on for its wait (BE-186)
+				at := matrixClock.Add(-identity.SMSResetWait)
+				p.SMSResetEnabledAt = &at
+			}
 			if err := w.store.PutPhone(ctx, p); err != nil {
 				return fmt.Errorf("fixture %s: %w", f.Name, err)
 			}
@@ -335,8 +339,13 @@ func (w *identityWiring) matrixTOTP(ctx context.Context, u identity.User) error 
 }
 
 // matrixPhoneCode is the code of the open phone verification of every
-// matrix account under identity_phone: pending (the bodies hold it).
-const matrixPhoneCode = "135790"
+// matrix account under identity_phone: pending; matrixPhoneChangeCode is the
+// open code of the current number under identity_phone: sms_mfa (BE-186). The
+// bodies hold them.
+const (
+	matrixPhoneCode       = "135790"
+	matrixPhoneChangeCode = "802467"
+)
 
 // matrixPhoneModes is the identity_phone config of each matrix application
 // (BE-172; keyed by its wiring):
@@ -345,7 +354,8 @@ const matrixPhoneCode = "135790"
 //	pending   every account has an open phone verification code
 //	          (matrixPhoneCode) to its number +9055500000NN
 //	verified  every account has that number verified
-//	sms_mfa   verified, with the SMS second step on
+//	sms_mfa   verified, with the SMS second step on and an open code of the
+//	          current number (matrixPhoneChangeCode)
 //
 // releaseMatrixApp deletes the entry once the application's test is over
 // (the key holds the whole container; BE-073).
@@ -361,6 +371,9 @@ func (w *identityWiring) matrixPhone(ctx context.Context, u identity.User, numbe
 		p := identity.Phone{UserID: u.ID, Number: number, VerifiedAt: matrixClock}
 		if mode == "sms_mfa" {
 			p.SMSMFAEnabledAt = &matrixClock
+			if err := w.matrixSMSCode(ctx, uuid.NewV7(), u.ID, identity.SMSPhoneChange, number, matrixPhoneChangeCode); err != nil {
+				return err
+			}
 		}
 		return w.store.PutPhone(ctx, p)
 	}

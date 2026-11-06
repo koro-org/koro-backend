@@ -494,7 +494,8 @@ func (s *service) ResetUserMFA(ctx context.Context, a authz.Actor, id uuid.UUID,
 			return err
 		}
 		// The SMS second step goes too (BE-172): a user who lost the
-		// phone is let in again by the same reset; the number stays.
+		// phone is let in again by the same reset; the number stays. So does
+		// the password reset by SMS (BE-186).
 		ph, hasPhone, err := s.phones().Phone(ctx, u.ID)
 		if err != nil {
 			return err
@@ -502,6 +503,11 @@ func (s *service) ResetUserMFA(ctx context.Context, a authz.Actor, id uuid.UUID,
 		smsWasOn := hasPhone && ph.SMSMFAEnabledAt != nil
 		if smsWasOn {
 			if _, err := s.phones().SetSMSMFA(ctx, u.ID, nil); err != nil {
+				return err
+			}
+		}
+		if hasPhone {
+			if err := s.closeSMSReset(ctx, ph, a, smsResetClosedMFAReset); err != nil {
 				return err
 			}
 		}

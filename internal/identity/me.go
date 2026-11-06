@@ -65,7 +65,7 @@ func (s *service) me(ctx context.Context, u User, a authz.Actor) (Me, error) {
 	if err != nil {
 		return Me{}, err
 	}
-	phone, err := s.myPhone(ctx, u.ID)
+	phone, err := s.myPhone(ctx, a, u.ID)
 	if err != nil {
 		return Me{}, err
 	}

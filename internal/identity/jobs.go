@@ -32,9 +32,11 @@ type Retention func(ctx context.Context) (time.Duration, error)
 // Subscribe registers the outbox subscriptions of identity (01 §6.2):
 // identity.email_token_issued → identity.send_email_token; file.rejected →
 // identity.remove_rejected_document (T-176, T-222: a student document the
-// scan rejected leaves its pending verification; files.SubscribeRejected).
+// scan rejected leaves its pending verification; files.SubscribeRejected);
+// membership.started → identity.close_sms_reset (BE-186).
 func (m Module) Subscribe(r *outbox.Registry) {
 	r.Subscribe(domainevent.TopicIdentityEmailTokenIssued, SendEmailTokenTaskName, m.svc.handleEmailTokenIssued, outbox.Queue(queue.Default))
+	r.Subscribe(domainevent.TopicMembershipStarted, CloseSMSResetTaskName, m.svc.handleMembershipStarted, outbox.Queue(queue.Default))
 	files.SubscribeRejected(r, eduOwner, RemoveRejectedDocumentTaskName, m.svc.removeRejectedDocument)
 }
 

@@ -16,7 +16,10 @@ type Phone struct {
 	VerifiedAt time.Time
 	// SMSMFAEnabledAt: the SMS second step of sign-in is on since then.
 	SMSMFAEnabledAt *time.Time
-	CreatedAt       time.Time
+	// SMSResetEnabledAt: the holder turned the password reset by SMS on then
+	// (BE-186, 000182); never next to SMSMFAEnabledAt.
+	SMSResetEnabledAt *time.Time
+	CreatedAt         time.Time
 }
 
 // SMSPurpose is what an SMS code proves (sms_codes_purpose_chk).
@@ -27,7 +30,11 @@ const (
 	SMSPhoneVerify   SMSPurpose = "phone_verify"   // the holder of a new number
 	SMSLogin         SMSPurpose = "login"          // the second step of a sign-in
 	SMSPasswordReset SMSPurpose = "password_reset" // a password reset by SMS
+	SMSPhoneChange   SMSPurpose = "phone_change"   // the holder of the current number, for a change of the phone factor (BE-186)
 )
+
+// smsPurposes are all the purposes of a code.
+var smsPurposes = []SMSPurpose{SMSPhoneVerify, SMSLogin, SMSPasswordReset, SMSPhoneChange}
 
 // SMSCode is one SMS code sent (sms_codes, 000177). The code itself is
 // derived from ID under KeyID and never stored; CodeHash is a keyed MAC of
@@ -62,20 +69,27 @@ func (c SMSCode) clone() SMSCode {
 }
 
 // phoneStore is the user_phones and sms_codes rows (000177; BE-172): the
-// verified number of an account, its SMS second step, and the one-time
-// codes of phone verification, SMS sign-in and SMS password reset.
+// verified number of an account, its SMS second step, its choice of the
+// password reset by SMS (BE-186), and the one-time codes of phone
+// verification, SMS sign-in, SMS password reset and phone factor change.
 type phoneStore interface {
 	// Phone returns the verified number of userID; found=false when none.
 	Phone(ctx context.Context, userID uuid.UUID) (p Phone, found bool, err error)
 	// PhoneOwner returns the account holding number; found=false when none.
 	PhoneOwner(ctx context.Context, number string) (userID uuid.UUID, found bool, err error)
 	// PutPhone stores the verified number of p.UserID, replacing an earlier
-	// one (number, verified_at and sms_mfa_enabled_at as given).
-	// ErrPhoneTaken when another account holds the number.
+	// one (number, verified_at, sms_mfa_enabled_at and sms_reset_enabled_at
+	// as given). ErrPhoneTaken when another account holds the number;
+	// ErrSMSResetNotAllowed with both dates set.
 	PutPhone(ctx context.Context, p Phone) error
 	// SetSMSMFA turns the SMS second step of userID on (at) or off (nil);
-	// changed=false when the account has no number.
+	// changed=false when the account has no number; ErrSMSResetNotAllowed
+	// while the password reset by SMS is on.
 	SetSMSMFA(ctx context.Context, userID uuid.UUID, at *time.Time) (changed bool, err error)
+	// SetSMSReset turns the password reset by SMS of userID on (at) or off
+	// (nil); changed=false when the account has no number;
+	// ErrSMSResetNotAllowed while the SMS second step is on.
+	SetSMSReset(ctx context.Context, userID uuid.UUID, at *time.Time) (changed bool, err error)
 	// DeletePhone deletes the number of userID and returns how many rows
 	// it deleted.
 	DeletePhone(ctx context.Context, userID uuid.UUID) (int, error)

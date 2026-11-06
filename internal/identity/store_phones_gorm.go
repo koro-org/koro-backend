@@ -15,11 +15,12 @@ import (
 // BE-172). Both belong to a user, never to an org.
 
 type phoneRow struct {
-	UserID          uuid.UUID  `gorm:"column:user_id;primaryKey"`
-	Number          string     `gorm:"column:phone_e164"`
-	VerifiedAt      time.Time  `gorm:"column:verified_at"`
-	SMSMFAEnabledAt *time.Time `gorm:"column:sms_mfa_enabled_at"`
-	CreatedAt       time.Time  `gorm:"column:created_at;default:now()"`
+	UserID            uuid.UUID  `gorm:"column:user_id;primaryKey"`
+	Number            string     `gorm:"column:phone_e164"`
+	VerifiedAt        time.Time  `gorm:"column:verified_at"`
+	SMSMFAEnabledAt   *time.Time `gorm:"column:sms_mfa_enabled_at"`
+	SMSResetEnabledAt *time.Time `gorm:"column:sms_reset_enabled_at"`
+	CreatedAt         time.Time  `gorm:"column:created_at;default:now()"`
 }
 
 // TableName implements gorm's Tabler.
@@ -27,7 +28,7 @@ func (phoneRow) TableName() string { return "user_phones" }
 
 func (r phoneRow) phone() Phone {
 	return Phone{UserID: r.UserID, Number: r.Number, VerifiedAt: r.VerifiedAt.UTC(), SMSMFAEnabledAt: db.UTCPtr(r.SMSMFAEnabledAt),
-		CreatedAt: r.CreatedAt.UTC()}
+		SMSResetEnabledAt: db.UTCPtr(r.SMSResetEnabledAt), CreatedAt: r.CreatedAt.UTC()}
 }
 
 type smsCodeRow struct {
@@ -87,10 +88,10 @@ func (s gormStore) PhoneOwner(ctx context.Context, number string) (uuid.UUID, bo
 //
 // cross-org: a phone number belongs to a user, not an org.
 func (s gormStore) PutPhone(ctx context.Context, p Phone) error {
-	r := phoneRow{UserID: p.UserID, Number: p.Number, VerifiedAt: p.VerifiedAt, SMSMFAEnabledAt: p.SMSMFAEnabledAt}
+	r := phoneRow{UserID: p.UserID, Number: p.Number, VerifiedAt: p.VerifiedAt, SMSMFAEnabledAt: p.SMSMFAEnabledAt, SMSResetEnabledAt: p.SMSResetEnabledAt}
 	err := db.Conn(ctx, s.orm).Omit("created_at").Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "user_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"phone_e164", "verified_at", "sms_mfa_enabled_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"phone_e164", "verified_at", "sms_mfa_enabled_at", "sms_reset_enabled_at"}),
 	}).Create(&r).Error
 	if err != nil {
 		return fmt.Errorf("identity: put phone: %w", constraints.Translate(err))
@@ -104,7 +105,18 @@ func (s gormStore) PutPhone(ctx context.Context, p Phone) error {
 func (s gormStore) SetSMSMFA(ctx context.Context, userID uuid.UUID, at *time.Time) (bool, error) {
 	res := db.Conn(ctx, s.orm).Model(&phoneRow{}).Where("user_id = ?", userID).Update("sms_mfa_enabled_at", at)
 	if res.Error != nil {
-		return false, fmt.Errorf("identity: set SMS second step: %w", db.Translate(res.Error))
+		return false, fmt.Errorf("identity: set SMS second step: %w", constraints.Translate(res.Error))
+	}
+	return res.RowsAffected == 1, nil
+}
+
+// SetSMSReset implements Store.
+//
+// cross-org: a phone number belongs to a user, not an org.
+func (s gormStore) SetSMSReset(ctx context.Context, userID uuid.UUID, at *time.Time) (bool, error) {
+	res := db.Conn(ctx, s.orm).Model(&phoneRow{}).Where("user_id = ?", userID).Update("sms_reset_enabled_at", at)
+	if res.Error != nil {
+		return false, fmt.Errorf("identity: set SMS reset: %w", constraints.Translate(res.Error))
 	}
 	return res.RowsAffected == 1, nil
 }

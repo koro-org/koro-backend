@@ -33,6 +33,7 @@ import (
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/obs"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/passwd"
 	"koro/internal/platform/privacy"
 	"koro/internal/platform/problem"
@@ -127,6 +128,11 @@ func TestWire_IdentityTasksAndPrivacy(t *testing.T) {
 	if len(subs) != 1 || subs[0].Name != identity.SendEmailTokenTaskName {
 		t.Fatalf("identity.email_token_issued subscriptions %+v", subs)
 	}
+	if !slices.ContainsFunc(c.infra.subs.For(domainevent.TopicMembershipStarted), func(s outbox.Subscription) bool {
+		return s.Name == identity.CloseSMSResetTaskName
+	}) {
+		t.Fatal("identity.close_sms_reset does not follow membership.started")
+	}
 	mux, err := c.workerMux(obs.Discard())
 	if err != nil {
 		t.Fatal(err)
@@ -135,7 +141,7 @@ func TestWire_IdentityTasksAndPrivacy(t *testing.T) {
 		identity.SessionsCleanupJobName, identity.EmailTokensCleanupJobName, identity.SendEduNoticeTaskName,
 		identity.EduExpireJobName, identity.EduRenewalRemindersJobName,
 		identity.NotifyTermsPublishedTaskName, identity.SendTermsNoticeTaskName,
-		identity.SendSMSCodeTaskName, identity.SMSCodesCleanupJobName} {
+		identity.SendSMSCodeTaskName, identity.SMSCodesCleanupJobName, identity.CloseSMSResetTaskName} {
 		if !slices.Contains(mux.Types(), name) {
 			t.Errorf("worker does not route %s", name)
 		}
@@ -564,6 +570,8 @@ func TestIdentityTemplates_MFAAndRoleAlertsRender(t *testing.T) {
 			identity.NoticeRecoveryCodesRegenerated, identity.NoticeMFAReset},
 		"identity.role_alert": {identity.AlertRoleRequested, identity.AlertRoleGranted, identity.AlertRoleRejected,
 			identity.AlertRoleRevokeRequested, identity.AlertRoleRevoked},
+		"identity.phone_notice": {identity.NoticePhoneVerified, identity.NoticePhoneRemoved, identity.NoticeSMSMFAEnabled,
+			identity.NoticeSMSMFADisabled, identity.NoticeSMSResetLimit, identity.NoticeSMSResetEnabled, identity.NoticeSMSResetDisabled},
 	}
 	for id, kinds := range cases {
 		for _, loc := range []string{"tr", "en"} {

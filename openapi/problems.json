@@ -822,6 +822,18 @@
     "type": "urn:koro:problem:identity.password_unchanged"
   },
   {
+    "code": "identity.phone_code_not_required",
+    "status": 409,
+    "title": "No code of the current number is needed",
+    "type": "urn:koro:problem:identity.phone_code_not_required"
+  },
+  {
+    "code": "identity.phone_code_required",
+    "status": 403,
+    "title": "A code sent to your current number is required",
+    "type": "urn:koro:problem:identity.phone_code_required"
+  },
+  {
     "code": "identity.phone_not_verified",
     "status": 409,
     "title": "No verified phone number",
@@ -862,6 +874,12 @@
     "status": 409,
     "title": "Your role requires an authenticator app; SMS is not allowed as a second step",
     "type": "urn:koro:problem:identity.sms_mfa_not_allowed"
+  },
+  {
+    "code": "identity.sms_reset_not_allowed",
+    "status": 409,
+    "title": "Password reset by SMS is not available for this account",
+    "type": "urn:koro:problem:identity.sms_reset_not_allowed"
   },
   {
     "code": "identity.sms_unavailable",

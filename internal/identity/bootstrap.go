@@ -175,6 +175,10 @@ func (b *Bootstrapper) Run(ctx context.Context, admins []AdminSeed) ([]Bootstrap
 			if _, err := b.sessions().RevokeUserSessions(ctx, out[i].UserID, nil, now, RevokeRoleChange); err != nil {
 				return err
 			}
+			// A platform role closes the password reset by SMS (BE-186).
+			if _, err := b.phones().SetSMSReset(ctx, out[i].UserID, nil); err != nil {
+				return err
+			}
 			uid := out[i].UserID
 			if err := b.d.Audit.Log(ctx, audit.Event{Action: string(authz.IdentityPlatformRoleGrant), Outcome: audit.Success,
 				SystemJob: BootstrapJob, ResourceType: resourceRole, ResourceID: &ra.ID, Reason: bootstrapReason,

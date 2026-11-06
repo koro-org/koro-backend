@@ -137,6 +137,17 @@ var (
 	// ErrSMSMFANotAllowed: the caller holds a role that requires MFA: its
 	// second factor is TOTP alone (SIM swap risk; BE-172, 03 §6.4).
 	ErrSMSMFANotAllowed = problem.New(problem.Conflict, "identity.sms_mfa_not_allowed", "Your role requires an authenticator app; SMS is not allowed as a second step")
+	// ErrSMSResetNotAllowed: the password reset by SMS cannot be turned on for
+	// this account: it holds an org or platform role, or its SMS second step
+	// is on (BE-186).
+	ErrSMSResetNotAllowed = problem.New(problem.Conflict, "identity.sms_reset_not_allowed", "Password reset by SMS is not available for this account")
+	// ErrPhoneCodeRequired: the SMS second step is on and the proof is the
+	// password: a change of the phone factor also takes the code of
+	// sendPhoneChangeCode (BE-186).
+	ErrPhoneCodeRequired = problem.New(problem.Forbidden, "identity.phone_code_required", "A code sent to your current number is required")
+	// ErrPhoneCodeNotRequired: sendPhoneChangeCode without a reason: the SMS
+	// second step is off or the proof is a TOTP code (BE-186).
+	ErrPhoneCodeNotRequired = problem.New(problem.Conflict, "identity.phone_code_not_required", "No code of the current number is needed")
 
 	// ErrBootstrap: `koro seed bootstrap-admin` refuses (wrong admin count,
 	// another admin already exists, unusable account).

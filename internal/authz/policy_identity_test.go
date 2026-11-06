@@ -237,15 +237,17 @@ func TestIdentityPolicy_EduVerificationEdgeCases(t *testing.T) {
 	wantErr(t, authz.Can(ctx, sys, authz.IdentityEduVerificationReview, eduVerification("student_b")), authz.ErrForbidden, false)
 }
 
-// TestIdentityPolicy_PhoneAndSMSMFA pins the BE-172 rows of 03 §5.1: the
-// phone number and SMS second step actions are O for every signed-in
-// persona (anonymous 403), another user's account is invisible (404), and
-// no MFA session is needed (k-sms, the MFA role refusal, is the service's
-// 409; an admin without TOTP may still remove a number).
+// TestIdentityPolicy_PhoneAndSMSMFA pins the BE-172 and BE-186 rows of 03
+// §5.1: the phone number, SMS second step and SMS reset actions are O for
+// every signed-in persona (anonymous 403), another user's account is
+// invisible (404), and no MFA session is needed (k-sms and the refusal of the
+// SMS reset to role holders are the service's 409; an admin without TOTP may
+// still remove a number).
 func TestIdentityPolicy_PhoneAndSMSMFA(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	acts := []authz.Action{authz.IdentityPhoneChange, authz.IdentityPhoneVerify, authz.IdentitySmsMfaEnable, authz.IdentitySmsMfaDisable}
+	acts := []authz.Action{authz.IdentityPhoneChange, authz.IdentityPhoneVerify, authz.IdentitySmsMfaEnable, authz.IdentitySmsMfaDisable,
+		authz.IdentitySmsResetEnable, authz.IdentitySmsResetDisable}
 	for _, p := range authztest.Personas() {
 		for _, act := range acts {
 			want := error(nil)

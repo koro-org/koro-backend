@@ -76,6 +76,7 @@ func (p privacyProvider) Export(ctx context.Context, userID uuid.UUID) (privacy.
 	} else if found { // the subject's own number in full
 		out.Items = append(out.Items, map[string]any{
 			"type": "phone", "phone": p.Number, "verified_at": p.VerifiedAt, "sms_mfa_enabled_at": p.SMSMFAEnabledAt,
+			"sms_reset_enabled_at": p.SMSResetEnabledAt,
 		})
 	}
 	actions, err := s.d.Store.AccountActionsOf(ctx, userID)

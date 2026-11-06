@@ -103,6 +103,11 @@ var termsExemptOperations = map[string]string{
 	"removeMyPhone":            "POST " + APIPrefix + "/me/phone/remove",
 	"enableSmsMfa":             "POST " + APIPrefix + "/me/mfa/sms",
 	"disableSmsMfa":            "POST " + APIPrefix + "/me/mfa/sms/disable",
+	// The code of the current number and the holder's choice of the password
+	// reset by SMS (BE-186) are the same account security.
+	"sendPhoneChangeCode":     "POST " + APIPrefix + "/me/phone/change-code",
+	"enableSmsPasswordReset":  "POST " + APIPrefix + "/me/phone/sms-reset",
+	"disableSmsPasswordReset": "POST " + APIPrefix + "/me/phone/sms-reset/disable",
 
 	// KVKK rights of the data subject (Law 6698 m.11, m.13): an
 	// application — access, rectification, erasure (the account's

@@ -11671,6 +11671,16 @@ components:
         sms_mfa_enabled:
           description: The SMS second step of sign-in is on
           type: boolean
+        sms_reset_active_from:
+          description: When the password reset by SMS starts working; absent while it is off
+          format: date-time
+          type: string
+        sms_reset_allowed:
+          description: "The caller may turn the password reset by SMS on: no org or platform role, SMS second step off"
+          type: boolean
+        sms_reset_enabled:
+          description: The caller turned the password reset by SMS on
+          type: boolean
         verified_at:
           format: date-time
           type: string
@@ -11678,6 +11688,19 @@ components:
         - number_hint
         - verified_at
         - sms_mfa_enabled
+        - sms_reset_allowed
+        - sms_reset_enabled
+      type: object
+    PhoneFactorInputBody:
+      additionalProperties: false
+      properties:
+        phone_code:
+          description: The code of sendPhoneChangeCode, while the SMS second step is on and the proof is the password
+          maxLength: 16
+          type: string
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: "Re-authentication proof (03 §6.2): password, or totp_code on a TOTP account"
       type: object
     PlatformContentDTO:
       additionalProperties: false
@@ -14371,7 +14394,7 @@ components:
       properties:
         channel:
           default: email
-          description: "sms: a code by SMS when the account may reset by SMS (BE-172)"
+          description: "sms: a code by SMS when the account's holder turned this on and the account may reset by SMS; otherwise the e-mail link"
           enum:
             - email
             - sms
@@ -15215,6 +15238,10 @@ components:
           description: A Turkish mobile number, e.g. +90 5XX XXX XX XX or 05XX XXX XX XX
           maxLength: 30
           minLength: 10
+          type: string
+        phone_code:
+          description: The code of sendPhoneChangeCode, while the SMS second step is on and the proof is the password
+          maxLength: 16
           type: string
         reauth:
           $ref: "#/components/schemas/ReauthDTO"
@@ -26824,7 +26851,7 @@ paths:
       x-koro-surface: public
   /api/v1/auth/password-resets:
     post:
-      description: "Always 202 (no account enumeration). channel email (default): a link valid for 30 minutes. channel sms (BE-172): a 6-digit code by SMS (10 minutes; confirmPasswordResetSms) when the account has a verified number, its SMS second step is off, it holds no role that requires MFA and the SMS limits, the platform's SMS budget and the account's daily ceiling allow it; otherwise the e-mail link, with the same answer."
+      description: "Always 202 (no account enumeration). channel email (default): a link valid for 30 minutes. channel sms (BE-172, BE-186): a 6-digit code by SMS (10 minutes; confirmPasswordResetSms) when the account's holder turned this on at least seven days ago (enableSmsPasswordReset; off by default), the account has a verified number, its SMS second step is off, it holds no org or platform role and the SMS limits, the platform's SMS budget and the account's daily ceiling allow it; otherwise the e-mail link, with the same answer."
       operationId: requestPasswordReset
       requestBody:
         content:
@@ -26884,7 +26911,7 @@ paths:
       x-koro-surface: public
   /api/v1/auth/password-resets/sms/confirm:
     post:
-      description: The code of requestPasswordReset with channel sms. A wrong, used or expired code, an unknown address, an account that may no longer reset by SMS and one above the daily ceiling of tries all answer 422 identity.invalid_sms_code. Every session of the account is closed.
+      description: The code of requestPasswordReset with channel sms. A wrong, used or expired code, an unknown address, an account that may no longer reset by SMS (the holder's choice turned off, the number changed, a role arrived) and one above the daily ceiling of tries all answer 422 identity.invalid_sms_code. Every session of the account is closed.
       operationId: confirmPasswordResetSms
       requestBody:
         content:
@@ -31625,7 +31652,7 @@ paths:
       x-koro-terms-gate: exempt
   /api/v1/me/mfa/sms:
     post:
-      description: "reauth is the proof. Sign-ins then ask for a code sent by SMS to the verified number (next to TOTP when that is on too). An SMS sign-in never makes the session MFA-verified. Holders of a role that requires MFA (platform roles, university_rep, company_admin/owner) get 409 identity.sms_mfa_not_allowed: TOTP only. 409 identity.phone_not_verified without a number. Already on: 204, nothing changes."
+      description: "reauth is the proof. Sign-ins then ask for a code sent by SMS to the verified number (next to TOTP when that is on too). An SMS sign-in never makes the session MFA-verified. Holders of a role that requires MFA (platform roles, university_rep, company_admin/owner) get 409 identity.sms_mfa_not_allowed: TOTP only. 409 identity.phone_not_verified without a number. Turning it on turns the password reset by SMS off. Already on: 204, nothing changes."
       operationId: enableSmsMfa
       requestBody:
         content:
@@ -31658,13 +31685,13 @@ paths:
       x-koro-terms-gate: exempt
   /api/v1/me/mfa/sms/disable:
     post:
-      description: "reauth is the proof. The number stays. Already off: 204, nothing changes."
+      description: "reauth is the proof. The number stays. Already off: 204, nothing changes. While the SMS second step is on and the proof is the password, phone_code must carry the code of sendPhoneChangeCode (403 identity.phone_code_required without it; 422 identity.invalid_sms_code for a wrong, used or expired one, counted towards the account lockout). A totp_code proof needs no phone_code."
       operationId: disableSmsMfa
       requestBody:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ReauthOnlyInputBody"
+              $ref: "#/components/schemas/PhoneFactorInputBody"
         required: true
       responses:
         "204":
@@ -32215,7 +32242,7 @@ paths:
       x-koro-terms-gate: exempt
   /api/v1/me/phone:
     post:
-      description: reauth is the proof (password, or totp_code on a TOTP account). A 6-digit code goes by SMS to the Turkish mobile number (valid 10 minutes); confirmPhoneVerification makes it the account's. The answer is the same whether or not another account holds the number (only its holder learns that, at confirmation). 422 identity.invalid_phone for anything but +90 5XX XXX XX XX; 503 identity.sms_unavailable without an SMS provider or while the platform's SMS budget is spent (with Retry-After). Sends are limited per number and purpose, account and address, and per day to a number the account does not hold (429).
+      description: reauth is the proof (password, or totp_code on a TOTP account). A 6-digit code goes by SMS to the Turkish mobile number (valid 10 minutes); confirmPhoneVerification makes it the account's. The answer is the same whether or not another account holds the number (only its holder learns that, at confirmation). 422 identity.invalid_phone for anything but +90 5XX XXX XX XX; 503 identity.sms_unavailable without an SMS provider or while the platform's SMS budget is spent (with Retry-After). Sends are limited per number and purpose, account and address, and per day to a number the account does not hold (429). While the SMS second step is on and the proof is the password, phone_code must carry the code of sendPhoneChangeCode (403 identity.phone_code_required without it; 422 identity.invalid_sms_code for a wrong, used or expired one, counted towards the account lockout). A totp_code proof needs no phone_code.
       operationId: startPhoneVerification
       requestBody:
         content:
@@ -32250,9 +32277,46 @@ paths:
       x-koro-reauth: true
       x-koro-surface: self
       x-koro-terms-gate: exempt
+  /api/v1/me/phone/change-code:
+    post:
+      description: reauth is the proof. A 6-digit code goes by SMS to the account's number (valid 10 minutes); startPhoneVerification, removeMyPhone and disableSmsMfa take it as phone_code while the SMS second step is on. 409 identity.phone_not_verified without a number; 409 identity.phone_code_not_required when the step is off or the proof is a totp_code. Without the phone, an admin's MFA reset turns the step off. Sends are limited (429); 503 identity.sms_unavailable without an SMS provider or while the platform's SMS budget is spent (with Retry-After).
+      operationId: sendPhoneChangeCode
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReauthOnlyInputBody"
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SMSCodeSentDTO"
+          description: Accepted
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Send a code to my current number
+      tags:
+        - identity
+      x-koro-action: identity.phone.change
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: self
+      x-koro-terms-gate: exempt
   /api/v1/me/phone/confirm:
     post:
-      description: The code of startPhoneVerification (single use, five tries). A wrong, used or expired code is 422 identity.invalid_sms_code; a number another account verified meanwhile is 409 identity.phone_taken. The number replaces an earlier one; the SMS second step stays as it was. A security notice goes by e-mail.
+      description: The code of startPhoneVerification (single use, five tries). A wrong, used or expired code is 422 identity.invalid_sms_code; a number another account verified meanwhile is 409 identity.phone_taken. The number replaces an earlier one; the SMS second step stays as it was, the open codes of the earlier number close and the password reset by SMS turns off. A security notice goes by e-mail.
       operationId: confirmPhoneVerification
       requestBody:
         content:
@@ -32288,8 +32352,41 @@ paths:
       x-koro-terms-gate: exempt
   /api/v1/me/phone/remove:
     post:
-      description: reauth is the proof. The number goes, and with it the SMS second step. 409 identity.phone_not_verified without a number.
+      description: reauth is the proof. The number goes, and with it the SMS second step and the password reset by SMS. 409 identity.phone_not_verified without a number. While the SMS second step is on and the proof is the password, phone_code must carry the code of sendPhoneChangeCode (403 identity.phone_code_required without it; 422 identity.invalid_sms_code for a wrong, used or expired one, counted towards the account lockout). A totp_code proof needs no phone_code.
       operationId: removeMyPhone
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PhoneFactorInputBody"
+        required: true
+      responses:
+        "204":
+          description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Remove my mobile number
+      tags:
+        - identity
+      x-koro-action: identity.phone.change
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: self
+      x-koro-terms-gate: exempt
+  /api/v1/me/phone/sms-reset:
+    post:
+      description: "reauth is the proof. Off by default; e-mail stays the standard way. From seven days later requestPasswordReset with channel sms may send a code to the verified number. 409 identity.phone_not_verified without a number; 409 identity.sms_reset_not_allowed for a holder of an org or platform role or with the SMS second step on (both before the proof). It turns off by itself when the number changes, the SMS second step goes on, a role arrives or an admin resets the account's MFA. A security notice goes by e-mail. Already on: 204, nothing changes (the wait does not restart). 503 identity.sms_unavailable without an SMS provider."
+      operationId: enableSmsPasswordReset
       requestBody:
         content:
           application/json:
@@ -32310,10 +32407,43 @@ paths:
       security:
         - sessionCookie: []
         - bearerAuth: []
-      summary: Remove my mobile number
+      summary: Turn the password reset by SMS on
       tags:
         - identity
-      x-koro-action: identity.phone.change
+      x-koro-action: identity.sms_reset.enable
+      x-koro-idempotency: optional
+      x-koro-rate-limit: reauth
+      x-koro-reauth: true
+      x-koro-surface: self
+      x-koro-terms-gate: exempt
+  /api/v1/me/phone/sms-reset/disable:
+    post:
+      description: "reauth is the proof. The reset goes by e-mail again and an open reset code closes; the number stays. A security notice goes by e-mail. Already off: 204, nothing changes."
+      operationId: disableSmsPasswordReset
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReauthOnlyInputBody"
+        required: true
+      responses:
+        "204":
+          description: No Content
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Turn the password reset by SMS off
+      tags:
+        - identity
+      x-koro-action: identity.sms_reset.disable
       x-koro-idempotency: optional
       x-koro-rate-limit: reauth
       x-koro-reauth: true

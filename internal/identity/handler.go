@@ -76,8 +76,9 @@ func Register(api huma.API, svc Service) {
 		OperationID: "requestPasswordReset", Method: http.MethodPost, Path: "/auth/password-resets", DefaultStatus: http.StatusAccepted,
 		Summary: "Request a password reset",
 		Description: "Always 202 (no account enumeration). channel email (default): a link valid for 30 minutes. channel sms " +
-			"(BE-172): a 6-digit code by SMS (10 minutes; confirmPasswordResetSms) when the account has a verified number, " +
-			"its SMS second step is off, it holds no role that requires MFA and the SMS limits, the platform's SMS budget and " +
+			"(BE-172, BE-186): a 6-digit code by SMS (10 minutes; confirmPasswordResetSms) when the account's holder turned " +
+			"this on at least seven days ago (enableSmsPasswordReset; off by default), the account has a verified number, " +
+			"its SMS second step is off, it holds no org or platform role and the SMS limits, the platform's SMS budget and " +
 			"the account's daily ceiling allow it; otherwise the e-mail link, with the same answer.",
 	}, op.Meta{Action: string(authz.IdentityPasswordResetRequest), Surface: op.SurfacePublic, RateLimit: op.RateAuthPasswordReset,
 		Idempotency: op.IdempotencyOptional}, h.resetRequest)
@@ -364,7 +365,7 @@ func (h handler) resend(ctx context.Context, in *emailInput) (*acceptedOutput, e
 type resetRequestInput struct {
 	Body struct {
 		Email   emailText `json:"email"`
-		Channel string    `json:"channel,omitempty" enum:"email,sms" default:"email" doc:"sms: a code by SMS when the account may reset by SMS (BE-172)"`
+		Channel string    `json:"channel,omitempty" enum:"email,sms" default:"email" doc:"sms: a code by SMS when the account's holder turned this on and the account may reset by SMS; otherwise the e-mail link"`
 	}
 }
 

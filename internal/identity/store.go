@@ -66,3 +66,7 @@ func (b *Bootstrapper) roles() roleStore { return b.d.Store }
 
 // sessions is the sessions view of the bootstrap's store.
 func (b *Bootstrapper) sessions() sessionStore { return b.d.Store }
+
+// phones is the phone rows of the bootstrap (a platform role closes the
+// password reset by SMS, BE-186).
+func (b *Bootstrapper) phones() phoneStore { return b.d.Store }

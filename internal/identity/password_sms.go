@@ -9,16 +9,17 @@ import (
 	"koro/internal/authz"
 )
 
-// Password reset by SMS (BE-172; optional, e-mail stays the default). The
-// request answers 202 whatever happens (no enumeration): an account that
-// may reset by SMS gets a code to its verified number (10 minutes), any
-// other account the e-mail link as before. An account may reset by SMS
-// only when SMS would not be its every factor and its role allows it:
+// Password reset by SMS (BE-172, BE-186; optional, e-mail stays the default).
+// The request answers 202 whatever happens (no enumeration): an account that
+// may reset by SMS gets a code to its verified number (10 minutes), any other
+// account the e-mail link as before. An account may reset by SMS when:
 //
 //   - it is active and has a verified number;
-//   - its SMS second step is off (the phone must not be both the reset
-//     channel and the second factor: one SIM swap would open the account);
-//   - it holds no role that requires MFA (k-sms: SIM swap);
+//   - its holder turned the reset by SMS on, at least SMSResetWait ago
+//     (sms_reset.go; off by default);
+//   - its SMS second step is off (the phone is never both the reset channel
+//     and the second factor);
+//   - it holds no role that refuses it (smsResetBarred);
 //   - it is below the daily ceiling of the SMS reset (BE-181: codes and tries
 //     per account in a rolling day, sms_limits.go).
 //
@@ -28,22 +29,27 @@ import (
 // identity.invalid_sms_code. Every session closes, as with the e-mail link.
 
 // smsResetNumber returns the number a password reset of u goes to by SMS,
-// "" when u must reset by e-mail.
+// "" when u must reset by e-mail. A choice found next to a role that refuses
+// it closes here (its membership event may have been lost).
 func (s *service) smsResetNumber(ctx context.Context, u User) (string, error) {
 	if s.d.SMS == nil || u.Status != StatusActive {
 		return "", nil
 	}
 	p, found, err := s.phones().Phone(ctx, u.ID)
-	if err != nil || !found || p.SMSMFAEnabledAt != nil {
+	if err != nil || !found || p.SMSResetEnabledAt == nil {
 		return "", err
 	}
-	roles, err := s.roles().PlatformRoles(ctx, u.ID)
+	roles, ms, err := s.heldRoles(ctx, u.ID)
 	if err != nil {
 		return "", err
 	}
-	ms, err := s.memberships(ctx, u.ID)
-	if err != nil || privileged(roles, ms) {
-		return "", err
+	if smsResetBarred(roles, ms) {
+		return "", s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
+			return s.closeSMSReset(ctx, p, authz.SystemActor(CloseSMSResetTaskName), smsResetClosedRole)
+		})
+	}
+	if !p.smsResetActive(s.now()) {
+		return "", nil
 	}
 	return p.Number, nil
 }

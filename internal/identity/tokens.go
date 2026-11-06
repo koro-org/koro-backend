@@ -71,6 +71,7 @@ var noticeTemplates = map[string]string{
 	NoticeRecoveryCodesRegenerated: mfaNoticeTemplate, NoticeMFAReset: mfaNoticeTemplate,
 	NoticePhoneVerified: phoneNoticeTemplate, NoticePhoneRemoved: phoneNoticeTemplate, NoticeSMSMFAEnabled: phoneNoticeTemplate,
 	NoticeSMSMFADisabled: phoneNoticeTemplate, NoticeSMSResetLimit: phoneNoticeTemplate,
+	NoticeSMSResetEnabled: phoneNoticeTemplate, NoticeSMSResetDisabled: phoneNoticeTemplate,
 }
 
 // issueToken opens a new e-mail token of purpose for u in the transaction

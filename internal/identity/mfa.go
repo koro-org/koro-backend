@@ -253,15 +253,25 @@ func (s *service) requiresMFA(ctx context.Context, a authz.Actor) (bool, error) 
 	if privileged(a.PlatformRoles, a.Memberships) {
 		return true, nil
 	}
-	roles, err := s.roles().PlatformRoles(ctx, a.UserID)
-	if err != nil {
-		return false, err
-	}
-	ms, err := s.memberships(ctx, a.UserID)
+	roles, ms, err := s.heldRoles(ctx, a.UserID)
 	if err != nil {
 		return false, err
 	}
 	return privileged(roles, ms), nil
+}
+
+// heldRoles returns the platform roles in effect and the org memberships of
+// userID, from the stored roles and the membership source.
+func (s *service) heldRoles(ctx context.Context, userID uuid.UUID) ([]authz.PlatformRole, []authz.Membership, error) {
+	roles, err := s.roles().PlatformRoles(ctx, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	ms, err := s.memberships(ctx, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return roles, ms, nil
 }
 
 // EnrollTOTP implements Service (enrollTotp, R by 06 H-46): a new secret

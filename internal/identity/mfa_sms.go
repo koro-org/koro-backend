@@ -52,8 +52,8 @@ func (f loginFactors) methods() []string {
 
 // secondFactors returns the second factors of u: TOTP when it is on; the
 // SMS code when the SMS second step is on, except next to TOTP for a holder
-// of an MFA role (03 §6.4, k-sms: their factor is TOTP alone, SIM swap). An
-// MFA role holder whose only second step is SMS (turned on before the role
+// of an MFA role (03 §6.4, k-sms: their factor is TOTP alone). An MFA role
+// holder whose only second step is SMS (turned on before the role
 // arrived) keeps it as the sign-in's guard; the session it opens is not
 // MFA-verified, so the role paths still need TOTP (03 §6.4-2).
 func (s *service) secondFactors(ctx context.Context, u User) (loginFactors, error) {
@@ -63,11 +63,7 @@ func (s *service) secondFactors(ctx context.Context, u User) (loginFactors, erro
 		return f, err
 	}
 	if f.TOTP {
-		roles, err := s.roles().PlatformRoles(ctx, u.ID)
-		if err != nil {
-			return f, err
-		}
-		ms, err := s.memberships(ctx, u.ID)
+		roles, ms, err := s.heldRoles(ctx, u.ID)
 		if err != nil {
 			return f, err
 		}
@@ -79,10 +75,11 @@ func (s *service) secondFactors(ctx context.Context, u User) (loginFactors, erro
 	return f, nil
 }
 
-// useLoginSMSCode verifies and consumes the open sign-in code of userID.
-func (s *service) useLoginSMSCode(ctx context.Context, userID uuid.UUID, raw string) (bool, error) {
+// useLoginSMSCode verifies and consumes the open sign-in code of userID, sent
+// to number (the account's number now).
+func (s *service) useLoginSMSCode(ctx context.Context, userID uuid.UUID, number, raw string) (bool, error) {
 	c, ok, err := s.matchSMSCode(ctx, userID, SMSLogin, raw)
-	if err != nil || !ok {
+	if err != nil || !ok || c.Number != number {
 		return false, err
 	}
 	return s.phones().ConsumeSMSCode(ctx, c.ID, s.now())

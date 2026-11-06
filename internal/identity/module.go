@@ -230,18 +230,28 @@ type Service interface {
 	// RegenerateRecoveryCodes is regenerateRecoveryCodes (R).
 	RegenerateRecoveryCodes(ctx context.Context, a authz.Actor, proof ReauthProof) (RecoveryCodes, error)
 
+	// SendPhoneChangeCode is sendPhoneChangeCode (R; BE-186): a code by SMS
+	// to the current number for a change of the phone factor.
+	SendPhoneChangeCode(ctx context.Context, a authz.Actor, proof ReauthProof) (SMSCodeSent, error)
 	// StartPhoneVerification is startPhoneVerification (R; BE-172): a code
 	// by SMS to the number (202 whether or not another account holds it).
-	StartPhoneVerification(ctx context.Context, a authz.Actor, phone string, proof ReauthProof) (SMSCodeSent, error)
+	// phoneCode is the code of the current number, when the change asks for
+	// one (BE-186; also RemovePhone, DisableSMSMFA).
+	StartPhoneVerification(ctx context.Context, a authz.Actor, phone string, proof ReauthProof, phoneCode string) (SMSCodeSent, error)
 	// ConfirmPhoneVerification is confirmPhoneVerification: the code makes
 	// its number the caller's.
 	ConfirmPhoneVerification(ctx context.Context, a authz.Actor, code string) (PhoneView, error)
 	// RemovePhone is removeMyPhone (R): the number and the SMS second step go.
-	RemovePhone(ctx context.Context, a authz.Actor, proof ReauthProof) error
+	RemovePhone(ctx context.Context, a authz.Actor, proof ReauthProof, phoneCode string) error
 	// EnableSMSMFA is enableSmsMfa (R; 409 for MFA roles, k-sms).
 	EnableSMSMFA(ctx context.Context, a authz.Actor, proof ReauthProof) error
 	// DisableSMSMFA is disableSmsMfa (R).
-	DisableSMSMFA(ctx context.Context, a authz.Actor, proof ReauthProof) error
+	DisableSMSMFA(ctx context.Context, a authz.Actor, proof ReauthProof, phoneCode string) error
+	// EnableSMSReset is enableSmsPasswordReset (R; BE-186; 409 for role
+	// holders and with the SMS second step on).
+	EnableSMSReset(ctx context.Context, a authz.Actor, proof ReauthProof) error
+	// DisableSMSReset is disableSmsPasswordReset (R; BE-186).
+	DisableSMSReset(ctx context.Context, a authz.Actor, proof ReauthProof) error
 	// SendMFALoginSMS is sendMfaLoginSms: the SMS code of a sign-in
 	// challenge.
 	SendMFALoginSMS(ctx context.Context, a authz.Actor, challengeID uuid.UUID) (SMSCodeSent, error)

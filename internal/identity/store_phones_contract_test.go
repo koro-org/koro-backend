@@ -11,9 +11,10 @@ import (
 )
 
 // phoneContract is the user_phones and sms_codes part of the store contract
-// (BE-172; 000177): one number per account and one account per number, the
-// SMS second step, the open code of a purpose, the attempt counter, single
-// use, the sent mark, the retention cleanup and the erasure.
+// (BE-172, 000177; BE-186, 000182): one number per account and one account per
+// number, the SMS second step, the password reset by SMS never next to it, the
+// open code of a purpose, the attempt counter, single use, the sent mark, the
+// retention cleanup and the erasure.
 func phoneContract(t *testing.T, s identity.Store) {
 	t.Helper()
 	ctx := t.Context()
@@ -65,6 +66,41 @@ func phoneContract(t *testing.T, s identity.Store) {
 	if err := s.PutPhone(ctx, identity.Phone{UserID: v.ID, Number: n1, VerifiedAt: at}); err != nil {
 		t.Fatalf("the freed number: %v", err)
 	}
+	// The password reset by SMS: on and off, stored by PutPhone as given, never
+	// next to the SMS second step.
+	if ok, err := s.SetSMSReset(ctx, v.ID, &on); err != nil || !ok {
+		t.Fatalf("SetSMSReset(on) = %v, %v", ok, err)
+	}
+	if r, _, _ := s.Phone(ctx, v.ID); r.SMSResetEnabledAt == nil || !r.SMSResetEnabledAt.Equal(on) || r.SMSMFAEnabledAt != nil {
+		t.Fatalf("phone with the reset on = %+v", r)
+	}
+	if _, err := s.SetSMSMFA(ctx, v.ID, &on); !errors.Is(err, identity.ErrSMSResetNotAllowed) {
+		t.Fatalf("the second step next to the reset = %v", err)
+	}
+	if _, err := s.SetSMSReset(ctx, u.ID, &on); !errors.Is(err, identity.ErrSMSResetNotAllowed) {
+		t.Fatalf("the reset next to the second step = %v", err)
+	}
+	if err := s.PutPhone(ctx, identity.Phone{UserID: v.ID, Number: n1, VerifiedAt: at, SMSMFAEnabledAt: &on, SMSResetEnabledAt: &on}); !errors.Is(err, identity.ErrSMSResetNotAllowed) {
+		t.Fatalf("PutPhone with both = %v", err)
+	}
+	if err := s.PutPhone(ctx, identity.Phone{UserID: v.ID, Number: n1, VerifiedAt: on}); err != nil {
+		t.Fatal(err)
+	}
+	if r, _, _ := s.Phone(ctx, v.ID); r.SMSResetEnabledAt != nil || !r.VerifiedAt.Equal(on) {
+		t.Fatalf("PutPhone without the reset = %+v", r)
+	}
+	if err := s.PutPhone(ctx, identity.Phone{UserID: v.ID, Number: n1, VerifiedAt: at, SMSResetEnabledAt: &on}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.SetSMSReset(ctx, v.ID, nil); err != nil || !ok {
+		t.Fatalf("SetSMSReset(off) = %v, %v", ok, err)
+	}
+	if r, _, _ := s.Phone(ctx, v.ID); r.SMSResetEnabledAt != nil {
+		t.Fatalf("phone with the reset off = %+v", r)
+	}
+	if ok, err := s.SetSMSReset(ctx, uuid.NewV7(), &on); err != nil || ok {
+		t.Fatalf("SetSMSReset without a number = %v, %v", ok, err)
+	}
 
 	// SMS codes: the newest open one of a purpose, attempts, single use.
 	code := func(purpose identity.SMSPurpose, created time.Time) identity.SMSCode {
@@ -77,6 +113,20 @@ func phoneContract(t *testing.T, s identity.Store) {
 	}
 	if _, found, err := s.OpenSMSCode(ctx, u.ID, identity.SMSLogin); err != nil || found {
 		t.Fatalf("OpenSMSCode(none) = %v, %v", found, err)
+	}
+	// The purposes: a change of the phone factor has its own, others are refused.
+	change := identity.SMSCode{ID: uuid.NewV7(), UserID: v.ID, Purpose: identity.SMSPhoneChange, Number: n1, KeyID: "k1",
+		CodeHash: bytes.Repeat([]byte{7}, 32), ExpiresAt: at.Add(24 * time.Hour), CreatedAt: at}
+	if err := s.InsertSMSCode(ctx, change); err != nil {
+		t.Fatal(err)
+	}
+	if got, found, err := s.OpenSMSCode(ctx, v.ID, identity.SMSPhoneChange); err != nil || !found || got.ID != change.ID {
+		t.Fatalf("OpenSMSCode(phone_change) = %+v, %v, %v", got, found, err)
+	}
+	bad := change
+	bad.ID, bad.Purpose = uuid.NewV7(), "email"
+	if err := s.InsertSMSCode(ctx, bad); err == nil {
+		t.Fatal("an unknown purpose was stored")
 	}
 	old := code(identity.SMSLogin, at)
 	cur := code(identity.SMSLogin, at.Add(time.Minute))

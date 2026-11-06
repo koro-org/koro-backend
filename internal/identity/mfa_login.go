@@ -176,7 +176,7 @@ func (s *service) CompleteMFALogin(ctx context.Context, a authz.Actor, in MFALog
 	case kind == factorRecoveryCode && f.TOTP:
 		ok, err = s.useRecoveryCode(ctx, u.ID, in.RecoveryCode)
 	case kind == factorSMS && f.SMS:
-		ok, err = s.useLoginSMSCode(ctx, u.ID, in.SMSCode)
+		ok, err = s.useLoginSMSCode(ctx, u.ID, f.Phone, in.SMSCode)
 	default: // a factor the account does not have counts as a wrong code
 	}
 	if err != nil {

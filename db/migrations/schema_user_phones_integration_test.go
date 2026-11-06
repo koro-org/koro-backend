@@ -98,6 +98,60 @@ func TestSchema_SMSCodesUserCreatedIndex(t *testing.T) {
 	}
 }
 
+// TestSchema_SMSResetPreference (BE-186, migration 000182): the password reset
+// by SMS of an account:
+//   - off by default, a date when on, never next to the SMS second step
+//     (user_phones_sms_reset_sms_mfa_chk);
+//   - sms_codes takes the purpose phone_change;
+//   - the down migration drops the column, the constraint and the codes of the
+//     purpose; the up one brings them back.
+func TestSchema_SMSResetPreference(t *testing.T) {
+	t.Parallel()
+	w := newP1aWorld(t)
+	const code = `INSERT INTO sms_codes (id, user_id, purpose, phone_e164, key_id, code_hash, attempts, expires_at, created_at)
+		VALUES ($1, $2, 'phone_change', $3, 'k1', $4, 0, now() + interval '10 minutes', now())`
+	check := func(t *testing.T) {
+		t.Helper()
+		u := w.user()
+		number := "+90555" + digits7(w.n())
+		w.exec(`INSERT INTO user_phones (user_id, phone_e164, verified_at) VALUES ($1, $2, now())`, u, number)
+		if n := w.count(`SELECT count(*) FROM user_phones WHERE user_id = $1 AND sms_reset_enabled_at IS NULL`, u); n != 1 {
+			t.Fatalf("a new number with the reset on (%d)", n)
+		}
+		expectOK(t, w.d.Pool, []p1aCase{
+			{name: "the reset on", sql: `UPDATE user_phones SET sms_reset_enabled_at = now() WHERE user_id = $1`, args: []any{u}},
+			{name: "a code of the current number", sql: code, args: []any{uuid.NewV7(), u, number, make([]byte, 32)}},
+		})
+		expectFail(t, w.d.Pool, []p1aCase{
+			{name: "the second step next to the reset", sql: `UPDATE user_phones SET sms_mfa_enabled_at = now() WHERE user_id = $1`, args: []any{u},
+				state: db.CodeCheckViolation, constraint: "user_phones_sms_reset_sms_mfa_chk"},
+		})
+		expectOK(t, w.d.Pool, []p1aCase{
+			{name: "the reset off", sql: `UPDATE user_phones SET sms_reset_enabled_at = NULL WHERE user_id = $1`, args: []any{u}},
+			{name: "then the second step", sql: `UPDATE user_phones SET sms_mfa_enabled_at = now() WHERE user_id = $1`, args: []any{u}},
+		})
+	}
+	check(t)
+
+	owner := testutil.OwnerConn(t, w.d)
+	if _, err := owner.Exec(t.Context(), mustRead(t, "000182_sms_reset_preference.down.sql")); err != nil {
+		t.Fatal(err)
+	}
+	if n := w.count(`SELECT count(*) FROM information_schema.columns WHERE table_name = 'user_phones' AND column_name = 'sms_reset_enabled_at'`) +
+		w.count(`SELECT count(*) FROM sms_codes WHERE purpose = 'phone_change'`); n != 0 {
+		t.Fatalf("down left %d objects of 000182", n)
+	}
+	u := w.user()
+	expectFail(t, w.d.Pool, []p1aCase{
+		{name: "the purpose after down", sql: code, args: []any{uuid.NewV7(), u, "+905559999976", make([]byte, 32)}, state: db.CodeCheckViolation,
+			constraint: "sms_codes_purpose_chk"},
+	})
+	if _, err := owner.Exec(t.Context(), mustRead(t, "000182_sms_reset_preference.up.sql")); err != nil {
+		t.Fatal(err)
+	}
+	check(t)
+}
+
 // digits7 is seven digits of a counter value (unique numbers per run).
 func digits7(n string) string {
 	d := []byte("0000000" + n)

@@ -30,7 +30,8 @@ var constraints = db.Constraints{
 	"privileged_account_actions_open_uq":             ErrAccountActionOpen,
 	"privileged_account_actions_four_eyes_chk":       ErrFourEyes,
 	"privileged_account_actions_self_chk":            ErrForbidden,
-	"user_phones_phone_uq":                           ErrPhoneTaken, // BE-172
+	"user_phones_phone_uq":                           ErrPhoneTaken,         // BE-172
+	"user_phones_sms_reset_sms_mfa_chk":              ErrSMSResetNotAllowed, // BE-186
 }
 
 // InsertUser implements Store.

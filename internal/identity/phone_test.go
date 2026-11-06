@@ -93,7 +93,7 @@ func lastSMSCode(t *testing.T, f *smsfake.Fake, number string) string {
 // verifiedPhone gives the actor's account number by the public flow.
 func (e *env) verifiedPhone(t *testing.T, f *smsfake.Fake, a authz.Actor, number string) {
 	t.Helper()
-	if _, err := e.svc.StartPhoneVerification(t.Context(), a, number, pwProof); err != nil {
+	if _, err := e.svc.StartPhoneVerification(t.Context(), a, number, pwProof, ""); err != nil {
 		t.Fatalf("StartPhoneVerification: %v", err)
 	}
 	e.sendSMS(t)
@@ -112,7 +112,7 @@ func TestPhone_VerifyWithSMSCode(t *testing.T) {
 	u := e.activeUser(t, "phone@example.com")
 	_, a := e.login(t, "phone@example.com", identity.ClientWeb)
 	ctx := t.Context()
-	sent, err := e.svc.StartPhoneVerification(ctx, a, testPhoneTyped, pwProof)
+	sent, err := e.svc.StartPhoneVerification(ctx, a, testPhoneTyped, pwProof, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,16 +190,16 @@ func TestPhone_StartRules(t *testing.T) {
 	e.activeUser(t, "rules@example.com")
 	_, a := e.login(t, "rules@example.com", identity.ClientWeb)
 	ctx := t.Context()
-	_, err := e.svc.StartPhoneVerification(ctx, a, testPhone, identity.ReauthProof{})
+	_, err := e.svc.StartPhoneVerification(ctx, a, testPhone, identity.ReauthProof{}, "")
 	problemtest.WantErr(t, err, identity.ErrReauthRequired)
-	_, err = e.svc.StartPhoneVerification(ctx, a, "+90 212 000 00 01", pwProof)
+	_, err = e.svc.StartPhoneVerification(ctx, a, "+90 212 000 00 01", pwProof, "")
 	problemtest.WantErr(t, err, identity.ErrInvalidPhone)
 	for i := range 3 {
-		if _, err := e.svc.StartPhoneVerification(ctx, a, testPhone, pwProof); err != nil {
+		if _, err := e.svc.StartPhoneVerification(ctx, a, testPhone, pwProof, ""); err != nil {
 			t.Fatalf("send %d: %v", i+1, err)
 		}
 	}
-	_, err = e.svc.StartPhoneVerification(ctx, a, testPhone, pwProof)
+	_, err = e.svc.StartPhoneVerification(ctx, a, testPhone, pwProof, "")
 	problemtest.WantErr(t, err, problem.ErrRateLimited)
 	// BE-178: the 429 carries the limiter's remaining wait (Retry-After).
 	if pe, ok := errors.AsType[*problem.Error](err); !ok || pe.RetryAfter() <= 0 || pe.RetryAfter() > 24*time.Hour ||
@@ -210,7 +210,7 @@ func TestPhone_StartRules(t *testing.T) {
 	off := newEnv(t)
 	off.activeUser(t, "off@example.com")
 	_, b := off.login(t, "off@example.com", identity.ClientWeb)
-	_, err = off.svc.StartPhoneVerification(ctx, b, testPhone, pwProof)
+	_, err = off.svc.StartPhoneVerification(ctx, b, testPhone, pwProof, "")
 	problemtest.WantErr(t, err, identity.ErrSMSUnavailable)
 	problemtest.WantErr(t, off.svc.EnableSMSMFA(ctx, b, pwProof), identity.ErrSMSUnavailable)
 }
@@ -226,7 +226,7 @@ func TestPhone_TakenNumberToldOnlyAtConfirm(t *testing.T) {
 	e.verifiedPhone(t, f, a, testPhone)
 	e.activeUser(t, "second@example.com")
 	_, b := e.login(t, "second@example.com", identity.ClientWeb)
-	if _, err := e.svc.StartPhoneVerification(t.Context(), b, testPhone, pwProof); err != nil {
+	if _, err := e.svc.StartPhoneVerification(t.Context(), b, testPhone, pwProof, ""); err != nil {
 		t.Fatalf("start with a taken number = %v, want the same answer", err)
 	}
 	e.sendSMS(t)
@@ -246,7 +246,7 @@ func TestSMSCode_AttemptsAndExpiry(t *testing.T) {
 	start := func() string {
 		t.Helper()
 		e.clk.Advance(time.Second)
-		if _, err := e.svc.StartPhoneVerification(ctx, a, testPhone, pwProof); err != nil {
+		if _, err := e.svc.StartPhoneVerification(ctx, a, testPhone, pwProof, ""); err != nil {
 			t.Fatal(err)
 		}
 		e.sendSMS(t) //nolint:contextcheck // the worker runs with its own task context
@@ -297,7 +297,7 @@ func TestSMSMFA_RefusedForMFARoles(t *testing.T) {
 	if me, _ := e.svc.Me(ctx, a); me.Phone == nil || !me.Phone.SMSMFAEnabled {
 		t.Fatalf("Me.Phone = %+v", me.Phone)
 	}
-	if err := e.svc.DisableSMSMFA(ctx, a, pwProof); err != nil {
+	if err := e.svc.DisableSMSMFA(ctx, a, pwProof, e.changeCode(t, f, a, testPhone)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -446,17 +446,15 @@ func (e *env) login2(t *testing.T, f *smsfake.Fake, email string) (identity.Logi
 	return res, authz.Actor{Kind: authz.KindUser, UserID: res.Session.UserID, SessionID: res.Session.ID, StudentStatus: authz.StudentNone}
 }
 
-// TestPasswordResetSMS_EligibleOnly: an eligible account resets with the SMS
-// code (every session closes); an account with the SMS second step, or of
-// an MFA role, gets the e-mail link instead; an unknown address answers
+// TestPasswordResetSMS_EligibleOnly: an account whose holder turned the reset
+// by SMS on resets with the SMS code (every session closes); an account with
+// the SMS second step gets the e-mail link instead; an unknown address answers
 // alike; a wrong code is refused.
 func TestPasswordResetSMS_EligibleOnly(t *testing.T) {
 	t.Parallel()
 	e, f := smsEnv(t)
 	ctx := t.Context()
-	u := e.activeUser(t, "reset@example.com")
-	_, a := e.login(t, "reset@example.com", identity.ClientWeb)
-	e.verifiedPhone(t, f, a, testPhone)
+	u, _ := e.smsResetUser(t, f, "reset@example.com", testPhone)
 	before := len(f.Sent())
 	if err := e.svc.RequestPasswordResetSMS(ctx, authz.Anonymous(), "reset@example.com"); err != nil {
 		t.Fatal(err)
@@ -485,7 +483,7 @@ func TestPasswordResetSMS_EligibleOnly(t *testing.T) {
 		t.Fatalf("login with the new password: %v", err)
 	}
 
-	// The SMS second step on: the reset goes by e-mail (one SIM swap must not open the account).
+	// The SMS second step on: the reset goes by e-mail.
 	e.smsMFAUser(t, f, "mfa.reset@example.com", testPhone2)
 	before = len(f.Sent())
 	if err := e.svc.RequestPasswordResetSMS(ctx, authz.Anonymous(), "mfa.reset@example.com"); err != nil {
@@ -516,7 +514,7 @@ func TestSMSCode_WorkerSendsOnceAndHidesTheCode(t *testing.T) {
 	e.activeUser(t, "worker@example.com")
 	_, a := e.login(t, "worker@example.com", identity.ClientWeb)
 	ctx := t.Context()
-	if _, err := e.svc.StartPhoneVerification(ctx, a, testPhone, pwProof); err != nil {
+	if _, err := e.svc.StartPhoneVerification(ctx, a, testPhone, pwProof, ""); err != nil {
 		t.Fatal(err)
 	}
 	var task queue.Enqueued
@@ -580,11 +578,11 @@ func TestPhone_RemoveAndPrivacy(t *testing.T) {
 
 	v := e.smsMFAUser(t, f, "remove@example.com", testPhone2)
 	_, a := e.login2(t, f, "remove@example.com")
-	problemtest.WantErr(t, e.svc.RemovePhone(ctx, a, identity.ReauthProof{}), identity.ErrReauthRequired)
-	if err := e.svc.RemovePhone(ctx, a, pwProof); err != nil {
+	problemtest.WantErr(t, e.svc.RemovePhone(ctx, a, identity.ReauthProof{}, ""), identity.ErrReauthRequired)
+	if err := e.svc.RemovePhone(ctx, a, pwProof, e.changeCode(t, f, a, testPhone2)); err != nil {
 		t.Fatal(err)
 	}
-	problemtest.WantErr(t, e.svc.RemovePhone(ctx, a, pwProof), identity.ErrPhoneNotVerified)
+	problemtest.WantErr(t, e.svc.RemovePhone(ctx, a, pwProof, ""), identity.ErrPhoneNotVerified)
 	res, err := e.svc.CreateSession(ctx, authz.Anonymous(), identity.Login{Email: "remove@example.com", Password: goodPassword})
 	if err != nil || res.MFARequired || res.Session.UserID != v.ID {
 		t.Fatalf("login after removing the number = %+v, %v", res, err)

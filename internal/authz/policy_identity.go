@@ -73,7 +73,8 @@ func identityPolicy() Policy {
 				return r.Type == TypeSession && a.Owns(r)
 			case IdentityAccountReadOwn, IdentityAccountUpdateOwn, IdentityPasswordChange, IdentityEmailChangeRequest,
 				IdentityMfaEnroll, IdentityMfaConfirm, IdentityMfaVerify, IdentityMfaDisable, IdentityMfaRecoveryRegenerate,
-				IdentityPhoneChange, IdentityPhoneVerify, IdentitySmsMfaEnable, IdentitySmsMfaDisable:
+				IdentityPhoneChange, IdentityPhoneVerify, IdentitySmsMfaEnable, IdentitySmsMfaDisable,
+				IdentitySmsResetEnable, IdentitySmsResetDisable:
 				return r.Type == TypeUser && a.Owns(r)
 			case IdentityUserSearch, IdentityPlatformRoleList:
 				return r.Type == TypeAdminSurface && AdminSurfaceVisible(a)
@@ -102,6 +103,7 @@ func identityPolicy() Policy {
 				IdentityAccountReadOwn, IdentityAccountUpdateOwn, IdentityPasswordChange, IdentityEmailChangeRequest,
 				IdentityMfaEnroll, IdentityMfaConfirm, IdentityMfaVerify, IdentityMfaDisable, IdentityMfaRecoveryRegenerate,
 				IdentityPhoneChange, IdentityPhoneVerify, IdentitySmsMfaEnable, IdentitySmsMfaDisable,
+				IdentitySmsResetEnable, IdentitySmsResetDisable,
 				IdentityEduVerificationStart, IdentityEduVerificationSubmitDocument, IdentityEduVerificationReadOwn:
 				return []Grant{{Role: RoleSelf}}
 			case IdentityEduVerificationList, IdentityEduVerificationReview:

@@ -55,7 +55,7 @@ func smsCodeTTL(p SMSPurpose) time.Duration {
 	if p == SMSLogin {
 		return 5 * time.Minute
 	}
-	return 10 * time.Minute // phone_verify, password_reset
+	return 10 * time.Minute // phone_verify, password_reset, phone_change
 }
 
 // smsTexts are the messages (plain ASCII: Netgsm's OTP route takes no
@@ -67,6 +67,8 @@ var smsTexts = map[SMSPurpose][2]string{
 		"Your Koro sign-in code: %s. Valid for %d minutes; do not share it."},
 	SMSPasswordReset: {"Koro parola sifirlama kodunuz: %s. Kod %d dakika gecerlidir. Siz istemediyseniz dikkate almayin.",
 		"Your Koro password reset code: %s. Valid for %d minutes. Ignore it if you did not ask for it."},
+	SMSPhoneChange: {"Koro telefon degisikligi onay kodunuz: %s. Kod %d dakika gecerlidir. Siz istemediyseniz parolanizi degistirin.",
+		"Your Koro phone change code: %s. Valid for %d minutes. If this was not you, change your password."},
 }
 
 // SMSCodeSent is the answer of an operation that sent a code: when it

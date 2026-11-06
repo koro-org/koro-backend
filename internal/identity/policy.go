@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"slices"
 	"time"
 
 	"koro/internal/authz"
@@ -54,6 +55,16 @@ func privileged(roles []authz.PlatformRole, ms []authz.Membership) bool {
 		}
 	}
 	return false
+}
+
+// smsResetBarred reports whether a user's roles refuse the password reset by
+// SMS (BE-186): any platform role in effect, or any org role beyond plain
+// club membership. A role added later is barred until it is allowed here.
+func smsResetBarred(roles []authz.PlatformRole, ms []authz.Membership) bool {
+	if len(roles) > 0 {
+		return true
+	}
+	return slices.ContainsFunc(ms, func(m authz.Membership) bool { return m.Role != authz.MemberMember })
 }
 
 // E-mail token lifetimes (02 §5.3).

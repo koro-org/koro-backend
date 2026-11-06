@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 	"uuid"
 
@@ -21,6 +22,7 @@ func (m *MemStore) Phone(_ context.Context, userID uuid.UUID) (Phone, bool, erro
 		return Phone{}, false, nil
 	}
 	p.SMSMFAEnabledAt = cloneTime(p.SMSMFAEnabledAt)
+	p.SMSResetEnabledAt = cloneTime(p.SMSResetEnabledAt)
 	return p, true, nil
 }
 
@@ -46,6 +48,9 @@ func (m *MemStore) PutPhone(_ context.Context, p Phone) error {
 	if !sms.ValidNumber(p.Number) || p.VerifiedAt.IsZero() {
 		return fmt.Errorf("%w: user_phones", errMemCheck)
 	}
+	if p.SMSMFAEnabledAt != nil && p.SMSResetEnabledAt != nil {
+		return ErrSMSResetNotAllowed // user_phones_sms_reset_sms_mfa_chk
+	}
 	for id, o := range m.phones {
 		if o.Number == p.Number && id != p.UserID {
 			return ErrPhoneTaken
@@ -57,6 +62,7 @@ func (m *MemStore) PutPhone(_ context.Context, p Phone) error {
 		p.CreatedAt = m.stamp()
 	}
 	p.SMSMFAEnabledAt = cloneTime(p.SMSMFAEnabledAt)
+	p.SMSResetEnabledAt = cloneTime(p.SMSResetEnabledAt)
 	m.phones[p.UserID] = p
 	return nil
 }
@@ -69,7 +75,26 @@ func (m *MemStore) SetSMSMFA(_ context.Context, userID uuid.UUID, at *time.Time)
 	if !ok {
 		return false, nil
 	}
+	if at != nil && p.SMSResetEnabledAt != nil {
+		return false, ErrSMSResetNotAllowed // user_phones_sms_reset_sms_mfa_chk
+	}
 	p.SMSMFAEnabledAt = cloneTime(at)
+	m.phones[userID] = p
+	return true, nil
+}
+
+// SetSMSReset implements Store.
+func (m *MemStore) SetSMSReset(_ context.Context, userID uuid.UUID, at *time.Time) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.phones[userID]
+	if !ok {
+		return false, nil
+	}
+	if at != nil && p.SMSMFAEnabledAt != nil {
+		return false, ErrSMSResetNotAllowed // user_phones_sms_reset_sms_mfa_chk
+	}
+	p.SMSResetEnabledAt = cloneTime(at)
 	m.phones[userID] = p
 	return true, nil
 }
@@ -93,7 +118,7 @@ func (m *MemStore) InsertSMSCode(_ context.Context, c SMSCode) error {
 		return fmt.Errorf("identity memstore: SMS code of unknown user: %w", ErrNotFound)
 	}
 	switch {
-	case c.Purpose != SMSPhoneVerify && c.Purpose != SMSLogin && c.Purpose != SMSPasswordReset,
+	case !slices.Contains(smsPurposes, c.Purpose),
 		!sms.ValidNumber(c.Number), c.KeyID == "", len(c.CodeHash) != 32, c.Attempts < 0 || c.Attempts > maxSMSAttemptsStored:
 		return fmt.Errorf("%w: sms_codes", errMemCheck)
 	}

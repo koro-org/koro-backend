@@ -1,4 +1,4 @@
-# Authz matrix of the identity module (03 §5.1, 04 §2.1; BE-014, BE-016, BE-018, BE-118, BE-128, BE-172). 45 operations × 18 personas.
+# Authz matrix of the identity module (03 §5.1, 04 §2.1; BE-014, BE-016, BE-018, BE-118, BE-128, BE-172, BE-186). 48 operations × 18 personas.
 # Public (P) operations are the same for every persona, a signed-in caller included (the
 # operation ignores the session; 06 H-25). O cells: /me/... and /auth/sessions/current act on
 # the caller's own account and sessions only; another user's session is 404. password.change
@@ -11,8 +11,10 @@
 # university); the matrix domain resolver knows matrix.edu.tr and its subdomains (uni_a).
 # BE-172: identity_phone (none | pending | verified | sms_mfa) gives every matrix account an open phone
 # verification code (135790) to +9055500000NN, that number verified, or verified with the SMS second step
-# on. The test container sends SMS in memory (smsfake). An SMS sign-in is never MFA-verified; the SMS second
-# step is refused to MFA roles (k-sms: 409 identity.sms_mfa_not_allowed).
+# on and an open code of the current number (802467, BE-186). The test container sends SMS in memory
+# (smsfake). An SMS sign-in is never MFA-verified; the SMS second step is refused to MFA roles (k-sms: 409
+# identity.sms_mfa_not_allowed). BE-186: the password reset by SMS is refused to every org role beyond plain
+# membership and to platform roles (409 identity.sms_reset_not_allowed).
 # Student documents are edu_document files in the files store (matrix_identity_test.go).
 version: 1
 config:
@@ -29,6 +31,9 @@ groups:
                 university_rep, company_member, company_admin, other_company_member, moderator, support, dpo,
                 platform_admin, finance_admin, talent_auditor]
   edu_bystanders: [moderator, dpo, finance_admin, talent_auditor]
+  sms_reset_open: [user_unverified, student, student_minor, club_member, event_staff]
+  sms_reset_barred: [club_admin, other_club_admin, university_rep, company_member, company_admin, other_company_member,
+                     moderator, support, dpo, platform_admin, finance_admin, talent_auditor]
 operations:
   registerAccount:
     method: POST
@@ -149,7 +154,7 @@ operations:
     variants:
       - name: sms_channel
         body: bodies/identity/reset_request_sms.json
-        note: BE-172 - channel sms; an account that may reset by SMS gets a code, any other the e-mail link (same 202)
+        note: BE-172, BE-186 - channel sms; an account whose holder turned it on gets a code, any other the e-mail link (same 202)
         expect: { "@all": 202 }
 
   confirmPasswordReset:
@@ -486,6 +491,33 @@ operations:
         body: bodies/identity/phone_start_landline.json
         note: Turkish mobile numbers only - identity.invalid_phone
         expect: { anonymous: 401, "@signed_in": 422 }
+      - name: sms_mfa_without_code
+        config: { identity_phone: sms_mfa }
+        note: BE-186 - the SMS second step on and the password as the proof - identity.phone_code_required
+        expect: { anonymous: 401, "@signed_in": 403 }
+      - name: sms_mfa_with_code
+        config: { identity_phone: sms_mfa }
+        body: bodies/identity/phone_start_code.json
+        note: BE-186 - the open code of the current number
+        expect: { anonymous: 401, "@signed_in": 202 }
+
+  sendPhoneChangeCode:
+    method: POST
+    path: /api/v1/me/phone/change-code
+    action: identity.phone.change
+    config: { identity_phone: sms_mfa }
+    body: bodies/identity/role_reauth.json
+    note: O · R (BE-186) - a code by SMS (in memory) to the current number
+    expect: { anonymous: 401, "@signed_in": 202 }
+    variants:
+      - name: step_off
+        config: { identity_phone: verified }
+        note: identity.phone_code_not_required
+        expect: { anonymous: 401, "@signed_in": 409 }
+      - name: no_phone
+        config: { identity_phone: none }
+        note: identity.phone_not_verified
+        expect: { anonymous: 401, "@signed_in": 409 }
 
   confirmPhoneVerification:
     method: POST
@@ -514,6 +546,15 @@ operations:
         config: { identity_phone: none }
         note: identity.phone_not_verified
         expect: { anonymous: 401, "@signed_in": 409 }
+      - name: sms_mfa_without_code
+        config: { identity_phone: sms_mfa }
+        note: BE-186 - identity.phone_code_required
+        expect: { anonymous: 401, "@signed_in": 403 }
+      - name: sms_mfa_with_code
+        config: { identity_phone: sms_mfa }
+        body: bodies/identity/role_reauth_phone_code.json
+        note: BE-186 - the open code of the current number
+        expect: { anonymous: 401, "@signed_in": 204 }
 
   enableSmsMfa:
     method: POST
@@ -534,8 +575,40 @@ operations:
     path: /api/v1/me/mfa/sms/disable
     action: identity.sms_mfa.disable
     config: { identity_phone: sms_mfa }
+    body: bodies/identity/role_reauth_phone_code.json
+    note: O · R - every role may turn its SMS second step off; BE-186 - the password as the proof takes the code of the current number
+    expect: { anonymous: 401, "@signed_in": 204 }
+    variants:
+      - name: without_code
+        body: bodies/identity/role_reauth.json
+        note: identity.phone_code_required
+        expect: { anonymous: 401, "@signed_in": 403 }
+
+  enableSmsPasswordReset:
+    method: POST
+    path: /api/v1/me/phone/sms-reset
+    action: identity.sms_reset.enable
+    config: { identity_phone: verified }
     body: bodies/identity/role_reauth.json
-    note: O · R - every role may turn its SMS second step off
+    note: O · R (BE-186) - the holder's choice; 409 identity.sms_reset_not_allowed for role holders
+    expect: { anonymous: 401, "@sms_reset_open": 204, "@sms_reset_barred": 409 }
+    variants:
+      - name: no_phone
+        config: { identity_phone: none }
+        note: identity.phone_not_verified (before the roles)
+        expect: { anonymous: 401, "@signed_in": 409 }
+      - name: sms_mfa_on
+        config: { identity_phone: sms_mfa }
+        note: identity.sms_reset_not_allowed
+        expect: { anonymous: 401, "@signed_in": 409 }
+
+  disableSmsPasswordReset:
+    method: POST
+    path: /api/v1/me/phone/sms-reset/disable
+    action: identity.sms_reset.disable
+    config: { identity_phone: verified }
+    body: bodies/identity/role_reauth.json
+    note: O · R (BE-186) - already off answers 204, nothing changes
     expect: { anonymous: 401, "@signed_in": 204 }
 
   sendMfaLoginSms:

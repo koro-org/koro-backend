@@ -23,7 +23,8 @@ import (
 )
 
 // seededPhone is an active account holding number, seeded without spending
-// an SMS limit; smsMFA turns the SMS second step on.
+// an SMS limit; smsMFA turns the SMS second step on, otherwise the password
+// reset by SMS has been on for its wait.
 func (e *env) seededPhone(t *testing.T, email, number string, smsMFA bool) identity.User {
 	t.Helper()
 	u := e.activeUser(t, email)
@@ -31,6 +32,9 @@ func (e *env) seededPhone(t *testing.T, email, number string, smsMFA bool) ident
 	p := identity.Phone{UserID: u.ID, Number: number, VerifiedAt: now}
 	if smsMFA {
 		p.SMSMFAEnabledAt = &now
+	} else {
+		on := now.Add(-identity.SMSResetWait)
+		p.SMSResetEnabledAt = &on
 	}
 	if err := e.store.PutPhone(t.Context(), p); err != nil {
 		t.Fatal(err)
@@ -94,7 +98,7 @@ func TestSMSLimits_Order(t *testing.T) {
 	e, _ := smsEnv(t)
 	a := e.loggedIn(t, "order@example.com")
 	from := len(e.lim.Calls())
-	if _, err := e.svc.StartPhoneVerification(t.Context(), a, testPhone, pwProof); err != nil {
+	if _, err := e.svc.StartPhoneVerification(t.Context(), a, testPhone, pwProof, ""); err != nil {
 		t.Fatal(err)
 	}
 	var names []string
@@ -118,12 +122,12 @@ func TestSMSLimits_RefusalSpendsNothingFurther(t *testing.T) {
 	ctx := t.Context()
 	a := e.loggedIn(t, "account@example.com")
 	for i := range 5 {
-		if _, err := e.svc.StartPhoneVerification(ctx, a, fmt.Sprintf("+90555000010%d", i), pwProof); err != nil {
+		if _, err := e.svc.StartPhoneVerification(ctx, a, fmt.Sprintf("+90555000010%d", i), pwProof, ""); err != nil {
 			t.Fatalf("send %d: %v", i+1, err)
 		}
 	}
 	from := len(e.lim.Calls())
-	_, err := e.svc.StartPhoneVerification(ctx, a, testPhone, pwProof)
+	_, err := e.svc.StartPhoneVerification(ctx, a, testPhone, pwProof, "")
 	problemtest.WantErr(t, err, problem.ErrRateLimited)
 	if calls := smsCalls(e.lim, from); len(calls) != 2 || !strings.HasPrefix(calls[1], "sms_user|") {
 		t.Fatalf("calls of the refused send = %v", calls)
@@ -131,7 +135,7 @@ func TestSMSLimits_RefusalSpendsNothingFurther(t *testing.T) {
 	// The number kept its whole daily limit for another account.
 	b := e.loggedIn(t, "other@example.com")
 	for i := range 3 {
-		if _, err := e.svc.StartPhoneVerification(ctx, b, testPhone, pwProof); err != nil {
+		if _, err := e.svc.StartPhoneVerification(ctx, b, testPhone, pwProof, ""); err != nil {
 			t.Fatalf("send %d to the untouched number: %v", i+1, err)
 		}
 	}
@@ -139,7 +143,7 @@ func TestSMSLimits_RefusalSpendsNothingFurther(t *testing.T) {
 	spend(t, e.lim, "sms_ip", 30, time.Hour, "ip:unknown")
 	c := e.loggedIn(t, "third@example.com")
 	from = len(e.lim.Calls())
-	_, err = e.svc.StartPhoneVerification(ctx, c, testPhone2, pwProof)
+	_, err = e.svc.StartPhoneVerification(ctx, c, testPhone2, pwProof, "")
 	problemtest.WantErr(t, err, problem.ErrRateLimited)
 	if calls := smsCalls(e.lim, from); len(calls) != 1 || !strings.HasPrefix(calls[0], "sms_ip|") {
 		t.Fatalf("calls of the send refused by the IP limit = %v", calls)
@@ -156,7 +160,7 @@ func TestSMSLimits_PurposesKeepTheirOwnBuckets(t *testing.T) {
 	e.seededPhone(t, "holder@example.com", testPhone, true)
 	a := e.loggedIn(t, "verifier@example.com")
 	from := len(e.lim.Calls())
-	if _, err := e.svc.StartPhoneVerification(ctx, a, testPhone, pwProof); err != nil {
+	if _, err := e.svc.StartPhoneVerification(ctx, a, testPhone, pwProof, ""); err != nil {
 		t.Fatal(err)
 	}
 	var key string
@@ -169,7 +173,7 @@ func TestSMSLimits_PurposesKeepTheirOwnBuckets(t *testing.T) {
 		t.Fatalf("number bucket key = %q", key)
 	}
 	spend(t, e.lim, "sms_number", 5, time.Hour, key)
-	_, err := e.svc.StartPhoneVerification(ctx, a, testPhone, pwProof)
+	_, err := e.svc.StartPhoneVerification(ctx, a, testPhone, pwProof, "")
 	problemtest.WantErr(t, err, problem.ErrRateLimited)
 	spend(t, e.lim, "sms_ip", 30, time.Hour, "ip:unknown")
 
@@ -192,22 +196,22 @@ func TestSMSLimits_NewNumberDailyLimit(t *testing.T) {
 	ctx := t.Context()
 	a, b := e.loggedIn(t, "a@example.com"), e.loggedIn(t, "b@example.com")
 	for _, actor := range []authz.Actor{a, b, a} {
-		if _, err := e.svc.StartPhoneVerification(ctx, actor, testPhone, pwProof); err != nil {
+		if _, err := e.svc.StartPhoneVerification(ctx, actor, testPhone, pwProof, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
-	_, err := e.svc.StartPhoneVerification(ctx, b, testPhone, pwProof)
+	_, err := e.svc.StartPhoneVerification(ctx, b, testPhone, pwProof, "")
 	problemtest.WantErr(t, err, problem.ErrRateLimited)
 	wantRetryAfter(t, err, 24*time.Hour)
 	e.clk.Advance(24 * time.Hour)
-	if _, err := e.svc.StartPhoneVerification(ctx, b, testPhone, pwProof); err != nil {
+	if _, err := e.svc.StartPhoneVerification(ctx, b, testPhone, pwProof, ""); err != nil {
 		t.Fatalf("a day later = %v", err)
 	}
 
 	e.seededPhone(t, "own@example.com", testPhone2, false)
 	_, c := e.login(t, "own@example.com", identity.ClientWeb)
 	for i := range 5 {
-		if _, err := e.svc.StartPhoneVerification(ctx, c, testPhone2, pwProof); err != nil {
+		if _, err := e.svc.StartPhoneVerification(ctx, c, testPhone2, pwProof, ""); err != nil {
 			t.Fatalf("send %d to the account's own number: %v", i+1, err)
 		}
 	}
@@ -227,7 +231,7 @@ func (e *env) spendGeneralBudget(t *testing.T, n int) {
 	t.Helper()
 	for i := range n {
 		a := e.loggedIn(t, fmt.Sprintf("spender%d@example.com", i))
-		if _, err := e.svc.StartPhoneVerification(t.Context(), a, fmt.Sprintf("+90555000020%d", i), pwProof); err != nil {
+		if _, err := e.svc.StartPhoneVerification(t.Context(), a, fmt.Sprintf("+90555000020%d", i), pwProof, ""); err != nil {
 			t.Fatalf("send %d: %v", i+1, err)
 		}
 	}
@@ -242,7 +246,7 @@ func TestSMSBudget_SpentAnswers503(t *testing.T) {
 	ctx := t.Context()
 	e.spendGeneralBudget(t, 4)
 	a := e.loggedIn(t, "late@example.com")
-	_, err := e.svc.StartPhoneVerification(ctx, a, testPhone, pwProof)
+	_, err := e.svc.StartPhoneVerification(ctx, a, testPhone, pwProof, "")
 	problemtest.WantErr(t, err, identity.ErrSMSUnavailable)
 	wantStatus(t, err, http.StatusServiceUnavailable)
 	wantRetryAfter(t, err, time.Hour)
@@ -257,7 +261,7 @@ func TestSMSBudget_SpentAnswers503(t *testing.T) {
 		t.Fatalf("sent = %d", n)
 	}
 	e.clk.Advance(time.Hour)
-	if _, err := e.svc.StartPhoneVerification(ctx, a, testPhone, pwProof); err != nil {
+	if _, err := e.svc.StartPhoneVerification(ctx, a, testPhone, pwProof, ""); err != nil {
 		t.Fatalf("after the refill = %v", err)
 	}
 }
@@ -268,7 +272,7 @@ func TestSMSBudget_DailyCeiling(t *testing.T) {
 	e, _ := smsEnv(t, func(d *identity.Deps) { d.SMSBudget = identity.SMSBudget{PerHour: 100, PerDay: 5} })
 	e.spendGeneralBudget(t, 4)
 	a := e.loggedIn(t, "late@example.com")
-	_, err := e.svc.StartPhoneVerification(t.Context(), a, testPhone, pwProof)
+	_, err := e.svc.StartPhoneVerification(t.Context(), a, testPhone, pwProof, "")
 	problemtest.WantErr(t, err, identity.ErrSMSUnavailable)
 	wantRetryAfter(t, err, 24*time.Hour)
 }
@@ -331,7 +335,7 @@ func TestSMSBudget_SharedByProcesses(t *testing.T) {
 	second, _ := budgetEnv(t, func(d *identity.Deps) { d.Limiter = first.lim })
 	first.spendGeneralBudget(t, 4)
 	a := second.loggedIn(t, "second@example.com")
-	_, err := second.svc.StartPhoneVerification(t.Context(), a, testPhone, pwProof)
+	_, err := second.svc.StartPhoneVerification(t.Context(), a, testPhone, pwProof, "")
 	problemtest.WantErr(t, err, identity.ErrSMSUnavailable)
 }
 
@@ -353,7 +357,7 @@ func TestSMSBudget_LimiterDownFailsClosed(t *testing.T) {
 	ctx := t.Context()
 	e.seededPhone(t, "reset@example.com", testPhone, false)
 	a := e.loggedIn(t, "down@example.com")
-	_, err := e.svc.StartPhoneVerification(ctx, a, testPhone2, pwProof)
+	_, err := e.svc.StartPhoneVerification(ctx, a, testPhone2, pwProof, "")
 	problemtest.WantErr(t, err, problem.ErrUnavailable)
 	if err := e.svc.RequestPasswordResetSMS(ctx, authz.Anonymous(), "reset@example.com"); err != nil {
 		t.Fatal(err)
@@ -373,7 +377,7 @@ func TestSMSBudget_ZeroTakesTheDefault(t *testing.T) {
 	e, _ := smsEnv(t)
 	spend(t, e.lim, "sms_budget_general_hour", identity.DefaultSMSBudget.PerHour-identity.DefaultSMSBudget.PerHour/5, time.Hour, "all")
 	a := e.loggedIn(t, "zero@example.com")
-	_, err := e.svc.StartPhoneVerification(t.Context(), a, testPhone, pwProof)
+	_, err := e.svc.StartPhoneVerification(t.Context(), a, testPhone, pwProof, "")
 	problemtest.WantErr(t, err, identity.ErrSMSUnavailable)
 }
 
@@ -383,7 +387,7 @@ func TestSMSCounters_WorkerOutcomes(t *testing.T) {
 	t.Parallel()
 	e, f := smsEnv(t)
 	a := e.loggedIn(t, "counts@example.com")
-	if _, err := e.svc.StartPhoneVerification(t.Context(), a, testPhone, pwProof); err != nil {
+	if _, err := e.svc.StartPhoneVerification(t.Context(), a, testPhone, pwProof, ""); err != nil {
 		t.Fatal(err)
 	}
 	var payload []byte

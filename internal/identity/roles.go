@@ -149,6 +149,9 @@ func (s *service) GrantPlatformRole(ctx context.Context, a authz.Actor, in RoleG
 			if n, err = s.sessions().RevokeUserSessions(ctx, u.ID, nil, now, RevokeRoleChange); err != nil {
 				return err
 			}
+			if err := s.closeSMSResetOf(ctx, u.ID, a, smsResetClosedRole); err != nil {
+				return err
+			}
 		}
 		out = ra
 		s.alertAdmins(ctx, ra.ID, alert)
@@ -208,6 +211,9 @@ func (s *service) ApprovePlatformRole(ctx context.Context, a authz.Actor, id uui
 		}
 		n, err := s.sessions().RevokeUserSessions(ctx, ra.UserID, nil, now, RevokeRoleChange)
 		if err != nil {
+			return err
+		}
+		if err := s.closeSMSResetOf(ctx, ra.UserID, a, smsResetClosedRole); err != nil {
 			return err
 		}
 		out = ra

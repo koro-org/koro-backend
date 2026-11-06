@@ -51,6 +51,7 @@ var termsAlwaysOpen = []string{
 	"identity.mfa.enroll", "identity.mfa.confirm", "identity.mfa.disable", "identity.mfa.verify", "identity.mfa_recovery.regenerate",
 	"identity.password.change", "identity.email_change.request",
 	"identity.phone.change", "identity.phone.verify", "identity.sms_mfa.enable", "identity.sms_mfa.disable", // BE-178
+	"identity.sms_reset.enable", "identity.sms_reset.disable", // BE-186
 	"kvkk.dsr.create", "kvkk.dsr.cancel_own",
 	"consent.record.create", "students.privacy.update_own", "students.access_grant.revoke",
 	"notify.preference.update_own", "messaging.block.manage", // BE-152, Q-20: refusing messages, blocking a company

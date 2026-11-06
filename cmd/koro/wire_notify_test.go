@@ -18,6 +18,7 @@ import (
 
 	"koro/internal/audit"
 	"koro/internal/authz"
+	"koro/internal/identity"
 	"koro/internal/notify"
 	"koro/internal/notify/pushtest"
 	"koro/internal/platform/config"
@@ -300,6 +301,75 @@ func TestWire_Notify_WebhookAcceptsAnyContentType(t *testing.T) {
 	app.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), `"code":"unauthenticated"`) {
 		t.Fatalf("forged delivery: status %d (%s), want 401 unauthenticated", rec.Code, rec.Body)
+	}
+}
+
+// TestWire_Push_FollowsTheIdentitySession (BE-182): a token registered through
+// the real services reaches its device while identity holds the session open
+// and is revoked on the first push after identity closes it. Registering from
+// a new session brings it back.
+func TestWire_Push_FollowsTheIdentitySession(t *testing.T) {
+	t.Parallel()
+	e := newActorEnv(t)
+	u := e.user(t, nil)
+	actor := func() authz.Actor {
+		t.Helper()
+		raw := e.session(t, u, identity.ClientWeb)
+		a, err := e.resolve(t.Context(), httpx.TransportCookie, raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+	fcm := pushtest.NewFCM(t)
+	clk := e.c.infra.clock
+	f, err := notify.NewFCM(notify.FCMConfig{ProjectID: fcm.ProjectID, CredentialsJSON: fcm.Credentials, BaseURL: fcm.Server.URL,
+		Clock: clk, HTTPClient: fcm.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := e.c.notify.store
+	pt, err := notify.NewPushTransport(notify.PushTransportConfig{Tokens: store, Sessions: lateSessions{w: &e.c.notify}, FCM: f,
+		Clock: clk, Log: obs.Discard()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const device = "wire-session-device"
+	in := notify.PushTokenInput{Platform: notify.PushAndroid, Token: device}
+	if _, err := e.c.notify.svc.RegisterPushToken(t.Context(), actor(), in); err != nil {
+		t.Fatal(err)
+	}
+	msg := notify.PushMessage{DeliveryID: uuid.NewV7(), UserID: u.ID, Kind: "events.reminder", Title: "Yeni bir bildirimin var"}
+	if _, err := pt.SendPush(t.Context(), msg); err != nil || len(fcm.Messages()) != 1 {
+		t.Fatalf("push on an open session = %v, %d messages", err, len(fcm.Messages()))
+	}
+	if n, err := e.c.identity.svc.RevokeAll(t.Context(), u.ID, identity.RevokeAdmin); err != nil || n != 1 {
+		t.Fatalf("RevokeAll() = %d, %v", n, err)
+	}
+	if _, err := pt.SendPush(t.Context(), msg); err != nil || len(fcm.Messages()) != 1 {
+		t.Fatalf("push after the session closed = %v, %d messages", err, len(fcm.Messages()))
+	}
+	if active, _ := store.ActivePushTokens(t.Context(), u.ID); len(active) != 0 {
+		t.Fatalf("active tokens = %+v, want the token revoked", active)
+	}
+	if _, err := e.c.notify.svc.RegisterPushToken(t.Context(), actor(), in); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pt.SendPush(t.Context(), msg); err != nil || len(fcm.Messages()) != 2 {
+		t.Fatalf("push on the new session = %v, %d messages", err, len(fcm.Messages()))
+	}
+}
+
+// TestWire_Push_SessionReaderNotWired_NothingIsSent: without the identity hook
+// the lookup fails, so the delivery is retried instead of sent.
+func TestWire_Push_SessionReaderNotWired_NothingIsSent(t *testing.T) {
+	t.Parallel()
+	if _, err := (lateSessions{w: &notifyWiring{}}).UnrevokedSessionIDs(t.Context(), uuid.NewV7()); err == nil {
+		t.Fatal("an unwired session reader answered")
+	}
+	c, _ := buildNotify(t, nil)
+	if c.notify.unrevokedSessions == nil {
+		t.Fatal("identity did not bind the session reader")
 	}
 }
 

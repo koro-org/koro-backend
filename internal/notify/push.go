@@ -31,9 +31,10 @@ func pushResource(owner, id uuid.UUID) authz.Resource {
 }
 
 // RegisterPushToken implements Service. The token is bound to the actor's
-// session (02 §6.3: revoked with it); a device that registers the same
-// token again — after signing in to another account too — moves the one row
-// (token_sha256 is unique). The token itself is never logged or audited.
+// session (02 §6.3: PushTransport revokes it once the session is closed,
+// BE-182); a device that registers the same token again — after signing in
+// to another account too — moves the one row (token_sha256 is unique). The
+// token itself is never logged or audited.
 func (s *service) RegisterPushToken(ctx context.Context, a authz.Actor, in PushTokenInput) (uuid.UUID, error) {
 	if err := authz.Can(ctx, a, authz.NotifyPushTokenManage, pushResource(a.UserID, uuid.Nil())); err != nil {
 		return uuid.Nil(), err

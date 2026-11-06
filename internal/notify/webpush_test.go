@@ -20,22 +20,23 @@ import (
 // webPushEnv is a PushTransport over the web push double (and optionally
 // the FCM double) with a memory store.
 type webPushEnv struct {
-	wp    *pushtest.WebPush
-	store notify.Store
-	pt    *notify.PushTransport
-	key   string // VAPID public key of the adapter
+	wp       *pushtest.WebPush
+	store    notify.Store
+	sessions *pushtest.Sessions // testSession is open
+	pt       *notify.PushTransport
+	key      string // VAPID public key of the adapter
 }
 
 func newWebPushEnv(t *testing.T, fcm *pushtest.FCM) webPushEnv {
 	t.Helper()
-	e := webPushEnv{wp: pushtest.NewWebPush(t), store: notify.NewMemStore()}
+	e := webPushEnv{wp: pushtest.NewWebPush(t), store: notify.NewMemStore(), sessions: pushtest.NewSessions(testSession)}
 	clk := clock.NewFake(t0)
 	w, err := notify.NewWebPush(notify.WebPushConfig{PrivateKey: pushtest.NewVAPIDKey(t), Subject: "mailto:push@koro.test",
 		Clock: clk, HTTPClient: e.wp.Client()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := notify.PushTransportConfig{Tokens: e.store, Subscriptions: e.store, WebPush: w, Clock: clk, Log: slog.New(slog.DiscardHandler)}
+	cfg := notify.PushTransportConfig{Tokens: e.store, Subscriptions: e.store, Sessions: e.sessions, WebPush: w, Clock: clk, Log: slog.New(slog.DiscardHandler)}
 	if fcm != nil {
 		if cfg.FCM, err = notify.NewFCM(notify.FCMConfig{ProjectID: fcm.ProjectID, CredentialsJSON: fcm.Credentials,
 			BaseURL: fcm.Server.URL, Clock: clk, HTTPClient: fcm.Client()}); err != nil {
@@ -60,7 +61,7 @@ func (e webPushEnv) subscribe(t *testing.T, user uuid.UUID) pushtest.WebPushSubs
 func storeSubscription(t *testing.T, store notify.Store, user uuid.UUID, endpoint string, p256dh, auth []byte) notify.WebPushSubscription {
 	t.Helper()
 	sum := sha256.Sum256([]byte(endpoint))
-	got, err := store.UpsertWebPushSubscription(t.Context(), notify.WebPushSubscription{ID: uuid.NewV7(), UserID: user,
+	got, err := store.UpsertWebPushSubscription(t.Context(), notify.WebPushSubscription{ID: uuid.NewV7(), UserID: user, SessionID: &testSession,
 		Endpoint: endpoint, EndpointSHA256: sum[:], P256DH: p256dh, Auth: auth, CreatedAt: t0, LastSeenAt: t0}, notify.MaxWebPushSubscriptions)
 	if err != nil {
 		t.Fatal(err)

@@ -155,6 +155,13 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 		if ok, _ := s.RevokeSession(ctx, u.ID, a.ID, contractBase.Add(time.Minute), identity.RevokeLogout); ok {
 			t.Fatal("revoked twice")
 		}
+		unrevoked, err := s.UnrevokedSessionIDs(ctx, u.ID)
+		if err != nil || len(unrevoked) != 2 || !slices.Contains(unrevoked, b.ID) || !slices.Contains(unrevoked, c.ID) {
+			t.Fatalf("UnrevokedSessionIDs = %v, %v", unrevoked, err)
+		}
+		if theirs, err := s.UnrevokedSessionIDs(ctx, uuid.NewV7()); err != nil || len(theirs) != 0 {
+			t.Fatalf("UnrevokedSessionIDs of another user = %v, %v", theirs, err)
+		}
 		live, _ := s.ActiveSessions(ctx, u.ID, contractBase.Add(3*time.Minute), nil, 10)
 		if len(live) != 2 || live[0].ID != c.ID || live[1].ID != b.ID {
 			t.Fatalf("ActiveSessions = %v", ids(live))

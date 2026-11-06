@@ -14,13 +14,20 @@ import (
 	"koro/internal/platform/clock"
 )
 
+// testSession is the open session the test surfaces register under;
+// testSessions is its double (read only: a test that ends sessions has its own).
+var (
+	testSession  = uuid.NewV7()
+	testSessions = pushtest.NewSessions(testSession)
+)
+
 // devices registers tokens for one user in a memory store.
 func devices(t *testing.T, store notify.Store, user uuid.UUID, platform notify.PushPlatform, tokens ...string) map[string]uuid.UUID {
 	t.Helper()
 	ids := map[string]uuid.UUID{}
 	for _, raw := range tokens {
 		sum := sha256.Sum256([]byte(raw))
-		got, err := store.UpsertPushToken(t.Context(), notify.PushToken{ID: uuid.NewV7(), UserID: user, Platform: platform,
+		got, err := store.UpsertPushToken(t.Context(), notify.PushToken{ID: uuid.NewV7(), UserID: user, SessionID: &testSession, Platform: platform,
 			Token: raw, TokenSHA256: sum[:], CreatedAt: t0, LastSeenAt: t0})
 		if err != nil {
 			t.Fatal(err)
@@ -56,7 +63,7 @@ func TestFCM_InvalidToken_Revoked(t *testing.T) {
 		t.Fatal(err)
 	}
 	var logs syncBuffer
-	pt, err := notify.NewPushTransport(notify.PushTransportConfig{Tokens: store, FCM: f, Clock: clk,
+	pt, err := notify.NewPushTransport(notify.PushTransportConfig{Tokens: store, Sessions: testSessions, FCM: f, Clock: clk,
 		Log: slog.New(slog.NewJSONHandler(&logs, nil))})
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +146,7 @@ func TestAPNs_JWTRotation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pt, _ := notify.NewPushTransport(notify.PushTransportConfig{Tokens: store, APNs: a, Clock: clk, Log: slog.New(slog.DiscardHandler)})
+	pt, _ := notify.NewPushTransport(notify.PushTransportConfig{Tokens: store, Sessions: testSessions, APNs: a, Clock: clk, Log: slog.New(slog.DiscardHandler)})
 	ctx := t.Context()
 	send := func() {
 		t.Helper()
@@ -229,7 +236,14 @@ func TestPush_ConfigErrors(t *testing.T) {
 			t.Errorf("NewAPNs accepted %+v", c.KeyID+"|"+c.Topic)
 		}
 	}
-	if _, err := notify.NewPushTransport(notify.PushTransportConfig{Tokens: notify.NewMemStore(), Clock: clk, Log: slog.New(slog.DiscardHandler)}); err == nil {
+	if _, err := notify.NewPushTransport(notify.PushTransportConfig{Tokens: notify.NewMemStore(), Sessions: testSessions, Clock: clk, Log: slog.New(slog.DiscardHandler)}); err == nil {
 		t.Fatal("NewPushTransport without providers succeeded")
+	}
+	f, err := notify.NewFCM(notify.FCMConfig{ProjectID: fcm.ProjectID, CredentialsJSON: fcm.Credentials, Clock: clk})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := notify.NewPushTransport(notify.PushTransportConfig{Tokens: notify.NewMemStore(), FCM: f, Clock: clk, Log: slog.New(slog.DiscardHandler)}); err == nil {
+		t.Fatal("NewPushTransport without Sessions succeeded")
 	}
 }

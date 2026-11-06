@@ -33,6 +33,9 @@ type sessionStore interface {
 	// both windows at now) of userID, newest first (id DESC), after the
 	// session ID after (nil: from the start).
 	ActiveSessions(ctx context.Context, userID uuid.UUID, now time.Time, after *uuid.UUID, limit int) ([]Session, error)
+	// UnrevokedSessionIDs returns the IDs of userID's sessions without a
+	// revocation, expired ones included until DeleteEndedSessions removes them.
+	UnrevokedSessionIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
 	// DeleteEndedSessions deletes up to limit sessions that ended (revoked,
 	// or a window closed) before cutoff, and returns how many.
 	DeleteEndedSessions(ctx context.Context, cutoff time.Time, limit int) (int, error)

@@ -293,6 +293,19 @@ func (m *MemStore) RevokeSession(_ context.Context, userID, id uuid.UUID, at tim
 	return true, nil
 }
 
+// UnrevokedSessionIDs implements Store.
+func (m *MemStore) UnrevokedSessionIDs(_ context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []uuid.UUID
+	for _, s := range m.sessions {
+		if s.UserID == userID && s.RevokedAt == nil {
+			out = append(out, s.ID)
+		}
+	}
+	return out, nil
+}
+
 // RevokeUserSessions implements Store.
 func (m *MemStore) RevokeUserSessions(_ context.Context, userID uuid.UUID, keep *uuid.UUID, at time.Time, reason RevokeReason) (int, error) {
 	m.mu.Lock()

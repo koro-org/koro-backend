@@ -51,6 +51,9 @@ import (
 //	                identity sets it in wire_identity.go build (BE-016), only
 //	                when nil. nil → the admin entitlement grant alerts of
 //	                06 H-40 are skipped with a WARN line.
+//	unrevokedSessions  the sessions of a user nobody closed (BE-182). identity
+//	                sets it in wire_identity.go build, only when nil. nil → a
+//	                push fails and is retried; nothing is sent.
 type notifyWiring struct {
 	store     notify.Store
 	tx        db.TxManager
@@ -68,7 +71,8 @@ type notifyWiring struct {
 	// built transport's web push adapter, if any.
 	webPushKey string
 
-	platformAdmins func(ctx context.Context) ([]uuid.UUID, error)
+	platformAdmins    func(ctx context.Context) ([]uuid.UUID, error)
+	unrevokedSessions func(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
 
 	deps notify.Deps // what build passed to notify.New
 	mod  notify.Module
@@ -103,6 +107,16 @@ func (l lateAdmins) PlatformAdmins(ctx context.Context) ([]uuid.UUID, error) {
 		return nil, errors.New("notify: platform admin resolver is not wired")
 	}
 	return l.w.platformAdmins(ctx)
+}
+
+// lateSessions reads notifyWiring.unrevokedSessions at call time.
+type lateSessions struct{ w *notifyWiring }
+
+func (l lateSessions) UnrevokedSessionIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	if l.w.unrevokedSessions == nil {
+		return nil, errors.New("notify: session reader is not wired")
+	}
+	return l.w.unrevokedSessions(ctx, userID)
 }
 
 // redisCursor keeps job positions in Redis (the queue's instance: AOF,
@@ -345,7 +359,7 @@ func newPushSender(cfg config.Notify, store pushStore, c *container) (notify.Pus
 		}
 		return notify.NoopPush{}, nil
 	}
-	tc := notify.PushTransportConfig{Tokens: store, Subscriptions: store, Clock: c.infra.clock,
+	tc := notify.PushTransportConfig{Tokens: store, Subscriptions: store, Sessions: lateSessions{w: &c.notify}, Clock: c.infra.clock,
 		Log: c.infra.log.With("module", "notify", "component", "push")}
 	options := pushProviders(cfg, c)
 	for _, name := range names {

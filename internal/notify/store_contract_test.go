@@ -18,6 +18,9 @@ import (
 type storeWorld struct {
 	s    notify.Store
 	user func(t *testing.T) uuid.UUID
+	// session opens a session of the user (the GORM store's rows reference
+	// sessions; identity owns the table).
+	session func(t *testing.T, user uuid.UUID) uuid.UUID
 	// age backdates a delivery's created_at to at (a row of a known age).
 	// The GORM store stamps a new row with the database clock (one clock,
 	// BE-069); nil for the in-memory store, whose clock is Claim's now.
@@ -507,6 +510,60 @@ func runStoreContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 		}
 	})
 
+	t.Run("push surfaces keep the session that registered them", func(t *testing.T) {
+		t.Parallel()
+		w := newWorld(t)
+		uid, other := w.user(t), w.user(t)
+		first, second := w.session(t, uid), w.session(t, other)
+		tokenSum := sha256.Sum256([]byte("bound-device"))
+		tok := func(user uuid.UUID, session *uuid.UUID) notify.PushToken {
+			return notify.PushToken{ID: newID(), UserID: user, SessionID: session, Platform: notify.PushAndroid, Token: "bound-device",
+				TokenSHA256: tokenSum[:], CreatedAt: t0, LastSeenAt: t0}
+		}
+		endpoint := "https://fcm.googleapis.com/fcm/send/bound-browser"
+		endpointSum := sha256.Sum256([]byte(endpoint))
+		sub := func(user uuid.UUID, session *uuid.UUID) notify.WebPushSubscription {
+			return notify.WebPushSubscription{ID: newID(), UserID: user, SessionID: session, Endpoint: endpoint, EndpointSHA256: endpointSum[:],
+				P256DH: make([]byte, notify.WebPushP256DHLen), Auth: make([]byte, notify.WebPushAuthLen), CreatedAt: t0, LastSeenAt: t0}
+		}
+		if _, err := w.s.UpsertPushToken(t.Context(), tok(uid, &first)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.s.UpsertWebPushSubscription(t.Context(), sub(uid, &first), 3); err != nil {
+			t.Fatal(err)
+		}
+		tokens, _ := w.s.ActivePushTokens(t.Context(), uid)
+		if len(tokens) != 1 || tokens[0].SessionID == nil || *tokens[0].SessionID != first {
+			t.Fatalf("ActivePushTokens() = %+v, want bound to the session", tokens)
+		}
+		subs, _ := w.s.WebPushSubscriptionsOf(t.Context(), uid)
+		if len(subs) != 1 || subs[0].SessionID == nil || *subs[0].SessionID != first {
+			t.Fatalf("WebPushSubscriptionsOf() = %+v, want bound to the session", subs)
+		}
+		// Registering again moves the row to the new session.
+		if _, err := w.s.UpsertPushToken(t.Context(), tok(other, &second)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.s.UpsertWebPushSubscription(t.Context(), sub(other, &second), 3); err != nil {
+			t.Fatal(err)
+		}
+		tokens, _ = w.s.ActivePushTokens(t.Context(), other)
+		if len(tokens) != 1 || tokens[0].SessionID == nil || *tokens[0].SessionID != second {
+			t.Fatalf("moved token = %+v", tokens)
+		}
+		subs, _ = w.s.WebPushSubscriptionsOf(t.Context(), other)
+		if len(subs) != 1 || subs[0].SessionID == nil || *subs[0].SessionID != second {
+			t.Fatalf("moved subscription = %+v", subs)
+		}
+		// A row without a session stays without one.
+		if _, err := w.s.UpsertPushToken(t.Context(), tok(other, nil)); err != nil {
+			t.Fatal(err)
+		}
+		if tokens, _ = w.s.ActivePushTokens(t.Context(), other); len(tokens) != 1 || tokens[0].SessionID != nil {
+			t.Fatalf("token without a session = %+v", tokens)
+		}
+	})
+
 	t.Run("web push subscriptions", func(t *testing.T) {
 		t.Parallel()
 		w := newWorld(t)
@@ -664,7 +721,8 @@ func index(email string) []byte { return testIndexer{}.Index(email) }
 func TestMemStore(t *testing.T) {
 	t.Parallel()
 	world := func(*testing.T) storeWorld {
-		return storeWorld{s: notify.NewMemStore(), user: func(*testing.T) uuid.UUID { return newID() }}
+		return storeWorld{s: notify.NewMemStore(), user: func(*testing.T) uuid.UUID { return newID() },
+			session: func(*testing.T, uuid.UUID) uuid.UUID { return newID() }}
 	}
 	runStoreContract(t, world)
 	runRetentionContract(t, world)

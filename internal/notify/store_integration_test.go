@@ -3,6 +3,7 @@
 package notify_test
 
 import (
+	"crypto/sha256"
 	"errors"
 	"os"
 	"strconv"
@@ -38,6 +39,52 @@ func insertUser(t *testing.T, d *db.DB) uuid.UUID {
 	return id
 }
 
+// insertSession writes a sessions row of user (the push tables reference
+// sessions; identity owns the table).
+func insertSession(t *testing.T, d *db.DB, user uuid.UUID) uuid.UUID {
+	t.Helper()
+	id := uuid.NewV7()
+	hash := sha256.Sum256(id[:])
+	_, err := d.Pool.Exec(t.Context(), `INSERT INTO sessions (id, user_id, token_hash, client_kind, idle_expires_at, absolute_expires_at)
+		VALUES ($1, $2, $3, 'web', now() + interval '1 hour', now() + interval '2 hours')`, id, user, hash[:])
+	if err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+	return id
+}
+
+// TestStore_PushSurfaces_SessionRowGone: deleting the sessions row (retention,
+// after the session ended) leaves the surfaces without a session.
+func TestStore_PushSurfaces_SessionRowGone(t *testing.T) {
+	t.Parallel()
+	d := testutil.NewDB(t)
+	s := notify.NewGormStore(d.ORM)
+	uid := insertUser(t, d)
+	sid := insertSession(t, d, uid)
+	now := time.Now().UTC()
+	tokenSum := sha256.Sum256([]byte("session-row-device"))
+	if _, err := s.UpsertPushToken(t.Context(), notify.PushToken{ID: uuid.NewV7(), UserID: uid, SessionID: &sid, Platform: notify.PushAndroid,
+		Token: "session-row-device", TokenSHA256: tokenSum[:], CreatedAt: now, LastSeenAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	endpoint := "https://fcm.googleapis.com/fcm/send/session-row-browser"
+	endpointSum := sha256.Sum256([]byte(endpoint))
+	if _, err := s.UpsertWebPushSubscription(t.Context(), notify.WebPushSubscription{ID: uuid.NewV7(), UserID: uid, SessionID: &sid,
+		Endpoint: endpoint, EndpointSHA256: endpointSum[:], P256DH: make([]byte, notify.WebPushP256DHLen),
+		Auth: make([]byte, notify.WebPushAuthLen), CreatedAt: now, LastSeenAt: now}, notify.MaxWebPushSubscriptions); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Pool.Exec(t.Context(), `DELETE FROM sessions WHERE id = $1`, sid); err != nil {
+		t.Fatal(err)
+	}
+	if tokens, err := s.ActivePushTokens(t.Context(), uid); err != nil || len(tokens) != 1 || tokens[0].SessionID != nil {
+		t.Fatalf("ActivePushTokens() = %+v, %v", tokens, err)
+	}
+	if subs, err := s.WebPushSubscriptionsOf(t.Context(), uid); err != nil || len(subs) != 1 || subs[0].SessionID != nil {
+		t.Fatalf("WebPushSubscriptionsOf() = %+v, %v", subs, err)
+	}
+}
+
 // TestStore_Contract_Gorm runs the very body the in-memory store passes
 // against PostgreSQL (T-98).
 func TestStore_Contract_Gorm(t *testing.T) {
@@ -45,6 +92,7 @@ func TestStore_Contract_Gorm(t *testing.T) {
 	world := func(t *testing.T) storeWorld {
 		d := testutil.NewDB(t)
 		return storeWorld{s: notify.NewGormStore(d.ORM), user: func(t *testing.T) uuid.UUID { return insertUser(t, d) },
+			session: func(t *testing.T, user uuid.UUID) uuid.UUID { return insertSession(t, d, user) },
 			age: func(t *testing.T, id uuid.UUID, at time.Time) {
 				t.Helper()
 				// Test only: the touch trigger stamps updated_at now, after created_at.

@@ -136,7 +136,7 @@ func registerer(store notify.Store, platform notify.PushPlatform, token func(i i
 		raw := token(n)
 		mu.Unlock()
 		sum := sha256.Sum256([]byte(raw))
-		if _, err := store.UpsertPushToken(t.Context(), notify.PushToken{ID: uuid.NewV7(), UserID: user, Platform: platform,
+		if _, err := store.UpsertPushToken(t.Context(), notify.PushToken{ID: uuid.NewV7(), UserID: user, SessionID: &testSession, Platform: platform,
 			Token: raw, TokenSHA256: sum[:], CreatedAt: t0, LastSeenAt: t0}); err != nil {
 			t.Fatal(err)
 		}
@@ -153,7 +153,7 @@ func TestPushTransport_FCM_ContractSuite(t *testing.T) { //nolint:tparallel // t
 	if err != nil {
 		t.Fatal(err)
 	}
-	pt, err := notify.NewPushTransport(notify.PushTransportConfig{Tokens: store, FCM: f, Clock: clock.NewFake(t0),
+	pt, err := notify.NewPushTransport(notify.PushTransportConfig{Tokens: store, Sessions: testSessions, FCM: f, Clock: clock.NewFake(t0),
 		Log: slog.New(slog.DiscardHandler)})
 	if err != nil {
 		t.Fatal(err)
@@ -175,7 +175,7 @@ func TestPushTransport_APNs_ContractSuite(t *testing.T) { //nolint:tparallel // 
 	if err != nil {
 		t.Fatal(err)
 	}
-	pt, err := notify.NewPushTransport(notify.PushTransportConfig{Tokens: store, APNs: a, Clock: clock.NewFake(t0),
+	pt, err := notify.NewPushTransport(notify.PushTransportConfig{Tokens: store, Sessions: testSessions, APNs: a, Clock: clock.NewFake(t0),
 		Log: slog.New(slog.DiscardHandler)})
 	if err != nil {
 		t.Fatal(err)

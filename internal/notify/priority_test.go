@@ -125,7 +125,7 @@ func TestPush_PriorityPerProvider(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			pt, err := notify.NewPushTransport(notify.PushTransportConfig{Tokens: store, APNs: a, Clock: clk, Log: slog.New(slog.DiscardHandler)})
+			pt, err := notify.NewPushTransport(notify.PushTransportConfig{Tokens: store, Sessions: testSessions, APNs: a, Clock: clk, Log: slog.New(slog.DiscardHandler)})
 			if err != nil {
 				t.Fatal(err)
 			}

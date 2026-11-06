@@ -316,13 +316,14 @@ func TestSecrets_NotLogged(t *testing.T) {
 	fcm := pushtest.NewFCM(t)
 	apns := pushtest.NewAPNs(t)
 	store := notify.NewMemStore()
-	user := uuid.NewV7()
+	user, session := uuid.NewV7(), uuid.NewV7()
+	sessions := pushtest.NewSessions(session)
 	const fcmDevice, apnsDevice = "fcm-device-token-SECRET-1", "ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12"
 	for _, d := range []struct {
 		pl  notify.PushPlatform
 		tok string
 	}{{notify.PushAndroid, fcmDevice}, {notify.PushIOS, apnsDevice}} {
-		_, _ = store.UpsertPushToken(ctx, notify.PushToken{ID: uuid.NewV7(), UserID: user, Platform: d.pl, Token: d.tok,
+		_, _ = store.UpsertPushToken(ctx, notify.PushToken{ID: uuid.NewV7(), UserID: user, SessionID: &session, Platform: d.pl, Token: d.tok,
 			TokenSHA256: bytes.Repeat([]byte{byte(len(d.tok))}, 32), CreatedAt: clk.Now(), LastSeenAt: clk.Now()})
 	}
 	f, err := notify.NewFCM(notify.FCMConfig{ProjectID: fcm.ProjectID, CredentialsJSON: fcm.Credentials, BaseURL: fcm.Server.URL,
@@ -335,7 +336,7 @@ func TestSecrets_NotLogged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pt, _ := notify.NewPushTransport(notify.PushTransportConfig{Tokens: store, FCM: f, APNs: a, Clock: clk, Log: log})
+	pt, _ := notify.NewPushTransport(notify.PushTransportConfig{Tokens: store, Sessions: sessions, FCM: f, APNs: a, Clock: clk, Log: log})
 	msg := notify.PushMessage{DeliveryID: uuid.NewV7(), UserID: user, Kind: "k", Title: "Yeni bir bildirimin var"}
 	_, err = pt.SendPush(ctx, msg)
 	note(err)
@@ -345,9 +346,9 @@ func TestSecrets_NotLogged(t *testing.T) {
 	note(err)
 	unreachable, _ := notify.NewAPNs(notify.APNsConfig{KeyPEM: apns.KeyPEM, KeyID: apns.KeyID, TeamID: apns.TeamID, Topic: apns.Topic,
 		BaseURL: "https://127.0.0.1:1", Clock: clk, Timeout: time.Second})
-	_, _ = store.UpsertPushToken(ctx, notify.PushToken{ID: uuid.NewV7(), UserID: user, Platform: notify.PushIOS,
+	_, _ = store.UpsertPushToken(ctx, notify.PushToken{ID: uuid.NewV7(), UserID: user, SessionID: &session, Platform: notify.PushIOS,
 		Token: strings.Repeat("cd", 32), TokenSHA256: bytes.Repeat([]byte{7}, 32), CreatedAt: clk.Now(), LastSeenAt: clk.Now()})
-	pt2, _ := notify.NewPushTransport(notify.PushTransportConfig{Tokens: store, APNs: unreachable, Clock: clk, Log: log})
+	pt2, _ := notify.NewPushTransport(notify.PushTransportConfig{Tokens: store, Sessions: sessions, APNs: unreachable, Clock: clk, Log: log})
 	_, err = pt2.SendPush(ctx, msg)
 	note(err)
 

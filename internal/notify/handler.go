@@ -70,7 +70,9 @@ func Register(api huma.API, svc Service) {
 	huma.Register(api, op.Koro(huma.Operation{
 		OperationID: "registerMyPushToken", Method: http.MethodPost, Path: "/me/push-tokens", Tags: tags,
 		Summary: "Register a push token", DefaultStatus: http.StatusCreated,
-		Description: "Bound to the current session. Registering a known token again moves it to this account and session.",
+		Description: "Bound to the current session: pushes stop when that session is closed (sign-out, revocation) and at the latest " +
+			"30 days after it expires, so register after every sign-in. Registering a known token again moves it to this " +
+			"account and session and brings it back.",
 	}, op.Meta{Action: string(authz.NotifyPushTokenManage), Surface: op.SurfaceSelf, Idempotency: op.IdempotencyOptional}), h.registerPush)
 
 	huma.Register(api, op.Koro(huma.Operation{
@@ -90,7 +92,9 @@ func Register(api huma.API, svc Service) {
 		Summary: "Register a browser's web push subscription", DefaultStatus: http.StatusCreated,
 		Description: "The PushSubscription of the browser: its endpoint and keys (PushSubscription.toJSON().keys). " +
 			"The endpoint must belong to a known push service (FCM, Mozilla, Apple, Microsoft). Bound to the current " +
-			"session; registering a known endpoint again moves it to this account and session and returns the same ID. " +
+			"session: pushes stop and the subscription is deleted when that session is closed (sign-out, revocation) and at " +
+			"the latest 30 days after it expires, so register after every sign-in. Registering a known endpoint again moves it to this account and session and " +
+			"returns the same ID while the row exists. " +
 			"At most 10 browsers per user: a new one replaces the least recently registered. 503 " +
 			"notify.web_push_unavailable when web push is off.",
 	}, op.Meta{Action: string(authz.NotifyPushTokenManage), Surface: op.SurfaceSelf, Idempotency: op.IdempotencyOptional}), h.registerWebPush)

@@ -264,6 +264,17 @@ func (s gormStore) ActiveSessions(ctx context.Context, userID uuid.UUID, now tim
 	return sessions(rows), nil
 }
 
+// UnrevokedSessionIDs implements Store (sessions_user_active_idx).
+//
+// cross-org: sessions belong to a user, not an org.
+func (s gormStore) UnrevokedSessionIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	if err := db.Conn(ctx, s.orm).Raw(`SELECT id FROM sessions WHERE user_id = ? AND revoked_at IS NULL`, userID).Scan(&ids).Error; err != nil {
+		return nil, fmt.Errorf("identity: unrevoked sessions: %w", err)
+	}
+	return ids, nil
+}
+
 // SessionsOf implements Store.
 //
 // cross-org: sessions belong to a user, not an org.

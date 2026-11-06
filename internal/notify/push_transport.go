@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 	"uuid"
@@ -39,6 +40,15 @@ type WebPushSubscriptions interface {
 	DropWebPushSubscription(ctx context.Context, id uuid.UUID) (bool, error)
 }
 
+// UnrevokedSessions answers which sessions of a user nobody has closed
+// (identity, bound in cmd/koro; BE-182). A push surface is bound to the
+// session that registered it and ends with that session.
+type UnrevokedSessions interface {
+	// UnrevokedSessionIDs returns the sessions of userID that are not revoked
+	// and whose row still exists.
+	UnrevokedSessionIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
+}
+
 // PushTransportConfig configures PushTransport. At least one provider.
 type PushTransportConfig struct {
 	// Tokens are the device tokens of FCM and APNs (required with either).
@@ -49,8 +59,10 @@ type PushTransportConfig struct {
 	// BE-173).
 	WebPush       *WebPush
 	Subscriptions WebPushSubscriptions
-	Clock         clock.Clock
-	Log           *slog.Logger
+	// Sessions gates every send on the surface's session (required).
+	Sessions UnrevokedSessions
+	Clock    clock.Clock
+	Log      *slog.Logger
 }
 
 // PushTransport is the real PushSender (BE-055, BE-173): it sends a message
@@ -60,14 +72,16 @@ type PushTransportConfig struct {
 // browsers subscribed over the Push API with Koro's VAPID key (RFC 8030,
 // 8291, 8292). A target the provider reports invalid is dropped (a device
 // token is revoked, push_tokens.revoked_at; a web push subscription is
-// deleted) and never tried again. The payload is the template's fixed
-// text, the in-app link and opaque IDs (02 §6.3: no personal data); the
-// delivery ID is the collapse key, so a retried delivery replaces the
-// earlier notification instead of stacking.
+// deleted) and never tried again. So is a target whose session was revoked or
+// whose session row is gone (BE-182): registering again from a session brings
+// it back. The payload is the template's fixed text, the in-app link and
+// opaque IDs (02 §6.3: no personal data); the delivery ID is the collapse key,
+// so a retried delivery replaces the earlier notification instead of stacking.
 //
 // Outcome: success when at least one target took the message or no target
 // failed transiently (no target, all dropped); an error (retried by the
-// worker) only when every attempt failed and one of them was transient.
+// worker) only when every attempt failed and one of them was transient, or
+// when the sessions cannot be read: nothing is sent or dropped then.
 type PushTransport struct {
 	c PushTransportConfig
 }
@@ -78,6 +92,9 @@ var _ PushSender = (*PushTransport)(nil)
 func NewPushTransport(c PushTransportConfig) (*PushTransport, error) {
 	if c.Clock == nil || c.Log == nil {
 		return nil, errors.New("notify: push transport needs Clock and Log")
+	}
+	if c.Sessions == nil {
+		return nil, errors.New("notify: push transport needs Sessions")
 	}
 	if c.FCM == nil && c.APNs == nil && c.WebPush == nil {
 		return nil, errors.New("notify: push transport needs FCM, APNs or web push")
@@ -129,7 +146,8 @@ func tokenChannel(pl PushPlatform) Channel {
 type pushTarget struct {
 	idKey    string // log attribute naming id
 	id       uuid.UUID
-	provider string // "" = no configured provider serves it (skipped)
+	session  *uuid.UUID // the session that registered it; nil = that row is gone
+	provider string     // "" = no configured provider serves it (skipped)
 	send     func(ctx context.Context, m PushMessage) (string, error)
 	drop     func(ctx context.Context) (bool, error)
 }
@@ -146,7 +164,7 @@ func (p *PushTransport) targets(ctx context.Context, m PushMessage) ([]pushTarge
 			if !m.allows(tokenChannel(t.Platform)) {
 				continue
 			}
-			tg := pushTarget{idKey: "push_token_id", id: t.ID,
+			tg := pushTarget{idKey: "push_token_id", id: t.ID, session: t.SessionID,
 				drop: func(ctx context.Context) (bool, error) { return p.c.Tokens.RevokePushToken(ctx, t.ID, p.c.Clock.Now()) }}
 			if prov := p.provider(t.Platform); prov != nil {
 				tg.provider = prov.name()
@@ -161,7 +179,7 @@ func (p *PushTransport) targets(ctx context.Context, m PushMessage) ([]pushTarge
 			return nil, err
 		}
 		for _, s := range subs {
-			out = append(out, pushTarget{idKey: "web_push_subscription_id", id: s.ID, provider: p.c.WebPush.name(),
+			out = append(out, pushTarget{idKey: "web_push_subscription_id", id: s.ID, session: s.SessionID, provider: p.c.WebPush.name(),
 				send: func(ctx context.Context, m PushMessage) (string, error) { return p.c.WebPush.send(ctx, s, m) },
 				drop: func(ctx context.Context) (bool, error) { return p.c.Subscriptions.DropWebPushSubscription(ctx, s.ID) }})
 		}
@@ -175,13 +193,32 @@ func (p *PushTransport) SendPush(ctx context.Context, m PushMessage) (string, er
 	if err != nil {
 		return "", err
 	}
+	var sessions []uuid.UUID
+	if len(targets) > 0 {
+		if sessions, err = p.c.Sessions.UnrevokedSessionIDs(ctx, m.UserID); err != nil {
+			return "", fmt.Errorf("push: unrevoked sessions: %w", err)
+		}
+	}
 	var (
-		firstID                        string
-		sent, dropped, skipped, failed int
-		transient                      error
-		permanent                      error
+		firstID                                string
+		sent, dropped, closed, skipped, failed int
+		transient                              error
+		permanent                              error
 	)
+	// drop records the outcome even if the context ends meanwhile.
+	drop := func(t pushTarget, count *int) {
+		if ok, derr := t.drop(context.WithoutCancel(ctx)); derr != nil {
+			failed++
+			transient = derr
+		} else if ok {
+			*count++
+		}
+	}
 	for _, t := range targets {
+		if t.session == nil || !slices.Contains(sessions, *t.session) {
+			drop(t, &closed)
+			continue
+		}
 		if t.send == nil {
 			skipped++
 			continue
@@ -194,13 +231,7 @@ func (p *PushTransport) SendPush(ctx context.Context, m PushMessage) (string, er
 				firstID = id
 			}
 		case errors.Is(err, errTokenInvalid):
-			// The outcome is recorded even if the context ends meanwhile.
-			if ok, derr := t.drop(context.WithoutCancel(ctx)); derr != nil {
-				failed++
-				transient = derr
-			} else if ok {
-				dropped++
-			}
+			drop(t, &dropped)
 		case errors.Is(err, ErrPermanent):
 			failed++
 			permanent = err
@@ -212,7 +243,7 @@ func (p *PushTransport) SendPush(ctx context.Context, m PushMessage) (string, er
 		}
 	}
 	p.c.Log.LogAttrs(ctx, slog.LevelInfo, "push sent", slog.String("delivery_id", m.DeliveryID.String()),
-		slog.Int("devices", len(targets)), slog.Int("sent", sent), slog.Int("revoked", dropped),
+		slog.Int("devices", len(targets)), slog.Int("sent", sent), slog.Int("revoked", dropped), slog.Int("session_closed", closed),
 		slog.Int("skipped", skipped), slog.Int("failed", failed))
 	switch {
 	case sent > 0:

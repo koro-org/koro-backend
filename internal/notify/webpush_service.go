@@ -50,7 +50,8 @@ func (s *service) MyWebPushSettings(ctx context.Context, a authz.Actor) (WebPush
 // RegisterWebPushSubscription implements Service. The endpoint must name a
 // known push service (ValidWebPushEndpoint: the SSRF guard) and the keys
 // must be a P-256 point and a 16-byte secret. The subscription is bound to
-// the actor's session; the same endpoint registered again — after signing
+// the actor's session (PushTransport deletes it once the session is closed,
+// BE-182); the same endpoint registered again — after signing
 // in to another account too — moves the one row (endpoint_sha256 is
 // unique). Beyond MaxWebPushSubscriptions the least recently seen browser
 // of the user is dropped. Neither the endpoint nor the keys are ever logged

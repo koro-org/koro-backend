@@ -220,6 +220,9 @@ func (w *identityWiring) build(c *container) error {
 	if c.notify.platformAdmins == nil { // 06 H-40 admin alerts (BE-015 hook)
 		c.notify.platformAdmins = mod.PlatformAdmins
 	}
+	if c.notify.unrevokedSessions == nil { // the push transport's session gate (BE-182)
+		c.notify.unrevokedSessions = mod.UnrevokedSessionIDs
+	}
 	if c.consent.reauth == nil {
 		svc := mod.Service
 		c.consent.reauth = func(ctx context.Context, userID uuid.UUID, password, totpCode string) (string, error) {

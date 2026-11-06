@@ -411,6 +411,14 @@ func (m Module) PlatformAdmins(ctx context.Context) ([]uuid.UUID, error) {
 	return m.svc.roles().UsersWithRole(ctx, authz.PlatformAdmin)
 }
 
+// UnrevokedSessionIDs returns the sessions of userID that nobody closed: not
+// revoked, and their row not yet removed (an expired session's row goes 30
+// days after it ended). notify's push transport reads it through cmd/koro
+// (BE-182).
+func (m Module) UnrevokedSessionIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	return m.svc.sessions().UnrevokedSessionIDs(ctx, userID)
+}
+
 // New builds the identity module.
 func New(d Deps) (Module, error) {
 	if err := d.validate(); err != nil {

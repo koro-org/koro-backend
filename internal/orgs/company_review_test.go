@@ -4,13 +4,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
 	"koro/internal/authz"
+	"koro/internal/identity"
 	"koro/internal/orgs"
+	"koro/internal/platform/domainevent"
 	"koro/internal/platform/problem"
 	"koro/internal/platform/problem/problemtest"
+	"koro/internal/platform/taxid"
 )
 
 // Synthetic identifiers that pass the check digits (koro-backend is public:
@@ -391,5 +395,198 @@ func TestAdminListOrgs_CompanyReviewFacts(t *testing.T) {
 	body, err := json.Marshal(seen["İyi Başvuru"])
 	if err != nil || strings.Contains(string(body), testVKN) {
 		t.Fatalf("the admin list shows the VKN: %s, %v", body, err)
+	}
+}
+
+// otherVKN is a valid VKN other than testVKN.
+func otherVKN(t *testing.T) string {
+	t.Helper()
+	for n := 1234567891; n < 1234567999; n++ {
+		if s := strconv.Itoa(n); taxid.ValidVKN(s) {
+			return s
+		}
+	}
+	t.Fatal("no valid VKN in the range")
+	return ""
+}
+
+// TestUpdateOrg_NewTaxIDOfReviewedCompany (BE-183): replacing the tax
+// identifier of a verified company takes the proof and, for a member, sends
+// the company back to review: status, verification and the admins' request.
+// What replaces nothing takes neither: the same VKN, the tax office, another
+// field. The caller's right and If-Match come before the proof.
+func TestUpdateOrg_NewTaxIDOfReviewedCompany(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := t.Context()
+	v, owner := e.company(t, "Onaylı Şirket")
+	id := v.Org.ID
+	if _, err := e.svc.AdminVerifyOrg(ctx, pad(t), id, ""); err != nil {
+		t.Fatal(err)
+	}
+	str := func(s string) *string { return &s }
+	etag := func() string {
+		t.Helper()
+		cur, err := e.svc.GetOrg(ctx, owner, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cur.ETag
+	}
+	wantActive := func(got orgs.OrgView, err error) {
+		t.Helper()
+		if err != nil || got.Org.Status != orgs.StatusActive || !got.Org.Verified() {
+			t.Fatalf("after the update = %+v, %v", got.Org, err)
+		}
+	}
+	got, err := e.svc.UpdateOrg(ctx, owner, id, etag(), orgs.OrgPatch{TaxNo: str(testVKN)})
+	wantActive(got, err)
+	got, err = e.svc.UpdateOrg(ctx, owner, id, etag(), orgs.OrgPatch{TaxOffice: str("Beşiktaş")})
+	wantActive(got, err)
+	got, err = e.svc.UpdateOrg(ctx, owner, id, etag(), orgs.OrgPatch{City: str("Ankara")})
+	wantActive(got, err)
+
+	vkn := otherVKN(t)
+	_, err = e.svc.UpdateOrg(ctx, owner, id, etag(), orgs.OrgPatch{TaxNo: &vkn})
+	problemtest.WantErr(t, err, identity.ErrReauthRequired)
+	_, err = e.svc.UpdateOrg(ctx, owner, id, etag(), orgs.OrgPatch{TCKN: str(testTCKN)})
+	problemtest.WantErr(t, err, identity.ErrReauthRequired)
+	_, err = e.svc.UpdateOrg(ctx, owner, id, etag(), orgs.OrgPatch{TaxNo: &vkn, Proof: proof("yanlis-parola-1")})
+	problemtest.WantErr(t, err, identity.ErrReauthFailed)
+	denied := len(e.audit.Rows(authz.OrgsOrgUpdate))
+	_, err = e.svc.UpdateOrg(ctx, owner, id, `"0"`, orgs.OrgPatch{TaxNo: &vkn, Proof: proof("yanlis-parola-1")})
+	problemtest.WantProblem(t, err, 412, "precondition_failed")
+	_, err = e.svc.UpdateOrg(ctx, e.member(t, id, authz.MemberRecruiter), id, etag(), orgs.OrgPatch{TaxNo: &vkn, Proof: proof("yanlis-parola-1")})
+	problemtest.WantErr(t, err, authz.ErrForbidden)
+	if n := len(e.audit.Rows(authz.OrgsOrgUpdate)); n != denied {
+		t.Fatalf("a proof was checked before the caller's right: %d rows, want %d", n, denied)
+	}
+	if cur, err := e.svc.GetOrg(ctx, owner, id); err != nil || cur.Org.Status != orgs.StatusActive || *cur.Company.TaxNo != testVKN {
+		t.Fatalf("a refused change was written: %+v, %v", cur.Company, err)
+	}
+
+	requests := len(eventsOf[domainevent.OrgReviewRequested](t, e, domainevent.TopicOrgReviewRequested))
+	got, err = e.svc.UpdateOrg(ctx, owner, id, etag(), orgs.OrgPatch{TaxNo: &vkn, Proof: proof(goodPassword)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Org.Status != orgs.StatusPendingReview || got.Org.Verified() || got.Org.VerifiedBy != nil || *got.Company.TaxNo != vkn {
+		t.Fatalf("after the new identifier = %+v, %+v", got.Org, got.Company)
+	}
+	if n := len(eventsOf[domainevent.OrgReviewRequested](t, e, domainevent.TopicOrgReviewRequested)); n != requests+1 {
+		t.Fatalf("%d review requests, want %d", n, requests+1)
+	}
+	ev := e.audit.Of(authz.OrgsOrgUpdate)
+	last := ev[len(ev)-1]
+	if fmt.Sprint(last.Metadata["fields"]) != "[status tax_id]" || last.Metadata["reauth"] == nil ||
+		last.Metadata["from"] != "active" || last.Metadata["to"] != "pending_review" || strings.Contains(fmt.Sprint(last.Metadata), vkn) {
+		t.Fatalf("audit = %+v", last.Metadata)
+	}
+
+	// In review the company corrects itself without a proof; the admin's
+	// verification ends it, and the next change takes the proof again.
+	if _, err := e.svc.UpdateOrg(ctx, owner, id, etag(), orgs.OrgPatch{TaxNo: str(testVKN)}); err != nil {
+		t.Fatal(err)
+	}
+	verified, err := e.svc.AdminVerifyOrg(ctx, pad(t), id, "")
+	if err != nil || verified.Org.Status != orgs.StatusActive || !verified.Org.Verified() {
+		t.Fatalf("verified again = %+v, %v", verified.Org, err)
+	}
+	_, err = e.svc.UpdateOrg(ctx, owner, id, etag(), orgs.OrgPatch{TaxNo: &vkn})
+	problemtest.WantErr(t, err, identity.ErrReauthRequired)
+
+	// A platform admin's correction takes the proof; they are the reviewer, so
+	// the company stays as it is.
+	admin := pad(t)
+	cur, err := e.svc.GetOrg(ctx, admin, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.svc.UpdateOrg(ctx, admin, id, cur.ETag, orgs.OrgPatch{TaxNo: &vkn})
+	problemtest.WantErr(t, err, identity.ErrReauthRequired)
+	got, err = e.svc.UpdateOrg(ctx, admin, id, cur.ETag, orgs.OrgPatch{TaxNo: &vkn, Proof: proof(goodPassword)})
+	wantActive(got, err)
+	if *got.Company.TaxNo != vkn {
+		t.Fatalf("the platform admin's correction = %+v", got.Company)
+	}
+}
+
+// TestUpdateOrg_FirstTaxID (BE-183): a company from before BE-165 gives its
+// first identifier without a proof and stays as it is; the next one is a change.
+func TestUpdateOrg_FirstTaxID(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := t.Context()
+	id, err := e.svc.Create(ctx, orgs.CreateOrg{Kind: orgs.KindCompany, Name: "Eski Şirket"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin := e.member(t, id, authz.MemberCompanyAdmin)
+	etag := func() string {
+		t.Helper()
+		cur, err := e.svc.GetOrg(ctx, admin, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cur.ETag
+	}
+	vkn, next := testVKN, otherVKN(t)
+	got, err := e.svc.UpdateOrg(ctx, admin, id, etag(), orgs.OrgPatch{TaxNo: &vkn})
+	if err != nil || got.Org.Status != orgs.StatusActive || *got.Company.TaxNo != vkn {
+		t.Fatalf("first identifier = %+v, %v", got.Company, err)
+	}
+	_, err = e.svc.UpdateOrg(ctx, admin, id, etag(), orgs.OrgPatch{TaxNo: &next})
+	problemtest.WantErr(t, err, identity.ErrReauthRequired)
+}
+
+// TestCompanyDomain_SharedDomains (BE-183): a provider's regional domain and a
+// throw-away service are no company's domain (422); an academic domain may be
+// named but holding an address there verifies nothing, a row verified before
+// this rule included. A company's own domain that merely starts like one stays.
+func TestCompanyDomain_SharedDomains(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := t.Context()
+	create := func(name, domain string) (orgs.OrgView, error) {
+		founder := user()
+		e.users.add(founder.UserID, "kurucu@"+domain, false)
+		in := companyInput(name)
+		in.EmailDomain = domain
+		return e.svc.CreateCompany(ctx, founder, in)
+	}
+	for _, d := range []string{"outlook.de", "yahoo.co.uk", "hotmail.fr", "live.co.uk", "gmx.at", "yandex.com.tr", "zoho.eu",
+		"web.de", "mailinator.com", "yopmail.com", "gmail.com"} {
+		_, err := create("Paylaşımlı "+d, d)
+		wantField(t, err, "body.email_domain", "")
+	}
+	for _, d := range []string{"ornek.edu.tr", "ornek.edu", "ornek.ac.uk", "ornek.k12.tr"} {
+		v, err := create("Akademik "+d, d)
+		if err != nil {
+			t.Fatalf("%s: %v", d, err)
+		}
+		if v.Company.DomainVerified() || orgs.ToAdminDTO(v).Company.DomainVerified {
+			t.Fatalf("%s: domain verified", d)
+		}
+	}
+	for _, d := range []string{"live.example.test", "yahoo-yazilim.com.tr", "edu.example.com", "ornek.co.uk"} {
+		v, err := create("Kendi "+d, d)
+		if err != nil {
+			t.Fatalf("%s: %v", d, err)
+		}
+		if !v.Company.DomainVerified() {
+			t.Fatalf("%s: not verified", d)
+		}
+	}
+	at := e.clk.Now()
+	domain := "ornek.edu.tr"
+	old := orgs.Company{EmailDomain: &domain, DomainVerifiedAt: &at}
+	if old.DomainVerified() {
+		t.Fatal("an academic row verified earlier still says so")
+	}
+	if d := orgs.ToOrgDTO(orgs.OrgView{Company: &old}).Company; d.DomainVerifiedAt != nil {
+		t.Fatalf("OrgDTO shows the old verification: %+v", d)
+	}
+	if d := orgs.ToPublicDTO(orgs.OrgView{Company: &old, Manage: true}).Company; d.DomainVerifiedAt != nil {
+		t.Fatalf("the management view shows the old verification: %+v", d)
 	}
 }

@@ -42,7 +42,9 @@ func registerMessageReports(api huma.API, h handler) {
 			"as they stood when the report was filed (oldest first), never the rest of the conversation. Every read " +
 			"needs X-Koro-Access-Reason and is recorded with it (audit, messaging.message_report.read); the " +
 			"conversation's parties are not notified (that would reveal the report). A report that is not a message " +
-			"report, or is gone, is 404. Work the report itself with adminGetReport / adminResolveReport.",
+			"report, or is gone, is 404. Nobody who is a side of the conversation or filed the report reads it (403, also " +
+			"for platform admins); once the report is resolved only a platform admin does (a moderator: 403). Work the " +
+			"report itself with adminGetReport / adminResolveReport.",
 	}, op.Meta{Action: string(authz.MessagingMessageReportRead), Surface: op.SurfaceAdmin, RateLimit: op.RateBreakGlass, AccessReasonRequired: true},
 		h.reportedMessages)
 }

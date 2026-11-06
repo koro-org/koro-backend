@@ -2,6 +2,7 @@ package messaging_test
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"uuid"
@@ -342,4 +343,92 @@ func TestMessageReport_DTO(t *testing.T) {
 		d.Messages[0].SenderUserID != authztest.ID("company_member").String() || d.Company.Kind != "company" || d.CompanyStatus != "" {
 		t.Fatalf("dto = %+v", d)
 	}
+}
+
+// TestMessageReport_StakeInTheReport (BE-183): a member of the conversation's
+// company and its student do not read the copy, whatever their platform role:
+// 403 with a denied record that has no org scope; another moderator reads it.
+func TestMessageReport_StakeInTheReport(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := t.Context()
+	_, c := e.accepted(t, "student")
+	conv := c.Conversation
+	m := e.say(t, "company_member", e.asCompany(), conv.ID, "Şirket mesajı")
+	res, err := e.svc.ReportMessage(ctx, actor(t, "student"), asStudent, conv.ID, m.ID, harassment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	member := func(name string) authz.Actor {
+		a := actor(t, name)
+		a.Memberships = append(slices.Clone(a.Memberships), authz.Membership{OrgID: conv.OrgID, OrgKind: authz.OrgCompany,
+			Role: authz.MemberRecruiter})
+		return a
+	}
+	studentMod := actor(t, "moderator")
+	studentMod.UserID = conv.StudentUserID
+	barred := []authz.Actor{member("moderator"), member("platform_admin"), studentMod}
+	for _, a := range barred {
+		_, err := e.svc.ReportedMessages(ctx, a, res.ID, moderatorReason)
+		problemtest.WantErr(t, err, authz.ErrForbidden)
+	}
+	rows := e.audit.of(authz.MessagingMessageReportRead)
+	if len(rows) != len(barred) {
+		t.Fatalf("%d audit rows, want %d", len(rows), len(barred))
+	}
+	for _, r := range rows {
+		if r.ev.Outcome != audit.Denied || r.ev.OrgID != nil || *r.ev.ResourceID != res.ID || r.ev.Reason != moderatorReason || r.tx == 0 {
+			t.Fatalf("denied audit = %+v (tx %d)", r.ev, r.tx)
+		}
+	}
+	if _, err := e.svc.ReportedMessages(ctx, actor(t, "moderator"), res.ID, moderatorReason); err != nil {
+		t.Fatal(err)
+	}
+	parties, err := e.svc.PartiesOfMessageReports(ctx, []uuid.UUID{res.ID, uuid.NewV7()})
+	if err != nil || len(parties) != 1 || parties[res.ID] != (feed.MessageReportParty{OrgID: conv.OrgID, StudentUserID: conv.StudentUserID}) {
+		t.Fatalf("parties = %+v, %v", parties, err)
+	}
+}
+
+// TestMessageReport_ResolvedCopy (BE-183, Q-43): the copy serves the review. A
+// moderator reads it while the report is open or in review; once resolved only
+// a platform admin does. The record says the report's status.
+func TestMessageReport_ResolvedCopy(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := t.Context()
+	_, c := e.accepted(t, "student")
+	conv := c.Conversation.ID
+	m := e.say(t, "company_member", e.asCompany(), conv, "Şirket mesajı")
+	res, err := e.svc.ReportMessage(ctx, actor(t, "student"), asStudent, conv, m.ID, harassment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for st, modReads := range map[feed.ReportStatus]bool{feed.ReportOpen: true, feed.ReportInReview: true,
+		feed.ReportActioned: false, feed.ReportDismissed: false} {
+		e.reports.setStatus(res.ID, st)
+		_, err := e.svc.ReportedMessages(ctx, actor(t, "moderator"), res.ID, moderatorReason)
+		if modReads && err != nil {
+			t.Fatalf("%s: moderator: %v", st, err)
+		}
+		if !modReads {
+			problemtest.WantErr(t, err, authz.ErrForbidden)
+		}
+		if _, err := e.svc.ReportedMessages(ctx, actor(t, "platform_admin"), res.ID, moderatorReason); err != nil {
+			t.Fatalf("%s: platform admin: %v", st, err)
+		}
+		rows := e.audit.of(authz.MessagingMessageReportRead)
+		if last := rows[len(rows)-1].ev; last.Outcome != audit.Success || last.Metadata["report_status"] != string(st) {
+			t.Fatalf("%s: audit = %+v", st, last)
+		}
+	}
+}
+
+// TestMessageReport_CopyWithoutTheQueue: without the feed the copy is not read
+// (nobody can decide on it).
+func TestMessageReport_CopyWithoutTheQueue(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, func(d *messaging.Deps) { d.Reports = nil })
+	_, err := e.svc.ReportedMessages(t.Context(), actor(t, "moderator"), uuid.NewV7(), moderatorReason)
+	problemtest.WantErr(t, err, problem.ErrUnavailable)
 }

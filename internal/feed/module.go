@@ -290,6 +290,9 @@ type Deps struct {
 	// none) who receive the review queue and report notices. nil → as
 	// Sender.
 	Staff Staff
+	// MessageParties names the sides of message reports (BE-183). nil → a
+	// message report is not decided on (503).
+	MessageParties MessageReportParties
 
 	// ReviewThreshold is FEED_REVIEW_THRESHOLD: the approved posts after
 	// which a new org publishes without review; 0 → DefaultReviewThreshold.

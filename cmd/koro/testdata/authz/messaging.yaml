@@ -400,6 +400,10 @@ operations:
       - name: unknown_report
         path_params: { report_id: "literal:00000000-0000-7000-8000-0000000000e5" }
         expect: { anonymous: 401, moderator: 404, platform_admin: 404, "@msg_no_platform_role": 403, "@msg_other_staff": 403 }
+      - name: resolved_report
+        path_params: { report_id: reported_msg_resolved }
+        note: once resolved the copy is a platform admin's (BE-183); a side of the conversation is the service tests' (no persona is both)
+        expect: { anonymous: 401, moderator: 403, platform_admin: 200, "@msg_no_platform_role": 403, "@msg_other_staff": 403 }
 
 # The conversations' realtime signal (BE-162b): 101 = upgraded; otherwise the handshake is answered like the lists
 # (listMyConversations, listOrgConversations) and nothing is upgraded.

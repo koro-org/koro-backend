@@ -478,6 +478,7 @@ type env struct {
 	ents     entitlements.Service
 	sender   *fakeSender
 	staff    *fakeStaff
+	parties  *fakeMessageParties
 	svc      feed.Service
 	mod      feed.Module
 
@@ -505,6 +506,7 @@ func newEnvWith(t *testing.T, tweak func(*feed.Deps)) *env {
 		audience: &fakeAudience{sensitive: map[string]bool{}},
 		sender:   &fakeSender{},
 		staff:    &fakeStaff{moderators: []uuid.UUID{orgID("moderator")}, admins: []uuid.UUID{orgID("platform_admin")}},
+		parties:  &fakeMessageParties{sides: map[uuid.UUID]feed.MessageReportParty{}},
 	}
 	tx := db.NopTx{}
 	idem := idempotency.New(idempotency.Deps{Tx: tx, Store: idempotency.NewMemStore(), Clock: clk, Log: obs.Discard()})
@@ -529,6 +531,7 @@ func newEnvWith(t *testing.T, tweak func(*feed.Deps)) *env {
 		Store: e.mem, Tx: tx, Outbox: e.out, Queue: e.queue, Audit: e.audit, Orgs: e.orgs, Idempotency: idem, Clock: clk,
 		Log: obs.Discard(), Viewers: e.viewers, Events: e.events, Files: e.files, Clubs: e.clubs,
 		Targeting: targeting.Service, Entitlements: e.ents, Sender: e.sender, Staff: e.staff,
+		MessageParties: e.parties,
 	}
 	if tweak != nil {
 		tweak(&d)
@@ -539,6 +542,30 @@ func newEnvWith(t *testing.T, tweak func(*feed.Deps)) *env {
 	}
 	e.mod, e.svc = mod, mod.Service
 	return e
+}
+
+// fakeMessageParties is messaging's knowledge of its reports.
+type fakeMessageParties struct {
+	mu    sync.Mutex
+	sides map[uuid.UUID]feed.MessageReportParty
+}
+
+func (f *fakeMessageParties) set(id uuid.UUID, p feed.MessageReportParty) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sides[id] = p
+}
+
+func (f *fakeMessageParties) PartiesOfMessageReports(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]feed.MessageReportParty, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[uuid.UUID]feed.MessageReportParty{}
+	for _, id := range ids {
+		if p, ok := f.sides[id]; ok {
+			out[id] = p
+		}
+	}
+	return out, nil
 }
 
 func persona(t *testing.T, name string) authz.Actor {

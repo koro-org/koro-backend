@@ -711,6 +711,14 @@ operations:
           "@fd_no_platform_role": 403
           "@fd_other_staff": 403
           "@fd_post_staff": 404
+      - name: message_report
+        path_params: { report_id: reported_msg_a }
+        note: decided on its conversation's sides, read from messaging (BE-183)
+        expect:
+          anonymous: 401
+          "@fd_no_platform_role": 403
+          "@fd_other_staff": 403
+          "@fd_post_staff": 200
 
   adminResolveReport:
     method: POST

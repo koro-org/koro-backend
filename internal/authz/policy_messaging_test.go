@@ -255,3 +255,39 @@ func TestMessagingPolicy_MessageReportRead(t *testing.T) {
 	wantErr(t, authz.Can(ctx, persona(t, "moderator"), authz.MessagingMessageReportRead, conversation("", student)),
 		authz.ErrNotFound, false)
 }
+
+// TestMessagingPolicy_MessageReportReadOnTheReport (BE-183): on the report
+// itself, a side of the conversation and the reporter read nothing, whatever
+// their platform role; an open or in-review report is the moderators', any
+// other status a platform admin's.
+func TestMessagingPolicy_MessageReportReadOnTheReport(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	org, student, reporter := authztest.ID("company_a"), authztest.ID("student"), authztest.ID("student")
+	report := func(status string) authz.Resource {
+		return authz.ContentReportResource(uuid.NewV7(), reporter, status, &org, &student)
+	}
+	mod, pad := persona(t, "moderator"), persona(t, "platform_admin")
+	for _, st := range []string{"open", "in_review"} {
+		wantErr(t, authz.Can(ctx, mod, authz.MessagingMessageReportRead, report(st)), nil, false)
+		wantErr(t, authz.Can(ctx, pad, authz.MessagingMessageReportRead, report(st)), nil, false)
+	}
+	for _, st := range []string{"actioned", "dismissed", ""} {
+		wantErr(t, authz.Can(ctx, mod, authz.MessagingMessageReportRead, report(st)), authz.ErrForbidden, false)
+		wantErr(t, authz.Can(ctx, pad, authz.MessagingMessageReportRead, report(st)), nil, false)
+	}
+	for _, base := range []authz.Actor{mod, pad} {
+		member := base
+		member.Memberships = append(slices.Clone(base.Memberships), authz.Membership{OrgID: org, OrgKind: authz.OrgCompany,
+			Role: authz.MemberRecruiter})
+		side := base
+		side.UserID = student
+		for _, a := range []authz.Actor{member, side} {
+			wantErr(t, authz.Can(ctx, a, authz.MessagingMessageReportRead, report("open")), authz.ErrForbidden, false)
+			wantErr(t, authz.Can(ctx, a, authz.MessagingMessageReportRead, report("dismissed")), authz.ErrForbidden, false)
+		}
+	}
+	// A company member without a platform role does not reach the report.
+	wantErr(t, authz.Can(ctx, persona(t, "company_admin"), authz.MessagingMessageReportRead, report("open")),
+		authz.ErrForbidden, false)
+}

@@ -7,12 +7,15 @@
 # authztest.ID("conversation_student_a_request"), sent by company_member). BE-162b: msg_company_a and
 # msg_student_a are a message of each side in it (the other side reports them: reportMy… / reportOrg…);
 # msg_reported_a is a company message the student already reported: reported_msg_a is that open report in the
-# feed's queue (target_type message) with its kept copy (adminGetReportedMessages). Fixtures run in name order.
+# feed's queue (target_type message) with its kept copy (adminGetReportedMessages); reported_msg_resolved is the
+# same over msg_resolved_a, dismissed (BE-183). Fixtures run in name order.
 version: 1
 fixtures:
   request_student_a: { kind: request, company: company_a, sender: company_member, student: student }
   conversation_student_a: { kind: conversation, company: company_a, sender: company_member, student: student }
   msg_company_a: { kind: message, conversation: conversation_student_a, side: company, sender: company_member }
   msg_reported_a: { kind: message, conversation: conversation_student_a, side: company, sender: company_admin }
+  msg_resolved_a: { kind: message, conversation: conversation_student_a, side: company, sender: company_admin }
   msg_student_a: { kind: message, conversation: conversation_student_a, side: student, sender: student }
   reported_msg_a: { kind: message_report, conversation: conversation_student_a, message: msg_reported_a, reporter: student }
+  reported_msg_resolved: { kind: message_report, conversation: conversation_student_a, message: msg_resolved_a, reporter: student, status: dismissed }

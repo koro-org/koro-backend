@@ -144,6 +144,34 @@ func TestHTTP_UpdateOrg_ETagRoundTrip(t *testing.T) {
 	}
 }
 
+// TestHTTP_UpdateOrg_NewTaxID (BE-183): the body's reauth reaches the proof of
+// a new tax identifier; without it 403, with it the company is back in review.
+func TestHTTP_UpdateOrg_NewTaxID(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	id := authztest.ID("company_a")
+	if _, _, err := e.store.InsertOrg(t.Context(), orgs.Org{ID: id, Kind: orgs.KindCompany, Name: "Matris A", Slug: "company-a", Status: orgs.StatusActive}); err != nil {
+		t.Fatal(err)
+	}
+	kind, no := orgs.TaxIDVKN, testVKN
+	if err := e.store.InsertCompany(t.Context(), orgs.Company{OrgID: id, TaxIDKind: &kind, TaxNo: &no}); err != nil {
+		t.Fatal(err)
+	}
+	app := newHTTP(t, e)
+	path := "/api/v1/orgs/" + id.String()
+	etag := call(t, app, "anonymous", http.MethodGet, path, "", nil).Header().Get("ETag")
+	tax := `"tax_no": "` + otherVKN(t) + `"`
+	rec := call(t, app, "company_admin", http.MethodPatch, path, `{`+tax+`}`, map[string]string{"If-Match": etag})
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "identity.reauth_required") {
+		t.Fatalf("PATCH without the proof = %d %s", rec.Code, rec.Body)
+	}
+	rec = call(t, app, "company_admin", http.MethodPatch, path, `{`+tax+`, "reauth": {"password": "`+goodPassword+`"}}`,
+		map[string]string{"If-Match": etag})
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"pending_review"`) {
+		t.Fatalf("PATCH with the proof = %d %s", rec.Code, rec.Body)
+	}
+}
+
 // TestSearchOrgs_SortName_TurkishCollation (T-203): ?sort=name orders by
 // name in Turkish collation (C < Ç, I < İ, O < Ö; not byte order) and the
 // cursor continues in the same order.

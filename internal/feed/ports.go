@@ -172,3 +172,18 @@ type Staff interface {
 	// PlatformAdmins returns the users holding platform_admin.
 	PlatformAdmins(ctx context.Context) ([]uuid.UUID, error)
 }
+
+// MessageReportParty is the two sides of a reported conversation (BE-183).
+type MessageReportParty struct {
+	OrgID         uuid.UUID
+	StudentUserID uuid.UUID
+}
+
+// MessageReportParties is messaging's knowledge of its reports (L10, above
+// feed; bound in cmd/koro at call time, 01 §6.3): a report's conversation is
+// messaging's, and who has a stake in the report depends on it.
+type MessageReportParties interface {
+	// PartiesOfMessageReports returns the sides of the reports among ids; a
+	// report without a kept context is absent.
+	PartiesOfMessageReports(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]MessageReportParty, error)
+}

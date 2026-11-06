@@ -100,7 +100,7 @@ func messagingPolicy() Policy {
 				}
 				return a.Owns(r)
 			case MessagingMessageReportRead:
-				return r.Type == TypeAdminSurface && AdminSurfaceVisible(a)
+				return (r.Type == TypeAdminSurface || r.Type == TypeContentReport) && AdminSurfaceVisible(a)
 			}
 			return false
 		},
@@ -125,11 +125,30 @@ func messagingPolicy() Policy {
 				}
 				return []Grant{{Role: RoleSelf}}
 			case MessagingMessageReportRead:
-				return moderators
+				return messageReportReadGrants(a, r)
 			}
 			return nil
 		},
 	}
+}
+
+// messageReportReadGrants decides on a message report's kept messages: the
+// admin surface is the moderators'; on the report itself (BE-183) nobody with
+// a stake in it reads them, and only an open or in-review one is the
+// moderators' work (Q-43: the copy serves the review). Any other status is a
+// platform admin's, an unknown one included.
+func messageReportReadGrants(a Actor, r Resource) []Grant {
+	if r.Type != TypeContentReport {
+		return moderators
+	}
+	if reportInterested(a, r) {
+		return nil
+	}
+	switch r.Attr(AttrStatus) {
+	case "open", "in_review":
+		return moderators
+	}
+	return []Grant{{Role: RolePlatformAdmin}}
 }
 
 // messagingCompanyGrants returns the S grants of cmm (recruiter) and cma

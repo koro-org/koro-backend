@@ -467,6 +467,7 @@ func (u *usersFake) erase(id uuid.UUID) {
 type reportsFake struct {
 	mu      sync.Mutex
 	reports []filed
+	status  map[uuid.UUID]feed.ReportStatus // open unless set
 	fail    error
 }
 
@@ -494,6 +495,30 @@ func (r *reportsFake) FileMessageReport(ctx context.Context, a authz.Actor, in f
 	f := filed{tx: fakeTxOf(ctx), id: uuid.NewV7(), reporter: a.UserID, in: in}
 	r.reports = append(r.reports, f)
 	return feed.ReportResult{ID: f.id, Created: true}, nil
+}
+
+func (r *reportsFake) MessageReportFacts(_ context.Context, reportID uuid.UUID) (feed.MessageReportFacts, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, f := range r.reports {
+		if f.id == reportID {
+			st, ok := r.status[reportID]
+			if !ok {
+				st = feed.ReportOpen
+			}
+			return feed.MessageReportFacts{ReporterUserID: f.reporter, Status: st}, nil
+		}
+	}
+	return feed.MessageReportFacts{}, feed.ErrNotFound
+}
+
+func (r *reportsFake) setStatus(reportID uuid.UUID, st feed.ReportStatus) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.status == nil {
+		r.status = map[uuid.UUID]feed.ReportStatus{}
+	}
+	r.status[reportID] = st
 }
 
 func (r *reportsFake) rollback(tx int) {

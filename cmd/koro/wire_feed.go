@@ -12,6 +12,7 @@ import (
 	"koro/internal/identity"
 	"koro/internal/notify"
 	"koro/internal/platform/db"
+	"koro/internal/platform/problem"
 )
 
 // feedWiring wires the feed module (L9; 01 §4.14). First owner: BE-027.
@@ -77,7 +78,7 @@ func (w *feedWiring) build(c *container) error {
 		Store: store, Tx: tx, Outbox: c.infra.outbox, Queue: c.infra.queue, Audit: c.audit.svc, Orgs: c.orgs.svc,
 		Idempotency: c.infra.idempotency, Clock: c.infra.clock, Log: c.infra.log.With("module", "feed"),
 		ReviewThreshold: c.infra.cfg.Feed.ReviewThreshold, ReportHideThreshold: c.infra.cfg.Feed.ReportHideThreshold,
-		Sender: feedSender{c: c}, Staff: feedStaff{c: c},
+		Sender: feedSender{c: c}, Staff: feedStaff{c: c}, MessageParties: feedMessageParties{c: c},
 	}
 	if svc := c.outreach.svc; svc != nil {
 		d.Targeting = svc
@@ -106,6 +107,17 @@ func (w *feedWiring) build(c *container) error {
 	c.sweepers = append(c.sweepers, mod.Sweeper)
 	c.orgs.logoKeeper = mod.Service
 	return nil
+}
+
+// feedMessageParties adapts messaging (L10, built after feed) to
+// feed.MessageReportParties, read at call time; no messaging → 503.
+type feedMessageParties struct{ c *container }
+
+func (m feedMessageParties) PartiesOfMessageReports(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]feed.MessageReportParty, error) {
+	if m.c.messaging.svc == nil {
+		return nil, problem.ErrUnavailable
+	}
+	return m.c.messaging.svc.PartiesOfMessageReports(ctx, ids)
 }
 
 // feedSender adapts notify (L3) to feed.Sender, read at call time; a

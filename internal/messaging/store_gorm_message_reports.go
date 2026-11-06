@@ -77,6 +77,21 @@ func (s gormStore) MessageReport(ctx context.Context, reportID uuid.UUID) (Messa
 	return rows[0], msgs, nil
 }
 
+// MessageReportContexts implements Store.
+//
+// cross-org: reports are addressed by their IDs on the admin surface.
+func (s gormStore) MessageReportContexts(ctx context.Context, ids []uuid.UUID) ([]MessageReport, error) {
+	out := []MessageReport{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	if err := db.Conn(ctx, s.orm).Raw(`SELECT `+messageReportCols+` FROM message_reports WHERE report_id = ANY(CAST( @ids AS uuid[]))`,
+		map[string]any{"ids": db.UUIDArray(ids)}).Scan(&out).Error; err != nil {
+		return nil, wrap("message report contexts", err)
+	}
+	return out, nil
+}
+
 // CountReportedMessagesBy implements Store.
 //
 // cross-org: the data subject's own messages (KVKK erasure).

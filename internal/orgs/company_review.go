@@ -91,10 +91,74 @@ var freeMailDomains = map[string]bool{
 	"protonmail.com": true, "proton.me": true, "pm.me": true, "tutanota.com": true, "tuta.io": true,
 	"fastmail.com": true, "hey.com": true,
 	"mynet.com": true, "superonline.com": true, "ttmail.com": true, "turk.net": true,
+	"web.de": true, "t-online.de": true, "qq.com": true, "163.com": true, "naver.com": true, "libero.it": true,
+	"wp.pl": true, "seznam.cz": true, "comcast.net": true,
 }
 
-// freeMailDomain reports whether d (lower case) is a free mailbox provider.
-func freeMailDomain(d string) bool { return freeMailDomains[d] }
+// disposableMailDomains are throw-away mailbox services (BE-183): an address
+// there says nothing about who holds it. Common ones only: the admin's review
+// remains the gate.
+var disposableMailDomains = map[string]bool{
+	"mailinator.com": true, "guerrillamail.com": true, "guerrillamail.net": true, "sharklasers.com": true,
+	"10minutemail.com": true, "temp-mail.org": true, "tempmail.com": true, "tempail.com": true, "yopmail.com": true,
+	"trashmail.com": true, "getnada.com": true, "maildrop.cc": true, "dispostable.com": true, "fakeinbox.com": true,
+	"throwawaymail.com": true, "moakt.com": true, "mohmal.com": true, "emailondeck.com": true,
+}
+
+// mailProviderBrands are the mailbox providers with regional domains
+// (outlook.de, yahoo.co.uk; BE-183): the first label of such a domain, over a
+// regional suffix.
+var mailProviderBrands = map[string]bool{
+	"gmail": true, "googlemail": true, "hotmail": true, "outlook": true, "live": true, "msn": true, "yahoo": true,
+	"ymail": true, "icloud": true, "aol": true, "gmx": true, "yandex": true, "zoho": true, "protonmail": true,
+	"proton": true, "tutanota": true, "fastmail": true,
+}
+
+// regionalSecondLevels are the second levels under a country code.
+var regionalSecondLevels = map[string]bool{"co": true, "com": true, "net": true, "org": true, "ne": true, "or": true}
+
+// regionalProviderDomain reports whether d is a provider's regional domain.
+func regionalProviderDomain(d string) bool {
+	brand, rest, ok := strings.Cut(d, ".")
+	if !ok || !mailProviderBrands[brand] {
+		return false
+	}
+	labels := strings.Split(rest, ".")
+	switch len(labels) {
+	case 1:
+		return len(labels[0]) == 2 || labels[0] == "com" || labels[0] == "net"
+	case 2:
+		return regionalSecondLevels[labels[0]] && len(labels[1]) == 2
+	}
+	return false
+}
+
+// academicDomain reports whether d is under an academic or school suffix
+// (.edu, .edu.tr, .ac.uk, .k12.tr): a whole institution's addresses, not one
+// company's (BE-183). A company of a university's technopark may name such a
+// domain, so it is accepted, but holding an address there verifies nothing.
+func academicDomain(d string) bool {
+	labels := strings.Split(d, ".")
+	n := len(labels)
+	switch {
+	case n >= 2 && labels[n-1] == "edu":
+		return true
+	case n >= 3 && len(labels[n-1]) == 2:
+		sl := labels[n-2]
+		return sl == "edu" || sl == "ac" || sl == "k12"
+	}
+	return false
+}
+
+// freeMailDomain reports whether d (lower case) is a mailbox anyone can hold:
+// never a company's own e-mail domain.
+func freeMailDomain(d string) bool {
+	return freeMailDomains[d] || disposableMailDomains[d] || regionalProviderDomain(d)
+}
+
+// sharedMailDomain reports whether an address at d (lower case) cannot show
+// that its holder speaks for one company: domain_verified never holds there.
+func sharedMailDomain(d string) bool { return freeMailDomain(d) || academicDomain(d) }
 
 // addressDomain is the domain of an e-mail address in lower case, "" for
 // an address without one.
@@ -115,7 +179,7 @@ func addressDomain(email string) string {
 // change applies only after the new one is confirmed. No user directory
 // or an unknown user → false.
 func (s *service) holdsAddressAt(ctx context.Context, userID uuid.UUID, domain string) (bool, error) {
-	if s.d.Users == nil || domain == "" || freeMailDomain(domain) {
+	if s.d.Users == nil || domain == "" || sharedMailDomain(domain) {
 		return false, nil
 	}
 	c, err := s.d.Users.Contact(ctx, userID)

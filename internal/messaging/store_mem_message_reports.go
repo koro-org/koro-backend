@@ -48,6 +48,19 @@ func (m *MemStore) MessageReport(_ context.Context, reportID uuid.UUID) (Message
 	return r, slices.Clone(m.reported[reportID]), nil
 }
 
+// MessageReportContexts implements Store.
+func (m *MemStore) MessageReportContexts(_ context.Context, ids []uuid.UUID) ([]MessageReport, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []MessageReport{}
+	for _, id := range ids {
+		if r, ok := m.reports[id]; ok {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
 // CountReportedMessagesBy implements Store.
 func (m *MemStore) CountReportedMessagesBy(_ context.Context, userID uuid.UUID) (int, error) {
 	m.mu.Lock()

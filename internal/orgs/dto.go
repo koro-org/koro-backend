@@ -52,7 +52,7 @@ type CompanyTaxDTO struct {
 	TaxNoMasked    bool   `json:"tax_no_masked,omitempty" doc:"tax_no shows only its last 4 digits"`
 	TaxOffice      string `json:"tax_office,omitempty"`
 	TaxIDValid     bool   `json:"tax_id_valid" doc:"A VKN or TCKN that passes its check digits was given"`
-	DomainVerified bool   `json:"domain_verified" doc:"email_domain is verified: the founder's or an editor's verified address is at it"`
+	DomainVerified bool   `json:"domain_verified" doc:"email_domain is verified: the founder's or an editor's verified address is at it; never for an academic or shared mail domain"`
 }
 
 // OrgPublicDTO is the public profile of an org (04 §2.2 getOrg). club and
@@ -149,7 +149,7 @@ type AdminCompanyReviewDTO struct {
 	TaxIDKind      string `json:"tax_id_kind,omitempty" enum:"vkn,tckn"`
 	TaxIDValid     bool   `json:"tax_id_valid" doc:"A VKN or TCKN that passes its check digits was given"`
 	EmailDomain    string `json:"email_domain,omitempty"`
-	DomainVerified bool   `json:"domain_verified" doc:"false: no e-mail domain, or no applicant address at it (warn the reviewer)"`
+	DomainVerified bool   `json:"domain_verified" doc:"false: no e-mail domain, no applicant address at it, or an academic or shared mail domain (warn the reviewer)"`
 }
 
 // AdminOrgList is a page of AdminOrgDTO.
@@ -175,7 +175,7 @@ func toPublicDTO(v OrgView) OrgPublicDTO {
 	if c := v.Company; c != nil {
 		d.Company = &CompanyPublicDTO{SectorCode: str(c.SectorCode), SizeBand: str(c.SizeBand), HQCity: str(c.HQCity)}
 		if v.Manage {
-			d.Company.EmailDomain, d.Company.DomainVerifiedAt = str(c.EmailDomain), utc(c.DomainVerifiedAt)
+			d.Company.EmailDomain, d.Company.DomainVerifiedAt = str(c.EmailDomain), utc(c.domainVerifiedAt())
 			t := toTaxDTO(*c, v.FullTaxNo)
 			d.Company.CompanyTaxDTO = &t
 		}
@@ -197,7 +197,7 @@ func toOrgDTO(v OrgView) OrgDTO {
 	if c := v.Company; c != nil {
 		d.Company = &CompanyDTO{
 			SectorCode: str(c.SectorCode), SizeBand: str(c.SizeBand), EmailDomain: str(c.EmailDomain),
-			DomainVerifiedAt: utc(c.DomainVerifiedAt), HQCity: str(c.HQCity), CompanyTaxDTO: toTaxDTO(*c, v.FullTaxNo),
+			DomainVerifiedAt: utc(c.domainVerifiedAt()), HQCity: str(c.HQCity), CompanyTaxDTO: toTaxDTO(*c, v.FullTaxNo),
 		}
 	}
 	return d

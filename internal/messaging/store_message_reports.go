@@ -20,6 +20,9 @@ type messageReportStore interface {
 	// messages, oldest first, or ErrNotFound (not a message report, or
 	// gone).
 	MessageReport(ctx context.Context, reportID uuid.UUID) (MessageReport, []ReportedMessage, error)
+	// MessageReportContexts returns the context rows of the reports among
+	// ids, in no order; a report without one is absent (BE-183).
+	MessageReportContexts(ctx context.Context, ids []uuid.UUID) ([]MessageReport, error)
 	// CountReportedMessagesBy counts the kept messages the user wrote
 	// (KVKK erasure: retained with their report).
 	CountReportedMessagesBy(ctx context.Context, userID uuid.UUID) (int, error)

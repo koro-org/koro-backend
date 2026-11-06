@@ -295,7 +295,7 @@ components:
       additionalProperties: false
       properties:
         domain_verified:
-          description: "false: no e-mail domain, or no applicant address at it (warn the reviewer)"
+          description: "false: no e-mail domain, no applicant address at it, or an academic or shared mail domain (warn the reviewer)"
           type: boolean
         email_domain:
           type: string
@@ -3676,7 +3676,7 @@ components:
       additionalProperties: false
       properties:
         domain_verified:
-          description: "email_domain is verified: the founder's or an editor's verified address is at it"
+          description: "email_domain is verified: the founder's or an editor's verified address is at it; never for an academic or shared mail domain"
           type: boolean
         domain_verified_at:
           format: date-time
@@ -3761,7 +3761,7 @@ components:
       additionalProperties: false
       properties:
         domain_verified:
-          description: "Only for the company's editors. email_domain is verified: the founder's or an editor's verified address is at it"
+          description: "Only for the company's editors. email_domain is verified: the founder's or an editor's verified address is at it; never for an academic or shared mail domain"
           type: boolean
         domain_verified_at:
           description: Only for the company's editors
@@ -17177,6 +17177,9 @@ components:
           maxLength: 200
           minLength: 2
           type: string
+        reauth:
+          $ref: "#/components/schemas/ReauthDTO"
+          description: "Re-authentication proof (03 §6.2): only for a new tax identifier of a company past its review"
         sector_code:
           description: Companies only
           maxLength: 40
@@ -24728,7 +24731,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/admin/reports:
     get:
-      description: "The moderation queue: oldest first (sort=-created_at: newest first). The reporter's identity is shown here."
+      description: "The moderation queue: oldest first (sort=-created_at: newest first). The reporter's identity is shown here. A message report of a conversation the caller is a side of, or one they filed, is left out: a page may hold fewer items than its limit, even none, and still have a next page."
       operationId: adminListReports
       parameters:
         - description: Page size
@@ -24824,7 +24827,7 @@ paths:
       x-koro-surface: admin
   /api/v1/admin/reports/{report_id}:
     get:
-      description: "The report with a summary of its target (the post or organization, its trust level, its open reports). A post target carries its images (media) and the images edits took off it after its publication (dropped_media, BE-158), each with a 5-minute URL. A message report (target_type message, BE-162b) has no target here: its conversation's messages are read one report at a time with a justification (adminGetReportedMessages)."
+      description: "The report with a summary of its target (the post or organization, its trust level, its open reports). A post target carries its images (media) and the images edits took off it after its publication (dropped_media, BE-158), each with a 5-minute URL. A message report (target_type message, BE-162b) has no target here: its conversation's messages are read one report at a time with a justification (adminGetReportedMessages). A message report of a conversation the caller is a side of, or one they filed, is 403."
       operationId: adminGetReport
       parameters:
         - description: Report ID
@@ -24861,7 +24864,7 @@ paths:
       x-koro-surface: admin
   /api/v1/admin/reports/{report_id}/messages:
     get:
-      description: "The moderators' only view of a conversation (Q-43): the reported message and at most 5 before it, as they stood when the report was filed (oldest first), never the rest of the conversation. Every read needs X-Koro-Access-Reason and is recorded with it (audit, messaging.message_report.read); the conversation's parties are not notified (that would reveal the report). A report that is not a message report, or is gone, is 404. Work the report itself with adminGetReport / adminResolveReport."
+      description: "The moderators' only view of a conversation (Q-43): the reported message and at most 5 before it, as they stood when the report was filed (oldest first), never the rest of the conversation. Every read needs X-Koro-Access-Reason and is recorded with it (audit, messaging.message_report.read); the conversation's parties are not notified (that would reveal the report). A report that is not a message report, or is gone, is 404. Nobody who is a side of the conversation or filed the report reads it (403, also for platform admins); once the report is resolved only a platform admin does (a moderator: 403). Work the report itself with adminGetReport / adminResolveReport."
       operationId: adminGetReportedMessages
       parameters:
         - description: Content report ID (an unknown, malformed or non-message report's ID is 404)
@@ -24906,7 +24909,7 @@ paths:
       x-koro-surface: admin
   /api/v1/admin/reports/{report_id}/resolve:
     post:
-      description: "in_review takes the report (assign_to_me assigns it to the caller); actioned needs a moderation action taken with the report (409 feed.moderation_action_required) or, for a message report (BE-162b: the measure is the company's or the user's suspension, or the conversation closed), a resolution_note saying what was done (422); dismissed closes it. A resolved report takes no other change (409 feed.invalid_state). Nobody resolves their own report. The reporter is told the report was handled."
+      description: "in_review takes the report (assign_to_me assigns it to the caller); actioned needs a moderation action taken with the report (409 feed.moderation_action_required) or, for a message report (BE-162b: the measure is the company's or the user's suspension, or the conversation closed), a resolution_note saying what was done (422); dismissed closes it. A resolved report takes no other change (409 feed.invalid_state). Nobody resolves their own report, nor a message report of a conversation they are a side of (403). The reporter is told the report was handled."
       operationId: adminResolveReport
       parameters:
         - description: Report ID
@@ -34392,7 +34395,7 @@ paths:
       x-koro-rate-limit: read_default
       x-koro-surface: public
     patch:
-      description: "If-Match with the ETag of getOrg is required: missing → 428, stale → 412. Company fields apply to companies only. A suspended org cannot be changed by its members (403 orgs.org_suspended)."
+      description: "If-Match with the ETag of getOrg is required: missing → 428, stale → 412. Company fields apply to companies only. A suspended org cannot be changed by its members (403 orgs.org_suspended). Replacing the tax identifier on file of a company past its review needs re-authentication (reauth; 403 identity.reauth_required, identity.reauth_failed) and, when a member does it, sends the active company back to pending_review until a platform admin verifies it again. The other changes need no proof."
       operationId: updateOrg
       parameters:
         - description: Organization ID
@@ -34442,6 +34445,7 @@ paths:
         - orgs
       x-koro-action: orgs.org.update
       x-koro-rate-limit: write_default
+      x-koro-reauth: true
       x-koro-surface: org
       x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/audience-counts:

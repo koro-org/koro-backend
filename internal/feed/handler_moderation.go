@@ -45,8 +45,10 @@ func registerModeration(api huma.API, h handler) {
 
 	op.Register(api, "feed", huma.Operation{
 		OperationID: "adminListReports", Method: http.MethodGet, Path: "/admin/reports",
-		Summary:     "List content reports",
-		Description: "The moderation queue: oldest first (sort=-created_at: newest first). The reporter's identity is shown here.",
+		Summary: "List content reports",
+		Description: "The moderation queue: oldest first (sort=-created_at: newest first). The reporter's identity is shown here. " +
+			"A message report of a conversation the caller is a side of, or one they filed, is left out: a page may hold " +
+			"fewer items than its limit, even none, and still have a next page.",
 	}, op.Meta{Action: string(authz.FeedReportList), Surface: op.SurfaceAdmin}, h.listReports)
 
 	op.Register(api, "feed", huma.Operation{
@@ -56,7 +58,7 @@ func registerModeration(api huma.API, h handler) {
 			"A post target carries its images (media) and the images edits took off it after its publication " +
 			"(dropped_media, BE-158), each with a 5-minute URL. A message report (target_type message, BE-162b) has no " +
 			"target here: its conversation's messages are read one report at a time with a justification " +
-			"(adminGetReportedMessages).",
+			"(adminGetReportedMessages). A message report of a conversation the caller is a side of, or one they filed, is 403.",
 	}, op.Meta{Action: string(authz.FeedReportRead), Surface: op.SurfaceAdmin}, h.getReport)
 
 	op.Register(api, "feed", huma.Operation{
@@ -66,7 +68,8 @@ func registerModeration(api huma.API, h handler) {
 			"action taken with the report (409 feed.moderation_action_required) or, for a message report (BE-162b: " +
 			"the measure is the company's or the user's suspension, or the conversation closed), a resolution_note " +
 			"saying what was done (422); dismissed closes it. A resolved " +
-			"report takes no other change (409 feed.invalid_state). Nobody resolves their own report. The reporter " +
+			"report takes no other change (409 feed.invalid_state). Nobody resolves their own report, nor a message " +
+			"report of a conversation they are a side of (403). The reporter " +
 			"is told the report was handled.",
 	}, op.Meta{Action: string(authz.FeedReportResolve), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional},
 		h.resolveReport)

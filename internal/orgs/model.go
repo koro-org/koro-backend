@@ -137,7 +137,18 @@ func (c Company) TaxIDValid() bool {
 
 // DomainVerified reports whether the e-mail domain is verified (the admin
 // review's domain_verified).
-func (c Company) DomainVerified() bool { return c.EmailDomain != nil && c.DomainVerifiedAt != nil }
+func (c Company) DomainVerified() bool {
+	return c.EmailDomain != nil && c.DomainVerifiedAt != nil && !sharedMailDomain(*c.EmailDomain)
+}
+
+// domainVerifiedAt is the verification's time while it holds: a row verified
+// before its domain counted as shared shows none (BE-183).
+func (c Company) domainVerifiedAt() *time.Time {
+	if !c.DomainVerified() {
+		return nil
+	}
+	return c.DomainVerifiedAt
+}
 
 // Size bands of companies.size_band.
 var sizeBands = []string{"1-10", "11-50", "51-200", "201-1000", "1000+"}

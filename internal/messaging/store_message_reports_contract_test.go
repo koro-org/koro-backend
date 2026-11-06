@@ -91,6 +91,13 @@ func messageReportContract(t *testing.T, newStore func(t *testing.T) (messaging.
 		if _, _, err := s.MessageReport(ctx, uuid.NewV7()); !errors.Is(err, messaging.ErrNotFound) {
 			t.Fatalf("unknown report = %v", err)
 		}
+		contexts, err := s.MessageReportContexts(ctx, []uuid.UUID{report, uuid.NewV7()})
+		if err != nil || len(contexts) != 1 || contexts[0].ReportID != report || contexts[0].OrgID != org || contexts[0].StudentUserID != student {
+			t.Fatalf("MessageReportContexts = %+v, %v", contexts, err)
+		}
+		if contexts, err := s.MessageReportContexts(ctx, nil); err != nil || len(contexts) != 0 {
+			t.Fatalf("MessageReportContexts(nil) = %+v, %v", contexts, err)
+		}
 	})
 
 	t.Run("checks", func(t *testing.T) {

@@ -25,8 +25,9 @@ import (
 // "conversation" (BE-162) is the open conversation of such a request,
 // accepted; a "message" (BE-162b) is a message of a conversation fixture
 // on one side, by a sender; a "message_report" (BE-162b) is the student
-// reporter's open content report of a message fixture of their
-// conversation in the feed's queue, with its kept copy (the message alone). Fixtures run in name order: a message's
+// reporter's content report of a message fixture of their conversation in
+// the feed's queue (open, or the resolved status given), with its kept copy
+// (the message alone). Fixtures run in name order: a message's
 // name sorts after its conversation's, a report's after its message's.
 func (w *messagingWiring) matrixFixtures(fx *matrixFixtures) error {
 	ctx := context.Background()
@@ -154,8 +155,13 @@ func (w *messagingWiring) matrixMessageReport(ctx context.Context, fx *matrixFix
 	if !ok {
 		return fmt.Errorf("the matrix needs the feed's in-memory store, got %T", w.late.feed.built)
 	}
-	if err := queue.PutReport(feed.Report{ID: id, ReporterUserID: reporter, TargetType: feed.TargetMessage, TargetID: mid,
-		Reason: feed.ReasonHarassment, Status: feed.ReportOpen, CreatedAt: matrixOrgTime, UpdatedAt: matrixOrgTime}); err != nil {
+	report := feed.Report{ID: id, ReporterUserID: reporter, TargetType: feed.TargetMessage, TargetID: mid,
+		Reason: feed.ReasonHarassment, Status: feed.ReportOpen, CreatedAt: matrixOrgTime, UpdatedAt: matrixOrgTime}
+	if st, _ := f.Fields["status"].(string); st != "" { // a resolved one (BE-183)
+		at := matrixOrgTime
+		report.Status, report.ResolvedAt = feed.ReportStatus(st), &at
+	}
+	if err := queue.PutReport(report); err != nil {
 		return err
 	}
 	conv, err := fx.Ref(f, "conversation")

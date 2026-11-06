@@ -108,6 +108,9 @@ type Reports interface {
 	//
 	// sync-write: feed.MessageReports.FileMessageReport
 	FileMessageReport(ctx context.Context, a authz.Actor, in feed.MessageReportInput) (feed.ReportResult, error)
+	// MessageReportFacts returns the reporter and the status of a message
+	// report, or feed.ErrNotFound (BE-183).
+	MessageReportFacts(ctx context.Context, reportID uuid.UUID) (feed.MessageReportFacts, error)
 }
 
 // StudentNames is students' level 3 name lookup (L7; BE-162b): the names a

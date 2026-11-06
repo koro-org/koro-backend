@@ -118,8 +118,10 @@ func feedPolicy() Policy {
 					return orgProfileVisible(a, r)
 				}
 				return false
-			case FeedReportList, FeedReportRead, FeedReviewQueueList, FeedModerationActionList:
+			case FeedReportList, FeedReviewQueueList, FeedModerationActionList:
 				return r.Type == TypeAdminSurface && AdminSurfaceVisible(a)
+			case FeedReportRead:
+				return AdminSurfaceVisible(a) && (r.Type == TypeAdminSurface || r.Type == TypeContentReport)
 			case FeedReportResolve, FeedPostModerate, FeedOrgModerate:
 				// The admin surface, then the decided target: an admin
 				// resource is no secret (403, never 404).
@@ -154,11 +156,11 @@ func feedPolicy() Policy {
 				return gs
 			case FeedReportCreate:
 				return []Grant{{Role: RoleUserUnverified}, {Role: RoleStudent}, {Role: RoleStudentMinor}}
-			case FeedReportList, FeedReportRead, FeedReviewQueueList, FeedModerationActionList:
+			case FeedReportList, FeedReviewQueueList, FeedModerationActionList:
 				return moderators
-			case FeedReportResolve:
-				if r.Type == TypeContentReport && a.Owns(r) {
-					return nil // nobody resolves their own report
+			case FeedReportRead, FeedReportResolve:
+				if reportInterested(a, r) {
+					return nil // nobody works a report they have a stake in
 				}
 				return moderators
 			case FeedPostModerate:
@@ -177,6 +179,34 @@ func feedPolicy() Policy {
 // moderators are the grants of the moderation actions (03 §5.7 mod, pad;
 // both MFA roles, k-mfa).
 var moderators = []Grant{{Role: RoleModerator}, {Role: RolePlatformAdmin}}
+
+// AttrReportParty is the optional TypeContentReport Attr: the user who is a
+// party of the reported conversation (a message report's student; BE-183).
+const AttrReportParty = "report_party_user"
+
+// ContentReportResource is the authz view of a content report: the reporter
+// as owner, its status and, for a message report, the sides of the reported
+// conversation (the company as OrgID, the student as AttrReportParty; nil
+// otherwise). Feed and messaging both decide on it (BE-183).
+func ContentReportResource(id, reporter uuid.UUID, status string, orgID, partyUserID *uuid.UUID) Resource {
+	r := Resource{Type: TypeContentReport, ID: id, OrgID: orgID, OwnerUserID: &reporter,
+		Attrs: map[string]string{AttrStatus: status}}
+	if partyUserID != nil {
+		r.Attrs[AttrReportParty] = partyUserID.String()
+	}
+	return r
+}
+
+// reportInterested reports whether a has a stake in the content report r:
+// they filed it, belong to the org it names or are the party it names. The
+// rule binds platform admins too, as orgModerationGrants does.
+func reportInterested(a Actor, r Resource) bool {
+	if r.Type != TypeContentReport {
+		return false
+	}
+	return a.Owns(r) || r.OrgID != nil && a.MemberOf(*r.OrgID) ||
+		a.IsUser() && r.Attr(AttrReportParty) == a.UserID.String()
+}
 
 // orgModerationGrants is feed.org.moderate on the admin surface or on the
 // decided org (Attrs moderation_action, trust_level): nobody moderates an

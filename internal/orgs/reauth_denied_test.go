@@ -9,11 +9,12 @@ import (
 	"koro/internal/audit/audittest"
 	"koro/internal/authz"
 	"koro/internal/identity"
+	"koro/internal/orgs"
 )
 
 // TestReauthDenied_EveryROperation (03 §6.2, BE-074): every orgs R
 // operation (orgs.org.suspend: suspend and reactivate, orgs.org.close,
-// orgs.ownership.transfer) audits a refused proof — wrong (403
+// orgs.ownership.transfer, orgs.org.update with a new tax identifier) audits a refused proof — wrong (403
 // identity.reauth_failed) or missing (403 identity.reauth_required) — as
 // one denied reauth_failed record of the org. Close and transfer read the
 // org first, so their record is scoped to it; suspend and reactivate check
@@ -71,6 +72,24 @@ func TestReauthDenied_EveryROperation(t *testing.T) {
 					return err
 				},
 				denied: audit.Event{ResourceID: &id, OrgID: &id}}
+		}},
+		{name: "updateOrg new tax identifier", action: authz.OrgsOrgUpdate, setup: func(t *testing.T, e *env) op {
+			v, owner := e.company(t, "Vergi Değiştiren Şirket")
+			id := v.Org.ID
+			if _, err := e.svc.AdminVerifyOrg(t.Context(), pad(t), id, ""); err != nil {
+				t.Fatal(err)
+			}
+			vkn := otherVKN(t)
+			return op{actor: owner,
+				call: func(ctx context.Context, a authz.Actor, p identity.ReauthProof) error {
+					cur, err := e.svc.GetOrg(ctx, a, id)
+					if err != nil {
+						return err
+					}
+					_, err = e.svc.UpdateOrg(ctx, a, id, cur.ETag, orgs.OrgPatch{TaxNo: &vkn, Proof: p})
+					return err
+				},
+				denied: audit.Event{ResourceID: &id, OrgID: &id, Metadata: map[string]any{"fields": []string{"tax_id"}}}}
 		}},
 		{name: "transferOrgOwnership", action: authz.OrgsOwnershipTransfer, setup: func(t *testing.T, e *env) op {
 			v, owner := e.company(t, "Devir Şirketi")

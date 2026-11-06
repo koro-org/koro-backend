@@ -161,7 +161,7 @@ func cleanEmailDomain(loc, s string) (*string, error) {
 		return nil, problem.Field(loc, "must be a domain name such as example.com")
 	}
 	if freeMailDomain(d) { // BE-165: not a company's own domain
-		return nil, problem.Field(loc, "must be the company's own domain, not a free e-mail provider")
+		return nil, problem.Field(loc, "must be the company's own domain, not a free or disposable e-mail provider")
 	}
 	return &d, nil
 }

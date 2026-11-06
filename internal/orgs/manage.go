@@ -8,6 +8,7 @@ import (
 
 	"koro/internal/authz"
 	"koro/internal/files"
+	"koro/internal/identity"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/idempotency"
@@ -35,6 +36,9 @@ type OrgPatch struct {
 	TaxNo     *string
 	TCKN      *string
 	TaxOffice *string
+	// Proof is the re-authentication proof a reviewed company's new tax
+	// identifier needs (BE-183; read for that change only).
+	Proof reauthProof
 }
 
 func (p OrgPatch) companyFields() bool {
@@ -70,21 +74,21 @@ func writable(a authz.Actor, o Org) error {
 // replaced or removed logo file is deleted in the transaction, after the
 // row stops naming it (files.DeleteReplaced, BE-155), unless the moderators
 // keep it for a report on the org (dropLogo, BE-180); org.updated then
-// revalidates the public page.
+// revalidates the public page. A new tax identifier of a reviewed company
+// takes the proof, checked before the transaction, and sends a member's
+// company back to review (taxChange, BE-183).
 func (s *service) UpdateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, ifMatch string, p OrgPatch) (OrgView, error) {
+	proved, err := s.taxChangeProof(ctx, a, id, ifMatch, p)
+	if err != nil {
+		return OrgView{}, err
+	}
 	var out Org
-	err := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
+	err = s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		o, err := s.orgs().LockOrg(ctx, id)
 		if err != nil {
 			return err
 		}
-		if err := authz.Can(ctx, a, authz.OrgsOrgUpdate, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
-			return err
-		}
-		if err := writable(a, o); err != nil {
-			return err
-		}
-		if err := httpx.CheckIfMatch(ifMatch, httpx.ETag(o.UpdatedAt)); err != nil {
+		if err := checkUpdate(ctx, a, o, ifMatch); err != nil {
 			return err
 		}
 		if p.empty() {
@@ -93,6 +97,18 @@ func (s *service) UpdateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, if
 		next, changed, err := s.applyPatch(ctx, a, o, p)
 		if err != nil {
 			return err
+		}
+		newTax, err := s.taxChange(ctx, o, p)
+		if err != nil {
+			return err
+		}
+		if newTax && proved == "" { // the company was reviewed after the first read
+			return identity.ErrReauthRequired
+		}
+		reopen := newTax && o.Status == StatusActive && !a.HasPlatformRole(authz.PlatformAdmin)
+		if reopen {
+			next.Status, next.VerifiedAt, next.VerifiedBy = StatusPendingReview, nil, nil
+			changed = append(changed, "status")
 		}
 		if out, err = s.orgs().UpdateOrg(ctx, next); err != nil {
 			return err
@@ -110,7 +126,17 @@ func (s *service) UpdateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, if
 		if err := s.emitOrgUpdated(ctx, o, changed); err != nil {
 			return err
 		}
-		return s.d.Audit.Log(ctx, auditEvent(a, authz.OrgsOrgUpdate, o.ID, "", map[string]any{"fields": changed}))
+		meta := map[string]any{"fields": changed}
+		if newTax {
+			meta["reauth"] = proved
+		}
+		if reopen {
+			if err := s.emitReviewRequested(ctx, out); err != nil {
+				return err
+			}
+			meta["from"], meta["to"] = string(o.Status), string(next.Status)
+		}
+		return s.d.Audit.Log(ctx, auditEvent(a, authz.OrgsOrgUpdate, o.ID, "", meta))
 	})
 	if err != nil {
 		return OrgView{}, err
@@ -118,6 +144,73 @@ func (s *service) UpdateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, if
 	v, err := s.view(ctx, out)
 	v.FullTaxNo = fullTaxNo(a)
 	return v, err
+}
+
+// checkUpdate is what updateOrg asks of the caller on the org: authz (404/403),
+// the status rule (403 orgs.org_suspended, 409), If-Match (428/412).
+func checkUpdate(ctx context.Context, a authz.Actor, o Org, ifMatch string) error {
+	if err := authz.Can(ctx, a, authz.OrgsOrgUpdate, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
+		return err
+	}
+	if err := writable(a, o); err != nil {
+		return err
+	}
+	return httpx.CheckIfMatch(ifMatch, httpx.ETag(o.UpdatedAt))
+}
+
+// taxChangeProof checks the proof of a new tax identifier and returns its kind
+// ("" when p needs none). It runs before the transaction, as the other R
+// operations do: the proof's hashing must not hold the org's row, and its
+// denied record must outlive the refusal. The caller's right comes first, so a
+// proof is never checked for someone who may not make the change.
+func (s *service) taxChangeProof(ctx context.Context, a authz.Actor, id uuid.UUID, ifMatch string, p OrgPatch) (string, error) {
+	if !p.taxID() {
+		return "", nil
+	}
+	o, err := s.orgs().GetOrg(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if err := checkUpdate(ctx, a, o, ifMatch); err != nil {
+		return "", err
+	}
+	newTax, err := s.taxChange(ctx, o, p)
+	if err != nil || !newTax {
+		return "", err
+	}
+	return s.reauth(ctx, a, p.Proof, reauthDenied(authz.OrgsOrgUpdate, o.ID, true, map[string]any{"fields": []string{"tax_id"}}))
+}
+
+// taxChange reports whether p replaces the tax identifier on file of a company
+// past its review with another one (BE-183). A company in review shows the
+// admin whatever it holds, and a first identifier (a company from before
+// BE-165) replaces nothing. The same VKN again is no change; a TCKN is not
+// stored, so a TCKN given over a TCKN cannot be compared and counts as one.
+func (s *service) taxChange(ctx context.Context, o Org, p OrgPatch) (bool, error) {
+	if !p.taxID() || o.Kind != KindCompany || o.Status == StatusPendingReview {
+		return false, nil
+	}
+	val := func(p *string) string {
+		if p == nil {
+			return ""
+		}
+		return *p
+	}
+	tax, err := cleanTaxID(val(p.TaxNo), val(p.TCKN))
+	if err != nil || tax.kind == nil {
+		return false, err // a blank one is applyPatch's refusal
+	}
+	c, err := s.companies().GetCompany(ctx, o.ID)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		return false, nil
+	case err != nil:
+		return false, err
+	case c.TaxIDKind == nil:
+		return false, nil
+	}
+	same := *tax.kind == TaxIDVKN && *c.TaxIDKind == TaxIDVKN && equalPtr(c.TaxNo, tax.no)
+	return !same, nil
 }
 
 // dropLogo ends the logo o named and next no longer does: it goes with its

@@ -301,3 +301,35 @@ func reportOf(reporter uuid.UUID) func(authztest.Persona) authz.Resource {
 		return authz.Resource{Type: authz.TypeContentReport, ID: uuid.NewV7(), OwnerUserID: &reporter}
 	}
 }
+
+// TestFeedPolicy_ReportOfAConversationSide (BE-183): a side of the reported
+// conversation neither reads nor resolves the report, whatever their platform
+// role; another moderator does both, and a report that names no side stays
+// the moderators' work.
+func TestFeedPolicy_ReportOfAConversationSide(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	org, student := authztest.ID("company_a"), authztest.ID("student")
+	reporter := uuid.NewV7()
+	report := authz.ContentReportResource(uuid.NewV7(), reporter, "open", &org, &student)
+	plain := authz.ContentReportResource(uuid.NewV7(), reporter, "open", nil, nil)
+	for _, act := range []authz.Action{authz.FeedReportRead, authz.FeedReportResolve} {
+		for _, name := range []string{"moderator", "platform_admin"} {
+			base := persona(t, name)
+			wantErr(t, authz.Can(ctx, base, act, report), nil, false)
+			wantErr(t, authz.Can(ctx, base, act, plain), nil, false)
+			member := base
+			member.Memberships = append(slices.Clone(base.Memberships), authz.Membership{OrgID: org, OrgKind: authz.OrgCompany,
+				Role: authz.MemberRecruiter})
+			wantErr(t, authz.Can(ctx, member, act, report), authz.ErrForbidden, false)
+			wantErr(t, authz.Can(ctx, member, act, plain), nil, false)
+			side := base
+			side.UserID = student
+			wantErr(t, authz.Can(ctx, side, act, report), authz.ErrForbidden, false)
+			filer := base
+			filer.UserID = reporter
+			wantErr(t, authz.Can(ctx, filer, act, plain), authz.ErrForbidden, false)
+		}
+		wantErr(t, authz.Can(ctx, persona(t, "support"), act, report), authz.ErrForbidden, false)
+	}
+}

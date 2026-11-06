@@ -61,8 +61,11 @@ func Register(api huma.API, svc Service) {
 		OperationID: "updateOrg", Method: http.MethodPatch, Path: "/orgs/{org_id}",
 		Summary: "Update an organization's profile",
 		Description: "If-Match with the ETag of getOrg is required: missing → 428, stale → 412. Company fields apply to " +
-			"companies only. A suspended org cannot be changed by its members (403 orgs.org_suspended).",
-	}, op.Meta{Action: string(authz.OrgsOrgUpdate), Surface: op.SurfaceOrg}, h.updateOrg)
+			"companies only. A suspended org cannot be changed by its members (403 orgs.org_suspended). Replacing the tax " +
+			"identifier on file of a company past its review needs re-authentication (reauth; 403 " +
+			"identity.reauth_required, identity.reauth_failed) and, when a member does it, sends the active company back " +
+			"to pending_review until a platform admin verifies it again. The other changes need no proof.",
+	}, op.Meta{Action: string(authz.OrgsOrgUpdate), Surface: op.SurfaceOrg, Reauth: true}, h.updateOrg)
 
 	op.Register(api, "orgs", huma.Operation{
 		OperationID: "closeOrg", Method: http.MethodPost, Path: "/orgs/{org_id}/close",
@@ -336,18 +339,19 @@ type updateOrgInput struct {
 	OrgPath
 	IfMatch string `header:"If-Match" doc:"ETag of getOrg (required: missing → 428, stale → 412)"`
 	Body    struct {
-		Name        *string `json:"name,omitempty" minLength:"2" maxLength:"200"`
-		Description *string `json:"description,omitempty" maxLength:"5000" doc:"Empty string clears it"`
-		LogoFileID  *string `json:"logo_file_id,omitempty" doc:"An org_logo upload (createUpload); empty string removes the logo"`
-		WebsiteURL  *string `json:"website_url,omitempty" maxLength:"2048" doc:"https:// only; empty string clears it"`
-		City        *string `json:"city,omitempty" maxLength:"60" doc:"Empty string clears it"`
-		SectorCode  *string `json:"sector_code,omitempty" maxLength:"40" doc:"Companies only"`
-		SizeBand    *string `json:"size_band,omitempty" maxLength:"10" doc:"Companies only: 1-10, 11-50, 51-200, 201-1000, 1000+"`
-		EmailDomain *string `json:"email_domain,omitempty" maxLength:"253" doc:"Companies only; no free e-mail provider. A change resets its verification; a member whose account address is at the domain verifies it."`
-		HQCity      *string `json:"hq_city,omitempty" maxLength:"60" doc:"Companies only; empty string clears it"`
-		TaxNo       *string `json:"tax_no,omitempty" maxLength:"20" doc:"Companies only: a VKN replaces the tax identifier on file; it cannot be cleared (empty string: 422 orgs.tax_id_required)"`
-		TCKN        *string `json:"tckn,omitempty" maxLength:"20" doc:"Companies only: a sole trader's TCKN replaces the tax identifier on file (checked, never stored or returned)"`
-		TaxOffice   *string `json:"tax_office,omitempty" maxLength:"100" doc:"Companies only; cannot be cleared (422 orgs.tax_id_required)"`
+		Name        *string            `json:"name,omitempty" minLength:"2" maxLength:"200"`
+		Description *string            `json:"description,omitempty" maxLength:"5000" doc:"Empty string clears it"`
+		LogoFileID  *string            `json:"logo_file_id,omitempty" doc:"An org_logo upload (createUpload); empty string removes the logo"`
+		WebsiteURL  *string            `json:"website_url,omitempty" maxLength:"2048" doc:"https:// only; empty string clears it"`
+		City        *string            `json:"city,omitempty" maxLength:"60" doc:"Empty string clears it"`
+		SectorCode  *string            `json:"sector_code,omitempty" maxLength:"40" doc:"Companies only"`
+		SizeBand    *string            `json:"size_band,omitempty" maxLength:"10" doc:"Companies only: 1-10, 11-50, 51-200, 201-1000, 1000+"`
+		EmailDomain *string            `json:"email_domain,omitempty" maxLength:"253" doc:"Companies only; no free e-mail provider. A change resets its verification; a member whose account address is at the domain verifies it."`
+		HQCity      *string            `json:"hq_city,omitempty" maxLength:"60" doc:"Companies only; empty string clears it"`
+		TaxNo       *string            `json:"tax_no,omitempty" maxLength:"20" doc:"Companies only: a VKN replaces the tax identifier on file; it cannot be cleared (empty string: 422 orgs.tax_id_required)"`
+		TCKN        *string            `json:"tckn,omitempty" maxLength:"20" doc:"Companies only: a sole trader's TCKN replaces the tax identifier on file (checked, never stored or returned)"`
+		TaxOffice   *string            `json:"tax_office,omitempty" maxLength:"100" doc:"Companies only; cannot be cleared (422 orgs.tax_id_required)"`
+		Reauth      *consent.ReauthDTO `json:"reauth,omitempty" doc:"Re-authentication proof (03 §6.2): only for a new tax identifier of a company past its review"`
 	}
 }
 
@@ -361,7 +365,7 @@ func (h handler) updateOrg(ctx context.Context, in *updateOrgInput) (*orgOutput,
 	p := OrgPatch{
 		Name: b.Name, Description: b.Description, WebsiteURL: b.WebsiteURL, City: b.City,
 		SectorCode: b.SectorCode, SizeBand: b.SizeBand, EmailDomain: b.EmailDomain, HQCity: b.HQCity,
-		TaxNo: b.TaxNo, TCKN: b.TCKN, TaxOffice: b.TaxOffice,
+		TaxNo: b.TaxNo, TCKN: b.TCKN, TaxOffice: b.TaxOffice, Proof: proofOf(b.Reauth),
 	}
 	if b.LogoFileID != nil {
 		if *b.LogoFileID == "" {

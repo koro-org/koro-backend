@@ -55,6 +55,9 @@ type MessageReporting interface {
 	// justification (10–500 characters, 422 without it), audited with the
 	// read.
 	ReportedMessages(ctx context.Context, a authz.Actor, reportID uuid.UUID, reason string) (ReportedMessagesView, error)
+	// PartiesOfMessageReports implements feed.MessageReportParties (BE-183):
+	// a module call, no actor; the feed decides.
+	PartiesOfMessageReports(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]feed.MessageReportParty, error)
 }
 
 // ReportMessage implements Service. Order: authz on the path and the
@@ -124,8 +127,10 @@ func (s *service) ReportMessage(ctx context.Context, a authz.Actor, p Party, con
 // ReportedMessages implements Service. Order: authz on the admin surface
 // (moderators and platform admins; 403/404 before anything else) → the
 // justification (422) → the report's copy (404 for a report that is no
-// message report, or gone) → the audit record of the read with the
-// justification, in its own transaction, before anything is returned (no
+// message report, or gone) → the decision on the report itself (BE-183, 403
+// with a denied record: a stake in the report; a resolved report is a
+// platform admin's) → the audit record of the read with the justification,
+// in its own transaction, before anything is returned (no
 // org scope: the company's trail never shows the moderators' reads; no
 // break_glass flag: the parties are not told, which would tell them of the
 // report and so of its reporter, Q-43). Only the copy is read: the live
@@ -138,8 +143,18 @@ func (s *service) ReportedMessages(ctx context.Context, a authz.Actor, reportID 
 	if err != nil {
 		return ReportedMessagesView{}, err
 	}
+	if s.d.Reports == nil {
+		return ReportedMessagesView{}, problem.ErrUnavailable
+	}
 	r, msgs, err := s.messageReports().MessageReport(ctx, reportID)
 	if err != nil {
+		return ReportedMessagesView{}, err
+	}
+	facts, err := s.d.Reports.MessageReportFacts(ctx, reportID)
+	if err != nil {
+		return ReportedMessagesView{}, err
+	}
+	if err := s.canReadReported(ctx, a, r, facts, reason); err != nil {
 		return ReportedMessagesView{}, err
 	}
 	company, err := s.d.Orgs.Get(ctx, r.OrgID)
@@ -153,6 +168,7 @@ func (s *service) ReportedMessages(ctx context.Context, a authz.Actor, reportID 
 			ResourceID: &id, Reason: reason, Metadata: map[string]any{
 				"conversation_id": r.ConversationID.String(), "message_id": r.MessageID.String(),
 				"company_org_id": r.OrgID.String(), audit.MetaSubjectUserID: r.StudentUserID.String(), "messages": len(msgs),
+				"report_status": string(facts.Status),
 			},
 		}.By(a))
 	}); err != nil {
@@ -160,4 +176,39 @@ func (s *service) ReportedMessages(ctx context.Context, a authz.Actor, reportID 
 	}
 	slices.SortFunc(msgs, func(x, y ReportedMessage) int { return compareID(x.MessageID, y.MessageID) })
 	return ReportedMessagesView{Report: r, Company: company, Messages: msgs}, nil
+}
+
+// canReadReported decides on the read of report r's copy. A refusal is
+// recorded as denied in its own transaction, without org scope (the company's
+// trail never shows a report).
+func (s *service) canReadReported(ctx context.Context, a authz.Actor, r MessageReport, facts feed.MessageReportFacts, reason string) error {
+	org, student := r.OrgID, r.StudentUserID
+	err := authz.Can(ctx, a, authz.MessagingMessageReportRead,
+		authz.ContentReportResource(r.ReportID, facts.ReporterUserID, string(facts.Status), &org, &student))
+	if err == nil || !errors.Is(err, authz.ErrForbidden) {
+		return err
+	}
+	id := r.ReportID
+	if lerr := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
+		return s.d.Audit.Log(ctx, audit.Event{
+			Action: string(authz.MessagingMessageReportRead), Outcome: audit.Denied, ResourceType: authz.TypeContentReport,
+			ResourceID: &id, Reason: reason, Metadata: map[string]any{"report_status": string(facts.Status)},
+		}.By(a))
+	}); lerr != nil {
+		return lerr
+	}
+	return err
+}
+
+// PartiesOfMessageReports implements MessageReporting.
+func (s *service) PartiesOfMessageReports(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]feed.MessageReportParty, error) {
+	rows, err := s.messageReports().MessageReportContexts(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID]feed.MessageReportParty, len(rows))
+	for _, r := range rows {
+		out[r.ReportID] = feed.MessageReportParty{OrgID: r.OrgID, StudentUserID: r.StudentUserID}
+	}
+	return out, nil
 }

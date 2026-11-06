@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/obs"
 	"koro/internal/platform/privacy"
+	"koro/internal/platform/problem"
 )
 
 // useMemStore installs the in-memory messaging stores used by service,
@@ -186,5 +188,22 @@ func TestWire_MessagingLiveAndReports(t *testing.T) {
 	read := paths["/api/v1/admin/reports/{report_id}/messages"].Get
 	if rl := fmt.Sprint(read.Extensions["x-koro-rate-limit"]); rl != "break_glass" {
 		t.Fatalf("adminGetReportedMessages rate class = %s, want break_glass", rl)
+	}
+}
+
+// TestWire_FeedMessageParties (BE-183): the feed asks messaging, built after
+// it, at call time; no messaging is 503, never a report without its sides.
+func TestWire_FeedMessageParties(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := feedMessageParties{c: c}.PartiesOfMessageReports(t.Context(), []uuid.UUID{uuid.NewV7()})
+	if err != nil || len(got) != 0 {
+		t.Fatalf("parties = %+v, %v", got, err)
+	}
+	if _, err := (feedMessageParties{c: &container{}}).PartiesOfMessageReports(t.Context(), nil); !errors.Is(err, problem.ErrUnavailable) {
+		t.Fatalf("without messaging = %v", err)
 	}
 }

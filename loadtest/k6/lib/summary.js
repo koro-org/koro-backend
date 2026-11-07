@@ -1,6 +1,6 @@
 // handleSummary output (OPS-005): a Markdown report for the GitHub job
 // summary (and stdout) plus the raw summary JSON. Pure JS, no remote jslib.
-import { ENDPOINTS } from './config.js';
+import { ENDPOINTS, LIST_TARGET_MS } from './config.js';
 
 function ms(v) {
   if (v === undefined || v === null || Number.isNaN(v)) return '–';
@@ -82,6 +82,11 @@ export function markdown(data, meta) {
   lines.push(`- Check-in taraması: ${counter('koro_checkin_results')} (ilk tarama ok, sonrası already_checked_in)`);
   lines.push(`- Tükenen teklif (409 sold_out): ${counter('koro_orders_sold_out')} · keşif sonuç satırı: ${counter('koro_discovery_results')}`);
   lines.push(`- 429 (rate limit): ${counter('koro_rate_limited')}`);
+  if (meta.scenarios.includes('lists')) {
+    lines.push(`- Süzgeçli liste (BE-193): veri ${meta.listRows ? `${meta.listRows} etkinlik + ${Math.floor(meta.listRows / 10)} kulüp (loadtest/bulk.sql)` : 'yalnız demo seed'}` +
+      ` · "Robotik" yoklaması ${meta.listProbe === undefined ? '–' : meta.listProbe} satır · dönen satır ${counter('koro_list_rows')}` +
+      ` · boş sayfa ${counter('koro_list_empty')} · hedef p95 < ${LIST_TARGET_MS} ms (BA §6.3)`);
+  }
   const fails = failedChecks(data.root_group || {}, []);
   if (fails.length > 0) {
     lines.push('');

@@ -11,6 +11,7 @@ doldurur).
 | `compose.yaml` | Test ortamı: altyapı + `deploy/Dockerfile` imajıyla api/worker; tek seferlik kurulum adımları (`setup` profili) |
 | `prep.sql` | Seed sonrası hazırlık (yalnız yönetici yüzeyinin yapacağı iki şey; aşağıda) + `pg_stat_statements` |
 | `students.sql` | k6'nın oturum açtığı demo öğrencilerin listesi (JSON) |
+| `bulk.sql` | Süzgeçli listelerin hacmi (BE-193): veritabanında `generate_series` ile 10 000 etkinlik + 1 000 kulüp |
 | `k6/main.js` | k6 giriş noktası: seçenekler, `setup`, senaryolar, `handleSummary` |
 | `k6/lib/config.js` | Profiller, senaryo seçimi, eşikler |
 | `k6/lib/setup.js` | Senaryoların ortak hazırlığı (gerçek API üzerinden) |
@@ -25,13 +26,15 @@ GitHub → **Actions → loadtest → Run workflow** (yalnız `main` ya da bir d
 gh workflow run loadtest.yml -R koro-org/koro-backend -f profile=pilot
 gh workflow run loadtest.yml -R koro-org/koro-backend -f profile=smoke -f scenarios=checkin,orders
 gh workflow run loadtest.yml -R koro-org/koro-backend -f profile=stress -f rate_limits=true
+gh workflow run loadtest.yml -R koro-org/koro-backend -f profile=smoke -f scenarios=lists -f list_rows=10000
 gh run watch -R koro-org/koro-backend    # son koşuyu izle
 ```
 
 | Girdi | Varsayılan | Ne |
 |---|---|---|
 | `profile` | `pilot` | `smoke` (~2 dk, betik doğrulaması) · `pilot` (2 dk artış + 10 dk kararlı + 30 sn iniş) · `soak` (30 dk kararlı, raporun dayanıklılık testi) · `stress` (5 basamakta pilot yükünün ~2,5 katına, dirsek noktasını bulmak için) |
-| `scenarios` | `all` | Virgüllü liste: `browse,signup,register,checkin,orders,discovery` |
+| `scenarios` | `all` | Virgüllü liste: `browse,signup,register,checkin,orders,discovery,lists` |
+| `list_rows` | `10000` | `bulk.sql`'in ürettiği etkinlik sayısı (kulüp = onda biri; `0` = üretme; 0–100 000) |
 | `vus` | profilinki | `browse`'un tepe VU sayısı (1–5000) |
 | `duration` | profilinki | Kararlı evrenin süresi (`90s`, `5m` …; `stress`'te basamak başına) |
 | `rate_limits` | `false` | `true`: API `RATE_LIMIT_ENABLED=true` ile açılır (aşağıda) |
@@ -54,6 +57,7 @@ varış hızı sabit: API yavaşlayınca sunulan yük azalmaz). Pilot ölçeği:
 | `checkin` | Görevli (event staff, `scanner`) QR okutur; %20'sinde kapı sayacı (`check-ins/stats`) | 2/sn | 300 kişi 3 kapıdan ~3 dakikada |
 | `orders` | Şirket sahibi (TOTP'li oturum) sipariş verir → havale talimatı (referans = sipariş no, IBAN) → sipariş detayı → iptal | 0,2/sn | Seyrek; yol çalışsın diye sıfırın üstünde |
 | `discovery` | İK (recruiter, %70) ve şirket sahibi keşif araması (üniversite/sınıf filtresi), %30'unda takma adlı profil | 1/sn | Birkaç işe alımcı sayfa çeviriyor |
+| `lists` | Süzgeçli public listeler, `bulk.sql` hacminin üstünde (BE-193): etkinlikte `q` (Türkçe büyük/küçük harf çeşitleriyle), kategori, şehir, üniversite, tarih aralığı ve bunların birleşimi (kategori + şehir/üniversite + tarih, bazen biçim ya da sözcük); kulüplerde `q`, kategori, üniversite, ad sırası. ¼'ünde aynı süzgeçle 2. sayfa. Çoğu oturumsuz ziyaretçi, ⅓'ü (varsa) öğrenci oturumu | 10/sn | Web'in etkinlik/kulüp süzgeç formu (WEB-069); BA §6.3 "10 000 kayıtla < 1 sn" |
 
 Toplam ~500 VU (400 `browse` + açık modellerin uçuştaki VU'ları). `stress` her hızı ×5, `browse`'u 1000 VU'ya çıkarır.
 
@@ -69,6 +73,8 @@ Toplam ~500 VU (400 `browse` + açık modellerin uçuştaki VU'ları). `stress` 
   okutulunca kapı tekrar okutmaya geçer (`already_checked_in`, 200).
 - 60 öğrenci keşfe açılır (`PATCH /me/privacy`, `discovery_profile` açık rıza metniyle; ayar ve rıza kaydı uygulamada
   aynı işlemde).
+- `lists` açıksa bir yoklama: `GET /events?q=Robotik&limit=100`; `LIST_ROWS ≥ 1000` iken 20 satırdan azsa uyarı
+  (bulk.sql koşmamış demektir). Sayı özette görünür.
 - Siparişler demo seed'in Model A havale tekliflerinden (`demo_targeted_post`, `demo_club_sponsorship`; 9'ar adet);
   her sipariş hemen iptal edildiği için adet teklife döner. Örtüşen siparişlerde `409 catalog.sold_out` beklenen yanıttır
   (`koro_orders_sold_out`). Hizmet kodu yetmez: Model C doğrudan teklifi (`db/seed/commerce_direct.go`) de
@@ -82,6 +88,22 @@ Demo seed iki şeyi içermiyor ve ikisi de normalde yönetici yüzeyinden (parol
 `discovery_profile` için yayımlanmış bir açık rıza metni (öğrencinin keşfe açılması bunu ister) ve demo şirketine
 `discovery_access` hakkı (keşif araması bunu ister). Bu iki satır test veritabanına doğrudan yazılır; geri kalan her şey
 (rıza, kayıt, sipariş …) API'den geçer. Üretim kodu değişmez.
+
+### `bulk.sql` (BE-193): 10 000 kayıtlık liste verisi
+
+Demo seed'de 34 etkinlik ve 24 kulüp var; süzgeçli listenin 10 000 kayıtta ölçülmesi için (BA §6.3, uyum denetimi E-5)
+iş, `prep.sql`'den sonra veritabanında `generate_series` ile üretir (repoda büyük dosya yok):
+
+- `clubs` sentetik kulüp (varsayılan 1 000; `list_rows / 10`): etkin, sahiplenilmiş, üniversitelere dağılmış, yalnız
+  hassas olmayan kategoriler; adı konu + numara ("Robotik Kulübü 123").
+- `events` etkinlik (varsayılan 10 000): bu kulüplerin, demo kulüplerinin (hassaslar hariç) ve üniversitelerin; %80
+  önümüzdeki 240 güne yayılmış yayımlı (her 50'de biri iptal), %20 son 180 günde bitmiş (`completed`); %90 herkese açık,
+  %5 üniversiteye özel, %5 yalnız üyelere; her kategori, üç biçim, on şehir; adı konu + tür + numara ("Robotik
+  Atölyesi 123"); çevrim içi bağlantılar `example.test`.
+
+Liste uçları yalnız bu tabloları okuduğundan satırlar doğrudan yazılır; yazma yolları (kayıt, bilet, sipariş) k6 ile
+API'den ve demo seed'in kendi etkinlikleri üzerinde ölçülür. Satırlar sentetiktir: kişi, adres, gerçek kurum yok.
+Sonunda `ANALYZE` (planlayıcı hacmi görsün). İdempotent.
 
 ## Rate limit
 
@@ -113,6 +135,7 @@ sunucularında (ayrı makineler) pay vardır.
 | kimlik (`kind:auth`: kayıt, e-posta onayı, giriş) | p95 < 1,5 s | argon2id bilerek yavaştır ve `PASSWORD_HASH_CONCURRENCY` (4) ile sınırlıdır |
 | `checkin` | p95 < 500 ms | Kapıda insan bekler; yazma eşiğinden sıkı |
 | `discovery_search` | p95 < 800 ms | En ağır okuma (aday taraması + sıralama + audit) |
+| süzgeçli liste (`kind:list`) ve her süzgeç ayrı (`events_filter_*`, `clubs_filter`) | p95 < 1 s | BA §6.3 "10 000 kayıtla yanıt süresi < 1 sn" (uyum denetimi E-5); süzgeç başına eşik, yavaş bir süzgeç hızlıların arkasına saklanmasın diye |
 | `koro_signup_email_ms` | p95 < 15 s | Doğrulama e-postası: outbox → worker → SMTP (aktarıcı 1 sn'de bir) |
 
 Uç başına p50/p95/p99 tablosu, eşiği olmayan uçlar için de özette yer alır (`max>=0` boş eşikleri bunun içindir).
@@ -121,7 +144,7 @@ Uç başına p50/p95/p99 tablosu, eşiği olmayan uçlar için de özette yer al
 ## Sonuç nasıl okunur
 
 - **Job summary:** eşik tablosu (geçti/KALDI), uç tablosu, akış göstergeleri (e-posta gecikmesi, tekrar kayıt, tükenen
-  teklif, 429), kalan check'ler, `pg_stat_statements`'tan toplam süreye göre ilk 10 sorgu. İş, k6 bir eşik yüzünden
+  teklif, 429, süzgeçli liste: veri hacmi, yoklama, dönen satır, boş sayfa), kalan check'ler, `pg_stat_statements`'tan toplam süreye göre ilk 10 sorgu. İş, k6 bir eşik yüzünden
   çıkarsa (çıkış 99) kırmızı biter; artifact yine yüklenir.
 - **Artifact `OPS-005-loadtest-<run>-<deneme>`** (14 gün):
   - `OPS-005-report.html`: k6 web dashboard raporu (zamana göre gecikme/istek/VU grafikleri; tarayıcıda aç),
@@ -145,6 +168,6 @@ ortamı açar. Özet JSON'dan `setup_data` (oturum token'ları) çıkarılır; �
 - k6 sürümü: workflow'da `K6_VERSION` + `K6_SHA256` (sürüm sayfasındaki `k6-vX.Y.Z-checksums.txt`'den
   `linux-amd64.tar.gz` satırı).
 - Yeni bir pilot akışı: `k6/lib/scenarios.js`'e fonksiyon, `config.js`'te `ALL_SCENARIOS`, profil hızları ve
-  `ENDPOINTS` (uç adı → `read|write|auth`), `main.js`'te export, workflow'un girdi doğrulamasına ad.
+  `ENDPOINTS` (uç adı → `read|write|auth|list`), `main.js`'te export, workflow'un girdi doğrulamasına ad.
 - Yerel deneme gerekirse (önerilmez; Mac yük kuralı): `scripts/serial.sh` kilidiyle, `profile=smoke`, workflow'daki
   adımların aynısı (`docker compose -f loadtest/compose.yaml …`), bitince `docker compose … down -v`.

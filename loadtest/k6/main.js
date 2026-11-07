@@ -6,7 +6,7 @@ import { env, enabledScenarios, scenarios, thresholds } from './lib/config.js';
 import { markdown } from './lib/summary.js';
 
 export { setup } from './lib/setup.js';
-export { browse, signup, register, checkin, orders, discovery } from './lib/scenarios.js';
+export { browse, signup, register, checkin, orders, discovery, lists } from './lib/scenarios.js';
 
 export const options = {
   scenarios: scenarios(),
@@ -24,6 +24,7 @@ export function handleSummary(data) {
   const md = markdown(data, {
     profile: env.profile, scenarios: enabledScenarios(), rateLimits: env.rateLimits,
     setupFailed: data.setup_data === undefined || data.setup_data === null,
+    listRows: env.listRows, listProbe: data.setup_data ? data.setup_data.listProbe : undefined,
   });
   // setup_data holds session tokens of the throwaway environment: keep it
   // out of the uploaded summary anyway.

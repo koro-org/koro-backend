@@ -14,6 +14,8 @@ export const custom = {
   checkinResults: new Counter('koro_checkin_results'),
   ordersSoldOut: new Counter('koro_orders_sold_out'),
   discoveryHits: new Counter('koro_discovery_results'),
+  listRows: new Counter('koro_list_rows'),
+  listEmpty: new Counter('koro_list_empty'),
 };
 
 function rfc3339(d) {
@@ -235,5 +237,106 @@ export function discovery(data) {
   if (items.length > 0 && Math.random() < 0.3) {
     check(call('GET', `/api/v1/orgs/${c.org}/discovery/profiles/${pick(items).anon_id}`, { token, ip, name: 'discovery_profile' }),
       { 'discovery profile 200': (x) => x.status === 200 });
+  }
+}
+
+// --- lists: the filtered public lists over the bulk.sql volume (BE-193) ---
+//
+// One filtered page per iteration, a quarter of them followed by the next
+// page with the same filters (the web carries them with the cursor). Most
+// callers are anonymous (the public pages); a third are signed-in students
+// when the run has any (their visibility adds university and member events
+// to the query). Search words, categories and cities are those of
+// loadtest/bulk.sql (and the demo seed), in Turkish case variants: q folds
+// İ/I/ı and ignores the circumflex. An empty page is a valid answer (a
+// narrow combination); koro_list_empty counts them per filter.
+
+const LIST_Q = ['kariyer', 'Robotik', 'YAPAY ZEKÂ', 'yapay zeka', 'girişimcilik', 'TİYATRO', 'fotoğrafçılık', 'satranç',
+  'veri bilimi', 'siber güvenlik', 'atölyesi', 'Münazara'];
+const LIST_EVENT_CATEGORIES = ['workshop', 'talk', 'competition', 'career', 'social', 'trip', 'sports', 'culture', 'volunteering', 'other'];
+const LIST_CITIES = ['Ankara', 'İstanbul', 'istanbul', 'İzmir', 'Bursa', 'Eskişehir', 'Antalya', 'Konya', 'Trabzon'];
+const LIST_FORMATS = ['in_person', 'online', 'hybrid'];
+const LIST_CLUB_CATEGORIES = ['academic', 'technology', 'career', 'entrepreneurship', 'arts', 'culture', 'sports',
+  'social_responsibility', 'hobby', 'other'];
+const LIST_CLUB_Q = ['Robotik', 'kulübü', 'SİNEMA', 'dans', 'havacılık', 'oyun geliştirme', 'ekonomi'];
+
+// ymd is the calendar date `days` from now (the API reads a date-only
+// starts_from / starts_to as that day in Europe/Istanbul).
+function ymd(days) {
+  return new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+}
+
+function qs(params) {
+  return params.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+}
+
+// listQuery returns [path, params] of one filtered list request `name`.
+function listQuery(name, data) {
+  const unis = data.universities || [];
+  const p = [['limit', '20']];
+  switch (name) {
+    case 'events_filter_q':
+      p.push(['q', pick(LIST_Q)]);
+      break;
+    case 'events_filter_category':
+      p.push(['category', pick(LIST_EVENT_CATEGORIES)]);
+      break;
+    case 'events_filter_city':
+      p.push(['city', pick(LIST_CITIES)]);
+      break;
+    case 'events_filter_university':
+      if (unis.length > 0) p.push(['university_id', pick(unis)]);
+      else p.push(['q', pick(LIST_Q)]);
+      break;
+    case 'events_filter_date': {
+      // a window of 1–8 weeks starting in the next 0–120 days, or (a fifth)
+      // the last month: the ended events of the list.
+      const from = Math.random() < 0.2 ? -30 : Math.floor(Math.random() * 120);
+      p.push(['starts_from', ymd(from)], ['starts_to', ymd(from + 7 * (1 + Math.floor(Math.random() * 8)))]);
+      if (Math.random() < 0.3) p.push(['sort', '-published_at']);
+      break;
+    }
+    case 'events_filter_combo': {
+      // what the web's filter form sends together: category + city or
+      // university, a date window, sometimes a format or a word.
+      p.push(['category', pick(LIST_EVENT_CATEGORIES)]);
+      if (unis.length > 0 && Math.random() < 0.5) p.push(['university_id', pick(unis)]);
+      else p.push(['city', pick(LIST_CITIES)]);
+      const from = Math.floor(Math.random() * 60);
+      p.push(['starts_from', ymd(from)], ['starts_to', ymd(from + 90)]);
+      if (Math.random() < 0.3) p.push(['format', pick(LIST_FORMATS)]);
+      if (Math.random() < 0.3) p.push(['q', pick(LIST_Q)]);
+      break;
+    }
+    default: { // clubs_filter
+      const r = Math.random();
+      if (r < 0.4) p.push(['q', pick(LIST_CLUB_Q)]);
+      if (r >= 0.3) p.push(['category', pick(LIST_CLUB_CATEGORIES)]);
+      if (unis.length > 0 && Math.random() < 0.5) p.push(['university_id', pick(unis)]);
+      if (Math.random() < 0.3) p.push(['sort', 'name']);
+      return ['/api/v1/clubs', p];
+    }
+  }
+  return ['/api/v1/events', p];
+}
+
+export function lists(data) {
+  const i = exec.scenario.iterationInTest;
+  const ip = 110000 + (i % 20000);
+  const students = data.students || [];
+  const token = students.length > 0 && Math.random() < 0.33 ? students[i % students.length].token : null;
+  const name = weighted({
+    events_filter_q: 20, events_filter_category: 14, events_filter_city: 14, events_filter_university: 14,
+    events_filter_date: 14, events_filter_combo: 12, clubs_filter: 12,
+  });
+  const [path, params] = listQuery(name, data);
+  const res = call('GET', `${path}?${qs(params)}`, { token, ip, name });
+  const b = json(res);
+  if (!check(res, { 'filtered list 200': (r) => r.status === 200 && b && Array.isArray(b.items) })) return;
+  custom.listRows.add(b.items.length, { name });
+  if (b.items.length === 0) custom.listEmpty.add(1, { name });
+  if (b.next_cursor && Math.random() < 0.25) {
+    const next = call('GET', `${path}?${qs(params.concat([['cursor', b.next_cursor]]))}`, { token, ip, name });
+    check(next, { 'filtered list next page 200': (r) => r.status === 200 });
   }
 }

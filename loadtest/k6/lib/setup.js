@@ -13,7 +13,9 @@
 //     check-in event with scanner staff and pre-issued tickets;
 //   - a part of the students opts in to discovery (PATCH /me/privacy with
 //     the consent text loadtest/prep.sql published);
-//   - the ids the reads pick from (public events, universities).
+//   - the ids the reads pick from (public events, universities);
+//   - for lists, a probe that the bulk.sql volume is there (a word search
+//     that should fill a page; a warning when it does not).
 import http from 'k6/http';
 import { sleep } from 'k6';
 import { SharedArray } from 'k6/data';
@@ -146,6 +148,13 @@ export function setup() {
   data.browseEvents = (evs.items || []).map((e) => e.event_id);
   const unis = must(call('GET', '/api/v1/universities?limit=10', { name: 'setup_unis' }), 200, 'list universities');
   data.universities = (unis.items || []).map((u) => u.university_id);
+  if (want.has('lists')) {
+    const probe = must(call('GET', '/api/v1/events?limit=100&q=Robotik', { name: 'setup_lists' }), 200, 'list probe');
+    data.listProbe = (probe.items || []).length;
+    if (env.listRows >= 1000 && data.listProbe < 20) {
+      console.warn(`lists: "Robotik" found ${data.listProbe} events with LIST_ROWS=${env.listRows}: did loadtest/bulk.sql run?`);
+    }
+  }
 
   // --- sign-up needs the current privacy notice and terms of use ---
   if (want.has('signup')) {
@@ -276,6 +285,7 @@ export function setup() {
     }
   }
   console.log(`setup: ${data.students.length} students, ${(data.regEvents || []).length} registration events, ` +
-    `${(data.tickets || []).length} tickets, ${data.discoverable || 0} discoverable, ${data.browseEvents.length} events to read`);
+    `${(data.tickets || []).length} tickets, ${data.discoverable || 0} discoverable, ${data.browseEvents.length} events to read` +
+    `${data.listProbe === undefined ? '' : `, list probe ${data.listProbe}`}`);
   return data;
 }

@@ -3,7 +3,7 @@
 //
 //   PROFILE      smoke | pilot | soak | stress (default pilot)
 //   SCENARIOS    "all" or a comma list of: browse, signup, register,
-//                checkin, orders, discovery
+//                checkin, orders, discovery, lists
 //   VUS          peak virtual users of browse (default: the profile's)
 //   DURATION     steady-state duration, e.g. 10m (default: the profile's)
 //   RATE_LIMITS  "on" when the API runs with RATE_LIMIT_ENABLED=true: a 429
@@ -14,8 +14,10 @@
 //   STUDENTS_FILE  JSON array of the demo students' e-mail addresses
 //                  (loadtest/students.sql)
 //   SUMMARY_DIR  where handleSummary writes OPS-005-summary.{json,md}
+//   LIST_ROWS    events loadtest/bulk.sql generated (0: none; the summary
+//                and setup's probe of the filtered lists report it)
 
-export const ALL_SCENARIOS = ['browse', 'signup', 'register', 'checkin', 'orders', 'discovery'];
+export const ALL_SCENARIOS = ['browse', 'signup', 'register', 'checkin', 'orders', 'discovery', 'lists'];
 
 export const env = {
   profile: (__ENV.PROFILE || 'pilot').trim(),
@@ -26,6 +28,7 @@ export const env = {
   studentsFile: __ENV.STUDENTS_FILE || '',
   summaryDir: (__ENV.SUMMARY_DIR || '.').replace(/\/+$/, ''),
   runID: (__ENV.RUN_ID || String(Date.now())).replace(/[^A-Za-z0-9]/g, '').slice(-12),
+  listRows: Math.max(0, parseInt(__ENV.LIST_ROWS || '0', 10) || 0),
 };
 
 // Pilot scale (docs/reports/teknik-rapor §8.5 targets; pilot: 2–3
@@ -39,7 +42,7 @@ export const env = {
 const PROFILES = {
   smoke: {
     ramp: '15s', steady: '1m', down: '10s', browseVUs: 10,
-    rates: { signup: 0.2, register: 1, checkin: 0.5, orders: 0.1, discovery: 0.2 },
+    rates: { signup: 0.2, register: 1, checkin: 0.5, orders: 0.1, discovery: 0.2, lists: 2 },
   },
   pilot: {
     ramp: '2m', steady: '10m', down: '30s', browseVUs: 400,
@@ -47,17 +50,18 @@ const PROFILES = {
     // popular event announced to the whole university (300 seats in a
     // minute: 5/s); checkin: 300 people through 3 doors in ~3 minutes
     // (2/s); orders: rare, kept above zero to exercise the path; discovery:
-    // a few recruiters paging through results.
-    rates: { signup: 1, register: 5, checkin: 2, orders: 0.2, discovery: 1 },
+    // a few recruiters paging through results; lists: anonymous visitors
+    // and students filtering the public event and club lists (BE-193).
+    rates: { signup: 1, register: 5, checkin: 2, orders: 0.2, discovery: 1, lists: 10 },
   },
   soak: {
     // the report's 30-minute endurance test at pilot load.
     ramp: '2m', steady: '30m', down: '30s', browseVUs: 400,
-    rates: { signup: 1, register: 5, checkin: 2, orders: 0.2, discovery: 1 },
+    rates: { signup: 1, register: 5, checkin: 2, orders: 0.2, discovery: 1, lists: 10 },
   },
   stress: {
     ramp: '2m', steady: '2m', down: '30s', browseVUs: 1000, steps: 5,
-    rates: { signup: 5, register: 25, checkin: 10, orders: 1, discovery: 5 },
+    rates: { signup: 5, register: 25, checkin: 10, orders: 1, discovery: 5, lists: 25 },
   },
 };
 
@@ -146,7 +150,7 @@ export function scenarios() {
       continue;
     }
     // signup waits for its e-mail (seconds) and needs more VUs in flight.
-    const maxVUs = { signup: 100, register: 100, checkin: 60, orders: 20, discovery: 40 }[name];
+    const maxVUs = { signup: 100, register: 100, checkin: 60, orders: 20, discovery: 40, lists: 60 }[name];
     out[name] = arrival(name, p.rates[name], p, maxVUs);
   }
   return out;
@@ -161,7 +165,15 @@ export const ENDPOINTS = {
   discovery_search: 'read', discovery_profile: 'read',
   register_account: 'auth', confirm_email: 'auth', login: 'auth',
   event_registration: 'write', my_ticket: 'read', checkin: 'write', order_create: 'write', order_cancel: 'write',
+  // BE-193: the filtered public lists over the bulk.sql volume (kind list:
+  // their own target, BA §6.3).
+  events_filter_q: 'list', events_filter_category: 'list', events_filter_city: 'list', events_filter_university: 'list',
+  events_filter_date: 'list', events_filter_combo: 'list', clubs_filter: 'list',
 };
+
+// LIST_TARGET_MS is the filtered list target: "10.000 kayıtla yanıt süresi
+// < 1 sn" (docs/reports/belge-analizi-yol-haritasi §6.3; uyum denetimi E-5).
+export const LIST_TARGET_MS = 1000;
 
 // Thresholds (README "Eşikler"). The technical report's pilot targets:
 // reads p95 < 300 ms, writes p95 < 800 ms, errors < 1 %, measured with
@@ -181,7 +193,13 @@ export function thresholds() {
     'http_req_duration{name:discovery_search}': ['p(95)<800'],
     // the verification e-mail through outbox → worker → SMTP.
     koro_signup_email_ms: ['p(95)<15000'],
+    // filtered public lists over 10,000 events (BA §6.3): every filter on
+    // its own, so a slow one cannot hide behind the fast ones.
+    'http_req_duration{kind:list}': [`p(95)<${LIST_TARGET_MS}`],
   };
+  for (const name of Object.keys(ENDPOINTS)) {
+    if (ENDPOINTS[name] === 'list') t[`http_req_duration{name:${name}}`] = [`p(95)<${LIST_TARGET_MS}`];
+  }
   for (const name of Object.keys(ENDPOINTS)) {
     const key = `http_req_duration{name:${name}}`;
     if (!t[key]) t[key] = ['max>=0'];

@@ -41,8 +41,8 @@ const TypeFeed = "feed"
 //	feed.post.create_targeted   S: as feed.post.create (k16, the targeting scope, is outreach.Compile's: 422)
 //	feed.report.create          every signed-in user (✓) on a post they see / an org whose profile they see
 //	feed.report.list            mod, pad (admin surface: no platform role → 403)
-//	feed.report.read            mod, pad (admin surface)
-//	feed.report.resolve         mod, pad (admin surface; on the report: not the reporter, Y6's spirit)
+//	feed.report.read            mod, pad (admin surface; on the report: nobody with a stake in it, see reportInterested)
+//	feed.report.resolve         mod, pad (admin surface; on the report: as feed.report.read, Y6's spirit)
 //	feed.review_queue.list      mod, pad (admin surface)
 //	feed.post.moderate          mod, pad (admin surface; on the post: not its author nor a writer of its org)
 //	feed.org.moderate           mod (k17: no suspend_org, no change of a suspended org), pad (admin surface;
@@ -180,14 +180,17 @@ func feedPolicy() Policy {
 // both MFA roles, k-mfa).
 var moderators = []Grant{{Role: RoleModerator}, {Role: RolePlatformAdmin}}
 
-// AttrReportParty is the optional TypeContentReport Attr: the user who is a
-// party of the reported conversation (a message report's student; BE-183).
+// AttrReportParty is the optional TypeContentReport Attr: the user the
+// report names as a party (a message report's student, BE-183; a post
+// report's author, BE-194).
 const AttrReportParty = "report_party_user"
 
 // ContentReportResource is the authz view of a content report: the reporter
-// as owner, its status and, for a message report, the sides of the reported
-// conversation (the company as OrgID, the student as AttrReportParty; nil
-// otherwise). Feed and messaging both decide on it (BE-183).
+// as owner, its status and the parties it names: for a message report the
+// sides of the reported conversation (the company as OrgID, the student as
+// AttrReportParty), for a post report the post's author org and author, for
+// an org report the org (nil when unknown). Feed and messaging both decide
+// on it (BE-183, BE-194).
 func ContentReportResource(id, reporter uuid.UUID, status string, orgID, partyUserID *uuid.UUID) Resource {
 	r := Resource{Type: TypeContentReport, ID: id, OrgID: orgID, OwnerUserID: &reporter,
 		Attrs: map[string]string{AttrStatus: status}}
@@ -198,8 +201,9 @@ func ContentReportResource(id, reporter uuid.UUID, status string, orgID, partyUs
 }
 
 // reportInterested reports whether a has a stake in the content report r:
-// they filed it, belong to the org it names or are the party it names. The
-// rule binds platform admins too, as orgModerationGrants does.
+// they filed it, belong to the org it names (any current membership) or are
+// the user it names. The rule binds platform admins too, as
+// orgModerationGrants does.
 func reportInterested(a Actor, r Resource) bool {
 	if r.Type != TypeContentReport {
 		return false

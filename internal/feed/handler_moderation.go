@@ -17,6 +17,12 @@ import (
 	"koro/internal/platform/problem"
 )
 
+// reportStake names who has a stake in a report, for the descriptions of the
+// report endpoints (BE-183, BE-194; authz reportInterested): nobody works
+// such a report, a platform admin included.
+const reportStake = "its reporter; a current member of the reported organization or of the reported post's " +
+	"author organization; the post's author; a side of the reported conversation: a member of its company, its student"
+
 // registerModeration adds the 9 operations of BE-032 (04 §2.7, §F.1,
 // §F.4): targeted posts, reports and moderation.
 func registerModeration(api huma.API, h handler) {
@@ -47,7 +53,7 @@ func registerModeration(api huma.API, h handler) {
 		OperationID: "adminListReports", Method: http.MethodGet, Path: "/admin/reports",
 		Summary: "List content reports",
 		Description: "The moderation queue: oldest first (sort=-created_at: newest first). The reporter's identity is shown here. " +
-			"A message report of a conversation the caller is a side of, or one they filed, is left out: a page may hold " +
+			"A report the caller has a stake in (" + reportStake + ") is left out: a page may hold " +
 			"fewer items than its limit, even none, and still have a next page.",
 	}, op.Meta{Action: string(authz.FeedReportList), Surface: op.SurfaceAdmin}, h.listReports)
 
@@ -58,7 +64,7 @@ func registerModeration(api huma.API, h handler) {
 			"A post target carries its images (media) and the images edits took off it after its publication " +
 			"(dropped_media, BE-158), each with a 5-minute URL. A message report (target_type message, BE-162b) has no " +
 			"target here: its conversation's messages are read one report at a time with a justification " +
-			"(adminGetReportedMessages). A message report of a conversation the caller is a side of, or one they filed, is 403.",
+			"(adminGetReportedMessages). A report the caller has a stake in (" + reportStake + ") is 403.",
 	}, op.Meta{Action: string(authz.FeedReportRead), Surface: op.SurfaceAdmin}, h.getReport)
 
 	op.Register(api, "feed", huma.Operation{
@@ -68,9 +74,8 @@ func registerModeration(api huma.API, h handler) {
 			"action taken with the report (409 feed.moderation_action_required) or, for a message report (BE-162b: " +
 			"the measure is the company's or the user's suspension, or the conversation closed), a resolution_note " +
 			"saying what was done (422); dismissed closes it. A resolved " +
-			"report takes no other change (409 feed.invalid_state). Nobody resolves their own report, nor a message " +
-			"report of a conversation they are a side of (403). The reporter " +
-			"is told the report was handled.",
+			"report takes no other change (409 feed.invalid_state). Nobody resolves a report they have a stake in (" +
+			reportStake + "; 403). The reporter is told the report was handled.",
 	}, op.Meta{Action: string(authz.FeedReportResolve), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional},
 		h.resolveReport)
 

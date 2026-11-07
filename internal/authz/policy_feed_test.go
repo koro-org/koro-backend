@@ -333,3 +333,38 @@ func TestFeedPolicy_ReportOfAConversationSide(t *testing.T) {
 		wantErr(t, authz.Can(ctx, persona(t, "support"), act, report), authz.ErrForbidden, false)
 	}
 }
+
+// TestFeedPolicy_ReportOfAPostOrOrgSide (BE-194): the party rule of the
+// conversation sides holds for a post report (its author org, any member
+// of it, and its author) and an org report (any member of the org),
+// whatever the platform role; a member of another org works the report.
+func TestFeedPolicy_ReportOfAPostOrOrgSide(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	club, other, author := authztest.ID("club_a"), authztest.ID("club_b"), authztest.ID("club_admin")
+	reporter := uuid.NewV7()
+	postReport := authz.ContentReportResource(uuid.NewV7(), reporter, "open", &club, &author)
+	orgReport := authz.ContentReportResource(uuid.NewV7(), reporter, "in_review", &club, nil)
+	join := func(a authz.Actor, org uuid.UUID, role authz.MemberRole) authz.Actor {
+		a.Memberships = append(slices.Clone(a.Memberships), authz.Membership{OrgID: org, OrgKind: authz.OrgClub, Role: role})
+		return a
+	}
+	for _, act := range []authz.Action{authz.FeedReportRead, authz.FeedReportResolve} {
+		for _, name := range []string{"moderator", "platform_admin"} {
+			base := persona(t, name)
+			for _, r := range []authz.Resource{postReport, orgReport} {
+				wantErr(t, authz.Can(ctx, base, act, r), nil, false)
+				wantErr(t, authz.Can(ctx, join(base, club, authz.MemberMember), act, r), authz.ErrForbidden, false)
+				wantErr(t, authz.Can(ctx, join(base, club, authz.MemberClubAdmin), act, r), authz.ErrForbidden, false)
+				wantErr(t, authz.Can(ctx, join(base, other, authz.MemberClubAdmin), act, r), nil, false)
+				filer := base
+				filer.UserID = reporter
+				wantErr(t, authz.Can(ctx, filer, act, r), authz.ErrForbidden, false)
+			}
+			writer := base
+			writer.UserID = author
+			wantErr(t, authz.Can(ctx, writer, act, postReport), authz.ErrForbidden, false)
+			wantErr(t, authz.Can(ctx, writer, act, orgReport), nil, false)
+		}
+	}
+}

@@ -54,17 +54,17 @@ func moderatedOrg(o orgs.OrgSummary, act ModAction, trust TrustLevel) authz.Reso
 }
 
 // reportResource is the authz view of a report a moderator reads or resolves:
-// the reporter as owner and, for a message report, the sides of its
-// conversation (BE-183; the zero party names none).
-func reportResource(r Report, p MessageReportParty) authz.Resource {
-	var org, student *uuid.UUID
+// the reporter as owner and the org and user its party names (BE-183,
+// BE-194; the zero party names none).
+func reportResource(r Report, p reportParty) authz.Resource {
+	var org, user *uuid.UUID
 	if p.OrgID != uuid.Nil() {
 		org = &p.OrgID
 	}
-	if p.StudentUserID != uuid.Nil() {
-		student = &p.StudentUserID
+	if p.UserID != uuid.Nil() {
+		user = &p.UserID
 	}
-	return authz.ContentReportResource(r.ID, r.ReporterUserID, string(r.Status), org, student)
+	return authz.ContentReportResource(r.ID, r.ReporterUserID, string(r.Status), org, user)
 }
 
 // postResource is the authz view of a post (03 §3.5: OrgID = the author

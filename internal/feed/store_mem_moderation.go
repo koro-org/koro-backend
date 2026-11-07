@@ -186,6 +186,23 @@ func (s *MemStore) OpenReporters(_ context.Context, t TargetType, targetID uuid.
 	return len(seen), nil
 }
 
+// PostReportAuthors implements Store.
+func (s *MemStore) PostReportAuthors(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]PostAuthor, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[uuid.UUID]PostAuthor{}
+	for _, id := range ids {
+		r, ok := s.reports[id]
+		if !ok || r.TargetType != TargetPost {
+			continue
+		}
+		if p, ok := s.posts[r.TargetID]; ok {
+			out[id] = PostAuthor{OrgID: p.OrgID, UserID: p.AuthorUserID}
+		}
+	}
+	return out, nil
+}
+
 // ReportsOf implements Store.
 func (s *MemStore) ReportsOf(_ context.Context, userID uuid.UUID) ([]Report, error) {
 	s.mu.Lock()

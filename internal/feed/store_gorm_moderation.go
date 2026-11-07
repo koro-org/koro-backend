@@ -151,6 +151,32 @@ func (s gormStore) OpenReporters(ctx context.Context, t TargetType, targetID uui
 	return int(n), nil
 }
 
+// PostReportAuthors implements Store.
+//
+// cross-org: the posts of reports the service already read on the admin
+// surface (reports have no org scope, 02 §12.9).
+func (s gormStore) PostReportAuthors(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]PostAuthor, error) {
+	out := map[uuid.UUID]PostAuthor{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		ReportID     uuid.UUID `gorm:"type:uuid;column:report_id"`
+		OrgID        uuid.UUID `gorm:"type:uuid;column:org_id"`
+		AuthorUserID uuid.UUID `gorm:"type:uuid;column:author_user_id"`
+	}
+	if err := db.Conn(ctx, s.orm).Raw(`SELECT r.id AS report_id, p.org_id, p.author_user_id
+		FROM content_reports r JOIN posts p ON p.id = r.target_id
+		WHERE r.target_type = 'post' AND r.id = ANY(CAST( @ids AS uuid[]))`,
+		map[string]any{"ids": db.UUIDArray(ids)}).Scan(&rows).Error; err != nil {
+		return nil, wrap("post report authors", err)
+	}
+	for _, r := range rows {
+		out[r.ReportID] = PostAuthor{OrgID: r.OrgID, UserID: r.AuthorUserID}
+	}
+	return out, nil
+}
+
 // ReportsOf implements Store.
 //
 // cross-org: the data subject's own reports (KVKK export).

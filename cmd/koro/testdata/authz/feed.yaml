@@ -17,7 +17,9 @@
 # the sensitive club ban — is outreach.Compile's: 422, scenarios); a company spends a targeted_post unit (company_a
 # holds 4; the "Hak yok" scenario empties company_b). Reports are every signed-in user's on what they see. The
 # moderation endpoints are the admin surface: moderator and platform_admin, every other user 403 (03 §3.6), with
-# MFA (k-mfa) and k17 (a moderator never suspends).
+# MFA (k-mfa) and k17 (a moderator never suspends). BE-183/BE-194: nobody reads or resolves a report they have a
+# stake in (its reporter; a member of the reported org or of the post's author org; the post's author; a side of the
+# reported conversation), platform_admin included.
 version: 1
 groups:
   # signed-in users without a membership in club_a (and no platform role).
@@ -719,6 +721,24 @@ operations:
           "@fd_no_platform_role": 403
           "@fd_other_staff": 403
           "@fd_post_staff": 200
+      - name: own_report
+        path_params: { report_id: report_a_by_moderator }
+        note: nobody reads a report they have a stake in, here its reporter (BE-194; members and authors are the service tests')
+        expect:
+          anonymous: 401
+          "@fd_no_platform_role": 403
+          "@fd_other_staff": 403
+          moderator: 403
+          platform_admin: 200
+      - name: org_report
+        path_params: { report_id: report_org_b }
+        note: an org report filed by platform_admin (BE-194; a member of the org is the service tests')
+        expect:
+          anonymous: 401
+          "@fd_no_platform_role": 403
+          "@fd_other_staff": 403
+          moderator: 200
+          platform_admin: 403
 
   adminResolveReport:
     method: POST
@@ -740,6 +760,24 @@ operations:
           "@fd_no_platform_role": 403
           "@fd_other_staff": 403
           "@fd_post_staff": 409
+      - name: own_report
+        path_params: { report_id: report_a_by_moderator }
+        note: nobody resolves a report they have a stake in, here its reporter (BE-194)
+        expect:
+          anonymous: 401
+          "@fd_no_platform_role": 403
+          "@fd_other_staff": 403
+          moderator: 403
+          platform_admin: 200
+      - name: org_report
+        path_params: { report_id: report_org_b }
+        note: an org report filed by platform_admin (BE-194)
+        expect:
+          anonymous: 401
+          "@fd_no_platform_role": 403
+          "@fd_other_staff": 403
+          moderator: 200
+          platform_admin: 403
 
   adminListReviewQueue:
     method: GET

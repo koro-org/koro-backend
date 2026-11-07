@@ -33,6 +33,10 @@ type reportStore interface {
 	// OpenReporters counts the users with an open report on the target (one
 	// open report per user and target: the distinct reporters).
 	OpenReporters(ctx context.Context, t TargetType, targetID uuid.UUID) (int, error)
+	// PostReportAuthors returns the author of the reported post of each post
+	// report among ids (BE-194: who has a stake in the report). Another
+	// target's report, and a report whose post is gone, is absent.
+	PostReportAuthors(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]PostAuthor, error)
 	// ReportsOf returns every report filed by userID, oldest first (KVKK
 	// export).
 	ReportsOf(ctx context.Context, userID uuid.UUID) ([]Report, error)
@@ -47,4 +51,11 @@ type ReportFilter struct {
 	Reason     ReportReason   // "": every reason
 	TargetType TargetType     // "": both
 	Newest     bool           // newest first (sort=-created_at)
+}
+
+// PostAuthor is who wrote a post: the org it speaks for and the user who
+// wrote it for the org.
+type PostAuthor struct {
+	OrgID  uuid.UUID
+	UserID uuid.UUID
 }

@@ -6,6 +6,8 @@
 # (its drafts publish at once); company_a has no settings row (new: its first posts go to review).
 # BE-032: report_a is student's open report of post_a_followers; audience_uni_a seeds 12 eligible students of
 # uni_a in students' store, so a targeted post of uni_a's students reaches k ≥ 10.
+# BE-194: report_a_by_moderator is moderator's open report of post_a_followers and report_org_b platform_admin's
+# open report of club_b: the reporter has a stake in it (no persona is a member of a reported org and a moderator).
 version: 1
 fixtures:
   post_a: { kind: post, org: club_a, author: club_admin, author_kind: club, status: published, audience: public }
@@ -26,4 +28,6 @@ fixtures:
                          audience: public }
   post_a_hidden: { kind: post, org: club_a, author: club_admin, author_kind: club, status: hidden, audience: public }
   report_a: { kind: report, reporter: student, target_type: post, target: post_a_followers, reason: spam }
+  report_a_by_moderator: { kind: report, reporter: moderator, target_type: post, target: post_a_followers, reason: spam }
+  report_org_b: { kind: report, reporter: platform_admin, target_type: org, target: club_b, reason: spam }
   audience_uni_a: { kind: audience, unis: [uni_a_university], count: 12 }

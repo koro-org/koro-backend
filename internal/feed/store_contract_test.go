@@ -1010,6 +1010,35 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (feed.Store, world)
 		}
 	})
 
+	t.Run("post report authors: the author org and author of a post report's post, none once it is gone (BE-194)", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		org, by, u := w.org(t, feed.AuthorClub), w.user(t), w.user(t)
+		p := insert(t, s, publishedAt(post(org, feed.AuthorClub, by), pub0))
+		draft := insert(t, s, post(org, feed.AuthorClub, by))
+		file := func(tt feed.TargetType, target uuid.UUID) uuid.UUID {
+			t.Helper()
+			r, _, err := s.InsertReport(ctx, feed.Report{ID: uuid.NewV7(), ReporterUserID: u, TargetType: tt, TargetID: target,
+				Reason: feed.ReasonSpam})
+			if err != nil {
+				t.Fatalf("InsertReport: %v", err)
+			}
+			return r.ID
+		}
+		rp, ro, gone := file(feed.TargetPost, p.ID), file(feed.TargetOrg, org), file(feed.TargetPost, draft.ID)
+		if err := s.DeletePost(ctx, org, draft.ID); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.PostReportAuthors(ctx, []uuid.UUID{rp, ro, gone, uuid.NewV7()})
+		if err != nil || len(got) != 1 || got[rp] != (feed.PostAuthor{OrgID: org, UserID: by}) {
+			t.Fatalf("PostReportAuthors = %+v, %v", got, err)
+		}
+		if got, err := s.PostReportAuthors(ctx, nil); err != nil || len(got) != 0 {
+			t.Fatalf("PostReportAuthors(none) = %+v, %v", got, err)
+		}
+	})
+
 	t.Run("report snapshot: written once with a post report, kept by the duplicate and the updates (BE-160)", func(t *testing.T) {
 		t.Parallel()
 		s, w := newStore(t)

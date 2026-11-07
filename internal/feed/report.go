@@ -279,34 +279,65 @@ func (s *service) MessageReportFacts(ctx context.Context, reportID uuid.UUID) (M
 	return MessageReportFacts{ReporterUserID: r.ReporterUserID, Status: r.Status}, nil
 }
 
-// messageParties returns the sides of the message reports among rows (none
-// when there is none). A message report cannot be decided on without them:
-// no port is 503, never an open door.
-func (s *service) messageParties(ctx context.Context, rows []Report) (map[uuid.UUID]MessageReportParty, error) {
-	var ids []uuid.UUID
-	for _, r := range rows {
-		if r.TargetType == TargetMessage {
-			ids = append(ids, r.ID)
-		}
-	}
-	if len(ids) == 0 {
-		return nil, nil
-	}
-	if s.d.MessageParties == nil {
-		return nil, problem.ErrUnavailable
-	}
-	return s.d.MessageParties.PartiesOfMessageReports(ctx, ids)
+// reportParty is who, besides its reporter, has a stake in a report (BE-183,
+// BE-194): the org it names (the reported org, the reported post's author
+// org, the reported conversation's company) and the user it names (the
+// post's author, the conversation's student). The zero party names none: a
+// report whose post or conversation is gone keeps its reporter's rule only.
+type reportParty struct {
+	OrgID  uuid.UUID
+	UserID uuid.UUID
 }
 
-// messageReportAccess decides on act on the single report r (BE-183) and
-// returns its sides. Another target's report has none and passes: its
-// decision stays where it was. A refusal for a stake in the report is
-// recorded as denied, in its own transaction and without org scope (the
-// reported org's trail never shows the report).
-func (s *service) messageReportAccess(ctx context.Context, a authz.Actor, act authz.Action, r Report) (MessageReportParty, error) {
-	parties, err := s.messageParties(ctx, []Report{r})
-	if err != nil || r.TargetType != TargetMessage {
-		return MessageReportParty{}, err
+// reportParties returns the parties of the reports among rows: an org
+// report's org, a post report's author (posts are feed's), a message
+// report's sides (messaging's). A message report cannot be decided on
+// without them: no port is 503, never an open door.
+func (s *service) reportParties(ctx context.Context, rows []Report) (map[uuid.UUID]reportParty, error) {
+	out := map[uuid.UUID]reportParty{}
+	var posts, messages []uuid.UUID
+	for _, r := range rows {
+		switch r.TargetType {
+		case TargetOrg:
+			out[r.ID] = reportParty{OrgID: r.TargetID}
+		case TargetPost:
+			posts = append(posts, r.ID)
+		case TargetMessage:
+			messages = append(messages, r.ID)
+		}
+	}
+	if len(posts) > 0 {
+		authors, err := s.reports().PostReportAuthors(ctx, posts)
+		if err != nil {
+			return nil, err
+		}
+		for id, w := range authors {
+			out[id] = reportParty(w)
+		}
+	}
+	if len(messages) > 0 {
+		if s.d.MessageParties == nil {
+			return nil, problem.ErrUnavailable
+		}
+		sides, err := s.d.MessageParties.PartiesOfMessageReports(ctx, messages)
+		if err != nil {
+			return nil, err
+		}
+		for id, p := range sides {
+			out[id] = reportParty{OrgID: p.OrgID, UserID: p.StudentUserID}
+		}
+	}
+	return out, nil
+}
+
+// reportAccess decides on act on the single report r and returns its party
+// (BE-183, BE-194). A refusal for a stake in the report is recorded as
+// denied, in its own transaction and without org scope (the reported org's
+// trail never shows the report).
+func (s *service) reportAccess(ctx context.Context, a authz.Actor, act authz.Action, r Report) (reportParty, error) {
+	parties, err := s.reportParties(ctx, []Report{r})
+	if err != nil {
+		return reportParty{}, err
 	}
 	p := parties[r.ID]
 	err = authz.Can(ctx, a, act, reportResource(r, p))
@@ -321,10 +352,10 @@ func (s *service) messageReportAccess(ctx context.Context, a authz.Actor, act au
 				Metadata: map[string]any{"target_type": string(r.TargetType), "status": string(r.Status)},
 			}.By(a))
 		}); lerr != nil {
-			return MessageReportParty{}, lerr
+			return reportParty{}, lerr
 		}
 	}
-	return MessageReportParty{}, err
+	return reportParty{}, err
 }
 
 // FileMessageReport implements MessageReports. A message report is never
@@ -382,8 +413,8 @@ func (s *service) autoHide(ctx context.Context, postID uuid.UUID) error {
 	return nil
 }
 
-// ListReports implements Service (feed.report.list). A message report the
-// caller has a stake in is left out of the page (BE-183): a page may hold
+// ListReports implements Service (feed.report.list). A report the caller
+// has a stake in is left out of the page (BE-183, BE-194): a page may hold
 // fewer items than its limit, even none, with a next position.
 func (s *service) ListReports(ctx context.Context, a authz.Actor, q ReportQuery) (ReportPage, error) {
 	if err := authz.Can(ctx, a, authz.FeedReportList, adminSurface); err != nil {
@@ -400,27 +431,25 @@ func (s *service) ListReports(ctx context.Context, a authz.Actor, q ReportQuery)
 		last := rows[len(rows)-1]
 		out.Next = &After{At: last.CreatedAt, ID: last.ID}
 	}
-	parties, err := s.messageParties(ctx, rows)
+	parties, err := s.reportParties(ctx, rows)
 	if err != nil {
 		return ReportPage{}, err
 	}
 	for _, r := range rows {
-		if r.TargetType == TargetMessage {
-			err := authz.Can(ctx, a, authz.FeedReportRead, reportResource(r, parties[r.ID]))
-			if errors.Is(err, authz.ErrForbidden) {
-				continue
-			}
-			if err != nil {
-				return ReportPage{}, err
-			}
+		err := authz.Can(ctx, a, authz.FeedReportRead, reportResource(r, parties[r.ID]))
+		if errors.Is(err, authz.ErrForbidden) {
+			continue
+		}
+		if err != nil {
+			return ReportPage{}, err
 		}
 		out.Items = append(out.Items, ReportView{Report: r})
 	}
 	return out, nil
 }
 
-// GetReport implements Service (feed.report.read): a message report the
-// caller has a stake in is 403 (BE-183).
+// GetReport implements Service (feed.report.read): a report the caller has
+// a stake in is 403 (BE-183, BE-194).
 func (s *service) GetReport(ctx context.Context, a authz.Actor, id uuid.UUID) (ReportView, error) {
 	if err := authz.Can(ctx, a, authz.FeedReportRead, adminSurface); err != nil {
 		return ReportView{}, err
@@ -429,7 +458,7 @@ func (s *service) GetReport(ctx context.Context, a authz.Actor, id uuid.UUID) (R
 	if err != nil {
 		return ReportView{}, err
 	}
-	if _, err := s.messageReportAccess(ctx, a, authz.FeedReportRead, r); err != nil {
+	if _, err := s.reportAccess(ctx, a, authz.FeedReportRead, r); err != nil {
 		return ReportView{}, err
 	}
 	return s.reportView(ctx, r)
@@ -509,9 +538,9 @@ func (s *service) reportedMedia(ctx context.Context, t *TargetSummary) error {
 // (taken, optionally assigned to the caller), open or in_review →
 // actioned (a moderation action was taken with the report) or dismissed.
 // A resolved report takes no other change (409); repeating its outcome is
-// a no-op. Nobody resolves their own report, nor a message report of a
-// conversation they are a side of (403, BE-183). The reporter is told the
-// report was handled (in-app, without the outcome's details).
+// a no-op. Nobody resolves a report they have a stake in (403, BE-183,
+// BE-194). The reporter is told the report was handled (in-app, without the
+// outcome's details).
 func (s *service) ResolveReport(ctx context.Context, a authz.Actor, id uuid.UUID, in ResolveInput) (ReportView, error) {
 	if err := authz.Can(ctx, a, authz.FeedReportResolve, adminSurface); err != nil {
 		return ReportView{}, err
@@ -539,7 +568,7 @@ func (s *service) ResolveReport(ctx context.Context, a authz.Actor, id uuid.UUID
 	if err != nil {
 		return ReportView{}, err
 	}
-	party, err := s.messageReportAccess(ctx, a, authz.FeedReportResolve, before)
+	party, err := s.reportAccess(ctx, a, authz.FeedReportResolve, before)
 	if err != nil {
 		return ReportView{}, err
 	}

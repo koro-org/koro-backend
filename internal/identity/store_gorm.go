@@ -568,6 +568,7 @@ func (s gormStore) CountRoleAssignments(ctx context.Context, role authz.Platform
 }
 
 // SearchUsers implements Store (users_email_uq; users_name_trgm_idx).
+// The persona and platform role filters (BE-190) narrow the same scan.
 //
 // cross-org: accounts belong to no org.
 func (s gormStore) SearchUsers(ctx context.Context, q UserSearch) ([]User, error) {
@@ -581,6 +582,13 @@ func (s gormStore) SearchUsers(ctx context.Context, q UserSearch) ([]User, error
 	}
 	if q.Status != "" {
 		tx = tx.Where("status = ?", string(q.Status))
+	}
+	if q.Persona != "" {
+		tx = tx.Where("signup_persona = ?", string(q.Persona))
+	}
+	if q.PlatformRole != "" { // platform_role_assignments_open_uq (user_id, role); 06 H-33
+		tx = tx.Where(`EXISTS (SELECT 1 FROM platform_role_assignments r
+		    WHERE r.user_id = users.id AND r.role = ? AND r.`+inEffect+`)`, string(q.PlatformRole))
 	}
 	if q.After != nil {
 		tx = tx.Where("id < ?", *q.After)

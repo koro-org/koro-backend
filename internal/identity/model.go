@@ -238,6 +238,15 @@ func privilegedRole(r authz.PlatformRole) bool {
 	return r == authz.PlatformAdmin || r == authz.PlatformFinanceAdmin || r == authz.PlatformTalentAuditor
 }
 
+// validPersona reports whether p is a users.signup_persona value.
+func validPersona(p Persona) bool {
+	switch p {
+	case PersonaStudent, PersonaCompany, PersonaUniversity, PersonaClub, PersonaPlatform:
+		return true
+	}
+	return false
+}
+
 // validPlatformRole reports whether r is a platform role of 02 §5.7.
 func validPlatformRole(r authz.PlatformRole) bool {
 	switch r {
@@ -297,13 +306,19 @@ func (t TOTP) clone() TOTP {
 
 // UserSearch is one page of adminQueryUsers, newest first. Exactly one of
 // Email (normalized, exact) and Name (a fragment of "first last") may be
-// set; neither lists every account (Status still applies).
+// set; neither lists every account (Status, Persona and PlatformRole still
+// apply).
 type UserSearch struct {
-	Email  string
-	Name   string
-	Status Status // "" = every status
-	After  *uuid.UUID
-	Limit  int
+	Email   string
+	Name    string
+	Status  Status  // "" = every status
+	Persona Persona // "" = every sign-up role (BE-190)
+	// PlatformRole keeps the accounts holding this platform role in effect
+	// (06 H-33: active or revoke_pending; a pending request grants
+	// nothing); "" = no role filter (BE-190).
+	PlatformRole authz.PlatformRole
+	After        *uuid.UUID
+	Limit        int
 }
 
 // AccountActionKind is privileged_account_actions.action: an admin action

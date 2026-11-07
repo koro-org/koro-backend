@@ -72,8 +72,9 @@ func registerMFAAndAdmin(api huma.API, h handler) {
 		Summary: "Search users",
 		Description: "Read-only: the criteria are in the body so that an e-mail address or a name never reaches a URL " +
 			"or an access log (BE-128). q is an exact e-mail address or a fragment of the name (2-100 characters); " +
-			"without q every account, newest first. Every search is audited (query kind and the users found, not the " +
-			"query). next_cursor goes back in the body.",
+			"without q every account, newest first. signup_persona (the role chosen at sign-up) and platform_role (a platform " +
+			"role in effect; needs identity.platform_role.list, 403 otherwise) narrow it (BE-190). Every search is " +
+			"audited (query kind, filters and the users found, not the query). next_cursor goes back in the body.",
 	}, op.Meta{Action: string(authz.IdentityUserSearch), Surface: op.SurfaceAdmin, RateLimit: op.RateSearch,
 		Idempotency: op.IdempotencyOptional}, h.queryUsers)
 
@@ -285,6 +286,9 @@ type queryUsersInput struct {
 	Body struct {
 		Q      string `json:"q,omitempty" maxLength:"254" doc:"An exact e-mail address or a fragment of the name (2-100 characters)"`
 		Status string `json:"status,omitempty" enum:"pending_email,active,suspended,erased"`
+		// Persona and PlatformRole are the role filters (BE-190).
+		Persona      string `json:"signup_persona,omitempty" enum:"student,company,university,club,platform" doc:"The role chosen at sign-up"`
+		PlatformRole string `json:"platform_role,omitempty" enum:"platform_admin,moderator,finance_admin,talent_auditor,support,dpo" doc:"Accounts holding this platform role in effect (active or revoke_pending); needs identity.platform_role.list"`
 		page.BodyParams
 	}
 }
@@ -297,22 +301,17 @@ const userSort = "id_desc"
 
 func (h handler) queryUsers(ctx context.Context, in *queryUsersInput) (*searchUsersOutput, error) {
 	b := in.Body
-	return h.userPage(ctx, "adminQueryUsers", b.Q, b.Status, b.Cursor, b.Limit)
-}
-
-// userPage runs one page of the admin user search; the cursor is bound to
-// the operation and its criteria.
-func (h handler) userPage(ctx context.Context, opID, query, status, cursor string, limit int) (*searchUsersOutput, error) {
 	a, err := authz.ActorFrom(ctx)
 	if err != nil {
 		return nil, err
 	}
-	fp := page.Fingerprint(opID, query, status)
-	c, err := page.Decode(cursor, userSort, fp, 1)
+	fp := page.Fingerprint("adminQueryUsers", b.Q, b.Status, b.Persona, b.PlatformRole)
+	c, err := page.Decode(b.Cursor, userSort, fp, 1)
 	if err != nil {
 		return nil, err
 	}
-	q := AdminUserQuery{Q: query, Status: Status(status), Limit: limit}
+	q := AdminUserQuery{Q: b.Q, Status: Status(b.Status), Persona: Persona(b.Persona),
+		PlatformRole: authz.PlatformRole(b.PlatformRole), Limit: b.Limit}
 	if c != nil {
 		id, err := c.UUID(0)
 		if err != nil {

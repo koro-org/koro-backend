@@ -44,6 +44,12 @@
 //     366 days; the default is the last 30 days (platform, company) or
 //     the last 12 calendar months (club, university: monthly growth). A
 //     malformed range is 422, after the authorisation (404/403 first).
+//   - Filters (BE-190, T-406; filters.go): a club's event, a company's
+//     audience dimensions (university, department, class year), a
+//     university's faculty, department and club. A filter only selects
+//     among figures published under the rules above, never a new number
+//     about fewer than 10 people; one that is malformed or not the org's
+//     own is 422 after the authorisation, like the range.
 //   - Personal data: none in an answer, a log line or an audit record;
 //     the panels are counts. Nothing is audited (aggregate reads, 03 §6.5
 //     lists none of them).

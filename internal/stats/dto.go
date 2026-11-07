@@ -282,6 +282,7 @@ type UniversityStudentsDTO struct {
 	ByDegreeLevel []KeyEstimate `json:"by_degree_level" doc:"associate, bachelor, master, doctorate"`
 	ByClassYear   []KeyEstimate `json:"by_class_year" doc:"1–8"`
 	ByDepartment  []KeyEstimate `json:"by_department" doc:"Department IDs (names: the directory's departments)"`
+	ByFaculty     []KeyEstimate `json:"by_faculty" doc:"Faculty IDs (names: the directory's faculties); a faculty sums its departments, students of a department outside any faculty are in none"`
 }
 
 // UniversityClubsDTO is the event density of the university's clubs.

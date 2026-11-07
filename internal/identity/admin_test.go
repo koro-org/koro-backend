@@ -111,6 +111,43 @@ func TestAdminSearchUsers_Audited(t *testing.T) {
 	}
 }
 
+// TestAdminSearchUsers_RoleFilters (BE-190): the sign-up role narrows the
+// search for every searcher; the platform role filter needs the platform
+// role list (platform_admin): support gets 403 before anything is read or
+// audited. Both filters are audited, a bad value is 422.
+func TestAdminSearchUsers_RoleFilters(t *testing.T) {
+	t.Parallel()
+	s := newStaffEnv(t)
+	ctx := t.Context()
+	sup := s.admin(t, "sup@koro.test", authz.PlatformSupport)
+
+	p, err := s.svc.SearchUsers(ctx, s.a, identity.AdminUserQuery{PlatformRole: authz.PlatformSupport})
+	if err != nil || len(p.Items) != 1 || p.Items[0].ID != sup.UserID {
+		t.Fatalf("support holders: %+v %v", p, err)
+	}
+	p, err = s.svc.SearchUsers(ctx, sup, identity.AdminUserQuery{Persona: identity.PersonaPlatform})
+	if err != nil || len(p.Items) != 0 {
+		t.Fatalf("persona platform: %+v %v", p, err) // the test admins signed up as students
+	}
+	p, err = s.svc.SearchUsers(ctx, sup, identity.AdminUserQuery{Persona: identity.PersonaStudent, Limit: 100})
+	if err != nil || len(p.Items) < 4 {
+		t.Fatalf("persona student: %d %v", len(p.Items), err)
+	}
+	ev := s.audit.of(string(authz.IdentityUserSearch))
+	if len(ev) != 3 || ev[0].Metadata["platform_role"] != "support" || ev[1].Metadata["signup_persona"] != "platform" {
+		t.Fatalf("audit %+v", ev)
+	}
+	_, err = s.svc.SearchUsers(ctx, sup, identity.AdminUserQuery{PlatformRole: authz.PlatformAdmin})
+	problemtest.WantErr(t, err, authz.ErrForbidden)
+	if n := len(s.audit.of(string(authz.IdentityUserSearch))); n != 3 {
+		t.Fatalf("a refused role search was audited (%d)", n)
+	}
+	for _, q := range []identity.AdminUserQuery{{Persona: "admin"}, {PlatformRole: "owner"}} {
+		_, err = s.svc.SearchUsers(ctx, s.a, q)
+		wantStatus(t, err, http.StatusUnprocessableEntity)
+	}
+}
+
 func TestAdminGetUser_NoClubMembership(t *testing.T) {
 	t.Parallel()
 	s := newStaffEnv(t)

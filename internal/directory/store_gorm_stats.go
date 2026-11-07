@@ -25,3 +25,15 @@ func (s gormStore) ClubsOf(ctx context.Context, universityID uuid.UUID) ([]Club,
 	}
 	return out, nil
 }
+
+// DepartmentsOf implements StatsStore.
+//
+// cross-org: public reference data of one university.
+func (s gormStore) DepartmentsOf(ctx context.Context, universityID uuid.UUID) ([]Department, error) {
+	var out []Department
+	err := db.Conn(ctx, s.orm).Select(deptCols).Where("university_id = ?", universityID).Order("id").Find(&out).Error
+	if err != nil {
+		return nil, wrap("departments of", err)
+	}
+	return out, nil
+}

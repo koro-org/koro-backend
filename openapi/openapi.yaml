@@ -1809,6 +1809,15 @@ components:
           type: string
         mfa_enabled:
           type: boolean
+        signup_persona:
+          description: The role chosen at sign-up (BE-190)
+          enum:
+            - student
+            - company
+            - university
+            - club
+            - platform
+          type: string
         status:
           enum:
             - pending_email
@@ -1822,6 +1831,7 @@ components:
       required:
         - user_id
         - status
+        - signup_persona
         - mfa_enabled
         - created_at
       type: object
@@ -12677,9 +12687,28 @@ components:
           maximum: 100
           minimum: 1
           type: integer
+        platform_role:
+          description: Accounts holding this platform role in effect (active or revoke_pending); needs identity.platform_role.list
+          enum:
+            - platform_admin
+            - moderator
+            - finance_admin
+            - talent_auditor
+            - support
+            - dpo
+          type: string
         q:
           description: An exact e-mail address or a fragment of the name (2-100 characters)
           maxLength: 254
+          type: string
+        signup_persona:
+          description: The role chosen at sign-up
+          enum:
+            - student
+            - company
+            - university
+            - club
+            - platform
           type: string
         status:
           enum:
@@ -17142,6 +17171,11 @@ components:
           items:
             $ref: "#/components/schemas/KeyEstimate"
           type: array
+        by_faculty:
+          description: "Faculty IDs (names: the directory's faculties); a faculty sums its departments, students of a department outside any faculty are in none"
+          items:
+            $ref: "#/components/schemas/KeyEstimate"
+          type: array
         new_in_range:
           $ref: "#/components/schemas/AudienceCountDTO"
           description: Student profiles created in the range
@@ -17153,6 +17187,7 @@ components:
         - by_degree_level
         - by_class_year
         - by_department
+        - by_faculty
       type: object
     UnsubscribeLinkDTO:
       additionalProperties: false
@@ -26471,7 +26506,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/admin/users/search:
     post:
-      description: "Read-only: the criteria are in the body so that an e-mail address or a name never reaches a URL or an access log (BE-128). q is an exact e-mail address or a fragment of the name (2-100 characters); without q every account, newest first. Every search is audited (query kind and the users found, not the query). next_cursor goes back in the body."
+      description: "Read-only: the criteria are in the body so that an e-mail address or a name never reaches a URL or an access log (BE-128). q is an exact e-mail address or a fragment of the name (2-100 characters); without q every account, newest first. signup_persona (the role chosen at sign-up) and platform_role (a platform role in effect; needs identity.platform_role.list, 403 otherwise) narrow it (BE-190). Every search is audited (query kind, filters and the users found, not the query). next_cursor goes back in the body."
       operationId: adminQueryUsers
       requestBody:
         content:
@@ -39049,7 +39084,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/stats/club:
     get:
-      description: "The club's members and their monthly growth, the registration and attendance of its events and the orders companies placed on its offerings (SR §8 Kulüp). Default range: the last 12 calendar months. Another kind of org is not found. The range is whole days in Europe/Istanbul (from and to inclusive, at most 366 days)."
+      description: "The club's members and their monthly growth, the registration and attendance of its events and the orders companies placed on its offerings (SR §8 Kulüp). Default range: the last 12 calendar months. event_id narrows the events to that event of the club, whatever its date (an event of another org is 422 query.event_id); members and sponsorship keep the range (BE-190). Another kind of org is not found. The range is whole days in Europe/Istanbul (from and to inclusive, at most 366 days)."
       operationId: getClubStats
       parameters:
         - description: Org ID
@@ -39075,6 +39110,14 @@ paths:
           schema:
             description: "Last day (YYYY-MM-DD, Europe/Istanbul), inclusive; default: today"
             format: date
+            type: string
+        - description: Only this event of the club, whatever its date
+          explode: false
+          in: query
+          name: event_id
+          schema:
+            description: Only this event of the club, whatever its date
+            format: uuid
             type: string
       responses:
         "200":
@@ -39102,7 +39145,7 @@ paths:
       x-koro-surface: org
   /api/v1/orgs/{org_id}/stats/company:
     get:
-      description: "The company's saved audiences with their stored estimates, the reach of its posts and dispatches, its contact requests with their acceptance rate and its package usage (SR §8 Şirket). Numbers about students are estimates: null below 10, rounded down to their bucket. Default range: the last 30 days. Another kind of org is not found. The range is whole days in Europe/Istanbul (from and to inclusive, at most 366 days)."
+      description: "The company's saved audiences with their stored estimates, the reach of its posts and dispatches, its contact requests with their acceptance rate and its package usage (SR §8 Şirket). Numbers about students are estimates: null below 10, rounded down to their bucket. university_id, department_id and class_year narrow the audiences and dispatches to those whose audience names them (a department names its university); their stored estimates pass through, nothing is counted again and the daily count budget is not spent (BE-190). The other sections are not about an audience. Default range: the last 30 days. Another kind of org is not found. The range is whole days in Europe/Istanbul (from and to inclusive, at most 366 days)."
       operationId: getCompanyStats
       parameters:
         - description: Org ID
@@ -39128,6 +39171,30 @@ paths:
           schema:
             description: "Last day (YYYY-MM-DD, Europe/Istanbul), inclusive; default: today"
             format: date
+            type: string
+        - description: Audiences and dispatches that name this university or one of its departments
+          explode: false
+          in: query
+          name: university_id
+          schema:
+            description: Audiences and dispatches that name this university or one of its departments
+            format: uuid
+            type: string
+        - description: Audiences and dispatches that name this department
+          explode: false
+          in: query
+          name: department_id
+          schema:
+            description: Audiences and dispatches that name this department
+            format: uuid
+            type: string
+        - description: Audiences and dispatches that name this class year (1-8)
+          explode: false
+          in: query
+          name: class_year
+          schema:
+            description: Audiences and dispatches that name this class year (1-8)
+            pattern: ^[1-8]$
             type: string
       responses:
         "200":
@@ -39155,7 +39222,7 @@ paths:
       x-koro-surface: org
   /api/v1/orgs/{org_id}/stats/university:
     get:
-      description: "The university's active students by degree level, class year and department (groups below 10 left out, the others rounded down to their bucket), the event density of its clubs (sensitive clubs and events of a sensitive category left out) and what waits for its decision (SR §8 Kurum). Default range: the last 12 calendar months. Another kind of org is not found. The range is whole days in Europe/Istanbul (from and to inclusive, at most 366 days)."
+      description: "The university's active students by degree level, class year and department (groups below 10 left out, the others rounded down to their bucket), the event density of its clubs (sensitive clubs and events of a sensitive category left out) and what waits for its decision (SR §8 Kurum). by_faculty sums the departments of each faculty. faculty_id or department_id (one of the university's, not both) narrows the students, every group again at least 10; club_id (one of its clubs) narrows the club activity, a sensitive club's staying empty; a filter that is not the university's is 422 (BE-190). Default range: the last 12 calendar months. Another kind of org is not found. The range is whole days in Europe/Istanbul (from and to inclusive, at most 366 days)."
       operationId: getUniversityStats
       parameters:
         - description: Org ID
@@ -39181,6 +39248,30 @@ paths:
           schema:
             description: "Last day (YYYY-MM-DD, Europe/Istanbul), inclusive; default: today"
             format: date
+            type: string
+        - description: Students of this faculty's departments only
+          explode: false
+          in: query
+          name: faculty_id
+          schema:
+            description: Students of this faculty's departments only
+            format: uuid
+            type: string
+        - description: Students of this department only
+          explode: false
+          in: query
+          name: department_id
+          schema:
+            description: Students of this department only
+            format: uuid
+            type: string
+        - description: Club activity of this club only (the club's org ID)
+          explode: false
+          in: query
+          name: club_id
+          schema:
+            description: Club activity of this club only (the club's org ID)
+            format: uuid
             type: string
       responses:
         "200":

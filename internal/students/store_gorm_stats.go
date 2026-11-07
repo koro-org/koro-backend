@@ -10,11 +10,12 @@ import (
 )
 
 // ProfileCounts implements statsStore: one grouping-sets pass over the
-// university's active profiles (student_profiles_filter_idx).
+// university's active profiles (student_profiles_filter_idx), those of
+// departments only when it is not empty (BE-190).
 //
 // cross-org: keyed by a university (student profiles belong to no org);
 // only counts leave, the service suppresses the groups below 10.
-func (s gormStore) ProfileCounts(ctx context.Context, universityID uuid.UUID, from, to time.Time) (ProfileCounts, error) {
+func (s gormStore) ProfileCounts(ctx context.Context, universityID uuid.UUID, departments []uuid.UUID, from, to time.Time) (ProfileCounts, error) {
 	var rows []struct {
 		Dim   string
 		Key   *string
@@ -27,8 +28,9 @@ func (s gormStore) ProfileCounts(ctx context.Context, universityID uuid.UUID, fr
 	        coalesce(degree_level, class_year::text, department_id::text) AS key,
 	        count(*) AS n, count(*) FILTER (WHERE created_at >= ? AND created_at < ?) AS fresh
 	   FROM student_profiles
-	  WHERE university_id = ? AND status = 'active'
-	  GROUP BY GROUPING SETS ((degree_level), (class_year), (department_id), ())`, from, to, universityID).Scan(&rows).Error
+	  WHERE university_id = ? AND status = 'active' AND (cardinality( ?::uuid[]) = 0 OR department_id = ANY( ?::uuid[]))
+	  GROUP BY GROUPING SETS ((degree_level), (class_year), (department_id), ())`, from, to, universityID,
+		db.UUIDArray(departments), db.UUIDArray(departments)).Scan(&rows).Error
 	if err != nil {
 		return ProfileCounts{}, fmt.Errorf("students: profile counts: %w", err)
 	}

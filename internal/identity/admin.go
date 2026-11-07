@@ -33,8 +33,17 @@ const (
 type AdminUserQuery struct {
 	Q      string // an exact e-mail address or a name fragment (2–100 characters); "" = all
 	Status Status // "" = every status
-	After  *uuid.UUID
-	Limit  int
+	// Persona keeps the accounts that signed up as it ("" = every role;
+	// BE-190, SR §8 Admin "rol").
+	Persona Persona
+	// PlatformRole keeps the accounts holding this platform role in effect
+	// ("" = no filter; BE-190). Who holds a platform role is what
+	// adminListPlatformRoles shows, so the filter needs
+	// identity.platform_role.list too (403 otherwise): support and dpo
+	// search users but do not list the platform staff.
+	PlatformRole authz.PlatformRole
+	After        *uuid.UUID
+	Limit        int
 }
 
 // AdminUserPage is one page of accounts, newest first.
@@ -91,7 +100,13 @@ func (s *service) SearchUsers(ctx context.Context, a authz.Actor, q AdminUserQue
 	if err := authz.Can(ctx, a, authz.IdentityUserSearch, adminSurface); err != nil {
 		return AdminUserPage{}, err
 	}
-	search := UserSearch{Status: q.Status, After: q.After, Limit: page.ClampLimit(q.Limit) + 1}
+	if q.PlatformRole != "" {
+		if err := authz.Can(ctx, a, authz.IdentityPlatformRoleList, adminSurface); err != nil {
+			return AdminUserPage{}, err
+		}
+	}
+	search := UserSearch{Status: q.Status, Persona: q.Persona, PlatformRole: q.PlatformRole, After: q.After,
+		Limit: page.ClampLimit(q.Limit) + 1}
 	kind := "all"
 	if raw := strings.TrimSpace(q.Q); raw != "" {
 		if strings.Contains(raw, "@") {
@@ -111,7 +126,13 @@ func (s *service) SearchUsers(ctx context.Context, a authz.Actor, q AdminUserQue
 	switch q.Status {
 	case "", StatusPendingEmail, StatusActive, StatusSuspended, StatusErased:
 	default:
-		return AdminUserPage{}, invalid(problem.ErrValidation, "query.status", "must be pending_email, active, suspended or erased")
+		return AdminUserPage{}, invalid(problem.ErrValidation, "body.status", "must be pending_email, active, suspended or erased")
+	}
+	if q.Persona != "" && !validPersona(q.Persona) {
+		return AdminUserPage{}, invalid(problem.ErrValidation, "body.signup_persona", "must be student, company, university, club or platform")
+	}
+	if q.PlatformRole != "" && !validPlatformRole(q.PlatformRole) {
+		return AdminUserPage{}, invalid(problem.ErrValidation, "body.platform_role", "must be a platform role")
 	}
 	rows, err := s.users().SearchUsers(ctx, search)
 	if err != nil {
@@ -125,6 +146,12 @@ func (s *service) SearchUsers(ctx context.Context, a authz.Actor, q AdminUserQue
 	meta := map[string]any{"query_kind": kind, "results": len(items), "result_user_ids": found}
 	if q.Status != "" {
 		meta["status"] = string(q.Status)
+	}
+	if q.Persona != "" {
+		meta["signup_persona"] = string(q.Persona)
+	}
+	if q.PlatformRole != "" {
+		meta["platform_role"] = string(q.PlatformRole)
 	}
 	if q.After != nil {
 		meta["page_after"] = q.After.String()

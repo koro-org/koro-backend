@@ -31,7 +31,9 @@ func Register(api huma.API, svc Service) {
 		Summary: "Get a club's panel figures",
 		Description: "The club's members and their monthly growth, the registration and attendance of its events " +
 			"and the orders companies placed on its offerings (SR §8 Kulüp). Default range: the last 12 calendar " +
-			"months. Another kind of org is not found." + rangeNote,
+			"months. event_id narrows the events to that event of the club, whatever its date (an event of another " +
+			"org is 422 query.event_id); members and sponsorship keep the range (BE-190). Another kind of org is " +
+			"not found." + rangeNote,
 	}, op.Meta{Action: string(authz.StatsClubRead), Surface: op.SurfaceOrg, QuerySyntax: rangeSyntax}, h.club)
 
 	op.Register(api, "stats", huma.Operation{
@@ -39,17 +41,23 @@ func Register(api huma.API, svc Service) {
 		Summary: "Get a company's panel figures",
 		Description: "The company's saved audiences with their stored estimates, the reach of its posts and " +
 			"dispatches, its contact requests with their acceptance rate and its package usage (SR §8 Şirket). " +
-			"Numbers about students are estimates: null below 10, rounded down to their bucket. Default range: the " +
-			"last 30 days. Another kind of org is not found." + rangeNote,
-	}, op.Meta{Action: string(authz.StatsCompanyRead), Surface: op.SurfaceOrg, QuerySyntax: rangeSyntax}, h.company)
+			"Numbers about students are estimates: null below 10, rounded down to their bucket. university_id, " +
+			"department_id and class_year narrow the audiences and dispatches to those whose audience names them (a " +
+			"department names its university); their stored estimates pass through, nothing is counted again and " +
+			"the daily count budget is not spent (BE-190). The other sections are not about an audience. Default " +
+			"range: the last 30 days. Another kind of org is not found." + rangeNote,
+	}, op.Meta{Action: string(authz.StatsCompanyRead), Surface: op.SurfaceOrg, QuerySyntax: companySyntax}, h.company)
 
 	op.Register(api, "stats", huma.Operation{
 		OperationID: "getUniversityStats", Method: http.MethodGet, Path: "/orgs/{org_id}/stats/university",
 		Summary: "Get a university's panel figures",
 		Description: "The university's active students by degree level, class year and department (groups below 10 " +
 			"left out, the others rounded down to their bucket), the event density of its clubs (sensitive clubs and " +
-			"events of a sensitive category left out) and what waits for its decision (SR §8 Kurum). Default range: " +
-			"the last 12 calendar months. Another kind of org is not found." + rangeNote,
+			"events of a sensitive category left out) and what waits for its decision (SR §8 Kurum). by_faculty sums " +
+			"the departments of each faculty. faculty_id or department_id (one of the university's, not both) " +
+			"narrows the students, every group again at least 10; club_id (one of its clubs) narrows the club " +
+			"activity, a sensitive club's staying empty; a filter that is not the university's is 422 (BE-190). " +
+			"Default range: the last 12 calendar months. Another kind of org is not found." + rangeNote,
 	}, op.Meta{Action: string(authz.StatsUniversityRead), Surface: op.SurfaceOrg, QuerySyntax: rangeSyntax}, h.university)
 }
 
@@ -64,11 +72,15 @@ type RangeParams struct {
 	To   string `query:"to" doc:"Last day (YYYY-MM-DD, Europe/Istanbul), inclusive; default: today"`
 }
 
-func (p RangeParams) query() RangeQuery { return RangeQuery(p) }
+func (p RangeParams) query() RangeQuery { return RangeQuery{From: p.From, To: p.To} }
 
 // rangeSyntax documents RangeParams as days; the service checks them after
 // the authorisation (RangeQuery.resolve), so they carry no format tag.
 var rangeSyntax = map[string]op.ParamSyntax{"from": op.Day, "to": op.Day}
+
+// companySyntax adds class_year, checked by the service too (an "<x>_id"
+// filter is documented as a UUID by httpx.DocumentParams).
+var companySyntax = map[string]op.ParamSyntax{"from": op.Day, "to": op.Day, "class_year": {Pattern: "^[1-8]$"}}
 
 type platformInput struct {
 	RangeParams
@@ -90,21 +102,42 @@ func (h handler) platform(ctx context.Context, in *platformInput) (*platformOutp
 	return &platformOutput{Body: st}, nil
 }
 
-type orgInput struct {
+// The org panels' inputs: the org, the period and the panel's filters
+// (BE-190), all checked by the service after the authorisation.
+type clubInput struct {
 	OrgID string `path:"org_id" doc:"Org ID"`
 	RangeParams
+	EventID string `query:"event_id" doc:"Only this event of the club, whatever its date"`
+}
+
+type companyInput struct {
+	OrgID string `path:"org_id" doc:"Org ID"`
+	RangeParams
+	UniversityID string `query:"university_id" doc:"Audiences and dispatches that name this university or one of its departments"`
+	DepartmentID string `query:"department_id" doc:"Audiences and dispatches that name this department"`
+	ClassYear    string `query:"class_year" doc:"Audiences and dispatches that name this class year (1-8)"`
+}
+
+type universityInput struct {
+	OrgID string `path:"org_id" doc:"Org ID"`
+	RangeParams
+	FacultyID    string `query:"faculty_id" doc:"Students of this faculty's departments only"`
+	DepartmentID string `query:"department_id" doc:"Students of this department only"`
+	ClubID       string `query:"club_id" doc:"Club activity of this club only (the club's org ID)"`
 }
 
 type clubOutput struct {
 	Body ClubStats
 }
 
-func (h handler) club(ctx context.Context, in *orgInput) (*clubOutput, error) {
+func (h handler) club(ctx context.Context, in *clubInput) (*clubOutput, error) {
 	a, err := authz.ActorFrom(ctx)
 	if err != nil {
 		return nil, err
 	}
-	st, err := h.svc.Club(ctx, a, httpx.ParseID(in.OrgID), in.query())
+	q := in.query()
+	q.EventID = in.EventID
+	st, err := h.svc.Club(ctx, a, httpx.ParseID(in.OrgID), q)
 	if err != nil {
 		return nil, err
 	}
@@ -115,12 +148,14 @@ type companyOutput struct {
 	Body CompanyStats
 }
 
-func (h handler) company(ctx context.Context, in *orgInput) (*companyOutput, error) {
+func (h handler) company(ctx context.Context, in *companyInput) (*companyOutput, error) {
 	a, err := authz.ActorFrom(ctx)
 	if err != nil {
 		return nil, err
 	}
-	st, err := h.svc.Company(ctx, a, httpx.ParseID(in.OrgID), in.query())
+	q := in.query()
+	q.UniversityID, q.DepartmentID, q.ClassYear = in.UniversityID, in.DepartmentID, in.ClassYear
+	st, err := h.svc.Company(ctx, a, httpx.ParseID(in.OrgID), q)
 	if err != nil {
 		return nil, err
 	}
@@ -131,12 +166,14 @@ type universityOutput struct {
 	Body UniversityStats
 }
 
-func (h handler) university(ctx context.Context, in *orgInput) (*universityOutput, error) {
+func (h handler) university(ctx context.Context, in *universityInput) (*universityOutput, error) {
 	a, err := authz.ActorFrom(ctx)
 	if err != nil {
 		return nil, err
 	}
-	st, err := h.svc.University(ctx, a, httpx.ParseID(in.OrgID), in.query())
+	q := in.query()
+	q.FacultyID, q.DepartmentID, q.ClubID = in.FacultyID, in.DepartmentID, in.ClubID
+	st, err := h.svc.University(ctx, a, httpx.ParseID(in.OrgID), q)
 	if err != nil {
 		return nil, err
 	}

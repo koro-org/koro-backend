@@ -32,3 +32,17 @@ func (s *MemStore) ClubsOf(_ context.Context, universityID uuid.UUID) ([]Club, e
 	slices.SortFunc(out, func(a, b Club) int { return cmp.Compare(a.OrgID.String(), b.OrgID.String()) })
 	return out, nil
 }
+
+// DepartmentsOf implements StatsStore.
+func (s *MemStore) DepartmentsOf(_ context.Context, universityID uuid.UUID) ([]Department, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []Department{}
+	for _, d := range s.depts {
+		if d.UniversityID == universityID {
+			out = append(out, d)
+		}
+	}
+	slices.SortFunc(out, func(a, b Department) int { return a.ID.Compare(b.ID) })
+	return out, nil
+}

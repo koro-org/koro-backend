@@ -62,6 +62,11 @@ type fake struct {
 	offerAsk   []uuid.UUID // PendingUniversityDecisions' orgIDs
 	studentAsk uuid.UUID
 	from, to   time.Time // the last range asked
+	// BE-190 filters.
+	structure   map[uuid.UUID]directory.UniversityStructure // UniversityStructure by university ID
+	audienceAsk *outreach.StatsFilter                       // OrgOutreachStats' filter
+	studentQ    *students.StudentStatsQuery                 // UniversityStudentStats' query
+	figuresAsk  [2]time.Time                                // OrgEventFigures' range
 }
 
 func (f *fake) Get(_ context.Context, id uuid.UUID) (orgs.OrgSummary, error) {
@@ -116,8 +121,9 @@ func (f *fake) EventStats(context.Context, time.Time, time.Time) (events.EventSt
 	return f.events, nil
 }
 
-func (f *fake) OrgEventFigures(context.Context, []uuid.UUID, time.Time, time.Time) ([]events.EventFigures, error) {
-	return f.figures, nil
+func (f *fake) OrgEventFigures(_ context.Context, _ []uuid.UUID, from, to time.Time) ([]events.EventFigures, error) {
+	f.figuresAsk = [2]time.Time{from, to}
+	return slices.Clone(f.figures), nil
 }
 
 func (f *fake) OrgEventTotals(_ context.Context, ids []uuid.UUID, _, _ time.Time) (map[uuid.UUID]events.EventTotals, error) {
@@ -152,7 +158,8 @@ func (d eventDir) Get(_ context.Context, id uuid.UUID) (events.EventSummary, err
 	return e, nil
 }
 
-func (f *fake) OrgOutreachStats(context.Context, uuid.UUID, time.Time, time.Time) (outreach.OutreachStats, error) {
+func (f *fake) OrgOutreachStats(_ context.Context, _ uuid.UUID, _, _ time.Time, sf outreach.StatsFilter) (outreach.OutreachStats, error) {
+	f.audienceAsk = &sf
 	return f.reach, nil
 }
 
@@ -164,9 +171,13 @@ func (f *fake) Usage(context.Context, uuid.UUID) ([]entitlements.FeatureUsage, e
 	return f.usage, nil
 }
 
-func (f *fake) UniversityStudentStats(_ context.Context, id uuid.UUID, _, _ time.Time) (students.UniversityStudents, error) {
-	f.studentAsk = id
+func (f *fake) UniversityStudentStats(_ context.Context, q students.StudentStatsQuery) (students.UniversityStudents, error) {
+	f.studentAsk, f.studentQ = q.UniversityID, &q
 	return f.students, nil
+}
+
+func (f *fake) UniversityStructure(_ context.Context, id uuid.UUID) (directory.UniversityStructure, error) {
+	return f.structure[id], nil
 }
 
 func (f *fake) UniversityClubStats(context.Context, uuid.UUID) (directory.UniversityClubs, error) {
@@ -189,7 +200,8 @@ func (f *fake) PendingEduDocuments(context.Context, authz.Actor) (int, error) {
 // world is the fake with the matrix orgs (authztest) and the service.
 func world(t *testing.T) (*fake, stats.Service) {
 	t.Helper()
-	f := &fake{orgs: map[uuid.UUID]orgs.OrgSummary{}, clubs: map[uuid.UUID]directory.Club{}, summaries: map[uuid.UUID]events.EventSummary{}}
+	f := &fake{orgs: map[uuid.UUID]orgs.OrgSummary{}, clubs: map[uuid.UUID]directory.Club{}, summaries: map[uuid.UUID]events.EventSummary{},
+		structure: map[uuid.UUID]directory.UniversityStructure{}}
 	for _, o := range authztest.Orgs() {
 		id := authztest.ID(o.Name)
 		f.orgs[id] = orgs.OrgSummary{ID: id, Kind: o.Kind, Name: o.Name, Status: orgs.StatusActive}

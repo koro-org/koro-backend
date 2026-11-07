@@ -575,6 +575,66 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 			t.Fatalf("mfa_verified_at %v", x.MFAVerifiedAt)
 		}
 	})
+	t.Run("admin search role filters", func(t *testing.T) {
+		// BE-190: the sign-up role and a platform role in effect (06 H-33:
+		// a pending request or a revoked role does not count) narrow the
+		// search; each filter combines with the name.
+		t.Parallel()
+		s, ctx := newWorld(t).s, t.Context()
+		tag := uuid.NewV7().String()[:8]
+		user := func(local string, p identity.Persona) identity.User {
+			t.Helper()
+			u := contractUser(tag + "-" + local + "@contract.test")
+			u.FirstName, u.Persona = "Rol"+tag, p
+			if err := s.InsertUser(ctx, u); err != nil {
+				t.Fatal(err)
+			}
+			return u
+		}
+		stu, com, mod, pend, gone := user("s", identity.PersonaStudent), user("c", identity.PersonaCompany),
+			user("m", identity.PersonaPlatform), user("p", identity.PersonaPlatform), user("g", identity.PersonaPlatform)
+		now := contractBase
+		for _, r := range []identity.RoleAssignment{
+			{ID: uuid.NewV7(), UserID: mod.ID, Role: authz.PlatformModerator, Reason: "moderation", Status: identity.RoleActive,
+				RequestedBy: &stu.ID, RequestedAt: now, GrantedAt: &now},
+			{ID: uuid.NewV7(), UserID: pend.ID, Role: authz.PlatformModerator, Reason: "awaiting approval", Status: identity.RolePending,
+				RequestedBy: &stu.ID, RequestedAt: now},
+			{ID: uuid.NewV7(), UserID: gone.ID, Role: authz.PlatformModerator, Reason: "former moderator", Status: identity.RoleRevoked,
+				RequestedBy: &stu.ID, RequestedAt: now, GrantedAt: &now, RevokeReason: "role ended", RevokedBy: &com.ID, RevokedAt: &now},
+		} {
+			if err := s.InsertRoleAssignment(ctx, r); err != nil {
+				t.Fatalf("%s: %v", r.Status, err)
+			}
+		}
+		found := func(q identity.UserSearch) []uuid.UUID {
+			t.Helper()
+			q.Name, q.Limit = "rol"+tag, 10
+			got, err := s.SearchUsers(ctx, q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := make([]uuid.UUID, len(got))
+			for i, u := range got {
+				out[i] = u.ID
+			}
+			return out
+		}
+		if got := found(identity.UserSearch{Persona: identity.PersonaCompany}); !slices.Equal(got, []uuid.UUID{com.ID}) {
+			t.Fatalf("persona company = %v", got)
+		}
+		if got := found(identity.UserSearch{Persona: identity.PersonaPlatform}); len(got) != 3 {
+			t.Fatalf("persona platform = %v", got)
+		}
+		if got := found(identity.UserSearch{PlatformRole: authz.PlatformModerator}); !slices.Equal(got, []uuid.UUID{mod.ID}) {
+			t.Fatalf("moderators in effect = %v, want only %v", got, mod.ID)
+		}
+		if got := found(identity.UserSearch{PlatformRole: authz.PlatformAdmin}); len(got) != 0 {
+			t.Fatalf("platform admins = %v", got)
+		}
+		if got := found(identity.UserSearch{PlatformRole: authz.PlatformModerator, Persona: identity.PersonaStudent}); len(got) != 0 {
+			t.Fatalf("both filters = %v", got)
+		}
+	})
 	t.Run("phones and SMS codes", func(t *testing.T) {
 		t.Parallel()
 		phoneContract(t, newWorld(t).s)

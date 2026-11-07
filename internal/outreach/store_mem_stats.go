@@ -9,12 +9,12 @@ import (
 )
 
 // OutreachStats implements statsStore.
-func (m *MemStore) OutreachStats(_ context.Context, orgID uuid.UUID, from, to time.Time, limit int) (StatsCounts, error) {
+func (m *MemStore) OutreachStats(_ context.Context, orgID uuid.UUID, from, to time.Time, limit int, keyGroups [][]string) (StatsCounts, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	c := StatsCounts{ByStatus: map[DispatchStatus]int{}}
 	for _, s := range m.rows {
-		if s.OrgID == orgID && !s.Archived() {
+		if s.OrgID == orgID && !s.Archived() && holdsGroups(s.AudienceKeys, keyGroups) {
 			c.Segments = append(c.Segments, s)
 		}
 	}
@@ -34,7 +34,7 @@ func (m *MemStore) OutreachStats(_ context.Context, orgID uuid.UUID, from, to ti
 		c.Segments = c.Segments[:limit]
 	}
 	for _, d := range m.dispatches {
-		if d.OrgID != orgID || d.CreatedAt.Before(from) || !d.CreatedAt.Before(to) {
+		if d.OrgID != orgID || d.CreatedAt.Before(from) || !d.CreatedAt.Before(to) || !holdsGroups(d.AudienceKeys, keyGroups) {
 			continue
 		}
 		c.ByStatus[d.Status]++

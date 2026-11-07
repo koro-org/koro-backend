@@ -3,6 +3,8 @@ package outreach
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strconv"
 	"time"
 	"uuid"
 )
@@ -15,8 +17,54 @@ import (
 type Statistics interface {
 	// OrgOutreachStats returns orgID's active segments with their stored
 	// estimates (no new count: the daily budget is not spent) and its
-	// dispatches created in [from, to).
-	OrgOutreachStats(ctx context.Context, orgID uuid.UUID, from, to time.Time) (OutreachStats, error)
+	// dispatches created in [from, to), both narrowed by f.
+	OrgOutreachStats(ctx context.Context, orgID uuid.UUID, from, to time.Time, f StatsFilter) (OutreachStats, error)
+}
+
+// StatsFilter narrows OrgOutreachStats to the segments and dispatches
+// whose audience names the given values (BE-190: the audience dimensions
+// of the company panel, SR §8 "üniversite, bölüm, sınıf"). A zero field
+// does not filter; the present ones all apply. It selects among the org's
+// own rows and their stored, already published figures: no student is
+// counted again (no daily budget, no new number about people).
+type StatsFilter struct {
+	// Uni keeps the audiences that name the university: its uni: key or
+	// the dept: key of one of UniDepts (the caller resolves the
+	// university's departments: a department implies its university).
+	Uni      *uuid.UUID
+	UniDepts []uuid.UUID
+	Dept     *uuid.UUID
+	Year     *int16
+}
+
+// keyGroups returns, per present dimension of f, the audience keys an
+// audience must hold at least one of; nil without a filter.
+func (f StatsFilter) keyGroups() [][]string {
+	var out [][]string
+	if f.Uni != nil {
+		g := []string{keyUni + f.Uni.String()}
+		for _, d := range f.UniDepts {
+			g = append(g, keyDept+d.String())
+		}
+		out = append(out, g)
+	}
+	if f.Dept != nil {
+		out = append(out, []string{keyDept + f.Dept.String()})
+	}
+	if f.Year != nil {
+		out = append(out, []string{keyYear + strconv.Itoa(int(*f.Year))})
+	}
+	return out
+}
+
+// holdsGroups reports whether keys holds a key of every group.
+func holdsGroups(keys []string, groups [][]string) bool {
+	for _, g := range groups {
+		if !slices.ContainsFunc(g, func(k string) bool { return slices.Contains(keys, k) }) {
+			return false
+		}
+	}
+	return true
 }
 
 // MaxStatsSegments bounds the segments of OrgOutreachStats (largest
@@ -60,14 +108,16 @@ type StatsCounts struct {
 // org of the caller's path.
 type statsStore interface {
 	// OutreachStats returns orgID's figures: up to limit active segments.
-	OutreachStats(ctx context.Context, orgID uuid.UUID, from, to time.Time, limit int) (StatsCounts, error)
+	// Only the segments and dispatches whose audience keys hold a key of
+	// every group of keyGroups count (none: every row).
+	OutreachStats(ctx context.Context, orgID uuid.UUID, from, to time.Time, limit int, keyGroups [][]string) (StatsCounts, error)
 }
 
 var _ Statistics = (*service)(nil)
 
 // OrgOutreachStats implements Statistics.
-func (s *service) OrgOutreachStats(ctx context.Context, orgID uuid.UUID, from, to time.Time) (OutreachStats, error) {
-	c, err := s.d.Store.OutreachStats(ctx, orgID, from, to, MaxStatsSegments)
+func (s *service) OrgOutreachStats(ctx context.Context, orgID uuid.UUID, from, to time.Time, f StatsFilter) (OutreachStats, error) {
+	c, err := s.d.Store.OutreachStats(ctx, orgID, from, to, MaxStatsSegments, f.keyGroups())
 	if err != nil {
 		return OutreachStats{}, fmt.Errorf("outreach: stats: %w", err)
 	}

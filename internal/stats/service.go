@@ -148,7 +148,7 @@ func (s *service) Club(ctx context.Context, a authz.Actor, orgID uuid.UUID, q Ra
 	if err != nil {
 		return ClubStats{}, err
 	}
-	figures, err := s.d.Events.OrgEventFigures(ctx, []uuid.UUID{o.ID}, from, to)
+	figures, err := s.clubFigures(ctx, o.ID, q, from, to)
 	if err != nil {
 		return ClubStats{}, err
 	}
@@ -228,8 +228,12 @@ func (s *service) Company(ctx context.Context, a authz.Actor, orgID uuid.UUID, q
 	if err != nil {
 		return CompanyStats{}, err
 	}
+	audience, err := s.audienceFilter(ctx, q)
+	if err != nil {
+		return CompanyStats{}, err
+	}
 	from, to := p.bounds()
-	reach, err := s.d.Outreach.OrgOutreachStats(ctx, o.ID, from, to)
+	reach, err := s.d.Outreach.OrgOutreachStats(ctx, o.ID, from, to, audience)
 	if err != nil {
 		return CompanyStats{}, err
 	}
@@ -297,22 +301,33 @@ func (s *service) University(ctx context.Context, a authz.Actor, orgID uuid.UUID
 	case err != nil:
 		return UniversityStats{}, err
 	}
-	out := UniversityStats{Range: p.dto(), Pending: UniversityPendingDTO{ClubClaims: uc.PendingClaims}}
+	var structure directory.UniversityStructure // none without the directory row: every filter is then 422
 	if uc.UniversityID != uuid.Nil() {
-		st, err := s.d.Students.UniversityStudentStats(ctx, uc.UniversityID, from, to)
+		if structure, err = s.d.Universities.UniversityStructure(ctx, uc.UniversityID); err != nil {
+			return UniversityStats{}, err
+		}
+	}
+	scope, err := resolveStudentScope(q, structure)
+	if err != nil {
+		return UniversityStats{}, err
+	}
+	open, err := clubScope(q, uc.Clubs)
+	if err != nil {
+		return UniversityStats{}, err
+	}
+	out := UniversityStats{Range: p.dto(), Pending: UniversityPendingDTO{ClubClaims: uc.PendingClaims}}
+	out.Students = universityStudents(students.UniversityStudents{})
+	if uc.UniversityID != uuid.Nil() && (!scope.filtered || len(scope.departments) > 0) {
+		st, err := s.d.Students.UniversityStudentStats(ctx, students.StudentStatsQuery{UniversityID: uc.UniversityID,
+			From: from, To: to, Departments: scope.departments, FacultyOf: scope.facultyOf})
 		if err != nil {
 			return UniversityStats{}, err
 		}
 		out.Students = universityStudents(st)
-	} else {
-		out.Students = universityStudents(students.UniversityStudents{})
 	}
-	all, open := make([]uuid.UUID, 0, len(uc.Clubs)), make([]uuid.UUID, 0, len(uc.Clubs))
+	all := make([]uuid.UUID, 0, len(uc.Clubs))
 	for _, c := range uc.Clubs {
 		all = append(all, c.OrgID)
-		if !c.Sensitive {
-			open = append(open, c.OrgID)
-		}
 		if c.Claimed {
 			out.Clubs.Claimed++
 		}
@@ -335,7 +350,7 @@ func (s *service) University(ctx context.Context, a authz.Actor, orgID uuid.UUID
 func universityStudents(st students.UniversityStudents) UniversityStudentsDTO {
 	return UniversityStudentsDTO{Total: estimateOf(st.Total), NewInRange: estimateOf(st.NewInRange),
 		ByDegreeLevel: groupEstimates(st.ByDegreeLevel), ByClassYear: groupEstimates(st.ByClassYear),
-		ByDepartment: groupEstimates(st.ByDepartment)}
+		ByDepartment: groupEstimates(st.ByDepartment), ByFaculty: groupEstimates(st.ByFaculty)}
 }
 
 // clubActivity fills the activity figures of the non-sensitive clubs.

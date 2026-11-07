@@ -75,10 +75,10 @@ type EventInfo interface {
 	Get(ctx context.Context, eventID uuid.UUID) (events.EventSummary, error)
 }
 
-// Outreach is an org's audiences and dispatch reach as estimates
-// (outreach.Statistics).
+// Outreach is an org's audiences and dispatch reach as estimates, narrowed
+// by the audience dimensions of the panel (outreach.Statistics).
 type Outreach interface {
-	OrgOutreachStats(ctx context.Context, orgID uuid.UUID, from, to time.Time) (outreach.OutreachStats, error)
+	OrgOutreachStats(ctx context.Context, orgID uuid.UUID, from, to time.Time, f outreach.StatsFilter) (outreach.OutreachStats, error)
 }
 
 // Contacts is a company's contact request counts (messaging.Statistics).
@@ -94,14 +94,16 @@ type Packages interface {
 // Students is a university's student figures, groups below 10 suppressed
 // (students.Statistics).
 type Students interface {
-	UniversityStudentStats(ctx context.Context, universityID uuid.UUID, from, to time.Time) (students.UniversityStudents, error)
+	UniversityStudentStats(ctx context.Context, q students.StudentStatsQuery) (students.UniversityStudents, error)
 }
 
-// Universities is a university's clubs and claim queue, and the platform's
-// claim queue (directory.Statistics).
+// Universities is a university's clubs and claim queue, the platform's
+// claim queue and a university's faculties and departments
+// (directory.Statistics; BE-190: the faculty breakdown and the filters).
 type Universities interface {
 	UniversityClubStats(ctx context.Context, universityOrgID uuid.UUID) (directory.UniversityClubs, error)
 	PendingClaims(ctx context.Context) (int, error)
+	UniversityStructure(ctx context.Context, universityID uuid.UUID) (directory.UniversityStructure, error)
 }
 
 // Offerings is the university decision queue of a university's clubs

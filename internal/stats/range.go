@@ -8,11 +8,27 @@ import (
 	"koro/internal/platform/problem"
 )
 
-// RangeQuery is the from and to query parameters of a panel as received
-// ("" = the panel's default).
+// RangeQuery is the query parameters of a panel as received: the period
+// (from, to; "" = the panel's default) and the panel's filters (BE-190,
+// T-406; "" = none). Each panel reads its own filters (the handlers set
+// only those of their operation); the service validates them after the
+// authorisation, like the period (422 naming the parameter).
 type RangeQuery struct {
 	From string
 	To   string
+	// EventID narrows the club panel's events to one event of the club.
+	EventID string
+	// UniversityID, DepartmentID and ClassYear narrow the company panel's
+	// audiences and dispatches to those that name them.
+	UniversityID string
+	ClassYear    string
+	// DepartmentID narrows the company panel's audiences (above) or the
+	// university panel's students to one department; FacultyID narrows
+	// the university panel's students to one faculty's departments.
+	DepartmentID string
+	FacultyID    string
+	// ClubID narrows the university panel's club activity to one club.
+	ClubID string
 }
 
 // MaxRangeDays bounds a panel's period (the reads stay on their indexes).

@@ -22,14 +22,15 @@ type RecoveryCodesDTO struct {
 
 // AdminUserSummaryDTO is one row of adminQueryUsers (04 §V.5 subset).
 type AdminUserSummaryDTO struct {
-	UserID      string     `json:"user_id" format:"uuid"`
-	Email       string     `json:"email,omitempty"`
-	FirstName   string     `json:"first_name,omitempty"`
-	LastName    string     `json:"last_name,omitempty"`
-	Status      string     `json:"status" enum:"pending_email,active,suspended,erased"`
-	MFAEnabled  bool       `json:"mfa_enabled"`
-	CreatedAt   time.Time  `json:"created_at"`
-	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
+	UserID        string     `json:"user_id" format:"uuid"`
+	Email         string     `json:"email,omitempty"`
+	FirstName     string     `json:"first_name,omitempty"`
+	LastName      string     `json:"last_name,omitempty"`
+	Status        string     `json:"status" enum:"pending_email,active,suspended,erased"`
+	SignupPersona string     `json:"signup_persona" enum:"student,company,university,club,platform" doc:"The role chosen at sign-up (BE-190)"`
+	MFAEnabled    bool       `json:"mfa_enabled"`
+	CreatedAt     time.Time  `json:"created_at"`
+	LastLoginAt   *time.Time `json:"last_login_at,omitempty"`
 }
 
 // AdminUserList is the body of adminQueryUsers.
@@ -146,7 +147,7 @@ func toRoleDTO(a RoleAssignment, u UserSummary) PlatformRoleAssignmentDTO {
 func toAdminSummaryDTO(u User) AdminUserSummaryDTO {
 	return AdminUserSummaryDTO{
 		UserID: u.ID.String(), Email: u.Email, FirstName: u.FirstName, LastName: u.LastName, Status: string(u.Status),
-		MFAEnabled: u.MFAEnabled, CreatedAt: u.CreatedAt, LastLoginAt: u.LastLoginAt,
+		SignupPersona: string(u.Persona), MFAEnabled: u.MFAEnabled, CreatedAt: u.CreatedAt, LastLoginAt: u.LastLoginAt,
 	}
 }
 

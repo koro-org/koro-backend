@@ -715,6 +715,8 @@ func (m *MemStore) SearchUsers(_ context.Context, q UserSearch) ([]User, error) 
 		case q.Email != "" && u.EmailNormalized != q.Email,
 			q.Email == "" && q.Name != "" && (u.Status == StatusErased || !strings.Contains(textx.LowerTR(u.FirstName+" "+u.LastName), name)),
 			q.Status != "" && u.Status != q.Status,
+			q.Persona != "" && u.Persona != q.Persona,
+			q.PlatformRole != "" && !m.holdsRole(u.ID, q.PlatformRole),
 			q.After != nil && u.ID.Compare(*q.After) >= 0:
 			continue
 		}
@@ -725,6 +727,17 @@ func (m *MemStore) SearchUsers(_ context.Context, q UserSearch) ([]User, error) 
 		out = out[:q.Limit]
 	}
 	return out, nil
+}
+
+// holdsRole reports whether userID holds role in effect (06 H-33); the
+// caller holds m.mu.
+func (m *MemStore) holdsRole(userID uuid.UUID, role authz.PlatformRole) bool {
+	for _, a := range m.roles {
+		if a.UserID == userID && a.Role == role && a.Status.InEffect() {
+			return true
+		}
+	}
+	return false
 }
 
 // MarkSessionMFA implements Store.

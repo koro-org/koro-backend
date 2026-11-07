@@ -93,4 +93,60 @@ func statsContract(t *testing.T, newStore func(t *testing.T) (directory.Store, w
 			t.Fatalf("rep scope = %d, want 2 (the sensitive club's claim is platform staff's)", n)
 		}
 	})
+	t.Run("departments of a university", func(t *testing.T) {
+		// BE-190: every department of the university, active or not, with
+		// its faculty, by ID; another university's are left out.
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		uni := func(name string) directory.University {
+			t.Helper()
+			u, err := s.InsertUniversity(ctx, directory.University{ID: uuid.NewV7(), OrgID: w.org(t, orgs.KindUniversity, name),
+				YokCode: "Y-" + next(), Name: name, City: "Bursa", Type: directory.UniversityState, IsActive: true})
+			if err != nil {
+				t.Fatalf("InsertUniversity: %v", err)
+			}
+			return u
+		}
+		u, other := uni("Bölüm Üniversitesi"), uni("Öteki Üniversite")
+		f, err := s.InsertFaculty(ctx, directory.Faculty{ID: uuid.NewV7(), UniversityID: u.ID, Name: "Fen Fakültesi", IsActive: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		dept := func(uid uuid.UUID, fac *uuid.UUID, name string, active bool) directory.Department {
+			t.Helper()
+			d, err := s.InsertDepartment(ctx, directory.Department{ID: uuid.NewV7(), UniversityID: uid, FacultyID: fac, Name: name,
+				DegreeLevel: directory.DegreeBachelor, IsActive: active})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return d
+		}
+		inFac, closed := dept(u.ID, &f.ID, "Fizik", true), dept(u.ID, nil, "Kapanan", false)
+		dept(other.ID, nil, "Başka", true)
+		got, err := s.DepartmentsOf(ctx, u.ID)
+		if err != nil || len(got) != 2 {
+			t.Fatalf("DepartmentsOf = %+v, %v", got, err)
+		}
+		if got[0].ID.Compare(got[1].ID) >= 0 {
+			t.Fatalf("DepartmentsOf is not by ID: %+v", got)
+		}
+		for _, d := range got {
+			switch d.ID {
+			case inFac.ID:
+				if d.FacultyID == nil || *d.FacultyID != f.ID {
+					t.Fatalf("faculty of %+v", d)
+				}
+			case closed.ID:
+				if d.FacultyID != nil || d.IsActive {
+					t.Fatalf("closed department %+v", d)
+				}
+			default:
+				t.Fatalf("unexpected department %+v", d)
+			}
+		}
+		if none, err := s.DepartmentsOf(ctx, uuid.NewV7()); err != nil || len(none) != 0 {
+			t.Fatalf("unknown university = %+v, %v", none, err)
+		}
+	})
 }

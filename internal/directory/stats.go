@@ -3,6 +3,7 @@ package directory
 import (
 	"context"
 	"fmt"
+	"slices"
 	"uuid"
 )
 
@@ -19,6 +20,27 @@ type Statistics interface {
 	// PendingClaims counts every pending claim (the platform's queue,
 	// sensitive clubs and escalated claims included).
 	PendingClaims(ctx context.Context) (int, error)
+	// UniversityStructure returns the departments of universityID with
+	// their faculty and its faculties (public reference data; BE-190: the
+	// faculty breakdown and the faculty and department filters of the
+	// university panel). An unknown university has none.
+	UniversityStructure(ctx context.Context, universityID uuid.UUID) (UniversityStructure, error)
+}
+
+// DepartmentBrief is one department of a university and its faculty (nil:
+// a department outside any faculty).
+type DepartmentBrief struct {
+	ID        uuid.UUID
+	FacultyID *uuid.UUID
+}
+
+// UniversityStructure is a university's faculties and departments by ID.
+// Departments holds every department, active or not (a student profile
+// may still name a department that closed); Faculties the active
+// faculties and every faculty a department names.
+type UniversityStructure struct {
+	Faculties   []uuid.UUID
+	Departments []DepartmentBrief
 }
 
 // ClubBrief is one club of a university's catalog.
@@ -46,6 +68,9 @@ type StatsStore interface {
 	ClubsOf(ctx context.Context, universityID uuid.UUID) ([]Club, error)
 	// CountClaims counts the claims of f (ListClaims' filter, unpaged).
 	CountClaims(ctx context.Context, f ClaimFilter) (int, error)
+	// DepartmentsOf returns every department of a university, active or
+	// not, by ID.
+	DepartmentsOf(ctx context.Context, universityID uuid.UUID) ([]Department, error)
 }
 
 var _ Statistics = (*service)(nil)
@@ -80,4 +105,29 @@ func (s *service) PendingClaims(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("directory: pending claims: %w", err)
 	}
 	return n, nil
+}
+
+// UniversityStructure implements Statistics.
+func (s *service) UniversityStructure(ctx context.Context, universityID uuid.UUID) (UniversityStructure, error) {
+	depts, err := s.d.Store.DepartmentsOf(ctx, universityID)
+	if err != nil {
+		return UniversityStructure{}, fmt.Errorf("directory: university departments: %w", err)
+	}
+	facs, err := s.d.Store.FacultiesOf(ctx, universityID)
+	if err != nil {
+		return UniversityStructure{}, fmt.Errorf("directory: university faculties: %w", err)
+	}
+	out := UniversityStructure{Faculties: make([]uuid.UUID, 0, len(facs)), Departments: make([]DepartmentBrief, len(depts))}
+	for _, f := range facs {
+		out.Faculties = append(out.Faculties, f.ID)
+	}
+	for i, d := range depts {
+		out.Departments[i] = DepartmentBrief{ID: d.ID, FacultyID: d.FacultyID}
+		if d.FacultyID != nil {
+			out.Faculties = append(out.Faculties, *d.FacultyID)
+		}
+	}
+	slices.SortFunc(out.Faculties, uuid.UUID.Compare)
+	out.Faculties = slices.Compact(out.Faculties)
+	return out, nil
 }

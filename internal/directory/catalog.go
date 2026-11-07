@@ -36,16 +36,13 @@ func (s *service) GetUniversity(ctx context.Context, id uuid.UUID) (University, 
 // UniversityNames implements Catalog. An inactive university keeps its name:
 // verifications made under it still show it.
 func (s *service) UniversityNames(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error) {
-	out := make(map[uuid.UUID]string, len(ids))
-	for _, id := range uniqueIDs(ids) {
-		u, err := s.d.Store.GetUniversity(ctx, id)
-		switch {
-		case errors.Is(err, ErrNotFound):
-		case err != nil:
-			return nil, err
-		default:
-			out[id] = u.Name
-		}
+	unis, err := s.d.Store.GetUniversities(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID]string, len(unis))
+	for _, u := range unis {
+		out[u.ID] = u.Name
 	}
 	return out, nil
 }

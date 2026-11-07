@@ -611,6 +611,20 @@ func (s *MemStore) GetClub(_ context.Context, orgID uuid.UUID) (Club, error) {
 	return cloneClub(c), nil
 }
 
+// GetClubs implements Store.
+func (s *MemStore) GetClubs(_ context.Context, orgIDs []uuid.UUID) ([]Club, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]Club, 0, len(orgIDs))
+	for _, id := range orgIDs {
+		if c, ok := s.clubs[id]; ok {
+			out = append(out, cloneClub(c))
+		}
+	}
+	slices.SortFunc(out, func(a, b Club) int { return a.OrgID.Compare(b.OrgID) })
+	return slices.CompactFunc(out, func(a, b Club) bool { return a.OrgID == b.OrgID }), nil
+}
+
 // LockClub implements Store.
 func (s *MemStore) LockClub(ctx context.Context, orgID uuid.UUID) (Club, error) {
 	return s.GetClub(ctx, orgID)

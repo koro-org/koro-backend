@@ -100,10 +100,10 @@ func TestAdminListClubClaims_Approver(t *testing.T) {
 		return p.Items
 	}
 
-	w.orgs.roleReads, w.store.uniReads = 0, 0
+	w.orgs.roleReads, w.store.uniReads, w.store.clubReads = 0, 0, 0
 	rows := list(pad(t))
-	if w.orgs.roleReads != 1 || w.store.uniReads != 1 {
-		t.Fatalf("reads for %d rows: %d of the reps, %d of the universities; want 1 each", len(rows), w.orgs.roleReads, w.store.uniReads)
+	if w.orgs.roleReads != 1 || w.store.uniReads != 1 || w.store.clubReads != 1 {
+		t.Fatalf("reads for %d rows: %d of the reps, %d of the universities, %d of the clubs; want 1 each", len(rows), w.orgs.roleReads, w.store.uniReads, w.store.clubReads)
 	}
 	if len(rows) != len(want) {
 		t.Fatalf("rows = %d, want %d", len(rows), len(want))

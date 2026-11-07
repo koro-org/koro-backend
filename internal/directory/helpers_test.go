@@ -77,6 +77,21 @@ type spyStore struct {
 	failClub     error
 	claimUpdates []int // transaction of each UpdateClaim (BE-022)
 	uniReads     int   // GetUniversity and GetUniversities calls (BE-184)
+	clubReads    int   // GetClub and GetClubs calls (BE-187)
+}
+
+func (s *spyStore) GetClub(ctx context.Context, orgID uuid.UUID) (directory.Club, error) {
+	s.mu.Lock()
+	s.clubReads++
+	s.mu.Unlock()
+	return s.Store.GetClub(ctx, orgID)
+}
+
+func (s *spyStore) GetClubs(ctx context.Context, orgIDs []uuid.UUID) ([]directory.Club, error) {
+	s.mu.Lock()
+	s.clubReads++
+	s.mu.Unlock()
+	return s.Store.GetClubs(ctx, orgIDs)
 }
 
 func (s *spyStore) GetUniversity(ctx context.Context, id uuid.UUID) (directory.University, error) {

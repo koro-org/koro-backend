@@ -18,7 +18,8 @@ import (
 )
 
 // TestUniversityNames_Catalog (BE-185, T-223): duplicates collapse, an
-// unknown ID has no key, a deactivated university keeps its name.
+// unknown ID has no key, a deactivated university keeps its name; one read
+// for the whole set (BE-187).
 func TestUniversityNames_Catalog(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -42,9 +43,13 @@ func TestUniversityNames_Catalog(t *testing.T) {
 	if _, err := e.svc.AdminUpdateUniversity(ctx, pad(t), u2.ID, directory.UniversityPatch{IsActive: new(false)}); err != nil {
 		t.Fatal(err)
 	}
+	e.store.uniReads = 0
 	got, err := e.svc.UniversityNames(ctx, []uuid.UUID{u1.ID, u2.ID, u1.ID, uuid.NewV7()})
 	if err != nil || len(got) != 2 || got[u1.ID] != "Birinci Üniversitesi" || got[u2.ID] != "Kapalı Üniversite" {
 		t.Fatalf("UniversityNames = %v, %v", got, err)
+	}
+	if e.store.uniReads != 1 {
+		t.Fatalf("university reads = %d, want 1", e.store.uniReads)
 	}
 	if got, err := e.svc.UniversityNames(ctx, nil); err != nil || got == nil || len(got) != 0 {
 		t.Fatalf("UniversityNames(nil) = %v, %v", got, err)

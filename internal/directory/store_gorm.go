@@ -487,6 +487,20 @@ func (s gormStore) GetClub(ctx context.Context, orgID uuid.UUID) (Club, error) {
 	return take[Club]("get club", clubCols, db.Conn(ctx, s.orm).Scopes(db.ScopeOrg(orgID)))
 }
 
+// GetClubs implements Store.
+//
+// cross-org: a lookup over the given club orgs (the admin claim queue).
+func (s gormStore) GetClubs(ctx context.Context, orgIDs []uuid.UUID) ([]Club, error) {
+	if len(orgIDs) == 0 {
+		return nil, nil
+	}
+	var out []Club
+	if err := db.Conn(ctx, s.orm).Model(&Club{}).Select(clubCols).Where("org_id IN ?", orgIDs).Order("org_id").Find(&out).Error; err != nil {
+		return nil, wrap("get clubs", err)
+	}
+	return out, nil
+}
+
 // LockClub implements Store.
 func (s gormStore) LockClub(ctx context.Context, orgID uuid.UUID) (Club, error) {
 	return take[Club]("lock club", clubCols, locked(db.Conn(ctx, s.orm)).Scopes(db.ScopeOrg(orgID)))

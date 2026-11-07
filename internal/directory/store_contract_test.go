@@ -376,6 +376,13 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (directory.Store, w
 		if _, err := s.GetClub(ctx, uuid.NewV7()); !errors.Is(err, directory.ErrNotFound) {
 			t.Fatalf("missing club: %v", err)
 		}
+		// GetClubs: the ones that exist, each once, with their social links.
+		if rows, err := s.GetClubs(ctx, []uuid.UUID{c.OrgID, uuid.NewV7(), c.OrgID}); err != nil || len(rows) != 1 || rows[0].OrgID != c.OrgID || rows[0].UniversityID != u.ID || rows[0].SocialLinks == nil {
+			t.Fatalf("GetClubs = %+v, %v", rows, err)
+		}
+		if rows, err := s.GetClubs(ctx, nil); err != nil || len(rows) != 0 {
+			t.Fatalf("GetClubs(nil) = %+v, %v", rows, err)
+		}
 		if _, err := s.InsertClub(ctx, directory.Club{OrgID: w.org(t, orgs.KindClub, "Yetim"), UniversityID: uuid.NewV7(),
 			Category: directory.CategoryArts, JoinPolicy: directory.JoinOpen, ClaimStatus: directory.ClaimUnclaimed}); err == nil {
 			t.Fatal("club of an unknown university was stored")

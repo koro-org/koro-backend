@@ -113,6 +113,8 @@ type ClubStore interface {
 	InsertClub(ctx context.Context, c Club) (Club, error)
 	// GetClub returns the club of an org or ErrNotFound.
 	GetClub(ctx context.Context, orgID uuid.UUID) (Club, error)
+	// GetClubs returns the clubs among orgIDs that exist, by org ID.
+	GetClubs(ctx context.Context, orgIDs []uuid.UUID) ([]Club, error)
 	// LockClub returns the club locked for the transaction.
 	LockClub(ctx context.Context, orgID uuid.UUID) (Club, error)
 	// UpdateClub writes category, sensitivity (flag, reason, set_by,

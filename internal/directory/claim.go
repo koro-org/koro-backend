@@ -511,11 +511,23 @@ func (s *service) adminViews(ctx context.Context, cs []ClubClaim) ([]ClaimView, 
 			return nil, err
 		}
 	}
+	orgIDs := make([]uuid.UUID, len(cs))
+	for i, c := range cs {
+		orgIDs[i] = c.ClubOrgID
+	}
+	rows, err := s.d.Store.GetClubs(ctx, orgIDs)
+	if err != nil {
+		return nil, err
+	}
+	clubs := make(map[uuid.UUID]Club, len(rows))
+	for _, c := range rows {
+		clubs[c.OrgID] = c
+	}
 	out := make([]ClaimView, len(cs))
 	for i, c := range cs {
-		club, err := s.d.Store.GetClub(ctx, c.ClubOrgID)
-		if err != nil {
-			return nil, err
+		club, ok := clubs[c.ClubOrgID]
+		if !ok {
+			return nil, ErrNotFound
 		}
 		v := ClaimView{Claim: c, ClubName: names[c.ClubOrgID], Club: club, EvidenceState: EvidenceNone}
 		if u, ok := users[c.ClaimantUserID]; ok {

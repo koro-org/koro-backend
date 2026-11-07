@@ -26,12 +26,17 @@ func (s universityReadCounter) GetUniversity(ctx context.Context, id uuid.UUID) 
 	return s.Store.GetUniversity(ctx, id)
 }
 
+func (s universityReadCounter) GetUniversities(ctx context.Context, ids []uuid.UUID) ([]directory.University, error) {
+	s.reads.Add(1)
+	return s.Store.GetUniversities(ctx, ids)
+}
+
 // TestWire_DirectoryNamesEduUniversities (BE-185, T-223) through the built
 // container: directory fills identity's universityNames, so the student's
 // answer (getMyEduVerification, the document in review next to a verified
 // row included) and the admin queue carry the name. A university directory
-// does not know keeps its ID and an empty name; a queue page reads each
-// university once, however many rows point at it.
+// does not know keeps its ID and an empty name; a queue page reads the
+// universities once, however many rows point at them (BE-187).
 func TestWire_DirectoryNamesEduUniversities(t *testing.T) {
 	t.Parallel()
 	c := newTestContainer(t)
@@ -128,7 +133,7 @@ func TestWire_DirectoryNamesEduUniversities(t *testing.T) {
 		t.Fatalf("unknown university answer = %+v", got.University)
 	}
 
-	// The queue: three rows, two universities, at most two reads.
+	// The queue: three rows, two universities, one read.
 	reads.Store(0)
 	admin, ok := authztest.Get("platform_admin")
 	if !ok {
@@ -150,7 +155,7 @@ func TestWire_DirectoryNamesEduUniversities(t *testing.T) {
 			t.Fatalf("queue row of %s named %q, want %q", *it.Record.UniversityID, it.UniversityName, want)
 		}
 	}
-	if n := reads.Load(); n > 2 {
-		t.Fatalf("university reads for a queue of 3 rows over 2 universities = %d, want at most 2", n)
+	if n := reads.Load(); n != 1 {
+		t.Fatalf("university reads for a queue of 3 rows over 2 universities = %d, want 1", n)
 	}
 }

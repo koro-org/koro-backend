@@ -2,6 +2,8 @@ package feed
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"time"
 	"uuid"
 )
@@ -31,9 +33,9 @@ type postStore interface {
 	// (published_at, id) (02 §12.2 "Görünürlük", R-003 §1.5.2).
 	ListFeed(ctx context.Context, f FeedFilter, after *After, limit int) ([]Post, error)
 	// ListOrgPosts returns up to limit published posts of orgID the reader
-	// f may see (the org page), newest first by (published_at, id). Mutes
-	// and hidden posts are feed-only: they do not apply here.
-	ListOrgPosts(ctx context.Context, orgID uuid.UUID, f Reader, after *After, limit int) ([]Post, error)
+	// f may see (the org page) of f.Kinds, newest first by (published_at,
+	// id). Mutes and hidden posts are feed-only: they do not apply here.
+	ListOrgPosts(ctx context.Context, orgID uuid.UUID, f OrgPostFilter, after *After, limit int) ([]Post, error)
 	// ListEventShares returns up to limit published posts sharing one of
 	// eventIDs (event_share) the reader r may see, newest first by
 	// (published_at, id): the post pages that show the events' summaries
@@ -77,9 +79,62 @@ type FeedFilter struct {
 	// Following keeps the posts of followed orgs (org_follows) and of the
 	// reader's member orgs: the "Takip ettiklerim" tab.
 	Following bool
-	// Kind keeps one post kind when set.
-	Kind Kind
+	// Kinds keeps these post kinds (none: every kind; BE-191).
+	Kinds Kinds
 }
+
+// OrgPostFilter narrows ListOrgPosts (BE-191).
+type OrgPostFilter struct {
+	Reader
+	// Kinds keeps these post kinds (none: every kind).
+	Kinds Kinds
+}
+
+// Kinds is the kind filter of the published lists (getFeed, listPosts;
+// BE-191): a post of one of the kinds passes; none passes every kind.
+type Kinds []Kind
+
+// KindsOf returns the canonical filter of raw (the kind query values):
+// sorted, a repeated kind once, so the same set in any order is the same
+// filter (and the same cursor fingerprint, String).
+func KindsOf(raw []string) Kinds {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make(Kinds, len(raw))
+	for i, k := range raw {
+		out[i] = Kind(k)
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// Valid reports whether every kind of ks is a post kind.
+func (ks Kinds) Valid() bool {
+	for _, k := range ks {
+		if !k.Valid() {
+			return false
+		}
+	}
+	return true
+}
+
+// keeps reports whether a post of kind k passes the filter.
+func (ks Kinds) keeps(k Kind) bool { return len(ks) == 0 || slices.Contains(ks, k) }
+
+// strings returns the kinds as the values of an SQL IN list.
+func (ks Kinds) strings() []string {
+	out := make([]string, len(ks))
+	for i, k := range ks {
+		out[i] = string(k)
+	}
+	return out
+}
+
+// String is the filter in the cursor fingerprint: the kinds in their
+// order, comma separated ("" for none; one kind is the kind itself, as
+// before BE-191, so the cursors of a single kind stay valid).
+func (ks Kinds) String() string { return strings.Join(ks.strings(), ",") }
 
 // After is the keyset position of a published page: the last row's
 // published_at and id.

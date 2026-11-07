@@ -12892,11 +12892,17 @@ components:
           items:
             $ref: "#/components/schemas/RecommendedEventDTO"
           type: array
+        opportunities:
+          description: Open opportunity calls (published in the last 60 days, deadline not over) you see in your feed and have neither liked nor saved, the best match first
+          items:
+            $ref: "#/components/schemas/RecommendedOpportunityDTO"
+          type: array
       required:
         - enabled
         - choice
         - events
         - clubs
+        - opportunities
       type: object
     RecommendedClubDTO:
       additionalProperties: false
@@ -12936,6 +12942,28 @@ components:
           type: array
       required:
         - event
+        - reasons
+      type: object
+    RecommendedOpportunityDTO:
+      additionalProperties: false
+      properties:
+        post:
+          $ref: "#/components/schemas/PostDTO"
+        reasons:
+          description: "The rules that picked the call, the strongest first (show the first; deadline_soon never comes alone): followed_org — a club or org you follow or belong to; attended_organiser — it organised an event you attended; same_university — your university or one of its clubs; eligible_year — open to your class year; popular — at least 10 likes or 10 saves; deadline_soon — the deadline is within 7 days"
+          items:
+            enum:
+              - followed_org
+              - attended_organiser
+              - same_university
+              - eligible_year
+              - popular
+              - deadline_soon
+            type: string
+          minItems: 1
+          type: array
+      required:
+        - post
         - reasons
       type: object
     RecordMineInputBody:
@@ -29107,7 +29135,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/feed:
     get:
-      description: Published posts the reader may see, newest first by (published_at, post_id). discover lists every visible post, following the posts of followed and member organizations. Muted organizations and hidden posts are left out; a minor gets no commercial post.
+      description: "Published posts the reader may see, newest first by (published_at, post_id). discover lists every visible post, following the posts of followed and member organizations. Muted organizations and hidden posts are left out; a minor gets no commercial post. kind narrows the page to some kinds (repeat it: kind=text&kind=image); the cursor is bound to the tab and the set of kinds (in any order)."
       operationId: getFeed
       parameters:
         - description: Page size
@@ -29129,6 +29157,21 @@ paths:
             description: Opaque cursor from next_cursor
             maxLength: 512
             type: string
+        - description: "Only these kinds (repeat the parameter: kind=text&kind=image); none: every kind. The same set in any order is the same filter and keeps its cursor"
+          explode: true
+          in: query
+          name: kind
+          schema:
+            description: "Only these kinds (repeat the parameter: kind=text&kind=image); none: every kind. The same set in any order is the same filter and keeps its cursor"
+            items:
+              enum:
+                - text
+                - image
+                - event_share
+                - opportunity_call
+              type: string
+            maxItems: 4
+            type: array
         - description: discover (default) or following
           explode: false
           in: query
@@ -29138,16 +29181,6 @@ paths:
             enum:
               - discover
               - following
-            type: string
-        - explode: false
-          in: query
-          name: kind
-          schema:
-            enum:
-              - text
-              - image
-              - event_share
-              - opportunity_call
             type: string
       responses:
         "200":
@@ -32616,16 +32649,16 @@ paths:
       x-koro-terms-gate: exempt
   /api/v1/me/recommendations:
     get:
-      description: "Rule-based recommendations from your own data, shown to you only: upcoming events (next 30 days) you have not registered for, of the clubs and orgs you follow or belong to, like the events you attended in the last year, of your university or popular (at least 10 registrations); clubs that organised your events or have at least 10 members in your department or university. Every item carries the reason codes of the rules that picked it; no score or count. Sensitive clubs and events of a sensitive category are never a signal nor a recommendation. Turn them off with updateMyPrivacy recommendation_choice: disabled (enabled=false, empty lists; default: on for an adult, off for a minor). Verified students only (403 otherwise)."
+      description: "Rule-based recommendations from your own data, shown to you only: upcoming events (next 30 days) you have not registered for, of the clubs and orgs you follow or belong to, like the events you attended in the last year, of your university or popular (at least 10 registrations); clubs that organised your events or have at least 10 members in your department or university; open opportunity calls (published in the last 60 days, deadline not over) you see in your feed and have neither liked nor saved, of the clubs and orgs you follow, belong to or attended events of, of your university, open to your class year or popular (at least 10 likes or 10 saves). Every item carries the reason codes of the rules that picked it; no score or count. Sensitive clubs, events of a sensitive category and calls addressed to a sensitive club's members are never a signal nor a recommendation; a minor gets no commercial call. Turn them off with updateMyPrivacy recommendation_choice: disabled (enabled=false, empty lists; default: on for an adult, off for a minor). Verified students only (403 otherwise)."
       operationId: listMyRecommendations
       parameters:
-        - description: Items per list (events and clubs each)
+        - description: Items per list (events, clubs and opportunities each)
           explode: false
           in: query
           name: limit
           schema:
             default: 10
-            description: Items per list (events and clubs each)
+            description: Items per list (events, clubs and opportunities each)
             format: int64
             maximum: 20
             minimum: 1
@@ -32648,7 +32681,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerAuth: []
-      summary: List my recommended events and clubs
+      summary: List my recommended events, clubs and opportunities
       tags:
         - recommend
       x-koro-action: recommend.recommendation.list_own
@@ -39257,7 +39290,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/posts:
     get:
-      description: "The published posts of an organization page the caller may see (anonymous: public, non-commercial posts only)."
+      description: "The published posts of an organization page the caller may see (anonymous: public, non-commercial posts only). kind narrows the page to some kinds (kind=opportunity_call: the organization's opportunity calls); the cursor is bound to the organization and the set of kinds."
       operationId: listPosts
       parameters:
         - description: Page size
@@ -39279,6 +39312,21 @@ paths:
             description: Opaque cursor from next_cursor
             maxLength: 512
             type: string
+        - description: "Only these kinds (repeat the parameter: kind=text&kind=image); none: every kind. The same set in any order is the same filter and keeps its cursor"
+          explode: true
+          in: query
+          name: kind
+          schema:
+            description: "Only these kinds (repeat the parameter: kind=text&kind=image); none: every kind. The same set in any order is the same filter and keeps its cursor"
+            items:
+              enum:
+                - text
+                - image
+                - event_share
+                - opportunity_call
+              type: string
+            maxItems: 4
+            type: array
         - description: The organization of the page
           explode: false
           in: query

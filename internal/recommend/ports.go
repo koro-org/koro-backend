@@ -7,6 +7,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/directory"
 	"koro/internal/events"
+	"koro/internal/feed"
 	"koro/internal/students"
 )
 
@@ -42,4 +43,11 @@ type Clubs interface {
 // Follows is the orgs the student follows (feed.Follows).
 type Follows interface {
 	FollowedOrgIDs(ctx context.Context, userID uuid.UUID, limit int) ([]uuid.UUID, error)
+}
+
+// Opportunities is the opportunity calls the student may see in the feed
+// and the cards of the chosen ones (feed.Opportunities, BE-191).
+type Opportunities interface {
+	RecommendableOpportunities(ctx context.Context, a authz.Actor, q feed.OpportunityQuery) ([]feed.OpportunityCandidate, error)
+	OpportunityCards(ctx context.Context, a authz.Actor, rows []feed.OpportunityCandidate) ([]feed.PostView, error)
 }

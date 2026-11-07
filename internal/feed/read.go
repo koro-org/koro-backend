@@ -34,16 +34,27 @@ const (
 // FeedQuery narrows getFeed.
 type FeedQuery struct {
 	Tab   string // TabDiscover (default) or TabFollowing
-	Kind  Kind   // optional
+	Kinds Kinds  // none: every kind (BE-191)
 	Limit int
 	After *After
 }
 
-// PageQuery is the page of listPosts.
+// PageQuery is the page of listPosts and of the reader's lists.
 type PageQuery struct {
 	Limit int
 	After *After
 }
+
+// OrgPageQuery narrows listPosts: the page and the kinds (none: every
+// kind; BE-191).
+type OrgPageQuery struct {
+	PageQuery
+	Kinds Kinds
+}
+
+// errKinds is the answer to a kind filter with a kind that is not a post
+// kind (the HTTP enum refuses it first).
+func errKinds() error { return problem.Field("query.kind", "is not a post kind") }
 
 // ManageQuery narrows listOrgPostsManage (statuses; newest first by id).
 type ManageQuery struct {
@@ -224,11 +235,14 @@ func (s *service) GetFeed(ctx context.Context, a authz.Actor, q FeedQuery) (Post
 	if err := authz.Can(ctx, a, authz.FeedFeedRead, feedResource); err != nil {
 		return PostPage{}, err
 	}
+	if !q.Kinds.Valid() {
+		return PostPage{}, errKinds()
+	}
 	r, err := s.readerOf(ctx, a)
 	if err != nil {
 		return PostPage{}, err
 	}
-	f := FeedFilter{Reader: r, Following: q.Tab == TabFollowing, Kind: q.Kind}
+	f := FeedFilter{Reader: r, Following: q.Tab == TabFollowing, Kinds: q.Kinds}
 	limit := clampFeed(q.Limit)
 	rows, err := s.posts().ListFeed(ctx, f, q.After, limit+1)
 	if err != nil {
@@ -248,8 +262,8 @@ func clampFeed(n int) int {
 }
 
 // ListPosts implements Service: the published posts of an org's page the
-// caller may see (anonymous: public, non-commercial; T-57).
-func (s *service) ListPosts(ctx context.Context, a authz.Actor, orgID uuid.UUID, q PageQuery) (PostPage, error) {
+// caller may see (anonymous: public, non-commercial; T-57), of q.Kinds.
+func (s *service) ListPosts(ctx context.Context, a authz.Actor, orgID uuid.UUID, q OrgPageQuery) (PostPage, error) {
 	o, err := s.org(ctx, orgID)
 	if err != nil {
 		return PostPage{}, err
@@ -257,13 +271,16 @@ func (s *service) ListPosts(ctx context.Context, a authz.Actor, orgID uuid.UUID,
 	if err := authz.Can(ctx, a, authz.FeedPostListByOrg, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
 		return PostPage{}, err
 	}
+	if !q.Kinds.Valid() {
+		return PostPage{}, errKinds()
+	}
 	r, err := s.readerOf(ctx, a)
 	if err != nil {
 		return PostPage{}, err
 	}
 	r.All = a.IsUser() && staffReader(a, o.ID)
 	limit := page.ClampLimit(q.Limit)
-	rows, err := s.posts().ListOrgPosts(ctx, o.ID, r, q.After, limit+1)
+	rows, err := s.posts().ListOrgPosts(ctx, o.ID, OrgPostFilter{Reader: r, Kinds: q.Kinds}, q.After, limit+1)
 	if err != nil {
 		return PostPage{}, err
 	}
@@ -298,7 +315,7 @@ func (s *service) ListOrgPosts(ctx context.Context, a authz.Actor, orgID uuid.UU
 	}
 	limit := page.ClampLimit(q.Limit)
 	if q.Kind != "" && !q.Kind.Valid() {
-		return PostPage{}, problem.Field("query.kind", "is not a post kind")
+		return PostPage{}, errKinds()
 	}
 	rows, err := s.posts().ListOrgManage(ctx, o.ID, ManageFilter{Statuses: q.Statuses, Kind: q.Kind}, q.After, limit+1)
 	if err != nil {

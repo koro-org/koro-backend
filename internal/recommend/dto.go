@@ -3,6 +3,7 @@ package recommend
 import (
 	"koro/internal/directory"
 	"koro/internal/events"
+	"koro/internal/feed"
 )
 
 // RecommendationsDTO is listMyRecommendations (04 §2.24): the student's own
@@ -13,6 +14,8 @@ type RecommendationsDTO struct {
 	Choice  string                `json:"choice" enum:"default,enabled,disabled" doc:"Your recommendation_choice of the privacy settings (getMyPrivacy, updateMyPrivacy)"`
 	Events  []RecommendedEventDTO `json:"events" doc:"Upcoming events (next 30 days) you have not registered for, the best match first"`
 	Clubs   []RecommendedClubDTO  `json:"clubs" doc:"Clubs you neither follow nor belong to, the best match first"`
+	// Opportunities: BE-191.
+	Opportunities []RecommendedOpportunityDTO `json:"opportunities" doc:"Open opportunity calls (published in the last 60 days, deadline not over) you see in your feed and have neither liked nor saved, the best match first"`
 }
 
 // RecommendedEventDTO is a recommended event: listEvents' card and why.
@@ -27,10 +30,21 @@ type RecommendedClubDTO struct {
 	Reasons []string              `json:"reasons" minItems:"1" enum:"attended_organiser,popular_in_department,popular_in_university" doc:"The rules that picked the club, the strongest first (show the first): attended_organiser — it organised an event you attended; popular_in_department — at least 10 students of your department are members; popular_in_university — at least 10 students of your university are members"`
 }
 
+// RecommendedOpportunityDTO is a recommended opportunity call: getFeed's
+// post and why (BE-191).
+type RecommendedOpportunityDTO struct {
+	Post    feed.PostDTO `json:"post"`
+	Reasons []string     `json:"reasons" minItems:"1" enum:"followed_org,attended_organiser,same_university,eligible_year,popular,deadline_soon" doc:"The rules that picked the call, the strongest first (show the first; deadline_soon never comes alone): followed_org — a club or org you follow or belong to; attended_organiser — it organised an event you attended; same_university — your university or one of its clubs; eligible_year — open to your class year; popular — at least 10 likes or 10 saves; deadline_soon — the deadline is within 7 days"`
+}
+
 func toDTO(r Recommendations) RecommendationsDTO {
 	out := RecommendationsDTO{
 		Enabled: r.Enabled, Choice: string(r.Choice),
 		Events: make([]RecommendedEventDTO, len(r.Events)), Clubs: make([]RecommendedClubDTO, len(r.Clubs)),
+		Opportunities: make([]RecommendedOpportunityDTO, len(r.Opportunities)),
+	}
+	for i, it := range r.Opportunities {
+		out.Opportunities[i] = RecommendedOpportunityDTO{Post: feed.PostDTOOf(it.View), Reasons: codes(it.Reasons)}
 	}
 	for i, it := range r.Events {
 		out.Events[i] = RecommendedEventDTO{Event: events.CardOf(it.View), Reasons: codes(it.Reasons)}

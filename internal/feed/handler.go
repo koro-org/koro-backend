@@ -27,14 +27,16 @@ func Register(api huma.API, svc Service) {
 		Summary: "Get the feed",
 		Description: "Published posts the reader may see, newest first by (published_at, post_id). discover lists " +
 			"every visible post, following the posts of followed and member organizations. Muted organizations and " +
-			"hidden posts are left out; a minor gets no commercial post.",
+			"hidden posts are left out; a minor gets no commercial post. kind narrows the page to some kinds " +
+			"(repeat it: kind=text&kind=image); the cursor is bound to the tab and the set of kinds (in any order).",
 	}, op.Meta{Action: string(authz.FeedFeedRead), Surface: op.SurfaceSelf}, h.getFeed)
 
 	op.Register(api, "feed", huma.Operation{
 		OperationID: "listPosts", Method: http.MethodGet, Path: "/posts",
 		Summary: "List an organization's posts",
 		Description: "The published posts of an organization page the caller may see (anonymous: public, " +
-			"non-commercial posts only).",
+			"non-commercial posts only). kind narrows the page to some kinds (kind=opportunity_call: the " +
+			"organization's opportunity calls); the cursor is bound to the organization and the set of kinds.",
 	}, op.Meta{Action: string(authz.FeedPostListByOrg), Surface: op.SurfacePublic}, h.listPosts)
 
 	op.Register(api, "feed", huma.Operation{
@@ -169,12 +171,21 @@ func listOut(p PostPage, fp string) *listOutput {
 	return out
 }
 
+// KindFilter is the kind filter of the published lists (getFeed,
+// listPosts; BE-191).
+type KindFilter struct {
+	Kind []string `query:"kind,explode" maxItems:"4" enum:"text,image,event_share,opportunity_call" doc:"Only these kinds (repeat the parameter: kind=text&kind=image); none: every kind. The same set in any order is the same filter and keeps its cursor"`
+}
+
+// kinds is the canonical filter (KindsOf).
+func (f KindFilter) kinds() Kinds { return KindsOf(f.Kind) }
+
 // ---- getFeed
 
 type getFeedInput struct {
 	FeedPage
-	Tab  string `query:"tab" enum:"discover,following" doc:"discover (default) or following"`
-	Kind string `query:"kind" enum:"text,image,event_share,opportunity_call"`
+	KindFilter
+	Tab string `query:"tab" enum:"discover,following" doc:"discover (default) or following"`
 }
 
 func (h handler) getFeed(ctx context.Context, in *getFeedInput) (*listOutput, error) {
@@ -186,8 +197,9 @@ func (h handler) getFeed(ctx context.Context, in *getFeedInput) (*listOutput, er
 	if tab == "" {
 		tab = TabDiscover
 	}
-	fp := page.Fingerprint("getFeed", tab, in.Kind)
-	q := FeedQuery{Tab: tab, Kind: Kind(in.Kind), Limit: in.Limit}
+	kinds := in.kinds()
+	fp := page.Fingerprint("getFeed", tab, kinds.String())
+	q := FeedQuery{Tab: tab, Kinds: kinds, Limit: in.Limit}
 	if q.After, err = cursorOf(in.Cursor, fp); err != nil {
 		return nil, err
 	}
@@ -202,6 +214,7 @@ func (h handler) getFeed(ctx context.Context, in *getFeedInput) (*listOutput, er
 
 type listPostsInput struct {
 	page.Params
+	KindFilter
 	OrgID string `query:"org_id" required:"true" doc:"The organization of the page"`
 }
 
@@ -210,8 +223,14 @@ func (h handler) listPosts(ctx context.Context, in *listPostsInput) (*listOutput
 	if err != nil {
 		return nil, problem.Field("query.org_id", "must be a UUID")
 	}
+	kinds := in.kinds()
 	fp := page.Fingerprint("listPosts", org.String())
-	q := PageQuery{Limit: in.Limit}
+	if len(kinds) > 0 {
+		// Without a filter the fingerprint stays the one before BE-191, so
+		// the cursors the clients hold keep working.
+		fp = page.Fingerprint("listPosts", org.String(), kinds.String())
+	}
+	q := OrgPageQuery{PageQuery: PageQuery{Limit: in.Limit}, Kinds: kinds}
 	if q.After, err = cursorOf(in.Cursor, fp); err != nil {
 		return nil, err
 	}

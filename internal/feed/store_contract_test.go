@@ -327,8 +327,15 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (feed.Store, world)
 		if got := list(feed.FeedFilter{Reader: fr, Following: true}, nil, 10); !slices.Equal(got, []uuid.UUID{fol.ID, pub.ID}) {
 			t.Fatalf("follower following tab = %v", got)
 		}
-		if got := list(feed.FeedFilter{Reader: r, Kind: feed.KindImage}, nil, 10); !slices.Equal(got, []uuid.UUID{otherPost.ID}) {
+		if got := list(feed.FeedFilter{Reader: r, Kinds: feed.Kinds{feed.KindImage}}, nil, 10); !slices.Equal(got, []uuid.UUID{otherPost.ID}) {
 			t.Fatalf("image feed = %v", got)
+		}
+		// Several kinds (BE-191): a post of any of them.
+		if got := list(feed.FeedFilter{Reader: r, Kinds: feed.Kinds{feed.KindImage, feed.KindText}}, nil, 10); !slices.Equal(got, []uuid.UUID{otherPost.ID, ad.ID, pub.ID}) {
+			t.Fatalf("image+text feed = %v", got)
+		}
+		if got := list(feed.FeedFilter{Reader: r, Kinds: feed.Kinds{feed.KindOpportunityCall, feed.KindEventShare}}, nil, 10); len(got) != 0 {
+			t.Fatalf("opportunity+event feed = %v", got)
 		}
 		// Keyset: strictly after (published_at, id).
 		if got := list(feed.FeedFilter{Reader: fr}, &feed.After{At: at(3), ID: fol.ID}, 10); !slices.Equal(got, []uuid.UUID{ad.ID, pub.ID}) {
@@ -362,7 +369,7 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (feed.Store, world)
 		// Org page: anonymous public non-commercial; All sees everything.
 		page := func(org uuid.UUID, rd feed.Reader) []uuid.UUID {
 			t.Helper()
-			ps, err := s.ListOrgPosts(ctx, org, rd, nil, 10)
+			ps, err := s.ListOrgPosts(ctx, org, feed.OrgPostFilter{Reader: rd}, nil, 10)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -376,6 +383,19 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (feed.Store, world)
 		}
 		if got := page(club, feed.Reader{All: true}); !slices.Equal(got, []uuid.UUID{segPost.ID, fol.ID, pub.ID}) {
 			t.Fatalf("staff club page = %v", got)
+		}
+		// The org page's kind filter (BE-191).
+		for _, tc := range []struct {
+			kinds feed.Kinds
+			want  []uuid.UUID
+		}{
+			{feed.Kinds{feed.KindText}, []uuid.UUID{segPost.ID, fol.ID, pub.ID}},
+			{feed.Kinds{feed.KindImage, feed.KindOpportunityCall}, []uuid.UUID{}},
+		} {
+			ps, err := s.ListOrgPosts(ctx, club, feed.OrgPostFilter{Reader: feed.Reader{All: true}, Kinds: tc.kinds}, nil, 10)
+			if err != nil || !slices.Equal(ids(ps), tc.want) {
+				t.Fatalf("club page of %v = %v, %v; want %v", tc.kinds, ids(ps), err, tc.want)
+			}
 		}
 		if got := page(company, r); !slices.Equal(got, []uuid.UUID{ad.ID}) {
 			t.Fatalf("muted org page = %v (mutes are feed-only)", got)

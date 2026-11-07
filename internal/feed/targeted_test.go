@@ -256,7 +256,7 @@ func TestTargetedPost_SensitiveClubMemberPost_VisibleOnlyToMembers(t *testing.T)
 	if _, err := e.svc.GetPost(ctx, member, v.Post.ID); err != nil {
 		t.Fatal(err)
 	}
-	page, err := e.svc.ListPosts(ctx, outsider, club, feed.PageQuery{})
+	page, err := e.svc.ListPosts(ctx, outsider, club, feed.OrgPageQuery{})
 	if err != nil || len(page.Items) != 0 {
 		t.Fatalf("club page of an outsider = %d, %v", len(page.Items), err)
 	}

@@ -235,7 +235,7 @@ func TestFeed_MinorSeesNoCommercial(t *testing.T) {
 	if _, err := e.svc.GetPost(ctx, minor, ad.Post.ID); err == nil {
 		t.Fatal("a minor opened a commercial post")
 	}
-	page, err := e.svc.ListPosts(ctx, minor, orgID("company_a"), feed.PageQuery{})
+	page, err := e.svc.ListPosts(ctx, minor, orgID("company_a"), feed.OrgPageQuery{})
 	if err != nil || len(page.Items) != 0 {
 		t.Fatalf("minor company page = %d, %v", len(page.Items), err)
 	}
@@ -264,7 +264,7 @@ func TestFeed_MutedOrgExcluded(t *testing.T) {
 	if other := e.feedIDs(t, persona(t, "user_unverified"), feed.FeedQuery{}); !contains(other, a.Post.ID) {
 		t.Fatal("the mute leaked to another reader")
 	}
-	page, err := e.svc.ListPosts(t.Context(), reader, orgID("club_a"), feed.PageQuery{})
+	page, err := e.svc.ListPosts(t.Context(), reader, orgID("club_a"), feed.OrgPageQuery{})
 	if err != nil || len(page.Items) != 1 {
 		t.Fatalf("org page of a muted org = %d, %v", len(page.Items), err)
 	}
@@ -358,7 +358,7 @@ func TestListPosts_AnonymousOnlyPublicNonCommercial(t *testing.T) {
 
 	ids := func(a authz.Actor, org string) []uuid.UUID {
 		t.Helper()
-		p, err := e.svc.ListPosts(ctx, a, orgID(org), feed.PageQuery{})
+		p, err := e.svc.ListPosts(ctx, a, orgID(org), feed.OrgPageQuery{})
 		if err != nil {
 			t.Fatalf("ListPosts: %v", err)
 		}
@@ -392,7 +392,7 @@ func TestListPosts_AnonymousOnlyPublicNonCommercial(t *testing.T) {
 		t.Fatalf("anonymous GetPost(public): %v", err)
 	}
 	// An unknown org's page is 404; the anonymous feed does not exist.
-	_, err := e.svc.ListPosts(ctx, authz.Anonymous(), uuid.NewV7(), feed.PageQuery{})
+	_, err := e.svc.ListPosts(ctx, authz.Anonymous(), uuid.NewV7(), feed.OrgPageQuery{})
 	wantNotFound(t, err)
 	_, err = e.svc.GetFeed(ctx, authz.Anonymous(), feed.FeedQuery{})
 	wantForbidden(t, err)

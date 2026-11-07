@@ -13,6 +13,7 @@ import (
 	"koro/internal/authz/authztest"
 	"koro/internal/directory"
 	"koro/internal/events"
+	"koro/internal/feed"
 	"koro/internal/orgs"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/obs"
@@ -38,6 +39,10 @@ type fakes struct {
 	query     events.RecommendQuery
 	cards     map[uuid.UUID]directory.ClubCard
 	asked     []uuid.UUID
+	calls2    []feed.OpportunityCandidate // the opportunity candidates (BE-191)
+	callQuery feed.OpportunityQuery
+	callErr   error
+	callCards []uuid.UUID
 }
 
 func (f *fakes) call(name string) {
@@ -114,9 +119,28 @@ func (f *fakes) EventCards(_ context.Context, rows []events.Event) ([]events.Eve
 	return out, nil
 }
 
+func (f *fakes) RecommendableOpportunities(_ context.Context, _ authz.Actor, q feed.OpportunityQuery) ([]feed.OpportunityCandidate, error) {
+	f.call("opportunities")
+	f.callQuery = q
+	return f.calls2, f.callErr
+}
+
+func (f *fakes) OpportunityCards(_ context.Context, _ authz.Actor, rows []feed.OpportunityCandidate) ([]feed.PostView, error) {
+	f.call("opportunity_cards")
+	out := make([]feed.PostView, len(rows))
+	f.callCards = f.callCards[:0]
+	for i, c := range rows {
+		f.callCards = append(f.callCards, c.PostID)
+		out[i] = feed.PostView{Post: feed.Post{ID: c.PostID, OrgID: c.OrgID, Kind: feed.KindOpportunityCall},
+			Org: orgs.OrgSummary{ID: c.OrgID, Kind: orgs.KindCompany, Name: "Şirket", Status: orgs.StatusActive}}
+	}
+	return out, nil
+}
+
 func newService(t *testing.T, f *fakes) recommend.Service {
 	t.Helper()
-	mod, err := recommend.New(recommend.Deps{Students: f, Events: f, Clubs: f, Follows: f, Clock: clock.NewFake(t0), Log: obs.Discard()})
+	mod, err := recommend.New(recommend.Deps{Students: f, Events: f, Clubs: f, Follows: f, Opportunities: f,
+		Clock: clock.NewFake(t0), Log: obs.Discard()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +216,7 @@ func TestList_OffReadsNothing(t *testing.T) {
 	} {
 		f := &fakes{choice: tc.choice}
 		r, err := newService(t, f).List(t.Context(), persona(t, tc.persona), recommend.Query{})
-		if err != nil || r.Enabled != tc.on || r.Choice != tc.choice || r.Events == nil || r.Clubs == nil {
+		if err != nil || r.Enabled != tc.on || r.Choice != tc.choice || r.Events == nil || r.Clubs == nil || r.Opportunities == nil {
 			t.Fatalf("%s/%s = %+v, %v", tc.persona, tc.choice, r, err)
 		}
 		if !tc.on && !slices.Equal(f.calls, []string{"choice"}) {
@@ -295,6 +319,98 @@ func TestList_ClubRules(t *testing.T) {
 		!slices.Equal(reasons(r.Clubs[1].Reasons), []string{"popular_in_department", "popular_in_university"}) ||
 		!slices.Equal(reasons(r.Clubs[2].Reasons), []string{"popular_in_university"}) {
 		t.Fatalf("clubs = %+v", r.Clubs)
+	}
+}
+
+// candidate is an opportunity call of org published at, with the flags and
+// deadline feed computed.
+func candidate(org uuid.UUID, at time.Time, deadline string, forYear, popular bool) feed.OpportunityCandidate {
+	return feed.OpportunityCandidate{PostID: uuid.NewV7(), OrgID: org, PublishedAt: at, ForYourYear: forYear, Popular: popular,
+		Opportunity: feed.Opportunity{Type: "internship", ApplyVia: "contact_request", Deadline: deadline}}
+}
+
+// TestList_OpportunityRules (BE-191): the opportunity candidates are asked
+// for the student's non-sensitive followed and member orgs, the attended
+// organisers and the university's orgs, published in the last 60 days;
+// each item carries the rules that hold, strongest first (deadline_soon
+// last, never alone), ranked by weight then by the newest, cut at the
+// limit; only the chosen ones become cards.
+func TestList_OpportunityRules(t *testing.T) {
+	t.Parallel()
+	a := persona(t, "club_member") // member of club_a and club_sensitive, student of uni_a
+	clubA, sens, followed, organiser, uniOrg := authztest.ID("club_a"), authztest.ID("club_sensitive"), uuid.NewV7(), uuid.NewV7(), uuid.NewV7()
+	at := func(h int) time.Time { return t0.Add(-time.Duration(h) * time.Hour) }
+	soon, later, today := "2026-11-08", "2026-11-20", "2026-11-05" // t0 is 2026-11-05 in Istanbul
+	c1 := candidate(followed, at(9), soon, true, false)            // 4 + 2 + 1 (soon)
+	c2 := candidate(organiser, at(8), later, false, true)          // 3 + 1
+	c3 := candidate(clubA, at(7), "", false, false)                // 4 (member) + 2 (university)
+	c4 := candidate(uniOrg, at(6), "", false, false)               // 2
+	c5 := candidate(uuid.NewV7(), at(5), today, false, true)
+	onlySensitive := candidate(sens, at(4), "", false, false)      // the sensitive membership is no rule
+	onlySoon := candidate(uuid.NewV7(), at(3), soon, false, false) // deadline_soon never alone
+	nothing := candidate(uuid.NewV7(), at(2), later, false, false) // no rule
+	f := &fakes{
+		choice:    students.RankingDefault,
+		follows:   []uuid.UUID{followed, sens},
+		sensitive: map[uuid.UUID]bool{sens: true},
+		uniOrgs:   []uuid.UUID{uniOrg, clubA},
+		signals:   events.RecommendationSignals{Organisers: []uuid.UUID{organiser}},
+		calls2:    []feed.OpportunityCandidate{nothing, onlySoon, onlySensitive, c5, c4, c3, c2, c1},
+	}
+	r, err := newService(t, f).List(t.Context(), a, recommend.Query{Limit: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := f.callQuery
+	if !q.Since.Equal(t0.Add(-recommend.OpportunityWindow)) || q.Limit != recommend.OpportunityCandidates {
+		t.Fatalf("query = %+v", q)
+	}
+	for _, id := range []uuid.UUID{followed, organiser, uniOrg, clubA} {
+		if !slices.Contains(q.OrgIDs, id) {
+			t.Fatalf("query orgs = %v, missing %s", q.OrgIDs, id)
+		}
+	}
+	if slices.Contains(q.OrgIDs, sens) {
+		t.Fatalf("query orgs = %v (the sensitive club is never a signal)", q.OrgIDs)
+	}
+	want := []struct {
+		id      uuid.UUID
+		reasons []string
+	}{
+		{c1.PostID, []string{"followed_org", "eligible_year", "deadline_soon"}},
+		{c3.PostID, []string{"followed_org", "same_university"}},
+		{c2.PostID, []string{"attended_organiser", "popular"}},
+		{c5.PostID, []string{"popular", "deadline_soon"}},
+	}
+	if len(r.Opportunities) != len(want) || len(f.callCards) != len(want) {
+		t.Fatalf("opportunities = %d (cards asked for %d), want %d: only the chosen ones become cards",
+			len(r.Opportunities), len(f.callCards), len(want))
+	}
+	for i, w := range want {
+		if got := r.Opportunities[i]; got.View.Post.ID != w.id || !slices.Equal(reasons(got.Reasons), w.reasons) {
+			t.Fatalf("opportunity %d = %s %v, want %s %v", i, got.View.Post.ID, got.Reasons, w.id, w.reasons)
+		}
+	}
+	r, err = newService(t, f).List(t.Context(), a, recommend.Query{Limit: 10})
+	if err != nil || len(r.Opportunities) != 5 || r.Opportunities[4].View.Post.ID != c4.PostID ||
+		!slices.Equal(reasons(r.Opportunities[4].Reasons), []string{"same_university"}) {
+		t.Fatalf("limit 10 = %+v, %v (same score as c5, older: after it; the calls without a rule left out)", r.Opportunities, err)
+	}
+	dto := recommend.ToDTOForTest(r)
+	if len(dto.Opportunities) != 5 || dto.Opportunities[0].Post.Kind != "opportunity_call" ||
+		!slices.Equal(dto.Opportunities[0].Reasons, want[0].reasons) {
+		t.Fatalf("dto = %+v", dto.Opportunities)
+	}
+}
+
+// TestList_OpportunityReadFailsClosed: an error of the opportunity read
+// (the sensitivity of its authors included) is returned, nothing is
+// recommended.
+func TestList_OpportunityReadFailsClosed(t *testing.T) {
+	t.Parallel()
+	f := &fakes{choice: students.RankingEnabled, callErr: errors.New("directory down")}
+	if r, err := newService(t, f).List(t.Context(), persona(t, "student"), recommend.Query{}); err == nil {
+		t.Fatalf("List without the opportunity read = %+v, want an error", r)
 	}
 }
 

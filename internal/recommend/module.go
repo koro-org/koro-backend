@@ -1,12 +1,13 @@
 // Package recommend is the rule-based recommendations of a student
-// (BE-174; uyum denetimi #25 "kural bazlı öneri"): upcoming events and clubs
-// picked by a handful of explainable rules over the student's own data,
-// each item with the reason codes of the rules that picked it. No machine
-// learning, no score in the answer, nothing stored: the module owns no
-// table, writes nothing and computes the lists on every request from small
-// read ports (ports.go) that the composition root fills with the system
-// reads of the modules that own the rows (students, events, directory,
-// feed). It sits in L13 next to stats (01 §5.1): nothing imports it.
+// (BE-174; uyum denetimi #25 "kural bazlı öneri"): upcoming events, clubs
+// and open opportunity calls (BE-191) picked by a handful of explainable
+// rules over the student's own data, each item with the reason codes of
+// the rules that picked it. No machine learning, no score in the answer,
+// nothing stored: the module owns no table, writes nothing and computes
+// the lists on every request from small read ports (ports.go) that the
+// composition root fills with the system reads of the modules that own the
+// rows (students, events, directory, feed). It sits in L13 next to stats
+// (01 §5.1): nothing imports it.
 //
 // Rules the package enforces:
 //
@@ -17,25 +18,33 @@
 //   - Own data, for the student only (KVKK md. 5/2-c, f; no profiling for
 //     a third party): the signals are the student's follows and
 //     memberships, the categories and organisers of the events the student
-//     held a place in, the student's university; the only data about other
-//     people is a popularity flag over at least 10 of them (k ≥ 10: an
-//     event's held places, the eligible members of a club in the student's
-//     department or university), counted where the rows live; no count
-//     leaves. Nothing is shown to or shared with an org, a company or an
+//     held a place in, the student's university and class year; the only
+//     data about other people is a popularity flag over at least 10 of
+//     them (k ≥ 10: an event's held places, the eligible members of a club
+//     in the student's department or university, an opportunity call's
+//     likes or saves), counted where the rows live; no count leaves.
+//     Nothing is shown to or shared with an org, a company or an
 //     institution; nothing is logged or audited beyond the request line.
 //   - Special-category data (03 Y2, KVKK md. 6): a sensitive club (health,
 //     religion, political opinion …) or an event of a sensitive category is
-//     never a signal and never a recommendation, whatever rule named it;
-//     an error reading the sensitivity answers 5xx (fail closed).
+//     never a signal and never a recommendation, whatever rule named it; an
+//     opportunity call of a sensitive club or addressed to its members
+//     neither; an error reading the sensitivity answers 5xx (fail closed).
+//   - Visibility and targeting (03 §3.6): an event or an opportunity call
+//     is recommended only to a student who may see it (the audience, a
+//     followers post for a follower or member, no commercial post for a
+//     minor, not muted or hidden).
 //   - Opt-out (KVKK md. 11): the student turns the recommendations off in
 //     the privacy settings (students recommendation_choice, updateMyPrivacy).
 //     "default" is on for an adult and off for a minor (Enabled); a student
 //     whose recommendations are off gets enabled=false and empty lists, and
 //     no signal is read.
 //   - Bounded: one request reads a fixed number of ports (two event store
-//     reads of at most Candidates rows, one follow read of at most
-//     MaxFollows IDs, two popularity counts, one club card read of at most
-//     MaxLimit cards); no cache (the lists change with every registration).
+//     reads and two opportunity store reads of at most Candidates rows
+//     each, one follow read of at most MaxFollows IDs, two popularity
+//     counts, one club card read and one call card read of at most
+//     MaxLimit cards); no cache (the lists change with every registration,
+//     like and save).
 package recommend
 
 import (
@@ -57,12 +66,13 @@ type Service interface {
 
 // Deps are the dependencies of the recommend module; all are required.
 type Deps struct {
-	Students Students
-	Events   Events
-	Clubs    Clubs
-	Follows  Follows
-	Clock    clock.Clock
-	Log      *slog.Logger
+	Students      Students
+	Events        Events
+	Clubs         Clubs
+	Follows       Follows
+	Opportunities Opportunities
+	Clock         clock.Clock
+	Log           *slog.Logger
 }
 
 func (d Deps) validate() error {
@@ -72,7 +82,8 @@ func (d Deps) validate() error {
 		ok   bool
 	}{
 		{"Students", d.Students != nil}, {"Events", d.Events != nil}, {"Clubs", d.Clubs != nil},
-		{"Follows", d.Follows != nil}, {"Clock", d.Clock != nil}, {"Log", d.Log != nil},
+		{"Follows", d.Follows != nil}, {"Opportunities", d.Opportunities != nil}, {"Clock", d.Clock != nil},
+		{"Log", d.Log != nil},
 	} {
 		if !c.ok {
 			errs = append(errs, fmt.Errorf("recommend.Deps.%s is missing", c.name))

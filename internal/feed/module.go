@@ -165,7 +165,7 @@ type Service interface {
 	// GetFeed is getFeed (feed.feed.read): the reader's feed.
 	GetFeed(ctx context.Context, a authz.Actor, q FeedQuery) (PostPage, error)
 	// ListPosts is listPosts (feed.post.list_by_org, P): an org's page.
-	ListPosts(ctx context.Context, a authz.Actor, orgID uuid.UUID, q PageQuery) (PostPage, error)
+	ListPosts(ctx context.Context, a authz.Actor, orgID uuid.UUID, q OrgPageQuery) (PostPage, error)
 	// GetPost is getPost (feed.post.read, P).
 	GetPost(ctx context.Context, a authz.Actor, id uuid.UUID) (PostView, error)
 	// ListOrgPosts is listOrgPostsManage (feed.post.list_org_manage): every

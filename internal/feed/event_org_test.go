@@ -51,7 +51,7 @@ func TestPost_EventShareCarriesOrganiser(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("getPost", got)
-	page, err := e.svc.ListPosts(ctx, authz.Anonymous(), orgID("club_a"), feed.PageQuery{Limit: 10})
+	page, err := e.svc.ListPosts(ctx, authz.Anonymous(), orgID("club_a"), feed.OrgPageQuery{PageQuery: feed.PageQuery{Limit: 10}})
 	if err != nil || len(page.Items) != 1 {
 		t.Fatalf("listPosts = %d items, %v", len(page.Items), err)
 	}

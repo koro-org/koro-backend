@@ -16,13 +16,13 @@ var forbidden = regexp.MustCompile(`(^|_)(score|rank\w*|weight|talent\w*|band|po
 
 // TestDTO_NoScoreOrPeopleCount (BE-174): the answer explains with reason
 // codes only; the top-level and item members carry no score, rank or
-// count (the event and club cards are listEvents' and listClubs' own,
-// pinned there).
+// count (the event, club and post cards are listEvents', listClubs' and
+// getFeed's own, pinned there).
 func TestDTO_NoScoreOrPeopleCount(t *testing.T) {
 	t.Parallel()
 	for _, typ := range []reflect.Type{
 		reflect.TypeFor[recommend.RecommendationsDTO](), reflect.TypeFor[recommend.RecommendedEventDTO](),
-		reflect.TypeFor[recommend.RecommendedClubDTO](),
+		reflect.TypeFor[recommend.RecommendedClubDTO](), reflect.TypeFor[recommend.RecommendedOpportunityDTO](),
 	} {
 		for i := range typ.NumField() {
 			name, _, _ := strings.Cut(typ.Field(i).Tag.Get("json"), ",")

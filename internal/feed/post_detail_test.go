@@ -115,7 +115,7 @@ func TestGetPost_VisibilityMatchesFeed(t *testing.T) {
 	}
 	var pages []uuid.UUID
 	for _, org := range []string{"club_a", "club_b", "company_a"} {
-		p, err := e.svc.ListPosts(ctx, authz.Anonymous(), orgID(org), feed.PageQuery{Limit: 50})
+		p, err := e.svc.ListPosts(ctx, authz.Anonymous(), orgID(org), feed.OrgPageQuery{PageQuery: feed.PageQuery{Limit: 50}})
 		if err != nil {
 			t.Fatal(err)
 		}

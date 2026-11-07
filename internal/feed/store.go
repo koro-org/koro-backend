@@ -31,6 +31,7 @@ type Store interface {
 	logoStore        // org_dropped_logos (store_logos.go, BE-180)
 	moderationStore  // moderation_actions and the review queue (store_moderation.go)
 	statsStore       // the counts of the panels (stats.go, BE-163)
+	recommendStore   // the opportunity read of the recommendations (recommend.go, BE-191)
 }
 
 // stats is the panel count view of the store (BE-163).

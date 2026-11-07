@@ -16,9 +16,9 @@ func (w *recommendWiring) useMemStore() {}
 
 // TestWire_RecommendReadsItsModulesAndRoutes (BE-174): recommend builds
 // over the system reads of students, events, directory and feed (each
-// asserted on its service), answers a verified student over the in-memory
-// stores (on by default for an adult, off for a minor) and registers its
-// read on the self surface.
+// asserted on its service; the opportunity read of feed: BE-191), answers
+// a verified student over the in-memory stores (on by default for an
+// adult, off for a minor) and registers its read on the self surface.
 func TestWire_RecommendReadsItsModulesAndRoutes(t *testing.T) {
 	t.Parallel()
 	c := newTestContainer(t)
@@ -34,7 +34,7 @@ func TestWire_RecommendReadsItsModulesAndRoutes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: List: %v", name, err)
 		}
-		if r.Enabled != enabled || r.Events == nil || r.Clubs == nil {
+		if r.Enabled != enabled || r.Events == nil || r.Clubs == nil || r.Opportunities == nil {
 			t.Fatalf("%s: recommendations = %+v", name, r)
 		}
 	}

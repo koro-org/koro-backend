@@ -358,7 +358,7 @@ func (s *MemStore) ListFeed(_ context.Context, f FeedFilter, after *After, limit
 	}
 	var out []Post
 	for _, p := range s.posts {
-		if p.Status != StatusPublished || !s.visible(f.Reader, p) || f.Kind != "" && p.Kind != f.Kind {
+		if p.Status != StatusPublished || !s.visible(f.Reader, p) || !f.Kinds.keeps(p.Kind) {
 			continue
 		}
 		if u := f.UserID; u != nil {
@@ -373,12 +373,12 @@ func (s *MemStore) ListFeed(_ context.Context, f FeedFilter, after *After, limit
 }
 
 // ListOrgPosts implements Store.
-func (s *MemStore) ListOrgPosts(_ context.Context, orgID uuid.UUID, r Reader, after *After, limit int) ([]Post, error) {
+func (s *MemStore) ListOrgPosts(_ context.Context, orgID uuid.UUID, f OrgPostFilter, after *After, limit int) ([]Post, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []Post
 	for _, p := range s.posts {
-		if p.OrgID == orgID && p.Status == StatusPublished && s.visible(r, p) {
+		if p.OrgID == orgID && p.Status == StatusPublished && s.visible(f.Reader, p) && f.Kinds.keeps(p.Kind) {
 			out = append(out, p.clone())
 		}
 	}

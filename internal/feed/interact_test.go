@@ -228,7 +228,7 @@ func TestHidePost_ExcludedFromFeed(t *testing.T) {
 	if other := e.feedIDs(t, persona(t, "club_member"), feed.FeedQuery{}); !contains(other, a.Post.ID) {
 		t.Fatal("the hide leaked to another reader")
 	}
-	page, err := e.svc.ListPosts(ctx, reader, orgID("club_a"), feed.PageQuery{})
+	page, err := e.svc.ListPosts(ctx, reader, orgID("club_a"), feed.OrgPageQuery{})
 	if err != nil || len(page.Items) != 2 {
 		t.Fatalf("org page = %d, %v", len(page.Items), err)
 	}
@@ -264,7 +264,7 @@ func TestMuteOrg_ExcludedFromFeed(t *testing.T) {
 	if ids := e.feedIDs(t, reader, feed.FeedQuery{}); !contains(ids, b.Post.ID) {
 		t.Fatal("another org vanished")
 	}
-	if page, err := e.svc.ListPosts(ctx, reader, orgID("club_a"), feed.PageQuery{}); err != nil || len(page.Items) != 1 {
+	if page, err := e.svc.ListPosts(ctx, reader, orgID("club_a"), feed.OrgPageQuery{}); err != nil || len(page.Items) != 1 {
 		t.Fatalf("org page of a muted org = %d, %v", len(page.Items), err)
 	}
 	mutes, err := e.svc.ListMutes(ctx, reader, feed.PageQuery{})

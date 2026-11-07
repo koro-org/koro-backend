@@ -335,9 +335,7 @@ func (s gormStore) ListFeed(ctx context.Context, f FeedFilter, after *After, lim
 	} else if f.Following {
 		return []Post{}, nil
 	}
-	if f.Kind != "" {
-		q = q.Where("p.kind = ?", string(f.Kind))
-	}
+	q = q.Scopes(ofKinds(f.Kinds))
 	if after != nil {
 		q = q.Where("(p.published_at, p.id) < ( ?, ?)", after.At, after.ID)
 	}
@@ -348,11 +346,21 @@ func (s gormStore) ListFeed(ctx context.Context, f FeedFilter, after *After, lim
 	return out, nil
 }
 
+// ofKinds is the kind filter of the aliased published lists (BE-191).
+func ofKinds(ks Kinds) func(*gorm.DB) *gorm.DB {
+	return func(q *gorm.DB) *gorm.DB {
+		if len(ks) == 0 {
+			return q
+		}
+		return q.Where("p.kind IN ?", ks.strings())
+	}
+}
+
 // ListOrgPosts implements Store over posts_author_idx.
-func (s gormStore) ListOrgPosts(ctx context.Context, orgID uuid.UUID, r Reader, after *After, limit int) ([]Post, error) {
-	q := db.Conn(ctx, s.orm).Table("posts AS p").Select(prefixed).Scopes(scoped(orgID)).
+func (s gormStore) ListOrgPosts(ctx context.Context, orgID uuid.UUID, f OrgPostFilter, after *After, limit int) ([]Post, error) {
+	q := db.Conn(ctx, s.orm).Table("posts AS p").Select(prefixed).Scopes(scoped(orgID), ofKinds(f.Kinds)).
 		Where("p.status = 'published'")
-	cond, args := readerConds(r)
+	cond, args := readerConds(f.Reader)
 	q = q.Where(cond, args...)
 	if after != nil {
 		q = q.Where("(p.published_at, p.id) < ( ?, ?)", after.At, after.ID)

@@ -78,6 +78,12 @@ operations:
         expect:
           anonymous: 401
           "@signed_in": 200
+      - name: opportunity_calls
+        query: { kind: opportunity_call }
+        note: BE-191 kind filter (repeatable; one value here)
+        expect:
+          anonymous: 401
+          "@signed_in": 200
 
   listPosts:
     method: GET
@@ -90,6 +96,10 @@ operations:
       - name: company_page
         query: { org_id: "{{fixture:company_a}}", limit: "10" }
         note: anonymous readers and minors get an empty page (every company post is commercial)
+        expect: { "@all": 200 }
+      - name: company_opportunity_calls
+        query: { org_id: "{{fixture:company_a}}", kind: opportunity_call }
+        note: BE-191 kind filter; anonymous readers and minors get an empty page (every company post is commercial)
         expect: { "@all": 200 }
       - name: unknown_org
         query: { org_id: "00000000-0000-7000-8000-0000000000aa" }

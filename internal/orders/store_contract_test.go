@@ -21,6 +21,7 @@ type world struct {
 	offering func(t *testing.T, s sellerRef) offeringRef
 	event    func(t *testing.T, org uuid.UUID) uuid.UUID
 	payout   func(t *testing.T, s sellerRef, lines map[uuid.UUID]int64) uuid.UUID
+	evidence func(t *testing.T, org uuid.UUID) uuid.UUID // a delivery_evidence upload of org (BE-189)
 }
 
 type buyerRef struct{ org, user, party uuid.UUID }
@@ -35,6 +36,7 @@ func memWorld() world {
 		offering: func(*testing.T, sellerRef) offeringRef { return offeringRef{id(), id(), id()} },
 		event:    func(*testing.T, uuid.UUID) uuid.UUID { return id() },
 		payout:   func(*testing.T, sellerRef, map[uuid.UUID]int64) uuid.UUID { return id() },
+		evidence: func(*testing.T, uuid.UUID) uuid.UUID { return id() },
 	}
 }
 

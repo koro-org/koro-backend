@@ -63,6 +63,18 @@ type Sales interface {
 	SalesStats(ctx context.Context, sellerOrgID uuid.UUID, from, to time.Time) (orders.SalesStats, error)
 }
 
+// Purchases is a buyer's order counts and the events its lines are bound
+// to (orders.Statistics; BE-189).
+type Purchases interface {
+	PurchaseStats(ctx context.Context, buyerOrgID uuid.UUID, from, to time.Time) (orders.PurchaseStats, error)
+}
+
+// EventInfo reads an event's summary: title, start, status, sensitivity
+// (events.Events; BE-189).
+type EventInfo interface {
+	Get(ctx context.Context, eventID uuid.UUID) (events.EventSummary, error)
+}
+
 // Outreach is an org's audiences and dispatch reach as estimates
 // (outreach.Statistics).
 type Outreach interface {

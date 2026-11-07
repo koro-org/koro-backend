@@ -245,6 +245,14 @@ func (s *service) Company(ctx context.Context, a authz.Actor, orgID uuid.UUID, q
 	if err != nil {
 		return CompanyStats{}, err
 	}
+	purchases, err := s.d.Purchases.PurchaseStats(ctx, o.ID, from, to)
+	if err != nil {
+		return CompanyStats{}, err
+	}
+	sponsorship, err := s.companySponsorship(ctx, purchases)
+	if err != nil {
+		return CompanyStats{}, err
+	}
 	out := CompanyStats{Range: p.dto(),
 		Audience: CompanyAudienceDTO{ActiveSegments: reach.ActiveSegments, Segments: make([]SegmentEstimateDTO, 0, len(reach.Segments))},
 		Posts:    CompanyPostsDTO{Published: posts.Published, Targeted: posts.Targeted, Likes: posts.Likes, Saves: posts.Saves},
@@ -252,6 +260,7 @@ func (s *service) Company(ctx context.Context, a authz.Actor, orgID uuid.UUID, q
 			Eligible: estimate(reach.Eligible), Sent: estimate(reach.Sent)},
 		ContactRequests: CompanyContactsDTO{Sent: contacts.Sent, ByStatus: keyCounts(contacts.ByStatus)},
 		Package:         make([]FeatureUsageDTO, len(usage)),
+		Sponsorship:     sponsorship,
 	}
 	for _, seg := range reach.Segments {
 		out.Audience.Segments = append(out.Audience.Segments, SegmentEstimateDTO{SegmentID: seg.ID.String(), Name: seg.Name,

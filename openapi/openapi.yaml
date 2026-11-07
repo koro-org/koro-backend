@@ -3795,6 +3795,54 @@ components:
           description: Only for the company's editors.
           type: string
       type: object
+    CompanySponsorshipDTO:
+      additionalProperties: false
+      properties:
+        awaiting_confirmation:
+          description: "Of the lines, marked delivered by the seller: the company confirms or disputes before the window ends"
+          format: int64
+          type: integer
+        by_fulfillment:
+          description: "Delivery status of those lines now: pending, marked, fulfilled, disputed, cancelled"
+          items:
+            $ref: "#/components/schemas/KeyCount"
+          type: array
+        by_status:
+          description: "Order status now: awaiting_payment, paid, in_fulfilment, completed, cancelled, expired, partially_refunded, refunded, disputed"
+          items:
+            $ref: "#/components/schemas/KeyCount"
+          type: array
+        delivered:
+          description: "Of the lines, fulfilled: the company confirmed, the dispute window elapsed or an admin resolved a dispute"
+          format: int64
+          type: integer
+        event_count:
+          description: Events the lines of those orders are bound to
+          format: int64
+          type: integer
+        events:
+          description: Those events, the latest order first, at most 50 (event_count says how many there are)
+          items:
+            $ref: "#/components/schemas/SponsoredEventDTO"
+          type: array
+        lines:
+          description: Lines of those orders delivered by a seller (Koro's feature rights and lines dropped from an unpaid order left out)
+          format: int64
+          type: integer
+        orders:
+          description: Orders placed in the range
+          format: int64
+          type: integer
+      required:
+        - orders
+        - by_status
+        - lines
+        - by_fulfillment
+        - delivered
+        - awaiting_confirmation
+        - event_count
+        - events
+      type: object
     CompanyStats:
       additionalProperties: false
       properties:
@@ -3812,6 +3860,8 @@ components:
           $ref: "#/components/schemas/CompanyPostsDTO"
         range:
           $ref: "#/components/schemas/RangeDTO"
+        sponsorship:
+          $ref: "#/components/schemas/CompanySponsorshipDTO"
       required:
         - range
         - audience
@@ -3819,6 +3869,7 @@ components:
         - dispatches
         - contact_requests
         - package
+        - sponsorship
       type: object
     CompleteInputBody:
       additionalProperties: false
@@ -15115,6 +15166,114 @@ components:
         - platform_amount
         - status
       type: object
+    SponsoredEventDTO:
+      additionalProperties: false
+      properties:
+        by_fulfillment:
+          description: The event's lines by delivery status now (keys as sponsorship.by_fulfillment)
+          items:
+            $ref: "#/components/schemas/KeyCount"
+          type: array
+        delivered:
+          description: Of the lines, fulfilled
+          format: int64
+          type: integer
+        event_id:
+          format: uuid
+          type: string
+        evidence_attached:
+          description: Lines with a delivery evidence, clean or not scanned yet (getOrderLineEvidence on the line)
+          format: int64
+          type: integer
+        evidence_rejected:
+          description: "Lines whose evidence the scan rejected: the seller uploads it again"
+          format: int64
+          type: integer
+        has_evidence:
+          description: The seller attached a delivery evidence to at least one line that was not rejected
+          type: boolean
+        held:
+          description: The event started by now and was not cancelled
+          type: boolean
+        last_ordered_at:
+          description: The latest placement of those orders
+          format: date-time
+          type: string
+        lines:
+          format: int64
+          type: integer
+        order_statuses:
+          description: Those orders by their status now (keys as sponsorship.by_status)
+          items:
+            $ref: "#/components/schemas/KeyCount"
+          type: array
+        orders:
+          description: Orders of the range that hold a line of the event
+          format: int64
+          type: integer
+        organizer_kind:
+          enum:
+            - platform
+            - university
+            - club
+            - company
+            - ngo
+          type: string
+        organizer_name:
+          type: string
+        organizer_org_id:
+          description: The org that holds the event and sold the lines (a club, mostly)
+          format: uuid
+          type: string
+        participation:
+          $ref: "#/components/schemas/SponsoredParticipationDTO"
+          description: null before the event is held, for an event of a sensitive category or a sensitive club, or when the figure is not available
+        starts_at:
+          format: date-time
+          type: string
+        status:
+          description: The event's status now
+          enum:
+            - draft
+            - published
+            - cancelled
+            - completed
+          type: string
+        title:
+          description: Empty, like starts_at and status absent, when the event cannot be read (it is kept while a line holds it)
+          type: string
+      required:
+        - event_id
+        - title
+        - held
+        - organizer_org_id
+        - organizer_name
+        - organizer_kind
+        - orders
+        - order_statuses
+        - lines
+        - by_fulfillment
+        - delivered
+        - has_evidence
+        - evidence_attached
+        - evidence_rejected
+        - last_ordered_at
+        - participation
+      type: object
+    SponsoredParticipationDTO:
+      additionalProperties: false
+      properties:
+        checked_in:
+          $ref: "#/components/schemas/AudienceCountDTO"
+        registered:
+          $ref: "#/components/schemas/AudienceCountDTO"
+          description: "Places kept: confirmed, checked in, no-show"
+      required:
+        - registered
+        - checked_in
+      type:
+        - object
+        - "null"
     StaffDTO:
       additionalProperties: false
       properties:

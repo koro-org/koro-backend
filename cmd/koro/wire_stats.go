@@ -17,7 +17,9 @@ import (
 // (the reads are methods of each concrete service next to its Service
 // contract, like students.DiscoveryIndex): orgs (OrgDirectory and
 // Statistics), directory (Catalog and Statistics), identity, feed,
-// events, orders, outreach, messaging, entitlements, students and catalog, and the queue counters of kvkk and identity
+// events (Statistics and Events: a sponsored event's summary, BE-189),
+// orders (sales and purchases), outreach, messaging, entitlements,
+// students and catalog, and the queue counters of kvkk and identity
 // (BE-192: gated by the queue's own list action).
 // A module that does not offer its read stops the build.
 type statsWiring struct {
@@ -40,6 +42,8 @@ func (w *statsWiring) build(c *container) error {
 	port("feed statistics", c.feed.svc, func(v any) (ok bool) { d.Content, ok = v.(stats.Content); return })
 	port("events statistics", c.events.svc, func(v any) (ok bool) { d.Events, ok = v.(stats.Events); return })
 	port("orders statistics", c.orders.svc, func(v any) (ok bool) { d.Sales, ok = v.(stats.Sales); return })
+	port("orders purchases", c.orders.svc, func(v any) (ok bool) { d.Purchases, ok = v.(stats.Purchases); return })
+	port("events summaries", c.events.svc, func(v any) (ok bool) { d.EventInfo, ok = v.(stats.EventInfo); return })
 	port("outreach statistics", c.outreach.svc, func(v any) (ok bool) { d.Outreach, ok = v.(stats.Outreach); return })
 	port("messaging statistics", c.messaging.svc, func(v any) (ok bool) { d.Contacts, ok = v.(stats.Contacts); return })
 	port("entitlements statistics", c.entitlements.svc, func(v any) (ok bool) { d.Packages, ok = v.(stats.Packages); return })

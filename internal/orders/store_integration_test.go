@@ -107,6 +107,14 @@ func pgWorld(d *db.DB) world {
 				'published', now())`, id, org, user(t), "e-o-"+nextN())
 			return id
 		},
+		evidence: func(t *testing.T, org uuid.UUID) uuid.UUID {
+			id := uuid.NewV7()
+			exec(t, `INSERT INTO files (id, purpose, org_id, uploaded_by, bucket, storage_key, declared_mime, detected_mime,
+				size_bytes, sha256, status, scan_status)
+				VALUES ($1, 'delivery_evidence', $2, $3, $4, $5, 'image/jpeg', 'image/jpeg', 2048, $6, 'active', 'skipped')`,
+				id, org, user(t), evidenceBuckets.Files, "delivery_evidence/2026/10/"+id.String(), make([]byte, 32))
+			return id
+		},
 		payout: func(t *testing.T, s sellerRef, lines map[uuid.UUID]int64) uuid.UUID {
 			file, acct, id, iban := uuid.NewV7(), uuid.NewV7(), uuid.NewV7(), pgIBAN()
 			exec(t, `INSERT INTO files (id, purpose, bucket, storage_key, declared_mime) VALUES ($1, 'bank_account_evidence', 'koro-files-dev', $2, 'application/pdf')`,

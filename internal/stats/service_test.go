@@ -43,6 +43,9 @@ type fake struct {
 	figures    []events.EventFigures
 	totals     map[uuid.UUID]events.EventTotals
 	sales      orders.SalesStats
+	purchases  orders.PurchaseStats
+	summaries  map[uuid.UUID]events.EventSummary // EventInfo (eventDir)
+	buyerAsk   uuid.UUID                         // PurchaseStats' buyer
 	reach      outreach.OutreachStats
 	contacts   messaging.ContactRequestStats
 	usage      []entitlements.FeatureUsage
@@ -132,6 +135,23 @@ func (f *fake) SalesStats(context.Context, uuid.UUID, time.Time, time.Time) (ord
 	return f.sales, nil
 }
 
+func (f *fake) PurchaseStats(_ context.Context, buyer uuid.UUID, from, to time.Time) (orders.PurchaseStats, error) {
+	f.buyerAsk, f.from, f.to = buyer, from, to
+	return f.purchases, nil
+}
+
+// eventDir is the EventInfo port over the fake's summaries (fake's Get is
+// the orgs port's).
+type eventDir struct{ f *fake }
+
+func (d eventDir) Get(_ context.Context, id uuid.UUID) (events.EventSummary, error) {
+	e, ok := d.f.summaries[id]
+	if !ok {
+		return events.EventSummary{}, events.ErrNotFound
+	}
+	return e, nil
+}
+
 func (f *fake) OrgOutreachStats(context.Context, uuid.UUID, time.Time, time.Time) (outreach.OutreachStats, error) {
 	return f.reach, nil
 }
@@ -169,7 +189,7 @@ func (f *fake) PendingEduDocuments(context.Context, authz.Actor) (int, error) {
 // world is the fake with the matrix orgs (authztest) and the service.
 func world(t *testing.T) (*fake, stats.Service) {
 	t.Helper()
-	f := &fake{orgs: map[uuid.UUID]orgs.OrgSummary{}, clubs: map[uuid.UUID]directory.Club{}}
+	f := &fake{orgs: map[uuid.UUID]orgs.OrgSummary{}, clubs: map[uuid.UUID]directory.Club{}, summaries: map[uuid.UUID]events.EventSummary{}}
 	for _, o := range authztest.Orgs() {
 		id := authztest.ID(o.Name)
 		f.orgs[id] = orgs.OrgSummary{ID: id, Kind: o.Kind, Name: o.Name, Status: orgs.StatusActive}
@@ -177,8 +197,9 @@ func world(t *testing.T) (*fake, stats.Service) {
 			f.clubs[id] = directory.Club{OrgID: id, IsSensitive: o.Sensitive}
 		}
 	}
-	mod, err := stats.New(stats.Deps{Orgs: f, Clubs: f, Users: f, OrgCounts: f, Content: f, Events: f, Sales: f, Outreach: f,
-		Contacts: f, Packages: f, Students: f, Universities: f, Offerings: f, DataRequests: f, StudentDocs: f, Clock: clock.NewFake(now), Log: obs.Discard()})
+	mod, err := stats.New(stats.Deps{Orgs: f, Clubs: f, Users: f, OrgCounts: f, Content: f, Events: f, Sales: f, Purchases: f,
+		EventInfo: eventDir{f}, Outreach: f, Contacts: f, Packages: f, Students: f, Universities: f, Offerings: f,
+		DataRequests: f, StudentDocs: f, Clock: clock.NewFake(now), Log: obs.Discard()})
 	if err != nil {
 		t.Fatal(err)
 	}

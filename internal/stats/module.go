@@ -4,7 +4,8 @@
 // nothing: every figure comes from the module that owns its rows through a
 // small read port (ports.go) that the composition root fills with the
 // modules' Statistics reads (orgs, identity, feed, events, orders,
-// outreach, messaging, entitlements, students, directory, catalog). The
+// outreach, messaging, entitlements, students, directory, catalog) and
+// the event summaries of events (a company's sponsored events, BE-189). The
 // product KPIs of SR §6 are BE-164's (kvkk, analytics), not this module's.
 //
 // Rules the package enforces:
@@ -33,10 +34,12 @@
 //     breakdown at a time, never a cross-tabulation), the participants of
 //     its clubs' events, a company's audiences and dispatch reach. A
 //     sensitive club and an event of a sensitive category never appear in
-//     a university's figures (special category data, KVKK md. 6). The
+//     a university's figures (special category data, KVKK md. 6), and the
+//     participation of such an event is never in a company's figures. The
 //     figures an org sees one by one already — a club's own members and
-//     registrations, a company's own contact requests, posts, likes and
-//     package — are exact.
+//     registrations, a company's own contact requests, posts, likes,
+//     package and orders — are exact; the participation of the events a
+//     company sponsors is an estimate (BE-189).
 //   - Range: whole days in Europe/Istanbul, from and to inclusive, at most
 //     366 days; the default is the last 30 days (platform, company) or
 //     the last 12 calendar months (club, university: monthly growth). A
@@ -79,6 +82,8 @@ type Deps struct {
 	Content      Content
 	Events       Events
 	Sales        Sales
+	Purchases    Purchases
+	EventInfo    EventInfo
 	Outreach     Outreach
 	Contacts     Contacts
 	Packages     Packages
@@ -99,6 +104,7 @@ func (d Deps) validate() error {
 	}{
 		{"Orgs", d.Orgs != nil}, {"Clubs", d.Clubs != nil}, {"Users", d.Users != nil}, {"OrgCounts", d.OrgCounts != nil},
 		{"Content", d.Content != nil}, {"Events", d.Events != nil}, {"Sales", d.Sales != nil},
+		{"Purchases", d.Purchases != nil}, {"EventInfo", d.EventInfo != nil},
 		{"Outreach", d.Outreach != nil}, {"Contacts", d.Contacts != nil}, {"Packages", d.Packages != nil},
 		{"Students", d.Students != nil}, {"Universities", d.Universities != nil}, {"Offerings", d.Offerings != nil},
 		{"DataRequests", d.DataRequests != nil}, {"StudentDocs", d.StudentDocs != nil},

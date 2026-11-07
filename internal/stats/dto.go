@@ -156,14 +156,16 @@ type ClubSponsorshipDTO struct {
 
 // ---- company (getCompanyStats)
 
-// CompanyStats is a company's panel (SR §8 Şirket).
+// CompanyStats is a company's panel (SR §8 Şirket). New sections are new
+// fields (the web reads the ones it knows).
 type CompanyStats struct {
-	Range           RangeDTO             `json:"range"`
-	Audience        CompanyAudienceDTO   `json:"audience"`
-	Posts           CompanyPostsDTO      `json:"posts"`
-	Dispatches      CompanyDispatchesDTO `json:"dispatches"`
-	ContactRequests CompanyContactsDTO   `json:"contact_requests"`
-	Package         []FeatureUsageDTO    `json:"package"`
+	Range           RangeDTO              `json:"range"`
+	Audience        CompanyAudienceDTO    `json:"audience"`
+	Posts           CompanyPostsDTO       `json:"posts"`
+	Dispatches      CompanyDispatchesDTO  `json:"dispatches"`
+	ContactRequests CompanyContactsDTO    `json:"contact_requests"`
+	Package         []FeatureUsageDTO     `json:"package"`
+	Sponsorship     CompanySponsorshipDTO `json:"sponsorship"`
 }
 
 // CompanyAudienceDTO is the company's saved audiences with their stored
@@ -213,6 +215,53 @@ type FeatureUsageDTO struct {
 	Used        int        `json:"used"`
 	Remaining   int        `json:"remaining"`
 	AccessUntil *time.Time `json:"access_until,omitempty" doc:"discovery_access: end of the running right"`
+}
+
+// CompanySponsorshipDTO is the orders the company placed in the range
+// (the clubs' offerings and Koro's packages), their delivery, and the
+// events its lines are bound to (BE-189; SR §8 "etkinlik ve sponsorluk
+// sonuçları"). The company sees these orders one by one: the counts are
+// exact; no amount and no person.
+type CompanySponsorshipDTO struct {
+	Orders               int                 `json:"orders" doc:"Orders placed in the range"`
+	ByStatus             []KeyCount          `json:"by_status" doc:"Order status now: awaiting_payment, paid, in_fulfilment, completed, cancelled, expired, partially_refunded, refunded, disputed"`
+	Lines                int                 `json:"lines" doc:"Lines of those orders delivered by a seller (Koro's feature rights and lines dropped from an unpaid order left out)"`
+	ByFulfillment        []KeyCount          `json:"by_fulfillment" doc:"Delivery status of those lines now: pending, marked, fulfilled, disputed, cancelled"`
+	Delivered            int                 `json:"delivered" doc:"Of the lines, fulfilled: the company confirmed, the dispute window elapsed or an admin resolved a dispute"`
+	AwaitingConfirmation int                 `json:"awaiting_confirmation" doc:"Of the lines, marked delivered by the seller: the company confirms or disputes before the window ends"`
+	EventCount           int                 `json:"event_count" doc:"Events the lines of those orders are bound to"`
+	Events               []SponsoredEventDTO `json:"events" doc:"Those events, the latest order first, at most 50 (event_count says how many there are)"`
+}
+
+// SponsoredEventDTO is one event the company's lines of the range are
+// bound to (an offering of the event's organiser, 06 H-55).
+type SponsoredEventDTO struct {
+	EventID          string                     `json:"event_id" format:"uuid"`
+	Title            string                     `json:"title" doc:"Empty, like starts_at and status absent, when the event cannot be read (it is kept while a line holds it)"`
+	StartsAt         *time.Time                 `json:"starts_at,omitempty"`
+	Status           string                     `json:"status,omitempty" enum:"draft,published,cancelled,completed" doc:"The event's status now"`
+	Held             bool                       `json:"held" doc:"The event started by now and was not cancelled"`
+	OrganizerID      string                     `json:"organizer_org_id" format:"uuid" doc:"The org that holds the event and sold the lines (a club, mostly)"`
+	OrganizerName    string                     `json:"organizer_name"`
+	OrganizerKind    string                     `json:"organizer_kind" enum:"platform,university,club,company,ngo"`
+	Orders           int                        `json:"orders" doc:"Orders of the range that hold a line of the event"`
+	OrderStatuses    []KeyCount                 `json:"order_statuses" doc:"Those orders by their status now (keys as sponsorship.by_status)"`
+	Lines            int                        `json:"lines"`
+	ByFulfillment    []KeyCount                 `json:"by_fulfillment" doc:"The event's lines by delivery status now (keys as sponsorship.by_fulfillment)"`
+	Delivered        int                        `json:"delivered" doc:"Of the lines, fulfilled"`
+	HasEvidence      bool                       `json:"has_evidence" doc:"The seller attached a delivery evidence to at least one line that was not rejected"`
+	EvidenceAttached int                        `json:"evidence_attached" doc:"Lines with a delivery evidence, clean or not scanned yet (getOrderLineEvidence on the line)"`
+	EvidenceRejected int                        `json:"evidence_rejected" doc:"Lines whose evidence the scan rejected: the seller uploads it again"`
+	LastOrderedAt    time.Time                  `json:"last_ordered_at" doc:"The latest placement of those orders"`
+	Participation    *SponsoredParticipationDTO `json:"participation" doc:"null before the event is held, for an event of a sensitive category or a sensitive club, or when the figure is not available"`
+}
+
+// SponsoredParticipationDTO is the participation of a held sponsored event,
+// as estimates (06 H-61: the company does not see the participants).
+type SponsoredParticipationDTO struct {
+	_          struct{} `nullable:"true"`
+	Registered Estimate `json:"registered" doc:"Places kept: confirmed, checked in, no-show"`
+	CheckedIn  Estimate `json:"checked_in"`
 }
 
 // ---- university (getUniversityStats)

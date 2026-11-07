@@ -242,6 +242,19 @@ func (s gormStore) EduQueue(ctx context.Context, q EduQuery) ([]EduRecord, error
 	return eduRecords(rows), nil
 }
 
+// PendingEduDocuments implements Store.
+//
+// cross-org: the platform staff queue spans every user; only the count leaves.
+func (s gormStore) PendingEduDocuments(ctx context.Context) (int, error) {
+	var n int64
+	err := db.Conn(ctx, s.orm).Model(&eduRow{}).
+		Where("method = ? AND status = ?", string(EduMethodDocument), string(EduPending)).Count(&n).Error
+	if err != nil {
+		return 0, fmt.Errorf("identity: pending edu documents: %w", err)
+	}
+	return int(n), nil
+}
+
 // ExpireEduVerifications implements Store (index edu_verifications_expiry_idx).
 //
 // cross-org: the nightly expiry spans every user.

@@ -174,6 +174,11 @@ func (m *MemStore) List(_ context.Context, f AdminFilter, after *After, limit in
 	return limitTo(rows, limit), nil
 }
 
+// CountIn implements Store.
+func (m *MemStore) CountIn(_ context.Context, statuses []Status) (int, error) {
+	return len(m.all(func(d DSR) bool { return slices.Contains(statuses, d.Status) })), nil
+}
+
 // HasOpen implements Store.
 func (m *MemStore) HasOpen(_ context.Context, userID uuid.UUID, t Type) (bool, error) {
 	return len(m.all(func(d DSR) bool {

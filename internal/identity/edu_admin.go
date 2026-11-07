@@ -42,6 +42,26 @@ func (s *service) EduQueue(ctx context.Context, a authz.Actor, q EduQuery) (EduP
 	return EduPage{Items: views, More: more}, nil
 }
 
+// EduQueueStatistics is the student document queue read of the platform
+// panel's queue counters (stats, BE-192).
+type EduQueueStatistics interface {
+	PendingEduDocuments(ctx context.Context, a authz.Actor) (int, error)
+}
+
+var _ EduQueueStatistics = (*service)(nil)
+
+// PendingEduDocuments is the size of the student document queue (pending
+// documents) for the platform panel's queue counters (SR §8): only a
+// count, no applicant leaves. It is gated like adminListEduVerifications
+// (identity.edu_verification.list: support, platform_admin; anyone else
+// gets its 403).
+func (s *service) PendingEduDocuments(ctx context.Context, a authz.Actor) (int, error) {
+	if err := authz.Can(ctx, a, authz.IdentityEduVerificationList, adminSurface); err != nil {
+		return 0, err
+	}
+	return s.edu().PendingEduDocuments(ctx)
+}
+
 // reviewable loads a student document verification for a reviewer: the
 // gate first (nothing is read before it), then the row (an e-mail
 // verification has no document: 404), then the decision on the real

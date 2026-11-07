@@ -89,6 +89,10 @@ type PlatformQueuesDTO struct {
 	OrgReviews     int `json:"org_reviews" doc:"Orgs awaiting verification (pending_review)"`
 	ClubClaims     int `json:"club_claims" doc:"Pending club claims, every university"`
 	ContentReports int `json:"content_reports" doc:"Content reports open or in review"`
+	// The two below are shown only to a caller who may work the queue
+	// (BE-192); null otherwise.
+	KvkkRequests     *int `json:"kvkk_requests" doc:"Data subject (KVKK) requests awaiting action that the caller may work: every open request for the dpo, those awaiting the second approval for platform_admin; null without kvkk.dsr.list"`
+	StudentDocuments *int `json:"student_documents" doc:"Student documents awaiting review; null without identity.edu_verification.list (support, platform_admin)"`
 }
 
 // ---- club (getClubStats)

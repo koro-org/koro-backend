@@ -145,6 +145,15 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 		if got.RequesterEmail != "basvuru@example.test" || got.UserID != nil {
 			t.Fatalf("applicant without account = %+v", got)
 		}
+		if n, err := w.s.CountIn(ctx, []kvkk.Status{kvkk.StatusReceived}); err != nil || n != 4 {
+			t.Fatalf("CountIn(received) = %d, %v", n, err)
+		}
+		if n, _ := w.s.CountIn(ctx, []kvkk.Status{kvkk.StatusAwaitingSecond}); n != 0 {
+			t.Fatalf("CountIn(awaiting) = %d", n)
+		}
+		if n, _ := w.s.CountIn(ctx, nil); n != 0 {
+			t.Fatalf("CountIn(none) = %d", n)
+		}
 		if open, _ := w.s.HasOpen(ctx, u, kvkk.TypeErasure); !open {
 			t.Fatal("HasOpen(erasure) = false")
 		}

@@ -374,6 +374,37 @@ func (s *service) AdminList(ctx context.Context, a authz.Actor, f AdminFilter, a
 	return p, nil
 }
 
+// queueStatuses are the statuses a request waits in for someone's action:
+// every open one (received, identity_check, in_progress,
+// awaiting_second_approval).
+var queueStatuses = []Status{StatusReceived, StatusIdentityCheck, StatusInProgress, StatusAwaitingSecond}
+
+// QueueStatistics is the request queue read of the platform panel's queue
+// counters (stats, BE-192).
+type QueueStatistics interface {
+	PendingRequests(ctx context.Context, a authz.Actor) (int, error)
+}
+
+var _ QueueStatistics = (*service)(nil)
+
+// PendingRequests is the size of the caller's data subject request queue
+// for the platform panel's queue counters (stats, BE-192; SR §8): only a
+// count, no request leaves. It is gated like adminListDataRequests
+// (kvkk.dsr.list: dpo, platform_admin; anyone else gets its 403) and
+// counts what that list would show the caller: every open request for the
+// dpo, only those awaiting the second approval for a platform_admin who is
+// not dpo (03 k32).
+func (s *service) PendingRequests(ctx context.Context, a authz.Actor) (int, error) {
+	if err := authz.Can(ctx, a, authz.KvkkDsrList, adminSurface); err != nil {
+		return 0, err
+	}
+	statuses := queueStatuses
+	if staffOnly(a) {
+		statuses = []Status{StatusAwaitingSecond}
+	}
+	return s.d.Store.CountIn(ctx, statuses)
+}
+
 // AdminGet implements Service (adminGetDataRequest).
 func (s *service) AdminGet(ctx context.Context, a authz.Actor, id uuid.UUID) (DSR, error) {
 	if err := authz.Can(ctx, a, authz.KvkkDsrRead, adminSurface); err != nil {

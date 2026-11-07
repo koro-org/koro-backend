@@ -11792,14 +11792,28 @@ components:
           description: Content reports open or in review
           format: int64
           type: integer
+        kvkk_requests:
+          description: "Data subject (KVKK) requests awaiting action that the caller may work: every open request for the dpo, those awaiting the second approval for platform_admin; null without kvkk.dsr.list"
+          format: int64
+          type:
+            - integer
+            - "null"
         org_reviews:
           description: Orgs awaiting verification (pending_review)
           format: int64
           type: integer
+        student_documents:
+          description: Student documents awaiting review; null without identity.edu_verification.list (support, platform_admin)
+          format: int64
+          type:
+            - integer
+            - "null"
       required:
         - org_reviews
         - club_claims
         - content_reports
+        - kvkk_requests
+        - student_documents
       type: object
     PlatformRoleAssignmentDTO:
       additionalProperties: false
@@ -25366,7 +25380,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/admin/stats:
     get:
-      description: "Operational counts of the platform (SR §8 Admin): accounts by status, sign-up role and verification, orgs by kind and status, posts and content reports, events and their participation, and the review queues. The *_in_range figures cover the range (default: the last 30 days). The range is whole days in Europe/Istanbul (from and to inclusive, at most 366 days)."
+      description: "Operational counts of the platform (SR §8 Admin): accounts by status, sign-up role and verification, orgs by kind and status, posts and content reports, events and their participation, and the review queues. The KVKK request and student document queues are counted only for a caller who may work that queue (kvkk.dsr.list; identity.edu_verification.list) and are null otherwise. The *_in_range figures cover the range (default: the last 30 days). The range is whole days in Europe/Istanbul (from and to inclusive, at most 366 days)."
       operationId: getAdminStats
       parameters:
         - description: "First day (YYYY-MM-DD, Europe/Istanbul), inclusive; default: the panel's"

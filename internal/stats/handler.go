@@ -21,7 +21,9 @@ func Register(api huma.API, svc Service) {
 		Summary: "Get the platform summary",
 		Description: "Operational counts of the platform (SR §8 Admin): accounts by status, sign-up role and " +
 			"verification, orgs by kind and status, posts and content reports, events and their participation, and " +
-			"the review queues. The *_in_range figures cover the range (default: the last 30 days)." + rangeNote,
+			"the review queues. The KVKK request and student document queues are counted only for a caller who may " +
+			"work that queue (kvkk.dsr.list; identity.edu_verification.list) and are null otherwise. " +
+			"The *_in_range figures cover the range (default: the last 30 days)." + rangeNote,
 	}, op.Meta{Action: string(authz.StatsPlatformRead), Surface: op.SurfaceAdmin, QuerySyntax: rangeSyntax}, h.platform)
 
 	op.Register(api, "stats", huma.Operation{

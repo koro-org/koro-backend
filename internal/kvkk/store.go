@@ -36,6 +36,9 @@ type Store interface {
 	// List returns up to limit requests matching f, soonest deadline first
 	// (due_at ASC, id ASC), after the cursor.
 	List(ctx context.Context, f AdminFilter, after *After, limit int) ([]DSR, error)
+	// CountIn returns how many requests are in one of statuses (none: 0);
+	// the admin queue counter (BE-192), no row leaves.
+	CountIn(ctx context.Context, statuses []Status) (int, error)
 	// HasOpen reports whether userID has an open request of type t.
 	HasOpen(ctx context.Context, userID uuid.UUID, t Type) (bool, error)
 	// AllOf returns every request of userID, oldest first (KVKK export and

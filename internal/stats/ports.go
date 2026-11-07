@@ -5,6 +5,7 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/authz"
 	"koro/internal/directory"
 	"koro/internal/entitlements"
 	"koro/internal/events"
@@ -95,4 +96,21 @@ type Universities interface {
 // (catalog.Statistics).
 type Offerings interface {
 	PendingUniversityDecisions(ctx context.Context, sellerOrgIDs []uuid.UUID) (int, error)
+}
+
+// The two queue counters below are gated by the queue's own list action,
+// not by stats.platform.read (BE-192, SR §8): a caller sees a queue's size
+// only if it may work that queue, and gets the module's 403 otherwise
+// (stats then publishes null).
+
+// DataRequests is the size of the caller's data subject request queue
+// (kvkk.QueueStatistics: kvkk.dsr.list; 03 k32 for platform_admin).
+type DataRequests interface {
+	PendingRequests(ctx context.Context, a authz.Actor) (int, error)
+}
+
+// StudentDocuments is the size of the student document queue
+// (identity.EduQueueStatistics: identity.edu_verification.list).
+type StudentDocuments interface {
+	PendingEduDocuments(ctx context.Context, a authz.Actor) (int, error)
 }

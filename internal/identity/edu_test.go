@@ -417,6 +417,21 @@ func TestSubmitEduDocument_QueuesForAdmin(t *testing.T) {
 	problemtest.WantErr(t, func() error { _, err := e.svc.EduQueue(ctx, a, identity.EduQuery{}); return err }(), authz.ErrForbidden)
 	dpo := e.staff(t, "dpo@example.com", authz.PlatformDPO)
 	problemtest.WantErr(t, func() error { _, err := e.svc.EduQueue(ctx, dpo, identity.EduQuery{}); return err }(), authz.ErrForbidden)
+	// The queue counter of the platform panel (BE-192): the same gate, one pending document.
+	counter, ok := e.svc.(identity.EduQueueStatistics)
+	if !ok {
+		t.Fatal("identity.Service does not offer EduQueueStatistics")
+	}
+	pad := e.staff(t, "yonetici@example.com", authz.PlatformAdmin)
+	for _, staff := range []authz.Actor{sup, pad} {
+		if n, err := counter.PendingEduDocuments(ctx, staff); err != nil || n != 1 {
+			t.Fatalf("pending documents = %d, %v", n, err)
+		}
+	}
+	for _, x := range []authz.Actor{a, dpo} {
+		_, err := counter.PendingEduDocuments(ctx, x)
+		problemtest.WantErr(t, err, authz.ErrForbidden)
+	}
 	if n := len(e.audit.of(string(authz.IdentityEduVerificationSubmitDocument))); n != 1 {
 		t.Fatalf("submit audits %d", n)
 	}

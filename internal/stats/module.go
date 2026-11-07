@@ -16,6 +16,11 @@
 //     without the role 403, everyone else 404. A sensitive club's panel is
 //     its members' only (Y2: platform staff 404). The panel of another
 //     org kind is 404 once the caller may read the org's panels at all.
+//     The platform panel's KVKK request and student document queue
+//     counters are gated again by the queue's own list action (BE-192):
+//     a number is shown only to a role that may work the queue, null
+//     otherwise; the KVKK one counts what kvkk.dsr.list would show the
+//     caller (03 k32: platform_admin only the second approvals).
 //   - Read only, scoped by the path: the org comes from the path and is
 //     read from orgs (H-38), never from a body; every provider read is
 //     keyed by it (or by the university the directory row of that org
@@ -80,6 +85,8 @@ type Deps struct {
 	Students     Students
 	Universities Universities
 	Offerings    Offerings
+	DataRequests DataRequests
+	StudentDocs  StudentDocuments
 	Clock        clock.Clock
 	Log          *slog.Logger
 }
@@ -94,6 +101,7 @@ func (d Deps) validate() error {
 		{"Content", d.Content != nil}, {"Events", d.Events != nil}, {"Sales", d.Sales != nil},
 		{"Outreach", d.Outreach != nil}, {"Contacts", d.Contacts != nil}, {"Packages", d.Packages != nil},
 		{"Students", d.Students != nil}, {"Universities", d.Universities != nil}, {"Offerings", d.Offerings != nil},
+		{"DataRequests", d.DataRequests != nil}, {"StudentDocs", d.StudentDocs != nil},
 		{"Clock", d.Clock != nil}, {"Log", d.Log != nil},
 	} {
 		if !c.ok {

@@ -211,6 +211,15 @@ func (m *MemStore) EduQueue(_ context.Context, q EduQuery) ([]EduRecord, error) 
 	return rows[:min(len(rows), max(q.Limit, 0))], nil
 }
 
+// PendingEduDocuments implements Store.
+func (m *MemStore) PendingEduDocuments(context.Context) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.eduWhere(func(v EduRecord) bool {
+		return v.Method == EduMethodDocument && v.Status == EduPending
+	}, false)), nil
+}
+
 // ExpireEduVerifications implements Store.
 func (m *MemStore) ExpireEduVerifications(_ context.Context, now time.Time, limit int) ([]EduRecord, error) {
 	m.mu.Lock()

@@ -199,6 +199,9 @@ func eduStoreContract(t *testing.T, newWorld func(t *testing.T) eduWorld) {
 			}
 			pending = append(pending, d.ID)
 		}
+		if n, err := s.PendingEduDocuments(ctx); err != nil || n != 3 {
+			t.Fatalf("PendingEduDocuments = %d, %v", n, err)
+		}
 		// Oldest first, keyset after the previous page.
 		p1, err := s.EduQueue(ctx, identity.EduQuery{Status: identity.EduPending, Limit: 2})
 		if err != nil || len(p1) != 2 || p1[0].ID != pending[0] || p1[1].ID != pending[1] {
@@ -215,6 +218,9 @@ func eduStoreContract(t *testing.T, newWorld func(t *testing.T) eduWorld) {
 			t.Fatal("DeleteEduVerification missed")
 		}
 		rest, _ := s.EduQueue(ctx, identity.EduQuery{Status: identity.EduPending, Limit: 5})
+		if n, _ := s.PendingEduDocuments(ctx); n != len(rest) {
+			t.Fatalf("PendingEduDocuments = %d after the delete, want %d", n, len(rest))
+		}
 		if slices.ContainsFunc(rest, func(r identity.EduRecord) bool { return r.ID == pending[0] }) {
 			t.Fatal("deleted row still queued")
 		}

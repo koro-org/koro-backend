@@ -2,6 +2,7 @@ package stats_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"slices"
 	"testing"
@@ -50,6 +51,10 @@ type fake struct {
 	uniErr     error
 	claims     int
 	offerings  int
+	dsrs       int         // PendingRequests
+	dsrErr     error       // PendingRequests' refusal
+	docs       int         // PendingEduDocuments
+	docsErr    error       // PendingEduDocuments' refusal
 	totalsAsk  []uuid.UUID // OrgEventTotals' orgIDs
 	offerAsk   []uuid.UUID // PendingUniversityDecisions' orgIDs
 	studentAsk uuid.UUID
@@ -155,6 +160,12 @@ func (f *fake) PendingUniversityDecisions(_ context.Context, ids []uuid.UUID) (i
 	return f.offerings, nil
 }
 
+func (f *fake) PendingRequests(context.Context, authz.Actor) (int, error) { return f.dsrs, f.dsrErr }
+
+func (f *fake) PendingEduDocuments(context.Context, authz.Actor) (int, error) {
+	return f.docs, f.docsErr
+}
+
 // world is the fake with the matrix orgs (authztest) and the service.
 func world(t *testing.T) (*fake, stats.Service) {
 	t.Helper()
@@ -167,7 +178,7 @@ func world(t *testing.T) (*fake, stats.Service) {
 		}
 	}
 	mod, err := stats.New(stats.Deps{Orgs: f, Clubs: f, Users: f, OrgCounts: f, Content: f, Events: f, Sales: f, Outreach: f,
-		Contacts: f, Packages: f, Students: f, Universities: f, Offerings: f, Clock: clock.NewFake(now), Log: obs.Discard()})
+		Contacts: f, Packages: f, Students: f, Universities: f, Offerings: f, DataRequests: f, StudentDocs: f, Clock: clock.NewFake(now), Log: obs.Discard()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +245,8 @@ func TestPlatform_SumsTheModulesFigures(t *testing.T) {
 		st.Orgs.ByKind[1].NewInRange != 2 || st.Orgs.NewInRange != 2 || len(st.Orgs.ByKind[1].ByStatus) != 2 {
 		t.Fatalf("orgs = %+v", st.Orgs)
 	}
-	if st.Queues != (stats.PlatformQueuesDTO{OrgReviews: 2, ClubClaims: 5, ContentReports: 3}) {
+	if q := st.Queues; q.OrgReviews != 2 || q.ClubClaims != 5 || q.ContentReports != 3 || q.KvkkRequests == nil ||
+		*q.KvkkRequests != 0 || q.StudentDocuments == nil || *q.StudentDocuments != 0 {
 		t.Fatalf("queues = %+v", st.Queues)
 	}
 	if st.Events.AttendanceRate == nil || *st.Events.AttendanceRate != 0.75 {
@@ -243,6 +255,36 @@ func TestPlatform_SumsTheModulesFigures(t *testing.T) {
 	for _, p := range []string{"moderator", "support", "company_admin", "club_admin"} {
 		_, err := svc.Platform(t.Context(), persona(t, p), stats.RangeQuery{})
 		wantStatus(t, err, http.StatusForbidden)
+	}
+}
+
+// TestPlatform_QueueCountersOnlyForTheQueuesRole (BE-192): the KVKK
+// request and student document counters are the modules' counts for a
+// caller they let work the queue, null when the module refuses the caller
+// (403/404 of its own list action), and any other failure fails the panel.
+func TestPlatform_QueueCountersOnlyForTheQueuesRole(t *testing.T) {
+	t.Parallel()
+	pad := persona(t, "platform_admin")
+	f, svc := world(t)
+	f.dsrs, f.docs = 4, 7
+	st, err := svc.Platform(t.Context(), pad, stats.RangeQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q := st.Queues; q.KvkkRequests == nil || *q.KvkkRequests != 4 || q.StudentDocuments == nil || *q.StudentDocuments != 7 {
+		t.Fatalf("queues = %+v", st.Queues)
+	}
+	f.dsrErr, f.docsErr = authz.ErrForbidden, authz.ErrNotFound
+	st, err = svc.Platform(t.Context(), pad, stats.RangeQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Queues.KvkkRequests != nil || st.Queues.StudentDocuments != nil {
+		t.Fatalf("refused queues = %+v, want null", st.Queues)
+	}
+	f.dsrErr, f.docsErr = nil, errors.New("database down")
+	if _, err := svc.Platform(t.Context(), pad, stats.RangeQuery{}); err == nil {
+		t.Fatal("a failing queue counter did not fail the panel")
 	}
 }
 

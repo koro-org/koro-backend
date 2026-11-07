@@ -17,7 +17,8 @@ import (
 // (the reads are methods of each concrete service next to its Service
 // contract, like students.DiscoveryIndex): orgs (OrgDirectory and
 // Statistics), directory (Catalog and Statistics), identity, feed,
-// events, orders, outreach, messaging, entitlements, students and catalog.
+// events, orders, outreach, messaging, entitlements, students and catalog, and the queue counters of kvkk and identity
+// (BE-192: gated by the queue's own list action).
 // A module that does not offer its read stops the build.
 type statsWiring struct {
 	svc stats.Service // set by build
@@ -44,6 +45,8 @@ func (w *statsWiring) build(c *container) error {
 	port("entitlements statistics", c.entitlements.svc, func(v any) (ok bool) { d.Packages, ok = v.(stats.Packages); return })
 	port("students statistics", c.students.svc, func(v any) (ok bool) { d.Students, ok = v.(stats.Students); return })
 	port("catalog statistics", c.catalog.svc, func(v any) (ok bool) { d.Offerings, ok = v.(stats.Offerings); return })
+	port("kvkk queue statistics", c.kvkk.svc, func(v any) (ok bool) { d.DataRequests, ok = v.(stats.DataRequests); return })
+	port("identity edu queue statistics", c.identity.svc, func(v any) (ok bool) { d.StudentDocs, ok = v.(stats.StudentDocuments); return })
 	if len(missing) > 0 {
 		return fmt.Errorf("stats: %v not built or without the read stats needs", missing)
 	}

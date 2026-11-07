@@ -179,11 +179,7 @@ func (s gormStore) ListOwn(ctx context.Context, userID uuid.UUID, after *After, 
 func (s gormStore) List(ctx context.Context, f AdminFilter, after *After, limit int) ([]DSR, error) {
 	q := db.Conn(ctx, s.orm).Table("data_subject_requests").Select(dsrCols)
 	if len(f.Statuses) > 0 {
-		st := make([]string, len(f.Statuses))
-		for i, x := range f.Statuses {
-			st[i] = string(x)
-		}
-		q = q.Where("status IN ?", st)
+		q = q.Where("status IN ?", statusStrings(f.Statuses))
 	}
 	if f.Type != nil {
 		q = q.Where("type = ?", string(*f.Type))
@@ -199,6 +195,30 @@ func (s gormStore) List(ctx context.Context, f AdminFilter, after *After, limit 
 		return nil, fmt.Errorf("kvkk: list requests: %w", err)
 	}
 	return dsrs(rows), nil
+}
+
+// statusStrings is the IN list of statuses.
+func statusStrings(statuses []Status) []string {
+	out := make([]string, len(statuses))
+	for i, x := range statuses {
+		out[i] = string(x)
+	}
+	return out
+}
+
+// CountIn implements Store.
+//
+// cross-org: the DPO queue spans every request; only the count leaves.
+func (s gormStore) CountIn(ctx context.Context, statuses []Status) (int, error) {
+	if len(statuses) == 0 {
+		return 0, nil
+	}
+	var n int64
+	err := db.Conn(ctx, s.orm).Table("data_subject_requests").Where("status IN ?", statusStrings(statuses)).Count(&n).Error
+	if err != nil {
+		return 0, fmt.Errorf("kvkk: count requests: %w", err)
+	}
+	return int(n), nil
 }
 
 // HasOpen implements Store.

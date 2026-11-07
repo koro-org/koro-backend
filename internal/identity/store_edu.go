@@ -45,6 +45,10 @@ type EduStore interface {
 	// EduQueue returns up to q.Limit document verifications in q.Status
 	// after q.After (pending: id ASC; others: id DESC).
 	EduQueue(ctx context.Context, q EduQuery) ([]EduRecord, error)
+	// PendingEduDocuments counts the document verifications awaiting a
+	// decision (method document, status pending): the platform panel's
+	// queue counter (BE-192), no row leaves.
+	PendingEduDocuments(ctx context.Context) (int, error)
 	// ExpireEduVerifications turns up to limit verified rows whose
 	// expires_at ≤ now into expired and returns them (identity.edu_expire;
 	// concurrent runs skip each other's rows).

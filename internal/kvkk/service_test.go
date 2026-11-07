@@ -156,6 +156,50 @@ func TestAdminFlow_UpdateIfMatchAndState(t *testing.T) {
 	problemtest.WantErr(t, err, kvkk.ErrState)
 }
 
+// TestPendingRequests_CountsWhatTheCallerMayWork (BE-192): the queue
+// counter of the platform panel counts the open requests for the dpo, only
+// those awaiting the second approval for platform_admin (k32), and is 403
+// for everyone without kvkk.dsr.list (support, moderator, a student).
+func TestPendingRequests_CountsWhatTheCallerMayWork(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := t.Context()
+	q, ok := e.svc.(kvkk.QueueStatistics)
+	if !ok {
+		t.Fatal("kvkk.Service does not offer QueueStatistics")
+	}
+	if n, err := q.PendingRequests(ctx, actor(t, "dpo")); err != nil || n != 0 {
+		t.Fatalf("empty queue = %d, %v", n, err)
+	}
+	if _, err := e.svc.CreateMine(ctx, actor(t, "student"), kvkk.MyRequest{Type: kvkk.TypeAccess}); err != nil {
+		t.Fatal(err)
+	}
+	prof, err := e.svc.CreateMine(ctx, actor(t, "student"), kvkk.MyRequest{Type: kvkk.TypeProfilingAccess})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.Approve(ctx, actor(t, "dpo"), prof.ID, kvkk.StageFirst); err != nil {
+		t.Fatal(err)
+	}
+	cancelled, err := e.svc.CreateMine(ctx, actor(t, "student_b"), kvkk.MyRequest{Type: kvkk.TypeInfo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.CancelMine(ctx, actor(t, "student_b"), cancelled.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := q.PendingRequests(ctx, actor(t, "dpo")); err != nil || n != 2 {
+		t.Fatalf("dpo queue = %d, %v; want 2 (the cancelled request is closed)", n, err)
+	}
+	if n, err := q.PendingRequests(ctx, actor(t, "platform_admin")); err != nil || n != 1 {
+		t.Fatalf("platform_admin queue = %d, %v; want 1 (awaiting the second approval only)", n, err)
+	}
+	for _, p := range []string{"support", "moderator", "student"} {
+		_, err := q.PendingRequests(ctx, actor(t, p))
+		problemtest.WantErr(t, err, authz.ErrForbidden)
+	}
+}
+
 func TestAdmin_PlatformAdminSeesAwaitingOnly_AndNoOwnRequest(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)

@@ -5,20 +5,27 @@ import (
 	"time"
 )
 
-// ResetAnswerFloor is the least time an answer of requestPasswordReset (both
-// channels) and confirmPasswordResetSms takes, counted from the account
-// lookup (BE-195). The answer of these operations is the same whatever the
-// state of the account the address names; the floor makes their duration
-// independent of that state too. It covers the work they keep on the
-// request path (the lookup, the rows, the audit record, the commit); the
-// e-mail and the SMS leave from the worker (identity.send_email_token,
-// identity.send_sms_code), never from the request. What is refused before
-// the lookup (a malformed address, the rate limits) does not depend on the
-// account and answers at once.
+// AnswerFloor is the least time an answer of the operations that look an
+// account up by an address takes, counted from that lookup:
+// requestPasswordReset (both channels) and confirmPasswordResetSms
+// (BE-195), resendEmailVerification, registerAccount and
+// startEduVerification (BE-200). The answer of these operations is the
+// same whatever the state of the account the address names; the floor
+// makes their duration independent of that state too. It covers the work
+// they keep on the request path after the lookup (the rows, the audit
+// record, the commit); e-mails, SMS and security notices leave from the
+// worker (identity.send_email_token, identity.send_sms_code,
+// identity.send_security_notice), never from the request.
 //
-// The value sits well above that work on a loaded server; the route's
+// What comes before the lookup does not depend on the account and stays
+// out of the floor: a refusal there (a malformed body, an unknown
+// university domain, the rate limits) answers at once, and the argon2id
+// hash every registration pays before its lookup is not counted in the
+// floor (it need not outlast a hash).
+//
+// The value sits well above that work on a loaded server; the routes'
 // latency (koro_http_request_duration_seconds) shows whether it still does.
-const ResetAnswerFloor = 500 * time.Millisecond
+const AnswerFloor = 500 * time.Millisecond
 
 // Pacer holds an answer back until a floor has passed (Deps.Pace).
 type Pacer interface {
@@ -42,7 +49,7 @@ func (timerPacer) Start(d time.Duration) func(context.Context) {
 	}
 }
 
-// resetFloor starts the answer floor of a password reset operation. The
-// caller defers the wait it returns, so the floor ends the operation, after
-// every transaction of it has committed.
-func (s *service) resetFloor() func(context.Context) { return s.d.Pace.Start(ResetAnswerFloor) }
+// answerFloor starts the answer floor (AnswerFloor) of an operation right
+// before its account lookup. The caller defers the wait it returns, so the
+// floor ends the operation, after every transaction of it has committed.
+func (s *service) answerFloor() func(context.Context) { return s.d.Pace.Start(AnswerFloor) }

@@ -87,11 +87,11 @@ func (w *identityWiring) useMemStore() {
 	w.secrets = testEnvelope()
 	w.memChallenges = true
 	w.sms = smsfake.New() // BE-172: SMS in memory (matrix 202s, wiring)
-	w.pace = noPace{}     // BE-195: the answer floor is measured in TestWire_IdentityResetAnswerFloor
+	w.pace = noPace{}     // BE-195, BE-200: the answer floor is measured in TestWire_IdentityAnswerFloor
 }
 
 // noPace answers at once (identity.Pacer): the in-memory container skips
-// the answer floor of the password reset operations.
+// the answer floor of the operations that look an account up by an address.
 type noPace struct{}
 
 func (noPace) Start(time.Duration) func(context.Context) { return func(context.Context) {} }
@@ -432,12 +432,14 @@ func TestWire_ChangePasswordPastRequestBudget_503(t *testing.T) {
 	}
 }
 
-// TestWire_IdentityResetAnswerFloor: with the production pacer (no seam),
-// requestPasswordReset and confirmPasswordResetSms answer over HTTP after
-// exactly identity.ResetAnswerFloor, for an unknown and a known address
-// alike (BE-195). Measured in a synctest bubble: the floor costs no
-// wall-clock time.
-func TestWire_IdentityResetAnswerFloor(t *testing.T) {
+// TestWire_IdentityAnswerFloor: with the production pacer (no seam), the
+// operations that look an account up by an address answer over HTTP after
+// exactly identity.AnswerFloor, for an unknown and a known address alike:
+// requestPasswordReset and confirmPasswordResetSms (BE-195),
+// resendEmailVerification, registerAccount and startEduVerification
+// (BE-200). Measured in a synctest bubble: the floor costs no wall-clock
+// time (nor does the registration's hash).
+func TestWire_IdentityAnswerFloor(t *testing.T) {
 	t.Parallel()
 	c := newTestContainer(t)
 	store := identity.NewMemStore(clock.Real().Now)
@@ -446,14 +448,25 @@ func TestWire_IdentityResetAnswerFloor(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := &actorEnv{c: c, store: store, clk: c.infra.clock}
-	known := e.user(t, nil)
+	known, other := e.user(t, nil), e.user(t, nil)
+	tok := e.session(t, known, identity.ClientMobile)
+	e.verified(t, other, "taken@ogr.uni.edu.tr", e.clk.Now().UTC().Truncate(time.Microsecond).AddDate(1, 0, 0))
+	c.hooks.domainResolver = func(_ context.Context, domain string) (uuid.UUID, bool, error) {
+		return eduUniversity, strings.HasSuffix(domain, "uni.edu.tr"), nil
+	}
+	privacyNotice := publishNotice(t, c, consent.KindPrivacyNotice, nil, "Aydınlatma metni\n")
+	terms := publishNotice(t, c, consent.KindTermsOfUse, nil, "Kullanım koşulları\n")
 	app, err := httpx.New(httpx.Deps{Log: obs.Discard(), Actors: c.actors})
 	if err != nil {
 		t.Fatal(err)
 	}
 	c.registerRoutes(app.V1)
-	do := func(ctx context.Context, method, path, body string) *httptest.ResponseRecorder {
+	do := func(ctx context.Context, method, path, tok, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequestWithContext(ctx, method, path, strings.NewReader(body))
+		if tok != "" {
+			req.Header.Set("X-Koro-Client", "mobile")
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
 		if body != "" {
 			req.Header.Set("Content-Type", "application/json")
 		}
@@ -463,33 +476,47 @@ func TestWire_IdentityResetAnswerFloor(t *testing.T) {
 	}
 	// Warm the stack up outside the bubble (lazy initialisation stays
 	// out of it).
-	if rec := do(t.Context(), http.MethodGet, "/api/v1/me", ""); rec.Code != http.StatusUnauthorized {
+	if rec := do(t.Context(), http.MethodGet, "/api/v1/me", "", ""); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("GET /me = %d %s", rec.Code, rec.Body)
 	}
 	const newPW = "Yepyeni-Sifre-Matris-77"
+	register := func(address string) string {
+		return `{"email":"` + address + `","password":"Uzun-ve-tahmin-edilmez-parola-2026","first_name":"Bea","last_name":"Kaya",` +
+			`"signup_persona":"company","locale":"tr-TR","privacy_notice_version_id":"` + privacyNotice.ID.String() +
+			`","terms_notice_version_id":"` + terms.ID.String() + `"}`
+	}
 	cases := []struct {
-		name, path, body string
-		want             int
+		name, path, tok, body string
+		want                  int
 	}{
-		{"reset request, unknown address", "/api/v1/auth/password-resets", `{"email":"nobody@actor.koro.test"}`, http.StatusAccepted},
-		{"reset request, known address", "/api/v1/auth/password-resets", `{"email":"` + known.Email + `"}`, http.StatusAccepted},
-		{"SMS reset, unknown address", "/api/v1/auth/password-resets/sms/confirm",
+		{"reset request, unknown address", "/api/v1/auth/password-resets", "", `{"email":"nobody@actor.koro.test"}`, http.StatusAccepted},
+		{"reset request, known address", "/api/v1/auth/password-resets", "", `{"email":"` + known.Email + `"}`, http.StatusAccepted},
+		{"SMS reset, unknown address", "/api/v1/auth/password-resets/sms/confirm", "",
 			`{"email":"nobody@actor.koro.test","code":"000000","new_password":"` + newPW + `"}`, http.StatusUnprocessableEntity},
-		{"SMS reset, known address", "/api/v1/auth/password-resets/sms/confirm",
+		{"SMS reset, known address", "/api/v1/auth/password-resets/sms/confirm", "",
 			`{"email":"` + known.Email + `","code":"000000","new_password":"` + newPW + `"}`, http.StatusUnprocessableEntity},
+		{"resend, unknown address", "/api/v1/auth/email-verifications/resend", "", `{"email":"nobody@actor.koro.test"}`, http.StatusAccepted},
+		{"resend, known address", "/api/v1/auth/email-verifications/resend", "", `{"email":"` + known.Email + `"}`, http.StatusAccepted},
+		{"register, new address", "/api/v1/auth/register", "", register("new@actor.koro.test"), http.StatusAccepted},
+		{"register, known address", "/api/v1/auth/register", "", register(known.Email), http.StatusAccepted},
+		{"edu start, free address", "/api/v1/me/edu-verifications", tok, `{"edu_email":"free@ogr.uni.edu.tr"}`, http.StatusAccepted},
+		{"edu start, address of another account", "/api/v1/me/edu-verifications", tok, `{"edu_email":"taken@ogr.uni.edu.tr"}`, http.StatusAccepted},
 	}
 	synctest.Test(t, func(t *testing.T) {
 		for _, tc := range cases {
 			start := time.Now()
-			rec := do(t.Context(), http.MethodPost, tc.path, tc.body)
+			rec := do(t.Context(), http.MethodPost, tc.path, tc.tok, tc.body)
 			if rec.Code != tc.want {
 				t.Fatalf("%s = %d %s, want %d", tc.name, rec.Code, rec.Body, tc.want)
 			}
-			if took := time.Since(start); took != identity.ResetAnswerFloor {
-				t.Errorf("%s answered after %v, want %v", tc.name, took, identity.ResetAnswerFloor)
+			if took := time.Since(start); took != identity.AnswerFloor {
+				t.Errorf("%s answered after %v, want %v", tc.name, took, identity.AnswerFloor)
 			}
 		}
 	})
+	if _, found, err := c.identity.svc.FindByEmail(t.Context(), "new@actor.koro.test"); err != nil || !found {
+		t.Fatalf("the registration made no account: %v", err)
+	}
 }
 
 // TestWire_IdentityEmailGoesThroughNotify: the worker side of a password

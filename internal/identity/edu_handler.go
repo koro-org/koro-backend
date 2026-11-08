@@ -21,7 +21,8 @@ func registerEdu(api huma.API, h handler) {
 		Summary: "Verify (or renew) my student status with a .edu.tr address",
 		Description: "A single-use link (valid 24 hours) goes to the address. 202 whether or not the address is " +
 			"free: an address that verifies another account gets nothing (no enumeration). An address whose domain " +
-			"is not a known university is 422 identity.edu_domain_unknown: submit a student document instead.",
+			"is not a known university is 422 identity.edu_domain_unknown: submit a student document instead. Past the " +
+			"address and domain checks and the rate limits, every answer takes at least 0.5 s (BE-200).",
 	}, op.Meta{Action: string(authz.IdentityEduVerificationStart), Surface: op.SurfaceSelf, RateLimit: op.RateAuthEmail,
 		Idempotency: op.IdempotencyOptional}, h.startEdu)
 

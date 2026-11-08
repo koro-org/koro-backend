@@ -27123,7 +27123,7 @@ paths:
       x-koro-surface: public
   /api/v1/auth/email-verifications/resend:
     post:
-      description: Always 202 (no account enumeration).
+      description: Always 202 (no account enumeration). Past the address check and the rate limits, every answer takes at least 0.5 s (BE-200).
       operationId: resendEmailVerification
       requestBody:
         content:
@@ -27243,7 +27243,7 @@ paths:
       x-koro-surface: public
   /api/v1/auth/register:
     post:
-      description: Always 202 for a valid request, whether the address is new or already registered (no account enumeration); a verification e-mail follows. birth_date is required for students (age gate). The privacy notice shown on the page is recorded as shown, never as consent; terms_notice_version_id is the current terms of use the user accepted with the mandatory box (422 consent.terms_not_current otherwise); consents are optional, one per purpose.
+      description: Always 202 for a valid request, whether the address is new or already registered (no account enumeration); a verification e-mail follows. birth_date is required for students (age gate). The privacy notice shown on the page is recorded as shown, never as consent; terms_notice_version_id is the current terms of use the user accepted with the mandatory box (422 consent.terms_not_current otherwise); consents are optional, one per purpose. Past the request checks and the rate limit, every answer takes at least 0.5 s (BE-200).
       operationId: registerAccount
       parameters:
         - description: Client kind (consent channel); default web
@@ -31553,7 +31553,7 @@ paths:
       x-koro-surface: self
   /api/v1/me/edu-verifications:
     post:
-      description: "A single-use link (valid 24 hours) goes to the address. 202 whether or not the address is free: an address that verifies another account gets nothing (no enumeration). An address whose domain is not a known university is 422 identity.edu_domain_unknown: submit a student document instead."
+      description: "A single-use link (valid 24 hours) goes to the address. 202 whether or not the address is free: an address that verifies another account gets nothing (no enumeration). An address whose domain is not a known university is 422 identity.edu_domain_unknown: submit a student document instead. Past the address and domain checks and the rate limits, every answer takes at least 0.5 s (BE-200)."
       operationId: startEduVerification
       requestBody:
         content:

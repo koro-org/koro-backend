@@ -229,7 +229,7 @@ func (s *service) ChangePassword(ctx context.Context, a authz.Actor, in Password
 // RequestPasswordReset implements Service (requestPasswordReset): 202 for
 // any well-formed address; a token goes only to an active or unverified
 // account (02 §5.3: 30 minutes). From the lookup on, the answer waits for
-// ResetAnswerFloor (pace.go).
+// AnswerFloor (pace.go).
 func (s *service) RequestPasswordReset(ctx context.Context, a authz.Actor, email string) error {
 	if err := authz.Can(ctx, a, authz.IdentityPasswordResetRequest, publicUser); err != nil {
 		return err
@@ -241,7 +241,7 @@ func (s *service) RequestPasswordReset(ctx context.Context, a authz.Actor, email
 	if err := s.limitEmail(ctx, rulePasswordReset, normalized); err != nil {
 		return err
 	}
-	wait := s.resetFloor()
+	wait := s.answerFloor()
 	defer wait(ctx)
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		u, found, err := s.users().UserByEmail(ctx, normalized)
@@ -371,7 +371,8 @@ func (s *service) confirmEmailTx(ctx context.Context, t EmailToken, edu signupEd
 
 // ResendVerification implements Service (resendEmailVerification): 202
 // for any well-formed address; only an unverified account gets a new
-// token (the previous one closes).
+// token (the previous one closes). From the lookup on, the answer waits
+// for AnswerFloor (pace.go; BE-200).
 func (s *service) ResendVerification(ctx context.Context, a authz.Actor, email string) error {
 	if err := authz.Can(ctx, a, authz.IdentityEmailResendVerification, publicUser); err != nil {
 		return err
@@ -383,6 +384,8 @@ func (s *service) ResendVerification(ctx context.Context, a authz.Actor, email s
 	if err := s.limitEmail(ctx, ruleAuthEmail, normalized); err != nil {
 		return err
 	}
+	wait := s.answerFloor()
+	defer wait(ctx)
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		u, found, err := s.users().UserByEmail(ctx, normalized)
 		if err != nil || !found || u.Status != StatusPendingEmail {

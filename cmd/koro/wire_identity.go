@@ -55,9 +55,10 @@ import (
 //	         none leaves it nil (every SMS operation answers 503), mem is
 //	         smsfake, mailpit the dev SMS box (BE-178), netgsm Netgsm's
 //	         OTP route. Tests preset smsfake.
-//	pace     nil → identity's runtime timer: the password reset operations
-//	         answer after identity.ResetAnswerFloor (BE-195). The in-memory
-//	         test container presets one that answers at once.
+//	pace     nil → identity's runtime timer: the operations that look an
+//	         account up by an address answer after identity.AnswerFloor
+//	         (BE-195, BE-200). The in-memory test container presets one
+//	         that answers at once.
 //
 // What identity provides to others, all set in build:
 //

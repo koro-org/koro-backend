@@ -150,7 +150,9 @@ func (s *service) resolveDomain(ctx context.Context, domain, location string) (u
 // (a burst against one inbox, from one IP or from one account all stop).
 // An address that already verifies another account gets nothing and the
 // answer is the same: only the address's holder can find out, by
-// confirming (no enumeration of verified addresses).
+// confirming (no enumeration of verified addresses). From the lookup on
+// (past the domain check), the answer waits for AnswerFloor (pace.go;
+// BE-200).
 func (s *service) StartEduVerification(ctx context.Context, a authz.Actor, raw string) error {
 	if err := authz.Can(ctx, a, authz.IdentityEduVerificationStart, ownUser(a)); err != nil {
 		return err
@@ -169,6 +171,8 @@ func (s *service) StartEduVerification(ctx context.Context, a authz.Actor, raw s
 	if err != nil {
 		return err
 	}
+	wait := s.answerFloor()
+	defer wait(ctx)
 	return s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
 		u, err := s.users().User(ctx, a.UserID)
 		if err != nil {

@@ -68,7 +68,9 @@ var errRegistrationRace = errors.New("identity: address taken concurrently")
 // returns nil whether the address is new or taken: the response and its
 // cost are the same (one argon2id hash in both paths; ASVS 6.3.8). A taken
 // address gets a security notice (or, while still unverified, a fresh
-// verification e-mail) instead of a second account.
+// verification e-mail) instead of a second account. From the lookup on,
+// the answer waits for AnswerFloor (pace.go; BE-200); the hash comes
+// before it, so the floor covers the writes alone.
 func (s *service) Register(ctx context.Context, a authz.Actor, in Registration) error {
 	if err := authz.Can(ctx, a, authz.IdentityAccountRegister, publicUser); err != nil {
 		return err
@@ -122,11 +124,15 @@ func (s *service) Register(ctx context.Context, a authz.Actor, in Registration) 
 	if s.d.Hasher == nil {
 		return ErrUnavailable
 	}
-	// Hash before looking the address up: both paths pay for one argon2id.
+	// Hash before looking the address up: both paths pay for one argon2id,
+	// before the answer floor starts (its time, queue for the hasher
+	// included, does not eat into the floor).
 	hash, err := s.d.Hasher.Hash(ctx, in.Password)
 	if err != nil {
 		return err
 	}
+	wait := s.answerFloor()
+	defer wait(ctx)
 
 	var created *User
 	err = s.d.Tx.WithTx(ctx, func(ctx context.Context) error {

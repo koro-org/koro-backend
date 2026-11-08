@@ -96,6 +96,13 @@ func (a *auditRec) of(action string) []audit.Event {
 	return out
 }
 
+// count returns how many events were accepted.
+func (a *auditRec) count() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.events)
+}
+
 // fakeRecorder records consents (and the transaction they ran in).
 type fakeRecorder struct {
 	mu    sync.Mutex
@@ -312,9 +319,9 @@ func (s *spyStore) InsertUser(ctx context.Context, u identity.User) error {
 	return s.MemStore.InsertUser(ctx, u)
 }
 
-// noPace answers at once: the answer floor of the password reset operations
-// is measured with the production timer in a synctest bubble
-// (reset_floor_test.go), every other test skips it.
+// noPace answers at once: the answer floor (identity.AnswerFloor) is
+// measured with the production timer in a synctest bubble
+// (answer_floor_test.go), every other test skips it.
 type noPace struct{}
 
 func (noPace) Start(time.Duration) func(context.Context) { return func(context.Context) {} }

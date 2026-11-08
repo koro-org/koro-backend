@@ -30,7 +30,7 @@ func Register(api huma.API, svc Service) {
 			"enumeration); a verification e-mail follows. birth_date is required for students (age gate). The privacy " +
 			"notice shown on the page is recorded as shown, never as consent; terms_notice_version_id is the current terms of " +
 			"use the user accepted with the mandatory box (422 consent.terms_not_current otherwise); consents are optional, one " +
-			"per purpose.",
+			"per purpose. Past the request checks and the rate limit, every answer takes at least 0.5 s (BE-200).",
 	}, op.Meta{Action: string(authz.IdentityAccountRegister), Surface: op.SurfacePublic, RateLimit: op.RateAuthRegister,
 		Idempotency: op.IdempotencyOptional}, h.register)
 
@@ -68,7 +68,9 @@ func Register(api huma.API, svc Service) {
 
 	op.Register(api, "identity", huma.Operation{
 		OperationID: "resendEmailVerification", Method: http.MethodPost, Path: "/auth/email-verifications/resend", DefaultStatus: http.StatusAccepted,
-		Summary: "Send the verification e-mail again", Description: "Always 202 (no account enumeration).",
+		Summary: "Send the verification e-mail again",
+		Description: "Always 202 (no account enumeration). Past the address check and the rate limits, every answer " +
+			"takes at least 0.5 s (BE-200).",
 	}, op.Meta{Action: string(authz.IdentityEmailResendVerification), Surface: op.SurfacePublic, RateLimit: op.RateAuthEmail,
 		Idempotency: op.IdempotencyOptional}, h.resend)
 

@@ -66,6 +66,11 @@ type requestStore interface {
 	// ListByStudent returns a page of the requests addressed to the
 	// student, newest first.
 	ListByStudent(ctx context.Context, studentID uuid.UUID, q ListQuery) ([]ContactRequest, error)
+	// OpportunityPostIDsOf returns up to limit distinct opportunity calls
+	// named by the requests addressed to the student created at or after
+	// since, whatever their status, latest request first (then the call's
+	// ID, descending). BE-198: the calls the recommendations leave out.
+	OpportunityPostIDsOf(ctx context.Context, studentID uuid.UUID, since time.Time, limit int) ([]uuid.UUID, error)
 	// PendingOfCompany row-locks the pending requests of the company to
 	// the student (a block declines them).
 	PendingOfCompany(ctx context.Context, orgID, studentID uuid.UUID) ([]ContactRequest, error)

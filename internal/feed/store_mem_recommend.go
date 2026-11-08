@@ -19,7 +19,7 @@ func (s *MemStore) RecommendableOpportunities(_ context.Context, f OpportunityFi
 	for _, p := range s.posts {
 		if p.Status != StatusPublished || p.Kind != KindOpportunityCall || p.PublishedAt.Before(f.Since) ||
 			!s.visible(f.Reader, p) || has(s.mutes, u, p.OrgID) || has(s.hides, u, p.ID) || has(s.likes, u, p.ID) ||
-			has(s.saves, u, p.ID) {
+			has(s.saves, u, p.ID) || slices.Contains(f.ExcludeIDs, p.ID) {
 			continue
 		}
 		o := decodeOpportunity(p.Opportunity)

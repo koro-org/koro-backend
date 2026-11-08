@@ -58,6 +58,11 @@ const PopularThreshold = 10
 // RecommendableOpportunities.
 const MaxRecommendableOpportunities = 50
 
+// MaxExcludedOpportunities bounds OpportunityQuery.Exclude (BE-198): the
+// calls a student was contacted about in the window are few (each request
+// spends a company's paid unit), the excess is ignored.
+const MaxExcludedOpportunities = 200
+
 // Opportunities is the opportunity call read of the rule-based
 // recommendations (BE-191; recommend, uyum denetimi #25, R-7). The caller
 // (recommend) authorises its own read first (cell O: the student's own
@@ -75,7 +80,7 @@ type Opportunities interface {
 	// most MaxRecommendableOpportunities) opportunity calls a may see in
 	// the feed, published at or after q.Since, whose deadline, if any, is
 	// today or later (Europe/Istanbul), that a has neither liked nor saved,
-	// of an active org: up to q.Limit authored by one of q.OrgIDs or open
+	// not among q.Exclude, of an active org: up to q.Limit authored by one of q.OrgIDs or open
 	// to a's own class year (eligible_years lists the year of a's profile),
 	// and up to q.Limit popular (PopularThreshold) ones; newest first.
 	// Candidates only: the caller ranks them and asks OpportunityCards for
@@ -94,6 +99,10 @@ type OpportunityQuery struct {
 	OrgIDs []uuid.UUID // calls of these orgs (the student's signals)
 	Since  time.Time   // published at or after
 	Limit  int
+	// Exclude are calls left out whatever matches them (BE-198: those a
+	// company already contacted the student about); the first
+	// MaxExcludedOpportunities count.
+	Exclude []uuid.UUID
 }
 
 // OpportunityCandidate is a recommendable opportunity call: what the rules
@@ -126,6 +135,8 @@ type OpportunityFilter struct {
 	// MinInterest: like_count or save_count at least this (0: not this
 	// way).
 	MinInterest int
+	// ExcludeIDs are left out whatever matches them (BE-198).
+	ExcludeIDs []uuid.UUID
 }
 
 // recommendStore is the opportunity read of the recommendations (BE-191).
@@ -133,9 +144,9 @@ type recommendStore interface {
 	// RecommendableOpportunities returns up to limit published opportunity
 	// calls f.Reader may see (readerConds), published at or after f.Since,
 	// without a deadline or with one on or after f.Today, of no org the
-	// reader muted, neither hidden, liked nor saved by the reader, that
-	// match one of f's matchers, newest first by (published_at, id). An
-	// anonymous reader gets none.
+	// reader muted, neither hidden, liked nor saved by the reader, not in
+	// f.ExcludeIDs, that match one of f's matchers, newest first by
+	// (published_at, id). An anonymous reader gets none.
 	RecommendableOpportunities(ctx context.Context, f OpportunityFilter, limit int) ([]Post, error)
 }
 
@@ -159,7 +170,8 @@ func (s *service) RecommendableOpportunities(ctx context.Context, a authz.Actor,
 		return nil, err
 	}
 	year := classYearOf(r.Keys)
-	f := OpportunityFilter{Reader: r, Since: q.Since, Today: civil.Today(s.d.Clock.Now())}
+	f := OpportunityFilter{Reader: r, Since: q.Since, Today: civil.Today(s.d.Clock.Now()),
+		ExcludeIDs: q.Exclude[:min(len(q.Exclude), MaxExcludedOpportunities)]}
 	var rows []Post
 	if len(q.OrgIDs) > 0 || year > 0 {
 		f.OrgIDs, f.ClassYear = q.OrgIDs, year

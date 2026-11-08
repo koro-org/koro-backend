@@ -2,6 +2,7 @@ package recommend
 
 import (
 	"context"
+	"time"
 	"uuid"
 
 	"koro/internal/authz"
@@ -50,4 +51,11 @@ type Follows interface {
 type Opportunities interface {
 	RecommendableOpportunities(ctx context.Context, a authz.Actor, q feed.OpportunityQuery) ([]feed.OpportunityCandidate, error)
 	OpportunityCards(ctx context.Context, a authz.Actor, rows []feed.OpportunityCandidate) ([]feed.PostView, error)
+}
+
+// ContactRequests is the opportunity calls a company already contacted the
+// student about (messaging.ContactedOpportunities, BE-198): left out of
+// the recommendations. Call IDs only; messaging is never imported here.
+type ContactRequests interface {
+	ContactedOpportunityPostIDs(ctx context.Context, userID uuid.UUID, since time.Time, limit int) ([]uuid.UUID, error)
 }

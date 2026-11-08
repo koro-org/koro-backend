@@ -18,12 +18,16 @@ type world struct {
 	// report files reporter's content report of a conversation message (the
 	// feed's row a message report's copy points at; BE-162b).
 	report func(t *testing.T, reporter, message uuid.UUID) uuid.UUID
+	// call is a published opportunity call of the company org posted by
+	// by (the FK of a request's opportunity_post_id; BE-198).
+	call func(t *testing.T, org, by uuid.UUID) uuid.UUID
 }
 
 func memWorld() world {
 	id := func(*testing.T) uuid.UUID { return uuid.NewV7() }
 	return world{org: id, user: id, usage: func(*testing.T, uuid.UUID) uuid.UUID { return uuid.NewV7() },
-		report: func(*testing.T, uuid.UUID, uuid.UUID) uuid.UUID { return uuid.NewV7() }}
+		report: func(*testing.T, uuid.UUID, uuid.UUID) uuid.UUID { return uuid.NewV7() },
+		call:   func(*testing.T, uuid.UUID, uuid.UUID) uuid.UUID { return uuid.NewV7() }}
 }
 
 func TestStore_Contract_Mem(t *testing.T) {
@@ -210,6 +214,65 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (messaging.Store, w
 		}
 		if n, err := s.DeleteBlocks(ctx, student); err != nil || n != 1 {
 			t.Fatalf("DeleteBlocks = %d, %v", n, err)
+		}
+	})
+
+	t.Run("the opportunity calls a student was contacted about", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		org, org2, sender, student, other := w.org(t), w.org(t), w.user(t), w.user(t), w.user(t)
+		call1, call2 := w.call(t, org, sender), w.call(t, org2, sender)
+		before := time.Now().Add(-time.Hour)
+		about := func(r messaging.ContactRequest, call uuid.UUID) messaging.ContactRequest {
+			r.Via, r.OpportunityPostID = messaging.ViaOpportunityPost, &call
+			return r
+		}
+		insert := func(r messaging.ContactRequest) messaging.ContactRequest {
+			t.Helper()
+			got, err := s.Insert(ctx, r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return got
+		}
+		at := time.Now().UTC().Truncate(time.Microsecond)
+		declined := insert(about(newReq(t, w, org, sender, student), call1))
+		if _, ok, err := s.Transition(ctx, declined.ID, messaging.StatusPending, messaging.StatusDeclined, &at); !ok || err != nil {
+			t.Fatalf("decline = %v, %v", ok, err)
+		}
+		plain := insert(newReq(t, w, org, sender, student)) // via discovery: no call
+		if _, ok, err := s.Transition(ctx, plain.ID, messaging.StatusPending, messaging.StatusWithdrawn, nil); !ok || err != nil {
+			t.Fatalf("withdraw = %v, %v", ok, err)
+		}
+		insert(about(newReq(t, w, org, sender, student), call1)) // the same call again: once
+		insert(about(newReq(t, w, org2, sender, student), call2))
+		insert(about(newReq(t, w, org2, sender, other), call2))
+		list := func(user uuid.UUID, since time.Time, limit int) []uuid.UUID {
+			t.Helper()
+			got, err := s.OpportunityPostIDsOf(ctx, user, since, limit)
+			if err != nil {
+				t.Fatalf("OpportunityPostIDsOf: %v", err)
+			}
+			return got
+		}
+		if got := list(student, before, 10); len(got) != 2 || got[0] != call2 || got[1] != call1 {
+			t.Fatalf("calls = %v, want [%s %s] (latest request first, each once, any status)", got, call2, call1)
+		}
+		if got := list(student, before, 1); len(got) != 1 || got[0] != call2 {
+			t.Fatalf("limit 1 = %v", got)
+		}
+		if got := list(student, before, 0); len(got) != 0 {
+			t.Fatalf("limit 0 = %v", got)
+		}
+		if got := list(student, time.Now().Add(time.Hour), 10); len(got) != 0 {
+			t.Fatalf("since later = %v", got)
+		}
+		if got := list(other, before, 10); len(got) != 1 || got[0] != call2 {
+			t.Fatalf("another student's = %v (only their own requests)", got)
+		}
+		if got := list(sender, before, 10); len(got) != 0 {
+			t.Fatalf("the sender's = %v (requests addressed to the user only)", got)
 		}
 	})
 

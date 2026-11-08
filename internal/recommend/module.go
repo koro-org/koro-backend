@@ -6,7 +6,7 @@
 // nothing stored: the module owns no table, writes nothing and computes
 // the lists on every request from small read ports (ports.go) that the
 // composition root fills with the system reads of the modules that own the
-// rows (students, events, directory, feed). It sits in L13 next to stats
+// rows (students, events, directory, feed, messaging). It sits in L13 next to stats
 // (01 §5.1): nothing imports it.
 //
 // Rules the package enforces:
@@ -25,6 +25,11 @@
 //     likes or saves), counted where the rows live; no count leaves.
 //     Nothing is shown to or shared with an org, a company or an
 //     institution; nothing is logged or audited beyond the request line.
+//   - Already in touch (BE-198): an opportunity call a company contacted
+//     the student about (a contact request naming it, whatever its status)
+//     is not recommended, like a call the student liked or saved; the read
+//     is the student's own requests (call IDs only), and its error answers
+//     5xx like every other read.
 //   - Special-category data (03 Y2, KVKK md. 6): a sensitive club (health,
 //     religion, political opinion …) or an event of a sensitive category is
 //     never a signal and never a recommendation, whatever rule named it; an
@@ -41,7 +46,8 @@
 //     no signal is read.
 //   - Bounded: one request reads a fixed number of ports (two event store
 //     reads and two opportunity store reads of at most Candidates rows
-//     each, one follow read of at most MaxFollows IDs, two popularity
+//     each, one follow read of at most MaxFollows IDs, one contact request
+//     read of at most feed.MaxExcludedOpportunities call IDs, two popularity
 //     counts, one club card read and one call card read of at most
 //     MaxLimit cards); no cache (the lists change with every registration,
 //     like and save).
@@ -71,8 +77,11 @@ type Deps struct {
 	Clubs         Clubs
 	Follows       Follows
 	Opportunities Opportunities
-	Clock         clock.Clock
-	Log           *slog.Logger
+	// ContactRequests leaves out the calls the student was contacted about
+	// (BE-198).
+	ContactRequests ContactRequests
+	Clock           clock.Clock
+	Log             *slog.Logger
 }
 
 func (d Deps) validate() error {
@@ -82,7 +91,8 @@ func (d Deps) validate() error {
 		ok   bool
 	}{
 		{"Students", d.Students != nil}, {"Events", d.Events != nil}, {"Clubs", d.Clubs != nil},
-		{"Follows", d.Follows != nil}, {"Opportunities", d.Opportunities != nil}, {"Clock", d.Clock != nil},
+		{"Follows", d.Follows != nil}, {"Opportunities", d.Opportunities != nil},
+		{"ContactRequests", d.ContactRequests != nil}, {"Clock", d.Clock != nil},
 		{"Log", d.Log != nil},
 	} {
 		if !c.ok {

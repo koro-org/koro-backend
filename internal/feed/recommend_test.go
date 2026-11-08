@@ -290,3 +290,35 @@ func TestOpportunityCards_ReaderViewsOfTheCandidates(t *testing.T) {
 		t.Fatalf("no rows = %v, %v", views, err)
 	}
 }
+
+// TestRecommendableOpportunities_LeavesOutExcluded (BE-198): a call of
+// q.Exclude (one a company already contacted the student about) is no
+// candidate, whether an org asked for or popularity named it; only the
+// first MaxExcludedOpportunities IDs count.
+func TestRecommendableOpportunities_LeavesOutExcluded(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := t.Context()
+	student := persona(t, "student")
+	since := e.clk.Now()
+	asked := e.putCall(t, "club_a", feed.AuthorClub, clubCall, nil)
+	contacted := e.putCall(t, "company_a", feed.AuthorCompany, companyCall, nil)
+	popular := e.putCall(t, "company_b", feed.AuthorCompany, companyCall, func(p *feed.Post) { p.LikeCount = feed.PopularThreshold })
+	o := e.svc.(feed.Opportunities)
+	q := feed.OpportunityQuery{OrgIDs: []uuid.UUID{orgID("club_a"), orgID("company_a")}, Since: since, Limit: 10}
+	got, err := o.RecommendableOpportunities(ctx, student, q)
+	if err != nil || !slices.Equal(candidateIDs(got), []uuid.UUID{popular.ID, contacted.ID, asked.ID}) {
+		t.Fatalf("without an exclusion = %v, %v", candidateIDs(got), err)
+	}
+	q.Exclude = []uuid.UUID{contacted.ID, popular.ID}
+	got, err = o.RecommendableOpportunities(ctx, student, q)
+	if err != nil || !slices.Equal(candidateIDs(got), []uuid.UUID{asked.ID}) {
+		t.Fatalf("excluded = %v, %v; want only %s", candidateIDs(got), err, asked.ID)
+	}
+	q.Exclude = make([]uuid.UUID, feed.MaxExcludedOpportunities, feed.MaxExcludedOpportunities+1)
+	q.Exclude = append(q.Exclude, contacted.ID) // past the bound: ignored
+	got, err = o.RecommendableOpportunities(ctx, student, q)
+	if err != nil || !slices.Contains(candidateIDs(got), contacted.ID) {
+		t.Fatalf("an exclusion past the bound = %v, %v; want it ignored", candidateIDs(got), err)
+	}
+}

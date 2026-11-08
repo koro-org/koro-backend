@@ -43,6 +43,16 @@ type fakes struct {
 	callQuery feed.OpportunityQuery
 	callErr   error
 	callCards []uuid.UUID
+	contacted []uuid.UUID // the calls of the student's contact requests (BE-198)
+	contactQ  contactQuery
+	contactE  error
+}
+
+// contactQuery is what ContactedOpportunityPostIDs was asked.
+type contactQuery struct {
+	user  uuid.UUID
+	since time.Time
+	limit int
 }
 
 func (f *fakes) call(name string) {
@@ -137,10 +147,16 @@ func (f *fakes) OpportunityCards(_ context.Context, _ authz.Actor, rows []feed.O
 	return out, nil
 }
 
+func (f *fakes) ContactedOpportunityPostIDs(_ context.Context, user uuid.UUID, since time.Time, limit int) ([]uuid.UUID, error) {
+	f.call("contacted")
+	f.contactQ = contactQuery{user, since, limit}
+	return f.contacted, f.contactE
+}
+
 func newService(t *testing.T, f *fakes) recommend.Service {
 	t.Helper()
 	mod, err := recommend.New(recommend.Deps{Students: f, Events: f, Clubs: f, Follows: f, Opportunities: f,
-		Clock: clock.NewFake(t0), Log: obs.Discard()})
+		ContactRequests: f, Clock: clock.NewFake(t0), Log: obs.Discard()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,6 +416,45 @@ func TestList_OpportunityRules(t *testing.T) {
 	if len(dto.Opportunities) != 5 || dto.Opportunities[0].Post.Kind != "opportunity_call" ||
 		!slices.Equal(dto.Opportunities[0].Reasons, want[0].reasons) {
 		t.Fatalf("dto = %+v", dto.Opportunities)
+	}
+}
+
+// TestList_LeavesOutContactedCalls (BE-198): the calls a company already
+// contacted the student about are read from the student's own requests
+// (the caller's user ID, the same 60-day window, bounded) and handed to
+// feed to leave out; an error of that read is returned.
+func TestList_LeavesOutContactedCalls(t *testing.T) {
+	t.Parallel()
+	a := persona(t, "student")
+	contacted := []uuid.UUID{uuid.NewV7(), uuid.NewV7()}
+	kept := candidate(uuid.NewV7(), t0.Add(-time.Hour), "", false, true)
+	f := &fakes{choice: students.RankingEnabled, contacted: contacted, calls2: []feed.OpportunityCandidate{kept}}
+	r, err := newService(t, f).List(t.Context(), a, recommend.Query{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := contactQuery{a.UserID, t0.Add(-recommend.OpportunityWindow), feed.MaxExcludedOpportunities}
+	if f.contactQ != want {
+		t.Fatalf("contact read = %+v, want %+v", f.contactQ, want)
+	}
+	if !slices.Equal(f.callQuery.Exclude, contacted) || !f.callQuery.Since.Equal(want.since) {
+		t.Fatalf("query = %+v, want Exclude %v", f.callQuery, contacted)
+	}
+	if len(r.Opportunities) != 1 || r.Opportunities[0].View.Post.ID != kept.PostID {
+		t.Fatalf("opportunities = %+v", r.Opportunities)
+	}
+
+	broken := &fakes{choice: students.RankingEnabled, contactE: errors.New("messaging down")}
+	if r, err := newService(t, broken).List(t.Context(), a, recommend.Query{}); err == nil {
+		t.Fatalf("List without the contact read = %+v, want an error", r)
+	}
+	if slices.Contains(broken.calls, "opportunities") {
+		t.Fatal("the candidates were read after the contact read failed")
+	}
+
+	off := &fakes{choice: students.RankingDisabled}
+	if _, err := newService(t, off).List(t.Context(), a, recommend.Query{}); err != nil || slices.Contains(off.calls, "contacted") {
+		t.Fatalf("recommendations off: %v, calls %v (no signal is read)", err, off.calls)
 	}
 }
 

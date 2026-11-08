@@ -225,6 +225,29 @@ func (m *MemStore) ListByStudent(_ context.Context, studentID uuid.UUID, q ListQ
 	return m.list(func(r ContactRequest) bool { return r.StudentUserID == studentID }, q), nil
 }
 
+// OpportunityPostIDsOf implements Store.
+func (m *MemStore) OpportunityPostIDsOf(_ context.Context, studentID uuid.UUID, since time.Time, limit int) ([]uuid.UUID, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	latest := map[uuid.UUID]time.Time{}
+	for _, r := range m.requests {
+		if r.StudentUserID != studentID || r.OpportunityPostID == nil || r.CreatedAt.Before(since) {
+			continue
+		}
+		if at, ok := latest[*r.OpportunityPostID]; !ok || r.CreatedAt.After(at) {
+			latest[*r.OpportunityPostID] = r.CreatedAt
+		}
+	}
+	out := slices.AppendSeq(make([]uuid.UUID, 0, len(latest)), maps.Keys(latest))
+	slices.SortFunc(out, func(a, b uuid.UUID) int {
+		if c := latest[b].Compare(latest[a]); c != 0 {
+			return c
+		}
+		return compareID(b, a)
+	})
+	return out[:min(max(limit, 0), len(out))], nil
+}
+
 // PendingOfCompany implements Store.
 func (m *MemStore) PendingOfCompany(_ context.Context, orgID, studentID uuid.UUID) ([]ContactRequest, error) {
 	m.mu.Lock()

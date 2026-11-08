@@ -88,6 +88,15 @@ func pgWorld(d *db.DB) world {
 				VALUES ($1, $2, 'message', $3, 'harassment')`, id, reporter, message)
 			return id
 		},
+		call: func(t *testing.T, org, by uuid.UUID) uuid.UUID {
+			id := uuid.NewV7()
+			pgExec(t, d, `INSERT INTO posts (id, org_id, author_org_kind, author_user_id, kind, title, body_json, opportunity,
+				audience_kind, audience_keys, audience_dim_count, commercial_flag, status, published_at)
+				VALUES ($1, $2, 'company', $3, 'opportunity_call', 'Yaz stajı', '{"type":"doc"}',
+				'{"type":"internship","apply_via":"contact_request"}', 'public', ARRAY['all'], 1, true, 'published', now())`,
+				id, org, by)
+			return id
+		},
 	}
 }
 

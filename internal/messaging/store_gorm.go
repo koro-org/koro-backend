@@ -183,6 +183,25 @@ func (s gormStore) ListByStudent(ctx context.Context, studentID uuid.UUID, q Lis
 		WHERE student_user_id = @student`+listFilter(args, q)+` ORDER BY id DESC LIMIT @limit`, args)
 }
 
+// OpportunityPostIDsOf implements Store over contact_requests_student_idx.
+//
+// cross-org: the student's own requests of every company (the calls the
+// recommendations leave out, BE-198); call IDs only.
+func (s gormStore) OpportunityPostIDsOf(ctx context.Context, studentID uuid.UUID, since time.Time, limit int) ([]uuid.UUID, error) {
+	out := []uuid.UUID{}
+	if limit <= 0 {
+		return out, nil
+	}
+	err := db.Conn(ctx, s.orm).Raw(`SELECT opportunity_post_id FROM contact_requests
+		WHERE student_user_id = @student AND opportunity_post_id IS NOT NULL AND created_at >= @since
+		GROUP BY opportunity_post_id ORDER BY max(created_at) DESC, opportunity_post_id DESC LIMIT @limit`,
+		map[string]any{"student": studentID, "since": since, "limit": limit}).Scan(&out).Error
+	if err != nil {
+		return nil, wrap("opportunity calls of student", err)
+	}
+	return out, nil
+}
+
 // PendingOfCompany implements Store.
 func (s gormStore) PendingOfCompany(ctx context.Context, orgID, studentID uuid.UUID) ([]ContactRequest, error) {
 	return s.rows(ctx, "pending requests of company", `SELECT `+requestCols+` FROM contact_requests

@@ -22,8 +22,9 @@ func TestStore_RecommendContract_Mem(t *testing.T) {
 // (BE-191): published opportunity calls the reader may see (the feed's
 // visibility), published since a time, without a deadline or with one on
 // or after today, of no org the reader muted, neither hidden, liked nor
-// saved by the reader, matching an author org, the reader's class year
-// (eligible_years) or the popularity floor (likes or saves), newest first.
+// saved by the reader, not excluded (BE-198), matching an author org, the
+// reader's class year (eligible_years) or the popularity floor (likes or
+// saves), newest first.
 func recommendContract(t *testing.T, newStore func(t *testing.T) (feed.Store, world)) {
 	t.Helper()
 	insert := func(t *testing.T, s feed.Store, p feed.Post) feed.Post {
@@ -123,6 +124,13 @@ func recommendContract(t *testing.T, newStore func(t *testing.T) (feed.Store, wo
 		}
 		if got := list(feed.OpportunityFilter{Reader: r, OrgIDs: []uuid.UUID{club}}, 1); !slices.Equal(got, []uuid.UUID{due.ID}) {
 			t.Fatalf("limit 1 = %v", got)
+		}
+		// BE-198: the excluded calls are left out whatever matcher names them.
+		if got := list(feed.OpportunityFilter{Reader: r, OrgIDs: []uuid.UUID{club}, ExcludeIDs: []uuid.UUID{due.ID, uuid.NewV7()}}, 10); !slices.Equal(got, []uuid.UUID{noDeadline.ID, followed.ID}) {
+			t.Fatalf("by org without the excluded = %v", got)
+		}
+		if got := list(feed.OpportunityFilter{Reader: r, MinInterest: feed.PopularThreshold, ExcludeIDs: []uuid.UUID{ad.ID}}, 10); !slices.Equal(got, []uuid.UUID{popularSaves.ID}) {
+			t.Fatalf("popular without the excluded = %v", got)
 		}
 		if got := list(feed.OpportunityFilter{Reader: r, ClassYear: 3}, 10); !slices.Equal(got, []uuid.UUID{forYear.ID}) {
 			t.Fatalf("class year 3 = %v", got)

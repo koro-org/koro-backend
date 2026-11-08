@@ -15,8 +15,9 @@ import (
 func (w *recommendWiring) useMemStore() {}
 
 // TestWire_RecommendReadsItsModulesAndRoutes (BE-174): recommend builds
-// over the system reads of students, events, directory and feed (each
-// asserted on its service; the opportunity read of feed: BE-191), answers
+// over the system reads of students, events, directory, feed and messaging
+// (each asserted on its service; the opportunity read of feed: BE-191; the
+// contacted calls of messaging: BE-198), answers
 // a verified student over the in-memory stores (on by default for an
 // adult, off for a minor) and registers its read on the self surface.
 func TestWire_RecommendReadsItsModulesAndRoutes(t *testing.T) {
@@ -57,15 +58,21 @@ func TestWire_RecommendReadsItsModulesAndRoutes(t *testing.T) {
 }
 
 // TestWire_RecommendNeedsEveryRead: a module that stops offering the read
-// recommend needs stops the build instead of answering without it.
+// recommend needs (feed's; messaging's contacted calls, BE-198) stops the
+// build instead of answering without it.
 func TestWire_RecommendNeedsEveryRead(t *testing.T) {
 	t.Parallel()
-	c := newTestContainer(t)
-	if err := c.build(); err != nil {
-		t.Fatal(err)
-	}
-	c.feed.svc = nil
-	if err := c.recommend.build(c); err == nil {
-		t.Fatal("recommend built without the feed read")
+	for name, drop := range map[string]func(c *container){
+		"feed":      func(c *container) { c.feed.svc = nil },
+		"messaging": func(c *container) { c.messaging.svc = nil },
+	} {
+		c := newTestContainer(t)
+		if err := c.build(); err != nil {
+			t.Fatal(err)
+		}
+		drop(c)
+		if err := c.recommend.build(c); err == nil {
+			t.Fatalf("recommend built without the %s read", name)
+		}
 	}
 }

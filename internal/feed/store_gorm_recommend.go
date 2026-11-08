@@ -39,6 +39,9 @@ func (s gormStore) RecommendableOpportunities(ctx context.Context, f Opportunity
 		Where("NOT EXISTS (SELECT 1 FROM post_reactions r WHERE r.user_id = ? AND r.post_id = p.id)", u).
 		Where("NOT EXISTS (SELECT 1 FROM post_saves v WHERE v.user_id = ? AND v.post_id = p.id)", u).
 		Where("("+strings.Join(match, " OR ")+")", args...)
+	if len(f.ExcludeIDs) > 0 {
+		q = q.Where("p.id NOT IN ?", f.ExcludeIDs)
+	}
 	var out []Post
 	if err := q.Order("p.published_at DESC, p.id DESC").Limit(limit).Scan(&out).Error; err != nil {
 		return nil, wrap("recommendable opportunities", err)

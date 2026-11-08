@@ -20,7 +20,11 @@ import (
 // the candidates), directory (Catalog.SensitiveOrgIDs,
 // Service.UniversityOrgs and directory.Recommendations: the club cards) and
 // feed (feed.Follows; feed.Opportunities: the opportunity calls and their
-// cards, BE-191). A module that does not offer its read stops the build.
+// cards, BE-191) and messaging (messaging.ContactedOpportunities: the calls
+// a company already contacted the student about, left out; BE-198; L10,
+// built before recommend). A module that does not offer its read stops the
+// build: without messaging's read recommend would recommend those calls
+// again, so it does not start rather than answer without it.
 type recommendWiring struct {
 	svc recommend.Service // set by build
 }
@@ -38,6 +42,10 @@ func (w *recommendWiring) build(c *container) error {
 	port("directory recommendations", c.directory.svc, func(v any) (ok bool) { d.Clubs, ok = v.(recommend.Clubs); return })
 	port("feed follows", c.feed.svc, func(v any) (ok bool) { d.Follows, ok = v.(recommend.Follows); return })
 	port("feed opportunities", c.feed.svc, func(v any) (ok bool) { d.Opportunities, ok = v.(recommend.Opportunities); return })
+	port("messaging contacted opportunities", c.messaging.svc, func(v any) (ok bool) {
+		d.ContactRequests, ok = v.(recommend.ContactRequests)
+		return
+	})
 	if len(missing) > 0 {
 		return fmt.Errorf("recommend: %v not built or without the read recommend needs", missing)
 	}

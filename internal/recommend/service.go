@@ -359,8 +359,9 @@ func (s *service) clubs(ctx context.Context, a authz.Actor, sig signals, limit i
 // opportunities picks the opportunity calls (BE-191): the candidates of
 // feed (the calls of the student's followed, member, university and
 // attended orgs, those open to the student's class year, the popular
-// ones), each with its reasons, by weight, then the newest; only the
-// chosen ones become cards.
+// ones; none a company contacted the student about, BE-198), each with
+// its reasons, by weight, then the newest; only the chosen ones become
+// cards.
 func (s *service) opportunities(ctx context.Context, a authz.Actor, sig signals, limit int) ([]OpportunityItem, error) {
 	now := s.d.Clock.Now().UTC()
 	var orgIDs []uuid.UUID
@@ -371,8 +372,14 @@ func (s *service) opportunities(ctx context.Context, a authz.Actor, sig signals,
 			}
 		}
 	}
+	since := now.Add(-OpportunityWindow)
+	// A request names a call published before it: the window bounds both.
+	contacted, err := s.d.ContactRequests.ContactedOpportunityPostIDs(ctx, a.UserID, since, feed.MaxExcludedOpportunities)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.d.Opportunities.RecommendableOpportunities(ctx, a, feed.OpportunityQuery{
-		OrgIDs: orgIDs, Since: now.Add(-OpportunityWindow), Limit: OpportunityCandidates,
+		OrgIDs: orgIDs, Since: since, Limit: OpportunityCandidates, Exclude: contacted,
 	})
 	if err != nil {
 		return nil, err

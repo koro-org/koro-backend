@@ -132,11 +132,13 @@ sunucularında (ayrı makineler) pay vardır.
 | `checks` | > %99 | Gövde doğrulamaları (kayıt `confirmed`, tarama `ok`, referans = sipariş no …) |
 | okuma (`kind:read`) | p95 < 300 ms, p99 < 1 s | Rapor hedefi |
 | yazma (`kind:write`) | p95 < 800 ms, p99 < 2 s | Rapor hedefi |
-| kimlik (`kind:auth`: kayıt, e-posta onayı, giriş) | p95 < 1,5 s | argon2id bilerek yavaştır ve `PASSWORD_HASH_CONCURRENCY` (4) ile sınırlıdır |
+| kimlik (`kind:auth`: kayıt, e-posta onayı, giriş) | p95 < 1,5 s | argon2id bilerek yavaştır ve `PASSWORD_HASH_CONCURRENCY` (4) ile sınırlıdır; kayıt ayrıca en az `identity.AnswerFloor` (500 ms, BE-200) sürer |
 | `checkin` | p95 < 500 ms | Kapıda insan bekler; yazma eşiğinden sıkı |
 | `discovery_search` | p95 < 800 ms | En ağır okuma (aday taraması + sıralama + audit) |
 | süzgeçli liste (`kind:list`) ve her süzgeç ayrı (`events_filter_*`, `clubs_filter`) | p95 < 1 s | BA §6.3 "10 000 kayıtla yanıt süresi < 1 sn" (uyum denetimi E-5); süzgeç başına eşik, yavaş bir süzgeç hızlıların arkasına saklanmasın diye |
 | `koro_signup_email_ms` | p95 < 15 s | Doğrulama e-postası: outbox → worker → SMTP (aktarıcı 1 sn'de bir) |
+
+`http_req_failed` kalırsa hangi ucun hangi durumla düştüğü `OPS-005-k6.json.gz` artifact'ındadır: `http_req_failed` noktalarında değeri 1 olanları `name` ve `status` etiketine göre sayın (BE-201'de sorun, süzgeçli `events_list` sayfasının imlecinin süzgeçsiz istenmesiydi: 422 `page.invalid_cursor`).
 
 Uç başına p50/p95/p99 tablosu, eşiği olmayan uçlar için de özette yer alır (`max>=0` boş eşikleri bunun içindir).
 `stress`'te eşiklerin kalması beklenir: amaç hangi basamakta, hangi uçta bozulduğunu görmektir.

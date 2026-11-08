@@ -27,11 +27,15 @@ function rfc3339(d) {
 const EVENT_FILTERS = ['', '', '&category=workshop', '&city=Ankara', '&q=kariyer'];
 
 function eventsList(token, ip) {
-  const res = call('GET', `/api/v1/events?limit=20${pick(EVENT_FILTERS)}`, { token, ip, name: 'events_list' });
+  const path = `/api/v1/events?limit=20${pick(EVENT_FILTERS)}`;
+  const res = call('GET', path, { token, ip, name: 'events_list' });
   check(res, { 'events list 200': (r) => r.status === 200 });
   const b = json(res);
   if (b && b.next_cursor && Math.random() < 0.2) {
-    call('GET', `/api/v1/events?limit=20&cursor=${encodeURIComponent(b.next_cursor)}`, { token, ip, name: 'events_list' });
+    // a cursor carries the fingerprint of its page's filters: the next page
+    // repeats them, or the API refuses it (422 page.invalid_cursor; BE-201).
+    const next = call('GET', `${path}&cursor=${encodeURIComponent(b.next_cursor)}`, { token, ip, name: 'events_list' });
+    check(next, { 'events list next page 200': (r) => r.status === 200 });
   }
 }
 
@@ -57,7 +61,8 @@ export function browse(data) {
         check(res, { 'feed 200': (r) => r.status === 200 });
         const b = json(res);
         if (b && b.next_cursor && Math.random() < 0.25) {
-          call('GET', `/api/v1/feed?limit=20&cursor=${encodeURIComponent(b.next_cursor)}`, { token, ip, name: 'feed' });
+          check(call('GET', `/api/v1/feed?limit=20&cursor=${encodeURIComponent(b.next_cursor)}`, { token, ip, name: 'feed' }),
+            { 'feed next page 200': (r) => r.status === 200 });
         }
         break;
       }

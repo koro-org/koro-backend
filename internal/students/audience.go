@@ -13,6 +13,7 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/consent"
+	"koro/internal/directory"
 	"koro/internal/files"
 	"koro/internal/identity"
 	"koro/internal/platform/civil"
@@ -73,6 +74,9 @@ type facts struct {
 	verification *identity.EduVerification // active one; nil: none
 	user         *identity.UserSummary     // nil: unknown account
 	clubs        []uuid.UUID               // active club memberships, sensitive clubs included
+	// clubCategories are the targetable categories of the student's
+	// non-sensitive clubs (BE-207; club_category_keys.go).
+	clubCategories []directory.Category
 	// events are the targetable participations of a student whose
 	// commercial consent is in force (BE-161; none otherwise).
 	events []EventParticipation
@@ -102,15 +106,20 @@ func sortKeys(keys []string) []string {
 }
 
 // audienceOf returns the stored audience of p (02 §9.1): the profile keys
-// plus the keys of its NON-sensitive clubs (03 Y2) and of its targetable
-// event participations (BE-161: consenting students only), and
-// eligibility = active verification ∧ adult ∧ profile active ∧ account
-// active.
+// plus the keys of its NON-sensitive clubs (03 Y2), of their targetable
+// categories (BE-207) and of its targetable event participations (BE-161:
+// consenting students only), and eligibility = active verification ∧
+// adult ∧ profile active ∧ account active.
 func audienceOf(p Profile, f facts, sensitive map[uuid.UUID]bool) ([]string, bool) {
 	keys := profileKeys(p)
 	for _, c := range f.clubs {
 		if !sensitive[c] {
 			keys = append(keys, ClubKey(c))
+		}
+	}
+	for _, c := range f.clubCategories {
+		if c.Targetable() {
+			keys = append(keys, ClubCategoryKey(c))
 		}
 	}
 	keys = append(keys, eventKeys(f.events)...)
@@ -146,7 +155,8 @@ func equalID(a, b *uuid.UUID) bool { return a == nil && b == nil || a != nil && 
 
 // loadFacts reads the facts of ids from identity, orgs and events (the
 // targetable participations of the students whose commercial consent is in
-// force, BE-161) and the sensitive flag of their clubs from directory.
+// force, BE-161) and the sensitive flag and the targetable category
+// (BE-207) of their clubs from directory.
 func (s *service) loadFacts(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]facts, map[uuid.UUID]bool, error) {
 	out := make(map[uuid.UUID]facts, len(ids))
 	if len(ids) == 0 {
@@ -184,8 +194,17 @@ func (s *service) loadFacts(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID
 	sensitive := map[uuid.UUID]bool{}
 	if len(clubs) > 0 {
 		slices.SortFunc(clubs, compareUUID)
-		if sensitive, err = s.d.Catalog.SensitiveOrgIDs(ctx, slices.Compact(clubs)); err != nil {
+		clubs = slices.Compact(clubs)
+		if sensitive, err = s.d.Catalog.SensitiveOrgIDs(ctx, clubs); err != nil {
 			return nil, nil, fmt.Errorf("students: sensitive clubs: %w", err)
+		}
+		cats, err := s.targetableCategories(ctx, clubs)
+		if err != nil {
+			return nil, nil, err
+		}
+		for id, f := range out {
+			f.clubCategories = clubCategoriesOf(f.clubs, sensitive, cats)
+			out[id] = f
 		}
 	}
 	return out, sensitive, nil
@@ -288,14 +307,15 @@ func (s *service) AudienceProfile(ctx context.Context, userID uuid.UUID) (Audien
 // reach its members; 02 §17), computed at read time and never stored, and
 // the stored event keys (BE-161: only a consenting student's targetable
 // participations, so a post targeting an event's attendees reaches the
-// students its count counted).
+// students its count counted) and the stored club category keys (BE-207:
+// non-sensitive clubs only, for the same reason).
 func (s *service) ViewerKeys(ctx context.Context, userID uuid.UUID) (ViewerKeys, error) {
 	keys := []string{KeyAll}
 	switch p, err := s.profiles().GetProfile(ctx, userID); {
 	case err == nil:
 		keys = profileKeys(p)
 		for _, k := range p.AudienceKeys {
-			if isEventKey(k) {
+			if isEventKey(k) || isClubCategoryKey(k) {
 				keys = append(keys, k)
 			}
 		}
@@ -369,6 +389,7 @@ func (m Module) Subscribe(r *outbox.Registry) {
 	r.Subscribe(domainevent.TopicUserEduVerified, ApplyEduVerifiedTaskName, m.svc.handleEduVerified, q)
 	r.Subscribe(domainevent.TopicUserEduVerificationLapsed, ApplyEduLapsedTaskName, m.svc.handleEduLapsed, q)
 	r.Subscribe(domainevent.TopicClubSensitivityChanged, DropSensitiveClubKeyTaskName, m.svc.handleSensitivityChanged, q)
+	r.Subscribe(domainevent.TopicClubUpdated, RefreshClubCategoryTaskName, m.svc.handleClubUpdated, q) // BE-207
 	files.SubscribeRejected(r, studentsModule, DropRejectedFileTaskName, m.svc.dropRejectedFile)
 	r.Subscribe(domainevent.TopicUserEduVerificationLapsed, SuspendLapsedGrantsTaskName, m.svc.handleLapsedGrants, q)
 	r.Subscribe(domainevent.TopicUserEduVerified, SuspendGapGrantsTaskName, m.svc.handleGapGrants, q)
@@ -467,9 +488,10 @@ func (s *service) handleEduLapsed(ctx context.Context, e domainevent.Envelope) e
 
 // handleSensitivityChanged is students.drop_sensitive_club_key
 // (club.sensitivity_changed, T-80). Sensitive: the club's key leaves every
-// profile in batches (special-category data must not target, 03 Y2).
-// Cleared: the club's active members are recomputed and get the key back.
-// Idempotent.
+// profile in batches (special-category data must not target, 03 Y2), then
+// the club's active members are recomputed so that their club category key
+// (BE-207) no longer comes from it. Cleared: the club's active members are
+// recomputed and get both keys back. Idempotent.
 func (s *service) handleSensitivityChanged(ctx context.Context, e domainevent.Envelope) error {
 	p, err := domainevent.Decode[domainevent.ClubSensitivityChanged](e)
 	if err != nil {
@@ -487,18 +509,8 @@ func (s *service) handleSensitivityChanged(ctx context.Context, e domainevent.En
 			s.d.Log.LogAttrs(ctx, slog.LevelInfo, "sensitive club key removed from audiences",
 				slog.String("org_id", p.ClubOrgID.String()), slog.Int("profiles", total))
 		}
-		return nil
 	}
-	members, err := s.d.Orgs.ActiveMemberIDs(ctx, p.ClubOrgID)
-	if err != nil {
-		return fmt.Errorf("%s: %w", DropSensitiveClubKeyTaskName, err)
-	}
-	for _, u := range members {
-		if err := s.refreshUser(ctx, u, DropSensitiveClubKeyTaskName); err != nil {
-			return fmt.Errorf("%s: %w", DropSensitiveClubKeyTaskName, err)
-		}
-	}
-	return nil
+	return s.refreshMembers(ctx, p.ClubOrgID, DropSensitiveClubKeyTaskName)
 }
 
 // ---- nightly jobs (01 §7)

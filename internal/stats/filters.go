@@ -21,12 +21,12 @@ import (
 // about fewer than 10 people:
 //
 //   - club: event_id, one event of the club (its own registrations: exact).
-//   - company: university_id, department_id, class_year select the saved
+//   - company: university_id, department_id, class_year and club_category
+//     (BE-207, Q-58: a targetable category only) select the saved
 //     audiences and dispatches whose audience names them; their stored,
 //     already published estimates pass through (no new count, no daily
 //     budget). Posts, contact requests, package and sponsorship are not
-//     about an audience and stay as they are. The club category is not an
-//     audience dimension (Q-58).
+//     about an audience and stay as they are.
 //   - university: faculty_id or department_id narrows the students (each
 //     group again at least 10, rounded down to its bucket: students
 //     suppresses, stats rounds); club_id narrows the club activity to one
@@ -73,8 +73,9 @@ func (s *service) clubFigures(ctx context.Context, clubID uuid.UUID, q RangeQuer
 
 // audienceFilter turns the company panel's filters into outreach's: a
 // university also names its departments (a department implies its
-// university). A malformed ID or class year is 422; an unknown ID simply
-// matches nothing (reference data is public).
+// university). A malformed ID or class year and a club category no
+// audience may name (sensitive, other, unknown) are 422; an unknown ID
+// simply matches nothing (reference data is public).
 func (s *service) audienceFilter(ctx context.Context, q RangeQuery) (outreach.StatsFilter, error) {
 	var f outreach.StatsFilter
 	uni, err := httpx.OptID("query.university_id", q.UniversityID)
@@ -91,6 +92,13 @@ func (s *service) audienceFilter(ctx context.Context, q RangeQuery) (outreach.St
 		}
 		v := int16(y)
 		f.Year = &v
+	}
+	if q.ClubCategory != "" {
+		c := directory.Category(q.ClubCategory)
+		if !c.Targetable() {
+			return f, problem.Field("query.club_category", "must be a club category an audience may name")
+		}
+		f.ClubCategory = &c
 	}
 	if uni != nil {
 		st, err := s.d.Universities.UniversityStructure(ctx, *uni)

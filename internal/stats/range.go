@@ -18,10 +18,12 @@ type RangeQuery struct {
 	To   string
 	// EventID narrows the club panel's events to one event of the club.
 	EventID string
-	// UniversityID, DepartmentID and ClassYear narrow the company panel's
-	// audiences and dispatches to those that name them.
+	// UniversityID, DepartmentID, ClassYear and ClubCategory (BE-207)
+	// narrow the company panel's audiences and dispatches to those that
+	// name them.
 	UniversityID string
 	ClassYear    string
+	ClubCategory string
 	// DepartmentID narrows the company panel's audiences (above) or the
 	// university panel's students to one department; FacultyID narrows
 	// the university panel's students to one faculty's departments.

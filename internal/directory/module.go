@@ -67,6 +67,11 @@ type Catalog interface {
 	// SensitiveOrgIDs reports which of orgIDs are sensitive clubs (only
 	// those keys are present, with true).
 	SensitiveOrgIDs(ctx context.Context, orgIDs []uuid.UUID) (map[uuid.UUID]bool, error)
+	// TargetableClubCategories returns the category of each club among
+	// orgIDs that an audience may reach through its category (BE-207): a
+	// known club that is not sensitive and whose category is Targetable.
+	// Every other club, an unknown ID included, has no key (fail closed).
+	TargetableClubCategories(ctx context.Context, orgIDs []uuid.UUID) (map[uuid.UUID]Category, error)
 	// GetUniversity returns a university (any is_active) or ErrNotFound.
 	GetUniversity(ctx context.Context, id uuid.UUID) (University, error)
 	// UniversityNames names the universities (any is_active) among ids, each

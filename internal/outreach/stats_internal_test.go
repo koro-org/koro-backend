@@ -4,6 +4,8 @@ import (
 	"slices"
 	"testing"
 	"uuid"
+
+	"koro/internal/directory"
 )
 
 // TestStatsFilter_KeyGroups (BE-190): a university reaches the audiences
@@ -24,5 +26,23 @@ func TestStatsFilter_KeyGroups(t *testing.T) {
 	keys := Definition{Dept: []uuid.UUID{d2}, Year: []int16{2, 3}}.Keys()
 	if !holdsGroups(keys, [][]string{want[0], want[2]}) || holdsGroups(keys, want) || !holdsGroups(keys, nil) {
 		t.Fatal("holdsGroups must need a key of every group")
+	}
+}
+
+// TestStatsFilter_ClubCategoryKeyGroup (BE-207): a club category is one
+// more group, applied with the others; a segment naming another category
+// is left out.
+func TestStatsFilter_ClubCategoryKeyGroup(t *testing.T) {
+	t.Parallel()
+	tech, year := directory.CategoryTechnology, int16(3)
+	got := StatsFilter{Year: &year, ClubCategory: &tech}.keyGroups()
+	want := [][]string{{"year:3"}, {"club_category:technology"}}
+	if !slices.EqualFunc(got, want, slices.Equal[[]string]) {
+		t.Fatalf("groups = %v, want %v", got, want)
+	}
+	named := Definition{Year: []int16{3}, ClubCategory: []directory.Category{directory.CategoryArts, tech}}.Keys()
+	other := Definition{Year: []int16{3}, ClubCategory: []directory.Category{directory.CategoryArts}}.Keys()
+	if !holdsGroups(named, got) || holdsGroups(other, got) {
+		t.Fatal("the club category group must select the audiences that name it")
 	}
 }

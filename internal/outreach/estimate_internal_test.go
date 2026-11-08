@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"uuid"
+
+	"koro/internal/directory"
 )
 
 // offsetBy is a Noise that answers off within the range.
@@ -106,5 +108,11 @@ func TestFamilies(t *testing.T) {
 	at := families(Definition{Event: []uuid.UUID{ev}, EventAttended: true, Year: []int16{4}})
 	if len(r) != 2 || r[1] != at[1] || r[0] == at[0] {
 		t.Fatalf("event differs: families %v and %v, want the event family shared only", r, at)
+	}
+	// Club categories (BE-207) are a family of their own.
+	c1 := families(Definition{ClubCategory: []directory.Category{directory.CategoryArts}, Year: []int16{4}})
+	c2 := families(Definition{ClubCategory: []directory.Category{directory.CategoryArts, directory.CategorySports}, Year: []int16{4}})
+	if len(c1) != 2 || !strings.HasPrefix(c1[1], "club_category:") || c1[1] != c2[1] || c1[0] == c2[0] {
+		t.Fatalf("club category differs: families %v and %v, want the club_category family shared only", c1, c2)
 	}
 }

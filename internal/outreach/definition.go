@@ -9,6 +9,7 @@ import (
 	"strings"
 	"uuid"
 
+	"koro/internal/directory"
 	"koro/internal/platform/problem"
 )
 
@@ -16,25 +17,31 @@ import (
 // the dispatch match. 'all' is never produced here: a segment always
 // narrows (02 §13.1: an empty definition is refused). An event is one
 // dimension: its registrants (event:) or, with EventAttended, its
-// attendees (attended:) (BE-161).
+// attendees (attended:) (BE-161). A club category is the members of the
+// category's non-sensitive clubs (club_category:, BE-207).
 const (
-	keyUni      = "uni:"
-	keyDept     = "dept:"
-	keyYear     = "year:"
-	keyClub     = "club:"
-	keyEvent    = "event:"
-	keyAttended = "attended:"
+	keyUni          = "uni:"
+	keyDept         = "dept:"
+	keyYear         = "year:"
+	keyClub         = "club:"
+	keyClubCategory = "club_category:"
+	keyEvent        = "event:"
+	keyAttended     = "attended:"
 )
 
 // Limits of a definition. Each dimension holds at most maxPerDimension
 // values (a company may OR many universities or departments), the event
 // dimension at most MaxEvents (BE-203: events are small groups, so few of
-// them are OR-ed at once); the students module accepts up to 500 keys, a
-// definition produces at most 218 (four dimensions at once).
+// them are OR-ed at once), the club category dimension at most the
+// targetable categories (BE-207); the students module accepts up to 500
+// keys, a definition produces at most 310 (four dimensions at once: three
+// of 100 values and the events).
 // maxDimensions is the audience_dim_count CHECK of segments, posts and
-// outreach_dispatches (1-4): with the event dimension (BE-161) five are
-// possible, but a department already implies its university, so a fifth
-// never narrows what four can say.
+// outreach_dispatches (1-4): with the event (BE-161) and the club category
+// (BE-207) dimensions six exist, but a department already implies its
+// university, and four at once is the most a targeting intersects (each
+// more only narrows towards the small groups k and the value floor
+// refuse).
 const (
 	maxPerDimension = 100
 	maxDimensions   = 4
@@ -49,10 +56,18 @@ const MaxEvents = 10
 // Definition is a targeting (02 §13.1 segments.definition): OR inside a
 // dimension, AND across the dimensions present. The dimensions are the
 // university (universities.id), the department (departments.id), the class
-// year (1–8), the club (the club's org ID) and the event (BE-161, Q-39:
-// events.id). A student's profile carries at most one key per dimension
-// except clubs and events, so a definition matches a student when every
+// year (1–8), the club (the club's org ID), the club category (BE-207,
+// Q-58: clubs.category) and the event (BE-161, Q-39: events.id). A
+// student's profile carries at most one key per dimension except clubs,
+// club categories and events, so a definition matches a student when every
 // present dimension has one of the student's keys.
+//
+// The club category dimension reaches the active members of the clubs of
+// the categories. Only targetable categories may be named
+// (directory.Category.Targetable: neither religious, political, identity
+// nor other), and a sensitive club's members are never reached through
+// it, whatever its category: students derives the keys from non-sensitive
+// clubs only.
 //
 // The event dimension reaches the students who registered for one of the
 // events (a confirmed, checked-in or no-show registration) or, with
@@ -65,12 +80,13 @@ const MaxEvents = 10
 // Talent values (points, bands, scores) are no dimension and never will be
 // (01 §0-7): nothing in a definition reads them.
 type Definition struct {
-	Uni           []uuid.UUID `json:"uni,omitempty"`
-	Dept          []uuid.UUID `json:"dept,omitempty"`
-	Year          []int16     `json:"year,omitempty"`
-	Club          []uuid.UUID `json:"club,omitempty"`
-	Event         []uuid.UUID `json:"event,omitempty"`
-	EventAttended bool        `json:"event_attended,omitempty"`
+	Uni           []uuid.UUID          `json:"uni,omitempty"`
+	Dept          []uuid.UUID          `json:"dept,omitempty"`
+	Year          []int16              `json:"year,omitempty"`
+	Club          []uuid.UUID          `json:"club,omitempty"`
+	ClubCategory  []directory.Category `json:"club_category,omitempty"`
+	Event         []uuid.UUID          `json:"event,omitempty"`
+	EventAttended bool                 `json:"event_attended,omitempty"`
 }
 
 // normalize validates d and returns it with every dimension sorted and
@@ -111,6 +127,9 @@ func (d Definition) normalize(loc string) (Definition, error) {
 	if n.Club, err = ids("club", d.Club); err != nil {
 		return Definition{}, err
 	}
+	if n.ClubCategory, err = clubCategories(at("club_category"), d.ClubCategory); err != nil {
+		return Definition{}, err
+	}
 	if n.Event, err = ids("event", d.Event); err != nil {
 		return Definition{}, err
 	}
@@ -134,7 +153,7 @@ func (d Definition) normalize(loc string) (Definition, error) {
 	}
 	switch dims := n.DimCount(); {
 	case dims == 0:
-		return Definition{}, problem.Field(loc, "at least one of uni, dept, year, club, event is required")
+		return Definition{}, problem.Field(loc, "at least one of uni, dept, year, club, club_category, event is required")
 	case dims > maxDimensions:
 		return Definition{}, problem.Field(loc,
 			"at most "+strconv.Itoa(maxDimensions)+" dimensions at once (a department already implies its university)")
@@ -142,11 +161,29 @@ func (d Definition) normalize(loc string) (Definition, error) {
 	return n, nil
 }
 
+// clubCategories validates the club categories of a definition (field
+// location at): each a targetable category (an unknown value, a sensitive
+// category or other is 422 at its place). It returns them sorted, without
+// duplicates.
+func clubCategories(at string, in []directory.Category) ([]directory.Category, error) {
+	for i, c := range in {
+		if !c.Targetable() {
+			return nil, problem.Field(at+"["+strconv.Itoa(i)+"]",
+				"must be a club category that may be targeted (never religious, political, identity or other)")
+		}
+	}
+	if len(in) == 0 {
+		return nil, nil
+	}
+	return slices.Compact(slices.Sorted(slices.Values(in))), nil
+}
+
 // DimCount is the number of dimensions present (1–4 for a valid
 // definition; segments_audience_dim_count_chk).
 func (d Definition) DimCount() int16 {
 	var n int16
-	for _, present := range []bool{len(d.Uni) > 0, len(d.Dept) > 0, len(d.Year) > 0, len(d.Club) > 0, len(d.Event) > 0} {
+	for _, present := range []bool{len(d.Uni) > 0, len(d.Dept) > 0, len(d.Year) > 0, len(d.Club) > 0, len(d.ClubCategory) > 0,
+		len(d.Event) > 0} {
 		if present {
 			n++
 		}
@@ -155,10 +192,10 @@ func (d Definition) DimCount() int16 {
 }
 
 // Keys returns the audience keys of d, sorted: "uni:<id>", "dept:<id>",
-// "year:<n>", "club:<id>" (02 §9.1) and "event:<id>", or "attended:<id>"
-// with EventAttended (BE-161).
+// "year:<n>", "club:<id>" (02 §9.1), "club_category:<category>" (BE-207)
+// and "event:<id>", or "attended:<id>" with EventAttended (BE-161).
 func (d Definition) Keys() []string {
-	keys := make([]string, 0, len(d.Uni)+len(d.Dept)+len(d.Year)+len(d.Club)+len(d.Event))
+	keys := make([]string, 0, len(d.Uni)+len(d.Dept)+len(d.Year)+len(d.Club)+len(d.ClubCategory)+len(d.Event))
 	for _, id := range d.Uni {
 		keys = append(keys, keyUni+id.String())
 	}
@@ -170,6 +207,9 @@ func (d Definition) Keys() []string {
 	}
 	for _, id := range d.Club {
 		keys = append(keys, keyClub+id.String())
+	}
+	for _, c := range d.ClubCategory {
+		keys = append(keys, keyClubCategory+string(c))
 	}
 	eventKey := keyEvent
 	if d.EventAttended {
@@ -185,17 +225,18 @@ func (d Definition) Keys() []string {
 // Dimension names: the field of each dimension in a definition (and in
 // its field locations), in the order the value floor checks them.
 const (
-	dimUni   = "uni"
-	dimDept  = "dept"
-	dimYear  = "year"
-	dimClub  = "club"
-	dimEvent = "event"
+	dimUni          = "uni"
+	dimDept         = "dept"
+	dimYear         = "year"
+	dimClub         = "club"
+	dimClubCategory = "club_category"
+	dimEvent        = "event"
 )
 
-var dimensionNames = []string{dimUni, dimDept, dimYear, dimClub, dimEvent}
+var dimensionNames = []string{dimUni, dimDept, dimYear, dimClub, dimClubCategory, dimEvent}
 
-// values returns the values of dimension name as text (IDs, class years),
-// in d's order.
+// values returns the values of dimension name as text (IDs, class years,
+// club categories), in d's order.
 func (d Definition) values(name string) []string {
 	switch name {
 	case dimUni:
@@ -210,6 +251,12 @@ func (d Definition) values(name string) []string {
 		return out
 	case dimClub:
 		return ids(d.Club)
+	case dimClubCategory:
+		out := make([]string, len(d.ClubCategory))
+		for i, c := range d.ClubCategory {
+			out[i] = string(c)
+		}
+		return out
 	case dimEvent:
 		return ids(d.Event)
 	}
@@ -228,6 +275,8 @@ func (d Definition) only(name string, i int) Definition {
 		n.Year = n.Year[i : i+1]
 	case dimClub:
 		n.Club = n.Club[i : i+1]
+	case dimClubCategory:
+		n.ClubCategory = n.ClubCategory[i : i+1]
 	case dimEvent:
 		n.Event = n.Event[i : i+1]
 	}
@@ -247,6 +296,8 @@ func (d Definition) without(name string) Definition {
 		n.Year = nil
 	case dimClub:
 		n.Club = nil
+	case dimClubCategory:
+		n.ClubCategory = nil
 	case dimEvent:
 		n.Event, n.EventAttended = nil, false
 	}
@@ -256,7 +307,7 @@ func (d Definition) without(name string) Definition {
 // clone returns a deep copy of d.
 func (d Definition) clone() Definition {
 	return Definition{Uni: slices.Clone(d.Uni), Dept: slices.Clone(d.Dept), Year: slices.Clone(d.Year), Club: slices.Clone(d.Club),
-		Event: slices.Clone(d.Event), EventAttended: d.EventAttended}
+		ClubCategory: slices.Clone(d.ClubCategory), Event: slices.Clone(d.Event), EventAttended: d.EventAttended}
 }
 
 // Value implements driver.Valuer (segments.definition jsonb).

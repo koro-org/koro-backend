@@ -13,13 +13,13 @@ import (
 
 // AudienceSpec is a targeting (02 §9.1, §13.1): audience keys, OR inside a
 // dimension and AND across dimensions. The dimensions are 'all', 'uni',
-// 'dept', 'year', 'club', 'event' and 'attended' (BE-161: the
-// registrants and the attendees of targetable events). Their number is
-// derived from the keys
-// (T-132), never taken from the caller: a wrong count would size another
-// set than the one targeted.
+// 'dept', 'year', 'club', 'club_category' (BE-207: the members of
+// non-sensitive clubs of a targetable category), 'event' and 'attended'
+// (BE-161: the registrants and the attendees of targetable events). Their
+// number is derived from the keys (T-132), never taken from the caller: a
+// wrong count would size another set than the one targeted.
 type AudienceSpec struct {
-	Keys []string // 'all', 'uni:<uuid>', 'dept:<uuid>', 'year:<1-8>', 'club:<uuid>', 'event:<uuid>', 'attended:<uuid>'
+	Keys []string // 'all', 'uni:<uuid>', 'dept:<uuid>', 'year:<1-8>', 'club:<uuid>', 'club_category:<category>', 'event:<uuid>', 'attended:<uuid>'
 }
 
 // Audience is the segment contract of outreach (01 §4.9): sizes with
@@ -65,11 +65,14 @@ func dimensionOf(k string) (string, bool) {
 	case keyYear:
 		y, err := strconv.Atoi(val)
 		return dim, err == nil && y >= 1 && y <= 8 && strconv.Itoa(y) == val
+	case keyClubCategory: // a sensitive or unknown category never targets (BE-207)
+		return dim, validClubCategoryKey(val)
 	}
 	return "", false
 }
 
-// compile validates spec, derives its dimensions and removes the keys of
+// compile validates spec (a club category key must name a targetable
+// category, BE-207), derives its dimensions and removes the keys of
 // sensitive clubs (03 Y2: special-category data never targets; the stored
 // keys hold none either, this guards a stale key and a sloppy caller) and
 // of events that are not targetable now (BE-161: members-only, sensitive,
@@ -111,7 +114,7 @@ func (s *service) compile(ctx context.Context, spec AudienceSpec) (segment, erro
 	if err != nil {
 		return segment{}, err
 	}
-	var n int16 // at most 6: uni, dept, year, club, event, attended ('all' alone is 1)
+	var n int16 // at most 7: uni, dept, year, club, club_category, event, attended ('all' alone is 1)
 	for range dims {
 		n++
 	}

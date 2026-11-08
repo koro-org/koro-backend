@@ -28,6 +28,24 @@ func (s *service) SensitiveOrgIDs(ctx context.Context, orgIDs []uuid.UUID) (map[
 	return out, nil
 }
 
+// TargetableClubCategories implements Catalog: one store read.
+func (s *service) TargetableClubCategories(ctx context.Context, orgIDs []uuid.UUID) (map[uuid.UUID]Category, error) {
+	out := map[uuid.UUID]Category{}
+	if len(orgIDs) == 0 {
+		return out, nil
+	}
+	clubs, err := s.d.Store.GetClubs(ctx, orgIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range clubs {
+		if !c.IsSensitive && c.Category.Targetable() {
+			out[c.OrgID] = c.Category
+		}
+	}
+	return out, nil
+}
+
 // GetUniversity implements Catalog.
 func (s *service) GetUniversity(ctx context.Context, id uuid.UUID) (University, error) {
 	return s.d.Store.GetUniversity(ctx, id)

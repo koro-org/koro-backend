@@ -92,6 +92,38 @@ func TestCompany_AudienceFilters(t *testing.T) {
 	wantStatus(t, err, http.StatusNotFound)
 }
 
+// TestCompany_ClubCategoryFilter (BE-207, Q-58): club_category reaches
+// outreach as a key filter next to the others; only a category an audience
+// may name is accepted: a sensitive category, other or an unknown value is
+// 422 after the authorisation and outreach is not asked.
+func TestCompany_ClubCategoryFilter(t *testing.T) {
+	t.Parallel()
+	f, svc := world(t)
+	ctx, company, cma := t.Context(), authztest.ID("company_a"), persona(t, "company_admin")
+	if _, err := svc.Company(ctx, cma, company, stats.RangeQuery{ClubCategory: "technology", ClassYear: "3"}); err != nil {
+		t.Fatal(err)
+	}
+	if a := f.audienceAsk; a == nil || a.ClubCategory == nil || *a.ClubCategory != directory.CategoryTechnology || *a.Year != 3 {
+		t.Fatalf("filter asked = %+v", a)
+	}
+	for _, c := range directory.TargetableCategories() {
+		if _, err := svc.Company(ctx, cma, company, stats.RangeQuery{ClubCategory: string(c)}); err != nil ||
+			*f.audienceAsk.ClubCategory != c {
+			t.Fatalf("%s: asked %+v, %v", c, f.audienceAsk, err)
+		}
+	}
+	for _, bad := range []string{"religious", "political", "identity", "other", "astrology", "Technology"} {
+		f.audienceAsk = nil
+		_, err := svc.Company(ctx, cma, company, stats.RangeQuery{ClubCategory: bad})
+		wantStatus(t, err, http.StatusUnprocessableEntity)
+		if f.audienceAsk != nil {
+			t.Fatalf("%s: outreach asked %+v", bad, f.audienceAsk)
+		}
+	}
+	_, err := svc.Company(ctx, persona(t, "other_company_member"), company, stats.RangeQuery{ClubCategory: "religious"})
+	wantStatus(t, err, http.StatusNotFound)
+}
+
 // TestUniversity_FacultyDepartmentAndClubFilters (BE-190): the faculty map
 // reaches students for the breakdown; a faculty filter asks its
 // departments, a department filter the one department; a faculty without

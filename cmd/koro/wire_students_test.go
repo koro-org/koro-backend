@@ -72,6 +72,7 @@ func TestWire_StudentsProvidesProviderHooksAndTasks(t *testing.T) {
 		{domainevent.TopicUserEduVerified, students.ApplyEduVerifiedTaskName},
 		{domainevent.TopicUserEduVerificationLapsed, students.ApplyEduLapsedTaskName},
 		{domainevent.TopicClubSensitivityChanged, students.DropSensitiveClubKeyTaskName},
+		{domainevent.TopicClubUpdated, students.RefreshClubCategoryTaskName}, // BE-207
 		{domainevent.TopicFileRejected, students.DropRejectedFileTaskName},
 		{domainevent.TopicUserEduVerificationLapsed, students.SuspendLapsedGrantsTaskName},
 		{domainevent.TopicUserEduVerified, students.SuspendGapGrantsTaskName},

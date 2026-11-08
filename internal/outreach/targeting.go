@@ -54,14 +54,16 @@ func (s *service) checkScope(ctx context.Context, sc Scope, orgID uuid.UUID, def
 	case ScopeClub:
 		// club:<own club> and nothing else: the club's members, sensitive
 		// club or not (its admin already sees them).
-		if len(def.Uni)+len(def.Dept)+len(def.Year)+len(def.Event) > 0 || len(def.Club) != 1 || def.Club[0] != orgID {
+		if len(def.Uni)+len(def.Dept)+len(def.Year)+len(def.ClubCategory)+len(def.Event) > 0 || len(def.Club) != 1 ||
+			def.Club[0] != orgID {
 			return ErrTargetOutOfScope
 		}
 		return nil
 	case ScopeUniversity:
 		// uni:<own university>, narrowed by department or year; never a
-		// club or an event.
-		if len(def.Club)+len(def.Event) > 0 || len(def.Uni) != 1 {
+		// club, a club category (BE-207: a company's dimension, Q-58) or
+		// an event.
+		if len(def.Club)+len(def.ClubCategory)+len(def.Event) > 0 || len(def.Uni) != 1 {
 			return ErrTargetOutOfScope
 		}
 		u, err := s.d.Catalog.GetUniversity(ctx, def.Uni[0])
@@ -75,6 +77,8 @@ func (s *service) checkScope(ctx context.Context, sc Scope, orgID uuid.UUID, def
 		}
 		return nil
 	case ScopeCompany, ScopePlatform:
+		// A club category is checked by normalize (a targetable category
+		// only); students never counts a sensitive club through it.
 		if err := s.checkClubs(ctx, def.Club); err != nil {
 			return err
 		}

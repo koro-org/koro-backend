@@ -224,12 +224,13 @@ func (s *service) ArchiveSegment(ctx context.Context, a authz.Actor, orgID, id u
 func shapeOf(d Definition) map[string]any {
 	return map[string]any{
 		"dimensions": int(d.DimCount()), "uni": len(d.Uni), "dept": len(d.Dept), "year": len(d.Year), "club": len(d.Club),
-		"event": len(d.Event), "event_attended": d.EventAttended,
+		"club_category": len(d.ClubCategory), "event": len(d.Event), "event_attended": d.EventAttended,
 	}
 }
 
 // sameDefinition reports whether two normalized definitions are equal.
 func sameDefinition(a, b Definition) bool {
 	return slices.Equal(a.Uni, b.Uni) && slices.Equal(a.Dept, b.Dept) && slices.Equal(a.Year, b.Year) &&
-		slices.Equal(a.Club, b.Club) && slices.Equal(a.Event, b.Event) && a.EventAttended == b.EventAttended
+		slices.Equal(a.Club, b.Club) && slices.Equal(a.ClubCategory, b.ClubCategory) && slices.Equal(a.Event, b.Event) &&
+		a.EventAttended == b.EventAttended
 }

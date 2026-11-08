@@ -53,6 +53,10 @@ type Catalog interface {
 	SkillsExist(ctx context.Context, ids []uuid.UUID) error
 	// SensitiveOrgIDs reports which of orgIDs are sensitive clubs.
 	SensitiveOrgIDs(ctx context.Context, orgIDs []uuid.UUID) (map[uuid.UUID]bool, error)
+	// TargetableClubCategories returns the category of each club among
+	// orgIDs that may become a club_category key (BE-207): not sensitive,
+	// of a targetable category; the others have no key.
+	TargetableClubCategories(ctx context.Context, orgIDs []uuid.UUID) (map[uuid.UUID]directory.Category, error)
 	// GetClub returns the catalog data of a club org or
 	// directory.ErrNotFound (an unknown club counts as sensitive where
 	// students must decide: the member card, the admin view; T-240).

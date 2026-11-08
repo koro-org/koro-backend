@@ -53,10 +53,10 @@ func Register(api huma.API, svc Service) {
 		Description: "The company's saved audiences with their stored estimates, the reach of its posts and " +
 			"dispatches, its contact requests with their acceptance rate and its package usage (SR §8 Şirket). " +
 			"Numbers about students are estimates: null below 10, rounded down to their bucket. university_id, " +
-			"department_id and class_year narrow the audiences and dispatches to those whose audience names them (a " +
-			"department names its university); their stored estimates pass through, nothing is counted again and " +
-			"the daily count budget is not spent (BE-190). The other sections are not about an audience. Default " +
-			"range: the last 30 days. Another kind of org is not found." + rangeNote,
+			"department_id, class_year and club_category (BE-207) narrow the audiences and dispatches to those whose " +
+			"audience names them (a department names its university); their stored estimates pass through, nothing " +
+			"is counted again and the daily count budget is not spent (BE-190). The other sections are not about an " +
+			"audience. Default range: the last 30 days. Another kind of org is not found." + rangeNote,
 	}, op.Meta{Action: string(authz.StatsCompanyRead), Surface: op.SurfaceOrg, QuerySyntax: companySyntax}, h.company)
 
 	op.Register(api, "stats", huma.Operation{
@@ -143,6 +143,7 @@ type companyInput struct {
 	UniversityID string `query:"university_id" doc:"Audiences and dispatches that name this university or one of its departments"`
 	DepartmentID string `query:"department_id" doc:"Audiences and dispatches that name this department"`
 	ClassYear    string `query:"class_year" doc:"Audiences and dispatches that name this class year (1-8)"`
+	ClubCategory string `query:"club_category" enum:"academic,technology,career,entrepreneurship,arts,culture,sports,social_responsibility,hobby" doc:"Audiences and dispatches that name this club category (BE-207; the categories an audience may name)"`
 }
 
 type universityInput struct {
@@ -181,7 +182,7 @@ func (h handler) company(ctx context.Context, in *companyInput) (*companyOutput,
 		return nil, err
 	}
 	q := in.query()
-	q.UniversityID, q.DepartmentID, q.ClassYear = in.UniversityID, in.DepartmentID, in.ClassYear
+	q.UniversityID, q.DepartmentID, q.ClassYear, q.ClubCategory = in.UniversityID, in.DepartmentID, in.ClassYear, in.ClubCategory
 	st, err := h.svc.Company(ctx, a, httpx.ParseID(in.OrgID), q)
 	if err != nil {
 		return nil, err

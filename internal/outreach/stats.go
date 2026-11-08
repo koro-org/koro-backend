@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"time"
 	"uuid"
+
+	"koro/internal/directory"
 )
 
 // Statistics is the targeting read of an org's panel (stats, BE-163; SR
@@ -23,12 +25,13 @@ type Statistics interface {
 
 // StatsFilter narrows OrgOutreachStats to the segments and dispatches
 // whose audience names the given values (BE-190: the audience dimensions
-// of the company panel, SR §8 "üniversite, bölüm, sınıf"). A zero field
-// does not filter; the present ones all apply. It selects among the org's
-// own rows and their stored, already published figures: no student is
-// counted again (no daily budget, no new number about people). A stored
-// segment estimate already carries its offset (BE-203) and passes through
-// PublicEstimate unchanged: it is never offset twice.
+// of the company panel, SR §8 "üniversite, bölüm, sınıf"; BE-207: "kulüp
+// kategorisi"). A zero field does not filter; the present ones all apply.
+// It selects among the org's own rows and their stored, already published
+// figures: no student is counted again (no daily budget, no new number
+// about people). A stored segment estimate already carries its offset
+// (BE-203) and passes through PublicEstimate unchanged: it is never offset
+// twice.
 type StatsFilter struct {
 	// Uni keeps the audiences that name the university: its uni: key or
 	// the dept: key of one of UniDepts (the caller resolves the
@@ -37,6 +40,9 @@ type StatsFilter struct {
 	UniDepts []uuid.UUID
 	Dept     *uuid.UUID
 	Year     *int16
+	// ClubCategory keeps the audiences that name the club category (a
+	// targetable one: the caller validates it).
+	ClubCategory *directory.Category
 }
 
 // keyGroups returns, per present dimension of f, the audience keys an
@@ -55,6 +61,9 @@ func (f StatsFilter) keyGroups() [][]string {
 	}
 	if f.Year != nil {
 		out = append(out, []string{keyYear + strconv.Itoa(int(*f.Year))})
+	}
+	if f.ClubCategory != nil {
+		out = append(out, []string{keyClubCategory + string(*f.ClubCategory)})
 	}
 	return out
 }

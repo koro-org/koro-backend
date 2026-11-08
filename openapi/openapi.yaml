@@ -14950,6 +14950,22 @@ components:
             type: string
           maxItems: 100
           type: array
+        club_category:
+          description: "Club categories (BE-207; companies and the platform only): the active members of a club of one of the categories. Only these categories may be named: religious, political, identity and other never (422 validation_failed). A sensitive club's members are never counted or reached through this dimension, whatever its category."
+          items:
+            enum:
+              - academic
+              - technology
+              - career
+              - entrepreneurship
+              - arts
+              - culture
+              - sports
+              - social_responsibility
+              - hobby
+            type: string
+          maxItems: 9
+          type: array
         dept:
           description: Department IDs
           items:
@@ -39162,7 +39178,7 @@ paths:
       x-koro-rate-limit: read_default
       x-koro-surface: org
     post:
-      description: "OR inside a dimension, AND across dimensions; one to four dimensions (a department already implies its university). Scope (03 k16): a club targets only its own members (club = [the club]); a university its own university (uni = [it]), narrowed by dept or year; a company every dimension but never a sensitive club (422 outreach.sensitive_target) nor an event that is not targetable (422 outreach.event_not_targetable; BE-161: the event dimension counts only students whose commercial message consent is in force). Out of scope → 422 outreach.target_out_of_scope. When the organization needs at least 10 students (every scope but a club's own members), each value of a dimension with several values must reach 10 students together with the other dimensions (422 outreach.audience_value_too_small, the field names the value). The estimate follows countAudience; counting spends the org's audience count budget."
+      description: "OR inside a dimension, AND across dimensions; one to four dimensions (a department already implies its university). Scope (03 k16): a club targets only its own members (club = [the club]); a university its own university (uni = [it]), narrowed by dept or year; a company every dimension but never a sensitive club (422 outreach.sensitive_target) nor an event that is not targetable (422 outreach.event_not_targetable; BE-161: the event dimension counts only students whose commercial message consent is in force); the club category (BE-207) reaches the members of the category's non-sensitive clubs only. Out of scope → 422 outreach.target_out_of_scope. When the organization needs at least 10 students (every scope but a club's own members), each value of a dimension with several values must reach 10 students together with the other dimensions (422 outreach.audience_value_too_small, the field names the value). The estimate follows countAudience; counting spends the org's audience count budget."
       operationId: createSegment
       parameters:
         - description: "Optional client-generated key; a retry with the same key and body replays the first response (Idempotent-Replayed: true)"
@@ -39451,7 +39467,7 @@ paths:
       x-koro-surface: org
   /api/v1/orgs/{org_id}/stats/company:
     get:
-      description: "The company's saved audiences with their stored estimates, the reach of its posts and dispatches, its contact requests with their acceptance rate and its package usage (SR §8 Şirket). Numbers about students are estimates: null below 10, rounded down to their bucket. university_id, department_id and class_year narrow the audiences and dispatches to those whose audience names them (a department names its university); their stored estimates pass through, nothing is counted again and the daily count budget is not spent (BE-190). The other sections are not about an audience. Default range: the last 30 days. Another kind of org is not found. The range is whole days in Europe/Istanbul (from and to inclusive, at most 366 days)."
+      description: "The company's saved audiences with their stored estimates, the reach of its posts and dispatches, its contact requests with their acceptance rate and its package usage (SR §8 Şirket). Numbers about students are estimates: null below 10, rounded down to their bucket. university_id, department_id, class_year and club_category (BE-207) narrow the audiences and dispatches to those whose audience names them (a department names its university); their stored estimates pass through, nothing is counted again and the daily count budget is not spent (BE-190). The other sections are not about an audience. Default range: the last 30 days. Another kind of org is not found. The range is whole days in Europe/Istanbul (from and to inclusive, at most 366 days)."
       operationId: getCompanyStats
       parameters:
         - description: Org ID
@@ -39501,6 +39517,23 @@ paths:
           schema:
             description: Audiences and dispatches that name this class year (1-8)
             pattern: ^[1-8]$
+            type: string
+        - description: Audiences and dispatches that name this club category (BE-207; the categories an audience may name)
+          explode: false
+          in: query
+          name: club_category
+          schema:
+            description: Audiences and dispatches that name this club category (BE-207; the categories an audience may name)
+            enum:
+              - academic
+              - technology
+              - career
+              - entrepreneurship
+              - arts
+              - culture
+              - sports
+              - social_responsibility
+              - hobby
             type: string
       responses:
         "200":

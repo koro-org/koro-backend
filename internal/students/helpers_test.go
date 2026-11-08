@@ -106,6 +106,9 @@ type catalog struct {
 	skills    map[uuid.UUID]bool
 	sensitive map[uuid.UUID]bool
 	clubs     map[uuid.UUID]bool // known clubs (catalog rows)
+	// categories of the clubs (BE-207; none by default, so the club
+	// category keys appear only where a test sets them).
+	categories map[uuid.UUID]directory.Category
 }
 
 func (c *catalog) GetClub(_ context.Context, orgID uuid.UUID) (directory.Club, error) {
@@ -158,6 +161,26 @@ func (c *catalog) SensitiveOrgIDs(_ context.Context, ids []uuid.UUID) (map[uuid.
 		}
 	}
 	return out, nil
+}
+
+// TargetableClubCategories applies directory's rule: a club that is not
+// sensitive, of a targetable category.
+func (c *catalog) TargetableClubCategories(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]directory.Category, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := map[uuid.UUID]directory.Category{}
+	for _, id := range ids {
+		if cat, ok := c.categories[id]; ok && !c.sensitive[id] && cat.Targetable() {
+			out[id] = cat
+		}
+	}
+	return out, nil
+}
+
+func (c *catalog) setCategory(id uuid.UUID, cat directory.Category) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.categories[id] = cat
 }
 
 func (c *catalog) setSensitive(id uuid.UUID, v bool) {
@@ -540,9 +563,10 @@ func newEnv(t *testing.T, opts ...func(*students.Deps)) *env {
 			e.deptA2: {ID: e.deptA2, UniversityID: e.uniA, Name: "Kapanan Bölüm", DegreeLevel: directory.DegreeBachelor},
 			e.deptB:  {ID: e.deptB, UniversityID: e.uniB, Name: "Fizik", DegreeLevel: directory.DegreeMaster, IsActive: true},
 		},
-		skills:    map[uuid.UUID]bool{e.skill1: true, e.skill2: true},
-		sensitive: map[uuid.UUID]bool{e.clubSens: true},
-		clubs:     map[uuid.UUID]bool{e.clubPlain: true, e.clubSens: true},
+		skills:     map[uuid.UUID]bool{e.skill1: true, e.skill2: true},
+		sensitive:  map[uuid.UUID]bool{e.clubSens: true},
+		clubs:      map[uuid.UUID]bool{e.clubPlain: true, e.clubSens: true},
+		categories: map[uuid.UUID]directory.Category{},
 	}
 	e.orgNames.name(e.clubPlain, "Satranç Kulübü")
 	e.orgNames.name(e.clubSens, "İnanç Topluluğu")

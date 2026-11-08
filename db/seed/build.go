@@ -11,10 +11,12 @@ import (
 	"time"
 	"uuid"
 
+	"koro/internal/directory"
 	"koro/internal/events"
 	"koro/internal/outreach"
 	"koro/internal/platform/testutil/fake"
 	"koro/internal/platform/textx"
+	"koro/internal/students"
 )
 
 // kinds are the ID spaces of the plan, in insertion order; an ID's time
@@ -457,7 +459,8 @@ func boolInt(v bool) int {
 }
 
 // audienceKeys is the students module's rule (02 §9.1): all, uni, dept,
-// year and the NON-sensitive clubs, sorted.
+// year, the NON-sensitive clubs and their targetable categories (BE-207),
+// sorted.
 func (s *student) audienceKeys(u University) []string {
 	keys := []string{"all", "uni:" + u.ID.String(), "year:" + strconv.Itoa(s.year)}
 	if s.dept != nil {
@@ -466,6 +469,9 @@ func (s *student) audienceKeys(u University) []string {
 	for _, c := range s.clubs {
 		if !c.sensitive {
 			keys = append(keys, "club:"+c.orgID.String())
+			if cat := directory.Category(c.spec.Category); cat.Targetable() {
+				keys = append(keys, students.ClubCategoryKey(cat))
+			}
 		}
 	}
 	slices.Sort(keys)

@@ -10,6 +10,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/authz"
+	"koro/internal/directory"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/httpx/op"
 	"koro/internal/platform/idempotency"
@@ -39,7 +40,8 @@ func Register(api huma.API, svc Service) {
 			"university its own university (uni = [it]), narrowed by dept or year; a company every dimension but " +
 			"never a sensitive club (422 outreach.sensitive_target) nor an event that is not targetable (422 " +
 			"outreach.event_not_targetable; BE-161: the event dimension counts only students whose commercial " +
-			"message consent is in force). Out of scope → 422 outreach.target_out_of_scope. When the organization " +
+			"message consent is in force); the club category (BE-207) reaches the members of the category's " +
+			"non-sensitive clubs only. Out of scope → 422 outreach.target_out_of_scope. When the organization " +
 			"needs at least 10 students (every scope but a club's own members), each value of a dimension with " +
 			"several values must reach 10 students together with the other dimensions (422 " +
 			"outreach.audience_value_too_small, the field names the value). The estimate follows countAudience; " +
@@ -112,6 +114,7 @@ type SegmentDefinitionDTO struct {
 	Dept          []string `json:"dept,omitempty" maxItems:"100" doc:"Department IDs"`
 	Year          []int    `json:"year,omitempty" maxItems:"8" doc:"Class years (1-8)"`
 	Club          []string `json:"club,omitempty" maxItems:"100" doc:"Club org IDs (never a sensitive club, except a club's own members)"`
+	ClubCategory  []string `json:"club_category,omitempty" maxItems:"9" enum:"academic,technology,career,entrepreneurship,arts,culture,sports,social_responsibility,hobby" doc:"Club categories (BE-207; companies and the platform only): the active members of a club of one of the categories. Only these categories may be named: religious, political, identity and other never (422 validation_failed). A sensitive club's members are never counted or reached through this dimension, whatever its category."`
 	Event         []string `json:"event,omitempty" maxItems:"10" doc:"Event IDs (BE-161; companies and the platform only; at most 10, BE-203): the students who registered for one of the events (a confirmed, checked-in or no-show registration). Only events whose targetable flag is true (listEvents, getEvent: a published or completed public event, neither of a sensitive category nor organised by a sensitive club, that started at most 365 days ago or has yet to start); any other is 422 outreach.event_not_targetable. Only students whose commercial message consent is in force are counted or reached through this dimension."`
 	EventAttended bool     `json:"event_attended,omitempty" doc:"With event: only the students checked in at one of the events (an event without check-in has none)"`
 }
@@ -158,6 +161,9 @@ func toSegmentDefinitionDTO(d Definition) SegmentDefinitionDTO {
 		EventAttended: d.EventAttended}
 	for _, y := range d.Year {
 		out.Year = append(out.Year, int(y))
+	}
+	for _, c := range d.ClubCategory {
+		out.ClubCategory = append(out.ClubCategory, string(c))
 	}
 	return out
 }
@@ -219,6 +225,9 @@ func (in SegmentDefinitionDTO) Definition(loc string) (Definition, error) {
 		return Definition{}, err
 	}
 	d.EventAttended = in.EventAttended
+	for _, c := range in.ClubCategory { // normalize refuses a value that may not be targeted
+		d.ClubCategory = append(d.ClubCategory, directory.Category(c))
+	}
 	for i, y := range in.Year {
 		if y < minYear || y > maxYear {
 			return Definition{}, problem.Field(loc+".year["+strconv.Itoa(i)+"]", "class years are 1-8")

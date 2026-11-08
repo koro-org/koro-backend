@@ -158,6 +158,19 @@ func (c Category) Sensitive() bool {
 	return c == CategoryReligious || c == CategoryPolitical || c == CategoryIdentity
 }
 
+// Targetable reports whether c may name an audience (BE-207, Q-58: the
+// club category dimension of a company's targeting): a valid category that
+// is neither sensitive nor other. other is left out with the sensitive
+// ones: it is the catch-all of a club no listed topic fits, so the platform
+// cannot vouch that it never holds special-category data (KVKK md. 6) and
+// it says nothing a company could target.
+func (c Category) Targetable() bool { return c.Valid() && !c.Sensitive() && c != CategoryOther }
+
+// TargetableCategories lists the targetable categories in 02 order.
+func TargetableCategories() []Category {
+	return slices.DeleteFunc(slices.Clone(Categories), func(c Category) bool { return !c.Targetable() })
+}
+
 // SensitiveReason is clubs.sensitive_reason (02 §8.5): why a club's
 // membership is special-category data (KVKK md. 6).
 type SensitiveReason string

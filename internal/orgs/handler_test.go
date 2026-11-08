@@ -144,8 +144,11 @@ func TestHTTP_UpdateOrg_ETagRoundTrip(t *testing.T) {
 	}
 }
 
-// TestHTTP_UpdateOrg_NewTaxID (BE-183): the body's reauth reaches the proof of
-// a new tax identifier; without it 403, with it the company is back in review.
+// TestHTTP_UpdateOrg_NewTaxID (BE-183, BE-206): the body's reauth reaches the
+// proof of a new tax identifier; without it 403, with it the company stays
+// active and waits for a review. The admin decisions read If-Match and the
+// rejection's reauth from the request: approve 428 without it, then 200; a
+// second change rejected with the proof suspends the company.
 func TestHTTP_UpdateOrg_NewTaxID(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -167,8 +170,34 @@ func TestHTTP_UpdateOrg_NewTaxID(t *testing.T) {
 	}
 	rec = call(t, app, "company_admin", http.MethodPatch, path, `{`+tax+`, "reauth": {"password": "`+goodPassword+`"}}`,
 		map[string]string{"If-Match": etag})
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"pending_review"`) {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"active"`) ||
+		!strings.Contains(rec.Body.String(), `"tax_id_review_requested_at"`) {
 		t.Fatalf("PATCH with the proof = %d %s", rec.Code, rec.Body)
+	}
+	etag = rec.Header().Get("ETag")
+	approve := "/api/v1/admin/orgs/" + id.String() + "/tax-id-change/approve"
+	if rec := call(t, app, "platform_admin", http.MethodPost, approve, `{}`, nil); rec.Code != http.StatusPreconditionRequired {
+		t.Fatalf("approve without If-Match = %d %s", rec.Code, rec.Body)
+	}
+	rec = call(t, app, "platform_admin", http.MethodPost, approve, `{"note": "GİB eşleşti"}`, map[string]string{"If-Match": etag})
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "tax_id_review_requested_at") {
+		t.Fatalf("approve = %d %s", rec.Code, rec.Body)
+	}
+	rec = call(t, app, "company_admin", http.MethodPatch, path, `{"tax_no": "`+testVKN+`", "reauth": {"password": "`+goodPassword+`"}}`,
+		map[string]string{"If-Match": etag})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("second change = %d %s", rec.Code, rec.Body)
+	}
+	etag = rec.Header().Get("ETag")
+	reject := "/api/v1/admin/orgs/" + id.String() + "/tax-id-change/reject"
+	if rec := call(t, app, "platform_admin", http.MethodPost, reject, `{"reason": "VKN eşleşmiyor"}`,
+		map[string]string{"If-Match": etag}); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "identity.reauth_required") {
+		t.Fatalf("reject without the proof = %d %s", rec.Code, rec.Body)
+	}
+	rec = call(t, app, "platform_admin", http.MethodPost, reject,
+		`{"reason": "VKN eşleşmiyor", "reauth": {"password": "`+goodPassword+`"}}`, map[string]string{"If-Match": etag})
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"suspended"`) {
+		t.Fatalf("reject = %d %s", rec.Code, rec.Body)
 	}
 }
 

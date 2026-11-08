@@ -41,13 +41,17 @@ type SearchQuery struct {
 	After        *ListAfter
 }
 
-// AdminQuery narrows adminListOrgs (04 §2.2: kind, status, q).
+// AdminQuery narrows adminListOrgs (04 §2.2: kind, status, q;
+// tax_id_review, BE-206).
 type AdminQuery struct {
 	Kind   Kind
 	Status Status
 	Q      string
-	Limit  int
-	After  *ListAfter
+	// TaxIDReview keeps the companies whose new tax identifier waits for a
+	// decision (BE-206).
+	TaxIDReview bool
+	Limit       int
+	After       *ListAfter
 }
 
 // OrgPage is a page of orgs (views without a company profile or ETag).
@@ -323,7 +327,8 @@ func (s *service) list(ctx context.Context, f ListFilter, limit int, after *List
 }
 
 // AdminListOrgs implements Service: every org, any status (03 §5.2
-// orgs.org.list_admin: moderator, support, platform_admin).
+// orgs.org.list_admin: moderator, support, platform_admin); tax_id_review
+// keeps the companies whose new tax identifier waits (BE-206).
 func (s *service) AdminListOrgs(ctx context.Context, a authz.Actor, q AdminQuery) (OrgPage, error) {
 	if err := authz.Can(ctx, a, authz.OrgsOrgListAdmin, adminSurface); err != nil {
 		return OrgPage{}, err
@@ -332,7 +337,7 @@ func (s *service) AdminListOrgs(ctx context.Context, a authz.Actor, q AdminQuery
 	if err != nil {
 		return OrgPage{}, err
 	}
-	f := ListFilter{Q: text, Sort: SortNewest}
+	f := ListFilter{Q: text, Sort: SortNewest, TaxIDReview: q.TaxIDReview}
 	if q.Kind != "" {
 		f.Kinds = []Kind{q.Kind}
 	}

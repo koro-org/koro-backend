@@ -32,6 +32,14 @@ func (s gormStore) OrgStats(ctx context.Context, from, to time.Time) (OrgStats, 
 			st.NewInRange[Kind(r.Kind)] += r.Fresh
 		}
 	}
+	// The companies whose new tax identifier waits (Company.TaxIDReviewPending; BE-206).
+	var reviews int64
+	err = db.Conn(ctx, s.orm).Raw(`SELECT count(*) FROM companies c JOIN organizations o ON o.id = c.org_id
+	  WHERE c.tax_id_review_requested_at IS NOT NULL AND o.status <> 'closed'`).Scan(&reviews).Error
+	if err != nil {
+		return OrgStats{}, fmt.Errorf("orgs: tax id reviews: %w", err)
+	}
+	st.TaxIDReviews = int(reviews)
 	return st, nil
 }
 

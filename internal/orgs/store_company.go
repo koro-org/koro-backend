@@ -17,7 +17,7 @@ type companyStore interface {
 	// have one (adminListOrgs' review facts, BE-165; cross-org).
 	CompaniesOf(ctx context.Context, orgIDs []uuid.UUID) (map[uuid.UUID]Company, error)
 	// UpdateCompany writes the profile columns (sector, size band, e-mail
-	// domain and its verification, HQ city, tax identity) of orgID's
-	// company and returns the stored row.
+	// domain and its verification, HQ city, tax identity and its pending
+	// review, BE-206) of orgID's company and returns the stored row.
 	UpdateCompany(ctx context.Context, c Company) (Company, error)
 }

@@ -178,6 +178,10 @@ func (s gormStore) ListOrgs(ctx context.Context, f ListFilter, after *ListAfter,
 	if f.OrgIDs != nil {
 		q = q.Where("id IN ?", f.OrgIDs)
 	}
+	if f.TaxIDReview {
+		q = q.Where(`kind = 'company' AND status <> 'closed' AND EXISTS (SELECT 1 FROM companies c
+			WHERE c.org_id = organizations.id AND c.tax_id_review_requested_at IS NOT NULL)`)
+	}
 	if f.Q != "" {
 		// Full text on name + description (koro_tr), or a substring of the
 		// normalised name (trigram index organizations_trgm_idx).
@@ -209,8 +213,8 @@ func (s gormStore) ListOrgs(ctx context.Context, f ListFilter, after *ListAfter,
 // organizations row (06 H-38).
 func (s gormStore) InsertCompany(ctx context.Context, c Company) error {
 	res := db.Conn(ctx, s.orm).Exec(`INSERT INTO companies (org_id, org_kind, sector_code, size_band, email_domain,
-		domain_verified_at, hq_city, tax_id_kind, tax_no, tax_office)
-		SELECT p.org_id, p.kind, @sector, @size, @domain, @verified, @hq, @tax_kind, @tax_no, @tax_office
+		domain_verified_at, hq_city, tax_id_kind, tax_no, tax_office, tax_id_review_requested_at)
+		SELECT p.org_id, p.kind, @sector, @size, @domain, @verified, @hq, @tax_kind, @tax_no, @tax_office, @tax_review
 		FROM (SELECT id AS org_id, kind FROM organizations) p WHERE p.org_id = @org_id`, companyArgs(c))
 	if res.Error != nil {
 		return wrap("insert company", res.Error)
@@ -226,7 +230,7 @@ func companyArgs(c Company) map[string]any {
 	return map[string]any{
 		"org_id": c.OrgID, "sector": c.SectorCode, "size": c.SizeBand, "domain": c.EmailDomain,
 		"verified": db.UTCPtr(c.DomainVerifiedAt), "hq": c.HQCity, "tax_kind": c.TaxIDKind, "tax_no": c.TaxNo,
-		"tax_office": c.TaxOffice,
+		"tax_office": c.TaxOffice, "tax_review": db.UTCPtr(c.TaxIDReviewRequestedAt),
 	}
 }
 
@@ -268,7 +272,7 @@ func (s gormStore) UpdateCompany(ctx context.Context, c Company) (Company, error
 	var rows []Company
 	err := db.Conn(ctx, s.orm).Raw(`UPDATE companies SET sector_code = @sector, size_band = @size,
 		email_domain = @domain, domain_verified_at = @verified, hq_city = @hq, tax_id_kind = @tax_kind, tax_no = @tax_no,
-		tax_office = @tax_office
+		tax_office = @tax_office, tax_id_review_requested_at = @tax_review
 		WHERE org_id = @org_id RETURNING *`, companyArgs(c)).
 		Scan(&rows).Error
 	if err != nil {

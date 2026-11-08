@@ -69,7 +69,7 @@ func (s *service) Platform(ctx context.Context, a authz.Actor, q RangeQuery) (Pl
 			ReportsByStatus: keyCounts(content.ReportsByStatus), ReportsInRange: content.ReportsInRange},
 		Events: PlatformEventsDTO{Upcoming: ev.Upcoming, HeldInRange: ev.Held, CancelledInRange: ev.Cancelled,
 			Registered: ev.Registered, CheckedIn: ev.CheckedIn, AttendanceRate: rate(ev.CheckedIn, ev.Registered)},
-		Queues: PlatformQueuesDTO{OrgReviews: pendingOrgReviews(org), ClubClaims: claims,
+		Queues: PlatformQueuesDTO{OrgReviews: pendingOrgReviews(org), TaxIDReviews: org.TaxIDReviews, ClubClaims: claims,
 			ContentReports: openContentReports(content)},
 	}
 	if out.Queues.KvkkRequests, out.Queues.StudentDocuments, err = s.moduleQueues(ctx, a); err != nil {

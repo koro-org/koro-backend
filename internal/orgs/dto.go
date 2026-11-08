@@ -33,7 +33,8 @@ func (CompanyPublicDTO) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.S
 	s.Required = slices.DeleteFunc(s.Required, func(name string) bool {
 		return name == "tax_id_valid" || name == "domain_verified"
 	})
-	for _, name := range []string{"tax_id_kind", "tax_no", "tax_no_masked", "tax_office", "tax_id_valid", "domain_verified"} {
+	for _, name := range []string{"tax_id_kind", "tax_no", "tax_no_masked", "tax_office", "tax_id_valid", "domain_verified",
+		"tax_id_review_requested_at"} {
 		if p := s.Properties[name]; p != nil {
 			cp := *p
 			cp.Description = strings.TrimSpace("Only for the company's editors. " + p.Description)
@@ -53,6 +54,9 @@ type CompanyTaxDTO struct {
 	TaxOffice      string `json:"tax_office,omitempty"`
 	TaxIDValid     bool   `json:"tax_id_valid" doc:"A VKN or TCKN that passes its check digits was given"`
 	DomainVerified bool   `json:"domain_verified" doc:"email_domain is verified: the founder's or an editor's verified address is at it; never for an academic or shared mail domain"`
+	// TaxIDReviewRequestedAt (BE-206): a member's new tax identifier waits
+	// for a platform admin since then; the company stays active meanwhile.
+	TaxIDReviewRequestedAt *time.Time `json:"tax_id_review_requested_at,omitempty" doc:"A member's new tax identifier waits for a platform admin's decision since then (the company stays active); absent when nothing waits"`
 }
 
 // OrgPublicDTO is the public profile of an org (04 §2.2 getOrg). club and
@@ -150,6 +154,8 @@ type AdminCompanyReviewDTO struct {
 	TaxIDValid     bool   `json:"tax_id_valid" doc:"A VKN or TCKN that passes its check digits was given"`
 	EmailDomain    string `json:"email_domain,omitempty"`
 	DomainVerified bool   `json:"domain_verified" doc:"false: no e-mail domain, no applicant address at it, or an academic or shared mail domain (warn the reviewer)"`
+	// TaxIDReviewRequestedAt is the pending tax identifier review (BE-206).
+	TaxIDReviewRequestedAt *time.Time `json:"tax_id_review_requested_at,omitempty" doc:"A member's new tax identifier waits for a decision since then (adminApproveTaxIdChange, adminRejectTaxIdChange); absent when nothing waits"`
 }
 
 // AdminOrgList is a page of AdminOrgDTO.
@@ -176,7 +182,7 @@ func toPublicDTO(v OrgView) OrgPublicDTO {
 		d.Company = &CompanyPublicDTO{SectorCode: str(c.SectorCode), SizeBand: str(c.SizeBand), HQCity: str(c.HQCity)}
 		if v.Manage {
 			d.Company.EmailDomain, d.Company.DomainVerifiedAt = str(c.EmailDomain), utc(c.domainVerifiedAt())
-			t := toTaxDTO(*c, v.FullTaxNo)
+			t := toTaxDTO(*c, o.Status, v.FullTaxNo)
 			d.Company.CompanyTaxDTO = &t
 		}
 	}
@@ -197,7 +203,7 @@ func toOrgDTO(v OrgView) OrgDTO {
 	if c := v.Company; c != nil {
 		d.Company = &CompanyDTO{
 			SectorCode: str(c.SectorCode), SizeBand: str(c.SizeBand), EmailDomain: str(c.EmailDomain),
-			DomainVerifiedAt: utc(c.domainVerifiedAt()), HQCity: str(c.HQCity), CompanyTaxDTO: toTaxDTO(*c, v.FullTaxNo),
+			DomainVerifiedAt: utc(c.domainVerifiedAt()), HQCity: str(c.HQCity), CompanyTaxDTO: toTaxDTO(*c, o.Status, v.FullTaxNo),
 		}
 	}
 	return d
@@ -224,17 +230,27 @@ func toAdminDTO(v OrgView) AdminOrgDTO {
 	if c := v.Company; c != nil {
 		d.Company = &AdminCompanyReviewDTO{
 			TaxIDKind: kindStr(c.TaxIDKind), TaxIDValid: c.TaxIDValid(), EmailDomain: str(c.EmailDomain),
-			DomainVerified: c.DomainVerified(),
+			DomainVerified: c.DomainVerified(), TaxIDReviewRequestedAt: taxReviewAt(*c, o.Status),
 		}
 	}
 	return d
 }
 
-// toTaxDTO maps the tax identity of c: the VKN masked unless full.
-func toTaxDTO(c Company, full bool) CompanyTaxDTO {
+// taxReviewAt is the time of c's pending tax identifier review for an org of
+// status s, nil when none waits (BE-206).
+func taxReviewAt(c Company, s Status) *time.Time {
+	if !c.TaxIDReviewPending(s) {
+		return nil
+	}
+	return utc(c.TaxIDReviewRequestedAt)
+}
+
+// toTaxDTO maps the tax identity of c (of an org of status s): the VKN
+// masked unless full.
+func toTaxDTO(c Company, s Status, full bool) CompanyTaxDTO {
 	d := CompanyTaxDTO{
 		TaxIDKind: kindStr(c.TaxIDKind), TaxNo: str(c.TaxNo), TaxOffice: str(c.TaxOffice), TaxIDValid: c.TaxIDValid(),
-		DomainVerified: c.DomainVerified(),
+		DomainVerified: c.DomainVerified(), TaxIDReviewRequestedAt: taxReviewAt(c, s),
 	}
 	if d.TaxNo != "" && !full {
 		d.TaxNo, d.TaxNoMasked = taxid.Mask(d.TaxNo, taxid.MaskedDigits), true

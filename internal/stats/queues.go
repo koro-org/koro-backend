@@ -15,6 +15,7 @@ import (
 // role learns the size of the queues it works and nothing else:
 //
 //	org_reviews        orgs.org.list_admin              moderator, support, platform_admin
+//	tax_id_reviews     orgs.org.list_admin              moderator, support, platform_admin (BE-206)
 //	club_claims        directory.club_claim.list        support, platform_admin
 //	content_reports    feed.report.list                 moderator, platform_admin
 //	kvkk_requests      kvkk.dsr.list (kvkk's count)     dpo, platform_admin (k32)
@@ -29,7 +30,7 @@ func (s *service) Queues(ctx context.Context, a authz.Actor) (QueueStats, error)
 	}
 	var out QueueStats
 	var err error
-	if out.OrgReviews, err = s.staffQueue(ctx, a, authz.OrgsOrgListAdmin, s.orgReviews); err != nil {
+	if out.OrgReviews, out.TaxIDReviews, err = s.orgQueues(ctx, a); err != nil {
 		return QueueStats{}, err
 	}
 	if out.ClubClaims, err = s.staffQueue(ctx, a, authz.DirectoryClubClaimList, s.d.Universities.PendingClaims); err != nil {
@@ -84,15 +85,22 @@ func queueSize(n int, err error) (*int, error) {
 	return nil, err
 }
 
-// orgReviews counts the orgs awaiting verification. The range of the org
-// counts is empty: only the counts by status are used.
-func (s *service) orgReviews(ctx context.Context) (int, error) {
+// orgQueues are the two org queues of adminListOrgs, one read for both and
+// gated like staffQueue: the orgs awaiting verification and the companies
+// whose new tax identifier waits (BE-206). The range of the org counts is
+// empty: only the counts by status and the pending reviews are used.
+func (s *service) orgQueues(ctx context.Context, a authz.Actor) (reviews, taxIDReviews *int, err error) {
+	if err := authz.Can(ctx, a, authz.OrgsOrgListAdmin, adminSurface); err != nil {
+		reviews, err = queueSize(0, err)
+		return reviews, nil, err
+	}
 	now := s.d.Clock.Now()
 	st, err := s.d.OrgCounts.OrgStats(ctx, now, now)
 	if err != nil {
-		return 0, err
+		return nil, nil, err
 	}
-	return pendingOrgReviews(st), nil
+	r, t := pendingOrgReviews(st), st.TaxIDReviews
+	return &r, &t, nil
 }
 
 // contentReports counts the content reports open or in review. The range

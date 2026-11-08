@@ -199,6 +199,7 @@ func (s *MemStore) ListOrgs(_ context.Context, f ListFilter, after *ListAfter, l
 		case len(f.Statuses) > 0 && !slices.Contains(f.Statuses, o.Status):
 		case f.City != "" && (o.City == nil || !textx.EqualFoldTR(*o.City, f.City)):
 		case f.OrgIDs != nil && !slices.Contains(f.OrgIDs, o.ID):
+		case f.TaxIDReview && !s.companies[o.ID].TaxIDReviewPending(o.Status):
 		case f.Q != "" && !strings.Contains(memNorm(o.Name), memNorm(f.Q)) &&
 			(o.Description == nil || !strings.Contains(memNorm(*o.Description), memNorm(f.Q))):
 		default:
@@ -251,7 +252,7 @@ func (s *MemStore) InsertCompany(_ context.Context, c Company) error {
 	}
 	now := s.stamp(time.Time{})
 	c.CreatedAt, c.UpdatedAt = now, now
-	c.DomainVerifiedAt = db.UTCPtr(c.DomainVerifiedAt)
+	c.DomainVerifiedAt, c.TaxIDReviewRequestedAt = db.UTCPtr(c.DomainVerifiedAt), db.UTCPtr(c.TaxIDReviewRequestedAt)
 	s.companies[c.OrgID] = c
 	return nil
 }
@@ -324,6 +325,7 @@ func (s *MemStore) UpdateCompany(_ context.Context, c Company) (Company, error) 
 	}
 	cur.SectorCode, cur.SizeBand, cur.EmailDomain, cur.HQCity = c.SectorCode, c.SizeBand, c.EmailDomain, c.HQCity
 	cur.DomainVerifiedAt, cur.TaxIDKind, cur.TaxNo, cur.TaxOffice = db.UTCPtr(c.DomainVerifiedAt), c.TaxIDKind, c.TaxNo, c.TaxOffice
+	cur.TaxIDReviewRequestedAt = db.UTCPtr(c.TaxIDReviewRequestedAt)
 	if err := checkCompany(cur); err != nil {
 		return Company{}, err
 	}

@@ -81,15 +81,19 @@ func adminRoles(k Kind) []authz.MemberRole {
 // handleReviewRequested is orgs.notify_review_requested: one in-app notice
 // per platform admin, linking the admin list of orgs awaiting review. An
 // org decided meanwhile needs no review. Idempotent: the dedupe key holds
-// the event and the admin.
+// the event and the admin. An org past its registration may await a
+// decision on its new tax identifier instead (notifyTaxIDReview, BE-206).
 func (s *service) handleReviewRequested(ctx context.Context, e domainevent.Envelope) error {
 	p, err := domainevent.Decode[domainevent.OrgReviewRequested](e)
 	if err != nil {
 		return queue.Permanent(err)
 	}
 	o, ok, err := s.reviewedOrg(ctx, p.OrgID)
-	if err != nil || !ok || o.Status != StatusPendingReview {
+	if err != nil || !ok {
 		return err
+	}
+	if o.Status != StatusPendingReview {
+		return s.notifyTaxIDReview(ctx, o)
 	}
 	if s.d.Sender == nil || s.d.PlatformAdmins == nil {
 		return errors.New("orgs: the review notices are not wired")
@@ -105,8 +109,9 @@ func (s *service) handleReviewRequested(ctx context.Context, e domainevent.Envel
 // the org's active admins (adminRoles) in-app, linking the org's panel,
 // and by e-mail; a rejection tells the founder in-app and by e-mail, which
 // carries the reason (organizations.rejection_reason; the in-app text is
-// fixed). Idempotent: the dedupe keys hold the event, the user and the
-// channel.
+// fixed); a decision on a new tax identifier tells the company's admins
+// (notifyTaxIDDecided, BE-206). Idempotent: the dedupe keys hold the event,
+// the user and the channel.
 func (s *service) handleReviewDecided(ctx context.Context, e domainevent.Envelope) error {
 	p, err := domainevent.Decode[domainevent.OrgReviewDecided](e)
 	if err != nil {
@@ -144,6 +149,8 @@ func (s *service) handleReviewDecided(ctx context.Context, e domainevent.Envelop
 		return s.notifyEach(ctx, e, o, tmplOrgRejected, []uuid.UUID{*o.CreatedBy}, notify.Link{}, map[string]any{
 			"org_name": o.Name, "reason": reason,
 		})
+	case domainevent.OrgReviewTaxIDApproved, domainevent.OrgReviewTaxIDRejected:
+		return s.notifyTaxIDDecided(ctx, e, o, p.Outcome)
 	}
 	return queue.Permanent(fmt.Errorf("orgs: org.review_decided: unknown outcome %q", p.Outcome))
 }
@@ -197,8 +204,15 @@ func (s *service) activeAdmins(ctx context.Context, o Org) ([]uuid.UUID, error) 
 // the delivered ones from repeating).
 func (s *service) notifyEach(ctx context.Context, e domainevent.Envelope, o Org, tmpl string, to []uuid.UUID, link notify.Link,
 	mail map[string]any) error {
+	return s.notifyKeyed(ctx, tmpl+":"+e.ID.String(), o, tmpl, to, link, mail)
+}
+
+// notifyKeyed is notifyEach with the dedupe keys' prefix given (key, then
+// the user and the channel).
+func (s *service) notifyKeyed(ctx context.Context, key string, o Org, tmpl string, to []uuid.UUID, link notify.Link,
+	mail map[string]any) error {
 	org := o.ID
-	key := tmpl + ":" + e.ID.String() + ":"
+	key += ":"
 	var errs []error
 	for _, uid := range to {
 		u := uid

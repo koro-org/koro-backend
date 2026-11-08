@@ -69,8 +69,11 @@ type OrgUpdated struct {
 func (OrgUpdated) Topic() string { return TopicOrgUpdated }
 
 // OrgReviewRequested: an org that awaits the platform admin's verification
-// was registered (createCompany: pending_review; BE-144). The worker tells
-// the platform admins in-app.
+// was registered (createCompany: pending_review; BE-144), or an active
+// company's new tax identifier awaits their decision (updateOrg flags it;
+// BE-206). The worker tells the platform admins in-app of what the org
+// awaits when it runs: a pending_review org is a registration, a flagged
+// company a tax identifier review.
 type OrgReviewRequested struct {
 	OrgID   uuid.UUID `json:"org_id"`
 	OrgKind string    `json:"org_kind"`
@@ -83,12 +86,18 @@ func (OrgReviewRequested) Topic() string { return TopicOrgReviewRequested }
 const (
 	OrgReviewVerified = "verified" // adminVerifyOrg: pending_review → active
 	OrgReviewRejected = "rejected" // closeOrg of a pending_review org by platform staff
+	// OrgReviewTaxIDApproved: adminApproveTaxIdChange (BE-206).
+	OrgReviewTaxIDApproved = "tax_id_approved"
+	// OrgReviewTaxIDRejected: adminRejectTaxIdChange, the company is suspended (BE-206).
+	OrgReviewTaxIDRejected = "tax_id_rejected"
 )
 
 // OrgReviewDecided: the review of a pending_review org ended (BE-144). The
 // worker tells the org's admins of a verification (in-app + e-mail) and the
 // founder of a rejection (in-app + e-mail with the reason, which the event
-// never carries: the worker reads organizations.rejection_reason).
+// never carries: the worker reads organizations.rejection_reason). The two
+// tax identifier outcomes (BE-206) tell the company's admins: an approval
+// in-app, a rejection in-app and by e-mail (without the staff's reason).
 type OrgReviewDecided struct {
 	OrgID   uuid.UUID `json:"org_id"`
 	OrgKind string    `json:"org_kind"`

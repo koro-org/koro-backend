@@ -1,4 +1,5 @@
-# Authz matrix of the orgs module (03 §5.2, 04 §2.2; BE-017 + BE-019; BE-120 listCompanies). 25 operations × 18 personas.
+# Authz matrix of the orgs module (03 §5.2, 04 §2.2; BE-017 + BE-019; BE-120 listCompanies; BE-206 tax identifier
+# review). 27 operations × 18 personas.
 # Public profile (03 §3.6): active/suspended orgs for everyone; pending_review/closed only for
 # members and platform_admin, support, moderator (others 404). Org management surface
 # (updateOrg, closeOrg, transferOrgOwnership; 03 §7.6): members without the role → 403,
@@ -241,6 +242,18 @@ operations:
           dpo: 403
           finance_admin: 403
           talent_auditor: 403
+      - name: tax_id_review_filter
+        query: { tax_id_review: "true" }
+        note: BE-206 — the companies whose new tax identifier waits (same cells as the list)
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403
+          moderator: 200
+          support: 200
+          platform_admin: 200
+          dpo: 403
+          finance_admin: 403
+          talent_auditor: 403
 
   adminVerifyOrg:
     method: POST
@@ -280,6 +293,44 @@ operations:
     action: orgs.org.suspend
     path_params: { org_id: company_suspended }
     body: bodies/orgs/reactivate.json
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+
+  # ---------------------------------------------------------------- BE-206: tax identifier review
+
+  adminApproveTaxIdChange:
+    method: POST
+    path: /api/v1/admin/orgs/{org_id}/tax-id-change/approve
+    action: orgs.org.verify
+    path_params: { org_id: company_tax_review }
+    headers: { If-Match: '"1hmhuo3hji000"' }
+    body: bodies/orgs/approve_tax_id.json
+    note: "single platform_admin (06 H-60, no four eyes for a document review); the company stays active"
+    expect:
+      anonymous: 401
+      "@no_platform_role": 403
+      "@other_staff": 403
+      platform_admin: 200
+    variants:
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000aa" }
+        expect:
+          anonymous: 401
+          "@no_platform_role": 403   # no ID probing without a platform role
+          "@other_staff": 403
+          platform_admin: 404
+
+  adminRejectTaxIdChange:
+    method: POST
+    path: /api/v1/admin/orgs/{org_id}/tax-id-change/reject
+    action: orgs.org.suspend
+    path_params: { org_id: company_tax_review }
+    headers: { If-Match: '"1hmhuo3hji000"' }
+    body: bodies/orgs/reject_tax_id.json
+    note: R; the rejection suspends the company
     expect:
       anonymous: 401
       "@no_platform_role": 403

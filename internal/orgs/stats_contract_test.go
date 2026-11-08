@@ -46,9 +46,19 @@ func statsContract(t *testing.T, newStore func(t *testing.T) (orgs.Store, world)
 		}
 		pending := newOrg(orgs.KindCompany, "Bekleyen")
 		pending.Status = orgs.StatusPendingReview
-		for _, o := range []orgs.Org{newOrg(orgs.KindClub, "Kulüp 1"), newOrg(orgs.KindClub, "Kulüp 2"), pending} {
+		// BE-206: a flagged company counts as a tax identifier review unless closed.
+		flagged, closed := newOrg(orgs.KindCompany, "Vergisi İncelenen"), newOrg(orgs.KindCompany, "Kapanmış İncelenen")
+		closedAt := t0
+		closed.Status, closed.ClosedAt = orgs.StatusClosed, &closedAt
+		for _, o := range []orgs.Org{newOrg(orgs.KindClub, "Kulüp 1"), newOrg(orgs.KindClub, "Kulüp 2"), pending, flagged, closed} {
 			if _, ok, err := s.InsertOrg(ctx, o); err != nil || !ok {
 				t.Fatalf("InsertOrg: %v %v", ok, err)
+			}
+		}
+		at := t0
+		for _, o := range []orgs.Org{flagged, closed} {
+			if err := s.InsertCompany(ctx, orgs.Company{OrgID: o.ID, TaxIDReviewRequestedAt: &at}); err != nil {
+				t.Fatalf("InsertCompany: %v", err)
 			}
 		}
 		after, err := s.OrgStats(ctx, wideFrom, wideTo)
@@ -63,6 +73,9 @@ func statsContract(t *testing.T, newStore func(t *testing.T) (orgs.Store, world)
 		}
 		if d := after.NewInRange[orgs.KindClub] - before.NewInRange[orgs.KindClub]; d != 2 {
 			t.Errorf("new clubs +%d, want +2", d)
+		}
+		if d := after.TaxIDReviews - before.TaxIDReviews; d != 1 {
+			t.Errorf("tax identifier reviews +%d, want +1 (the closed company does not count)", d)
 		}
 		if !slices.IsSortedFunc(after.Counts, func(a, b orgs.OrgCount) int {
 			return cmp.Or(cmp.Compare(a.Kind, b.Kind), cmp.Compare(a.Status, b.Status))

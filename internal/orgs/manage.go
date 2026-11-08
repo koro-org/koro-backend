@@ -75,8 +75,12 @@ func writable(a authz.Actor, o Org) error {
 // row stops naming it (files.DeleteReplaced, BE-155), unless the moderators
 // keep it for a report on the org (dropLogo, BE-180); org.updated then
 // revalidates the public page. A new tax identifier of a reviewed company
-// takes the proof, checked before the transaction, and sends a member's
-// company back to review (taxChange, BE-183).
+// takes the proof, checked before the transaction (taxChange, BE-183). A
+// member's one leaves the active company as it is and waits for the
+// platform admins (BE-206, Q-55): the first one while none is pending flags
+// the company (companies.tax_id_review_requested_at) and writes
+// org.review_requested in the transaction; a platform admin's correction
+// flags nothing (they are the reviewers).
 func (s *service) UpdateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, ifMatch string, p OrgPatch) (OrgView, error) {
 	proved, err := s.taxChangeProof(ctx, a, id, ifMatch, p)
 	if err != nil {
@@ -105,20 +109,17 @@ func (s *service) UpdateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, if
 		if newTax && proved == "" { // the company was reviewed after the first read
 			return identity.ErrReauthRequired
 		}
-		reopen := newTax && o.Status == StatusActive && !a.HasPlatformRole(authz.PlatformAdmin)
-		if reopen {
-			next.Status, next.VerifiedAt, next.VerifiedBy = StatusPendingReview, nil, nil
-			changed = append(changed, "status")
-		}
+		review := newTax && o.Status == StatusActive && !a.HasPlatformRole(authz.PlatformAdmin)
 		if out, err = s.orgs().UpdateOrg(ctx, next); err != nil {
 			return err
 		}
 		if err := s.dropLogo(ctx, a, o, next); err != nil {
 			return err
 		}
+		requested := false
 		if p.companyFields() {
-			cc, err := s.patchCompany(ctx, a, o, p)
-			if err != nil {
+			var cc []string
+			if cc, requested, err = s.patchCompany(ctx, a, o, p, review); err != nil {
 				return err
 			}
 			changed = append(changed, cc...)
@@ -130,11 +131,14 @@ func (s *service) UpdateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, if
 		if newTax {
 			meta["reauth"] = proved
 		}
-		if reopen {
+		switch {
+		case requested:
 			if err := s.emitReviewRequested(ctx, out); err != nil {
 				return err
 			}
-			meta["from"], meta["to"] = string(o.Status), string(next.Status)
+			meta["tax_id_review"] = taxReviewRequested
+		case review: // a review was pending already: the admins hear of it once
+			meta["tax_id_review"] = taxReviewPending
 		}
 		return s.d.Audit.Log(ctx, auditEvent(a, authz.OrgsOrgUpdate, o.ID, "", meta))
 	})
@@ -303,17 +307,20 @@ func (p OrgPatch) keepsTaxIdentity() error {
 // patchCompany writes the company fields of p. A new e-mail domain loses
 // its verification; an editor who is a member of the company and whose
 // account address is at the domain verifies it (BE-165: a platform
-// admin's own address never does).
-func (s *service) patchCompany(ctx context.Context, a authz.Actor, o Org, p OrgPatch) ([]string, error) {
+// admin's own address never does). review flags the new tax identifier for
+// the platform admins (BE-206) unless a review is pending already; requested
+// reports that this write flagged it.
+func (s *service) patchCompany(ctx context.Context, a authz.Actor, o Org, p OrgPatch, review bool) (changed []string,
+	requested bool, err error) {
 	c, err := s.companies().GetCompany(ctx, o.ID)
 	if errors.Is(err, ErrNotFound) {
 		if err := s.companies().InsertCompany(ctx, Company{OrgID: o.ID}); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		c, err = s.companies().GetCompany(ctx, o.ID)
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	val := func(p *string) string {
 		if p == nil {
@@ -323,15 +330,14 @@ func (s *service) patchCompany(ctx context.Context, a authz.Actor, o Org, p OrgP
 	}
 	cf, err := cleanCompany(val(p.SectorCode), val(p.SizeBand), val(p.EmailDomain), val(p.HQCity), false)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if cf.tax, err = cleanTaxID(val(p.TaxNo), val(p.TCKN)); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if cf.taxOffice, err = cleanTaxOffice(val(p.TaxOffice)); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	var changed []string
 	if p.SectorCode != nil {
 		c.SectorCode, changed = cf.sector, append(changed, "sector_code")
 	}
@@ -346,7 +352,7 @@ func (s *service) patchCompany(ctx context.Context, a authz.Actor, o Org, p OrgP
 		if c.EmailDomain != nil && c.DomainVerifiedAt == nil && a.MemberOf(o.ID) {
 			ok, err := s.holdsAddressAt(ctx, a.UserID, *c.EmailDomain)
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
 			if ok {
 				now := s.now()
@@ -360,13 +366,17 @@ func (s *service) patchCompany(ctx context.Context, a authz.Actor, o Org, p OrgP
 	if p.taxID() {
 		c.TaxIDKind, c.TaxNo, changed = cf.tax.kind, cf.tax.no, append(changed, "tax_id")
 	}
+	if review && c.TaxIDReviewRequestedAt == nil {
+		now := s.now()
+		c.TaxIDReviewRequestedAt, requested = &now, true
+	}
 	if p.TaxOffice != nil {
 		c.TaxOffice, changed = cf.taxOffice, append(changed, "tax_office")
 	}
 	if _, err := s.companies().UpdateCompany(ctx, c); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return changed, nil
+	return changed, requested, nil
 }
 
 func equalPtr(a, b *string) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }

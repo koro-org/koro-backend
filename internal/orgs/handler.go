@@ -3,6 +3,7 @@ package orgs
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"uuid"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -63,8 +64,9 @@ func Register(api huma.API, svc Service) {
 		Description: "If-Match with the ETag of getOrg is required: missing → 428, stale → 412. Company fields apply to " +
 			"companies only. A suspended org cannot be changed by its members (403 orgs.org_suspended). Replacing the tax " +
 			"identifier on file of a company past its review needs re-authentication (reauth; 403 " +
-			"identity.reauth_required, identity.reauth_failed) and, when a member does it, sends the active company back " +
-			"to pending_review until a platform admin verifies it again. The other changes need no proof.",
+			"identity.reauth_required, identity.reauth_failed). When a member does it, the active company stays active " +
+			"and the change waits for a platform admin (company.tax_id_review_requested_at; adminApproveTaxIdChange, " +
+			"adminRejectTaxIdChange). The other changes need no proof.",
 	}, op.Meta{Action: string(authz.OrgsOrgUpdate), Surface: op.SurfaceOrg, Reauth: true}, h.updateOrg)
 
 	op.Register(api, "orgs", huma.Operation{
@@ -86,6 +88,8 @@ func Register(api huma.API, svc Service) {
 	op.Register(api, "orgs", huma.Operation{
 		OperationID: "adminListOrgs", Method: http.MethodGet, Path: "/admin/orgs",
 		Summary: "List organizations (platform staff)",
+		Description: "tax_id_review=true lists the companies whose new tax identifier waits for a platform admin's " +
+			"decision (any status but closed; company.tax_id_review_requested_at).",
 	}, op.Meta{Action: string(authz.OrgsOrgListAdmin), Surface: op.SurfaceAdmin}, h.adminList)
 
 	op.Register(api, "orgs", huma.Operation{
@@ -104,6 +108,25 @@ func Register(api huma.API, svc Service) {
 		Summary: "Reactivate a suspended organization", Description: "suspended → active, with re-authentication.",
 	}, op.Meta{Action: string(authz.OrgsOrgSuspend), Surface: op.SurfaceAdmin, Reauth: true, RateLimit: op.RateReauth,
 		Idempotency: op.IdempotencyOptional}, h.adminReactivate)
+
+	op.Register(api, "orgs", huma.Operation{
+		OperationID: "adminApproveTaxIdChange", Method: http.MethodPost, Path: "/admin/orgs/{org_id}/tax-id-change/approve",
+		Summary: "Approve a company's new tax identifier",
+		Description: "The company's pending tax identifier review ends; its status and verification stay. If-Match with " +
+			"the ETag of getOrg is required (missing → 428; stale → 412: the identifier changed since it was read). No " +
+			"pending review (or a closed org) → 409 orgs.invalid_state. The company's admins are told in-app.",
+	}, op.Meta{Action: string(authz.OrgsOrgVerify), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional},
+		h.adminApproveTaxID)
+
+	op.Register(api, "orgs", huma.Operation{
+		OperationID: "adminRejectTaxIdChange", Method: http.MethodPost, Path: "/admin/orgs/{org_id}/tax-id-change/reject",
+		Summary: "Reject a company's new tax identifier",
+		Description: "With re-authentication and a reason (audited, not shown to the company). The pending review ends " +
+			"and an active company is suspended (a suspended one stays so); the company's admins are told in-app and by " +
+			"e-mail. A platform admin can then correct the identifier (updateOrg) and reactivate it. If-Match with the " +
+			"ETag of getOrg is required (428/412). No pending review (or a closed org) → 409 orgs.invalid_state.",
+	}, op.Meta{Action: string(authz.OrgsOrgSuspend), Surface: op.SurfaceAdmin, Reauth: true, RateLimit: op.RateReauth,
+		Idempotency: op.IdempotencyOptional}, h.adminRejectTaxID)
 
 	registerMembers(api, h)
 }
@@ -269,9 +292,10 @@ func (h handler) listCompanies(ctx context.Context, in *listCompaniesInput) (*se
 
 type adminListInput struct {
 	page.Params
-	Kind   string `query:"kind" enum:"platform,university,club,company,ngo"`
-	Status string `query:"status" enum:"pending_review,active,suspended,closed"`
-	Q      string `query:"q" maxLength:"100"`
+	Kind        string `query:"kind" enum:"platform,university,club,company,ngo"`
+	Status      string `query:"status" enum:"pending_review,active,suspended,closed"`
+	Q           string `query:"q" maxLength:"100"`
+	TaxIDReview bool   `query:"tax_id_review" doc:"true: only the companies whose new tax identifier waits for a decision (BE-206)"`
 }
 
 type adminListOutput struct {
@@ -283,12 +307,13 @@ func (h handler) adminList(ctx context.Context, in *adminListInput) (*adminListO
 	if err != nil {
 		return nil, err
 	}
-	fp := page.Fingerprint("adminListOrgs", in.Kind, in.Status, in.Q)
+	fp := page.Fingerprint("adminListOrgs", in.Kind, in.Status, in.Q, strconv.FormatBool(in.TaxIDReview))
 	after, err := cursorOf(in.Cursor, SortNewest, fp)
 	if err != nil {
 		return nil, err
 	}
-	p, err := h.svc.AdminListOrgs(ctx, a, AdminQuery{Kind: Kind(in.Kind), Status: Status(in.Status), Q: in.Q, Limit: in.Limit, After: after})
+	p, err := h.svc.AdminListOrgs(ctx, a, AdminQuery{Kind: Kind(in.Kind), Status: Status(in.Status), Q: in.Q,
+		TaxIDReview: in.TaxIDReview, Limit: in.Limit, After: after})
 	if err != nil {
 		return nil, err
 	}
@@ -466,6 +491,53 @@ func (h handler) adminVerify(ctx context.Context, in *verifyInput) (*orgOutput, 
 		note = in.Body.Note
 	}
 	v, err := h.svc.AdminVerifyOrg(ctx, a, id, note)
+	if err != nil {
+		return nil, err
+	}
+	return orgOut(v), nil
+}
+
+// ---- adminApproveTaxIdChange / adminRejectTaxIdChange (BE-206)
+
+type taxIDApproveInput struct {
+	OrgPath
+	IfMatch string `header:"If-Match" doc:"ETag of getOrg (required: missing → 428, stale → 412)"`
+	Body    *struct {
+		Note string `json:"note,omitempty" maxLength:"500" doc:"Internal note (audited)"`
+	}
+}
+
+func (h handler) adminApproveTaxID(ctx context.Context, in *taxIDApproveInput) (*orgOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var note string
+	if in.Body != nil {
+		note = in.Body.Note
+	}
+	v, err := h.svc.AdminApproveTaxIDChange(ctx, a, in.id(), in.IfMatch, note)
+	if err != nil {
+		return nil, err
+	}
+	return orgOut(v), nil
+}
+
+type taxIDRejectInput struct {
+	OrgPath
+	IfMatch string `header:"If-Match" doc:"ETag of getOrg (required: missing → 428, stale → 412)"`
+	Body    struct {
+		Reason string             `json:"reason" minLength:"3" maxLength:"500" doc:"Why the identifier is rejected (audited; not shown to the company)"`
+		Reauth *consent.ReauthDTO `json:"reauth,omitempty" doc:"Re-authentication proof (03 §6.2)"`
+	}
+}
+
+func (h handler) adminRejectTaxID(ctx context.Context, in *taxIDRejectInput) (*orgOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	v, err := h.svc.AdminRejectTaxIDChange(ctx, a, in.id(), in.IfMatch, in.Body.Reason, proofOf(in.Body.Reauth))
 	if err != nil {
 		return nil, err
 	}

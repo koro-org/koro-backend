@@ -64,6 +64,7 @@ func builderCases() map[string]struct {
 		"AdminLegalPartyLink":             {AdminLegalPartyLink(a), "/admin/legal-parties/{party_id}"},
 		"AdminPaymentLink":                {AdminPaymentLink(a), "/admin/payments/{payment_id}"},
 		"AdminPendingOrgsLink":            {AdminPendingOrgsLink(), "/admin/orgs?status=pending_review"},
+		"AdminTaxIDReviewsLink":           {AdminTaxIDReviewsLink(), "/admin/orgs?tax_id_review=true"},
 		"AdminOrderLink":                  {AdminOrderLink("KR7K3M9Q2X"), "/admin/orders?order_no={order_no}"},
 		"AdminPlatformRolesLink":          {AdminPlatformRolesLink(), "/admin/platform-roles"},
 		"AdminPayoutLink":                 {AdminPayoutLink(a), "/admin/payouts/{payout_id}"},

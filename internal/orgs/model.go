@@ -93,7 +93,10 @@ func (o Org) Summary() OrgSummary {
 // application (BE-165, migration 000173) is: the kind of identifier given,
 // the VKN (kind vkn only) and the tax office. A TCKN is never stored (06
 // H-60 data minimisation): kind tckn records that a valid one was given.
-// None of these columns is personal data.
+// TaxIDReviewRequestedAt (BE-206, migration 000183) is the time a member's
+// new tax identifier of the active company started waiting for the platform
+// admins (nil: nothing to review); no copy of a number is kept. None of
+// these columns is personal data.
 type Company struct {
 	OrgID            uuid.UUID  `gorm:"type:uuid;column:org_id;primaryKey" json:"org_id"`
 	OrgKind          Kind       `gorm:"column:org_kind" json:"org_kind"`
@@ -105,12 +108,21 @@ type Company struct {
 	TaxIDKind        *TaxIDKind `gorm:"column:tax_id_kind" json:"tax_id_kind,omitempty"`
 	TaxNo            *string    `gorm:"column:tax_no" json:"-"` // VKN: never logged (05 §11.2)
 	TaxOffice        *string    `gorm:"column:tax_office" json:"tax_office,omitempty"`
-	CreatedAt        time.Time  `gorm:"column:created_at;->" json:"created_at"`
-	UpdatedAt        time.Time  `gorm:"column:updated_at;->" json:"updated_at"`
+	// TaxIDReviewRequestedAt: see the type's comment (BE-206).
+	TaxIDReviewRequestedAt *time.Time `gorm:"column:tax_id_review_requested_at" json:"tax_id_review_requested_at,omitempty"`
+	CreatedAt              time.Time  `gorm:"column:created_at;->" json:"created_at"`
+	UpdatedAt              time.Time  `gorm:"column:updated_at;->" json:"updated_at"`
 }
 
 // TableName implements gorm's Tabler.
 func (Company) TableName() string { return "companies" }
+
+// TaxIDReviewPending reports whether a member's new tax identifier of the
+// company waits for the platform admins' decision (BE-206): flagged, and the
+// org of status s not closed (a closed org has nothing left to decide).
+func (c Company) TaxIDReviewPending(s Status) bool {
+	return c.TaxIDReviewRequestedAt != nil && s != StatusClosed
+}
 
 // TaxIDKind is companies.tax_id_kind: which tax identifier a company gave.
 type TaxIDKind string

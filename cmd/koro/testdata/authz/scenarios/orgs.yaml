@@ -45,6 +45,31 @@ scenarios:
       - { persona: platform_admin, operation: adminVerifyOrg, expect: 200 }
       - { persona: anonymous, operation: getOrg, path_params: { org_id: company_pending }, expect: 200 }
       - { persona: platform_admin, operation: adminVerifyOrg, expect: 409, code: orgs.invalid_state }
+  tax_id_review_approve:
+    note: >-
+      BE-206 (Q-55): company_tax_review stays public while its new VKN waits. The approval reads the org as the
+      admin saw it (stale If-Match 412), keeps the company active and ends the review (a second approval or a
+      rejection is 409); the rejection needs the proof (checked after the review and If-Match).
+    steps:
+      - { persona: anonymous, operation: getOrg, path_params: { org_id: company_tax_review }, expect: 200 }
+      - { persona: platform_admin, operation: adminRejectTaxIdChange, body: bodies/orgs/reject_tax_id_no_reauth.json,
+          expect: 403, code: identity.reauth_required }
+      - { persona: platform_admin, operation: adminApproveTaxIdChange, headers: { If-Match: '"0"' }, expect: 412,
+          code: precondition_failed }
+      - { persona: platform_admin, operation: adminApproveTaxIdChange, expect: 200 }
+      - { persona: anonymous, operation: getOrg, path_params: { org_id: company_tax_review }, expect: 200 }
+      - { persona: platform_admin, operation: adminApproveTaxIdChange, expect: 409, code: orgs.invalid_state }
+      - { persona: platform_admin, operation: adminRejectTaxIdChange, expect: 409, code: orgs.invalid_state }
+  tax_id_review_reject:
+    note: >-
+      BE-206: the rejection suspends company_tax_review (still public: 03 §3.6) and ends the review; the
+      reactivation is the existing R operation; a second rejection is 409.
+    steps:
+      - { persona: platform_admin, operation: adminRejectTaxIdChange, expect: 200 }
+      - { persona: anonymous, operation: getOrg, path_params: { org_id: company_tax_review }, expect: 200 }
+      - { persona: platform_admin, operation: adminRejectTaxIdChange, expect: 409, code: orgs.invalid_state }
+      - { persona: platform_admin, operation: adminReactivateOrg, path_params: { org_id: company_tax_review }, expect: 200 }
+      - { persona: platform_admin, operation: adminApproveTaxIdChange, expect: 409, code: orgs.invalid_state }
   admin_needs_mfa:
     note: platform_admin's org operations are k-mfa role paths (03 §6.4)
     steps:

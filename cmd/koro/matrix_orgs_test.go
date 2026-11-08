@@ -27,6 +27,10 @@ var matrixOrgTime = time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 // matrixSlug is the slug of an org fixture: its name with hyphens.
 func matrixSlug(name string) string { return strings.ReplaceAll(name, "_", "-") }
 
+// matrixVKN is the synthetic VKN of a matrix company with a tax identifier
+// (a valid check digit; BE-206 company_tax_review).
+const matrixVKN = "1234567890"
+
 // matrixFixtures seeds the orgs of the matrix (03 §7.3): the shared org
 // fixtures of authztest (active and verified; companies with a profile),
 // the fixtures of fixtures/orgs.yaml (kind org: type, status; BE-019:
@@ -37,7 +41,8 @@ func matrixSlug(name string) string { return strings.ReplaceAll(name, "_", "-") 
 // verification (seam students of orgsWiring; never set in production).
 func (w *orgsWiring) matrixFixtures(fx *matrixFixtures) error {
 	ctx := context.Background()
-	insert := func(name string, kind orgs.Kind, status orgs.Status) error {
+	// taxReview (BE-206) gives the company a VKN and a pending review of it.
+	insert := func(name string, kind orgs.Kind, status orgs.Status, taxReview bool) error {
 		id, err := fx.ID(name)
 		if err != nil {
 			return err
@@ -53,14 +58,19 @@ func (w *orgsWiring) matrixFixtures(fx *matrixFixtures) error {
 		}
 		if kind == orgs.KindCompany {
 			sector, size := "software", "11-50"
-			if err := w.store.InsertCompany(ctx, orgs.Company{OrgID: id, SectorCode: &sector, SizeBand: &size}); err != nil {
+			c := orgs.Company{OrgID: id, SectorCode: &sector, SizeBand: &size}
+			if taxReview {
+				vkn, no := orgs.TaxIDVKN, matrixVKN
+				c.TaxIDKind, c.TaxNo, c.TaxIDReviewRequestedAt = &vkn, &no, &t
+			}
+			if err := w.store.InsertCompany(ctx, c); err != nil {
 				return fmt.Errorf("company %s: %w", name, err)
 			}
 		}
 		return nil
 	}
 	for _, o := range authztest.Orgs() {
-		if err := insert(o.Name, o.Kind, orgs.StatusActive); err != nil {
+		if err := insert(o.Name, o.Kind, orgs.StatusActive, false); err != nil {
 			return err
 		}
 	}
@@ -71,7 +81,8 @@ func (w *orgsWiring) matrixFixtures(fx *matrixFixtures) error {
 		case "org":
 			typ, _ := f.Fields["type"].(string)
 			status, _ := f.Fields["status"].(string)
-			if err := insert(f.Name, orgs.Kind(typ), orgs.Status(status)); err != nil {
+			taxReview, _ := f.Fields["tax_id_review"].(bool)
+			if err := insert(f.Name, orgs.Kind(typ), orgs.Status(status), taxReview); err != nil {
 				return err
 			}
 		case "persona_membership":

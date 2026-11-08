@@ -187,6 +187,15 @@ type Service interface {
 	// AdminReactivateOrg is adminReactivateOrg (orgs.org.suspend, R):
 	// suspended → active.
 	AdminReactivateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, reason string, proof identity.ReauthProof) (OrgView, error)
+	// AdminApproveTaxIDChange is adminApproveTaxIdChange (orgs.org.verify;
+	// BE-206): a company's pending new tax identifier is approved, the
+	// company stays as it is. ifMatch is the org's ETag (428/412).
+	AdminApproveTaxIDChange(ctx context.Context, a authz.Actor, id uuid.UUID, ifMatch, note string) (OrgView, error)
+	// AdminRejectTaxIDChange is adminRejectTaxIdChange (orgs.org.suspend, R;
+	// BE-206): a company's pending new tax identifier is rejected and an
+	// active company suspended. ifMatch is the org's ETag (428/412).
+	AdminRejectTaxIDChange(ctx context.Context, a authz.Actor, id uuid.UUID, ifMatch, reason string,
+		proof identity.ReauthProof) (OrgView, error)
 
 	// ListMembers is listOrgMembers (orgs.member.list; B for support and
 	// platform_admin). A sensitive club's list is its club_admin's only and

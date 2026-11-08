@@ -15,6 +15,9 @@ version: 1
 fixtures:
   company_pending: { kind: org, type: company, status: pending_review }
   company_suspended: { kind: org, type: company, status: suspended }
+  # BE-206: an active, verified company whose new VKN waits for a platform admin (tax_id_review: the
+  # company row carries a VKN and companies.tax_id_review_requested_at).
+  company_tax_review: { kind: org, type: company, status: active, tax_id_review: true }
 
   m_club_member_club_a: { kind: persona_membership, persona: club_member, org: club_a }
   m_club_member_sensitive: { kind: persona_membership, persona: club_member, org: club_sensitive }

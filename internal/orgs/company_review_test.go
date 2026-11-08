@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"koro/internal/authz"
 	"koro/internal/identity"
@@ -398,6 +399,14 @@ func TestAdminListOrgs_CompanyReviewFacts(t *testing.T) {
 	}
 }
 
+// must returns v, failing on err (test helper of conversions that cannot fail).
+func must[T any](v T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
 // otherVKN is a valid VKN other than testVKN.
 func otherVKN(t *testing.T) string {
 	t.Helper()
@@ -410,11 +419,13 @@ func otherVKN(t *testing.T) string {
 	return ""
 }
 
-// TestUpdateOrg_NewTaxIDOfReviewedCompany (BE-183): replacing the tax
-// identifier of a verified company takes the proof and, for a member, sends
-// the company back to review: status, verification and the admins' request.
-// What replaces nothing takes neither: the same VKN, the tax office, another
-// field. The caller's right and If-Match come before the proof.
+// TestUpdateOrg_NewTaxIDOfReviewedCompany (BE-183, BE-206): replacing the
+// tax identifier of a verified company takes the proof. A member's new one
+// leaves the company active and verified (Q-55) and flags it for the
+// platform admins once: the flag, org.review_requested and the audit, which
+// names no number. What replaces nothing takes neither: the
+// same VKN, the tax office, another field. The caller's right and If-Match
+// come before the proof.
 func TestUpdateOrg_NewTaxIDOfReviewedCompany(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -445,6 +456,17 @@ func TestUpdateOrg_NewTaxIDOfReviewedCompany(t *testing.T) {
 	wantActive(got, err)
 	got, err = e.svc.UpdateOrg(ctx, owner, id, etag(), orgs.OrgPatch{City: str("Ankara")})
 	wantActive(got, err)
+	if got.Company.TaxIDReviewRequestedAt != nil {
+		t.Fatalf("a change of nothing flagged the company: %v", got.Company.TaxIDReviewRequestedAt)
+	}
+
+	// A wrong check digit is still 422 (BE-165), before any proof is asked.
+	bad := "1234567800"
+	for taxid.ValidVKN(bad) {
+		bad = strconv.Itoa(1 + must(strconv.Atoi(bad)))
+	}
+	_, err = e.svc.UpdateOrg(ctx, owner, id, etag(), orgs.OrgPatch{TaxNo: &bad})
+	wantField(t, err, "body.tax_no", bad)
 
 	vkn := otherVKN(t)
 	_, err = e.svc.UpdateOrg(ctx, owner, id, etag(), orgs.OrgPatch{TaxNo: &vkn})
@@ -461,42 +483,60 @@ func TestUpdateOrg_NewTaxIDOfReviewedCompany(t *testing.T) {
 	if n := len(e.audit.Rows(authz.OrgsOrgUpdate)); n != denied {
 		t.Fatalf("a proof was checked before the caller's right: %d rows, want %d", n, denied)
 	}
-	if cur, err := e.svc.GetOrg(ctx, owner, id); err != nil || cur.Org.Status != orgs.StatusActive || *cur.Company.TaxNo != testVKN {
+	if cur, err := e.svc.GetOrg(ctx, owner, id); err != nil || cur.Org.Status != orgs.StatusActive || *cur.Company.TaxNo != testVKN ||
+		cur.Company.TaxIDReviewRequestedAt != nil {
 		t.Fatalf("a refused change was written: %+v, %v", cur.Company, err)
 	}
 
-	requests := len(eventsOf[domainevent.OrgReviewRequested](t, e, domainevent.TopicOrgReviewRequested))
+	requests := func() []domainevent.OrgReviewRequested {
+		return eventsOf[domainevent.OrgReviewRequested](t, e, domainevent.TopicOrgReviewRequested)
+	}
+	before := len(requests())
+	e.clk.Advance(time.Hour)
+	flaggedAt := e.clk.Now()
 	got, err = e.svc.UpdateOrg(ctx, owner, id, etag(), orgs.OrgPatch{TaxNo: &vkn, Proof: proof(goodPassword)})
-	if err != nil {
-		t.Fatal(err)
+	wantActive(got, err)
+	if *got.Company.TaxNo != vkn || got.Company.TaxIDReviewRequestedAt == nil || !got.Company.TaxIDReviewRequestedAt.Equal(flaggedAt) {
+		t.Fatalf("after the new identifier = %+v", got.Company)
 	}
-	if got.Org.Status != orgs.StatusPendingReview || got.Org.Verified() || got.Org.VerifiedBy != nil || *got.Company.TaxNo != vkn {
-		t.Fatalf("after the new identifier = %+v, %+v", got.Org, got.Company)
+	if got.Org.VerifiedBy == nil || got.Org.VerifiedAt == nil {
+		t.Fatalf("the verification was dropped: %+v", got.Org)
 	}
-	if n := len(eventsOf[domainevent.OrgReviewRequested](t, e, domainevent.TopicOrgReviewRequested)); n != requests+1 {
-		t.Fatalf("%d review requests, want %d", n, requests+1)
+	if d := orgs.ToOrgDTO(got).Company; d.TaxIDReviewRequestedAt == nil || !d.TaxIDReviewRequestedAt.Equal(flaggedAt) || !d.TaxNoMasked {
+		t.Fatalf("the editor's DTO = %+v", d)
+	}
+	reqs := requests()
+	if len(reqs) != before+1 || reqs[len(reqs)-1].OrgID != id {
+		t.Fatalf("review requests = %+v, want one more", reqs)
 	}
 	ev := e.audit.Of(authz.OrgsOrgUpdate)
 	last := ev[len(ev)-1]
-	if fmt.Sprint(last.Metadata["fields"]) != "[status tax_id]" || last.Metadata["reauth"] == nil ||
-		last.Metadata["from"] != "active" || last.Metadata["to"] != "pending_review" || strings.Contains(fmt.Sprint(last.Metadata), vkn) {
+	if fmt.Sprint(last.Metadata["fields"]) != "[tax_id]" || last.Metadata["reauth"] == nil ||
+		last.Metadata["tax_id_review"] != "requested" || last.Metadata["from"] != nil || strings.Contains(fmt.Sprint(last.Metadata), vkn) {
 		t.Fatalf("audit = %+v", last.Metadata)
 	}
-
-	// In review the company corrects itself without a proof; the admin's
-	// verification ends it, and the next change takes the proof again.
-	if _, err := e.svc.UpdateOrg(ctx, owner, id, etag(), orgs.OrgPatch{TaxNo: str(testVKN)}); err != nil {
-		t.Fatal(err)
+	if pub := orgs.ToPublicDTO(got); pub.Company == nil || pub.Company.CompanyTaxDTO != nil || !pub.Verified {
+		t.Fatalf("the public profile = %+v", pub)
 	}
-	verified, err := e.svc.AdminVerifyOrg(ctx, pad(t), id, "")
-	if err != nil || verified.Org.Status != orgs.StatusActive || !verified.Org.Verified() {
-		t.Fatalf("verified again = %+v, %v", verified.Org, err)
-	}
-	_, err = e.svc.UpdateOrg(ctx, owner, id, etag(), orgs.OrgPatch{TaxNo: &vkn})
-	problemtest.WantErr(t, err, identity.ErrReauthRequired)
 
-	// A platform admin's correction takes the proof; they are the reviewer, so
-	// the company stays as it is.
+	// While the review is pending, another new identifier takes the proof
+	// again and keeps the first request's time; the admins hear of it once.
+	e.clk.Advance(time.Hour)
+	got, err = e.svc.UpdateOrg(ctx, owner, id, etag(), orgs.OrgPatch{TCKN: str(testTCKN), Proof: proof(goodPassword)})
+	wantActive(got, err)
+	if !got.Company.TaxIDReviewRequestedAt.Equal(flaggedAt) || *got.Company.TaxIDKind != orgs.TaxIDTCKN {
+		t.Fatalf("second change = %+v", got.Company)
+	}
+	if n := len(requests()); n != before+1 {
+		t.Fatalf("%d review requests after the second change, want %d", n, before+1)
+	}
+	ev = e.audit.Of(authz.OrgsOrgUpdate)
+	if last := ev[len(ev)-1]; last.Metadata["tax_id_review"] != "pending" {
+		t.Fatalf("audit of the second change = %+v", last.Metadata)
+	}
+
+	// A platform admin's correction takes the proof; they are the reviewers,
+	// so it flags nothing and leaves the pending review as it is.
 	admin := pad(t)
 	cur, err := e.svc.GetOrg(ctx, admin, id)
 	if err != nil {
@@ -506,8 +546,12 @@ func TestUpdateOrg_NewTaxIDOfReviewedCompany(t *testing.T) {
 	problemtest.WantErr(t, err, identity.ErrReauthRequired)
 	got, err = e.svc.UpdateOrg(ctx, admin, id, cur.ETag, orgs.OrgPatch{TaxNo: &vkn, Proof: proof(goodPassword)})
 	wantActive(got, err)
-	if *got.Company.TaxNo != vkn {
+	if *got.Company.TaxNo != vkn || !got.Company.TaxIDReviewRequestedAt.Equal(flaggedAt) || len(requests()) != before+1 {
 		t.Fatalf("the platform admin's correction = %+v", got.Company)
+	}
+	ev = e.audit.Of(authz.OrgsOrgUpdate)
+	if last := ev[len(ev)-1]; last.Metadata["tax_id_review"] != nil {
+		t.Fatalf("audit of the platform admin's correction = %+v", last.Metadata)
 	}
 }
 

@@ -29,6 +29,11 @@ func (m *MemStore) OrgStats(_ context.Context, from, to time.Time) (OrgStats, er
 	for k, n := range counts {
 		st.Counts = append(st.Counts, OrgCount{Kind: k.kind, Status: k.status, Count: n})
 	}
+	for id, c := range m.companies {
+		if o, ok := m.orgs[id]; ok && c.TaxIDReviewPending(o.Status) {
+			st.TaxIDReviews++
+		}
+	}
 	slices.SortFunc(st.Counts, func(a, b OrgCount) int {
 		return cmp.Or(cmp.Compare(a.Kind, b.Kind), cmp.Compare(a.Status, b.Status))
 	})

@@ -16,7 +16,7 @@ func queueFigures(f *fake) {
 	f.orgStats = orgs.OrgStats{Counts: []orgs.OrgCount{
 		{Kind: orgs.KindClub, Status: orgs.StatusPendingReview, Count: 1},
 		{Kind: orgs.KindCompany, Status: orgs.StatusActive, Count: 9},
-		{Kind: orgs.KindCompany, Status: orgs.StatusPendingReview, Count: 2}}}
+		{Kind: orgs.KindCompany, Status: orgs.StatusPendingReview, Count: 2}}, TaxIDReviews: 6}
 	f.content = feed.ContentStats{PostsByStatus: map[feed.Status]int{feed.StatusPublished: 40},
 		ReportsByStatus: map[feed.ReportStatus]int{feed.ReportOpen: 4, feed.ReportInReview: 1, feed.ReportActioned: 6}}
 	f.claims, f.dsrs, f.docs = 5, 7, 8
@@ -25,7 +25,7 @@ func queueFigures(f *fake) {
 // counts reads a QueueStats as name → size (-1: null).
 func counts(q stats.QueueStats) map[string]int {
 	out := map[string]int{}
-	for name, p := range map[string]*int{"org_reviews": q.OrgReviews, "club_claims": q.ClubClaims,
+	for name, p := range map[string]*int{"org_reviews": q.OrgReviews, "tax_id_reviews": q.TaxIDReviews, "club_claims": q.ClubClaims,
 		"content_reports": q.ContentReports, "kvkk_requests": q.KvkkRequests, "student_documents": q.StudentDocuments} {
 		out[name] = -1
 		if p != nil {
@@ -35,7 +35,8 @@ func counts(q stats.QueueStats) map[string]int {
 	return out
 }
 
-// TestQueues_EachCounterOnlyForTheRolesThatWorkTheQueue (BE-196, 03 k37):
+// TestQueues_EachCounterOnlyForTheRolesThatWorkTheQueue (BE-196, 03 k37;
+// BE-206 tax_id_reviews behind orgs.org.list_admin like org_reviews):
 // every platform role reads the queue sizes; each counter is the queue's
 // size for a role its own list action admits (orgs.org.list_admin,
 // directory.club_claim.list, feed.report.list, kvkk.dsr.list,
@@ -49,12 +50,12 @@ func TestQueues_EachCounterOnlyForTheRolesThatWorkTheQueue(t *testing.T) {
 		persona string
 		want    map[string]int
 	}{
-		{"moderator", map[string]int{"org_reviews": 3, "club_claims": null, "content_reports": 5, "kvkk_requests": null, "student_documents": null}},
-		{"support", map[string]int{"org_reviews": 3, "club_claims": 5, "content_reports": null, "kvkk_requests": null, "student_documents": 8}},
-		{"dpo", map[string]int{"org_reviews": null, "club_claims": null, "content_reports": null, "kvkk_requests": 7, "student_documents": null}},
-		{"platform_admin", map[string]int{"org_reviews": 3, "club_claims": 5, "content_reports": 5, "kvkk_requests": 7, "student_documents": 8}},
-		{"finance_admin", map[string]int{"org_reviews": null, "club_claims": null, "content_reports": null, "kvkk_requests": null, "student_documents": null}},
-		{"talent_auditor", map[string]int{"org_reviews": null, "club_claims": null, "content_reports": null, "kvkk_requests": null, "student_documents": null}},
+		{"moderator", map[string]int{"org_reviews": 3, "tax_id_reviews": 6, "club_claims": null, "content_reports": 5, "kvkk_requests": null, "student_documents": null}},
+		{"support", map[string]int{"org_reviews": 3, "tax_id_reviews": 6, "club_claims": 5, "content_reports": null, "kvkk_requests": null, "student_documents": 8}},
+		{"dpo", map[string]int{"org_reviews": null, "tax_id_reviews": null, "club_claims": null, "content_reports": null, "kvkk_requests": 7, "student_documents": null}},
+		{"platform_admin", map[string]int{"org_reviews": 3, "tax_id_reviews": 6, "club_claims": 5, "content_reports": 5, "kvkk_requests": 7, "student_documents": 8}},
+		{"finance_admin", map[string]int{"org_reviews": null, "tax_id_reviews": null, "club_claims": null, "content_reports": null, "kvkk_requests": null, "student_documents": null}},
+		{"talent_auditor", map[string]int{"org_reviews": null, "tax_id_reviews": null, "club_claims": null, "content_reports": null, "kvkk_requests": null, "student_documents": null}},
 	} {
 		f, svc := world(t)
 		queueFigures(f)
@@ -100,8 +101,9 @@ func TestQueues_SameFiguresAsThePlatformPanel(t *testing.T) {
 	if pq.KvkkRequests == nil || pq.StudentDocuments == nil {
 		t.Fatalf("platform queues = %+v", pq)
 	}
-	want := map[string]int{"org_reviews": pq.OrgReviews, "club_claims": pq.ClubClaims, "content_reports": pq.ContentReports,
-		"kvkk_requests": *pq.KvkkRequests, "student_documents": *pq.StudentDocuments}
+	want := map[string]int{"org_reviews": pq.OrgReviews, "tax_id_reviews": pq.TaxIDReviews, "club_claims": pq.ClubClaims,
+		"content_reports": pq.ContentReports,
+		"kvkk_requests":   *pq.KvkkRequests, "student_documents": *pq.StudentDocuments}
 	got := counts(q)
 	for name, n := range want {
 		if got[name] != n {

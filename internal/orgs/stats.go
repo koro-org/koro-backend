@@ -32,6 +32,9 @@ type OrgCount struct {
 type OrgStats struct {
 	Counts     []OrgCount   // every (kind, status) pair with at least one org, by kind then status
 	NewInRange map[Kind]int // orgs created in [from, to) by kind
+	// TaxIDReviews counts the companies whose new tax identifier waits for
+	// the platform admins now (Company.TaxIDReviewPending; BE-206).
+	TaxIDReviews int
 }
 
 // MemberMonth is the membership change of one calendar month

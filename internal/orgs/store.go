@@ -78,7 +78,11 @@ type ListFilter struct {
 	// OrgIDs restricts the result to these orgs when non-nil (an empty,
 	// non-nil slice matches nothing).
 	OrgIDs []uuid.UUID
-	Sort   string // SortNewest (default) or SortName
+	// TaxIDReview keeps the companies whose new tax identifier waits for
+	// the platform admins (Company.TaxIDReviewPending: flagged, not closed;
+	// BE-206).
+	TaxIDReview bool
+	Sort        string // SortNewest (default) or SortName
 }
 
 // ListAfter is the keyset position of a page: the last row's sort values.

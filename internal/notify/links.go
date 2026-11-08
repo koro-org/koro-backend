@@ -192,6 +192,7 @@ var (
 	routeAdminInvoice            = route("/admin/invoices/{invoice_id}", LinkForAdmin)               // billing (finance, BE-144)
 	routeAdminLegalParty         = route("/admin/legal-parties/{party_id}", LinkForAdmin)            // parties (BE-159)
 	routeAdminPendingOrgs        = route("/admin/orgs?status=pending_review", LinkForAdmin)          // orgs (BE-144)
+	routeAdminTaxIDReviews       = route("/admin/orgs?tax_id_review=true", LinkForAdmin)             // orgs (BE-206)
 	routeAdminOrder              = route("/admin/orders?order_no={order_no}", LinkForAdmin)          // orders
 	routeAdminPlatformRoles      = route("/admin/platform-roles", LinkForAdmin)                      // identity (e-mail)
 	routeAdminPayment            = route("/admin/payments/{payment_id}", LinkForAdmin)               // payments (BE-159)
@@ -326,6 +327,10 @@ func AdminRefundRequestLink(req uuid.UUID) Link {
 func AdminReportLink(report uuid.UUID) Link { return routeAdminReport.link(report.String()) }
 func AdminReviewQueueLink() Link            { return routeAdminReviewQueue.link() }
 func AdminUnmatchedTransfersLink() Link     { return routeAdminUnmatched.link() }
+
+// AdminTaxIDReviewsLink is the admin list of the companies whose new tax
+// identifier waits for a decision (BE-206).
+func AdminTaxIDReviewsLink() Link { return routeAdminTaxIDReviews.link() }
 
 // linkPathText is NotificationDTO.link_path: its OpenAPI description and
 // x-koro-link-paths come from the catalog, so the contract can never miss

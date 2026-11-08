@@ -93,9 +93,9 @@ func TestWire_StatsQueuesGatedByTheModules(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		persona string
-		want    string // the non-null counters: o(rg reviews) c(lub claims) r(eports) k(vkk) d(ocuments)
+		want    string // the non-null counters: o(rg reviews) t(ax id reviews) c(lub claims) r(eports) k(vkk) d(ocuments)
 	}{
-		{"moderator", "or"}, {"support", "ocd"}, {"dpo", "k"}, {"platform_admin", "ocrkd"},
+		{"moderator", "otr"}, {"support", "otcd"}, {"dpo", "k"}, {"platform_admin", "otcrkd"},
 		{"finance_admin", ""}, {"talent_auditor", ""},
 	} {
 		p, _ := authztest.Get(tc.persona)
@@ -107,7 +107,8 @@ func TestWire_StatsQueuesGatedByTheModules(t *testing.T) {
 		for _, x := range []struct {
 			key string
 			n   *int
-		}{{"o", q.OrgReviews}, {"c", q.ClubClaims}, {"r", q.ContentReports}, {"k", q.KvkkRequests}, {"d", q.StudentDocuments}} {
+		}{{"o", q.OrgReviews}, {"t", q.TaxIDReviews}, {"c", q.ClubClaims}, {"r", q.ContentReports}, {"k", q.KvkkRequests},
+			{"d", q.StudentDocuments}} {
 			if x.n != nil {
 				got.WriteString(x.key)
 			}

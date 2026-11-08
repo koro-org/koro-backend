@@ -226,6 +226,63 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (orgs.Store, world)
 		}
 	})
 
+	t.Run("companies: tax identifier review flag and queue filter (BE-206)", func(t *testing.T) {
+		t.Parallel()
+		s, _ := newStore(t)
+		ctx := t.Context()
+		tag := "r" + strconv.FormatInt(slugSeq.Add(1), 10) // isolates this test's rows in a shared database
+		at := time.Date(2026, 11, 8, 10, 30, 0, 0, time.UTC)
+		company := func(name string, status orgs.Status, flagged bool) orgs.Org {
+			t.Helper()
+			o := newOrg(orgs.KindCompany, name+" "+tag)
+			o.Status = status
+			if status == orgs.StatusClosed {
+				o.ClosedAt = &at
+			}
+			o = insert(t, s, o)
+			c := orgs.Company{OrgID: o.ID}
+			if flagged {
+				c.TaxIDReviewRequestedAt = &at
+			}
+			if err := s.InsertCompany(ctx, c); err != nil {
+				t.Fatalf("InsertCompany %s: %v", name, err)
+			}
+			return o
+		}
+		waiting := company("Bekleyen", orgs.StatusActive, true)
+		suspended := company("Askıda", orgs.StatusSuspended, true)
+		company("Kapalı", orgs.StatusClosed, true)
+		plain := company("Sade", orgs.StatusActive, false)
+		insert(t, s, newOrg(orgs.KindClub, "Kulüp "+tag))
+
+		c, err := s.GetCompany(ctx, waiting.ID)
+		if err != nil || c.TaxIDReviewRequestedAt == nil || !c.TaxIDReviewRequestedAt.Equal(at) || !c.TaxIDReviewPending(waiting.Status) {
+			t.Fatalf("flag on insert = %+v, %v", c.TaxIDReviewRequestedAt, err)
+		}
+		rows, err := s.ListOrgs(ctx, orgs.ListFilter{TaxIDReview: true, Q: tag}, nil, 10)
+		if err != nil || len(rows) != 2 || !slices.ContainsFunc(rows, func(o orgs.Org) bool { return o.ID == waiting.ID }) ||
+			!slices.ContainsFunc(rows, func(o orgs.Org) bool { return o.ID == suspended.ID }) {
+			t.Fatalf("queue = %v, %v; want the active and the suspended flagged companies", rows, err)
+		}
+		// UpdateCompany writes the flag both ways.
+		p, err := s.GetCompany(ctx, plain.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.TaxIDReviewRequestedAt = &at
+		if got, err := s.UpdateCompany(ctx, p); err != nil || got.TaxIDReviewRequestedAt == nil || !got.TaxIDReviewRequestedAt.Equal(at) {
+			t.Fatalf("flagged = %+v, %v", got.TaxIDReviewRequestedAt, err)
+		}
+		c.TaxIDReviewRequestedAt = nil
+		if got, err := s.UpdateCompany(ctx, c); err != nil || got.TaxIDReviewRequestedAt != nil {
+			t.Fatalf("cleared = %+v, %v", got.TaxIDReviewRequestedAt, err)
+		}
+		rows, err = s.ListOrgs(ctx, orgs.ListFilter{TaxIDReview: true, Q: tag, Statuses: []orgs.Status{orgs.StatusActive}}, nil, 10)
+		if err != nil || len(rows) != 1 || rows[0].ID != plain.ID {
+			t.Fatalf("active queue after the updates = %v, %v", rows, err)
+		}
+	})
+
 	t.Run("members: parent kind, uniqueness, end", func(t *testing.T) {
 		t.Parallel()
 		s, w := newStore(t)

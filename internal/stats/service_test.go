@@ -277,7 +277,8 @@ func TestPlatform_SumsTheModulesFigures(t *testing.T) {
 		NewInRange: 7, VerifiedStudents: 30}
 	f.orgStats = orgs.OrgStats{Counts: []orgs.OrgCount{
 		{Kind: orgs.KindClub, Status: orgs.StatusActive, Count: 12}, {Kind: orgs.KindCompany, Status: orgs.StatusActive, Count: 3},
-		{Kind: orgs.KindCompany, Status: orgs.StatusPendingReview, Count: 2}}, NewInRange: map[orgs.Kind]int{orgs.KindCompany: 2}}
+		{Kind: orgs.KindCompany, Status: orgs.StatusPendingReview, Count: 2}}, NewInRange: map[orgs.Kind]int{orgs.KindCompany: 2},
+		TaxIDReviews: 1}
 	f.content = feed.ContentStats{PostsByStatus: map[feed.Status]int{feed.StatusPublished: 9},
 		ReportsByStatus: map[feed.ReportStatus]int{feed.ReportOpen: 2, feed.ReportInReview: 1, feed.ReportDismissed: 4}}
 	f.events = events.EventStats{Upcoming: 3, Held: 4, Registered: 8, CheckedIn: 6}
@@ -300,7 +301,7 @@ func TestPlatform_SumsTheModulesFigures(t *testing.T) {
 		st.Orgs.ByKind[1].NewInRange != 2 || st.Orgs.NewInRange != 2 || len(st.Orgs.ByKind[1].ByStatus) != 2 {
 		t.Fatalf("orgs = %+v", st.Orgs)
 	}
-	if q := st.Queues; q.OrgReviews != 2 || q.ClubClaims != 5 || q.ContentReports != 3 || q.KvkkRequests == nil ||
+	if q := st.Queues; q.OrgReviews != 2 || q.TaxIDReviews != 1 || q.ClubClaims != 5 || q.ContentReports != 3 || q.KvkkRequests == nil ||
 		*q.KvkkRequests != 0 || q.StudentDocuments == nil || *q.StudentDocuments != 0 {
 		t.Fatalf("queues = %+v", st.Queues)
 	}

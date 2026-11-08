@@ -87,6 +87,7 @@ type PlatformEventsDTO struct {
 // PlatformQueuesDTO is the size of the review queues.
 type PlatformQueuesDTO struct {
 	OrgReviews     int `json:"org_reviews" doc:"Orgs awaiting verification (pending_review)"`
+	TaxIDReviews   int `json:"tax_id_reviews" doc:"Companies whose new tax identifier awaits a decision (adminListOrgs?tax_id_review=true; BE-206)"`
 	ClubClaims     int `json:"club_claims" doc:"Pending club claims, every university"`
 	ContentReports int `json:"content_reports" doc:"Content reports open or in review"`
 	// The two below are shown only to a caller who may work the queue
@@ -103,6 +104,7 @@ type PlatformQueuesDTO struct {
 // action, the rule of BE-192), null otherwise. Counts only, now.
 type QueueStats struct {
 	OrgReviews       *int `json:"org_reviews" doc:"Orgs awaiting verification (pending_review); null without orgs.org.list_admin (moderator, support, platform_admin)"`
+	TaxIDReviews     *int `json:"tax_id_reviews" doc:"Companies whose new tax identifier awaits a decision (adminListOrgs?tax_id_review=true; BE-206); null without orgs.org.list_admin (moderator, support, platform_admin)"`
 	ClubClaims       *int `json:"club_claims" doc:"Pending club claims, every university; null without directory.club_claim.list (support, platform_admin)"`
 	ContentReports   *int `json:"content_reports" doc:"Content reports open or in review; null without feed.report.list (moderator, platform_admin)"`
 	KvkkRequests     *int `json:"kvkk_requests" doc:"Data subject (KVKK) requests awaiting action that the caller may work: every open request for the dpo, those awaiting the second approval for platform_admin; null without kvkk.dsr.list"`

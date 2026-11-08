@@ -24,7 +24,7 @@ type gormStore struct{ orm *gorm.DB }
 const (
 	profileCols = `user_id, university_id, department_id, degree_level, class_year, expected_graduation, status,
 		graduated_at, headline, about, city, avatar_file_id, completed_sections, audience_keys, audience_eligible,
-		audience_refreshed_at, created_at, updated_at`
+		audience_refreshed_at, interests, created_at, updated_at`
 	privacyCols    = `user_id, discoverable, show_contact_on_grant, show_clubs_on_grant, activity_ranking_choice, recommendation_choice, created_at, updated_at`
 	experienceCols = `id, user_id, kind, title, organization_name, start_month, end_month, description, created_at, updated_at`
 )
@@ -86,7 +86,10 @@ func (s gormStore) LockProfile(ctx context.Context, userID uuid.UUID) (Profile, 
 }
 
 func profileArgs(p Profile) map[string]any {
-	keys, sections := p.AudienceKeys, p.CompletedSections
+	keys, sections, interests := p.AudienceKeys, p.CompletedSections, p.Interests
+	if interests == nil {
+		interests = db.TextArray{}
+	}
 	if keys == nil {
 		keys = db.TextArray{}
 	}
@@ -98,7 +101,7 @@ func profileArgs(p Profile) map[string]any {
 		"degree_level": string(p.DegreeLevel), "class_year": p.ClassYear, "expected_graduation": p.ExpectedGraduation,
 		"status": string(p.Status), "graduated_at": p.GraduatedAt, "headline": p.Headline, "about": p.About,
 		"city": p.City, "avatar_file_id": p.AvatarFileID, "completed_sections": sections, "audience_keys": keys,
-		"audience_eligible": p.AudienceEligible, "audience_refreshed_at": p.AudienceRefreshedAt,
+		"audience_eligible": p.AudienceEligible, "audience_refreshed_at": p.AudienceRefreshedAt, "interests": interests,
 	}
 }
 
@@ -109,10 +112,11 @@ func (s gormStore) InsertProfile(ctx context.Context, p Profile) (Profile, bool,
 	var rows []Profile
 	err := db.Conn(ctx, s.orm).Raw(`INSERT INTO student_profiles
 		(user_id, university_id, department_id, degree_level, class_year, expected_graduation, status, graduated_at,
-		 headline, about, city, avatar_file_id, completed_sections, audience_keys, audience_eligible, audience_refreshed_at)
+		 headline, about, city, avatar_file_id, completed_sections, audience_keys, audience_eligible, audience_refreshed_at,
+		 interests)
 		VALUES ( @user_id, @university_id, @department_id, @degree_level, @class_year, @expected_graduation, @status,
 		 @graduated_at, @headline, @about, @city, @avatar_file_id, @completed_sections, @audience_keys,
-		 @audience_eligible, @audience_refreshed_at)
+		 @audience_eligible, @audience_refreshed_at, @interests)
 		ON CONFLICT (user_id) DO NOTHING
 		RETURNING `+profileCols, profileArgs(p)).Scan(&rows).Error
 	if err != nil {
@@ -134,7 +138,7 @@ func (s gormStore) UpdateProfile(ctx context.Context, p Profile) (Profile, error
 		class_year = @class_year, expected_graduation = @expected_graduation, status = @status,
 		graduated_at = @graduated_at, headline = @headline, about = @about, city = @city,
 		avatar_file_id = @avatar_file_id, completed_sections = @completed_sections, audience_keys = @audience_keys,
-		audience_eligible = @audience_eligible, audience_refreshed_at = @audience_refreshed_at
+		audience_eligible = @audience_eligible, audience_refreshed_at = @audience_refreshed_at, interests = @interests
 		WHERE user_id = @user_id
 		RETURNING `+profileCols, profileArgs(p)).Scan(&rows).Error
 	if err != nil {

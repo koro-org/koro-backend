@@ -11,7 +11,7 @@ import (
 func (s *MemStore) RecommendableOpportunities(_ context.Context, f OpportunityFilter, limit int) ([]Post, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if (len(f.OrgIDs) == 0 && f.ClassYear <= 0 && f.MinInterest <= 0) || limit <= 0 || f.Reader.UserID == nil {
+	if (len(f.OrgIDs) == 0 && f.ClassYear <= 0 && len(f.Types) == 0 && f.MinInterest <= 0) || limit <= 0 || f.Reader.UserID == nil {
 		return []Post{}, nil
 	}
 	u := *f.Reader.UserID
@@ -27,7 +27,7 @@ func (s *MemStore) RecommendableOpportunities(_ context.Context, f OpportunityFi
 			continue
 		}
 		match := slices.Contains(f.OrgIDs, p.OrgID) || f.ClassYear > 0 && slices.Contains(o.EligibleYears, f.ClassYear) ||
-			f.MinInterest > 0 && (p.LikeCount >= f.MinInterest || p.SaveCount >= f.MinInterest)
+			slices.Contains(f.Types, o.Type) || f.MinInterest > 0 && (p.LikeCount >= f.MinInterest || p.SaveCount >= f.MinInterest)
 		if match {
 			out = append(out, p.clone())
 		}

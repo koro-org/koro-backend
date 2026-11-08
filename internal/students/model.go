@@ -133,6 +133,7 @@ type Profile struct {
 	AudienceKeys        db.TextArray  `gorm:"column:audience_keys"`
 	AudienceEligible    bool          `gorm:"column:audience_eligible"`
 	AudienceRefreshedAt *time.Time    `gorm:"column:audience_refreshed_at"`
+	Interests           db.TextArray  `gorm:"column:interests"` // BE-204: Interest values in their order, at most MaxInterests
 	CreatedAt           time.Time     `gorm:"column:created_at;->"`
 	UpdatedAt           time.Time     `gorm:"column:updated_at;->"`
 }
@@ -145,6 +146,10 @@ func (Profile) TableName() string { return "student_profiles" }
 func cloneProfile(p Profile) Profile {
 	p.CompletedSections = slices.Clone(p.CompletedSections)
 	p.AudienceKeys = slices.Clone(p.AudienceKeys)
+	p.Interests = slices.Clone(p.Interests)
+	if p.Interests == nil {
+		p.Interests = db.TextArray{}
+	}
 	if p.CompletedSections == nil {
 		p.CompletedSections = db.TextArray{}
 	}

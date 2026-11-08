@@ -138,6 +138,13 @@ func recommendContract(t *testing.T, newStore func(t *testing.T) (feed.Store, wo
 		if got := list(feed.OpportunityFilter{Reader: r, ClassYear: 2}, 10); len(got) != 0 {
 			t.Fatalf("class year 2 = %v", got)
 		}
+		// BE-204: the types the student's interests map to.
+		if got := list(feed.OpportunityFilter{Reader: r, Types: []string{"volunteer", "project"}}, 10); !slices.Equal(got, []uuid.UUID{due.ID, noDeadline.ID}) {
+			t.Fatalf("by type = %v", got)
+		}
+		if got := list(feed.OpportunityFilter{Reader: r, Types: []string{"job"}}, 10); len(got) != 0 {
+			t.Fatalf("by type job = %v (the only job call is over)", got)
+		}
 		if got := list(feed.OpportunityFilter{Reader: r, MinInterest: feed.PopularThreshold}, 10); !slices.Equal(got, []uuid.UUID{popularSaves.ID, ad.ID}) {
 			t.Fatalf("popular = %v (10 saves, 10 likes)", got)
 		}

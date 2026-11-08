@@ -46,6 +46,16 @@ type fakes struct {
 	contacted []uuid.UUID // the calls of the student's contact requests (BE-198)
 	contactQ  contactQuery
 	contactE  error
+	interests []students.Interest // the profile's interests (BE-204)
+	inClubs   []uuid.UUID         // the clubs of the interests' categories
+	inAsked   interestAsk
+}
+
+// interestAsk is what ClubsInCategories was asked.
+type interestAsk struct {
+	uni   uuid.UUID
+	cats  []directory.Category
+	limit int
 }
 
 // contactQuery is what ContactedOpportunityPostIDs was asked.
@@ -69,6 +79,17 @@ func (f *fakes) RecommendationChoice(context.Context, uuid.UUID) (students.Recom
 func (f *fakes) PopularClubs(context.Context, uuid.UUID, int) (students.PopularClubs, error) {
 	f.call("popular")
 	return f.popular, nil
+}
+
+func (f *fakes) Interests(context.Context, uuid.UUID) ([]students.Interest, error) {
+	f.call("interests")
+	return f.interests, nil
+}
+
+func (f *fakes) ClubsInCategories(_ context.Context, uni uuid.UUID, cats []directory.Category, limit int) ([]uuid.UUID, error) {
+	f.call("interest_clubs")
+	f.inAsked = interestAsk{uni, cats, limit}
+	return f.inClubs, nil
 }
 
 func (f *fakes) FollowedOrgIDs(context.Context, uuid.UUID, int) ([]uuid.UUID, error) {

@@ -79,6 +79,14 @@ func checkProfile(p Profile) error {
 			return errCheck
 		}
 	}
+	if len(p.Interests) > MaxInterests { // student_profiles_interests_chk
+		return errCheck
+	}
+	for _, x := range p.Interests {
+		if !Interest(x).Valid() {
+			return errCheck
+		}
+	}
 	return nil
 }
 

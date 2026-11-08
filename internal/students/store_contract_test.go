@@ -66,7 +66,8 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (students.Store, wo
 		ctx := t.Context()
 		uni := w.university(t)
 		p := newProfile(t, s, w, uni)
-		if p.CreatedAt.IsZero() || len(p.CompletedSections) != 0 || len(p.AudienceKeys) != 0 || p.AudienceEligible {
+		if p.CreatedAt.IsZero() || len(p.CompletedSections) != 0 || len(p.AudienceKeys) != 0 || p.AudienceEligible ||
+			p.Interests == nil || len(p.Interests) != 0 {
 			t.Fatalf("inserted = %+v", p)
 		}
 		if _, ok, err := s.InsertProfile(ctx, p); err != nil || ok {
@@ -77,10 +78,15 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (students.Store, wo
 		grad := ym(2027, 6)
 		p.DepartmentID, p.ClassYear, p.ExpectedGraduation, p.Headline = &dept, &year, &grad, ptr("Başlık")
 		p.CompletedSections, p.AudienceKeys, p.AudienceEligible = []string{"basics"}, []string{"all", "uni:x"}, true
+		p.Interests = []string{"technology", "sports"} // BE-204
 		got, err := s.UpdateProfile(ctx, p)
 		if err != nil || *got.DepartmentID != dept || *got.ClassYear != 2 || *got.ExpectedGraduation != grad ||
-			!slices.Equal(got.AudienceKeys, []string{"all", "uni:x"}) || !got.AudienceEligible || *got.Headline != "Başlık" {
+			!slices.Equal(got.AudienceKeys, []string{"all", "uni:x"}) || !got.AudienceEligible || *got.Headline != "Başlık" ||
+			!slices.Equal(got.Interests, []string{"technology", "sports"}) {
 			t.Fatalf("updated = %+v, %v", got, err)
+		}
+		if read, err := s.GetProfile(ctx, p.UserID); err != nil || !slices.Equal(read.Interests, []string{"technology", "sports"}) {
+			t.Fatalf("GetProfile interests = %v, %v", read.Interests, err)
 		}
 		locked, err := s.LockProfile(ctx, p.UserID)
 		if err != nil || locked.UserID != p.UserID {
@@ -99,6 +105,12 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (students.Store, wo
 			"graduated":   func(p students.Profile) students.Profile { p.Status = students.ProfileGraduated; return p },
 			"section":     func(p students.Profile) students.Profile { p.CompletedSections = []string{"talent"}; return p },
 			"not 1st day": func(p students.Profile) students.Profile { d := grad; d.Day = 2; p.ExpectedGraduation = &d; return p },
+			// BE-204: student_profiles_interests_chk (a sensitive club category is no interest; at most 5).
+			"interest": func(p students.Profile) students.Profile { p.Interests = []string{"religious"}; return p },
+			"interests": func(p students.Profile) students.Profile {
+				p.Interests = []string{"academic", "technology", "career", "arts", "sports", "hobby"}
+				return p
+			},
 		} {
 			if _, err := s.UpdateProfile(ctx, bad(got)); !isInvalid(err) {
 				t.Errorf("%s: %v, want 422", name, err)

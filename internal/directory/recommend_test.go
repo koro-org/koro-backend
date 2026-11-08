@@ -62,3 +62,58 @@ func TestRecommendableClubs_NeverSensitiveOrInactive(t *testing.T) {
 		t.Fatalf("no IDs = %+v, %v", got, err)
 	}
 }
+
+// TestClubsInCategories_OwnUniversityNeverSensitive (BE-204): the clubs of
+// the student's interests are the student's university's clubs of the
+// asked categories, category by category in the order asked, each by name;
+// a sensitive club (whatever its category), a club whose org is not active,
+// another university's club and a sensitive category are left out, and the
+// list stops at the limit.
+func TestClubsInCategories_OwnUniversityNeverSensitive(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := t.Context()
+	uni := e.university(t, "U-I", "Iğdır Üniversitesi", "Iğdır")
+	other := e.university(t, "U-J", "Jandarma Üniversitesi", "Ankara")
+	robot := e.club(t, uni, "Robotik Kulübü", directory.CategoryTechnology)
+	code := e.club(t, uni, "Kodlama Kulübü", directory.CategoryTechnology)
+	run := e.club(t, uni, "Koşu Kulübü", directory.CategorySports)
+	e.club(t, uni, "Fotoğraf Kulübü", directory.CategoryArts)
+	e.club(t, uni, "İnanç Topluluğu", directory.CategoryReligious)
+	e.club(t, other, "Yazılım Kulübü", directory.CategoryTechnology)
+	health, err := e.svc.AdminCreateClub(ctx, pad(t), directory.ClubInput{UniversityID: uni.ID, Name: "Destek Grubu",
+		Category: directory.CategorySports, JoinPolicy: directory.JoinApproval, IsSensitive: true, SensitiveReason: "health"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := e.club(t, uni, "Kapanan Spor Kulübü", directory.CategorySports)
+	o, err := e.orgsMem.GetOrg(ctx, closed.Club.OrgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.Status = orgs.StatusSuspended
+	if _, err := e.orgsMem.UpdateOrg(ctx, o); err != nil {
+		t.Fatal(err)
+	}
+	rec := e.svc.(directory.Recommendations)
+	cats := []directory.Category{directory.CategorySports, directory.CategoryReligious, directory.CategoryTechnology, directory.CategorySports}
+	got, err := rec.ClubsInCategories(ctx, uni.ID, cats, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []uuid.UUID{run.Club.OrgID, code.Club.OrgID, robot.Club.OrgID}; !slices.Equal(got, want) {
+		t.Fatalf("ClubsInCategories = %v, want %v (sports, then technology by name)", got, want)
+	}
+	if slices.Contains(got, health.Club.OrgID) {
+		t.Fatal("a sensitive club came back")
+	}
+	if got, err := rec.ClubsInCategories(ctx, uni.ID, cats, 2); err != nil || len(got) != 2 {
+		t.Fatalf("limit 2 = %v, %v", got, err)
+	}
+	if got, err := rec.ClubsInCategories(ctx, uni.ID, []directory.Category{directory.CategoryReligious, "unknown"}, 10); err != nil || len(got) != 0 {
+		t.Fatalf("a sensitive or unknown category = %v, %v", got, err)
+	}
+	if got, err := rec.ClubsInCategories(ctx, uuid.Nil(), cats, 10); err != nil || len(got) != 0 {
+		t.Fatalf("no university = %v, %v", got, err)
+	}
+}

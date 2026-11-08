@@ -13063,10 +13063,11 @@ components:
         club:
           $ref: "#/components/schemas/ClubCardDTO"
         reasons:
-          description: "The rules that picked the club, the strongest first (show the first): attended_organiser — it organised an event you attended; popular_in_department — at least 10 students of your department are members; popular_in_university — at least 10 students of your university are members"
+          description: "The rules that picked the club, the strongest first (show the first): attended_organiser — it organised an event you attended; matches_interest — its category is one of your profile's interests (a club of your university, or one another rule picked); popular_in_department — at least 10 students of your department are members; popular_in_university — at least 10 students of your university are members"
           items:
             enum:
               - attended_organiser
+              - matches_interest
               - popular_in_department
               - popular_in_university
             type: string
@@ -13082,10 +13083,11 @@ components:
         event:
           $ref: "#/components/schemas/EventCardDTO"
         reasons:
-          description: "The rules that picked the event, the strongest first (show the first; starting_soon never comes alone): followed_org — a club or org you follow or belong to; attended_category — like the events you attended in the last year; same_university — your university or one of its clubs; popular — at least 10 registrations; starting_soon — starts within 72 hours"
+          description: "The rules that picked the event, the strongest first (show the first; starting_soon never comes alone): followed_org — a club or org you follow or belong to; matches_interest — its category matches one of your profile's interests; attended_category — like the events you attended in the last year; same_university — your university or one of its clubs; popular — at least 10 registrations; starting_soon — starts within 72 hours"
           items:
             enum:
               - followed_org
+              - matches_interest
               - attended_category
               - same_university
               - popular
@@ -13103,11 +13105,12 @@ components:
         post:
           $ref: "#/components/schemas/PostDTO"
         reasons:
-          description: "The rules that picked the call, the strongest first (show the first; deadline_soon never comes alone): followed_org — a club or org you follow or belong to; attended_organiser — it organised an event you attended; same_university — your university or one of its clubs; eligible_year — open to your class year; popular — at least 10 likes or 10 saves; deadline_soon — the deadline is within 7 days"
+          description: "The rules that picked the call, the strongest first (show the first; deadline_soon never comes alone): followed_org — a club or org you follow or belong to; attended_organiser — it organised an event you attended; matches_interest — its type matches one of your profile's interests; same_university — your university or one of its clubs; eligible_year — open to your class year; popular — at least 10 likes or 10 saves; deadline_soon — the deadline is within 7 days"
           items:
             enum:
               - followed_org
               - attended_organiser
+              - matches_interest
               - same_university
               - eligible_year
               - popular
@@ -15991,6 +15994,21 @@ components:
           type: array
         headline:
           type: string
+        interests:
+          description: Your interests (at most 5), used by your own recommendations only (GET /me/recommendations, reason matches_interest); never shown to a company or anyone else
+          items:
+            enum:
+              - academic
+              - technology
+              - career
+              - entrepreneurship
+              - arts
+              - culture
+              - sports
+              - social_responsibility
+              - hobby
+            type: string
+          type: array
         languages:
           items:
             $ref: "#/components/schemas/StudentLanguageDTO"
@@ -16019,6 +16037,7 @@ components:
         - degree_level
         - status
         - completed_sections
+        - interests
         - skills
         - experiences
         - languages
@@ -17699,6 +17718,23 @@ components:
         headline:
           maxLength: 160
           type: string
+        interests:
+          description: Replaces your interests (at most 5; an empty list clears them). Used by your own recommendations only (reason matches_interest), never shown to a company. No special category of personal data (religion, politics, health, …) is an interest
+          items:
+            enum:
+              - academic
+              - technology
+              - career
+              - entrepreneurship
+              - arts
+              - culture
+              - sports
+              - social_responsibility
+              - hobby
+            type: string
+          maxItems: 5
+          type: array
+          uniqueItems: true
       type: object
     UpdatePurposeInputBody:
       additionalProperties: false
@@ -33684,7 +33720,7 @@ paths:
       x-koro-rate-limit: read_default
       x-koro-surface: self
     patch:
-      description: Partial update; an empty string clears an optional text. The university comes from the student verification and cannot be changed (an unknown member such as university_id is 422). The department must be an active department of that university (422 students.unknown_department).
+      description: Partial update; an empty string clears an optional text. The university comes from the student verification and cannot be changed (an unknown member such as university_id is 422). The department must be an active department of that university (422 students.unknown_department). interests replaces the list of interests (at most 5, from a fixed list without special categories of personal data); they feed your own recommendations only.
       operationId: updateMyStudentProfile
       requestBody:
         content:

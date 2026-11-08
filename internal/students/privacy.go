@@ -142,6 +142,7 @@ func exportProfile(p Profile) map[string]any {
 		"record": "student_profile", "university_id": p.UniversityID.String(), "degree_level": string(p.DegreeLevel),
 		"status": string(p.Status), "completed_sections": []string(p.CompletedSections),
 		"audience_keys": []string(p.AudienceKeys), "audience_eligible": p.AudienceEligible,
+		"interests":  append([]string{}, p.Interests...),
 		"created_at": p.CreatedAt.UTC().Format(time.RFC3339), "updated_at": p.UpdatedAt.UTC().Format(time.RFC3339),
 	}
 	if p.DepartmentID != nil {

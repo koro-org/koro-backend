@@ -43,7 +43,9 @@ func Register(api huma.API, svc Service) {
 		Summary: "Update my student profile",
 		Description: "Partial update; an empty string clears an optional text. The university comes from the " +
 			"student verification and cannot be changed (an unknown member such as university_id is 422). The " +
-			"department must be an active department of that university (422 students.unknown_department).",
+			"department must be an active department of that university (422 students.unknown_department). " +
+			"interests replaces the list of interests (at most 5, from a fixed list without special categories " +
+			"of personal data); they feed your own recommendations only.",
 	}, authz.StudentsProfileUpdateOwn, ""), h.updateProfile)
 
 	huma.Register(api, self(huma.Operation{
@@ -165,6 +167,8 @@ type updateProfileInput struct {
 		About              *string `json:"about,omitempty" maxLength:"2000"`
 		City               *string `json:"city,omitempty" maxLength:"60"`
 		AvatarFileID       *string `json:"avatar_file_id,omitempty" doc:"An avatar upload of yours (createUpload); empty string removes the avatar"`
+		// Interests: BE-204.
+		Interests *[]string `json:"interests,omitempty" maxItems:"5" uniqueItems:"true" enum:"academic,technology,career,entrepreneurship,arts,culture,sports,social_responsibility,hobby" doc:"Replaces your interests (at most 5; an empty list clears them). Used by your own recommendations only (reason matches_interest), never shown to a company. No special category of personal data (religion, politics, health, …) is an interest"`
 	}
 }
 
@@ -187,6 +191,13 @@ func (h handler) updateProfile(ctx context.Context, in *updateProfileInput) (*pr
 	if b.DegreeLevel != nil {
 		d := DegreeLevel(*b.DegreeLevel)
 		p.DegreeLevel = &d
+	}
+	if b.Interests != nil {
+		in := make([]Interest, len(*b.Interests))
+		for i, x := range *b.Interests {
+			in[i] = Interest(x)
+		}
+		p.Interests = &in
 	}
 	v, err := h.svc.UpdateMyProfile(ctx, a, p)
 	if err != nil {

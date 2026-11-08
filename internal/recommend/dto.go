@@ -21,20 +21,20 @@ type RecommendationsDTO struct {
 // RecommendedEventDTO is a recommended event: listEvents' card and why.
 type RecommendedEventDTO struct {
 	Event   events.EventCardDTO `json:"event"`
-	Reasons []string            `json:"reasons" minItems:"1" enum:"followed_org,attended_category,same_university,popular,starting_soon" doc:"The rules that picked the event, the strongest first (show the first; starting_soon never comes alone): followed_org — a club or org you follow or belong to; attended_category — like the events you attended in the last year; same_university — your university or one of its clubs; popular — at least 10 registrations; starting_soon — starts within 72 hours"`
+	Reasons []string            `json:"reasons" minItems:"1" enum:"followed_org,matches_interest,attended_category,same_university,popular,starting_soon" doc:"The rules that picked the event, the strongest first (show the first; starting_soon never comes alone): followed_org — a club or org you follow or belong to; matches_interest — its category matches one of your profile's interests; attended_category — like the events you attended in the last year; same_university — your university or one of its clubs; popular — at least 10 registrations; starting_soon — starts within 72 hours"`
 }
 
 // RecommendedClubDTO is a recommended club: listClubs' card and why.
 type RecommendedClubDTO struct {
 	Club    directory.ClubCardDTO `json:"club"`
-	Reasons []string              `json:"reasons" minItems:"1" enum:"attended_organiser,popular_in_department,popular_in_university" doc:"The rules that picked the club, the strongest first (show the first): attended_organiser — it organised an event you attended; popular_in_department — at least 10 students of your department are members; popular_in_university — at least 10 students of your university are members"`
+	Reasons []string              `json:"reasons" minItems:"1" enum:"attended_organiser,matches_interest,popular_in_department,popular_in_university" doc:"The rules that picked the club, the strongest first (show the first): attended_organiser — it organised an event you attended; matches_interest — its category is one of your profile's interests (a club of your university, or one another rule picked); popular_in_department — at least 10 students of your department are members; popular_in_university — at least 10 students of your university are members"`
 }
 
 // RecommendedOpportunityDTO is a recommended opportunity call: getFeed's
 // post and why (BE-191).
 type RecommendedOpportunityDTO struct {
 	Post    feed.PostDTO `json:"post"`
-	Reasons []string     `json:"reasons" minItems:"1" enum:"followed_org,attended_organiser,same_university,eligible_year,popular,deadline_soon" doc:"The rules that picked the call, the strongest first (show the first; deadline_soon never comes alone): followed_org — a club or org you follow or belong to; attended_organiser — it organised an event you attended; same_university — your university or one of its clubs; eligible_year — open to your class year; popular — at least 10 likes or 10 saves; deadline_soon — the deadline is within 7 days"`
+	Reasons []string     `json:"reasons" minItems:"1" enum:"followed_org,attended_organiser,matches_interest,same_university,eligible_year,popular,deadline_soon" doc:"The rules that picked the call, the strongest first (show the first; deadline_soon never comes alone): followed_org — a club or org you follow or belong to; attended_organiser — it organised an event you attended; matches_interest — its type matches one of your profile's interests; same_university — your university or one of its clubs; eligible_year — open to your class year; popular — at least 10 likes or 10 saves; deadline_soon — the deadline is within 7 days"`
 }
 
 func toDTO(r Recommendations) RecommendationsDTO {

@@ -138,6 +138,7 @@ type StudentProfileSelfDTO struct {
 	City               string                 `json:"city,omitempty"`
 	AvatarURL          string                 `json:"avatar_url,omitempty" doc:"Signed URL, valid for 5 minutes"`
 	CompletedSections  []string               `json:"completed_sections"`
+	Interests          []string               `json:"interests" enum:"academic,technology,career,entrepreneurship,arts,culture,sports,social_responsibility,hobby" doc:"Your interests (at most 5), used by your own recommendations only (GET /me/recommendations, reason matches_interest); never shown to a company or anyone else"`
 	Skills             []StudentSkillDTO      `json:"skills"`
 	Experiences        []StudentExperienceDTO `json:"experiences"`
 	Languages          []StudentLanguageDTO   `json:"languages"`
@@ -178,8 +179,8 @@ func toSelfDTO(v ProfileView) StudentProfileSelfDTO {
 		UserID: p.UserID.String(), University: universityRef(v), Department: departmentRef(v),
 		DegreeLevel: string(p.DegreeLevel), ClassYear: intPtr(p.ClassYear), Status: string(p.Status),
 		Headline: str(p.Headline), About: str(p.About), City: str(p.City), AvatarURL: v.AvatarURL,
-		CompletedSections: append([]string{}, p.CompletedSections...),
-		Skills:            skillDTOs(v.Skills, v.SkillNames), Languages: languageDTOs(v.Languages),
+		CompletedSections: append([]string{}, p.CompletedSections...), Interests: append([]string{}, p.Interests...),
+		Skills: skillDTOs(v.Skills, v.SkillNames), Languages: languageDTOs(v.Languages),
 		Experiences: make([]StudentExperienceDTO, len(v.Experiences)), CVs: cvDTOs(v.CVs), Privacy: toPrivacyDTO(v.Privacy),
 	}
 	if p.ExpectedGraduation != nil {

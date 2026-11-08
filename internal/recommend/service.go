@@ -34,6 +34,9 @@ const (
 	maxCategories = 3
 	// maxPopularClubs bounds each popular club list read from students.
 	maxPopularClubs = 20
+	// maxInterestClubs bounds the clubs of the student's interests read
+	// from directory (BE-204).
+	maxInterestClubs = 20
 	// OpportunityWindow is how far back a recommended opportunity call may
 	// have been published (BE-191); a call whose deadline is over is never
 	// one.
@@ -66,6 +69,13 @@ const (
 	ReasonStartingSoon Reason = "starting_soon"
 )
 
+// ReasonMatchesInterest: the item matches one of the interests of the
+// student's profile ("İlgi alanına uygun"; BE-204, Q-57): an event of a
+// category, a club of the student's university of the category, or an
+// opportunity call of a type the interest maps to (interestMatches). The
+// student's own declared data; no sensitive category is an interest.
+const ReasonMatchesInterest Reason = "matches_interest"
+
 // Reasons of an opportunity call besides followed_org, attended_organiser,
 // same_university and popular (BE-191; popular: at least 10 likes or 10
 // saves).
@@ -94,15 +104,18 @@ const (
 // EventReasons and ClubReasons list the codes in the order an item shows
 // them (the strongest rule first); weights rank the items.
 var (
-	EventReasons       = []Reason{ReasonFollowedOrg, ReasonAttendedCategory, ReasonSameUniversity, ReasonPopular, ReasonStartingSoon}
-	ClubReasons        = []Reason{ReasonAttendedOrganiser, ReasonPopularInDepartment, ReasonPopularInUniversity}
+	EventReasons = []Reason{
+		ReasonFollowedOrg, ReasonMatchesInterest, ReasonAttendedCategory, ReasonSameUniversity, ReasonPopular, ReasonStartingSoon,
+	}
+	ClubReasons        = []Reason{ReasonAttendedOrganiser, ReasonMatchesInterest, ReasonPopularInDepartment, ReasonPopularInUniversity}
 	OpportunityReasons = []Reason{
-		ReasonFollowedOrg, ReasonAttendedOrganiser, ReasonSameUniversity, ReasonEligibleYear, ReasonPopular, ReasonDeadlineSoon,
+		ReasonFollowedOrg, ReasonAttendedOrganiser, ReasonMatchesInterest, ReasonSameUniversity, ReasonEligibleYear, ReasonPopular,
+		ReasonDeadlineSoon,
 	}
 	weights = map[Reason]int{
 		ReasonFollowedOrg: 4, ReasonAttendedCategory: 2, ReasonSameUniversity: 2, ReasonPopular: 1, ReasonStartingSoon: 1,
 		ReasonAttendedOrganiser: 3, ReasonPopularInDepartment: 2, ReasonPopularInUniversity: 1,
-		ReasonEligibleYear: 2, ReasonDeadlineSoon: 1,
+		ReasonEligibleYear: 2, ReasonDeadlineSoon: 1, ReasonMatchesInterest: 2,
 	}
 )
 
@@ -199,6 +212,7 @@ type signals struct {
 	university []uuid.UUID        // the student's university org and its clubs: same_university
 	categories []events.Category  // the attended categories, most events first: attended_category
 	organisers []uuid.UUID        // the attended organisers (never sensitive): attended_organiser
+	interests  interestSignals    // what the profile's interests match (BE-204): matches_interest
 }
 
 func (s *service) signals(ctx context.Context, a authz.Actor) (signals, error) {
@@ -242,6 +256,11 @@ func (s *service) signals(ctx context.Context, a authz.Actor) (signals, error) {
 	}
 	sig.categories = ev.Categories[:min(maxCategories, len(ev.Categories))]
 	sig.organisers = ev.Organisers
+	interests, err := s.d.Students.Interests(ctx, a.UserID)
+	if err != nil {
+		return signals{}, err
+	}
+	sig.interests = matchesOf(interests)
 	return sig, nil
 }
 
@@ -258,7 +277,8 @@ func (s *service) events(ctx context.Context, a authz.Actor, sig signals, limit 
 		}
 	}
 	rows, err := s.d.Events.RecommendableEvents(ctx, a, events.RecommendQuery{
-		OrgIDs: orgIDs, Categories: sig.categories, From: now, To: now.Add(Horizon), Limit: Candidates,
+		OrgIDs: orgIDs, Categories: appendNew(slices.Clone(sig.categories), sig.interests.events...), From: now,
+		To: now.Add(Horizon), Limit: Candidates,
 	})
 	if err != nil {
 		return nil, err
@@ -272,6 +292,7 @@ func (s *service) events(ctx context.Context, a authz.Actor, sig signals, limit 
 	for _, e := range rows {
 		rules := map[Reason]bool{
 			ReasonFollowedOrg:      slices.Contains(sig.followed, e.OrgID),
+			ReasonMatchesInterest:  slices.Contains(sig.interests.events, e.Category),
 			ReasonAttendedCategory: slices.Contains(sig.categories, e.Category),
 			ReasonSameUniversity:   slices.Contains(sig.university, e.OrgID),
 			ReasonPopular:          e.ConfirmedCount >= events.PopularThreshold,
@@ -308,14 +329,23 @@ func (s *service) events(ctx context.Context, a authz.Actor, sig signals, limit 
 	return out, nil
 }
 
-// clubs picks the clubs: the organisers of the student's events and the
-// clubs popular in the student's department and university, without the
-// student's own (followed or member), by weight, then in the order the
-// rules named them; directory drops the sensitive and inactive ones.
+// clubs picks the clubs: the organisers of the student's events, the clubs
+// of the student's university in the categories of the student's interests
+// and the clubs popular in the student's department and university,
+// without the student's own (followed or member), by weight, then in the
+// order the rules named them; directory drops the sensitive and inactive
+// ones. A chosen club whose category is one of the interests carries
+// matches_interest too.
 func (s *service) clubs(ctx context.Context, a authz.Actor, sig signals, limit int) ([]ClubItem, error) {
 	pop, err := s.d.Students.PopularClubs(ctx, a.UserID, maxPopularClubs)
 	if err != nil {
 		return nil, err
+	}
+	var interestClubs []uuid.UUID
+	if len(sig.interests.clubs) > 0 && a.IsVerifiedStudent() && a.UniversityID != nil {
+		if interestClubs, err = s.d.Clubs.ClubsInCategories(ctx, *a.UniversityID, sig.interests.clubs, maxInterestClubs); err != nil {
+			return nil, err
+		}
 	}
 	var order []uuid.UUID
 	rules := map[uuid.UUID]map[Reason]bool{}
@@ -332,6 +362,7 @@ func (s *service) clubs(ctx context.Context, a authz.Actor, sig signals, limit i
 		}
 	}
 	name(sig.organisers, ReasonAttendedOrganiser)
+	name(interestClubs, ReasonMatchesInterest)
 	name(pop.Department, ReasonPopularInDepartment)
 	name(pop.University, ReasonPopularInUniversity)
 	if len(order) == 0 {
@@ -348,11 +379,14 @@ func (s *service) clubs(ctx context.Context, a authz.Actor, sig signals, limit i
 	}
 	out := make([]ClubItem, 0, len(cards))
 	for _, c := range cards {
-		reasons, _ := pick(ClubReasons, rules[c.Row.OrgID])
-		if len(reasons) > 0 {
+		if r := rules[c.Row.OrgID]; r != nil && slices.Contains(sig.interests.clubs, c.Row.Category) {
+			r[ReasonMatchesInterest] = true
+		}
+		if reasons, _ := pick(ClubReasons, rules[c.Row.OrgID]); len(reasons) > 0 {
 			out = append(out, ClubItem{Card: c, Reasons: reasons})
 		}
 	}
+	slices.SortStableFunc(out, func(x, y ClubItem) int { return cmp.Compare(score(y.Card.Row.OrgID), score(x.Card.Row.OrgID)) })
 	return out, nil
 }
 
@@ -379,7 +413,7 @@ func (s *service) opportunities(ctx context.Context, a authz.Actor, sig signals,
 		return nil, err
 	}
 	rows, err := s.d.Opportunities.RecommendableOpportunities(ctx, a, feed.OpportunityQuery{
-		OrgIDs: orgIDs, Since: since, Limit: OpportunityCandidates, Exclude: contacted,
+		OrgIDs: orgIDs, Since: since, Limit: OpportunityCandidates, Exclude: contacted, Types: sig.interests.opportunities,
 	})
 	if err != nil {
 		return nil, err
@@ -396,6 +430,7 @@ func (s *service) opportunities(ctx context.Context, a authz.Actor, sig signals,
 		rules := map[Reason]bool{
 			ReasonFollowedOrg:       slices.Contains(sig.followed, c.OrgID),
 			ReasonAttendedOrganiser: slices.Contains(sig.organisers, c.OrgID),
+			ReasonMatchesInterest:   slices.Contains(sig.interests.opportunities, c.Opportunity.Type),
 			ReasonSameUniversity:    slices.Contains(sig.university, c.OrgID),
 			ReasonEligibleYear:      c.ForYourYear,
 			ReasonPopular:           c.Popular,

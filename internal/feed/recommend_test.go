@@ -322,3 +322,36 @@ func TestRecommendableOpportunities_LeavesOutExcluded(t *testing.T) {
 		t.Fatalf("an exclusion past the bound = %v, %v; want it ignored", candidateIDs(got), err)
 	}
 }
+
+// TestRecommendableOpportunities_ByInterestTypes (BE-204): q.Types (the
+// opportunity types the student's interests map to) makes a call of one of
+// them a candidate without an org or a class year; an unknown type matches
+// nothing, and the feed's visibility still holds (a minor gets no company
+// call).
+func TestRecommendableOpportunities_ByInterestTypes(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := t.Context()
+	student := persona(t, "student")
+	since := e.clk.Now()
+	volunteer := e.putCall(t, "club_b", feed.AuthorClub, clubCall, nil)
+	internship := e.putCall(t, "company_a", feed.AuthorCompany, companyCall, nil)
+	e.putCall(t, "club_a", feed.AuthorClub, overCall, nil) // a job call whose deadline is over
+	o := e.svc.(feed.Opportunities)
+	q := feed.OpportunityQuery{Types: []string{"volunteer", "internship", "job"}, Since: since, Limit: 10}
+	got, err := o.RecommendableOpportunities(ctx, student, q)
+	if err != nil || !slices.Equal(candidateIDs(got), []uuid.UUID{internship.ID, volunteer.ID}) {
+		t.Fatalf("by type = %v, %v", candidateIDs(got), err)
+	}
+	got, err = o.RecommendableOpportunities(ctx, persona(t, "student_minor"), q)
+	if err != nil || !slices.Equal(candidateIDs(got), []uuid.UUID{volunteer.ID}) {
+		t.Fatalf("minor by type = %v, %v (no commercial call)", candidateIDs(got), err)
+	}
+	q.Types = []string{"religious", "volunteer'--"}
+	if got, err := o.RecommendableOpportunities(ctx, student, q); err != nil || len(got) != 0 {
+		t.Fatalf("unknown types = %v, %v", candidateIDs(got), err)
+	}
+	if !slices.Equal(feed.OpportunityTypes(), []string{"internship", "job", "part_time", "project", "volunteer", "talent_call"}) {
+		t.Fatalf("OpportunityTypes = %v", feed.OpportunityTypes())
+	}
+}

@@ -239,6 +239,10 @@ var (
 	workModes        = []string{"onsite", "hybrid", "remote"}
 )
 
+// OpportunityTypes lists the types of an opportunity call (opportunity.type;
+// the recommendations' interest matching reads them, BE-204).
+func OpportunityTypes() []string { return slices.Clone(opportunityTypes) }
+
 // cleanOpportunity validates an opportunity and returns its canonical
 // JSON. Applying with a contact request is a company's (messaging: the
 // company asks, the student accepts).

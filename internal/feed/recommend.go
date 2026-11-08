@@ -80,9 +80,10 @@ type Opportunities interface {
 	// most MaxRecommendableOpportunities) opportunity calls a may see in
 	// the feed, published at or after q.Since, whose deadline, if any, is
 	// today or later (Europe/Istanbul), that a has neither liked nor saved,
-	// not among q.Exclude, of an active org: up to q.Limit authored by one of q.OrgIDs or open
-	// to a's own class year (eligible_years lists the year of a's profile),
-	// and up to q.Limit popular (PopularThreshold) ones; newest first.
+	// not among q.Exclude, of an active org: up to q.Limit authored by one of q.OrgIDs, open
+	// to a's own class year (eligible_years lists the year of a's profile)
+	// or of one of q.Types (BE-204: the student's interests), and up to
+	// q.Limit popular (PopularThreshold) ones; newest first.
 	// Candidates only: the caller ranks them and asks OpportunityCards for
 	// the few it shows.
 	RecommendableOpportunities(ctx context.Context, a authz.Actor, q OpportunityQuery) ([]OpportunityCandidate, error)
@@ -103,6 +104,10 @@ type OpportunityQuery struct {
 	// company already contacted the student about); the first
 	// MaxExcludedOpportunities count.
 	Exclude []uuid.UUID
+	// Types are opportunity types (OpportunityTypes) a call of matches
+	// (BE-204: the types the student's interests map to); an unknown one
+	// matches nothing.
+	Types []string
 }
 
 // OpportunityCandidate is a recommendable opportunity call: what the rules
@@ -121,7 +126,7 @@ type OpportunityCandidate struct {
 }
 
 // OpportunityFilter narrows recommendStore.RecommendableOpportunities. The
-// three matchers are ORed; none set matches nothing.
+// four matchers are ORed; none set matches nothing.
 type OpportunityFilter struct {
 	// Reader is the signed-in reader: the visibility of readerConds, and
 	// whose mutes, hides, likes and saves leave calls out.
@@ -132,6 +137,8 @@ type OpportunityFilter struct {
 	OrgIDs []uuid.UUID
 	// ClassYear: eligible_years lists it (0: not this way).
 	ClassYear int
+	// Types: opportunity.type is one of them (BE-204).
+	Types []string
 	// MinInterest: like_count or save_count at least this (0: not this
 	// way).
 	MinInterest int
@@ -173,13 +180,14 @@ func (s *service) RecommendableOpportunities(ctx context.Context, a authz.Actor,
 	f := OpportunityFilter{Reader: r, Since: q.Since, Today: civil.Today(s.d.Clock.Now()),
 		ExcludeIDs: q.Exclude[:min(len(q.Exclude), MaxExcludedOpportunities)]}
 	var rows []Post
-	if len(q.OrgIDs) > 0 || year > 0 {
-		f.OrgIDs, f.ClassYear = q.OrgIDs, year
+	types := knownTypes(q.Types)
+	if len(q.OrgIDs) > 0 || year > 0 || len(types) > 0 {
+		f.OrgIDs, f.ClassYear, f.Types = q.OrgIDs, year, types
 		if rows, err = s.recommendations().RecommendableOpportunities(ctx, f, limit); err != nil {
 			return nil, err
 		}
 	}
-	f.OrgIDs, f.ClassYear, f.MinInterest = nil, 0, PopularThreshold
+	f.OrgIDs, f.ClassYear, f.Types, f.MinInterest = nil, 0, nil, PopularThreshold
 	popular, err := s.recommendations().RecommendableOpportunities(ctx, f, limit)
 	if err != nil {
 		return nil, err
@@ -208,6 +216,17 @@ func (s *service) RecommendableOpportunities(ctx context.Context, a authz.Actor,
 		})
 	}
 	return out, nil
+}
+
+// knownTypes returns the opportunity types among types, each once.
+func knownTypes(types []string) []string {
+	var out []string
+	for _, t := range types {
+		if slices.Contains(opportunityTypes, t) && !slices.Contains(out, t) {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // recommendable keeps the rows of an active org that is not a sensitive

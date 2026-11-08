@@ -12,6 +12,7 @@ import (
 	"koro/internal/directory"
 	"koro/internal/files"
 	"koro/internal/platform/civil"
+	"koro/internal/platform/db"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
 	"koro/internal/platform/problem"
@@ -32,12 +33,15 @@ type ProfilePatch struct {
 	City                    *string // "" clears
 	Avatar                  *uuid.UUID
 	ClearAvatar             bool
+	// Interests replaces the interests (BE-204; an empty list clears them):
+	// at most MaxInterests, duplicates dropped, kept in their order.
+	Interests *[]Interest
 }
 
 func (p ProfilePatch) empty() bool {
 	return p.Department == nil && !p.ClearDepartment && p.DegreeLevel == nil && p.ClassYear == nil &&
 		p.ExpectedGraduation == nil && !p.ClearExpectedGraduation && p.Headline == nil && p.About == nil &&
-		p.City == nil && p.Avatar == nil && !p.ClearAvatar
+		p.City == nil && p.Avatar == nil && !p.ClearAvatar && p.Interests == nil
 }
 
 // SkillInput is one item of putMySkills.
@@ -290,6 +294,13 @@ func (s *service) UpdateMyProfile(ctx context.Context, a authz.Actor, patch Prof
 func (s *service) apply(ctx context.Context, a authz.Actor, p Profile, patch ProfilePatch) (Profile, []string, error) {
 	next, changed := p, []string{}
 	set := func(name string) { changed = append(changed, name) }
+	var interests db.TextArray // validated before any other read or write of the patch
+	if patch.Interests != nil {
+		var err error
+		if interests, err = cleanInterests(*patch.Interests); err != nil {
+			return p, nil, err
+		}
+	}
 	switch {
 	case patch.Department != nil:
 		d, err := s.d.Catalog.GetDepartment(ctx, *patch.Department)
@@ -384,6 +395,10 @@ func (s *service) apply(ctx context.Context, a authz.Actor, p Profile, patch Pro
 	case patch.ClearAvatar && p.AvatarFileID != nil:
 		next.AvatarFileID = nil
 		set("avatar_file_id")
+	}
+	if patch.Interests != nil && !slices.Equal(interests, p.Interests) {
+		next.Interests = interests
+		set("interests")
 	}
 	return next, changed, nil
 }

@@ -39,6 +39,10 @@ type Recommendations interface {
 	// profile, most members first; none without a profile (or, for the
 	// department list, without a department).
 	PopularClubs(ctx context.Context, userID uuid.UUID, limit int) (PopularClubs, error)
+	// Interests returns the interests of userID's student profile in their
+	// order (BE-204); none without a profile. The student's own data, read
+	// for the student's own recommendations only.
+	Interests(ctx context.Context, userID uuid.UUID) ([]Interest, error)
 }
 
 // PopularClubs are the clubs popular around a student (Recommendations):

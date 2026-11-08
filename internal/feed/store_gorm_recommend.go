@@ -21,6 +21,9 @@ func (s gormStore) RecommendableOpportunities(ctx context.Context, f Opportunity
 	if f.ClassYear > 0 {
 		match, args = append(match, "p.opportunity -> 'eligible_years' @> jsonb_build_array( ?::int)"), append(args, f.ClassYear)
 	}
+	if len(f.Types) > 0 {
+		match, args = append(match, "p.opportunity ->> 'type' IN ?"), append(args, f.Types)
+	}
 	if f.MinInterest > 0 {
 		match, args = append(match, "p.like_count >= ? OR p.save_count >= ?"), append(args, f.MinInterest, f.MinInterest)
 	}

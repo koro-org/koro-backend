@@ -21,6 +21,13 @@ type Recommendations interface {
 	// orgIDs; the others are left out. A card carries the member count
 	// from MemberThreshold on and the public logo, like listClubs.
 	RecommendableClubs(ctx context.Context, orgIDs []uuid.UUID, limit int) ([]ClubCard, error)
+	// ClubsInCategories returns the org IDs of up to limit (at most
+	// MaxRecommendableClubs) clubs of universityID in one of cats that may
+	// be recommended (active org, not sensitive), category by category in
+	// the order of cats, each by name (BE-204: the clubs of the student's
+	// interests). A sensitive category is never asked for: such a club is
+	// always sensitive and left out.
+	ClubsInCategories(ctx context.Context, universityID uuid.UUID, cats []Category, limit int) ([]uuid.UUID, error)
 }
 
 var _ Recommendations = (*service)(nil)
@@ -70,6 +77,38 @@ func (s *service) RecommendableClubs(ctx context.Context, orgIDs []uuid.UUID, li
 	}
 	for _, r := range kept {
 		out = append(out, ClubCard{Row: r, MemberCount: s.countOf(ctx, r.Club), LogoPublicURL: logos[r.OrgID]})
+	}
+	return out, nil
+}
+
+// ClubsInCategories implements Recommendations: one store read per valid,
+// non-sensitive category, stopped at the limit.
+func (s *service) ClubsInCategories(ctx context.Context, universityID uuid.UUID, cats []Category, limit int) ([]uuid.UUID, error) {
+	out := []uuid.UUID{}
+	limit = min(limit, MaxRecommendableClubs)
+	if universityID == uuid.Nil() || limit <= 0 {
+		return out, nil
+	}
+	var asked []Category
+	for _, c := range cats {
+		if c.Valid() && !c.Sensitive() && !slices.Contains(asked, c) {
+			asked = append(asked, c)
+		}
+	}
+	for _, c := range asked {
+		if len(out) == limit {
+			break
+		}
+		uni := universityID
+		rows, err := s.d.Store.ListClubs(ctx, ClubFilter{UniversityID: &uni, Category: c, Sort: SortName}, nil, limit)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			if len(out) < limit && !r.IsSensitive && r.OrgStatus == "active" && !slices.Contains(out, r.OrgID) {
+				out = append(out, r.OrgID)
+			}
+		}
 	}
 	return out, nil
 }

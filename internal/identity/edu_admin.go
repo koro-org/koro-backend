@@ -188,8 +188,10 @@ func (s *service) DecideEduVerification(ctx context.Context, a authz.Actor, id u
 }
 
 // approvable checks what an approval needs besides the pending state: an
-// active applicant (a suspended or erased account is not verified) and a
-// document the reviewer could see (clean, or skipped without a scanner;
+// active applicant (a suspended or erased account is not verified) with a
+// birth date (ageKnown: 409 identity.birth_date_missing; the student adds
+// it with updateMe, the document stays pending) and a document the
+// reviewer could see (clean, or skipped without a scanner;
 // files.ErrNotClean otherwise).
 func (s *service) approvable(ctx context.Context, v EduRecord) error {
 	u, err := s.users().User(ctx, v.UserID)
@@ -198,6 +200,9 @@ func (s *service) approvable(ctx context.Context, v EduRecord) error {
 	}
 	if u.Status != StatusActive {
 		return ErrUserInvalidState
+	}
+	if err := ageKnown(u); err != nil {
+		return err
 	}
 	if v.DocumentFileID == nil {
 		return files.ErrNotClean

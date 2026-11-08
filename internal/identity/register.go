@@ -181,7 +181,7 @@ func (s *service) Register(ctx context.Context, a authz.Actor, in Registration) 
 			nid := c.NoticeVersionID
 			_, err := s.d.Consent.Record(ctx, consent.RecordInput{
 				UserID: u.ID, Purpose: c.Purpose, Action: consent.Granted, NoticeVersionID: &nid,
-				TextSHA256: c.TextSHA256, Channel: channel, Minor: u.IsMinor(now),
+				TextSHA256: c.TextSHA256, Channel: channel, Minor: MinorProtected(u.BirthDate, false, now), // a new account is no student yet
 			})
 			if pe, ok := errors.AsType[*problem.Error](err); ok && (pe.Kind() == problem.Invalid || pe.Kind() == problem.Conflict) {
 				// A consent rule the request could not see (inactive

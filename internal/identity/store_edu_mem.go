@@ -162,6 +162,20 @@ func (m *MemStore) LatestEduOutcome(_ context.Context, userID uuid.UUID) (EduRec
 	return rows[0], true, nil
 }
 
+// UsersEverVerified implements Store.
+func (m *MemStore) UsersEverVerified(_ context.Context, userIDs []uuid.UUID) ([]uuid.UUID, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []uuid.UUID
+	for _, v := range m.edu {
+		if slices.Contains(userIDs, v.UserID) && !slices.Contains(out, v.UserID) &&
+			(v.Status == EduVerified || v.Status == EduExpired || v.Status == EduRevoked) {
+			out = append(out, v.UserID)
+		}
+	}
+	return out, nil
+}
+
 // ActiveEduVerifications implements Store.
 func (m *MemStore) ActiveEduVerifications(_ context.Context, userIDs []uuid.UUID, now time.Time) ([]EduRecord, error) {
 	m.mu.Lock()

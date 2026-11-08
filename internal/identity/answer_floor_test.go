@@ -213,7 +213,9 @@ func TestAnswerFloor_RegisterResendAndEduStart(t *testing.T) {
 		}
 		eduStart := func(name string, a authz.Actor, addr string, want answerTrace) {
 			t.Helper()
-			check("edu start, "+name, 0, func(ctx context.Context) error { return e.svc.StartEduVerification(ctx, a, addr) }, want)
+			check("edu start, "+name, 0, func(ctx context.Context) error {
+				return e.svc.StartEduVerification(ctx, a, identity.EduStart{Email: addr})
+			}, want)
 		}
 
 		token := answerTrace{events: 1} // identity.email_token_issued, sent by the worker
@@ -242,9 +244,9 @@ func TestAnswerFloor_RegisterResendAndEduStart(t *testing.T) {
 		if err := e.svc.Register(ctx, anon, e.registration("not an address")); err == nil {
 			t.Fatal("register: a malformed address was accepted")
 		}
-		problemtest.WantErr(t, e.svc.StartEduVerification(ctx, bora, "bora@bilinmeyen.edu.tr"), identity.ErrEduDomainUnknown)
+		problemtest.WantErr(t, e.svc.StartEduVerification(ctx, bora, identity.EduStart{Email: "bora@bilinmeyen.edu.tr"}), identity.ErrEduDomainUnknown)
 		// The address's auth_email budget (3 an hour) is spent.
-		if err := e.svc.StartEduVerification(ctx, bora, "ada@uni.edu.tr"); err == nil {
+		if err := e.svc.StartEduVerification(ctx, bora, identity.EduStart{Email: "ada@uni.edu.tr"}); err == nil {
 			t.Fatal("edu start: a fourth start for the address within the hour was accepted")
 		} else {
 			wantStatus(t, err, http.StatusTooManyRequests)

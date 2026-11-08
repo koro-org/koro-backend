@@ -146,3 +146,11 @@ scenarios:
     steps:
       - { persona: user_unverified, operation: startEduVerification, body: bodies/identity/edu_start_unknown.json, expect: 422, code: identity.edu_domain_unknown }
       - { persona: user_unverified, operation: startEduVerification, expect: 202 }
+  # BE-202
+  edu_birth_date_required:
+    note: "BE-202: an account without a birth date sends one to start a student verification; the birth date is set
+      once (another one is 409)"
+    steps:
+      - { persona: user_unverified, operation: startEduVerification, body: bodies/identity/edu_start_no_birth_date.json, expect: 422, code: identity.birth_date_required }
+      - { persona: user_unverified, operation: startEduVerification, expect: 202 }
+      - { persona: user_unverified, operation: updateMe, body: bodies/identity/update_me_birth_date_other.json, expect: 409, code: identity.birth_date_locked }

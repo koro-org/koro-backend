@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"koro/internal/authz"
+	"koro/internal/platform/civil"
 	"koro/internal/platform/db"
 	"koro/internal/platform/textx"
 )
@@ -128,6 +129,19 @@ func (s gormStore) UpdateUser(ctx context.Context, u User) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// SetBirthDate implements Store: set once, in one statement (the row
+// decides, not a read before it).
+//
+// cross-org: accounts belong to no org.
+func (s gormStore) SetBirthDate(ctx context.Context, id uuid.UUID, d civil.Date) (bool, error) {
+	res := db.Conn(ctx, s.orm).Exec(`UPDATE users SET birth_date = ?
+		WHERE id = ? AND birth_date IS NULL AND status <> 'erased'`, d, id)
+	if res.Error != nil {
+		return false, fmt.Errorf("identity: set birth date: %w", constraints.Translate(res.Error))
+	}
+	return res.RowsAffected == 1, nil
 }
 
 // EraseUser implements Store: the tombstone of 02 §5.1 (users_erased_chk).

@@ -173,6 +173,23 @@ func (s gormStore) LatestEduOutcome(ctx context.Context, userID uuid.UUID) (EduR
 	return rows[0].record(), true, nil
 }
 
+// UsersEverVerified implements Store (the statuses of LatestEduOutcome).
+//
+// cross-org: student verifications belong to no org.
+func (s gormStore) UsersEverVerified(ctx context.Context, userIDs []uuid.UUID) ([]uuid.UUID, error) {
+	if len(userIDs) == 0 {
+		return nil, nil
+	}
+	var out []uuid.UUID
+	err := db.Conn(ctx, s.orm).Model(&eduRow{}).Distinct("user_id").
+		Where("user_id IN ? AND status IN ?", userIDs, []string{string(EduVerified), string(EduExpired), string(EduRevoked)}).
+		Pluck("user_id", &out).Error
+	if err != nil {
+		return nil, fmt.Errorf("identity: users ever verified: %w", err)
+	}
+	return out, nil
+}
+
 // ActiveEduVerifications implements Store (index
 // edu_verifications_one_verified_uq).
 //

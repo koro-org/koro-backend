@@ -119,7 +119,10 @@ func Register(api huma.API, svc Service) {
 
 	op.Register(api, "identity", huma.Operation{
 		OperationID: "updateMe", Method: http.MethodPatch, Path: "/me",
-		Summary: "Update my name or language",
+		Summary: "Update my name, language or birth date",
+		Description: "birth_date is set once: accepted while the account has none (a student without one sees " +
+			"birth_date_required in getMe and is protected as a minor until then); the stored date again changes " +
+			"nothing, another one is 409 identity.birth_date_locked (a correction goes through support).",
 	}, op.Meta{Action: string(authz.IdentityAccountUpdateOwn), Surface: op.SurfaceSelf}, h.updateMe)
 
 	op.Register(api, "identity", huma.Operation{
@@ -190,13 +193,11 @@ func (h handler) register(ctx context.Context, in *registerInput) (*acceptedOutp
 		Email: string(in.Body.Email), Password: string(in.Body.Password), FirstName: string(in.Body.FirstName), LastName: string(in.Body.LastName),
 		Persona: Persona(in.Body.SignupPersona), Locale: in.Body.Locale, Client: clientKind(in.Client),
 	}
-	if in.Body.BirthDate != "" {
-		d, err := civil.Parse(in.Body.BirthDate)
-		if err != nil {
-			return nil, problem.Field("body.birth_date", "must be YYYY-MM-DD")
-		}
-		r.BirthDate = &d
+	birth, err := parseBirthDate(in.Body.BirthDate)
+	if err != nil {
+		return nil, err
 	}
+	r.BirthDate = birth
 	id, err := uuid.Parse(in.Body.PrivacyNoticeVersionID)
 	if err != nil {
 		return nil, problem.Field("body.privacy_notice_version_id", "must be a UUID")
@@ -437,6 +438,18 @@ func (h handler) emailChange(ctx context.Context, in *emailChangeInput) (*accept
 	return &acceptedOutput{}, nil
 }
 
+// parseBirthDate reads an optional body.birth_date ("" = absent).
+func parseBirthDate(raw string) (*civil.Date, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	d, err := civil.Parse(raw)
+	if err != nil {
+		return nil, problem.Field("body.birth_date", "must be YYYY-MM-DD")
+	}
+	return &d, nil
+}
+
 // ---- getMe / updateMe
 
 type meOutput struct {
@@ -460,6 +473,7 @@ type updateMeInput struct {
 		FirstName *nameText `json:"first_name,omitempty"`
 		LastName  *nameText `json:"last_name,omitempty"`
 		Locale    *string   `json:"locale,omitempty" enum:"tr-TR,en-US"`
+		BirthDate string    `json:"birth_date,omitempty" format:"date" doc:"YYYY-MM-DD; set once: only while the account has none (getMe birth_date_required), another date than the stored one is 409 identity.birth_date_locked"`
 	}
 }
 
@@ -468,7 +482,12 @@ func (h handler) updateMe(ctx context.Context, in *updateMeInput) (*meOutput, er
 	if err != nil {
 		return nil, err
 	}
-	m, err := h.svc.UpdateMe(ctx, a, MePatch{FirstName: (*string)(in.Body.FirstName), LastName: (*string)(in.Body.LastName), Locale: in.Body.Locale})
+	birth, err := parseBirthDate(in.Body.BirthDate)
+	if err != nil {
+		return nil, err
+	}
+	m, err := h.svc.UpdateMe(ctx, a, MePatch{FirstName: (*string)(in.Body.FirstName), LastName: (*string)(in.Body.LastName),
+		Locale: in.Body.Locale, BirthDate: birth})
 	if err != nil {
 		return nil, err
 	}

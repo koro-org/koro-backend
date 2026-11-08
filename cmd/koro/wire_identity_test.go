@@ -289,6 +289,31 @@ func TestActorResolver_MinorComputedEachRequest(t *testing.T) {
 	}
 }
 
+// TestActorResolver_StudentWithoutBirthDateIsMinor (Q-52, BE-202): a
+// student, verified or lapsed, whose birth date is unknown gets the minor
+// protections (identity.MinorProtected); an account that never was a
+// student does not.
+func TestActorResolver_StudentWithoutBirthDateIsMinor(t *testing.T) {
+	t.Parallel()
+	e := newActorEnv(t)
+	u := e.user(t, nil)
+	raw := e.session(t, u, identity.ClientMobile)
+	e.verified(t, u, "eski@ogr.uni.edu.tr", e.clk.Now().UTC().Truncate(time.Microsecond).Add(time.Hour))
+	a, err := e.resolve(t.Context(), httpx.TransportBearer, raw)
+	if err != nil || !a.IsMinor || a.StudentStatus != authz.StudentVerified {
+		t.Fatalf("verified student without a birth date = minor %v, status %s, %v", a.IsMinor, a.StudentStatus, err)
+	}
+	e.fake().Advance(time.Hour)
+	a, err = e.resolve(t.Context(), httpx.TransportBearer, raw)
+	if err != nil || !a.IsMinor || a.StudentStatus != authz.StudentLapsed {
+		t.Fatalf("lapsed student without a birth date = minor %v, status %s, %v", a.IsMinor, a.StudentStatus, err)
+	}
+	a, err = e.resolve(t.Context(), httpx.TransportBearer, e.session(t, e.user(t, nil), identity.ClientMobile))
+	if err != nil || a.IsMinor || a.StudentStatus != authz.StudentNone {
+		t.Fatalf("never a student, no birth date = minor %v, status %s, %v", a.IsMinor, a.StudentStatus, err)
+	}
+}
+
 // TestSession_CookieTokenAsBearer_401 (03 §2.2-1): a web session's token
 // sent as a bearer token (and a mobile token sent as the cookie) is
 // rejected; over HTTP, a protected operation answers 401 and a public one
@@ -499,8 +524,9 @@ func TestWire_IdentityAnswerFloor(t *testing.T) {
 		{"resend, known address", "/api/v1/auth/email-verifications/resend", "", `{"email":"` + known.Email + `"}`, http.StatusAccepted},
 		{"register, new address", "/api/v1/auth/register", "", register("new@actor.koro.test"), http.StatusAccepted},
 		{"register, known address", "/api/v1/auth/register", "", register(known.Email), http.StatusAccepted},
-		{"edu start, free address", "/api/v1/me/edu-verifications", tok, `{"edu_email":"free@ogr.uni.edu.tr"}`, http.StatusAccepted},
-		{"edu start, address of another account", "/api/v1/me/edu-verifications", tok, `{"edu_email":"taken@ogr.uni.edu.tr"}`, http.StatusAccepted},
+		// The account has no birth date: the first start writes it, the second keeps it (BE-202).
+		{"edu start, free address", "/api/v1/me/edu-verifications", tok, `{"edu_email":"free@ogr.uni.edu.tr","birth_date":"2003-04-23"}`, http.StatusAccepted},
+		{"edu start, address of another account", "/api/v1/me/edu-verifications", tok, `{"edu_email":"taken@ogr.uni.edu.tr","birth_date":"2003-04-23"}`, http.StatusAccepted},
 	}
 	synctest.Test(t, func(t *testing.T) {
 		for _, tc := range cases {

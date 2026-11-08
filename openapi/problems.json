@@ -642,6 +642,18 @@
     "type": "urn:koro:problem:identity.account_action_open"
   },
   {
+    "code": "identity.birth_date_locked",
+    "status": 409,
+    "title": "Birth date cannot be changed",
+    "type": "urn:koro:problem:identity.birth_date_locked"
+  },
+  {
+    "code": "identity.birth_date_missing",
+    "status": 409,
+    "title": "The account has no birth date",
+    "type": "urn:koro:problem:identity.birth_date_missing"
+  },
+  {
     "code": "identity.birth_date_required",
     "status": 422,
     "title": "Birth date is required",

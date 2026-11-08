@@ -32,8 +32,20 @@ var (
 	// ErrInvalidEmail: not a plain e-mail address.
 	ErrInvalidEmail = problem.New(problem.Invalid, "identity.invalid_email", "Invalid e-mail address")
 	// ErrBirthDateRequired: a student registration without birth_date (age
-	// gate, 02 §5.1).
+	// gate, 02 §5.1), or a student verification started (.edu.tr address or
+	// document) by an account without one that does not send it (Q-52,
+	// BE-202).
 	ErrBirthDateRequired = problem.New(problem.Invalid, "identity.birth_date_required", "Birth date is required")
+	// ErrBirthDateMissing: a student verification would complete (the
+	// .edu.tr link, a document approval) for an account without a birth
+	// date (Q-52, BE-202). The account holder adds it with updateMe; the
+	// link stays usable until it expires.
+	ErrBirthDateMissing = problem.New(problem.Conflict, "identity.birth_date_missing", "The account has no birth date")
+	// ErrBirthDateLocked: updateMe with a birth date other than the one the
+	// account holds. A birth date is set once; a correction goes through
+	// support (a data subject request), so nobody leaves the minor
+	// protections by editing it (BE-202).
+	ErrBirthDateLocked = problem.New(problem.Conflict, "identity.birth_date_locked", "Birth date cannot be changed")
 	// ErrInvalidBirthDate: a birth date in the future or before 1900.
 	ErrInvalidBirthDate = problem.New(problem.Invalid, "identity.invalid_birth_date", "Invalid birth date")
 	// ErrInvalidName: a first or last name that is empty, too long or

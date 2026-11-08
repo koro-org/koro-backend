@@ -135,6 +135,13 @@ func eduStoreContract(t *testing.T, newWorld func(t *testing.T) eduWorld) {
 		if out, found, _ := s.LatestEduOutcome(ctx, u.ID); !found || out.ID != doc.ID {
 			t.Fatalf("latest outcome = %+v %v", out, found)
 		}
+		// Students now or before (BE-202): u once (two rows), not v nor the reviewer.
+		if ever, err := s.UsersEverVerified(ctx, []uuid.UUID{u.ID, v.ID, reviewer.ID}); err != nil || !slices.Equal(ever, []uuid.UUID{u.ID}) {
+			t.Fatalf("UsersEverVerified = %v, %v", ever, err)
+		}
+		if ever, err := s.UsersEverVerified(ctx, nil); err != nil || len(ever) != 0 {
+			t.Fatalf("UsersEverVerified(nil) = %v, %v", ever, err)
+		}
 		if _, found, _ := s.OpenEduVerificationOfEmail(ctx, addr); found {
 			t.Fatal("a superseded row still holds the address")
 		}
@@ -168,6 +175,9 @@ func eduStoreContract(t *testing.T, newWorld func(t *testing.T) eduWorld) {
 		if out, found, _ := s.LatestEduOutcome(ctx, u.ID); !found || out.Status != identity.EduExpired {
 			t.Fatalf("latest outcome after the expiry = %+v", out)
 		}
+		if ever, _ := s.UsersEverVerified(ctx, []uuid.UUID{u.ID}); len(ever) != 1 {
+			t.Fatalf("a lapsed student is not among UsersEverVerified: %v", ever)
+		}
 		if r, _ := s.ExpireEduVerifications(ctx, exp.Add(time.Hour), 10); len(r) != 0 {
 			t.Fatal("expired twice")
 		}
@@ -178,6 +188,9 @@ func eduStoreContract(t *testing.T, newWorld func(t *testing.T) eduWorld) {
 		}
 		if _, err := s.EduVerification(ctx, doc.ID); !errors.Is(err, identity.ErrNotFound) {
 			t.Fatalf("after erasure = %v", err)
+		}
+		if ever, _ := s.UsersEverVerified(ctx, []uuid.UUID{u.ID}); len(ever) != 0 {
+			t.Fatalf("UsersEverVerified after erasure = %v", ever)
 		}
 	})
 	t.Run("queue", func(t *testing.T) {

@@ -12,6 +12,7 @@ import (
 	"uuid"
 
 	"koro/internal/authz"
+	"koro/internal/platform/civil"
 	"koro/internal/platform/textx"
 )
 
@@ -179,6 +180,23 @@ func (m *MemStore) Users(_ context.Context, ids []uuid.UUID) ([]User, error) {
 		}
 	}
 	return out, nil
+}
+
+// SetBirthDate implements Store.
+func (m *MemStore) SetBirthDate(_ context.Context, id uuid.UUID, d civil.Date) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cur, ok := m.users[id]
+	if !ok || cur.BirthDate != nil || cur.Status == StatusErased {
+		return false, nil
+	}
+	cur.BirthDate = &d
+	if err := checkUser(cur); err != nil {
+		return false, err
+	}
+	cur.UpdatedAt = m.touch(cur.UpdatedAt)
+	m.users[id] = cur
+	return true, nil
 }
 
 // UpdateUser implements Store.

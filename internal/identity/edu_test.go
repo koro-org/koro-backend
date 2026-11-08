@@ -141,7 +141,7 @@ func (e *eduEnv) staff(t *testing.T, email string, role authz.PlatformRole) auth
 // verifyByEmail runs start + confirm and returns the token used.
 func (e *eduEnv) verifyByEmail(t *testing.T, a authz.Actor, address string) string {
 	t.Helper()
-	if err := e.svc.StartEduVerification(t.Context(), a, address); err != nil {
+	if err := e.svc.StartEduVerification(t.Context(), a, identity.EduStart{Email: address}); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	tok := e.lastToken(t, "identity.edu_verify")
@@ -185,7 +185,7 @@ func TestStartEdu_UnknownDomain_422(t *testing.T) {
 	e := newEduEnv(t)
 	_, a := e.student(t, "ada@example.com")
 	for _, addr := range []string{"ada@bilinmeyen.edu.tr", "ada@gmail.com", "ada@edu.tr", "ada@uni.edu.tr.evil.com"} {
-		err := e.svc.StartEduVerification(t.Context(), a, addr)
+		err := e.svc.StartEduVerification(t.Context(), a, identity.EduStart{Email: addr})
 		problemtest.WantErr(t, err, identity.ErrEduDomainUnknown)
 		wantStatus(t, err, http.StatusUnprocessableEntity)
 		pe, _ := errors.AsType[*problem.Error](err)
@@ -204,11 +204,11 @@ func TestStartEdu_UnknownDomain_422(t *testing.T) {
 		}
 	}
 	// A subdomain of a known university resolves (öğrenci adresleri).
-	if err := e.svc.StartEduVerification(t.Context(), a, "ada@ogr.uni.edu.tr"); err != nil {
+	if err := e.svc.StartEduVerification(t.Context(), a, identity.EduStart{Email: "ada@ogr.uni.edu.tr"}); err != nil {
 		t.Fatalf("subdomain: %v", err)
 	}
 	// Anonymous callers cannot start (O).
-	problemtest.WantErr(t, e.svc.StartEduVerification(t.Context(), authz.Anonymous(), "x@uni.edu.tr"), authz.ErrForbidden)
+	problemtest.WantErr(t, e.svc.StartEduVerification(t.Context(), authz.Anonymous(), identity.EduStart{Email: "x@uni.edu.tr"}), authz.ErrForbidden)
 }
 
 func TestStartEdu_NilResolver_422(t *testing.T) {
@@ -217,7 +217,7 @@ func TestStartEdu_NilResolver_422(t *testing.T) {
 	// so nobody becomes a student by e-mail; the document path stays open.
 	e := newEduEnv(t, func(d *identity.Deps) { d.Domains = nil })
 	_, a := e.student(t, "ada@example.com")
-	err := e.svc.StartEduVerification(t.Context(), a, "ada@ogr.uni.edu.tr")
+	err := e.svc.StartEduVerification(t.Context(), a, identity.EduStart{Email: "ada@ogr.uni.edu.tr"})
 	problemtest.WantErr(t, err, identity.ErrEduDomainUnknown)
 	wantStatus(t, err, http.StatusUnprocessableEntity)
 	if len(e.eduRows(t, a.UserID)) != 0 {
@@ -234,7 +234,7 @@ func TestConfirmEdu_SetsVerifiedWithOneYearExpiry(t *testing.T) {
 	e := newEduEnv(t)
 	u, a := e.student(t, "ada@example.com")
 	ctx := t.Context()
-	if err := e.svc.StartEduVerification(ctx, a, "Ada.Yilmaz@Ogr.Uni.edu.tr"); err != nil {
+	if err := e.svc.StartEduVerification(ctx, a, identity.EduStart{Email: "Ada.Yilmaz@Ogr.Uni.edu.tr"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(e.eduRows(t, u.ID)) != 0 {
@@ -280,7 +280,7 @@ func TestConfirmEdu_SetsVerifiedWithOneYearExpiry(t *testing.T) {
 	// Single use.
 	problemtest.WantErr(t, e.svc.ConfirmEduVerification(ctx, authz.Anonymous(), tok), identity.ErrInvalidToken)
 	// Expired after 24 hours.
-	if err := e.svc.StartEduVerification(ctx, a, "ada@uni.edu.tr"); err != nil {
+	if err := e.svc.StartEduVerification(ctx, a, identity.EduStart{Email: "ada@uni.edu.tr"}); err != nil {
 		t.Fatal(err)
 	}
 	late := e.lastToken(t, "identity.edu_verify")
@@ -331,7 +331,7 @@ func TestConfirmEdu_RenewalSupersedesOld(t *testing.T) {
 	// the start answers like a free address and sends nothing.
 	_, b := e.student(t, "bora@example.com")
 	sent := len(e.mail.sent())
-	if err := e.svc.StartEduVerification(ctx, b, "ADA@uni.edu.tr"); err != nil {
+	if err := e.svc.StartEduVerification(ctx, b, identity.EduStart{Email: "ADA@uni.edu.tr"}); err != nil {
 		t.Fatalf("taken address start = %v, want nil (202)", err)
 	}
 	e.deliver(t)
@@ -349,7 +349,7 @@ func TestEduConfirm_AddressTakenMeanwhile_409(t *testing.T) {
 	_, a := e.student(t, "ada@example.com")
 	_, b := e.student(t, "bora@example.com")
 	ctx := t.Context()
-	if err := e.svc.StartEduVerification(ctx, b, "ortak@uni.edu.tr"); err != nil {
+	if err := e.svc.StartEduVerification(ctx, b, identity.EduStart{Email: "ortak@uni.edu.tr"}); err != nil {
 		t.Fatal(err)
 	}
 	tokB := e.lastToken(t, "identity.edu_verify")

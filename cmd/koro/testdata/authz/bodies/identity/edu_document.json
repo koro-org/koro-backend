@@ -1,1 +1,1 @@
-{"university_id": "{{fixture:uni_a_university}}", "document_file_id": "{{fixture:edu_file_student}}"}
+{"university_id": "{{fixture:uni_a_university}}", "document_file_id": "{{fixture:edu_file_student}}", "birth_date": "2000-03-14"}

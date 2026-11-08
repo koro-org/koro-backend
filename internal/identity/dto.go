@@ -77,31 +77,33 @@ func toTermsDTO(t TermsState) TermsDTO {
 // MeDTO is the identity part of getMe (04 §V.1). Student profile sections
 // are added by the students module (BE-022).
 type MeDTO struct {
-	UserID          string          `json:"user_id" format:"uuid"`
-	Email           string          `json:"email"`
-	FirstName       string          `json:"first_name"`
-	LastName        string          `json:"last_name"`
-	Locale          string          `json:"locale" enum:"tr-TR,en-US"`
-	SignupPersona   string          `json:"signup_persona" enum:"student,company,university,club,platform"`
-	MFAEnabled      bool            `json:"mfa_enabled"`
-	EmailVerifiedAt *time.Time      `json:"email_verified_at,omitempty"`
-	BirthDate       string          `json:"birth_date,omitempty" format:"date"`
-	IsMinor         bool            `json:"is_minor"`
-	Student         StudentDTO      `json:"student"`
-	Memberships     []MembershipDTO `json:"memberships"`
-	PlatformRoles   []string        `json:"platform_roles"`
-	Capabilities    []string        `json:"capabilities" doc:"Menu hints only; every request is authorized on its own"`
-	Terms           TermsDTO        `json:"terms" doc:"Terms of use acceptance (BE-118)"`
-	Phone           *PhoneDTO       `json:"phone,omitempty" doc:"The verified mobile number, masked (BE-172); absent without one"`
-	SMSAvailable    bool            `json:"sms_available" doc:"The SMS features (phone number, SMS second step, SMS reset) are available"`
+	UserID            string          `json:"user_id" format:"uuid"`
+	Email             string          `json:"email"`
+	FirstName         string          `json:"first_name"`
+	LastName          string          `json:"last_name"`
+	Locale            string          `json:"locale" enum:"tr-TR,en-US"`
+	SignupPersona     string          `json:"signup_persona" enum:"student,company,university,club,platform"`
+	MFAEnabled        bool            `json:"mfa_enabled"`
+	EmailVerifiedAt   *time.Time      `json:"email_verified_at,omitempty"`
+	BirthDate         string          `json:"birth_date,omitempty" format:"date"`
+	IsMinor           bool            `json:"is_minor" doc:"The protections of users under 18 apply: under 18, or a student whose birth date is unknown"`
+	BirthDateRequired bool            `json:"birth_date_required" doc:"A student without a birth date: ask for it (updateMe birth_date) before anything else; until then the account is protected as under 18"`
+	Student           StudentDTO      `json:"student"`
+	Memberships       []MembershipDTO `json:"memberships"`
+	PlatformRoles     []string        `json:"platform_roles"`
+	Capabilities      []string        `json:"capabilities" doc:"Menu hints only; every request is authorized on its own"`
+	Terms             TermsDTO        `json:"terms" doc:"Terms of use acceptance (BE-118)"`
+	Phone             *PhoneDTO       `json:"phone,omitempty" doc:"The verified mobile number, masked (BE-172); absent without one"`
+	SMSAvailable      bool            `json:"sms_available" doc:"The SMS features (phone number, SMS second step, SMS reset) are available"`
 }
 
 func toMeDTO(m Me) MeDTO {
 	d := MeDTO{
 		UserID: m.UserID.String(), Email: m.Email, FirstName: m.FirstName, LastName: m.LastName, Locale: m.Locale,
 		SignupPersona: string(m.Persona), MFAEnabled: m.MFAEnabled, EmailVerifiedAt: m.EmailVerifiedAt, IsMinor: m.IsMinor,
-		Student:     StudentDTO{Status: string(m.StudentStatus)},
-		Memberships: make([]MembershipDTO, 0, len(m.Memberships)), PlatformRoles: make([]string, 0, len(m.PlatformRoles)),
+		BirthDateRequired: m.BirthDateRequired,
+		Student:           StudentDTO{Status: string(m.StudentStatus)},
+		Memberships:       make([]MembershipDTO, 0, len(m.Memberships)), PlatformRoles: make([]string, 0, len(m.PlatformRoles)),
 		Capabilities: make([]string, 0, len(m.Capabilities)), Terms: toTermsDTO(m.Terms), SMSAvailable: m.SMSAvailable,
 	}
 	if m.Phone != nil {

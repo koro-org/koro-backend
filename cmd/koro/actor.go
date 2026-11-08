@@ -25,8 +25,9 @@ import (
 //     StudentStatus (verified while a verification is in its year, lapsed
 //     once it ran out or was revoked, none otherwise) and, when verified,
 //     UniversityID;
-//  3. IsMinor is computed from the birth date at this request's instant
-//     (02 §5.1: never stored).
+//  3. IsMinor is computed at this request's instant (02 §5.1: never
+//     stored) by identity.MinorProtected: under 18, or a student (verified
+//     or lapsed) whose birth date is unknown (Q-52, BE-202).
 //
 // Every rejection is the same problem.ErrUnauthenticated (the middleware
 // turns it into 401 on protected operations and into an anonymous actor on
@@ -59,13 +60,13 @@ func (r actorResolver) actor(ctx context.Context, cred httpx.Credential) (authz.
 		Kind: authz.KindUser, UserID: p.UserID, SessionID: p.SessionID,
 		PlatformRoles: p.PlatformRoles, Memberships: p.Memberships,
 		StudentStatus: authz.StudentNone, MFAVerified: p.MFAVerified,
-		IsMinor: p.BirthDate != nil && p.BirthDate.IsMinor(r.clock.Now()),
 	}
 	st, err := r.students.StudentStatus(ctx, p.UserID)
 	if err != nil {
 		return authz.Actor{}, fmt.Errorf("actor: student verification: %w", err)
 	}
 	a.StudentStatus = st.Status
+	a.IsMinor = identity.MinorProtected(p.BirthDate, identity.WasStudent(st.Status), r.clock.Now())
 	if st.Status == authz.StudentVerified && st.Active != nil {
 		uni := st.Active.UniversityID
 		a.UniversityID = &uni

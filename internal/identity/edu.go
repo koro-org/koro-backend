@@ -12,6 +12,7 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/files"
+	"koro/internal/platform/civil"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/problem"
@@ -49,10 +50,19 @@ const (
 	maxReviewNote   = 500
 )
 
+// EduStart is the body of startEduVerification.
+type EduStart struct {
+	Email string // the .edu.tr address
+	// BirthDate is required when the account has none (eduAgeGate); an
+	// account that has one keeps it and the field is ignored.
+	BirthDate *civil.Date
+}
+
 // EduDocumentSubmission is the body of submitEduDocument.
 type EduDocumentSubmission struct {
-	UniversityID uuid.UUID // the university the student claims
-	FileID       uuid.UUID // an edu_document upload of the caller
+	UniversityID uuid.UUID   // the university the student claims
+	FileID       uuid.UUID   // an edu_document upload of the caller
+	BirthDate    *civil.Date // as EduStart.BirthDate
 }
 
 // EduDecision is the body of adminDecideEduVerification.
@@ -127,6 +137,47 @@ func parseEduEmail(raw, location string) (email, normalized, domain string, err 
 	return email, normalized, domain, nil
 }
 
+// eduAgeGate is the age gate of a student verification (Q-52; BE-202): no
+// account becomes a student without a birth date, so the minor rules know
+// every student's age. An account without one sends it with the request
+// (body.birth_date); it is validated and returned to be written (set
+// once). An account that has one keeps it: given is ignored and nil
+// returned.
+func eduAgeGate(u User, given *civil.Date, now time.Time) (*civil.Date, error) {
+	switch {
+	case u.BirthDate != nil:
+		return nil, nil
+	case given == nil:
+		return nil, invalid(ErrBirthDateRequired, "body.birth_date", "is required to verify a student: the account has none")
+	}
+	if err := checkBirthDate(*given, now); err != nil {
+		return nil, err
+	}
+	d := *given
+	return &d, nil
+}
+
+// fillBirthDate writes the birth date eduAgeGate returned (nil: nothing to
+// write), in the caller's transaction, and reports whether it did. A
+// birth date set meanwhile by another request stays (never overwritten).
+func (s *service) fillBirthDate(ctx context.Context, userID uuid.UUID, d *civil.Date) (bool, error) {
+	if d == nil {
+		return false, nil
+	}
+	return s.users().SetBirthDate(ctx, userID, *d)
+}
+
+// ageKnown is the age gate where a student verification completes (the
+// .edu.tr link, a document approval): the account carries a birth date
+// (Q-52; BE-202). Verifications started before the gate covered every path
+// meet it here.
+func ageKnown(u User) error {
+	if u.BirthDate == nil {
+		return ErrBirthDateMissing
+	}
+	return nil
+}
+
 // resolveDomain maps a .edu.tr domain to its university. Without a
 // resolver (directory not wired) every domain is unknown: the safe default
 // keeps the student role closed and points at the document path.
@@ -152,12 +203,21 @@ func (s *service) resolveDomain(ctx context.Context, domain, location string) (u
 // answer is the same: only the address's holder can find out, by
 // confirming (no enumeration of verified addresses). From the lookup on
 // (past the domain check), the answer waits for AnswerFloor (pace.go;
-// BE-200).
-func (s *service) StartEduVerification(ctx context.Context, a authz.Actor, raw string) error {
+// BE-200). An account without a birth date sends one (eduAgeGate); it is
+// written with the token, whatever the address.
+func (s *service) StartEduVerification(ctx context.Context, a authz.Actor, in EduStart) error {
 	if err := authz.Can(ctx, a, authz.IdentityEduVerificationStart, ownUser(a)); err != nil {
 		return err
 	}
-	email, normalized, domain, err := parseEduEmail(raw, "body.edu_email")
+	email, normalized, domain, err := parseEduEmail(in.Email, "body.edu_email")
+	if err != nil {
+		return err
+	}
+	me, err := s.users().User(ctx, a.UserID)
+	if err != nil {
+		return err
+	}
+	birth, err := eduAgeGate(me, in.BirthDate, s.now())
 	if err != nil {
 		return err
 	}
@@ -179,6 +239,11 @@ func (s *service) StartEduVerification(ctx context.Context, a authz.Actor, raw s
 			return err
 		}
 		meta := map[string]any{"university_id": uni.String()}
+		if set, err := s.fillBirthDate(ctx, u.ID, birth); err != nil {
+			return err
+		} else if set {
+			meta["birth_date_set"] = true // never the date itself
+		}
 		holder, taken, err := s.edu().OpenEduVerificationOfEmail(ctx, normalized)
 		if err != nil {
 			return err
@@ -198,7 +263,10 @@ func (s *service) StartEduVerification(ctx context.Context, a authz.Actor, raw s
 
 // ConfirmEduVerification implements Service (confirmEduVerification, 204).
 // The token is single use and expires after 24 hours; the domain is
-// resolved again (a university removed meanwhile is 422).
+// resolved again (a university removed meanwhile is 422). An account
+// without a birth date (a link sent before the age gate covered every
+// path) is 409 identity.birth_date_missing and the token is not used: the
+// holder adds the birth date (updateMe) and opens the link again.
 func (s *service) ConfirmEduVerification(ctx context.Context, a authz.Actor, raw string) error {
 	if err := authz.Can(ctx, a, authz.IdentityEduVerificationConfirm, publicUser); err != nil {
 		return err
@@ -209,6 +277,9 @@ func (s *service) ConfirmEduVerification(ctx context.Context, a authz.Actor, raw
 	}
 	if u.Status != StatusActive {
 		return ErrInvalidToken
+	}
+	if err := ageKnown(u); err != nil {
+		return err
 	}
 	email, normalized, domain, err := parseEduEmail(t.TargetEmail, "body.token")
 	if err != nil {
@@ -250,6 +321,9 @@ type eduAddress struct {
 // the registration path of confirmEmail (BE-097) share it, so both follow
 // the same rules. extra adds audit metadata.
 func (s *service) completeEduEmail(ctx context.Context, cur User, tokenID uuid.UUID, addr eduAddress, extra map[string]any) (EduRecord, error) {
+	if err := ageKnown(cur); err != nil {
+		return EduRecord{}, err
+	}
 	now := s.now()
 	renewal, superseded, err := s.supersedeOpen(ctx, cur.ID, uuid.Nil(), now)
 	if err != nil {
@@ -321,7 +395,9 @@ func usableDocument(f files.FileMeta, userID uuid.UUID) bool {
 
 // SubmitEduDocument implements Service (submitEduDocument, 202): a pending
 // row with the document attached, in one transaction. One document per
-// user is in review at a time (409 identity.edu_verification_pending).
+// user is in review at a time (409 identity.edu_verification_pending). An
+// account without a birth date sends one (eduAgeGate), written with the
+// row.
 func (s *service) SubmitEduDocument(ctx context.Context, a authz.Actor, in EduDocumentSubmission) (EduView, error) {
 	if err := authz.Can(ctx, a, authz.IdentityEduVerificationSubmitDocument, ownUser(a)); err != nil {
 		return EduView{}, err
@@ -344,7 +420,12 @@ func (s *service) SubmitEduDocument(ctx context.Context, a authz.Actor, in EduDo
 	}
 	var v EduRecord
 	err = s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		if _, err := s.users().LockUser(ctx, a.UserID); err != nil {
+		u, err := s.users().LockUser(ctx, a.UserID)
+		if err != nil {
+			return err
+		}
+		birth, err := eduAgeGate(u, in.BirthDate, s.now())
+		if err != nil {
 			return err
 		}
 		open, err := s.edu().LockOpenEduVerifications(ctx, a.UserID)
@@ -355,6 +436,10 @@ func (s *service) SubmitEduDocument(ctx context.Context, a authz.Actor, in EduDo
 			if o.Status == EduPending {
 				return ErrEduPending
 			}
+		}
+		set, err := s.fillBirthDate(ctx, u.ID, birth)
+		if err != nil {
+			return err
 		}
 		uni, file := in.UniversityID, in.FileID
 		v = EduRecord{ID: uuid.NewV7(), UserID: a.UserID, Method: EduMethodDocument, UniversityID: &uni,
@@ -370,8 +455,11 @@ func (s *service) SubmitEduDocument(ctx context.Context, a authz.Actor, in EduDo
 		case err != nil:
 			return err
 		}
-		return s.d.Audit.Log(ctx, event(authz.IdentityEduVerificationSubmitDocument, audit.Success, resourceEdu, v.ID,
-			map[string]any{"file_id": file.String(), "university_id": uni.String()}).By(a))
+		meta := map[string]any{"file_id": file.String(), "university_id": uni.String()}
+		if set {
+			meta["birth_date_set"] = true // never the date itself
+		}
+		return s.d.Audit.Log(ctx, event(authz.IdentityEduVerificationSubmitDocument, audit.Success, resourceEdu, v.ID, meta).By(a))
 	})
 	if err != nil {
 		return EduView{}, err

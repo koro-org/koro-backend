@@ -8839,6 +8839,9 @@ components:
         birth_date:
           format: date
           type: string
+        birth_date_required:
+          description: "A student without a birth date: ask for it (updateMe birth_date) before anything else; until then the account is protected as under 18"
+          type: boolean
         capabilities:
           description: Menu hints only; every request is authorized on its own
           items:
@@ -8852,6 +8855,7 @@ components:
         first_name:
           type: string
         is_minor:
+          description: "The protections of users under 18 apply: under 18, or a student whose birth date is unknown"
           type: boolean
         last_name:
           type: string
@@ -8901,6 +8905,7 @@ components:
         - signup_persona
         - mfa_enabled
         - is_minor
+        - birth_date_required
         - student
         - memberships
         - platform_roles
@@ -15494,6 +15499,10 @@ components:
     StartEduInputBody:
       additionalProperties: false
       properties:
+        birth_date:
+          description: YYYY-MM-DD; required when the account has no birth date (a student's age must be known), ignored otherwise (set once)
+          format: date
+          type: string
         edu_email:
           description: A .edu.tr address of the caller's university
           maxLength: 254
@@ -16122,6 +16131,10 @@ components:
     SubmitEduDocumentInputBody:
       additionalProperties: false
       properties:
+        birth_date:
+          description: YYYY-MM-DD; required when the account has no birth date (a student's age must be known), ignored otherwise (set once)
+          format: date
+          type: string
         document_file_id:
           description: A completed edu_document upload of the caller
           format: uuid
@@ -17357,6 +17370,10 @@ components:
     UpdateMeInputBody:
       additionalProperties: false
       properties:
+        birth_date:
+          description: "YYYY-MM-DD; set once: only while the account has none (getMe birth_date_required), another date than the stored one is 409 identity.birth_date_locked"
+          format: date
+          type: string
         first_name:
           maxLength: 100
           minLength: 1
@@ -19974,7 +19991,7 @@ paths:
       x-koro-surface: admin
   /api/v1/admin/edu-verifications/{verification_id}/decision:
     post:
-      description: "verified needs university_id and a clean document; the student is verified for one year (a current verification is superseded). rejected keeps review_note for the student. Own document: 403; a decided verification: 409 identity.edu_invalid_state."
+      description: "verified needs university_id and a clean document; the student is verified for one year (a current verification is superseded). rejected keeps review_note for the student. Own document: 403; a decided verification: 409 identity.edu_invalid_state; an applicant without a birth date: 409 identity.birth_date_missing (the document stays pending until the student adds it)."
       operationId: adminDecideEduVerification
       parameters:
         - description: Verification ID (an unknown or malformed ID is 404)
@@ -27040,7 +27057,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/auth/edu-verifications/confirm:
     post:
-      description: Single use; an unknown, used or expired token is 422 identity.invalid_token. The account becomes a verified student for one year; a renewal supersedes the previous verification. An address that verifies another account is 409 identity.edu_email_taken.
+      description: "Single use; an unknown, used or expired token is 422 identity.invalid_token. The account becomes a verified student for one year; a renewal supersedes the previous verification. An address that verifies another account is 409 identity.edu_email_taken. An account without a birth date (a link sent before birth_date was required) is 409 identity.birth_date_missing and the token stays usable: add the birth date (updateMe), then confirm again."
       operationId: confirmEduVerification
       requestBody:
         content:
@@ -29947,6 +29964,7 @@ paths:
       x-koro-rate-limit: read_default
       x-koro-surface: self
     patch:
+      description: "birth_date is set once: accepted while the account has none (a student without one sees birth_date_required in getMe and is protected as a minor until then); the stored date again changes nothing, another one is 409 identity.birth_date_locked (a correction goes through support)."
       operationId: updateMe
       requestBody:
         content:
@@ -29972,7 +29990,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerAuth: []
-      summary: Update my name or language
+      summary: Update my name, language or birth date
       tags:
         - identity
       x-koro-action: identity.account.update_own
@@ -31553,7 +31571,7 @@ paths:
       x-koro-surface: self
   /api/v1/me/edu-verifications:
     post:
-      description: "A single-use link (valid 24 hours) goes to the address. 202 whether or not the address is free: an address that verifies another account gets nothing (no enumeration). An address whose domain is not a known university is 422 identity.edu_domain_unknown: submit a student document instead. Past the address and domain checks and the rate limits, every answer takes at least 0.5 s (BE-200)."
+      description: "A single-use link (valid 24 hours) goes to the address. 202 whether or not the address is free: an address that verifies another account gets nothing (no enumeration). An address whose domain is not a known university is 422 identity.edu_domain_unknown: submit a student document instead. An account without a birth date sends birth_date (422 identity.birth_date_required otherwise); an account that has one keeps it and the field is ignored. Past the address and domain checks and the rate limits, every answer takes at least 0.5 s (BE-200)."
       operationId: startEduVerification
       requestBody:
         content:
@@ -31589,7 +31607,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/me/edu-verifications/document:
     post:
-      description: For students without a .edu.tr address (open education). document_file_id is a completed edu_document upload of the caller (createUpload). The document waits for platform staff; one at a time (409 identity.edu_verification_pending).
+      description: For students without a .edu.tr address (open education). document_file_id is a completed edu_document upload of the caller (createUpload). The document waits for platform staff; one at a time (409 identity.edu_verification_pending). birth_date as in startEduVerification.
       operationId: submitEduDocument
       requestBody:
         content:

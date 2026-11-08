@@ -105,7 +105,7 @@ type Actor struct {
 	Memberships   []Membership
 	StudentStatus StudentStatus
 	UniversityID  *uuid.UUID // universities.id of the active verification
-	IsMinor       bool       // computed per request from users.birth_date
+	IsMinor       bool       // minor protections apply; per request from users.birth_date (identity.MinorProtected: unknown age of a student counts)
 	MFAVerified   bool       // sessions.mfa_verified_at IS NOT NULL
 	SystemJob     string     // job name when Kind is KindSystem
 }

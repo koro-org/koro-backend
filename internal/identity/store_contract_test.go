@@ -99,6 +99,32 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 		if len(us) != 1 || us[0].ID != u.ID {
 			t.Fatalf("Users = %+v", us)
 		}
+		// A birth date is set once (BE-202): written where there is none,
+		// never replaced; UpdateUser never writes it.
+		nb := contractUser(uuid.NewV7().String() + "@contract.test")
+		nb.Persona, nb.BirthDate = identity.PersonaCompany, nil
+		if err := s.InsertUser(ctx, nb); err != nil {
+			t.Fatal(err)
+		}
+		first, _ := civil.New(2004, time.May, 20)
+		second, _ := civil.New(1990, time.January, 1)
+		if set, err := s.SetBirthDate(ctx, nb.ID, first); err != nil || !set {
+			t.Fatalf("SetBirthDate = %v, %v", set, err)
+		}
+		if set, err := s.SetBirthDate(ctx, nb.ID, second); err != nil || set {
+			t.Fatalf("second SetBirthDate = %v, %v", set, err)
+		}
+		if set, err := s.SetBirthDate(ctx, uuid.NewV7(), first); err != nil || set {
+			t.Fatalf("SetBirthDate of a missing row = %v, %v", set, err)
+		}
+		withBirth, _ := s.User(ctx, nb.ID)
+		withBirth.BirthDate = &second
+		if err := s.UpdateUser(ctx, withBirth); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := s.User(ctx, nb.ID); got.BirthDate == nil || *got.BirthDate != first || got.UpdatedAt.Before(got.CreatedAt) {
+			t.Fatalf("birth date = %v, want %v", got.BirthDate, first)
+		}
 		// Erasure: a tombstone, idempotent, the address is free again.
 		if ok, err := s.EraseUser(ctx, u.ID, contractBase.Add(2*time.Hour)); err != nil || !ok {
 			t.Fatalf("EraseUser = %v, %v", ok, err)
@@ -109,6 +135,9 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 		tomb, _ := s.User(ctx, u.ID)
 		if tomb.Status != identity.StatusErased || tomb.Email != "" || tomb.PasswordHash != "" || tomb.FirstName != "" || tomb.BirthDate != nil || tomb.ErasedAt == nil {
 			t.Fatalf("tombstone = %+v", tomb)
+		}
+		if set, err := s.SetBirthDate(ctx, u.ID, first); err != nil || set {
+			t.Fatalf("SetBirthDate of a tombstone = %v, %v", set, err)
 		}
 		if _, found, _ := s.UserByEmail(ctx, u.EmailNormalized); found {
 			t.Fatal("a tombstone is still found by address")

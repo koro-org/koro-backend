@@ -49,7 +49,7 @@ type User struct {
 	PasswordHash     string // argon2id PHC string; "" = no password (bootstrap admin, erased)
 	FirstName        string
 	LastName         string
-	BirthDate        *civil.Date // mandatory for students (age gate)
+	BirthDate        *civil.Date // mandatory for students (age gate); set once (SetBirthDate)
 	Persona          Persona
 	Locale           string
 	MFAEnabled       bool
@@ -63,10 +63,28 @@ type User struct {
 	UpdatedAt        time.Time
 }
 
-// IsMinor reports whether the user is under 18 at now (02 §5.1: computed on
-// every read, never stored). Without a birth date (non-student personas)
-// the answer is false.
-func (u User) IsMinor(now time.Time) bool { return u.BirthDate != nil && u.BirthDate.IsMinor(now) }
+// MinorProtected is the one age rule of the platform (03 student_minor,
+// 02 §5.1; Q-52, BE-202): whether the protections of users under 18 apply
+// to someone born on birth at now. They apply to a minor, and to a student
+// whose age is unknown (fail closed: a student is anyone verified as one
+// at some point, the Actor's StudentStatus verified or lapsed). An account
+// that never was a student and has no birth date (company, university,
+// club personas) is not protected as a minor: the minor rules are student
+// rules. Computed on every read, never stored. Every IsMinor identity
+// hands out (the Actor through the resolver, Me, UserSummary) comes from
+// here.
+func MinorProtected(birth *civil.Date, student bool, now time.Time) bool {
+	if birth == nil {
+		return student
+	}
+	return birth.IsMinor(now)
+}
+
+// WasStudent reports whether a student status counts as a student for
+// MinorProtected: verified now or before (lapsed).
+func WasStudent(s authz.StudentStatus) bool {
+	return s == authz.StudentVerified || s == authz.StudentLapsed
+}
 
 // locked reports whether the account is locked at now.
 func (u User) locked(now time.Time) bool { return u.LockedUntil != nil && now.Before(*u.LockedUntil) }

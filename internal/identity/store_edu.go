@@ -33,6 +33,11 @@ type EduStore interface {
 	// of userID (the Actor's StudentStatus: a verified row is always the
 	// newest of these); found=false when the user was never verified.
 	LatestEduOutcome(ctx context.Context, userID uuid.UUID) (v EduRecord, found bool, err error)
+	// UsersEverVerified returns the users among userIDs that LatestEduOutcome
+	// finds (a verified, expired or revoked row: students now or before),
+	// each once, in no particular order. It tells a student whose age is
+	// unknown from an account that never was one (MinorProtected; BE-202).
+	UsersEverVerified(ctx context.Context, userIDs []uuid.UUID) ([]uuid.UUID, error)
 	// ActiveEduVerifications returns the verified rows of userIDs whose
 	// expires_at is after now.
 	ActiveEduVerifications(ctx context.Context, userIDs []uuid.UUID, now time.Time) ([]EduRecord, error)

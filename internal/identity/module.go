@@ -73,7 +73,7 @@ type Principal struct {
 	MFAVerified   bool
 	PlatformRoles []authz.PlatformRole // in effect only (06 H-33)
 	Memberships   []authz.Membership   // hooks.memberships (orgs); none until BE-019
-	BirthDate     *civil.Date          // IsMinor is computed per request by the resolver
+	BirthDate     *civil.Date          // the resolver computes IsMinor per request (MinorProtected)
 }
 
 // UserSummary is a user as other modules see it: no e-mail (01 §4.6).
@@ -83,7 +83,9 @@ type UserSummary struct {
 	FirstName string
 	LastName  string
 	Locale    string
-	IsMinor   bool
+	// IsMinor: the minor protections apply (MinorProtected: under 18, or
+	// a student, now or before, whose birth date is unknown; BE-202).
+	IsMinor bool
 }
 
 // UserContact is the address of a user, for the worker/notification path
@@ -211,7 +213,7 @@ type Service interface {
 	ConfirmEmailChange(ctx context.Context, a authz.Actor, token string) error
 	// Me is getMe.
 	Me(ctx context.Context, a authz.Actor) (Me, error)
-	// UpdateMe is updateMe (names, locale).
+	// UpdateMe is updateMe (names, locale, the birth date once).
 	UpdateMe(ctx context.Context, a authz.Actor, p MePatch) (Me, error)
 	// AcceptTerms is acceptTerms: the caller accepts the current terms of
 	// use (a new version, or an account older than the ledger; BE-118).
@@ -297,8 +299,9 @@ type Service interface {
 	// StartEduVerification is startEduVerification: a single-use link to
 	// the .edu.tr address (24 h). nil (202) whether or not the address is
 	// free (only its holder learns that, at confirmation); an unknown
-	// domain is 422 identity.edu_domain_unknown.
-	StartEduVerification(ctx context.Context, a authz.Actor, eduEmail string) error
+	// domain is 422 identity.edu_domain_unknown; an account without a
+	// birth date that sends none is 422 identity.birth_date_required.
+	StartEduVerification(ctx context.Context, a authz.Actor, in EduStart) error
 	// ConfirmEduVerification is confirmEduVerification: the token's user
 	// becomes a verified student for a year; a renewal supersedes the
 	// previous verification.

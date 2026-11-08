@@ -3,6 +3,8 @@ package identity
 import (
 	"context"
 	"uuid"
+
+	"koro/internal/platform/civil"
 )
 
 // userStore is the users rows, the account (02 §5.1): registration, login
@@ -28,6 +30,11 @@ type userStore interface {
 	// suspension_reason, failed_login_count, locked_until. A taken
 	// email_normalized is ErrEmailTaken; a missing row ErrNotFound.
 	UpdateUser(ctx context.Context, u User) error
+	// SetBirthDate writes the birth date of an account that has none and
+	// reports whether it did: a birth date is set once (BE-202; UpdateUser
+	// never writes it). An account that has one, a tombstone and a missing
+	// row are false.
+	SetBirthDate(ctx context.Context, id uuid.UUID, d civil.Date) (bool, error)
 	// SearchUsers returns up to q.Limit accounts newest first (id DESC)
 	// after q.After: by exact normalized e-mail, by a fragment of the name
 	// (koro_norm, users_name_trgm_idx; tombstones excluded) or all of them,

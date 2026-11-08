@@ -151,7 +151,7 @@ func TestWire_IdentityReadsDomainResolverHook(t *testing.T) {
 	u := e.user(t, nil)
 	tok := e.session(t, u, identity.ClientMobile)
 	do := e.http(t)
-	start := `{"edu_email":"ada@ogr.uni.edu.tr"}`
+	start := `{"edu_email":"ada@ogr.uni.edu.tr","birth_date":"2003-04-23"}` // the account has none (BE-202)
 	if code, body := do(http.MethodPost, "/api/v1/me/edu-verifications", tok, start); code != http.StatusUnprocessableEntity ||
 		!strings.Contains(body, "identity.edu_domain_unknown") || strings.Contains(body, "ada@") {
 		t.Fatalf("nil hook = %d %s", code, body)

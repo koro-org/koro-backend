@@ -21,8 +21,10 @@ func registerEdu(api huma.API, h handler) {
 		Summary: "Verify (or renew) my student status with a .edu.tr address",
 		Description: "A single-use link (valid 24 hours) goes to the address. 202 whether or not the address is " +
 			"free: an address that verifies another account gets nothing (no enumeration). An address whose domain " +
-			"is not a known university is 422 identity.edu_domain_unknown: submit a student document instead. Past the " +
-			"address and domain checks and the rate limits, every answer takes at least 0.5 s (BE-200).",
+			"is not a known university is 422 identity.edu_domain_unknown: submit a student document instead. An account " +
+			"without a birth date sends birth_date (422 identity.birth_date_required otherwise); an account that has one " +
+			"keeps it and the field is ignored. Past the address and domain checks and the rate limits, every answer " +
+			"takes at least 0.5 s (BE-200).",
 	}, op.Meta{Action: string(authz.IdentityEduVerificationStart), Surface: op.SurfaceSelf, RateLimit: op.RateAuthEmail,
 		Idempotency: op.IdempotencyOptional}, h.startEdu)
 
@@ -31,7 +33,9 @@ func registerEdu(api huma.API, h handler) {
 		DefaultStatus: http.StatusNoContent, Summary: "Confirm a .edu.tr address",
 		Description: "Single use; an unknown, used or expired token is 422 identity.invalid_token. The account becomes a " +
 			"verified student for one year; a renewal supersedes the previous verification. An address that " +
-			"verifies another account is 409 identity.edu_email_taken.",
+			"verifies another account is 409 identity.edu_email_taken. An account without a birth date (a link sent " +
+			"before birth_date was required) is 409 identity.birth_date_missing and the token stays usable: add the " +
+			"birth date (updateMe), then confirm again.",
 	}, op.Meta{Action: string(authz.IdentityEduVerificationConfirm), Surface: op.SurfacePublic, RateLimit: op.RateTokenConfirm,
 		Idempotency: op.IdempotencyOptional}, h.confirmEdu)
 
@@ -40,7 +44,7 @@ func registerEdu(api huma.API, h handler) {
 		DefaultStatus: http.StatusAccepted, Summary: "Submit a student document for review",
 		Description: "For students without a .edu.tr address (open education). document_file_id is a completed " +
 			"edu_document upload of the caller (createUpload). The document waits for platform staff; one at a " +
-			"time (409 identity.edu_verification_pending).",
+			"time (409 identity.edu_verification_pending). birth_date as in startEduVerification.",
 	}, op.Meta{Action: string(authz.IdentityEduVerificationSubmitDocument), Surface: op.SurfaceSelf,
 		Idempotency: op.IdempotencyOptional}, h.submitEduDocument)
 
@@ -68,7 +72,8 @@ func registerEdu(api huma.API, h handler) {
 		Summary: "Approve or reject a student document",
 		Description: "verified needs university_id and a clean document; the student is verified for one year (a " +
 			"current verification is superseded). rejected keeps review_note for the student. Own document: 403; " +
-			"a decided verification: 409 identity.edu_invalid_state.",
+			"a decided verification: 409 identity.edu_invalid_state; an applicant without a birth date: 409 " +
+			"identity.birth_date_missing (the document stays pending until the student adds it).",
 	}, op.Meta{Action: string(authz.IdentityEduVerificationReview), Surface: op.SurfaceAdmin,
 		Idempotency: op.IdempotencyOptional}, h.decideEdu)
 }
@@ -194,7 +199,8 @@ func toAdminEduDTO(v EduView) AdminEduVerificationDTO {
 
 type startEduInput struct {
 	Body struct {
-		EduEmail emailText `json:"edu_email" doc:"A .edu.tr address of the caller's university"`
+		EduEmail  emailText `json:"edu_email" doc:"A .edu.tr address of the caller's university"`
+		BirthDate string    `json:"birth_date,omitempty" format:"date" doc:"YYYY-MM-DD; required when the account has no birth date (a student's age must be known), ignored otherwise (set once)"`
 	}
 }
 
@@ -203,7 +209,11 @@ func (h handler) startEdu(ctx context.Context, in *startEduInput) (*acceptedOutp
 	if err != nil {
 		return nil, err
 	}
-	if err := h.svc.StartEduVerification(ctx, a, string(in.Body.EduEmail)); err != nil {
+	birth, err := parseBirthDate(in.Body.BirthDate)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.svc.StartEduVerification(ctx, a, EduStart{Email: string(in.Body.EduEmail), BirthDate: birth}); err != nil {
 		return nil, err
 	}
 	return &acceptedOutput{}, nil
@@ -217,6 +227,7 @@ type submitEduDocumentInput struct {
 	Body struct {
 		UniversityID   string `json:"university_id" format:"uuid" doc:"The university the student attends"`
 		DocumentFileID string `json:"document_file_id" format:"uuid" doc:"A completed edu_document upload of the caller"`
+		BirthDate      string `json:"birth_date,omitempty" format:"date" doc:"YYYY-MM-DD; required when the account has no birth date (a student's age must be known), ignored otherwise (set once)"`
 	}
 }
 
@@ -237,7 +248,11 @@ func (h handler) submitEduDocument(ctx context.Context, in *submitEduDocumentInp
 	if err != nil {
 		return nil, problem.Field("body.document_file_id", "must be a UUID")
 	}
-	v, err := h.svc.SubmitEduDocument(ctx, a, EduDocumentSubmission{UniversityID: uni, FileID: file})
+	birth, err := parseBirthDate(in.Body.BirthDate)
+	if err != nil {
+		return nil, err
+	}
+	v, err := h.svc.SubmitEduDocument(ctx, a, EduDocumentSubmission{UniversityID: uni, FileID: file, BirthDate: birth})
 	if err != nil {
 		return nil, err
 	}

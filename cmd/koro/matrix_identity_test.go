@@ -202,6 +202,11 @@ func (w *identityWiring) matrixFixtures(fx *matrixFixtures) error {
 			if err := w.store.InsertEduVerification(ctx, v); err != nil {
 				return fmt.Errorf("fixture %s: %w", f.Name, err)
 			}
+			// BE-202: a document comes with the applicant's birth date (an
+			// account that has one keeps it).
+			if _, err := w.store.SetBirthDate(ctx, owner, adult); err != nil {
+				return fmt.Errorf("fixture %s: birth date: %w", f.Name, err)
+			}
 		default:
 			return fmt.Errorf("fixture %s: unknown kind %q", f.Name, f.Kind)
 		}

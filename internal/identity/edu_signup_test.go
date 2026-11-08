@@ -331,7 +331,7 @@ func TestConfirmEmail_EduSignup_MinorSameRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	u := e.signupUser(t, "genc@ogr.uni.edu.tr")
-	if !u.IsMinor(e.clk.Now()) {
+	if u.BirthDate == nil || !u.BirthDate.IsMinor(e.clk.Now()) {
 		t.Fatal("the fixture is not a minor")
 	}
 	// A minor is verified like by confirmEduVerification; the minor rules

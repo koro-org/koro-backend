@@ -96,6 +96,7 @@ import (
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
 	"koro/internal/platform/idempotency"
+	"koro/internal/platform/kvcache"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/privacy"
 )
@@ -340,6 +341,10 @@ type Deps struct {
 	// the system revokes it (config STUDENTS_GRANT_SUSPENSION_WINDOW,
 	// BE-088). 0 → DefaultSuspensionWindow.
 	SuspensionWindow time.Duration
+	// Cache keeps the popular clubs of a department or a university for
+	// PopularClubsTTL (BE-197; the API's Redis). nil → every call counts
+	// in the database.
+	Cache kvcache.Cache
 }
 
 func (d Deps) validate() error {

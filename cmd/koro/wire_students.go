@@ -11,6 +11,7 @@ import (
 	"koro/internal/authz"
 	"koro/internal/notify"
 	"koro/internal/platform/db"
+	"koro/internal/platform/kvcache"
 	"koro/internal/platform/problem"
 	"koro/internal/students"
 )
@@ -124,6 +125,11 @@ func (w *studentsWiring) build(c *container) error {
 	}
 	d.Sender = studentsSender{c: c}
 	d.SuspensionWindow = c.infra.cfg.Students.GrantSuspensionWindow
+	// BE-197: the popular clubs of the recommendations, cached in the
+	// API's Redis; without Redis (wiring tests) every call counts.
+	if c.infra.redis != nil {
+		d.Cache = kvcache.NewRedis(c.infra.redis)
+	}
 	mod, err := students.New(d)
 	if err != nil {
 		return err

@@ -19,8 +19,14 @@
 //     to the payee for the paid-out lines whose seller pays the commission
 //     (manual_upload). Model C plans only Koro's fee to the buyer (its
 //     buyer_fee_amount). Models A2 and B plan nothing (logged; T-299).
-//     invoice_automation 'provider' is still planned for upload until BE-053
-//     wires the provider flow (logged).
+//   - The provider flow (provider_flow.go, BE-053): Koro's own invoices
+//     whose policies say invoice_automation 'provider' are issued by the
+//     wired InvoiceProvider (Paraşüt: parasut.go) — queued with a reserved
+//     series and number, drafted (query before create), issued, polled
+//     (≤ 24 h) and stored with the provider's number and PDF, or failed
+//     with finance told. Without a wired provider they are planned for
+//     upload (logged). The OAuth tokens rotate under the
+//     integration_credentials row lock (tokens.go, billing.refresh_token).
 //   - Upload (billing.invoice.upload; 03 k29): a planned invoice without a
 //     document, or one found mismatched, takes the PDF (an invoice_pdf
 //     upload of the actor or of the issuer org, application/pdf), the number,
@@ -51,6 +57,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"uuid"
 
 	"koro/internal/authz"
@@ -102,8 +109,10 @@ type Service interface {
 // Orgs and Files are required (New fails otherwise). Reauth nil →
 // adminPutIntegration 503; Sealer nil → adminPutIntegration 503 (nothing
 // is stored in clear); Sender or Staff nil → the notice task fails and is
-// retried. Provider is the e-invoice adapter of BE-053 (nil: every invoice
-// is uploaded).
+// retried. Provider is the e-invoice adapter (nil: every invoice is
+// uploaded); with it ProviderName (invoices.provider) and ProviderSeries
+// (the reserved series) are required. Tokens is the provider's token
+// rotation (nil: no billing.refresh_token job).
 type Deps struct {
 	Store       Store
 	Tx          db.TxManager
@@ -125,6 +134,10 @@ type Deps struct {
 	Sender   Sender
 	Staff    Staff
 	Provider InvoiceProvider
+
+	ProviderName   string // "parasut" (invoices_provider_chk)
+	ProviderSeries string // the provider flow's invoice series (invoices.reserved_series)
+	Tokens         *ProviderTokens
 }
 
 func (d Deps) validate() error {
@@ -142,8 +155,19 @@ func (d Deps) validate() error {
 			errs = append(errs, fmt.Errorf("billing.Deps.%s is missing", c.name))
 		}
 	}
+	if d.Provider != nil {
+		if d.ProviderName != ProviderParasut && d.ProviderName != "nilvera" {
+			errs = append(errs, fmt.Errorf("billing.Deps.ProviderName %q is not an invoice provider", d.ProviderName))
+		}
+		if !reSeries.MatchString(d.ProviderSeries) {
+			errs = append(errs, errors.New("billing.Deps.ProviderSeries must be 1-16 letters or digits"))
+		}
+	}
 	return errors.Join(errs...)
 }
+
+// reSeries is the provider flow's invoice series (BILLING_PARASUT_SERIES).
+var reSeries = regexp.MustCompile(`^[A-Za-z0-9]{1,16}$`)
 
 // Module is what billing hands to the composition root.
 type Module struct {

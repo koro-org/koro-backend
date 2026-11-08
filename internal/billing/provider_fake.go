@@ -5,14 +5,15 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-
-	"koro/internal/platform/money"
+	"uuid"
 )
 
 // FakeProvider is an in-memory InvoiceProvider (BE-042): the tests' and
-// the skeleton of the invoice_automation='provider' path until BE-053 wires
-// Paraşüt. It keeps the contract's idempotency rules and answers a job
-// pending for PendingPolls polls before it is done. Safe for concurrent use.
+// the development adapter (BILLING_INVOICE_PROVIDER=mem; refused in
+// staging and prod). It keeps the contract's idempotency rules and answers
+// a job pending for PendingPolls polls before it is done; a document left
+// to the provider (DocUnknown) is an e-Fatura for a party upserted with
+// EInvoice, else an e-Arşiv. Safe for concurrent use.
 type FakeProvider struct {
 	// PendingPolls is how many PollJob calls answer pending before the job
 	// is done (0: done at the first poll).
@@ -21,6 +22,7 @@ type FakeProvider struct {
 	mu       sync.Mutex
 	seq      int
 	contacts map[string]string     // contact key → contact ID
+	eInvoice map[string]bool       // contact ID → registered for e-Fatura
 	drafts   map[string]*fakeDraft // "series/no" → draft
 	byID     map[string]*fakeDraft // provider invoice ID → draft
 	jobs     map[string]*fakeJob   // job ID → job
@@ -33,6 +35,7 @@ type fakeDraft struct {
 	job    string
 	issued bool
 	no     string
+	ettn   string
 }
 
 type fakeJob struct {
@@ -42,8 +45,8 @@ type fakeJob struct {
 
 // NewFakeProvider returns an empty FakeProvider.
 func NewFakeProvider() *FakeProvider {
-	return &FakeProvider{contacts: map[string]string{}, drafts: map[string]*fakeDraft{}, byID: map[string]*fakeDraft{},
-		jobs: map[string]*fakeJob{}}
+	return &FakeProvider{contacts: map[string]string{}, eInvoice: map[string]bool{}, drafts: map[string]*fakeDraft{},
+		byID: map[string]*fakeDraft{}, jobs: map[string]*fakeJob{}}
 }
 
 var _ InvoiceProvider = (*FakeProvider)(nil)
@@ -66,34 +69,18 @@ func (f *FakeProvider) UpsertContact(_ context.Context, p PartySnapshot) (string
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if id, ok := f.contacts[key]; ok {
+		f.eInvoice[id] = p.EInvoice
 		return id, nil
 	}
 	id := f.next("contact")
-	f.contacts[key] = id
+	f.contacts[key], f.eInvoice[id] = id, p.EInvoice
 	return id, nil
 }
 
 // CreateDraft implements InvoiceProvider (query before create).
 func (f *FakeProvider) CreateDraft(_ context.Context, in DraftInvoice) (ProviderRef, error) {
-	if in.Series == "" || in.No <= 0 || len(in.Lines) == 0 || in.IssueDate.IsZero() {
-		return ProviderRef{}, fmt.Errorf("%w: series, number, issue date and lines are required", ErrProviderInvalid)
-	}
-	var gross int64
-	for _, l := range in.Lines {
-		net, err := money.Mul(l.UnitPrice, int64(l.Quantity))
-		if err != nil {
-			return ProviderRef{}, fmt.Errorf("%w: %w", ErrProviderInvalid, err)
-		}
-		vat, err := money.VAT(net, int64(l.VATRateBP))
-		if err != nil {
-			return ProviderRef{}, fmt.Errorf("%w: %w", ErrProviderInvalid, err)
-		}
-		if gross, err = money.Sum(gross, net, vat); err != nil {
-			return ProviderRef{}, fmt.Errorf("%w: %w", ErrProviderInvalid, err)
-		}
-	}
-	if gross != in.TotalGross {
-		return ProviderRef{}, fmt.Errorf("%w: lines sum to %d, total is %d", ErrProviderInvalid, gross, in.TotalGross)
+	if _, err := checkDraft(in); err != nil {
+		return ProviderRef{}, err
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -115,7 +102,7 @@ func (f *FakeProvider) CreateDraft(_ context.Context, in DraftInvoice) (Provider
 
 // Issue implements InvoiceProvider: one job per draft.
 func (f *FakeProvider) Issue(_ context.Context, ref ProviderRef, doc DocumentType) (string, error) {
-	if doc != DocEFatura && doc != DocEArsiv {
+	if doc != DocEFatura && doc != DocEArsiv && doc != DocUnknown {
 		return "", fmt.Errorf("%w: document type %q", ErrProviderInvalid, doc)
 	}
 	f.mu.Lock()
@@ -126,6 +113,12 @@ func (f *FakeProvider) Issue(_ context.Context, ref ProviderRef, doc DocumentTyp
 	}
 	if d.job != "" {
 		return d.job, nil
+	}
+	if doc == DocUnknown {
+		doc = DocEArsiv
+		if f.eInvoice[d.in.ContactID] {
+			doc = DocEFatura
+		}
 	}
 	d.doc, d.job = doc, f.next("job")
 	f.jobs[d.job] = &fakeJob{draft: d}
@@ -148,8 +141,9 @@ func (f *FakeProvider) PollJob(_ context.Context, jobID string) (JobStatus, erro
 		j.draft.issued = true
 		j.draft.ref.EDocID = f.next("edoc")
 		j.draft.no = fmt.Sprintf("%s%04d%09d", j.draft.in.Series, j.draft.in.IssueDate.Year, j.draft.in.No)
+		j.draft.ettn = uuid.NewV7().String()
 	}
-	return JobStatus{State: JobDone, Ref: j.draft.ref, InvoiceNo: j.draft.no}, nil
+	return JobStatus{State: JobDone, Ref: j.draft.ref, Doc: j.draft.doc, InvoiceNo: j.draft.no, ETTN: j.draft.ettn}, nil
 }
 
 // FetchPDF implements InvoiceProvider: a minimal PDF naming the number.

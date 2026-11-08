@@ -78,6 +78,9 @@ type Files interface {
 	// States returns the states of the PDFs of a response (one read;
 	// BE-154b).
 	States(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]files.State, error)
+	// PutGenerated stores the PDF a provider issued (outside a
+	// transaction; attached in the issue transaction; BE-053).
+	PutGenerated(ctx context.Context, in files.GeneratedFile) (uuid.UUID, error)
 }
 
 // AuditLogger is audit's logger (L1): every invoice write is logged in its
@@ -96,10 +99,20 @@ type Reauthenticator interface {
 	Verify(ctx context.Context, userID uuid.UUID, proof identity.ReauthProof) (kind string, err error)
 }
 
-// Sealer envelope-encrypts the integration tokens (platform/crypto,
-// BE-055: the shared Envelope).
+// Sealer envelope-encrypts the integration tokens and opens them for the
+// provider calls and their rotation (platform/crypto, BE-055: the shared
+// Envelope).
 type Sealer interface {
 	Seal(ctx context.Context, purpose string, plaintext []byte) ([]byte, error)
+	Open(ctx context.Context, purpose string, sealed []byte) ([]byte, error)
+}
+
+// TokenRefresher renews an integration's OAuth tokens with its refresh
+// token (ParasutOAuth, BE-053). An error wrapping ErrRefreshRefused means
+// the provider refused the refresh token itself (revoked, expired, already
+// rotated): an administrator enters new tokens (adminPutIntegration).
+type TokenRefresher interface {
+	Refresh(ctx context.Context, refreshToken string) (TokenGrant, error)
 }
 
 // Sender is notify's Sender (L3): the invoice notices are sent by the worker.

@@ -15,6 +15,7 @@ import (
 	"koro/internal/parties"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/money"
+	"koro/internal/platform/outbox"
 	"koro/internal/platform/queue"
 )
 
@@ -43,7 +44,9 @@ var planResource = authz.Resource{Type: authz.TypeInvoice, Attrs: map[string]str
 
 // plan stores the documents build expects in one transaction: a document
 // whose key exists is skipped (a repeated event), a new one is audited as
-// billing.invoice.plan and its uploaders are told after the commit.
+// billing.invoice.plan and its uploaders are told after the commit; a
+// document of the provider flow takes the next reserved number of its
+// series and starts the flow (invoice.requested, O; BE-053).
 func (s *service) plan(ctx context.Context, job string, build func(ctx context.Context) ([]expected, error)) error {
 	sys := authz.SystemActor(job)
 	if err := authz.Can(ctx, sys, authz.BillingInvoicePlan, planResource); err != nil {
@@ -55,6 +58,13 @@ func (s *service) plan(ctx context.Context, job string, build func(ctx context.C
 			return err
 		}
 		for _, x := range docs {
+			if x.inv.IssuingMode == ModeProvider {
+				no, err := s.d.Store.ReserveInvoiceNo(ctx, *x.inv.ReservedSeries)
+				if err != nil {
+					return err
+				}
+				x.inv.ReservedNo = &no
+			}
 			stored, created, err := s.d.Store.InsertInvoice(ctx, x.inv, x.lines)
 			if err != nil {
 				return err
@@ -66,7 +76,13 @@ func (s *service) plan(ctx context.Context, job string, build func(ctx context.C
 				map[string]any{"trigger": string(stored.Trigger), "lines": len(x.lines)})); err != nil {
 				return err
 			}
-			s.notice(ctx, stored, noticePlanned)
+			if stored.IssuingMode == ModeProvider {
+				if err := outbox.Emit(ctx, s.d.Outbox, domainevent.InvoiceRequested{InvoiceID: stored.ID}, invoiceSubject, stored.ID); err != nil {
+					return err
+				}
+			} else {
+				s.notice(ctx, stored, noticePlanned)
+			}
 			s.d.Log.LogAttrs(ctx, slog.LevelInfo, "invoice planned", slog.String("invoice_id", stored.ID.String()),
 				slog.String("kind", string(stored.Kind)), slog.String("trigger", string(stored.Trigger)))
 		}
@@ -213,7 +229,7 @@ func (s *service) onFulfilled(ctx context.Context, o orders.Order, l orders.Line
 }
 
 // terms reads the invoice terms of a line (catalog); a provider automation
-// is still planned for upload until BE-053 (logged).
+// without a wired provider is planned for upload (logged).
 func (s *service) terms(ctx context.Context, l orders.Line) (catalog.InvoiceTerms, error) {
 	t, err := s.d.Offerings.InvoiceTerms(ctx, l.OfferingID, l.CommercePolicyID)
 	if err != nil {
@@ -257,6 +273,15 @@ func (s *service) serviceSale(ctx context.Context, o orders.Order, l orders.Line
 		NetAmount: l.NetAmount, VATRateBP: l.VATRateBP, VATAmount: l.VATAmount, VATExemptionCode: t.VATExemptionCode,
 		VATWithholdingCode: t.VATWithholdingCode, VATWithheldAmount: l.VATWithheldAmount,
 	}
+	if l.PayeeID == nil { // Koro's own service invoice may go through the provider
+		via, err := s.viaProvider(ctx, []orders.Line{l}, []Line{ln})
+		if err != nil {
+			return expected{}, err
+		}
+		if via {
+			mode = ModeProvider
+		}
+	}
 	buyerOrg := o.OrgID
 	return s.document(Invoice{
 		OrderID: &o.ID, Kind: KindServiceSale, IssuerPartyID: issuer.ID, RecipientPartyID: o.BuyerPartyID,
@@ -269,12 +294,16 @@ func (s *service) serviceSale(ctx context.Context, o orders.Order, l orders.Line
 // platformFee is Koro's fee invoice to the buyer for the lines whose buyer
 // pays the commission (model A, payer buyer; model C's fee).
 func (s *service) platformFee(ctx context.Context, o orders.Order, lines []orders.Line) (expected, bool, error) {
-	var ls []Line
+	var (
+		ls  []Line
+		src []orders.Line
+	)
 	for _, l := range lines {
 		if l.CommissionPayer != "buyer" || l.CommissionAmount <= 0 || l.FulfillmentStatus == orders.FulfillCancelled {
 			continue
 		}
 		id := l.ID
+		src = append(src, l)
 		ls = append(ls, Line{OrderLineID: &id, Description: "Platform hizmet bedeli – " + l.TitleSnapshot, Quantity: 1,
 			UnitPriceAmount: l.CommissionAmount, NetAmount: l.CommissionAmount, VATRateBP: l.CommissionVATRateBP,
 			VATAmount: l.CommissionVATAmount})
@@ -286,11 +315,15 @@ func (s *service) platformFee(ctx context.Context, o orders.Order, lines []order
 	if err != nil {
 		return expected{}, false, err
 	}
+	mode, err := s.koroMode(ctx, src, ls)
+	if err != nil {
+		return expected{}, false, err
+	}
 	buyerOrg := o.OrgID
 	x, err := s.document(Invoice{
 		OrderID: &o.ID, Kind: KindPlatformFee, IssuerPartyID: koro.ID, RecipientPartyID: o.BuyerPartyID,
 		RecipientOrgID: &buyerOrg, IssuerSnapshot: partySnapshot(koro), RecipientSnapshot: buyerSnapshot(o.BuyerSnapshot),
-		IssuingMode: ModeManualUpload, Trigger: TriggerOnPayment, IdempotencyKey: key(KindPlatformFee, o.ID, "all"),
+		IssuingMode: mode, Trigger: TriggerOnPayment, IdempotencyKey: key(KindPlatformFee, o.ID, "all"),
 	}, ls)
 	return x, err == nil, err
 }
@@ -303,7 +336,10 @@ func (s *service) onPayout(ctx context.Context, payoutID, payeeID uuid.UUID) ([]
 		return nil, err
 	}
 	byOrder := map[uuid.UUID]orders.Order{}
-	var ls []Line
+	var (
+		ls  []Line
+		src []orders.Line
+	)
 	for _, l := range lines {
 		if l.CommissionPayer != "seller" || l.CommissionAmount <= 0 {
 			continue
@@ -320,6 +356,7 @@ func (s *service) onPayout(ctx context.Context, payoutID, payeeID uuid.UUID) ([]
 			continue
 		}
 		id := l.ID
+		src = append(src, l)
 		ls = append(ls, Line{OrderLineID: &id, Description: "Komisyon – " + o.OrderNo + " " + l.TitleSnapshot, Quantity: 1,
 			UnitPriceAmount: l.CommissionAmount, NetAmount: l.CommissionAmount, VATRateBP: l.CommissionVATRateBP,
 			VATAmount: l.CommissionVATAmount})
@@ -339,16 +376,30 @@ func (s *service) onPayout(ctx context.Context, payoutID, payeeID uuid.UUID) ([]
 	if err != nil {
 		return nil, err
 	}
+	mode, err := s.koroMode(ctx, src, ls)
+	if err != nil {
+		return nil, err
+	}
 	payout, org := payoutID, py.OrgID
 	x, err := s.document(Invoice{
 		PayoutID: &payout, Kind: KindCommission, IssuerPartyID: koro.ID, RecipientPartyID: party.ID, RecipientOrgID: &org,
-		IssuerSnapshot: partySnapshot(koro), RecipientSnapshot: partySnapshot(party), IssuingMode: ModeManualUpload,
+		IssuerSnapshot: partySnapshot(koro), RecipientSnapshot: partySnapshot(party), IssuingMode: mode,
 		Trigger: TriggerOnPayout, IdempotencyKey: key(KindCommission, payoutID, "all"),
 	}, ls)
 	if err != nil {
 		return nil, err
 	}
 	return []expected{x}, nil
+}
+
+// koroMode is the issuing mode of Koro's invoice of the source lines: the
+// provider when viaProvider says so, else finance's upload.
+func (s *service) koroMode(ctx context.Context, src []orders.Line, lines []Line) (IssuingMode, error) {
+	via, err := s.viaProvider(ctx, src, lines)
+	if err != nil || !via {
+		return ModeManualUpload, err
+	}
+	return ModeProvider, nil
 }
 
 // platformParty returns Koro's legal party; without it (bootstrap-commerce
@@ -369,6 +420,10 @@ func (s *service) platformParty(ctx context.Context) (parties.LegalParty, error)
 // totals (platform/money, 06 H-6).
 func (s *service) document(inv Invoice, lines []Line) (expected, error) {
 	inv.ID, inv.Status, inv.DocumentType, inv.Provider, inv.Currency = uuid.NewV7(), StatusPlanned, DocUnknown, ProviderNone, Currency
+	if inv.IssuingMode == ModeProvider { // the number is reserved when it is stored (plan)
+		series := s.d.ProviderSeries
+		inv.Status, inv.Provider, inv.ReservedSeries = StatusQueued, s.d.ProviderName, &series
+	}
 	var net, vat, withheld []int64
 	for i := range lines {
 		l := &lines[i]

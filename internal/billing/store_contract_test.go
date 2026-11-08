@@ -241,6 +241,70 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (billing.Store, wor
 		}
 	})
 
+	t.Run("provider flow: reserved numbers, provider columns, contacts", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		series := "C" + uuid.NewV7().String()[24:]
+		reserve := func() int {
+			t.Helper()
+			var n int
+			if err := w.tx.WithTx(ctx, func(ctx context.Context) error {
+				var err error
+				n, err = s.ReserveInvoiceNo(ctx, series)
+				return err
+			}); err != nil {
+				t.Fatalf("ReserveInvoiceNo: %v", err)
+			}
+			return n
+		}
+		if n := reserve(); n != 1 {
+			t.Fatalf("first reserved number = %d, want 1", n)
+		}
+		f := newFixture(t, w)
+		f.inv.IssuingMode, f.inv.Provider, f.inv.Status = billing.ModeProvider, billing.ProviderParasut, billing.StatusQueued
+		f.inv.ReservedSeries, f.inv.ReservedNo = &series, ptr(1)
+		stored, _ := insertIn(t, s, w, f)
+		if stored.ReservedSeries == nil || *stored.ReservedSeries != series || stored.ReservedNo == nil || *stored.ReservedNo != 1 {
+			t.Fatalf("stored reserved = %v/%v", stored.ReservedSeries, stored.ReservedNo)
+		}
+		if n := reserve(); n != 2 {
+			t.Fatalf("next reserved number = %d, want 2", n)
+		}
+		next := stored
+		next.Status, next.Attempts = billing.StatusProviderPending, 3
+		next.ProviderContactID, next.ProviderInvoiceID = ptr("101"), ptr("202")
+		next.ProviderJobID, next.ProviderEDocID = ptr("202:303"), ptr("e_archives/404")
+		other := "OTHER"
+		next.ReservedSeries = &other // a planned column: never written
+		got, err := updateIn(ctx, s, w, next, billing.StatusQueued)
+		if err != nil {
+			t.Fatalf("UpdateInvoice: %v", err)
+		}
+		if got.Attempts != 3 || *got.ProviderContactID != "101" || *got.ProviderInvoiceID != "202" || *got.ProviderJobID != "202:303" ||
+			*got.ProviderEDocID != "e_archives/404" || *got.ReservedSeries != series {
+			t.Fatalf("updated = %+v", got)
+		}
+
+		party := w.party(t)
+		if _, err := s.ProviderContact(ctx, party, billing.ProviderParasut); !errors.Is(err, billing.ErrNotFound) {
+			t.Fatalf("ProviderContact(none) = %v", err)
+		}
+		for _, id := range []string{"501", "502"} {
+			if err := w.tx.WithTx(ctx, func(ctx context.Context) error {
+				return s.PutProviderContact(ctx, party, billing.ProviderParasut, id)
+			}); err != nil {
+				t.Fatalf("PutProviderContact: %v", err)
+			}
+			if got, err := s.ProviderContact(ctx, party, billing.ProviderParasut); err != nil || got != id {
+				t.Fatalf("ProviderContact = %q, %v; want %q", got, err, id)
+			}
+		}
+		if _, err := s.Credential(ctx, billing.ProviderParasut, false); !errors.Is(err, billing.ErrNotFound) {
+			t.Fatalf("Credential(none) = %v", err)
+		}
+	})
+
 	t.Run("integration credentials", func(t *testing.T) {
 		t.Parallel()
 		s, w := newStore(t)
@@ -269,6 +333,14 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (billing.Store, wor
 		rows, err := s.Credentials(ctx)
 		if err != nil || len(rows) < 1 {
 			t.Fatalf("Credentials = %d, %v", len(rows), err)
+		}
+		var locked billing.Credential
+		if err := w.tx.WithTx(ctx, func(ctx context.Context) error {
+			var err error
+			locked, err = s.Credential(ctx, "parasut", true)
+			return err
+		}); err != nil || string(locked.RefreshTokenEnc) != "sealed-2" {
+			t.Fatalf("Credential(lock) = %+v, %v", locked, err)
 		}
 	})
 }

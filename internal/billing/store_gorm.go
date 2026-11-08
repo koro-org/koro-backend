@@ -2,6 +2,7 @@ package billing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"uuid"
 
@@ -86,13 +87,17 @@ func (s gormStore) UpdateInvoice(ctx context.Context, next Invoice, from Status)
 	err := db.Conn(ctx, s.orm).Raw(`UPDATE invoices SET
 		status = @status, document_type = @document_type, invoice_no = @invoice_no, ettn = @ettn, issue_date = @issue_date,
 		pdf_file_id = @pdf_file_id, pdf_sha256 = @pdf_sha256, uploaded_by = @uploaded_by, verified_by = @verified_by,
-		verified_at = @verified_at, issued_at = @issued_at, last_error = @last_error, pdf_replaced_at = @pdf_replaced_at
+		verified_at = @verified_at, issued_at = @issued_at, last_error = @last_error, pdf_replaced_at = @pdf_replaced_at,
+		attempts = @attempts, provider_contact_id = @provider_contact_id, provider_invoice_id = @provider_invoice_id,
+		provider_edoc_id = @provider_edoc_id, provider_job_id = @provider_job_id
 		WHERE id = @id AND status = @from
 		RETURNING *`, map[string]any{
 		"id": next.ID, "from": from, "status": next.Status, "document_type": next.DocumentType, "invoice_no": next.InvoiceNo,
 		"ettn": next.ETTN, "issue_date": next.IssueDate, "pdf_file_id": next.PDFFileID, "pdf_sha256": next.PDFSHA256,
 		"uploaded_by": next.UploadedBy, "verified_by": next.VerifiedBy, "verified_at": next.VerifiedAt,
 		"issued_at": next.IssuedAt, "last_error": next.LastError, "pdf_replaced_at": next.PDFReplacedAt,
+		"attempts": next.Attempts, "provider_contact_id": next.ProviderContactID, "provider_invoice_id": next.ProviderInvoiceID,
+		"provider_edoc_id": next.ProviderEDocID, "provider_job_id": next.ProviderJobID,
 	}).Scan(&rows).Error
 	if err != nil {
 		return Invoice{}, fmt.Errorf("billing: update invoice: %w", translate(err))
@@ -179,6 +184,71 @@ func (s gormStore) Credentials(ctx context.Context) ([]Credential, error) {
 		return nil, fmt.Errorf("billing: integration credentials: %w", err)
 	}
 	return out, nil
+}
+
+// ReserveInvoiceNo implements Store: a transaction-scoped advisory lock
+// per series serialises the reservations (no sequence or unique index on
+// reserved_no: the number is the next above the series' highest).
+//
+// cross-org: the platform's own invoice series.
+func (s gormStore) ReserveInvoiceNo(ctx context.Context, series string) (int, error) {
+	if !db.InTx(ctx) {
+		return 0, errors.New("billing: ReserveInvoiceNo must run in a transaction (the lock ends with it)")
+	}
+	conn := db.Conn(ctx, s.orm)
+	if err := conn.Exec("SELECT pg_advisory_xact_lock(hashtextextended('billing.invoices.reserved_no:' || CAST( ? AS text), 0))", series).Error; err != nil {
+		return 0, fmt.Errorf("billing: lock the reserved series: %w", err)
+	}
+	var next int
+	if err := conn.Raw("SELECT COALESCE(MAX(reserved_no), 0) + 1 FROM invoices WHERE reserved_series = ?", series).
+		Scan(&next).Error; err != nil {
+		return 0, fmt.Errorf("billing: next reserved number: %w", err)
+	}
+	return next, nil
+}
+
+// ProviderContact implements Store.
+//
+// cross-org: a legal party's reference at a provider.
+func (s gormStore) ProviderContact(ctx context.Context, partyID uuid.UUID, provider string) (string, error) {
+	var ids []string
+	if err := db.Conn(ctx, s.orm).Raw("SELECT provider_contact_id FROM provider_contact_map WHERE legal_party_id = ? AND provider = ?",
+		partyID, provider).Scan(&ids).Error; err != nil {
+		return "", fmt.Errorf("billing: provider contact: %w", err)
+	}
+	if len(ids) == 0 {
+		return "", ErrNotFound
+	}
+	return ids[0], nil
+}
+
+// PutProviderContact implements Store (upsert on the party and provider).
+//
+// cross-org: a legal party's reference at a provider.
+func (s gormStore) PutProviderContact(ctx context.Context, partyID uuid.UUID, provider, contactID string) error {
+	err := db.Conn(ctx, s.orm).Exec(`INSERT INTO provider_contact_map (legal_party_id, provider, provider_contact_id)
+		VALUES ( ?, ?, ?)
+		ON CONFLICT (legal_party_id, provider) DO UPDATE SET provider_contact_id = EXCLUDED.provider_contact_id`,
+		partyID, provider, contactID).Error
+	if err != nil {
+		return fmt.Errorf("billing: put provider contact: %w", translate(err))
+	}
+	return nil
+}
+
+// Credential implements Store.
+//
+// cross-org: platform configuration.
+func (s gormStore) Credential(ctx context.Context, provider string, lock bool) (Credential, error) {
+	var c Credential
+	err := db.LockIf(db.Conn(ctx, s.orm), lock).Where("provider = ?", provider).Take(&c).Error
+	switch {
+	case db.IsNotFound(err):
+		return Credential{}, ErrNotFound
+	case err != nil:
+		return Credential{}, fmt.Errorf("billing: integration credential: %w", err)
+	}
+	return c, nil
 }
 
 // PutCredential implements Store (upsert on the provider).

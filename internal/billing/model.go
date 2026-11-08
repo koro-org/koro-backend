@@ -188,25 +188,37 @@ type Invoice struct {
 	Provider          string       `gorm:"column:provider"`
 	Status            Status       `gorm:"column:status"`
 	Trigger           Trigger      `gorm:"column:trigger"`
-	InvoiceNo         *string      `gorm:"column:invoice_no"`
-	ETTN              *uuid.UUID   `gorm:"type:uuid;column:ettn"`
-	IssueDate         *civil.Date  `gorm:"column:issue_date"`
-	Currency          string       `gorm:"column:currency"`
-	NetAmount         int64        `gorm:"column:net_amount"`
-	VATAmount         int64        `gorm:"column:vat_amount"`
-	VATWithheldAmount int64        `gorm:"column:vat_withheld_amount"`
-	TotalAmount       int64        `gorm:"column:total_amount"`
-	PayableAmount     int64        `gorm:"column:payable_amount"`
-	RefersToInvoiceID *uuid.UUID   `gorm:"type:uuid;column:refers_to_invoice_id"`
-	PDFFileID         *uuid.UUID   `gorm:"type:uuid;column:pdf_file_id"`
-	PDFSHA256         []byte       `gorm:"column:pdf_sha256"`
-	Attempts          int          `gorm:"column:attempts"`
-	LastError         *string      `gorm:"column:last_error"` // the mismatch note (manual) or the provider's last error
-	IdempotencyKey    string       `gorm:"column:idempotency_key"`
-	UploadedBy        *uuid.UUID   `gorm:"type:uuid;column:uploaded_by"`
-	VerifiedBy        *uuid.UUID   `gorm:"type:uuid;column:verified_by"`
-	VerifiedAt        *time.Time   `gorm:"column:verified_at"`
-	IssuedAt          *time.Time   `gorm:"column:issued_at"`
+	// ReservedSeries and ReservedNo are the provider flow's own series and
+	// sequence (BE-053): reserved when the invoice is planned, they make the
+	// draft at the provider findable again (query before create).
+	ReservedSeries *string `gorm:"column:reserved_series"`
+	ReservedNo     *int    `gorm:"column:reserved_no"`
+	// The provider's references, written as each step of the provider flow
+	// completes (BE-053): the contact, the draft, the e-document and the
+	// issue job.
+	ProviderContactID *string     `gorm:"column:provider_contact_id"`
+	ProviderInvoiceID *string     `gorm:"column:provider_invoice_id"`
+	ProviderEDocID    *string     `gorm:"column:provider_edoc_id"`
+	ProviderJobID     *string     `gorm:"column:provider_job_id"`
+	InvoiceNo         *string     `gorm:"column:invoice_no"`
+	ETTN              *uuid.UUID  `gorm:"type:uuid;column:ettn"`
+	IssueDate         *civil.Date `gorm:"column:issue_date"`
+	Currency          string      `gorm:"column:currency"`
+	NetAmount         int64       `gorm:"column:net_amount"`
+	VATAmount         int64       `gorm:"column:vat_amount"`
+	VATWithheldAmount int64       `gorm:"column:vat_withheld_amount"`
+	TotalAmount       int64       `gorm:"column:total_amount"`
+	PayableAmount     int64       `gorm:"column:payable_amount"`
+	RefersToInvoiceID *uuid.UUID  `gorm:"type:uuid;column:refers_to_invoice_id"`
+	PDFFileID         *uuid.UUID  `gorm:"type:uuid;column:pdf_file_id"`
+	PDFSHA256         []byte      `gorm:"column:pdf_sha256"`
+	Attempts          int         `gorm:"column:attempts"`
+	LastError         *string     `gorm:"column:last_error"` // the mismatch note (manual) or the provider's last error
+	IdempotencyKey    string      `gorm:"column:idempotency_key"`
+	UploadedBy        *uuid.UUID  `gorm:"type:uuid;column:uploaded_by"`
+	VerifiedBy        *uuid.UUID  `gorm:"type:uuid;column:verified_by"`
+	VerifiedAt        *time.Time  `gorm:"column:verified_at"`
+	IssuedAt          *time.Time  `gorm:"column:issued_at"`
 	// PDFReplacedAt is when the rejected PDF of the issued invoice was
 	// replaced (BE-154b; its verification is reset until another person
 	// than its uploader verifies it again).

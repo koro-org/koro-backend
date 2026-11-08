@@ -27,10 +27,23 @@ type Store interface {
 	InvoiceLines(ctx context.Context, invoiceID uuid.UUID) ([]Line, error)
 	// UpdateInvoice writes the running columns of next (status, document
 	// type, number, ETTN, issue date, PDF, uploader, verifier, issued_at,
-	// last_error) when the stored row is still in state from;
-	// ErrInvalidState otherwise. The planned columns are never written
+	// last_error, attempts and the provider references) when the stored row
+	// is still in state from; ErrInvalidState otherwise. The planned
+	// columns (the reserved series and number among them) are never written
 	// (06 H-56).
 	UpdateInvoice(ctx context.Context, next Invoice, from Status) (Invoice, error)
+	// ReserveInvoiceNo returns the next number of the provider flow's
+	// series: one above the highest reserved_no of the series. It holds a
+	// transaction-scoped lock until the running transaction ends, so the
+	// caller inserts the invoice carrying the number in that transaction
+	// and concurrent plans never take the same number (BE-053).
+	ReserveInvoiceNo(ctx context.Context, series string) (int, error)
+	// ProviderContact returns the contact ID of a legal party at a provider
+	// (provider_contact_map) or ErrNotFound.
+	ProviderContact(ctx context.Context, partyID uuid.UUID, provider string) (string, error)
+	// PutProviderContact inserts or replaces the contact ID of a legal party
+	// at a provider.
+	PutProviderContact(ctx context.Context, partyID uuid.UUID, provider, contactID string) error
 	// ListInvoices returns up to limit invoices matching f, newest first
 	// (created_at, then ID), strictly after the cursor.
 	ListInvoices(ctx context.Context, f Filter, after *Cursor, limit int) ([]Invoice, error)
@@ -43,6 +56,10 @@ type Store interface {
 
 	// Credentials returns every integration_credentials row by provider.
 	Credentials(ctx context.Context) ([]Credential, error)
+	// Credential returns the integration_credentials row of a provider or
+	// ErrNotFound; lock takes its row lock until the running transaction
+	// ends (the token rotation's single refresher, 02 §22.5).
+	Credential(ctx context.Context, provider string, lock bool) (Credential, error)
 	// PutCredential inserts or replaces the row of c.Provider.
 	PutCredential(ctx context.Context, c Credential) (Credential, error)
 }

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"time"
 	"uuid"
 
 	"koro/internal/authz"
@@ -34,10 +35,12 @@ const (
 var orgAdminRoles = []authz.MemberRole{authz.MemberClubAdmin, authz.MemberUniversityRep, authz.MemberCompanyAdmin,
 	authz.MemberCompanyOwner}
 
-// Subscribe registers the plan consumers and the invoice e-mail (01 §6.2):
-// payment.captured, order_line.fulfilled, payout.paid and payment.refunded
-// → the plan; invoice.issued → the PDF to the recipient. Money handlers run
-// on the critical queue with the money retries (01 §8).
+// Subscribe registers the plan consumers, the invoice e-mail and the
+// provider flow (01 §6.2): payment.captured, order_line.fulfilled,
+// payout.paid and payment.refunded → the plan; invoice.issued → the PDF to
+// the recipient; invoice.requested → the provider flow; invoice.failed →
+// finance. Money handlers run on the critical queue with the money retries
+// (01 §8).
 func (m Module) Subscribe(r *outbox.Registry) {
 	opts := []outbox.Option{outbox.Queue(queue.Critical), outbox.MaxRetry(queue.MoneyMaxRetry)}
 	r.Subscribe(domainevent.TopicPaymentCaptured, PlanOnPaymentTaskName, m.svc.handlePaymentCaptured, opts...)
@@ -45,12 +48,27 @@ func (m Module) Subscribe(r *outbox.Registry) {
 	r.Subscribe(domainevent.TopicPayoutPaid, PlanOnPayoutTaskName, m.svc.handlePayoutPaid, opts...)
 	r.Subscribe(domainevent.TopicPaymentRefunded, PlanOnRefundTaskName, m.svc.handlePaymentRefunded, opts...)
 	r.Subscribe(domainevent.TopicInvoiceIssued, SendInvoiceTaskName, m.svc.handleInvoiceIssued, opts...)
+	r.Subscribe(domainevent.TopicInvoiceRequested, IssueInvoiceTaskName, m.svc.handleInvoiceRequested, opts...)
+	r.Subscribe(domainevent.TopicInvoiceFailed, NotifyInvoiceFailedTaskName, m.svc.handleInvoiceFailed, opts...)
 	files.SubscribeRejected(r, "billing", NotifyRejectedPDFTaskName, m.svc.notifyRejectedPDF)
 }
 
-// Tasks returns the plain task handlers of billing: the A notices.
+// Tasks returns the plain task handlers of billing: the A notices and the
+// provider flow's polls.
 func (m Module) Tasks() []queue.Task {
-	return []queue.Task{{Name: NotifyInvoiceTaskName, Handle: m.svc.handleNotice}}
+	return []queue.Task{{Name: NotifyInvoiceTaskName, Handle: m.svc.handleNotice},
+		{Name: PollJobsTaskName, Handle: m.svc.handlePollJob}}
+}
+
+// Jobs returns the scheduled jobs of billing: the token rotation of the
+// provider integration, when one is wired (01 §7 billing.refresh_token).
+func (m Module) Jobs() []queue.Job {
+	t := m.svc.d.Tokens
+	if t == nil {
+		return nil
+	}
+	return []queue.Job{{Name: RefreshTokenTaskName, Cron: RefreshTokenCron, Queue: queue.Default, Unique: 25 * time.Minute,
+		Handle: t.RefreshDue}}
 }
 
 // handleInvoiceIssued e-mails the issued invoice's PDF to the recipient

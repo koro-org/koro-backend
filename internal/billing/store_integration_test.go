@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -324,5 +325,87 @@ func TestService_PlanUploadVerifyCancel_Postgres(t *testing.T) {
 	}
 	if lines := e.lines(t, r.CreditNote.ID); len(lines) != 1 || lines[0].OrderLineID == nil || *lines[0].OrderLineID != l.ID {
 		t.Fatalf("credit note lines = %+v", lines)
+	}
+}
+
+// TestParasut_TokenRefresh_RowLock_SingleRefresher_Postgres: the token
+// rotation over the GORM store — workers refreshing the same refused token
+// at once wait for integration_credentials' row lock (SELECT … FOR UPDATE)
+// and one of them calls Paraşüt's token endpoint (02 §22.5).
+func TestParasut_TokenRefresh_RowLock_SingleRefresher_Postgres(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	d := testutil.NewDB(t)
+	r := newParasutRig(t, d.Tx, billing.NewGormStore(d.ORM))
+	stale, err := r.tokens.Token(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const workers = 4
+	got := make([]billing.ProviderToken, workers)
+	errs := make([]error, workers)
+	var wg sync.WaitGroup
+	for i := range workers {
+		wg.Go(func() { got[i], errs[i] = r.tokens.Refresh(ctx, stale.Access) })
+	}
+	wg.Wait()
+	for i := range workers {
+		if errs[i] != nil || got[i].Access == stale.Access || got[i].Access != got[0].Access {
+			t.Fatalf("worker %d: %v, %v; want the one renewed token", i, got[i], errs[i])
+		}
+	}
+	if n := r.d.tokenCount(); n != 1 {
+		t.Fatalf("token endpoint called %d times, want 1", n)
+	}
+}
+
+// TestStore_ReserveInvoiceNo_ConcurrentPlansPostgres: plans reserving
+// numbers of one series at once get distinct, consecutive numbers (the
+// advisory lock holds until each inserts its invoice).
+func TestStore_ReserveInvoiceNo_ConcurrentPlansPostgres(t *testing.T) {
+	t.Parallel()
+	s, w := pgStoreWorld(t)
+	series := "P" + uuid.NewV7().String()[24:]
+	const plans = 4
+	fixtures := make([]fixture, plans)
+	for i := range fixtures {
+		fixtures[i] = newFixture(t, w)
+		fixtures[i].inv.IssuingMode, fixtures[i].inv.Provider = billing.ModeProvider, billing.ProviderParasut
+		fixtures[i].inv.Status, fixtures[i].inv.ReservedSeries = billing.StatusQueued, &series
+	}
+	nos := make([]int, plans)
+	var wg sync.WaitGroup
+	for i := range plans {
+		wg.Go(func() {
+			if err := w.tx.WithTx(t.Context(), func(ctx context.Context) error {
+				n, err := s.ReserveInvoiceNo(ctx, series)
+				if err != nil {
+					return err
+				}
+				f := fixtures[i]
+				f.inv.ReservedNo, nos[i] = &n, n
+				_, _, err = s.InsertInvoice(ctx, f.inv, f.lines)
+				return err
+			}); err != nil {
+				t.Errorf("plan %d: %v", i, err)
+			}
+		})
+	}
+	wg.Wait()
+	seen := map[int]bool{}
+	for _, n := range nos {
+		if n < 1 || n > plans || seen[n] {
+			t.Fatalf("reserved numbers = %v, want 1..%d once each", nos, plans)
+		}
+		seen[n] = true
+	}
+	if err := w.tx.WithTx(t.Context(), func(ctx context.Context) error {
+		_, err := s.ReserveInvoiceNo(ctx, series)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReserveInvoiceNo(t.Context(), series); err == nil {
+		t.Fatal("ReserveInvoiceNo outside a transaction: no error")
 	}
 }

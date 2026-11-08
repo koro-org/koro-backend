@@ -20,15 +20,23 @@ import (
 type MemStore struct {
 	now func() time.Time
 
-	mu    sync.Mutex
-	inv   map[uuid.UUID]Invoice
-	lines map[uuid.UUID][]Line
-	creds map[string]Credential
+	mu       sync.Mutex
+	inv      map[uuid.UUID]Invoice
+	lines    map[uuid.UUID][]Line
+	creds    map[string]Credential
+	contacts map[contactKey]string
+}
+
+// contactKey is the primary key of provider_contact_map.
+type contactKey struct {
+	party    uuid.UUID
+	provider string
 }
 
 // NewMemStore returns an empty MemStore stamping rows with now.
 func NewMemStore(now func() time.Time) *MemStore {
-	return &MemStore{now: now, inv: map[uuid.UUID]Invoice{}, lines: map[uuid.UUID][]Line{}, creds: map[string]Credential{}}
+	return &MemStore{now: now, inv: map[uuid.UUID]Invoice{}, lines: map[uuid.UUID][]Line{}, creds: map[string]Credential{},
+		contacts: map[contactKey]string{}}
 }
 
 var _ Store = (*MemStore)(nil)
@@ -55,6 +63,8 @@ func checkRow(i Invoice) error {
 		return ErrInvalidState // invoices_pdf_replaced_chk (000164)
 	case (i.Kind == KindCreditNote) != (i.RefersToInvoiceID != nil):
 		return ErrInvalidState // invoices_credit_note_chk
+	case i.IssuingMode == ModeProvider && i.Provider == ProviderNone:
+		return errors.New("billing: invoices_provider_mode_chk: provider mode without a provider")
 	case i.IssuerPartyID == i.RecipientPartyID:
 		return errors.New("billing: invoices_parties_chk: issuer = recipient")
 	case i.TotalAmount != i.NetAmount+i.VATAmount || i.PayableAmount != i.TotalAmount-i.VATWithheldAmount:
@@ -173,6 +183,11 @@ func (m *MemStore) UpdateInvoice(_ context.Context, next Invoice, from Status) (
 	upd.PDFFileID, upd.PDFSHA256, upd.UploadedBy, upd.VerifiedBy, upd.VerifiedAt = next.PDFFileID, bytes.Clone(next.PDFSHA256),
 		next.UploadedBy, next.VerifiedBy, next.VerifiedAt
 	upd.IssuedAt, upd.LastError, upd.PDFReplacedAt = next.IssuedAt, next.LastError, next.PDFReplacedAt
+	upd.Attempts, upd.ProviderContactID, upd.ProviderInvoiceID = next.Attempts, next.ProviderContactID, next.ProviderInvoiceID
+	upd.ProviderEDocID, upd.ProviderJobID = next.ProviderEDocID, next.ProviderJobID
+	if upd.Attempts < 0 {
+		return Invoice{}, errors.New("billing: invoices_attempts_chk: attempts < 0")
+	}
 	if err := frozen(cur, upd); err != nil {
 		return Invoice{}, err
 	}
@@ -285,6 +300,57 @@ func (m *MemStore) Credentials(_ context.Context) ([]Credential, error) {
 		return 0
 	})
 	return out, nil
+}
+
+// ReserveInvoiceNo implements Store (the store's mutex stands for the
+// advisory lock).
+func (m *MemStore) ReserveInvoiceNo(_ context.Context, series string) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	high := 0
+	for _, i := range m.inv {
+		if i.ReservedSeries != nil && *i.ReservedSeries == series && i.ReservedNo != nil {
+			high = max(high, *i.ReservedNo)
+		}
+	}
+	return high + 1, nil
+}
+
+// ProviderContact implements Store.
+func (m *MemStore) ProviderContact(_ context.Context, partyID uuid.UUID, provider string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	id, ok := m.contacts[contactKey{partyID, provider}]
+	if !ok {
+		return "", ErrNotFound
+	}
+	return id, nil
+}
+
+// PutProviderContact implements Store.
+func (m *MemStore) PutProviderContact(_ context.Context, partyID uuid.UUID, provider, contactID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	switch {
+	case provider != ProviderParasut && provider != "nilvera" && provider != "iyzico":
+		return fmt.Errorf("billing: provider_contact_map_provider_chk: %q", provider)
+	case contactID == "":
+		return errors.New("billing: provider_contact_map.provider_contact_id is NOT NULL")
+	}
+	m.contacts[contactKey{partyID, provider}] = contactID
+	return nil
+}
+
+// Credential implements Store (no row lock in memory: the caller's
+// TxManager serialises, as the row lock does in PostgreSQL).
+func (m *MemStore) Credential(_ context.Context, provider string, _ bool) (Credential, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c, ok := m.creds[provider]
+	if !ok {
+		return Credential{}, ErrNotFound
+	}
+	return cloneCredential(c), nil
 }
 
 // PutCredential implements Store.

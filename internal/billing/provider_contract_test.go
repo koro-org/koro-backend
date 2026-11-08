@@ -25,18 +25,24 @@ type providerFixture struct {
 	// PollWait the pause between them (0 for the fake).
 	MaxPolls int
 	PollWait time.Duration
+	// ContactDoc is the document an issue left to the provider (DocUnknown)
+	// gives Contact (DocEArsiv when empty: not registered for e-Fatura).
+	ContactDoc billing.DocumentType
 }
 
 // providerContract is the contract suite of billing.InvoiceProvider
-// (BE-042): every adapter passes it — FakeProvider in
-// TestFakeProvider_ContractSuite, the Paraşüt adapter of BE-053 against its
-// sandbox (a test of this package). Its steps share the provider's state
-// and run in order.
+// (BE-042, BE-053): every adapter passes it — FakeProvider in
+// TestFakeProvider_ContractSuite, ParasutProvider over its httptest double
+// in TestParasut_ContractSuite (and against Paraşüt's sandbox once an
+// account exists). Its steps share the provider's state and run in order.
 func providerContract(t *testing.T, p billing.InvoiceProvider, fx providerFixture) {
 	t.Helper()
 	ctx := t.Context()
 	if fx.MaxPolls <= 0 {
 		fx.MaxPolls = 5
+	}
+	if fx.ContactDoc == "" {
+		fx.ContactDoc = billing.DocEArsiv
 	}
 
 	var contact string
@@ -67,7 +73,7 @@ func providerContract(t *testing.T, p billing.InvoiceProvider, fx providerFixtur
 		IssueDate: fx.IssueDate, Currency: billing.Currency, TotalGross: 1_200_000,
 		Lines: []billing.DraftLine{{Description: "Contract suite service", Quantity: 1, UnitPrice: 1_000_000, VATRateBP: 2000}},
 	}
-	var ref billing.ProviderRef
+	var ref, second billing.ProviderRef
 	t.Run("draft is created once per series and number", func(t *testing.T) {
 		r, err := p.CreateDraft(ctx, draft)
 		if err != nil || r.InvoiceID == "" {
@@ -94,7 +100,7 @@ func providerContract(t *testing.T, p billing.InvoiceProvider, fx providerFixtur
 			!errors.Is(err, billing.ErrProviderInvalid) {
 			t.Fatalf("CreateDraft(unknown contact) = %v, want ErrProviderNotFound or ErrProviderInvalid", err)
 		}
-		ref = r
+		ref, second = r, other
 	})
 	if ref.InvoiceID == "" {
 		t.Fatal("no draft: the remaining steps need one")
@@ -131,7 +137,8 @@ func providerContract(t *testing.T, p billing.InvoiceProvider, fx providerFixtur
 		t.Fatal("no job: the remaining steps need one")
 	}
 
-	t.Run("job finishes with the official number and the PDF", func(t *testing.T) {
+	poll := func(t *testing.T, job string) billing.JobStatus {
+		t.Helper()
 		var st billing.JobStatus
 		for i := range fx.MaxPolls {
 			var err error
@@ -145,8 +152,13 @@ func providerContract(t *testing.T, p billing.InvoiceProvider, fx providerFixtur
 				time.Sleep(fx.PollWait)
 			}
 		}
-		if st.State != billing.JobDone || st.InvoiceNo == "" || st.Ref.EDocID == "" || st.Ref.InvoiceID != ref.InvoiceID {
-			t.Fatalf("job after %d polls = %+v; want done with a number and an e-document", fx.MaxPolls, st)
+		return st
+	}
+	t.Run("job finishes with the official number and the PDF", func(t *testing.T) {
+		st := poll(t, job)
+		if st.State != billing.JobDone || st.InvoiceNo == "" || st.Ref.EDocID == "" || st.Ref.InvoiceID != ref.InvoiceID ||
+			st.Doc != billing.DocEArsiv {
+			t.Fatalf("job after %d polls = %+v; want a done e-Arşiv with a number and an e-document", fx.MaxPolls, st)
 		}
 		again, err := p.PollJob(ctx, job)
 		if err != nil || again.State != billing.JobDone || again.InvoiceNo != st.InvoiceNo {
@@ -158,6 +170,21 @@ func providerContract(t *testing.T, p billing.InvoiceProvider, fx providerFixtur
 		pdf, err := p.FetchPDF(ctx, st.Ref)
 		if err != nil || !bytes.HasPrefix(pdf, []byte("%PDF-")) {
 			t.Fatalf("FetchPDF = %d bytes, %v; want a PDF", len(pdf), err)
+		}
+		if again, err := p.Issue(ctx, ref, billing.DocEArsiv); err != nil || again == "" {
+			t.Fatalf("Issue(issued draft) = %q, %v; want a job of the issued document", again, err)
+		} else if st, err := p.PollJob(ctx, again); err != nil || st.State != billing.JobDone || st.InvoiceNo == "" {
+			t.Fatalf("PollJob(issued draft) = %+v, %v; want done", st, err)
+		}
+	})
+
+	t.Run("document left to the provider follows the recipient's registration", func(t *testing.T) {
+		j, err := p.Issue(ctx, second, billing.DocUnknown)
+		if err != nil || j == "" {
+			t.Fatalf("Issue(DocUnknown) = %q, %v", j, err)
+		}
+		if st := poll(t, j); st.State != billing.JobDone || st.Doc != fx.ContactDoc || st.InvoiceNo == "" {
+			t.Fatalf("job = %+v; want a done %s", st, fx.ContactDoc)
 		}
 	})
 }

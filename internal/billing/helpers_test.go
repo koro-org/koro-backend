@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -114,8 +115,9 @@ func (f *fakeOrders) update(id uuid.UUID, fn func(*orders.Line)) {
 // fakeTerms answers the invoice terms of an offering (on_fulfillment by
 // default, manual automation).
 type fakeTerms struct {
-	mu       sync.Mutex
-	triggers map[uuid.UUID]catalog.InvoiceTrigger
+	mu         sync.Mutex
+	triggers   map[uuid.UUID]catalog.InvoiceTrigger
+	automation catalog.InvoiceAutomation // "" → manual
 }
 
 func (f *fakeTerms) InvoiceTerms(_ context.Context, offeringID, _ uuid.UUID) (catalog.InvoiceTerms, error) {
@@ -125,7 +127,11 @@ func (f *fakeTerms) InvoiceTerms(_ context.Context, offeringID, _ uuid.UUID) (ca
 	if !ok {
 		tr = catalog.InvoiceOnFulfillment
 	}
-	return catalog.InvoiceTerms{OfferingID: offeringID, Trigger: tr, Automation: catalog.InvoiceManual}, nil
+	auto := f.automation
+	if auto == "" {
+		auto = catalog.InvoiceManual
+	}
+	return catalog.InvoiceTerms{OfferingID: offeringID, Trigger: tr, Automation: auto}, nil
 }
 
 // fakeParties holds the legal parties, Koro's own and the payees.
@@ -203,10 +209,28 @@ func (fakeOrgs) HasRole(_ context.Context, orgID, userID uuid.UUID, roles ...aut
 // fakeFiles holds file metadata; Attach records the owner; Read serves
 // pdfBytes unless notClean.
 type fakeFiles struct {
-	mu       sync.Mutex
-	meta     map[uuid.UUID]files.FileMeta
-	attached map[uuid.UUID]files.Owner
-	notClean bool
+	mu        sync.Mutex
+	meta      map[uuid.UUID]files.FileMeta
+	attached  map[uuid.UUID]files.Owner
+	generated map[uuid.UUID][]byte // PutGenerated contents
+	notClean  bool
+}
+
+// PutGenerated stores a server-generated file (clean, active, unattached).
+func (f *fakeFiles) PutGenerated(ctx context.Context, in files.GeneratedFile) (uuid.UUID, error) {
+	if db.InTx(ctx) {
+		return uuid.Nil(), errors.New("fakeFiles: PutGenerated inside a transaction")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	id := uuid.NewV7()
+	f.meta[id] = files.FileMeta{ID: id, Purpose: in.Purpose, OrgID: in.OrgID, MIME: in.ContentType, SizeBytes: int64(len(in.Content)),
+		SHA256: make([]byte, 32), Status: files.StatusActive, ScanStatus: files.ScanClean, AttachedEntityID: uuid.Nil()}
+	if f.generated == nil {
+		f.generated = map[uuid.UUID][]byte{}
+	}
+	f.generated[id] = slices.Clone(in.Content)
+	return id, nil
 }
 
 // put adds an active invoice_pdf PDF of uploader (and org when given).
@@ -364,6 +388,9 @@ type env struct {
 	svc     billing.Service
 	subs    *outbox.Registry
 
+	provider billing.InvoiceProvider // the provider flow's adapter (nil: none)
+	log      *slog.Logger            // obs.Discard unless a test captures it
+
 	koro, buyer, payee, payeeParty uuid.UUID // Koro's party, company_a's buyer party, club_a's payee and its party
 }
 
@@ -373,7 +400,7 @@ func newEnv(t *testing.T) *env {
 	return newEnvWith(t, clk, billing.NewMemStore(clk.Now), db.NopTx{})
 }
 
-func newEnvWith(t *testing.T, clk *clock.Fake, store billing.Store, tx db.TxManager) *env {
+func newEnvWith(t *testing.T, clk *clock.Fake, store billing.Store, tx db.TxManager, opts ...func(*env)) *env {
 	t.Helper()
 	e := &env{
 		clk: clk, store: store,
@@ -387,6 +414,9 @@ func newEnvWith(t *testing.T, clk *clock.Fake, store billing.Store, tx db.TxMana
 	}
 	e.tx = tx
 	e.seedParties()
+	for _, o := range opts {
+		o(e)
+	}
 	mod, err := billing.New(e.deps(t))
 	if err != nil {
 		t.Fatalf("billing.New: %v", err)
@@ -403,11 +433,19 @@ func newEnvWith(t *testing.T, clk *clock.Fake, store billing.Store, tx db.TxMana
 func (e *env) deps(t *testing.T) billing.Deps {
 	t.Helper()
 	keeper := idempotency.New(idempotency.Deps{Tx: e.tx, Store: idempotency.NewMemStore(), Clock: e.clk, Log: obs.Discard()})
-	return billing.Deps{
-		Store: e.store, Tx: e.tx, Clock: e.clk, Log: obs.Discard(), Audit: e.audit, Outbox: e.outbox, Queue: e.queue,
+	log := e.log
+	if log == nil {
+		log = obs.Discard()
+	}
+	d := billing.Deps{
+		Store: e.store, Tx: e.tx, Clock: e.clk, Log: log, Audit: e.audit, Outbox: e.outbox, Queue: e.queue,
 		Idempotency: keeper, Orders: e.orders, Offerings: e.terms, Parties: e.parties, Payees: fakePayees{p: e.parties},
 		Orgs: fakeOrgs{}, Files: e.files, Reauth: e.reauth, Sealer: e.sealer, Sender: e.sender, Staff: fakeStaff{},
 	}
+	if e.provider != nil {
+		d.Provider, d.ProviderName, d.ProviderSeries = e.provider, billing.ProviderParasut, "KRO"
+	}
+	return d
 }
 
 // seedParties writes Koro's party, company_a's buyer party and club_a's

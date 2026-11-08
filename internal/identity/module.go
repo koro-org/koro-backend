@@ -344,7 +344,7 @@ type Deps struct {
 	Consent ConsentRecorder // registration consents (same transaction)
 	Terms   TermsLedger     // terms of use acceptances (registration, acceptTerms, getMe, the terms gate; BE-124)
 	Notices NoticeLookup    // the privacy notice and the terms shown at registration
-	Mailer  Mailer          // worker: verification, reset, change and security e-mails
+	Mailer  Mailer          // worker: verification, reset, change and security e-mails; security alerts in the app (BE-205)
 
 	// LinkBaseURL is APP_LINK_BASE_URL (client origin of the e-mail links; internal/platform/applink).
 	LinkBaseURL string

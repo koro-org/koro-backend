@@ -24,6 +24,12 @@ func TestTemplates_PushPriority(t *testing.T) {
 	high := map[string]bool{"identity.security_notice": true, "identity.mfa_notice": true, "identity.phone_notice": true,
 		"identity.email_change": true, "identity.password_reset": true, "identity.role_alert": true,
 		"messaging.conversation_message": true}
+	// The in-app and push alerts of the security notices (BE-205).
+	for _, kind := range []string{"password_changed", "email_change_requested", "email_changed", "mfa_enabled",
+		"mfa_disabled", "recovery_code_used", "recovery_codes_regenerated", "mfa_reset", "phone_verified",
+		"phone_removed", "sms_mfa_enabled", "sms_mfa_disabled", "sms_reset_enabled", "sms_reset_disabled"} {
+		high["identity.security_"+kind] = true
+	}
 	for _, id := range tpl.IDs() {
 		meta, _ := tpl.Meta(id)
 		want := notify.PriorityNormal

@@ -74,6 +74,33 @@ var noticeTemplates = map[string]string{
 	NoticeSMSResetEnabled: phoneNoticeTemplate, NoticeSMSResetDisabled: phoneNoticeTemplate,
 }
 
+// alertKinds are the security notice kinds that also go to the app (in-app
+// notification and push; BE-205, Q-50): password, e-mail, two-step
+// verification and phone changes. A kind an anonymous party can cause
+// stays e-mail only, so a stranger cannot make the holder's phone ring:
+// signup_attempt (anyone can type the address) and sms_reset_limit
+// (anyone can request SMS resets).
+var alertKinds = map[string]bool{
+	NoticePasswordChanged: true, NoticeEmailChangeRequested: true, NoticeEmailChanged: true,
+	NoticeMFAEnabled: true, NoticeMFADisabled: true, NoticeRecoveryCodeUsed: true,
+	NoticeRecoveryCodesRegenerated: true, NoticeMFAReset: true,
+	NoticePhoneVerified: true, NoticePhoneRemoved: true, NoticeSMSMFAEnabled: true,
+	NoticeSMSMFADisabled: true, NoticeSMSResetEnabled: true, NoticeSMSResetDisabled: true,
+}
+
+// alertTemplate is the in-app and push template of an alert kind
+// (internal/notify/templates/identity/security_<kind>.*): their texts are
+// fixed, so each kind has its own template, which is also the
+// notification's kind for the clients.
+func alertTemplate(kind string) string { return "identity.security_" + kind }
+
+// alertChannels are the channels of an alert besides the e-mail.
+var alertChannels = []notify.Channel{notify.ChannelInApp, notify.ChannelPush}
+
+// securityLink is the deep link of the alerts: the security settings
+// (notify's catalog, BE-205).
+var securityLink = notify.MySecurityLink()
+
 // issueToken opens a new e-mail token of purpose for u in the transaction
 // carried by ctx: the open tokens of the same purpose close, the row keeps
 // only the SHA-256 of the derived token, and identity.email_token_issued
@@ -208,20 +235,51 @@ func (s *service) handleSecurityNotice(ctx context.Context, payload []byte) erro
 	if u.Status == StatusErased || u.Email == "" {
 		return nil
 	}
-	msg := notify.Message{
+	key := "identity.security:" + n.Ref.String()
+	var msgs []notify.Message
+	if alertKinds[n.Kind] {
+		for _, ch := range alertChannels {
+			msgs = append(msgs, notify.Message{
+				UserID: &u.ID, Channel: ch, Category: notify.CategoryTransactional, Template: alertTemplate(n.Kind),
+				Locale: u.Locale, LinkPath: securityLink, DedupeKey: key + ":" + string(ch),
+			})
+		}
+	}
+	mail := notify.Message{
 		UserID: &u.ID, ToEmail: u.Email, Channel: notify.ChannelEmail, Category: notify.CategoryTransactional,
 		Template: tpl, Locale: u.Locale,
 		Data:      map[string]any{"name": u.FirstName, "kind": n.Kind, "link": applink.Page(s.d.LinkBaseURL, string(applink.ResetPassword))},
-		DedupeKey: "identity.security:" + n.Ref.String(),
+		DedupeKey: key,
 	}
 	if tpl == phoneNoticeTemplate {
-		msg.Data["phone_hint"] = n.PhoneHint
+		mail.Data["phone_hint"] = n.PhoneHint
 	}
-	if _, err := s.d.Mailer.Send(ctx, msg); err != nil {
-		if notify.IsPermanent(err) {
-			return queue.Permanent(err)
+	return s.sendNotice(ctx, n.Kind, append(msgs, mail))
+}
+
+// sendNotice sends every message of a security notice. One channel's
+// refusal does not hold back the others: a transient failure retries the
+// task (notify's dedupe keys drop what already went), a permanent one is
+// logged and, once nothing is left to retry, ends the task.
+func (s *service) sendNotice(ctx context.Context, kind string, msgs []notify.Message) error {
+	var retry, refused []error
+	for _, m := range msgs {
+		_, err := s.d.Mailer.Send(ctx, m)
+		switch {
+		case err == nil:
+		case notify.IsPermanent(err):
+			s.d.Log.LogAttrs(ctx, slog.LevelWarn, "security notice not deliverable", slog.String("kind", kind),
+				slog.String("channel", string(m.Channel)), slog.String("user_id", m.UserID.String()), slog.String("err", err.Error()))
+			refused = append(refused, err)
+		default:
+			retry = append(retry, err)
 		}
+	}
+	if err := errors.Join(retry...); err != nil {
 		return err
+	}
+	if err := errors.Join(refused...); err != nil {
+		return queue.Permanent(err)
 	}
 	return nil
 }

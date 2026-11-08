@@ -74,8 +74,9 @@ type NoticeLookup interface {
 	NoticeByID(ctx context.Context, id uuid.UUID) (NoticeInfo, error)
 }
 
-// Mailer sends e-mail in the worker (notify, L3; 01 §5.3: identity passes
-// the address, notify never resolves recipients).
+// Mailer sends e-mail, in-app notifications and push in the worker
+// (notify, L3; 01 §5.3: identity passes the address, notify never resolves
+// recipients).
 type Mailer interface {
 	Send(ctx context.Context, m notify.Message) (uuid.UUID, error)
 }

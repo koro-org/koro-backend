@@ -1,0 +1,11 @@
+version: 1
+category: transactional
+# BE-205 (Q-50): the in-app and push alert of the security notice kind
+# sms_mfa_disabled (identity.send_security_notice; e-mail: identity.phone_notice).
+# Fixed texts with no personal data: no IP, device, address or number; the
+# deep link is the security settings (/me/security). Preference security: it
+# cannot be switched off (02 §6.5 CHECK); the device's own notification
+# settings still govern push.
+preference: security
+channels: [in_app, push]
+priority: high

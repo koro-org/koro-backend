@@ -31,6 +31,7 @@ func builderCases() map[string]struct {
 		"MyConversationLink":              {MyConversationLink(a), "/me/conversations/{conversation_id}"},
 		"MyRegistrationLink":              {MyRegistrationLink(a), "/me/registrations/{registration_id}"},
 		"MySecurityEventsLink":            {MySecurityEventsLink(), "/me/security-events"},
+		"MySecurityLink":                  {MySecurityLink(), "/me/security"},
 		"MyTermsLink":                     {MyTermsLink(), "/me/terms"},
 		"MyStudentVerificationLink":       {MyStudentVerificationLink(), "/me/student-verification"},
 		"PostLink":                        {PostLink(a), "/posts/{post_id}"},

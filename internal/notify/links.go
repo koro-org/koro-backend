@@ -156,6 +156,7 @@ var (
 	routeMyConversation   = route("/me/conversations/{conversation_id}", LinkForUser)       // messaging (BE-162)
 	routeMyRegistration   = route("/me/registrations/{registration_id}", LinkForUser)       // events
 	routeMySecurityEvents = route("/me/security-events", LinkForUser)                       // notify (audit alerts)
+	routeMySecurity       = route("/me/security", LinkForUser)                              // identity (security notices, BE-205)
 	routeMyTerms          = route("/me/terms", LinkForUser)                                 // identity (a new terms of use version, BE-124)
 	routeMyStudentVerif   = route("/me/student-verification", LinkForUser)                  // identity (e-mail)
 	routePost             = route("/posts/{post_id}", LinkForUser)                          // outreach (feed dispatch)
@@ -228,6 +229,7 @@ func MyContactRequestLink(req uuid.UUID) Link { return routeMyContactRequest.lin
 func MyConversationLink(conv uuid.UUID) Link  { return routeMyConversation.link(conv.String()) }
 func MyRegistrationLink(reg uuid.UUID) Link   { return routeMyRegistration.link(reg.String()) }
 func MySecurityEventsLink() Link              { return routeMySecurityEvents.link() }
+func MySecurityLink() Link                    { return routeMySecurity.link() }
 func MyTermsLink() Link                       { return routeMyTerms.link() }
 func MyStudentVerificationLink() Link         { return routeMyStudentVerif.link() }
 func PostLink(post uuid.UUID) Link            { return routePost.link(post.String()) }

@@ -13,6 +13,13 @@ var (
 	// how much": an inline definition and a saved segment fail the same way.
 	ErrAudienceTooSmall = problem.New(problem.Invalid, "outreach.audience_too_small",
 		"The audience is too small to target")
+	// ErrAudienceValueTooSmall: one value of a dimension with several values
+	// reaches fewer than 10 students together with the other dimensions
+	// (BE-203, the value floor; estimate.go). The field names the value's
+	// place in the definition; like ErrAudienceTooSmall it carries no
+	// number.
+	ErrAudienceValueTooSmall = problem.New(problem.Invalid, "outreach.audience_value_too_small",
+		"A value of the audience reaches too few students")
 	// ErrSensitiveTarget: a company (or the platform) targets a sensitive
 	// club (03 Y2, §3.4; 02 §13.1). Only the club's own club_admin may
 	// address its members.

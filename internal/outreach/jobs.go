@@ -86,17 +86,33 @@ func (s *service) recountRows(ctx context.Context, rows []Segment) (int, error) 
 	return changed, err
 }
 
-// estimate is the published estimate of a stored segment. A definition
-// students refuses (a malformed row) is logged and counts as below the
-// threshold instead of stopping the whole run.
+// estimate is the published estimate of a stored segment, under the rules
+// of a fresh count (BE-203: the value floor and the offset, so the same
+// definition shows the same number here and in countAudience). A
+// definition that no longer validates (a malformed row, or more events than
+// MaxEvents since BE-203) or that students refuses is logged and counts as
+// below the threshold instead of stopping the whole run; so does a value
+// below the floor.
 func (s *service) estimate(ctx context.Context, r Segment) (Estimate, error) {
-	est, err := s.size(ctx, r.Definition)
-	if errors.Is(err, problem.ErrValidation) {
-		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "segment definition refused by students",
+	var (
+		est   Estimate
+		small *smallValue
+	)
+	def, err := r.Definition.normalize("")
+	if err == nil {
+		est, small, err = s.measure(ctx, def, true)
+	}
+	switch {
+	case errors.Is(err, problem.ErrValidation):
+		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "segment definition refused",
 			slog.String("segment_id", r.ID.String()), slog.String("org_id", r.OrgID.String()))
 		return Estimate{BelowThreshold: true}, nil
+	case err != nil:
+		return Estimate{}, err
+	case small != nil:
+		return Estimate{BelowThreshold: true}, nil
 	}
-	return est, err
+	return est, nil
 }
 
 func sameCount(a, b *int) bool {

@@ -1338,6 +1338,12 @@
     "type": "urn:koro:problem:outreach.audience_too_small"
   },
   {
+    "code": "outreach.audience_value_too_small",
+    "status": 422,
+    "title": "A value of the audience reaches too few students",
+    "type": "urn:koro:problem:outreach.audience_value_too_small"
+  },
+  {
     "code": "outreach.dispatch_exists",
     "status": 409,
     "title": "The post already has a dispatch",

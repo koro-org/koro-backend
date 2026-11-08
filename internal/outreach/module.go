@@ -26,15 +26,25 @@
 //     adult, active. Below 10 there is no number at all — the count is
 //     null with below_threshold, a compiled targeting that needs k fails
 //     with 422 outreach.audience_too_small, a segment's last_count is NULL.
-//   - Difference attacks (two counts that differ by a small group): every
-//     published count is rounded down to its bucket (Bucket: 10 below 100,
-//     50 below 1 000, 100 below 10 000, then 1 000); the exact count is
-//     never returned, stored or logged. Counting is rate limited per org:
-//     30 per minute at the API (04 §1.9 audience_count: countAudience,
-//     createSegment, updateSegment) and a daily budget across every fresh
-//     count, Compile included (OUTREACH_COUNT_DAILY_LIMIT, default 300;
-//     429 rate_limited, fail closed without the limiter). getSegment shows
-//     the stored estimate and costs nothing.
+//   - Differences between counts (two counts that differ by a small
+//     group): every published count is rounded down to its bucket (Bucket:
+//     10 below 100, 50 below 1 000, 100 below 10 000, then 1 000); the
+//     exact count is never returned, stored or logged. Counting is rate
+//     limited per org: 30 per minute at the API (04 §1.9 audience_count:
+//     countAudience, createSegment, updateSegment) and a daily budget
+//     across every fresh count, Compile included
+//     (OUTREACH_COUNT_DAILY_LIMIT, default 300; 429 rate_limited, fail
+//     closed without the limiter). getSegment shows the stored estimate and
+//     costs nothing.
+//   - Privacy of fresh counts (BE-203, Q-53; estimate.go): a fixed offset
+//     of at most half a bucket step, keyed from the canonical definition
+//     and its exact size (CRYPTO_TOKEN_KEYS), is added before the rounding,
+//     so counting the same audience again shows the same number; every
+//     value of a dimension with several values must reach 10 students with
+//     the other dimensions (422 outreach.audience_value_too_small, for the
+//     scopes that need k); a definition ORs at most MaxEvents events. Many
+//     counts of one definition family, refusals by the value floor and a
+//     spent budget raise count alarms (alarm.go).
 //   - Talent values never enter outreach (01 §0-7): no dimension, no
 //     field and no import reads them.
 //   - Org status (03 §2.3): segment writes and counts for a suspended org
@@ -98,7 +108,8 @@ type Targeting interface {
 	// the definition (or loads the saved segment), applies a's scope in
 	// the org (03 k16) and sizes the audience. It returns
 	// ErrTargetOutOfScope, ErrSensitiveTarget, ErrAudienceTooSmall (no
-	// number; not for a club addressing its own members), ErrNotFound (no
+	// number; not for a club addressing its own members),
+	// ErrAudienceValueTooSmall (BE-203, the value floor), ErrNotFound (no
 	// such segment in the org), ErrInvalidState (archived segment) or a
 	// validation error. Each call spends one unit of the org's daily count
 	// budget (ErrRateLimited). The caller has authorised its own action
@@ -205,7 +216,8 @@ type Deps struct {
 	Audience    Audience            // students: count_segment (k ≥ 10)
 	Catalog     Catalog             // directory: sensitive clubs, a university's org
 	Orgs        Orgs                // orgs: the org's existence and status
-	Limiter     Limiter             // the daily count budget per org
+	Limiter     Limiter             // the daily count budget per org, the family watch (BE-203)
+	Noise       Noise               // the offset of fresh estimates (BE-203; KeyedNoise in production)
 	Idempotency *idempotency.Keeper // optional Idempotency-Key of createSegment and archiveSegment (06 H-5)
 	Clock       clock.Clock
 	Log         *slog.Logger
@@ -250,7 +262,7 @@ func (d Deps) validate() error {
 		ok   bool
 	}{
 		{"Store", d.Store != nil}, {"Tx", d.Tx != nil}, {"Audit", d.Audit != nil}, {"Audience", d.Audience != nil},
-		{"Catalog", d.Catalog != nil}, {"Orgs", d.Orgs != nil}, {"Limiter", d.Limiter != nil},
+		{"Catalog", d.Catalog != nil}, {"Orgs", d.Orgs != nil}, {"Limiter", d.Limiter != nil}, {"Noise", d.Noise != nil},
 		{"Idempotency", d.Idempotency != nil}, {"Clock", d.Clock != nil}, {"Log", d.Log != nil},
 		{"Outbox", d.Outbox != nil}, {"Entitlements", d.Entitlements != nil}, {"Recipients", d.Recipients != nil},
 		{"Members", d.Members != nil}, {"Users", d.Users != nil}, {"Consents", d.Consents != nil},
@@ -313,7 +325,10 @@ func (m Module) Subscribe(r *outbox.Registry) {
 	r.Subscribe(domainevent.TopicPostPublished, StartDispatchTaskName, m.svc.handlePostPublished, q, to)
 }
 
-type service struct{ d Deps }
+type service struct {
+	d      Deps
+	alarms countAlarms // BE-203
+}
 
 var _ Service = (*service)(nil)
 

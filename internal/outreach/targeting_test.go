@@ -211,7 +211,9 @@ func TestCompile_OrWithinDimAndAcrossDims(t *testing.T) {
 		{"A and 3 = 12", outreach.Definition{Uni: []uuid.UUID{uniA}, Year: []int16{3}}, 10, 2},
 		{"A and 3 and deptX = 12", outreach.Definition{Uni: []uuid.UUID{uniA}, Year: []int16{3}, Dept: []uuid.UUID{deptX}}, 10, 3},
 		{"club A or club B = 13+30", outreach.Definition{Club: []uuid.UUID{clubB, clubA}}, 40, 1},
-		{"(club A or B) and A = 30", outreach.Definition{Club: []uuid.UUID{clubA, clubB}, Uni: []uuid.UUID{uniA}}, 30, 2},
+		// Every value of a multi-valued dimension reaches 10 with the other
+		// dimensions here (the value floor, BE-203: TestCountAudience_ValueFloor).
+		{"(club A or B) and (A or B) = 13+30", outreach.Definition{Club: []uuid.UUID{clubA, clubB}, Uni: []uuid.UUID{uniA, uniB}}, 40, 2},
 	} {
 		got, err := e.svc.Compile(ctx, cmm, specFor(companyA, tc.def))
 		if err != nil || got.Size != tc.size || got.DimCount != tc.dims {

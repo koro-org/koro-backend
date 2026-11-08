@@ -27,18 +27,24 @@ const (
 )
 
 // Limits of a definition. Each dimension holds at most maxPerDimension
-// values (a company may OR many universities or departments); the students
-// module accepts up to 500 keys, a definition produces at most 308 (four
-// dimensions at once). maxDimensions is the audience_dim_count CHECK of
-// segments, posts and outreach_dispatches (1-4): with the event dimension
-// (BE-161) five are possible, but a department already implies its
-// university, so a fifth never narrows what four can say.
+// values (a company may OR many universities or departments), the event
+// dimension at most MaxEvents (BE-203: events are small groups, so few of
+// them are OR-ed at once); the students module accepts up to 500 keys, a
+// definition produces at most 218 (four dimensions at once).
+// maxDimensions is the audience_dim_count CHECK of segments, posts and
+// outreach_dispatches (1-4): with the event dimension (BE-161) five are
+// possible, but a department already implies its university, so a fifth
+// never narrows what four can say.
 const (
 	maxPerDimension = 100
 	maxDimensions   = 4
 	minYear         = 1
 	maxYear         = 8
 )
+
+// MaxEvents is the most events one definition may OR (BE-203, Q-53): a
+// longer list is 422 validation_failed at the event field.
+const MaxEvents = 10
 
 // Definition is a targeting (02 §13.1 segments.definition): OR inside a
 // dimension, AND across the dimensions present. The dimensions are the
@@ -108,6 +114,9 @@ func (d Definition) normalize(loc string) (Definition, error) {
 	if n.Event, err = ids("event", d.Event); err != nil {
 		return Definition{}, err
 	}
+	if len(n.Event) > MaxEvents {
+		return Definition{}, problem.Field(at("event"), "at most "+strconv.Itoa(MaxEvents)+" events")
+	}
 	if d.EventAttended && len(n.Event) == 0 {
 		return Definition{}, problem.Field(at("event_attended"), "requires event")
 	}
@@ -171,6 +180,77 @@ func (d Definition) Keys() []string {
 	}
 	slices.Sort(keys)
 	return keys
+}
+
+// Dimension names: the field of each dimension in a definition (and in
+// its field locations), in the order the value floor checks them.
+const (
+	dimUni   = "uni"
+	dimDept  = "dept"
+	dimYear  = "year"
+	dimClub  = "club"
+	dimEvent = "event"
+)
+
+var dimensionNames = []string{dimUni, dimDept, dimYear, dimClub, dimEvent}
+
+// values returns the values of dimension name as text (IDs, class years),
+// in d's order.
+func (d Definition) values(name string) []string {
+	switch name {
+	case dimUni:
+		return ids(d.Uni)
+	case dimDept:
+		return ids(d.Dept)
+	case dimYear:
+		out := make([]string, len(d.Year))
+		for i, y := range d.Year {
+			out[i] = strconv.Itoa(int(y))
+		}
+		return out
+	case dimClub:
+		return ids(d.Club)
+	case dimEvent:
+		return ids(d.Event)
+	}
+	return nil
+}
+
+// only returns a copy of d with dimension name narrowed to its i-th value.
+func (d Definition) only(name string, i int) Definition {
+	n := d.clone()
+	switch name {
+	case dimUni:
+		n.Uni = n.Uni[i : i+1]
+	case dimDept:
+		n.Dept = n.Dept[i : i+1]
+	case dimYear:
+		n.Year = n.Year[i : i+1]
+	case dimClub:
+		n.Club = n.Club[i : i+1]
+	case dimEvent:
+		n.Event = n.Event[i : i+1]
+	}
+	return n
+}
+
+// without returns a copy of d without dimension name (the event dimension
+// with its attended flag).
+func (d Definition) without(name string) Definition {
+	n := d.clone()
+	switch name {
+	case dimUni:
+		n.Uni = nil
+	case dimDept:
+		n.Dept = nil
+	case dimYear:
+		n.Year = nil
+	case dimClub:
+		n.Club = nil
+	case dimEvent:
+		n.Event, n.EventAttended = nil, false
+	}
+	return n
 }
 
 // clone returns a deep copy of d.

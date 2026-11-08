@@ -17,6 +17,7 @@ import (
 	"koro/internal/notify"
 	"koro/internal/orgs"
 	"koro/internal/outreach"
+	"koro/internal/outreach/outreachtest"
 	"koro/internal/platform/civil"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
@@ -34,6 +35,7 @@ import (
 func (w *outreachWiring) useMemStore() {
 	w.store = outreach.NewMemStore(clock.Real().Now)
 	w.tx = db.NopTx{}
+	w.noise = outreachtest.NoNoise{} // BE-203: the wiring and matrix tests read plain buckets
 }
 
 // TestWire_OutreachProvidesServiceAndJobs pins what outreach binds in build

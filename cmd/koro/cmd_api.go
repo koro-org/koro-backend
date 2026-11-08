@@ -70,6 +70,9 @@ func runAPI(ctx context.Context, stop context.CancelFunc, environ map[string]str
 	if err := c.identity.metrics(tel.Metrics); err != nil { // koro_sms_codes_total (BE-181)
 		return err
 	}
+	if err := c.outreach.metrics(tel.Metrics); err != nil { // koro_outreach_count_alarms_total (BE-203)
+		return err
+	}
 	var global []gin.HandlerFunc
 	if cfg.RateLimit.Enabled {
 		web := ratelimit.NewWebKeys(cfg.RateLimit.WebKeyList())

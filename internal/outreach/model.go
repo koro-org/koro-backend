@@ -55,8 +55,10 @@ func cloneTime(t *time.Time) *time.Time {
 // Estimate is the only audience number outreach ever publishes (04 §V.2,
 // Seviye 0): below k = 10 there is no number at all (BelowThreshold); from
 // 10 on, the count is rounded down to its bucket (Bucket), so two counts
-// that differ by a few students usually show the same number. The exact
-// count stays inside outreach: it is not returned, stored or logged.
+// that differ by a few students usually show the same number. A fresh
+// audience count (countAudience, a segment's count, Compile) also carries
+// a fixed privacy offset before the rounding (BE-203, estimate.go). The
+// exact count stays inside outreach: it is not returned, stored or logged.
 type Estimate struct {
 	Count          *int // nil when BelowThreshold
 	BelowThreshold bool
@@ -65,11 +67,14 @@ type Estimate struct {
 // KThreshold is the smallest audience a number is shown for (k-anonymity).
 const KThreshold = 10
 
-// PublicEstimate turns an exact audience size into its published form: no
-// number below KThreshold, the bucket from KThreshold on. BE-035's dispatch
-// counters (eligible, consented, sent) go through it as well: a delivered
-// count can fall below 10 after the minors and suspended accounts are
-// filtered again, and a raw delivery count is never shown.
+// PublicEstimate turns a size into its published form: no number below
+// KThreshold, the bucket from KThreshold on. It adds no noise: an audience
+// count is offset first (estimate.go), BE-035's dispatch counters
+// (eligible, consented, sent) and the panels' figures go through it as
+// they are (a delivered count can fall below 10 after the minors and
+// suspended accounts are filtered again, and a raw delivery count is never
+// shown). A published value passes through unchanged (Bucket is
+// idempotent), so a stored estimate is never shifted twice.
 func PublicEstimate(n int) Estimate {
 	if n < KThreshold {
 		return Estimate{BelowThreshold: true}
@@ -85,20 +90,26 @@ func PublicEstimate(n int) Estimate {
 // and the budget of counts per org (Targeting) keeps an attacker from
 // probing the bucket edges at scale.
 func Bucket(n int) int {
-	var step int
-	switch {
-	case n < KThreshold:
+	if n < KThreshold {
 		return 0
-	case n < 100:
-		step = 10
-	case n < 1_000:
-		step = 50
-	case n < 10_000:
-		step = 100
-	default:
-		step = 1_000
 	}
-	return n - n%step
+	return n - n%bucketStep(n)
+}
+
+// bucketStep is the rounding step of a size: 10 below 100, 50 below 1 000,
+// 100 below 10 000, then 1 000. Each step divides the next, so a bucketed
+// value is its own bucket.
+func bucketStep(n int) int {
+	switch {
+	case n < 100:
+		return 10
+	case n < 1_000:
+		return 50
+	case n < 10_000:
+		return 100
+	default:
+		return 1_000
+	}
 }
 
 // SegmentSpec is what a targeting compiles (01 §4.13): the org that
@@ -119,10 +130,10 @@ type Compiled struct {
 	DimCount   int16
 	Definition Definition // normalized
 	SegmentID  *uuid.UUID // the saved segment, when the spec named one
-	// Size is the published estimate (Bucket; ≥ 10). It is 0 only for a
-	// club addressing its own members, which needs no k ≥ 10 (02 §12.2):
-	// such an audience may be small, or a sensitive club's, whose
-	// membership is never counted.
+	// Size is the published estimate (offset and bucketed, ≥ 10; BE-203).
+	// It is 0 only for a club addressing its own members, which needs no
+	// k ≥ 10 (02 §12.2): such an audience may be small, or a sensitive
+	// club's, whose membership is never counted.
 	Size int
 }
 

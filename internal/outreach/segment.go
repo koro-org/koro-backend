@@ -63,7 +63,8 @@ func (s *service) CreateSegment(ctx context.Context, a authz.Actor, orgID uuid.U
 	if err != nil {
 		return SegmentView{}, err
 	}
-	if err := s.checkScope(ctx, ScopeOf(a, orgID), orgID, def); err != nil {
+	sc := ScopeOf(a, orgID)
+	if err := s.checkScope(ctx, sc, orgID, def); err != nil {
 		return SegmentView{}, err
 	}
 	hash, err := idempotency.Hash(struct {
@@ -76,7 +77,7 @@ func (s *service) CreateSegment(ctx context.Context, a authz.Actor, orgID uuid.U
 		return SegmentView{}, err
 	}
 	id, _, err := idempotency.Do(ctx, s.d.Idempotency, hash, func(ctx context.Context) (uuid.UUID, error) {
-		est, err := s.count(ctx, orgID, def)
+		est, err := s.count(ctx, orgID, sc, def, "body.definition", in.Definition)
 		if err != nil {
 			return uuid.Nil(), err
 		}
@@ -116,6 +117,7 @@ func (s *service) UpdateSegment(ctx context.Context, a authz.Actor, orgID, id uu
 	var (
 		name string
 		def  *Definition
+		sc   = ScopeOf(a, orgID)
 	)
 	if p.Name != nil {
 		n, err := cleanName("body.name", *p.Name)
@@ -129,7 +131,7 @@ func (s *service) UpdateSegment(ctx context.Context, a authz.Actor, orgID, id uu
 		if err != nil {
 			return SegmentView{}, err
 		}
-		if err := s.checkScope(ctx, ScopeOf(a, orgID), orgID, d); err != nil {
+		if err := s.checkScope(ctx, sc, orgID, d); err != nil {
 			return SegmentView{}, err
 		}
 		def = &d
@@ -151,7 +153,7 @@ func (s *service) UpdateSegment(ctx context.Context, a authz.Actor, orgID, id uu
 			next.Name, changed["name"] = name, true
 		}
 		if def != nil && !sameDefinition(*def, cur.Definition) {
-			est, err := s.count(ctx, orgID, *def)
+			est, err := s.count(ctx, orgID, sc, *def, "body.definition", *p.Definition)
 			if err != nil {
 				return err
 			}

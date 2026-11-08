@@ -8,7 +8,9 @@ import (
 // BE-030; only tickets of the outreach module edit this file and the
 // "# --- outreach ---" block of .env.example (BE-001 R7). The unsubscribe
 // link of commercial e-mail is consent's (CONSENT_UNSUBSCRIBE_BASE_URL,
-// BE-062; it replaced OUTREACH_UNSUBSCRIBE_URL).
+// BE-062; it replaced OUTREACH_UNSUBSCRIBE_URL). The privacy offset of
+// fresh audience estimates (BE-203) needs no setting of its own: it is keyed
+// by CRYPTO_TOKEN_KEYS under the "outreach.audience_noise" purpose.
 type Outreach struct {
 	// CountDailyLimit is how many audience counts an org may run in 24
 	// hours (countAudience, createSegment, updateSegment with a definition

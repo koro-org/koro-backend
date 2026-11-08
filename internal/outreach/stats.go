@@ -26,7 +26,9 @@ type Statistics interface {
 // of the company panel, SR §8 "üniversite, bölüm, sınıf"). A zero field
 // does not filter; the present ones all apply. It selects among the org's
 // own rows and their stored, already published figures: no student is
-// counted again (no daily budget, no new number about people).
+// counted again (no daily budget, no new number about people). A stored
+// segment estimate already carries its offset (BE-203) and passes through
+// PublicEstimate unchanged: it is never offset twice.
 type StatsFilter struct {
 	// Uni keeps the audiences that name the university: its uni: key or
 	// the dept: key of one of UniDepts (the caller resolves the

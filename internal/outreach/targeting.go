@@ -11,7 +11,6 @@ import (
 	"koro/internal/directory"
 	"koro/internal/platform/problem"
 	"koro/internal/platform/ratelimit"
-	"koro/internal/students"
 )
 
 // countBudgetRule is the name of the daily count budget of an org.
@@ -124,30 +123,29 @@ func (s *service) checkEvents(ctx context.Context, events []uuid.UUID) error {
 	return nil
 }
 
-// count sizes a normalized definition of orgID: one unit of the org's
-// daily budget, then students' count_segment. Only the published Estimate
+// count sizes a normalized definition of orgID for an actor in scope sc:
+// one unit of the org's daily budget, the family watch, then measure (with
+// the value floor when sc needs k). A refused value is located in raw, the
+// definition as the caller wrote it at loc. Only the published Estimate
 // leaves this function; the exact size is neither returned nor logged.
-func (s *service) count(ctx context.Context, orgID uuid.UUID, def Definition) (Estimate, error) {
+func (s *service) count(ctx context.Context, orgID uuid.UUID, sc Scope, def Definition, loc string, raw Definition) (Estimate, error) {
 	if err := s.spend(ctx, orgID); err != nil {
 		return Estimate{}, err
 	}
-	return s.size(ctx, def)
-}
-
-// size is students' count_segment of def as a published Estimate.
-func (s *service) size(ctx context.Context, def Definition) (Estimate, error) {
-	n, err := s.d.Audience.Count(ctx, students.AudienceSpec{Keys: def.Keys()})
+	s.watch(ctx, orgID, def)
+	est, small, err := s.measure(ctx, def, sc.needsK())
 	switch {
-	case errors.Is(err, students.ErrAudienceTooSmall):
-		return Estimate{BelowThreshold: true}, nil
 	case err != nil:
 		return Estimate{}, err
+	case small != nil:
+		s.raise(ctx, AlarmValueFloor, orgID, slog.String("dimension", small.dim))
+		return Estimate{}, small.at(loc, raw)
 	}
-	return PublicEstimate(n), nil
+	return est, nil
 }
 
 // spend takes one unit of the org's daily count budget. The budget bounds
-// difference attacks over many slightly different definitions; an
+// how many slightly different definitions an org can compare; an
 // unavailable limiter fails closed (503), an exhausted budget is 429.
 func (s *service) spend(ctx context.Context, orgID uuid.UUID) error {
 	rule := ratelimit.Rule{
@@ -160,7 +158,7 @@ func (s *service) spend(ctx context.Context, orgID uuid.UUID) error {
 			slog.String("org_id", orgID.String()), slog.String("err", err.Error()))
 		return problem.ErrUnavailable.Wrap(err)
 	case !res.Allowed:
-		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "audience count budget exhausted", slog.String("org_id", orgID.String()))
+		s.raise(ctx, AlarmBudget, orgID) // the daily budget is spent
 		return ErrRateLimited
 	}
 	return nil
@@ -179,9 +177,10 @@ func (s *service) Compile(ctx context.Context, a authz.Actor, spec SegmentSpec) 
 		return Compiled{}, ErrTargetOutOfScope
 	}
 	var (
-		def   Definition
-		segID *uuid.UUID
-		err   error
+		def, raw Definition
+		loc      string
+		segID    *uuid.UUID
+		err      error
 	)
 	if spec.SegmentID != nil {
 		seg, err := s.d.Store.Get(ctx, spec.OrgID, *spec.SegmentID)
@@ -191,18 +190,19 @@ func (s *service) Compile(ctx context.Context, a authz.Actor, spec SegmentSpec) 
 		if seg.Archived() {
 			return Compiled{}, ErrInvalidState
 		}
-		if def, err = seg.Definition.normalize("body.audience.segment_id"); err != nil {
-			return Compiled{}, err
-		}
+		raw, loc = seg.Definition, "body.audience.segment_id"
 		id := seg.ID
 		segID = &id
-	} else if def, err = spec.Definition.normalize("body.audience.definition"); err != nil {
+	} else {
+		raw, loc = *spec.Definition, "body.audience.definition"
+	}
+	if def, err = raw.normalize(loc); err != nil {
 		return Compiled{}, err
 	}
 	if err := s.checkScope(ctx, sc, spec.OrgID, def); err != nil {
 		return Compiled{}, err
 	}
-	est, err := s.count(ctx, spec.OrgID, def)
+	est, err := s.count(ctx, spec.OrgID, sc, def, loc, raw)
 	if err != nil {
 		return Compiled{}, err
 	}
@@ -224,16 +224,17 @@ func (s *service) CountAudience(ctx context.Context, a authz.Actor, orgID uuid.U
 	if err := s.usableOrg(ctx, a, orgID); err != nil {
 		return CountResult{}, err
 	}
-	def, err := def.normalize("body.definition")
+	norm, err := def.normalize("body.definition")
 	if err != nil {
 		return CountResult{}, err
 	}
-	if err := s.checkScope(ctx, ScopeOf(a, orgID), orgID, def); err != nil {
+	sc := ScopeOf(a, orgID)
+	if err := s.checkScope(ctx, sc, orgID, norm); err != nil {
 		return CountResult{}, err
 	}
-	est, err := s.count(ctx, orgID, def)
+	est, err := s.count(ctx, orgID, sc, norm, "body.definition", def)
 	if err != nil {
 		return CountResult{}, err
 	}
-	return CountResult{Estimate: est, Dimensions: def.DimCount()}, nil
+	return CountResult{Estimate: est, Dimensions: norm.DimCount()}, nil
 }

@@ -3,13 +3,16 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"uuid"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"koro/internal/notify"
 	"koro/internal/outreach"
+	"koro/internal/platform/crypto"
 	"koro/internal/platform/db"
+	"koro/internal/platform/obs"
 )
 
 // outreachWiring wires the outreach module (L8; 01 §4.13). First owner:
@@ -19,6 +22,9 @@ import (
 //
 //	store  nil → outreach.NewGormStore over the app_rw pool; tests preset the in-memory store
 //	tx     nil → the app_rw pool's TxManager; tests preset db.NopTx
+//	noise  nil → outreach.KeyedNoise over CRYPTO_TOKEN_KEYS (the offset of fresh
+//	       audience estimates, purpose outreach.audience_noise; BE-203); tests
+//	       preset outreachtest.NoNoise
 //
 // Consumed (built in lower layers): c.audit.svc, c.students.svc
 // (Audience.Count: count_segment, k ≥ 10; BE-035: Stream, the recipient
@@ -37,6 +43,10 @@ import (
 // BE-161: c.events.svc (L8, built before outreach: events.Targeting's
 // TargetableEvents, the event dimension; nil → no event is targetable).
 //
+// BE-203: the platform's token keys (CRYPTO_TOKEN_KEYS) key the estimate
+// offset; metrics registers koro_outreach_count_alarms_total on the API's
+// registry (the counts run there).
+//
 // Provided, set in build: svc (outreach.Service: Targeting.Compile,
 // ScheduleDispatch, DiscardDispatch and DispatchOfPost for feed's targeted
 // posts, BE-032/BE-035) and the retention sweeper of outreach_dispatches
@@ -44,6 +54,7 @@ import (
 type outreachWiring struct {
 	store outreach.Store
 	tx    db.TxManager
+	noise outreach.Noise
 
 	mod  outreach.Module
 	svc  outreach.Service // set by build
@@ -63,8 +74,22 @@ func (w *outreachWiring) build(c *container) error {
 	if store == nil || tx == nil {
 		return errors.New("outreach: no store (database not opened)")
 	}
+	noise := w.noise
+	if noise == nil {
+		keys, err := crypto.ParseKeyring(c.infra.platform.Crypto.TokenKeys.Reveal())
+		if err != nil {
+			return fmt.Errorf("outreach: CRYPTO_TOKEN_KEYS: %w", err)
+		}
+		deriver, err := crypto.NewDeriver(keys)
+		if err != nil {
+			return fmt.Errorf("outreach: CRYPTO_TOKEN_KEYS: %w", err)
+		}
+		if noise, err = outreach.NewKeyedNoise(deriver); err != nil {
+			return err
+		}
+	}
 	d := outreach.Deps{
-		Store: store, Tx: tx, Audit: c.audit.svc, Limiter: c.infra.limiter, Idempotency: c.infra.idempotency,
+		Store: store, Tx: tx, Audit: c.audit.svc, Limiter: c.infra.limiter, Noise: noise, Idempotency: c.infra.idempotency,
 		Clock: c.infra.clock, Log: c.infra.log.With("module", "outreach"),
 		DailyCountLimit: c.infra.cfg.Outreach.CountDailyLimit,
 		Sender:          outreachSender{c: c}, Posts: outreachPosts{c: c},
@@ -142,6 +167,23 @@ func (w *outreachWiring) tasks(c *container) {
 	for _, j := range w.mod.Jobs() {
 		c.infra.jobs.Schedule(j)
 	}
+}
+
+// metrics registers koro_outreach_count_alarms_total{reason} (BE-203) on the
+// API's registry (the audience counts run there); nil m → metrics off.
+func (w *outreachWiring) metrics(m *obs.Metrics) error {
+	return m.CounterFunc("koro_outreach_count_alarms_total",
+		"Audience count alarms for review by reason (family: many counts of one definition family by an org within 24 "+
+			"hours; value_floor: a count refused because one value reaches too few students; budget: the org's daily "+
+			"count budget is spent).",
+		[]string{"reason"}, func() []obs.Sample {
+			as := w.mod.CountAlarms()
+			out := make([]obs.Sample, len(as))
+			for i, a := range as {
+				out[i] = obs.Sample{Labels: []string{a.Reason}, Value: float64(a.Count)}
+			}
+			return out
+		})
 }
 
 // routes: the 6 segment and audience count operations of BE-030 and the 4

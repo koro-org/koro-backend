@@ -69,6 +69,25 @@ type Limiter interface {
 	Allow(ctx context.Context, rule ratelimit.Rule, key string) (ratelimit.Result, error)
 }
 
+// Noise draws the fixed privacy offset of a published audience estimate
+// (BE-203, Q-53; estimate.go). The same seed always gives the same offset,
+// so counting a definition again shows the same number while its audience
+// is unchanged; different seeds give offsets spread evenly over the range.
+// Production: KeyedNoise over the platform's token keys.
+type Noise interface {
+	// Offset returns an integer in [-half, half] fixed by seed (half ≥ 0).
+	Offset(seed []byte, half int) (int, error)
+}
+
+// NoiseKeys keys KeyedNoise: HMAC-SHA256 under rotating keys
+// (CRYPTO_TOKEN_KEYS, a purpose of its own). It is *crypto.Deriver.
+type NoiseKeys interface {
+	// ActiveKeyID is the key of new offsets.
+	ActiveKeyID() string
+	// DerivedToken is HMAC-SHA256 of the parts under (keyID, purpose).
+	DerivedToken(purpose, keyID string, parts ...[]byte) ([]byte, error)
+}
+
 // ---- dispatch (BE-035)
 
 // Entitlements is what outreach needs from entitlements (L2; 01 §4.4): the

@@ -22,6 +22,7 @@ import (
 	"koro/internal/identity"
 	"koro/internal/orgs"
 	"koro/internal/outreach"
+	"koro/internal/outreach/outreachtest"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
 	"koro/internal/platform/httpx"
@@ -267,6 +268,11 @@ func withLimiter(l outreach.Limiter) envOption {
 	return func(e *env, d *outreach.Deps) { e.limiter, d.Limiter = l, l }
 }
 
+// withNoise sets the estimate offset (BE-203); the default adds none.
+func withNoise(n outreach.Noise) envOption {
+	return func(_ *env, d *outreach.Deps) { d.Noise = n }
+}
+
 func newEnv(t *testing.T, opts ...envOption) *env {
 	t.Helper()
 	clk := clock.NewFake(t0)
@@ -311,7 +317,7 @@ func newEnvWith(t *testing.T, clk *clock.Fake, store outreach.Store, tx db.TxMan
 	e.ents = ents.Service
 	d := outreach.Deps{
 		Store: store, Tx: tx, Audit: e.audit, Audience: e.audience, Catalog: e.catalog, Orgs: e.orgs,
-		Limiter: e.limiter, Clock: clk, Log: obs.Discard(), Idempotency: idem,
+		Limiter: e.limiter, Noise: outreachtest.NoNoise{}, Clock: clk, Log: obs.Discard(), Idempotency: idem,
 		Outbox: e.out, Entitlements: e.ents, Recipients: e.audience, Members: e.members, Users: e.users,
 		Consents: e.consents, Sender: e.sender, Posts: e.posts, LinkBaseURL: "https://koro.example.test",
 		Unsubscribe: fakeLinks{},

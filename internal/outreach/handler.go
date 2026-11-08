@@ -39,8 +39,11 @@ func Register(api huma.API, svc Service) {
 			"university its own university (uni = [it]), narrowed by dept or year; a company every dimension but " +
 			"never a sensitive club (422 outreach.sensitive_target) nor an event that is not targetable (422 " +
 			"outreach.event_not_targetable; BE-161: the event dimension counts only students whose commercial " +
-			"message consent is in force). Out of scope → 422 outreach.target_out_of_scope. The estimate is null " +
-			"below 10 students and rounded down otherwise; counting spends the org's audience count budget.",
+			"message consent is in force). Out of scope → 422 outreach.target_out_of_scope. When the organization " +
+			"needs at least 10 students (every scope but a club's own members), each value of a dimension with " +
+			"several values must reach 10 students together with the other dimensions (422 " +
+			"outreach.audience_value_too_small, the field names the value). The estimate follows countAudience; " +
+			"counting spends the org's audience count budget.",
 	}, op.Meta{
 		Action: string(authz.OutreachSegmentManage), Surface: op.SurfaceOrg, RateLimit: op.RateAudienceCount,
 		Idempotency: op.IdempotencyOptional,
@@ -67,10 +70,14 @@ func Register(api huma.API, svc Service) {
 	op.Register(api, "outreach", huma.Operation{
 		OperationID: "countAudience", Method: http.MethodPost, Path: "/orgs/{org_id}/audience-counts",
 		Summary: "Estimate an audience",
-		Description: "Level 0 (04 §V.2): a number only, never an identity or a sample. Below 10 students count is " +
-			"null and below_threshold true; from 10 on the count is rounded down (to 10 below 100, 50 below 1000, " +
-			"100 below 10000, then 1000). Only audience eligible students count (verified, adult, active). The " +
-			"scope rules of createSegment apply. Each count spends the org's daily audience count budget (429 " +
+		Description: "Level 0 (04 §V.2): a number only, never an identity or a sample, and an approximation " +
+			"(BE-203): a privacy offset of at most half a rounding step is added, then the count is rounded down " +
+			"(to 10 below 100, 50 below 1000, 100 below 10000, then 1000). The offset is fixed for a definition " +
+			"and its audience: the same definition (in any order) shows the same number until its audience " +
+			"changes, and the number can be one step away from the plain rounding. Below 10 students — exact or " +
+			"after the offset — count is null and below_threshold true. Only audience eligible students count " +
+			"(verified, adult, active). The scope and value rules of createSegment apply (422 " +
+			"outreach.audience_value_too_small). Each count spends the org's daily audience count budget (429 " +
 			"rate_limited when spent).",
 	}, op.Meta{
 		Action: string(authz.OutreachAudienceCount), Surface: op.SurfaceOrg, RateLimit: op.RateAudienceCount,
@@ -105,7 +112,7 @@ type SegmentDefinitionDTO struct {
 	Dept          []string `json:"dept,omitempty" maxItems:"100" doc:"Department IDs"`
 	Year          []int    `json:"year,omitempty" maxItems:"8" doc:"Class years (1-8)"`
 	Club          []string `json:"club,omitempty" maxItems:"100" doc:"Club org IDs (never a sensitive club, except a club's own members)"`
-	Event         []string `json:"event,omitempty" maxItems:"100" doc:"Event IDs (BE-161; companies and the platform only): the students who registered for one of the events (a confirmed, checked-in or no-show registration). Only events whose targetable flag is true (listEvents, getEvent: a published or completed public event, neither of a sensitive category nor organised by a sensitive club, that started at most 365 days ago or has yet to start); any other is 422 outreach.event_not_targetable. Only students whose commercial message consent is in force are counted or reached through this dimension."`
+	Event         []string `json:"event,omitempty" maxItems:"10" doc:"Event IDs (BE-161; companies and the platform only; at most 10, BE-203): the students who registered for one of the events (a confirmed, checked-in or no-show registration). Only events whose targetable flag is true (listEvents, getEvent: a published or completed public event, neither of a sensitive category nor organised by a sensitive club, that started at most 365 days ago or has yet to start); any other is 422 outreach.event_not_targetable. Only students whose commercial message consent is in force are counted or reached through this dimension."`
 	EventAttended bool     `json:"event_attended,omitempty" doc:"With event: only the students checked in at one of the events (an event without check-in has none)"`
 }
 

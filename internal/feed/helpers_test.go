@@ -22,6 +22,7 @@ import (
 	"koro/internal/notify"
 	"koro/internal/orgs"
 	"koro/internal/outreach"
+	"koro/internal/outreach/outreachtest"
 	"koro/internal/platform/clock"
 	"koro/internal/platform/db"
 	"koro/internal/platform/idempotency"
@@ -520,6 +521,7 @@ func newEnvWith(t *testing.T, tweak func(*feed.Deps)) *env {
 	e.dispatches = outreach.NewMemStore(clk.Now)
 	targeting, err := outreach.New(outreach.Deps{Store: e.dispatches, Tx: tx, Audit: e.audit,
 		Audience: e.audience, Catalog: e.clubs, Orgs: e.orgs, Limiter: ratelimit.NewMem(clk), Idempotency: idem,
+		Noise: outreachtest.NoNoise{}, // BE-203: the feed's tests read plain buckets
 		Clock: clk, Log: obs.Discard(), Outbox: e.out, Entitlements: e.ents, Recipients: dispatchPeers{},
 		Members: dispatchPeers{}, Users: dispatchPeers{}, Consents: dispatchPeers{}, Sender: e.sender, Posts: posts,
 		LinkBaseURL: "https://koro.example.test"})
